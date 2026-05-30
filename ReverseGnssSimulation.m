@@ -1,0 +1,1608 @@
+classdef ReverseGnssSimulation < handle
+    %REVERSEGNSSSIMULATION Compact object-oriented scenario coordinator.
+    %
+    % This class replaces the large script body of
+    % GSNSCClockScenarioNReceivers.m. It intentionally does not create many
+    % small helper classes. Existing domain objects keep their role:
+    %   - Clock: clock truth model and EKF clock process model
+    %   - SpaceAsset: spacecraft state, attitude, receiver phase centers
+    %   - GroundNode: tower geodetic/ECEF/ECI state
+    %   - ExtendedKalmanFilter: generic EKF predict/update logic
+    %
+    % ReverseGnssSimulation owns scenario flow, config loading, pseudorange
+    % generation, H matrix creation, history arrays, result saving, and
+    % report preparation.
+
+    properties
+        runtimeOptions = struct()
+
+        scriptDir string
+        projectRoot string
+        entryPointName string = "GSNSCClockScenarioNReceivers"
+
+        clockStream = []
+        measurementStream = []
+        validationClockStream = []
+        towerClockStream = []
+        seedConfig = struct()
+
+        simConfig
+        cfg
+        constants
+
+        dt double = 1.0
+        numSteps double = 2
+        time_s double = []
+        jd0 double = NaN
+
+        c double = 299792458.0
+        mu double = NaN
+
+        activeTowerConfig
+        towers cell = {}
+        numTowers double = 0
+        towerNames string = strings(1, 0)
+        towersEciFirst_m double = []
+        towerClocks cell = {}
+        towerClockBiasTruth_m double = []
+        towerClockDriftTruth_mps double = []
+        clockGaugeMode string = "externalTimeTransfer"
+        estimateTowerClockBias logical = false
+        estimateTowerClockDrift logical = false
+        towerClockCorrectionSigma_m double = 0.0
+        referenceTowerIndex double = NaN
+        stateDim double = 11
+        PhiTowerClk cell = {}
+        QTowerClk cell = {}
+
+        assetConfig
+        rxConfig
+        assetTruth
+        assetEst
+        scClock
+        oscillatorConfig
+        attTrue_rad double = zeros(3, 1)
+        attitudeFrame string = "LVLH"
+
+        numReceivers double = 0
+        receiverNames string = strings(1, 0)
+        scenarioName string = ""
+
+        idx = struct()
+        ekf
+        PhiClk double = eye(2)
+        Q double = []
+        R double = []
+
+        history struct = struct()
+        results struct = struct()
+        outputDir string = ""
+    end
+
+    methods
+        function obj = ReverseGnssSimulation(runtimeOptions)
+            if nargin >= 1 && ~isempty(runtimeOptions)
+                obj.runtimeOptions = runtimeOptions;
+            end
+
+            if isfield(obj.runtimeOptions, 'entryPointName') && ~isempty(obj.runtimeOptions.entryPointName)
+                obj.entryPointName = string(obj.runtimeOptions.entryPointName);
+            end
+
+            obj.scriptDir = string(fileparts(mfilename('fullpath')));
+            obj.projectRoot = string(fileparts(char(obj.scriptDir)));
+        end
+
+        function configure(obj)
+            obj.setupPaths();
+            obj.loadConfig();
+            obj.setupTime();
+            obj.setupGroundNodes();
+            obj.setupSpaceAssetsAndReceivers();
+            obj.setupClockAndEkf();
+            obj.setupHistory();
+        end
+
+        function run(obj)
+            fprintf('%s ReceiverComponent EKF with %d receivers and %d towers\n', ...
+                char(obj.scenarioName), obj.numReceivers, obj.numTowers);
+
+            for k = 1:obj.numSteps
+                obj.step(k);
+            end
+
+            obj.buildResults();
+
+            finalPositionError_m = norm(obj.ekf.X(1:3) - obj.assetTruth.pos_ECI_m);
+            fprintf('Done. Final position error: %.3f m\n', finalPositionError_m);
+            fprintf('Final attitude errors [roll pitch yaw] deg in %s frame: [% .4f % .4f % .4f]\n', ...
+                char(obj.attitudeFrame), obj.history.attitude_error_deg(:, end));
+            fprintf('Mean innovation RMS: %.3f m over %.0f measurements/epoch\n', ...
+                mean(obj.history.innovation_rms_m, 'omitnan'), mean(obj.history.measurement_count));
+        end
+
+        function saveResults(obj)
+            if isempty(fieldnames(obj.results))
+                obj.buildResults();
+            end
+
+            if strlength(obj.outputDir) == 0
+                obj.outputDir = string(fullfile(char(obj.scriptDir), "reports", char(obj.entryPointName), char(obj.scenarioName)));
+            end
+
+            if ~exist(char(obj.outputDir), "dir")
+                mkdir(char(obj.outputDir));
+            end
+
+            results = obj.results; %#ok<NASGU>
+            save(fullfile(char(obj.outputDir), sprintf('%s_results.mat', char(obj.scenarioName))), 'results');
+        end
+
+        function generateReport(obj)
+            if ~isfield(obj.cfg, 'report') || ...
+                    ~isfield(obj.cfg.report, 'generatePdf') || ...
+                    ~logical(obj.cfg.report.generatePdf)
+                return;
+            end
+
+            if isempty(fieldnames(obj.results))
+                obj.buildResults();
+            end
+
+            if strlength(obj.outputDir) == 0
+                obj.outputDir = string(fullfile(char(obj.scriptDir), "reports", char(obj.entryPointName), char(obj.scenarioName)));
+            end
+            if ~exist(char(obj.outputDir), "dir")
+                mkdir(char(obj.outputDir));
+            end
+
+            reportData = obj.buildGenerateReportData(); %#ok<NASGU>
+
+            reportToggles = struct(); %#ok<NASGU>
+            reportToggles.generatePdf = true;
+            reportToggles.groundSegment = true;
+            reportToggles.satelliteClockError = true;
+            reportToggles.ekfOrbitClockEstimation = true;
+            reportToggles.measurementNoise = obj.cfg.measurement.enableNoise || obj.cfg.measurement.enableMeasurementNoise;
+            reportToggles.allanDeviationValidation = logical(obj.getFieldOrDefault( ...
+                obj.cfg.report, 'enableAllanDeviationValidation', true));
+            reportToggles.perfectGroundClocks = obj.clockGaugeMode == "perfectGroundTransmitterClocks";
+            reportToggles.groundClockError = obj.useTowerClockTruth();
+            reportToggles.groundTimingNetworkCorrection = obj.applyTowerClockCorrectionsInObservation() || obj.clockGaugeMode == "externalTimeTransfer";
+            reportToggles.towerClocksEstimatedInEkf = obj.estimateTowerClockBias;
+
+            reportConfig = struct(); %#ok<NASGU>
+            reportConfig.title = sprintf('GSNSC %d-Receiver Clock Scenario EKF Report', obj.numReceivers);
+            reportConfig.scenarioName = char(obj.scenarioName);
+            reportConfig.selectedOscillatorName = string(obj.assetConfig.sharedClock.clockType);
+            reportConfig.reportRoot = char(obj.outputDir);
+            reportConfig.outputBaseName = sprintf('%s_report', char(obj.scenarioName));
+
+            if isfield(obj.cfg.report, 'compilePdf')
+                reportConfig.compilePdf = obj.cfg.report.compilePdf;
+            else
+                reportConfig.compilePdf = true;
+            end
+
+            defaultInteractivePlots = false;
+            if isfield(obj.simConfig, 'enableInteractivePlots')
+                defaultInteractivePlots = obj.simConfig.enableInteractivePlots;
+            end
+            reportConfig.interactivePlots = logical(obj.getFieldOrDefault( ...
+                obj.cfg.report, 'interactivePlots', defaultInteractivePlots));
+            reportConfig.closeFiguresAfterExport = ~reportConfig.interactivePlots;
+            reportConfig.generatedBy = char(obj.entryPointName);
+
+            reportScript = obj.findProjectFile('generateReport.m');
+            if strlength(reportScript) == 0
+                reportScript = obj.findProjectFile(fullfile('Reports', 'generateReport.m'));
+            end
+
+            if strlength(reportScript) == 0 || ~isfile(char(reportScript))
+                warning('ReverseGnssSimulation:MissingReportScript', ...
+                    'generateReport.m was not found. Report generation skipped.');
+                return;
+            end
+
+            run(char(reportScript));
+        end
+    end
+
+    methods (Access = private)
+        function setupPaths(obj)
+            addpath(char(obj.scriptDir));
+            if isfolder(char(obj.projectRoot))
+                addpath(char(obj.projectRoot));
+            end
+
+            candidateRoots = unique([obj.scriptDir, obj.projectRoot], 'stable');
+            candidateSubfolders = ["Clock", "Components", "EKF", "Nodes", "Objects", "Reports", "Scenarios"];
+
+            for r = 1:numel(candidateRoots)
+                for s = 1:numel(candidateSubfolders)
+                    folderPath = fullfile(char(candidateRoots(r)), char(candidateSubfolders(s)));
+                    if isfolder(folderPath)
+                        addpath(folderPath);
+                    end
+                end
+            end
+        end
+
+        function loadConfig(obj)
+            configFile = obj.findProjectFile('SimulationConfig.m');
+            if strlength(configFile) == 0 || ~isfile(char(configFile))
+                error('ReverseGnssSimulation:MissingSimulationConfig', ...
+                    'SimulationConfig.m was not found in the scenario folder, project root, or current folder.');
+            end
+
+            if isfield(obj.runtimeOptions, 'selected_oscillator_name')
+                selected_oscillator_name = obj.runtimeOptions.selected_oscillator_name; %#ok<NASGU>
+            end
+            if isfield(obj.runtimeOptions, 'simConfigOverride')
+                simConfigOverride = obj.runtimeOptions.simConfigOverride; %#ok<NASGU>
+            end
+            if isfield(obj.runtimeOptions, 'simConfigOverrides')
+                simConfigOverrides = obj.runtimeOptions.simConfigOverrides; %#ok<NASGU>
+            end
+            if isfield(obj.runtimeOptions, 'N_RECEIVERS')
+                N_RECEIVERS = obj.runtimeOptions.N_RECEIVERS; %#ok<NASGU>
+            end
+
+            run(char(configFile));
+
+            if ~exist('simConfig', 'var')
+                error('ReverseGnssSimulation:InvalidSimulationConfig', ...
+                    'SimulationConfig.m did not create a simConfig struct.');
+            end
+
+            obj.simConfig = simConfig;
+
+            if isfield(obj.runtimeOptions, 'simConfigOverride') && isstruct(obj.runtimeOptions.simConfigOverride)
+                obj.simConfig = obj.mergeStructs(obj.simConfig, obj.runtimeOptions.simConfigOverride);
+            end
+            if isfield(obj.runtimeOptions, 'simConfigOverrides') && isstruct(obj.runtimeOptions.simConfigOverrides)
+                obj.simConfig = obj.mergeStructs(obj.simConfig, obj.runtimeOptions.simConfigOverrides);
+            end
+
+            obj.cfg = obj.simConfig.scenarios.vsnscToReceivers;
+            obj.constants = obj.simConfig.constants;
+            obj.c = obj.simConfig.constants.speedOfLight_mps;
+            obj.mu = obj.simConfig.constants.earthMu_m3ps2;
+            if ~isfield(obj.simConfig, 'randomSeed') || isempty(obj.simConfig.randomSeed)
+                obj.simConfig.randomSeed = 1;
+                warning('ReverseGnssSimulation:MissingRandomSeed', ...
+                    'simConfig.randomSeed was missing. Using default randomSeed = 1.');
+            end
+            
+            if ~isfield(obj.simConfig, 'randomSeed') || isempty(obj.simConfig.randomSeed)
+                obj.simConfig.randomSeed = 1;
+                warning('ReverseGnssSimulation:MissingRandomSeed', ...
+                    'simConfig.randomSeed was missing. Using default randomSeed = 1.');
+            end
+            
+            baseSeed = double(obj.simConfig.randomSeed);
+            
+            rng(baseSeed, 'twister');
+            
+                        if ~isfield(obj.simConfig, 'randomSeed') || isempty(obj.simConfig.randomSeed)
+                obj.simConfig.randomSeed = 1;
+                warning('ReverseGnssSimulation:MissingRandomSeed', ...
+                    'simConfig.randomSeed was missing. Using default randomSeed = 1.');
+            end
+
+            baseSeed = double(obj.simConfig.randomSeed);
+            seedDefaults = struct( ...
+                'base', baseSeed, ...
+                'clockTruth', baseSeed + 1001, ...
+                'measurementNoise', baseSeed + 2001, ...
+                'orbitProcess', baseSeed + 3001, ...
+                'towerClocks', baseSeed + 4001, ...
+                'allanValidation', baseSeed + 5001);
+
+            if ~isfield(obj.simConfig, 'seeds') || ~isstruct(obj.simConfig.seeds)
+                obj.simConfig.seeds = struct();
+            end
+
+            seedNames = fieldnames(seedDefaults);
+            for idxSeed = 1:numel(seedNames)
+                seedName = seedNames{idxSeed};
+                if ~isfield(obj.simConfig.seeds, seedName) || isempty(obj.simConfig.seeds.(seedName))
+                    obj.simConfig.seeds.(seedName) = seedDefaults.(seedName);
+                end
+                obj.simConfig.seeds.(seedName) = double(obj.simConfig.seeds.(seedName));
+            end
+
+            obj.seedConfig = obj.simConfig.seeds;
+
+            rng(obj.seedConfig.base, 'twister');
+            obj.clockStream = RandStream('mt19937ar', 'Seed', obj.seedConfig.clockTruth);
+            obj.measurementStream = RandStream('mt19937ar', 'Seed', obj.seedConfig.measurementNoise);
+            obj.validationClockStream = RandStream('mt19937ar', 'Seed', obj.seedConfig.allanValidation);
+                        obj.towerClockStream = RandStream('mt19937ar', 'Seed', obj.seedConfig.towerClocks);
+        end
+
+        function setupTime(obj)
+            obj.dt = obj.simConfig.simulation.dt_s;
+            obj.numSteps = max(2, floor(obj.simConfig.simulation.totalTime_h * 3600 / obj.dt));
+            obj.time_s = (0:obj.numSteps - 1) * obj.dt;
+            obj.jd0 = obj.julianDateFromDatetime(obj.simConfig.simulation.startUtc);
+        end
+
+        function setupGroundNodes(obj)
+            towerCfg = obj.cfg.towers;
+
+            if isfield(towerCfg, 'enabled')
+                enabledFlags = [towerCfg.enabled];
+            else
+                enabledFlags = true(1, numel(towerCfg));
+            end
+
+            obj.activeTowerConfig = towerCfg(enabledFlags);
+            obj.numTowers = numel(obj.activeTowerConfig);
+
+            if obj.numTowers < 1
+                error('ReverseGnssSimulation:NoTowers', ...
+                    'At least one enabled ground transmitter is required.');
+            end
+
+                        obj.towerNames = string({obj.activeTowerConfig.name});
+            obj.configureClockGaugeMode();
+
+            obj.towers = cell(1, obj.numTowers);
+            obj.towerClocks = cell(1, obj.numTowers);
+            obj.towerClockBiasTruth_m = zeros(1, obj.numTowers);
+            obj.towerClockDriftTruth_mps = zeros(1, obj.numTowers);
+
+            for k = 1:obj.numTowers
+                tc = obj.activeTowerConfig(k);
+                [towerClock, initialBias_m, initialDrift_mps] = obj.createTowerClock(tc, k);
+
+                obj.towerClocks{k} = towerClock;
+                obj.towers{k} = GroundNode(tc.name, tc.lat_deg, tc.lon_deg, tc.alt_m, towerClock);
+                obj.towers{k}.total_bias_sec = initialBias_m / obj.c;
+
+                obj.towerClockBiasTruth_m(k) = initialBias_m;
+                obj.towerClockDriftTruth_mps(k) = initialDrift_mps;
+            end
+
+            obj.towersEciFirst_m = obj.towerPositionsEci(obj.jd0);
+        end
+
+        function setupSpaceAssetsAndReceivers(obj)
+            obj.assetConfig = obj.cfg.spaceAssets.assets(1);
+            obj.attitudeFrame = upper(strtrim(string(obj.getFieldOrDefault( ...
+                obj.cfg.spaceAssets, 'attitudeFrame', "LVLH"))));
+
+            initialState = obj.initialGeoState(obj.assetConfig, obj.jd0, obj.mu);
+            obj.assetTruth = SpaceAsset(obj.assetConfig.name, initialState, []);
+            obj.assetTruth.id = obj.assetConfig.id;
+
+            obj.assetEst = SpaceAsset(obj.assetConfig.name, obj.assetTruth.state_ECI, []);
+            obj.assetEst.id = obj.assetConfig.id;
+            obj.assetTruth.setAttitudeFrame(obj.attitudeFrame);
+            obj.assetEst.setAttitudeFrame(obj.attitudeFrame);
+
+            rxCfgAvailable = obj.cfg.spaceAssets.receivers;
+
+            if isfield(obj.runtimeOptions, 'N_RECEIVERS') && ~isempty(obj.runtimeOptions.N_RECEIVERS)
+                nRequested = double(obj.runtimeOptions.N_RECEIVERS);
+                nRequested = min(nRequested, numel(rxCfgAvailable));
+                obj.rxConfig = rxCfgAvailable(1:nRequested);
+                for idxRx = 1:numel(obj.rxConfig)
+                    obj.rxConfig(idxRx).enabled = true;
+                end
+            else
+                if isfield(rxCfgAvailable, 'enabled')
+                    obj.rxConfig = rxCfgAvailable([rxCfgAvailable.enabled]);
+                else
+                    obj.rxConfig = rxCfgAvailable;
+                end
+
+                if isfield(obj.cfg, 'numReceiversToUse')
+                    obj.rxConfig = obj.rxConfig(1:min(double(obj.cfg.numReceiversToUse), numel(obj.rxConfig)));
+                elseif isfield(obj.cfg.spaceAssets, 'receiverCountPerAsset') && ~isempty(obj.cfg.spaceAssets.receiverCountPerAsset)
+                    obj.rxConfig = obj.rxConfig(1:min(double(obj.cfg.spaceAssets.receiverCountPerAsset(1)), numel(obj.rxConfig)));
+                end
+            end
+
+            if isempty(obj.rxConfig)
+                error('ReverseGnssSimulation:ReceiverCount', ...
+                    'At least one ReceiverComponent is required.');
+            end
+
+            obj.numReceivers = numel(obj.rxConfig);
+            obj.receiverNames = string({obj.rxConfig.name});
+            obj.scenarioName = sprintf('GSNSCClockScenario%dReceivers', obj.numReceivers);
+
+            obj.assetTruth.setReceivers(ReceiverComponent.empty(1, 0));
+            obj.assetEst.setReceivers(ReceiverComponent.empty(1, 0));
+
+            for k = 1:obj.numReceivers
+                obj.assetTruth.addReceiverComponent(ReceiverComponent(obj.rxConfig(k)));
+                obj.assetEst.addReceiverComponent(ReceiverComponent(obj.rxConfig(k)));
+            end
+
+            obj.attTrue_rad = obj.attitudeTruthFromConfig(obj.cfg);
+            obj.assetTruth.setAttitudeEuler321_rad(obj.attTrue_rad);
+            obj.assetEst.setAttitudeEuler321_rad([0; 0; 0]);
+        end
+
+        function setupClockAndEkf(obj)
+            obj.oscillatorConfig = obj.simConfig.clockLibrary.(obj.assetConfig.sharedClock.clockType);
+
+            obj.scClock = Clock(obj.oscillatorConfig.h0, obj.oscillatorConfig.hm1, obj.oscillatorConfig.hm2, obj.dt);
+            obj.scClock.randomStream = obj.clockStream;
+            obj.scClock.state_sec = [ ...
+                obj.assetConfig.sharedClock.initialBias_ps * 1e-12; ...
+                obj.assetConfig.sharedClock.initialDrift_ps_per_s * 1e-12; ...
+                0.0; ...
+                0.0];
+
+            obj.idx = struct();
+
+            obj.idx.pos = 1:3;
+            obj.idx.vel = 4:6;
+            obj.idx.att = 7:9;
+            obj.idx.cb = 10;
+            obj.idx.cd = 11;
+            obj.idx.tcb = zeros(1, 0);
+            obj.idx.tcd = zeros(1, 0);
+
+            nextIdx = 12;
+            if obj.estimateTowerClockBias
+                obj.idx.tcb = nextIdx:(nextIdx + obj.numTowers - 1);
+                nextIdx = nextIdx + obj.numTowers;
+            end
+
+            if obj.estimateTowerClockDrift
+                if ~obj.estimateTowerClockBias
+                    error('ReverseGnssSimulation:InvalidTowerClockState', ...
+                        'Tower clock drift estimation requires tower clock bias estimation.');
+                end
+                obj.idx.tcd = nextIdx:(nextIdx + obj.numTowers - 1);
+                nextIdx = nextIdx + obj.numTowers;
+            end
+
+            obj.stateDim = nextIdx - 1;
+
+            x0 = zeros(obj.stateDim, 1);
+            x0(1:11) = [ ...
+                obj.assetTruth.pos_ECI_m + [1; -1; 0.5]; ...
+                obj.assetTruth.vel_ECI_mps; ...
+                zeros(3, 1); ...
+                0; ...
+                0];
+
+            P0 = zeros(obj.stateDim, obj.stateDim);
+            P0(1:11, 1:11) = diag([ ...
+                ones(3, 1) * obj.cfg.ekf.initialPositionSigma_m; ...
+                ones(3, 1) * obj.cfg.ekf.initialVelocitySigma_mps; ...
+                deg2rad([2; 2; 5]); ...
+                obj.cfg.ekf.initialClockBiasSigma_m; ...
+                obj.cfg.ekf.initialClockDriftSigma_mps].^2);
+
+            if obj.estimateTowerClockBias
+                towerBiasSigma_m = obj.towerClockStateInitialSigma_m();
+                P0(obj.idx.tcb, obj.idx.tcb) = eye(obj.numTowers) * towerBiasSigma_m^2;
+            end
+
+            if obj.estimateTowerClockDrift
+                towerDriftSigma_mps = obj.towerClockDriftInitialSigma_mps();
+                P0(obj.idx.tcd, obj.idx.tcd) = eye(obj.numTowers) * towerDriftSigma_mps^2;
+            end
+
+            [obj.PhiClk, Qclk] = obj.getEkfClockBiasDriftModel( ...
+                obj.oscillatorConfig.h0, obj.oscillatorConfig.hm1, obj.oscillatorConfig.hm2, ...
+                obj.dt, obj.c, obj.cfg.clockModel, obj.cfg.clockGaussMarkovCorrelationTime_s);
+
+            obj.PhiTowerClk = cell(1, obj.numTowers);
+            obj.QTowerClk = cell(1, obj.numTowers);
+            for idxTower = 1:obj.numTowers
+                [obj.PhiTowerClk{idxTower}, obj.QTowerClk{idxTower}] = obj.towerClockEkfModel(idxTower);
+            end
+
+            obj.Q = zeros(obj.stateDim, obj.stateDim);
+            obj.Q(1:3, 1:3) = eye(3) * obj.cfg.ekf.orbitProcessVariance;
+            obj.Q(7:9, 7:9) = eye(3) * deg2rad(1e-5)^2;
+            obj.Q(10:11, 10:11) = Qclk;
+
+            if obj.estimateTowerClockBias
+                for idxTower = 1:obj.numTowers
+                    if obj.estimateTowerClockDrift
+                        idxPair = [obj.idx.tcb(idxTower), obj.idx.tcd(idxTower)];
+                        obj.Q(idxPair, idxPair) = obj.QTowerClk{idxTower};
+                    else
+                        obj.Q(obj.idx.tcb(idxTower), obj.idx.tcb(idxTower)) = ...
+                            max(obj.QTowerClk{idxTower}(1, 1), 1e-12);
+                    end
+                end
+            end
+
+            obj.R = eye(obj.numReceivers * obj.numTowers) * obj.cfg.measurement.pseudorangeSigma_m^2;
+
+            obj.ekf = ExtendedKalmanFilter(x0, P0, obj.Q, obj.R);
+            if ismethod(obj.ekf, 'setAngleStateIndices')
+                obj.ekf.setAngleStateIndices(obj.idx.att);
+            end
+        end
+        
+        function setupHistory(obj)
+            obj.history = struct();
+            obj.history.x = NaN(obj.stateDim, obj.numSteps);
+            obj.history.truth = NaN(obj.stateDim, obj.numSteps);
+            obj.history.covariance_diag = NaN(obj.stateDim, obj.numSteps);
+            obj.history.attitude_error_deg = NaN(3, obj.numSteps);
+            obj.history.innovation_rms_m = NaN(1, obj.numSteps);
+            obj.history.postfit_innovation_rms_m = NaN(1, obj.numSteps);
+            obj.history.nis_history = NaN(1, obj.numSteps);
+            obj.history.covariance_condition_number = NaN(1, obj.numSteps);
+            obj.history.innovation_condition_number = NaN(1, obj.numSteps);
+            obj.history.H_rank_history = NaN(1, obj.numSteps);
+            obj.history.measurement_count = zeros(1, obj.numSteps);
+            obj.history.visible_tower_count = zeros(1, obj.numSteps);
+            obj.history.sat_pos_history_m = NaN(3, obj.numSteps);
+            obj.history.clock_phase_history_s = NaN(1, obj.numSteps);
+            obj.history.tower_clock_bias_truth_m = NaN(obj.numTowers, obj.numSteps);
+            obj.history.tower_clock_drift_truth_mps = NaN(obj.numTowers, obj.numSteps);
+
+            obj.history.prefit_residual_by_receiver_tower_m = NaN(obj.numReceivers, obj.numTowers, obj.numSteps);
+            obj.history.postfit_residual_by_receiver_tower_m = NaN(obj.numReceivers, obj.numTowers, obj.numSteps);
+            obj.history.pseudorange_by_receiver_tower_m = NaN(obj.numReceivers, obj.numTowers, obj.numSteps);
+            obj.history.true_range_by_receiver_tower_m = NaN(obj.numReceivers, obj.numTowers, obj.numSteps);
+            obj.history.los_unit_eci_by_receiver_tower = NaN(3, obj.numReceivers, obj.numTowers, obj.numSteps);
+
+            obj.outputDir = string(fullfile(char(obj.scriptDir), "reports", char(obj.entryPointName), char(obj.scenarioName)));
+        end
+
+        function step(obj, k)
+            jd = obj.jd0 + obj.time_s(k) / 86400.0;
+            towersEci = obj.towerPositionsEci(jd);
+
+            if k > 1
+                obj.assetTruth.state_ECI = obj.propagateTwoBodyState(obj.assetTruth.state_ECI, obj.mu, obj.dt);
+                obj.scClock.update(obj.dt);
+                obj.updateTowerClockTruth();
+
+                Phi = eye(obj.stateDim);
+                Phi(1:6, 1:6) = obj.twoBodyPhiFirstOrder(obj.ekf.X(1:6), obj.mu, obj.dt);
+                Phi(10:11, 10:11) = obj.PhiClk;
+
+                xPred = obj.ekf.X;
+                xPred(1:6) = obj.propagateTwoBodyState(obj.ekf.X(1:6), obj.mu, obj.dt);
+                xPred(10:11) = obj.PhiClk * obj.ekf.X(10:11);
+
+                if obj.estimateTowerClockBias
+                    for idxTower = 1:obj.numTowers
+                        if obj.estimateTowerClockDrift
+                            idxPair = [obj.idx.tcb(idxTower), obj.idx.tcd(idxTower)];
+                            xPred(idxPair) = obj.PhiTowerClk{idxTower} * obj.ekf.X(idxPair);
+                            Phi(idxPair, idxPair) = obj.PhiTowerClk{idxTower};
+                        else
+                            xPred(obj.idx.tcb(idxTower)) = obj.ekf.X(obj.idx.tcb(idxTower));
+                        end
+                    end
+                end
+
+                obj.ekf.predict(xPred, Phi, obj.Q);
+            end
+
+            trueClock_m = obj.scClock.get_error_meters();
+            trueClockDrift_mps = obj.c * obj.scClock.total_drift_sec_per_s;
+            obj.history.clock_phase_history_s(k) = trueClock_m / obj.c;
+
+            [yRange, RRange] = obj.makePseudoranges( ...
+                obj.assetTruth, towersEci, trueClock_m, obj.towerClockBiasTruth_m, obj.cfg.measurement);
+
+            [ypRange, HRange] = obj.predictPseudorangesWithJacobian(obj.ekf.X, obj.assetEst, towersEci);
+
+            [yUpdate, ypUpdate, HUpdate, RUpdate] = obj.appendClockGaugeMeasurements( ...
+                yRange, ypRange, HRange, RRange);
+
+            S = HUpdate * obj.ekf.P * HUpdate' + RUpdate;
+
+            [~, nis] = obj.ekf.update(yUpdate, ypUpdate, HUpdate, RUpdate);
+
+            innovRange = yRange - ypRange;
+            [ypPostRange, ~] = obj.predictPseudorangesWithJacobian(obj.ekf.X, obj.assetEst, towersEci);
+            postfitRange = yRange - ypPostRange;
+
+            [trueRangeRt, losRt] = obj.receiverTowerGeometry(obj.assetTruth, towersEci);
+
+            obj.recordHistory(k, yRange, innovRange, postfitRange, trueRangeRt, losRt, ...
+                S, HUpdate, trueClock_m, trueClockDrift_mps, nis);
+        end
+
+        function recordHistory(obj, k, y, innov, postfit, trueRangeRt, losRt, S, H, trueClock_m, trueClockDrift_mps, nis)
+            truthVector = NaN(obj.stateDim, 1);
+            truthVector(1:11) = [obj.assetTruth.state_ECI; obj.attTrue_rad; trueClock_m; trueClockDrift_mps];
+
+            if obj.estimateTowerClockBias
+                truthVector(obj.idx.tcb) = obj.towerClockBiasTruth_m(:);
+            end
+
+            if obj.estimateTowerClockDrift
+                truthVector(obj.idx.tcd) = obj.towerClockDriftTruth_mps(:);
+            end
+
+            obj.history.x(:, k) = obj.ekf.X;
+            obj.history.truth(:, k) = truthVector;
+            obj.history.covariance_diag(:, k) = diag(obj.ekf.P);
+            obj.history.attitude_error_deg(:, k) = rad2deg(obj.ekf.X(obj.idx.att) - obj.attTrue_rad(:));
+            obj.history.innovation_rms_m(k) = obj.computeRms(innov);
+            obj.history.postfit_innovation_rms_m(k) = obj.computeRms(postfit);
+            obj.history.nis_history(k) = nis;
+            obj.history.covariance_condition_number(k) = cond(obj.ekf.P);
+            obj.history.innovation_condition_number(k) = cond(S);
+            obj.history.H_rank_history(k) = rank(H);
+            obj.history.measurement_count(k) = size(H, 1);
+            obj.history.visible_tower_count(k) = obj.numTowers;
+            obj.history.sat_pos_history_m(:, k) = obj.assetTruth.pos_ECI_m;
+            obj.history.tower_clock_bias_truth_m(:, k) = obj.towerClockBiasTruth_m(:);
+            obj.history.tower_clock_drift_truth_mps(:, k) = obj.towerClockDriftTruth_mps(:);
+            reportData.true_ground_clock_bias_ps = ...
+                obj.history.tower_clock_bias_truth_m ./ obj.c .* 1e12;
+            reportData.true_ground_clock_drift_ps_per_s = ...
+                obj.history.tower_clock_drift_truth_mps ./ obj.c .* 1e12;
+            obj.history.prefit_residual_by_receiver_tower_m(:, :, k) = reshape(innov, obj.numTowers, obj.numReceivers).';
+            obj.history.postfit_residual_by_receiver_tower_m(:, :, k) = reshape(postfit, obj.numTowers, obj.numReceivers).';
+            obj.history.pseudorange_by_receiver_tower_m(:, :, k) = reshape(y, obj.numTowers, obj.numReceivers).';
+            obj.history.true_range_by_receiver_tower_m(:, :, k) = trueRangeRt;
+            obj.history.los_unit_eci_by_receiver_tower(:, :, :, k) = losRt;
+        end
+
+        function buildResults(obj)
+            obj.results = struct();
+            obj.results.time_s = obj.time_s;
+            obj.results.state_est = obj.history.x;
+            obj.results.state_truth = obj.history.truth;
+            obj.results.covariance_diag = obj.history.covariance_diag;
+            obj.results.attitude_error_deg = obj.history.attitude_error_deg;
+            obj.results.innovation_rms_m = obj.history.innovation_rms_m;
+            obj.results.postfit_innovation_rms_m = obj.history.postfit_innovation_rms_m;
+            obj.results.nis_history = obj.history.nis_history;
+            obj.results.receiver_names = obj.receiverNames;
+            obj.results.receiver_offsets_body_m = [obj.assetTruth.receivers.offsetBody_m];
+            obj.results.num_receivers = obj.numReceivers;
+            obj.results.attitude_frame = obj.attitudeFrame;
+            obj.results.seedConfig = obj.seedConfig;
+            obj.results.clockGaugeMode = obj.clockGaugeMode;
+            obj.results.estimateTowerClockBias = obj.estimateTowerClockBias;
+            obj.results.estimateTowerClockDrift = obj.estimateTowerClockDrift;
+            obj.results.tower_clock_bias_truth_m = obj.history.tower_clock_bias_truth_m;
+            obj.results.tower_clock_drift_truth_mps = obj.history.tower_clock_drift_truth_mps;           
+            obj.results.scenario_name = obj.scenarioName;
+        end
+
+        function [y, Rrange] = makePseudoranges(obj, asset, towersEci, spaceClockBias_m, towerClockBias_m, measurementConfig)
+            rx = asset.getEnabledReceivers();
+            y = zeros(numel(rx) * size(towersEci, 2), 1);
+            Rrange = zeros(numel(y), numel(y));
+            row = 1;
+
+            baseSigma_m = measurementConfig.pseudorangeSigma_m;
+            numericalFloor_m = obj.getFieldOrDefault(measurementConfig, 'sigma_numerical_floor_m', 1e-6);
+
+            for i = 1:numel(rx)
+                rrx = asset.getReceiverPositionECI(rx(i));
+                for j = 1:size(towersEci, 2)
+                    y(row) = norm(rrx - towersEci(:, j)) + spaceClockBias_m - towerClockBias_m(j);
+
+                    sigma2 = baseSigma_m^2;
+
+                    if obj.applyTowerClockCorrectionsInObservation()
+                        y(row) = y(row) + towerClockBias_m(j);
+
+                        if obj.externalTimingNoiseEnabled() && obj.towerClockCorrectionSigma_m > 0.0
+                            correctionNoise_m = obj.towerClockCorrectionSigma_m * randn(obj.measurementStream);
+                            y(row) = y(row) + correctionNoise_m;
+                            sigma2 = sigma2 + obj.towerClockCorrectionSigma_m^2;
+                        end
+                    end
+
+                    if measurementConfig.enableNoise || measurementConfig.enableMeasurementNoise
+                        y(row) = y(row) + baseSigma_m * randn(obj.measurementStream);
+                    end
+
+                    Rrange(row, row) = max(sigma2, numericalFloor_m^2);
+                    row = row + 1;
+                end
+            end
+        end
+
+        function [y, H] = predictPseudorangesWithJacobian(obj, x, asset, towersEci)
+            rx = asset.getEnabledReceivers();
+            state_eci = x(1:6);
+            attitude_rad = x(obj.idx.att);
+
+            y = zeros(numel(rx) * size(towersEci, 2), 1);
+            H = zeros(numel(y), numel(x));
+            row = 1;
+
+            for i = 1:numel(rx)
+                [rrx, drrx_dstate, drrx_datt] = SpaceAsset.receiverPositionAndJacobians( ...
+                    rx(i), state_eci, attitude_rad, obj.attitudeFrame);
+
+                for j = 1:size(towersEci, 2)
+                    d = rrx - towersEci(:, j);
+                    rho = norm(d);
+                    u = d / rho;
+
+                    y(row) = rho + x(obj.idx.cb);
+
+                    if obj.estimateTowerClockBias
+                        y(row) = y(row) - x(obj.idx.tcb(j));
+                        H(row, obj.idx.tcb(j)) = -1.0;
+                    end
+
+                    H(row, obj.idx.pos) = u.' * drrx_dstate(:, 1:3);
+                    H(row, obj.idx.vel) = u.' * drrx_dstate(:, 4:6);
+
+                    for qAtt = 1:3
+                        H(row, obj.idx.att(qAtt)) = u.' * drrx_datt(:, qAtt);
+                    end
+
+                    H(row, obj.idx.cb) = 1.0;
+                    row = row + 1;
+                end
+            end
+        end
+
+        function [trueRangeRt, losRt] = receiverTowerGeometry(~, asset, towersEci)
+            rx = asset.getEnabledReceivers();
+            nr = numel(rx);
+            nt = size(towersEci, 2);
+
+            trueRangeRt = NaN(nr, nt);
+            losRt = NaN(3, nr, nt);
+
+            for i = 1:nr
+                rrx = asset.getReceiverPositionECI(rx(i));
+                for j = 1:nt
+                    d = rrx - towersEci(:, j);
+                    trueRangeRt(i, j) = norm(d);
+                    losRt(:, i, j) = d ./ trueRangeRt(i, j);
+                end
+            end
+        end
+
+        function towersEci = towerPositionsEci(obj, jd)
+            towersEci = zeros(3, numel(obj.towers));
+
+            for i = 1:numel(obj.towers)
+                if ismethod(obj.towers{i}, 'getKinematicsECI')
+                    towersEci(:, i) = obj.towers{i}.getKinematicsECI(jd);
+                else
+                    towersEci(:, i) = obj.towers{i}.get_kinematics_ECI(jd);
+                end
+            end
+        end
+
+        function state = initialGeoState(~, assetConfig, jd, mu)
+            try
+                state = SpaceAsset.initialGeoState(assetConfig, jd, mu);
+                return;
+            catch err
+                if ~(contains(err.identifier, 'NoSuchMethod') || ...
+                        contains(err.message, 'initialGeoState') || ...
+                        contains(err.message, 'Unrecognized'))
+                    rethrow(err);
+                end
+            end
+
+            r = 6378137.0 + assetConfig.geoAltitude_m;
+            lat = deg2rad(assetConfig.startLatitude_deg);
+            lon = deg2rad(assetConfig.startLongitude_deg);
+
+            ecef_m = r * [ ...
+                cos(lat) * cos(lon); ...
+                cos(lat) * sin(lon); ...
+                sin(lat)];
+
+            R = SpaceAsset.rot3(ReverseGnssSimulation.gmstRad(jd));
+            pos_eci_m = R * ecef_m;
+
+            omegaEarth_radps = 7.2921151467e-5;
+            vel_eci_mps = cross([0; 0; omegaEarth_radps], pos_eci_m);
+
+            if norm(vel_eci_mps) < 1.0
+                vel_eci_mps = [0; sqrt(mu / norm(pos_eci_m)); 0];
+            end
+
+            state = [pos_eci_m; vel_eci_mps];
+        end
+
+        function stateNext = propagateTwoBodyState(~, state, mu, dt)
+            try
+                stateNext = SpaceAsset.propagateTwoBodyState(state, mu, dt);
+                return;
+            catch err
+                if ~(contains(err.identifier, 'NoSuchMethod') || ...
+                        contains(err.message, 'propagateTwoBodyState') || ...
+                        contains(err.message, 'Unrecognized'))
+                    rethrow(err);
+                end
+            end
+
+            state = state(:);
+            r = state(1:3);
+            v = state(4:6);
+            a = -mu * r / norm(r)^3;
+
+            vNext = v + a * dt;
+            rNext = r + vNext * dt;
+
+            stateNext = [rNext; vNext];
+        end
+
+        function Phi = twoBodyPhiFirstOrder(~, state, mu, dt)
+            try
+                Phi = SpaceAsset.twoBodyPhiFirstOrder(state, mu, dt);
+                return;
+            catch err
+                if ~(contains(err.identifier, 'NoSuchMethod') || ...
+                        contains(err.message, 'twoBodyPhiFirstOrder') || ...
+                        contains(err.message, 'Unrecognized'))
+                    rethrow(err);
+                end
+            end
+
+            state = state(:);
+            r = state(1:3);
+            rn = norm(r);
+            I = eye(3);
+
+            A = zeros(6);
+            A(1:3, 4:6) = I;
+            A(4:6, 1:3) = -mu * (I / rn^3 - 3.0 * (r * r.') / rn^5);
+
+            Phi = eye(6) + A * dt;
+        end
+
+        function att = attitudeTruthFromConfig(~, cfg)
+            attDeg = [0.5; -0.3; 1.0];
+
+            if isfield(cfg, 'platformAttitudeTruth_deg')
+                attDeg = cfg.platformAttitudeTruth_deg(:);
+            elseif isfield(cfg.spaceAssets, 'platformAttitudeTruth_deg')
+                attDeg = cfg.spaceAssets.platformAttitudeTruth_deg(:);
+            end
+
+            att = deg2rad(attDeg);
+        end
+
+        function [Phi, Q] = getEkfClockBiasDriftModel(~, h0, hm1, hm2, dt, c, clockModel, correlationTime_s)
+            try
+                [Phi, Q] = Clock.getEkfBiasDriftModel(h0, hm1, hm2, dt, c, clockModel, correlationTime_s);
+            catch err
+                if contains(err.identifier, 'NoSuchMethod') || ...
+                        contains(err.message, 'getEkfBiasDriftModel') || ...
+                        contains(err.message, 'Unrecognized')
+                    [Phi, Q] = Clock.aggregateBiasDriftModel(h0, hm1, hm2, dt, c, clockModel, correlationTime_s);
+                else
+                    rethrow(err);
+                end
+            end
+        end
+
+        function jd = julianDateFromDatetime(~, t)
+            try
+                jd = Clock.julianDateFromDatetime(t);
+                return;
+            catch err
+                if ~(contains(err.identifier, 'NoSuchMethod') || ...
+                        contains(err.message, 'julianDateFromDatetime') || ...
+                        contains(err.message, 'Unrecognized'))
+                    rethrow(err);
+                end
+            end
+
+            y = year(t);
+            m = month(t);
+            d = day(t);
+            h = hour(t) + minute(t) / 60.0 + second(t) / 3600.0;
+
+            jd = 367.0 * y ...
+                - floor(7.0 * (y + floor((m + 9.0) / 12.0)) / 4.0) ...
+                + floor(275.0 * m / 9.0) ...
+                + d ...
+                + 1721013.5 ...
+                + h / 24.0;
+        end
+
+        function reportData = buildGenerateReportData(obj)
+            towersForReport = obj.reportConfigTowers(obj.activeTowerConfig);
+
+            reportData = struct();
+            reportData.time_vec = obj.time_s;
+            reportData.total_time_hours = max(obj.time_s) / 3600.0;
+            reportData.dt = obj.dt;
+            reportData.c = obj.c;
+            reportData.num_towers = numel(towersForReport);
+            reportData.R_earth = obj.simConfig.constants.earthRadius_m;
+            reportData.oscillators = obj.simConfig.clockLibrary;
+            reportData.towers = towersForReport;
+            reportData.tower_names = string({towersForReport.name});
+            reportData.receiver_names = obj.receiverNames;
+
+            xHist = obj.history.x;
+            truthHist = obj.history.truth;
+            PdiagHist = obj.history.covariance_diag;
+
+            reportData.ekf_pos_error_m = xHist(obj.idx.pos, :) - truthHist(obj.idx.pos, :);
+            reportData.ekf_pos_sigma_m = sqrt(max(PdiagHist(obj.idx.pos, :), 0));
+            reportData.ekf_clock_error_ps = (xHist(obj.idx.cb, :) - truthHist(obj.idx.cb, :)) ./ obj.c .* 1e12;
+            reportData.ekf_clock_sigma_ps = sqrt(max(PdiagHist(obj.idx.cb, :), 0)) ./ obj.c .* 1e12;
+            reportData.true_clock_bias_ps = truthHist(obj.idx.cb, :) ./ obj.c .* 1e12;
+            reportData.est_clock_bias_ps = xHist(obj.idx.cb, :) ./ obj.c .* 1e12;
+            reportData.attitude_frame = obj.attitudeFrame;
+            reportData.attitude_state_names = ["roll", "pitch", "yaw"];
+            reportData.attitude_truth_rad = truthHist(obj.idx.att, :);
+            reportData.attitude_truth_deg = rad2deg(truthHist(obj.idx.att, :));
+            reportData.attitude_est_deg = rad2deg(xHist(obj.idx.att, :));
+            reportData.attitude_error_deg = reportData.attitude_est_deg - reportData.attitude_truth_deg;
+            reportData.attitude_sigma_deg = rad2deg(sqrt(max(PdiagHist(obj.idx.att, :), 0)));
+            reportData.final_attitude_error_deg = reportData.attitude_error_deg(:, end);
+            reportData.innovation_rms_m = obj.history.innovation_rms_m;
+            reportData.postfit_innovation_rms_m = obj.history.postfit_innovation_rms_m;
+            reportData.nis_history = obj.history.nis_history;
+            reportData.nis_degrees_of_freedom = size(obj.history.prefit_residual_by_receiver_tower_m, 1) * ...
+                size(obj.history.prefit_residual_by_receiver_tower_m, 2);
+            reportData.sat_pos_history_m = obj.history.sat_pos_history_m;
+            reportData.towers_eci_first_m = obj.towersEciFirst_m;
+            reportData.final_position_error_m = norm(reportData.ekf_pos_error_m(:, end));
+            reportData.final_clock_error_ps = reportData.ekf_clock_error_ps(end);
+            reportData.final_innovation_rms_m = obj.history.innovation_rms_m(end);
+
+            reportData.prefit_residual_by_receiver_tower_m = obj.history.prefit_residual_by_receiver_tower_m;
+            reportData.postfit_residual_by_receiver_tower_m = obj.history.postfit_residual_by_receiver_tower_m;
+            reportData.pseudorange_by_receiver_tower_m = obj.history.pseudorange_by_receiver_tower_m;
+            reportData.true_range_by_receiver_tower_m = obj.history.true_range_by_receiver_tower_m;
+            reportData.los_unit_eci_by_receiver_tower = obj.history.los_unit_eci_by_receiver_tower;
+            reportData.pseudorange_error_by_receiver_tower_m = ...
+                obj.history.pseudorange_by_receiver_tower_m - obj.history.true_range_by_receiver_tower_m;
+            reportData.receiver_offset_body_by_receiver_m = [obj.assetTruth.receivers.offsetBody_m];
+            reportData.covariance_condition_number = obj.history.covariance_condition_number;
+            reportData.innovation_condition_number = obj.history.innovation_condition_number;
+            reportData.H_rank_history = obj.history.H_rank_history;
+            reportData.final_H_rank = obj.history.H_rank_history(end);
+            reportData.visible_tower_count = obj.history.visible_tower_count;
+            reportData.measurementNoiseEnabled = obj.cfg.measurement.enableNoise || obj.cfg.measurement.enableMeasurementNoise;
+            reportData.numerical_measurement_sigma_floor_m = obj.getFieldOrDefault(obj.cfg.measurement, 'sigma_numerical_floor_m', NaN);
+                        reportData.clockGaugeMode = obj.clockGaugeMode;
+            reportData.externalClockCorrectionSigma_ps = obj.getFieldOrDefault(obj.cfg, 'externalClockCorrectionSigma_ps', NaN);
+            reportData.referenceTowerName = obj.getFieldOrDefault(obj.cfg, 'referenceTowerName', '');
+            reportData.tower_clocks_estimated_in_ekf = obj.estimateTowerClockBias;
+            reportData.tower_clock_drift_estimated_in_ekf = obj.estimateTowerClockDrift;
+            reportData.tower_clock_bias_truth_m = obj.history.tower_clock_bias_truth_m;
+            reportData.tower_clock_drift_truth_mps = obj.history.tower_clock_drift_truth_mps;
+            reportData.true_ground_clock_bias_ps = obj.history.tower_clock_bias_truth_m ./ obj.c .* 1e12;
+            reportData.true_ground_clock_drift_ps_per_s = obj.history.tower_clock_drift_truth_mps ./ obj.c .* 1e12;
+
+            prefitByTower = squeeze(mean(obj.history.prefit_residual_by_receiver_tower_m, 1));
+            postfitByTower = squeeze(mean(obj.history.postfit_residual_by_receiver_tower_m, 1));
+            if obj.numTowers == 1
+                prefitByTower = reshape(prefitByTower, 1, []);
+                postfitByTower = reshape(postfitByTower, 1, []);
+            end
+            reportData.prefit_residual_by_tower_m = prefitByTower;
+            reportData.postfit_residual_by_tower_m = postfitByTower;
+
+            numRangeRows = obj.numReceivers * obj.numTowers;
+            baseSigma2 = obj.cfg.measurement.pseudorangeSigma_m^2;
+            numericalFloor2 = obj.getFieldOrDefault(obj.cfg.measurement, 'sigma_numerical_floor_m', 0.0)^2;
+            reportData.R_receiver_m2 = ones(numRangeRows, obj.numSteps) * baseSigma2;
+            reportData.R_tower_clock_m2 = zeros(numRangeRows, obj.numSteps);
+            if obj.applyTowerClockCorrectionsInObservation()
+                reportData.R_tower_clock_m2(:) = obj.towerClockCorrectionSigma_m^2;
+            end
+            reportData.R_atmosphere_m2 = zeros(numRangeRows, obj.numSteps);
+            reportData.R_hardware_m2 = zeros(numRangeRows, obj.numSteps);
+            reportData.R_multipath_m2 = zeros(numRangeRows, obj.numSteps);
+            reportData.R_numerical_regularization_m2 = ones(numRangeRows, obj.numSteps) * numericalFloor2;
+            reportData.R_total_m2 = reportData.R_receiver_m2 + reportData.R_tower_clock_m2 + ...
+                reportData.R_atmosphere_m2 + reportData.R_hardware_m2 + ...
+                reportData.R_multipath_m2 + reportData.R_numerical_regularization_m2;
+
+            [reportData.frame_transform_table, reportData.frame_transform_roundtrip_table] = ...
+                obj.buildFrameTransformTables();
+
+            if obj.estimateTowerClockBias
+                reportData.clock_estimation_mode = 'spacecraftAndTowerClockBias';
+                reportData.tower_clock_bias_est_m = xHist(obj.idx.tcb, :);
+                reportData.est_ground_clock_bias_ps = xHist(obj.idx.tcb, :) ./ obj.c .* 1e12;
+                gaugeOffset_ps = mean(reportData.est_ground_clock_bias_ps - reportData.true_ground_clock_bias_ps, 1);
+                reportData.est_ground_clock_bias_ps_gauge_aligned = reportData.est_ground_clock_bias_ps - gaugeOffset_ps;
+                reportData.tower_clock_bias_error_ps = ...
+                    (xHist(obj.idx.tcb, :) - obj.history.tower_clock_bias_truth_m) ./ obj.c .* 1e12;
+                reportData.final_tower_clock_rms_ps = obj.computeRms(reportData.tower_clock_bias_error_ps(:, end));
+            elseif obj.applyTowerClockCorrectionsInObservation()
+                reportData.clock_estimation_mode = 'spacecraftOnlyWithExternalTowerCorrections';
+            elseif obj.clockGaugeMode == "perfectGroundTransmitterClocks"
+                reportData.clock_estimation_mode = 'spacecraftOnlyPerfectGroundClocks';
+            else
+                reportData.clock_estimation_mode = 'spacecraftOnlyUnestimatedTowerClockResiduals';
+            end
+
+            reportData.ekf_clock_state_units = 'metres and metres per second';
+            reportData.receiver_architecture_note = sprintf( ...
+                'N=%d enabled ReceiverComponent phase centres on one SpaceAsset. All receiver measurements share the same spacecraft clock state. Ground transmitter clocks are handled by clockGaugeMode=%s.', ...
+                obj.numReceivers, char(obj.clockGaugeMode));
+            reportData.signal_model_note = ['Instantaneous ECI geometric pseudorange from ground transmitters to spacecraft-mounted receiver phase centers. ' ...
+                'The active clock model is z = rho + spacecraftClockBias - towerClockBias + noise unless clockGaugeMode applies external tower-clock corrections. ' ...
+                'No signal transmit time, light-time iteration, Sagnac correction, Doppler, carrier phase, code tracking, ambiguity, atmosphere, multipath, group delay, antenna phase-center error, or receiver tracking loop is active.'];
+            reportData.attitude_observability_note = sprintf([ ...
+                'Receiver phase-center baselines couple %s-frame Euler-321 attitude error into pseudorange through the LOS projection Jacobian. ' ...
+                'With one phase center attitude is unobservable; with one non-zero baseline only partial rotational observability exists; ' ...
+                'with non-collinear baselines the instantaneous rank can include roll, pitch, and yaw. Current N=%d.'], char(obj.attitudeFrame), obj.numReceivers);
+
+            selectedName = string(obj.getSharedClockType(obj.simConfig, obj.cfg));
+            selectedOscCfg = obj.simConfig.clockLibrary.(char(selectedName));
+            selectedClock = Clock(selectedOscCfg.h0, selectedOscCfg.hm1, selectedOscCfg.hm2, obj.dt);
+
+            nAllanSamples = floor(obj.getFieldOrDefault(obj.simConfig.validation, 'allanValidationSamples', numel(obj.history.clock_phase_history_s)));
+            reportData.tau_profile_s = obj.validTauForSamples(obj.simConfig.validation.tauProfile_s, obj.dt, nAllanSamples);
+            [reportData.tau_sim_s, reportData.sim_adev, reportData.sim_adev_sigma, reportData.sim_adev_edf] = ...
+                obj.runClockAllanValidation(selectedClock, obj.simConfig.validation.tauSimulation_s, obj.dt, nAllanSamples);
+
+            reportData.selected_allan_deviation_1s = selectedClock.theoreticalAllanDeviation(1.0);
+            reportData.clock_allan_names = ["SpaceAsset", obj.towerNames];
+            reportData.clock_allan_deviation_1s = NaN(1, 1 + obj.numTowers);
+            reportData.clock_allan_deviation_1s(1) = reportData.selected_allan_deviation_1s;
+            for idxTower = 1:obj.numTowers
+                [towerClockType, h0Factor, hm1Factor, hm2Factor] = ...
+                    obj.towerClockParameters(obj.activeTowerConfig(idxTower), idxTower);
+                towerOsc = obj.simConfig.clockLibrary.(char(towerClockType));
+                towerClockForReport = Clock(towerOsc.h0 * h0Factor, towerOsc.hm1 * hm1Factor, ...
+                    towerOsc.hm2 * hm2Factor, obj.dt);
+                reportData.clock_allan_deviation_1s(1 + idxTower) = ...
+                    towerClockForReport.theoreticalAllanDeviation(1.0);
+            end
+            reportData.sim_adev_by_clock = NaN(1 + obj.numTowers, numel(reportData.tau_sim_s));
+            reportData.sim_adev_by_clock(1, :) = reportData.sim_adev;
+            for idxTower = 1:obj.numTowers
+                towerPhase_s = obj.history.tower_clock_bias_truth_m(idxTower, :) ./ obj.c;
+                reportData.sim_adev_by_clock(1 + idxTower, :) = ...
+                    obj.allanFromPhase(selectedClock, towerPhase_s, reportData.tau_sim_s, obj.dt);
+            end
+            reportData.sim_adev_sigma_by_clock = reportData.sim_adev_sigma;
+            reportData.sim_adev_edf_by_clock = reportData.sim_adev_edf;
+            reportData.seedConfig = obj.seedConfig;
+            reportData.source_references = {sprintf('Generated by %s with %d receivers.', obj.entryPointName, obj.numReceivers)};
+        end
+
+        function [frameTable, roundtripTable] = buildFrameTransformTables(obj)
+            epochIndex = unique([1, max(1, round(obj.numSteps / 2)), obj.numSteps]);
+            epochLabels = strings(0, 1);
+            objectTypes = strings(0, 1);
+            objectNames = strings(0, 1);
+            eciX_km = [];
+            eciY_km = [];
+            eciZ_km = [];
+            ecefX_km = [];
+            ecefY_km = [];
+            ecefZ_km = [];
+            lvlhX_km = [];
+            lvlhY_km = [];
+            lvlhZ_km = [];
+
+            ecefRoundtripMax_m = 0.0;
+            lvlhRoundtripMax_m = 0.0;
+
+            for idxEpoch = 1:numel(epochIndex)
+                k = epochIndex(idxEpoch);
+                if k == 1
+                    label = "start";
+                elseif k == obj.numSteps
+                    label = "final";
+                else
+                    label = "mid";
+                end
+
+                jd = obj.jd0 + obj.time_s(k) / 86400.0;
+                theta = obj.gmstRad(jd);
+                R_ecef_to_eci = [cos(theta), -sin(theta), 0; sin(theta), cos(theta), 0; 0, 0, 1];
+                R_eci_to_ecef = R_ecef_to_eci.';
+
+                state_eci = obj.history.truth(1:6, k);
+                if any(~isfinite(state_eci))
+                    state_eci = obj.assetTruth.state_ECI;
+                end
+                R_lvlh_to_eci = SpaceAsset.lvlhToEciDcm(state_eci);
+                R_eci_to_lvlh = R_lvlh_to_eci.';
+                satEci = state_eci(1:3);
+                satEcef = R_eci_to_ecef * satEci;
+
+                [epochLabels, objectTypes, objectNames, eciX_km, eciY_km, eciZ_km, ...
+                    ecefX_km, ecefY_km, ecefZ_km, lvlhX_km, lvlhY_km, lvlhZ_km] = ...
+                    obj.appendFrameRow(epochLabels, objectTypes, objectNames, eciX_km, eciY_km, eciZ_km, ...
+                    ecefX_km, ecefY_km, ecefZ_km, lvlhX_km, lvlhY_km, lvlhZ_km, ...
+                    label, "SpaceAsset", string(obj.assetTruth.name), satEci, satEcef, [0; 0; 0]);
+
+                rx = obj.assetTruth.getEnabledReceivers();
+                for idxRx = 1:numel(rx)
+                    rxEci = SpaceAsset.receiverPositionFromState(rx(idxRx), state_eci, ...
+                        obj.history.truth(obj.idx.att, k), obj.attitudeFrame);
+                    rxEcef = R_eci_to_ecef * rxEci;
+                    rxLvlh = R_eci_to_lvlh * (rxEci - satEci);
+                    [epochLabels, objectTypes, objectNames, eciX_km, eciY_km, eciZ_km, ...
+                        ecefX_km, ecefY_km, ecefZ_km, lvlhX_km, lvlhY_km, lvlhZ_km] = ...
+                        obj.appendFrameRow(epochLabels, objectTypes, objectNames, eciX_km, eciY_km, eciZ_km, ...
+                        ecefX_km, ecefY_km, ecefZ_km, lvlhX_km, lvlhY_km, lvlhZ_km, ...
+                        label, "Receiver", string(rx(idxRx).name), rxEci, rxEcef, rxLvlh);
+                    ecefRoundtripMax_m = max(ecefRoundtripMax_m, norm(R_ecef_to_eci * rxEcef - rxEci));
+                    lvlhRoundtripMax_m = max(lvlhRoundtripMax_m, norm(satEci + R_lvlh_to_eci * rxLvlh - rxEci));
+                end
+
+                towerEci = obj.towerPositionsEci(jd);
+                for idxTower = 1:obj.numTowers
+                    twrEci = towerEci(:, idxTower);
+                    twrEcef = R_eci_to_ecef * twrEci;
+                    twrLvlh = R_eci_to_lvlh * (twrEci - satEci);
+                    [epochLabels, objectTypes, objectNames, eciX_km, eciY_km, eciZ_km, ...
+                        ecefX_km, ecefY_km, ecefZ_km, lvlhX_km, lvlhY_km, lvlhZ_km] = ...
+                        obj.appendFrameRow(epochLabels, objectTypes, objectNames, eciX_km, eciY_km, eciZ_km, ...
+                        ecefX_km, ecefY_km, ecefZ_km, lvlhX_km, lvlhY_km, lvlhZ_km, ...
+                        label, "Tower", obj.towerNames(idxTower), twrEci, twrEcef, twrLvlh);
+                    ecefRoundtripMax_m = max(ecefRoundtripMax_m, norm(R_ecef_to_eci * twrEcef - twrEci));
+                    lvlhRoundtripMax_m = max(lvlhRoundtripMax_m, norm(satEci + R_lvlh_to_eci * twrLvlh - twrEci));
+                end
+            end
+
+            frameTable = table(epochLabels, objectTypes, objectNames, eciX_km(:), eciY_km(:), eciZ_km(:), ...
+                ecefX_km(:), ecefY_km(:), ecefZ_km(:), lvlhX_km(:), lvlhY_km(:), lvlhZ_km(:), ...
+                'VariableNames', {'Epoch','ObjectType','Name','ECI_X_km','ECI_Y_km','ECI_Z_km', ...
+                'ECEF_X_km','ECEF_Y_km','ECEF_Z_km','LVLH_X_km','LVLH_Y_km','LVLH_Z_km'});
+
+            Transform = ["ECEF_to_ECI_to_ECEF"; "ECI_to_LVLH_to_ECI"];
+            MaxRoundTripError_m = [ecefRoundtripMax_m; lvlhRoundtripMax_m];
+            roundtripTable = table(Transform, MaxRoundTripError_m);
+        end
+
+        function [epochLabels, objectTypes, objectNames, eciX_km, eciY_km, eciZ_km, ...
+                ecefX_km, ecefY_km, ecefZ_km, lvlhX_km, lvlhY_km, lvlhZ_km] = ...
+                appendFrameRow(~, epochLabels, objectTypes, objectNames, eciX_km, eciY_km, eciZ_km, ...
+                ecefX_km, ecefY_km, ecefZ_km, lvlhX_km, lvlhY_km, lvlhZ_km, ...
+                epochLabel, objectType, objectName, eci_m, ecef_m, lvlh_m)
+            epochLabels(end + 1, 1) = string(epochLabel);
+            objectTypes(end + 1, 1) = string(objectType);
+            objectNames(end + 1, 1) = string(objectName);
+            eciX_km(end + 1, 1) = eci_m(1) / 1000.0;
+            eciY_km(end + 1, 1) = eci_m(2) / 1000.0;
+            eciZ_km(end + 1, 1) = eci_m(3) / 1000.0;
+            ecefX_km(end + 1, 1) = ecef_m(1) / 1000.0;
+            ecefY_km(end + 1, 1) = ecef_m(2) / 1000.0;
+            ecefZ_km(end + 1, 1) = ecef_m(3) / 1000.0;
+            lvlhX_km(end + 1, 1) = lvlh_m(1) / 1000.0;
+            lvlhY_km(end + 1, 1) = lvlh_m(2) / 1000.0;
+            lvlhZ_km(end + 1, 1) = lvlh_m(3) / 1000.0;
+        end
+
+        function towersForReport = reportConfigTowers(~, activeTowerConfig)
+            towersForReport = repmat( ...
+                struct('name', '', 'lat_deg', 0, 'lon_deg', 0, 'alt_m', 0, 'enabled', true), ...
+                1, numel(activeTowerConfig));
+
+            for i = 1:numel(activeTowerConfig)
+                towersForReport(i).name = char(string(activeTowerConfig(i).name));
+                towersForReport(i).lat_deg = activeTowerConfig(i).lat_deg;
+                towersForReport(i).lon_deg = activeTowerConfig(i).lon_deg;
+                towersForReport(i).alt_m = activeTowerConfig(i).alt_m;
+                towersForReport(i).enabled = true;
+            end
+        end
+
+        function tauOut = validTauForSamples(~, tauIn, dt, n)
+            tauIn = tauIn(:).';
+            m = unique(round(tauIn ./ dt));
+            m = m(isfinite(m) & m >= 1 & 2 .* m < n);
+            tauOut = m .* dt;
+            if isempty(tauOut)
+                tauOut = dt;
+            end
+        end
+
+        function adev = allanFromPhase(~, clockObj, phase_s, tau_s, dt)
+            %#ok<INUSD>
+            adev = NaN(size(tau_s));
+            for i = 1:numel(tau_s)
+                try
+                    adev(i) = Clock.computeOverlappingAllanDeviation(phase_s(:), tau_s(i), dt);
+                catch
+                    adev(i) = NaN;
+                end
+            end
+        end
+
+        function [tauValid_s, adev, adevSigma, edf] = runClockAllanValidation(obj, clockTemplate, tauRequested_s, dt, nSamples)
+            nSamples = max(3, floor(double(nSamples)));
+            tauValid_s = obj.validTauForSamples(tauRequested_s, dt, nSamples);
+
+            validationClock = Clock(clockTemplate.h_0, clockTemplate.h_minus_1, clockTemplate.h_minus_2, dt);
+            validationClock.randomStream = RandStream('mt19937ar', 'Seed', obj.seedConfig.allanValidation);
+            validationClock.reset([0.0; 0.0; 0.0; 0.0]);
+
+            phase_s = NaN(nSamples, 1);
+            phase_s(1) = validationClock.total_bias_sec;
+            for idxSample = 2:nSamples
+                validationClock.update(dt);
+                phase_s(idxSample) = validationClock.total_bias_sec;
+            end
+
+            adev = NaN(1, numel(tauValid_s));
+            adevSigma = NaN(1, numel(tauValid_s));
+            edf = NaN(1, numel(tauValid_s));
+
+            for idxTau = 1:numel(tauValid_s)
+                [adev(idxTau), ~, edf(idxTau), adevSigma(idxTau)] = ...
+                    Clock.computeOverlappingAllanDeviation(phase_s, tauValid_s(idxTau), dt);
+            end
+        end
+
+        function configureClockGaugeMode(obj)
+            obj.clockGaugeMode = obj.normalizeClockGaugeMode( ...
+                obj.getFieldOrDefault(obj.cfg, 'clockGaugeMode', "externalTimeTransfer"));
+
+            obj.towerClockCorrectionSigma_m = obj.externalClockSigma_m();
+
+            estimateBias = false;
+            estimateDrift = false;
+
+            if isfield(obj.cfg, 'externalTimeTransfer')
+                estimateBias = logical(obj.getFieldOrDefault( ...
+                    obj.cfg.externalTimeTransfer, 'estimateTowerClockBias', false));
+                estimateDrift = logical(obj.getFieldOrDefault( ...
+                    obj.cfg.externalTimeTransfer, 'estimateTowerClockDrift', false));
+            end
+
+            if obj.clockGaugeMode == "perfectGroundTransmitterClocks"
+                estimateBias = false;
+                estimateDrift = false;
+            elseif obj.clockGaugeMode == "knownTowerClockCorrections" || obj.clockGaugeMode == "externalTowerCorrections"
+                estimateBias = false;
+                estimateDrift = false;
+            elseif obj.clockGaugeMode == "fixReferenceTower" || obj.clockGaugeMode == "zeroMeanNetworkConstraint"
+                estimateBias = true;
+            end
+
+            obj.estimateTowerClockBias = estimateBias;
+            obj.estimateTowerClockDrift = estimateDrift;
+
+            obj.referenceTowerIndex = NaN;
+            referenceTowerName = string(obj.getFieldOrDefault(obj.cfg, 'referenceTowerName', ""));
+            if strlength(referenceTowerName) > 0
+                idxReference = find(obj.towerNames == referenceTowerName, 1, 'first');
+                if ~isempty(idxReference)
+                    obj.referenceTowerIndex = idxReference;
+                end
+            end
+
+            if obj.clockGaugeMode == "fixReferenceTower" && isnan(obj.referenceTowerIndex)
+                obj.referenceTowerIndex = 1;
+            end
+        end
+
+        function mode = normalizeClockGaugeMode(~, modeIn)
+            key = lower(strtrim(string(modeIn)));
+
+            if any(key == ["perfectgroundtransmitterclocks", "perfectgroundclocks", "perfect"])
+                mode = "perfectGroundTransmitterClocks";
+            elseif any(key == ["knowntowerclockcorrections", "knowntowercorrections", "knowncorrections"])
+                mode = "knownTowerClockCorrections";
+            elseif any(key == ["externaltowercorrections", "externalcorrections"])
+                mode = "externalTowerCorrections";
+            elseif any(key == ["externaltimetransfer", "twtt", "timetransfer"])
+                mode = "externalTimeTransfer";
+            elseif any(key == ["fixreferencetower", "referencetower"])
+                mode = "fixReferenceTower";
+            elseif any(key == ["zeromeannetworkconstraint", "zeromean"])
+                mode = "zeroMeanNetworkConstraint";
+            elseif key == "none"
+                mode = "none";
+            else
+                error('ReverseGnssSimulation:InvalidClockGaugeMode', ...
+                    'Unsupported clockGaugeMode: %s', char(string(modeIn)));
+            end
+        end
+
+        function tf = useTowerClockTruth(obj)
+            tf = obj.clockGaugeMode ~= "perfectGroundTransmitterClocks";
+        end
+
+        function tf = applyTowerClockCorrectionsInObservation(obj)
+            tf = obj.clockGaugeMode == "knownTowerClockCorrections" || ...
+                 obj.clockGaugeMode == "externalTowerCorrections" || ...
+                 (obj.clockGaugeMode == "externalTimeTransfer" && ~obj.estimateTowerClockBias);
+        end
+
+        function tf = externalTimingNoiseEnabled(obj)
+            tf = false;
+            if isfield(obj.cfg, 'externalTimeTransfer')
+                tf = logical(obj.getFieldOrDefault(obj.cfg.externalTimeTransfer, 'enableNoise', false));
+            end
+            tf = tf || obj.clockGaugeMode == "externalTowerCorrections";
+        end
+
+        function sigma_m = externalClockSigma_m(obj)
+            sigma_ps = obj.getFieldOrDefault(obj.cfg, 'externalClockCorrectionSigma_ps', 0.0);
+            if isempty(sigma_ps) || ~isfinite(double(sigma_ps))
+                sigma_ps = 0.0;
+            end
+            sigma_m = abs(double(sigma_ps)) * 1e-12 * obj.c;
+        end
+
+        function [towerClock, initialBias_m, initialDrift_mps] = createTowerClock(obj, towerConfig, idxTower)
+            [clockType, h0Factor, hm1Factor, hm2Factor, initialBias_ps, initialDrift_ps_per_s] = ...
+                obj.towerClockParameters(towerConfig, idxTower);
+
+            if ~obj.useTowerClockTruth() || ~logical(obj.getFieldOrDefault(towerConfig, 'clockEnabled', false))
+                towerClock = Clock(0.0, 0.0, 0.0, obj.dt);
+                towerClock.randomStream = obj.towerClockStream;
+                towerClock.reset([0.0; 0.0; 0.0; 0.0]);
+                initialBias_m = 0.0;
+                initialDrift_mps = 0.0;
+                return;
+            end
+
+            if ~isfield(obj.simConfig.clockLibrary, char(clockType))
+                error('ReverseGnssSimulation:UnknownTowerClockType', ...
+                    'Unknown tower clock type: %s', char(clockType));
+            end
+
+            osc = obj.simConfig.clockLibrary.(char(clockType));
+            towerClock = Clock(osc.h0 * h0Factor, osc.hm1 * hm1Factor, osc.hm2 * hm2Factor, obj.dt);
+            towerClock.randomStream = obj.towerClockStream;
+
+            initialBias_s = initialBias_ps * 1e-12;
+            initialDrift_s_per_s = initialDrift_ps_per_s * 1e-12;
+            towerClock.reset([initialBias_s; initialDrift_s_per_s; 0.0; 0.0]);
+
+            initialBias_m = obj.c * initialBias_s;
+            initialDrift_mps = obj.c * initialDrift_s_per_s;
+        end
+
+        function updateTowerClockTruth(obj)
+            if ~obj.useTowerClockTruth()
+                obj.towerClockBiasTruth_m(:) = 0.0;
+                obj.towerClockDriftTruth_mps(:) = 0.0;
+                return;
+            end
+
+            for idxTower = 1:obj.numTowers
+                if isempty(obj.towerClocks{idxTower})
+                    obj.towerClockBiasTruth_m(idxTower) = 0.0;
+                    obj.towerClockDriftTruth_mps(idxTower) = 0.0;
+                    continue;
+                end
+
+                obj.towerClocks{idxTower}.update(obj.dt);
+                obj.towers{idxTower}.total_bias_sec = obj.towerClocks{idxTower}.total_bias_sec;
+
+                obj.towerClockBiasTruth_m(idxTower) = obj.c * obj.towerClocks{idxTower}.total_bias_sec;
+                obj.towerClockDriftTruth_mps(idxTower) = obj.c * obj.towerClocks{idxTower}.total_drift_sec_per_s;
+            end
+        end
+
+        function [Phi, Q] = towerClockEkfModel(obj, idxTower)
+            [clockType, h0Factor, hm1Factor, hm2Factor] = obj.towerClockParameters(obj.activeTowerConfig(idxTower), idxTower);
+
+            if ~isfield(obj.simConfig.clockLibrary, char(clockType))
+                error('ReverseGnssSimulation:UnknownTowerClockType', ...
+                    'Unknown tower clock type: %s', char(clockType));
+            end
+
+            osc = obj.simConfig.clockLibrary.(char(clockType));
+            [Phi, Q] = obj.getEkfClockBiasDriftModel( ...
+                osc.h0 * h0Factor, osc.hm1 * hm1Factor, osc.hm2 * hm2Factor, ...
+                obj.dt, obj.c, obj.cfg.clockModel, obj.cfg.clockGaussMarkovCorrelationTime_s);
+        end
+
+        function [clockType, h0Factor, hm1Factor, hm2Factor, initialBias_ps, initialDrift_ps_per_s] = towerClockParameters(obj, towerConfig, idxTower)
+            clockType = 'Cesium1';
+            h0Factor = 1.0;
+            hm1Factor = 1.0;
+            hm2Factor = 1.0;
+            initialBias_ps = 0.0;
+            initialDrift_ps_per_s = 0.0;
+
+            if isfield(obj.cfg, 'towerClock')
+                towerClockCfg = obj.cfg.towerClock;
+                clockType = obj.getFieldOrDefault(towerClockCfg, 'clockType', clockType);
+                h0Factor = obj.selectTowerValue(obj.getFieldOrDefault(towerClockCfg, 'h0Factor', h0Factor), idxTower, h0Factor);
+                hm1Factor = obj.selectTowerValue(obj.getFieldOrDefault(towerClockCfg, 'hm1Factor', hm1Factor), idxTower, hm1Factor);
+                hm2Factor = obj.selectTowerValue(obj.getFieldOrDefault(towerClockCfg, 'hm2Factor', hm2Factor), idxTower, hm2Factor);
+                initialBias_ps = obj.selectTowerValue(obj.getFieldOrDefault(towerClockCfg, 'initialBias_ps', initialBias_ps), idxTower, initialBias_ps);
+                initialDrift_ps_per_s = obj.selectTowerValue(obj.getFieldOrDefault(towerClockCfg, 'initialDrift_ps_per_s', initialDrift_ps_per_s), idxTower, initialDrift_ps_per_s);
+            end
+
+            if isfield(towerConfig, 'clock')
+                clockType = obj.getFieldOrDefault(towerConfig.clock, 'clockType', clockType);
+                h0Factor = obj.getFieldOrDefault(towerConfig.clock, 'h0Factor', h0Factor);
+                hm1Factor = obj.getFieldOrDefault(towerConfig.clock, 'hm1Factor', hm1Factor);
+                hm2Factor = obj.getFieldOrDefault(towerConfig.clock, 'hm2Factor', hm2Factor);
+                initialBias_ps = obj.getFieldOrDefault(towerConfig.clock, 'initialBias_ps', initialBias_ps);
+                initialDrift_ps_per_s = obj.getFieldOrDefault(towerConfig.clock, 'initialDrift_ps_per_s', initialDrift_ps_per_s);
+            end
+
+            clockType = string(clockType);
+            h0Factor = double(h0Factor);
+            hm1Factor = double(hm1Factor);
+            hm2Factor = double(hm2Factor);
+            initialBias_ps = double(initialBias_ps);
+            initialDrift_ps_per_s = double(initialDrift_ps_per_s);
+        end
+
+        function value = selectTowerValue(~, rawValue, idxTower, defaultValue)
+            if isempty(rawValue)
+                value = defaultValue;
+                return;
+            end
+
+            if isnumeric(rawValue) || islogical(rawValue)
+                rawValue = rawValue(:);
+                if numel(rawValue) >= idxTower
+                    value = rawValue(idxTower);
+                else
+                    value = rawValue(1);
+                end
+                return;
+            end
+
+            if iscell(rawValue)
+                if numel(rawValue) >= idxTower
+                    value = rawValue{idxTower};
+                else
+                    value = rawValue{1};
+                end
+                return;
+            end
+
+            if isstring(rawValue)
+                if numel(rawValue) >= idxTower
+                    value = rawValue(idxTower);
+                else
+                    value = rawValue(1);
+                end
+                return;
+            end
+
+            value = rawValue;
+        end
+
+        function sigma_m = towerClockStateInitialSigma_m(obj)
+            defaultSigma_m = max(100.0, 10.0 * max(obj.towerClockCorrectionSigma_m, 1e-3));
+            sigma_m = obj.getFieldOrDefault(obj.cfg.ekf, 'initialTowerClockBiasSigma_m', defaultSigma_m);
+            sigma_m = max(double(sigma_m), 1e-6);
+        end
+
+        function sigma_mps = towerClockDriftInitialSigma_mps(obj)
+            sigma_mps = obj.getFieldOrDefault(obj.cfg.ekf, 'initialTowerClockDriftSigma_mps', 0.1);
+            sigma_mps = max(double(sigma_mps), 1e-12);
+        end
+
+        function [yOut, ypOut, HOut, ROut] = appendClockGaugeMeasurements(obj, yRange, ypRange, HRange, RRange)
+            yOut = yRange;
+            ypOut = ypRange;
+            HOut = HRange;
+            ROut = RRange;
+
+            if ~obj.estimateTowerClockBias
+                return;
+            end
+
+            numericalFloor_m = obj.getFieldOrDefault(obj.cfg.measurement, 'sigma_numerical_floor_m', 1e-6);
+
+            if obj.clockGaugeMode == "externalTimeTransfer"
+                sigma_m = max(obj.towerClockCorrectionSigma_m, numericalFloor_m);
+
+                for idxTower = 1:obj.numTowers
+                    yPseudo = obj.towerClockBiasTruth_m(idxTower);
+                    if obj.externalTimingNoiseEnabled() && sigma_m > 0.0
+                        yPseudo = yPseudo + sigma_m * randn(obj.measurementStream);
+                    end
+
+                    hPseudo = zeros(1, obj.stateDim);
+                    hPseudo(obj.idx.tcb(idxTower)) = 1.0;
+
+                    yOut = [yOut; yPseudo];
+                    ypOut = [ypOut; obj.ekf.X(obj.idx.tcb(idxTower))];
+                    HOut = [HOut; hPseudo];
+                    ROut = blkdiag(ROut, sigma_m^2);
+                end
+
+            elseif obj.clockGaugeMode == "fixReferenceTower"
+                idxReference = obj.referenceTowerIndex;
+                if isnan(idxReference)
+                    idxReference = 1;
+                end
+
+                hPseudo = zeros(1, obj.stateDim);
+                hPseudo(obj.idx.tcb(idxReference)) = 1.0;
+
+                yOut = [yOut; 0.0];
+                ypOut = [ypOut; obj.ekf.X(obj.idx.tcb(idxReference))];
+                HOut = [HOut; hPseudo];
+                ROut = blkdiag(ROut, numericalFloor_m^2);
+
+            elseif obj.clockGaugeMode == "zeroMeanNetworkConstraint"
+                sigma_m = obj.getFieldOrDefault(obj.cfg, 'zeroMeanClockConstraintSigma_m', numericalFloor_m);
+                sigma_m = max(double(sigma_m), numericalFloor_m);
+
+                hPseudo = zeros(1, obj.stateDim);
+                hPseudo(obj.idx.tcb) = 1.0 / obj.numTowers;
+
+                yOut = [yOut; 0.0];
+                ypOut = [ypOut; mean(obj.ekf.X(obj.idx.tcb))];
+                HOut = [HOut; hPseudo];
+                ROut = blkdiag(ROut, sigma_m^2);
+            end
+        end
+        
+        function value = getFieldOrDefault(~, s, fieldName, defaultValue)
+            if isstruct(s) && isfield(s, fieldName)
+                value = s.(fieldName);
+            else
+                value = defaultValue;
+            end
+        end
+
+        function name = getSharedClockType(~, simConfig, cfg)
+            name = 'Unknown';
+            if isfield(cfg, 'spaceAssets') && ...
+                    isfield(cfg.spaceAssets, 'assets') && ...
+                    isfield(cfg.spaceAssets.assets(1), 'sharedClock') && ...
+                    isfield(cfg.spaceAssets.assets(1).sharedClock, 'clockType')
+                name = cfg.spaceAssets.assets(1).sharedClock.clockType;
+            elseif isfield(simConfig, 'spacecraft') && isfield(simConfig.spacecraft, 'clock')
+                name = simConfig.spacecraft.clock.clockType;
+            end
+        end
+
+        function configPath = findProjectFile(obj, relativePath)
+            candidates = strings(1, 0);
+            candidates(end + 1) = string(fullfile(char(obj.scriptDir), relativePath));
+            candidates(end + 1) = string(fullfile(char(obj.projectRoot), relativePath));
+            candidates(end + 1) = string(fullfile(pwd, relativePath));
+
+            configPath = "";
+            for i = 1:numel(candidates)
+                if isfile(char(candidates(i)))
+                    configPath = candidates(i);
+                    return;
+                end
+            end
+        end
+
+        function merged = mergeStructs(obj, baseStruct, overrideStruct)
+            merged = baseStruct;
+            names = fieldnames(overrideStruct);
+
+            for i = 1:numel(names)
+                fieldName = names{i};
+                if isfield(merged, fieldName) && isstruct(merged.(fieldName)) && isstruct(overrideStruct.(fieldName)) && ...
+                        isscalar(merged.(fieldName)) && isscalar(overrideStruct.(fieldName))
+                    merged.(fieldName) = obj.mergeStructs(merged.(fieldName), overrideStruct.(fieldName));
+                else
+                    merged.(fieldName) = overrideStruct.(fieldName);
+                end
+            end
+        end
+
+        function value = computeRms(~, x)
+            x = x(:);
+            value = sqrt(mean(x.^2, 'omitnan'));
+        end
+    end
+
+    methods (Static, Access = private)
+        function gmst_rad = gmstRad(jd)
+            T = (jd - 2451545.0) / 36525.0;
+
+            gmst_deg = 280.46061837 ...
+                + 360.98564736629 * (jd - 2451545.0) ...
+                + 0.000387933 * T^2 ...
+                - (T^3) / 38710000.0;
+
+            gmst_rad = deg2rad(mod(gmst_deg, 360.0));
+        end
+    end
+end

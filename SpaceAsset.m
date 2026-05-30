@@ -1,0 +1,439 @@
+classdef SpaceAsset < handle
+    %SPACEASSET Spacecraft container for receiver phase-center geometry.
+    % Holds ECI translational state, body-to-ECI attitude, and mounted
+    % ReceiverComponent phase centers. Receiver clocks are not modeled here;
+    % scenario scripts may estimate one shared parent spacecraft clock state.
+
+    properties
+        id = 1
+        name = "SpaceAsset"
+        attitudeFrame = "LVLH"
+        state_ECI = zeros(6, 1)
+
+        % Body-to-ECI direction cosine matrix. By default the body frame is
+        % aligned with ECI. Set with setAttitudeEuler321_rad or directly with
+        % setRotationBodyToECI.
+        rotationBodyToECI = eye(3)
+
+        % Informational Euler-321 attitude [roll; pitch; yaw] in radians.
+        % The DCM above is the authoritative attitude used for geometry.
+        attitudeEuler321_rad = zeros(3, 1)
+
+        receivers = ReceiverComponent.empty(1, 0)
+    end
+
+    properties (Dependent)
+        pos_ECI_m
+        vel_ECI_mps
+    end
+
+    methods
+        function obj = SpaceAsset(asset_name, initial_state_ECI, initial_attitude)
+            if nargin >= 1 && ~isempty(asset_name)
+                obj.name = string(asset_name);
+            end
+            if nargin >= 2 && ~isempty(initial_state_ECI)
+                obj.state_ECI = initial_state_ECI(:);
+            end
+            if nargin >= 3 && ~isempty(initial_attitude)
+                if isnumeric(initial_attitude) && isequal(size(initial_attitude), [3, 3])
+                    obj.setRotationBodyToECI(initial_attitude);
+                elseif isnumeric(initial_attitude) && numel(initial_attitude) == 3
+                    obj.setAttitudeEuler321_rad(initial_attitude(:));
+                else
+                    error('SpaceAsset:InvalidInitialAttitude', ...
+                        'initial_attitude must be a 3x3 DCM or a 3-element Euler-321 vector.');
+                end
+            end
+            obj.validateState();
+            obj.validateAttitude();
+        end
+
+        function pos = get.pos_ECI_m(obj)
+            pos = obj.state_ECI(1:3);
+        end
+
+        function vel = get.vel_ECI_mps(obj)
+            vel = obj.state_ECI(4:6);
+        end
+
+        function set.pos_ECI_m(obj, pos)
+            obj.state_ECI(1:3) = pos(:);
+        end
+
+        function set.vel_ECI_mps(obj, vel)
+            obj.state_ECI(4:6) = vel(:);
+        end
+
+        function setReceivers(obj, receiver_array)
+            if isempty(receiver_array)
+                obj.receivers = ReceiverComponent.empty(1, 0);
+                return;
+            end
+            if ~isa(receiver_array, 'ReceiverComponent')
+                error('SpaceAsset:InvalidReceivers', ...
+                    'receiver_array must contain ReceiverComponent objects.');
+            end
+            obj.receivers = receiver_array;
+        end
+
+        function addReceiverComponent(obj, receiver_component)
+            if ~isa(receiver_component, 'ReceiverComponent')
+                error('SpaceAsset:InvalidReceiverComponent', ...
+                    'receiver_component must be a ReceiverComponent object.');
+            end
+            if isempty(obj.receivers)
+                obj.receivers = receiver_component;
+            else
+                obj.receivers(1, end + 1) = receiver_component;
+            end
+        end
+
+        function addReceiver(obj, offset_body_m, receiver_name, receiver_id)
+            % Convenience wrapper retained for legacy MeasurementModel code.
+            if nargin < 3 || isempty(receiver_name)
+                receiver_name = "RX";
+            end
+            if nargin < 4 || isempty(receiver_id)
+                receiver_id = numel(obj.receivers) + 1;
+            end
+            obj.addReceiverComponent(ReceiverComponent(offset_body_m(:), receiver_name, receiver_id));
+        end
+
+        function rx_enabled = getEnabledReceivers(obj)
+            if isempty(obj.receivers)
+                rx_enabled = ReceiverComponent.empty(1, 0);
+                return;
+            end
+            enabled_flags = arrayfun(@(rx) logical(rx.enabled), obj.receivers);
+            rx_enabled = obj.receivers(enabled_flags);
+        end
+
+                function setRotationBodyToECI(obj, rotation_body_to_eci)
+            % Direct DCM assignment is an inertial attitude input.
+            obj.attitudeFrame = "ECI";
+            obj.rotationBodyToECI = rotation_body_to_eci;
+            obj.validateAttitude();
+        end
+
+        function setAttitudeFrame(obj, attitude_frame)
+            attitude_frame = upper(strtrim(string(attitude_frame)));
+            if ~(attitude_frame == "LVLH" || attitude_frame == "ECI")
+                error('SpaceAsset:InvalidAttitudeFrame', ...
+                    'attitudeFrame must be "LVLH" or "ECI".');
+            end
+            obj.attitudeFrame = attitude_frame;
+            obj.rotationBodyToECI = SpaceAsset.bodyToEciFromEuler321( ...
+                obj.attitudeEuler321_rad, obj.state_ECI, obj.attitudeFrame);
+            obj.validateAttitude();
+        end
+
+        function R = getRotationBodyToECI(obj)
+            obj.rotationBodyToECI = SpaceAsset.bodyToEciFromEuler321( ...
+                obj.attitudeEuler321_rad, obj.state_ECI, obj.attitudeFrame);
+            obj.validateAttitude();
+            R = obj.rotationBodyToECI;
+        end
+
+        function setAttitudeEuler321_rad(obj, attitude_rad)
+            if ~isnumeric(attitude_rad) || numel(attitude_rad) ~= 3 || any(~isfinite(attitude_rad(:)))
+                error('SpaceAsset:InvalidEulerAttitude', ...
+                    'attitude_rad must be a finite 3-element [roll; pitch; yaw] vector in radians.');
+            end
+            obj.attitudeEuler321_rad = attitude_rad(:);
+            obj.rotationBodyToECI = SpaceAsset.bodyToEciFromEuler321( ...
+                obj.attitudeEuler321_rad, obj.state_ECI, obj.attitudeFrame);
+            obj.validateAttitude();
+        end
+
+        function setAttitudeEuler321_deg(obj, attitude_deg)
+            obj.setAttitudeEuler321_rad(deg2rad(attitude_deg(:)));
+        end
+
+        function pos_eci = getReceiverPositionECI(obj, receiver_component)
+            if ~isa(receiver_component, 'ReceiverComponent')
+                error('SpaceAsset:InvalidReceiverComponent', ...
+                    'receiver_component must be a ReceiverComponent object.');
+            end
+            pos_eci = obj.pos_ECI_m + obj.getRotationBodyToECI() * receiver_component.getOffsetBody_m();
+        end
+
+        function initializeGeoState(obj, asset_cfg, jd, mu)
+            obj.state_ECI = SpaceAsset.initialGeoState(asset_cfg, jd, mu);
+            obj.validateState();
+        end
+        
+        function propagateTwoBody(obj, mu, dt)
+            obj.state_ECI = SpaceAsset.propagateTwoBodyState(obj.state_ECI, mu, dt);
+            obj.validateState();
+        end
+        
+        function Phi = getTwoBodyPhi(obj, mu, dt)
+            Phi = SpaceAsset.twoBodyPhiFirstOrder(obj.state_ECI, mu, dt);
+        end
+        
+        function [pos_eci, dpos_datt] = getReceiverPositionAndAttitudeJacobian(obj, receiver_component, attitude_rad, base_position_eci_m)
+            % Returns receiver phase-center position and derivative with respect to
+            % [roll; pitch; yaw].
+            %
+            % base_position_eci_m is optional. Use it when the EKF state position is
+            % not equal to obj.pos_ECI_m.
+        
+            if ~isa(receiver_component, 'ReceiverComponent')
+                error('SpaceAsset:InvalidReceiverComponent', ...
+                    'receiver_component must be a ReceiverComponent object.');
+            end
+        
+            if nargin < 4 || isempty(base_position_eci_m)
+                base_position_eci_m = obj.pos_ECI_m;
+            end
+        
+            state_for_geometry = [base_position_eci_m; obj.vel_ECI_mps];
+            [pos_eci, ~, dpos_datt] = SpaceAsset.receiverPositionAndJacobians( ...
+                receiver_component, state_for_geometry, attitude_rad, obj.attitudeFrame);
+        end
+
+        function validateState(obj)
+            if ~isnumeric(obj.state_ECI) || numel(obj.state_ECI) ~= 6 || any(~isfinite(obj.state_ECI(:)))
+                error('SpaceAsset:InvalidState', 'state_ECI must be a finite 6-element numeric vector.');
+            end
+            obj.state_ECI = obj.state_ECI(:);
+        end
+
+        function validateAttitude(obj)
+            if ~isnumeric(obj.rotationBodyToECI) || ~isequal(size(obj.rotationBodyToECI), [3, 3]) || any(~isfinite(obj.rotationBodyToECI(:)))
+                error('SpaceAsset:InvalidAttitude', 'rotationBodyToECI must be a finite 3-by-3 numeric matrix.');
+            end
+            orthogonality_error = norm(obj.rotationBodyToECI' * obj.rotationBodyToECI - eye(3), 'fro');
+            determinant_error = abs(det(obj.rotationBodyToECI) - 1.0);
+            if orthogonality_error > 1e-8 || determinant_error > 1e-8
+                error('SpaceAsset:InvalidAttitudeDCM', ...
+                    'rotationBodyToECI must be an orthonormal right-handed DCM.');
+            end
+        end
+    end
+
+    methods (Static)
+        function state = initialGeoState(asset_cfg, jd, mu)
+            % Builds an initial ECI state from configured latitude, longitude,
+            % and GEO-like altitude.
+        
+            r = 6378137.0 + asset_cfg.geoAltitude_m;
+            lat = deg2rad(asset_cfg.startLatitude_deg);
+            lon = deg2rad(asset_cfg.startLongitude_deg);
+            ecef_m = r * [ ...
+                cos(lat) * cos(lon);
+                cos(lat) * sin(lon);
+                sin(lat)];
+        
+            R = SpaceAsset.rot3(GroundNode.gmstRad(jd));
+        
+            pos_eci_m = R * ecef_m;
+        
+            omega_earth_radps = 7.2921151467e-5;
+            vel_eci_mps = cross([0; 0; omega_earth_radps], pos_eci_m);
+        
+            if norm(vel_eci_mps) < 1.0
+                vel_eci_mps = [0; sqrt(mu / norm(pos_eci_m)); 0];
+            end
+        
+            state = [pos_eci_m; vel_eci_mps];
+        end
+        
+        function state_next = propagateTwoBodyState(state, mu, dt)
+            % Fourth-order Runge-Kutta two-body propagation step.
+            state = state(:);
+            validateattributes(state, {'numeric'}, {'real', 'finite', 'numel', 6}, mfilename, 'state');
+            validateattributes(mu, {'numeric'}, {'real', 'finite', 'scalar', 'positive'}, mfilename, 'mu');
+            validateattributes(dt, {'numeric'}, {'real', 'finite', 'scalar'}, mfilename, 'dt');
+
+            k1 = SpaceAsset.twoBodyDynamics(state, mu);
+            k2 = SpaceAsset.twoBodyDynamics(state + 0.5 * dt * k1, mu);
+            k3 = SpaceAsset.twoBodyDynamics(state + 0.5 * dt * k2, mu);
+            k4 = SpaceAsset.twoBodyDynamics(state + dt * k3, mu);
+
+            state_next = state + (dt / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4);
+        end
+
+        function xdot = twoBodyDynamics(state, mu)
+            state = state(:);
+            r = state(1:3);
+            v = state(4:6);
+            rn = norm(r);
+            if rn <= 0.0 || ~isfinite(rn)
+                error('SpaceAsset:InvalidOrbitRadius', 'Position norm must be positive and finite.');
+            end
+            a = -mu * r / rn^3;
+            xdot = [v; a];
+        end
+        
+        function Phi = twoBodyPhiFirstOrder(state, mu, dt)
+            % Discrete RK4-consistent state transition from central differences.
+            state = state(:);
+            validateattributes(state, {'numeric'}, {'real', 'finite', 'numel', 6}, mfilename, 'state');
+
+            Phi = zeros(6, 6);
+            step = [max(ones(3, 1) * 1e-3, 1e-9 * abs(state(1:3))); ...
+                    max(ones(3, 1) * 1e-6, 1e-9 * abs(state(4:6)))];
+
+            for q = 1:6
+                state_plus = state;
+                state_minus = state;
+                state_plus(q) = state_plus(q) + step(q);
+                state_minus(q) = state_minus(q) - step(q);
+
+                f_plus = SpaceAsset.propagateTwoBodyState(state_plus, mu, dt);
+                f_minus = SpaceAsset.propagateTwoBodyState(state_minus, mu, dt);
+                Phi(:, q) = (f_plus - f_minus) ./ (2.0 * step(q));
+            end
+        end
+
+        function pos_eci = receiverPositionFromState(receiver_component, state_eci, attitude_rad, attitude_frame)
+            if ~isa(receiver_component, 'ReceiverComponent')
+                error('SpaceAsset:InvalidReceiverComponent', ...
+                    'receiver_component must be a ReceiverComponent object.');
+            end
+
+            state_eci = state_eci(:);
+            validateattributes(state_eci, {'numeric'}, {'real', 'finite', 'numel', 6}, mfilename, 'state_eci');
+
+            R_body_to_eci = SpaceAsset.bodyToEciFromEuler321(attitude_rad, state_eci, attitude_frame);
+            pos_eci = state_eci(1:3) + R_body_to_eci * receiver_component.getOffsetBody_m();
+        end
+
+        function [pos_eci, dpos_dstate, dpos_datt] = receiverPositionAndJacobians(receiver_component, state_eci, attitude_rad, attitude_frame)
+            state_eci = state_eci(:);
+            attitude_rad = attitude_rad(:);
+
+            pos_eci = SpaceAsset.receiverPositionFromState( ...
+                receiver_component, state_eci, attitude_rad, attitude_frame);
+
+            dpos_dstate = zeros(3, 6);
+            dpos_datt = zeros(3, 3);
+
+            state_step = [max(ones(3, 1) * 1e-3, 1e-9 * abs(state_eci(1:3))); ...
+                          max(ones(3, 1) * 1e-6, 1e-9 * abs(state_eci(4:6)))];
+            attitude_step = ones(3, 1) * 1e-7;
+
+            for q = 1:6
+                state_plus = state_eci;
+                state_minus = state_eci;
+                state_plus(q) = state_plus(q) + state_step(q);
+                state_minus(q) = state_minus(q) - state_step(q);
+
+                p_plus = SpaceAsset.receiverPositionFromState( ...
+                    receiver_component, state_plus, attitude_rad, attitude_frame);
+                p_minus = SpaceAsset.receiverPositionFromState( ...
+                    receiver_component, state_minus, attitude_rad, attitude_frame);
+                dpos_dstate(:, q) = (p_plus - p_minus) ./ (2.0 * state_step(q));
+            end
+
+            for q = 1:3
+                att_plus = attitude_rad;
+                att_minus = attitude_rad;
+                att_plus(q) = att_plus(q) + attitude_step(q);
+                att_minus(q) = att_minus(q) - attitude_step(q);
+
+                p_plus = SpaceAsset.receiverPositionFromState( ...
+                    receiver_component, state_eci, att_plus, attitude_frame);
+                p_minus = SpaceAsset.receiverPositionFromState( ...
+                    receiver_component, state_eci, att_minus, attitude_frame);
+                dpos_datt(:, q) = (p_plus - p_minus) ./ (2.0 * attitude_step(q));
+            end
+        end
+
+        function R_body_to_eci = bodyToEciFromEuler321(attitude_rad, state_eci, attitude_frame)
+            if nargin < 3 || isempty(attitude_frame)
+                attitude_frame = "LVLH";
+            end
+
+            attitude_frame = upper(strtrim(string(attitude_frame)));
+            R_euler = SpaceAsset.euler321(attitude_rad);
+
+            if attitude_frame == "LVLH"
+                R_body_to_eci = SpaceAsset.lvlhToEciDcm(state_eci) * R_euler;
+            elseif attitude_frame == "ECI"
+                R_body_to_eci = R_euler;
+            else
+                error('SpaceAsset:InvalidAttitudeFrame', ...
+                    'attitudeFrame must be "LVLH" or "ECI".');
+            end
+        end
+
+        function R_lvlh_to_eci = lvlhToEciDcm(state_eci)
+            state_eci = state_eci(:);
+            validateattributes(state_eci, {'numeric'}, {'real', 'finite', 'numel', 6}, mfilename, 'state_eci');
+
+            r_eci = state_eci(1:3);
+            v_eci = state_eci(4:6);
+
+            r_norm = norm(r_eci);
+            h_eci = cross(r_eci, v_eci);
+            h_norm = norm(h_eci);
+
+            if r_norm <= 0.0 || h_norm <= 0.0
+                error('SpaceAsset:InvalidLVLHState', ...
+                    'LVLH frame requires non-zero position and non-zero angular momentum.');
+            end
+
+            z_lvlh_in_eci = -r_eci ./ r_norm;
+            y_lvlh_in_eci = -h_eci ./ h_norm;
+            x_lvlh_in_eci = cross(y_lvlh_in_eci, z_lvlh_in_eci);
+            x_lvlh_in_eci = x_lvlh_in_eci ./ norm(x_lvlh_in_eci);
+
+            y_lvlh_in_eci = cross(z_lvlh_in_eci, x_lvlh_in_eci);
+            y_lvlh_in_eci = y_lvlh_in_eci ./ norm(y_lvlh_in_eci);
+
+            R_lvlh_to_eci = [x_lvlh_in_eci, y_lvlh_in_eci, z_lvlh_in_eci];
+        end
+        function R = euler321(attitude_rad)
+            attitude_rad = attitude_rad(:);
+            roll = attitude_rad(1);
+            pitch = attitude_rad(2);
+            yaw = attitude_rad(3);
+            R = SpaceAsset.rot3(yaw) * SpaceAsset.rot2(pitch) * SpaceAsset.rot1(roll);
+        end
+
+        function [R, dR_datt] = euler321WithDerivatives(attitude_rad)
+            attitude_rad = attitude_rad(:);
+            roll = attitude_rad(1);
+            pitch = attitude_rad(2);
+            yaw = attitude_rad(3);
+            R1 = SpaceAsset.rot1(roll);
+            R2 = SpaceAsset.rot2(pitch);
+            R3 = SpaceAsset.rot3(yaw);
+            dR1 = SpaceAsset.drot1(roll);
+            dR2 = SpaceAsset.drot2(pitch);
+            dR3 = SpaceAsset.drot3(yaw);
+            R = R3 * R2 * R1;
+            dR_datt = zeros(3, 3, 3);
+            dR_datt(:, :, 1) = R3 * R2 * dR1; % roll
+            dR_datt(:, :, 2) = R3 * dR2 * R1; % pitch
+            dR_datt(:, :, 3) = dR3 * R2 * R1; % yaw
+        end
+
+        function R = rot1(a)
+            R = [1 0 0; 0 cos(a) -sin(a); 0 sin(a) cos(a)];
+        end
+
+        function R = rot2(a)
+            R = [cos(a) 0 sin(a); 0 1 0; -sin(a) 0 cos(a)];
+        end
+
+        function R = rot3(a)
+            R = [cos(a) -sin(a) 0; sin(a) cos(a) 0; 0 0 1];
+        end
+
+        function dR = drot1(a)
+            dR = [0 0 0; 0 -sin(a) -cos(a); 0 cos(a) -sin(a)];
+        end
+
+        function dR = drot2(a)
+            dR = [-sin(a) 0 cos(a); 0 0 0; -cos(a) 0 -sin(a)];
+        end
+
+        function dR = drot3(a)
+            dR = [-sin(a) -cos(a) 0; cos(a) -sin(a) 0; 0 0 0];
+        end
+    end
+end

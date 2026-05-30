@@ -1,0 +1,1749 @@
+% generateReport.m
+% =========================================================================
+% GENERAL OPT-IN LATEX REPORT SCRIPT
+% =========================================================================
+% This script expects reportConfig, reportToggles, and reportData in the
+% caller workspace. By default all report toggles are disabled, so running
+% this file directly does not generate a report.
+
+%% Report Setup
+script_dir = fileparts(mfilename('fullpath'));
+addpath(script_dir);
+project_root = fileparts(script_dir);
+addpath(project_root);
+report_script_dir = fileparts(mfilename('fullpath'));
+simulation_dir = fullfile(report_script_dir, "..");
+path_candidates = [ ...
+    fullfile(report_script_dir, "Clock"), fullfile(simulation_dir, "Clock"), ...
+    fullfile(report_script_dir, "Components"), fullfile(simulation_dir, "Components"), ...
+    fullfile(report_script_dir, "EKF"), fullfile(simulation_dir, "EKF"), ...
+    fullfile(report_script_dir, "Nodes"), fullfile(simulation_dir, "Nodes")];
+for path_idx = 1:numel(path_candidates)
+    if isfolder(path_candidates(path_idx))
+        addpath(path_candidates(path_idx));
+    end
+end
+
+if ~exist("reportToggles", "var") || ~isstruct(reportToggles)
+    reportToggles = defaultReportToggles();
+else
+    reportToggles = mergeStructDefaults(reportToggles, defaultReportToggles());
+end
+
+if ~reportToggles.generatePdf
+    fprintf('generateReport: report generation is disabled. Set reportToggles.generatePdf = true from the scenario script to generate a PDF.\n');
+    return;
+end
+
+if ~exist("reportData", "var") || ~isstruct(reportData)
+    error("generateReport:MissingData", ...
+        "reportData must be provided by the scenario script when report generation is enabled.");
+end
+
+if ~exist("reportConfig", "var") || ~isstruct(reportConfig)
+    reportConfig = struct();
+end
+reportConfig = mergeStructDefaults(reportConfig, defaultReportConfig(report_script_dir));
+
+required_fields = [
+    "time_vec"
+    "total_time_hours"
+    "dt"
+    "num_towers"
+    "R_earth"
+    "oscillators"
+    "towers"
+    "ekf_pos_error_m"
+    "ekf_pos_sigma_m"
+    "ekf_clock_error_ps"
+    "ekf_clock_sigma_ps"
+    "true_clock_bias_ps"
+    "est_clock_bias_ps"
+    "innovation_rms_m"
+    "nis_history"
+    "sat_pos_history_m"
+    "towers_eci_first_m"
+    "tau_profile_s"
+    "tau_sim_s"
+    "sim_adev"
+    "final_position_error_m"
+    "final_clock_error_ps"
+    "final_innovation_rms_m"
+    "selected_allan_deviation_1s"
+];
+validateRequiredFields(reportData, required_fields);
+reportData = ensureReportMetrics(reportData);
+
+report_root = char(reportConfig.reportRoot);
+figure_dir = fullfile(report_root, "figures");
+if ~exist(report_root, "dir")
+    mkdir(report_root);
+end
+if ~exist(figure_dir, "dir")
+    mkdir(figure_dir);
+end
+
+fprintf('generateReport: creating LaTeX/PDF report...\n');
+
+interactive_report_plots = true;
+if isfield(reportConfig, "interactivePlots")
+    interactive_report_plots = logical(reportConfig.interactivePlots);
+end
+setappdata(0, 'generateReportInteractivePlots', interactive_report_plots);
+
+%% Report Figure Generation
+plot_paths = struct();
+plot_paths.position_error = exportPlot(figure_dir, "position_error.pdf", ...
+    @() plotPositionError(reportData.time_vec, reportData.ekf_pos_error_m));
+plot_paths.position_covariance = exportPlot(figure_dir, "position_covariance.pdf", ...
+    @() plotPositionCovariance(reportData.time_vec, reportData.ekf_pos_sigma_m));
+plot_paths.clock_error = exportPlot(figure_dir, "clock_error.pdf", ...
+    @() plotClockError(reportData.time_vec, reportData.ekf_clock_error_ps, reportData.ekf_clock_sigma_ps));
+plot_paths.clock_bias = exportPlot(figure_dir, "clock_bias_tracking.pdf", ...
+    @() plotClockBias(reportData.time_vec, reportData.true_clock_bias_ps, reportData.est_clock_bias_ps));
+if isfield(reportData, "true_ground_clock_bias_ps")
+    plot_paths.ground_clock_bias = exportPlot(figure_dir, "ground_clock_bias.pdf", ...
+        @() plotGroundClockBias(reportData.time_vec, reportData.true_ground_clock_bias_ps, reportData.towers));
+else
+    plot_paths.ground_clock_bias = "";
+end
+if isfield(reportData, "tower_clock_correction_s")
+    plot_paths.ground_clock_correction = exportPlot(figure_dir, "ground_clock_correction.pdf", ...
+        @() plotGroundClockCorrection(reportData.time_vec, reportData.true_ground_clock_bias_ps, ...
+        reportData.tower_clock_correction_s, reportData.tower_clock_correction_residual_s, ...
+        reportData.tower_clock_correction_sigma_s, reportData.towers));
+else
+    plot_paths.ground_clock_correction = "";
+end
+if isfield(reportData, "est_ground_clock_bias_ps") && any(isfinite(reportData.est_ground_clock_bias_ps(:)))
+    plot_paths.ground_clock_estimate = exportPlot(figure_dir, "ground_clock_estimate.pdf", ...
+        @() plotGroundClockEstimate(reportData.time_vec, reportData.true_ground_clock_bias_ps, reportData.est_ground_clock_bias_ps, reportData.towers));
+else
+    plot_paths.ground_clock_estimate = "";
+end
+if isfield(reportData, "est_ground_clock_bias_ps_gauge_aligned") && any(isfinite(reportData.est_ground_clock_bias_ps_gauge_aligned(:)))
+    plot_paths.ground_clock_gauge_aligned = exportPlot(figure_dir, "ground_clock_gauge_aligned.pdf", ...
+        @() plotGroundClockEstimate(reportData.time_vec, reportData.true_ground_clock_bias_ps, reportData.est_ground_clock_bias_ps_gauge_aligned, reportData.towers));
+else
+    plot_paths.ground_clock_gauge_aligned = "";
+end
+if isfield(reportData, "prefit_residual_by_tower_m")
+    plot_paths.residual_by_tower = exportPlot(figure_dir, "residual_by_tower.pdf", ...
+        @() plotResidualByTower(reportData.time_vec, reportData.prefit_residual_by_tower_m, reportData.postfit_residual_by_tower_m, reportData.towers));
+else
+    plot_paths.residual_by_tower = "";
+end
+if isfield(reportData, "prefit_residual_by_receiver_tower_m")
+    plot_paths.per_receiver_prefit_rms = exportPlot(figure_dir, "per_receiver_prefit_rms.pdf", ...
+        @() plotPerReceiverResidualRms(reportData.time_vec, reportData.prefit_residual_by_receiver_tower_m, reportData.receiver_names, "Pre-fit pseudorange residual RMS [m]"));
+    plot_paths.per_receiver_postfit_rms = exportPlot(figure_dir, "per_receiver_postfit_rms.pdf", ...
+        @() plotPerReceiverResidualRms(reportData.time_vec, reportData.postfit_residual_by_receiver_tower_m, reportData.receiver_names, "Post-fit pseudorange residual RMS [m]"));
+    plot_paths.receiver_residual_heatmaps = exportPlot(figure_dir, "receiver_residual_heatmaps.pdf", ...
+        @() plotReceiverResidualHeatmaps(reportData.time_vec, reportData.prefit_residual_by_receiver_tower_m, ...
+        reportData.postfit_residual_by_receiver_tower_m, reportData.receiver_names, reportData.tower_names));
+    plot_paths.differential_residuals = exportPlot(figure_dir, "rx2_minus_rx1_residuals.pdf", ...
+        @() plotRx2MinusRx1Residuals(reportData.time_vec, reportData.prefit_residual_by_receiver_tower_m, ...
+        reportData.postfit_residual_by_receiver_tower_m, reportData.tower_names));
+else
+    plot_paths.per_receiver_prefit_rms = "";
+    plot_paths.per_receiver_postfit_rms = "";
+    plot_paths.receiver_residual_heatmaps = "";
+    plot_paths.differential_residuals = "";
+end
+if isfield(reportData, "pseudorange_error_by_receiver_tower_m")
+    plot_paths.receiver_pseudorange_error = exportPlot(figure_dir, "receiver_pseudorange_error.pdf", ...
+        @() plotPerReceiverResidualRms(reportData.time_vec, reportData.pseudorange_error_by_receiver_tower_m, ...
+        reportData.receiver_names, "Pseudorange minus geometric range RMS [m]"));
+else
+    plot_paths.receiver_pseudorange_error = "";
+end
+if isfield(reportData, "true_range_by_receiver_tower_m") && isfield(reportData, "pseudorange_by_receiver_tower_m")
+    plot_paths.baseline_projection = exportPlot(figure_dir, "baseline_projection.pdf", ...
+        @() plotBaselineProjection(reportData.time_vec, reportData.true_range_by_receiver_tower_m, ...
+        reportData.los_unit_eci_by_receiver_tower, reportData.receiver_offset_body_by_receiver_m, reportData.tower_names));
+    plot_paths.differential_observable = exportPlot(figure_dir, "differential_observable.pdf", ...
+        @() plotDifferentialObservable(reportData.time_vec, reportData.pseudorange_by_receiver_tower_m, ...
+        reportData.true_range_by_receiver_tower_m, reportData.tower_names));
+else
+    plot_paths.baseline_projection = "";
+    plot_paths.differential_observable = "";
+end
+if isfield(reportData, "receiver_subset_diagnostics") && isfield(reportData.receiver_subset_diagnostics, "enabled") && reportData.receiver_subset_diagnostics.enabled
+    plot_paths.receiver_subset_position = exportPlot(figure_dir, "receiver_subset_position.pdf", ...
+        @() plotReceiverSubsetComparison(reportData.time_vec, reportData.receiver_subset_diagnostics.position_error_norm_m, ...
+        reportData.receiver_subset_diagnostics.case_labels, "3D position error [m]"));
+    plot_paths.receiver_subset_covariance = exportPlot(figure_dir, "receiver_subset_covariance.pdf", ...
+        @() plotReceiverSubsetComparison(reportData.time_vec, reportData.receiver_subset_diagnostics.position_sigma_norm_m, ...
+        reportData.receiver_subset_diagnostics.case_labels, "Position sigma norm [m]"));
+    plot_paths.receiver_subset_residuals = exportPlot(figure_dir, "receiver_subset_residuals.pdf", ...
+        @() plotReceiverSubsetResiduals(reportData.time_vec, reportData.receiver_subset_diagnostics));
+else
+    plot_paths.receiver_subset_position = "";
+    plot_paths.receiver_subset_covariance = "";
+    plot_paths.receiver_subset_residuals = "";
+end
+if isfield(reportData, "R_total_m2")
+    plot_paths.R_breakdown = exportPlot(figure_dir, "measurement_covariance_breakdown.pdf", ...
+        @() plotMeasurementCovarianceBreakdown(reportData.time_vec, reportData));
+else
+    plot_paths.R_breakdown = "";
+end
+if isfield(reportData, "visible_tower_count")
+    plot_paths.visible_towers = exportPlot(figure_dir, "visible_towers.pdf", ...
+        @() plotVisibleTowers(reportData.time_vec, reportData.visible_tower_count, reportData.num_towers));
+else
+    plot_paths.visible_towers = "";
+end
+plot_paths.innovation = exportPlot(figure_dir, "innovation_rms.pdf", ...
+    @() plotInnovation(reportData.time_vec, reportData.innovation_rms_m, reportData.postfit_innovation_rms_m));
+if isfield(reportData, "nis_degrees_of_freedom")
+    plot_paths.nis = exportPlot(figure_dir, "nis.pdf", ...
+        @() plotNis(reportData.time_vec, reportData.nis_history, reportData.num_towers, reportData.nis_degrees_of_freedom));
+else
+    plot_paths.nis = exportPlot(figure_dir, "nis.pdf", ...
+        @() plotNis(reportData.time_vec, reportData.nis_history, reportData.num_towers));
+end
+plot_paths.geometry = exportPlot(figure_dir, "geometry.pdf", ...
+    @() plotGeometry(reportData.R_earth, reportData.sat_pos_history_m, reportData.towers_eci_first_m, reportData.towers));
+if isfield(reportData, "clock_allan_names") && isfield(reportData, "sim_adev_by_clock")
+    plot_paths.allan = exportPlot(figure_dir, "allan_deviation.pdf", ...
+        @() plotAllanDeviation(reportData.oscillators, reportConfig.selectedOscillatorName, ...
+        reportData.tau_profile_s, reportData.tau_sim_s, reportData.sim_adev, reportData.dt, ...
+        reportData.clock_allan_names, reportData.sim_adev_by_clock));
+else
+    plot_paths.allan = exportPlot(figure_dir, "allan_deviation.pdf", ...
+        @() plotAllanDeviation(reportData.oscillators, reportConfig.selectedOscillatorName, ...
+        reportData.tau_profile_s, reportData.tau_sim_s, reportData.sim_adev, reportData.dt));
+end
+
+%% LaTeX Report Assembly
+report = {};
+report = appendLine(report, "\documentclass[11pt,a4paper]{article}");
+report = appendLine(report, "\usepackage[margin=1.7cm]{geometry}");
+report = appendLine(report, "\usepackage{graphicx}");
+report = appendLine(report, "\usepackage{longtable}");
+report = appendLine(report, "\usepackage{array}");
+report = appendLine(report, "\usepackage{booktabs}");
+report = appendLine(report, "\usepackage{xcolor}");
+report = appendLine(report, "\usepackage{hyperref}");
+report = appendLine(report, "\setlength{\parindent}{0pt}");
+report = appendLine(report, "\setlength{\tabcolsep}{7pt}");
+report = appendLine(report, "\renewcommand{\arraystretch}{1.18}");
+report = appendLine(report, "\hypersetup{colorlinks=true,linkcolor=black,urlcolor=blue}");
+report = appendLine(report, "\begin{document}");
+report = appendLine(report, "\begin{center}");
+report = appendLine(report, sprintf("{\\Large \\textbf{%s}}\\\\[4pt]", latexEscape(reportConfig.title)));
+report = appendLine(report, sprintf("{\\large Scenario: \\textbf{%s}}\\\\[4pt]", latexEscape(reportConfig.scenarioName)));
+report = appendLine(report, sprintf("{\\large Selected satellite oscillator: \\textbf{%s}}\\\\[4pt]", latexEscape(reportConfig.selectedOscillatorName)));
+report_timestamp = char(string(datetime("now", "Format", "yyyy-MM-dd HH:mm:ss")));
+report = appendLine(report, sprintf("{\\small Generated by \\texttt{%s} on %s}", latexEscape(reportConfig.generatedBy), report_timestamp));
+report = appendLine(report, "\end{center}");
+report = appendLine(report, "\vspace{0.3cm}");
+
+has_first_page_tables = isfield(reportData, "assumption_table") || ...
+    isfield(reportData, "noise_error_table") || ...
+    isfield(reportData, "covariance_table") || ...
+    isfield(reportData, "initial_state_table") || ...
+    isfield(reportData, "first_page_summary_table");
+if has_first_page_tables
+    report = appendLine(report, "\section{Run Assumptions and Initial Conditions}");
+    report = appendOptionalTable(report, "First-Page Configuration Snapshot", reportData, "first_page_summary_table", 12);
+    report = appendOptionalTable(report, "Scenario Assumptions", reportData, "assumption_table", 18);
+    report = appendOptionalTable(report, "Noise and Error Inputs", reportData, "noise_error_table", 24);
+    report = appendOptionalTable(report, "Covariance and Process Inputs", reportData, "covariance_table", 24);
+    report = appendOptionalTable(report, "Initial Kalman Filter State Vector", reportData, "initial_state_table", 40);
+end
+
+report = appendLine(report, "\section{Scenario Summary}");
+summary_format = [ ...
+    'This report documents the current validation scenario. ' ...
+    'The ground segment transmits clock-referenced pseudorange observations. ' ...
+    'Each SpaceAsset carries simple mounted ReceiverComponent phase centers that share the parent SpaceAsset clock. ' ...
+    'The EKF estimates ECI position, velocity, configured SpaceAsset clock, and tower clock states using %s for the internal clock sub-state. ' ...
+    'The run length is %.2f hours with %.1f second sampling and %d ground stations.'];
+if isfield(reportData, "ekf_clock_state_units")
+    clock_state_units_text = reportData.ekf_clock_state_units;
+else
+    clock_state_units_text = 'native clock seconds';
+end
+report = appendParagraph(report, sprintf(summary_format, ...
+    char(string(clock_state_units_text)), ...
+    reportData.total_time_hours, reportData.dt, reportData.num_towers));
+if isfield(reportData, "clock_estimation_mode")
+    clock_mode_text = string(reportData.clock_estimation_mode);
+    if clock_mode_text == "spacecraftOnly"
+        mode_description = ['Clock-estimation mode is %s. ' ...
+            'In operational spacecraft-only mode, tower clocks are corrected externally by the ground timing network and are not free EKF states on board the spacecraft.'];
+    else
+        mode_description = ['Clock-estimation mode is %s. ' ...
+            'Tower transmitter clocks are explicit EKF states, and each raw pseudorange row carries positive parent-SpaceAsset clock sensitivity and negative sensitivity to the specific transmitting tower clock.'];
+    end
+    report = appendParagraph(report, sprintf(mode_description, char(clock_mode_text)));
+end
+if isfield(reportData, "clockGaugeMode")
+    gauge_text = string(reportData.clockGaugeMode);
+    if gauge_text == "externalTimeTransfer"
+        gauge_description = sprintf( ...
+            'Clock gauge mode is %s. Tower clock pseudo-measurements provide an external time-transfer reference with configured sigma %.3g ps, so reported clock states are referenced to that external network time scale.', ...
+            char(gauge_text), reportData.externalClockCorrectionSigma_ps);
+    elseif gauge_text == "fixReferenceTower"
+        gauge_description = sprintf( ...
+            'Clock gauge mode is %s. Reported spacecraft and tower clock estimates are relative to reference tower %s; no absolute UTC or GNSS system-time solution is claimed.', ...
+            char(gauge_text), char(string(reportData.referenceTowerName)));
+    elseif gauge_text == "externalTowerCorrections"
+        gauge_description = sprintf( ...
+            'Clock gauge mode is %s. Tower transmitter clocks are simulated in truth and corrected before the spacecraft-only EKF update; residual correction uncertainty is represented in R.', ...
+            char(gauge_text));
+    else
+        gauge_description = sprintf( ...
+            'Clock gauge mode is %s. Absolute joint tower/spacecraft clock solution is unobservable from one-way pseudorange only unless an explicit reference or constraint is present.', ...
+            char(gauge_text));
+    end
+    report = appendParagraph(report, gauge_description);
+end
+if isfield(reportData, "measurementNoiseEnabled") && ~reportData.measurementNoiseEnabled
+    report = appendParagraph(report, ['Measurement noise injection is disabled. Innovation RMS remains useful as a deterministic residual diagnostic, ' ...
+        'but NIS is not statistically meaningful and should not be interpreted as a chi-square consistency result.']);
+end
+if isfield(reportData, "receiver_architecture_note")
+    report = appendLine(report, "\subsection{Receiver Clock Architecture Interpretation}");
+    report = appendParagraph(report, reportData.receiver_architecture_note);
+end
+report = appendOptionalTable(report, "Receiver Architecture Comparison", reportData, "receiver_architecture_comparison_table", 12);
+report = appendOptionalTable(report, "Receiver Geometry Diagnostic", reportData, "receiver_geometry_comparison_table", 12);
+if isfield(reportData, "signal_model_note")
+    report = appendLine(report, "\subsection{Scenario Geometry and Receiver Architecture}");
+    report = appendParagraph(report, reportData.signal_model_note);
+end
+report = appendOptionalTable(report, "Scenario Geometry and Receiver Architecture", reportData, "scenario_geometry_table", 20);
+report = appendOptionalTable(report, "Frame Transform Snapshot: ECI, ECEF, and Spacecraft LVLH", reportData, "frame_transform_table", 80);
+report = appendOptionalTable(report, "Frame Transform Round-Trip Validation", reportData, "frame_transform_roundtrip_table", 12);
+if isfield(reportData, "source_references")
+    report = appendLine(report, "\subsection{Scientific Model References}");
+    references = string(reportData.source_references);
+    report = appendLine(report, "\begin{itemize}");
+    for reference_idx = 1:numel(references)
+        report = appendLine(report, "\item " + string(latexEscape(references(reference_idx))));
+    end
+    report = appendLine(report, "\end{itemize}");
+end
+
+report = appendLine(report, "\begin{center}");
+report = appendLine(report, "\begin{tabular}{p{0.39\textwidth}p{0.18\textwidth}p{0.34\textwidth}}");
+report = appendLine(report, "\toprule");
+report = appendLine(report, "\textbf{Component or scenario} & \textbf{Status} & \textbf{Report action}\\");
+report = appendLine(report, "\midrule");
+report = appendStatusRow(report, "Ground segment geometry", reportToggles.groundSegment);
+report = appendStatusRow(report, "Perfect ground transmitter clocks", reportToggles.perfectGroundClocks);
+report = appendStatusRow(report, "Ground transmitter clock error", reportToggles.groundClockError);
+if isfield(reportToggles, "groundTimingNetworkCorrection")
+    report = appendStatusRow(report, "Ground timing network correction", reportToggles.groundTimingNetworkCorrection);
+end
+if isfield(reportToggles, "towerClocksEstimatedInEkf")
+    report = appendStatusRow(report, "Tower clocks estimated in spacecraft EKF", reportToggles.towerClocksEstimatedInEkf);
+end
+report = appendStatusRow(report, "SpaceAsset onboard clock error", reportToggles.satelliteClockError);
+report = appendStatusRow(report, "EKF orbit and clock estimation", reportToggles.ekfOrbitClockEstimation);
+report = appendStatusRow(report, "Measurement noise", reportToggles.measurementNoise);
+if isfield(reportToggles, "clockCovarianceFloor")
+    report = appendStatusRow(report, "Clock covariance floor", reportToggles.clockCovarianceFloor);
+end
+report = appendStatusRow(report, "J2 perturbation", reportToggles.j2Perturbation);
+report = appendStatusRow(report, "Relativistic clock term", reportToggles.relativisticClockTerm);
+report = appendStatusRow(report, "Ionosphere", reportToggles.ionosphere);
+report = appendStatusRow(report, "Troposphere", reportToggles.troposphere);
+report = appendStatusRow(report, "Multipath", reportToggles.multipath);
+report = appendStatusRow(report, "Receiver thermal noise", reportToggles.receiverThermalNoise);
+report = appendStatusRow(report, "Antenna bias", reportToggles.antennaBias);
+report = appendStatusRow(report, "Hardware delay", reportToggles.hardwareDelay);
+report = appendLine(report, "\bottomrule");
+report = appendLine(report, "\end{tabular}");
+report = appendLine(report, "\end{center}");
+
+report = appendLine(report, "\clearpage");
+report = appendLine(report, "\section{State Estimation Validation}");
+report = beginPlotTable(report);
+report = appendReportRow(report, reportToggles.ekfOrbitClockEstimation, plot_paths.position_error, ...
+    "Combined EKF Position Error Using RX1 + RX2", ...
+    ["The plot compares the EKF position estimate with the propagated truth state in all three ECI axes and as a 3D norm. " ...
+     "The diagnostic is deterministic truth differencing; no measurement noise is injected unless the measurement-noise toggle is enabled."]);
+report = appendReportRow(report, reportToggles.ekfOrbitClockEstimation, plot_paths.position_covariance, ...
+    "EKF Position Covariance", ...
+    ["The plot shows the square root of the EKF posterior covariance diagonal for the three position states. " ...
+     "The statistical approach is covariance propagation through the linearized two-body dynamics and correction by pseudorange observations."]);
+report = appendReportRow(report, reportToggles.ekfOrbitClockEstimation && reportToggles.satelliteClockError, plot_paths.clock_error, ...
+    "Clock Synchronisation Error", ...
+    ["The plot shows SpaceAsset onboard clock estimation error against the EKF clock covariance envelope. " ...
+     "The clock process follows the selected oscillator power-law noise model."]);
+report = appendReportRow(report, reportToggles.ekfOrbitClockEstimation && reportToggles.satelliteClockError, plot_paths.clock_bias, ...
+    "SpaceAsset Onboard Clock Bias Tracking", ...
+    ["The plot compares the true simulated SpaceAsset onboard clock bias with the EKF clock-bias estimate. " ...
+     "The approach is state-estimation consistency against known truth in a controlled scenario."]);
+report = endPlotTable(report);
+
+report = appendLine(report, "\clearpage");
+report = appendLine(report, "\section{Measurement and Geometry Validation}");
+report = beginPlotTable(report);
+report = appendReportRow(report, reportToggles.ekfOrbitClockEstimation, plot_paths.innovation, ...
+    "Pseudorange Pre-Fit and Post-Fit Residual RMS", ...
+    ["The plot separates the pre-fit innovation before the EKF correction from the post-fit residual after the correction. " ...
+     "With measurement noise disabled this is a deterministic diagnostic for geometry, clock-state coupling, numerical consistency, and estimator convergence."]);
+report = appendReportRow(report, isfield(reportData, "prefit_residual_by_tower_m"), plot_paths.residual_by_tower, ...
+    "Per-Tower Measurement Residuals", ...
+    ["The plot keeps pre-fit and post-fit residuals separated by tower. " ...
+     "Blank intervals indicate epochs where that tower was not visible and was excluded from the EKF update."]);
+report = appendReportRow(report, isfield(reportData, "R_total_m2"), plot_paths.R_breakdown, ...
+    "Measurement Covariance Contribution", ...
+    ["The plot shows the root-variance contribution placed in the diagonal measurement covariance. " ...
+     "Physical contributions are kept separate from any tiny numerical regularisation floor used to keep the innovation covariance nonsingular in ideal zero-noise runs."]);
+if isfield(reportData, "measurementNoiseEnabled") && ~reportData.measurementNoiseEnabled
+    nis_description = ["The plot shows NIS computed from the pre-fit innovation and assumed covariance. " ...
+        "Measurement noise injection is disabled in this deterministic validation, so NIS is a numerical diagnostic only and is not statistically meaningful."];
+else
+    nis_description = ["The plot shows NIS computed from the pre-fit innovation and assumed measurement covariance. " ...
+        "NIS is a chi-square consistency statistic when the measurement covariance represents real stochastic noise."];
+end
+report = appendReportRow(report, reportToggles.ekfOrbitClockEstimation, plot_paths.nis, ...
+    "Normalised Innovation Squared", nis_description);
+report = appendReportRow(report, isfield(reportData, "visible_tower_count"), plot_paths.visible_towers, ...
+    "Visible Tower Count", ...
+    ["The plot shows how many towers pass the configured elevation mask at each epoch. " ...
+     "The measurement vector, Jacobian, and covariance are resized to this active tower count before each EKF update."]);
+report = appendReportRow(report, reportToggles.groundSegment, plot_paths.geometry, ...
+    "Ground-to-Space Geometry", ...
+    ["The plot shows Earth, the selected ground segment, the GEO truth trajectory, and initial ground-to-space ranging paths. " ...
+     "This component uses deterministic ECEF-to-ECI geometry and no stochastic propagation channel."]);
+report = appendReportRow(report, reportToggles.measurementNoise, "", ...
+    "Measurement Noise Model", ...
+    "Measurement noise is not part of the current clock-only validation scenario.");
+report = endPlotTable(report);
+
+report = appendLine(report, "\clearpage");
+report = appendLine(report, "\section{Per-Receiver Measurement Diagnostics}");
+report = appendParagraph(report, ['Receiver rows are generated dynamically from the ReceiverComponent objects mounted on each SpaceAsset. ' ...
+    'Receiver offsets are known body-frame geometry; receiver clocks, RF hardware delays, and antenna-offset states are not estimated in the active measurement path.']);
+report = beginPlotTable(report);
+report = appendReportRow(report, strlength(string(plot_paths.per_receiver_prefit_rms)) > 0, plot_paths.per_receiver_prefit_rms, ...
+    "Per-Receiver Pre-Fit Pseudorange Residual RMS", ...
+    ["Each curve is the tower-wise RMS pre-fit pseudorange residual for one receiver element. " ...
+     "These are measurement-level residuals, not raw RF signal errors."]);
+report = appendReportRow(report, strlength(string(plot_paths.per_receiver_postfit_rms)) > 0, plot_paths.per_receiver_postfit_rms, ...
+    "Per-Receiver Post-Fit Pseudorange Residual RMS", ...
+    ["Each curve is the tower-wise RMS post-fit pseudorange residual for one receiver element after the EKF update. " ...
+     "The fused EKF uses all enabled receiver/tower rows in the same update."]);
+report = appendReportRow(report, strlength(string(plot_paths.receiver_residual_heatmaps)) > 0, plot_paths.receiver_residual_heatmaps, ...
+    "Per-Receiver Per-Tower Residual Heatmaps", ...
+    ["The heatmaps keep RX1 and RX2 residuals separated by tower and epoch. " ...
+     "Blank samples are non-visible or unused tower/receiver links."]);
+report = appendReportRow(report, strlength(string(plot_paths.receiver_pseudorange_error)) > 0, plot_paths.receiver_pseudorange_error, ...
+    "Per-Receiver Pseudorange-Minus-Geometric Range", ...
+    ["This plot shows the measurement-level pseudorange excess over geometric range. " ...
+     "It contains clock terms and any generated noise; it is not a waveform-domain signal error."]);
+report = endPlotTable(report);
+
+report = appendLine(report, "\clearpage");
+report = appendLine(report, "\section{RX2-RX1 Differential Geometry Diagnostics}");
+report = appendParagraph(report, ['For the same tower and epoch, RX2-RX1 differencing cancels the shared SpaceAsset clock and that tower clock. ' ...
+    'The remaining first-order signal is the receiver baseline projection onto the tower line of sight, plus measurement noise if enabled.']);
+report = beginPlotTable(report);
+report = appendReportRow(report, strlength(string(plot_paths.differential_residuals)) > 0, plot_paths.differential_residuals, ...
+    "RX2-RX1 Differential Pseudorange Residuals", ...
+    "The plot shows per-tower differential residuals and RMS after common clock terms cancel in shared-clock mode.");
+report = appendReportRow(report, strlength(string(plot_paths.baseline_projection)) > 0, plot_paths.baseline_projection, ...
+    "Baseline-Projection Range Difference", ...
+    "The plot compares exact rho_RX2-rho_RX1 against the first-order LOS projection of the known RX2-RX1 body-frame baseline.");
+report = appendReportRow(report, strlength(string(plot_paths.differential_observable)) > 0, plot_paths.differential_observable, ...
+    "Differential Observable Consistency", ...
+    "The plot compares delta_z and delta_rho and shows delta_z-delta_rho after shared receiver and same-tower clock terms cancel.");
+report = endPlotTable(report);
+report = appendOptionalTable(report, "Baseline Diagnostic Summary", reportData, "baseline_diagnostics_table", 12);
+
+report = appendLine(report, "\clearpage");
+report = appendLine(report, "\section{Combined EKF Result and Receiver-Subset Comparison}");
+report = appendParagraph(report, ['The combined result is the primary EKF using RX1 + RX2 measurements together. ' ...
+    'The RX1-only and RX2-only curves are shadow filters driven by the same truth and measurement stream for comparison. ' ...
+    'A 2 m code-pseudorange baseline may produce only small position differences.']);
+report = beginPlotTable(report);
+report = appendReportRow(report, true, plot_paths.position_error, ...
+    "Combined EKF Position Error Using RX1 + RX2", ...
+    "The plot is the fused EKF position error using both receiver measurement sets.");
+report = appendReportRow(report, true, plot_paths.position_covariance, ...
+    "Combined EKF Position Covariance", ...
+    "The plot is the fused EKF posterior position covariance for the RX1 + RX2 update.");
+report = appendReportRow(report, strlength(string(plot_paths.receiver_subset_position)) > 0, plot_paths.receiver_subset_position, ...
+    "Single-Receiver Versus Dual-Receiver Position Error", ...
+    "RX1-only, RX2-only, and fused shadow filters are compared using the same state architecture and truth stream.");
+report = appendReportRow(report, strlength(string(plot_paths.receiver_subset_covariance)) > 0, plot_paths.receiver_subset_covariance, ...
+    "Single-Receiver Versus Dual-Receiver Position Covariance", ...
+    "This plot compares posterior position sigma norm for RX1-only, RX2-only, and RX1+RX2 fused shadow filters.");
+report = appendReportRow(report, strlength(string(plot_paths.receiver_subset_residuals)) > 0, plot_paths.receiver_subset_residuals, ...
+    "Single-Receiver Versus Dual-Receiver Residual RMS", ...
+    "This plot compares pre-fit and post-fit residual RMS for the receiver-subset shadow filters.");
+report = endPlotTable(report);
+report = appendOptionalTable(report, "Single-Versus-Dual Receiver Comparison", reportData, "receiver_subset_comparison_table", 12);
+report = appendOptionalTable(report, "Receiver-Subset State and Clock Counts", reportData, "receiver_subset_state_table", 12);
+
+report = appendLine(report, "\clearpage");
+report = appendLine(report, "\section{Baseline and Attitude Observability}");
+if isfield(reportData, "attitude_observability_note")
+    report = appendParagraph(report, reportData.attitude_observability_note);
+end
+if isfield(reportData, "clock_estimation_mode") && contains(string(reportData.clock_estimation_mode), "tower clock")
+    report = appendParagraph(report, ['Receiver baselines and non-coincident phase centres are now used in the EKF attitude-sensitive observation model. ' ...
+        'The active scenario estimates Euler-321 attitude error states together with spacecraft clock and tower-clock states. ' ...
+        'Antenna phase-center variation, carrier-phase ambiguity, and waveform tracking loops are still not implemented in this scenario.']);
+else
+    report = appendParagraph(report, ['The two-receiver baseline is used here as a geometric path-length diagnostic. ' ...
+        'No attitude state estimator, antenna phase-center variation model, carrier-phase ambiguity model, or waveform tracking loop is implemented in this scenario.']);
+end
+
+report = appendLine(report, "\clearpage");
+report = appendLine(report, "\section{Oscillator Stability Validation}");
+report = beginPlotTable(report);
+if isfield(reportData, "clock_allan_names") && isfield(reportData, "sim_adev_by_clock")
+    allan_description = ["The plot compares theoretical Allan deviation profiles with simulated result points for the spacecraft oscillator and every tower oscillator. " ...
+        "The statistical approach is overlapping Allan deviation applied to independently simulated clock time-error records across the displayed averaging-time range."];
+else
+    allan_description = ["The plot compares theoretical Allan deviation profiles with simulated result points for the selected satellite oscillator. " ...
+        "The statistical approach is overlapping Allan deviation applied to independently simulated clock time-error records across the displayed averaging-time range."];
+end
+report = appendReportRow(report, reportToggles.allanDeviationValidation && reportToggles.satelliteClockError, plot_paths.allan, ...
+    "Oscillator Stability Check", allan_description);
+if reportToggles.groundClockError
+    if isfield(reportData, "est_ground_clock_bias_ps") && any(isfinite(reportData.est_ground_clock_bias_ps(:)))
+        ground_clock_description = ["Ground transmitter clock error is enabled. " ...
+            "The plot shows the true station-specific transmitter clock biases used in the pseudorange truth generation. " ...
+            "The EKF is configured to estimate individual tower clock states, so tower-clock sensitivity is included in the measurement Jacobian."];
+    else
+        if isfield(reportData, "tower_clock_correction_s")
+            ground_clock_description = ["Ground transmitter clock error is enabled. " ...
+                "The plot shows the true station-specific transmitter clock biases used in the raw pseudorange truth generation. " ...
+                "The spacecraft EKF does not estimate these tower clocks; an external tower-clock product is applied before the spacecraft-only EKF update."];
+        else
+            ground_clock_description = ["Ground transmitter clock error is enabled. " ...
+                "The plot shows the true station-specific transmitter clock biases used in the pseudorange truth generation. " ...
+                "These ground clock states are not estimated separately by the EKF in this scenario, so their effect appears through the ranging residuals and estimated receiver state."];
+        end
+    end
+else
+    ground_clock_description = "Ground-clock error is intentionally not part of the current scenario because ground transmitter clocks are ideal references.";
+end
+report = appendReportRow(report, reportToggles.groundClockError, plot_paths.ground_clock_bias, ...
+    "Ground Clock Error", ground_clock_description);
+if isfield(reportData, "tower_clock_correction_s")
+    ground_timing_correction_description = ...
+        ["The plot separates raw tower clock error, applied ground timing correction, and residual correction error. " ...
+         "In externalTowerCorrections mode this is a Stage-1 abstraction: an external tower-clock correction product, not a physical GNSS common-view, TWSTFT, fiber, White Rabbit, or UTC(k) timing network."];
+else
+    ground_timing_correction_description = ...
+        "This scenario does not provide an external tower-clock correction product.";
+end
+report = appendReportRow(report, isfield(reportData, "tower_clock_correction_s"), plot_paths.ground_clock_correction, ...
+    "External Ground Timing Correction", ground_timing_correction_description);
+report = appendReportRow(report, strlength(string(plot_paths.ground_clock_estimate)) > 0, plot_paths.ground_clock_estimate, ...
+    "Tower Clock State Estimates", ...
+    ["The plot compares true tower transmitter clock biases with EKF-estimated tower clock biases when tower-clock estimation is enabled. " ...
+     "If estimation is disabled the plot is omitted and tower clocks act as transmitter-side measurement errors."]);
+if strlength(string(plot_paths.ground_clock_gauge_aligned)) > 0
+    report = appendReportRow(report, true, plot_paths.ground_clock_gauge_aligned, ...
+        "Gauge-Aligned Tower Clock State Estimates", ...
+        ["The plot removes only the post-simulation common clock mode between the true and estimated network clocks. " ...
+         "This diagnostic is not used in the EKF update; it shows the observable relative tower-clock modes for one-way pseudorange data."]);
+end
+report = endPlotTable(report);
+
+report = appendLine(report, "\clearpage");
+report = appendLine(report, "\section{Disabled Components}");
+report = beginPlotTable(report);
+report = appendReportRow(report, reportToggles.j2Perturbation, "", "J2 Perturbation", "J2 perturbation is not part of the current clock-only validation scenario.");
+report = appendReportRow(report, reportToggles.relativisticClockTerm, "", "Relativistic Clock Term", "Relativistic clock modelling is not part of the current clock-only validation scenario.");
+report = appendReportRow(report, reportToggles.ionosphere, "", "Ionosphere", "Ionospheric propagation is not part of the current clock-only validation scenario.");
+report = appendReportRow(report, reportToggles.troposphere, "", "Troposphere", "Tropospheric propagation is not part of the current clock-only validation scenario.");
+report = appendReportRow(report, reportToggles.multipath, "", "Multipath", "Multipath and NLOS effects are not part of the current clock-only validation scenario.");
+report = appendReportRow(report, reportToggles.receiverThermalNoise, "", "Receiver Thermal Noise", "Receiver thermal noise is not part of the current clock-only validation scenario.");
+report = appendReportRow(report, reportToggles.antennaBias, "", "Antenna Bias", "Antenna phase-center and group-delay effects are not part of the current clock-only validation scenario.");
+report = appendReportRow(report, reportToggles.hardwareDelay, "", "Hardware Delay", "Transmitter and receiver hardware delay states are not part of the current clock-only validation scenario.");
+report = endPlotTable(report);
+
+report = appendLine(report, "\clearpage");
+report = appendLine(report, "\section{Numerical Summary}");
+report = appendParagraph(report, sprintf([ ...
+    'The final-sample values are retained as endpoint diagnostics, but they should not be used alone to rank oscillator performance. ' ...
+    'The run-level statistics below separate the full record, the period after the first %.2f hours, and the final %.2f hours.'], ...
+    reportData.convergence_skip_seconds / 3600, ...
+    reportData.final_window_seconds / 3600));
+if isfield(reportData, "clock_covariance_floor_enabled") && reportData.clock_covariance_floor_enabled
+    report = appendParagraph(report, sprintf([ ...
+        'Clock covariance regularisation is enabled for this run. ' ...
+        'The EKF keeps a minimum estimated clock phase standard deviation of %.3g ps and a minimum estimated clock frequency standard deviation of %.3g ps/s. ' ...
+        'This does not change the truth oscillator; it provides a lower bound for estimator covariance if the clock sub-state collapses numerically.'], ...
+        reportData.clock_phase_covariance_floor_ps, reportData.clock_frequency_covariance_floor_ps_per_s));
+end
+if isfield(reportData, "numerical_measurement_sigma_floor_m") && reportData.numerical_measurement_sigma_floor_m > 0
+    report = appendParagraph(report, sprintf([ ...
+        'A %.3g m measurement covariance floor is applied only as numerical regularisation for the zero-noise ideal-product validation. ' ...
+        'It is not receiver tracking noise, tower timing residual noise, atmosphere, multipath, or hardware delay.'], ...
+        reportData.numerical_measurement_sigma_floor_m));
+end
+report = appendLine(report, "\begin{center}");
+report = appendLine(report, "\begin{tabular}{p{0.52\textwidth}p{0.25\textwidth}}");
+report = appendLine(report, "\toprule");
+report = appendLine(report, "\textbf{Quantity} & \textbf{Value}\\");
+report = appendLine(report, "\midrule");
+report = appendFinalValueRow(report, "Final 3D position estimation error", reportData.final_position_error_m, "m");
+report = appendFinalValueRow(report, "Final satellite clock estimation error", reportData.final_clock_error_ps, "ps");
+report = appendFinalValueRow(report, "Final satellite clock range-equivalent error", reportData.final_clock_range_equivalent_m, "m");
+report = appendFinalValueRow(report, "Final pre-fit pseudorange innovation RMS", reportData.final_prefit_innovation_rms_m, "m");
+report = appendFinalValueRow(report, "Final post-fit pseudorange residual RMS", reportData.final_postfit_residual_rms_m, "m");
+if isfield(reportData, "ground_clock_range_rms_m")
+    report = appendFinalValueRow(report, "Final ground transmitter clock range RMS", reportData.ground_clock_range_rms_m(end), "m");
+end
+if isfield(reportData, "final_tower_clock_rms_ps")
+    if isfield(reportData, "clockGaugeMode") && string(reportData.clockGaugeMode) == "externalTimeTransfer"
+        tower_clock_label = "Final externally referenced tower clock RMS";
+    else
+        tower_clock_label = "Final relative tower clock RMS";
+    end
+    report = appendFinalValueRow(report, tower_clock_label, reportData.final_tower_clock_rms_ps, "ps");
+end
+if isfield(reportData, "final_H_rank")
+    report = appendFinalValueRow(report, "Final measurement Jacobian rank", reportData.final_H_rank, "-");
+end
+if isfield(reportData, "final_observability_rank")
+    report = appendFinalValueRow(report, "Final sliding-window observability rank", reportData.final_observability_rank, "-");
+end
+if isfield(reportData, "final_common_mode_residual_norm")
+    report = appendFinalValueRow(report, "Final pseudorange common-mode null residual", reportData.final_common_mode_residual_norm, "-");
+end
+if isfield(reportData, "final_covariance_condition_number")
+    report = appendFinalValueRow(report, "Final EKF covariance condition number", reportData.final_covariance_condition_number, "-");
+end
+if isfield(reportData, "final_innovation_condition_number")
+    report = appendFinalValueRow(report, "Final innovation covariance condition number", reportData.final_innovation_condition_number, "-");
+end
+if isfield(reportData, "nis_mean_final_window")
+    report = appendFinalValueRow(report, "Final-window NIS mean", reportData.nis_mean_final_window, "-");
+end
+if isfield(reportData, "nis_expected_dof_final_window")
+    report = appendFinalValueRow(report, "Final-window mean measurement DoF", reportData.nis_expected_dof_final_window, "-");
+end
+if isfield(reportData, "final_raw_tower_clock_residual_rms_m")
+    report = appendFinalValueRow(report, "Final raw tower-clock effect RMS before correction", reportData.final_raw_tower_clock_residual_rms_m, "m");
+end
+if isfield(reportData, "final_corrected_tower_clock_residual_rms_m")
+    report = appendFinalValueRow(report, "Final corrected tower-clock effect RMS after correction", reportData.final_corrected_tower_clock_residual_rms_m, "m");
+end
+if isfield(reportData, "final_ground_timing_residual_rms_m")
+    report = appendFinalValueRow(report, "Final residual ground timing correction RMS", reportData.final_ground_timing_residual_rms_m, "m");
+end
+if isfield(reportData, "clock_allan_names") && isfield(reportData, "clock_allan_deviation_1s")
+    for idx_clock = 1:numel(reportData.clock_allan_names)
+        allan_label = sprintf("%s Allan deviation at 1 s", char(string(reportData.clock_allan_names(idx_clock))));
+        report = appendLine(report, sprintf("%s & %s\\\\", ...
+            latexEscape(allan_label), formatEngineering(reportData.clock_allan_deviation_1s(idx_clock), "")));
+    end
+else
+    report = appendLine(report, sprintf("Selected oscillator Allan deviation at 1 s & %s\\\\", formatEngineering(reportData.selected_allan_deviation_1s, "")));
+end
+report = appendLine(report, "\bottomrule");
+report = appendLine(report, "\end{tabular}");
+report = appendLine(report, "\end{center}");
+
+report = appendLine(report, "\vspace{0.25cm}");
+report = appendLine(report, "\begin{center}");
+report = appendLine(report, "\scriptsize");
+report = appendLine(report, "\begin{tabular}{p{0.28\textwidth}p{0.13\textwidth}p{0.13\textwidth}p{0.13\textwidth}p{0.13\textwidth}}");
+report = appendLine(report, "\toprule");
+report = appendLine(report, "\textbf{Metric} & \textbf{Full RMS} & \textbf{After 1 h RMS} & \textbf{Final h RMS} & \textbf{Final h 95\% abs.}\\");
+report = appendLine(report, "\midrule");
+report = appendSummaryMetricRow(report, "3D position error [m]", reportData.position_error_summary_m, reportData.position_error_final_window_summary_m);
+report = appendSummaryMetricRow(report, "Clock estimation error [ps]", reportData.clock_error_summary_ps, reportData.clock_error_final_window_summary_ps);
+report = appendSummaryMetricRow(report, "Clock range-equivalent error [m]", reportData.clock_error_range_summary_m, reportData.clock_error_range_final_window_summary_m);
+report = appendSummaryMetricRow(report, "Pre-fit innovation RMS [m]", reportData.prefit_innovation_summary_m, reportData.prefit_innovation_final_window_summary_m);
+report = appendSummaryMetricRow(report, "Post-fit residual RMS [m]", reportData.postfit_innovation_summary_m, reportData.postfit_innovation_final_window_summary_m);
+if isfield(reportData, "ground_clock_range_summary_m")
+    report = appendSummaryMetricRow(report, "Ground clock range RMS [m]", reportData.ground_clock_range_summary_m, reportData.ground_clock_range_final_window_summary_m);
+end
+if isfield(reportData, "raw_tower_clock_residual_summary_m")
+    report = appendSummaryMetricRow(report, "Raw tower-clock effect RMS [m]", reportData.raw_tower_clock_residual_summary_m, reportData.raw_tower_clock_residual_final_window_summary_m);
+end
+if isfield(reportData, "corrected_tower_clock_residual_summary_m")
+    report = appendSummaryMetricRow(report, "Corrected tower-clock effect RMS [m]", reportData.corrected_tower_clock_residual_summary_m, reportData.corrected_tower_clock_residual_final_window_summary_m);
+end
+if isfield(reportData, "ground_clock_correction_residual_summary_m")
+    report = appendSummaryMetricRow(report, "Ground timing residual RMS [m]", reportData.ground_clock_correction_residual_summary_m, reportData.ground_clock_correction_residual_final_window_summary_m);
+end
+report = appendSummaryMetricRow(report, "EKF covariance condition [-]", reportData.covariance_condition_summary, reportData.covariance_condition_final_window_summary);
+report = appendSummaryMetricRow(report, "Innovation covariance condition [-]", reportData.innovation_condition_summary, reportData.innovation_condition_final_window_summary);
+report = appendLine(report, "\bottomrule");
+report = appendLine(report, "\end{tabular}");
+report = appendLine(report, "\end{center}");
+report = appendLine(report, "\end{document}");
+
+output_base_name = char(string(reportConfig.outputBaseName));
+tex_file_name = [output_base_name '.tex'];
+pdf_file_name = [output_base_name '.pdf'];
+tex_path = fullfile(report_root, tex_file_name);
+writeTextFile(tex_path, report);
+
+if reportConfig.compilePdf
+    old_dir = pwd;
+    cd(report_root);
+    pdflatex_command = findPdfLatex(reportConfig);
+    if strlength(pdflatex_command) > 0
+        compile_command = sprintf('"%s" -interaction=nonstopmode -halt-on-error "%s"', char(pdflatex_command), tex_file_name);
+        [compile_status, compile_output] = system(compile_command);
+        if compile_status ~= 0
+            cd(old_dir);
+            error("generateReport:LatexCompileFailed", "%s", compile_output);
+        end
+        fprintf('generateReport: report PDF created:\n%s\n', fullfile(report_root, pdf_file_name));
+    else
+        fprintf('generateReport: pdflatex not found. Wrote LaTeX file:\n%s\n', tex_path);
+    end
+    cd(old_dir);
+else
+    fprintf('generateReport: wrote LaTeX file:\n%s\n', tex_path);
+end
+
+%% Default Configuration Helpers
+function toggles = defaultReportToggles()
+    toggles = struct();
+    toggles.generatePdf = false;
+    toggles.groundSegment = false;
+    toggles.perfectGroundClocks = false;
+    toggles.groundClockError = false;
+    toggles.groundTimingNetworkCorrection = false;
+    toggles.towerClocksEstimatedInEkf = false;
+    toggles.satelliteClockError = false;
+    toggles.ekfOrbitClockEstimation = false;
+    toggles.measurementNoise = false;
+    toggles.allanDeviationValidation = false;
+    toggles.j2Perturbation = false;
+    toggles.relativisticClockTerm = false;
+    toggles.ionosphere = false;
+    toggles.troposphere = false;
+    toggles.multipath = false;
+    toggles.receiverThermalNoise = false;
+    toggles.antennaBias = false;
+    toggles.hardwareDelay = false;
+end
+
+function config = defaultReportConfig(report_script_dir)
+    config = struct();
+    config.title = 'Clock-Only Ground-to-Space EKF Validation Report';
+    config.scenarioName = 'Unnamed scenario';
+    config.selectedOscillatorName = 'Unknown oscillator';
+    config.reportRoot = fullfile(report_script_dir, "clock_only_ekf_report");
+    config.outputBaseName = "clock_only_ekf_report_" + string(datetime("now", "Format", "yyyy-MM-dd"));
+    config.compilePdf = true;
+    config.generatedBy = 'scenario script';
+    config.pdflatexCommand = "";
+end
+
+function out = mergeStructDefaults(in, defaults)
+    out = defaults;
+    names = fieldnames(in);
+    for idx = 1:numel(names)
+        out.(names{idx}) = in.(names{idx});
+    end
+end
+
+function validateRequiredFields(data, required_fields)
+    for idx = 1:numel(required_fields)
+        if ~isfield(data, required_fields(idx))
+            error("generateReport:MissingField", ...
+                "reportData.%s is required for report generation.", required_fields(idx));
+        end
+    end
+end
+
+function data = ensureReportMetrics(data)
+    if ~isfield(data, "postfit_innovation_rms_m")
+        data.postfit_innovation_rms_m = NaN(size(data.innovation_rms_m));
+    end
+    if ~isfield(data, "covariance_condition_number")
+        data.covariance_condition_number = NaN(size(data.innovation_rms_m));
+    end
+    if ~isfield(data, "innovation_condition_number")
+        data.innovation_condition_number = NaN(size(data.innovation_rms_m));
+    end
+
+    if ~isfield(data, "convergence_skip_seconds")
+        data.convergence_skip_seconds = min(3600, 0.1 * max(data.time_vec));
+    end
+    if ~isfield(data, "final_window_seconds")
+        data.final_window_seconds = min(3600, 0.1 * max(data.time_vec));
+    end
+
+    steady_state_idx = data.time_vec >= data.convergence_skip_seconds;
+    if nnz(steady_state_idx) < 2
+        steady_state_idx = true(size(data.time_vec));
+    end
+    final_window_idx = data.time_vec >= (max(data.time_vec) - data.final_window_seconds);
+    if nnz(final_window_idx) < 2
+        final_window_idx = true(size(data.time_vec));
+    end
+
+    position_error_norm_m = sqrt(sum(data.ekf_pos_error_m.^2, 1));
+    speed_of_light_mps = 299792458.0;
+    if isfield(data, "c")
+        speed_of_light_mps = data.c;
+    end
+    clock_error_range_equiv_m = data.ekf_clock_error_ps * 1e-12 * speed_of_light_mps;
+
+    if ~isfield(data, "position_error_summary_m")
+        data.position_error_summary_m = buildErrorSummary(position_error_norm_m, steady_state_idx);
+    end
+    if ~isfield(data, "clock_error_summary_ps")
+        data.clock_error_summary_ps = buildErrorSummary(data.ekf_clock_error_ps, steady_state_idx);
+    end
+    if ~isfield(data, "clock_error_range_summary_m")
+        data.clock_error_range_summary_m = buildErrorSummary(clock_error_range_equiv_m, steady_state_idx);
+    end
+    if ~isfield(data, "prefit_innovation_summary_m")
+        data.prefit_innovation_summary_m = buildErrorSummary(data.innovation_rms_m, steady_state_idx);
+    end
+    if ~isfield(data, "postfit_innovation_summary_m")
+        data.postfit_innovation_summary_m = buildErrorSummary(data.postfit_innovation_rms_m, steady_state_idx);
+    end
+    if ~isfield(data, "covariance_condition_summary")
+        data.covariance_condition_summary = buildErrorSummary(data.covariance_condition_number, steady_state_idx);
+    end
+    if ~isfield(data, "innovation_condition_summary")
+        data.innovation_condition_summary = buildErrorSummary(data.innovation_condition_number, steady_state_idx);
+    end
+    if ~isfield(data, "position_error_final_window_summary_m")
+        data.position_error_final_window_summary_m = buildErrorSummary(position_error_norm_m, final_window_idx);
+    end
+    if ~isfield(data, "clock_error_final_window_summary_ps")
+        data.clock_error_final_window_summary_ps = buildErrorSummary(data.ekf_clock_error_ps, final_window_idx);
+    end
+    if ~isfield(data, "clock_error_range_final_window_summary_m")
+        data.clock_error_range_final_window_summary_m = buildErrorSummary(clock_error_range_equiv_m, final_window_idx);
+    end
+    if ~isfield(data, "prefit_innovation_final_window_summary_m")
+        data.prefit_innovation_final_window_summary_m = buildErrorSummary(data.innovation_rms_m, final_window_idx);
+    end
+    if ~isfield(data, "postfit_innovation_final_window_summary_m")
+        data.postfit_innovation_final_window_summary_m = buildErrorSummary(data.postfit_innovation_rms_m, final_window_idx);
+    end
+    if ~isfield(data, "covariance_condition_final_window_summary")
+        data.covariance_condition_final_window_summary = buildErrorSummary(data.covariance_condition_number, final_window_idx);
+    end
+    if ~isfield(data, "innovation_condition_final_window_summary")
+        data.innovation_condition_final_window_summary = buildErrorSummary(data.innovation_condition_number, final_window_idx);
+    end
+    if ~isfield(data, "final_clock_range_equivalent_m")
+        data.final_clock_range_equivalent_m = clock_error_range_equiv_m(end);
+    end
+    if ~isfield(data, "final_prefit_innovation_rms_m")
+        data.final_prefit_innovation_rms_m = data.innovation_rms_m(end);
+    end
+    if ~isfield(data, "final_postfit_residual_rms_m")
+        data.final_postfit_residual_rms_m = data.postfit_innovation_rms_m(end);
+    end
+end
+
+function summary = buildErrorSummary(values, steady_state_idx)
+    values = values(:);
+    steady_values = values(steady_state_idx(:));
+
+    summary = struct();
+    summary.final = values(end);
+    summary.finalAbs = abs(values(end));
+    summary.fullRunRms = sqrt(mean(values.^2, 'omitnan'));
+    summary.steadyStateRms = sqrt(mean(steady_values.^2, 'omitnan'));
+    summary.fullRunMeanAbs = mean(abs(values), 'omitnan');
+    summary.steadyStateMeanAbs = mean(abs(steady_values), 'omitnan');
+    summary.fullRunP95Abs = localPercentile(abs(values), 95);
+    summary.steadyStateP95Abs = localPercentile(abs(steady_values), 95);
+    summary.fullRunMaxAbs = max(abs(values), [], 'omitnan');
+    summary.steadyStateMaxAbs = max(abs(steady_values), [], 'omitnan');
+end
+
+function value = localPercentile(values, percentile)
+    values = sort(values(:));
+    values = values(isfinite(values));
+    if isempty(values)
+        value = NaN;
+        return;
+    end
+
+    rank_position = 1 + (percentile / 100) * (numel(values) - 1);
+    lower_index = floor(rank_position);
+    upper_index = ceil(rank_position);
+    if lower_index == upper_index
+        value = values(lower_index);
+    else
+        weight = rank_position - lower_index;
+        value = (1 - weight) * values(lower_index) + weight * values(upper_index);
+    end
+end
+
+function pdflatex_command = findPdfLatex(reportConfig)
+    candidates = strings(0, 1);
+    if isfield(reportConfig, "pdflatexCommand") && strlength(string(reportConfig.pdflatexCommand)) > 0
+        candidates(end+1, 1) = string(reportConfig.pdflatexCommand);
+    end
+    candidates(end+1, 1) = "pdflatex";
+    candidates(end+1, 1) = "/Library/TeX/texbin/pdflatex";
+    candidates(end+1, 1) = "/usr/local/texlive/2025/bin/universal-darwin/pdflatex";
+    candidates(end+1, 1) = "/usr/local/texlive/2024/bin/universal-darwin/pdflatex";
+
+    pdflatex_command = "";
+    for idx = 1:numel(candidates)
+        candidate = candidates(idx);
+        if contains(candidate, filesep) && ~isfile(candidate)
+            continue;
+        end
+        test_command = sprintf('"%s" -version', char(candidate));
+        [status, ~] = system(test_command);
+        if status == 0
+            pdflatex_command = candidate;
+            return;
+        end
+    end
+end
+
+%% Plot Helpers
+function path_out = exportPlot(figure_dir, file_name, plot_function)
+    interactive_report_plots = getappdata(0, 'generateReportInteractivePlots');
+    if isempty(interactive_report_plots)
+        interactive_report_plots = true;
+    end
+    visible_state = 'on';
+    if ~interactive_report_plots
+        visible_state = 'off';
+    end
+
+    fig = figure('Visible', visible_state, 'Color', 'w', 'Position', [100 100 900 520]);
+    cleanup_obj = onCleanup(@() closeFigureIfNeeded(fig, interactive_report_plots));
+    plot_function();
+    path_out = fullfile(figure_dir, file_name);
+    exportgraphics(fig, path_out, 'ContentType', 'image', 'Resolution', 220);
+end
+
+function closeFigureIfNeeded(fig, interactive_report_plots)
+    if ~interactive_report_plots && isvalid(fig)
+        close(fig);
+    end
+end
+
+function plotPositionError(time_vec, ekf_pos_error_m)
+    plot(time_vec / 3600, ekf_pos_error_m(1, :), 'r-', 'LineWidth', 1.2, 'DisplayName', 'X error');
+    hold on;
+    plot(time_vec / 3600, ekf_pos_error_m(2, :), 'g-', 'LineWidth', 1.2, 'DisplayName', 'Y error');
+    plot(time_vec / 3600, ekf_pos_error_m(3, :), 'b-', 'LineWidth', 1.2, 'DisplayName', 'Z error');
+    plot(time_vec / 3600, sqrt(sum(ekf_pos_error_m.^2, 1)), 'k--', 'LineWidth', 1.2, 'DisplayName', '3D norm');
+    grid on;
+    legend('Location', 'best');
+    xlabel('Time [Hours]', 'FontWeight', 'bold');
+    ylabel('Position Error [Meters]', 'FontWeight', 'bold');
+    title('Combined EKF Result Using RX1 + RX2 Measurements', 'FontSize', 12);
+end
+
+function plotPositionCovariance(time_vec, ekf_pos_sigma_m)
+    plot(time_vec / 3600, ekf_pos_sigma_m(1, :), 'r-', 'LineWidth', 1.0, 'DisplayName', 'X sigma');
+    hold on;
+    plot(time_vec / 3600, ekf_pos_sigma_m(2, :), 'g-', 'LineWidth', 1.0, 'DisplayName', 'Y sigma');
+    plot(time_vec / 3600, ekf_pos_sigma_m(3, :), 'b-', 'LineWidth', 1.0, 'DisplayName', 'Z sigma');
+    grid on;
+    legend('Location', 'best');
+    xlabel('Time [Hours]', 'FontWeight', 'bold');
+    ylabel('Position Sigma [Meters]', 'FontWeight', 'bold');
+    title('EKF Position Covariance', 'FontSize', 12);
+end
+
+function plotClockError(time_vec, ekf_clock_error_ps, ekf_clock_sigma_ps)
+    plot(time_vec / 3600, ekf_clock_error_ps, 'b-', 'LineWidth', 1.2, 'DisplayName', 'Clock error');
+    hold on;
+    plot(time_vec / 3600, 3 * ekf_clock_sigma_ps, 'k:', 'LineWidth', 1.0, 'DisplayName', '+3 sigma');
+    plot(time_vec / 3600, -3 * ekf_clock_sigma_ps, 'k:', 'LineWidth', 1.0, 'DisplayName', '-3 sigma');
+    yline(100, 'r--', 'Target Bound (+100ps)', 'LineWidth', 1.2);
+    yline(-100, 'r--', 'Target Bound (-100ps)', 'LineWidth', 1.2);
+    grid on;
+    legend('Location', 'best');
+    xlabel('Time [Hours]', 'FontWeight', 'bold');
+    ylabel('Clock Sync Error [Picoseconds]', 'FontWeight', 'bold');
+    title('EKF Clock Synchronisation Error', 'FontSize', 12);
+end
+
+function plotClockBias(time_vec, true_clock_bias_ps, est_clock_bias_ps)
+    plot(time_vec / 3600, true_clock_bias_ps, 'b-', 'LineWidth', 1.2, 'DisplayName', 'True SpaceAsset clock bias');
+    hold on;
+    plot(time_vec / 3600, est_clock_bias_ps, 'r--', 'LineWidth', 1.5, 'DisplayName', 'EKF estimated clock bias');
+    yline(100, 'k:', 'Target Bound (+100ps)', 'LineWidth', 1.0);
+    yline(-100, 'k:', 'Target Bound (-100ps)', 'LineWidth', 1.0);
+    grid on;
+    legend('Location', 'best');
+    xlabel('Time [Hours]', 'FontWeight', 'bold');
+    ylabel('Clock Bias [Picoseconds]', 'FontWeight', 'bold');
+    title('EKF Tracking SpaceAsset Onboard Clock Bias', 'FontSize', 12);
+end
+
+function plotGroundClockBias(time_vec, true_ground_clock_bias_ps, towers)
+    if size(true_ground_clock_bias_ps, 2) ~= numel(time_vec)
+        true_ground_clock_bias_ps = true_ground_clock_bias_ps';
+    end
+
+    for idx = 1:size(true_ground_clock_bias_ps, 1)
+        station_name = sprintf('Station %d', idx);
+        if idx <= numel(towers)
+            station_name = towers(idx).name;
+        end
+        plot(time_vec / 3600, true_ground_clock_bias_ps(idx, :), ...
+            'LineWidth', 1.1, 'DisplayName', station_name);
+        hold on;
+    end
+    grid on;
+    legend('Location', 'best');
+    xlabel('Time [Hours]', 'FontWeight', 'bold');
+    ylabel('Ground Clock Bias [Picoseconds]', 'FontWeight', 'bold');
+    title('Ground Transmitter Clock Biases', 'FontSize', 12);
+end
+
+function plotGroundClockCorrection(time_vec, true_ground_clock_bias_ps, correction_s, residual_s, sigma_s, towers)
+    if size(true_ground_clock_bias_ps, 2) ~= numel(time_vec)
+        true_ground_clock_bias_ps = true_ground_clock_bias_ps';
+    end
+    correction_ps = correction_s * 1e12;
+    residual_ps = residual_s * 1e12;
+    sigma_ps = sigma_s * 1e12;
+    if size(correction_ps, 2) ~= numel(time_vec)
+        correction_ps = correction_ps';
+    end
+    if size(residual_ps, 2) ~= numel(time_vec)
+        residual_ps = residual_ps';
+    end
+    if size(sigma_ps, 2) ~= numel(time_vec)
+        sigma_ps = sigma_ps';
+    end
+
+    tiledlayout(2, 1, 'TileSpacing', 'compact', 'Padding', 'compact');
+    nexttile;
+    colors = lines(size(true_ground_clock_bias_ps, 1));
+    for idx = 1:size(true_ground_clock_bias_ps, 1)
+        station_name = sprintf('Station %d', idx);
+        if idx <= numel(towers)
+            station_name = towers(idx).name;
+        end
+        plot(time_vec / 3600, true_ground_clock_bias_ps(idx, :), ...
+            '-', 'Color', colors(idx, :), 'LineWidth', 1.0, ...
+            'DisplayName', [station_name ' raw']);
+        hold on;
+        plot(time_vec / 3600, correction_ps(idx, :), ...
+            '--', 'Color', colors(idx, :), 'LineWidth', 0.9, ...
+            'HandleVisibility', 'off');
+    end
+    grid on;
+    legend('Location', 'best');
+    ylabel('Clock Correction [ps]', 'FontWeight', 'bold');
+    title('Raw Tower Clock Bias and Applied Correction', 'FontSize', 12);
+
+    nexttile;
+    plot(time_vec / 3600, residual_ps', 'LineWidth', 0.9);
+    hold on;
+    sigma_envelope = sqrt(mean(sigma_ps.^2, 1, 'omitnan'));
+    plot(time_vec / 3600, 3 * sigma_envelope, 'k:', 'LineWidth', 1.0, 'DisplayName', '+3 sigma RMS');
+    plot(time_vec / 3600, -3 * sigma_envelope, 'k:', 'LineWidth', 1.0, 'DisplayName', '-3 sigma RMS');
+    grid on;
+    xlabel('Time [Hours]', 'FontWeight', 'bold');
+    ylabel('Residual [ps]', 'FontWeight', 'bold');
+    title('Residual Ground Timing Correction Error', 'FontSize', 12);
+end
+
+function plotGroundClockEstimate(time_vec, true_ground_clock_bias_ps, est_ground_clock_bias_ps, towers)
+    if size(true_ground_clock_bias_ps, 2) ~= numel(time_vec)
+        true_ground_clock_bias_ps = true_ground_clock_bias_ps';
+    end
+    if size(est_ground_clock_bias_ps, 2) ~= numel(time_vec)
+        est_ground_clock_bias_ps = est_ground_clock_bias_ps';
+    end
+
+    colors = lines(size(true_ground_clock_bias_ps, 1));
+    for idx = 1:size(true_ground_clock_bias_ps, 1)
+        station_name = sprintf('Station %d', idx);
+        if idx <= numel(towers)
+            station_name = towers(idx).name;
+        end
+        plot(time_vec / 3600, true_ground_clock_bias_ps(idx, :), ...
+            '-', 'Color', colors(idx, :), 'LineWidth', 1.0, ...
+            'DisplayName', [station_name ' truth']);
+        hold on;
+        plot(time_vec / 3600, est_ground_clock_bias_ps(idx, :), ...
+            '--', 'Color', colors(idx, :), 'LineWidth', 1.0, ...
+            'DisplayName', [station_name ' EKF']);
+    end
+    grid on;
+    legend('Location', 'best');
+    xlabel('Time [Hours]', 'FontWeight', 'bold');
+    ylabel('Tower Clock Bias [Picoseconds]', 'FontWeight', 'bold');
+    title('Tower Clock Truth and EKF Estimates', 'FontSize', 12);
+end
+
+function plotInnovation(time_vec, innovation_rms_m, postfit_innovation_rms_m)
+    plot(time_vec / 3600, innovation_rms_m, 'k', 'LineWidth', 1.2, 'DisplayName', 'Pre-fit innovation RMS');
+    hold on;
+    plot(time_vec / 3600, postfit_innovation_rms_m, 'b--', 'LineWidth', 1.1, 'DisplayName', 'Post-fit residual RMS');
+    grid on;
+    legend('Location', 'best');
+    xlabel('Time [Hours]', 'FontWeight', 'bold');
+    ylabel('Pseudorange RMS [Meters]', 'FontWeight', 'bold');
+    title('Pseudorange Pre-Fit and Post-Fit Residuals', 'FontSize', 12);
+end
+
+function plotMeasurementCovarianceBreakdown(time_vec, reportData)
+    receiver_sigma = rmsVarianceComponent(reportData, "R_receiver_m2");
+    tower_sigma = rmsVarianceComponent(reportData, "R_tower_clock_m2");
+    atmosphere_sigma = rmsVarianceComponent(reportData, "R_atmosphere_m2");
+    hardware_sigma = rmsVarianceComponent(reportData, "R_hardware_m2");
+    multipath_sigma = rmsVarianceComponent(reportData, "R_multipath_m2");
+    numerical_sigma = zeros(size(receiver_sigma));
+    if isfield(reportData, "R_numerical_regularization_m2")
+        numerical_sigma = rmsVarianceComponent(reportData, "R_numerical_regularization_m2");
+    end
+    total_sigma = rmsVarianceComponent(reportData, "R_total_m2");
+
+    plot(time_vec / 3600, total_sigma, 'k-', 'LineWidth', 1.4, 'DisplayName', 'Total');
+    hold on;
+    plot(time_vec / 3600, receiver_sigma, 'b-', 'LineWidth', 1.0, 'DisplayName', 'Receiver tracking');
+    plot(time_vec / 3600, tower_sigma, 'r-', 'LineWidth', 1.0, 'DisplayName', 'Ground timing residual');
+    plot(time_vec / 3600, atmosphere_sigma, 'Color', [0.3 0.6 0.3], 'LineWidth', 1.0, 'DisplayName', 'Atmosphere placeholder');
+    plot(time_vec / 3600, hardware_sigma, 'Color', [0.7 0.3 0.7], 'LineWidth', 1.0, 'DisplayName', 'Hardware placeholder');
+    plot(time_vec / 3600, multipath_sigma, 'Color', [0.9 0.5 0.1], 'LineWidth', 1.0, 'DisplayName', 'Multipath placeholder');
+    plot(time_vec / 3600, numerical_sigma, 'Color', [0.2 0.2 0.2], ...
+        'LineStyle', ':', 'LineWidth', 1.0, 'DisplayName', 'Numerical floor');
+    grid on;
+    legend('Location', 'best');
+    xlabel('Time [Hours]', 'FontWeight', 'bold');
+    ylabel('R Component Sigma [Meters]', 'FontWeight', 'bold');
+    title('Measurement Covariance Breakdown', 'FontSize', 12);
+end
+
+function sigma = rmsVarianceComponent(reportData, field_name)
+    values = reportData.(field_name);
+    sigma = sqrt(mean(values, 1, 'omitnan'));
+end
+
+function plotResidualByTower(time_vec, prefit_residual_by_tower_m, postfit_residual_by_tower_m, towers)
+    if size(prefit_residual_by_tower_m, 2) ~= numel(time_vec)
+        prefit_residual_by_tower_m = prefit_residual_by_tower_m';
+    end
+    if size(postfit_residual_by_tower_m, 2) ~= numel(time_vec)
+        postfit_residual_by_tower_m = postfit_residual_by_tower_m';
+    end
+
+    colors = lines(size(prefit_residual_by_tower_m, 1));
+    for idx = 1:size(prefit_residual_by_tower_m, 1)
+        station_name = sprintf('Station %d', idx);
+        if idx <= numel(towers)
+            station_name = towers(idx).name;
+        end
+        plot(time_vec / 3600, prefit_residual_by_tower_m(idx, :), ...
+            '-', 'Color', colors(idx, :), 'LineWidth', 1.0, ...
+            'DisplayName', [station_name ' pre-fit']);
+        hold on;
+        plot(time_vec / 3600, postfit_residual_by_tower_m(idx, :), ...
+            '--', 'Color', colors(idx, :), 'LineWidth', 0.8, ...
+            'HandleVisibility', 'off');
+    end
+    grid on;
+    legend('Location', 'best');
+    xlabel('Time [Hours]', 'FontWeight', 'bold');
+    ylabel('Residual [Meters]', 'FontWeight', 'bold');
+    title('Per-Tower Pseudorange Residuals', 'FontSize', 12);
+end
+
+function plotPerReceiverResidualRms(time_vec, data_by_receiver_tower_m, receiver_names, ylabel_text)
+    values = squeeze(sqrt(mean(data_by_receiver_tower_m.^2, 2, 'omitnan')));
+    if isvector(values)
+        values = values(:).';
+    end
+    plot(time_vec / 3600, values', 'LineWidth', 1.2);
+    grid on;
+    xlabel('Time [Hours]', 'FontWeight', 'bold');
+    ylabel(ylabel_text, 'FontWeight', 'bold');
+    title(ylabel_text, 'FontSize', 12);
+    legend(cellstr(string(receiver_names)), 'Location', 'best');
+end
+
+function plotReceiverResidualHeatmaps(time_vec, prefit_by_receiver_tower_m, postfit_by_receiver_tower_m, receiver_names, tower_names)
+    num_receivers = min(size(prefit_by_receiver_tower_m, 1), 2);
+    tiledlayout(num_receivers, 2, 'TileSpacing', 'compact', 'Padding', 'compact');
+    for idx_receiver = 1:num_receivers
+        nexttile;
+        imagesc(time_vec / 3600, 1:numel(tower_names), squeeze(prefit_by_receiver_tower_m(idx_receiver, :, :)));
+        set(gca, 'YTick', 1:numel(tower_names), 'YTickLabel', cellstr(string(tower_names)));
+        xlabel('Time [Hours]');
+        ylabel('Tower');
+        title(sprintf('%s pre-fit [m]', char(string(receiver_names(idx_receiver)))));
+        colorbar;
+        nexttile;
+        imagesc(time_vec / 3600, 1:numel(tower_names), squeeze(postfit_by_receiver_tower_m(idx_receiver, :, :)));
+        set(gca, 'YTick', 1:numel(tower_names), 'YTickLabel', cellstr(string(tower_names)));
+        xlabel('Time [Hours]');
+        ylabel('Tower');
+        title(sprintf('%s post-fit [m]', char(string(receiver_names(idx_receiver)))));
+        colorbar;
+    end
+end
+
+function plotRx2MinusRx1Residuals(time_vec, prefit_by_receiver_tower_m, postfit_by_receiver_tower_m, tower_names)
+    if size(prefit_by_receiver_tower_m, 1) < 2
+        text(0.05, 0.5, 'RX2-RX1 residual diagnostics require at least two receivers.');
+        axis off;
+        return;
+    end
+    delta_prefit = squeeze(prefit_by_receiver_tower_m(2, :, :) - prefit_by_receiver_tower_m(1, :, :));
+    delta_postfit = squeeze(postfit_by_receiver_tower_m(2, :, :) - postfit_by_receiver_tower_m(1, :, :));
+    tiledlayout(2, 1, 'TileSpacing', 'compact', 'Padding', 'compact');
+    nexttile;
+    plot(time_vec / 3600, delta_prefit', 'LineWidth', 0.9);
+    grid on;
+    xlabel('Time [Hours]');
+    ylabel('\Delta pre-fit [m]');
+    title('RX2 minus RX1 same-tower pre-fit residuals');
+    legend(cellstr(string(tower_names)), 'Location', 'bestoutside');
+    nexttile;
+    plot(time_vec / 3600, sqrt(mean(delta_prefit.^2, 1, 'omitnan')), 'k-', 'LineWidth', 1.2);
+    hold on;
+    plot(time_vec / 3600, sqrt(mean(delta_postfit.^2, 1, 'omitnan')), 'b--', 'LineWidth', 1.2);
+    grid on;
+    xlabel('Time [Hours]');
+    ylabel('RMS [m]');
+    title('RX2 minus RX1 differential residual RMS');
+    legend('Pre-fit', 'Post-fit', 'Location', 'best');
+end
+
+function plotBaselineProjection(time_vec, true_range_by_receiver_tower_m, los_unit_eci_by_receiver_tower, receiver_offset_body_by_receiver_m, tower_names)
+    if size(true_range_by_receiver_tower_m, 1) < 2
+        text(0.05, 0.5, 'Baseline projection diagnostics require at least two receivers.');
+        axis off;
+        return;
+    end
+    baseline_body_m = receiver_offset_body_by_receiver_m(:, 2) - receiver_offset_body_by_receiver_m(:, 1);
+    delta_exact = squeeze(true_range_by_receiver_tower_m(2, :, :) - true_range_by_receiver_tower_m(1, :, :));
+    los_rx1 = squeeze(los_unit_eci_by_receiver_tower(:, 1, :, :));
+    delta_approx = squeeze(sum(los_rx1 .* reshape(baseline_body_m, 3, 1, 1), 1));
+    projection_error = delta_exact - delta_approx;
+    tiledlayout(2, 1, 'TileSpacing', 'compact', 'Padding', 'compact');
+    nexttile;
+    plot(time_vec / 3600, delta_exact', 'LineWidth', 0.9);
+    hold on;
+    plot(time_vec / 3600, delta_approx', '--', 'LineWidth', 0.9);
+    grid on;
+    xlabel('Time [Hours]');
+    ylabel('\Delta\rho [m]');
+    title('Exact RX2-RX1 Range Difference and LOS Projection');
+    legend([cellstr(string(tower_names)); cellstr(string(tower_names) + " approx")], 'Location', 'bestoutside');
+    nexttile;
+    plot(time_vec / 3600, projection_error', 'LineWidth', 0.9);
+    grid on;
+    xlabel('Time [Hours]');
+    ylabel('Exact - approx [m]');
+    title('First-Order Baseline Projection Residual');
+end
+
+function plotDifferentialObservable(time_vec, pseudorange_by_receiver_tower_m, true_range_by_receiver_tower_m, tower_names)
+    if size(pseudorange_by_receiver_tower_m, 1) < 2
+        text(0.05, 0.5, 'Differential observable diagnostics require at least two receivers.');
+        axis off;
+        return;
+    end
+    delta_z = squeeze(pseudorange_by_receiver_tower_m(2, :, :) - pseudorange_by_receiver_tower_m(1, :, :));
+    delta_rho = squeeze(true_range_by_receiver_tower_m(2, :, :) - true_range_by_receiver_tower_m(1, :, :));
+    consistency = delta_z - delta_rho;
+    tiledlayout(2, 1, 'TileSpacing', 'compact', 'Padding', 'compact');
+    nexttile;
+    plot(time_vec / 3600, delta_z', 'LineWidth', 0.9);
+    hold on;
+    plot(time_vec / 3600, delta_rho', '--', 'LineWidth', 0.9);
+    grid on;
+    xlabel('Time [Hours]');
+    ylabel('\Delta [m]');
+    title('RX2-RX1 Differential Pseudorange and Geometry');
+    legend([cellstr(string(tower_names)); cellstr(string(tower_names) + " geom")], 'Location', 'bestoutside');
+    nexttile;
+    plot(time_vec / 3600, consistency', 'LineWidth', 0.9);
+    grid on;
+    xlabel('Time [Hours]');
+    ylabel('\Delta z - \Delta\rho [m]');
+    title('Clock-Cancelled Differential Observable Residual');
+end
+
+function plotReceiverSubsetComparison(time_vec, values_by_case, case_labels, ylabel_text)
+    plot(time_vec / 3600, values_by_case', 'LineWidth', 1.2);
+    grid on;
+    xlabel('Time [Hours]', 'FontWeight', 'bold');
+    ylabel(ylabel_text, 'FontWeight', 'bold');
+    title('RX1 Only, RX2 Only, and RX1+RX2 Fused EKF Comparison', 'FontSize', 12);
+    legend(cellstr(string(case_labels)), 'Location', 'best');
+end
+
+function plotReceiverSubsetResiduals(time_vec, diagnostics)
+    plot(time_vec / 3600, diagnostics.prefit_rms_m', 'LineWidth', 1.0);
+    hold on;
+    plot(time_vec / 3600, diagnostics.postfit_rms_m', '--', 'LineWidth', 1.0);
+    grid on;
+    xlabel('Time [Hours]', 'FontWeight', 'bold');
+    ylabel('Residual RMS [m]', 'FontWeight', 'bold');
+    legend([cellstr(string(diagnostics.case_labels) + " pre"); cellstr(string(diagnostics.case_labels) + " post")], ...
+        'Location', 'best');
+    title('Receiver-Subset Pre-Fit and Post-Fit Residual RMS', 'FontSize', 12);
+end
+
+function plotVisibleTowers(time_vec, visible_tower_count, num_towers)
+    stairs(time_vec / 3600, visible_tower_count, 'k-', 'LineWidth', 1.4);
+    grid on;
+    ylim([0, max(num_towers, max(visible_tower_count, [], 'omitnan')) + 0.5]);
+    xlabel('Time [Hours]', 'FontWeight', 'bold');
+    ylabel('Visible Towers [-]', 'FontWeight', 'bold');
+    title('Number of Towers Used by the EKF', 'FontSize', 12);
+end
+
+function plotNis(time_vec, nis_history, num_towers, nis_degrees_of_freedom)
+    time_vec = time_vec(:).';
+    nis_history = nis_history(:).';
+    if nargin < 4 || isempty(nis_degrees_of_freedom)
+        nis_degrees_of_freedom = num_towers * ones(size(time_vec));
+    elseif isscalar(nis_degrees_of_freedom)
+        nis_degrees_of_freedom = nis_degrees_of_freedom * ones(size(time_vec));
+    else
+        nis_degrees_of_freedom = nis_degrees_of_freedom(:).';
+    end
+    h_nis = plot(time_vec / 3600, nis_history, 'b', 'LineWidth', 1.2, ...
+        'DisplayName', 'NIS');
+    hold on;
+    h_mean = plot(time_vec / 3600, nis_degrees_of_freedom, 'k--', 'LineWidth', 1.0, ...
+        'DisplayName', 'Expected mean if noise is injected');
+    upper95 = arrayfun(@chiSquareApprox95, nis_degrees_of_freedom);
+    h_upper = plot(time_vec / 3600, upper95, 'r:', 'LineWidth', 1.0, ...
+        'DisplayName', 'Approx. 95% upper bound');
+    grid on;
+    legend([h_nis h_mean h_upper], 'Location', 'best');
+    xlabel('Time [Hours]', 'FontWeight', 'bold');
+    ylabel('NIS [-]', 'FontWeight', 'bold');
+    title('Innovation Consistency Check', 'FontSize', 12);
+end
+
+function value = chiSquareApprox95(degrees_of_freedom)
+    if ~isfinite(degrees_of_freedom) || degrees_of_freedom <= 0
+        value = NaN;
+        return;
+    end
+    z95 = 1.64485362695147;
+    value = degrees_of_freedom * (1 - 2 / (9 * degrees_of_freedom) + ...
+        z95 * sqrt(2 / (9 * degrees_of_freedom)))^3;
+end
+
+function plotGeometry(R_earth, sat_pos_history_m, towers_eci_first_m, towers)
+    [xe, ye, ze] = sphere(40);
+    surf(R_earth * xe, R_earth * ye, R_earth * ze, ...
+        'FaceColor', [0.75 0.85 1.0], 'EdgeColor', 'none', 'FaceAlpha', 0.35);
+    hold on;
+    plot3(sat_pos_history_m(1, :), sat_pos_history_m(2, :), sat_pos_history_m(3, :), ...
+        'k-', 'LineWidth', 1.5, 'DisplayName', 'Space asset trajectory');
+    scatter3(towers_eci_first_m(1, :), towers_eci_first_m(2, :), towers_eci_first_m(3, :), ...
+        60, 'r', 'filled', 'DisplayName', 'Ground segment at start');
+    for i = 1:length(towers)
+        plot3([towers_eci_first_m(1, i), sat_pos_history_m(1, 1)], ...
+              [towers_eci_first_m(2, i), sat_pos_history_m(2, 1)], ...
+              [towers_eci_first_m(3, i), sat_pos_history_m(3, 1)], ...
+              'm--', 'LineWidth', 1.0, 'HandleVisibility', 'on');
+        text(towers_eci_first_m(1, i), towers_eci_first_m(2, i), towers_eci_first_m(3, i), ...
+            ['  ' towers(i).name], 'FontSize', 8);
+    end
+    axis equal;
+    grid on;
+    xlabel('ECI X [m]', 'FontWeight', 'bold');
+    ylabel('ECI Y [m]', 'FontWeight', 'bold');
+    zlabel('ECI Z [m]', 'FontWeight', 'bold');
+    title('Ground-to-Space Measurement Geometry', 'FontSize', 12);
+    legend('Location', 'best');
+    view(35, 25);
+end
+
+function plotAllanDeviation(oscillators, selected_oscillator_name, tau_profile_s, tau_sim_s, sim_adev, dt, clock_allan_names, sim_adev_by_clock)
+
+    if nargin < 7 || isempty(clock_allan_names)
+        clock_allan_names = string(selected_oscillator_name);
+    end
+
+    if nargin < 8 || isempty(sim_adev_by_clock)
+        sim_adev_by_clock = sim_adev(:).';
+    end
+
+    clock_allan_names = string(clock_allan_names);
+
+    oscillator_plot_styles = { ...
+        'TCXO',           [1.00 0.00 0.00], '-',  'Allan deviation for TCXO'; ...
+        'StandardQuartz', [0.00 0.80 0.00], '--', 'Allan deviation for a quartz'; ...
+        'OCXO1',          [0.00 0.00 1.00], ':',  'Allan deviation for OCXO 1'; ...
+        'Rubidium1',      [1.00 0.00 1.00], ':',  'Allan deviation for Rubidium'; ...
+        'Cesium1',        [0.00 0.85 0.85], '-.', 'Allan deviation for a Cesium'; ...
+        'OCXO2',          [1.00 0.90 0.00], '--', 'Allan deviation for a OCXO2' ...
+    };
+
+    hold on;
+
+    x_all = [];
+    y_all = [];
+
+    % ---------------------------------------------------------------------
+    % 1) Full theoretical Allan deviation curves
+    % ---------------------------------------------------------------------
+    for i = 1:size(oscillator_plot_styles, 1)
+        osc_name = oscillator_plot_styles{i, 1};
+
+        if ~isfield(oscillators, osc_name)
+            continue;
+        end
+
+        line_color = oscillator_plot_styles{i, 2};
+        line_style = oscillator_plot_styles{i, 3};
+        legend_name = oscillator_plot_styles{i, 4};
+
+        osc_clock = Clock( ...
+            oscillators.(osc_name).h0, ...
+            oscillators.(osc_name).hm1, ...
+            oscillators.(osc_name).hm2, ...
+            dt);
+
+        y_theory = osc_clock.theoreticalAllanDeviation(tau_profile_s);
+
+        valid_theory = isfinite(tau_profile_s) & tau_profile_s > 0 & ...
+                       isfinite(y_theory) & y_theory > 0;
+
+        loglog(tau_profile_s(valid_theory), y_theory(valid_theory), ...
+            line_style, ...
+            'LineWidth', 1.5, ...
+            'Color', line_color, ...
+            'DisplayName', legend_name);
+
+        x_all = [x_all, tau_profile_s(valid_theory)]; %#ok<AGROW>
+        y_all = [y_all, y_theory(valid_theory)];      %#ok<AGROW>
+    end
+
+    % ---------------------------------------------------------------------
+    % 2) Simulated overlapping Allan deviation points
+    % ---------------------------------------------------------------------
+    marker_symbols = {'s', 'o', '^', 'v', 'd', 'p', 'h', 'x', '+', '*'};
+
+    if size(sim_adev_by_clock, 1) ~= numel(clock_allan_names)
+        sim_adev_by_clock = reshape(sim_adev_by_clock, 1, []);
+        clock_allan_names = string(selected_oscillator_name);
+    end
+
+    point_colors = lines(max(1, size(sim_adev_by_clock, 1)));
+
+    for idx_clock = 1:size(sim_adev_by_clock, 1)
+
+        valid_sim = isfinite(tau_sim_s) & tau_sim_s > 0 & ...
+                    isfinite(sim_adev_by_clock(idx_clock, :)) & ...
+                    sim_adev_by_clock(idx_clock, :) > 0;
+
+        if ~any(valid_sim)
+            continue;
+        end
+
+        marker_idx = 1 + mod(idx_clock - 1, numel(marker_symbols));
+
+        loglog(tau_sim_s(valid_sim), sim_adev_by_clock(idx_clock, valid_sim), ...
+            marker_symbols{marker_idx}, ...
+            'LineStyle', 'none', ...
+            'MarkerEdgeColor', point_colors(idx_clock, :), ...
+            'MarkerFaceColor', 'w', ...
+            'MarkerSize', 5, ...
+            'LineWidth', 1.1, ...
+            'DisplayName', ['Simulated points: ' char(clock_allan_names(idx_clock))]);
+
+        x_all = [x_all, tau_sim_s(valid_sim)];                         %#ok<AGROW>
+        y_all = [y_all, sim_adev_by_clock(idx_clock, valid_sim)];      %#ok<AGROW>
+    end
+
+    % ---------------------------------------------------------------------
+    % 3) Full automatic scale from BOTH theory and simulation
+    % ---------------------------------------------------------------------
+    grid on;
+
+    ax = gca;
+    ax.XScale = 'log';
+    ax.YScale = 'log';
+
+    x_all = x_all(isfinite(x_all) & x_all > 0);
+    y_all = y_all(isfinite(y_all) & y_all > 0);
+
+    if ~isempty(x_all)
+        ax.XLim = [10^floor(log10(min(x_all))), 10^ceil(log10(max(x_all)))];
+    end
+
+    if ~isempty(y_all)
+        ax.YLim = [10^floor(log10(min(y_all))), 10^ceil(log10(max(y_all)))];
+    end
+
+    ax.XMinorGrid = 'on';
+    ax.YMinorGrid = 'on';
+    ax.GridLineStyle = ':';
+
+    xlabel('Time [s]', 'FontWeight', 'bold');
+    ylabel('Allan deviation \sigma_y(\tau) [-]', 'FontWeight', 'bold');
+    title('Oscillator Stability Check', 'FontSize', 12);
+
+    legend('Location', 'southwest', 'FontSize', 6);
+    legend boxoff;
+
+    hold off;
+end
+
+%% LaTeX Formatting Helpers
+function report = appendLine(report, line)
+    report{end+1, 1} = char(line);
+end
+
+function report = appendParagraph(report, text_value)
+    report = appendLine(report, latexEscape(text_value));
+    report = appendLine(report, "");
+end
+
+function report = appendOptionalTable(report, title_text, data, field_name, max_rows)
+    if ~isfield(data, field_name)
+        return;
+    end
+    tbl = data.(field_name);
+    if isempty(tbl)
+        return;
+    end
+    if ~istable(tbl)
+        error("generateReport:InvalidReportTable", ...
+            "reportData.%s must be a MATLAB table.", field_name);
+    end
+    if height(tbl) == 0
+        return;
+    end
+    if nargin < 5 || isempty(max_rows)
+        max_rows = height(tbl);
+    end
+
+    report = appendLine(report, sprintf("\\subsection{%s}", latexEscape(title_text)));
+    report = appendLine(report, "\begin{center}");
+    report = appendLine(report, "\scriptsize");
+    column_spec = compactTableColumnSpec(width(tbl));
+    report = appendLine(report, sprintf("\\begin{longtable}{%s}", column_spec));
+    report = appendLine(report, "\toprule");
+    report = appendLine(report, latexTableHeader(tbl));
+    report = appendLine(report, "\midrule");
+    row_limit = min(height(tbl), max_rows);
+    for idx_row = 1:row_limit
+        report = appendLine(report, latexTableRow(tbl, idx_row));
+    end
+    if height(tbl) > row_limit
+        omitted = height(tbl) - row_limit;
+        report = appendLine(report, sprintf("\\multicolumn{%d}{l}{\\textit{%d additional rows omitted for first-page compactness.}}\\\\", ...
+            width(tbl), omitted));
+    end
+    report = appendLine(report, "\bottomrule");
+    report = appendLine(report, "\end{longtable}");
+    report = appendLine(report, "\normalsize");
+    report = appendLine(report, "\end{center}");
+end
+
+function column_spec = compactTableColumnSpec(num_columns)
+    if num_columns <= 0
+        column_spec = "p{0.9\textwidth}";
+        return;
+    end
+    width_fraction = min(0.42, 0.92 / num_columns);
+    columns = strings(1, num_columns);
+    for idx_col = 1:num_columns
+        columns(idx_col) = sprintf("p{%.3f\\textwidth}", width_fraction);
+    end
+    column_spec = char(strjoin(columns, ""));
+end
+
+function header_line = latexTableHeader(tbl)
+    names = string(tbl.Properties.VariableNames);
+    header_cells = strings(1, numel(names));
+    for idx_col = 1:numel(names)
+        header_cells(idx_col) = "\textbf{" + string(latexEscape(names(idx_col))) + "}";
+    end
+    header_line = char(strjoin(header_cells, " & ") + "\\");
+end
+
+function row_line = latexTableRow(tbl, idx_row)
+    names = string(tbl.Properties.VariableNames);
+    row_cells = strings(1, numel(names));
+    for idx_col = 1:numel(names)
+        value = tbl{idx_row, idx_col};
+        row_cells(idx_col) = string(latexEscape(tableCellToText(value)));
+    end
+    row_line = char(strjoin(row_cells, " & ") + "\\");
+end
+
+function text_value = tableCellToText(value)
+    if iscell(value)
+        if isempty(value)
+            text_value = "";
+            return;
+        end
+        value = value{1};
+    end
+    if isstring(value)
+        if isempty(value)
+            text_value = "";
+        else
+            text_value = strjoin(value(:).', ", ");
+        end
+    elseif ischar(value)
+        text_value = string(value);
+    elseif isnumeric(value)
+        if isempty(value)
+            text_value = "";
+        elseif isscalar(value)
+            if isfinite(value)
+                text_value = string(sprintf("%.6g", value));
+            else
+                text_value = string(value);
+            end
+        else
+            text_value = string(mat2str(value, 6));
+        end
+    elseif islogical(value)
+        text_value = string(value);
+    elseif isdatetime(value)
+        text_value = string(value);
+    elseif isduration(value)
+        text_value = string(value);
+    else
+        try
+            text_value = string(value);
+        catch
+            text_value = "<unprintable>";
+        end
+    end
+end
+
+function report = beginPlotTable(report)
+    report = appendLine(report, "\begin{longtable}{p{0.47\textwidth}p{0.47\textwidth}}");
+    report = appendLine(report, "\toprule");
+    report = appendLine(report, "\textbf{Plot} & \textbf{Description and statistical approach}\\");
+    report = appendLine(report, "\midrule");
+end
+
+function report = endPlotTable(report)
+    report = appendLine(report, "\bottomrule");
+    report = appendLine(report, "\end{longtable}");
+end
+
+function report = appendReportRow(report, is_enabled, plot_path, title_text, description_text)
+    if is_enabled
+        if strlength(string(plot_path)) > 0
+            plot_ref = relativeLatexPath(plot_path);
+            left_cell = sprintf("\\vspace{0pt}\\includegraphics[width=\\linewidth]{%s}", plot_ref);
+        else
+            left_cell = "\vspace{0pt}\textit{No plot generated for this enabled configuration item.}";
+        end
+        right_cell = sprintf("\\vspace{0pt}\\textbf{%s}\\par\\vspace{3pt}%s", latexEscape(title_text), latexEscape(description_text));
+    else
+        left_cell = "\vspace{0pt}\textit{No plot generated.}";
+        right_cell = sprintf("\\vspace{0pt}\\textbf{%s}\\par\\vspace{3pt}%s", latexEscape(title_text), latexEscape(description_text));
+    end
+    report = appendLine(report, sprintf("%s & %s\\\\", left_cell, right_cell));
+    report = appendLine(report, "\midrule");
+end
+
+function report = appendStatusRow(report, component_name, is_enabled)
+    if is_enabled
+        status = "\textcolor{green!45!black}{Enabled}";
+        action = "Included in this report.";
+    else
+        status = "\textcolor{gray}{Disabled}";
+        action = "Not part of the current clock-only validation scenario.";
+    end
+    report = appendLine(report, sprintf("%s & %s & %s\\\\", ...
+        latexEscape(component_name), status, latexEscape(action)));
+end
+
+function report = appendFinalValueRow(report, quantity_name, value, unit_name)
+    report = appendLine(report, sprintf("%s & %s\\\\", ...
+        latexEscape(quantity_name), formatEngineering(value, unit_name)));
+end
+
+function report = appendSummaryMetricRow(report, metric_name, summary, final_window_summary)
+    report = appendLine(report, sprintf("%s & %s & %s & %s & %s\\\\", ...
+        latexEscape(metric_name), ...
+        formatEngineering(summary.fullRunRms, ""), ...
+        formatEngineering(summary.steadyStateRms, ""), ...
+        formatEngineering(final_window_summary.steadyStateRms, ""), ...
+        formatEngineering(final_window_summary.steadyStateP95Abs, "")));
+end
+
+function out = formatEngineering(value, unit_name)
+    if isnan(value)
+        number_text = "not available";
+    elseif isinf(value)
+        number_text = string(value);
+    elseif value == 0
+        number_text = "0";
+    elseif abs(value) < 1e-3 || abs(value) >= 1e4
+        number_text = string(sprintf('%.6e', value));
+    else
+        number_text = string(sprintf('%.6f', value));
+    end
+
+    if strlength(string(unit_name)) > 0 && number_text ~= "not available"
+        out = char(number_text + " " + string(unit_name));
+    else
+        out = char(number_text);
+    end
+end
+
+function out = latexEscape(in)
+    raw_string = string(in);
+    if numel(raw_string) > 1
+        raw_string = strjoin(raw_string, "");
+    end
+    raw = char(raw_string);
+    out = "";
+    for idx = 1:length(raw)
+        ch = raw(idx);
+        switch ch
+            case '\'
+                out = out + "\textbackslash{}";
+            case '&'
+                out = out + "\&";
+            case '%'
+                out = out + "\%";
+            case '$'
+                out = out + "\$";
+            case '#'
+                out = out + "\#";
+            case '_'
+                out = out + "\_";
+            case '{'
+                out = out + "\{";
+            case '}'
+                out = out + "\}";
+            case '~'
+                out = out + "\textasciitilde{}";
+            case '^'
+                out = out + "\textasciicircum{}";
+            otherwise
+                out = out + ch;
+        end
+    end
+    out = char(out);
+end
+
+function path_out = relativeLatexPath(path_in)
+    [~, file_name, ext] = fileparts(char(string(path_in)));
+    path_out = char("figures/" + string(file_name) + string(ext));
+end
+
+function writeTextFile(path_out, lines)
+    fid = fopen(path_out, 'w');
+    cleanup = onCleanup(@() fclose(fid));
+    for i = 1:numel(lines)
+        fprintf(fid, '%s\n', lines{i});
+    end
+end
