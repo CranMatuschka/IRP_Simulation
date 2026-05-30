@@ -19,7 +19,6 @@ classdef SpaceAsset < handle
         % The DCM above is the authoritative attitude used for geometry.
         attitudeEuler321_rad = zeros(3, 1)
         antennas = Antenna.empty(1, 0)
-        clock = []
     end
 
     properties (Dependent)
@@ -28,24 +27,30 @@ classdef SpaceAsset < handle
     end
 
     methods
-        function obj = SpaceAsset(id, name, state_ECI, clockObj, antennas, attitudeFrame, attitudeEuler321_rad)
-            obj.id = id;
-            obj.name = string(name);
-            obj.state_ECI = state_ECI(:);
-
-            obj.clock = clockObj;
-            obj.antennas = antennas;
-
-            obj.attitudeFrame = upper(strtrim(string(attitudeFrame)));
-            obj.attitudeEuler321_rad = attitudeEuler321_rad(:);
-
-            obj.rotationBodyToECI = SpaceAsset.bodyToEciFromEuler321( ...
-                obj.attitudeEuler321_rad, ...
-                obj.state_ECI, ...
-                obj.attitudeFrame);
-
-            obj.validateState();
-            obj.validateAttitude();
+        function obj = SpaceAsset(assetConfig, initialState_ECI, clockObj)
+            obj.id = assetConfig.id;
+            obj.name = string(assetConfig.name);
+            obj.state_ECI = initialState_ECI(:);
+        
+            if nargin >= 3
+                obj.clock = clockObj;
+            end
+        
+            if isfield(assetConfig, 'attitudeFrame')
+                obj.attitudeFrame = string(assetConfig.attitudeFrame);
+            end
+        
+            if isfield(assetConfig, 'attitudeEuler321_rad')
+                obj.attitudeEuler321_rad = assetConfig.attitudeEuler321_rad(:);
+            elseif isfield(assetConfig, 'attitudeEuler321_deg')
+                obj.attitudeEuler321_rad = deg2rad(assetConfig.attitudeEuler321_deg(:));
+            end
+        
+            if isfield(assetConfig, 'antennas')
+                obj.antennas = SpaceAsset.buildAntennaArray(assetConfig.antennas);
+            else
+                obj.antennas = Antenna.empty(1, 0);
+            end
         end
 
         function pos = get.pos_ECI_m(obj)
@@ -115,8 +120,12 @@ classdef SpaceAsset < handle
             obj.setAttitudeEuler321_rad(deg2rad(attitude_deg(:)));
         end
 
-        function pos_eci = getReceiverPositionECI(obj, antenna)
-            pos_eci = obj.pos_ECI_m + obj.getRotationBodyToECI() * antenna.getOffsetBody_m();
+        function pos_eci = getReceiverPositionECI(obj, receiver_component)
+            if ~isa(receiver_component, 'ReceiverComponent')
+                error('SpaceAsset:InvalidReceiverComponent', ...
+                    'receiver_component must be a ReceiverComponent object.');
+            end
+            pos_eci = obj.pos_ECI_m + obj.getRotationBodyToECI() * receiver_component.getOffsetBody_m();
         end
 
         function initializeGeoState(obj, asset_cfg, jd, mu)
@@ -133,15 +142,25 @@ classdef SpaceAsset < handle
             Phi = SpaceAsset.twoBodyPhiFirstOrder(obj.state_ECI, mu, dt);
         end
         
-        function [pos_eci, dpos_datt] = getReceiverPositionAndAttitudeJacobian(obj, antenna, attitude_rad, base_position_eci_m)
+        function [pos_eci, dpos_datt] = getReceiverPositionAndAttitudeJacobian(obj, receiver_component, attitude_rad, base_position_eci_m)
+            % Returns receiver phase-center position and derivative with respect to
+            % [roll; pitch; yaw].
+            %
+            % base_position_eci_m is optional. Use it when the EKF state position is
+            % not equal to obj.pos_ECI_m.
+        
+            if ~isa(receiver_component, 'ReceiverComponent')
+                error('SpaceAsset:InvalidReceiverComponent', ...
+                    'receiver_component must be a ReceiverComponent object.');
+            end
+        
             if nargin < 4 || isempty(base_position_eci_m)
                 base_position_eci_m = obj.pos_ECI_m;
             end
         
             state_for_geometry = [base_position_eci_m; obj.vel_ECI_mps];
-        
             [pos_eci, ~, dpos_datt] = SpaceAsset.receiverPositionAndJacobians( ...
-                antenna, state_for_geometry, attitude_rad, obj.attitudeFrame);
+                receiver_component, state_for_geometry, attitude_rad, obj.attitudeFrame);
         end
 
         function validateState(obj)
@@ -259,12 +278,17 @@ classdef SpaceAsset < handle
             end
         end
 
-        function pos_eci = receiverPositionFromState(antenna, state_eci, attitude_rad, attitude_frame)
+        function pos_eci = receiverPositionFromState(receiver_component, state_eci, attitude_rad, attitude_frame)
+            if ~isa(receiver_component, 'ReceiverComponent')
+                error('SpaceAsset:InvalidReceiverComponent', ...
+                    'receiver_component must be a ReceiverComponent object.');
+            end
+
             state_eci = state_eci(:);
             validateattributes(state_eci, {'numeric'}, {'real', 'finite', 'numel', 6}, mfilename, 'state_eci');
-        
+
             R_body_to_eci = SpaceAsset.bodyToEciFromEuler321(attitude_rad, state_eci, attitude_frame);
-            pos_eci = state_eci(1:3) + R_body_to_eci * antenna.getOffsetBody_m();
+            pos_eci = state_eci(1:3) + R_body_to_eci * receiver_component.getOffsetBody_m();
         end
 
         function [pos_eci, dpos_dstate, dpos_datt] = receiverPositionAndJacobians(receiver_component, state_eci, attitude_rad, attitude_frame)

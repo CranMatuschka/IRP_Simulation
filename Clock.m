@@ -124,16 +124,6 @@ classdef Clock < handle
             current_error_sec = obj.total_bias_sec;
         end
 
-        function [totalTimeFluctuation, obj] = step(obj, dt)
-            % Backward-compatible wrapper.
-            % With handle classes, reassignment is no longer required, but
-            % old calls like [bias, clock] = clock.step() still work.
-            if nargin < 2
-                totalTimeFluctuation = obj.update();
-            else
-                totalTimeFluctuation = obj.update(dt);
-            end
-        end
 
         function reset(obj, initialState_sec)
             if nargin < 2 || isempty(initialState_sec)
@@ -203,11 +193,6 @@ classdef Clock < handle
                        ((2.0 * pi^2 / 3.0) .* tau .* obj.h_minus_2);
 
             allanDev = sqrt(max(allanVar, 0.0));
-        end
-
-        function adev = overlappingAllenDeviation(~, phase_data, tau, dt)
-            % Backward-compatible misspelled method name.
-            adev = Clock.computeOverlappingAllanDeviation(phase_data, tau, dt);
         end
 
     end
@@ -319,27 +304,6 @@ classdef Clock < handle
             adev_max = adev_array(idx);
 
             hm2 = (3.0 * adev_max^2) / (2.0 * pi^2 * tau_max);
-        end
-
-        function [Phi, Q] = getEkfBiasDriftModel(h0, hm1, hm2, dt, c, clockModel, correlationTime_s)
-            % Clearer public name for the EKF 2-state clock model.
-            %
-            % State:
-            %   [clock bias in meters;
-            %    clock drift in meters per second]
-        
-            if nargin < 7
-                correlationTime_s = [];
-            end
-            if nargin < 6
-                clockModel = [];
-            end
-            if nargin < 5
-                c = [];
-            end
-        
-            [Phi, Q] = Clock.aggregateBiasDriftModel( ...
-                h0, hm1, hm2, dt, c, clockModel, correlationTime_s);
         end
 
         function [Phi, Q] = aggregateBiasDriftModel(h0, hm1, hm2, dt, c, clockModel, correlationTime_s)

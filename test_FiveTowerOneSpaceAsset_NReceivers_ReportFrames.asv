@@ -51,7 +51,7 @@ SAMPLE_TIME_S = 1.0;
 RECEIVER_BASELINE_M = 2.0;
 RECEIVER_PSEUDORANGE_SIGMA_M = 0.30;
 ENABLE_MEASUREMENT_NOISE = false;
-COMPILE_PDF = true;
+COMPILE_PDF = false;
 RANDOM_SEED = 20260527;
 
 % GEO-like initial position for the validation case.
@@ -92,7 +92,7 @@ spaceAssetsOverride.defaultReceiverClockMode = "sharedSpaceAssetClock";
 spaceAssetsOverride.platformAttitudeTruth_deg = TRUE_ATTITUDE_EULER321_DEG;
 spaceAssetsOverride.attitudeFrame = ATTITUDE_FRAME;
 spaceAssetsOverride.assets = spaceAssetConfig;
-spaceAssetsOverride.antennas = antennaConfigs;
+spaceAssetsOverride.receivers = antennaConfigs;
 
 simConfigOverride = struct();
 simConfigOverride.randomSeed = RANDOM_SEED;
@@ -119,7 +119,7 @@ simConfigOverride.scenarios.vsnscToReceivers.measurement.enableMeasurementNoise 
 simConfigOverride.scenarios.vsnscToReceivers.measurement.elevationMask_deg = 0.0;
 simConfigOverride.scenarios.vsnscToReceivers.measurement.sigma_numerical_floor_m = 1e-4;
 
-simConfigOverride.scenarios.vsnscToReceivers.report.generatePdf = true;
+simConfigOverride.scenarios.vsnscToReceivers.report.generatePdf = false;
 simConfigOverride.scenarios.vsnscToReceivers.report.compilePdf = COMPILE_PDF;
 simConfigOverride.scenarios.vsnscToReceivers.report.interactivePlots = false;
 simConfigOverride.scenarios.vsnscToReceivers.report.enableAllanDeviationValidation = true;
@@ -230,7 +230,7 @@ function offsets = canonicalReceiverOffsets(nReceivers, baseline_m)
     end
 end
 
-function asset = buildSpaceAssetConfig(id, name, lat_deg, lon_deg, altitude_m, clockType, antennas)
+function  asset = buildSpaceAssetConfig(id, name, lat_deg, lon_deg, altitude_m, clockType, antennas)
     asset = struct();
     asset.id = id;
     asset.name = name;
@@ -243,7 +243,7 @@ function asset = buildSpaceAssetConfig(id, name, lat_deg, lon_deg, altitude_m, c
     asset.sharedClock.clockType = char(clockType);
     asset.sharedClock.initialBias_ps = 0.0;
     asset.sharedClock.initialDrift_ps_per_s = 0.0;
-    asset.antennas = antennas;
+    asset.receivers = receivers;
 end
 
 function errorModels = disabledErrorRegistry()
@@ -288,7 +288,7 @@ function diagnostics = buildFrameTransformDiagnostics(sim)
         sat_ecef_m = R_eci_to_ecef * sat_eci_m;
         rows(end + 1, :) = makeFrameRow(epochLabel, "SpaceAsset", string(sim.assetTruth.name), sat_eci_m, sat_ecef_m, [0; 0; 0]); %#ok<AGROW>
 
-        rx = sim.assetTruth.getEnabledAntennas();
+        rx = sim.assetTruth.getEnabledReceivers();
         for idxRx = 1:numel(rx)
             rx_eci_m = SpaceAsset.receiverPositionFromState(rx(idxRx), state_eci, sim.history.truth(sim.idx.att, k), sim.attitudeFrame);
             rx_ecef_m = R_eci_to_ecef * rx_eci_m;

@@ -45,7 +45,7 @@ classdef Antenna < handle
                     obj.pseudorangeSigma_m = cfg.measurementSigma_m;
                 end
 
-                obj.validate();
+                obj.validateMode();
                 return;
             end
 
@@ -59,7 +59,8 @@ classdef Antenna < handle
                 obj.id = varargin{3};
             end
 
-            obj.validate();
+            obj.validateMode();
+            obj.validateVectors;
         end
 %%
         function offset = getOffsetBody_m(obj)
@@ -164,13 +165,13 @@ classdef Antenna < handle
         end
 
         function validateVectors(obj)
-            if numel(obj.leverArmBody_m) ~= 3
+            if numel(obj.offsetBody_m) ~= 3
                 error('Antenna:InvalidLeverArm', 'leverArmBody_m must be a 3x1 vector.');
             end
             if numel(obj.pco_m) ~= 3
                 error('Antenna:InvalidPCO', 'pco_m must be a 3x1 vector.');
             end
-            obj.leverArmBody_m = obj.leverArmBody_m(:);
+            obj.offsetBody_m = obj.offsetBody_m(:);
             obj.pco_m = obj.pco_m(:);
         end
 
