@@ -35,9 +35,12 @@ classdef Antenna < handle
                 if isfield(cfg, "id"); obj.id = cfg.id; end
                 if isfield(cfg, "name"); obj.name = string(cfg.name); end
                 if isfield(cfg, "enabled"); obj.enabled = logical(cfg.enabled);end
-                if isfield(cfg, "offsetBody_m"); obj.offsetBody_m = cfg.offsetBody_m(:);
+                if isfield(cfg, "offsetBody_m")
+                    obj.offsetBody_m = cfg.offsetBody_m(:);
                 elseif isfield(cfg, "antennaOffsetBody_m")
                     obj.offsetBody_m = cfg.antennaOffsetBody_m(:);
+                elseif isfield(cfg, "leverArmBody_m")
+                    obj.offsetBody_m = cfg.leverArmBody_m(:);
                 end
                 if isfield(cfg, "pseudorangeSigma_m")
                     obj.pseudorangeSigma_m = cfg.pseudorangeSigma_m;
@@ -46,6 +49,7 @@ classdef Antenna < handle
                 end
 
                 obj.validateMode();
+                obj.validateVectors();
                 return;
             end
 

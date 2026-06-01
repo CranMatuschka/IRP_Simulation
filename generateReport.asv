@@ -361,7 +361,6 @@ report = appendLine(report, "\bottomrule");
 report = appendLine(report, "\end{tabular}");
 report = appendLine(report, "\end{center}");
 
-%% State Estimation Validation
 report = appendLine(report, "\clearpage");
 report = appendLine(report, "\section{State Estimation Validation}");
 if isfield(reportData, "attitude_filter_note")
@@ -401,7 +400,7 @@ report = appendReportRow(report, reportToggles.ekfOrbitClockEstimation && report
      "The approach is state-estimation consistency against known truth in a controlled scenario."]);
 
 report = endPlotTable(report);
-%% Measurement and Geometry Validation
+
 report = appendLine(report, "\clearpage");
 report = appendLine(report, "\section{Measurement and Geometry Validation}");
 report = appendParagraph(report, [ ...
@@ -1709,18 +1708,14 @@ function text_value = tableCellToText(value)
         end
         value = value{1};
     end
-
     if isstring(value)
         if isempty(value)
             text_value = "";
         else
-            value(ismissing(value)) = "";
             text_value = strjoin(value(:).', ", ");
         end
-
     elseif ischar(value)
         text_value = string(value);
-
     elseif isnumeric(value)
         if isempty(value)
             text_value = "";
@@ -1728,33 +1723,20 @@ function text_value = tableCellToText(value)
             if isfinite(value)
                 text_value = string(sprintf("%.6g", value));
             else
-                text_value = "";
+                text_value = string(value);
             end
         else
             text_value = string(mat2str(value, 6));
         end
-
     elseif islogical(value)
         text_value = string(value);
-
     elseif isdatetime(value)
-        if ismissing(value)
-            text_value = "";
-        else
-            text_value = string(value);
-        end
-
+        text_value = string(value);
     elseif isduration(value)
-        if ismissing(value)
-            text_value = "";
-        else
-            text_value = string(value);
-        end
-
+        text_value = string(value);
     else
         try
             text_value = string(value);
-            text_value(ismissing(text_value)) = "";
         catch
             text_value = "<unprintable>";
         end
@@ -1837,20 +1819,11 @@ function out = formatEngineering(value, unit_name)
 end
 
 function out = latexEscape(in)
-    if nargin == 0 || isempty(in)
-        out = "";
-        return;
-    end
-
     raw_string = string(in);
-    raw_string(ismissing(raw_string)) = "";
-
     if numel(raw_string) > 1
         raw_string = strjoin(raw_string, "");
     end
-
     raw = char(raw_string);
-
     out = "";
     for idx = 1:length(raw)
         ch = raw(idx);
@@ -1876,10 +1849,9 @@ function out = latexEscape(in)
             case '^'
                 out = out + "\textasciicircum{}";
             otherwise
-                out = out + string(ch);
+                out = out + ch;
         end
     end
-
     out = char(out);
 end
 

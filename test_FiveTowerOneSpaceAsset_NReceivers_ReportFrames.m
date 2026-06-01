@@ -60,6 +60,7 @@ SPACE_ASSET_LON_DEG = -10.0;
 SPACE_ASSET_ALTITUDE_M = 35786000.0;
 TRUE_ATTITUDE_EULER321_DEG = [0.5; -0.3; 1.0];
 ATTITUDE_FRAME = "LVLH";
+TRUE_ANGULAR_RATE_BODY_DEGPS = [0.0; 0.0; 0.0];
 
 % External time-transfer reference for tower-clock gauge fixing.
 CLOCK_GAUGE_MODE = "externalTimeTransfer";
@@ -91,6 +92,7 @@ spaceAssetsOverride.receiverCountPerAsset = N_RECEIVERS;
 spaceAssetsOverride.defaultReceiverClockMode = "sharedSpaceAssetClock";
 spaceAssetsOverride.platformAttitudeTruth_deg = TRUE_ATTITUDE_EULER321_DEG;
 spaceAssetsOverride.attitudeFrame = ATTITUDE_FRAME;
+spaceAssetsOverride.platformAngularRateTruth_degps = TRUE_ANGULAR_RATE_BODY_DEGPS;
 spaceAssetsOverride.assets = spaceAssetConfig;
 spaceAssetsOverride.antennas = antennaConfigs;
 
@@ -123,7 +125,7 @@ simConfigOverride.scenarios.vsnscToReceivers.report.generatePdf = true;
 simConfigOverride.scenarios.vsnscToReceivers.report.compilePdf = COMPILE_PDF;
 simConfigOverride.scenarios.vsnscToReceivers.report.interactivePlots = false;
 simConfigOverride.scenarios.vsnscToReceivers.report.enableAllanDeviationValidation = true;
-simConfigOverride.scenarios.vsnscToReceivers.report.enableReceiverSubsetComparison = N_RECEIVERS >= 2;
+simConfigOverride.scenarios.vsnscToReceivers.report.enableReceiverSubsetComparison = false;
 
 % Explicitly preserve the clock-only architecture. These flags are carried for
 % documentation and future module insertion; the active simulation does not yet
@@ -179,6 +181,7 @@ function antennas = buildAntennaConfigs(nReceivers, baseline_m, measurementSigma
         'enabled', true, ...
         'mode', "RX", ...
         'leverArmBody_m', zeros(3, 1), ...
+        'offsetBody_m', zeros(3, 1), ...
         'pco_m', zeros(3, 1), ...
         'pcvMap', [], ...
         'measurementSigma_m', measurementSigma_m, ...
@@ -194,6 +197,7 @@ function antennas = buildAntennaConfigs(nReceivers, baseline_m, measurementSigma
         antennas(k).enabled = true;
         antennas(k).mode = "RX";
         antennas(k).leverArmBody_m = offsets(:, k);
+        antennas(k).offsetBody_m = offsets(:, k);
 
         % Default zero RF phase-centre state.
         antennas(k).pco_m = zeros(3,1);

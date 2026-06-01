@@ -51,7 +51,7 @@ classdef ReverseGnssSimulation < handle
         estimateTowerClockDrift logical = false
         towerClockCorrectionSigma_m double = 0.0
         referenceTowerIndex double = NaN
-        stateDim double = 11
+        stateDim double = 14
         PhiTowerClk cell = {}
         QTowerClk cell = {}
 
@@ -62,6 +62,7 @@ classdef ReverseGnssSimulation < handle
         scClock
         oscillatorConfig
         attTrue_rad double = zeros(3, 1)
+        omegaTrue_radps double = zeros(3, 1)
         attitudeFrame string = "LVLH"
 
         numReceivers double = 0
@@ -445,9 +446,14 @@ classdef ReverseGnssSimulation < handle
                 obj.cfg.spaceAssets, ...
                 'platformAttitudeTruth_deg', ...
                 [0; 0; 0]);
+
+            omegaTruth_degps = obj.getFieldOrDefault( ...
+                obj.cfg.spaceAssets, ...
+                'platformAngularRateTruth_degps', ...
+                [0; 0; 0]);
             
-            attTruth_rad = deg2rad(attTruth_deg(:));
-            attEst_rad = zeros(3, 1);
+            obj.attTrue_rad = deg2rad(attTruth_deg(:));
+            obj.omegaTrue_radps = deg2rad(omegaTruth_degps(:));
             
             obj.oscillatorConfig = obj.simConfig.clockLibrary.(obj.assetConfig.sharedClock.clockType);
             obj.scClock = obj.makeSpaceAssetClock();
@@ -462,8 +468,17 @@ classdef ReverseGnssSimulation < handle
                 obj.scClock, ...
                 antennasTruth, ...
                 obj.attitudeFrame, ...
-                attTruth_rad);
+                obj.attTrue_rad);
             
+            rxDebug = obj.assetTruth.getEnabledAntennas();
+            fprintf('\nReceiver phase-center offsets used by Antenna model:\n');
+            for i = 1:numel(rxDebug)
+                fprintf('%s: [% .3f % .3f % .3f] m\n', ...
+                    char(rxDebug(i).name), rxDebug(i).offsetBody_m(1), ...
+                    rxDebug(i).offsetBody_m(2), rxDebug(i).offsetBody_m(3));
+            end    
+
+
             obj.assetEst = SpaceAsset( ...
                 obj.assetConfig.id, ...
                 obj.assetConfig.name, ...
@@ -476,10 +491,7 @@ classdef ReverseGnssSimulation < handle
             obj.assetTruth.setAttitudeFrame(obj.attitudeFrame);
             obj.assetEst.setAttitudeFrame(obj.attitudeFrame);
         
-            attTruth_deg = obj.getFieldOrDefault( ...
-                obj.cfg.spaceAssets, 'platformAttitudeTruth_deg', [0; 0; 0]);
-        
-            obj.assetTruth.setAttitudeEuler321_deg(attTruth_deg);
+            obj.assetTruth.setAttitudeEuler321_rad(obj.attTrue_rad);
             obj.assetEst.setAttitudeEuler321_rad(zeros(3, 1));
         end
 
@@ -488,13 +500,14 @@ classdef ReverseGnssSimulation < handle
 
             obj.idx.pos = 1:3;
             obj.idx.vel = 4:6;
-            obj.idx.att = 7:9;
-            obj.idx.cb = 10;
-            obj.idx.cd = 11;
+            obj.idx.att = 7:9;       % [roll; pitch; yaw] Euler-321 states [rad]
+            obj.idx.omega = 10:12;   % [rollRate; pitchRate; yawRate] [rad/s]
+            obj.idx.cb = 13;         % SpaceAsset clock bias [m]
+            obj.idx.cd = 14;         % SpaceAsset clock drift [m/s]
             obj.idx.tcb = zeros(1, 0);
             obj.idx.tcd = zeros(1, 0);
-
-            nextIdx = 12;
+            
+            nextIdx = 15;
             if obj.estimateTowerClockBias
                 obj.idx.tcb = nextIdx:(nextIdx + obj.numTowers - 1);
                 nextIdx = nextIdx + obj.numTowers;
@@ -511,19 +524,30 @@ classdef ReverseGnssSimulation < handle
 
             obj.stateDim = nextIdx - 1;
 
+            clockIdx = [obj.idx.cb obj.idx.cd];
+
+            initialAngularRateSigma_degps = obj.getFieldOrDefault( ...
+                obj.cfg.ekf, ...
+                'initialAngularRateSigma_degps', ...
+                [0.02; 0.02; 0.02]);
+            
+            initialAngularRateSigma_degps = initialAngularRateSigma_degps(:);
+            
             x0 = zeros(obj.stateDim, 1);
-            x0(1:11) = [ ...
+            x0(1:14) = [ ...
                 obj.assetTruth.pos_ECI_m + [1; -1; 0.5]; ...
                 obj.assetTruth.vel_ECI_mps; ...
                 zeros(3, 1); ...
+                zeros(3, 1); ...
                 0; ...
                 0];
-
+            
             P0 = zeros(obj.stateDim, obj.stateDim);
-            P0(1:11, 1:11) = diag([ ...
+            P0(1:14, 1:14) = diag([ ...
                 ones(3, 1) * obj.cfg.ekf.initialPositionSigma_m; ...
                 ones(3, 1) * obj.cfg.ekf.initialVelocitySigma_mps; ...
                 deg2rad([2; 2; 5]); ...
+                deg2rad(initialAngularRateSigma_degps); ...
                 obj.cfg.ekf.initialClockBiasSigma_m; ...
                 obj.cfg.ekf.initialClockDriftSigma_mps].^2);
 
@@ -550,9 +574,10 @@ classdef ReverseGnssSimulation < handle
             end
 
             obj.Q = zeros(obj.stateDim, obj.stateDim);
-            obj.Q(1:3, 1:3) = eye(3) * obj.cfg.ekf.orbitProcessVariance;
-            obj.Q(7:9, 7:9) = eye(3) * deg2rad(1e-5)^2;
-            obj.Q(10:11, 10:11) = Qclk;
+            obj.Q(obj.idx.pos, obj.idx.pos) = eye(3) * obj.cfg.ekf.orbitProcessVariance;
+            obj.Q(obj.idx.att, obj.idx.att) = eye(3) * deg2rad(1e-5)^2;
+            obj.Q(obj.idx.omega, obj.idx.omega) = eye(3) * deg2rad(1e-7)^2;
+            obj.Q(clockIdx, clockIdx) = Qclk;
 
             if obj.estimateTowerClockBias
                 for idxTower = 1:obj.numTowers
@@ -580,6 +605,7 @@ classdef ReverseGnssSimulation < handle
             obj.history.truth = NaN(obj.stateDim, obj.numSteps);
             obj.history.covariance_diag = NaN(obj.stateDim, obj.numSteps);
             obj.history.attitude_error_deg = NaN(3, obj.numSteps);
+            obj.history.angular_velocity_error_degps = NaN(3, obj.numSteps);
             obj.history.innovation_rms_m = NaN(1, obj.numSteps);
             obj.history.postfit_innovation_rms_m = NaN(1, obj.numSteps);
             obj.history.nis_history = NaN(1, obj.numSteps);
@@ -608,16 +634,22 @@ classdef ReverseGnssSimulation < handle
 
             if k > 1
                 obj.assetTruth.state_ECI = SpaceAsset.propagateTwoBodyState(obj.assetTruth.state_ECI, obj.mu, obj.dt);
+                obj.attTrue_rad = mod(obj.attTrue_rad + obj.omegaTrue_radps * obj.dt + pi, 2*pi) - pi;
+                obj.assetTruth.setAttitudeEuler321_rad(obj.attTrue_rad);
                 obj.assetTruth.clock.update(obj.dt);
                 obj.updateTowerClockTruth();
 
                 Phi = eye(obj.stateDim);
                 Phi(1:6, 1:6) = SpaceAsset.twoBodyPhiFirstOrder(obj.ekf.X(1:6), obj.mu, obj.dt);
-                Phi(10:11, 10:11) = obj.PhiClk;
-
+                Phi(obj.idx.att, obj.idx.omega) = eye(3) * obj.dt;
+                clockIdx = [obj.idx.cb obj.idx.cd];
+                Phi(clockIdx, clockIdx) = obj.PhiClk;
+                
                 xPred = obj.ekf.X;
                 xPred(1:6) = SpaceAsset.propagateTwoBodyState(obj.ekf.X(1:6), obj.mu, obj.dt);
-                xPred(10:11) = obj.PhiClk * obj.ekf.X(10:11);
+                xPred(obj.idx.att) = obj.ekf.X(obj.idx.att) + obj.dt * obj.ekf.X(obj.idx.omega);
+                xPred(obj.idx.omega) = obj.ekf.X(obj.idx.omega);
+                xPred(clockIdx) = obj.PhiClk * obj.ekf.X(clockIdx);
 
                 if obj.estimateTowerClockBias
                     for idxTower = 1:obj.numTowers
@@ -664,7 +696,12 @@ classdef ReverseGnssSimulation < handle
 
         function recordHistory(obj, k, y, innov, postfit, trueRangeRt, losRt, S, H, trueClock_m, trueClockDrift_mps, nis)
             truthVector = NaN(obj.stateDim, 1);
-            truthVector(1:11) = [obj.assetTruth.state_ECI; obj.attTrue_rad; trueClock_m; trueClockDrift_mps];
+            truthVector(1:14) = [ ...
+                obj.assetTruth.state_ECI; ...
+                obj.attTrue_rad; ...
+                obj.omegaTrue_radps; ...
+                trueClock_m; ...
+                trueClockDrift_mps];
 
             if obj.estimateTowerClockBias
                 truthVector(obj.idx.tcb) = obj.towerClockBiasTruth_m(:);
@@ -678,6 +715,8 @@ classdef ReverseGnssSimulation < handle
             obj.history.truth(:, k) = truthVector;
             obj.history.covariance_diag(:, k) = diag(obj.ekf.P);
             obj.history.attitude_error_deg(:, k) = rad2deg(obj.ekf.X(obj.idx.att) - obj.attTrue_rad(:));
+            obj.history.angular_velocity_error_degps(:, k) = ...
+                 rad2deg(obj.ekf.X(obj.idx.omega) - obj.omegaTrue_radps(:));
             obj.history.innovation_rms_m(k) = obj.computeRms(innov);
             obj.history.postfit_innovation_rms_m(k) = obj.computeRms(postfit);
             obj.history.nis_history(k) = nis;
@@ -707,6 +746,7 @@ classdef ReverseGnssSimulation < handle
             obj.results.state_truth = obj.history.truth;
             obj.results.covariance_diag = obj.history.covariance_diag;
             obj.results.attitude_error_deg = obj.history.attitude_error_deg;
+            obj.results.angular_velocity_error_degps = obj.history.angular_velocity_error_degps;
             obj.results.innovation_rms_m = obj.history.innovation_rms_m;
             obj.results.postfit_innovation_rms_m = obj.history.postfit_innovation_rms_m;
             obj.results.nis_history = obj.history.nis_history;
@@ -721,6 +761,7 @@ classdef ReverseGnssSimulation < handle
             obj.results.tower_clock_bias_truth_m = obj.history.tower_clock_bias_truth_m;
             obj.results.tower_clock_drift_truth_mps = obj.history.tower_clock_drift_truth_mps;           
             obj.results.scenario_name = obj.scenarioName;
+
         end
 
         function [y, Rrange] = makePseudoranges(obj, asset, towersEci, spaceClockBias_m, towerClockBias_m, measurementConfig)
@@ -898,10 +939,12 @@ classdef ReverseGnssSimulation < handle
 
             reportData.ekf_pos_error_m = xHist(obj.idx.pos, :) - truthHist(obj.idx.pos, :);
             reportData.ekf_pos_sigma_m = sqrt(max(PdiagHist(obj.idx.pos, :), 0));
+            
             reportData.ekf_clock_error_ps = (xHist(obj.idx.cb, :) - truthHist(obj.idx.cb, :)) ./ obj.c .* 1e12;
             reportData.ekf_clock_sigma_ps = sqrt(max(PdiagHist(obj.idx.cb, :), 0)) ./ obj.c .* 1e12;
             reportData.true_clock_bias_ps = truthHist(obj.idx.cb, :) ./ obj.c .* 1e12;
             reportData.est_clock_bias_ps = xHist(obj.idx.cb, :) ./ obj.c .* 1e12;
+            
             reportData.attitude_frame = obj.attitudeFrame;
             reportData.attitude_state_names = ["roll", "pitch", "yaw"];
             reportData.attitude_truth_rad = truthHist(obj.idx.att, :);
@@ -909,12 +952,29 @@ classdef ReverseGnssSimulation < handle
             reportData.attitude_est_deg = rad2deg(xHist(obj.idx.att, :));
             reportData.attitude_error_deg = reportData.attitude_est_deg - reportData.attitude_truth_deg;
             reportData.attitude_sigma_deg = rad2deg(sqrt(max(PdiagHist(obj.idx.att, :), 0)));
+            
+            reportData.final_attitude_error_deg = reportData.attitude_error_deg(:, end);
+            reportData.final_attitude_error_norm_deg = norm(reportData.final_attitude_error_deg);    
+
+            reportData.angular_velocity_state_names = ["roll rate", "pitch rate", "yaw rate"];
+            reportData.angular_velocity_truth_degps = rad2deg(truthHist(obj.idx.omega, :));
+            reportData.angular_velocity_est_degps = rad2deg(xHist(obj.idx.omega, :));
+            reportData.angular_velocity_error_degps = ...
+                reportData.angular_velocity_est_degps - reportData.angular_velocity_truth_degps;
+            reportData.angular_velocity_sigma_degps = ...
+                rad2deg(sqrt(max(PdiagHist(obj.idx.omega, :), 0)));
+            reportData.final_angular_velocity_error_degps = ...
+                reportData.angular_velocity_error_degps(:, end);
+            
+            reportData.final_angular_velocity_error_norm_degps = ...
+                norm(reportData.final_angular_velocity_error_degps);
+            
+            
             reportData.final_attitude_error_deg = reportData.attitude_error_deg(:, end);
             reportData.innovation_rms_m = obj.history.innovation_rms_m;
             reportData.postfit_innovation_rms_m = obj.history.postfit_innovation_rms_m;
             reportData.nis_history = obj.history.nis_history;
-            reportData.nis_degrees_of_freedom = size(obj.history.prefit_residual_by_receiver_tower_m, 1) * ...
-                size(obj.history.prefit_residual_by_receiver_tower_m, 2);
+            reportData.nis_degrees_of_freedom = obj.history.measurement_count;
             reportData.sat_pos_history_m = obj.history.sat_pos_history_m;
             reportData.towers_eci_first_m = obj.towersEciFirst_m;
             reportData.final_position_error_m = norm(reportData.ekf_pos_error_m(:, end));
@@ -938,6 +998,7 @@ classdef ReverseGnssSimulation < handle
             reportData.numerical_measurement_sigma_floor_m = obj.getFieldOrDefault(obj.cfg.measurement, 'sigma_numerical_floor_m', NaN);
                         reportData.clockGaugeMode = obj.clockGaugeMode;
             reportData.externalClockCorrectionSigma_ps = obj.getFieldOrDefault(obj.cfg, 'externalClockCorrectionSigma_ps', NaN);
+            
             reportData.referenceTowerName = obj.getFieldOrDefault(obj.cfg, 'referenceTowerName', '');
             reportData.tower_clocks_estimated_in_ekf = obj.estimateTowerClockBias;
             reportData.tower_clock_drift_estimated_in_ekf = obj.estimateTowerClockDrift;
@@ -971,8 +1032,7 @@ classdef ReverseGnssSimulation < handle
                 reportData.R_atmosphere_m2 + reportData.R_hardware_m2 + ...
                 reportData.R_multipath_m2 + reportData.R_numerical_regularization_m2;
 
-            [reportData.frame_transform_table, reportData.frame_transform_roundtrip_table] = ...
-                obj.buildFrameTransformTables();
+            reportData.starting_position_table = obj.buildStartingPositionTable();
 
             if obj.estimateTowerClockBias
                 reportData.clock_estimation_mode = 'spacecraftAndTowerClockBias';
@@ -1002,7 +1062,13 @@ classdef ReverseGnssSimulation < handle
                 'Receiver phase-center baselines couple %s-frame Euler-321 attitude error into pseudorange through the LOS projection Jacobian. ' ...
                 'With one phase center attitude is unobservable; with one non-zero baseline only partial rotational observability exists; ' ...
                 'with non-collinear baselines the instantaneous rank can include roll, pitch, and yaw. Current N=%d.'], char(obj.attitudeFrame), obj.numReceivers);
-
+            reportData.attitude_filter_note = sprintf([ ...
+                'Attitude states are directly connected to the pseudorange model through receiver phase-centre lever-arm geometry. ' ...
+                'Angular-rate states are not directly observed by an instantaneous pseudorange row; they are only connected through the attitude propagation model. ' ...
+                'Current truth angular rate is [%g, %g, %g] deg/s, so nearly constant angular-rate estimates are expected in this validation case.'], ...
+                rad2deg(obj.omegaTrue_radps(1)), ...
+                rad2deg(obj.omegaTrue_radps(2)), ...
+                rad2deg(obj.omegaTrue_radps(3)));
             selectedName = string(obj.getSharedClockType(obj.simConfig, obj.cfg));
             selectedOscCfg = obj.simConfig.clockLibrary.(char(selectedName));
             selectedClock = Clock(selectedOscCfg.h0, selectedOscCfg.hm1, selectedOscCfg.hm2, obj.dt);
@@ -1036,6 +1102,137 @@ classdef ReverseGnssSimulation < handle
             reportData.sim_adev_edf_by_clock = reportData.sim_adev_edf;
             reportData.seedConfig = obj.seedConfig;
             reportData.source_references = {sprintf('Generated by %s with %d receivers.', obj.entryPointName, obj.numReceivers)};
+        end
+
+        function startingTable = buildStartingPositionTable(obj)
+            objectType = strings(0, 1);
+            objectName = strings(0, 1);
+            positionFrame = strings(0, 1);
+        
+            position1 = strings(0, 1);
+            position2 = strings(0, 1);
+            position3 = strings(0, 1);
+        
+            k = 1;
+            jd = obj.jd0 + obj.time_s(k) / 86400.0;
+        
+            state_eci = obj.history.truth(1:6, k);
+            if any(~isfinite(state_eci))
+                state_eci = obj.assetTruth.state_ECI;
+            end
+        
+            sat_eci_m = state_eci(1:3);
+        
+            R_lvlh_to_eci = SpaceAsset.lvlhToEciDcm(state_eci);
+            R_eci_to_lvlh = R_lvlh_to_eci.';
+        
+            [satLat_deg, satLon_deg] = eciPositionToLatLonDeg(sat_eci_m, jd);
+        
+            earthRadius_m = 6378137.0;
+            if isfield(obj.cfg, "earth") && isfield(obj.cfg.earth, "radius_m")
+                earthRadius_m = obj.cfg.earth.radius_m;
+            end
+        
+            satAlt_km = (norm(sat_eci_m) - earthRadius_m) / 1000.0;
+        
+            appendRow( ...
+                "SpaceAsset", ...
+                string(obj.assetTruth.name), ...
+                "Geodetic sub-satellite point", ...
+                formatPosition("Lat", satLat_deg, "deg"), ...
+                formatPosition("Lon", satLon_deg, "deg"), ...
+                formatPosition("Alt", satAlt_km, "km"));
+        
+            receivers = obj.assetTruth.getEnabledAntennas();
+        
+            for idxReceiver = 1:numel(receivers)
+                rx_eci_m = SpaceAsset.receiverPositionFromState( ...
+                    receivers(idxReceiver), ...
+                    state_eci, ...
+                    obj.history.truth(obj.idx.att, k), ...
+                    obj.attitudeFrame);
+        
+                rx_lvlh_m = R_eci_to_lvlh * (rx_eci_m - sat_eci_m);
+        
+                appendRow( ...
+                    "Receiver", ...
+                    string(receivers(idxReceiver).name), ...
+                    "Spacecraft LVLH offset", ...
+                    formatPosition("X", rx_lvlh_m(1), "m"), ...
+                    formatPosition("Y", rx_lvlh_m(2), "m"), ...
+                    formatPosition("Z", rx_lvlh_m(3), "m"));
+            end
+        
+            for idxTower = 1:obj.numTowers
+                towerAlt_m = 0.0;
+                if isfield(obj.activeTowerConfig(idxTower), "alt_m")
+                    towerAlt_m = double(obj.activeTowerConfig(idxTower).alt_m);
+                end
+        
+                appendRow( ...
+                    "Tower", ...
+                    obj.towerNames(idxTower), ...
+                    "Geodetic station position", ...
+                    formatPosition("Lat", double(obj.activeTowerConfig(idxTower).lat_deg), "deg"), ...
+                    formatPosition("Lon", double(obj.activeTowerConfig(idxTower).lon_deg), "deg"), ...
+                    formatPosition("Alt", towerAlt_m, "m"));
+            end
+        
+            startingTable = table( ...
+                objectType, ...
+                objectName, ...
+                positionFrame, ...
+                position1, ...
+                position2, ...
+                position3, ...
+                'VariableNames', { ...
+                    'ObjectType', ...
+                    'Name', ...
+                    'Frame', ...
+                    'Position1', ...
+                    'Position2', ...
+                    'Position3'});
+        
+            function appendRow(typeValue, nameValue, frameValue, pos1Value, pos2Value, pos3Value)
+                nameValue = string(nameValue);
+                if ismissing(nameValue) || strlength(nameValue) == 0
+                    nameValue = "unnamed";
+                end
+        
+                objectType(end + 1, 1) = string(typeValue);
+                objectName(end + 1, 1) = nameValue;
+                positionFrame(end + 1, 1) = string(frameValue);
+        
+                position1(end + 1, 1) = string(pos1Value);
+                position2(end + 1, 1) = string(pos2Value);
+                position3(end + 1, 1) = string(pos3Value);
+            end
+        
+            function out = formatPosition(label, value, unitText)
+                if isempty(value) || ~isfinite(value)
+                    out = "";
+                    return;
+                end
+        
+                out = string(sprintf("%s %.6g %s", ...
+                    char(string(label)), ...
+                    double(value), ...
+                    char(string(unitText))));
+            end
+        
+            function [lat_deg, lon_deg] = eciPositionToLatLonDeg(pos_eci_m, jdLocal)
+                theta = GroundNode.gmstRad(jdLocal);
+        
+                R_eci_to_ecef = [ ...
+                     cos(theta),  sin(theta), 0; ...
+                    -sin(theta),  cos(theta), 0; ...
+                     0,           0,          1];
+        
+                pos_ecef_m = R_eci_to_ecef * pos_eci_m(:);
+        
+                lon_deg = rad2deg(atan2(pos_ecef_m(2), pos_ecef_m(1)));
+                lat_deg = rad2deg(atan2(pos_ecef_m(3), hypot(pos_ecef_m(1), pos_ecef_m(2))));
+            end
         end
 
         function [frameTable, roundtripTable] = buildFrameTransformTables(obj)

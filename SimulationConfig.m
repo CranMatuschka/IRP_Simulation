@@ -242,7 +242,7 @@ vsnscToReceivers.report.includeFirstPageAssumptions = true;
 % Receiver-comparison diagnostics run shadow EKFs using the same truth stream:
 % RX1 only, RX2 only, and RX1+RX2 fused. These diagnostics are for report
 % comparison only; they do not change the primary fused scenario.
-vsnscToReceivers.report.enableReceiverSubsetComparison = true;
+vsnscToReceivers.report.enableReceiverSubsetComparison = false;
 
 simConfig.scenarios.clockOnly = clockOnly;
 simConfig.scenarios.reverseGnss = reverseGnss;
@@ -303,6 +303,7 @@ function antenna = makeAntennaConfig(id, parentAssetIndex, name, enabled, leverA
     antenna.enabled = enabled;
     antenna.mode = mode;
     antenna.leverArmBody_m = leverArmBody_m(:);
+    antenna.offsetBody_m = leverArmBody_m(:);
 
     % Default zero RF phase-centre state preserves old ReceiverComponent
     % zero-bias validation behaviour exactly.
