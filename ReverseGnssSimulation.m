@@ -512,38 +512,9 @@ classdef ReverseGnssSimulation < handle
         end
         
         function buildResults(obj)
-            obj.results = struct();
-            obj.results.time_s = obj.time_s;
-            obj.results.state_est = obj.history.x;
-            obj.results.state_truth = obj.history.truth;
-            obj.results.covariance_diag = obj.history.covariance_diag;
-            obj.results.innovation_rms_m = obj.history.innovation_rms_m;
-            obj.results.postfit_innovation_rms_m = obj.history.postfit_innovation_rms_m;
-            obj.results.nis_history = obj.history.nis_history;
-            obj.results.H_rank_history = obj.history.H_rank_history;
-            obj.results.receiver_names = obj.receiverNames;
-            obj.results.receiver_offsets_body_m = obj.receiverOffsetsBody_m;
-            obj.results.num_receivers = obj.numReceivers;
-            obj.results.scenario_name = obj.scenarioName;
-            obj.results.state_names = obj.stateNames();
-            obj.results.observability = obj.observabilityDiagnostics();
-            obj.results.ground_clock_true_m = obj.history.ground_clock_true_m;
-            obj.results.ground_clock_correction_m = obj.history.ground_clock_correction_m;
-            obj.results.ground_clock_residual_m = obj.history.ground_clock_residual_m;
-            obj.results.clock_bias_truth_m = obj.history.truth(obj.idx.rxClockBias, :);
-            obj.results.clock_bias_est_m = obj.history.x(obj.idx.rxClockBias, :);
-            obj.results.pseudorange_by_receiver_tower_m = obj.history.pseudorange_by_receiver_tower_m;
-            obj.results.true_range_by_receiver_tower_m = obj.history.true_range_by_receiver_tower_m;
-            obj.results.enableTowerClockEKF = obj.towerClockEkfEnabled();
-
-            if obj.towerClockEkfEnabled()
-                obj.results.tower_clock_bias_est_m = obj.history.x(obj.idx.towerClockBias, :);
-                obj.results.tower_clock_bias_truth_m = obj.history.truth(obj.idx.towerClockBias, :);
-                obj.results.tower_clock_drift_est_mps = obj.history.x(obj.idx.towerClockDrift, :);
-                obj.results.tower_clock_drift_truth_mps = obj.history.truth(obj.idx.towerClockDrift, :);
-            end
+            obj.results = ResultBuilder.fromSimulation(obj);
         end
-
+        
         function reportData = buildGenerateReportData(obj)
             reportData = ReportDataBuilder.fromSimulation(obj);
         end
