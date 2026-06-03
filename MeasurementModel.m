@@ -9,7 +9,6 @@ classdef MeasurementModel < handle
     %   - elevation mask logic
     %   - deterministic extra-delay toggles
     %   - measurement-noise injection
-    %   - tower-clock gauge constraint rows
 
     properties
         cfg
@@ -207,60 +206,6 @@ classdef MeasurementModel < handle
             end
         end
 
-        function [yAll, ypAll, HAll, RAll] = appendTowerClockGaugeConstraint(obj, ...
-                yRange, ypRange, HRange, RRange, ...
-                estTowerClockBias_m, estTowerClockDrift_mps, ...
-                idx, stateDim, towerClockEkfEnabled, ekfCfg)
-        
-            if ~towerClockEkfEnabled
-                yAll = yRange;
-                ypAll = ypRange;
-                HAll = HRange;
-                RAll = RRange;
-                return;
-            end
-        
-            if obj.numTowers < 1
-                yAll = yRange;
-                ypAll = ypRange;
-                HAll = HRange;
-                RAll = RRange;
-                return;
-            end
-        
-            gaugeMode = string(obj.getFieldOrDefault(obj.cfg, ...
-                'towerClockGaugeMode', "meanGroundClock"));
-        
-            if gaugeMode ~= "meanGroundClock"
-                error('ReverseGnssSimulation:UnsupportedTowerClockGauge', ...
-                    'Only towerClockGaugeMode="meanGroundClock" is currently implemented.');
-            end
-        
-            sigmaBias_m = obj.getScalarField(ekfCfg, ...
-                'towerClockGaugeBiasSigma_m', 1e-4);
-        
-            sigmaDrift_mps = obj.getScalarField(ekfCfg, ...
-                'towerClockGaugeDriftSigma_mps', 1e-6);
-        
-            yGauge = [0.0; 0.0];
-        
-            ypGauge = [ ...
-                mean(estTowerClockBias_m); ...
-                mean(estTowerClockDrift_mps)];
-        
-            HGauge = zeros(2, stateDim);
-        
-            HGauge(1, idx.towerClockBias) = 1.0 / obj.numTowers;
-            HGauge(2, idx.towerClockDrift) = 1.0 / obj.numTowers;
-        
-            RGauge = diag([sigmaBias_m^2, sigmaDrift_mps^2]);
-        
-            yAll = [yRange; yGauge];
-            ypAll = [ypRange; ypGauge];
-            HAll = [HRange; HGauge];
-            RAll = blkdiag(RRange, RGauge);
-        end
-        
         function tf = elevationMaskEnabled(obj)
             tf = obj.useElevationMask;
         end
