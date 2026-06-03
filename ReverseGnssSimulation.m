@@ -341,35 +341,8 @@ classdef ReverseGnssSimulation < handle
         end
 
         function setupEkf(obj)
-            obj.idx = struct();
-
-            obj.idx.pos = 1:3;
-            obj.idx.vel = 4:6;
-            obj.idx.att = 7:9;
-            obj.idx.omega = 10:12;
-            obj.idx.rxClockBias = 13;
-            obj.idx.rxClockDrift = 14;
-            obj.idx.rxClock = 13:14;
-
-            if obj.towerClockEkfEnabled()
-                obj.idx.towerClockBias = zeros(1, obj.numTowers);
-                obj.idx.towerClockDrift = zeros(1, obj.numTowers);
-
-                nextIdx = 15;
-                for twr = 1:obj.numTowers
-                    obj.idx.towerClockBias(twr) = nextIdx;
-                    obj.idx.towerClockDrift(twr) = nextIdx + 1;
-                    nextIdx = nextIdx + 2;
-                end
-
-                obj.idx.towerClock = sort([obj.idx.towerClockBias, obj.idx.towerClockDrift]);
-                obj.stateDim = 14 + 2 * obj.numTowers;
-            else
-                obj.idx.towerClockBias = [];
-                obj.idx.towerClockDrift = [];
-                obj.idx.towerClock = [];
-                obj.stateDim = 14;
-            end
+            [obj.idx, obj.stateDim] = StateIndexFactory.create( ...
+                obj.numTowers, obj.towerClockEkfEnabled());
 
             x0 = zeros(obj.stateDim, 1);
             P0 = zeros(obj.stateDim);
@@ -1035,21 +1008,10 @@ classdef ReverseGnssSimulation < handle
         end
 
         function names = stateNames(obj)
-            names = ["ECI X position [m]"; "ECI Y position [m]"; "ECI Z position [m]"; ...
-                "ECI X velocity [m/s]"; "ECI Y velocity [m/s]"; "ECI Z velocity [m/s]"; ...
-                "Body attitude error x [rad]"; "Body attitude error y [rad]"; "Body attitude error z [rad]"; ...
-                "Body omega x [rad/s]"; "Body omega y [rad/s]"; "Body omega z [rad/s]"; ...
-                "RX clock bias relative to ground clock gauge [m]"; ...
-                "RX clock drift relative to ground clock gauge [m/s]"];
-
-            if obj.towerClockEkfEnabled()
-                for twr = 1:obj.numTowers
-                    names(end + 1, 1) = sprintf('%s clock bias relative to mean ground clock [m]', obj.towerNames(twr));
-                    names(end + 1, 1) = sprintf('%s clock drift relative to mean ground clock [m/s]', obj.towerNames(twr));
-                end
-            end
+            names = StateIndexFactory.stateNames( ...
+                obj.towerNames, obj.towerClockEkfEnabled());
         end
-
+        
         function towers = reportTowers(obj)
             towers = repmat(struct('name', '', 'lat_deg', 0, 'lon_deg', 0, 'alt_m', 0, 'enabled', true), 1, obj.numTowers);
             for k = 1:obj.numTowers
