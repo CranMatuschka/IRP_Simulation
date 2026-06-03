@@ -150,9 +150,9 @@ classdef ReverseGnssSimulation < handle
             end
 
             reportData = obj.buildGenerateReportData();
-            reportToggles = obj.buildReportToggles();
-            reportConfig = obj.buildReportConfig();
-
+            reportToggles = ReportConfigBuilder.togglesFromSimulation(obj);
+            reportConfig = ReportConfigBuilder.configFromSimulation(obj);
+            
             generateReport(reportData, reportConfig, reportToggles);
         end
     end
@@ -519,49 +519,6 @@ classdef ReverseGnssSimulation < handle
             reportData = ReportDataBuilder.fromSimulation(obj);
         end
 
-        function reportToggles = buildReportToggles(obj)
-            reportToggles = struct();
-
-            reportToggles.generatePdf = true;
-            reportToggles.groundSegment = true;
-            reportToggles.perfectGroundClocks = ~obj.groundClockErrorsEnabled();
-            reportToggles.groundClockError = obj.groundClockErrorsEnabled();
-            reportToggles.groundTimingNetworkCorrection = obj.groundClockCorrectionEnabled();
-            reportToggles.towerClocksEstimatedInEkf = obj.towerClockEkfEnabled();
-
-            reportToggles.satelliteClockError = true;
-            reportToggles.ekfOrbitClockEstimation = true;
-            reportToggles.measurementNoise = obj.measurementModel.measurementNoiseEnabled();
-
-            reportToggles.allanDeviationValidation = logical(obj.getFieldOrDefault( ...
-                obj.cfg.report, 'enableAllanDeviationValidation', true));
-
-            reportToggles.ionosphere = logical(obj.cfg.measurement.enableIonosphereDelay);
-            reportToggles.troposphere = logical(obj.cfg.measurement.enableTroposphereDelay);
-            reportToggles.multipath = logical(obj.cfg.measurement.enableMultipathDelay);
-            reportToggles.antennaBias = logical(obj.cfg.measurement.enableAntennaDelay);
-            reportToggles.hardwareDelay = logical(obj.cfg.measurement.enableHardwareDelay);
-        end
-        
-        function reportConfig = buildReportConfig(obj)
-            reportConfig = struct();
-
-            reportConfig.title = 'Reverse-GNSS Spacecraft Code-Pseudorange EKF Report';
-            reportConfig.scenarioName = char(obj.scenarioName);
-            reportConfig.selectedOscillatorName = string(obj.assetConfig.clock.clockType);
-            reportConfig.reportRoot = char(obj.outputDir);
-            reportConfig.outputBaseName = sprintf('%s_report', char(obj.scenarioName));
-
-            reportConfig.compilePdf = logical(obj.getFieldOrDefault( ...
-                obj.cfg.report, 'compilePdf', true));
-
-            reportConfig.interactivePlots = logical(obj.getFieldOrDefault( ...
-                obj.cfg.report, 'interactivePlots', false));
-
-            reportConfig.closeFiguresAfterExport = ~reportConfig.interactivePlots;
-            reportConfig.generatedBy = char(obj.entryPointName);
-        end
-        
         function F = buildStateTransition(obj)
             F = eye(obj.stateDim);
             dtLocal = obj.dt;
