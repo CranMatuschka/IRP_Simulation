@@ -30,10 +30,23 @@ classdef Antenna < handle
 
             if nargin == 1 && isstruct(varargin{1})
                 cfg = varargin{1};
-
-                if isfield(cfg, "id"); obj.id = cfg.id; end
-                if isfield(cfg, "name"); obj.name = string(cfg.name); end
-                if isfield(cfg, "enabled"); obj.enabled = logical(cfg.enabled);end
+            
+                if isfield(cfg, "id")
+                    obj.id = cfg.id;
+                end
+            
+                if isfield(cfg, "name")
+                    obj.name = string(cfg.name);
+                end
+            
+                if isfield(cfg, "mode")
+                    obj.mode = string(cfg.mode);
+                end
+            
+                if isfield(cfg, "enabled")
+                    obj.enabled = logical(cfg.enabled);
+                end
+            
                 if isfield(cfg, "offsetBody_m")
                     obj.offsetBody_m = cfg.offsetBody_m(:);
                 elseif isfield(cfg, "antennaOffsetBody_m")
@@ -41,12 +54,29 @@ classdef Antenna < handle
                 elseif isfield(cfg, "leverArmBody_m")
                     obj.offsetBody_m = cfg.leverArmBody_m(:);
                 end
+            
+                if isfield(cfg, "pco_m")
+                    obj.pco_m = cfg.pco_m(:);
+                elseif isfield(cfg, "phaseCenterOffset_m")
+                    obj.pco_m = cfg.phaseCenterOffset_m(:);
+                elseif isfield(cfg, "phaseCentreOffset_m")
+                    obj.pco_m = cfg.phaseCentreOffset_m(:);
+                end
+            
+                if isfield(cfg, "pcvMap")
+                    obj.pcvMap = cfg.pcvMap;
+                elseif isfield(cfg, "phaseCenterVariationMap")
+                    obj.pcvMap = cfg.phaseCenterVariationMap;
+                elseif isfield(cfg, "phaseCentreVariationMap")
+                    obj.pcvMap = cfg.phaseCentreVariationMap;
+                end
+            
                 if isfield(cfg, "pseudorangeSigma_m")
                     obj.pseudorangeSigma_m = cfg.pseudorangeSigma_m;
                 elseif isfield(cfg, "measurementSigma_m")
                     obj.pseudorangeSigma_m = cfg.measurementSigma_m;
                 end
-
+            
                 obj.validateMode();
                 obj.validateVectors();
                 return;
