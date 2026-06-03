@@ -375,7 +375,10 @@ classdef ReverseGnssSimulation < handle
                 end
             end
 
-            P0 = obj.applyStateLocksToCovariance(P0);
+            P0 = StateLockPolicy.applyToCovariance( ...
+                P0, obj.cfg.ekf, obj.idx, obj.stateDim, ...
+                obj.towerClockEkfEnabled());
+
             obj.initialX0 = obj.physicalEstimateVector();
             obj.initialTruth0 = obj.physicalTruthVector();
             obj.initialP0 = P0;
@@ -402,7 +405,10 @@ classdef ReverseGnssSimulation < handle
 
                 F = obj.buildStateTransition();
                 obj.ekf.predict(zeros(obj.stateDim, 1), F, obj.Q);
-                obj.ekf.P = obj.applyStateLocksToCovariance(obj.ekf.P);
+                
+                obj.ekf.P = StateLockPolicy.applyToCovariance( ...
+                    obj.ekf.P, obj.cfg.ekf, obj.idx, obj.stateDim, obj.towerClockEkfEnabled());
+                
                 obj.transitionFromInitial = F * obj.transitionFromInitial;
             end
 
@@ -447,8 +453,11 @@ classdef ReverseGnssSimulation < handle
             obj.ekf.X(:) = 0.0;
 
             obj.ekf.P = obj.applyCovarianceFloor(obj.ekf.P);
-            obj.ekf.P = obj.applyStateLocksToCovariance(obj.ekf.P);
 
+            obj.ekf.P = StateLockPolicy.applyToCovariance( ...
+                obj.ekf.P, obj.cfg.ekf, obj.idx, ...
+                obj.stateDim, obj.towerClockEkfEnabled());
+            
             [ypPostRange, ~] = ...
                 obj.measurementModel.predictPseudorangesWithJacobian( ...
                 towersEci, groundResidualModel_m, visibilityMask, ...
@@ -520,7 +529,9 @@ classdef ReverseGnssSimulation < handle
                     F(idxPair, idxPair) = towerPhi;
                 end
             end
-            F = obj.applyStateLocksToTransition(F);
+            F = StateLockPolicy.applyToTransition( ...
+                    F, obj.cfg.ekf, obj.idx, obj.stateDim, ...
+                    obj.towerClockEkfEnabled());
         end
 
         function Q = buildProcessNoise(obj)
@@ -549,7 +560,9 @@ classdef ReverseGnssSimulation < handle
                 end
             end   
             Q = 0.5 * (Q + Q');
-            Q = obj.applyStateLocksToProcessNoise(Q);
+            Q = StateLockPolicy.applyToProcessNoise( ...
+                Q, obj.cfg.ekf, obj.idx, obj.stateDim, ...
+                obj.towerClockEkfEnabled());
         end
 
         function [clockPhi, clockQ] = clockBiasDriftMatrices(obj, dtLocal)
@@ -620,7 +633,9 @@ classdef ReverseGnssSimulation < handle
         function injectErrorState(obj, dx)
             dx = dx(:);
 
-            lockedIdx = obj.lockedStateIndices();
+            lockedIdx = StateLockPolicy.lockedStateIndices( ...
+                obj.cfg.ekf, obj.idx, obj.stateDim, obj.towerClockEkfEnabled());
+            
             if ~isempty(lockedIdx)
                 dx(lockedIdx) = 0.0;
             end
@@ -773,112 +788,6 @@ classdef ReverseGnssSimulation < handle
         
         function tf = towerClockEkfEnabled(obj)
             tf = logical(obj.getFieldOrDefault(obj.cfg, 'enableTowerClockEKF', false));
-        end
-        
-        function tf = freezeNavigationStates(obj)
-            tf = logical(obj.getFieldOrDefault(obj.cfg.ekf, ...
-                'freezeNavigationStates', false));
-        end
-
-        function idxLocked = lockedStateIndices(obj)
-            idxLocked = [];
-        
-            if obj.freezeNavigationStates()
-                idxLocked = [idxLocked, obj.idx.pos, obj.idx.vel, obj.idx.att, obj.idx.omega];
-            else
-                if ~obj.estimateStateGroup('estimatePosition', true)
-                    idxLocked = [idxLocked, obj.idx.pos];
-                end
-        
-                if ~obj.estimateStateGroup('estimateVelocity', true)
-                    idxLocked = [idxLocked, obj.idx.vel];
-                end
-        
-                if ~obj.estimateStateGroup('estimateAttitude', true)
-                    idxLocked = [idxLocked, obj.idx.att];
-                end
-        
-                if ~obj.estimateStateGroup('estimateAngularRate', true)
-                    idxLocked = [idxLocked, obj.idx.omega];
-                end
-            end
-        
-            if ~obj.estimateStateGroup('estimateReceiverClockBias', true)
-                idxLocked = [idxLocked, obj.idx.rxClockBias];
-            end
-        
-            if ~obj.estimateStateGroup('estimateReceiverClockDrift', true)
-                idxLocked = [idxLocked, obj.idx.rxClockDrift];
-            end
-        
-            if obj.towerClockEkfEnabled()
-                if ~obj.estimateStateGroup('estimateTowerClockBias', true)
-                    idxLocked = [idxLocked, obj.idx.towerClockBias];
-                end
-        
-                if ~obj.estimateStateGroup('estimateTowerClockDrift', true)
-                    idxLocked = [idxLocked, obj.idx.towerClockDrift];
-                end
-            end
-        
-            idxLocked = unique(idxLocked(:).');
-            idxLocked = idxLocked(idxLocked >= 1 & idxLocked <= obj.stateDim);
-        end
-        
-        function tf = estimateStateGroup(obj, fieldName, defaultValue)
-            tf = logical(obj.getFieldOrDefault(obj.cfg.ekf, fieldName, defaultValue));
-        end
-        
-        function lockedVar = lockedStateVariance(obj)
-            lockedVar = obj.getScalarField(obj.cfg.ekf, 'lockedStateVariance', 1e-24);
-        end
-        
-        function P = applyStateLocksToCovariance(obj, P)
-            lockedIdx = obj.lockedStateIndices();
-        
-            P = 0.5 * (P + P');
-        
-            if isempty(lockedIdx)
-                return;
-            end
-        
-            lockedVar = obj.lockedStateVariance();
-            
-            P(lockedIdx, :) = 0.0;
-            P(:, lockedIdx) = 0.0;
-            P(sub2ind(size(P), lockedIdx, lockedIdx)) = lockedVar;
-        
-            P = 0.5 * (P + P');
-        end
-        
-        function Q = applyStateLocksToProcessNoise(obj, Q)
-            lockedIdx = obj.lockedStateIndices();
-        
-            Q = 0.5 * (Q + Q');
-        
-            if isempty(lockedIdx)
-                return;
-            end
-        
-            Q(lockedIdx, :) = 0.0;
-            Q(:, lockedIdx) = 0.0;
-        
-            Q = 0.5 * (Q + Q');
-        end
-        
-        function F = applyStateLocksToTransition(obj, F)
-            lockedIdx = obj.lockedStateIndices();
-        
-            if isempty(lockedIdx)
-                return;
-            end
-        
-            F(lockedIdx, :) = 0.0;
-            F(:, lockedIdx) = 0.0;
-        
-            for kk = lockedIdx
-                F(kk, kk) = 1.0;
-            end
         end
         
         function x = physicalEstimateVector(obj)
