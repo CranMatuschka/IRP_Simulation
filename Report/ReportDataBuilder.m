@@ -26,7 +26,8 @@ classdef ReportDataBuilder
 
             % Raw inputs used by generateReport.m to build report-specific tables.
             reportData.asset_name = string(sim.assetConfig.name);
-            reportData.state_names = ReportDataBuilder.stateNames(sim);
+            reportData.state_names = StateIndexFactory.stateNames( ...
+                sim.towerNames, ReportDataBuilder.towerClockEkfEnabled(sim));
             reportData.state_dim = sim.stateDim;
             reportData.state_index = sim.idx;
             reportData.enable_tower_clock_ekf = ReportDataBuilder.towerClockEkfEnabled(sim);
@@ -290,11 +291,6 @@ classdef ReportDataBuilder
             end
         end
 
-        function names = stateNames(sim)
-            names = StateIndexFactory.stateNames( ...
-                sim.towerNames, ReportDataBuilder.towerClockEkfEnabled(sim));
-        end
-
         function obs = observabilityDiagnostics(sim)
             W = 0.5 * (sim.observabilityNormalMatrix + sim.observabilityNormalMatrix.');
             columnNorm = sqrt(max(diag(W), 0));
@@ -306,7 +302,8 @@ classdef ReportDataBuilder
 
             s = svd(Wn);
             weak = columnNorm < max(columnNorm) * 1e-8;
-            names = ReportDataBuilder.stateNames(sim);
+            names = StateIndexFactory.stateNames( ...
+                sim.towerNames, ReportDataBuilder.towerClockEkfEnabled(sim));
 
             obs = struct( ...
                 'rank', sum(s > 1e-8), ...

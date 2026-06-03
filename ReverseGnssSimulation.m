@@ -936,60 +936,6 @@ classdef ReverseGnssSimulation < handle
             end
         end
 
-        function names = stateNames(obj)
-            names = StateIndexFactory.stateNames( ...
-                obj.towerNames, obj.towerClockEkfEnabled());
-        end
-        
-        function towers = reportTowers(obj)
-            towers = repmat(struct('name', '', 'lat_deg', 0, 'lon_deg', 0, 'alt_m', 0, 'enabled', true), 1, obj.numTowers);
-            for k = 1:obj.numTowers
-                towers(k).name = char(obj.towerNames(k));
-                towers(k).lat_deg = obj.activeTowerConfig(k).lat_deg;
-                towers(k).lon_deg = obj.activeTowerConfig(k).lon_deg;
-                towers(k).alt_m = obj.activeTowerConfig(k).alt_m;
-                towers(k).enabled = true;
-            end
-        end
-
-        function tauOut = validTauForSamples(~, tauIn, dt, n)
-            m = unique(round(tauIn(:).' ./ dt));
-            m = m(isfinite(m) & m >= 1 & 2 .* m < n);
-            tauOut = m .* dt;
-            if isempty(tauOut), tauOut = dt; end
-        end
- 
-        function [tauValid_s, adev, adevSigma, edf] = runClockAllanValidation(obj, clockTemplate, tauRequested_s, dt, nSamples)
-            nSamples = max(3, floor(double(nSamples)));
-            tauValid_s = obj.validTauForSamples(tauRequested_s, dt, nSamples);
-            validationClock = Clock(clockTemplate.h_0, clockTemplate.h_minus_1, clockTemplate.h_minus_2, dt);
-            validationClock.randomStream = obj.validationClockStream;
-            phase_s = NaN(nSamples, 1);
-            phase_s(1) = validationClock.total_bias_sec;
-            for k = 2:nSamples
-                validationClock.update(dt);
-                phase_s(k) = validationClock.total_bias_sec;
-            end
-            adev = NaN(1, numel(tauValid_s));
-            adevSigma = NaN(1, numel(tauValid_s));
-            edf = NaN(1, numel(tauValid_s));
-            for k = 1:numel(tauValid_s)
-                [adev(k), ~, edf(k), adevSigma(k)] = Clock.computeOverlappingAllanDeviation(phase_s, tauValid_s(k), dt);
-            end
-        end
-
-        function obs = observabilityDiagnostics(obj)
-            W = 0.5 * (obj.observabilityNormalMatrix + obj.observabilityNormalMatrix.');
-            columnNorm = sqrt(max(diag(W), 0));
-            scale = columnNorm; scale(scale == 0) = Inf;
-            Wn = W ./ (scale * scale.'); Wn(~isfinite(Wn)) = 0.0;
-            s = svd(Wn);
-            weak = columnNorm < max(columnNorm) * 1e-8;
-            names = obj.stateNames();
-            obs = struct('rank', sum(s > 1e-8), 'normalizedSingularValues', s, ...
-                'columnNorm', columnNorm, 'weak', weak, 'weakStateNames', names(weak));
-        end
-
         function value = getFieldOrDefault(~, s, fieldName, defaultValue)
             if isstruct(s) && isfield(s, fieldName), value = s.(fieldName); else, value = defaultValue; end
         end
