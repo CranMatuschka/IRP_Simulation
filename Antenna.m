@@ -1,10 +1,9 @@
 classdef Antenna < handle
-    %RECEIVERCOMPONENT Geometric spacecraft receiver phase-center only.
+    %ANTENNA Geometric RF antenna phase-center model.
     %
-    % This class intentionally contains no clock, no RF delay, no hardware
-    % state, no receiver bias, and no process model.
-    %
-    % The only physical input is offsetBody_m.
+    % Supports TX, RX, and Diplex sign conventions.
+    % offsetBody_m is the mounting offset in the parent object's local/body frame.
+    % pco_m and pcvMap model antenna phase-center corrections.
 
     properties
         id = 1
@@ -20,7 +19,7 @@ classdef Antenna < handle
         % center. Used by MeasurementModel when building R.
         pseudorangeSigma_m = 0.0
         pcvMap = []
-        pco_m (3,1)
+        pco_m (3,1) double = zeros(3, 1)
     end
 
     methods

@@ -90,6 +90,7 @@ if isfield(reportConfig, "interactivePlots")
     interactive_report_plots = logical(reportConfig.interactivePlots);
 end
 setappdata(0, 'generateReportInteractivePlots', interactive_report_plots);
+setappdata(0, 'generateReportOutputBaseName', string(reportConfig.outputBaseName));
 
 %% Report Figure Generation
 plot_paths = struct();
@@ -227,6 +228,8 @@ end
 report = {};
 report = appendLine(report, "\documentclass[11pt,a4paper]{article}");
 report = appendLine(report, "\usepackage[margin=1.7cm]{geometry}");
+report = appendLine(report, "\usepackage{amsmath}");
+report = appendLine(report, "\usepackage{geometry}");
 report = appendLine(report, "\usepackage{graphicx}");
 report = appendLine(report, "\usepackage{longtable}");
 report = appendLine(report, "\usepackage{array}");
@@ -234,7 +237,7 @@ report = appendLine(report, "\usepackage{booktabs}");
 report = appendLine(report, "\usepackage{xcolor}");
 report = appendLine(report, "\usepackage{hyperref}");
 report = appendLine(report, "\setlength{\parindent}{0pt}");
-report = appendLine(report, "\setlength{\tabcolsep}{7pt}");
+report = appendLine(report, "\setlength{\tabcolsep}{3pt}");
 report = appendLine(report, "\renewcommand{\arraystretch}{1.18}");
 report = appendLine(report, "\hypersetup{colorlinks=true,linkcolor=black,urlcolor=blue}");
 report = appendLine(report, "\begin{document}");
@@ -251,6 +254,8 @@ has_first_page_tables = isfield(reportData, "assumption_table") || ...
     isfield(reportData, "noise_error_table") || ...
     isfield(reportData, "covariance_table") || ...
     isfield(reportData, "initial_state_table") || ...
+    isfield(reportData, "final_state_table") || ...
+    isfield(reportData, "observability_table") || ...
     isfield(reportData, "first_page_summary_table");
 if has_first_page_tables
     report = appendLine(report, "\section{Run Assumptions and Initial Conditions}");
@@ -259,14 +264,16 @@ if has_first_page_tables
     report = appendOptionalTable(report, "Noise and Error Inputs", reportData, "noise_error_table", 24);
     report = appendOptionalTable(report, "Covariance and Process Inputs", reportData, "covariance_table", 24);
     report = appendOptionalTable(report, "Initial Kalman Filter State Vector", reportData, "initial_state_table", 40);
+    report = appendOptionalTable(report, "Final Kalman Filter State Vector", reportData, "final_state_table", 40);
+    report = appendOptionalTable(report, "Accumulated Linearised Observability", reportData, "observability_table", 40);
 end
 
 report = appendLine(report, "\section{Scenario Summary}");
 summary_format = [ ...
     'This report documents the current validation scenario. ' ...
-    'The ground segment transmits clock-referenced pseudorange observations. ' ...
-    'Each SpaceAsset carries simple mounted ReceiverComponent phase centers that share the parent SpaceAsset clock. ' ...
-    'The EKF estimates ECI position, velocity, configured SpaceAsset clock, and tower clock states using %s for the internal clock sub-state. ' ...
+    'The ground segment transmits reverse-GNSS pseudorange observations to a satellite receiver. ' ...
+    'Each SpaceAsset carries fixed mounted RX phase centres that share the parent RX clock. ' ...
+    'The EKF estimates local orbital receiver navigation, configured RX clock states, and configured transmitter signal-delay states using %s for the internal clock sub-state. ' ...
     'The run length is %.2f hours with %.1f second sampling and %d ground stations.'];
 if isfield(reportData, "ekf_clock_state_units")
     clock_state_units_text = reportData.ekf_clock_state_units;
@@ -278,18 +285,25 @@ report = appendParagraph(report, sprintf(summary_format, ...
     reportData.total_time_hours, reportData.dt, reportData.num_towers));
 if isfield(reportData, "clock_estimation_mode")
     clock_mode_text = string(reportData.clock_estimation_mode);
-    if clock_mode_text == "spacecraftOnly"
+    if clock_mode_text == "spacecraftOnly" || clock_mode_text == "spacecraftReceiverClockOnly"
         mode_description = ['Clock-estimation mode is %s. ' ...
-            'In operational spacecraft-only mode, tower clocks are corrected externally by the ground timing network and are not free EKF states on board the spacecraft.'];
+            'The EKF estimates the spacecraft receiver clock only. Tower transmitter residual clocks may be generated in the truth measurements, but they are not EKF states and are not inserted into the predicted pseudorange unless represented by an explicit correction.'];
+    elseif clock_mode_text == "receiverClockAndTxSignalDelays"
+        mode_description = ['Clock-estimation mode is %s. ' ...
+            'The EKF estimates the satellite RX clock and one range-equivalent transmitter signal-delay state per tower; the pseudorange Jacobian has positive RX clock-bias sensitivity and negative sensitivity to the transmitting tower delay.'];
     else
         mode_description = ['Clock-estimation mode is %s. ' ...
-            'Tower transmitter clocks are explicit EKF states, and each raw pseudorange row carries positive parent-SpaceAsset clock sensitivity and negative sensitivity to the specific transmitting tower clock.'];
+            'See the scenario notes for which clock terms are estimated states and which are applied truth-side residuals or corrections.'];
     end
     report = appendParagraph(report, sprintf(mode_description, char(clock_mode_text)));
 end
 if isfield(reportData, "clockGaugeMode")
     gauge_text = string(reportData.clockGaugeMode);
-    if gauge_text == "externalTimeTransfer"
+    if gauge_text == "fixReferenceTxDelay"
+        gauge_description = sprintf( ...
+            'Reference ambiguity handling is %s. TX signal delays are range-equivalent relative delays, with reference tower %s fixed to zero.', ...
+            char(gauge_text), char(string(reportData.referenceTowerName)));
+    elseif gauge_text == "externalTimeTransfer"
         gauge_description = sprintf( ...
             'Clock gauge mode is %s. Tower clock pseudo-measurements provide an external time-transfer reference with configured sigma %.3g ps, so reported clock states are referenced to that external network time scale.', ...
             char(gauge_text), reportData.externalClockCorrectionSigma_ps);
@@ -300,6 +314,11 @@ if isfield(reportData, "clockGaugeMode")
     elseif gauge_text == "externalTowerCorrections"
         gauge_description = sprintf( ...
             'Clock gauge mode is %s. Tower transmitter clocks are simulated in truth and corrected before the spacecraft-only EKF update; residual correction uncertainty is represented in R.', ...
+            char(gauge_text));
+    elseif gauge_text == "groundClockResidualsGeneratedButNotEstimated"
+        gauge_description = sprintf( ...
+            ['Clock gauge mode is %s. Tower transmitter residual clocks are generated on the truth side after any configured external correction, ' ...
+             'but they are not EKF states. If ground correction is disabled, these transmitter-side residuals appear in the pseudorange innovations rather than being removed from the prediction model.'], ...
             char(gauge_text));
     else
         gauge_description = sprintf( ...
@@ -312,12 +331,19 @@ if isfield(reportData, "measurementNoiseEnabled") && ~reportData.measurementNois
     report = appendParagraph(report, ['Measurement noise injection is disabled. Innovation RMS remains useful as a deterministic residual diagnostic, ' ...
         'but NIS is not statistically meaningful and should not be interpreted as a chi-square consistency result.']);
 end
+if isfield(reportData, "observability_note")
+    report = appendParagraph(report, reportData.observability_note);
+end
+
+% 1.1 Receiver Clock Architectue Interpretation
 if isfield(reportData, "receiver_architecture_note")
     report = appendLine(report, "\subsection{Receiver Clock Architecture Interpretation}");
     report = appendParagraph(report, reportData.receiver_architecture_note);
 end
 report = appendOptionalTable(report, "Receiver Architecture Comparison", reportData, "receiver_architecture_comparison_table", 12);
 report = appendOptionalTable(report, "Receiver Geometry Diagnostic", reportData, "receiver_geometry_comparison_table", 12);
+
+% 1.2 Scenario Geometriy and Receiver Architecture
 if isfield(reportData, "signal_model_note")
     report = appendLine(report, "\subsection{Scenario Geometry and Receiver Architecture}");
     report = appendParagraph(report, reportData.signal_model_note);
@@ -325,6 +351,50 @@ end
 
 report = appendOptionalTable(report, "Scenario Geometry and Receiver Architecture", ...
     reportData, "scenario_geometry_table", 20);
+
+% 1.3 EKF State Vector
+if isfield(reportData, "state_vector_table")
+    report = appendLine(report, "\subsection{EKF State Vector}");
+    report = appendParagraph(report, ['The filter is an error-state / MEKF-style estimator. ' ...
+        'The nominal spacecraft position, velocity, attitude quaternion, body angular rate, and receiver clock are corrected by the estimated error state after each measurement update.']);
+    report = appendOptionalTable(report, "", reportData, "state_vector_table", 14);
+end
+
+
+% 1.4 Pseudorange Measurement Model and Observation Matrix
+if isfield(reportData, "measurement_model_equation") || ...
+        isfield(reportData, "observation_matrix_equation") || ...
+        isfield(reportData, "measurement_model_table")
+    report = appendLine(report, "\subsection{Pseudorange Measurement Model and Observation Matrix}");
+    if isfield(reportData, "measurement_model_equation")
+        report = appendLine(report, "\[");
+        equation_lines = string(reportData.measurement_model_equation);
+        for idx_equation_line = 1:numel(equation_lines)
+            report = appendLine(report, equation_lines(idx_equation_line));
+        end
+        report = appendLine(report, "\]");
+    end
+    if isfield(reportData, "observation_matrix_equation")
+        report = appendLine(report, "\[");
+        equation_lines = string(reportData.observation_matrix_equation);
+        for idx_equation_line = 1:numel(equation_lines)
+            report = appendLine(report, equation_lines(idx_equation_line));
+        end
+        report = appendLine(report, "\]");
+    end
+    report = appendOptionalTable(report, "", reportData, "measurement_model_table", 12);
+    report = appendOptionalTable(report, ...
+        "H-matrix factor observability by EKF state block", ...
+        reportData, ...
+        "h_factor_observability_table", ...
+        12);
+    
+    report = appendOptionalTable(report, ...
+        "Observation matrix dimensions and rank diagnostics", ...
+        reportData, ...
+        "observation_matrix_diagnostics_table", ...
+        12);
+end
 
 report = appendOptionalTable(report, "Starting Positions", ...
     reportData, "starting_position_table", 20);
@@ -341,7 +411,7 @@ if isfield(reportToggles, "groundTimingNetworkCorrection")
     report = appendStatusRow(report, "Ground timing network correction", reportToggles.groundTimingNetworkCorrection);
 end
 if isfield(reportToggles, "towerClocksEstimatedInEkf")
-    report = appendStatusRow(report, "Tower clocks estimated in spacecraft EKF", reportToggles.towerClocksEstimatedInEkf);
+    report = appendStatusRow(report, "TX signal delays estimated in EKF", reportToggles.towerClocksEstimatedInEkf);
 end
 report = appendStatusRow(report, "SpaceAsset onboard clock error", reportToggles.satelliteClockError);
 report = appendStatusRow(report, "EKF orbit and clock estimation", reportToggles.ekfOrbitClockEstimation);
@@ -361,7 +431,7 @@ report = appendLine(report, "\bottomrule");
 report = appendLine(report, "\end{tabular}");
 report = appendLine(report, "\end{center}");
 
-%% State Estimation Validation
+%% 2. State Estimation Validation
 report = appendLine(report, "\clearpage");
 report = appendLine(report, "\section{State Estimation Validation}");
 if isfield(reportData, "attitude_filter_note")
@@ -370,8 +440,8 @@ end
 report = beginPlotTable(report);
 
 report = appendReportRow(report, reportToggles.ekfOrbitClockEstimation, plot_paths.position_error, ...
-    "Combined EKF Position Error Using RX1 + RX2", ...
-    ["The plot compares the EKF position estimate with the propagated truth state in all three ECI axes and as a 3D norm. " ...
+    "Combined EKF Local Position Error", ...
+    ["The plot compares the EKF local East/North/Vertical position estimate with truth in all three local axes and as a 3D norm. " ...
      "The diagnostic is deterministic truth differencing; no measurement noise is injected unless the measurement-noise toggle is enabled."]);
 
 report = appendReportRow(report, reportToggles.ekfOrbitClockEstimation, plot_paths.position_covariance, ...
@@ -401,7 +471,40 @@ report = appendReportRow(report, reportToggles.ekfOrbitClockEstimation && report
      "The approach is state-estimation consistency against known truth in a controlled scenario."]);
 
 report = endPlotTable(report);
-%% Measurement and Geometry Validation
+
+if isfield(reportData, "final_H_rows") && ...
+        isfield(reportData, "final_H_columns") && ...
+        isfield(reportData, "final_H_rank") && ...
+        isfield(reportData, "final_H_rank_to_state_dim")
+
+    report = appendLine(report, "\subsection{Instantaneous Measurement Jacobian Rank}");
+
+    hRankPercent = 100.0 * reportData.final_H_rank_to_state_dim;
+
+    report = appendParagraph(report, sprintf([ ...
+        'The final measurement Jacobian contains %d measurement rows and %d EKF state columns. ' ...
+        'Its instantaneous rank is %d, corresponding to %.1f%% of the EKF state dimension. ' ...
+        'This means that all pseudorange rows may be used, but they provide only %d independent measurement directions at this epoch. ' ...
+        'For the current pseudorange-only model, this is expected when the geometry mainly observes spacecraft position and receiver clock bias, ' ...
+        'while velocity, angular rate, and clock drift are observable only through time propagation.'], ...
+        reportData.final_H_rows, ...
+        reportData.final_H_columns, ...
+        reportData.final_H_rank, ...
+        hRankPercent, ...
+        reportData.final_H_rank));
+end
+if isfield(reportData, "final_H_pos_rank") && ...
+        isfield(reportData, "final_H_att_rank") && ...
+        isfield(reportData, "final_H_pos_att_clock_rank")
+
+    report = appendParagraph(report, sprintf([ ...
+        'Final block ranks: position block rank = %d, attitude block rank = %d, ' ...
+        'combined position-attitude-clock-bias rank = %d.'], ...
+        reportData.final_H_pos_rank, ...
+        reportData.final_H_att_rank, ...
+        reportData.final_H_pos_att_clock_rank));
+end
+%% 3. Measurement and Geometry Validation
 report = appendLine(report, "\clearpage");
 report = appendLine(report, "\section{Measurement and Geometry Validation}");
 report = appendParagraph(report, [ ...
@@ -433,10 +536,16 @@ else
 end
 report = appendReportRow(report, reportToggles.ekfOrbitClockEstimation, plot_paths.nis, ...
     "Normalised Innovation Squared", nis_description);
+if isfield(reportData, "enableElevationMask") && reportData.enableElevationMask
+    visibility_description = ["The plot shows how many ground towers pass the tower-side elevation mask and are used by the EKF at each epoch. " ...
+        sprintf("Elevation mask: %.2f deg.", reportData.elevationMask_deg)];
+else
+    visibility_description = ["The plot shows how many tower rows are used by the EKF at each epoch. " ...
+        "Elevation-mask visibility filtering is disabled."];
+end
+
 report = appendReportRow(report, isfield(reportData, "visible_tower_count"), plot_paths.visible_towers, ...
-    "Visible Tower Count", ...
-    ["The plot shows how many towers pass the configured elevation mask at each epoch. " ...
-     "The measurement vector, Jacobian, and covariance are resized to this active tower count before each EKF update."]);
+    "Tower Rows Used by the EKF", visibility_description);
 report = appendReportRow(report, reportToggles.groundSegment, plot_paths.geometry, ...
     "Ground-to-Space Geometry", ...
     ["The plot shows Earth, the selected ground segment, the GEO truth trajectory, and initial ground-to-space ranging paths. " ...
@@ -445,11 +554,11 @@ report = appendReportRow(report, reportToggles.measurementNoise, "", ...
     "Measurement Noise Model", ...
     "Measurement noise is not part of the current clock-only validation scenario.");
 report = endPlotTable(report);
-%% Per-Receiver Measurement Diagnostics
+%% 4. Per-Receiver Measurement Diagnostics
 report = appendLine(report, "\clearpage");
 report = appendLine(report, "\section{Per-Receiver Measurement Diagnostics}");
-report = appendParagraph(report, ['Receiver rows are generated dynamically from the ReceiverComponent objects mounted on each SpaceAsset. ' ...
-    'Receiver offsets are known body-frame geometry; receiver clocks, RF hardware delays, and antenna-offset states are not estimated in the active measurement path.']);
+report = appendParagraph(report, ['Receiver rows are generated dynamically from the enabled RX phase centres mounted on the SpaceAsset. ' ...
+    'Receiver offsets are known local-frame geometry; receiver clocks, RF hardware delays, attitude, and antenna-offset states are not estimated in the active measurement path.']);
 report = beginPlotTable(report);
 report = appendReportRow(report, strlength(string(plot_paths.per_receiver_prefit_rms)) > 0, plot_paths.per_receiver_prefit_rms, ...
     "Per-Receiver Pre-Fit Pseudorange Residual RMS", ...
@@ -468,35 +577,8 @@ report = appendReportRow(report, strlength(string(plot_paths.receiver_pseudorang
     ["This plot shows the measurement-level pseudorange excess over geometric range. " ...
      "It contains clock terms and any generated noise; it is not a waveform-domain signal error."]);
 report = endPlotTable(report);
-%% Baseline and Attitude Observability
-report = appendLine(report, "\clearpage");
-report = appendLine(report, "\section{Baseline and Attitude Observability}");
 
-if isfield(reportData, "attitude_observability_note")
-    report = appendParagraph(report, reportData.attitude_observability_note);
-end
-
-if isfield(reportData, "attitude_est_deg")
-    report = appendParagraph(report, ['Euler-321 roll, pitch, and yaw are active EKF states. ' ...
-        'Angular velocity states are propagated with a constant-rate attitude model. ' ...
-        'Receiver-baseline pseudorange geometry constrains attitude through the line-of-sight projection; angular velocity is constrained through the time evolution of attitude.']);
-else
-    report = appendParagraph(report, ['No attitude-state diagnostics were provided in reportData. ' ...
-        'Check ReverseGnssSimulation.buildGenerateReportData and the EKF state indexing.']);
-end
-
-report = beginPlotTable(report);
-report = appendReportRow(report, strlength(string(plot_paths.attitude_states)) > 0, plot_paths.attitude_states, ...
-    "Attitude State Estimate and Error", ...
-    "Roll, pitch, and yaw truth, estimate, error, and covariance envelope.");
-report = appendReportRow(report, strlength(string(plot_paths.attitude_covariance)) > 0, plot_paths.attitude_covariance, ...
-    "Attitude State Covariance", ...
-    "Posterior roll, pitch, and yaw standard deviations.");
-report = appendReportRow(report, strlength(string(plot_paths.angular_velocity_states)) > 0, plot_paths.angular_velocity_states, ...
-    "Angular Velocity State Estimate and Error", ...
-    "Roll-rate, pitch-rate, and yaw-rate truth, estimate, error, and covariance envelope.");
-report = endPlotTable(report);
-
+%%  5. Oscillator Stability Validation
 report = appendLine(report, "\clearpage");
 report = appendLine(report, "\section{Oscillator Stability Validation}");
 report = beginPlotTable(report);
@@ -518,7 +600,7 @@ if reportToggles.groundClockError
         if isfield(reportData, "tower_clock_correction_s")
             ground_clock_description = ["Ground transmitter clock error is enabled. " ...
                 "The plot shows the true station-specific transmitter clock biases used in the raw pseudorange truth generation. " ...
-                "The spacecraft EKF does not estimate these tower clocks; an external tower-clock product is applied before the spacecraft-only EKF update."];
+                "The spacecraft EKF does not estimate these tower clocks. The truth measurement contains the residual after any configured external correction; if correction is disabled, that residual is unmodelled in the EKF prediction."];
         else
             ground_clock_description = ["Ground transmitter clock error is enabled. " ...
                 "The plot shows the true station-specific transmitter clock biases used in the pseudorange truth generation. " ...
@@ -552,6 +634,7 @@ if strlength(string(plot_paths.ground_clock_gauge_aligned)) > 0
 end
 report = endPlotTable(report);
 
+%% 6. Disabled Components
 report = appendLine(report, "\clearpage");
 report = appendLine(report, "\section{Disabled Components}");
 report = beginPlotTable(report);
@@ -565,7 +648,7 @@ report = appendReportRow(report, reportToggles.antennaBias, "", "Antenna Bias", 
 report = appendReportRow(report, reportToggles.hardwareDelay, "", "Hardware Delay", "Transmitter and receiver hardware delay states are not part of the current clock-only validation scenario.");
 report = endPlotTable(report);
 
-%% Numerical Summary
+%% 7. Numerical Summary
 report = appendLine(report, "\clearpage");
 report = appendLine(report, "\section{Numerical Summary}");
 report = appendParagraph(report, sprintf([ ...
@@ -607,7 +690,9 @@ if isfield(reportData, "ground_clock_range_rms_m")
     report = appendFinalValueRow(report, "Final ground transmitter clock range RMS", reportData.ground_clock_range_rms_m(end), "m");
 end
 if isfield(reportData, "final_tower_clock_rms_ps")
-    if isfield(reportData, "clockGaugeMode") && string(reportData.clockGaugeMode) == "externalTimeTransfer"
+    if isfield(reportData, "clockGaugeMode") && string(reportData.clockGaugeMode) == "fixReferenceTxDelay"
+        tower_clock_label = "Final TX signal-delay time-equivalent RMS";
+    elseif isfield(reportData, "clockGaugeMode") && string(reportData.clockGaugeMode) == "externalTimeTransfer"
         tower_clock_label = "Final externally referenced tower clock RMS";
     else
         tower_clock_label = "Final relative tower clock RMS";
@@ -928,6 +1013,13 @@ function path_out = exportPlot(figure_dir, file_name, plot_function)
     fig = figure('Visible', visible_state, 'Color', 'w', 'Position', [100 100 900 520]);
     cleanup_obj = onCleanup(@() closeFigureIfNeeded(fig, interactive_report_plots));
     plot_function();
+    report_base = getappdata(0, 'generateReportOutputBaseName');
+    
+    if ~isempty(report_base)
+        [~, base_name, ext] = fileparts(file_name);
+        file_name = sprintf('%s_%s%s', char(report_base), base_name, ext);
+    end
+    
     path_out = fullfile(figure_dir, file_name);
     exportgraphics(fig, path_out, 'ContentType', 'image', 'Resolution', 220);
 end
@@ -948,7 +1040,7 @@ function plotPositionError(time_vec, ekf_pos_error_m)
     legend('Location', 'best');
     xlabel('Time [Hours]', 'FontWeight', 'bold');
     ylabel('Position Error [Meters]', 'FontWeight', 'bold');
-    title('Combined EKF Result Using RX1 + RX2 Measurements', 'FontSize', 12);
+    title('Combined EKF Result Using Enabled RX Measurements', 'FontSize', 12);
 end
 
 function plotPositionCovariance(time_vec, ekf_pos_sigma_m)
@@ -1075,11 +1167,33 @@ function plotClockError(time_vec, ekf_clock_error_ps, ekf_clock_sigma_ps)
 end
 
 function plotClockBias(time_vec, true_clock_bias_ps, est_clock_bias_ps)
-    plot(time_vec / 3600, true_clock_bias_ps, 'b-', 'LineWidth', 1.2, 'DisplayName', 'True SpaceAsset clock bias');
+    plot(time_vec / 3600, true_clock_bias_ps, 'b-', ...
+        'LineWidth', 1.2, ...
+        'DisplayName', 'True SpaceAsset clock bias');
     hold on;
-    plot(time_vec / 3600, est_clock_bias_ps, 'r--', 'LineWidth', 1.5, 'DisplayName', 'EKF estimated clock bias');
+
+    plot(time_vec / 3600, est_clock_bias_ps, 'r--', ...
+        'LineWidth', 1.5, ...
+        'DisplayName', 'EKF estimated clock bias');
+
     yline(100, 'k:', 'Target Bound (+100ps)', 'LineWidth', 1.0);
     yline(-100, 'k:', 'Target Bound (-100ps)', 'LineWidth', 1.0);
+
+    % Cut the plot to the true SpaceAsset clock-bias range +/- 0.1 ps.
+    true_valid_ps = true_clock_bias_ps(isfinite(true_clock_bias_ps));
+    if ~isempty(true_valid_ps)
+        margin_ps = 1.1;
+        y_min_ps = min(true_valid_ps)*margin_ps;
+        y_max_ps = max(true_valid_ps)*margin_ps;
+
+        if y_min_ps == y_max_ps
+            y_min_ps = y_min_ps - margin_ps;
+            y_max_ps = y_max_ps + margin_ps;
+        end
+
+        ylim([y_min_ps, y_max_ps]);
+    end
+
     grid on;
     legend('Location', 'best');
     xlabel('Time [Hours]', 'FontWeight', 'bold');
@@ -1419,8 +1533,8 @@ function plotVisibleTowers(time_vec, visible_tower_count, num_towers)
     grid on;
     ylim([0, max(num_towers, max(visible_tower_count, [], 'omitnan')) + 0.5]);
     xlabel('Time [Hours]', 'FontWeight', 'bold');
-    ylabel('Visible Towers [-]', 'FontWeight', 'bold');
-    title('Number of Towers Used by the EKF', 'FontSize', 12);
+    ylabel('Tower Rows Used [-]', 'FontWeight', 'bold');
+    title('Number of Tower Rows Used by the EKF', 'FontSize', 12);
 end
 
 function plotNis(time_vec, nis_history, num_towers, nis_degrees_of_freedom)
@@ -1646,10 +1760,12 @@ function report = appendOptionalTable(report, title_text, data, field_name, max_
         max_rows = height(tbl);
     end
 
-    report = appendLine(report, sprintf("\\subsection{%s}", latexEscape(title_text)));
+    if strlength(string(title_text)) > 0
+        report = appendLine(report, sprintf("\\subsection{%s}", latexEscape(title_text)));
+    end
     report = appendLine(report, "\begin{center}");
     report = appendLine(report, "\scriptsize");
-    column_spec = compactTableColumnSpec(width(tbl));
+    column_spec = compactTableColumnSpec(width(tbl), field_name);
     report = appendLine(report, sprintf("\\begin{longtable}{%s}", column_spec));
     report = appendLine(report, "\toprule");
     report = appendLine(report, latexTableHeader(tbl));
@@ -1669,24 +1785,40 @@ function report = appendOptionalTable(report, title_text, data, field_name, max_
     report = appendLine(report, "\end{center}");
 end
 
-function column_spec = compactTableColumnSpec(num_columns)
+function column_spec = compactTableColumnSpec(num_columns, field_name)
+    if nargin < 2 || isempty(field_name)
+        field_name = "";
+    end
+
     if num_columns <= 0
-        column_spec = "p{0.9\textwidth}";
+        column_spec = "@{}p{0.9\textwidth}@{}";
         return;
     end
-    width_fraction = min(0.42, 0.92 / num_columns);
+
+    % Custom layout for the EKF state-vector table.
+    % Sum is deliberately below 1.0 because LaTeX also adds inter-column padding.
+    if string(field_name) == "state_vector_table" && num_columns == 5
+        widths = [0.055, 0.175, 0.295, 0.070, 0.270];
+    else
+        total_width_fraction = 0.82;
+        widths = repmat(total_width_fraction / num_columns, 1, num_columns);
+    end
+
     columns = strings(1, num_columns);
     for idx_col = 1:num_columns
-        columns(idx_col) = sprintf("p{%.3f\\textwidth}", width_fraction);
+        columns(idx_col) = sprintf(">{\\raggedright\\arraybackslash}p{%.3f\\textwidth}", widths(idx_col));
     end
-    column_spec = char(strjoin(columns, ""));
+
+    % @{} removes left/right outer table padding.
+    column_spec = char("@{}" + strjoin(columns, "") + "@{}");
 end
 
 function header_line = latexTableHeader(tbl)
     names = string(tbl.Properties.VariableNames);
     header_cells = strings(1, numel(names));
     for idx_col = 1:numel(names)
-        header_cells(idx_col) = "\textbf{" + string(latexEscape(names(idx_col))) + "}";
+        header_name = regexprep(char(names(idx_col)), '(?<=[a-z])(?=[A-Z])', ' ');
+        header_cells(idx_col) = "\textbf{" + string(latexEscape(header_name)) + "}";
     end
     header_line = char(strjoin(header_cells, " & ") + "\\");
 end
