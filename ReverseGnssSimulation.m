@@ -134,34 +134,41 @@ classdef ReverseGnssSimulation < handle
             if ~isfield(obj.cfg, 'report') || ~logical(obj.getFieldOrDefault(obj.cfg.report, 'generatePdf', false))
                 return;
             end
+
             if isempty(fieldnames(obj.results))
                 obj.buildResults();
             end
+
             if strlength(obj.outputDir) == 0
-                obj.outputDir = string(fullfile(char(obj.scriptDir), "reports", char(obj.entryPointName), char(obj.scenarioName)));
+                obj.outputDir = string(fullfile(char(obj.scriptDir), ...
+                    "reports", char(obj.entryPointName), char(obj.scenarioName)));
             end
+
             if ~exist(char(obj.outputDir), "dir")
                 mkdir(char(obj.outputDir));
             end
 
-            reportData = obj.buildGenerateReportData(); %#ok<NASGU>
-            reportToggles = struct(); %#ok<NASGU>
+            reportData = obj.buildGenerateReportData();
+
+            reportToggles = struct();
             reportToggles.generatePdf = true;
             reportToggles.groundSegment = true;
             reportToggles.perfectGroundClocks = ~obj.groundClockErrorsEnabled();
             reportToggles.groundClockError = obj.groundClockErrorsEnabled();
             reportToggles.groundTimingNetworkCorrection = obj.groundClockCorrectionEnabled();
-                        reportToggles.towerClocksEstimatedInEkf = obj.towerClockEkfEnabled();
+            reportToggles.towerClocksEstimatedInEkf = obj.towerClockEkfEnabled();
             reportToggles.satelliteClockError = true;
             reportToggles.ekfOrbitClockEstimation = true;
-            reportToggles.measurementNoise = obj.measurementModel.measurementNoiseEnabled();            reportToggles.allanDeviationValidation = logical(obj.getFieldOrDefault(obj.cfg.report, 'enableAllanDeviationValidation', true));
+            reportToggles.measurementNoise = obj.measurementModel.measurementNoiseEnabled();
+            reportToggles.allanDeviationValidation = logical(obj.getFieldOrDefault( ...
+                obj.cfg.report, 'enableAllanDeviationValidation', true));
             reportToggles.ionosphere = logical(obj.cfg.measurement.enableIonosphereDelay);
             reportToggles.troposphere = logical(obj.cfg.measurement.enableTroposphereDelay);
             reportToggles.multipath = logical(obj.cfg.measurement.enableMultipathDelay);
             reportToggles.antennaBias = logical(obj.cfg.measurement.enableAntennaDelay);
             reportToggles.hardwareDelay = logical(obj.cfg.measurement.enableHardwareDelay);
 
-            reportConfig = struct(); %#ok<NASGU>
+            reportConfig = struct();
             reportConfig.title = 'Reverse-GNSS Spacecraft Code-Pseudorange EKF Report';
             reportConfig.scenarioName = char(obj.scenarioName);
             reportConfig.selectedOscillatorName = string(obj.assetConfig.clock.clockType);
@@ -172,7 +179,7 @@ classdef ReverseGnssSimulation < handle
             reportConfig.closeFiguresAfterExport = ~reportConfig.interactivePlots;
             reportConfig.generatedBy = char(obj.entryPointName);
 
-            run(char(fullfile(char(obj.scriptDir), 'generateReport.m')));
+            generateReport(reportData, reportConfig, reportToggles);
         end
     end
 
@@ -811,7 +818,7 @@ classdef ReverseGnssSimulation < handle
                 ];
             reportData.observation_matrix_equation = ...
                 "H_{g,a} = \left[ \mathbf{u}^{T} \quad \mathbf{0}_{1\times3} \quad \mathbf{u}^{T}(-\mathbf{C}_{BI}[\mathbf{l}_{a,B}]_{\times}) \quad \mathbf{0}_{1\times3} \quad 1 \quad 0 \right]";
-            reportData.measurement_model_table = MeasurementModel.buildMeasurementModelReportTable();
+            
             reportData.h_factor_observability_table = obj.buildHFactorObservabilityTable();
             reportData.observation_matrix_diagnostics_table = obj.buildObservationMatrixDiagnosticsTable();
             prefitByTower = squeeze(mean(obj.history.prefit_residual_by_receiver_tower_m, 1));
