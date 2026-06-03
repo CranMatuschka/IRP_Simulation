@@ -371,23 +371,4 @@ classdef MeasurementModel < handle
             end
         end
     end
-
-    methods (Static)
-        function tableOut = buildMeasurementModelReportTable()
-            Term = ["geometric range"; "receiver clock bias"; "receiver clock drift"; ...
-                "ground residual clock"; "extra delay"; "measurement noise"];
-
-            Expression = ["rho = norm(r_sc,I + C_BI*l_a,B - r_g,I)"; "+b_rx"; "bdot_rx"; ...
-                "-b_g_res"; "d_extra"; "nu"];
-
-            Meaning = ["Receiver phase-center to tower range"; ...
-                "Shared spacecraft receiver clock range-equivalent bias"; ...
-                "Propagated clock drift"; ...
-                "Transmitter-side residual after any external correction"; ...
-                "Atmosphere/hardware/multipath/antenna/Sagnac terms"; ...
-                "Pseudorange noise"];
-
-            tableOut = table(Term, Expression, Meaning);
-        end
-    end
 end
