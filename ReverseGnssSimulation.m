@@ -120,14 +120,10 @@ classdef ReverseGnssSimulation < handle
             if isempty(fieldnames(obj.results))
                 obj.buildResults();
             end
-            if strlength(obj.outputDir) == 0
-                obj.outputDir = string(fullfile(char(obj.scriptDir), "reports", char(obj.entryPointName), char(obj.scenarioName)));
-            end
-            if ~exist(char(obj.outputDir), "dir")
-                mkdir(char(obj.outputDir));
-            end
-            results = obj.results; %#ok<NASGU>
-            save(fullfile(char(obj.outputDir), sprintf('%s_results.mat', char(obj.scenarioName))), 'results');
+
+            SimulationOutputManager.ensureOutputDirectory(obj);
+            SimulationOutputManager.saveResultsStruct( ...
+                obj.results, obj.outputDir, obj.scenarioName);
         end
 
         function generateReport(obj)
@@ -136,18 +132,7 @@ classdef ReverseGnssSimulation < handle
                 return;
             end
 
-            if isempty(fieldnames(obj.results))
-                obj.buildResults();
-            end
-
-            if strlength(obj.outputDir) == 0
-                obj.outputDir = string(fullfile(char(obj.scriptDir), ...
-                    "reports", char(obj.entryPointName), char(obj.scenarioName)));
-            end
-
-            if ~exist(char(obj.outputDir), "dir")
-                mkdir(char(obj.outputDir));
-            end
+            SimulationOutputManager.ensureOutputDirectory(obj);
 
             reportData = obj.buildGenerateReportData();
             reportToggles = ReportConfigBuilder.togglesFromSimulation(obj);
@@ -407,9 +392,7 @@ classdef ReverseGnssSimulation < handle
 
         function setupHistory(obj)
             obj.history = HistoryRecorder.initialize(obj);
-
-            obj.outputDir = string(fullfile(char(obj.scriptDir), ...
-                "reports", char(obj.entryPointName), char(obj.scenarioName)));
+            obj.outputDir = SimulationOutputManager.defaultOutputDirectory(obj);
         end
         %%
         function step(obj, k)
