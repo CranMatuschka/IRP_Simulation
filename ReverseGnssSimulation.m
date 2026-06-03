@@ -693,6 +693,19 @@ classdef ReverseGnssSimulation < handle
             reportData.towers = obj.reportTowers();
             reportData.tower_names = obj.towerNames;
             reportData.receiver_names = obj.receiverNames;
+            
+            % Raw inputs used by generateReport.m to build report-specific tables.
+            reportData.asset_name = string(obj.assetConfig.name);
+            reportData.state_names = obj.stateNames();
+            reportData.state_dim = obj.stateDim;
+            reportData.state_index = obj.idx;
+            reportData.enable_tower_clock_ekf = obj.towerClockEkfEnabled();
+            reportData.num_receivers = obj.numReceivers;
+            reportData.receiver_offsets_body_m = obj.receiverOffsetsBody_m;
+            reportData.initial_truth_position_eci_m = obj.initialTruth0(obj.idx.pos);
+            reportData.initial_est_position_eci_m = obj.initialX0(obj.idx.pos);
+            reportData.observability_normal_matrix = obj.observabilityNormalMatrix;
+            
             reportData.ekf_pos_error_m = xHist(obj.idx.pos, :) - truthHist(obj.idx.pos, :);
             reportData.ekf_pos_sigma_m = sqrt(max(Pdiag(obj.idx.pos, :), 0));
             reportData.ekf_clock_error_ps = (xHist(obj.idx.rxClockBias, :) - truthHist(obj.idx.rxClockBias, :)) ./ obj.c .* 1e12;
@@ -745,6 +758,12 @@ classdef ReverseGnssSimulation < handle
             reportData.final_H_att_column_norm = obj.history.H_att_column_norm_history(:, end);
             reportData.final_H_rx_clock_bias_column_norm = obj.history.H_rx_clock_bias_column_norm_history(end);
             reportData.H_rank_history = obj.history.H_rank_history;
+            reportData.H_pos_rank_history = obj.history.H_pos_rank_history;
+            reportData.H_att_rank_history = obj.history.H_att_rank_history;
+            reportData.H_pos_att_clock_rank_history = obj.history.H_pos_att_clock_rank_history;
+            reportData.H_rx_clock_bias_column_norm_history = obj.history.H_rx_clock_bias_column_norm_history;
+            reportData.pseudorange_measurement_count = obj.history.pseudorange_measurement_count;
+            
             reportData.final_H_rank = obj.history.H_rank_history(end);
             reportData.H_row_count_history = obj.history.measurement_count;
             reportData.H_column_count_history = obj.stateDim * ones(1, obj.numSteps);

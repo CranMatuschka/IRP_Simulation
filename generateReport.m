@@ -45,7 +45,7 @@ function generateReport(reportData, reportConfig, reportToggles)
     if nargin < 2 || ~isstruct(reportConfig)
         reportConfig = struct();
     end
-    reportConfig = mergeStructDefaults(reportConfig, defaultReportConfig(report_script_dir));
+ 
     reportConfig = mergeStructDefaults(reportConfig, defaultReportConfig(report_script_dir));
     
     required_fields = [
@@ -76,9 +76,7 @@ function generateReport(reportData, reportConfig, reportToggles)
     ];
     validateRequiredFields(reportData, required_fields);
     reportData = ensureReportMetrics(reportData);
-    if ~isfield(reportData, "measurement_model_table")
-        reportData.measurement_model_table = buildMeasurementModelReportTable();
-    end
+    reportData = ensureReportTables(reportData);
 
     report_root = char(reportConfig.reportRoot);
     figure_dir = fullfile(report_root, "figures");
@@ -803,6 +801,518 @@ function generateReport(reportData, reportConfig, reportToggles)
         cd(old_dir);
     else
         fprintf('generateReport: wrote LaTeX file:\n%s\n', tex_path);
+    end
+end
+%% Report Table Builders
+function reportData = ensureReportTables(reportData)
+    if ~isfield(reportData, "measurement_model_table")
+        reportData.measurement_model_table = buildMeasurementModelReportTable();
+    end
+
+    if ~isfield(reportData, "state_vector_table")
+        reportData.state_vector_table = buildStateVectorReportTable(reportData);
+    end
+
+    if ~isfield(reportData, "h_factor_observability_table")
+        reportData.h_factor_observability_table = buildHFactorObservabilityTable(reportData);
+    end
+
+    if ~isfield(reportData, "observation_matrix_diagnostics_table")
+        reportData.observation_matrix_diagnostics_table = ...
+            buildObservationMatrixDiagnosticsTable(reportData);
+    end
+
+    if ~isfield(reportData, "starting_position_table")
+        reportData.starting_position_table = buildStartingPositionTable(reportData);
+    end
+end
+
+function tableOut = buildStartingPositionTable(reportData)
+    objectType = strings(0, 1);
+    objectName = strings(0, 1);
+    positionFrame = strings(0, 1);
+    position1 = strings(0, 1);
+    position2 = strings(0, 1);
+    position3 = strings(0, 1);
+
+    if isfield(reportData, "initial_truth_position_eci_m") && ...
+            numel(reportData.initial_truth_position_eci_m) >= 3
+        r0_I = reportData.initial_truth_position_eci_m(:);
+    elseif isfield(reportData, "sat_pos_history_m") && ...
+            size(reportData.sat_pos_history_m, 1) >= 3
+        r0_I = reportData.sat_pos_history_m(1:3, 1);
+    else
+        r0_I = [NaN; NaN; NaN];
+    end
+
+    assetName = "SpaceAsset";
+    if isfield(reportData, "asset_name")
+        assetName = string(reportData.asset_name);
+    end
+
+    appendRow("SpaceAsset", assetName, "ECI initial center of mass", ...
+        sprintf("X %.6g m", r0_I(1)), ...
+        sprintf("Y %.6g m", r0_I(2)), ...
+        sprintf("Z %.6g m", r0_I(3)));
+
+    if isfield(reportData, "receiver_offsets_body_m")
+        receiverOffsets = reportData.receiver_offsets_body_m;
+    elseif isfield(reportData, "receiver_offset_body_by_receiver_m")
+        receiverOffsets = reportData.receiver_offset_body_by_receiver_m;
+    else
+        receiverOffsets = zeros(3, 0);
+    end
+
+    receiverNames = strings(1, size(receiverOffsets, 2));
+    if isfield(reportData, "receiver_names")
+        receiverNames = string(reportData.receiver_names);
+    end
+
+    for rx = 1:size(receiverOffsets, 2)
+        off = receiverOffsets(:, rx);
+        receiverName = sprintf("RX%d", rx);
+        if rx <= numel(receiverNames)
+            receiverName = receiverNames(rx);
+        end
+
+        appendRow("Receiver", receiverName, "Body lever arm", ...
+            sprintf("X %.6g m", off(1)), ...
+            sprintf("Y %.6g m", off(2)), ...
+            sprintf("Z %.6g m", off(3)));
+    end
+
+    if isfield(reportData, "towers")
+        towers = reportData.towers;
+        for twr = 1:numel(towers)
+            appendRow("Tower", string(towers(twr).name), "Fixed geodetic/ECEF source", ...
+                sprintf("Lat %.6g deg", towers(twr).lat_deg), ...
+                sprintf("Lon %.6g deg", towers(twr).lon_deg), ...
+                sprintf("Alt %.6g m", towers(twr).alt_m));
+        end
+    end
+
+    tableOut = table(objectType, objectName, positionFrame, ...
+        position1, position2, position3, ...
+        'VariableNames', {'ObjectType','Name','Frame','Position1','Position2','Position3'});
+
+    function appendRow(typeValue, nameValue, frameValue, pos1, pos2, pos3)
+        objectType(end + 1, 1) = string(typeValue);
+        objectName(end + 1, 1) = string(nameValue);
+        positionFrame(end + 1, 1) = string(frameValue);
+        position1(end + 1, 1) = string(pos1);
+        position2(end + 1, 1) = string(pos2);
+        position3(end + 1, 1) = string(pos3);
+    end
+end
+
+function tableOut = buildObservationMatrixDiagnosticsTable(reportData)
+    measCount = NaN;
+    if isfield(reportData, "pseudorange_measurement_count")
+        measCount = reportData.pseudorange_measurement_count(:);
+    elseif isfield(reportData, "nis_degrees_of_freedom")
+        measCount = reportData.nis_degrees_of_freedom(:);
+    elseif isfield(reportData, "H_row_count_history")
+        measCount = reportData.H_row_count_history(:);
+    end
+
+    validMeas = measCount(isfinite(measCount));
+    if isempty(validMeas)
+        finalPseudorangeRows = NaN;
+        meanPseudorangeRows = NaN;
+        minPseudorangeRows = NaN;
+        maxPseudorangeRows = NaN;
+    else
+        finalPseudorangeRows = validMeas(end);
+        meanPseudorangeRows = mean(validMeas);
+        minPseudorangeRows = min(validMeas);
+        maxPseudorangeRows = max(validMeas);
+    end
+
+    gaugeRows = 0;
+    if isfield(reportData, "enable_tower_clock_ekf") && reportData.enable_tower_clock_ekf
+        gaugeRows = 2;
+    end
+
+    finalHRows = finalPseudorangeRows + gaugeRows;
+
+    hColumns = NaN;
+    if isfield(reportData, "state_dim")
+        hColumns = reportData.state_dim;
+    elseif isfield(reportData, "final_H_columns")
+        hColumns = reportData.final_H_columns;
+    end
+
+    hRank = getReportVector(reportData, "H_rank_history");
+    hRankValid = hRank(isfinite(hRank));
+
+    if isempty(hRankValid)
+        finalRankH = NaN;
+        minRankH = NaN;
+        maxRankH = NaN;
+    else
+        finalRankH = hRankValid(end);
+        minRankH = min(hRankValid);
+        maxRankH = max(hRankValid);
+    end
+
+    finalRankDeficiency = hColumns - finalRankH;
+
+    hPosRank = getReportVector(reportData, "H_pos_rank_history");
+    hAttRank = getReportVector(reportData, "H_att_rank_history");
+    hCombinedRank = getReportVector(reportData, "H_pos_att_clock_rank_history");
+
+    if all(isnan(hPosRank)) && isfield(reportData, "final_H_pos_rank")
+        hPosRank = reportData.final_H_pos_rank;
+    end
+    if all(isnan(hAttRank)) && isfield(reportData, "final_H_att_rank")
+        hAttRank = reportData.final_H_att_rank;
+    end
+    if all(isnan(hCombinedRank)) && isfield(reportData, "final_H_pos_att_clock_rank")
+        hCombinedRank = reportData.final_H_pos_att_clock_rank;
+    end
+
+    finalPosRank = lastFiniteLocal(hPosRank);
+    finalAttRank = lastFiniteLocal(hAttRank);
+    finalCombinedRank = lastFiniteLocal(hCombinedRank);
+
+    Quantity = [ ...
+        "final H rows"; ...
+        "H columns / EKF state dimension"; ...
+        "final rank(H)"; ...
+        "rank deficiency, n_x - rank(H)"; ...
+        "minimum rank(H) over run"; ...
+        "maximum rank(H) over run"; ...
+        "final pseudorange rows"; ...
+        "mean pseudorange rows"; ...
+        "minimum pseudorange rows"; ...
+        "maximum pseudorange rows"; ...
+        "extra gauge rows"; ...
+        "final position-column rank"; ...
+        "final attitude-column rank"; ...
+        "final position/attitude/clock rank" ...
+        ];
+
+    Value = [ ...
+        formatNumberLocal(finalHRows); ...
+        formatNumberLocal(hColumns); ...
+        formatNumberLocal(finalRankH); ...
+        formatNumberLocal(finalRankDeficiency); ...
+        formatNumberLocal(minRankH); ...
+        formatNumberLocal(maxRankH); ...
+        formatNumberLocal(finalPseudorangeRows); ...
+        sprintf("%.2f", meanPseudorangeRows); ...
+        formatNumberLocal(minPseudorangeRows); ...
+        formatNumberLocal(maxPseudorangeRows); ...
+        formatNumberLocal(gaugeRows); ...
+        formatNumberLocal(finalPosRank); ...
+        formatNumberLocal(finalAttRank); ...
+        formatNumberLocal(finalCombinedRank) ...
+        ];
+
+    Meaning = [ ...
+        "Number of scalar rows in the final EKF update matrix H"; ...
+        "Number of estimated EKF error states"; ...
+        "Numerical rank of the final observation matrix H"; ...
+        "Unobservable dimension remaining in final H"; ...
+        "Worst instantaneous H rank during the run"; ...
+        "Best instantaneous H rank during the run"; ...
+        "Visible pseudorange measurements at final epoch"; ...
+        "Average visible pseudorange measurements per epoch"; ...
+        "Minimum visible pseudorange measurements in one epoch"; ...
+        "Maximum visible pseudorange measurements in one epoch"; ...
+        "Additional clock-gauge constraint rows added to H"; ...
+        "Rank of H columns corresponding to position states"; ...
+        "Rank of H columns corresponding to attitude-error states"; ...
+        "Rank of combined position, attitude, and receiver-clock columns" ...
+        ];
+
+    tableOut = table(Quantity, Value, Meaning);
+end
+
+function tableOut = buildStateVectorReportTable(reportData)
+    names = string(reportData.state_names);
+    n = numel(names);
+
+    Index = (1:n).';
+    Symbol = strings(n, 1);
+    Description = strings(n, 1);
+    Unit = strings(n, 1);
+    DynamicCouplingNote = strings(n, 1);
+
+    baseSymbol = ["delta r_I,x"; "delta r_I,y"; "delta r_I,z"; ...
+        "delta v_I,x"; "delta v_I,y"; "delta v_I,z"; ...
+        "delta theta_B,x"; "delta theta_B,y"; "delta theta_B,z"; ...
+        "delta omega_B,x"; "delta omega_B,y"; "delta omega_B,z"; ...
+        "delta b_rx"; "delta bdot_rx"];
+
+    baseUnit = ["m"; "m"; "m"; ...
+        "m/s"; "m/s"; "m/s"; ...
+        "rad"; "rad"; "rad"; ...
+        "rad/s"; "rad/s"; "rad/s"; ...
+        "m"; "m/s"];
+
+    baseCount = min(14, n);
+    Symbol(1:baseCount) = baseSymbol(1:baseCount);
+    Unit(1:baseCount) = baseUnit(1:baseCount);
+    Description(1:baseCount) = names(1:baseCount);
+
+    if n >= 14
+        DynamicCouplingNote(1:3) = "Coupled to velocity through dynamics";
+        DynamicCouplingNote(4:6) = "Affects future position through dynamics";
+        DynamicCouplingNote(7:9) = "Zero when receiver lever arm is zero";
+        DynamicCouplingNote(10:12) = "Affects future attitude through dynamics";
+        DynamicCouplingNote(13) = "Directly estimated at measurement epoch";
+        DynamicCouplingNote(14) = "Affects future receiver clock bias through clock transition model";
+    end
+
+    towerClockEnabled = isfield(reportData, "enable_tower_clock_ekf") && ...
+        reportData.enable_tower_clock_ekf;
+
+    towerNames = strings(0, 1);
+    if isfield(reportData, "tower_names")
+        towerNames = string(reportData.tower_names);
+    end
+
+    if towerClockEnabled && n > 14
+        row = 15;
+        twr = 1;
+        while row <= n
+            towerName = sprintf("Tower %d", twr);
+            if twr <= numel(towerNames)
+                towerName = towerNames(twr);
+            end
+
+            Symbol(row) = sprintf('delta b_g,%d', twr);
+            Description(row) = sprintf('%s tower clock bias', towerName);
+            Unit(row) = "m";
+            DynamicCouplingNote(row) = "Estimated relative to mean ground-network clock gauge";
+            row = row + 1;
+
+            if row <= n
+                Symbol(row) = sprintf('delta bdot_g,%d', twr);
+                Description(row) = sprintf('%s tower clock drift', towerName);
+                Unit(row) = "m/s";
+                DynamicCouplingNote(row) = "Affects future tower clock bias through clock transition model";
+                row = row + 1;
+            end
+
+            twr = twr + 1;
+        end
+    end
+
+    tableOut = table(Index, Symbol, Description, Unit, DynamicCouplingNote);
+end
+
+function tableOut = buildHFactorObservabilityTable(reportData)
+    hRankHistory = getReportVector(reportData, "H_rank_history");
+    kFinal = find(isfinite(hRankHistory), 1, 'last');
+    if isempty(kFinal)
+        kFinal = numel(hRankHistory);
+    end
+    if isempty(kFinal) || kFinal < 1
+        kFinal = 1;
+    end
+
+    hRowsHistory = getReportVector(reportData, "H_row_count_history");
+    hColsHistory = getReportVector(reportData, "H_column_count_history");
+
+    hRows = getVectorValue(hRowsHistory, kFinal, getFieldOrDefaultLocal(reportData, "final_H_rows", NaN));
+    hCols = getVectorValue(hColsHistory, kFinal, getFieldOrDefaultLocal(reportData, "final_H_columns", NaN));
+    hRank = getVectorValue(hRankHistory, kFinal, getFieldOrDefaultLocal(reportData, "final_H_rank", NaN));
+    hDef = hCols - hRank;
+
+    W = zeros(getFieldOrDefaultLocal(reportData, "state_dim", 0));
+    if isfield(reportData, "observability_normal_matrix")
+        W = reportData.observability_normal_matrix;
+    end
+    W = 0.5 * (W + W.');
+
+    colNorm = sqrt(max(diag(W), 0.0));
+    if isempty(colNorm)
+        colNorm = zeros(getFieldOrDefaultLocal(reportData, "state_dim", 0), 1);
+    end
+
+    scale = colNorm;
+    scale(scale == 0.0) = Inf;
+
+    Wn = W ./ (scale * scale.');
+    Wn(~isfinite(Wn)) = 0.0;
+
+    stateNames = string(reportData.state_names);
+    if isempty(colNorm)
+        weakTol = 0.0;
+    else
+        weakTol = max(colNorm) * 1e-8;
+    end
+
+    idx = reportData.state_index;
+
+    Block = strings(0, 1);
+    StateColumns = strings(0, 1);
+    HFactor = strings(0, 1);
+    DirectRankFinalEpoch = strings(0, 1);
+    AccumulatedDynamicRank = strings(0, 1);
+    Interpretation = strings(0, 1);
+
+    appendBlock("position error dr_I", idx.pos, ...
+        "u^T", ...
+        getVectorValue(getReportVector(reportData, "H_pos_rank_history"), kFinal, ...
+        getFieldOrDefaultLocal(reportData, "final_H_pos_rank", NaN)), ...
+        "Directly observed as line-of-sight range sensitivity. Full 3D rank needs diverse LOS geometry.");
+
+    appendBlock("velocity error dv_I", idx.vel, ...
+        "0", ...
+        0, ...
+        "Not directly observed by code pseudorange. It becomes observable only because velocity propagates into future position.");
+
+    appendBlock("attitude error dtheta_B", idx.att, ...
+        "u^T*(-C_BI*skew(l_a_B))", ...
+        getVectorValue(getReportVector(reportData, "H_att_rank_history"), kFinal, ...
+        getFieldOrDefaultLocal(reportData, "final_H_att_rank", NaN)), ...
+        "Observed only through non-zero receiver lever arms. A receiver at the center of mass gives zero attitude sensitivity.");
+
+    appendBlock("body angular-rate error domega_B", idx.omega, ...
+        "0", ...
+        0, ...
+        "Not directly observed by code pseudorange. It becomes observable only because angular rate propagates into future attitude.");
+
+    appendBlock("receiver clock bias db_rx", idx.rxClockBias, ...
+        "1", ...
+        double(getVectorValue(getReportVector(reportData, "H_rx_clock_bias_column_norm_history"), ...
+        kFinal, getFieldOrDefaultLocal(reportData, "final_H_rx_clock_bias_column_norm", 0.0)) > 0.0), ...
+        "Directly observed as a common range offset across all pseudoranges.");
+
+    appendBlock("receiver clock drift dbdot_rx", idx.rxClockDrift, ...
+        "0", ...
+        0, ...
+        "Not directly observed by pseudorange. It becomes observable only because clock drift propagates into future clock bias.");
+
+    towerClockEnabled = isfield(reportData, "enable_tower_clock_ekf") && ...
+        reportData.enable_tower_clock_ekf;
+
+    if towerClockEnabled && isfield(idx, "towerClockBias") && isfield(idx, "towerClockDrift")
+        visibleTowerHistory = getReportVector(reportData, "visible_tower_count");
+        visibleTowers = getVectorValue(visibleTowerHistory, kFinal, ...
+            getFieldOrDefaultLocal(reportData, "num_towers", NaN));
+
+        appendBlock("tower clock biases db_g", idx.towerClockBias, ...
+            "-1 for the transmitting tower, plus mean-clock gauge row", ...
+            min(getFieldOrDefaultLocal(reportData, "num_towers", numel(idx.towerClockBias)), visibleTowers + 1), ...
+            "Directly observed only for visible towers. The mean-clock gauge fixes the otherwise arbitrary network clock reference.");
+
+        appendBlock("tower clock drifts dbdot_g", idx.towerClockDrift, ...
+            "0 in pseudorange rows, mean-drift gauge row only", ...
+            1, ...
+            "Not directly observed by pseudorange. The gauge constrains the mean; time propagation couples drift into tower clock bias.");
+    end
+
+    appendBlock("full instantaneous H", 1:getFieldOrDefaultLocal(reportData, "state_dim", numel(stateNames)), ...
+        "all active H columns", ...
+        hRank, ...
+        sprintf("Final H has %s rows, %s columns, rank %s, deficiency %s. This is instantaneous rank only.", ...
+        formatNumberLocal(hRows), formatNumberLocal(hCols), ...
+        formatNumberLocal(hRank), formatNumberLocal(hDef)));
+
+    tableOut = table(Block, StateColumns, HFactor, ...
+        DirectRankFinalEpoch, AccumulatedDynamicRank, Interpretation, ...
+        'VariableNames', {'Block','Cols','HFactor','DirectRank','DynamicRank','Interpretation'});
+
+    function appendBlock(blockName, idxBlock, hFactorText, directRank, interpretationText)
+        idxBlock = idxBlock(:).';
+
+        if isempty(idxBlock)
+            accumulatedRank = NaN;
+            weakStateText = "n/a";
+            colText = "n/a";
+        else
+            if isempty(Wn)
+                accumulatedRank = NaN;
+            else
+                accumulatedRank = rank(Wn(idxBlock, idxBlock), 1e-8);
+            end
+
+            weakLocal = idxBlock(colNorm(idxBlock) < weakTol);
+
+            if isempty(weakLocal)
+                weakStateText = "none";
+            else
+                weakStateText = strjoin(string(stateNames(weakLocal)), ", ");
+            end
+
+            colText = sprintf("%d", idxBlock(1));
+            for ii = 2:numel(idxBlock)
+                colText = colText + sprintf(", %d", idxBlock(ii));
+            end
+        end
+
+        Block(end + 1, 1) = string(blockName);
+        StateColumns(end + 1, 1) = string(colText);
+        HFactor(end + 1, 1) = string(hFactorText);
+        DirectRankFinalEpoch(end + 1, 1) = string(formatRankLocal(directRank, numel(idxBlock)));
+        AccumulatedDynamicRank(end + 1, 1) = string(formatRankLocal(accumulatedRank, numel(idxBlock)));
+
+        if weakStateText == "none"
+            Interpretation(end + 1, 1) = string(interpretationText);
+        else
+            Interpretation(end + 1, 1) = string(interpretationText) + ...
+                " Weak accumulated states: " + weakStateText + ".";
+        end
+    end
+end
+
+function v = getReportVector(reportData, fieldName)
+    fieldName = char(fieldName);
+    if isfield(reportData, fieldName) && ~isempty(reportData.(fieldName))
+        v = reportData.(fieldName)(:);
+    else
+        v = NaN;
+    end
+end
+
+function value = getVectorValue(values, index, defaultValue)
+    values = values(:);
+    if index >= 1 && index <= numel(values) && isfinite(values(index))
+        value = values(index);
+    else
+        value = defaultValue;
+    end
+end
+
+function value = getFieldOrDefaultLocal(s, fieldName, defaultValue)
+    fieldName = char(fieldName);
+    if isstruct(s) && isfield(s, fieldName) && ~isempty(s.(fieldName))
+        value = s.(fieldName);
+    else
+        value = defaultValue;
+    end
+end
+
+function y = lastFiniteLocal(x)
+    x = x(:);
+    x = x(isfinite(x));
+
+    if isempty(x)
+        y = NaN;
+    else
+        y = x(end);
+    end
+end
+
+function s = formatNumberLocal(x)
+    if isempty(x) || ~isfinite(x)
+        s = "n/a";
+    elseif abs(x - round(x)) < 1e-12
+        s = sprintf("%d", round(x));
+    else
+        s = sprintf("%.3g", x);
+    end
+end
+
+function s = formatRankLocal(r, n)
+    if isempty(r) || ~isfinite(r)
+        s = "n/a";
+    else
+        s = sprintf("%d of %d", round(r), n);
     end
 end
 %% Default Configuration Helpers
