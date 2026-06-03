@@ -433,49 +433,11 @@ classdef ReverseGnssSimulation < handle
         end
 
         function setupHistory(obj)
-            obj.history = struct();
-            obj.history.x = NaN(obj.stateDim, obj.numSteps);
-            obj.history.truth = NaN(obj.stateDim, obj.numSteps);
-            obj.history.covariance_diag = NaN(obj.stateDim, obj.numSteps);
-            obj.history.innovation_rms_m = NaN(1, obj.numSteps);
-            obj.history.postfit_innovation_rms_m = NaN(1, obj.numSteps);
-            obj.history.nis_history = NaN(1, obj.numSteps);
-            obj.history.covariance_condition_number = NaN(1, obj.numSteps);
-            obj.history.innovation_condition_number = NaN(1, obj.numSteps);
-            obj.history.H_row_count_history = NaN(1, obj.numSteps);
-            obj.history.H_column_count_history = NaN(1, obj.numSteps);
-            obj.history.H_rank_to_state_dim_history = NaN(1, obj.numSteps);
-            obj.history.H_state_deficiency_history = NaN(1, obj.numSteps);
-            
-            obj.history.H_pos_rank_history = NaN(1, obj.numSteps);
-            obj.history.H_att_rank_history = NaN(1, obj.numSteps);
-            obj.history.H_pos_att_clock_rank_history = NaN(1, obj.numSteps);
-            obj.history.H_pos_column_norm_history = NaN(3, obj.numSteps);
-            obj.history.H_att_column_norm_history = NaN(3, obj.numSteps);
-            obj.history.H_rx_clock_bias_column_norm_history = NaN(1, obj.numSteps);
-            
-            obj.history.measurement_count = zeros(1, obj.numSteps);
-            obj.history.pseudorange_measurement_count = zeros(1, obj.numSteps);
-            obj.history.visible_tower_count = zeros(1, obj.numSteps);
-            obj.history.sat_pos_history_m = NaN(3, obj.numSteps);
-            obj.history.receiver_eci_by_receiver = NaN(3, obj.numReceivers, obj.numSteps);
-            obj.history.tower_eci_by_tower = NaN(3, obj.numTowers, obj.numSteps);
-            obj.history.ground_clock_true_m = NaN(obj.numTowers, obj.numSteps);
-            obj.history.ground_clock_correction_m = NaN(obj.numTowers, obj.numSteps);
-            obj.history.ground_clock_residual_m = NaN(obj.numTowers, obj.numSteps);
-            obj.history.clock_phase_history_s = NaN(1, obj.numSteps);
-            obj.history.prefit_residual_by_receiver_tower_m = NaN(obj.numReceivers, obj.numTowers, obj.numSteps);
-            obj.history.postfit_residual_by_receiver_tower_m = NaN(obj.numReceivers, obj.numTowers, obj.numSteps);
-            obj.history.pseudorange_by_receiver_tower_m = NaN(obj.numReceivers, obj.numTowers, obj.numSteps);
-            obj.history.true_range_by_receiver_tower_m = NaN(obj.numReceivers, obj.numTowers, obj.numSteps);
-            obj.history.los_unit_eci_by_receiver_tower = NaN(3, obj.numReceivers, obj.numTowers, obj.numSteps);
-            obj.history.visibility_mask_by_receiver_tower = false(obj.numReceivers, obj.numTowers, obj.numSteps);
-            obj.history.elevation_deg_by_receiver_tower = NaN(obj.numReceivers, obj.numTowers, obj.numSteps);
-            
-            obj.outputDir = string(fullfile(char(obj.scriptDir), "reports", char(obj.entryPointName), char(obj.scenarioName)));
-            
-        end
+            obj.history = HistoryRecorder.initialize(obj);
 
+            obj.outputDir = string(fullfile(char(obj.scriptDir), ...
+                "reports", char(obj.entryPointName), char(obj.scenarioName)));
+        end
         %%
         function step(obj, k)
             if k > 1
@@ -549,81 +511,32 @@ classdef ReverseGnssSimulation < handle
                 groundResidual_m, groundTrue_m, groundCorrection_m, ...
                 visibilityMask, elevationRt_deg)
 
-            obj.history.x(:, k) = obj.physicalEstimateVector();
-            obj.history.truth(:, k) = obj.physicalTruthVector();
-            obj.history.covariance_diag(:, k) = diag(obj.ekf.P);
-            obj.history.innovation_rms_m(k) = obj.computeRms(innovation);
-            obj.history.postfit_innovation_rms_m(k) = obj.computeRms(postfit);
-            obj.history.nis_history(k) = nisValue;
-            obj.history.covariance_condition_number(k) = cond(obj.ekf.P);
-            if isempty(S)
-                obj.history.innovation_condition_number(k) = NaN;
-            else
-                obj.history.innovation_condition_number(k) = cond(S);
-            end
-            
-            if isempty(H)
-                hRank = 0;
-                hRows = 0;
-                hCols = obj.stateDim;
-            else
-                hRank = rank(H);
-                hRows = size(H, 1);
-                hCols = size(H, 2);
-            end
-            
-            obj.history.H_rank_history(k) = hRank;
-            obj.history.H_row_count_history(k) = hRows;
-            obj.history.H_column_count_history(k) = hCols;
-            obj.history.H_rank_to_state_dim_history(k) = hRank / max(hCols, 1);
-            obj.history.H_state_deficiency_history(k) = hCols - hRank;
-            
-            if isempty(H)
-                obj.history.H_pos_rank_history(k) = 0;
-                obj.history.H_att_rank_history(k) = 0;
-                obj.history.H_pos_att_clock_rank_history(k) = 0;
-                obj.history.H_pos_column_norm_history(:, k) = 0;
-                obj.history.H_att_column_norm_history(:, k) = 0;
-                obj.history.H_rx_clock_bias_column_norm_history(k) = 0;
-            else
-                Hpos = H(:, obj.idx.pos);
-                Hatt = H(:, obj.idx.att);
-                Hclk = H(:, obj.idx.rxClockBias);
-            
-                obj.history.H_pos_rank_history(k) = rank(Hpos);
-                obj.history.H_att_rank_history(k) = rank(Hatt);
-                obj.history.H_pos_att_clock_rank_history(k) = rank([Hpos, Hatt, Hclk]);
-            
-                obj.history.H_pos_column_norm_history(:, k) = vecnorm(Hpos, 2, 1).';
-                obj.history.H_att_column_norm_history(:, k) = vecnorm(Hatt, 2, 1).';
-                obj.history.H_rx_clock_bias_column_norm_history(k) = norm(Hclk);
-            end
-
-            obj.observabilityNormalMatrix = obj.observabilityNormalMatrix + (H * obj.transitionFromInitial).' * (H * obj.transitionFromInitial);
-            obj.history.measurement_count(k) = size(H, 1);
-            obj.history.pseudorange_measurement_count(k) = numel(y);
-            obj.history.visible_tower_count(k) = sum(any(visibilityMask, 1));
-            obj.history.sat_pos_history_m(:, k) = obj.truthAsset.pos_ECI_m;
-            obj.history.receiver_eci_by_receiver(:, :, k) = receiverEci;
-            obj.history.tower_eci_by_tower(:, :, k) = towersEci;
-            obj.history.ground_clock_true_m(:, k) = groundTrue_m(:);
-            obj.history.ground_clock_correction_m(:, k) = groundCorrection_m(:);
-            obj.history.ground_clock_residual_m(:, k) = groundResidual_m(:);
-            obj.history.clock_phase_history_s(k) = obj.truthAsset.clock.total_bias_sec;
-            obj.history.prefit_residual_by_receiver_tower_m(:, :, k) = ...
-                obj.measurementModel.vectorToReceiverTowerMatrix(innovation, visibilityMask);
-            
-            obj.history.postfit_residual_by_receiver_tower_m(:, :, k) = ...
-                obj.measurementModel.vectorToReceiverTowerMatrix(postfit, visibilityMask);
-            
-            obj.history.pseudorange_by_receiver_tower_m(:, :, k) = ...
-                obj.measurementModel.vectorToReceiverTowerMatrix(y, visibilityMask);
-            obj.history.true_range_by_receiver_tower_m(:, :, k) = trueRangeRt;
-            obj.history.los_unit_eci_by_receiver_tower(:, :, :, k) = losRt;
-            obj.history.visibility_mask_by_receiver_tower(:, :, k) = visibilityMask;
-            obj.history.elevation_deg_by_receiver_tower(:, :, k) = elevationRt_deg;
+            [obj.history, obj.observabilityNormalMatrix] = HistoryRecorder.record( ...
+                obj, ...
+                obj.history, ...
+                obj.observabilityNormalMatrix, ...
+                obj.physicalEstimateVector(), ...
+                obj.physicalTruthVector(), ...
+                diag(obj.ekf.P), ...
+                obj.ekf.P, ...
+                k, ...
+                y, ...
+                innovation, ...
+                postfit, ...
+                S, ...
+                H, ...
+                nisValue, ...
+                trueRangeRt, ...
+                losRt, ...
+                receiverEci, ...
+                towersEci, ...
+                groundResidual_m, ...
+                groundTrue_m, ...
+                groundCorrection_m, ...
+                visibilityMask, ...
+                elevationRt_deg);
         end
-
+        
         function buildResults(obj)
             obj.results = struct();
             obj.results.time_s = obj.time_s;
@@ -1264,11 +1177,6 @@ classdef ReverseGnssSimulation < handle
                 if any(eul ~= 0), q = FrameGeometry.dcmToQuat(SpaceAsset.euler321(eul)); end
             end
             q = FrameGeometry.normalizeQuat(q);
-        end
-
-        function value = computeRms(~, x)
-            x = x(:);
-            value = sqrt(mean(x.^2, 'omitnan'));
         end
 
     end
