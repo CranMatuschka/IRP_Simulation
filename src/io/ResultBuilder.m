@@ -28,9 +28,9 @@ classdef ResultBuilder
 
             results.state_names = StateIndexFactory.stateNames( ...
                 sim.towerNames, towerClockEkfEnabled);
-
-            results.observability = ResultBuilder.observabilityDiagnostics(sim);
-
+            
+            results.observability = ObservabilityAnalyzer.analyzeNormalMatrix( ...
+                sim.observabilityNormalMatrix, results.state_names);
             results.ground_clock_true_m = sim.history.ground_clock_true_m;
             results.ground_clock_correction_m = sim.history.ground_clock_correction_m;
             results.ground_clock_residual_m = sim.history.ground_clock_residual_m;
@@ -63,29 +63,6 @@ classdef ResultBuilder
     end
 
     methods (Static, Access = private)
-        function obs = observabilityDiagnostics(sim)
-            W = 0.5 * (sim.observabilityNormalMatrix + sim.observabilityNormalMatrix.');
-
-            columnNorm = sqrt(max(diag(W), 0));
-            scale = columnNorm;
-            scale(scale == 0) = Inf;
-
-            Wn = W ./ (scale * scale.');
-            Wn(~isfinite(Wn)) = 0.0;
-
-            s = svd(Wn);
-            weak = columnNorm < max(columnNorm) * 1e-8;
-
-            names = StateIndexFactory.stateNames( ...
-                sim.towerNames, ResultBuilder.towerClockEkfEnabled(sim));
-
-            obs = struct( ...
-                'rank', sum(s > 1e-8), ...
-                'normalizedSingularValues', s, ...
-                'columnNorm', columnNorm, ...
-                'weak', weak, ...
-                'weakStateNames', names(weak));
-        end
 
         function tf = towerClockEkfEnabled(sim)
             tf = logical(ResultBuilder.getFieldOrDefault( ...

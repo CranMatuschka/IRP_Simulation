@@ -227,7 +227,8 @@ classdef ReportDataBuilder
             reportData.R_total_m2 = reportData.R_receiver_m2 + ...
                 reportData.R_tower_clock_m2 + reportData.R_numerical_regularization_m2;
 
-            obs = ReportDataBuilder.observabilityDiagnostics(sim);
+            obs = ObservabilityAnalyzer.analyzeNormalMatrix( ...
+                sim.observabilityNormalMatrix, reportData.state_names);
             reportData.final_observability_rank = obs.rank;
             reportData.weak_observability_state_names = obs.weakStateNames;
             reportData.observability_note = sprintf( ...
@@ -289,28 +290,6 @@ classdef ReportDataBuilder
                 towers(k).alt_m = sim.activeTowerConfig(k).alt_m;
                 towers(k).enabled = true;
             end
-        end
-
-        function obs = observabilityDiagnostics(sim)
-            W = 0.5 * (sim.observabilityNormalMatrix + sim.observabilityNormalMatrix.');
-            columnNorm = sqrt(max(diag(W), 0));
-            scale = columnNorm;
-            scale(scale == 0) = Inf;
-
-            Wn = W ./ (scale * scale.');
-            Wn(~isfinite(Wn)) = 0.0;
-
-            s = svd(Wn);
-            weak = columnNorm < max(columnNorm) * 1e-8;
-            names = StateIndexFactory.stateNames( ...
-                sim.towerNames, ReportDataBuilder.towerClockEkfEnabled(sim));
-
-            obs = struct( ...
-                'rank', sum(s > 1e-8), ...
-                'normalizedSingularValues', s, ...
-                'columnNorm', columnNorm, ...
-                'weak', weak, ...
-                'weakStateNames', names(weak));
         end
 
         function tauOut = validTauForSamples(tauIn, dt, n)
