@@ -27,10 +27,10 @@ classdef ReportDataBuilder
             % Raw inputs used by generateReport.m to build report-specific tables.
             reportData.asset_name = string(sim.assetConfig.name);
             reportData.state_names = StateIndexFactory.stateNames( ...
-                sim.towerNames, ReportDataBuilder.towerClockEkfEnabled(sim));
+                sim.towerNames, GroundTimingNetwork.towerClockEkfEnabled(sim.cfg));
             reportData.state_dim = sim.stateDim;
             reportData.state_index = sim.idx;
-            reportData.enable_tower_clock_ekf = ReportDataBuilder.towerClockEkfEnabled(sim);
+            reportData.enable_tower_clock_ekf = GroundTimingNetwork.towerClockEkfEnabled(sim.cfg);
             reportData.num_receivers = sim.numReceivers;
             reportData.receiver_offsets_body_m = sim.receiverOffsetsBody_m;
             reportData.initial_truth_position_eci_m = sim.initialTruth0(sim.idx.pos);
@@ -46,7 +46,7 @@ classdef ReportDataBuilder
             reportData.true_clock_bias_ps = truthHist(sim.idx.rxClockBias, :) ./ sim.c .* 1e12;
             reportData.est_clock_bias_ps = xHist(sim.idx.rxClockBias, :) ./ sim.c .* 1e12;
 
-            if ReportDataBuilder.towerClockEkfEnabled(sim)
+            if GroundTimingNetwork.towerClockEkfEnabled(sim.cfg)
                 reportData.est_tower_clock_bias_ps = ...
                     xHist(sim.idx.towerClockBias, :) ./ sim.c .* 1e12;
 
@@ -123,7 +123,7 @@ classdef ReportDataBuilder
                 sim.history.ground_clock_residual_m ./ sim.c;
             reportData.tower_clock_correction_sigma_s = ...
                 ones(sim.numTowers, sim.numSteps) .* ...
-                sqrt(ReportDataBuilder.groundClockResidualVariance_m2(sim)) ./ sim.c;
+                sqrt(GroundTimingNetwork.residualVariance_m2(sim.cfg, sim.c)) ./ sim.c;
 
             reportData.prefit_residual_by_receiver_tower_m = ...
                 sim.history.prefit_residual_by_receiver_tower_m;
@@ -151,12 +151,12 @@ classdef ReportDataBuilder
             reportData.enableElevationMask = sim.measurementModel.elevationMaskEnabled();
             reportData.elevationMask_deg = sim.measurementModel.elevationMaskDeg();
 
-            if ReportDataBuilder.towerClockEkfEnabled(sim)
+            if GroundTimingNetwork.towerClockEkfEnabled(sim.cfg)
                 reportData.clockGaugeMode = "towerClockEKF_meanGroundClockGauge";
                 reportData.referenceTowerName = "Mean ground-network clock";
                 reportData.clock_estimation_mode = 'spacecraftReceiverClockPlusTowerClockEKF';
             else
-                if ReportDataBuilder.groundClockCorrectionEnabled(sim)
+                if GroundTimingNetwork.groundClockCorrectionEnabled(sim.cfg)
                     reportData.clockGaugeMode = "externalTowerCorrections";
                     reportData.referenceTowerName = "External ground timing product";
                 else
@@ -172,7 +172,7 @@ classdef ReportDataBuilder
                 'N=%d onboard receiver phase centres share one receiver oscillator. Lever arms are Body-frame vectors rotated by q_BI into ECI.', ...
                 sim.numReceivers);
 
-            if ReportDataBuilder.towerClockEkfEnabled(sim)
+            if GroundTimingNetwork.towerClockEkfEnabled(sim.cfg)
                 reportData.signal_model_note = [ ...
                     'Truth code pseudorange: P = rho(r_sc_I + C_BI l_a_B, r_g_I) + b_rx_true - b_g_true + d_truth + noise. ' ...
                     'Estimator prediction: P_hat = rho(rhat_sc_I + Chat_BI l_a_B, r_g_I) + bhat_rx - bhat_g. ' ...
@@ -212,10 +212,11 @@ classdef ReportDataBuilder
             nRows = sim.numReceivers * sim.numTowers;
             receiverR2 = sim.cfg.measurement.pseudorangeSigma_m^2 * ...
                 double(sim.measurementModel.measurementNoiseEnabled());
-            groundR2 = ReportDataBuilder.groundClockResidualVariance_m2(sim);
+            groundR2 = GroundTimingNetwork.residualVariance_m2(sim.cfg, sim.c);
+
             actualR2 = sim.measurementModel.measurementVariance( ...
-                ReportDataBuilder.towerClockEkfEnabled(sim), ...
-                ReportDataBuilder.groundClockResidualVariance_m2(sim));
+                GroundTimingNetwork.towerClockEkfEnabled(sim.cfg), ...
+                GroundTimingNetwork.residualVariance_m2(sim.cfg, sim.c));
 
             reportData.R_receiver_m2 = ones(nRows, sim.numSteps) * receiverR2;
             reportData.R_tower_clock_m2 = ones(nRows, sim.numSteps) * groundR2;
@@ -331,45 +332,6 @@ classdef ReportDataBuilder
             for k = 1:numel(tauValid_s)
                 [adev(k), ~, edf(k), adevSigma(k)] = ...
                     Clock.computeOverlappingAllanDeviation(phase_s, tauValid_s(k), dt);
-            end
-        end
-
-        function tf = towerClockEkfEnabled(sim)
-            tf = logical(ReportDataBuilder.getFieldOrDefault( ...
-                sim.cfg, 'enableTowerClockEKF', false));
-        end
-
-        function tf = groundClockErrorsEnabled(sim)
-            tf = logical(ReportDataBuilder.getFieldOrDefault( ...
-                sim.cfg, 'enableGroundClockErrors', false));
-        end
-
-        function tf = groundClockCorrectionEnabled(sim)
-            tf = logical(ReportDataBuilder.getFieldOrDefault( ...
-                sim.cfg, 'enableGroundClockCorrection', true));
-        end
-
-        function tf = groundClockCorrectionNoiseEnabled(sim)
-            tf = logical(ReportDataBuilder.getFieldOrDefault( ...
-                sim.cfg, 'enableGroundClockCorrectionNoise', false));
-        end
-
-        function sigma_m = groundClockCorrectionSigma_m(sim)
-            sigma_ps = ReportDataBuilder.getScalarField( ...
-                sim.cfg, ...
-                'groundClockCorrectionSigma_ps', ...
-                ReportDataBuilder.getScalarField(sim.cfg, 'externalClockCorrectionSigma_ps', 0.0));
-
-            sigma_m = sim.c * sigma_ps * 1e-12;
-        end
-
-        function var_m2 = groundClockResidualVariance_m2(sim)
-            if ReportDataBuilder.groundClockErrorsEnabled(sim) && ...
-                    ReportDataBuilder.groundClockCorrectionEnabled(sim) && ...
-                    ReportDataBuilder.groundClockCorrectionNoiseEnabled(sim)
-                var_m2 = ReportDataBuilder.groundClockCorrectionSigma_m(sim)^2;
-            else
-                var_m2 = 0.0;
             end
         end
 

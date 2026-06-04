@@ -167,7 +167,7 @@ classdef ReverseGnssSimulation < handle
             obj.measurementStream = RandStream('mt19937ar', 'Seed', obj.seedConfig.measurementNoise);
             obj.towerClockStream = RandStream('mt19937ar', 'Seed', obj.seedConfig.towerClocks);
             obj.validationClockStream = RandStream('mt19937ar', 'Seed', obj.seedConfig.allanValidation);
-            obj.applyTowerClockEkfConfiguration();
+            obj.cfg = GroundTimingNetwork.applyTowerClockEkfConfiguration(obj.cfg); 
         end
 
         function setupTime(obj)
@@ -178,24 +178,16 @@ classdef ReverseGnssSimulation < handle
         end
 
         function setupGroundNodes(obj)
-            towerCfg = obj.cfg.towers;
+            [obj.towers, obj.activeTowerConfig, obj.towerNames] = ...
+                GroundTimingNetwork.buildGroundNodes( ...
+                obj.cfg.towers, ...
+                obj.simConfig, ...
+                obj.assetConfig, ...
+                obj.dt, ...
+                obj.seedConfig, ...
+                obj.c);
 
-            enabled = true(1, numel(towerCfg));
-            if isfield(towerCfg, 'enabled')
-                enabled = [towerCfg.enabled];
-            end
-
-            obj.activeTowerConfig = towerCfg(enabled);
-            obj.numTowers = numel(obj.activeTowerConfig);
-            obj.towerNames = string({obj.activeTowerConfig.name});
-            obj.towers = cell(1, obj.numTowers);
-
-            for k = 1:obj.numTowers
-                tc = obj.activeTowerConfig(k);
-                clk = obj.makeTowerClock(tc, k);
-                obj.towers{k} = GroundNode(tc, clk);
-            end
-
+            obj.numTowers = numel(obj.towers);
             obj.towersEciFirst_m = GroundNode.positionsECI(obj.towers, obj.jd0);
         end
 
@@ -266,8 +258,7 @@ classdef ReverseGnssSimulation < handle
 
             if obj.towerClockEkfEnabled()
                 [towerBiasGauge_m, towerDriftGauge_mps, meanTowerBias_m, meanTowerDrift_mps] = ...
-                    obj.towerClockTruthGaugeVectors();
-
+                    GroundTimingNetwork.truthGaugeVectors(obj.towers, obj.cfg);
                 obj.estAsset.setNominalClockState( ...
                     obj.truthAsset.getClockBias_m() - meanTowerBias_m + ...
                     obj.getScalarField(obj.cfg.ekf, 'initialClockBiasError_m', 100.0), ...
@@ -370,7 +361,8 @@ classdef ReverseGnssSimulation < handle
             obj.Q = EkfDynamicsModel.buildProcessNoise(obj);
             obj.R = eye(obj.numReceivers * obj.numTowers) * ...
                 obj.measurementModel.measurementVariance( ...
-                obj.towerClockEkfEnabled(), obj.groundClockResidualVariance_m2());
+                obj.towerClockEkfEnabled(), ...
+                GroundTimingNetwork.residualVariance_m2(obj.cfg, obj.c));
             obj.ekf = ExtendedKalmanFilter(x0, P0, obj.Q, obj.R);
 
             obj.transitionFromInitial = eye(obj.stateDim);
@@ -399,7 +391,13 @@ classdef ReverseGnssSimulation < handle
             jd = obj.jd0 + obj.time_s(k) / 86400.0;
             towersEci = GroundNode.positionsECI(obj.towers, jd);
 
-            [groundResidual_m, groundTrue_m, groundCorrection_m] = obj.groundClockResidual_m();
+            [groundResidual_m, groundTrue_m, groundCorrection_m] = ...
+                GroundTimingNetwork.residualMeters( ...
+                obj.towers, ...
+                obj.cfg, ...
+                obj.c, ...
+                obj.measurementStream, ...
+                obj.towerClockEkfEnabled());
 
             groundResidualTruth_m = groundResidual_m;
             groundResidualModel_m = zeros(obj.numTowers, 1);
@@ -408,7 +406,8 @@ classdef ReverseGnssSimulation < handle
                 obj.measurementModel.makePseudoranges( ...
                 jd, towersEci, groundResidualTruth_m, ...
                 obj.truthAsset, ...
-                obj.towerClockEkfEnabled(), obj.groundClockResidualVariance_m2());
+                obj.towerClockEkfEnabled(), ...
+                GroundTimingNetwork.residualVariance_m2(obj.cfg, obj.c));
 
             [ypRange, Hrange] = ...
                 obj.measurementModel.predictPseudorangesWithJacobian( ...
@@ -547,125 +546,6 @@ classdef ReverseGnssSimulation < handle
             P = 0.5 * (P + P');
         end
 
-        function [residual_m, trueBias_m, correction_m] = groundClockResidual_m(obj)
-            residual_m = zeros(obj.numTowers, 1);
-            trueBias_m = zeros(obj.numTowers, 1);
-            correction_m = zeros(obj.numTowers, 1);
-        
-            if ~obj.groundClockErrorsEnabled()
-                return;
-            end
-
-            if obj.groundClockErrorsEnabled() && ...
-                    ~obj.groundClockCorrectionEnabled() && ...
-                    ~obj.towerClockEkfEnabled()
-                error('ReverseGnssSimulation:UnmodelledTowerClockResidual', ...
-                    ['Ground clock errors are enabled, but tower clocks are neither externally corrected ', ...
-                     'nor estimated. This makes transmitter clock residuals unmodelled pseudorange biases. ', ...
-                     'Enable ground clock correction or explicitly run a separate ground-network timing estimator.']);
-            end
-        
-            for k = 1:obj.numTowers
-                trueBias_m(k) = obj.towers{k}.clockBias_m();
-        
-                if obj.groundClockCorrectionEnabled()
-                    correction_m(k) = trueBias_m(k);
-        
-                    if obj.groundClockCorrectionNoiseEnabled()
-                        correction_m(k) = correction_m(k) + ...
-                            obj.groundClockCorrectionSigma_m() * randn(obj.measurementStream);
-                    end
-                end
-        
-                residual_m(k) = trueBias_m(k) - correction_m(k);
-            end
-        end
-
-        function tf = groundClockErrorsEnabled(obj)
-            tf = logical(obj.getFieldOrDefault(obj.cfg, 'enableGroundClockErrors', false));
-        end
-
-        function tf = groundClockCorrectionEnabled(obj)
-            tf = logical(obj.getFieldOrDefault(obj.cfg, 'enableGroundClockCorrection', true));
-        end
-
-        function tf = groundClockCorrectionNoiseEnabled(obj)
-            tf = logical(obj.getFieldOrDefault(obj.cfg, 'enableGroundClockCorrectionNoise', false));
-        end
-        
-        function applyTowerClockEkfConfiguration(obj)
-            if ~obj.towerClockEkfEnabled()
-                return;
-            end
-
-            if obj.towerClockEkfEnabled() && ...
-                    logical(obj.getFieldOrDefault(obj.cfg, 'spacecraftNavigationFilterOnly', true))
-                error('ReverseGnssSimulation:TowerClockStatesNotSpacecraftStates', ...
-                    ['enableTowerClockEKF=true adds ground-network clock states to the spacecraft navigation filter. ', ...
-                     'For this architecture, tower clocks must be supplied as external measurement corrections ', ...
-                     'or estimated in a separate ground timing-network filter.']);
-            end
-
-            if ~obj.groundClockErrorsEnabled()
-                warning('ReverseGnssSimulation:TowerClockEKFEnablesGroundClocks', ...
-                    ['enableTowerClockEKF=true requires physical tower clock errors. ', ...
-                     'Setting enableGroundClockErrors=true.']);
-                obj.cfg.enableGroundClockErrors = true;
-            end
-
-            if obj.groundClockCorrectionEnabled()
-                warning('ReverseGnssSimulation:TowerClockEKFDisablesExternalCorrection', ...
-                    ['enableTowerClockEKF=true estimates tower clocks inside the EKF. ', ...
-                     'Disabling external ground clock correction to avoid double correction.']);
-                obj.cfg.enableGroundClockCorrection = false;
-                obj.cfg.enableGroundClockCorrectionNoise = false;
-            end
-        end
-
-        function sigma_m = groundClockCorrectionSigma_m(obj)
-            sigma_ps = obj.getScalarField(obj.cfg, 'groundClockCorrectionSigma_ps', obj.getScalarField(obj.cfg, 'externalClockCorrectionSigma_ps', 0.0));
-            sigma_m = obj.c * sigma_ps * 1e-12;
-        end
-
-        function var_m2 = groundClockResidualVariance_m2(obj)
-            if obj.groundClockErrorsEnabled() && obj.groundClockCorrectionEnabled() && obj.groundClockCorrectionNoiseEnabled()
-                var_m2 = obj.groundClockCorrectionSigma_m()^2;
-            else
-                var_m2 = 0.0;
-            end
-        end
-
-        function clk = makeTowerClock(obj, tc, towerIndex)
-            clockType = char(obj.getTowerField(tc, 'clockType', obj.assetConfig.clock.clockType));
-            if ~isfield(obj.simConfig.clockLibrary, clockType)
-                clockType = char(obj.assetConfig.clock.clockType);
-            end
-            osc = obj.simConfig.clockLibrary.(clockType);
-            clk = Clock(osc.h0, osc.hm1, osc.hm2, obj.dt);
-            clk.randomStream = RandStream('mt19937ar', 'Seed', double(obj.seedConfig.towerClocks) + towerIndex);
-            bias_m = double(obj.getTowerField(tc, 'initialClockBias_m', 0.0));
-            drift_mps = double(obj.getTowerField(tc, 'initialClockDrift_mps', 0.0));
-            clk.reset([bias_m / obj.c; drift_mps / obj.c; 0.0; 0.0]);
-        end
-
-        function [biasGauge_m, driftGauge_mps, meanBias_m, meanDrift_mps] = towerClockTruthGaugeVectors(obj)
-            biasAbs_m = zeros(obj.numTowers, 1);
-            driftAbs_mps = zeros(obj.numTowers, 1);
-
-            for twr = 1:obj.numTowers
-                if obj.groundClockErrorsEnabled()
-                    biasAbs_m(twr) = obj.towers{twr}.clockBias_m();
-                    driftAbs_mps(twr) = obj.towers{twr}.clockDrift_mps();
-                end
-            end
-
-            meanBias_m = mean(biasAbs_m);
-            meanDrift_mps = mean(driftAbs_mps);
-
-            biasGauge_m = biasAbs_m - meanBias_m;
-            driftGauge_mps = driftAbs_mps - meanDrift_mps;
-        end        
-        
         function tf = towerClockEkfEnabled(obj)
             tf = logical(obj.getFieldOrDefault(obj.cfg, 'enableTowerClockEKF', false));
         end
@@ -696,7 +576,7 @@ classdef ReverseGnssSimulation < handle
 
             if obj.towerClockEkfEnabled()
                 [towerBiasGauge_m, towerDriftGauge_mps, meanTowerBias_m, meanTowerDrift_mps] = ...
-                    obj.towerClockTruthGaugeVectors();
+                    GroundTimingNetwork.truthGaugeVectors(obj.towers, obj.cfg);
 
                 x(obj.idx.rxClockBias) = obj.truthAsset.getClockBias_m() - meanTowerBias_m;
                 x(obj.idx.rxClockDrift) = obj.truthAsset.getClockDrift_mps() - meanTowerDrift_mps;
@@ -714,10 +594,6 @@ classdef ReverseGnssSimulation < handle
 
         function value = getScalarField(~, s, fieldName, defaultValue)
             if isstruct(s) && isfield(s, fieldName) && ~isempty(s.(fieldName)), value = double(s.(fieldName)); else, value = double(defaultValue); end
-        end
-
-        function value = getTowerField(~, towerStruct, fieldName, defaultValue)
-            if isstruct(towerStruct) && isfield(towerStruct, fieldName), value = towerStruct.(fieldName); else, value = defaultValue; end
         end
 
         function vec = vectorFieldOrDefault(~, s, fieldName, defaultValue, n)

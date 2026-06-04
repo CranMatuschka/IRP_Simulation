@@ -11,16 +11,16 @@ classdef ReportConfigBuilder
             reportToggles.groundSegment = true;
 
             reportToggles.perfectGroundClocks = ...
-                ~ReportConfigBuilder.groundClockErrorsEnabled(sim);
-
+                ~GroundTimingNetwork.groundClockErrorsEnabled(sim.cfg);
+            
             reportToggles.groundClockError = ...
-                ReportConfigBuilder.groundClockErrorsEnabled(sim);
-
+                GroundTimingNetwork.groundClockErrorsEnabled(sim.cfg);
+            
             reportToggles.groundTimingNetworkCorrection = ...
-                ReportConfigBuilder.groundClockCorrectionEnabled(sim);
-
+                GroundTimingNetwork.groundClockCorrectionEnabled(sim.cfg);
+            
             reportToggles.towerClocksEstimatedInEkf = ...
-                ReportConfigBuilder.towerClockEkfEnabled(sim);
+                GroundTimingNetwork.towerClockEkfEnabled(sim.cfg);
 
             reportToggles.satelliteClockError = true;
             reportToggles.ekfOrbitClockEstimation = true;
@@ -82,21 +82,7 @@ classdef ReportConfigBuilder
     end
 
     methods (Static, Access = private)
-        function tf = towerClockEkfEnabled(sim)
-            tf = logical(ReportConfigBuilder.getFieldOrDefault( ...
-                sim.cfg, 'enableTowerClockEKF', false));
-        end
-
-        function tf = groundClockErrorsEnabled(sim)
-            tf = logical(ReportConfigBuilder.getFieldOrDefault( ...
-                sim.cfg, 'enableGroundClockErrors', false));
-        end
-
-        function tf = groundClockCorrectionEnabled(sim)
-            tf = logical(ReportConfigBuilder.getFieldOrDefault( ...
-                sim.cfg, 'enableGroundClockCorrection', true));
-        end
-
+        
         function value = getFieldOrDefault(s, fieldName, defaultValue)
             if isstruct(s) && isfield(s, fieldName) && ~isempty(s.(fieldName))
                 value = s.(fieldName);
