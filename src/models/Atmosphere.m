@@ -1,216 +1,354 @@
 classdef Atmosphere < handle
-    % ATMOSPHERECLASS Service class for environmental physics.
-    % Handles 3D Ray-Tracing through ECMWF Troposphere data and 
-    % IONEX global ionosphere maps.
-    
-    properties
-        cds_api_key     % String: API Key for Copernicus Climate Data Store
+    %ATMOSPHERE Code-pseudorange atmospheric propagation-delay model.
+    %
+    % The public interface returns delays in metres because the Reverse-GNSS
+    % measurement model forms code pseudoranges in metres.
+    %
+    % Atmosphere contains propagation physics only. External atmospheric-data
+    % downloading, parsing, and caching will be implemented by separate data
+    % provider classes.
+
+    properties (SetAccess = private)
+        role string = "truth"
+        cfg struct = struct()
+
+        dataRoot string = ""
+
+        c double = 299792458.0
+        earthRadius_m double = 6378137.0
+        ionosphereShellHeight_m double = 350000.0
+
+        missingDataPolicy string = "error"
+
+        enableTroposphere logical = false
+        enableIonosphere logical = false
+
+        troposphereModel string = "disabled"
+        ionosphereModel string = "disabled"
+
+        constantTroposphereDelay_m double = 0.0
+        constantIonosphereDelay_m double = 0.0
     end
-    
-    properties (Constant)
-        % Physical Constants for Atmospheric Models
-        R_earth = 6371000.0;    % Earth radius for atmospheric models (meters)
-        H_ion = 350000.0;       % Height of max plasma density (meters)
-        g_0 = 9.80665;          % Standard gravity (m/s^2)
-        c = 299792458.0;        % Speed of light (m/s)
-    end
-    
+
     methods
-        % =========================================================================
-        % CONSTRUCTOR
-        % =========================================================================
-        function obj = Atmosphere(api_key)
-            if nargin > 0
-                obj.cds_api_key = api_key;
-            else
-                obj.cds_api_key = ""; % Must be set before calling ECMWF
+        function obj = Atmosphere(atmosphereCfg, constants, role)
+            %ATMOSPHERE Construct a truth or estimator atmosphere model.
+            %
+            % atmosphereCfg is expected to contain:
+            %   atmosphereCfg.truth
+            %   atmosphereCfg.model
+            %   atmosphereCfg.dataRoot
+            %   atmosphereCfg.missingDataPolicy
+            %
+            % Example:
+            %   truthAtmosphere = Atmosphere(cfg.atmosphere, constants, "truth");
+            %   modelAtmosphere = Atmosphere(cfg.atmosphere, constants, "model");
+
+            if nargin < 1 || isempty(atmosphereCfg)
+                atmosphereCfg = struct();
             end
+
+            if nargin < 2 || isempty(constants)
+                constants = struct();
+            end
+
+            if nargin < 3 || isempty(role)
+                role = "truth";
+            end
+
+            obj.role = obj.normalizeChoice( ...
+                role, ["truth", "model"], 'role');
+
+            if isstruct(atmosphereCfg) && isfield(atmosphereCfg, char(obj.role))
+                obj.cfg = atmosphereCfg.(char(obj.role));
+            else
+                obj.cfg = atmosphereCfg;
+            end
+
+            obj.c = obj.getScalarField( ...
+                constants, 'speedOfLight_mps', 299792458.0);
+
+            obj.earthRadius_m = obj.getScalarField( ...
+                constants, 'earthRadius_m', 6378137.0);
+
+            obj.ionosphereShellHeight_m = obj.getScalarField( ...
+                atmosphereCfg, 'ionosphereShellHeight_m', 350000.0);
+
+            obj.missingDataPolicy = obj.normalizeChoice( ...
+                obj.getFieldOrDefault(atmosphereCfg, 'missingDataPolicy', "error"), ...
+                ["error", "invalid"], ...
+                'missingDataPolicy');
+
+            configuredDataRoot = string(obj.getFieldOrDefault( ...
+                atmosphereCfg, 'dataRoot', fullfile("data", "atmosphere")));
+
+            if strlength(configuredDataRoot) == 0
+                configuredDataRoot = fullfile("data", "atmosphere");
+            end
+
+            obj.dataRoot = obj.resolveProjectPath(configuredDataRoot);
+
+            obj.enableTroposphere = logical(obj.getFieldOrDefault( ...
+                obj.cfg, 'enableTroposphere', false));
+
+            obj.enableIonosphere = logical(obj.getFieldOrDefault( ...
+                obj.cfg, 'enableIonosphere', false));
+
+            defaultTroposphereModel = "disabled";
+            if obj.enableTroposphere
+                defaultTroposphereModel = "constant";
+            end
+
+            defaultIonosphereModel = "disabled";
+            if obj.enableIonosphere
+                defaultIonosphereModel = "constant";
+            end
+
+            obj.troposphereModel = obj.normalizeChoice( ...
+                obj.getFieldOrDefault( ...
+                    obj.cfg, 'troposphereModel', defaultTroposphereModel), ...
+                ["disabled", "constant", "saastamoinen", "era5profile"], ...
+                'troposphereModel');
+
+            obj.ionosphereModel = obj.normalizeChoice( ...
+                obj.getFieldOrDefault( ...
+                    obj.cfg, 'ionosphereModel', defaultIonosphereModel), ...
+                ["disabled", "constant", "thinshellvtec", "ionex"], ...
+                'ionosphereModel');
+
+            if ~obj.enableTroposphere
+                obj.troposphereModel = "disabled";
+            end
+
+            if ~obj.enableIonosphere
+                obj.ionosphereModel = "disabled";
+            end
+
+            obj.constantTroposphereDelay_m = obj.getScalarField( ...
+                obj.cfg, 'constantTroposphereDelay_m', 0.0);
+
+            obj.constantIonosphereDelay_m = obj.getScalarField( ...
+                obj.cfg, 'constantIonosphereDelay_m', 0.0);
+
+            obj.validateConfiguration();
         end
-        
-        % =========================================================================
-        % MASTER FUNCTION: Get Total Atmospheric Delay
-        % =========================================================================
-        function [total_delay_sec, tropo_sec, iono_sec] = get_atmospheric_delays(obj, ground_node, sat_node, freq_Hz, jd_current, datetime_utc)
-            % 1. Automatically extract positions and resolve geometry
-            rx_ecef_m = ground_node.pos_ECEF_m;
-            sat_ecef_m = sat_node.get_pos_ECEF(jd_current);
-            
-            [~, elevation_deg] = obj.calc_az_el(rx_ecef_m, sat_ecef_m, ground_node.lat_deg, ground_node.lon_deg);
-            
-            % If the satellite is below the horizon, atmospheric models break down
-            if elevation_deg < 0
-                warning('Satellite is below the horizon (Elevation: %.1f deg).', elevation_deg);
-                total_delay_sec = NaN; tropo_sec = NaN; iono_sec = NaN;
+
+        function delay = codeDelayMeters( ...
+                obj, groundNode, receiverEci_m, jd, datetimeUtc, frequency_Hz)
+            %CODEDELAYMETERS Return code-pseudorange atmosphere delay in metres.
+            %
+            % Inputs:
+            %   groundNode     GroundNode transmitter object
+            %   receiverEci_m  Receiver phase-centre position in ECI, metres
+            %   jd             Julian date associated with receiverEci_m
+            %   datetimeUtc    UTC datetime associated with the measurement
+            %   frequency_Hz   Signal carrier frequency in hertz
+            %
+            % Output fields:
+            %   total_m
+            %   troposphere_m
+            %   ionosphere_m
+            %   elevation_deg
+            %   azimuth_deg
+            %   valid
+            %   metadata
+
+            if ~isa(groundNode, 'GroundNode')
+                error('Atmosphere:InvalidGroundNode', ...
+                    'groundNode must be a GroundNode object.');
+            end
+
+            validateattributes(receiverEci_m, {'numeric'}, ...
+                {'real', 'finite', 'numel', 3}, ...
+                mfilename, 'receiverEci_m');
+
+            validateattributes(jd, {'numeric'}, ...
+                {'real', 'finite', 'scalar'}, ...
+                mfilename, 'jd');
+
+            if ~isdatetime(datetimeUtc) || ~isscalar(datetimeUtc)
+                error('Atmosphere:InvalidDatetime', ...
+                    'datetimeUtc must be a scalar datetime value.');
+            end
+
+            validateattributes(frequency_Hz, {'numeric'}, ...
+                {'real', 'finite', 'scalar', 'positive'}, ...
+                mfilename, 'frequency_Hz');
+
+            receiverEci_m = receiverEci_m(:);
+            towerEci_m = groundNode.positionEci(jd);
+
+            [elevation_deg, azimuth_deg] = ...
+                FrameGeometry.elevationAzimuthFromGround( ...
+                    groundNode.lat_deg, ...
+                    groundNode.lon_deg, ...
+                    towerEci_m, ...
+                    receiverEci_m, ...
+                    jd);
+
+            delay = obj.emptyDelayResult( ...
+                groundNode, elevation_deg, azimuth_deg, ...
+                jd, datetimeUtc, frequency_Hz);
+
+            if ~isfinite(elevation_deg) || elevation_deg < 0.0
+                delay.total_m = NaN;
+                delay.troposphere_m = NaN;
+                delay.ionosphere_m = NaN;
+                delay.valid = false;
                 return;
             end
-            
-            % 2. Calculate Troposphere (Neutral Atmosphere)
-            tropo_sec = obj.calc_troposphere_ecmwf(ground_node.lat_deg, ground_node.lon_deg, elevation_deg, datetime_utc);
-            
-            % 3. Calculate Ionosphere (Dispersive Plasma)
-            iono_sec = obj.calc_ionosphere_tec(ground_node.lat_deg, ground_node.lon_deg, elevation_deg, freq_Hz, datetime_utc);
-            
-            % 4. Sum up the delays
-            total_delay_sec = tropo_sec + iono_sec;
+
+            delay.troposphere_m = obj.troposphereDelayMeters(elevation_deg);
+            delay.ionosphere_m = obj.ionosphereDelayMeters( ...
+                elevation_deg, frequency_Hz);
+
+            delay.total_m = delay.troposphere_m + delay.ionosphere_m;
+            delay.valid = true;
+        end
+
+        function tf = isEnabled(obj)
+            tf = obj.enableTroposphere || obj.enableIonosphere;
         end
     end
-    
+
     methods (Access = private)
-        % =========================================================================
-        % PRIVATE: Calculate Azimuth and Elevation (ECEF to ENU)
-        % =========================================================================
-        function [azimuth_deg, elevation_deg] = calc_az_el(~, rx_ecef_m, sat_ecef_m, lat_deg, lon_deg)
-            dx = sat_ecef_m(1) - rx_ecef_m(1);
-            dy = sat_ecef_m(2) - rx_ecef_m(2);
-            dz = sat_ecef_m(3) - rx_ecef_m(3);
+        function delay_m = troposphereDelayMeters(obj, elevation_deg)
+            %#ok<INUSD>
 
-            lat_rad = deg2rad(lat_deg);
-            lon_rad = deg2rad(lon_deg);
+            switch obj.troposphereModel
+                case "disabled"
+                    delay_m = 0.0;
 
-            t = cos(lon_rad) * dx + sin(lon_rad) * dy;
-            East = -sin(lon_rad) * dx + cos(lon_rad) * dy;
-            North = -sin(lat_rad) * t + cos(lat_rad) * dz;
-            Up = cos(lat_rad) * t + sin(lat_rad) * dz;
+                case "constant"
+                    delay_m = obj.constantTroposphereDelay_m;
 
-            azimuth_deg = mod(rad2deg(atan2(East, North)), 360);
-            elevation_deg = rad2deg(atan2(Up, sqrt(East^2 + North^2)));
+                otherwise
+                    error('Atmosphere:TroposphereModelNotImplemented', ...
+                        'Troposphere model "%s" is configured but not implemented yet.', ...
+                        obj.troposphereModel);
+            end
         end
-        
-        % =========================================================================
-        % PRIVATE: Troposphere 3D ECMWF Ray Tracing
-        % =========================================================================
-        function delay_sec = calc_troposphere_ecmwf(obj, lat, lon, elev_angle_deg, datetime_utc)
-            % Bounding box for local weather profile
-            lat_N = lat + 0.125; lat_S = lat - 0.125;
-            lon_W = lon - 0.125; lon_E = lon + 0.125;
-            
-            filename_str = sprintf('data/era5_profile_%04d%02d%02d_%02d00.nc', ...
-                year(datetime_utc), month(datetime_utc), day(datetime_utc), hour(datetime_utc));
-            nc_filename = fullfile(pwd, filename_str);
-            
-            % Download logic (only if file is missing)
-            if ~isfile(nc_filename)
-                if obj.cds_api_key == ""
-                    error('CDS API Key is missing. Cannot download ECMWF data.');
-                end
-                client = py.cdsapi.Client(pyargs('url', 'https://cds.climate.copernicus.eu/api', 'key', obj.cds_api_key));
-                request_dict = py.dict(pyargs(...
-                    'product_type', 'reanalysis', 'data_format', 'netcdf', ...
-                    'variable', py.list({'temperature', 'specific_humidity', 'geopotential'}), ...
-                    'pressure_level', py.list({'1', '2', '3', '5', '7', '10', '20', '30', '50', '70', ...
-                                               '100', '150', '200', '250', '300', '400', '500', '600', ...
-                                               '700', '775', '850', '925', '1000'}), ...
-                    'year', num2str(year(datetime_utc)), 'month', sprintf('%02d', month(datetime_utc)), ...
-                    'day', sprintf('%02d', day(datetime_utc)), 'time', sprintf('%02d:00', hour(datetime_utc)), ... 
-                    'area', py.list({lat_N, lon_W, lat_S, lon_E}) ... 
-                ));
-                client.retrieve('reanalysis-era5-pressure-levels', request_dict, nc_filename);
+
+        function delay_m = ionosphereDelayMeters(obj, elevation_deg, frequency_Hz)
+            %#ok<INUSD>
+
+            switch obj.ionosphereModel
+                case "disabled"
+                    delay_m = 0.0;
+
+                case "constant"
+                    delay_m = obj.constantIonosphereDelay_m;
+
+                otherwise
+                    error('Atmosphere:IonosphereModelNotImplemented', ...
+                        'Ionosphere model "%s" is configured but not implemented yet.', ...
+                        obj.ionosphereModel);
             end
-        
-            % Extract and process 3D Weather Layers
-            T_mean = squeeze(mean(ncread(nc_filename, 't'), [1, 2], 'omitnan'));
-            q_mean = squeeze(mean(ncread(nc_filename, 'q'), [1, 2], 'omitnan'));
-            Z_mean = squeeze(mean(ncread(nc_filename, 'z'), [1, 2], 'omitnan'));
-            
-            [Z_raw, sort_idx] = sort(Z_mean, 'ascend');
-            T_raw = T_mean(sort_idx);
-            q_raw = q_mean(sort_idx);
-            h_layers = Z_raw / obj.g_0; 
-            
-            P_levels = sort([1, 2, 3, 5, 7, 10, 20, 30, 50, 70, 100, 150, 200, 250, 300, 400, 500, 600, 700, 775, 850, 925, 1000]', 'descend');
-            e_layers = (q_raw .* P_levels) ./ (0.622 + 0.378 .* q_raw);
-            N_layers = 77.6 .* (P_levels ./ T_raw) + 3.73e5 .* (e_layers ./ (T_raw.^2));
-            n_layers = 1 + (N_layers * 1e-6);
-        
-            % 3D Ray-Tracing via Snell's Law
-            zenith_angle = deg2rad(90 - elev_angle_deg);
-            delay_meters = 0;
-            
-            for i = 1:(length(h_layers) - 1)
-                r_current = obj.R_earth + h_layers(i);
-                r_next = obj.R_earth + h_layers(i+1);
-                n_current = n_layers(i);
-                n_next = n_layers(i+1); 
-                
-                C = r_current * n_current * sin(zenith_angle); 
-                sin_next_zenith = C / (r_next * n_next); 
-                if sin_next_zenith > 1; break; end % Total internal reflection
-                
-                next_zenith_angle = asin(sin_next_zenith);
-                ds = sqrt(r_next^2 - r_current^2 * sin(zenith_angle)^2) - r_current * cos(zenith_angle); 
-                delay_meters = delay_meters + (n_current - 1) * ds; 
-                zenith_angle = next_zenith_angle; 
-            end
-            
-            delay_sec = delay_meters / obj.c;
         end
-        
-        % =========================================================================
-        % PRIVATE: Ionosphere IONEX VTEC to STEC Mapping
-        % =========================================================================
-        function delay_sec = calc_ionosphere_tec(obj, lat, lon, elev_angle_deg, f_Hz, datetime_utc)
-            year_4d = year(datetime_utc);
-            doy_str = sprintf('%03d', floor(datenum(datetime_utc)) - datenum(year_4d, 1, 0));
-            
-            filename_gz = sprintf('data/COD0OPSFIN_%04d%s0000_01D_01H_GIM.INX.gz', year_4d, doy_str);
-            filename_unzipped = sprintf('data/COD0OPSFIN_%04d%s0000_01D_01H_GIM.INX', year_4d, doy_str);
-            
-            % Download logic
-            if ~isfile(fullfile(pwd, filename_unzipped))
-                url = sprintf('http://ftp.aiub.unibe.ch/CODE/%04d/%s', year_4d, filename_gz);
-                websave(fullfile(pwd, filename_gz), url);
-                gunzip(fullfile(pwd, filename_gz)); 
+
+        function delay = emptyDelayResult( ...
+                obj, groundNode, elevation_deg, azimuth_deg, ...
+                jd, datetimeUtc, frequency_Hz)
+
+            metadata = struct( ...
+                'role', obj.role, ...
+                'groundNodeName', string(groundNode.name), ...
+                'groundAltitude_m', double(groundNode.alt_m), ...
+                'troposphereModel', obj.troposphereModel, ...
+                'ionosphereModel', obj.ionosphereModel, ...
+                'frequency_Hz', double(frequency_Hz), ...
+                'jd', double(jd), ...
+                'datetimeUtc', datetimeUtc, ...
+                'dataRoot', obj.dataRoot);
+
+            delay = struct( ...
+                'total_m', 0.0, ...
+                'troposphere_m', 0.0, ...
+                'ionosphere_m', 0.0, ...
+                'elevation_deg', elevation_deg, ...
+                'azimuth_deg', azimuth_deg, ...
+                'valid', false, ...
+                'metadata', metadata);
+        end
+
+        function validateConfiguration(obj)
+            validateattributes(obj.c, {'numeric'}, ...
+                {'real', 'finite', 'scalar', 'positive'}, ...
+                mfilename, 'c');
+
+            validateattributes(obj.earthRadius_m, {'numeric'}, ...
+                {'real', 'finite', 'scalar', 'positive'}, ...
+                mfilename, 'earthRadius_m');
+
+            validateattributes(obj.ionosphereShellHeight_m, {'numeric'}, ...
+                {'real', 'finite', 'scalar', 'positive'}, ...
+                mfilename, 'ionosphereShellHeight_m');
+
+            validateattributes(obj.constantTroposphereDelay_m, {'numeric'}, ...
+                {'real', 'finite', 'scalar', 'nonnegative'}, ...
+                mfilename, 'constantTroposphereDelay_m');
+
+            validateattributes(obj.constantIonosphereDelay_m, {'numeric'}, ...
+                {'real', 'finite', 'scalar', 'nonnegative'}, ...
+                mfilename, 'constantIonosphereDelay_m');
+
+            if obj.enableTroposphere && obj.troposphereModel == "disabled"
+                error('Atmosphere:InvalidTroposphereConfiguration', ...
+                    ['enableTroposphere=true requires a troposphereModel other ', ...
+                     'than "disabled".']);
             end
-            
-            % Parse IONEX file
-            fid = fopen(fullfile(pwd, filename_unzipped), 'r');
-            target_hour = hour(datetime_utc); 
-            vtec_value = NaN; exponent = -1; 
-            is_correct_map = false;
-            
-            while ~feof(fid)
-                line = fgetl(fid);
-                if contains(line, 'EPOCH OF CURRENT MAP')
-                    map_time = sscanf(line, '%d %d %d %d %d %d');
-                    if map_time(4) == target_hour
-                        is_correct_map = true;
-                    elseif map_time(4) > target_hour
-                        break;
-                    end
-                end
-                
-                if is_correct_map && contains(line, 'LAT/LON1/LON2/DLON/H')
-                    lat_data = sscanf(line, '%f %f %f %f %f');
-                    if abs(lat_data(1) - lat) <= 1.25
-                        lon_index = round((lon - lat_data(2)) / lat_data(4)) + 1;
-                        tec_values = [];
-                        while length(tec_values) < lon_index
-                            tec_values = [tec_values; sscanf(fgetl(fid), '%f')]; %#ok<AGROW>
-                        end
-                        vtec_value = tec_values(lon_index) * (10^exponent);
-                        break; 
-                    end
-                end
-                if contains(line, 'EXPONENT')
-                    exponent = sscanf(line, '%f');
-                end
+
+            if obj.enableIonosphere && obj.ionosphereModel == "disabled"
+                error('Atmosphere:InvalidIonosphereConfiguration', ...
+                    ['enableIonosphere=true requires an ionosphereModel other ', ...
+                     'than "disabled".']);
             end
-            fclose(fid);
-            
-            if isnan(vtec_value)
-                warning('Could not find VTEC value. Defaulting to 0.');
-                vtec_value = 0;
+        end
+
+        function value = normalizeChoice(~, rawValue, allowedValues, fieldName)
+            value = lower(strtrim(string(rawValue)));
+            allowedValues = lower(string(allowedValues));
+
+            if ~isscalar(value) || ~any(value == allowedValues)
+                error('Atmosphere:InvalidConfigurationChoice', ...
+                    '%s must be one of: %s.', ...
+                    fieldName, strjoin(allowedValues, ', '));
             end
-            
-            % Mapping Function (VTEC to STEC)
-            E_rad = deg2rad(elev_angle_deg);
-            sin_alpha = (obj.R_earth / (obj.R_earth + obj.H_ion)) * cos(E_rad);
-            MF = 1 / sqrt(1 - sin_alpha^2);
-            STEC = vtec_value * MF;
-            
-            % Physics: Delay in meters -> Time in seconds
-            delay_meters = (40.3 * STEC * 1e16) / (f_Hz^2);
-            delay_sec = delay_meters / obj.c;
+        end
+
+        function pathOut = resolveProjectPath(~, pathIn)
+            pathIn = string(pathIn);
+            pathChar = char(pathIn);
+
+            if ispc
+                isAbsolute = ~isempty(regexp( ...
+                    pathChar, '^[A-Za-z]:[\\/]|^\\\\', 'once'));
+            else
+                isAbsolute = startsWith(pathChar, filesep);
+            end
+
+            if isAbsolute
+                pathOut = string(pathChar);
+            else
+                pathOut = string(fullfile( ...
+                    char(ProjectPathManager.projectRoot()), pathChar));
+            end
+        end
+
+        function value = getFieldOrDefault(~, s, fieldName, defaultValue)
+            if isstruct(s) && isfield(s, fieldName) && ~isempty(s.(fieldName))
+                value = s.(fieldName);
+            else
+                value = defaultValue;
+            end
+        end
+
+        function value = getScalarField(~, s, fieldName, defaultValue)
+            if isstruct(s) && isfield(s, fieldName) && ~isempty(s.(fieldName))
+                value = double(s.(fieldName));
+            else
+                value = double(defaultValue);
+            end
         end
     end
 end

@@ -76,6 +76,7 @@ scenario.towers = [ ...
 %% Measurement Model
 scenario.measurement = struct();
 scenario.measurement.pseudorangeSigma_m = 0.30;
+scenario.measurement.signalFrequency_Hz = 1575.42e6;
 scenario.measurement.sigma_numerical_floor_m = 1e-3;
 scenario.measurement.enableMeasurementNoise = false;
 scenario.measurement.enableNoise = false;
@@ -94,6 +95,43 @@ scenario.measurement.rxHardwareDelay_m = 0.0;
 scenario.measurement.multipathDelay_m = 0.0;
 scenario.measurement.antennaDelay_m = 0.0;
 scenario.measurement.sagnacCorrection_m = 0.0;
+
+%% Atmosphere Model
+% The legacy measurement atmosphere fields above remain in place until the
+% Atmosphere class is connected to MeasurementModel.
+%
+% "truth" controls the physical delay applied to generated pseudoranges.
+% "model" controls the correction applied by the estimator prediction model.
+
+scenario.atmosphere = struct();
+
+% Project-relative folder for downloaded or cached atmospheric products.
+scenario.atmosphere.dataRoot = fullfile("data", "atmosphere");
+
+% Missing external data must never be silently replaced with zero.
+% Supported values: "error", "invalid"
+scenario.atmosphere.missingDataPolicy = "error";
+
+% Thin-shell height used by future ionosphere models.
+scenario.atmosphere.ionosphereShellHeight_m = 350000.0;
+
+scenario.atmosphere.truth = struct( ...
+    'enableTroposphere', logical(scenario.measurement.enableTroposphereDelay), ...
+    'enableIonosphere', logical(scenario.measurement.enableIonosphereDelay), ...
+    'troposphereModel', "constant", ...
+    'ionosphereModel', "constant", ...
+    'constantTroposphereDelay_m', scenario.measurement.troposphereDelay_m, ...
+    'constantIonosphereDelay_m', scenario.measurement.ionosphereDelay_m);
+
+% Preserve the current simulation behavior: atmosphere is generated only in
+% truth and is not yet corrected in the estimator prediction model.
+scenario.atmosphere.model = struct( ...
+    'enableTroposphere', false, ...
+    'enableIonosphere', false, ...
+    'troposphereModel', "disabled", ...
+    'ionosphereModel', "disabled", ...
+    'constantTroposphereDelay_m', 0.0, ...
+    'constantIonosphereDelay_m', 0.0);
 
 %% EKF and Process Noise
 scenario.enableGroundClockErrors = true;
