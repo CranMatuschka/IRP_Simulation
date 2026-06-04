@@ -109,7 +109,9 @@ classdef ReverseGnssSimulation < handle
             for k = 1:obj.numSteps
                 obj.step(k);
             end
-            obj.buildResults();
+            
+            obj.results = ResultBuilder.fromSimulation(obj);
+            
             fprintf('Done. Final ECI position error: %.3f m\n', ...
                 norm(obj.history.x(obj.idx.pos, end) - obj.history.truth(obj.idx.pos, end)));
             fprintf('Mean pseudorange innovation RMS: %.3f m over %.0f measurements/epoch\n', ...
@@ -118,7 +120,7 @@ classdef ReverseGnssSimulation < handle
 
         function saveResults(obj)
             if isempty(fieldnames(obj.results))
-                obj.buildResults();
+                obj.results = ResultBuilder.fromSimulation(obj);
             end
 
             SimulationOutputManager.ensureOutputDirectory(obj);
@@ -134,7 +136,7 @@ classdef ReverseGnssSimulation < handle
 
             SimulationOutputManager.ensureOutputDirectory(obj);
 
-            reportData = obj.buildGenerateReportData();
+            reportData = ReportDataBuilder.fromSimulation(obj);
             reportToggles = ReportConfigBuilder.togglesFromSimulation(obj);
             reportConfig = ReportConfigBuilder.configFromSimulation(obj);
             
@@ -211,7 +213,7 @@ classdef ReverseGnssSimulation < handle
                 obj.towers{k} = GroundNode(tc, clk);
             end
 
-            obj.towersEciFirst_m = obj.towerPositionsEci(obj.jd0);
+            obj.towersEciFirst_m = GroundNode.positionsECI(obj.towers, obj.jd0);
         end
 
         function setupSpaceAssetAndReceivers(obj)
@@ -383,7 +385,7 @@ classdef ReverseGnssSimulation < handle
             obj.initialTruth0 = obj.physicalTruthVector();
             obj.initialP0 = P0;
 
-            obj.Q = obj.buildProcessNoise();
+            obj.Q = EkfDynamicsModel.buildProcessNoise(obj);
             obj.R = eye(obj.numReceivers * obj.numTowers) * ...
                 obj.measurementModel.measurementVariance( ...
                 obj.towerClockEkfEnabled(), obj.groundClockResidualVariance_m2());
@@ -403,7 +405,7 @@ classdef ReverseGnssSimulation < handle
                 obj.propagateTruth();
                 obj.propagateNominalEstimate();
 
-                F = obj.buildStateTransition();
+                F = EkfDynamicsModel.buildStateTransition(obj);
                 obj.ekf.predict(zeros(obj.stateDim, 1), F, obj.Q);
                 
                 obj.ekf.P = StateLockPolicy.applyToCovariance( ...
@@ -413,7 +415,7 @@ classdef ReverseGnssSimulation < handle
             end
 
             jd = obj.jd0 + obj.time_s(k) / 86400.0;
-            towersEci = obj.towerPositionsEci(jd);
+            towersEci = GroundNode.positionsECI(obj.towers, jd);
 
             [groundResidual_m, groundTrue_m, groundCorrection_m] = obj.groundClockResidual_m();
 
@@ -503,22 +505,6 @@ classdef ReverseGnssSimulation < handle
                 elevationRt_deg);
         end
         
-        function buildResults(obj)
-            obj.results = ResultBuilder.fromSimulation(obj);
-        end
-        
-        function reportData = buildGenerateReportData(obj)
-            reportData = ReportDataBuilder.fromSimulation(obj);
-        end
-
-        function F = buildStateTransition(obj)
-            F = EkfDynamicsModel.buildStateTransition(obj);
-        end
-
-        function Q = buildProcessNoise(obj)
-            Q = EkfDynamicsModel.buildProcessNoise(obj);
-        end
-
         function propagateTruth(obj)
             obj.truthAsset.propagateTruth(obj.mu, obj.dt);
 
@@ -577,10 +563,6 @@ classdef ReverseGnssSimulation < handle
                 P(1:obj.stateDim+1:end) = d;
             end
             P = 0.5 * (P + P');
-        end
-
-        function towersEci = towerPositionsEci(obj, jd)
-            towersEci = GroundNode.positionsECI(obj.towers, jd);
         end
 
         function [residual_m, trueBias_m, correction_m] = groundClockResidual_m(obj)
