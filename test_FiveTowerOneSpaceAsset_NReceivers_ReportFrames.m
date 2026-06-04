@@ -40,6 +40,7 @@ if isempty(thisDir)
     thisDir = pwd;
 end
 addpath(thisDir);
+ProjectPathManager.addProjectPaths();
 
 fprintf('\n=== Simplified reverse-GNSS satellite-RX test ===\n');
 fprintf('Receivers on SpaceAsset: %d\n', N_RECEIVERS);

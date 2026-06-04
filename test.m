@@ -13,7 +13,9 @@ thisDir = fileparts(thisFile);
 if isempty(thisDir)
     thisDir = pwd;
 end
+
 addpath(thisDir);
+ProjectPathManager.addProjectPaths();
 
 fprintf('\n=== Reverse-GNSS isolated EKF validation ===\n');
 

@@ -21,6 +21,7 @@ if isempty(thisDir)
     thisDir = pwd;
 end
 addpath(thisDir);
+ProjectPathManager.addProjectPaths();
 
 % The ReverseGnssSimulation object will run SimulationConfig.m itself.
 % This override is merged into the scenario by SimulationConfig.m.
