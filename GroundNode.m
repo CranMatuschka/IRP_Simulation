@@ -29,51 +29,43 @@ classdef GroundNode < handle
     end
 
     methods
-        function obj = GroundNode(cfgOrName, clockObj, antennaCfg)
+        function obj = GroundNode(cfg, clockObj, antennaCfg)
             if nargin == 0
                 obj.tx_clock = Clock(0, 0, 0, 1.0);
                 obj.antenna = GroundNode.defaultTxAntenna("GROUND");
                 return;
             end
 
-            if isstruct(cfgOrName)
-                cfg = cfgOrName;
-
-                obj.name = string(cfg.name);
-                obj.lat_deg = double(cfg.lat_deg);
-                obj.lon_deg = double(cfg.lon_deg);
-                obj.alt_m = double(cfg.alt_m);
-
-                if isfield(cfg, 'txSignalDelay_m')
-                    obj.txSignalDelay_m = double(cfg.txSignalDelay_m);
-                end
-
-                if nargin >= 2 && ~isempty(clockObj)
-                    obj.tx_clock = clockObj;
-                else
-                    obj.tx_clock = Clock(0, 0, 0, 1.0);
-                end
-
-                if nargin >= 3 && ~isempty(antennaCfg)
-                    antCfg = antennaCfg;
-                elseif isfield(cfg, 'antenna') && ~isempty(cfg.antenna)
-                    antCfg = cfg.antenna;
-                else
-                    antCfg = GroundNode.defaultTxAntennaConfig(obj.name);
-                end
-
-                obj.antenna = Antenna(antCfg);
-                obj.antenna.mode = "TX";
-                return;
+            if ~isstruct(cfg)
+                error('GroundNode:InvalidConfiguration', ...
+                    'GroundNode requires a tower configuration struct.');
             end
 
-            % Backward-compatible constructor:
-            % GroundNode(name, lat, lon, alt, clockObj, antennaCfg)
-            obj.name = string(cfgOrName);
-            obj.lat_deg = double(clockObj);
-            obj.lon_deg = double(antennaCfg);
-            error('GroundNode:UseStructConstructor', ...
-                'Use GroundNode(towerConfig, clockObj) for the cleaned architecture.');
+            obj.name = string(cfg.name);
+            obj.lat_deg = double(cfg.lat_deg);
+            obj.lon_deg = double(cfg.lon_deg);
+            obj.alt_m = double(cfg.alt_m);
+
+            if isfield(cfg, 'txSignalDelay_m')
+                obj.txSignalDelay_m = double(cfg.txSignalDelay_m);
+            end
+
+            if nargin >= 2 && ~isempty(clockObj)
+                obj.tx_clock = clockObj;
+            else
+                obj.tx_clock = Clock(0, 0, 0, 1.0);
+            end
+
+            if nargin >= 3 && ~isempty(antennaCfg)
+                antCfg = antennaCfg;
+            elseif isfield(cfg, 'antenna') && ~isempty(cfg.antenna)
+                antCfg = cfg.antenna;
+            else
+                antCfg = GroundNode.defaultTxAntennaConfig(obj.name);
+            end
+
+            obj.antenna = Antenna(antCfg);
+            obj.antenna.mode = "TX";
         end
 
         function val = get.pos_ECEF_m(obj)
@@ -89,10 +81,6 @@ classdef GroundNode < handle
             pos_eci_m = obj.getKinematicsECI(jd);
         end
 
-        function vel_eci_mps = velocityEci(obj, jd)
-            [~, vel_eci_mps] = obj.getKinematicsECI(jd);
-        end
-
         function bias_sec = updateClock(obj, dt)
             if nargin < 2 || isempty(dt)
                 dt = 1.0;
@@ -105,11 +93,6 @@ classdef GroundNode < handle
             end
 
             bias_sec = obj.total_bias_sec;
-        end
-
-        % Backward-compatible name.
-        function update_clock_physics(obj, dt)
-            obj.updateClock(dt);
         end
 
         function bias_m = clockBias_m(obj)

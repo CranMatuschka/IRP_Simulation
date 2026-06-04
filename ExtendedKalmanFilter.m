@@ -1,8 +1,6 @@
 classdef ExtendedKalmanFilter < handle
-    % EXTENDEDKALMANFILTER A generic EKF engine.
-    % Handles State (X), Covariance (P), Process Noise (Q), and Measurement Noise (R).
-    % Optional angle-state wrapping keeps Euler states bounded after predict/update.
-
+    %EXTENDEDKALMANFILTER Generic EKF engine.
+    % Handles state, covariance, process noise, and measurement noise.
     properties
         X       % State estimate vector (n x 1)
         P       % State covariance matrix (n x n)
@@ -10,7 +8,6 @@ classdef ExtendedKalmanFilter < handle
         R       % Default Measurement noise covariance matrix (m x m)
 
         x_dim   % Number of states (n)
-        y_dim   % Number of measurements (m)
     end
 
     methods
@@ -21,7 +18,6 @@ classdef ExtendedKalmanFilter < handle
             obj.R = R0;
 
             obj.x_dim = length(obj.X);
-            obj.y_dim = size(obj.R, 1);
         end
 
         function predict(obj, X_propagated, Phi, Q_dynamic)

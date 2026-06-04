@@ -31,9 +31,6 @@ classdef Clock < handle
     properties (Dependent)
         % Backward-compatible aliases.
         % Prefer state_sec and nominalDt in new code.
-        state
-        dt
-
         total_bias_sec
         total_drift_sec_per_s
     end
@@ -70,31 +67,10 @@ classdef Clock < handle
             obj.rebuildDiscreteModel(obj.nominalDt);
         end
 
-        function val = get.state(obj)
-            val = obj.state_sec;
-        end
-
-        function set.state(obj, val)
-            validateattributes(val, {'numeric'}, ...
-                {'real', 'finite', 'numel', 4}, mfilename, 'state');
-            obj.state_sec = val(:);
-        end
-
-        function val = get.dt(obj)
-            val = obj.nominalDt;
-        end
-
-        function set.dt(obj, val)
-            validateattributes(val, {'numeric'}, ...
-                {'real', 'finite', 'scalar', 'positive'}, mfilename, 'dt');
-            obj.nominalDt = val;
-            obj.rebuildDiscreteModel(obj.nominalDt);
-        end
-
         function bias_sec = get.total_bias_sec(obj)
             bias_sec = obj.state_sec(1) + obj.state_sec(3);
         end
-
+       
         function drift_sec_per_s = get.total_drift_sec_per_s(obj)
             drift_sec_per_s = obj.state_sec(2) + obj.state_sec(4);
         end
@@ -124,7 +100,6 @@ classdef Clock < handle
             current_error_sec = obj.total_bias_sec;
         end
 
-
         function reset(obj, initialState_sec)
             if nargin < 2 || isempty(initialState_sec)
                 obj.state_sec = zeros(4, 1);
@@ -133,10 +108,6 @@ classdef Clock < handle
                     {'real', 'finite', 'numel', 4}, mfilename, 'initialState_sec');
                 obj.state_sec = initialState_sec(:);
             end
-        end
-
-        function error_m = get_error_meters(obj)
-            error_m = obj.total_bias_sec * obj.c;
         end
 
         function Phi = getStateTransition(obj, dt)
@@ -273,10 +244,6 @@ classdef Clock < handle
             variance = mean(second_diff.^2) / (2.0 * tau_eff^2);
             adev = sqrt(max(variance, 0.0));
             adev_sigma = adev / sqrt(2.0 * edf);
-        end
-
-        function [adev, tau_eff, edf, adev_sigma] = computeOverlappingAllanDeviationWithConfidence(phase_data, tau, dt)
-            [adev, tau_eff, edf, adev_sigma] = Clock.computeOverlappingAllanDeviation(phase_data, tau, dt);
         end
 
         function h0 = calculate_h0(tau_array, adev_array)
