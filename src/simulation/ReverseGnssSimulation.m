@@ -40,6 +40,10 @@ classdef ReverseGnssSimulation < handle
         towerClockStream = [];
         validationClockStream = [];
         measurementModel;
+
+        truthAtmosphere = [];
+        modelAtmosphere = [];
+
         seedConfig = struct();
 
         towers cell = {};
@@ -75,6 +79,7 @@ classdef ReverseGnssSimulation < handle
         outputDir string = "";
         history struct = struct();
         results struct = struct();
+
     end
 
     methods
@@ -93,6 +98,7 @@ classdef ReverseGnssSimulation < handle
             obj.setupTime();
             obj.setupGroundNodes();
             obj.setupSpaceAssetAndReceivers();
+            obj.setupAtmosphereModels();
             obj.setupMeasurementModel();
             obj.setupEkf();
             obj.setupHistory();
@@ -297,7 +303,24 @@ classdef ReverseGnssSimulation < handle
                 obj.c, ...
                 obj.towers, ...
                 obj.truthAsset.getEnabledAntennas(), ...
-                obj.measurementStream);
+                obj.measurementStream, ...
+                obj.truthAtmosphere, ...
+                obj.modelAtmosphere);
+        end
+
+        function setupAtmosphereModels(obj)
+            atmosphereCfg = obj.getFieldOrDefault( ...
+                obj.cfg, 'atmosphere', struct());
+
+            obj.truthAtmosphere = Atmosphere( ...
+                atmosphereCfg, ...
+                obj.constants, ...
+                "truth");
+
+            obj.modelAtmosphere = Atmosphere( ...
+                atmosphereCfg, ...
+                obj.constants, ...
+                "model");
         end
 
         function setupEkf(obj)

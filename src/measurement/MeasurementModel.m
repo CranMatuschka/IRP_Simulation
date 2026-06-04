@@ -60,7 +60,9 @@ classdef MeasurementModel < handle
     end
 
     methods
-        function obj = MeasurementModel(scenarioCfg, c, towers, receiverAntennas, measurementStream)
+        function obj = MeasurementModel( ...
+                scenarioCfg, c, towers, receiverAntennas, measurementStream, ...
+                truthAtmosphere, modelAtmosphere)
             obj.cfg = scenarioCfg;
             obj.c = c;
             obj.towers = towers;
@@ -77,7 +79,33 @@ classdef MeasurementModel < handle
                 obj.measurementStream = measurementStream;
             end
 
+            if nargin >= 6 && ~isempty(truthAtmosphere)
+                if ~isa(truthAtmosphere, 'Atmosphere')
+                    error('MeasurementModel:InvalidTruthAtmosphere', ...
+                        'truthAtmosphere must be an Atmosphere object.');
+                end
+
+                obj.truthAtmosphere = truthAtmosphere;
+            end
+
+            if nargin >= 7 && ~isempty(modelAtmosphere)
+                if ~isa(modelAtmosphere, 'Atmosphere')
+                    error('MeasurementModel:InvalidModelAtmosphere', ...
+                        'modelAtmosphere must be an Atmosphere object.');
+                end
+
+                obj.modelAtmosphere = modelAtmosphere;
+            end
+
             mcfg = scenarioCfg.measurement;
+
+            obj.signalFrequency_Hz = obj.getScalarField( ...
+                mcfg, 'signalFrequency_Hz', 1575.42e6);
+
+            validateattributes(obj.signalFrequency_Hz, ...
+                {'numeric'}, ...
+                {'real', 'finite', 'scalar', 'positive'}, ...
+                mfilename, 'signalFrequency_Hz');
 
             obj.useMeasurementNoise = logical(obj.getFieldOrDefault(mcfg, 'enableMeasurementNoise', false)) || ...
                                       logical(obj.getFieldOrDefault(mcfg, 'enableNoise', false));
