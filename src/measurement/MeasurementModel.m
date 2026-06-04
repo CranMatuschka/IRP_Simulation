@@ -7,7 +7,8 @@ classdef MeasurementModel < handle
     %   - pseudorange Jacobian H
     %   - measurement covariance R
     %   - elevation mask logic
-    %   - deterministic extra-delay toggles
+    %   - truth and estimator atmospheric-delay application
+    %   - non-atmospheric deterministic extra-delay toggles
     %   - measurement-noise injection
 
     properties
@@ -22,21 +23,26 @@ classdef MeasurementModel < handle
         numTowers double = 0
 
         measurementStream = []
+        truthAtmosphere = []
+        modelAtmosphere = []
+
+        signalFrequency_Hz double = 1575.42e6
 
         % Cached measurement options, initialized once.
         useMeasurementNoise logical = false
         useElevationMask logical = false
         elevationMask_deg double = 0.0
 
-        useIonosphereDelay logical = false
-        useTroposphereDelay logical = false
         useHardwareDelay logical = false
         useMultipathDelay logical = false
         useAntennaDelay logical = false
         useSagnacCorrection logical = false
+        useLightTimeCorrection logical = false
+        
+        lightTimeCorrectionMethod string = "inertialIterative"
+        lightTimeCorrectionTolerance_s double = 1e-12
+        lightTimeCorrectionMaxIterations double = 10
 
-        ionosphereDelay_m double = 0.0
-        troposphereDelay_m double = 0.0
         txHardwareDelay_m double = 0.0
         rxHardwareDelay_m double = 0.0
         multipathDelay_m double = 0.0
@@ -80,6 +86,18 @@ classdef MeasurementModel < handle
             obj.useAntennaDelay = logical(obj.getFieldOrDefault(mcfg, 'enableAntennaDelay', false));
             obj.useSagnacCorrection = logical(obj.getFieldOrDefault(mcfg, 'enableSagnacCorrection', false));
 
+            obj.useLightTimeCorrection = logical(obj.getFieldOrDefault( ...
+                mcfg, 'enableLightTimeCorrection', false));
+
+            obj.lightTimeCorrectionMethod = string(obj.getFieldOrDefault( ...
+                mcfg, 'lightTimeCorrectionMethod', "inertialIterative"));
+
+            obj.lightTimeCorrectionTolerance_s = obj.getScalarField( ...
+                mcfg, 'lightTimeCorrectionTolerance_s', 1e-12);
+
+            obj.lightTimeCorrectionMaxIterations = obj.getScalarField( ...
+                mcfg, 'lightTimeCorrectionMaxIterations', 10);
+
             obj.ionosphereDelay_m = obj.getScalarField(mcfg, 'ionosphereDelay_m', 0.0);
             obj.troposphereDelay_m = obj.getScalarField(mcfg, 'troposphereDelay_m', 0.0);
             obj.txHardwareDelay_m = obj.getScalarField(mcfg, 'txHardwareDelay_m', 0.0);
@@ -92,6 +110,7 @@ classdef MeasurementModel < handle
             obj.numericalSigmaFloor_m = obj.getScalarField(mcfg, ...
                 'sigma_numerical_floor_m', ...
                 obj.getScalarField(mcfg, 'deterministicSigma_m', 1e-4));
+            obj.validateLightTimeCorrectionConfiguration();
         end
 
         function [y, Rrange, trueRangeRt, losRt, receiverEci, visibilityMask, elevationRt_deg] = ...
@@ -300,6 +319,54 @@ classdef MeasurementModel < handle
     end
 
     methods (Access = private)
+        
+        function validateLightTimeCorrectionConfiguration(obj)
+            %VALIDATELIGHTTIMECORRECTIONCONFIGURATION Validate the future
+            % inertial light-time correction settings without changing the
+            % current pseudorange calculation.
+        
+            rawMethod = obj.lightTimeCorrectionMethod;
+        
+            % Normalize char arrays, string arrays, whitespace, and capitalization.
+            methodKey = lower(strtrim(string(rawMethod)));
+        
+            if ~isscalar(methodKey) || ismissing(methodKey) || strlength(methodKey) == 0
+                error('MeasurementModel:InvalidLightTimeCorrectionMethod', ...
+                    ['lightTimeCorrectionMethod must be one non-empty string scalar. ', ...
+                     'Received: %s'], mat2str(rawMethod));
+            end
+        
+            allowedMethod = "inertialiterative";
+        
+            if methodKey ~= allowedMethod
+                error('MeasurementModel:InvalidLightTimeCorrectionMethod', ...
+                    ['lightTimeCorrectionMethod must be "inertialIterative". ', ...
+                     'Received: "%s".'], char(methodKey));
+            end
+        
+            validateattributes(obj.lightTimeCorrectionTolerance_s, ...
+                {'numeric'}, ...
+                {'real', 'finite', 'scalar', 'positive'}, ...
+                mfilename, 'lightTimeCorrectionTolerance_s');
+        
+            validateattributes(obj.lightTimeCorrectionMaxIterations, ...
+                {'numeric'}, ...
+                {'real', 'finite', 'scalar', 'integer', 'positive'}, ...
+                mfilename, 'lightTimeCorrectionMaxIterations');
+        
+            if obj.useLightTimeCorrection && obj.useSagnacCorrection
+                error('MeasurementModel:LightTimeCorrectionSagnacConflict', ...
+                    ['The inertial light-time correction and the separate ', ...
+                     'Sagnac correction cannot be enabled simultaneously. ', ...
+                     'The inertial light-time correction will represent Earth ', ...
+                     'rotation by evaluating the ground transmitter at the ', ...
+                     'signal transmission time.']);
+            end
+        
+            % Store the canonical spelling for reports and later comparisons.
+            obj.lightTimeCorrectionMethod = "inertialIterative";
+        end
+        
         function value = getFieldOrDefault(~, s, fieldName, defaultValue)
             if isstruct(s) && isfield(s, fieldName) && ~isempty(s.(fieldName))
                 value = s.(fieldName);

@@ -155,7 +155,6 @@ classdef Atmosphere < handle
                 obj.cfg, 'vtec_TECU', 10.0);
 
             obj.validateConfiguration();
-            obj.validateConfiguration();
         end
 
         function delay = codeDelayMeters( ...
