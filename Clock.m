@@ -29,8 +29,7 @@ classdef Clock < handle
     end
 
     properties (Dependent)
-        % Backward-compatible aliases.
-        % Prefer state_sec and nominalDt in new code.
+        % Derived aggregate clock quantities.
         total_bias_sec
         total_drift_sec_per_s
     end

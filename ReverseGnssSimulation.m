@@ -22,8 +22,6 @@ classdef ReverseGnssSimulation < handle
 
     properties
         runtimeOptions = struct();
-        scriptDir string;
-        projectRoot string;
         entryPointName string = "ReverseGnssSimulation";
 
         simConfig;
@@ -87,12 +85,10 @@ classdef ReverseGnssSimulation < handle
             if isfield(obj.runtimeOptions, 'entryPointName')
                 obj.entryPointName = string(obj.runtimeOptions.entryPointName);
             end
-            obj.scriptDir = string(fileparts(mfilename('fullpath')));
-            obj.projectRoot = string(fileparts(char(obj.scriptDir)));
+            ProjectPathManager.addProjectPaths();
         end
 
         function configure(obj)
-            obj.setupPaths();
             obj.loadConfig();
             obj.setupTime();
             obj.setupGroundNodes();
@@ -144,19 +140,7 @@ classdef ReverseGnssSimulation < handle
     end
 
     methods (Access = private)
-        function setupPaths(obj)
-            addpath(char(obj.scriptDir));
-            
-            reportDir = fullfile(char(obj.scriptDir), 'Report');
-            if isfolder(reportDir)
-                addpath(reportDir);
-            end
-
-            if isfolder(char(obj.projectRoot))
-                addpath(char(obj.projectRoot));
-            end
-        end
-
+        
         function loadConfig(obj)
             if isfield(obj.runtimeOptions, 'simConfigOverride')
                 simConfigOverride = obj.runtimeOptions.simConfigOverride; %#ok<NASGU>
@@ -164,7 +148,7 @@ classdef ReverseGnssSimulation < handle
             if isfield(obj.runtimeOptions, 'simConfigOverrides')
                 simConfigOverrides = obj.runtimeOptions.simConfigOverrides; %#ok<NASGU>
             end
-            run(char(fullfile(char(obj.scriptDir), 'SimulationConfig.m')));
+            run(char(ProjectPathManager.simulationConfigFile()));
             obj.simConfig = simConfig;
             obj.cfg = obj.simConfig.scenarios.reverseGnssClockNavigationScenario;
             obj.constants = obj.simConfig.constants;

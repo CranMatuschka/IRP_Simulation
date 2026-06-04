@@ -9,22 +9,11 @@ function generateReport(reportData, reportConfig, reportToggles)
     
     %% Report Setup
 
-    script_dir = fileparts(mfilename('fullpath'));
-    addpath(script_dir);
-    project_root = fileparts(script_dir);
-    addpath(project_root);
-    report_script_dir = fileparts(mfilename('fullpath'));
-    simulation_dir = fullfile(report_script_dir, "..");
-    path_candidates = [ ...
-        fullfile(report_script_dir, "Clock"), fullfile(simulation_dir, "Clock"), ...
-        fullfile(report_script_dir, "Components"), fullfile(simulation_dir, "Components"), ...
-        fullfile(report_script_dir, "EKF"), fullfile(simulation_dir, "EKF"), ...
-        fullfile(report_script_dir, "Nodes"), fullfile(simulation_dir, "Nodes")];
-    for path_idx = 1:numel(path_candidates)
-        if isfolder(path_candidates(path_idx))
-            addpath(path_candidates(path_idx));
-        end
-    end
+    reportDir = string(fileparts(mfilename('fullpath')));
+    projectRoot = string(fileparts(char(reportDir)));
+
+    addpath(char(projectRoot));
+    ProjectPathManager.addProjectPaths();
     
     if nargin < 3 || ~isstruct(reportToggles)
         reportToggles = struct();
@@ -46,7 +35,7 @@ function generateReport(reportData, reportConfig, reportToggles)
         reportConfig = struct();
     end
  
-    reportConfig = mergeStructDefaults(reportConfig, defaultReportConfig(report_script_dir));
+    reportConfig = mergeStructDefaults(reportConfig, defaultReportConfig(reportDir));
     
     required_fields = [
         "time_vec"
