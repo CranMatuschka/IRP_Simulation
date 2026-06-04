@@ -92,16 +92,15 @@ scenario.measurement.txHardwareDelay_m = 0.0;
 scenario.measurement.rxHardwareDelay_m = 0.0;
 scenario.measurement.multipathDelay_m = 0.0;
 scenario.measurement.antennaDelay_m = 0.0;
-scenario.measurement.enableLightTime = true;
+
+scenario.measurement.enableLightTime = false;
 scenario.measurement.lightTimeCorrectionMethod = "inertialIterative";
 scenario.measurement.lightTimeTolerance_s = 1e-12;
 scenario.measurement.lightTimeMaxIterations = 10;
+
 scenario.measurement.sagnacCorrection_m = 0.0;
 
 %% Atmosphere Model
-% The legacy measurement atmosphere fields above remain in place until the
-% Atmosphere class is connected to MeasurementModel.
-%
 % "truth" controls the physical delay applied to generated pseudoranges.
 % "model" controls the correction applied by the estimator prediction model.
 

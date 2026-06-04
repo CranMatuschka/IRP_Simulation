@@ -55,7 +55,7 @@ scenario.report.enableAllanDeviationValidation = true;
 
 % Deterministic regression by default. Turn this on in SimulationConfig
 % or here if you explicitly want noisy measurements.
-scenario.measurement.lightTimeCorrectionTolerance_s = 0.0;
+
 scenario.measurement.lightTimeCorrectionMethod = "invalidMethod";
 scenario.measurement.enableLightTimeCorrection = false;
 scenario.measurement.enableSagnacCorrection = false;
