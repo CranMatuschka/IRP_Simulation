@@ -37,6 +37,11 @@ classdef Atmosphere < handle
 
         % Deterministic ionosphere input.
         vtec_TECU double = 10.0
+        % Residual uncertainty of the configured estimator correction.
+        % These values are used by MeasurementModel to build R, not to
+        % change the deterministic propagation delay.
+        residualTroposphereSigma_m double = 0.0
+        residualIonosphereSigma_m double = 0.0
     end
 
     methods
@@ -154,6 +159,12 @@ classdef Atmosphere < handle
             obj.vtec_TECU = obj.getScalarField( ...
                 obj.cfg, 'vtec_TECU', 10.0);
 
+            obj.residualTroposphereSigma_m = obj.getScalarField( ...
+                obj.cfg, 'residualTroposphereSigma_m', 0.0);
+
+            obj.residualIonosphereSigma_m = obj.getScalarField( ...
+                obj.cfg, 'residualIonosphereSigma_m', 0.0);
+            
             obj.validateConfiguration();
         end
 
@@ -298,6 +309,23 @@ classdef Atmosphere < handle
         function tf = isEnabled(obj)
             tf = obj.enableTroposphere || obj.enableIonosphere;
         end
+        
+        function sigma_m = residualCodeSigma_m(obj)
+            %RESIDUALCODESIGMA_M Return one-sigma residual code-delay error.
+            %
+            % This is an uncertainty model for the correction residual, not
+            % an additional deterministic delay.
+
+            sigma_m = hypot( ...
+                obj.residualTroposphereSigma_m, ...
+                obj.residualIonosphereSigma_m);
+        end
+
+        function variance_m2 = residualCodeVariance_m2(obj)
+            sigma_m = obj.residualCodeSigma_m();
+            variance_m2 = sigma_m^2;
+        end
+    
     end
 
     methods (Access = private)
@@ -592,6 +620,14 @@ classdef Atmosphere < handle
             validateattributes(obj.vtec_TECU, {'numeric'}, ...
                 {'real', 'finite', 'scalar', 'nonnegative'}, ...
                 mfilename, 'vtec_TECU');
+            
+            validateattributes(obj.residualTroposphereSigma_m, {'numeric'}, ...
+                {'real', 'finite', 'scalar', 'nonnegative'}, ...
+                mfilename, 'residualTroposphereSigma_m');
+
+            validateattributes(obj.residualIonosphereSigma_m, {'numeric'}, ...
+                {'real', 'finite', 'scalar', 'nonnegative'}, ...
+                mfilename, 'residualIonosphereSigma_m');
             
             if obj.enableTroposphere && obj.troposphereModel == "disabled"
                 error('Atmosphere:InvalidTroposphereConfiguration', ...

@@ -149,6 +149,7 @@ classdef MeasurementModel < handle
             receiverEci = truthAsset.receiverPositionsEci();
             visibilityMask = false(obj.numReceivers, obj.numTowers);
             elevationRt_deg = NaN(obj.numReceivers, obj.numTowers);
+            measurementTowerIndex = zeros(maxMeas, 1);
 
             bRx_m = truthAsset.getClockBias_m();
             row = 0;
@@ -182,6 +183,8 @@ classdef MeasurementModel < handle
                         twr, rx, jd, towersEci(:, twr), rRx_I, truthAsset);
 
                     row = row + 1;
+                    measurementTowerIndex(row) = twr;
+
                     y(row) = rho ...
                         + bRx_m ...
                         - groundResidualTruth_m(twr) ...
@@ -205,9 +208,12 @@ classdef MeasurementModel < handle
             end
 
             y = y(1:row);
+            measurementTowerIndex = measurementTowerIndex(1:row);
 
-            Rrange = eye(row) * ...
-                obj.measurementVariance(towerClockEkfEnabled, groundClockResidualVariance_m2);
+            Rrange = obj.measurementCovariance( ...
+                measurementTowerIndex, ...
+                towerClockEkfEnabled, ...
+                groundClockResidualVariance_m2);
         end
                 
         function [yp, H] = predictPseudorangesWithJacobian( ...
@@ -340,8 +346,10 @@ classdef MeasurementModel < handle
         function tf = measurementNoiseEnabled(obj)
             tf = obj.useMeasurementNoise;
         end
+        
+        function sigma2 = measurementVariance( ...
+                obj, towerClockEkfEnabled, groundClockResidualVariance_m2)
 
-        function sigma2 = measurementVariance(obj, towerClockEkfEnabled, groundClockResidualVariance_m2)
             if nargin < 2 || isempty(towerClockEkfEnabled)
                 towerClockEkfEnabled = false;
             end
@@ -350,20 +358,82 @@ classdef MeasurementModel < handle
                 groundClockResidualVariance_m2 = 0.0;
             end
 
-            sigma2 = 0.0;
+            independentSigma_m = max( ...
+                obj.pseudorangeSigma_m, ...
+                obj.numericalSigmaFloor_m);
+
+            sigma2 = independentSigma_m^2;
 
             if ~towerClockEkfEnabled
                 sigma2 = sigma2 + groundClockResidualVariance_m2;
             end
 
-            sigma2 = sigma2 + max(obj.pseudorangeSigma_m, obj.numericalSigmaFloor_m)^2;
+            sigma2 = sigma2 + obj.atmosphereResidualVariance_m2();
             sigma2 = max(sigma2, 1e-12);
         end
+        
+        function R = measurementCovariance( ...
+                obj, measurementTowerIndex, ...
+                towerClockEkfEnabled, groundClockResidualVariance_m2)
 
+            if nargin < 3 || isempty(towerClockEkfEnabled)
+                towerClockEkfEnabled = false;
+            end
+
+            if nargin < 4 || isempty(groundClockResidualVariance_m2)
+                groundClockResidualVariance_m2 = 0.0;
+            end
+
+            measurementTowerIndex = double(measurementTowerIndex(:));
+            n = numel(measurementTowerIndex);
+
+            if n == 0
+                R = zeros(0, 0);
+                return;
+            end
+
+            validateattributes(measurementTowerIndex, {'numeric'}, ...
+                {'real', 'finite', 'integer', 'positive'}, ...
+                mfilename, 'measurementTowerIndex');
+
+            independentSigma_m = max( ...
+                obj.pseudorangeSigma_m, ...
+                obj.numericalSigmaFloor_m);
+
+            R = eye(n) * independentSigma_m^2;
+
+            if ~towerClockEkfEnabled && groundClockResidualVariance_m2 > 0.0
+                R = obj.addSameTowerCommonVariance( ...
+                    R, measurementTowerIndex, groundClockResidualVariance_m2);
+            end
+
+            atmosphereVariance_m2 = obj.atmosphereResidualVariance_m2();
+
+            if atmosphereVariance_m2 > 0.0
+                R = obj.addSameTowerCommonVariance( ...
+                    R, measurementTowerIndex, atmosphereVariance_m2);
+            end
+
+            R = 0.5 * (R + R');
+
+            validateattributes(R, {'numeric'}, ...
+                {'real', 'finite', 'size', [n, n]}, ...
+                mfilename, 'R');
+        end
+        
         function sigma_m = effectiveNumericalMeasurementSigma_m(obj)
             sigma_m = obj.numericalSigmaFloor_m;
         end
 
+        function sigma2 = atmosphereResidualVariance_m2(obj)
+            if isempty(obj.modelAtmosphere)
+                sigma2 = 0.0;
+                return;
+            end
+
+            sigma2 = obj.modelAtmosphere.residualCodeVariance_m2();
+        end
+    
     end
 
     methods (Access = private)
@@ -408,6 +478,23 @@ classdef MeasurementModel < handle
                 mfilename, 'atmosphereGradientReceiverEci');
         end
 
+        function R = addSameTowerCommonVariance( ...
+                ~, R, measurementTowerIndex, commonVariance_m2)
+
+            commonVariance_m2 = double(commonVariance_m2);
+
+            validateattributes(commonVariance_m2, {'numeric'}, ...
+                {'real', 'finite', 'scalar', 'nonnegative'}, ...
+                mfilename, 'commonVariance_m2');
+
+            towerIds = unique(measurementTowerIndex(:).');
+
+            for towerId = towerIds
+                rows = measurementTowerIndex == towerId;
+                R(rows, rows) = R(rows, rows) + commonVariance_m2;
+            end
+        end        
+        
         function validateLightTimeCorrectionConfiguration(obj)
             %VALIDATELIGHTTIMECORRECTIONCONFIGURATION Validate the future
             % inertial light-time correction settings without changing the

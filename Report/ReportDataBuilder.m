@@ -218,20 +218,31 @@ classdef ReportDataBuilder
                 double(sim.measurementModel.measurementNoiseEnabled());
             groundR2 = GroundTimingNetwork.residualVariance_m2(sim.cfg, sim.c);
 
+            if GroundTimingNetwork.towerClockEkfEnabled(sim.cfg)
+                appliedGroundR2 = 0.0;
+            else
+                appliedGroundR2 = groundR2;
+            end
+
+            atmosphereR2 = sim.measurementModel.atmosphereResidualVariance_m2();
+
             actualR2 = sim.measurementModel.measurementVariance( ...
                 GroundTimingNetwork.towerClockEkfEnabled(sim.cfg), ...
                 GroundTimingNetwork.residualVariance_m2(sim.cfg, sim.c));
 
             reportData.R_receiver_m2 = ones(nRows, sim.numSteps) * receiverR2;
-            reportData.R_tower_clock_m2 = ones(nRows, sim.numSteps) * groundR2;
-            reportData.R_atmosphere_m2 = zeros(nRows, sim.numSteps);
+            reportData.R_tower_clock_m2 = ones(nRows, sim.numSteps) * appliedGroundR2;
+            reportData.R_atmosphere_m2 = ones(nRows, sim.numSteps) * atmosphereR2;
             reportData.R_hardware_m2 = zeros(nRows, sim.numSteps);
             reportData.R_multipath_m2 = zeros(nRows, sim.numSteps);
             reportData.R_numerical_regularization_m2 = ...
-                ones(nRows, sim.numSteps) * max(actualR2 - receiverR2 - groundR2, 0.0);
-            reportData.R_total_m2 = reportData.R_receiver_m2 + ...
-                reportData.R_tower_clock_m2 + reportData.R_numerical_regularization_m2;
+                ones(nRows, sim.numSteps) * ...
+                max(actualR2 - receiverR2 - appliedGroundR2 - atmosphereR2, 0.0);
 
+            reportData.R_total_m2 = reportData.R_receiver_m2 + ...
+                reportData.R_tower_clock_m2 + ...
+                reportData.R_atmosphere_m2 + ...
+                reportData.R_numerical_regularization_m2;
             obs = ObservabilityAnalyzer.analyzeNormalMatrix( ...
                 sim.observabilityNormalMatrix, reportData.state_names);
             reportData.final_observability_rank = obs.rank;
