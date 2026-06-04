@@ -28,6 +28,15 @@ classdef Atmosphere < handle
 
         constantTroposphereDelay_m double = 0.0
         constantIonosphereDelay_m double = 0.0
+
+        % Deterministic troposphere inputs.
+        surfacePressure_hPa double = 1013.25
+        surfaceTemperature_K double = 293.15
+        relativeHumidity_fraction double = 0.50
+        minimumMappingElevation_deg double = 3.0
+
+        % Deterministic ionosphere input.
+        vtec_TECU double = 10.0
     end
 
     methods
@@ -130,6 +139,22 @@ classdef Atmosphere < handle
             obj.constantIonosphereDelay_m = obj.getScalarField( ...
                 obj.cfg, 'constantIonosphereDelay_m', 0.0);
 
+            obj.surfacePressure_hPa = obj.getScalarField( ...
+                obj.cfg, 'surfacePressure_hPa', 1013.25);
+
+            obj.surfaceTemperature_K = obj.getScalarField( ...
+                obj.cfg, 'surfaceTemperature_K', 293.15);
+
+            obj.relativeHumidity_fraction = obj.getScalarField( ...
+                obj.cfg, 'relativeHumidity_fraction', 0.50);
+
+            obj.minimumMappingElevation_deg = obj.getScalarField( ...
+                obj.cfg, 'minimumMappingElevation_deg', 3.0);
+
+            obj.vtec_TECU = obj.getScalarField( ...
+                obj.cfg, 'vtec_TECU', 10.0);
+
+            obj.validateConfiguration();
             obj.validateConfiguration();
         end
 
@@ -198,7 +223,8 @@ classdef Atmosphere < handle
                 return;
             end
 
-            delay.troposphere_m = obj.troposphereDelayMeters(elevation_deg);
+            delay.troposphere_m = obj.troposphereDelayMeters( ...
+                groundNode, elevation_deg);
             delay.ionosphere_m = obj.ionosphereDelayMeters( ...
                 elevation_deg, frequency_Hz);
 
@@ -212,9 +238,7 @@ classdef Atmosphere < handle
     end
 
     methods (Access = private)
-        function delay_m = troposphereDelayMeters(obj, elevation_deg)
-            %#ok<INUSD>
-
+        function delay_m = troposphereDelayMeters(obj, groundNode, elevation_deg)
             switch obj.troposphereModel
                 case "disabled"
                     delay_m = 0.0;
@@ -222,16 +246,23 @@ classdef Atmosphere < handle
                 case "constant"
                     delay_m = obj.constantTroposphereDelay_m;
 
-                otherwise
+                case "saastamoinen"
+                    delay_m = obj.saastamoinenDelayMeters( ...
+                        groundNode, elevation_deg);
+
+                case "era5profile"
                     error('Atmosphere:TroposphereModelNotImplemented', ...
-                        'Troposphere model "%s" is configured but not implemented yet.', ...
+                        ['Troposphere model "era5profile" requires an ', ...
+                         'ERA5 data provider and is not implemented yet.']);
+
+                otherwise
+                    error('Atmosphere:UnknownTroposphereModel', ...
+                        'Unsupported troposphere model "%s".', ...
                         obj.troposphereModel);
             end
         end
 
         function delay_m = ionosphereDelayMeters(obj, elevation_deg, frequency_Hz)
-            %#ok<INUSD>
-
             switch obj.ionosphereModel
                 case "disabled"
                     delay_m = 0.0;
@@ -239,36 +270,144 @@ classdef Atmosphere < handle
                 case "constant"
                     delay_m = obj.constantIonosphereDelay_m;
 
-                otherwise
+                case "thinshellvtec"
+                    delay_m = obj.thinShellVtecDelayMeters( ...
+                        elevation_deg, frequency_Hz);
+
+                case "ionex"
                     error('Atmosphere:IonosphereModelNotImplemented', ...
-                        'Ionosphere model "%s" is configured but not implemented yet.', ...
+                        ['Ionosphere model "ionex" requires an IONEX data ', ...
+                         'provider and is not implemented yet.']);
+
+                otherwise
+                    error('Atmosphere:UnknownIonosphereModel', ...
+                        'Unsupported ionosphere model "%s".', ...
                         obj.ionosphereModel);
             end
+        end
+
+        function delay_m = saastamoinenDelayMeters( ...
+                obj, groundNode, elevation_deg)
+
+            latitude_rad = deg2rad(double(groundNode.lat_deg));
+            height_km = double(groundNode.alt_m) / 1000.0;
+
+            pressure_hPa = obj.surfacePressure_hPa;
+            temperature_K = obj.surfaceTemperature_K;
+
+            waterVaporPressure_hPa = obj.waterVaporPressure_hPa( ...
+                temperature_K, obj.relativeHumidity_fraction);
+
+            heightCorrection = ...
+                1.0 ...
+                - 0.00266 * cos(2.0 * latitude_rad) ...
+                - 0.00028 * height_km;
+
+            if heightCorrection <= 0.0
+                error('Atmosphere:InvalidSaastamoinenHeightCorrection', ...
+                    'Saastamoinen height correction must be positive.');
+            end
+
+            zenithHydrostaticDelay_m = ...
+                0.0022768 * pressure_hPa / heightCorrection;
+
+            zenithWetDelay_m = ...
+                0.002277 * ...
+                (1255.0 / temperature_K + 0.05) * ...
+                waterVaporPressure_hPa;
+
+            mappingFactor = obj.troposphereMappingFactor(elevation_deg);
+
+            delay_m = ...
+                (zenithHydrostaticDelay_m + zenithWetDelay_m) * ...
+                mappingFactor;
+        end
+
+        function delay_m = thinShellVtecDelayMeters( ...
+                obj, elevation_deg, frequency_Hz)
+
+            mappingFactor = obj.ionosphereMappingFactor(elevation_deg);
+
+            slantTec_electrons_per_m2 = ...
+                obj.vtec_TECU * 1e16 * mappingFactor;
+
+            delay_m = ...
+                40.3 * slantTec_electrons_per_m2 / frequency_Hz^2;
+        end
+
+        function mappingFactor = troposphereMappingFactor( ...
+                obj, elevation_deg)
+
+            effectiveElevation_deg = max( ...
+                double(elevation_deg), ...
+                obj.minimumMappingElevation_deg);
+
+            mappingFactor = 1.0 / sind(effectiveElevation_deg);
+        end
+
+        function mappingFactor = ionosphereMappingFactor(obj, elevation_deg)
+            elevation_rad = deg2rad(double(elevation_deg));
+
+            shellRatio = ...
+                obj.earthRadius_m / ...
+                (obj.earthRadius_m + obj.ionosphereShellHeight_m);
+
+            projection = shellRatio * cos(elevation_rad);
+            projection = max(-1.0, min(1.0, projection));
+
+            denominator = sqrt(max(1.0 - projection^2, eps));
+            mappingFactor = 1.0 / denominator;
+        end
+
+        function vaporPressure_hPa = waterVaporPressure_hPa( ...
+                ~, temperature_K, relativeHumidity_fraction)
+
+            temperature_C = temperature_K - 273.15;
+
+            saturationVaporPressure_hPa = ...
+                6.1121 * exp( ...
+                (18.678 - temperature_C / 234.5) * ...
+                (temperature_C / (257.14 + temperature_C)));
+
+            vaporPressure_hPa = ...
+                relativeHumidity_fraction * saturationVaporPressure_hPa;
         end
 
         function delay = emptyDelayResult( ...
                 obj, groundNode, elevation_deg, azimuth_deg, ...
                 jd, datetimeUtc, frequency_Hz)
 
-            metadata = struct( ...
-                'role', obj.role, ...
-                'groundNodeName', string(groundNode.name), ...
-                'groundAltitude_m', double(groundNode.alt_m), ...
-                'troposphereModel', obj.troposphereModel, ...
-                'ionosphereModel', obj.ionosphereModel, ...
-                'frequency_Hz', double(frequency_Hz), ...
-                'jd', double(jd), ...
-                'datetimeUtc', datetimeUtc, ...
-                'dataRoot', obj.dataRoot);
+            metadata = struct();
 
-            delay = struct( ...
-                'total_m', 0.0, ...
-                'troposphere_m', 0.0, ...
-                'ionosphere_m', 0.0, ...
-                'elevation_deg', elevation_deg, ...
-                'azimuth_deg', azimuth_deg, ...
-                'valid', false, ...
-                'metadata', metadata);
+            metadata.role = obj.role;
+            metadata.groundNodeName = string(groundNode.name);
+            metadata.groundAltitude_m = double(groundNode.alt_m);
+
+            metadata.troposphereModel = obj.troposphereModel;
+            metadata.ionosphereModel = obj.ionosphereModel;
+
+            metadata.frequency_Hz = double(frequency_Hz);
+            metadata.jd = double(jd);
+            metadata.datetimeUtc = datetimeUtc;
+            metadata.dataRoot = obj.dataRoot;
+
+            metadata.surfacePressure_hPa = obj.surfacePressure_hPa;
+            metadata.surfaceTemperature_K = obj.surfaceTemperature_K;
+            metadata.relativeHumidity_fraction = obj.relativeHumidity_fraction;
+            metadata.minimumMappingElevation_deg = obj.minimumMappingElevation_deg;
+            metadata.vtec_TECU = obj.vtec_TECU;
+
+            delay = struct();
+
+            delay.total_m = 0.0;
+            delay.troposphere_m = 0.0;
+            delay.ionosphere_m = 0.0;
+
+            delay.elevation_deg = double(elevation_deg);
+            delay.azimuth_deg = double(azimuth_deg);
+
+            delay.valid = false;
+            delay.metadata = metadata;
         end
 
         function validateConfiguration(obj)
@@ -292,6 +431,26 @@ classdef Atmosphere < handle
                 {'real', 'finite', 'scalar', 'nonnegative'}, ...
                 mfilename, 'constantIonosphereDelay_m');
 
+            validateattributes(obj.surfacePressure_hPa, {'numeric'}, ...
+                {'real', 'finite', 'scalar', 'positive'}, ...
+                mfilename, 'surfacePressure_hPa');
+
+            validateattributes(obj.surfaceTemperature_K, {'numeric'}, ...
+                {'real', 'finite', 'scalar', '>', 150.0}, ...
+                mfilename, 'surfaceTemperature_K');
+
+            validateattributes(obj.relativeHumidity_fraction, {'numeric'}, ...
+                {'real', 'finite', 'scalar', '>=', 0.0, '<=', 1.0}, ...
+                mfilename, 'relativeHumidity_fraction');
+
+            validateattributes(obj.minimumMappingElevation_deg, {'numeric'}, ...
+                {'real', 'finite', 'scalar', 'positive', '<=', 90.0}, ...
+                mfilename, 'minimumMappingElevation_deg');
+
+            validateattributes(obj.vtec_TECU, {'numeric'}, ...
+                {'real', 'finite', 'scalar', 'nonnegative'}, ...
+                mfilename, 'vtec_TECU');
+            
             if obj.enableTroposphere && obj.troposphereModel == "disabled"
                 error('Atmosphere:InvalidTroposphereConfiguration', ...
                     ['enableTroposphere=true requires a troposphereModel other ', ...
