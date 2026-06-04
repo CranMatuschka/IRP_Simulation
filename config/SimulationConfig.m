@@ -101,9 +101,9 @@ scenario.measurement.lightTimeMaxIterations = 10;
 scenario.measurement.sagnacCorrection_m = 0.0;
 
 %% Atmosphere Model
-% "truth" controls the physical delay applied to generated pseudoranges.
-% "model" controls the correction applied by the estimator prediction model.
-
+% Estimator atmosphere defaults to disabled.
+% When enabled, its correction and receiver-position sensitivity are included
+% in predicted pseudoranges and the EKF measurement Jacobian.
 scenario.atmosphere = struct();
 
 % Project-relative folder for downloaded or cached atmospheric products.

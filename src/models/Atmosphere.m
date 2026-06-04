@@ -231,6 +231,70 @@ classdef Atmosphere < handle
             delay.valid = true;
         end
 
+        function [delay, gradientReceiverEci] = codeDelayAndGradientMeters( ...
+                obj, groundNode, receiverEci_m, jd, datetimeUtc, frequency_Hz)
+            %CODEDELAYANDGRADIENTMETERS Return code delay and receiver gradient.
+            %
+            % gradientReceiverEci is d(delay)/d(receiverEci_m), expressed as
+            % a 3x1 ECI gradient in metres per metre.
+            %
+            % The currently implemented deterministic models depend on
+            % receiver position only through ground-station elevation.
+
+            delay = obj.codeDelayMeters( ...
+                groundNode, receiverEci_m, jd, datetimeUtc, frequency_Hz);
+
+            gradientReceiverEci = zeros(3, 1);
+
+            if ~delay.valid
+                gradientReceiverEci(:) = NaN;
+                return;
+            end
+
+            if ~obj.isEnabled()
+                return;
+            end
+
+            receiverEci_m = receiverEci_m(:);
+            towerEci_m = groundNode.positionEci(jd);
+
+            d = receiverEci_m - towerEci_m;
+            rho = norm(d);
+
+            if rho <= eps
+                gradientReceiverEci(:) = NaN;
+                return;
+            end
+
+            u = d ./ rho;
+
+            R_enu_ecef = FrameGeometry.ecefToEnuDcm( ...
+                groundNode.lat_deg, groundNode.lon_deg);
+
+            upEcef = R_enu_ecef(3, :).';
+            upEci = FrameGeometry.ecefToEciDcm(jd) * upEcef;
+
+            sinElevation = max(0.0, min(1.0, dot(upEci, u)));
+
+            gradientSinElevation = ...
+                (eye(3) - u * u.') * upEci / rho;
+
+            dDelay_dSinElevation = ...
+                obj.troposphereDelayDerivativePerSinElevation( ...
+                    groundNode, delay.elevation_deg, sinElevation) ...
+                + obj.ionosphereDelayDerivativePerSinElevation( ...
+                    delay.elevation_deg, sinElevation, frequency_Hz);
+
+            gradientReceiverEci = ...
+                dDelay_dSinElevation * gradientSinElevation;
+
+            validateattributes(gradientReceiverEci, {'numeric'}, ...
+                {'real', 'finite', 'numel', 3}, ...
+                mfilename, 'gradientReceiverEci');
+
+            gradientReceiverEci = gradientReceiverEci(:);
+        end        
+        
         function tf = isEnabled(obj)
             tf = obj.enableTroposphere || obj.enableIonosphere;
         end
@@ -261,6 +325,44 @@ classdef Atmosphere < handle
             end
         end
 
+        function derivative = troposphereDelayDerivativePerSinElevation( ...
+                obj, groundNode, elevation_deg, sinElevation)
+
+            switch obj.troposphereModel
+                case "disabled"
+                    derivative = 0.0;
+
+                case "constant"
+                    derivative = 0.0;
+
+                case "saastamoinen"
+                    % The mapping function is clamped below the configured
+                    % minimum elevation, so its derivative is zero there.
+                    if double(elevation_deg) <= obj.minimumMappingElevation_deg
+                        derivative = 0.0;
+                        return;
+                    end
+
+                    slantDelay_m = obj.saastamoinenDelayMeters( ...
+                        groundNode, elevation_deg);
+
+                    s = max(double(sinElevation), eps);
+
+                    % T = Z / sin(E), therefore dT/dsin(E) = -T / sin(E).
+                    derivative = -slantDelay_m / s;
+
+                case "era5profile"
+                    error('Atmosphere:TroposphereGradientNotImplemented', ...
+                        ['Troposphere model "era5profile" requires an ', ...
+                         'ERA5 data provider and gradient implementation.']);
+
+                otherwise
+                    error('Atmosphere:UnknownTroposphereModel', ...
+                        'Unsupported troposphere model "%s".', ...
+                        obj.troposphereModel);
+            end
+        end        
+        
         function delay_m = ionosphereDelayMeters(obj, elevation_deg, frequency_Hz)
             switch obj.ionosphereModel
                 case "disabled"
@@ -285,6 +387,47 @@ classdef Atmosphere < handle
             end
         end
 
+        function derivative = ionosphereDelayDerivativePerSinElevation( ...
+                obj, elevation_deg, sinElevation, frequency_Hz)
+
+            switch obj.ionosphereModel
+                case "disabled"
+                    derivative = 0.0;
+
+                case "constant"
+                    derivative = 0.0;
+
+                case "thinshellvtec"
+                    slantDelay_m = obj.thinShellVtecDelayMeters( ...
+                        elevation_deg, frequency_Hz);
+
+                    shellRatio = ...
+                        obj.earthRadius_m / ...
+                        (obj.earthRadius_m + obj.ionosphereShellHeight_m);
+
+                    q = shellRatio^2;
+                    s = double(sinElevation);
+
+                    denominatorTerm = max( ...
+                        1.0 - q + q * s^2, ...
+                        eps);
+
+                    % I = K / sqrt(1 - q + q sin(E)^2)
+                    derivative = ...
+                        -slantDelay_m * q * s / denominatorTerm;
+
+                case "ionex"
+                    error('Atmosphere:IonosphereGradientNotImplemented', ...
+                        ['Ionosphere model "ionex" requires an IONEX data ', ...
+                         'provider and gradient implementation.']);
+
+                otherwise
+                    error('Atmosphere:UnknownIonosphereModel', ...
+                        'Unsupported ionosphere model "%s".', ...
+                        obj.ionosphereModel);
+            end
+        end
+        
         function delay_m = saastamoinenDelayMeters( ...
                 obj, groundNode, elevation_deg)
 

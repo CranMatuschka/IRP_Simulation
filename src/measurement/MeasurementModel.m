@@ -91,8 +91,6 @@ classdef MeasurementModel < handle
                 obj.modelAtmosphere = modelAtmosphere;
             end
 
-            obj.validateEstimatorAtmosphereModel();
-
             mcfg = scenarioCfg.measurement;
 
             obj.signalFrequency_Hz = obj.getScalarField( ...
@@ -172,7 +170,8 @@ classdef MeasurementModel < handle
                     rho = norm(d);
                     u = d ./ rho;
 
-                    [atmosphere_m, atmosphereValid] = obj.atmosphereDelay_m( ...
+                    [atmosphere_m, atmosphereValid] = ...
+                        obj.atmosphereDelayAndGradient_m( ...
                         obj.truthAtmosphere, twr, rRx_I, jd, datetimeUtc);
 
                     if ~atmosphereValid
@@ -216,7 +215,7 @@ classdef MeasurementModel < handle
                 groundResidualModel_m, visibilityMask, estAsset, ...
                 estTowerClockBias_m, idx, stateDim, towerClockEkfEnabled)
 
-            if nargin < 4 || isempty(visibilityMask)
+            if nargin < 6 || isempty(visibilityMask)
                 visibilityMask = true(obj.numReceivers, obj.numTowers);
             end
 
@@ -243,7 +242,8 @@ classdef MeasurementModel < handle
                     rho = norm(d);
                     u = d ./ rho;
 
-                    [atmosphere_m, atmosphereValid] = obj.atmosphereDelay_m( ...
+                    [atmosphere_m, atmosphereValid, atmosphereGradient_I] = ...
+                        obj.atmosphereDelayAndGradient_m( ...
                         obj.modelAtmosphere, twr, rRx_I, jd, datetimeUtc);
 
                     if ~atmosphereValid
@@ -252,13 +252,16 @@ classdef MeasurementModel < handle
                              'and receiver %d.'], twr, rx);
                     end
 
+                    pseudorangeGradient_I = u + atmosphereGradient_I;
+
                     if towerClockEkfEnabled
                         yp(row) = rho ...
                             + estClockBias_m ...
                             - estTowerClockBias_m(twr) ...
                             + atmosphere_m;
-                        H(row, idx.pos) = u.';
-                        H(row, idx.att) = u.' * J_att;
+
+                        H(row, idx.pos) = pseudorangeGradient_I.';
+                        H(row, idx.att) = pseudorangeGradient_I.' * J_att;
                         H(row, idx.rxClockBias) = 1.0;
                         H(row, idx.towerClockBias(twr)) = -1.0;
                     else
@@ -266,8 +269,9 @@ classdef MeasurementModel < handle
                             + estClockBias_m ...
                             - groundResidualModel_m(twr) ...
                             + atmosphere_m;
-                        H(row, idx.pos) = u.';
-                        H(row, idx.att) = u.' * J_att;
+
+                        H(row, idx.pos) = pseudorangeGradient_I.';
+                        H(row, idx.att) = pseudorangeGradient_I.' * J_att;
                         H(row, idx.rxClockBias) = 1.0;
                     end
 
@@ -363,18 +367,21 @@ classdef MeasurementModel < handle
     end
 
     methods (Access = private)
-
-        function [delay_m, valid] = atmosphereDelay_m( ...
+        
+        function [delay_m, valid, gradientReceiverEci] = ...
+                atmosphereDelayAndGradient_m( ...
                 obj, atmosphereModel, towerIndex, receiverEci_m, jd, datetimeUtc)
 
             delay_m = 0.0;
             valid = true;
+            gradientReceiverEci = zeros(3, 1);
 
             if isempty(atmosphereModel) || ~atmosphereModel.isEnabled()
                 return;
             end
 
-            delay = atmosphereModel.codeDelayMeters( ...
+            [delay, gradientReceiverEci] = ...
+                atmosphereModel.codeDelayAndGradientMeters( ...
                 obj.towers{towerIndex}, ...
                 receiverEci_m, ...
                 jd, ...
@@ -385,36 +392,22 @@ classdef MeasurementModel < handle
 
             if ~valid
                 delay_m = NaN;
+                gradientReceiverEci(:) = NaN;
                 return;
             end
 
             delay_m = double(delay.total_m);
+            gradientReceiverEci = double(gradientReceiverEci(:));
 
             validateattributes(delay_m, {'numeric'}, ...
                 {'real', 'finite', 'scalar', 'nonnegative'}, ...
                 mfilename, 'atmosphereDelay_m');
+
+            validateattributes(gradientReceiverEci, {'numeric'}, ...
+                {'real', 'finite', 'numel', 3}, ...
+                mfilename, 'atmosphereGradientReceiverEci');
         end
-        
-        function validateEstimatorAtmosphereModel(obj)
-            if isempty(obj.modelAtmosphere) || ~obj.modelAtmosphere.isEnabled()
-                return;
-            end
 
-            hasNonconstantTroposphere = ...
-                obj.modelAtmosphere.enableTroposphere && ...
-                obj.modelAtmosphere.troposphereModel ~= "constant";
-
-            hasNonconstantIonosphere = ...
-                obj.modelAtmosphere.enableIonosphere && ...
-                obj.modelAtmosphere.ionosphereModel ~= "constant";
-
-            if hasNonconstantTroposphere || hasNonconstantIonosphere
-                error('MeasurementModel:EstimatorAtmosphereJacobianNotImplemented', ...
-                    ['Only constant estimator-atmosphere models are allowed ', ...
-                     'until atmospheric Jacobian terms are implemented.']);
-            end
-        end   
-        
         function validateLightTimeCorrectionConfiguration(obj)
             %VALIDATELIGHTTIMECORRECTIONCONFIGURATION Validate the future
             % inertial light-time correction settings without changing the
