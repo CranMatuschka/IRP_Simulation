@@ -3,3 +3,7 @@ Backup/
 *.asv
 *.ASV
 data/atmosphere/
+
+# macOS metadata
+.DS_Store
+
