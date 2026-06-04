@@ -1,4 +1,4 @@
-classdef AtmosphereClass < handle
+classdef Atmosphere < handle
     % ATMOSPHERECLASS Service class for environmental physics.
     % Handles 3D Ray-Tracing through ECMWF Troposphere data and 
     % IONEX global ionosphere maps.
@@ -19,7 +19,7 @@ classdef AtmosphereClass < handle
         % =========================================================================
         % CONSTRUCTOR
         % =========================================================================
-        function obj = AtmosphereClass(api_key)
+        function obj = Atmosphere(api_key)
             if nargin > 0
                 obj.cds_api_key = api_key;
             else
