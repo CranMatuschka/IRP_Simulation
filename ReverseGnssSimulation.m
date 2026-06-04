@@ -57,7 +57,6 @@ classdef ReverseGnssSimulation < handle
         receiverConfig = struct([]);
         receiverNames string = strings(1, 0);
         receiverOffsetsBody_m double = zeros(3, 0);
-        receiverOffsetsLocal_m double = zeros(3, 0);
         numReceivers double = 0;
 
         estTowerClockBias_m double = zeros(0, 1);
@@ -309,8 +308,7 @@ classdef ReverseGnssSimulation < handle
             obj.numReceivers = numel(obj.truthAsset.getEnabledAntennas());
             obj.receiverNames = obj.truthAsset.receiverNames();
             obj.receiverOffsetsBody_m = obj.truthAsset.receiverOffsetsBody_m();
-            obj.receiverOffsetsLocal_m = obj.receiverOffsetsBody_m;
-
+             
             fprintf('\nReceiver lever arms in Body frame [m]:\n');
             for k = 1:obj.numReceivers
                 fprintf('%s: [% .3f % .3f % .3f]\n', ...

@@ -56,8 +56,4 @@ classdef ExtendedKalmanFilter < handle
 
 
     end
-
-    methods (Static, Access = private)
-
-    end
 end
