@@ -512,96 +512,11 @@ classdef ReverseGnssSimulation < handle
         end
 
         function F = buildStateTransition(obj)
-            F = eye(obj.stateDim);
-            dtLocal = obj.dt;
-        
-            phiRv = SpaceAsset.twoBodyPhiFirstOrder(obj.estAsset.state_ECI, obj.mu, dtLocal);
-            rvIdx = [obj.idx.pos obj.idx.vel];
-            F(rvIdx, rvIdx) = phiRv;
-            F(obj.idx.att, obj.idx.omega) = eye(3) * dtLocal;
-        
-            [clockPhi, ~] = obj.clockBiasDriftMatrices(dtLocal);
-            F(obj.idx.rxClock, obj.idx.rxClock) = clockPhi;
-            if obj.towerClockEkfEnabled()
-                for twr = 1:obj.numTowers
-                    [towerPhi, ~] = obj.towerClockBiasDriftMatrices(twr, dtLocal);
-                    idxPair = [obj.idx.towerClockBias(twr), obj.idx.towerClockDrift(twr)];
-                    F(idxPair, idxPair) = towerPhi;
-                end
-            end
-            F = StateLockPolicy.applyToTransition( ...
-                    F, obj.cfg.ekf, obj.idx, obj.stateDim, ...
-                    obj.towerClockEkfEnabled());
+            F = EkfDynamicsModel.buildStateTransition(obj);
         end
 
         function Q = buildProcessNoise(obj)
-            Q = zeros(obj.stateDim);
-            dtLocal = obj.dt;
-            qAcc = obj.getScalarField(obj.cfg.process, 'eciAccelerationPsd_m2ps3', obj.getScalarField(obj.cfg.process, 'localAccelerationPsd_m2ps3', 1e-6));
-            qBlock = qAcc .* [dtLocal^3/3, dtLocal^2/2; dtLocal^2/2, dtLocal];
-            for axis = 1:3
-                idxPair = [obj.idx.pos(axis), obj.idx.vel(axis)];
-                Q(idxPair, idxPair) = qBlock;
-            end
-            qOmega = obj.getScalarField(obj.cfg.process, 'attitudeAngularAccelerationPsd_rad2ps3', deg2rad(1e-4)^2);
-            qAttBlock = qOmega .* [dtLocal^3/3, dtLocal^2/2; dtLocal^2/2, dtLocal];
-            for axis = 1:3
-                idxPair = [obj.idx.att(axis), obj.idx.omega(axis)];
-                Q(idxPair, idxPair) = qAttBlock;
-            end
-           
-            [~, qClockBlock] = obj.clockBiasDriftMatrices(dtLocal);
-            Q(obj.idx.rxClock, obj.idx.rxClock) = qClockBlock;
-            if obj.towerClockEkfEnabled()
-                for twr = 1:obj.numTowers
-                    [~, qTowerClockBlock] = obj.towerClockBiasDriftMatrices(twr, dtLocal);
-                    idxPair = [obj.idx.towerClockBias(twr), obj.idx.towerClockDrift(twr)];
-                    Q(idxPair, idxPair) = qTowerClockBlock;
-                end
-            end   
-            Q = 0.5 * (Q + Q');
-            Q = StateLockPolicy.applyToProcessNoise( ...
-                Q, obj.cfg.ekf, obj.idx, obj.stateDim, ...
-                obj.towerClockEkfEnabled());
-        end
-
-        function [clockPhi, clockQ] = clockBiasDriftMatrices(obj, dtLocal)
-            osc = obj.simConfig.clockLibrary.(char(obj.assetConfig.clock.clockType));
-        
-            clockModel = string(obj.getFieldOrDefault(obj.cfg.process, ...
-                'clockModel', "brownHwang"));
-        
-            clockCorrelationTime_s = obj.getScalarField(obj.cfg.process, ...
-                'clockCorrelationTime_s', 3600.0);
-        
-            [clockPhi, clockQ] = Clock.aggregateBiasDriftModel( ...
-                osc.h0, osc.hm1, osc.hm2, dtLocal, obj.c, ...
-                clockModel, clockCorrelationTime_s);
-        end
-
-        function [clockPhi, clockQ] = towerClockBiasDriftMatrices(obj, towerIndex, dtLocal)
-            tc = obj.activeTowerConfig(towerIndex);
-
-            clockType = char(obj.getTowerField(tc, ...
-                'clockType', obj.assetConfig.clock.clockType));
-
-            if ~isfield(obj.simConfig.clockLibrary, clockType)
-                clockType = char(obj.assetConfig.clock.clockType);
-            end
-
-            osc = obj.simConfig.clockLibrary.(clockType);
-
-            clockModel = string(obj.getFieldOrDefault(obj.cfg.process, ...
-                'towerClockModel', ...
-                obj.getFieldOrDefault(obj.cfg.process, 'clockModel', "brownHwang")));
-
-            clockCorrelationTime_s = obj.getScalarField(obj.cfg.process, ...
-                'towerClockCorrelationTime_s', ...
-                obj.getScalarField(obj.cfg.process, 'clockCorrelationTime_s', 3600.0));
-
-            [clockPhi, clockQ] = Clock.aggregateBiasDriftModel( ...
-                osc.h0, osc.hm1, osc.hm2, dtLocal, obj.c, ...
-                clockModel, clockCorrelationTime_s);
+            Q = EkfDynamicsModel.buildProcessNoise(obj);
         end
 
         function propagateTruth(obj)
@@ -613,12 +528,13 @@ classdef ReverseGnssSimulation < handle
         end
 
         function propagateNominalEstimate(obj)
-            [clockPhi, ~] = obj.clockBiasDriftMatrices(obj.dt);
+            [clockPhi, ~] = EkfDynamicsModel.clockBiasDriftMatrices(obj, obj.dt);
             obj.estAsset.propagateNominal(obj.mu, obj.dt, clockPhi);
 
             if obj.towerClockEkfEnabled()
                 for twr = 1:obj.numTowers
-                    [towerPhi, ~] = obj.towerClockBiasDriftMatrices(twr, obj.dt);
+                    [towerPhi, ~] = EkfDynamicsModel.towerClockBiasDriftMatrices( ...
+                        obj, twr, obj.dt);
 
                     towerClockState = towerPhi * [ ...
                         obj.estTowerClockBias_m(twr); ...
