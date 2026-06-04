@@ -33,12 +33,6 @@ classdef MeasurementModel < handle
         useElevationMask logical = false
         elevationMask_deg double = 0.0
 
-        useIonosphereDelay logical = false
-        useTroposphereDelay logical = false
-
-        ionosphereDelay_m double = 0.0
-        troposphereDelay_m double = 0.0
-
         useHardwareDelay logical = false
         useMultipathDelay logical = false
         useAntennaDelay logical = false
@@ -97,6 +91,8 @@ classdef MeasurementModel < handle
                 obj.modelAtmosphere = modelAtmosphere;
             end
 
+            obj.validateEstimatorAtmosphereModel();
+
             mcfg = scenarioCfg.measurement;
 
             obj.signalFrequency_Hz = obj.getScalarField( ...
@@ -113,8 +109,6 @@ classdef MeasurementModel < handle
             obj.useElevationMask = logical(obj.getFieldOrDefault(mcfg, 'enableElevationMask', false));
             obj.elevationMask_deg = obj.getScalarField(mcfg, 'elevationMask_deg', 0.0);
 
-            obj.useIonosphereDelay = logical(obj.getFieldOrDefault(mcfg, 'enableIonosphereDelay', false));
-            obj.useTroposphereDelay = logical(obj.getFieldOrDefault(mcfg, 'enableTroposphereDelay', false));
             obj.useHardwareDelay = logical(obj.getFieldOrDefault(mcfg, 'enableHardwareDelay', false));
             obj.useMultipathDelay = logical(obj.getFieldOrDefault(mcfg, 'enableMultipathDelay', false));
             obj.useAntennaDelay = logical(obj.getFieldOrDefault(mcfg, 'enableAntennaDelay', false));
@@ -132,8 +126,6 @@ classdef MeasurementModel < handle
             obj.lightTimeCorrectionMaxIterations = obj.getScalarField( ...
                 mcfg, 'lightTimeCorrectionMaxIterations', 10);
 
-            obj.ionosphereDelay_m = obj.getScalarField(mcfg, 'ionosphereDelay_m', 0.0);
-            obj.troposphereDelay_m = obj.getScalarField(mcfg, 'troposphereDelay_m', 0.0);
             obj.txHardwareDelay_m = obj.getScalarField(mcfg, 'txHardwareDelay_m', 0.0);
             obj.rxHardwareDelay_m = obj.getScalarField(mcfg, 'rxHardwareDelay_m', 0.0);
             obj.multipathDelay_m = obj.getScalarField(mcfg, 'multipathDelay_m', 0.0);
@@ -148,9 +140,9 @@ classdef MeasurementModel < handle
         end
 
         function [y, Rrange, trueRangeRt, losRt, receiverEci, visibilityMask, elevationRt_deg] = ...
-                makePseudoranges(obj, jd, towersEci, groundResidualTruth_m, ...
+                makePseudoranges(obj, jd, datetimeUtc, towersEci, groundResidualTruth_m, ...
                 truthAsset, towerClockEkfEnabled, groundClockResidualVariance_m2)
-
+            
             maxMeas = obj.numReceivers * obj.numTowers;
 
             y = NaN(maxMeas, 1);
@@ -180,11 +172,22 @@ classdef MeasurementModel < handle
                     rho = norm(d);
                     u = d ./ rho;
 
-                    extra_m = obj.extraDelay_m( ...
+                    [atmosphere_m, atmosphereValid] = obj.atmosphereDelay_m( ...
+                        obj.truthAtmosphere, twr, rRx_I, jd, datetimeUtc);
+
+                    if ~atmosphereValid
+                        continue;
+                    end
+
+                    extra_m = obj.nonAtmosphericExtraDelay_m( ...
                         twr, rx, jd, towersEci(:, twr), rRx_I, truthAsset);
 
                     row = row + 1;
-                    y(row) = rho + bRx_m - groundResidualTruth_m(twr) + extra_m;
+                    y(row) = rho ...
+                        + bRx_m ...
+                        - groundResidualTruth_m(twr) ...
+                        + atmosphere_m ...
+                        + extra_m;
 
                     if obj.useMeasurementNoise
                         if isempty(obj.measurementStream)
@@ -208,7 +211,8 @@ classdef MeasurementModel < handle
                 obj.measurementVariance(towerClockEkfEnabled, groundClockResidualVariance_m2);
         end
                 
-        function [yp, H] = predictPseudorangesWithJacobian(obj, towersEci, ...
+        function [yp, H] = predictPseudorangesWithJacobian( ...
+                obj, jd, datetimeUtc, towersEci, ...
                 groundResidualModel_m, visibilityMask, estAsset, ...
                 estTowerClockBias_m, idx, stateDim, towerClockEkfEnabled)
 
@@ -239,16 +243,29 @@ classdef MeasurementModel < handle
                     rho = norm(d);
                     u = d ./ rho;
 
-                    if towerClockEkfEnabled
-                        yp(row) = rho + estClockBias_m - estTowerClockBias_m(twr);
+                    [atmosphere_m, atmosphereValid] = obj.atmosphereDelay_m( ...
+                        obj.modelAtmosphere, twr, rRx_I, jd, datetimeUtc);
 
+                    if ~atmosphereValid
+                        error('MeasurementModel:InvalidModelAtmosphereDelay', ...
+                            ['Estimator atmosphere delay is invalid for tower %d ', ...
+                             'and receiver %d.'], twr, rx);
+                    end
+
+                    if towerClockEkfEnabled
+                        yp(row) = rho ...
+                            + estClockBias_m ...
+                            - estTowerClockBias_m(twr) ...
+                            + atmosphere_m;
                         H(row, idx.pos) = u.';
                         H(row, idx.att) = u.' * J_att;
                         H(row, idx.rxClockBias) = 1.0;
                         H(row, idx.towerClockBias(twr)) = -1.0;
                     else
-                        yp(row) = rho + estClockBias_m - groundResidualModel_m(twr);
-
+                        yp(row) = rho ...
+                            + estClockBias_m ...
+                            - groundResidualModel_m(twr) ...
+                            + atmosphere_m;
                         H(row, idx.pos) = u.';
                         H(row, idx.att) = u.' * J_att;
                         H(row, idx.rxClockBias) = 1.0;
@@ -292,16 +309,9 @@ classdef MeasurementModel < handle
             matrixRt(linIdx) = vectorValues(1:n);
         end
 
-        function extra_m = extraDelay_m(obj, towerIndex, receiverIndex, jd, towerEci_m, receiverEci_m, spaceAsset)
+        function extra_m = nonAtmosphericExtraDelay_m( ...
+                obj, towerIndex, receiverIndex, jd, towerEci_m, receiverEci_m, spaceAsset)
             extra_m = 0.0;
-
-            if obj.useIonosphereDelay
-                extra_m = extra_m + obj.ionosphereDelay_m;
-            end
-
-            if obj.useTroposphereDelay
-                extra_m = extra_m + obj.troposphereDelay_m;
-            end
 
             if obj.useHardwareDelay
                 towerSpecificTxDelay_m = obj.towers{towerIndex}.txSignalDelay_m;
@@ -353,6 +363,57 @@ classdef MeasurementModel < handle
     end
 
     methods (Access = private)
+
+        function [delay_m, valid] = atmosphereDelay_m( ...
+                obj, atmosphereModel, towerIndex, receiverEci_m, jd, datetimeUtc)
+
+            delay_m = 0.0;
+            valid = true;
+
+            if isempty(atmosphereModel) || ~atmosphereModel.isEnabled()
+                return;
+            end
+
+            delay = atmosphereModel.codeDelayMeters( ...
+                obj.towers{towerIndex}, ...
+                receiverEci_m, ...
+                jd, ...
+                datetimeUtc, ...
+                obj.signalFrequency_Hz);
+
+            valid = logical(delay.valid);
+
+            if ~valid
+                delay_m = NaN;
+                return;
+            end
+
+            delay_m = double(delay.total_m);
+
+            validateattributes(delay_m, {'numeric'}, ...
+                {'real', 'finite', 'scalar', 'nonnegative'}, ...
+                mfilename, 'atmosphereDelay_m');
+        end
+        
+        function validateEstimatorAtmosphereModel(obj)
+            if isempty(obj.modelAtmosphere) || ~obj.modelAtmosphere.isEnabled()
+                return;
+            end
+
+            hasNonconstantTroposphere = ...
+                obj.modelAtmosphere.enableTroposphere && ...
+                obj.modelAtmosphere.troposphereModel ~= "constant";
+
+            hasNonconstantIonosphere = ...
+                obj.modelAtmosphere.enableIonosphere && ...
+                obj.modelAtmosphere.ionosphereModel ~= "constant";
+
+            if hasNonconstantTroposphere || hasNonconstantIonosphere
+                error('MeasurementModel:EstimatorAtmosphereJacobianNotImplemented', ...
+                    ['Only constant estimator-atmosphere models are allowed ', ...
+                     'until atmospheric Jacobian terms are implemented.']);
+            end
+        end   
         
         function validateLightTimeCorrectionConfiguration(obj)
             %VALIDATELIGHTTIMECORRECTIONCONFIGURATION Validate the future
