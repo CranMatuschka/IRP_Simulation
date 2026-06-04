@@ -7,6 +7,12 @@ classdef ReportConfigBuilder
         function reportToggles = togglesFromSimulation(sim)
             reportToggles = struct();
 
+            atmosphereCfg = ReportConfigBuilder.getFieldOrDefault( ...
+                sim.cfg, 'atmosphere', struct());
+
+            truthAtmosphereCfg = ReportConfigBuilder.getFieldOrDefault( ...
+                atmosphereCfg, 'truth', struct());
+
             reportToggles.generatePdf = true;
             reportToggles.groundSegment = true;
 
@@ -33,11 +39,11 @@ classdef ReportConfigBuilder
 
             reportToggles.ionosphere = logical( ...
                 ReportConfigBuilder.getFieldOrDefault( ...
-                sim.cfg.measurement, 'enableIonosphereDelay', false));
+                truthAtmosphereCfg, 'enableIonosphere', false));
 
             reportToggles.troposphere = logical( ...
                 ReportConfigBuilder.getFieldOrDefault( ...
-                sim.cfg.measurement, 'enableTroposphereDelay', false));
+                truthAtmosphereCfg, 'enableTroposphere', false));
 
             reportToggles.multipath = logical( ...
                 ReportConfigBuilder.getFieldOrDefault( ...

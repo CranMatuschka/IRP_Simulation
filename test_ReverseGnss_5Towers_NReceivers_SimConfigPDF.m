@@ -57,8 +57,8 @@ scenario.report.enableAllanDeviationValidation = true;
 % or here if you explicitly want noisy measurements.
 scenario.measurement.lightTimeCorrectionTolerance_s = 0.0;
 scenario.measurement.lightTimeCorrectionMethod = "invalidMethod";
-scenario.measurement.enableLightTimeCorrection = true;
-scenario.measurement.enableSagnacCorrection = true;
+scenario.measurement.enableLightTimeCorrection = false;
+scenario.measurement.enableSagnacCorrection = false;
 scenario.measurement.enableMeasurementNoise = false;
 scenario.measurement.enableNoise = false;
 scenario.measurement.enableElevationMask = true;

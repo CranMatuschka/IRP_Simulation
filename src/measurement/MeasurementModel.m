@@ -33,6 +33,12 @@ classdef MeasurementModel < handle
         useElevationMask logical = false
         elevationMask_deg double = 0.0
 
+        useIonosphereDelay logical = false
+        useTroposphereDelay logical = false
+
+        ionosphereDelay_m double = 0.0
+        troposphereDelay_m double = 0.0
+
         useHardwareDelay logical = false
         useMultipathDelay logical = false
         useAntennaDelay logical = false

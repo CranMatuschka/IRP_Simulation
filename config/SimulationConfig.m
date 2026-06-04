@@ -80,16 +80,14 @@ scenario.measurement.signalFrequency_Hz = 1575.42e6;
 scenario.measurement.sigma_numerical_floor_m = 1e-3;
 scenario.measurement.enableMeasurementNoise = false;
 scenario.measurement.enableNoise = false;
-scenario.measurement.enableIonosphereDelay = false;
-scenario.measurement.enableTroposphereDelay = false;
+
 scenario.measurement.enableHardwareDelay = false;
 scenario.measurement.enableMultipathDelay = false;
 scenario.measurement.enableAntennaDelay = false;
 scenario.measurement.enableSagnacCorrection = false;
 scenario.measurement.enableElevationMask = true;
 scenario.measurement.elevationMask_deg = 5.0;
-scenario.measurement.ionosphereDelay_m = 0.0;
-scenario.measurement.troposphereDelay_m = 0.0;
+
 scenario.measurement.txHardwareDelay_m = 0.0;
 scenario.measurement.rxHardwareDelay_m = 0.0;
 scenario.measurement.multipathDelay_m = 0.0;
@@ -120,12 +118,12 @@ scenario.atmosphere.missingDataPolicy = "error";
 scenario.atmosphere.ionosphereShellHeight_m = 350000.0;
 
 scenario.atmosphere.truth = struct( ...
-    'enableTroposphere', logical(scenario.measurement.enableTroposphereDelay), ...
-    'enableIonosphere', logical(scenario.measurement.enableIonosphereDelay), ...
+    'enableTroposphere', false, ...
+    'enableIonosphere', false, ...
     'troposphereModel', "constant", ...
     'ionosphereModel', "constant", ...
-    'constantTroposphereDelay_m', scenario.measurement.troposphereDelay_m, ...
-    'constantIonosphereDelay_m', scenario.measurement.ionosphereDelay_m, ...
+    'constantTroposphereDelay_m', 0.0, ...
+    'constantIonosphereDelay_m', 0.0, ...
     'surfacePressure_hPa', 1013.25, ...
     'surfaceTemperature_K', 293.15, ...
     'relativeHumidity_fraction', 0.50, ...
@@ -215,6 +213,12 @@ if exist("simConfigOverrides", "var") && isstruct(simConfigOverrides)
     simConfig = mergeStructRecursive(simConfig, simConfigOverrides);
 end
 
+% Temporary compatibility bridge:
+% MeasurementModel still consumes constant atmosphere fields from
+% scenario.measurement. Derive those internal fields from the canonical
+% scenario.atmosphere configuration after caller overrides are merged.
+simConfig = applyAtmosphereCompatibilityBridge(simConfig);
+
 %% Helpers
 function osc = makeOscillator(h0, hm1, hm2)
     osc = struct();
@@ -281,4 +285,89 @@ function base = mergeStructRecursive(base, override)
             base.(name) = override.(name);
         end
     end
+end
+
+function simConfig = applyAtmosphereCompatibilityBridge(simConfig)
+    scenarioField = 'reverseGnssClockNavigationScenario';
+    scenario = simConfig.scenarios.(scenarioField);
+
+    if ~isfield(scenario, 'atmosphere') || ...
+            ~isfield(scenario.atmosphere, 'truth') || ...
+            ~isfield(scenario.atmosphere, 'model')
+        error('SimulationConfig:MissingAtmosphereConfiguration', ...
+            ['scenario.atmosphere.truth and scenario.atmosphere.model ', ...
+             'must be defined.']);
+    end
+
+    truthCfg = scenario.atmosphere.truth;
+    modelCfg = scenario.atmosphere.model;
+
+    % The estimator atmosphere is not connected to predicted pseudoranges yet.
+    % Reject enabled estimator corrections instead of silently ignoring them.
+    if logical(modelCfg.enableTroposphere) || logical(modelCfg.enableIonosphere)
+        error('SimulationConfig:EstimatorAtmosphereNotYetConnected', ...
+            ['scenario.atmosphere.model must remain disabled until Atmosphere ', ...
+             'is connected to predicted pseudoranges.']);
+    end
+
+    [useTroposphere, troposphereDelay_m] = ...
+        constantAtmosphereCompatibility( ...
+            truthCfg.enableTroposphere, ...
+            truthCfg.troposphereModel, ...
+            truthCfg.constantTroposphereDelay_m, ...
+            "troposphere");
+
+    [useIonosphere, ionosphereDelay_m] = ...
+        constantAtmosphereCompatibility( ...
+            truthCfg.enableIonosphere, ...
+            truthCfg.ionosphereModel, ...
+            truthCfg.constantIonosphereDelay_m, ...
+            "ionosphere");
+
+    % These are internal compatibility fields, not user-facing configuration.
+    scenario.measurement.enableTroposphereDelay = useTroposphere;
+    scenario.measurement.enableIonosphereDelay = useIonosphere;
+    scenario.measurement.troposphereDelay_m = troposphereDelay_m;
+    scenario.measurement.ionosphereDelay_m = ionosphereDelay_m;
+
+    simConfig.scenarios.(scenarioField) = scenario;
+end
+
+function [enabled, delay_m] = constantAtmosphereCompatibility( ...
+        enabledRaw, modelRaw, configuredDelay_m, componentName)
+
+    enabled = logical(enabledRaw);
+
+    if ~isscalar(enabled)
+        error('SimulationConfig:InvalidAtmosphereEnableFlag', ...
+            '%s enable flag must be scalar.', char(componentName));
+    end
+
+    modelName = lower(strtrim(string(modelRaw)));
+
+    if ~isscalar(modelName)
+        error('SimulationConfig:InvalidAtmosphereModel', ...
+            '%s model name must be a string scalar.', char(componentName));
+    end
+
+    if ~enabled
+        delay_m = 0.0;
+        return;
+    end
+
+    % Until Atmosphere is injected into MeasurementModel, only the existing
+    % constant-delay behavior can be represented truthfully.
+    if modelName ~= "constant"
+        error('SimulationConfig:AtmosphereModelNotYetConnected', ...
+            ['The %s truth model "%s" is configured, but Atmosphere is not ', ...
+             'connected to MeasurementModel yet. Use "constant" until the ', ...
+             'integration commit.'], ...
+            char(componentName), char(modelName));
+    end
+
+    validateattributes(configuredDelay_m, {'numeric'}, ...
+        {'real', 'finite', 'scalar', 'nonnegative'}, ...
+        mfilename, char(componentName));
+
+    delay_m = double(configuredDelay_m);
 end
