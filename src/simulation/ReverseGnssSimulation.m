@@ -37,6 +37,7 @@ classdef ReverseGnssSimulation < handle
 
         clockStream = [];
         measurementStream = [];
+        atmosphereResidualStream = [];
         towerClockStream = [];
         validationClockStream = [];
         measurementModel;
@@ -168,11 +169,26 @@ classdef ReverseGnssSimulation < handle
             if ~isfield(obj.seedConfig, 'towerClocks')
                 obj.seedConfig.towerClocks = baseSeed + 3001;
             end
+
+            if ~isfield(obj.seedConfig, 'atmosphereResidual')
+                obj.seedConfig.atmosphereResidual = baseSeed + 4001;
+            end
             rng(baseSeed, 'twister');
-            obj.clockStream = RandStream('mt19937ar', 'Seed', obj.seedConfig.clockTruth);
-            obj.measurementStream = RandStream('mt19937ar', 'Seed', obj.seedConfig.measurementNoise);
-            obj.towerClockStream = RandStream('mt19937ar', 'Seed', obj.seedConfig.towerClocks);
-            obj.validationClockStream = RandStream('mt19937ar', 'Seed', obj.seedConfig.allanValidation);
+                        obj.clockStream = RandStream( ...
+                'mt19937ar', 'Seed', obj.seedConfig.clockTruth);
+
+            obj.measurementStream = RandStream( ...
+                'mt19937ar', 'Seed', obj.seedConfig.measurementNoise);
+
+            obj.atmosphereResidualStream = RandStream( ...
+                'mt19937ar', 'Seed', obj.seedConfig.atmosphereResidual);
+
+            obj.towerClockStream = RandStream( ...
+                'mt19937ar', 'Seed', obj.seedConfig.towerClocks);
+
+            obj.validationClockStream = RandStream( ...
+                'mt19937ar', 'Seed', obj.seedConfig.allanValidation);
+            
             obj.cfg = GroundTimingNetwork.applyTowerClockEkfConfiguration(obj.cfg); 
         end
 
@@ -298,14 +314,15 @@ classdef ReverseGnssSimulation < handle
         end
 
         function setupMeasurementModel(obj)
-            obj.measurementModel = MeasurementModel( ...
+             obj.measurementModel = MeasurementModel( ...
                 obj.cfg, ...
                 obj.c, ...
                 obj.towers, ...
                 obj.truthAsset.getEnabledAntennas(), ...
                 obj.measurementStream, ...
                 obj.truthAtmosphere, ...
-                obj.modelAtmosphere);
+                obj.modelAtmosphere, ...
+                obj.atmosphereResidualStream);
         end
 
         function setupAtmosphereModels(obj)

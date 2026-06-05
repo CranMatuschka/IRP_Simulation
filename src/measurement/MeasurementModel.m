@@ -23,6 +23,7 @@ classdef MeasurementModel < handle
         numTowers double = 0
 
         measurementStream = []
+        atmosphereResidualStream = []
         truthAtmosphere = []
         modelAtmosphere = []
 
@@ -56,7 +57,7 @@ classdef MeasurementModel < handle
     methods
         function obj = MeasurementModel( ...
                 scenarioCfg, c, towers, receiverAntennas, measurementStream, ...
-                truthAtmosphere, modelAtmosphere)
+                truthAtmosphere, modelAtmosphere, atmosphereResidualStream)
             obj.cfg = scenarioCfg;
             obj.c = c;
             obj.towers = towers;
@@ -90,7 +91,16 @@ classdef MeasurementModel < handle
 
                 obj.modelAtmosphere = modelAtmosphere;
             end
+            
+            if nargin >= 8 && ~isempty(atmosphereResidualStream)
+                if ~isa(atmosphereResidualStream, 'RandStream')
+                    error('MeasurementModel:InvalidAtmosphereResidualStream', ...
+                        'atmosphereResidualStream must be a RandStream object.');
+                end
 
+                obj.atmosphereResidualStream = atmosphereResidualStream;
+            end
+            
             mcfg = scenarioCfg.measurement;
 
             obj.signalFrequency_Hz = obj.getScalarField( ...
@@ -152,6 +162,8 @@ classdef MeasurementModel < handle
             measurementTowerIndex = zeros(maxMeas, 1);
 
             bRx_m = truthAsset.getClockBias_m();
+            atmosphereResidualByTower_m = ...
+                obj.sampleTruthAtmosphereResidualByTower_m();
             row = 0;
 
             for rx = 1:obj.numReceivers
@@ -189,6 +201,7 @@ classdef MeasurementModel < handle
                         + bRx_m ...
                         - groundResidualTruth_m(twr) ...
                         + atmosphere_m ...
+                        + atmosphereResidualByTower_m(twr) ...
                         + extra_m;
 
                     if obj.useMeasurementNoise
@@ -476,6 +489,42 @@ classdef MeasurementModel < handle
             validateattributes(gradientReceiverEci, {'numeric'}, ...
                 {'real', 'finite', 'numel', 3}, ...
                 mfilename, 'atmosphereGradientReceiverEci');
+        end
+
+        function residualByTower_m = ...
+                sampleTruthAtmosphereResidualByTower_m(obj)
+            %SAMPLETRUTHATMOSPHERERESIDUALBYTOWER_M Generate one residual
+            % sample per tower for the current epoch.
+            %
+            % All onboard receivers observing the same tower receive the same
+            % residual. This matches the tower-common covariance structure in R.
+
+            residualByTower_m = zeros(obj.numTowers, 1);
+
+            if isempty(obj.truthAtmosphere)
+                return;
+            end
+
+            sigma_m = double(obj.truthAtmosphere.residualCodeSigma_m());
+
+            if sigma_m <= 0.0
+                return;
+            end
+
+            if isempty(obj.atmosphereResidualStream)
+                standardNormal = randn(obj.numTowers, 1);
+            else
+                standardNormal = randn( ...
+                    obj.atmosphereResidualStream, ...
+                    obj.numTowers, ...
+                    1);
+            end
+
+            residualByTower_m = sigma_m * standardNormal;
+
+            validateattributes(residualByTower_m, {'numeric'}, ...
+                {'real', 'finite', 'size', [obj.numTowers, 1]}, ...
+                mfilename, 'residualByTower_m');
         end
 
         function R = addSameTowerCommonVariance( ...

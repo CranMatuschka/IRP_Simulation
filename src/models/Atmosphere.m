@@ -37,9 +37,10 @@ classdef Atmosphere < handle
 
         % Deterministic ionosphere input.
         vtec_TECU double = 10.0
-        % Residual uncertainty of the configured estimator correction.
-        % These values are used by MeasurementModel to build R, not to
-        % change the deterministic propagation delay.
+        % Residual code-delay uncertainty.
+        % For the truth role these values control simulated tower-common
+        % residual noise. For the model role they control measurement
+        % covariance R. They do not change the deterministic delay.
         residualTroposphereSigma_m double = 0.0
         residualIonosphereSigma_m double = 0.0
     end
@@ -313,12 +314,20 @@ classdef Atmosphere < handle
         function sigma_m = residualCodeSigma_m(obj)
             %RESIDUALCODESIGMA_M Return one-sigma residual code-delay error.
             %
-            % This is an uncertainty model for the correction residual, not
-            % an additional deterministic delay.
+            % Disabled atmospheric components contribute zero uncertainty.
 
-            sigma_m = hypot( ...
-                obj.residualTroposphereSigma_m, ...
-                obj.residualIonosphereSigma_m);
+            troposphereSigma_m = 0.0;
+            ionosphereSigma_m = 0.0;
+
+            if obj.enableTroposphere
+                troposphereSigma_m = obj.residualTroposphereSigma_m;
+            end
+
+            if obj.enableIonosphere
+                ionosphereSigma_m = obj.residualIonosphereSigma_m;
+            end
+
+            sigma_m = hypot(troposphereSigma_m, ionosphereSigma_m);
         end
 
         function variance_m2 = residualCodeVariance_m2(obj)

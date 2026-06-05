@@ -16,6 +16,7 @@ simConfig = struct();
 simConfig.randomSeed = 42;
 simConfig.seeds.clockTruth = simConfig.randomSeed + 1001;
 simConfig.seeds.measurementNoise = simConfig.randomSeed + 2001;
+simConfig.seeds.atmosphereResidual = simConfig.randomSeed + 4001;
 simConfig.seeds.allanValidation = simConfig.randomSeed + 5001;
 simConfig.enableInteractivePlots = false;
 simConfig.enableReportGeneration = true;
