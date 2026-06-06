@@ -12,7 +12,7 @@
 
 %   sim = test_ReverseGnss_5Towers_NReceivers_SimConfigPDF();
 %   sim = test_ReverseGnss_5Towers_NReceivers_SimConfigPDF(8);
-REPORT_VERSION = sprintf('1.12');
+REPORT_VERSION = sprintf('1.13');
 N_RECEIVERS = 4;
 assert(N_RECEIVERS >= 1 && floor(N_RECEIVERS) == N_RECEIVERS, ...
     'N_RECEIVERS must be a positive integer.');
@@ -147,6 +147,7 @@ validateRetainedReportAtmosphereDiagnostics(sim);
 runIonosphereProviderInterfaceRegression();
 runGriddedIonosphereProviderInterpolationRegression();
 runIonexParserProviderRegression();
+runIonexAtmosphereDelayRegression();
 runIonospherePiercePointGeometryRegression();
 runAtmosphereConstantDiagnosticRegression();
 runAtmosphereResidualAndCovarianceRegression();
@@ -597,6 +598,148 @@ function runIonexParserProviderRegression()
         'Atmosphere should own an IONEX ionosphere provider when a source file is configured.');
 
     disp("PASS: IONEX parser and provider interpolation are valid.");
+end
+
+function runIonexAtmosphereDelayRegression()
+    ProjectPathManager.addProjectPaths();
+
+    ionexText = [
+        "     0                                                      EXPONENT"
+        "                                                            END OF HEADER"
+        "     1                                                      START OF TEC MAP"
+        "  2026     5    27    23     0     0                       EPOCH OF CURRENT MAP"
+        "   -90.0  -180.0   180.0   360.0   350.0                   LAT/LON1/LON2/DLON/H"
+        "     10    10"
+        "    90.0  -180.0   180.0   360.0   350.0                   LAT/LON1/LON2/DLON/H"
+        "     10    10"
+        "                                                            END OF TEC MAP"
+        "     2                                                      START OF TEC MAP"
+        "  2026     5    28     0     0     0                       EPOCH OF CURRENT MAP"
+        "   -90.0  -180.0   180.0   360.0   350.0                   LAT/LON1/LON2/DLON/H"
+        "     10    10"
+        "    90.0  -180.0   180.0   360.0   350.0                   LAT/LON1/LON2/DLON/H"
+        "     10    10"
+        "                                                            END OF TEC MAP"
+        ];
+
+    ionexFile = fullfile(tempdir, ...
+        sprintf('reverse_gnss_ionex_delay_%s.ionex', ...
+        char(java.util.UUID.randomUUID)));
+
+    fid = fopen(ionexFile, 'w');
+
+    assert(fid > 0, ...
+        'Could not create temporary IONEX delay test file.');
+
+    cleanup = onCleanup(@() deleteTemporaryFile(ionexFile));
+
+    for k = 1:numel(ionexText)
+        fprintf(fid, '%s\n', ionexText(k));
+    end
+
+    fclose(fid);
+
+    datetimeUtc = datetime(2026, 5, 27, 23, 30, 0, ...
+        'TimeZone', 'UTC');
+
+    jd = Clock.julianDateFromDatetime(datetimeUtc);
+
+    constants = struct( ...
+        'speedOfLight_mps', 299792458.0, ...
+        'earthRadius_m', 6378137.0);
+
+    atmosphereCfg = struct();
+    atmosphereCfg.dataRoot = "";
+    atmosphereCfg.missingDataPolicy = "error";
+    atmosphereCfg.ionosphereShellHeight_m = 350000.0;
+
+    atmosphereCfg.model = struct( ...
+        'enableTroposphere', false, ...
+        'enableIonosphere', true, ...
+        'troposphereModel', "disabled", ...
+        'ionosphereModel', "ionex", ...
+        'ionosphereProviderType', "ionex", ...
+        'ionexFile', ionexFile, ...
+        'residualTroposphereSigma_m', 0.0, ...
+        'residualIonosphereSigma_m', 0.0);
+
+    atmosphere = Atmosphere(atmosphereCfg, constants, "model");
+
+    towerCfg = struct( ...
+        'name', 'IonexDelayTower', ...
+        'lat_deg', 28.3, ...
+        'lon_deg', -16.5, ...
+        'alt_m', 0.0, ...
+        'txSignalDelay_m', 0.0);
+
+    tower = GroundNode(towerCfg);
+
+    elevation_deg = 45.0;
+    azimuth_deg = 120.0;
+    slantRange_m = 4.0e7;
+
+    uEnu = [ ...
+        cosd(elevation_deg) * sind(azimuth_deg); ...
+        cosd(elevation_deg) * cosd(azimuth_deg); ...
+        sind(elevation_deg)];
+
+    R_enu_ecef = FrameGeometry.ecefToEnuDcm( ...
+        tower.lat_deg, tower.lon_deg);
+
+    uEcef = R_enu_ecef.' * uEnu;
+
+    receiverEcef_m = tower.pos_ECEF_m + slantRange_m * uEcef;
+    receiverEci_m = FrameGeometry.ecefToEciDcm(jd) * receiverEcef_m;
+
+    frequency_Hz = 1575.42e6;
+
+    delay = atmosphere.codeDelayMeters( ...
+        tower, receiverEci_m, jd, datetimeUtc, frequency_Hz);
+
+    assert(delay.valid, ...
+        'IONEX atmosphere delay should be valid.');
+
+    assert(delay.troposphere_m == 0.0, ...
+        'IONEX-only test should have zero troposphere delay.');
+
+    assert(delay.ionosphere_m > 0.0, ...
+        'IONEX code ionosphere delay should be positive.');
+
+    assert(delay.metadata.ionospherePiercePoint.valid, ...
+        'IONEX delay metadata must contain a valid pierce point.');
+
+    assert(delay.metadata.ionosphereMap.valid, ...
+        'IONEX delay metadata must contain a valid VTEC map query.');
+
+    assert(delay.metadata.ionosphereMap.providerType == "ionex", ...
+        'IONEX delay metadata should report provider type ionex.');
+
+    assert(abs(delay.metadata.ionosphereMap.vtec_TECU - 10.0) < 1e-12, ...
+        'IONEX test VTEC should interpolate to 10 TECU.');
+
+    expectedDelay_m = ...
+        40.3 * ...
+        (10.0 * 1.0e16 * ...
+        delay.metadata.ionospherePiercePoint.mappingFactor) / ...
+        frequency_Hz^2;
+
+    assert(abs(delay.ionosphere_m - expectedDelay_m) < 1e-10, ...
+        'IONEX atmosphere delay does not match first-order code delay formula.');
+
+    [delayWithGradient, gradientReceiverEci] = ...
+        atmosphere.codeDelayAndGradientMeters( ...
+        tower, receiverEci_m, jd, datetimeUtc, frequency_Hz);
+
+    assert(delayWithGradient.valid, ...
+        'IONEX atmosphere delay with gradient should be valid.');
+
+    assert(all(isfinite(gradientReceiverEci)), ...
+        'IONEX numerical atmosphere gradient must be finite.');
+
+    assert(norm(gradientReceiverEci) > 0.0, ...
+        'IONEX numerical gradient should be nonzero for oblique geometry.');
+
+    disp("PASS: IONEX atmosphere code-delay model is valid.");
 end
 
 function runIonospherePiercePointGeometryRegression()

@@ -240,15 +240,6 @@ classdef Atmosphere < handle
             delay = obj.emptyDelayResult( ...
                 groundNode, elevation_deg, azimuth_deg, ...
                 jd, datetimeUtc, frequency_Hz);
-           
-            delay.metadata.ionospherePiercePoint = ...
-                IonospherePiercePointGeometry.fromEciLineOfSight( ...
-                towerEci_m, ...
-                receiverEci_m, ...
-                jd, ...
-                obj.earthRadius_m, ...
-                obj.ionosphereShellHeight_m, ...
-                elevation_deg);
 
             if ~isfinite(elevation_deg) || elevation_deg < 0.0
                 delay.total_m = NaN;
@@ -258,12 +249,35 @@ classdef Atmosphere < handle
                 return;
             end
 
+            delay.metadata.ionospherePiercePoint = ...
+                IonospherePiercePointGeometry.fromEciLineOfSight( ...
+                towerEci_m, ...
+                receiverEci_m, ...
+                jd, ...
+                obj.earthRadius_m, ...
+                obj.ionosphereShellHeight_m, ...
+                elevation_deg);
+
             delay.troposphere_m = obj.troposphereDelayMeters( ...
                 groundNode, elevation_deg);
-            delay.ionosphere_m = obj.ionosphereDelayMeters( ...
-                elevation_deg, frequency_Hz);
+
+            [delay.ionosphere_m, delay.metadata.ionosphereMap] = ...
+                obj.ionosphereDelayMeters( ...
+                delay.metadata.ionospherePiercePoint, ...
+                datetimeUtc, ...
+                elevation_deg, ...
+                frequency_Hz);
 
             delay.total_m = delay.troposphere_m + delay.ionosphere_m;
+
+            if ~isfinite(delay.total_m) || ...
+                    ~isfinite(delay.troposphere_m) || ...
+                    ~isfinite(delay.ionosphere_m)
+                delay.total_m = NaN;
+                delay.valid = false;
+                return;
+            end
+
             delay.valid = true;
         end
 
@@ -282,12 +296,17 @@ classdef Atmosphere < handle
 
             gradientReceiverEci = zeros(3, 1);
 
-            if ~delay.valid
-                gradientReceiverEci(:) = NaN;
+            if ~obj.isEnabled()
                 return;
             end
 
-            if ~obj.isEnabled()
+            if obj.ionosphereModel == "ionex"
+                gradientReceiverEci = obj.numericalDelayGradientReceiverEci( ...
+                    groundNode, ...
+                    receiverEci_m, ...
+                    jd, ...
+                    datetimeUtc, ...
+                    frequency_Hz);
                 return;
             end
 
@@ -367,6 +386,48 @@ classdef Atmosphere < handle
     end
 
     methods (Access = private)
+        function gradientReceiverEci = numericalDelayGradientReceiverEci( ...
+                obj, groundNode, receiverEci_m, jd, datetimeUtc, frequency_Hz)
+
+            receiverEci_m = receiverEci_m(:);
+            step_m = 10.0;
+
+            gradientReceiverEci = NaN(3, 1);
+
+            for axisIndex = 1:3
+                delta = zeros(3, 1);
+                delta(axisIndex) = step_m;
+
+                delayPlus = obj.codeDelayMeters( ...
+                    groundNode, ...
+                    receiverEci_m + delta, ...
+                    jd, ...
+                    datetimeUtc, ...
+                    frequency_Hz);
+
+                delayMinus = obj.codeDelayMeters( ...
+                    groundNode, ...
+                    receiverEci_m - delta, ...
+                    jd, ...
+                    datetimeUtc, ...
+                    frequency_Hz);
+
+                if ~delayPlus.valid || ~delayMinus.valid
+                    return;
+                end
+
+                gradientReceiverEci(axisIndex) = ...
+                    (delayPlus.total_m - delayMinus.total_m) / ...
+                    (2.0 * step_m);
+            end
+
+            validateattributes(gradientReceiverEci, {'numeric'}, ...
+                {'real', 'finite', 'numel', 3}, ...
+                mfilename, 'gradientReceiverEci');
+
+            gradientReceiverEci = gradientReceiverEci(:);
+        end
+        
         function delay_m = troposphereDelayMeters(obj, groundNode, elevation_deg)
             switch obj.troposphereModel
                 case "disabled"
@@ -429,22 +490,29 @@ classdef Atmosphere < handle
             end
         end        
         
-        function delay_m = ionosphereDelayMeters(obj, elevation_deg, frequency_Hz)
+        function [delay_m, mapResult] = ionosphereDelayMeters( ...
+                obj, piercePoint, datetimeUtc, elevation_deg, frequency_Hz)
+
+            mapResult = obj.emptyIonosphereMapResult( ...
+                datetimeUtc, NaN, NaN);
+
             switch obj.ionosphereModel
                 case "disabled"
                     delay_m = 0.0;
+                    mapResult.message = "Ionosphere model is disabled.";
 
                 case "constant"
                     delay_m = obj.constantIonosphereDelay_m;
+                    mapResult.message = "Constant ionosphere delay model.";
 
                 case "thinshellvtec"
                     delay_m = obj.thinShellVtecDelayMeters( ...
                         elevation_deg, frequency_Hz);
+                    mapResult.message = "Scalar thin-shell VTEC model.";
 
                 case "ionex"
-                    error('Atmosphere:IonosphereModelNotImplemented', ...
-                        ['Ionosphere model "ionex" requires an IONEX data ', ...
-                         'provider and is not implemented yet.']);
+                    [delay_m, mapResult] = obj.ionexDelayMeters( ...
+                        piercePoint, datetimeUtc, frequency_Hz);
 
                 otherwise
                     error('Atmosphere:UnknownIonosphereModel', ...
@@ -453,6 +521,94 @@ classdef Atmosphere < handle
             end
         end
 
+        function [delay_m, mapResult] = ionexDelayMeters( ...
+                obj, piercePoint, datetimeUtc, frequency_Hz)
+
+            mapResult = obj.emptyIonosphereMapResult( ...
+                datetimeUtc, NaN, NaN);
+
+            if isempty(obj.ionosphereProvider) || ...
+                    ~obj.ionosphereProvider.isAvailable()
+                delay_m = obj.handleMissingIonosphereData( ...
+                    'IONEX ionosphere provider is not available.');
+                mapResult.message = ...
+                    "IONEX ionosphere provider is not available.";
+                return;
+            end
+
+            if ~isstruct(piercePoint) || ...
+                    ~isfield(piercePoint, 'valid') || ...
+                    ~piercePoint.valid
+                delay_m = obj.handleMissingIonosphereData( ...
+                    'Ionosphere pierce point is invalid.');
+                mapResult.message = "Ionosphere pierce point is invalid.";
+                return;
+            end
+
+            mapResult = obj.ionosphereProvider.verticalTecAt( ...
+                datetimeUtc, ...
+                piercePoint.latitude_deg, ...
+                piercePoint.longitude_deg);
+
+            if ~isfield(mapResult, 'valid') || ~mapResult.valid
+                delay_m = obj.handleMissingIonosphereData( ...
+                    'IONEX VTEC is unavailable at the requested pierce point.');
+                return;
+            end
+
+            vtec_TECU = double(mapResult.vtec_TECU);
+
+            validateattributes(vtec_TECU, {'numeric'}, ...
+                {'real', 'finite', 'scalar', 'nonnegative'}, ...
+                mfilename, 'ionexVtec_TECU');
+
+            mappingFactor = double(piercePoint.mappingFactor);
+
+            validateattributes(mappingFactor, {'numeric'}, ...
+                {'real', 'finite', 'scalar', 'positive'}, ...
+                mfilename, 'ionexMappingFactor');
+
+            slantTec_electrons_per_m2 = ...
+                vtec_TECU * 1.0e16 * mappingFactor;
+
+            delay_m = ...
+                40.3 * slantTec_electrons_per_m2 / frequency_Hz^2;
+
+            mapResult.metadata.mappingFactor = mappingFactor;
+            mapResult.metadata.slantTec_TECU = vtec_TECU * mappingFactor;
+            mapResult.metadata.delay_m = delay_m;
+        end
+        
+        function delay_m = handleMissingIonosphereData(obj, messageText)
+            if obj.missingDataPolicy == "error"
+                error('Atmosphere:MissingIonosphereMapData', '%s', messageText);
+            end
+
+            delay_m = NaN;
+        end
+        
+        function mapResult = emptyIonosphereMapResult( ...
+                obj, datetimeUtc, latitude_deg, longitude_deg)
+
+            mapResult = struct();
+
+            mapResult.valid = false;
+            mapResult.vtec_TECU = NaN;
+            mapResult.rms_TECU = NaN;
+
+            mapResult.datetimeUtc = datetimeUtc;
+            mapResult.latitude_deg = double(latitude_deg);
+            mapResult.longitude_deg = double(longitude_deg);
+
+            mapResult.providerType = obj.ionosphereProviderType;
+            mapResult.dataRoot = obj.dataRoot;
+            mapResult.role = obj.role;
+
+            mapResult.source = "";
+            mapResult.message = "";
+            mapResult.metadata = struct();
+        end
+        
         function derivative = ionosphereDelayDerivativePerSinElevation( ...
                 obj, elevation_deg, sinElevation, frequency_Hz)
 
@@ -615,6 +771,9 @@ classdef Atmosphere < handle
                 'shellRadius_m', obj.earthRadius_m + obj.ionosphereShellHeight_m, ...
                 'earthRadius_m', obj.earthRadius_m, ...
                 'shellHeight_m', obj.ionosphereShellHeight_m);
+
+            metadata.ionosphereMap = obj.emptyIonosphereMapResult( ...
+                datetimeUtc, NaN, NaN);
             delay = struct();
 
             delay.total_m = 0.0;
