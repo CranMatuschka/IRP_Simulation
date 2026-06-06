@@ -12,7 +12,7 @@
 
 %   sim = test_ReverseGnss_5Towers_NReceivers_SimConfigPDF();
 %   sim = test_ReverseGnss_5Towers_NReceivers_SimConfigPDF(8);
-REPORT_VERSION = sprintf('1.18');
+REPORT_VERSION = sprintf('1.19');
 N_RECEIVERS = 4;
 assert(N_RECEIVERS >= 1 && floor(N_RECEIVERS) == N_RECEIVERS, ...
     'N_RECEIVERS must be a positive integer.');
@@ -150,6 +150,7 @@ runGriddedIonosphereProviderInterpolationRegression();
 runIonexParserProviderRegression();
 runIonexAtmosphereDelayRegression();
 runIonexHistoryReportDiagnosticsRegression();
+runIonexTruthModelMismatchRegression();
 runAtmosphereInvalidGradientGuardRegression();
 runIonospherePiercePointGeometryRegression();
 runAtmosphereConstantDiagnosticRegression();
@@ -1000,6 +1001,131 @@ function runIonexHistoryReportDiagnosticsRegression()
     disp("PASS: IONEX history and report diagnostics are recorded.");
 end
 
+function runIonexTruthModelMismatchRegression()
+    ProjectPathManager.addProjectPaths();
+
+    truthIonexFile = string([tempname, '_truth.ionex']);
+    modelIonexFile = string([tempname, '_model.ionex']);
+
+    cleanupTruth = onCleanup(@() deleteTemporaryFile(truthIonexFile));
+    cleanupModel = onCleanup(@() deleteTemporaryFile(modelIonexFile));
+
+    writeUniformIonexTestFile(truthIonexFile, 14.0);
+    writeUniformIonexTestFile(modelIonexFile, 10.0);
+
+    simConfigOverride = makeShortRegressionOverride();
+    scenarioPath = 'reverseGnssClockNavigationScenario';
+
+    truthCfg = struct( ...
+        'enableTroposphere', false, ...
+        'enableIonosphere', true, ...
+        'troposphereModel', "disabled", ...
+        'ionosphereModel', "ionex", ...
+        'ionosphereProviderType', "ionex", ...
+        'ionexFile', truthIonexFile, ...
+        'residualTroposphereSigma_m', 0.0, ...
+        'residualIonosphereSigma_m', 0.0);
+
+    modelCfg = truthCfg;
+    modelCfg.ionexFile = modelIonexFile;
+
+    simConfigOverride.scenarios.(scenarioPath).atmosphere.truth = truthCfg;
+    simConfigOverride.scenarios.(scenarioPath).atmosphere.model = modelCfg;
+
+    simConfigOverride.scenarios.(scenarioPath).measurement.enableElevationMask = true;
+    simConfigOverride.scenarios.(scenarioPath).measurement.elevationMask_deg = 5.0;
+
+    runtimeOptions = struct();
+    runtimeOptions.entryPointName = "IonexTruthModelMismatchRegression";
+    runtimeOptions.simConfigOverride = simConfigOverride;
+
+    sim = ReverseGnssSimulation(runtimeOptions);
+    sim.configure();
+    sim.run();
+
+    visible = sim.history.visibility_mask_by_receiver_tower(:, :, 1);
+
+    assert(any(visible(:)), ...
+        'IONEX truth/model mismatch regression produced no visible measurements.');
+
+    truthVtec = ...
+        sim.history.atmosphere_truth_ionosphere_vtec_TECU_by_receiver_tower(:, :, 1);
+
+    modelVtec = ...
+        sim.history.atmosphere_model_ionosphere_vtec_TECU_by_receiver_tower(:, :, 1);
+
+    truthStec = ...
+        sim.history.atmosphere_truth_ionosphere_stec_TECU_by_receiver_tower(:, :, 1);
+
+    modelStec = ...
+        sim.history.atmosphere_model_ionosphere_stec_TECU_by_receiver_tower(:, :, 1);
+
+    truthMapping = ...
+        sim.history.atmosphere_truth_ionosphere_mapping_factor_by_receiver_tower(:, :, 1);
+
+    modelMapping = ...
+        sim.history.atmosphere_model_ionosphere_mapping_factor_by_receiver_tower(:, :, 1);
+
+    truthIonosphere_m = ...
+        sim.history.atmosphere_truth_ionosphere_by_receiver_tower_m(:, :, 1);
+
+    modelIonosphere_m = ...
+        sim.history.atmosphere_model_ionosphere_by_receiver_tower_m(:, :, 1);
+
+    assert(all(abs(truthVtec(visible) - 14.0) < 1e-12), ...
+        'Truth IONEX VTEC should equal 14 TECU.');
+
+    assert(all(abs(modelVtec(visible) - 10.0) < 1e-12), ...
+        'Estimator IONEX VTEC should equal 10 TECU.');
+
+    assert(all(abs(truthStec(visible) - ...
+        truthVtec(visible) .* truthMapping(visible)) < 1e-10), ...
+        'Truth STEC must equal truth VTEC times truth mapping factor.');
+
+    assert(all(abs(modelStec(visible) - ...
+        modelVtec(visible) .* modelMapping(visible)) < 1e-10), ...
+        'Estimator STEC must equal estimator VTEC times estimator mapping factor.');
+
+    frequency_Hz = 1575.42e6;
+
+    expectedTruthIonosphere_m = ...
+        40.3 .* (truthStec .* 1.0e16) ./ frequency_Hz^2;
+
+    expectedModelIonosphere_m = ...
+        40.3 .* (modelStec .* 1.0e16) ./ frequency_Hz^2;
+
+    assert(max(abs(truthIonosphere_m(visible) - ...
+        expectedTruthIonosphere_m(visible))) < 1e-10, ...
+        'Truth IONEX ionosphere delay does not match first-order code-delay formula.');
+
+    assert(max(abs(modelIonosphere_m(visible) - ...
+        expectedModelIonosphere_m(visible))) < 1e-10, ...
+        'Estimator IONEX ionosphere delay does not match first-order code-delay formula.');
+
+    reportData = ReportDataBuilder.fromSimulation(sim);
+
+    ionosphereResidual_m = ...
+        reportData.atmosphere_ionosphere_residual_by_receiver_tower_m(:, :, 1);
+
+    expectedResidual_m = truthIonosphere_m - modelIonosphere_m;
+
+    assert(max(abs(ionosphereResidual_m(visible) - ...
+        expectedResidual_m(visible))) < 1e-10, ...
+        'IONEX truth-minus-model residual should equal truth ionosphere minus model ionosphere.');
+
+    assert(mean(ionosphereResidual_m(visible), 'omitnan') > 0.0, ...
+        'Truth VTEC larger than model VTEC should produce positive mean ionosphere residual.');
+
+    assert(mean(truthVtec(visible), 'omitnan') > ...
+        mean(modelVtec(visible), 'omitnan'), ...
+        'Truth VTEC mean should be larger than estimator VTEC mean.');
+
+    assert(isfield(reportData, 'ionosphere_map_summary_table'), ...
+        'IONEX mismatch report data should include the ionosphere map summary table.');
+
+    disp("PASS: IONEX truth-model mismatch produces the expected residual.");
+end
+
 function runAtmosphereInvalidGradientGuardRegression()
     ProjectPathManager.addProjectPaths();
 
@@ -1682,6 +1808,41 @@ end
 function deleteTemporaryFile(filePath)
     if exist(filePath, 'file') == 2
         delete(filePath);
+    end
+end
+
+function writeUniformIonexTestFile(filePath, vtec_TECU)
+    vtecRow = sprintf(' %6.0f %5.0f', double(vtec_TECU), double(vtec_TECU));
+
+    ionexText = [
+        "     0                                                      EXPONENT"
+        "                                                            END OF HEADER"
+        "     1                                                      START OF TEC MAP"
+        "  2026     5    27    23     0     0                       EPOCH OF CURRENT MAP"
+        "   -90.0  -180.0   180.0   360.0   350.0                   LAT/LON1/LON2/DLON/H"
+        string(vtecRow)
+        "    90.0  -180.0   180.0   360.0   350.0                   LAT/LON1/LON2/DLON/H"
+        string(vtecRow)
+        "                                                            END OF TEC MAP"
+        "     2                                                      START OF TEC MAP"
+        "  2026     5    28     0     0     0                       EPOCH OF CURRENT MAP"
+        "   -90.0  -180.0   180.0   360.0   350.0                   LAT/LON1/LON2/DLON/H"
+        string(vtecRow)
+        "    90.0  -180.0   180.0   360.0   350.0                   LAT/LON1/LON2/DLON/H"
+        string(vtecRow)
+        "                                                            END OF TEC MAP"
+        ];
+
+    fid = fopen(char(string(filePath)), 'w');
+
+    assert(fid > 0, ...
+        'Could not create temporary uniform IONEX test file: %s', ...
+        char(string(filePath)));
+
+    fileCleanup = onCleanup(@() fclose(fid));
+
+    for k = 1:numel(ionexText)
+        fprintf(fid, '%s\n', ionexText(k));
     end
 end
 
