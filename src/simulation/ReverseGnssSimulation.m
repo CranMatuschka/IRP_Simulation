@@ -173,8 +173,10 @@ classdef ReverseGnssSimulation < handle
             if ~isfield(obj.seedConfig, 'atmosphereResidual')
                 obj.seedConfig.atmosphereResidual = baseSeed + 4001;
             end
+            
             rng(baseSeed, 'twister');
-                        obj.clockStream = RandStream( ...
+
+            obj.clockStream = RandStream( ...
                 'mt19937ar', 'Seed', obj.seedConfig.clockTruth);
 
             obj.measurementStream = RandStream( ...
@@ -188,8 +190,8 @@ classdef ReverseGnssSimulation < handle
 
             obj.validationClockStream = RandStream( ...
                 'mt19937ar', 'Seed', obj.seedConfig.allanValidation);
-            
-            obj.cfg = GroundTimingNetwork.applyTowerClockEkfConfiguration(obj.cfg); 
+
+            obj.cfg = GroundTimingNetwork.applyTowerClockEkfConfiguration(obj.cfg);
         end
 
         function setupTime(obj)
@@ -428,7 +430,7 @@ classdef ReverseGnssSimulation < handle
                 obj.transitionFromInitial = F * obj.transitionFromInitial;
             end
 
-                        jd = obj.jd0 + obj.time_s(k) / 86400.0;
+            jd = obj.jd0 + obj.time_s(k) / 86400.0;
             datetimeUtc = obj.simConfig.simulation.startUtc + seconds(obj.time_s(k));
 
             towersEci = GroundNode.positionsECI(obj.towers, jd);

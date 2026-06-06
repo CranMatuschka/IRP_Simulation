@@ -94,10 +94,13 @@ scenario.measurement.rxHardwareDelay_m = 0.0;
 scenario.measurement.multipathDelay_m = 0.0;
 scenario.measurement.antennaDelay_m = 0.0;
 
-scenario.measurement.enableLightTime = false;
+% Inertial light-time propagation is not implemented yet.
+% Keep disabled, but use the canonical field names consumed by
+% MeasurementModel.
+scenario.measurement.enableLightTimeCorrection = false;
 scenario.measurement.lightTimeCorrectionMethod = "inertialIterative";
-scenario.measurement.lightTimeTolerance_s = 1e-12;
-scenario.measurement.lightTimeMaxIterations = 10;
+scenario.measurement.lightTimeCorrectionTolerance_s = 1e-12;
+scenario.measurement.lightTimeCorrectionMaxIterations = 10;
 
 scenario.measurement.sagnacCorrection_m = 0.0;
 
