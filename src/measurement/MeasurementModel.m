@@ -152,7 +152,9 @@ classdef MeasurementModel < handle
                 atmosphereTruthDelayRt_m, ...
                 atmosphereTruthTroposphereRt_m, ...
                 atmosphereTruthIonosphereRt_m, ...
-                atmosphereTruthResidualByTower_m] = ...
+                atmosphereTruthResidualByTower_m, ...
+                atmosphereTruthTroposphereResidualByTower_m, ...
+                atmosphereTruthIonosphereResidualByTower_m] = ...
                 makePseudoranges(obj, jd, datetimeUtc, towersEci, groundResidualTruth_m, ...
                 truthAsset, towerClockEkfEnabled, groundClockResidualVariance_m2)
             
@@ -173,7 +175,9 @@ classdef MeasurementModel < handle
                 NaN(obj.numReceivers, obj.numTowers);
 
             bRx_m = truthAsset.getClockBias_m();
-            atmosphereTruthResidualByTower_m = ...
+            [atmosphereTruthResidualByTower_m, ...
+                    atmosphereTruthTroposphereResidualByTower_m, ...
+                    atmosphereTruthIonosphereResidualByTower_m] = ...
                 obj.sampleTruthAtmosphereResidualByTower_m();
             row = 0;
 
@@ -535,26 +539,65 @@ classdef MeasurementModel < handle
                 mfilename, 'atmosphereGradientReceiverEci');
         end
         
-        function residualByTower_m = ...
+        function [residualByTower_m, troposphereResidualByTower_m, ...
+                ionosphereResidualByTower_m] = ...
                 sampleTruthAtmosphereResidualByTower_m(obj)
-            %SAMPLETRUTHATMOSPHERERESIDUALBYTOWER_M Generate one residual
-            % sample per tower for the current epoch.
+            %SAMPLETRUTHATMOSPHERERESIDUALBYTOWER_M Generate tower-common
+            % atmosphere residual samples for the current epoch.
             %
-            % All onboard receivers observing the same tower receive the same
-            % residual. This matches the tower-common covariance structure in R.
+            % Troposphere and ionosphere residuals are sampled independently.
+            % Their sum is the total atmospheric residual added to each
+            % pseudorange from the same tower. This matches the covariance
+            % model sigma_total^2 = sigma_tropo^2 + sigma_iono^2.
 
-            residualByTower_m = zeros(obj.numTowers, 1);
+            troposphereResidualByTower_m = zeros(obj.numTowers, 1);
+            ionosphereResidualByTower_m = zeros(obj.numTowers, 1);
 
             if isempty(obj.truthAtmosphere)
+                residualByTower_m = zeros(obj.numTowers, 1);
                 return;
             end
 
-            sigma_m = double(obj.truthAtmosphere.residualCodeSigma_m());
+            troposphereSigma_m = 0.0;
+            ionosphereSigma_m = 0.0;
 
-            if sigma_m <= 0.0
-                return;
+            if obj.truthAtmosphere.enableTroposphere
+                troposphereSigma_m = ...
+                    double(obj.truthAtmosphere.residualTroposphereSigma_m);
             end
 
+            if obj.truthAtmosphere.enableIonosphere
+                ionosphereSigma_m = ...
+                    double(obj.truthAtmosphere.residualIonosphereSigma_m);
+            end
+
+            if troposphereSigma_m > 0.0
+                troposphereResidualByTower_m = troposphereSigma_m * ...
+                    obj.standardNormalAtmosphereSamplesByTower();
+            end
+
+            if ionosphereSigma_m > 0.0
+                ionosphereResidualByTower_m = ionosphereSigma_m * ...
+                    obj.standardNormalAtmosphereSamplesByTower();
+            end
+
+            residualByTower_m = ...
+                troposphereResidualByTower_m + ionosphereResidualByTower_m;
+
+            validateattributes(residualByTower_m, {'numeric'}, ...
+                {'real', 'finite', 'size', [obj.numTowers, 1]}, ...
+                mfilename, 'residualByTower_m');
+
+            validateattributes(troposphereResidualByTower_m, {'numeric'}, ...
+                {'real', 'finite', 'size', [obj.numTowers, 1]}, ...
+                mfilename, 'troposphereResidualByTower_m');
+
+            validateattributes(ionosphereResidualByTower_m, {'numeric'}, ...
+                {'real', 'finite', 'size', [obj.numTowers, 1]}, ...
+                mfilename, 'ionosphereResidualByTower_m');
+        end
+
+        function standardNormal = standardNormalAtmosphereSamplesByTower(obj)
             if isempty(obj.atmosphereResidualStream)
                 standardNormal = randn(obj.numTowers, 1);
             else
@@ -563,14 +606,8 @@ classdef MeasurementModel < handle
                     obj.numTowers, ...
                     1);
             end
-
-            residualByTower_m = sigma_m * standardNormal;
-
-            validateattributes(residualByTower_m, {'numeric'}, ...
-                {'real', 'finite', 'size', [obj.numTowers, 1]}, ...
-                mfilename, 'residualByTower_m');
         end
-
+        
         function R = addSameTowerCommonVariance( ...
                 ~, R, measurementTowerIndex, commonVariance_m2)
 
