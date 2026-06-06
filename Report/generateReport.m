@@ -192,6 +192,26 @@ function generateReport(reportData, reportConfig, reportToggles)
     else
         plot_paths.R_breakdown = "";
     end
+    atmospherePlotsEnabled = ...
+        (reportToggles.ionosphere || reportToggles.troposphere) && ...
+        isfield(reportData, "atmosphere_truth_total_by_receiver_tower_m") && ...
+        isfield(reportData, "atmosphere_model_delay_by_receiver_tower_m");
+
+    if atmospherePlotsEnabled
+        plot_paths.atmosphere_components = exportPlot( ...
+            figure_dir, ...
+            "atmosphere_components.pdf", ...
+            @() plotAtmosphereComponents(reportData.time_vec, reportData));
+
+        plot_paths.atmosphere_residual_components = exportPlot( ...
+            figure_dir, ...
+            "atmosphere_residual_components.pdf", ...
+            @() plotAtmosphereResidualComponents(reportData.time_vec, reportData));
+    else
+        plot_paths.atmosphere_components = "";
+        plot_paths.atmosphere_residual_components = "";
+    end
+
     if isfield(reportData, "visible_tower_count")
         plot_paths.visible_towers = exportPlot(figure_dir, "visible_towers.pdf", ...
             @() plotVisibleTowers(reportData.time_vec, reportData.visible_tower_count, reportData.num_towers));
@@ -522,6 +542,17 @@ function generateReport(reportData, reportConfig, reportToggles)
         "Measurement Covariance Contribution", ...
         ["The plot shows the root-variance contribution placed in the diagonal measurement covariance. " ...
          "Physical contributions are kept separate from any tiny numerical regularisation floor used to keep the innovation covariance nonsingular in ideal zero-noise runs."]);
+    report = appendReportRow(report, atmospherePlotsEnabled, ...
+        plot_paths.atmosphere_components, ...
+        "Ionosphere and Troposphere Delay Components", ...
+        ["The plot separates deterministic truth and estimator-model atmospheric code-delay components. " ...
+         "Troposphere and ionosphere are shown independently so that enabled propagation models can be inspected directly."]);
+
+    report = appendReportRow(report, atmospherePlotsEnabled, ...
+        plot_paths.atmosphere_residual_components, ...
+        "Atmosphere Truth Minus Model Residual Components", ...
+        ["The plot shows the remaining atmospheric contribution after subtracting the estimator model from the truth model. " ...
+         "This is the diagnostic residual that can drive pseudorange innovations when truth and estimator atmosphere differ."]);
     if isfield(reportData, "measurementNoiseEnabled") && ~reportData.measurementNoiseEnabled
         nis_description = ["The plot shows NIS computed from the full EKF update innovation and covariance. " ...
             "Because range measurement noise injection is disabled in this deterministic validation, the curve is a numerical diagnostic only. " ...
@@ -550,6 +581,14 @@ function generateReport(reportData, reportConfig, reportToggles)
         "Measurement Noise Model", ...
         "Measurement noise is not part of the current clock-only validation scenario.");
     report = endPlotTable(report);
+
+    if atmospherePlotsEnabled
+        report = appendOptionalTable(report, ...
+            "Atmosphere Propagation Summary", ...
+            reportData, ...
+            "atmosphere_summary_table", ...
+            20);
+    end
     %% 4. Per-Receiver Measurement Diagnostics
     report = appendLine(report, "\clearpage");
     report = appendLine(report, "\section{Per-Receiver Measurement Diagnostics}");
@@ -636,8 +675,17 @@ function generateReport(reportData, reportConfig, reportToggles)
     report = beginPlotTable(report);
     report = appendReportRow(report, reportToggles.j2Perturbation, "", "J2 Perturbation", "J2 perturbation is not part of the current clock-only validation scenario.");
     report = appendReportRow(report, reportToggles.relativisticClockTerm, "", "Relativistic Clock Term", "Relativistic clock modelling is not part of the current clock-only validation scenario.");
-    report = appendReportRow(report, reportToggles.ionosphere, "", "Ionosphere", "Ionospheric propagation is not part of the current clock-only validation scenario.");
-    report = appendReportRow(report, reportToggles.troposphere, "", "Troposphere", "Tropospheric propagation is not part of the current clock-only validation scenario.");
+    if ~reportToggles.ionosphere
+        report = appendReportRow(report, false, "", ...
+            "Ionosphere", ...
+            "Ionospheric propagation is disabled in this scenario.");
+    end
+
+    if ~reportToggles.troposphere
+        report = appendReportRow(report, false, "", ...
+            "Troposphere", ...
+            "Tropospheric propagation is disabled in this scenario.");
+    end
     report = appendReportRow(report, reportToggles.multipath, "", "Multipath", "Multipath and NLOS effects are not part of the current clock-only validation scenario.");
     report = appendReportRow(report, reportToggles.receiverThermalNoise, "", "Receiver Thermal Noise", "Receiver thermal noise is not part of the current clock-only validation scenario.");
     report = appendReportRow(report, reportToggles.antennaBias, "", "Antenna Bias", "Antenna phase-center and group-delay effects are not part of the current clock-only validation scenario.");
@@ -1846,6 +1894,86 @@ function plotMeasurementCovarianceBreakdown(time_vec, reportData)
     xlabel('Time [Hours]', 'FontWeight', 'bold');
     ylabel('R Component Sigma [Meters]', 'FontWeight', 'bold');
     title('Measurement Covariance Breakdown', 'FontSize', 12);
+end
+
+function plotAtmosphereComponents(time_vec, reportData)
+    truthTroposphere = rmsByEpoch( ...
+        reportData.atmosphere_truth_troposphere_by_receiver_tower_m);
+
+    truthIonosphere = rmsByEpoch( ...
+        reportData.atmosphere_truth_ionosphere_by_receiver_tower_m);
+
+    truthTotal = rmsByEpoch( ...
+        reportData.atmosphere_truth_total_by_receiver_tower_m);
+
+    modelTroposphere = rmsByEpoch( ...
+        reportData.atmosphere_model_troposphere_by_receiver_tower_m);
+
+    modelIonosphere = rmsByEpoch( ...
+        reportData.atmosphere_model_ionosphere_by_receiver_tower_m);
+
+    modelTotal = rmsByEpoch( ...
+        reportData.atmosphere_model_delay_by_receiver_tower_m);
+
+    plot(time_vec / 3600, truthTotal, 'k-', ...
+        'LineWidth', 1.4, 'DisplayName', 'Truth total');
+
+    hold on;
+
+    plot(time_vec / 3600, truthTroposphere, 'b-', ...
+        'LineWidth', 1.0, 'DisplayName', 'Truth troposphere');
+
+    plot(time_vec / 3600, truthIonosphere, 'r-', ...
+        'LineWidth', 1.0, 'DisplayName', 'Truth ionosphere');
+
+    plot(time_vec / 3600, modelTotal, 'k--', ...
+        'LineWidth', 1.2, 'DisplayName', 'Model total');
+
+    plot(time_vec / 3600, modelTroposphere, 'b--', ...
+        'LineWidth', 0.9, 'DisplayName', 'Model troposphere');
+
+    plot(time_vec / 3600, modelIonosphere, 'r--', ...
+        'LineWidth', 0.9, 'DisplayName', 'Model ionosphere');
+
+    grid on;
+    legend('Location', 'best');
+    xlabel('Time [Hours]', 'FontWeight', 'bold');
+    ylabel('Atmosphere Code Delay RMS [Meters]', 'FontWeight', 'bold');
+    title('Ionosphere and Troposphere Code-Delay Components', 'FontSize', 12);
+end
+
+function plotAtmosphereResidualComponents(time_vec, reportData)
+    totalResidual = rmsByEpoch( ...
+        reportData.atmosphere_residual_by_receiver_tower_m);
+
+    troposphereResidual = rmsByEpoch( ...
+        reportData.atmosphere_troposphere_residual_by_receiver_tower_m);
+
+    ionosphereResidual = rmsByEpoch( ...
+        reportData.atmosphere_ionosphere_residual_by_receiver_tower_m);
+
+    plot(time_vec / 3600, totalResidual, 'k-', ...
+        'LineWidth', 1.4, 'DisplayName', 'Total atmosphere residual');
+
+    hold on;
+
+    plot(time_vec / 3600, troposphereResidual, 'b-', ...
+        'LineWidth', 1.0, 'DisplayName', 'Troposphere residual');
+
+    plot(time_vec / 3600, ionosphereResidual, 'r-', ...
+        'LineWidth', 1.0, 'DisplayName', 'Ionosphere residual');
+
+    grid on;
+    legend('Location', 'best');
+    xlabel('Time [Hours]', 'FontWeight', 'bold');
+    ylabel('Truth Minus Model RMS [Meters]', 'FontWeight', 'bold');
+    title('Atmospheric Model Residual Components', 'FontSize', 12);
+end
+
+function series = rmsByEpoch(data_by_receiver_tower_time)
+    numEpochs = size(data_by_receiver_tower_time, 3);
+    flattened = reshape(data_by_receiver_tower_time, [], numEpochs);
+    series = sqrt(mean(flattened.^2, 1, 'omitnan'));
 end
 
 function sigma = rmsVarianceComponent(reportData, field_name)

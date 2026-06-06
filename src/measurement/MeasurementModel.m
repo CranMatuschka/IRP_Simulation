@@ -149,7 +149,10 @@ classdef MeasurementModel < handle
         
         function [y, Rrange, trueRangeRt, losRt, receiverEci, ...
                 visibilityMask, elevationRt_deg, ...
-                atmosphereTruthDelayRt_m, atmosphereTruthResidualByTower_m] = ...
+                atmosphereTruthDelayRt_m, ...
+                atmosphereTruthTroposphereRt_m, ...
+                atmosphereTruthIonosphereRt_m, ...
+                atmosphereTruthResidualByTower_m] = ...
                 makePseudoranges(obj, jd, datetimeUtc, towersEci, groundResidualTruth_m, ...
                 truthAsset, towerClockEkfEnabled, groundClockResidualVariance_m2)
             
@@ -163,6 +166,11 @@ classdef MeasurementModel < handle
             elevationRt_deg = NaN(obj.numReceivers, obj.numTowers);
             measurementTowerIndex = zeros(maxMeas, 1);
             atmosphereTruthDelayRt_m = NaN(obj.numReceivers, obj.numTowers);
+            atmosphereTruthTroposphereRt_m = ...
+                NaN(obj.numReceivers, obj.numTowers);
+
+            atmosphereTruthIonosphereRt_m = ...
+                NaN(obj.numReceivers, obj.numTowers);
 
             bRx_m = truthAsset.getClockBias_m();
             atmosphereTruthResidualByTower_m = ...
@@ -186,7 +194,7 @@ classdef MeasurementModel < handle
                     rho = norm(d);
                     u = d ./ rho;
 
-                    [atmosphere_m, atmosphereValid] = ...
+                    [atmosphere_m, atmosphereValid, ~, atmosphereDetails] = ...
                         obj.atmosphereDelayAndGradient_m( ...
                         obj.truthAtmosphere, twr, rRx_I, jd, datetimeUtc);
 
@@ -194,6 +202,11 @@ classdef MeasurementModel < handle
                         continue;
                     end
                     atmosphereTruthDelayRt_m(rx, twr) = atmosphere_m;
+                    atmosphereTruthTroposphereRt_m(rx, twr) = ...
+                        atmosphereDetails.troposphere_m;
+
+                    atmosphereTruthIonosphereRt_m(rx, twr) = ...
+                        atmosphereDetails.ionosphere_m;
                     extra_m = obj.nonAtmosphericExtraDelay_m( ...
                         twr, rx, jd, towersEci(:, twr), rRx_I, truthAsset);
 
@@ -232,7 +245,10 @@ classdef MeasurementModel < handle
                 groundClockResidualVariance_m2);
         end
                 
-        function [yp, H, atmosphereModelDelayRt_m] = predictPseudorangesWithJacobian( ...
+        function [yp, H, atmosphereModelDelayRt_m, ...
+                atmosphereModelTroposphereRt_m, ...
+                atmosphereModelIonosphereRt_m] = ...
+                predictPseudorangesWithJacobian( ...
                 obj, jd, datetimeUtc, towersEci, ...
                 groundResidualModel_m, visibilityMask, estAsset, ...
                 estTowerClockBias_m, idx, stateDim, towerClockEkfEnabled)
@@ -244,6 +260,11 @@ classdef MeasurementModel < handle
             yp = zeros(nnz(visibilityMask), 1);
             H = zeros(numel(yp), stateDim);
             atmosphereModelDelayRt_m = NaN(obj.numReceivers, obj.numTowers);
+            atmosphereModelTroposphereRt_m = ...
+                NaN(obj.numReceivers, obj.numTowers);
+
+            atmosphereModelIonosphereRt_m = ...
+                NaN(obj.numReceivers, obj.numTowers);
 
             C_BI_est = estAsset.C_BI;
             estClockBias_m = estAsset.getClockBias_m();
@@ -265,7 +286,8 @@ classdef MeasurementModel < handle
                     rho = norm(d);
                     u = d ./ rho;
 
-                    [atmosphere_m, atmosphereValid, atmosphereGradient_I] = ...
+                    [atmosphere_m, atmosphereValid, ...
+                            atmosphereGradient_I, atmosphereDetails] = ...
                         obj.atmosphereDelayAndGradient_m( ...
                         obj.modelAtmosphere, twr, rRx_I, jd, datetimeUtc);
 
@@ -275,6 +297,11 @@ classdef MeasurementModel < handle
                              'and receiver %d.'], twr, rx);
                     end
                     atmosphereModelDelayRt_m(rx, twr) = atmosphere_m;
+                    atmosphereModelTroposphereRt_m(rx, twr) = ...
+                        atmosphereDetails.troposphere_m;
+
+                    atmosphereModelIonosphereRt_m(rx, twr) = ...
+                        atmosphereDetails.ionosphere_m;
                     pseudorangeGradient_I = u + atmosphereGradient_I;
 
                     if towerClockEkfEnabled
@@ -455,13 +482,18 @@ classdef MeasurementModel < handle
 
     methods (Access = private)
         
-        function [delay_m, valid, gradientReceiverEci] = ...
+        function [delay_m, valid, gradientReceiverEci, components] = ...
                 atmosphereDelayAndGradient_m( ...
                 obj, atmosphereModel, towerIndex, receiverEci_m, jd, datetimeUtc)
 
             delay_m = 0.0;
             valid = true;
             gradientReceiverEci = zeros(3, 1);
+
+            components = struct( ...
+                'total_m', 0.0, ...
+                'troposphere_m', 0.0, ...
+                'ionosphere_m', 0.0);
 
             if isempty(atmosphereModel) || ~atmosphereModel.isEnabled()
                 return;
@@ -480,11 +512,19 @@ classdef MeasurementModel < handle
             if ~valid
                 delay_m = NaN;
                 gradientReceiverEci(:) = NaN;
+
+                components.total_m = NaN;
+                components.troposphere_m = NaN;
+                components.ionosphere_m = NaN;
                 return;
             end
 
             delay_m = double(delay.total_m);
             gradientReceiverEci = double(gradientReceiverEci(:));
+
+            components.total_m = double(delay.total_m);
+            components.troposphere_m = double(delay.troposphere_m);
+            components.ionosphere_m = double(delay.ionosphere_m);
 
             validateattributes(delay_m, {'numeric'}, ...
                 {'real', 'finite', 'scalar', 'nonnegative'}, ...
@@ -494,7 +534,7 @@ classdef MeasurementModel < handle
                 {'real', 'finite', 'numel', 3}, ...
                 mfilename, 'atmosphereGradientReceiverEci');
         end
-
+        
         function residualByTower_m = ...
                 sampleTruthAtmosphereResidualByTower_m(obj)
             %SAMPLETRUTHATMOSPHERERESIDUALBYTOWER_M Generate one residual
