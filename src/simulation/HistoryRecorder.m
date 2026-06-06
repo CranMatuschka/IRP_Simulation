@@ -369,34 +369,34 @@ classdef HistoryRecorder
                 atmosphereModelIonosphereDiagnostics.mapping_factor;
 
             history.atmosphere_model_troposphere_pressure_hPa_by_receiver_tower(:, :, k) = ...
-                atmosphereTruthTroposphereDiagnostics.pressure_hPa;
+                atmosphereModelTroposphereDiagnostics.pressure_hPa;
 
             history.atmosphere_model_troposphere_temperature_K_by_receiver_tower(:, :, k) = ...
-                atmosphereTruthTroposphereDiagnostics.temperature_K;
+                atmosphereModelTroposphereDiagnostics.temperature_K;
 
             history.atmosphere_model_troposphere_relative_humidity_fraction_by_receiver_tower(:, :, k) = ...
-                atmosphereTruthTroposphereDiagnostics.relative_humidity_fraction;
+                atmosphereModelTroposphereDiagnostics.relative_humidity_fraction;
 
             history.atmosphere_model_troposphere_water_vapor_pressure_hPa_by_receiver_tower(:, :, k) = ...
-                atmosphereTruthTroposphereDiagnostics.water_vapor_pressure_hPa;
+                atmosphereModelTroposphereDiagnostics.water_vapor_pressure_hPa;
 
             history.atmosphere_model_troposphere_zhd_m_by_receiver_tower(:, :, k) = ...
-                atmosphereTruthTroposphereDiagnostics.zhd_m;
+                atmosphereModelTroposphereDiagnostics.zhd_m;
 
             history.atmosphere_model_troposphere_zwd_m_by_receiver_tower(:, :, k) = ...
-                atmosphereTruthTroposphereDiagnostics.zwd_m;
+                atmosphereModelTroposphereDiagnostics.zwd_m;
 
             history.atmosphere_model_troposphere_mapping_hydrostatic_by_receiver_tower(:, :, k) = ...
-                atmosphereTruthTroposphereDiagnostics.mapping_hydrostatic;
+                atmosphereModelTroposphereDiagnostics.mapping_hydrostatic;
 
             history.atmosphere_model_troposphere_mapping_wet_by_receiver_tower(:, :, k) = ...
-                atmosphereTruthTroposphereDiagnostics.mapping_wet;
+                atmosphereModelTroposphereDiagnostics.mapping_wet;
 
             history.atmosphere_model_troposphere_slant_hydrostatic_m_by_receiver_tower(:, :, k) = ...
-                atmosphereTruthTroposphereDiagnostics.slant_hydrostatic_m;
+                atmosphereModelTroposphereDiagnostics.slant_hydrostatic_m;
 
             history.atmosphere_model_troposphere_slant_wet_m_by_receiver_tower(:, :, k) = ...
-                atmosphereTruthTroposphereDiagnostics.slant_wet_m;
+                atmosphereModelTroposphereDiagnostics.slant_wet_m;
 
             truthResidualByReceiverTower_m = repmat( ...
                 atmosphereTruthResidualByTower_m(:).', ...
