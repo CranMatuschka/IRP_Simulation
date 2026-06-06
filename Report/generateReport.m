@@ -212,6 +212,22 @@ function generateReport(reportData, reportConfig, reportToggles)
         plot_paths.atmosphere_residual_components = "";
     end
 
+    ionosphereMapPlotsEnabled = ...
+    atmospherePlotsEnabled && ...
+    isfield(reportData, "atmosphere_truth_ionosphere_vtec_TECU_by_receiver_tower") && ...
+    isfield(reportData, "atmosphere_model_ionosphere_vtec_TECU_by_receiver_tower") && ...
+    (any(isfinite(reportData.atmosphere_truth_ionosphere_vtec_TECU_by_receiver_tower(:))) || ...
+     any(isfinite(reportData.atmosphere_model_ionosphere_vtec_TECU_by_receiver_tower(:))));
+
+    if ionosphereMapPlotsEnabled
+        plot_paths.ionosphere_map_diagnostics = exportPlot( ...
+            figure_dir, ...
+            "ionosphere_map_diagnostics.pdf", ...
+            @() plotIonosphereMapDiagnostics(reportData.time_vec, reportData));
+    else
+        plot_paths.ionosphere_map_diagnostics = "";
+    end
+
     if isfield(reportData, "visible_tower_count")
         plot_paths.visible_towers = exportPlot(figure_dir, "visible_towers.pdf", ...
             @() plotVisibleTowers(reportData.time_vec, reportData.visible_tower_count, reportData.num_towers));
@@ -549,11 +565,11 @@ function generateReport(reportData, reportConfig, reportToggles)
         ["The plot separates deterministic truth and estimator-model atmospheric code-delay components. " ...
          "Troposphere and ionosphere are shown independently so that enabled propagation models can be inspected directly."]);
 
-    report = appendReportRow(report, atmospherePlotsEnabled, ...
-        plot_paths.atmosphere_residual_components, ...
-        "Atmosphere Truth Minus Model Residual Components", ...
-        ["The plot shows the remaining atmospheric contribution after subtracting the estimator model from the truth model. " ...
-         "This is the diagnostic residual that can drive pseudorange innovations when truth and estimator atmosphere differ."]);
+    report = appendReportRow(report, ionosphereMapPlotsEnabled, ...
+        plot_paths.ionosphere_map_diagnostics, ...
+        "IONEX Pierce-Point VTEC, STEC, and Mapping Diagnostics", ...
+        ["The plot shows ionospheric map diagnostics evaluated at the thin-shell pierce point. " ...
+         "VTEC is interpolated from the configured map provider, STEC is VTEC multiplied by the shell mapping factor, and the mapping factor comes from the ground-to-receiver elevation geometry."]);
     if isfield(reportData, "measurementNoiseEnabled") && ~reportData.measurementNoiseEnabled
         nis_description = ["The plot shows NIS computed from the full EKF update innovation and covariance. " ...
             "Because range measurement noise injection is disabled in this deterministic validation, the curve is a numerical diagnostic only. " ...
@@ -2015,10 +2031,76 @@ function plotAtmosphereResidualComponents(time_vec, reportData)
     title('Atmospheric Model Residual Components', 'FontSize', 12);
 end
 
+function plotIonosphereMapDiagnostics(time_vec, reportData)
+    truthVtec = meanByEpoch( ...
+        reportData.atmosphere_truth_ionosphere_vtec_TECU_by_receiver_tower);
+
+    modelVtec = meanByEpoch( ...
+        reportData.atmosphere_model_ionosphere_vtec_TECU_by_receiver_tower);
+
+    truthStec = meanByEpoch( ...
+        reportData.atmosphere_truth_ionosphere_stec_TECU_by_receiver_tower);
+
+    modelStec = meanByEpoch( ...
+        reportData.atmosphere_model_ionosphere_stec_TECU_by_receiver_tower);
+
+    truthMapping = meanByEpoch( ...
+        reportData.atmosphere_truth_ionosphere_mapping_factor_by_receiver_tower);
+
+    modelMapping = meanByEpoch( ...
+        reportData.atmosphere_model_ionosphere_mapping_factor_by_receiver_tower);
+
+    tiledlayout(2, 1, 'TileSpacing', 'compact', 'Padding', 'compact');
+
+    nexttile;
+
+    plot(time_vec / 3600, truthVtec, 'b-', ...
+        'LineWidth', 1.1, 'DisplayName', 'Truth VTEC');
+
+    hold on;
+
+    plot(time_vec / 3600, modelVtec, 'b--', ...
+        'LineWidth', 1.0, 'DisplayName', 'Model VTEC');
+
+    plot(time_vec / 3600, truthStec, 'r-', ...
+        'LineWidth', 1.1, 'DisplayName', 'Truth STEC');
+
+    plot(time_vec / 3600, modelStec, 'r--', ...
+        'LineWidth', 1.0, 'DisplayName', 'Model STEC');
+
+    grid on;
+    legend('Location', 'best');
+    xlabel('Time [Hours]', 'FontWeight', 'bold');
+    ylabel('TEC [TECU]', 'FontWeight', 'bold');
+    title('IONEX VTEC and Slant TEC at Pierce Point', 'FontSize', 12);
+
+    nexttile;
+
+    plot(time_vec / 3600, truthMapping, 'k-', ...
+        'LineWidth', 1.1, 'DisplayName', 'Truth mapping factor');
+
+    hold on;
+
+    plot(time_vec / 3600, modelMapping, 'k--', ...
+        'LineWidth', 1.0, 'DisplayName', 'Model mapping factor');
+
+    grid on;
+    legend('Location', 'best');
+    xlabel('Time [Hours]', 'FontWeight', 'bold');
+    ylabel('Mapping Factor [-]', 'FontWeight', 'bold');
+    title('Thin-Shell Ionosphere Mapping Factor', 'FontSize', 12);
+end
+
 function series = rmsByEpoch(data_by_receiver_tower_time)
     numEpochs = size(data_by_receiver_tower_time, 3);
     flattened = reshape(data_by_receiver_tower_time, [], numEpochs);
     series = sqrt(mean(flattened.^2, 1, 'omitnan'));
+end
+
+function series = meanByEpoch(data_by_receiver_tower_time)
+    numEpochs = size(data_by_receiver_tower_time, 3);
+    flattened = reshape(data_by_receiver_tower_time, [], numEpochs);
+    series = mean(flattened, 1, 'omitnan');
 end
 
 function sigma = rmsVarianceComponent(reportData, field_name)
