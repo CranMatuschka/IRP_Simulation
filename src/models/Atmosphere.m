@@ -296,6 +296,11 @@ classdef Atmosphere < handle
 
             gradientReceiverEci = zeros(3, 1);
 
+            if ~delay.valid
+                gradientReceiverEci(:) = NaN;
+                return;
+            end
+
             if ~obj.isEnabled()
                 return;
             end

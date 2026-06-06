@@ -12,7 +12,7 @@
 
 %   sim = test_ReverseGnss_5Towers_NReceivers_SimConfigPDF();
 %   sim = test_ReverseGnss_5Towers_NReceivers_SimConfigPDF(8);
-REPORT_VERSION = sprintf('1.13');
+REPORT_VERSION = sprintf('1.14');
 N_RECEIVERS = 4;
 assert(N_RECEIVERS >= 1 && floor(N_RECEIVERS) == N_RECEIVERS, ...
     'N_RECEIVERS must be a positive integer.');
@@ -148,8 +148,10 @@ runIonosphereProviderInterfaceRegression();
 runGriddedIonosphereProviderInterpolationRegression();
 runIonexParserProviderRegression();
 runIonexAtmosphereDelayRegression();
+runAtmosphereInvalidGradientGuardRegression();
 runIonospherePiercePointGeometryRegression();
 runAtmosphereConstantDiagnosticRegression();
+
 runAtmosphereResidualAndCovarianceRegression();
 runAtmosphereComponentResidualDecompositionRegression();
 runAtmosphereResidualCovarianceNisRegression();
@@ -157,7 +159,7 @@ runAtmosphereGradientFiniteDifferenceRegression();
 
 fprintf('\nPASS: test finished and PDF was created:\n%s\n', pdfFile);
 
-
+%% Helper function
 function receivers = makeReceiverConfigsForTest(nReceivers, baseline_m, sigma_m)
     base = double(baseline_m);
 
@@ -740,6 +742,83 @@ function runIonexAtmosphereDelayRegression()
         'IONEX numerical gradient should be nonzero for oblique geometry.');
 
     disp("PASS: IONEX atmosphere code-delay model is valid.");
+end
+
+function runAtmosphereInvalidGradientGuardRegression()
+    ProjectPathManager.addProjectPaths();
+
+    datetimeUtc = datetime(2026, 5, 27, 23, 0, 0, ...
+        'TimeZone', 'UTC');
+
+    jd = Clock.julianDateFromDatetime(datetimeUtc);
+
+    earthRadius_m = 6378137.0;
+
+    constants = struct( ...
+        'speedOfLight_mps', 299792458.0, ...
+        'earthRadius_m', earthRadius_m);
+
+    atmosphereCfg = struct();
+    atmosphereCfg.dataRoot = fullfile("data", "atmosphere");
+    atmosphereCfg.missingDataPolicy = "error";
+    atmosphereCfg.ionosphereShellHeight_m = 350000.0;
+
+    atmosphereCfg.model = struct( ...
+        'enableTroposphere', true, ...
+        'enableIonosphere', true, ...
+        'troposphereModel', "saastamoinen", ...
+        'ionosphereModel', "thinshellvtec", ...
+        'surfacePressure_hPa', 1013.25, ...
+        'surfaceTemperature_K', 293.15, ...
+        'relativeHumidity_fraction', 0.50, ...
+        'minimumMappingElevation_deg', 3.0, ...
+        'vtec_TECU', 10.0, ...
+        'residualTroposphereSigma_m', 0.0, ...
+        'residualIonosphereSigma_m', 0.0);
+
+    atmosphere = Atmosphere(atmosphereCfg, constants, "model");
+
+    towerCfg = struct( ...
+        'name', 'InvalidGradientTower', ...
+        'lat_deg', 0.0, ...
+        'lon_deg', 0.0, ...
+        'alt_m', 0.0, ...
+        'txSignalDelay_m', 0.0);
+
+    tower = GroundNode(towerCfg);
+
+    % Receiver below the local horizon for an equatorial x-axis tower.
+    receiverEcef_m = [0.0; earthRadius_m + 4.0e7; 0.0];
+    receiverEci_m = FrameGeometry.ecefToEciDcm(jd) * receiverEcef_m;
+
+    [delay, gradientReceiverEci] = atmosphere.codeDelayAndGradientMeters( ...
+        tower, receiverEci_m, jd, datetimeUtc, 1575.42e6);
+
+    assert(~delay.valid, ...
+        'Below-horizon atmosphere delay should be invalid.');
+
+    assert(all(isnan(gradientReceiverEci)), ...
+        'Invalid atmosphere delay must return a NaN gradient.');
+
+    disabledCfg = atmosphereCfg;
+    disabledCfg.model.enableTroposphere = false;
+    disabledCfg.model.enableIonosphere = false;
+    disabledCfg.model.troposphereModel = "disabled";
+    disabledCfg.model.ionosphereModel = "disabled";
+
+    disabledAtmosphere = Atmosphere(disabledCfg, constants, "model");
+
+    [disabledDelay, disabledGradient] = ...
+        disabledAtmosphere.codeDelayAndGradientMeters( ...
+        tower, receiverEci_m, jd, datetimeUtc, 1575.42e6);
+
+    assert(~disabledDelay.valid, ...
+        'Below-horizon disabled atmosphere delay should still be invalid.');
+
+    assert(all(isnan(disabledGradient)), ...
+        'Below-horizon disabled atmosphere should also return NaN gradient.');
+
+    disp("PASS: invalid atmosphere delays return NaN gradients.");
 end
 
 function runIonospherePiercePointGeometryRegression()
