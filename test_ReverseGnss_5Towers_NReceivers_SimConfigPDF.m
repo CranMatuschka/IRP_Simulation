@@ -12,7 +12,7 @@
 
 %   sim = test_ReverseGnss_5Towers_NReceivers_SimConfigPDF();
 %   sim = test_ReverseGnss_5Towers_NReceivers_SimConfigPDF(8);
-REPORT_VERSION = sprintf('1.14');
+REPORT_VERSION = sprintf('1.15');
 N_RECEIVERS = 4;
 assert(N_RECEIVERS >= 1 && floor(N_RECEIVERS) == N_RECEIVERS, ...
     'N_RECEIVERS must be a positive integer.');
@@ -148,6 +148,8 @@ runIonosphereProviderInterfaceRegression();
 runGriddedIonosphereProviderInterpolationRegression();
 runIonexParserProviderRegression();
 runIonexAtmosphereDelayRegression();
+runIonexHistoryReportDiagnosticsRegression();
+runAtmosphereInvalidGradientGuardRegression();
 runAtmosphereInvalidGradientGuardRegression();
 runIonospherePiercePointGeometryRegression();
 runAtmosphereConstantDiagnosticRegression();
@@ -742,6 +744,134 @@ function runIonexAtmosphereDelayRegression()
         'IONEX numerical gradient should be nonzero for oblique geometry.');
 
     disp("PASS: IONEX atmosphere code-delay model is valid.");
+end
+
+function runIonexHistoryReportDiagnosticsRegression()
+    ProjectPathManager.addProjectPaths();
+
+    ionexText = [
+        "     0                                                      EXPONENT"
+        "                                                            END OF HEADER"
+        "     1                                                      START OF TEC MAP"
+        "  2026     5    27    23     0     0                       EPOCH OF CURRENT MAP"
+        "   -90.0  -180.0   180.0   360.0   350.0                   LAT/LON1/LON2/DLON/H"
+        "     10    10"
+        "    90.0  -180.0   180.0   360.0   350.0                   LAT/LON1/LON2/DLON/H"
+        "     10    10"
+        "                                                            END OF TEC MAP"
+        "     2                                                      START OF TEC MAP"
+        "  2026     5    28     0     0     0                       EPOCH OF CURRENT MAP"
+        "   -90.0  -180.0   180.0   360.0   350.0                   LAT/LON1/LON2/DLON/H"
+        "     10    10"
+        "    90.0  -180.0   180.0   360.0   350.0                   LAT/LON1/LON2/DLON/H"
+        "     10    10"
+        "                                                            END OF TEC MAP"
+        ];
+
+    ionexFile = fullfile(tempdir, ...
+        sprintf('reverse_gnss_ionex_history_%s.ionex', ...
+        char(java.util.UUID.randomUUID)));
+
+    fid = fopen(ionexFile, 'w');
+
+    assert(fid > 0, ...
+        'Could not create temporary IONEX history test file.');
+
+    cleanup = onCleanup(@() deleteTemporaryFile(ionexFile));
+
+    for k = 1:numel(ionexText)
+        fprintf(fid, '%s\n', ionexText(k));
+    end
+
+    fclose(fid);
+
+    simConfigOverride = makeShortRegressionOverride();
+    scenarioPath = 'reverseGnssClockNavigationScenario';
+
+    ionexAtmosphereCfg = struct( ...
+        'enableTroposphere', false, ...
+        'enableIonosphere', true, ...
+        'troposphereModel', "disabled", ...
+        'ionosphereModel', "ionex", ...
+        'ionosphereProviderType', "ionex", ...
+        'ionexFile', ionexFile, ...
+        'residualTroposphereSigma_m', 0.0, ...
+        'residualIonosphereSigma_m', 0.0);
+
+    simConfigOverride.scenarios.(scenarioPath).atmosphere.truth = ...
+        ionexAtmosphereCfg;
+
+    simConfigOverride.scenarios.(scenarioPath).atmosphere.model = ...
+        ionexAtmosphereCfg;
+
+    simConfigOverride.scenarios.(scenarioPath).measurement.enableElevationMask = true;
+    simConfigOverride.scenarios.(scenarioPath).measurement.elevationMask_deg = 5.0;
+
+    runtimeOptions = struct();
+    runtimeOptions.entryPointName = "IonexHistoryReportDiagnosticsRegression";
+    runtimeOptions.simConfigOverride = simConfigOverride;
+
+    sim = ReverseGnssSimulation(runtimeOptions);
+    sim.configure();
+    sim.run();
+
+    visible = sim.history.visibility_mask_by_receiver_tower(:, :, 1);
+
+    assert(any(visible(:)), ...
+        'IONEX history diagnostic regression produced no visible measurements.');
+
+    truthVtec = ...
+        sim.history.atmosphere_truth_ionosphere_vtec_TECU_by_receiver_tower(:, :, 1);
+
+    truthStec = ...
+        sim.history.atmosphere_truth_ionosphere_stec_TECU_by_receiver_tower(:, :, 1);
+
+    truthMapping = ...
+        sim.history.atmosphere_truth_ionosphere_mapping_factor_by_receiver_tower(:, :, 1);
+
+    truthLat = ...
+        sim.history.atmosphere_truth_ionosphere_ipp_lat_deg_by_receiver_tower(:, :, 1);
+
+    truthLon = ...
+        sim.history.atmosphere_truth_ionosphere_ipp_lon_deg_by_receiver_tower(:, :, 1);
+
+    assert(all(abs(truthVtec(visible) - 10.0) < 1e-12), ...
+        'Recorded IONEX truth VTEC should equal 10 TECU.');
+
+    assert(all(isfinite(truthStec(visible))), ...
+        'Recorded IONEX truth STEC should be finite.');
+
+    assert(all(isfinite(truthMapping(visible))), ...
+        'Recorded IONEX truth mapping factor should be finite.');
+
+    assert(all(isfinite(truthLat(visible))), ...
+        'Recorded IONEX truth IPP latitude should be finite.');
+
+    assert(all(isfinite(truthLon(visible))), ...
+        'Recorded IONEX truth IPP longitude should be finite.');
+
+    assert(all(abs(truthStec(visible) - ...
+        truthVtec(visible) .* truthMapping(visible)) < 1e-10), ...
+        'Recorded STEC must equal VTEC times mapping factor.');
+
+    results = ResultBuilder.fromSimulation(sim);
+    reportData = ReportDataBuilder.fromSimulation(sim);
+
+    assert(isfield(results, ...
+        'atmosphere_truth_ionosphere_vtec_TECU_by_receiver_tower'));
+
+    assert(isfield(reportData, ...
+        'atmosphere_truth_ionosphere_vtec_TECU_by_receiver_tower'));
+
+    assert(isfield(reportData, 'ionosphere_map_summary_table'), ...
+        'Report data should contain ionosphere map summary table.');
+
+    assert(any(contains( ...
+        string(reportData.ionosphere_map_summary_table.Quantity), ...
+        "Mean truth VTEC")), ...
+        'Ionosphere map summary table should contain mean truth VTEC.');
+
+    disp("PASS: IONEX history and report diagnostics are recorded.");
 end
 
 function runAtmosphereInvalidGradientGuardRegression()
