@@ -12,7 +12,7 @@
 
 %   sim = test_ReverseGnss_5Towers_NReceivers_SimConfigPDF();
 %   sim = test_ReverseGnss_5Towers_NReceivers_SimConfigPDF(8);
-REPORT_VERSION = sprintf('1.10');
+REPORT_VERSION = sprintf('1.11');
 N_RECEIVERS = 4;
 assert(N_RECEIVERS >= 1 && floor(N_RECEIVERS) == N_RECEIVERS, ...
     'N_RECEIVERS must be a positive integer.');
@@ -145,6 +145,7 @@ assert(contains(reportText, 'Atmosphere Propagation Summary'), ...
 
 validateRetainedReportAtmosphereDiagnostics(sim);
 runIonosphereProviderInterfaceRegression();
+runGriddedIonosphereProviderInterpolationRegression();
 runIonospherePiercePointGeometryRegression();
 runAtmosphereConstantDiagnosticRegression();
 runAtmosphereResidualAndCovarianceRegression();
@@ -375,6 +376,117 @@ function runIonosphereProviderInterfaceRegression()
         'IONEX placeholder provider should not be available yet.');
 
     disp("PASS: ionosphere provider interface is available and baseline-safe.");
+end
+
+function runGriddedIonosphereProviderInterpolationRegression()
+    ProjectPathManager.addProjectPaths();
+
+    epoch0 = datetime(2026, 5, 27, 23, 0, 0, 'TimeZone', 'UTC');
+    epochUtc = [epoch0; epoch0 + hours(1)];
+
+    latitude_deg = [-10.0; 10.0];
+    longitude_deg = [0.0; 20.0];
+
+    vtec_TECU = zeros( ...
+        numel(latitude_deg), ...
+        numel(longitude_deg), ...
+        numel(epochUtc));
+
+    for it = 1:numel(epochUtc)
+        for ilat = 1:numel(latitude_deg)
+            for ilon = 1:numel(longitude_deg)
+                vtec_TECU(ilat, ilon, it) = ...
+                    100.0 ...
+                    + latitude_deg(ilat) ...
+                    + 2.0 * longitude_deg(ilon) ...
+                    + 10.0 * (it - 1);
+            end
+        end
+    end
+
+    mapCfg = struct( ...
+        'datetimeUtc', epochUtc, ...
+        'latitude_deg', latitude_deg, ...
+        'longitude_deg', longitude_deg, ...
+        'vtec_TECU', vtec_TECU, ...
+        'rms_TECU', ones(size(vtec_TECU)) * 0.5, ...
+        'source', "unit-test grid");
+
+    providerCfg = struct();
+    providerCfg.ionosphereMap = mapCfg;
+
+    provider = IonosphereMapProviderFactory.create( ...
+        "grid", ...
+        fullfile("data", "atmosphere"), ...
+        providerCfg, ...
+        "model");
+
+    assert(isa(provider, 'GriddedIonosphereMapProvider'), ...
+        'Grid provider type should construct GriddedIonosphereMapProvider.');
+
+    assert(provider.isAvailable(), ...
+        'Grid provider should be available.');
+
+    queryTime = epoch0 + minutes(30);
+    queryLat_deg = 0.0;
+    queryLon_deg = 10.0;
+
+    result = provider.verticalTecAt( ...
+        queryTime, queryLat_deg, queryLon_deg);
+
+    expectedVtec_TECU = ...
+        100.0 ...
+        + queryLat_deg ...
+        + 2.0 * queryLon_deg ...
+        + 10.0 * 0.5;
+
+    assert(result.valid, ...
+        'Grid provider interpolation result should be valid.');
+
+    assert(abs(result.vtec_TECU - expectedVtec_TECU) < 1e-12, ...
+        'Grid provider VTEC interpolation is incorrect.');
+
+    assert(abs(result.rms_TECU - 0.5) < 1e-12, ...
+        'Grid provider RMS interpolation is incorrect.');
+
+    assert(result.metadata.latitudeIndex0 == 1);
+    assert(result.metadata.latitudeIndex1 == 2);
+    assert(result.metadata.longitudeIndex0 == 1);
+    assert(result.metadata.longitudeIndex1 == 2);
+    assert(result.metadata.timeIndex0 == 1);
+    assert(result.metadata.timeIndex1 == 2);
+
+    outsideResult = provider.verticalTecAt( ...
+        queryTime, 80.0, queryLon_deg);
+
+    assert(~outsideResult.valid, ...
+        'Grid provider should reject queries outside latitude coverage.');
+
+    constants = struct( ...
+        'speedOfLight_mps', 299792458.0, ...
+        'earthRadius_m', 6378137.0);
+
+    atmosphereCfg = struct();
+    atmosphereCfg.dataRoot = fullfile("data", "atmosphere");
+    atmosphereCfg.missingDataPolicy = "error";
+    atmosphereCfg.ionosphereShellHeight_m = 350000.0;
+
+    atmosphereCfg.model = struct( ...
+        'enableTroposphere', false, ...
+        'enableIonosphere', false, ...
+        'ionosphereProviderType', "grid", ...
+        'ionosphereMap', mapCfg);
+
+    atmosphere = Atmosphere(atmosphereCfg, constants, "model");
+
+    assert(atmosphere.ionosphereProviderType == "grid", ...
+        'Atmosphere should accept the grid ionosphere provider type.');
+
+    assert(isa(atmosphere.ionosphereProvider, ...
+            'GriddedIonosphereMapProvider'), ...
+        'Atmosphere should own a gridded ionosphere provider.');
+
+    disp("PASS: gridded ionosphere provider interpolation is valid.");
 end
 
 function runIonospherePiercePointGeometryRegression()

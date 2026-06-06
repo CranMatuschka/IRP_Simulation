@@ -1,10 +1,12 @@
 classdef IonosphereMapProviderFactory
     %IONOSPHEREMAPPROVIDERFACTORY Construct ionosphere map providers.
     %
-    % Phase-two architecture commit only:
+    % Phase-two architecture:
     % - "none" returns NullIonosphereMapProvider.
-    % - "ionex" also returns NullIonosphereMapProvider until IonexProvider
-    %   is implemented in a later commit.
+    % - "grid" returns GriddedIonosphereMapProvider for deterministic
+    %   interpolation tests and future parsed products.
+    % - "ionex" still returns NullIonosphereMapProvider until IonexProvider
+    %   is implemented.
 
     methods (Static)
         function provider = create(providerType, dataRoot, cfg, role)
@@ -30,6 +32,10 @@ classdef IonosphereMapProviderFactory
                 case "none"
                     provider = NullIonosphereMapProvider( ...
                         "none", dataRoot, cfg, role);
+
+                case "grid"
+                    provider = GriddedIonosphereMapProvider( ...
+                        dataRoot, cfg, role);
 
                 case "ionex"
                     % IonexProvider is intentionally introduced later.
