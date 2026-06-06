@@ -47,6 +47,12 @@ classdef ResultBuilder
             results.atmosphere_truth_delay_by_receiver_tower_m = ...
                 sim.history.atmosphere_truth_delay_by_receiver_tower_m;
 
+            results.atmosphere_truth_troposphere_by_receiver_tower_m = ...
+                sim.history.atmosphere_truth_troposphere_by_receiver_tower_m;
+
+            results.atmosphere_truth_ionosphere_by_receiver_tower_m = ...
+                sim.history.atmosphere_truth_ionosphere_by_receiver_tower_m;
+
             results.atmosphere_truth_residual_by_tower_m = ...
                 sim.history.atmosphere_truth_residual_by_tower_m;
 
@@ -55,6 +61,13 @@ classdef ResultBuilder
 
             results.atmosphere_model_delay_by_receiver_tower_m = ...
                 sim.history.atmosphere_model_delay_by_receiver_tower_m;
+
+            results.atmosphere_model_troposphere_by_receiver_tower_m = ...
+                sim.history.atmosphere_model_troposphere_by_receiver_tower_m;
+
+            results.atmosphere_model_ionosphere_by_receiver_tower_m = ...
+                sim.history.atmosphere_model_ionosphere_by_receiver_tower_m;
+            
             results.enableTowerClockEKF = towerClockEkfEnabled;
 
             if towerClockEkfEnabled

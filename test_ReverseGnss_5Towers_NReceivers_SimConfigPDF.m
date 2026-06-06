@@ -63,6 +63,23 @@ scenario.measurement.enableNoise = false;
 scenario.measurement.enableElevationMask = true;
 scenario.measurement.elevationMask_deg = 5.0;
 
+
+% Enable deterministic atmosphere in the normal retained PDF report.
+% This makes ionosphere and troposphere visible in the standard report output.
+truthAtmosphereCfg = struct( ...
+    'enableTroposphere', true, ...
+    'enableIonosphere', true, ...
+    'troposphereModel', "constant", ...
+    'ionosphereModel', "constant", ...
+    'constantTroposphereDelay_m', 2.0, ...
+    'constantIonosphereDelay_m', 3.0, ...
+    'residualTroposphereSigma_m', 0.0, ...
+    'residualIonosphereSigma_m', 0.0);
+
+modelAtmosphereCfg = truthAtmosphereCfg;
+
+scenario.atmosphere.truth = truthAtmosphereCfg;
+scenario.atmosphere.model = modelAtmosphereCfg;
 % Use external timing corrections, not tower-clock EKF states, for the
 % simple 14-state spacecraft navigation/clock test.
 scenario.enableGroundClockErrors = false;
@@ -111,8 +128,16 @@ assert(exist(texFile, 'file') == 2, 'Report TEX was not created: %s', texFile);
 assert(exist(pdfFile, 'file') == 2, ...
     ['Report PDF was not created: %s\n', ...
      'Check that pdflatex is installed and visible on the MATLAB system path.'], pdfFile);
+reportText = fileread(texFile);
 
-validateDefaultAtmosphereDiagnostics(sim);
+assert(contains(reportText, 'Ionosphere and Troposphere Delay Components'), ...
+    'Atmosphere component section is missing from the normal TEX report.');
+
+assert(contains(reportText, 'Atmosphere Propagation Summary'), ...
+    'Atmosphere summary table is missing from the normal TEX report.');
+
+
+validateRetainedReportAtmosphereDiagnostics(sim);
 runAtmosphereConstantDiagnosticRegression();
 runAtmosphereResidualAndCovarianceRegression();
 runAtmosphereGradientFiniteDifferenceRegression();
@@ -164,42 +189,75 @@ function receivers = makeReceiverConfigsForTest(nReceivers, baseline_m, sigma_m)
     end
 end
 
-function validateDefaultAtmosphereDiagnostics(sim)
+function validateRetainedReportAtmosphereDiagnostics(sim)
     assert(isfield(sim.history, 'atmosphere_truth_delay_by_receiver_tower_m'));
-    assert(isfield(sim.history, 'atmosphere_truth_residual_by_tower_m'));
+    assert(isfield(sim.history, 'atmosphere_truth_troposphere_by_receiver_tower_m'));
+    assert(isfield(sim.history, 'atmosphere_truth_ionosphere_by_receiver_tower_m'));
     assert(isfield(sim.history, 'atmosphere_truth_total_by_receiver_tower_m'));
     assert(isfield(sim.history, 'atmosphere_model_delay_by_receiver_tower_m'));
+    assert(isfield(sim.history, 'atmosphere_model_troposphere_by_receiver_tower_m'));
+    assert(isfield(sim.history, 'atmosphere_model_ionosphere_by_receiver_tower_m'));
 
     visible = sim.history.visibility_mask_by_receiver_tower;
 
     assert(any(visible(:)), ...
-        'Default regression produced no visible pseudorange measurements.');
+        'Retained regression produced no visible pseudorange measurements.');
 
-    truthDelay = sim.history.atmosphere_truth_delay_by_receiver_tower_m;
-    truthTotal = sim.history.atmosphere_truth_total_by_receiver_tower_m;
-    modelDelay = sim.history.atmosphere_model_delay_by_receiver_tower_m;
+    truthTotal = sim.history.atmosphere_truth_delay_by_receiver_tower_m;
+    truthTropo = sim.history.atmosphere_truth_troposphere_by_receiver_tower_m;
+    truthIono = sim.history.atmosphere_truth_ionosphere_by_receiver_tower_m;
+    truthTotalWithResidual = sim.history.atmosphere_truth_total_by_receiver_tower_m;
+
+    modelTotal = sim.history.atmosphere_model_delay_by_receiver_tower_m;
+    modelTropo = sim.history.atmosphere_model_troposphere_by_receiver_tower_m;
+    modelIono = sim.history.atmosphere_model_ionosphere_by_receiver_tower_m;
+
     truthResidualByTower = sim.history.atmosphere_truth_residual_by_tower_m;
 
-    assert(all(abs(truthDelay(visible)) < 1e-12), ...
-        'Default truth atmosphere delay should be zero.');
+    assert(all(abs(truthTropo(visible) - 2.0) < 1e-12), ...
+        'Retained report truth troposphere should be 2 m.');
 
-    assert(all(abs(truthTotal(visible)) < 1e-12), ...
-        'Default truth total atmosphere contribution should be zero.');
+    assert(all(abs(truthIono(visible) - 3.0) < 1e-12), ...
+        'Retained report truth ionosphere should be 3 m.');
 
-    assert(all(abs(modelDelay(visible)) < 1e-12), ...
-        'Default estimator atmosphere correction should be zero.');
+    assert(all(abs(truthTotal(visible) - 5.0) < 1e-12), ...
+        'Retained report truth atmosphere total should be 5 m.');
+
+    assert(all(abs(truthTotalWithResidual(visible) - 5.0) < 1e-12), ...
+        'Retained report truth atmosphere total including residual should be 5 m.');
+
+    assert(all(abs(modelTropo(visible) - 2.0) < 1e-12), ...
+        'Retained report model troposphere should be 2 m.');
+
+    assert(all(abs(modelIono(visible) - 3.0) < 1e-12), ...
+        'Retained report model ionosphere should be 3 m.');
+
+    assert(all(abs(modelTotal(visible) - 5.0) < 1e-12), ...
+        'Retained report model atmosphere total should be 5 m.');
 
     assert(all(abs(truthResidualByTower(:)) < 1e-12), ...
-        'Default truth atmospheric residual should be zero.');
+        'Retained report truth atmospheric residual should be zero.');
 
     results = ResultBuilder.fromSimulation(sim);
+    reportData = ReportDataBuilder.fromSimulation(sim);
+    reportToggles = ReportConfigBuilder.togglesFromSimulation(sim);
 
-    assert(isfield(results, 'atmosphere_truth_delay_by_receiver_tower_m'));
-    assert(isfield(results, 'atmosphere_truth_residual_by_tower_m'));
-    assert(isfield(results, 'atmosphere_truth_total_by_receiver_tower_m'));
-    assert(isfield(results, 'atmosphere_model_delay_by_receiver_tower_m'));
+    assert(reportToggles.ionosphere, ...
+        'Ionosphere report toggle should be enabled.');
 
-    disp("PASS: default atmosphere diagnostics are zero and exported.");
+    assert(reportToggles.troposphere, ...
+        'Troposphere report toggle should be enabled.');
+
+    assert(isfield(results, 'atmosphere_truth_troposphere_by_receiver_tower_m'));
+    assert(isfield(results, 'atmosphere_truth_ionosphere_by_receiver_tower_m'));
+    assert(isfield(results, 'atmosphere_model_troposphere_by_receiver_tower_m'));
+    assert(isfield(results, 'atmosphere_model_ionosphere_by_receiver_tower_m'));
+
+    assert(isfield(reportData, 'atmosphere_summary_table'));
+    assert(isfield(reportData, 'atmosphere_troposphere_residual_by_receiver_tower_m'));
+    assert(isfield(reportData, 'atmosphere_ionosphere_residual_by_receiver_tower_m'));
+
+    disp("PASS: retained PDF report includes ionosphere and troposphere diagnostics.");
 end
 
 function runAtmosphereConstantDiagnosticRegression()

@@ -11,7 +11,7 @@ classdef ReportConfigBuilder
                 sim.cfg, 'atmosphere', struct());
 
             truthAtmosphereCfg = ReportConfigBuilder.getFieldOrDefault( ...
-                atmosphereCfg, 'truth', struct())
+                atmosphereCfg, 'truth', struct());
             
             modelAtmosphereCfg = ReportConfigBuilder.getFieldOrDefault( ...
                 atmosphereCfg, 'model', struct());
