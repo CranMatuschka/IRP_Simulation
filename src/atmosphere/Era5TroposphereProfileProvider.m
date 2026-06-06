@@ -506,10 +506,15 @@ classdef Era5TroposphereProfileProvider < TroposphereProfileProvider
             varInfo = Era5TroposphereProfileProvider.variableInfo( ...
                 ncInfo, varName);
 
-            raw = double(ncread(char(filePath), char(varName)));
-
             dimNames = string({varInfo.Dimensions.Name});
             dimLower = lower(dimNames);
+            dimLengths = double([varInfo.Dimensions.Length]);
+
+            if numel(dimNames) ~= 3
+                error('Era5TroposphereProfileProvider:InvalidVariableRank', ...
+                    'Variable "%s" must have exactly three NetCDF dimensions.', ...
+                    char(varName));
+            end
 
             iLat = find(contains(dimLower, "lat"), 1, 'first');
             iLon = find(contains(dimLower, "lon"), 1, 'first');
@@ -521,12 +526,28 @@ classdef Era5TroposphereProfileProvider < TroposphereProfileProvider
                      'and time dimensions.'], char(varName));
             end
 
+            raw = double(ncread(char(filePath), char(varName)));
+
+            if numel(raw) ~= prod(dimLengths)
+                error('Era5TroposphereProfileProvider:InvalidVariableSize', ...
+                    ['Variable "%s" data size does not match its declared ', ...
+                     'NetCDF dimension lengths.'], char(varName));
+            end
+
+            raw = reshape(raw, dimLengths);
+
             data = permute(raw, [iLat, iLon, iTime]);
 
-            if ndims(data) ~= 3
-                error('Era5TroposphereProfileProvider:InvalidVariableRank', ...
-                    'Variable "%s" must be three-dimensional.', ...
-                    char(varName));
+            expectedSize = dimLengths([iLat, iLon, iTime]);
+
+            data = reshape(data, expectedSize);
+
+            if size(data, 1) ~= expectedSize(1) || ...
+                    size(data, 2) ~= expectedSize(2) || ...
+                    size(data, 3) ~= expectedSize(3)
+                error('Era5TroposphereProfileProvider:InvalidVariableShape', ...
+                    ['Variable "%s" could not be reshaped to ', ...
+                     'latitude-longitude-time order.'], char(varName));
             end
         end
 
