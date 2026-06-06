@@ -12,7 +12,7 @@
 
 %   sim = test_ReverseGnss_5Towers_NReceivers_SimConfigPDF();
 %   sim = test_ReverseGnss_5Towers_NReceivers_SimConfigPDF(8);
-REPORT_VERSION = sprintf('1.17');
+REPORT_VERSION = sprintf('1.18');
 N_RECEIVERS = 4;
 assert(N_RECEIVERS >= 1 && floor(N_RECEIVERS) == N_RECEIVERS, ...
     'N_RECEIVERS must be a positive integer.');
@@ -141,7 +141,8 @@ assert(contains(reportText, 'Ionosphere and Troposphere Delay Components'), ...
 
 assert(contains(reportText, 'Atmosphere Propagation Summary'), ...
     'Atmosphere summary table is missing from the normal TEX report.');
-
+assert(contains(reportText, 'Atmosphere Truth Minus Model Residual Components'), ...
+    'Atmosphere residual component row is missing from the normal TEX report.');
 
 validateRetainedReportAtmosphereDiagnostics(sim);
 runIonosphereProviderInterfaceRegression();
@@ -149,7 +150,6 @@ runGriddedIonosphereProviderInterpolationRegression();
 runIonexParserProviderRegression();
 runIonexAtmosphereDelayRegression();
 runIonexHistoryReportDiagnosticsRegression();
-runAtmosphereInvalidGradientGuardRegression();
 runAtmosphereInvalidGradientGuardRegression();
 runIonospherePiercePointGeometryRegression();
 runAtmosphereConstantDiagnosticRegression();
@@ -300,6 +300,62 @@ function validateRetainedReportAtmosphereDiagnostics(sim)
     assert(isfield(results, 'atmosphere_model_ionosphere_by_receiver_tower_m'));
 
     assert(isfield(reportData, 'atmosphere_summary_table'));
+    assert(isfield(reportData, ...
+        'atmosphere_truth_ionosphere_vtec_TECU_by_receiver_tower'));
+
+    assert(isfield(reportData, ...
+        'atmosphere_truth_ionosphere_stec_TECU_by_receiver_tower'));
+
+    assert(isfield(reportData, ...
+        'atmosphere_truth_ionosphere_mapping_factor_by_receiver_tower'));
+
+    assert(isfield(reportData, ...
+        'atmosphere_model_ionosphere_vtec_TECU_by_receiver_tower'));
+
+    assert(isfield(reportData, ...
+        'atmosphere_model_ionosphere_stec_TECU_by_receiver_tower'));
+
+    assert(isfield(reportData, ...
+        'atmosphere_model_ionosphere_mapping_factor_by_receiver_tower'));
+
+    truthVtec = ...
+        reportData.atmosphere_truth_ionosphere_vtec_TECU_by_receiver_tower;
+
+    truthStec = ...
+        reportData.atmosphere_truth_ionosphere_stec_TECU_by_receiver_tower;
+
+    truthMapping = ...
+        reportData.atmosphere_truth_ionosphere_mapping_factor_by_receiver_tower;
+
+    modelVtec = ...
+        reportData.atmosphere_model_ionosphere_vtec_TECU_by_receiver_tower;
+
+    modelStec = ...
+        reportData.atmosphere_model_ionosphere_stec_TECU_by_receiver_tower;
+
+    modelMapping = ...
+        reportData.atmosphere_model_ionosphere_mapping_factor_by_receiver_tower;
+
+    assert(all(abs(truthVtec(visible) - 10.0) < 1e-12), ...
+        'Retained report scalar truth VTEC should be 10 TECU.');
+
+    assert(all(abs(modelVtec(visible) - 10.0) < 1e-12), ...
+        'Retained report scalar model VTEC should be 10 TECU.');
+
+    assert(all(isfinite(truthStec(visible))), ...
+        'Retained report scalar truth STEC should be finite.');
+
+    assert(all(isfinite(modelStec(visible))), ...
+        'Retained report scalar model STEC should be finite.');
+
+    assert(all(abs(truthStec(visible) - ...
+        truthVtec(visible) .* truthMapping(visible)) < 1e-10), ...
+        'Retained report scalar truth STEC must equal VTEC times mapping factor.');
+
+    assert(all(abs(modelStec(visible) - ...
+        modelVtec(visible) .* modelMapping(visible)) < 1e-10), ...
+        'Retained report scalar model STEC must equal VTEC times mapping factor.');
+
     assert(isfield(reportData, 'atmosphere_troposphere_residual_by_receiver_tower_m'));
     assert(isfield(reportData, 'atmosphere_ionosphere_residual_by_receiver_tower_m'));
 

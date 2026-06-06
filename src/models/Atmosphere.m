@@ -511,9 +511,12 @@ classdef Atmosphere < handle
                     mapResult.message = "Constant ionosphere delay model.";
 
                 case "thinshellvtec"
-                    delay_m = obj.thinShellVtecDelayMeters( ...
-                        elevation_deg, frequency_Hz);
-                    mapResult.message = "Scalar thin-shell VTEC model.";
+                    [delay_m, mapResult] = ...
+                        obj.thinShellVtecDelayWithMetadataMeters( ...
+                        piercePoint, ...
+                        datetimeUtc, ...
+                        elevation_deg, ...
+                        frequency_Hz);
 
                 case "ionex"
                     [delay_m, mapResult] = obj.ionexDelayMeters( ...
@@ -524,6 +527,61 @@ classdef Atmosphere < handle
                         'Unsupported ionosphere model "%s".', ...
                         obj.ionosphereModel);
             end
+        end
+        
+        function [delay_m, mapResult] = ...
+                thinShellVtecDelayWithMetadataMeters( ...
+                obj, piercePoint, datetimeUtc, elevation_deg, frequency_Hz)
+
+            mapResult = obj.emptyIonosphereMapResult( ...
+                datetimeUtc, NaN, NaN);
+
+            delay_m = obj.thinShellVtecDelayMeters( ...
+                elevation_deg, frequency_Hz);
+
+            mapResult.message = "Scalar thin-shell VTEC model.";
+
+            vtec_TECU = double(obj.vtec_TECU);
+
+            validateattributes(vtec_TECU, {'numeric'}, ...
+                {'real', 'finite', 'scalar', 'nonnegative'}, ...
+                mfilename, 'thinShellVtec_TECU');
+
+            mappingFactor = obj.ionosphereMappingFactor(elevation_deg);
+
+            if isstruct(piercePoint) && ...
+                    isfield(piercePoint, 'valid') && ...
+                    piercePoint.valid
+
+                if isfield(piercePoint, 'latitude_deg')
+                    mapResult.latitude_deg = ...
+                        double(piercePoint.latitude_deg);
+                end
+
+                if isfield(piercePoint, 'longitude_deg')
+                    mapResult.longitude_deg = ...
+                        double(piercePoint.longitude_deg);
+                end
+
+                if isfield(piercePoint, 'mappingFactor') && ...
+                        isfinite(piercePoint.mappingFactor)
+                    mappingFactor = double(piercePoint.mappingFactor);
+                end
+            end
+
+            validateattributes(mappingFactor, {'numeric'}, ...
+                {'real', 'finite', 'scalar', 'positive'}, ...
+                mfilename, 'thinShellMappingFactor');
+
+            mapResult.valid = true;
+            mapResult.vtec_TECU = vtec_TECU;
+            mapResult.rms_TECU = NaN;
+            mapResult.providerType = obj.ionosphereProviderType;
+            mapResult.source = "scalar VTEC configuration";
+
+            mapResult.metadata.mappingFactor = mappingFactor;
+            mapResult.metadata.slantTec_TECU = vtec_TECU * mappingFactor;
+            mapResult.metadata.delay_m = delay_m;
         end
 
         function [delay_m, mapResult] = ionexDelayMeters( ...
