@@ -12,7 +12,7 @@
 
 %   sim = test_ReverseGnss_5Towers_NReceivers_SimConfigPDF();
 %   sim = test_ReverseGnss_5Towers_NReceivers_SimConfigPDF(8);
-REPORT_VERSION = sprintf('1.21');
+REPORT_VERSION = sprintf('1.22');
 N_RECEIVERS = 4;
 assert(N_RECEIVERS >= 1 && floor(N_RECEIVERS) == N_RECEIVERS, ...
     'N_RECEIVERS must be a positive integer.');
@@ -145,6 +145,7 @@ assert(contains(reportText, 'Atmosphere Truth Minus Model Residual Components'),
     'Atmosphere residual component row is missing from the normal TEX report.');
 
 validateRetainedReportAtmosphereDiagnostics(sim);
+runTroposphereProviderInterfaceRegression();
 runIonosphereProviderInterfaceRegression();
 runGriddedIonosphereProviderInterpolationRegression();
 runIonexParserProviderRegression();
@@ -363,6 +364,103 @@ function validateRetainedReportAtmosphereDiagnostics(sim)
     assert(isfield(reportData, 'atmosphere_ionosphere_residual_by_receiver_tower_m'));
 
     disp("PASS: retained PDF report includes ionosphere and troposphere diagnostics.");
+end
+
+function runTroposphereProviderInterfaceRegression()
+    ProjectPathManager.addProjectPaths();
+
+    provider = TroposphereProfileProviderFactory.create( ...
+        "none", ...
+        fullfile("data", "atmosphere"), ...
+        struct(), ...
+        "model");
+
+    assert(isa(provider, 'TroposphereProfileProvider'), ...
+        'Provider must implement TroposphereProfileProvider.');
+
+    assert(isa(provider, 'NullTroposphereProfileProvider'), ...
+        'Default troposphere provider should be NullTroposphereProfileProvider.');
+
+    assert(~provider.isAvailable(), ...
+        'Null troposphere provider must report unavailable.');
+
+    queryTime = datetime(2026, 5, 27, 23, 0, 0, ...
+        'TimeZone', 'UTC');
+
+    result = provider.profileAt(queryTime, 52.0, 13.0, 100.0);
+
+    assert(isstruct(result), ...
+        'Troposphere provider result must be a struct.');
+
+    assert(isfield(result, 'valid'));
+    assert(isfield(result, 'pressure_hPa'));
+    assert(isfield(result, 'temperature_K'));
+    assert(isfield(result, 'relativeHumidity_fraction'));
+    assert(isfield(result, 'waterVaporPressure_hPa'));
+    assert(isfield(result, 'zenithHydrostaticDelay_m'));
+    assert(isfield(result, 'zenithWetDelay_m'));
+    assert(isfield(result, 'providerType'));
+
+    assert(~result.valid, ...
+        'Null troposphere provider must return invalid profile data.');
+
+    assert(isnan(result.pressure_hPa), ...
+        'Null troposphere provider pressure must be NaN.');
+
+    constants = struct( ...
+        'speedOfLight_mps', 299792458.0, ...
+        'earthRadius_m', 6378137.0);
+
+    atmosphereCfg = struct();
+    atmosphereCfg.dataRoot = fullfile("data", "atmosphere");
+    atmosphereCfg.missingDataPolicy = "error";
+    atmosphereCfg.ionosphereShellHeight_m = 350000.0;
+
+    atmosphereCfg.model = struct( ...
+        'enableTroposphere', false, ...
+        'enableIonosphere', false, ...
+        'troposphereProviderType', "none", ...
+        'ionosphereProviderType', "none");
+
+    atmosphere = Atmosphere(atmosphereCfg, constants, "model");
+
+    assert(atmosphere.troposphereProviderType == "none", ...
+        'Atmosphere should store troposphereProviderType.');
+
+    assert(isa(atmosphere.troposphereProvider, ...
+            'NullTroposphereProfileProvider'), ...
+        'Atmosphere should own a null troposphere provider by default.');
+
+    profileCfg = atmosphereCfg;
+    profileCfg.model.troposphereProviderType = "profile";
+
+    profileAtmosphere = Atmosphere(profileCfg, constants, "model");
+
+    assert(profileAtmosphere.troposphereProviderType == "profile", ...
+        'Atmosphere should accept the profile troposphere provider type.');
+
+    assert(isa(profileAtmosphere.troposphereProvider, ...
+            'NullTroposphereProfileProvider'), ...
+        ['Profile troposphere provider should currently resolve to the null ', ...
+         'provider until the deterministic profile provider is implemented.']);
+
+    era5Cfg = atmosphereCfg;
+    era5Cfg.model.troposphereProviderType = "era5";
+
+    era5Atmosphere = Atmosphere(era5Cfg, constants, "model");
+
+    assert(era5Atmosphere.troposphereProviderType == "era5", ...
+        'Atmosphere should accept the era5 troposphere provider type.');
+
+    assert(isa(era5Atmosphere.troposphereProvider, ...
+            'NullTroposphereProfileProvider'), ...
+        ['ERA5 troposphere provider should currently resolve to the null ', ...
+         'provider until ERA5 provider parsing is implemented.']);
+
+    assert(~era5Atmosphere.troposphereProvider.isAvailable(), ...
+        'ERA5 placeholder troposphere provider should not be available yet.');
+
+    disp("PASS: troposphere provider interface is available and baseline-safe.");
 end
 
 function runIonosphereProviderInterfaceRegression()
