@@ -12,7 +12,7 @@
 
 %   sim = test_ReverseGnss_5Towers_NReceivers_SimConfigPDF();
 %   sim = test_ReverseGnss_5Towers_NReceivers_SimConfigPDF(8);
-REPORT_VERSION = sprintf('1.19');
+REPORT_VERSION = sprintf('1.20');
 N_RECEIVERS = 4;
 assert(N_RECEIVERS >= 1 && floor(N_RECEIVERS) == N_RECEIVERS, ...
     'N_RECEIVERS must be a positive integer.');
@@ -148,6 +148,7 @@ validateRetainedReportAtmosphereDiagnostics(sim);
 runIonosphereProviderInterfaceRegression();
 runGriddedIonosphereProviderInterpolationRegression();
 runIonexParserProviderRegression();
+runIonexParserEdgeCaseRegression();
 runIonexAtmosphereDelayRegression();
 runIonexHistoryReportDiagnosticsRegression();
 runIonexTruthModelMismatchRegression();
@@ -659,6 +660,181 @@ function runIonexParserProviderRegression()
         'Atmosphere should own an IONEX ionosphere provider when a source file is configured.');
 
     disp("PASS: IONEX parser and provider interpolation are valid.");
+end
+
+function runIonexParserEdgeCaseRegression()
+    ProjectPathManager.addProjectPaths();
+
+    exponentIonexFile = string([tempname, '_exponent_reversed_lat.ionex']);
+    missingIonexFile = string([tempname, '_missing_values.ionex']);
+    narrowIonexFile = string([tempname, '_narrow_grid.ionex']);
+
+    cleanupExponent = onCleanup(@() deleteTemporaryFile(exponentIonexFile));
+    cleanupMissing = onCleanup(@() deleteTemporaryFile(missingIonexFile));
+    cleanupNarrow = onCleanup(@() deleteTemporaryFile(narrowIonexFile));
+
+    exponentIonexText = [
+        "    -1                                                      EXPONENT"
+        "                                                            END OF HEADER"
+        "     1                                                      START OF TEC MAP"
+        "  2026     5    27    23     0     0                       EPOCH OF CURRENT MAP"
+        "    10.0     0.0    20.0    20.0   350.0                   LAT/LON1/LON2/DLON/H"
+        "    110   130"
+        "   -10.0     0.0    20.0    20.0   350.0                   LAT/LON1/LON2/DLON/H"
+        "     90   110"
+        "                                                            END OF TEC MAP"
+        "     2                                                      START OF TEC MAP"
+        "  2026     5    28     0     0     0                       EPOCH OF CURRENT MAP"
+        "    10.0     0.0    20.0    20.0   350.0                   LAT/LON1/LON2/DLON/H"
+        "    130   150"
+        "   -10.0     0.0    20.0    20.0   350.0                   LAT/LON1/LON2/DLON/H"
+        "    110   130"
+        "                                                            END OF TEC MAP"
+        ];
+
+    writeIonexTextFile(exponentIonexFile, exponentIonexText);
+
+    mapCfg = IonexParser.parseFile(exponentIonexFile);
+
+    assert(isequal(mapCfg.latitude_deg(:), [-10.0; 10.0]), ...
+        'IONEX parser should sort reversed latitude rows into ascending order.');
+
+    assert(isequal(mapCfg.longitude_deg(:), [0.0; 20.0]), ...
+        'IONEX parser longitude grid is incorrect.');
+
+    assert(abs(mapCfg.vtec_TECU(1, 1, 1) - 9.0) < 1e-12, ...
+        'IONEX exponent scaling failed for first latitude row.');
+
+    assert(abs(mapCfg.vtec_TECU(2, 2, 1) - 13.0) < 1e-12, ...
+        'IONEX exponent scaling failed for second latitude row.');
+
+    providerCfg = struct();
+    providerCfg.ionexFile = exponentIonexFile;
+
+    provider = IonosphereMapProviderFactory.create( ...
+        "ionex", ...
+        "", ...
+        providerCfg, ...
+        "model");
+
+    queryTime = datetime(2026, 5, 27, 23, 30, 0, ...
+        'TimeZone', 'UTC');
+
+    result = provider.verticalTecAt(queryTime, 0.0, 10.0);
+
+    assert(result.valid, ...
+        'IONEX provider should interpolate inside the grid.');
+
+    assert(abs(result.vtec_TECU - 12.0) < 1e-12, ...
+        'IONEX provider failed combined latitude/longitude/time interpolation.');
+
+    outsideLatitude = provider.verticalTecAt(queryTime, 50.0, 10.0);
+
+    assert(~outsideLatitude.valid, ...
+        'IONEX provider should mark latitude queries outside the grid invalid.');
+
+    outsideTime = provider.verticalTecAt( ...
+        datetime(2026, 5, 28, 2, 0, 0, 'TimeZone', 'UTC'), ...
+        0.0, ...
+        10.0);
+
+    assert(~outsideTime.valid, ...
+        'IONEX provider should mark time queries outside the grid invalid.');
+
+    missingIonexText = [
+        "     0                                                      EXPONENT"
+        "                                                            END OF HEADER"
+        "     1                                                      START OF TEC MAP"
+        "  2026     5    27    23     0     0                       EPOCH OF CURRENT MAP"
+        "   -10.0     0.0    20.0    20.0   350.0                   LAT/LON1/LON2/DLON/H"
+        "   9999    10"
+        "                                                            END OF TEC MAP"
+        ];
+
+    writeIonexTextFile(missingIonexFile, missingIonexText);
+
+    missingValueErrorDetected = false;
+
+    try
+        IonexParser.parseFile(missingIonexFile);
+    catch ME
+        missingValueErrorDetected = ...
+            strcmp(ME.identifier, ...
+            'IonexParser:MissingTecValuesUnsupported');
+    end
+
+    assert(missingValueErrorDetected, ...
+        'IONEX parser should reject unsupported missing TEC values.');
+
+    narrowIonexText = [
+        "     0                                                      EXPONENT"
+        "                                                            END OF HEADER"
+        "     1                                                      START OF TEC MAP"
+        "  2026     5    27    23     0     0                       EPOCH OF CURRENT MAP"
+        "    80.0   100.0   120.0    20.0   350.0                   LAT/LON1/LON2/DLON/H"
+        "     10    10"
+        "    90.0   100.0   120.0    20.0   350.0                   LAT/LON1/LON2/DLON/H"
+        "     10    10"
+        "                                                            END OF TEC MAP"
+        "     2                                                      START OF TEC MAP"
+        "  2026     5    28     0     0     0                       EPOCH OF CURRENT MAP"
+        "    80.0   100.0   120.0    20.0   350.0                   LAT/LON1/LON2/DLON/H"
+        "     10    10"
+        "    90.0   100.0   120.0    20.0   350.0                   LAT/LON1/LON2/DLON/H"
+        "     10    10"
+        "                                                            END OF TEC MAP"
+        ];
+
+    writeIonexTextFile(narrowIonexFile, narrowIonexText);
+
+    datetimeUtc = datetime(2026, 5, 27, 23, 30, 0, ...
+        'TimeZone', 'UTC');
+
+    jd = Clock.julianDateFromDatetime(datetimeUtc);
+
+    constants = struct( ...
+        'speedOfLight_mps', 299792458.0, ...
+        'earthRadius_m', 6378137.0);
+
+    atmosphereCfg = struct();
+    atmosphereCfg.dataRoot = "";
+    atmosphereCfg.missingDataPolicy = "invalid";
+    atmosphereCfg.ionosphereShellHeight_m = 350000.0;
+
+    atmosphereCfg.model = struct( ...
+        'enableTroposphere', false, ...
+        'enableIonosphere', true, ...
+        'troposphereModel', "disabled", ...
+        'ionosphereModel', "ionex", ...
+        'ionosphereProviderType', "ionex", ...
+        'ionexFile', narrowIonexFile, ...
+        'residualTroposphereSigma_m', 0.0, ...
+        'residualIonosphereSigma_m', 0.0);
+
+    atmosphere = Atmosphere(atmosphereCfg, constants, "model");
+
+    towerCfg = struct( ...
+        'name', 'IonexMissingPolicyTower', ...
+        'lat_deg', 0.0, ...
+        'lon_deg', 0.0, ...
+        'alt_m', 0.0, ...
+        'txSignalDelay_m', 0.0);
+
+    tower = GroundNode(towerCfg);
+
+    receiverEcef_m = [6378137.0 + 4.0e7; 0.0; 0.0];
+    receiverEci_m = FrameGeometry.ecefToEciDcm(jd) * receiverEcef_m;
+
+    delay = atmosphere.codeDelayMeters( ...
+        tower, receiverEci_m, jd, datetimeUtc, 1575.42e6);
+
+    assert(~delay.valid, ...
+        'missingDataPolicy="invalid" should return an invalid delay instead of throwing.');
+
+    assert(isnan(delay.ionosphere_m), ...
+        'Out-of-grid IONEX with missingDataPolicy="invalid" should produce NaN ionosphere delay.');
+
+    disp("PASS: IONEX parser edge cases are covered.");
 end
 
 function runIonexAtmosphereDelayRegression()
@@ -1808,6 +1984,20 @@ end
 function deleteTemporaryFile(filePath)
     if exist(filePath, 'file') == 2
         delete(filePath);
+    end
+end
+
+function writeIonexTextFile(filePath, ionexText)
+    fid = fopen(char(string(filePath)), 'w');
+
+    assert(fid > 0, ...
+        'Could not create temporary IONEX test file: %s', ...
+        char(string(filePath)));
+
+    fileCleanup = onCleanup(@() fclose(fid));
+
+    for k = 1:numel(ionexText)
+        fprintf(fid, '%s\n', ionexText(k));
     end
 end
 
