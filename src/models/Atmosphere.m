@@ -38,6 +38,7 @@ classdef Atmosphere < handle
         surfaceTemperature_K double = 293.15
         relativeHumidity_fraction double = 0.50
         minimumMappingElevation_deg double = 3.0
+        troposphereMappingFunction string = "simple"
 
         % Deterministic ionosphere input.
         vtec_TECU double = 10.0
@@ -187,6 +188,14 @@ classdef Atmosphere < handle
 
             obj.minimumMappingElevation_deg = obj.getScalarField( ...
                 obj.cfg, 'minimumMappingElevation_deg', 3.0);
+
+            obj.troposphereMappingFunction = obj.normalizeChoice( ...
+                obj.getFieldOrDefault( ...
+                    obj.cfg, ...
+                    'troposphereMappingFunction', ...
+                    "simple"), ...
+                ["simple"], ...
+                'troposphereMappingFunction');
 
             obj.vtec_TECU = obj.getScalarField( ...
                 obj.cfg, 'vtec_TECU', 10.0);
@@ -786,13 +795,14 @@ classdef Atmosphere < handle
                 (1255.0 / temperature_K + 0.05) * ...
                 waterVaporPressure_hPa;
 
-            mappingFactor = obj.troposphereMappingFactor(elevation_deg);
+            [mappingHydrostatic, mappingWet] = ...
+                obj.troposphereMappingFactors(elevation_deg);
 
             slantHydrostaticDelay_m = ...
-                zenithHydrostaticDelay_m * mappingFactor;
+                zenithHydrostaticDelay_m * mappingHydrostatic;
 
             slantWetDelay_m = ...
-                zenithWetDelay_m * mappingFactor;
+                zenithWetDelay_m * mappingWet;
 
             delay_m = ...
                 slantHydrostaticDelay_m + slantWetDelay_m;
@@ -811,8 +821,9 @@ classdef Atmosphere < handle
             tropoResult.zenithHydrostaticDelay_m = zenithHydrostaticDelay_m;
             tropoResult.zenithWetDelay_m = zenithWetDelay_m;
 
-            tropoResult.mappingHydrostatic = mappingFactor;
-            tropoResult.mappingWet = mappingFactor;
+            tropoResult.mappingFunction = obj.troposphereMappingFunction;
+            tropoResult.mappingHydrostatic = mappingHydrostatic;
+            tropoResult.mappingWet = mappingWet;
 
             tropoResult.slantHydrostaticDelay_m = slantHydrostaticDelay_m;
             tropoResult.slantWetDelay_m = slantWetDelay_m;
@@ -832,6 +843,32 @@ classdef Atmosphere < handle
         end
 
         function mappingFactor = troposphereMappingFactor( ...
+                obj, elevation_deg)
+
+            [mappingHydrostatic, ~] = ...
+                obj.troposphereMappingFactors(elevation_deg);
+
+            mappingFactor = mappingHydrostatic;
+        end
+
+        function [mappingHydrostatic, mappingWet] = ...
+                troposphereMappingFactors(obj, elevation_deg)
+
+            switch obj.troposphereMappingFunction
+                case "simple"
+                    mappingHydrostatic = ...
+                        obj.simpleTroposphereMappingFactor(elevation_deg);
+
+                    mappingWet = mappingHydrostatic;
+
+                otherwise
+                    error('Atmosphere:UnknownTroposphereMappingFunction', ...
+                        'Unsupported troposphere mapping function "%s".', ...
+                        obj.troposphereMappingFunction);
+            end
+        end
+
+        function mappingFactor = simpleTroposphereMappingFactor( ...
                 obj, elevation_deg)
 
             effectiveElevation_deg = max( ...
@@ -879,6 +916,7 @@ classdef Atmosphere < handle
 
             tropoResult.model = obj.troposphereModel;
             tropoResult.providerType = obj.troposphereProviderType;
+            tropoResult.mappingFunction = obj.troposphereMappingFunction;
             tropoResult.role = obj.role;
             tropoResult.source = "";
 
@@ -914,6 +952,7 @@ classdef Atmosphere < handle
             metadata.troposphereProviderType = obj.troposphereProviderType;
             metadata.troposphere = obj.emptyTroposphereResult( ...
                 datetimeUtc, groundNode);
+            metadata.troposphereMappingFunction = obj.troposphereMappingFunction;
             metadata.ionosphereModel = obj.ionosphereModel;
             metadata.ionosphereProviderType = obj.ionosphereProviderType;
 
