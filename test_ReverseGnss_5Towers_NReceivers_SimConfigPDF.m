@@ -12,7 +12,7 @@
 
 %   sim = test_ReverseGnss_5Towers_NReceivers_SimConfigPDF();
 %   sim = test_ReverseGnss_5Towers_NReceivers_SimConfigPDF(8);
-REPORT_VERSION = sprintf('1.20');
+REPORT_VERSION = sprintf('1.21');
 N_RECEIVERS = 4;
 assert(N_RECEIVERS >= 1 && floor(N_RECEIVERS) == N_RECEIVERS, ...
     'N_RECEIVERS must be a positive integer.');
@@ -149,6 +149,7 @@ runIonosphereProviderInterfaceRegression();
 runGriddedIonosphereProviderInterpolationRegression();
 runIonexParserProviderRegression();
 runIonexParserEdgeCaseRegression();
+runIonexConfigurationExampleRegression();
 runIonexAtmosphereDelayRegression();
 runIonexHistoryReportDiagnosticsRegression();
 runIonexTruthModelMismatchRegression();
@@ -835,6 +836,91 @@ function runIonexParserEdgeCaseRegression()
         'Out-of-grid IONEX with missingDataPolicy="invalid" should produce NaN ionosphere delay.');
 
     disp("PASS: IONEX parser edge cases are covered.");
+end
+
+function runIonexConfigurationExampleRegression()
+    ProjectPathManager.addProjectPaths();
+
+    ionexFile = string([tempname, '_config_example.ionex']);
+    cleanupIonex = onCleanup(@() deleteTemporaryFile(ionexFile));
+
+    writeUniformIonexTestFile(ionexFile, 12.0);
+
+    constants = struct( ...
+        'speedOfLight_mps', 299792458.0, ...
+        'earthRadius_m', 6378137.0);
+
+    atmosphereCfg = struct();
+    atmosphereCfg.dataRoot = "";
+    atmosphereCfg.missingDataPolicy = "error";
+    atmosphereCfg.ionosphereShellHeight_m = 350000.0;
+
+    ionexExampleCfg = struct( ...
+        'enableTroposphere', false, ...
+        'enableIonosphere', true, ...
+        'troposphereModel', "disabled", ...
+        'ionosphereModel', "ionex", ...
+        'ionosphereProviderType', "ionex", ...
+        'ionexFile', ionexFile, ...
+        'residualTroposphereSigma_m', 0.0, ...
+        'residualIonosphereSigma_m', 0.0);
+
+    atmosphereCfg.truth = ionexExampleCfg;
+    atmosphereCfg.model = ionexExampleCfg;
+
+    truthAtmosphere = Atmosphere(atmosphereCfg, constants, "truth");
+    modelAtmosphere = Atmosphere(atmosphereCfg, constants, "model");
+
+    assert(truthAtmosphere.ionosphereModel == "ionex", ...
+        'IONEX config example should select ionosphereModel="ionex" for truth.');
+
+    assert(modelAtmosphere.ionosphereModel == "ionex", ...
+        'IONEX config example should select ionosphereModel="ionex" for model.');
+
+    assert(truthAtmosphere.ionosphereProviderType == "ionex", ...
+        'IONEX config example should select ionosphereProviderType="ionex" for truth.');
+
+    assert(modelAtmosphere.ionosphereProviderType == "ionex", ...
+        'IONEX config example should select ionosphereProviderType="ionex" for model.');
+
+    assert(isa(truthAtmosphere.ionosphereProvider, ...
+            'IonexIonosphereMapProvider'), ...
+        'Truth IONEX config example should construct IonexIonosphereMapProvider.');
+
+    assert(isa(modelAtmosphere.ionosphereProvider, ...
+            'IonexIonosphereMapProvider'), ...
+        'Model IONEX config example should construct IonexIonosphereMapProvider.');
+
+    assert(truthAtmosphere.ionosphereProvider.isAvailable(), ...
+        'Truth IONEX provider from config example should be available.');
+
+    assert(modelAtmosphere.ionosphereProvider.isAvailable(), ...
+        'Model IONEX provider from config example should be available.');
+
+    configPath = fullfile( ...
+        fileparts(mfilename('fullpath')), ...
+        'config', ...
+        'SimulationConfig.m');
+
+    configText = string(fileread(configPath));
+
+    assert(contains(configText, ...
+            'IONEX first-order code ionosphere correction example'), ...
+        'SimulationConfig should document the IONEX usage example.');
+
+    assert(contains(configText, ...
+            'ionosphereProviderType = "ionex"'), ...
+        'SimulationConfig should document ionosphereProviderType="ionex".');
+
+    assert(contains(configText, ...
+            'ionexFile = "example.ionex"'), ...
+        'SimulationConfig should document ionexFile usage.');
+
+    assert(contains(configText, ...
+            'missingDataPolicy="error"'), ...
+        'SimulationConfig should document recommended IONEX missing-data policy.');
+
+    disp("PASS: IONEX configuration example is documented and constructible.");
 end
 
 function runIonexAtmosphereDelayRegression()
