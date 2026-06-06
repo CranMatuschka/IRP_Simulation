@@ -12,7 +12,7 @@
 
 %   sim = test_ReverseGnss_5Towers_NReceivers_SimConfigPDF();
 %   sim = test_ReverseGnss_5Towers_NReceivers_SimConfigPDF(8);
-REPORT_VERSION = sprintf('1.6');
+REPORT_VERSION = sprintf('1.7');
 N_RECEIVERS = 4;
 assert(N_RECEIVERS >= 1 && floor(N_RECEIVERS) == N_RECEIVERS, ...
     'N_RECEIVERS must be a positive integer.');
@@ -147,6 +147,7 @@ validateRetainedReportAtmosphereDiagnostics(sim);
 runAtmosphereConstantDiagnosticRegression();
 runAtmosphereResidualAndCovarianceRegression();
 runAtmosphereComponentResidualDecompositionRegression();
+runAtmosphereResidualCovarianceNisRegression();
 runAtmosphereGradientFiniteDifferenceRegression();
 
 fprintf('\nPASS: test finished and PDF was created:\n%s\n', pdfFile);
@@ -479,6 +480,112 @@ function runAtmosphereComponentResidualDecompositionRegression()
     assert(abs(R(1, 4)) < 1e-12);
 
     disp("PASS: atmosphere residual decomposition is internally consistent.");
+end
+
+function runAtmosphereResidualCovarianceNisRegression()
+    baseOverride = makeShortRegressionOverride();
+
+    truthCfg = struct( ...
+        'enableTroposphere', true, ...
+        'enableIonosphere', true, ...
+        'troposphereModel', "constant", ...
+        'ionosphereModel', "constant", ...
+        'constantTroposphereDelay_m', 0.0, ...
+        'constantIonosphereDelay_m', 0.0, ...
+        'residualTroposphereSigma_m', 0.8, ...
+        'residualIonosphereSigma_m', 0.6);
+
+    matchedModelCfg = truthCfg;
+
+    underModeledModelCfg = truthCfg;
+    underModeledModelCfg.residualTroposphereSigma_m = 0.0;
+    underModeledModelCfg.residualIonosphereSigma_m = 0.0;
+
+    scenarioPath = 'reverseGnssClockNavigationScenario';
+
+    matchedOverride = baseOverride;
+    matchedOverride.scenarios.(scenarioPath).atmosphere.truth = truthCfg;
+    matchedOverride.scenarios.(scenarioPath).atmosphere.model = matchedModelCfg;
+
+    underModeledOverride = baseOverride;
+    underModeledOverride.scenarios.(scenarioPath).atmosphere.truth = truthCfg;
+    underModeledOverride.scenarios.(scenarioPath).atmosphere.model = underModeledModelCfg;
+
+    matchedOptions = struct();
+    matchedOptions.entryPointName = "AtmosphereMatchedCovarianceNisRegression";
+    matchedOptions.simConfigOverride = matchedOverride;
+
+    simMatched = ReverseGnssSimulation(matchedOptions);
+    simMatched.configure();
+    simMatched.run();
+
+    underModeledOptions = struct();
+    underModeledOptions.entryPointName = "AtmosphereUnderModeledCovarianceNisRegression";
+    underModeledOptions.simConfigOverride = underModeledOverride;
+
+    simUnderModeled = ReverseGnssSimulation(underModeledOptions);
+    simUnderModeled.configure();
+    simUnderModeled.run();
+
+    nisMatched = simMatched.history.nis_history(1);
+    nisUnderModeled = simUnderModeled.history.nis_history(1);
+
+    assert(isfinite(nisMatched), ...
+        'Matched atmosphere covariance NIS must be finite.');
+
+    assert(isfinite(nisUnderModeled), ...
+        'Under-modeled atmosphere covariance NIS must be finite.');
+
+    assert(nisMatched <= nisUnderModeled + 1e-10, ...
+        ['Adding the matched atmospheric residual covariance to R should ', ...
+         'not increase the first-epoch NIS for the same innovation.']);
+
+    matchedAtmosphereVariance_m2 = ...
+        simMatched.measurementModel.atmosphereResidualVariance_m2();
+
+    underModeledAtmosphereVariance_m2 = ...
+        simUnderModeled.measurementModel.atmosphereResidualVariance_m2();
+
+    assert(abs(matchedAtmosphereVariance_m2 - 1.0) < 1e-12, ...
+        'Matched atmosphere residual variance should be 0.8^2 + 0.6^2 = 1 m^2.');
+
+    assert(underModeledAtmosphereVariance_m2 == 0.0, ...
+        'Under-modeled estimator atmosphere residual variance should be zero.');
+
+    measurementTowerIndex = [1; 2; 1; 2];
+
+    Rmatched = simMatched.measurementModel.measurementCovariance( ...
+        measurementTowerIndex, ...
+        true, ...
+        0.0);
+
+    RunderModeled = simUnderModeled.measurementModel.measurementCovariance( ...
+        measurementTowerIndex, ...
+        true, ...
+        0.0);
+
+    Rdiff = 0.5 * ((Rmatched - RunderModeled) + ...
+                   (Rmatched - RunderModeled).');
+
+    assert(min(eig(Rdiff)) > -1e-12, ...
+        'Matched atmosphere covariance should add a positive semidefinite term to R.');
+
+    assert(abs(Rdiff(1, 3) - 1.0) < 1e-12, ...
+        'Same-tower atmosphere covariance should equal 1 m^2.');
+
+    assert(abs(Rdiff(2, 4) - 1.0) < 1e-12, ...
+        'Same-tower atmosphere covariance should equal 1 m^2.');
+
+    assert(abs(Rdiff(1, 2)) < 1e-12, ...
+        'Different towers should not share atmosphere residual covariance.');
+
+    reportData = ReportDataBuilder.fromSimulation(simMatched);
+
+    assert(isfield(reportData, 'R_atmosphere_m2'));
+    assert(all(abs(reportData.R_atmosphere_m2(:) - 1.0) < 1e-12), ...
+        'Report atmosphere covariance contribution should equal 1 m^2.');
+
+    disp("PASS: matched atmospheric residual covariance reduces or preserves NIS.");
 end
 
 function runAtmosphereResidualAndCovarianceRegression()
