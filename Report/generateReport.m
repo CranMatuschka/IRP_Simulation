@@ -83,7 +83,10 @@ function generateReport(reportData, reportConfig, reportToggles)
         interactive_report_plots = logical(reportConfig.interactivePlots);
     end
     setappdata(0, 'generateReportInteractivePlots', interactive_report_plots);
-    setappdata(0, 'generateReportOutputBaseName', string(reportConfig.outputBaseName));
+    safeFigureOutputBaseName = sanitizeLatexFileStem( ...
+        string(reportConfig.outputBaseName));
+    
+    setappdata(0, 'generateReportOutputBaseName', safeFigureOutputBaseName);
     
     %% Report Figure Generation
     plot_paths = struct();
@@ -2535,6 +2538,19 @@ function out = latexEscape(in)
     end
 
     out = char(out);
+end
+
+function safeStem = sanitizeLatexFileStem(fileStem)
+    safeStem = string(fileStem);
+    safeStem(ismissing(safeStem)) = "report";
+
+    % Keep LaTeX/pdfTeX graphics filenames simple. Older graphicx versions
+    % can misinterpret dots inside the filename stem as part of the extension.
+    safeStem = regexprep(safeStem, '[^A-Za-z0-9_-]', '_');
+
+    if strlength(safeStem) == 0
+        safeStem = "report";
+    end
 end
 
 function path_out = relativeLatexPath(path_in)

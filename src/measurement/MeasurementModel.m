@@ -146,8 +146,10 @@ classdef MeasurementModel < handle
                 obj.getScalarField(mcfg, 'deterministicSigma_m', 1e-4));
             obj.validateLightTimeCorrectionConfiguration();
         end
-
-        function [y, Rrange, trueRangeRt, losRt, receiverEci, visibilityMask, elevationRt_deg] = ...
+        
+        function [y, Rrange, trueRangeRt, losRt, receiverEci, ...
+                visibilityMask, elevationRt_deg, ...
+                atmosphereTruthDelayRt_m, atmosphereTruthResidualByTower_m] = ...
                 makePseudoranges(obj, jd, datetimeUtc, towersEci, groundResidualTruth_m, ...
                 truthAsset, towerClockEkfEnabled, groundClockResidualVariance_m2)
             
@@ -160,9 +162,10 @@ classdef MeasurementModel < handle
             visibilityMask = false(obj.numReceivers, obj.numTowers);
             elevationRt_deg = NaN(obj.numReceivers, obj.numTowers);
             measurementTowerIndex = zeros(maxMeas, 1);
+            atmosphereTruthDelayRt_m = NaN(obj.numReceivers, obj.numTowers);
 
             bRx_m = truthAsset.getClockBias_m();
-            atmosphereResidualByTower_m = ...
+            atmosphereTruthResidualByTower_m = ...
                 obj.sampleTruthAtmosphereResidualByTower_m();
             row = 0;
 
@@ -190,7 +193,7 @@ classdef MeasurementModel < handle
                     if ~atmosphereValid
                         continue;
                     end
-
+                    atmosphereTruthDelayRt_m(rx, twr) = atmosphere_m;
                     extra_m = obj.nonAtmosphericExtraDelay_m( ...
                         twr, rx, jd, towersEci(:, twr), rRx_I, truthAsset);
 
@@ -201,7 +204,7 @@ classdef MeasurementModel < handle
                         + bRx_m ...
                         - groundResidualTruth_m(twr) ...
                         + atmosphere_m ...
-                        + atmosphereResidualByTower_m(twr) ...
+                        + atmosphereTruthResidualByTower_m(twr) ...
                         + extra_m;
 
                     if obj.useMeasurementNoise
@@ -229,7 +232,7 @@ classdef MeasurementModel < handle
                 groundClockResidualVariance_m2);
         end
                 
-        function [yp, H] = predictPseudorangesWithJacobian( ...
+        function [yp, H, atmosphereModelDelayRt_m] = predictPseudorangesWithJacobian( ...
                 obj, jd, datetimeUtc, towersEci, ...
                 groundResidualModel_m, visibilityMask, estAsset, ...
                 estTowerClockBias_m, idx, stateDim, towerClockEkfEnabled)
@@ -240,6 +243,7 @@ classdef MeasurementModel < handle
 
             yp = zeros(nnz(visibilityMask), 1);
             H = zeros(numel(yp), stateDim);
+            atmosphereModelDelayRt_m = NaN(obj.numReceivers, obj.numTowers);
 
             C_BI_est = estAsset.C_BI;
             estClockBias_m = estAsset.getClockBias_m();
@@ -270,7 +274,7 @@ classdef MeasurementModel < handle
                             ['Estimator atmosphere delay is invalid for tower %d ', ...
                              'and receiver %d.'], twr, rx);
                     end
-
+                    atmosphereModelDelayRt_m(rx, twr) = atmosphere_m;
                     pseudorangeGradient_I = u + atmosphereGradient_I;
 
                     if towerClockEkfEnabled

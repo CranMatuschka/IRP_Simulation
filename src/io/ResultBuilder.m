@@ -43,7 +43,18 @@ classdef ResultBuilder
 
             results.true_range_by_receiver_tower_m = ...
                 sim.history.true_range_by_receiver_tower_m;
+            
+            results.atmosphere_truth_delay_by_receiver_tower_m = ...
+                sim.history.atmosphere_truth_delay_by_receiver_tower_m;
 
+            results.atmosphere_truth_residual_by_tower_m = ...
+                sim.history.atmosphere_truth_residual_by_tower_m;
+
+            results.atmosphere_truth_total_by_receiver_tower_m = ...
+                sim.history.atmosphere_truth_total_by_receiver_tower_m;
+
+            results.atmosphere_model_delay_by_receiver_tower_m = ...
+                sim.history.atmosphere_model_delay_by_receiver_tower_m;
             results.enableTowerClockEKF = towerClockEkfEnabled;
 
             if towerClockEkfEnabled
