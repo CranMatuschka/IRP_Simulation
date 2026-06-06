@@ -4,8 +4,11 @@ classdef TroposphereProfileProviderFactory
     % - "none" returns NullTroposphereProfileProvider.
     % - "profile" returns DeterministicTroposphereProfileProvider when a
     %   profile source is configured, otherwise NullTroposphereProfileProvider.
-    % - "era5" returns NullTroposphereProfileProvider until ERA5 parsing is
-    %   implemented.
+    % - "era5" returns Era5TroposphereProfileProvider when an ERA5 source is
+    %   configured, otherwise NullTroposphereProfileProvider.
+    %
+    % The ERA5 provider is currently a source-resolving skeleton. It does
+    % not parse ERA5 data yet.
 
     methods (Static)
         function provider = create(providerType, dataRoot, cfg, role)
@@ -42,8 +45,13 @@ classdef TroposphereProfileProviderFactory
                     end
 
                 case "era5"
-                    provider = NullTroposphereProfileProvider( ...
-                        "era5", dataRoot, cfg, role);
+                    if Era5TroposphereProfileProvider.hasEra5Source(cfg)
+                        provider = Era5TroposphereProfileProvider( ...
+                            dataRoot, cfg, role);
+                    else
+                        provider = NullTroposphereProfileProvider( ...
+                            "era5", dataRoot, cfg, role);
+                    end
 
                 otherwise
                     error('TroposphereProfileProviderFactory:UnknownProviderType', ...

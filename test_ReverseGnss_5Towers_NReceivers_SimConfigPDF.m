@@ -12,7 +12,7 @@
 
 %   sim = test_ReverseGnss_5Towers_NReceivers_SimConfigPDF();
 %   sim = test_ReverseGnss_5Towers_NReceivers_SimConfigPDF(8);
-REPORT_VERSION = sprintf('1.28');
+REPORT_VERSION = sprintf('1.29');
 N_RECEIVERS = 4;
 assert(N_RECEIVERS >= 1 && floor(N_RECEIVERS) == N_RECEIVERS, ...
     'N_RECEIVERS must be a positive integer.');
@@ -153,6 +153,7 @@ runDeterministicTroposphereProfileProviderRegression();
 runProfileTroposphereDelayRegression();
 runTroposphereProfileReportDiagnosticsRegression();
 runTroposphereTruthModelMismatchRegression();
+runEra5TroposphereProviderSkeletonRegression();
 runIonosphereProviderInterfaceRegression();
 
 runGriddedIonosphereProviderInterpolationRegression();
@@ -1424,6 +1425,126 @@ function runTroposphereTruthModelMismatchRegression()
         'Troposphere profile summary table should contain mean estimator ZHD.');
 
     disp("PASS: troposphere truth-model mismatch produces the expected residual.");
+end
+
+function runEra5TroposphereProviderSkeletonRegression()
+    ProjectPathManager.addProjectPaths();
+
+    era5File = string([tempname, '_era5_skeleton.nc']);
+    cleanupEra5 = onCleanup(@() deleteTemporaryFile(era5File));
+
+    fid = fopen(char(era5File), 'w');
+
+    assert(fid > 0, ...
+        'Could not create temporary ERA5 skeleton test file.');
+
+    fileCleanup = onCleanup(@() fclose(fid));
+
+    fprintf(fid, '%s\n', 'ERA5 skeleton placeholder file.');
+    clear fileCleanup;
+
+    providerCfg = struct();
+    providerCfg.era5File = era5File;
+
+    provider = TroposphereProfileProviderFactory.create( ...
+        "era5", ...
+        "", ...
+        providerCfg, ...
+        "model");
+
+    assert(isa(provider, 'Era5TroposphereProfileProvider'), ...
+        'Configured ERA5 source should construct Era5TroposphereProfileProvider.');
+
+    assert(isa(provider, 'TroposphereProfileProvider'), ...
+        'ERA5 provider must implement TroposphereProfileProvider.');
+
+    assert(~provider.isAvailable(), ...
+        'ERA5 skeleton provider must remain unavailable until parsing is implemented.');
+
+    queryTime = datetime(2026, 5, 27, 23, 0, 0, ...
+        'TimeZone', 'UTC');
+
+    result = provider.profileAt(queryTime, 52.0, 13.0, 100.0);
+
+    assert(isstruct(result), ...
+        'ERA5 skeleton profileAt result must be a struct.');
+
+    assert(~result.valid, ...
+        'ERA5 skeleton profileAt result must be invalid until parsing is implemented.');
+
+    assert(result.providerType == "era5", ...
+        'ERA5 skeleton result should report providerType era5.');
+
+    assert(string(result.source) == string(era5File), ...
+        'ERA5 skeleton result should preserve the configured source file.');
+
+    assert(isfield(result.metadata, 'era5File'), ...
+        'ERA5 skeleton result should include era5File metadata.');
+
+    assert(string(result.metadata.era5File) == string(era5File), ...
+        'ERA5 skeleton metadata should preserve the configured ERA5 file.');
+
+    noSourceProvider = TroposphereProfileProviderFactory.create( ...
+        "era5", ...
+        "", ...
+        struct(), ...
+        "model");
+
+    assert(isa(noSourceProvider, 'NullTroposphereProfileProvider'), ...
+        'ERA5 provider without a source should remain a null provider.');
+
+    assert(~noSourceProvider.isAvailable(), ...
+        'ERA5 provider without a source should not be available.');
+
+    missingCfg = struct();
+    missingCfg.era5File = string([tempname, '_missing_era5.nc']);
+
+    missingFileRejected = false;
+
+    try
+        TroposphereProfileProviderFactory.create( ...
+            "era5", ...
+            "", ...
+            missingCfg, ...
+            "model");
+    catch ME
+        missingFileRejected = ...
+            strcmp(ME.identifier, ...
+            'Era5TroposphereProfileProvider:Era5FileNotFound');
+    end
+
+    assert(missingFileRejected, ...
+        'Configured but missing ERA5 source file should be rejected.');
+
+    constants = struct( ...
+        'speedOfLight_mps', 299792458.0, ...
+        'earthRadius_m', 6378137.0);
+
+    atmosphereCfg = struct();
+    atmosphereCfg.dataRoot = "";
+    atmosphereCfg.missingDataPolicy = "error";
+    atmosphereCfg.ionosphereShellHeight_m = 350000.0;
+
+    atmosphereCfg.model = struct( ...
+        'enableTroposphere', false, ...
+        'enableIonosphere', false, ...
+        'troposphereProviderType', "era5", ...
+        'era5File', era5File, ...
+        'ionosphereProviderType', "none");
+
+    atmosphere = Atmosphere(atmosphereCfg, constants, "model");
+
+    assert(atmosphere.troposphereProviderType == "era5", ...
+        'Atmosphere should store troposphereProviderType era5.');
+
+    assert(isa(atmosphere.troposphereProvider, ...
+            'Era5TroposphereProfileProvider'), ...
+        'Atmosphere should own an ERA5 provider when an ERA5 source is configured.');
+
+    assert(~atmosphere.troposphereProvider.isAvailable(), ...
+        'Atmosphere ERA5 skeleton provider should remain unavailable until parsing is implemented.');
+
+    disp("PASS: ERA5 troposphere provider skeleton is configured and baseline-safe.");
 end
 
 function runIonosphereProviderInterfaceRegression()
