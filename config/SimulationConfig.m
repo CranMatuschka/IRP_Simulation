@@ -146,6 +146,43 @@ scenario.atmosphere.ionosphereShellHeight_m = 350000.0;
 % by the shell mapping factor. missingDataPolicy="error" is recommended for
 % production runs; "invalid" is useful for deterministic regression tests.
 
+%
+% Troposphere profile-provider example:
+%
+%   scenario.atmosphere.truth.enableTroposphere = true;
+%   scenario.atmosphere.truth.troposphereModel = "profile";
+%   scenario.atmosphere.truth.troposphereProviderType = "profile";
+%   scenario.atmosphere.truth.troposphereMappingFunction = "simple";
+%   scenario.atmosphere.truth.troposphereProfile = struct( ...
+%       'datetimeUtc', datetime(2026,5,27,23,0,0,'TimeZone','UTC'), ...
+%       'pressure_hPa', 1013.25, ...
+%       'temperature_K', 293.15, ...
+%       'relativeHumidity_fraction', 0.50);
+%
+%   scenario.atmosphere.model = scenario.atmosphere.truth;
+%
+% The profile provider is deterministic and in-memory. It is intended for
+% regression tests, controlled truth/model mismatch studies, and as the
+% internal representation that external weather providers can feed.
+%
+% ERA5 surface-meteorology troposphere example:
+%
+%   scenario.atmosphere.truth.enableTroposphere = true;
+%   scenario.atmosphere.truth.troposphereModel = "profile";
+%   scenario.atmosphere.truth.troposphereProviderType = "era5";
+%   scenario.atmosphere.truth.troposphereMappingFunction = "simple";
+%   scenario.atmosphere.truth.era5File = "era5_surface.nc";
+%
+%   scenario.atmosphere.model = scenario.atmosphere.truth;
+%
+% era5File may be an absolute path or a path relative to
+% scenario.atmosphere.dataRoot. The implemented ERA5 path currently reads
+% surface meteorology from NetCDF, not full vertical ray tracing. Supported
+% variables are latitude/longitude/time, surface pressure sp [Pa],
+% temperature t2m [K], and one humidity source such as d2m dewpoint [K],
+% relative humidity, or water vapour pressure. Atmosphere then computes
+% Saastamoinen-style ZHD/ZWD and applies the configured mapping function.
+
 scenario.atmosphere.truth = struct( ...
     'enableTroposphere', false, ...
     'enableIonosphere', false, ...
