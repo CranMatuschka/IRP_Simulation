@@ -12,7 +12,7 @@
 
 %   sim = test_ReverseGnss_5Towers_NReceivers_SimConfigPDF();
 %   sim = test_ReverseGnss_5Towers_NReceivers_SimConfigPDF(8);
-REPORT_VERSION = sprintf('1.11');
+REPORT_VERSION = sprintf('1.12');
 N_RECEIVERS = 4;
 assert(N_RECEIVERS >= 1 && floor(N_RECEIVERS) == N_RECEIVERS, ...
     'N_RECEIVERS must be a positive integer.');
@@ -146,6 +146,7 @@ assert(contains(reportText, 'Atmosphere Propagation Summary'), ...
 validateRetainedReportAtmosphereDiagnostics(sim);
 runIonosphereProviderInterfaceRegression();
 runGriddedIonosphereProviderInterpolationRegression();
+runIonexParserProviderRegression();
 runIonospherePiercePointGeometryRegression();
 runAtmosphereConstantDiagnosticRegression();
 runAtmosphereResidualAndCovarianceRegression();
@@ -487,6 +488,115 @@ function runGriddedIonosphereProviderInterpolationRegression()
         'Atmosphere should own a gridded ionosphere provider.');
 
     disp("PASS: gridded ionosphere provider interpolation is valid.");
+end
+
+function runIonexParserProviderRegression()
+    ProjectPathManager.addProjectPaths();
+
+    ionexText = [
+        "     0                                                      EXPONENT"
+        "                                                            END OF HEADER"
+        "     1                                                      START OF TEC MAP"
+        "  2026     5    27    23     0     0                       EPOCH OF CURRENT MAP"
+        "   -10.0     0.0    20.0    20.0   350.0                   LAT/LON1/LON2/DLON/H"
+        "     90   130"
+        "    10.0     0.0    20.0    20.0   350.0                   LAT/LON1/LON2/DLON/H"
+        "    110   150"
+        "                                                            END OF TEC MAP"
+        "     2                                                      START OF TEC MAP"
+        "  2026     5    28     0     0     0                       EPOCH OF CURRENT MAP"
+        "   -10.0     0.0    20.0    20.0   350.0                   LAT/LON1/LON2/DLON/H"
+        "    100   140"
+        "    10.0     0.0    20.0    20.0   350.0                   LAT/LON1/LON2/DLON/H"
+        "    120   160"
+        "                                                            END OF TEC MAP"
+        ];
+
+    ionexFile = fullfile(tempdir, ...
+        sprintf('reverse_gnss_test_%s.ionex', char(java.util.UUID.randomUUID)));
+
+    fid = fopen(ionexFile, 'w');
+
+    assert(fid > 0, ...
+        'Could not create temporary IONEX file.');
+
+    cleanup = onCleanup(@() deleteTemporaryFile(ionexFile));
+
+    for k = 1:numel(ionexText)
+        fprintf(fid, '%s\n', ionexText(k));
+    end
+
+    fclose(fid);
+
+    mapCfg = IonexParser.parseFile(ionexFile);
+
+    assert(isfield(mapCfg, 'datetimeUtc'));
+    assert(isfield(mapCfg, 'latitude_deg'));
+    assert(isfield(mapCfg, 'longitude_deg'));
+    assert(isfield(mapCfg, 'vtec_TECU'));
+
+    assert(numel(mapCfg.datetimeUtc) == 2);
+    assert(isequal(mapCfg.latitude_deg(:), [-10.0; 10.0]));
+    assert(isequal(mapCfg.longitude_deg(:), [0.0; 20.0]));
+
+    providerCfg = struct();
+    providerCfg.ionexFile = ionexFile;
+
+    provider = IonosphereMapProviderFactory.create( ...
+        "ionex", ...
+        "", ...
+        providerCfg, ...
+        "model");
+
+    assert(isa(provider, 'IonexIonosphereMapProvider'), ...
+        'IONEX source should construct IonexIonosphereMapProvider.');
+
+    assert(provider.isAvailable(), ...
+        'IONEX provider should be available.');
+
+    queryTime = datetime(2026, 5, 27, 23, 30, 0, 'TimeZone', 'UTC');
+
+    result = provider.verticalTecAt(queryTime, 0.0, 10.0);
+
+    expectedVtec_TECU = 125.0;
+
+    assert(result.valid, ...
+        'IONEX provider interpolation should be valid.');
+
+    assert(abs(result.vtec_TECU - expectedVtec_TECU) < 1e-12, ...
+        'IONEX provider VTEC interpolation is incorrect.');
+
+    assert(result.providerType == "ionex", ...
+        'IONEX provider result should identify providerType ionex.');
+
+    assert(string(result.source) == string(ionexFile), ...
+        'IONEX provider result should report the source file.');
+
+    constants = struct( ...
+        'speedOfLight_mps', 299792458.0, ...
+        'earthRadius_m', 6378137.0);
+
+    atmosphereCfg = struct();
+    atmosphereCfg.dataRoot = "";
+    atmosphereCfg.missingDataPolicy = "error";
+    atmosphereCfg.ionosphereShellHeight_m = 350000.0;
+
+    atmosphereCfg.model = struct( ...
+        'enableTroposphere', false, ...
+        'enableIonosphere', false, ...
+        'ionosphereProviderType', "ionex", ...
+        'ionexFile', ionexFile);
+
+    atmosphere = Atmosphere(atmosphereCfg, constants, "model");
+
+    assert(atmosphere.ionosphereProviderType == "ionex", ...
+        'Atmosphere should accept ionex provider type.');
+
+    assert(isa(atmosphere.ionosphereProvider, ...
+            'IonexIonosphereMapProvider'), ...
+        'Atmosphere should own an IONEX ionosphere provider when a source file is configured.');
+
+    disp("PASS: IONEX parser and provider interpolation are valid.");
 end
 
 function runIonospherePiercePointGeometryRegression()
@@ -1089,6 +1199,12 @@ function runAtmosphereGradientFiniteDifferenceRegression()
         'Atmosphere analytic gradient does not match finite differences.');
 
     disp("PASS: atmosphere analytic gradient matches finite differences.");
+end
+
+function deleteTemporaryFile(filePath)
+    if exist(filePath, 'file') == 2
+        delete(filePath);
+    end
 end
 
 function simConfigOverride = makeShortRegressionOverride()
