@@ -12,7 +12,7 @@
 
 %   sim = test_ReverseGnss_5Towers_NReceivers_SimConfigPDF();
 %   sim = test_ReverseGnss_5Towers_NReceivers_SimConfigPDF(8);
-REPORT_VERSION = sprintf('1.5');
+REPORT_VERSION = sprintf('1.6');
 N_RECEIVERS = 4;
 assert(N_RECEIVERS >= 1 && floor(N_RECEIVERS) == N_RECEIVERS, ...
     'N_RECEIVERS must be a positive integer.');
@@ -146,6 +146,7 @@ assert(contains(reportText, 'Atmosphere Propagation Summary'), ...
 validateRetainedReportAtmosphereDiagnostics(sim);
 runAtmosphereConstantDiagnosticRegression();
 runAtmosphereResidualAndCovarianceRegression();
+runAtmosphereComponentResidualDecompositionRegression();
 runAtmosphereGradientFiniteDifferenceRegression();
 
 fprintf('\nPASS: test finished and PDF was created:\n%s\n', pdfFile);
@@ -343,6 +344,141 @@ function runAtmosphereConstantDiagnosticRegression()
     assert(all(isfinite(sim.history.postfit_innovation_rms_m)));
 
     disp("PASS: constant truth/model atmosphere diagnostics equal 5 m.");
+end
+
+function runAtmosphereComponentResidualDecompositionRegression()
+    simConfigOverride = makeShortRegressionOverride();
+
+    truthCfg = struct( ...
+        'enableTroposphere', true, ...
+        'enableIonosphere', true, ...
+        'troposphereModel', "constant", ...
+        'ionosphereModel', "constant", ...
+        'constantTroposphereDelay_m', 0.0, ...
+        'constantIonosphereDelay_m', 0.0, ...
+        'residualTroposphereSigma_m', 0.8, ...
+        'residualIonosphereSigma_m', 0.6);
+
+    modelCfg = truthCfg;
+
+    simConfigOverride.scenarios.reverseGnssClockNavigationScenario.atmosphere.truth = truthCfg;
+    simConfigOverride.scenarios.reverseGnssClockNavigationScenario.atmosphere.model = modelCfg;
+
+    runtimeOptions = struct();
+    runtimeOptions.entryPointName = "AtmosphereComponentResidualDecompositionRegression";
+    runtimeOptions.simConfigOverride = simConfigOverride;
+
+    sim = ReverseGnssSimulation(runtimeOptions);
+    sim.configure();
+    sim.run();
+
+    visible = sim.history.visibility_mask_by_receiver_tower(:, :, 1);
+
+    assert(any(visible(:)), ...
+        'Component residual regression produced no visible measurements.');
+
+    assert(isfield(sim.history, 'atmosphere_truth_troposphere_residual_by_tower_m'));
+    assert(isfield(sim.history, 'atmosphere_truth_ionosphere_residual_by_tower_m'));
+    assert(isfield(sim.history, 'atmosphere_truth_troposphere_total_by_receiver_tower_m'));
+    assert(isfield(sim.history, 'atmosphere_truth_ionosphere_total_by_receiver_tower_m'));
+
+    totalResidualByTower_m = ...
+        sim.history.atmosphere_truth_residual_by_tower_m(:, 1);
+
+    troposphereResidualByTower_m = ...
+        sim.history.atmosphere_truth_troposphere_residual_by_tower_m(:, 1);
+
+    ionosphereResidualByTower_m = ...
+        sim.history.atmosphere_truth_ionosphere_residual_by_tower_m(:, 1);
+
+    assert(max(abs(totalResidualByTower_m - ...
+        troposphereResidualByTower_m - ...
+        ionosphereResidualByTower_m)) < 1e-12, ...
+        'Total atmosphere residual must equal troposphere plus ionosphere residuals.');
+
+    truthTroposphereDeterministic_m = ...
+        sim.history.atmosphere_truth_troposphere_by_receiver_tower_m(:, :, 1);
+
+    truthIonosphereDeterministic_m = ...
+        sim.history.atmosphere_truth_ionosphere_by_receiver_tower_m(:, :, 1);
+
+    truthTotalDeterministic_m = ...
+        sim.history.atmosphere_truth_delay_by_receiver_tower_m(:, :, 1);
+
+    truthTroposphereTotal_m = ...
+        sim.history.atmosphere_truth_troposphere_total_by_receiver_tower_m(:, :, 1);
+
+    truthIonosphereTotal_m = ...
+        sim.history.atmosphere_truth_ionosphere_total_by_receiver_tower_m(:, :, 1);
+
+    truthTotal_m = ...
+        sim.history.atmosphere_truth_total_by_receiver_tower_m(:, :, 1);
+
+    expectedTroposphereTotal_m = ...
+        truthTroposphereDeterministic_m + ...
+        repmat(troposphereResidualByTower_m(:).', sim.numReceivers, 1);
+
+    expectedIonosphereTotal_m = ...
+        truthIonosphereDeterministic_m + ...
+        repmat(ionosphereResidualByTower_m(:).', sim.numReceivers, 1);
+
+    assert(max(abs(truthTroposphereTotal_m(visible) - ...
+        expectedTroposphereTotal_m(visible))) < 1e-12, ...
+        'Truth troposphere total must equal deterministic troposphere plus troposphere residual.');
+
+    assert(max(abs(truthIonosphereTotal_m(visible) - ...
+        expectedIonosphereTotal_m(visible))) < 1e-12, ...
+        'Truth ionosphere total must equal deterministic ionosphere plus ionosphere residual.');
+
+    assert(max(abs(truthTotal_m(visible) - ...
+        truthTroposphereTotal_m(visible) - ...
+        truthIonosphereTotal_m(visible))) < 1e-12, ...
+        'Truth total atmosphere must equal troposphere total plus ionosphere total.');
+
+    assert(max(abs(truthTotalDeterministic_m(visible) - ...
+        truthTroposphereDeterministic_m(visible) - ...
+        truthIonosphereDeterministic_m(visible))) < 1e-12, ...
+        'Deterministic truth atmosphere must equal deterministic troposphere plus ionosphere.');
+
+    results = ResultBuilder.fromSimulation(sim);
+    reportData = ReportDataBuilder.fromSimulation(sim);
+
+    assert(isfield(results, 'atmosphere_truth_troposphere_residual_by_tower_m'));
+    assert(isfield(results, 'atmosphere_truth_ionosphere_residual_by_tower_m'));
+    assert(isfield(results, 'atmosphere_truth_troposphere_total_by_receiver_tower_m'));
+    assert(isfield(results, 'atmosphere_truth_ionosphere_total_by_receiver_tower_m'));
+
+    assert(isfield(reportData, 'atmosphere_truth_troposphere_residual_by_tower_m'));
+    assert(isfield(reportData, 'atmosphere_truth_ionosphere_residual_by_tower_m'));
+    assert(isfield(reportData, 'atmosphere_truth_troposphere_total_by_receiver_tower_m'));
+    assert(isfield(reportData, 'atmosphere_truth_ionosphere_total_by_receiver_tower_m'));
+
+    componentResidualSum_m = ...
+        reportData.atmosphere_troposphere_residual_by_receiver_tower_m + ...
+        reportData.atmosphere_ionosphere_residual_by_receiver_tower_m;
+
+    totalAtmosphereResidual_m = ...
+        reportData.atmosphere_residual_by_receiver_tower_m;
+
+    assert(max(abs(componentResidualSum_m(visible) - ...
+        totalAtmosphereResidual_m(visible))) < 1e-12, ...
+        'Report atmosphere residual components must sum to total atmosphere residual.');
+
+    measurementTowerIndex = [1; 2; 1; 2];
+
+    R = sim.measurementModel.measurementCovariance( ...
+        measurementTowerIndex, ...
+        true, ...
+        0.0);
+
+    expectedAtmosphereVariance_m2 = 0.8^2 + 0.6^2;
+
+    assert(abs(R(1, 3) - expectedAtmosphereVariance_m2) < 1e-12);
+    assert(abs(R(2, 4) - expectedAtmosphereVariance_m2) < 1e-12);
+    assert(abs(R(1, 2)) < 1e-12);
+    assert(abs(R(1, 4)) < 1e-12);
+
+    disp("PASS: atmosphere residual decomposition is internally consistent.");
 end
 
 function runAtmosphereResidualAndCovarianceRegression()
