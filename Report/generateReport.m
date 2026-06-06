@@ -2530,7 +2530,7 @@ function text_value = tableCellToText(value)
 end
 
 function report = beginPlotTable(report)
-    report = appendLine(report, "\begin{longtable}{p{0.47\textwidth}p{0.47\textwidth}}");
+    report = appendLine(report, "\begin{longtable}{@{}p{0.46\textwidth}p{0.48\textwidth}@{}}");
     report = appendLine(report, "\toprule");
     report = appendLine(report, "\textbf{Plot} & \textbf{Description and statistical approach}\\");
     report = appendLine(report, "\midrule");
@@ -2545,17 +2545,30 @@ function report = appendReportRow(report, is_enabled, plot_path, title_text, des
     if is_enabled
         if strlength(string(plot_path)) > 0
             plot_ref = relativeLatexPath(plot_path);
-            left_cell = sprintf("\\vspace{0pt}\\includegraphics[width=\\linewidth]{%s}", plot_ref);
+            left_content = sprintf("\\includegraphics[width=\\linewidth]{%s}", plot_ref);
         else
-            left_cell = "\vspace{0pt}\textit{No plot generated for this enabled configuration item.}";
+            left_content = "\textit{No plot generated for this enabled configuration item.}";
         end
-        right_cell = sprintf("\\vspace{0pt}\\textbf{%s}\\par\\vspace{3pt}%s", latexEscape(title_text), latexEscape(description_text));
     else
-        left_cell = "\vspace{0pt}\textit{No plot generated.}";
-        right_cell = sprintf("\\vspace{0pt}\\textbf{%s}\\par\\vspace{3pt}%s", latexEscape(title_text), latexEscape(description_text));
+        left_content = "\textit{No plot generated.}";
     end
+
+    right_content = sprintf( ...
+        "\\textbf{%s}\\par\\vspace{3pt}%s", ...
+        latexEscape(title_text), ...
+        latexEscape(description_text));
+
+    left_cell = topAlignedTableCell(left_content);
+    right_cell = topAlignedTableCell(right_content);
+
     report = appendLine(report, sprintf("%s & %s\\\\", left_cell, right_cell));
     report = appendLine(report, "\midrule");
+end
+
+function cell_text = topAlignedTableCell(content)
+    cell_text = sprintf( ...
+        "\\begin{minipage}[t]{\\linewidth}\\vspace{0pt}%s\\end{minipage}", ...
+        char(string(content)));
 end
 
 function report = appendStatusRow(report, component_name, is_enabled)
