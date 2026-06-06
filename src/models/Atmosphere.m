@@ -274,8 +274,11 @@ classdef Atmosphere < handle
                 obj.ionosphereShellHeight_m, ...
                 elevation_deg);
 
-            delay.troposphere_m = obj.troposphereDelayMeters( ...
-                groundNode, elevation_deg);
+            [delay.troposphere_m, delay.metadata.troposphere] = ...
+                obj.troposphereDelayMeters( ...
+                groundNode, ...
+                elevation_deg, ...
+                datetimeUtc);
 
             [delay.ionosphere_m, delay.metadata.ionosphereMap] = ...
                 obj.ionosphereDelayMeters( ...
@@ -449,17 +452,31 @@ classdef Atmosphere < handle
             gradientReceiverEci = gradientReceiverEci(:);
         end
         
-        function delay_m = troposphereDelayMeters(obj, groundNode, elevation_deg)
+        function [delay_m, tropoResult] = troposphereDelayMeters( ...
+                obj, groundNode, elevation_deg, datetimeUtc)
+
+            tropoResult = obj.emptyTroposphereResult( ...
+                datetimeUtc, groundNode);
+
             switch obj.troposphereModel
                 case "disabled"
                     delay_m = 0.0;
+                    tropoResult.valid = true;
+                    tropoResult.total_m = 0.0;
+                    tropoResult.message = "Troposphere model is disabled.";
 
                 case "constant"
                     delay_m = obj.constantTroposphereDelay_m;
+                    tropoResult.valid = true;
+                    tropoResult.total_m = delay_m;
+                    tropoResult.message = "Constant troposphere delay model.";
 
                 case "saastamoinen"
-                    delay_m = obj.saastamoinenDelayMeters( ...
-                        groundNode, elevation_deg);
+                    [delay_m, tropoResult] = ...
+                        obj.saastamoinenDelayWithMetadataMeters( ...
+                        groundNode, ...
+                        elevation_deg, ...
+                        datetimeUtc);
 
                 case "era5profile"
                     error('Atmosphere:TroposphereModelNotImplemented', ...
@@ -732,6 +749,16 @@ classdef Atmosphere < handle
         function delay_m = saastamoinenDelayMeters( ...
                 obj, groundNode, elevation_deg)
 
+            [delay_m, ~] = obj.saastamoinenDelayWithMetadataMeters( ...
+                groundNode, ...
+                elevation_deg, ...
+                NaT(1, 1, 'TimeZone', 'UTC'));
+        end
+
+        function [delay_m, tropoResult] = ...
+                saastamoinenDelayWithMetadataMeters( ...
+                obj, groundNode, elevation_deg, datetimeUtc)
+
             latitude_rad = deg2rad(double(groundNode.lat_deg));
             height_km = double(groundNode.alt_m) / 1000.0;
 
@@ -761,9 +788,35 @@ classdef Atmosphere < handle
 
             mappingFactor = obj.troposphereMappingFactor(elevation_deg);
 
+            slantHydrostaticDelay_m = ...
+                zenithHydrostaticDelay_m * mappingFactor;
+
+            slantWetDelay_m = ...
+                zenithWetDelay_m * mappingFactor;
+
             delay_m = ...
-                (zenithHydrostaticDelay_m + zenithWetDelay_m) * ...
-                mappingFactor;
+                slantHydrostaticDelay_m + slantWetDelay_m;
+
+            tropoResult = obj.emptyTroposphereResult( ...
+                datetimeUtc, groundNode);
+
+            tropoResult.valid = true;
+            tropoResult.message = "Saastamoinen hydrostatic plus wet delay.";
+
+            tropoResult.pressure_hPa = pressure_hPa;
+            tropoResult.temperature_K = temperature_K;
+            tropoResult.relativeHumidity_fraction = obj.relativeHumidity_fraction;
+            tropoResult.waterVaporPressure_hPa = waterVaporPressure_hPa;
+
+            tropoResult.zenithHydrostaticDelay_m = zenithHydrostaticDelay_m;
+            tropoResult.zenithWetDelay_m = zenithWetDelay_m;
+
+            tropoResult.mappingHydrostatic = mappingFactor;
+            tropoResult.mappingWet = mappingFactor;
+
+            tropoResult.slantHydrostaticDelay_m = slantHydrostaticDelay_m;
+            tropoResult.slantWetDelay_m = slantWetDelay_m;
+            tropoResult.total_m = delay_m;
         end
 
         function delay_m = thinShellVtecDelayMeters( ...
@@ -810,6 +863,43 @@ classdef Atmosphere < handle
                 relativeHumidity_fraction * saturationVaporPressure_hPa;
         end
 
+        function tropoResult = emptyTroposphereResult( ...
+                obj, datetimeUtc, groundNode)
+
+            tropoResult = struct();
+
+            tropoResult.valid = false;
+            tropoResult.message = "";
+
+            tropoResult.datetimeUtc = datetimeUtc;
+
+            tropoResult.latitude_deg = double(groundNode.lat_deg);
+            tropoResult.longitude_deg = double(groundNode.lon_deg);
+            tropoResult.height_m = double(groundNode.alt_m);
+
+            tropoResult.model = obj.troposphereModel;
+            tropoResult.providerType = obj.troposphereProviderType;
+            tropoResult.role = obj.role;
+            tropoResult.source = "";
+
+            tropoResult.pressure_hPa = NaN;
+            tropoResult.temperature_K = NaN;
+            tropoResult.relativeHumidity_fraction = NaN;
+            tropoResult.waterVaporPressure_hPa = NaN;
+
+            tropoResult.zenithHydrostaticDelay_m = NaN;
+            tropoResult.zenithWetDelay_m = NaN;
+
+            tropoResult.mappingHydrostatic = NaN;
+            tropoResult.mappingWet = NaN;
+
+            tropoResult.slantHydrostaticDelay_m = NaN;
+            tropoResult.slantWetDelay_m = NaN;
+            tropoResult.total_m = NaN;
+
+            tropoResult.metadata = struct();
+        end
+        
         function delay = emptyDelayResult( ...
                 obj, groundNode, elevation_deg, azimuth_deg, ...
                 jd, datetimeUtc, frequency_Hz)
@@ -822,6 +912,8 @@ classdef Atmosphere < handle
 
             metadata.troposphereModel = obj.troposphereModel;
             metadata.troposphereProviderType = obj.troposphereProviderType;
+            metadata.troposphere = obj.emptyTroposphereResult( ...
+                datetimeUtc, groundNode);
             metadata.ionosphereModel = obj.ionosphereModel;
             metadata.ionosphereProviderType = obj.ionosphereProviderType;
 
