@@ -12,7 +12,7 @@
 
 %   sim = test_ReverseGnss_5Towers_NReceivers_SimConfigPDF();
 %   sim = test_ReverseGnss_5Towers_NReceivers_SimConfigPDF(8);
-REPORT_VERSION = sprintf('1.3');
+REPORT_VERSION = sprintf('1.4');
 N_RECEIVERS = 4;
 assert(N_RECEIVERS >= 1 && floor(N_RECEIVERS) == N_RECEIVERS, ...
     'N_RECEIVERS must be a positive integer.');
@@ -112,6 +112,11 @@ assert(exist(pdfFile, 'file') == 2, ...
     ['Report PDF was not created: %s\n', ...
      'Check that pdflatex is installed and visible on the MATLAB system path.'], pdfFile);
 
+validateDefaultAtmosphereDiagnostics(sim);
+runAtmosphereConstantDiagnosticRegression();
+runAtmosphereResidualAndCovarianceRegression();
+runAtmosphereGradientFiniteDifferenceRegression();
+
 fprintf('\nPASS: test finished and PDF was created:\n%s\n', pdfFile);
 
 
@@ -157,4 +162,299 @@ function receivers = makeReceiverConfigsForTest(nReceivers, baseline_m, sigma_m)
         receivers(rx).measurementSigma_m = double(sigma_m);
         receivers(rx).pseudorangeSigma_m = double(sigma_m);
     end
+end
+
+function validateDefaultAtmosphereDiagnostics(sim)
+    assert(isfield(sim.history, 'atmosphere_truth_delay_by_receiver_tower_m'));
+    assert(isfield(sim.history, 'atmosphere_truth_residual_by_tower_m'));
+    assert(isfield(sim.history, 'atmosphere_truth_total_by_receiver_tower_m'));
+    assert(isfield(sim.history, 'atmosphere_model_delay_by_receiver_tower_m'));
+
+    visible = sim.history.visibility_mask_by_receiver_tower;
+
+    assert(any(visible(:)), ...
+        'Default regression produced no visible pseudorange measurements.');
+
+    truthDelay = sim.history.atmosphere_truth_delay_by_receiver_tower_m;
+    truthTotal = sim.history.atmosphere_truth_total_by_receiver_tower_m;
+    modelDelay = sim.history.atmosphere_model_delay_by_receiver_tower_m;
+    truthResidualByTower = sim.history.atmosphere_truth_residual_by_tower_m;
+
+    assert(all(abs(truthDelay(visible)) < 1e-12), ...
+        'Default truth atmosphere delay should be zero.');
+
+    assert(all(abs(truthTotal(visible)) < 1e-12), ...
+        'Default truth total atmosphere contribution should be zero.');
+
+    assert(all(abs(modelDelay(visible)) < 1e-12), ...
+        'Default estimator atmosphere correction should be zero.');
+
+    assert(all(abs(truthResidualByTower(:)) < 1e-12), ...
+        'Default truth atmospheric residual should be zero.');
+
+    results = ResultBuilder.fromSimulation(sim);
+
+    assert(isfield(results, 'atmosphere_truth_delay_by_receiver_tower_m'));
+    assert(isfield(results, 'atmosphere_truth_residual_by_tower_m'));
+    assert(isfield(results, 'atmosphere_truth_total_by_receiver_tower_m'));
+    assert(isfield(results, 'atmosphere_model_delay_by_receiver_tower_m'));
+
+    disp("PASS: default atmosphere diagnostics are zero and exported.");
+end
+
+function runAtmosphereConstantDiagnosticRegression()
+    simConfigOverride = makeShortRegressionOverride();
+
+    truthCfg = struct( ...
+        'enableTroposphere', true, ...
+        'enableIonosphere', true, ...
+        'troposphereModel', "constant", ...
+        'ionosphereModel', "constant", ...
+        'constantTroposphereDelay_m', 2.0, ...
+        'constantIonosphereDelay_m', 3.0, ...
+        'residualTroposphereSigma_m', 0.0, ...
+        'residualIonosphereSigma_m', 0.0);
+
+    modelCfg = truthCfg;
+
+    simConfigOverride.scenarios.reverseGnssClockNavigationScenario.atmosphere.truth = truthCfg;
+    simConfigOverride.scenarios.reverseGnssClockNavigationScenario.atmosphere.model = modelCfg;
+
+    runtimeOptions = struct();
+    runtimeOptions.entryPointName = "AtmosphereConstantDiagnosticRegression";
+    runtimeOptions.simConfigOverride = simConfigOverride;
+
+    sim = ReverseGnssSimulation(runtimeOptions);
+    sim.configure();
+    sim.run();
+
+    visible = sim.history.visibility_mask_by_receiver_tower(:, :, 1);
+
+    truthDelay = sim.history.atmosphere_truth_delay_by_receiver_tower_m(:, :, 1);
+    truthTotal = sim.history.atmosphere_truth_total_by_receiver_tower_m(:, :, 1);
+    modelDelay = sim.history.atmosphere_model_delay_by_receiver_tower_m(:, :, 1);
+
+    assert(any(visible(:)), ...
+        'Constant atmosphere regression produced no visible measurements.');
+
+    assert(all(abs(truthDelay(visible) - 5.0) < 1e-12), ...
+        'Truth atmosphere diagnostic should equal 5 m.');
+
+    assert(all(abs(truthTotal(visible) - 5.0) < 1e-12), ...
+        'Truth atmosphere total should equal 5 m with zero residual.');
+
+    assert(all(abs(modelDelay(visible) - 5.0) < 1e-12), ...
+        'Estimator atmosphere diagnostic should equal 5 m.');
+
+    assert(all(isfinite(sim.history.innovation_rms_m)));
+    assert(all(isfinite(sim.history.postfit_innovation_rms_m)));
+
+    disp("PASS: constant truth/model atmosphere diagnostics equal 5 m.");
+end
+
+function runAtmosphereResidualAndCovarianceRegression()
+    simConfigOverride = makeShortRegressionOverride();
+
+    truthCfg = struct( ...
+        'enableTroposphere', true, ...
+        'enableIonosphere', false, ...
+        'troposphereModel', "constant", ...
+        'ionosphereModel', "disabled", ...
+        'constantTroposphereDelay_m', 0.0, ...
+        'constantIonosphereDelay_m', 0.0, ...
+        'residualTroposphereSigma_m', 1.0, ...
+        'residualIonosphereSigma_m', 0.0);
+
+    modelCfg = struct( ...
+        'enableTroposphere', true, ...
+        'enableIonosphere', true, ...
+        'troposphereModel', "constant", ...
+        'ionosphereModel', "constant", ...
+        'constantTroposphereDelay_m', 0.0, ...
+        'constantIonosphereDelay_m', 0.0, ...
+        'residualTroposphereSigma_m', 0.20, ...
+        'residualIonosphereSigma_m', 0.30);
+
+    simConfigOverride.scenarios.reverseGnssClockNavigationScenario.atmosphere.truth = truthCfg;
+    simConfigOverride.scenarios.reverseGnssClockNavigationScenario.atmosphere.model = modelCfg;
+
+    runtimeOptions = struct();
+    runtimeOptions.entryPointName = "AtmosphereResidualAndCovarianceRegression";
+    runtimeOptions.simConfigOverride = simConfigOverride;
+
+    sim = ReverseGnssSimulation(runtimeOptions);
+    sim.configure();
+    sim.run();
+
+    visible = sim.history.visibility_mask_by_receiver_tower(:, :, 1);
+    truthDelay = sim.history.atmosphere_truth_delay_by_receiver_tower_m(:, :, 1);
+    truthTotal = sim.history.atmosphere_truth_total_by_receiver_tower_m(:, :, 1);
+    residualByTower = sim.history.atmosphere_truth_residual_by_tower_m(:, 1);
+
+    commonTowerFound = false;
+
+    for twr = 1:sim.numTowers
+        receiverMask = visible(:, twr);
+
+        if nnz(receiverMask) >= 2
+            receiverResiduals = truthTotal(receiverMask, twr) - truthDelay(receiverMask, twr);
+
+            assert(max(receiverResiduals) - min(receiverResiduals) < 1e-10, ...
+                'Truth atmospheric residual must be common across receivers for one tower.');
+
+            assert(abs(receiverResiduals(1) - residualByTower(twr)) < 1e-10, ...
+                'Recorded tower atmospheric residual does not match receiver/tower total.');
+
+            commonTowerFound = true;
+        end
+    end
+
+    assert(commonTowerFound, ...
+        'No tower had at least two visible receiver measurements.');
+
+    assert(abs(sim.truthAtmosphere.residualCodeSigma_m() - 1.0) < 1e-12);
+    assert(abs(sim.modelAtmosphere.residualCodeVariance_m2() - 0.13) < 1e-12);
+
+    measurementTowerIndex = [1; 2; 1; 2];
+
+    R = sim.measurementModel.measurementCovariance( ...
+        measurementTowerIndex, ...
+        true, ...
+        0.0);
+
+    atmosphereVariance_m2 = 0.20^2 + 0.30^2;
+
+    assert(abs(R(1, 3) - atmosphereVariance_m2) < 1e-12);
+    assert(abs(R(2, 4) - atmosphereVariance_m2) < 1e-12);
+    assert(abs(R(1, 2)) < 1e-12);
+    assert(abs(R(1, 4)) < 1e-12);
+    assert(norm(R - R.', inf) < 1e-12);
+    assert(min(eig(0.5 * (R + R.'))) > 0.0);
+
+    disp("PASS: atmospheric residuals are tower-common and covariance is consistent.");
+end
+
+function runAtmosphereGradientFiniteDifferenceRegression()
+    datetimeUtc = datetime(2026, 5, 27, 23, 0, 0, 'TimeZone', 'UTC');
+    jd = Clock.julianDateFromDatetime(datetimeUtc);
+
+    constants = struct( ...
+        'speedOfLight_mps', 299792458.0, ...
+        'earthRadius_m', 6378137.0);
+
+    atmosphereCfg = struct();
+    atmosphereCfg.dataRoot = fullfile("data", "atmosphere");
+    atmosphereCfg.missingDataPolicy = "error";
+    atmosphereCfg.ionosphereShellHeight_m = 350000.0;
+
+    atmosphereCfg.model = struct( ...
+        'enableTroposphere', true, ...
+        'enableIonosphere', true, ...
+        'troposphereModel', "saastamoinen", ...
+        'ionosphereModel', "thinshellvtec", ...
+        'constantTroposphereDelay_m', 0.0, ...
+        'constantIonosphereDelay_m', 0.0, ...
+        'surfacePressure_hPa', 1013.25, ...
+        'surfaceTemperature_K', 293.15, ...
+        'relativeHumidity_fraction', 0.50, ...
+        'minimumMappingElevation_deg', 3.0, ...
+        'vtec_TECU', 10.0, ...
+        'residualTroposphereSigma_m', 0.0, ...
+        'residualIonosphereSigma_m', 0.0);
+
+    atmosphere = Atmosphere(atmosphereCfg, constants, "model");
+
+    towerCfg = struct( ...
+        'name', 'GradientTower', ...
+        'lat_deg', 28.3, ...
+        'lon_deg', -16.5, ...
+        'alt_m', 0.0, ...
+        'txSignalDelay_m', 0.0);
+
+    tower = GroundNode(towerCfg);
+
+    elevation_deg = 30.0;
+    azimuth_deg = 120.0;
+    slantRange_m = 4.0e7;
+
+    uEnu = [ ...
+        cosd(elevation_deg) * sind(azimuth_deg); ...
+        cosd(elevation_deg) * cosd(azimuth_deg); ...
+        sind(elevation_deg)];
+
+    R_enu_ecef = FrameGeometry.ecefToEnuDcm( ...
+        tower.lat_deg, tower.lon_deg);
+
+    uEcef = R_enu_ecef.' * uEnu;
+
+    receiverEcef_m = tower.pos_ECEF_m + slantRange_m * uEcef;
+    receiverEci_m = FrameGeometry.ecefToEciDcm(jd) * receiverEcef_m;
+
+    [delay, analyticGradient] = atmosphere.codeDelayAndGradientMeters( ...
+        tower, receiverEci_m, jd, datetimeUtc, 1575.42e6);
+
+    assert(delay.valid);
+
+    step_m = 100.0;
+    finiteDifferenceGradient = zeros(3, 1);
+
+    for axisIndex = 1:3
+        delta = zeros(3, 1);
+        delta(axisIndex) = step_m;
+
+        delayPlus = atmosphere.codeDelayMeters( ...
+            tower, receiverEci_m + delta, jd, datetimeUtc, 1575.42e6);
+
+        delayMinus = atmosphere.codeDelayMeters( ...
+            tower, receiverEci_m - delta, jd, datetimeUtc, 1575.42e6);
+
+        assert(delayPlus.valid && delayMinus.valid);
+
+        finiteDifferenceGradient(axisIndex) = ...
+            (delayPlus.total_m - delayMinus.total_m) / (2.0 * step_m);
+    end
+
+    gradientError = norm(analyticGradient - finiteDifferenceGradient, inf);
+    gradientScale = max(norm(finiteDifferenceGradient, inf), 1e-12);
+
+    assert(gradientError < 1e-4 * gradientScale, ...
+        'Atmosphere analytic gradient does not match finite differences.');
+
+    disp("PASS: atmosphere analytic gradient matches finite differences.");
+end
+
+function simConfigOverride = makeShortRegressionOverride()
+    simConfigOverride = struct();
+    simConfigOverride.randomSeed = 42;
+    simConfigOverride.enableInteractivePlots = false;
+    simConfigOverride.enableReportGeneration = false;
+
+    simConfigOverride.simulation.dt_s = 1.0;
+    simConfigOverride.simulation.totalTime_h = 0.001;
+
+    scenario = struct();
+    scenario.name = "AtmosphereRegression";
+    scenario.numReceivers = 4;
+    scenario.receiverBaseline_m = 2.0;
+    scenario.receivers = makeReceiverConfigsForTest(4, scenario.receiverBaseline_m, 0.30);
+
+    scenario.report.generatePdf = false;
+    scenario.report.compilePdf = false;
+    scenario.report.interactivePlots = false;
+    scenario.report.enableAllanDeviationValidation = false;
+
+    scenario.measurement.enableMeasurementNoise = false;
+    scenario.measurement.enableNoise = false;
+    scenario.measurement.enableElevationMask = true;
+    scenario.measurement.elevationMask_deg = 5.0;
+    scenario.measurement.enableLightTimeCorrection = false;
+    scenario.measurement.enableSagnacCorrection = false;
+
+    scenario.enableGroundClockErrors = false;
+    scenario.enableGroundClockCorrection = true;
+    scenario.enableGroundClockCorrectionNoise = false;
+    scenario.enableTowerClockEKF = false;
+    scenario.towerClockGaugeMode = "externalTowerCorrections";
+
+    simConfigOverride.scenarios.reverseGnssClockNavigationScenario = scenario;
 end
