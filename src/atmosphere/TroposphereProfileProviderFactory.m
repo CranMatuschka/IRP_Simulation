@@ -1,10 +1,9 @@
 classdef TroposphereProfileProviderFactory
     %TROPOSPHEREPROFILEPROVIDERFACTORY Construct troposphere providers.
     %
-    % Architecture commit only:
     % - "none" returns NullTroposphereProfileProvider.
-    % - "profile" returns NullTroposphereProfileProvider until the
-    %   deterministic in-memory profile provider is implemented.
+    % - "profile" returns DeterministicTroposphereProfileProvider when a
+    %   profile source is configured, otherwise NullTroposphereProfileProvider.
     % - "era5" returns NullTroposphereProfileProvider until ERA5 parsing is
     %   implemented.
 
@@ -34,8 +33,13 @@ classdef TroposphereProfileProviderFactory
                         "none", dataRoot, cfg, role);
 
                 case "profile"
-                    provider = NullTroposphereProfileProvider( ...
-                        "profile", dataRoot, cfg, role);
+                    if TroposphereProfileProviderFactory.hasProfileSource(cfg)
+                        provider = DeterministicTroposphereProfileProvider( ...
+                            dataRoot, cfg, role);
+                    else
+                        provider = NullTroposphereProfileProvider( ...
+                            "profile", dataRoot, cfg, role);
+                    end
 
                 case "era5"
                     provider = NullTroposphereProfileProvider( ...
@@ -45,6 +49,26 @@ classdef TroposphereProfileProviderFactory
                     error('TroposphereProfileProviderFactory:UnknownProviderType', ...
                         'Unsupported troposphere provider type "%s".', ...
                         providerType);
+            end
+        end
+    end
+
+    methods (Static, Access = private)
+        function tf = hasProfileSource(cfg)
+            tf = false;
+
+            if ~isstruct(cfg)
+                return;
+            end
+
+            if isfield(cfg, 'troposphereProfile') && ...
+                    isstruct(cfg.troposphereProfile)
+                tf = true;
+                return;
+            end
+
+            if isfield(cfg, 'profile') && isstruct(cfg.profile)
+                tf = true;
             end
         end
     end

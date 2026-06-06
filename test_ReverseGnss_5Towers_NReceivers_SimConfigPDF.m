@@ -12,7 +12,7 @@
 
 %   sim = test_ReverseGnss_5Towers_NReceivers_SimConfigPDF();
 %   sim = test_ReverseGnss_5Towers_NReceivers_SimConfigPDF(8);
-REPORT_VERSION = sprintf('1.24');
+REPORT_VERSION = sprintf('1.25');
 N_RECEIVERS = 4;
 assert(N_RECEIVERS >= 1 && floor(N_RECEIVERS) == N_RECEIVERS, ...
     'N_RECEIVERS must be a positive integer.');
@@ -149,7 +149,9 @@ validateRetainedReportAtmosphereDiagnostics(sim);
 runTroposphereProviderInterfaceRegression();
 runTroposphereHydrostaticWetComponentRegression();
 runTroposphereMappingFunctionSelectionRegression();
+runDeterministicTroposphereProfileProviderRegression();
 runIonosphereProviderInterfaceRegression();
+
 runGriddedIonosphereProviderInterpolationRegression();
 runIonexParserProviderRegression();
 runIonexParserEdgeCaseRegression();
@@ -723,6 +725,116 @@ function runTroposphereMappingFunctionSelectionRegression()
         'Unsupported troposphere mapping functions must be rejected until implemented.');
 
     disp("PASS: troposphere mapping-function selection is explicit and safe.");
+end
+
+function runDeterministicTroposphereProfileProviderRegression()
+    ProjectPathManager.addProjectPaths();
+
+    epoch0 = datetime(2026, 5, 27, 23, 0, 0, ...
+        'TimeZone', 'UTC');
+
+    epochUtc = [epoch0; epoch0 + hours(1)];
+
+    pressure_hPa = [990.0; 1010.0];
+    temperature_K = [285.0; 295.0];
+    relativeHumidity_fraction = [0.40; 0.60];
+
+    profileCfg = struct( ...
+        'datetimeUtc', epochUtc, ...
+        'pressure_hPa', pressure_hPa, ...
+        'temperature_K', temperature_K, ...
+        'relativeHumidity_fraction', relativeHumidity_fraction, ...
+        'source', "unit-test deterministic profile");
+
+    providerCfg = struct();
+    providerCfg.troposphereProfile = profileCfg;
+
+    provider = TroposphereProfileProviderFactory.create( ...
+        "profile", ...
+        fullfile("data", "atmosphere"), ...
+        providerCfg, ...
+        "model");
+
+    assert(isa(provider, 'DeterministicTroposphereProfileProvider'), ...
+        'Profile source should construct DeterministicTroposphereProfileProvider.');
+
+    assert(provider.isAvailable(), ...
+        'Deterministic troposphere profile provider should be available.');
+
+    queryTime = epoch0 + minutes(30);
+
+    result = provider.profileAt(queryTime, 52.0, 13.0, 100.0);
+
+    expectedPressure_hPa = 1000.0;
+    expectedTemperature_K = 290.0;
+    expectedRelativeHumidity_fraction = 0.50;
+
+    temperature_C = expectedTemperature_K - 273.15;
+
+    saturationVaporPressure_hPa = ...
+        6.1121 * exp( ...
+        (18.678 - temperature_C / 234.5) * ...
+        (temperature_C / (257.14 + temperature_C)));
+
+    expectedWaterVaporPressure_hPa = ...
+        expectedRelativeHumidity_fraction * saturationVaporPressure_hPa;
+
+    assert(result.valid, ...
+        'Interpolated deterministic troposphere profile should be valid.');
+
+    assert(abs(result.pressure_hPa - expectedPressure_hPa) < 1e-12, ...
+        'Interpolated pressure is incorrect.');
+
+    assert(abs(result.temperature_K - expectedTemperature_K) < 1e-12, ...
+        'Interpolated temperature is incorrect.');
+
+    assert(abs(result.relativeHumidity_fraction - ...
+        expectedRelativeHumidity_fraction) < 1e-12, ...
+        'Interpolated relative humidity is incorrect.');
+
+    assert(abs(result.waterVaporPressure_hPa - ...
+        expectedWaterVaporPressure_hPa) < 1e-12, ...
+        'Computed water vapour pressure is incorrect.');
+
+    assert(result.providerType == "profile", ...
+        'Deterministic profile result should report providerType profile.');
+
+    assert(result.metadata.timeIndex0 == 1);
+    assert(result.metadata.timeIndex1 == 2);
+    assert(abs(result.metadata.timeWeight - 0.5) < 1e-12);
+
+    outsideResult = provider.profileAt( ...
+        epoch0 - hours(1), 52.0, 13.0, 100.0);
+
+    assert(~outsideResult.valid, ...
+        'Deterministic profile provider should reject out-of-time queries.');
+
+    constants = struct( ...
+        'speedOfLight_mps', 299792458.0, ...
+        'earthRadius_m', 6378137.0);
+
+    atmosphereCfg = struct();
+    atmosphereCfg.dataRoot = fullfile("data", "atmosphere");
+    atmosphereCfg.missingDataPolicy = "error";
+    atmosphereCfg.ionosphereShellHeight_m = 350000.0;
+
+    atmosphereCfg.model = struct( ...
+        'enableTroposphere', false, ...
+        'enableIonosphere', false, ...
+        'troposphereProviderType', "profile", ...
+        'troposphereProfile', profileCfg, ...
+        'ionosphereProviderType', "none");
+
+    atmosphere = Atmosphere(atmosphereCfg, constants, "model");
+
+    assert(atmosphere.troposphereProviderType == "profile", ...
+        'Atmosphere should accept deterministic profile provider type.');
+
+    assert(isa(atmosphere.troposphereProvider, ...
+            'DeterministicTroposphereProfileProvider'), ...
+        'Atmosphere should own a deterministic troposphere profile provider.');
+
+    disp("PASS: deterministic troposphere profile provider interpolation is valid.");
 end
 
 function runIonosphereProviderInterfaceRegression()
