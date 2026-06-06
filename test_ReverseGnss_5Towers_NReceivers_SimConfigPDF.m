@@ -12,7 +12,7 @@
 
 %   sim = test_ReverseGnss_5Towers_NReceivers_SimConfigPDF();
 %   sim = test_ReverseGnss_5Towers_NReceivers_SimConfigPDF(8);
-REPORT_VERSION = sprintf('1.7');
+REPORT_VERSION = sprintf('1.9');
 N_RECEIVERS = 4;
 assert(N_RECEIVERS >= 1 && floor(N_RECEIVERS) == N_RECEIVERS, ...
     'N_RECEIVERS must be a positive integer.');
@@ -144,6 +144,7 @@ assert(contains(reportText, 'Atmosphere Propagation Summary'), ...
 
 
 validateRetainedReportAtmosphereDiagnostics(sim);
+runIonosphereProviderInterfaceRegression();
 runAtmosphereConstantDiagnosticRegression();
 runAtmosphereResidualAndCovarianceRegression();
 runAtmosphereComponentResidualDecompositionRegression();
@@ -295,6 +296,84 @@ function validateRetainedReportAtmosphereDiagnostics(sim)
     assert(isfield(reportData, 'atmosphere_ionosphere_residual_by_receiver_tower_m'));
 
     disp("PASS: retained PDF report includes ionosphere and troposphere diagnostics.");
+end
+
+function runIonosphereProviderInterfaceRegression()
+    ProjectPathManager.addProjectPaths();
+
+    provider = IonosphereMapProviderFactory.create( ...
+        "none", ...
+        fullfile("data", "atmosphere"), ...
+        struct(), ...
+        "model");
+
+    assert(isa(provider, 'IonosphereMapProvider'), ...
+        'Provider must implement IonosphereMapProvider.');
+
+    assert(isa(provider, 'NullIonosphereMapProvider'), ...
+        'Default provider should be NullIonosphereMapProvider.');
+
+    assert(~provider.isAvailable(), ...
+        'Null provider must report unavailable.');
+
+    queryTime = datetime(2026, 5, 27, 23, 0, 0, 'TimeZone', 'UTC');
+
+    result = provider.verticalTecAt(queryTime, 52.0, 13.0);
+
+    assert(isstruct(result), ...
+        'Provider result must be a struct.');
+
+    assert(isfield(result, 'valid'));
+    assert(isfield(result, 'vtec_TECU'));
+    assert(isfield(result, 'latitude_deg'));
+    assert(isfield(result, 'longitude_deg'));
+    assert(isfield(result, 'providerType'));
+
+    assert(~result.valid, ...
+        'Null provider must return invalid VTEC data.');
+
+    assert(isnan(result.vtec_TECU), ...
+        'Null provider VTEC must be NaN.');
+
+    constants = struct( ...
+        'speedOfLight_mps', 299792458.0, ...
+        'earthRadius_m', 6378137.0);
+
+    atmosphereCfg = struct();
+    atmosphereCfg.dataRoot = fullfile("data", "atmosphere");
+    atmosphereCfg.missingDataPolicy = "error";
+    atmosphereCfg.ionosphereShellHeight_m = 350000.0;
+
+    atmosphereCfg.model = struct( ...
+        'enableTroposphere', false, ...
+        'enableIonosphere', false, ...
+        'ionosphereProviderType', "none");
+
+    atmosphere = Atmosphere(atmosphereCfg, constants, "model");
+
+    assert(atmosphere.ionosphereProviderType == "none", ...
+        'Atmosphere should store ionosphereProviderType.');
+
+    assert(isa(atmosphere.ionosphereProvider, 'NullIonosphereMapProvider'), ...
+        'Atmosphere should own a null ionosphere provider by default.');
+
+    ionexCfg = atmosphereCfg;
+    ionexCfg.model.ionosphereProviderType = "ionex";
+
+    ionexAtmosphere = Atmosphere(ionexCfg, constants, "model");
+
+    assert(ionexAtmosphere.ionosphereProviderType == "ionex", ...
+        'Atmosphere should accept the ionex provider type.');
+
+    assert(isa(ionexAtmosphere.ionosphereProvider, ...
+            'NullIonosphereMapProvider'), ...
+        ['IONEX provider type should currently resolve to the null ', ...
+         'provider until IonexProvider is implemented.']);
+
+    assert(~ionexAtmosphere.ionosphereProvider.isAvailable(), ...
+        'IONEX placeholder provider should not be available yet.');
+
+    disp("PASS: ionosphere provider interface is available and baseline-safe.");
 end
 
 function runAtmosphereConstantDiagnosticRegression()
