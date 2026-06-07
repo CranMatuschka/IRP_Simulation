@@ -212,6 +212,55 @@ scenario.atmosphere.ionosphereShellHeight_m = 350000.0;
 % reduce EKF overconfidence by increasing innovation covariance S and
 % reducing NIS per degree of freedom for the same deterministic residual.
 
+%
+% Stochastic truth atmosphere residual injection:
+%
+% The truth atmosphere can inject stochastic code-delay residuals into the
+% generated pseudoranges by setting:
+%
+%   scenario.atmosphere.truth.residualTroposphereSigma_m
+%   scenario.atmosphere.truth.residualIonosphereSigma_m
+%
+% The truth residuals are generated once per tower and epoch. The same
+% residual sample is then applied to every receiver observing that tower at
+% that epoch, so the injected term is tower-common across onboard receiver
+% phase centres.
+%
+% The injected truth residual is separated into:
+%
+%   atmosphere_truth_troposphere_residual_by_tower_m
+%   atmosphere_truth_ionosphere_residual_by_tower_m
+%   atmosphere_truth_residual_by_tower_m
+%
+% with:
+%
+%   atmosphere_truth_residual_by_tower_m = ...
+%       atmosphere_truth_troposphere_residual_by_tower_m + ...
+%       atmosphere_truth_ionosphere_residual_by_tower_m
+%
+% The deterministic truth atmosphere delay remains separate from this
+% stochastic residual. Therefore:
+%
+%   deterministic truth delay = modelled troposphere + modelled ionosphere
+%   total truth delay         = deterministic truth delay + stochastic residual
+%
+% The atmosphere residual seed is:
+%
+%   simConfig.seeds.atmosphereResidual
+%
+% Reusing the same seed must reproduce identical truth residual samples.
+% Changing the seed must produce a different residual sequence. For large
+% sample counts, the residual statistics should converge approximately to:
+%
+%   std(troposphere residual) ~= residualTroposphereSigma_m
+%   std(ionosphere residual)  ~= residualIonosphereSigma_m
+%   std(total residual)       ~= hypot(residualTroposphereSigma_m, ...
+%                                      residualIonosphereSigma_m)
+%
+% Keep truth residual sigmas at zero for deterministic geometry/report
+% validation. Enable them only when testing stochastic truth generation,
+% estimator consistency, or atmosphere-model robustness.
+
 scenario.atmosphere.truth = struct( ...
     'enableTroposphere', false, ...
     'enableIonosphere', false, ...
