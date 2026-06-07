@@ -12,6 +12,8 @@ classdef ReportDataBuilder
             Pdiag = sim.history.covariance_diag;
 
             reportData = struct();
+            reportData.error_budget_status = ...
+                ResultBuilder.errorBudgetStatus(sim);
 
             reportData.time_vec = sim.time_s;
             reportData.total_time_hours = max(sim.time_s) / 3600.0;

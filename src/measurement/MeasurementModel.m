@@ -27,19 +27,30 @@ classdef MeasurementModel < handle
     %     structured atmosphere budget internally while preserving these
     %     legacy outputs until callers are updated.
     %
-    % Remaining implementation audit:
-    %   - Atmosphere truth/model/residual handling is the validated baseline.
-    %     Truth atmosphere and sampled stochastic residuals belong only in y;
-    %     model atmosphere and residual covariance belong in yp/R.
-    %   - The next required regression is a deterministic atmosphere mismatch
-    %     prefit-innovation test with receiver/tower clock absorption disabled
-    %     or tightly constrained. Final position error alone is not a valid
-    %     validation metric for common-mode atmospheric range residuals.
-    %   - Non-atmospheric terms are currently scaffolded as truth/model/residual
-    %     budgets, but most model corrections are still zero. Hardware,
-    %     antenna, multipath, tower-survey, light-time, Sagnac, and relativity
-    %     must not be treated as physically complete until their model-side
-    %     corrections enter yp and their diagnostics are validated.
+    %
+    % Implemented first-stage error-chain status:
+    %   - Atmosphere: truth/model/residual/covariance chain is active.
+    %     Truth deterministic delay and sampled stochastic residuals enter y;
+    %     estimator model delay enters yp; estimator residual sigmas enter R.
+    %   - Non-atmospheric budget: hardware, antenna scalar correction,
+    %     deterministic/stochastic multipath, tower-survey range effect, and
+    %     legacy scalar Sagnac all expose truth/model/residual components.
+    %   - Propagation: ECI receive-epoch range is the baseline. Optional
+    %     inertial iterative light-time and Shapiro path delay can enter y
+    %     and/or yp through separate truth/model toggles.
+    %   - Covariance: update-time R is built per epoch. Same-tower common
+    %     covariance is used for atmosphere/ground-clock residuals; stochastic
+    %     multipath contributes independent diagonal variance.
+    %
+    % Known limitations:
+    %   - Relativistic clock correction is explicit but guarded, because the
+    %     affected physical clock dynamics must be defined before applying a
+    %     GPS-style eccentricity correction.
+    %   - Antenna PCO/PCV truth/model separation is still first-stage only:
+    %     the current model-side antenna correction is scalar.
+    %   - Tower-specific hardware model delay is still future work; current
+    %     model hardware correction is global TX/RX.
+    %   - Carrier phase observables are not part of this first-stage chain.
     %   - Keep follow-up changes small and local. Prefer simple MATLAB structs
     %     and backward-compatible wrappers over new class hierarchies.
 
