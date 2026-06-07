@@ -94,15 +94,23 @@ scenario.measurement.rxHardwareDelay_m = 0.0;
 scenario.measurement.multipathDelay_m = 0.0;
 scenario.measurement.antennaDelay_m = 0.0;
 
-% Inertial light-time propagation is not implemented yet.
+% Geometric range currently uses ECI transmitter and receiver positions
+% evaluated at the receiver epoch. Inertial light-time propagation is not
+% implemented yet. When it is enabled in the future, it must evaluate the
+% ground transmitter in ECI at transmit time and must not be combined with a
+% separate ECEF Sagnac correction unless explicitly proven not to double
+% count Earth rotation.
 % Keep disabled, but use the canonical field names consumed by
 % MeasurementModel.
+scenario.measurement.propagationFrame = "ECI_static_receive_epoch";
 scenario.measurement.enableLightTimeCorrection = false;
 scenario.measurement.lightTimeCorrectionMethod = "inertialIterative";
 scenario.measurement.lightTimeCorrectionTolerance_s = 1e-12;
 scenario.measurement.lightTimeCorrectionMaxIterations = 10;
 
 scenario.measurement.sagnacCorrection_m = 0.0;
+scenario.measurement.enableRelativisticPathDelay = false;
+scenario.measurement.enableRelativisticClockCorrection = false;
 
 %% Atmosphere Model
 % "truth" controls the physical atmospheric delay and optional residual noise

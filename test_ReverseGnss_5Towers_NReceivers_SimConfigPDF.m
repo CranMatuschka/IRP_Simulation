@@ -180,6 +180,7 @@ runAtmosphereInvalidGradientGuardRegression();
 runIonospherePiercePointGeometryRegression();
 runIonosphereThinShellMappingRegression();
 runSimpleZtdTroposphereRegression();
+runPropagationCorrectionScaffoldRegression();
 runAtmosphereConstantDiagnosticRegression();
 runAtmosphereDeterministicConstantCasesRegression();
 
@@ -4489,6 +4490,102 @@ function runSimpleZtdTroposphereRegression()
         'simpleZtd must reject minimumMappingElevation_deg below 10 deg.');
 
     disp("PASS: simpleZtd troposphere delay and low-elevation guard are correct.");
+end
+
+function runPropagationCorrectionScaffoldRegression()
+    simConfigOverride = makeShortRegressionOverride();
+
+    runtimeOptions = struct();
+    runtimeOptions.entryPointName = "PropagationCorrectionScaffoldRegression";
+    runtimeOptions.simConfigOverride = simConfigOverride;
+
+    sim = ReverseGnssSimulation(runtimeOptions);
+    sim.configure();
+    sim.run();
+
+    visible = sim.history.visibility_mask_by_receiver_tower;
+
+    assert(isfield(sim.history, 'propagation'), ...
+        'History must expose propagation diagnostics.');
+
+    assert(sim.history.propagation.frame_used == "ECI_static_receive_epoch", ...
+        'Propagation frame diagnostic must identify ECI receive-epoch geometry.');
+
+    assert(all(abs(sim.history.propagation.light_time.truth_m(visible)) < 1e-12), ...
+        'Disabled light-time truth diagnostic must be zero.');
+
+    assert(all(abs(sim.history.propagation.light_time.model_m(visible)) < 1e-12), ...
+        'Disabled light-time model diagnostic must be zero.');
+
+    assert(all(abs(sim.history.propagation.sagnac.truth_m(visible)) < 1e-12), ...
+        'Disabled Sagnac truth diagnostic must be zero.');
+
+    assert(all(abs(sim.history.propagation.relativity.truth.pathDelay_m(visible)) < 1e-12), ...
+        'Disabled relativistic path diagnostic must be zero.');
+
+    assert(all(abs(sim.history.propagation.relativity.truth.clockCorrection_m(visible)) < 1e-12), ...
+        'Disabled relativistic clock diagnostic must be zero.');
+
+    results = ResultBuilder.fromSimulation(sim);
+    reportData = ReportDataBuilder.fromSimulation(sim);
+
+    assert(isfield(results, 'propagation'), ...
+        'Saved results must expose propagation diagnostics.');
+
+    assert(isfield(reportData, 'propagation'), ...
+        'Report data must expose propagation diagnostics.');
+
+    assert(isfield(reportData, 'propagation_frame_note'), ...
+        'Report data must describe the propagation frame.');
+
+    assert(isfield(reportData, 'relativity_note'), ...
+        'Report data must describe relativity handling.');
+
+    conflictOverride = makeShortRegressionOverride();
+    scenarioPath = "reverseGnssClockNavigationScenario";
+    conflictOverride.scenarios.(scenarioPath).measurement.enableLightTimeCorrection = true;
+    conflictOverride.scenarios.(scenarioPath).measurement.enableSagnacCorrection = true;
+
+    conflictOptions = struct();
+    conflictOptions.entryPointName = "SagnacLightTimeConflictRegression";
+    conflictOptions.simConfigOverride = conflictOverride;
+
+    rejectedConflict = false;
+
+    try
+        conflictSim = ReverseGnssSimulation(conflictOptions);
+        conflictSim.configure();
+    catch ME
+        rejectedConflict = ...
+            strcmp(ME.identifier, ...
+            'MeasurementModel:LightTimeCorrectionSagnacConflict');
+    end
+
+    assert(rejectedConflict, ...
+        'Inertial light-time and separate Sagnac correction must not both be enabled.');
+
+    relativityOverride = makeShortRegressionOverride();
+    relativityOverride.scenarios.(scenarioPath).measurement.enableRelativisticPathDelay = true;
+
+    relativityOptions = struct();
+    relativityOptions.entryPointName = "RelativityNotImplementedRegression";
+    relativityOptions.simConfigOverride = relativityOverride;
+
+    rejectedRelativity = false;
+
+    try
+        relativitySim = ReverseGnssSimulation(relativityOptions);
+        relativitySim.configure();
+    catch ME
+        rejectedRelativity = ...
+            strcmp(ME.identifier, ...
+            'MeasurementModel:RelativisticPathDelayNotImplemented');
+    end
+
+    assert(rejectedRelativity, ...
+        'Enabling unimplemented relativistic path delay must raise a clear error.');
+
+    disp("PASS: propagation frame, Sagnac/light-time guard, and relativity scaffold are explicit.");
 end
 
 function runAtmosphereConstantDiagnosticRegression()

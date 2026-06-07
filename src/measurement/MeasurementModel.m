@@ -55,7 +55,10 @@ classdef MeasurementModel < handle
         useAntennaDelay logical = false
         useSagnacCorrection logical = false
         useLightTimeCorrection logical = false
+        enableRelativisticPathDelay logical = false
+        enableRelativisticClockCorrection logical = false
         
+        propagationFrame string = "ECI_static_receive_epoch"
         lightTimeCorrectionMethod string = "inertialIterative"
         lightTimeCorrectionTolerance_s double = 1e-12
         lightTimeCorrectionMaxIterations double = 10
@@ -140,6 +143,15 @@ classdef MeasurementModel < handle
 
             obj.useLightTimeCorrection = logical(obj.getFieldOrDefault( ...
                 mcfg, 'enableLightTimeCorrection', false));
+
+            obj.enableRelativisticPathDelay = logical(obj.getFieldOrDefault( ...
+                mcfg, 'enableRelativisticPathDelay', false));
+
+            obj.enableRelativisticClockCorrection = logical(obj.getFieldOrDefault( ...
+                mcfg, 'enableRelativisticClockCorrection', false));
+
+            obj.propagationFrame = string(obj.getFieldOrDefault( ...
+                mcfg, 'propagationFrame', "ECI_static_receive_epoch"));
 
             obj.lightTimeCorrectionMethod = string(obj.getFieldOrDefault( ...
                 mcfg, 'lightTimeCorrectionMethod', "inertialIterative"));
@@ -531,6 +543,59 @@ classdef MeasurementModel < handle
             end
 
             sigma2 = obj.modelAtmosphere.residualCodeVariance_m2();
+        end
+
+        function diagnostics = propagationDiagnosticsForVisibleLinks(obj, visibilityMask)
+            if nargin < 2 || isempty(visibilityMask)
+                visibilityMask = true(obj.numReceivers, obj.numTowers);
+            end
+
+            validateattributes(visibilityMask, {'logical'}, ...
+                {'size', [obj.numReceivers, obj.numTowers]}, ...
+                mfilename, 'visibilityMask');
+
+            visibleScaffold_m = NaN(obj.numReceivers, obj.numTowers);
+            visibleScaffold_m(visibilityMask) = 0.0;
+
+            diagnostics = struct();
+            diagnostics.frame_used = obj.propagationFrame;
+
+            diagnostics.light_time = struct();
+            diagnostics.light_time.truth_m = visibleScaffold_m;
+            diagnostics.light_time.model_m = visibleScaffold_m;
+
+            diagnostics.sagnac = struct();
+            diagnostics.sagnac.truth_m = visibleScaffold_m;
+            if obj.useSagnacCorrection
+                diagnostics.sagnac.truth_m(visibilityMask) = ...
+                    obj.sagnacCorrection_m;
+            end
+            diagnostics.sagnac.model_m = visibleScaffold_m;
+
+            diagnostics.relativity = struct();
+            diagnostics.relativity.truth = struct();
+            diagnostics.relativity.model = struct();
+            diagnostics.relativity.residual = struct();
+            diagnostics.relativity.truth.pathDelay_m = visibleScaffold_m;
+            diagnostics.relativity.model.pathDelay_m = visibleScaffold_m;
+            diagnostics.relativity.truth.clockCorrection_m = ...
+                visibleScaffold_m;
+            diagnostics.relativity.model.clockCorrection_m = ...
+                visibleScaffold_m;
+            diagnostics.relativity.residual.total_m = visibleScaffold_m;
+
+            diagnostics.light_time.residual_m = ...
+                diagnostics.light_time.truth_m - ...
+                diagnostics.light_time.model_m;
+            diagnostics.sagnac.residual_m = ...
+                diagnostics.sagnac.truth_m - diagnostics.sagnac.model_m;
+
+            diagnostics.relativistic_path_enabled = ...
+                obj.enableRelativisticPathDelay;
+            diagnostics.relativistic_clock_enabled = ...
+                obj.enableRelativisticClockCorrection;
+            diagnostics.note = ...
+                "Light-time and relativistic corrections are scaffolded as explicit zero terms unless a future implementation enables them.";
         end
     
     end
@@ -930,6 +995,23 @@ classdef MeasurementModel < handle
             % inertial light-time correction settings without changing the
             % current pseudorange calculation.
         
+            frameKey = lower(strtrim(string(obj.propagationFrame)));
+
+            if ~isscalar(frameKey) || ismissing(frameKey) || strlength(frameKey) == 0
+                error('MeasurementModel:InvalidPropagationFrame', ...
+                    ['propagationFrame must be one non-empty string scalar. ', ...
+                     'Received: %s'], char(string(obj.propagationFrame)));
+            end
+
+            if frameKey ~= "eci_static_receive_epoch"
+                error('MeasurementModel:InvalidPropagationFrame', ...
+                    ['propagationFrame must currently be ', ...
+                     '"ECI_static_receive_epoch". Received: "%s".'], ...
+                    char(frameKey));
+            end
+
+            obj.propagationFrame = "ECI_static_receive_epoch";
+
             rawMethod = obj.lightTimeCorrectionMethod;
         
             % Normalize char arrays, string arrays, whitespace, and capitalization.
@@ -966,6 +1048,20 @@ classdef MeasurementModel < handle
                      'The inertial light-time correction will represent Earth ', ...
                      'rotation by evaluating the ground transmitter at the ', ...
                      'signal transmission time.']);
+            end
+
+            if obj.enableRelativisticPathDelay
+                error('MeasurementModel:RelativisticPathDelayNotImplemented', ...
+                    ['enableRelativisticPathDelay is explicit but not yet ', ...
+                     'implemented. Keep it disabled until a Shapiro/path ', ...
+                     'model is added.']);
+            end
+
+            if obj.enableRelativisticClockCorrection
+                error('MeasurementModel:RelativisticClockCorrectionNotImplemented', ...
+                    ['enableRelativisticClockCorrection is explicit but not ', ...
+                     'yet implemented. Keep it disabled until the affected ', ...
+                     'physical clock is modelled.']);
             end
         
             % Store the canonical spelling for reports and later comparisons.

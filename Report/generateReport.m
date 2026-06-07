@@ -426,6 +426,14 @@ function generateReport(reportData, reportConfig, reportToggles)
     if isfield(reportData, "signal_model_note")
         report = appendLine(report, "\subsection{Scenario Geometry and Receiver Architecture}");
         report = appendParagraph(report, reportData.signal_model_note);
+
+        if isfield(reportData, "propagation_frame_note")
+            report = appendParagraph(report, reportData.propagation_frame_note);
+        end
+
+        if isfield(reportData, "relativity_note")
+            report = appendParagraph(report, reportData.relativity_note);
+        end
     end
     
     report = appendOptionalTable(report, "Scenario Geometry and Receiver Architecture", ...
