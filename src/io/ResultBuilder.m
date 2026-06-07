@@ -46,6 +46,9 @@ classdef ResultBuilder
 
             results.atmosphere = sim.history.atmosphere;
             results.propagation = sim.history.propagation;
+            if isfield(sim.history, 'non_atmospheric')
+                results.non_atmospheric = sim.history.non_atmospheric;
+            end
             
             results.atmosphere_truth_delay_by_receiver_tower_m = ...
                 sim.history.atmosphere_truth_delay_by_receiver_tower_m;

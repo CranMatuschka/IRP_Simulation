@@ -159,7 +159,9 @@ classdef ReportDataBuilder
 
             reportData.atmosphere = sim.history.atmosphere;
             reportData.propagation = sim.history.propagation;
-            
+            if isfield(sim.history, 'non_atmospheric')
+                reportData.non_atmospheric = sim.history.non_atmospheric;
+            end
             reportData.atmosphere_truth_delay_by_receiver_tower_m = ...
                 sim.history.atmosphere_truth_delay_by_receiver_tower_m;
             reportData.atmosphere_truth_residual_by_tower_m = ...
