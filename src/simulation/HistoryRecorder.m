@@ -18,6 +18,20 @@ classdef HistoryRecorder
             history.nis_history = NaN(1, sim.numSteps);
             history.covariance_condition_number = NaN(1, sim.numSteps);
             history.innovation_condition_number = NaN(1, sim.numSteps);
+            history.innovation_covariance_mean_variance_m2 = ...
+                NaN(1, sim.numSteps);
+
+            history.innovation_covariance_min_variance_m2 = ...
+                NaN(1, sim.numSteps);
+
+            history.innovation_covariance_max_variance_m2 = ...
+                NaN(1, sim.numSteps);
+
+            history.nis_per_degree_of_freedom = ...
+                NaN(1, sim.numSteps);
+
+            history.normalized_innovation_rms = ...
+                NaN(1, sim.numSteps);
 
             history.H_row_count_history = NaN(1, sim.numSteps);
             history.H_column_count_history = NaN(1, sim.numSteps);
@@ -213,7 +227,43 @@ classdef HistoryRecorder
             else
                 history.innovation_condition_number(k) = cond(S);
             end
+            if isempty(S)
+                innovationCovarianceDiagonal_m2 = [];
+            else
+                innovationCovarianceDiagonal_m2 = diag(S);
+                innovationCovarianceDiagonal_m2 = ...
+                    innovationCovarianceDiagonal_m2( ...
+                    isfinite(innovationCovarianceDiagonal_m2) & ...
+                    innovationCovarianceDiagonal_m2 >= 0.0);
+            end
 
+            if isempty(innovationCovarianceDiagonal_m2)
+                history.innovation_covariance_mean_variance_m2(k) = NaN;
+                history.innovation_covariance_min_variance_m2(k) = NaN;
+                history.innovation_covariance_max_variance_m2(k) = NaN;
+            else
+                history.innovation_covariance_mean_variance_m2(k) = ...
+                    mean(innovationCovarianceDiagonal_m2, 'omitnan');
+
+                history.innovation_covariance_min_variance_m2(k) = ...
+                    min(innovationCovarianceDiagonal_m2, [], 'omitnan');
+
+                history.innovation_covariance_max_variance_m2(k) = ...
+                    max(innovationCovarianceDiagonal_m2, [], 'omitnan');
+            end
+
+            innovationDof = size(S, 1);
+
+            if isfinite(nisValue) && innovationDof > 0
+                history.nis_per_degree_of_freedom(k) = ...
+                    nisValue / innovationDof;
+
+                history.normalized_innovation_rms(k) = ...
+                    sqrt(max(history.nis_per_degree_of_freedom(k), 0.0));
+            else
+                history.nis_per_degree_of_freedom(k) = NaN;
+                history.normalized_innovation_rms(k) = NaN;
+            end
             if isempty(H)
                 hRank = 0;
                 hRows = 0;
