@@ -93,6 +93,13 @@ scenario.measurement.txHardwareDelay_m = 0.0;
 scenario.measurement.rxHardwareDelay_m = 0.0;
 scenario.measurement.multipathDelay_m = 0.0;
 scenario.measurement.antennaDelay_m = 0.0;
+% Optional estimator/model corrections for the same non-atmospheric terms.
+% Defaults are zero, so legacy truth-only behaviour is preserved unless a
+% calibrated model correction is explicitly configured.
+scenario.measurement.txHardwareDelayModel_m = 0.0;
+scenario.measurement.rxHardwareDelayModel_m = 0.0;
+scenario.measurement.multipathDelayModel_m = 0.0;
+scenario.measurement.antennaDelayModel_m = 0.0;
 
 % Geometric range currently uses ECI transmitter and receiver positions
 % evaluated at the receiver epoch. Inertial light-time propagation is not
@@ -109,6 +116,7 @@ scenario.measurement.lightTimeCorrectionTolerance_s = 1e-12;
 scenario.measurement.lightTimeCorrectionMaxIterations = 10;
 
 scenario.measurement.sagnacCorrection_m = 0.0;
+scenario.measurement.sagnacCorrectionModel_m = 0.0;
 scenario.measurement.enableRelativisticPathDelay = false;
 scenario.measurement.enableRelativisticClockCorrection = false;
 

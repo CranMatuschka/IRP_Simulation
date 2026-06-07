@@ -583,8 +583,14 @@ classdef HistoryRecorder
                 [sim.numReceivers, sim.numTowers, sim.numSteps];
 
             propagation = struct();
-            propagation.frame_used = sim.measurementModel.propagationFrame;
-
+            if isfield(sim, 'measurementModel') && ...
+                    ~isempty(sim.measurementModel) && ...
+                    isprop(sim.measurementModel, 'propagationFrame')
+                propagation.frame_used = ...
+                    sim.measurementModel.propagationFrame;
+            else
+                propagation.frame_used = "ECI_static_receive_epoch";
+            end
             propagation.light_time = struct();
             propagation.light_time.truth_m = NaN(receiverTowerSize);
             propagation.light_time.model_m = NaN(receiverTowerSize);
