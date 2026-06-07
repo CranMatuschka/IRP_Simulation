@@ -183,6 +183,35 @@ scenario.atmosphere.ionosphereShellHeight_m = 350000.0;
 % relative humidity, or water vapour pressure. Atmosphere then computes
 % Saastamoinen-style ZHD/ZWD and applies the configured mapping function.
 
+%
+% Atmospheric residual covariance settings:
+%
+%   residualTroposphereSigma_m
+%   residualIonosphereSigma_m
+%
+% These fields represent unmodelled atmospheric code-delay uncertainty in
+% metres. They do not change the deterministic atmosphere correction itself.
+% The deterministic correction is still controlled only by troposphereModel,
+% ionosphereModel, and their provider data.
+%
+% For the estimator/model atmosphere, enabled residual sigmas are added to
+% the pseudorange measurement covariance as:
+%
+%   R_atmosphere = residualTroposphereSigma_m^2 ...
+%                + residualIonosphereSigma_m^2
+%
+% The covariance is applied as a same-tower common-mode contribution because
+% all receivers observing the same transmitting tower share the same
+% atmospheric model-error source for that tower/link epoch. When
+% enableTroposphere=false or enableIonosphere=false, the corresponding
+% residual sigma is ignored.
+%
+% For the truth atmosphere, residual sigmas can be used for stochastic truth
+% perturbations. For deterministic regression and PDF-report scenarios they
+% should normally stay at zero. Increasing model residual sigmas should
+% reduce EKF overconfidence by increasing innovation covariance S and
+% reducing NIS per degree of freedom for the same deterministic residual.
+
 scenario.atmosphere.truth = struct( ...
     'enableTroposphere', false, ...
     'enableIonosphere', false, ...

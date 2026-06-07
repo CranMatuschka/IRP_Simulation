@@ -12,7 +12,7 @@
 
 %   sim = test_ReverseGnss_5Towers_NReceivers_SimConfigPDF();
 %   sim = test_ReverseGnss_5Towers_NReceivers_SimConfigPDF(8);
-REPORT_VERSION = sprintf('1.36');
+REPORT_VERSION = sprintf('1.37');
 N_RECEIVERS = 4;
 assert(N_RECEIVERS >= 1 && floor(N_RECEIVERS) == N_RECEIVERS, ...
     'N_RECEIVERS must be a positive integer.');
@@ -148,6 +148,7 @@ assert(contains(reportText, 'Atmosphere Truth Minus Model Residual Components'),
 validateRetainedReportAtmosphereDiagnostics(sim);
 runAtmosphericResidualCovarianceRegression();
 runResidualSigmaOverconfidenceRegression();
+runAtmosphericResidualCovarianceDocumentationRegression();
 runInnovationCovarianceReportDiagnosticsRegression(sim, reportText);
 runTroposphereProviderInterfaceRegression();
 runTroposphereHydrostaticWetComponentRegression();
@@ -2349,6 +2350,51 @@ function runResidualSigmaOverconfidenceRegression()
         'Changing residual sigma must not change the deterministic innovation vector itself.');
 
     disp("PASS: atmospheric residual sigma reduces EKF overconfidence.");
+end
+
+function runAtmosphericResidualCovarianceDocumentationRegression()
+    ProjectPathManager.addProjectPaths();
+
+    configPath = fullfile( ...
+        fileparts(mfilename('fullpath')), ...
+        'config', ...
+        'SimulationConfig.m');
+
+    configText = string(fileread(configPath));
+
+    assert(contains(configText, ...
+            'Atmospheric residual covariance settings'), ...
+        'SimulationConfig should document atmospheric residual covariance settings.');
+
+    assert(contains(configText, ...
+            'residualTroposphereSigma_m'), ...
+        'SimulationConfig should document residualTroposphereSigma_m.');
+
+    assert(contains(configText, ...
+            'residualIonosphereSigma_m'), ...
+        'SimulationConfig should document residualIonosphereSigma_m.');
+
+    assert(contains(configText, ...
+            'do not change the deterministic atmosphere correction'), ...
+        'SimulationConfig should state that residual sigmas do not change deterministic atmosphere delay.');
+
+    assert(contains(configText, ...
+            'R_atmosphere = residualTroposphereSigma_m^2'), ...
+        'SimulationConfig should document the atmosphere covariance equation.');
+
+    assert(contains(configText, ...
+            'same-tower common-mode contribution'), ...
+        'SimulationConfig should document same-tower common-mode covariance behaviour.');
+
+    assert(contains(configText, ...
+            'enableTroposphere=false or enableIonosphere=false'), ...
+        'SimulationConfig should document that disabled components ignore residual sigma.');
+
+    assert(contains(configText, ...
+            'reducing NIS per degree of freedom'), ...
+        'SimulationConfig should connect model residual sigmas to EKF consistency diagnostics.');
+
+    disp("PASS: atmospheric residual covariance settings are documented.");
 end
 
 function runInnovationCovarianceReportDiagnosticsRegression(sim, reportText)
