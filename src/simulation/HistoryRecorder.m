@@ -547,7 +547,7 @@ classdef HistoryRecorder
                 truthIonosphereTotal_m;
 
             history = HistoryRecorder.recordPropagationDiagnostics( ...
-                sim, history, k, visibilityMask);
+                sim, history, k, visibilityMask, towersEci, receiverEci);
 
             history = HistoryRecorder.recordAtmosphereBudget( ...
                 sim, ...
@@ -744,15 +744,26 @@ classdef HistoryRecorder
 
             propagation.diagnostics = struct();
             propagation.diagnostics.note = ...
-                "ECI receive-epoch geometry is logged explicitly; light-time and relativity are zero scaffolds until implemented.";
+                "ECI receive-epoch geometry is logged explicitly; inertial light-time is computed when enabled; relativity remains an explicit zero scaffold until implemented.";
         end
 
         function history = recordPropagationDiagnostics( ...
-                sim, history, k, visibilityMask)
+                sim, history, k, visibilityMask, towersEci, truthReceiverEci)
+
+            jd = sim.jd0 + sim.time_s(k) / 86400.0;
+            modelReceiverEci = truthReceiverEci;
+
+            if isprop(sim, 'estAsset') && ~isempty(sim.estAsset)
+                modelReceiverEci = sim.estAsset.receiverPositionsEci();
+            end
 
             diagnostics = ...
                 sim.measurementModel.propagationDiagnosticsForVisibleLinks( ...
-                visibilityMask);
+                visibilityMask, ...
+                jd, ...
+                towersEci, ...
+                truthReceiverEci, ...
+                modelReceiverEci);
 
             history.propagation.frame_used = diagnostics.frame_used;
 

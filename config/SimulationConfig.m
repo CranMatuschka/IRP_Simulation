@@ -101,16 +101,16 @@ scenario.measurement.rxHardwareDelayModel_m = 0.0;
 scenario.measurement.multipathDelayModel_m = 0.0;
 scenario.measurement.antennaDelayModel_m = 0.0;
 
-% Geometric range currently uses ECI transmitter and receiver positions
-% evaluated at the receiver epoch. Inertial light-time propagation is not
-% implemented yet. When it is enabled in the future, it must evaluate the
-% ground transmitter in ECI at transmit time and must not be combined with a
-% separate ECEF Sagnac correction unless explicitly proven not to double
-% count Earth rotation.
-% Keep disabled, but use the canonical field names consumed by
-% MeasurementModel.
+% Geometric range uses ECI transmitter and receiver positions evaluated at
+% the receiver epoch. Optional inertial iterative light-time evaluates the
+% ground transmitter in ECI at signal transmit time and adds the resulting
+% range correction to y and/or yp. Do not combine it with a separate ECEF
+% Sagnac correction because that would double count Earth rotation.
+% Keep disabled by default, but use the canonical field names consumed by
 scenario.measurement.propagationFrame = "ECI_static_receive_epoch";
 scenario.measurement.enableLightTimeCorrection = false;
+scenario.measurement.enableLightTimeCorrectionTruth = false;
+scenario.measurement.enableLightTimeCorrectionModel = false;
 scenario.measurement.lightTimeCorrectionMethod = "inertialIterative";
 scenario.measurement.lightTimeCorrectionTolerance_s = 1e-12;
 scenario.measurement.lightTimeCorrectionMaxIterations = 10;
