@@ -43,6 +43,8 @@ classdef ResultBuilder
 
             results.true_range_by_receiver_tower_m = ...
                 sim.history.true_range_by_receiver_tower_m;
+
+            results.atmosphere = sim.history.atmosphere;
             
             results.atmosphere_truth_delay_by_receiver_tower_m = ...
                 sim.history.atmosphere_truth_delay_by_receiver_tower_m;
