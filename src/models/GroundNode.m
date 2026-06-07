@@ -18,6 +18,8 @@ classdef GroundNode < handle
 
         txSignalDelay_m double = 0.0
         total_bias_sec double = 0.0
+        truthPositionOffsetEcef_m double = zeros(3, 1)
+        modelPositionOffsetEcef_m double = zeros(3, 1)
     end
 
     properties (Dependent)
@@ -49,7 +51,28 @@ classdef GroundNode < handle
             if isfield(cfg, 'txSignalDelay_m')
                 obj.txSignalDelay_m = double(cfg.txSignalDelay_m);
             end
+            if isfield(cfg, 'truthPositionOffsetEcef_m') && ...
+                    ~isempty(cfg.truthPositionOffsetEcef_m)
+                obj.truthPositionOffsetEcef_m = ...
+                    double(cfg.truthPositionOffsetEcef_m(:));
+            end
 
+            if isfield(cfg, 'modelPositionOffsetEcef_m') && ...
+                    ~isempty(cfg.modelPositionOffsetEcef_m)
+                obj.modelPositionOffsetEcef_m = ...
+                    double(cfg.modelPositionOffsetEcef_m(:));
+            end
+
+            validateattributes(obj.truthPositionOffsetEcef_m, ...
+                {'numeric'}, ...
+                {'real', 'finite', 'numel', 3}, ...
+                mfilename, 'truthPositionOffsetEcef_m');
+
+            validateattributes(obj.modelPositionOffsetEcef_m, ...
+                {'numeric'}, ...
+                {'real', 'finite', 'numel', 3}, ...
+                mfilename, 'modelPositionOffsetEcef_m');
+            
             if nargin >= 2 && ~isempty(clockObj)
                 obj.tx_clock = clockObj;
             else

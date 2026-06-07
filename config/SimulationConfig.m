@@ -87,6 +87,7 @@ scenario.measurement.enableMultipathDelay = false;
 scenario.measurement.enableAntennaDelay = false;
 scenario.measurement.enableSagnacCorrection = false;
 scenario.measurement.enableElevationMask = true;
+scenario.measurement.enableTowerSurveyError = false;
 scenario.measurement.elevationMask_deg = 5.0;
 
 scenario.measurement.txHardwareDelay_m = 0.0;
@@ -471,6 +472,8 @@ function tower = makeTower(name, lat_deg, lon_deg, alt_m, txDelay_m)
     tower.alt_m = alt_m;
     tower.enabled = true;
     tower.txSignalDelay_m = txDelay_m;
+    tower.truthPositionOffsetEcef_m = zeros(3, 1);
+    tower.modelPositionOffsetEcef_m = zeros(3, 1);
 end
 
 function receivers = makeReceiverConfigs(nReceivers, baseline_m, sigma_m)
