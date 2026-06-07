@@ -84,6 +84,7 @@ scenario.measurement.enableNoise = false;
 
 scenario.measurement.enableHardwareDelay = false;
 scenario.measurement.enableMultipathDelay = false;
+scenario.measurement.enableStochasticMultipath = false;
 scenario.measurement.enableAntennaDelay = false;
 scenario.measurement.enableSagnacCorrection = false;
 scenario.measurement.enableElevationMask = true;
@@ -100,6 +101,9 @@ scenario.measurement.antennaDelay_m = 0.0;
 scenario.measurement.txHardwareDelayModel_m = 0.0;
 scenario.measurement.rxHardwareDelayModel_m = 0.0;
 scenario.measurement.multipathDelayModel_m = 0.0;
+scenario.measurement.multipathStochasticSigma0_m = 0.20;
+scenario.measurement.multipathStochasticMinimumElevation_deg = 10.0;
+scenario.measurement.multipathStochasticRandomSeed = 246813579;
 scenario.measurement.antennaDelayModel_m = 0.0;
 
 % Geometric range uses ECI transmitter and receiver positions evaluated at

@@ -687,6 +687,8 @@ classdef HistoryRecorder
             nonAtmospheric.truth = struct();
             nonAtmospheric.model = struct();
             nonAtmospheric.residual = struct();
+            nonAtmospheric.sigma = struct();
+            nonAtmospheric.variance = struct();
 
             for componentIndex = 1:numel(componentNames)
                 fieldName = char(componentNames(componentIndex) + "_m");
@@ -694,6 +696,8 @@ classdef HistoryRecorder
                 nonAtmospheric.truth.(fieldName) = NaN(receiverTowerSize);
                 nonAtmospheric.model.(fieldName) = NaN(receiverTowerSize);
                 nonAtmospheric.residual.(fieldName) = NaN(receiverTowerSize);
+                nonAtmospheric.sigma.(fieldName) = NaN(receiverTowerSize);
+                nonAtmospheric.variance.(fieldName) = NaN(receiverTowerSize);
             end
 
             nonAtmospheric.diagnostics = struct();
@@ -951,6 +955,10 @@ classdef HistoryRecorder
 
                         history.non_atmospheric.truth.(fieldName)(rx, twr, k) = ...
                             truthValue_m;
+                        history.non_atmospheric.sigma.(fieldName)(rx, twr, k) = ...
+                            truthBudget.(budgetField).sigma_m;
+                        history.non_atmospheric.variance.(fieldName)(rx, twr, k) = ...
+                            truthBudget.(budgetField).variance_m2;                    
                         history.non_atmospheric.model.(fieldName)(rx, twr, k) = ...
                             modelValue_m;
                         history.non_atmospheric.residual.(fieldName)(rx, twr, k) = ...

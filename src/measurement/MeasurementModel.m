@@ -68,6 +68,7 @@ classdef MeasurementModel < handle
 
         useHardwareDelay logical = false
         useMultipathDelay logical = false
+        useStochasticMultipath logical = false
         useAntennaDelay logical = false
         useSagnacCorrection logical = false
         useLightTimeCorrection logical = false
@@ -88,6 +89,9 @@ classdef MeasurementModel < handle
         txHardwareDelay_m double = 0.0
         rxHardwareDelay_m double = 0.0
         multipathDelay_m double = 0.0
+        multipathStochasticSigma0_m double = 0.20
+        multipathStochasticMinimumElevation_deg double = 10.0
+        multipathStochasticRandomSeed double = 246813579
         antennaDelay_m double = 0.0
         sagnacCorrection_m double = 0.0
         txHardwareDelayModel_m double = 0.0
@@ -173,6 +177,8 @@ classdef MeasurementModel < handle
 
             obj.useHardwareDelay = logical(obj.getFieldOrDefault(mcfg, 'enableHardwareDelay', false));
             obj.useMultipathDelay = logical(obj.getFieldOrDefault(mcfg, 'enableMultipathDelay', false));
+            obj.useStochasticMultipath = logical(obj.getFieldOrDefault( ...
+                mcfg, 'enableStochasticMultipath', false));
             obj.useAntennaDelay = logical(obj.getFieldOrDefault(mcfg, 'enableAntennaDelay', false));
             obj.useSagnacCorrection = logical(obj.getFieldOrDefault(mcfg, 'enableSagnacCorrection', false));
             obj.useTowerSurveyError = logical(obj.getFieldOrDefault( ...
@@ -227,6 +233,27 @@ classdef MeasurementModel < handle
             obj.txHardwareDelay_m = obj.getScalarField(mcfg, 'txHardwareDelay_m', 0.0);
             obj.rxHardwareDelay_m = obj.getScalarField(mcfg, 'rxHardwareDelay_m', 0.0);
             obj.multipathDelay_m = obj.getScalarField(mcfg, 'multipathDelay_m', 0.0);
+            obj.multipathStochasticSigma0_m = obj.getScalarField( ...
+                mcfg, 'multipathStochasticSigma0_m', 0.20);
+            obj.multipathStochasticMinimumElevation_deg = obj.getScalarField( ...
+                mcfg, 'multipathStochasticMinimumElevation_deg', 10.0);
+            obj.multipathStochasticRandomSeed = obj.getScalarField( ...
+                mcfg, 'multipathStochasticRandomSeed', 246813579);
+
+            validateattributes(obj.multipathStochasticSigma0_m, ...
+                {'numeric'}, ...
+                {'real', 'finite', 'scalar', 'nonnegative'}, ...
+                mfilename, 'multipathStochasticSigma0_m');
+
+            validateattributes(obj.multipathStochasticMinimumElevation_deg, ...
+                {'numeric'}, ...
+                {'real', 'finite', 'scalar', '>=', 5.0, '<=', 90.0}, ...
+                mfilename, 'multipathStochasticMinimumElevation_deg');
+
+            validateattributes(obj.multipathStochasticRandomSeed, ...
+                {'numeric'}, ...
+                {'real', 'finite', 'scalar'}, ...
+                mfilename, 'multipathStochasticRandomSeed');
             obj.antennaDelay_m = obj.getScalarField(mcfg, 'antennaDelay_m', 0.0);
             obj.sagnacCorrection_m = obj.getScalarField(mcfg, 'sagnacCorrection_m', 0.0);
             obj.txHardwareDelayModel_m = obj.getScalarField(mcfg, 'txHardwareDelayModel_m', 0.0);
@@ -280,6 +307,8 @@ classdef MeasurementModel < handle
                     atmosphereTruthTroposphereResidualByTower_m, ...
                     atmosphereTruthIonosphereResidualByTower_m] = ...
                 obj.sampleTruthAtmosphereResidualByTower_m();
+            independentExtraVariance_m2 = ...
+                zeros(obj.numReceivers * obj.numTowers, 1);
             row = 0;
 
             for rx = 1:obj.numReceivers
@@ -338,7 +367,12 @@ classdef MeasurementModel < handle
 
                     row = row + 1;
                     measurementTowerIndex(row) = twr;
-
+                    independentExtraVariance_m2(row) = ...
+                        obj.multipathVariance_m2( ...
+                        twr, ...
+                        jd, ...
+                        towersEci(:, twr), ...
+                        rRx_I);
                     y(row) = rho ...
                         + lightTimeTruth_m ...
                         + relativisticPathTruth_m ...
@@ -366,11 +400,13 @@ classdef MeasurementModel < handle
 
             y = y(1:row);
             measurementTowerIndex = measurementTowerIndex(1:row);
+            independentExtraVariance_m2 = independentExtraVariance_m2(1:row);
 
             Rrange = obj.measurementCovariance( ...
                 measurementTowerIndex, ...
                 towerClockEkfEnabled, ...
-                groundClockResidualVariance_m2);
+                groundClockResidualVariance_m2, ...
+                independentExtraVariance_m2);
         end
                 
         function [yp, H, atmosphereModelDelayRt_m, ...
@@ -579,14 +615,37 @@ classdef MeasurementModel < handle
             end
 
             if obj.useMultipathDelay
+                [multipathStochasticTruth_m, multipathSigma_m, ...
+                        multipathElevation_deg] = ...
+                    obj.stochasticMultipathTruth_m( ...
+                    towerIndex, ...
+                    receiverIndex, ...
+                    jd, ...
+                    towerEci_m, ...
+                    receiverEci_m);
+
+                multipathTruth_m = ...
+                    obj.multipathDelay_m + multipathStochasticTruth_m;
+
                 budget.multipath = obj.withTruthModel( ...
                     budget.multipath, ...
-                    obj.multipathDelay_m, ...
+                    multipathTruth_m, ...
                     obj.multipathDelayModel_m);
+
+                budget.multipath.sigma_m = multipathSigma_m;
+                budget.multipath.variance_m2 = multipathSigma_m^2;
+                budget.multipath.correlation_model = "independent";
+
                 budget.multipath.diagnostics = struct( ...
                     'truth_configured_delay_m', obj.multipathDelay_m, ...
+                    'truth_stochastic_delay_m', multipathStochasticTruth_m, ...
                     'model_configured_delay_m', obj.multipathDelayModel_m, ...
-                    'note', "First-stage multipath is deterministic. Stochastic/elevation-dependent multipath should be added later without giving truth samples to the estimator.");
+                    'sigma_m', multipathSigma_m, ...
+                    'variance_m2', multipathSigma_m^2, ...
+                    'elevation_deg', multipathElevation_deg, ...
+                    'minimum_elevation_deg', obj.multipathStochasticMinimumElevation_deg, ...
+                    'random_seed', obj.multipathStochasticRandomSeed, ...
+                    'note', "First-stage stochastic multipath is an independent link/epoch truth sample. The estimator receives only model correction and diagonal variance, not the actual truth sample.");
             end
 
             if obj.useAntennaDelay
@@ -692,12 +751,14 @@ classdef MeasurementModel < handle
             end
 
             sigma2 = sigma2 + obj.atmosphereResidualVariance_m2();
+            sigma2 = sigma2 + obj.nominalMultipathResidualVariance_m2();
             sigma2 = max(sigma2, 1e-12);
         end
         
         function R = measurementCovariance( ...
                 obj, measurementTowerIndex, ...
-                towerClockEkfEnabled, groundClockResidualVariance_m2)
+                towerClockEkfEnabled, groundClockResidualVariance_m2, ...
+                independentExtraVariance_m2)
 
             if nargin < 3 || isempty(towerClockEkfEnabled)
                 towerClockEkfEnabled = false;
@@ -706,10 +767,20 @@ classdef MeasurementModel < handle
             if nargin < 4 || isempty(groundClockResidualVariance_m2)
                 groundClockResidualVariance_m2 = 0.0;
             end
-
+            if nargin < 5
+                independentExtraVariance_m2 = [];
+            end
             measurementTowerIndex = double(measurementTowerIndex(:));
             n = numel(measurementTowerIndex);
+            if isempty(independentExtraVariance_m2)
+                independentExtraVariance_m2 = zeros(n, 1);
+            else
+                independentExtraVariance_m2 = double(independentExtraVariance_m2(:));
+            end
 
+            validateattributes(independentExtraVariance_m2, {'numeric'}, ...
+                {'real', 'finite', 'nonnegative', 'numel', n}, ...
+                mfilename, 'independentExtraVariance_m2');
             if n == 0
                 R = zeros(0, 0);
                 return;
@@ -723,7 +794,8 @@ classdef MeasurementModel < handle
                 obj.pseudorangeSigma_m, ...
                 obj.numericalSigmaFloor_m);
 
-            R = eye(n) * independentSigma_m^2;
+            R = eye(n) * independentSigma_m^2 + ...
+                diag(independentExtraVariance_m2);
 
             if ~towerClockEkfEnabled && groundClockResidualVariance_m2 > 0.0
                 R = obj.addSameTowerCommonVariance( ...
@@ -747,7 +819,15 @@ classdef MeasurementModel < handle
         function sigma_m = effectiveNumericalMeasurementSigma_m(obj)
             sigma_m = obj.numericalSigmaFloor_m;
         end
-
+        
+        function sigma2 = nominalMultipathResidualVariance_m2(obj)
+            if obj.useMultipathDelay && obj.useStochasticMultipath
+                sigma2 = obj.multipathStochasticSigma0_m^2;
+            else
+                sigma2 = 0.0;
+            end
+        end
+        
         function sigma2 = atmosphereResidualVariance_m2(obj)
             if isempty(obj.modelAtmosphere)
                 sigma2 = 0.0;
@@ -1295,6 +1375,91 @@ classdef MeasurementModel < handle
             component.model_m = double(model_m);
             component.residual_m = component.truth_m - component.model_m;
             component.variance_m2 = component.sigma_m^2;
+        end
+        
+        function variance_m2 = multipathVariance_m2( ...
+                obj, towerIndex, jd, towerEci_m, receiverEci_m)
+
+            [sigma_m, ~] = obj.multipathSigma_m( ...
+                towerIndex, jd, towerEci_m, receiverEci_m);
+
+            variance_m2 = sigma_m^2;
+        end
+
+        function [sigma_m, elevation_deg] = multipathSigma_m( ...
+                obj, towerIndex, jd, towerEci_m, receiverEci_m)
+
+            sigma_m = 0.0;
+            elevation_deg = NaN;
+
+            if ~(obj.useMultipathDelay && obj.useStochasticMultipath)
+                return;
+            end
+
+            [elevation_deg, ~] = obj.towerElevationToReceiverEci( ...
+                jd, ...
+                towerIndex, ...
+                towerEci_m, ...
+                receiverEci_m);
+
+            if ~isfinite(elevation_deg)
+                elevation_deg = obj.multipathStochasticMinimumElevation_deg;
+            end
+
+            elevationUsed_deg = max( ...
+                elevation_deg, ...
+                obj.multipathStochasticMinimumElevation_deg);
+
+            sigma_m = obj.multipathStochasticSigma0_m ./ ...
+                sin(deg2rad(elevationUsed_deg));
+
+            validateattributes(sigma_m, {'numeric'}, ...
+                {'real', 'finite', 'scalar', 'nonnegative'}, ...
+                mfilename, 'multipathSigma_m');
+        end
+
+        function [stochastic_m, sigma_m, elevation_deg] = ...
+                stochasticMultipathTruth_m( ...
+                obj, towerIndex, receiverIndex, jd, towerEci_m, receiverEci_m)
+
+            [sigma_m, elevation_deg] = obj.multipathSigma_m( ...
+                towerIndex, jd, towerEci_m, receiverEci_m);
+
+            if sigma_m <= 0.0
+                stochastic_m = 0.0;
+                return;
+            end
+
+            standardNormal = obj.deterministicMultipathStandardNormal( ...
+                jd, towerIndex, receiverIndex);
+
+            stochastic_m = sigma_m * standardNormal;
+
+            validateattributes(stochastic_m, {'numeric'}, ...
+                {'real', 'finite', 'scalar'}, ...
+                mfilename, 'stochasticMultipathTruth_m');
+        end
+
+        function standardNormal = deterministicMultipathStandardNormal( ...
+                obj, jd, towerIndex, receiverIndex)
+
+            secondsFromJ2000 = round((double(jd) - 2451545.0) * 86400.0);
+            epochBucket = mod(secondsFromJ2000, 1000000);
+
+            hashInput = ...
+                double(obj.multipathStochasticRandomSeed) + ...
+                78.233 * double(towerIndex) + ...
+                37.719 * double(receiverIndex) + ...
+                0.0001 * double(epochBucket);
+
+            uniform01 = mod(sin(12.9898 * hashInput) * 43758.5453123, 1.0);
+            uniform01 = min(max(uniform01, eps), 1.0 - eps);
+
+            standardNormal = sqrt(2.0) * erfinv(2.0 * uniform01 - 1.0);
+
+            validateattributes(standardNormal, {'numeric'}, ...
+                {'real', 'finite', 'scalar'}, ...
+                mfilename, 'standardNormalMultipath');
         end
         
         function rangeEffect_m = towerSurveyRangeEffect_m( ...
