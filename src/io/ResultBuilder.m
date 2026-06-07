@@ -93,10 +93,12 @@ classdef ResultBuilder
         function results = fromSimulation(sim)
             towerClockEkfEnabled = ResultBuilder.towerClockEkfEnabled(sim);
 
-            reportData = struct();
-            reportData.error_budget_status = ...
+            results = struct();
+            results.error_budget_status = ...
                 ResultBuilder.errorBudgetStatus(sim);
-            reportData.time_vec = sim.time_s;
+
+            results.time_s = sim.time_s;
+
             results.state_est = sim.history.x;
             results.state_truth = sim.history.truth;
             results.covariance_diag = sim.history.covariance_diag;
