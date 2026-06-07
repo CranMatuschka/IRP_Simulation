@@ -68,6 +68,9 @@ classdef ResultBuilder
 
             results.atmosphere_truth_ionosphere_mapping_factor_by_receiver_tower = ...
                 sim.history.atmosphere_truth_ionosphere_mapping_factor_by_receiver_tower;
+
+            results.atmosphere_truth_ionosphere_frequency_Hz_by_receiver_tower = ...
+                sim.history.atmosphere_truth_ionosphere_frequency_Hz_by_receiver_tower;
             
             results.atmosphere_truth_troposphere_pressure_hPa_by_receiver_tower = ...
                 sim.history.atmosphere_truth_troposphere_pressure_hPa_by_receiver_tower;
@@ -139,6 +142,9 @@ classdef ResultBuilder
 
             results.atmosphere_model_ionosphere_mapping_factor_by_receiver_tower = ...
                 sim.history.atmosphere_model_ionosphere_mapping_factor_by_receiver_tower;
+
+            results.atmosphere_model_ionosphere_frequency_Hz_by_receiver_tower = ...
+                sim.history.atmosphere_model_ionosphere_frequency_Hz_by_receiver_tower;
             
             results.atmosphere_model_troposphere_pressure_hPa_by_receiver_tower = ...
                 sim.history.atmosphere_model_troposphere_pressure_hPa_by_receiver_tower;

@@ -668,6 +668,9 @@ classdef MeasurementModel < handle
 
             diagnostics.mapping_factor = ...
                 NaN(obj.numReceivers, obj.numTowers);
+
+            diagnostics.frequency_Hz = ...
+                NaN(obj.numReceivers, obj.numTowers);
         end
 
         function diagnostics = emptyIonosphereDiagnosticScalar(~)
@@ -676,7 +679,8 @@ classdef MeasurementModel < handle
                 'ipp_lon_deg', NaN, ...
                 'vtec_TECU', NaN, ...
                 'stec_TECU', NaN, ...
-                'mapping_factor', NaN);
+                'mapping_factor', NaN, ...
+                'frequency_Hz', NaN);
         end
 
         function matrices = assignIonosphereDiagnostics( ...
@@ -696,6 +700,9 @@ classdef MeasurementModel < handle
 
             matrices.mapping_factor(rx, twr) = ...
                 scalarDiagnostics.mapping_factor;
+
+            matrices.frequency_Hz(rx, twr) = ...
+                scalarDiagnostics.frequency_Hz;
         end
 
         function diagnostics = ionosphereDiagnosticFromDelay(obj, delay)
@@ -706,6 +713,10 @@ classdef MeasurementModel < handle
             end
 
             metadata = delay.metadata;
+
+            if isfield(metadata, 'frequency_Hz')
+                diagnostics.frequency_Hz = double(metadata.frequency_Hz);
+            end
 
             if isfield(metadata, 'ionospherePiercePoint') && ...
                     isstruct(metadata.ionospherePiercePoint)
@@ -752,6 +763,11 @@ classdef MeasurementModel < handle
                         if isfield(mapResult.metadata, 'mappingFactor')
                             diagnostics.mapping_factor = ...
                                 double(mapResult.metadata.mappingFactor);
+                        end
+
+                        if isfield(mapResult.metadata, 'frequency_Hz')
+                            diagnostics.frequency_Hz = ...
+                                double(mapResult.metadata.frequency_Hz);
                         end
                     end
                 end

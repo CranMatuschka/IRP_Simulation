@@ -104,6 +104,9 @@ classdef HistoryRecorder
 
             history.atmosphere_truth_ionosphere_mapping_factor_by_receiver_tower = ...
                 NaN(sim.numReceivers, sim.numTowers, sim.numSteps);
+
+            history.atmosphere_truth_ionosphere_frequency_Hz_by_receiver_tower = ...
+                NaN(sim.numReceivers, sim.numTowers, sim.numSteps);
             history.atmosphere_truth_troposphere_pressure_hPa_by_receiver_tower = ...
                 NaN(sim.numReceivers, sim.numTowers, sim.numSteps);
 
@@ -160,6 +163,9 @@ classdef HistoryRecorder
                 NaN(sim.numReceivers, sim.numTowers, sim.numSteps);
 
             history.atmosphere_model_ionosphere_mapping_factor_by_receiver_tower = ...
+                NaN(sim.numReceivers, sim.numTowers, sim.numSteps);
+
+            history.atmosphere_model_ionosphere_frequency_Hz_by_receiver_tower = ...
                 NaN(sim.numReceivers, sim.numTowers, sim.numSteps);
             history.atmosphere_model_troposphere_pressure_hPa_by_receiver_tower = ...
                 NaN(sim.numReceivers, sim.numTowers, sim.numSteps);
@@ -360,6 +366,9 @@ classdef HistoryRecorder
             history.atmosphere_truth_ionosphere_mapping_factor_by_receiver_tower(:, :, k) = ...
                 atmosphereTruthIonosphereDiagnostics.mapping_factor;   
 
+            history.atmosphere_truth_ionosphere_frequency_Hz_by_receiver_tower(:, :, k) = ...
+                atmosphereTruthIonosphereDiagnostics.frequency_Hz;
+
             history.atmosphere_truth_troposphere_pressure_hPa_by_receiver_tower(:, :, k) = ...
                 atmosphereTruthTroposphereDiagnostics.pressure_hPa;
 
@@ -420,6 +429,9 @@ classdef HistoryRecorder
 
             history.atmosphere_model_ionosphere_mapping_factor_by_receiver_tower(:, :, k) = ...
                 atmosphereModelIonosphereDiagnostics.mapping_factor;
+
+            history.atmosphere_model_ionosphere_frequency_Hz_by_receiver_tower(:, :, k) = ...
+                atmosphereModelIonosphereDiagnostics.frequency_Hz;
 
             history.atmosphere_model_troposphere_pressure_hPa_by_receiver_tower(:, :, k) = ...
                 atmosphereModelTroposphereDiagnostics.pressure_hPa;

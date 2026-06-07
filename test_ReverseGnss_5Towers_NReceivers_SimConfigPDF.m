@@ -178,6 +178,8 @@ runAtmosphereInvalidGradientGuardRegression();
 
 
 runIonospherePiercePointGeometryRegression();
+runIonosphereThinShellMappingRegression();
+runSimpleZtdTroposphereRegression();
 runAtmosphereConstantDiagnosticRegression();
 runAtmosphereDeterministicConstantCasesRegression();
 
@@ -4315,6 +4317,180 @@ function runIonospherePiercePointGeometryRegression()
     disp("PASS: thin-shell ionosphere pierce-point geometry is valid.");
 end
 
+function runIonosphereThinShellMappingRegression()
+    datetimeUtc = datetime(2026, 5, 27, 23, 0, 0, 'TimeZone', 'UTC');
+    jd = Clock.julianDateFromDatetime(datetimeUtc);
+
+    earthRadius_m = 6378137.0;
+    shellHeight_m = 350000.0;
+    vtec_TECU = 12.0;
+    frequency_Hz = 1575.42e6;
+
+    constants = struct( ...
+        'speedOfLight_mps', 299792458.0, ...
+        'earthRadius_m', earthRadius_m);
+
+    atmosphereCfg = struct();
+    atmosphereCfg.dataRoot = fullfile("data", "atmosphere");
+    atmosphereCfg.missingDataPolicy = "error";
+    atmosphereCfg.ionosphereShellHeight_m = shellHeight_m;
+
+    atmosphereCfg.model = struct( ...
+        'enableTroposphere', false, ...
+        'enableIonosphere', true, ...
+        'troposphereModel', "disabled", ...
+        'ionosphereModel', "thinshellvtec", ...
+        'vtec_TECU', vtec_TECU, ...
+        'ionosphereProviderType', "none");
+
+    atmosphere = Atmosphere(atmosphereCfg, constants, "model");
+
+    tower = GroundNode(struct( ...
+        'name', 'ThinShellTower', ...
+        'lat_deg', 0.0, ...
+        'lon_deg', 0.0, ...
+        'alt_m', 0.0, ...
+        'txSignalDelay_m', 0.0));
+
+    receiverEci_m = receiverEciForElevationAzimuthRange( ...
+        tower, jd, 35.0, 70.0, 4.0e7);
+
+    delay = atmosphere.codeDelayMeters( ...
+        tower, receiverEci_m, jd, datetimeUtc, frequency_Hz);
+
+    assert(delay.valid, ...
+        'Thin-shell VTEC delay should be valid.');
+
+    elevation_rad = deg2rad(double(delay.elevation_deg));
+    expectedMappingFactor = ...
+        1.0 / sqrt(1.0 - ...
+        (earthRadius_m * cos(elevation_rad) / ...
+        (earthRadius_m + shellHeight_m))^2);
+
+    expectedStec_TECU = vtec_TECU * expectedMappingFactor;
+    expectedDelay_m = ...
+        40.3 * expectedStec_TECU * 1.0e16 / frequency_Hz^2;
+
+    mapMetadata = delay.metadata.ionosphereMap.metadata;
+
+    assert(abs(delay.metadata.ionospherePiercePoint.mappingFactor - ...
+        expectedMappingFactor) < 1e-12, ...
+        'Thin-shell pierce-point mapping factor must follow the shell equation.');
+
+    assert(abs(mapMetadata.mappingFactor - expectedMappingFactor) < 1e-12, ...
+        'Thin-shell map metadata must retain mapping factor.');
+
+    assert(abs(delay.metadata.ionosphereMap.vtec_TECU - vtec_TECU) < 1e-12, ...
+        'Thin-shell map metadata must retain VTEC.');
+
+    assert(abs(mapMetadata.slantTec_TECU - expectedStec_TECU) < 1e-12, ...
+        'Thin-shell STEC must equal VTEC times mapping factor.');
+
+    assert(abs(delay.ionosphere_m - expectedDelay_m) < 1e-12, ...
+        'Thin-shell code delay must equal 40.3 * STEC / f^2.');
+
+    assert(abs(mapMetadata.delay_m - expectedDelay_m) < 1e-12, ...
+        'Thin-shell metadata delay must equal the applied ionosphere delay.');
+
+    assert(abs(mapMetadata.frequency_Hz - frequency_Hz) < 1e-9, ...
+        'Thin-shell metadata must retain signal frequency.');
+
+    doubledFrequencyDelay = atmosphere.codeDelayMeters( ...
+        tower, receiverEci_m, jd, datetimeUtc, 2.0 * frequency_Hz);
+
+    expectedFrequencyRatio = (frequency_Hz / (2.0 * frequency_Hz))^2;
+    actualFrequencyRatio = ...
+        doubledFrequencyDelay.ionosphere_m / delay.ionosphere_m;
+
+    assert(abs(actualFrequencyRatio - expectedFrequencyRatio) < 1e-12, ...
+        'Thin-shell ionosphere delay must scale as 1/frequency^2.');
+
+    disp("PASS: thin-shell VTEC mapping, TECU conversion, and frequency scaling are correct.");
+end
+
+function runSimpleZtdTroposphereRegression()
+    datetimeUtc = datetime(2026, 5, 27, 23, 0, 0, 'TimeZone', 'UTC');
+    jd = Clock.julianDateFromDatetime(datetimeUtc);
+
+    constants = struct( ...
+        'speedOfLight_mps', 299792458.0, ...
+        'earthRadius_m', 6378137.0);
+
+    zhd_m = 2.3;
+    zwd_m = 0.2;
+
+    atmosphereCfg = struct();
+    atmosphereCfg.dataRoot = fullfile("data", "atmosphere");
+    atmosphereCfg.missingDataPolicy = "error";
+    atmosphereCfg.ionosphereShellHeight_m = 350000.0;
+    atmosphereCfg.model = struct( ...
+        'enableTroposphere', true, ...
+        'enableIonosphere', false, ...
+        'troposphereModel', "simpleZtd", ...
+        'ionosphereModel', "disabled", ...
+        'zhd_m', zhd_m, ...
+        'zwd_m', zwd_m, ...
+        'minimumMappingElevation_deg', 10.0, ...
+        'residualTroposphereSigma_m', 0.0, ...
+        'residualIonosphereSigma_m', 0.0);
+
+    atmosphere = Atmosphere(atmosphereCfg, constants, "model");
+
+    tower = GroundNode(struct( ...
+        'name', 'SimpleZtdTower', ...
+        'lat_deg', 28.3, ...
+        'lon_deg', -16.5, ...
+        'alt_m', 0.0, ...
+        'txSignalDelay_m', 0.0));
+
+    receiverEci_m = receiverEciForElevationAzimuthRange( ...
+        tower, jd, 30.0, 120.0, 4.0e7);
+
+    delay = atmosphere.codeDelayMeters( ...
+        tower, receiverEci_m, jd, datetimeUtc, 1575.42e6);
+
+    assert(delay.valid, ...
+        'simpleZtd delay should be valid for visible geometry.');
+
+    elevationUsed_deg = max(delay.elevation_deg, 10.0);
+    expectedMapping = 1.0 / sind(elevationUsed_deg);
+    expectedDelay_m = (zhd_m + zwd_m) * expectedMapping;
+
+    tropo = delay.metadata.troposphere;
+
+    assert(abs(delay.troposphere_m - expectedDelay_m) < 1e-12, ...
+        'simpleZtd troposphere delay must equal (ZHD + ZWD) / sin(E_used).');
+
+    assert(abs(tropo.zenithHydrostaticDelay_m - zhd_m) < 1e-12, ...
+        'simpleZtd diagnostics must retain ZHD.');
+
+    assert(abs(tropo.zenithWetDelay_m - zwd_m) < 1e-12, ...
+        'simpleZtd diagnostics must retain ZWD.');
+
+    assert(abs(tropo.mappingHydrostatic - expectedMapping) < 1e-12, ...
+        'simpleZtd diagnostics must retain hydrostatic mapping.');
+
+    assert(abs(tropo.mappingWet - expectedMapping) < 1e-12, ...
+        'simpleZtd diagnostics must retain wet mapping.');
+
+    badCfg = atmosphereCfg;
+    badCfg.model.minimumMappingElevation_deg = 5.0;
+
+    rejectedLowElevation = false;
+
+    try
+        Atmosphere(badCfg, constants, "model");
+    catch ME
+        rejectedLowElevation = ...
+            strcmp(ME.identifier, 'Atmosphere:SimpleZtdMinimumElevation');
+    end
+
+    assert(rejectedLowElevation, ...
+        'simpleZtd must reject minimumMappingElevation_deg below 10 deg.');
+
+    disp("PASS: simpleZtd troposphere delay and low-elevation guard are correct.");
+end
+
 function runAtmosphereConstantDiagnosticRegression()
     simConfigOverride = makeShortRegressionOverride();
 
@@ -4922,6 +5098,25 @@ function runAtmosphereGradientFiniteDifferenceRegression()
         'Atmosphere analytic gradient does not match finite differences.');
 
     disp("PASS: atmosphere analytic gradient matches finite differences.");
+end
+
+function receiverEci_m = receiverEciForElevationAzimuthRange( ...
+        tower, jd, elevation_deg, azimuth_deg, slantRange_m)
+
+    towerEcef_m = tower.pos_ECEF_m;
+
+    uEnu = [ ...
+        cosd(elevation_deg) * sind(azimuth_deg); ...
+        cosd(elevation_deg) * cosd(azimuth_deg); ...
+        sind(elevation_deg)];
+
+    R_enu_ecef = FrameGeometry.ecefToEnuDcm( ...
+        tower.lat_deg, tower.lon_deg);
+
+    uEcef = R_enu_ecef.' * uEnu;
+
+    receiverEcef_m = towerEcef_m + slantRange_m * uEcef;
+    receiverEci_m = FrameGeometry.ecefToEciDcm(jd) * receiverEcef_m;
 end
 
 function saturation_hPa = saturationVaporPressureHpaForTest(temperature_K)
