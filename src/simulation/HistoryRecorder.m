@@ -26,7 +26,19 @@ classdef HistoryRecorder
 
             history.innovation_covariance_max_variance_m2 = ...
                 NaN(1, sim.numSteps);
+            history.measurement_covariance_range_mean_variance_m2 = ...
+                NaN(1, sim.numSteps);
+            history.measurement_covariance_range_max_offdiag_m2 = ...
+                NaN(1, sim.numSteps);
+            history.measurement_covariance_range_dimension = ...
+                zeros(1, sim.numSteps);
 
+            history.measurement_covariance_update_mean_variance_m2 = ...
+                NaN(1, sim.numSteps);
+            history.measurement_covariance_update_max_offdiag_m2 = ...
+                NaN(1, sim.numSteps);
+            history.measurement_covariance_update_dimension = ...
+                zeros(1, sim.numSteps);
             history.nis_per_degree_of_freedom = ...
                 NaN(1, sim.numSteps);
 
@@ -266,6 +278,36 @@ classdef HistoryRecorder
                 history.innovation_covariance_max_variance_m2(k) = ...
                     max(innovationCovarianceDiagonal_m2, [], 'omitnan');
             end
+            latestRrange = [];
+            latestRupdate = [];
+
+            if isprop(sim, 'latestRrange')
+                latestRrange = sim.latestRrange;
+            end
+
+            if isprop(sim, 'latestRupdate')
+                latestRupdate = sim.latestRupdate;
+            end
+
+            [rangeMeanVariance_m2, rangeMaxOffdiag_m2, rangeDimension] = ...
+                HistoryRecorder.covarianceSummary(latestRrange);
+
+            [updateMeanVariance_m2, updateMaxOffdiag_m2, updateDimension] = ...
+                HistoryRecorder.covarianceSummary(latestRupdate);
+
+            history.measurement_covariance_range_mean_variance_m2(k) = ...
+                rangeMeanVariance_m2;
+            history.measurement_covariance_range_max_offdiag_m2(k) = ...
+                rangeMaxOffdiag_m2;
+            history.measurement_covariance_range_dimension(k) = ...
+                rangeDimension;
+
+            history.measurement_covariance_update_mean_variance_m2(k) = ...
+                updateMeanVariance_m2;
+            history.measurement_covariance_update_max_offdiag_m2(k) = ...
+                updateMaxOffdiag_m2;
+            history.measurement_covariance_update_dimension(k) = ...
+                updateDimension;
 
             innovationDof = size(S, 1);
 
@@ -534,6 +576,47 @@ classdef HistoryRecorder
     end
 
     methods (Static, Access = private)
+        function [meanDiagonal_m2, maxOffDiagonalAbs_m2, dimension] = ...
+                covarianceSummary(R)
+
+            if isempty(R)
+                meanDiagonal_m2 = NaN;
+                maxOffDiagonalAbs_m2 = NaN;
+                dimension = 0;
+                return;
+            end
+
+            validateattributes(R, {'numeric'}, ...
+                {'real', 'finite', '2d', 'square'}, ...
+                mfilename, 'R');
+
+            dimension = size(R, 1);
+
+            diagonalValues_m2 = diag(R);
+            diagonalValues_m2 = diagonalValues_m2(isfinite(diagonalValues_m2));
+
+            if isempty(diagonalValues_m2)
+                meanDiagonal_m2 = NaN;
+            else
+                meanDiagonal_m2 = mean(diagonalValues_m2, 'omitnan');
+            end
+
+            if dimension <= 1
+                maxOffDiagonalAbs_m2 = 0.0;
+                return;
+            end
+
+            offDiagonal_m2 = R - diag(diag(R));
+            offDiagonalAbs_m2 = abs(offDiagonal_m2(:));
+            offDiagonalAbs_m2 = offDiagonalAbs_m2(isfinite(offDiagonalAbs_m2));
+
+            if isempty(offDiagonalAbs_m2)
+                maxOffDiagonalAbs_m2 = NaN;
+            else
+                maxOffDiagonalAbs_m2 = max(offDiagonalAbs_m2);
+            end
+        end
+        
         function atmosphere = initializeAtmosphereBudgetHistory(sim)
             receiverTowerSize = ...
                 [sim.numReceivers, sim.numTowers, sim.numSteps];

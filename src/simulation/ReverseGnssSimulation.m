@@ -70,6 +70,8 @@ classdef ReverseGnssSimulation < handle
         ekf;
         Q double = [];
         R double = [];
+        latestRrange double = []
+        latestRupdate double = []
         transitionFromInitial double = eye(14);
         observabilityNormalMatrix double = zeros(14);
 
@@ -499,7 +501,8 @@ classdef ReverseGnssSimulation < handle
                 obj.estTowerClockBias_m, obj.estTowerClockDrift_mps, ...
                 obj.idx, obj.stateDim, obj.towerClockEkfEnabled(), ...
                 obj.cfg, obj.cfg.ekf, obj.numTowers);
-
+            obj.latestRrange = Rrange;
+            obj.latestRupdate = Rupdate;
             S = Hupdate * obj.ekf.P * Hupdate' + Rupdate;
 
             if isempty(yUpdate)

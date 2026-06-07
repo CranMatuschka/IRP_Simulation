@@ -21,6 +21,20 @@ classdef ResultBuilder
             results.nis_history = sim.history.nis_history;
             results.H_rank_history = sim.history.H_rank_history;
 
+            results.measurement_covariance_range_mean_variance_m2 = ...
+                sim.history.measurement_covariance_range_mean_variance_m2;
+            results.measurement_covariance_range_max_offdiag_m2 = ...
+                sim.history.measurement_covariance_range_max_offdiag_m2;
+            results.measurement_covariance_range_dimension = ...
+                sim.history.measurement_covariance_range_dimension;
+
+            results.measurement_covariance_update_mean_variance_m2 = ...
+                sim.history.measurement_covariance_update_mean_variance_m2;
+            results.measurement_covariance_update_max_offdiag_m2 = ...
+                sim.history.measurement_covariance_update_max_offdiag_m2;
+            results.measurement_covariance_update_dimension = ...
+                sim.history.measurement_covariance_update_dimension;
+
             results.receiver_names = sim.receiverNames;
             results.receiver_offsets_body_m = sim.receiverOffsetsBody_m;
             results.num_receivers = sim.numReceivers;
