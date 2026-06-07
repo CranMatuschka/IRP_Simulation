@@ -1,4 +1,4 @@
-classdef HistoryRecorder
+ classdef HistoryRecorder
     %HISTORYRECORDER Allocates and records Reverse-GNSS simulation history.
     %
     % This class owns history struct shape and per-epoch logging. It does not
@@ -6,6 +6,7 @@ classdef HistoryRecorder
     % reports.
 
     methods (Static)
+        
         function history = initialize(sim)
             history = struct();
 
