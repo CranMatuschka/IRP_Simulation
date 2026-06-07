@@ -400,6 +400,15 @@ classdef ReverseGnssSimulation < handle
             obj.initialTruth0 = obj.physicalTruthVector();
             obj.initialP0 = P0;
 
+            % Audit note:
+            % obj.R is only the nominal constructor covariance used to size and
+            % initialize the EKF object. The physically relevant pseudorange
+            % covariance is rebuilt per epoch in MeasurementModel.measurementCovariance()
+            % because visibility, measurement ordering, ground-clock common-mode
+            % terms, and same-tower atmospheric covariance blocks are epoch-dependent.
+            % Do not use this nominal diagonal obj.R as proof that the update-time
+            % measurement covariance is diagonal.
+
             obj.Q = EkfDynamicsModel.buildProcessNoise(obj);
             obj.R = eye(obj.numReceivers * obj.numTowers) * ...
                 obj.measurementModel.measurementVariance( ...

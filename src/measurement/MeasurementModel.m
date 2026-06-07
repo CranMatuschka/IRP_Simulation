@@ -26,6 +26,22 @@ classdef MeasurementModel < handle
     %     backwards-compatible output lists. The migration path is to add a
     %     structured atmosphere budget internally while preserving these
     %     legacy outputs until callers are updated.
+    %
+    % Remaining implementation audit:
+    %   - Atmosphere truth/model/residual handling is the validated baseline.
+    %     Truth atmosphere and sampled stochastic residuals belong only in y;
+    %     model atmosphere and residual covariance belong in yp/R.
+    %   - The next required regression is a deterministic atmosphere mismatch
+    %     prefit-innovation test with receiver/tower clock absorption disabled
+    %     or tightly constrained. Final position error alone is not a valid
+    %     validation metric for common-mode atmospheric range residuals.
+    %   - Non-atmospheric terms are currently scaffolded as truth/model/residual
+    %     budgets, but most model corrections are still zero. Hardware,
+    %     antenna, multipath, tower-survey, light-time, Sagnac, and relativity
+    %     must not be treated as physically complete until their model-side
+    %     corrections enter yp and their diagnostics are validated.
+    %   - Keep follow-up changes small and local. Prefer simple MATLAB structs
+    %     and backward-compatible wrappers over new class hierarchies.
 
     properties
         cfg
