@@ -285,6 +285,48 @@ scenario.atmosphere.ionosphereShellHeight_m = 350000.0;
 % Keep truth residual sigmas at zero for deterministic geometry/report
 % validation. Enable them only when testing stochastic truth generation,
 % estimator consistency, or atmosphere-model robustness.
+%
+% Truth/model/residual diagnostic workflow:
+%
+%   sim.history.atmosphere.truth.total_m
+%       physical atmosphere delay used in generated pseudoranges y
+%
+%   sim.history.atmosphere.model.total_m
+%       deterministic correction available to the estimator prediction yp
+%
+%   sim.history.atmosphere.residual.total_m
+%       truth.total_m - model.total_m, including stochastic truth residuals
+%
+%   sim.history.atmosphere.residual.deterministic_total_m
+%       deterministic truth/model mismatch with stochastic samples removed
+%
+%   sim.history.atmosphere.covariance
+%       model residual sigmas and the sameTower variance contribution added
+%       to R for receivers observing the same transmitting tower
+%
+% The saved results struct mirrors these fields as results.atmosphere. The
+% report data and atmosphere summary table expose the configured truth/model
+% modes, constant parameters, deterministic mismatch, residual sigmas, and
+% R covariance structure. The example script
+% examples/runAtmosphereMismatchStudy.m configures a no-external-data
+% constant mismatch with truth total 4.6 m, model total 3.7 m, and
+% deterministic residual 0.9 m.
+%
+% Do not validate atmosphere realism from final position error alone. Common
+% atmospheric range errors can be absorbed by receiver or tower clock states.
+% Inspect prefit and postfit innovations, clock-bias errors, NIS, R, and the
+% atmosphere truth/model/residual diagnostics.
+%
+% Propagation correction status:
+%
+%   scenario.measurement.propagationFrame = "ECI_static_receive_epoch"
+%
+% means geometric range uses ECI transmitter and receiver positions at the
+% receive epoch. Inertial iterative light-time and relativistic path/clock
+% terms are scaffolded diagnostics and remain disabled by default. Enabling
+% unimplemented relativistic flags raises a clear error. Enabling both
+% inertial light-time and separate Sagnac correction is guarded to prevent
+% accidental double counting.
 
 scenario.atmosphere.truth = struct( ...
     'enableTroposphere', false, ...
