@@ -12,7 +12,7 @@
 
 %   sim = test_ReverseGnss_5Towers_NReceivers_SimConfigPDF();
 %   sim = test_ReverseGnss_5Towers_NReceivers_SimConfigPDF(8);
-REPORT_VERSION = sprintf('1.37');
+REPORT_VERSION = sprintf('1.38');
 N_RECEIVERS = 4;
 assert(N_RECEIVERS >= 1 && floor(N_RECEIVERS) == N_RECEIVERS, ...
     'N_RECEIVERS must be a positive integer.');
@@ -149,6 +149,7 @@ validateRetainedReportAtmosphereDiagnostics(sim);
 runAtmosphericResidualCovarianceRegression();
 runResidualSigmaOverconfidenceRegression();
 runAtmosphericResidualCovarianceDocumentationRegression();
+runStochasticTruthResidualInjectionRegression();
 runInnovationCovarianceReportDiagnosticsRegression(sim, reportText);
 runTroposphereProviderInterfaceRegression();
 runTroposphereHydrostaticWetComponentRegression();
@@ -2395,6 +2396,201 @@ function runAtmosphericResidualCovarianceDocumentationRegression()
         'SimulationConfig should connect model residual sigmas to EKF consistency diagnostics.');
 
     disp("PASS: atmospheric residual covariance settings are documented.");
+end
+
+function runStochasticTruthResidualInjectionRegression()
+    ProjectPathManager.addProjectPaths();
+
+    simA = runStochasticTruthResidualScenarioForTest(91001);
+    simB = runStochasticTruthResidualScenarioForTest(91001);
+    simC = runStochasticTruthResidualScenarioForTest(91002);
+
+    totalA = simA.history.atmosphere_truth_residual_by_tower_m;
+    tropoA = simA.history.atmosphere_truth_troposphere_residual_by_tower_m;
+    ionoA = simA.history.atmosphere_truth_ionosphere_residual_by_tower_m;
+
+    totalB = simB.history.atmosphere_truth_residual_by_tower_m;
+    tropoB = simB.history.atmosphere_truth_troposphere_residual_by_tower_m;
+    ionoB = simB.history.atmosphere_truth_ionosphere_residual_by_tower_m;
+
+    totalC = simC.history.atmosphere_truth_residual_by_tower_m;
+
+    finiteA = isfinite(totalA);
+
+    assert(any(finiteA(:)), ...
+        'Stochastic truth residual regression should record finite residuals.');
+
+    assert(any(abs(totalA(finiteA)) > 0.0), ...
+        'Truth atmosphere residual samples should be nonzero when truth residual sigmas are enabled.');
+
+    assert(any(abs(tropoA(finiteA)) > 0.0), ...
+        'Truth troposphere residual samples should be nonzero when residualTroposphereSigma_m is enabled.');
+
+    assert(any(abs(ionoA(finiteA)) > 0.0), ...
+        'Truth ionosphere residual samples should be nonzero when residualIonosphereSigma_m is enabled.');
+
+    assert(max(abs(totalA(:) - (tropoA(:) + ionoA(:)))) < 1e-12, ...
+        'Truth total atmosphere residual must equal troposphere residual plus ionosphere residual.');
+
+    assert(max(abs(totalA(:) - totalB(:))) < 1e-12, ...
+        'Same atmosphere residual seed should reproduce the same total truth residual samples.');
+
+    assert(max(abs(tropoA(:) - tropoB(:))) < 1e-12, ...
+        'Same atmosphere residual seed should reproduce the same troposphere residual samples.');
+
+    assert(max(abs(ionoA(:) - ionoB(:))) < 1e-12, ...
+        'Same atmosphere residual seed should reproduce the same ionosphere residual samples.');
+
+    assert(max(abs(totalA(:) - totalC(:))) > 1e-9, ...
+        'Different atmosphere residual seed should produce different truth residual samples.');
+
+    assert(abs(std(tropoA(:), 0, 'omitnan')) > 0.0, ...
+        'Troposphere truth residual samples should have nonzero spread.');
+
+    assert(abs(std(ionoA(:), 0, 'omitnan')) > 0.0, ...
+        'Ionosphere truth residual samples should have nonzero spread.');
+
+    assert(abs(std(totalA(:), 0, 'omitnan')) > ...
+            max(abs(std(tropoA(:), 0, 'omitnan')), ...
+                abs(std(ionoA(:), 0, 'omitnan'))) * 0.25, ...
+        'Total truth residual samples should have physically meaningful spread.');
+
+    for k = 1:simA.numSteps
+        visible = simA.history.visibility_mask_by_receiver_tower(:, :, k);
+
+        correctedWithoutTruthResidual = ...
+            simA.history.pseudorange_by_receiver_tower_m(:, :, k) ...
+            - simA.history.true_range_by_receiver_tower_m(:, :, k) ...
+            - simA.history.atmosphere_truth_delay_by_receiver_tower_m(:, :, k);
+
+        commonClockSamples = [];
+
+        for twr = 1:simA.numTowers
+            receiverMask = visible(:, twr);
+
+            if ~any(receiverMask)
+                continue;
+            end
+
+            towerResidual_m = ...
+                simA.history.atmosphere_truth_residual_by_tower_m(twr, k);
+
+            clockSamplesForTower = ...
+                correctedWithoutTruthResidual(receiverMask, twr) ...
+                - towerResidual_m;
+
+            commonClockSamples = [ ...
+                commonClockSamples; ...
+                clockSamplesForTower(:)]; %#ok<AGROW>
+        end
+
+        if numel(commonClockSamples) > 1
+            assert(max(abs(commonClockSamples - ...
+                    mean(commonClockSamples, 'omitnan'))) < 1e-6, ...
+                'Truth atmosphere residual must be injected as a tower-common pseudorange term.');
+        end
+    end
+
+    zeroResidualSim = runZeroTruthResidualScenarioForTest();
+
+    zeroTotal = zeroResidualSim.history.atmosphere_truth_residual_by_tower_m;
+    zeroTropo = zeroResidualSim.history.atmosphere_truth_troposphere_residual_by_tower_m;
+    zeroIono = zeroResidualSim.history.atmosphere_truth_ionosphere_residual_by_tower_m;
+
+    assert(all(abs(zeroTotal(:)) < 1e-12), ...
+        'Truth atmosphere residuals should be exactly zero when truth residual sigmas are zero.');
+
+    assert(all(abs(zeroTropo(:)) < 1e-12), ...
+        'Truth troposphere residuals should be exactly zero when residualTroposphereSigma_m is zero.');
+
+    assert(all(abs(zeroIono(:)) < 1e-12), ...
+        'Truth ionosphere residuals should be exactly zero when residualIonosphereSigma_m is zero.');
+
+    disp("PASS: stochastic truth atmosphere residual injection is reproducible and tower-common.");
+end
+
+function sim = runStochasticTruthResidualScenarioForTest(atmosphereResidualSeed)
+    simConfigOverride = makeShortRegressionOverride();
+
+    simConfigOverride.simulation.totalTime_h = 0.004;
+    simConfigOverride.seeds.atmosphereResidual = double(atmosphereResidualSeed);
+
+    scenarioPath = 'reverseGnssClockNavigationScenario';
+
+    truthCfg = struct( ...
+        'enableTroposphere', true, ...
+        'enableIonosphere', true, ...
+        'troposphereModel', "constant", ...
+        'ionosphereModel', "constant", ...
+        'constantTroposphereDelay_m', 0.0, ...
+        'constantIonosphereDelay_m', 0.0, ...
+        'residualTroposphereSigma_m', 1.50, ...
+        'residualIonosphereSigma_m', 2.50);
+
+    modelCfg = truthCfg;
+    modelCfg.residualTroposphereSigma_m = 0.0;
+    modelCfg.residualIonosphereSigma_m = 0.0;
+
+    simConfigOverride.scenarios.(scenarioPath).atmosphere.truth = truthCfg;
+    simConfigOverride.scenarios.(scenarioPath).atmosphere.model = modelCfg;
+
+    simConfigOverride.scenarios.(scenarioPath).measurement.enableMeasurementNoise = false;
+    simConfigOverride.scenarios.(scenarioPath).measurement.enableNoise = false;
+    simConfigOverride.scenarios.(scenarioPath).measurement.enableElevationMask = true;
+    simConfigOverride.scenarios.(scenarioPath).measurement.elevationMask_deg = 5.0;
+
+    simConfigOverride.scenarios.(scenarioPath).enableGroundClockErrors = false;
+    simConfigOverride.scenarios.(scenarioPath).enableGroundClockCorrection = true;
+    simConfigOverride.scenarios.(scenarioPath).enableGroundClockCorrectionNoise = false;
+
+    runtimeOptions = struct();
+    runtimeOptions.entryPointName = "StochasticTruthResidualInjectionRegression";
+    runtimeOptions.simConfigOverride = simConfigOverride;
+
+    sim = ReverseGnssSimulation(runtimeOptions);
+    sim.configure();
+    sim.run();
+end
+
+function sim = runZeroTruthResidualScenarioForTest()
+    simConfigOverride = makeShortRegressionOverride();
+
+    simConfigOverride.simulation.totalTime_h = 0.004;
+    simConfigOverride.seeds.atmosphereResidual = 91001;
+
+    scenarioPath = 'reverseGnssClockNavigationScenario';
+
+    truthCfg = struct( ...
+        'enableTroposphere', true, ...
+        'enableIonosphere', true, ...
+        'troposphereModel', "constant", ...
+        'ionosphereModel', "constant", ...
+        'constantTroposphereDelay_m', 0.0, ...
+        'constantIonosphereDelay_m', 0.0, ...
+        'residualTroposphereSigma_m', 0.0, ...
+        'residualIonosphereSigma_m', 0.0);
+
+    modelCfg = truthCfg;
+
+    simConfigOverride.scenarios.(scenarioPath).atmosphere.truth = truthCfg;
+    simConfigOverride.scenarios.(scenarioPath).atmosphere.model = modelCfg;
+
+    simConfigOverride.scenarios.(scenarioPath).measurement.enableMeasurementNoise = false;
+    simConfigOverride.scenarios.(scenarioPath).measurement.enableNoise = false;
+    simConfigOverride.scenarios.(scenarioPath).measurement.enableElevationMask = true;
+    simConfigOverride.scenarios.(scenarioPath).measurement.elevationMask_deg = 5.0;
+
+    simConfigOverride.scenarios.(scenarioPath).enableGroundClockErrors = false;
+    simConfigOverride.scenarios.(scenarioPath).enableGroundClockCorrection = true;
+    simConfigOverride.scenarios.(scenarioPath).enableGroundClockCorrectionNoise = false;
+
+    runtimeOptions = struct();
+    runtimeOptions.entryPointName = "ZeroTruthResidualRegression";
+    runtimeOptions.simConfigOverride = simConfigOverride;
+
+    sim = ReverseGnssSimulation(runtimeOptions);
+    sim.configure();
+    sim.run();
 end
 
 function runInnovationCovarianceReportDiagnosticsRegression(sim, reportText)
