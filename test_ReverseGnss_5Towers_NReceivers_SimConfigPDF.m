@@ -179,7 +179,7 @@ runAtmosphereComponentResidualDecompositionRegression();
 runAtmosphereResidualCovarianceNisRegression();
 runAtmosphereGradientFiniteDifferenceRegression();
 
-fprintf('\nPASS: test finished and PDF was created:\n%s\n', pdfFile);
+fprintf('\nPASS: test finished and PDF was created:\n%s\n', pdfFile); 
 
 %% Helper function
 function receivers = makeReceiverConfigsForTest(nReceivers, baseline_m, sigma_m)
