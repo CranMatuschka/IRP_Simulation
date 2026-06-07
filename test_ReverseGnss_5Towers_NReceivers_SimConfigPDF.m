@@ -181,6 +181,7 @@ runIonospherePiercePointGeometryRegression();
 runIonosphereThinShellMappingRegression();
 runSimpleZtdTroposphereRegression();
 runPropagationCorrectionScaffoldRegression();
+runNonAtmosphericErrorBudgetScaffoldRegression();
 runAtmosphereConstantDiagnosticRegression();
 runAtmosphereDeterministicConstantCasesRegression();
 
@@ -4586,6 +4587,99 @@ function runPropagationCorrectionScaffoldRegression()
         'Enabling unimplemented relativistic path delay must raise a clear error.');
 
     disp("PASS: propagation frame, Sagnac/light-time guard, and relativity scaffold are explicit.");
+end
+
+function runNonAtmosphericErrorBudgetScaffoldRegression()
+    simConfigOverride = makeShortRegressionOverride();
+    scenarioPath = "reverseGnssClockNavigationScenario";
+
+    simConfigOverride.scenarios.(scenarioPath).measurement.enableHardwareDelay = true;
+    simConfigOverride.scenarios.(scenarioPath).measurement.txHardwareDelay_m = 1.25;
+    simConfigOverride.scenarios.(scenarioPath).measurement.rxHardwareDelay_m = 0.75;
+    simConfigOverride.scenarios.(scenarioPath).measurement.enableMultipathDelay = true;
+    simConfigOverride.scenarios.(scenarioPath).measurement.multipathDelay_m = 0.40;
+    simConfigOverride.scenarios.(scenarioPath).measurement.enableAntennaDelay = false;
+    simConfigOverride.scenarios.(scenarioPath).measurement.enableSagnacCorrection = false;
+
+    runtimeOptions = struct();
+    runtimeOptions.entryPointName = "NonAtmosphericErrorBudgetScaffoldRegression";
+    runtimeOptions.simConfigOverride = simConfigOverride;
+
+    sim = ReverseGnssSimulation(runtimeOptions);
+    sim.configure();
+
+    datetimeUtc = sim.simConfig.simulation.startUtc;
+    jd = Clock.julianDateFromDatetime(datetimeUtc);
+    towersEci_m = GroundNode.positionsECI(sim.towers, jd);
+    receiverEci_m = sim.truthAsset.receiverPositionsEci();
+
+    towerIndex = 1;
+    receiverIndex = 1;
+
+    [extraTruth_m, extraModel_m, budget] = ...
+        sim.measurementModel.nonAtmosphericErrorBudget_m( ...
+        towerIndex, ...
+        receiverIndex, ...
+        jd, ...
+        towersEci_m(:, towerIndex), ...
+        receiverEci_m(:, receiverIndex), ...
+        sim.truthAsset);
+
+    expectedHardware_m = ...
+        simConfigOverride.scenarios.(scenarioPath).measurement.txHardwareDelay_m + ...
+        sim.towers{towerIndex}.txSignalDelay_m + ...
+        simConfigOverride.scenarios.(scenarioPath).measurement.rxHardwareDelay_m;
+
+    expectedMultipath_m = ...
+        simConfigOverride.scenarios.(scenarioPath).measurement.multipathDelay_m;
+
+    expectedTotal_m = expectedHardware_m + expectedMultipath_m;
+
+    assert(abs(budget.hardware.truth_m - expectedHardware_m) < 1e-12, ...
+        'Hardware truth budget should include TX, tower-specific, and RX delay.');
+
+    assert(abs(budget.hardware.model_m) < 1e-12, ...
+        'Hardware model scaffold should be zero until calibration corrections are added.');
+
+    assert(abs(budget.hardware.residual_m - budget.hardware.truth_m) < 1e-12, ...
+        'Hardware residual should equal truth minus model.');
+
+    assert(abs(budget.multipath.truth_m - expectedMultipath_m) < 1e-12, ...
+        'Multipath truth budget should use configured delay.');
+
+    assert(abs(budget.multipath.model_m) < 1e-12, ...
+        'Multipath model scaffold should be zero until mitigation corrections are added.');
+
+    assert(abs(budget.antenna.truth_m) < 1e-12, ...
+        'Disabled antenna budget should be zero.');
+
+    assert(abs(budget.tower_survey.truth_m) < 1e-12, ...
+        'Tower survey scaffold should be zero until true/model tower positions are separated.');
+
+    assert(abs(extraTruth_m - expectedTotal_m) < 1e-12, ...
+        'Non-atmospheric total truth delay should sum enabled truth components.');
+
+    assert(abs(extraModel_m) < 1e-12, ...
+        'Non-atmospheric model total should stay zero in the scaffold.');
+
+    assert(abs(budget.total.residual_m - expectedTotal_m) < 1e-12, ...
+        'Non-atmospheric total residual should equal truth minus model.');
+
+    legacyExtra_m = sim.measurementModel.nonAtmosphericExtraDelay_m( ...
+        towerIndex, ...
+        receiverIndex, ...
+        jd, ...
+        towersEci_m(:, towerIndex), ...
+        receiverEci_m(:, receiverIndex), ...
+        sim.truthAsset);
+
+    assert(abs(legacyExtra_m - extraTruth_m) < 1e-12, ...
+        'Backward-compatible nonAtmosphericExtraDelay_m must return total truth delay.');
+
+    assert(budget.hardware.correlation_model == "independent");
+    assert(budget.multipath.correlation_model == "independent");
+
+    disp("PASS: non-atmospheric error budget scaffold preserves existing truth delays.");
 end
 
 function runAtmosphereConstantDiagnosticRegression()
