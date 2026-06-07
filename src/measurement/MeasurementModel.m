@@ -10,6 +10,22 @@ classdef MeasurementModel < handle
     %   - truth and estimator atmospheric-delay application
     %   - non-atmospheric deterministic extra-delay toggles
     %   - measurement-noise injection
+    %
+    % Truth/model/residual audit map:
+    %   - makePseudoranges() forms truth y. It evaluates truthAtmosphere,
+    %     samples stochastic tower-common atmosphere residuals once per
+    %     epoch, and adds those samples only to y.
+    %   - predictPseudorangesWithJacobian() forms estimator yp and H. It
+    %     evaluates modelAtmosphere only and does not access the actual
+    %     stochastic truth residual samples.
+    %   - measurementCovariance() represents estimator uncertainty. Model
+    %     atmosphere residual sigmas enter R as same-tower common-mode
+    %     covariance blocks through addSameTowerCommonVariance().
+    %   - HistoryRecorder and ReportDataBuilder currently assemble
+    %     atmosphere truth/model/residual diagnostics from the long
+    %     backwards-compatible output lists. The migration path is to add a
+    %     structured atmosphere budget internally while preserving these
+    %     legacy outputs until callers are updated.
 
     properties
         cfg
