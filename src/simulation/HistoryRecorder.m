@@ -744,7 +744,7 @@ classdef HistoryRecorder
 
             propagation.diagnostics = struct();
             propagation.diagnostics.note = ...
-                "ECI receive-epoch geometry is logged explicitly; inertial light-time is computed when enabled; relativity remains an explicit zero scaffold until implemented.";
+                "ECI receive-epoch geometry is logged explicitly; inertial light-time and Shapiro path delay are computed when enabled; relativistic clock correction remains explicitly guarded.";
         end
 
         function history = recordPropagationDiagnostics( ...

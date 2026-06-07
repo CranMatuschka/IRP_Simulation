@@ -119,7 +119,11 @@ scenario.measurement.sagnacCorrection_m = 0.0;
 scenario.measurement.sagnacCorrectionModel_m = 0.0;
 scenario.measurement.enableRelativisticPathDelay = false;
 scenario.measurement.enableRelativisticClockCorrection = false;
-
+scenario.measurement.enableRelativisticPathDelayTruth = false;
+scenario.measurement.enableRelativisticPathDelayModel = false;
+scenario.measurement.enableRelativisticClockCorrectionTruth = false;
+scenario.measurement.enableRelativisticClockCorrectionModel = false;
+scenario.measurement.earthGravitationalParameter_m3ps2 = 3.986004418e14;
 %% Atmosphere Model
 % "truth" controls the physical atmospheric delay and optional residual noise
 % applied to generated pseudoranges.
