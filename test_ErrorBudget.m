@@ -5,6 +5,7 @@ ProjectPathManager.addProjectPaths();
 
 testComponentResidualAndAliases();
 testEvaluateTotalsAndVarianceSplit();
+testNonAtmosphericBudget();
 
 fprintf('PASS: ErrorBudget checks passed.\n');
 end
@@ -55,4 +56,55 @@ assert(all(budget.modelGradient_ECI == [1.0; 2.0; 3.0]));
 assert(abs(budget.independentVariance_m2 - 0.09) < eps);
 assert(abs(budget.sameTowerVariance_m2 - 0.4^2) < eps);
 assert(budget.components.troposphere.correlation_model == "sameTower");
+end
+
+function testNonAtmosphericBudget()
+context = struct();
+context.useHardwareDelay = true;
+context.txHardwareDelay_m = 1.0;
+context.towerTxSignalDelay_m = 0.25;
+context.rxHardwareDelay_m = 0.50;
+context.txHardwareDelayModel_m = 0.20;
+context.rxHardwareDelayModel_m = 0.10;
+
+context.useMultipathDelay = true;
+context.multipathDelay_m = 0.75;
+context.multipathStochasticTruth_m = -0.05;
+context.multipathDelayModel_m = 0.30;
+context.multipathSigma_m = 0.20;
+context.multipathElevation_deg = 45.0;
+context.multipathStochasticMinimumElevation_deg = 10.0;
+context.multipathStochasticRandomSeed = 123;
+
+context.useAntennaDelay = true;
+context.antennaDelay_m = 0.40;
+context.txAntennaCorrection_m = 0.06;
+context.rxAntennaCorrection_m = 0.04;
+context.antennaDelayModel_m = 0.25;
+
+context.useSagnacCorrection = true;
+context.sagnacCorrection_m = 0.03;
+context.sagnacCorrectionModel_m = 0.01;
+
+context.useTowerSurveyError = true;
+context.truthTowerSurvey_m = -0.20;
+context.modelTowerSurvey_m = -0.05;
+context.truthTowerPositionOffsetEcef_m = [1; 2; 3];
+context.modelTowerPositionOffsetEcef_m = [0; 0; 1];
+
+[truth_m, model_m, budget] = ErrorBudget.nonAtmospheric(context);
+
+expectedTruth_m = 1.75 + 0.70 + 0.50 + 0.03 - 0.20;
+expectedModel_m = 0.30 + 0.30 + 0.25 + 0.01 - 0.05;
+
+assert(abs(truth_m - expectedTruth_m) < eps);
+assert(abs(model_m - expectedModel_m) < eps);
+assert(abs(budget.total.residual_m - ...
+    (expectedTruth_m - expectedModel_m)) < eps);
+assert(abs(budget.multipath.variance_m2 - 0.20^2) < eps);
+assert(budget.multipath.correlation_model == "independent");
+assert(contains(budget.legacy_sagnac.diagnostics.note, ...
+    "Legacy scalar Sagnac placeholder"));
+assert(all(budget.tower_survey.diagnostics.truth_position_offset_ecef_m == ...
+    [1; 2; 3]));
 end
