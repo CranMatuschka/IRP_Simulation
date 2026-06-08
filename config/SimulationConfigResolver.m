@@ -391,6 +391,7 @@ classdef SimulationConfigResolver
             end
 
             explicitMode = false;
+            explicitStochastic = false;
             if isfield(override, 'mode')
                 mode = SimulationConfigResolver.normalizeMode(override.mode);
                 component.truthMode = mode;
@@ -422,10 +423,12 @@ classdef SimulationConfigResolver
                 component.stochasticMode = ...
                     SimulationConfigResolver.normalizeMode(override.stochastic);
                 explicitMode = true;
+                explicitStochastic = true;
             elseif isfield(override, 'stochasticMode')
                 component.stochasticMode = ...
                     SimulationConfigResolver.normalizeMode(override.stochasticMode);
                 explicitMode = true;
+                explicitStochastic = true;
             end
 
             if isfield(override, 'correlationModel')
@@ -445,6 +448,10 @@ classdef SimulationConfigResolver
                         component.stochasticMode = "awgn";
                     end
                 end
+            end
+
+            if ~explicitStochastic && SimulationConfigResolver.componentUsesAwgn(component)
+                component.stochasticMode = "awgn";
             end
 
             component = SimulationConfigResolver.finalizeComponent(component);

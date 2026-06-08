@@ -26,6 +26,8 @@ classdef ReverseGnssSimulation < handle
 
         simConfig;
         cfg;
+        resolvedConfig;
+        resolvedErrors;
         constants;
         c double = 299792458.0;
         mu double = 398600.4418e9;
@@ -194,6 +196,9 @@ classdef ReverseGnssSimulation < handle
                 'mt19937ar', 'Seed', obj.seedConfig.allanValidation);
 
             obj.cfg = GroundTimingNetwork.applyTowerClockEkfConfiguration(obj.cfg);
+            obj.simConfig.scenarios.reverseGnssClockNavigationScenario = obj.cfg;
+            obj.resolvedConfig = SimulationConfigResolver.resolve(obj.simConfig);
+            obj.resolvedErrors = obj.resolvedConfig.errors;
         end
 
         function setupTime(obj)
