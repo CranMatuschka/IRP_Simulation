@@ -245,16 +245,14 @@
             history.truth(:, k) = truthVector;
             history.covariance_diag(:, k) = covarianceDiag;
 
-            history.innovation_rms_m(k) = HistoryRecorder.computeRms(innovation);
-            history.postfit_innovation_rms_m(k) = HistoryRecorder.computeRms(postfit);
+            history.innovation_rms_m(k) = MeasurementAlgebra.rms(innovation);
+            history.postfit_innovation_rms_m(k) = MeasurementAlgebra.rms(postfit);
             history.nis_history(k) = nisValue;
-            history.covariance_condition_number(k) = cond(covarianceMatrix);
+            history.covariance_condition_number(k) = ...
+                MeasurementAlgebra.safeConditionNumber(covarianceMatrix);
 
-            if isempty(S)
-                history.innovation_condition_number(k) = NaN;
-            else
-                history.innovation_condition_number(k) = cond(S);
-            end
+            history.innovation_condition_number(k) = ...
+                MeasurementAlgebra.safeConditionNumber(S);
             if isempty(S)
                 innovationCovarianceDiagonal_m2 = [];
             else
@@ -291,10 +289,10 @@
             end
 
             [rangeMeanVariance_m2, rangeMaxOffdiag_m2, rangeDimension] = ...
-                HistoryRecorder.covarianceSummary(latestRrange);
+                MeasurementAlgebra.covarianceSummary(latestRrange);
 
             [updateMeanVariance_m2, updateMaxOffdiag_m2, updateDimension] = ...
-                HistoryRecorder.covarianceSummary(latestRupdate);
+                MeasurementAlgebra.covarianceSummary(latestRupdate);
 
             history.measurement_covariance_range_mean_variance_m2(k) = ...
                 rangeMeanVariance_m2;
@@ -577,47 +575,6 @@
     end
 
     methods (Static, Access = private)
-        function [meanDiagonal_m2, maxOffDiagonalAbs_m2, dimension] = ...
-                covarianceSummary(R)
-
-            if isempty(R)
-                meanDiagonal_m2 = NaN;
-                maxOffDiagonalAbs_m2 = NaN;
-                dimension = 0;
-                return;
-            end
-
-            validateattributes(R, {'numeric'}, ...
-                {'real', 'finite', '2d', 'square'}, ...
-                mfilename, 'R');
-
-            dimension = size(R, 1);
-
-            diagonalValues_m2 = diag(R);
-            diagonalValues_m2 = diagonalValues_m2(isfinite(diagonalValues_m2));
-
-            if isempty(diagonalValues_m2)
-                meanDiagonal_m2 = NaN;
-            else
-                meanDiagonal_m2 = mean(diagonalValues_m2, 'omitnan');
-            end
-
-            if dimension <= 1
-                maxOffDiagonalAbs_m2 = 0.0;
-                return;
-            end
-
-            offDiagonal_m2 = R - diag(diag(R));
-            offDiagonalAbs_m2 = abs(offDiagonal_m2(:));
-            offDiagonalAbs_m2 = offDiagonalAbs_m2(isfinite(offDiagonalAbs_m2));
-
-            if isempty(offDiagonalAbs_m2)
-                maxOffDiagonalAbs_m2 = NaN;
-            else
-                maxOffDiagonalAbs_m2 = max(offDiagonalAbs_m2);
-            end
-        end
-        
         function atmosphere = initializeAtmosphereBudgetHistory(sim)
             receiverTowerSize = ...
                 [sim.numReceivers, sim.numTowers, sim.numSteps];
@@ -969,9 +926,5 @@
             end
         end
 
-        function value = computeRms(x)
-            x = x(:);
-            value = sqrt(mean(x.^2, 'omitnan'));
-        end
     end
 end

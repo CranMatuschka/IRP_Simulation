@@ -805,22 +805,22 @@ classdef MeasurementModel < handle
                 obj.pseudorangeSigma_m, ...
                 obj.numericalSigmaFloor_m);
 
-            R = eye(n) * independentSigma_m^2 + ...
-                diag(independentExtraVariance_m2);
+            R = MeasurementAlgebra.diagonalCovariance(repmat(independentSigma_m, n, 1)) + ...
+                MeasurementAlgebra.diagonalCovariance(sqrt(independentExtraVariance_m2));
 
             if ~towerClockEkfEnabled && groundClockResidualVariance_m2 > 0.0
-                R = obj.addSameTowerCommonVariance( ...
+                R = MeasurementAlgebra.addSameTowerCommonVariance( ...
                     R, measurementTowerIndex, groundClockResidualVariance_m2);
             end
 
             atmosphereVariance_m2 = obj.atmosphereResidualVariance_m2();
 
             if atmosphereVariance_m2 > 0.0
-                R = obj.addSameTowerCommonVariance( ...
+                R = MeasurementAlgebra.addSameTowerCommonVariance( ...
                     R, measurementTowerIndex, atmosphereVariance_m2);
             end
 
-            R = 0.5 * (R + R');
+            R = MeasurementAlgebra.symmetrize(R);
 
             validateattributes(R, {'numeric'}, ...
                 {'real', 'finite', 'size', [n, n]}, ...
@@ -1352,23 +1352,6 @@ classdef MeasurementModel < handle
             end
         end
         
-        function R = addSameTowerCommonVariance( ...
-                ~, R, measurementTowerIndex, commonVariance_m2)
-
-            commonVariance_m2 = double(commonVariance_m2);
-
-            validateattributes(commonVariance_m2, {'numeric'}, ...
-                {'real', 'finite', 'scalar', 'nonnegative'}, ...
-                mfilename, 'commonVariance_m2');
-
-            towerIds = unique(measurementTowerIndex(:).');
-
-            for towerId = towerIds
-                rows = measurementTowerIndex == towerId;
-                R(rows, rows) = R(rows, rows) + commonVariance_m2;
-            end
-        end        
-
         function component = emptyErrorBudgetComponent(~)
             component = struct();
             component.truth_m = 0.0;
