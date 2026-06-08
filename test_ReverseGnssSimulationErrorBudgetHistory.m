@@ -12,6 +12,22 @@ sim.configure();
 sim.run();
 
 history = sim.history;
+finalPositionError_m = norm( ...
+    history.x(sim.idx.pos, end) - history.truth(sim.idx.pos, end));
+innovationRmsMean_m = mean(history.innovation_rms_m, 'omitnan');
+truthAtmosphereMean_m = mean( ...
+    history.errorBudget.atmosphere.truthTotal_m(:), 'omitnan');
+modelAtmosphereMean_m = mean( ...
+    history.errorBudget.atmosphere.modelTotal_m(:), 'omitnan');
+covarianceMean_m2 = mean( ...
+    history.errorBudget.atmosphere.sameTowerVariance_m2(:), 'omitnan');
+
+assert(abs(finalPositionError_m - 559.38528668540778) < 1e-9);
+assert(abs(innovationRmsMean_m - 584.51380801007917) < 1e-9);
+assert(abs(truthAtmosphereMean_m - 2.5) < 1e-12);
+assert(abs(modelAtmosphereMean_m - 2.5) < 1e-12);
+assert(abs(covarianceMean_m2 - 0.05) < 1e-12);
+
 assert(isfield(history, 'errorBudget'));
 assert(isfield(history.errorBudget, 'atmosphere'));
 assert(isfield(history.errorBudget, 'nonAtmospheric'));
