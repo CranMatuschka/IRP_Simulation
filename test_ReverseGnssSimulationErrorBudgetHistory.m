@@ -52,6 +52,13 @@ assert(abs(reportData.model_atmosphere_residual_variance_m2 - ...
     mean(history.errorBudget.atmosphere.sameTowerVariance_m2(:), ...
     'omitnan')) < eps);
 
+status = sim.results.error_budget_status;
+assert(any(status.guarded_not_implemented == ...
+    "Shapiro relativistic path delay truth/model correction"));
+assert(~any(status.implemented == ...
+    "Shapiro relativistic path delay truth/model correction"));
+assert(any(status.diagnostics_available == "history.errorBudget"));
+
 fprintf('PASS: ReverseGnssSimulation error-budget history check passed.\n');
 end
 

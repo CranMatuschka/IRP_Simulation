@@ -36,8 +36,9 @@ classdef MeasurementModel < handle
     %     deterministic/stochastic multipath, tower-survey range effect, and
     %     legacy scalar Sagnac all expose truth/model/residual components.
     %   - Propagation: ECI receive-epoch range is the baseline. Optional
-    %     inertial iterative light-time and Shapiro path delay can enter y
-    %     and/or yp through separate truth/model toggles.
+    %     inertial iterative light-time can enter y and/or yp through
+    %     separate truth/model toggles. Shapiro path delay is scaffolded but
+    %     guarded until accepted in a dedicated physics/test branch.
     %   - Covariance: update-time R is built per epoch. Same-tower common
     %     covariance is used for atmosphere/ground-clock residuals; stochastic
     %     multipath contributes independent diagonal variance.
@@ -909,7 +910,7 @@ classdef MeasurementModel < handle
             diagnostics.relativity.clock_enabled_model = ...
                 obj.enableRelativisticClockCorrectionModel;
             diagnostics.note = ...
-                "ECI inertial light-time and Shapiro path delay are computed when enabled; relativistic clock correction remains guarded until the physical clock dynamics are modelled.";
+                "ECI inertial light-time is computed when enabled. Shapiro path delay and relativistic clock correction remain guarded until the physical models are accepted and tested.";
         end
 
     end

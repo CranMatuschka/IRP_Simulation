@@ -6,6 +6,7 @@ ProjectPathManager.addProjectPaths();
 testModeNormalization();
 testAwgnValidation();
 testBackwardCompatibleDefaults();
+testClockStatus();
 
 fprintf('PASS: SimulationConfigResolver checks passed.\n');
 end
@@ -114,6 +115,18 @@ assert(~resolved.errors.legacySagnac.enabled);
 assert(~resolved.errors.relativity.enabled);
 assert(resolved.errors.clock.enabled);
 assert(resolved.errors.clock.covariance.enabled);
+end
+
+function testClockStatus()
+simConfig = loadDefaultConfig();
+scenario = simConfig.scenarios.reverseGnssClockNavigationScenario;
+scenario.process.clockModel = "coupledGaussMarkov";
+simConfig.scenarios.reverseGnssClockNavigationScenario = scenario;
+
+resolved = SimulationConfigResolver.resolve(simConfig);
+assert(resolved.errors.clock.modelMode == "advanced");
+assert(resolved.errors.clock.stochasticMode == "advanced");
+assert(resolved.errors.clock.diagnostics.status == "experimental");
 end
 
 function simConfig = loadDefaultConfig()
