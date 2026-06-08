@@ -103,24 +103,17 @@ classdef ResultBuilder
             results.state_truth = sim.history.truth;
             results.covariance_diag = sim.history.covariance_diag;
 
-            results.innovation_rms_m = sim.history.innovation_rms_m;
-            results.postfit_innovation_rms_m = sim.history.postfit_innovation_rms_m;
-            results.nis_history = sim.history.nis_history;
-            results.H_rank_history = sim.history.H_rank_history;
-
-            results.measurement_covariance_range_mean_variance_m2 = ...
-                sim.history.measurement_covariance_range_mean_variance_m2;
-            results.measurement_covariance_range_max_offdiag_m2 = ...
-                sim.history.measurement_covariance_range_max_offdiag_m2;
-            results.measurement_covariance_range_dimension = ...
-                sim.history.measurement_covariance_range_dimension;
-
-            results.measurement_covariance_update_mean_variance_m2 = ...
-                sim.history.measurement_covariance_update_mean_variance_m2;
-            results.measurement_covariance_update_max_offdiag_m2 = ...
-                sim.history.measurement_covariance_update_max_offdiag_m2;
-            results.measurement_covariance_update_dimension = ...
-                sim.history.measurement_covariance_update_dimension;
+            results = BuilderFieldCopier.copyNamedFields(results, sim.history, [
+                "innovation_rms_m"
+                "postfit_innovation_rms_m"
+                "nis_history"
+                "H_rank_history"
+                "measurement_covariance_range_mean_variance_m2"
+                "measurement_covariance_range_max_offdiag_m2"
+                "measurement_covariance_range_dimension"
+                "measurement_covariance_update_mean_variance_m2"
+                "measurement_covariance_update_max_offdiag_m2"
+                "measurement_covariance_update_dimension"]);
 
             results.receiver_names = sim.receiverNames;
             results.receiver_offsets_body_m = sim.receiverOffsetsBody_m;
@@ -132,154 +125,21 @@ classdef ResultBuilder
             
             results.observability = ObservabilityAnalyzer.analyzeNormalMatrix( ...
                 sim.observabilityNormalMatrix, results.state_names);
-            results.ground_clock_true_m = sim.history.ground_clock_true_m;
-            results.ground_clock_correction_m = sim.history.ground_clock_correction_m;
-            results.ground_clock_residual_m = sim.history.ground_clock_residual_m;
+            results = BuilderFieldCopier.copyNamedFields(results, sim.history, [
+                "ground_clock_true_m"
+                "ground_clock_correction_m"
+                "ground_clock_residual_m"]);
 
             results.clock_bias_truth_m = sim.history.truth(sim.idx.rxClockBias, :);
             results.clock_bias_est_m = sim.history.x(sim.idx.rxClockBias, :);
 
-            results.pseudorange_by_receiver_tower_m = ...
-                sim.history.pseudorange_by_receiver_tower_m;
-
-            results.true_range_by_receiver_tower_m = ...
-                sim.history.true_range_by_receiver_tower_m;
-
-            results.atmosphere = sim.history.atmosphere;
-            results.propagation = sim.history.propagation;
-            if isfield(sim.history, 'non_atmospheric')
-                results.non_atmospheric = sim.history.non_atmospheric;
-            end
-            
-            results.atmosphere_truth_delay_by_receiver_tower_m = ...
-                sim.history.atmosphere_truth_delay_by_receiver_tower_m;
-
-            results.atmosphere_truth_troposphere_by_receiver_tower_m = ...
-                sim.history.atmosphere_truth_troposphere_by_receiver_tower_m;
-
-            results.atmosphere_truth_ionosphere_by_receiver_tower_m = ...
-                sim.history.atmosphere_truth_ionosphere_by_receiver_tower_m;
-            results.atmosphere_truth_ionosphere_ipp_lat_deg_by_receiver_tower = ...
-                sim.history.atmosphere_truth_ionosphere_ipp_lat_deg_by_receiver_tower;
-
-            results.atmosphere_truth_ionosphere_ipp_lon_deg_by_receiver_tower = ...
-                sim.history.atmosphere_truth_ionosphere_ipp_lon_deg_by_receiver_tower;
-
-            results.atmosphere_truth_ionosphere_vtec_TECU_by_receiver_tower = ...
-                sim.history.atmosphere_truth_ionosphere_vtec_TECU_by_receiver_tower;
-
-            results.atmosphere_truth_ionosphere_stec_TECU_by_receiver_tower = ...
-                sim.history.atmosphere_truth_ionosphere_stec_TECU_by_receiver_tower;
-
-            results.atmosphere_truth_ionosphere_mapping_factor_by_receiver_tower = ...
-                sim.history.atmosphere_truth_ionosphere_mapping_factor_by_receiver_tower;
-
-            results.atmosphere_truth_ionosphere_frequency_Hz_by_receiver_tower = ...
-                sim.history.atmosphere_truth_ionosphere_frequency_Hz_by_receiver_tower;
-            
-            results.atmosphere_truth_troposphere_pressure_hPa_by_receiver_tower = ...
-                sim.history.atmosphere_truth_troposphere_pressure_hPa_by_receiver_tower;
-
-            results.atmosphere_truth_troposphere_temperature_K_by_receiver_tower = ...
-                sim.history.atmosphere_truth_troposphere_temperature_K_by_receiver_tower;
-
-            results.atmosphere_truth_troposphere_relative_humidity_fraction_by_receiver_tower = ...
-                sim.history.atmosphere_truth_troposphere_relative_humidity_fraction_by_receiver_tower;
-
-            results.atmosphere_truth_troposphere_water_vapor_pressure_hPa_by_receiver_tower = ...
-                sim.history.atmosphere_truth_troposphere_water_vapor_pressure_hPa_by_receiver_tower;
-
-            results.atmosphere_truth_troposphere_zhd_m_by_receiver_tower = ...
-                sim.history.atmosphere_truth_troposphere_zhd_m_by_receiver_tower;
-
-            results.atmosphere_truth_troposphere_zwd_m_by_receiver_tower = ...
-                sim.history.atmosphere_truth_troposphere_zwd_m_by_receiver_tower;
-
-            results.atmosphere_truth_troposphere_mapping_hydrostatic_by_receiver_tower = ...
-                sim.history.atmosphere_truth_troposphere_mapping_hydrostatic_by_receiver_tower;
-
-            results.atmosphere_truth_troposphere_mapping_wet_by_receiver_tower = ...
-                sim.history.atmosphere_truth_troposphere_mapping_wet_by_receiver_tower;
-
-            results.atmosphere_truth_troposphere_slant_hydrostatic_m_by_receiver_tower = ...
-                sim.history.atmosphere_truth_troposphere_slant_hydrostatic_m_by_receiver_tower;
-
-            results.atmosphere_truth_troposphere_slant_wet_m_by_receiver_tower = ...
-                sim.history.atmosphere_truth_troposphere_slant_wet_m_by_receiver_tower;
-            results.atmosphere_truth_troposphere_residual_by_tower_m = ...
-                sim.history.atmosphere_truth_troposphere_residual_by_tower_m;
-
-            results.atmosphere_truth_ionosphere_residual_by_tower_m = ...
-                sim.history.atmosphere_truth_ionosphere_residual_by_tower_m;
-
-            results.atmosphere_truth_troposphere_total_by_receiver_tower_m = ...
-                sim.history.atmosphere_truth_troposphere_total_by_receiver_tower_m;
-
-            results.atmosphere_truth_ionosphere_total_by_receiver_tower_m = ...
-                sim.history.atmosphere_truth_ionosphere_total_by_receiver_tower_m; 
-
-            results.atmosphere_truth_residual_by_tower_m = ...
-                sim.history.atmosphere_truth_residual_by_tower_m;
-
-            results.atmosphere_truth_total_by_receiver_tower_m = ...
-                sim.history.atmosphere_truth_total_by_receiver_tower_m;
-
-            results.atmosphere_model_delay_by_receiver_tower_m = ...
-                sim.history.atmosphere_model_delay_by_receiver_tower_m;
-
-            results.atmosphere_model_troposphere_by_receiver_tower_m = ...
-                sim.history.atmosphere_model_troposphere_by_receiver_tower_m;
-
-            results.atmosphere_model_ionosphere_by_receiver_tower_m = ...
-                sim.history.atmosphere_model_ionosphere_by_receiver_tower_m;
-
-            results.atmosphere_model_ionosphere_ipp_lat_deg_by_receiver_tower = ...
-                sim.history.atmosphere_model_ionosphere_ipp_lat_deg_by_receiver_tower;
-
-            results.atmosphere_model_ionosphere_ipp_lon_deg_by_receiver_tower = ...
-                sim.history.atmosphere_model_ionosphere_ipp_lon_deg_by_receiver_tower;
-
-            results.atmosphere_model_ionosphere_vtec_TECU_by_receiver_tower = ...
-                sim.history.atmosphere_model_ionosphere_vtec_TECU_by_receiver_tower;
-
-            results.atmosphere_model_ionosphere_stec_TECU_by_receiver_tower = ...
-                sim.history.atmosphere_model_ionosphere_stec_TECU_by_receiver_tower;
-
-            results.atmosphere_model_ionosphere_mapping_factor_by_receiver_tower = ...
-                sim.history.atmosphere_model_ionosphere_mapping_factor_by_receiver_tower;
-
-            results.atmosphere_model_ionosphere_frequency_Hz_by_receiver_tower = ...
-                sim.history.atmosphere_model_ionosphere_frequency_Hz_by_receiver_tower;
-            
-            results.atmosphere_model_troposphere_pressure_hPa_by_receiver_tower = ...
-                sim.history.atmosphere_model_troposphere_pressure_hPa_by_receiver_tower;
-
-            results.atmosphere_model_troposphere_temperature_K_by_receiver_tower = ...
-                sim.history.atmosphere_model_troposphere_temperature_K_by_receiver_tower;
-
-            results.atmosphere_model_troposphere_relative_humidity_fraction_by_receiver_tower = ...
-                sim.history.atmosphere_model_troposphere_relative_humidity_fraction_by_receiver_tower;
-
-            results.atmosphere_model_troposphere_water_vapor_pressure_hPa_by_receiver_tower = ...
-                sim.history.atmosphere_model_troposphere_water_vapor_pressure_hPa_by_receiver_tower;
-
-            results.atmosphere_model_troposphere_zhd_m_by_receiver_tower = ...
-                sim.history.atmosphere_model_troposphere_zhd_m_by_receiver_tower;
-
-            results.atmosphere_model_troposphere_zwd_m_by_receiver_tower = ...
-                sim.history.atmosphere_model_troposphere_zwd_m_by_receiver_tower;
-
-            results.atmosphere_model_troposphere_mapping_hydrostatic_by_receiver_tower = ...
-                sim.history.atmosphere_model_troposphere_mapping_hydrostatic_by_receiver_tower;
-
-            results.atmosphere_model_troposphere_mapping_wet_by_receiver_tower = ...
-                sim.history.atmosphere_model_troposphere_mapping_wet_by_receiver_tower;
-
-            results.atmosphere_model_troposphere_slant_hydrostatic_m_by_receiver_tower = ...
-                sim.history.atmosphere_model_troposphere_slant_hydrostatic_m_by_receiver_tower;
-
-            results.atmosphere_model_troposphere_slant_wet_m_by_receiver_tower = ...
-                sim.history.atmosphere_model_troposphere_slant_wet_m_by_receiver_tower;
+            results = BuilderFieldCopier.copyNamedFields(results, sim.history, [
+                "pseudorange_by_receiver_tower_m"
+                "true_range_by_receiver_tower_m"
+                "atmosphere"
+                "propagation"
+                "non_atmospheric"
+                BuilderFieldCopier.atmosphereHistoryFieldNames()]);
             results.enableTowerClockEKF = towerClockEkfEnabled;
 
             if towerClockEkfEnabled
@@ -299,7 +159,6 @@ classdef ResultBuilder
     end
 
     methods (Static, Access = private)
-
         function tf = towerClockEkfEnabled(sim)
             tf = logical(ResultBuilder.getFieldOrDefault( ...
                 sim.cfg, 'enableTowerClockEKF', false));
