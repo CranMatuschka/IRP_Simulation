@@ -97,7 +97,9 @@ classdef GroundTimingNetwork
 
                     if GroundTimingNetwork.groundClockCorrectionNoiseEnabled(cfg)
                         correction_m(k) = correction_m(k) + ...
-                            GroundTimingNetwork.correctionSigma_m(cfg, c) * randn(measurementStream);
+                            StochasticProcess.whiteNoiseSample( ...
+                            GroundTimingNetwork.correctionSigma_m(cfg, c), 1, ...
+                            measurementStream);
                     end
                 end
 

@@ -394,13 +394,8 @@ classdef MeasurementModel < handle
                         + extra_m;
 
                     if obj.useMeasurementNoise
-                        if isempty(obj.measurementStream)
-                            noise = randn();
-                        else
-                            noise = randn(obj.measurementStream);
-                        end
-
-                        y(row) = y(row) + obj.pseudorangeSigma_m * noise;
+                        y(row) = y(row) + StochasticProcess.whiteNoiseSample( ...
+                            obj.pseudorangeSigma_m, 1, obj.measurementStream);
                     end
 
                     trueRangeRt(rx, twr) = rho;
@@ -805,7 +800,7 @@ classdef MeasurementModel < handle
                 obj.pseudorangeSigma_m, ...
                 obj.numericalSigmaFloor_m);
 
-            R = MeasurementAlgebra.diagonalCovariance(repmat(independentSigma_m, n, 1)) + ...
+            R = StochasticProcess.whiteNoiseCovariance(independentSigma_m, n) + ...
                 MeasurementAlgebra.diagonalCovariance(sqrt(independentExtraVariance_m2));
 
             if ~towerClockEkfEnabled && groundClockResidualVariance_m2 > 0.0
@@ -1342,14 +1337,8 @@ classdef MeasurementModel < handle
         end
 
         function standardNormal = standardNormalAtmosphereSamplesByTower(obj)
-            if isempty(obj.atmosphereResidualStream)
-                standardNormal = randn(obj.numTowers, 1);
-            else
-                standardNormal = randn( ...
-                    obj.atmosphereResidualStream, ...
-                    obj.numTowers, ...
-                    1);
-            end
+            standardNormal = StochasticProcess.whiteNoiseSample( ...
+                1.0, obj.numTowers, obj.atmosphereResidualStream);
         end
         
         function component = emptyErrorBudgetComponent(~)
