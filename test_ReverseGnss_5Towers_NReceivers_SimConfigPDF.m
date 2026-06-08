@@ -12,7 +12,7 @@
 
 %   sim = test_ReverseGnss_5Towers_NReceivers_SimConfigPDF();
 %   sim = test_ReverseGnss_5Towers_NReceivers_SimConfigPDF(8);
-REPORT_VERSION = sprintf('1.41');
+REPORT_VERSION = sprintf('1.42');
 N_RECEIVERS = 4;
 assert(N_RECEIVERS >= 1 && floor(N_RECEIVERS) == N_RECEIVERS, ...
     'N_RECEIVERS must be a positive integer.');
@@ -39,7 +39,7 @@ simConfigOverride.enableReportGeneration = true;
 
 % Keep the test fast. Increase this to 1.0 for a one-hour run.
 simConfigOverride.simulation.dt_s = 1.0;
-simConfigOverride.simulation.totalTime_h = 1;
+simConfigOverride.simulation.totalTime_h = 0.001;
 
 scenario = struct();
 scenario.name = scenarioName;
@@ -181,7 +181,7 @@ runIonospherePiercePointGeometryRegression();
 runIonosphereThinShellMappingRegression();
 runSimpleZtdTroposphereRegression();
 runPropagationCorrectionScaffoldRegression();
-runNonAtmosphericErrorBudgetScaffoldRegression();
+runNonAtmosphericComponentScaffoldRegression();
 runAtmosphereConstantDiagnosticRegression();
 runAtmosphereDeterministicConstantCasesRegression();
 
@@ -238,29 +238,27 @@ function receivers = makeReceiverConfigsForTest(nReceivers, baseline_m, sigma_m)
 end
 
 function validateRetainedReportAtmosphereDiagnostics(sim)
-    assert(isfield(sim.history, 'atmosphere_truth_delay_by_receiver_tower_m'));
-    assert(isfield(sim.history, 'atmosphere_truth_troposphere_by_receiver_tower_m'));
-    assert(isfield(sim.history, 'atmosphere_truth_ionosphere_by_receiver_tower_m'));
-    assert(isfield(sim.history, 'atmosphere_truth_total_by_receiver_tower_m'));
-    assert(isfield(sim.history, 'atmosphere_model_delay_by_receiver_tower_m'));
-    assert(isfield(sim.history, 'atmosphere_model_troposphere_by_receiver_tower_m'));
-    assert(isfield(sim.history, 'atmosphere_model_ionosphere_by_receiver_tower_m'));
+    assert(isfield(sim.history, 'errors'));
+    assert(isfield(sim.history.errors, 'atmosphere'));
+    assert(isfield(sim.history.errors, 'troposphere'));
+    assert(isfield(sim.history.errors, 'ionosphere'));
+    assert(~isfield(sim.history, 'atmosphere'));
 
     visible = sim.history.visibility_mask_by_receiver_tower;
 
     assert(any(visible(:)), ...
         'Retained regression produced no visible pseudorange measurements.');
 
-    truthTotal = sim.history.atmosphere_truth_delay_by_receiver_tower_m;
-    truthTropo = sim.history.atmosphere_truth_troposphere_by_receiver_tower_m;
-    truthIono = sim.history.atmosphere_truth_ionosphere_by_receiver_tower_m;
-    truthTotalWithResidual = sim.history.atmosphere_truth_total_by_receiver_tower_m;
+    truthTotal = sim.history.errors.atmosphere.deterministicTruth_m;
+    truthTropo = sim.history.errors.troposphere.deterministicTruth_m;
+    truthIono = sim.history.errors.ionosphere.deterministicTruth_m;
+    truthTotalWithResidual = sim.history.errors.atmosphere.truth_m;
 
-    modelTotal = sim.history.atmosphere_model_delay_by_receiver_tower_m;
-    modelTropo = sim.history.atmosphere_model_troposphere_by_receiver_tower_m;
-    modelIono = sim.history.atmosphere_model_ionosphere_by_receiver_tower_m;
+    modelTotal = sim.history.errors.atmosphere.model_m;
+    modelTropo = sim.history.errors.troposphere.model_m;
+    modelIono = sim.history.errors.ionosphere.model_m;
 
-    truthResidualByTower = sim.history.atmosphere_truth_residual_by_tower_m;
+    truthResidualByTower = sim.history.errors.atmosphere.stochasticResidualByTower_m;
 
     assert(all(isfinite(truthTropo(visible))), ...
         'Retained report truth troposphere contains non-finite values.');
@@ -1110,46 +1108,46 @@ function runTroposphereProfileReportDiagnosticsRegression()
         'Troposphere profile report diagnostic regression produced no visible measurements.');
 
     truthPressure = ...
-        sim.history.atmosphere_truth_troposphere_pressure_hPa_by_receiver_tower(:, :, 1);
+        sim.history.diagnostics.atmosphere.truth.troposphere.pressure_hPa(:, :, 1);
 
     truthTemperature = ...
-        sim.history.atmosphere_truth_troposphere_temperature_K_by_receiver_tower(:, :, 1);
+        sim.history.diagnostics.atmosphere.truth.troposphere.temperature_K(:, :, 1);
 
     truthRelativeHumidity = ...
-        sim.history.atmosphere_truth_troposphere_relative_humidity_fraction_by_receiver_tower(:, :, 1);
+        sim.history.diagnostics.atmosphere.truth.troposphere.relative_humidity_fraction(:, :, 1);
 
     truthWaterVaporPressure = ...
-        sim.history.atmosphere_truth_troposphere_water_vapor_pressure_hPa_by_receiver_tower(:, :, 1);
+        sim.history.diagnostics.atmosphere.truth.troposphere.water_vapor_pressure_hPa(:, :, 1);
 
     truthZhd = ...
-        sim.history.atmosphere_truth_troposphere_zhd_m_by_receiver_tower(:, :, 1);
+        sim.history.diagnostics.atmosphere.truth.troposphere.zhd_m(:, :, 1);
 
     truthZwd = ...
-        sim.history.atmosphere_truth_troposphere_zwd_m_by_receiver_tower(:, :, 1);
+        sim.history.diagnostics.atmosphere.truth.troposphere.zwd_m(:, :, 1);
 
     truthSlantHydrostatic = ...
-        sim.history.atmosphere_truth_troposphere_slant_hydrostatic_m_by_receiver_tower(:, :, 1);
+        sim.history.diagnostics.atmosphere.truth.troposphere.slant_hydrostatic_m(:, :, 1);
 
     truthSlantWet = ...
-        sim.history.atmosphere_truth_troposphere_slant_wet_m_by_receiver_tower(:, :, 1);
+        sim.history.diagnostics.atmosphere.truth.troposphere.slant_wet_m(:, :, 1);
 
     truthMappingHydrostatic = ...
-        sim.history.atmosphere_truth_troposphere_mapping_hydrostatic_by_receiver_tower(:, :, 1);
+        sim.history.diagnostics.atmosphere.truth.troposphere.mapping_hydrostatic(:, :, 1);
 
     truthMappingWet = ...
-        sim.history.atmosphere_truth_troposphere_mapping_wet_by_receiver_tower(:, :, 1);
+        sim.history.diagnostics.atmosphere.truth.troposphere.mapping_wet(:, :, 1);
 
     modelZhd = ...
-        sim.history.atmosphere_model_troposphere_zhd_m_by_receiver_tower(:, :, 1);
+        sim.history.diagnostics.atmosphere.model.troposphere.zhd_m(:, :, 1);
 
     modelZwd = ...
-        sim.history.atmosphere_model_troposphere_zwd_m_by_receiver_tower(:, :, 1);
+        sim.history.diagnostics.atmosphere.model.troposphere.zwd_m(:, :, 1);
 
     modelSlantHydrostatic = ...
-        sim.history.atmosphere_model_troposphere_slant_hydrostatic_m_by_receiver_tower(:, :, 1);
+        sim.history.diagnostics.atmosphere.model.troposphere.slant_hydrostatic_m(:, :, 1);
 
     modelSlantWet = ...
-        sim.history.atmosphere_model_troposphere_slant_wet_m_by_receiver_tower(:, :, 1);
+        sim.history.diagnostics.atmosphere.model.troposphere.slant_wet_m(:, :, 1);
 
     assert(all(isfinite(truthPressure(visible))), ...
         'Recorded truth pressure should be finite.');
@@ -1331,46 +1329,46 @@ function runTroposphereTruthModelMismatchRegression()
         'Troposphere truth/model mismatch regression produced no visible measurements.');
 
     truthPressure = ...
-        sim.history.atmosphere_truth_troposphere_pressure_hPa_by_receiver_tower(:, :, 1);
+        sim.history.diagnostics.atmosphere.truth.troposphere.pressure_hPa(:, :, 1);
 
     modelPressure = ...
-        sim.history.atmosphere_model_troposphere_pressure_hPa_by_receiver_tower(:, :, 1);
+        sim.history.diagnostics.atmosphere.model.troposphere.pressure_hPa(:, :, 1);
 
     truthRelativeHumidity = ...
-        sim.history.atmosphere_truth_troposphere_relative_humidity_fraction_by_receiver_tower(:, :, 1);
+        sim.history.diagnostics.atmosphere.truth.troposphere.relative_humidity_fraction(:, :, 1);
 
     modelRelativeHumidity = ...
-        sim.history.atmosphere_model_troposphere_relative_humidity_fraction_by_receiver_tower(:, :, 1);
+        sim.history.diagnostics.atmosphere.model.troposphere.relative_humidity_fraction(:, :, 1);
 
     truthZhd = ...
-        sim.history.atmosphere_truth_troposphere_zhd_m_by_receiver_tower(:, :, 1);
+        sim.history.diagnostics.atmosphere.truth.troposphere.zhd_m(:, :, 1);
 
     modelZhd = ...
-        sim.history.atmosphere_model_troposphere_zhd_m_by_receiver_tower(:, :, 1);
+        sim.history.diagnostics.atmosphere.model.troposphere.zhd_m(:, :, 1);
 
     truthZwd = ...
-        sim.history.atmosphere_truth_troposphere_zwd_m_by_receiver_tower(:, :, 1);
+        sim.history.diagnostics.atmosphere.truth.troposphere.zwd_m(:, :, 1);
 
     modelZwd = ...
-        sim.history.atmosphere_model_troposphere_zwd_m_by_receiver_tower(:, :, 1);
+        sim.history.diagnostics.atmosphere.model.troposphere.zwd_m(:, :, 1);
 
     truthSlantHydrostatic = ...
-        sim.history.atmosphere_truth_troposphere_slant_hydrostatic_m_by_receiver_tower(:, :, 1);
+        sim.history.diagnostics.atmosphere.truth.troposphere.slant_hydrostatic_m(:, :, 1);
 
     modelSlantHydrostatic = ...
-        sim.history.atmosphere_model_troposphere_slant_hydrostatic_m_by_receiver_tower(:, :, 1);
+        sim.history.diagnostics.atmosphere.model.troposphere.slant_hydrostatic_m(:, :, 1);
 
     truthSlantWet = ...
-        sim.history.atmosphere_truth_troposphere_slant_wet_m_by_receiver_tower(:, :, 1);
+        sim.history.diagnostics.atmosphere.truth.troposphere.slant_wet_m(:, :, 1);
 
     modelSlantWet = ...
-        sim.history.atmosphere_model_troposphere_slant_wet_m_by_receiver_tower(:, :, 1);
+        sim.history.diagnostics.atmosphere.model.troposphere.slant_wet_m(:, :, 1);
 
     truthTroposphere_m = ...
-        sim.history.atmosphere_truth_troposphere_by_receiver_tower_m(:, :, 1);
+        sim.history.errors.troposphere.deterministicTruth_m(:, :, 1);
 
     modelTroposphere_m = ...
-        sim.history.atmosphere_model_troposphere_by_receiver_tower_m(:, :, 1);
+        sim.history.errors.troposphere.model_m(:, :, 1);
 
     assert(all(abs(truthPressure(visible) - 1010.0) < 1e-12), ...
         'Truth profile pressure should equal 1010 hPa.');
@@ -1951,21 +1949,21 @@ function runAtmosphericResidualCovarianceRegression()
 
     initializedHistory = HistoryRecorder.initialize(historyShapeStub);
 
-    assert(isfield(initializedHistory, ...
-        'atmosphere_model_troposphere_pressure_hPa_by_receiver_tower'), ...
+    assert(isfield(initializedHistory.diagnostics.atmosphere.model, ...
+        'troposphere'), ...
         'History initialization must allocate model troposphere pressure diagnostics.');
 
     assert(isequal(size( ...
-        initializedHistory.atmosphere_model_troposphere_pressure_hPa_by_receiver_tower), ...
+        initializedHistory.diagnostics.atmosphere.model.troposphere.pressure_hPa), ...
         [2, 3, 4]), ...
         'Model troposphere pressure history should be receiver-by-tower-by-time.');
 
-    assert(isfield(initializedHistory, ...
-        'atmosphere_truth_troposphere_pressure_hPa_by_receiver_tower'), ...
+    assert(isfield(initializedHistory.diagnostics.atmosphere.truth, ...
+        'troposphere'), ...
         'History initialization must retain truth troposphere pressure diagnostics.');
 
     assert(isequal(size( ...
-        initializedHistory.atmosphere_truth_troposphere_pressure_hPa_by_receiver_tower), ...
+        initializedHistory.diagnostics.atmosphere.truth.troposphere.pressure_hPa), ...
         [2, 3, 4]), ...
         'Truth troposphere pressure history should be receiver-by-tower-by-time.');
 
@@ -2415,15 +2413,15 @@ function runStochasticTruthResidualInjectionRegression()
     simB = runStochasticTruthResidualScenarioForTest(91001);
     simC = runStochasticTruthResidualScenarioForTest(91002);
 
-    totalA = simA.history.atmosphere_truth_residual_by_tower_m;
-    tropoA = simA.history.atmosphere_truth_troposphere_residual_by_tower_m;
-    ionoA = simA.history.atmosphere_truth_ionosphere_residual_by_tower_m;
+    totalA = simA.history.errors.atmosphere.stochasticResidualByTower_m;
+    tropoA = simA.history.errors.troposphere.stochasticResidualByTower_m;
+    ionoA = simA.history.errors.ionosphere.stochasticResidualByTower_m;
 
-    totalB = simB.history.atmosphere_truth_residual_by_tower_m;
-    tropoB = simB.history.atmosphere_truth_troposphere_residual_by_tower_m;
-    ionoB = simB.history.atmosphere_truth_ionosphere_residual_by_tower_m;
+    totalB = simB.history.errors.atmosphere.stochasticResidualByTower_m;
+    tropoB = simB.history.errors.troposphere.stochasticResidualByTower_m;
+    ionoB = simB.history.errors.ionosphere.stochasticResidualByTower_m;
 
-    totalC = simC.history.atmosphere_truth_residual_by_tower_m;
+    totalC = simC.history.errors.atmosphere.stochasticResidualByTower_m;
 
     finiteA = isfinite(totalA);
 
@@ -2446,17 +2444,17 @@ function runStochasticTruthResidualInjectionRegression()
         'History must expose structured atmosphere diagnostics.');
 
     assert(max(abs( ...
-            simA.history.atmosphere.truth.stochastic_residual_total_by_tower_m(:) - ...
+            simA.history.errors.atmosphere.stochasticResidualByTower_m(:) - ...
             totalA(:))) < 1e-12, ...
         'Structured total truth residual by tower must match legacy truth residual samples.');
 
     assert(max(abs( ...
-            simA.history.atmosphere.truth.stochastic_residual_troposphere_by_tower_m(:) - ...
+            simA.history.errors.troposphere.stochasticResidualByTower_m(:) - ...
             tropoA(:))) < 1e-12, ...
         'Structured troposphere truth residual by tower must match legacy samples.');
 
     assert(max(abs( ...
-            simA.history.atmosphere.truth.stochastic_residual_ionosphere_by_tower_m(:) - ...
+            simA.history.errors.ionosphere.stochasticResidualByTower_m(:) - ...
             ionoA(:))) < 1e-12, ...
         'Structured ionosphere truth residual by tower must match legacy samples.');
 
@@ -2494,13 +2492,13 @@ function runStochasticTruthResidualInjectionRegression()
             repmat(totalA(:, k).', simA.numReceivers, 1);
 
         structuredTruthResidual_m = ...
-            simA.history.atmosphere.truth.stochastic_residual_total_m(:, :, k);
+            simA.history.errors.atmosphere.stochasticResidual_m(:, :, k);
 
         structuredModelAtmosphere_m = ...
-            simA.history.atmosphere.model.total_m(:, :, k);
+            simA.history.errors.atmosphere.model_m(:, :, k);
 
         structuredAtmosphereResidual_m = ...
-            simA.history.atmosphere.residual.total_m(:, :, k);
+            simA.history.errors.atmosphere.residual_m(:, :, k);
 
         assert(max(abs(structuredTruthResidual_m(visible) - ...
             expectedResidualByReceiverTower_m(visible))) < 1e-12, ...
@@ -2518,7 +2516,7 @@ function runStochasticTruthResidualInjectionRegression()
         correctedWithoutTruthResidual = ...
             simA.history.pseudorange_by_receiver_tower_m(:, :, k) ...
             - simA.history.true_range_by_receiver_tower_m(:, :, k) ...
-            - simA.history.atmosphere_truth_delay_by_receiver_tower_m(:, :, k);
+            - simA.history.errors.atmosphere.deterministicTruth_m(:, :, k);
 
         commonClockSamples = [];
 
@@ -2530,7 +2528,7 @@ function runStochasticTruthResidualInjectionRegression()
             end
 
             towerResidual_m = ...
-                simA.history.atmosphere_truth_residual_by_tower_m(twr, k);
+                simA.history.errors.atmosphere.stochasticResidualByTower_m(twr, k);
 
             clockSamplesForTower = ...
                 correctedWithoutTruthResidual(receiverMask, twr) ...
@@ -2550,9 +2548,9 @@ function runStochasticTruthResidualInjectionRegression()
 
     zeroResidualSim = runZeroTruthResidualScenarioForTest();
 
-    zeroTotal = zeroResidualSim.history.atmosphere_truth_residual_by_tower_m;
-    zeroTropo = zeroResidualSim.history.atmosphere_truth_troposphere_residual_by_tower_m;
-    zeroIono = zeroResidualSim.history.atmosphere_truth_ionosphere_residual_by_tower_m;
+    zeroTotal = zeroResidualSim.history.errors.atmosphere.stochasticResidualByTower_m;
+    zeroTropo = zeroResidualSim.history.errors.troposphere.stochasticResidualByTower_m;
+    zeroIono = zeroResidualSim.history.errors.ionosphere.stochasticResidualByTower_m;
 
     assert(all(abs(zeroTotal(:)) < 1e-12), ...
         'Truth atmosphere residuals should be exactly zero when truth residual sigmas are zero.');
@@ -2756,13 +2754,13 @@ function runTruthResidualStatisticsRegression()
         expectedIonosphereSigma_m);
 
     troposphereSamples_m = ...
-        sim.history.atmosphere_truth_troposphere_residual_by_tower_m(:);
+        sim.history.errors.troposphere.stochasticResidualByTower_m(:);
 
     ionosphereSamples_m = ...
-        sim.history.atmosphere_truth_ionosphere_residual_by_tower_m(:);
+        sim.history.errors.ionosphere.stochasticResidualByTower_m(:);
 
     totalSamples_m = ...
-        sim.history.atmosphere_truth_residual_by_tower_m(:);
+        sim.history.errors.atmosphere.stochasticResidualByTower_m(:);
 
     validSamples = ...
         isfinite(troposphereSamples_m) & ...
@@ -3854,19 +3852,19 @@ function runIonexHistoryReportDiagnosticsRegression()
         'IONEX history diagnostic regression produced no visible measurements.');
 
     truthVtec = ...
-        sim.history.atmosphere_truth_ionosphere_vtec_TECU_by_receiver_tower(:, :, 1);
+        sim.history.diagnostics.atmosphere.truth.ionosphere.vtec_TECU(:, :, 1);
 
     truthStec = ...
-        sim.history.atmosphere_truth_ionosphere_stec_TECU_by_receiver_tower(:, :, 1);
+        sim.history.diagnostics.atmosphere.truth.ionosphere.stec_TECU(:, :, 1);
 
     truthMapping = ...
-        sim.history.atmosphere_truth_ionosphere_mapping_factor_by_receiver_tower(:, :, 1);
+        sim.history.diagnostics.atmosphere.truth.ionosphere.mapping_factor(:, :, 1);
 
     truthLat = ...
-        sim.history.atmosphere_truth_ionosphere_ipp_lat_deg_by_receiver_tower(:, :, 1);
+        sim.history.diagnostics.atmosphere.truth.ionosphere.ipp_lat_deg(:, :, 1);
 
     truthLon = ...
-        sim.history.atmosphere_truth_ionosphere_ipp_lon_deg_by_receiver_tower(:, :, 1);
+        sim.history.diagnostics.atmosphere.truth.ionosphere.ipp_lon_deg(:, :, 1);
 
     assert(all(abs(truthVtec(visible) - 10.0) < 1e-12), ...
         'Recorded IONEX truth VTEC should equal 10 TECU.');
@@ -3915,13 +3913,13 @@ function runIonexHistoryReportDiagnosticsRegression()
         'atmosphere_model_ionosphere_vtec_TECU_by_receiver_tower'));
 
     modelVtec = ...
-        sim.history.atmosphere_model_ionosphere_vtec_TECU_by_receiver_tower(:, :, 1);
+        sim.history.diagnostics.atmosphere.model.ionosphere.vtec_TECU(:, :, 1);
 
     modelStec = ...
-        sim.history.atmosphere_model_ionosphere_stec_TECU_by_receiver_tower(:, :, 1);
+        sim.history.diagnostics.atmosphere.model.ionosphere.stec_TECU(:, :, 1);
 
     modelMapping = ...
-        sim.history.atmosphere_model_ionosphere_mapping_factor_by_receiver_tower(:, :, 1);
+        sim.history.diagnostics.atmosphere.model.ionosphere.mapping_factor(:, :, 1);
 
     assert(all(abs(modelVtec(visible) - 10.0) < 1e-12), ...
         'Recorded IONEX model VTEC should equal 10 TECU.');
@@ -3938,7 +3936,7 @@ function runIonexHistoryReportDiagnosticsRegression()
 
     assert(all(abs( ...
         results.atmosphere_model_ionosphere_vtec_TECU_by_receiver_tower(:, :, 1) - ...
-        sim.history.atmosphere_model_ionosphere_vtec_TECU_by_receiver_tower(:, :, 1)) < 1e-12 | ...
+        sim.history.diagnostics.atmosphere.model.ionosphere.vtec_TECU(:, :, 1)) < 1e-12 | ...
         ~visible, 'all'), ...
         'ResultBuilder model VTEC export should match simulation history.');
 
@@ -4025,28 +4023,28 @@ function runIonexTruthModelMismatchRegression()
         'IONEX truth/model mismatch regression produced no visible measurements.');
 
     truthVtec = ...
-        sim.history.atmosphere_truth_ionosphere_vtec_TECU_by_receiver_tower(:, :, 1);
+        sim.history.diagnostics.atmosphere.truth.ionosphere.vtec_TECU(:, :, 1);
 
     modelVtec = ...
-        sim.history.atmosphere_model_ionosphere_vtec_TECU_by_receiver_tower(:, :, 1);
+        sim.history.diagnostics.atmosphere.model.ionosphere.vtec_TECU(:, :, 1);
 
     truthStec = ...
-        sim.history.atmosphere_truth_ionosphere_stec_TECU_by_receiver_tower(:, :, 1);
+        sim.history.diagnostics.atmosphere.truth.ionosphere.stec_TECU(:, :, 1);
 
     modelStec = ...
-        sim.history.atmosphere_model_ionosphere_stec_TECU_by_receiver_tower(:, :, 1);
+        sim.history.diagnostics.atmosphere.model.ionosphere.stec_TECU(:, :, 1);
 
     truthMapping = ...
-        sim.history.atmosphere_truth_ionosphere_mapping_factor_by_receiver_tower(:, :, 1);
+        sim.history.diagnostics.atmosphere.truth.ionosphere.mapping_factor(:, :, 1);
 
     modelMapping = ...
-        sim.history.atmosphere_model_ionosphere_mapping_factor_by_receiver_tower(:, :, 1);
+        sim.history.diagnostics.atmosphere.model.ionosphere.mapping_factor(:, :, 1);
 
     truthIonosphere_m = ...
-        sim.history.atmosphere_truth_ionosphere_by_receiver_tower_m(:, :, 1);
+        sim.history.errors.ionosphere.deterministicTruth_m(:, :, 1);
 
     modelIonosphere_m = ...
-        sim.history.atmosphere_model_ionosphere_by_receiver_tower_m(:, :, 1);
+        sim.history.errors.ionosphere.model_m(:, :, 1);
 
     assert(all(abs(truthVtec(visible) - 14.0) < 1e-12), ...
         'Truth IONEX VTEC should equal 14 TECU.');
@@ -4506,35 +4504,34 @@ function runPropagationCorrectionScaffoldRegression()
 
     visible = sim.history.visibility_mask_by_receiver_tower;
 
-    assert(isfield(sim.history, 'propagation'), ...
-        'History must expose propagation diagnostics.');
+    assert(~isfield(sim.history, 'propagation'), ...
+        'History must not keep the old propagation duplicate tree.');
+    assert(isfield(sim.history, 'diagnostics') && ...
+        isfield(sim.history.diagnostics, 'propagation'), ...
+        'History must expose canonical propagation diagnostics.');
+    assert(isfield(sim.history.errors, 'lightTime'), ...
+        'History must expose canonical light-time error terms.');
 
-    assert(sim.history.propagation.frame_used == "ECI_static_receive_epoch", ...
+    assert(sim.history.diagnostics.propagation.frame_used == "ECI_static_receive_epoch", ...
         'Propagation frame diagnostic must identify ECI receive-epoch geometry.');
 
-    assert(all(abs(sim.history.propagation.light_time.truth_m(visible)) < 1e-12), ...
+    assert(all(abs(sim.history.errors.lightTime.truth_m(visible)) < 1e-12), ...
         'Disabled light-time truth diagnostic must be zero.');
 
-    assert(all(abs(sim.history.propagation.light_time.model_m(visible)) < 1e-12), ...
+    assert(all(abs(sim.history.errors.lightTime.model_m(visible)) < 1e-12), ...
         'Disabled light-time model diagnostic must be zero.');
 
-    assert(all(abs(sim.history.propagation.sagnac.truth_m(visible)) < 1e-12), ...
+    assert(all(abs(sim.history.errors.legacySagnac.truth_m(visible)) < 1e-12), ...
         'Disabled Sagnac truth diagnostic must be zero.');
 
-    assert(all(abs(sim.history.propagation.relativity.truth.pathDelay_m(visible)) < 1e-12), ...
+    assert(all(abs(sim.history.errors.relativity.pathTruth_m(visible)) < 1e-12), ...
         'Disabled relativistic path diagnostic must be zero.');
-
-    assert(all(abs(sim.history.propagation.relativity.truth.clockCorrection_m(visible)) < 1e-12), ...
-        'Disabled relativistic clock diagnostic must be zero.');
 
     results = ResultBuilder.fromSimulation(sim);
     reportData = ReportDataBuilder.fromSimulation(sim);
 
     assert(isfield(results, 'propagation'), ...
         'Saved results must expose propagation diagnostics.');
-
-    assert(isfield(reportData, 'propagation'), ...
-        'Report data must expose propagation diagnostics.');
 
     assert(isfield(reportData, 'propagation_frame_note'), ...
         'Report data must describe the propagation frame.');
@@ -4589,7 +4586,7 @@ function runPropagationCorrectionScaffoldRegression()
     disp("PASS: propagation frame, Sagnac/light-time guard, and relativity scaffold are explicit.");
 end
 
-function runNonAtmosphericErrorBudgetScaffoldRegression()
+function runNonAtmosphericComponentScaffoldRegression()
     simConfigOverride = makeShortRegressionOverride();
     scenarioPath = "reverseGnssClockNavigationScenario";
 
@@ -4602,7 +4599,7 @@ function runNonAtmosphericErrorBudgetScaffoldRegression()
     simConfigOverride.scenarios.(scenarioPath).measurement.enableSagnacCorrection = false;
 
     runtimeOptions = struct();
-    runtimeOptions.entryPointName = "NonAtmosphericErrorBudgetScaffoldRegression";
+    runtimeOptions.entryPointName = "NonAtmosphericComponentScaffoldRegression";
     runtimeOptions.simConfigOverride = simConfigOverride;
 
     sim = ReverseGnssSimulation(runtimeOptions);
@@ -4617,7 +4614,7 @@ function runNonAtmosphericErrorBudgetScaffoldRegression()
     receiverIndex = 1;
 
     [extraTruth_m, extraModel_m, budget] = ...
-        sim.measurementModel.nonAtmosphericErrorBudget_m( ...
+        sim.measurementModel.nonAtmosphericTerms_m( ...
         towerIndex, ...
         receiverIndex, ...
         jd, ...
@@ -4653,7 +4650,7 @@ function runNonAtmosphericErrorBudgetScaffoldRegression()
     assert(abs(budget.antenna.truth_m) < 1e-12, ...
         'Disabled antenna budget should be zero.');
 
-    assert(abs(budget.tower_survey.truth_m) < 1e-12, ...
+    assert(abs(budget.towerSurvey.truth_m) < 1e-12, ...
         'Tower survey scaffold should be zero until true/model tower positions are separated.');
 
     assert(abs(extraTruth_m - expectedTotal_m) < 1e-12, ...
@@ -4676,10 +4673,7 @@ function runNonAtmosphericErrorBudgetScaffoldRegression()
     assert(abs(legacyExtra_m - extraTruth_m) < 1e-12, ...
         'Backward-compatible nonAtmosphericExtraDelay_m must return total truth delay.');
 
-    assert(budget.hardware.correlation_model == "independent");
-    assert(budget.multipath.correlation_model == "independent");
-
-    disp("PASS: non-atmospheric error budget scaffold preserves existing truth delays.");
+    disp("PASS: non-atmospheric component scaffold preserves existing truth delays.");
 end
 
 function runAtmosphereConstantDiagnosticRegression()
@@ -4710,9 +4704,9 @@ function runAtmosphereConstantDiagnosticRegression()
 
     visible = sim.history.visibility_mask_by_receiver_tower(:, :, 1);
 
-    truthDelay = sim.history.atmosphere_truth_delay_by_receiver_tower_m(:, :, 1);
-    truthTotal = sim.history.atmosphere_truth_total_by_receiver_tower_m(:, :, 1);
-    modelDelay = sim.history.atmosphere_model_delay_by_receiver_tower_m(:, :, 1);
+    truthDelay = sim.history.errors.atmosphere.deterministicTruth_m(:, :, 1);
+    truthTotal = sim.history.errors.atmosphere.truth_m(:, :, 1);
+    modelDelay = sim.history.errors.atmosphere.model_m(:, :, 1);
 
     assert(any(visible(:)), ...
         'Constant atmosphere regression produced no visible measurements.');
@@ -4794,15 +4788,15 @@ function assertDeterministicAtmosphereCase( ...
         char(caseName));
 
     truthLegacy_m = ...
-        sim.history.atmosphere_truth_total_by_receiver_tower_m(:, :, 1);
+        sim.history.errors.atmosphere.truth_m(:, :, 1);
     modelLegacy_m = ...
-        sim.history.atmosphere_model_delay_by_receiver_tower_m(:, :, 1);
+        sim.history.errors.atmosphere.model_m(:, :, 1);
     residualStruct_m = ...
-        sim.history.atmosphere.residual.total_m(:, :, 1);
+        sim.history.errors.atmosphere.residual_m(:, :, 1);
     truthStruct_m = ...
-        sim.history.atmosphere.truth.total_m(:, :, 1);
+        sim.history.errors.atmosphere.truth_m(:, :, 1);
     modelStruct_m = ...
-        sim.history.atmosphere.model.total_m(:, :, 1);
+        sim.history.errors.atmosphere.model_m(:, :, 1);
 
     assert(all(abs(truthLegacy_m(visible) - expectedTruth_m) < 1e-12), ...
         'Truth atmosphere total mismatch for case %s.', char(caseName));
@@ -4839,7 +4833,7 @@ function assertDeterministicAtmosphereCase( ...
         'Report residual mismatch for case %s.', char(caseName));
 
     resultResidual_m = results.atmosphere.residual.total_m(:, :, 1);
-    historyResidual_m = sim.history.atmosphere.residual.total_m(:, :, 1);
+    historyResidual_m = sim.history.errors.atmosphere.residual_m(:, :, 1);
 
     assert(all(abs(resultResidual_m(visible) - ...
         historyResidual_m(visible)) < 1e-12), ...
@@ -4892,19 +4886,17 @@ function runAtmosphereComponentResidualDecompositionRegression()
     assert(any(visible(:)), ...
         'Component residual regression produced no visible measurements.');
 
-    assert(isfield(sim.history, 'atmosphere_truth_troposphere_residual_by_tower_m'));
-    assert(isfield(sim.history, 'atmosphere_truth_ionosphere_residual_by_tower_m'));
-    assert(isfield(sim.history, 'atmosphere_truth_troposphere_total_by_receiver_tower_m'));
-    assert(isfield(sim.history, 'atmosphere_truth_ionosphere_total_by_receiver_tower_m'));
+    assert(isfield(sim.history.errors, 'troposphere'));
+    assert(isfield(sim.history.errors, 'ionosphere'));
 
     totalResidualByTower_m = ...
-        sim.history.atmosphere_truth_residual_by_tower_m(:, 1);
+        sim.history.errors.atmosphere.stochasticResidualByTower_m(:, 1);
 
     troposphereResidualByTower_m = ...
-        sim.history.atmosphere_truth_troposphere_residual_by_tower_m(:, 1);
+        sim.history.errors.troposphere.stochasticResidualByTower_m(:, 1);
 
     ionosphereResidualByTower_m = ...
-        sim.history.atmosphere_truth_ionosphere_residual_by_tower_m(:, 1);
+        sim.history.errors.ionosphere.stochasticResidualByTower_m(:, 1);
 
     assert(max(abs(totalResidualByTower_m - ...
         troposphereResidualByTower_m - ...
@@ -4912,22 +4904,22 @@ function runAtmosphereComponentResidualDecompositionRegression()
         'Total atmosphere residual must equal troposphere plus ionosphere residuals.');
 
     truthTroposphereDeterministic_m = ...
-        sim.history.atmosphere_truth_troposphere_by_receiver_tower_m(:, :, 1);
+        sim.history.errors.troposphere.deterministicTruth_m(:, :, 1);
 
     truthIonosphereDeterministic_m = ...
-        sim.history.atmosphere_truth_ionosphere_by_receiver_tower_m(:, :, 1);
+        sim.history.errors.ionosphere.deterministicTruth_m(:, :, 1);
 
     truthTotalDeterministic_m = ...
-        sim.history.atmosphere_truth_delay_by_receiver_tower_m(:, :, 1);
+        sim.history.errors.atmosphere.deterministicTruth_m(:, :, 1);
 
     truthTroposphereTotal_m = ...
-        sim.history.atmosphere_truth_troposphere_total_by_receiver_tower_m(:, :, 1);
+        sim.history.errors.troposphere.truth_m(:, :, 1);
 
     truthIonosphereTotal_m = ...
-        sim.history.atmosphere_truth_ionosphere_total_by_receiver_tower_m(:, :, 1);
+        sim.history.errors.ionosphere.truth_m(:, :, 1);
 
     truthTotal_m = ...
-        sim.history.atmosphere_truth_total_by_receiver_tower_m(:, :, 1);
+        sim.history.errors.atmosphere.truth_m(:, :, 1);
 
     expectedTroposphereTotal_m = ...
         truthTroposphereDeterministic_m + ...
@@ -4982,19 +4974,19 @@ function runAtmosphereComponentResidualDecompositionRegression()
     assert(isfield(results, 'atmosphere'));
     assert(isfield(reportData, 'atmosphere'));
 
-    assert(abs(sim.history.atmosphere.covariance.residualTroposphereSigma_m(1) - ...
+    assert(abs(sim.history.errors.troposphere.sigma_m(1) - ...
         0.8) < 1e-12, ...
         'Structured atmosphere covariance must retain model troposphere sigma.');
 
-    assert(abs(sim.history.atmosphere.covariance.residualIonosphereSigma_m(1) - ...
+    assert(abs(sim.history.errors.ionosphere.sigma_m(1) - ...
         0.6) < 1e-12, ...
         'Structured atmosphere covariance must retain model ionosphere sigma.');
 
-    assert(abs(sim.history.atmosphere.covariance.variance_m2(1) - ...
+    assert(abs(sim.history.errors.atmosphere.variance_m2(1) - ...
         (0.8^2 + 0.6^2)) < 1e-12, ...
         'Structured atmosphere covariance variance must be sigma_tropo^2 + sigma_iono^2.');
 
-    assert(sim.history.atmosphere.covariance.correlation_model == "sameTower", ...
+    assert(sim.history.errors.atmosphere.correlationModel == "sameTower", ...
         'Atmospheric residual covariance correlation model should be sameTower.');
 
     measurementTowerIndex = [1; 2; 1; 2];
@@ -5155,9 +5147,9 @@ function runAtmosphereResidualAndCovarianceRegression()
     sim.run();
 
     visible = sim.history.visibility_mask_by_receiver_tower(:, :, 1);
-    truthDelay = sim.history.atmosphere_truth_delay_by_receiver_tower_m(:, :, 1);
-    truthTotal = sim.history.atmosphere_truth_total_by_receiver_tower_m(:, :, 1);
-    residualByTower = sim.history.atmosphere_truth_residual_by_tower_m(:, 1);
+    truthDelay = sim.history.errors.atmosphere.deterministicTruth_m(:, :, 1);
+    truthTotal = sim.history.errors.atmosphere.truth_m(:, :, 1);
+    residualByTower = sim.history.errors.atmosphere.stochasticResidualByTower_m(:, 1);
 
     commonTowerFound = false;
 

@@ -92,12 +92,12 @@ expectedDeterministicResidual_m = 0.9;
 expectedModelVariance_m2 = 0.2^2 + 0.5^2;
 
 visible = logical(sim.history.visibility_mask_by_receiver_tower);
-truthDeterministic_m = sim.history.atmosphere.truth.deterministic_total_m;
-truthTotal_m = sim.history.atmosphere.truth.total_m;
-truthStochastic_m = sim.history.atmosphere.truth.stochastic_residual_total_m;
-modelTotal_m = sim.history.atmosphere.model.total_m;
+truthDeterministic_m = sim.history.errors.atmosphere.deterministicTruth_m;
+truthTotal_m = sim.history.errors.atmosphere.truth_m;
+truthStochastic_m = sim.history.errors.atmosphere.stochasticResidual_m;
+modelTotal_m = sim.history.errors.atmosphere.model_m;
 deterministicResidual_m = ...
-    sim.history.atmosphere.residual.deterministic_total_m;
+    sim.history.errors.atmosphere.deterministicResidual_m;
 
 valid = visible & isfinite(truthDeterministic_m) & isfinite(modelTotal_m);
 assert(any(valid(:)), ...

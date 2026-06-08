@@ -268,17 +268,17 @@ scenario.atmosphere.ionosphereShellHeight_m = 350000.0;
 % that epoch, so the injected term is tower-common across onboard receiver
 % phase centres.
 %
-% The injected truth residual is separated into:
+% The injected truth residual is recorded canonically as:
 %
-%   atmosphere_truth_troposphere_residual_by_tower_m
-%   atmosphere_truth_ionosphere_residual_by_tower_m
-%   atmosphere_truth_residual_by_tower_m
+%   sim.history.errors.troposphere.stochasticResidualByTower_m
+%   sim.history.errors.ionosphere.stochasticResidualByTower_m
+%   sim.history.errors.atmosphere.stochasticResidualByTower_m
 %
 % with:
 %
-%   atmosphere_truth_residual_by_tower_m = ...
-%       atmosphere_truth_troposphere_residual_by_tower_m + ...
-%       atmosphere_truth_ionosphere_residual_by_tower_m
+%   sim.history.errors.atmosphere.stochasticResidualByTower_m = ...
+%       sim.history.errors.troposphere.stochasticResidualByTower_m + ...
+%       sim.history.errors.ionosphere.stochasticResidualByTower_m
 %
 % The deterministic truth atmosphere delay remains separate from this
 % stochastic residual. Therefore:
@@ -305,19 +305,19 @@ scenario.atmosphere.ionosphereShellHeight_m = 350000.0;
 %
 % Truth/model/residual diagnostic workflow:
 %
-%   sim.history.atmosphere.truth.total_m
+%   sim.history.errors.atmosphere.truth_m
 %       physical atmosphere delay used in generated pseudoranges y
 %
-%   sim.history.atmosphere.model.total_m
+%   sim.history.errors.atmosphere.model_m
 %       deterministic correction available to the estimator prediction yp
 %
-%   sim.history.atmosphere.residual.total_m
+%   sim.history.errors.atmosphere.residual_m
 %       truth.total_m - model.total_m, including stochastic truth residuals
 %
-%   sim.history.atmosphere.residual.deterministic_total_m
+%   sim.history.errors.atmosphere.deterministicResidual_m
 %       deterministic truth/model mismatch with stochastic samples removed
 %
-%   sim.history.atmosphere.covariance
+%   sim.history.errors.atmosphere
 %       model residual sigmas and the sameTower variance contribution added
 %       to R for receivers observing the same transmitting tower
 %
