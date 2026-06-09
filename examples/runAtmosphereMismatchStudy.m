@@ -1,4 +1,4 @@
-function [sim, results, reportData, resultFile] = runAtmosphereMismatchStudy()
+function [sim, results, reportContext, resultFile] = runAtmosphereMismatchStudy()
 %RUNATMOSPHEREMISMATCHSTUDY Constant truth/model atmosphere mismatch example.
 %
 % This example requires no external IONEX, ERA5, or profile data. It uses
