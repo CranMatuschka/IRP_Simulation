@@ -142,11 +142,11 @@ classdef ReverseGnssSimulation < handle
 
             SimulationOutputManager.ensureOutputDirectory(obj);
 
-            reportData = ReportDataBuilder.fromSimulation(obj);
+            reportContext = ReportDataBuilder.fromSimulation(obj);
             reportToggles = ReportConfigBuilder.togglesFromSimulation(obj);
             reportConfig = ReportConfigBuilder.configFromSimulation(obj);
             
-            generateReport(reportData, reportConfig, reportToggles);
+            generateReport(reportContext, reportConfig, reportToggles);
         end
     end
 
