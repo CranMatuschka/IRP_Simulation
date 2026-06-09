@@ -21,11 +21,7 @@ classdef MeasurementModel < handle
     %   - measurementCovariance() represents estimator uncertainty. Model
     %     atmosphere residual sigmas enter R as same-tower common-mode
     %     covariance blocks through addSameTowerCommonVariance().
-    %   - HistoryRecorder and ReportDataBuilder currently assemble
-    %     atmosphere truth/model/residual diagnostics from the long
-    %     backwards-compatible output lists. The migration path is to add a
-    %     structured atmosphere budget internally while preserving these
-    %     legacy outputs until callers are updated.
+    %   - HistoryRecorder is the only persistent simulation-data writer.
     %
     %
     % Implemented first-stage error-chain status:

@@ -1,11 +1,11 @@
-function generateReport(ctx, reportConfig, reportToggles)
+function generateReport(sim, reportConfig, reportToggles)
     %GENERATEREPORT Build the Reverse-GNSS LaTeX/PDF report.
     % =========================================================================
     % GENERAL OPT-IN LATEX REPORT GENERATOR
     % =========================================================================
-    % This function expects prepared ctx, reportConfig, and reportToggles
-    % structures. By default all report toggles are disabled unless explicitly
-    % enabled by the caller.
+    % This function expects a simulation object plus reportConfig and
+    % reportToggles structures. By default all report toggles are disabled
+    % unless explicitly enabled by the caller.
     
     %% Report Setup
 
@@ -26,9 +26,12 @@ function generateReport(ctx, reportConfig, reportToggles)
         return;
     end
     
-    if nargin < 1 || ~isstruct(ctx)
+    if nargin < 1 || isempty(sim)
         error("generateReport:MissingData", ...
-            "ctx must be provided when report generation is enabled.");
+            "sim must be provided when report generation is enabled.");
+    end
+    if isa(sim, 'function_handle')
+        sim = sim();
     end
     
     if nargin < 2 || ~isstruct(reportConfig)
@@ -63,9 +66,7 @@ function generateReport(ctx, reportConfig, reportToggles)
         "final_innovation_rms_m"
         "selected_allan_deviation_1s"
     ];
-    if isfield(ctx, "sim")
-        ctx = prepareReportContext(ctx.sim);
-    end
+    ctx = prepareReportContext(sim);
 
     validateRequiredFields(ctx, required_fields);
     ctx = ensureReportMetrics(ctx);

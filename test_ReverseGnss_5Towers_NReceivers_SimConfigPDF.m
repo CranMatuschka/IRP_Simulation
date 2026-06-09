@@ -304,7 +304,6 @@ function validateRetainedReportAtmosphereDiagnostics(sim)
         'Retained report truth atmospheric residual should be zero.');
 
     results = ResultBuilder.fromSimulation(sim);
-    reportContext = ReportDataBuilder.fromSimulation(sim);
     reportToggles = ReportConfigBuilder.togglesFromSimulation(sim);
 
     assert(reportToggles.ionosphere, ...
@@ -330,9 +329,6 @@ function validateRetainedReportAtmosphereDiagnostics(sim)
     assert(~isfield(results, 'non_atmospheric'));
     assert(~isfield(results, 'propagation'));
     assert(~isfield(results, 'legacy'));
-    assert(isequaln(reportContext.history, sim.history));
-    assert(~isfield(reportContext, 'atmosphere'));
-
     truthVtec = ...
         sim.history.diagnostics.atmosphere.truth.ionosphere.vtec_TECU;
 
@@ -1180,8 +1176,6 @@ function runTroposphereProfileReportDiagnosticsRegression()
         'Truth slant wet delay must equal ZWD times wet mapping factor.');
 
     results = ResultBuilder.fromSimulation(sim);
-    reportContext = ReportDataBuilder.fromSimulation(sim);
-
     assert(~isfield(results, 'diagnostics'));
     assert(isequaln( ...
         results.history.diagnostics.atmosphere.truth.troposphere, ...
@@ -1189,9 +1183,6 @@ function runTroposphereProfileReportDiagnosticsRegression()
     assert(isequaln( ...
         results.history.diagnostics.atmosphere.model.troposphere, ...
         sim.history.diagnostics.atmosphere.model.troposphere));
-    assert(isequaln(reportContext.history, sim.history));
-    assert(~isfield(reportContext, 'atmosphere'));
-
     assert(any(isfinite( ...
         sim.history.diagnostics.atmosphere.truth.troposphere.slant_hydrostatic_m(:))), ...
         'Troposphere profile plot source should contain finite truth slant hydrostatic delay.');
@@ -1350,8 +1341,6 @@ function runTroposphereTruthModelMismatchRegression()
         (modelSlantHydrostatic(visible) + modelSlantWet(visible))) < 1e-10), ...
         'Estimator troposphere delay must equal slant hydrostatic plus slant wet.');
 
-    reportContext = ReportDataBuilder.fromSimulation(sim);
-
     troposphereResidual_m = ...
         sim.history.errors.troposphere.residual_m(:, :, 1);
 
@@ -1372,9 +1361,8 @@ function runTroposphereTruthModelMismatchRegression()
     assert(mean(troposphereResidual_m(visible), 'omitnan') > 0.0, ...
         'Larger truth pressure/humidity should produce positive mean troposphere residual.');
 
-    assert(isequaln(reportContext.history, sim.history));
-    assert(~isfield(reportContext, 'troposphere_profile_summary_table'), ...
-        'Report context must not store derived troposphere profile tables.');
+    assert(~isfield(sim.history, 'troposphere_profile_summary_table'), ...
+        'History must not store derived troposphere profile tables.');
 
     disp("PASS: troposphere truth-model mismatch produces the expected residual.");
 end
@@ -2595,11 +2583,6 @@ function sim = runZeroTruthResidualScenarioForTest()
 end
 
 function runStochasticTruthResidualReportDiagnosticsRegression(sim, reportText)
-    mainReportContext = ReportDataBuilder.fromSimulation(sim);
-    assert(isequaln(mainReportContext.history, sim.history));
-    assert(~isfield(mainReportContext, 'stochastic_truth_residual_summary_table'), ...
-        'Report context must not store derived stochastic residual tables.');
-
     assert(contains(reportText, ...
         'Stochastic Truth Atmosphere Residuals'), ...
         'Generated report should include stochastic truth atmosphere residual plot row.');
@@ -2609,8 +2592,6 @@ function runStochasticTruthResidualReportDiagnosticsRegression(sim, reportText)
         'Generated report should include stochastic truth atmosphere residual summary table.');
 
     stochasticSim = runStochasticTruthResidualScenarioForTest(92001);
-    stochasticReportContext = ReportDataBuilder.fromSimulation(stochasticSim);
-    assert(isequaln(stochasticReportContext.history, stochasticSim.history));
 
     truthTropoSigma_m = ...
         stochasticSim.truthAtmosphere.residualTroposphereSigma_m;
@@ -2774,8 +2755,6 @@ function runTruthResidualStatisticsRegression()
 
     assert(abs(residualCorrelation) < 0.20, ...
         'Troposphere and ionosphere truth residual samples should be approximately independent.');
-    reportContext = ReportDataBuilder.fromSimulation(sim);
-    assert(isequaln(reportContext.history, sim.history));
     assert(abs(hypot(expectedTroposphereSigma_m, expectedIonosphereSigma_m) - ...
         expectedTotalSigma_m) < 1e-12, ...
         'Configured total residual sigma should be RSS.');
@@ -2785,8 +2764,8 @@ function runTruthResidualStatisticsRegression()
     assert(abs(std(ionosphereCorrelationSamples_m, 0, 'omitnan') - ...
         ionosphereStd_m) < 1e-12, ...
         'Ionosphere residual std should match raw samples.');
-    assert(~isfield(reportContext, 'stochastic_truth_residual_summary_table'), ...
-        'Report context must not store derived stochastic residual tables.');
+    assert(~isfield(sim.history, 'stochastic_truth_residual_summary_table'), ...
+        'History must not store derived stochastic residual tables.');
 
     disp("PASS: stochastic truth atmosphere residual statistics match configured sigmas.");
 end
@@ -2941,10 +2920,8 @@ function runInnovationCovarianceReportDiagnosticsRegression(sim, reportText)
         sim.history.nis_per_degree_of_freedom(:))), ...
         'NIS per degree of freedom history should contain finite values.');
 
-    reportContext = ReportDataBuilder.fromSimulation(sim);
-    assert(isequaln(reportContext.history, sim.history));
-    assert(~isfield(reportContext, 'innovation_covariance_summary_table'), ...
-        'Report context must not store derived innovation covariance tables.');
+    assert(~isfield(sim.history, 'innovation_covariance_summary_table'), ...
+        'History must not store derived innovation covariance tables.');
 
     assert(contains(reportText, ...
         'Innovation Covariance Consistency'), ...
@@ -3766,8 +3743,6 @@ function runIonexHistoryReportDiagnosticsRegression()
         'Recorded STEC must equal VTEC times mapping factor.');
 
     results = ResultBuilder.fromSimulation(sim);
-    reportContext = ReportDataBuilder.fromSimulation(sim);
-
     assert(~isfield(results, 'diagnostics'));
     assert(isequaln( ...
         results.history.diagnostics.atmosphere.truth.ionosphere, ...
@@ -3775,9 +3750,8 @@ function runIonexHistoryReportDiagnosticsRegression()
     assert(isequaln( ...
         results.history.diagnostics.atmosphere.model.ionosphere, ...
         sim.history.diagnostics.atmosphere.model.ionosphere));
-    assert(isequaln(reportContext.history, sim.history));
-    assert(~isfield(reportContext, 'ionosphere_map_summary_table'), ...
-        'Report context must not store derived ionosphere map tables.');
+    assert(~isfield(sim.history, 'ionosphere_map_summary_table'), ...
+        'History must not store derived ionosphere map tables.');
 
     modelVtec = ...
         sim.history.diagnostics.atmosphere.model.ionosphere.vtec_TECU(:, :, 1);
@@ -3935,8 +3909,6 @@ function runIonexTruthModelMismatchRegression()
         expectedModelIonosphere_m(visible))) < 1e-10, ...
         'Estimator IONEX ionosphere delay does not match first-order code-delay formula.');
 
-    reportContext = ReportDataBuilder.fromSimulation(sim);
-
     ionosphereResidual_m = ...
         sim.history.errors.ionosphere.residual_m(:, :, 1);
 
@@ -3953,9 +3925,8 @@ function runIonexTruthModelMismatchRegression()
         mean(modelVtec(visible), 'omitnan'), ...
         'Truth VTEC mean should be larger than estimator VTEC mean.');
 
-    assert(isequaln(reportContext.history, sim.history));
-    assert(~isfield(reportContext, 'ionosphere_map_summary_table'), ...
-        'Report context must not store derived ionosphere map tables.');
+    assert(~isfield(sim.history, 'ionosphere_map_summary_table'), ...
+        'History must not store derived ionosphere map tables.');
 
     disp("PASS: IONEX truth-model mismatch produces the expected residual.");
 end
@@ -4388,7 +4359,6 @@ function runPropagationCorrectionScaffoldRegression()
         'Disabled relativistic path diagnostic must be zero.');
 
     results = ResultBuilder.fromSimulation(sim);
-    reportContext = ReportDataBuilder.fromSimulation(sim);
 
     assert(~isfield(results, 'errors'), ...
         'Saved results must not duplicate canonical propagation error history.');
@@ -4397,12 +4367,10 @@ function runPropagationCorrectionScaffoldRegression()
     assert(~isfield(results, 'propagation'), ...
         'results.propagation is forbidden; use results.history errors and diagnostics.');
 
-    assert(isequaln(reportContext.history, sim.history), ...
-        'Report context must reference the canonical history.');
-    assert(~isfield(reportContext, 'propagation_frame_note'), ...
-        'Report context must not store derived propagation prose.');
-    assert(~isfield(reportContext, 'relativity_note'), ...
-        'Report context must not store derived relativity prose.');
+    assert(~isfield(sim.history, 'propagation_frame_note'), ...
+        'History must not store derived propagation prose.');
+    assert(~isfield(sim.history, 'relativity_note'), ...
+        'History must not store derived relativity prose.');
 
     conflictOverride = makeShortRegressionOverride();
     scenarioPath = "reverseGnssClockNavigationScenario";
@@ -4685,7 +4653,6 @@ function assertDeterministicAtmosphereCase( ...
         'Residual must equal truth minus model for case %s.', char(caseName));
 
     results = ResultBuilder.fromSimulation(sim);
-    reportContext = ReportDataBuilder.fromSimulation(sim);
 
     assert(~isfield(results, 'errors'), ...
         'Saved results must not duplicate canonical error history.');
@@ -4701,12 +4668,10 @@ function assertDeterministicAtmosphereCase( ...
     resultResidual_m = results.history.errors.atmosphere.residual_m(:, :, 1);
     historyResidual_m = sim.history.errors.atmosphere.residual_m(:, :, 1);
 
-    assert(isequaln(reportContext.history, sim.history), ...
-        'Report context must reference the canonical history.');
-    assert(~isfield(reportContext, 'atmosphere'), ...
-        'Report context must not store the old atmosphere duplicate tree.');
-    assert(~isfield(reportContext, 'atmosphere_residual_by_receiver_tower_m'), ...
-        'Report context must not store flat atmosphere residual copies.');
+    assert(~isfield(sim.history, 'atmosphere'), ...
+        'History must not store the old atmosphere duplicate tree.');
+    assert(~isfield(sim.history, 'atmosphere_residual_by_receiver_tower_m'), ...
+        'History must not store flat atmosphere residual copies.');
     assert(all(abs(historyResidual_m(visible) - expectedResidual_m) < 1e-12), ...
         'History residual mismatch for case %s.', char(caseName));
 
@@ -4823,7 +4788,6 @@ function runAtmosphereComponentResidualDecompositionRegression()
         'Deterministic truth atmosphere must equal deterministic troposphere plus ionosphere.');
 
     results = ResultBuilder.fromSimulation(sim);
-    reportContext = ReportDataBuilder.fromSimulation(sim);
 
     assert(~isfield(results, 'errors'));
     assert(isequaln(results.history.errors, sim.history.errors));
@@ -4842,12 +4806,10 @@ function runAtmosphereComponentResidualDecompositionRegression()
     assert(~isfield(results, 'atmosphere'), ...
         'results.atmosphere is forbidden; use results.history.errors.atmosphere.');
     
-    assert(isequaln(reportContext.history, sim.history), ...
-        'Report context must reference the canonical history.');
-    assert(~isfield(reportContext, 'atmosphere'), ...
-        'Report context must not store the old atmosphere duplicate tree.');
-    assert(~isfield(reportContext, 'atmosphere_summary_table'), ...
-        'Report context must not store derived atmosphere tables.');
+    assert(~isfield(sim.history, 'atmosphere'), ...
+        'History must not store the old atmosphere duplicate tree.');
+    assert(~isfield(sim.history, 'atmosphere_summary_table'), ...
+        'History must not store derived atmosphere tables.');
     assert(abs(sim.history.errors.troposphere.sigma_m(1) - ...
         0.8) < 1e-12, ...
         'Structured atmosphere covariance must retain model troposphere sigma.');
@@ -4977,11 +4939,8 @@ function runAtmosphereResidualCovarianceNisRegression()
     assert(abs(Rdiff(1, 2)) < 1e-12, ...
         'Different towers should not share atmosphere residual covariance.');
 
-    reportContext = ReportDataBuilder.fromSimulation(simMatched);
-    assert(isequaln(reportContext.history, simMatched.history), ...
-        'Report context must reference the canonical history.');
-    assert(~isfield(reportContext, 'R_atmosphere_m2'), ...
-        'Report context must not store derived atmosphere covariance copies.');
+    assert(~isfield(simMatched.history, 'R_atmosphere_m2'), ...
+        'History must not store derived atmosphere covariance copies.');
 
     disp("PASS: matched atmospheric residual covariance reduces or preserves NIS.");
 end

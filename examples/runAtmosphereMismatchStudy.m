@@ -1,4 +1,4 @@
-function [sim, results, reportContext, resultFile] = runAtmosphereMismatchStudy()
+function [sim, results, resultFile] = runAtmosphereMismatchStudy()
 %RUNATMOSPHEREMISMATCHSTUDY Constant truth/model atmosphere mismatch example.
 %
 % This example requires no external IONEX, ERA5, or profile data. It uses
@@ -82,7 +82,6 @@ sim.run();
 sim.saveResults();
 
 results = sim.results;
-reportContext = ReportDataBuilder.fromSimulation(sim);
 resultFile = fullfile(char(sim.outputDir), ...
     sprintf('%s_results.mat', char(sim.scenarioName)));
 
@@ -124,8 +123,6 @@ assertClose(mean(sim.history.errors.atmosphere.variance_m2(:), 'omitnan'), ...
 assert(isfield(results, 'history') && ...
     isfield(results.history.errors, 'atmosphere'), ...
     'Saved results structure must expose the canonical history snapshot.');
-assert(isequaln(reportContext.history, sim.history), ...
-    'Report context must expose canonical history directly.');
 assert(exist(resultFile, 'file') == 2, ...
     'Expected saved results file was not created: %s', resultFile);
 

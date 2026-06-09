@@ -34,10 +34,6 @@ assert(~isfield(history, 'non_atmospheric'));
 assert(~isfield(history, 'propagation'));
 assert(any(isfinite(history.errors.hardware.truth_m(:))));
 
-reportContext = ReportDataBuilder.fromSimulation(sim);
-assert(isequaln(reportContext.history, sim.history));
-assert(~isfield(reportContext, 'atmosphere'));
-assert(~isfield(reportContext, 'atmosphere_residual_by_receiver_tower_m'));
 assert(isequaln(history.errors.atmosphere.residual_m, ...
     history.errors.troposphere.residual_m + history.errors.ionosphere.residual_m));
 assert(abs(mean(history.errors.atmosphere.variance_m2(:), 'omitnan') - 0.05) < eps);
