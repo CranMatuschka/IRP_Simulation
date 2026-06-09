@@ -39,41 +39,343 @@ function generateReport(sim, reportConfig, reportToggles)
     end
  
     reportConfig = mergeStructDefaults(reportConfig, defaultReportConfig(reportDir));
-    
-    required_fields = [
-        "time_vec"
-        "total_time_hours"
-        "dt"
-        "num_towers"
-        "R_earth"
-        "oscillators"
-        "towers"
-        "ekf_pos_error_m"
-        "ekf_pos_sigma_m"
-        "ekf_clock_error_ps"
-        "ekf_clock_sigma_ps"
-        "true_clock_bias_ps"
-        "est_clock_bias_ps"
-        "innovation_rms_m"
-        "nis_history"
-        "sat_pos_history_m"
-        "towers_eci_first_m"
-        "tau_profile_s"
-        "tau_sim_s"
-        "sim_adev"
-        "final_position_error_m"
-        "final_clock_error_ps"
-        "final_innovation_rms_m"
-        "selected_allan_deviation_1s"
-    ];
-    ctx = prepareReportContext(sim);
 
-    validateRequiredFields(ctx, required_fields);
-    ctx = ensureReportMetrics(ctx);
-    ctx = ensureReportTables(ctx);
-    history = ctx.history;
+    history = sim.history;
     errors = history.errors;
     diags = history.diagnostics;
+    xHist = history.x;
+    truthHist = history.truth;
+    Pdiag = history.covariance_diag;
+
+    error_budget_status = ResultBuilder.errorBudgetStatus(sim);
+    time_vec = sim.time_s;
+    total_time_hours = max(sim.time_s) / 3600.0;
+    dt = sim.dt;
+    c = sim.c;
+    num_towers = sim.numTowers;
+    R_earth = sim.constants.earthRadius_m;
+    oscillators = sim.simConfig.clockLibrary;
+    towers = reportTowersLocal(sim);
+    tower_names = sim.towerNames;
+    receiver_names = sim.receiverNames;
+    asset_name = string(sim.assetConfig.name);
+    state_names = StateIndexFactory.stateNames( ...
+        sim.towerNames, GroundTimingNetwork.towerClockEkfEnabled(sim.cfg));
+    state_dim = sim.stateDim;
+    state_index = sim.idx;
+    enable_tower_clock_ekf = GroundTimingNetwork.towerClockEkfEnabled(sim.cfg);
+    num_receivers = sim.numReceivers;
+    receiver_offsets_body_m = sim.receiverOffsetsBody_m;
+    initial_truth_position_eci_m = sim.initialTruth0(sim.idx.pos);
+    initial_est_position_eci_m = sim.initialX0(sim.idx.pos); %#ok<NASGU>
+    observability_normal_matrix = sim.observabilityNormalMatrix;
+
+    ekf_pos_error_m = xHist(sim.idx.pos, :) - truthHist(sim.idx.pos, :);
+    ekf_pos_sigma_m = sqrt(max(Pdiag(sim.idx.pos, :), 0));
+    ekf_clock_error_ps = ...
+        (xHist(sim.idx.rxClockBias, :) - truthHist(sim.idx.rxClockBias, :)) ./ sim.c .* 1e12;
+    ekf_clock_sigma_ps = ...
+        sqrt(max(Pdiag(sim.idx.rxClockBias, :), 0)) ./ sim.c .* 1e12;
+    true_clock_bias_ps = truthHist(sim.idx.rxClockBias, :) ./ sim.c .* 1e12;
+    est_clock_bias_ps = xHist(sim.idx.rxClockBias, :) ./ sim.c .* 1e12;
+
+    if enable_tower_clock_ekf
+        est_ground_clock_bias_ps = xHist(sim.idx.towerClockBias, :) ./ sim.c .* 1e12;
+        true_tower_clock_bias_ps = truthHist(sim.idx.towerClockBias, :) ./ sim.c .* 1e12; %#ok<NASGU>
+        est_tower_clock_drift_psps = xHist(sim.idx.towerClockDrift, :) ./ sim.c .* 1e12; %#ok<NASGU>
+        true_tower_clock_drift_psps = truthHist(sim.idx.towerClockDrift, :) ./ sim.c .* 1e12; %#ok<NASGU>
+    end
+
+    innovation_rms_m = history.innovation_rms_m;
+    postfit_innovation_rms_m = history.postfit_innovation_rms_m;
+    nis_history = history.nis_history;
+    innovation_covariance_mean_variance_m2 = ...
+        history.innovation_covariance_mean_variance_m2;
+    innovation_covariance_min_variance_m2 = ...
+        history.innovation_covariance_min_variance_m2;
+    innovation_covariance_max_variance_m2 = ...
+        history.innovation_covariance_max_variance_m2;
+    nis_per_degree_of_freedom = history.nis_per_degree_of_freedom;
+    normalized_innovation_rms = history.normalized_innovation_rms;
+    innovation_covariance_mean_sigma_m = ...
+        sqrt(max(innovation_covariance_mean_variance_m2, 0.0));
+    innovation_covariance_min_sigma_m = ...
+        sqrt(max(innovation_covariance_min_variance_m2, 0.0));
+    innovation_covariance_max_sigma_m = ...
+        sqrt(max(innovation_covariance_max_variance_m2, 0.0));
+    sat_pos_history_m = history.truth(sim.idx.pos, :);
+    nis_degrees_of_freedom = history.measurement_count;
+
+    towers_eci_first_m = sim.towersEciFirst_m;
+    final_position_error_m = norm(ekf_pos_error_m(:, end));
+    final_clock_error_ps = ekf_clock_error_ps(end);
+    final_innovation_rms_m = history.innovation_rms_m(end);
+
+    attitude_truth_deg = rad2deg(truthHist(sim.idx.att, :));
+    attitude_est_deg = rad2deg(xHist(sim.idx.att, :));
+    attitude_error_deg = rad2deg( ...
+        FrameGeometry.wrapToPi(xHist(sim.idx.att, :) - truthHist(sim.idx.att, :)));
+    attitude_sigma_deg = rad2deg(sqrt(max(Pdiag(sim.idx.att, :), 0)));
+    attitude_state_names = ["roll"; "pitch"; "yaw"];
+    attitude_frame = "body-to-ECI Euler view of q_BI";
+
+    angular_velocity_truth_degps = rad2deg(truthHist(sim.idx.omega, :));
+    angular_velocity_est_degps = rad2deg(xHist(sim.idx.omega, :));
+    angular_velocity_error_degps = ...
+        rad2deg(xHist(sim.idx.omega, :) - truthHist(sim.idx.omega, :));
+    angular_velocity_sigma_degps = ...
+        rad2deg(sqrt(max(Pdiag(sim.idx.omega, :), 0)));
+    angular_velocity_state_names = ["omega_x"; "omega_y"; "omega_z"];
+    final_attitude_error_norm_deg = norm(attitude_error_deg(:, end));
+    final_angular_velocity_error_norm_degps = ...
+        norm(angular_velocity_error_degps(:, end));
+
+    final_H_pos_rank = history.H_pos_rank_history(end);
+    final_H_att_rank = history.H_att_rank_history(end);
+    final_H_pos_att_clock_rank = history.H_pos_att_clock_rank_history(end);
+    final_H_rx_clock_bias_column_norm = ...
+        history.H_rx_clock_bias_column_norm_history(end); %#ok<NASGU>
+    pseudorange_measurement_count = history.pseudorange_measurement_count;
+    final_H_rank = history.H_rank_history(end);
+    final_H_rows = history.measurement_count(end);
+    final_H_columns = sim.stateDim;
+    final_H_rank_to_state_dim = final_H_rank / max(sim.stateDim, 1);
+    final_H_state_deficiency = sim.stateDim - final_H_rank; %#ok<NASGU>
+
+    true_ground_clock_bias_ps = history.ground_clock_true_m ./ sim.c .* 1e12;
+    tower_clock_correction_s = history.ground_clock_correction_m ./ sim.c;
+    tower_clock_correction_residual_s = history.ground_clock_residual_m ./ sim.c;
+    tower_clock_correction_sigma_s = ...
+        ones(sim.numTowers, sim.numSteps) .* ...
+        sqrt(GroundTimingNetwork.residualVariance_m2(sim.cfg, sim.c)) ./ sim.c;
+
+    prefit_residual_by_receiver_tower_m = ...
+        history.prefit_residual_by_receiver_tower_m;
+    postfit_residual_by_receiver_tower_m = ...
+        history.postfit_residual_by_receiver_tower_m;
+    pseudorange_by_receiver_tower_m = history.pseudorange_by_receiver_tower_m;
+    true_range_by_receiver_tower_m = history.true_range_by_receiver_tower_m;
+    los_unit_eci_by_receiver_tower = history.los_unit_eci_by_receiver_tower;
+    covariance_condition_number = history.covariance_condition_number;
+    innovation_condition_number = history.innovation_condition_number;
+    visible_tower_count = history.visible_tower_count;
+    pseudorange_error_by_receiver_tower_m = ...
+        history.pseudorange_by_receiver_tower_m - history.true_range_by_receiver_tower_m;
+    receiver_offset_body_by_receiver_m = sim.receiverOffsetsBody_m;
+    used_tower_count = history.visible_tower_count; %#ok<NASGU>
+    measurementNoiseEnabled = sim.measurementModel.measurementNoiseEnabled();
+    numerical_measurement_sigma_floor_m = ...
+        sim.measurementModel.effectiveNumericalMeasurementSigma_m();
+    enableElevationMask = sim.measurementModel.elevationMaskEnabled();
+    elevationMask_deg = sim.measurementModel.elevationMaskDeg();
+
+    if enable_tower_clock_ekf
+        clockGaugeMode = "towerClockEKF_meanGroundClockGauge";
+        referenceTowerName = "Mean ground-network clock";
+        clock_estimation_mode = 'spacecraftReceiverClockPlusTowerClockEKF';
+    else
+        if GroundTimingNetwork.groundClockCorrectionEnabled(sim.cfg)
+            clockGaugeMode = "externalTowerCorrections";
+            referenceTowerName = "External ground timing product";
+        else
+            clockGaugeMode = "groundClockResidualsGeneratedButNotEstimated";
+            referenceTowerName = "";
+        end
+        clock_estimation_mode = 'spacecraftReceiverClockOnly';
+    end
+
+    ekf_clock_state_units = 'metres and metres per second';
+    receiver_architecture_note = sprintf( ...
+        'N=%d onboard receiver phase centres share one receiver oscillator. Lever arms are Body-frame vectors rotated by q_BI into ECI.', ...
+        sim.numReceivers);
+    if enable_tower_clock_ekf
+        signal_model_note = [ ...
+            'Truth code pseudorange: P = rho(r_sc_I + C_BI l_a_B, r_g_I) + b_rx_true - b_g_true + d_truth + noise. ' ...
+            'Estimator prediction: P_hat = rho(rhat_sc_I + Chat_BI l_a_B, r_g_I) + bhat_rx - bhat_g + d_model. ' ...
+            'Tower clocks are EKF states and the mean ground-network clock defines the time gauge.'];
+    else
+        signal_model_note = [ ...
+            'Truth code pseudorange: P = rho(r_sc_I + C_BI l_a_B, r_g_I) + b_rx_true - b_g_res_true + d_truth + noise. ' ...
+            'Estimator prediction: P_hat = rho(rhat_sc_I + Chat_BI l_a_B, r_g_I) + bhat_rx + d_model. ' ...
+            'In spacecraftReceiverClockOnly mode, b_g_res is not an EKF state and d_model is supplied by the configured estimator atmosphere model.'];
+    end
+    attitude_filter_note = ...
+        'MEKF-style attitude update uses a body-frame small-angle error injected multiplicatively into q_BI.';
+    propagation_frame_note = sprintf( ...
+        ['Range geometry frame: %s. Current geometry uses ECI ', ...
+         'transmitter and receiver positions evaluated at the receiver epoch; ', ...
+         'optional inertial iterative light-time is guarded against ', ...
+         'legacy scalar Sagnac double counting.'], ...
+        char(sim.measurementModel.propagationFrame));
+    relativity_note = ...
+        ['Relativistic path delay and relativistic clock correction are explicit ', ...
+         'zero-valued diagnostics when disabled. Enabling either flag currently ', ...
+         'raises an error until a physical path/clock implementation is added.'];
+    measurement_model_equation = [ ...
+        "\begin{aligned}"; ...
+        "P_{g,a}^{truth}"; ...
+        "&= \left\| \mathbf{r}_{sc,I} + \mathbf{C}_{BI}\mathbf{l}_{a,B} - \mathbf{r}_{g,I} \right\|"; ...
+        "&= + b_{rx}^{true} - b_{g,res}^{true} + d_{truth} + \nu \\"; ...
+        "\hat{P}_{g,a}"; ...
+        "&= \left\| \hat{\mathbf{r}}_{sc,I} + \hat{\mathbf{C}}_{BI}\mathbf{l}_{a,B} - \mathbf{r}_{g,I} \right\|"; ...
+        "&= + \hat{b}_{rx} + d_{model}"; ...
+        "\end{aligned}" ...
+        ];
+    observation_matrix_equation = [...
+        "\begin{aligned}"; ...
+        "\mathbf{g} = \mathbf{u} + \nabla_{\mathbf{r}_{rx,I}} d_{model}, \qquad H_{g,a}";...
+        " &= \left[ \mathbf{g}^{T} \quad \mathbf{0}_{1\times3} \quad \mathbf{g}^{T}(-\mathbf{C}_{BI}" + ...
+        " \mathbf{l}_{a,B}]_{\times}) \quad \mathbf{0}_{1\times3} \quad 1 \quad 0 \right]";...
+        "\end{aligned}" ...
+        ];
+
+    prefit_residual_by_tower_m = ...
+        squeeze(mean(history.prefit_residual_by_receiver_tower_m, 1));
+    postfit_residual_by_tower_m = ...
+        squeeze(mean(history.postfit_residual_by_receiver_tower_m, 1));
+
+    nRows = sim.numReceivers * sim.numTowers;
+    receiverR2 = sim.cfg.measurement.pseudorangeSigma_m^2 * ...
+        double(measurementNoiseEnabled);
+    groundR2 = GroundTimingNetwork.residualVariance_m2(sim.cfg, sim.c);
+    if enable_tower_clock_ekf
+        appliedGroundR2 = 0.0;
+    else
+        appliedGroundR2 = groundR2;
+    end
+    atmosphereR2 = sim.measurementModel.atmosphereResidualVariance_m2();
+    actualR2 = sim.measurementModel.measurementVariance( ...
+        enable_tower_clock_ekf, groundR2);
+    R_receiver_m2 = ones(nRows, sim.numSteps) * receiverR2;
+    R_tower_clock_m2 = ones(nRows, sim.numSteps) * appliedGroundR2;
+    R_atmosphere_m2 = ones(nRows, sim.numSteps) * atmosphereR2;
+    R_numerical_regularization_m2 = ...
+        ones(nRows, sim.numSteps) * ...
+        max(actualR2 - receiverR2 - appliedGroundR2 - atmosphereR2, 0.0);
+    R_total_m2 = R_receiver_m2 + R_tower_clock_m2 + ...
+        R_atmosphere_m2 + R_numerical_regularization_m2;
+
+    obs = ObservabilityAnalyzer.analyzeNormalMatrix( ...
+        sim.observabilityNormalMatrix, state_names);
+    final_observability_rank = obs.rank;
+    weak_observability_state_names = obs.weakStateNames; %#ok<NASGU>
+    observability_note = sprintf( ...
+        'Column-normalized accumulated pseudorange observability rank is %d of %d states. Weak states: %s.', ...
+        obs.rank, sim.stateDim, strjoin(string(obs.weakStateNames), ', '));
+
+    totalResidualByTower_m = errors.atmosphere.stochasticResidualByTower_m;
+    tropoResidualByTower_m = errors.troposphere.stochasticResidualByTower_m;
+    ionoResidualByTower_m = errors.ionosphere.stochasticResidualByTower_m;
+    truth_atmosphere_residual_mean_m = mean(totalResidualByTower_m(:), 'omitnan');
+    truth_atmosphere_residual_std_m = std(totalResidualByTower_m(:), 0, 'omitnan');
+    truth_atmosphere_residual_rms_m = sqrt(mean(totalResidualByTower_m(:).^2, 'omitnan'));
+    truth_atmosphere_residual_max_abs_m = max(abs(totalResidualByTower_m(:)), [], 'omitnan');
+    truth_troposphere_residual_mean_m = mean(tropoResidualByTower_m(:), 'omitnan');
+    truth_troposphere_residual_std_m = std(tropoResidualByTower_m(:), 0, 'omitnan');
+    truth_troposphere_residual_rms_m = sqrt(mean(tropoResidualByTower_m(:).^2, 'omitnan'));
+    truth_troposphere_residual_max_abs_m = max(abs(tropoResidualByTower_m(:)), [], 'omitnan');
+    truth_ionosphere_residual_mean_m = mean(ionoResidualByTower_m(:), 'omitnan');
+    truth_ionosphere_residual_std_m = std(ionoResidualByTower_m(:), 0, 'omitnan');
+    truth_ionosphere_residual_rms_m = sqrt(mean(ionoResidualByTower_m(:).^2, 'omitnan'));
+    truth_ionosphere_residual_max_abs_m = max(abs(ionoResidualByTower_m(:)), [], 'omitnan');
+    truth_troposphere_residual_config_sigma_m = ...
+        double(sim.truthAtmosphere.residualTroposphereSigma_m) * ...
+        double(sim.truthAtmosphere.enableTroposphere);
+    truth_ionosphere_residual_config_sigma_m = ...
+        double(sim.truthAtmosphere.residualIonosphereSigma_m) * ...
+        double(sim.truthAtmosphere.enableIonosphere);
+    truth_total_residual_config_sigma_m = hypot( ...
+        truth_troposphere_residual_config_sigma_m, ...
+        truth_ionosphere_residual_config_sigma_m);
+    mean_truth_atmosphere_delay_m = mean(errors.atmosphere.truth_m(:), 'omitnan');
+    mean_model_atmosphere_delay_m = mean(errors.atmosphere.model_m(:), 'omitnan');
+    mean_atmosphere_model_residual_m = mean(errors.atmosphere.residual_m(:), 'omitnan');
+    model_atmosphere_residual_sigma_m = ...
+        sim.measurementModel.modelAtmosphere.residualCodeSigma_m();
+    truth_atmosphere_residual_sigma_m = ...
+        sim.measurementModel.truthAtmosphere.residualCodeSigma_m();
+    mean_deterministic_atmosphere_model_residual_m = ...
+        mean(errors.atmosphere.deterministicResidual_m(:), 'omitnan');
+    model_atmosphere_residual_variance_m2 = ...
+        mean(errors.atmosphere.variance_m2(:), 'omitnan');
+    model_atmosphere_covariance_structure = string(errors.atmosphere.correlationModel);
+
+    selectedOsc = sim.simConfig.clockLibrary.(char(sim.assetConfig.clock.clockType));
+    selectedClock = Clock(selectedOsc.h0, selectedOsc.hm1, selectedOsc.hm2, sim.dt);
+    nAllan = floor(sim.simConfig.validation.allanValidationSamples);
+    tau_profile_s = validTauForSamplesLocal( ...
+        sim.simConfig.validation.tauProfile_s, sim.dt, nAllan);
+    clockValidationList = [{selectedClock}, GroundNode.clocks(sim.towers)];
+    clock_allan_names = ["SpaceAsset RX", sim.towerNames];
+    nClock = numel(clockValidationList);
+    clock_allan_deviation_1s = NaN(1, nClock);
+    sim_adev_by_clock = NaN(nClock, 0);
+
+    for idxClock = 1:nClock
+        [tauThis_s, adevThis, sigmaThis, edfThis] = ...
+            runClockAllanValidationLocal( ...
+            clockValidationList{idxClock}, ...
+            sim.simConfig.validation.tauSimulation_s, ...
+            sim.dt, nAllan, sim.validationClockStream);
+
+        if idxClock == 1
+            tau_sim_s = tauThis_s;
+            sim_adev = adevThis;
+            sim_adev_sigma = sigmaThis; %#ok<NASGU>
+            sim_adev_edf = edfThis; %#ok<NASGU>
+            sim_adev_by_clock = NaN(nClock, numel(tauThis_s));
+        end
+
+        sim_adev_by_clock(idxClock, :) = adevThis;
+        clock_allan_deviation_1s(idxClock) = ...
+            clockValidationList{idxClock}.theoreticalAllanDeviation(1.0);
+    end
+
+    selected_allan_deviation_1s = selectedClock.theoreticalAllanDeviation(1.0);
+    seedConfig = sim.seedConfig; %#ok<NASGU>
+    source_references = {sprintf('Generated by %s.', sim.entryPointName)}; %#ok<NASGU>
+
+    convergence_skip_seconds = min(3600, 0.1 * max(time_vec));
+    final_window_seconds = min(3600, 0.1 * max(time_vec));
+    steady_state_idx = time_vec >= convergence_skip_seconds;
+    if nnz(steady_state_idx) < 2
+        steady_state_idx = true(size(time_vec));
+    end
+    final_window_idx = time_vec >= (max(time_vec) - final_window_seconds);
+    if nnz(final_window_idx) < 2
+        final_window_idx = true(size(time_vec));
+    end
+    position_error_norm_m = sqrt(sum(ekf_pos_error_m.^2, 1));
+    clock_error_range_equiv_m = ekf_clock_error_ps * 1e-12 * sim.c;
+    position_error_summary_m = buildErrorSummary(position_error_norm_m, steady_state_idx);
+    clock_error_summary_ps = buildErrorSummary(ekf_clock_error_ps, steady_state_idx);
+    clock_error_range_summary_m = buildErrorSummary(clock_error_range_equiv_m, steady_state_idx);
+    prefit_innovation_summary_m = buildErrorSummary(innovation_rms_m, steady_state_idx);
+    postfit_innovation_summary_m = buildErrorSummary(postfit_innovation_rms_m, steady_state_idx);
+    covariance_condition_summary = buildErrorSummary(covariance_condition_number, steady_state_idx);
+    innovation_condition_summary = buildErrorSummary(innovation_condition_number, steady_state_idx);
+    position_error_final_window_summary_m = buildErrorSummary(position_error_norm_m, final_window_idx);
+    clock_error_final_window_summary_ps = buildErrorSummary(ekf_clock_error_ps, final_window_idx);
+    clock_error_range_final_window_summary_m = buildErrorSummary(clock_error_range_equiv_m, final_window_idx);
+    prefit_innovation_final_window_summary_m = buildErrorSummary(innovation_rms_m, final_window_idx);
+    postfit_innovation_final_window_summary_m = buildErrorSummary(postfit_innovation_rms_m, final_window_idx);
+    covariance_condition_final_window_summary = buildErrorSummary(covariance_condition_number, final_window_idx);
+    innovation_condition_final_window_summary = buildErrorSummary(innovation_condition_number, final_window_idx);
+    final_clock_range_equivalent_m = clock_error_range_equiv_m(end);
+    final_prefit_innovation_rms_m = innovation_rms_m(end);
+    final_postfit_residual_rms_m = postfit_innovation_rms_m(end);
+
+    measurement_model_table = buildMeasurementModelReportTable();
+    state_vector_table = buildStateVectorReportTable(sim, state_names, state_index, enable_tower_clock_ekf, tower_names);
+    h_factor_observability_table = buildHFactorObservabilityTable( ...
+        sim, state_names, state_index, enable_tower_clock_ekf);
+    observation_matrix_diagnostics_table = buildObservationMatrixDiagnosticsTable(sim);
+    starting_position_table = buildStartingPositionTable(sim);
+    innovation_covariance_summary_table = buildInnovationCovarianceSummaryTable(sim);
+    stochastic_truth_residual_summary_table = buildStochasticTruthResidualSummaryTable(sim);
+    atmosphere_summary_table = buildAtmosphereSummaryTable(sim);
+    ionosphere_map_summary_table = buildIonosphereMapSummaryTable(sim, diags);
+    troposphere_profile_summary_table = buildTroposphereProfileSummaryTable(sim, diags);
 
     report_root = char(reportConfig.reportRoot);
     figure_dir = fullfile(report_root, "figures");
@@ -99,82 +401,82 @@ function generateReport(sim, reportConfig, reportToggles)
     %% Report Figure Generation
     plot_paths = struct();
     plot_paths.position_error = exportPlot(figure_dir, "position_error.pdf", ...
-        @() plotPositionError(ctx.time_vec, ctx.ekf_pos_error_m));
+        @() plotPositionError(time_vec, ekf_pos_error_m));
     plot_paths.position_covariance = exportPlot(figure_dir, "position_covariance.pdf", ...
-        @() plotPositionCovariance(ctx.time_vec, ctx.ekf_pos_sigma_m));
+        @() plotPositionCovariance(time_vec, ekf_pos_sigma_m));
     
-    if isfield(ctx, "attitude_est_deg") && isfield(ctx, "attitude_truth_deg")
+    if exist('attitude_est_deg', 'var') && exist('attitude_truth_deg', 'var')
         plot_paths.attitude_states = exportPlot(figure_dir, "attitude_states.pdf", ...
-            @() plotAttitudeStates(ctx.time_vec, ctx.attitude_truth_deg, ...
-            ctx.attitude_est_deg, ctx.attitude_error_deg, ...
-            ctx.attitude_sigma_deg, ctx.attitude_state_names, ...
-            ctx.attitude_frame));
+            @() plotAttitudeStates(time_vec, attitude_truth_deg, ...
+            attitude_est_deg, attitude_error_deg, ...
+            attitude_sigma_deg, attitude_state_names, ...
+            attitude_frame));
     
         plot_paths.attitude_covariance = exportPlot(figure_dir, "attitude_covariance.pdf", ...
-            @() plotAttitudeCovariance(ctx.time_vec, ctx.attitude_sigma_deg, ...
-            ctx.attitude_state_names, ctx.attitude_frame));
+            @() plotAttitudeCovariance(time_vec, attitude_sigma_deg, ...
+            attitude_state_names, attitude_frame));
     else
         plot_paths.attitude_states = "";
         plot_paths.attitude_covariance = "";
     end
     
-    if isfield(ctx, "angular_velocity_est_degps") && isfield(ctx, "angular_velocity_truth_degps")
+    if exist('angular_velocity_est_degps', 'var') && exist('angular_velocity_truth_degps', 'var')
         plot_paths.angular_velocity_states = exportPlot(figure_dir, "angular_velocity_states.pdf", ...
-            @() plotAngularVelocityStates(ctx.time_vec, ...
-            ctx.angular_velocity_truth_degps, ...
-            ctx.angular_velocity_est_degps, ...
-            ctx.angular_velocity_error_degps, ...
-            ctx.angular_velocity_sigma_degps, ...
-            ctx.angular_velocity_state_names, ...
-            ctx.attitude_frame));
+            @() plotAngularVelocityStates(time_vec, ...
+            angular_velocity_truth_degps, ...
+            angular_velocity_est_degps, ...
+            angular_velocity_error_degps, ...
+            angular_velocity_sigma_degps, ...
+            angular_velocity_state_names, ...
+            attitude_frame));
     else
         plot_paths.angular_velocity_states = "";
     end
     
     plot_paths.clock_error = exportPlot(figure_dir, "clock_error.pdf", ...
-        @() plotClockError(ctx.time_vec, ctx.ekf_clock_error_ps, ctx.ekf_clock_sigma_ps));
+        @() plotClockError(time_vec, ekf_clock_error_ps, ekf_clock_sigma_ps));
     plot_paths.clock_bias = exportPlot(figure_dir, "clock_bias_tracking.pdf", ...
-        @() plotClockBias(ctx.time_vec, ctx.true_clock_bias_ps, ctx.est_clock_bias_ps));
-    if isfield(ctx, "true_ground_clock_bias_ps")
+        @() plotClockBias(time_vec, true_clock_bias_ps, est_clock_bias_ps));
+    if exist('true_ground_clock_bias_ps', 'var')
         plot_paths.ground_clock_bias = exportPlot(figure_dir, "ground_clock_bias.pdf", ...
-            @() plotGroundClockBias(ctx.time_vec, ctx.true_ground_clock_bias_ps, ctx.towers));
+            @() plotGroundClockBias(time_vec, true_ground_clock_bias_ps, towers));
     else
         plot_paths.ground_clock_bias = "";
     end
-    if isfield(ctx, "tower_clock_correction_s")
+    if exist('tower_clock_correction_s', 'var')
         plot_paths.ground_clock_correction = exportPlot(figure_dir, "ground_clock_correction.pdf", ...
-            @() plotGroundClockCorrection(ctx.time_vec, ctx.true_ground_clock_bias_ps, ...
-            ctx.tower_clock_correction_s, ctx.tower_clock_correction_residual_s, ...
-            ctx.tower_clock_correction_sigma_s, ctx.towers));
+            @() plotGroundClockCorrection(time_vec, true_ground_clock_bias_ps, ...
+            tower_clock_correction_s, tower_clock_correction_residual_s, ...
+            tower_clock_correction_sigma_s, towers));
     else
         plot_paths.ground_clock_correction = "";
     end
-    if isfield(ctx, "est_ground_clock_bias_ps") && any(isfinite(ctx.est_ground_clock_bias_ps(:)))
+    if exist('est_ground_clock_bias_ps', 'var') && any(isfinite(est_ground_clock_bias_ps(:)))
         plot_paths.ground_clock_estimate = exportPlot(figure_dir, "ground_clock_estimate.pdf", ...
-            @() plotGroundClockEstimate(ctx.time_vec, ctx.true_ground_clock_bias_ps, ctx.est_ground_clock_bias_ps, ctx.towers));
+            @() plotGroundClockEstimate(time_vec, true_ground_clock_bias_ps, est_ground_clock_bias_ps, towers));
     else
         plot_paths.ground_clock_estimate = "";
     end
-    if isfield(ctx, "est_ground_clock_bias_ps_gauge_aligned") && any(isfinite(ctx.est_ground_clock_bias_ps_gauge_aligned(:)))
+    if exist('est_ground_clock_bias_ps_gauge_aligned', 'var') && any(isfinite(est_ground_clock_bias_ps_gauge_aligned(:)))
         plot_paths.ground_clock_gauge_aligned = exportPlot(figure_dir, "ground_clock_gauge_aligned.pdf", ...
-            @() plotGroundClockEstimate(ctx.time_vec, ctx.true_ground_clock_bias_ps, ctx.est_ground_clock_bias_ps_gauge_aligned, ctx.towers));
+            @() plotGroundClockEstimate(time_vec, true_ground_clock_bias_ps, est_ground_clock_bias_ps_gauge_aligned, towers));
     else
         plot_paths.ground_clock_gauge_aligned = "";
     end
-    if isfield(ctx, "prefit_residual_by_tower_m")
+    if exist('prefit_residual_by_tower_m', 'var')
         plot_paths.residual_by_tower = exportPlot(figure_dir, "residual_by_tower.pdf", ...
-            @() plotResidualByTower(ctx.time_vec, ctx.prefit_residual_by_tower_m, ctx.postfit_residual_by_tower_m, ctx.towers));
+            @() plotResidualByTower(time_vec, prefit_residual_by_tower_m, postfit_residual_by_tower_m, towers));
     else
         plot_paths.residual_by_tower = "";
     end
-    if isfield(ctx, "prefit_residual_by_receiver_tower_m")
+    if exist('prefit_residual_by_receiver_tower_m', 'var')
         plot_paths.per_receiver_prefit_rms = exportPlot(figure_dir, "per_receiver_prefit_rms.pdf", ...
-            @() plotPerReceiverResidualRms(ctx.time_vec, ctx.prefit_residual_by_receiver_tower_m, ctx.receiver_names, "Pre-fit pseudorange residual RMS [m]"));
+            @() plotPerReceiverResidualRms(time_vec, prefit_residual_by_receiver_tower_m, receiver_names, "Pre-fit pseudorange residual RMS [m]"));
         plot_paths.per_receiver_postfit_rms = exportPlot(figure_dir, "per_receiver_postfit_rms.pdf", ...
-            @() plotPerReceiverResidualRms(ctx.time_vec, ctx.postfit_residual_by_receiver_tower_m, ctx.receiver_names, "Post-fit pseudorange residual RMS [m]"));
+            @() plotPerReceiverResidualRms(time_vec, postfit_residual_by_receiver_tower_m, receiver_names, "Post-fit pseudorange residual RMS [m]"));
         plot_paths.receiver_residual_heatmaps = exportPlot(figure_dir, "receiver_residual_heatmaps.pdf", ...
-            @() plotReceiverResidualHeatmaps(ctx.time_vec, ctx.prefit_residual_by_receiver_tower_m, ...
-            ctx.postfit_residual_by_receiver_tower_m, ctx.receiver_names, ctx.tower_names));
+            @() plotReceiverResidualHeatmaps(time_vec, prefit_residual_by_receiver_tower_m, ...
+            postfit_residual_by_receiver_tower_m, receiver_names, tower_names));
        plot_paths.differential_residuals = "";
     else
         plot_paths.per_receiver_prefit_rms = "";
@@ -182,10 +484,10 @@ function generateReport(sim, reportConfig, reportToggles)
         plot_paths.receiver_residual_heatmaps = "";
         plot_paths.differential_residuals = "";
     end
-    if isfield(ctx, "pseudorange_error_by_receiver_tower_m")
+    if exist('pseudorange_error_by_receiver_tower_m', 'var')
         plot_paths.receiver_pseudorange_error = exportPlot(figure_dir, "receiver_pseudorange_error.pdf", ...
-            @() plotPerReceiverResidualRms(ctx.time_vec, ctx.pseudorange_error_by_receiver_tower_m, ...
-            ctx.receiver_names, "Pseudorange minus geometric range RMS [m]"));
+            @() plotPerReceiverResidualRms(time_vec, pseudorange_error_by_receiver_tower_m, ...
+            receiver_names, "Pseudorange minus geometric range RMS [m]"));
     else
         plot_paths.receiver_pseudorange_error = "";
     end
@@ -194,9 +496,9 @@ function generateReport(sim, reportConfig, reportToggles)
     plot_paths.receiver_subset_position = "";
     plot_paths.receiver_subset_covariance = "";
     plot_paths.receiver_subset_residuals = "";
-    if isfield(ctx, "R_total_m2")
+    if exist('R_total_m2', 'var')
         plot_paths.R_breakdown = exportPlot(figure_dir, "measurement_covariance_breakdown.pdf", ...
-            @() plotMeasurementCovarianceBreakdown(ctx.time_vec, ctx));
+            @() plotMeasurementCovarianceBreakdown(time_vec, sim));
     else
         plot_paths.R_breakdown = "";
     end
@@ -221,7 +523,7 @@ function generateReport(sim, reportConfig, reportToggles)
         plot_paths.atmosphere_components = exportPlot( ...
             figure_dir, ...
             "atmosphere_components.pdf", ...
-            @() plotAtmosphereComponents(ctx.time_vec, errors));
+            @() plotAtmosphereComponents(time_vec, errors));
     else
         plot_paths.atmosphere_components = "";
     end
@@ -230,7 +532,7 @@ function generateReport(sim, reportConfig, reportToggles)
         plot_paths.atmosphere_residual_components = exportPlot( ...
             figure_dir, ...
             "atmosphere_residual_components.pdf", ...
-            @() plotAtmosphereResidualComponents(ctx.time_vec, errors));
+            @() plotAtmosphereResidualComponents(time_vec, errors));
     else
         plot_paths.atmosphere_residual_components = "";
     end
@@ -249,7 +551,7 @@ function generateReport(sim, reportConfig, reportToggles)
         plot_paths.ionosphere_map_diagnostics = exportPlot( ...
             figure_dir, ...
             "ionosphere_map_diagnostics.pdf", ...
-            @() plotIonosphereMapDiagnostics(ctx.time_vec, diags));
+            @() plotIonosphereMapDiagnostics(time_vec, diags));
     else
         plot_paths.ionosphere_map_diagnostics = "";
     end
@@ -270,7 +572,7 @@ function generateReport(sim, reportConfig, reportToggles)
         plot_paths.troposphere_profile_diagnostics = exportPlot( ...
             figure_dir, ...
             "troposphere_profile_diagnostics.pdf", ...
-            @() plotTroposphereProfileDiagnostics(ctx.time_vec, diags));
+            @() plotTroposphereProfileDiagnostics(time_vec, diags));
     else
         plot_paths.troposphere_profile_diagnostics = "";
     end
@@ -287,51 +589,49 @@ function generateReport(sim, reportConfig, reportToggles)
             figure_dir, ...
             "stochastic_truth_atmosphere_residuals.pdf", ...
             @() plotStochasticTruthAtmosphereResiduals( ...
-            ctx.time_vec, ...
+            time_vec, ...
             errors));
     else
         plot_paths.stochastic_truth_residuals = "";
     end    
     
     
-    if isfield(ctx, "visible_tower_count")
+    if exist('visible_tower_count', 'var')
         plot_paths.visible_towers = exportPlot(figure_dir, "visible_towers.pdf", ...
-            @() plotVisibleTowers(ctx.time_vec, ctx.visible_tower_count, ctx.num_towers));
+            @() plotVisibleTowers(time_vec, visible_tower_count, num_towers));
     else
         plot_paths.visible_towers = "";
     end
     plot_paths.innovation = exportPlot(figure_dir, "innovation_rms.pdf", ...
-        @() plotInnovation(ctx.time_vec, ctx.innovation_rms_m, ctx.postfit_innovation_rms_m));
-    if isfield(ctx, "nis_degrees_of_freedom")
+        @() plotInnovation(time_vec, innovation_rms_m, postfit_innovation_rms_m));
+    if exist('nis_degrees_of_freedom', 'var')
         plot_paths.nis = exportPlot(figure_dir, "nis.pdf", ...
-            @() plotNis(ctx.time_vec, ctx.nis_history, ctx.num_towers, ctx.nis_degrees_of_freedom));
+            @() plotNis(time_vec, nis_history, num_towers, nis_degrees_of_freedom));
     else
         plot_paths.nis = exportPlot(figure_dir, "nis.pdf", ...
-            @() plotNis(ctx.time_vec, ctx.nis_history, ctx.num_towers));
+            @() plotNis(time_vec, nis_history, num_towers));
     end
-    if isfield(ctx, "normalized_innovation_rms") && ...
-            isfield(ctx, "innovation_covariance_mean_sigma_m")
+    if exist('normalized_innovation_rms', 'var') && ...
+            exist('innovation_covariance_mean_sigma_m', 'var')
         plot_paths.innovation_covariance_consistency = exportPlot( ...
             figure_dir, ...
             "innovation_covariance_consistency.pdf", ...
-            @() plotInnovationCovarianceConsistency( ...
-            ctx.time_vec, ...
-            ctx));
+            @() plotInnovationCovarianceConsistency(time_vec, sim));
     else
         plot_paths.innovation_covariance_consistency = "";
     end
 
     plot_paths.geometry = exportPlot(figure_dir, "geometry.pdf", ...
-        @() plotGeometry(ctx.R_earth, ctx.sat_pos_history_m, ctx.towers_eci_first_m, ctx.towers));
-    if isfield(ctx, "clock_allan_names") && isfield(ctx, "sim_adev_by_clock")
+        @() plotGeometry(R_earth, sat_pos_history_m, towers_eci_first_m, towers));
+    if exist('clock_allan_names', 'var') && exist('sim_adev_by_clock', 'var')
         plot_paths.allan = exportPlot(figure_dir, "allan_deviation.pdf", ...
-            @() plotAllanDeviation(ctx.oscillators, reportConfig.selectedOscillatorName, ...
-            ctx.tau_profile_s, ctx.tau_sim_s, ctx.sim_adev, ctx.dt, ...
-            ctx.clock_allan_names, ctx.sim_adev_by_clock));
+            @() plotAllanDeviation(oscillators, reportConfig.selectedOscillatorName, ...
+            tau_profile_s, tau_sim_s, sim_adev, dt, ...
+            clock_allan_names, sim_adev_by_clock));
     else
         plot_paths.allan = exportPlot(figure_dir, "allan_deviation.pdf", ...
-            @() plotAllanDeviation(ctx.oscillators, reportConfig.selectedOscillatorName, ...
-            ctx.tau_profile_s, ctx.tau_sim_s, ctx.sim_adev, ctx.dt));
+            @() plotAllanDeviation(oscillators, reportConfig.selectedOscillatorName, ...
+            tau_profile_s, tau_sim_s, sim_adev, dt));
     end
     
     %% LaTeX Report Assembly
@@ -360,22 +660,36 @@ function generateReport(sim, reportConfig, reportToggles)
     report = appendLine(report, "\end{center}");
     report = appendLine(report, "\vspace{0.3cm}");
     
-    has_first_page_tables = isfield(ctx, "assumption_table") || ...
-        isfield(ctx, "noise_error_table") || ...
-        isfield(ctx, "covariance_table") || ...
-        isfield(ctx, "initial_state_table") || ...
-        isfield(ctx, "final_state_table") || ...
-        isfield(ctx, "observability_table") || ...
-        isfield(ctx, "first_page_summary_table");
+    has_first_page_tables = exist('assumption_table', 'var') || ...
+        exist('noise_error_table', 'var') || ...
+        exist('covariance_table', 'var') || ...
+        exist('initial_state_table', 'var') || ...
+        exist('final_state_table', 'var') || ...
+        exist('observability_table', 'var') || ...
+        exist('first_page_summary_table', 'var');
     if has_first_page_tables
         report = appendLine(report, "\section{Run Assumptions and Initial Conditions}");
-        report = appendOptionalTable(report, "First-Page Configuration Snapshot", ctx, "first_page_summary_table", 12);
-        report = appendOptionalTable(report, "Scenario Assumptions", ctx, "assumption_table", 18);
-        report = appendOptionalTable(report, "Noise and Error Inputs", ctx, "noise_error_table", 24);
-        report = appendOptionalTable(report, "Covariance and Process Inputs", ctx, "covariance_table", 24);
-        report = appendOptionalTable(report, "Initial Kalman Filter State Vector", ctx, "initial_state_table", 40);
-        report = appendOptionalTable(report, "Final Kalman Filter State Vector", ctx, "final_state_table", 40);
-        report = appendOptionalTable(report, "Accumulated Linearised Observability", ctx, "observability_table", 40);
+        if exist('first_page_summary_table', 'var')
+            report = appendOptionalTable(report, "First-Page Configuration Snapshot", first_page_summary_table, "first_page_summary_table", 12);
+        end
+        if exist('assumption_table', 'var')
+            report = appendOptionalTable(report, "Scenario Assumptions", assumption_table, "assumption_table", 18);
+        end
+        if exist('noise_error_table', 'var')
+            report = appendOptionalTable(report, "Noise and Error Inputs", noise_error_table, "noise_error_table", 24);
+        end
+        if exist('covariance_table', 'var')
+            report = appendOptionalTable(report, "Covariance and Process Inputs", covariance_table, "covariance_table", 24);
+        end
+        if exist('initial_state_table', 'var')
+            report = appendOptionalTable(report, "Initial Kalman Filter State Vector", initial_state_table, "initial_state_table", 40);
+        end
+        if exist('final_state_table', 'var')
+            report = appendOptionalTable(report, "Final Kalman Filter State Vector", final_state_table, "final_state_table", 40);
+        end
+        if exist('observability_table', 'var')
+            report = appendOptionalTable(report, "Accumulated Linearised Observability", observability_table, "observability_table", 40);
+        end
     end
     
     report = appendLine(report, "\section{Scenario Summary}");
@@ -385,16 +699,16 @@ function generateReport(sim, reportConfig, reportToggles)
         'Each SpaceAsset carries fixed mounted RX phase centres that share the parent RX clock. ' ...
         'The EKF estimates local orbital receiver navigation, configured RX clock states, and configured transmitter signal-delay states using %s for the internal clock sub-state. ' ...
         'The run length is %.2f hours with %.1f second sampling and %d ground stations.'];
-    if isfield(ctx, "ekf_clock_state_units")
-        clock_state_units_text = ctx.ekf_clock_state_units;
+    if exist('ekf_clock_state_units', 'var')
+        clock_state_units_text = ekf_clock_state_units;
     else
         clock_state_units_text = 'native clock seconds';
     end
     report = appendParagraph(report, sprintf(summary_format, ...
         char(string(clock_state_units_text)), ...
-        ctx.total_time_hours, ctx.dt, ctx.num_towers));
-    if isfield(ctx, "clock_estimation_mode")
-        clock_mode_text = string(ctx.clock_estimation_mode);
+        total_time_hours, dt, num_towers));
+    if exist('clock_estimation_mode', 'var')
+        clock_mode_text = string(clock_estimation_mode);
         if clock_mode_text == "spacecraftOnly" || clock_mode_text == "spacecraftReceiverClockOnly"
             mode_description = ['Clock-estimation mode is %s. ' ...
                 'The EKF estimates the spacecraft receiver clock only. Tower transmitter residual clocks may be generated in the truth measurements, but they are not EKF states and are not inserted into the predicted pseudorange unless represented by an explicit correction.'];
@@ -407,20 +721,20 @@ function generateReport(sim, reportConfig, reportToggles)
         end
         report = appendParagraph(report, sprintf(mode_description, char(clock_mode_text)));
     end
-    if isfield(ctx, "clockGaugeMode")
-        gauge_text = string(ctx.clockGaugeMode);
+    if exist('clockGaugeMode', 'var')
+        gauge_text = string(clockGaugeMode);
         if gauge_text == "fixReferenceTxDelay"
             gauge_description = sprintf( ...
                 'Reference ambiguity handling is %s. TX signal delays are range-equivalent relative delays, with reference tower %s fixed to zero.', ...
-                char(gauge_text), char(string(ctx.referenceTowerName)));
+                char(gauge_text), char(string(referenceTowerName)));
         elseif gauge_text == "externalTimeTransfer"
             gauge_description = sprintf( ...
                 'Clock gauge mode is %s. Tower clock pseudo-measurements provide an external time-transfer reference with configured sigma %.3g ps, so reported clock states are referenced to that external network time scale.', ...
-                char(gauge_text), ctx.externalClockCorrectionSigma_ps);
+                char(gauge_text), externalClockCorrectionSigma_ps);
         elseif gauge_text == "fixReferenceTower"
             gauge_description = sprintf( ...
                 'Clock gauge mode is %s. Reported spacecraft and tower clock estimates are relative to reference tower %s; no absolute UTC or GNSS system-time solution is claimed.', ...
-                char(gauge_text), char(string(ctx.referenceTowerName)));
+                char(gauge_text), char(string(referenceTowerName)));
         elseif gauge_text == "externalTowerCorrections"
             gauge_description = sprintf( ...
                 'Clock gauge mode is %s. Tower transmitter clocks are simulated in truth and corrected before the spacecraft-only EKF update; residual correction uncertainty is represented in R.', ...
@@ -437,85 +751,79 @@ function generateReport(sim, reportConfig, reportToggles)
         end
         report = appendParagraph(report, gauge_description);
     end
-    if isfield(ctx, "measurementNoiseEnabled") && ~ctx.measurementNoiseEnabled
+    if exist('measurementNoiseEnabled', 'var') && ~measurementNoiseEnabled
         report = appendParagraph(report, ['Measurement noise injection is disabled. Innovation RMS remains useful as a deterministic residual diagnostic, ' ...
             'but NIS is not statistically meaningful and should not be interpreted as a chi-square consistency result.']);
     end
-    if isfield(ctx, "observability_note")
-        report = appendParagraph(report, ctx.observability_note);
+    if exist('observability_note', 'var')
+        report = appendParagraph(report, observability_note);
     end
     
     % 1.1 Receiver Clock Architectue Interpretation
-    if isfield(ctx, "receiver_architecture_note")
+    if exist('receiver_architecture_note', 'var')
         report = appendLine(report, "\subsection{Receiver Clock Architecture Interpretation}");
-        report = appendParagraph(report, ctx.receiver_architecture_note);
+        report = appendParagraph(report, receiver_architecture_note);
     end
-    report = appendOptionalTable(report, "Receiver Architecture Comparison", ctx, "receiver_architecture_comparison_table", 12);
-    report = appendOptionalTable(report, "Receiver Geometry Diagnostic", ctx, "receiver_geometry_comparison_table", 12);
-    
     % 1.2 Scenario Geometriy and Receiver Architecture
-    if isfield(ctx, "signal_model_note")
+    if exist('signal_model_note', 'var')
         report = appendLine(report, "\subsection{Scenario Geometry and Receiver Architecture}");
-        report = appendParagraph(report, ctx.signal_model_note);
+        report = appendParagraph(report, signal_model_note);
 
-        if isfield(ctx, "propagation_frame_note")
-            report = appendParagraph(report, ctx.propagation_frame_note);
+        if exist('propagation_frame_note', 'var')
+            report = appendParagraph(report, propagation_frame_note);
         end
 
-        if isfield(ctx, "relativity_note")
-            report = appendParagraph(report, ctx.relativity_note);
+        if exist('relativity_note', 'var')
+            report = appendParagraph(report, relativity_note);
         end
     end
-    
-    report = appendOptionalTable(report, "Scenario Geometry and Receiver Architecture", ...
-        ctx, "scenario_geometry_table", 20);
     
     % 1.3 EKF State Vector
-    if isfield(ctx, "state_vector_table")
+    if exist('state_vector_table', 'var')
         report = appendLine(report, "\subsection{EKF State Vector}");
         report = appendParagraph(report, ['The filter is an error-state / MEKF-style estimator. ' ...
             'The nominal spacecraft position, velocity, attitude quaternion, body angular rate, and receiver clock are corrected by the estimated error state after each measurement update.']);
-        report = appendOptionalTable(report, "", ctx, "state_vector_table", 14);
+        report = appendOptionalTable(report, "", state_vector_table, "state_vector_table", 14);
     end
     
     
     % 1.4 Pseudorange Measurement Model and Observation Matrix
-    if isfield(ctx, "measurement_model_equation") || ...
-            isfield(ctx, "observation_matrix_equation") || ...
-            isfield(ctx, "measurement_model_table")
+    if exist('measurement_model_equation', 'var') || ...
+            exist('observation_matrix_equation', 'var') || ...
+            exist('measurement_model_table', 'var')
         report = appendLine(report, "\subsection{Pseudorange Measurement Model and Observation Matrix}");
-        if isfield(ctx, "measurement_model_equation")
+        if exist('measurement_model_equation', 'var')
             report = appendLine(report, "\[");
-            equation_lines = string(ctx.measurement_model_equation);
+            equation_lines = string(measurement_model_equation);
             for idx_equation_line = 1:numel(equation_lines)
                 report = appendLine(report, equation_lines(idx_equation_line));
             end
             report = appendLine(report, "\]");
         end
-        if isfield(ctx, "observation_matrix_equation")
+        if exist('observation_matrix_equation', 'var')
             report = appendLine(report, "\[");
-            equation_lines = string(ctx.observation_matrix_equation);
+            equation_lines = string(observation_matrix_equation);
             for idx_equation_line = 1:numel(equation_lines)
                 report = appendLine(report, equation_lines(idx_equation_line));
             end
             report = appendLine(report, "\]");
         end
-        report = appendOptionalTable(report, "", ctx, "measurement_model_table", 12);
+        report = appendOptionalTable(report, "", measurement_model_table, "measurement_model_table", 12);
         report = appendOptionalTable(report, ...
             "H-matrix factor observability by EKF state block", ...
-            ctx, ...
+            h_factor_observability_table, ...
             "h_factor_observability_table", ...
             12);
         
         report = appendOptionalTable(report, ...
             "Observation matrix dimensions and rank diagnostics", ...
-            ctx, ...
+            observation_matrix_diagnostics_table, ...
             "observation_matrix_diagnostics_table", ...
             12);
     end
     
     report = appendOptionalTable(report, "Starting Positions", ...
-        ctx, "starting_position_table", 20);
+        starting_position_table, "starting_position_table", 20);
     
     report = appendLine(report, "\begin{center}");
     report = appendLine(report, "\begin{tabular}{p{0.39\textwidth}p{0.18\textwidth}p{0.34\textwidth}}");
@@ -552,8 +860,8 @@ function generateReport(sim, reportConfig, reportToggles)
     %% 2. State Estimation Validation
     report = appendLine(report, "\clearpage");
     report = appendLine(report, "\section{State Estimation Validation}");
-    if isfield(ctx, "attitude_filter_note")
-        report = appendParagraph(report, ctx.attitude_filter_note);
+    if exist('attitude_filter_note', 'var')
+        report = appendParagraph(report, attitude_filter_note);
     end
     report = beginPlotTable(report);
     
@@ -567,12 +875,12 @@ function generateReport(sim, reportConfig, reportToggles)
         ["The plot shows the square root of the EKF posterior covariance diagonal for the three position states. " ...
          "The statistical approach is covariance propagation through the linearized two-body dynamics and correction by pseudorange observations."]);
     
-    report = appendReportRow(report, isfield(ctx, "attitude_est_deg") && strlength(string(plot_paths.attitude_states)) > 0, plot_paths.attitude_states, ...
+    report = appendReportRow(report, exist('attitude_est_deg', 'var') && strlength(string(plot_paths.attitude_states)) > 0, plot_paths.attitude_states, ...
         "EKF Attitude States: Roll, Pitch, Yaw", ...
         ["The plot compares true and estimated Euler-321 attitude states and shows attitude error with the covariance envelope. " ...
          "Attitude is observable only through the mounted receiver phase-centre lever arms and the line-of-sight geometry."]);
     
-    report = appendReportRow(report, isfield(ctx, "angular_velocity_est_degps") && strlength(string(plot_paths.angular_velocity_states)) > 0, plot_paths.angular_velocity_states, ...
+    report = appendReportRow(report, exist('angular_velocity_est_degps', 'var') && strlength(string(plot_paths.angular_velocity_states)) > 0, plot_paths.angular_velocity_states, ...
         "EKF Angular Velocity States", ...
         ["Angular velocity is not an instantaneous pseudorange observable. " ...
          "It is coupled indirectly through attitude propagation, so a zero-rate truth case should remain nearly constant. " ...
@@ -590,14 +898,14 @@ function generateReport(sim, reportConfig, reportToggles)
     
     report = endPlotTable(report);
     
-    if isfield(ctx, "final_H_rows") && ...
-            isfield(ctx, "final_H_columns") && ...
-            isfield(ctx, "final_H_rank") && ...
-            isfield(ctx, "final_H_rank_to_state_dim")
+    if exist('final_H_rows', 'var') && ...
+            exist('final_H_columns', 'var') && ...
+            exist('final_H_rank', 'var') && ...
+            exist('final_H_rank_to_state_dim', 'var')
     
         report = appendLine(report, "\subsection{Instantaneous Measurement Jacobian Rank}");
     
-        hRankPercent = 100.0 * ctx.final_H_rank_to_state_dim;
+        hRankPercent = 100.0 * final_H_rank_to_state_dim;
     
         report = appendParagraph(report, sprintf([ ...
             'The final measurement Jacobian contains %d measurement rows and %d EKF state columns. ' ...
@@ -605,22 +913,22 @@ function generateReport(sim, reportConfig, reportToggles)
             'This means that all pseudorange rows may be used, but they provide only %d independent measurement directions at this epoch. ' ...
             'For the current pseudorange-only model, this is expected when the geometry mainly observes spacecraft position and receiver clock bias, ' ...
             'while velocity, angular rate, and clock drift are observable only through time propagation.'], ...
-            ctx.final_H_rows, ...
-            ctx.final_H_columns, ...
-            ctx.final_H_rank, ...
+            final_H_rows, ...
+            final_H_columns, ...
+            final_H_rank, ...
             hRankPercent, ...
-            ctx.final_H_rank));
+            final_H_rank));
     end
-    if isfield(ctx, "final_H_pos_rank") && ...
-            isfield(ctx, "final_H_att_rank") && ...
-            isfield(ctx, "final_H_pos_att_clock_rank")
+    if exist('final_H_pos_rank', 'var') && ...
+            exist('final_H_att_rank', 'var') && ...
+            exist('final_H_pos_att_clock_rank', 'var')
     
         report = appendParagraph(report, sprintf([ ...
             'Final block ranks: position block rank = %d, attitude block rank = %d, ' ...
             'combined position-attitude-clock-bias rank = %d.'], ...
-            ctx.final_H_pos_rank, ...
-            ctx.final_H_att_rank, ...
-            ctx.final_H_pos_att_clock_rank));
+            final_H_pos_rank, ...
+            final_H_att_rank, ...
+            final_H_pos_att_clock_rank));
     end
     %% 3. Measurement and Geometry Validation
     report = appendLine(report, "\clearpage");
@@ -636,11 +944,11 @@ function generateReport(sim, reportConfig, reportToggles)
         "Pseudorange Pre-Fit and Post-Fit Residual RMS", ...
         ["The plot separates the pre-fit innovation before the EKF correction from the post-fit residual after the correction. " ...
          "With measurement noise disabled this is a deterministic diagnostic for geometry, clock-state coupling, numerical consistency, and estimator convergence."]);
-    report = appendReportRow(report, isfield(ctx, "prefit_residual_by_tower_m"), plot_paths.residual_by_tower, ...
+    report = appendReportRow(report, exist('prefit_residual_by_tower_m', 'var'), plot_paths.residual_by_tower, ...
         "Per-Tower Measurement Residuals", ...
         ["The plot keeps pre-fit and post-fit residuals separated by tower. " ...
          "Blank intervals indicate epochs where that tower was not visible and was excluded from the EKF update."]);
-    report = appendReportRow(report, isfield(ctx, "R_total_m2"), plot_paths.R_breakdown, ...
+    report = appendReportRow(report, exist('R_total_m2', 'var'), plot_paths.R_breakdown, ...
         "Measurement Covariance Contribution", ...
         ["The plot shows the per-row root-variance contributions represented in the measurement covariance. " ...
          "Receiver tracking noise is independent by row; ground-timing and atmospheric residual terms may also enter the full R matrix as tower-common correlations across receivers. " ...
@@ -710,7 +1018,7 @@ function generateReport(sim, reportConfig, reportToggles)
             stochastic_truth_residual_description);
     end
     
-    if isfield(ctx, "measurementNoiseEnabled") && ~ctx.measurementNoiseEnabled
+    if exist('measurementNoiseEnabled', 'var') && ~measurementNoiseEnabled
         nis_description = ["The plot shows NIS computed from the full EKF update innovation and covariance. " ...
             "Because range measurement noise injection is disabled in this deterministic validation, the curve is a numerical diagnostic only. " ...
             "It should not be interpreted as a chi-square consistency result."];
@@ -727,15 +1035,15 @@ function generateReport(sim, reportConfig, reportToggles)
         ["The plot compares the pre-fit innovation RMS with the square root of the mean innovation covariance diagonal. " ...
          "It also shows NIS per degree of freedom and its square-root form. " ...
          "This is a statistical consistency diagnostic only when the injected stochastic errors match the covariance represented in R and S."]);
-    if isfield(ctx, "enableElevationMask") && ctx.enableElevationMask
+    if exist('enableElevationMask', 'var') && enableElevationMask
         visibility_description = ["The plot shows how many ground towers pass the tower-side elevation mask and are used by the EKF at each epoch. " ...
-            sprintf("Elevation mask: %.2f deg.", ctx.elevationMask_deg)];
+            sprintf("Elevation mask: %.2f deg.", elevationMask_deg)];
     else
         visibility_description = ["The plot shows how many tower rows are used by the EKF at each epoch. " ...
             "Elevation-mask visibility filtering is disabled."];
     end
     
-    report = appendReportRow(report, isfield(ctx, "visible_tower_count"), plot_paths.visible_towers, ...
+    report = appendReportRow(report, exist('visible_tower_count', 'var'), plot_paths.visible_towers, ...
         "Tower Rows Used by the EKF", visibility_description);
     report = appendReportRow(report, reportToggles.groundSegment, plot_paths.geometry, ...
         "Ground-to-Space Geometry", ...
@@ -746,18 +1054,18 @@ function generateReport(sim, reportConfig, reportToggles)
         "Measurement noise is not part of the current clock-only validation scenario.");
     report = endPlotTable(report);
 
-    if isfield(ctx, "innovation_covariance_summary_table")
+    if exist('innovation_covariance_summary_table', 'var')
         report = appendOptionalTable(report, ...
             "Innovation Covariance Summary", ...
-            ctx, ...
+            innovation_covariance_summary_table, ...
             "innovation_covariance_summary_table", ...
             20);
     end
 
-    if isfield(ctx, "stochastic_truth_residual_summary_table")
+    if exist('stochastic_truth_residual_summary_table', 'var')
         report = appendOptionalTable(report, ...
             "Stochastic Truth Atmosphere Residual Summary", ...
-            ctx, ...
+            stochastic_truth_residual_summary_table, ...
             "stochastic_truth_residual_summary_table", ...
             20);
     end
@@ -765,22 +1073,22 @@ function generateReport(sim, reportConfig, reportToggles)
     if atmosphereSectionEnabled
         report = appendOptionalTable(report, ...
             "Atmosphere Propagation Summary", ...
-            ctx, ...
+            atmosphere_summary_table, ...
             "atmosphere_summary_table", ...
             20);
 
-        if isfield(ctx, "ionosphere_map_summary_table")
+        if exist('ionosphere_map_summary_table', 'var')
             report = appendOptionalTable(report, ...
                 "Ionosphere Pierce-Point TEC Diagnostics", ...
-                ctx, ...
+                ionosphere_map_summary_table, ...
                 "ionosphere_map_summary_table", ...
                 20);
         end
         
-        if isfield(ctx, "troposphere_profile_summary_table")
+        if exist('troposphere_profile_summary_table', 'var')
             report = appendOptionalTable(report, ...
                 "Troposphere Profile Hydrostatic and Wet Diagnostics", ...
-                ctx, ...
+                troposphere_profile_summary_table, ...
                 "troposphere_profile_summary_table", ...
                 20);
         end
@@ -813,7 +1121,7 @@ function generateReport(sim, reportConfig, reportToggles)
     report = appendLine(report, "\clearpage");
     report = appendLine(report, "\section{Oscillator Stability Validation}");
     report = beginPlotTable(report);
-    if isfield(ctx, "clock_allan_names") && isfield(ctx, "sim_adev_by_clock")
+    if exist('clock_allan_names', 'var') && exist('sim_adev_by_clock', 'var')
         allan_description = ["The plot compares theoretical Allan deviation profiles with simulated result points for the spacecraft oscillator and every tower oscillator. " ...
             "The statistical approach is overlapping Allan deviation applied to independently simulated clock time-error records across the displayed averaging-time range."];
     else
@@ -823,12 +1131,12 @@ function generateReport(sim, reportConfig, reportToggles)
     report = appendReportRow(report, reportToggles.allanDeviationValidation && reportToggles.satelliteClockError, plot_paths.allan, ...
         "Oscillator Stability Check", allan_description);
     if reportToggles.groundClockError
-        if isfield(ctx, "est_ground_clock_bias_ps") && any(isfinite(ctx.est_ground_clock_bias_ps(:)))
+        if exist('est_ground_clock_bias_ps', 'var') && any(isfinite(est_ground_clock_bias_ps(:)))
             ground_clock_description = ["Ground transmitter clock error is enabled. " ...
                 "The plot shows the true station-specific transmitter clock biases used in the pseudorange truth generation. " ...
                 "The EKF is configured to estimate individual tower clock states, so tower-clock sensitivity is included in the measurement Jacobian."];
         else
-            if isfield(ctx, "tower_clock_correction_s")
+            if exist('tower_clock_correction_s', 'var')
                 ground_clock_description = ["Ground transmitter clock error is enabled. " ...
                     "The plot shows the true station-specific transmitter clock biases used in the raw pseudorange truth generation. " ...
                     "The spacecraft EKF does not estimate these tower clocks. The truth measurement contains the residual after any configured external correction; if correction is disabled, that residual is unmodelled in the EKF prediction."];
@@ -843,7 +1151,7 @@ function generateReport(sim, reportConfig, reportToggles)
     end
     report = appendReportRow(report, reportToggles.groundClockError, plot_paths.ground_clock_bias, ...
         "Ground Clock Error", ground_clock_description);
-    if isfield(ctx, "tower_clock_correction_s")
+    if exist('tower_clock_correction_s', 'var')
         ground_timing_correction_description = ...
             ["The plot separates raw tower clock error, applied ground timing correction, and residual correction error. " ...
              "In externalTowerCorrections mode this is a Stage-1 abstraction: an external tower-clock correction product, not a physical GNSS common-view, TWSTFT, fiber, White Rabbit, or UTC(k) timing network."];
@@ -851,7 +1159,7 @@ function generateReport(sim, reportConfig, reportToggles)
         ground_timing_correction_description = ...
             "This scenario does not provide an external tower-clock correction product.";
     end
-    report = appendReportRow(report, isfield(ctx, "tower_clock_correction_s"), plot_paths.ground_clock_correction, ...
+    report = appendReportRow(report, exist('tower_clock_correction_s', 'var'), plot_paths.ground_clock_correction, ...
         "External Ground Timing Correction", ground_timing_correction_description);
     report = appendReportRow(report, strlength(string(plot_paths.ground_clock_estimate)) > 0, plot_paths.ground_clock_estimate, ...
         "Tower Clock State Estimates", ...
@@ -894,125 +1202,125 @@ function generateReport(sim, reportConfig, reportToggles)
     report = appendParagraph(report, sprintf([ ...
         'The final-sample values are retained as endpoint diagnostics, but they should not be used alone to rank oscillator performance. ' ...
         'The run-level statistics below separate the full record, the period after the first %.2f hours, and the final %.2f hours.'], ...
-        ctx.convergence_skip_seconds / 3600, ...
-        ctx.final_window_seconds / 3600));
-    if isfield(ctx, "clock_covariance_floor_enabled") && ctx.clock_covariance_floor_enabled
+        convergence_skip_seconds / 3600, ...
+        final_window_seconds / 3600));
+    if exist('clock_covariance_floor_enabled', 'var') && clock_covariance_floor_enabled
         report = appendParagraph(report, sprintf([ ...
             'Clock covariance regularisation is enabled for this run. ' ...
             'The EKF keeps a minimum estimated clock phase standard deviation of %.3g ps and a minimum estimated clock frequency standard deviation of %.3g ps/s. ' ...
             'This does not change the truth oscillator; it provides a lower bound for estimator covariance if the clock sub-state collapses numerically.'], ...
-            ctx.clock_phase_covariance_floor_ps, ctx.clock_frequency_covariance_floor_ps_per_s));
+            clock_phase_covariance_floor_ps, clock_frequency_covariance_floor_ps_per_s));
     end
-    if isfield(ctx, "numerical_measurement_sigma_floor_m") && ctx.numerical_measurement_sigma_floor_m > 0
+    if exist('numerical_measurement_sigma_floor_m', 'var') && numerical_measurement_sigma_floor_m > 0
         report = appendParagraph(report, sprintf([ ...
             'A %.3g m measurement covariance floor is applied only as numerical regularisation for the zero-noise ideal-product validation. ' ...
             'It is not receiver tracking noise, tower timing residual noise, atmosphere, multipath, or hardware delay.'], ...
-            ctx.numerical_measurement_sigma_floor_m));
+            numerical_measurement_sigma_floor_m));
     end
     report = appendLine(report, "\begin{center}");
     report = appendLine(report, "\begin{tabular}{p{0.52\textwidth}p{0.25\textwidth}}");
     report = appendLine(report, "\toprule");
     report = appendLine(report, "\textbf{Quantity} & \textbf{Value}\\");
     report = appendLine(report, "\midrule");
-    report = appendFinalValueRow(report, "Final 3D position estimation error", ctx.final_position_error_m, "m");
-    report = appendFinalValueRow(report, "Final satellite clock estimation error", ctx.final_clock_error_ps, "ps");
-    report = appendFinalValueRow(report, "Final satellite clock range-equivalent error", ctx.final_clock_range_equivalent_m, "m");
-    if isfield(ctx, "final_attitude_error_norm_deg")
-        report = appendFinalValueRow(report, "Final attitude error norm", ctx.final_attitude_error_norm_deg, "deg");
+    report = appendFinalValueRow(report, "Final 3D position estimation error", final_position_error_m, "m");
+    report = appendFinalValueRow(report, "Final satellite clock estimation error", final_clock_error_ps, "ps");
+    report = appendFinalValueRow(report, "Final satellite clock range-equivalent error", final_clock_range_equivalent_m, "m");
+    if exist('final_attitude_error_norm_deg', 'var')
+        report = appendFinalValueRow(report, "Final attitude error norm", final_attitude_error_norm_deg, "deg");
     end
     
-    if isfield(ctx, "final_angular_velocity_error_norm_degps")
-        report = appendFinalValueRow(report, "Final angular velocity error norm", ctx.final_angular_velocity_error_norm_degps, "deg/s");
+    if exist('final_angular_velocity_error_norm_degps', 'var')
+        report = appendFinalValueRow(report, "Final angular velocity error norm", final_angular_velocity_error_norm_degps, "deg/s");
     end
-    report = appendFinalValueRow(report, "Final pre-fit pseudorange innovation RMS", ctx.final_prefit_innovation_rms_m, "m");
-    report = appendFinalValueRow(report, "Final post-fit pseudorange residual RMS", ctx.final_postfit_residual_rms_m, "m");
+    report = appendFinalValueRow(report, "Final pre-fit pseudorange innovation RMS", final_prefit_innovation_rms_m, "m");
+    report = appendFinalValueRow(report, "Final post-fit pseudorange residual RMS", final_postfit_residual_rms_m, "m");
 
-    if isfield(ctx, "mean_truth_atmosphere_delay_m")
+    if exist('mean_truth_atmosphere_delay_m', 'var')
         report = appendFinalValueRow(report, ...
             "Mean truth atmospheric code delay", ...
-            ctx.mean_truth_atmosphere_delay_m, ...
+            mean_truth_atmosphere_delay_m, ...
             "m");
     end
 
-    if isfield(ctx, "mean_model_atmosphere_delay_m")
+    if exist('mean_model_atmosphere_delay_m', 'var')
         report = appendFinalValueRow(report, ...
             "Mean estimator atmospheric correction", ...
-            ctx.mean_model_atmosphere_delay_m, ...
+            mean_model_atmosphere_delay_m, ...
             "m");
     end
 
-    if isfield(ctx, "mean_atmosphere_model_residual_m")
+    if exist('mean_atmosphere_model_residual_m', 'var')
         report = appendFinalValueRow(report, ...
             "Mean truth minus model atmospheric residual", ...
-            ctx.mean_atmosphere_model_residual_m, ...
+            mean_atmosphere_model_residual_m, ...
             "m");
     end
 
-    if isfield(ctx, "truth_atmosphere_residual_sigma_m")
+    if exist('truth_atmosphere_residual_sigma_m', 'var')
         report = appendFinalValueRow(report, ...
             "Truth atmospheric residual sigma", ...
-            ctx.truth_atmosphere_residual_sigma_m, ...
+            truth_atmosphere_residual_sigma_m, ...
             "m");
     end
 
-    if isfield(ctx, "model_atmosphere_residual_sigma_m")
+    if exist('model_atmosphere_residual_sigma_m', 'var')
         report = appendFinalValueRow(report, ...
             "Estimator atmospheric residual sigma used in R", ...
-            ctx.model_atmosphere_residual_sigma_m, ...
+            model_atmosphere_residual_sigma_m, ...
             "m");
     end
 
-    if isfield(ctx, "ground_clock_range_rms_m")
-        report = appendFinalValueRow(report, "Final ground transmitter clock range RMS", ctx.ground_clock_range_rms_m(end), "m");
+    if exist('ground_clock_range_rms_m', 'var')
+        report = appendFinalValueRow(report, "Final ground transmitter clock range RMS", ground_clock_range_rms_m(end), "m");
     end
-    if isfield(ctx, "final_tower_clock_rms_ps")
-        if isfield(ctx, "clockGaugeMode") && string(ctx.clockGaugeMode) == "fixReferenceTxDelay"
+    if exist('final_tower_clock_rms_ps', 'var')
+        if exist('clockGaugeMode', 'var') && string(clockGaugeMode) == "fixReferenceTxDelay"
             tower_clock_label = "Final TX signal-delay time-equivalent RMS";
-        elseif isfield(ctx, "clockGaugeMode") && string(ctx.clockGaugeMode) == "externalTimeTransfer"
+        elseif exist('clockGaugeMode', 'var') && string(clockGaugeMode) == "externalTimeTransfer"
             tower_clock_label = "Final externally referenced tower clock RMS";
         else
             tower_clock_label = "Final relative tower clock RMS";
         end
-        report = appendFinalValueRow(report, tower_clock_label, ctx.final_tower_clock_rms_ps, "ps");
+        report = appendFinalValueRow(report, tower_clock_label, final_tower_clock_rms_ps, "ps");
     end
-    if isfield(ctx, "final_H_rank")
-        report = appendFinalValueRow(report, "Final measurement Jacobian rank", ctx.final_H_rank, "-");
+    if exist('final_H_rank', 'var')
+        report = appendFinalValueRow(report, "Final measurement Jacobian rank", final_H_rank, "-");
     end
-    if isfield(ctx, "final_observability_rank")
-        report = appendFinalValueRow(report, "Final sliding-window observability rank", ctx.final_observability_rank, "-");
+    if exist('final_observability_rank', 'var')
+        report = appendFinalValueRow(report, "Final sliding-window observability rank", final_observability_rank, "-");
     end
-    if isfield(ctx, "final_common_mode_residual_norm")
-        report = appendFinalValueRow(report, "Final pseudorange common-mode null residual", ctx.final_common_mode_residual_norm, "-");
+    if exist('final_common_mode_residual_norm', 'var')
+        report = appendFinalValueRow(report, "Final pseudorange common-mode null residual", final_common_mode_residual_norm, "-");
     end
-    if isfield(ctx, "final_covariance_condition_number")
-        report = appendFinalValueRow(report, "Final EKF covariance condition number", ctx.final_covariance_condition_number, "-");
+    if exist('final_covariance_condition_number', 'var')
+        report = appendFinalValueRow(report, "Final EKF covariance condition number", final_covariance_condition_number, "-");
     end
-    if isfield(ctx, "final_innovation_condition_number")
-        report = appendFinalValueRow(report, "Final innovation covariance condition number", ctx.final_innovation_condition_number, "-");
+    if exist('final_innovation_condition_number', 'var')
+        report = appendFinalValueRow(report, "Final innovation covariance condition number", final_innovation_condition_number, "-");
     end
-    if isfield(ctx, "nis_mean_final_window")
-        report = appendFinalValueRow(report, "Final-window NIS mean", ctx.nis_mean_final_window, "-");
+    if exist('nis_mean_final_window', 'var')
+        report = appendFinalValueRow(report, "Final-window NIS mean", nis_mean_final_window, "-");
     end
-    if isfield(ctx, "nis_expected_dof_final_window")
-        report = appendFinalValueRow(report, "Final-window mean measurement DoF", ctx.nis_expected_dof_final_window, "-");
+    if exist('nis_expected_dof_final_window', 'var')
+        report = appendFinalValueRow(report, "Final-window mean measurement DoF", nis_expected_dof_final_window, "-");
     end
-    if isfield(ctx, "final_raw_tower_clock_residual_rms_m")
-        report = appendFinalValueRow(report, "Final raw tower-clock effect RMS before correction", ctx.final_raw_tower_clock_residual_rms_m, "m");
+    if exist('final_raw_tower_clock_residual_rms_m', 'var')
+        report = appendFinalValueRow(report, "Final raw tower-clock effect RMS before correction", final_raw_tower_clock_residual_rms_m, "m");
     end
-    if isfield(ctx, "final_corrected_tower_clock_residual_rms_m")
-        report = appendFinalValueRow(report, "Final corrected tower-clock effect RMS after correction", ctx.final_corrected_tower_clock_residual_rms_m, "m");
+    if exist('final_corrected_tower_clock_residual_rms_m', 'var')
+        report = appendFinalValueRow(report, "Final corrected tower-clock effect RMS after correction", final_corrected_tower_clock_residual_rms_m, "m");
     end
-    if isfield(ctx, "final_ground_timing_residual_rms_m")
-        report = appendFinalValueRow(report, "Final residual ground timing correction RMS", ctx.final_ground_timing_residual_rms_m, "m");
+    if exist('final_ground_timing_residual_rms_m', 'var')
+        report = appendFinalValueRow(report, "Final residual ground timing correction RMS", final_ground_timing_residual_rms_m, "m");
     end
-    if isfield(ctx, "clock_allan_names") && isfield(ctx, "clock_allan_deviation_1s")
-        for idx_clock = 1:numel(ctx.clock_allan_names)
-            allan_label = sprintf("%s Allan deviation at 1 s", char(string(ctx.clock_allan_names(idx_clock))));
+    if exist('clock_allan_names', 'var') && exist('clock_allan_deviation_1s', 'var')
+        for idx_clock = 1:numel(clock_allan_names)
+            allan_label = sprintf("%s Allan deviation at 1 s", char(string(clock_allan_names(idx_clock))));
             report = appendLine(report, sprintf("%s & %s\\\\", ...
-                latexEscape(allan_label), formatEngineering(ctx.clock_allan_deviation_1s(idx_clock), "")));
+                latexEscape(allan_label), formatEngineering(clock_allan_deviation_1s(idx_clock), "")));
         end
     else
-        report = appendLine(report, sprintf("Selected oscillator Allan deviation at 1 s & %s\\\\", formatEngineering(ctx.selected_allan_deviation_1s, "")));
+        report = appendLine(report, sprintf("Selected oscillator Allan deviation at 1 s & %s\\\\", formatEngineering(selected_allan_deviation_1s, "")));
     end
     report = appendLine(report, "\bottomrule");
     report = appendLine(report, "\end{tabular}");
@@ -1025,25 +1333,25 @@ function generateReport(sim, reportConfig, reportToggles)
     report = appendLine(report, "\toprule");
     report = appendLine(report, "\textbf{Metric} & \textbf{Full RMS} & \textbf{After 1 h RMS} & \textbf{Final h RMS} & \textbf{Final h 95\% abs.}\\");
     report = appendLine(report, "\midrule");
-    report = appendSummaryMetricRow(report, "3D position error [m]", ctx.position_error_summary_m, ctx.position_error_final_window_summary_m);
-    report = appendSummaryMetricRow(report, "Clock estimation error [ps]", ctx.clock_error_summary_ps, ctx.clock_error_final_window_summary_ps);
-    report = appendSummaryMetricRow(report, "Clock range-equivalent error [m]", ctx.clock_error_range_summary_m, ctx.clock_error_range_final_window_summary_m);
-    report = appendSummaryMetricRow(report, "Pre-fit innovation RMS [m]", ctx.prefit_innovation_summary_m, ctx.prefit_innovation_final_window_summary_m);
-    report = appendSummaryMetricRow(report, "Post-fit residual RMS [m]", ctx.postfit_innovation_summary_m, ctx.postfit_innovation_final_window_summary_m);
-    if isfield(ctx, "ground_clock_range_summary_m")
-        report = appendSummaryMetricRow(report, "Ground clock range RMS [m]", ctx.ground_clock_range_summary_m, ctx.ground_clock_range_final_window_summary_m);
+    report = appendSummaryMetricRow(report, "3D position error [m]", position_error_summary_m, position_error_final_window_summary_m);
+    report = appendSummaryMetricRow(report, "Clock estimation error [ps]", clock_error_summary_ps, clock_error_final_window_summary_ps);
+    report = appendSummaryMetricRow(report, "Clock range-equivalent error [m]", clock_error_range_summary_m, clock_error_range_final_window_summary_m);
+    report = appendSummaryMetricRow(report, "Pre-fit innovation RMS [m]", prefit_innovation_summary_m, prefit_innovation_final_window_summary_m);
+    report = appendSummaryMetricRow(report, "Post-fit residual RMS [m]", postfit_innovation_summary_m, postfit_innovation_final_window_summary_m);
+    if exist('ground_clock_range_summary_m', 'var')
+        report = appendSummaryMetricRow(report, "Ground clock range RMS [m]", ground_clock_range_summary_m, ground_clock_range_final_window_summary_m);
     end
-    if isfield(ctx, "raw_tower_clock_residual_summary_m")
-        report = appendSummaryMetricRow(report, "Raw tower-clock effect RMS [m]", ctx.raw_tower_clock_residual_summary_m, ctx.raw_tower_clock_residual_final_window_summary_m);
+    if exist('raw_tower_clock_residual_summary_m', 'var')
+        report = appendSummaryMetricRow(report, "Raw tower-clock effect RMS [m]", raw_tower_clock_residual_summary_m, raw_tower_clock_residual_final_window_summary_m);
     end
-    if isfield(ctx, "corrected_tower_clock_residual_summary_m")
-        report = appendSummaryMetricRow(report, "Corrected tower-clock effect RMS [m]", ctx.corrected_tower_clock_residual_summary_m, ctx.corrected_tower_clock_residual_final_window_summary_m);
+    if exist('corrected_tower_clock_residual_summary_m', 'var')
+        report = appendSummaryMetricRow(report, "Corrected tower-clock effect RMS [m]", corrected_tower_clock_residual_summary_m, corrected_tower_clock_residual_final_window_summary_m);
     end
-    if isfield(ctx, "ground_clock_correction_residual_summary_m")
-        report = appendSummaryMetricRow(report, "Ground timing residual RMS [m]", ctx.ground_clock_correction_residual_summary_m, ctx.ground_clock_correction_residual_final_window_summary_m);
+    if exist('ground_clock_correction_residual_summary_m', 'var')
+        report = appendSummaryMetricRow(report, "Ground timing residual RMS [m]", ground_clock_correction_residual_summary_m, ground_clock_correction_residual_final_window_summary_m);
     end
-    report = appendSummaryMetricRow(report, "EKF covariance condition [-]", ctx.covariance_condition_summary, ctx.covariance_condition_final_window_summary);
-    report = appendSummaryMetricRow(report, "Innovation covariance condition [-]", ctx.innovation_condition_summary, ctx.innovation_condition_final_window_summary);
+    report = appendSummaryMetricRow(report, "EKF covariance condition [-]", covariance_condition_summary, covariance_condition_final_window_summary);
+    report = appendSummaryMetricRow(report, "Innovation covariance condition [-]", innovation_condition_summary, innovation_condition_final_window_summary);
     report = appendLine(report, "\bottomrule");
     report = appendLine(report, "\end{tabular}");
     report = appendLine(report, "\end{center}");
@@ -1076,240 +1384,14 @@ function generateReport(sim, reportConfig, reportToggles)
     end
 end
 %% Report Table Builders
-function ctx = prepareReportContext(sim)
+function tableOut = buildInnovationCovarianceSummaryTable(sim)
     history = sim.history;
-    errors = history.errors;
-    diags = history.diagnostics;
-    xHist = history.x;
-    truthHist = history.truth;
-    Pdiag = history.covariance_diag;
-
-    ctx = struct();
-    ctx.sim = sim;
-    ctx.history = history;
-    ctx.error_budget_status = ResultBuilder.errorBudgetStatus(sim);
-    ctx.time_vec = sim.time_s;
-    ctx.total_time_hours = max(sim.time_s) / 3600.0;
-    ctx.dt = sim.dt;
-    ctx.c = sim.c;
-    ctx.num_towers = sim.numTowers;
-    ctx.R_earth = sim.constants.earthRadius_m;
-    ctx.oscillators = sim.simConfig.clockLibrary;
-    ctx.towers = reportTowersLocal(sim);
-    ctx.tower_names = sim.towerNames;
-    ctx.receiver_names = sim.receiverNames;
-
-    ctx.asset_name = string(sim.assetConfig.name);
-    ctx.state_names = StateIndexFactory.stateNames( ...
-        sim.towerNames, GroundTimingNetwork.towerClockEkfEnabled(sim.cfg));
-    ctx.state_dim = sim.stateDim;
-    ctx.state_index = sim.idx;
-    ctx.enable_tower_clock_ekf = GroundTimingNetwork.towerClockEkfEnabled(sim.cfg);
-    ctx.num_receivers = sim.numReceivers;
-    ctx.receiver_offsets_body_m = sim.receiverOffsetsBody_m;
-    ctx.initial_truth_position_eci_m = sim.initialTruth0(sim.idx.pos);
-    ctx.initial_est_position_eci_m = sim.initialX0(sim.idx.pos);
-    ctx.observability_normal_matrix = sim.observabilityNormalMatrix;
-
-    ctx.ekf_pos_error_m = xHist(sim.idx.pos, :) - truthHist(sim.idx.pos, :);
-    ctx.ekf_pos_sigma_m = sqrt(max(Pdiag(sim.idx.pos, :), 0));
-    ctx.ekf_clock_error_ps = ...
-        (xHist(sim.idx.rxClockBias, :) - truthHist(sim.idx.rxClockBias, :)) ./ sim.c .* 1e12;
-    ctx.ekf_clock_sigma_ps = ...
-        sqrt(max(Pdiag(sim.idx.rxClockBias, :), 0)) ./ sim.c .* 1e12;
-    ctx.true_clock_bias_ps = truthHist(sim.idx.rxClockBias, :) ./ sim.c .* 1e12;
-    ctx.est_clock_bias_ps = xHist(sim.idx.rxClockBias, :) ./ sim.c .* 1e12;
-
-    if GroundTimingNetwork.towerClockEkfEnabled(sim.cfg)
-        ctx.est_tower_clock_bias_ps = ...
-            xHist(sim.idx.towerClockBias, :) ./ sim.c .* 1e12;
-        ctx.true_tower_clock_bias_ps = ...
-            truthHist(sim.idx.towerClockBias, :) ./ sim.c .* 1e12;
-        ctx.est_tower_clock_drift_psps = ...
-            xHist(sim.idx.towerClockDrift, :) ./ sim.c .* 1e12;
-        ctx.true_tower_clock_drift_psps = ...
-            truthHist(sim.idx.towerClockDrift, :) ./ sim.c .* 1e12;
-    end
-
-    ctx.innovation_rms_m = history.innovation_rms_m;
-    ctx.postfit_innovation_rms_m = history.postfit_innovation_rms_m;
-    ctx.nis_history = history.nis_history;
-    ctx.innovation_covariance_mean_variance_m2 = ...
-        history.innovation_covariance_mean_variance_m2;
-    ctx.innovation_covariance_min_variance_m2 = ...
-        history.innovation_covariance_min_variance_m2;
-    ctx.innovation_covariance_max_variance_m2 = ...
-        history.innovation_covariance_max_variance_m2;
-    ctx.nis_per_degree_of_freedom = history.nis_per_degree_of_freedom;
-    ctx.measurement_covariance_range_mean_variance_m2 = ...
-        history.measurement_covariance_range_mean_variance_m2;
-    ctx.measurement_covariance_range_max_offdiag_m2 = ...
-        history.measurement_covariance_range_max_offdiag_m2;
-    ctx.measurement_covariance_range_dimension = ...
-        history.measurement_covariance_range_dimension;
-    ctx.measurement_covariance_update_mean_variance_m2 = ...
-        history.measurement_covariance_update_mean_variance_m2;
-    ctx.measurement_covariance_update_max_offdiag_m2 = ...
-        history.measurement_covariance_update_max_offdiag_m2;
-    ctx.measurement_covariance_update_dimension = ...
-        history.measurement_covariance_update_dimension;
-    ctx.normalized_innovation_rms = history.normalized_innovation_rms;
-    ctx.sat_pos_history_m = history.sat_pos_history_m;
-    ctx.nis_degrees_of_freedom = history.measurement_count;
-
-    ctx.innovation_covariance_mean_sigma_m = ...
-        sqrt(max(ctx.innovation_covariance_mean_variance_m2, 0.0));
-    ctx.innovation_covariance_min_sigma_m = ...
-        sqrt(max(ctx.innovation_covariance_min_variance_m2, 0.0));
-    ctx.innovation_covariance_max_sigma_m = ...
-        sqrt(max(ctx.innovation_covariance_max_variance_m2, 0.0));
-
-    ctx.towers_eci_first_m = sim.towersEciFirst_m;
-    ctx.final_position_error_m = norm(ctx.ekf_pos_error_m(:, end));
-    ctx.final_clock_error_ps = ctx.ekf_clock_error_ps(end);
-    ctx.final_innovation_rms_m = history.innovation_rms_m(end);
-
-    ctx.attitude_truth_deg = rad2deg(truthHist(sim.idx.att, :));
-    ctx.attitude_est_deg = rad2deg(xHist(sim.idx.att, :));
-    ctx.attitude_error_deg = rad2deg( ...
-        FrameGeometry.wrapToPi(xHist(sim.idx.att, :) - truthHist(sim.idx.att, :)));
-    ctx.attitude_sigma_deg = rad2deg(sqrt(max(Pdiag(sim.idx.att, :), 0)));
-    ctx.attitude_state_names = ["roll"; "pitch"; "yaw"];
-    ctx.attitude_frame = "body-to-ECI Euler view of q_BI";
-
-    ctx.angular_velocity_truth_degps = rad2deg(truthHist(sim.idx.omega, :));
-    ctx.angular_velocity_est_degps = rad2deg(xHist(sim.idx.omega, :));
-    ctx.angular_velocity_error_degps = ...
-        rad2deg(xHist(sim.idx.omega, :) - truthHist(sim.idx.omega, :));
-    ctx.angular_velocity_sigma_degps = ...
-        rad2deg(sqrt(max(Pdiag(sim.idx.omega, :), 0)));
-    ctx.angular_velocity_state_names = ["omega_x"; "omega_y"; "omega_z"];
-    ctx.final_attitude_error_norm_deg = norm(ctx.attitude_error_deg(:, end));
-    ctx.final_angular_velocity_error_norm_degps = ...
-        norm(ctx.angular_velocity_error_degps(:, end));
-
-    ctx.final_H_pos_rank = history.H_pos_rank_history(end);
-    ctx.final_H_att_rank = history.H_att_rank_history(end);
-    ctx.final_H_pos_att_clock_rank = history.H_pos_att_clock_rank_history(end);
-    ctx.final_H_pos_column_norm = history.H_pos_column_norm_history(:, end);
-    ctx.final_H_att_column_norm = history.H_att_column_norm_history(:, end);
-    ctx.final_H_rx_clock_bias_column_norm = ...
-        history.H_rx_clock_bias_column_norm_history(end);
-    ctx.H_rank_history = history.H_rank_history;
-    ctx.H_pos_rank_history = history.H_pos_rank_history;
-    ctx.H_att_rank_history = history.H_att_rank_history;
-    ctx.H_pos_att_clock_rank_history = history.H_pos_att_clock_rank_history;
-    ctx.H_rx_clock_bias_column_norm_history = ...
-        history.H_rx_clock_bias_column_norm_history;
-    ctx.pseudorange_measurement_count = history.pseudorange_measurement_count;
-    ctx.final_H_rank = history.H_rank_history(end);
-    ctx.H_row_count_history = history.measurement_count;
-    ctx.H_column_count_history = sim.stateDim * ones(1, sim.numSteps);
-    ctx.H_rank_to_state_dim_history = ...
-        history.H_rank_history ./ max(sim.stateDim, 1);
-    ctx.H_state_deficiency_history = sim.stateDim - history.H_rank_history;
-    ctx.final_H_rows = history.measurement_count(end);
-    ctx.final_H_columns = sim.stateDim;
-    ctx.final_H_rank_to_state_dim = ctx.final_H_rank / max(sim.stateDim, 1);
-    ctx.final_H_state_deficiency = sim.stateDim - ctx.final_H_rank;
-
-    ctx.true_ground_clock_bias_ps = history.ground_clock_true_m ./ sim.c .* 1e12;
-    ctx.tower_clock_correction_s = history.ground_clock_correction_m ./ sim.c;
-    ctx.tower_clock_correction_residual_s = history.ground_clock_residual_m ./ sim.c;
-    ctx.tower_clock_correction_sigma_s = ...
-        ones(sim.numTowers, sim.numSteps) .* ...
-        sqrt(GroundTimingNetwork.residualVariance_m2(sim.cfg, sim.c)) ./ sim.c;
-
-    ctx.prefit_residual_by_receiver_tower_m = ...
-        history.prefit_residual_by_receiver_tower_m;
-    ctx.postfit_residual_by_receiver_tower_m = ...
-        history.postfit_residual_by_receiver_tower_m;
-    ctx.pseudorange_by_receiver_tower_m = history.pseudorange_by_receiver_tower_m;
-    ctx.true_range_by_receiver_tower_m = history.true_range_by_receiver_tower_m;
-    ctx.los_unit_eci_by_receiver_tower = history.los_unit_eci_by_receiver_tower;
-    ctx.covariance_condition_number = history.covariance_condition_number;
-    ctx.innovation_condition_number = history.innovation_condition_number;
-    ctx.visible_tower_count = history.visible_tower_count;
-
-    ctx = addAtmosphereReportSummaries(ctx, sim, errors, diags);
-
-    ctx.pseudorange_error_by_receiver_tower_m = ...
-        history.pseudorange_by_receiver_tower_m - history.true_range_by_receiver_tower_m;
-    ctx.receiver_offset_body_by_receiver_m = sim.receiverOffsetsBody_m;
-    ctx.used_tower_count = history.visible_tower_count;
-    ctx.measurementNoiseEnabled = sim.measurementModel.measurementNoiseEnabled();
-    ctx.numerical_measurement_sigma_floor_m = ...
-        sim.measurementModel.effectiveNumericalMeasurementSigma_m();
-    ctx.enableElevationMask = sim.measurementModel.elevationMaskEnabled();
-    ctx.elevationMask_deg = sim.measurementModel.elevationMaskDeg();
-
-    if GroundTimingNetwork.towerClockEkfEnabled(sim.cfg)
-        ctx.clockGaugeMode = "towerClockEKF_meanGroundClockGauge";
-        ctx.referenceTowerName = "Mean ground-network clock";
-        ctx.clock_estimation_mode = 'spacecraftReceiverClockPlusTowerClockEKF';
-    else
-        if GroundTimingNetwork.groundClockCorrectionEnabled(sim.cfg)
-            ctx.clockGaugeMode = "externalTowerCorrections";
-            ctx.referenceTowerName = "External ground timing product";
-        else
-            ctx.clockGaugeMode = "groundClockResidualsGeneratedButNotEstimated";
-            ctx.referenceTowerName = "";
-        end
-        ctx.clock_estimation_mode = 'spacecraftReceiverClockOnly';
-    end
-
-    ctx.ekf_clock_state_units = 'metres and metres per second';
-    ctx.receiver_architecture_note = sprintf( ...
-        'N=%d onboard receiver phase centres share one receiver oscillator. Lever arms are Body-frame vectors rotated by q_BI into ECI.', ...
-        sim.numReceivers);
-    if GroundTimingNetwork.towerClockEkfEnabled(sim.cfg)
-        ctx.signal_model_note = [ ...
-            'Truth code pseudorange: P = rho(r_sc_I + C_BI l_a_B, r_g_I) + b_rx_true - b_g_true + d_truth + noise. ' ...
-            'Estimator prediction: P_hat = rho(rhat_sc_I + Chat_BI l_a_B, r_g_I) + bhat_rx - bhat_g + d_model. ' ...
-            'Tower clocks are EKF states and the mean ground-network clock defines the time gauge.'];
-    else
-        ctx.signal_model_note = [ ...
-            'Truth code pseudorange: P = rho(r_sc_I + C_BI l_a_B, r_g_I) + b_rx_true - b_g_res_true + d_truth + noise. ' ...
-            'Estimator prediction: P_hat = rho(rhat_sc_I + Chat_BI l_a_B, r_g_I) + bhat_rx + d_model. ' ...
-            'In spacecraftReceiverClockOnly mode, b_g_res is not an EKF state and d_model is supplied by the configured estimator atmosphere model.'];
-    end
-    ctx.attitude_observability_note = ...
-        ['Attitude remains in the EKF for every receiver count. Its pseudorange sensitivity is ' ...
-         '-g^T C_BI skew(l_a_B), where g = u + grad_r(d_model); zero lever arms produce zero attitude sensitivity naturally.'];
-    ctx.attitude_filter_note = ...
-        'MEKF-style attitude update uses a body-frame small-angle error injected multiplicatively into q_BI.';
-    ctx.propagation_frame_note = sprintf( ...
-        ['Range geometry frame: %s. Current geometry uses ECI ', ...
-         'transmitter and receiver positions evaluated at the receiver epoch; ', ...
-         'optional inertial iterative light-time is guarded against ', ...
-         'legacy scalar Sagnac double counting.'], ...
-        char(sim.measurementModel.propagationFrame));
-    ctx.relativity_note = ...
-        ['Relativistic path delay and relativistic clock correction are explicit ', ...
-         'zero-valued diagnostics when disabled. Enabling either flag currently ', ...
-         'raises an error until a physical path/clock implementation is added.'];
-    ctx.measurement_model_equation = [ ...
-        "\begin{aligned}"; ...
-        "P_{g,a}^{truth}"; ...
-        "&= \left\| \mathbf{r}_{sc,I} + \mathbf{C}_{BI}\mathbf{l}_{a,B} - \mathbf{r}_{g,I} \right\|"; ...
-        "&= + b_{rx}^{true} - b_{g,res}^{true} + d_{truth} + \nu \\"; ...
-        "\hat{P}_{g,a}"; ...
-        "&= \left\| \hat{\mathbf{r}}_{sc,I} + \hat{\mathbf{C}}_{BI}\mathbf{l}_{a,B} - \mathbf{r}_{g,I} \right\|"; ...
-        "&= + \hat{b}_{rx} + d_{model}"; ...
-        "\end{aligned}" ...
-        ];
-    ctx.observation_matrix_equation = [...
-        "\begin{aligned}"; ...
-        "\mathbf{g} = \mathbf{u} + \nabla_{\mathbf{r}_{rx,I}} d_{model}, \qquad H_{g,a}";...
-        " &= \left[ \mathbf{g}^{T} \quad \mathbf{0}_{1\times3} \quad \mathbf{g}^{T}(-\mathbf{C}_{BI}" + ...
-        " \mathbf{l}_{a,B}]_{\times}) \quad \mathbf{0}_{1\times3} \quad 1 \quad 0 \right]";...
-        "\end{aligned}" ...
-        ];
-
-    ctx.prefit_residual_by_tower_m = ...
-        squeeze(mean(history.prefit_residual_by_receiver_tower_m, 1));
-    ctx.postfit_residual_by_tower_m = ...
-        squeeze(mean(history.postfit_residual_by_receiver_tower_m, 1));
+    innovationCovarianceMeanSigma_m = ...
+        sqrt(max(history.innovation_covariance_mean_variance_m2, 0.0));
+    innovationCovarianceMinSigma_m = ...
+        sqrt(max(history.innovation_covariance_min_variance_m2, 0.0));
+    innovationCovarianceMaxSigma_m = ...
+        sqrt(max(history.innovation_covariance_max_variance_m2, 0.0));
 
     nRows = sim.numReceivers * sim.numTowers;
     receiverR2 = sim.cfg.measurement.pseudorangeSigma_m^2 * ...
@@ -1323,117 +1405,9 @@ function ctx = prepareReportContext(sim)
     atmosphereR2 = sim.measurementModel.atmosphereResidualVariance_m2();
     actualR2 = sim.measurementModel.measurementVariance( ...
         GroundTimingNetwork.towerClockEkfEnabled(sim.cfg), groundR2);
-    ctx.R_receiver_m2 = ones(nRows, sim.numSteps) * receiverR2;
-    ctx.R_tower_clock_m2 = ones(nRows, sim.numSteps) * appliedGroundR2;
-    ctx.R_atmosphere_m2 = ones(nRows, sim.numSteps) * atmosphereR2;
-    ctx.R_hardware_m2 = zeros(nRows, sim.numSteps);
-    ctx.R_multipath_m2 = zeros(nRows, sim.numSteps);
-    ctx.R_numerical_regularization_m2 = ...
-        ones(nRows, sim.numSteps) * ...
-        max(actualR2 - receiverR2 - appliedGroundR2 - atmosphereR2, 0.0);
-    ctx.R_total_m2 = ctx.R_receiver_m2 + ctx.R_tower_clock_m2 + ...
-        ctx.R_atmosphere_m2 + ctx.R_numerical_regularization_m2;
-    ctx.innovation_covariance_summary_table = ...
-        buildInnovationCovarianceSummaryTable(ctx);
+    numericalR2 = max(actualR2 - receiverR2 - appliedGroundR2 - atmosphereR2, 0.0);
+    totalR2 = receiverR2 + appliedGroundR2 + atmosphereR2 + numericalR2;
 
-    obs = ObservabilityAnalyzer.analyzeNormalMatrix( ...
-        sim.observabilityNormalMatrix, ctx.state_names);
-    ctx.final_observability_rank = obs.rank;
-    ctx.weak_observability_state_names = obs.weakStateNames;
-    ctx.observability_note = sprintf( ...
-        'Column-normalized accumulated pseudorange observability rank is %d of %d states. Weak states: %s.', ...
-        obs.rank, sim.stateDim, strjoin(string(obs.weakStateNames), ', '));
-
-    selectedOsc = sim.simConfig.clockLibrary.(char(sim.assetConfig.clock.clockType));
-    selectedClock = Clock(selectedOsc.h0, selectedOsc.hm1, selectedOsc.hm2, sim.dt);
-    nAllan = floor(sim.simConfig.validation.allanValidationSamples);
-    ctx.tau_profile_s = validTauForSamplesLocal( ...
-        sim.simConfig.validation.tauProfile_s, sim.dt, nAllan);
-    clockValidationList = [{selectedClock}, GroundNode.clocks(sim.towers)];
-    clockNames = ["SpaceAsset RX", sim.towerNames];
-    nClock = numel(clockValidationList);
-    clockAdev1s = NaN(1, nClock);
-    simAdevByClock = NaN(nClock, 0);
-
-    for idxClock = 1:nClock
-        [tauThis_s, adevThis, sigmaThis, edfThis] = ...
-            runClockAllanValidationLocal( ...
-            clockValidationList{idxClock}, ...
-            sim.simConfig.validation.tauSimulation_s, ...
-            sim.dt, nAllan, sim.validationClockStream);
-
-        if idxClock == 1
-            ctx.tau_sim_s = tauThis_s;
-            ctx.sim_adev = adevThis;
-            ctx.sim_adev_sigma = sigmaThis;
-            ctx.sim_adev_edf = edfThis;
-            simAdevByClock = NaN(nClock, numel(tauThis_s));
-        end
-
-        simAdevByClock(idxClock, :) = adevThis;
-        clockAdev1s(idxClock) = ...
-            clockValidationList{idxClock}.theoreticalAllanDeviation(1.0);
-    end
-
-    ctx.selected_allan_deviation_1s = ...
-        selectedClock.theoreticalAllanDeviation(1.0);
-    ctx.clock_allan_names = clockNames;
-    ctx.clock_allan_deviation_1s = clockAdev1s;
-    ctx.sim_adev_by_clock = simAdevByClock;
-    ctx.seedConfig = sim.seedConfig;
-    ctx.source_references = {sprintf('Generated by %s.', sim.entryPointName)};
-end
-
-function ctx = addAtmosphereReportSummaries(ctx, sim, errors, diags)
-    totalResidualByTower_m = errors.atmosphere.stochasticResidualByTower_m;
-    tropoResidualByTower_m = errors.troposphere.stochasticResidualByTower_m;
-    ionoResidualByTower_m = errors.ionosphere.stochasticResidualByTower_m;
-
-    ctx.truth_atmosphere_residual_mean_m = mean(totalResidualByTower_m(:), 'omitnan');
-    ctx.truth_atmosphere_residual_std_m = std(totalResidualByTower_m(:), 0, 'omitnan');
-    ctx.truth_atmosphere_residual_rms_m = sqrt(mean(totalResidualByTower_m(:).^2, 'omitnan'));
-    ctx.truth_atmosphere_residual_max_abs_m = max(abs(totalResidualByTower_m(:)), [], 'omitnan');
-    ctx.truth_troposphere_residual_mean_m = mean(tropoResidualByTower_m(:), 'omitnan');
-    ctx.truth_troposphere_residual_std_m = std(tropoResidualByTower_m(:), 0, 'omitnan');
-    ctx.truth_troposphere_residual_rms_m = sqrt(mean(tropoResidualByTower_m(:).^2, 'omitnan'));
-    ctx.truth_troposphere_residual_max_abs_m = max(abs(tropoResidualByTower_m(:)), [], 'omitnan');
-    ctx.truth_ionosphere_residual_mean_m = mean(ionoResidualByTower_m(:), 'omitnan');
-    ctx.truth_ionosphere_residual_std_m = std(ionoResidualByTower_m(:), 0, 'omitnan');
-    ctx.truth_ionosphere_residual_rms_m = sqrt(mean(ionoResidualByTower_m(:).^2, 'omitnan'));
-    ctx.truth_ionosphere_residual_max_abs_m = max(abs(ionoResidualByTower_m(:)), [], 'omitnan');
-
-    ctx.truth_troposphere_residual_config_sigma_m = ...
-        double(sim.truthAtmosphere.residualTroposphereSigma_m) * ...
-        double(sim.truthAtmosphere.enableTroposphere);
-    ctx.truth_ionosphere_residual_config_sigma_m = ...
-        double(sim.truthAtmosphere.residualIonosphereSigma_m) * ...
-        double(sim.truthAtmosphere.enableIonosphere);
-    ctx.truth_total_residual_config_sigma_m = hypot( ...
-        ctx.truth_troposphere_residual_config_sigma_m, ...
-        ctx.truth_ionosphere_residual_config_sigma_m);
-
-    ctx.mean_truth_atmosphere_delay_m = mean(errors.atmosphere.truth_m(:), 'omitnan');
-    ctx.mean_model_atmosphere_delay_m = mean(errors.atmosphere.model_m(:), 'omitnan');
-    ctx.mean_atmosphere_model_residual_m = mean(errors.atmosphere.residual_m(:), 'omitnan');
-    ctx.model_atmosphere_residual_sigma_m = ...
-        sim.measurementModel.modelAtmosphere.residualCodeSigma_m();
-    ctx.truth_atmosphere_residual_sigma_m = ...
-        sim.measurementModel.truthAtmosphere.residualCodeSigma_m();
-    ctx.mean_deterministic_atmosphere_model_residual_m = ...
-        mean(errors.atmosphere.deterministicResidual_m(:), 'omitnan');
-    ctx.model_atmosphere_residual_variance_m2 = ...
-        mean(errors.atmosphere.variance_m2(:), 'omitnan');
-    ctx.model_atmosphere_covariance_structure = string(errors.atmosphere.correlationModel);
-
-    ctx.atmosphere_summary_table = buildAtmosphereSummaryTable(sim, ctx);
-    ctx.stochastic_truth_residual_summary_table = ...
-        buildStochasticTruthResidualSummaryTable(ctx);
-    ctx.ionosphere_map_summary_table = buildIonosphereMapSummaryTable(sim, diags);
-    ctx.troposphere_profile_summary_table = ...
-        buildTroposphereProfileSummaryTable(sim, diags);
-end
-
-function tableOut = buildInnovationCovarianceSummaryTable(ctx)
     Quantity = [ ...
         "Mean pre-fit innovation RMS [m]"; ...
         "Mean post-fit innovation RMS [m]"; ...
@@ -1451,25 +1425,40 @@ function tableOut = buildInnovationCovarianceSummaryTable(ctx)
         ];
 
     Value = [ ...
-        scalarText(mean(ctx.innovation_rms_m(:), 'omitnan')); ...
-        scalarText(mean(ctx.postfit_innovation_rms_m(:), 'omitnan')); ...
-        scalarText(mean(ctx.innovation_covariance_mean_sigma_m(:), 'omitnan')); ...
-        scalarText(mean(ctx.innovation_covariance_min_sigma_m(:), 'omitnan')); ...
-        scalarText(mean(ctx.innovation_covariance_max_sigma_m(:), 'omitnan')); ...
-        scalarText(mean(ctx.nis_history(:), 'omitnan')); ...
-        scalarText(mean(ctx.nis_per_degree_of_freedom(:), 'omitnan')); ...
-        scalarText(mean(ctx.normalized_innovation_rms(:), 'omitnan')); ...
-        scalarText(sqrt(mean(ctx.R_receiver_m2(:), 'omitnan'))); ...
-        scalarText(sqrt(mean(ctx.R_tower_clock_m2(:), 'omitnan'))); ...
-        scalarText(sqrt(mean(ctx.R_atmosphere_m2(:), 'omitnan'))); ...
-        scalarText(sqrt(mean(ctx.R_numerical_regularization_m2(:), 'omitnan'))); ...
-        scalarText(sqrt(mean(ctx.R_total_m2(:), 'omitnan'))) ...
+        scalarText(mean(history.innovation_rms_m(:), 'omitnan')); ...
+        scalarText(mean(history.postfit_innovation_rms_m(:), 'omitnan')); ...
+        scalarText(mean(innovationCovarianceMeanSigma_m(:), 'omitnan')); ...
+        scalarText(mean(innovationCovarianceMinSigma_m(:), 'omitnan')); ...
+        scalarText(mean(innovationCovarianceMaxSigma_m(:), 'omitnan')); ...
+        scalarText(mean(history.nis_history(:), 'omitnan')); ...
+        scalarText(mean(history.nis_per_degree_of_freedom(:), 'omitnan')); ...
+        scalarText(mean(history.normalized_innovation_rms(:), 'omitnan')); ...
+        scalarText(sqrt(mean(ones(nRows, sim.numSteps) * receiverR2, 'all', 'omitnan'))); ...
+        scalarText(sqrt(mean(ones(nRows, sim.numSteps) * appliedGroundR2, 'all', 'omitnan'))); ...
+        scalarText(sqrt(mean(ones(nRows, sim.numSteps) * atmosphereR2, 'all', 'omitnan'))); ...
+        scalarText(sqrt(mean(ones(nRows, sim.numSteps) * numericalR2, 'all', 'omitnan'))); ...
+        scalarText(sqrt(mean(ones(nRows, sim.numSteps) * totalR2, 'all', 'omitnan'))) ...
         ];
 
     tableOut = table(Quantity, Value);
 end
 
-function tableOut = buildStochasticTruthResidualSummaryTable(ctx)
+function tableOut = buildStochasticTruthResidualSummaryTable(sim)
+    errors = sim.history.errors;
+    totalResidualByTower_m = errors.atmosphere.stochasticResidualByTower_m;
+    tropoResidualByTower_m = errors.troposphere.stochasticResidualByTower_m;
+    ionoResidualByTower_m = errors.ionosphere.stochasticResidualByTower_m;
+
+    truthTroposphereResidualConfigSigma_m = ...
+        double(sim.truthAtmosphere.residualTroposphereSigma_m) * ...
+        double(sim.truthAtmosphere.enableTroposphere);
+    truthIonosphereResidualConfigSigma_m = ...
+        double(sim.truthAtmosphere.residualIonosphereSigma_m) * ...
+        double(sim.truthAtmosphere.enableIonosphere);
+    truthTotalResidualConfigSigma_m = hypot( ...
+        truthTroposphereResidualConfigSigma_m, ...
+        truthIonosphereResidualConfigSigma_m);
+
     Quantity = [ ...
         "Configured truth troposphere residual sigma [m]"; ...
         "Configured truth ionosphere residual sigma [m]"; ...
@@ -1489,27 +1478,41 @@ function tableOut = buildStochasticTruthResidualSummaryTable(ctx)
         ];
 
     Value = [ ...
-        scalarText(ctx.truth_troposphere_residual_config_sigma_m); ...
-        scalarText(ctx.truth_ionosphere_residual_config_sigma_m); ...
-        scalarText(ctx.truth_total_residual_config_sigma_m); ...
-        scalarText(ctx.truth_atmosphere_residual_mean_m); ...
-        scalarText(ctx.truth_atmosphere_residual_std_m); ...
-        scalarText(ctx.truth_atmosphere_residual_rms_m); ...
-        scalarText(ctx.truth_atmosphere_residual_max_abs_m); ...
-        scalarText(ctx.truth_troposphere_residual_mean_m); ...
-        scalarText(ctx.truth_troposphere_residual_std_m); ...
-        scalarText(ctx.truth_troposphere_residual_rms_m); ...
-        scalarText(ctx.truth_troposphere_residual_max_abs_m); ...
-        scalarText(ctx.truth_ionosphere_residual_mean_m); ...
-        scalarText(ctx.truth_ionosphere_residual_std_m); ...
-        scalarText(ctx.truth_ionosphere_residual_rms_m); ...
-        scalarText(ctx.truth_ionosphere_residual_max_abs_m) ...
+        scalarText(truthTroposphereResidualConfigSigma_m); ...
+        scalarText(truthIonosphereResidualConfigSigma_m); ...
+        scalarText(truthTotalResidualConfigSigma_m); ...
+        scalarText(mean(totalResidualByTower_m(:), 'omitnan')); ...
+        scalarText(std(totalResidualByTower_m(:), 0, 'omitnan')); ...
+        scalarText(sqrt(mean(totalResidualByTower_m(:).^2, 'omitnan'))); ...
+        scalarText(max(abs(totalResidualByTower_m(:)), [], 'omitnan')); ...
+        scalarText(mean(tropoResidualByTower_m(:), 'omitnan')); ...
+        scalarText(std(tropoResidualByTower_m(:), 0, 'omitnan')); ...
+        scalarText(sqrt(mean(tropoResidualByTower_m(:).^2, 'omitnan'))); ...
+        scalarText(max(abs(tropoResidualByTower_m(:)), [], 'omitnan')); ...
+        scalarText(mean(ionoResidualByTower_m(:), 'omitnan')); ...
+        scalarText(std(ionoResidualByTower_m(:), 0, 'omitnan')); ...
+        scalarText(sqrt(mean(ionoResidualByTower_m(:).^2, 'omitnan'))); ...
+        scalarText(max(abs(ionoResidualByTower_m(:)), [], 'omitnan')) ...
         ];
 
     tableOut = table(Quantity, Value);
 end
 
-function tableOut = buildAtmosphereSummaryTable(sim, ctx)
+function tableOut = buildAtmosphereSummaryTable(sim)
+    errors = sim.history.errors;
+    meanTruthAtmosphereDelay_m = mean(errors.atmosphere.truth_m(:), 'omitnan');
+    meanModelAtmosphereDelay_m = mean(errors.atmosphere.model_m(:), 'omitnan');
+    meanAtmosphereModelResidual_m = mean(errors.atmosphere.residual_m(:), 'omitnan');
+    meanDeterministicAtmosphereModelResidual_m = ...
+        mean(errors.atmosphere.deterministicResidual_m(:), 'omitnan');
+    truthAtmosphereResidualSigma_m = ...
+        sim.measurementModel.truthAtmosphere.residualCodeSigma_m();
+    modelAtmosphereResidualSigma_m = ...
+        sim.measurementModel.modelAtmosphere.residualCodeSigma_m();
+    modelAtmosphereResidualVariance_m2 = ...
+        mean(errors.atmosphere.variance_m2(:), 'omitnan');
+    modelAtmosphereCovarianceStructure = string(errors.atmosphere.correlationModel);
+
     Quantity = [ ...
         "Truth troposphere enabled"; ...
         "Truth troposphere model"; ...
@@ -1551,23 +1554,23 @@ function tableOut = buildAtmosphereSummaryTable(sim, ctx)
         scalarText(sim.truthAtmosphere.constantIonosphereDelay_m); ...
         scalarText(sim.modelAtmosphere.constantTroposphereDelay_m); ...
         scalarText(sim.modelAtmosphere.constantIonosphereDelay_m); ...
-        scalarText(ctx.mean_truth_atmosphere_delay_m); ...
-        scalarText(ctx.mean_model_atmosphere_delay_m); ...
-        scalarText(ctx.mean_atmosphere_model_residual_m); ...
-        scalarText(ctx.mean_deterministic_atmosphere_model_residual_m); ...
+        scalarText(meanTruthAtmosphereDelay_m); ...
+        scalarText(meanModelAtmosphereDelay_m); ...
+        scalarText(meanAtmosphereModelResidual_m); ...
+        scalarText(meanDeterministicAtmosphereModelResidual_m); ...
         string( ...
             (sim.truthAtmosphere.enableTroposphere && ...
             sim.truthAtmosphere.residualTroposphereSigma_m > 0.0) || ...
             (sim.truthAtmosphere.enableIonosphere && ...
             sim.truthAtmosphere.residualIonosphereSigma_m > 0.0)); ...
-        scalarText(ctx.truth_atmosphere_residual_sigma_m); ...
+        scalarText(truthAtmosphereResidualSigma_m); ...
         scalarText(sim.truthAtmosphere.residualTroposphereSigma_m); ...
         scalarText(sim.truthAtmosphere.residualIonosphereSigma_m); ...
-        scalarText(ctx.model_atmosphere_residual_sigma_m); ...
+        scalarText(modelAtmosphereResidualSigma_m); ...
         scalarText(sim.modelAtmosphere.residualTroposphereSigma_m); ...
         scalarText(sim.modelAtmosphere.residualIonosphereSigma_m); ...
-        scalarText(ctx.model_atmosphere_residual_variance_m2); ...
-        ctx.model_atmosphere_covariance_structure ...
+        scalarText(modelAtmosphereResidualVariance_m2); ...
+        modelAtmosphereCovarianceStructure ...
         ];
 
     tableOut = table(Quantity, Value);
@@ -1724,30 +1727,7 @@ function [tauValid_s, adev, adevSigma, edf] = runClockAllanValidationLocal( ...
     end
 end
 
-function ctx = ensureReportTables(ctx)
-    if ~isfield(ctx, "measurement_model_table")
-        ctx.measurement_model_table = buildMeasurementModelReportTable();
-    end
-
-    if ~isfield(ctx, "state_vector_table")
-        ctx.state_vector_table = buildStateVectorReportTable(ctx);
-    end
-
-    if ~isfield(ctx, "h_factor_observability_table")
-        ctx.h_factor_observability_table = buildHFactorObservabilityTable(ctx);
-    end
-
-    if ~isfield(ctx, "observation_matrix_diagnostics_table")
-        ctx.observation_matrix_diagnostics_table = ...
-            buildObservationMatrixDiagnosticsTable(ctx);
-    end
-
-    if ~isfield(ctx, "starting_position_table")
-        ctx.starting_position_table = buildStartingPositionTable(ctx);
-    end
-end
-
-function tableOut = buildStartingPositionTable(ctx)
+function tableOut = buildStartingPositionTable(sim)
     objectType = strings(0, 1);
     objectName = strings(0, 1);
     positionFrame = strings(0, 1);
@@ -1755,60 +1735,30 @@ function tableOut = buildStartingPositionTable(ctx)
     position2 = strings(0, 1);
     position3 = strings(0, 1);
 
-    if isfield(ctx, "initial_truth_position_eci_m") && ...
-            numel(ctx.initial_truth_position_eci_m) >= 3
-        r0_I = ctx.initial_truth_position_eci_m(:);
-    elseif isfield(ctx, "sat_pos_history_m") && ...
-            size(ctx.sat_pos_history_m, 1) >= 3
-        r0_I = ctx.sat_pos_history_m(1:3, 1);
-    else
-        r0_I = [NaN; NaN; NaN];
-    end
-
-    assetName = "SpaceAsset";
-    if isfield(ctx, "asset_name")
-        assetName = string(ctx.asset_name);
-    end
-
-    appendRow("SpaceAsset", assetName, "ECI initial center of mass", ...
+    r0_I = sim.initialTruth0(sim.idx.pos);
+    appendRow("SpaceAsset", string(sim.assetConfig.name), "ECI initial center of mass", ...
         sprintf("X %.6g m", r0_I(1)), ...
         sprintf("Y %.6g m", r0_I(2)), ...
         sprintf("Z %.6g m", r0_I(3)));
 
-    if isfield(ctx, "receiver_offsets_body_m")
-        receiverOffsets = ctx.receiver_offsets_body_m;
-    elseif isfield(ctx, "receiver_offset_body_by_receiver_m")
-        receiverOffsets = ctx.receiver_offset_body_by_receiver_m;
-    else
-        receiverOffsets = zeros(3, 0);
-    end
-
-    receiverNames = strings(1, size(receiverOffsets, 2));
-    if isfield(ctx, "receiver_names")
-        receiverNames = string(ctx.receiver_names);
-    end
-
-    for rx = 1:size(receiverOffsets, 2)
-        off = receiverOffsets(:, rx);
+    for rx = 1:size(sim.receiverOffsetsBody_m, 2)
+        off = sim.receiverOffsetsBody_m(:, rx);
         receiverName = sprintf("RX%d", rx);
-        if rx <= numel(receiverNames)
-            receiverName = receiverNames(rx);
+        if rx <= numel(sim.receiverNames)
+            receiverName = sim.receiverNames(rx);
         end
-
         appendRow("Receiver", receiverName, "Body lever arm", ...
             sprintf("X %.6g m", off(1)), ...
             sprintf("Y %.6g m", off(2)), ...
             sprintf("Z %.6g m", off(3)));
     end
 
-    if isfield(ctx, "towers")
-        towers = ctx.towers;
-        for twr = 1:numel(towers)
-            appendRow("Tower", string(towers(twr).name), "Fixed geodetic/ECEF source", ...
-                sprintf("Lat %.6g deg", towers(twr).lat_deg), ...
-                sprintf("Lon %.6g deg", towers(twr).lon_deg), ...
-                sprintf("Alt %.6g m", towers(twr).alt_m));
-        end
+    towers = reportTowersLocal(sim);
+    for twr = 1:numel(towers)
+        appendRow("Tower", string(towers(twr).name), "Fixed geodetic/ECEF source", ...
+            sprintf("Lat %.6g deg", towers(twr).lat_deg), ...
+            sprintf("Lon %.6g deg", towers(twr).lon_deg), ...
+            sprintf("Alt %.6g m", towers(twr).alt_m));
     end
 
     tableOut = table(objectType, objectName, positionFrame, ...
@@ -1825,16 +1775,9 @@ function tableOut = buildStartingPositionTable(ctx)
     end
 end
 
-function tableOut = buildObservationMatrixDiagnosticsTable(ctx)
-    measCount = NaN;
-    if isfield(ctx, "pseudorange_measurement_count")
-        measCount = ctx.pseudorange_measurement_count(:);
-    elseif isfield(ctx, "nis_degrees_of_freedom")
-        measCount = ctx.nis_degrees_of_freedom(:);
-    elseif isfield(ctx, "H_row_count_history")
-        measCount = ctx.H_row_count_history(:);
-    end
-
+function tableOut = buildObservationMatrixDiagnosticsTable(sim)
+    history = sim.history;
+    measCount = history.pseudorange_measurement_count(:);
     validMeas = measCount(isfinite(measCount));
     if isempty(validMeas)
         finalPseudorangeRows = NaN;
@@ -1848,99 +1791,49 @@ function tableOut = buildObservationMatrixDiagnosticsTable(ctx)
         maxPseudorangeRows = max(validMeas);
     end
 
-    gaugeRows = 0;
-    if isfield(ctx, "enable_tower_clock_ekf") && ctx.enable_tower_clock_ekf
-        gaugeRows = 2;
-    end
-
+    gaugeRows = 2 * double(GroundTimingNetwork.towerClockEkfEnabled(sim.cfg));
     finalHRows = finalPseudorangeRows + gaugeRows;
-
-    hColumns = NaN;
-    if isfield(ctx, "state_dim")
-        hColumns = ctx.state_dim;
-    elseif isfield(ctx, "final_H_columns")
-        hColumns = ctx.final_H_columns;
-    end
-
-    hRank = getReportVector(ctx, "H_rank_history");
-    hRankValid = hRank(isfinite(hRank));
-
-    if isempty(hRankValid)
-        finalRankH = NaN;
-        minRankH = NaN;
-        maxRankH = NaN;
-    else
-        finalRankH = hRankValid(end);
-        minRankH = min(hRankValid);
-        maxRankH = max(hRankValid);
-    end
-
-    finalRankDeficiency = hColumns - finalRankH;
-
-    hPosRank = getReportVector(ctx, "H_pos_rank_history");
-    hAttRank = getReportVector(ctx, "H_att_rank_history");
-    hCombinedRank = getReportVector(ctx, "H_pos_att_clock_rank_history");
-
-    if all(isnan(hPosRank)) && isfield(ctx, "final_H_pos_rank")
-        hPosRank = ctx.final_H_pos_rank;
-    end
-    if all(isnan(hAttRank)) && isfield(ctx, "final_H_att_rank")
-        hAttRank = ctx.final_H_att_rank;
-    end
-    if all(isnan(hCombinedRank)) && isfield(ctx, "final_H_pos_att_clock_rank")
-        hCombinedRank = ctx.final_H_pos_att_clock_rank;
-    end
-
-    finalPosRank = lastFiniteLocal(hPosRank);
-    finalAttRank = lastFiniteLocal(hAttRank);
-    finalCombinedRank = lastFiniteLocal(hCombinedRank);
+    hRank = history.H_rank_history(end);
+    hDeficiency = sim.stateDim - hRank;
 
     Quantity = [ ...
-        "final H rows"; ...
-        "H columns / EKF state dimension"; ...
-        "final rank(H)"; ...
-        "rank deficiency, n_x - rank(H)"; ...
-        "minimum rank(H) over run"; ...
-        "maximum rank(H) over run"; ...
-        "final pseudorange rows"; ...
-        "mean pseudorange rows"; ...
-        "minimum pseudorange rows"; ...
-        "maximum pseudorange rows"; ...
-        "extra gauge rows"; ...
-        "final position-column rank"; ...
-        "final attitude-column rank"; ...
-        "final position/attitude/clock rank" ...
+        "Final pseudorange measurement rows"; ...
+        "Mean pseudorange measurement rows"; ...
+        "Minimum pseudorange measurement rows"; ...
+        "Maximum pseudorange measurement rows"; ...
+        "Additional clock-gauge constraint rows"; ...
+        "Final observation matrix rows"; ...
+        "Final observation matrix columns"; ...
+        "Final observation matrix rank"; ...
+        "Final observation matrix deficiency"; ...
+        "Final position-column rank"; ...
+        "Final attitude-column rank"; ...
+        "Final position-attitude-clock rank" ...
         ];
-
     Value = [ ...
-        formatNumberLocal(finalHRows); ...
-        formatNumberLocal(hColumns); ...
-        formatNumberLocal(finalRankH); ...
-        formatNumberLocal(finalRankDeficiency); ...
-        formatNumberLocal(minRankH); ...
-        formatNumberLocal(maxRankH); ...
-        formatNumberLocal(finalPseudorangeRows); ...
-        sprintf("%.2f", meanPseudorangeRows); ...
-        formatNumberLocal(minPseudorangeRows); ...
-        formatNumberLocal(maxPseudorangeRows); ...
-        formatNumberLocal(gaugeRows); ...
-        formatNumberLocal(finalPosRank); ...
-        formatNumberLocal(finalAttRank); ...
-        formatNumberLocal(finalCombinedRank) ...
+        scalarText(finalPseudorangeRows); ...
+        scalarText(meanPseudorangeRows); ...
+        scalarText(minPseudorangeRows); ...
+        scalarText(maxPseudorangeRows); ...
+        scalarText(gaugeRows); ...
+        scalarText(finalHRows); ...
+        scalarText(sim.stateDim); ...
+        scalarText(hRank); ...
+        scalarText(hDeficiency); ...
+        scalarText(history.H_pos_rank_history(end)); ...
+        scalarText(history.H_att_rank_history(end)); ...
+        scalarText(history.H_pos_att_clock_rank_history(end)) ...
         ];
-
     Meaning = [ ...
-        "Number of scalar rows in the final EKF update matrix H"; ...
-        "Number of estimated EKF error states"; ...
-        "Numerical rank of the final observation matrix H"; ...
+        "Visible receiver-tower pseudorange rows at the final epoch"; ...
+        "Average visible receiver-tower pseudorange rows"; ...
+        "Worst instantaneous measurement availability"; ...
+        "Best instantaneous measurement availability"; ...
+        "Clock-gauge rows appended by the estimator"; ...
+        "Total final H rows including gauge constraints"; ...
+        "EKF error-state dimension"; ...
+        "Numerical rank of final H"; ...
         "Unobservable dimension remaining in final H"; ...
-        "Worst instantaneous H rank during the run"; ...
-        "Best instantaneous H rank during the run"; ...
-        "Visible pseudorange measurements at final epoch"; ...
-        "Average visible pseudorange measurements per epoch"; ...
-        "Minimum visible pseudorange measurements in one epoch"; ...
-        "Maximum visible pseudorange measurements in one epoch"; ...
-        "Additional clock-gauge constraint rows added to H"; ...
         "Rank of H columns corresponding to position states"; ...
         "Rank of H columns corresponding to attitude-error states"; ...
         "Rank of combined position, attitude, and receiver-clock columns" ...
@@ -1949,8 +1842,8 @@ function tableOut = buildObservationMatrixDiagnosticsTable(ctx)
     tableOut = table(Quantity, Value, Meaning);
 end
 
-function tableOut = buildStateVectorReportTable(ctx)
-    names = string(ctx.state_names);
+function tableOut = buildStateVectorReportTable(sim, stateNames, idx, towerClockEnabled, towerNames)
+    names = string(stateNames);
     n = numel(names);
 
     Index = (1:n).';
@@ -1964,12 +1857,8 @@ function tableOut = buildStateVectorReportTable(ctx)
         "delta theta_B,x"; "delta theta_B,y"; "delta theta_B,z"; ...
         "delta omega_B,x"; "delta omega_B,y"; "delta omega_B,z"; ...
         "delta b_rx"; "delta bdot_rx"];
-
-    baseUnit = ["m"; "m"; "m"; ...
-        "m/s"; "m/s"; "m/s"; ...
-        "rad"; "rad"; "rad"; ...
-        "rad/s"; "rad/s"; "rad/s"; ...
-        "m"; "m/s"];
+    baseUnit = ["m"; "m"; "m"; "m/s"; "m/s"; "m/s"; ...
+        "rad"; "rad"; "rad"; "rad/s"; "rad/s"; "rad/s"; "m"; "m/s"];
 
     baseCount = min(14, n);
     Symbol(1:baseCount) = baseSymbol(1:baseCount);
@@ -1985,15 +1874,7 @@ function tableOut = buildStateVectorReportTable(ctx)
         DynamicCouplingNote(14) = "Affects future receiver clock bias through clock transition model";
     end
 
-    towerClockEnabled = isfield(ctx, "enable_tower_clock_ekf") && ...
-        ctx.enable_tower_clock_ekf;
-
-    towerNames = strings(0, 1);
-    if isfield(ctx, "tower_names")
-        towerNames = string(ctx.tower_names);
-    end
-
-    if towerClockEnabled && n > 14
+    if towerClockEnabled && isfield(idx, "towerClockBias") && n > 14
         row = 15;
         twr = 1;
         while row <= n
@@ -2001,13 +1882,11 @@ function tableOut = buildStateVectorReportTable(ctx)
             if twr <= numel(towerNames)
                 towerName = towerNames(twr);
             end
-
             Symbol(row) = sprintf('delta b_g,%d', twr);
             Description(row) = sprintf('%s tower clock bias', towerName);
             Unit(row) = "m";
             DynamicCouplingNote(row) = "Estimated relative to mean ground-network clock gauge";
             row = row + 1;
-
             if row <= n
                 Symbol(row) = sprintf('delta bdot_g,%d', twr);
                 Description(row) = sprintf('%s tower clock drift', towerName);
@@ -2015,7 +1894,6 @@ function tableOut = buildStateVectorReportTable(ctx)
                 DynamicCouplingNote(row) = "Affects future tower clock bias through clock transition model";
                 row = row + 1;
             end
-
             twr = twr + 1;
         end
     end
@@ -2023,49 +1901,21 @@ function tableOut = buildStateVectorReportTable(ctx)
     tableOut = table(Index, Symbol, Description, Unit, DynamicCouplingNote);
 end
 
-function tableOut = buildHFactorObservabilityTable(ctx)
-    hRankHistory = getReportVector(ctx, "H_rank_history");
-    kFinal = find(isfinite(hRankHistory), 1, 'last');
+function tableOut = buildHFactorObservabilityTable(sim, stateNames, idx, towerClockEnabled)
+    history = sim.history;
+    kFinal = find(isfinite(history.H_rank_history), 1, 'last');
     if isempty(kFinal)
-        kFinal = numel(hRankHistory);
-    end
-    if isempty(kFinal) || kFinal < 1
-        kFinal = 1;
+        kFinal = sim.numSteps;
     end
 
-    hRowsHistory = getReportVector(ctx, "H_row_count_history");
-    hColsHistory = getReportVector(ctx, "H_column_count_history");
-
-    hRows = getVectorValue(hRowsHistory, kFinal, getFieldOrDefaultLocal(ctx, "final_H_rows", NaN));
-    hCols = getVectorValue(hColsHistory, kFinal, getFieldOrDefaultLocal(ctx, "final_H_columns", NaN));
-    hRank = getVectorValue(hRankHistory, kFinal, getFieldOrDefaultLocal(ctx, "final_H_rank", NaN));
-    hDef = hCols - hRank;
-
-    W = zeros(getFieldOrDefaultLocal(ctx, "state_dim", 0));
-    if isfield(ctx, "observability_normal_matrix")
-        W = ctx.observability_normal_matrix;
-    end
-    W = 0.5 * (W + W.');
-
+    W = 0.5 * (sim.observabilityNormalMatrix + sim.observabilityNormalMatrix.');
     colNorm = sqrt(max(diag(W), 0.0));
-    if isempty(colNorm)
-        colNorm = zeros(getFieldOrDefaultLocal(ctx, "state_dim", 0), 1);
-    end
-
     scale = colNorm;
     scale(scale == 0.0) = Inf;
-
     Wn = W ./ (scale * scale.');
     Wn(~isfinite(Wn)) = 0.0;
-
-    stateNames = string(ctx.state_names);
-    if isempty(colNorm)
-        weakTol = 0.0;
-    else
-        weakTol = max(colNorm) * 1e-8;
-    end
-
-    idx = ctx.state_index;
+    weakTol = max([colNorm(:); 0]) * 1e-8;
+    stateNames = string(stateNames);
 
     Block = strings(0, 1);
     StateColumns = strings(0, 1);
@@ -2074,157 +1924,76 @@ function tableOut = buildHFactorObservabilityTable(ctx)
     AccumulatedDynamicRank = strings(0, 1);
     Interpretation = strings(0, 1);
 
-    appendBlock("position error dr_I", idx.pos, ...
-        "u^T", ...
-        getVectorValue(getReportVector(ctx, "H_pos_rank_history"), kFinal, ...
-        getFieldOrDefaultLocal(ctx, "final_H_pos_rank", NaN)), ...
+    appendBlock("position error dr_I", idx.pos, "u^T", ...
+        history.H_pos_rank_history(kFinal), ...
         "Directly observed as line-of-sight range sensitivity. Full 3D rank needs diverse LOS geometry.");
-
-    appendBlock("velocity error dv_I", idx.vel, ...
-        "0", ...
-        0, ...
+    appendBlock("velocity error dv_I", idx.vel, "0", 0, ...
         "Not directly observed by code pseudorange. It becomes observable only because velocity propagates into future position.");
-
-    appendBlock("attitude error dtheta_B", idx.att, ...
-        "u^T*(-C_BI*skew(l_a_B))", ...
-        getVectorValue(getReportVector(ctx, "H_att_rank_history"), kFinal, ...
-        getFieldOrDefaultLocal(ctx, "final_H_att_rank", NaN)), ...
+    appendBlock("attitude error dtheta_B", idx.att, "u^T*(-C_BI*skew(l_a_B))", ...
+        history.H_att_rank_history(kFinal), ...
         "Observed only through non-zero receiver lever arms. A receiver at the center of mass gives zero attitude sensitivity.");
-
-    appendBlock("body angular-rate error domega_B", idx.omega, ...
-        "0", ...
-        0, ...
+    appendBlock("body angular-rate error domega_B", idx.omega, "0", 0, ...
         "Not directly observed by code pseudorange. It becomes observable only because angular rate propagates into future attitude.");
-
-    appendBlock("receiver clock bias db_rx", idx.rxClockBias, ...
-        "1", ...
-        double(getVectorValue(getReportVector(ctx, "H_rx_clock_bias_column_norm_history"), ...
-        kFinal, getFieldOrDefaultLocal(ctx, "final_H_rx_clock_bias_column_norm", 0.0)) > 0.0), ...
+    appendBlock("receiver clock bias db_rx", idx.rxClockBias, "1", ...
+        double(history.H_rx_clock_bias_column_norm_history(kFinal) > 0.0), ...
         "Directly observed as a common range offset across all pseudoranges.");
-
-    appendBlock("receiver clock drift dbdot_rx", idx.rxClockDrift, ...
-        "0", ...
-        0, ...
+    appendBlock("receiver clock drift dbdot_rx", idx.rxClockDrift, "0", 0, ...
         "Not directly observed by pseudorange. It becomes observable only because clock drift propagates into future clock bias.");
 
-    towerClockEnabled = isfield(ctx, "enable_tower_clock_ekf") && ...
-        ctx.enable_tower_clock_ekf;
-
     if towerClockEnabled && isfield(idx, "towerClockBias") && isfield(idx, "towerClockDrift")
-        visibleTowerHistory = getReportVector(ctx, "visible_tower_count");
-        visibleTowers = getVectorValue(visibleTowerHistory, kFinal, ...
-            getFieldOrDefaultLocal(ctx, "num_towers", NaN));
-
+        visibleTowers = history.visible_tower_count(kFinal);
         appendBlock("tower clock biases db_g", idx.towerClockBias, ...
             "-1 for the transmitting tower, plus mean-clock gauge row", ...
-            min(getFieldOrDefaultLocal(ctx, "num_towers", numel(idx.towerClockBias)), visibleTowers + 1), ...
+            min(sim.numTowers, visibleTowers + 1), ...
             "Directly observed only for visible towers. The mean-clock gauge fixes the otherwise arbitrary network clock reference.");
-
         appendBlock("tower clock drifts dbdot_g", idx.towerClockDrift, ...
-            "0 in pseudorange rows, mean-drift gauge row only", ...
-            1, ...
+            "0 in pseudorange rows, mean-drift gauge row only", 1, ...
             "Not directly observed by pseudorange. The gauge constrains the mean; time propagation couples drift into tower clock bias.");
     end
 
-    appendBlock("full instantaneous H", 1:getFieldOrDefaultLocal(ctx, "state_dim", numel(stateNames)), ...
-        "all active H columns", ...
-        hRank, ...
+    appendBlock("full instantaneous H", 1:sim.stateDim, "all active H columns", ...
+        history.H_rank_history(kFinal), ...
         sprintf("Final H has %s rows, %s columns, rank %s, deficiency %s. This is instantaneous rank only.", ...
-        formatNumberLocal(hRows), formatNumberLocal(hCols), ...
-        formatNumberLocal(hRank), formatNumberLocal(hDef)));
+        formatNumberLocal(history.measurement_count(kFinal)), ...
+        formatNumberLocal(sim.stateDim), ...
+        formatNumberLocal(history.H_rank_history(kFinal)), ...
+        formatNumberLocal(sim.stateDim - history.H_rank_history(kFinal))));
 
     tableOut = table(Block, StateColumns, HFactor, ...
-        DirectRankFinalEpoch, AccumulatedDynamicRank, Interpretation, ...
-        'VariableNames', {'Block','Cols','HFactor','DirectRank','DynamicRank','Interpretation'});
+        DirectRankFinalEpoch, AccumulatedDynamicRank, Interpretation);
 
-    function appendBlock(blockName, idxBlock, hFactorText, directRank, interpretationText)
-        idxBlock = idxBlock(:).';
-
-        if isempty(idxBlock)
-            accumulatedRank = NaN;
-            weakStateText = "n/a";
+    function appendBlock(blockName, cols, hFactor, directRank, interpretation)
+        if isempty(cols)
             colText = "n/a";
+            accumulatedRank = "n/a";
         else
-            if isempty(Wn)
-                accumulatedRank = NaN;
+            cols = cols(:).';
+            colText = strjoin(string(cols), ", ");
+            validCols = cols(cols >= 1 & cols <= numel(colNorm));
+            if isempty(validCols)
+                accumulatedRank = "n/a";
             else
-                accumulatedRank = rank(Wn(idxBlock, idxBlock), 1e-8);
-            end
-
-            weakLocal = idxBlock(colNorm(idxBlock) < weakTol);
-
-            if isempty(weakLocal)
-                weakStateText = "none";
-            else
-                weakStateText = strjoin(string(stateNames(weakLocal)), ", ");
-            end
-
-            colText = sprintf("%d", idxBlock(1));
-            for ii = 2:numel(idxBlock)
-                colText = colText + sprintf(", %d", idxBlock(ii));
+                accumulatedRank = formatRankLocal(rank(Wn(validCols, validCols), 1e-10), numel(validCols));
+                if all(colNorm(validCols) <= weakTol)
+                    accumulatedRank = accumulatedRank + " (weak)";
+                end
             end
         end
 
         Block(end + 1, 1) = string(blockName);
-        StateColumns(end + 1, 1) = string(colText);
-        HFactor(end + 1, 1) = string(hFactorText);
-        DirectRankFinalEpoch(end + 1, 1) = string(formatRankLocal(directRank, numel(idxBlock)));
-        AccumulatedDynamicRank(end + 1, 1) = string(formatRankLocal(accumulatedRank, numel(idxBlock)));
-
-        if weakStateText == "none"
-            Interpretation(end + 1, 1) = string(interpretationText);
-        else
-            Interpretation(end + 1, 1) = string(interpretationText) + ...
-                " Weak accumulated states: " + weakStateText + ".";
-        end
-    end
-end
-
-function v = getReportVector(ctx, fieldName)
-    fieldName = char(fieldName);
-    if isfield(ctx, fieldName) && ~isempty(ctx.(fieldName))
-        v = ctx.(fieldName)(:);
-    else
-        v = NaN;
-    end
-end
-
-function value = getVectorValue(values, index, defaultValue)
-    values = values(:);
-    if index >= 1 && index <= numel(values) && isfinite(values(index))
-        value = values(index);
-    else
-        value = defaultValue;
-    end
-end
-
-function value = getFieldOrDefaultLocal(s, fieldName, defaultValue)
-    fieldName = char(fieldName);
-    if isstruct(s) && isfield(s, fieldName) && ~isempty(s.(fieldName))
-        value = s.(fieldName);
-    else
-        value = defaultValue;
-    end
-end
-
-function y = lastFiniteLocal(x)
-    x = x(:);
-    x = x(isfinite(x));
-
-    if isempty(x)
-        y = NaN;
-    else
-        y = x(end);
+        StateColumns(end + 1, 1) = colText;
+        HFactor(end + 1, 1) = string(hFactor);
+        DirectRankFinalEpoch(end + 1, 1) = scalarText(directRank);
+        AccumulatedDynamicRank(end + 1, 1) = accumulatedRank;
+        Interpretation(end + 1, 1) = string(interpretation);
     end
 end
 
 function s = formatNumberLocal(x)
     if isempty(x) || ~isfinite(x)
         s = "n/a";
-    elseif abs(x - round(x)) < 1e-12
-        s = sprintf("%d", round(x));
     else
-        s = sprintf("%.3g", x);
+        s = sprintf("%.0f", x);
     end
 end
 
@@ -2282,7 +2051,7 @@ function validateRequiredFields(data, required_fields)
     for idx = 1:numel(required_fields)
         if ~isfield(data, required_fields(idx))
             error("generateReport:MissingField", ...
-                "ctx.%s is required for report generation.", required_fields(idx));
+                "%s is required for report generation.", required_fields(idx));
         end
     end
 end
@@ -2793,17 +2562,29 @@ function plotInnovation(time_vec, innovation_rms_m, postfit_innovation_rms_m)
     title('Pseudorange Pre-Fit and Post-Fit Residuals', 'FontSize', 12);
 end
 
-function plotMeasurementCovarianceBreakdown(time_vec, ctx)
-    receiver_sigma = rmsVarianceComponent(ctx, "R_receiver_m2");
-    tower_sigma = rmsVarianceComponent(ctx, "R_tower_clock_m2");
-    atmosphere_sigma = rmsVarianceComponent(ctx, "R_atmosphere_m2");
-    hardware_sigma = rmsVarianceComponent(ctx, "R_hardware_m2");
-    multipath_sigma = rmsVarianceComponent(ctx, "R_multipath_m2");
-    numerical_sigma = zeros(size(receiver_sigma));
-    if isfield(ctx, "R_numerical_regularization_m2")
-        numerical_sigma = rmsVarianceComponent(ctx, "R_numerical_regularization_m2");
+function plotMeasurementCovarianceBreakdown(time_vec, sim)
+    n = numel(time_vec);
+    receiverR2 = sim.cfg.measurement.pseudorangeSigma_m^2 * ...
+        double(sim.measurementModel.measurementNoiseEnabled());
+    groundR2 = GroundTimingNetwork.residualVariance_m2(sim.cfg, sim.c);
+    if GroundTimingNetwork.towerClockEkfEnabled(sim.cfg)
+        appliedGroundR2 = 0.0;
+    else
+        appliedGroundR2 = groundR2;
     end
-    total_sigma = rmsVarianceComponent(ctx, "R_total_m2");
+    atmosphereR2 = sim.measurementModel.atmosphereResidualVariance_m2();
+    actualR2 = sim.measurementModel.measurementVariance( ...
+        GroundTimingNetwork.towerClockEkfEnabled(sim.cfg), groundR2);
+    numericalR2 = max(actualR2 - receiverR2 - appliedGroundR2 - atmosphereR2, 0.0);
+    totalR2 = receiverR2 + appliedGroundR2 + atmosphereR2 + numericalR2;
+
+    receiver_sigma = sqrt(receiverR2) * ones(1, n);
+    tower_sigma = sqrt(appliedGroundR2) * ones(1, n);
+    atmosphere_sigma = sqrt(atmosphereR2) * ones(1, n);
+    hardware_sigma = zeros(1, n);
+    multipath_sigma = zeros(1, n);
+    numerical_sigma = sqrt(numericalR2) * ones(1, n);
+    total_sigma = sqrt(totalR2) * ones(1, n);
 
     plot(time_vec / 3600, total_sigma, 'k-', 'LineWidth', 1.4, 'DisplayName', 'Total');
     hold on;
@@ -3122,11 +2903,6 @@ function series = meanByEpoch(data_by_receiver_tower_time)
     series = mean(flattened, 1, 'omitnan');
 end
 
-function sigma = rmsVarianceComponent(ctx, field_name)
-    values = ctx.(field_name);
-    sigma = sqrt(mean(values, 1, 'omitnan'));
-end
-
 function plotResidualByTower(time_vec, prefit_residual_by_tower_m, postfit_residual_by_tower_m, towers)
     if size(prefit_residual_by_tower_m, 2) ~= numel(time_vec)
         prefit_residual_by_tower_m = prefit_residual_by_tower_m';
@@ -3344,14 +3120,16 @@ function plotNis(time_vec, nis_history, num_towers, nis_degrees_of_freedom)
     title('Innovation Consistency Check', 'FontSize', 12);
 end
 
-function plotInnovationCovarianceConsistency(time_vec, ctx)
+function plotInnovationCovarianceConsistency(time_vec, sim)
+    history = sim.history;
     time_h = time_vec(:).' / 3600.0;
 
-    innovationRms_m = ctx.innovation_rms_m(:).';
-    innovationSigma_m = ctx.innovation_covariance_mean_sigma_m(:).';
+    innovationRms_m = history.innovation_rms_m(:).';
+    innovationSigma_m = ...
+        sqrt(max(history.innovation_covariance_mean_variance_m2(:).', 0.0));
 
-    nisPerDof = ctx.nis_per_degree_of_freedom(:).';
-    normalizedInnovationRms = ctx.normalized_innovation_rms(:).';
+    nisPerDof = history.nis_per_degree_of_freedom(:).';
+    normalizedInnovationRms = history.normalized_innovation_rms(:).';
 
     tiledlayout(2, 1, ...
         'TileSpacing', 'compact', ...
@@ -3582,17 +3360,13 @@ function report = appendParagraph(report, text_value)
     report = appendLine(report, "");
 end
 
-function report = appendOptionalTable(report, title_text, data, field_name, max_rows)
-    if ~isfield(data, field_name)
-        return;
-    end
-    tbl = data.(field_name);
+function report = appendOptionalTable(report, title_text, tbl, field_name, max_rows)
     if isempty(tbl)
         return;
     end
     if ~istable(tbl)
         error("generateReport:InvalidReportTable", ...
-            "ctx.%s must be a MATLAB table.", field_name);
+            "%s must be a MATLAB table.", field_name);
     end
     if height(tbl) == 0
         return;

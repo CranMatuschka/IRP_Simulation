@@ -27,10 +27,6 @@ classdef HistoryRecorder
             history.normalized_innovation_rms = NaN(1, sim.numSteps);
 
             history.H_rank_history = NaN(1, sim.numSteps);
-            history.H_row_count_history = NaN(1, sim.numSteps);
-            history.H_column_count_history = NaN(1, sim.numSteps);
-            history.H_rank_to_state_dim_history = NaN(1, sim.numSteps);
-            history.H_state_deficiency_history = NaN(1, sim.numSteps);
             history.H_pos_rank_history = NaN(1, sim.numSteps);
             history.H_att_rank_history = NaN(1, sim.numSteps);
             history.H_pos_att_clock_rank_history = NaN(1, sim.numSteps);
@@ -41,7 +37,6 @@ classdef HistoryRecorder
             history.measurement_count = zeros(1, sim.numSteps);
             history.pseudorange_measurement_count = zeros(1, sim.numSteps);
             history.visible_tower_count = zeros(1, sim.numSteps);
-            history.sat_pos_history_m = NaN(3, sim.numSteps);
             history.receiver_eci_by_receiver = NaN(3, sim.numReceivers, sim.numSteps);
             history.tower_eci_by_tower = NaN(3, sim.numTowers, sim.numSteps);
 
@@ -95,7 +90,6 @@ classdef HistoryRecorder
             history.measurement_count(k) = size(filterStats.H, 1);
             history.pseudorange_measurement_count(k) = numel(truth.y);
             history.visible_tower_count(k) = sum(any(visibilityMask, 1));
-            history.sat_pos_history_m(:, k) = sim.truthAsset.pos_ECI_m;
             history.receiver_eci_by_receiver(:, :, k) = truth.receiverEci;
             history.tower_eci_by_tower(:, :, k) = epoch.towersEci;
             history.ground_clock_true_m(:, k) = epoch.groundTrue_m(:);
@@ -285,18 +279,12 @@ classdef HistoryRecorder
                 Hclk = zeros(0, 1);
             else
                 hRank = rank(H);
-                hRows = size(H, 1);
-                hCols = size(H, 2);
                 Hpos = H(:, sim.idx.pos);
                 Hatt = H(:, sim.idx.att);
                 Hclk = H(:, sim.idx.rxClockBias);
             end
 
             history.H_rank_history(k) = hRank;
-            history.H_row_count_history(k) = hRows;
-            history.H_column_count_history(k) = hCols;
-            history.H_rank_to_state_dim_history(k) = hRank / max(hCols, 1);
-            history.H_state_deficiency_history(k) = hCols - hRank;
             history.H_pos_rank_history(k) = rank(Hpos);
             history.H_att_rank_history(k) = rank(Hatt);
             history.H_pos_att_clock_rank_history(k) = rank([Hpos, Hatt, Hclk]);
