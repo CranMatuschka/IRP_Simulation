@@ -321,7 +321,7 @@ scenario.atmosphere.ionosphereShellHeight_m = 350000.0;
 %       model residual sigmas and the sameTower variance contribution added
 %       to R for receivers observing the same transmitting tower
 %
-% The saved results struct exports these fields as results.errors.atmosphere. The
+% The saved results struct exports these fields as results.history.errors.atmosphere. The
 % report data and atmosphere summary table expose the configured truth/model
 % modes, constant parameters, deterministic mismatch, residual sigmas, and
 % R covariance structure. The example script

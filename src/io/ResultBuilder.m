@@ -110,12 +110,6 @@ classdef ResultBuilder
             results.tower_names = sim.towerNames;
             results.error_budget_status = ...
                 ResultBuilder.errorBudgetStatus(sim);
-
-            results.errors = sim.history.errors;
-            results.diagnostics = sim.history.diagnostics;
-            results.x = sim.history.x;
-            results.truth = sim.history.truth;
-            results.covariance_diag = sim.history.covariance_diag;
         end
     end
 

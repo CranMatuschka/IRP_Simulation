@@ -43,9 +43,13 @@ assert(isequaln(history.errors.atmosphere.residual_m, ...
 assert(abs(mean(history.errors.atmosphere.variance_m2(:), 'omitnan') - 0.05) < eps);
 
 results = ResultBuilder.fromSimulation(sim);
-assert(isfield(results, 'history') || isfield(results, 'errors'));
+assert(isfield(results, 'history'));
 assert(isequaln(results.history, sim.history));
-assert(isequaln(results.errors, sim.history.errors));
+assert(~isfield(results, 'errors'));
+assert(~isfield(results, 'diagnostics'));
+assert(~isfield(results, 'x'));
+assert(~isfield(results, 'truth'));
+assert(~isfield(results, 'covariance_diag'));
 assert(~isfield(results, 'atmosphere'));
 assert(~isfield(results, 'non_atmospheric'));
 assert(~isfield(results, 'propagation'));
