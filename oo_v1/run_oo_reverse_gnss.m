@@ -29,6 +29,29 @@ fprintf('Working directory: %s\n', thisDir);
 %% --- Build configuration ----------------------------------------------
 cfg = revgnss.ConfigFactory.defaultConfig();
 
+% Use 4 receiver antennas / phase centers
+cfg.scenario.nReceivers = 1;
+cfg.asset.receiverLeverArms_body_m = [
+     1.0  -1.0   0.0   0.0;
+     0.0   0.0   1.0  -1.0;
+     0.2   0.2  -0.2  -0.2
+];
+
+cfg.asset.receiverLeverArm_body_m = cfg.asset.receiverLeverArms_body_m(:,1);
+
+cfg.estimator.estimateAttitude = true;
+cfg.estimator.estimateAttitudeFromPseudorange = true;
+
+cfg.estimator.estimateAngularRate = false;
+cfg.estimator.estimateAngularRateFromPseudorange = false;
+
+cfg.estimator.P0_euler_rad = deg2rad(5);
+cfg.estimator.P0_omega_radps = 1e-12;
+cfg.estimator.sigma_angAccel_radps2 = 1e-10;
+cfg.estimator.initialError.euler_deg = [1.0; -1.0; 0.5];
+cfg.estimator.initialError.omega_radps = [0;0;0];
+cfg.errors.codeNoise.sigma_m = 0.03;
+
 % Duration and step already set in defaultConfig (3600 s, dt=1 s).
 % Enable plots and report; figures are hidden by default (showFigures=false).
 cfg.plots.enable                = true;
