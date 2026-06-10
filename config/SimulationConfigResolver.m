@@ -1,10 +1,6 @@
 classdef SimulationConfigResolver
-    %SIMULATIONCONFIGRESOLVER Normalizes legacy and string error settings.
-    %
-    % This resolver is intentionally passive: it converts SimulationConfig
-    % fields into one canonical internal struct without changing existing
-    % simulation behaviour. Later refactors can consume resolved.errors while
-    % keeping the legacy fields available for backward compatibility.
+    %SIMULATIONCONFIGRESOLVER Converts SimulationConfig fields into one
+    % canonical internal struct without changing simulation behaviour.
 
     methods (Static)
         function resolved = resolve(simConfig)
