@@ -37,8 +37,12 @@ classdef SpaceAsset < handle
         % Truth angular velocity in body frame [rad/s]
         angularRate_body_radps   (3,1) double  = zeros(3,1)
 
-        % Receiver antenna lever arm in body frame [m]
+        % Receiver antenna lever arm in body frame [m] — single antenna / first antenna
         receiverLeverArm_body_m  (3,1) double  = zeros(3,1)
+
+        % All receiver antenna lever arms in body frame [m], columns = antennas (3xN)
+        % Default: one antenna at centre-of-mass (zero lever arm).
+        receiverLeverArms_body_m (3,:) double  = zeros(3,1)
 
         % Receiver clock
         clock                    revgnss.ClockModel
@@ -58,7 +62,17 @@ classdef SpaceAsset < handle
             obj.v_ecef_mps             = cfg.v_ecef_mps(:);
             obj.attitude_euler_rad     = cfg.attitude_euler_rad(:);
             obj.angularRate_body_radps = cfg.angularRate_body_radps(:);
-            obj.receiverLeverArm_body_m = cfg.receiverLeverArm_body_m(:);
+
+            % Lever-arm backward-compat: accept either singular or plural field.
+            % New configs set receiverLeverArms_body_m (3xN).
+            % Old configs set receiverLeverArm_body_m (3x1).
+            if isfield(cfg, 'receiverLeverArms_body_m')
+                obj.receiverLeverArms_body_m = cfg.receiverLeverArms_body_m;
+                obj.receiverLeverArm_body_m  = cfg.receiverLeverArms_body_m(:,1);
+            elseif isfield(cfg, 'receiverLeverArm_body_m')
+                obj.receiverLeverArm_body_m  = cfg.receiverLeverArm_body_m(:);
+                obj.receiverLeverArms_body_m = cfg.receiverLeverArm_body_m(:);  % 3x1
+            end
 
             obj.clock = revgnss.ClockModel(cfg.clock);
 
@@ -74,9 +88,27 @@ classdef SpaceAsset < handle
 
         % ----------------------------------------------------------------
         function r_ant = getAntennaPositionECEF(obj)
-            % getAntennaPositionECEF  Compute receiver antenna phase center.
+            % getAntennaPositionECEF  Compute first (or only) antenna phase center.
             r_ant = revgnss.AttitudeKinematics.applyLeverArm( ...
                 obj.r_ecef_m, obj.attitude_euler_rad, obj.receiverLeverArm_body_m);
+        end
+
+        % ----------------------------------------------------------------
+        function r_ants = getAntennaPositionsECEF(obj, r_cm, euler)
+            % getAntennaPositionsECEF  All antenna phase centres [3 x N_ant].
+            %
+            % Inputs:
+            %   r_cm   [3x1]  centre-of-mass position in ECEF [m]
+            %   euler  [3x1]  attitude Euler angles [rad] (ZYX)
+            %
+            % Output:
+            %   r_ants [3 x N_ant]  ECEF position of each antenna
+            N_ant  = size(obj.receiverLeverArms_body_m, 2);
+            r_ants = zeros(3, N_ant);
+            for ai = 1:N_ant
+                r_ants(:,ai) = revgnss.AttitudeKinematics.applyLeverArm( ...
+                    r_cm, euler, obj.receiverLeverArms_body_m(:,ai));
+            end
         end
 
         function propagate(obj, dt_s, accel_ecef_mps2, alpha_body_radps2)

@@ -227,15 +227,19 @@ classdef ReverseGNSSSimulation < handle
 
     methods (Access = private)
         % ----------------------------------------------------------------
-        function postfit = computePostfitResiduals_(obj, z, visIds, errStruct)
+        function postfit = computePostfitResiduals_(obj, z, ~, errStruct)
             % computePostfitResiduals_  Recompute h with updated EKF state.
             %
-            % Reuses errStruct.towerClockModel_m so that the SAME correction
-            % noise (generated once in computeMeasurements) is applied here.
-            % This ensures postfit residuals are not corrupted by a second
-            % independent noise draw.
+            % Uses errStruct.towerIdx_perMeas / antennaIdx_perMeas so this works
+            % for any number of antennas.  The second argument (visIds) is kept
+            % in the signature for call-site compatibility but is ignored here —
+            % errStruct carries all required indexing.
+            %
+            % Reuses errStruct.towerClockModel_m (generated once per epoch in
+            % computeMeasurements) so no new noise draw occurs.
 
-            if isempty(z) || isempty(visIds)
+            if isempty(z) || isempty(errStruct) || ...
+                    ~isfield(errStruct,'towerIdx_perMeas')
                 postfit = [];
                 return
             end
@@ -244,30 +248,34 @@ classdef ReverseGNSSSimulation < handle
             r_post   = obj.ekf.x(sm.r_idx);
             eul_post = obj.ekf.x(sm.euler_idx);
             brx_post = obj.ekf.x(sm.b_rx_idx);
-            lever    = obj.asset.receiverLeverArm_body_m;
-            r_ant    = revgnss.AttitudeKinematics.applyLeverArm(r_post, eul_post, lever);
 
-            M      = numel(visIds);
+            twr_list = errStruct.towerIdx_perMeas;
+            ant_list = errStruct.antennaIdx_perMeas;
+            leverArms = obj.asset.receiverLeverArms_body_m;   % 3 x N_ant
+            M = numel(twr_list);
             h_post = zeros(M, 1);
 
             for mi = 1:M
-                ti    = visIds(mi);
+                ti    = twr_list(mi);
+                ai    = ant_list(mi);
+                lever = leverArms(:, ai);
+
+                r_ant = revgnss.AttitudeKinematics.applyLeverArm(r_post, eul_post, lever);
                 r_twr = obj.towers{ti}.getAntennaPositionECEF();
                 rho   = norm(r_ant - r_twr);
 
-                % Tower clock model: EKF state if estimated, else stored correction
+                % Tower clock: EKF state if estimated, else stored correction (NO new draw)
                 if isfield(sm,'towerClockIdx') && ti <= size(sm.towerClockIdx,1) && ...
                         sm.towerClockIdx(ti,1) > 0
                     b_twr = obj.ekf.x(sm.towerClockIdx(ti,1));
-                elseif ~isempty(errStruct) && isfield(errStruct,'towerClockModel_m') && ...
-                        mi <= numel(errStruct.towerClockModel_m)
-                    b_twr = errStruct.towerClockModel_m(mi);  % reuse, NO new randn
+                elseif mi <= numel(errStruct.towerClockModel_m)
+                    b_twr = errStruct.towerClockModel_m(mi);
                 else
                     b_twr = 0;
                 end
 
                 model_total = 0;
-                if ~isempty(errStruct) && isfield(errStruct,'modelTotal_m')
+                if isfield(errStruct,'modelTotal_m') && mi <= numel(errStruct.modelTotal_m)
                     model_total = errStruct.modelTotal_m(mi);
                 end
                 h_post(mi) = rho + brx_post - b_twr + model_total;

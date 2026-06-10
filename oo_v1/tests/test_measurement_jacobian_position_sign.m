@@ -25,7 +25,7 @@ euler    = x_est(stateMap.euler_idx);
 r_cm     = x_est(stateMap.r_idx);
 
 % Analytical measurements
-[z, h, H, R, ~] = measModel.computeMeasurements(asset, towers, x_est, 0, stateMap);
+[z, h, H, R, errStruct] = measModel.computeMeasurements(asset, towers, x_est, 0, stateMap);
 
 if isempty(z)
     fprintf('  No visible towers at epoch 0 — cannot test Jacobian.\n');
@@ -34,11 +34,12 @@ if isempty(z)
 end
 
 M = numel(z);
-fprintf('  Visible towers: %d\n', M);
+fprintf('  Measurements (tower-antenna pairs): %d\n', M);
 
-% Determine which towers are visible (same as inside computeMeasurements)
-[visible, ~] = measModel.computeVisibility(towers, asset.getAntennaPositionECEF());
-visIds = find(visible);
+% Tower/antenna index for each measurement (stored by computeMeasurements)
+twr_list = errStruct.towerIdx_perMeas;   % [M x 1]
+ant_list = errStruct.antennaIdx_perMeas; % [M x 1]
+leverArms = asset.receiverLeverArms_body_m;  % 3 x N_ant
 
 % Numerical finite-difference of H w.r.t. r_cm (3 position states)
 stepFD = 0.5;   % 0.5 m perturbation
@@ -47,13 +48,11 @@ H_fd   = zeros(M, 3);
 for ai = 1:3
     dx = zeros(3,1);  dx(ai) = stepFD;
 
-    % Perturbed antenna positions
-    r_ant_p = revgnss.AttitudeKinematics.applyLeverArm(r_cm + dx, euler, lever);
-    r_ant_m = revgnss.AttitudeKinematics.applyLeverArm(r_cm - dx, euler, lever);
-
     for mi = 1:M
-        ti    = visIds(mi);
-        r_twr = towers{ti}.getAntennaPositionECEF();
+        lv    = leverArms(:, ant_list(mi));
+        r_ant_p = revgnss.AttitudeKinematics.applyLeverArm(r_cm + dx, euler, lv);
+        r_ant_m = revgnss.AttitudeKinematics.applyLeverArm(r_cm - dx, euler, lv);
+        r_twr = towers{twr_list(mi)}.getAntennaPositionECEF();
         rho_p = norm(r_ant_p - r_twr);
         rho_m = norm(r_ant_m - r_twr);
         H_fd(mi, ai) = (rho_p - rho_m) / (2 * stepFD);
@@ -72,9 +71,10 @@ fprintf('  Max relative Jacobian error (position): %.2e\n', maxRel);
 assert(maxRel < 1e-4, ...
     'test_measurement_jacobian_position_sign FAILED: relative error %.2e > 1e-4', maxRel);
 
-% Sign check: H_pos row should be aligned with unit LOS vector (tower → receiver).
-r_ant = revgnss.AttitudeKinematics.applyLeverArm(r_cm, euler, lever);
-r_twr1 = towers{visIds(1)}.getAntennaPositionECEF();
+% Sign check: H_pos first row aligned with unit LOS vector (tower → receiver).
+lv1   = leverArms(:, ant_list(1));
+r_ant = revgnss.AttitudeKinematics.applyLeverArm(r_cm, euler, lv1);
+r_twr1 = towers{twr_list(1)}.getAntennaPositionECEF();
 u1 = (r_ant - r_twr1) / norm(r_ant - r_twr1);
 dotProd = dot(H_pos(1,:)', u1);
 

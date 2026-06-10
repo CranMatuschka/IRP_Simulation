@@ -13,14 +13,15 @@ classdef ConfigFactory
     %   Custom      User-filled coefficients
     %
     % Factory configs:
-    %   defaultConfig()          GEO-1, deterministic clocks, all errors off
-    %   idealConfig()            Same but code noise = 0
-    %   noLeverArmConfig()       Zero lever arm (attitude unobservable)
-    %   positionClockOnlyConfig()  Attitude/omega frozen, zero lever arm
-    %   clockNoiseConfig()       Stochastic clocks + noisyCorrection mode
-    %   atmosphereConfig()       Trop + iono enabled
+    %   defaultConfig()              GEO-1, deterministic clocks, all errors off
+    %   idealConfig()                Same but code noise = 0
+    %   noLeverArmConfig()           Zero lever arm (attitude unobservable)
+    %   positionClockOnlyConfig()    Attitude/omega frozen, zero lever arm
+    %   multiAntennaAttitudeConfig() 4-antenna cross; attitude observable
+    %   clockNoiseConfig()           Stochastic clocks + noisyCorrection mode
+    %   atmosphereConfig()           Trop + iono enabled
     %   uncorrectedTowerClocksConfig()  Stochastic, no correction
-    %   clockDiversityConfig()   Each tower uses a different clock type
+    %   clockDiversityConfig()       Each tower uses a different clock type
     %
     % Clock factory:
     %   cfgClock = revgnss.ConfigFactory.makeClockConfig(templateName, seed, factors, globalScaling)
@@ -50,7 +51,9 @@ classdef ConfigFactory
             cfg.asset.v_ecef_mps              = [0; 0; 0];   % geostationary in ECEF
             cfg.asset.attitude_euler_rad      = [0; 0; 0];
             cfg.asset.angularRate_body_radps  = [0; 0; 0];
-            cfg.asset.receiverLeverArm_body_m = [1.0; 0.5; 0.2];
+            % One antenna at centre-of-mass; zero lever arm → attitude unobservable.
+            cfg.asset.receiverLeverArm_body_m  = [0; 0; 0];
+            cfg.asset.receiverLeverArms_body_m = [0; 0; 0];   % 3x1, one antenna
 
             % Clock scaling factors (applied by makeClockConfig)
             cfg.clockScaling.globalBiasFactor    = 1.0;
@@ -103,29 +106,37 @@ classdef ConfigFactory
 
             % --- Estimator ------------------------------------------------
             cfg.estimator.estimateTowerClocks     = false;
-            cfg.estimator.estimateAttitude        = true;
+            cfg.estimator.estimateAttitude        = true;   % attitude STAYS in state
             cfg.estimator.estimateAngularRate     = true;
+            % Attitude pseudorange observability flags.
+            % Default: H attitude columns are zeroed → no measurement update on attitude.
+            % Set true only when lever arms are non-zero (e.g. multiAntennaAttitudeConfig).
+            cfg.estimator.estimateAttitudeFromPseudorange     = false;
+            cfg.estimator.estimateAngularRateFromPseudorange  = false;
             % perfectCorrection: EKF uses known tower clock values (zero here).
             cfg.estimator.towerClockMode          = 'perfectCorrection';
             cfg.estimator.towerClockCorrectionSigma_m = 0.5; % used if noisyCorrection
             cfg.estimator.elevationMask_rad       = 5 * pi/180;
             cfg.estimator.attitudeJacobianStep_rad = 1e-6;
             cfg.estimator.sigma_accel_mps2        = 0.01;
-            cfg.estimator.sigma_angAccel_radps2   = 1e-5;
+            % Near-zero angular-acceleration noise: attitude stays frozen at truth.
+            cfg.estimator.sigma_angAccel_radps2   = 1e-15;
             cfg.estimator.minMeasurementsForUpdate = 4;
 
             % Initial covariance (1-sigma diagonal)
             cfg.estimator.P0_pos_m        = 1000.0;
             cfg.estimator.P0_vel_mps      = 1.0;
-            cfg.estimator.P0_euler_rad    = 0.01;
-            cfg.estimator.P0_omega_radps  = 1e-4;
+            % Near-zero attitude uncertainty: EKF treats attitude as known.
+            cfg.estimator.P0_euler_rad    = 1e-12;
+            cfg.estimator.P0_omega_radps  = 1e-12;
             cfg.estimator.P0_bRx_m        = 100.0;
             cfg.estimator.P0_bdotRx_mps   = 0.01;
 
             % Controlled initial errors (fixed offsets, not random)
             cfg.estimator.initialError.pos_m          = [1000; -500; 250];
             cfg.estimator.initialError.vel_mps        = [0.1; -0.1; 0.05];
-            cfg.estimator.initialError.euler_deg      = [0.5; -0.3; 0.2];
+            % Zero attitude error: no initial offset, no runaway risk.
+            cfg.estimator.initialError.euler_deg      = [0; 0; 0];
             cfg.estimator.initialError.omega_radps    = [0; 0; 0];
             cfg.estimator.initialError.clockBias_m    = 100.0;
             cfg.estimator.initialError.clockDrift_mps = 0.01;
@@ -221,6 +232,33 @@ classdef ConfigFactory
             cfg.estimator.estimateAngularRate = false;
         end
 
+        function cfg = multiAntennaAttitudeConfig()
+            % multiAntennaAttitudeConfig  Four-antenna cross pattern for attitude estimation.
+            %
+            % Places four antennas at ±1 m cross in X/Y and ±0.2 m in Z.
+            % With 5 towers all visible, produces 5×4 = 20 measurements/epoch.
+            % Attitude H columns are nonzero (estimateAttitudeFromPseudorange = true).
+
+            cfg = revgnss.ConfigFactory.defaultConfig();
+
+            % Four-antenna pattern (3 x 4): ±1 m cross in X/Y, ±0.2 m in Z
+            cfg.asset.receiverLeverArms_body_m = [ 1  -1   0   0; ...
+                                                   0   0   1  -1; ...
+                                                   0.2 0.2 -0.2 -0.2 ];
+            % Keep singular field consistent (first antenna) for EKF backward-compat
+            cfg.asset.receiverLeverArm_body_m  = [1; 0; 0.2];
+
+            % Enable attitude observability
+            cfg.estimator.estimateAttitudeFromPseudorange    = true;
+            cfg.estimator.estimateAngularRateFromPseudorange = false;
+
+            % Widen initial attitude uncertainty to allow convergence
+            cfg.estimator.P0_euler_rad  = deg2rad(5)^2;
+
+            % Tighter code noise for good attitude geometry
+            cfg.errors.codeNoise.sigma_m = 0.03;
+        end
+
         function cfg = clockNoiseConfig()
             % clockNoiseConfig  Stochastic receiver + tower clocks with noisyCorrection.
             cfg = revgnss.ConfigFactory.defaultConfig();
@@ -259,42 +297,43 @@ classdef ConfigFactory
         function cfg = clockDiversityConfig()
             % clockDiversityConfig  Each tower uses a different clock type.
             %
-            % Tower assignments:
-            %   Tenerife        OCXO     (standard ground station)
-            %   Stockholm       TCXO     (lower-grade)
-            %   Hartebeesthoek  Rubidium (medium-long term)
-            %   Bengaluru       OCXO     (3× worse h0)
-            %   Libreville      AtomicLike (best)
+            % Tower assignments (unique seeds 200+k, all stochastic):
+            %   1 Tenerife        OCXO       seed 201
+            %   2 Stockholm       TCXO       seed 202
+            %   3 Hartebeesthoek  Rubidium   seed 203
+            %   4 Bengaluru       OCXO       seed 204
+            %   5 Libreville      AtomicLike seed 205
             %
             % Tower clocks are stochastic; mode = perfectCorrection.
+            % Default (defaultConfig) run remains fully deterministic.
 
             cfg = revgnss.ConfigFactory.defaultConfig();
             gs  = cfg.clockScaling;
 
-            templateNames = {'OCXO','TCXO','Rubidium','OCXO','AtomicLike'};
-            seedBase      = 200;
-            factorSets    = { ...
-                struct(), ...                          % Tenerife: OCXO standard
-                struct(), ...                          % Stockholm: TCXO standard
-                struct(), ...                          % Hartebeesthoek: Rubidium standard
-                struct('h0Factor', 3.0), ...           % Bengaluru: OCXO worse h0
-                struct() };                            % Libreville: AtomicLike
+            % One entry per tower: {templateName, factors}
+            towerClockDefs = { ...
+                'OCXO',       struct(); ...              % 1 Tenerife
+                'TCXO',       struct(); ...              % 2 Stockholm
+                'Rubidium',   struct(); ...              % 3 Hartebeesthoek
+                'OCXO',       struct(); ...              % 4 Bengaluru
+                'AtomicLike', struct() };                % 5 Libreville
 
             for k = 1:5
-                tpl = templateNames{k};
-                fac = factorSets{k};
-                cfgClk = revgnss.ConfigFactory.makeClockConfig(tpl, seedBase+k, fac, gs);
-                cfgClk.name         = sprintf('%s_Clock', cfg.towers(k).name);
-                cfgClk.deterministic = false;
+                tpl = towerClockDefs{k,1};
+                fac = towerClockDefs{k,2};
+                seed_k = 200 + k;   % unique seed per tower: 201…205
+                cfgClk = revgnss.ConfigFactory.makeClockConfig(tpl, seed_k, fac, gs);
+                cfgClk.name          = sprintf('%s_Clock', cfg.towers(k).name);
+                cfgClk.deterministic = false;            % stochastic
                 cfgClk.bias_s        = (k-1) * 5e-9;    % small initial bias offset
                 cfgClk.fracFreq      = k * 1e-12;
 
-                cfg.towers(k).clock        = cfgClk;
+                cfg.towers(k).clock         = cfgClk;
                 cfg.towers(k).clockTemplate = tpl;
                 cfg.towers(k).clockFactors  = fac;
             end
 
-            % Receiver clock also stochastic (OCXO)
+            % Receiver clock also stochastic (OCXO, seed 100)
             rxClk = revgnss.ConfigFactory.makeClockConfig('OCXO', 100, struct(), gs);
             rxClk.name         = 'RxClock';
             rxClk.deterministic = false;
@@ -302,7 +341,7 @@ classdef ConfigFactory
             rxClk.fracFreq      = 0.0;
             cfg.asset.clock = rxClk;
 
-            % Keep perfectCorrection: assume clock products broadcast
+            % Keep perfectCorrection: assume clock products are broadcast
             cfg.estimator.towerClockMode = 'perfectCorrection';
             cfg.errors.codeNoise.sigma_m  = 1.0;
         end

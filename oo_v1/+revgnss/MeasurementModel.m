@@ -66,67 +66,88 @@ classdef MeasurementModel < handle
         % ----------------------------------------------------------------
         function [z, h, H, R, errStruct] = computeMeasurements(obj, ...
                 asset, towers, x_est, t_s, stateMap)
-            % computeMeasurements  Main measurement function.
+            % computeMeasurements  Main measurement function (multi-antenna capable).
             %
-            % Tower clock corrections are generated ONCE here and stored in
-            % errStruct.  Postfit residuals must reuse errStruct.towerClockModel_m
-            % rather than calling getTowerClockModel_ again.
+            % Loops over all visible (tower, antenna) pairs.  Default config has
+            % N_ant=1 with a zero lever arm, recovering the single-antenna case.
+            %
+            % Tower clock corrections are generated ONCE and stored in errStruct
+            % so postfit residuals reuse the same samples.
 
-            % ----- Truth quantities ------------------------------------
+            % ----- All lever arms (3 x N_ant) --------------------------
+            leverArms = asset.receiverLeverArms_body_m;   % 3 x N_ant
+            N_ant = size(leverArms, 2);
+
+            % ----- Truth state -----------------------------------------
             r_cm_true  = asset.r_ecef_m;
             euler_true = asset.attitude_euler_rad;
-            lever      = asset.receiverLeverArm_body_m;
-            r_ant_true = revgnss.AttitudeKinematics.applyLeverArm( ...
-                r_cm_true, euler_true, lever);
+            b_rx_true  = asset.clock.getBiasMeters();
 
             % ----- EKF state extraction --------------------------------
             r_est     = x_est(stateMap.r_idx);
             euler_est = x_est(stateMap.euler_idx);
             b_rx_est  = x_est(stateMap.b_rx_idx);
-            r_ant_est = revgnss.AttitudeKinematics.applyLeverArm( ...
-                r_est, euler_est, lever);
 
-            % ----- Visibility (based on truth antenna) -----------------
-            [visible, elevations_rad] = obj.computeVisibility(towers, r_ant_true);
-            visIdx = find(visible);
-            M      = numel(visIdx);
+            % ----- All truth/estimated antenna positions ---------------
+            r_ants_true = asset.getAntennaPositionsECEF(r_cm_true, euler_true);  % 3xN_ant
+            r_ants_est  = asset.getAntennaPositionsECEF(r_est,     euler_est);   % 3xN_ant
+
             nx     = numel(x_est);
+            N_twr  = numel(towers);
+
+            % ----- Build (tower, antenna) pair visibility list ----------
+            % Each visible pair contributes one pseudorange measurement.
+            twr_list = zeros(N_twr * N_ant, 1);
+            ant_list = zeros(N_twr * N_ant, 1);
+            elv_list = zeros(N_twr * N_ant, 1);
+            cnt = 0;
+            for ti = 1:N_twr
+                r_twr = towers{ti}.getAntennaPositionECEF();
+                for ai = 1:N_ant
+                    elv = revgnss.GeometryUtils.elevationAngle(r_twr, r_ants_true(:,ai));
+                    if elv >= obj.elevMask_rad
+                        cnt = cnt + 1;
+                        twr_list(cnt) = ti;
+                        ant_list(cnt) = ai;
+                        elv_list(cnt) = elv;
+                    end
+                end
+            end
+            twr_list = twr_list(1:cnt);
+            ant_list = ant_list(1:cnt);
+            elv_list = elv_list(1:cnt);
+            M = cnt;
 
             if M == 0
                 z = []; h = []; H = zeros(0,nx); R = []; errStruct = [];
                 return
             end
 
-            % ----- Error chain (atmosphere, code noise, hw, multipath) -----
-            towerIds  = cellfun(@(t) t.id, towers(visIdx))';
-            towerIdx  = visIdx;
-            elv       = elevations_rad(visIdx);
-
-            errStruct = obj.errorChain.compute(elv, towerIds, towerIdx, t_s);
+            % ----- Error chain (per measurement, i.e. per tower-ant pair) --
+            towerIds = arrayfun(@(ti) towers{ti}.id, twr_list);
+            errStruct = obj.errorChain.compute(elv_list, towerIds, twr_list, t_s);
 
             % ----- Tower clock corrections — generated ONCE per epoch ------
-            % This prevents repeated randn() calls if h is recomputed later.
-            towerClkMode   = obj.getTowerClockMode_();
-            towerClkTruth  = zeros(M,1);
-            towerClkModel  = zeros(M,1);
-            towerClkSigma  = zeros(M,1);
+            towerClkMode  = obj.getTowerClockMode_();
+            towerClkTruth = zeros(M,1);
+            towerClkModel = zeros(M,1);
+            towerClkSigma = zeros(M,1);
 
-            % For noisy correction: generate all noise samples in one call
             noiseSigma = obj.cfg.estimator.towerClockCorrectionSigma_m;
             if isfield(obj.cfg,'towerClockCorrectionSigma_m')
                 noiseSigma = obj.cfg.towerClockCorrectionSigma_m;
             end
+            % Use stream-based draw so global rng state is never touched
             if strcmp(towerClkMode,'noisyCorrection')
-                corrNoise_m = noiseSigma * randn(M,1);   % ONE call, stored
+                corrNoise_m = noiseSigma * obj.errorChain.drawNormal(M, 1);
             else
                 corrNoise_m = zeros(M,1);
             end
 
             for mi = 1:M
-                ti = visIdx(mi);
+                ti  = twr_list(mi);
                 b_t = towers{ti}.getClockBiasMeters();
                 towerClkTruth(mi) = b_t;
-
                 switch towerClkMode
                     case 'none'
                         towerClkModel(mi) = 0;
@@ -140,10 +161,12 @@ classdef MeasurementModel < handle
                 end
             end
 
-            % Attach to errStruct for external reuse (postfit residuals, diagnostics)
+            % Attach to errStruct for postfit residuals / diagnostics
             errStruct.towerClockTruth_m      = towerClkTruth;
             errStruct.towerClockModel_m      = towerClkModel;
             errStruct.towerClockModelSigma_m = towerClkSigma;
+            errStruct.towerIdx_perMeas       = twr_list;   % [M x 1]
+            errStruct.antennaIdx_perMeas     = ant_list;   % [M x 1]
 
             % ----- Build z, h, R ----------------------------------------
             z      = zeros(M,1);
@@ -153,82 +176,89 @@ classdef MeasurementModel < handle
             sigmaFloor = obj.cfg.measurement.sigmaFloor_m;
 
             for mi = 1:M
-                ti  = visIdx(mi);
+                ti  = twr_list(mi);
+                ai  = ant_list(mi);
                 twr = towers{ti};
-
-                % Truth range
-                r_twr    = twr.getAntennaPositionECEF();
-                rho_true = norm(r_ant_true - r_twr);
+                r_twr = twr.getAntennaPositionECEF();
 
                 % Truth pseudorange
-                b_rx_true  = asset.clock.getBiasMeters();
+                rho_true = norm(r_ants_true(:,ai) - r_twr);
                 z(mi) = rho_true + b_rx_true - towerClkTruth(mi) + errStruct.truthTotal_m(mi);
 
-                % Predicted range
-                rho_est = norm(r_ant_est - r_twr);
+                % Predicted pseudorange
+                rho_est = norm(r_ants_est(:,ai) - r_twr);
 
-                % Tower clock model for h: EKF state if estimating, else stored correction
+                % Tower clock model: EKF state if estimating, else pre-computed correction
                 if isfield(stateMap,'towerClockIdx') && ti <= size(stateMap.towerClockIdx,1) && ...
                         stateMap.towerClockIdx(ti,1) > 0
                     b_twr_h = x_est(stateMap.towerClockIdx(ti,1));
                 else
-                    b_twr_h = towerClkModel(mi);    % use pre-generated correction
+                    b_twr_h = towerClkModel(mi);
                 end
 
                 h(mi) = rho_est + b_rx_est - b_twr_h + errStruct.modelTotal_m(mi);
 
-                % Measurement noise variance
-                R_diag(mi) = max(errStruct.sigmaTotal_m(mi), sigmaFloor)^2;
-
-                % Warn if R would be exactly zero in ideal-noise case
-                if errStruct.sigmaTotal_m(mi) < sigmaFloor && sigmaFloor <= 1e-3
-                    % silent — handled by floor
-                end
+                % Measurement noise variance: include tower clock correction sigma in R
+                sigma_i = sqrt(errStruct.sigmaTotal_m(mi)^2 + towerClkSigma(mi)^2);
+                R_diag(mi) = max(sigma_i, sigmaFloor)^2;
             end
 
             % ----- Jacobian H ------------------------------------------
-            H = obj.computeJacobian_(towers, visIdx, r_est, euler_est, ...
-                lever, x_est, stateMap, nx);
+            H = obj.computeJacobian_(towers, twr_list, ant_list, ...
+                r_est, euler_est, leverArms, x_est, stateMap, nx);
 
             R = diag(R_diag);
         end
 
         % ----------------------------------------------------------------
-        function H = computeJacobian_(obj, towers, visIdx, r_cm_est, ...
-                euler_est, lever, x_est, stateMap, nx)
-            % computeJacobian_  Measurement Jacobian for visible towers.
+        function H = computeJacobian_(obj, towers, twr_list, ant_list, ...
+                r_cm_est, euler_est, leverArms, x_est, stateMap, nx)
+            % computeJacobian_  Measurement Jacobian for visible tower-antenna pairs.
+            %
+            % Attitude H columns are nonzero ONLY when:
+            %   estimateAttitudeFromPseudorange == true  AND  norm(lever) > 0.
+            % Otherwise attitude states are unobservable by design (default).
 
-            M = numel(visIdx);
+            M = numel(twr_list);
             H = zeros(M, nx);
 
-            r_ant_est = revgnss.AttitudeKinematics.applyLeverArm( ...
-                r_cm_est, euler_est, lever);
+            % Gate attitude Jacobian: check config flag
+            doAttJac = isfield(obj.cfg.estimator, 'estimateAttitudeFromPseudorange') && ...
+                       obj.cfg.estimator.estimateAttitudeFromPseudorange;
+
+            step    = obj.attitudeJacStep_rad;
+            eul_idx = stateMap.euler_idx;
 
             for mi = 1:M
-                ti    = visIdx(mi);
-                r_twr = towers{ti}.getAntennaPositionECEF();
+                ti  = twr_list(mi);
+                ai  = ant_list(mi);
+                lever = leverArms(:, ai);
+
+                r_twr     = towers{ti}.getAntennaPositionECEF();
+                r_ant_est = revgnss.AttitudeKinematics.applyLeverArm( ...
+                    r_cm_est, euler_est, lever);
 
                 delta = r_ant_est - r_twr;
                 rho   = norm(delta);
-                if rho < 1; rho = 1; end   % guard against degenerate geometry
+                if rho < 1; rho = 1; end
 
-                u = delta / rho;   % unit LOS [3x1]
+                u = delta / rho;   % unit LOS vector [3x1]
 
                 % Position Jacobian: d_rho / d_r_cm = u'
                 H(mi, stateMap.r_idx) = u';
 
-                % Attitude Jacobian: finite-difference d_rho / d_euler
-                step     = obj.attitudeJacStep_rad;
-                eul_idx  = stateMap.euler_idx;
-                for ai = 1:3
-                    eul_p = euler_est; eul_p(ai) = eul_p(ai) + step;
-                    eul_m = euler_est; eul_m(ai) = eul_m(ai) - step;
-
-                    r_ant_p = revgnss.AttitudeKinematics.applyLeverArm(r_cm_est, eul_p, lever);
-                    r_ant_m = revgnss.AttitudeKinematics.applyLeverArm(r_cm_est, eul_m, lever);
-
-                    H(mi, eul_idx(ai)) = (norm(r_ant_p - r_twr) - norm(r_ant_m - r_twr)) / (2*step);
+                % Attitude Jacobian: finite-difference, gated by config + lever arm
+                if doAttJac && norm(lever) > 1e-9
+                    for ai2 = 1:3
+                        eul_p = euler_est; eul_p(ai2) = eul_p(ai2) + step;
+                        eul_m = euler_est; eul_m(ai2) = eul_m(ai2) - step;
+                        r_p = revgnss.AttitudeKinematics.applyLeverArm(r_cm_est, eul_p, lever);
+                        r_m = revgnss.AttitudeKinematics.applyLeverArm(r_cm_est, eul_m, lever);
+                        H(mi, eul_idx(ai2)) = (norm(r_p - r_twr) - norm(r_m - r_twr)) / (2*step);
+                    end
                 end
+                % omega columns remain zero (no Doppler v1; attitude rates
+                % only appear when attitude itself is observed).
 
                 % Receiver clock bias: +1
                 H(mi, stateMap.b_rx_idx) = 1;

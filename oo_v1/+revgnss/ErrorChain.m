@@ -41,6 +41,12 @@ classdef ErrorChain < handle
         end
 
         % ----------------------------------------------------------------
+        function x = drawNormal(obj, m, n)
+            % drawNormal  Draw m-by-n standard-normal samples from the stream.
+            x = randn(obj.rngStream, m, n);
+        end
+
+        % ----------------------------------------------------------------
         function err = compute(obj, elevations_rad, towerIds, towerIdx, t_s)
             % compute  Evaluate all error sources for N visible towers.
             %

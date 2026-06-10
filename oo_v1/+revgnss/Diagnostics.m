@@ -112,7 +112,8 @@ classdef Diagnostics < handle
                     entry.towerClockCorrectionError_m = [];
                 end
 
-                % Per-source RMS for this epoch (truth - model residual)
+                % Per-source RMS(truth_m - model_m) for this epoch.
+                % getPerSourceErrorRMS() returns these as "Truth - Model" residual RMS.
                 labels = {'code','trop','iono','hwDelay','mp'};
                 for j = 1:numel(labels)
                     lbl = labels{j};
@@ -121,7 +122,8 @@ classdef Diagnostics < handle
                         t_k = errStruct.bySource.truth_m.(lbl);
                         m_k = errStruct.bySource.model_m.(lbl);
                         if ~isempty(t_k)
-                            entry.perSourceTruthRMS.(lbl) = sqrt(mean(t_k.^2));
+                            diff_k = t_k - m_k;
+                            entry.perSourceTruthRMS.(lbl) = sqrt(mean(diff_k.^2));  % truth-model
                             entry.perSourceModelRMS.(lbl) = sqrt(mean(m_k.^2));
                         else
                             entry.perSourceTruthRMS.(lbl) = 0;
@@ -183,10 +185,26 @@ classdef Diagnostics < handle
             if ~isempty(H) && size(H,2) >= 9
                 H_att = H(:, sm.euler_idx);
                 entry.attitudeJacobianNorm = norm(H_att, 'fro');
-                % Warn if attitude columns are near-zero (lever arm ~ 0 or bad geometry)
-                if entry.attitudeJacobianNorm < 1e-10 && ~isempty(H) && mod(obj.nEpochs+1,500)==1
-                    warning('Diagnostics:zeroAttJac', ...
-                        'Attitude Jacobian is near-zero at t=%.0f s. Check lever arm.', t_s);
+                % Warn only when attitude estimation from pseudorange is expected but
+                % the Jacobian is near-zero (i.e. lever arm/geometry problem).
+                % Suppress when estimateAttitudeFromPseudorange = false (by design).
+                % Note: Diagnostics has no direct access to cfg; the EKF carries the flag.
+                % We use the heuristic: if every euler_idx column of H is exactly zero
+                % AND the omega_idx columns are also zero, the filter zeroed them on purpose.
+                % A simple epoch-throttled warning is only emitted when the H columns
+                % are non-trivially structured (rank > 0 excluding att columns) but att
+                % columns are still zero — meaning something unexpected happened.
+                % In practice, for the default config we simply skip the warning.
+                if entry.attitudeJacobianNorm < 1e-10 && ~isempty(H) && ...
+                        mod(obj.nEpochs+1,500) == 1
+                    % Check whether omega columns are also zero (expected in gated mode)
+                    H_omg = H(:, sm.omega_idx);
+                    if norm(H_omg,'fro') > 1e-10
+                        % Omega columns nonzero but euler columns zero — unexpected
+                        warning('Diagnostics:zeroAttJac', ...
+                            'Attitude Jacobian is near-zero at t=%.0f s. Check lever arm.', t_s);
+                    end
+                    % else: both euler and omega columns zero = intentional gating, no warn
                 end
             else
                 entry.attitudeJacobianNorm = 0;
@@ -270,8 +288,8 @@ classdef Diagnostics < handle
         end
 
         function perSrc = getPerSourceErrorRMS(obj)
-            % Returns struct of [nEpochs x 1] vectors, one per error source.
-            % Field values = truth-model residual RMS per epoch [m].
+            % getPerSourceErrorRMS  RMS(truth_m - model_m) per source per epoch [m].
+            % Title: "Truth - Model" residual RMS.
             labels = {'code','trop','iono','hwDelay','mp'};
             for j = 1:numel(labels)
                 lbl = labels{j};

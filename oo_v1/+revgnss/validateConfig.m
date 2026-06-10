@@ -21,13 +21,22 @@ assert(isfield(cfg.simulation,'duration_s') && cfg.simulation.duration_s > 0, ..
 % Asset block
 assert(isfield(cfg.asset,'r_ecef_m'),  'validateConfig: cfg.asset.r_ecef_m required');
 assert(isfield(cfg.asset,'v_ecef_mps'),'validateConfig: cfg.asset.v_ecef_mps required');
-assert(isfield(cfg.asset,'receiverLeverArm_body_m'), ...
-    'validateConfig: cfg.asset.receiverLeverArm_body_m required');
+assert(isfield(cfg.asset,'receiverLeverArm_body_m') || ...
+       isfield(cfg.asset,'receiverLeverArms_body_m'), ...
+    'validateConfig: cfg.asset.receiverLeverArm_body_m or receiverLeverArms_body_m required');
 
-% Lever arm observability warning
-if norm(cfg.asset.receiverLeverArm_body_m) < 1e-9
+% Lever arm observability info (not a warning when zero — intended for default)
+hasPlural = isfield(cfg.asset,'receiverLeverArms_body_m');
+if hasPlural
+    maxNorm = max(vecnorm(cfg.asset.receiverLeverArms_body_m, 2, 1));
+else
+    maxNorm = norm(cfg.asset.receiverLeverArm_body_m);
+end
+doAttJac = isfield(cfg.estimator,'estimateAttitudeFromPseudorange') && ...
+           cfg.estimator.estimateAttitudeFromPseudorange;
+if doAttJac && maxNorm < 1e-9
     warning('validateConfig:zeroLeverArm', ...
-        'receiverLeverArm_body_m is zero. Attitude states are unobservable from pseudorange alone.');
+        'estimateAttitudeFromPseudorange=true but all lever arms are zero. Attitude unobservable.');
 end
 
 % Towers block

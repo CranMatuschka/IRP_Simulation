@@ -87,6 +87,9 @@ classdef ClockModel < handle
         % History: stores TOTAL (state + colored) for ADEV computation
         history         (1,1) struct
 
+        % Per-instance RNG stream (reproducible, independent of global state)
+        rngStream                          % RandStream object
+
         % Pre-computed colored-noise absolute sequences
         noiseBias_s_vec     (:,1) double = []  % absolute colored bias [s] at each epoch
         noiseFracFreq_vec   (:,1) double = []  % absolute colored frac-freq [-] at each epoch
@@ -119,6 +122,9 @@ classdef ClockModel < handle
             if isfield(cfg,'fracFreq');              obj.fracFreq             = cfg.fracFreq;             end
             if isfield(cfg,'driftRate_fracPerSec'); obj.driftRate_fracPerSec = cfg.driftRate_fracPerSec; end
 
+            % Dedicated RNG stream — independent of global rand state
+            obj.rngStream = RandStream('mt19937ar', 'Seed', obj.seed);
+
             obj.history.time_s   = [];
             obj.history.bias_s   = [];
             obj.history.fracFreq = [];
@@ -126,7 +132,7 @@ classdef ClockModel < handle
 
         % -------------------------------------------------------------- %
         function reset(obj, seed)
-            % reset  Reset state, colored components, and history.
+            % reset  Reset state, colored components, history, and RNG stream.
             if nargin > 1; obj.seed = seed; end
             obj.bias_s                   = 0;
             obj.fracFreq                 = 0;
@@ -139,6 +145,8 @@ classdef ClockModel < handle
             obj.history.fracFreq         = [];
             obj.noiseBias_s_vec          = [];
             obj.noiseFracFreq_vec        = [];
+            % Reinitialise stream from seed so the sequence is reproducible
+            obj.rngStream = RandStream('mt19937ar', 'Seed', obj.seed);
         end
 
         % -------------------------------------------------------------- %
@@ -170,7 +178,10 @@ classdef ClockModel < handle
                 return
             end
 
-            rng(obj.seed);
+            % Use per-instance stream — never touches global rng state
+            % Reset stream so precomputeNoise is reproducible regardless of
+            % how many step() calls have already consumed random numbers.
+            reset(obj.rngStream, obj.seed);
 
             % Frequency axis (positive, DC excluded)
             fs    = 1 / dt;
@@ -186,7 +197,7 @@ classdef ClockModel < handle
             A_frac     = sqrt(max(Sy_frac, 0) * fs / N);
 
             % Random complex spectrum → Hermitian symmetry → real IFFT
-            WN_frac    = randn(N,1) + 1i*randn(N,1);
+            WN_frac    = randn(obj.rngStream, N, 1) + 1i*randn(obj.rngStream, N, 1);
             X_frac     = A_frac .* WN_frac;
             X_frac_sym = makeHermitian_(X_frac, N);
             y_frac_col = real(ifft(X_frac_sym));
@@ -237,8 +248,8 @@ classdef ClockModel < handle
                 n_bias_wfm   = 0;
                 dn_freq_rwfm = 0;
             else
-                n_bias_wfm   = randn * sigma_wfm_bias_s;   % WFM phase jump [s]
-                dn_freq_rwfm = randn * sigma_rwfm_frac;    % RWFM freq increment [-]
+                n_bias_wfm   = randn(obj.rngStream) * sigma_wfm_bias_s;   % WFM phase jump [s]
+                dn_freq_rwfm = randn(obj.rngStream) * sigma_rwfm_frac;    % RWFM freq increment [-]
             end
 
             % Deterministic frequency drift
