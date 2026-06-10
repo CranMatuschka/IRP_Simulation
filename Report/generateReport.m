@@ -30,7 +30,9 @@ function generateReport(sim, reportConfig, reportToggles)
         error("generateReport:MissingData", ...
             "sim must be provided when report generation is enabled.");
     end
-    
+    if isa(sim, 'function_handle')
+        sim = sim();
+    end
     if nargin < 2 || ~isstruct(reportConfig)
         reportConfig = struct();
     end
