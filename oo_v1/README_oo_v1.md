@@ -367,3 +367,244 @@ This is physically correct — the EKF clock state acts as a catch-all for commo
 - Tower clock estimation enabled by default for advanced scenarios
 - Ambiguity resolution (LAMBDA/MLAMBDA)
 - Real ephemeris / precise orbit/clock products
+
+---
+
+## 17. Measurement Model (Truth / Predicted Detail)
+
+### Truth pseudorange
+```
+z_i = ||r_ant_true − r_tower_i||  (geometric range)
+    + b_rx_true                    (receiver clock bias, metres)
+    − b_tower_true_i               (tower clock bias, metres — TRUE clock)
+    + ε_code_i                     (code noise, 1-σ from cfg.errors.codeNoiseSigma_m)
+    + d_trop_truth_i               (tropospheric delay from truth model)
+    + d_iono_truth_i               (ionospheric delay from truth model)
+    + d_hw_truth_i                 (hardware delay from truth model)
+    + d_mp_truth_i                 (multipath from truth model)
+```
+
+### Predicted pseudorange (for EKF innovation)
+```
+h_i = ||r_ant_est − r_tower_i||   (geometric range from estimated position + lever arm)
+    + b_rx_est                     (receiver clock bias from EKF state)
+    − b_tower_model_i              (tower clock correction — MODEL)
+    + d_trop_model_i               (tropospheric model correction)
+    + d_iono_model_i               (ionospheric model correction)
+    + d_hw_model_i                 (hardware model correction)
+```
+
+### Innovation
+```
+ν_i = z_i − h_i
+    ≈ (position error projected onto LOS)
+    + (receiver clock bias error)
+    − (tower clock correction error)
+    + (unmodelled truth − model error residual)
+    + code noise
+```
+
+### Antenna phase centre
+```
+r_ant_ecef = r_cm_ecef + C_ecef_body(roll, pitch, yaw) · leverArm_body
+```
+where `C_ecef_body = Rz(yaw) · Ry(pitch) · Rx(roll)` (ZYX convention).
+
+The lever arm `receiverLeverArm_body_m` is typically `[1.0; 0.5; 0.2]` m in the default scenario. Setting it to zero removes attitude observability from pseudorange.
+
+---
+
+## 18. Truth / Model Separation
+
+This design principle prevents noise from being drawn twice for the same measurement:
+
+1. At the **start of each epoch**, `MeasurementModel.computeMeasurements()` generates all tower clock corrections in **one batch** `randn(M,1)` call and stores them in `errStruct.towerClockModel_m`.
+2. These stored corrections are used to form both the truth measurement `z` and the predicted measurement `h`.
+3. When `computePostfitResiduals_()` recomputes `h` after the EKF update (using the updated state), it **reuses** `errStruct.towerClockModel_m` — it does **not** call `randn` again.
+
+This ensures postfit residuals are not corrupted by an independent second noise draw, which would inflate the residual RMS and make the filter appear inconsistent.
+
+The `getTowerClockModel_()` method exists for standalone/test use only and is explicitly marked as calling `randn` — it must **not** be called in the main simulation loop for postfit computation.
+
+### Tower clock modes
+| Mode | b_tower_model | Notes |
+|------|--------------|-------|
+| `none` | 0 | No correction applied (worst case) |
+| `perfectCorrection` | `b_tower_true` | Ideal correction (default) |
+| `noisyCorrection` | `b_tower_true + σ·n` | Realistic; σ from `cfg.estimator.towerClockCorrectionSigma_m` |
+
+---
+
+## 19. Clock Model — Scientific Design
+
+### Power spectral density
+The five power-law noise terms follow IEEE Std 1139-2008:
+```
+S_y(f) = h₂·f² + h₁·f¹ + h₀·f⁰ + h₋₁·f⁻¹ + h₋₂·f⁻²
+```
+| Symbol | Noise type | ADEV slope | State domain |
+|--------|-----------|------------|-------------|
+| h₂ | White PM (WPM) | τ⁻¹ | Precomputed (colored) |
+| h₁ | Flicker PM (FPM) | τ⁻¹ | Precomputed (colored) |
+| h₀ | White FM (WFM) | τ⁻¹/² | State (phase jump) |
+| h₋₁ | Flicker FM (FFM) | τ⁰ | Precomputed (colored) |
+| h₋₂ | Random-walk FM (RWFM) | τ⁺¹/² | State (freq drift) |
+
+### State decomposition
+`ClockModel` maintains a **2-state** EKF-compatible representation for WFM+RWFM:
+```
+state: [bias_s, fracFreq]   (time bias in seconds, fractional frequency)
+```
+plus a **separate** colored component (WPM + FPM + FFM) precomputed as an absolute time series:
+```
+coloredBias_s_current     — absolute colored bias at current epoch [s]
+coloredFracFreq_current   — absolute colored fractional frequency at current epoch
+```
+
+Public accessors return the **total** (state + colored). State-only accessors (`getStateBiasSeconds`, `getStateFracFreq`) return the 2-state portion for EKF initialization.
+
+### WFM propagation (CRITICAL)
+
+**Incorrect (causes wrong ADEV slope):** Adding WFM noise to the `fracFreq` state makes it persistent — it integrates over time and produces a τ⁺¹/² ADEV slope (RWFM behaviour), not the correct τ⁻¹/² slope.
+
+**Correct:** WFM is a direct **phase jump**:
+```matlab
+sigma_wfm_bias_s = sqrt(h.h0 * dt_s / 2);
+n_bias_wfm = sigma_wfm_bias_s * randn;
+new_bias_s = old_bias_s + dt_s * fracFreq + n_bias_wfm;  % NOT into fracFreq
+```
+
+### Colored noise precomputation
+WPM, FPM, and FFM are synthesised via spectral shaping (Kasdin-Walter method) before simulation starts. The precomputed absolute time series is stored in `noiseBias_s_vec` / `noiseFracFreq_vec`.
+
+**Advance-first indexing:** At each step, the next index is read before incrementing the counter, so the first step reads the value at `t = dt` (end of step) not `t = 0`:
+```matlab
+nextIdx = sampleIndex + 1;
+coloredBias_s_current = noiseBias_s_vec(nextIdx);
+sampleIndex = nextIdx;
+```
+
+### EKF process noise Q
+The 2×2 Brown-Hwang process noise matrix covers WFM + RWFM, with a conservative FFM additive term:
+```
+Q_11 = (h₀/2 + 2·ln2·h₋₁)·dt + (2/3)·π²·h₋₂·dt³
+Q_12 = Q_21 = π²·h₋₂·dt²
+Q_22 = 2·π²·h₋₂·dt
+```
+The `2·ln2·h₋₁` term conservatively captures FFM's white contribution to phase noise at `τ = dt`.
+
+### Clock templates (per `ConfigFactory.makeClockConfig`)
+| Template | h₀ | h₋₁ | h₋₂ | Typical use |
+|----------|-----|------|------|-------------|
+| TCXO | 9e-22 | 2e-21 | 1e-20 | Low-grade tower |
+| OCXO | 2e-25 | 7e-27 | 2e-29 | Standard tower |
+| RUBIDIUM | 1e-22 | 4.5e-24 | 3e-28 | Mid-grade tower |
+| ATOMICLIKE | 1e-26 | 1e-28 | 1e-30 | High-grade reference |
+| CUSTOM | user-supplied | | | |
+
+h-coefficients scale as **amplitude²** (PSD units). A noise factor of `f` scales h as `f²`, preserving the physical interpretation of h as a spectral density level.
+
+### Allan deviation vs Allan variance
+Throughout this codebase:
+- **Allan deviation** = σ_y(τ)  (square root of Allan variance)
+- **Allan variance** = σ_y²(τ)
+
+These are never conflated. Plot titles, axis labels, and getter names use the correct term for each quantity.
+
+---
+
+## 20. Plotting Behaviour
+
+### Figure visibility
+Figures are **hidden by default** (`cfg.plots.showFigures = false`). This prevents 16 windows opening during automated runs while still saving all outputs:
+
+```matlab
+cfg.plots.showFigures           = false;  % create figures with Visible='off'
+cfg.plots.saveIndividualFigures = true;   % save each figure as .png + .fig
+cfg.plots.savePdf               = true;   % save all figures into one PDF
+cfg.plots.closeAfterSave        = false;  % keep handles valid for further use
+```
+
+To display figures interactively:
+```matlab
+cfg.plots.showFigures = true;
+```
+
+### Figure handle flow
+`Plotter.plotAll()` returns an array of figure handles. These are passed explicitly to `ReportWriter.write()`:
+```matlab
+figHandles = sim.plot();          % returns handles, does NOT use findobj
+sim.writeReport(figHandles);      % PDF uses the passed handles only
+```
+Or in one call:
+```matlab
+sim.plotAndReport();
+```
+
+`ReportWriter` does **not** rely on `findobj` when handles are provided. If handles are empty it falls back to `findobj` with a warning.
+
+### 16 standard figures (ordered)
+| # | Filename stem | Content |
+|---|--------------|---------|
+| 01 | `position_error_xyz` | ECEF x/y/z position error (3 subplots) |
+| 02 | `position_error_norm` | Position error norm |
+| 03 | `attitude_error_components` | Roll/pitch/yaw error (3 subplots) |
+| 04 | `attitude_error_norm` | Attitude error norm |
+| 05 | `rx_clock_bias` | Clock bias [m] + error [m] (2 subplots) |
+| 06 | `rx_clock_drift` | Fractional frequency truth vs est + drift error |
+| 07 | `prefit_innovation_rms` | Prefit innovation RMS per epoch |
+| 08 | `postfit_residual_rms` | Postfit residual RMS per epoch |
+| 09 | `NIS` | Normalised Innovation Squared |
+| 10 | `visible_towers` | Visible tower count |
+| 11 | `per_source_error_rms` | Code / trop / iono / hw / multipath RMS |
+| 12 | `rx_allan_deviation` | Receiver σ_y(τ) theoretical + empirical |
+| 13 | `rx_allan_variance` | Receiver σ_y²(τ) theoretical + empirical |
+| 14 | `tower_allan_deviation` | All towers σ_y(τ) on one axes |
+| 15 | `tower_clock_bias` | Per-tower clock bias histories |
+| 16 | `tower_clock_drift` | Per-tower fractional frequency histories |
+
+Saved to `oo_v1/output/figures/` as `<NN>_<name>.png` and `<NN>_<name>.fig`.
+
+For deterministic clocks (zero stochastic noise), the Allan plots annotate: *"Empirical σ_y(τ) is zero (deterministic clock)"*
+
+---
+
+## 21. Kalman Filter Limitations and Position-Clock-Only Mode
+
+### When to use `positionClockOnlyConfig`
+Use `revgnss.ConfigFactory.positionClockOnlyConfig()` when:
+- The lever arm is zero (or very small), making attitude unobservable from pseudorange.
+- You want to validate position + clock convergence without attitude noise masking the result.
+- Running quick tests that don't need attitude estimation.
+
+This config sets:
+- `leverArm = [0; 0; 0]` (antenna at centre of mass)
+- `P0_euler_rad = 1e-12` (near-zero initial attitude uncertainty)
+- `sigma_angAccel = 1e-15` (near-zero angular acceleration process noise)
+- `estimateAttitude = false`, `estimateAngularRate = false`
+
+When `estimateAttitude = false`, the EKF still carries the attitude states but sets their Q contribution to `~0`, effectively freezing them. The state dimension is unchanged for code simplicity.
+
+### EKF consistency checks
+| Metric | Good | Potential issue |
+|--------|------|----------------|
+| NIS ≈ M (visible towers) | Consistent filter | — |
+| NIS >> M | Under-modelled noise | Increase R or Q |
+| NIS << M | Over-modelled noise | Decrease R or Q |
+| Postfit RMS < Prefit RMS | Filter is updating usefully | — |
+| Attitude Jacobian norm ≈ 0 | Zero lever arm or poor geometry | Set leverArm ≠ 0 or use positionClockOnlyConfig |
+| Condition number S > 1e12 | Numerical ill-conditioning | Check R and H for near-singular cases |
+
+### Angular cross-term Q
+The angular process noise block includes an off-diagonal cross term:
+```
+Q_euler_omega = σ²_angAccel · dt² / 2
+```
+This accounts for the correlation between integrated attitude error and angular rate noise over a timestep. Without it, the EKF can become overconfident in attitude shortly after update.
+
+### Finite-difference F matrix (Euler-Euler block)
+The transition matrix F uses numerical (central-difference) differentiation of the Euler kinematic equation with respect to the Euler angles:
+```matlab
+F(euler_idx, euler_idx(ai)) = (eul_new(eul+ε) − eul_new(eul−ε)) / (2ε)
+```
+with `ε = 1e-7 rad`. This avoids analytically differentiating the T(e,ω) matrix and is correct when Euler angles change slowly (GEO scenario).

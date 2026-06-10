@@ -10,9 +10,12 @@
 %   Tower clocks: deterministic zero bias, perfectCorrection mode
 %   EKF start   : 1000 m position offset, 100 m clock bias offset
 %
-% Output:
-%   Figures open on screen.
-%   PDF saved to: oo_v1/output/reverse_gnss_simple_report.pdf
+% Output (cfg.plots.showFigures = false by default):
+%   Figures created hidden (not shown on screen).
+%   Individual figures saved to: oo_v1/output/figures/<NN>_<name>.png/.fig
+%   PDF saved to:                oo_v1/output/reverse_gnss_simple_report.pdf
+%
+% To show figures on screen, set cfg.plots.showFigures = true before running.
 %
 % Usage (from oo_v1/ directory or any directory with oo_v1/ on path):
 %   cd oo_v1
@@ -27,10 +30,13 @@ fprintf('Working directory: %s\n', thisDir);
 cfg = revgnss.ConfigFactory.defaultConfig();
 
 % Duration and step already set in defaultConfig (3600 s, dt=1 s).
-% Enable plots and report.
-cfg.plots.enable          = true;
-cfg.plots.saveFigures     = false;
-cfg.report.enable         = true;
+% Enable plots and report; figures are hidden by default (showFigures=false).
+cfg.plots.enable                = true;
+cfg.plots.showFigures           = false;   % hidden: saved to disk, not shown
+cfg.plots.saveIndividualFigures = true;
+cfg.plots.savePdf               = true;
+cfg.plots.closeAfterSave        = false;
+cfg.report.enable               = true;
 
 %% --- Create and run simulation ----------------------------------------
 sim = revgnss.ReverseGNSSSimulation(cfg);
@@ -38,12 +44,16 @@ sim.initialize();
 sim.run();
 
 %% --- Generate plots and PDF report ------------------------------------
-sim.plot();
-sim.writeReport();
+% sim.plotAndReport() is equivalent to:
+%   figHandles = sim.plot();
+%   sim.writeReport(figHandles);
+figHandles = sim.plot();
+sim.writeReport(figHandles);
 
 %% --- Export results (optional) ----------------------------------------
 results = sim.getResults();
 fprintf('\nDone. Access results via the ''results'' variable.\n');
-fprintf('  results.diag        - per-epoch diagnostics\n');
-fprintf('  results.assetHistory - truth state log\n');
-fprintf('  results.ekfHistory   - EKF state log\n');
+fprintf('  results.diag         - per-epoch diagnostics\n');
+fprintf('  results.assetHistory  - truth state log\n');
+fprintf('  results.ekfHistory    - EKF state log\n');
+fprintf('Figures saved to: %s\n', cfg.plots.outputDir);

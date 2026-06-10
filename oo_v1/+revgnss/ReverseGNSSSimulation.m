@@ -1,31 +1,32 @@
 classdef ReverseGNSSSimulation < handle
     % ReverseGNSSSimulation  Top-level orchestrator for reverse-GNSS simulation.
     %
-    % Owns all simulation objects and runs the epoch loop.
-    %
     % Usage:
     %   cfg = revgnss.ConfigFactory.defaultConfig();
     %   sim = revgnss.ReverseGNSSSimulation(cfg);
     %   sim.initialize();
     %   sim.run();
-    %   sim.plot();
-    %   sim.writeReport();
+    %   sim.plotAndReport();          % one-liner: plots + saves PDF
+    %
+    % or:
+    %   figHandles = sim.plot();
+    %   sim.writeReport(figHandles);  % explicit figure-handle passing
 
     properties
         cfg         (1,1) struct
 
         asset       revgnss.SpaceAsset
-        towers      cell            % 1 x nTowers cell of GroundTower
+        towers      cell
         measModel   revgnss.MeasurementModel
         errorChain  revgnss.ErrorChain
         ekf         revgnss.ReverseGNSSEKF
-        orbitProp               % OrbitPropagator or []
+        orbitProp
 
         diag        revgnss.Diagnostics
 
-        nTowers     (1,1) double = 5
-        nEpochs     (1,1) double = 0
-        tVec        (:,1) double = []
+        nTowers     (1,1) double  = 5
+        nEpochs     (1,1) double  = 0
+        tVec        (:,1) double  = []
         isInit      (1,1) logical = false
     end
 
@@ -62,16 +63,11 @@ classdef ReverseGNSSSimulation < handle
 
         % ----------------------------------------------------------------
         function run(obj)
-            if ~obj.isInit
-                obj.initialize();
-            end
-
+            if ~obj.isInit; obj.initialize(); end
             fprintf('Running simulation...\n');
-
             for k = 1:obj.nEpochs
                 obj.step(k);
             end
-
             fprintf('Simulation complete. %d epochs processed.\n', obj.nEpochs);
             obj.summarize();
         end
@@ -81,13 +77,13 @@ classdef ReverseGNSSSimulation < handle
             t_s = obj.tVec(k);
             dt  = obj.cfg.simulation.dt_s;
 
-            % --- Update truth from orbit propagator ----------------------
+            % Truth orbit propagation (external propagator, if any)
             if ~isempty(obj.orbitProp)
                 [r_ecef, v_ecef] = obj.orbitProp.propagate(t_s);
                 obj.asset.setTruthFromOrbit(r_ecef, v_ecef);
             end
 
-            % --- Step tower clocks and asset -----------------------------
+            % Step tower clocks and asset truth state (skip at first epoch)
             if k > 1
                 for ti = 1:obj.nTowers
                     obj.towers{ti}.stepClock(dt);
@@ -99,51 +95,49 @@ classdef ReverseGNSSSimulation < handle
                 end
             end
 
-            % --- Log truth state -----------------------------------------
+            % Log truth state
             obj.asset.logState(t_s);
 
-            % --- EKF prediction (skip at k=1 since no prior state) -------
+            % EKF predict (skip at first epoch — no prior state to propagate from)
             if k > 1
                 towerClockModels = cellfun(@(t) t.clock, obj.towers, ...
                     'UniformOutput', false);
                 obj.ekf.predict(dt, towerClockModels);
             end
 
-            % --- Compute measurements ------------------------------------
+            % Compute measurements (also generates and stores tower clock corrections)
             [z, h, H, R, errStruct] = obj.measModel.computeMeasurements( ...
                 obj.asset, obj.towers, obj.ekf.x, t_s, obj.ekf.stateMap);
 
-            % --- Visibility for diagnostics ------------------------------
+            % Visibility for diagnostics
             [visible, elev_rad] = obj.measModel.computeVisibility( ...
                 obj.towers, obj.asset.getAntennaPositionECEF());
             visIds   = find(visible);
             visElevs = elev_rad(visible);
 
-            % --- Minimum measurement guard before EKF update -------------
-            minMeas = 4;
-            if isfield(obj.cfg.estimator, 'minMeasurementsForUpdate')
-                minMeas = obj.cfg.estimator.minMeasurementsForUpdate;
-            end
+            % Minimum measurement guard
+            minMeas = obj.cfg.estimator.minMeasurementsForUpdate;
 
-            NIS = NaN;
+            NIS             = NaN;
             postfitResidual = [];
 
             if ~isempty(z) && numel(z) >= minMeas
                 [~, ~, ~, NIS] = obj.ekf.update(z, h, H, R);
 
-                % Postfit residuals: recompute h using updated state
+                % Postfit residuals: recompute h with updated EKF state,
+                % reusing the SAME tower clock corrections from errStruct.
                 postfitResidual = obj.computePostfitResiduals_(z, visIds, errStruct);
 
             elseif ~isempty(z) && numel(z) < minMeas && mod(k, 100) == 1
-                fprintf('  [t=%.0f s] Skipping EKF update: %d measurements < %d minimum\n', ...
+                fprintf('  [t=%.0f s] EKF update skipped: %d measurements < %d minimum\n', ...
                     t_s, numel(z), minMeas);
             end
 
-            % --- Record diagnostics --------------------------------------
+            % Record diagnostics
             obj.diag.record(t_s, obj.asset, obj.ekf, z, h, H, R, NIS, ...
                 errStruct, visIds, visElevs, postfitResidual);
 
-            % --- EKF history log -----------------------------------------
+            % EKF history log
             posErr = norm(obj.ekf.x(obj.ekf.stateMap.r_idx) - obj.asset.r_ecef_m);
             obj.ekf.logStep(t_s, NIS, posErr);
         end
@@ -166,55 +160,86 @@ classdef ReverseGNSSSimulation < handle
             nisVec = obj.diag.getNIS();
             nVis   = obj.diag.getNumVisibleTowers();
 
-            % RMS over last 20% of run
-            idx20 = max(1, round(0.8 * numel(t)));
+            idx20  = max(1, round(0.8 * numel(t)));
             posRms = rms(posErr(idx20:end));
 
             fprintf('\n--- Simulation Summary ---\n');
-            fprintf('  Duration          : %.1f s  (%d epochs)\n',  t(end), numel(t));
-            fprintf('  Final pos error   : %.2f m\n',               posErr(end));
-            fprintf('  Position RMS      : %.2f m\n',               rms(posErr));
-            fprintf('  Position RMS (last 20%%): %.2f m\n',         posRms);
-            fprintf('  Clock bias RMS    : %.3f m\n',               rms(clkErr));
-            fprintf('  Innovation RMS    : %.3f m\n',               rms(innRms(innRms > 0)));
-            fprintf('  Mean NIS          : %.2f\n',                 mean(nisVec, 'omitnan'));
-            fprintf('  Mean visible twr  : %.1f\n',                 mean(nVis));
+            fprintf('  Duration               : %.1f s  (%d epochs)\n',   t(end), numel(t));
+            fprintf('  Final pos error        : %.3f m\n',                posErr(end));
+            fprintf('  Position RMS           : %.3f m\n',                rms(posErr));
+            fprintf('  Position RMS (last 20%%): %.3f m\n',               posRms);
+            fprintf('  Clock bias RMS         : %.4f m\n',                rms(clkErr));
+            fprintf('  Prefit innovation RMS  : %.4f m\n',                rms(innRms(innRms>0)));
+            fprintf('  Mean NIS               : %.2f\n',                  mean(nisVec,'omitnan'));
+            fprintf('  Mean visible towers    : %.1f\n',                  mean(nVis));
             fprintf('--------------------------\n\n');
         end
 
         % ----------------------------------------------------------------
-        function plot(obj)
-            if obj.cfg.plots.enable
-                revgnss.Plotter.plotAll(obj.diag, obj.asset, obj.towers, obj.cfg);
+        function figHandles = plot(obj)
+            % plot  Generate all diagnostic figures.
+            %
+            % Returns array of figure handles for use by writeReport().
+            % Figures are created hidden if cfg.plots.showFigures = false.
+
+            figHandles = gobjects(0);
+            if ~isfield(obj.cfg,'plots') || ~obj.cfg.plots.enable
+                return
             end
+            figHandles = revgnss.Plotter.plotAll( ...
+                obj.diag, obj.asset, obj.towers, obj.cfg);
         end
 
         % ----------------------------------------------------------------
-        function writeReport(obj)
-            % writeReport  Save all open figures to PDF report.
-            if ~isfield(obj.cfg, 'report') || ~obj.cfg.report.enable
+        function writeReport(obj, figHandles)
+            % writeReport  Save figures to PDF report.
+            %
+            % Inputs:
+            %   figHandles  Array of figure handles from sim.plot().
+            %               If empty or omitted, falls back to findobj.
+
+            if ~isfield(obj.cfg,'report') || ~obj.cfg.report.enable
                 return
             end
+            if nargin < 2; figHandles = []; end
+
             pdfPath = obj.cfg.report.outputPdf;
-            revgnss.ReportWriter.write(pdfPath, obj.cfg, obj.diag);
-            if isfield(obj.cfg.report, 'includeTimestampedCopy') && ...
+            revgnss.ReportWriter.write(pdfPath, figHandles, obj.cfg);
+
+            if isfield(obj.cfg.report,'includeTimestampedCopy') && ...
                     obj.cfg.report.includeTimestampedCopy
-                ts = datestr(now, 'yyyymmdd_HHMMSS');
+                ts = datestr(now, 'yyyymmdd_HHMMSS'); %#ok<TNOW1,DATST>
                 [d, f, e] = fileparts(pdfPath);
                 tsPdf = fullfile(d, sprintf('%s_%s%s', f, ts, e));
                 copyfile(pdfPath, tsPdf);
                 fprintf('  Timestamped copy: %s\n', tsPdf);
             end
         end
+
+        % ----------------------------------------------------------------
+        function plotAndReport(obj)
+            % plotAndReport  Convenience: plot then save PDF, in one call.
+            figHandles = obj.plot();
+            obj.writeReport(figHandles);
+        end
+
     end
 
     methods (Access = private)
+        % ----------------------------------------------------------------
         function postfit = computePostfitResiduals_(obj, z, visIds, errStruct)
-            % Recompute predicted pseudoranges with the updated EKF state.
+            % computePostfitResiduals_  Recompute h with updated EKF state.
+            %
+            % Reuses errStruct.towerClockModel_m so that the SAME correction
+            % noise (generated once in computeMeasurements) is applied here.
+            % This ensures postfit residuals are not corrupted by a second
+            % independent noise draw.
+
             if isempty(z) || isempty(visIds)
                 postfit = [];
                 return
             end
+
             sm       = obj.ekf.stateMap;
             r_post   = obj.ekf.x(sm.r_idx);
             eul_post = obj.ekf.x(sm.euler_idx);
@@ -222,23 +247,27 @@ classdef ReverseGNSSSimulation < handle
             lever    = obj.asset.receiverLeverArm_body_m;
             r_ant    = revgnss.AttitudeKinematics.applyLeverArm(r_post, eul_post, lever);
 
-            M = numel(visIds);
+            M      = numel(visIds);
             h_post = zeros(M, 1);
+
             for mi = 1:M
                 ti    = visIds(mi);
                 r_twr = obj.towers{ti}.getAntennaPositionECEF();
                 rho   = norm(r_ant - r_twr);
 
-                % Guard: only index into state if tower clock is estimated
-                if isfield(sm, 'towerClockIdx') && ti <= size(sm.towerClockIdx,1) && ...
+                % Tower clock model: EKF state if estimated, else stored correction
+                if isfield(sm,'towerClockIdx') && ti <= size(sm.towerClockIdx,1) && ...
                         sm.towerClockIdx(ti,1) > 0
                     b_twr = obj.ekf.x(sm.towerClockIdx(ti,1));
+                elseif ~isempty(errStruct) && isfield(errStruct,'towerClockModel_m') && ...
+                        mi <= numel(errStruct.towerClockModel_m)
+                    b_twr = errStruct.towerClockModel_m(mi);  % reuse, NO new randn
                 else
-                    b_twr = obj.measModel.getTowerClockModel_(obj.towers{ti}, obj.cfg);
+                    b_twr = 0;
                 end
 
                 model_total = 0;
-                if ~isempty(errStruct)
+                if ~isempty(errStruct) && isfield(errStruct,'modelTotal_m')
                     model_total = errStruct.modelTotal_m(mi);
                 end
                 h_post(mi) = rho + brx_post - b_twr + model_total;
