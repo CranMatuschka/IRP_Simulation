@@ -212,6 +212,37 @@ Both `GroundTower` and `SpaceAsset` hold a `revgnss.ClockModel` instance. They a
 - Easy comparison experiments (e.g., Experiment E).
 - EKF process noise for tower clock states uses the same `getProcessNoiseQ` method.
 
+### Simple config fields for tower/receiver count and clock factorisation
+
+| Field | Location | Description | Default |
+|-------|----------|-------------|---------|
+| `cfg.scenario.nTowers` | top-level | Number of ground towers to instantiate | `5` |
+| `cfg.scenario.nReceivers` | top-level | Number of receiver antennas on the asset | `1` |
+| `cfg.towers(k).clockName` | per tower | Name prefix (used in `clock.name`) | `'GroundClock'` |
+| `cfg.towers(k).clockType` | per tower | Template: TCXO / OCXO / Rubidium / AtomicLike | `'OCXO'` |
+| `cfg.towers(k).clockFactors` | per tower | Amplitude and role scale factors (struct) | all `1` |
+| `cfg.asset.clockName` | asset | Receiver clock name prefix | `'SpaceReceiverClock'` |
+| `cfg.asset.clockType` | asset | Receiver clock template | `'OCXO'` |
+| `cfg.asset.clockFactors` | asset | Per-instance amplitude and role scale factors | all `1` |
+
+`clockFactors` sub-fields (all default to `1`):
+`biasFactor`, `freqFactor`, `noiseFactor`, `roleNoiseFactor`,
+`h2Factor`, `h1Factor`, `h0Factor`, `hMinus1Factor`, `hMinus2Factor`.
+
+`roleNoiseFactor` separates role-based scaling (tower vs receiver, populated from
+`cfg.clockScaling.towerNoiseFactor` / `.receiverNoiseFactor`) from per-instance tuning
+(`noiseFactor`). Combined noise amplitude applied inside `makeClockConfig`:
+```
+noiseAmp = globalNoiseFactor × noiseFactor × roleNoiseFactor
+h-coefficients scale as noiseAmp²  (PSD units)
+```
+
+When `cfg.scenario.nReceivers > 1`, lever arms default to the first `nReceivers` columns
+of a ±1 m cross pattern: `[1 -1 0 0; 0 0 1 -1; 0.2 0.2 -0.2 -0.2]`.
+
+`clockDiversityConfig()` demonstrates the pattern: override only `clockType` and specific
+`clockFactors` fields per tower, then call `makeClockConfig` to regenerate `cfg.towers(k).clock`.
+
 ---
 
 ## 9. Attitude Modeling

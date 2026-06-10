@@ -39,6 +39,10 @@ classdef ConfigFactory
             cfg.simulation.duration_s = 3600.0;
             cfg.simulation.seed       = 42;
 
+            % --- Scenario topology (simple count fields) ------------------
+            cfg.scenario.nTowers    = 5;
+            cfg.scenario.nReceivers = 1;
+
             % --- GEO asset (stationary in ECEF) ---------------------------
             geoLat_rad = 0.0;
             geoLon_rad = 23.0 * pi / 180;
@@ -51,9 +55,15 @@ classdef ConfigFactory
             cfg.asset.v_ecef_mps              = [0; 0; 0];   % geostationary in ECEF
             cfg.asset.attitude_euler_rad      = [0; 0; 0];
             cfg.asset.angularRate_body_radps  = [0; 0; 0];
-            % One antenna at centre-of-mass; zero lever arm → attitude unobservable.
-            cfg.asset.receiverLeverArm_body_m  = [0; 0; 0];
-            cfg.asset.receiverLeverArms_body_m = [0; 0; 0];   % 3x1, one antenna
+            % Lever arms: single antenna at CoM for 1 receiver; cross pattern for >1.
+            if cfg.scenario.nReceivers == 1
+                cfg.asset.receiverLeverArm_body_m  = [0; 0; 0];
+                cfg.asset.receiverLeverArms_body_m = [0; 0; 0];
+            else
+                fullArms = [1 -1 0 0; 0 0 1 -1; 0.2 0.2 -0.2 -0.2];
+                cfg.asset.receiverLeverArms_body_m = fullArms(:, 1:cfg.scenario.nReceivers);
+                cfg.asset.receiverLeverArm_body_m  = cfg.asset.receiverLeverArms_body_m(:,1);
+            end
 
             % Clock scaling factors (applied by makeClockConfig)
             cfg.clockScaling.globalBiasFactor    = 1.0;
@@ -62,10 +72,16 @@ classdef ConfigFactory
             cfg.clockScaling.receiverNoiseFactor = 1.0;
             cfg.clockScaling.towerNoiseFactor    = 1.0;
 
-            % Asset receiver clock: OCXO, deterministic for convergence test
+            % Asset receiver clock fields (simple config fields)
+            cfg.asset.clockName    = 'SpaceReceiverClock';
+            cfg.asset.clockType    = 'OCXO';
+            cfg.asset.clockFactors = struct( ...
+                'biasFactor',1,'freqFactor',1,'noiseFactor',1, ...
+                'roleNoiseFactor', cfg.clockScaling.receiverNoiseFactor, ...
+                'h2Factor',1,'h1Factor',1,'h0Factor',1,'hMinus1Factor',1,'hMinus2Factor',1);
             cfg.asset.clock = revgnss.ConfigFactory.makeClockConfig( ...
-                'OCXO', 100, struct(), cfg.clockScaling);
-            cfg.asset.clock.name         = 'RxClock';
+                cfg.asset.clockType, 100, cfg.asset.clockFactors, cfg.clockScaling);
+            cfg.asset.clock.name          = 'RxClock';
             cfg.asset.clock.deterministic = true;
             cfg.asset.clock.bias_s        = 0.0;
             cfg.asset.clock.fracFreq      = 0.0;
@@ -82,7 +98,8 @@ classdef ConfigFactory
                 'Libreville',       0.0355,    -9.4496,  0.0 };
 
             cfg.towers = struct();
-            for k = 1:5
+            nT = min(cfg.scenario.nTowers, size(towerDefs,1));
+            for k = 1:nT
                 cfg.towers(k).id                  = k;
                 cfg.towers(k).name                = towerDefs{k,1};
                 cfg.towers(k).lat_rad             = towerDefs{k,2} * pi/180;
@@ -91,14 +108,18 @@ classdef ConfigFactory
                 cfg.towers(k).antennaOffset_enu_m = [0; 0; 0];
                 cfg.towers(k).hardwareDelay_m     = 0.0;
 
-                % Per-tower clock template tag (informational)
-                cfg.towers(k).clockTemplate = 'OCXO';
-                cfg.towers(k).clockFactors  = struct();
+                % Per-tower clock fields (simple config fields)
+                cfg.towers(k).clockName    = 'GroundClock';
+                cfg.towers(k).clockType    = 'OCXO';
+                cfg.towers(k).clockFactors = struct( ...
+                    'biasFactor',1,'freqFactor',1,'noiseFactor',1, ...
+                    'roleNoiseFactor', cfg.clockScaling.towerNoiseFactor, ...
+                    'h2Factor',1,'h1Factor',1,'h0Factor',1,'hMinus1Factor',1,'hMinus2Factor',1);
 
                 % Tower clock: OCXO, deterministic for convergence test
                 cfg.towers(k).clock = revgnss.ConfigFactory.makeClockConfig( ...
-                    'OCXO', 200 + k, struct(), cfg.clockScaling);
-                cfg.towers(k).clock.name         = sprintf('%s_Clock', towerDefs{k,1});
+                    cfg.towers(k).clockType, 200+k, cfg.towers(k).clockFactors, cfg.clockScaling);
+                cfg.towers(k).clock.name          = sprintf('%s_%s', cfg.towers(k).clockName, towerDefs{k,1});
                 cfg.towers(k).clock.deterministic = true;
                 cfg.towers(k).clock.bias_s        = 0.0;
                 cfg.towers(k).clock.fracFreq      = 0.0;
@@ -297,12 +318,12 @@ classdef ConfigFactory
         function cfg = clockDiversityConfig()
             % clockDiversityConfig  Each tower uses a different clock type.
             %
-            % Tower assignments (unique seeds 200+k, all stochastic):
-            %   1 Tenerife        OCXO       seed 201
-            %   2 Stockholm       TCXO       seed 202
-            %   3 Hartebeesthoek  Rubidium   seed 203
-            %   4 Bengaluru       OCXO       seed 204
-            %   5 Libreville      AtomicLike seed 205
+            % Overrides only clockType/clockFactors per tower, then recreates clock.
+            %   1 Tenerife        OCXO       noiseFactor=1.0
+            %   2 Stockholm       TCXO       noiseFactor=1.2
+            %   3 Hartebeesthoek  Rubidium   noiseFactor=0.8
+            %   4 Bengaluru       OCXO       h0Factor=3.0
+            %   5 Libreville      AtomicLike noiseFactor=1.0
             %
             % Tower clocks are stochastic; mode = perfectCorrection.
             % Default (defaultConfig) run remains fully deterministic.
@@ -310,36 +331,42 @@ classdef ConfigFactory
             cfg = revgnss.ConfigFactory.defaultConfig();
             gs  = cfg.clockScaling;
 
-            % One entry per tower: {templateName, factors}
-            towerClockDefs = { ...
-                'OCXO',       struct(); ...              % 1 Tenerife
-                'TCXO',       struct(); ...              % 2 Stockholm
-                'Rubidium',   struct(); ...              % 3 Hartebeesthoek
-                'OCXO',       struct(); ...              % 4 Bengaluru
-                'AtomicLike', struct() };                % 5 Libreville
+            % Per-tower overrides: only clockType and select clockFactors fields.
+            % roleNoiseFactor is inherited from defaultConfig (= clockScaling.towerNoiseFactor).
+            % {clockType, noiseFactor, h0Factor}
+            towerOverrides = { ...
+                'OCXO',       1.0, 1.0; ...    % 1 Tenerife
+                'TCXO',       1.2, 1.0; ...    % 2 Stockholm
+                'Rubidium',   0.8, 1.0; ...    % 3 Hartebeesthoek
+                'OCXO',       1.0, 3.0; ...    % 4 Bengaluru  (h0Factor=3)
+                'AtomicLike', 1.0, 1.0 };      % 5 Libreville
 
-            for k = 1:5
-                tpl = towerClockDefs{k,1};
-                fac = towerClockDefs{k,2};
-                seed_k = 200 + k;   % unique seed per tower: 201…205
-                cfgClk = revgnss.ConfigFactory.makeClockConfig(tpl, seed_k, fac, gs);
-                cfgClk.name          = sprintf('%s_Clock', cfg.towers(k).name);
-                cfgClk.deterministic = false;            % stochastic
-                cfgClk.bias_s        = (k-1) * 5e-9;    % small initial bias offset
+            nT = numel(cfg.towers);
+            for k = 1:min(nT, size(towerOverrides,1))
+                tType = towerOverrides{k,1};
+                nF    = towerOverrides{k,2};
+                h0F   = towerOverrides{k,3};
+
+                % Override clockType and select clockFactors fields
+                cfg.towers(k).clockType                = tType;
+                cfg.towers(k).clockFactors.noiseFactor = nF;
+                cfg.towers(k).clockFactors.h0Factor    = h0F;
+
+                % Recreate clock with updated settings; roleNoiseFactor preserved
+                cfgClk = revgnss.ConfigFactory.makeClockConfig( ...
+                    tType, 200+k, cfg.towers(k).clockFactors, gs);
+                cfgClk.name          = sprintf('%s_%s', cfg.towers(k).clockName, cfg.towers(k).name);
+                cfgClk.deterministic = false;
+                cfgClk.bias_s        = (k-1) * 5e-9;
                 cfgClk.fracFreq      = k * 1e-12;
 
-                cfg.towers(k).clock         = cfgClk;
-                cfg.towers(k).clockTemplate = tpl;
-                cfg.towers(k).clockFactors  = fac;
+                cfg.towers(k).clock = cfgClk;
             end
 
-            % Receiver clock also stochastic (OCXO, seed 100)
-            rxClk = revgnss.ConfigFactory.makeClockConfig('OCXO', 100, struct(), gs);
-            rxClk.name         = 'RxClock';
-            rxClk.deterministic = false;
-            rxClk.bias_s        = 0.0;
-            rxClk.fracFreq      = 0.0;
-            cfg.asset.clock = rxClk;
+            % Receiver clock also stochastic (reuse clock built in defaultConfig)
+            cfg.asset.clock.deterministic = false;
+            cfg.asset.clock.bias_s        = 0.0;
+            cfg.asset.clock.fracFreq      = 0.0;
 
             % Keep perfectCorrection: assume clock products are broadcast
             cfg.estimator.towerClockMode = 'perfectCorrection';
@@ -370,17 +397,18 @@ classdef ConfigFactory
             tmpl = revgnss.ConfigFactory.getClockTemplate_(templateName);
 
             % Extract global factors
-            gNoise   = getf_(globalScaling, 'globalNoiseFactor',   1.0);
-            gBias    = getf_(globalScaling, 'globalBiasFactor',    1.0);
-            gFreq    = getf_(globalScaling, 'globalFreqFactor',    1.0);
-            gTower   = getf_(globalScaling, 'towerNoiseFactor',    1.0);
-            gRx      = getf_(globalScaling, 'receiverNoiseFactor', 1.0);
-            % Note: caller decides whether this is a tower or receiver clock
-            % and may pass gTower or gRx as additional multiplier externally.
-            % Here we apply globalNoiseFactor only.
+            gNoise = getf_(globalScaling, 'globalNoiseFactor', 1.0);
+            gBias  = getf_(globalScaling, 'globalBiasFactor',  1.0);
+            gFreq  = getf_(globalScaling, 'globalFreqFactor',  1.0);
+            % Role-based and per-instance factors come from the factors struct:
+            %   factors.roleNoiseFactor — set to clockScaling.towerNoiseFactor or
+            %                             clockScaling.receiverNoiseFactor by the caller
+            %   factors.noiseFactor     — per-instance tuning (default 1)
 
             % Per-coefficient amplitude-squared scale factors
-            noiseAmp2 = gNoise^2;
+            noiseF    = getf_(factors, 'noiseFactor',     1.0);
+            roleF     = getf_(factors, 'roleNoiseFactor', 1.0);
+            noiseAmp2 = (gNoise * noiseF * roleF)^2;
             h2F   = getf_(factors,'h2Factor',   1.0)^2 * noiseAmp2;
             h1F   = getf_(factors,'h1Factor',   1.0)^2 * noiseAmp2;
             h0F   = getf_(factors,'h0Factor',   1.0)^2 * noiseAmp2;
