@@ -10,7 +10,11 @@ classdef ScenarioFactory
 
         function [asset, towers, ekf, measModel, errorChain, orbitProp] = build(cfg)
             % build  Instantiate all simulation objects from cfg.
+            %
+            % Calls finalizeConfig first to resolve nTowers/nReceivers,
+            % set lever arms, and recreate per-tower/receiver clocks.
 
+            cfg = revgnss.ConfigFactory.finalizeConfig(cfg);
             revgnss.validateConfig(cfg);
 
             % --- Orbit propagator --------------------------------------

@@ -97,11 +97,13 @@ classdef ReverseGNSSEKF < handle
             obj.x = zeros(obj.nx, 1);
             obj.P = eye(obj.nx);
 
-            if isfield(cfg.asset,'receiverLeverArm_body_m')
-                if norm(cfg.asset.receiverLeverArm_body_m) < 1e-9
-                    warning('ReverseGNSSEKF:noLeverArm', ...
-                        'Lever arm is zero. Attitude states are unobservable from pseudorange.');
-                end
+            % Warn about zero lever arm only when attitude from pseudorange is requested
+            doAttPR = isfield(cfg.estimator,'estimateAttitudeFromPseudorange') && ...
+                cfg.estimator.estimateAttitudeFromPseudorange;
+            if doAttPR && isfield(cfg.asset,'receiverLeverArm_body_m') && ...
+                    norm(cfg.asset.receiverLeverArm_body_m) < 1e-9
+                warning('ReverseGNSSEKF:noLeverArm', ...
+                    'estimateAttitudeFromPseudorange=true but lever arm is zero. Attitude unobservable.');
             end
 
             obj.initHistory_();
@@ -203,10 +205,19 @@ classdef ReverseGNSSEKF < handle
             if any(~isfinite(obj.P(:)))
                 warning('ReverseGNSSEKF:update','NaN/Inf in P after update');
             end
-            eigP = eig(obj.P);
-            if any(eigP < 0)
-                warning('ReverseGNSSEKF:update','P not PSD; projecting');
+            eigP   = eig(obj.P);
+            minEig = min(eigP);
+            tol    = max(1e-12, 1e-12 * max(abs(diag(obj.P))));
+            if minEig < -tol
+                % Genuinely non-PSD: project to nearest SPD
+                warning('ReverseGNSSEKF:update', ...
+                    'P not PSD (minEig=%.2e); projecting to nearest SPD.', minEig);
                 obj.P = nearestSPD_(obj.P);
+                obj.P = (obj.P + obj.P') / 2;   % extra symmetrise after projection
+            elseif minEig < 0
+                % Tiny negative eigenvalue from floating-point: nudge diagonal
+                obj.P = (obj.P + obj.P') / 2;
+                obj.P = obj.P + eye(obj.nx) * (tol - minEig);
             end
 
             % NIS: nu' * S^{-1} * nu  via backslash
@@ -273,6 +284,17 @@ classdef ReverseGNSSEKF < handle
 
             T = [1, sr*tp, cr*tp; 0, cr, -sr; 0, sr/cp, cr/cp];
             F(sm.euler_idx, sm.omega_idx) = dt_s * T;
+
+            % Freeze attitude kinematics when estimation is disabled.
+            % This prevents numerical drift of the euler/omega states.
+            if ~obj.estimateAttitude
+                F(sm.euler_idx, sm.euler_idx) = eye(3);
+                F(sm.euler_idx, sm.omega_idx) = zeros(3);
+            end
+            if ~obj.estimateAngularRate
+                F(sm.omega_idx, sm.omega_idx) = eye(3);
+                F(sm.omega_idx, sm.euler_idx) = zeros(3);
+            end
 
             % Receiver clock bias-drift coupling
             F(sm.b_rx_idx, sm.bdot_rx_idx) = dt_s;

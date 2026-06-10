@@ -23,6 +23,11 @@ classdef ConfigFactory
     %   uncorrectedTowerClocksConfig()  Stochastic, no correction
     %   clockDiversityConfig()       Each tower uses a different clock type
     %
+    % Finalizer (called automatically by ScenarioFactory.build):
+    %   cfg = revgnss.ConfigFactory.finalizeConfig(cfg)
+    %     Trims towers to cfg.scenario.nTowers, sets lever arms from nReceivers,
+    %     recreates per-tower and receiver clocks from clockType/clockFactors.
+    %
     % Clock factory:
     %   cfgClock = revgnss.ConfigFactory.makeClockConfig(templateName, seed, factors, globalScaling)
 
@@ -55,15 +60,10 @@ classdef ConfigFactory
             cfg.asset.v_ecef_mps              = [0; 0; 0];   % geostationary in ECEF
             cfg.asset.attitude_euler_rad      = [0; 0; 0];
             cfg.asset.angularRate_body_radps  = [0; 0; 0];
-            % Lever arms: single antenna at CoM for 1 receiver; cross pattern for >1.
-            if cfg.scenario.nReceivers == 1
-                cfg.asset.receiverLeverArm_body_m  = [0; 0; 0];
-                cfg.asset.receiverLeverArms_body_m = [0; 0; 0];
-            else
-                fullArms = [1 -1 0 0; 0 0 1 -1; 0.2 0.2 -0.2 -0.2];
-                cfg.asset.receiverLeverArms_body_m = fullArms(:, 1:cfg.scenario.nReceivers);
-                cfg.asset.receiverLeverArm_body_m  = cfg.asset.receiverLeverArms_body_m(:,1);
-            end
+            % Lever arms: zero by default (single antenna, attitude unobservable).
+            % finalizeConfig() sets cross-pattern arms when nReceivers > 1.
+            cfg.asset.receiverLeverArm_body_m  = [0; 0; 0];
+            cfg.asset.receiverLeverArms_body_m = [0; 0; 0];
 
             % Clock scaling factors (applied by makeClockConfig)
             cfg.clockScaling.globalBiasFactor    = 1.0;
@@ -97,9 +97,9 @@ classdef ConfigFactory
                 'Bengaluru',       13.0,       77.6,    0.0; ...
                 'Libreville',       0.0355,    -9.4496,  0.0 };
 
+            % Build ALL defined towers; finalizeConfig() trims to cfg.scenario.nTowers.
             cfg.towers = struct();
-            nT = min(cfg.scenario.nTowers, size(towerDefs,1));
-            for k = 1:nT
+            for k = 1:size(towerDefs,1)
                 cfg.towers(k).id                  = k;
                 cfg.towers(k).name                = towerDefs{k,1};
                 cfg.towers(k).lat_rad             = towerDefs{k,2} * pi/180;
@@ -127,8 +127,10 @@ classdef ConfigFactory
 
             % --- Estimator ------------------------------------------------
             cfg.estimator.estimateTowerClocks     = false;
-            cfg.estimator.estimateAttitude        = true;   % attitude STAYS in state
-            cfg.estimator.estimateAngularRate     = true;
+            % Attitude/omega states remain in the 14-state vector but are frozen
+            % (zero Q, zero H columns).  Set true for multiAntennaAttitudeConfig.
+            cfg.estimator.estimateAttitude        = false;
+            cfg.estimator.estimateAngularRate     = false;
             % Attitude pseudorange observability flags.
             % Default: H attitude columns are zeroed → no measurement update on attitude.
             % Set true only when lever arms are non-zero (e.g. multiAntennaAttitudeConfig).
@@ -256,25 +258,25 @@ classdef ConfigFactory
         function cfg = multiAntennaAttitudeConfig()
             % multiAntennaAttitudeConfig  Four-antenna cross pattern for attitude estimation.
             %
-            % Places four antennas at ±1 m cross in X/Y and ±0.2 m in Z.
-            % With 5 towers all visible, produces 5×4 = 20 measurements/epoch.
-            % Attitude H columns are nonzero (estimateAttitudeFromPseudorange = true).
+            % Sets cfg.scenario.nReceivers=4; finalizeConfig sets the ±1 m cross
+            % lever arms automatically.  With 5 towers visible, produces
+            % 5×4 = 20 measurements/epoch.
+            %
+            % P0_euler_rad is a 1-sigma value; ScenarioFactory squares it.
 
             cfg = revgnss.ConfigFactory.defaultConfig();
 
-            % Four-antenna pattern (3 x 4): ±1 m cross in X/Y, ±0.2 m in Z
-            cfg.asset.receiverLeverArms_body_m = [ 1  -1   0   0; ...
-                                                   0   0   1  -1; ...
-                                                   0.2 0.2 -0.2 -0.2 ];
-            % Keep singular field consistent (first antenna) for EKF backward-compat
-            cfg.asset.receiverLeverArm_body_m  = [1; 0; 0.2];
+            % Four receivers → finalizeConfig sets lever arms from the cross pattern
+            cfg.scenario.nReceivers = 4;
 
-            % Enable attitude observability
-            cfg.estimator.estimateAttitudeFromPseudorange    = true;
-            cfg.estimator.estimateAngularRateFromPseudorange = false;
+            % Enable attitude states and pseudorange observability
+            cfg.estimator.estimateAttitude                    = true;
+            cfg.estimator.estimateAngularRate                 = false;
+            cfg.estimator.estimateAttitudeFromPseudorange     = true;
+            cfg.estimator.estimateAngularRateFromPseudorange  = false;
 
-            % Widen initial attitude uncertainty to allow convergence
-            cfg.estimator.P0_euler_rad  = deg2rad(5)^2;
+            % Widen initial attitude uncertainty (1-sigma, not variance)
+            cfg.estimator.P0_euler_rad = deg2rad(5);   % ScenarioFactory squares this
 
             % Tighter code noise for good attitude geometry
             cfg.errors.codeNoise.sigma_m = 0.03;
@@ -384,36 +386,37 @@ classdef ConfigFactory
             %   templateName   'TCXO'|'OCXO'|'Rubidium'|'AtomicLike'|'Custom'
             %   baseSeed       integer seed for reproducibility
             %   factors        struct with optional per-coefficient scale factors:
-            %                    biasFactor, freqFactor, noiseFactor,
+            %                    biasFactor, freqFactor, noiseFactor, roleNoiseFactor,
             %                    h2Factor, h1Factor, h0Factor, hMinus1Factor, hMinus2Factor
             %   globalScaling  cfg.clockScaling struct (globalNoiseFactor, etc.)
             %
-            % All h-coefficient factors scale as AMPLITUDE^2 (since h is a PSD level).
-            % Example: h0Factor=3 triples h0, giving ~sqrt(3)× worse WFM ADEV.
+            % h-coefficients are PSD levels (one-sided, fractional frequency).
+            % Scale factors are DIRECT multipliers on h (not on amplitude):
+            %   noiseScale = globalNoiseFactor * noiseFactor * roleNoiseFactor
+            %   h0_out = template.h0 * h0Factor * noiseScale
+            % Example: h0Factor=3 → h0 is 3×, Allan deviation is sqrt(3)×.
 
             if nargin < 3 || isempty(factors);       factors       = struct(); end
             if nargin < 4 || isempty(globalScaling); globalScaling = struct(); end
 
             tmpl = revgnss.ConfigFactory.getClockTemplate_(templateName);
 
-            % Extract global factors
+            % Extract global scale factors
             gNoise = getf_(globalScaling, 'globalNoiseFactor', 1.0);
             gBias  = getf_(globalScaling, 'globalBiasFactor',  1.0);
             gFreq  = getf_(globalScaling, 'globalFreqFactor',  1.0);
-            % Role-based and per-instance factors come from the factors struct:
-            %   factors.roleNoiseFactor — set to clockScaling.towerNoiseFactor or
-            %                             clockScaling.receiverNoiseFactor by the caller
-            %   factors.noiseFactor     — per-instance tuning (default 1)
 
-            % Per-coefficient amplitude-squared scale factors
-            noiseF    = getf_(factors, 'noiseFactor',     1.0);
-            roleF     = getf_(factors, 'roleNoiseFactor', 1.0);
-            noiseAmp2 = (gNoise * noiseF * roleF)^2;
-            h2F   = getf_(factors,'h2Factor',   1.0)^2 * noiseAmp2;
-            h1F   = getf_(factors,'h1Factor',   1.0)^2 * noiseAmp2;
-            h0F   = getf_(factors,'h0Factor',   1.0)^2 * noiseAmp2;
-            hm1F  = getf_(factors,'hMinus1Factor',1.0)^2 * noiseAmp2;
-            hm2F  = getf_(factors,'hMinus2Factor',1.0)^2 * noiseAmp2;
+            % Combined noise scale (direct PSD multiplier, not amplitude-squared)
+            noiseF     = getf_(factors, 'noiseFactor',     1.0);
+            roleF      = getf_(factors, 'roleNoiseFactor', 1.0);
+            noiseScale = gNoise * noiseF * roleF;
+
+            % Per-coefficient direct PSD factors
+            h2F   = getf_(factors,'h2Factor',      1.0) * noiseScale;
+            h1F   = getf_(factors,'h1Factor',      1.0) * noiseScale;
+            h0F   = getf_(factors,'h0Factor',      1.0) * noiseScale;
+            hm1F  = getf_(factors,'hMinus1Factor', 1.0) * noiseScale;
+            hm2F  = getf_(factors,'hMinus2Factor', 1.0) * noiseScale;
 
             biasF = getf_(factors,'biasFactor', 1.0) * gBias;
             freqF = getf_(factors,'freqFactor', 1.0) * gFreq;
@@ -431,6 +434,100 @@ classdef ConfigFactory
             cfgClock.noiseCoeffs.h0       = tmpl.h0       * h0F;
             cfgClock.noiseCoeffs.hMinus1  = tmpl.hMinus1  * hm1F;
             cfgClock.noiseCoeffs.hMinus2  = tmpl.hMinus2  * hm2F;
+        end
+
+        function cfg = finalizeConfig(cfg)
+            % finalizeConfig  Resolve nTowers/nReceivers, lever arms, recreate clocks.
+            %
+            % Called automatically by ScenarioFactory.build and
+            % ReverseGNSSSimulation.initialize.  Also call manually after
+            % overriding cfg.scenario.*, cfg.towers(k).clockType/Factors, or
+            % cfg.asset.clockType/Factors.
+            %
+            % Rules enforced:
+            %   nTowers > numel(cfg.towers)  → error  (no implicit tower creation)
+            %   nTowers < numel(cfg.towers)  → trim cfg.towers to first nTowers
+            %   nReceivers == 1              → lever arms = [0;0;0]  (single antenna)
+            %   nReceivers  > 1              → lever arms from ±1 m cross pattern
+            %   nReceivers  > 4              → error  (only 4 columns defined)
+            %   nReceivers <= 1              → force estimateAttitudeFromPseudorange=false
+            %
+            % Clock recreation is idempotent: noiseCoeffs are re-derived from
+            % clockType + clockFactors; name/deterministic/bias_s/fracFreq preserved.
+
+            % ---- Tower count -----------------------------------------------
+            nT_req   = cfg.scenario.nTowers;
+            nT_avail = numel(cfg.towers);
+            if nT_req > nT_avail
+                error('ConfigFactory:finalizeConfig', ...
+                    ['cfg.scenario.nTowers=%d but only %d towers are defined ' ...
+                     'in cfg.towers.  Add tower definitions or reduce nTowers.'], ...
+                    nT_req, nT_avail);
+            end
+            cfg.towers = cfg.towers(1:nT_req);
+
+            % ---- Recreate tower clocks from type + factors (idempotent) ----
+            gs = cfg.clockScaling;
+            for k = 1:nT_req
+                if isfield(cfg.towers(k),'clockType') && ...
+                        isfield(cfg.towers(k),'clockFactors')
+                    % Sync roleNoiseFactor from clockScaling before recreating
+                    cfg.towers(k).clockFactors.roleNoiseFactor = ...
+                        gs.towerNoiseFactor;
+                    prev = cfg.towers(k).clock;
+                    clk  = revgnss.ConfigFactory.makeClockConfig( ...
+                        cfg.towers(k).clockType, 200+k, ...
+                        cfg.towers(k).clockFactors, gs);
+                    clk.name          = prev.name;
+                    clk.deterministic = prev.deterministic;
+                    clk.bias_s        = prev.bias_s;
+                    clk.fracFreq      = prev.fracFreq;
+                    cfg.towers(k).clock = clk;
+                end
+            end
+
+            % ---- Recreate receiver clock (idempotent) ----------------------
+            if isfield(cfg.asset,'clockType') && isfield(cfg.asset,'clockFactors')
+                cfg.asset.clockFactors.roleNoiseFactor = gs.receiverNoiseFactor;
+                prev = cfg.asset.clock;
+                clk  = revgnss.ConfigFactory.makeClockConfig( ...
+                    cfg.asset.clockType, 100, cfg.asset.clockFactors, gs);
+                clk.name          = prev.name;
+                clk.deterministic = prev.deterministic;
+                clk.bias_s        = prev.bias_s;
+                clk.fracFreq      = prev.fracFreq;
+                cfg.asset.clock   = clk;
+            end
+
+            % ---- Receiver lever arms ----------------------------------------
+            nR_req   = cfg.scenario.nReceivers;
+            fullArms = [1 -1 0 0; 0 0 1 -1; 0.2 0.2 -0.2 -0.2];  % 3 × 4
+            maxR = size(fullArms, 2);
+
+            if nR_req < 1
+                error('ConfigFactory:finalizeConfig', ...
+                    'cfg.scenario.nReceivers must be >= 1 (got %d).', nR_req);
+            end
+            if nR_req > maxR
+                error('ConfigFactory:finalizeConfig', ...
+                    ['cfg.scenario.nReceivers=%d but the predefined cross ' ...
+                     'pattern has only %d columns.  Extend fullArms or ' ...
+                     'reduce nReceivers.'], nR_req, maxR);
+            end
+
+            if nR_req == 1
+                cfg.asset.receiverLeverArm_body_m  = [0; 0; 0];
+                cfg.asset.receiverLeverArms_body_m = [0; 0; 0];
+            else
+                cfg.asset.receiverLeverArms_body_m = fullArms(:, 1:nR_req);
+                cfg.asset.receiverLeverArm_body_m  = ...
+                    cfg.asset.receiverLeverArms_body_m(:, 1);
+            end
+
+            % ---- Attitude pseudorange gate ---------------------------------
+            if nR_req <= 1
+                cfg.estimator.estimateAttitudeFromPseudorange = false;
+            end
         end
 
         function tmpl = getClockTemplate_(templateName)

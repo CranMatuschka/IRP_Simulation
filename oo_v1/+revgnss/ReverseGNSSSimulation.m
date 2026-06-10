@@ -40,6 +40,10 @@ classdef ReverseGNSSSimulation < handle
         function initialize(obj)
             fprintf('=== ReverseGNSSSimulation: initializing ===\n');
 
+            % Finalize config: resolves nTowers/nReceivers, sets lever arms,
+            % recreates clocks.  Updates obj.cfg so diagnostics below are correct.
+            obj.cfg = revgnss.ConfigFactory.finalizeConfig(obj.cfg);
+
             [obj.asset, obj.towers, obj.ekf, obj.measModel, ...
              obj.errorChain, obj.orbitProp] = revgnss.ScenarioFactory.build(obj.cfg);
 
@@ -52,8 +56,15 @@ classdef ReverseGNSSSimulation < handle
             obj.diag   = revgnss.Diagnostics();
             obj.isInit = true;
 
+            nRx = size(obj.asset.receiverLeverArms_body_m, 2);
+            doAttPR = isfield(obj.cfg.estimator,'estimateAttitudeFromPseudorange') && ...
+                obj.cfg.estimator.estimateAttitudeFromPseudorange;
+
             fprintf('  Asset       : %s\n', obj.cfg.asset.name);
             fprintf('  Towers      : %d\n', obj.nTowers);
+            fprintf('  Receivers   : %d\n', nRx);
+            fprintf('  Max meas/epoch: %d\n', obj.nTowers * nRx);
+            fprintf('  Attitude from pseudorange: %d\n', doAttPR);
             fprintf('  Epochs      : %d (dt=%.1f s, dur=%.0f s)\n', ...
                 obj.nEpochs, dt, dur);
             fprintf('  State dim   : %d\n', obj.ekf.nx);
