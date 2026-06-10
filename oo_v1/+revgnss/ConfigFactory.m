@@ -46,7 +46,7 @@ classdef ConfigFactory
 
             % --- Scenario topology (simple count fields) ------------------
             cfg.scenario.nTowers    = 5;
-            cfg.scenario.nReceivers = 3;
+            cfg.scenario.nReceivers = 1;
 
             % --- GEO asset (stationary in ECEF) ---------------------------
             geoLat_rad = 0.0;
@@ -127,15 +127,13 @@ classdef ConfigFactory
 
             % --- Estimator ------------------------------------------------
             cfg.estimator.estimateTowerClocks     = false;
-            % Attitude/omega states remain in the 14-state vector but are frozen
-            % (zero Q, zero H columns).  Set true for multiAntennaAttitudeConfig.
-            cfg.estimator.estimateAttitude        = true;
+            % Attitude/omega states remain in the 14-state vector but are frozen.
+            % (zero Q, zero H columns). Set true only in multiAntennaAttitudeConfig.
+            cfg.estimator.estimateAttitude        = false;
             cfg.estimator.estimateAngularRate     = false;
-            % Attitude pseudorange observability flags.
-            % Default: H attitude columns are zeroed → no measurement update on attitude.
-            % Set true only when lever arms are non-zero (e.g. multiAntennaAttitudeConfig).
-            cfg.estimator.estimateAttitudeFromPseudorange     = true;
+            cfg.estimator.estimateAttitudeFromPseudorange     = false;
             cfg.estimator.estimateAngularRateFromPseudorange  = false;
+            cfg.estimator.estimateCarrierAmbiguities          = false;
             % perfectCorrection: EKF uses known tower clock values (zero here).
             cfg.estimator.towerClockMode          = 'perfectCorrection';
             cfg.estimator.towerClockCorrectionSigma_m = 0.5; % used if noisyCorrection
@@ -195,6 +193,43 @@ classdef ConfigFactory
             cfg.errors.multipath.truth.stochastic_sigma_m  = 0.1;
             cfg.errors.multipath.sigma_m                   = 0.0;
 
+            % --- Physics constants and range-correction toggles ---------------
+            % All physics corrections default to false. Enable in realisticPseudorangeConfig.
+            cfg.physics.c_mps              = 299792458;
+            cfg.physics.omegaEarth_radps   = 7.2921151467e-5;
+            cfg.physics.muEarth_m3ps2      = 3.986004418e14;
+
+            cfg.physics.sagnac.truth.enable    = false;
+            cfg.physics.sagnac.model.enable    = false;
+
+            cfg.physics.lightTime.truth.enable = false;
+            cfg.physics.lightTime.model.enable = false;
+            cfg.physics.lightTime.maxIter      = 2;
+
+            cfg.physics.relativity.shapiro.truth.enable = false;
+            cfg.physics.relativity.shapiro.model.enable = false;
+
+            cfg.physics.relativity.clock.truth.enable = false;
+            cfg.physics.relativity.clock.model.enable = false;
+
+            cfg.physics.doppler.truth.enable = false;
+            cfg.physics.doppler.model.enable = false;
+
+            % --- Observable toggles: pseudorange always on, others off ------
+            cfg.measurements.pseudorange.enable   = true;
+            cfg.measurements.doppler.enable       = false;
+            cfg.measurements.doppler.sigma_mps    = 0.01;
+            cfg.measurements.doppler.useInEKF     = false;
+
+            cfg.measurements.carrierPhase.enable           = false;
+            cfg.measurements.carrierPhase.useInEKF         = false;
+            cfg.measurements.carrierPhase.frequency_Hz     = 1575.42e6;
+            cfg.measurements.carrierPhase.lambda_m         = 299792458 / 1575.42e6;
+            cfg.measurements.carrierPhase.sigma_cycles     = 0.01;
+            cfg.measurements.carrierPhase.initialAmbiguityMode = 'randomInteger';
+            cfg.measurements.carrierPhase.seed             = 9001;
+            cfg.measurements.carrierPhase.cycleSlip.enable = false;
+
             % --- Plots -------------------------------------------------------
             % showFigures = false: figures created with Visible='off', saved to file.
             % saveIndividualFigures: save each figure as .png and .fig.
@@ -227,58 +262,62 @@ classdef ConfigFactory
         end
 
         function cfg = noLeverArmConfig()
-            % noLeverArmConfig  Zero lever arm — attitude unobservable from pseudorange.
+            % noLeverArmConfig  Zero lever arm, single receiver — attitude unobservable.
             cfg = revgnss.ConfigFactory.idealConfig();
-            cfg.asset.receiverLeverArm_body_m = [0; 0; 0];
+            cfg.scenario.nReceivers                          = 1;
+            cfg.asset.receiverLeverArm_body_m                = [0; 0; 0];
+            cfg.asset.receiverLeverArms_body_m               = [0; 0; 0];
+            cfg.estimator.estimateAttitude                   = false;
+            cfg.estimator.estimateAngularRate                = false;
+            cfg.estimator.estimateAttitudeFromPseudorange    = false;
+            cfg.estimator.estimateAngularRateFromPseudorange = false;
         end
 
         function cfg = positionClockOnlyConfig()
-            % positionClockOnlyConfig  Attitude/omega effectively frozen.
-            %
-            % Use this for baseline debugging when attitude convergence is
-            % not the focus.  Attitude and angular-rate states are given near-zero
-            % initial uncertainty and process noise, and the lever arm is set to
-            % zero so they do not affect measurements.
-            %
-            % Only position (3) and clock bias+drift (2) are actively estimated.
-
+            % positionClockOnlyConfig  Position + clock only; attitude frozen.
             cfg = revgnss.ConfigFactory.idealConfig();
-            cfg.asset.receiverLeverArm_body_m = [0; 0; 0];
-
-            % Near-zero uncertainty and process noise for attitude/omega
-            cfg.estimator.P0_euler_rad      = 1e-12;
-            cfg.estimator.P0_omega_radps    = 1e-12;
-            cfg.estimator.sigma_angAccel_radps2 = 1e-15;
-
-            % Disable estimation flags (EKF will use near-zero Q for these)
-            cfg.estimator.estimateAttitude    = false;
-            cfg.estimator.estimateAngularRate = false;
+            cfg.scenario.nReceivers                          = 1;
+            cfg.asset.receiverLeverArm_body_m                = [0; 0; 0];
+            cfg.asset.receiverLeverArms_body_m               = [0; 0; 0];
+            cfg.estimator.estimateAttitude                   = false;
+            cfg.estimator.estimateAngularRate                = false;
+            cfg.estimator.estimateAttitudeFromPseudorange    = false;
+            cfg.estimator.estimateAngularRateFromPseudorange = false;
+            cfg.estimator.P0_euler_rad                       = 1e-12;
+            cfg.estimator.P0_omega_radps                     = 1e-12;
+            cfg.estimator.sigma_angAccel_radps2              = 1e-15;
         end
 
         function cfg = multiAntennaAttitudeConfig()
             % multiAntennaAttitudeConfig  Four-antenna cross pattern for attitude estimation.
             %
-            % Sets cfg.scenario.nReceivers=4; finalizeConfig sets the ±1 m cross
-            % lever arms automatically.  With 5 towers visible, produces
-            % 5×4 = 20 measurements/epoch.
-            %
-            % P0_euler_rad is a 1-sigma value; ScenarioFactory squares it.
+            % Only preset that enables estimateAttitudeFromPseudorange.
+            % 5 towers × 4 antennas = 20 measurements/epoch.
+            % P0_euler_rad is 1-sigma; ScenarioFactory squares it.
 
             cfg = revgnss.ConfigFactory.defaultConfig();
 
-            % Four receivers → finalizeConfig sets lever arms from the cross pattern
             cfg.scenario.nReceivers = 4;
 
-            % Enable attitude states and pseudorange observability
-            cfg.estimator.estimateAttitude                    = true;
-            cfg.estimator.estimateAngularRate                 = false;
-            cfg.estimator.estimateAttitudeFromPseudorange     = true;
-            cfg.estimator.estimateAngularRateFromPseudorange  = false;
+            % Explicit ±1 m cross pattern; finalizeConfig will NOT overwrite
+            % because N == nReceivers.
+            cfg.asset.receiverLeverArms_body_m = [ ...
+                 1.0  -1.0   0.0   0.0; ...
+                 0.0   0.0   1.0  -1.0; ...
+                 0.2   0.2  -0.2  -0.2 ];
+            cfg.asset.receiverLeverArm_body_m = cfg.asset.receiverLeverArms_body_m(:,1);
 
-            % Widen initial attitude uncertainty (1-sigma, not variance)
-            cfg.estimator.P0_euler_rad = deg2rad(5);   % ScenarioFactory squares this
+            cfg.estimator.estimateAttitude                   = true;
+            cfg.estimator.estimateAngularRate                = false;
+            cfg.estimator.estimateAttitudeFromPseudorange    = true;
+            cfg.estimator.estimateAngularRateFromPseudorange = false;
 
-            % Tighter code noise for good attitude geometry
+            cfg.estimator.P0_euler_rad              = deg2rad(5);
+            cfg.estimator.P0_omega_radps            = 1e-12;
+            cfg.estimator.sigma_angAccel_radps2     = 1e-10;
+            cfg.estimator.initialError.euler_deg    = [1; -1; 0.5];
+            cfg.estimator.initialError.omega_radps  = [0; 0; 0];
+
             cfg.errors.codeNoise.sigma_m = 0.03;
         end
 
@@ -373,6 +412,20 @@ classdef ConfigFactory
             % Keep perfectCorrection: assume clock products are broadcast
             cfg.estimator.towerClockMode = 'perfectCorrection';
             cfg.errors.codeNoise.sigma_m  = 1.0;
+        end
+
+        function cfg = realisticPseudorangeConfig()
+            % realisticPseudorangeConfig  Sagnac + Shapiro corrections truth+model enabled.
+            %
+            % With both truth and model enabled, corrections mostly cancel in the
+            % innovation. To see the deterministic bias, set model.enable=false.
+            cfg = revgnss.ConfigFactory.defaultConfig();
+            cfg.physics.sagnac.truth.enable           = true;
+            cfg.physics.sagnac.model.enable           = true;
+            cfg.physics.lightTime.truth.enable        = true;
+            cfg.physics.lightTime.model.enable        = true;
+            cfg.physics.relativity.shapiro.truth.enable = true;
+            cfg.physics.relativity.shapiro.model.enable = true;
         end
 
         % ==================================================================
@@ -501,8 +554,8 @@ classdef ConfigFactory
 
             % ---- Receiver lever arms ----------------------------------------
             nR_req   = cfg.scenario.nReceivers;
-            fullArms = [1 -1 0 0; 0 0 1 -1; 0.2 0.2 -0.2 -0.2];  % 3 × 4
-            maxR = size(fullArms, 2);
+            defaultArms = [1 -1 0 0; 0 0 1 -1; 0.2 0.2 -0.2 -0.2];  % 3 × 4
+            maxR = size(defaultArms, 2);
 
             if nR_req < 1
                 error('ConfigFactory:finalizeConfig', ...
@@ -511,22 +564,31 @@ classdef ConfigFactory
             if nR_req > maxR
                 error('ConfigFactory:finalizeConfig', ...
                     ['cfg.scenario.nReceivers=%d but the predefined cross ' ...
-                     'pattern has only %d columns.  Extend fullArms or ' ...
+                     'pattern has only %d columns.  Supply custom lever arms or ' ...
                      'reduce nReceivers.'], nR_req, maxR);
             end
 
             if nR_req == 1
+                % Single receiver: always zero lever arm
                 cfg.asset.receiverLeverArm_body_m  = [0; 0; 0];
                 cfg.asset.receiverLeverArms_body_m = [0; 0; 0];
             else
-                cfg.asset.receiverLeverArms_body_m = fullArms(:, 1:nR_req);
-                cfg.asset.receiverLeverArm_body_m  = ...
+                % Check if a valid custom 3×nR arm matrix is already present
+                existingArms = cfg.asset.receiverLeverArms_body_m;
+                isCustom = (size(existingArms,1) == 3) && ...
+                           (size(existingArms,2) == nR_req) && ...
+                           ~isequal(existingArms, [0;0;0]);
+                if ~isCustom
+                    cfg.asset.receiverLeverArms_body_m = defaultArms(:, 1:nR_req);
+                end
+                cfg.asset.receiverLeverArm_body_m = ...
                     cfg.asset.receiverLeverArms_body_m(:, 1);
             end
 
             % ---- Attitude pseudorange gate ---------------------------------
             if nR_req <= 1
-                cfg.estimator.estimateAttitudeFromPseudorange = false;
+                cfg.estimator.estimateAttitudeFromPseudorange    = false;
+                cfg.estimator.estimateAngularRateFromPseudorange = false;
             end
         end
 

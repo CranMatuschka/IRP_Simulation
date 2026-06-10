@@ -170,6 +170,7 @@ classdef ReverseGNSSSimulation < handle
             innRms = obj.diag.getPrefitInnovationRMS();
             nisVec = obj.diag.getNIS();
             nVis   = obj.diag.getNumVisibleTowers();
+            nMeas  = obj.diag.getNumMeasurements();
 
             idx20  = max(1, round(0.8 * numel(t)));
             posRms = rms(posErr(idx20:end));
@@ -183,6 +184,7 @@ classdef ReverseGNSSSimulation < handle
             fprintf('  Prefit innovation RMS  : %.4f m\n',                rms(innRms(innRms>0)));
             fprintf('  Mean NIS               : %.2f\n',                  mean(nisVec,'omitnan'));
             fprintf('  Mean visible towers    : %.1f\n',                  mean(nVis));
+            fprintf('  Mean measurements/epoch: %.1f\n',                  mean(nMeas));
             fprintf('--------------------------\n\n');
         end
 
@@ -273,7 +275,7 @@ classdef ReverseGNSSSimulation < handle
 
                 r_ant = revgnss.AttitudeKinematics.applyLeverArm(r_post, eul_post, lever);
                 r_twr = obj.towers{ti}.getAntennaPositionECEF();
-                rho   = norm(r_ant - r_twr);
+                rho   = revgnss.RangeCorrections.correctedPseudorange(r_ant, r_twr, obj.cfg, 'model');
 
                 % Tower clock: EKF state if estimated, else stored correction (NO new draw)
                 if isfield(sm,'towerClockIdx') && ti <= size(sm.towerClockIdx,1) && ...

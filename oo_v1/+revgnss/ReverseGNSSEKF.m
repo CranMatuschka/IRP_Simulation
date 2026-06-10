@@ -131,9 +131,14 @@ classdef ReverseGNSSEKF < handle
             r_new = r + dt_s * v;
             v_new = v;
 
-            % Attitude: Euler kinematics
-            edot    = revgnss.AttitudeKinematics.eulerRatesFromBodyRates(eul, omg);
-            eul_new = revgnss.AttitudeKinematics.wrapEuler(eul + dt_s * edot);
+            % Attitude: Euler kinematics (frozen when estimation disabled)
+            if obj.estimateAttitude
+                edot    = revgnss.AttitudeKinematics.eulerRatesFromBodyRates(eul, omg);
+                eul_new = revgnss.AttitudeKinematics.wrapEuler(eul + dt_s * edot);
+            else
+                eul_new = eul;   % freeze state — no kinematics update
+            end
+            % Angular rate: constant-rate model in v1 regardless of flag
             omg_new = omg;
 
             % Receiver clock

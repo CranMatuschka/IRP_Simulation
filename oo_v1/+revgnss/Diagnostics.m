@@ -112,6 +112,24 @@ classdef Diagnostics < handle
                     entry.towerClockCorrectionError_m = [];
                 end
 
+                % Doppler prefit RMS (if enabled)
+                if isfield(errStruct,'doppler') && isfield(errStruct.doppler,'prefit') && ...
+                        ~isempty(errStruct.doppler.prefit)
+                    entry.dopplerPrefitRMS_mps = sqrt(mean(errStruct.doppler.prefit.^2));
+                else
+                    entry.dopplerPrefitRMS_mps = 0;
+                end
+
+                % Range-correction diagnostics (sagnac, shapiro)
+                if isfield(errStruct,'sagnacTruth_m')
+                    diff_s = errStruct.sagnacTruth_m - errStruct.sagnacModel_m;
+                    entry.sagnacDiffRMS_m  = sqrt(mean(diff_s.^2));
+                    entry.shapiroDiffRMS_m = sqrt(mean((errStruct.shapiroTruth_m - errStruct.shapiroModel_m).^2));
+                else
+                    entry.sagnacDiffRMS_m  = 0;
+                    entry.shapiroDiffRMS_m = 0;
+                end
+
                 % Per-source RMS(truth_m - model_m) for this epoch.
                 % getPerSourceErrorRMS() returns these as "Truth - Model" residual RMS.
                 labels = {'code','trop','iono','hwDelay','mp'};
@@ -141,6 +159,9 @@ classdef Diagnostics < handle
                 entry.towerClockTruth_m   = [];
                 entry.towerClockModel_m   = [];
                 entry.towerClockCorrectionError_m = [];
+                entry.sagnacDiffRMS_m  = 0;
+                entry.shapiroDiffRMS_m = 0;
+                entry.dopplerPrefitRMS_mps = 0;
                 labels = {'code','trop','iono','hwDelay','mp'};
                 for j = 1:numel(labels)
                     entry.perSourceTruthRMS.(labels{j}) = 0;
@@ -165,7 +186,8 @@ classdef Diagnostics < handle
             entry.clockDriftError_mps  = x(sm.bdot_rx_idx) - asset.clock.getDriftMetersPerSecond();
             entry.fracFreqError        = entry.clockDriftError_mps / c;
 
-            entry.numVisibleTowers = numel(visibleTowerIds);
+            entry.numVisibleTowers  = numel(visibleTowerIds);
+            entry.numMeasurements  = numel(z);
 
             % --- Innovation / residual RMS per epoch -------------------
             if ~isempty(z)
@@ -280,6 +302,18 @@ classdef Diagnostics < handle
 
         function nv = getNumVisibleTowers(obj)
             nv = [obj.log.numVisibleTowers]';
+        end
+
+        function nm = getNumMeasurements(obj)
+            nm = [obj.log.numMeasurements]';
+        end
+
+        function v = getSagnacDiffRMS(obj)
+            v = [obj.log.sagnacDiffRMS_m]';
+        end
+
+        function v = getShapiroDiffRMS(obj)
+            v = [obj.log.shapiroDiffRMS_m]';
         end
 
         function e = getAttitudeErrorVecs(obj)

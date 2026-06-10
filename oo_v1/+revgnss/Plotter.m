@@ -233,18 +233,26 @@ classdef Plotter
         end
 
         function fig = plotVisibleTowers(diag, t, cfg)
-            % Fig 10: visible tower count per epoch
+            % Fig 10: visible tower count and total measurements per epoch
             nv = diag.getNumVisibleTowers();
-            fig = revgnss.Plotter.newFig_('10 — Visible Towers', cfg);
+            nm = diag.getNumMeasurements();
+            fig = revgnss.Plotter.newFig_('10 — Visible Towers & Measurements', cfg);
+            subplot(2,1,1);
             plot(t, nv, 'b.', 'MarkerSize',6);
             xlabel('Time [s]'); ylabel('Count');
-            title('Number of Visible Ground Towers vs Time');
+            title('Visible Ground Towers');
             ylim([0, max(nv)+1]); grid on;
+            subplot(2,1,2);
+            plot(t, nm, 'r.', 'MarkerSize',6);
+            xlabel('Time [s]'); ylabel('Count');
+            title('Total Pseudorange Measurements');
+            ylim([0, max(nm)+1]); grid on;
+            sgtitle('Observations per Epoch');
             revgnss.Plotter.saveFig_(fig, '10_visible_towers', cfg);
         end
 
         function fig = plotPerSourceErrorRMS(diag, t, cfg)
-            % Fig 11: per error-source RMS (truth-model residual per epoch)
+            % Fig 11: per error-source RMS (truth-model residual per epoch) + range corrections
             perSrc = diag.getPerSourceErrorRMS();
             labels = {'code','trop','iono','hwDelay','mp'};
             dispNm = {'Code noise','Troposphere','Ionosphere','Hw delay','Multipath'};
@@ -261,8 +269,20 @@ classdef Plotter
                     hasAny = true;
                 end
             end
+
+            % Range-correction diagnostics (sagnac, shapiro truth−model)
+            sagRMS = diag.getSagnacDiffRMS();
+            if any(sagRMS > 0)
+                plot(t, sagRMS, 'c--', 'LineWidth',1.2, 'DisplayName','Sagnac (T-M)');
+                hold on; hasAny = true;
+            end
+            shaRMS = diag.getShapiroDiffRMS();
+            if any(shaRMS > 0)
+                plot(t, shaRMS, 'k--', 'LineWidth',1.2, 'DisplayName','Shapiro (T-M)');
+                hold on; hasAny = true;
+            end
+
             if ~hasAny
-                % All sources zero — still show a labelled zero line
                 plot(t, zeros(size(t)), 'b', 'LineWidth',1.2, 'DisplayName','All sources');
             end
             xlabel('Time [s]'); ylabel('RMS [m]');

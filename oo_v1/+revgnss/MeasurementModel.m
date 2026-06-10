@@ -36,13 +36,15 @@ classdef MeasurementModel < handle
         errorChain      revgnss.ErrorChain
         elevMask_rad    (1,1) double = 5 * pi/180
         attitudeJacStep_rad (1,1) double = 1e-6
+        ambiguityMap                       % containers.Map: (tower*1000+antenna) → integer N
     end
 
     methods
         function obj = MeasurementModel(cfg, errorChain)
             if nargin == 0; return; end
-            obj.cfg        = cfg;
-            obj.errorChain = errorChain;
+            obj.cfg          = cfg;
+            obj.errorChain   = errorChain;
+            obj.ambiguityMap = [];   % populated lazily on first carrier phase call
             if isfield(cfg,'elevationMask_rad')
                 obj.elevMask_rad = cfg.elevationMask_rad;
             end
@@ -175,18 +177,30 @@ classdef MeasurementModel < handle
 
             sigmaFloor = obj.cfg.measurement.sigmaFloor_m;
 
+            % Storage for per-correction diagnostics
+            sagnacTruth_m  = zeros(M,1);
+            sagnacModel_m  = zeros(M,1);
+            shapiroTruth_m = zeros(M,1);
+            shapiroModel_m = zeros(M,1);
+
             for mi = 1:M
                 ti  = twr_list(mi);
                 ai  = ant_list(mi);
                 twr = towers{ti};
                 r_twr = twr.getAntennaPositionECEF();
 
-                % Truth pseudorange
-                rho_true = norm(r_ants_true(:,ai) - r_twr);
+                % Truth pseudorange with corrections
+                [rho_true, cTruth] = revgnss.RangeCorrections.correctedPseudorange( ...
+                    r_ants_true(:,ai), r_twr, obj.cfg, 'truth');
+                sagnacTruth_m(mi)  = cTruth.sagnac;
+                shapiroTruth_m(mi) = cTruth.shapiro;
                 z(mi) = rho_true + b_rx_true - towerClkTruth(mi) + errStruct.truthTotal_m(mi);
 
-                % Predicted pseudorange
-                rho_est = norm(r_ants_est(:,ai) - r_twr);
+                % Predicted pseudorange with corrections
+                [rho_est, cModel] = revgnss.RangeCorrections.correctedPseudorange( ...
+                    r_ants_est(:,ai), r_twr, obj.cfg, 'model');
+                sagnacModel_m(mi)  = cModel.sagnac;
+                shapiroModel_m(mi) = cModel.shapiro;
 
                 % Tower clock model: EKF state if estimating, else pre-computed correction
                 if isfield(stateMap,'towerClockIdx') && ti <= size(stateMap.towerClockIdx,1) && ...
@@ -198,16 +212,104 @@ classdef MeasurementModel < handle
 
                 h(mi) = rho_est + b_rx_est - b_twr_h + errStruct.modelTotal_m(mi);
 
-                % Measurement noise variance: include tower clock correction sigma in R
+                % Measurement noise variance: stochastic uncertainty only
                 sigma_i = sqrt(errStruct.sigmaTotal_m(mi)^2 + towerClkSigma(mi)^2);
                 R_diag(mi) = max(sigma_i, sigmaFloor)^2;
             end
 
-            % ----- Jacobian H ------------------------------------------
-            H = obj.computeJacobian_(towers, twr_list, ant_list, ...
+            % Attach correction diagnostics to errStruct
+            errStruct.sagnacTruth_m  = sagnacTruth_m;
+            errStruct.sagnacModel_m  = sagnacModel_m;
+            errStruct.shapiroTruth_m = shapiroTruth_m;
+            errStruct.shapiroModel_m = shapiroModel_m;
+
+            % ----- Jacobian H (pseudorange only) -----------------------
+            H_pr = obj.computeJacobian_(towers, twr_list, ant_list, ...
                 r_est, euler_est, leverArms, x_est, stateMap, nx);
 
+            % ----- Doppler (pseudorange-rate) rows ----------------------
+            doCfg = isfield(obj.cfg,'measurements') && ...
+                    isfield(obj.cfg.measurements,'doppler') && ...
+                    obj.cfg.measurements.doppler.enable;
+
+            if doCfg
+                v_rx_true = asset.v_ecef_mps;
+                v_rx_est  = x_est(stateMap.v_idx);
+                bdot_rx_true = asset.clock.getDriftMetersPerSecond();
+                bdot_rx_est  = x_est(stateMap.bdot_rx_idx);
+                sigma_dop = obj.cfg.measurements.doppler.sigma_mps;
+
+                zd     = zeros(M,1);
+                hd     = zeros(M,1);
+                Hd     = zeros(M,nx);
+                Rd_diag = sigma_dop^2 * ones(M,1);
+
+                for mi = 1:M
+                    ti  = twr_list(mi);
+                    ai  = ant_list(mi);
+                    r_twr = towers{ti}.getAntennaPositionECEF();
+
+                    % Truth range rate
+                    delta_t = r_ants_true(:,ai) - r_twr;
+                    rho_t   = norm(delta_t); if rho_t < 1; rho_t = 1; end
+                    u_t     = delta_t / rho_t;
+                    rhoDot_true = u_t' * v_rx_true;   % v_twr = 0
+                    zd(mi) = rhoDot_true + bdot_rx_true + ...
+                             sigma_dop * obj.errorChain.drawNormal(1,1);
+
+                    % Model range rate + Jacobian
+                    delta_e = r_ants_est(:,ai) - r_twr;
+                    rho_e   = norm(delta_e); if rho_e < 1; rho_e = 1; end
+                    u_e     = delta_e / rho_e;
+                    rhoDot_est = u_e' * v_rx_est;
+                    hd(mi) = rhoDot_est + bdot_rx_est;
+
+                    % H: velocity = u', clock drift = 1, others = 0
+                    Hd(mi, stateMap.v_idx)       = u_e';
+                    Hd(mi, stateMap.bdot_rx_idx) = 1;
+                end
+
+                useInEKF = obj.cfg.measurements.doppler.useInEKF;
+                errStruct.doppler.z     = zd;
+                errStruct.doppler.h     = hd;
+                errStruct.doppler.prefit = zd - hd;
+
+                if useInEKF
+                    z = [z; zd];
+                    h = [h; hd];
+                    H_pr = [H_pr; Hd];
+                    R_diag = [R_diag; Rd_diag];
+                end
+            else
+                errStruct.doppler = struct();
+            end
+
+            H = H_pr;
             R = diag(R_diag);
+
+            % ----- Carrier phase (diagnostic only; never used in EKF v1) --
+            doCpCfg = isfield(obj.cfg,'measurements') && ...
+                      isfield(obj.cfg.measurements,'carrierPhase') && ...
+                      obj.cfg.measurements.carrierPhase.enable;
+
+            if doCpCfg
+                if obj.cfg.measurements.carrierPhase.useInEKF
+                    % Check for ambiguity states (Stage 4)
+                    doAmb = isfield(obj.cfg.estimator,'estimateCarrierAmbiguities') && ...
+                            obj.cfg.estimator.estimateCarrierAmbiguities;
+                    if ~doAmb
+                        error('MeasurementModel:carrierPhaseNoAmbiguity', ...
+                            ['carrierPhase.useInEKF=true requires ' ...
+                             'cfg.estimator.estimateCarrierAmbiguities=true. ' ...
+                             'Float ambiguity states are not implemented. ' ...
+                             'Set useInEKF=false for diagnostic-only mode.']);
+                    end
+                end
+                errStruct.carrierPhase = obj.computeCarrierPhase_( ...
+                    asset, towers, twr_list, ant_list, r_ants_true);
+            else
+                errStruct.carrierPhase = struct();
+            end
         end
 
         % ----------------------------------------------------------------
@@ -222,8 +324,10 @@ classdef MeasurementModel < handle
             M = numel(twr_list);
             H = zeros(M, nx);
 
-            % Gate attitude Jacobian: check config flag
-            doAttJac = isfield(obj.cfg.estimator, 'estimateAttitudeFromPseudorange') && ...
+            % Gate attitude Jacobian: both estimateAttitude AND estimateAttitudeFromPseudorange
+            doAttJac = isfield(obj.cfg.estimator, 'estimateAttitude') && ...
+                       obj.cfg.estimator.estimateAttitude && ...
+                       isfield(obj.cfg.estimator, 'estimateAttitudeFromPseudorange') && ...
                        obj.cfg.estimator.estimateAttitudeFromPseudorange;
 
             step    = obj.attitudeJacStep_rad;
@@ -284,6 +388,57 @@ classdef MeasurementModel < handle
         end
 
         % ----------------------------------------------------------------
+        function cp = computeCarrierPhase_(obj, asset, towers, twr_list, ant_list, r_ants_true)
+            % computeCarrierPhase_  Generate truth carrier phase observables (diagnostic).
+            %
+            % z_phi_cycles = (rho + b_rx - b_twr)/lambda + N_ia
+            % N_ia is a constant integer ambiguity per (tower, antenna) arc.
+            % No cycle slips in v1.
+            cpc    = obj.cfg.measurements.carrierPhase;
+            lambda = cpc.lambda_m;
+            sigma  = cpc.sigma_cycles;
+            M      = numel(twr_list);
+
+            % Initialise ambiguity map lazily (persistent across epochs via property)
+            if isempty(obj.ambiguityMap)
+                rngAmb = RandStream('mt19937ar','Seed', cpc.seed);
+                obj.ambiguityMap = containers.Map('KeyType','int32','ValueType','double');
+                for mi2 = 1:M
+                    key = int32(twr_list(mi2) * 1000 + ant_list(mi2));
+                    if ~isKey(obj.ambiguityMap, key)
+                        switch cpc.initialAmbiguityMode
+                            case 'randomInteger'
+                                obj.ambiguityMap(key) = round(randn(rngAmb,1,1) * 1e4);
+                            otherwise
+                                obj.ambiguityMap(key) = 0;
+                        end
+                    end
+                end
+            end
+
+            b_rx_true = asset.clock.getBiasMeters();
+            phi    = zeros(M,1);
+            ambig  = zeros(M,1);
+            for mi = 1:M
+                ti   = twr_list(mi);
+                ai   = ant_list(mi);
+                r_twr = towers{ti}.getAntennaPositionECEF();
+                b_twr = towers{ti}.getClockBiasMeters();
+                rho   = norm(r_ants_true(:,ai) - r_twr);
+                key   = int32(ti * 1000 + ai);
+                N_ia  = obj.ambiguityMap(key);
+                ambig(mi) = N_ia;
+                phi(mi) = (rho + b_rx_true - b_twr) / lambda + N_ia + ...
+                          sigma * obj.errorChain.drawNormal(1,1);
+            end
+            cp.phi_cycles      = phi;
+            cp.ambiguity_int   = ambig;
+            cp.lambda_m        = lambda;
+            cp.towerIdx        = twr_list;
+            cp.antennaIdx      = ant_list;
+        end
+
+        % ----------------------------------------------------------------
         function b_model = getTowerClockModel_(obj, twr, cfg)
             % getTowerClockModel_  Legacy single-tower clock correction helper.
             %
@@ -302,7 +457,7 @@ classdef MeasurementModel < handle
                 case 'perfectCorrection'
                     b_model = twr.getClockBiasMeters();
                 case 'noisyCorrection'
-                    b_model = twr.getClockBiasMeters() + noiseSigma * randn;
+                    b_model = twr.getClockBiasMeters() + noiseSigma * obj.errorChain.drawNormal(1,1);
                 otherwise
                     b_model = 0;
             end
