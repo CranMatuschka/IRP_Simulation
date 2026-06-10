@@ -47,8 +47,13 @@ classdef ReportWriter
             end
 
             % Keep only valid figure handles
-            figHandles = figHandles(isgraphics(figHandles) & ...
-                strcmp(get(figHandles,'Type'),'figure'));
+            valid = isgraphics(figHandles);
+            figHandles = figHandles(valid);
+            
+            if ~isempty(figHandles)
+                isFig = arrayfun(@(g) strcmp(get(g, 'Type'), 'figure'), figHandles);
+                figHandles = figHandles(isFig);
+            end
 
             if isempty(figHandles)
                 warning('ReportWriter:noValidFigures', 'No valid figure handles to save.');
@@ -186,14 +191,27 @@ classdef ReportWriter
             fname = regexprep(fname, '[^\w]', '');
         end
 
-        % ------------------------------------------------------------------
+                % ------------------------------------------------------------------
         function ok = hasExportGraphicsAppend_()
             % hasExportGraphicsAppend_  True on MATLAB R2020b+.
+            %
+            % Important:
+            % ver('MATLAB').Version is like '9.14', not '2023'.
+            % The calendar release year is stored in v.Release, e.g. '(R2023a)'.
+        
             try
-                v   = ver('MATLAB');
-                yr  = str2double(v.Version(1:4));
-                rel = v.Release(3);   % 'a' or 'b'
-                ok  = (yr > 2020) || (yr == 2020 && rel >= 'b');
+                v = ver('MATLAB');
+        
+                tok = regexp(v.Release, 'R(\d{4})([ab])', 'tokens', 'once');
+                if isempty(tok)
+                    ok = false;
+                    return
+                end
+        
+                yr  = str2double(tok{1});
+                rel = tok{2};   % 'a' or 'b'
+        
+                ok = (yr > 2020) || (yr == 2020 && strcmp(rel, 'b'));
             catch
                 ok = false;
             end
@@ -222,38 +240,43 @@ classdef ReportWriter
 
         % ------------------------------------------------------------------
         function exportViaPrint_(figHandles, pdfPath)
-            % exportViaPrint_  Fallback: print each figure + Ghostscript merge.
-            tmpDir  = tempdir();
-            tmpFiles = {};
-
+            % exportViaPrint_  Fallback PDF export using MATLAB print -append.
+            %
+            % This avoids the old behavior where only the first figure was copied
+            % when Ghostscript was unavailable.
+        
+            if exist(pdfPath, 'file')
+                delete(pdfPath);
+            end
+        
+            nWritten = 0;
+        
             for k = 1:numel(figHandles)
                 fig = figHandles(k);
-                if ~isvalid(fig); continue; end
-                tmpPath = fullfile(tmpDir, sprintf('revgnss_fig_%04d.pdf', k));
+        
+                if ~isgraphics(fig) || ~strcmp(get(fig, 'Type'), 'figure')
+                    continue
+                end
+        
                 try
-                    print(fig, tmpPath, '-dpdf', '-bestfit');
-                    tmpFiles{end+1} = tmpPath; %#ok<AGROW>
+                    if nWritten == 0
+                        print(fig, pdfPath, '-dpdf', '-bestfit');
+                    else
+                        print(fig, pdfPath, '-dpdf', '-bestfit', '-append');
+                    end
+        
+                    nWritten = nWritten + 1;
                 catch ME
                     warning('ReportWriter:printFailed', ...
                         'print() failed for figure %d: %s', k, ME.message);
                 end
             end
-
-            if isempty(tmpFiles); return; end
-
-            if numel(tmpFiles) == 1
-                copyfile(tmpFiles{1}, pdfPath);
+        
+            if nWritten == 0
+                warning('ReportWriter:noPdfPages', ...
+                    'No figures were written to the PDF.');
             else
-                gsOk = revgnss.ReportWriter.tryGhostscriptMerge_(tmpFiles, pdfPath);
-                if ~gsOk
-                    copyfile(tmpFiles{1}, pdfPath);
-                    warning('ReportWriter:partialPdf', ...
-                        'Could not merge PDFs (Ghostscript unavailable). First figure only.');
-                end
-            end
-
-            for k = 1:numel(tmpFiles)
-                if exist(tmpFiles{k},'file'); delete(tmpFiles{k}); end
+                fprintf('  Wrote %d figures/pages to PDF using print fallback.\n', nWritten);
             end
         end
 

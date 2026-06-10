@@ -75,8 +75,13 @@ classdef Plotter
             end
 
             % Return only valid figure handles
-            valid = isgraphics(fh) & strcmp(get(fh,'Type'),'figure');
+            valid = isgraphics(fh);
             figHandles = fh(valid);
+            
+            if ~isempty(figHandles)
+                isFig = arrayfun(@(g) strcmp(get(g, 'Type'), 'figure'), figHandles);
+                figHandles = figHandles(isFig);
+            end
         end
 
         % ================================================================
