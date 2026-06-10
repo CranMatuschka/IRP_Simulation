@@ -39,6 +39,8 @@ classdef Atmosphere < handle
         relativeHumidity_fraction double = 0.50
         minimumMappingElevation_deg double = 3.0
         troposphereMappingFunction string = "simple"
+        zhd_m double = 0.0
+        zwd_m double = 0.0
 
         % Deterministic ionosphere input.
         vtec_TECU double = 10.0
@@ -154,7 +156,7 @@ classdef Atmosphere < handle
             obj.troposphereModel = obj.normalizeChoice( ...
                 obj.getFieldOrDefault( ...
                     obj.cfg, 'troposphereModel', defaultTroposphereModel), ...
-                ["disabled", "constant", "saastamoinen", "profile", "era5profile"], ...
+                ["disabled", "constant", "simpleztd", "saastamoinen", "profile", "era5profile"], ...
                 'troposphereModel');
 
             obj.ionosphereModel = obj.normalizeChoice( ...
@@ -186,8 +188,16 @@ classdef Atmosphere < handle
             obj.relativeHumidity_fraction = obj.getScalarField( ...
                 obj.cfg, 'relativeHumidity_fraction', 0.50);
 
+            defaultMinimumMappingElevation_deg = 3.0;
+
+            if obj.troposphereModel == "simpleztd"
+                defaultMinimumMappingElevation_deg = 10.0;
+            end
+
             obj.minimumMappingElevation_deg = obj.getScalarField( ...
-                obj.cfg, 'minimumMappingElevation_deg', 3.0);
+                obj.cfg, ...
+                'minimumMappingElevation_deg', ...
+                defaultMinimumMappingElevation_deg);
 
             obj.troposphereMappingFunction = obj.normalizeChoice( ...
                 obj.getFieldOrDefault( ...
@@ -196,6 +206,9 @@ classdef Atmosphere < handle
                     "simple"), ...
                 ["simple"], ...
                 'troposphereMappingFunction');
+
+            obj.zhd_m = obj.getScalarField(obj.cfg, 'zhd_m', 0.0);
+            obj.zwd_m = obj.getScalarField(obj.cfg, 'zwd_m', 0.0);
 
             obj.vtec_TECU = obj.getScalarField( ...
                 obj.cfg, 'vtec_TECU', 10.0);
@@ -481,6 +494,13 @@ classdef Atmosphere < handle
                     tropoResult.total_m = delay_m;
                     tropoResult.message = "Constant troposphere delay model.";
 
+                case "simpleztd"
+                    [delay_m, tropoResult] = ...
+                        obj.simpleZtdDelayWithMetadataMeters( ...
+                        groundNode, ...
+                        elevation_deg, ...
+                        datetimeUtc);
+
                 case "saastamoinen"
                     [delay_m, tropoResult] = ...
                         obj.saastamoinenDelayWithMetadataMeters( ...
@@ -516,6 +536,21 @@ classdef Atmosphere < handle
 
                 case "constant"
                     derivative = 0.0;
+
+                case "simpleztd"
+                    % The simpleZtd mapping is clamped below the configured
+                    % minimum elevation, so its derivative is zero there.
+                    if double(elevation_deg) <= obj.minimumMappingElevation_deg
+                        derivative = 0.0;
+                        return;
+                    end
+
+                    slantDelay_m = ...
+                        (obj.zhd_m + obj.zwd_m) / ...
+                        max(double(sinElevation), eps);
+
+                    derivative = ...
+                        -slantDelay_m / max(double(sinElevation), eps);
 
                 case "saastamoinen"
                     % The mapping function is clamped below the configured
@@ -632,6 +667,7 @@ classdef Atmosphere < handle
             mapResult.metadata.mappingFactor = mappingFactor;
             mapResult.metadata.slantTec_TECU = vtec_TECU * mappingFactor;
             mapResult.metadata.delay_m = delay_m;
+            mapResult.metadata.frequency_Hz = double(frequency_Hz);
         end
 
         function [delay_m, mapResult] = ionexDelayMeters( ...
@@ -690,6 +726,7 @@ classdef Atmosphere < handle
             mapResult.metadata.mappingFactor = mappingFactor;
             mapResult.metadata.slantTec_TECU = vtec_TECU * mappingFactor;
             mapResult.metadata.delay_m = delay_m;
+            mapResult.metadata.frequency_Hz = double(frequency_Hz);
         end
         
         function delay_m = handleMissingIonosphereData(obj, messageText)
@@ -770,6 +807,39 @@ classdef Atmosphere < handle
                 groundNode, ...
                 elevation_deg, ...
                 NaT(1, 1, 'TimeZone', 'UTC'));
+        end
+
+        function [delay_m, tropoResult] = ...
+                simpleZtdDelayWithMetadataMeters( ...
+                obj, groundNode, elevation_deg, datetimeUtc)
+
+            [mappingHydrostatic, mappingWet] = ...
+                obj.troposphereMappingFactors(elevation_deg);
+
+            slantHydrostaticDelay_m = obj.zhd_m * mappingHydrostatic;
+            slantWetDelay_m = obj.zwd_m * mappingWet;
+
+            delay_m = slantHydrostaticDelay_m + slantWetDelay_m;
+
+            tropoResult = obj.emptyTroposphereResult( ...
+                datetimeUtc, groundNode);
+
+            tropoResult.valid = true;
+            tropoResult.message = ...
+                "simpleZtd uses flat-earth 1/sin(E) obliquity mapping; it is not a precise low-elevation model.";
+            tropoResult.source = "configured zhd_m and zwd_m";
+
+            tropoResult.zenithHydrostaticDelay_m = obj.zhd_m;
+            tropoResult.zenithWetDelay_m = obj.zwd_m;
+
+            tropoResult.mappingFunction = obj.troposphereMappingFunction;
+            tropoResult.mappingHydrostatic = mappingHydrostatic;
+            tropoResult.mappingWet = mappingWet;
+
+            tropoResult.slantHydrostaticDelay_m = ...
+                slantHydrostaticDelay_m;
+            tropoResult.slantWetDelay_m = slantWetDelay_m;
+            tropoResult.total_m = delay_m;
         end
 
         function [delay_m, tropoResult] = ...
@@ -1117,6 +1187,8 @@ classdef Atmosphere < handle
             metadata.surfaceTemperature_K = obj.surfaceTemperature_K;
             metadata.relativeHumidity_fraction = obj.relativeHumidity_fraction;
             metadata.minimumMappingElevation_deg = obj.minimumMappingElevation_deg;
+            metadata.zhd_m = obj.zhd_m;
+            metadata.zwd_m = obj.zwd_m;
             metadata.vtec_TECU = obj.vtec_TECU;
             metadata.ionospherePiercePoint = struct( ...
                 'valid', false, ...
@@ -1197,9 +1269,25 @@ classdef Atmosphere < handle
                 {'real', 'finite', 'scalar', '>=', 0.0, '<=', 1.0}, ...
                 mfilename, 'relativeHumidity_fraction');
 
+            validateattributes(obj.zhd_m, {'numeric'}, ...
+                {'real', 'finite', 'scalar', 'nonnegative'}, ...
+                mfilename, 'zhd_m');
+
+            validateattributes(obj.zwd_m, {'numeric'}, ...
+                {'real', 'finite', 'scalar', 'nonnegative'}, ...
+                mfilename, 'zwd_m');
+
             validateattributes(obj.minimumMappingElevation_deg, {'numeric'}, ...
                 {'real', 'finite', 'scalar', 'positive', '<=', 90.0}, ...
                 mfilename, 'minimumMappingElevation_deg');
+
+            if obj.troposphereModel == "simpleztd" && ...
+                    obj.minimumMappingElevation_deg < 10.0
+                error('Atmosphere:SimpleZtdMinimumElevation', ...
+                    ['simpleZtd uses a flat-earth 1/sin(E) mapping and ', ...
+                     'requires minimumMappingElevation_deg >= 10 deg. ', ...
+                     'Use an advanced mapping model for lower elevations.']);
+            end
 
             validateattributes(obj.vtec_TECU, {'numeric'}, ...
                 {'real', 'finite', 'scalar', 'nonnegative'}, ...

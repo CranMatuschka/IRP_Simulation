@@ -84,26 +84,51 @@ scenario.measurement.enableNoise = false;
 
 scenario.measurement.enableHardwareDelay = false;
 scenario.measurement.enableMultipathDelay = false;
+scenario.measurement.enableStochasticMultipath = false;
 scenario.measurement.enableAntennaDelay = false;
 scenario.measurement.enableSagnacCorrection = false;
 scenario.measurement.enableElevationMask = true;
+scenario.measurement.enableTowerSurveyError = false;
 scenario.measurement.elevationMask_deg = 5.0;
 
 scenario.measurement.txHardwareDelay_m = 0.0;
 scenario.measurement.rxHardwareDelay_m = 0.0;
 scenario.measurement.multipathDelay_m = 0.0;
 scenario.measurement.antennaDelay_m = 0.0;
+% Optional estimator/model corrections for the same non-atmospheric terms.
+% Defaults are zero, so legacy truth-only behaviour is preserved unless a
+% calibrated model correction is explicitly configured.
+scenario.measurement.txHardwareDelayModel_m = 0.0;
+scenario.measurement.rxHardwareDelayModel_m = 0.0;
+scenario.measurement.multipathDelayModel_m = 0.0;
+scenario.measurement.multipathStochasticSigma0_m = 0.20;
+scenario.measurement.multipathStochasticMinimumElevation_deg = 10.0;
+scenario.measurement.multipathStochasticRandomSeed = 246813579;
+scenario.measurement.antennaDelayModel_m = 0.0;
 
-% Inertial light-time propagation is not implemented yet.
-% Keep disabled, but use the canonical field names consumed by
-% MeasurementModel.
+% Geometric range uses ECI transmitter and receiver positions evaluated at
+% the receiver epoch. Optional inertial iterative light-time evaluates the
+% ground transmitter in ECI at signal transmit time and adds the resulting
+% range correction to y and/or yp. Do not combine it with a separate ECEF
+% Sagnac correction because that would double count Earth rotation.
+% Keep disabled by default, but use the canonical field names consumed by
+scenario.measurement.propagationFrame = "ECI_static_receive_epoch";
 scenario.measurement.enableLightTimeCorrection = false;
+scenario.measurement.enableLightTimeCorrectionTruth = false;
+scenario.measurement.enableLightTimeCorrectionModel = false;
 scenario.measurement.lightTimeCorrectionMethod = "inertialIterative";
 scenario.measurement.lightTimeCorrectionTolerance_s = 1e-12;
 scenario.measurement.lightTimeCorrectionMaxIterations = 10;
 
 scenario.measurement.sagnacCorrection_m = 0.0;
-
+scenario.measurement.sagnacCorrectionModel_m = 0.0;
+scenario.measurement.enableRelativisticPathDelay = false;
+scenario.measurement.enableRelativisticClockCorrection = false;
+scenario.measurement.enableRelativisticPathDelayTruth = false;
+scenario.measurement.enableRelativisticPathDelayModel = false;
+scenario.measurement.enableRelativisticClockCorrectionTruth = false;
+scenario.measurement.enableRelativisticClockCorrectionModel = false;
+scenario.measurement.earthGravitationalParameter_m3ps2 = 3.986004418e14;
 %% Atmosphere Model
 % "truth" controls the physical atmospheric delay and optional residual noise
 % applied to generated pseudoranges.
@@ -182,6 +207,23 @@ scenario.atmosphere.ionosphereShellHeight_m = 350000.0;
 % temperature t2m [K], and one humidity source such as d2m dewpoint [K],
 % relative humidity, or water vapour pressure. Atmosphere then computes
 % Saastamoinen-style ZHD/ZWD and applies the configured mapping function.
+%
+% Simple ZTD troposphere example:
+%
+%   scenario.atmosphere.truth.enableTroposphere = true;
+%   scenario.atmosphere.truth.troposphereModel = "simpleZtd";
+%   scenario.atmosphere.truth.zhd_m = 2.3;
+%   scenario.atmosphere.truth.zwd_m = 0.2;
+%   scenario.atmosphere.truth.minimumMappingElevation_deg = 10.0;
+%
+% simpleZtd computes:
+%
+%   slant_tropo_m = (zhd_m + zwd_m) ...
+%                 / sin(max(elevation, minimumMappingElevation))
+%
+% This is a first-stage flat-earth obliquity model for regression tests and
+% coarse simulations. It is not a precise low-elevation troposphere model,
+% so minimumMappingElevation_deg must be at least 10 deg.
 
 %
 % Atmospheric residual covariance settings:
@@ -226,17 +268,17 @@ scenario.atmosphere.ionosphereShellHeight_m = 350000.0;
 % that epoch, so the injected term is tower-common across onboard receiver
 % phase centres.
 %
-% The injected truth residual is separated into:
+% The injected truth residual is recorded canonically as:
 %
-%   atmosphere_truth_troposphere_residual_by_tower_m
-%   atmosphere_truth_ionosphere_residual_by_tower_m
-%   atmosphere_truth_residual_by_tower_m
+%   sim.history.errors.troposphere.stochasticResidualByTower_m
+%   sim.history.errors.ionosphere.stochasticResidualByTower_m
+%   sim.history.errors.atmosphere.stochasticResidualByTower_m
 %
 % with:
 %
-%   atmosphere_truth_residual_by_tower_m = ...
-%       atmosphere_truth_troposphere_residual_by_tower_m + ...
-%       atmosphere_truth_ionosphere_residual_by_tower_m
+%   sim.history.errors.atmosphere.stochasticResidualByTower_m = ...
+%       sim.history.errors.troposphere.stochasticResidualByTower_m + ...
+%       sim.history.errors.ionosphere.stochasticResidualByTower_m
 %
 % The deterministic truth atmosphere delay remains separate from this
 % stochastic residual. Therefore:
@@ -260,6 +302,48 @@ scenario.atmosphere.ionosphereShellHeight_m = 350000.0;
 % Keep truth residual sigmas at zero for deterministic geometry/report
 % validation. Enable them only when testing stochastic truth generation,
 % estimator consistency, or atmosphere-model robustness.
+%
+% Truth/model/residual diagnostic workflow:
+%
+%   sim.history.errors.atmosphere.truth_m
+%       physical atmosphere delay used in generated pseudoranges y
+%
+%   sim.history.errors.atmosphere.model_m
+%       deterministic correction available to the estimator prediction yp
+%
+%   sim.history.errors.atmosphere.residual_m
+%       truth.total_m - model.total_m, including stochastic truth residuals
+%
+%   sim.history.errors.atmosphere.deterministicResidual_m
+%       deterministic truth/model mismatch with stochastic samples removed
+%
+%   sim.history.errors.atmosphere
+%       model residual sigmas and the sameTower variance contribution added
+%       to R for receivers observing the same transmitting tower
+%
+% The saved results struct exports these fields as results.history.errors.atmosphere. The
+% report data and atmosphere summary table expose the configured truth/model
+% modes, constant parameters, deterministic mismatch, residual sigmas, and
+% R covariance structure. The example script
+% examples/runAtmosphereMismatchStudy.m configures a no-external-data
+% constant mismatch with truth total 4.6 m, model total 3.7 m, and
+% deterministic residual 0.9 m.
+%
+% Do not validate atmosphere realism from final position error alone. Common
+% atmospheric range errors can be absorbed by receiver or tower clock states.
+% Inspect prefit and postfit innovations, clock-bias errors, NIS, R, and the
+% atmosphere truth/model/residual diagnostics.
+%
+% Propagation correction status:
+%
+%   scenario.measurement.propagationFrame = "ECI_static_receive_epoch"
+%
+% means geometric range uses ECI transmitter and receiver positions at the
+% receive epoch. Inertial iterative light-time and relativistic path/clock
+% terms are scaffolded diagnostics and remain disabled by default. Enabling
+% unimplemented relativistic flags raises a clear error. Enabling both
+% inertial light-time and separate Sagnac correction is guarded to prevent
+% accidental double counting.
 
 scenario.atmosphere.truth = struct( ...
     'enableTroposphere', false, ...
@@ -277,6 +361,8 @@ scenario.atmosphere.truth = struct( ...
     'surfaceTemperature_K', 293.15, ...
     'relativeHumidity_fraction', 0.50, ...
     'minimumMappingElevation_deg', 3.0, ...
+    'zhd_m', 0.0, ...
+    'zwd_m', 0.0, ...
     'vtec_TECU', 10.0, ...
     'residualTroposphereSigma_m', 0.0, ...
     'residualIonosphereSigma_m', 0.0);
@@ -300,6 +386,8 @@ scenario.atmosphere.model = struct( ...
     'surfaceTemperature_K', 293.15, ...
     'relativeHumidity_fraction', 0.50, ...
     'minimumMappingElevation_deg', 3.0, ...
+    'zhd_m', 0.0, ...
+    'zwd_m', 0.0, ...
     'vtec_TECU', 10.0, ...
     'residualTroposphereSigma_m', 0.0, ...
     'residualIonosphereSigma_m', 0.0);
@@ -388,6 +476,8 @@ function tower = makeTower(name, lat_deg, lon_deg, alt_m, txDelay_m)
     tower.alt_m = alt_m;
     tower.enabled = true;
     tower.txSignalDelay_m = txDelay_m;
+    tower.truthPositionOffsetEcef_m = zeros(3, 1);
+    tower.modelPositionOffsetEcef_m = zeros(3, 1);
 end
 
 function receivers = makeReceiverConfigs(nReceivers, baseline_m, sigma_m)

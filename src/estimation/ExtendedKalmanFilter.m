@@ -28,7 +28,7 @@ classdef ExtendedKalmanFilter < handle
             obj.X = X_propagated(:);
 
             obj.P = Phi * obj.P * Phi' + Q_dynamic;
-            obj.P = 0.5 * (obj.P + obj.P');
+            obj.P = MeasurementAlgebra.symmetrize(obj.P);
         end
 
         function [innovation, NIS, S] = update(obj, y_actual, y_pred, H, R_dynamic)
@@ -36,7 +36,7 @@ classdef ExtendedKalmanFilter < handle
                 R_dynamic = obj.R;
             end
 
-            innovation = y_actual(:) - y_pred(:);
+            innovation = MeasurementAlgebra.residual(y_actual, y_pred);
             S = H * obj.P * H' + R_dynamic;
 
             K = (obj.P * H') / S;
@@ -45,7 +45,7 @@ classdef ExtendedKalmanFilter < handle
             I = eye(obj.x_dim);
             temp_mat = I - K * H;
             obj.P = temp_mat * obj.P * temp_mat' + K * R_dynamic * K';
-            obj.P = 0.5 * (obj.P + obj.P');
+            obj.P = MeasurementAlgebra.symmetrize(obj.P);
 
             NIS = innovation' * (S \ innovation);
         end
