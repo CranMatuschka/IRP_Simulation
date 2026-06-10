@@ -145,7 +145,6 @@ classdef ReverseGnssSimulation < handle
             reportToggles = ReportConfigBuilder.togglesFromSimulation(obj);
             reportConfig = ReportConfigBuilder.configFromSimulation(obj);
             
-            simProvider = @() obj;
             generateReport(simProvider, reportConfig, reportToggles);
         end
     end

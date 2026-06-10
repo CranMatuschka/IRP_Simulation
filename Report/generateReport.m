@@ -30,9 +30,6 @@ function generateReport(sim, reportConfig, reportToggles)
         error("generateReport:MissingData", ...
             "sim must be provided when report generation is enabled.");
     end
-    if isa(sim, 'function_handle')
-        sim = sim();
-    end
     
     if nargin < 2 || ~isstruct(reportConfig)
         reportConfig = struct();
@@ -103,7 +100,6 @@ function generateReport(sim, reportConfig, reportToggles)
         sqrt(max(innovation_covariance_min_variance_m2, 0.0));
     innovation_covariance_max_sigma_m = ...
         sqrt(max(innovation_covariance_max_variance_m2, 0.0));
-    sat_pos_history_m = history.truth(sim.idx.pos, :);
     nis_degrees_of_freedom = history.measurement_count;
 
     towers_eci_first_m = sim.towersEciFirst_m;
@@ -234,27 +230,7 @@ function generateReport(sim, reportConfig, reportToggles)
     postfit_residual_by_tower_m = ...
         squeeze(mean(history.postfit_residual_by_receiver_tower_m, 1));
 
-    nRows = sim.numReceivers * sim.numTowers;
-    receiverR2 = sim.cfg.measurement.pseudorangeSigma_m^2 * ...
-        double(measurementNoiseEnabled);
-    groundR2 = GroundTimingNetwork.residualVariance_m2(sim.cfg, sim.c);
-    if enable_tower_clock_ekf
-        appliedGroundR2 = 0.0;
-    else
-        appliedGroundR2 = groundR2;
-    end
-    atmosphereR2 = sim.measurementModel.atmosphereResidualVariance_m2();
-    actualR2 = sim.measurementModel.measurementVariance( ...
-        enable_tower_clock_ekf, groundR2);
-    R_receiver_m2 = ones(nRows, sim.numSteps) * receiverR2;
-    R_tower_clock_m2 = ones(nRows, sim.numSteps) * appliedGroundR2;
-    R_atmosphere_m2 = ones(nRows, sim.numSteps) * atmosphereR2;
-    R_numerical_regularization_m2 = ...
-        ones(nRows, sim.numSteps) * ...
-        max(actualR2 - receiverR2 - appliedGroundR2 - atmosphereR2, 0.0);
-    R_total_m2 = R_receiver_m2 + R_tower_clock_m2 + ...
-        R_atmosphere_m2 + R_numerical_regularization_m2;
-
+    
     obs = ObservabilityAnalyzer.analyzeNormalMatrix( ...
         sim.observabilityNormalMatrix, state_names);
     final_observability_rank = obs.rank;
@@ -496,12 +472,9 @@ function generateReport(sim, reportConfig, reportToggles)
     plot_paths.receiver_subset_position = "";
     plot_paths.receiver_subset_covariance = "";
     plot_paths.receiver_subset_residuals = "";
-    if exist('R_total_m2', 'var')
-        plot_paths.R_breakdown = exportPlot(figure_dir, "measurement_covariance_breakdown.pdf", ...
-            @() plotMeasurementCovarianceBreakdown(time_vec, sim));
-    else
-        plot_paths.R_breakdown = "";
-    end
+    plot_paths.R_breakdown = exportPlot(figure_dir, ...
+        "measurement_covariance_breakdown.pdf", ...
+        @() plotMeasurementCovarianceBreakdown(time_vec, sim));
     atmosphereSectionEnabled = reportToggles.ionosphere || reportToggles.troposphere;
     atmospherePlotsEnabled = ...
         atmosphereSectionEnabled && ...
@@ -611,18 +584,13 @@ function generateReport(sim, reportConfig, reportToggles)
         plot_paths.nis = exportPlot(figure_dir, "nis.pdf", ...
             @() plotNis(time_vec, nis_history, num_towers));
     end
-    if exist('normalized_innovation_rms', 'var') && ...
-            exist('innovation_covariance_mean_sigma_m', 'var')
-        plot_paths.innovation_covariance_consistency = exportPlot( ...
-            figure_dir, ...
-            "innovation_covariance_consistency.pdf", ...
-            @() plotInnovationCovarianceConsistency(time_vec, sim));
-    else
-        plot_paths.innovation_covariance_consistency = "";
-    end
+    plot_paths.innovation_covariance_consistency = exportPlot( ...
+        figure_dir, ...
+        "innovation_covariance_consistency.pdf", ...
+        @() plotInnovationCovarianceConsistency(time_vec, sim));
 
     plot_paths.geometry = exportPlot(figure_dir, "geometry.pdf", ...
-        @() plotGeometry(R_earth, sat_pos_history_m, towers_eci_first_m, towers));
+        @() plotGeometry(R_earth, history.truth(sim.idx.pos, :), towers_eci_first_m, towers));
     if exist('clock_allan_names', 'var') && exist('sim_adev_by_clock', 'var')
         plot_paths.allan = exportPlot(figure_dir, "allan_deviation.pdf", ...
             @() plotAllanDeviation(oscillators, reportConfig.selectedOscillatorName, ...
