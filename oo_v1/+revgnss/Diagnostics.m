@@ -15,7 +15,7 @@ classdef Diagnostics < handle
         end
 
         function record(obj, t_s, asset, ekf, z, h, H, R, NIS, errStruct, ...
-                visibleTowerIds, elevations_rad)
+                visibleTowerIds, elevations_rad, postfitResidual)
             % record  Append one epoch of data.
 
             sm = ekf.stateMap;
@@ -50,10 +50,12 @@ classdef Diagnostics < handle
                 entry.measurements.z                = z;
                 entry.measurements.h                = h;
                 entry.measurements.prefitInnovation = z - h;
-                % Postfit residual: (I - H*K)*nu, approximated here as zero
-                % because we do not have K available in Diagnostics.
-                % For filter health use prefitInnovation; postfit = 0 is a v1 limitation.
-                entry.measurements.postfitResidual  = zeros(size(z));
+                % Postfit residual: recomputed in ReverseGNSSSimulation after EKF update.
+                if nargin >= 13 && ~isempty(postfitResidual)
+                    entry.measurements.postfitResidual = postfitResidual;
+                else
+                    entry.measurements.postfitResidual = z - h;  % fallback = prefit
+                end
                 entry.measurements.visibleTowerIds  = visibleTowerIds;
                 entry.measurements.elevation_rad    = elevations_rad;
             else

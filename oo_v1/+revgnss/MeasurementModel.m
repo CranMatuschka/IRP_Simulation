@@ -147,7 +147,10 @@ classdef MeasurementModel < handle
                 rho_est = norm(r_ant_est - r_twr);
 
                 % Tower clock model/estimate
-                if isfield(stateMap,'towerClockIdx') && ti <= size(stateMap.towerClockIdx,1)
+                % Guard: only index into state if tower clocks are actually estimated
+                % (stateMap.towerClockIdx(ti,1) == 0 when estimateTowerClocks = false).
+                if isfield(stateMap,'towerClockIdx') && ti <= size(stateMap.towerClockIdx,1) && ...
+                        stateMap.towerClockIdx(ti,1) > 0
                     b_twr_est = x_est(stateMap.towerClockIdx(ti,1));
                 else
                     b_twr_est = obj.getTowerClockModel_(twr, obj.cfg);
@@ -159,8 +162,12 @@ classdef MeasurementModel < handle
                     - b_twr_est ...
                     + errStruct.modelTotal_m(mi);
 
-                % Measurement noise variance
-                R_diag(mi) = errStruct.sigmaTotal_m(mi)^2;
+                % Measurement noise variance — apply floor to prevent R = 0
+                sigmaFloor = 1e-3;
+                if isfield(obj.cfg, 'measurement') && isfield(obj.cfg.measurement, 'sigmaFloor_m')
+                    sigmaFloor = obj.cfg.measurement.sigmaFloor_m;
+                end
+                R_diag(mi) = max(errStruct.sigmaTotal_m(mi), sigmaFloor)^2;
             end
 
             % ----- Jacobian H ------------------------------------------
@@ -231,9 +238,11 @@ classdef MeasurementModel < handle
 
         % ----------------------------------------------------------------
         function b_model = getTowerClockModel_(obj, twr, cfg)
-            % Choose tower clock correction based on cfg.
+            % Choose tower clock correction based on cfg.estimator.towerClockMode.
             towerClockMode = 'none';
-            if isfield(cfg,'towerClockMode')
+            if isfield(cfg, 'estimator') && isfield(cfg.estimator, 'towerClockMode')
+                towerClockMode = cfg.estimator.towerClockMode;
+            elseif isfield(cfg, 'towerClockMode')
                 towerClockMode = cfg.towerClockMode;
             end
             switch towerClockMode

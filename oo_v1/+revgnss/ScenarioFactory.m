@@ -60,25 +60,36 @@ classdef ScenarioFactory
 
         % ----------------------------------------------------------------
         function x0 = buildInitialState_(cfg, asset, towers, ekf)
-            % Build EKF initial state from truth + small perturbation.
+            % Build EKF initial state from truth + configured perturbation.
             sm = ekf.stateMap;
             x0 = zeros(ekf.nx, 1);
 
-            % Add position perturbation (km-level initial uncertainty)
-            pos_pert  = cfg.estimator.P0_pos_m * randn(3,1);
-            vel_pert  = cfg.estimator.P0_vel_mps * randn(3,1);
-            eul_pert  = cfg.estimator.P0_euler_rad * randn(3,1);
-            omg_pert  = cfg.estimator.P0_omega_radps * randn(3,1);
+            % Use cfg.estimator.initialError if available (controlled offsets).
+            % Fall back to random P0-scaled draws if not configured.
+            if isfield(cfg.estimator, 'initialError')
+                ie = cfg.estimator.initialError;
+                pos_pert  = ie.pos_m(:);
+                vel_pert  = ie.vel_mps(:);
+                eul_pert  = ie.euler_deg(:) * pi / 180;
+                omg_pert  = ie.omega_radps(:);
+                clk_pert  = ie.clockBias_m;
+                cdot_pert = ie.clockDrift_mps;
+            else
+                pos_pert  = cfg.estimator.P0_pos_m   * randn(3,1);
+                vel_pert  = cfg.estimator.P0_vel_mps  * randn(3,1);
+                eul_pert  = cfg.estimator.P0_euler_rad * randn(3,1);
+                omg_pert  = cfg.estimator.P0_omega_radps * randn(3,1);
+                clk_pert  = cfg.estimator.P0_bRx_m    * randn;
+                cdot_pert = cfg.estimator.P0_bdotRx_mps * randn;
+            end
 
             x0(sm.r_idx)     = asset.r_ecef_m + pos_pert;
             x0(sm.v_idx)     = asset.v_ecef_mps + vel_pert;
             x0(sm.euler_idx) = asset.attitude_euler_rad + eul_pert;
             x0(sm.omega_idx) = asset.angularRate_body_radps + omg_pert;
 
-            x0(sm.b_rx_idx)    = asset.clock.getBiasMeters() + ...
-                cfg.estimator.P0_bRx_m * randn;
-            x0(sm.bdot_rx_idx) = asset.clock.getDriftMetersPerSecond() + ...
-                cfg.estimator.P0_bdotRx_mps * randn;
+            x0(sm.b_rx_idx)    = asset.clock.getBiasMeters() + clk_pert;
+            x0(sm.bdot_rx_idx) = asset.clock.getDriftMetersPerSecond() + cdot_pert;
 
             if ekf.estimateTowerClocks
                 for ti = 1:ekf.nTowers

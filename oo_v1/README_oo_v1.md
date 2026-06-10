@@ -1,5 +1,68 @@
 # oo_v1 — Object-Oriented Reverse-GNSS Simulation
 
+## Default scenario
+
+The default run uses **GEO-1** as the space asset and five ground towers taken from the original `config/SimulationConfig.m`:
+
+| Component | Parameter | Value |
+|-----------|-----------|-------|
+| Space asset | Name | GEO-1 |
+| | Latitude | 0.0 deg |
+| | Longitude | 23.0 deg |
+| | Altitude | 35 786 000 m (GEO) |
+| Tower 1 | Tenerife | lat 28.3, lon -16.5, alt 0 m |
+| Tower 2 | Stockholm | lat 59.3, lon 18.1, alt 0 m |
+| Tower 3 | Hartebeesthoek | lat -25.9, lon 27.7, alt 0 m |
+| Tower 4 | Bengaluru | lat 13.0, lon 77.6, alt 0 m |
+| Tower 5 | Libreville | lat 0.0355, lon -9.4496, alt 0 m |
+
+The GEO satellite is stationary in ECEF. No orbit propagator is used for the default scenario.
+
+---
+
+## Simple PDF report
+
+Run the default simulation and it automatically saves a PDF containing all diagnostic figures:
+
+```matlab
+cd oo_v1
+run_oo_reverse_gnss
+```
+
+After the run completes, the report is saved to:
+
+```
+oo_v1/output/reverse_gnss_simple_report.pdf
+```
+
+The PDF is tracked by git. PNGs are not committed by default.
+
+Implementation: `+revgnss/ReportWriter.m`. Uses `exportgraphics` with `Append` on MATLAB R2020b+; falls back to `print` on older releases.
+
+To generate a report from your own simulation:
+```matlab
+sim.plot();
+sim.writeReport();
+```
+
+---
+
+## Kalman convergence expectations
+
+The default scenario is a **position and clock convergence validation**. Do not judge performance solely from final position error.
+
+Key points:
+
+- Pseudorange from 5 towers primarily observes **position (3 states)** and **receiver clock bias (1 state)**.
+- With 5 measurements and 14 states, the EKF is underdetermined per epoch but converges recursively over time.
+- **Attitude is weakly observable** only through the receiver antenna lever arm (`receiverLeverArm_body_m = [1.0; 0.5; 0.2]`). Attitude convergence is slow; position and clock converge first.
+- **Clock-mode errors and common-mode atmospheric delays** can be absorbed by the receiver clock bias state. This is physically correct but means position improvement from atmosphere modelling is limited; innovation RMS improvement is more visible.
+- The default case has all errors off (no atmosphere, no hardware delay, no multipath) and deterministic tower clocks with `perfectCorrection` mode. This is the easiest convergence case.
+- Expected behaviour: position error should decrease significantly within 600–1800 s. Final position error depends on measurement noise and geometry.
+- NIS should be approximately equal to the number of visible measurements (5) once converged. Large NIS indicates under-modelled noise or filter divergence.
+
+---
+
 ## 1. Purpose
 
 `oo_v1` is a clean, object-oriented MATLAB implementation of a **reverse-GNSS** simulation. N ground towers transmit GNSS-like ranging signals upward to a space asset (LEO satellite). The space asset carries a receiver and estimates its position, velocity, attitude, angular velocity, and receiver clock state via an Extended Kalman Filter (EKF) processing pseudorange measurements from the towers.
@@ -213,7 +276,7 @@ cd oo_v1
 run_oo_reverse_gnss
 ```
 
-This runs a 300-second default scenario with 8 towers, plots all diagnostics.
+This runs a 3600-second (1 hour) GEO-1 scenario with 5 towers, plots all diagnostics, and saves a PDF report to `oo_v1/output/reverse_gnss_simple_report.pdf`.
 
 ### All experiments
 
