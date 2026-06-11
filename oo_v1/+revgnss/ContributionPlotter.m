@@ -80,14 +80,17 @@ classdef ContributionPlotter
                     if isfield(ef, dFld); d_vals = ef.(dFld); end
                 end
 
+                % fieldExists: diagnostic record has data (may all be zero)
+                % hasNonzero:  at least one nonzero sample exists
+                fieldExists = ~isempty(t_vals) && ~isempty(m_vals) && ~isempty(d_vals);
                 hasTruth    = ~isempty(t_vals) && any(abs(t_vals) > 1e-15);
                 hasModel    = ~isempty(m_vals) && any(abs(m_vals) > 1e-15);
                 hasMismatch = ~isempty(d_vals) && any(abs(d_vals) > 1e-15);
-                hasData     = hasTruth || hasModel || hasMismatch;
+                hasNonzero  = hasTruth || hasModel || hasMismatch;
 
                 figContribs(k) = revgnss.ContributionPlotter.makeContribFig_( ...
                     t, t_vals, m_vals, d_vals, hasTruth, hasModel, hasMismatch, ...
-                    hasData, enabled, dispName, unit, cfg);
+                    hasNonzero, fieldExists, enabled, dispName, unit, cfg);
             end
 
             figs = [figTruth; figMismatch; figContribs];
@@ -107,7 +110,12 @@ classdef ContributionPlotter
                 case 'codenoise'
                     tf = true;
                 case 'towerclock'
-                    tf = true;
+                    try
+                        mode = cfg.estimator.towerClockMode;
+                        tf   = ischar(mode) && ~strcmp(mode, 'none');
+                    catch
+                        tf = false;
+                    end
                 case 'troposphere'
                     tf = revgnss.ContributionPlotter.cf_(cfg, {'errors','troposphere','truth','enable'}) || ...
                          revgnss.ContributionPlotter.cf_(cfg, {'errors','troposphere','model','enable'});
@@ -252,12 +260,18 @@ classdef ContributionPlotter
         % ================================================================
 
         function fig = makeContribFig_(t, t_vals, m_vals, d_vals, ...
-                hasTruth, hasModel, hasMismatch, hasData, enabled, dispName, unit, cfg)
+                hasTruth, hasModel, hasMismatch, hasNonzero, fieldExists, enabled, dispName, unit, cfg)
             % Three-line contribution figure: Truth (blue), Model (green), T-M (red dashed).
+            %
+            % Display logic:
+            %   hasNonzero              → plot lines (normal data)
+            %   fieldExists && enabled  → green "numerically zero" (perfect cancellation)
+            %   ~fieldExists && enabled → red warning (diagnostic data missing — likely bug)
+            %   ~enabled                → gray "disabled / zero contribution"
             fig = revgnss.ContributionPlotter.newFig_( ...
                 sprintf('Contribution: %s', dispName), cfg);
 
-            if hasData
+            if hasNonzero
                 hold on;
                 if hasTruth
                     plot(t, t_vals, 'Color',[0.10 0.45 0.74], 'LineWidth',1.5, ...
@@ -286,7 +300,21 @@ classdef ContributionPlotter
                 text(0.98, 0.95, annotStr, 'Units','normalized', ...
                     'HorizontalAlignment','right','VerticalAlignment','top', ...
                     'FontSize',9,'BackgroundColor',[1 1 0.85],'EdgeColor',[0.7 0.7 0]);
+
+            elseif fieldExists && enabled
+                % Diagnostic data exists but all values are exactly zero — expected for
+                % perfectly matched effects (e.g. towerClock in perfectCorrection mode,
+                % or matched Sagnac/Shapiro in all_contributions_matched).
+                text(0.5, 0.55, dispName, 'Units','normalized', ...
+                    'HorizontalAlignment','center','FontSize',13, ...
+                    'FontWeight','bold','Color',[0.20 0.50 0.20]);
+                text(0.5, 0.42, 'contribution is numerically zero', ...
+                    'Units','normalized','HorizontalAlignment','center', ...
+                    'FontSize',11,'Color',[0.30 0.60 0.30],'FontAngle','italic');
+
             elseif enabled
+                % Effect is enabled but no diagnostic data was recorded — likely a bug
+                % in the diagnostics recording path or a missing errStruct field.
                 text(0.5, 0.60, dispName, 'Units','normalized', ...
                     'HorizontalAlignment','center','FontSize',13, ...
                     'FontWeight','bold','Color',[0.6 0 0]);
@@ -295,6 +323,7 @@ classdef ContributionPlotter
                     'FontSize',11,'Color',[0.8 0 0]);
                 warning('ContributionPlotter:missingEnabledData', ...
                     '%s is enabled but no diagnostic data found.', dispName);
+
             else
                 text(0.5, 0.5, sprintf('%s\ndisabled / zero contribution', dispName), ...
                     'Units','normalized','HorizontalAlignment','center', ...
