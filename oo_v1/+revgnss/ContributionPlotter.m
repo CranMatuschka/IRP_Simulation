@@ -1,16 +1,13 @@
 classdef ContributionPlotter
-    % ContributionPlotter  Per-effect contribution figures for one simulation run.
+    % ContributionPlotter  Per-effect Truth / Model / Mismatch contribution figures.
     %
     % Primary entry point (use in reports):
     %   figs = revgnss.ContributionPlotter.plotSingleCaseContributionPages(diag, cfg)
     %
-    %   Returns: 1 overview figure + 1 figure per known contribution = ~21 figures.
-    %   Disabled effects produce a simple "disabled / zero contribution" page.
+    %   Returns: 2 overview figures (Truth RMS, Mismatch RMS)
+    %            + 20 per-effect pages (Truth/Model/Mismatch lines when data exists)
+    %   Disabled effects produce a gray "disabled / zero contribution" page.
     %   Enabled effects with missing data produce a red warning page.
-    %
-    % Debug-only (many figures, not for reports):
-    %   revgnss.ContributionPlotter.plotAllContributions(diag, cfg)
-    %   revgnss.ContributionPlotter.plotIndividualContributionFigures(diag, cfg)
 
     methods (Static)
 
@@ -19,64 +16,81 @@ classdef ContributionPlotter
         % ================================================================
 
         function figs = plotSingleCaseContributionPages(diag, cfg)
-            % plotSingleCaseContributionPages  One figure per known contribution source.
+            % plotSingleCaseContributionPages  Truth/Model/Mismatch per effect.
             %
             % Returns:
-            %   figs(1)       — pseudorange overview (all nonzero lines)
-            %   figs(2:21)    — one page per contribution (enabled=plot, disabled=text page)
+            %   figs(1)     — Truth RMS overview (bar chart, all PR effects)
+            %   figs(2)     — Mismatch RMS overview (bar chart)
+            %   figs(3:22)  — one page per contribution (20 effects)
             t  = diag.getTimeVector();
             cs = diag.getContributionSeries();
 
-            % ---- contribution spec table --------------------------------
-            % {displayName, cs_field_name, unit, effect_category}
+            % ---- contribution spec table -----------------------------------
+            % {displayName, effectName, unit, category}
+            % effectName = key in cs struct from getContributionSeries()
+            % unit determines sub-field suffix: m → _m, m/s → _mps, cycles → _cycles
             specs = { ...
-                'Total (T-M)',              'totalTruthMinusModel_rms_m',                     'm',      'total'; ...
-                'Code Noise',               'codeNoise_rms_m',                                'm',      'codeNoise'; ...
-                'Troposphere',              'troposphere_rms_m',                              'm',      'troposphere'; ...
-                'Ionosphere',               'ionosphere_rms_m',                               'm',      'ionosphere'; ...
-                'HW Delay',                 'hardwareDelay_rms_m',                            'm',      'hardwareDelay'; ...
-                'Multipath',                'multipath_rms_m',                                'm',      'multipath'; ...
-                'Sagnac (T-M)',             'sagnacTruthMinusModel_rms_m',                    'm',      'sagnac'; ...
-                'Shapiro (T-M)',            'shapiroTruthMinusModel_rms_m',                   'm',      'shapiro'; ...
-                'Tower Survey (T-M)',       'towerSurveyTruthMinusModel_rms_m',               'm',      'towerSurvey'; ...
-                'Rx PCO (T-M)',             'receiverPCOTruthMinusModel_rms_m',               'm',      'receiverPCO'; ...
-                'Tower PCO (T-M)',          'towerPCOTruthMinusModel_rms_m',                  'm',      'towerPCO'; ...
-                'PCV (T-M)',                'pcvTruthMinusModel_rms_m',                       'm',      'pcv'; ...
-                'Tower Clock Corr. Error',  'towerClockCorrectionError_rms_m',                'm',      'towerClock'; ...
-                'Corr. Common-Mode',        'correlatedCommonMode_rms_m',                     'm',      'correlatedNoise'; ...
-                'Corr. Same-Tower',         'correlatedSameTower_rms_m',                      'm',      'correlatedNoise'; ...
-                'Corr. Independent',        'correlatedIndependent_rms_m',                    'm',      'correlatedNoise'; ...
-                'Doppler Prefit RMS',       'dopplerPrefit_rms_mps',                          'm/s',    'doppler'; ...
-                'Doppler Twr Clock Drift',  'dopplerTowerClockDriftTruthMinusModel_rms_mps',  'm/s',    'doppler'; ...
-                'Carrier Phase (cycles)',   'carrierPhase_rms_cycles',                        'cycles', 'carrier'; ...
-                'Carrier Phase (m)',        'carrierPhase_rms_m',                             'm',      'carrier' };
+                'Total',                    'total',                 'm',      'total'; ...
+                'Code Noise',               'codeNoise',             'm',      'codeNoise'; ...
+                'Troposphere',              'troposphere',           'm',      'troposphere'; ...
+                'Ionosphere',               'ionosphere',            'm',      'ionosphere'; ...
+                'HW Delay',                 'hardwareDelay',         'm',      'hardwareDelay'; ...
+                'Multipath',                'multipath',             'm',      'multipath'; ...
+                'Sagnac',                   'sagnac',                'm',      'sagnac'; ...
+                'Shapiro',                  'shapiro',               'm',      'shapiro'; ...
+                'Tower Survey',             'towerSurvey',           'm',      'towerSurvey'; ...
+                'Receiver PCO',             'receiverPCO',           'm',      'receiverPCO'; ...
+                'Tower PCO',                'towerPCO',              'm',      'towerPCO'; ...
+                'PCV',                      'pcv',                   'm',      'pcv'; ...
+                'Tower Clock',              'towerClock',            'm',      'towerClock'; ...
+                'Corr. Common-Mode',        'correlatedCommonMode',  'm',      'correlatedNoise'; ...
+                'Corr. Same-Tower',         'correlatedSameTower',   'm',      'correlatedNoise'; ...
+                'Corr. Independent',        'correlatedIndependent', 'm',      'correlatedNoise'; ...
+                'Doppler (full)',           'dopplerRangeRate',      'm/s',    'doppler'; ...
+                'Doppler Twr Clk Drift',   'dopplerTowerClockDrift','m/s',    'doppler'; ...
+                'Carrier Phase (cycles)',   'carrierPhaseCycles',    'cycles', 'carrier'; ...
+                'Carrier Phase (m)',        'carrierPhaseMeters',    'm',      'carrier' };
 
             nContrib = size(specs, 1);
 
-            % Overview figure (PR domain only, nonzero lines)
-            figOverview = revgnss.ContributionPlotter.plotContribOverview_(t, cs, cfg);
+            % Two overview figures
+            figTruth    = revgnss.ContributionPlotter.plotTruthOverview_(t, cs, cfg);
+            figMismatch = revgnss.ContributionPlotter.plotMismatchOverview_(t, cs, cfg);
 
             % One figure per contribution
             figContribs = gobjects(nContrib, 1);
             for k = 1:nContrib
-                dispName  = specs{k,1};
-                csField   = specs{k,2};
-                unit      = specs{k,3};
-                category  = specs{k,4};
+                dispName = specs{k,1};
+                effName  = specs{k,2};
+                unit     = specs{k,3};
+                category = specs{k,4};
+                suffix   = revgnss.ContributionPlotter.unitSuffix_(unit);
 
                 enabled = revgnss.ContributionPlotter.isEffectEnabled(cfg, category);
 
-                vals = [];
-                if isfield(cs, csField) && ~isempty(cs.(csField))
-                    vals = cs.(csField);
+                % Extract truth / model / mismatch time series
+                t_vals = []; m_vals = []; d_vals = [];
+                if isfield(cs, effName)
+                    ef   = cs.(effName);
+                    tFld = ['truthRMS_'    suffix];
+                    mFld = ['modelRMS_'    suffix];
+                    dFld = ['mismatchRMS_' suffix];
+                    if isfield(ef, tFld); t_vals = ef.(tFld); end
+                    if isfield(ef, mFld); m_vals = ef.(mFld); end
+                    if isfield(ef, dFld); d_vals = ef.(dFld); end
                 end
-                hasData = ~isempty(vals) && any(abs(vals) > 1e-15);
+
+                hasTruth    = ~isempty(t_vals) && any(abs(t_vals) > 1e-15);
+                hasModel    = ~isempty(m_vals) && any(abs(m_vals) > 1e-15);
+                hasMismatch = ~isempty(d_vals) && any(abs(d_vals) > 1e-15);
+                hasData     = hasTruth || hasModel || hasMismatch;
 
                 figContribs(k) = revgnss.ContributionPlotter.makeContribFig_( ...
-                    t, vals, hasData, enabled, dispName, unit, cfg);
+                    t, t_vals, m_vals, d_vals, hasTruth, hasModel, hasMismatch, ...
+                    hasData, enabled, dispName, unit, cfg);
             end
 
-            figs = [figOverview; figContribs];
+            figs = [figTruth; figMismatch; figContribs];
             figs = figs(isgraphics(figs));
         end
 
@@ -91,9 +105,9 @@ classdef ContributionPlotter
                 case 'total'
                     tf = true;
                 case 'codenoise'
-                    tf = true;   % basic measurement noise always present
+                    tf = true;
                 case 'towerclock'
-                    tf = true;   % tower clock correction always computed
+                    tf = true;
                 case 'troposphere'
                     tf = revgnss.ContributionPlotter.cf_(cfg, {'errors','troposphere','truth','enable'}) || ...
                          revgnss.ContributionPlotter.cf_(cfg, {'errors','troposphere','model','enable'});
@@ -133,109 +147,24 @@ classdef ContributionPlotter
         end
 
         % ================================================================
-        %  DEBUG / FULL SUITE
+        %  DEBUG / FULL SUITE  (legacy methods, kept for interactive use)
         % ================================================================
 
         function figs = plotAllContributions(diag, cfg)
-            % Debug only — creates ~20 individual figures.
-            f1 = revgnss.ContributionPlotter.plotContributionOverview(diag, cfg);
-            f2 = revgnss.ContributionPlotter.plotIndividualContributionFigures(diag, cfg);
-            figs = [f1; f2];
+            % Debug only — calls plotSingleCaseContributionPages.
+            figs = revgnss.ContributionPlotter.plotSingleCaseContributionPages(diag, cfg);
         end
 
         function fig = plotContributionOverview(diag, cfg)
-            % Debug only — all pseudorange-domain RMS on one axes.
+            % Debug only — mismatch RMS overview.
             t  = diag.getTimeVector();
             cs = diag.getContributionSeries();
-            fig = revgnss.ContributionPlotter.newFig_('Contribution Overview [m]', cfg);
-
-            prFields = { ...
-                'codeNoise_rms_m',                   'Code noise'; ...
-                'troposphere_rms_m',                  'Troposphere'; ...
-                'ionosphere_rms_m',                   'Ionosphere'; ...
-                'hardwareDelay_rms_m',                'HW delay'; ...
-                'multipath_rms_m',                    'Multipath'; ...
-                'sagnacTruthMinusModel_rms_m',        'Sagnac (T-M)'; ...
-                'shapiroTruthMinusModel_rms_m',       'Shapiro (T-M)'; ...
-                'towerSurveyTruthMinusModel_rms_m',   'Tower survey (T-M)'; ...
-                'receiverPCOTruthMinusModel_rms_m',   'Rx PCO (T-M)'; ...
-                'towerPCOTruthMinusModel_rms_m',      'Tower PCO (T-M)'; ...
-                'pcvTruthMinusModel_rms_m',           'PCV (T-M)'; ...
-                'towerClockCorrectionError_rms_m',    'Tower clock err'; ...
-                'correlatedCommonMode_rms_m',         'Corr common-mode'; ...
-                'correlatedSameTower_rms_m',          'Corr same-tower'; ...
-                'correlatedIndependent_rms_m',        'Corr independent'; ...
-                'totalTruthMinusModel_rms_m',         'TOTAL (T-M)' };
-
-            colors  = lines(size(prFields,1));
-            nActive = 0;
-            for k = 1:size(prFields,1)
-                fld = prFields{k,1}; lbl = prFields{k,2};
-                if ~isfield(cs, fld); continue; end
-                vals = cs.(fld);
-                if all(vals < 1e-15); continue; end
-                nActive = nActive + 1;
-                plot(t, vals, 'Color', colors(k,:), 'LineWidth', 1.2, ...
-                    'DisplayName', lbl);
-                hold on;
-            end
-
-            if nActive == 0
-                text(0.5, 0.5, 'All contributions are zero (all effects disabled)', ...
-                    'Units','normalized','HorizontalAlignment','center', ...
-                    'FontSize',10,'Color',[0.5 0.5 0.5]);
-            end
-            xlabel('Time [s]'); ylabel('RMS [m]');
-            title('Pseudorange Contribution RMS — Truth - Model');
-            if nActive > 0; legend('Location','best','FontSize',7); end
-            grid on;
+            fig = revgnss.ContributionPlotter.plotMismatchOverview_(t, cs, cfg);
         end
 
         function figs = plotIndividualContributionFigures(diag, cfg)
-            % Debug only — one figure per contribution (~19 figures).
-            t  = diag.getTimeVector();
-            cs = diag.getContributionSeries();
-
-            specs = { ...
-                'codeNoise_rms_m',                    'Code Noise',         'm'; ...
-                'troposphere_rms_m',                  'Troposphere',        'm'; ...
-                'ionosphere_rms_m',                   'Ionosphere',         'm'; ...
-                'hardwareDelay_rms_m',                'HW Delay',           'm'; ...
-                'multipath_rms_m',                    'Multipath',          'm'; ...
-                'sagnacTruthMinusModel_rms_m',        'Sagnac (T-M)',       'm'; ...
-                'shapiroTruthMinusModel_rms_m',       'Shapiro (T-M)',      'm'; ...
-                'towerSurveyTruthMinusModel_rms_m',   'Tower Survey (T-M)', 'm'; ...
-                'receiverPCOTruthMinusModel_rms_m',   'Rx PCO (T-M)',       'm'; ...
-                'towerPCOTruthMinusModel_rms_m',      'Tower PCO (T-M)',    'm'; ...
-                'pcvTruthMinusModel_rms_m',           'PCV (T-M)',          'm'; ...
-                'towerClockCorrectionError_rms_m',    'Tower Clock Err',    'm'; ...
-                'correlatedCommonMode_rms_m',         'Corr Common-Mode',   'm'; ...
-                'correlatedSameTower_rms_m',          'Corr Same-Tower',    'm'; ...
-                'correlatedIndependent_rms_m',        'Corr Independent',   'm'; ...
-                'totalTruthMinusModel_rms_m',         'TOTAL (T-M)',        'm'; ...
-                'dopplerPrefit_rms_mps',              'Doppler Prefit',     'm/s'; ...
-                'dopplerTowerClockDriftTruthMinusModel_rms_mps', 'Doppler Twr Drift', 'm/s'; ...
-                'carrierPhase_rms_cycles',            'Carrier Phase',      'cycles'; ...
-                'carrierPhase_rms_m',                 'Carrier Phase',      'm' };
-
-            figs = gobjects(size(specs,1),1);
-            for k = 1:size(specs,1)
-                fld  = specs{k,1};
-                name = specs{k,2};
-                unit = specs{k,3};
-                fig  = revgnss.ContributionPlotter.newFig_( ...
-                    sprintf('Contribution: %s', name), cfg);
-                figs(k) = fig;
-                if isfield(cs, fld) && any(abs(cs.(fld)) > 1e-15)
-                    plot(t, cs.(fld), 'b', 'LineWidth',1.5);
-                else
-                    text(0.5, 0.5, sprintf('%s\ndisabled / zero contribution', name), ...
-                        'Units','normalized','HorizontalAlignment','center', ...
-                        'FontSize',10,'Color',[0.5 0.5 0.5],'FontStyle','italic');
-                end
-                xlabel('Time [s]'); ylabel(sprintf('RMS [%s]', unit));
-                title(sprintf('%s', name)); grid on;
-            end
+            % Debug only — delegates to plotSingleCaseContributionPages.
+            figs = revgnss.ContributionPlotter.plotSingleCaseContributionPages(diag, cfg);
         end
 
     end  % public static methods
@@ -243,71 +172,121 @@ classdef ContributionPlotter
     methods (Static, Access = private)
 
         % ================================================================
-        %  SINGLE-CASE HELPERS
+        %  OVERVIEW PAGES
         % ================================================================
 
-        function fig = plotContribOverview_(t, cs, cfg)
-            % Overview figure: all nonzero PR-domain contributions on one axes.
+        function fig = plotTruthOverview_(t, cs, cfg)
+            % Bar chart: mean truth and model RMS for all PR-domain effects.
             fig = revgnss.ContributionPlotter.newFig_( ...
-                'Contribution Overview — Pseudorange Domain', cfg);
+                'Contribution Overview — Truth and Model RMS', cfg);
 
-            prFields = { ...
-                'totalTruthMinusModel_rms_m',       'TOTAL (T-M)',        [0 0 0],       2.0; ...
-                'codeNoise_rms_m',                  'Code Noise',         [0.2 0.6 0.2], 1.2; ...
-                'troposphere_rms_m',                'Troposphere',        [0 0.4 0.8],   1.2; ...
-                'ionosphere_rms_m',                 'Ionosphere',         [0.8 0.2 0.2], 1.2; ...
-                'hardwareDelay_rms_m',              'HW Delay',           [0.6 0.3 0],   1.2; ...
-                'multipath_rms_m',                  'Multipath',          [0.7 0 0.7],   1.2; ...
-                'sagnacTruthMinusModel_rms_m',      'Sagnac (T-M)',       [0 0.7 0.7],   1.2; ...
-                'shapiroTruthMinusModel_rms_m',     'Shapiro (T-M)',      [1 0.5 0],     1.2; ...
-                'towerSurveyTruthMinusModel_rms_m', 'Tower Survey (T-M)', [0.5 0.5 0],   1.2; ...
-                'receiverPCOTruthMinusModel_rms_m', 'Rx PCO (T-M)',       [0.3 0 0.6],   1.2; ...
-                'towerPCOTruthMinusModel_rms_m',    'Tower PCO (T-M)',    [0.8 0.6 0],   1.2; ...
-                'pcvTruthMinusModel_rms_m',         'PCV (T-M)',          [0.4 0.4 0.8], 1.2; ...
-                'towerClockCorrectionError_rms_m',  'Tower Clock Err',    [0.5 0 0],     1.2 };
+            effNames = {'codeNoise','troposphere','ionosphere','hardwareDelay','multipath', ...
+                        'sagnac','shapiro','towerSurvey','receiverPCO','towerPCO','pcv', ...
+                        'towerClock','correlatedCommonMode','correlatedSameTower', ...
+                        'correlatedIndependent','total'};
+            labels = {'Code','Trop','Iono','HWDly','MP','Sagnac','Shapiro', ...
+                      'TwrSvy','RxPCO','TwrPCO','PCV','TwrClk','CorrCM','CorrST','CorrInd','TOTAL'};
 
-            nActive = 0;
-            for k = 1:size(prFields,1)
-                fld = prFields{k,1}; lbl = prFields{k,2};
-                clr = prFields{k,3}; lw  = prFields{k,4};
-                if ~isfield(cs, fld); continue; end
-                vals = cs.(fld);
-                if all(vals < 1e-15); continue; end
-                nActive = nActive + 1;
-                plot(t, vals, 'Color', clr, 'LineWidth', lw, 'DisplayName', lbl);
-                hold on;
+            nE = numel(effNames);
+            iStart  = max(1, round(0.8 * numel(t)));  % last 20% steady-state
+            truthV  = zeros(1, nE);
+            modelV  = zeros(1, nE);
+
+            for ei = 1:nE
+                eff = effNames{ei};
+                if isfield(cs, eff)
+                    ef = cs.(eff);
+                    if isfield(ef,'truthRMS_m')
+                        truthV(ei) = mean(ef.truthRMS_m(iStart:end));
+                    end
+                    if isfield(ef,'modelRMS_m')
+                        modelV(ei) = mean(ef.modelRMS_m(iStart:end));
+                    end
+                end
             end
 
-            if nActive == 0
-                text(0.5, 0.5, 'All pseudorange contributions are zero', ...
-                    'Units','normalized','HorizontalAlignment','center', ...
-                    'FontSize',10,'Color',[0.5 0.5 0.5]);
-            end
-            xlabel('Time [s]'); ylabel('RMS [m]');
-            title('Contribution Overview — Pseudorange Domain (Truth - Model)');
-            if nActive > 0; legend('Location','best','FontSize',7); end
+            bdat = [truthV; modelV]';
+            bh = bar(1:nE, bdat, 'grouped');
+            bh(1).FaceColor = [0.10 0.45 0.74];   % blue = truth
+            bh(2).FaceColor = [0.35 0.70 0.20];    % green = model
+            set(gca, 'XTick', 1:nE, 'XTickLabel', labels, 'XTickLabelRotation', 45);
+            legend('Truth','Model','Location','northeast');
+            ylabel('Mean RMS [m]  (last 20% of run)');
+            title('Contribution Overview — Truth and Model RMS [m]');
             grid on;
         end
 
-        function fig = makeContribFig_(t, vals, hasData, enabled, dispName, unit, cfg)
-            % One figure per contribution: plot if data exists, text page otherwise.
+        function fig = plotMismatchOverview_(t, cs, cfg)
+            % Bar chart: mean mismatch RMS for all PR-domain effects.
+            fig = revgnss.ContributionPlotter.newFig_( ...
+                'Contribution Overview — Mismatch RMS', cfg);
+
+            effNames = {'codeNoise','troposphere','ionosphere','hardwareDelay','multipath', ...
+                        'sagnac','shapiro','towerSurvey','receiverPCO','towerPCO','pcv', ...
+                        'towerClock','correlatedCommonMode','correlatedSameTower', ...
+                        'correlatedIndependent','total'};
+            labels = {'Code','Trop','Iono','HWDly','MP','Sagnac','Shapiro', ...
+                      'TwrSvy','RxPCO','TwrPCO','PCV','TwrClk','CorrCM','CorrST','CorrInd','TOTAL'};
+
+            nE = numel(effNames);
+            iStart   = max(1, round(0.8 * numel(t)));
+            mismatchV = zeros(1, nE);
+
+            for ei = 1:nE
+                eff = effNames{ei};
+                if isfield(cs, eff) && isfield(cs.(eff),'mismatchRMS_m')
+                    mismatchV(ei) = mean(cs.(eff).mismatchRMS_m(iStart:end));
+                end
+            end
+
+            bh = bar(1:nE, mismatchV);
+            bh.FaceColor = [0.85 0.33 0.10];  % red = mismatch
+            set(gca, 'XTick', 1:nE, 'XTickLabel', labels, 'XTickLabelRotation', 45);
+            ylabel('Mean Mismatch RMS [m]  (last 20% of run)');
+            title('Contribution Overview — Truth-Model Mismatch RMS [m]');
+            grid on;
+        end
+
+        % ================================================================
+        %  INDIVIDUAL CONTRIBUTION FIGURE
+        % ================================================================
+
+        function fig = makeContribFig_(t, t_vals, m_vals, d_vals, ...
+                hasTruth, hasModel, hasMismatch, hasData, enabled, dispName, unit, cfg)
+            % Three-line contribution figure: Truth (blue), Model (green), T-M (red dashed).
             fig = revgnss.ContributionPlotter.newFig_( ...
                 sprintf('Contribution: %s', dispName), cfg);
 
             if hasData
-                plot(t, vals, 'b', 'LineWidth', 1.5);
+                hold on;
+                if hasTruth
+                    plot(t, t_vals, 'Color',[0.10 0.45 0.74], 'LineWidth',1.5, ...
+                        'DisplayName','Truth');
+                end
+                if hasModel
+                    plot(t, m_vals, 'Color',[0.35 0.70 0.20], 'LineWidth',1.5, ...
+                        'DisplayName','Model');
+                end
+                if ~isempty(d_vals)
+                    plot(t, d_vals, 'Color',[0.85 0.33 0.10], 'LineWidth',1.2, ...
+                        'LineStyle','--', 'DisplayName','Truth-Model');
+                end
+                hold off;
+                legend('Location','best','FontSize',8);
                 xlabel('Time [s]');
                 ylabel(sprintf('RMS [%s]', unit));
                 grid on;
-                maxVal   = max(abs(vals));
-                finalVal = vals(end);
-                annotStr = sprintf('Max: %.4g %s\nFinal: %.4g %s', ...
-                    maxVal, unit, finalVal, unit);
+
+                maxT = 0; maxM = 0; maxD = 0;
+                if hasTruth;    maxT = max(abs(t_vals)); end
+                if hasModel;    maxM = max(abs(m_vals)); end
+                if hasMismatch; maxD = max(abs(d_vals)); end
+                annotStr = sprintf('Max Truth:    %.4g %s\nMax Model:    %.4g %s\nMax T-M:      %.4g %s', ...
+                    maxT, unit, maxM, unit, maxD, unit);
                 text(0.98, 0.95, annotStr, 'Units','normalized', ...
                     'HorizontalAlignment','right','VerticalAlignment','top', ...
                     'FontSize',9,'BackgroundColor',[1 1 0.85],'EdgeColor',[0.7 0.7 0]);
             elseif enabled
-                % Effect is on but no diagnostic data came through
                 text(0.5, 0.60, dispName, 'Units','normalized', ...
                     'HorizontalAlignment','center','FontSize',13, ...
                     'FontWeight','bold','Color',[0.6 0 0]);
@@ -315,10 +294,8 @@ classdef ContributionPlotter
                     'Units','normalized','HorizontalAlignment','center', ...
                     'FontSize',11,'Color',[0.8 0 0]);
                 warning('ContributionPlotter:missingEnabledData', ...
-                    '%s is enabled but no diagnostic data found in contribution series.', ...
-                    dispName);
+                    '%s is enabled but no diagnostic data found.', dispName);
             else
-                % Disabled — simple gray text page
                 text(0.5, 0.5, sprintf('%s\ndisabled / zero contribution', dispName), ...
                     'Units','normalized','HorizontalAlignment','center', ...
                     'FontSize',12,'Color',[0.5 0.5 0.5],'FontAngle','italic');
@@ -327,8 +304,18 @@ classdef ContributionPlotter
         end
 
         % ================================================================
-        %  CONFIG FIELD HELPER
+        %  HELPERS
         % ================================================================
+
+        function suffix = unitSuffix_(unit)
+            % Map unit string to sub-field suffix in contribution struct.
+            switch unit
+                case 'm';      suffix = 'm';
+                case 'm/s';    suffix = 'mps';
+                case 'cycles'; suffix = 'cycles';
+                otherwise;     suffix = 'm';
+            end
+        end
 
         function tf = cf_(s, fields)
             % Safely read a nested boolean field; returns false if any level missing.
@@ -341,10 +328,6 @@ classdef ContributionPlotter
                 tf = false;
             end
         end
-
-        % ================================================================
-        %  FIGURE CREATION
-        % ================================================================
 
         function fig = newFig_(name, cfg)
             vis = 'on';

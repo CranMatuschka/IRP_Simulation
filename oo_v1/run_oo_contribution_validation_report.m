@@ -9,10 +9,10 @@
 % Expected figure count:
 %   1  summary page
 %  17  standard diagnostic figures  (INCLUDE_ALL_STANDARD_PLOTS = true)
-%   1  contribution overview
-%  20  one page per known contribution (enabled=plot, disabled=text page)
+%   2  contribution overview (Truth RMS + Mismatch RMS bar charts)
+%  20  one page per contribution (Truth/Model/Mismatch lines or text page)
 %  ----
-%  39  total
+%  40  total
 %
 % Hard limits: error if < 10 or > 60 figures.
 %
@@ -43,8 +43,9 @@ addpath(thisDir);
 %   'doppler_diag_only'     Doppler diagnostic (not in EKF)
 %   'doppler_ekf'           Doppler in EKF
 %   'carrier_diag_only'     Carrier phase diagnostic
+%   'all_contributions_demo' Mixed matched/mismatched — default, for diagnostics
 %   'custom'                Edit buildReportCase below
-REPORT_CASE = 'baseline';
+REPORT_CASE = 'all_contributions_demo';
 
 % If true: include all 17 standard diagnostic figures from Plotter.plotAll.
 % If false: include a compact 8-figure subset (position/attitude/clock/NIS/RMS).
@@ -239,6 +240,51 @@ function cfg = buildReportCase(caseName, duration_s, showFigures)
             cfg = revgnss.ConfigFactory.defaultConfig();
             cfg.measurements.carrierPhase.enable   = true;
             cfg.measurements.carrierPhase.useInEKF = true;
+
+        case 'all_contributions_demo'
+            % Demo case: mixed matched/mismatched effects for contribution diagnostics.
+            % Matched: Sagnac, Shapiro  — truth and model both nonzero, mismatch near zero.
+            % Mismatched: atmosphere, survey, PCO, PCV  — truth nonzero, model zero.
+            % Stochastic: code noise, correlated noise  — truth nonzero, model = 0.
+            % Diagnostic: Doppler, carrier phase  — not in EKF.
+            cfg = revgnss.ConfigFactory.defaultConfig();
+            % Matched geometry
+            cfg.physics.sagnac.truth.enable = true;
+            cfg.physics.sagnac.model.enable = true;
+            cfg.physics.relativity.shapiro.truth.enable = true;
+            cfg.physics.relativity.shapiro.model.enable = true;
+            % Mismatched atmosphere
+            cfg.errors.troposphere.truth.enable        = true;
+            cfg.errors.troposphere.truth.zenithDelay_m = 2.3;
+            cfg.errors.troposphere.model.enable        = false;
+            cfg.errors.ionosphere.truth.enable         = true;
+            cfg.errors.ionosphere.truth.zenithDelay_m  = 5.0;
+            cfg.errors.ionosphere.model.enable         = false;
+            % Mismatched survey/antenna
+            cfg.effects.towerSurvey.truth.enable = true;
+            cfg.effects.towerSurvey.model.enable = false;
+            cfg.effects.towerSurvey.sigmaENU_m   = [0.05; 0.05; 0.10];
+            cfg.effects.antennaPCO.truth.enable          = true;
+            cfg.effects.antennaPCO.model.enable          = false;
+            cfg.effects.antennaPCO.receiverOffset_body_m = [0.05; 0.0; 0.02];
+            cfg.effects.antennaPCO.towerOffset_enu_m     = [0.03; 0.02; 0.05];
+            cfg.effects.antennaPCV.truth.enable = true;
+            cfg.effects.antennaPCV.model.enable = false;
+            cfg.effects.antennaPCV.amplitude_m  = 0.01;
+            % Correlated noise (truth only)
+            cfg.effects.correlatedNoise.enable             = true;
+            cfg.effects.correlatedNoise.commonModeSigma_m  = 0.15;
+            cfg.effects.correlatedNoise.sameTowerSigma_m   = 0.10;
+            cfg.effects.correlatedNoise.independentSigma_m = 0.05;
+            % Doppler diagnostic only
+            cfg.measurements.doppler.enable    = true;
+            cfg.measurements.doppler.useInEKF  = false;
+            cfg.measurements.doppler.sigma_mps = 0.01;
+            cfg.physics.doppler.truth.enable   = true;
+            cfg.physics.doppler.model.enable   = true;
+            % Carrier diagnostic only
+            cfg.measurements.carrierPhase.enable   = true;
+            cfg.measurements.carrierPhase.useInEKF = false;
 
         case 'custom'
             cfg = revgnss.ConfigFactory.defaultConfig();

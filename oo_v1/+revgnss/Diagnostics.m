@@ -284,32 +284,46 @@ classdef Diagnostics < handle
             end
 
             % --- Per-effect contribution RMS --------------------------------
-            % All values are RMS of the truth-model mismatch vector for that effect.
-            % Fields are zero when the effect is disabled or data is absent.
+            % Format: cnt.effectName.{truthRMS_m, modelRMS_m, mismatchRMS_m}
+            % Doppler uses _mps suffix; carrier phase uses _cycles suffix.
+            rms3m   = @(t,m) struct( ...
+                'truthRMS_m',      sqrt(mean(t.^2)), ...
+                'modelRMS_m',      sqrt(mean(m.^2)), ...
+                'mismatchRMS_m',   sqrt(mean((t-m).^2)));
+            rms3mps = @(t,m) struct( ...
+                'truthRMS_mps',    sqrt(mean(t.^2)), ...
+                'modelRMS_mps',    sqrt(mean(m.^2)), ...
+                'mismatchRMS_mps', sqrt(mean((t-m).^2)));
+
+            z3m   = struct('truthRMS_m',      0, 'modelRMS_m',      0, 'mismatchRMS_m',      0);
+            z3mps = struct('truthRMS_mps',    0, 'modelRMS_mps',    0, 'mismatchRMS_mps',    0);
+            z3cyc = struct('truthRMS_cycles', 0, 'modelRMS_cycles', 0, 'mismatchRMS_cycles', 0);
+
             cnt = struct();
-            cnt.codeNoise_rms_m          = 0;
-            cnt.troposphere_rms_m        = 0;
-            cnt.ionosphere_rms_m         = 0;
-            cnt.hardwareDelay_rms_m      = 0;
-            cnt.multipath_rms_m          = 0;
-            cnt.sagnacTruthMinusModel_rms_m      = 0;
-            cnt.shapiroTruthMinusModel_rms_m     = 0;
-            cnt.towerSurveyTruthMinusModel_rms_m = 0;
-            cnt.receiverPCOTruthMinusModel_rms_m = 0;
-            cnt.towerPCOTruthMinusModel_rms_m    = 0;
-            cnt.pcvTruthMinusModel_rms_m         = 0;
-            cnt.towerClockCorrectionError_rms_m  = 0;
-            cnt.correlatedCommonMode_rms_m       = 0;
-            cnt.correlatedSameTower_rms_m        = 0;
-            cnt.correlatedIndependent_rms_m      = 0;
-            cnt.totalTruthMinusModel_rms_m       = 0;
-            cnt.dopplerPrefit_rms_mps                        = 0;
-            cnt.dopplerTowerClockDriftTruthMinusModel_rms_mps = 0;
-            cnt.carrierPhase_rms_cycles = 0;
-            cnt.carrierPhase_rms_m      = 0;
+            cnt.codeNoise             = z3m;
+            cnt.troposphere           = z3m;
+            cnt.ionosphere            = z3m;
+            cnt.hardwareDelay         = z3m;
+            cnt.multipath             = z3m;
+            cnt.sagnac                = z3m;
+            cnt.shapiro               = z3m;
+            cnt.towerSurvey           = z3m;
+            cnt.receiverPCO           = z3m;
+            cnt.towerPCO              = z3m;
+            cnt.pcv                   = z3m;
+            cnt.towerClock            = z3m;
+            cnt.correlatedCommonMode  = z3m;
+            cnt.correlatedSameTower   = z3m;
+            cnt.correlatedIndependent = z3m;
+            cnt.total                 = z3m;
+            cnt.dopplerRangeRate      = z3mps;
+            cnt.dopplerTowerClockDrift = z3mps;
+            cnt.dopplerNoise          = z3mps;
+            cnt.carrierPhaseCycles    = z3cyc;
+            cnt.carrierPhaseMeters    = z3m;
 
             if ~isempty(errStruct)
-                % ErrorChain per-source (truth - model) contributions
+                % --- ErrorChain per-source (code, trop, iono, hwDelay, mp) ----
                 if isfield(errStruct,'bySource') && isfield(errStruct.bySource,'truth_m')
                     bst = errStruct.bySource.truth_m;
                     bsm = errStruct.bySource.model_m;
@@ -318,86 +332,95 @@ classdef Diagnostics < handle
                     for si = 1:size(srcMap,1)
                         src = srcMap{si,1}; fld = srcMap{si,2};
                         if isfield(bst,src) && ~isempty(bst.(src))
-                            diff_v = bst.(src) - bsm.(src);
-                            cnt.([fld '_rms_m']) = sqrt(mean(diff_v.^2));
+                            cnt.(fld) = rms3m(bst.(src), bsm.(src));
                         end
                     end
                 end
-                % Sagnac / Shapiro
-                cnt.sagnacTruthMinusModel_rms_m  = entry.sagnacDiffRMS_m;
-                cnt.shapiroTruthMinusModel_rms_m = entry.shapiroDiffRMS_m;
-                % PCV
-                if isfield(errStruct,'pcvTruth_m') && ~isempty(errStruct.pcvTruth_m)
-                    pcv_diff = errStruct.pcvTruth_m - errStruct.pcvModel_m;
-                    cnt.pcvTruthMinusModel_rms_m = sqrt(mean(pcv_diff.^2));
+
+                % --- Sagnac / Shapiro / PCV ------------------------------------
+                if isfield(errStruct,'sagnacTruth_m') && ~isempty(errStruct.sagnacTruth_m)
+                    cnt.sagnac  = rms3m(errStruct.sagnacTruth_m,  errStruct.sagnacModel_m);
+                    cnt.shapiro = rms3m(errStruct.shapiroTruth_m, errStruct.shapiroModel_m);
+                    cnt.pcv     = rms3m(errStruct.pcvTruth_m,     errStruct.pcvModel_m);
                 end
-                % Tower survey
+
+                % --- Tower survey / Receiver PCO / Tower PCO ------------------
                 if isfield(errStruct,'towerSurveyTruth_m') && ~isempty(errStruct.towerSurveyTruth_m)
-                    sv_diff = errStruct.towerSurveyTruth_m - errStruct.towerSurveyModel_m;
-                    cnt.towerSurveyTruthMinusModel_rms_m = sqrt(mean(sv_diff.^2));
+                    cnt.towerSurvey = rms3m(errStruct.towerSurveyTruth_m, errStruct.towerSurveyModel_m);
                 end
-                % Receiver PCO
                 if isfield(errStruct,'receiverPCOTruth_m') && ~isempty(errStruct.receiverPCOTruth_m)
-                    rp_diff = errStruct.receiverPCOTruth_m - errStruct.receiverPCOModel_m;
-                    cnt.receiverPCOTruthMinusModel_rms_m = sqrt(mean(rp_diff.^2));
+                    cnt.receiverPCO = rms3m(errStruct.receiverPCOTruth_m, errStruct.receiverPCOModel_m);
                 end
-                % Tower PCO
                 if isfield(errStruct,'towerPCOTruth_m') && ~isempty(errStruct.towerPCOTruth_m)
-                    tp_diff = errStruct.towerPCOTruth_m - errStruct.towerPCOModel_m;
-                    cnt.towerPCOTruthMinusModel_rms_m = sqrt(mean(tp_diff.^2));
+                    cnt.towerPCO = rms3m(errStruct.towerPCOTruth_m, errStruct.towerPCOModel_m);
                 end
-                % Tower clock correction error
-                if ~isempty(entry.towerClockCorrectionError_m)
-                    cnt.towerClockCorrectionError_rms_m = ...
-                        sqrt(mean(entry.towerClockCorrectionError_m.^2));
+
+                % --- Tower clock (subtracted in z/h, so negate for range domain)
+                if isfield(errStruct,'towerClockTruth_m') && ~isempty(errStruct.towerClockTruth_m)
+                    cnt.towerClock = rms3m( ...
+                        -errStruct.towerClockTruth_m, -errStruct.towerClockModel_m);
                 end
-                % Correlated noise components
+
+                % --- Correlated noise (truth only; model = 0) -----------------
                 if isfield(errStruct,'correlatedNoise')
                     cn = errStruct.correlatedNoise;
-                    if isfield(cn,'common_m')
-                        cnt.correlatedCommonMode_rms_m = sqrt(mean(cn.common_m.^2));
-                    end
-                    if isfield(cn,'sameTower_m')
-                        cnt.correlatedSameTower_rms_m = sqrt(mean(cn.sameTower_m.^2));
-                    end
-                    if isfield(cn,'independent_m')
-                        cnt.correlatedIndependent_rms_m = sqrt(mean(cn.independent_m.^2));
+                    Mv = numel(cn.common_m);
+                    if Mv > 0
+                        zv = zeros(Mv,1);
+                        cnt.correlatedCommonMode  = rms3m(cn.common_m,      zv);
+                        cnt.correlatedSameTower   = rms3m(cn.sameTower_m,   zv);
+                        cnt.correlatedIndependent = rms3m(cn.independent_m, zv);
                     end
                 end
-                % Total truth-model deterministic mismatch
-                if ~isempty(errStruct.truthTotal_m)
-                    total_diff = (errStruct.truthTotal_m - errStruct.modelTotal_m) + ...
-                        (errStruct.sagnacTruth_m - errStruct.sagnacModel_m) + ...
-                        (errStruct.shapiroTruth_m - errStruct.shapiroModel_m) + ...
-                        (errStruct.pcvTruth_m - errStruct.pcvModel_m);
+
+                % --- Total (all truth/model effects summed) -------------------
+                if isfield(errStruct,'sagnacTruth_m') && ~isempty(errStruct.truthTotal_m)
+                    tt = errStruct.truthTotal_m + errStruct.sagnacTruth_m + ...
+                         errStruct.shapiroTruth_m + errStruct.pcvTruth_m;
+                    tm = errStruct.modelTotal_m + errStruct.sagnacModel_m + ...
+                         errStruct.shapiroModel_m + errStruct.pcvModel_m;
                     if isfield(errStruct,'towerSurveyTruth_m')
-                        total_diff = total_diff + errStruct.towerSurveyTruth_m - errStruct.towerSurveyModel_m;
+                        tt = tt + errStruct.towerSurveyTruth_m;
+                        tm = tm + errStruct.towerSurveyModel_m;
                     end
                     if isfield(errStruct,'receiverPCOTruth_m')
-                        total_diff = total_diff + errStruct.receiverPCOTruth_m - errStruct.receiverPCOModel_m;
+                        tt = tt + errStruct.receiverPCOTruth_m;
+                        tm = tm + errStruct.receiverPCOModel_m;
                     end
                     if isfield(errStruct,'towerPCOTruth_m')
-                        total_diff = total_diff + errStruct.towerPCOTruth_m - errStruct.towerPCOModel_m;
+                        tt = tt + errStruct.towerPCOTruth_m;
+                        tm = tm + errStruct.towerPCOModel_m;
                     end
-                    cnt.totalTruthMinusModel_rms_m = sqrt(mean(total_diff.^2));
+                    if isfield(errStruct,'correlatedNoise')
+                        cn2 = errStruct.correlatedNoise;
+                        tt = tt + cn2.common_m + cn2.sameTower_m + cn2.independent_m;
+                    end
+                    cnt.total = rms3m(tt, tm);
                 end
-                % Doppler
-                cnt.dopplerPrefit_rms_mps = entry.dopplerPrefitRMS_mps;
-                if isfield(errStruct,'doppler') && ...
-                        isfield(errStruct.doppler,'towerClockDriftTruth_mps') && ...
-                        ~isempty(errStruct.doppler.towerClockDriftTruth_mps)
-                    bdot_diff = errStruct.doppler.towerClockDriftTruth_mps - ...
-                                errStruct.doppler.towerClockDriftModel_mps;
-                    cnt.dopplerTowerClockDriftTruthMinusModel_rms_mps = sqrt(mean(bdot_diff.^2));
+
+                % --- Doppler (full zd/hd as truth/model proxies) --------------
+                if isfield(errStruct,'doppler') && isfield(errStruct.doppler,'z') && ...
+                        ~isempty(errStruct.doppler.z)
+                    cnt.dopplerRangeRate = rms3mps(errStruct.doppler.z, errStruct.doppler.h);
+                    if isfield(errStruct.doppler,'towerClockDriftTruth_mps') && ...
+                            ~isempty(errStruct.doppler.towerClockDriftTruth_mps)
+                        cnt.dopplerTowerClockDrift = rms3mps( ...
+                            errStruct.doppler.towerClockDriftTruth_mps, ...
+                            errStruct.doppler.towerClockDriftModel_mps);
+                    end
                 end
-                % Carrier phase
+
+                % --- Carrier phase (truth only; no model in v1) ---------------
                 if isfield(errStruct,'carrierPhase') && ...
                         isfield(errStruct.carrierPhase,'phi_cycles') && ...
                         ~isempty(errStruct.carrierPhase.phi_cycles)
                     phi = errStruct.carrierPhase.phi_cycles;
                     lam = errStruct.carrierPhase.lambda_m;
-                    cnt.carrierPhase_rms_cycles = sqrt(mean(phi.^2));
-                    cnt.carrierPhase_rms_m      = cnt.carrierPhase_rms_cycles * lam;
+                    cnt.carrierPhaseCycles = struct( ...
+                        'truthRMS_cycles',    sqrt(mean(phi.^2)), ...
+                        'modelRMS_cycles',    0, ...
+                        'mismatchRMS_cycles', sqrt(mean(phi.^2)));
+                    cnt.carrierPhaseMeters = rms3m(phi * lam, zeros(size(phi)));
                 end
             end
             entry.contributions = cnt;
@@ -486,18 +509,29 @@ classdef Diagnostics < handle
             v = [obj.log.postfitDopplerRMS_mps]';
         end
 
-        function cs = getContributionSeries(obj)
-            % getContributionSeries  All contribution time series as struct of vectors.
-            if obj.nEpochs == 0; cs = struct(); return; end
-            flds = fieldnames(obj.log(1).contributions);
-            for fi = 1:numel(flds)
-                f = flds{fi};
-                vals = zeros(obj.nEpochs, 1);
-                for k = 1:obj.nEpochs
-                    v = obj.log(k).contributions.(f);
-                    if ~isempty(v); vals(k) = v; end
+        function C = getContributionSeries(obj)
+            % getContributionSeries  Per-effect contribution time series.
+            %
+            % Returns nested struct:
+            %   C.effectName.truthRMS_m    [nEpochs x 1]
+            %   C.effectName.modelRMS_m    [nEpochs x 1]
+            %   C.effectName.mismatchRMS_m [nEpochs x 1]
+            %   (Doppler: _mps suffix; carrier: _cycles suffix)
+            if obj.nEpochs == 0; C = struct(); return; end
+            C = struct();
+            effects = fieldnames(obj.log(1).contributions);
+            for ei = 1:numel(effects)
+                eff  = effects{ei};
+                sflds = fieldnames(obj.log(1).contributions.(eff));
+                for fi = 1:numel(sflds)
+                    fld  = sflds{fi};
+                    vals = zeros(obj.nEpochs, 1);
+                    for k = 1:obj.nEpochs
+                        v = obj.log(k).contributions.(eff).(fld);
+                        if ~isempty(v) && isnumeric(v); vals(k) = v(1); end
+                    end
+                    C.(eff).(fld) = vals;
                 end
-                cs.(f) = vals;
             end
         end
 
