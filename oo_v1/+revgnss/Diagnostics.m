@@ -336,6 +336,7 @@ classdef Diagnostics < handle
             cnt.ionosphere            = z3m;
             cnt.hardwareDelay         = z3m;
             cnt.multipath             = z3m;
+            cnt.scintillationCodeNoise = z3m;
             cnt.sagnac                = z3m;
             cnt.shapiro               = z3m;
             cnt.towerSurvey           = z3m;
@@ -365,6 +366,14 @@ classdef Diagnostics < handle
                         if isfield(bst,src) && ~isempty(bst.(src))
                             cnt.(fld) = rms3m(bst.(src), bsm.(src));
                         end
+                    end
+                    % Scintillation
+                    if isfield(bst,'scintillation') && ~isempty(bst.scintillation)
+                        scintModel = zeros(size(bst.scintillation));
+                        if isfield(bsm,'scintillation')
+                            scintModel = bsm.scintillation;
+                        end
+                        cnt.scintillationCodeNoise = rms3m(bst.scintillation, scintModel);
                     end
                 end
 

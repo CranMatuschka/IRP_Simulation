@@ -314,6 +314,67 @@ classdef MeasurementModel < handle
             errStruct.towerPCOTruth_m     = towerPCOTruth_m;
             errStruct.towerPCOModel_m     = towerPCOModel_m;
 
+            % ----- Multi-frequency signal expansion (if N_sig > 1) --------
+            signals = revgnss.SignalUtils.getEnabledSignals(obj.cfg);
+            N_sig = numel(signals);
+
+            f_L1 = 1575.42e6;
+            if isfield(obj.cfg,'signals') && isfield(obj.cfg.signals,'L1') && ...
+                    isfield(obj.cfg.signals.L1,'frequency_Hz')
+                f_L1 = obj.cfg.signals.L1.frequency_Hz;
+            end
+
+            if N_sig > 1
+                % Expand z, h, R_diag, errStruct from M_pairs to M = M_pairs * N_sig
+                M_pairs = M;
+                [z, h, R_diag, errStructExpanded, twr_list, ant_list] = ...
+                    obj.expandToMultiFreq_(z, h, R_diag, errStruct, M_pairs, ...
+                        signals, f_L1, sigmaFloor, towers, towerClkTruth, ...
+                        towerClkModel, towerClkSigma, ...
+                        sagnacTruth_m, sagnacModel_m, shapiroTruth_m, shapiroModel_m, ...
+                        pcvTruth_m, pcvModel_m, towerSurveyTruth_m, towerSurveyModel_m, ...
+                        receiverPCOTruth_m, receiverPCOModel_m, towerPCOTruth_m, towerPCOModel_m);
+                M = M_pairs * N_sig;
+                errStruct = errStructExpanded;
+                errStruct.nPseudorange = M;
+
+                % Add signal metadata
+                sigIdx   = zeros(M,1);
+                sigNames = cell(M,1);
+                freqHz   = zeros(M,1);
+                for si = 1:N_sig
+                    idx = (si-1)*M_pairs+1 : si*M_pairs;
+                    sigIdx(idx)   = si;
+                    freqHz(idx)   = signals(si).frequency_Hz;
+                    [sigNames{idx}] = deal(signals(si).name);
+                end
+                errStruct.signalIdx_perMeas   = sigIdx;
+                errStruct.signalName_perMeas  = sigNames;
+                errStruct.frequencyHz_perMeas = freqHz;
+            else
+                % Single frequency: add signal metadata, keep everything else unchanged
+                errStruct.signalIdx_perMeas   = ones(M,1);
+                errStruct.signalName_perMeas  = repmat({'L1'}, M, 1);
+                if isfield(obj.cfg,'signals') && isfield(obj.cfg.signals,'L1')
+                    errStruct.frequencyHz_perMeas = ...
+                        obj.cfg.signals.L1.frequency_Hz * ones(M,1);
+                else
+                    errStruct.frequencyHz_perMeas = f_L1 * ones(M,1);
+                end
+
+                % Add scintillation to bySource (L1 only)
+                if isfield(errStruct,'scintSigmaL1_m') && any(errStruct.scintSigmaL1_m > 0)
+                    scintTruth = errStruct.scintSigmaL1_m .* randn(obj.errorChain.rngStream, M, 1);
+                    z = z + scintTruth;
+                    errStruct.bySource.truth_m.scintillation = scintTruth;
+                    errStruct.bySource.model_m.scintillation = zeros(M,1);
+                    R_diag = R_diag + errStruct.scintSigmaL1_m.^2;
+                else
+                    errStruct.bySource.truth_m.scintillation = zeros(M,1);
+                    errStruct.bySource.model_m.scintillation = zeros(M,1);
+                end
+            end
+
             % ----- Stage 4: correlated measurement noise ---------------
             % Adds truth-side correlated noise to z and builds full R.
             % correlNoise.common_m / sameTower_m / independent_m stored for contribution diagnostics.
@@ -697,6 +758,244 @@ classdef MeasurementModel < handle
     end  % public methods
 
     methods (Access = private)
+
+        % ----------------------------------------------------------------
+        function [z_out, h_out, R_diag_out, errOut, twr_out, ant_out] = expandToMultiFreq_( ...
+                obj, z_L1, h_L1, R_diag_L1, errL1, M_pairs, signals, f_L1, sigmaFloor, ...
+                towers, towerClkTruth, towerClkModel, towerClkSigma, ...
+                sagnacT, sagnacM, shapiroT, shapiroM, pcvT, pcvM, ...
+                twrSvyT, twrSvyM, rxPCOT, rxPCOM, twrPCOT, twrPCOM)
+            % expandToMultiFreq_  Expand L1 measurements to M = M_pairs * N_sig.
+            %
+            % For L1 (si=1): direct copy of the existing arrays.
+            % For L2+ (si>1): replace iono and code noise with freq-scaled equivalents.
+            % All other error terms (trop, HW delay, multipath, clocks, sagnac,
+            % shapiro, PCV, survey, PCO) are non-dispersive and are tiled unchanged.
+
+            N_sig = numel(signals);
+            M     = M_pairs * N_sig;
+
+            z_out     = zeros(M,1);
+            h_out     = zeros(M,1);
+            R_diag_out = zeros(M,1);
+            twr_out   = zeros(M,1);
+            ant_out   = zeros(M,1);
+
+            % Per-source bySource fields
+            flds = {'code','trop','iono','hwDelay','mp','scintillation'};
+            btOut = struct(); bmOut = struct();
+            for fi = 1:numel(flds)
+                btOut.(flds{fi}) = zeros(M,1);
+                bmOut.(flds{fi}) = zeros(M,1);
+            end
+
+            % Geometric range at L1 level (removes all L1 error contributions)
+            % z_geom(pi) = z_L1(pi) - truthTotal_L1(pi)  (geometry only)
+            % h_geom(pi) = h_L1(pi) - modelTotal_L1(pi)
+            z_geom = z_L1 - errL1.truthTotal_m;
+            h_geom = h_L1 - errL1.modelTotal_m;
+
+            % Also remove L1 tower clock contributions (already in z/h from main loop)
+            % They are already included in z_L1 / h_L1, so z_geom and h_geom are pure geometry
+            % (geometry includes clocks because z_geom = rho_truth + b_rx - b_twr)
+            % We need to separate them out:
+            %   z_L1 = rho_truth + b_rx_truth - b_twr_truth + errTruthTotal
+            %   h_L1 = rho_est   + b_rx_est   - b_twr_model + errModelTotal
+            % So z_geom below still contains geometry + clocks, just not ErrorChain.
+
+            % L1 iono and code truth/model
+            ionoTruthL1 = errL1.bySource.truth_m.iono;
+            ionoModelL1 = errL1.bySource.model_m.iono;
+            codeTruthL1 = errL1.bySource.truth_m.code;
+            sigmaCodeL1 = errL1.bySource.sigma_m.code;
+
+            for si = 1:N_sig
+                sigCfg     = signals(si);
+                freqScale  = (f_L1 / sigCfg.frequency_Hz)^2;
+                offset     = (si-1) * M_pairs;
+
+                for pi = 1:M_pairs
+                    mi = offset + pi;
+                    twr_out(mi) = errL1.towerIdx_perMeas(pi);
+                    ant_out(mi) = errL1.antennaIdx_perMeas(pi);
+
+                    if si == 1
+                        % L1: direct copy
+                        z_out(mi)     = z_L1(pi);
+                        h_out(mi)     = h_L1(pi);
+                        R_diag_out(mi) = R_diag_L1(pi);
+                        for fi = 1:numel(flds)
+                            fn = flds{fi};
+                            if isfield(errL1.bySource.truth_m, fn)
+                                btOut.(fn)(mi) = errL1.bySource.truth_m.(fn)(pi);
+                            end
+                            if isfield(errL1.bySource.model_m, fn)
+                                bmOut.(fn)(mi) = errL1.bySource.model_m.(fn)(pi);
+                            end
+                        end
+                        % Scintillation for L1
+                        scintSig = errL1.scintSigmaL1_m(pi);
+                        scintDraw = scintSig * randn(obj.errorChain.rngStream, 1, 1);
+                        z_out(mi) = z_out(mi) + scintDraw;
+                        R_diag_out(mi) = R_diag_out(mi) + scintSig^2;
+                        btOut.scintillation(mi) = scintDraw;
+
+                    else
+                        % L2+: replace iono and code noise
+                        elv = errL1.elevations_rad(pi);
+
+                        % Iono: scale from L1 level by freqScale
+                        iono_t_si = ionoTruthL1(pi) * freqScale;
+                        iono_m_si = ionoModelL1(pi) * freqScale;
+                        delta_iono_t = iono_t_si - ionoTruthL1(pi);
+                        delta_iono_m = iono_m_si - ionoModelL1(pi);
+
+                        % Code noise: signal-specific sigma
+                        sigma_code_si = obj.computeCodeSigmaForSignal_( ...
+                            sigCfg, elv, obj.cfg);
+                        code_draw_si = sigma_code_si * ...
+                            randn(obj.errorChain.rngStream, 1, 1);
+
+                        % Replace L1 code noise with signal-specific noise
+                        code_delta_t = code_draw_si - codeTruthL1(pi);
+
+                        % Scintillation at this frequency
+                        scintExpF = 1.0;
+                        if isfield(obj.cfg.errors,'ionosphere') && ...
+                                isfield(obj.cfg.errors.ionosphere,'scintillation') && ...
+                                isfield(obj.cfg.errors.ionosphere.scintillation,'frequencyExponent')
+                            scintExpF = obj.cfg.errors.ionosphere.scintillation.frequencyExponent;
+                        end
+                        scintSigF = errL1.scintSigmaL1_m(pi) * ...
+                            (f_L1 / sigCfg.frequency_Hz)^scintExpF;
+                        scintDraw = scintSigF * randn(obj.errorChain.rngStream, 1, 1);
+
+                        z_out(mi) = z_L1(pi) + delta_iono_t + code_delta_t + scintDraw;
+                        h_out(mi) = h_L1(pi) + delta_iono_m;
+
+                        % R: code variance at this frequency + scint + non-code sigma
+                        R_diag_out(mi) = max(sigma_code_si, sigmaFloor)^2 + ...
+                                         scintSigF^2 + errL1.sigmaExtra_m(pi)^2 + ...
+                                         towerClkSigma(pi)^2;
+
+                        % Populate bySource
+                        for fi = 1:numel(flds)
+                            fn = flds{fi};
+                            if isfield(errL1.bySource.truth_m, fn)
+                                btOut.(fn)(mi) = errL1.bySource.truth_m.(fn)(pi);
+                            end
+                            if isfield(errL1.bySource.model_m, fn)
+                                bmOut.(fn)(mi) = errL1.bySource.model_m.(fn)(pi);
+                            end
+                        end
+                        % Override iono and code with frequency-specific values
+                        btOut.iono(mi)          = iono_t_si;
+                        bmOut.iono(mi)          = iono_m_si;
+                        btOut.code(mi)          = code_draw_si;
+                        bmOut.code(mi)          = 0;
+                        btOut.scintillation(mi) = scintDraw;
+                        bmOut.scintillation(mi) = 0;
+                    end
+                end
+            end
+
+            % Build output errStruct
+            errOut = errL1;
+            errOut.bySource.truth_m = btOut;
+            errOut.bySource.model_m = bmOut;
+
+            % Tile sigma sub-fields (trop, iono, hwDelay, mp)
+            sigFlds = fieldnames(errL1.bySource.sigma_m);
+            for fi = 1:numel(sigFlds)
+                fn = sigFlds{fi};
+                if isfield(errL1.bySource.sigma_m, fn) && ~isempty(errL1.bySource.sigma_m.(fn))
+                    errOut.bySource.sigma_m.(fn) = repmat(errL1.bySource.sigma_m.(fn)(:), N_sig, 1);
+                end
+            end
+
+            % Overwrite code sigma with signal-specific values
+            errOut.bySource.sigma_m.code = zeros(M,1);
+            for si = 1:N_sig
+                for pi = 1:M_pairs
+                    mi = (si-1)*M_pairs + pi;
+                    if si == 1
+                        errOut.bySource.sigma_m.code(mi) = sigmaCodeL1(pi);
+                    else
+                        errOut.bySource.sigma_m.code(mi) = ...
+                            obj.computeCodeSigmaForSignal_(signals(si), ...
+                                errL1.elevations_rad(pi), obj.cfg);
+                    end
+                end
+            end
+
+            % Tile scalar arrays that are M_pairs-length → M-length
+            tileFields = {'towerClockTruth_m','towerClockModel_m', ...
+                          'towerClockModelSigma_m', ...
+                          'sagnacTruth_m','sagnacModel_m', ...
+                          'shapiroTruth_m','shapiroModel_m', ...
+                          'pcvTruth_m','pcvModel_m', ...
+                          'towerSurveyTruth_m','towerSurveyModel_m', ...
+                          'receiverPCOTruth_m','receiverPCOModel_m', ...
+                          'towerPCOTruth_m','towerPCOModel_m', ...
+                          'elevations_rad','scintSigmaL1_m','sigmaExtra_m'};
+            for fi = 1:numel(tileFields)
+                fn = tileFields{fi};
+                if isfield(errL1, fn) && ~isempty(errL1.(fn))
+                    errOut.(fn) = repmat(errL1.(fn)(:), N_sig, 1);
+                end
+            end
+
+            errOut.towerIdx_perMeas   = twr_out;
+            errOut.antennaIdx_perMeas = ant_out;
+
+            % Recompute truthTotal and modelTotal at M level
+            errOut.truthTotal_m = zeros(M,1);
+            errOut.modelTotal_m = zeros(M,1);
+            for fi = 1:numel(flds)
+                fn = flds{fi};
+                if isfield(btOut, fn)
+                    errOut.truthTotal_m = errOut.truthTotal_m + btOut.(fn);
+                end
+                if isfield(bmOut, fn)
+                    errOut.modelTotal_m = errOut.modelTotal_m + bmOut.(fn);
+                end
+            end
+
+            % sigmaTotal at M level (approximate: tiled from L1, with code updated)
+            errOut.sigmaTotal_m = repmat(errL1.sigmaTotal_m, N_sig, 1);
+        end
+
+        % ----------------------------------------------------------------
+        function sigma = computeCodeSigmaForSignal_(obj, sigCfg, elv, cfg)
+            % computeCodeSigmaForSignal_  Per-signal code noise sigma at given elevation.
+            %
+            % Uses signal codeSigma0_m and the configured code noise model.
+
+            elvFloor = revgnss.Constants.ELEVATION_FLOOR_RAD;
+            sigma0   = sigCfg.codeSigma0_m;
+
+            codeModel = 'constant';
+            if isfield(cfg,'measurements') && isfield(cfg.measurements,'codeNoise') && ...
+                    isfield(cfg.measurements.codeNoise,'model')
+                codeModel = cfg.measurements.codeNoise.model;
+            end
+
+            switch lower(codeModel)
+                case 'constant'
+                    sigma = sigma0;
+                case 'elevation'
+                    p = 1.0;
+                    if isfield(cfg,'measurements') && ...
+                            isfield(cfg.measurements,'codeNoise') && ...
+                            isfield(cfg.measurements.codeNoise,'elevationExponent')
+                        p = cfg.measurements.codeNoise.elevationExponent;
+                    end
+                    mapping = 1 / max(sin(elv), sin(elvFloor));
+                    sigma   = sigma0 * mapping^p;
+                otherwise
+                    sigma = sigma0;
+            end
+        end
 
         % ----------------------------------------------------------------
         function r_twr = getTowerPosition_(obj, tower, towerIdx, side)

@@ -169,6 +169,66 @@ classdef ConfigFactory
             % --- Error sources: all off by default -----------------------
             cfg.errors.codeNoise.sigma_m = 0.3;
 
+            % --- Signal / frequency config ----------------------------------------
+            cfg.signals.enabled = {'L1'};
+            cfg.signals.L1.name          = 'L1';
+            cfg.signals.L1.frequency_Hz  = 1575.42e6;
+            cfg.signals.L1.lambda_m      = cfg.physics.c_mps / 1575.42e6;
+            cfg.signals.L1.codeSigma0_m  = 0.30;
+            cfg.signals.L2.name          = 'L2';
+            cfg.signals.L2.frequency_Hz  = 1227.60e6;
+            cfg.signals.L2.lambda_m      = cfg.physics.c_mps / 1227.60e6;
+            cfg.signals.L2.codeSigma0_m  = 0.45;
+
+            % --- Code noise model --------------------------------------------------
+            cfg.measurements.codeNoise.model             = 'constant';
+            cfg.measurements.codeNoise.seed              = 6101;
+            cfg.measurements.codeNoise.minElevation_rad  = deg2rad(5);
+            cfg.measurements.codeNoise.elevationExponent = 1.0;
+            cfg.measurements.codeNoise.cn0.enable           = false;
+            cfg.measurements.codeNoise.cn0.base_dBHz        = 45;
+            cfg.measurements.codeNoise.cn0.elevationGain_dB = 6;
+            cfg.measurements.codeNoise.cn0.weatherLossScale_dB = 2;
+            cfg.measurements.codeNoise.cn0.sigmaAt45dBHz_m  = 0.30;
+
+            % --- Environment / weather -------------------------------------------
+            cfg.environment.weather.enable                 = false;
+            cfg.environment.weather.seed                   = 7201;
+            cfg.environment.weather.defaultPressure_hPa    = 1013.25;
+            cfg.environment.weather.defaultTemperature_K   = 293.15;
+            cfg.environment.weather.defaultRelativeHumidity = 0.50;
+            cfg.environment.weather.heightScale_m          = 8400;
+
+            % --- Extended atmosphere model config --------------------------------
+            % Troposphere: new dry/wet split (backward compat: also keep zenithDelay_m)
+            cfg.errors.troposphere.modelType                  = 'simpleMapped';
+            cfg.errors.troposphere.truth.zenithDryDelay_m     = 2.3;
+            cfg.errors.troposphere.truth.zenithWetDelay_m     = 0.15;
+            cfg.errors.troposphere.model.zenithDryDelay_m     = 2.3;
+            cfg.errors.troposphere.model.zenithWetDelay_m     = 0.15;
+            cfg.errors.troposphere.stochastic.enable          = false;
+            cfg.errors.troposphere.stochastic.process         = 'gaussMarkov';
+            cfg.errors.troposphere.stochastic.tau_s           = 3600;
+            cfg.errors.troposphere.stochastic.sigmaWet_ss_m   = 0.05;
+            cfg.errors.troposphere.stochastic.sigmaModelResidual_m = 0.02;
+
+            % Ionosphere: new verticalDelayL1 (backward compat: keep zenithDelay_m)
+            cfg.errors.ionosphere.modelType                       = 'simpleMapped';
+            cfg.errors.ionosphere.truth.verticalDelayL1_m          = 5.0;
+            cfg.errors.ionosphere.model.verticalDelayL1_m          = 5.0;
+            cfg.errors.ionosphere.stochastic.enable               = false;
+            cfg.errors.ionosphere.stochastic.process              = 'gaussMarkov';
+            cfg.errors.ionosphere.stochastic.tau_s                = 1800;
+            cfg.errors.ionosphere.stochastic.sigmaVDelayL1_ss_m   = 1.0;
+            cfg.errors.ionosphere.stochastic.sigmaModelResidualL1_m = 0.5;
+            cfg.errors.ionosphere.scintillation.enable            = false;
+            cfg.errors.ionosphere.scintillation.process           = 'gaussMarkov';
+            cfg.errors.ionosphere.scintillation.tau_s             = 30;
+            cfg.errors.ionosphere.scintillation.sigmaCodeL1_m     = 0.3;
+            cfg.errors.ionosphere.scintillation.frequencyExponent = 1.0;
+            cfg.errors.ionosphere.scintillation.affectsCodeNoise  = true;
+            cfg.errors.ionosphere.scintillation.affectsPseudorangeBias = false;
+
             cfg.errors.troposphere.truth.enable        = false;
             cfg.errors.troposphere.truth.zenithDelay_m = 2.3;
             cfg.errors.troposphere.model.enable        = false;

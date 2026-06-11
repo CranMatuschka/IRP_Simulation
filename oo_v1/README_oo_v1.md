@@ -710,3 +710,74 @@ The transition matrix F uses numerical (central-difference) differentiation of t
 F(euler_idx, euler_idx(ai)) = (eul_new(eul+ε) − eul_new(eul−ε)) / (2ε)
 ```
 with `ε = 1e-7 rad`. This avoids analytically differentiating the T(e,ω) matrix and is correct when Euler angles change slowly (GEO scenario).
+
+---
+
+## 22. Simple Stochastic Environment Models
+
+These models add physically motivated time-varying noise without external data downloads or full atmospheric models. All processes use seeded `RandStream` objects — no bare `randn` calls — so results are exactly reproducible.
+
+### Signals / dual-frequency
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `cfg.signals.enabled` | `{'L1'}` | Enable `{'L1','L2'}` for dual frequency |
+| `cfg.signals.L1.codeSigma0_m` | `0.30` | L1 code noise base sigma |
+| `cfg.signals.L2.codeSigma0_m` | `0.45` | L2 code noise base sigma |
+
+With dual frequency enabled, the measurement vector doubles (blocked ordering: all L1 first, then all L2). Ionosphere scales as `(f_L1/f_L2)² ≈ 1.647`; troposphere is non-dispersive.
+
+### Code noise model
+
+| `cfg.measurements.codeNoise.model` | Behaviour |
+|------------------------------------|-----------|
+| `'constant'` (default) | Fixed sigma from `cfg.errors.codeNoise.sigma_m` |
+| `'elevation'` | `sigma₀ / sin(el)^p` per signal |
+| `'cn0'` | Derived from simulated C/N0 |
+
+### Troposphere: local weather Gauss-Markov
+
+Set `cfg.errors.troposphere.modelType = 'localWeatherGM'` to activate a per-tower first-order Gauss-Markov wet residual:
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `stochastic.enable` | `false` | Activate GM process |
+| `stochastic.tau_s` | `3600` | Correlation time [s] |
+| `stochastic.sigmaWet_ss_m` | `0.05` | Steady-state σ of wet residual [m zenith] |
+| `truth.zenithDryDelay_m` | `2.3` | Fixed dry zenith delay [m] |
+| `truth.zenithWetDelay_m` | `0.15` | Nominal wet zenith delay [m] |
+
+Total zenith delay = dry + wet + GM residual; mapped to slant by `1/sin(el)`. Model residual is zero (no correction applied) unless the EKF carries a wet delay state.
+
+### Ionosphere: TEC Gauss-Markov
+
+Set `cfg.errors.ionosphere.modelType = 'tecGaussMarkov'` to activate a per-tower GM TEC residual:
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `stochastic.enable` | `false` | Activate GM process |
+| `stochastic.tau_s` | `1800` | Correlation time [s] |
+| `stochastic.sigmaVDelayL1_ss_m` | `1.0` | Steady-state σ of L1 vertical delay [m] |
+| `truth.verticalDelayL1_m` | `5.0` | Nominal L1 vertical delay [m] |
+
+L2 iono = L1 iono × `(f_L1/f_L2)²`. Model residual is zero by default.
+
+### Scintillation (code noise amplitude modulation)
+
+Set `cfg.errors.ionosphere.scintillation.enable = true`:
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `tau_s` | `30` | GM amplitude correlation time [s] |
+| `sigmaCodeL1_m` | `0.3` | L1 code noise amplitude [m] |
+| `frequencyExponent` | `1.0` | Frequency scaling: `(f_L1/f)^exp` |
+
+Scintillation sigma scales inversely with `sqrt(sin(el))` and is added to R per measurement.
+
+### Limitations
+
+- No external data (no VMF3, GPT3, ERA5, IONEX).
+- GM residuals are independent per tower (no spatial correlation).
+- Scintillation is a scalar amplitude GM — no inter-frequency or inter-tower coherence.
+- Dual frequency does not yet enable ionosphere-free combination in the EKF (L4 combination).
+- Single-frequency default behaviour is unchanged; enabling `{'L1','L2'}` doubles the measurement count.

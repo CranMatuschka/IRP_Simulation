@@ -27,6 +27,9 @@ suiteStart = datetime('now');
 SUITE_DURATION_S = 600;     % seconds per case
 RUN_DOPPLER_EKF  = false;   % true to also run doppler_ekf case
 RUN_CARRIER_DIAG = false;   % true to also run carrier_diag_only case
+RUN_DUAL_FREQUENCY_CASES   = true;   % dual-frequency L1+L2 cases
+RUN_STOCHASTIC_ENV_CASE    = true;   % stochastic trop + iono GM case
+RUN_CLOCK_NOISE_VALIDATION = true;   % stochastic clocks + noisyCorrection
 
 thisDir = fileparts(mfilename('fullpath'));
 addpath(thisDir);
@@ -52,6 +55,13 @@ SUITE_CASES = {'baseline', ...
                'doppler_diag_only'};
 if RUN_DOPPLER_EKF;  SUITE_CASES{end+1} = 'doppler_ekf';      end
 if RUN_CARRIER_DIAG; SUITE_CASES{end+1} = 'carrier_diag_only'; end
+if RUN_DUAL_FREQUENCY_CASES
+    SUITE_CASES{end+1} = 'dual_frequency_baseline';
+    SUITE_CASES{end+1} = 'ionosphere_dual_frequency_mismatch';
+    SUITE_CASES{end+1} = 'ionosphere_dual_frequency_matched';
+end
+if RUN_STOCHASTIC_ENV_CASE;    SUITE_CASES{end+1} = 'stochastic_environment_validation'; end
+if RUN_CLOCK_NOISE_VALIDATION; SUITE_CASES{end+1} = 'clock_noise_validation'; end
 
 nCases = numel(SUITE_CASES);
 fprintf('\n=== Scientific Validation Suite: %d cases × %d s ===\n\n', nCases, SUITE_DURATION_S);
@@ -160,6 +170,28 @@ function r = collectMetrics(caseName, cfg, d)
         csGet_(cs, 'correlatedCommonMode',  'mismatchRMS_m', iS, 'max'), ...
         csGet_(cs, 'correlatedSameTower',   'mismatchRMS_m', iS, 'max'), ...
         csGet_(cs, 'correlatedIndependent', 'mismatchRMS_m', iS, 'max')]);
+
+    % --- New metrics: dual-frequency and stochastic environment --------
+    try
+        signals = revgnss.SignalUtils.getEnabledSignals(cfg);
+        r.nSignals = numel(signals);
+    catch
+        r.nSignals = 1;
+    end
+    try
+        r.enabledSignals = strjoin(cfg.signals.enabled, '+');
+    catch
+        r.enabledSignals = 'L1';
+    end
+    r.maxMeasurements    = max(d.getNumMeasurements());
+    r.maxMeasurementRows = max(d.getNumMeasurementRows());
+    r.meanScintillationRMS_m = csGet_(cs, 'scintillationCodeNoise', 'truthRMS_m', iS, 'mean');
+    r.maxIonoMismatchL1_m  = 0;
+    r.maxIonoMismatchL2_m  = 0;
+    r.ionoL2overL1Ratio    = NaN;
+    % Clock bias/drift RMS (last 20%)
+    clkDrift = d.getClockDriftErrors();
+    r.clockDriftRMS_last20_mps = rms(clkDrift(iS:end));
 
     r.status   = 'UNKNOWN';
     r.notes    = '';
@@ -273,6 +305,61 @@ function r = applyRules(r, baselinePosErr)
         case 'carrier_diag_only'
             r.status = 'INFO';
             nn{end+1} = 'Carrier phase diagnostic — full rules TBD';
+            ok = true;
+
+        case 'dual_frequency_baseline'
+            % Dual-frequency: expect N_sig × measurement rows
+            if r.maxMeasurementRows < 2
+                ok = false;
+                nn{end+1} = sprintf('dual-freq maxMeasRows=%d < 2', r.maxMeasurementRows);
+            end
+            [nisOk, nisNote] = checkNIS_(r);
+            if ~nisOk; ok = false; nn{end+1} = nisNote; end
+            if r.finalPositionError_m > 100
+                ok = false;
+                nn{end+1} = sprintf('posErr %.2f m > 100 m', r.finalPositionError_m);
+            end
+            nn{end+1} = sprintf('nSignals=%d maxRows=%d', r.nSignals, r.maxMeasurementRows);
+            r.status = iff_(ok, 'PASS', 'FAIL');
+
+        case 'ionosphere_dual_frequency_mismatch'
+            % L2 iono delay should be larger than L1 (ratio ≈ (f_L1/f_L2)^2 ≈ 1.647)
+            ok = r.maxIonosphereMismatch_m > 1;
+            if ~ok
+                nn{end+1} = sprintf('iono mismatch %.4f m < 1 m', r.maxIonosphereMismatch_m);
+            end
+            nn{end+1} = sprintf('nSignals=%d enabledSigs=%s', r.nSignals, r.enabledSignals);
+            r.status = iff_(ok, 'PASS', 'FAIL');
+
+        case 'ionosphere_dual_frequency_matched'
+            % Matched iono truth=model: mismatch should be near zero
+            if r.maxIonosphereMismatch_m > 0.1
+                ok = false;
+                nn{end+1} = sprintf('matched iono mismatch %.4f m > 0.1 m', r.maxIonosphereMismatch_m);
+            end
+            nn{end+1} = sprintf('nSignals=%d', r.nSignals);
+            r.status = iff_(ok, 'PASS', 'FAIL');
+
+        case 'stochastic_environment_validation'
+            % Stochastic GM models: mark INFO (no strict NIS rule — R may not match stochastic)
+            r.status = 'INFO';
+            nn{end+1} = 'stochastic GM trop+iono — NIS rule relaxed';
+            ok = true;
+            if isnan(r.meanNIS) || isinf(r.meanNIS)
+                ok = false;
+                r.status = 'FAIL';
+                nn{end+1} = 'NIS is NaN/Inf';
+            end
+            if r.finalPositionError_m > 5e4
+                ok = false;
+                r.status = 'FAIL';
+                nn{end+1} = sprintf('posErr %.2f m >> 50 km', r.finalPositionError_m);
+            end
+
+        case 'clock_noise_validation'
+            r.status = 'INFO';
+            nn{end+1} = sprintf('stochastic clocks noisyCorrection — posErr=%.2f m', ...
+                r.finalPositionError_m);
             ok = true;
 
         otherwise
@@ -537,15 +624,23 @@ function writeCSV(caseResults, csvPath)
     statusStr  = cellfun(@(r) r.status,                         caseResults, 'UniformOutput', false)';
     notesStr   = cellfun(@(r) r.notes,                          caseResults, 'UniformOutput', false)';
 
+    nSig        = cellfun(@(r) r.nSignals,                       caseResults)';
+    enabledSigs = cellfun(@(r) r.enabledSignals,                 caseResults, 'UniformOutput', false)';
+    maxMeasRows = cellfun(@(r) r.maxMeasurementRows,             caseResults)';
+    scintRMS    = cellfun(@(r) r.meanScintillationRMS_m,         caseResults)';
+    clkDriftRMS = cellfun(@(r) r.clockDriftRMS_last20_mps,       caseResults)';
+
     T = table(caseNames, posErr, posRMS, clkErr, meanNIS, expNIS, mismatch, gdop, ...
         sagnac, shapiro, trop, iono, twrSvy, rxPCO, twrPCO, pcv, corrNoise, ...
+        nSig, enabledSigs, maxMeasRows, scintRMS, clkDriftRMS, ...
         statusStr, notesStr, ...
         'VariableNames', { ...
             'caseName','finalPositionError_m','positionRMS_last20_m','finalClockBiasError_m', ...
             'meanNIS','expectedNIS','meanTotalMismatch_m','meanGDOPLike', ...
             'maxSagnacMismatch_m','maxShapiroMismatch_m','maxTropMismatch_m','maxIonoMismatch_m', ...
             'maxTwrSvyMismatch_m','maxRxPCOMismatch_m','maxTwrPCOMismatch_m','maxPCVMismatch_m', ...
-            'maxCorrNoiseMismatch_m','status','notes'});
+            'maxCorrNoiseMismatch_m','nSignals','enabledSignals','maxMeasurementRows', ...
+            'meanScintillationRMS_m','clockDriftRMS_last20_mps','status','notes'});
 
     writetable(T, csvPath);
     fprintf('  CSV saved: %s\n', csvPath);

@@ -7,10 +7,19 @@ classdef ErrorChain < handle
     %   Model errors (biases/corrections) affect the predicted measurement h.
     %   The difference propagates into the innovation nu = z - h.
     %
+    % All results are at L1 level (single-frequency).  MeasurementModel
+    % handles frequency scaling for multi-frequency expansion.
+    %
+    % Configuration:
+    %   Receives the FULL cfg struct (not just cfg.errors).
+    %   Error fields accessed via obj.cfg.errors.*
+    %   Signal fields via obj.cfg.signals.*
+    %   Measurement fields via obj.cfg.measurements.*
+    %
     % Configuration example:
     %   cfg.errors.troposphere.truth.enable  = true;
     %   cfg.errors.troposphere.truth.zenithDelay_m = 2.3;
-    %   cfg.errors.troposphere.model.enable  = false;  % ignored in predictor
+    %   cfg.errors.troposphere.model.enable  = false;
     %
     % Returns:
     %   err.truthTotal_m            [N x 1]  total truth error contribution
@@ -20,6 +29,9 @@ classdef ErrorChain < handle
     %   err.bySource.model_m        struct   per-source model error
     %   err.bySource.sigma_m        struct   per-source sigma
     %   err.labels                  cell     source name strings
+    %   err.elevations_rad          [N x 1]  elevation angles (for MeasurementModel)
+    %   err.scintSigmaL1_m          [N x 1]  L1 scintillation sigma per measurement
+    %   err.sigmaExtra_m            [N x 1]  sqrt(sigmaTotal^2 - sigmaCode^2)
     %
     % Note on receiver clock and tower clock:
     %   These are passed in from the EKF state / truth state separately.
@@ -27,17 +39,54 @@ classdef ErrorChain < handle
     %   MeasurementModel adds them explicitly.
 
     properties
-        cfg         (1,1) struct   % error configuration
+        cfg         (1,1) struct   % FULL simulation config (not just errors sub-struct)
         rngStream                  % MATLAB random number stream
         seed        (1,1) double = 0
+        envModel                   % revgnss.EnvironmentModel (always created)
+        envRng                     % RandStream for elevation-dependent code noise
+        lastT_s     (1,1) double = -1   % last t_s for dt computation
     end
 
     methods
         function obj = ErrorChain(cfg, seed)
+            % ErrorChain  Constructor.
+            %
+            % Inputs:
+            %   cfg    struct   FULL simulation config struct (not cfg.errors)
+            %   seed   scalar   integer seed for the primary RNG
+            %
+            % Backward compatibility: if cfg looks like cfg.errors (has 'codeNoise' but
+            % not 'errors'), wrap it so internal code always sees cfg.errors.
+
             if nargin == 0; return; end
+
+            % Handle backward-compat: if only cfg.errors was passed
+            % (old call: ErrorChain(cfg.errors, seed)), wrap it so
+            % obj.cfg.errors always exists.
+            if isfield(cfg,'codeNoise') && ~isfield(cfg,'errors')
+                fullCfg.errors = cfg;
+                fullCfg.simulation.dt_s = 1.0;
+                cfg = fullCfg;
+            end
+
             obj.cfg = cfg;
             if nargin >= 2; obj.seed = seed; end
             obj.rngStream = RandStream('mt19937ar','Seed', obj.seed);
+
+            % --- EnvironmentModel: always created --------------------------
+            nT = 1;
+            if isfield(cfg,'scenario') && isfield(cfg.scenario,'nTowers')
+                nT = cfg.scenario.nTowers;
+            end
+            obj.envModel = revgnss.EnvironmentModel(cfg, nT);
+
+            % --- Separate RNG for elevation-based code noise ---------------
+            seed2 = 6101;
+            if isfield(cfg,'measurements') && isfield(cfg.measurements,'codeNoise') && ...
+                    isfield(cfg.measurements.codeNoise,'seed')
+                seed2 = cfg.measurements.codeNoise.seed;
+            end
+            obj.envRng = RandStream('mt19937ar', 'Seed', seed2);
         end
 
         % ----------------------------------------------------------------
@@ -57,6 +106,7 @@ classdef ErrorChain < handle
             %   t_s              scalar   current time
             %
             % Returns: err struct as described in class header.
+            % All results are at L1 level.
 
             N   = numel(elevations_rad);
             elv = elevations_rad(:);
@@ -64,24 +114,53 @@ classdef ErrorChain < handle
             % Floor elevation for atmosphere mapping
             elvFloor = revgnss.Constants.ELEVATION_FLOOR_RAD;
 
+            % --- Compute dt and step EnvironmentModel --------------------
+            if obj.lastT_s < 0
+                % First call: use configured dt or default 1 s
+                dt = 1.0;
+                if isfield(obj.cfg,'simulation') && isfield(obj.cfg.simulation,'dt_s')
+                    dt = obj.cfg.simulation.dt_s;
+                end
+            else
+                dt = t_s - obj.lastT_s;
+                if dt <= 0
+                    dt = 1.0;
+                    if isfield(obj.cfg,'simulation') && isfield(obj.cfg.simulation,'dt_s')
+                        dt = obj.cfg.simulation.dt_s;
+                    end
+                end
+            end
+            obj.lastT_s = t_s;
+
+            % Step environment once per epoch (ALL towers)
+            obj.envModel.step(dt);
+
+            % L1 frequency for scintillation and iono scaling reference
+            f_L1 = 1575.42e6;
+            if isfield(obj.cfg,'signals') && isfield(obj.cfg.signals,'L1') && ...
+                    isfield(obj.cfg.signals.L1,'frequency_Hz')
+                f_L1 = obj.cfg.signals.L1.frequency_Hz;
+            end
+
             % Allocate output
             truth_m = struct();
             model_m = struct();
             sigma_m = struct();
 
             % -------- 1. Code measurement noise (sigma only, no bias) ---
-            sigma_code = obj.cfg.codeNoise.sigma_m;
-            truth_m.code  = sigma_code * randn(obj.rngStream, N, 1);
+            % Compute elevation-dependent sigma vector (L1 level)
+            sigma_code_vec = obj.computeCodeSigmaVec_(elv, elvFloor);
+            truth_m.code  = sigma_code_vec .* randn(obj.rngStream, N, 1);
             model_m.code  = zeros(N,1);
-            sigma_m.code  = sigma_code * ones(N,1);
+            sigma_m.code  = sigma_code_vec;
 
             % -------- 2. Troposphere ----------------------------------
             [truth_m.trop, model_m.trop, sigma_m.trop] = ...
-                obj.troposphere_(elv, elvFloor);
+                obj.troposphere_(elv, elvFloor, towerIdx);
 
-            % -------- 3. Ionosphere ------------------------------------
+            % -------- 3. Ionosphere (L1 level) ------------------------
             [truth_m.iono, model_m.iono, sigma_m.iono] = ...
-                obj.ionosphere_(elv, elvFloor);
+                obj.ionosphere_(elv, elvFloor, towerIdx, f_L1);
 
             % -------- 4. Hardware delay --------------------------------
             [truth_m.hwDelay, model_m.hwDelay, sigma_m.hwDelay] = ...
@@ -90,6 +169,18 @@ classdef ErrorChain < handle
             % -------- 5. Multipath ------------------------------------
             [truth_m.mp, model_m.mp, sigma_m.mp] = ...
                 obj.multipath_(elv, t_s);
+
+            % -------- 6. Scintillation sigma (L1 level) ---------------
+            scintSigmaL1_m = zeros(N,1);
+            ec = obj.cfg.errors;
+            if isfield(ec,'ionosphere') && isfield(ec.ionosphere,'scintillation') && ...
+                    isfield(ec.ionosphere.scintillation,'enable') && ...
+                    ec.ionosphere.scintillation.enable
+                for k = 1:N
+                    scintSigmaL1_m(k) = obj.envModel.getScintillationSigma( ...
+                        elv(k), f_L1, f_L1);  % L1 level: freqHz = f_L1
+                end
+            end
 
             % -------- Aggregate ----------------------------------------
             labels = {'code','trop','iono','hwDelay','mp'};
@@ -104,6 +195,9 @@ classdef ErrorChain < handle
             end
             sigmaTotal = sqrt(sigmaTotal);
 
+            % sigmaExtra: non-code sigma (for MeasurementModel R building)
+            sigmaExtra_m = sqrt(max(sigmaTotal.^2 - sigma_code_vec.^2, 0));
+
             err.truthTotal_m   = truthTotal;
             err.modelTotal_m   = modelTotal;
             err.sigmaTotal_m   = sigmaTotal;
@@ -111,36 +205,121 @@ classdef ErrorChain < handle
             err.bySource.model_m = model_m;
             err.bySource.sigma_m = sigma_m;
             err.labels = labels;
+            % New fields for MeasurementModel multi-frequency expansion
+            err.elevations_rad  = elv;
+            err.scintSigmaL1_m  = scintSigmaL1_m;
+            err.sigmaExtra_m    = sigmaExtra_m;
         end
     end
 
     methods (Access = private)
-        % ----------------------------------------------------------------
-        function [truth_m, model_m, sigma_m] = troposphere_(obj, elv, elvFloor)
-            % Simple mapped troposphere (Stage 6 model).
-            %
-            % Zenith tropospheric delay mapped to each elevation angle via 1/sin(el).
-            % This is a simplified isotropic model (no VMF3/GPT3/ERA5 — Stage 9 only).
-            % Sign convention: positive (delay) for both code and carrier phase.
-            % TODO Stage 9: replace with VMF3/GPT3 grid interpolation if needed.
-            N = numel(elv);
-            tc = obj.cfg.troposphere;
-            mappingFn = @(e) 1 ./ max(sin(e), sin(elvFloor));
 
-            if tc.truth.enable
-                zenith_m = tc.truth.zenithDelay_m;
-                truth_m  = zenith_m * mappingFn(elv);
-            else
-                truth_m  = zeros(N,1);
+        % ----------------------------------------------------------------
+        function sigma_vec = computeCodeSigmaVec_(obj, elv, elvFloor)
+            % computeCodeSigmaVec_  Per-measurement code noise sigma [L1 level].
+            %
+            % Supports:
+            %   'constant'   (default): cfg.errors.codeNoise.sigma_m for all elevations
+            %   'elevation':  sigma = codeSigma0_L1 / sin(el)^p
+            %   'cn0':        sigma from CN0 model
+
+            N = numel(elv);
+            ec = obj.cfg.errors;
+
+            % Code noise model type
+            codeModel = 'constant';
+            if isfield(obj.cfg,'measurements') && isfield(obj.cfg.measurements,'codeNoise') && ...
+                    isfield(obj.cfg.measurements.codeNoise,'model')
+                codeModel = obj.cfg.measurements.codeNoise.model;
             end
 
-            if tc.model.enable
-                zenith_m_model = tc.model.zenithDelay_m;
-                bias_frac      = 1;
-                if isfield(tc.model,'biasFraction'); bias_frac = tc.model.biasFraction; end
-                model_m = zenith_m_model * bias_frac * mappingFn(elv);
-            else
+            % Base sigma at L1 (from errors.codeNoise for backward compat,
+            % or from signals.L1.codeSigma0_m for new config)
+            sigma0 = ec.codeNoise.sigma_m;  % backward compat default
+            if isfield(obj.cfg,'signals') && isfield(obj.cfg.signals,'L1') && ...
+                    isfield(obj.cfg.signals.L1,'codeSigma0_m')
+                sigma0 = obj.cfg.signals.L1.codeSigma0_m;
+            end
+
+            switch lower(codeModel)
+                case 'constant'
+                    sigma_vec = sigma0 * ones(N,1);
+
+                case 'elevation'
+                    p = 1.0;
+                    if isfield(obj.cfg,'measurements') && ...
+                            isfield(obj.cfg.measurements,'codeNoise') && ...
+                            isfield(obj.cfg.measurements.codeNoise,'elevationExponent')
+                        p = obj.cfg.measurements.codeNoise.elevationExponent;
+                    end
+                    mapping   = 1 ./ max(sin(elv), sin(elvFloor));
+                    sigma_vec = sigma0 * mapping.^p;
+
+                case 'cn0'
+                    % CN0-based sigma model
+                    cn0cfg = obj.cfg.measurements.codeNoise.cn0;
+                    base_dBHz   = 45;
+                    elevGain_dB = 6;
+                    sigmaAt45_m = 0.30;
+                    if isfield(cn0cfg,'base_dBHz');        base_dBHz   = cn0cfg.base_dBHz; end
+                    if isfield(cn0cfg,'elevationGain_dB'); elevGain_dB = cn0cfg.elevationGain_dB; end
+                    if isfield(cn0cfg,'sigmaAt45dBHz_m');  sigmaAt45_m = cn0cfg.sigmaAt45dBHz_m; end
+
+                    sigma_vec = zeros(N,1);
+                    for k = 1:N
+                        cn0_dBHz  = base_dBHz + elevGain_dB * sin(elv(k));
+                        sigma_vec(k) = sigmaAt45_m * 10^(-(cn0_dBHz - 45)/20);
+                    end
+
+                otherwise
+                    sigma_vec = sigma0 * ones(N,1);
+            end
+        end
+
+        % ----------------------------------------------------------------
+        function [truth_m, model_m, sigma_m] = troposphere_(obj, elv, elvFloor, towerIdx)
+            % troposphere_  Tropospheric delay [m] for all visible measurements.
+            %
+            % For 'simpleMapped': uses old zenithDelay_m (backward compat).
+            % For 'localWeatherGM': delegates to EnvironmentModel.
+
+            N = numel(elv);
+            tc = obj.cfg.errors.troposphere;
+            mappingFn = @(e) 1 ./ max(sin(e), sin(elvFloor));
+
+            modelType = 'simpleMapped';
+            if isfield(tc,'modelType'); modelType = tc.modelType; end
+
+            if strcmp(modelType,'localWeatherGM')
+                % Delegate to EnvironmentModel
+                truth_m = zeros(N,1);
                 model_m = zeros(N,1);
+                for k = 1:N
+                    ti = towerIdx(k);
+                    if isfield(tc,'truth') && isfield(tc.truth,'enable') && tc.truth.enable
+                        truth_m(k) = obj.envModel.getTropDelay(ti, elv(k), 'truth');
+                    end
+                    if isfield(tc,'model') && isfield(tc.model,'enable') && tc.model.enable
+                        model_m(k) = obj.envModel.getTropDelay(ti, elv(k), 'model');
+                    end
+                end
+            else
+                % simpleMapped (backward compat)
+                if isfield(tc,'truth') && isfield(tc.truth,'enable') && tc.truth.enable
+                    zenith_m = tc.truth.zenithDelay_m;
+                    truth_m  = zenith_m * mappingFn(elv);
+                else
+                    truth_m  = zeros(N,1);
+                end
+
+                if isfield(tc,'model') && isfield(tc.model,'enable') && tc.model.enable
+                    zenith_m_model = tc.model.zenithDelay_m;
+                    bias_frac      = 1;
+                    if isfield(tc.model,'biasFraction'); bias_frac = tc.model.biasFraction; end
+                    model_m = zenith_m_model * bias_frac * mappingFn(elv);
+                else
+                    model_m = zeros(N,1);
+                end
             end
 
             if isfield(tc,'sigma_m')
@@ -150,33 +329,54 @@ classdef ErrorChain < handle
             end
         end
 
-        function [truth_m, model_m, sigma_m] = ionosphere_(obj, elv, elvFloor)
-            % Simple single-frequency ionosphere (Stage 6 model).
+        % ----------------------------------------------------------------
+        function [truth_m, model_m, sigma_m] = ionosphere_(obj, elv, elvFloor, towerIdx, f_L1)
+            % ionosphere_  L1 ionospheric slant delay [m] for all visible measurements.
             %
-            % First-order ionospheric delay mapped to elevation via 1/sin(el).
-            % Sign convention: POSITIVE for pseudorange (code phase delay).
-            %                  NEGATIVE for carrier phase (carrier phase advance).
-            % ErrorChain truth/modelTotal is used directly in pseudorange z and h.
-            % computeCarrierPhase_ does NOT use ErrorChain totals (wrong iono sign).
-            % TODO Stage 9: replace with dual-frequency or Klobuchar/NeQuick model.
-            N = numel(elv);
-            ic = obj.cfg.ionosphere;
+            % Returns L1-level delay.  MeasurementModel scales to other frequencies.
+            %
+            % For 'simpleMapped': uses old zenithDelay_m (backward compat).
+            % For 'tecGaussMarkov': delegates to EnvironmentModel.
+
+            N  = numel(elv);
+            ic = obj.cfg.errors.ionosphere;
             mappingFn = @(e) 1 ./ max(sin(e), sin(elvFloor));
 
-            if ic.truth.enable
-                iono_zenith_m = ic.truth.zenithDelay_m;
-                truth_m = iono_zenith_m * mappingFn(elv);
-            else
-                truth_m = zeros(N,1);
-            end
+            modelType = 'simpleMapped';
+            if isfield(ic,'modelType'); modelType = ic.modelType; end
 
-            if ic.model.enable
-                zenith_m_model = ic.model.zenithDelay_m;
-                bias_frac = 1;
-                if isfield(ic.model,'biasFraction'); bias_frac = ic.model.biasFraction; end
-                model_m = zenith_m_model * bias_frac * mappingFn(elv);
-            else
+            if strcmp(modelType,'tecGaussMarkov')
+                % Delegate to EnvironmentModel (returns L1 slant delay when freqHz = f_L1)
+                truth_m = zeros(N,1);
                 model_m = zeros(N,1);
+                for k = 1:N
+                    ti = towerIdx(k);
+                    if isfield(ic,'truth') && isfield(ic.truth,'enable') && ic.truth.enable
+                        truth_m(k) = obj.envModel.getIonoDelay( ...
+                            ti, elv(k), 'truth', f_L1, f_L1);
+                    end
+                    if isfield(ic,'model') && isfield(ic.model,'enable') && ic.model.enable
+                        model_m(k) = obj.envModel.getIonoDelay( ...
+                            ti, elv(k), 'model', f_L1, f_L1);
+                    end
+                end
+            else
+                % simpleMapped (backward compat)
+                if isfield(ic,'truth') && isfield(ic.truth,'enable') && ic.truth.enable
+                    iono_zenith_m = ic.truth.zenithDelay_m;
+                    truth_m = iono_zenith_m * mappingFn(elv);
+                else
+                    truth_m = zeros(N,1);
+                end
+
+                if isfield(ic,'model') && isfield(ic.model,'enable') && ic.model.enable
+                    zenith_m_model = ic.model.zenithDelay_m;
+                    bias_frac = 1;
+                    if isfield(ic.model,'biasFraction'); bias_frac = ic.model.biasFraction; end
+                    model_m = zenith_m_model * bias_frac * mappingFn(elv);
+                else
+                    model_m = zeros(N,1);
+                end
             end
 
             if isfield(ic,'sigma_m')
@@ -186,8 +386,9 @@ classdef ErrorChain < handle
             end
         end
 
+        % ----------------------------------------------------------------
         function [truth_m, model_m, sigma_m] = hardwareDelay_(obj, N, towerIds)
-            hc = obj.cfg.hardwareDelay;
+            hc = obj.cfg.errors.hardwareDelay;
             truth_m = zeros(N,1);
             model_m = zeros(N,1);
             sigma_m = zeros(N,1);
@@ -210,9 +411,10 @@ classdef ErrorChain < handle
             end
         end
 
+        % ----------------------------------------------------------------
         function [truth_m, model_m, sigma_m] = multipath_(obj, elv, t_s)
             N = numel(elv);
-            mc = obj.cfg.multipath;
+            mc = obj.cfg.errors.multipath;
             truth_m = zeros(N,1);
             model_m = zeros(N,1);
             sigma_m = zeros(N,1);
@@ -230,5 +432,6 @@ classdef ErrorChain < handle
                 sigma_m = mc.sigma_m * ones(N,1);
             end
         end
+
     end
 end

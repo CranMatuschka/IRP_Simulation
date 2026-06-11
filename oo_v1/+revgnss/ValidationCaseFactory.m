@@ -174,6 +174,48 @@ classdef ValidationCaseFactory
                     cfg.measurements.carrierPhase.enable          = true;
                     cfg.measurements.carrierPhase.useInEKF        = false;
 
+                case 'dual_frequency_baseline'
+                    % Dual-frequency (L1+L2) baseline: code noise only, both signals
+                    cfg = revgnss.ConfigFactory.defaultConfig();
+                    cfg.signals.enabled = {'L1','L2'};
+
+                case 'ionosphere_dual_frequency_mismatch'
+                    % Dual-frequency with ionosphere truth on, model off — visible mismatch
+                    cfg = revgnss.ConfigFactory.defaultConfig();
+                    cfg.signals.enabled = {'L1','L2'};
+                    cfg.errors.ionosphere.truth.enable        = true;
+                    cfg.errors.ionosphere.truth.zenithDelay_m = 5.0;
+                    cfg.errors.ionosphere.model.enable        = false;
+
+                case 'ionosphere_dual_frequency_matched'
+                    % Dual-frequency with matched iono truth=model — should mostly cancel
+                    cfg = revgnss.ConfigFactory.defaultConfig();
+                    cfg.signals.enabled = {'L1','L2'};
+                    cfg.errors.ionosphere.truth.enable        = true;
+                    cfg.errors.ionosphere.truth.zenithDelay_m = 5.0;
+                    cfg.errors.ionosphere.model.enable        = true;
+                    cfg.errors.ionosphere.model.zenithDelay_m = 5.0;
+
+                case 'stochastic_environment_validation'
+                    % Stochastic troposphere + ionosphere GM; no model correction
+                    cfg = revgnss.ConfigFactory.defaultConfig();
+                    cfg.errors.troposphere.modelType                = 'localWeatherGM';
+                    cfg.errors.troposphere.truth.enable             = true;
+                    cfg.errors.troposphere.model.enable             = false;
+                    cfg.errors.troposphere.stochastic.enable        = true;
+                    cfg.errors.troposphere.stochastic.tau_s         = 3600;
+                    cfg.errors.troposphere.stochastic.sigmaWet_ss_m = 0.05;
+                    cfg.errors.ionosphere.modelType                 = 'tecGaussMarkov';
+                    cfg.errors.ionosphere.truth.enable              = true;
+                    cfg.errors.ionosphere.model.enable              = false;
+                    cfg.errors.ionosphere.stochastic.enable         = true;
+                    cfg.errors.ionosphere.stochastic.tau_s          = 1800;
+                    cfg.errors.ionosphere.stochastic.sigmaVDelayL1_ss_m = 1.0;
+
+                case 'clock_noise_validation'
+                    % Stochastic clocks + noisyCorrection (same as clockNoiseConfig)
+                    cfg = revgnss.ConfigFactory.clockNoiseConfig();
+
                 otherwise
                     error('revgnss:ValidationCaseFactory:unknownCase', ...
                         'Unknown case: ''%s''. See classdef header for valid cases.', caseName);
