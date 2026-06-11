@@ -1,30 +1,33 @@
 % run_oo_contribution_validation_report.m
 %
-% Creates one compact contribution validation PDF for one selected scenario.
-% This is not a full case sweep.
+% Creates ONE PDF from ONE simulation run.
+% Not a case sweep.  No repeated standard plots.  No hundreds of pages.
 %
 % Output:
 %   oo_v1/output/effect_contribution_validation_report.pdf
 %
-% Page budget (default):
-%   1   summary page
-%  17   standard diagnostic plots  (INCLUDE_FULL_STANDARD_PLOTS = true)
-%   7   compact contribution plots
-%   2   comparison summary (only if RUN_COMPARISON_SUMMARY = true)
-%  ---
-%  ~25  total
+% Expected figure count:
+%   1  summary page
+%  17  standard diagnostic figures  (INCLUDE_ALL_STANDARD_PLOTS = true)
+%   1  contribution overview
+%  20  one page per known contribution (enabled=plot, disabled=text page)
+%  ----
+%  39  total
+%
+% Hard limits: error if < 10 or > 60 figures.
 %
 % Usage:
 %   cd oo_v1
 %   run_oo_contribution_validation_report
 
 clear; close all; clc;
+scriptStart = datetime('now');
 
 thisDir = fileparts(mfilename('fullpath'));
 addpath(thisDir);
 
 % ======================================================================
-%  CONFIGURATION
+%  CONFIGURATION — edit these lines
 % ======================================================================
 % Select one scenario to validate:
 %   'baseline'              defaultConfig — code noise only
@@ -38,17 +41,14 @@ addpath(thisDir);
 %   'ionosphere_mismatch'   Ionosphere truth only
 %   'correlated_noise'      Correlated noise enabled
 %   'doppler_diag_only'     Doppler diagnostic (not in EKF)
+%   'doppler_ekf'           Doppler in EKF
 %   'carrier_diag_only'     Carrier phase diagnostic
-%   'custom'                Edit buildCaseConfig below
+%   'custom'                Edit buildReportCase below
 REPORT_CASE = 'baseline';
 
 % If true: include all 17 standard diagnostic figures from Plotter.plotAll.
 % If false: include a compact 8-figure subset (position/attitude/clock/NIS/RMS).
-INCLUDE_FULL_STANDARD_PLOTS = false;
-
-% If true: run 6 additional comparison cases and append a summary table/plot.
-% No full per-case plots — only scalar metrics.
-RUN_COMPARISON_SUMMARY = false;
+INCLUDE_ALL_STANDARD_PLOTS = true;
 
 duration_s  = 600;
 showFigures = false;
@@ -57,74 +57,116 @@ showFigures = false;
 %  OUTPUT PATH
 % ======================================================================
 singlePdf = fullfile(thisDir, 'output', 'effect_contribution_validation_report.pdf');
-if ~exist(fullfile(thisDir, 'output'), 'dir')
-    mkdir(fullfile(thisDir, 'output'));
-end
 
 % ======================================================================
-%  BUILD + RUN ONE SCENARIO
+%  BUILD + RUN ONE SCENARIO  — do NOT add loops here
 % ======================================================================
-cfg = buildCaseConfig(REPORT_CASE, duration_s, showFigures);
+fprintf('\n=== Contribution Validation Report: %s  (ONE simulation run only) ===\n', REPORT_CASE);
 
-fprintf('\n=== Contribution Validation Report: %s ===\n', REPORT_CASE);
+cfg = buildReportCase(REPORT_CASE, duration_s, showFigures);
+
 sim = revgnss.ReverseGNSSSimulation(cfg);
 sim.initialize();
 sim.run();
 
-d = sim.diag;
-t = d.getTimeVector();
+% Use finalized config (finalizeConfig runs inside initialize)
+cfg = sim.cfg;
+d   = sim.diag;
+t   = d.getTimeVector();
 
 % ======================================================================
 %  ASSEMBLE FIGURES
 % ======================================================================
 allFigHandles = gobjects(0);
 
-% 1) Case summary
-figSum = makeSummaryFig(REPORT_CASE, cfg, d, showFigures);
+% 1) Summary page
+figSum = makeSummaryFig(REPORT_CASE, cfg, d, singlePdf, showFigures);
 allFigHandles = [allFigHandles; figSum];
 
-% 2) Standard diagnostic plots
-if INCLUDE_FULL_STANDARD_PLOTS
+% 2) Standard diagnostic plots (once)
+if INCLUDE_ALL_STANDARD_PLOTS
     stdFigs = revgnss.Plotter.plotAll(d, sim.asset, sim.towers, cfg);
     allFigHandles = [allFigHandles; stdFigs(:)];
-    % Doppler RMS (separate unit — only include if Doppler configured)
-    if isDopplerEnabled(cfg)
-        figDop = revgnss.Plotter.plotDopplerRMS(d, t, cfg);
-        allFigHandles = [allFigHandles; figDop];
-    end
 else
     compactStd = plotCompactStandardSubset(d, sim.asset, sim.towers, cfg, t);
     allFigHandles = [allFigHandles; compactStd(:)];
 end
 
-% 3) Compact contribution plots (7 grouped figures)
-contribFigs = revgnss.ContributionPlotter.plotCompactContributionReport(d, cfg);
+% 3) Contribution pages: 1 overview + 20 per-effect pages
+contribFigs = revgnss.ContributionPlotter.plotSingleCaseContributionPages(d, cfg);
 allFigHandles = [allFigHandles; contribFigs(:)];
 
-% 4) Optional comparison summary (scalar metrics only, no per-case full reports)
-if RUN_COMPARISON_SUMMARY
-    compFigs = runComparisonSummary(duration_s, showFigures);
-    allFigHandles = [allFigHandles; compFigs(:)];
+% ======================================================================
+%  VALIDATE FIGURE COUNT — hard limits
+% ======================================================================
+nFigs = sum(isgraphics(allFigHandles));
+fprintf('Figure count: %d\n', nFigs);
+
+if nFigs < 10
+    error('run_oo_contribution_validation_report:tooFew', ...
+        'Only %d figures — report generation failed before PDF writing.', nFigs);
+end
+
+if nFigs > 60
+    error('run_oo_contribution_validation_report:tooMany', ...
+        ['%d figures exceeds limit of 60. This script runs ONE case only. ' ...
+         'Check that no loops were added.'], nFigs);
 end
 
 % ======================================================================
-%  WRITE SINGLE PDF
+%  WRITE PDF — bulletproof
 % ======================================================================
-nFigs = numel(allFigHandles);
-fprintf('Contribution validation report pages: %d figures\n', nFigs);
-if nFigs > 40
-    warning('run_oo_contribution_validation_report:tooLarge', ...
-        'Report too large: expected compact report, got %d figures', nFigs);
+outDir = fileparts(singlePdf);
+if ~exist(outDir, 'dir')
+    mkdir(outDir);
 end
 
-revgnss.ReportWriter.write(singlePdf, allFigHandles, cfg);
-fprintf('Written: %s\n\n', singlePdf);
+% Delete stale file so we can verify the new one by timestamp
+if exist(singlePdf, 'file')
+    delete(singlePdf);
+end
+
+% Build write config: savePdf MUST be true or ReportWriter silently skips
+cfgReport                             = cfg;
+cfgReport.plots.savePdf               = true;
+cfgReport.plots.saveFigures           = false;
+cfgReport.plots.saveIndividualFigures = false;
+cfgReport.report.enable               = true;
+cfgReport.report.outputPdf            = singlePdf;
+
+fprintf('Writing PDF with %d figures...\n', nFigs);
+revgnss.ReportWriter.write(singlePdf, allFigHandles, cfgReport);
+
+% ======================================================================
+%  VERIFY — must exist, nonzero, newly written
+% ======================================================================
+if ~exist(singlePdf, 'file')
+    error('run_oo_contribution_validation_report:writeFailed', ...
+        'PDF was not created: %s', singlePdf);
+end
+
+info = dir(singlePdf);
+if info.bytes <= 0
+    error('run_oo_contribution_validation_report:emptyPdf', ...
+        'PDF exists but is empty: %s', singlePdf);
+end
+
+modTime = datetime(info.datenum, 'ConvertFrom', 'datenum');
+if modTime < scriptStart - seconds(30)
+    error('run_oo_contribution_validation_report:stalePdf', ...
+        ['PDF timestamp (%s) predates script start (%s). ' ...
+         'The file was not newly written: %s'], ...
+        char(modTime), char(scriptStart), singlePdf);
+end
+
+fprintf('\nPDF created: %s\n(%.1f kB, %d figures)\n\n', ...
+    singlePdf, info.bytes/1024, nFigs);
 
 % ======================================================================
 %  LOCAL FUNCTIONS
 % ======================================================================
 
-function cfg = buildCaseConfig(caseName, duration_s, showFigures)
+function cfg = buildReportCase(caseName, duration_s, showFigures)
     switch caseName
         case 'baseline'
             cfg = revgnss.ConfigFactory.defaultConfig();
@@ -185,75 +227,72 @@ function cfg = buildCaseConfig(caseName, duration_s, showFigures)
             cfg.physics.doppler.truth.enable   = true;
             cfg.physics.doppler.model.enable   = true;
 
+        case 'doppler_ekf'
+            cfg = revgnss.ConfigFactory.defaultConfig();
+            cfg.measurements.doppler.enable    = true;
+            cfg.measurements.doppler.useInEKF  = true;
+            cfg.measurements.doppler.sigma_mps = 0.01;
+            cfg.physics.doppler.truth.enable   = true;
+            cfg.physics.doppler.model.enable   = true;
+
         case 'carrier_diag_only'
             cfg = revgnss.ConfigFactory.defaultConfig();
             cfg.measurements.carrierPhase.enable   = true;
             cfg.measurements.carrierPhase.useInEKF = false;
 
         case 'custom'
-            % Modify here for custom runs
             cfg = revgnss.ConfigFactory.defaultConfig();
+            % Add custom modifications below:
 
         otherwise
             error('run_oo_contribution_validation_report:unknownCase', ...
                 'Unknown REPORT_CASE: ''%s''. See header for valid options.', caseName);
     end
-    cfg = silencePlots(cfg, duration_s, showFigures);
-end
 
-function cfg = silencePlots(cfg, duration_s, showFigures)
     cfg.simulation.duration_s       = duration_s;
+    cfg.plots.enable                = true;   % allow figure creation
     cfg.plots.showFigures           = showFigures;
-    cfg.plots.savePdf               = false;
-    cfg.plots.saveIndividualFigures = false;
+    cfg.plots.savePdf               = false;  % suppress auto-save during run
     cfg.plots.saveFigures           = false;
-    cfg.report.enable               = false;
+    cfg.plots.saveIndividualFigures = false;
+    cfg.report.enable               = false;  % suppress auto-report during run
 end
 
-function tf = isDopplerEnabled(cfg)
-    tf = isfield(cfg,'measurements') && ...
-         isfield(cfg.measurements,'doppler') && ...
-         isfield(cfg.measurements.doppler,'enable') && ...
-         cfg.measurements.doppler.enable;
-end
-
-function fig = makeSummaryFig(caseName, cfg, d, showFigures)
+function fig = makeSummaryFig(caseName, cfg, d, pdfPath, showFigures)
     vis = 'off';
     if showFigures; vis = 'on'; end
     fig = figure('Name', ['Summary: ' caseName], 'Visible', vis, ...
-        'NumberTitle','off', 'Position',[100 100 700 420]);
+        'NumberTitle','off', 'Position',[100 100 720 440]);
 
     posErr  = d.getPositionErrors();
     nisVec  = d.getNIS();
     m_rows  = d.getNumMeasurementRows();
     nRx     = 1;
-    if isfield(cfg,'scenario') && isfield(cfg.scenario,'nReceivers')
-        nRx = cfg.scenario.nReceivers;
+    nTowers = 0;
+    if isfield(cfg,'scenario')
+        if isfield(cfg.scenario,'nReceivers'); nRx     = cfg.scenario.nReceivers; end
+        if isfield(cfg.scenario,'nTowers');    nTowers = cfg.scenario.nTowers;    end
     end
+    if nTowers == 0 && isfield(cfg,'towers')
+        nTowers = numel(cfg.towers);
+    end
+
     maxMeas  = max(d.getNumMeasurements());
     maxRows  = max(m_rows);
     meanNIS  = mean(nisVec,'omitnan');
     finalPos = posErr(end);
-    posRms   = rms(posErr(max(1,round(0.8*numel(posErr))):end));
+    posRms   = rms(posErr(max(1, round(0.8*numel(posErr))):end));
 
-    % Collect enabled effects as a string
-    effects = collectEnabledEffects(cfg);
-    effectStr = strjoin(effects, ', ');
-    if isempty(effectStr); effectStr = 'none (baseline)'; end
-
-    nTowers = 0;
-    if isfield(cfg,'scenario') && isfield(cfg.scenario,'nTowers')
-        nTowers = cfg.scenario.nTowers;
-    elseif isfield(cfg,'towers')
-        nTowers = numel(cfg.towers);
-    end
+    effects  = collectEnabledEffects(cfg);
+    fxStr    = strjoin(effects, ', ');
+    if isempty(fxStr); fxStr = 'none (baseline)'; end
 
     axes('Position',[0 0 1 1],'Visible','off'); %#ok<LAXES>
-    title('Contribution Validation Report — Case Summary');
 
     lines_ = { ...
-        sprintf('\\bfCase:\\rm  %s', strrep(caseName,'_',' ')); ...
+        '\bfContribution Validation Report — ONE simulation run only'; ...
         ''; ...
+        sprintf('\\bfCase:\\rm  %s', strrep(caseName,'_',' ')); ...
         sprintf('Duration:              %.0f s', cfg.simulation.duration_s); ...
         sprintf('Towers:                %d', nTowers); ...
         sprintf('Receivers:             %d', nRx); ...
@@ -261,27 +300,27 @@ function fig = makeSummaryFig(caseName, cfg, d, showFigures)
         sprintf('Max EKF rows/epoch:    %d', maxRows); ...
         sprintf('Final pos error:       %.4f m', finalPos); ...
         sprintf('Pos RMS (last 20%%):   %.4f m', posRms); ...
-        sprintf('Mean NIS:              %.2f   (E[NIS] ~ %.0f)', ...
-            meanNIS, mean(m_rows,'omitnan')); ...
+        sprintf('Mean NIS:              %.2f   (E[NIS] ~ %.0f)', meanNIS, mean(m_rows,'omitnan')); ...
         ''; ...
-        sprintf('\\bfEnabled effects:\\rm  %s', effectStr) };
+        sprintf('\\bfEnabled effects:\\rm  %s', fxStr); ...
+        ''; ...
+        sprintf('\\bfOutput PDF:\\rm  %s', pdfPath) };
 
-    text(0.05, 0.92, lines_, 'Units','normalized', ...
-        'VerticalAlignment','top','FontSize',11, ...
-        'Interpreter','tex');
+    text(0.05, 0.95, lines_, 'Units','normalized', ...
+        'VerticalAlignment','top','FontSize',11,'Interpreter','tex');
 end
 
 function effects = collectEnabledEffects(cfg)
     effects = {};
     if isfield(cfg,'physics')
         p = cfg.physics;
-        if isfield(p,'sagnac') && isfield(p.sagnac,'truth') && ...
-                isfield(p.sagnac.truth,'enable') && p.sagnac.truth.enable
-            effects{end+1} = 'Sagnac-truth';
-        end
-        if isfield(p,'sagnac') && isfield(p.sagnac,'model') && ...
-                isfield(p.sagnac.model,'enable') && p.sagnac.model.enable
-            effects{end+1} = 'Sagnac-model';
+        if isfield(p,'sagnac')
+            if isfield(p.sagnac,'truth') && isfield(p.sagnac.truth,'enable') && p.sagnac.truth.enable
+                effects{end+1} = 'Sagnac-truth';
+            end
+            if isfield(p.sagnac,'model') && isfield(p.sagnac.model,'enable') && p.sagnac.model.enable
+                effects{end+1} = 'Sagnac-model';
+            end
         end
         if isfield(p,'relativity') && isfield(p.relativity,'shapiro') && ...
                 isfield(p.relativity.shapiro,'truth') && ...
@@ -325,8 +364,7 @@ function effects = collectEnabledEffects(cfg)
     end
     if isfield(cfg,'measurements')
         if isfield(cfg.measurements,'doppler') && ...
-                isfield(cfg.measurements.doppler,'enable') && ...
-                cfg.measurements.doppler.enable
+                isfield(cfg.measurements.doppler,'enable') && cfg.measurements.doppler.enable
             if isfield(cfg.measurements.doppler,'useInEKF') && cfg.measurements.doppler.useInEKF
                 effects{end+1} = 'Doppler-EKF';
             else
@@ -341,8 +379,8 @@ function effects = collectEnabledEffects(cfg)
     end
 end
 
-function figs = plotCompactStandardSubset(d, asset, towers, cfg, t)
-    % 8 essential figures when INCLUDE_FULL_STANDARD_PLOTS = false
+function figs = plotCompactStandardSubset(d, ~, ~, cfg, t)
+    % 8 essential figures when INCLUDE_ALL_STANDARD_PLOTS = false
     figs = gobjects(0);
     if ~isfield(cfg,'plots') || ~cfg.plots.enable; return; end
 
@@ -360,95 +398,4 @@ function figs = plotCompactStandardSubset(d, asset, towers, cfg, t)
     figs  = f(valid);
     isFig = arrayfun(@(g) strcmp(get(g,'Type'),'figure'), figs);
     figs  = figs(isFig);
-end
-
-function figs = runComparisonSummary(duration_s, showFigures)
-    % Run 6 cases and collect only scalar metrics — no per-case full plots.
-    cases = {'baseline', 'realistic_matched', 'sagnac_mismatch', ...
-             'troposphere_mismatch', 'ionosphere_mismatch', 'correlated_noise'};
-    nCases = numel(cases);
-
-    results = struct();
-    results.name            = cases;
-    results.finalPosErr_m   = zeros(1, nCases);
-    results.meanNIS         = zeros(1, nCases);
-    results.meanPostfitRMS_m = zeros(1, nCases);
-    results.maxContrib_m    = zeros(1, nCases);
-    results.maxPRMeas       = zeros(1, nCases);
-
-    for ci = 1:nCases
-        try
-            cfg = buildCaseConfig(cases{ci}, duration_s, false);
-            cfg.plots.enable = false;   % suppress all plotting
-            sim = revgnss.ReverseGNSSSimulation(cfg);
-            sim.initialize();
-            sim.run();
-            d = sim.diag;
-
-            posErr = d.getPositionErrors();
-            nis    = d.getNIS();
-            cs     = d.getContributionSeries();
-
-            results.finalPosErr_m(ci)    = posErr(end);
-            results.meanNIS(ci)          = mean(nis,'omitnan');
-            results.meanPostfitRMS_m(ci) = mean(d.getPostfitPseudorangeRMS(),'omitnan');
-            results.maxPRMeas(ci)        = max(d.getNumMeasurements());
-
-            if isfield(cs,'totalTruthMinusModel_rms_m')
-                results.maxContrib_m(ci) = max(cs.totalTruthMinusModel_rms_m);
-            end
-        catch ME
-            fprintf('  WARNING: comparison case "%s" failed: %s\n', cases{ci}, ME.message);
-        end
-    end
-
-    figs = gobjects(0);
-    figs = [figs; makeComparisonTableFig(results, showFigures)];
-    figs = [figs; makeComparisonBarFig(results, showFigures)];
-end
-
-function fig = makeComparisonTableFig(results, showFigures)
-    vis = 'off'; if showFigures; vis = 'on'; end
-    fig = figure('Name','Comparison Summary Table','Visible',vis,'NumberTitle','off');
-    axes('Position',[0.02 0.02 0.96 0.96],'Visible','off'); %#ok<LAXES>
-
-    hdr = sprintf('%-28s %12s %10s %12s %12s %8s', ...
-        'Case', 'FinalPos[m]', 'MeanNIS', 'PostfitRMS[m]', 'MaxContrib[m]', 'MaxMeas');
-    sep  = repmat('-', 1, 88);
-    rows = {'\bfComparison Summary (scalar metrics only)'; ' '; hdr; sep};
-
-    for ci = 1:numel(results.name)
-        rows{end+1} = sprintf('%-28s %12.4f %10.2f %12.4f %12.4f %8d', ...
-            results.name{ci}, ...
-            results.finalPosErr_m(ci), ...
-            results.meanNIS(ci), ...
-            results.meanPostfitRMS_m(ci), ...
-            results.maxContrib_m(ci), ...
-            results.maxPRMeas(ci)); %#ok<AGROW>
-    end
-
-    text(0.02, 0.97, rows, ...
-        'Units','normalized','VerticalAlignment','top', ...
-        'FontSize',8,'FontName','Courier','Interpreter','tex');
-end
-
-function fig = makeComparisonBarFig(results, showFigures)
-    vis = 'off'; if showFigures; vis = 'on'; end
-    fig = figure('Name','Comparison Bar Chart','Visible',vis,'NumberTitle','off');
-    nCases     = numel(results.name);
-    shortNames = cellfun(@(s) strrep(s,'_','-'), results.name, 'UniformOutput', false);
-    xIdx       = 1:nCases;
-
-    subplot(2,1,1);
-    bar(xIdx, [results.finalPosErr_m; results.meanPostfitRMS_m; results.maxContrib_m]', 'grouped');
-    set(gca, 'XTick', xIdx, 'XTickLabel', shortNames, 'XTickLabelRotation', 20);
-    legend('Final pos err [m]','Postfit RMS [m]','Max contrib [m]','Location','best','FontSize',7);
-    ylabel('Metres'); title('Position & Pseudorange Metrics'); grid on;
-
-    subplot(2,1,2);
-    bar(xIdx, results.meanNIS, 'b');
-    set(gca, 'XTick', xIdx, 'XTickLabel', shortNames, 'XTickLabelRotation', 20);
-    ylabel('Mean NIS'); title('Mean NIS per Case'); grid on;
-
-    sgtitle('Case Comparison Summary');
 end
