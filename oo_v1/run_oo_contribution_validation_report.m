@@ -180,18 +180,18 @@ function cfg = buildReportCase(caseName, duration_s, showFigures)
         case 'sagnac_mismatch'
             cfg = revgnss.ConfigFactory.defaultConfig();
             cfg.physics.sagnac.truth.enable = true;
-            cfg.physics.sagnac.model.enable = false;
+            cfg.physics.sagnac.model.enable = true;
 
         case 'tower_survey_mismatch'
             cfg = revgnss.ConfigFactory.defaultConfig();
             cfg.effects.towerSurvey.truth.enable = true;
-            cfg.effects.towerSurvey.model.enable = false;
+            cfg.effects.towerSurvey.model.enable = true;
             cfg.effects.towerSurvey.sigmaENU_m   = [0.05; 0.05; 0.10];
 
         case 'pco_mismatch'
             cfg = revgnss.ConfigFactory.defaultConfig();
             cfg.effects.antennaPCO.truth.enable          = true;
-            cfg.effects.antennaPCO.model.enable          = false;
+            cfg.effects.antennaPCO.model.enable          = true;
             cfg.effects.antennaPCO.receiverOffset_body_m = [0.05; 0.0; 0.02];
 
         case 'pcv_toy'
@@ -204,13 +204,13 @@ function cfg = buildReportCase(caseName, duration_s, showFigures)
             cfg = revgnss.ConfigFactory.defaultConfig();
             cfg.errors.troposphere.truth.enable        = true;
             cfg.errors.troposphere.truth.zenithDelay_m = 2.3;
-            cfg.errors.troposphere.model.enable        = false;
+            cfg.errors.troposphere.model.enable        = true;
 
         case 'ionosphere_mismatch'
             cfg = revgnss.ConfigFactory.defaultConfig();
             cfg.errors.ionosphere.truth.enable        = true;
             cfg.errors.ionosphere.truth.zenithDelay_m = 5.0;
-            cfg.errors.ionosphere.model.enable        = false;
+            cfg.errors.ionosphere.model.enable        = true;
 
         case 'correlated_noise'
             cfg = revgnss.ConfigFactory.defaultConfig();
@@ -222,7 +222,7 @@ function cfg = buildReportCase(caseName, duration_s, showFigures)
         case 'doppler_diag_only'
             cfg = revgnss.ConfigFactory.defaultConfig();
             cfg.measurements.doppler.enable    = true;
-            cfg.measurements.doppler.useInEKF  = false;
+            cfg.measurements.doppler.useInEKF  = true;
             cfg.measurements.doppler.sigma_mps = 0.01;
             cfg.physics.doppler.truth.enable   = true;
             cfg.physics.doppler.model.enable   = true;
@@ -238,7 +238,7 @@ function cfg = buildReportCase(caseName, duration_s, showFigures)
         case 'carrier_diag_only'
             cfg = revgnss.ConfigFactory.defaultConfig();
             cfg.measurements.carrierPhase.enable   = true;
-            cfg.measurements.carrierPhase.useInEKF = false;
+            cfg.measurements.carrierPhase.useInEKF = true;
 
         case 'custom'
             cfg = revgnss.ConfigFactory.defaultConfig();
