@@ -12,3 +12,4 @@ oo_v1/output/figures/
 oo_v1/output/*.png
 oo_v1/output/*.pdf
 !oo_v1/output/reverse_gnss_simple_report.pdf
+!oo_v1/output/reverse_gnss_simple_report.pdf
