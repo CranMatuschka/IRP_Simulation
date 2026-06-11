@@ -198,6 +198,9 @@ classdef ConfigFactory
             cfg.environment.weather.defaultTemperature_K   = 293.15;
             cfg.environment.weather.defaultRelativeHumidity = 0.50;
             cfg.environment.weather.heightScale_m          = 8400;
+            cfg.environment.weather.lapseRate_K_per_m      = 0.0065;
+            cfg.environment.weather.minTemperature_K        = 220.0;
+            cfg.environment.weather.maxTemperature_K        = 320.0;
 
             % --- Extended atmosphere model config --------------------------------
             % Troposphere: new dry/wet split (backward compat: also keep zenithDelay_m)
@@ -228,6 +231,11 @@ classdef ConfigFactory
             cfg.errors.ionosphere.scintillation.frequencyExponent = 1.0;
             cfg.errors.ionosphere.scintillation.affectsCodeNoise  = true;
             cfg.errors.ionosphere.scintillation.affectsPseudorangeBias = false;
+
+            cfg.errors.troposphere.stochastic.modelResidual.enable = false;
+            cfg.errors.troposphere.stochastic.modelResidual.mode   = 'zero';
+            cfg.errors.ionosphere.stochastic.modelResidual.enable  = false;
+            cfg.errors.ionosphere.stochastic.modelResidual.mode    = 'zero';
 
             cfg.errors.troposphere.truth.enable        = false;
             cfg.errors.troposphere.truth.zenithDelay_m = 2.3;

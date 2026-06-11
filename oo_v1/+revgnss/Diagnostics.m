@@ -463,6 +463,38 @@ classdef Diagnostics < handle
                     cnt.carrierPhaseMeters = rms3m(phi * lam, zeros(size(phi)));
                 end
             end
+
+            % --- Per-signal breakdown (L1/L2 separate stats) ---------------
+            cnt.bySignal = struct();
+            if ~isempty(errStruct) && isfield(errStruct,'signalIdx_perMeas') && ...
+                    ~isempty(errStruct.signalIdx_perMeas) && ...
+                    isfield(errStruct,'bySource') && isfield(errStruct.bySource,'truth_m')
+                bst3 = errStruct.bySource.truth_m;
+                bsm3 = errStruct.bySource.model_m;
+                sigIdxAll = errStruct.signalIdx_perMeas;
+                sigNamAll = errStruct.signalName_perMeas;
+                uSigs = unique(sigIdxAll);
+                for si = 1:numel(uSigs)
+                    mask = (sigIdxAll == uSigs(si));
+                    nm   = matlab.lang.makeValidName(sigNamAll{find(mask,1)});
+                    cnts = struct();
+                    if isfield(bst3,'code') && ~isempty(bst3.code)
+                        cnts.codeNoise   = rms3m(bst3.code(mask),  bsm3.code(mask));
+                    end
+                    if isfield(bst3,'iono') && ~isempty(bst3.iono)
+                        cnts.ionosphere  = rms3m(bst3.iono(mask),  bsm3.iono(mask));
+                    end
+                    if isfield(bst3,'trop') && ~isempty(bst3.trop)
+                        cnts.troposphere = rms3m(bst3.trop(mask),  bsm3.trop(mask));
+                    end
+                    if isfield(errStruct.bySource,'sigma_m') && ...
+                            isfield(errStruct.bySource.sigma_m,'code') && ...
+                            ~isempty(errStruct.bySource.sigma_m.code)
+                        cnts.codeSigma_m = mean(errStruct.bySource.sigma_m.code(mask));
+                    end
+                    cnt.bySignal.(nm) = cnts;
+                end
+            end
             entry.contributions = cnt;
 
             % --- 1-sigma position bound from P diagonal ---------------
@@ -561,7 +593,8 @@ classdef Diagnostics < handle
             C = struct();
             effects = fieldnames(obj.log(1).contributions);
             for ei = 1:numel(effects)
-                eff  = effects{ei};
+                eff = effects{ei};
+                if strcmp(eff, 'bySignal'); continue; end  % handled by getBySignalContributions
                 sflds = fieldnames(obj.log(1).contributions.(eff));
                 for fi = 1:numel(sflds)
                     fld  = sflds{fi};
@@ -571,6 +604,53 @@ classdef Diagnostics < handle
                         if ~isempty(v) && isnumeric(v); vals(k) = v(1); end
                     end
                     C.(eff).(fld) = vals;
+                end
+            end
+        end
+
+        function B = getBySignalContributions(obj)
+            % getBySignalContributions  Per-signal contribution time series.
+            %
+            % Returns nested struct:
+            %   B.L1.codeNoise.truthRMS_m    [nEpochs x 1]
+            %   B.L1.ionosphere.mismatchRMS_m
+            %   B.L1.codeSigma_m             [nEpochs x 1]  (scalar per epoch, not rms3m)
+            %   etc.
+            if obj.nEpochs == 0; B = struct(); return; end
+            B = struct();
+            bs = obj.log(1).contributions.bySignal;
+            if isempty(fieldnames(bs)); return; end
+            sigNames = fieldnames(bs);
+            for si = 1:numel(sigNames)
+                nm   = sigNames{si};
+                effs = fieldnames(bs.(nm));
+                for ei = 1:numel(effs)
+                    eff = effs{ei};
+                    v1  = bs.(nm).(eff);
+                    if isstruct(v1)
+                        % rms3m struct: iterate sub-fields
+                        sflds = fieldnames(v1);
+                        for fi = 1:numel(sflds)
+                            fld  = sflds{fi};
+                            vals = zeros(obj.nEpochs, 1);
+                            for k = 1:obj.nEpochs
+                                try
+                                    v = obj.log(k).contributions.bySignal.(nm).(eff).(fld);
+                                    if ~isempty(v) && isnumeric(v); vals(k) = v(1); end
+                                catch; end
+                            end
+                            B.(nm).(eff).(fld) = vals;
+                        end
+                    elseif isnumeric(v1)
+                        vals = zeros(obj.nEpochs, 1);
+                        for k = 1:obj.nEpochs
+                            try
+                                v = obj.log(k).contributions.bySignal.(nm).(eff);
+                                if ~isempty(v) && isnumeric(v); vals(k) = v(1); end
+                            catch; end
+                        end
+                        B.(nm).(eff) = vals;
+                    end
                 end
             end
         end

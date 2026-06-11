@@ -193,6 +193,47 @@ function r = collectMetrics(caseName, cfg, d)
     clkDrift = d.getClockDriftErrors();
     r.clockDriftRMS_last20_mps = rms(clkDrift(iS:end));
 
+    % --- Deterministic vs stochastic mismatch split ---------------------
+    detEffects = {'sagnac','shapiro','troposphere','ionosphere','towerSurvey', ...
+                  'receiverPCO','towerPCO','pcv','hardwareDelay'};
+    detSqSum = 0;
+    for k = 1:numel(detEffects)
+        v = csGet_(cs, detEffects{k}, 'mismatchRMS_m', iS, 'mean');
+        detSqSum = detSqSum + v^2;
+    end
+    r.deterministicMismatchRMS_last20_m = sqrt(detSqSum);
+    r.stochasticNoiseRMS_last20_m = csGet_(cs, 'codeNoise', 'truthRMS_m', iS, 'mean');
+
+    % --- Per-signal L1/L2 metrics from bySignal contributions -----------
+    r.ionoL2overL1Ratio = NaN;
+    r.tropL2minusL1_m   = NaN;
+    r.meanCodeSigmaL1_m = NaN;
+    r.meanCodeSigmaL2_m = NaN;
+    try
+        B = d.getBySignalContributions();
+        if isfield(B,'L1') && isfield(B,'L2')
+            if isfield(B.L1,'ionosphere') && isfield(B.L2,'ionosphere')
+                ioL1 = mean(B.L1.ionosphere.truthRMS_m(iS:end), 'omitnan');
+                ioL2 = mean(B.L2.ionosphere.truthRMS_m(iS:end), 'omitnan');
+                if ioL1 > 1e-6
+                    r.ionoL2overL1Ratio = ioL2 / ioL1;
+                end
+            end
+            if isfield(B.L1,'troposphere') && isfield(B.L2,'troposphere')
+                trL1 = mean(B.L1.troposphere.truthRMS_m(iS:end), 'omitnan');
+                trL2 = mean(B.L2.troposphere.truthRMS_m(iS:end), 'omitnan');
+                r.tropL2minusL1_m = abs(trL2 - trL1);
+            end
+            if isfield(B.L1,'codeSigma_m')
+                r.meanCodeSigmaL1_m = mean(B.L1.codeSigma_m(iS:end), 'omitnan');
+            end
+            if isfield(B.L2,'codeSigma_m')
+                r.meanCodeSigmaL2_m = mean(B.L2.codeSigma_m(iS:end), 'omitnan');
+            end
+        end
+    catch
+    end
+
     r.status   = 'UNKNOWN';
     r.notes    = '';
     r.passFail = false;
@@ -220,11 +261,10 @@ function r = applyRules(r, baselinePosErr)
                 ok = false;
                 nn{end+1} = sprintf('posErr %.2f > %.1f m', r.finalPositionError_m, thresh);
             end
-            % Total mismatch includes code noise (~0.3 m); deterministic effects
-            % are validated individually below.  Only flag catastrophic failures here.
-            if r.meanTotalMismatchRMS_last20_m > 1.0
+            % deterministicMismatchRMS excludes code noise — directly tests cancellation
+            if r.deterministicMismatchRMS_last20_m > 0.10
                 ok = false;
-                nn{end+1} = sprintf('meanTotalMismatch %.4f m > 1.0 m', r.meanTotalMismatchRMS_last20_m);
+                nn{end+1} = sprintf('detMismatch %.4f m > 0.10 m', r.deterministicMismatchRMS_last20_m);
             end
             detFlds = {'maxSagnacMismatch_m','maxShapiroMismatch_m', ...
                        'maxTroposphereMismatch_m','maxIonosphereMismatch_m', ...
@@ -237,6 +277,8 @@ function r = applyRules(r, baselinePosErr)
                     nn{end+1} = sprintf('%s %.5f m > 0.01 m', detFlds{k}, val);
                 end
             end
+            nn{end+1} = sprintf('detMismatch=%.4f stochNoise=%.4f m', ...
+                r.deterministicMismatchRMS_last20_m, r.stochasticNoiseRMS_last20_m);
             r.status = iff_(ok, 'PASS', 'FAIL');
 
         case 'all_contributions_demo'
@@ -631,18 +673,29 @@ function writeCSV(caseResults, csvPath)
     maxMeasRows = cellfun(@(r) r.maxMeasurementRows,             caseResults)';
     scintRMS    = cellfun(@(r) r.meanScintillationRMS_m,         caseResults)';
     clkDriftRMS = cellfun(@(r) r.clockDriftRMS_last20_mps,       caseResults)';
+    detMismatch = cellfun(@(r) r.deterministicMismatchRMS_last20_m, caseResults)';
+    stochNoise  = cellfun(@(r) r.stochasticNoiseRMS_last20_m,    caseResults)';
+    ionoRatio   = cellfun(@(r) r.ionoL2overL1Ratio,              caseResults)';
+    tropL2L1    = cellfun(@(r) r.tropL2minusL1_m,                caseResults)';
+    sigL1       = cellfun(@(r) r.meanCodeSigmaL1_m,              caseResults)';
+    sigL2       = cellfun(@(r) r.meanCodeSigmaL2_m,              caseResults)';
 
-    T = table(caseNames, posErr, posRMS, clkErr, meanNIS, expNIS, mismatch, gdop, ...
+    T = table(caseNames, posErr, posRMS, clkErr, meanNIS, expNIS, mismatch, ...
+        detMismatch, stochNoise, gdop, ...
         sagnac, shapiro, trop, iono, twrSvy, rxPCO, twrPCO, pcv, corrNoise, ...
         nSig, enabledSigs, maxMeasRows, scintRMS, clkDriftRMS, ...
+        ionoRatio, tropL2L1, sigL1, sigL2, ...
         statusStr, notesStr, ...
         'VariableNames', { ...
             'caseName','finalPositionError_m','positionRMS_last20_m','finalClockBiasError_m', ...
-            'meanNIS','expectedNIS','meanTotalMismatch_m','meanGDOPLike', ...
+            'meanNIS','expectedNIS','meanTotalMismatch_m', ...
+            'deterministicMismatchRMS_last20_m','stochasticNoiseRMS_last20_m','meanGDOPLike', ...
             'maxSagnacMismatch_m','maxShapiroMismatch_m','maxTropMismatch_m','maxIonoMismatch_m', ...
             'maxTwrSvyMismatch_m','maxRxPCOMismatch_m','maxTwrPCOMismatch_m','maxPCVMismatch_m', ...
             'maxCorrNoiseMismatch_m','nSignals','enabledSignals','maxMeasurementRows', ...
-            'meanScintillationRMS_m','clockDriftRMS_last20_mps','status','notes'});
+            'meanScintillationRMS_m','clockDriftRMS_last20_mps', ...
+            'ionoL2overL1Ratio','tropL2minusL1_m','meanCodeSigmaL1_m','meanCodeSigmaL2_m', ...
+            'status','notes'});
 
     writetable(T, csvPath);
     fprintf('  CSV saved: %s\n', csvPath);

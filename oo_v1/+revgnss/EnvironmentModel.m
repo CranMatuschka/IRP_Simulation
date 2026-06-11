@@ -22,6 +22,8 @@ classdef EnvironmentModel < handle
         % Per-tower atmosphere states ([nTowers x 1] struct arrays)
         tropState   struct   % fields: wetResidualTruth_m, wetResidualModel_m
         ionoState   struct   % fields: tecResidualTruth_m, tecResidualModel_m
+        % Per-tower height-dependent weather (ZHD_m, ZWD_m, pressure_hPa, temperature_K)
+        weatherState struct
         % Global scalar scintillation amplitude (GM state; unit amplitude at init)
         scintAmplitude (1,1) double = 1.0
         % RandStream for all environment stochastic steps
@@ -52,6 +54,7 @@ classdef EnvironmentModel < handle
             % Initialise per-tower states
             obj.initTropState_();
             obj.initIonoState_();
+            obj.initWeatherFromTowers_();
             % scintAmplitude starts at 1.0 (unit amplitude)
             obj.scintAmplitude = 1.0;
         end
@@ -78,13 +81,40 @@ classdef EnvironmentModel < handle
 
                 tau_trop = tc.stochastic.tau_s;
                 sig_trop = tc.stochastic.sigmaWet_ss_m;
+
+                mrEnable = false;
+                mrMode   = 'zero';
+                if isfield(tc.stochastic,'modelResidual') && ...
+                        isfield(tc.stochastic.modelResidual,'enable')
+                    mrEnable = tc.stochastic.modelResidual.enable;
+                    if isfield(tc.stochastic.modelResidual,'mode')
+                        mrMode = tc.stochastic.modelResidual.mode;
+                    end
+                end
+                sigModel = 0.02;
+                if isfield(tc.stochastic,'sigmaModelResidual_m')
+                    sigModel = tc.stochastic.sigmaModelResidual_m;
+                end
+
                 for k = 1:obj.nTowers
                     obj.tropState(k).wetResidualTruth_m = ...
                         revgnss.StochasticProcess.gaussMarkovStep( ...
                             obj.tropState(k).wetResidualTruth_m, dt, ...
                             tau_trop, sig_trop, obj.envRng);
-                    % Model residual stays 0 unless sigmaModelResidual > 0
-                    % (simplified: no model-side GM by default)
+                    if mrEnable
+                        switch mrMode
+                            case 'sameAsTruth'
+                                obj.tropState(k).wetResidualModel_m = ...
+                                    obj.tropState(k).wetResidualTruth_m;
+                            case 'independentGM'
+                                obj.tropState(k).wetResidualModel_m = ...
+                                    revgnss.StochasticProcess.gaussMarkovStep( ...
+                                        obj.tropState(k).wetResidualModel_m, dt, ...
+                                        tau_trop, sigModel, obj.envRng);
+                            otherwise  % 'zero'
+                                obj.tropState(k).wetResidualModel_m = 0;
+                        end
+                    end
                 end
             end
 
@@ -164,31 +194,23 @@ classdef EnvironmentModel < handle
                     end
 
                 case 'localWeatherGM'
-                    % Total zenith = dry + wet (nominal + stochastic residual)
+                    % Total zenith = dry + wet from per-tower weatherState + residual
                     ti = max(1, min(towerIdx, obj.nTowers));
                     if strcmp(side,'truth')
-                        zenithDry = 2.3;
-                        zenithWet = 0.15;
-                        if isfield(tc,'truth')
-                            if isfield(tc.truth,'zenithDryDelay_m')
-                                zenithDry = tc.truth.zenithDryDelay_m;
-                            end
-                            if isfield(tc.truth,'zenithWetDelay_m')
-                                zenithWet = tc.truth.zenithWetDelay_m;
-                            end
+                        if obj.nTowers > 0 && numel(obj.weatherState) >= ti
+                            zenithDry = obj.weatherState(ti).ZHD_m;
+                            zenithWet = obj.weatherState(ti).ZWD_m;
+                        else
+                            zenithDry = 2.3; zenithWet = 0.15;
                         end
                         residual = obj.tropState(ti).wetResidualTruth_m;
                         delay    = (zenithDry + zenithWet + residual) * mapping;
                     else % 'model'
-                        zenithDry = 2.3;
-                        zenithWet = 0.15;
-                        if isfield(tc,'model')
-                            if isfield(tc.model,'zenithDryDelay_m')
-                                zenithDry = tc.model.zenithDryDelay_m;
-                            end
-                            if isfield(tc.model,'zenithWetDelay_m')
-                                zenithWet = tc.model.zenithWetDelay_m;
-                            end
+                        if obj.nTowers > 0 && numel(obj.weatherState) >= ti
+                            zenithDry = obj.weatherState(ti).ZHD_m;
+                            zenithWet = obj.weatherState(ti).ZWD_m;
+                        else
+                            zenithDry = 2.3; zenithWet = 0.15;
                         end
                         residual = obj.tropState(ti).wetResidualModel_m;
                         delay    = (zenithDry + zenithWet + residual) * mapping;
@@ -348,6 +370,52 @@ classdef EnvironmentModel < handle
             end
             proto = struct('tecResidualTruth_m', 0, 'tecResidualModel_m', 0);
             obj.ionoState = repmat(proto, nT, 1);
+        end
+
+        function initWeatherFromTowers_(obj)
+            % initWeatherFromTowers_  Compute per-tower ZHD/ZWD from altitude via lapse rate.
+            %
+            % Uses standard atmosphere parameterisation:
+            %   P(h) = P0 * exp(-h / hScale)
+            %   T(h) = clamp(T0 - lapse*h, Tmin, Tmax)
+            %   ZHD  = 2.3 * P(h) / 1013.25   (Saastamoinen dry zenith, scaled)
+            %   ZWD  = 0.15 * RH0 * exp(-h / 2000)
+            nT = obj.nTowers;
+            if nT == 0
+                obj.weatherState = struct('ZHD_m',{},'ZWD_m',{},'pressure_hPa',{},'temperature_K',{});
+                return;
+            end
+
+            wc = struct();
+            if isfield(obj.cfg,'environment') && isfield(obj.cfg.environment,'weather')
+                wc = obj.cfg.environment.weather;
+            end
+            P0   = 1013.25; if isfield(wc,'defaultPressure_hPa');    P0   = wc.defaultPressure_hPa;    end
+            T0   = 293.15;  if isfield(wc,'defaultTemperature_K');   T0   = wc.defaultTemperature_K;   end
+            RH0  = 0.50;    if isfield(wc,'defaultRelativeHumidity'); RH0  = wc.defaultRelativeHumidity; end
+            hSc  = 8400;    if isfield(wc,'heightScale_m');           hSc  = wc.heightScale_m;           end
+            lr   = 0.0065;  if isfield(wc,'lapseRate_K_per_m');       lr   = wc.lapseRate_K_per_m;       end
+            Tmin = 220.0;   if isfield(wc,'minTemperature_K');        Tmin = wc.minTemperature_K;        end
+            Tmax = 320.0;   if isfield(wc,'maxTemperature_K');        Tmax = wc.maxTemperature_K;        end
+
+            proto = struct('ZHD_m', 0, 'ZWD_m', 0, 'pressure_hPa', P0, 'temperature_K', T0);
+            obj.weatherState = repmat(proto, nT, 1);
+
+            for k = 1:nT
+                alt_m = 0;
+                if isfield(obj.cfg,'towers') && numel(obj.cfg.towers) >= k && ...
+                        isfield(obj.cfg.towers(k),'alt_m')
+                    alt_m = obj.cfg.towers(k).alt_m;
+                end
+                P_k   = P0 * exp(-alt_m / hSc);
+                T_k   = max(Tmin, min(Tmax, T0 - lr * alt_m));
+                ZHD_k = 2.3 * P_k / P0;
+                ZWD_k = 0.15 * RH0 * exp(-alt_m / 2000);
+                obj.weatherState(k).ZHD_m        = ZHD_k;
+                obj.weatherState(k).ZWD_m        = ZWD_k;
+                obj.weatherState(k).pressure_hPa = P_k;
+                obj.weatherState(k).temperature_K = T_k;
+            end
         end
 
     end  % private methods

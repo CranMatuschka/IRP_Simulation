@@ -116,19 +116,9 @@ classdef ErrorChain < handle
 
             % --- Compute dt and step EnvironmentModel --------------------
             if obj.lastT_s < 0
-                % First call: use configured dt or default 1 s
-                dt = 1.0;
-                if isfield(obj.cfg,'simulation') && isfield(obj.cfg.simulation,'dt_s')
-                    dt = obj.cfg.simulation.dt_s;
-                end
+                dt = 0;  % first epoch: initialise GM states without stepping
             else
-                dt = t_s - obj.lastT_s;
-                if dt <= 0
-                    dt = 1.0;
-                    if isfield(obj.cfg,'simulation') && isfield(obj.cfg.simulation,'dt_s')
-                        dt = obj.cfg.simulation.dt_s;
-                    end
-                end
+                dt = max(t_s - obj.lastT_s, 0);
             end
             obj.lastT_s = t_s;
 
