@@ -10,9 +10,9 @@
 %   1  summary page
 %  17  standard diagnostic figures  (INCLUDE_ALL_STANDARD_PLOTS = true)
 %   2  contribution overview (Truth RMS + Mismatch RMS bar charts)
-%  20  one page per contribution (Truth/Model/Mismatch lines or text page)
+%  21  one page per contribution (Truth/Model/Mismatch lines or text page)
 %  ----
-%  40  total
+%  41  total
 %
 % Hard limits: error if < 10 or > 60 figures.
 %
@@ -45,6 +45,11 @@ addpath(thisDir);
 %   'carrier_diag_only'     Carrier phase diagnostic
 %   'all_contributions_matched' All deterministic effects matched — validates cancellation
 %   'all_contributions_demo' Mixed matched/mismatched — default, for diagnostics
+%   'dual_frequency_baseline'           L1+L2 baseline — code noise only, both signals
+%   'ionosphere_dual_frequency_mismatch' Dual-freq iono truth only — visible freq-scaled mismatch
+%   'ionosphere_dual_frequency_matched'  Dual-freq iono truth=model — should mostly cancel
+%   'stochastic_environment_validation'  Trop GM + iono TEC GM, no model correction
+%   'clock_noise_validation'             Stochastic clocks + noisy correction
 %   'custom'                Edit buildReportCase below
 REPORT_CASE = 'all_contributions_matched';
 
@@ -174,188 +179,21 @@ printContributionTable(REPORT_CASE, d);
 % ======================================================================
 
 function cfg = buildReportCase(caseName, duration_s, showFigures)
-    switch caseName
-        case 'baseline'
-            cfg = revgnss.ConfigFactory.defaultConfig();
-
-        case 'multi_receiver_att'
-            cfg = revgnss.ConfigFactory.multiAntennaAttitudeConfig();
-
-        case 'realistic_matched'
-            cfg = revgnss.ConfigFactory.realisticPseudorangeConfig();
-
-        case 'sagnac_mismatch'
-            % Sagnac in truth only — model has no rotation correction → visible innovation bias
-            cfg = revgnss.ConfigFactory.defaultConfig();
-            cfg.physics.sagnac.truth.enable = true;
-            cfg.physics.sagnac.model.enable = false;
-
-        case 'tower_survey_mismatch'
-            % Tower survey offset in truth only — model assumes perfect tower positions
-            cfg = revgnss.ConfigFactory.defaultConfig();
-            cfg.effects.towerSurvey.truth.enable = true;
-            cfg.effects.towerSurvey.model.enable = false;
-            cfg.effects.towerSurvey.sigmaENU_m   = [0.05; 0.05; 0.10];
-
-        case 'pco_mismatch'
-            % Receiver PCO offset in truth only — model assumes zero offset
-            cfg = revgnss.ConfigFactory.defaultConfig();
-            cfg.effects.antennaPCO.truth.enable          = true;
-            cfg.effects.antennaPCO.model.enable          = false;
-            cfg.effects.antennaPCO.receiverOffset_body_m = [0.05; 0.0; 0.02];
-
-        case 'pcv_toy'
-            % PCV in truth only — model assumes zero phase variation
-            cfg = revgnss.ConfigFactory.defaultConfig();
-            cfg.effects.antennaPCV.truth.enable = true;
-            cfg.effects.antennaPCV.model.enable = false;
-            cfg.effects.antennaPCV.amplitude_m  = 0.01;
-
-        case 'troposphere_mismatch'
-            % Troposphere in truth only — model has no correction
-            cfg = revgnss.ConfigFactory.defaultConfig();
-            cfg.errors.troposphere.truth.enable        = true;
-            cfg.errors.troposphere.truth.zenithDelay_m = 2.3;
-            cfg.errors.troposphere.model.enable        = false;
-
-        case 'ionosphere_mismatch'
-            % Ionosphere in truth only — model has no correction
-            cfg = revgnss.ConfigFactory.defaultConfig();
-            cfg.errors.ionosphere.truth.enable        = true;
-            cfg.errors.ionosphere.truth.zenithDelay_m = 5.0;
-            cfg.errors.ionosphere.model.enable        = false;
-
-        case 'correlated_noise'
-            cfg = revgnss.ConfigFactory.defaultConfig();
-            cfg.effects.correlatedNoise.enable             = true;
-            cfg.effects.correlatedNoise.commonModeSigma_m  = 0.15;
-            cfg.effects.correlatedNoise.sameTowerSigma_m   = 0.10;
-            cfg.effects.correlatedNoise.independentSigma_m = 0.05;
-
-        case 'doppler_diag_only'
-            % Doppler measurements enabled for diagnostics — NOT fed into EKF
-            cfg = revgnss.ConfigFactory.defaultConfig();
-            cfg.measurements.doppler.enable    = true;
-            cfg.measurements.doppler.useInEKF  = false;
-            cfg.measurements.doppler.sigma_mps = 0.01;
-            cfg.physics.doppler.truth.enable   = true;
-            cfg.physics.doppler.model.enable   = true;
-
-        case 'doppler_ekf'
-            cfg = revgnss.ConfigFactory.defaultConfig();
-            cfg.measurements.doppler.enable    = true;
-            cfg.measurements.doppler.useInEKF  = true;
-            cfg.measurements.doppler.sigma_mps = 0.01;
-            cfg.physics.doppler.truth.enable   = true;
-            cfg.physics.doppler.model.enable   = true;
-
-        case 'carrier_diag_only'
-            % Carrier phase enabled for diagnostics — NOT fed into EKF
-            cfg = revgnss.ConfigFactory.defaultConfig();
-            cfg.measurements.carrierPhase.enable   = true;
-            cfg.measurements.carrierPhase.useInEKF = false;
-
-        case 'all_contributions_matched'
-            % Validation case: ALL deterministic effects enabled with identical truth and model
-            % parameters.  Each effect cancels in (truth - model); mismatch should be < 0.05 m
-            % for all contributions.  Position error should stay near the baseline level
-            % (code noise only) because the EKF sees correct corrections.
-            % No stochastic correlated noise; no Doppler/carrier (simplifies interpretation).
-            cfg = revgnss.ConfigFactory.defaultConfig();
-            % Geometry — matched
-            cfg.physics.sagnac.truth.enable = true;
-            cfg.physics.sagnac.model.enable = true;
-            cfg.physics.relativity.shapiro.truth.enable = true;
-            cfg.physics.relativity.shapiro.model.enable = true;
-            % Atmosphere — matched (same zenith delay both sides)
-            cfg.errors.troposphere.truth.enable        = true;
-            cfg.errors.troposphere.model.enable        = true;
-            cfg.errors.troposphere.truth.zenithDelay_m = 2.3;
-            cfg.errors.troposphere.model.zenithDelay_m = 2.3;
-            cfg.errors.ionosphere.truth.enable         = true;
-            cfg.errors.ionosphere.model.enable         = true;
-            cfg.errors.ionosphere.truth.zenithDelay_m  = 5.0;
-            cfg.errors.ionosphere.model.zenithDelay_m  = 5.0;
-            % Survey offset — matched (finalizeConfig generates one offset, shared by both)
-            cfg.effects.towerSurvey.truth.enable = true;
-            cfg.effects.towerSurvey.model.enable = true;
-            cfg.effects.towerSurvey.sigmaENU_m   = [0.05; 0.05; 0.10];
-            % PCO — matched (same offsets applied to truth and model)
-            cfg.effects.antennaPCO.truth.enable          = true;
-            cfg.effects.antennaPCO.model.enable          = true;
-            cfg.effects.antennaPCO.receiverOffset_body_m = [0.05; 0.0; 0.02];
-            cfg.effects.antennaPCO.towerOffset_enu_m     = [0.05; 0.0; 0.02];
-            % PCV — matched
-            cfg.effects.antennaPCV.truth.enable = true;
-            cfg.effects.antennaPCV.model.enable = true;
-            cfg.effects.antennaPCV.amplitude_m  = 0.01;
-            % No stochastic: correlated noise off (its truth-only by design, would bias mismatch)
-            cfg.effects.correlatedNoise.enable  = false;
-            % No Doppler or carrier (diag only, don't muddy the validation)
-            cfg.measurements.doppler.enable     = false;
-            cfg.measurements.carrierPhase.enable = false;
-
-        case 'all_contributions_demo'
-            % Demo case: mixed matched/mismatched effects for contribution diagnostics.
-            % Matched: Sagnac, Shapiro  — truth and model both nonzero, mismatch near zero.
-            % Mismatched: atmosphere, survey, PCO, PCV  — truth nonzero, model zero.
-            % Stochastic: code noise, correlated noise  — truth nonzero, model = 0.
-            % Diagnostic: Doppler, carrier phase  — not in EKF.
-            cfg = revgnss.ConfigFactory.defaultConfig();
-            % Matched geometry
-            cfg.physics.sagnac.truth.enable = true;
-            cfg.physics.sagnac.model.enable = true;
-            cfg.physics.relativity.shapiro.truth.enable = true;
-            cfg.physics.relativity.shapiro.model.enable = true;
-            % Mismatched atmosphere
-            cfg.errors.troposphere.truth.enable        = true;
-            cfg.errors.troposphere.truth.zenithDelay_m = 2.3;
-            cfg.errors.troposphere.model.enable        = false;
-            cfg.errors.ionosphere.truth.enable         = true;
-            cfg.errors.ionosphere.truth.zenithDelay_m  = 5.0;
-            cfg.errors.ionosphere.model.enable         = false;
-            % Mismatched survey/antenna
-            cfg.effects.towerSurvey.truth.enable = true;
-            cfg.effects.towerSurvey.model.enable = false;
-            cfg.effects.towerSurvey.sigmaENU_m   = [0.05; 0.05; 0.10];
-            cfg.effects.antennaPCO.truth.enable          = true;
-            cfg.effects.antennaPCO.model.enable          = false;
-            cfg.effects.antennaPCO.receiverOffset_body_m = [0.05; 0.0; 0.02];
-            cfg.effects.antennaPCO.towerOffset_enu_m     = [0.03; 0.02; 0.05];
-            cfg.effects.antennaPCV.truth.enable = true;
-            cfg.effects.antennaPCV.model.enable = false;
-            cfg.effects.antennaPCV.amplitude_m  = 0.01;
-            % Correlated noise (truth only)
-            cfg.effects.correlatedNoise.enable             = true;
-            cfg.effects.correlatedNoise.commonModeSigma_m  = 0.15;
-            cfg.effects.correlatedNoise.sameTowerSigma_m   = 0.10;
-            cfg.effects.correlatedNoise.independentSigma_m = 0.05;
-            % Doppler diagnostic only
-            cfg.measurements.doppler.enable    = true;
-            cfg.measurements.doppler.useInEKF  = false;
-            cfg.measurements.doppler.sigma_mps = 0.01;
-            cfg.physics.doppler.truth.enable   = true;
-            cfg.physics.doppler.model.enable   = true;
-            % Carrier diagnostic only
-            cfg.measurements.carrierPhase.enable   = true;
-            cfg.measurements.carrierPhase.useInEKF = false;
-
-        case 'custom'
-            cfg = revgnss.ConfigFactory.defaultConfig();
-            % Add custom modifications below:
-
-        otherwise
-            error('run_oo_contribution_validation_report:unknownCase', ...
-                'Unknown REPORT_CASE: ''%s''. See header for valid options.', caseName);
+    % Delegate all named cases to ValidationCaseFactory so both scripts
+    % share the same single source of truth.  'custom' is handled locally.
+    if strcmp(caseName, 'custom')
+        cfg = revgnss.ConfigFactory.defaultConfig();
+        % Add custom modifications below:
+        cfg.simulation.duration_s       = duration_s;
+        cfg.plots.enable                = true;
+        cfg.plots.showFigures           = showFigures;
+        cfg.plots.savePdf               = false;
+        cfg.plots.saveFigures           = false;
+        cfg.plots.saveIndividualFigures = false;
+        cfg.report.enable               = false;
+    else
+        cfg = revgnss.ValidationCaseFactory.buildCase(caseName, duration_s, showFigures);
     end
-
-    cfg.simulation.duration_s       = duration_s;
-    cfg.plots.enable                = true;   % allow figure creation
-    cfg.plots.showFigures           = showFigures;
-    cfg.plots.savePdf               = false;  % suppress auto-save during run
-    cfg.plots.saveFigures           = false;
-    cfg.plots.saveIndividualFigures = false;
-    cfg.report.enable               = false;  % suppress auto-report during run
 end
 
 function fig = makeSummaryFig(caseName, cfg, d, pdfPath, showFigures)
@@ -433,6 +271,11 @@ function desc = getCaseDescription(caseName)
         case 'doppler_ekf';          desc = 'EKF augmentation — Doppler measurements fed into EKF';
         case 'carrier_diag_only';    desc = 'Diagnostic — carrier phase recorded, not used in EKF';
         case 'multi_receiver_att';   desc = 'Attitude estimation — multiple receivers';
+        case 'dual_frequency_baseline'; desc = 'Dual-frequency (L1+L2) baseline — code noise only';
+        case 'ionosphere_dual_frequency_mismatch'; desc = 'Dual-freq — ionosphere truth only, frequency-scaled mismatch';
+        case 'ionosphere_dual_frequency_matched';  desc = 'Dual-freq — ionosphere truth=model, should cancel';
+        case 'stochastic_environment_validation';  desc = 'Stochastic — troposphere GM + ionosphere TEC GM, no model correction';
+        case 'clock_noise_validation'; desc = 'Stochastic — clock noise validation with noisy correction';
         case 'custom';               desc = 'Custom — user-defined configuration';
         otherwise;                   desc = strrep(caseName, '_', ' ');
     end
@@ -502,16 +345,16 @@ function printContributionTable(caseName, d)
     fprintf('%-28s  %10s  %10s  %10s\n', 'Effect', 'TruthRMS_m', 'ModelRMS_m', 'MismatchRMS_m');
     fprintf('%s\n', repmat('-', 1, 66));
 
-    effOrder  = {'total','codeNoise','troposphere','ionosphere','hardwareDelay', ...
-                 'multipath','sagnac','shapiro','towerSurvey','receiverPCO','towerPCO', ...
-                 'pcv','towerClock','correlatedCommonMode','correlatedSameTower','correlatedIndependent'};
-    effLabels = {'TOTAL','Code Noise','Troposphere','Ionosphere','HW Delay', ...
-                 'Multipath','Sagnac','Shapiro','Tower Survey','Rx PCO','Tower PCO', ...
-                 'PCV','Tower Clock','Corr CM','Corr ST','Corr Ind'};
+    effOrder  = {'total','codeNoise','scintillationCodeNoise','troposphere','ionosphere', ...
+                 'hardwareDelay','multipath','sagnac','shapiro','towerSurvey','receiverPCO', ...
+                 'towerPCO','pcv','towerClock','correlatedCommonMode','correlatedSameTower', ...
+                 'correlatedIndependent'};
+    effLabels = {'TOTAL','Code Noise','Scintillation Noise','Troposphere','Ionosphere', ...
+                 'HW Delay','Multipath','Sagnac','Shapiro','Tower Survey','Rx PCO', ...
+                 'Tower PCO','PCV','Tower Clock','Corr CM','Corr ST','Corr Ind'};
 
-    % Code noise is always stochastic (truth=random, model=0); total includes it.
-    % Neither should trigger the matched-case threshold warning.
-    stochasticEffs = {'total', 'codeNoise'};
+    % Stochastic effects (truth=random draw, model=0); never trigger matched-case WARN.
+    stochasticEffs = {'total', 'codeNoise', 'scintillationCodeNoise'};
 
     anyWarn = false;
     for k = 1:numel(effOrder)

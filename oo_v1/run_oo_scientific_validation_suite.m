@@ -220,9 +220,11 @@ function r = applyRules(r, baselinePosErr)
                 ok = false;
                 nn{end+1} = sprintf('posErr %.2f > %.1f m', r.finalPositionError_m, thresh);
             end
-            if r.meanTotalMismatchRMS_last20_m > 0.1
+            % Total mismatch includes code noise (~0.3 m); deterministic effects
+            % are validated individually below.  Only flag catastrophic failures here.
+            if r.meanTotalMismatchRMS_last20_m > 1.0
                 ok = false;
-                nn{end+1} = sprintf('meanTotalMismatch %.4f m > 0.1 m', r.meanTotalMismatchRMS_last20_m);
+                nn{end+1} = sprintf('meanTotalMismatch %.4f m > 1.0 m', r.meanTotalMismatchRMS_last20_m);
             end
             detFlds = {'maxSagnacMismatch_m','maxShapiroMismatch_m', ...
                        'maxTroposphereMismatch_m','maxIonosphereMismatch_m', ...

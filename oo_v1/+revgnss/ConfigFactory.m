@@ -173,11 +173,11 @@ classdef ConfigFactory
             cfg.signals.enabled = {'L1'};
             cfg.signals.L1.name          = 'L1';
             cfg.signals.L1.frequency_Hz  = 1575.42e6;
-            cfg.signals.L1.lambda_m      = cfg.physics.c_mps / 1575.42e6;
+            cfg.signals.L1.lambda_m      = 299792458 / 1575.42e6;
             cfg.signals.L1.codeSigma0_m  = 0.30;
             cfg.signals.L2.name          = 'L2';
             cfg.signals.L2.frequency_Hz  = 1227.60e6;
-            cfg.signals.L2.lambda_m      = cfg.physics.c_mps / 1227.60e6;
+            cfg.signals.L2.lambda_m      = 299792458 / 1227.60e6;
             cfg.signals.L2.codeSigma0_m  = 0.45;
 
             % --- Code noise model --------------------------------------------------
