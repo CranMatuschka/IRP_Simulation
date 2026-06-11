@@ -10,5 +10,5 @@ data/atmosphere/
 # oo_v1 output: ignore PNGs but track the canonical PDF report
 oo_v1/output/figures/
 oo_v1/output/*.png
+oo_v1/output/*.pdf
 !oo_v1/output/reverse_gnss_simple_report.pdf
-

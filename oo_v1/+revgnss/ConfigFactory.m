@@ -161,6 +161,7 @@ classdef ConfigFactory
             cfg.estimator.initialError.omega_radps    = [0; 0; 0];
             cfg.estimator.initialError.clockBias_m    = 100.0;
             cfg.estimator.initialError.clockDrift_mps = 0.01;
+            cfg.estimator.forceFiniteDifferenceH      = false;
 
             % --- Measurement noise floor ----------------------------------
             cfg.measurement.sigmaFloor_m = 1e-3;
@@ -192,6 +193,34 @@ classdef ConfigFactory
             cfg.errors.multipath.truth.frequency_radps     = 0.01;
             cfg.errors.multipath.truth.stochastic_sigma_m  = 0.1;
             cfg.errors.multipath.sigma_m                   = 0.0;
+
+            % --- Effect toggles: deterministic geometric/structural effects ------
+            % cfg.effects groups new deterministic effects added in Stages 2–4.
+            % Each effect has truth/model toggle so mismatches appear as innovation bias.
+            % If truth=true and model=true with same params, the effect mostly cancels.
+            % R contains stochastic uncertainty only — deterministic bias belongs here.
+
+            cfg.effects.towerSurvey.truth.enable = false;
+            cfg.effects.towerSurvey.model.enable = false;
+            cfg.effects.towerSurvey.sigmaENU_m   = [0.01; 0.01; 0.03];
+            cfg.effects.towerSurvey.seed         = 3100;
+
+            cfg.effects.antennaPCO.truth.enable          = false;
+            cfg.effects.antennaPCO.model.enable          = false;
+            cfg.effects.antennaPCO.receiverOffset_body_m = [0; 0; 0];
+            cfg.effects.antennaPCO.towerOffset_enu_m     = [0; 0; 0];
+
+            % antennaPCV: toy elevation model only.  NOT calibrated ANTEX.
+            cfg.effects.antennaPCV.truth.enable  = false;
+            cfg.effects.antennaPCV.model.enable  = false;
+            cfg.effects.antennaPCV.modelType     = 'toyAzEl';
+            cfg.effects.antennaPCV.amplitude_m   = 0.005;
+
+            cfg.effects.correlatedNoise.enable            = false;
+            cfg.effects.correlatedNoise.commonModeSigma_m = 0.0;
+            cfg.effects.correlatedNoise.sameTowerSigma_m  = 0.0;
+            cfg.effects.correlatedNoise.independentSigma_m = 0.0;
+            cfg.effects.correlatedNoise.seed              = 4100;
 
             % --- Physics constants and range-correction toggles ---------------
             % All physics corrections default to false. Enable in realisticPseudorangeConfig.
@@ -553,42 +582,54 @@ classdef ConfigFactory
             end
 
             % ---- Receiver lever arms ----------------------------------------
-            nR_req   = cfg.scenario.nReceivers;
+            % Priority: custom 3×nR arms always win (any nR).
+            %           Then auto-fill from 4-column cross pattern if nR<=4.
+            %           Else require custom arms or error.
+            nR_req      = cfg.scenario.nReceivers;
             defaultArms = [1 -1 0 0; 0 0 1 -1; 0.2 0.2 -0.2 -0.2];  % 3 × 4
-            maxR = size(defaultArms, 2);
 
             if nR_req < 1
                 error('ConfigFactory:finalizeConfig', ...
                     'cfg.scenario.nReceivers must be >= 1 (got %d).', nR_req);
             end
-            if nR_req > maxR
-                error('ConfigFactory:finalizeConfig', ...
-                    ['cfg.scenario.nReceivers=%d but the predefined cross ' ...
-                     'pattern has only %d columns.  Supply custom lever arms or ' ...
-                     'reduce nReceivers.'], nR_req, maxR);
-            end
 
             if nR_req == 1
-                % Single receiver: always zero lever arm
+                % Single receiver: force zero lever arm; attitude from PR impossible.
                 cfg.asset.receiverLeverArm_body_m  = [0; 0; 0];
                 cfg.asset.receiverLeverArms_body_m = [0; 0; 0];
-            else
-                % Check if a valid custom 3×nR arm matrix is already present
-                existingArms = cfg.asset.receiverLeverArms_body_m;
-                isCustom = (size(existingArms,1) == 3) && ...
-                           (size(existingArms,2) == nR_req) && ...
-                           ~isequal(existingArms, [0;0;0]);
-                if ~isCustom
-                    cfg.asset.receiverLeverArms_body_m = defaultArms(:, 1:nR_req);
-                end
-                cfg.asset.receiverLeverArm_body_m = ...
-                    cfg.asset.receiverLeverArms_body_m(:, 1);
-            end
-
-            % ---- Attitude pseudorange gate ---------------------------------
-            if nR_req <= 1
                 cfg.estimator.estimateAttitudeFromPseudorange    = false;
                 cfg.estimator.estimateAngularRateFromPseudorange = false;
+            else
+                existingArms = cfg.asset.receiverLeverArms_body_m;
+                isCustom = (size(existingArms,1) == 3) && (size(existingArms,2) == nR_req);
+                if isCustom
+                    % Custom 3×nR arms already present — keep as-is.
+                elseif nR_req <= size(defaultArms, 2)
+                    cfg.asset.receiverLeverArms_body_m = defaultArms(:, 1:nR_req);
+                else
+                    error('ConfigFactory:finalizeConfig', ...
+                        ['nReceivers=%d > 4 requires custom 3x%d receiverLeverArms_body_m. ' ...
+                         'Set cfg.asset.receiverLeverArms_body_m to a 3x%d matrix ' ...
+                         'before calling finalizeConfig.'], nR_req, nR_req, nR_req);
+                end
+                cfg.asset.receiverLeverArm_body_m = cfg.asset.receiverLeverArms_body_m(:, 1);
+            end
+
+            % ---- Tower survey errors (Stage 2) --------------------------------
+            % One deterministic ENU error per tower drawn from a seeded RNG.
+            % Same realization stored for truth and model use:
+            %   truth=on / model=off  → innovation shows deterministic bias.
+            %   truth=on / model=on   → mostly cancels (same error applied to both).
+            if isfield(cfg,'effects') && isfield(cfg.effects,'towerSurvey')
+                ts  = cfg.effects.towerSurvey;
+                rngS = RandStream('mt19937ar','Seed', ts.seed);
+                for k = 1:nT_req
+                    cfg.towers(k).surveyError_ENU_m = ts.sigmaENU_m(:) .* randn(rngS, 3, 1);
+                end
+            else
+                for k = 1:nT_req
+                    cfg.towers(k).surveyError_ENU_m = zeros(3,1);
+                end
             end
         end
 

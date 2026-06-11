@@ -20,13 +20,14 @@ classdef Plotter
     %  07  prefit_innovation_rms     — prefit innovation RMS
     %  08  postfit_residual_rms      — postfit residual RMS
     %  09  NIS                       — Normalised Innovation Squared
-    %  10  visible_towers            — visible tower count
+    %  10  visible_towers            — visible tower count + total measurements
     %  11  per_source_error_rms      — per error-source RMS
     %  12  rx_allan_deviation        — empirical + theoretical sigma_y(tau)
     %  13  rx_allan_variance         — empirical + theoretical sigma_y^2(tau)
     %  14  tower_allan_deviation     — all-tower empirical + theoretical ADEV
     %  15  tower_clock_bias          — all-tower clock bias histories
     %  16  tower_clock_drift         — all-tower frac-freq / drift histories
+    %  17  measurement_count         — numVisibleTowers + numMeasurements (essential for multi-receiver)
 
     methods (Static)
 
@@ -41,7 +42,7 @@ classdef Plotter
 
             t = diag.getTimeVector();
 
-            fh = gobjects(1, 16);
+            fh = gobjects(1, 17);
             fi = 0;
 
             fi=fi+1; fh(fi) = revgnss.Plotter.plotPositionErrorComponents(diag, t, cfg);
@@ -73,6 +74,8 @@ classdef Plotter
                 fi=fi+1; fh(fi) = gobjects(1);
                 fi=fi+1; fh(fi) = gobjects(1);
             end
+
+            fi=fi+1; fh(fi) = revgnss.Plotter.plotMeasurementCount(diag, t, cfg);
 
             % Return only valid figure handles
             valid = isgraphics(fh);
@@ -411,6 +414,33 @@ classdef Plotter
             title('Per-Tower Clock Bias Histories');
             legend('Location','best'); grid on;
             revgnss.Plotter.saveFig_(fig, '15_tower_clock_bias', cfg);
+        end
+
+        function fig = plotMeasurementCount(diag, t, cfg)
+            % Fig 17: visible-tower count and total measurement count per epoch.
+            %
+            % For single-receiver runs: numMeasurements == numVisibleTowers.
+            % For multi-receiver (N antennas): numMeasurements == N * numVisibleTowers.
+            % This plot is essential for diagnosing multi-receiver configurations.
+            nv = diag.getNumVisibleTowers();
+            nm = diag.getNumMeasurements();
+            fig = revgnss.Plotter.newFig_('17 — Measurement Count', cfg);
+            subplot(2,1,1);
+            plot(t, nv, 'b.', 'MarkerSize', 6); hold on;
+            yline(mean(nv), 'b--', 'LineWidth', 1.0, 'DisplayName', sprintf('Mean %.1f', mean(nv)));
+            xlabel('Time [s]'); ylabel('Count');
+            title('Visible Ground Towers per Epoch');
+            ylim([0, max(max(nv)+1, 2)]); grid on; legend('Location','best');
+
+            subplot(2,1,2);
+            plot(t, nm, 'r.', 'MarkerSize', 6); hold on;
+            yline(max(nm), 'r--', 'LineWidth', 1.0, 'DisplayName', sprintf('Max %d', max(nm)));
+            xlabel('Time [s]'); ylabel('Count');
+            title('Total Pseudorange Measurements per Epoch');
+            ylim([0, max(max(nm)+1, 2)]); grid on; legend('Location','best');
+
+            sgtitle(sprintf('Observation Count (max meas = %d)', max(nm)));
+            revgnss.Plotter.saveFig_(fig, '17_measurement_count', cfg);
         end
 
         function fig = plotTowerClockDrift(towers, cfg)

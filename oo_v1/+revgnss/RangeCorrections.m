@@ -59,11 +59,12 @@ classdef RangeCorrections
         end
 
         % ----------------------------------------------------------------
-        function [rho, contrib] = correctedPseudorange(rx_ecef, tx_ecef, cfg, side)
+        function [rho, contrib] = correctedPseudorange(rx_ecef, tx_ecef, cfg, side, el_rad)
             % correctedPseudorange  Geometric range plus enabled deterministic corrections.
             %
-            % side: 'truth' → use cfg.physics.*.truth.enable flags
-            %       'model' → use cfg.physics.*.model.enable flags
+            % side:   'truth' → use cfg.physics.*.truth.enable and cfg.effects.*.truth.enable
+            %         'model' → use cfg.physics.*.model.enable and cfg.effects.*.model.enable
+            % el_rad: optional elevation angle [rad] used for toy PCV (if omitted, PCV skipped).
             %
             % Returns:
             %   rho     scalar, corrected range [m]
@@ -71,6 +72,7 @@ classdef RangeCorrections
 
             contrib.sagnac  = 0;
             contrib.shapiro = 0;
+            contrib.pcv     = 0;
 
             rho = revgnss.RangeCorrections.geometricRange(rx_ecef, tx_ecef);
 
@@ -93,6 +95,19 @@ classdef RangeCorrections
                     contrib.shapiro = dSh;
                     rho = rho + dSh;
                 end
+            end
+
+            % Toy PCV (Stage 3) — NOT calibrated ANTEX; elevation-dependent only.
+            % pcv_m = amplitude * cos(az) * cos(el)^2  with az=0 → amplitude * cos(el)^2
+            % Applied only if el_rad is provided and cfg.effects.antennaPCV.(side).enable.
+            if nargin >= 5 && ~isempty(el_rad) && isfield(cfg,'effects') && ...
+                    isfield(cfg.effects,'antennaPCV') && isfield(cfg.effects.antennaPCV, side) && ...
+                    cfg.effects.antennaPCV.(side).enable
+                amp = cfg.effects.antennaPCV.amplitude_m;
+                % toy AzEl: assume az=0 (azimuth-independent elevation model)
+                dPCV = amp * cos(el_rad)^2;
+                contrib.pcv = dPCV;
+                rho = rho + dPCV;
             end
         end
 

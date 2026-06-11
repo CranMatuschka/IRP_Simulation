@@ -117,7 +117,12 @@ classdef ErrorChain < handle
     methods (Access = private)
         % ----------------------------------------------------------------
         function [truth_m, model_m, sigma_m] = troposphere_(obj, elv, elvFloor)
-            % Simple zenith-mapped tropospheric delay.
+            % Simple mapped troposphere (Stage 6 model).
+            %
+            % Zenith tropospheric delay mapped to each elevation angle via 1/sin(el).
+            % This is a simplified isotropic model (no VMF3/GPT3/ERA5 — Stage 9 only).
+            % Sign convention: positive (delay) for both code and carrier phase.
+            % TODO Stage 9: replace with VMF3/GPT3 grid interpolation if needed.
             N = numel(elv);
             tc = obj.cfg.troposphere;
             mappingFn = @(e) 1 ./ max(sin(e), sin(elvFloor));
@@ -146,7 +151,14 @@ classdef ErrorChain < handle
         end
 
         function [truth_m, model_m, sigma_m] = ionosphere_(obj, elv, elvFloor)
-            % Simple mapping-function ionosphere (pseudorange: positive sign).
+            % Simple single-frequency ionosphere (Stage 6 model).
+            %
+            % First-order ionospheric delay mapped to elevation via 1/sin(el).
+            % Sign convention: POSITIVE for pseudorange (code phase delay).
+            %                  NEGATIVE for carrier phase (carrier phase advance).
+            % ErrorChain truth/modelTotal is used directly in pseudorange z and h.
+            % computeCarrierPhase_ does NOT use ErrorChain totals (wrong iono sign).
+            % TODO Stage 9: replace with dual-frequency or Klobuchar/NeQuick model.
             N = numel(elv);
             ic = obj.cfg.ionosphere;
             mappingFn = @(e) 1 ./ max(sin(e), sin(elvFloor));

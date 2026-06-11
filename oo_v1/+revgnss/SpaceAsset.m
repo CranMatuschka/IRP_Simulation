@@ -94,20 +94,24 @@ classdef SpaceAsset < handle
         end
 
         % ----------------------------------------------------------------
-        function r_ants = getAntennaPositionsECEF(obj, r_cm, euler)
+        function r_ants = getAntennaPositionsECEF(obj, r_cm, euler, leverArms)
             % getAntennaPositionsECEF  All antenna phase centres [3 x N_ant].
             %
             % Inputs:
-            %   r_cm   [3x1]  centre-of-mass position in ECEF [m]
-            %   euler  [3x1]  attitude Euler angles [rad] (ZYX)
+            %   r_cm       [3x1]    centre-of-mass position in ECEF [m]
+            %   euler      [3x1]    attitude Euler angles [rad] (ZYX)
+            %   leverArms  [3xN]    optional override; uses obj.receiverLeverArms_body_m if omitted
             %
             % Output:
             %   r_ants [3 x N_ant]  ECEF position of each antenna
-            N_ant  = size(obj.receiverLeverArms_body_m, 2);
+            if nargin < 4 || isempty(leverArms)
+                leverArms = obj.receiverLeverArms_body_m;
+            end
+            N_ant  = size(leverArms, 2);
             r_ants = zeros(3, N_ant);
             for ai = 1:N_ant
                 r_ants(:,ai) = revgnss.AttitudeKinematics.applyLeverArm( ...
-                    r_cm, euler, obj.receiverLeverArms_body_m(:,ai));
+                    r_cm, euler, leverArms(:,ai));
             end
         end
 

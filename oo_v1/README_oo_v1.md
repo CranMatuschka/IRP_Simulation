@@ -90,16 +90,18 @@ This implementation lives **entirely within** the `oo_v1/` folder and does not m
   OrbitPropagator.m    Simple circular LEO orbit (ECI -> ECEF)
   GeometryUtils.m      ECEF/geodetic conversions, elevation angle (static)
   GroundTower.m        Ground transmitter with ClockModel
-  SpaceAsset.m         Orbiting receiver with attitude and ClockModel
+  SpaceAsset.m         Orbiting receiver with attitude and ClockModel (optional lever-arm override)
   ErrorChain.m         Per-source pseudorange error computation
-  MeasurementModel.m   Truth/predicted pseudorange + Jacobian H
+  RangeCorrections.m   Sagnac, Shapiro, and antenna PCV corrections
+  MeasurementModel.m   Truth/predicted pseudorange + Jacobian H (analytic or finite-diff)
   ReverseGNSSEKF.m     14+ state EKF with Joseph stabilised update
   ReverseGNSSSimulation.m  Simulation orchestrator (owns all objects)
-  ConfigFactory.m      Default and experiment configuration builders
+  ConfigFactory.m      Config builders: defaultConfig, multiAntennaAttitudeConfig, etc.
   ScenarioFactory.m    Instantiates objects from a config struct
   validateConfig.m     Startup config validation
-  Plotter.m            15-category diagnostic plot suite
+  Plotter.m            17-figure diagnostic plot suite
   Diagnostics.m        Per-epoch truth/estimate/error log
+  ReportWriter.m       Saves figure array to multi-page PDF
 ```
 
 ---
@@ -298,43 +300,115 @@ The truth-model residual for each source contributes to the innovation:
 
 ---
 
+## 11b. Deterministic Effects (`cfg.effects`)
+
+`cfg.effects` groups deterministic physical effects that are **separate from stochastic noise**. Each effect has independent `truth` and `model` toggles. `R` always contains only stochastic uncertainty.
+
+| Effect | Fields | Default |
+|--------|--------|---------|
+| Tower survey error | `towerSurvey.sigmaENU_m`, `.seed`, `.truth.enable`, `.model.enable` | all off, σ = [1 1 3] cm |
+| Antenna PCO (receiver) | `antennaPCO.receiverOffset_body_m`, `.truth.enable`, `.model.enable` | off, [0;0;0] |
+| Antenna PCO (tower) | `antennaPCO.towerOffset_enu_m`, `.truth.enable`, `.model.enable` | off, [0;0;0] |
+| Antenna PCV (toy) | `antennaPCV.amplitude_m`, `.modelType='toyAzEl'`, `.truth.enable`, `.model.enable` | off, 5 mm |
+| Correlated noise | `correlatedNoise.commonModeSigma_m`, `.sameTowerSigma_m`, `.independentSigma_m`, `.seed`, `.enable` | off, all 0 |
+
+**Tower survey errors** are drawn once in `finalizeConfig` (seeded `RandStream`) and stored in `cfg.towers(k).surveyError_ENU_m`. `getTowerPosition_` returns the perturbed position on-the-fly without mutating `tower.r_ecef_m`.
+
+**Antenna PCO** shifts all receiver lever arms by `receiverOffset_body_m` (body frame) and the tower antenna phase centre by `towerOffset_enu_m` (ENU frame).
+
+**Toy PCV** model: `dPCV = amplitude * cos(el)^2` — elevation-dependent, azimuth assumed zero. NOT calibrated ANTEX.
+
+**Correlated noise** builds a full off-diagonal `R` matrix: common-mode (shared across all towers), per-tower (shared across all receivers of one tower), and independent draws.
+
+**Finite-difference Jacobian** is triggered automatically when any of Sagnac, Shapiro, PCO, or PCV are enabled on the model side, or when `cfg.estimator.forceFiniteDifferenceH = true`. Tower survey does not require FD (the unit vector `u` is unaffected by fixed tower position).
+
+---
+
 ## 12. How to Run
 
-### Basic simulation
+### Basic simulation (baseline)
 
 ```matlab
 cd oo_v1
 run_oo_reverse_gnss
 ```
 
-This runs a 3600-second (1 hour) GEO-1 scenario with 5 towers, plots all diagnostics, and saves a PDF report to `oo_v1/output/reverse_gnss_simple_report.pdf`.
+Uses `defaultConfig()`: GEO-1, 5 towers, 1 receiver, all effects off. Saves PDF to `output/reverse_gnss_simple_report.pdf`.
 
-### All experiments
+### Effect toggle test file
 
 ```matlab
 cd oo_v1
-run_oo_experiments
+run_oo_effect_toggle_tests
 ```
 
-Prints a comparison table (position RMS, innovation RMS, NIS, etc.) for Experiments A–G.
+Set `RUN_*` flags at the top to enable/disable individual test cases. Each case writes a separate PDF to `output/<caseName>.pdf` and figures to `output/figures/<caseName>/`. A summary table is printed at the end showing final position error, NIS, and prefit/postfit RMS.
 
-### Individual test
+### Config presets
+
+| Preset | Description |
+|--------|-------------|
+| `defaultConfig()` | Clean baseline: 5 towers, 1 receiver, all physics off, deterministic clocks |
+| `multiAntennaAttitudeConfig()` | 4-antenna cross pattern; `estimateAttitudeFromPseudorange=true`; 20 max measurements/epoch |
+| `realisticPseudorangeConfig()` | Sagnac + Shapiro truth+model both enabled; corrections mostly cancel |
+| `clockDiversityConfig()` | Each tower uses a different clock type (OCXO/TCXO/Rubidium/AtomicLike) |
+
+### Multi-receiver setup
+
+`cfg.scenario.nReceivers` controls how many antenna phase centres the asset has:
+- 1 receiver: single antenna, zero lever arm, attitude estimation off.
+- 2–4 receivers: auto-filled from a ±1 m cross pattern.
+- > 4 receivers: **requires** custom `cfg.asset.receiverLeverArms_body_m` (3 × N matrix).
+
+```matlab
+cfg.scenario.nReceivers = 6;
+cfg.asset.receiverLeverArms_body_m = [  % 3 × 6 custom pattern
+    1, -1,  0,  0,  0.5, -0.5; ...
+    0,  0,  1, -1,  0.5, -0.5; ...
+    0.2, 0.2, -0.2, -0.2, 0, 0 ];
+```
+
+### Truth/model effect toggles
+
+Every new deterministic effect (tower survey, PCO, PCV, Sagnac, Shapiro) has separate truth/model toggles:
+
+```matlab
+% Mismatch: truth sees survey error, model assumes nominal positions
+cfg.effects.towerSurvey.truth.enable = true;
+cfg.effects.towerSurvey.model.enable = false;
+
+% Matched: both see same error, mostly cancels in innovation
+cfg.effects.towerSurvey.truth.enable = true;
+cfg.effects.towerSurvey.model.enable = true;
+```
+
+`R` contains only stochastic uncertainty. Deterministic mismatches appear as innovation bias, not inflated R.
+
+### Carrier phase
+
+Carrier phase is a **diagnostic observable only**. It is never used in the EKF unless float ambiguity states are implemented.
+
+```matlab
+cfg.measurements.carrierPhase.enable   = true;
+cfg.measurements.carrierPhase.useInEKF = false;   % diagnostic only
+```
+
+Setting `useInEKF=true` without `estimateCarrierAmbiguities=true` throws a clear error. No fake integer ambiguity resolution is done.
+
+### Unit and integration tests
 
 ```matlab
 cd oo_v1/tests
-test_ideal_convergence
-```
-
-Or run all tests:
-
-```matlab
-cd oo_v1/tests
-test_ideal_convergence
-test_noise_scaling
-test_tower_clock_effect
-test_clock_allan_model
-test_attitude_lever_arm_observability
-test_atmosphere_mismatch
+test_ideal_convergence                   % position + clock converge from cold start
+test_noise_scaling                       % NIS scales correctly with measurement sigma
+test_stage0_default_config               % default run completes, NIS reasonable
+test_stage0_multi_antenna                % 4-receiver cross pattern gives 20 meas/epoch
+test_stage1_realistic_pseudorange        % Sagnac+Shapiro matched: near-baseline NIS
+test_stage2_doppler                      % Doppler stacked in z; postfit split correct
+test_stage3_carrier_phase                % carrier stored; useInEKF=false enforced
+test_atmosphere_mismatch                 % trop/iono mismatch shows innovation bias
+test_attitude_lever_arm_observability    % zero lever arm → unobservable attitude
+test_clock_allan_model                   % empirical ADEV matches theoretical slope
 ```
 
 ---
@@ -372,31 +446,28 @@ This is physically correct — the EKF clock state acts as a catch-all for commo
 
 | Limitation | Notes |
 |-----------|-------|
-| No carrier phase | No integer ambiguity states; pseudorange only |
-| No light-time iteration | One-way range used; Sagnac effect ignored |
-| No Sagnac correction | Can cause dm-level errors in LEO |
+| Carrier phase: diagnostic only | No float/integer ambiguity states; carrier stored but not used in EKF |
+| No light-time iteration | One-way range used; Sagnac enabled via `cfg.physics.sagnac` toggles |
 | Simple circular orbit | No J2, no drag, no SRP |
-| Simple atmosphere | 1/sin(elev) mapping; no troposphere/ionosphere model |
-| Diagonal R only | No correlated or common-mode measurement covariance |
+| Simple atmosphere | 1/sin(elev) mapping; no ERA5/VMF3/GPT3 (Stage 9 TODO) |
+| Toy PCV only | `amplitude * cos(el)^2`; no ANTEX file support |
 | Euler attitude | Gimbal-lock singularity at pitch = ±90° |
 | No IMU | Attitude propagation is kinematic; no inertial aiding |
-| No cycle slips | Carrier phase not implemented |
+| No ambiguity resolution | LAMBDA/MLAMBDA deferred to future work |
 
 ---
 
 ## 16. Future Extensions
 
-- Carrier phase measurements with integer ambiguity states
+- Float ambiguity states for carrier phase in EKF (Stage 8 TODO)
+- Integer ambiguity resolution (LAMBDA/MLAMBDA)
 - Cycle slip detection and repair
-- Sagnac and relativistic corrections
-- Light-time iteration
+- Light-time iteration (iterate range until Sagnac converges)
 - J2 / high-fidelity orbit propagator (e.g. RK4 + gravity model)
 - IMU aiding for attitude
 - Quaternion attitude representation (removes singularity)
-- Multiple receiver antennas (baseline vector for attitude)
-- Correlated measurement covariance (common-mode errors)
-- Tower clock estimation enabled by default for advanced scenarios
-- Ambiguity resolution (LAMBDA/MLAMBDA)
+- ERA5/VMF3/GPT3 atmosphere models (Stage 9 TODO)
+- ANTEX-calibrated PCV (replace toy elevation model)
 - Real ephemeris / precise orbit/clock products
 
 ---

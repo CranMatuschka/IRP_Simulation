@@ -79,12 +79,14 @@ classdef ScenarioFactory
                 clk_pert  = ie.clockBias_m;
                 cdot_pert = ie.clockDrift_mps;
             else
-                pos_pert  = cfg.estimator.P0_pos_m   * randn(3,1);
-                vel_pert  = cfg.estimator.P0_vel_mps  * randn(3,1);
-                eul_pert  = cfg.estimator.P0_euler_rad * randn(3,1);
-                omg_pert  = cfg.estimator.P0_omega_radps * randn(3,1);
-                clk_pert  = cfg.estimator.P0_bRx_m    * randn;
-                cdot_pert = cfg.estimator.P0_bdotRx_mps * randn;
+                % Deterministic fallback: seeded RNG so results are reproducible.
+                rngFb = RandStream('mt19937ar', 'Seed', cfg.simulation.seed + 7777);
+                pos_pert  = cfg.estimator.P0_pos_m      * randn(rngFb, 3, 1);
+                vel_pert  = cfg.estimator.P0_vel_mps    * randn(rngFb, 3, 1);
+                eul_pert  = cfg.estimator.P0_euler_rad  * randn(rngFb, 3, 1);
+                omg_pert  = cfg.estimator.P0_omega_radps * randn(rngFb, 3, 1);
+                clk_pert  = cfg.estimator.P0_bRx_m      * randn(rngFb, 1, 1);
+                cdot_pert = cfg.estimator.P0_bdotRx_mps * randn(rngFb, 1, 1);
             end
 
             x0(sm.r_idx)     = asset.r_ecef_m + pos_pert;
