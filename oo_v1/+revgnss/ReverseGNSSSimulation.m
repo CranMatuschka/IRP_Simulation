@@ -243,70 +243,55 @@ classdef ReverseGNSSSimulation < handle
         function postfit = computePostfitResiduals_(obj, z, ~, errStruct)
             % computePostfitResiduals_  Recompute h with updated EKF state.
             %
-            % Option A (0.4): uses errStruct.nPseudorange to split z into PR and
-            % Doppler rows.  Pseudorange rows use corrected range model.  Doppler
-            % rows use velocity dot-product model with updated v and bdot.
-            % Reuses stored tower clock corrections — no new noise draw.
+            % Pseudorange postfit delegates to MeasurementModel.computePseudorangeModelOnly
+            % so exactly the same model path (Sagnac, Shapiro, PCO, PCV, survey, ErrorChain)
+            % is used as the EKF h.  Doppler rows use a direct velocity model.
 
             if isempty(z) || isempty(errStruct) || ~isfield(errStruct,'towerIdx_perMeas')
                 postfit = [];
                 return
             end
 
-            sm       = obj.ekf.stateMap;
-            r_post   = obj.ekf.x(sm.r_idx);
-            eul_post = obj.ekf.x(sm.euler_idx);
-            brx_post = obj.ekf.x(sm.b_rx_idx);
+            sm   = obj.ekf.stateMap;
+            M_pr = errStruct.nPseudorange;
 
-            twr_list  = errStruct.towerIdx_perMeas;
-            ant_list  = errStruct.antennaIdx_perMeas;
-            leverArms = obj.asset.receiverLeverArms_body_m;
+            % Pseudorange postfit via exact model path
+            h_post_pr = obj.measModel.computePseudorangeModelOnly( ...
+                obj.asset, obj.towers, obj.ekf.x, errStruct, sm);
 
-            M_pr = errStruct.nPseudorange;   % pseudorange count
-            h_post = zeros(M_pr, 1);
-
-            for mi = 1:M_pr
-                ti    = twr_list(mi);
-                ai    = ant_list(mi);
-                lever = leverArms(:, ai);
-
-                r_ant = revgnss.AttitudeKinematics.applyLeverArm(r_post, eul_post, lever);
-                r_twr = obj.towers{ti}.getAntennaPositionECEF();
-                rho   = revgnss.RangeCorrections.correctedPseudorange(r_ant, r_twr, obj.cfg, 'model');
-
-                if isfield(sm,'towerClockIdx') && ti <= size(sm.towerClockIdx,1) && ...
-                        sm.towerClockIdx(ti,1) > 0
-                    b_twr = obj.ekf.x(sm.towerClockIdx(ti,1));
-                elseif mi <= numel(errStruct.towerClockModel_m)
-                    b_twr = errStruct.towerClockModel_m(mi);
-                else
-                    b_twr = 0;
-                end
-
-                model_total = 0;
-                if isfield(errStruct,'modelTotal_m') && mi <= numel(errStruct.modelTotal_m)
-                    model_total = errStruct.modelTotal_m(mi);
-                end
-                h_post(mi) = rho + brx_post - b_twr + model_total;
-            end
-
-            % Doppler rows (if useInEKF=true they are stacked after pseudorange)
+            % Doppler postfit (if useInEKF=true rows are stacked after pseudorange)
             doDoppler = isfield(obj.cfg,'measurements') && ...
                         isfield(obj.cfg.measurements,'doppler') && ...
                         obj.cfg.measurements.doppler.enable && ...
                         obj.cfg.measurements.doppler.useInEKF;
 
             if doDoppler && numel(z) > M_pr
+                r_post    = obj.ekf.x(sm.r_idx);
+                eul_post  = obj.ekf.x(sm.euler_idx);
                 v_post    = obj.ekf.x(sm.v_idx);
                 bdot_post = obj.ekf.x(sm.bdot_rx_idx);
-                M_dop = numel(z) - M_pr;
+                leverArms = obj.asset.receiverLeverArms_body_m;
+                twr_list  = errStruct.towerIdx_perMeas;
+                ant_list  = errStruct.antennaIdx_perMeas;
+
+                M_dop   = numel(z) - M_pr;
                 hd_post = zeros(M_dop, 1);
                 for mi = 1:M_dop
                     ti    = twr_list(mi);
                     ai    = ant_list(mi);
-                    lever = leverArms(:, ai);
-                    r_ant = revgnss.AttitudeKinematics.applyLeverArm(r_post, eul_post, lever);
+                    r_ant = revgnss.AttitudeKinematics.applyLeverArm( ...
+                        r_post, eul_post, leverArms(:, ai));
+                    % Model tower position: nominal + survey error if model.enable
                     r_twr = obj.towers{ti}.getAntennaPositionECEF();
+                    if isfield(obj.cfg,'effects') && isfield(obj.cfg.effects,'towerSurvey') && ...
+                            isfield(obj.cfg.effects.towerSurvey,'model') && ...
+                            obj.cfg.effects.towerSurvey.model.enable && ...
+                            ti <= numel(obj.cfg.towers) && ...
+                            isfield(obj.cfg.towers(ti),'surveyError_ENU_m')
+                        enu = obj.cfg.towers(ti).surveyError_ENU_m;
+                        r_twr = r_twr + revgnss.GeometryUtils.enu2ecef_vector( ...
+                            obj.towers{ti}.lat_rad, obj.towers{ti}.lon_rad, enu);
+                    end
                     delta = r_ant - r_twr;
                     rho_e = norm(delta); if rho_e < 1; rho_e = 1; end
                     u_e   = delta / rho_e;
@@ -318,9 +303,9 @@ classdef ReverseGNSSSimulation < handle
                     end
                     hd_post(mi) = u_e' * v_post + bdot_post - bdot_twr_model;
                 end
-                postfit = [z(1:M_pr) - h_post; z(M_pr+1:end) - hd_post];
+                postfit = [z(1:M_pr) - h_post_pr; z(M_pr+1:end) - hd_post];
             else
-                postfit = z(1:M_pr) - h_post;
+                postfit = z(1:M_pr) - h_post_pr;
             end
         end
     end

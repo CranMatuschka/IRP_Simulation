@@ -196,41 +196,67 @@ classdef Plotter
         end
 
         function fig = plotPrefitInnovationRMS(diag, t, cfg)
-            % Fig 07: prefit innovation RMS
-            rms_vec = diag.getPrefitInnovationRMS();
-            fig = revgnss.Plotter.newFig_('07 — Prefit Innovation RMS', cfg);
-            plot(t, rms_vec, 'b', 'LineWidth',1.5);
-            xlabel('Time [s]'); ylabel('Innovation RMS [m]');
-            title('Prefit Innovation RMS vs Time'); grid on;
+            % Fig 07: pseudorange prefit innovation RMS [m]
+            % Uses pseudorange rows only.  Doppler is plotted separately to avoid
+            % mixing metres and metres/second in the same axes.
+            rms_pr  = diag.getPrefitPseudorangeRMS();
+            fig = revgnss.Plotter.newFig_('07 — Prefit Innovation RMS (pseudorange)', cfg);
+            plot(t, rms_pr, 'b', 'LineWidth',1.5);
+            xlabel('Time [s]'); ylabel('Prefit Innovation RMS [m]');
+            title('Pseudorange Prefit Innovation RMS vs Time'); grid on;
             revgnss.Plotter.saveFig_(fig, '07_prefit_innovation_rms', cfg);
         end
 
         function fig = plotPostfitResidualRMS(diag, t, cfg)
-            % Fig 08: postfit residual RMS
-            rms_vec = diag.getPostfitResidualRMS();
-            fig = revgnss.Plotter.newFig_('08 — Postfit Residual RMS', cfg);
-            plot(t, rms_vec, 'b', 'LineWidth',1.5);
-            xlabel('Time [s]'); ylabel('Residual RMS [m]');
-            title('Postfit Residual RMS vs Time'); grid on;
+            % Fig 08: pseudorange postfit residual RMS [m]
+            % Uses pseudorange rows only.  Doppler kept in a separate figure.
+            rms_pr = diag.getPostfitPseudorangeRMS();
+            fig = revgnss.Plotter.newFig_('08 — Postfit Residual RMS (pseudorange)', cfg);
+            plot(t, rms_pr, 'b', 'LineWidth',1.5);
+            xlabel('Time [s]'); ylabel('Postfit Residual RMS [m]');
+            title('Pseudorange Postfit Residual RMS vs Time'); grid on;
             revgnss.Plotter.saveFig_(fig, '08_postfit_residual_rms', cfg);
+        end
+
+        function fig = plotDopplerRMS(diag, t, cfg)
+            % Doppler prefit/postfit RMS [m/s].  Separate figure to avoid mixing units.
+            pf_mps  = diag.getPrefitDopplerRMS();
+            pof_mps = diag.getPostfitDopplerRMS();
+            fig = revgnss.Plotter.newFig_('Doppler RMS', cfg);
+            hasDoppler = any(pf_mps > 0) || any(pof_mps > 0);
+            if hasDoppler
+                plot(t, pf_mps,  'b', 'LineWidth',1.5, 'DisplayName','Prefit [m/s]'); hold on;
+                plot(t, pof_mps, 'r--', 'LineWidth',1.5, 'DisplayName','Postfit [m/s]');
+                legend('Location','best');
+            else
+                text(0.5, 0.5, 'No Doppler in EKF this run', 'Units','normalized', ...
+                    'HorizontalAlignment','center','FontSize',10,'Color',[0.5 0.5 0.5]);
+            end
+            xlabel('Time [s]'); ylabel('Doppler RMS [m/s]');
+            title('Doppler Prefit / Postfit RMS vs Time'); grid on;
+            revgnss.Plotter.saveFig_(fig, 'doppler_rms', cfg);
         end
 
         function fig = plotNIS(diag, t, cfg)
             % Fig 09: Normalised Innovation Squared
-            NIS     = diag.getNIS();
-            nv_mean = mean([diag.log.numVisibleTowers]);
+            %
+            % Expected NIS equals the EKF measurement dimension (z rows), not the
+            % visible tower count.  For pseudorange-only, these are equal.  For
+            % multi-receiver or Doppler-EKF they differ.
+            NIS    = diag.getNIS();
+            m_mean = mean(diag.getNumMeasurementRows());
 
             fig = revgnss.Plotter.newFig_('09 — NIS', cfg);
             plot(t, NIS, 'b', 'LineWidth',1.2); hold on;
-            if nv_mean > 0
-                yline(nv_mean, 'r--', 'LineWidth',1.2, ...
-                    'DisplayName', sprintf('E[NIS] ~ %.0f (\\chi^2 expected)', nv_mean));
-                yline(3*nv_mean, 'k:', 'LineWidth',1.0, ...
-                    'DisplayName', sprintf('3\\times E[NIS] (informal bound)', 3*nv_mean));
+            if m_mean > 0
+                yline(m_mean, 'r--', 'LineWidth',1.2, ...
+                    'DisplayName', sprintf('E[NIS] ~ %.0f (measurement rows)', m_mean));
+                yline(3*m_mean, 'k:', 'LineWidth',1.0, ...
+                    'DisplayName', sprintf('3\\times E[NIS] (informal bound)'));
             end
             xlabel('Time [s]'); ylabel('NIS');
             title('Normalised Innovation Squared (NIS)');
-            legend({'NIS','Expected value','3\times expected'},'Location','best');
+            legend({'NIS','E[NIS] (meas rows)','3\times E[NIS]'},'Location','best');
             grid on;
             revgnss.Plotter.saveFig_(fig, '09_NIS', cfg);
         end

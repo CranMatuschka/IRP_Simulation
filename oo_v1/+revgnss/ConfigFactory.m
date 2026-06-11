@@ -448,11 +448,15 @@ classdef ConfigFactory
             %
             % With both truth and model enabled, corrections mostly cancel in the
             % innovation. To see the deterministic bias, set model.enable=false.
+            %
+            % Light-time iteration is NOT implemented in v1. Sagnac is applied as
+            % the first-order Earth-rotation correction. Do not enable lightTime
+            % until an ECI/transmit-time model exists.
             cfg = revgnss.ConfigFactory.defaultConfig();
             cfg.physics.sagnac.truth.enable           = true;
             cfg.physics.sagnac.model.enable           = true;
-            cfg.physics.lightTime.truth.enable        = true;
-            cfg.physics.lightTime.model.enable        = true;
+            cfg.physics.lightTime.truth.enable        = false;   % not implemented in v1
+            cfg.physics.lightTime.model.enable        = false;   % not implemented in v1
             cfg.physics.relativity.shapiro.truth.enable = true;
             cfg.physics.relativity.shapiro.model.enable = true;
         end
@@ -536,6 +540,22 @@ classdef ConfigFactory
             %
             % Clock recreation is idempotent: noiseCoeffs are re-derived from
             % clockType + clockFactors; name/deterministic/bias_s/fracFreq preserved.
+
+            % ---- Light-time guard -----------------------------------------
+            % Light-time iteration is not implemented in v1.  Sagnac handles the
+            % first-order Earth-rotation correction instead.  Raise a clear error
+            % rather than silently ignoring the flag.
+            if isfield(cfg,'physics') && isfield(cfg.physics,'lightTime')
+                lt = cfg.physics.lightTime;
+                ltTruth = isfield(lt,'truth') && isfield(lt.truth,'enable') && lt.truth.enable;
+                ltModel = isfield(lt,'model') && isfield(lt.model,'enable') && lt.model.enable;
+                if ltTruth || ltModel
+                    error('ConfigFactory:lightTimeNotImplemented', ...
+                        ['Light-time correction is configured but not implemented in v1. ' ...
+                         'Disable cfg.physics.lightTime.truth/model.enable, or implement ' ...
+                         'a consistent ECI transmit-time model first.']);
+                end
+            end
 
             % ---- Tower count -----------------------------------------------
             nT_req   = cfg.scenario.nTowers;

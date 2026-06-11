@@ -203,15 +203,35 @@ classdef MeasurementModel < handle
             shapiroModel_m = zeros(M,1);
             pcvTruth_m     = zeros(M,1);
             pcvModel_m     = zeros(M,1);
+            % Contribution arrays for diagnostics (first-order range difference per effect)
+            towerSurveyTruth_m  = zeros(M,1);
+            towerSurveyModel_m  = zeros(M,1);
+            receiverPCOTruth_m  = zeros(M,1);
+            receiverPCOModel_m  = zeros(M,1);
+            towerPCOTruth_m     = zeros(M,1);
+            towerPCOModel_m     = zeros(M,1);
 
             for mi = 1:M
                 ti  = twr_list(mi);
                 ai  = ant_list(mi);
                 elv = elv_list(mi);
 
-                % Stage 2: truth and model tower positions (survey error)
-                r_twr_truth = obj.getTowerPosition_(towers{ti}, ti, 'truth');
-                r_twr_model = obj.getTowerPosition_(towers{ti}, ti, 'model');
+                % Nominal tower position (no survey, no PCO) for contribution baseline
+                r_twr_nom = towers{ti}.getAntennaPositionECEF();
+
+                % Stage 2: truth and model tower positions (survey error only, no PCO yet)
+                r_twr_survey_truth = obj.getTowerPosition_(towers{ti}, ti, 'truth');
+                r_twr_survey_model = obj.getTowerPosition_(towers{ti}, ti, 'model');
+
+                % Tower survey range contribution (truth-model mismatch in range domain)
+                towerSurveyTruth_m(mi) = norm(r_ants_truth(:,ai) - r_twr_survey_truth) - ...
+                                         norm(r_ants_truth(:,ai) - r_twr_nom);
+                towerSurveyModel_m(mi) = norm(r_ants_est(:,ai)   - r_twr_survey_model) - ...
+                                         norm(r_ants_est(:,ai)   - r_twr_nom);
+
+                % Start with survey-shifted positions for PCO application
+                r_twr_truth = r_twr_survey_truth;
+                r_twr_model = r_twr_survey_model;
 
                 % Stage 3: tower PCO on top of survey-shifted position
                 if isfield(obj.cfg,'effects') && isfield(obj.cfg.effects,'antennaPCO')
@@ -225,6 +245,29 @@ classdef MeasurementModel < handle
                         tOff = pco.towerOffset_enu_m(:);
                         R_ENU = revgnss.GeometryUtils.enu2ecef(towers{ti}.lat_rad, towers{ti}.lon_rad);
                         r_twr_model = r_twr_model + R_ENU * tOff;
+                    end
+                end
+
+                % Tower PCO range contribution (before PCO vs after PCO positions)
+                towerPCOTruth_m(mi) = norm(r_ants_truth(:,ai) - r_twr_truth) - ...
+                                      norm(r_ants_truth(:,ai) - r_twr_survey_truth);
+                towerPCOModel_m(mi) = norm(r_ants_est(:,ai)   - r_twr_model) - ...
+                                      norm(r_ants_est(:,ai)   - r_twr_survey_model);
+
+                % Receiver PCO range contribution (antenna with vs without PCO offset)
+                if isfield(obj.cfg,'effects') && isfield(obj.cfg.effects,'antennaPCO')
+                    pco = obj.cfg.effects.antennaPCO;
+                    if isfield(pco,'truth') && pco.truth.enable
+                        r_ant_no_pco = revgnss.AttitudeKinematics.applyLeverArm( ...
+                            r_cm_true, euler_true, leverArms(:,ai));
+                        receiverPCOTruth_m(mi) = norm(r_ants_truth(:,ai) - r_twr_truth) - ...
+                                                  norm(r_ant_no_pco      - r_twr_truth);
+                    end
+                    if isfield(pco,'model') && pco.model.enable
+                        r_ant_no_pco_est = revgnss.AttitudeKinematics.applyLeverArm( ...
+                            r_est, euler_est, leverArms(:,ai));
+                        receiverPCOModel_m(mi) = norm(r_ants_est(:,ai)  - r_twr_model) - ...
+                                                  norm(r_ant_no_pco_est - r_twr_model);
                     end
                 end
 
@@ -264,10 +307,18 @@ classdef MeasurementModel < handle
             errStruct.shapiroModel_m = shapiroModel_m;
             errStruct.pcvTruth_m     = pcvTruth_m;
             errStruct.pcvModel_m     = pcvModel_m;
+            errStruct.towerSurveyTruth_m  = towerSurveyTruth_m;
+            errStruct.towerSurveyModel_m  = towerSurveyModel_m;
+            errStruct.receiverPCOTruth_m  = receiverPCOTruth_m;
+            errStruct.receiverPCOModel_m  = receiverPCOModel_m;
+            errStruct.towerPCOTruth_m     = towerPCOTruth_m;
+            errStruct.towerPCOModel_m     = towerPCOModel_m;
 
             % ----- Stage 4: correlated measurement noise ---------------
             % Adds truth-side correlated noise to z and builds full R.
-            [z, R] = obj.applyCorrelatedNoise_(z, R_diag, twr_list, M);
+            % correlNoise.common_m / sameTower_m / independent_m stored for contribution diagnostics.
+            [z, R, correlNoise] = obj.applyCorrelatedNoise_(z, R_diag, twr_list, M);
+            errStruct.correlatedNoise = correlNoise;
 
             % ----- Jacobian H (pseudorange) ----------------------------
             H_pr = obj.computeJacobian_(towers, twr_list, ant_list, ...
@@ -557,6 +608,92 @@ classdef MeasurementModel < handle
             end
         end
 
+        % ----------------------------------------------------------------
+        function h_pr = computePseudorangeModelOnly(obj, asset, towers, x_state, errStruct, stateMap)
+            % computePseudorangeModelOnly  Recompute h_pr with updated EKF state.
+            %
+            % Exact same model-side path as computeMeasurements (h side):
+            %   - PCO-adjusted lever arms (model)
+            %   - getTowerPosition_(..., 'model') with survey error
+            %   - Model tower PCO if enabled
+            %   - correctedPseudorange(..., 'model', el) — Sagnac, Shapiro, PCV
+            %   - Receiver + tower clock from state / errStruct
+            %   - errStruct.modelTotal_m — frozen ErrorChain corrections
+            %
+            % Used by ReverseGNSSSimulation.computePostfitResiduals_ so postfit
+            % uses the exact same model path as the EKF h, not a simplified version.
+
+            leverArms = asset.receiverLeverArms_body_m;
+            N_ant = size(leverArms, 2);
+
+            % Model-side lever arms with receiver PCO if enabled
+            leverArms_model = leverArms;
+            if isfield(obj.cfg,'effects') && isfield(obj.cfg.effects,'antennaPCO')
+                pco = obj.cfg.effects.antennaPCO;
+                if isfield(pco,'model') && pco.model.enable
+                    off = pco.receiverOffset_body_m(:);
+                    leverArms_model = leverArms + off * ones(1, N_ant);
+                end
+            end
+
+            r_est     = x_state(stateMap.r_idx);
+            euler_est = x_state(stateMap.euler_idx);
+            b_rx_est  = x_state(stateMap.b_rx_idx);
+
+            r_ants_est = asset.getAntennaPositionsECEF(r_est, euler_est, leverArms_model);
+
+            twr_list = errStruct.towerIdx_perMeas;
+            ant_list = errStruct.antennaIdx_perMeas;
+            M_pr     = errStruct.nPseudorange;
+
+            h_pr = zeros(M_pr, 1);
+
+            for mi = 1:M_pr
+                ti = twr_list(mi);
+                ai = ant_list(mi);
+
+                % Model tower position (with survey error if model.enable)
+                r_twr_model = obj.getTowerPosition_(towers{ti}, ti, 'model');
+
+                % Tower PCO (model side)
+                if isfield(obj.cfg,'effects') && isfield(obj.cfg.effects,'antennaPCO')
+                    pco = obj.cfg.effects.antennaPCO;
+                    if isfield(pco,'model') && pco.model.enable
+                        tOff = pco.towerOffset_enu_m(:);
+                        R_ENU = revgnss.GeometryUtils.enu2ecef( ...
+                            towers{ti}.lat_rad, towers{ti}.lon_rad);
+                        r_twr_model = r_twr_model + R_ENU * tOff;
+                    end
+                end
+
+                % Elevation angle from updated positions (for PCV)
+                r_ant = r_ants_est(:, ai);
+                elv = revgnss.GeometryUtils.elevationAngle(r_twr_model, r_ant);
+
+                % Corrected range (Sagnac, Shapiro, PCV all on model side)
+                rho_est = revgnss.RangeCorrections.correctedPseudorange( ...
+                    r_ant, r_twr_model, obj.cfg, 'model', elv);
+
+                % Tower clock: EKF state if estimated, else frozen model correction
+                if isfield(stateMap,'towerClockIdx') && ti <= size(stateMap.towerClockIdx,1) && ...
+                        stateMap.towerClockIdx(ti,1) > 0
+                    b_twr = x_state(stateMap.towerClockIdx(ti,1));
+                elseif mi <= numel(errStruct.towerClockModel_m)
+                    b_twr = errStruct.towerClockModel_m(mi);
+                else
+                    b_twr = 0;
+                end
+
+                % Frozen ErrorChain model correction (same realization as original h)
+                model_total = 0;
+                if isfield(errStruct,'modelTotal_m') && mi <= numel(errStruct.modelTotal_m)
+                    model_total = errStruct.modelTotal_m(mi);
+                end
+
+                h_pr(mi) = rho_est + b_rx_est - b_twr + model_total;
+            end
+        end
+
     end  % public methods
 
     methods (Access = private)
@@ -591,11 +728,14 @@ classdef MeasurementModel < handle
         end
 
         % ----------------------------------------------------------------
-        function [z_out, R_out] = applyCorrelatedNoise_(obj, z_in, R_diag, twr_list, M)
+        function [z_out, R_out, noiseComp] = applyCorrelatedNoise_(obj, z_in, R_diag, twr_list, M)
             % applyCorrelatedNoise_  Stage 4: add correlated truth noise and build full R.
             %
+            % Returns optional third output noiseComp with per-component noise vectors
+            % (same length as z) for contribution diagnostics.
+            %
             % If cfg.effects.correlatedNoise.enable=false, returns z unchanged and
-            % R = diag(R_diag).
+            % R = diag(R_diag) and noiseComp with zero arrays.
             %
             % If enabled:
             %   Truth noise draws (added to z only):
@@ -606,6 +746,10 @@ classdef MeasurementModel < handle
             %            + commonModeSigma^2 * ones(M,M)
             %            + sameTowerSigma^2 blocks per tower group.
 
+            noiseComp.common_m      = zeros(M,1);
+            noiseComp.sameTower_m   = zeros(M,1);
+            noiseComp.independent_m = zeros(M,1);
+
             z_out = z_in;
             if ~isfield(obj.cfg,'effects') || ~isfield(obj.cfg.effects,'correlatedNoise') || ...
                     ~obj.cfg.effects.correlatedNoise.enable
@@ -613,13 +757,14 @@ classdef MeasurementModel < handle
                 return
             end
 
-            cn = obj.cfg.effects.correlatedNoise;
+            cn  = obj.cfg.effects.correlatedNoise;
             rng = obj.rngCorr;
 
             % Common-mode noise
             if cn.commonModeSigma_m > 0
                 common = cn.commonModeSigma_m * randn(rng, 1, 1);
-                z_out = z_out + common * ones(M,1);
+                noiseComp.common_m = common * ones(M,1);
+                z_out = z_out + noiseComp.common_m;
             end
 
             % Same-tower noise
@@ -628,13 +773,15 @@ classdef MeasurementModel < handle
                 for k = 1:numel(uniqTwrs)
                     tNoise = cn.sameTowerSigma_m * randn(rng, 1, 1);
                     mask = (twr_list == uniqTwrs(k));
+                    noiseComp.sameTower_m(mask) = tNoise;
                     z_out(mask) = z_out(mask) + tNoise;
                 end
             end
 
             % Independent correlated-noise component
             if cn.independentSigma_m > 0
-                z_out = z_out + cn.independentSigma_m * randn(rng, M, 1);
+                noiseComp.independent_m = cn.independentSigma_m * randn(rng, M, 1);
+                z_out = z_out + noiseComp.independent_m;
             end
 
             % Build full R
