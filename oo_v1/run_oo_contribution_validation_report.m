@@ -46,7 +46,7 @@ addpath(thisDir);
 %   'all_contributions_matched' All deterministic effects matched — validates cancellation
 %   'all_contributions_demo' Mixed matched/mismatched — default, for diagnostics
 %   'custom'                Edit buildReportCase below
-REPORT_CASE = 'all_contributions_demo';
+REPORT_CASE = 'all_contributions_matched';
 
 % If true: include all 17 standard diagnostic figures from Plotter.plotAll.
 % If false: include a compact 8-figure subset (position/attitude/clock/NIS/RMS).
