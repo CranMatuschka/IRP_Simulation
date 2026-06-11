@@ -283,6 +283,37 @@ classdef Diagnostics < handle
                 entry.conditionNumberS = NaN;
             end
 
+            % --- Geometry / DOPS diagnostics --------------------------------
+            % Project pseudorange rows onto [x, y, z, b_rx] columns.
+            % This is a geometry-only quality metric independent of P or error models.
+            % gdopLike = sqrt(trace(Q)) where Q = (H_pc' * R_pr^-1 * H_pc)^-1
+            entry.geometryRank           = NaN;
+            entry.gdopLike               = NaN;
+            entry.pdopLike               = NaN;
+            entry.tdopLike               = NaN;
+            entry.positionClockCondition = NaN;
+            posClkIdx = [sm.r_idx(:); sm.b_rx_idx]';   % [1 2 3 13] for default state
+            if ~isempty(H) && ~isempty(R) && M_pr >= 4 && numel(posClkIdx) == 4 && ...
+                    size(H, 2) >= max(posClkIdx)
+                H_pr = H(1:M_pr, :);
+                R_pr = R(1:M_pr, 1:M_pr);
+                H_pc = H_pr(:, posClkIdx);
+                entry.geometryRank = rank(H_pc);
+                if entry.geometryRank >= 4
+                    try
+                        invR_pr  = R_pr \ eye(M_pr);
+                        N_geom   = H_pc' * invR_pr * H_pc;
+                        Q_geom   = N_geom \ eye(4);
+                        entry.gdopLike               = sqrt(max(trace(Q_geom),          0));
+                        entry.pdopLike               = sqrt(max(trace(Q_geom(1:3,1:3)), 0));
+                        entry.tdopLike               = sqrt(max(Q_geom(4,4),            0));
+                        entry.positionClockCondition = cond(N_geom);
+                    catch
+                        % ill-conditioned geometry — leave as NaN
+                    end
+                end
+            end
+
             % --- Per-effect contribution RMS --------------------------------
             % Format: cnt.effectName.{truthRMS_m, modelRMS_m, mismatchRMS_m}
             % Doppler uses _mps suffix; carrier phase uses _cycles suffix.
@@ -572,6 +603,22 @@ classdef Diagnostics < handle
             for k = 1:obj.nEpochs
                 M{k} = obj.log(k).towerClockTruth_m;
             end
+        end
+
+        function v = getGDOPLike(obj)
+            v = [obj.log.gdopLike]';
+        end
+
+        function v = getPDOPLike(obj)
+            v = [obj.log.pdopLike]';
+        end
+
+        function v = getTDOPLike(obj)
+            v = [obj.log.tdopLike]';
+        end
+
+        function v = getGeometryRank(obj)
+            v = [obj.log.geometryRank]';
         end
 
     end
