@@ -1,27 +1,29 @@
 classdef ReportRunner
-    % ReportRunner  Single-run simulation and report writer for reverse-GNSS.
+    % ReportRunner  Single-run simulation and optional report writer.
     %
     % Usage:
     %   cfg = revgnss.ConfigFactory.defaultConfig();
     %   cfg.simulation.duration_s = 600;
     %   cfg.report.version        = '1.01';
+    %   cfg.report.writePdf       = true;   % false = skip PDF
+    %   cfg.report.writeMat       = true;   % false = skip MAT
     %   out = revgnss.ReportRunner.runSingle(cfg);
     %
-    % Returns struct with fields:
-    %   out.cfg               — finalized config
+    % out fields:
+    %   out.cfg               — finalized (sanitized) config
     %   out.sim               — ReverseGNSSSimulation handle
     %   out.diag              — Diagnostics handle
     %   out.summary           — metrics struct
     %   out.contributionSeries
     %   out.reportFolder
-    %   out.pdfPath
-    %   out.matPath
+    %   out.pdfPath           — target path (written only if writePdf=true)
+    %   out.matPath           — target path (written only if writeMat=true)
 
     methods (Static)
 
         % ================================================================
         function out = runSingle(cfg)
-            % runSingle  Finalize cfg, run simulation, write one PDF+MAT report.
+            % runSingle  Finalize cfg, run simulation, optionally write report.
 
             % ---- Resolve output paths -----------------------------------
             baseDir = fullfile(fileparts(mfilename('fullpath')), '..', 'output');
@@ -40,37 +42,53 @@ classdef ReportRunner
             if isfield(cfg,'report') && isfield(cfg.report,'overwrite')
                 overwrite = cfg.report.overwrite;
             end
+            writePdf = true;
+            if isfield(cfg,'report') && isfield(cfg.report,'writePdf')
+                writePdf = cfg.report.writePdf;
+            end
+            writeMat = true;
+            if isfield(cfg,'report') && isfield(cfg.report,'writeMat')
+                writeMat = cfg.report.writeMat;
+            end
 
             reportFolder = fullfile(baseDir, [prefix datestr(now,'yyyymmdd')]);
-            if ~exist(reportFolder,'dir')
-                mkdir(reportFolder);
-            end
             pdfPath = fullfile(reportFolder, sprintf('report-v%s.pdf', version));
             matPath = fullfile(reportFolder, sprintf('report-v%s.mat', version));
 
-            % ---- Handle existing files ----------------------------------
-            if overwrite
-                if exist(pdfPath,'file'); delete(pdfPath); end
-                if exist(matPath,'file'); delete(matPath); end
+            fprintf('=== ReportRunner: starting ===\n');
+            fprintf('  Version : %s\n', version);
+            if writePdf
+                fprintf('  Target PDF : %s\n', pdfPath);
             else
-                ts = datestr(now,'HHMMSSfff');
-                if exist(pdfPath,'file')
-                    pdfPath = strrep(pdfPath,'.pdf',['_' ts '.pdf']);
-                end
-                if exist(matPath,'file')
-                    matPath = strrep(matPath,'.mat',['_' ts '.mat']);
+                fprintf('  PDF writing disabled by cfg.report.writePdf = false.\n');
+            end
+            if writeMat
+                fprintf('  Target MAT : %s\n', matPath);
+            else
+                fprintf('  MAT writing disabled by cfg.report.writeMat = false.\n');
+            end
+
+            % ---- Handle existing files (only if we'll write them) -------
+            if writePdf || writeMat
+                if ~exist(reportFolder,'dir'); mkdir(reportFolder); end
+                if overwrite
+                    if writePdf && exist(pdfPath,'file'); delete(pdfPath); end
+                    if writeMat && exist(matPath,'file'); delete(matPath); end
+                else
+                    ts = datestr(now,'HHMMSSfff');
+                    if writePdf && exist(pdfPath,'file')
+                        pdfPath = strrep(pdfPath,'.pdf',['_' ts '.pdf']);
+                    end
+                    if writeMat && exist(matPath,'file')
+                        matPath = strrep(matPath,'.mat',['_' ts '.mat']);
+                    end
                 end
             end
 
-            fprintf('=== ReportRunner: starting ===\n');
-            fprintf('  Folder  : %s\n', reportFolder);
-            fprintf('  PDF     : %s\n', pdfPath);
-            fprintf('  Version : %s\n', version);
-
             % ---- Configure plot output ----------------------------------
             cfg.plots.outputDir             = fullfile(reportFolder, 'figures');
-            cfg.plots.enable                = true;
-            cfg.plots.showFigures           = false;
+            cfg.plots.enable                = writePdf;
+            cfg.plots.showFigures           = isfield(cfg,'plots') && isfield(cfg.plots,'showFigures') && cfg.plots.showFigures;
             cfg.plots.saveIndividualFigures = false;
             cfg.plots.saveFigures           = false;
             cfg.plots.savePdf               = false;
@@ -86,68 +104,74 @@ classdef ReportRunner
             % ---- Collect summary metrics --------------------------------
             summary = revgnss.ReportRunner.collectSummary_(diag, cfg, version, reportFolder, pdfPath, matPath);
 
-            % ---- Standard plots ----------------------------------------
-            figHandles = revgnss.Plotter.plotAll(diag, sim.asset, sim.towers, cfg);
-            nRx = size(sim.asset.receiverLeverArms_body_m, 2);
-            if nRx == 1
-                figHandles = revgnss.ReportRunner.replaceAttitudeFigs_(figHandles);
+            % ---- PDF: generate figures and write ------------------------
+            if writePdf
+                figHandles = revgnss.Plotter.plotAll(diag, sim.asset, sim.towers, cfg);
+                nRx = size(sim.asset.receiverLeverArms_body_m, 2);
+                if nRx == 1
+                    figHandles = revgnss.ReportRunner.replaceAttitudeFigs_(figHandles);
+                end
+                contribFigs = revgnss.ContributionPlotter.plotSingleCaseContributionPages(diag, cfg);
+                summaryFig  = revgnss.ReportRunner.makeSummaryPage_(summary, cfg);
+
+                allFigs = [summaryFig, figHandles(:)', contribFigs(:)'];
+                allFigs = allFigs(isgraphics(allFigs));
+                fprintf('  Writing PDF (%d pages)...\n', numel(allFigs));
+                cfgWrite = cfg;
+                cfgWrite.plots.savePdf = true;
+                revgnss.ReportWriter.write(pdfPath, allFigs, cfgWrite);
+
+                if exist(pdfPath,'file') ~= 2
+                    error('ReportRunner:pdfNotWritten', 'PDF not written: %s', pdfPath);
+                end
+                info = dir(pdfPath);
+                if info.bytes <= 0
+                    error('ReportRunner:pdfEmpty', 'PDF is empty: %s', pdfPath);
+                end
+                fprintf('  PDF written: %s  (%.1f kB)\n', pdfPath, info.bytes/1024);
             end
 
-            % ---- Contribution plots ------------------------------------
-            contribFigs = revgnss.ContributionPlotter.plotSingleCaseContributionPages(diag, cfg);
-
-            % ---- Summary page ------------------------------------------
-            summaryFig = revgnss.ReportRunner.makeSummaryPage_(summary, cfg);
-
-            % ---- Assemble PDF ------------------------------------------
-            allFigs = [summaryFig, figHandles(:)', contribFigs(:)'];
-            allFigs = allFigs(isgraphics(allFigs));
-            fprintf('  Writing PDF (%d pages)...\n', numel(allFigs));
-            cfgWrite = cfg;
-            cfgWrite.plots.savePdf = true;   % ReportRunner owns the PDF write
-            revgnss.ReportWriter.write(pdfPath, allFigs, cfgWrite);
-
-            % ---- Verify PDF --------------------------------------------
-            if exist(pdfPath,'file') ~= 2
-                error('ReportRunner:pdfNotWritten', 'PDF not written: %s', pdfPath);
-            end
-            info = dir(pdfPath);
-            if info.bytes <= 0
-                error('ReportRunner:pdfEmpty', 'PDF is empty: %s', pdfPath);
-            end
-            fprintf('  PDF: %s  (%.1f kB)\n', pdfPath, info.bytes/1024);
-
-            % ---- Save MAT ----------------------------------------------
+            % ---- MAT: save ----------------------------------------------
             cs = diag.getContributionSeries();
-            reportVersion   = version;
-            reportTimestamp = datestr(now,'yyyy-mm-dd HH:MM:SS');
-            diagnostics     = diag;
-            finalStateEstimate = [];
-            finalTruthState    = [];
-            try
-                res = sim.getResults();
-                if isfield(res,'ekfHistory')  && ~isempty(res.ekfHistory)
-                    finalStateEstimate = res.ekfHistory(end);
+            if writeMat
+                reportVersion   = version;
+                reportTimestamp = datestr(now,'yyyy-mm-dd HH:MM:SS');
+                diagnostics     = diag;
+                finalStateEstimate = [];
+                finalTruthState    = [];
+                try
+                    res = sim.getResults();
+                    if isfield(res,'ekfHistory')  && ~isempty(res.ekfHistory)
+                        finalStateEstimate = res.ekfHistory(end);
+                    end
+                    if isfield(res,'assetHistory') && ~isempty(res.assetHistory)
+                        finalTruthState = res.assetHistory(end);
+                    end
+                catch
                 end
-                if isfield(res,'assetHistory') && ~isempty(res.assetHistory)
-                    finalTruthState = res.assetHistory(end);
-                end
-            catch
-            end
-            save(matPath, 'cfg', 'summary', 'diagnostics', ...
-                 'finalStateEstimate', 'finalTruthState', ...
-                 'cs', 'reportVersion', 'reportTimestamp', ...
-                 'pdfPath', 'matPath', '-v7.3');
+                save(matPath, 'cfg', 'summary', 'diagnostics', ...
+                     'finalStateEstimate', 'finalTruthState', ...
+                     'cs', 'reportVersion', 'reportTimestamp', ...
+                     'pdfPath', 'matPath', '-v7.3');
 
-            % ---- Verify MAT --------------------------------------------
-            if exist(matPath,'file') ~= 2
-                error('ReportRunner:matNotWritten', 'MAT not written: %s', matPath);
+                if exist(matPath,'file') ~= 2
+                    error('ReportRunner:matNotWritten', 'MAT not written: %s', matPath);
+                end
+                info = dir(matPath);
+                if info.bytes <= 0
+                    error('ReportRunner:matEmpty', 'MAT is empty: %s', matPath);
+                end
+                fprintf('  MAT written: %s  (%.1f kB)\n', matPath, info.bytes/1024);
             end
-            info = dir(matPath);
-            if info.bytes <= 0
-                error('ReportRunner:matEmpty', 'MAT is empty: %s', matPath);
+
+            % ---- Validation warnings summary ----------------------------
+            if isfield(cfg,'validation') && isfield(cfg.validation,'warnings') && ...
+                    ~isempty(cfg.validation.warnings)
+                fprintf('  [SANITIZATION] %d warning(s):\n', numel(cfg.validation.warnings));
+                for k = 1:numel(cfg.validation.warnings)
+                    fprintf('    %d. %s\n', k, cfg.validation.warnings{k});
+                end
             end
-            fprintf('  MAT: %s  (%.1f kB)\n', matPath, info.bytes/1024);
 
             % ---- Assemble output struct ---------------------------------
             out.cfg               = cfg;
@@ -208,7 +232,7 @@ classdef ReportRunner
             % Enabled effects list
             summary.enabledEffects = revgnss.ReportRunner.listEnabledEffects_(cfg);
 
-            % Observed measurement counts
+            % Observed counts
             try
                 summary.maxEKFRows = max(diag.getNumMeasurementRows());
             catch
@@ -218,23 +242,25 @@ classdef ReportRunner
             % NIS
             try
                 nisVec = diag.getNIS();
-                summary.meanNIS    = mean(nisVec, 'omitnan');
+                summary.meanNIS     = mean(nisVec, 'omitnan');
                 summary.expectedNIS = mean(diag.getNumMeasurementRows(), 'omitnan');
             catch
                 summary.meanNIS     = NaN;
                 summary.expectedNIS = NaN;
             end
 
-            % Position and clock metrics (last 20 epochs)
+            % Position and clock metrics
             try
                 posErr = diag.getPositionErrors();
                 N  = numel(posErr);
                 iS = max(1, N-19);
-                summary.finalPositionLast_m = posErr(end);
-                summary.finalPositionRMS_m  = rms(posErr(iS:end));
+                summary.finalPositionError_m = posErr(end);
+                summary.finalPositionLast_m  = posErr(end);
+                summary.finalPositionRMS_m   = rms(posErr(iS:end));
             catch
-                summary.finalPositionLast_m = NaN;
-                summary.finalPositionRMS_m  = NaN;
+                summary.finalPositionError_m = NaN;
+                summary.finalPositionLast_m  = NaN;
+                summary.finalPositionRMS_m   = NaN;
             end
             try
                 cbErr = diag.getClockBiasErrors();
@@ -290,6 +316,17 @@ classdef ReportRunner
                 end
             catch
             end
+
+            % Validation warnings (for summary page)
+            if isfield(cfg,'validation') && isfield(cfg.validation,'warnings')
+                summary.validationWarnings  = cfg.validation.warnings;
+                summary.disabledFeatures    = cfg.validation.disabledFeatures;
+                summary.mappedFeatures      = cfg.validation.mappedFeatures;
+            else
+                summary.validationWarnings  = {};
+                summary.disabledFeatures    = {};
+                summary.mappedFeatures      = {};
+            end
         end
 
         % ================================================================
@@ -315,11 +352,8 @@ classdef ReportRunner
                 parts = strsplit(checks{k,1},'.');
                 val = cfg; ok = true;
                 for p = 1:numel(parts)
-                    if isfield(val, parts{p})
-                        val = val.(parts{p});
-                    else
-                        ok = false; break;
-                    end
+                    if isfield(val, parts{p}); val = val.(parts{p});
+                    else; ok = false; break; end
                 end
                 if ok && islogical(val) && val
                     effects{end+1} = checks{k,2}; %#ok<AGROW>
@@ -397,7 +431,7 @@ classdef ReportRunner
             end
             L{end+1} = '';
             L{end+1} = '--- Metrics (last 20 epochs) ---';
-            L{end+1} = sprintf('Final pos error       : %.4f m', summary.finalPositionLast_m);
+            L{end+1} = sprintf('Final pos error       : %.4f m', summary.finalPositionError_m);
             L{end+1} = sprintf('Position RMS (last20%%) : %.4f m', summary.finalPositionRMS_m);
             L{end+1} = sprintf('Clock bias RMS (last20%%): %.4f m', summary.finalClockBiasRMS_m);
             L{end+1} = sprintf('Mean NIS              : %.2f  (expected %.1f)', ...
@@ -413,6 +447,15 @@ classdef ReportRunner
             if ~isnan(summary.tropL2minusL1_m)
                 L{end+1} = sprintf('Trop L2-L1            : %.2e m  (expected ~0)', ...
                     summary.tropL2minusL1_m);
+            end
+
+            % Validation warnings
+            if ~isempty(summary.validationWarnings)
+                L{end+1} = '';
+                L{end+1} = '--- Sanitization Warnings ---';
+                for k = 1:numel(summary.validationWarnings)
+                    L{end+1} = sprintf('  %d. %s', k, summary.validationWarnings{k}); %#ok<AGROW>
+                end
             end
 
             text(ax, 0.03, 0.97, strjoin(L, '\n'), ...

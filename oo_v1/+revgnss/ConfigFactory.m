@@ -210,7 +210,7 @@ classdef ConfigFactory
             cfg.errors.troposphere.truth.zenithWetDelay_m     = 0.15;
             cfg.errors.troposphere.model.zenithDryDelay_m     = 2.3;
             cfg.errors.troposphere.model.zenithWetDelay_m     = 0.15;
-            cfg.errors.troposphere.stochastic.enable          = false;
+            cfg.errors.troposphere.stochastic.enable          = true;
             cfg.errors.troposphere.stochastic.process         = 'gaussMarkov';
             cfg.errors.troposphere.stochastic.tau_s           = 3600;
             cfg.errors.troposphere.stochastic.sigmaWet_ss_m   = 0.05;
@@ -225,7 +225,7 @@ classdef ConfigFactory
             cfg.errors.ionosphere.stochastic.tau_s                = 1800;
             cfg.errors.ionosphere.stochastic.sigmaVDelayL1_ss_m   = 1.0;
             cfg.errors.ionosphere.stochastic.sigmaModelResidualL1_m = 0.5;
-            cfg.errors.ionosphere.scintillation.enable            = false;
+            cfg.errors.ionosphere.scintillation.enable            = true;
             cfg.errors.ionosphere.scintillation.process           = 'gaussMarkov';
             cfg.errors.ionosphere.scintillation.tau_s             = 30;
             cfg.errors.ionosphere.scintillation.sigmaCodeL1_m     = 0.3;
@@ -238,23 +238,23 @@ classdef ConfigFactory
             cfg.errors.ionosphere.stochastic.modelResidual.enable  = false;
             cfg.errors.ionosphere.stochastic.modelResidual.mode    = 'zero';
 
-            cfg.errors.troposphere.truth.enable        = false;
+            cfg.errors.troposphere.truth.enable        = true;
             cfg.errors.troposphere.truth.zenithDelay_m = 2.3;
-            cfg.errors.troposphere.model.enable        = false;
+            cfg.errors.troposphere.model.enable        = true;
             cfg.errors.troposphere.model.zenithDelay_m = 2.3;
             cfg.errors.troposphere.model.biasFraction  = 1.0;
             cfg.errors.troposphere.sigma_m             = 0.0;
 
-            cfg.errors.ionosphere.truth.enable         = false;
+            cfg.errors.ionosphere.truth.enable         = true;
             cfg.errors.ionosphere.truth.zenithDelay_m  = 5.0;
-            cfg.errors.ionosphere.model.enable         = false;
+            cfg.errors.ionosphere.model.enable         = true;
             cfg.errors.ionosphere.model.zenithDelay_m  = 5.0;
             cfg.errors.ionosphere.model.biasFraction   = 1.0;
             cfg.errors.ionosphere.sigma_m              = 0.0;
 
             cfg.errors.hardwareDelay.truth.enable      = false;
             cfg.errors.hardwareDelay.truth.default_m   = 0.0;
-            cfg.errors.hardwareDelay.model.enable      = false;
+            cfg.errors.hardwareDelay.model.enable      = true;
             cfg.errors.hardwareDelay.model.default_m   = 0.0;
 
             cfg.errors.multipath.truth.enable              = false;
@@ -297,8 +297,8 @@ classdef ConfigFactory
             cfg.physics.omegaEarth_radps   = 7.2921151467e-5;
             cfg.physics.muEarth_m3ps2      = 3.986004418e14;
 
-            cfg.physics.sagnac.truth.enable    = false;
-            cfg.physics.sagnac.model.enable    = false;
+            cfg.physics.sagnac.truth.enable    = true;
+            cfg.physics.sagnac.model.enable    = true;
 
             cfg.physics.lightTime.truth.enable = false;
             cfg.physics.lightTime.model.enable = false;
@@ -318,12 +318,12 @@ classdef ConfigFactory
             % doppler.useInEKF=true requires physics.doppler.model.enable=true.
             % carrierPhase.useInEKF=true requires estimateCarrierAmbiguities=true.
             cfg.measurements.pseudorange.enable   = true;
-            cfg.measurements.doppler.enable       = false;
+            cfg.measurements.doppler.enable       = true;
             cfg.measurements.doppler.sigma_mps    = 0.01;
-            cfg.measurements.doppler.useInEKF     = false;
+            cfg.measurements.doppler.useInEKF     = true;
 
-            cfg.measurements.carrierPhase.enable           = false;
-            cfg.measurements.carrierPhase.useInEKF         = false;
+            cfg.measurements.carrierPhase.enable           = true;
+            cfg.measurements.carrierPhase.useInEKF         = true;
             cfg.measurements.carrierPhase.frequency_Hz     = 1575.42e6;
             cfg.measurements.carrierPhase.lambda_m         = 299792458 / 1575.42e6;
             cfg.measurements.carrierPhase.sigma_cycles     = 0.01;
@@ -351,6 +351,14 @@ classdef ConfigFactory
             cfg.report.baseOutputDir       = fullfile(fileparts(mfilename('fullpath')), '..', 'output');
             cfg.report.dateFolderPrefix    = 'Report-';
             cfg.report.overwrite           = true;
+            cfg.report.writePdf            = true;
+            cfg.report.writeMat            = true;
+
+            % --- Validation policy ----------------------------------------
+            cfg.validation.unsupportedFeaturePolicy = 'disableWithWarning';
+            cfg.validation.warnings         = {};
+            cfg.validation.disabledFeatures = {};
+            cfg.validation.mappedFeatures   = {};
         end
 
         % ==================================================================
@@ -614,19 +622,131 @@ classdef ConfigFactory
             % Clock recreation is idempotent: noiseCoeffs are re-derived from
             % clockType + clockFactors; name/deterministic/bias_s/fracFreq preserved.
 
-            % ---- Light-time guard -----------------------------------------
-            % Light-time iteration is not implemented in v1.  Sagnac handles the
-            % first-order Earth-rotation correction instead.  Raise a clear error
-            % rather than silently ignoring the flag.
+            % ---- Initialize validation tracking ---------------------------
+            if ~isfield(cfg,'validation')
+                cfg.validation = struct();
+            end
+            if ~isfield(cfg.validation,'unsupportedFeaturePolicy')
+                cfg.validation.unsupportedFeaturePolicy = 'disableWithWarning';
+            end
+            if ~isfield(cfg.validation,'warnings');         cfg.validation.warnings         = {}; end
+            if ~isfield(cfg.validation,'disabledFeatures'); cfg.validation.disabledFeatures = {}; end
+            if ~isfield(cfg.validation,'mappedFeatures');   cfg.validation.mappedFeatures   = {}; end
+            policy = cfg.validation.unsupportedFeaturePolicy;
+
+            % ---- User convenience field mappings -------------------------
+            % cfg.clock.receiver.deterministic → cfg.asset.clock.deterministic
+            if isfield(cfg,'clock') && isfield(cfg.clock,'receiver') && ...
+                    isfield(cfg.clock.receiver,'deterministic')
+                cfg.asset.clock.deterministic = cfg.clock.receiver.deterministic;
+            end
+            % cfg.errors.towerClockCorrection.mode → cfg.estimator.towerClockMode
+            if isfield(cfg,'errors') && isfield(cfg.errors,'towerClockCorrection') && ...
+                    isfield(cfg.errors.towerClockCorrection,'mode')
+                cfg.estimator.towerClockMode = cfg.errors.towerClockCorrection.mode;
+            end
+
+            % ---- Unsupported: light-time ----------------------------------
+            % Full light-time not implemented. Map to first-order Sagnac or error.
             if isfield(cfg,'physics') && isfield(cfg.physics,'lightTime')
                 lt = cfg.physics.lightTime;
                 ltTruth = isfield(lt,'truth') && isfield(lt.truth,'enable') && lt.truth.enable;
                 ltModel = isfield(lt,'model') && isfield(lt.model,'enable') && lt.model.enable;
                 if ltTruth || ltModel
-                    error('ConfigFactory:lightTimeNotImplemented', ...
-                        ['Light-time correction is configured but not implemented in v1. ' ...
-                         'Disable cfg.physics.lightTime.truth/model.enable, or implement ' ...
-                         'a consistent ECI transmit-time model first.']);
+                    if strcmp(policy,'error')
+                        error('ConfigFactory:lightTimeNotSupported', ...
+                            ['Full light-time correction is not implemented in v1. ' ...
+                             'Set unsupportedFeaturePolicy=''disableWithWarning'' to map to Sagnac.']);
+                    end
+                    parts = {'Full light-time not implemented in v1.'};
+                    if ltTruth
+                        sOn = isfield(cfg.physics,'sagnac') && isfield(cfg.physics.sagnac,'truth') && ...
+                              isfield(cfg.physics.sagnac.truth,'enable') && cfg.physics.sagnac.truth.enable;
+                        if ~sOn
+                            cfg.physics.sagnac.truth.enable    = true;
+                            parts{end+1}                       = 'lightTime.truth mapped to sagnac.truth.';
+                            cfg.validation.mappedFeatures{end+1} = 'lightTime.truth -> sagnac.truth';
+                        else
+                            parts{end+1} = 'lightTime.truth: sagnac.truth already enabled; lightTime disabled.';
+                        end
+                        cfg.physics.lightTime.truth.enable = false;
+                    end
+                    if ltModel
+                        sOn = isfield(cfg.physics,'sagnac') && isfield(cfg.physics.sagnac,'model') && ...
+                              isfield(cfg.physics.sagnac.model,'enable') && cfg.physics.sagnac.model.enable;
+                        if ~sOn
+                            cfg.physics.sagnac.model.enable    = true;
+                            parts{end+1}                       = 'lightTime.model mapped to sagnac.model.';
+                            cfg.validation.mappedFeatures{end+1} = 'lightTime.model -> sagnac.model';
+                        else
+                            parts{end+1} = 'lightTime.model: sagnac.model already enabled; lightTime disabled.';
+                        end
+                        cfg.physics.lightTime.model.enable = false;
+                    end
+                    warnMsg = strjoin(parts, ' ');
+                    cfg.validation.warnings{end+1} = warnMsg;
+                    warning('ConfigFactory:lightTimeMapped', '%s', warnMsg);
+                end
+            end
+
+            % ---- Unsupported: relativistic clock-rate correction ----------
+            if isfield(cfg,'physics') && isfield(cfg.physics,'relativity') && ...
+                    isfield(cfg.physics.relativity,'clock')
+                rc    = cfg.physics.relativity.clock;
+                rcOn  = (isfield(rc,'truth') && isfield(rc.truth,'enable') && rc.truth.enable) || ...
+                        (isfield(rc,'model') && isfield(rc.model,'enable') && rc.model.enable);
+                if rcOn
+                    warnMsg = 'Relativistic clock-rate correction is not implemented as a validated v1 model and was disabled.';
+                    if strcmp(policy,'error')
+                        error('ConfigFactory:relClockNotSupported', '%s', warnMsg);
+                    end
+                    if isfield(rc,'truth') && isfield(rc.truth,'enable')
+                        cfg.physics.relativity.clock.truth.enable = false;
+                    end
+                    if isfield(rc,'model') && isfield(rc.model,'enable')
+                        cfg.physics.relativity.clock.model.enable = false;
+                    end
+                    cfg.validation.warnings{end+1}         = warnMsg;
+                    cfg.validation.disabledFeatures{end+1} = 'relativity.clock';
+                    warning('ConfigFactory:relClockDisabled', '%s', warnMsg);
+                end
+            end
+
+            % ---- Unsupported: carrier phase useInEKF ----------------------
+            if isfield(cfg,'measurements') && isfield(cfg.measurements,'carrierPhase') && ...
+                    isfield(cfg.measurements.carrierPhase,'useInEKF') && ...
+                    cfg.measurements.carrierPhase.useInEKF
+                warnMsg = 'Carrier phase EKF use requires ambiguity states not implemented in v1. carrierPhase.useInEKF disabled (diagnostic mode kept if enable=true).';
+                if strcmp(policy,'error')
+                    error('ConfigFactory:carrierEKFNotSupported', '%s', warnMsg);
+                end
+                cfg.measurements.carrierPhase.useInEKF = false;
+                cfg.validation.warnings{end+1}         = warnMsg;
+                cfg.validation.disabledFeatures{end+1} = 'carrierPhase.useInEKF';
+                warning('ConfigFactory:carrierEKFDisabled', '%s', warnMsg);
+            end
+
+            % ---- Unsupported: Doppler EKF dependency ---------------------
+            if isfield(cfg,'measurements') && isfield(cfg.measurements,'doppler') && ...
+                    isfield(cfg.measurements.doppler,'useInEKF') && ...
+                    cfg.measurements.doppler.useInEKF
+                dEnable  = isfield(cfg.measurements.doppler,'enable') && cfg.measurements.doppler.enable;
+                dModelOk = isfield(cfg,'physics') && isfield(cfg.physics,'doppler') && ...
+                           isfield(cfg.physics.doppler,'model') && ...
+                           isfield(cfg.physics.doppler.model,'enable') && ...
+                           cfg.physics.doppler.model.enable;
+                if ~dEnable || ~dModelOk
+                    missing = {};
+                    if ~dEnable;  missing{end+1} = 'doppler.enable=true'; end
+                    if ~dModelOk; missing{end+1} = 'physics.doppler.model.enable=true'; end
+                    warnMsg = sprintf('doppler.useInEKF requires %s. useInEKF disabled.', strjoin(missing,' and '));
+                    if strcmp(policy,'error')
+                        error('ConfigFactory:dopplerEKFInvalid', '%s', warnMsg);
+                    end
+                    cfg.measurements.doppler.useInEKF      = false;
+                    cfg.validation.warnings{end+1}         = warnMsg;
+                    cfg.validation.disabledFeatures{end+1} = 'doppler.useInEKF';
+                    warning('ConfigFactory:dopplerEKFDisabled', '%s', warnMsg);
                 end
             end
 

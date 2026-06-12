@@ -511,6 +511,15 @@ classdef MeasurementModel < handle
             [z, R, correlNoise] = obj.applyCorrelatedNoise_(z, R_diag, twr_list, M);
             errStruct.correlatedNoise = correlNoise;
 
+            % R validity guard
+            rDiag = diag(R);
+            if any(~isfinite(rDiag)) || any(rDiag <= 0)
+                nBad = sum(~isfinite(rDiag) | rDiag <= 0);
+                error('MeasurementModel:invalidR', ...
+                    ['R has %d invalid diagonal values (NaN/Inf/<=0). ' ...
+                     'Check cfg.errors.codeNoise.sigma_m, cfg.effects, and cfg.errors toggles.'], nBad);
+            end
+
             % ----- Jacobian H (pseudorange) ----------------------------
             H_pr = obj.computeJacobian_(towers, twr_list, ant_list, ...
                 r_est, euler_est, leverArms_model, x_est, stateMap, nx);
