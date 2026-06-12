@@ -314,13 +314,16 @@ classdef ConfigFactory
             cfg.physics.doppler.model.enable = false;
 
             % --- Observable toggles: pseudorange always on, others off ------
+            % Doppler and carrier phase are off by default; explicit cases enable them.
+            % doppler.useInEKF=true requires physics.doppler.model.enable=true.
+            % carrierPhase.useInEKF=true requires estimateCarrierAmbiguities=true.
             cfg.measurements.pseudorange.enable   = true;
-            cfg.measurements.doppler.enable       = true;
+            cfg.measurements.doppler.enable       = false;
             cfg.measurements.doppler.sigma_mps    = 0.01;
-            cfg.measurements.doppler.useInEKF     = true;
+            cfg.measurements.doppler.useInEKF     = false;
 
-            cfg.measurements.carrierPhase.enable           = true;
-            cfg.measurements.carrierPhase.useInEKF         = true;
+            cfg.measurements.carrierPhase.enable           = false;
+            cfg.measurements.carrierPhase.useInEKF         = false;
             cfg.measurements.carrierPhase.frequency_Hz     = 1575.42e6;
             cfg.measurements.carrierPhase.lambda_m         = 299792458 / 1575.42e6;
             cfg.measurements.carrierPhase.sigma_cycles     = 0.01;
