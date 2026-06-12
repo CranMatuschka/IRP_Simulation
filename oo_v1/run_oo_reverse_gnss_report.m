@@ -19,7 +19,7 @@ cfg = revgnss.ConfigFactory.defaultConfig();
 % ============================================================
 
 % --- Simulation timing ------------------------------------------
-cfg.simulation.duration_s = 600;
+cfg.simulation.duration_s = 3600;
 cfg.simulation.dt_s       = 1;
 
 % --- Report output ----------------------------------------------
@@ -33,33 +33,33 @@ cfg.report.overwrite      = true;
 % --- Receivers / attitude ---------------------------------------
 % nReceivers == 1  ->  attitude estimation OFF, zero lever arms
 % nReceivers  > 1  ->  attitude estimation ON,  auto cross-pattern lever arms
-cfg.scenario.nReceivers = 1;
+cfg.scenario.nReceivers = 3;
 
 % --- Frequency --------------------------------------------------
 % false  ->  L1 only
 % true   ->  L1 + L2
-cfg.signals.twoFrequency.enable = false;
+cfg.signals.twoFrequency.enable = true;
 
 % --- Geometry / relativity --------------------------------------
-cfg.physics.sagnac.truth.enable          = false;
-cfg.physics.sagnac.model.enable          = false;
-cfg.physics.lightTime.truth.enable       = false;   % mapped to Sagnac if enabled
-cfg.physics.lightTime.model.enable       = false;   % mapped to Sagnac if enabled
-cfg.physics.relativity.shapiro.truth.enable = false;
-cfg.physics.relativity.shapiro.model.enable = false;
-cfg.physics.relativity.clock.truth.enable   = false; % disabled/warned: not validated v1
-cfg.physics.relativity.clock.model.enable   = false; % disabled/warned: not validated v1
+cfg.physics.sagnac.truth.enable          = true;
+cfg.physics.sagnac.model.enable          = true;
+cfg.physics.lightTime.truth.enable       = true;   % mapped to Sagnac if enabled
+cfg.physics.lightTime.model.enable       = true;   % mapped to Sagnac if enabled
+cfg.physics.relativity.shapiro.truth.enable = true;
+cfg.physics.relativity.shapiro.model.enable = true;
+cfg.physics.relativity.clock.truth.enable   = true; % disabled/warned: not validated v1
+cfg.physics.relativity.clock.model.enable   = true; % disabled/warned: not validated v1
 
 % --- Atmosphere -------------------------------------------------
-cfg.errors.troposphere.truth.enable       = false;
-cfg.errors.troposphere.model.enable       = false;
+cfg.errors.troposphere.truth.enable       = true;
+cfg.errors.troposphere.model.enable       = true;
 cfg.errors.troposphere.modelType          = 'simpleMapped';
-cfg.errors.troposphere.stochastic.enable  = false;
-cfg.errors.ionosphere.truth.enable        = false;
-cfg.errors.ionosphere.model.enable        = false;
+cfg.errors.troposphere.stochastic.enable  = true;
+cfg.errors.ionosphere.truth.enable        = true;
+cfg.errors.ionosphere.model.enable        = true;
 cfg.errors.ionosphere.modelType           = 'simpleMapped';
-cfg.errors.ionosphere.stochastic.enable   = false;
-cfg.errors.ionosphere.scintillation.enable = false;
+cfg.errors.ionosphere.stochastic.enable   = true;
+cfg.errors.ionosphere.scintillation.enable = true;
 
 % --- Measurement noise ------------------------------------------
 cfg.measurements.codeNoise.model = 'constant';
@@ -86,14 +86,14 @@ cfg.clock.receiver.deterministic      = true;
 cfg.errors.towerClockCorrection.mode  = 'perfectCorrection';
 
 % --- Doppler ----------------------------------------------------
-cfg.measurements.doppler.enable       = false;
-cfg.measurements.doppler.useInEKF     = false;
-cfg.physics.doppler.truth.enable      = false;
-cfg.physics.doppler.model.enable      = false;
+cfg.measurements.doppler.enable       = true;
+cfg.measurements.doppler.useInEKF     = true;
+cfg.physics.doppler.truth.enable      = true;
+cfg.physics.doppler.model.enable      = true;
 
 % --- Carrier phase ----------------------------------------------
-cfg.measurements.carrierPhase.enable      = false;
-cfg.measurements.carrierPhase.useInEKF    = false;   % disabled/warned: ambiguity states not implemented v1
+cfg.measurements.carrierPhase.enable      = true;
+cfg.measurements.carrierPhase.useInEKF    = true;   % disabled/warned: ambiguity states not implemented v1
 
 % --- Validation policy ------------------------------------------
 % 'disableWithWarning'  ->  unsupported features disabled with console warning
