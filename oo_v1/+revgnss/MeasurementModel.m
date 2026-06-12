@@ -314,9 +314,9 @@ classdef MeasurementModel < handle
             errStruct.towerPCOTruth_m     = towerPCOTruth_m;
             errStruct.towerPCOModel_m     = towerPCOModel_m;
 
-            % ----- Multi-frequency signal expansion (if N_sig > 1) --------
+            % ----- Direct tower × antenna × signal measurement generation -----
             signals = revgnss.SignalUtils.getEnabledSignals(obj.cfg);
-            N_sig = numel(signals);
+            N_sig   = numel(signals);
 
             f_L1 = 1575.42e6;
             if isfield(obj.cfg,'signals') && isfield(obj.cfg.signals,'L1') && ...
@@ -325,29 +325,159 @@ classdef MeasurementModel < handle
             end
 
             if N_sig > 1
-                % Expand z, h, R_diag, errStruct from M_pairs to M = M_pairs * N_sig
+                % Phase 2: build z/h/R directly for each (signal, pair)
                 M_pairs = M;
-                [z, h, R_diag, errStructExpanded, twr_list, ant_list] = ...
-                    obj.expandToMultiFreq_(z, h, R_diag, errStruct, M_pairs, ...
-                        signals, f_L1, sigmaFloor, towers, towerClkTruth, ...
-                        towerClkModel, towerClkSigma, ...
-                        sagnacTruth_m, sagnacModel_m, shapiroTruth_m, shapiroModel_m, ...
-                        pcvTruth_m, pcvModel_m, towerSurveyTruth_m, towerSurveyModel_m, ...
-                        receiverPCOTruth_m, receiverPCOModel_m, towerPCOTruth_m, towerPCOModel_m);
-                M = M_pairs * N_sig;
-                errStruct = errStructExpanded;
-                errStruct.nPseudorange = M;
+                M       = M_pairs * N_sig;
 
-                % Add signal metadata
+                z_new      = zeros(M,1);
+                h_new      = zeros(M,1);
+                R_diag_new = zeros(M,1);
+
+                flds  = {'code','trop','iono','hwDelay','mp','scintillation'};
+                btOut = struct(); bmOut = struct(); bsOut = struct();
+                for fi = 1:numel(flds)
+                    btOut.(flds{fi}) = zeros(M,1);
+                    bmOut.(flds{fi}) = zeros(M,1);
+                end
+                bsOut.code = zeros(M,1);
+
                 sigIdx   = zeros(M,1);
                 sigNames = cell(M,1);
                 freqHz   = zeros(M,1);
-                for si = 1:N_sig
-                    idx = (si-1)*M_pairs+1 : si*M_pairs;
-                    sigIdx(idx)   = si;
-                    freqHz(idx)   = signals(si).frequency_Hz;
-                    [sigNames{idx}] = deal(signals(si).name);
+
+                scintExpF = 1.0;
+                if isfield(obj.cfg,'errors') && isfield(obj.cfg.errors,'ionosphere') && ...
+                        isfield(obj.cfg.errors.ionosphere,'scintillation') && ...
+                        isfield(obj.cfg.errors.ionosphere.scintillation,'frequencyExponent')
+                    scintExpF = obj.cfg.errors.ionosphere.scintillation.frequencyExponent;
                 end
+
+                for si = 1:N_sig
+                    sigCfg    = signals(si);
+                    freqScale = (f_L1 / sigCfg.frequency_Hz)^2;
+                    offset    = (si-1) * M_pairs;
+
+                    for pi = 1:M_pairs
+                        mi = offset + pi;
+                        sigIdx(mi)   = si;
+                        sigNames{mi} = sigCfg.name;
+                        freqHz(mi)   = sigCfg.frequency_Hz;
+
+                        scintSigL1_pi = errStruct.scintSigmaL1_m(pi);
+                        scintSig_si   = scintSigL1_pi * (f_L1 / sigCfg.frequency_Hz)^scintExpF;
+                        scint_t       = scintSig_si * randn(obj.errorChain.rngStream, 1, 1);
+
+                        if si == 1
+                            % L1: copy Phase-1 z/h/R, add scintillation
+                            z_new(mi)      = z(pi) + scint_t;
+                            h_new(mi)      = h(pi);
+                            R_diag_new(mi) = R_diag(pi) + scintSig_si^2;
+                            for fi = 1:numel(flds)
+                                fn = flds{fi};
+                                if isfield(errStruct.bySource.truth_m, fn)
+                                    btOut.(fn)(mi) = errStruct.bySource.truth_m.(fn)(pi);
+                                end
+                                if isfield(errStruct.bySource.model_m, fn)
+                                    bmOut.(fn)(mi) = errStruct.bySource.model_m.(fn)(pi);
+                                end
+                            end
+                            btOut.scintillation(mi) = scint_t;
+                            elv_pi = errStruct.elevations_rad(pi);
+                            sigma_code_si = obj.computeCodeSigmaForSignal_(sigCfg, elv_pi, obj.cfg);
+                            bsOut.code(mi) = sigma_code_si;
+                        else
+                            % L2+: compute from geometry base + per-signal errors
+                            elv_pi        = errStruct.elevations_rad(pi);
+                            sigma_code_si = obj.computeCodeSigmaForSignal_(sigCfg, elv_pi, obj.cfg);
+                            code_t        = sigma_code_si * randn(obj.errorChain.rngStream, 1, 1);
+
+                            iono_t_si = 0; iono_m_si = 0;
+                            if isfield(errStruct.bySource.truth_m,'iono')
+                                iono_t_si = errStruct.bySource.truth_m.iono(pi) * freqScale;
+                            end
+                            if isfield(errStruct.bySource.model_m,'iono')
+                                iono_m_si = errStruct.bySource.model_m.iono(pi) * freqScale;
+                            end
+
+                            trop_t = 0; trop_m = 0; hw_t = 0; hw_m = 0; mp_t = 0;
+                            if isfield(errStruct.bySource.truth_m,'trop'),    trop_t = errStruct.bySource.truth_m.trop(pi);    end
+                            if isfield(errStruct.bySource.model_m,'trop'),    trop_m = errStruct.bySource.model_m.trop(pi);    end
+                            if isfield(errStruct.bySource.truth_m,'hwDelay'), hw_t   = errStruct.bySource.truth_m.hwDelay(pi); end
+                            if isfield(errStruct.bySource.model_m,'hwDelay'), hw_m   = errStruct.bySource.model_m.hwDelay(pi); end
+                            if isfield(errStruct.bySource.truth_m,'mp'),      mp_t   = errStruct.bySource.truth_m.mp(pi);      end
+
+                            % Geometry + clocks (strips L1 error terms from Phase-1 z/h)
+                            z_geom_pi = z(pi) - errStruct.truthTotal_m(pi);
+                            h_geom_pi = h(pi) - errStruct.modelTotal_m(pi);
+
+                            z_new(mi) = z_geom_pi + trop_t + iono_t_si + hw_t + mp_t + code_t + scint_t;
+                            h_new(mi) = h_geom_pi + trop_m + iono_m_si + hw_m;
+
+                            sigma_extra_pi = errStruct.sigmaExtra_m(pi);
+                            R_diag_new(mi) = max(sigma_code_si, sigmaFloor)^2 + ...
+                                             scintSig_si^2 + sigma_extra_pi^2 + towerClkSigma(pi)^2;
+
+                            btOut.trop(mi)          = trop_t;
+                            bmOut.trop(mi)          = trop_m;
+                            btOut.iono(mi)          = iono_t_si;
+                            bmOut.iono(mi)          = iono_m_si;
+                            btOut.hwDelay(mi)       = hw_t;
+                            bmOut.hwDelay(mi)       = hw_m;
+                            btOut.mp(mi)            = mp_t;
+                            btOut.code(mi)          = code_t;
+                            btOut.scintillation(mi) = scint_t;
+                            bsOut.code(mi)          = sigma_code_si;
+                        end
+                    end
+                end
+
+                z        = z_new;
+                h        = h_new;
+                R_diag   = R_diag_new;
+                twr_list = repmat(twr_list, N_sig, 1);
+                ant_list = repmat(ant_list, N_sig, 1);
+
+                errStruct.bySource.truth_m = btOut;
+                errStruct.bySource.model_m = bmOut;
+
+                % Tile non-code sigma fields; override code sigma with signal-specific
+                sigFlds = fieldnames(errStruct.bySource.sigma_m);
+                for fi2 = 1:numel(sigFlds)
+                    fn = sigFlds{fi2};
+                    if ~isempty(errStruct.bySource.sigma_m.(fn))
+                        errStruct.bySource.sigma_m.(fn) = repmat(errStruct.bySource.sigma_m.(fn)(:), N_sig, 1);
+                    end
+                end
+                errStruct.bySource.sigma_m.code = bsOut.code;
+
+                % Tile scalar errStruct arrays
+                tileFields = {'towerClockTruth_m','towerClockModel_m','towerClockModelSigma_m', ...
+                              'sagnacTruth_m','sagnacModel_m','shapiroTruth_m','shapiroModel_m', ...
+                              'pcvTruth_m','pcvModel_m','towerSurveyTruth_m','towerSurveyModel_m', ...
+                              'receiverPCOTruth_m','receiverPCOModel_m','towerPCOTruth_m','towerPCOModel_m', ...
+                              'elevations_rad','scintSigmaL1_m','sigmaExtra_m','sigmaTotal_m'};
+                for fi2 = 1:numel(tileFields)
+                    fn = tileFields{fi2};
+                    if isfield(errStruct, fn) && ~isempty(errStruct.(fn))
+                        errStruct.(fn) = repmat(errStruct.(fn)(:), N_sig, 1);
+                    end
+                end
+
+                errStruct.towerIdx_perMeas   = twr_list;
+                errStruct.antennaIdx_perMeas = ant_list;
+                errStruct.nPseudorange       = M;
+
+                % Rebuild truthTotal and modelTotal at M level
+                errStruct.truthTotal_m = zeros(M,1);
+                errStruct.modelTotal_m = zeros(M,1);
+                for fi2 = 1:numel(flds)
+                    fn = flds{fi2};
+                    errStruct.truthTotal_m = errStruct.truthTotal_m + btOut.(fn);
+                    if isfield(bmOut, fn)
+                        errStruct.modelTotal_m = errStruct.modelTotal_m + bmOut.(fn);
+                    end
+                end
+
                 errStruct.signalIdx_perMeas   = sigIdx;
                 errStruct.signalName_perMeas  = sigNames;
                 errStruct.frequencyHz_perMeas = freqHz;
@@ -758,212 +888,6 @@ classdef MeasurementModel < handle
     end  % public methods
 
     methods (Access = private)
-
-        % ----------------------------------------------------------------
-        function [z_out, h_out, R_diag_out, errOut, twr_out, ant_out] = expandToMultiFreq_( ...
-                obj, z_L1, h_L1, R_diag_L1, errL1, M_pairs, signals, f_L1, sigmaFloor, ...
-                towers, towerClkTruth, towerClkModel, towerClkSigma, ...
-                sagnacT, sagnacM, shapiroT, shapiroM, pcvT, pcvM, ...
-                twrSvyT, twrSvyM, rxPCOT, rxPCOM, twrPCOT, twrPCOM)
-            % expandToMultiFreq_  Expand L1 measurements to M = M_pairs * N_sig.
-            %
-            % For L1 (si=1): direct copy of the existing arrays.
-            % For L2+ (si>1): replace iono and code noise with freq-scaled equivalents.
-            % All other error terms (trop, HW delay, multipath, clocks, sagnac,
-            % shapiro, PCV, survey, PCO) are non-dispersive and are tiled unchanged.
-
-            N_sig = numel(signals);
-            M     = M_pairs * N_sig;
-
-            z_out     = zeros(M,1);
-            h_out     = zeros(M,1);
-            R_diag_out = zeros(M,1);
-            twr_out   = zeros(M,1);
-            ant_out   = zeros(M,1);
-
-            % Per-source bySource fields
-            flds = {'code','trop','iono','hwDelay','mp','scintillation'};
-            btOut = struct(); bmOut = struct();
-            for fi = 1:numel(flds)
-                btOut.(flds{fi}) = zeros(M,1);
-                bmOut.(flds{fi}) = zeros(M,1);
-            end
-
-            % Geometric range at L1 level (removes all L1 error contributions)
-            % z_geom(pi) = z_L1(pi) - truthTotal_L1(pi)  (geometry only)
-            % h_geom(pi) = h_L1(pi) - modelTotal_L1(pi)
-            z_geom = z_L1 - errL1.truthTotal_m;
-            h_geom = h_L1 - errL1.modelTotal_m;
-
-            % Also remove L1 tower clock contributions (already in z/h from main loop)
-            % They are already included in z_L1 / h_L1, so z_geom and h_geom are pure geometry
-            % (geometry includes clocks because z_geom = rho_truth + b_rx - b_twr)
-            % We need to separate them out:
-            %   z_L1 = rho_truth + b_rx_truth - b_twr_truth + errTruthTotal
-            %   h_L1 = rho_est   + b_rx_est   - b_twr_model + errModelTotal
-            % So z_geom below still contains geometry + clocks, just not ErrorChain.
-
-            % L1 iono and code truth/model
-            ionoTruthL1 = errL1.bySource.truth_m.iono;
-            ionoModelL1 = errL1.bySource.model_m.iono;
-            codeTruthL1 = errL1.bySource.truth_m.code;
-            sigmaCodeL1 = errL1.bySource.sigma_m.code;
-
-            for si = 1:N_sig
-                sigCfg     = signals(si);
-                freqScale  = (f_L1 / sigCfg.frequency_Hz)^2;
-                offset     = (si-1) * M_pairs;
-
-                for pi = 1:M_pairs
-                    mi = offset + pi;
-                    twr_out(mi) = errL1.towerIdx_perMeas(pi);
-                    ant_out(mi) = errL1.antennaIdx_perMeas(pi);
-
-                    if si == 1
-                        % L1: direct copy
-                        z_out(mi)     = z_L1(pi);
-                        h_out(mi)     = h_L1(pi);
-                        R_diag_out(mi) = R_diag_L1(pi);
-                        for fi = 1:numel(flds)
-                            fn = flds{fi};
-                            if isfield(errL1.bySource.truth_m, fn)
-                                btOut.(fn)(mi) = errL1.bySource.truth_m.(fn)(pi);
-                            end
-                            if isfield(errL1.bySource.model_m, fn)
-                                bmOut.(fn)(mi) = errL1.bySource.model_m.(fn)(pi);
-                            end
-                        end
-                        % Scintillation for L1
-                        scintSig = errL1.scintSigmaL1_m(pi);
-                        scintDraw = scintSig * randn(obj.errorChain.rngStream, 1, 1);
-                        z_out(mi) = z_out(mi) + scintDraw;
-                        R_diag_out(mi) = R_diag_out(mi) + scintSig^2;
-                        btOut.scintillation(mi) = scintDraw;
-
-                    else
-                        % L2+: replace iono and code noise
-                        elv = errL1.elevations_rad(pi);
-
-                        % Iono: scale from L1 level by freqScale
-                        iono_t_si = ionoTruthL1(pi) * freqScale;
-                        iono_m_si = ionoModelL1(pi) * freqScale;
-                        delta_iono_t = iono_t_si - ionoTruthL1(pi);
-                        delta_iono_m = iono_m_si - ionoModelL1(pi);
-
-                        % Code noise: signal-specific sigma
-                        sigma_code_si = obj.computeCodeSigmaForSignal_( ...
-                            sigCfg, elv, obj.cfg);
-                        code_draw_si = sigma_code_si * ...
-                            randn(obj.errorChain.rngStream, 1, 1);
-
-                        % Replace L1 code noise with signal-specific noise
-                        code_delta_t = code_draw_si - codeTruthL1(pi);
-
-                        % Scintillation at this frequency
-                        scintExpF = 1.0;
-                        if isfield(obj.cfg.errors,'ionosphere') && ...
-                                isfield(obj.cfg.errors.ionosphere,'scintillation') && ...
-                                isfield(obj.cfg.errors.ionosphere.scintillation,'frequencyExponent')
-                            scintExpF = obj.cfg.errors.ionosphere.scintillation.frequencyExponent;
-                        end
-                        scintSigF = errL1.scintSigmaL1_m(pi) * ...
-                            (f_L1 / sigCfg.frequency_Hz)^scintExpF;
-                        scintDraw = scintSigF * randn(obj.errorChain.rngStream, 1, 1);
-
-                        z_out(mi) = z_L1(pi) + delta_iono_t + code_delta_t + scintDraw;
-                        h_out(mi) = h_L1(pi) + delta_iono_m;
-
-                        % R: code variance at this frequency + scint + non-code sigma
-                        R_diag_out(mi) = max(sigma_code_si, sigmaFloor)^2 + ...
-                                         scintSigF^2 + errL1.sigmaExtra_m(pi)^2 + ...
-                                         towerClkSigma(pi)^2;
-
-                        % Populate bySource
-                        for fi = 1:numel(flds)
-                            fn = flds{fi};
-                            if isfield(errL1.bySource.truth_m, fn)
-                                btOut.(fn)(mi) = errL1.bySource.truth_m.(fn)(pi);
-                            end
-                            if isfield(errL1.bySource.model_m, fn)
-                                bmOut.(fn)(mi) = errL1.bySource.model_m.(fn)(pi);
-                            end
-                        end
-                        % Override iono and code with frequency-specific values
-                        btOut.iono(mi)          = iono_t_si;
-                        bmOut.iono(mi)          = iono_m_si;
-                        btOut.code(mi)          = code_draw_si;
-                        bmOut.code(mi)          = 0;
-                        btOut.scintillation(mi) = scintDraw;
-                        bmOut.scintillation(mi) = 0;
-                    end
-                end
-            end
-
-            % Build output errStruct
-            errOut = errL1;
-            errOut.bySource.truth_m = btOut;
-            errOut.bySource.model_m = bmOut;
-
-            % Tile sigma sub-fields (trop, iono, hwDelay, mp)
-            sigFlds = fieldnames(errL1.bySource.sigma_m);
-            for fi = 1:numel(sigFlds)
-                fn = sigFlds{fi};
-                if isfield(errL1.bySource.sigma_m, fn) && ~isempty(errL1.bySource.sigma_m.(fn))
-                    errOut.bySource.sigma_m.(fn) = repmat(errL1.bySource.sigma_m.(fn)(:), N_sig, 1);
-                end
-            end
-
-            % Overwrite code sigma with signal-specific values
-            errOut.bySource.sigma_m.code = zeros(M,1);
-            for si = 1:N_sig
-                for pi = 1:M_pairs
-                    mi = (si-1)*M_pairs + pi;
-                    if si == 1
-                        errOut.bySource.sigma_m.code(mi) = sigmaCodeL1(pi);
-                    else
-                        errOut.bySource.sigma_m.code(mi) = ...
-                            obj.computeCodeSigmaForSignal_(signals(si), ...
-                                errL1.elevations_rad(pi), obj.cfg);
-                    end
-                end
-            end
-
-            % Tile scalar arrays that are M_pairs-length → M-length
-            tileFields = {'towerClockTruth_m','towerClockModel_m', ...
-                          'towerClockModelSigma_m', ...
-                          'sagnacTruth_m','sagnacModel_m', ...
-                          'shapiroTruth_m','shapiroModel_m', ...
-                          'pcvTruth_m','pcvModel_m', ...
-                          'towerSurveyTruth_m','towerSurveyModel_m', ...
-                          'receiverPCOTruth_m','receiverPCOModel_m', ...
-                          'towerPCOTruth_m','towerPCOModel_m', ...
-                          'elevations_rad','scintSigmaL1_m','sigmaExtra_m'};
-            for fi = 1:numel(tileFields)
-                fn = tileFields{fi};
-                if isfield(errL1, fn) && ~isempty(errL1.(fn))
-                    errOut.(fn) = repmat(errL1.(fn)(:), N_sig, 1);
-                end
-            end
-
-            errOut.towerIdx_perMeas   = twr_out;
-            errOut.antennaIdx_perMeas = ant_out;
-
-            % Recompute truthTotal and modelTotal at M level
-            errOut.truthTotal_m = zeros(M,1);
-            errOut.modelTotal_m = zeros(M,1);
-            for fi = 1:numel(flds)
-                fn = flds{fi};
-                if isfield(btOut, fn)
-                    errOut.truthTotal_m = errOut.truthTotal_m + btOut.(fn);
-                end
-                if isfield(bmOut, fn)
-                    errOut.modelTotal_m = errOut.modelTotal_m + bmOut.(fn);
-                end
-            end
-
-            % sigmaTotal at M level (approximate: tiled from L1, with code updated)
-            errOut.sigmaTotal_m = repmat(errL1.sigmaTotal_m, N_sig, 1);
-        end
 
         % ----------------------------------------------------------------
         function sigma = computeCodeSigmaForSignal_(obj, sigCfg, elv, cfg)

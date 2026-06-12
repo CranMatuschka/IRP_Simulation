@@ -1,5 +1,8 @@
 % run_oo_reverse_gnss  Default reverse-GNSS simulation (GEO-1 scenario).
 %
+% Wrapper around ReportRunner.runSingle — kept for backward compatibility.
+% For the full user-facing report workflow see run_oo_reverse_gnss_report.m.
+%
 % Default scenario:
 %   Space asset : GEO-1, lat 0 deg, lon 23 deg, alt 35786 km
 %   Towers      : 5 ground stations (Tenerife, Stockholm, Hartebeesthoek, Bengaluru, Libreville)
@@ -22,19 +25,12 @@ cfg = revgnss.ConfigFactory.defaultConfig();
 % cfg = revgnss.ConfigFactory.clockDiversityConfig();         % diverse tower clocks
 % cfg = revgnss.ConfigFactory.realisticPseudorangeConfig();   % Sagnac + Shapiro corrections
 
-%% --- Create and run simulation ----------------------------------------
-sim = revgnss.ReverseGNSSSimulation(cfg);
-sim.initialize();
-sim.run();
+%% --- Run via ReportRunner --------------------------------------------
+out = revgnss.ReportRunner.runSingle(cfg);
 
-%% --- Generate plots and PDF report ------------------------------------
-figHandles = sim.plot();
-sim.writeReport(figHandles);
-
-%% --- Export results (optional) ----------------------------------------
-results = sim.getResults();
+results = out.sim.getResults();
 fprintf('\nDone. Access results via the ''results'' variable.\n');
 fprintf('  results.diag         - per-epoch diagnostics\n');
 fprintf('  results.assetHistory  - truth state log\n');
 fprintf('  results.ekfHistory    - EKF state log\n');
-fprintf('Figures saved to: %s\n', cfg.plots.outputDir);
+fprintf('Report saved to: %s\n', out.pdfPath);

@@ -46,7 +46,7 @@ classdef ConfigFactory
 
             % --- Scenario topology (simple count fields) ------------------
             cfg.scenario.nTowers    = 5;
-            cfg.scenario.nReceivers = 3;
+            cfg.scenario.nReceivers = 1;
 
             % --- GEO asset (stationary in ECEF) ---------------------------
             geoLat_rad = 0.0;
@@ -55,7 +55,7 @@ classdef ConfigFactory
             r_geo      = revgnss.GeometryUtils.geodetic2ecef(geoLat_rad, geoLon_rad, geoAlt_m);
 
             cfg.asset.name                    = 'GEO-1';
-            cfg.asset.mass_kg                 = 2000;
+            cfg.asset.mass_kg                 = 70;
             cfg.asset.r_ecef_m                = r_geo;
             cfg.asset.v_ecef_mps              = [0; 0; 0];   % geostationary in ECEF
             cfg.asset.attitude_euler_rad      = [0; 0; 0];
@@ -157,7 +157,7 @@ classdef ConfigFactory
             cfg.estimator.initialError.pos_m          = [1000; -500; 250];
             cfg.estimator.initialError.vel_mps        = [0.1; -0.1; 0.05];
             % Zero attitude error: no initial offset, no runaway risk.
-            cfg.estimator.initialError.euler_deg      = [0; 0; 0];
+            cfg.estimator.initialError.euler_deg      = [0.5; 0.5; 0.5];
             cfg.estimator.initialError.omega_radps    = [0; 0; 0];
             cfg.estimator.initialError.clockBias_m    = 100.0;
             cfg.estimator.initialError.clockDrift_mps = 0.01;
@@ -171,6 +171,7 @@ classdef ConfigFactory
 
             % --- Signal / frequency config ----------------------------------------
             cfg.signals.enabled = {'L1'};
+            cfg.signals.twoFrequency.enable = false;
             cfg.signals.L1.name          = 'L1';
             cfg.signals.L1.frequency_Hz  = 1575.42e6;
             cfg.signals.L1.lambda_m      = 299792458 / 1575.42e6;
@@ -314,18 +315,18 @@ classdef ConfigFactory
 
             % --- Observable toggles: pseudorange always on, others off ------
             cfg.measurements.pseudorange.enable   = true;
-            cfg.measurements.doppler.enable       = false;
+            cfg.measurements.doppler.enable       = true;
             cfg.measurements.doppler.sigma_mps    = 0.01;
-            cfg.measurements.doppler.useInEKF     = false;
+            cfg.measurements.doppler.useInEKF     = true;
 
-            cfg.measurements.carrierPhase.enable           = false;
-            cfg.measurements.carrierPhase.useInEKF         = false;
+            cfg.measurements.carrierPhase.enable           = true;
+            cfg.measurements.carrierPhase.useInEKF         = true;
             cfg.measurements.carrierPhase.frequency_Hz     = 1575.42e6;
             cfg.measurements.carrierPhase.lambda_m         = 299792458 / 1575.42e6;
             cfg.measurements.carrierPhase.sigma_cycles     = 0.01;
             cfg.measurements.carrierPhase.initialAmbiguityMode = 'randomInteger';
             cfg.measurements.carrierPhase.seed             = 9001;
-            cfg.measurements.carrierPhase.cycleSlip.enable = false;
+            cfg.measurements.carrierPhase.cycleSlip.enable = true;
 
             % --- Plots -------------------------------------------------------
             % showFigures = false: figures created with Visible='off', saved to file.
@@ -346,6 +347,10 @@ classdef ConfigFactory
             cfg.report.outputPdf           = fullfile(fileparts(mfilename('fullpath')), ...
                 '..', 'output', 'reverse_gnss_simple_report.pdf');
             cfg.report.includeTimestampedCopy = false;
+            cfg.report.version             = '1.00';
+            cfg.report.baseOutputDir       = fullfile(fileparts(mfilename('fullpath')), '..', 'output');
+            cfg.report.dateFolderPrefix    = 'Report-';
+            cfg.report.overwrite           = true;
         end
 
         % ==================================================================
@@ -669,10 +674,21 @@ classdef ConfigFactory
                 cfg.asset.clock   = clk;
             end
 
-            % ---- Receiver lever arms ----------------------------------------
+            % ---- twoFrequency toggle (additive: only acts when enable=true) ----
+            % When enable=false, signals.enabled is left as-is so explicit
+            % {'L1','L2'} overrides (e.g. in ValidationCaseFactory) are preserved.
+            if isfield(cfg,'signals') && isfield(cfg.signals,'twoFrequency') && ...
+                    isfield(cfg.signals.twoFrequency,'enable') && ...
+                    cfg.signals.twoFrequency.enable
+                cfg.signals.enabled = {'L1','L2'};
+            end
+
+            % ---- Receiver lever arms and auto-attitude ----------------------
             % Priority: custom 3×nR arms always win (any nR).
             %           Then auto-fill from 4-column cross pattern if nR<=4.
             %           Else require custom arms or error.
+            % Auto-attitude: nReceivers==1 → all attitude flags false.
+            %                nReceivers >1 → estimateAttitude/FromPseudorange true.
             nR_req      = cfg.scenario.nReceivers;
             defaultArms = [1 -1 0 0; 0 0 1 -1; 0.2 0.2 -0.2 -0.2];  % 3 × 4
 
@@ -682,12 +698,19 @@ classdef ConfigFactory
             end
 
             if nR_req == 1
-                % Single receiver: force zero lever arm; attitude from PR impossible.
-                cfg.asset.receiverLeverArm_body_m  = [0; 0; 0];
-                cfg.asset.receiverLeverArms_body_m = [0; 0; 0];
+                % Single receiver: force zero lever arm; attitude is unobservable.
+                cfg.asset.receiverLeverArm_body_m              = [0; 0; 0];
+                cfg.asset.receiverLeverArms_body_m             = [0; 0; 0];
+                cfg.estimator.estimateAttitude                   = false;
+                cfg.estimator.estimateAngularRate                = false;
                 cfg.estimator.estimateAttitudeFromPseudorange    = false;
                 cfg.estimator.estimateAngularRateFromPseudorange = false;
             else
+                % Multi-receiver: attitude is observable from pseudorange geometry.
+                cfg.estimator.estimateAttitude                   = true;
+                cfg.estimator.estimateAngularRate                = true;
+                cfg.estimator.estimateAttitudeFromPseudorange    = true;
+                cfg.estimator.estimateAngularRateFromPseudorange = false;
                 existingArms = cfg.asset.receiverLeverArms_body_m;
                 isCustom = (size(existingArms,1) == 3) && (size(existingArms,2) == nR_req);
                 if isCustom
