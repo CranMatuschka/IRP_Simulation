@@ -46,7 +46,7 @@ classdef ConfigFactory
 
             % --- Scenario topology (simple count fields) ------------------
             cfg.scenario.nTowers    = 5;
-            cfg.scenario.nReceivers = 1;
+            cfg.scenario.nReceivers = 3;
 
             % --- GEO asset (stationary in ECEF) ---------------------------
             geoLat_rad = 0.0;
@@ -129,9 +129,9 @@ classdef ConfigFactory
             cfg.estimator.estimateTowerClocks     = false;
             % Attitude/omega states remain in the 14-state vector but are frozen.
             % (zero Q, zero H columns). Set true only in multiAntennaAttitudeConfig.
-            cfg.estimator.estimateAttitude        = false;
+            cfg.estimator.estimateAttitude        = true;
             cfg.estimator.estimateAngularRate     = false;
-            cfg.estimator.estimateAttitudeFromPseudorange     = false;
+            cfg.estimator.estimateAttitudeFromPseudorange     = true;
             cfg.estimator.estimateAngularRateFromPseudorange  = false;
             cfg.estimator.estimateCarrierAmbiguities          = false;
             % perfectCorrection: EKF uses known tower clock values (zero here).

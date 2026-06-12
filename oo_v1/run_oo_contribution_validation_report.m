@@ -205,7 +205,7 @@ function fig = makeSummaryFig(caseName, cfg, d, pdfPath, showFigures)
     posErr  = d.getPositionErrors();
     nisVec  = d.getNIS();
     m_rows  = d.getNumMeasurementRows();
-    nRx     = 1;
+    nRx     = 3;
     nTowers = 0;
     if isfield(cfg,'scenario')
         if isfield(cfg.scenario,'nReceivers'); nRx     = cfg.scenario.nReceivers; end
