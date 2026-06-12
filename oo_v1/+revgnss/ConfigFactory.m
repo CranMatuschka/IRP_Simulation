@@ -347,9 +347,6 @@ classdef ConfigFactory
 
             % --- Report ---------------------------------------------------
             cfg.report.enable              = true;
-            cfg.report.outputPdf           = fullfile(fileparts(mfilename('fullpath')), ...
-                '..', 'output', 'reverse_gnss_simple_report.pdf');
-            cfg.report.includeTimestampedCopy = false;
             cfg.report.version             = '1.00';
             cfg.report.baseOutputDir       = fullfile(fileparts(mfilename('fullpath')), '..', 'output');
             cfg.report.dateFolderPrefix    = 'Report-';
@@ -677,13 +674,16 @@ classdef ConfigFactory
                 cfg.asset.clock   = clk;
             end
 
-            % ---- twoFrequency toggle (additive: only acts when enable=true) ----
-            % When enable=false, signals.enabled is left as-is so explicit
-            % {'L1','L2'} overrides (e.g. in ValidationCaseFactory) are preserved.
+            % ---- twoFrequency toggle: always overrides signals.enabled ----
+            % false → {'L1'} only;  true → {'L1','L2'}.
+            % All callers that want L1+L2 must set twoFrequency.enable=true.
             if isfield(cfg,'signals') && isfield(cfg.signals,'twoFrequency') && ...
-                    isfield(cfg.signals.twoFrequency,'enable') && ...
-                    cfg.signals.twoFrequency.enable
-                cfg.signals.enabled = {'L1','L2'};
+                    isfield(cfg.signals.twoFrequency,'enable')
+                if cfg.signals.twoFrequency.enable
+                    cfg.signals.enabled = {'L1','L2'};
+                else
+                    cfg.signals.enabled = {'L1'};
+                end
             end
 
             % ---- Receiver lever arms and auto-attitude ----------------------

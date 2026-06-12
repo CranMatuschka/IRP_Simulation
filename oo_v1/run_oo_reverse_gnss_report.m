@@ -1,33 +1,49 @@
-% run_oo_reverse_gnss_report  Main user-facing reverse-GNSS report script.
+% run_oo_reverse_gnss_report  Main user-facing reverse-GNSS simulation script.
 %
-% Produces a single dated PDF+MAT report in:
-%   oo_v1/output/Report-YYYYMMDD/report-vX.XX.pdf
+% Runs one simulation and writes one report:
+%   output/Report-YYYYMMDD/report-vX.XX.pdf
+%   output/Report-YYYYMMDD/report-vX.XX.mat
 %
-% Edit cfg.scenario.nReceivers and cfg.signals.twoFrequency.enable to
-% switch between single/multi-antenna and single/dual-frequency modes.
-%
-% Default: nReceivers=1, L1 only, 600 s, code noise 0.3 m.
+% Edit the USER CONFIGURATION section below to change the scenario.
 
-%% --- Setup path -------------------------------------------------------
+clear; close all; clc;
+
 thisDir = fileparts(mfilename('fullpath'));
 addpath(thisDir);
 
-%% --- Build configuration ---------------------------------------------
 cfg = revgnss.ConfigFactory.defaultConfig();
+
+% ============================================================
+% USER CONFIGURATION
+% ============================================================
 
 cfg.simulation.duration_s = 600;
 
-% Topology: set nReceivers > 1 to enable attitude estimation automatically.
+% Receivers:
+% nReceivers == 1  →  attitude estimation automatically OFF
+% nReceivers  > 1  →  attitude estimation automatically ON
 cfg.scenario.nReceivers = 1;
 
-% Dual-frequency toggle: false → L1 only, true → L1 + L2.
+% Frequency:
+% false  →  L1 only
+% true   →  L1 + L2
 cfg.signals.twoFrequency.enable = false;
 
-% Report metadata
+% Report
 cfg.report.version       = '1.01';
 cfg.report.baseOutputDir = fullfile(thisDir, 'output');
+cfg.report.overwrite     = true;
 
-%% --- Run and generate report -----------------------------------------
+% ============================================================
+% RUN ONE SIMULATION AND WRITE ONE REPORT
+% ============================================================
+
 out = revgnss.ReportRunner.runSingle(cfg);
 
-fprintf('\nReport written to:\n  %s\n', out.pdfPath);
+fprintf('\nPDF:\n%s\n', out.pdfPath);
+fprintf('\nMAT:\n%s\n', out.matPath);
+
+try
+    open(out.pdfPath);
+catch
+end

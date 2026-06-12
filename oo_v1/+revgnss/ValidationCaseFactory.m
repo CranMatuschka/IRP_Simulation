@@ -177,12 +177,12 @@ classdef ValidationCaseFactory
                 case 'dual_frequency_baseline'
                     % Dual-frequency (L1+L2) baseline: code noise only, both signals
                     cfg = revgnss.ConfigFactory.defaultConfig();
-                    cfg.signals.enabled = {'L1','L2'};
+                    cfg.signals.twoFrequency.enable = true;
 
                 case 'ionosphere_dual_frequency_mismatch'
                     % Dual-frequency with ionosphere truth on, model off — visible mismatch
                     cfg = revgnss.ConfigFactory.defaultConfig();
-                    cfg.signals.enabled = {'L1','L2'};
+                    cfg.signals.twoFrequency.enable           = true;
                     cfg.errors.ionosphere.truth.enable        = true;
                     cfg.errors.ionosphere.truth.zenithDelay_m = 5.0;
                     cfg.errors.ionosphere.model.enable        = false;
@@ -190,7 +190,7 @@ classdef ValidationCaseFactory
                 case 'ionosphere_dual_frequency_matched'
                     % Dual-frequency with matched iono truth=model — should mostly cancel
                     cfg = revgnss.ConfigFactory.defaultConfig();
-                    cfg.signals.enabled = {'L1','L2'};
+                    cfg.signals.twoFrequency.enable           = true;
                     cfg.errors.ionosphere.truth.enable        = true;
                     cfg.errors.ionosphere.truth.zenithDelay_m = 5.0;
                     cfg.errors.ionosphere.model.enable        = true;
