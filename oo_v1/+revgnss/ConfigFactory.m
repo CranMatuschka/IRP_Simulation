@@ -251,6 +251,18 @@ classdef ConfigFactory
             cfg.errors.ionosphere.model.zenithDelay_m  = 5.0;
             cfg.errors.ionosphere.model.biasFraction   = 1.0;
             cfg.errors.ionosphere.sigma_m              = 0.0;
+            % CHANGED: v3→v4 — Issue 2/16
+            % d/dt of first-order iono delay: dot{I}_L1 = -(40.3/f_L1^2)*dot{TEC}.
+            % When true, Doppler is excluded from ionoFreeCode mode (no IF Doppler model).
+            cfg.errors.ionosphere.includeRateTerm      = false;
+
+            % Tower clock product parameters (for product epoch caching — Issue 6/16)
+            cfg.errors.towerClock.updateInterval_s     = 300;   % product update interval [s]
+            cfg.errors.towerClock.latency_s            = 0;     % product delivery latency [s]
+            % CHANGED: v3→v4 — Issue 10/16
+            % Shared clock-drift product uncertainty per tower.  Set > 0 if drift
+            % corrections are active and their error should appear in R.
+            cfg.errors.towerClock.driftCorrSigma_m_per_s = 0;  % [m/s], default: unmodelled
 
             cfg.errors.hardwareDelay.truth.enable      = false;
             cfg.errors.hardwareDelay.truth.default_m   = 0.0;
@@ -433,6 +445,13 @@ classdef ConfigFactory
 
         function cfg = clockNoiseConfig()
             % clockNoiseConfig  Stochastic receiver + tower clocks with noisyCorrection.
+            %
+            % CHANGED: v3→v4 — Issue 5
+            % SIMULATION NOTE: noisyCorrection is a truth-based simulated external
+            % correction product.  It is NOT a model of what a real receiver
+            % produces; it adds zero-mean Gaussian noise to the true tower clock.
+            % Use for Monte Carlo bias/sigma studies only.
+            % predictedProduct is the more realistic product model.
             cfg = revgnss.ConfigFactory.defaultConfig();
 
             % Enable stochastic noise for receiver clock

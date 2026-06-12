@@ -325,8 +325,19 @@ classdef ErrorChain < handle
             %
             % Returns L1-level delay.  MeasurementModel scales to other frequencies.
             %
-            % For 'simpleMapped': uses old zenithDelay_m (backward compat).
-            % For 'tecGaussMarkov': delegates to EnvironmentModel.
+            % Supported modelType values:
+            %   'simpleMapped'         – mapped from cfg.errors.ionosphere.*.zenithDelay_m (compat)
+            %   'constantVerticalDelay'– mapped from cfg.errors.ionosphere.*.verticalDelayL1_m [m]
+            %                           I_slant = verticalDelayL1_m / sin(el) at L1
+            %   'tecGaussMarkov'       – EnvironmentModel Gauss-Markov TEC residual
+            %
+            % CHANGED: v3→v4 — Issue 1
+            % 'constantVerticalTEC' is NOT a valid model: the field verticalDelayL1_m already
+            % stores metres of L1 delay, NOT TECU.  If TECU-based input is needed in future,
+            % add a separate modelType 'constantVerticalTEC_TECU' that reads
+            % cfg.errors.ionosphere.verticalTEC_TECU and converts:
+            %   I_L1_m = (40.3 / f_L1_Hz^2) * TEC_TECU * 1e16
+            % (Leick et al. 2015, Kaplan & Hegarty 2017)
 
             N  = numel(elv);
             ic = obj.cfg.errors.ionosphere;
@@ -334,6 +345,16 @@ classdef ErrorChain < handle
 
             modelType = 'simpleMapped';
             if isfield(ic,'modelType'); modelType = ic.modelType; end
+
+            % Guard: reject deprecated 'constantVerticalTEC' identifier
+            if strcmp(modelType,'constantVerticalTEC')
+                if ~isfield(ic,'verticalTEC_TECU')
+                    error('ErrorChain:invalidModelType', ...
+                        ['ionosphere modelType ''constantVerticalTEC'' requires ' ...
+                         'cfg.errors.ionosphere.verticalTEC_TECU [TECU]. ' ...
+                         'Use ''constantVerticalDelay'' with verticalDelayL1_m [m] instead.']);
+                end
+            end
 
             if strcmp(modelType,'tecGaussMarkov')
                 % Delegate to EnvironmentModel (returns L1 slant delay when freqHz = f_L1)
@@ -349,6 +370,35 @@ classdef ErrorChain < handle
                         model_m(k) = obj.envModel.getIonoDelay( ...
                             ti, elv(k), 'model', f_L1, f_L1);
                     end
+                end
+            elseif strcmp(modelType,'constantVerticalDelay')
+                % CHANGED: v3→v4 — Issue 1
+                % constantVerticalDelay: cfg.errors.ionosphere.*.verticalDelayL1_m [m] is
+                % the vertical L1 delay in metres.  Slant delay = vdel / sin(el).
+                % I_slant = verticalDelayL1_m / sin(el)   [Leick et al. 2015 eq. 9.11]
+                if isfield(ic,'truth') && isfield(ic.truth,'enable') && ic.truth.enable
+                    vdel = 0;
+                    if isfield(ic.truth,'verticalDelayL1_m')
+                        vdel = ic.truth.verticalDelayL1_m;
+                    elseif isfield(ic.truth,'zenithDelay_m')
+                        vdel = ic.truth.zenithDelay_m;
+                    end
+                    truth_m = vdel * mappingFn(elv);
+                else
+                    truth_m = zeros(N,1);
+                end
+                if isfield(ic,'model') && isfield(ic.model,'enable') && ic.model.enable
+                    vdel = 0;
+                    if isfield(ic.model,'verticalDelayL1_m')
+                        vdel = ic.model.verticalDelayL1_m;
+                    elseif isfield(ic.model,'zenithDelay_m')
+                        vdel = ic.model.zenithDelay_m;
+                    end
+                    bias_frac = 1;
+                    if isfield(ic.model,'biasFraction'); bias_frac = ic.model.biasFraction; end
+                    model_m = vdel * bias_frac * mappingFn(elv);
+                else
+                    model_m = zeros(N,1);
                 end
             else
                 % simpleMapped (backward compat)

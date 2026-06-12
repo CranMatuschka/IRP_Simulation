@@ -81,6 +81,53 @@ classdef SignalUtils
             end
         end
 
+        function H_clk = buildClockOnlyH(nMeas, nTowers, towerIdx_perMeas)
+            % buildClockOnlyH  Clock-only design matrix for gauge-mode test (Issue 17).
+            %
+            % CHANGED: v3→v4 — Issue 17
+            % State ordering: [b_rx, b_tower_1, ..., b_tower_N]
+            % Each pseudorange row: b_rx = +1, b_tower_i = -1.
+            % H_clk has rows of the form [1, 0, ..., -1_ti, ..., 0].
+            %
+            % For gaugeMode='none': rank(H_clk) = nTowers  (one null direction:
+            %   all clocks shift together → [1,1,...,1] in null space).
+            % For fixedReference: the reference tower is set to zero in H_clk;
+            %   call buildClockOnlyH_fixedRef instead.
+            %
+            % Inputs:
+            %   nMeas             scalar   number of measurements (pseudorange rows)
+            %   nTowers           scalar   number of tower clock states estimated
+            %   towerIdx_perMeas  [nMeas x 1]  tower index (1-based) per measurement
+            %
+            % Output:
+            %   H_clk   [nMeas x (1 + nTowers)]  clock-only submatrix
+            H_clk = zeros(nMeas, 1 + nTowers);
+            H_clk(:, 1) = 1;   % b_rx column
+            for mi = 1:nMeas
+                ti = towerIdx_perMeas(mi);
+                if ti >= 1 && ti <= nTowers
+                    H_clk(mi, 1 + ti) = -1;   % b_tower_ti column
+                end
+            end
+        end
+
+        function H_clk = buildClockOnlyH_fixedRef(nMeas, nTowers, towerIdx_perMeas, refTowerIdx)
+            % buildClockOnlyH_fixedRef  Clock-only H with fixed reference tower.
+            %
+            % CHANGED: v3→v4 — Issue 17
+            % The reference tower row is omitted (its clock is known = gauge fixed).
+            % State ordering: [b_rx, b_tower_1, ..., b_tower_N] excluding refTowerIdx.
+            % With fixedReference: rank(H_clk_fixed) = nTowers + 1 (full rank).
+            %
+            % Inputs:
+            %   refTowerIdx  scalar   1-based index of the reference (fixed) tower
+            H_clk = revgnss.SignalUtils.buildClockOnlyH(nMeas, nTowers, towerIdx_perMeas);
+            % Zero out the reference tower column (it is fixed, not estimated)
+            if refTowerIdx >= 1 && refTowerIdx <= nTowers
+                H_clk(:, 1 + refTowerIdx) = 0;
+            end
+        end
+
         function scale = getFrequencyScaleToL1(signal, cfg)
             % getFrequencyScaleToL1  Return (f_L1 / f_signal)^2.
             %

@@ -161,6 +161,12 @@ classdef MeasurementModel < handle
                 noiseSigma = obj.cfg.towerClockCorrectionSigma_m;
             end
             if strcmp(towerClkMode,'noisyCorrection')
+                % CHANGED: v3→v4 — Issue 5
+                % SIMULATION NOTE: noisyCorrection is a truth-based simulated external
+                % correction product.  It is NOT a model of what a real receiver
+                % produces; it adds zero-mean Gaussian noise to the true tower clock.
+                % Use for Monte Carlo bias/sigma studies only.
+                % predictedProduct is the more realistic product model.
                 corrNoise_m = noiseSigma * obj.errorChain.drawNormal(M, 1);
             else
                 corrNoise_m = zeros(M,1);
@@ -172,10 +178,16 @@ classdef MeasurementModel < handle
                 towerClkTruth(mi) = b_t;
                 switch towerClkMode
                     case 'none'
+                        % CHANGED: v3→v4 — Issue 4
+                        % gaugeMode=none: no product available; tower clock unknown.
+                        % EKF must estimate or accept the clock bias as an error.
                         towerClkModel(mi) = 0;
                     case 'perfectCorrection'
+                        % Validation/test use only.  Uses truth clock directly.
                         towerClkModel(mi) = b_t;
                     case 'noisyCorrection'
+                        % Truth-based simulated correction (see SIMULATION NOTE above).
+                        % correction = true_tower_clock + randn * sigma_correction
                         towerClkModel(mi) = b_t + corrNoise_m(mi);
                         towerClkSigma(mi) = noiseSigma;
                     otherwise
@@ -189,6 +201,34 @@ classdef MeasurementModel < handle
             errStruct.towerIdx_perMeas       = twr_list;
             errStruct.antennaIdx_perMeas     = ant_list;
             errStruct.nPseudorange           = M;   % 0.4: for postfit split
+
+            % CHANGED: v3→v4 — Issue 6: extended product correction cache.
+            % Postfit recomputation must reuse exactly these values (not re-query or re-draw).
+            errStruct.towerClockCorrection_m      = towerClkModel;    % correction applied
+            errStruct.towerClockCorrectionSigma_m = towerClkSigma;    % sigma used in R
+            errStruct.towerClockCorrNoise_m       = corrNoise_m;      % noise realization
+
+            % Product epoch: t_prod = floor((t - latency) / updateInterval) * updateInterval
+            updateInterval_s = 300;
+            latency_s        = 0;
+            if isfield(obj.cfg,'errors') && isfield(obj.cfg.errors,'towerClock')
+                tc2 = obj.cfg.errors.towerClock;
+                if isfield(tc2,'updateInterval_s'); updateInterval_s = tc2.updateInterval_s; end
+                if isfield(tc2,'latency_s');        latency_s        = tc2.latency_s;        end
+            end
+            t_available = t_s - latency_s;
+            if updateInterval_s > 0
+                t_prod = floor(t_available / updateInterval_s) * updateInterval_s;
+            else
+                t_prod = t_available;
+            end
+            if t_prod < 0
+                warning('revgnss:productEpoch', ...
+                    'Product epoch negative at t=%.1f s; clamping to 0.', t_s);
+                t_prod = 0;
+            end
+            errStruct.towerClockProductEpoch_s = t_prod;
+            errStruct.towerClockProductAge_s   = t_s - t_prod;
 
             % ----- Build z, h, R_diag ----------------------------------
             z      = zeros(M,1);
@@ -287,6 +327,11 @@ classdef MeasurementModel < handle
                 pcvModel_m(mi)     = cModel.pcv;
 
                 % Tower clock model
+                % CHANGED: v3→v4 — Issue 4
+                % If estimateTowerClocks=true, the EKF state represents the FULL tower
+                % clock bias (approach a).  Do NOT also apply a product correction when
+                % the EKF is estimating the tower clock — that would double-subtract.
+                % If the EKF does not estimate the tower clock, use the correction product.
                 if isfield(stateMap,'towerClockIdx') && ti <= size(stateMap.towerClockIdx,1) && ...
                         stateMap.towerClockIdx(ti,1) > 0
                     b_twr_h = x_est(stateMap.towerClockIdx(ti,1));
@@ -325,6 +370,15 @@ classdef MeasurementModel < handle
             end
 
             if N_sig > 1
+                % CHANGED: v3→v4 — Issue 9
+                % NOTE on hardware/code biases (DCB):
+                % Signal-dependent hardware delays on L1 and L2 do NOT cancel in the
+                % IF combination.  HW_IF = alpha*HW_L1 - beta*HW_L2.
+                % In this v1 simulation hardware delays are set to zero (simplified).
+                % LIMITATION: DCB calibration is not implemented.  In a real receiver
+                % or precise point positioning system, DCBs must be estimated or
+                % corrected using IGS DCB products (see Schaer 1999, Montenbruck 2014).
+                %
                 % Phase 2: build z/h/R directly for each (signal, pair)
                 M_pairs = M;
                 M       = M_pairs * N_sig;
@@ -548,6 +602,32 @@ classdef MeasurementModel < handle
                          'Cannot build h model without physics.doppler.model.enable.']);
                 end
 
+                % CHANGED: v3→v4 — Issue 2
+                % V1 LIMITATION: In ionoFreeCode mode, Doppler rows are not
+                % combined.  They are passed through only if the ionosphere model
+                % does not include rate terms (dot{TEC} = 0 in this simulation).
+                % Doppler DOES carry a frequency-dependent ionospheric rate term in
+                % reality (d/dt of first-order iono delay).  If iono-rate modeling
+                % is ever added, either implement a Doppler IF combination or disable
+                % Doppler in ionoFreeCode mode.
+                %
+                % Guard: if iono rate term is enabled, exclude Doppler rows (Issue 2)
+                ionoRateEnabled = isfield(obj.cfg,'errors') && ...
+                    isfield(obj.cfg.errors,'ionosphere') && ...
+                    isfield(obj.cfg.errors.ionosphere,'includeRateTerm') && ...
+                    obj.cfg.errors.ionosphere.includeRateTerm;
+                if ionoRateEnabled
+                    warning('revgnss:ionoFreeCode', ...
+                        ['ionosphere.includeRateTerm is enabled but no Doppler ' ...
+                         'IF combination model exists. ' ...
+                         'Doppler rows are excluded to avoid unmodelled dispersive bias.']);
+                    % Skip Doppler EKF rows this epoch
+                    errStruct.doppler = struct('z',[],'h',[],'prefit',[], ...
+                        'towerClockDriftTruth_mps',[],'towerClockDriftModel_mps',[]);
+                    H = H_pr;
+                    return
+                end
+
                 v_rx_true = asset.v_ecef_mps;
                 v_rx_est  = x_est(stateMap.v_idx);
                 bdot_rx_true = asset.clock.getDriftMetersPerSecond();
@@ -557,6 +637,15 @@ classdef MeasurementModel < handle
                 zd      = zeros(M,1);
                 hd      = zeros(M,1);
                 Hd      = zeros(M,nx);
+                % CHANGED: v3→v4 — Issue 10
+                % V1 SIMPLIFICATION: Doppler R is diagonal.
+                % Clock-drift product uncertainty (driftCorrSigma_m_per_s) is NOT
+                % included here.  This is acceptable when drift product errors are
+                % small compared to Doppler noise sigma, or when tower clocks are
+                % assumed stable.
+                % LIMITATION: If clock-drift corrections are active, add
+                %   cfg.errors.towerClock.driftCorrSigma_m_per_s
+                % as a shared term per tower or document that it remains unmodelled.
                 Rd_diag = sigma_dop^2 * ones(M,1);
                 towerClockDriftTruth_mps = zeros(M,1);
                 towerClockDriftModel_mps = zeros(M,1);
@@ -608,7 +697,13 @@ classdef MeasurementModel < handle
                 errStruct.doppler.towerClockDriftModel_mps = towerClockDriftModel_mps;
 
                 if useInEKF
-                    % Extend z/h/H/R with Doppler rows (Doppler R stays diagonal)
+                    % CHANGED: v3→v4 — Issue 11
+                    % LIMITATION: Cross-covariance between pseudorange and Doppler rows
+                    % arising from a shared tower-clock product error is ignored in v1.
+                    % The off-diagonal blocks of R between pseudorange and Doppler are
+                    % set to zero.  This is valid only when clock product errors are
+                    % small relative to independent noise terms, or when clock states
+                    % are estimated in the EKF (absorbing the correlation).
                     z    = [z;    zd];
                     h    = [h;    hd];
                     H_pr = [H_pr; Hd];
@@ -657,6 +752,14 @@ classdef MeasurementModel < handle
             % Stage 5: if any model-side correction is on (Sagnac, Shapiro, PCV, PCO)
             % OR cfg.estimator.forceFiniteDifferenceH=true, use FD for r and euler columns.
             % Clock columns remain analytic: b_rx=+1, b_twr=-1.
+            %
+            % CHANGED: v3→v4 — Issue 13
+            % V1 APPROXIMATION: Attitude derivatives of tropospheric and
+            % ionospheric corrections through lever-arm-induced elevation changes
+            % are ignored.  This is valid when:
+            %     leverArmLength_m << slantRange_m   AND
+            %     atmospheric correction gradient is small.
+            % Add a diagnostic warning if leverArmLength / slantRange > 1e-4.
 
             M = numel(twr_list);
             H = zeros(M, nx);
@@ -692,6 +795,18 @@ classdef MeasurementModel < handle
                     delta = r_ant - r_twr;
                     rho   = norm(delta); if rho < 1; rho = 1; end
                     H(mi, stateMap.r_idx) = (delta / rho)';
+                end
+
+                % Lever-arm ratio diagnostic (Issue 13)
+                r_twr_diag = obj.getTowerPosition_(towers{ti}, ti, 'model');
+                r_ant_diag = revgnss.AttitudeKinematics.applyLeverArm(r_cm_est, euler_est, lever);
+                slantRange_diag = norm(r_ant_diag - r_twr_diag);
+                leverNorm_diag  = norm(lever);
+                if slantRange_diag > 0 && leverNorm_diag / slantRange_diag > 1e-4 && ...
+                        leverNorm_diag > 1e-9 && mod(mi, max(1, numel(twr_list))) == 1
+                    warning('revgnss:leverArmRatio', ...
+                        'Lever arm / slant range = %.2e; atmosphere attitude derivatives may not be negligible.', ...
+                        leverNorm_diag / slantRange_diag);
                 end
 
                 % Attitude FD (gated by config + non-zero lever)
@@ -802,6 +917,11 @@ classdef MeasurementModel < handle
                 case 'perfectCorrection'
                     b_model = twr.getClockBiasMeters();
                 case 'noisyCorrection'
+                    % CHANGED: v3→v4 — Issue 5
+                    % SIMULATION NOTE: noisyCorrection is a truth-based simulated external
+                    % correction product.  It is NOT a model of what a real receiver
+                    % produces; it adds zero-mean Gaussian noise to the true tower clock.
+                    % Use for Monte Carlo bias/sigma studies only.
                     b_model = twr.getClockBiasMeters() + noiseSigma * obj.errorChain.drawNormal(1,1);
                 otherwise
                     b_model = 0;
@@ -1056,6 +1176,22 @@ classdef MeasurementModel < handle
     end  % private methods
 
     methods (Static)
+
+        function [z_isl, h_isl, H_isl] = computeISLMeasurements(asset_rx, asset_tx, ~, ~)
+            % computeISLMeasurements  v1 stub — Inter-Satellite Link (ISL) placeholder.
+            %
+            % CHANGED: v3→v4 — Issue 18
+            % PLACEHOLDER — Inter-Satellite Link (ISL) v1 stub
+            % Candidate future one-way range observable:
+            %   z_{rx,tx} = rho_{rx,tx} + b_rx - b_tx + noise
+            % Sign convention: receiver clock adds positively, transmitter subtracts.
+            % (Consistent with standard GNSS pseudorange convention:
+            %  z = rho + b_receiver - b_transmitter + noise)
+            % v1 returns empty measurement vector and empty H; no EKF effect.
+            z_isl = [];
+            h_isl = [];
+            H_isl = zeros(0, 0);
+        end
 
         function need = needsFiniteDiffH_(cfg)
             % needsFiniteDiffH_  True when any model-side position-affecting correction is on.

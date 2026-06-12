@@ -6,6 +6,23 @@
 % Output (when write flags are true):
 %   output/Report-YYYYMMDD/report-vX.XX.pdf
 %   output/Report-YYYYMMDD/report-vX.XX.mat
+%
+% CHANGED: v3→v4 — Issue 19
+% -------  v1 Known Limitations  -------
+%
+% L1. Signal-dependent hardware delays / differential code biases (DCB)
+%     are set to zero.  In the IF combination, HW_IF = a*HW_L1 - b*HW_L2
+%     does not cancel and can be a significant bias for precise positioning.
+%     Not modelled in v1.  See Schaer (1999), Montenbruck (2014).
+%
+% L2. Doppler ionosphere-rate term (d/dt of first-order iono delay) is
+%     not modelled.  Doppler IF combination is not implemented.
+%     Doppler is excluded from ionoFreeCode mode if iono-rate is active.
+%
+% L3. Pseudorange/Doppler cross-covariance from shared tower-clock
+%     product errors is ignored.  R is block-diagonal (PR and Doppler
+%     blocks uncorrelated).  Valid only when clock product errors are
+%     small or when clock states are estimated in the EKF.
 
 clear; close all; clc;
 

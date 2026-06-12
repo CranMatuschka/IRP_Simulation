@@ -407,10 +407,39 @@ classdef EnvironmentModel < handle
                         isfield(obj.cfg.towers(k),'alt_m')
                     alt_m = obj.cfg.towers(k).alt_m;
                 end
-                P_k   = P0 * exp(-alt_m / hSc);
-                T_k   = max(Tmin, min(Tmax, T0 - lr * alt_m));
+
+                % CHANGED: v3→v4 — Issue 14
+                % Saastamoinen (1972) standard atmosphere validity guards.
+                % P(h) = 1013.25*(1 - 2.2557e-5*h)^5.2559  valid for h in [-500, 11000] m.
+                if alt_m < -500 || alt_m > 11000
+                    warning('revgnss:saastHeight', ...
+                        'Tower %d height %.0f m is outside Saastamoinen validity range [-500, 11000] m. Clamping.', ...
+                        k, alt_m);
+                    alt_m = max(-500, min(alt_m, 11000));
+                end
+
+                P_k  = P0 * exp(-alt_m / hSc);
+                T_k  = T0 - lr * alt_m;
+
+                % Guard temperature: physically > 0; 150 K as conservative floor
+                if T_k < 150
+                    T_k = 150;
+                end
+                T_k = max(Tmin, min(Tmax, T_k));
+
+                % Guard pressure: avoid divide-by-zero in humidity terms
+                P_k = max(P_k, 1e-3);
+
+                % Guard relative humidity: [0, 1]
+                RH_k = max(0, min(RH0, 1));
+
                 ZHD_k = 2.3 * P_k / P0;
-                ZWD_k = 0.15 * RH0 * exp(-alt_m / 2000);
+                ZWD_k = 0.15 * RH_k * exp(-alt_m / 2000);
+
+                % Guard output: assert finite
+                assert(isfinite(ZHD_k) && isfinite(ZWD_k), ...
+                    'EnvironmentModel: Saastamoinen ZHD/ZWD is NaN/Inf for tower %d', k);
+
                 obj.weatherState(k).ZHD_m        = ZHD_k;
                 obj.weatherState(k).ZWD_m        = ZWD_k;
                 obj.weatherState(k).pressure_hPa = P_k;

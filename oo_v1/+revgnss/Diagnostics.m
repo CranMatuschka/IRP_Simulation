@@ -248,26 +248,44 @@ classdef Diagnostics < handle
                 % Warn only when attitude estimation from pseudorange is expected but
                 % the Jacobian is near-zero (i.e. lever arm/geometry problem).
                 % Suppress when estimateAttitudeFromPseudorange = false (by design).
-                % Note: Diagnostics has no direct access to cfg; the EKF carries the flag.
-                % We use the heuristic: if every euler_idx column of H is exactly zero
-                % AND the omega_idx columns are also zero, the filter zeroed them on purpose.
-                % A simple epoch-throttled warning is only emitted when the H columns
-                % are non-trivially structured (rank > 0 excluding att columns) but att
-                % columns are still zero — meaning something unexpected happened.
-                % In practice, for the default config we simply skip the warning.
                 if entry.attitudeJacobianNorm < 1e-10 && ~isempty(H) && ...
                         mod(obj.nEpochs+1,500) == 1
-                    % Check whether omega columns are also zero (expected in gated mode)
                     H_omg = H(:, sm.omega_idx);
                     if norm(H_omg,'fro') > 1e-10
-                        % Omega columns nonzero but euler columns zero — unexpected
                         warning('Diagnostics:zeroAttJac', ...
                             'Attitude Jacobian is near-zero at t=%.0f s. Check lever arm.', t_s);
                     end
-                    % else: both euler and omega columns zero = intentional gating, no warn
+                end
+
+                % CHANGED: v3→v4 — Issue 8
+                % Attitude observability via SVD rank (not just max singular value).
+                % Using only maxSV cannot distinguish partial (1-2 axis) from full
+                % 3-axis sensitivity.
+                sv_att       = svd(H_att);
+                tol_sv       = max(sv_att) * 1e-6;  % relative tolerance
+                attRank      = sum(sv_att > tol_sv);
+                switch attRank
+                    case 0
+                        attStatus = 'unobservable';
+                    case {1,2}
+                        attStatus = 'partial';
+                    case 3
+                        attStatus = 'full';
+                    otherwise
+                        attStatus = 'full';
+                end
+                entry.attitudeRank   = attRank;
+                entry.attitudeStatus = attStatus;
+                if attRank >= 2
+                    entry.attitudeCondNum = max(sv_att(1:attRank)) / min(sv_att(1:attRank));
+                else
+                    entry.attitudeCondNum = NaN;
                 end
             else
                 entry.attitudeJacobianNorm = 0;
+                entry.attitudeRank         = 0;
+                entry.attitudeStatus       = 'unobservable';
+                entry.attitudeCondNum      = NaN;
             end
 
             if ~isempty(H)
@@ -565,6 +583,31 @@ classdef Diagnostics < handle
             nr = [obj.log.numMeasurementRows]';
         end
 
+        function [sumNIS, dof, passes] = accumulatedNISTest(obj, nSigma)
+            % accumulatedNISTest  Chi-squared NIS consistency check (Issue 7).
+            %
+            % CHANGED: v3→v4 — Issue 7
+            % Under correct filter: sumNIS ~ chi²(dof) where dof = sum of per-epoch M_k.
+            % E[sumNIS] = dof,  Var[sumNIS] = 2*dof
+            % Test: |sumNIS - dof| < nSigma * sqrt(2*dof)
+            % Reference: Bar-Shalom et al., "Estimation with Applications to
+            %   Tracking and Navigation", 2001.
+            %
+            % Mean NIS per epoch is NOT used for the formal test because
+            % NIS_k / M_k ≈ 1 only approximately when M_k varies.
+            if nargin < 2; nSigma = 3; end
+            nisVec  = obj.getNIS();
+            mVec    = obj.getNumMeasurementRows();
+            valid   = isfinite(nisVec) & isfinite(mVec) & mVec > 0;
+            sumNIS  = sum(nisVec(valid));
+            dof     = sum(mVec(valid));
+            if dof > 0
+                passes = abs(sumNIS - dof) < nSigma * sqrt(2 * dof);
+            else
+                passes = false;
+            end
+        end
+
         function v = getPrefitPseudorangeRMS(obj)
             v = [obj.log.prefitPseudorangeRMS_m]';
         end
@@ -708,6 +751,16 @@ classdef Diagnostics < handle
 
         function v = getGeometryRank(obj)
             v = [obj.log.geometryRank]';
+        end
+
+        function v = getAttitudeRank(obj)
+            % CHANGED: v3→v4 — Issue 8
+            v = [obj.log.attitudeRank]';
+        end
+
+        function v = getAttitudeStatus(obj)
+            % CHANGED: v3→v4 — Issue 8
+            v = {obj.log.attitudeStatus}';
         end
 
     end

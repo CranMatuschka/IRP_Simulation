@@ -1,10 +1,13 @@
 % test_measurement_jacobian_position_sign  Finite-difference check of H(position).
 %
-% For pseudorange rho = ||r_ant - r_tower||, the Jacobian w.r.t. ECEF CM position
-% should be:   H_pos(i,:) = (r_ant_est - r_tower_i)' / rho_i
+% CHANGED: v3→v4 — Issue 12
+% Naming: H_model = H as returned by MeasurementModel.computeH.
+%         H_fd_ref = independently recomputed finite-difference Jacobian.
+% We do NOT call H_model "analytic" because the internal implementation
+% may use numerical differentiation (FD) when corrections are enabled.
 %
-% This test verifies analytically computed H matches numerical finite difference
-% to better than 1e-4 relative error.
+% Tolerances: rel_tol = 1e-4 for geometry-only rows;
+%             abs_tol = 1e-7 for rows where |H_fd_ref| is small.
 
 thisDir = fileparts(mfilename('fullpath'));
 addpath(fullfile(thisDir, '..'));
@@ -24,8 +27,8 @@ lever    = asset.receiverLeverArm_body_m;
 euler    = x_est(stateMap.euler_idx);
 r_cm     = x_est(stateMap.r_idx);
 
-% Analytical measurements
-[z, h, H, R, errStruct] = measModel.computeMeasurements(asset, towers, x_est, 0, stateMap);
+% H_model: H as returned by MeasurementModel (may use FD internally)
+[z, h, H_model, R, errStruct] = measModel.computeMeasurements(asset, towers, x_est, 0, stateMap);
 
 if isempty(z)
     fprintf('  No visible towers at epoch 0 — cannot test Jacobian.\n');
@@ -41,9 +44,9 @@ twr_list = errStruct.towerIdx_perMeas;   % [M x 1]
 ant_list = errStruct.antennaIdx_perMeas; % [M x 1]
 leverArms = asset.receiverLeverArms_body_m;  % 3 x N_ant
 
-% Numerical finite-difference of H w.r.t. r_cm (3 position states)
-stepFD = 0.5;   % 0.5 m perturbation
-H_fd   = zeros(M, 3);
+% H_fd_ref: independently recomputed FD Jacobian (step = 1e-5 * |r| or 1 m)
+stepFD  = max(1e-5 * norm(r_cm), 1.0);
+H_fd_ref = zeros(M, 3);
 
 for ai = 1:3
     dx = zeros(3,1);  dx(ai) = stepFD;
@@ -55,21 +58,24 @@ for ai = 1:3
         r_twr = towers{twr_list(mi)}.getAntennaPositionECEF();
         rho_p = norm(r_ant_p - r_twr);
         rho_m = norm(r_ant_m - r_twr);
-        H_fd(mi, ai) = (rho_p - rho_m) / (2 * stepFD);
+        H_fd_ref(mi, ai) = (rho_p - rho_m) / (2 * stepFD);
     end
 end
 
-% Extract analytical position block from H
-H_pos = H(:, stateMap.r_idx);   % M x 3
+% Extract position block from H_model
+H_pos = H_model(:, stateMap.r_idx);   % M x 3
 
-% Compare: relative error per entry
-denom   = max(abs(H_fd), 1e-10);
-relErr  = abs(H_pos - H_fd) ./ denom;
-maxRel  = max(relErr(:));
+% CHANGED: v3→v4 — Issue 12 tolerances
+rel_tol = 1e-4;   % for geometry-only rows
+abs_tol = 1e-7;   % for rows where |H_fd_ref| is small
+err     = abs(H_pos - H_fd_ref);
+rel_err = err ./ max(abs(H_fd_ref), 1e-10);
+passes  = rel_err(:) < rel_tol | err(:) < abs_tol;
+maxRel  = max(rel_err(:));
 
-fprintf('  Max relative Jacobian error (position): %.2e\n', maxRel);
-assert(maxRel < 1e-4, ...
-    'test_measurement_jacobian_position_sign FAILED: relative error %.2e > 1e-4', maxRel);
+fprintf('  Max relative Jacobian error (H_model vs H_fd_ref): %.2e\n', maxRel);
+assert(all(passes), ...
+    'test_measurement_jacobian_position_sign FAILED: H_model does not match H_fd_ref within tolerance (max rel=%.2e)', maxRel);
 
 % Sign check: H_pos first row aligned with unit LOS vector (tower → receiver).
 lv1   = leverArms(:, ant_list(1));
