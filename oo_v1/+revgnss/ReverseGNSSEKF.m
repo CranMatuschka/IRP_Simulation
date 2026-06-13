@@ -45,6 +45,15 @@ classdef ReverseGNSSEKF < handle
 
         estimateTowerClocks  (1,1) logical = false
 
+        % Carrier float ambiguity states
+        estimateAmbiguities  (1,1) logical = false
+        nAmbiguities         (1,1) double  = 0
+        ambiguityNSignals    (1,1) double  = 1   % signals per tower
+
+        % Per-tower ZWD states
+        estimateZwd          (1,1) logical = false
+        nZwdStates           (1,1) double  = 0
+
         % Process noise parameters
         sigma_accel_mps2      (1,1) double = 0.01
         sigma_angAccel_radps2 (1,1) double = 1e-4
@@ -77,9 +86,37 @@ classdef ReverseGNSSEKF < handle
                 obj.estimateAngularRate = cfg.estimator.estimateAngularRate;
             end
 
+            % Determine if ambiguity states requested
+            if isfield(cfg,'measurements') && isfield(cfg.measurements,'carrierMode') && ...
+                    strcmp(cfg.measurements.carrierMode,'ekfFloat')
+                ambMode = '';
+                if isfield(cfg,'estimation') && isfield(cfg.estimation,'ambiguityMode')
+                    ambMode = cfg.estimation.ambiguityMode;
+                end
+                if strcmp(ambMode,'floatPerTowerSignal')
+                    obj.estimateAmbiguities = true;
+                    signals = revgnss.SignalUtils.getEnabledSignals(cfg);
+                    obj.ambiguityNSignals = numel(signals);
+                    obj.nAmbiguities = nTowers * obj.ambiguityNSignals;
+                end
+            end
+
+            % Determine if ZWD states requested
+            if isfield(cfg,'estimation') && isfield(cfg.estimation,'troposphereMode') && ...
+                    strcmp(cfg.estimation.troposphereMode,'perTowerZwd')
+                obj.estimateZwd    = true;
+                obj.nZwdStates     = nTowers;
+            end
+
             obj.nx = obj.nxBase;
             if obj.estimateTowerClocks
-                obj.nx = obj.nxBase + 2 * nTowers;
+                obj.nx = obj.nx + 2 * nTowers;
+            end
+            if obj.estimateAmbiguities
+                obj.nx = obj.nx + obj.nAmbiguities;
+            end
+            if obj.estimateZwd
+                obj.nx = obj.nx + obj.nZwdStates;
             end
 
             if isfield(cfg.estimator,'sigma_accel_mps2')
@@ -238,15 +275,46 @@ classdef ReverseGNSSEKF < handle
             sm.b_rx_idx    = 13;
             sm.bdot_rx_idx = 14;
 
+            nextIdx = obj.nxBase + 1;
+
+            % Optional tower clock states
             if obj.estimateTowerClocks && nTowers > 0
                 tClockIdx = zeros(nTowers, 2);
                 for ti = 1:nTowers
-                    base = obj.nxBase + 2*(ti-1);
-                    tClockIdx(ti,:) = [base+1, base+2];
+                    tClockIdx(ti,:) = [nextIdx, nextIdx+1];
+                    nextIdx = nextIdx + 2;
                 end
                 sm.towerClockIdx = tClockIdx;
             else
                 sm.towerClockIdx = zeros(nTowers, 2);
+            end
+
+            % Optional float ambiguity states: [nTowers x nSignals]
+            % ambiguityIdx(ti, si) = state index for tower ti, signal si
+            if obj.estimateAmbiguities && obj.nAmbiguities > 0
+                nSig = obj.ambiguityNSignals;
+                ambIdx = zeros(nTowers, nSig);
+                for ti = 1:nTowers
+                    for si = 1:nSig
+                        ambIdx(ti, si) = nextIdx;
+                        nextIdx = nextIdx + 1;
+                    end
+                end
+                sm.ambiguityIdx = ambIdx;
+            else
+                sm.ambiguityIdx = zeros(nTowers, max(1, obj.ambiguityNSignals));
+            end
+
+            % Optional per-tower ZWD states
+            if obj.estimateZwd && obj.nZwdStates > 0
+                zwdIdx = zeros(nTowers, 1);
+                for ti = 1:nTowers
+                    zwdIdx(ti) = nextIdx;
+                    nextIdx    = nextIdx + 1;
+                end
+                sm.zwdIdx = zwdIdx;
+            else
+                sm.zwdIdx = zeros(nTowers, 1);
             end
         end
 
@@ -308,6 +376,23 @@ classdef ReverseGNSSEKF < handle
             if obj.estimateTowerClocks
                 for ti = 1:obj.nTowers
                     F(sm.towerClockIdx(ti,1), sm.towerClockIdx(ti,2)) = dt_s;
+                end
+            end
+
+            % Ambiguity states: identity (random walk; F = I already)
+            % ZWD states: first-order Gauss-Markov phi = exp(-dt/tau)
+            if obj.estimateZwd
+                tau_zwd = 3600;
+                if isfield(obj.cfg,'estimation') && isfield(obj.cfg.estimation,'tropoZwd') && ...
+                        isfield(obj.cfg.estimation.tropoZwd,'tau_s')
+                    tau_zwd = obj.cfg.estimation.tropoZwd.tau_s;
+                end
+                phi_zwd = exp(-dt_s / tau_zwd);
+                for ti = 1:obj.nTowers
+                    idx = sm.zwdIdx(ti);
+                    if idx > 0
+                        F(idx, idx) = phi_zwd;
+                    end
                 end
             end
         end
@@ -389,8 +474,69 @@ classdef ReverseGNSSEKF < handle
                 end
             end
 
+            % --- Ambiguity process noise (random walk, very small) -------
+            if obj.estimateAmbiguities
+                q_amb_sigma = 1e-5;   % default [m/sqrt(s)]
+                if isfield(obj.cfg,'estimation') && isfield(obj.cfg.estimation,'ambiguity') && ...
+                        isfield(obj.cfg.estimation.ambiguity,'processNoiseSigma_m_per_sqrt_s')
+                    q_amb_sigma = obj.cfg.estimation.ambiguity.processNoiseSigma_m_per_sqrt_s;
+                end
+                q_amb = q_amb_sigma^2 * dt_s;
+                nSig  = obj.ambiguityNSignals;
+                for ti = 1:obj.nTowers
+                    for si = 1:nSig
+                        idx = sm.ambiguityIdx(ti, si);
+                        if idx > 0
+                            Q(idx, idx) = q_amb;
+                        end
+                    end
+                end
+            end
+
+            % --- ZWD process noise (Gauss-Markov steady-state) ----------
+            if obj.estimateZwd
+                tau_zwd    = 3600;
+                sigma_ss   = 0.05;
+                if isfield(obj.cfg,'estimation') && isfield(obj.cfg.estimation,'tropoZwd')
+                    tz = obj.cfg.estimation.tropoZwd;
+                    if isfield(tz,'tau_s');       tau_zwd  = tz.tau_s;       end
+                    if isfield(tz,'sigma_ss_m');  sigma_ss = tz.sigma_ss_m;  end
+                end
+                phi_zwd = exp(-dt_s / tau_zwd);
+                q_zwd   = sigma_ss^2 * (1 - phi_zwd^2);
+                for ti = 1:obj.nTowers
+                    idx = sm.zwdIdx(ti);
+                    if idx > 0
+                        Q(idx, idx) = q_zwd;
+                    end
+                end
+            end
+
             % Enforce symmetry
             Q = (Q + Q') / 2;
+        end
+
+        % ----------------------------------------------------------------
+        function resetAmbiguityCovariance(obj, towerIdx, sigIdx)
+            % resetAmbiguityCovariance  Reset ambiguity covariance after cycle slip.
+            %
+            % Sets P(amb,amb) to initialSigma_m^2 for tower towerIdx, signal sigIdx.
+            % Used when a cycle slip is detected or synthesized.
+            if ~obj.estimateAmbiguities; return; end
+            sm = obj.stateMap;
+            if towerIdx < 1 || towerIdx > obj.nTowers; return; end
+            if sigIdx < 1   || sigIdx > obj.ambiguityNSignals; return; end
+            idx = sm.ambiguityIdx(towerIdx, sigIdx);
+            if idx <= 0 || idx > obj.nx; return; end
+
+            initSig = 100;
+            if isfield(obj.cfg,'estimation') && isfield(obj.cfg.estimation,'ambiguity') && ...
+                    isfield(obj.cfg.estimation.ambiguity,'initialSigma_m')
+                initSig = obj.cfg.estimation.ambiguity.initialSigma_m;
+            end
+            obj.P(idx, :) = 0;
+            obj.P(:, idx) = 0;
+            obj.P(idx, idx) = initSig^2;
         end
 
         % ----------------------------------------------------------------

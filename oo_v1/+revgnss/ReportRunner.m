@@ -229,6 +229,22 @@ classdef ReportRunner
             summary.carrierPhaseEnabled  = cfg.measurements.carrierPhase.enable;
             summary.carrierPhaseUseInEKF = cfg.measurements.carrierPhase.useInEKF;
 
+            % New observable / estimation modes (v4+)
+            summary.carrierMode     = revgnss.ReportRunner.safeCfgStr_(cfg, ...
+                {'measurements','carrierMode'}, 'diagnostic');
+            summary.codeMode        = revgnss.ReportRunner.safeCfgStr_(cfg, ...
+                {'measurements','codeMode'}, 'singleFrequency');
+            summary.ambiguityMode   = revgnss.ReportRunner.safeCfgStr_(cfg, ...
+                {'estimation','ambiguityMode'}, 'none');
+            summary.troposphereMode = revgnss.ReportRunner.safeCfgStr_(cfg, ...
+                {'estimation','troposphereMode'}, 'none');
+            summary.lightTimeModel  = revgnss.ReportRunner.safeCfgStr_(cfg, ...
+                {'effects','lightTime','model'}, 'sagnacFirstOrder');
+            summary.pcvModel        = revgnss.ReportRunner.safeCfgStr_(cfg, ...
+                {'effects','antenna','pcvModel'}, 'toy');
+            summary.towerClockCorrMode = revgnss.ReportRunner.safeCfgStr_(cfg, ...
+                {'towerClock','correctionMode'}, 'perfectTruth');
+
             % Enabled effects list
             summary.enabledEffects = revgnss.ReportRunner.listEnabledEffects_(cfg);
 
@@ -421,6 +437,15 @@ classdef ReportRunner
             L{end+1} = sprintf('Carrier phase  enabled   : %s    useInEKF: %s', ...
                 mat2str(summary.carrierPhaseEnabled), mat2str(summary.carrierPhaseUseInEKF));
             L{end+1} = '';
+            L{end+1} = '--- Modes (v4+) ---';
+            L{end+1} = sprintf('carrierMode         : %s', summary.carrierMode);
+            L{end+1} = sprintf('codeMode            : %s', summary.codeMode);
+            L{end+1} = sprintf('ambiguityMode       : %s', summary.ambiguityMode);
+            L{end+1} = sprintf('troposphereMode     : %s', summary.troposphereMode);
+            L{end+1} = sprintf('lightTime.model     : %s', summary.lightTimeModel);
+            L{end+1} = sprintf('antenna.pcvModel    : %s', summary.pcvModel);
+            L{end+1} = sprintf('towerClock.corrMode : %s', summary.towerClockCorrMode);
+            L{end+1} = '';
             L{end+1} = '--- Enabled Effects ---';
             if isempty(summary.enabledEffects)
                 L{end+1} = '  (none — code noise only)';
@@ -461,6 +486,23 @@ classdef ReportRunner
             text(ax, 0.03, 0.97, strjoin(L, '\n'), ...
                 'Units','normalized', 'VerticalAlignment','top', ...
                 'FontName','Courier', 'FontSize',8.5, 'Interpreter','none');
+        end
+
+        % ----------------------------------------------------------------
+        function val = safeCfgStr_(cfg, path, default)
+            % safeCfgStr_  Safely read a string from nested cfg fields.
+            % path: cell array of field names, e.g. {'measurements','carrierMode'}
+            val = default;
+            node = cfg;
+            for k = 1:numel(path)
+                if ~isstruct(node) || ~isfield(node, path{k})
+                    return
+                end
+                node = node.(path{k});
+            end
+            if ischar(node) || isstring(node)
+                val = char(node);
+            end
         end
 
     end  % private static methods

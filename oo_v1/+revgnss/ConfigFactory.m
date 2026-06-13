@@ -131,7 +131,7 @@ classdef ConfigFactory
             % (zero Q, zero H columns). Set true only in multiAntennaAttitudeConfig.
             cfg.estimator.estimateAttitude        = true;
             cfg.estimator.estimateAngularRate     = false;
-            cfg.estimator.estimateAttitudeFromPseudorange     = true;
+            cfg.estimator.estimateAttitudeFromPseudorange     = false;
             cfg.estimator.estimateAngularRateFromPseudorange  = false;
             cfg.estimator.estimateCarrierAmbiguities          = false;
             % perfectCorrection: EKF uses known tower clock values (zero here).
@@ -335,13 +335,82 @@ classdef ConfigFactory
             cfg.measurements.doppler.useInEKF     = true;
 
             cfg.measurements.carrierPhase.enable           = true;
-            cfg.measurements.carrierPhase.useInEKF         = true;
+            cfg.measurements.carrierPhase.useInEKF         = false;   % governed by carrierMode in v4+
             cfg.measurements.carrierPhase.frequency_Hz     = 1575.42e6;
             cfg.measurements.carrierPhase.lambda_m         = 299792458 / 1575.42e6;
             cfg.measurements.carrierPhase.sigma_cycles     = 0.01;
             cfg.measurements.carrierPhase.initialAmbiguityMode = 'randomInteger';
             cfg.measurements.carrierPhase.seed             = 9001;
             cfg.measurements.carrierPhase.cycleSlip.enable = true;
+
+            % --- Observable mode (Step 1) -----------------------------------
+            % observableMode: describes active observables (informational + validation).
+            %   'code'                   pseudorange only
+            %   'code+doppler'           pseudorange + Doppler
+            %   'code+carrier'           pseudorange + carrier (requires carrierMode != 'off')
+            %   'code+doppler+carrier'   all three
+            % codeMode:
+            %   'singleFrequency'        L1 (or L2) only
+            %   'dualFrequencyStacked'   L1 + L2 as separate rows (existing behavior)
+            %   'ionosphereFree'         L1+L2 IF combination; requires L1 and L2
+            % carrierMode:
+            %   'off'        do not compute carrier phase
+            %   'diagnostic' compute carrier z but do not update EKF (existing behavior)
+            %   'ekfFloat'   carrier as EKF observable with float ambiguity states
+            % carrierCombinationMode:
+            %   'raw'             individual L1/L2 phase (one ambiguity per tower/signal)
+            %   'ionosphereFree'  IF phase (one IF ambiguity per tower)
+            cfg.measurements.observableMode          = 'code+doppler+carrier';
+            cfg.measurements.codeMode                = 'singleFrequency';
+            cfg.measurements.carrierMode             = 'diagnostic';
+            cfg.measurements.carrierCombinationMode  = 'raw';
+
+            % Carrier phase in metres (new-style sigma)
+            cfg.measurements.carrier.sigma_m                   = 0.005;
+            cfg.measurements.carrier.minElevationDeg           = 5;
+            cfg.measurements.carrier.cycleSlipMode             = 'none';
+            cfg.measurements.carrier.syntheticSlipProbability  = 0;
+
+            % --- Estimation modes (Steps 3 + 7) ----------------------------
+            % ambiguityMode: 'none' | 'floatPerTowerSignal'
+            % troposphereMode: 'none' | 'perTowerZwd'
+            cfg.estimation.ambiguityMode = 'none';
+            cfg.estimation.ambiguity.initialSigma_m                   = 100;
+            cfg.estimation.ambiguity.processNoiseSigma_m_per_sqrt_s   = 1e-5;
+
+            cfg.estimation.troposphereMode = 'none';
+            cfg.estimation.tropoZwd.tau_s          = 3600;
+            cfg.estimation.tropoZwd.sigma_ss_m     = 0.05;
+            cfg.estimation.tropoZwd.initialSigma_m = 0.10;
+
+            % --- Antenna PCV model (Step 4) ---------------------------------
+            % pcvModel: 'none' | 'toy' | 'table'
+            % 'toy' preserves existing toyAzEl behavior.
+            % 'table' uses receiverPcvTable (elevation-only or el+az).
+            cfg.effects.antenna.pcvModel                     = 'toy';
+            cfg.effects.antenna.receiverPcvTable.elDeg       = 0:10:90;
+            cfg.effects.antenna.receiverPcvTable.pcv_m       = zeros(1, 10);
+
+            % --- Light-time model (Step 5) ----------------------------------
+            % 'none' | 'sagnacFirstOrder' | 'iterative'
+            % Default 'sagnacFirstOrder' maps from existing cfg.physics.sagnac behavior.
+            cfg.effects.lightTime.model   = 'sagnacFirstOrder';
+            cfg.effects.lightTime.maxIter = 5;
+            cfg.effects.lightTime.tol_s   = 1e-12;
+
+            % --- Tower clock correction product (Step 6) -------------------
+            % correctionMode: 'none' | 'perfectTruth' | 'product' | 'productNoisy'
+            % 'perfectTruth' maps from old 'perfectCorrection' (validation use only).
+            % 'product' uses per-tower product struct (bias_m, drift_mps, epoch_s, ...).
+            % 'productNoisy' adds correction uncertainty to R.
+            cfg.towerClock.correctionMode = 'perfectTruth';
+            cfg.towerClock.sigmaBias_m    = 0.0;
+            cfg.towerClock.sigmaDrift_mps = 0.0;
+
+            % --- Observability diagnostics (Step 8) -------------------------
+            cfg.diagnostics.observability.enabled       = false;
+            cfg.diagnostics.observability.warn          = true;
+            cfg.diagnostics.observability.rankTolerance = [];
 
             % --- Plots -------------------------------------------------------
             % showFigures = false: figures created with Visible='off', saved to file.
@@ -545,20 +614,93 @@ classdef ConfigFactory
 
         function cfg = realisticPseudorangeConfig()
             % realisticPseudorangeConfig  Sagnac + Shapiro corrections truth+model enabled.
-            %
-            % With both truth and model enabled, corrections mostly cancel in the
-            % innovation. To see the deterministic bias, set model.enable=false.
-            %
-            % Light-time iteration is NOT implemented in v1. Sagnac is applied as
-            % the first-order Earth-rotation correction. Do not enable lightTime
-            % until an ECI/transmit-time model exists.
             cfg = revgnss.ConfigFactory.defaultConfig();
-            cfg.physics.sagnac.truth.enable           = true;
-            cfg.physics.sagnac.model.enable           = true;
-            cfg.physics.lightTime.truth.enable        = false;   % not implemented in v1
-            cfg.physics.lightTime.model.enable        = false;   % not implemented in v1
+            cfg.physics.sagnac.truth.enable             = true;
+            cfg.physics.sagnac.model.enable             = true;
             cfg.physics.relativity.shapiro.truth.enable = true;
             cfg.physics.relativity.shapiro.model.enable = true;
+        end
+
+        function cfg = cleanConfig()
+            % cleanConfig  All errors off: code-only baseline for convergence validation.
+            %
+            % Named scenario preset: no atmosphere, no antenna errors, no multipath,
+            % no tower clock mismatch, simple code-only measurements.
+            cfg = revgnss.ConfigFactory.defaultConfig();
+            cfg.errors.troposphere.truth.enable    = false;
+            cfg.errors.troposphere.model.enable    = false;
+            cfg.errors.ionosphere.truth.enable     = false;
+            cfg.errors.ionosphere.model.enable     = false;
+            cfg.errors.hardwareDelay.truth.enable  = false;
+            cfg.errors.hardwareDelay.model.enable  = false;
+            cfg.errors.multipath.truth.enable      = false;
+            cfg.effects.antennaPCV.truth.enable    = false;
+            cfg.effects.antennaPCV.model.enable    = false;
+            cfg.effects.antennaPCO.truth.enable    = false;
+            cfg.effects.antennaPCO.model.enable    = false;
+            cfg.errors.codeNoise.sigma_m           = 0.3;
+            cfg.measurements.observableMode        = 'code';
+            cfg.measurements.doppler.enable        = false;
+            cfg.measurements.doppler.useInEKF      = false;
+            cfg.measurements.carrierPhase.enable   = false;
+            cfg.measurements.carrierMode           = 'off';
+        end
+
+        function cfg = matchedErrorBaselineConfig()
+            % matchedErrorBaselineConfig  Truth+model include same deterministic corrections.
+            %
+            % Innovations remain small because model matches truth. This is the
+            % matched-error baseline (NOT "all errors off" — same corrections both sides).
+            cfg = revgnss.ConfigFactory.defaultConfig();
+        end
+
+        function cfg = dualFrequencyIFConfig()
+            % dualFrequencyIFConfig  L1+L2 ionosphere-free code combination.
+            %
+            % Enables IF pseudorange combination.  First-order ionosphere cancels.
+            % Requires both L1 and L2 active.
+            cfg = revgnss.ConfigFactory.defaultConfig();
+            cfg.signals.twoFrequency.enable      = true;
+            cfg.measurements.codeMode            = 'ionosphereFree';
+            cfg.measurements.observableMode      = 'code+doppler';
+            cfg.errors.ionosphere.truth.enable   = true;
+            cfg.errors.ionosphere.model.enable   = true;
+        end
+
+        function cfg = carrierFloatConfig()
+            % carrierFloatConfig  Carrier phase EKF with float ambiguity states.
+            %
+            % ambiguityMode='floatPerTowerSignal': one float ambiguity per tower/signal.
+            % No integer fixing. Ambiguities converge over time absorbing phase offsets.
+            cfg = revgnss.ConfigFactory.defaultConfig();
+            cfg.measurements.carrierMode             = 'ekfFloat';
+            cfg.measurements.carrierCombinationMode  = 'raw';
+            cfg.measurements.observableMode          = 'code+doppler+carrier';
+            cfg.estimation.ambiguityMode             = 'floatPerTowerSignal';
+            cfg.estimation.ambiguity.initialSigma_m  = 100;
+            cfg.measurements.doppler.enable          = true;
+            cfg.measurements.doppler.useInEKF        = true;
+            cfg.physics.doppler.truth.enable         = true;
+            cfg.physics.doppler.model.enable         = true;
+        end
+
+        function cfg = stochasticErrorsConfig()
+            % stochasticErrorsConfig  Stochastic clocks + atmosphere errors enabled.
+            cfg = revgnss.ConfigFactory.defaultConfig();
+            cfg.asset.clock.deterministic          = false;
+            cfg.asset.clock.bias_s                 = 1e-6;
+            cfg.asset.clock.fracFreq               = 1e-11;
+            for k = 1:numel(cfg.towers)
+                cfg.towers(k).clock.deterministic  = false;
+                cfg.towers(k).clock.bias_s         = (k-1) * 1e-8;
+                cfg.towers(k).clock.fracFreq       = k * 1e-12;
+            end
+            cfg.errors.troposphere.truth.enable    = true;
+            cfg.errors.troposphere.model.enable    = true;
+            cfg.errors.ionosphere.truth.enable     = true;
+            cfg.errors.ionosphere.model.enable     = true;
+            cfg.estimator.towerClockMode           = 'noisyCorrection';
+            cfg.towerClock.correctionMode          = 'productNoisy';
         end
 
         % ==================================================================
@@ -659,10 +801,32 @@ classdef ConfigFactory
                     isfield(cfg.clock.receiver,'deterministic')
                 cfg.asset.clock.deterministic = cfg.clock.receiver.deterministic;
             end
-            % cfg.errors.towerClockCorrection.mode → cfg.estimator.towerClockMode
+            % cfg.errors.towerClockCorrection.mode → cfg.estimator.towerClockMode (legacy)
             if isfield(cfg,'errors') && isfield(cfg.errors,'towerClockCorrection') && ...
                     isfield(cfg.errors.towerClockCorrection,'mode')
                 cfg.estimator.towerClockMode = cfg.errors.towerClockCorrection.mode;
+            end
+            % cfg.towerClock.correctionMode → cfg.estimator.towerClockMode (new mapping)
+            % 'perfectTruth' is the default value and does NOT override a manually-set
+            % estimator.towerClockMode (backward compatibility).
+            % All other non-default values override estimator.towerClockMode.
+            if isfield(cfg,'towerClock') && isfield(cfg.towerClock,'correctionMode')
+                newMode = cfg.towerClock.correctionMode;
+                switch newMode
+                    case 'perfectTruth'
+                        % Default value: only set if not already overridden by user
+                        if ~isfield(cfg,'estimator') || ~isfield(cfg.estimator,'towerClockMode')
+                            cfg.estimator.towerClockMode = 'perfectCorrection';
+                        end
+                    case 'product'
+                        cfg.estimator.towerClockMode = 'perfectCorrection';
+                    case 'productNoisy'
+                        cfg.estimator.towerClockMode = 'noisyCorrection';
+                    case 'none'
+                        cfg.estimator.towerClockMode = 'none';
+                    otherwise
+                        cfg.estimator.towerClockMode = newMode;
+                end
             end
 
             % ---- Unsupported: light-time ----------------------------------
@@ -731,18 +895,93 @@ classdef ConfigFactory
                 end
             end
 
-            % ---- Unsupported: carrier phase useInEKF ----------------------
-            if isfield(cfg,'measurements') && isfield(cfg.measurements,'carrierPhase') && ...
-                    isfield(cfg.measurements.carrierPhase,'useInEKF') && ...
-                    cfg.measurements.carrierPhase.useInEKF
-                warnMsg = 'Carrier phase EKF use requires ambiguity states not implemented in v1. carrierPhase.useInEKF disabled (diagnostic mode kept if enable=true).';
-                if strcmp(policy,'error')
-                    error('ConfigFactory:carrierEKFNotSupported', '%s', warnMsg);
+            % ---- Carrier mode validation ----------------------------------
+            % New API: cfg.measurements.carrierMode takes precedence.
+            % Legacy: cfg.measurements.carrierPhase.useInEKF=true without new API
+            %   → disabled with warning for backward compatibility.
+            hasNewCarrierMode = isfield(cfg,'measurements') && ...
+                isfield(cfg.measurements,'carrierMode');
+            if hasNewCarrierMode
+                carrierMode = cfg.measurements.carrierMode;
+                switch carrierMode
+                    case 'ekfFloat'
+                        % Require ambiguityMode='floatPerTowerSignal'
+                        ambMode = '';
+                        if isfield(cfg,'estimation') && isfield(cfg.estimation,'ambiguityMode')
+                            ambMode = cfg.estimation.ambiguityMode;
+                        end
+                        if ~strcmp(ambMode,'floatPerTowerSignal')
+                            error('ConfigFactory:carrierEKFRequiresAmbiguities', ...
+                                ['carrierMode=''ekfFloat'' requires ' ...
+                                 'cfg.estimation.ambiguityMode=''floatPerTowerSignal''. ' ...
+                                 'Set ambiguityMode appropriately.']);
+                        end
+                        % Require carrier signals configured
+                        if ~isfield(cfg,'measurements') || ~isfield(cfg.measurements,'codeMode')
+                            cfg.measurements.codeMode = 'singleFrequency';
+                        end
+                    case {'off','diagnostic'}
+                        % Ensure legacy useInEKF=true is silenced when carrierMode governs behavior
+                        if isfield(cfg,'measurements') && isfield(cfg.measurements,'carrierPhase') && ...
+                                isfield(cfg.measurements.carrierPhase,'useInEKF') && ...
+                                cfg.measurements.carrierPhase.useInEKF
+                            cfg.measurements.carrierPhase.useInEKF = false;
+                        end
+                    otherwise
+                        error('ConfigFactory:invalidCarrierMode', ...
+                            'cfg.measurements.carrierMode must be ''off'', ''diagnostic'', or ''ekfFloat''; got ''%s''.', carrierMode);
                 end
-                cfg.measurements.carrierPhase.useInEKF = false;
-                cfg.validation.warnings{end+1}         = warnMsg;
-                cfg.validation.disabledFeatures{end+1} = 'carrierPhase.useInEKF';
-                warning('ConfigFactory:carrierEKFDisabled', '%s', warnMsg);
+            else
+                % Legacy path: check old carrierPhase.useInEKF
+                if isfield(cfg,'measurements') && isfield(cfg.measurements,'carrierPhase') && ...
+                        isfield(cfg.measurements.carrierPhase,'useInEKF') && ...
+                        cfg.measurements.carrierPhase.useInEKF
+                    warnMsg = ['Carrier phase EKF use via carrierPhase.useInEKF is deprecated. ' ...
+                               'Set cfg.measurements.carrierMode=''ekfFloat'' and ' ...
+                               'cfg.estimation.ambiguityMode=''floatPerTowerSignal'' instead. ' ...
+                               'carrierPhase.useInEKF disabled (diagnostic mode kept if enable=true).'];
+                    if strcmp(policy,'error')
+                        error('ConfigFactory:carrierEKFUseLegacy', '%s', warnMsg);
+                    end
+                    cfg.measurements.carrierPhase.useInEKF = false;
+                    cfg.validation.warnings{end+1}         = warnMsg;
+                    cfg.validation.disabledFeatures{end+1} = 'carrierPhase.useInEKF';
+                    warning('ConfigFactory:carrierEKFLegacy', '%s', warnMsg);
+                end
+            end
+
+            % ---- twoFrequency early apply (must run before codeMode validation) ----
+            if isfield(cfg,'signals') && isfield(cfg.signals,'twoFrequency') && ...
+                    isfield(cfg.signals.twoFrequency,'enable')
+                if cfg.signals.twoFrequency.enable
+                    cfg.signals.enabled = {'L1','L2'};
+                else
+                    cfg.signals.enabled = {'L1'};
+                end
+            end
+
+            % ---- codeMode validation -------------------------------------
+            if isfield(cfg,'measurements') && isfield(cfg.measurements,'codeMode')
+                codeMode = cfg.measurements.codeMode;
+                switch codeMode
+                    case 'ionosphereFree'
+                        % Requires L1+L2
+                        sigNames = {};
+                        if isfield(cfg,'signals') && isfield(cfg.signals,'enabled')
+                            sigNames = cfg.signals.enabled;
+                        end
+                        hasL1 = any(strcmpi(sigNames,'L1'));
+                        hasL2 = any(strcmpi(sigNames,'L2'));
+                        if ~hasL1 || ~hasL2
+                            error('ConfigFactory:ionoFreeRequiresDualFreq', ...
+                                'codeMode=''ionosphereFree'' requires L1 and L2 signals. Enable cfg.signals.twoFrequency.enable=true.');
+                        end
+                    case {'singleFrequency','dualFrequencyStacked'}
+                        % OK
+                    otherwise
+                        error('ConfigFactory:invalidCodeMode', ...
+                            'cfg.measurements.codeMode must be ''singleFrequency'', ''dualFrequencyStacked'', or ''ionosphereFree''; got ''%s''.', codeMode);
+                end
             end
 
             % ---- Unsupported: Doppler EKF dependency ---------------------
@@ -811,18 +1050,6 @@ classdef ConfigFactory
                 clk.bias_s        = prev.bias_s;
                 clk.fracFreq      = prev.fracFreq;
                 cfg.asset.clock   = clk;
-            end
-
-            % ---- twoFrequency toggle: always overrides signals.enabled ----
-            % false → {'L1'} only;  true → {'L1','L2'}.
-            % All callers that want L1+L2 must set twoFrequency.enable=true.
-            if isfield(cfg,'signals') && isfield(cfg.signals,'twoFrequency') && ...
-                    isfield(cfg.signals.twoFrequency,'enable')
-                if cfg.signals.twoFrequency.enable
-                    cfg.signals.enabled = {'L1','L2'};
-                else
-                    cfg.signals.enabled = {'L1'};
-                end
             end
 
             % ---- Receiver lever arms and auto-attitude ----------------------

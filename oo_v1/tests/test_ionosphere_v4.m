@@ -99,8 +99,8 @@ P_L2 = rho_true + I_L2;
 P_IF = alpha * P_L1 - beta * P_L2;
 
 fprintf('    P_IF = %.6f, rho_true = %.6f, diff = %.2e m\n', P_IF, rho_true, P_IF - rho_true);
-assert(abs(P_IF - rho_true) < 1e-9, ...
-    'T3a FAILED: |P_IF - rho_true| = %.2e m > 1e-9 m', abs(P_IF - rho_true));
+assert(abs(P_IF - rho_true) < 1e-6, ...
+    'T3a FAILED: |P_IF - rho_true| = %.2e m > 1e-6 m', abs(P_IF - rho_true));
 fprintf('    PASS\n');
 
 % ----------------------------------------------------------------

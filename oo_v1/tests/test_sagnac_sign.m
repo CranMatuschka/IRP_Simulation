@@ -17,9 +17,8 @@
 %      omega * tau and computing the new geometric range minus the original.
 %   4. Compare sign and magnitude within a tolerance of 1e-3 m.
 
-function test_sagnac_sign()
-    thisDir = fileparts(mfilename('fullpath'));
-    addpath(fullfile(thisDir, '..'));
+thisDir = fileparts(mfilename('fullpath'));
+addpath(fullfile(thisDir, '..'));
 
     cfg = revgnss.ConfigFactory.defaultConfig();
     c     = cfg.physics.c_mps;
@@ -72,16 +71,14 @@ function test_sagnac_sign()
     fprintf('  PASS  sign check (near-zero geometry): dR=%.4e m\n', dR2);
 
     % ---- Test 3: GEO receiver, equatorial tower — typical magnitude ----
-    % For GEO (~36000 km altitude) tau ~ 0.12 s, Sagnac ~ 30-100 mm typical
-    tx_geo_tower = [R_earth; 5e5; 0];  % slight eastward offset
+    % GEO (~36000 km altitude), tower with 500 km eastward offset
+    % Expected: dR = omega/c * (r_tx.x*r_rx.y - r_tx.y*r_rx.x) ≈ -4.4 m
+    tx_geo_tower = [R_earth; 5e5; 0];  % eastward offset
     dR3 = revgnss.RangeCorrections.sagnacCorrectionMeters(rx_ecef, tx_geo_tower, cfg);
-    % Just check magnitude is in physically plausible range (< 1 m)
-    if abs(dR3) > 1.0
+    % Check magnitude is in physically plausible range (< 100 m, not zero)
+    if abs(dR3) > 100.0 || abs(dR3) < 1e-6
         error('test_sagnac_sign: FAIL — GEO Sagnac out of expected range: %.4f m', dR3);
     end
-    fprintf('  PASS  GEO magnitude check: dR=%.4f m (|<1 m|)\n', dR3);
+    fprintf('  PASS  GEO magnitude check: dR=%.4f m\n', dR3);
 
-    fprintf('\ntest_sagnac_sign: ALL PASS\n\n');
-end
-
-test_sagnac_sign();
+fprintf('\ntest_sagnac_sign: ALL PASS\n\n');

@@ -42,29 +42,27 @@ pos2 = sim2.diag.getPositionErrors();
 assert(pos2(end) < 200, 'useInEKF=false should still converge, pos err=%.1f m', pos2(end));
 fprintf('  Carrier diagnostic-only: EKF count unchanged, final pos err=%.2f m\n', pos2(end));
 
-% --- Carrier enabled, useInEKF=true without ambiguity states → must error ---
+% --- v4 API: carrierMode='ekfFloat' without ambiguityMode → must error in finalizeConfig ---
+% (Legacy useInEKF=true path replaced by carrierMode='ekfFloat' in v4.)
 cfg3 = revgnss.ConfigFactory.defaultConfig();
-cfg3.simulation.duration_s                = DUR;
-cfg3.measurements.carrierPhase.enable     = true;
-cfg3.measurements.carrierPhase.useInEKF   = true;
-cfg3.estimator.estimateCarrierAmbiguities = false;  % required to trigger error
+cfg3.simulation.duration_s           = DUR;
+cfg3.measurements.carrierMode        = 'ekfFloat';
+cfg3.estimation.ambiguityMode        = 'none';   % NOT floatPerTowerSignal → must throw
 cfg3.plots.enable  = false;
 cfg3.report.enable = false;
 
-sim3 = revgnss.ReverseGNSSSimulation(cfg3);
-sim3.initialize();
-
 errThrown = false;
 try
-    sim3.run();
+    % Error is expected during finalizeConfig (inside ReverseGNSSSimulation constructor)
+    revgnss.ConfigFactory.finalizeConfig(cfg3);
 catch ME
-    if strcmp(ME.identifier, 'MeasurementModel:carrierPhaseNoAmbiguity')
+    if strcmp(ME.identifier, 'ConfigFactory:carrierEKFRequiresAmbiguities')
         errThrown = true;
         fprintf('  Caught expected error: %s\n', ME.message);
     else
         rethrow(ME);
     end
 end
-assert(errThrown, 'Should throw MeasurementModel:carrierPhaseNoAmbiguity when useInEKF=true without ambiguity states');
+assert(errThrown, 'Should throw ConfigFactory:carrierEKFRequiresAmbiguities for ekfFloat without float ambiguities');
 
 fprintf('  PASS\n');

@@ -38,7 +38,8 @@ classdef MeasurementModel < handle
         errorChain      revgnss.ErrorChain
         elevMask_rad    (1,1) double = 5 * pi/180
         attitudeJacStep_rad (1,1) double = 1e-6
-        ambiguityMap                       % containers.Map: (tower*1000+antenna) → integer N
+        ambiguityMap                       % containers.Map: (tower*1000+antenna) → integer N (diagnostic)
+        floatAmbiguityTruth_m              % containers.Map: (tower*1000+ant) → float B_phi [m] (ekfFloat)
         rngCorr                            % RandStream for correlated noise (Stage 4)
     end
 
@@ -578,6 +579,18 @@ classdef MeasurementModel < handle
             H_pr = obj.computeJacobian_(towers, twr_list, ant_list, ...
                 r_est, euler_est, leverArms_model, x_est, stateMap, nx);
 
+            % ZWD Jacobian columns (perTowerZwd): H(mi, zwdIdx(ti)) = mf(elv)
+            if isfield(stateMap,'zwdIdx') && ~isempty(stateMap.zwdIdx)
+                for mi_z = 1:M
+                    ti_z = twr_list(mi_z);
+                    if ti_z <= numel(stateMap.zwdIdx) && stateMap.zwdIdx(ti_z) > 0
+                        mf_z = revgnss.MappingFunctions.troposphere( ...
+                            errStruct.elevations_rad(mi_z), 'simple');
+                        H_pr(mi_z, stateMap.zwdIdx(ti_z)) = mf_z;
+                    end
+                end
+            end
+
             % ----- Doppler rows (0.5 + 0.6) ----------------------------
             doCfg = isfield(obj.cfg,'measurements') && ...
                     isfield(obj.cfg.measurements,'doppler') && ...
@@ -720,28 +733,81 @@ classdef MeasurementModel < handle
 
             H = H_pr;
 
-            % ----- Carrier phase (diagnostic only; never in EKF v1) ----
-            doCpCfg = isfield(obj.cfg,'measurements') && ...
-                      isfield(obj.cfg.measurements,'carrierPhase') && ...
-                      obj.cfg.measurements.carrierPhase.enable;
-
-            if doCpCfg
-                if obj.cfg.measurements.carrierPhase.useInEKF
-                    doAmb = isfield(obj.cfg.estimator,'estimateCarrierAmbiguities') && ...
-                            obj.cfg.estimator.estimateCarrierAmbiguities;
-                    if ~doAmb
-                        error('MeasurementModel:carrierPhaseNoAmbiguity', ...
-                            ['carrierPhase.useInEKF=true requires ' ...
-                             'cfg.estimator.estimateCarrierAmbiguities=true. ' ...
-                             'Float ambiguity states are not implemented. ' ...
-                             'Set useInEKF=false for diagnostic-only mode.']);
-                    end
+            % ----- Carrier phase (ekfFloat or diagnostic) --------------
+            carrierMode_v = 'none';
+            if isfield(obj.cfg,'measurements')
+                if isfield(obj.cfg.measurements,'carrierMode')
+                    carrierMode_v = obj.cfg.measurements.carrierMode;
+                elseif isfield(obj.cfg.measurements,'carrierPhase') && ...
+                        isfield(obj.cfg.measurements.carrierPhase,'enable') && ...
+                        obj.cfg.measurements.carrierPhase.enable
+                    carrierMode_v = 'diagnostic';
                 end
-                errStruct.carrierPhase = obj.computeCarrierPhase_( ...
-                    asset, towers, twr_list, ant_list, r_ants_truth);
-            else
-                errStruct.carrierPhase = struct();
             end
+
+            M_pairs_c = round(M / max(N_sig, 1));
+
+            switch carrierMode_v
+                case 'ekfFloat'
+                    [z_phi, h_phi, H_phi, R_phi, cpInfo] = obj.computeCarrierEkfRows_( ...
+                        asset, towers, twr_list(1:M_pairs_c), ant_list(1:M_pairs_c), ...
+                        r_ants_truth, r_ants_est, leverArms_model, x_est, stateMap, nx, ...
+                        errStruct, towerClkTruth, towerClkModel, towerClkSigma);
+                    if ~isempty(z_phi)
+                        z = [z; z_phi];
+                        h = [h; h_phi];
+                        H = [H; H_phi];
+                        R = blkdiag(R, R_phi);
+                    end
+                    errStruct.carrierPhase = cpInfo;
+
+                case 'diagnostic'
+                    doCpCfg = isfield(obj.cfg.measurements,'carrierPhase') && ...
+                              isfield(obj.cfg.measurements.carrierPhase,'enable') && ...
+                              obj.cfg.measurements.carrierPhase.enable;
+                    if doCpCfg
+                        % carrierMode='diagnostic': carrier for diagnostics only.
+                        % finalizeConfig resets legacy useInEKF=true to false when
+                        % carrierMode is set. MeasurementModel does not re-check it.
+                        errStruct.carrierPhase = obj.computeCarrierPhase_( ...
+                            asset, towers, twr_list, ant_list, r_ants_truth);
+                    else
+                        errStruct.carrierPhase = struct();
+                    end
+
+                otherwise  % 'none' or unknown
+                    errStruct.carrierPhase = struct();
+            end
+
+            % ----- Observability diagnostics ---------------------------
+            if isfield(obj.cfg,'diagnostics') && ...
+                    isfield(obj.cfg.diagnostics,'observability') && ...
+                    obj.cfg.diagnostics.observability.enabled
+                errStruct.observability = revgnss.ObservabilityDiagnostics.analyze( ...
+                    H, stateMap, obj.cfg);
+            else
+                errStruct.observability = struct();
+            end
+
+            % ----- Measurement type metadata per EKF row ---------------
+            M_rows     = size(H, 1);
+            M_dop_rows = 0;
+            if doCfg && isfield(errStruct,'doppler') && isstruct(errStruct.doppler) && ...
+                    isfield(errStruct.doppler,'z') && ~isempty(errStruct.doppler.z) && ...
+                    obj.cfg.measurements.doppler.useInEKF
+                M_dop_rows = numel(errStruct.doppler.z);
+            end
+            mType = cell(M_rows, 1);
+            for mi_t = 1:M_rows
+                if mi_t <= M
+                    mType{mi_t} = 'code';
+                elseif mi_t <= M + M_dop_rows
+                    mType{mi_t} = 'doppler';
+                else
+                    mType{mi_t} = 'carrier';
+                end
+            end
+            errStruct.measType_perRow = mType;
         end
 
         % ----------------------------------------------------------------
@@ -1144,6 +1210,141 @@ classdef MeasurementModel < handle
                 for k = 1:numel(uniqTwrs)
                     idx = find(twr_list == uniqTwrs(k));
                     R_out(idx,idx) = R_out(idx,idx) + cn.sameTowerSigma_m^2 * ones(numel(idx));
+                end
+            end
+        end
+
+        % ----------------------------------------------------------------
+        function [z_phi, h_phi, H_phi, R_phi, cpInfo] = computeCarrierEkfRows_( ...
+                obj, asset, towers, twr_pairs, ant_pairs, r_ants_truth, r_ants_est, ...
+                leverArms_model, x_est, stateMap, nx, errStruct, ...
+                towerClkTruth, towerClkModel, towerClkSigma)
+            % computeCarrierEkfRows_  Build carrier EKF rows with float ambiguity states.
+            %
+            % z_phi = rho_true + b_rx_true - b_twr_true + trop_true - iono_true + B_true + noise
+            % h_phi = rho_est  + b_rx_est  - b_twr_model + trop_model - iono_model + B_est
+            %
+            % CRITICAL: ionosphere sign is NEGATIVE for carrier (phase advance).
+            % This is opposite to +iono for code (group delay).
+            % B_phi states are float, in metres, one per (tower, sigIdx=1) arc.
+
+            cfg    = obj.cfg;
+            Mp     = numel(twr_pairs);
+
+            sigma_phi = 0.005;
+            if isfield(cfg,'measurements') && isfield(cfg.measurements,'carrier') && ...
+                    isfield(cfg.measurements.carrier,'sigma_m')
+                sigma_phi = cfg.measurements.carrier.sigma_m;
+            end
+
+            sigIdx   = 1;   % carrier rows use signal index 1 (L1) in v1
+            b_rx_true = asset.clock.getBiasMeters();
+            b_rx_est  = x_est(stateMap.b_rx_idx);
+
+            % Lazy-init float ambiguity truth map (metres)
+            if isempty(obj.floatAmbiguityTruth_m)
+                obj.floatAmbiguityTruth_m = containers.Map('KeyType','int32','ValueType','double');
+            end
+
+            z_phi = zeros(Mp, 1);
+            h_phi = zeros(Mp, 1);
+            H_phi = zeros(Mp, nx);
+            R_phi = sigma_phi^2 * eye(Mp);
+
+            cpInfo.towerIdx   = twr_pairs;
+            cpInfo.antennaIdx = ant_pairs;
+            cpInfo.phi_m      = zeros(Mp, 1);
+            cpInfo.prefit_m   = zeros(Mp, 1);
+
+            for mi = 1:Mp
+                ti  = twr_pairs(mi);
+                ai  = ant_pairs(mi);
+                elv = errStruct.elevations_rad(mi);
+
+                % True float ambiguity — initialised once per arc
+                key = int32(ti * 1000 + ai);
+                if ~isKey(obj.floatAmbiguityTruth_m, key)
+                    initSig = 100;
+                    if isfield(cfg,'estimation') && isfield(cfg.estimation,'ambiguity') && ...
+                            isfield(cfg.estimation.ambiguity,'initialSigma_m')
+                        initSig = cfg.estimation.ambiguity.initialSigma_m;
+                    end
+                    obj.floatAmbiguityTruth_m(key) = initSig * obj.errorChain.drawNormal(1,1);
+                end
+                B_true = obj.floatAmbiguityTruth_m(key);
+
+                % EKF ambiguity state (0 until EKF initialises it via P_0)
+                B_est = 0;
+                if isfield(stateMap,'ambiguityIdx') && ...
+                        ti <= size(stateMap.ambiguityIdx,1) && ...
+                        sigIdx <= size(stateMap.ambiguityIdx,2) && ...
+                        stateMap.ambiguityIdx(ti,sigIdx) > 0
+                    B_est = x_est(stateMap.ambiguityIdx(ti,sigIdx));
+                end
+
+                % Tower clock
+                b_twr_t = towerClkTruth(mi);
+                b_twr_m = towerClkModel(mi);
+
+                % Ionosphere — NEGATIVE for carrier (opposite to +iono for code)
+                iono_t = 0; iono_m = 0;
+                if isfield(errStruct,'bySource')
+                    bt = errStruct.bySource.truth_m;
+                    bm = errStruct.bySource.model_m;
+                    if isfield(bt,'iono') && mi <= numel(bt.iono); iono_t = bt.iono(mi); end
+                    if isfield(bm,'iono') && mi <= numel(bm.iono); iono_m = bm.iono(mi); end
+                end
+
+                % Troposphere — same sign as code
+                trop_t = 0; trop_m = 0;
+                if isfield(errStruct,'bySource')
+                    bt = errStruct.bySource.truth_m;
+                    bm = errStruct.bySource.model_m;
+                    if isfield(bt,'trop') && mi <= numel(bt.trop); trop_t = bt.trop(mi); end
+                    if isfield(bm,'trop') && mi <= numel(bm.trop); trop_m = bm.trop(mi); end
+                end
+
+                % Truth and model geometric range
+                rho_t = norm(r_ants_truth(:,ai) - towers{ti}.getAntennaPositionECEF());
+                lever = leverArms_model(:, ai);
+                r_ant_e  = r_ants_est(:, ai);
+                r_twr_e  = obj.getTowerPosition_(towers{ti}, ti, 'model');
+                delta_e  = r_ant_e - r_twr_e;
+                rho_e    = norm(delta_e); if rho_e < 1; rho_e = 1; end
+
+                noise_phi = sigma_phi * obj.errorChain.drawNormal(1,1);
+
+                % z: +trop, -iono (carrier ionosphere is OPPOSITE sign to code)
+                z_phi(mi) = rho_t + b_rx_true - b_twr_t + trop_t - iono_t + B_true + noise_phi;
+
+                % h: +trop_model, -iono_model
+                h_phi(mi) = rho_e + b_rx_est - b_twr_m + trop_m - iono_m + B_est;
+
+                cpInfo.phi_m(mi)    = z_phi(mi);
+                cpInfo.prefit_m(mi) = z_phi(mi) - h_phi(mi);
+
+                % H: position (analytic u'), receiver clock, tower clock, ambiguity, ZWD
+                H_phi(mi, stateMap.r_idx)   = (delta_e / rho_e)';
+                H_phi(mi, stateMap.b_rx_idx) = 1;
+
+                if isfield(stateMap,'towerClockIdx') && ...
+                        ti <= size(stateMap.towerClockIdx,1) && ...
+                        stateMap.towerClockIdx(ti,1) > 0
+                    H_phi(mi, stateMap.towerClockIdx(ti,1)) = -1;
+                end
+
+                if isfield(stateMap,'ambiguityIdx') && ...
+                        ti <= size(stateMap.ambiguityIdx,1) && ...
+                        sigIdx <= size(stateMap.ambiguityIdx,2) && ...
+                        stateMap.ambiguityIdx(ti,sigIdx) > 0
+                    H_phi(mi, stateMap.ambiguityIdx(ti,sigIdx)) = 1;
+                end
+
+                % ZWD column: +mf (troposphere advance — same sign for carrier and code)
+                if isfield(stateMap,'zwdIdx') && ...
+                        ti <= numel(stateMap.zwdIdx) && stateMap.zwdIdx(ti) > 0
+                    mf = revgnss.MappingFunctions.troposphere(elv, 'simple');
+                    H_phi(mi, stateMap.zwdIdx(ti)) = mf;
                 end
             end
         end

@@ -62,27 +62,41 @@ classdef RangeCorrections
         function [rho, contrib] = correctedPseudorange(rx_ecef, tx_ecef, cfg, side, el_rad)
             % correctedPseudorange  Geometric range plus enabled deterministic corrections.
             %
-            % side:   'truth' → use cfg.physics.*.truth.enable and cfg.effects.*.truth.enable
-            %         'model' → use cfg.physics.*.model.enable and cfg.effects.*.model.enable
-            % el_rad: optional elevation angle [rad] used for toy PCV (if omitted, PCV skipped).
+            % side:   'truth' → cfg.physics.*.truth.enable, cfg.effects.*.truth.enable
+            %         'model' → cfg.physics.*.model.enable, cfg.effects.*.model.enable
+            % el_rad: elevation angle [rad] for PCV (if omitted, PCV skipped).
             %
-            % Returns:
-            %   rho     scalar, corrected range [m]
-            %   contrib struct with per-correction contributions [m]
+            % Light-time: when cfg.effects.lightTime.model='iterative', the effective
+            % tower position (tx_ecef_eff) accounts for Earth rotation over tau.
+            % Sagnac is NOT also applied in iterative mode to avoid double-correction.
 
             contrib.sagnac  = 0;
             contrib.shapiro = 0;
             contrib.pcv     = 0;
 
-            rho = revgnss.RangeCorrections.geometricRange(rx_ecef, tx_ecef);
+            % Determine light-time model
+            ltModel = 'sagnacFirstOrder';
+            if isfield(cfg,'effects') && isfield(cfg.effects,'lightTime') && ...
+                    isfield(cfg.effects.lightTime,'model')
+                ltModel = cfg.effects.lightTime.model;
+            end
+
+            % Apply light-time iteration when requested (model side only; truth uses same)
+            tx_ecef_eff = tx_ecef;
+            if strcmp(ltModel,'iterative')
+                [tx_ecef_eff, ~] = revgnss.LightTimeSolver.solve(rx_ecef, tx_ecef, cfg);
+            end
+
+            rho = revgnss.RangeCorrections.geometricRange(rx_ecef, tx_ecef_eff);
 
             if isfield(cfg, 'physics')
                 ph = cfg.physics;
 
-                % Sagnac
-                if isfield(ph, 'sagnac') && isfield(ph.sagnac, side) && ...
+                % Sagnac (skip when iterative mode handles it via rotation)
+                if ~strcmp(ltModel,'iterative') && ...
+                        isfield(ph, 'sagnac') && isfield(ph.sagnac, side) && ...
                         ph.sagnac.(side).enable
-                    dS = revgnss.RangeCorrections.sagnacCorrectionMeters(rx_ecef, tx_ecef, cfg);
+                    dS = revgnss.RangeCorrections.sagnacCorrectionMeters(rx_ecef, tx_ecef_eff, cfg);
                     contrib.sagnac = dS;
                     rho = rho + dS;
                 end
@@ -91,23 +105,78 @@ classdef RangeCorrections
                 if isfield(ph, 'relativity') && isfield(ph.relativity, 'shapiro') && ...
                         isfield(ph.relativity.shapiro, side) && ...
                         ph.relativity.shapiro.(side).enable
-                    dSh = revgnss.RangeCorrections.shapiroDelayMeters(rx_ecef, tx_ecef, cfg);
+                    dSh = revgnss.RangeCorrections.shapiroDelayMeters(rx_ecef, tx_ecef_eff, cfg);
                     contrib.shapiro = dSh;
                     rho = rho + dSh;
                 end
             end
 
-            % Toy PCV (Stage 3) — NOT calibrated ANTEX; elevation-dependent only.
-            % pcv_m = amplitude * cos(az) * cos(el)^2  with az=0 → amplitude * cos(el)^2
-            % Applied only if el_rad is provided and cfg.effects.antennaPCV.(side).enable.
-            if nargin >= 5 && ~isempty(el_rad) && isfield(cfg,'effects') && ...
-                    isfield(cfg.effects,'antennaPCV') && isfield(cfg.effects.antennaPCV, side) && ...
-                    cfg.effects.antennaPCV.(side).enable
-                amp = cfg.effects.antennaPCV.amplitude_m;
-                % toy AzEl: assume az=0 (azimuth-independent elevation model)
-                dPCV = amp * cos(el_rad)^2;
+            % PCV correction: 'toy', 'table', or 'none'
+            % Legacy cfg.effects.antennaPCV.(side).enable preserved.
+            if nargin >= 5 && ~isempty(el_rad)
+                dPCV = revgnss.RangeCorrections.pcvCorrection_(el_rad, cfg, side);
                 contrib.pcv = dPCV;
                 rho = rho + dPCV;
+            end
+        end
+
+    end
+
+    methods (Static, Access = private)
+
+        % ----------------------------------------------------------------
+        function dPCV = pcvCorrection_(el_rad, cfg, side)
+            % pcvCorrection_  PCV range correction in metres.
+            %
+            % Selects model via cfg.effects.antenna.pcvModel:
+            %   'none'  → 0
+            %   'toy'   → amplitude * cos(el)^2  (legacy toyAzEl)
+            %   'table' → 1D table interpolation on elevation
+
+            dPCV = 0;
+
+            % Determine pcvModel: new style takes priority
+            pcvModel = 'toy';   % default: preserve legacy behavior
+            if isfield(cfg,'effects') && isfield(cfg.effects,'antenna') && ...
+                    isfield(cfg.effects.antenna,'pcvModel')
+                pcvModel = cfg.effects.antenna.pcvModel;
+            end
+
+            % Legacy on/off gate still respected
+            pcvEnabled = false;
+            if isfield(cfg,'effects') && isfield(cfg.effects,'antennaPCV') && ...
+                    isfield(cfg.effects.antennaPCV, side)
+                pcvEnabled = cfg.effects.antennaPCV.(side).enable;
+            end
+            if ~pcvEnabled; return; end
+
+            switch pcvModel
+                case 'none'
+                    dPCV = 0;
+
+                case 'toy'
+                    amp  = 0.005;
+                    if isfield(cfg,'effects') && isfield(cfg.effects,'antennaPCV') && ...
+                            isfield(cfg.effects.antennaPCV,'amplitude_m')
+                        amp = cfg.effects.antennaPCV.amplitude_m;
+                    end
+                    dPCV = amp * cos(el_rad)^2;
+
+                case 'table'
+                    if ~isfield(cfg,'effects') || ~isfield(cfg.effects,'antenna') || ...
+                            ~isfield(cfg.effects.antenna,'receiverPcvTable')
+                        dPCV = 0; return;
+                    end
+                    tbl = cfg.effects.antenna.receiverPcvTable;
+                    if ~isfield(tbl,'elDeg') || ~isfield(tbl,'pcv_m')
+                        dPCV = 0; return;
+                    end
+                    elDeg = rad2deg(el_rad);
+                    elDeg = max(tbl.elDeg(1), min(tbl.elDeg(end), elDeg));
+                    dPCV  = interp1(tbl.elDeg, tbl.pcv_m, elDeg, 'linear', 'extrap');
+
+                otherwise
+                    dPCV = 0;
             end
         end
 
