@@ -132,6 +132,37 @@ classdef ScenarioFactory
                     P0(idx_bdot, idx_bdot) = sigma_bd_twr^2;
                 end
             end
+
+            % TASK 1: float ambiguity initial covariance (one per tower×signal)
+            if ekf.estimateAmbiguities && isfield(sm,'ambiguityIdx') && ~isempty(sm.ambiguityIdx)
+                sigma0_amb = 100.0;
+                if isfield(cfg,'estimation') && isfield(cfg.estimation,'ambiguity') && ...
+                        isfield(cfg.estimation.ambiguity,'initialSigma_m')
+                    sigma0_amb = cfg.estimation.ambiguity.initialSigma_m;
+                end
+                idxMat = sm.ambiguityIdx;
+                for k = 1:numel(idxMat)
+                    idx_k = idxMat(k);
+                    if idx_k > 0
+                        P0(idx_k, idx_k) = sigma0_amb^2;
+                    end
+                end
+            end
+
+            % TASK 1: ZWD initial covariance (one per tower)
+            if ekf.estimateZwd && isfield(sm,'zwdIdx') && ~isempty(sm.zwdIdx)
+                sigma0_zwd = 0.10;
+                if isfield(cfg,'estimation') && isfield(cfg.estimation,'tropoZwd') && ...
+                        isfield(cfg.estimation.tropoZwd,'initialSigma_m')
+                    sigma0_zwd = cfg.estimation.tropoZwd.initialSigma_m;
+                end
+                for k = 1:numel(sm.zwdIdx)
+                    idx_k = sm.zwdIdx(k);
+                    if idx_k > 0
+                        P0(idx_k, idx_k) = sigma0_zwd^2;
+                    end
+                end
+            end
         end
     end
 end

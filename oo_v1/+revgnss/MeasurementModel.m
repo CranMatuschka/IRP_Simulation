@@ -173,6 +173,28 @@ classdef MeasurementModel < handle
                 corrNoise_m = zeros(M,1);
             end
 
+            % TASK 6: Product epoch computed ONCE before measurement loop so
+            % 'product' and 'productNoisy' modes can evaluate b_hat(t_s) =
+            % b(t_prod) + bdot(t_prod) * (t_s - t_prod) per tower.
+            updateInterval_s = 300;
+            latency_s        = 0;
+            if isfield(obj.cfg,'errors') && isfield(obj.cfg.errors,'towerClock')
+                tc2 = obj.cfg.errors.towerClock;
+                if isfield(tc2,'updateInterval_s'); updateInterval_s = tc2.updateInterval_s; end
+                if isfield(tc2,'latency_s');        latency_s        = tc2.latency_s;        end
+            end
+            t_available = t_s - latency_s;
+            if updateInterval_s > 0
+                t_prod = floor(t_available / updateInterval_s) * updateInterval_s;
+            else
+                t_prod = t_available;
+            end
+            if t_prod < 0
+                warning('revgnss:productEpoch', ...
+                    'Product epoch negative at t=%.1f s; clamping to 0.', t_s);
+                t_prod = 0;
+            end
+
             for mi = 1:M
                 ti  = twr_list(mi);
                 b_t = towers{ti}.getClockBiasMeters();
@@ -190,6 +212,17 @@ classdef MeasurementModel < handle
                         % Truth-based simulated correction (see SIMULATION NOTE above).
                         % correction = true_tower_clock + randn * sigma_correction
                         towerClkModel(mi) = b_t + corrNoise_m(mi);
+                        towerClkSigma(mi) = noiseSigma;
+                    case 'product'
+                        % TASK 6: Linear product evaluation.
+                        % b_hat(t_s) = b(t_prod) + bdot(t_prod) * (t_s - t_prod)
+                        % Reads tower clock state from history at the product epoch.
+                        [b_p, bd_p] = obj.getClockAtProductEpoch_(towers{ti}, t_prod);
+                        towerClkModel(mi) = b_p + bd_p * (t_s - t_prod);
+                    case 'productNoisy'
+                        % TASK 6: Same linear prediction with R uncertainty inflation.
+                        [b_p, bd_p] = obj.getClockAtProductEpoch_(towers{ti}, t_prod);
+                        towerClkModel(mi) = b_p + bd_p * (t_s - t_prod);
                         towerClkSigma(mi) = noiseSigma;
                     otherwise
                         towerClkModel(mi) = 0;
@@ -209,25 +242,6 @@ classdef MeasurementModel < handle
             errStruct.towerClockCorrectionSigma_m = towerClkSigma;    % sigma used in R
             errStruct.towerClockCorrNoise_m       = corrNoise_m;      % noise realization
 
-            % Product epoch: t_prod = floor((t - latency) / updateInterval) * updateInterval
-            updateInterval_s = 300;
-            latency_s        = 0;
-            if isfield(obj.cfg,'errors') && isfield(obj.cfg.errors,'towerClock')
-                tc2 = obj.cfg.errors.towerClock;
-                if isfield(tc2,'updateInterval_s'); updateInterval_s = tc2.updateInterval_s; end
-                if isfield(tc2,'latency_s');        latency_s        = tc2.latency_s;        end
-            end
-            t_available = t_s - latency_s;
-            if updateInterval_s > 0
-                t_prod = floor(t_available / updateInterval_s) * updateInterval_s;
-            else
-                t_prod = t_available;
-            end
-            if t_prod < 0
-                warning('revgnss:productEpoch', ...
-                    'Product epoch negative at t=%.1f s; clamping to 0.', t_s);
-                t_prod = 0;
-            end
             errStruct.towerClockProductEpoch_s = t_prod;
             errStruct.towerClockProductAge_s   = t_s - t_prod;
 
@@ -341,6 +355,13 @@ classdef MeasurementModel < handle
                 end
 
                 h(mi) = rho_est + b_rx_est - b_twr_h + errStruct.modelTotal_m(mi);
+
+                % TASK 2: ZWD state contribution to predicted pseudorange
+                if isfield(stateMap,'zwdIdx') && ti <= numel(stateMap.zwdIdx) && ...
+                        stateMap.zwdIdx(ti) > 0
+                    mf_h = revgnss.MappingFunctions.troposphere(elv, 'simple');
+                    h(mi) = h(mi) + mf_h * x_est(stateMap.zwdIdx(ti));
+                end
 
                 sigma_i = sqrt(errStruct.sigmaTotal_m(mi)^2 + towerClkSigma(mi)^2);
                 R_diag(mi) = max(sigma_i, sigmaFloor)^2;
@@ -558,6 +579,56 @@ classdef MeasurementModel < handle
                     errStruct.bySource.truth_m.scintillation = zeros(M,1);
                     errStruct.bySource.model_m.scintillation = zeros(M,1);
                 end
+            end
+
+            % ----- TASK 3: IF combination (ionosphereFree codeMode) --------
+            % When codeMode='ionosphereFree' and N_sig==2: combine stacked L1+L2
+            % rows into M_pairs IF rows.  Uses IonoFreeCombination coefficients
+            % so iono cancels algebraically.  R is combined assuming uncorrelated signals.
+            codeMode_v = '';
+            if isfield(obj.cfg,'measurements') && isfield(obj.cfg.measurements,'codeMode')
+                codeMode_v = obj.cfg.measurements.codeMode;
+            end
+            if strcmp(codeMode_v,'ionosphereFree') && N_sig == 2 && M == M_pairs * 2
+                signals_if = revgnss.SignalUtils.getEnabledSignals(obj.cfg);
+                f_L2_if    = signals_if(2).frequency_Hz;
+                [alpha_if, beta_if] = revgnss.IonoFreeCombination.coefficients(f_L1, f_L2_if);
+
+                idx1 = 1:M_pairs;
+                idx2 = M_pairs+1 : 2*M_pairs;
+
+                z_if    = alpha_if * z(idx1)      + beta_if * z(idx2);
+                h_if    = alpha_if * h(idx1)      + beta_if * h(idx2);
+                R_if    = alpha_if^2 * R_diag(idx1) + beta_if^2 * R_diag(idx2);
+
+                z = z_if;
+                h = h_if;
+                R_diag   = R_if;
+                twr_list = twr_list(idx1);
+                ant_list = ant_list(idx1);
+                M        = M_pairs;
+                N_sig    = 1;
+
+                % Compress errStruct per-row fields to M_pairs IF rows
+                ifTileFields = {'towerClockTruth_m','towerClockModel_m','towerClockModelSigma_m', ...
+                    'sagnacTruth_m','sagnacModel_m','shapiroTruth_m','shapiroModel_m', ...
+                    'pcvTruth_m','pcvModel_m','towerSurveyTruth_m','towerSurveyModel_m', ...
+                    'receiverPCOTruth_m','receiverPCOModel_m','towerPCOTruth_m','towerPCOModel_m', ...
+                    'elevations_rad','scintSigmaL1_m','sigmaExtra_m','sigmaTotal_m', ...
+                    'truthTotal_m','modelTotal_m','signalIdx_perMeas','frequencyHz_perMeas'};
+                for fi3 = 1:numel(ifTileFields)
+                    fn = ifTileFields{fi3};
+                    if isfield(errStruct,fn) && numel(errStruct.(fn)) >= M_pairs
+                        errStruct.(fn) = errStruct.(fn)(idx1);
+                    end
+                end
+                if isfield(errStruct,'signalName_perMeas') && numel(errStruct.signalName_perMeas) >= M_pairs
+                    errStruct.signalName_perMeas = repmat({'IF'}, M_pairs, 1);
+                end
+                errStruct.towerIdx_perMeas   = twr_list;
+                errStruct.antennaIdx_perMeas = ant_list;
+                errStruct.nPseudorange       = M;
+                errStruct.ifCombination      = true;
             end
 
             % ----- Stage 4: correlated measurement noise ---------------
@@ -1077,6 +1148,13 @@ classdef MeasurementModel < handle
                 end
 
                 h_pr(mi) = rho_est + b_rx_est - b_twr + model_total;
+
+                % TASK 2: ZWD state contribution (same as in computeMeasurements h path)
+                if isfield(stateMap,'zwdIdx') && ti <= numel(stateMap.zwdIdx) && ...
+                        stateMap.zwdIdx(ti) > 0
+                    mf_h = revgnss.MappingFunctions.troposphere(elv, 'simple');
+                    h_pr(mi) = h_pr(mi) + mf_h * x_state(stateMap.zwdIdx(ti));
+                end
             end
         end
 
@@ -1143,6 +1221,30 @@ classdef MeasurementModel < handle
             else
                 r_twr = r_nom;
             end
+        end
+
+        % ----------------------------------------------------------------
+        function [b_m, bdot_mps] = getClockAtProductEpoch_(obj, tower, t_prod_s)
+            % getClockAtProductEpoch_  Return tower clock bias and drift at product epoch.
+            %
+            % Looks up the tower clock history to find the state at or just before
+            % t_prod_s.  Used by 'product' and 'productNoisy' towerClockMode to
+            % evaluate the linear prediction b_hat(t) = b(t_prod) + bdot * (t-t_prod).
+            %
+            % Returns [0, 0] when history is unavailable (first epoch or t_prod=0).
+            b_m      = 0;
+            bdot_mps = 0;
+            hist = tower.history;
+            if isempty(hist.time_s) || isempty(hist.clockBias_m)
+                return;
+            end
+            % Find the last history entry at or before t_prod_s (with epsilon guard).
+            idx = find(hist.time_s <= t_prod_s + 1e-9, 1, 'last');
+            if isempty(idx)
+                return;
+            end
+            b_m      = hist.clockBias_m(idx);
+            bdot_mps = hist.clockDrift_mps(idx);
         end
 
         % ----------------------------------------------------------------
@@ -1304,27 +1406,37 @@ classdef MeasurementModel < handle
                     if isfield(bm,'trop') && mi <= numel(bm.trop); trop_m = bm.trop(mi); end
                 end
 
-                % Truth and model geometric range
-                rho_t = norm(r_ants_truth(:,ai) - towers{ti}.getAntennaPositionECEF());
-                lever = leverArms_model(:, ai);
+                % Truth and model geometric range (TASK 4C: use correctedPseudorange,
+                % same correction path as code measurements — Sagnac, Shapiro, PCV)
+                r_twr_t = towers{ti}.getAntennaPositionECEF();
+                rho_t = revgnss.RangeCorrections.correctedPseudorange( ...
+                    r_ants_truth(:,ai), r_twr_t, obj.cfg, 'truth', elv);
+
                 r_ant_e  = r_ants_est(:, ai);
                 r_twr_e  = obj.getTowerPosition_(towers{ti}, ti, 'model');
                 delta_e  = r_ant_e - r_twr_e;
-                rho_e    = norm(delta_e); if rho_e < 1; rho_e = 1; end
+                rho_e_geom = norm(delta_e); if rho_e_geom < 1; rho_e_geom = 1; end
+                rho_e = revgnss.RangeCorrections.correctedPseudorange( ...
+                    r_ant_e, r_twr_e, obj.cfg, 'model', elv);
 
                 noise_phi = sigma_phi * obj.errorChain.drawNormal(1,1);
 
                 % z: +trop, -iono (carrier ionosphere is OPPOSITE sign to code)
                 z_phi(mi) = rho_t + b_rx_true - b_twr_t + trop_t - iono_t + B_true + noise_phi;
 
-                % h: +trop_model, -iono_model
+                % h: +trop_model, -iono_model + ZWD state (TASK 2)
                 h_phi(mi) = rho_e + b_rx_est - b_twr_m + trop_m - iono_m + B_est;
+                if isfield(stateMap,'zwdIdx') && ti <= numel(stateMap.zwdIdx) && ...
+                        stateMap.zwdIdx(ti) > 0
+                    mf_phi = revgnss.MappingFunctions.troposphere(elv, 'simple');
+                    h_phi(mi) = h_phi(mi) + mf_phi * x_est(stateMap.zwdIdx(ti));
+                end
 
                 cpInfo.phi_m(mi)    = z_phi(mi);
                 cpInfo.prefit_m(mi) = z_phi(mi) - h_phi(mi);
 
-                % H: position (analytic u'), receiver clock, tower clock, ambiguity, ZWD
-                H_phi(mi, stateMap.r_idx)   = (delta_e / rho_e)';
+                % H: position (geometric unit vector), receiver clock, tower clock, ambiguity, ZWD
+                H_phi(mi, stateMap.r_idx)   = (delta_e / rho_e_geom)';
                 H_phi(mi, stateMap.b_rx_idx) = 1;
 
                 if isfield(stateMap,'towerClockIdx') && ...

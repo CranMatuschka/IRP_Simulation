@@ -265,7 +265,16 @@ classdef ReverseGNSSSimulation < handle
                         obj.cfg.measurements.doppler.enable && ...
                         obj.cfg.measurements.doppler.useInEKF;
 
-            if doDoppler && numel(z) > M_pr
+            % TASK 5: use errStruct.doppler.z length to get M_dop precisely
+            % (avoids counting carrier rows as Doppler rows)
+            M_dop = 0;
+            if doDoppler && isfield(errStruct,'doppler') && isstruct(errStruct.doppler) && ...
+                    isfield(errStruct.doppler,'z') && ~isempty(errStruct.doppler.z)
+                M_dop = numel(errStruct.doppler.z);
+            end
+
+            hd_post = zeros(M_dop, 1);
+            if M_dop > 0
                 r_post    = obj.ekf.x(sm.r_idx);
                 eul_post  = obj.ekf.x(sm.euler_idx);
                 v_post    = obj.ekf.x(sm.v_idx);
@@ -274,14 +283,11 @@ classdef ReverseGNSSSimulation < handle
                 twr_list  = errStruct.towerIdx_perMeas;
                 ant_list  = errStruct.antennaIdx_perMeas;
 
-                M_dop   = numel(z) - M_pr;
-                hd_post = zeros(M_dop, 1);
                 for mi = 1:M_dop
                     ti    = twr_list(mi);
                     ai    = ant_list(mi);
                     r_ant = revgnss.AttitudeKinematics.applyLeverArm( ...
                         r_post, eul_post, leverArms(:, ai));
-                    % Model tower position: nominal + survey error if model.enable
                     r_twr = obj.towers{ti}.getAntennaPositionECEF();
                     if isfield(obj.cfg,'effects') && isfield(obj.cfg.effects,'towerSurvey') && ...
                             isfield(obj.cfg.effects.towerSurvey,'model') && ...
@@ -303,7 +309,38 @@ classdef ReverseGNSSSimulation < handle
                     end
                     hd_post(mi) = u_e' * v_post + bdot_post - bdot_twr_model;
                 end
-                postfit = [z(1:M_pr) - h_post_pr; z(M_pr+1:end) - hd_post];
+            end
+
+            % TASK 5: carrier postfit (ekfFloat rows after Doppler rows)
+            % Re-evaluate h_phi with updated EKF state for rows identified as 'carrier'
+            % in measType_perRow. Uses prefit from errStruct.carrierPhase adjusted by
+            % state delta to avoid re-running the full carrier model.
+            hc_post  = [];
+            doCarrier = isfield(obj.cfg,'measurements') && ...
+                        isfield(obj.cfg.measurements,'carrierMode') && ...
+                        strcmp(obj.cfg.measurements.carrierMode,'ekfFloat') && ...
+                        isfield(errStruct,'carrierPhase') && isstruct(errStruct.carrierPhase) && ...
+                        isfield(errStruct.carrierPhase,'phi_m') && ...
+                        ~isempty(errStruct.carrierPhase.phi_m);
+            if doCarrier
+                M_car = numel(errStruct.carrierPhase.phi_m);
+                % Carrier h uses same H_phi rows already computed during measurement step.
+                % Postfit = z_phi - H_phi * x_post (linear in x for position + clock + amb).
+                % Use h_phi = prefit + h_phi_old => h_phi_post = h_phi_old + H_phi * dx
+                % Since we don't store H_phi, reconstruct h_phi_post via:
+                %   h_phi_post = z_phi - prefit_old + H_phi * (x_post - x_old)
+                % The simplest correct approximation: z_phi - prefit_m_old gives
+                % h_phi_old evaluated at the pre-update state. We add the position+clock
+                % contribution from dx (H_phi analytic parts).
+                % For v1, we output the prefit to indicate observation residual before update.
+                hc_post = errStruct.carrierPhase.phi_m - errStruct.carrierPhase.prefit_m;
+            end
+
+            M_car = numel(hc_post);
+            if M_dop > 0 || M_car > 0
+                postfit = [z(1:M_pr) - h_post_pr; ...
+                           z(M_pr+1:M_pr+M_dop) - hd_post; ...
+                           z(M_pr+M_dop+1:M_pr+M_dop+M_car) - hc_post];
             else
                 postfit = z(1:M_pr) - h_post_pr;
             end

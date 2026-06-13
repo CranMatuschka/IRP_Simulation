@@ -819,9 +819,11 @@ classdef ConfigFactory
                             cfg.estimator.towerClockMode = 'perfectCorrection';
                         end
                     case 'product'
-                        cfg.estimator.towerClockMode = 'perfectCorrection';
+                        % TASK 6: linear product evaluation — new mode name.
+                        cfg.estimator.towerClockMode = 'product';
                     case 'productNoisy'
-                        cfg.estimator.towerClockMode = 'noisyCorrection';
+                        % TASK 6: linear product with R inflation — new mode name.
+                        cfg.estimator.towerClockMode = 'productNoisy';
                     case 'none'
                         cfg.estimator.towerClockMode = 'none';
                     otherwise
@@ -981,6 +983,43 @@ classdef ConfigFactory
                     otherwise
                         error('ConfigFactory:invalidCodeMode', ...
                             'cfg.measurements.codeMode must be ''singleFrequency'', ''dualFrequencyStacked'', or ''ionosphereFree''; got ''%s''.', codeMode);
+                end
+            end
+
+            % ---- Task 4D/4E: carrier ekfFloat v1 restrictions -----------
+            % Runs AFTER twoFrequency apply so cfg.signals.enabled is final.
+            if isfield(cfg,'measurements') && isfield(cfg.measurements,'carrierMode') && ...
+                    strcmp(cfg.measurements.carrierMode,'ekfFloat')
+
+                % Task 4D: ekfFloat uses L1 only (sigIdx=1 in computeCarrierEkfRows_)
+                sigEnabled = {};
+                if isfield(cfg,'signals') && isfield(cfg.signals,'enabled')
+                    sigEnabled = cfg.signals.enabled;
+                end
+                if numel(sigEnabled) > 1
+                    warnMsg4D = ['ekfFloat carrier mode adds L1 rows only in v1 ' ...
+                                 '(computeCarrierEkfRows_ uses sigIdx=1). ' ...
+                                 'L2 carrier EKF rows are NOT added. ' ...
+                                 'For dual-frequency iono removal use codeMode=''ionosphereFree''.'];
+                    cfg.validation.warnings{end+1} = warnMsg4D;
+                    warning('ConfigFactory:carrierEKFSingleFreqOnly', '%s', warnMsg4D);
+                end
+
+                % Task 4E: carrierCombinationMode='ionosphereFree' not implemented
+                cCombMode = '';
+                if isfield(cfg.measurements,'carrierCombinationMode')
+                    cCombMode = cfg.measurements.carrierCombinationMode;
+                end
+                if strcmp(cCombMode,'ionosphereFree')
+                    warnMsg4E = ['carrierCombinationMode=''ionosphereFree'' is not implemented ' ...
+                                 'in v1 ekfFloat. Falling back to ''raw'' (L1 only).'];
+                    if strcmp(policy,'error')
+                        error('ConfigFactory:carrierIFNotSupported', '%s', warnMsg4E);
+                    end
+                    cfg.measurements.carrierCombinationMode = 'raw';
+                    cfg.validation.warnings{end+1}         = warnMsg4E;
+                    cfg.validation.disabledFeatures{end+1} = 'carrierCombinationMode.ionosphereFree';
+                    warning('ConfigFactory:carrierIFDisabled', '%s', warnMsg4E);
                 end
             end
 

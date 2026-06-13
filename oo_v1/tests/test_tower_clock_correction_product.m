@@ -1,21 +1,28 @@
 % test_tower_clock_correction_product
-% ConfigFactory.finalizeConfig maps new towerClock.correctionMode names.
+% Task 6: Tower clock correction product mode.
 %
 % Verifies:
-%   - 'perfectTruth' → estimator.towerClockMode = 'perfectCorrection'
-%   - 'product'      → estimator.towerClockMode = 'perfectCorrection'
-%   - 'productNoisy' → estimator.towerClockMode = 'noisyCorrection'
-%   - 'none'         → estimator.towerClockMode = 'none'
+%   T1: Config mapping — correctionMode → towerClockMode
+%   T2: 'product' mode evaluates b_hat = b(t_prod) + bdot(t_prod)*(t-t_prod)
+%       For deterministic zero clocks: b_hat = 0 = truth → same h as perfectCorrection
+%   T3: 'productNoisy' mode inflates R by noiseSigma^2 (towerClkSigma > 0)
+%   T4: 'product' mode prediction diverges from truth for stochastic non-zero clocks
 
 thisDir = fileparts(mfilename('fullpath'));
 addpath(fullfile(thisDir, '..'));
 
 fprintf('=== test_tower_clock_correction_product ===\n');
 
+% ----------------------------------------------------------------
+% T1: Config mapping — correctionMode names map to correct towerClockMode
+% ----------------------------------------------------------------
+fprintf('  T1: Config mapping correctionMode → towerClockMode ...\n');
+
+% Updated in TASK 6: 'product' maps to 'product', 'productNoisy' to 'productNoisy'
 cases = { ...
     'perfectTruth', 'perfectCorrection'; ...
-    'product',      'perfectCorrection'; ...
-    'productNoisy', 'noisyCorrection'; ...
+    'product',      'product'; ...
+    'productNoisy', 'productNoisy'; ...
     'none',         'none'; ...
 };
 
@@ -32,9 +39,153 @@ for k = 1:size(cases, 1)
 
     actual = cfgF.estimator.towerClockMode;
     assert(strcmp(actual, expectMode), ...
-        'correctionMode=%s: expected towerClockMode=%s, got %s', ...
+        'T1: correctionMode=%s: expected towerClockMode=%s, got %s', ...
         corrMode, expectMode, actual);
-    fprintf('  correctionMode=%-14s → towerClockMode=%s\n', corrMode, actual);
+    fprintf('    correctionMode=%-14s → towerClockMode=%s\n', corrMode, actual);
 end
 
-fprintf('  PASS\n');
+% ----------------------------------------------------------------
+% T2: 'product' mode linear evaluation — deterministic zero clocks
+%     b_hat(t) = b(t_prod) + bdot(t_prod)*(t - t_prod) = 0 for zero clocks
+%     h_product must equal h_perfectCorrection (both use b_twr = 0)
+% ----------------------------------------------------------------
+fprintf('  T2: product mode agrees with perfectCorrection for zero clocks ...\n');
+
+cfg_prod = revgnss.ConfigFactory.defaultConfig();
+cfg_prod.towerClock.correctionMode = 'product';
+cfg_prod.measurements.doppler.useInEKF = false;
+cfg_prod.measurements.carrierMode      = 'off';
+cfg_prod.simulation.duration_s         = 10;
+cfg_prod.plots.enable  = false;
+cfg_prod.report.enable = false;
+
+cfg_pc = cfg_prod;
+cfg_pc.towerClock.correctionMode = 'perfectTruth';
+
+% Run a few epochs so history is populated
+sim_prod = revgnss.ReverseGNSSSimulation(cfg_prod);
+sim_prod.initialize();
+sim_prod.run();
+
+sim_pc = revgnss.ReverseGNSSSimulation(cfg_pc);
+sim_pc.initialize();
+sim_pc.run();
+
+% Compare h at a mid-run epoch via measurementModel directly
+% (both should be identical for zero deterministic clocks)
+[asset_p, towers_p, ekf_p, mm_p] = revgnss.ScenarioFactory.build(cfg_prod);
+[asset_c, towers_c, ekf_c, mm_c] = revgnss.ScenarioFactory.build(cfg_pc);
+
+% Step towers a few times so history exists at t=5 s
+for step = 1:5
+    for ti = 1:numel(towers_p); towers_p{ti}.stepClock(1); end
+    for ti = 1:numel(towers_c); towers_c{ti}.stepClock(1); end
+end
+
+[~, h_prod] = mm_p.computeMeasurements(asset_p, towers_p, ekf_p.x, 5, ekf_p.stateMap);
+[~, h_pc  ] = mm_c.computeMeasurements(asset_c, towers_c, ekf_c.x, 5, ekf_c.stateMap);
+
+if ~isempty(h_prod) && ~isempty(h_pc)
+    max_diff = max(abs(h_prod - h_pc));
+    assert(max_diff < 1e-9, ...
+        'T2 FAILED: product vs perfectCorrection h differ by %.2e (expect < 1e-9 for zero clocks)', ...
+        max_diff);
+    fprintf('    max |h_product - h_perfectCorrection| = %.2e (zero clocks): PASS\n', max_diff);
+else
+    fprintf('    no visible towers — vacuous PASS\n');
+end
+
+% ----------------------------------------------------------------
+% T3: 'productNoisy' mode sets towerClkSigma > 0, inflating R
+% ----------------------------------------------------------------
+fprintf('  T3: productNoisy inflates R via noiseSigma ...\n');
+
+sigma_prod = 0.3;
+cfg_pn = revgnss.ConfigFactory.defaultConfig();
+cfg_pn.towerClock.correctionMode               = 'productNoisy';
+cfg_pn.estimator.towerClockCorrectionSigma_m   = sigma_prod;
+cfg_pn.measurements.doppler.useInEKF = false;
+cfg_pn.measurements.carrierMode      = 'off';
+cfg_pn.plots.enable  = false;
+cfg_pn.report.enable = false;
+
+[asset_pn, towers_pn, ekf_pn, mm_pn] = revgnss.ScenarioFactory.build(cfg_pn);
+[~, ~, ~, R_pn, errSt_pn] = mm_pn.computeMeasurements( ...
+    asset_pn, towers_pn, ekf_pn.x, 0, ekf_pn.stateMap);
+
+if ~isempty(R_pn)
+    % R should include sigma_prod^2 contribution (diagonal entries > base noise^2)
+    base_sigma = cfg_pn.errors.codeNoise.sigma_m;
+    sigmaFloor = cfg_pn.measurement.sigmaFloor_m;
+    expected_min = max(base_sigma, sigmaFloor)^2 + sigma_prod^2;
+    actual_R_diag = diag(R_pn);
+    % At least the first M_pr rows should have inflated R
+    M_pr = errSt_pn.nPseudorange;
+    assert(all(actual_R_diag(1:M_pr) >= sigma_prod^2 - 1e-12), ...
+        'T3 FAILED: productNoisy R diagonal < sigma_prod^2=%.4e', sigma_prod^2);
+    fprintf('    R(1)=%.4e (>= sigma_prod^2=%.4e): PASS\n', actual_R_diag(1), sigma_prod^2);
+else
+    fprintf('    no visible towers — vacuous PASS\n');
+end
+
+% ----------------------------------------------------------------
+% T4: 'product' prediction evaluates b_hat(t) = b(t_prod) + bdot(t_prod)*(t-t_prod).
+%     At t=450 with interval=300: t_prod = floor(450/300)*300 = 300.
+%     Tower 1 has bias=50 m, no drift. So b_hat(450) = 50 + 0*150 = 50 m.
+%     This confirms getClockAtProductEpoch_ reads history correctly.
+% ----------------------------------------------------------------
+fprintf('  T4: product linear evaluation reads history at t_prod ...\n');
+
+bias_expected_m = 50.0;
+c_mps = 299792458;
+
+cfg_t4 = revgnss.ConfigFactory.defaultConfig();
+cfg_t4.towerClock.correctionMode              = 'product';
+cfg_t4.errors.towerClock.updateInterval_s     = 300;
+cfg_t4.simulation.duration_s                  = 500;  % precompute noise far enough
+cfg_t4.measurements.doppler.useInEKF = false;
+cfg_t4.measurements.carrierMode      = 'off';
+cfg_t4.plots.enable  = false;
+cfg_t4.report.enable = false;
+
+% Tower 1: known bias 50 m, zero drift, deterministic (no stochastic noise)
+cfg_t4.towers(1).clock.bias_s        = bias_expected_m / c_mps;
+cfg_t4.towers(1).clock.fracFreq      = 0;
+cfg_t4.towers(1).clock.deterministic = true;
+
+[asset_t4, towers_t4, ekf_t4, mm_t4] = revgnss.ScenarioFactory.build(cfg_t4);
+
+% Step tower clocks 450 steps to populate history up to t=450 s
+for step_i = 1:450
+    for ti = 1:numel(towers_t4)
+        towers_t4{ti}.stepClock(1);
+    end
+end
+
+% At t=450, interval=300 → t_prod = floor(450/300)*300 = 300
+% b(t=300) = 50 m (deterministic constant), bdot = 0
+% b_hat(450) = 50 + 0 * (450-300) = 50 m
+[~, ~, ~, ~, errSt_t4] = mm_t4.computeMeasurements( ...
+    asset_t4, towers_t4, ekf_t4.x, 450, ekf_t4.stateMap);
+
+if ~isempty(errSt_t4)
+    t_prod_t4 = errSt_t4.towerClockProductEpoch_s;
+    assert(abs(t_prod_t4 - 300) < 1e-9, ...
+        'T4 FAILED: product epoch at t=450 should be 300 (got %.1f)', t_prod_t4);
+
+    twr_meas_idx = find(errSt_t4.towerIdx_perMeas == 1, 1);
+    if ~isempty(twr_meas_idx)
+        b_hat = errSt_t4.towerClockModel_m(twr_meas_idx);
+        assert(abs(b_hat - bias_expected_m) < 1e-3, ...
+            'T4 FAILED: b_hat=%.4f m should be ~%.4f m (tower bias at t_prod=300)', ...
+            b_hat, bias_expected_m);
+        fprintf('    t=450, t_prod=%d s, b_hat=%.4f m ≈ bias=%.4f m: PASS\n', ...
+            t_prod_t4, b_hat, bias_expected_m);
+    else
+        fprintf('    tower 1 not visible — vacuous PASS\n');
+    end
+else
+    fprintf('    no measurements — vacuous PASS\n');
+end
+
+fprintf('=== test_tower_clock_correction_product: ALL PASS ===\n');

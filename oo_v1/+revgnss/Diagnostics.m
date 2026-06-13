@@ -200,13 +200,22 @@ classdef Diagnostics < handle
             entry.numMeasurementRows         = numel(z); % total EKF z dimension
 
             % --- Innovation / residual RMS split by measurement type -------
-            % Pseudorange rows [m] and Doppler rows [m/s] are NEVER mixed.
+            % Use measType_perRow when available to separate code/Doppler/carrier.
+            M_dop_rows = 0;
+            if ~isempty(errStruct) && isfield(errStruct,'measType_perRow')
+                mtype = errStruct.measType_perRow;
+                M_dop_rows = sum(strcmp(mtype,'doppler'));
+            elseif ~isempty(errStruct) && isfield(errStruct,'doppler') && ...
+                    isfield(errStruct.doppler,'z') && ~isempty(errStruct.doppler.z)
+                M_dop_rows = numel(errStruct.doppler.z);
+            end
+
             if ~isempty(z) && M_pr > 0 && numel(z) >= M_pr
                 innPR = z(1:M_pr) - h(1:M_pr);
                 entry.prefitPseudorangeRMS_m  = sqrt(mean(innPR.^2));
                 entry.prefitInnovationRMS     = entry.prefitPseudorangeRMS_m;
-                if numel(z) > M_pr
-                    innDop = z(M_pr+1:end) - h(M_pr+1:end);
+                if M_dop_rows > 0 && numel(z) >= M_pr + M_dop_rows
+                    innDop = z(M_pr+1:M_pr+M_dop_rows) - h(M_pr+1:M_pr+M_dop_rows);
                     entry.prefitDopplerRMS_mps = sqrt(mean(innDop.^2));
                 else
                     entry.prefitDopplerRMS_mps = 0;
@@ -221,8 +230,8 @@ classdef Diagnostics < handle
                 resPR = postfitResidual(1:M_pr);
                 entry.postfitPseudorangeRMS_m = sqrt(mean(resPR.^2));
                 entry.postfitResidualRMS      = entry.postfitPseudorangeRMS_m;
-                if numel(postfitResidual) > M_pr
-                    resDop = postfitResidual(M_pr+1:end);
+                if M_dop_rows > 0 && numel(postfitResidual) >= M_pr + M_dop_rows
+                    resDop = postfitResidual(M_pr+1:M_pr+M_dop_rows);
                     entry.postfitDopplerRMS_mps = sqrt(mean(resDop.^2));
                 else
                     entry.postfitDopplerRMS_mps = 0;
