@@ -169,7 +169,23 @@ classdef RangeCorrections
                     end
                     tbl = cfg.effects.antenna.receiverPcvTable;
                     if ~isfield(tbl,'elDeg') || ~isfield(tbl,'pcv_m')
-                        dPCV = 0; return;
+                        error('RangeCorrections:pcvTableMissingField', ...
+                            'receiverPcvTable must have elDeg and pcv_m fields.');
+                    end
+                    if isfield(tbl,'azDeg')
+                        error('RangeCorrections:pcvAzimuthUnsupported', ...
+                            'Azimuth-dependent PCV (azDeg field) is not supported in v1. Use elevation-only table.');
+                    end
+                    nEl  = numel(tbl.elDeg);
+                    nPcv = numel(tbl.pcv_m);
+                    if nEl < 2
+                        error('RangeCorrections:pcvTableTooShort', ...
+                            'receiverPcvTable.elDeg must have at least 2 entries, got %d.', nEl);
+                    end
+                    if nEl ~= nPcv
+                        error('RangeCorrections:pcvTableLengthMismatch', ...
+                            'receiverPcvTable.elDeg (%d entries) and pcv_m (%d entries) must have the same length.', ...
+                            nEl, nPcv);
                     end
                     elDeg = rad2deg(el_rad);
                     elDeg = max(tbl.elDeg(1), min(tbl.elDeg(end), elDeg));

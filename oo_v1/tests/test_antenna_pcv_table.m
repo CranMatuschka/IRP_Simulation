@@ -44,4 +44,42 @@ assert(abs(contrib_none.pcv) < 1e-12, ...
 
 fprintf('  pcv(30 deg)=%.4f m  pcv(0 deg)=%.4f m  pcv(none)=%.2e\n', ...
     contrib30.pcv, contrib0.pcv, contrib_none.pcv);
+
+% ---- T2: malformed table — mismatched lengths throws clear error ----
+fprintf('  T2: malformed table (length mismatch) throws error ...\n');
+
+cfg_bad = cfg;
+cfg_bad.effects.antenna.receiverPcvTable.elDeg = [0 30 60 90];
+cfg_bad.effects.antenna.receiverPcvTable.pcv_m = [0.02 0.01];  % wrong length
+
+threwBad = false;
+try
+    revgnss.RangeCorrections.correctedPseudorange([0;0;42e6], [0;1e6;0], cfg_bad, 'truth', el_30);
+catch ME
+    threwBad = true;
+    assert(contains(ME.identifier, 'pcvTable') || contains(ME.identifier, 'RangeCorrections'), ...
+        'T2: wrong error id: %s', ME.identifier);
+    fprintf('    caught expected error: %s\n', ME.identifier);
+end
+assert(threwBad, 'T2 FAILED: mismatched table lengths should throw an error');
+fprintf('    PASS\n');
+
+% ---- T3: azimuth field present → clear error ----
+fprintf('  T3: azimuth-dependent table rejects azDeg field ...\n');
+
+cfg_az = cfg;
+cfg_az.effects.antenna.receiverPcvTable.azDeg = 0:10:350;
+
+threwAz = false;
+try
+    revgnss.RangeCorrections.correctedPseudorange([0;0;42e6], [0;1e6;0], cfg_az, 'truth', el_30);
+catch ME
+    threwAz = true;
+    assert(contains(ME.identifier, 'pcvAzimuth') || contains(ME.identifier, 'RangeCorrections'), ...
+        'T3: wrong error id: %s', ME.identifier);
+    fprintf('    caught expected error: %s\n', ME.identifier);
+end
+assert(threwAz, 'T3 FAILED: azDeg field should throw an unsupported error');
+fprintf('    PASS\n');
+
 fprintf('  PASS\n');

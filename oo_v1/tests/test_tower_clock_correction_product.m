@@ -188,4 +188,58 @@ else
     fprintf('    no measurements — vacuous PASS\n');
 end
 
+% ----------------------------------------------------------------
+% T5: testWrongProductCreatesInnovation
+%     Tower clocks have nonzero biases (clockNoiseConfig) but correction
+%     mode='none' (no product applied). Innovations must be significantly
+%     larger than with perfectTruth (which corrects the clock exactly).
+%     This verifies that an uncorrected tower clock bias propagates to innovation.
+% ----------------------------------------------------------------
+fprintf('  T5: wrong product (no correction) creates larger innovation than perfectTruth ...\n');
+
+% Base: stochastic tower clocks with known nonzero biases
+cfg_t5_base = revgnss.ConfigFactory.clockNoiseConfig();
+cfg_t5_base.measurements.doppler.useInEKF = false;
+cfg_t5_base.measurements.carrierMode      = 'off';
+cfg_t5_base.errors.codeNoise.sigma_m      = 0;  % noise-free
+cfg_t5_base.plots.enable  = false;
+cfg_t5_base.report.enable = false;
+
+% 'none' mode: no correction, tower clock bias shows in innovation
+cfg_t5_none = cfg_t5_base;
+cfg_t5_none.towerClock.correctionMode = 'none';
+[asset_t5n, towers_t5n, ekf_t5n, mm_t5n] = revgnss.ScenarioFactory.build(cfg_t5_none);
+[z_t5n, h_t5n, ~, ~, errSt_t5n] = mm_t5n.computeMeasurements( ...
+    asset_t5n, towers_t5n, ekf_t5n.x, 0, ekf_t5n.stateMap);
+
+% 'perfectTruth' mode: correction = truth, innovation near 0
+cfg_t5_pt = cfg_t5_base;
+cfg_t5_pt.towerClock.correctionMode = 'perfectTruth';
+[asset_t5p, towers_t5p, ekf_t5p, mm_t5p] = revgnss.ScenarioFactory.build(cfg_t5_pt);
+[z_t5p, h_t5p, ~, ~, errSt_t5p] = mm_t5p.computeMeasurements( ...
+    asset_t5p, towers_t5p, ekf_t5p.x, 0, ekf_t5p.stateMap);
+
+if ~isempty(z_t5n) && ~isempty(z_t5p)
+    M_pr5 = errSt_t5n.nPseudorange;
+    innov_none = z_t5n(1:M_pr5) - h_t5n(1:M_pr5);
+    innov_pt   = z_t5p(1:M_pr5) - h_t5p(1:M_pr5);
+    % towerClockModel for 'none' is 0; towerClockTruth is nonzero bias
+    % Innovation in 'none' mode should include the full tower clock bias
+    truth_bias = errSt_t5n.towerClockTruth_m;  % per-measurement true clock values
+    % For any tower with nonzero truth clock, the 'none' innovation > pt innovation
+    max_abs_none = max(abs(innov_none));
+    max_abs_pt   = max(abs(innov_pt));
+    % Should have at least one tower with nonzero bias (clockNoiseConfig)
+    assert(max(abs(truth_bias)) > 1e-3, ...
+        'T5 FAILED: clockNoiseConfig tower clock biases should be nonzero');
+    % 'none' mode innovation should be larger than 'perfectTruth' innovation
+    assert(max_abs_none > max_abs_pt + 1e-3, ...
+        'T5 FAILED: none-mode innovation (%.4f m) should exceed perfectTruth (%.4f m)', ...
+        max_abs_none, max_abs_pt);
+    fprintf('    |innov|_none=%.4f m  |innov|_perfectTruth=%.4f m: PASS\n', ...
+        max_abs_none, max_abs_pt);
+else
+    fprintf('    no visible towers — vacuous PASS\n');
+end
+
 fprintf('=== test_tower_clock_correction_product: ALL PASS ===\n');
