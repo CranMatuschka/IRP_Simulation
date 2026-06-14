@@ -371,7 +371,7 @@ classdef MeasurementModel < handle
                 b_twr_truth_h = towerClkTruth(mi);
                 if ~isempty(cTruth.t_tx_s)
                     tau_truth = t_s - cTruth.t_tx_s;
-                    bdot_twr  = towers{ti}.clock.getClockDriftMetersPerSecond();
+                    bdot_twr  = towers{ti}.getClockDriftMetersPerSecond();
                     b_twr_truth_h = b_twr_truth_h - bdot_twr * tau_truth;
                 end
                 z(mi) = rho_true + b_rx_true - b_twr_truth_h + errStruct.truthTotal_m(mi);

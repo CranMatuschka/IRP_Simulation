@@ -103,6 +103,7 @@ cfg_t4 = revgnss.ConfigFactory.defaultConfig();
 cfg_t4.measurements.carrierMode              = 'ekfFloat';
 cfg_t4.estimation.ambiguityMode              = 'floatPerTowerSignal';
 cfg_t4.measurements.carrierCombinationMode   = 'ionosphereFree';
+cfg_t4.validation.unsupportedFeaturePolicy   = 'disableWithWarning';
 cfg_t4.plots.enable  = false;
 cfg_t4.report.enable = false;
 

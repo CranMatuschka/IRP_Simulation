@@ -30,6 +30,7 @@ assert(strcmp(cfg1.validation.unsupportedFeaturePolicy,'error'), ...
     cfg1.validation.unsupportedFeaturePolicy);
 cfg1.measurements.carrierMode             = 'ekfFloat';
 cfg1.measurements.carrierCombinationMode  = 'ionosphereFree';
+cfg1.estimation.ambiguityMode             = 'floatPerTowerSignal';
 
 threw1 = false;
 try
@@ -51,6 +52,7 @@ cfg2 = revgnss.ConfigFactory.defaultConfig();
 cfg2.measurements.carrierMode             = 'ekfFloat';
 cfg2.measurements.carrierCombinationMode  = 'ionosphereFree';
 cfg2.validation.unsupportedFeaturePolicy  = 'disableWithWarning';
+cfg2.estimation.ambiguityMode             = 'floatPerTowerSignal';
 
 threw2 = false;
 ws2 = warning('off','all');
@@ -81,6 +83,7 @@ fprintf('  T4: carrier IF must not silently become raw with default policy ...\n
 cfg4 = revgnss.ConfigFactory.defaultConfig();
 cfg4.measurements.carrierMode             = 'ekfFloat';
 cfg4.measurements.carrierCombinationMode  = 'ionosphereFree';
+cfg4.estimation.ambiguityMode             = 'floatPerTowerSignal';
 
 threw4 = false;
 try

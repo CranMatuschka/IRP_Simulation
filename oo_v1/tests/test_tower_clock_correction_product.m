@@ -51,8 +51,8 @@ end
 % ----------------------------------------------------------------
 fprintf('  T2: product mode agrees with perfectCorrection for zero clocks ...\n');
 
-cfg_prod = revgnss.ConfigFactory.defaultConfig();
-cfg_prod.towerClock.correctionMode = 'product';
+% Use towerClockProductConfig (provides required products struct with zero bias/drift)
+cfg_prod = revgnss.ConfigFactory.towerClockProductConfig();
 cfg_prod.measurements.doppler.useInEKF = false;
 cfg_prod.measurements.carrierMode      = 'off';
 cfg_prod.simulation.duration_s         = 10;
@@ -101,9 +101,16 @@ end
 fprintf('  T3: productNoisy inflates R via noiseSigma ...\n');
 
 sigma_prod = 0.3;
-cfg_pn = revgnss.ConfigFactory.defaultConfig();
-cfg_pn.towerClock.correctionMode               = 'productNoisy';
-cfg_pn.estimator.towerClockCorrectionSigma_m   = sigma_prod;
+% Use towerClockProductConfig and set sigmaBias in products struct
+cfg_pn = revgnss.ConfigFactory.towerClockProductConfig();
+cfg_pn.towerClock.correctionMode = 'productNoisy';
+for k = 1:numel(cfg_pn.towerClock.products)
+    cfg_pn.towerClock.products(k).bias_m         = 0;
+    cfg_pn.towerClock.products(k).drift_mps      = 0;
+    cfg_pn.towerClock.products(k).sigmaBias_m    = sigma_prod;
+    cfg_pn.towerClock.products(k).sigmaDrift_mps = 0;
+    cfg_pn.towerClock.products(k).epoch_s        = 0;
+end
 cfg_pn.measurements.doppler.useInEKF = false;
 cfg_pn.measurements.carrierMode      = 'off';
 cfg_pn.plots.enable  = false;
@@ -114,13 +121,9 @@ cfg_pn.report.enable = false;
     asset_pn, towers_pn, ekf_pn.x, 0, ekf_pn.stateMap);
 
 if ~isempty(R_pn)
-    % R should include sigma_prod^2 contribution (diagonal entries > base noise^2)
-    base_sigma = cfg_pn.errors.codeNoise.sigma_m;
-    sigmaFloor = cfg_pn.measurement.sigmaFloor_m;
-    expected_min = max(base_sigma, sigmaFloor)^2 + sigma_prod^2;
     actual_R_diag = diag(R_pn);
-    % At least the first M_pr rows should have inflated R
     M_pr = errSt_pn.nPseudorange;
+    % R diagonal must include sigmaBias_m^2 contribution from products struct
     assert(all(actual_R_diag(1:M_pr) >= sigma_prod^2 - 1e-12), ...
         'T3 FAILED: productNoisy R diagonal < sigma_prod^2=%.4e', sigma_prod^2);
     fprintf('    R(1)=%.4e (>= sigma_prod^2=%.4e): PASS\n', actual_R_diag(1), sigma_prod^2);
@@ -140,7 +143,10 @@ bias_expected_m = 50.0;
 c_mps = 299792458;
 
 cfg_t4 = revgnss.ConfigFactory.defaultConfig();
-cfg_t4.towerClock.correctionMode              = 'product';
+% truthHistoryProduct: history-based linear prediction from tower clock log.
+% product mode now requires explicit cfg.towerClock.products struct;
+% this test checks getClockAtProductEpoch_ which is the history-based path.
+cfg_t4.towerClock.correctionMode              = 'truthHistoryProduct';
 cfg_t4.errors.towerClock.updateInterval_s     = 300;
 cfg_t4.simulation.duration_s                  = 500;  % precompute noise far enough
 cfg_t4.measurements.doppler.useInEKF = false;
