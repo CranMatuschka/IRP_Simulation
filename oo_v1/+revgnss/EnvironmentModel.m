@@ -239,7 +239,18 @@ classdef EnvironmentModel < handle
 
             ic       = obj.cfg.errors.ionosphere;
             elvFloor = revgnss.Constants.ELEVATION_FLOOR_RAD;
-            mapping  = 1 / max(sin(elevation_rad), sin(elvFloor));
+
+            % Stage 7A: use config-driven ionosphere mapping model.
+            % Default 'simpleSecant' preserves Stage 6 backward-compatibility.
+            ionoMapKind   = 'simpleSecant';
+            shellHeight_m = 350e3;
+            if isfield(obj.cfg,'effects') && isfield(obj.cfg.effects,'ionosphere')
+                ef = obj.cfg.effects.ionosphere;
+                if isfield(ef,'mappingModel');  ionoMapKind   = ef.mappingModel;  end
+                if isfield(ef,'shellHeight_m'); shellHeight_m = ef.shellHeight_m; end
+            end
+            mapping   = revgnss.MappingFunctions.ionosphere( ...
+                max(elevation_rad, elvFloor), ionoMapKind, shellHeight_m);
             freqScale = (f_L1_Hz / freqHz)^2;
 
             modelType = 'simpleMapped';
