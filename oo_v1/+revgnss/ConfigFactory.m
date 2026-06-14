@@ -2,8 +2,13 @@ classdef ConfigFactory
     % ConfigFactory  Builds simulation configuration structs.
     %
     % Default scenario: GEO-1 at lat 0, lon 23 deg, alt 35 786 km with five
-    % ground towers from the original SimulationConfig.m layout.  All error
-    % sources are disabled by default for clean EKF convergence validation.
+    % ground towers from the original SimulationConfig.m layout.
+    %
+    % NOTE: defaultConfig() is a MATCHED-ERROR BASELINE, not "all errors off."
+    % Troposphere and ionosphere truth+model are both enabled with equal values
+    % so innovations remain small (effects cancel).  Use cleanConfig() for a
+    % genuinely error-free code-only baseline, or matchedErrorBaselineConfig()
+    % to make the matched-baseline intent explicit.
     %
     % Clock templates available (see clockTemplates sub-struct):
     %   TCXO        Temperature-compensated crystal oscillator (moderate)
@@ -371,6 +376,14 @@ classdef ConfigFactory
             cfg.measurements.carrier.cycleSlipMode             = 'none';
             cfg.measurements.carrier.syntheticSlipProbability  = 0;
 
+            % --- ZWD mapping model (Step 6) ---------------------------------
+            % Governs the mapping function used for ZWD state contributions in h,
+            % H Jacobian, and postfit recomputation.
+            % 'simple'           — 1/sin(el) (default)
+            % 'continuedFraction'— simple continued-fraction form (illustrative)
+            % NOTE: VMF3, GPT3, and Niell are NOT implemented.
+            cfg.effects.troposphere.mappingModel = 'simple';
+
             % --- Estimation modes (Steps 3 + 7) ----------------------------
             % ambiguityMode: 'none' | 'floatPerTowerSignal'
             % troposphereMode: 'none' | 'perTowerZwd'
@@ -399,13 +412,27 @@ classdef ConfigFactory
             cfg.effects.lightTime.tol_s   = 1e-12;
 
             % --- Tower clock correction product (Step 6) -------------------
-            % correctionMode: 'none' | 'perfectTruth' | 'product' | 'productNoisy'
-            % 'perfectTruth' maps from old 'perfectCorrection' (validation use only).
-            % 'product' uses per-tower product struct (bias_m, drift_mps, epoch_s, ...).
-            % 'productNoisy' adds correction uncertainty to R.
-            cfg.towerClock.correctionMode = 'perfectTruth';
-            cfg.towerClock.sigmaBias_m    = 0.0;
-            cfg.towerClock.sigmaDrift_mps = 0.0;
+            % correctionMode: 'none' | 'perfectTruth' | 'truthHistoryProduct' |
+            %                 'product' | 'productNoisy'
+            %
+            % 'none'               — no tower clock correction
+            % 'perfectTruth'       — use exact truth clock (validation only)
+            % 'truthHistoryProduct'— simulate product from tower truth history
+            %                        (old 'product'/'productNoisy' behavior)
+            % 'product'            — use cfg.towerClock.products(ti) explicit struct
+            % 'productNoisy'       — same but add product uncertainty to R
+            %
+            % Product uncertainty R inflation (productNoisy):
+            %   sigma_corr^2 = sigmaBias^2 + dt^2*sigmaDrift^2 + 2*dt*covBiasDrift
+            % where dt = t_eval - epoch_s of the product.
+            %
+            % Validity: if abs(dt) > validity_s, action per productValidityPolicy.
+            cfg.towerClock.correctionMode         = 'perfectTruth';
+            cfg.towerClock.sigmaBias_m            = 0.0;
+            cfg.towerClock.sigmaDrift_mps         = 0.0;
+            cfg.towerClock.productValidityPolicy  = 'warn';  % 'warn' | 'error'
+            % cfg.towerClock.products is not set in defaultConfig (optional field).
+            % Set it in towerClockProductConfig() or manually per tower.
 
             % --- Observability diagnostics (Step 8) -------------------------
             cfg.diagnostics.observability.enabled       = false;
@@ -700,7 +727,36 @@ classdef ConfigFactory
             cfg.errors.ionosphere.truth.enable     = true;
             cfg.errors.ionosphere.model.enable     = true;
             cfg.estimator.towerClockMode           = 'noisyCorrection';
-            cfg.towerClock.correctionMode          = 'productNoisy';
+            cfg.towerClock.correctionMode          = 'truthHistoryProduct';
+        end
+
+        function cfg = towerClockProductConfig()
+            % towerClockProductConfig  Explicit per-tower product struct mode.
+            %
+            % Uses cfg.towerClock.products(ti) structs with bias/drift/epoch/sigma.
+            % All towers initialised with zero bias/drift at epoch 0.
+            % Add uncertainty to R via correctionMode='productNoisy'.
+            %
+            % Fields per tower product struct:
+            %   bias_m       — clock bias at epoch_s [m]
+            %   drift_mps    — clock drift at epoch_s [m/s]
+            %   epoch_s      — reference epoch for linear prediction [s]
+            %   sigmaBias_m  — 1-sigma bias uncertainty [m]
+            %   sigmaDrift_mps — 1-sigma drift uncertainty [m/s]
+            %   covBiasDrift — bias-drift covariance [m^2/s]
+            %   validity_s   — max |dt| before policy triggers [s]
+            cfg = revgnss.ConfigFactory.defaultConfig();
+            cfg.towerClock.correctionMode        = 'product';
+            cfg.towerClock.productValidityPolicy = 'warn';
+            for k = 1:numel(cfg.towers)
+                cfg.towerClock.products(k).bias_m        = 0.0;
+                cfg.towerClock.products(k).drift_mps     = 0.0;
+                cfg.towerClock.products(k).epoch_s       = 0.0;
+                cfg.towerClock.products(k).sigmaBias_m   = 0.1;
+                cfg.towerClock.products(k).sigmaDrift_mps = 1e-4;
+                cfg.towerClock.products(k).covBiasDrift  = 0.0;
+                cfg.towerClock.products(k).validity_s    = 600;
+            end
         end
 
         % ==================================================================
@@ -818,11 +874,17 @@ classdef ConfigFactory
                         if ~isfield(cfg,'estimator') || ~isfield(cfg.estimator,'towerClockMode')
                             cfg.estimator.towerClockMode = 'perfectCorrection';
                         end
+                    case 'truthHistoryProduct'
+                        % Simulated product derived from tower truth history.
+                        % Internally maps to 'product' (history-based) in MeasurementModel.
+                        cfg.estimator.towerClockMode = 'product';
                     case 'product'
-                        % TASK 6: linear product evaluation — new mode name.
+                        % Explicit per-tower product struct (cfg.towerClock.products).
+                        % Falls back to history if products struct is absent.
                         cfg.estimator.towerClockMode = 'product';
                     case 'productNoisy'
-                        % TASK 6: linear product with R inflation — new mode name.
+                        % Explicit product struct with R inflation.
+                        % Falls back to history if products struct is absent.
                         cfg.estimator.towerClockMode = 'productNoisy';
                     case 'none'
                         cfg.estimator.towerClockMode = 'none';

@@ -95,8 +95,11 @@ classdef ReverseGNSSEKF < handle
                 end
                 if strcmp(ambMode,'floatPerTowerSignal')
                     obj.estimateAmbiguities = true;
-                    signals = revgnss.SignalUtils.getEnabledSignals(cfg);
-                    obj.ambiguityNSignals = numel(signals);
+                    % Carrier EKF in v1 supports L1 only (computeCarrierEkfRows_
+                    % uses sigIdx=1 only).  Always allocate nTowers ambiguity
+                    % states regardless of how many signals are enabled so no
+                    % unobserved L2 ambiguity states are silently created.
+                    obj.ambiguityNSignals = 1;
                     obj.nAmbiguities = nTowers * obj.ambiguityNSignals;
                 end
             end

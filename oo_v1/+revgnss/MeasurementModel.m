@@ -214,16 +214,29 @@ classdef MeasurementModel < handle
                         towerClkModel(mi) = b_t + corrNoise_m(mi);
                         towerClkSigma(mi) = noiseSigma;
                     case 'product'
-                        % TASK 6: Linear product evaluation.
-                        % b_hat(t_s) = b(t_prod) + bdot(t_prod) * (t_s - t_prod)
-                        % Reads tower clock state from history at the product epoch.
-                        [b_p, bd_p] = obj.getClockAtProductEpoch_(towers{ti}, t_prod);
-                        towerClkModel(mi) = b_p + bd_p * (t_s - t_prod);
+                        % Phase 4: use explicit product struct if available, else history.
+                        if isfield(obj.cfg,'towerClock') && isfield(obj.cfg.towerClock,'products') && ...
+                                ti <= numel(obj.cfg.towerClock.products)
+                            [b_hat, ~] = obj.evalProductStruct_(ti, t_s);
+                            towerClkModel(mi) = b_hat;
+                        else
+                            % Fallback: history-based linear prediction
+                            [b_p, bd_p] = obj.getClockAtProductEpoch_(towers{ti}, t_prod);
+                            towerClkModel(mi) = b_p + bd_p * (t_s - t_prod);
+                        end
                     case 'productNoisy'
-                        % TASK 6: Same linear prediction with R uncertainty inflation.
-                        [b_p, bd_p] = obj.getClockAtProductEpoch_(towers{ti}, t_prod);
-                        towerClkModel(mi) = b_p + bd_p * (t_s - t_prod);
-                        towerClkSigma(mi) = noiseSigma;
+                        % Phase 4: product with R uncertainty inflation.
+                        if isfield(obj.cfg,'towerClock') && isfield(obj.cfg.towerClock,'products') && ...
+                                ti <= numel(obj.cfg.towerClock.products)
+                            [b_hat, sig_corr] = obj.evalProductStruct_(ti, t_s);
+                            towerClkModel(mi) = b_hat;
+                            towerClkSigma(mi) = sig_corr;
+                        else
+                            % Fallback: history-based with fixed noiseSigma
+                            [b_p, bd_p] = obj.getClockAtProductEpoch_(towers{ti}, t_prod);
+                            towerClkModel(mi) = b_p + bd_p * (t_s - t_prod);
+                            towerClkSigma(mi) = noiseSigma;
+                        end
                     otherwise
                         towerClkModel(mi) = 0;
                 end
@@ -359,7 +372,7 @@ classdef MeasurementModel < handle
                 % TASK 2: ZWD state contribution to predicted pseudorange
                 if isfield(stateMap,'zwdIdx') && ti <= numel(stateMap.zwdIdx) && ...
                         stateMap.zwdIdx(ti) > 0
-                    mf_h = revgnss.MappingFunctions.troposphere(elv, 'simple');
+                    mf_h = revgnss.MappingFunctions.troposphere(elv, obj.zwdMappingKind_());
                     h(mi) = h(mi) + mf_h * x_est(stateMap.zwdIdx(ti));
                 end
 
@@ -652,11 +665,12 @@ classdef MeasurementModel < handle
 
             % ZWD Jacobian columns (perTowerZwd): H(mi, zwdIdx(ti)) = mf(elv)
             if isfield(stateMap,'zwdIdx') && ~isempty(stateMap.zwdIdx)
+                mfKind = obj.zwdMappingKind_();
                 for mi_z = 1:M
                     ti_z = twr_list(mi_z);
                     if ti_z <= numel(stateMap.zwdIdx) && stateMap.zwdIdx(ti_z) > 0
                         mf_z = revgnss.MappingFunctions.troposphere( ...
-                            errStruct.elevations_rad(mi_z), 'simple');
+                            errStruct.elevations_rad(mi_z), mfKind);
                         H_pr(mi_z, stateMap.zwdIdx(ti_z)) = mf_z;
                     end
                 end
@@ -854,8 +868,26 @@ classdef MeasurementModel < handle
             if isfield(obj.cfg,'diagnostics') && ...
                     isfield(obj.cfg.diagnostics,'observability') && ...
                     obj.cfg.diagnostics.observability.enabled
+                % Build measType_perRow before passing so diagnostics see row types
+                M_rows_obs = size(H, 1);
+                M_dop_obs  = 0;
+                if doCfg && isfield(errStruct,'doppler') && isstruct(errStruct.doppler) && ...
+                        isfield(errStruct.doppler,'z') && ~isempty(errStruct.doppler.z) && ...
+                        obj.cfg.measurements.doppler.useInEKF
+                    M_dop_obs = numel(errStruct.doppler.z);
+                end
+                mTypeObs = cell(M_rows_obs, 1);
+                for mi_o = 1:M_rows_obs
+                    if mi_o <= M
+                        mTypeObs{mi_o} = 'code';
+                    elseif mi_o <= M + M_dop_obs
+                        mTypeObs{mi_o} = 'doppler';
+                    else
+                        mTypeObs{mi_o} = 'carrier';
+                    end
+                end
                 errStruct.observability = revgnss.ObservabilityDiagnostics.analyze( ...
-                    H, stateMap, obj.cfg);
+                    H, stateMap, obj.cfg, mTypeObs);
             else
                 errStruct.observability = struct();
             end
@@ -1152,8 +1184,121 @@ classdef MeasurementModel < handle
                 % TASK 2: ZWD state contribution (same as in computeMeasurements h path)
                 if isfield(stateMap,'zwdIdx') && ti <= numel(stateMap.zwdIdx) && ...
                         stateMap.zwdIdx(ti) > 0
-                    mf_h = revgnss.MappingFunctions.troposphere(elv, 'simple');
+                    mf_h = revgnss.MappingFunctions.troposphere(elv, obj.zwdMappingKind_());
                     h_pr(mi) = h_pr(mi) + mf_h * x_state(stateMap.zwdIdx(ti));
+                end
+            end
+        end
+
+        % ----------------------------------------------------------------
+        function h_phi = computeCarrierModelOnly(obj, asset, towers, x_state, errStruct, stateMap)
+            % computeCarrierModelOnly  Recompute carrier h with updated EKF state.
+            %
+            % Returns h_phi for each carrier row (one per visible tower) evaluated
+            % at x_state (the post-update EKF state).  Used by
+            % ReverseGNSSSimulation.computePostfitResiduals_ to produce true
+            % postfit residuals rather than prefit residuals.
+            %
+            % Formula (Phase 2):
+            %   h_phi = rho_est + b_rx_est - b_twr_model
+            %           + trop_model - iono_model + B_est + zwd_contribution
+            %
+            % All error-chain corrections are frozen from errStruct (same realization
+            % as original h).  Only the state-dependent terms (r, b_rx, B, ZWD) are
+            % re-evaluated from x_state.
+
+            if ~isfield(errStruct,'carrierPhase') || ...
+                    ~isstruct(errStruct.carrierPhase) || ...
+                    ~isfield(errStruct.carrierPhase,'towerIdx') || ...
+                    isempty(errStruct.carrierPhase.towerIdx)
+                h_phi = [];
+                return
+            end
+
+            cp = errStruct.carrierPhase;
+            twr_pairs = cp.towerIdx;
+            ant_pairs = cp.antennaIdx;
+            Mp = numel(twr_pairs);
+
+            leverArms = asset.receiverLeverArms_body_m;
+            N_ant = size(leverArms, 2);
+
+            % Model-side lever arms with receiver PCO if enabled
+            leverArms_model = leverArms;
+            if isfield(obj.cfg,'effects') && isfield(obj.cfg.effects,'antennaPCO')
+                pco = obj.cfg.effects.antennaPCO;
+                if isfield(pco,'model') && pco.model.enable
+                    off = pco.receiverOffset_body_m(:);
+                    leverArms_model = leverArms + off * ones(1, N_ant);
+                end
+            end
+
+            r_est     = x_state(stateMap.r_idx);
+            euler_est = x_state(stateMap.euler_idx);
+            b_rx_est  = x_state(stateMap.b_rx_idx);
+
+            r_ants_est = asset.getAntennaPositionsECEF(r_est, euler_est, leverArms_model);
+
+            sigIdx = 1;   % L1 only in v1
+            h_phi  = zeros(Mp, 1);
+            mfKind = obj.zwdMappingKind_();
+
+            for mi = 1:Mp
+                ti  = twr_pairs(mi);
+                ai  = ant_pairs(mi);
+
+                % Model tower position (survey + PCO, same as computeMeasurements)
+                r_twr_e = obj.getTowerPosition_(towers{ti}, ti, 'model');
+                if isfield(obj.cfg,'effects') && isfield(obj.cfg.effects,'antennaPCO')
+                    pco = obj.cfg.effects.antennaPCO;
+                    if isfield(pco,'model') && pco.model.enable
+                        tOff = pco.towerOffset_enu_m(:);
+                        R_ENU = revgnss.GeometryUtils.enu2ecef(towers{ti}.lat_rad, towers{ti}.lon_rad);
+                        r_twr_e = r_twr_e + R_ENU * tOff;
+                    end
+                end
+
+                % Updated elevation for ZWD mapping
+                elv = revgnss.GeometryUtils.elevationAngle(r_twr_e, r_ants_est(:, ai));
+
+                % Corrected geometric range (same path as code)
+                rho_e = revgnss.RangeCorrections.correctedPseudorange( ...
+                    r_ants_est(:, ai), r_twr_e, obj.cfg, 'model', elv);
+
+                % Tower clock: EKF state if estimated, else frozen model correction
+                if isfield(stateMap,'towerClockIdx') && ti <= size(stateMap.towerClockIdx,1) && ...
+                        stateMap.towerClockIdx(ti,1) > 0
+                    b_twr = x_state(stateMap.towerClockIdx(ti,1));
+                elseif isfield(errStruct,'towerClockModel_m') && mi <= numel(errStruct.towerClockModel_m)
+                    b_twr = errStruct.towerClockModel_m(mi);
+                else
+                    b_twr = 0;
+                end
+
+                % Float ambiguity state (updated)
+                B_est = 0;
+                if isfield(stateMap,'ambiguityIdx') && ...
+                        ti <= size(stateMap.ambiguityIdx,1) && ...
+                        sigIdx <= size(stateMap.ambiguityIdx,2) && ...
+                        stateMap.ambiguityIdx(ti,sigIdx) > 0
+                    B_est = x_state(stateMap.ambiguityIdx(ti,sigIdx));
+                end
+
+                % Frozen troposphere and ionosphere (same realization as original h)
+                trop_m = 0; iono_m = 0;
+                if isfield(errStruct,'bySource')
+                    bm = errStruct.bySource.model_m;
+                    if isfield(bm,'trop') && mi <= numel(bm.trop); trop_m = bm.trop(mi); end
+                    if isfield(bm,'iono') && mi <= numel(bm.iono); iono_m = bm.iono(mi); end
+                end
+
+                h_phi(mi) = rho_e + b_rx_est - b_twr + trop_m - iono_m + B_est;
+
+                % ZWD state (updated)
+                if isfield(stateMap,'zwdIdx') && ti <= numel(stateMap.zwdIdx) && ...
+                        stateMap.zwdIdx(ti) > 0
+                    mf = revgnss.MappingFunctions.troposphere(elv, mfKind);
+                    h_phi(mi) = h_phi(mi) + mf * x_state(stateMap.zwdIdx(ti));
                 end
             end
         end
@@ -1227,10 +1372,8 @@ classdef MeasurementModel < handle
         function [b_m, bdot_mps] = getClockAtProductEpoch_(obj, tower, t_prod_s)
             % getClockAtProductEpoch_  Return tower clock bias and drift at product epoch.
             %
-            % Looks up the tower clock history to find the state at or just before
-            % t_prod_s.  Used by 'product' and 'productNoisy' towerClockMode to
-            % evaluate the linear prediction b_hat(t) = b(t_prod) + bdot * (t-t_prod).
-            %
+            % For 'truthHistoryProduct'/'product'/'productNoisy' modes that do NOT have
+            % an explicit cfg.towerClock.products struct, this reads from tower history.
             % Returns [0, 0] when history is unavailable (first epoch or t_prod=0).
             b_m      = 0;
             bdot_mps = 0;
@@ -1238,13 +1381,65 @@ classdef MeasurementModel < handle
             if isempty(hist.time_s) || isempty(hist.clockBias_m)
                 return;
             end
-            % Find the last history entry at or before t_prod_s (with epsilon guard).
             idx = find(hist.time_s <= t_prod_s + 1e-9, 1, 'last');
-            if isempty(idx)
-                return;
-            end
+            if isempty(idx); return; end
             b_m      = hist.clockBias_m(idx);
             bdot_mps = hist.clockDrift_mps(idx);
+        end
+
+        % ----------------------------------------------------------------
+        function [b_hat, sigma_corr] = evalProductStruct_(obj, ti, t_eval_s)
+            % evalProductStruct_  Evaluate explicit per-tower product struct.
+            %
+            % Reads cfg.towerClock.products(ti) and returns the linearly-predicted
+            % clock bias at t_eval_s together with the product prediction uncertainty.
+            %
+            %   b_hat = bias_m + drift_mps * dt         [m]
+            %   sigma_corr^2 = sigmaBias^2 + dt^2*sigmaDrift^2 + 2*dt*covBiasDrift
+            %
+            % where dt = t_eval_s - epoch_s.
+            % If validity_s is set and |dt| > validity_s, applies productValidityPolicy.
+            b_hat      = 0;
+            sigma_corr = 0;
+
+            if ~isfield(obj.cfg,'towerClock') || ~isfield(obj.cfg.towerClock,'products')
+                return  % no product struct — caller must use history fallback
+            end
+            products = obj.cfg.towerClock.products;
+            if ti > numel(products)
+                return
+            end
+            prod = products(ti);
+
+            epoch_s   = 0;  if isfield(prod,'epoch_s');   epoch_s   = prod.epoch_s;   end
+            bias_m    = 0;  if isfield(prod,'bias_m');    bias_m    = prod.bias_m;    end
+            drift_mps = 0;  if isfield(prod,'drift_mps'); drift_mps = prod.drift_mps; end
+
+            dt = t_eval_s - epoch_s;
+
+            % Validity check
+            if isfield(prod,'validity_s') && prod.validity_s > 0 && abs(dt) > prod.validity_s
+                policy = 'warn';
+                if isfield(obj.cfg.towerClock,'productValidityPolicy')
+                    policy = obj.cfg.towerClock.productValidityPolicy;
+                end
+                msg = sprintf(['Tower %d product validity exceeded: |dt|=%.1f s > %.1f s. ' ...
+                               'Prediction accuracy may be degraded.'], ti, abs(dt), prod.validity_s);
+                if strcmp(policy,'error')
+                    error('MeasurementModel:productValidityExceeded', '%s', msg);
+                else
+                    warning('MeasurementModel:productValidityExceeded', '%s', msg);
+                end
+            end
+
+            b_hat = bias_m + drift_mps * dt;
+
+            % R contribution: sigma_corr^2 = sigmaBias^2 + dt^2*sigmaDrift^2 + 2*dt*cov
+            sBias  = 0; if isfield(prod,'sigmaBias_m');    sBias  = prod.sigmaBias_m;    end
+            sDrift = 0; if isfield(prod,'sigmaDrift_mps'); sDrift = prod.sigmaDrift_mps; end
+            cov    = 0; if isfield(prod,'covBiasDrift');   cov    = prod.covBiasDrift;   end
+            var_corr = sBias^2 + dt^2 * sDrift^2 + 2*dt*cov;
+            sigma_corr = sqrt(max(var_corr, 0));
         end
 
         % ----------------------------------------------------------------
@@ -1406,9 +1601,18 @@ classdef MeasurementModel < handle
                     if isfield(bm,'trop') && mi <= numel(bm.trop); trop_m = bm.trop(mi); end
                 end
 
-                % Truth and model geometric range (TASK 4C: use correctedPseudorange,
-                % same correction path as code measurements — Sagnac, Shapiro, PCV)
-                r_twr_t = towers{ti}.getAntennaPositionECEF();
+                % Truth and model geometric range (same path as code: survey + PCO + corrections)
+                % Phase 3: use getTowerPosition_ so survey error is included on truth side
+                r_twr_t = obj.getTowerPosition_(towers{ti}, ti, 'truth');
+                % Tower PCO (truth side) — mirrors code path in computeMeasurements
+                if isfield(obj.cfg,'effects') && isfield(obj.cfg.effects,'antennaPCO')
+                    pco = obj.cfg.effects.antennaPCO;
+                    if isfield(pco,'truth') && pco.truth.enable
+                        tOff = pco.towerOffset_enu_m(:);
+                        R_ENU = revgnss.GeometryUtils.enu2ecef(towers{ti}.lat_rad, towers{ti}.lon_rad);
+                        r_twr_t = r_twr_t + R_ENU * tOff;
+                    end
+                end
                 rho_t = revgnss.RangeCorrections.correctedPseudorange( ...
                     r_ants_truth(:,ai), r_twr_t, obj.cfg, 'truth', elv);
 
@@ -1428,7 +1632,7 @@ classdef MeasurementModel < handle
                 h_phi(mi) = rho_e + b_rx_est - b_twr_m + trop_m - iono_m + B_est;
                 if isfield(stateMap,'zwdIdx') && ti <= numel(stateMap.zwdIdx) && ...
                         stateMap.zwdIdx(ti) > 0
-                    mf_phi = revgnss.MappingFunctions.troposphere(elv, 'simple');
+                    mf_phi = revgnss.MappingFunctions.troposphere(elv, obj.zwdMappingKind_());
                     h_phi(mi) = h_phi(mi) + mf_phi * x_est(stateMap.zwdIdx(ti));
                 end
 
@@ -1455,7 +1659,7 @@ classdef MeasurementModel < handle
                 % ZWD column: +mf (troposphere advance — same sign for carrier and code)
                 if isfield(stateMap,'zwdIdx') && ...
                         ti <= numel(stateMap.zwdIdx) && stateMap.zwdIdx(ti) > 0
-                    mf = revgnss.MappingFunctions.troposphere(elv, 'simple');
+                    mf = revgnss.MappingFunctions.troposphere(elv, obj.zwdMappingKind_());
                     H_phi(mi, stateMap.zwdIdx(ti)) = mf;
                 end
             end
@@ -1487,6 +1691,28 @@ classdef MeasurementModel < handle
         end
 
     end  % private methods
+
+    methods (Access = private)
+
+        % ----------------------------------------------------------------
+        function kind = zwdMappingKind_(obj)
+            % zwdMappingKind_  Return the configured ZWD troposphere mapping kind.
+            %
+            % Reads cfg.effects.troposphere.mappingModel (preferred) or
+            % cfg.errors.troposphere.mappingModel (legacy path).
+            % Defaults to 'simple' if neither is set.
+            % Valid values: 'simple' | 'continuedFraction'
+            kind = 'simple';
+            if isfield(obj.cfg,'effects') && isfield(obj.cfg.effects,'troposphere') && ...
+                    isfield(obj.cfg.effects.troposphere,'mappingModel')
+                kind = obj.cfg.effects.troposphere.mappingModel;
+            elseif isfield(obj.cfg,'errors') && isfield(obj.cfg.errors,'troposphere') && ...
+                    isfield(obj.cfg.errors.troposphere,'mappingModel')
+                kind = obj.cfg.errors.troposphere.mappingModel;
+            end
+        end
+
+    end  % private (ZWD helper) methods
 
     methods (Static)
 

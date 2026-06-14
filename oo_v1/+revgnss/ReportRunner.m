@@ -105,6 +105,7 @@ classdef ReportRunner
             summary = revgnss.ReportRunner.collectSummary_(diag, cfg, version, reportFolder, pdfPath, matPath);
 
             % ---- PDF: generate figures and write ------------------------
+            texPath2 = '';
             if writePdf
                 figHandles = revgnss.Plotter.plotAll(diag, sim.asset, sim.towers, cfg);
                 nRx = size(sim.asset.receiverLeverArms_body_m, 2);
@@ -114,7 +115,20 @@ classdef ReportRunner
                 contribFigs = revgnss.ContributionPlotter.plotSingleCaseContributionPages(diag, cfg);
                 summaryFig  = revgnss.ReportRunner.makeSummaryPage_(summary, cfg);
 
-                allFigs = [summaryFig, figHandles(:)', contribFigs(:)'];
+                % Phase 9: latex-style scientific section pages
+                texFigs  = gobjects(0);
+                texPath2 = '';
+                reportStyle = 'default';
+                if isfield(cfg,'report') && isfield(cfg.report,'style')
+                    reportStyle = cfg.report.style;
+                end
+                if strcmp(reportStyle,'latex')
+                    [texFigs, texPath2] = revgnss.LatexReportBuilder.build( ...
+                        diag, sim.asset, sim.towers, cfg, summary);
+                end
+                texFigs = texFigs(isgraphics(texFigs));
+
+                allFigs = [summaryFig, texFigs(:)', figHandles(:)', contribFigs(:)'];
                 allFigs = allFigs(isgraphics(allFigs));
                 fprintf('  Writing PDF (%d pages)...\n', numel(allFigs));
                 cfgWrite = cfg;
@@ -182,6 +196,7 @@ classdef ReportRunner
             out.reportFolder      = reportFolder;
             out.pdfPath           = pdfPath;
             out.matPath           = matPath;
+            out.texPath           = texPath2;
 
             fprintf('=== ReportRunner: done ===\n');
         end

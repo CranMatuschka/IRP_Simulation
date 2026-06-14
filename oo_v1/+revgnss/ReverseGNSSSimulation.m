@@ -311,10 +311,9 @@ classdef ReverseGNSSSimulation < handle
                 end
             end
 
-            % TASK 5: carrier postfit (ekfFloat rows after Doppler rows)
-            % Re-evaluate h_phi with updated EKF state for rows identified as 'carrier'
-            % in measType_perRow. Uses prefit from errStruct.carrierPhase adjusted by
-            % state delta to avoid re-running the full carrier model.
+            % Phase 2: carrier postfit — recompute h_phi from UPDATED EKF state.
+            % computeCarrierModelOnly uses the post-update x with the same frozen
+            % error-chain corrections (frozen trop/iono/tower-clock) from errStruct.
             hc_post  = [];
             doCarrier = isfield(obj.cfg,'measurements') && ...
                         isfield(obj.cfg.measurements,'carrierMode') && ...
@@ -323,17 +322,12 @@ classdef ReverseGNSSSimulation < handle
                         isfield(errStruct.carrierPhase,'phi_m') && ...
                         ~isempty(errStruct.carrierPhase.phi_m);
             if doCarrier
-                M_car = numel(errStruct.carrierPhase.phi_m);
-                % Carrier h uses same H_phi rows already computed during measurement step.
-                % Postfit = z_phi - H_phi * x_post (linear in x for position + clock + amb).
-                % Use h_phi = prefit + h_phi_old => h_phi_post = h_phi_old + H_phi * dx
-                % Since we don't store H_phi, reconstruct h_phi_post via:
-                %   h_phi_post = z_phi - prefit_old + H_phi * (x_post - x_old)
-                % The simplest correct approximation: z_phi - prefit_m_old gives
-                % h_phi_old evaluated at the pre-update state. We add the position+clock
-                % contribution from dx (H_phi analytic parts).
-                % For v1, we output the prefit to indicate observation residual before update.
-                hc_post = errStruct.carrierPhase.phi_m - errStruct.carrierPhase.prefit_m;
+                hc_post = obj.measModel.computeCarrierModelOnly( ...
+                    obj.asset, obj.towers, obj.ekf.x, errStruct, sm);
+                if isempty(hc_post)
+                    % Fallback: no carrier state map — use prefit h approximation
+                    hc_post = errStruct.carrierPhase.phi_m - errStruct.carrierPhase.prefit_m;
+                end
             end
 
             M_car = numel(hc_post);

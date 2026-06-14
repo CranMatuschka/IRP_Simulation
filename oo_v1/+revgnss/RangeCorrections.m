@@ -128,21 +128,27 @@ classdef RangeCorrections
         function dPCV = pcvCorrection_(el_rad, cfg, side)
             % pcvCorrection_  PCV range correction in metres.
             %
-            % Selects model via cfg.effects.antenna.pcvModel:
-            %   'none'  → 0
-            %   'toy'   → amplitude * cos(el)^2  (legacy toyAzEl)
-            %   'table' → 1D table interpolation on elevation
+            % pcvModel governs behavior:
+            %   'none'  → 0 regardless of legacy enable flags
+            %   'toy'   → amplitude * cos(el)^2 when legacy enable flag is true
+            %   'table' → 1D table interpolation; table MUST exist when enabled
+            %
+            % pcvModel='table' throws an error if the table is missing or malformed.
+            % Azimuth-dependent tables are not supported and throw an error.
 
             dPCV = 0;
 
-            % Determine pcvModel: new style takes priority
-            pcvModel = 'toy';   % default: preserve legacy behavior
+            % pcvModel determines behavior; defaults to 'toy' (legacy)
+            pcvModel = 'toy';
             if isfield(cfg,'effects') && isfield(cfg.effects,'antenna') && ...
                     isfield(cfg.effects.antenna,'pcvModel')
                 pcvModel = cfg.effects.antenna.pcvModel;
             end
 
-            % Legacy on/off gate still respected
+            % 'none': always zero, regardless of legacy enable flags
+            if strcmp(pcvModel,'none'); return; end
+
+            % Legacy on/off gate: controls whether PCV is active this side
             pcvEnabled = false;
             if isfield(cfg,'effects') && isfield(cfg.effects,'antennaPCV') && ...
                     isfield(cfg.effects.antennaPCV, side)
@@ -151,11 +157,8 @@ classdef RangeCorrections
             if ~pcvEnabled; return; end
 
             switch pcvModel
-                case 'none'
-                    dPCV = 0;
-
                 case 'toy'
-                    amp  = 0.005;
+                    amp = 0.005;
                     if isfield(cfg,'effects') && isfield(cfg.effects,'antennaPCV') && ...
                             isfield(cfg.effects.antennaPCV,'amplitude_m')
                         amp = cfg.effects.antennaPCV.amplitude_m;
@@ -163,9 +166,12 @@ classdef RangeCorrections
                     dPCV = amp * cos(el_rad)^2;
 
                 case 'table'
+                    % Table is MANDATORY when pcvModel='table' and pcvEnabled=true
                     if ~isfield(cfg,'effects') || ~isfield(cfg.effects,'antenna') || ...
                             ~isfield(cfg.effects.antenna,'receiverPcvTable')
-                        dPCV = 0; return;
+                        error('RangeCorrections:pcvTableMissing', ...
+                            ['pcvModel=''table'' requires cfg.effects.antenna.receiverPcvTable. ' ...
+                             'Table is missing. Provide a valid table or set pcvModel to ''toy'' or ''none''.']);
                     end
                     tbl = cfg.effects.antenna.receiverPcvTable;
                     if ~isfield(tbl,'elDeg') || ~isfield(tbl,'pcv_m')
