@@ -6,7 +6,7 @@ addpath(fullfile(thisDir, '..'));
 fprintf('=== test_tower_clock_effect ===\n');
 
 rmsUncorrected = runCaseTowerClock('none');
-rmsCorrected   = runCaseTowerClock('perfectCorrection');
+rmsCorrected   = runCaseTowerClock('perfectTruth');
 
 fprintf('  Uncorrected  innRMS: %.4f m\n', rmsUncorrected);
 fprintf('  Corrected    innRMS: %.4f m\n', rmsCorrected);
@@ -24,7 +24,22 @@ function innRms = runCaseTowerClock(mode)
     cfg.simulation.dt_s          = 1.0;
     cfg.plots.enable             = false;
     cfg.errors.codeNoise.sigma_m = 0.5;
-    cfg.estimator.towerClockMode = mode;
+
+    % Add deterministic clock biases so 'none' vs 'perfectTruth' correction is observable.
+    % Tower k gets a bias of k * 1e-7 s ≈ k * 30 m; these are constant (deterministic=true).
+    for k = 1:cfg.scenario.nTowers
+        cfg.towers(k).clock.bias_s = k * 1e-7;
+    end
+
+    % Start EKF at truth so innovations reflect clock correction, not position transient
+    cfg.estimator.initialError.pos_m          = [0; 0; 0];
+    cfg.estimator.initialError.vel_mps        = [0; 0; 0];
+    cfg.estimator.initialError.euler_deg      = [0; 0; 0];
+    cfg.estimator.initialError.omega_radps    = [0; 0; 0];
+    cfg.estimator.initialError.clockBias_m    = 0;
+    cfg.estimator.initialError.clockDrift_mps = 0;
+
+    cfg.towerClock.correctionMode = mode;
     sim = revgnss.ReverseGNSSSimulation(cfg);
     sim.initialize(); sim.run();
     ir = sim.diag.getPrefitInnovationRMS();

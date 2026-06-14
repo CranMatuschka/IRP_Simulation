@@ -46,7 +46,8 @@ fprintf('  T2: pcvModel=''table'' with no table throws pcvTableMissing ...\n');
 cfg_tab = revgnss.ConfigFactory.defaultConfig();
 cfg_tab.effects.antenna.pcvModel         = 'table';
 cfg_tab.effects.antennaPCV.truth.enable  = true;
-% Deliberately do NOT set cfg_tab.effects.antenna.receiverPcvTable
+% Remove the default receiverPcvTable so the 'table' mode has no table
+cfg_tab.effects.antenna = rmfield(cfg_tab.effects.antenna, 'receiverPcvTable');
 
 threwT2 = false;
 try

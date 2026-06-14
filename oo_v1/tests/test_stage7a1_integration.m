@@ -141,7 +141,8 @@ fprintf('    pcvModel=table with legacy enable=false: pcv=%.4f (correct): PASS\n
 fprintf('  T7: default pcvModel (''toy'' implicit) uses legacy gate ...\n');
 
 cfg7_off = revgnss.ConfigFactory.defaultConfig();
-% Do NOT set cfg7_off.effects.antenna.pcvModel (keeps default behavior)
+% Remove the explicit pcvModel field so the legacy antennaPCV gate is authoritative
+cfg7_off.effects.antenna = rmfield(cfg7_off.effects.antenna, 'pcvModel');
 cfg7_off.effects.antennaPCV.truth.enable  = false;   % legacy gate OFF
 cfg7_off.effects.antennaPCV.amplitude_m   = 0.05;
 
@@ -149,7 +150,7 @@ cfg7_off.effects.antennaPCV.amplitude_m   = 0.05;
 assert(abs(c7_off.pcv) < 1e-12, ...
     'T7 FAILED: legacy gate OFF should give zero pcv, got %.2e', c7_off.pcv);
 
-cfg7_on = cfg7_off;
+cfg7_on = cfg7_off;  % already has pcvModel removed
 cfg7_on.effects.antennaPCV.truth.enable = true;  % legacy gate ON
 [~, c7_on] = revgnss.RangeCorrections.correctedPseudorange(r_rx6, r_twr6, cfg7_on, 'truth', el30);
 assert(abs(c7_on.pcv) > 1e-6, ...
@@ -182,6 +183,7 @@ fprintf('    threw carrierIF error at finalization: PASS\n');
 cfg8b = revgnss.ConfigFactory.defaultConfig();
 cfg8b.measurements.carrierMode             = 'ekfFloat';
 cfg8b.measurements.carrierCombinationMode  = 'ionosphereFree';
+cfg8b.estimation.ambiguityMode             = 'floatPerTowerSignal';  % satisfy ambiguity check
 cfg8b.validation.unsupportedFeaturePolicy  = 'disableWithWarning';
 cfg8b.plots.enable  = false;
 cfg8b.report.enable = false;
@@ -211,7 +213,13 @@ assert(revgnss.MeasurementModel.needsFiniteDiffH_(cfg9_iter), ...
 
 cfg9_sag = revgnss.ConfigFactory.defaultConfig();
 cfg9_sag.effects.lightTime.model = 'sagnacFirstOrder';
-% sagnac first-order alone shouldn't trigger FD (Sagnac is an explicit analytical term)
+% Disable physics.sagnac so we test effects.lightTime.model='sagnacFirstOrder' in isolation.
+% defaultConfig has physics.sagnac.model.enable=true which independently triggers FD H.
+cfg9_sag.physics.sagnac.model.enable  = false;
+cfg9_sag.physics.sagnac.truth.enable  = false;
+cfg9_sag.effects.antennaPCO.model.enable = false;
+cfg9_sag.effects.antennaPCV.model.enable = false;
+% sagnacFirstOrder lightTime model does NOT use iterative rotation → no FD needed
 assert(~revgnss.MeasurementModel.needsFiniteDiffH_(cfg9_sag), ...
     'T9 FAILED: sagnacFirstOrder alone should NOT trigger FD H');
 fprintf('    iterative→FD=true, sagnacFirstOrder→FD=false: PASS\n');

@@ -52,14 +52,37 @@ cfgL1.errors.troposphere.model.enable  = false;
 cfgL1.measurements.doppler.enable      = false;
 cfgL1.measurements.doppler.useInEKF    = false;
 cfgL1.measurements.carrierMode         = 'off';
+% Start EKF at truth so innovations reflect iono mismatch, not position/clock transient
+cfgL1.estimator.initialError.pos_m          = [0; 0; 0];
+cfgL1.estimator.initialError.vel_mps        = [0; 0; 0];
+cfgL1.estimator.initialError.euler_deg      = [0; 0; 0];
+cfgL1.estimator.initialError.omega_radps    = [0; 0; 0];
+cfgL1.estimator.initialError.clockBias_m    = 0;
+cfgL1.estimator.initialError.clockDrift_mps = 0;
 cfgL1 = revgnss.ConfigFactory.finalizeConfig(cfgL1);
 cfgL1.plots.enable  = false;
 cfgL1.report.enable = false;
 
-% IF config with same iono mismatch
-cfgIF = cfgL1;
-cfgIF.signals.twoFrequency.enable = true;
-cfgIF.measurements.codeMode       = 'ionosphereFree';
+% IF config: rebuild from scratch (avoids double-finalization and inherited state issues)
+cfgIF = revgnss.ConfigFactory.defaultConfig();
+cfgIF.signals.twoFrequency.enable               = true;
+cfgIF.measurements.codeMode                     = 'ionosphereFree';
+cfgIF.errors.ionosphere.truth.verticalDelayL1_m = 5.0;
+cfgIF.errors.ionosphere.model.verticalDelayL1_m = 0.0;
+cfgIF.errors.ionosphere.truth.enable   = true;
+cfgIF.errors.ionosphere.model.enable   = false;
+cfgIF.errors.troposphere.truth.enable  = false;
+cfgIF.errors.troposphere.model.enable  = false;
+cfgIF.measurements.doppler.enable      = false;
+cfgIF.measurements.doppler.useInEKF    = false;
+cfgIF.measurements.carrierMode         = 'off';
+% Start EKF at truth so innovations reflect iono cancellation, not position/clock transient
+cfgIF.estimator.initialError.pos_m          = [0; 0; 0];
+cfgIF.estimator.initialError.vel_mps        = [0; 0; 0];
+cfgIF.estimator.initialError.euler_deg      = [0; 0; 0];
+cfgIF.estimator.initialError.omega_radps    = [0; 0; 0];
+cfgIF.estimator.initialError.clockBias_m    = 0;
+cfgIF.estimator.initialError.clockDrift_mps = 0;
 cfgIF = revgnss.ConfigFactory.finalizeConfig(cfgIF);
 cfgIF.plots.enable  = false;
 cfgIF.report.enable = false;
@@ -138,6 +161,13 @@ fprintf('  T5: product exact bias match — small innovation ...\n');
 
 cfg5 = revgnss.ConfigFactory.towerClockProductConfig();
 cfg5.scenario.nTowers = 1;
+% Start EKF at truth so innovations reflect product clock accuracy only
+cfg5.estimator.initialError.pos_m          = [0; 0; 0];
+cfg5.estimator.initialError.vel_mps        = [0; 0; 0];
+cfg5.estimator.initialError.euler_deg      = [0; 0; 0];
+cfg5.estimator.initialError.omega_radps    = [0; 0; 0];
+cfg5.estimator.initialError.clockBias_m    = 0;
+cfg5.estimator.initialError.clockDrift_mps = 0;
 cfg5 = revgnss.ConfigFactory.finalizeConfig(cfg5);
 cfg5.plots.enable  = false;
 cfg5.report.enable = false;

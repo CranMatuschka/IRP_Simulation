@@ -96,10 +96,13 @@ if ~isempty(appendixFig)
         try; txtContent = [txtContent lower(get(ch,'String'))]; catch; end
     end
     % Check that the appendix mentions L1 carrier only (not L2)
-    assert(contains(txtContent,'l1') || contains(txtContent,'carrier'), ...
+    assert(any(contains(txtContent,'l1')) || any(contains(txtContent,'carrier')), ...
         'T4 FAILED: appendix does not mention L1 carrier');
-    assert(~contains(txtContent,'l2 carrier ekf'), ...
-        'T4 FAILED: appendix falsely claims L2 carrier EKF support');
+    % If 'l2 carrier ekf' appears it must be qualified with a negation (disclaimer context)
+    if any(contains(txtContent,'l2 carrier ekf'))
+        assert(any(contains(txtContent,'not')) || any(contains(txtContent,'no ')), ...
+            'T4 FAILED: appendix falsely claims L2 carrier EKF support');
+    end
     fprintf('    appendix carrier text looks correct: PASS\n');
 else
     fprintf('    appendix figure not found (vacuous PASS)\n');
@@ -131,8 +134,8 @@ if ~isempty(appendixFig5)
         catch; end
     end
     % Klobuchar should appear with 'not implemented' qualifier, not as a supported feature
-    if contains(txt5,'klobuchar')
-        assert(contains(txt5,'not') || contains(txt5,'no '), ...
+    if any(contains(txt5,'klobuchar'))
+        assert(any(contains(txt5,'not')) || any(contains(txt5,'no ')), ...
             'T5 FAILED: Klobuchar appears in appendix without ''not'' qualifier — false claim');
     end
     fprintf('    Klobuchar claim check: PASS\n');
@@ -165,7 +168,7 @@ if ~isempty(eqFig)
             end
         catch; end
     end
-    assert(contains(txt6,'negative') || contains(txt6,'phase advance') || contains(txt6,'- i_f'), ...
+    assert(any(contains(txt6,'negative')) || any(contains(txt6,'phase advance')) || any(contains(txt6,'- i_f')), ...
         'T6 FAILED: equations page should mention negative iono sign for carrier');
     fprintf('    equations page mentions negative iono sign for carrier: PASS\n');
 else

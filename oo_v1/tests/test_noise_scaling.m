@@ -15,10 +15,15 @@ for si = 1:2
     cfg.simulation.dt_s            = 1.0;
     cfg.plots.enable               = false;
     cfg.errors.codeNoise.sigma_m   = sigmas(si);
-    cfg.asset.clock.deterministic  = false;
-    for k=1:numel(cfg.towers)
-        cfg.towers(k).clock.deterministic = false;
-    end
+    cfg.signals.L1.codeSigma0_m    = sigmas(si);  % signals.L1.codeSigma0_m takes precedence
+
+    % Start EKF at truth so innovations reflect code noise level, not position transient
+    cfg.estimator.initialError.pos_m          = [0; 0; 0];
+    cfg.estimator.initialError.vel_mps        = [0; 0; 0];
+    cfg.estimator.initialError.euler_deg      = [0; 0; 0];
+    cfg.estimator.initialError.omega_radps    = [0; 0; 0];
+    cfg.estimator.initialError.clockBias_m    = 0;
+    cfg.estimator.initialError.clockDrift_mps = 0;
 
     sim = revgnss.ReverseGNSSSimulation(cfg);
     sim.initialize(); sim.run();

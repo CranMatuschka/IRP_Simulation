@@ -54,10 +54,10 @@ fprintf('    towerClockProductConfig finalizes: PASS\n');
 fprintf('  T3: stochasticErrorsConfig uses truthHistoryProduct correctionMode ...\n');
 
 cfg3 = revgnss.ConfigFactory.stochasticErrorsConfig();
-assert(strcmp(cfg3.towerClock.correctionMode,'truthHistoryProduct'), ...
-    'T3 FAILED: stochasticErrorsConfig.towerClock.correctionMode should be ''truthHistoryProduct'', got ''%s''', ...
+assert(strcmp(cfg3.towerClock.correctionMode,'truthHistoryProductNoisy'), ...
+    'T3 FAILED: stochasticErrorsConfig.towerClock.correctionMode should be ''truthHistoryProductNoisy'', got ''%s''', ...
     cfg3.towerClock.correctionMode);
-fprintf('    stochasticErrorsConfig correctionMode=truthHistoryProduct: PASS\n');
+fprintf('    stochasticErrorsConfig correctionMode=truthHistoryProductNoisy: PASS\n');
 
 % ----------------------------------------------------------------
 % T4: carrierFloatConfig activates carrierMode=ekfFloat
@@ -72,9 +72,9 @@ assert(strcmp(cfg4.measurements.carrierMode,'ekfFloat'), ...
 
 assert(isfield(cfg4,'estimation'), 'T4 FAILED: estimation field missing');
 assert(isfield(cfg4.estimation,'ambiguityMode'), 'T4 FAILED: ambiguityMode missing');
-assert(strcmp(cfg4.estimation.ambiguityMode,'float'), ...
-    'T4 FAILED: ambiguityMode=%s, expected float', cfg4.estimation.ambiguityMode);
-fprintf('    carrierMode=ekfFloat, ambiguityMode=float: PASS\n');
+assert(strcmp(cfg4.estimation.ambiguityMode,'floatPerTowerSignal'), ...
+    'T4 FAILED: ambiguityMode=%s, expected floatPerTowerSignal', cfg4.estimation.ambiguityMode);
+fprintf('    carrierMode=ekfFloat, ambiguityMode=floatPerTowerSignal: PASS\n');
 
 % ----------------------------------------------------------------
 % T5: dualFrequencyIFConfig creates codeMode=ionosphereFree

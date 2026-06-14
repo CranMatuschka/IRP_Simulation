@@ -23,11 +23,19 @@ fprintf('  PASS\n');
 
 %% Local functions
 function innRms = runCaseAtmo(tropModelOn)
-    cfg = revgnss.ConfigFactory.defaultConfig();
+    cfg = revgnss.ConfigFactory.cleanConfig();
     cfg.simulation.duration_s = 200;
     cfg.simulation.dt_s       = 1.0;
     cfg.plots.enable          = false;
     cfg.errors.codeNoise.sigma_m = 0.1;
+
+    % Start EKF at truth so innovations reflect trop effect, not position transient
+    cfg.estimator.initialError.pos_m          = [0; 0; 0];
+    cfg.estimator.initialError.vel_mps        = [0; 0; 0];
+    cfg.estimator.initialError.euler_deg      = [0; 0; 0];
+    cfg.estimator.initialError.omega_radps    = [0; 0; 0];
+    cfg.estimator.initialError.clockBias_m    = 0;
+    cfg.estimator.initialError.clockDrift_mps = 0;
 
     % Ionosphere off for clean comparison
     cfg.errors.ionosphere.truth.enable = false;
@@ -38,8 +46,6 @@ function innRms = runCaseAtmo(tropModelOn)
     cfg.errors.troposphere.model.enable        = tropModelOn;
     cfg.errors.troposphere.model.zenithDelay_m = 2.3;
     cfg.errors.troposphere.model.biasFraction  = 1.0;
-
-    cfg.estimator.towerClockMode = 'perfectCorrection';
 
     sim = revgnss.ReverseGNSSSimulation(cfg);
     sim.initialize(); sim.run();
