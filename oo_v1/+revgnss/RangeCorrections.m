@@ -73,6 +73,8 @@ classdef RangeCorrections
             contrib.sagnac  = 0;
             contrib.shapiro = 0;
             contrib.pcv     = 0;
+            contrib.tau_s   = 0;    % signal travel time [s]; non-zero only in iterative mode
+            contrib.t_tx_s  = [];   % approximate transmit time; empty unless iterative mode
 
             % Determine light-time model
             ltModel = 'sagnacFirstOrder';
@@ -81,10 +83,14 @@ classdef RangeCorrections
                 ltModel = cfg.effects.lightTime.model;
             end
 
-            % Apply light-time iteration when requested (model side only; truth uses same)
+            % Apply light-time iteration when requested (model side only; truth uses same).
+            % Stage 7A: also capture tau_s and t_tx_s for transmit-time clock evaluation.
             tx_ecef_eff = tx_ecef;
             if strcmp(ltModel,'iterative')
-                [tx_ecef_eff, ~] = revgnss.LightTimeSolver.solve(rx_ecef, tx_ecef, cfg);
+                [tx_ecef_eff, tau_s_lt, t_tx_lt] = revgnss.LightTimeSolver.solve( ...
+                    rx_ecef, tx_ecef, cfg);
+                contrib.tau_s  = tau_s_lt;
+                contrib.t_tx_s = t_tx_lt;
             end
 
             rho = revgnss.RangeCorrections.geometricRange(rx_ecef, tx_ecef_eff);

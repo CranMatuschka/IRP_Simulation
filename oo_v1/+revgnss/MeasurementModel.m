@@ -201,42 +201,59 @@ classdef MeasurementModel < handle
                 towerClkTruth(mi) = b_t;
                 switch towerClkMode
                     case 'none'
-                        % CHANGED: v3→v4 — Issue 4
-                        % gaugeMode=none: no product available; tower clock unknown.
-                        % EKF must estimate or accept the clock bias as an error.
+                        % No correction. EKF must estimate or accept clock bias as error.
                         towerClkModel(mi) = 0;
                     case 'perfectCorrection'
-                        % Validation/test use only.  Uses truth clock directly.
+                        % Validation/test use only. Uses truth clock directly.
                         towerClkModel(mi) = b_t;
                     case 'noisyCorrection'
-                        % Truth-based simulated correction (see SIMULATION NOTE above).
-                        % correction = true_tower_clock + randn * sigma_correction
+                        % Truth-based simulated correction + Gaussian noise (truthHistoryProductNoisy).
                         towerClkModel(mi) = b_t + corrNoise_m(mi);
                         towerClkSigma(mi) = noiseSigma;
+                    case 'truthProduct'
+                        % Stage 7A: truthHistoryProduct — history-based linear prediction.
+                        % Does NOT require cfg.towerClock.products struct.
+                        [b_p, bd_p] = obj.getClockAtProductEpoch_(towers{ti}, t_prod);
+                        towerClkModel(mi) = b_p + bd_p * (t_s - t_prod);
                     case 'product'
-                        % Phase 4: use explicit product struct if available, else history.
-                        if isfield(obj.cfg,'towerClock') && isfield(obj.cfg.towerClock,'products') && ...
-                                ti <= numel(obj.cfg.towerClock.products)
-                            [b_hat, ~] = obj.evalProductStruct_(ti, t_s);
-                            towerClkModel(mi) = b_hat;
-                        else
-                            % Fallback: history-based linear prediction
-                            [b_p, bd_p] = obj.getClockAtProductEpoch_(towers{ti}, t_prod);
-                            towerClkModel(mi) = b_p + bd_p * (t_s - t_prod);
+                        % Stage 7A: explicit cfg.towerClock.products struct REQUIRED.
+                        % NO fallback to truth history. Throws if struct is missing.
+                        hasProd = isfield(obj.cfg,'towerClock') && ...
+                                  isfield(obj.cfg.towerClock,'products') && ...
+                                  ti <= numel(obj.cfg.towerClock.products);
+                        if ~hasProd
+                            nProd = 0;
+                            if isfield(obj.cfg,'towerClock') && isfield(obj.cfg.towerClock,'products')
+                                nProd = numel(obj.cfg.towerClock.products);
+                            end
+                            error('MeasurementModel:productStructMissing', ...
+                                ['correctionMode=''product'' requires cfg.towerClock.products(%d) ' ...
+                                 'to be set. Found only %d product struct(s). ' ...
+                                 'Use correctionMode=''truthHistoryProduct'' for history-based mode.'], ...
+                                ti, nProd);
                         end
+                        [b_hat, ~] = obj.evalProductStruct_(ti, t_s);
+                        towerClkModel(mi) = b_hat;
                     case 'productNoisy'
-                        % Phase 4: product with R uncertainty inflation.
-                        if isfield(obj.cfg,'towerClock') && isfield(obj.cfg.towerClock,'products') && ...
-                                ti <= numel(obj.cfg.towerClock.products)
-                            [b_hat, sig_corr] = obj.evalProductStruct_(ti, t_s);
-                            towerClkModel(mi) = b_hat;
-                            towerClkSigma(mi) = sig_corr;
-                        else
-                            % Fallback: history-based with fixed noiseSigma
-                            [b_p, bd_p] = obj.getClockAtProductEpoch_(towers{ti}, t_prod);
-                            towerClkModel(mi) = b_p + bd_p * (t_s - t_prod);
-                            towerClkSigma(mi) = noiseSigma;
+                        % Stage 7A: explicit struct REQUIRED + uncertainty added to R.
+                        % NO fallback to truth history. Throws if struct is missing.
+                        hasProd = isfield(obj.cfg,'towerClock') && ...
+                                  isfield(obj.cfg.towerClock,'products') && ...
+                                  ti <= numel(obj.cfg.towerClock.products);
+                        if ~hasProd
+                            nProd = 0;
+                            if isfield(obj.cfg,'towerClock') && isfield(obj.cfg.towerClock,'products')
+                                nProd = numel(obj.cfg.towerClock.products);
+                            end
+                            error('MeasurementModel:productStructMissing', ...
+                                ['correctionMode=''productNoisy'' requires cfg.towerClock.products(%d) ' ...
+                                 'to be set. Found only %d product struct(s). ' ...
+                                 'Use correctionMode=''truthHistoryProductNoisy'' for history-based mode.'], ...
+                                ti, nProd);
                         end
+                        [b_hat, sig_corr] = obj.evalProductStruct_(ti, t_s);
+                        towerClkModel(mi) = b_hat;
+                        towerClkSigma(mi) = sig_corr;
                     otherwise
                         towerClkModel(mi) = 0;
                 end
@@ -345,7 +362,18 @@ classdef MeasurementModel < handle
                 sagnacTruth_m(mi)  = cTruth.sagnac;
                 shapiroTruth_m(mi) = cTruth.shapiro;
                 pcvTruth_m(mi)     = cTruth.pcv;
-                z(mi) = rho_true + b_rx_true - towerClkTruth(mi) + errStruct.truthTotal_m(mi);
+
+                % Stage 7A: transmit-time tower clock for truth side.
+                % When iterative light-time is active, the tower clock should be
+                % evaluated at t_tx = t_rx - tau, not at t_rx.
+                % Use first-order approximation: b(t_tx) ≈ b(t_rx) - bdot * tau.
+                b_twr_truth_h = towerClkTruth(mi);
+                if ~isempty(cTruth.t_tx_s)
+                    tau_truth = t_s - cTruth.t_tx_s;
+                    bdot_twr  = towers{ti}.clock.getClockDriftMetersPerSecond();
+                    b_twr_truth_h = b_twr_truth_h - bdot_twr * tau_truth;
+                end
+                z(mi) = rho_true + b_rx_true - b_twr_truth_h + errStruct.truthTotal_m(mi);
 
                 % Predicted pseudorange with corrections + toy PCV
                 [rho_est, cModel] = revgnss.RangeCorrections.correctedPseudorange( ...
@@ -354,12 +382,36 @@ classdef MeasurementModel < handle
                 shapiroModel_m(mi) = cModel.shapiro;
                 pcvModel_m(mi)     = cModel.pcv;
 
-                % Tower clock model
-                % CHANGED: v3→v4 — Issue 4
-                % If estimateTowerClocks=true, the EKF state represents the FULL tower
-                % clock bias (approach a).  Do NOT also apply a product correction when
-                % the EKF is estimating the tower clock — that would double-subtract.
-                % If the EKF does not estimate the tower clock, use the correction product.
+                % Stage 7A: transmit-time tower clock for model side.
+                % If iterative light-time is active, re-evaluate product at t_tx_s.
+                % If EKF estimates the clock, the EKF state is used (no re-evaluation).
+                if ~isempty(cModel.t_tx_s) && ...
+                        ~(isfield(stateMap,'towerClockIdx') && ti <= size(stateMap.towerClockIdx,1) && ...
+                          stateMap.towerClockIdx(ti,1) > 0)
+                    % Re-evaluate tower clock at transmit time for product modes.
+                    t_tx_model = cModel.t_tx_s;
+                    switch towerClkMode
+                        case 'product'
+                            if isfield(obj.cfg,'towerClock') && ...
+                                    isfield(obj.cfg.towerClock,'products') && ...
+                                    ti <= numel(obj.cfg.towerClock.products)
+                                [b_reev, ~] = obj.evalProductStruct_(ti, t_tx_model);
+                                towerClkModel(mi) = b_reev;
+                            end
+                        case 'productNoisy'
+                            if isfield(obj.cfg,'towerClock') && ...
+                                    isfield(obj.cfg.towerClock,'products') && ...
+                                    ti <= numel(obj.cfg.towerClock.products)
+                                [b_reev, ~] = obj.evalProductStruct_(ti, t_tx_model);
+                                towerClkModel(mi) = b_reev;
+                            end
+                        case 'truthProduct'
+                            [b_p, bd_p] = obj.getClockAtProductEpoch_(towers{ti}, t_prod);
+                            towerClkModel(mi) = b_p + bd_p * (t_tx_model - t_prod);
+                    end
+                end
+
+                % Tower clock model — use EKF state if estimated, else product.
                 if isfield(stateMap,'towerClockIdx') && ti <= size(stateMap.towerClockIdx,1) && ...
                         stateMap.towerClockIdx(ti,1) > 0
                     b_twr_h = x_est(stateMap.towerClockIdx(ti,1));
@@ -1524,6 +1576,13 @@ classdef MeasurementModel < handle
             % CRITICAL: ionosphere sign is NEGATIVE for carrier (phase advance).
             % This is opposite to +iono for code (group delay).
             % B_phi states are float, in metres, one per (tower, sigIdx=1) arc.
+            %
+            % Stage 7A — Carrier H position Jacobian:
+            % When range corrections (Sagnac, Shapiro, PCV, PCO) are active the
+            % geometric unit vector dρ/dr = u' is insufficient.  If
+            % needsFiniteDiffH_ is true, we use central finite difference on
+            % computeModelRangeOnly_ (identical function used for h_phi range).
+            % Clock, ambiguity, and ZWD columns remain analytic.
 
             cfg    = obj.cfg;
             Mp     = numel(twr_pairs);
@@ -1639,8 +1698,28 @@ classdef MeasurementModel < handle
                 cpInfo.phi_m(mi)    = z_phi(mi);
                 cpInfo.prefit_m(mi) = z_phi(mi) - h_phi(mi);
 
-                % H: position (geometric unit vector), receiver clock, tower clock, ambiguity, ZWD
-                H_phi(mi, stateMap.r_idx)   = (delta_e / rho_e_geom)';
+                % ---- H: position columns (analytic or FD) -------------------
+                r_cm_est  = x_est(stateMap.r_idx);
+                euler_est = x_est(stateMap.euler_idx);
+                doFD = revgnss.MeasurementModel.needsFiniteDiffH_(obj.cfg);
+
+                if doFD
+                    % Central finite-difference position Jacobian.
+                    % Uses computeModelRangeOnly_ — same function as h_phi range term.
+                    step_r = 1.0;  % 1 m step
+                    for ki = 1:3
+                        rp = r_cm_est; rp(ki) = rp(ki) + step_r;
+                        rm = r_cm_est; rm(ki) = rm(ki) - step_r;
+                        hp = obj.computeModelRangeOnly_(towers, ti, ai, rp, euler_est, leverArms_model);
+                        hm = obj.computeModelRangeOnly_(towers, ti, ai, rm, euler_est, leverArms_model);
+                        H_phi(mi, stateMap.r_idx(ki)) = (hp - hm) / (2*step_r);
+                    end
+                else
+                    % Analytic unit vector (pure geometry, no range corrections)
+                    H_phi(mi, stateMap.r_idx) = (delta_e / rho_e_geom)';
+                end
+
+                % ---- H: clock, ambiguity, ZWD (always analytic) -------------
                 H_phi(mi, stateMap.b_rx_idx) = 1;
 
                 if isfield(stateMap,'towerClockIdx') && ...
@@ -1656,7 +1735,7 @@ classdef MeasurementModel < handle
                     H_phi(mi, stateMap.ambiguityIdx(ti,sigIdx)) = 1;
                 end
 
-                % ZWD column: +mf (troposphere advance — same sign for carrier and code)
+                % ZWD column: +mf (same sign for carrier and code)
                 if isfield(stateMap,'zwdIdx') && ...
                         ti <= numel(stateMap.zwdIdx) && stateMap.zwdIdx(ti) > 0
                     mf = revgnss.MappingFunctions.troposphere(elv, obj.zwdMappingKind_());
