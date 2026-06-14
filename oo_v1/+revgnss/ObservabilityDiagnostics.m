@@ -49,8 +49,10 @@ classdef ObservabilityDiagnostics
             diag.errors   = {};
 
             % --- Row counts by type ---
+            diag.nIFCodeRows = 0;  % IF combination code rows
             if ~isempty(measTypePerRow) && numel(measTypePerRow) == M
                 diag.nCodeRows    = sum(strcmp(measTypePerRow,'code'));
+                diag.nIFCodeRows  = sum(strcmp(measTypePerRow,'ifCode'));
                 diag.nDopplerRows = sum(strcmp(measTypePerRow,'doppler'));
                 diag.nCarrierRows = sum(strcmp(measTypePerRow,'carrier'));
             else

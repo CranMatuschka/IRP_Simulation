@@ -4,11 +4,39 @@ classdef ConfigFactory
     % Default scenario: GEO-1 at lat 0, lon 23 deg, alt 35 786 km with five
     % ground towers from the original SimulationConfig.m layout.
     %
-    % NOTE: defaultConfig() is a MATCHED-ERROR BASELINE, not "all errors off."
-    % Troposphere and ionosphere truth+model are both enabled with equal values
-    % so innovations remain small (effects cancel).  Use cleanConfig() for a
-    % genuinely error-free code-only baseline, or matchedErrorBaselineConfig()
-    % to make the matched-baseline intent explicit.
+    % -----------------------------------------------------------------------
+    % CONFIGURATION HIERARCHY (Stage 7A)
+    %
+    %   defaultConfig()          MATCHED-ERROR BASELINE (not "all errors off").
+    %                            Troposphere and ionosphere are BOTH enabled with
+    %                            equal truth and model values so they cancel.
+    %                            Innovations remain small. Use as the standard
+    %                            starting point for any scenario.
+    %
+    %   cleanConfig()            Genuinely error-free code-only baseline.
+    %                            All atmosphere, multipath, and antenna errors
+    %                            disabled. Use for convergence validation.
+    %
+    %   matchedErrorBaselineConfig()  Alias for defaultConfig(). Explicit name
+    %                            for the matched-error intent.
+    %
+    % -----------------------------------------------------------------------
+    % SUPPORTED OBSERVABLES (Stage 7A)
+    %   Code pseudorange (single-frequency or IF L1/L2 combination)
+    %   Simplified Doppler
+    %   Raw L1 float carrier EKF (no L2 carrier, no IF carrier, no integer fixing)
+    %   ZWD per-tower EKF state
+    %   Tower-clock product structs (explicit or truth-history)
+    %   PCV: none / toy (elevation only) / table (elevation-only, no azimuth)
+    %   Ionosphere mapping: simpleSecant (1/sin) or thinShell
+    %   Thin-shell mapping: M(e)=1/sqrt(1-(Re*cos(e)/(Re+hI))^2); NOT Klobuchar
+    %
+    % NOT SUPPORTED (Stage 7A)
+    %   L2 carrier EKF | carrier IF | integer ambiguity resolution
+    %   Azimuth-dependent PCV | ANTEX parser | IONEX | SP3/CLK | RINEX
+    %   VMF3 / GPT3 / ERA5 | Klobuchar ionosphere model
+    %   PPP-grade or mm-level accuracy claims
+    % -----------------------------------------------------------------------
     %
     % Clock templates available (see clockTemplates sub-struct):
     %   TCXO        Temperature-compensated crystal oscillator (moderate)
@@ -18,15 +46,20 @@ classdef ConfigFactory
     %   Custom      User-filled coefficients
     %
     % Factory configs:
-    %   defaultConfig()              GEO-1, deterministic clocks, all errors off
-    %   idealConfig()                Same but code noise = 0
+    %   defaultConfig()              GEO-1, matched-error baseline (trop+iono both on)
+    %   idealConfig()                Code noise = 0, all errors off
+    %   cleanConfig()                All errors off, code-only
+    %   matchedErrorBaselineConfig() Alias for defaultConfig()
     %   noLeverArmConfig()           Zero lever arm (attitude unobservable)
     %   positionClockOnlyConfig()    Attitude/omega frozen, zero lever arm
     %   multiAntennaAttitudeConfig() 4-antenna cross; attitude observable
-    %   clockNoiseConfig()           Stochastic clocks + noisyCorrection mode
+    %   clockNoiseConfig()           Stochastic clocks + truthHistoryProductNoisy mode
     %   atmosphereConfig()           Trop + iono enabled
     %   uncorrectedTowerClocksConfig()  Stochastic, no correction
     %   clockDiversityConfig()       Each tower uses a different clock type
+    %   towerClockProductConfig()    Explicit per-tower product struct mode
+    %   carrierFloatConfig()         Raw L1 float carrier EKF
+    %   dualFrequencyIFConfig()      L1+L2 IF code combination
     %
     % Finalizer (called automatically by ScenarioFactory.build):
     %   cfg = revgnss.ConfigFactory.finalizeConfig(cfg)
@@ -42,7 +75,15 @@ classdef ConfigFactory
         %  MAIN DEFAULT CONFIGURATION
         % ==================================================================
         function cfg = defaultConfig()
-            % defaultConfig  GEO-1 convergence test, deterministic clocks, all errors off.
+            % defaultConfig  GEO-1 matched-error baseline.
+            %
+            % Troposphere and ionosphere are BOTH enabled (truth=model), so they cancel
+            % in innovations.  This is NOT "all errors off" — it is a matched-error
+            % baseline.  Use cleanConfig() for a genuinely error-free code-only run.
+            % Tower clocks: perfectTruth (validation mode).
+            % Code noise: 0.3 m sigma.  Doppler off by default in EKF.
+            % Carrier phase: diagnostic (not in EKF) by default.
+            % Ionosphere mapping: 'simpleSecant' (1/sin, backward-compatible).
 
             % --- Simulation timing ----------------------------------------
             cfg.simulation.dt_s       = 1.0;
@@ -349,22 +390,30 @@ classdef ConfigFactory
             cfg.measurements.carrierPhase.cycleSlip.enable = true;
 
             % --- Observable mode (Step 1) -----------------------------------
-            % observableMode: describes active observables (informational + validation).
+            % observableMode: DESCRIPTIVE LABEL (not authoritative — does not gate
+            % measurements).  Used for report generation and diagnostics only.
+            % Actual measurement behavior is controlled by codeMode, carrierMode,
+            % cfg.measurements.doppler.enable, and cfg.measurements.doppler.useInEKF.
+            %
             %   'code'                   pseudorange only
             %   'code+doppler'           pseudorange + Doppler
             %   'code+carrier'           pseudorange + carrier (requires carrierMode != 'off')
             %   'code+doppler+carrier'   all three
-            % codeMode:
+            %
+            % codeMode (authoritative):
             %   'singleFrequency'        L1 (or L2) only
-            %   'dualFrequencyStacked'   L1 + L2 as separate rows (existing behavior)
+            %   'dualFrequencyStacked'   L1 + L2 as separate rows
             %   'ionosphereFree'         L1+L2 IF combination; requires L1 and L2
-            % carrierMode:
+            %
+            % carrierMode (authoritative):
             %   'off'        do not compute carrier phase
-            %   'diagnostic' compute carrier z but do not update EKF (existing behavior)
-            %   'ekfFloat'   carrier as EKF observable with float ambiguity states
-            % carrierCombinationMode:
-            %   'raw'             individual L1/L2 phase (one ambiguity per tower/signal)
-            %   'ionosphereFree'  IF phase (one IF ambiguity per tower)
+            %   'diagnostic' compute carrier z but do not update EKF
+            %   'ekfFloat'   carrier as EKF observable with float L1 ambiguity states
+            %                NOTE: L2 carrier EKF is NOT supported in v1.
+            %
+            % carrierCombinationMode (authoritative):
+            %   'raw'             individual L1 phase (L2 not supported in EKF)
+            %   'ionosphereFree'  NOT supported — no IF carrier EKF in v1
             cfg.measurements.observableMode          = 'code+doppler+carrier';
             cfg.measurements.codeMode                = 'singleFrequency';
             cfg.measurements.carrierMode             = 'diagnostic';
@@ -383,6 +432,16 @@ classdef ConfigFactory
             % 'continuedFraction'— simple continued-fraction form (illustrative)
             % NOTE: VMF3, GPT3, and Niell are NOT implemented.
             cfg.effects.troposphere.mappingModel = 'simple';
+
+            % --- Ionosphere mapping model (Stage 7A) ------------------------
+            % Governs the mapping function used to project vertical ionosphere
+            % delays to slant delays in EnvironmentModel.getIonoDelay().
+            % 'simpleSecant' — 1/sin(el) (backward-compatible, Stage 6 and earlier)
+            % 'thinShell'    — single thin-shell: M(e)=1/sqrt(1-(Re*cos(e)/(Re+hI))^2)
+            %                  hI set via cfg.effects.ionosphere.shellHeight_m
+            % NOTE: This is NOT a Klobuchar model. Klobuchar is not implemented.
+            cfg.effects.ionosphere.mappingModel  = 'simpleSecant';
+            cfg.effects.ionosphere.shellHeight_m = 350e3;
 
             % --- Estimation modes (Steps 3 + 7) ----------------------------
             % ambiguityMode: 'none' | 'floatPerTowerSignal'
@@ -726,8 +785,9 @@ classdef ConfigFactory
             cfg.errors.troposphere.model.enable    = true;
             cfg.errors.ionosphere.truth.enable     = true;
             cfg.errors.ionosphere.model.enable     = true;
-            cfg.estimator.towerClockMode           = 'noisyCorrection';
-            cfg.towerClock.correctionMode          = 'truthHistoryProduct';
+            % Stage 7A: use truthHistoryProductNoisy (history-based + noise) consistently.
+            % Do NOT set estimator.towerClockMode directly; let finalizeConfig map it.
+            cfg.towerClock.correctionMode = 'truthHistoryProductNoisy';
         end
 
         function cfg = towerClockProductConfig()
@@ -863,28 +923,39 @@ classdef ConfigFactory
                 cfg.estimator.towerClockMode = cfg.errors.towerClockCorrection.mode;
             end
             % cfg.towerClock.correctionMode → cfg.estimator.towerClockMode (new mapping)
-            % 'perfectTruth' is the default value and does NOT override a manually-set
-            % estimator.towerClockMode (backward compatibility).
-            % All other non-default values override estimator.towerClockMode.
+            % Stage 7A: truth-history modes and explicit-struct modes are now distinct.
+            %
+            % Supported correctionMode values:
+            %   'none'                  — no tower clock correction
+            %   'perfectTruth'          — use exact truth clock (validation only)
+            %   'truthHistoryProduct'   — history-based linear prediction (no explicit struct)
+            %   'truthHistoryProductNoisy' — history-based + noise added to R
+            %   'product'               — explicit cfg.towerClock.products struct REQUIRED
+            %   'productNoisy'          — explicit struct REQUIRED + uncertainty added to R
+            %
+            % Internal estimator.towerClockMode values:
+            %   'none' | 'perfectCorrection' | 'noisyCorrection' |
+            %   'truthProduct' | 'product' | 'productNoisy'
             if isfield(cfg,'towerClock') && isfield(cfg.towerClock,'correctionMode')
                 newMode = cfg.towerClock.correctionMode;
                 switch newMode
                     case 'perfectTruth'
-                        % Default value: only set if not already overridden by user
+                        % Default value: only set if not already overridden by user.
                         if ~isfield(cfg,'estimator') || ~isfield(cfg.estimator,'towerClockMode')
                             cfg.estimator.towerClockMode = 'perfectCorrection';
                         end
                     case 'truthHistoryProduct'
-                        % Simulated product derived from tower truth history.
-                        % Internally maps to 'product' (history-based) in MeasurementModel.
-                        cfg.estimator.towerClockMode = 'product';
+                        % History-based product. Internal mode 'truthProduct' does NOT
+                        % require cfg.towerClock.products — it uses tower truth history.
+                        cfg.estimator.towerClockMode = 'truthProduct';
+                    case 'truthHistoryProductNoisy'
+                        % History-based + Gaussian noise added to R.
+                        cfg.estimator.towerClockMode = 'noisyCorrection';
                     case 'product'
-                        % Explicit per-tower product struct (cfg.towerClock.products).
-                        % Falls back to history if products struct is absent.
+                        % Explicit per-tower product struct required. NO fallback.
                         cfg.estimator.towerClockMode = 'product';
                     case 'productNoisy'
-                        % Explicit product struct with R inflation.
-                        % Falls back to history if products struct is absent.
+                        % Explicit product struct required + R inflation. NO fallback.
                         cfg.estimator.towerClockMode = 'productNoisy';
                     case 'none'
                         cfg.estimator.towerClockMode = 'none';
