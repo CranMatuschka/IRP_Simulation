@@ -102,9 +102,13 @@ else
 end
 
 % ----------------------------------------------------------------
-% T4: truthHistoryProduct correctionMode maps to 'product' internally
+% T4: truthHistoryProduct correctionMode maps to internal 'truthProduct'
 % ----------------------------------------------------------------
-fprintf('  T4: truthHistoryProduct correctionMode maps to internal product ...\n');
+% Stage 7A: semantics change — 'product' now requires an explicit
+% cfg.towerClock.products struct.  'truthHistoryProduct' maps to the
+% internal mode 'truthProduct' (history-based prediction from tower truth,
+% no explicit struct required).  Update this test to match new semantics.
+fprintf('  T4: truthHistoryProduct correctionMode maps to internal truthProduct ...\n');
 
 cfg4 = revgnss.ConfigFactory.defaultConfig();
 cfg4.towerClock.correctionMode = 'truthHistoryProduct';
@@ -112,10 +116,10 @@ cfg4.plots.enable  = false;
 cfg4.report.enable = false;
 
 cfgF4 = revgnss.ConfigFactory.finalizeConfig(cfg4);
-assert(strcmp(cfgF4.estimator.towerClockMode,'product'), ...
-    'T4 FAILED: truthHistoryProduct should map to towerClockMode=product, got %s', ...
+assert(strcmp(cfgF4.estimator.towerClockMode,'truthProduct'), ...
+    'T4 FAILED: truthHistoryProduct should map to towerClockMode=truthProduct, got ''%s''', ...
     cfgF4.estimator.towerClockMode);
-fprintf('    truthHistoryProduct → towerClockMode=product: PASS\n');
+fprintf('    truthHistoryProduct → towerClockMode=truthProduct (internal, no explicit struct needed): PASS\n');
 
 % ----------------------------------------------------------------
 % T5: productValidityPolicy='warn' does not throw
