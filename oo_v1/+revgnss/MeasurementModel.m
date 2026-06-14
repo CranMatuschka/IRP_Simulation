@@ -404,8 +404,9 @@ classdef MeasurementModel < handle
                             if isfield(obj.cfg,'towerClock') && ...
                                     isfield(obj.cfg.towerClock,'products') && ...
                                     ti <= numel(obj.cfg.towerClock.products)
-                                [b_reev, ~] = obj.evalProductStruct_(ti, t_tx_model);
+                                [b_reev, sig_reev] = obj.evalProductStruct_(ti, t_tx_model);
                                 towerClkModel(mi) = b_reev;
+                                towerClkSigma(mi) = sig_reev;  % R epoch-consistent with bias
                             end
                         case 'truthProduct'
                             [b_p, bd_p] = obj.getClockAtProductEpoch_(towers{ti}, t_prod);
@@ -891,7 +892,7 @@ classdef MeasurementModel < handle
                     [z_phi, h_phi, H_phi, R_phi, cpInfo] = obj.computeCarrierEkfRows_( ...
                         asset, towers, twr_list(1:M_pairs_c), ant_list(1:M_pairs_c), ...
                         r_ants_truth, r_ants_est, leverArms_model, x_est, stateMap, nx, ...
-                        errStruct, towerClkTruth, towerClkModel, towerClkSigma);
+                        errStruct, towerClkTruth, towerClkModel, towerClkSigma, t_s);
                     if ~isempty(z_phi)
                         z = [z; z_phi];
                         h = [h; h_phi];
@@ -1165,8 +1166,9 @@ classdef MeasurementModel < handle
         end
 
         % ----------------------------------------------------------------
-        function h_pr = computePseudorangeModelOnly(obj, asset, towers, x_state, errStruct, stateMap)
+        function h_pr = computePseudorangeModelOnly(obj, asset, towers, x_state, errStruct, stateMap, t_s)
             % computePseudorangeModelOnly  Recompute h_pr with updated EKF state.
+            if nargin < 7 || isempty(t_s); t_s = 0; end
             %
             % Exact same model-side path as computeMeasurements (h side):
             %   - PCO-adjusted lever arms (model)
@@ -1228,7 +1230,7 @@ classdef MeasurementModel < handle
 
                 % Corrected range (Sagnac, Shapiro, PCV all on model side)
                 rho_est = revgnss.RangeCorrections.correctedPseudorange( ...
-                    r_ant, r_twr_model, obj.cfg, 'model', elv);
+                    r_ant, r_twr_model, obj.cfg, 'model', elv, t_s);
 
                 % Tower clock: EKF state if estimated, else frozen model correction
                 if isfield(stateMap,'towerClockIdx') && ti <= size(stateMap.towerClockIdx,1) && ...
@@ -1258,8 +1260,9 @@ classdef MeasurementModel < handle
         end
 
         % ----------------------------------------------------------------
-        function h_phi = computeCarrierModelOnly(obj, asset, towers, x_state, errStruct, stateMap)
+        function h_phi = computeCarrierModelOnly(obj, asset, towers, x_state, errStruct, stateMap, t_s)
             % computeCarrierModelOnly  Recompute carrier h with updated EKF state.
+            if nargin < 7 || isempty(t_s); t_s = 0; end
             %
             % Returns h_phi for each carrier row (one per visible tower) evaluated
             % at x_state (the post-update EKF state).  Used by
@@ -1330,7 +1333,7 @@ classdef MeasurementModel < handle
 
                 % Corrected geometric range (same path as code)
                 rho_e = revgnss.RangeCorrections.correctedPseudorange( ...
-                    r_ants_est(:, ai), r_twr_e, obj.cfg, 'model', elv);
+                    r_ants_est(:, ai), r_twr_e, obj.cfg, 'model', elv, t_s);
 
                 % Tower clock: EKF state if estimated, else frozen model correction
                 if isfield(stateMap,'towerClockIdx') && ti <= size(stateMap.towerClockIdx,1) && ...
@@ -1470,11 +1473,17 @@ classdef MeasurementModel < handle
             sigma_corr = 0;
 
             if ~isfield(obj.cfg,'towerClock') || ~isfield(obj.cfg.towerClock,'products')
-                return  % no product struct — caller must use history fallback
+                error('MeasurementModel:productStructMissing', ...
+                    ['evalProductStruct_: cfg.towerClock.products is required for explicit ' ...
+                     'product/productNoisy modes but is missing. ' ...
+                     'Provide a products struct array or use truthHistoryProduct instead.']);
             end
             products = obj.cfg.towerClock.products;
             if ti > numel(products)
-                return
+                error('MeasurementModel:productStructMissing', ...
+                    ['evalProductStruct_: tower index %d exceeds products array length %d. ' ...
+                     'Ensure cfg.towerClock.products has one entry per tower.'], ...
+                    ti, numel(products));
             end
             prod = products(ti);
 
@@ -1582,8 +1591,9 @@ classdef MeasurementModel < handle
         function [z_phi, h_phi, H_phi, R_phi, cpInfo] = computeCarrierEkfRows_( ...
                 obj, asset, towers, twr_pairs, ant_pairs, r_ants_truth, r_ants_est, ...
                 leverArms_model, x_est, stateMap, nx, errStruct, ...
-                towerClkTruth, towerClkModel, towerClkSigma)
+                towerClkTruth, towerClkModel, towerClkSigma, t_s)
             % computeCarrierEkfRows_  Build carrier EKF rows with float ambiguity states.
+            if nargin < 17 || isempty(t_s); t_s = 0; end
             %
             % z_phi = rho_true + b_rx_true - b_twr_true + trop_true - iono_true + B_true + noise
             % h_phi = rho_est  + b_rx_est  - b_twr_model + trop_model - iono_model + B_est
@@ -1602,24 +1612,23 @@ classdef MeasurementModel < handle
             cfg    = obj.cfg;
             Mp     = numel(twr_pairs);
 
-            % Stage 7A.1: guard against accidental carrier IF request.
-            % Carrier ionosphere-free combination is NOT implemented.
-            % Only raw L1 float carrier EKF is supported.
+            % Defensive guard: carrier IF must be caught by ConfigFactory.finalizeConfig.
+            % If it survives to here, throw unless user explicitly opted into silent fallback.
             if isfield(cfg,'measurements') && ...
                     isfield(cfg.measurements,'carrierCombinationMode') && ...
                     strcmp(cfg.measurements.carrierCombinationMode,'ionosphereFree')
                 policy = '';
-                if isfield(cfg,'estimator') && ...
-                        isfield(cfg.estimator,'unsupportedFeaturePolicy')
-                    policy = cfg.estimator.unsupportedFeaturePolicy;
+                if isfield(cfg,'validation') && ...
+                        isfield(cfg.validation,'unsupportedFeaturePolicy')
+                    policy = cfg.validation.unsupportedFeaturePolicy;
                 end
-                if ~strcmp(policy,'warnAndFallback')
+                if ~strcmp(policy,'disableWithWarning')
                     error('MeasurementModel:carrierIFNotImplemented', ...
                         ['Carrier ionosphere-free combination is NOT implemented in oo_v1. ' ...
                          'Only raw L1 float carrier EKF is supported. ' ...
                          'Use code IF (codeMode=''ionosphereFree'') or disable carrier EKF. ' ...
-                         'To use raw L1 instead without error, set: ' ...
-                         'cfg.estimator.unsupportedFeaturePolicy = ''warnAndFallback''.']);
+                         'To suppress this error and use raw L1, set: ' ...
+                         'cfg.validation.unsupportedFeaturePolicy = ''disableWithWarning''.']);
                 else
                     warning('MeasurementModel:carrierIFNotImplemented', ...
                         'carrierCombinationMode=ionosphereFree not implemented. Using raw L1 carrier instead.');
@@ -1712,14 +1721,14 @@ classdef MeasurementModel < handle
                     end
                 end
                 rho_t = revgnss.RangeCorrections.correctedPseudorange( ...
-                    r_ants_truth(:,ai), r_twr_t, obj.cfg, 'truth', elv);
+                    r_ants_truth(:,ai), r_twr_t, obj.cfg, 'truth', elv, t_s);
 
                 r_ant_e  = r_ants_est(:, ai);
                 r_twr_e  = obj.getTowerPosition_(towers{ti}, ti, 'model');
                 delta_e  = r_ant_e - r_twr_e;
                 rho_e_geom = norm(delta_e); if rho_e_geom < 1; rho_e_geom = 1; end
                 rho_e = revgnss.RangeCorrections.correctedPseudorange( ...
-                    r_ant_e, r_twr_e, obj.cfg, 'model', elv);
+                    r_ant_e, r_twr_e, obj.cfg, 'model', elv, t_s);
 
                 noise_phi = sigma_phi * obj.errorChain.drawNormal(1,1);
 
@@ -1835,16 +1844,14 @@ classdef MeasurementModel < handle
     methods (Static)
 
         function [z_isl, h_isl, H_isl] = computeISLMeasurements(asset_rx, asset_tx, ~, ~)
-            % computeISLMeasurements  v1 stub — Inter-Satellite Link (ISL) placeholder.
+            % computeISLMeasurements  Future-work stub. ISL is NOT implemented in oo_v1.
             %
-            % CHANGED: v3→v4 — Issue 18
-            % PLACEHOLDER — Inter-Satellite Link (ISL) v1 stub
+            % Returns empty z/h/H — no EKF rows, no measurement effect.
+            % Do NOT advertise ISL as supported functionality.
+            %
             % Candidate future one-way range observable:
             %   z_{rx,tx} = rho_{rx,tx} + b_rx - b_tx + noise
             % Sign convention: receiver clock adds positively, transmitter subtracts.
-            % (Consistent with standard GNSS pseudorange convention:
-            %  z = rho + b_receiver - b_transmitter + noise)
-            % v1 returns empty measurement vector and empty H; no EKF effect.
             z_isl = [];
             h_isl = [];
             H_isl = zeros(0, 0);

@@ -137,7 +137,7 @@ classdef ReverseGNSSSimulation < handle
 
                 % Postfit residuals: recompute h with updated EKF state,
                 % reusing the SAME tower clock corrections from errStruct.
-                postfitResidual = obj.computePostfitResiduals_(z, visIds, errStruct);
+                postfitResidual = obj.computePostfitResiduals_(z, visIds, errStruct, t_s);
 
             elseif ~isempty(z) && numel(z) < minMeas && mod(k, 100) == 1
                 fprintf('  [t=%.0f s] EKF update skipped: %d measurements < %d minimum\n', ...
@@ -240,8 +240,9 @@ classdef ReverseGNSSSimulation < handle
 
     methods (Access = private)
         % ----------------------------------------------------------------
-        function postfit = computePostfitResiduals_(obj, z, ~, errStruct)
+        function postfit = computePostfitResiduals_(obj, z, ~, errStruct, t_s)
             % computePostfitResiduals_  Recompute h with updated EKF state.
+            if nargin < 5 || isempty(t_s); t_s = 0; end
             %
             % Pseudorange postfit delegates to MeasurementModel.computePseudorangeModelOnly
             % so exactly the same model path (Sagnac, Shapiro, PCO, PCV, survey, ErrorChain)
@@ -257,7 +258,7 @@ classdef ReverseGNSSSimulation < handle
 
             % Pseudorange postfit via exact model path
             h_post_pr = obj.measModel.computePseudorangeModelOnly( ...
-                obj.asset, obj.towers, obj.ekf.x, errStruct, sm);
+                obj.asset, obj.towers, obj.ekf.x, errStruct, sm, t_s);
 
             % Doppler postfit (if useInEKF=true rows are stacked after pseudorange)
             doDoppler = isfield(obj.cfg,'measurements') && ...
@@ -323,7 +324,7 @@ classdef ReverseGNSSSimulation < handle
                         ~isempty(errStruct.carrierPhase.phi_m);
             if doCarrier
                 hc_post = obj.measModel.computeCarrierModelOnly( ...
-                    obj.asset, obj.towers, obj.ekf.x, errStruct, sm);
+                    obj.asset, obj.towers, obj.ekf.x, errStruct, sm, t_s);
                 if isempty(hc_post)
                     % Fallback: no carrier state map — use prefit h approximation
                     hc_post = errStruct.carrierPhase.phi_m - errStruct.carrierPhase.prefit_m;

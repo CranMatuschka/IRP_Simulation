@@ -9,7 +9,7 @@
 %   T5:  Tower clock product re-evaluated at correct absolute t_tx when t_s > 0
 %   T6:  pcvModel='table' applies even when legacy enable=false (no silent bypass)
 %   T7:  pcvModel='toy' without explicit field still uses legacy gate
-%   T8:  Carrier IF throws by default; warnAndFallback policy suppresses error
+%   T8:  Carrier IF throws at finalization by default; disableWithWarning suppresses
 %   T9:  needsFiniteDiffH_ returns true when lightTime.model='iterative'
 %   T10: IF code rows labeled 'ifCode' in measType_perRow
 %   T11: ObservabilityDiagnostics.nIFCodeRows > 0 in ionosphere-free mode
@@ -157,41 +157,47 @@ assert(abs(c7_on.pcv) > 1e-6, ...
 fprintf('    legacy off → pcv=0; legacy on → pcv=%.4f: PASS\n', c7_on.pcv);
 
 % ----------------------------------------------------------------
-% T8: Carrier IF throws by default; warnAndFallback suppresses error
+% T8: Carrier IF throws at finalization by default (ConfigFactory catches it first)
 % ----------------------------------------------------------------
-fprintf('  T8: carrierCombinationMode=ionosphereFree throws by default ...\n');
+fprintf('  T8: carrierCombinationMode=ionosphereFree throws at finalization by default ...\n');
 
 cfg8 = revgnss.ConfigFactory.defaultConfig();
 cfg8.measurements.carrierMode             = 'ekfFloat';
 cfg8.measurements.carrierCombinationMode  = 'ionosphereFree';
 cfg8.plots.enable  = false;
 cfg8.report.enable = false;
-cfg8 = revgnss.ConfigFactory.finalizeConfig(cfg8);
-
-[asset8, towers8, ekf8, mm8] = revgnss.ScenarioFactory.build(cfg8);
+% Default policy='error' → finalizeConfig must throw
 threw8 = false;
 try
-    mm8.computeMeasurements(asset8, towers8, ekf8.x, 0, ekf8.stateMap);
+    revgnss.ConfigFactory.finalizeConfig(cfg8);
 catch ME
     threw8 = true;
-    assert(contains(ME.identifier,'carrierIFNotImplemented'), ...
-        'T8 FAILED: wrong error id %s', ME.identifier);
+    assert(contains(ME.identifier,'carrierIF') || contains(ME.identifier,'ConfigFactory'), ...
+        'T8 FAILED: wrong error id ''%s''', ME.identifier);
 end
-assert(threw8, 'T8 FAILED: carrierCombinationMode=ionosphereFree should throw by default');
-fprintf('    threw carrierIFNotImplemented: PASS\n');
+assert(threw8, 'T8 FAILED: carrierCombinationMode=ionosphereFree should throw at finalization by default');
+fprintf('    threw carrierIF error at finalization: PASS\n');
 
-% warnAndFallback suppresses error
-cfg8b = cfg8;
-cfg8b.estimator.unsupportedFeaturePolicy = 'warnAndFallback';
-[asset8b, towers8b, ekf8b, mm8b] = revgnss.ScenarioFactory.build(cfg8b);
+% disableWithWarning suppresses error and falls back to raw
+cfg8b = revgnss.ConfigFactory.defaultConfig();
+cfg8b.measurements.carrierMode             = 'ekfFloat';
+cfg8b.measurements.carrierCombinationMode  = 'ionosphereFree';
+cfg8b.validation.unsupportedFeaturePolicy  = 'disableWithWarning';
+cfg8b.plots.enable  = false;
+cfg8b.report.enable = false;
 threw8b = false;
+warnState8b = warning('off','all');
 try
-    mm8b.computeMeasurements(asset8b, towers8b, ekf8b.x, 0, ekf8b.stateMap);
+    cfg8b_fin = revgnss.ConfigFactory.finalizeConfig(cfg8b);
 catch
     threw8b = true;
 end
-assert(~threw8b, 'T8b FAILED: warnAndFallback should suppress carrier IF error');
-fprintf('    warnAndFallback suppresses error: PASS\n');
+warning(warnState8b);
+assert(~threw8b, 'T8b FAILED: disableWithWarning should suppress carrier IF error at finalization');
+assert(strcmp(cfg8b_fin.measurements.carrierCombinationMode,'raw'), ...
+    'T8b FAILED: after disableWithWarning, carrierCombinationMode should be ''raw'', got ''%s''', ...
+    cfg8b_fin.measurements.carrierCombinationMode);
+fprintf('    disableWithWarning suppresses error, carrierCombinationMode=raw: PASS\n');
 
 % ----------------------------------------------------------------
 % T9: needsFiniteDiffH_ true when lightTime.model='iterative'

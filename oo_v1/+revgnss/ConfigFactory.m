@@ -81,9 +81,13 @@ classdef ConfigFactory
             % in innovations.  This is NOT "all errors off" — it is a matched-error
             % baseline.  Use cleanConfig() for a genuinely error-free code-only run.
             % Tower clocks: perfectTruth (validation mode).
-            % Code noise: 0.3 m sigma.  Doppler off by default in EKF.
-            % Carrier phase: diagnostic (not in EKF) by default.
+            % Code noise: 0.3 m sigma.
+            % Doppler: enabled with useInEKF=true; requires physics.doppler.model.enable=true
+            %   for EKF use (finalizeConfig disables useInEKF if physics not set).
+            % Carrier phase: diagnostic (not in EKF) by default; set carrierMode='ekfFloat'
+            %   and estimation.ambiguityMode='floatPerTowerSignal' to use in EKF.
             % Ionosphere mapping: 'simpleSecant' (1/sin, backward-compatible).
+            % Validation policy: 'error' (unsupported features throw by default).
 
             % --- Simulation timing ----------------------------------------
             cfg.simulation.dt_s       = 1.0;
@@ -371,10 +375,10 @@ classdef ConfigFactory
             cfg.physics.doppler.truth.enable = false;
             cfg.physics.doppler.model.enable = false;
 
-            % --- Observable toggles: pseudorange always on, others off ------
-            % Doppler and carrier phase are off by default; explicit cases enable them.
-            % doppler.useInEKF=true requires physics.doppler.model.enable=true.
-            % carrierPhase.useInEKF=true requires estimateCarrierAmbiguities=true.
+            % --- Observable toggles -----------------------------------------
+            % doppler.enable=true, doppler.useInEKF=true by default.
+            %   useInEKF is auto-disabled by finalizeConfig if physics.doppler.model.enable=false.
+            % carrierPhase.useInEKF is deprecated; use carrierMode='ekfFloat' instead.
             cfg.measurements.pseudorange.enable   = true;
             cfg.measurements.doppler.enable       = true;
             cfg.measurements.doppler.sigma_mps    = 0.01;
@@ -522,7 +526,9 @@ classdef ConfigFactory
             cfg.report.writeMat            = true;
 
             % --- Validation policy ----------------------------------------
-            cfg.validation.unsupportedFeaturePolicy = 'disableWithWarning';
+            % 'error'             — unsupported features throw (default; safe)
+            % 'disableWithWarning'— unsupported features disabled with a warning
+            cfg.validation.unsupportedFeaturePolicy = 'error';
             cfg.validation.warnings         = {};
             cfg.validation.disabledFeatures = {};
             cfg.validation.mappedFeatures   = {};
@@ -904,7 +910,7 @@ classdef ConfigFactory
                 cfg.validation = struct();
             end
             if ~isfield(cfg.validation,'unsupportedFeaturePolicy')
-                cfg.validation.unsupportedFeaturePolicy = 'disableWithWarning';
+                cfg.validation.unsupportedFeaturePolicy = 'error';
             end
             if ~isfield(cfg.validation,'warnings');         cfg.validation.warnings         = {}; end
             if ~isfield(cfg.validation,'disabledFeatures'); cfg.validation.disabledFeatures = {}; end
@@ -1145,8 +1151,10 @@ classdef ConfigFactory
                 end
                 if strcmp(cCombMode,'ionosphereFree')
                     warnMsg4E = ['carrierCombinationMode=''ionosphereFree'' is not implemented ' ...
-                                 'in v1 ekfFloat. Falling back to ''raw'' (L1 only).'];
-                    if strcmp(policy,'error')
+                                 'in v1 ekfFloat. Raw L1 carrier only. ' ...
+                                 'To suppress this error and fall back to raw L1, set: ' ...
+                                 'cfg.validation.unsupportedFeaturePolicy = ''disableWithWarning''.'];
+                    if ~strcmp(policy,'disableWithWarning')
                         error('ConfigFactory:carrierIFNotSupported', '%s', warnMsg4E);
                     end
                     cfg.measurements.carrierCombinationMode = 'raw';
@@ -1170,9 +1178,6 @@ classdef ConfigFactory
                     if ~dEnable;  missing{end+1} = 'doppler.enable=true'; end
                     if ~dModelOk; missing{end+1} = 'physics.doppler.model.enable=true'; end
                     warnMsg = sprintf('doppler.useInEKF requires %s. useInEKF disabled.', strjoin(missing,' and '));
-                    if strcmp(policy,'error')
-                        error('ConfigFactory:dopplerEKFInvalid', '%s', warnMsg);
-                    end
                     cfg.measurements.doppler.useInEKF      = false;
                     cfg.validation.warnings{end+1}         = warnMsg;
                     cfg.validation.disabledFeatures{end+1} = 'doppler.useInEKF';
