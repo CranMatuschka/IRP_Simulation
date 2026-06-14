@@ -328,8 +328,13 @@ classdef ErrorChain < handle
             % Supported modelType values:
             %   'simpleMapped'         – mapped from cfg.errors.ionosphere.*.zenithDelay_m (compat)
             %   'constantVerticalDelay'– mapped from cfg.errors.ionosphere.*.verticalDelayL1_m [m]
-            %                           I_slant = verticalDelayL1_m / sin(el) at L1
+            %                           I_slant = verticalDelayL1_m * M(el) at L1
             %   'tecGaussMarkov'       – EnvironmentModel Gauss-Markov TEC residual
+            %
+            % Stage 7A.1: mapping uses MappingFunctions.ionosphere() with
+            % cfg.effects.ionosphere.mappingModel ('simpleSecant' or 'thinShell').
+            % Default is 'simpleSecant' (backward-compatible with Stage 6 and earlier).
+            % This is NOT Klobuchar. Klobuchar is not implemented.
             %
             % CHANGED: v3→v4 — Issue 1
             % 'constantVerticalTEC' is NOT a valid model: the field verticalDelayL1_m already
@@ -341,7 +346,18 @@ classdef ErrorChain < handle
 
             N  = numel(elv);
             ic = obj.cfg.errors.ionosphere;
-            mappingFn = @(e) 1 ./ max(sin(e), sin(elvFloor));
+
+            % Stage 7A.1: config-driven ionosphere mapping (not hardcoded 1/sin).
+            % Default 'simpleSecant' preserves Stage 6 backward-compatibility.
+            ionoMapKind   = 'simpleSecant';
+            shellHeight_m = 350e3;
+            if isfield(obj.cfg,'effects') && isfield(obj.cfg.effects,'ionosphere')
+                ef = obj.cfg.effects.ionosphere;
+                if isfield(ef,'mappingModel');  ionoMapKind   = ef.mappingModel;  end
+                if isfield(ef,'shellHeight_m'); shellHeight_m = ef.shellHeight_m; end
+            end
+            % Compute mapping vector for all elevations.
+            mapping = revgnss.MappingFunctions.ionosphere(elv, ionoMapKind, shellHeight_m);
 
             modelType = 'simpleMapped';
             if isfield(ic,'modelType'); modelType = ic.modelType; end
@@ -357,7 +373,8 @@ classdef ErrorChain < handle
             end
 
             if strcmp(modelType,'tecGaussMarkov')
-                % Delegate to EnvironmentModel (returns L1 slant delay when freqHz = f_L1)
+                % Delegate to EnvironmentModel (returns L1 slant delay when freqHz = f_L1).
+                % EnvironmentModel.getIonoDelay already uses config-driven mapping.
                 truth_m = zeros(N,1);
                 model_m = zeros(N,1);
                 for k = 1:N
@@ -374,8 +391,9 @@ classdef ErrorChain < handle
             elseif strcmp(modelType,'constantVerticalDelay')
                 % CHANGED: v3→v4 — Issue 1
                 % constantVerticalDelay: cfg.errors.ionosphere.*.verticalDelayL1_m [m] is
-                % the vertical L1 delay in metres.  Slant delay = vdel / sin(el).
-                % I_slant = verticalDelayL1_m / sin(el)   [Leick et al. 2015 eq. 9.11]
+                % the vertical L1 delay in metres.
+                % I_slant = verticalDelayL1_m * mapping(el)  [Leick et al. 2015 eq. 9.11]
+                % Stage 7A.1: mapping uses MappingFunctions.ionosphere() (not hardcoded secant).
                 if isfield(ic,'truth') && isfield(ic.truth,'enable') && ic.truth.enable
                     vdel = 0;
                     if isfield(ic.truth,'verticalDelayL1_m')
@@ -383,7 +401,7 @@ classdef ErrorChain < handle
                     elseif isfield(ic.truth,'zenithDelay_m')
                         vdel = ic.truth.zenithDelay_m;
                     end
-                    truth_m = vdel * mappingFn(elv);
+                    truth_m = vdel * mapping;
                 else
                     truth_m = zeros(N,1);
                 end
@@ -396,15 +414,16 @@ classdef ErrorChain < handle
                     end
                     bias_frac = 1;
                     if isfield(ic.model,'biasFraction'); bias_frac = ic.model.biasFraction; end
-                    model_m = vdel * bias_frac * mappingFn(elv);
+                    model_m = vdel * bias_frac * mapping;
                 else
                     model_m = zeros(N,1);
                 end
             else
-                % simpleMapped (backward compat)
+                % simpleMapped (backward compat).
+                % Stage 7A.1: mapping uses MappingFunctions.ionosphere() (not hardcoded secant).
                 if isfield(ic,'truth') && isfield(ic.truth,'enable') && ic.truth.enable
                     iono_zenith_m = ic.truth.zenithDelay_m;
-                    truth_m = iono_zenith_m * mappingFn(elv);
+                    truth_m = iono_zenith_m * mapping;
                 else
                     truth_m = zeros(N,1);
                 end
@@ -413,16 +432,16 @@ classdef ErrorChain < handle
                     zenith_m_model = ic.model.zenithDelay_m;
                     bias_frac = 1;
                     if isfield(ic.model,'biasFraction'); bias_frac = ic.model.biasFraction; end
-                    model_m = zenith_m_model * bias_frac * mappingFn(elv);
+                    model_m = zenith_m_model * bias_frac * mapping;
                 else
                     model_m = zeros(N,1);
                 end
             end
 
             if isfield(ic,'sigma_m')
-                sigma_m = ic.sigma_m * mappingFn(elv);
+                sigma_m = ic.sigma_m * mapping;
             else
-                sigma_m = 0.3 * mappingFn(elv);  % fallback
+                sigma_m = 0.3 * mapping;  % fallback
             end
         end
 
