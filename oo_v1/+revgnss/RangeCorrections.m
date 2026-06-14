@@ -59,22 +59,29 @@ classdef RangeCorrections
         end
 
         % ----------------------------------------------------------------
-        function [rho, contrib] = correctedPseudorange(rx_ecef, tx_ecef, cfg, side, el_rad)
+        function [rho, contrib] = correctedPseudorange(rx_ecef, tx_ecef, cfg, side, el_rad, t_rx_s)
             % correctedPseudorange  Geometric range plus enabled deterministic corrections.
             %
-            % side:   'truth' → cfg.physics.*.truth.enable, cfg.effects.*.truth.enable
-            %         'model' → cfg.physics.*.model.enable, cfg.effects.*.model.enable
-            % el_rad: elevation angle [rad] for PCV (if omitted, PCV skipped).
+            % side:    'truth' → cfg.physics.*.truth.enable, cfg.effects.*.truth.enable
+            %          'model' → cfg.physics.*.model.enable, cfg.effects.*.model.enable
+            % el_rad:  elevation angle [rad] for PCV (if omitted, PCV skipped).
+            % t_rx_s:  receive epoch [s] (optional; default 0).
+            %          Passed to LightTimeSolver when model='iterative' so that
+            %          returned t_tx_s = t_rx_s - tau_s is an absolute epoch, not
+            %          merely -tau_s.  Callers should pass the simulation time t_s
+            %          whenever transmit-time clock evaluation is needed.
             %
             % Light-time: when cfg.effects.lightTime.model='iterative', the effective
             % tower position (tx_ecef_eff) accounts for Earth rotation over tau.
             % Sagnac is NOT also applied in iterative mode to avoid double-correction.
 
+            if nargin < 6 || isempty(t_rx_s); t_rx_s = 0; end
+
             contrib.sagnac  = 0;
             contrib.shapiro = 0;
             contrib.pcv     = 0;
             contrib.tau_s   = 0;    % signal travel time [s]; non-zero only in iterative mode
-            contrib.t_tx_s  = [];   % approximate transmit time; empty unless iterative mode
+            contrib.t_tx_s  = [];   % approximate transmit time [s]; empty unless iterative mode
 
             % Determine light-time model
             ltModel = 'sagnacFirstOrder';
@@ -83,12 +90,12 @@ classdef RangeCorrections
                 ltModel = cfg.effects.lightTime.model;
             end
 
-            % Apply light-time iteration when requested (model side only; truth uses same).
-            % Stage 7A: also capture tau_s and t_tx_s for transmit-time clock evaluation.
+            % Apply light-time iteration when requested.
+            % Stage 7A: t_rx_s is passed so t_tx_s = t_rx_s - tau_s is an absolute epoch.
             tx_ecef_eff = tx_ecef;
             if strcmp(ltModel,'iterative')
                 [tx_ecef_eff, tau_s_lt, t_tx_lt] = revgnss.LightTimeSolver.solve( ...
-                    rx_ecef, tx_ecef, cfg);
+                    rx_ecef, tx_ecef, cfg, t_rx_s);
                 contrib.tau_s  = tau_s_lt;
                 contrib.t_tx_s = t_tx_lt;
             end
@@ -144,23 +151,31 @@ classdef RangeCorrections
 
             dPCV = 0;
 
-            % pcvModel determines behavior; defaults to 'toy' (legacy)
+            % pcvModel determines behavior; defaults to 'toy' (legacy).
+            % pcvModelExplicit tracks whether pcvModel was explicitly configured.
+            pcvModelExplicit = false;
             pcvModel = 'toy';
             if isfield(cfg,'effects') && isfield(cfg.effects,'antenna') && ...
                     isfield(cfg.effects.antenna,'pcvModel')
                 pcvModel = cfg.effects.antenna.pcvModel;
+                pcvModelExplicit = true;
             end
 
             % 'none': always zero, regardless of legacy enable flags
             if strcmp(pcvModel,'none'); return; end
 
-            % Legacy on/off gate: controls whether PCV is active this side
-            pcvEnabled = false;
-            if isfield(cfg,'effects') && isfield(cfg.effects,'antennaPCV') && ...
-                    isfield(cfg.effects.antennaPCV, side)
-                pcvEnabled = cfg.effects.antennaPCV.(side).enable;
+            % Legacy enable gate.
+            % When pcvModel is explicitly set (not just the 'toy' default), the model
+            % is authoritative and the legacy antennaPCV.(side).enable flag is bypassed.
+            % This prevents pcvModel='table' from being silently disabled by a legacy flag.
+            if ~pcvModelExplicit
+                pcvEnabled = false;
+                if isfield(cfg,'effects') && isfield(cfg.effects,'antennaPCV') && ...
+                        isfield(cfg.effects.antennaPCV, side)
+                    pcvEnabled = cfg.effects.antennaPCV.(side).enable;
+                end
+                if ~pcvEnabled; return; end
             end
-            if ~pcvEnabled; return; end
 
             switch pcvModel
                 case 'toy'

@@ -357,8 +357,9 @@ classdef MeasurementModel < handle
                 end
 
                 % Truth pseudorange with corrections + toy PCV (Stage 3)
+                % Stage 7A.1: pass t_s so t_tx_s = t_s - tau_s is an absolute epoch.
                 [rho_true, cTruth] = revgnss.RangeCorrections.correctedPseudorange( ...
-                    r_ants_truth(:,ai), r_twr_truth, obj.cfg, 'truth', elv);
+                    r_ants_truth(:,ai), r_twr_truth, obj.cfg, 'truth', elv, t_s);
                 sagnacTruth_m(mi)  = cTruth.sagnac;
                 shapiroTruth_m(mi) = cTruth.shapiro;
                 pcvTruth_m(mi)     = cTruth.pcv;
@@ -376,8 +377,9 @@ classdef MeasurementModel < handle
                 z(mi) = rho_true + b_rx_true - b_twr_truth_h + errStruct.truthTotal_m(mi);
 
                 % Predicted pseudorange with corrections + toy PCV
+                % Stage 7A.1: pass t_s so t_tx_s is an absolute epoch for product re-eval.
                 [rho_est, cModel] = revgnss.RangeCorrections.correctedPseudorange( ...
-                    r_ants_est(:,ai), r_twr_model, obj.cfg, 'model', elv);
+                    r_ants_est(:,ai), r_twr_model, obj.cfg, 'model', elv, t_s);
                 sagnacModel_m(mi)  = cModel.sagnac;
                 shapiroModel_m(mi) = cModel.shapiro;
                 pcvModel_m(mi)     = cModel.pcv;
@@ -928,10 +930,17 @@ classdef MeasurementModel < handle
                         obj.cfg.measurements.doppler.useInEKF
                     M_dop_obs = numel(errStruct.doppler.z);
                 end
+                % Stage 7A.1: label IF-combined code rows as 'ifCode' so
+                % ObservabilityDiagnostics.nIFCodeRows is non-zero in IF mode.
+                isIFCodeObs = isfield(errStruct,'ifCombination') && errStruct.ifCombination;
                 mTypeObs = cell(M_rows_obs, 1);
                 for mi_o = 1:M_rows_obs
                     if mi_o <= M
-                        mTypeObs{mi_o} = 'code';
+                        if isIFCodeObs
+                            mTypeObs{mi_o} = 'ifCode';
+                        else
+                            mTypeObs{mi_o} = 'code';
+                        end
                     elseif mi_o <= M + M_dop_obs
                         mTypeObs{mi_o} = 'doppler';
                     else
@@ -952,10 +961,16 @@ classdef MeasurementModel < handle
                     obj.cfg.measurements.doppler.useInEKF
                 M_dop_rows = numel(errStruct.doppler.z);
             end
+            % Stage 7A.1: label IF rows as 'ifCode' so downstream diagnostics count them.
+            isIFCode = isfield(errStruct,'ifCombination') && errStruct.ifCombination;
             mType = cell(M_rows, 1);
             for mi_t = 1:M_rows
                 if mi_t <= M
-                    mType{mi_t} = 'code';
+                    if isIFCode
+                        mType{mi_t} = 'ifCode';
+                    else
+                        mType{mi_t} = 'code';
+                    end
                 elseif mi_t <= M + M_dop_rows
                     mType{mi_t} = 'doppler';
                 else
@@ -1587,6 +1602,30 @@ classdef MeasurementModel < handle
             cfg    = obj.cfg;
             Mp     = numel(twr_pairs);
 
+            % Stage 7A.1: guard against accidental carrier IF request.
+            % Carrier ionosphere-free combination is NOT implemented.
+            % Only raw L1 float carrier EKF is supported.
+            if isfield(cfg,'measurements') && ...
+                    isfield(cfg.measurements,'carrierCombinationMode') && ...
+                    strcmp(cfg.measurements.carrierCombinationMode,'ionosphereFree')
+                policy = '';
+                if isfield(cfg,'estimator') && ...
+                        isfield(cfg.estimator,'unsupportedFeaturePolicy')
+                    policy = cfg.estimator.unsupportedFeaturePolicy;
+                end
+                if ~strcmp(policy,'warnAndFallback')
+                    error('MeasurementModel:carrierIFNotImplemented', ...
+                        ['Carrier ionosphere-free combination is NOT implemented in oo_v1. ' ...
+                         'Only raw L1 float carrier EKF is supported. ' ...
+                         'Use code IF (codeMode=''ionosphereFree'') or disable carrier EKF. ' ...
+                         'To use raw L1 instead without error, set: ' ...
+                         'cfg.estimator.unsupportedFeaturePolicy = ''warnAndFallback''.']);
+                else
+                    warning('MeasurementModel:carrierIFNotImplemented', ...
+                        'carrierCombinationMode=ionosphereFree not implemented. Using raw L1 carrier instead.');
+                end
+            end
+
             sigma_phi = 0.005;
             if isfield(cfg,'measurements') && isfield(cfg.measurements,'carrier') && ...
                     isfield(cfg.measurements.carrier,'sigma_m')
@@ -1844,6 +1883,14 @@ classdef MeasurementModel < handle
                 if isfield(cfg.effects,'antennaPCV') && ...
                         isfield(cfg.effects.antennaPCV,'model') && ...
                         cfg.effects.antennaPCV.model.enable
+                    need = true; return;
+                end
+                % Stage 7A.1: iterative light-time rotates the tower position by
+                % omega_E*tau; the geometric Jacobian dρ/dr = u' is then wrong.
+                % Use finite-difference H when iterative light-time is active.
+                if isfield(cfg.effects,'lightTime') && ...
+                        isfield(cfg.effects.lightTime,'model') && ...
+                        strcmp(cfg.effects.lightTime.model,'iterative')
                     need = true; return;
                 end
             end
