@@ -109,8 +109,14 @@ cfg.physics.doppler.truth.enable      = true;
 cfg.physics.doppler.model.enable      = true;
 
 % --- Carrier phase ----------------------------------------------
+% Legacy API: carrierPhase.useInEKF=true is remapped by finalizeConfig.
+% Float ambiguity states ARE implemented (see carrierFloatConfig).
+% To enable carrier EKF, set:
+%   cfg.measurements.carrierMode = 'ekfFloat';
+%   cfg.estimation.ambiguityMode = 'floatPerTowerSignal';
+% This run uses 'diagnostic' (carrier computed but not fed to EKF).
 cfg.measurements.carrierPhase.enable      = true;
-cfg.measurements.carrierPhase.useInEKF    = true;   % disabled/warned: ambiguity states not implemented v1
+cfg.measurements.carrierPhase.useInEKF    = false;  % use carrierMode='ekfFloat' for EKF carrier
 
 % --- Validation policy ------------------------------------------
 % 'disableWithWarning'  ->  unsupported features disabled with console warning
