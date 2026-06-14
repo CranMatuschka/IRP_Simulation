@@ -216,15 +216,34 @@ classdef LatexReportBuilder
             L{end+1} = sprintf('  beta  = -f2^2/ (f1^2 - f2^2) = %.6f', b);
             L{end+1} = '  First-order ionosphere cancels; geometry and clocks preserved.';
             L{end+1} = '';
+            % Stage 7A: iono mapping model
+            ionoMapKind = 'simpleSecant';
+            shellH_km   = 350;
+            try
+                ionoMapKind = cfg.effects.ionosphere.mappingModel;
+                shellH_km   = cfg.effects.ionosphere.shellHeight_m / 1e3;
+            catch; end
             L{end+1} = 'Ionosphere frequency scaling:';
             L{end+1} = '  I_f = I_L1 * (f_L1 / f)^2';
+            L{end+1} = sprintf('Ionosphere mapping model: %s', ionoMapKind);
+            if strcmp(ionoMapKind,'thinShell')
+                L{end+1} = sprintf('  M(e) = 1/sqrt(1-(Re*cos(e)/(Re+hI))^2),  hI=%.0f km', shellH_km);
+                L{end+1} = '  NOTE: thin-shell geometry only. This is NOT a Klobuchar model.';
+            else
+                L{end+1} = '  M(e) = 1/sin(e)  [simple secant; backward-compatible]';
+            end
             L{end+1} = '';
             L{end+1} = 'ZWD state contribution:';
             L{end+1} = '  h_zwd = m_w(el) * ZWD    [m_w = troposphere mapping function]';
             L{end+1} = '  H_zwd = m_w(el)           [Jacobian column]';
             L{end+1} = '';
-            L{end+1} = 'Tower clock product linear prediction:';
-            L{end+1} = '  b_hat(t) = bias_m + drift_mps * (t - epoch_s)';
+            L{end+1} = 'Tower clock product (correctionMode):';
+            L{end+1} = '  perfectTruth            : use truth clock (validation only)';
+            L{end+1} = '  truthHistoryProduct     : history-based linear prediction';
+            L{end+1} = '  truthHistoryProductNoisy: history + Gaussian noise in R';
+            L{end+1} = '  product                 : explicit cfg.towerClock.products struct';
+            L{end+1} = '  productNoisy            : explicit struct + uncertainty in R';
+            L{end+1} = '  b_hat(t) = bias_m + drift_mps*(t-epoch_s)';
             L{end+1} = '  sigma_corr^2 = sigmaBias^2 + dt^2*sigmaDrift^2 + 2*dt*cov';
             L{end+1} = '';
             L{end+1} = 'EKF state vector x (base 14 states):';
@@ -669,16 +688,18 @@ classdef LatexReportBuilder
             L{end+1} = sprintf('  simulation.duration_s: %.0f', cfg.simulation.duration_s);
             L{end+1} = sprintf('  simulation.seed     : %d', cfg.simulation.seed);
             L{end+1} = '';
-            L{end+1} = 'Known limitations (v1 Stage 6):';
-            L{end+1} = '  * No integer ambiguity fixing';
-            L{end+1} = '  * Raw L1 carrier only in ekfFloat mode';
-            L{end+1} = '  * No ANTEX parser (toy PCV model or user-supplied table)';
-            L{end+1} = '  * No IONEX (Klobuchar or simple mapped ionosphere only)';
-            L{end+1} = '  * No SP3/CLK product ingest (history-based or explicit struct)';
+            L{end+1} = 'Known limitations (v1 Stage 7A):';
+            L{end+1} = '  * No integer ambiguity fixing (float EKF only)';
+            L{end+1} = '  * Raw L1 carrier only — no L2 carrier EKF, no IF carrier';
+            L{end+1} = '  * No ANTEX parser — elevation-only PCV table or toy model';
+            L{end+1} = '  * Ionosphere: simpleSecant(1/sin) or thinShell mapping only';
+            L{end+1} = '  * Klobuchar model is NOT implemented';
+            L{end+1} = '  * No IONEX product ingest';
+            L{end+1} = '  * No SP3/CLK product ingest (history or explicit struct)';
             L{end+1} = '  * No RINEX parser';
             L{end+1} = '  * No VMF3/GPT3/ERA5 (simple or continued-fraction mapping)';
-            L{end+1} = '  * No PPP-grade claim';
-            L{end+1} = '  * No centimeter/millimeter guarantee';
+            L{end+1} = '  * No azimuth-dependent PCV';
+            L{end+1} = '  * No PPP-grade or mm-level accuracy claim';
 
             text(ax, 0.02, 0.97, strjoin(L,'\n'), ...
                 'Units','normalized', 'VerticalAlignment','top', ...
