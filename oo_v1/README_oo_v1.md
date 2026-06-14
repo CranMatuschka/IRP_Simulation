@@ -1,5 +1,16 @@
 # oo_v1 — Object-Oriented Reverse-GNSS Simulation
 
+## Current status
+
+| Item | Value |
+|------|-------|
+| Stage | 7A (complete) / 7B (complete) |
+| Test suite | 73 / 73 test files passing (72 Stage-7A + 1 Stage-7B with 18 sub-tests) |
+| MATLAB version | R2025b |
+| Branch | `feature/oo-reverse-gnss-v1` |
+
+---
+
 ## Default scenario
 
 The default run uses **GEO-1** as the space asset and five ground towers taken from the original `config/SimulationConfig.m`:
@@ -20,30 +31,45 @@ The GEO satellite is stationary in ECEF. No orbit propagator is used for the def
 
 ---
 
-## Simple PDF report
+## Running the main report
 
-Run the default simulation and it automatically saves a PDF containing all diagnostic figures:
+Run the full simulation and LaTeX-style scientific report:
 
 ```matlab
 cd oo_v1
-run_oo_reverse_gnss
+run_oo_reverse_gnss_report
 ```
 
-After the run completes, the report is saved to:
+After the run completes, outputs are saved to:
 
 ```
-oo_v1/output/reverse_gnss_simple_report.pdf
+oo_v1/output/Report-YYYYMMDD/report-v1.01.pdf
+oo_v1/output/Report-YYYYMMDD/report-v1.01.mat
 ```
 
-The PDF is tracked by git. PNGs are not committed by default.
+The PDF contains: title page, executive summary, model equations, configuration table,
+state vector, measurement summary, error budget, observability diagnostics, scientific
+verdict (with test status), appendix, and all diagnostic plots.
 
-Implementation: `+revgnss/ReportWriter.m`. Uses `exportgraphics` with `Append` on MATLAB R2020b+; falls back to `print` on older releases.
+### Report styles
 
-To generate a report from your own simulation:
+| `cfg.report.style` | Behaviour |
+|--------------------|-----------|
+| `'latex'` (default in main script) | Adds 10 LaTeX-style section pages before plots |
+| `''` or not set | Simple summary page only (faster) |
+
+### Optional LaTeX source
+
 ```matlab
-sim.plot();
-sim.writeReport();
+cfg.report.writeTex  = true;     % write .tex source beside PDF
+cfg.report.compileTex = 'auto';  % 'auto' | 'never' | 'require'
 ```
+
+When `compileTex='auto'` and `pdflatex`/`xelatex` is in PATH, a compiled PDF is produced
+alongside the MATLAB-figure PDF. If LaTeX is not available, the MATLAB PDF is the deliverable.
+
+Implementation: `+revgnss/ReportRunner.m`, `+revgnss/LatexReportBuilder.m`, `+revgnss/ReportWriter.m`.
+Uses `exportgraphics` with `Append` on MATLAB R2020b+; falls back to `print` on older releases.
 
 ---
 
@@ -101,7 +127,14 @@ This implementation lives **entirely within** the `oo_v1/` folder and does not m
   validateConfig.m     Startup config validation
   Plotter.m            17-figure diagnostic plot suite
   Diagnostics.m        Per-epoch truth/estimate/error log
+  ReportRunner.m       Single-run simulation + optional PDF/MAT output
   ReportWriter.m       Saves figure array to multi-page PDF
+  LatexReportBuilder.m LaTeX-style 10-section report pages (equations, tables, verdict)
+  ReportEquations.m    Canonical measurement-equation string blocks (used by builder + tests)
+  ReportTables.m       State-vector and configuration table string blocks
+  ReportSummary.m      Performance metrics formatting from summary struct
+  ReportText.m         Standard description / limitations / supported-features text blocks
+  ReportStatus.m       Test-suite status metadata (72/72 passing, commit SHA, MATLAB version)
 ```
 
 ---
@@ -446,29 +479,51 @@ This is physically correct — the EKF clock state acts as a catch-all for commo
 
 | Limitation | Notes |
 |-----------|-------|
-| Carrier phase: diagnostic only | No float/integer ambiguity states; carrier stored but not used in EKF |
-| No light-time iteration | One-way range used; Sagnac enabled via `cfg.physics.sagnac` toggles |
+| Carrier phase: float L1 only | `ekfFloat` mode uses raw L1 float ambiguity states; no L2 carrier EKF rows, no carrier IF |
+| No integer ambiguity resolution | LAMBDA/MLAMBDA deferred to future work; float ambiguities converge |
+| Light-time | `sagnacFirstOrder` (default) or `iterative` iterative mode available; no full ECI |
 | Simple circular orbit | No J2, no drag, no SRP |
-| Simple atmosphere | 1/sin(elev) mapping; no ERA5/VMF3/GPT3 (Stage 9 TODO) |
-| Toy PCV only | `amplitude * cos(el)^2`; no ANTEX file support |
+| Simple atmosphere | simpleSecant (1/sin) or thinShell mapping; no VMF3/GPT3/ERA5 |
+| PCV model | None / toy (elevation-only) / elevation-table — no ANTEX file parser |
 | Euler attitude | Gimbal-lock singularity at pitch = ±90° |
 | No IMU | Attitude propagation is kinematic; no inertial aiding |
-| No ambiguity resolution | LAMBDA/MLAMBDA deferred to future work |
+| No real products | No ANTEX, IONEX, SP3, CLK, RINEX parsers; tower clocks are history-based or explicit struct |
+| No PPP-grade accuracy | Meter-to-decameter navigation accuracy; no cm/mm claim |
+
+### Supported feature status
+
+| Feature | Status |
+|---------|--------|
+| Code pseudorange EKF | **Implemented** |
+| L1/L2 ionosphere-free code | **Implemented** |
+| Simplified Doppler | **Implemented** |
+| Raw L1 float carrier EKF | **Implemented** (ekfFloat mode) |
+| ZWD residual state | **Implemented** (perTowerZwd mode) |
+| Tower-clock correction modes | **Implemented** (none/perfectTruth/history/product) |
+| Sagnac / Shapiro / light-time | **Implemented** (approximations) |
+| Observability diagnostics | **Implemented** |
+| MATLAB PDF + optional .tex report | **Implemented** |
+| Integer ambiguity resolution | Not implemented (future work) |
+| L2 carrier EKF / phase IF | Not implemented |
+| ANTEX / IONEX / SP3 / CLK parsers | Not implemented |
+| Klobuchar ionosphere model | Not implemented |
+| VMF3 / GPT3 / ERA5 atmosphere | Not implemented |
+| PPP-grade or cm accuracy | Not claimed |
 
 ---
 
 ## 16. Future Extensions
 
-- Float ambiguity states for carrier phase in EKF (Stage 8 TODO)
-- Integer ambiguity resolution (LAMBDA/MLAMBDA)
+- Integer ambiguity resolution (LAMBDA/MLAMBDA) — float EKF implemented; integer fixing deferred
 - Cycle slip detection and repair
-- Light-time iteration (iterate range until Sagnac converges)
 - J2 / high-fidelity orbit propagator (e.g. RK4 + gravity model)
 - IMU aiding for attitude
-- Quaternion attitude representation (removes singularity)
-- ERA5/VMF3/GPT3 atmosphere models (Stage 9 TODO)
+- Quaternion attitude representation (removes gimbal-lock singularity)
+- ERA5/VMF3/GPT3 atmosphere models
 - ANTEX-calibrated PCV (replace toy elevation model)
-- Real ephemeris / precise orbit/clock products
+- Real ephemeris / precise orbit/clock products (SP3/CLK parsers)
+- L2 carrier EKF rows / ionosphere-free carrier combination
+- Phase wind-up model
 
 ---
 

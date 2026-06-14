@@ -47,6 +47,12 @@ cfg.report.version        = '1.01';
 cfg.report.baseOutputDir  = fullfile(thisDir, 'output');
 cfg.report.overwrite      = true;
 
+% Report style: 'latex' enables LaTeX-style section pages (LatexReportBuilder).
+% Set to any other value (or remove this line) for the simple summary-only output.
+cfg.report.style     = 'latex';   % 'latex' | '' (simple)
+cfg.report.writeTex  = false;     % true  = write .tex source file beside PDF
+cfg.report.compileTex = 'auto';   % 'auto' | 'never' | 'require'
+
 % --- Receivers / attitude ---------------------------------------
 % nReceivers == 1  ->  attitude estimation OFF, zero lever arms
 % nReceivers  > 1  ->  attitude estimation ON,  auto cross-pattern lever arms
@@ -109,14 +115,12 @@ cfg.physics.doppler.truth.enable      = true;
 cfg.physics.doppler.model.enable      = true;
 
 % --- Carrier phase ----------------------------------------------
-% Legacy API: carrierPhase.useInEKF=true is remapped by finalizeConfig.
-% Float ambiguity states ARE implemented (see carrierFloatConfig).
-% To enable carrier EKF, set:
+% Float ambiguity EKF is available via carrierFloatConfig or by setting:
 %   cfg.measurements.carrierMode = 'ekfFloat';
 %   cfg.estimation.ambiguityMode = 'floatPerTowerSignal';
-% This run uses 'diagnostic' (carrier computed but not fed to EKF).
+% This run uses 'diagnostic' mode: carrier is computed but not fed to EKF.
 cfg.measurements.carrierPhase.enable      = true;
-cfg.measurements.carrierPhase.useInEKF    = false;  % use carrierMode='ekfFloat' for EKF carrier
+cfg.measurements.carrierPhase.useInEKF    = false;  % diagnostic only; set carrierMode='ekfFloat' to enable
 
 % --- Validation policy ------------------------------------------
 % 'disableWithWarning'  ->  unsupported features disabled with console warning

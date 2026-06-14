@@ -98,7 +98,7 @@ classdef LatexReportBuilder
             L{end+1} = '================================================================';
             L{end+1} = '';
             L{end+1} = '  REVERSE-GNSS SIMULATION REPORT';
-            L{end+1} = '  Scientific Validation Report — Stage 6';
+            L{end+1} = '  Scientific Validation Report — Stage 7A';
             L{end+1} = '';
             L{end+1} = '================================================================';
             L{end+1} = '';
@@ -659,6 +659,13 @@ classdef LatexReportBuilder
                 end
             end
 
+            L{end+1} = '';
+            L{end+1} = '--- Test Status ---';
+            statusLines = revgnss.ReportStatus.summaryLines();
+            for k = 1:numel(statusLines)
+                L{end+1} = sprintf('  %s', statusLines{k}); %#ok<AGROW>
+            end
+
             text(ax, 0.02, 0.97, strjoin(L,'\n'), ...
                 'Units','normalized', 'VerticalAlignment','top', ...
                 'FontName','Courier', 'FontSize',9, 'Interpreter','none');
@@ -744,13 +751,13 @@ classdef LatexReportBuilder
             fprintf(fid,'\\documentclass[11pt,a4paper]{article}\n');
             fprintf(fid,'\\usepackage[margin=2cm]{geometry}\n');
             fprintf(fid,'\\usepackage{booktabs,amsmath,lmodern,microtype}\n');
-            fprintf(fid,'\\title{Reverse-GNSS Simulation Report\\\\ \\large{oo\\_v1 Stage 6 --- Scientific Validation}}\n');
+            fprintf(fid,'\\title{Reverse-GNSS Simulation Report\\\\ \\large{oo\\_v1 Stage 7A --- Scientific Validation}}\n');
             fprintf(fid,'\\author{CranMatuschka --- claude-sonnet-4-6}\n');
             fprintf(fid,'\\date{%s \\\\ Commit: %s}\n', ts, sha);
             fprintf(fid,'\\begin{document}\n');
             fprintf(fid,'\\maketitle\n');
             fprintf(fid,'\\begin{abstract}\n');
-            fprintf(fid,'This report documents the oo\\_v1 Stage 6 reverse-GNSS simulation.\n');
+            fprintf(fid,'This report documents the oo\\_v1 Stage 7A reverse-GNSS simulation.\n');
             fprintf(fid,'Scenario: %s. Duration: %.0f s.\n', scenarioName, cfg.simulation.duration_s);
             fprintf(fid,'Scientific limitations: no integer ambiguity resolution, raw L1 carrier only,\n');
             fprintf(fid,'no external data products (ANTEX/IONEX/SP3/CLK), no VMF3/GPT3.\n');
