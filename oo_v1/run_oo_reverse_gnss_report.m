@@ -47,12 +47,15 @@ cfg.report.version        = '1.01';
 cfg.report.baseOutputDir  = fullfile(thisDir, 'output');
 cfg.report.overwrite      = true;
 
-% Report style: 'latex' enables LaTeX-style section pages (LatexReportBuilder).
-% Set to any other value (or remove this line) for the simple summary-only output.
-cfg.report.style     = 'latex';     % 'latex' | '' (simple)
-cfg.report.layout    = 'clockStyle'; % 'clockStyle' | 'default'
-cfg.report.writeTex  = false;       % true  = write .tex source file beside PDF
-cfg.report.compileTex = 'auto';     % 'auto' | 'never' | 'require'
+% Report style and layout:
+%   layout='clockExact'  — LaTeX pipeline (requires pdflatex/xelatex).
+%                          Writes .tex + compiles to PDF matching Clock_* style.
+%   layout='clockStyle'  — MATLAB figure report with Clock-style section pages.
+%   layout='default'     — Simple text dump + raw diagnostic plots.
+cfg.report.style     = 'latex';      % 'latex' | '' (simple)
+cfg.report.layout    = 'clockExact'; % 'clockExact' | 'clockStyle' | 'default'
+cfg.report.writeTex  = true;         % true  = write .tex source file beside PDF
+cfg.report.compileTex = 'require';   % 'require' | 'auto' | 'never'
 
 % --- Receivers / attitude ---------------------------------------
 % nReceivers == 1  ->  attitude estimation OFF, zero lever arms

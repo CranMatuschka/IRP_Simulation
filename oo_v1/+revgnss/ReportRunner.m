@@ -104,9 +104,39 @@ classdef ReportRunner
             % ---- Collect summary metrics --------------------------------
             summary = revgnss.ReportRunner.collectSummary_(diag, cfg, version, reportFolder, pdfPath, matPath);
 
-            % ---- PDF: generate figures and write ------------------------
+            % ---- Determine report layout before PDF generation -----------
+            reportLayout = 'default';
+            if isfield(cfg,'report') && isfield(cfg.report,'layout')
+                reportLayout = cfg.report.layout;
+            end
+
+            % ---- PDF: clockExact path (LaTeX pipeline, no MATLAB figures) -
             texPath2 = '';
-            if writePdf
+            if writePdf && strcmp(reportLayout,'clockExact')
+                ceResult = revgnss.ClockExactReportBuilder.build( ...
+                    diag, sim.asset, sim.towers, cfg, summary);
+                texPath2 = ceResult.texPath;
+                if ceResult.success && ~isempty(ceResult.pdfPath)
+                    pdfPath = ceResult.pdfPath;
+                    if exist(pdfPath,'file') ~= 2
+                        error('ReportRunner:pdfNotWritten', ...
+                            'ClockExact PDF not written: %s', pdfPath);
+                    end
+                    info = dir(pdfPath);
+                    if info.bytes <= 0
+                        error('ReportRunner:pdfEmpty', 'ClockExact PDF is empty: %s', pdfPath);
+                    end
+                    fprintf('  PDF written (ClockExact): %s  (%.1f kB)\n', pdfPath, info.bytes/1024);
+                elseif ~ceResult.success
+                    error('ReportRunner:clockExactFailed', ...
+                        'ClockExact report failed: %s', ceResult.message);
+                else
+                    % compileTex='never': .tex written, no PDF
+                    fprintf('  [ClockExact] .tex written (compile skipped): %s\n', texPath2);
+                end
+
+            % ---- PDF: MATLAB figure path (default / clockStyle) ----------
+            elseif writePdf
                 figHandles = revgnss.Plotter.plotAll(diag, sim.asset, sim.towers, cfg);
                 nRx = size(sim.asset.receiverLeverArms_body_m, 2);
                 if nRx == 1
@@ -125,8 +155,7 @@ classdef ReportRunner
                 end
 
                 % Phase 9: latex-style scientific section pages
-                texFigs  = gobjects(0);
-                texPath2 = '';
+                texFigs = gobjects(0);
                 if strcmp(reportStyle,'latex')
                     [texFigs, texPath2] = revgnss.LatexReportBuilder.build( ...
                         diag, sim.asset, sim.towers, cfg, summary);
