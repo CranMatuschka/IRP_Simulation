@@ -531,6 +531,34 @@ classdef ConfigFactory
             cfg.hardware.txCodeBias.processSigma_m_per_sqrt_s = 1e-5;
             cfg.hardware.txCodeBias.gaugeSigma_m              = 1e-6;
 
+            % --- Receiver code / carrier hardware-bias architecture (Stage 12) ---
+            % Receiver code hardware delay has the same first-order sensitivity as
+            % receiver clock bias in single-frequency one-way pseudorange:
+            %   dP/d(b_rx) = +1,  dP/d(d_rx_code) = +1
+            % Free EKF estimation of both is not identifiable.  Allowed modes:
+            %   'off'                  — no correction applied (collinear term ignored)
+            %   'absorbedInReceiverClock'  — formally absorbed; default safe mode
+            %   'fixed'                — apply cfg.hardware.rxCodeBias.fixedValue_m to h
+            %   'externalCalibration'  — same as 'fixed' (value from external source)
+            %   'estimate'             — blocked; finalizeConfig throws an error
+            cfg.hardware.rxCodeBias.enable       = false;
+            cfg.hardware.rxCodeBias.mode         = 'absorbedInReceiverClock';
+            cfg.hardware.rxCodeBias.fixedValue_m = 0.0;
+            cfg.hardware.rxCodeBias.sigma_m      = 0.0;
+
+            % Receiver carrier phase hardware bias.  In float-ambiguity mode,
+            % constant phase hardware biases are absorbed into the float ambiguity
+            % states and are not separately estimable.  Allowed modes:
+            %   'notImplemented'     — default; no separate state or correction
+            %   'absorbedInAmbiguity'— explicitly declares absorption (carrier float only)
+            %   'fixed'              — apply cfg.hardware.rxCarrierBias.fixedValue_m
+            %   'externalCalibration'— same as 'fixed'
+            %   'estimate'           — blocked; finalizeConfig throws an error
+            cfg.hardware.rxCarrierBias.enable       = false;
+            cfg.hardware.rxCarrierBias.mode         = 'notImplemented';
+            cfg.hardware.rxCarrierBias.fixedValue_m = 0.0;
+            cfg.hardware.rxCarrierBias.sigma_m      = 0.0;
+
             % --- Observability diagnostics (Step 8) -------------------------
             cfg.diagnostics.observability.enabled       = false;
             cfg.diagnostics.observability.warn          = true;
@@ -1101,6 +1129,65 @@ classdef ConfigFactory
                     end
 
                     cfg.hardware.txCodeBias.enable = true;
+                end
+            end
+
+            % ---- Stage 12: receiver hardware-bias identifiability guards ------
+            if isfield(cfg,'hardware') && isfield(cfg.hardware,'rxCodeBias')
+                rxcb = cfg.hardware.rxCodeBias;
+                rxMode12 = 'absorbedInReceiverClock';
+                if isfield(rxcb,'mode'); rxMode12 = rxcb.mode; end
+
+                % Guard 1: free estimation is forbidden (collinear with receiver clock)
+                if strcmp(rxMode12, 'estimate')
+                    error('ConfigFactory:rxCodeBiasCollinear', ...
+                        ['Receiver code hardware delay is collinear with receiver clock bias ' ...
+                         'in single-frequency one-way pseudorange. ' ...
+                         'Free EKF estimation is not identifiable without an external ' ...
+                         'calibration, multi-frequency constraint, or clock prior. ' ...
+                         'Use mode ''absorbedInReceiverClock'', ''fixed'', or ''externalCalibration''.']);
+                end
+
+                % Guard 2: fixed/external modes require a valid (non-NaN) value
+                if any(strcmp(rxMode12, {'fixed','externalCalibration'}))
+                    val12 = NaN;
+                    if isfield(rxcb,'fixedValue_m'); val12 = rxcb.fixedValue_m; end
+                    if isnan(val12)
+                        error('ConfigFactory:rxCodeBiasNoValue', ...
+                            ['cfg.hardware.rxCodeBias.mode=''%s'' requires a valid numeric ' ...
+                             'fixedValue_m (got NaN). Set fixedValue_m to the calibrated ' ...
+                             'receiver code hardware delay in metres.'], rxMode12);
+                    end
+                    cfg.hardware.rxCodeBias.enable = true;
+                end
+            end
+
+            if isfield(cfg,'hardware') && isfield(cfg.hardware,'rxCarrierBias')
+                rxcb2 = cfg.hardware.rxCarrierBias;
+                rxCMode12 = 'notImplemented';
+                if isfield(rxcb2,'mode'); rxCMode12 = rxcb2.mode; end
+
+                % Guard 3: free carrier phase bias estimation is blocked
+                if strcmp(rxCMode12, 'estimate')
+                    error('ConfigFactory:rxCarrierBiasEstimate', ...
+                        ['Receiver carrier phase hardware bias estimation is not supported. ' ...
+                         'In float-ambiguity mode, constant phase hardware biases are absorbed ' ...
+                         'into the float ambiguity states. Use mode ''absorbedInAmbiguity'' or ' ...
+                         '''notImplemented'' to declare this explicitly.']);
+                end
+
+                % Warning (not error): carrier float in EKF + notImplemented → absorbed
+                carrierModeInEKF12 = false;
+                if isfield(cfg,'measurements') && isfield(cfg.measurements,'carrierMode')
+                    carrierModeInEKF12 = strcmp(cfg.measurements.carrierMode,'ekfFloat');
+                end
+                if carrierModeInEKF12 && strcmp(rxCMode12,'notImplemented')
+                    warnMsg12 = ['Receiver carrier hardware phase bias is absorbed into ' ...
+                                 'float ambiguity states in this configuration ' ...
+                                 '(rxCarrierBias.mode=''notImplemented'' + carrierMode=''ekfFloat''). ' ...
+                                 'Absolute carrier phase calibration is not available.'];
+                    cfg.validation.warnings{end+1} = warnMsg12;
+                    warning('ConfigFactory:rxCarrierBiasAbsorbed', '%s', warnMsg12);
                 end
             end
 

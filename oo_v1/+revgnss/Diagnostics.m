@@ -33,6 +33,13 @@ classdef Diagnostics < handle
     properties
         log     (:,1) struct
         nEpochs (1,1) double = 0
+        % Receiver hardware-bias architecture metadata (Stage 12)
+        % Set once during construction from cfg; constant across epochs.
+        rxCodeBiasMode                  char   = 'absorbedInReceiverClock'
+        rxCodeBiasModel_m               double = 0.0
+        rxCodeBiasIdentifiabilityStatus char   = 'safe: collinear term absorbed into receiver clock'
+        rxCarrierBiasMode               char   = 'notImplemented'
+        rxCarrierBiasIdentifiabilityStatus char = 'safe: constant phase bias absorbed in float ambiguity'
     end
 
     properties (Access = private)
@@ -61,6 +68,51 @@ classdef Diagnostics < handle
                 if isfield(co,'windowLengthEpochs'); obj.clockObsWinLen_ = co.windowLengthEpochs; end
                 if isfield(co,'minWindowEpochs');    obj.clockObsMinWin_ = co.minWindowEpochs;    end
                 if isfield(co,'rankTolerance');      obj.clockObsRankTol_ = co.rankTolerance;     end
+            end
+
+            % --- Stage 12: receiver bias architecture metadata ---------------
+            if isfield(cfg,'hardware') && isfield(cfg.hardware,'rxCodeBias')
+                rxcb = cfg.hardware.rxCodeBias;
+                if isfield(rxcb,'mode')
+                    obj.rxCodeBiasMode = rxcb.mode;
+                end
+                switch obj.rxCodeBiasMode
+                    case {'fixed','externalCalibration'}
+                        if isfield(rxcb,'fixedValue_m')
+                            obj.rxCodeBiasModel_m = rxcb.fixedValue_m;
+                        end
+                        obj.rxCodeBiasIdentifiabilityStatus = ...
+                            'safe: fixed/external calibration applied as model correction';
+                    case 'absorbedInReceiverClock'
+                        obj.rxCodeBiasIdentifiabilityStatus = ...
+                            'safe: collinear term absorbed into receiver clock bias';
+                    case 'off'
+                        obj.rxCodeBiasIdentifiabilityStatus = ...
+                            'safe: correction disabled; collinear term absorbed into receiver clock';
+                    otherwise
+                        obj.rxCodeBiasIdentifiabilityStatus = ...
+                            sprintf('unknown mode ''%s''', obj.rxCodeBiasMode);
+                end
+            end
+            if isfield(cfg,'hardware') && isfield(cfg.hardware,'rxCarrierBias')
+                rxcb2 = cfg.hardware.rxCarrierBias;
+                if isfield(rxcb2,'mode')
+                    obj.rxCarrierBiasMode = rxcb2.mode;
+                end
+                switch obj.rxCarrierBiasMode
+                    case 'absorbedInAmbiguity'
+                        obj.rxCarrierBiasIdentifiabilityStatus = ...
+                            'safe: phase bias declared absorbed into float ambiguity';
+                    case 'notImplemented'
+                        obj.rxCarrierBiasIdentifiabilityStatus = ...
+                            'safe: constant phase bias absorbed in float ambiguity (implicit)';
+                    case {'fixed','externalCalibration'}
+                        obj.rxCarrierBiasIdentifiabilityStatus = ...
+                            'safe: fixed/external carrier phase calibration';
+                    otherwise
+                        obj.rxCarrierBiasIdentifiabilityStatus = ...
+                            sprintf('unknown mode ''%s''', obj.rxCarrierBiasMode);
+                end
             end
         end
 

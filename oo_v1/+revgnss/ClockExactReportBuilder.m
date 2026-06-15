@@ -448,6 +448,7 @@ classdef ClockExactReportBuilder
             CE.writeOscillatorValidation_(fid, plotPaths, stem, figDir, cfg);
             CE.writeClockObservability_(fid, diag, cfg);
             CE.writeTxCodeBias_(fid, diag, cfg);
+            CE.writeBiasArchitecture_(fid, cfg);
             CE.writeDisabledComponents_(fid, cfg);
             CE.writeNumericalSummary_(fid, cfg, summary, diag);
 
@@ -1108,6 +1109,62 @@ classdef ClockExactReportBuilder
                  'simultaneously; a delay-datum gauge is required.']);
 
             fprintf(fid, CE.plotTableFooter_());
+            fprintf(fid, '\\clearpage\n');
+        end
+
+        % ================================================================
+        % SECTION 8 — RECEIVER AND OBSERVABLE HARDWARE BIAS ARCHITECTURE (Stage 12)
+        % ================================================================
+
+        function writeBiasArchitecture_(fid, cfg)
+            % writeBiasArchitecture_  Report section classifying all bias/delay terms.
+            %
+            % Always printed (not conditional on any flag).  Describes which biases are
+            % estimated, fixed, external, absorbed, disabled, or not implemented.
+
+            fprintf(fid, '\\section{Receiver and Observable Hardware Bias Architecture}\n');
+            fprintf(fid, ['\\small\n' ...
+                'Pseudorange (code), Doppler, and carrier phase each carry a set of hardware ' ...
+                'delays and phase biases that must be classified before EKF design.\n\n']);
+
+            fprintf(fid, ['\\subsection*{Receiver Code Hardware Delay}\n' ...
+                'Receiver code hardware delay and receiver clock bias have identical first-order\n' ...
+                'sensitivity in single-frequency one-way pseudorange:\n' ...
+                '$\\partial P / \\partial b_{\\rm rx} = +1$, $\\partial P / \\partial d_{\\rm rx,code} = +1$.\n' ...
+                'Therefore this implementation does \\textbf{not} allow free receiver code-delay EKF estimation.\n' ...
+                'The receiver code bias is either absorbed into the receiver clock (default),\n' ...
+                'fixed from external calibration, or disabled.\n\n']);
+
+            fprintf(fid, ['\\subsection*{Carrier Phase Hardware Bias}\n' ...
+                'Receiver and transmitter carrier phase hardware biases are distinct from code group delays.\n' ...
+                'In float-ambiguity mode, \\emph{constant} phase hardware biases are absorbed into\n' ...
+                'the float ambiguity state unless a separate calibrated phase-bias model is provided.\n\n']);
+
+            % Bias architecture table
+            fprintf(fid, '\\normalsize\n');
+            fprintf(fid, ['\\begin{longtable}{|p{4.5cm}|p{2.2cm}|p{1.2cm}|p{2.5cm}|p{5.5cm}|}\n' ...
+                '\\hline\n' ...
+                '\\textbf{Bias / Delay Term} & \\textbf{Status} & \\textbf{In EKF?} & ' ...
+                '\\textbf{Observable} & \\textbf{Identifiability / Gauge Note} \\\\ \\hline\n' ...
+                '\\endhead\n']);
+
+            try
+                rows = revgnss.BiasArchitecture.toTable(cfg);
+                for k = 1:size(rows,1)
+                    term   = revgnss.ClockExactReportBuilder.esc_(rows{k,1});
+                    status = revgnss.ClockExactReportBuilder.esc_(rows{k,2});
+                    inekf  = revgnss.ClockExactReportBuilder.esc_(rows{k,3});
+                    obs    = revgnss.ClockExactReportBuilder.esc_(rows{k,4});
+                    note   = revgnss.ClockExactReportBuilder.esc_(rows{k,5});
+                    fprintf(fid, '%s & %s & %s & %s & %s \\\\ \\hline\n', ...
+                        term, status, inekf, obs, note);
+                end
+            catch ME
+                fprintf(fid, 'Error generating bias architecture table: %s \\\\ \\hline\n', ...
+                    revgnss.ClockExactReportBuilder.esc_(ME.message));
+            end
+
+            fprintf(fid, '\\end{longtable}\n');
             fprintf(fid, '\\clearpage\n');
         end
 

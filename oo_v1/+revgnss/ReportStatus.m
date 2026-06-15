@@ -8,9 +8,9 @@ classdef ReportStatus
 
         function s = current()
             % current  Return struct with current test/validation status.
-            s.nPassing      = 152;
-            s.nTotal        = 152;
-            s.stage         = '11.0';
+            s.nPassing      = 164;
+            s.nTotal        = 164;
+            s.stage         = '12.0';
             s.allPass       = (s.nPassing == s.nTotal);
             s.matlabVersion = version;
             s.commitSHA     = revgnss.ReportStatus.getGitSHA_();

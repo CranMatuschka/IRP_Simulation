@@ -437,6 +437,15 @@ classdef MeasurementModel < handle
                     h(mi) = h(mi) + x_est(stateMap.txCodeBiasIdx(ti));
                 end
 
+                % TASK 4: Receiver code hardware-delay model correction.
+                % Applied only for 'fixed' and 'externalCalibration' modes.
+                % Sign: +1 (delay increases measured pseudorange, same as b_rx).
+                % No Jacobian column — not an EKF state.
+                d_rx_code_h = obj.getRxCodeBiasModel_();
+                if d_rx_code_h ~= 0
+                    h(mi) = h(mi) + d_rx_code_h;
+                end
+
                 sigma_i = sqrt(errStruct.sigmaTotal_m(mi)^2 + towerClkSigma(mi)^2);
                 R_diag(mi) = max(sigma_i, sigmaFloor)^2;
             end
@@ -1275,6 +1284,12 @@ classdef MeasurementModel < handle
                         stateMap.txCodeBiasIdx(ti) > 0
                     h_pr(mi) = h_pr(mi) + x_state(stateMap.txCodeBiasIdx(ti));
                 end
+
+                % TASK 4: Receiver code hardware-delay postfit correction (code rows only)
+                d_rx_code_pr = obj.getRxCodeBiasModel_();
+                if d_rx_code_pr ~= 0
+                    h_pr(mi) = h_pr(mi) + d_rx_code_pr;
+                end
             end
         end
 
@@ -1839,6 +1854,30 @@ classdef MeasurementModel < handle
     end  % private methods
 
     methods (Access = private)
+
+        % ----------------------------------------------------------------
+        function d = getRxCodeBiasModel_(obj)
+            % getRxCodeBiasModel_  Return receiver code hardware-delay model correction [m].
+            %
+            % Returns 0 for 'off', 'absorbedInReceiverClock', and 'notImplemented'.
+            % Returns cfg.hardware.rxCodeBias.fixedValue_m for 'fixed' and
+            % 'externalCalibration' modes.  The caller adds this to code-row h only.
+            % No Jacobian: not an EKF state.
+            d = 0;
+            if ~isfield(obj.cfg,'hardware') || ~isfield(obj.cfg.hardware,'rxCodeBias')
+                return;
+            end
+            rxcb = obj.cfg.hardware.rxCodeBias;
+            if ~isfield(rxcb,'mode'); return; end
+            switch rxcb.mode
+                case {'fixed','externalCalibration'}
+                    if isfield(rxcb,'fixedValue_m') && ~isnan(rxcb.fixedValue_m)
+                        d = rxcb.fixedValue_m;
+                    end
+                otherwise
+                    d = 0;
+            end
+        end
 
         % ----------------------------------------------------------------
         function kind = zwdMappingKind_(obj)
