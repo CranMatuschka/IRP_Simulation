@@ -497,6 +497,22 @@ classdef ConfigFactory
             % cfg.towerClock.products is not set in defaultConfig (optional field).
             % Set it in towerClockProductConfig() or manually per tower.
 
+            % --- Clock architecture mode (Stage 8) ---------------------------
+            % clock.mode: which clocks are in the EKF state vector.
+            %   'spacecraftReceiverClockOnly' — only rx clock (default; 14-state base)
+            %   'includeTowerClocksInEKF'     — add tower clock states (+2/tower)
+            %     Requires clock.gauge.mode != 'free' (one-way PR is rank-deficient otherwise).
+            %
+            % clock.gauge.mode: how the clock datum ambiguity is resolved.
+            %   'externalTowerCorrections' — tower clocks corrected from external product (default)
+            %   'fixReferenceTower'        — pin tower-1 clock to zero (differential estimation)
+            %   'free'                     — no gauge; legal only with spacecraftReceiverClockOnly
+            %
+            % clock.hardwareDelay.estimatePerTower — hardware delay EKF state placeholder (v1: not implemented)
+            cfg.clock.mode                           = 'spacecraftReceiverClockOnly';
+            cfg.clock.gauge.mode                     = 'externalTowerCorrections';
+            cfg.clock.hardwareDelay.estimatePerTower = false;
+
             % --- Observability diagnostics (Step 8) -------------------------
             cfg.diagnostics.observability.enabled       = false;
             cfg.diagnostics.observability.warn          = true;
@@ -970,6 +986,34 @@ classdef ConfigFactory
                         cfg.estimator.towerClockMode = 'none';
                     otherwise
                         cfg.estimator.towerClockMode = newMode;
+                end
+            end
+
+            % ---- Clock mode / gauge validation (Stage 8) ------------------
+            % Map cfg.clock.mode to estimator.estimateTowerClocks and validate gauge.
+            if isfield(cfg,'clock') && isfield(cfg.clock,'mode')
+                clockMode = cfg.clock.mode;
+                gaugeMode = 'externalTowerCorrections';
+                if isfield(cfg.clock,'gauge') && isfield(cfg.clock.gauge,'mode')
+                    gaugeMode = cfg.clock.gauge.mode;
+                end
+                switch clockMode
+                    case 'spacecraftReceiverClockOnly'
+                        cfg.estimator.estimateTowerClocks = false;
+                    case 'includeTowerClocksInEKF'
+                        cfg.estimator.estimateTowerClocks = true;
+                        if strcmp(gaugeMode,'free')
+                            error('ConfigFactory:clockGaugeRequired', ...
+                                ['clock.mode=''includeTowerClocksInEKF'' requires a gauge. ' ...
+                                 'One-way pseudorange cannot separate receiver clock from tower ' ...
+                                 'clocks without a datum constraint (rank-deficient clock subspace). ' ...
+                                 'Set cfg.clock.gauge.mode to ''externalTowerCorrections'' or ' ...
+                                 '''fixReferenceTower''.']);
+                        end
+                    otherwise
+                        error('ConfigFactory:invalidClockMode', ...
+                            ['cfg.clock.mode must be ''spacecraftReceiverClockOnly'' or ' ...
+                             '''includeTowerClocksInEKF''; got ''%s''.'], clockMode);
                 end
             end
 

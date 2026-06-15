@@ -250,6 +250,52 @@ classdef Diagnostics < handle
                 entry.dopplerPrefitRMS_mps = entry.prefitDopplerRMS_mps;
             end
 
+            % --- Per-type NIS (normalized by R diagonal, not full S) -------
+            % Diagnostic: sum((z_k - h_k)^2 / R_kk) per measurement type.
+            % MeasurementModel labels: 'code' or 'ifCode' (code pseudorange),
+            %                          'doppler', 'carrier'.
+            % These use prefit innovations and R diagonal — not the full
+            % innovation covariance S = H*P*H'+R.  Useful for per-type
+            % chi-squared sanity checks.  E[NIS_k / dof_k] = 1 only
+            % approximately (missing H*P*H' contribution).
+            entry.NIS_code    = 0;
+            entry.NIS_doppler = 0;
+            entry.NIS_carrier = 0;
+            if ~isempty(z) && ~isempty(h) && ~isempty(R) && numel(z) == numel(h)
+                inn_all = z - h;
+                Rdiag   = max(diag(R), 1e-20);
+                if ~isempty(errStruct) && isfield(errStruct,'measType_perRow') && ...
+                        numel(errStruct.measType_perRow) == numel(z)
+                    mtype_r = errStruct.measType_perRow;
+                    % 'code' and 'ifCode' are both code pseudorange rows
+                    prMask  = strcmp(mtype_r,'code') | strcmp(mtype_r,'ifCode');
+                    dopMask = strcmp(mtype_r, 'doppler');
+                    carMask = strcmp(mtype_r, 'carrier');
+                    if any(prMask)
+                        entry.NIS_code    = sum(inn_all(prMask).^2  ./ Rdiag(prMask));
+                    end
+                    if any(dopMask)
+                        entry.NIS_doppler = sum(inn_all(dopMask).^2 ./ Rdiag(dopMask));
+                    end
+                    if any(carMask)
+                        entry.NIS_carrier = sum(inn_all(carMask).^2 ./ Rdiag(carMask));
+                    end
+                elseif M_pr > 0 && numel(z) >= M_pr
+                    entry.NIS_code = sum(inn_all(1:M_pr).^2 ./ Rdiag(1:M_pr));
+                end
+            end
+
+            % --- NEES: position error normalized by EKF covariance ----------
+            % NEES_pos = r_err' * P_pos^{-1} * r_err / 3.
+            % Under a consistent filter, E[NEES_pos] = 1.
+            entry.NEES_pos = NaN;
+            try
+                P_pos = ekf.P(sm.r_idx, sm.r_idx);
+                if rcond(P_pos) > 1e-15
+                    entry.NEES_pos = (r_err' * (P_pos \ r_err)) / 3;
+                end
+            catch; end
+
             % --- Jacobian diagnostics ----------------------------------
             if ~isempty(H) && size(H,2) >= 9
                 H_att = H(:, sm.euler_idx);
@@ -770,6 +816,28 @@ classdef Diagnostics < handle
         function v = getAttitudeStatus(obj)
             % CHANGED: v3→v4 — Issue 8
             v = {obj.log.attitudeStatus}';
+        end
+
+        function C = getNISByType(obj)
+            % getNISByType  Per-type normalized innovation series [nEpochs x 1].
+            %
+            % Returns struct with fields: code, doppler, carrier.
+            % Each is sum((inn_k)^2 / R_kk) for the relevant measurement type.
+            % These are prefit chi-squared diagnostics, NOT the full EKF NIS
+            % (which uses S = H*P*H'+R).  E[NIS_k/dof_k] approx 1 in steady state.
+            C.code    = [obj.log.NIS_code]';
+            C.doppler = [obj.log.NIS_doppler]';
+            C.carrier = [obj.log.NIS_carrier]';
+        end
+
+        function v = getNEES(obj)
+            % getNEES  Position NEES (Normalized Estimation Error Squared) [nEpochs x 1].
+            %
+            % NEES_pos = r_err' * P_pos^{-1} * r_err / 3.
+            % Under a consistent filter, E[NEES_pos] = 1.
+            % Values >> 1: filter is too optimistic (P too small).
+            % Values << 1: filter is too pessimistic (P too large).
+            v = [obj.log.NEES_pos]';
         end
 
     end
