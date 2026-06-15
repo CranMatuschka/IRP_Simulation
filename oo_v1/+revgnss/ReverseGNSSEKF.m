@@ -543,6 +543,164 @@ classdef ReverseGNSSEKF < handle
         end
 
         % ----------------------------------------------------------------
+        % ----------------------------------------------------------------
+        function [z_out, h_out, H_out, R_out, gaugeInfo] = appendClockGaugeRows(obj, z, h, H, R)
+            % appendClockGaugeRows  Augment measurement stack with clock-gauge pseudo-rows.
+            %
+            % Clock-gauge pseudo-measurements constrain the datum ambiguity in the
+            % joint spacecraft-receiver / tower-transmitter clock subspace.  One-way
+            % pseudorange observes only clock differences; without a gauge, the common
+            % clock offset is unobservable (rank-deficient clock subspace).
+            %
+            % Gauge modes (cfg.clock.gauge.mode):
+            %   'fixReferenceTower'    — pin reference tower bias+drift to zero.
+            %       H_gauge(b_twr_ref) = 1, R_gauge = sigmaBias^2.
+            %   'meanGroundClockGauge' — pin mean tower bias+drift to zero.
+            %       H_gauge(b_twr_i)   = 1/N for all i.
+            %   others                 — no gauge rows (external correction assumed).
+            %
+            % The gauge rows enter the same EKF update as physical measurements so
+            % that both state AND covariance are constrained through K and P update.
+            %
+            % Outputs:
+            %   z_out, h_out, H_out, R_out  augmented stack (physical + gauge)
+            %   gaugeInfo  struct: rowsAdded, types, biasResidual_m,
+            %              driftResidual_mps, biasSigma_m, driftSigma_mps,
+            %              clockSubspaceRank, clockSubspaceCondNum
+
+            z_out = z; h_out = h; H_out = H; R_out = R;
+            gaugeInfo.rowsAdded            = 0;
+            gaugeInfo.types                = {};
+            gaugeInfo.biasResidual_m       = NaN;
+            gaugeInfo.driftResidual_mps    = NaN;
+            gaugeInfo.biasSigma_m          = NaN;
+            gaugeInfo.driftSigma_mps       = NaN;
+            gaugeInfo.clockSubspaceRank    = NaN;
+            gaugeInfo.clockSubspaceCondNum = NaN;
+
+            if ~obj.estimateTowerClocks || obj.nTowers < 1
+                return;
+            end
+
+            sm = obj.stateMap;
+            nx = obj.nx;
+
+            % Read gauge parameters
+            gaugeMode   = 'externalTowerCorrections';
+            sigmaBias   = 1e-6;
+            sigmaDrift  = 1e-9;
+            refTowerIdx = 1;
+            if isfield(obj.cfg,'clock') && isfield(obj.cfg.clock,'gauge')
+                g = obj.cfg.clock.gauge;
+                if isfield(g,'mode');               gaugeMode   = g.mode;               end
+                if isfield(g,'sigmaBias_m');         sigmaBias   = g.sigmaBias_m;        end
+                if isfield(g,'sigmaDrift_mps');      sigmaDrift  = g.sigmaDrift_mps;     end
+                if isfield(g,'referenceTowerIndex'); refTowerIdx = g.referenceTowerIndex; end
+            end
+            gaugeInfo.biasSigma_m    = sigmaBias;
+            gaugeInfo.driftSigma_mps = sigmaDrift;
+
+            % Tower drift states are allocated when estimateTowerClocks=true
+            hasDrift = (sm.towerClockIdx(1,2) > 0);
+
+            switch gaugeMode
+                case 'fixReferenceTower'
+                    kref    = max(1, min(refTowerIdx, obj.nTowers));
+                    idxBias = sm.towerClockIdx(kref, 1);
+                    idxDrft = sm.towerClockIdx(kref, 2);
+
+                    % Bias pseudo-measurement: z=0, h=x(b_twr_ref), H_row selects that state
+                    Hb = zeros(1, nx); Hb(idxBias) = 1;
+                    z_out = [z_out; 0];
+                    h_out = [h_out; obj.x(idxBias)];
+                    H_out = [H_out; Hb];
+                    R_out = blkdiag(R_out, sigmaBias^2);
+                    gaugeInfo.types{end+1}   = 'clockGaugeBias';
+                    gaugeInfo.biasResidual_m = obj.x(idxBias);
+                    gaugeInfo.rowsAdded      = gaugeInfo.rowsAdded + 1;
+
+                    if hasDrift && idxDrft > 0
+                        Hd = zeros(1, nx); Hd(idxDrft) = 1;
+                        z_out = [z_out; 0];
+                        h_out = [h_out; obj.x(idxDrft)];
+                        H_out = [H_out; Hd];
+                        R_out = blkdiag(R_out, sigmaDrift^2);
+                        gaugeInfo.types{end+1}        = 'clockGaugeDrift';
+                        gaugeInfo.driftResidual_mps   = obj.x(idxDrft);
+                        gaugeInfo.rowsAdded           = gaugeInfo.rowsAdded + 1;
+                    end
+
+                case 'meanGroundClockGauge'
+                    N = obj.nTowers;
+                    biasIdx  = sm.towerClockIdx(:, 1);
+                    driftIdx = sm.towerClockIdx(:, 2);
+
+                    % Mean bias pseudo-measurement: H(b_twr_i) = 1/N for all i
+                    Hb = zeros(1, nx); Hb(biasIdx) = 1/N;
+                    meanBias = mean(obj.x(biasIdx));
+                    z_out = [z_out; 0];
+                    h_out = [h_out; meanBias];
+                    H_out = [H_out; Hb];
+                    R_out = blkdiag(R_out, sigmaBias^2);
+                    gaugeInfo.types{end+1}   = 'clockGaugeBias';
+                    gaugeInfo.biasResidual_m = meanBias;
+                    gaugeInfo.rowsAdded      = gaugeInfo.rowsAdded + 1;
+
+                    if hasDrift && all(driftIdx > 0)
+                        Hd = zeros(1, nx); Hd(driftIdx) = 1/N;
+                        meanDrift = mean(obj.x(driftIdx));
+                        z_out = [z_out; 0];
+                        h_out = [h_out; meanDrift];
+                        H_out = [H_out; Hd];
+                        R_out = blkdiag(R_out, sigmaDrift^2);
+                        gaugeInfo.types{end+1}        = 'clockGaugeDrift';
+                        gaugeInfo.driftResidual_mps   = meanDrift;
+                        gaugeInfo.rowsAdded           = gaugeInfo.rowsAdded + 1;
+                    end
+
+                otherwise
+                    % 'externalTowerCorrections' or unknown: no gauge rows
+                    return;
+            end
+
+            % Clock-subspace rank diagnostic (uses augmented H)
+            gaugeInfo = obj.computeClockSubspaceStats_(H_out, gaugeInfo);
+        end
+
+        % ----------------------------------------------------------------
+        function gaugeInfo = computeClockSubspaceStats_(obj, H_full, gaugeInfo)
+            % computeClockSubspaceStats_  SVD rank/condition of H restricted to clock columns.
+            %
+            % Extracts columns of H corresponding to:
+            %   receiver clock bias, receiver clock drift,
+            %   tower clock biases, tower clock drifts (if estimated).
+            % Reports numerical rank and condition number of H_clock.
+            % rank(H_clock) = nClockStates means the gauge removes the nullspace.
+            sm     = obj.stateMap;
+            clkIdx = [sm.b_rx_idx; sm.bdot_rx_idx];
+            if obj.estimateTowerClocks
+                clkIdx = [clkIdx; sm.towerClockIdx(:,1); sm.towerClockIdx(:,2)];
+            end
+            clkIdx = clkIdx(clkIdx > 0);
+
+            if isempty(H_full) || size(H_full,2) < max(clkIdx)
+                return;
+            end
+
+            H_clk = H_full(:, clkIdx);
+            sv    = svd(H_clk, 'econ');
+            sv    = sv(sv > 0);
+            if isempty(sv)
+                gaugeInfo.clockSubspaceRank   = 0;
+                gaugeInfo.clockSubspaceCondNum = Inf;
+            else
+                tol = sv(1) * max(size(H_clk)) * eps;
+                gaugeInfo.clockSubspaceRank   = sum(sv > tol);
+                gaugeInfo.clockSubspaceCondNum = sv(1) / max(sv(end), eps);
+            end
+        end
+
+        % ----------------------------------------------------------------
         function initHistory_(obj)
             obj.history.time_s      = [];
             obj.history.x           = [];

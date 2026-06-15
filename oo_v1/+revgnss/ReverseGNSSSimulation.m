@@ -120,23 +120,30 @@ classdef ReverseGNSSSimulation < handle
             [z, h, H, R, errStruct] = obj.measModel.computeMeasurements( ...
                 obj.asset, obj.towers, obj.ekf.x, t_s, obj.ekf.stateMap);
 
+            % Append clock-gauge pseudo-measurements for EKF update only.
+            % z_ekf/h_ekf/H_ekf/R_ekf include gauge rows.
+            % z/h/H/R stay physical-only for diagnostics (no count inflation).
+            [z_ekf, h_ekf, H_ekf, R_ekf, gaugeInfo] = obj.ekf.appendClockGaugeRows(z, h, H, R);
+            errStruct.gaugeInfo = gaugeInfo;
+
             % Visibility for diagnostics
             [visible, elev_rad] = obj.measModel.computeVisibility( ...
                 obj.towers, obj.asset.getAntennaPositionECEF());
             visIds   = find(visible);
             visElevs = elev_rad(visible);
 
-            % Minimum measurement guard
+            % Minimum measurement guard (physical rows only, not gauge rows)
             minMeas = obj.cfg.estimator.minMeasurementsForUpdate;
 
             NIS             = NaN;
             postfitResidual = [];
 
             if ~isempty(z) && numel(z) >= minMeas
-                [~, ~, ~, NIS] = obj.ekf.update(z, h, H, R);
+                [~, ~, ~, NIS] = obj.ekf.update(z_ekf, h_ekf, H_ekf, R_ekf);
 
-                % Postfit residuals: recompute h with updated EKF state,
-                % reusing the SAME tower clock corrections from errStruct.
+                % Postfit residuals: recompute h with updated EKF state.
+                % Use physical z/errStruct (not augmented) so gauge rows
+                % are not included in postfit RMS statistics.
                 postfitResidual = obj.computePostfitResiduals_(z, visIds, errStruct, t_s);
 
             elseif ~isempty(z) && numel(z) < minMeas && mod(k, 100) == 1

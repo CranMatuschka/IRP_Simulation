@@ -296,6 +296,33 @@ classdef Diagnostics < handle
                 end
             catch; end
 
+            % --- Clock gauge diagnostics ------------------------------------
+            % gaugeInfo is populated by ReverseGNSSEKF.appendClockGaugeRows
+            % and attached to errStruct.gaugeInfo by ReverseGNSSSimulation.
+            entry.clockGaugeRowsAdded        = 0;
+            entry.clockGaugeBiasResidual_m   = NaN;
+            entry.clockGaugeDriftResidual_mps = NaN;
+            entry.clockSubspaceRank          = NaN;
+            entry.clockSubspaceCondNum       = NaN;
+            if ~isempty(errStruct) && isfield(errStruct,'gaugeInfo')
+                gi = errStruct.gaugeInfo;
+                if isfield(gi,'rowsAdded')
+                    entry.clockGaugeRowsAdded = gi.rowsAdded;
+                end
+                if isfield(gi,'biasResidual_m')
+                    entry.clockGaugeBiasResidual_m = gi.biasResidual_m;
+                end
+                if isfield(gi,'driftResidual_mps')
+                    entry.clockGaugeDriftResidual_mps = gi.driftResidual_mps;
+                end
+                if isfield(gi,'clockSubspaceRank')
+                    entry.clockSubspaceRank = gi.clockSubspaceRank;
+                end
+                if isfield(gi,'clockSubspaceCondNum')
+                    entry.clockSubspaceCondNum = gi.clockSubspaceCondNum;
+                end
+            end
+
             % --- Jacobian diagnostics ----------------------------------
             if ~isempty(H) && size(H,2) >= 9
                 H_att = H(:, sm.euler_idx);
@@ -838,6 +865,35 @@ classdef Diagnostics < handle
             % Values >> 1: filter is too optimistic (P too small).
             % Values << 1: filter is too pessimistic (P too large).
             v = [obj.log.NEES_pos]';
+        end
+
+        function v = getClockGaugeRowsAdded(obj)
+            % getClockGaugeRowsAdded  Number of gauge pseudo-rows inserted per epoch.
+            % Zero when tower clocks are not in EKF or gauge is 'externalTowerCorrections'.
+            v = [obj.log.clockGaugeRowsAdded]';
+        end
+
+        function v = getClockSubspaceRank(obj)
+            % getClockSubspaceRank  Numerical rank of H restricted to clock columns.
+            % Should equal nClockStates when gauge removes the nullspace.
+            v = [obj.log.clockSubspaceRank]';
+        end
+
+        function v = getClockSubspaceCondNum(obj)
+            % getClockSubspaceCondNum  Condition number of H_clock (sv_max / sv_min).
+            v = [obj.log.clockSubspaceCondNum]';
+        end
+
+        function v = getClockGaugeBiasResiduals(obj)
+            % getClockGaugeBiasResiduals  Tower clock bias gauge residual per epoch [m].
+            % fixReferenceTower: reference tower bias state value.
+            % meanGroundClockGauge: mean of all tower bias states.
+            v = [obj.log.clockGaugeBiasResidual_m]';
+        end
+
+        function v = getClockGaugeDriftResiduals(obj)
+            % getClockGaugeDriftResiduals  Tower clock drift gauge residual per epoch [m/s].
+            v = [obj.log.clockGaugeDriftResidual_mps]';
         end
 
     end
