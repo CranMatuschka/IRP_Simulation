@@ -46,13 +46,14 @@ end
 
 % -----------------------------------------------------------------------
 % T01: testRunOoReverseGnssReportStillWorks
-%      Config interface works and LatexReportBuilder.build returns 10 figs.
+%      Config interface works and LatexReportBuilder.build returns >= 12 figs
+%      (10 original + P10 Observable Diagnostics + P11 Clock Validation).
 % -----------------------------------------------------------------------
 try
     [figs01, ~, ~] = buildMinimalReport_(parentDir);
     n01 = numel(figs01);
     close(figs01);
-    assert(n01 == 10, 'Expected 10 report figures, got %d', n01);
+    assert(n01 >= 12, 'Expected >= 12 report figures, got %d', n01);
     fprintf('T01 testRunOoReverseGnssReportStillWorks : PASS (%d figs)\n', n01);
     nPass = nPass + 1;
 catch ex

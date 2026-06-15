@@ -37,6 +37,8 @@ classdef LatexReportBuilder
             figs{end+1} = revgnss.LatexReportBuilder.makeMeasurementSummaryPage_(diag, cfg, summary);
             figs{end+1} = revgnss.LatexReportBuilder.makeErrorBudgetPage_(diag, cfg);
             figs{end+1} = revgnss.LatexReportBuilder.makeObservabilityPage_(diag, cfg);
+            figs{end+1} = revgnss.LatexReportBuilder.makeObservableDiagPage_(diag, cfg);
+            figs{end+1} = revgnss.LatexReportBuilder.makeClockValidationPage_(diag, cfg, summary);
             figs{end+1} = revgnss.LatexReportBuilder.makeVerdictPage_(cfg, summary);
             figs{end+1} = revgnss.LatexReportBuilder.makeAppendixPage_(cfg, summary);
 
@@ -798,10 +800,17 @@ classdef LatexReportBuilder
             metricHdr  = sprintf('  %-44s  %s', 'Quantity', 'Value');
             metricRule = ['  ' repmat('-', 1, 65)];
             metricLines = {metricHdr, metricRule};
-            metricLines{end+1} = sprintf('  %-44s  %.6f m', 'Final 3D position estimation error', pos3D);
-            metricLines{end+1} = sprintf('  %-44s  %.6f m (%.0f ps)', 'Final clock estimation error', clkM, clkPs);
-            metricLines{end+1} = sprintf('  %-44s  %.6f m', 'Final pre-fit pseudorange innovation RMS', pfRMS);
-            metricLines{end+1} = sprintf('  %-44s  %.6f m', 'Final post-fit pseudorange residual RMS', poRMS);
+            metricLines{end+1} = sprintf('  %-44s  %s', 'Final 3D position estimation error', ...
+                revgnss.LatexReportBuilder.fmtV_(pos3D, 'm'));
+            if ~(isnan(clkM) || isinf(clkM))
+                metricLines{end+1} = sprintf('  %-44s  %.6f m  (%.0f ps)', 'Final clock estimation error', clkM, clkPs);
+            else
+                metricLines{end+1} = sprintf('  %-44s  not available', 'Final clock estimation error');
+            end
+            metricLines{end+1} = sprintf('  %-44s  %s', 'Final pre-fit pseudorange innovation RMS', ...
+                revgnss.LatexReportBuilder.fmtV_(pfRMS, 'm'));
+            metricLines{end+1} = sprintf('  %-44s  %s', 'Final post-fit pseudorange residual RMS', ...
+                revgnss.LatexReportBuilder.fmtV_(poRMS, 'm'));
             metricLines{end+1} = sprintf('  %-44s  %g', 'Max EKF measurement rows / epoch', mxEKF);
             metricLines{end+1} = sprintf('  %-44s  code=%g  doppler=%g  carrier=%g', ...
                 'Total measurement rows (full run)', nCd, nDp, nCr);
@@ -943,6 +952,235 @@ classdef LatexReportBuilder
                     RL.addHRule(fig, yB);
                 end
             end
+        end
+
+        % ================================================================
+        % fmtV_  Format a scalar metric; returns 'not available' for NaN/Inf.
+        % ================================================================
+        function s = fmtV_(val, unit)
+            if ~isnumeric(val) || ~isscalar(val) || isnan(val) || isinf(val)
+                s = 'not available';
+            else
+                s = sprintf('%.6f %s', val, unit);
+            end
+        end
+
+        % ================================================================
+        % P10 — Per-Observable and Geometry Diagnostics
+        % ================================================================
+        function fig = makeObservableDiagPage_(diag, cfg)
+            RL  = revgnss.ReportLayout;
+            fig = RL.createPage('P10 — Observable Diagnostics');
+
+            RL.addSectionHeader(fig, '4. Per-Observable and Geometry Diagnostics', 0.97);
+
+            desc1 = ['Doppler innovation and post-fit RMS track the frequency-difference observable ' ...
+                     'quality. DOP metrics assess the geometric diversity of the tower network ' ...
+                     'as seen from the GEO spacecraft.'];
+            RL.addBodyText(fig, {desc1}, 0.91, 0.86);
+            RL.addHRule(fig, 0.85);
+
+            % Row 1: Doppler pre/post-fit RMS
+            [axL1, axR1] = RL.addTwoColRow(fig, 0.62, 0.84);
+            doppOk = false;
+            try
+                t   = diag.getTimeVector();
+                dpf = diag.getPrefitDopplerRMS();
+                dpo = diag.getPostfitDopplerRMS();
+                if ~isempty(t) && ~isempty(dpf)
+                    plot(axL1, t, dpf, 'b-', 'LineWidth', 1, 'DisplayName', 'Pre-fit');
+                    if ~isempty(dpo)
+                        hold(axL1,'on');
+                        plot(axL1, t, dpo, 'r--', 'LineWidth', 1, 'DisplayName', 'Post-fit');
+                        legend(axL1, 'show', 'Location','northeast', 'FontSize', 7);
+                    end
+                    xlabel(axL1, 'Time [s]', 'FontSize', 8);
+                    ylabel(axL1, 'RMS [m/s]', 'FontSize', 8);
+                    title(axL1, 'Doppler Residual RMS', 'FontSize', 8, 'FontWeight','normal');
+                    grid(axL1, 'on'); set(axL1, 'Box','off');
+                    doppOk = true;
+                end
+            catch; end
+            if ~doppOk; RL.addNoPlot(axL1); end
+            RL.addDescText(axR1, 'Doppler Pre-Fit and Post-Fit Residual RMS', ...
+                {'Pre-fit Doppler innovation (before EKF correction) and', ...
+                 'post-fit residual for the velocity/Doppler channel.', ...
+                 'Not available if Doppler is not enabled in this run.'});
+
+            RL.addHRule(fig, 0.61);
+
+            % Row 2: Per-source error breakdown
+            [axL2, axR2] = RL.addTwoColRow(fig, 0.38, 0.60);
+            srcOk = false;
+            try
+                t2  = diag.getTimeVector();
+                psr = diag.getPerSourceErrorRMS();
+                if ~isempty(t2) && isstruct(psr)
+                    flds = fieldnames(psr);
+                    hold(axL2,'on');
+                    cmap = lines(min(numel(flds),5));
+                    for ki = 1:min(numel(flds),4)
+                        fld = flds{ki};
+                        v = psr.(fld);
+                        if isnumeric(v) && ~isempty(v)
+                            plot(axL2, t2(1:numel(v)), v, '-', ...
+                                'Color', cmap(ki,:), 'LineWidth', 1, ...
+                                'DisplayName', fld);
+                            srcOk = true;
+                        end
+                    end
+                    if srcOk
+                        legend(axL2,'show','Location','northeast','FontSize',6);
+                        xlabel(axL2, 'Time [s]', 'FontSize', 8);
+                        ylabel(axL2, 'RMS [m]', 'FontSize', 8);
+                        title(axL2, 'Per-Source Error RMS', 'FontSize', 8, 'FontWeight','normal');
+                        grid(axL2, 'on'); set(axL2, 'Box','off');
+                    end
+                end
+            catch; end
+            if ~srcOk; RL.addNoPlot(axL2); end
+            RL.addDescText(axR2, 'Per-Source Code Pseudorange Error RMS', ...
+                {'Breakdown of the raw code error into contributions:', ...
+                 '  code  — geometric range and clock residual', ...
+                 '  trop  — troposphere truth-model mismatch', ...
+                 '  iono  — ionosphere truth-model mismatch'});
+
+            RL.addHRule(fig, 0.37);
+
+            % Row 3: DOP metrics
+            [axL3, axR3] = RL.addTwoColRow(fig, 0.08, 0.36);
+            dopOk2 = false;
+            try
+                t3   = diag.getTimeVector();
+                gdop = diag.getGDOPLike();
+                pdop = diag.getPDOPLike();
+                tdop = diag.getTDOPLike();
+                if ~isempty(t3) && ~isempty(gdop)
+                    hold(axL3,'on');
+                    plot(axL3, t3, gdop, 'b-',  'LineWidth', 1, 'DisplayName', 'GDOP');
+                    if ~isempty(pdop)
+                        plot(axL3, t3, pdop, 'r--', 'LineWidth', 1, 'DisplayName', 'PDOP');
+                    end
+                    if ~isempty(tdop)
+                        plot(axL3, t3, tdop, 'g:', 'LineWidth', 1, 'DisplayName', 'TDOP');
+                    end
+                    legend(axL3,'show','Location','northeast','FontSize',7);
+                    xlabel(axL3, 'Time [s]', 'FontSize', 8);
+                    ylabel(axL3, 'DOP', 'FontSize', 8);
+                    title(axL3, 'Dilution of Precision', 'FontSize', 8, 'FontWeight','normal');
+                    grid(axL3, 'on'); set(axL3, 'Box','off');
+                    dopOk2 = true;
+                end
+            catch; end
+            if ~dopOk2; RL.addNoPlot(axL3); end
+            RL.addDescText(axR3, 'Dilution of Precision (Geometry-Like)', ...
+                {'GDOP, PDOP, TDOP are geometry-derived scaling factors', ...
+                 'computed from the pseudorange observation matrix.', ...
+                 'Lower DOP values indicate better geometric diversity.', ...
+                 'Tower network DOP near 1-2 is typical for GEO coverage.'});
+        end
+
+        % ================================================================
+        % P11 — Clock, Oscillator, and Product Validation
+        % ================================================================
+        function fig = makeClockValidationPage_(diag, cfg, summary)
+            RL  = revgnss.ReportLayout;
+            fig = RL.createPage('P11 — Clock Validation');
+
+            RL.addSectionHeader(fig, '5. Clock, Oscillator, and Product Validation', 0.97);
+
+            desc1 = ['Clock estimation diagnostics compare the EKF receiver clock bias and drift ' ...
+                     'estimates with the true simulation clock values. Tower clock product ' ...
+                     'corrections are validated against the truth model.'];
+            RL.addBodyText(fig, {desc1}, 0.91, 0.86);
+            RL.addHRule(fig, 0.85);
+
+            % Row 1: Receiver clock bias error
+            [axL1, axR1] = RL.addTwoColRow(fig, 0.62, 0.84);
+            clkOk = false;
+            try
+                t  = diag.getTimeVector();
+                cb = diag.getClockBiasErrors();
+                if ~isempty(t) && ~isempty(cb)
+                    plot(axL1, t, cb*1e3, 'r-', 'LineWidth', 1);
+                    xlabel(axL1, 'Time [s]', 'FontSize', 8);
+                    ylabel(axL1, 'Error [mm]', 'FontSize', 8);
+                    title(axL1, 'Receiver Clock Bias Error', 'FontSize', 8, 'FontWeight','normal');
+                    grid(axL1, 'on'); set(axL1, 'Box','off');
+                    clkOk = true;
+                end
+            catch; end
+            if ~clkOk; RL.addNoPlot(axL1); end
+            finalClkM  = NaN; if isfield(summary,'finalClockErr_m');  finalClkM  = summary.finalClockErr_m;  end
+            finalClkPs = NaN; if isfield(summary,'finalClockErr_ps'); finalClkPs = summary.finalClockErr_ps; end
+            RL.addDescText(axR1, 'Receiver Clock Bias Estimation Error', ...
+                {sprintf('Final value: %s', revgnss.LatexReportBuilder.fmtV_(finalClkM,'m')), ...
+                 sprintf('In picoseconds: %s', revgnss.LatexReportBuilder.fmtV_(finalClkPs,'ps')), ...
+                 'Clock bias sign: POSITIVE (adds to pseudorange).', ...
+                 'Tower clock sign: NEGATIVE (subtracts from pseudorange).'});
+
+            RL.addHRule(fig, 0.61);
+
+            % Row 2: Clock drift error
+            [axL2, axR2] = RL.addTwoColRow(fig, 0.38, 0.60);
+            driftOk = false;
+            try
+                t2 = diag.getTimeVector();
+                cd = diag.getClockDriftErrors();
+                if ~isempty(t2) && ~isempty(cd)
+                    plot(axL2, t2, cd, 'b-', 'LineWidth', 1);
+                    xlabel(axL2, 'Time [s]', 'FontSize', 8);
+                    ylabel(axL2, 'Drift error [m/s]', 'FontSize', 8);
+                    title(axL2, 'Clock Drift Error', 'FontSize', 8, 'FontWeight','normal');
+                    grid(axL2, 'on'); set(axL2, 'Box','off');
+                    driftOk = true;
+                end
+            catch; end
+            if ~driftOk
+                try
+                    t2 = diag.getTimeVector();
+                    ff = diag.getFractionalFrequencyErrors();
+                    if ~isempty(t2) && ~isempty(ff)
+                        plot(axL2, t2, ff, 'b-', 'LineWidth', 1);
+                        xlabel(axL2, 'Time [s]', 'FontSize', 8);
+                        ylabel(axL2, 'FFDE', 'FontSize', 8);
+                        title(axL2, 'Fractional Frequency Error', 'FontSize', 8, 'FontWeight','normal');
+                        grid(axL2, 'on'); set(axL2, 'Box','off');
+                        driftOk = true;
+                    end
+                catch; end
+            end
+            if ~driftOk; RL.addNoPlot(axL2); end
+            RL.addDescText(axR2, 'Clock Drift and Fractional Frequency', ...
+                {'The clock drift state tracks the rate at which the receiver', ...
+                 'clock phase accumulates (units: m/s equivalent).', ...
+                 'The Brown-Hwang two-state model drives process noise.', ...
+                 'Fractional frequency deviation = drift / c.'});
+
+            RL.addHRule(fig, 0.37);
+
+            % Row 3: Tower clock bias (final epoch)
+            [axL3, axR3] = RL.addTwoColRow(fig, 0.08, 0.36);
+            twrClkOk = false;
+            try
+                M = diag.getTowerClockBiasMatrix();
+                if iscell(M) && ~isempty(M) && ~isempty(M{end})
+                    finalVec = M{end};
+                    if isnumeric(finalVec) && ~isempty(finalVec)
+                        bar(axL3, 1:numel(finalVec), finalVec*1e3);
+                        xlabel(axL3, 'Tower index', 'FontSize', 8);
+                        ylabel(axL3, 'Bias [mm]', 'FontSize', 8);
+                        title(axL3, 'Tower Clock Bias (final epoch)', 'FontSize', 8, 'FontWeight','normal');
+                        grid(axL3, 'on'); set(axL3, 'Box','off');
+                        twrClkOk = true;
+                    end
+                end
+            catch; end
+            if ~twrClkOk; RL.addNoPlot(axL3); end
+            RL.addDescText(axR3, 'Tower Clock Product Validation', ...
+                {'Bar chart shows per-tower clock truth bias at the final', ...
+                 'simulation epoch. Tower clock sign is NEGATIVE in the', ...
+                 'pseudorange model. Zero means truth and model clock agree.'});
         end
 
         % ================================================================

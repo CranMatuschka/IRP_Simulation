@@ -524,6 +524,7 @@ classdef ConfigFactory
             cfg.report.overwrite           = true;
             cfg.report.writePdf            = true;
             cfg.report.writeMat            = true;
+            cfg.report.appendRawPlots      = false;
 
             % --- Validation policy ----------------------------------------
             % 'error'             — unsupported features throw (default; safe)

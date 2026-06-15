@@ -113,22 +113,40 @@ classdef ReportRunner
                     figHandles = revgnss.ReportRunner.replaceAttitudeFigs_(figHandles);
                 end
                 contribFigs = revgnss.ContributionPlotter.plotSingleCaseContributionPages(diag, cfg);
-                summaryFig  = revgnss.ReportRunner.makeSummaryPage_(summary, cfg);
 
-                % Phase 9: latex-style scientific section pages
-                texFigs  = gobjects(0);
-                texPath2 = '';
+                % Determine report style and appendRawPlots (default false for latex)
                 reportStyle = 'default';
                 if isfield(cfg,'report') && isfield(cfg.report,'style')
                     reportStyle = cfg.report.style;
                 end
+                appendRawPlots = false;
+                if isfield(cfg,'report') && isfield(cfg.report,'appendRawPlots')
+                    appendRawPlots = cfg.report.appendRawPlots;
+                end
+
+                % Phase 9: latex-style scientific section pages
+                texFigs  = gobjects(0);
+                texPath2 = '';
                 if strcmp(reportStyle,'latex')
                     [texFigs, texPath2] = revgnss.LatexReportBuilder.build( ...
                         diag, sim.asset, sim.towers, cfg, summary);
                 end
                 texFigs = texFigs(isgraphics(texFigs));
 
-                allFigs = [summaryFig, texFigs(:)', figHandles(:)', contribFigs(:)'];
+                if strcmp(reportStyle,'latex')
+                    % Original Clock-style: section pages only; raw text dump excluded
+                    if appendRawPlots
+                        allFigs = [texFigs(:)', figHandles(:)', contribFigs(:)'];
+                    else
+                        allFigs = texFigs;
+                        try; close(figHandles(isgraphics(figHandles))); catch; end
+                        try; close(contribFigs(isgraphics(contribFigs))); catch; end
+                    end
+                else
+                    % Simple/default style: raw text dump + diagnostic plots
+                    summaryFig = revgnss.ReportRunner.makeSummaryPage_(summary, cfg);
+                    allFigs = [summaryFig, figHandles(:)', contribFigs(:)'];
+                end
                 allFigs = allFigs(isgraphics(allFigs));
                 fprintf('  Writing PDF (%d pages)...\n', numel(allFigs));
                 cfgWrite = cfg;
@@ -358,6 +376,44 @@ classdef ReportRunner
                 summary.disabledFeatures    = {};
                 summary.mappedFeatures      = {};
             end
+
+            % Aliases and derived fields for LatexReportBuilder compatibility
+            summary.finalPos3D_m     = summary.finalPositionError_m;
+
+            summary.finalClockErr_m  = NaN;
+            summary.finalClockErr_ps = NaN;
+            try
+                cbErr = diag.getClockBiasErrors();
+                if ~isempty(cbErr)
+                    summary.finalClockErr_m  = cbErr(end);
+                    c_mps = revgnss.Constants.SPEED_OF_LIGHT_MPS;
+                    summary.finalClockErr_ps = cbErr(end) / c_mps * 1e12;
+                end
+            catch; end
+
+            summary.finalPrefitRMS_m  = NaN;
+            summary.finalPostfitRMS_m = NaN;
+            try
+                pf = diag.getPrefitInnovationRMS();
+                if ~isempty(pf); summary.finalPrefitRMS_m  = pf(end);  end
+            catch; end
+            try
+                po = diag.getPostfitResidualRMS();
+                if ~isempty(po); summary.finalPostfitRMS_m = po(end); end
+            catch; end
+
+            % Per-observable row counts (maximum per epoch, from config)
+            nTwr  = cfg.scenario.nTowers;
+            nRx   = cfg.scenario.nReceivers;
+            twoF  = isfield(cfg,'signals') && isfield(cfg.signals,'twoFrequency') && ...
+                isfield(cfg.signals.twoFrequency,'enable') && cfg.signals.twoFrequency.enable;
+            summary.totalCodeRows    = nTwr * nRx * (1 + twoF);
+            doppInEKF = isfield(cfg.measurements,'doppler') && ...
+                isfield(cfg.measurements.doppler,'useInEKF') && cfg.measurements.doppler.useInEKF;
+            carrInEKF = isfield(cfg.measurements,'carrierPhase') && ...
+                isfield(cfg.measurements.carrierPhase,'useInEKF') && cfg.measurements.carrierPhase.useInEKF;
+            summary.totalDopplerRows = nTwr * nRx * doppInEKF;
+            summary.totalCarrierRows = nTwr * nRx * carrInEKF;
         end
 
         % ================================================================
