@@ -4,8 +4,8 @@
 
 | Item | Value |
 |------|-------|
-| Stage | 7A (complete) / 7B (complete) |
-| Test suite | 73 / 73 test files passing (72 Stage-7A + 1 Stage-7B with 18 sub-tests) |
+| Stage | 7A (complete) / 7B (complete) / 7B.1 (complete) |
+| Test suite | 74 / 74 test files passing (72 Stage-7A + 1 Stage-7B + 1 Stage-7B.1 with 18 sub-tests) |
 | MATLAB version | R2025b |
 | Branch | `feature/oo-reverse-gnss-v1` |
 
@@ -68,7 +68,9 @@ cfg.report.compileTex = 'auto';  % 'auto' | 'never' | 'require'
 When `compileTex='auto'` and `pdflatex`/`xelatex` is in PATH, a compiled PDF is produced
 alongside the MATLAB-figure PDF. If LaTeX is not available, the MATLAB PDF is the deliverable.
 
-Implementation: `+revgnss/ReportRunner.m`, `+revgnss/LatexReportBuilder.m`, `+revgnss/ReportWriter.m`.
+Implementation: `+revgnss/ReportRunner.m`, `+revgnss/LatexReportBuilder.m`, `+revgnss/ReportLayout.m`, `+revgnss/ReportWriter.m`.
+
+**Report page layout (Stage 7B.1):** `LatexReportBuilder` produces 10 section pages in the original `generateReport` longtable style — two-column rows (left: plot or italic "No plot generated.", right: bold title + body), compact tables, thin gray rules, Helvetica/Times fonts. `ReportLayout` is the layout helper; each page function in `LatexReportBuilder` calls `ReportLayout.createPage`, `addSectionHeader`, `addTwoColRow`, `addDescText`, `addNoPlot`, and `addHRule`.
 Uses `exportgraphics` with `Append` on MATLAB R2020b+; falls back to `print` on older releases.
 
 ---
@@ -134,7 +136,8 @@ This implementation lives **entirely within** the `oo_v1/` folder and does not m
   ReportTables.m       State-vector and configuration table string blocks
   ReportSummary.m      Performance metrics formatting from summary struct
   ReportText.m         Standard description / limitations / supported-features text blocks
-  ReportStatus.m       Test-suite status metadata (72/72 passing, commit SHA, MATLAB version)
+  ReportStatus.m       Test-suite status metadata (74/74 passing, commit SHA, MATLAB version)
+  ReportLayout.m       Two-column layout helpers for original-style report pages (longtable style)
 ```
 
 ---

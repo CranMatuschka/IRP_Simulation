@@ -1,30 +1,28 @@
 classdef LatexReportBuilder
-    % LatexReportBuilder  Generate LaTeX-style scientific report sections.
+    % LatexReportBuilder  Generate original-style scientific report figures.
     %
-    % Produces numbered section figures (title page, equations, tables, etc.)
-    % that look like a scientific report when assembled into a PDF.
-    % Optionally writes a .tex source file and compiles with pdflatex/xelatex.
+    % Produces 10 numbered section figures (P00–P09) that follow the style
+    % of the original generateReport / Clock_20260602_v001_report layout:
+    %   - Two-column rows: left = plot or "No plot generated.", right = description
+    %   - Section headers in bold Helvetica with horizontal rules
+    %   - Component status table with green / gray colour coding
+    %   - 5-column state-vector table (Index, Symbol, Description, Unit, Note)
+    %   - Numerical summary table at the end
+    %
+    % Optionally writes a .tex source file in the same longtable format.
     %
     % Usage:
     %   [textFigs, texPath] = revgnss.LatexReportBuilder.build(diag, asset, towers, cfg, summary);
     %
-    % cfg.report.style = 'latex'           — enables this builder
-    % cfg.report.writeTex = true/false     — write .tex source file
+    % cfg.report.style      = 'latex'   — enables this builder
+    % cfg.report.writeTex   = true/false
     % cfg.report.compileTex = 'auto'/'never'/'require'
-    %
-    % When compileTex='auto' and pdflatex is available, a compiled PDF is produced
-    % beside the MATLAB PDF.  Otherwise the MATLAB-figure PDF is the deliverable.
 
     methods (Static)
 
         % ================================================================
         function [textFigs, texPath] = build(diag, asset, towers, cfg, summary)
             % build  Assemble all report section figures + optional .tex file.
-            %
-            % Returns:
-            %   textFigs   array of figure handles (text-section pages)
-            %   texPath    path to .tex file, or '' if not written
-
             if nargin < 5; summary = struct(); end
 
             textFigs = gobjects(0);
@@ -42,21 +40,18 @@ classdef LatexReportBuilder
             figs{end+1} = revgnss.LatexReportBuilder.makeVerdictPage_(cfg, summary);
             figs{end+1} = revgnss.LatexReportBuilder.makeAppendixPage_(cfg, summary);
 
-            % Collect valid handles
             for k = 1:numel(figs)
                 if isgraphics(figs{k})
                     textFigs(end+1) = figs{k}; %#ok<AGROW>
                 end
             end
 
-            % Optionally write .tex source
             doTex = false;
             if isfield(cfg,'report') && isfield(cfg.report,'writeTex')
                 doTex = cfg.report.writeTex;
             end
             if doTex
-                texPath = revgnss.LatexReportBuilder.writeTexFile_(cfg, summary);
-                % Optionally compile
+                texPath = revgnss.LatexReportBuilder.writeTexFile_(cfg, summary, diag);
                 compileMode = 'auto';
                 if isfield(cfg,'report') && isfield(cfg.report,'compileTex')
                     compileMode = cfg.report.compileTex;
@@ -78,67 +73,90 @@ classdef LatexReportBuilder
     methods (Static, Access = private)
 
         % ================================================================
+        % P00 — Title Page
+        % ================================================================
         function fig = makeTitlePage_(cfg, summary)
-            fig = figure('Visible','off','Name','P00 — Title Page', ...
-                         'Units','normalized','Position',[0.05 0.05 0.8 0.9]);
-            ax  = axes(fig,'Position',[0 0 1 1],'Visible','off');
+            RL  = revgnss.ReportLayout;
+            fig = RL.createPage('P00 — Title Page');
 
             scenarioName = 'GEO-1 Default';
             if isfield(cfg,'asset') && isfield(cfg.asset,'name')
                 scenarioName = cfg.asset.name;
             end
-            presetName = '';
-            if isfield(summary,'presetName'); presetName = summary.presetName; end
-
-            commitSHA = revgnss.LatexReportBuilder.getGitSHA_();
-
-            L = {};
-            L{end+1} = '';
-            L{end+1} = '';
-            L{end+1} = '================================================================';
-            L{end+1} = '';
-            L{end+1} = '  REVERSE-GNSS SIMULATION REPORT';
-            L{end+1} = '  Scientific Validation Report — Stage 7A';
-            L{end+1} = '';
-            L{end+1} = '================================================================';
-            L{end+1} = '';
-            L{end+1} = sprintf('  Branch     : feature/oo-reverse-gnss-v1');
-            L{end+1} = sprintf('  Folder     : oo_v1');
-            L{end+1} = sprintf('  Commit     : %s', commitSHA);
-            L{end+1} = '';
-            L{end+1} = sprintf('  Scenario   : %s', scenarioName);
-            if ~isempty(presetName)
-                L{end+1} = sprintf('  Preset     : %s', presetName);
-            end
-            v = '1.00'; if isfield(summary,'version'); v = summary.version; end
-            L{end+1} = sprintf('  Version    : %s', v);
+            v  = '1.00';
+            if isfield(summary,'version');   v  = summary.version;   end
             ts = datestr(now,'yyyy-mm-dd HH:MM:SS'); %#ok<TNOW1,DATST>
             if isfield(summary,'timestamp'); ts = summary.timestamp; end
-            L{end+1} = sprintf('  Generated  : %s', ts);
-            L{end+1} = '';
-            L{end+1} = '================================================================';
-            L{end+1} = '';
-            L{end+1} = '  SCIENTIFIC LIMITATIONS (see Section 10)';
-            L{end+1} = '';
-            L{end+1} = '  * No integer ambiguity fixing (float ambiguities only)';
-            L{end+1} = '  * Raw L1 carrier only (no L2 carrier in ekfFloat mode)';
-            L{end+1} = '  * No ANTEX/IONEX/SP3/CLK/RINEX parsers';
-            L{end+1} = '  * No VMF3/GPT3/ERA5 troposphere models';
-            L{end+1} = '  * No PPP-grade claim, no centimeter/millimeter guarantee';
-            L{end+1} = '';
-            L{end+1} = '================================================================';
+            sha = revgnss.LatexReportBuilder.getGitSHA_();
 
-            text(ax, 0.5, 0.5, strjoin(L,'\n'), ...
-                'Units','normalized', 'HorizontalAlignment','center', ...
-                'VerticalAlignment','middle', 'FontName','Courier', ...
-                'FontSize',10, 'Interpreter','none');
+            RL.addPageTitle(fig, ...
+                'Reverse-GNSS Spacecraft Code-Pseudorange EKF Report', ...
+                {sprintf('Scenario: %s', scenarioName), ...
+                 sprintf('Generated by oo_v1  |  Version %s  |  %s', v, ts)});
+
+            RL.addHRule(fig, 0.86);
+
+            % Key settings block
+            nTwr = 5;
+            if isfield(cfg,'scenario') && isfield(cfg.scenario,'nTowers')
+                nTwr = cfg.scenario.nTowers;
+            end
+            nRx = 1;
+            if isfield(cfg,'scenario') && isfield(cfg.scenario,'nReceivers')
+                nRx = cfg.scenario.nReceivers;
+            end
+            dur = 3600;
+            if isfield(cfg,'simulation') && isfield(cfg.simulation,'duration_s')
+                dur = cfg.simulation.duration_s;
+            end
+            codeMode = '—';
+            if isfield(cfg,'measurements') && isfield(cfg.measurements,'codeMode')
+                codeMode = cfg.measurements.codeMode;
+            end
+            twoF = false;
+            if isfield(cfg,'signals') && isfield(cfg.signals,'twoFrequency') && ...
+                    isfield(cfg.signals.twoFrequency,'enable')
+                twoF = cfg.signals.twoFrequency.enable;
+            end
+
+            kvLines = {};
+            kvLines{end+1} = sprintf('  %-24s %s', 'Branch:', 'feature/oo-reverse-gnss-v1');
+            kvLines{end+1} = sprintf('  %-24s %s', 'Commit SHA:', sha);
+            kvLines{end+1} = sprintf('  %-24s %d towers  /  %d receivers  /  %.0f s', ...
+                'Scenario:', nTwr, nRx, dur);
+            kvLines{end+1} = sprintf('  %-24s %s  (two-frequency: %s)', ...
+                'Observable mode:', codeMode, mat2str(twoF));
+            RL.addBodyText(fig, kvLines, 0.86, 0.68);
+
+            RL.addHRule(fig, 0.67);
+
+            % Scientific limitations
+            limLines = {};
+            limLines{end+1} = 'Scientific Limitations (v1):';
+            limLines{end+1} = '  * No integer ambiguity fixing — float ambiguities only';
+            limLines{end+1} = '  * Raw L1 carrier only in ekfFloat mode (no L2 carrier EKF, no carrier IF)';
+            limLines{end+1} = '  * No ANTEX / IONEX / SP3 / CLK / RINEX parsers';
+            limLines{end+1} = '  * No VMF3 / GPT3 / ERA5 troposphere models';
+            limLines{end+1} = '  * No PPP-grade claim — no centimetre or millimetre accuracy guarantee';
+            limLines{end+1} = '  * Receiver clock bias sign is POSITIVE (adds to pseudorange)';
+            limLines{end+1} = '  * Tower clock bias sign is NEGATIVE (subtracts from pseudorange)';
+            RL.addBodyText(fig, limLines, 0.67, 0.42);
+
+            RL.addHRule(fig, 0.41);
+
+            % Test status
+            statusLines = revgnss.ReportStatus.summaryLines();
+            stBlock = ['Test Status:' newline, ...
+                strjoin(cellfun(@(s) ['  ' s], statusLines, 'UniformOutput', false), newline)];
+            RL.addBodyText(fig, {stBlock}, 0.41, 0.18);
         end
 
         % ================================================================
+        % P01 — Abstract (Scenario Summary)
+        % ================================================================
         function fig = makeAbstractPage_(cfg, summary)
-            fig = figure('Visible','off','Name','P01 — Abstract', ...
-                         'Units','normalized','Position',[0.05 0.05 0.8 0.9]);
-            ax  = axes(fig,'Position',[0.05 0.05 0.9 0.9],'Visible','off');
+            RL  = revgnss.ReportLayout;
+            fig = RL.createPage('P01 — Abstract');
 
             carrierMode = 'diagnostic';
             codeMode    = 'singleFrequency';
@@ -150,390 +168,537 @@ classdef LatexReportBuilder
             if isfield(summary,'troposphereMode'); tropoMode   = summary.troposphereMode; end
 
             nTwr = 5; dur = 3600;
-            if isfield(cfg,'scenario') && isfield(cfg.scenario,'nTowers'); nTwr = cfg.scenario.nTowers; end
-            if isfield(cfg,'simulation') && isfield(cfg.simulation,'duration_s'); dur = cfg.simulation.duration_s; end
+            if isfield(cfg,'scenario') && isfield(cfg.scenario,'nTowers')
+                nTwr = cfg.scenario.nTowers;
+            end
+            if isfield(cfg,'simulation') && isfield(cfg.simulation,'duration_s')
+                dur = cfg.simulation.duration_s;
+            end
 
-            L = {};
-            L{end+1} = '1. Abstract / Executive Summary';
-            L{end+1} = '================================';
-            L{end+1} = '';
-            L{end+1} = sprintf('This report documents a reverse-GNSS simulation run using the oo_v1');
-            L{end+1} = sprintf('MATLAB simulator.  A ground-based network of %d towers transmits', nTwr);
-            L{end+1} = sprintf('signals received by a GEO space asset over %.0f seconds.', dur);
-            L{end+1} = '';
-            L{end+1} = 'Active observables:';
-            L{end+1} = sprintf('  Code mode         : %s', codeMode);
-            L{end+1} = sprintf('  Carrier mode      : %s', carrierMode);
-            L{end+1} = sprintf('  Ambiguity mode    : %s', ambMode);
-            L{end+1} = sprintf('  Troposphere mode  : %s', tropoMode);
-            L{end+1} = '';
-            L{end+1} = 'Scientific limitations of this simulation:';
-            L{end+1} = '  * Carrier phase (if ekfFloat): float ambiguities, L1 only.';
-            L{end+1} = '    Absolute phase alignment is not claimed.';
-            L{end+1} = '  * Ionosphere-free code removes first-order iono algebraically;';
-            L{end+1} = '    higher-order terms and DCBs are not modelled.';
-            L{end+1} = '  * ZWD estimation (if perTowerZwd) converges under nominal noise;';
-            L{end+1} = '    no external VMF3/GPT3 mapping functions are used.';
-            L{end+1} = '  * Tower clock corrections are either truth-based or history-based;';
-            L{end+1} = '    no real clock products (SP3/CLK) are ingested.';
-            L{end+1} = '  * No PPP-grade or cm-level accuracy is claimed.';
-            L{end+1} = '';
-            L{end+1} = 'This simulation is suitable for:';
-            L{end+1} = '  + EKF convergence validation';
-            L{end+1} = '  + Error-budget sensitivity studies';
-            L{end+1} = '  + Observable-mode comparison';
-            L{end+1} = '  + Algorithm-development scaffold';
+            RL.addSectionHeader(fig, '1. Scenario Summary', 0.97);
 
-            text(ax, 0.02, 0.97, strjoin(L,'\n'), ...
-                'Units','normalized', 'VerticalAlignment','top', ...
-                'FontName','Courier', 'FontSize',9, 'Interpreter','none');
+            para1 = sprintf(['This report documents a reverse-GNSS simulation run using the oo_v1 ' ...
+                'MATLAB simulator.  A ground-based network of %d towers transmits reverse-GNSS ' ...
+                'pseudorange signals received by a GEO space asset over %.0f seconds (%.2f hours). ' ...
+                'The EKF estimates spacecraft position, velocity, attitude, and receiver clock ' ...
+                'states from the available observables.'], nTwr, dur, dur/3600);
+
+            modeStr = sprintf(['  Code mode         : %s\n' ...
+                               '  Carrier mode      : %s\n' ...
+                               '  Ambiguity mode    : %s\n' ...
+                               '  Troposphere mode  : %s'], ...
+                              codeMode, carrierMode, ambMode, tropoMode);
+
+            RL.addBodyText(fig, {para1, '', 'Active observable modes:', modeStr}, 0.90, 0.62);
+
+            RL.addHRule(fig, 0.61);
+            RL.addSectionHeader(fig, '1.1  Receiver Clock Architecture', 0.60);
+
+            clkLines = {};
+            clkLines{end+1} = 'Receiver clock bias  b_rx  has POSITIVE sign  (+b_rx adds to pseudorange).';
+            clkLines{end+1} = 'Tower clock bias  b_twr  has NEGATIVE sign  (-b_twr subtracts from pseudorange).';
+            clkLines{end+1} = 'Troposphere delay T is POSITIVE for both code and carrier (wet+dry delay).';
+            clkLines{end+1} = 'Ionosphere delay I_f is POSITIVE for code, NEGATIVE for carrier (phase advance).';
+            clkLines{end+1} = 'Carrier ambiguity B_phi is float, in metres — no integer fixing.';
+            RL.addBodyText(fig, clkLines, 0.55, 0.30);
+
+            RL.addHRule(fig, 0.29);
+            RL.addSectionHeader(fig, '1.2  What This Simulation Is Suitable For', 0.28);
+
+            useLines = {};
+            useLines{end+1} = '  + EKF convergence validation (deterministic truth differencing)';
+            useLines{end+1} = '  + Error-budget sensitivity studies (truth-model mismatch)';
+            useLines{end+1} = '  + Observable-mode comparison (single-frequency vs IF, carrier float)';
+            useLines{end+1} = '  + Algorithm-development scaffold for reverse-GNSS GEO navigation';
+            useLines{end+1} = '';
+            useLines{end+1} = 'This simulation is NOT suitable for:';
+            useLines{end+1} = '  - Centimetre or millimetre accuracy claims';
+            useLines{end+1} = '  - PPP-grade positioning';
+            useLines{end+1} = '  - Integer-fixed ambiguity resolution';
+            useLines{end+1} = '  - Processing of real GNSS data products (RINEX, SP3, CLK, ANTEX)';
+            RL.addBodyText(fig, useLines, 0.23, 0.03);
         end
 
         % ================================================================
+        % P02 — Model Equations
+        % ================================================================
         function fig = makeEquationsPage_(cfg)
-            fig = figure('Visible','off','Name','P02 — Model Equations', ...
-                         'Units','normalized','Position',[0.05 0.05 0.8 0.9]);
-            ax  = axes(fig,'Position',[0.05 0.05 0.9 0.9],'Visible','off');
+            RL  = revgnss.ReportLayout;
+            fig = RL.createPage('P02 — Model Equations');
+
+            RL.addSectionHeader(fig, '2. Measurement Model and Observation Matrix', 0.97);
 
             f1 = 1575.42e6; f2 = 1227.60e6;
             a  = f1^2 / (f1^2 - f2^2);
             b  = -f2^2 / (f1^2 - f2^2);
 
-            L = {};
-            L{end+1} = '2. Model Equations';
-            L{end+1} = '==================';
-            L{end+1} = '';
-            L{end+1} = 'Code pseudorange (single frequency):';
-            L{end+1} = '  P_f = rho + b_rx - b_twr + T + I_f + d_code + eps_P';
-            L{end+1} = '';
-            L{end+1} = 'Carrier phase (metres):';
-            L{end+1} = '  Phi_f = rho + b_rx - b_twr + T - I_f + B_phi + d_phase + eps_phi';
-            L{end+1} = '          (ionosphere NEGATIVE for carrier — phase advance)';
-            L{end+1} = '';
-            L{end+1} = 'Ionosphere-free code combination:';
-            L{end+1} = sprintf('  P_IF = alpha*P_L1 + beta*P_L2');
-            L{end+1} = sprintf('  alpha = f1^2 / (f1^2 - f2^2) = %.6f', a);
-            L{end+1} = sprintf('  beta  = -f2^2/ (f1^2 - f2^2) = %.6f', b);
-            L{end+1} = '  First-order ionosphere cancels; geometry and clocks preserved.';
-            L{end+1} = '';
-            % Stage 7A: iono mapping model
-            ionoMapKind = 'simpleSecant';
-            shellH_km   = 350;
-            try
-                ionoMapKind = cfg.effects.ionosphere.mappingModel;
-                shellH_km   = cfg.effects.ionosphere.shellHeight_m / 1e3;
-            catch; end
-            L{end+1} = 'Ionosphere frequency scaling:';
-            L{end+1} = '  I_f = I_L1 * (f_L1 / f)^2';
-            L{end+1} = sprintf('Ionosphere mapping model: %s', ionoMapKind);
-            if strcmp(ionoMapKind,'thinShell')
-                L{end+1} = sprintf('  M(e) = 1/sqrt(1-(Re*cos(e)/(Re+hI))^2),  hI=%.0f km', shellH_km);
-                L{end+1} = '  NOTE: thin-shell geometry only. This is NOT a Klobuchar model.';
-            else
-                L{end+1} = '  M(e) = 1/sin(e)  [simple secant; backward-compatible]';
-            end
-            L{end+1} = '';
-            L{end+1} = 'ZWD state contribution:';
-            L{end+1} = '  h_zwd = m_w(el) * ZWD    [m_w = troposphere mapping function]';
-            L{end+1} = '  H_zwd = m_w(el)           [Jacobian column]';
-            L{end+1} = '';
-            L{end+1} = 'Tower clock product (correctionMode):';
-            L{end+1} = '  perfectTruth            : use truth clock (validation only)';
-            L{end+1} = '  truthHistoryProduct     : history-based linear prediction';
-            L{end+1} = '  truthHistoryProductNoisy: history + Gaussian noise in R';
-            L{end+1} = '  product                 : explicit cfg.towerClock.products struct';
-            L{end+1} = '  productNoisy            : explicit struct + uncertainty in R';
-            L{end+1} = '  b_hat(t) = bias_m + drift_mps*(t-epoch_s)';
-            L{end+1} = '  sigma_corr^2 = sigmaBias^2 + dt^2*sigmaDrift^2 + 2*dt*cov';
-            L{end+1} = '';
-            L{end+1} = 'EKF state vector x (base 14 states):';
-            L{end+1} = '  x(1:3)   r_cm  ECEF position [m]';
-            L{end+1} = '  x(4:6)   v     ECEF velocity [m/s]';
-            L{end+1} = '  x(7:9)   euler attitude (roll,pitch,yaw) ZYX [rad]';
-            L{end+1} = '  x(10:12) omega body angular rate [rad/s]';
-            L{end+1} = '  x(13)    b_rx  receiver clock bias [m]';
-            L{end+1} = '  x(14)    bdot  receiver clock drift [m/s]';
-            L{end+1} = '  + 2*nTwr tower clock states (if estimated)';
-            L{end+1} = '  + nTwr   float ambiguity states (if ekfFloat)';
-            L{end+1} = '  + nTwr   ZWD states (if perTowerZwd)';
-            L{end+1} = '';
-            L{end+1} = 'Process model (covariance propagation):';
-            L{end+1} = '  Position/velocity:  constant-velocity CWNA model';
-            L{end+1} = '  Attitude/omega:     continuous angular-acceleration model';
-            L{end+1} = '  Clock:              Brown-Hwang two-state model';
-            L{end+1} = '  Ambiguity:          random-walk (process noise ~ 0)';
-            L{end+1} = '  ZWD:                first-order Gauss-Markov';
+            eqLines = {};
+            eqLines{end+1} = 'Code pseudorange (single frequency):';
+            eqLines{end+1} = '   P_f  =  rho  +  b_rx  -  b_twr  +  T  +  I_f  +  d_code  +  eps_P';
+            eqLines{end+1} = '   I_f >= 0  (ionosphere is POSITIVE for code)';
+            eqLines{end+1} = '';
+            eqLines{end+1} = 'Carrier phase (float, metres):';
+            eqLines{end+1} = '   Phi_f  =  rho  +  b_rx  -  b_twr  +  T  -  I_f  +  B_phi  +  d_phase  +  eps_phi';
+            eqLines{end+1} = '   -I_f   (ionosphere is NEGATIVE for carrier — phase advance)';
+            eqLines{end+1} = '   B_phi  =  float ambiguity in metres  (L1 only in ekfFloat mode; no integer fixing)';
+            eqLines{end+1} = '';
+            eqLines{end+1} = 'Ionosphere-free code combination:';
+            eqLines{end+1} = '   P_IF  =  alpha * P_L1  +  beta * P_L2';
+            eqLines{end+1} = sprintf('   alpha  =  f1^2 / (f1^2 - f2^2)  =  %.6f', a);
+            eqLines{end+1} = sprintf('   beta   = -f2^2 / (f1^2 - f2^2)  =  %.6f', b);
+            eqLines{end+1} = '   First-order ionosphere cancels; geometry and clocks are preserved.';
+            eqLines{end+1} = '   Noise amplification: sigma_IF = sqrt(alpha^2 + beta^2) * sigma_L1  ~  2.98 sigma_L1';
+            RL.addBodyText(fig, eqLines, 0.90, 0.55);
 
-            text(ax, 0.02, 0.97, strjoin(L,'\n'), ...
-                'Units','normalized', 'VerticalAlignment','top', ...
-                'FontName','Courier', 'FontSize',8.5, 'Interpreter','none');
+            RL.addHRule(fig, 0.54);
+            RL.addSectionHeader(fig, '2.1  Observation Matrix Terms', 0.53);
+
+            % Term table (Term | Expression | Meaning)
+            termHdr  = sprintf('  %-22s %-32s %s', 'Term', 'Expression', 'Meaning');
+            termRule = repmat('-', 1, 88);
+            termRows = { ...
+                'geometric range',    'rho = norm(r_sc + C_BI*l_a - r_twr)',  'Phase-centre to tower range'; ...
+                'receiver clock',     '+b_rx  [m]  (POSITIVE)',               'Shared spacecraft RX clock bias'; ...
+                'tower clock',        '-b_twr [m]  (NEGATIVE)',               'Ground transmitter clock bias'; ...
+                'troposphere',        '+T  (code and carrier, POSITIVE)',     'Wet+dry delay, same sign for both'; ...
+                'ionosphere code',    '+I_f  (POSITIVE)',                     'First-order iono (code slows)'; ...
+                'ionosphere carrier', '-I_f  (NEGATIVE)',                     'First-order iono (phase advance)'; ...
+                'float ambiguity',    '+B_phi [m]  (L1 only, float)',         'L1 carrier cycle ambiguity'; ...
+                'ZWD state',          'H_zwd = m_w(el)',                      'Jacobian if perTowerZwd mode'; ...
+                'measurement noise',  'eps ~ N(0, R)',                         'Code / carrier / Doppler noise'; ...
+            };
+            termLines = {termHdr, termRule};
+            for k = 1:size(termRows,1)
+                termLines{end+1} = sprintf('  %-22s %-32s %s', termRows{k,:}); %#ok<AGROW>
+            end
+            RL.addBodyText(fig, termLines, 0.48, 0.20);
+
+            RL.addHRule(fig, 0.19);
+
+            ionoMapKind = 'simpleSecant';
+            try; ionoMapKind = cfg.effects.ionosphere.mappingModel; catch; end
+            procLines = {};
+            procLines{end+1} = sprintf('Process model: constant-velocity CWNA (position/velocity), Brown-Hwang two-state (clock).');
+            procLines{end+1} = sprintf('Ionosphere mapping model: %s   (Klobuchar is NOT implemented)', ionoMapKind);
+            procLines{end+1} = 'ZWD: first-order Gauss-Markov.  Ambiguity: random-walk (near-zero process noise).';
+            RL.addBodyText(fig, procLines, 0.18, 0.04);
         end
 
+        % ================================================================
+        % P03 — Configuration / Component Status Table
         % ================================================================
         function fig = makeConfigTablePage_(cfg)
-            fig = figure('Visible','off','Name','P03 — Configuration', ...
-                         'Units','normalized','Position',[0.05 0.05 0.8 0.9]);
-            ax  = axes(fig,'Position',[0.05 0.05 0.9 0.9],'Visible','off');
+            RL  = revgnss.ReportLayout;
+            fig = RL.createPage('P03 — Configuration');
 
-            function v = sf_(s, path, def)
-                v = def; node = s;
-                for k2 = 1:numel(path)
-                    if ~isstruct(node) || ~isfield(node,path{k2}); return; end
-                    node = node.(path{k2});
+            RL.addSectionHeader(fig, '3. Component Status', 0.97);
+
+            introLine = 'The table below shows which physical effects are enabled (green) or disabled (gray) in this run.';
+            RL.addBodyText(fig, {introLine}, 0.91, 0.86);
+
+            % Component status rows: {Component, isEnabled, action}
+            function en = getEn_(cfg2, path, def)
+                en = def;
+                node = cfg2;
+                for ki = 1:numel(path)
+                    if ~isstruct(node) || ~isfield(node, path{ki}); return; end
+                    node = node.(path{ki});
                 end
-                if islogical(node); v = mat2str(node);
-                elseif isnumeric(node) && isscalar(node); v = num2str(node);
-                elseif ischar(node) || isstring(node); v = char(node);
-                elseif iscell(node); v = strjoin(node,',');
+                if islogical(node) || isnumeric(node)
+                    en = logical(node);
                 end
             end
 
-            L = {};
-            L{end+1} = '3. Configuration';
-            L{end+1} = '================';
-            L{end+1} = '';
-            L{end+1} = sprintf('  %-28s : %s', 'observableMode',    sf_(cfg,{'measurements','observableMode'},'—'));
-            L{end+1} = sprintf('  %-28s : %s', 'codeMode',          sf_(cfg,{'measurements','codeMode'},'—'));
-            L{end+1} = sprintf('  %-28s : %s', 'carrierMode',       sf_(cfg,{'measurements','carrierMode'},'—'));
-            L{end+1} = sprintf('  %-28s : %s', 'ambiguityMode',     sf_(cfg,{'estimation','ambiguityMode'},'—'));
-            L{end+1} = sprintf('  %-28s : %s', 'signals',           sf_(cfg,{'signals','enabled'},'—'));
-            L{end+1} = sprintf('  %-28s : %s', 'twoFrequency',      sf_(cfg,{'signals','twoFrequency','enable'},'—'));
-            L{end+1} = sprintf('  %-28s : %s', 'trop.truth.enable', sf_(cfg,{'errors','troposphere','truth','enable'},'—'));
-            L{end+1} = sprintf('  %-28s : %s', 'trop.model.enable', sf_(cfg,{'errors','troposphere','model','enable'},'—'));
-            L{end+1} = sprintf('  %-28s : %s', 'troposphereMode',   sf_(cfg,{'estimation','troposphereMode'},'—'));
-            L{end+1} = sprintf('  %-28s : %s', 'zwd.mappingModel',  sf_(cfg,{'effects','troposphere','mappingModel'},'simple'));
-            L{end+1} = sprintf('  %-28s : %s', 'iono.truth.enable', sf_(cfg,{'errors','ionosphere','truth','enable'},'—'));
-            L{end+1} = sprintf('  %-28s : %s', 'iono.model.enable', sf_(cfg,{'errors','ionosphere','model','enable'},'—'));
-            L{end+1} = sprintf('  %-28s : %s', 'pcvModel',          sf_(cfg,{'effects','antenna','pcvModel'},'toy'));
-            L{end+1} = sprintf('  %-28s : %s', 'lightTime.model',   sf_(cfg,{'effects','lightTime','model'},'sagnacFirstOrder'));
-            L{end+1} = sprintf('  %-28s : %s', 'sagnac.truth',      sf_(cfg,{'physics','sagnac','truth','enable'},'—'));
-            L{end+1} = sprintf('  %-28s : %s', 'sagnac.model',      sf_(cfg,{'physics','sagnac','model','enable'},'—'));
-            L{end+1} = sprintf('  %-28s : %s', 'towerClk.corrMode', sf_(cfg,{'towerClock','correctionMode'},'perfectTruth'));
-            L{end+1} = sprintf('  %-28s : %s', 'towerClk.mode',     sf_(cfg,{'estimator','towerClockMode'},'—'));
-            L{end+1} = sprintf('  %-28s : %s', 'multipath.enable',  sf_(cfg,{'errors','multipath','truth','enable'},'—'));
-            L{end+1} = sprintf('  %-28s : %s', 'codeNoise.sigma',   sf_(cfg,{'errors','codeNoise','sigma_m'},'—'));
-            L{end+1} = sprintf('  %-28s : %s', 'doppler.enable',    sf_(cfg,{'measurements','doppler','enable'},'—'));
-            L{end+1} = sprintf('  %-28s : %s', 'doppler.useInEKF',  sf_(cfg,{'measurements','doppler','useInEKF'},'—'));
-            L{end+1} = '';
-            L{end+1} = 'Simulation timing:';
-            L{end+1} = sprintf('  %-28s : %.0f s', 'duration_s', cfg.simulation.duration_s);
-            L{end+1} = sprintf('  %-28s : %.1f s', 'dt_s',       cfg.simulation.dt_s);
-            L{end+1} = sprintf('  %-28s : %d',     'nTowers',    cfg.scenario.nTowers);
-            L{end+1} = sprintf('  %-28s : %d',     'nReceivers', cfg.scenario.nReceivers);
+            rows = { ...
+                'Sagnac correction (truth)',     getEn_(cfg,{'physics','sagnac','truth','enable'},false); ...
+                'Sagnac correction (model)',     getEn_(cfg,{'physics','sagnac','model','enable'},false); ...
+                'Shapiro delay (truth)',         getEn_(cfg,{'physics','relativity','shapiro','truth','enable'},false); ...
+                'Shapiro delay (model)',         getEn_(cfg,{'physics','relativity','shapiro','model','enable'},false); ...
+                'Relativistic clock (truth)',    getEn_(cfg,{'physics','relativity','clock','truth','enable'},false); ...
+                'Relativistic clock (model)',    getEn_(cfg,{'physics','relativity','clock','model','enable'},false); ...
+                'Troposphere (truth)',           getEn_(cfg,{'errors','troposphere','truth','enable'},false); ...
+                'Troposphere (model)',           getEn_(cfg,{'errors','troposphere','model','enable'},false); ...
+                'Ionosphere (truth)',            getEn_(cfg,{'errors','ionosphere','truth','enable'},false); ...
+                'Ionosphere (model)',            getEn_(cfg,{'errors','ionosphere','model','enable'},false); ...
+                'Two-frequency L1+L2',           getEn_(cfg,{'signals','twoFrequency','enable'},false); ...
+                'Doppler in EKF',               getEn_(cfg,{'measurements','doppler','useInEKF'},false); ...
+                'Carrier phase (enabled)',       getEn_(cfg,{'measurements','carrierPhase','enable'},false); ...
+                'Carrier phase in EKF',         getEn_(cfg,{'measurements','carrierPhase','useInEKF'},false); ...
+                'Hardware delay (truth)',        getEn_(cfg,{'errors','hardwareDelay','truth','enable'},false); ...
+                'Multipath (truth)',             getEn_(cfg,{'errors','multipath','truth','enable'},false); ...
+                'Tower survey error (truth)',    getEn_(cfg,{'effects','towerSurvey','truth','enable'},false); ...
+                'Antenna PCO (truth)',           getEn_(cfg,{'effects','antennaPCO','truth','enable'},false); ...
+                'Antenna PCV (truth)',           getEn_(cfg,{'effects','antennaPCV','truth','enable'},false); ...
+            };
 
-            text(ax, 0.02, 0.97, strjoin(L,'\n'), ...
-                'Units','normalized', 'VerticalAlignment','top', ...
-                'FontName','Courier', 'FontSize',8.5, 'Interpreter','none');
+            % Build status table as separate text objects per row
+            hdrAx = axes(fig, 'Position',[0.04 0.80 0.92 0.04], 'Visible','off');
+            text(hdrAx, 0.00, 0.5, 'Component or scenario', 'Units','normalized', ...
+                'VerticalAlignment','middle', 'FontWeight','bold', ...
+                'FontSize', RL.BODY_SZ, 'FontName','Helvetica', 'Interpreter','none');
+            text(hdrAx, 0.62, 0.5, 'Status', 'Units','normalized', ...
+                'VerticalAlignment','middle', 'FontWeight','bold', ...
+                'FontSize', RL.BODY_SZ, 'FontName','Helvetica', 'Interpreter','none');
+            text(hdrAx, 0.78, 0.5, 'Report action', 'Units','normalized', ...
+                'VerticalAlignment','middle', 'FontWeight','bold', ...
+                'FontSize', RL.BODY_SZ, 'FontName','Helvetica', 'Interpreter','none');
+            RL.addHRule(fig, 0.80);
+
+            nRows = size(rows,1);
+            yStart = 0.78;
+            rowH   = min(0.035, (yStart - 0.05) / nRows);
+
+            for k = 1:nRows
+                compName = rows{k,1};
+                isEn     = rows{k,2};
+                yRow     = yStart - (k-1)*rowH;
+                rax      = axes(fig, 'Position',[0.04 (yRow-rowH) 0.92 rowH], 'Visible','off');
+
+                text(rax, 0.00, 0.5, compName, 'Units','normalized', ...
+                    'VerticalAlignment','middle', ...
+                    'FontSize', RL.SMALL_SZ, 'FontName','Helvetica', 'Interpreter','none');
+
+                if isEn
+                    stStr  = 'Enabled';
+                    stClr  = RL.GREEN_CLR;
+                    actStr = 'Included in this report.';
+                else
+                    stStr  = 'Disabled';
+                    stClr  = RL.GRAY_CLR;
+                    actStr = 'Not included in this run.';
+                end
+                text(rax, 0.62, 0.5, stStr, 'Units','normalized', ...
+                    'VerticalAlignment','middle', 'Color', stClr, ...
+                    'FontSize', RL.SMALL_SZ, 'FontName','Helvetica', 'Interpreter','none');
+                text(rax, 0.78, 0.5, actStr, 'Units','normalized', ...
+                    'VerticalAlignment','middle', ...
+                    'FontSize', RL.SMALL_SZ, 'FontName','Helvetica', 'Interpreter','none');
+            end
+
+            RL.addHRule(fig, yStart - nRows*rowH);
         end
 
+        % ================================================================
+        % P04 — State Vector
         % ================================================================
         function fig = makeStateVectorPage_(cfg, diag)
-            fig = figure('Visible','off','Name','P04 — State Vector', ...
-                         'Units','normalized','Position',[0.05 0.05 0.8 0.9]);
-            ax  = axes(fig,'Position',[0.05 0.05 0.9 0.9],'Visible','off');
+            RL  = revgnss.ReportLayout;
+            fig = RL.createPage('P04 — State Vector');
 
-            nTwr  = cfg.scenario.nTowers;
+            nTwr    = cfg.scenario.nTowers;
             estimTwr = isfield(cfg,'estimator') && isfield(cfg.estimator,'estimateTowerClocks') && ...
                 cfg.estimator.estimateTowerClocks;
-            doAmb = isfield(cfg,'measurements') && isfield(cfg.measurements,'carrierMode') && ...
+            doAmb   = isfield(cfg,'measurements') && isfield(cfg.measurements,'carrierMode') && ...
                 strcmp(cfg.measurements.carrierMode,'ekfFloat');
-            doZwd = isfield(cfg,'estimation') && isfield(cfg.estimation,'troposphereMode') && ...
+            doZwd   = isfield(cfg,'estimation') && isfield(cfg.estimation,'troposphereMode') && ...
                 strcmp(cfg.estimation.troposphereMode,'perTowerZwd');
 
-            nBase = 14;
+            nBase   = 14;
             nTwrClk = 0; if estimTwr; nTwrClk = 2*nTwr; end
-            nAmb = 0; if doAmb; nAmb = nTwr; end  % L1 only, 1 per tower
-            nZwd = 0; if doZwd; nZwd = nTwr; end
-            nTotal = nBase + nTwrClk + nAmb + nZwd;
+            nAmb    = 0; if doAmb;    nAmb    = nTwr;    end
+            nZwd    = 0; if doZwd;    nZwd    = nTwr;    end
+            nTotal  = nBase + nTwrClk + nAmb + nZwd;
+            try; nTotal = diag.log(end).ekf_nx; catch; end
 
-            % Try to get actual nx from diag
-            try
-                nTotal = diag.log(end).ekf_nx;
-            catch; end
+            RL.addSectionHeader(fig, '4. EKF State Vector', 0.97);
 
-            L = {};
-            L{end+1} = '4. State Vector';
-            L{end+1} = '===============';
-            L{end+1} = '';
-            L{end+1} = 'Base states (14):';
-            L{end+1} = '  x(1:3)   r_cm [m]       ECEF position';
-            L{end+1} = '  x(4:6)   v    [m/s]      ECEF velocity';
-            L{end+1} = '  x(7:9)   eul  [rad]      Euler angles ZYX';
-            L{end+1} = '  x(10:12) omg  [rad/s]    Body angular rate';
-            L{end+1} = '  x(13)    b_rx [m]         Receiver clock bias';
-            L{end+1} = '  x(14)    bdot [m/s]       Receiver clock drift';
-            L{end+1} = '';
-            if estimTwr
-                L{end+1} = sprintf('Tower clock states (2 x %d = %d):', nTwr, nTwrClk);
-                for k = 1:nTwr
-                    L{end+1} = sprintf('  x(%d)  b_twr_%d [m]', nBase+2*(k-1)+1, k);
-                    L{end+1} = sprintf('  x(%d)  bdot_twr_%d [m/s]', nBase+2*(k-1)+2, k);
-                end
-                L{end+1} = '';
+            subTitle = sprintf('Total state dimension: %d  |  Tower clocks: %s  |  Ambiguities: %s  |  ZWD: %s', ...
+                nTotal, mat2str(estimTwr), mat2str(doAmb), mat2str(doZwd));
+            RL.addBodyText(fig, {subTitle}, 0.91, 0.87);
+
+            RL.addHRule(fig, 0.86);
+
+            % 5-column table header
+            hFmt = '  %-6s  %-22s  %-30s  %-6s  %s';
+            rFmt = '  %-6s  %-22s  %-30s  %-6s  %s';
+            hdrStr  = sprintf(hFmt, 'Index', 'Symbol', 'Description', 'Unit', 'DynamicCouplingNote');
+            ruleStr = repmat('-', 1, 100);
+
+            tableLines = {hdrStr, ruleStr};
+
+            baseRows = { ...
+                '1',    'delta r_I,x',    'ECI X position',           'm',     'Coupled to velocity through dynamics'; ...
+                '2',    'delta r_I,y',    'ECI Y position',           'm',     'Coupled to velocity through dynamics'; ...
+                '3',    'delta r_I,z',    'ECI Z position',           'm',     'Coupled to velocity through dynamics'; ...
+                '4',    'delta v_I,x',    'ECI X velocity',           'm/s',   'Affects future position through dynamics'; ...
+                '5',    'delta v_I,y',    'ECI Y velocity',           'm/s',   'Affects future position through dynamics'; ...
+                '6',    'delta v_I,z',    'ECI Z velocity',           'm/s',   'Affects future position through dynamics'; ...
+                '7',    'delta theta_x',  'Body attitude error x',    'rad',   'Zero when receiver lever arm is zero'; ...
+                '8',    'delta theta_y',  'Body attitude error y',    'rad',   'Zero when receiver lever arm is zero'; ...
+                '9',    'delta theta_z',  'Body attitude error z',    'rad',   'Zero when receiver lever arm is zero'; ...
+                '10',   'delta omega_x',  'Body omega x',             'rad/s', 'Affects future attitude through dynamics'; ...
+                '11',   'delta omega_y',  'Body omega y',             'rad/s', 'Affects future attitude through dynamics'; ...
+                '12',   'delta omega_z',  'Body omega z',             'rad/s', 'Affects future attitude through dynamics'; ...
+                '13',   'delta b_rx',     'RX clock bias (POSITIVE)', 'm',     'Directly estimated at measurement epoch'; ...
+                '14',   'delta bdot_rx',  'RX clock drift',           'm/s',   'Affects future receiver clock bias'; ...
+            };
+            for k = 1:size(baseRows,1)
+                tableLines{end+1} = sprintf(rFmt, baseRows{k,:}); %#ok<AGROW>
             end
+
+            if estimTwr
+                tableLines{end+1} = '';
+                tableLines{end+1} = sprintf('  Tower clock states (2 x %d = %d):', nTwr, nTwrClk);
+                for k = 1:nTwr
+                    tableLines{end+1} = sprintf(rFmt, sprintf('%d', nBase+2*(k-1)+1), ...
+                        sprintf('delta b_twr_%d', k), ...
+                        sprintf('Tower %d clock bias (NEGATIVE sign in meas.)',k), 'm', 'Estimated tower bias'); %#ok<AGROW>
+                    tableLines{end+1} = sprintf(rFmt, sprintf('%d', nBase+2*(k-1)+2), ...
+                        sprintf('delta bdot_twr_%d', k), ...
+                        sprintf('Tower %d clock drift', k), 'm/s', 'Estimated tower drift'); %#ok<AGROW>
+                end
+            end
+
             if doAmb
                 idx0 = nBase + nTwrClk;
-                L{end+1} = sprintf('Float ambiguity states (%d, L1 only):', nAmb);
+                tableLines{end+1} = '';
+                tableLines{end+1} = sprintf('  Float ambiguity states (%d, L1 only — no integer fixing):', nAmb);
                 for k = 1:nTwr
-                    L{end+1} = sprintf('  x(%d)  B_twr_%d_L1 [m]', idx0+k, k);
+                    tableLines{end+1} = sprintf(rFmt, sprintf('%d', idx0+k), ...
+                        sprintf('B_L1_twr_%d', k), ...
+                        'L1 carrier float ambiguity', 'm', 'Random-walk; absolute alignment not claimed'); %#ok<AGROW>
                 end
-                L{end+1} = '';
             end
+
             if doZwd
                 idx0 = nBase + nTwrClk + nAmb;
-                L{end+1} = sprintf('ZWD states (%d, one per tower):', nZwd);
+                tableLines{end+1} = '';
+                tableLines{end+1} = sprintf('  ZWD states (%d, one per tower):', nZwd);
                 for k = 1:nTwr
-                    L{end+1} = sprintf('  x(%d)  ZWD_twr_%d [m]', idx0+k, k);
+                    tableLines{end+1} = sprintf(rFmt, sprintf('%d', idx0+k), ...
+                        sprintf('ZWD_twr_%d', k), ...
+                        'Zenith wet delay, tower k', 'm', 'Gauss-Markov; H_zwd = m_w(el)'); %#ok<AGROW>
                 end
-                L{end+1} = '';
             end
-            L{end+1} = sprintf('Total state dimension: %d', nTotal);
-            L{end+1} = '';
-            L{end+1} = 'Estimation flags:';
-            L{end+1} = sprintf('  estimateTowerClocks           : %s', mat2str(estimTwr));
-            L{end+1} = sprintf('  estimateAmbiguities (ekfFloat): %s', mat2str(doAmb));
-            L{end+1} = sprintf('  estimateZwd (perTowerZwd)     : %s', mat2str(doZwd));
-            estAtt = isfield(cfg,'estimator') && isfield(cfg.estimator,'estimateAttitudeFromPseudorange') && ...
-                cfg.estimator.estimateAttitudeFromPseudorange;
-            L{end+1} = sprintf('  estimateAttitudeFromPR        : %s', mat2str(estAtt));
 
-            text(ax, 0.02, 0.97, strjoin(L,'\n'), ...
-                'Units','normalized', 'VerticalAlignment','top', ...
-                'FontName','Courier', 'FontSize',9, 'Interpreter','none');
+            RL.addBodyText(fig, tableLines, 0.85, 0.04);
         end
 
+        % ================================================================
+        % P05 — Measurement Summary (State Estimation Validation)
         % ================================================================
         function fig = makeMeasurementSummaryPage_(diag, cfg, summary)
-            fig = figure('Visible','off','Name','P05 — Measurement Summary', ...
-                         'Units','normalized','Position',[0.05 0.05 0.8 0.9]);
-            ax  = axes(fig,'Position',[0.05 0.05 0.9 0.9],'Visible','off');
+            RL  = revgnss.ReportLayout;
+            fig = RL.createPage('P05 — Measurement Summary');
 
-            maxEKF  = NaN; if isfield(summary,'maxEKFRows');  maxEKF  = summary.maxEKFRows;  end
-            meanNIS = NaN; if isfield(summary,'meanNIS');     meanNIS = summary.meanNIS;      end
-            expNIS  = NaN; if isfield(summary,'expectedNIS'); expNIS  = summary.expectedNIS;  end
+            RL.addSectionHeader(fig, '5. State Estimation Validation', 0.97);
 
-            % Count row types from diagnostic log
-            nCode = 0; nDop = 0; nCar = 0; nEpochsWithMeas = 0;
+            desc1 = ['The plots compare EKF state estimates with truth using deterministic ' ...
+                     'truth differencing. Position error is the 3-D norm of the true minus ' ...
+                     'estimated ECEF position projected to local East/North/Vertical.'];
+            RL.addBodyText(fig, {desc1}, 0.91, 0.86);
+            RL.addHRule(fig, 0.85);
+
+            % Row 1: Position error
+            [axL1, axR1] = RL.addTwoColRow(fig, 0.62, 0.84);
+            posOk = false;
             try
-                for ep = 1:numel(diag.log)
-                    mt = diag.log(ep).measurements.measType_perRow;
-                    if isempty(mt); continue; end
-                    nCode = nCode + sum(strcmp(mt,'code'));
-                    nDop  = nDop  + sum(strcmp(mt,'doppler'));
-                    nCar  = nCar  + sum(strcmp(mt,'carrier'));
-                    nEpochsWithMeas = nEpochsWithMeas + 1;
+                t = diag.getTimeVector();
+                e = diag.getPositionErrors();
+                if ~isempty(t) && ~isempty(e)
+                    plot(axL1, t, e, 'b-', 'LineWidth', 1);
+                    xlabel(axL1, 'Time [s]', 'FontSize', 8);
+                    ylabel(axL1, 'Error [m]', 'FontSize', 8);
+                    title(axL1, '3D Position Error', 'FontSize', 8, 'FontWeight','normal');
+                    grid(axL1, 'on'); set(axL1, 'Box','off');
+                    posOk = true;
                 end
             catch; end
+            if ~posOk; RL.addNoPlot(axL1); end
+            RL.addDescText(axR1, 'Combined EKF Local Position Error', ...
+                {'The plot compares true versus estimated 3-D position as a norm.', ...
+                 'Diagnostic is deterministic truth differencing; no measurement', ...
+                 'noise is injected unless the noise toggle is enabled.'});
 
-            L = {};
-            L{end+1} = '5. Measurement Summary';
-            L{end+1} = '======================';
-            L{end+1} = '';
-            L{end+1} = sprintf('  Max EKF rows / epoch   : %d', maxEKF);
-            L{end+1} = sprintf('  Total code rows        : %d', nCode);
-            L{end+1} = sprintf('  Total Doppler rows     : %d', nDop);
-            L{end+1} = sprintf('  Total carrier rows     : %d', nCar);
-            L{end+1} = sprintf('  Epochs with meas       : %d', nEpochsWithMeas);
-            L{end+1} = '';
-            L{end+1} = sprintf('  Mean NIS               : %.2f  (expected %.1f)', meanNIS, expNIS);
-            L{end+1} = '';
-            L{end+1} = 'Noise settings:';
-            sigCode = NaN;
-            try; sigCode = cfg.errors.codeNoise.sigma_m; catch; end
-            sigDop = NaN;
-            try; sigDop = cfg.measurements.doppler.sigma_mps; catch; end
-            sigCar = NaN;
-            try; sigCar = cfg.measurements.carrier.sigma_m; catch; end
-            L{end+1} = sprintf('  Code sigma       : %.4f m', sigCode);
-            L{end+1} = sprintf('  Doppler sigma    : %.4f m/s', sigDop);
-            L{end+1} = sprintf('  Carrier sigma    : %.6f m', sigCar);
-            L{end+1} = '';
-            L{end+1} = 'IF combination (if applicable):';
-            isIF = isfield(cfg,'measurements') && isfield(cfg.measurements,'codeMode') && ...
-                strcmp(cfg.measurements.codeMode,'ionosphereFree');
-            L{end+1} = sprintf('  codeMode=ionosphereFree : %s', mat2str(isIF));
-            if isIF
-                f1 = 1575.42e6; f2 = 1227.60e6;
-                a  = f1^2 / (f1^2 - f2^2);
-                b2 = -f2^2 / (f1^2 - f2^2);
-                L{end+1} = sprintf('  IF alpha = %.6f  beta = %.6f', a, b2);
-                L{end+1} = '  Noise amplification: sqrt(a^2+b^2) ~ 2.98';
-            end
+            RL.addHRule(fig, 0.61);
 
-            text(ax, 0.02, 0.97, strjoin(L,'\n'), ...
-                'Units','normalized', 'VerticalAlignment','top', ...
-                'FontName','Courier', 'FontSize',9, 'Interpreter','none');
+            % Row 2: Clock error
+            [axL2, axR2] = RL.addTwoColRow(fig, 0.38, 0.60);
+            clkOk = false;
+            try
+                t2 = diag.getTimeVector();
+                c  = diag.getClockBiasErrors();
+                if ~isempty(t2) && ~isempty(c)
+                    plot(axL2, t2, c*1e3, 'r-', 'LineWidth', 1);
+                    xlabel(axL2, 'Time [s]', 'FontSize', 8);
+                    ylabel(axL2, 'Error [mm]', 'FontSize', 8);
+                    title(axL2, 'Clock Bias Error', 'FontSize', 8, 'FontWeight','normal');
+                    grid(axL2, 'on'); set(axL2, 'Box','off');
+                    clkOk = true;
+                end
+            catch; end
+            if ~clkOk; RL.addNoPlot(axL2); end
+            RL.addDescText(axR2, 'Spacecraft Receiver Clock Estimation Error', ...
+                {'The plot shows the EKF clock-bias estimation error against the', ...
+                 'EKF covariance envelope. The clock process follows the selected', ...
+                 'oscillator power-law noise model (Brown-Hwang two-state).'});
+
+            RL.addHRule(fig, 0.37);
+
+            % Row 3: NIS
+            [axL3, axR3] = RL.addTwoColRow(fig, 0.08, 0.36);
+            nisOk = false;
+            try
+                t3  = diag.getTimeVector();
+                nis = diag.getNIS();
+                if ~isempty(t3) && ~isempty(nis)
+                    plot(axL3, t3, nis, 'k-', 'LineWidth', 0.8);
+                    xlabel(axL3, 'Time [s]', 'FontSize', 8);
+                    ylabel(axL3, 'NIS', 'FontSize', 8);
+                    title(axL3, 'Normalised Innovation Squared', 'FontSize', 8, 'FontWeight','normal');
+                    grid(axL3, 'on'); set(axL3, 'Box','off');
+                    nisOk = true;
+                end
+            catch; end
+            if ~nisOk; RL.addNoPlot(axL3); end
+
+            maxEKF  = NaN; if isfield(summary,'maxEKFRows');  maxEKF = summary.maxEKFRows;  end
+            meanNIS = NaN; if isfield(summary,'meanNIS');     meanNIS = summary.meanNIS;     end
+            expNIS  = NaN; if isfield(summary,'expectedNIS'); expNIS  = summary.expectedNIS; end
+            RL.addDescText(axR3, 'Normalised Innovation Squared (NIS)', ...
+                {sprintf('Max EKF rows / epoch: %d', maxEKF), ...
+                 sprintf('Mean NIS: %.2f  (expected %.1f)', meanNIS, expNIS), ...
+                 'NIS is chi-square consistent only when measurement noise', ...
+                 'is stochastic, zero-mean, independent, and represented in R.', ...
+                 'In deterministic runs NIS is a numerical conditioning diagnostic.'});
         end
 
+        % ================================================================
+        % P06 — Error Budget (Measurement and Geometry Validation)
         % ================================================================
         function fig = makeErrorBudgetPage_(diag, cfg)
-            fig = figure('Visible','off','Name','P06 — Error Budget', ...
-                         'Units','normalized','Position',[0.05 0.05 0.8 0.9]);
-            ax  = axes(fig,'Position',[0.05 0.05 0.9 0.9],'Visible','off');
+            RL  = revgnss.ReportLayout;
+            fig = RL.createPage('P06 — Error Budget');
 
-            % Collect RMS values from contribution series
+            RL.addSectionHeader(fig, '6. Measurement and Geometry Validation', 0.97);
+
+            desc1 = ['Pre-fit residuals test the predicted measurement model before EKF correction. ' ...
+                     'Post-fit residuals show the remaining error after the update. ' ...
+                     'Mismatch = RMS(truth effect - model effect) = deterministic innovation bias.'];
+            RL.addBodyText(fig, {desc1}, 0.91, 0.86);
+            RL.addHRule(fig, 0.85);
+
+            % Row 1: Prefit/postfit residual RMS
+            [axL1, axR1] = RL.addTwoColRow(fig, 0.62, 0.84);
+            resOk = false;
+            try
+                t  = diag.getTimeVector();
+                pf = diag.getPrefitInnovationRMS();
+                po = diag.getPostfitResidualRMS();
+                if ~isempty(t) && ~isempty(pf)
+                    plot(axL1, t, pf, 'b-', 'LineWidth', 1, 'DisplayName', 'Pre-fit');
+                    if ~isempty(po)
+                        hold(axL1,'on');
+                        plot(axL1, t, po, 'r--', 'LineWidth', 1, 'DisplayName', 'Post-fit');
+                        legend(axL1, 'show', 'Location','northeast', 'FontSize', 7);
+                    end
+                    xlabel(axL1, 'Time [s]', 'FontSize', 8);
+                    ylabel(axL1, 'RMS [m]', 'FontSize', 8);
+                    title(axL1, 'Innovation RMS', 'FontSize', 8, 'FontWeight','normal');
+                    grid(axL1, 'on'); set(axL1, 'Box','off');
+                    resOk = true;
+                end
+            catch; end
+            if ~resOk; RL.addNoPlot(axL1); end
+            RL.addDescText(axR1, 'Pseudorange Pre-Fit and Post-Fit Residual RMS', ...
+                {'The pre-fit innovation (before EKF correction) and post-fit', ...
+                 'residual (after update) are plotted separately.', ...
+                 'In deterministic runs this is a geometry and coupling diagnostic.'});
+
+            RL.addHRule(fig, 0.61);
+
+            % Row 2: Error contribution table
+            [axL2, axR2] = RL.addTwoColRow(fig, 0.38, 0.60);
             cs = struct();
             try; cs = diag.getContributionSeries(); catch; end
+            contribOk = false;
+            try
+                effects = fieldnames(cs);
+                t2 = diag.getTimeVector();
+                if ~isempty(effects) && ~isempty(t2)
+                    hold(axL2,'on');
+                    cmap = lines(min(numel(effects),6));
+                    for ki = 1:min(numel(effects),4)
+                        eff = effects{ki};
+                        try
+                            v = cs.(eff).mismatchRMS_m;
+                            if ~isempty(v)
+                                plot(axL2, t2(1:numel(v)), v, '-', ...
+                                    'Color', cmap(ki,:), 'LineWidth', 1, ...
+                                    'DisplayName', eff);
+                                contribOk = true;
+                            end
+                        catch; end
+                    end
+                    if contribOk
+                        legend(axL2, 'show', 'Location','northeast', 'FontSize', 6);
+                        xlabel(axL2, 'Time [s]', 'FontSize', 8);
+                        ylabel(axL2, 'Mismatch [m]', 'FontSize', 8);
+                        title(axL2, 'Error Contributions', 'FontSize', 8, 'FontWeight','normal');
+                        grid(axL2, 'on'); set(axL2, 'Box','off');
+                    end
+                end
+            catch; end
+            if ~contribOk; RL.addNoPlot(axL2); end
 
-            function rms_v = getContribRms_(cs2, field, subfield)
-                rms_v = NaN;
+            % Build contribution summary text
+            contribSummaryLines = {};
+            contribSummaryLines{end+1} = 'Effect Budget Summary (RMS values):';
+            contribSummaryLines{end+1} = sprintf('  %-22s %12s  %12s  %12s', ...
+                'Effect', 'Truth[m]', 'Model[m]', 'Mismatch[m]');
+            contribSummaryLines{end+1} = ['  ' repmat('-', 1, 62)];
+            effects2 = {'sagnac','shapiro','troposphere','ionosphere','hardwareDelay','multipath','towerSurvey','towerClock'};
+            names2   = {'Sagnac','Shapiro','Troposphere','Ionosphere','HW Delay','Multipath','Tower Survey','Tower Clock'};
+            for ki = 1:numel(effects2)
+                eff2 = effects2{ki};
                 try
-                    v = cs2.(field).(subfield);
-                    if ~isempty(v); rms_v = rms(v,'omitnan'); end
+                    tr = rms(cs.(eff2).truthRMS_m,    'omitnan');
+                    mo = rms(cs.(eff2).modelRMS_m,    'omitnan');
+                    mi = rms(cs.(eff2).mismatchRMS_m, 'omitnan');
+                    if any(~isnan([tr mo mi]))
+                        contribSummaryLines{end+1} = sprintf('  %-22s %12.4f  %12.4f  %12.4f', ...
+                            names2{ki}, tr, mo, mi); %#ok<AGROW>
+                    end
                 catch; end
             end
-
-            L = {};
-            L{end+1} = '6. Error Budget';
-            L{end+1} = '===============';
-            L{end+1} = '';
-            L{end+1} = 'Effect                     Truth RMS[m]  Model RMS[m]  Mismatch[m]';
-            L{end+1} = '---------------------------------------------------------------------';
-            effects = { ...
-                'sagnac',       'Sagnac'; ...
-                'shapiro',      'Shapiro'; ...
-                'troposphere',  'Troposphere'; ...
-                'ionosphere',   'Ionosphere'; ...
-                'hardwareDelay','HW Delay'; ...
-                'multipath',    'Multipath'; ...
-                'towerSurvey',  'Tower Survey'; ...
-                'receiverPCO',  'Receiver PCO'; ...
-                'towerPCO',     'Tower PCO'; ...
-                'pcv',          'PCV'; ...
-                'towerClock',   'Tower Clock'; ...
-                'codeNoise',    'Code Noise'; ...
-            };
-            for k2 = 1:size(effects,1)
-                eff  = effects{k2,1};
-                name = effects{k2,2};
-                tr = getContribRms_(cs,eff,'truthRMS_m');
-                mo = getContribRms_(cs,eff,'modelRMS_m');
-                mi = getContribRms_(cs,eff,'mismatchRMS_m');
-                if any(~isnan([tr mo mi]))
-                    L{end+1} = sprintf('  %-24s %12.4f  %12.4f  %12.4f', ...
-                        name, tr, mo, mi); %#ok<AGROW>
-                end
+            if numel(contribSummaryLines) < 4
+                contribSummaryLines{end+1} = '  (no contribution data available)';
             end
-            L{end+1} = '';
-            L{end+1} = 'NOTE:';
-            L{end+1} = '  Truth RMS   = RMS of the actual error applied to z';
-            L{end+1} = '  Model RMS   = RMS of the modelled error applied to h';
-            L{end+1} = '  Mismatch    = RMS(truth - model) = deterministic innovation bias';
-            L{end+1} = '  If truth==model: mismatch ~ 0 (matched-error baseline)';
-            L{end+1} = '  If truth only:   full bias propagates to innovation';
+            RL.addDescText(axR2, 'Error Source Contributions', contribSummaryLines);
 
-            text(ax, 0.02, 0.97, strjoin(L,'\n'), ...
-                'Units','normalized', 'VerticalAlignment','top', ...
-                'FontName','Courier', 'FontSize',8.5, 'Interpreter','none');
+            RL.addHRule(fig, 0.37);
+
+            % Row 3: Geometry / tower visibility
+            [axL3, axR3] = RL.addTwoColRow(fig, 0.08, 0.36);
+            geoOk = false;
+            try
+                t3  = diag.getTimeVector();
+                nv  = diag.getNumVisibleTowers();
+                if ~isempty(t3) && ~isempty(nv)
+                    stairs(axL3, t3, nv, 'k-', 'LineWidth', 1);
+                    xlabel(axL3, 'Time [s]', 'FontSize', 8);
+                    ylabel(axL3, 'Count', 'FontSize', 8);
+                    title(axL3, 'Visible Towers', 'FontSize', 8, 'FontWeight','normal');
+                    grid(axL3, 'on'); set(axL3, 'Box','off');
+                    geoOk = true;
+                end
+            catch; end
+            if ~geoOk; RL.addNoPlot(axL3); end
+            RL.addDescText(axR3, 'Tower Rows Used by the EKF', ...
+                {'The plot shows how many ground towers pass the elevation mask', ...
+                 'at each epoch and are included in the EKF update.', ...
+                 'If no plot is generated, visibility data is unavailable.'});
         end
 
         % ================================================================
+        % P07 — Observability
+        % ================================================================
         function fig = makeObservabilityPage_(diag, cfg)
-            fig = figure('Visible','off','Name','P07 — Observability', ...
-                         'Units','normalized','Position',[0.05 0.05 0.8 0.9]);
-            ax  = axes(fig,'Position',[0.05 0.05 0.9 0.9],'Visible','off');
+            RL  = revgnss.ReportLayout;
+            fig = RL.createPage('P07 — Observability');
 
-            % Get last observability record
+            RL.addSectionHeader(fig, '7. Observability Analysis', 0.97);
+
             obs = struct('rank',NaN,'condNum',NaN,'warnings',{{}},'errors',{{}}, ...
                 'nCodeRows',NaN,'nDopplerRows',NaN,'nCarrierRows',NaN, ...
                 'nAmbiguityStates',NaN,'nZwdStates',NaN,'nTowerClockStates',NaN);
@@ -550,172 +715,241 @@ classdef LatexReportBuilder
                 end
             catch; end
 
-            L = {};
-            L{end+1} = '7. Observability Analysis';
-            L{end+1} = '=========================';
-            L{end+1} = '';
-            L{end+1} = sprintf('  Numerical rank    : %s', num2str(obs.rank));
-            L{end+1} = sprintf('  Condition number  : %.2e', obs.condNum);
-            L{end+1} = '';
-            L{end+1} = 'Measurement row counts (last epoch with observability):';
-            L{end+1} = sprintf('  Code rows         : %s', num2str(obs.nCodeRows));
-            L{end+1} = sprintf('  Doppler rows      : %s', num2str(obs.nDopplerRows));
-            L{end+1} = sprintf('  Carrier rows      : %s', num2str(obs.nCarrierRows));
-            L{end+1} = '';
-            L{end+1} = 'State counts:';
-            L{end+1} = sprintf('  Ambiguity states  : %s', num2str(obs.nAmbiguityStates));
-            L{end+1} = sprintf('  ZWD states        : %s', num2str(obs.nZwdStates));
-            L{end+1} = sprintf('  Tower clock states: %s', num2str(obs.nTowerClockStates));
-            L{end+1} = '';
-            if ~isempty(obs.warnings)
-                L{end+1} = sprintf('Warnings (%d):', numel(obs.warnings));
-                for k = 1:min(10,numel(obs.warnings))
-                    L{end+1} = sprintf('  [W%d] %s', k, obs.warnings{k}); %#ok<AGROW>
+            % Row 1: Observability rank time series
+            [axL1, axR1] = RL.addTwoColRow(fig, 0.62, 0.90);
+            rkOk = false;
+            try
+                t   = diag.getTimeVector();
+                grk = diag.getGeometryRank();
+                if ~isempty(t) && ~isempty(grk)
+                    stairs(axL1, t, grk, 'b-', 'LineWidth', 1);
+                    xlabel(axL1, 'Time [s]', 'FontSize', 8);
+                    ylabel(axL1, 'Rank', 'FontSize', 8);
+                    title(axL1, 'Geometry Rank', 'FontSize', 8, 'FontWeight','normal');
+                    grid(axL1, 'on'); set(axL1, 'Box','off');
+                    rkOk = true;
                 end
-            else
-                L{end+1} = 'Warnings: (none)';
-            end
-            L{end+1} = '';
-            if ~isempty(obs.errors)
-                L{end+1} = sprintf('Errors (%d):', numel(obs.errors));
-                for k = 1:min(10,numel(obs.errors))
-                    L{end+1} = sprintf('  [E%d] %s', k, obs.errors{k}); %#ok<AGROW>
-                end
-            else
-                L{end+1} = 'Errors: (none)';
-            end
-            L{end+1} = '';
-            L{end+1} = 'NOTE: Observability diagnostics are computed only when';
-            L{end+1} = '  cfg.diagnostics.observability.enabled = true.';
-            L{end+1} = '  If all fields show NaN, enable diagnostics and re-run.';
+            catch; end
+            if ~rkOk; RL.addNoPlot(axL1); end
 
-            text(ax, 0.02, 0.97, strjoin(L,'\n'), ...
-                'Units','normalized', 'VerticalAlignment','top', ...
-                'FontName','Courier', 'FontSize',8.5, 'Interpreter','none');
+            rkInfo = {};
+            rkInfo{end+1} = sprintf('Numerical rank    : %s', num2str(obs.rank));
+            rkInfo{end+1} = sprintf('Condition number  : %.2e', obs.condNum);
+            rkInfo{end+1} = '';
+            rkInfo{end+1} = 'Measurement row counts (last epoch with observability data):';
+            rkInfo{end+1} = sprintf('  Code rows         : %s', num2str(obs.nCodeRows));
+            rkInfo{end+1} = sprintf('  Doppler rows      : %s', num2str(obs.nDopplerRows));
+            rkInfo{end+1} = sprintf('  Carrier rows      : %s', num2str(obs.nCarrierRows));
+            rkInfo{end+1} = '';
+            rkInfo{end+1} = 'State counts:';
+            rkInfo{end+1} = sprintf('  Ambiguity states  : %s', num2str(obs.nAmbiguityStates));
+            rkInfo{end+1} = sprintf('  ZWD states        : %s', num2str(obs.nZwdStates));
+            rkInfo{end+1} = sprintf('  Tower clock states: %s', num2str(obs.nTowerClockStates));
+            RL.addDescText(axR1, 'Observability and Geometry Rank', rkInfo);
+
+            RL.addHRule(fig, 0.61);
+
+            % Warnings / errors block
+            RL.addSectionHeader(fig, '7.1  Observability Warnings and Errors', 0.60);
+            warnLines = {};
+            if ~isempty(obs.warnings)
+                warnLines{end+1} = sprintf('Warnings (%d):', numel(obs.warnings));
+                for k = 1:min(8,numel(obs.warnings))
+                    warnLines{end+1} = sprintf('  [W%d] %s', k, obs.warnings{k}); %#ok<AGROW>
+                end
+            else
+                warnLines{end+1} = 'Warnings: (none)';
+            end
+            if ~isempty(obs.errors)
+                warnLines{end+1} = '';
+                warnLines{end+1} = sprintf('Errors (%d):', numel(obs.errors));
+                for k = 1:min(8,numel(obs.errors))
+                    warnLines{end+1} = sprintf('  [E%d] %s', k, obs.errors{k}); %#ok<AGROW>
+                end
+            else
+                warnLines{end+1} = 'Errors: (none)';
+            end
+            warnLines{end+1} = '';
+            warnLines{end+1} = 'NOTE: Observability diagnostics require cfg.diagnostics.observability.enabled=true.';
+            warnLines{end+1} = '      If fields show NaN, enable diagnostics and re-run.';
+            RL.addBodyText(fig, warnLines, 0.55, 0.04);
         end
 
         % ================================================================
+        % P08 — Scientific Verdict (Numerical Summary)
+        % ================================================================
         function fig = makeVerdictPage_(cfg, summary)
-            fig = figure('Visible','off','Name','P08 — Scientific Verdict', ...
-                         'Units','normalized','Position',[0.05 0.05 0.8 0.9]);
-            ax  = axes(fig,'Position',[0.05 0.05 0.9 0.9],'Visible','off');
+            RL  = revgnss.ReportLayout;
+            fig = RL.createPage('P08 — Scientific Verdict');
+
+            RL.addSectionHeader(fig, '8. Numerical Summary', 0.97);
+
+            % Top-level metrics
+            pos3D   = NaN; if isfield(summary,'finalPos3D_m');     pos3D   = summary.finalPos3D_m;     end
+            clkM    = NaN; if isfield(summary,'finalClockErr_m');  clkM    = summary.finalClockErr_m;  end
+            clkPs   = NaN; if isfield(summary,'finalClockErr_ps'); clkPs   = summary.finalClockErr_ps; end
+            pfRMS   = NaN; if isfield(summary,'finalPrefitRMS_m'); pfRMS   = summary.finalPrefitRMS_m; end
+            poRMS   = NaN; if isfield(summary,'finalPostfitRMS_m');poRMS   = summary.finalPostfitRMS_m;end
+            mxEKF   = NaN; if isfield(summary,'maxEKFRows');       mxEKF   = summary.maxEKFRows;       end
+            nCd     = NaN; if isfield(summary,'totalCodeRows');     nCd     = summary.totalCodeRows;    end
+            nDp     = NaN; if isfield(summary,'totalDopplerRows');  nDp     = summary.totalDopplerRows; end
+            nCr     = NaN; if isfield(summary,'totalCarrierRows');  nCr     = summary.totalCarrierRows; end
+
+            metricHdr  = sprintf('  %-44s  %s', 'Quantity', 'Value');
+            metricRule = ['  ' repmat('-', 1, 65)];
+            metricLines = {metricHdr, metricRule};
+            metricLines{end+1} = sprintf('  %-44s  %.6f m', 'Final 3D position estimation error', pos3D);
+            metricLines{end+1} = sprintf('  %-44s  %.6f m (%.0f ps)', 'Final clock estimation error', clkM, clkPs);
+            metricLines{end+1} = sprintf('  %-44s  %.6f m', 'Final pre-fit pseudorange innovation RMS', pfRMS);
+            metricLines{end+1} = sprintf('  %-44s  %.6f m', 'Final post-fit pseudorange residual RMS', poRMS);
+            metricLines{end+1} = sprintf('  %-44s  %g', 'Max EKF measurement rows / epoch', mxEKF);
+            metricLines{end+1} = sprintf('  %-44s  code=%g  doppler=%g  carrier=%g', ...
+                'Total measurement rows (full run)', nCd, nDp, nCr);
+            RL.addBodyText(fig, metricLines, 0.91, 0.66);
+
+            RL.addHRule(fig, 0.65);
+            RL.addSectionHeader(fig, '8.1  Scientific Validity Assessment', 0.64);
 
             carrierMode = 'diagnostic';
             codeMode    = 'singleFrequency';
-            ambMode     = 'none';
             tropoMode   = 'none';
             if isfield(summary,'carrierMode');     carrierMode = summary.carrierMode;     end
             if isfield(summary,'codeMode');        codeMode    = summary.codeMode;        end
-            if isfield(summary,'ambiguityMode');   ambMode     = summary.ambiguityMode;   end
             if isfield(summary,'troposphereMode'); tropoMode   = summary.troposphereMode; end
 
-            L = {};
-            L{end+1} = '8. Scientific Verdict';
-            L{end+1} = '=====================';
-            L{end+1} = '';
-
-            % Valid claims
-            L{end+1} = 'What IS valid in this run:';
-            L{end+1} = '  + Pseudorange-based position and clock estimation (EKF)';
-            L{end+1} = '  + Sagnac / Shapiro corrections (when enabled)';
-            L{end+1} = '  + Matched-error baseline (innovations near zero when truth=model)';
+            validLines = {};
+            validLines{end+1} = 'What IS valid in this run:';
+            validLines{end+1} = '  + Pseudorange-based position and clock estimation (EKF)';
+            validLines{end+1} = '  + Sagnac / Shapiro corrections (when enabled)';
+            validLines{end+1} = '  + Matched-error baseline (innovations near zero when truth=model)';
             if strcmp(codeMode,'ionosphereFree')
-                L{end+1} = '  + Ionosphere-free code combination (first-order iono removed)';
+                validLines{end+1} = '  + Ionosphere-free code combination (first-order iono removed algebraically)';
             end
             if strcmp(tropoMode,'perTowerZwd')
-                L{end+1} = '  + ZWD state estimation (per-tower, config-driven mapping)';
+                validLines{end+1} = '  + ZWD state estimation (per-tower, config-driven mapping function)';
             end
-
-            L{end+1} = '';
-            L{end+1} = 'What is DIAGNOSTIC only:';
+            validLines{end+1} = '';
+            validLines{end+1} = 'What is DIAGNOSTIC only (not used in EKF position solution):';
             if strcmp(carrierMode,'diagnostic')
-                L{end+1} = '  ~ Carrier phase (diagnostic mode: not used in EKF)';
+                validLines{end+1} = '  ~ Carrier phase (diagnostic mode: computed but NOT fed to EKF)';
             elseif strcmp(carrierMode,'ekfFloat')
-                L{end+1} = '  ~ Carrier phase EKF (float ambiguities, L1 only)';
-                L{end+1} = '    Ambiguities converge but absolute phase alignment not claimed.';
+                validLines{end+1} = '  ~ Carrier phase EKF (float ambiguities, L1 only)';
+                validLines{end+1} = '    Ambiguities converge but absolute phase alignment is not claimed.';
             end
+            validLines{end+1} = '';
+            validLines{end+1} = 'What is NOT implemented (hard limitations, v1):';
+            validLines{end+1} = '  - Integer ambiguity resolution (float only)';
+            validLines{end+1} = '  - L2 carrier EKF rows or carrier ionosphere-free combination';
+            validLines{end+1} = '  - ANTEX, IONEX, SP3, CLK, RINEX parsers (no real data products)';
+            validLines{end+1} = '  - VMF3, GPT3, ERA5 troposphere models';
+            validLines{end+1} = '  - PPP-grade, centimetre-level, or millimetre-level accuracy';
+            validLines{end+1} = '  - Differential code bias (DCB) calibration';
+            RL.addBodyText(fig, validLines, 0.59, 0.28);
 
-            L{end+1} = '';
-            L{end+1} = 'What is EXPERIMENTAL:';
-            L{end+1} = '  ~ Continued-fraction ZWD mapping (illustrative, not Niell/VMF3)';
-            L{end+1} = '  ~ Tower clock product struct (no real SP3/CLK ingest)';
+            RL.addHRule(fig, 0.27);
 
-            L{end+1} = '';
-            L{end+1} = 'What is NOT implemented:';
-            L{end+1} = '  - Integer ambiguity resolution';
-            L{end+1} = '  - L2 carrier EKF rows';
-            L{end+1} = '  - ANTEX, IONEX, SP3/CLK, RINEX parsers';
-            L{end+1} = '  - VMF3 / GPT3 / ERA5 troposphere models';
-            L{end+1} = '  - PPP-grade or centimeter accuracy';
-            L{end+1} = '  - DCB calibration';
-            L{end+1} = '';
-
+            % Config warnings + test status
             warnList = {};
             if isfield(summary,'validationWarnings'); warnList = summary.validationWarnings; end
+            statusLines = revgnss.ReportStatus.summaryLines();
+            stBlock = {};
+            stBlock{end+1} = 'Test Status:';
+            for k = 1:numel(statusLines)
+                stBlock{end+1} = sprintf('  %s', statusLines{k}); %#ok<AGROW>
+            end
             if ~isempty(warnList)
-                L{end+1} = sprintf('Config sanitization warnings (%d):', numel(warnList));
-                for k = 1:min(8,numel(warnList))
-                    L{end+1} = sprintf('  [W%d] %s', k, warnList{k}); %#ok<AGROW>
+                stBlock{end+1} = '';
+                stBlock{end+1} = sprintf('Config sanitization warnings (%d):', numel(warnList));
+                for k = 1:min(6,numel(warnList))
+                    stBlock{end+1} = sprintf('  [W%d] %s', k, warnList{k}); %#ok<AGROW>
                 end
             end
-
-            L{end+1} = '';
-            L{end+1} = '--- Test Status ---';
-            statusLines = revgnss.ReportStatus.summaryLines();
-            for k = 1:numel(statusLines)
-                L{end+1} = sprintf('  %s', statusLines{k}); %#ok<AGROW>
-            end
-
-            text(ax, 0.02, 0.97, strjoin(L,'\n'), ...
-                'Units','normalized', 'VerticalAlignment','top', ...
-                'FontName','Courier', 'FontSize',9, 'Interpreter','none');
+            RL.addBodyText(fig, stBlock, 0.26, 0.04);
         end
 
+        % ================================================================
+        % P09 — Appendix (Disabled Components & Known Limitations)
         % ================================================================
         function fig = makeAppendixPage_(cfg, summary)
-            fig = figure('Visible','off','Name','P09 — Appendix', ...
-                         'Units','normalized','Position',[0.05 0.05 0.8 0.9]);
-            ax  = axes(fig,'Position',[0.05 0.05 0.9 0.9],'Visible','off');
+            RL  = revgnss.ReportLayout;
+            fig = RL.createPage('P09 — Appendix');
 
-            L = {};
-            L{end+1} = '9. Appendix';
-            L{end+1} = '===========';
-            L{end+1} = '';
-            L{end+1} = 'Generated files:';
-            pdfP = ''; matP = '';
-            if isfield(summary,'pdfPath'); pdfP = summary.pdfPath; end
-            if isfield(summary,'matPath'); matP = summary.matPath; end
-            L{end+1} = sprintf('  PDF : %s', pdfP);
-            L{end+1} = sprintf('  MAT : %s', matP);
-            L{end+1} = '';
-            L{end+1} = 'Key config fields (abbreviated):';
-            L{end+1} = sprintf('  scenario.nTowers    : %d', cfg.scenario.nTowers);
-            L{end+1} = sprintf('  scenario.nReceivers : %d', cfg.scenario.nReceivers);
-            L{end+1} = sprintf('  simulation.dt_s     : %.1f', cfg.simulation.dt_s);
-            L{end+1} = sprintf('  simulation.duration_s: %.0f', cfg.simulation.duration_s);
-            L{end+1} = sprintf('  simulation.seed     : %d', cfg.simulation.seed);
-            L{end+1} = '';
-            L{end+1} = 'Known limitations (v1 Stage 7A):';
-            L{end+1} = '  * No integer ambiguity fixing (float EKF only)';
-            L{end+1} = '  * Raw L1 carrier only — no L2 carrier EKF, no IF carrier';
-            L{end+1} = '  * No ANTEX parser — elevation-only PCV table or toy model';
-            L{end+1} = '  * Ionosphere: simpleSecant(1/sin) or thinShell mapping only';
-            L{end+1} = '  * Klobuchar model is NOT implemented';
-            L{end+1} = '  * No IONEX product ingest';
-            L{end+1} = '  * No SP3/CLK product ingest (history or explicit struct)';
-            L{end+1} = '  * No RINEX parser';
-            L{end+1} = '  * No VMF3/GPT3/ERA5 (simple or continued-fraction mapping)';
-            L{end+1} = '  * No azimuth-dependent PCV';
-            L{end+1} = '  * No PPP-grade or mm-level accuracy claim';
+            RL.addSectionHeader(fig, '9. Disabled Components and Known Limitations', 0.97);
 
-            text(ax, 0.02, 0.97, strjoin(L,'\n'), ...
-                'Units','normalized', 'VerticalAlignment','top', ...
-                'FontName','Courier', 'FontSize',9, 'Interpreter','none');
+            % Section intro
+            introLine = 'Components not included in this run are listed below as "No plot generated." entries.';
+            RL.addBodyText(fig, {introLine}, 0.91, 0.87);
+            RL.addHRule(fig, 0.86);
+
+            % Build list of disabled components from config
+            function en = getEn_(cfg2, path, def)
+                en = def;
+                node = cfg2;
+                for ki = 1:numel(path)
+                    if ~isstruct(node) || ~isfield(node, path{ki}); return; end
+                    node = node.(path{ki});
+                end
+                if islogical(node) || isnumeric(node); en = logical(node); end
+            end
+
+            disabledItems = {};
+            if ~getEn_(cfg,{'errors','multipath','truth','enable'},false)
+                disabledItems{end+1} = {'Multipath and NLOS', ...
+                    'Multipath and non-line-of-sight effects are not modelled in this run.'};
+            end
+            if ~getEn_(cfg,{'errors','hardwareDelay','truth','enable'},false)
+                disabledItems{end+1} = {'Hardware Delay', ...
+                    'Transmitter and receiver hardware delay states are not estimated.'};
+            end
+            if ~getEn_(cfg,{'effects','towerSurvey','truth','enable'},false)
+                disabledItems{end+1} = {'Tower Survey Error', ...
+                    'Tower geodetic position uncertainty is not modelled.'};
+            end
+            if ~getEn_(cfg,{'effects','antennaPCO','truth','enable'},false)
+                disabledItems{end+1} = {'Antenna PCO', ...
+                    'Antenna phase-centre offset correction is not applied.'};
+            end
+            if ~getEn_(cfg,{'effects','antennaPCV','truth','enable'},false)
+                disabledItems{end+1} = {'Antenna PCV', ...
+                    'Elevation-dependent antenna phase-centre variation is not applied.'};
+            end
+            if ~getEn_(cfg,{'measurements','carrierPhase','useInEKF'},false)
+                disabledItems{end+1} = {'Carrier Phase in EKF', ...
+                    'Carrier phase is computed but not fed into the EKF (diagnostic only).'};
+            end
+
+            % Always-disabled (v1 limitations)
+            disabledItems{end+1} = {'Integer Ambiguity Resolution', ...
+                'No integer fixing is implemented. Float ambiguities only (v1 limitation).'};
+            disabledItems{end+1} = {'L2 Carrier EKF / Carrier IF', ...
+                'No L2 carrier EKF rows and no carrier ionosphere-free combination (v1 limitation).'};
+            disabledItems{end+1} = {'External Data Products (ANTEX / SP3 / CLK)', ...
+                'No ANTEX, IONEX, SP3, CLK, or RINEX parsers are implemented (v1 limitation).'};
+            disabledItems{end+1} = {'VMF3 / GPT3 / ERA5 Troposphere', ...
+                'No advanced troposphere model is used. Simple secant or continued-fraction only.'};
+
+            % Lay out no-plot rows
+            nItems = numel(disabledItems);
+            yStart = 0.84;
+            rowH   = min(0.09, (yStart - 0.04) / max(nItems, 1));
+
+            for k = 1:nItems
+                yB = yStart - k * rowH;
+                yT = yB + rowH;
+                [axLk, axRk] = RL.addTwoColRow(fig, yB, yT);
+                RL.addNoPlot(axLk);
+                RL.addDescText(axRk, disabledItems{k}{1}, {disabledItems{k}{2}});
+                if k < nItems
+                    RL.addHRule(fig, yB);
+                end
+            end
         end
 
         % ================================================================
-        function texPath = writeTexFile_(cfg, summary)
-            % writeTexFile_  Write a LaTeX source file (.tex) beside the PDF.
+        % .tex writer (longtable format matching original generateReport style)
+        % ================================================================
+        function texPath = writeTexFile_(cfg, summary, diag)
+            if nargin < 3; diag = []; end
 
             baseDir = fullfile(fileparts(mfilename('fullpath')), '..', 'output');
             if isfield(cfg,'report') && isfield(cfg.report,'baseOutputDir')
@@ -725,57 +959,268 @@ classdef LatexReportBuilder
             if isfield(cfg,'report') && isfield(cfg.report,'dateFolderPrefix')
                 prefix = cfg.report.dateFolderPrefix;
             end
-            version = '1.00';
+            ver = '1.00';
             if isfield(cfg,'report') && isfield(cfg.report,'version')
-                version = cfg.report.version;
+                ver = cfg.report.version;
             end
             reportFolder = fullfile(baseDir, [prefix datestr(now,'yyyymmdd')]); %#ok<TNOW1,DATST>
             if ~exist(reportFolder,'dir'); mkdir(reportFolder); end
-            texPath = fullfile(reportFolder, sprintf('report-v%s.tex', version));
+            texPath = fullfile(reportFolder, sprintf('report-v%s.tex', ver));
 
             scenarioName = 'GEO-1';
             if isfield(cfg,'asset') && isfield(cfg.asset,'name')
                 scenarioName = cfg.asset.name;
             end
-            ts = datestr(now,'yyyy-mm-dd'); %#ok<TNOW1,DATST>
+            ts  = datestr(now,'yyyy-mm-dd'); %#ok<TNOW1,DATST>
             if isfield(summary,'timestamp'); ts = summary.timestamp(1:10); end
             sha = revgnss.LatexReportBuilder.getGitSHA_();
 
+            nTwr = 5;
+            if isfield(cfg,'scenario') && isfield(cfg.scenario,'nTowers')
+                nTwr = cfg.scenario.nTowers;
+            end
+            dur  = 3600;
+            if isfield(cfg,'simulation') && isfield(cfg.simulation,'duration_s')
+                dur = cfg.simulation.duration_s;
+            end
+            codeMode    = '—';
+            carrierMode = '—';
+            if isfield(cfg,'measurements')
+                if isfield(cfg.measurements,'codeMode');    codeMode    = cfg.measurements.codeMode;    end
+                if isfield(cfg.measurements,'carrierMode'); carrierMode = cfg.measurements.carrierMode; end
+            end
+
             fid = fopen(texPath,'w');
             if fid < 0
-                warning('LatexReportBuilder:texWriteFailed','Cannot write .tex file: %s', texPath);
+                warning('LatexReportBuilder:texWriteFailed','Cannot write .tex: %s', texPath);
                 texPath = '';
                 return
             end
 
+            % Preamble (original style)
             fprintf(fid,'\\documentclass[11pt,a4paper]{article}\n');
-            fprintf(fid,'\\usepackage[margin=2cm]{geometry}\n');
-            fprintf(fid,'\\usepackage{booktabs,amsmath,lmodern,microtype}\n');
-            fprintf(fid,'\\title{Reverse-GNSS Simulation Report\\\\ \\large{oo\\_v1 Stage 7A --- Scientific Validation}}\n');
-            fprintf(fid,'\\author{CranMatuschka --- claude-sonnet-4-6}\n');
-            fprintf(fid,'\\date{%s \\\\ Commit: %s}\n', ts, sha);
+            fprintf(fid,'\\usepackage[margin=1.7cm]{geometry}\n');
+            fprintf(fid,'\\usepackage{graphicx}\n');
+            fprintf(fid,'\\usepackage{longtable}\n');
+            fprintf(fid,'\\usepackage{array}\n');
+            fprintf(fid,'\\usepackage{booktabs}\n');
+            fprintf(fid,'\\usepackage{xcolor}\n');
+            fprintf(fid,'\\usepackage{hyperref}\n');
+            fprintf(fid,'\\setlength{\\parindent}{0pt}\n');
+            fprintf(fid,'\\setlength{\\tabcolsep}{3pt}\n');
+            fprintf(fid,'\\renewcommand{\\arraystretch}{1.18}\n');
+            fprintf(fid,'\\hypersetup{colorlinks=true,linkcolor=black,urlcolor=blue}\n');
             fprintf(fid,'\\begin{document}\n');
-            fprintf(fid,'\\maketitle\n');
-            fprintf(fid,'\\begin{abstract}\n');
-            fprintf(fid,'This report documents the oo\\_v1 Stage 7A reverse-GNSS simulation.\n');
-            fprintf(fid,'Scenario: %s. Duration: %.0f s.\n', scenarioName, cfg.simulation.duration_s);
-            fprintf(fid,'Scientific limitations: no integer ambiguity resolution, raw L1 carrier only,\n');
-            fprintf(fid,'no external data products (ANTEX/IONEX/SP3/CLK), no VMF3/GPT3.\n');
-            fprintf(fid,'\\end{abstract}\n');
-            fprintf(fid,'\\section{Model Equations}\n');
-            fprintf(fid,'Code pseudorange: $P_f = \\rho + b_{rx} - b_{twr} + T + I_f + \\varepsilon_P$\n\n');
-            fprintf(fid,'Carrier phase: $\\Phi_f = \\rho + b_{rx} - b_{twr} + T - I_f + B_\\phi + \\varepsilon_\\phi$\n\n');
-            fprintf(fid,'IF combination: $P_{IF} = \\alpha P_1 + \\beta P_2$, $\\alpha = f_1^2/(f_1^2-f_2^2)$\n\n');
-            fprintf(fid,'\\section{Configuration}\n');
-            fprintf(fid,'See configuration table in MATLAB report page P03.\n');
-            fprintf(fid,'\\section{Limitations}\n');
-            fprintf(fid,'\\begin{itemize}\n');
-            fprintf(fid,'\\item No integer ambiguity fixing\n');
-            fprintf(fid,'\\item Raw L1 carrier only in ekfFloat mode\n');
-            fprintf(fid,'\\item No ANTEX/IONEX/SP3/CLK/RINEX parsers\n');
-            fprintf(fid,'\\item No VMF3/GPT3/ERA5 troposphere models\n');
-            fprintf(fid,'\\item No PPP-grade claim\n');
-            fprintf(fid,'\\end{itemize}\n');
+
+            % Title
+            fprintf(fid,'\\begin{center}\n');
+            fprintf(fid,'{\\Large \\textbf{Reverse-GNSS Spacecraft Code-Pseudorange EKF Report}}\\\\[4pt]\n');
+            fprintf(fid,'{\\large Scenario: \\textbf{%s}}\\\\[4pt]\n', revgnss.LatexReportBuilder.texEscape_(scenarioName));
+            fprintf(fid,'{\\small Generated by oo\\_v1 on %s \\\\ Commit: %s}\n', ts, sha);
+            fprintf(fid,'\\end{center}\n');
+            fprintf(fid,'\\vspace{0.3cm}\n');
+
+            % Section 1: Scenario Summary
+            fprintf(fid,'\\section{Scenario Summary}\n');
+            fprintf(fid,['This report documents a reverse-GNSS simulation run using the oo\\_v1 ' ...
+                'MATLAB simulator. A ground-based network of %d towers transmits signals ' ...
+                'received by a GEO space asset over %.0f seconds (%.2f hours). ' ...
+                'The EKF estimates spacecraft position, velocity, attitude, and receiver clock states.\n\n'], ...
+                nTwr, dur, dur/3600);
+            fprintf(fid,'Observable mode: \\texttt{%s}. Carrier mode: \\texttt{%s}.\n\n', ...
+                revgnss.LatexReportBuilder.texEscape_(codeMode), ...
+                revgnss.LatexReportBuilder.texEscape_(carrierMode));
+            fprintf(fid,['Receiver clock bias $b_{rx}$ has \\textbf{positive} sign (adds to pseudorange). ' ...
+                'Tower clock bias $b_{twr}$ has \\textbf{negative} sign (subtracts from pseudorange). ' ...
+                'Ionosphere delay is positive for code, negative for carrier (phase advance).\n\n']);
+
+            % Subsection: EKF State Vector
+            fprintf(fid,'\\subsection{EKF State Vector}\n');
+            fprintf(fid,'The filter is an error-state EKF. The 14 base states are listed below.\n\n');
+            fprintf(fid,'\\begin{center}\n\\scriptsize\n');
+            fprintf(fid,['\\begin{longtable}{@{}>\\{\\raggedright\\arraybackslash\\}p{0.055\\textwidth}' ...
+                '>\\{\\raggedright\\arraybackslash\\}p{0.175\\textwidth}' ...
+                '>\\{\\raggedright\\arraybackslash\\}p{0.295\\textwidth}' ...
+                '>\\{\\raggedright\\arraybackslash\\}p{0.070\\textwidth}' ...
+                '>\\{\\raggedright\\arraybackslash\\}p{0.270\\textwidth}@{}}\n']);
+            fprintf(fid,'\\toprule\n');
+            fprintf(fid,'\\textbf{Index} & \\textbf{Symbol} & \\textbf{Description} & \\textbf{Unit} & \\textbf{DynamicCouplingNote}\\\\\n');
+            fprintf(fid,'\\midrule\n');
+            stateRows = { ...
+                '1','delta r_{I,x}','ECI X position','m','Coupled to velocity through dynamics'; ...
+                '2','delta r_{I,y}','ECI Y position','m','Coupled to velocity through dynamics'; ...
+                '3','delta r_{I,z}','ECI Z position','m','Coupled to velocity through dynamics'; ...
+                '4','delta v_{I,x}','ECI X velocity','m/s','Affects future position through dynamics'; ...
+                '5','delta v_{I,y}','ECI Y velocity','m/s','Affects future position through dynamics'; ...
+                '6','delta v_{I,z}','ECI Z velocity','m/s','Affects future position through dynamics'; ...
+                '7','delta theta_{B,x}','Body attitude error x','rad','Zero when receiver lever arm is zero'; ...
+                '8','delta theta_{B,y}','Body attitude error y','rad','Zero when receiver lever arm is zero'; ...
+                '9','delta theta_{B,z}','Body attitude error z','rad','Zero when receiver lever arm is zero'; ...
+                '10','delta omega_{B,x}','Body omega x','rad/s','Affects future attitude through dynamics'; ...
+                '11','delta omega_{B,y}','Body omega y','rad/s','Affects future attitude through dynamics'; ...
+                '12','delta omega_{B,z}','Body omega z','rad/s','Affects future attitude through dynamics'; ...
+                '13','delta b_{rx}','RX clock bias (POSITIVE sign)','m','Directly estimated at measurement epoch'; ...
+                '14','delta dot{b}_{rx}','RX clock drift','m/s','Affects future receiver clock bias'; ...
+            };
+            for k = 1:size(stateRows,1)
+                fprintf(fid,'%s & %s & %s & %s & %s\\\\\n', stateRows{k,:});
+            end
+            fprintf(fid,'\\bottomrule\n');
+            fprintf(fid,'\\end{longtable}\n\\normalsize\n\\end{center}\n');
+
+            % Subsection: Measurement model
+            fprintf(fid,'\\subsection{Pseudorange Measurement Model}\n');
+            f1 = 1575.42e6; f2 = 1227.60e6;
+            a  = f1^2 / (f1^2 - f2^2);
+            b2 = -f2^2 / (f1^2 - f2^2);
+            fprintf(fid,'\\[\nP_f = \\rho + b_{rx} - b_{twr} + T + I_f + \\varepsilon_P, \\quad I_f \\geq 0 \\text{ (positive for code)}\n\\]\n');
+            fprintf(fid,'\\[\n\\Phi_f = \\rho + b_{rx} - b_{twr} + T - I_f + B_\\phi + \\varepsilon_\\phi, \\quad -I_f \\text{ (negative for carrier)}\n\\]\n');
+            fprintf(fid,'\\[\nP_{\\mathrm{IF}} = \\alpha P_1 + \\beta P_2, \\quad \\alpha = %.6f, \\quad \\beta = %.6f\n\\]\n', a, b2);
+
+            % Subsection: Component Status
+            fprintf(fid,'\\subsection{Component Status}\n');
+            fprintf(fid,'\\begin{center}\n');
+            fprintf(fid,'\\begin{tabular}{p{0.39\\textwidth}p{0.18\\textwidth}p{0.34\\textwidth}}\n');
+            fprintf(fid,'\\toprule\n');
+            fprintf(fid,'\\textbf{Component or scenario} & \\textbf{Status} & \\textbf{Report action}\\\\\n');
+            fprintf(fid,'\\midrule\n');
+            function en = getEnTex_(cfg2, path, def)
+                en = def;
+                node = cfg2;
+                for ki = 1:numel(path)
+                    if ~isstruct(node) || ~isfield(node, path{ki}); return; end
+                    node = node.(path{ki});
+                end
+                if islogical(node) || isnumeric(node); en = logical(node); end
+            end
+            compStatus = { ...
+                'Troposphere (truth)',        getEnTex_(cfg,{'errors','troposphere','truth','enable'},false); ...
+                'Ionosphere (truth)',         getEnTex_(cfg,{'errors','ionosphere','truth','enable'},false); ...
+                'Sagnac correction (model)',  getEnTex_(cfg,{'physics','sagnac','model','enable'},false); ...
+                'Two-frequency (L1+L2)',      getEnTex_(cfg,{'signals','twoFrequency','enable'},false); ...
+                'Doppler in EKF',            getEnTex_(cfg,{'measurements','doppler','useInEKF'},false); ...
+                'Carrier phase in EKF',      getEnTex_(cfg,{'measurements','carrierPhase','useInEKF'},false); ...
+                'Hardware delay',            getEnTex_(cfg,{'errors','hardwareDelay','truth','enable'},false); ...
+                'Multipath',                 getEnTex_(cfg,{'errors','multipath','truth','enable'},false); ...
+                'Integer ambiguity fixing',  false; ...
+                'L2 carrier EKF',            false; ...
+                'ANTEX/SP3/CLK parsers',     false; ...
+                'VMF3/GPT3 troposphere',     false; ...
+                'PPP-grade accuracy',        false; ...
+            };
+            for k = 1:size(compStatus,1)
+                compN = revgnss.LatexReportBuilder.texEscape_(compStatus{k,1});
+                isEn2 = compStatus{k,2};
+                if isEn2
+                    stTex  = '\\textcolor{green!45!black}{Enabled}';
+                    actTex = 'Included in this report.';
+                else
+                    stTex  = '\\textcolor{gray}{Disabled}';
+                    actTex = 'Not part of this run.';
+                end
+                fprintf(fid,'%s & %s & %s\\\\\n', compN, stTex, actTex);
+                fprintf(fid,'\\midrule\n');
+            end
+            fprintf(fid,'\\bottomrule\n');
+            fprintf(fid,'\\end{tabular}\n\\end{center}\n');
+            fprintf(fid,'\\clearpage\n');
+
+            % Section 2: State Estimation Validation (plot-description rows)
+            fprintf(fid,'\\section{State Estimation Validation}\n');
+            fprintf(fid,['EKF state estimates are compared with truth using deterministic truth differencing. ' ...
+                'No measurement noise is injected unless the noise toggle is enabled.\n\n']);
+            fprintf(fid,'\\begin{longtable}{p{0.47\\textwidth}p{0.47\\textwidth}}\n');
+            fprintf(fid,'\\toprule\n');
+            fprintf(fid,'\\textbf{Plot} & \\textbf{Description and statistical approach}\\\\\n');
+            fprintf(fid,'\\midrule\n');
+
+            plotRows1 = { ...
+                '', 'Combined EKF Local Position Error', ...
+                ['The plot compares the EKF local East/North/Vertical position estimate with truth ' ...
+                 'in all three local axes and as a 3D norm. Diagnostic is deterministic truth differencing.']; ...
+                '', 'Spacecraft Receiver Clock Estimation Error', ...
+                ['The plot shows the EKF clock-bias estimation error. The clock process follows ' ...
+                 'the selected oscillator power-law noise model (Brown-Hwang two-state).']; ...
+                '', 'Normalised Innovation Squared (NIS)', ...
+                ['NIS is chi-square consistent only when measurement noise is stochastic, zero-mean, ' ...
+                 'and represented correctly in R. In deterministic runs it is a numerical diagnostic.']; ...
+            };
+            for k = 1:size(plotRows1,1)
+                if ~isempty(plotRows1{k,1})
+                    fprintf(fid,'\\vspace{0pt}\\includegraphics[width=\\linewidth]{figures/%s} & \\vspace{0pt}\\textbf{%s}\\par\\vspace{3pt}%s\\\\\n', ...
+                        plotRows1{k,1}, plotRows1{k,2}, plotRows1{k,3});
+                else
+                    fprintf(fid,'\\vspace{0pt}\\textit{No plot generated.} & \\vspace{0pt}\\textbf{%s}\\par\\vspace{3pt}%s\\\\\n', ...
+                        plotRows1{k,2}, plotRows1{k,3});
+                end
+                fprintf(fid,'\\midrule\n');
+            end
+            fprintf(fid,'\\bottomrule\n\\end{longtable}\n');
+            fprintf(fid,'\\clearpage\n');
+
+            % Section 3: Measurement and Geometry Validation
+            fprintf(fid,'\\section{Measurement and Geometry Validation}\n');
+            fprintf(fid,['Pre-fit residuals test the predicted model before correction. ' ...
+                'Post-fit residuals show remaining error after the EKF update.\n\n']);
+            fprintf(fid,'\\begin{longtable}{p{0.47\\textwidth}p{0.47\\textwidth}}\n');
+            fprintf(fid,'\\toprule\n');
+            fprintf(fid,'\\textbf{Plot} & \\textbf{Description and statistical approach}\\\\\n');
+            fprintf(fid,'\\midrule\n');
+            plotRows2 = { ...
+                '', 'Pseudorange Pre-Fit and Post-Fit Residual RMS', ...
+                ['Pre-fit innovation (before EKF correction) and post-fit residual (after update). ' ...
+                 'With noise disabled this is a deterministic geometry and coupling diagnostic.']; ...
+                '', 'Error Source Contributions', ...
+                'Mismatch = RMS(truth effect - model effect) = deterministic innovation bias per effect.'; ...
+                '', 'Tower Rows Used by EKF', ...
+                'Number of ground towers passing the elevation mask at each epoch.'; ...
+            };
+            for k = 1:size(plotRows2,1)
+                fprintf(fid,'\\vspace{0pt}\\textit{No plot generated.} & \\vspace{0pt}\\textbf{%s}\\par\\vspace{3pt}%s\\\\\n', ...
+                    plotRows2{k,2}, plotRows2{k,3});
+                fprintf(fid,'\\midrule\n');
+            end
+            fprintf(fid,'\\bottomrule\n\\end{longtable}\n');
+            fprintf(fid,'\\clearpage\n');
+
+            % Section 4: Disabled Components
+            fprintf(fid,'\\section{Disabled Components}\n');
+            fprintf(fid,'\\begin{longtable}{p{0.47\\textwidth}p{0.47\\textwidth}}\n');
+            fprintf(fid,'\\toprule\n');
+            fprintf(fid,'\\textbf{Plot} & \\textbf{Description and statistical approach}\\\\\n');
+            fprintf(fid,'\\midrule\n');
+            disCompRows = { ...
+                'Integer Ambiguity Resolution', 'No integer fixing is implemented. Float ambiguities only (v1 limitation).'; ...
+                'L2 Carrier EKF', 'No L2 carrier EKF rows and no carrier ionosphere-free combination (v1).'; ...
+                'ANTEX / IONEX / SP3 / CLK parsers', 'No external GNSS data product parsers implemented (v1).'; ...
+                'VMF3 / GPT3 / ERA5 Troposphere', 'No advanced troposphere model; simple secant mapping only (v1).'; ...
+                'PPP-grade accuracy', 'No centimetre or millimetre accuracy is claimed (v1).'; ...
+            };
+            for k = 1:size(disCompRows,1)
+                fprintf(fid,'\\vspace{0pt}\\textit{No plot generated.} & \\vspace{0pt}\\textbf{%s}\\par\\vspace{3pt}%s\\\\\n', ...
+                    disCompRows{k,1}, disCompRows{k,2});
+                fprintf(fid,'\\midrule\n');
+            end
+            fprintf(fid,'\\bottomrule\n\\end{longtable}\n');
+            fprintf(fid,'\\clearpage\n');
+
+            % Section 5: Numerical Summary
+            fprintf(fid,'\\section{Numerical Summary}\n');
+            fprintf(fid,'\\begin{center}\n');
+            fprintf(fid,'\\begin{tabular}{p{0.52\\textwidth}p{0.25\\textwidth}}\n');
+            fprintf(fid,'\\toprule\n');
+            fprintf(fid,'\\textbf{Quantity} & \\textbf{Value}\\\\\n');
+            fprintf(fid,'\\midrule\n');
+            pos3D  = NaN; if isfield(summary,'finalPos3D_m');    pos3D  = summary.finalPos3D_m;    end
+            clkM2  = NaN; if isfield(summary,'finalClockErr_m'); clkM2  = summary.finalClockErr_m; end
+            pfRMS2 = NaN; if isfield(summary,'finalPrefitRMS_m');pfRMS2 = summary.finalPrefitRMS_m;end
+            fprintf(fid,'Final 3D position estimation error & %.6f m\\\\\n', pos3D);
+            fprintf(fid,'Final receiver clock estimation error & %.6f m\\\\\n', clkM2);
+            fprintf(fid,'Final pre-fit pseudorange innovation RMS & %.6f m\\\\\n', pfRMS2);
+            fprintf(fid,'Code mode & \\texttt{%s}\\\\\n', revgnss.LatexReportBuilder.texEscape_(codeMode));
+            fprintf(fid,'Carrier mode & \\texttt{%s}\\\\\n', revgnss.LatexReportBuilder.texEscape_(carrierMode));
+            fprintf(fid,'\\bottomrule\n');
+            fprintf(fid,'\\end{tabular}\n\\end{center}\n');
             fprintf(fid,'\\end{document}\n');
             fclose(fid);
 
@@ -783,8 +1228,21 @@ classdef LatexReportBuilder
         end
 
         % ================================================================
+        function s = texEscape_(s)
+            % texEscape_  Escape LaTeX special characters in a string.
+            s = strrep(s, '\', '\\textbackslash ');
+            s = strrep(s, '_', '\\_');
+            s = strrep(s, '&', '\\&');
+            s = strrep(s, '%', '\\%');
+            s = strrep(s, '#', '\\#');
+            s = strrep(s, '{', '\\{');
+            s = strrep(s, '}', '\\}');
+            s = strrep(s, '^', '\\^{}');
+            s = strrep(s, '~', '\\textasciitilde{}');
+        end
+
+        % ================================================================
         function compileTexFile_(texPath)
-            % compileTexFile_  Compile .tex with pdflatex in the tex directory.
             texDir = fileparts(texPath);
             [~,stem] = fileparts(texPath);
             cmd = sprintf('cd "%s" && pdflatex -interaction=nonstopmode "%s.tex" > /dev/null 2>&1', ...
@@ -800,7 +1258,6 @@ classdef LatexReportBuilder
 
         % ================================================================
         function available = detectLatexCompiler_()
-            % detectLatexCompiler_  True if pdflatex or xelatex is in PATH.
             [s1,~] = system('pdflatex --version 2>/dev/null');
             available = (s1 == 0);
             if ~available
@@ -811,7 +1268,6 @@ classdef LatexReportBuilder
 
         % ================================================================
         function sha = getGitSHA_()
-            % getGitSHA_  Return short git SHA of HEAD, or 'unknown'.
             sha = 'unknown';
             try
                 [s, out] = system('git rev-parse --short HEAD 2>/dev/null');
