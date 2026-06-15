@@ -37,10 +37,10 @@ classdef LatexReportBuilder
             figs{end+1} = revgnss.LatexReportBuilder.makeMeasurementSummaryPage_(diag, cfg, summary);
             figs{end+1} = revgnss.LatexReportBuilder.makeErrorBudgetPage_(diag, cfg);
             figs{end+1} = revgnss.LatexReportBuilder.makeObservabilityPage_(diag, cfg);
-            figs{end+1} = revgnss.LatexReportBuilder.makeObservableDiagPage_(diag, cfg);
-            figs{end+1} = revgnss.LatexReportBuilder.makeClockValidationPage_(diag, cfg, summary);
-            figs{end+1} = revgnss.LatexReportBuilder.makeVerdictPage_(cfg, summary);
-            figs{end+1} = revgnss.LatexReportBuilder.makeAppendixPage_(cfg, summary);
+            figs{end+1} = revgnss.LatexReportBuilder.makeObservableDiagPage_(diag, cfg);           % §4
+            figs{end+1} = revgnss.LatexReportBuilder.makeClockValidationPage_(diag, cfg, summary); % §5
+            figs{end+1} = revgnss.LatexReportBuilder.makeAppendixPage_(cfg, summary);              % §6
+            figs{end+1} = revgnss.LatexReportBuilder.makeVerdictPage_(cfg, summary);               % §7
 
             for k = 1:numel(figs)
                 if isgraphics(figs{k})
@@ -228,7 +228,7 @@ classdef LatexReportBuilder
             RL  = revgnss.ReportLayout;
             fig = RL.createPage('P02 — Model Equations');
 
-            RL.addSectionHeader(fig, '2. Measurement Model and Observation Matrix', 0.97);
+            RL.addSectionHeader(fig, '1.1  Measurement Model and Observation Matrix', 0.97);
 
             f1 = 1575.42e6; f2 = 1227.60e6;
             a  = f1^2 / (f1^2 - f2^2);
@@ -253,7 +253,7 @@ classdef LatexReportBuilder
             RL.addBodyText(fig, eqLines, 0.90, 0.55);
 
             RL.addHRule(fig, 0.54);
-            RL.addSectionHeader(fig, '2.1  Observation Matrix Terms', 0.53);
+            RL.addSectionHeader(fig, '1.1.1  Observation Matrix Terms', 0.53);
 
             % Term table (Term | Expression | Meaning)
             termHdr  = sprintf('  %-22s %-32s %s', 'Term', 'Expression', 'Meaning');
@@ -293,7 +293,7 @@ classdef LatexReportBuilder
             RL  = revgnss.ReportLayout;
             fig = RL.createPage('P03 — Configuration');
 
-            RL.addSectionHeader(fig, '3. Component Status', 0.97);
+            RL.addSectionHeader(fig, '1.2  Component Status', 0.97);
 
             introLine = 'The table below shows which physical effects are enabled (green) or disabled (gray) in this run.';
             RL.addBodyText(fig, {introLine}, 0.91, 0.86);
@@ -402,7 +402,7 @@ classdef LatexReportBuilder
             nTotal  = nBase + nTwrClk + nAmb + nZwd;
             try; nTotal = diag.log(end).ekf_nx; catch; end
 
-            RL.addSectionHeader(fig, '4. EKF State Vector', 0.97);
+            RL.addSectionHeader(fig, '1.3  EKF State Vector', 0.97);
 
             subTitle = sprintf('Total state dimension: %d  |  Tower clocks: %s  |  Ambiguities: %s  |  ZWD: %s', ...
                 nTotal, mat2str(estimTwr), mat2str(doAmb), mat2str(doZwd));
@@ -483,7 +483,7 @@ classdef LatexReportBuilder
             RL  = revgnss.ReportLayout;
             fig = RL.createPage('P05 — Measurement Summary');
 
-            RL.addSectionHeader(fig, '5. State Estimation Validation', 0.97);
+            RL.addSectionHeader(fig, '2. State Estimation Validation', 0.97);
 
             desc1 = ['The plots compare EKF state estimates with truth using deterministic ' ...
                      'truth differencing. Position error is the 3-D norm of the true minus ' ...
@@ -572,7 +572,7 @@ classdef LatexReportBuilder
             RL  = revgnss.ReportLayout;
             fig = RL.createPage('P06 — Error Budget');
 
-            RL.addSectionHeader(fig, '6. Measurement and Geometry Validation', 0.97);
+            RL.addSectionHeader(fig, '3. Measurement and Geometry Validation', 0.97);
 
             desc1 = ['Pre-fit residuals test the predicted measurement model before EKF correction. ' ...
                      'Post-fit residuals show the remaining error after the update. ' ...
@@ -699,7 +699,7 @@ classdef LatexReportBuilder
             RL  = revgnss.ReportLayout;
             fig = RL.createPage('P07 — Observability');
 
-            RL.addSectionHeader(fig, '7. Observability Analysis', 0.97);
+            RL.addSectionHeader(fig, '3.1  Observability Analysis', 0.97);
 
             obs = struct('rank',NaN,'condNum',NaN,'warnings',{{}},'errors',{{}}, ...
                 'nCodeRows',NaN,'nDopplerRows',NaN,'nCarrierRows',NaN, ...
@@ -752,7 +752,7 @@ classdef LatexReportBuilder
             RL.addHRule(fig, 0.61);
 
             % Warnings / errors block
-            RL.addSectionHeader(fig, '7.1  Observability Warnings and Errors', 0.60);
+            RL.addSectionHeader(fig, '3.1.1  Observability Warnings and Errors', 0.60);
             warnLines = {};
             if ~isempty(obs.warnings)
                 warnLines{end+1} = sprintf('Warnings (%d):', numel(obs.warnings));
@@ -784,7 +784,7 @@ classdef LatexReportBuilder
             RL  = revgnss.ReportLayout;
             fig = RL.createPage('P08 — Scientific Verdict');
 
-            RL.addSectionHeader(fig, '8. Numerical Summary', 0.97);
+            RL.addSectionHeader(fig, '7. Numerical Summary', 0.97);
 
             % Top-level metrics
             pos3D   = NaN; if isfield(summary,'finalPos3D_m');     pos3D   = summary.finalPos3D_m;     end
@@ -811,13 +811,19 @@ classdef LatexReportBuilder
                 revgnss.LatexReportBuilder.fmtV_(pfRMS, 'm'));
             metricLines{end+1} = sprintf('  %-44s  %s', 'Final post-fit pseudorange residual RMS', ...
                 revgnss.LatexReportBuilder.fmtV_(poRMS, 'm'));
-            metricLines{end+1} = sprintf('  %-44s  %g', 'Max EKF measurement rows / epoch', mxEKF);
-            metricLines{end+1} = sprintf('  %-44s  code=%g  doppler=%g  carrier=%g', ...
-                'Total measurement rows (full run)', nCd, nDp, nCr);
+            metricLines{end+1} = sprintf('  %-44s  %s', 'Max EKF measurement rows / epoch', ...
+                revgnss.LatexReportBuilder.fmtV_(mxEKF, ''));
+            if isnan(nCd) || isnan(nDp) || isnan(nCr)
+                metricLines{end+1} = sprintf('  %-44s  not available', ...
+                    'Total measurement rows (full run)');
+            else
+                metricLines{end+1} = sprintf('  %-44s  code=%g  doppler=%g  carrier=%g', ...
+                    'Total measurement rows (full run)', nCd, nDp, nCr);
+            end
             RL.addBodyText(fig, metricLines, 0.91, 0.66);
 
             RL.addHRule(fig, 0.65);
-            RL.addSectionHeader(fig, '8.1  Scientific Validity Assessment', 0.64);
+            RL.addSectionHeader(fig, '7.1  Scientific Validity Assessment', 0.64);
 
             carrierMode = 'diagnostic';
             codeMode    = 'singleFrequency';
@@ -883,7 +889,7 @@ classdef LatexReportBuilder
             RL  = revgnss.ReportLayout;
             fig = RL.createPage('P09 — Appendix');
 
-            RL.addSectionHeader(fig, '9. Disabled Components and Known Limitations', 0.97);
+            RL.addSectionHeader(fig, '6. Disabled Components and Known Limitations', 0.97);
 
             % Section intro
             introLine = 'Components not included in this run are listed below as "No plot generated." entries.';
@@ -972,7 +978,7 @@ classdef LatexReportBuilder
             RL  = revgnss.ReportLayout;
             fig = RL.createPage('P10 — Observable Diagnostics');
 
-            RL.addSectionHeader(fig, '4. Per-Observable and Geometry Diagnostics', 0.97);
+            RL.addSectionHeader(fig, '4. Per-Receiver Measurement Diagnostics', 0.97);
 
             desc1 = ['Doppler innovation and post-fit RMS track the frequency-difference observable ' ...
                      'quality. DOP metrics assess the geometric diversity of the tower network ' ...
@@ -1421,7 +1427,57 @@ classdef LatexReportBuilder
             fprintf(fid,'\\bottomrule\n\\end{longtable}\n');
             fprintf(fid,'\\clearpage\n');
 
-            % Section 4: Disabled Components
+            % Section 4: Per-Receiver Measurement Diagnostics
+            fprintf(fid,'\\section{Per-Receiver Measurement Diagnostics}\n');
+            fprintf(fid,['Doppler innovation and post-fit RMS track the frequency-difference observable quality. ' ...
+                'DOP metrics assess the geometric diversity of the tower network as seen from the GEO spacecraft.\n\n']);
+            fprintf(fid,'\\begin{longtable}{p{0.47\\textwidth}p{0.47\\textwidth}}\n');
+            fprintf(fid,'\\toprule\n');
+            fprintf(fid,'\\textbf{Plot} & \\textbf{Description and statistical approach}\\\\\n');
+            fprintf(fid,'\\midrule\n');
+            plotRows4 = { ...
+                '', 'Doppler Pre-Fit and Post-Fit Residual RMS', ...
+                ['Pre-fit Doppler innovation (before EKF correction) and post-fit residual. ' ...
+                 'Not available if Doppler is not enabled in this run.']; ...
+                '', 'Per-Source Code Pseudorange Error RMS', ...
+                ['Breakdown of the raw code error into contributions: code, trop, iono, hwDelay, multipath.']; ...
+                '', 'Dilution of Precision (Geometry-Like)', ...
+                ['GDOP, PDOP, TDOP are geometry-derived scaling factors from the pseudorange observation matrix.']; ...
+            };
+            for k = 1:size(plotRows4,1)
+                fprintf(fid,'\\vspace{0pt}\\textit{No plot generated.} & \\vspace{0pt}\\textbf{%s}\\par\\vspace{3pt}%s\\\\\n', ...
+                    plotRows4{k,2}, plotRows4{k,3});
+                fprintf(fid,'\\midrule\n');
+            end
+            fprintf(fid,'\\bottomrule\n\\end{longtable}\n');
+            fprintf(fid,'\\clearpage\n');
+
+            % Section 5: Clock, Oscillator, and Product Validation
+            fprintf(fid,'\\section{Clock, Oscillator, and Product Validation}\n');
+            fprintf(fid,['Clock estimation diagnostics compare the EKF receiver clock bias and drift estimates ' ...
+                'with the true simulation clock values.\n\n']);
+            fprintf(fid,'\\begin{longtable}{p{0.47\\textwidth}p{0.47\\textwidth}}\n');
+            fprintf(fid,'\\toprule\n');
+            fprintf(fid,'\\textbf{Plot} & \\textbf{Description and statistical approach}\\\\\n');
+            fprintf(fid,'\\midrule\n');
+            plotRows5 = { ...
+                '', 'Receiver Clock Bias Estimation Error', ...
+                ['The plot shows the EKF clock-bias estimation error. ' ...
+                 'Clock bias sign: POSITIVE (adds to pseudorange).']; ...
+                '', 'Clock Drift and Fractional Frequency', ...
+                ['The clock drift state (m/s equivalent). Brown-Hwang two-state process noise model.']; ...
+                '', 'Tower Clock Product Validation', ...
+                ['Bar chart shows per-tower clock truth bias at final epoch. Tower clock sign: NEGATIVE.']; ...
+            };
+            for k = 1:size(plotRows5,1)
+                fprintf(fid,'\\vspace{0pt}\\textit{No plot generated.} & \\vspace{0pt}\\textbf{%s}\\par\\vspace{3pt}%s\\\\\n', ...
+                    plotRows5{k,2}, plotRows5{k,3});
+                fprintf(fid,'\\midrule\n');
+            end
+            fprintf(fid,'\\bottomrule\n\\end{longtable}\n');
+            fprintf(fid,'\\clearpage\n');
+
+            % Section 6: Disabled Components
             fprintf(fid,'\\section{Disabled Components}\n');
             fprintf(fid,'\\begin{longtable}{p{0.47\\textwidth}p{0.47\\textwidth}}\n');
             fprintf(fid,'\\toprule\n');
@@ -1442,7 +1498,7 @@ classdef LatexReportBuilder
             fprintf(fid,'\\bottomrule\n\\end{longtable}\n');
             fprintf(fid,'\\clearpage\n');
 
-            % Section 5: Numerical Summary
+            % Section 7: Numerical Summary
             fprintf(fid,'\\section{Numerical Summary}\n');
             fprintf(fid,'\\begin{center}\n');
             fprintf(fid,'\\begin{tabular}{p{0.52\\textwidth}p{0.25\\textwidth}}\n');

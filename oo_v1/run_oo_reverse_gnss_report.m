@@ -49,9 +49,10 @@ cfg.report.overwrite      = true;
 
 % Report style: 'latex' enables LaTeX-style section pages (LatexReportBuilder).
 % Set to any other value (or remove this line) for the simple summary-only output.
-cfg.report.style     = 'latex';   % 'latex' | '' (simple)
-cfg.report.writeTex  = false;     % true  = write .tex source file beside PDF
-cfg.report.compileTex = 'auto';   % 'auto' | 'never' | 'require'
+cfg.report.style     = 'latex';     % 'latex' | '' (simple)
+cfg.report.layout    = 'clockStyle'; % 'clockStyle' | 'default'
+cfg.report.writeTex  = false;       % true  = write .tex source file beside PDF
+cfg.report.compileTex = 'auto';     % 'auto' | 'never' | 'require'
 
 % --- Receivers / attitude ---------------------------------------
 % nReceivers == 1  ->  attitude estimation OFF, zero lever arms

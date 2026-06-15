@@ -525,6 +525,7 @@ classdef ConfigFactory
             cfg.report.writePdf            = true;
             cfg.report.writeMat            = true;
             cfg.report.appendRawPlots      = false;
+            cfg.report.layout              = 'default'; % 'default' | 'clockStyle'
 
             % --- Validation policy ----------------------------------------
             % 'error'             — unsupported features throw (default; safe)
