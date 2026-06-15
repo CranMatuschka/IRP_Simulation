@@ -35,9 +35,33 @@ classdef Diagnostics < handle
         nEpochs (1,1) double = 0
     end
 
+    properties (Access = private)
+        clockObsBuf_
+        clockObsEnable_  (1,1) logical = true
+        clockObsWinLen_  (1,1) double  = 60
+        clockObsMinWin_  (1,1) double  = 5
+        clockObsRankTol_
+    end
+
     methods
-        function obj = Diagnostics()
+        function obj = Diagnostics(cfg)
             obj.log = struct([]);
+            obj.clockObsBuf_     = struct('H_phys', {{}}, 'Rd_phys', {{}}, ...
+                                          'H_gauge', {{}}, 'Rd_gauge', {{}});
+            obj.clockObsRankTol_ = [];
+            if nargin > 0 && ~isempty(cfg)
+                obj.configureCfg(cfg);
+            end
+        end
+
+        function configureCfg(obj, cfg)
+            if isfield(cfg,'diagnostics') && isfield(cfg.diagnostics,'clockObservability')
+                co = cfg.diagnostics.clockObservability;
+                if isfield(co,'enable');             obj.clockObsEnable_ = co.enable;             end
+                if isfield(co,'windowLengthEpochs'); obj.clockObsWinLen_ = co.windowLengthEpochs; end
+                if isfield(co,'minWindowEpochs');    obj.clockObsMinWin_ = co.minWindowEpochs;    end
+                if isfield(co,'rankTolerance');      obj.clockObsRankTol_ = co.rankTolerance;     end
+            end
         end
 
         % ----------------------------------------------------------------
@@ -320,6 +344,88 @@ classdef Diagnostics < handle
                 end
                 if isfield(gi,'clockSubspaceCondNum')
                     entry.clockSubspaceCondNum = gi.clockSubspaceCondNum;
+                end
+            end
+
+            % --- Windowed clock observability Gramian ----------------------
+            % Build a sliding epoch buffer (physical H + gauge H restricted to
+            % clock columns) and compute the weighted observability Gramian.
+            % Physical-only rank reveals the persistent one-way pseudorange nullspace;
+            % gauged rank should equal n_clk when the gauge removes that nullspace.
+            entry.clockObsRankPhysical = NaN;
+            entry.clockObsRankGauged   = NaN;
+            entry.clockObsCondPhysical = NaN;
+            entry.clockObsCondGauged   = NaN;
+            entry.clockObsWeakPhysical = NaN;
+            entry.clockObsWeakGauged   = NaN;
+            if obj.clockObsEnable_
+                clkIdx10 = [sm.b_rx_idx; sm.bdot_rx_idx];
+                if isfield(sm,'towerClockIdx')
+                    % towerClockIdx is [N×2]: col1=bias_idx, col2=drift_idx.
+                    % Interleave row-by-row to match kron STM pair ordering:
+                    % [b_rx; bdot_rx; b_twr1; bdot_twr1; ...]
+                    tci10    = sm.towerClockIdx;
+                    flat10   = reshape(tci10', [], 1);   % [2N × 1] interleaved
+                    clkIdx10 = [clkIdx10; flat10(flat10 > 0)];
+                end
+                clkIdx10 = clkIdx10(clkIdx10 > 0);
+
+                if ~isempty(H) && ~isempty(R) && ~isempty(clkIdx10) && size(H,2) >= max(clkIdx10)
+                    H_clk10  = H(:, clkIdx10);
+                    Rd10     = diag(R);
+                else
+                    H_clk10  = zeros(0, numel(clkIdx10));
+                    Rd10     = zeros(0, 1);
+                end
+
+                H_gauge10 = zeros(0, numel(clkIdx10));
+                Rd_g10    = zeros(0, 1);
+                if ~isempty(errStruct) && isfield(errStruct,'gaugeInfo')
+                    gi10 = errStruct.gaugeInfo;
+                    if isfield(gi10,'H_gauge') && ~isempty(gi10.H_gauge) && ...
+                            ~isempty(clkIdx10) && size(gi10.H_gauge,2) >= max(clkIdx10)
+                        H_gauge10 = gi10.H_gauge(:, clkIdx10);
+                    end
+                    if isfield(gi10,'R_gauge_diag') && ~isempty(gi10.R_gauge_diag)
+                        Rd_g10 = gi10.R_gauge_diag;
+                    end
+                end
+
+                buf10 = obj.clockObsBuf_;
+                buf10.H_phys{end+1}   = H_clk10;
+                buf10.Rd_phys{end+1}  = Rd10;
+                buf10.H_gauge{end+1}  = H_gauge10;
+                buf10.Rd_gauge{end+1} = Rd_g10;
+                wl10 = obj.clockObsWinLen_;
+                if numel(buf10.H_phys) > wl10
+                    buf10.H_phys  = buf10.H_phys(end-wl10+1:end);
+                    buf10.Rd_phys = buf10.Rd_phys(end-wl10+1:end);
+                    buf10.H_gauge = buf10.H_gauge(end-wl10+1:end);
+                    buf10.Rd_gauge = buf10.Rd_gauge(end-wl10+1:end);
+                end
+                obj.clockObsBuf_ = buf10;
+
+                if numel(buf10.H_phys) >= obj.clockObsMinWin_ && ...
+                        ~isempty(clkIdx10) && mod(numel(clkIdx10), 2) == 0
+                    if obj.nEpochs >= 1
+                        dt10 = t_s - obj.log(obj.nEpochs).time_s;
+                    else
+                        dt10 = 1;
+                    end
+                    if dt10 <= 0; dt10 = 1; end
+                    try
+                        obs10 = revgnss.ObservabilityDiagnostics.computeClockWindowObservability( ...
+                            buf10.H_phys, buf10.Rd_phys, buf10.H_gauge, buf10.Rd_gauge, ...
+                            dt10, sm, obj.clockObsRankTol_);
+                        entry.clockObsRankPhysical = obs10.rankPhysical;
+                        entry.clockObsRankGauged   = obs10.rankGauged;
+                        entry.clockObsCondPhysical = obs10.conditionPhysical;
+                        entry.clockObsCondGauged   = obs10.conditionGauged;
+                        entry.clockObsWeakPhysical = obs10.weakStatesPhysical;
+                        entry.clockObsWeakGauged   = obs10.weakStatesGauged;
+                    catch
+                        % Leave as NaN — Gramian failed (e.g. no clock states)
+                    end
                 end
             end
 
@@ -894,6 +1000,40 @@ classdef Diagnostics < handle
         function v = getClockGaugeDriftResiduals(obj)
             % getClockGaugeDriftResiduals  Tower clock drift gauge residual per epoch [m/s].
             v = [obj.log.clockGaugeDriftResidual_mps]';
+        end
+
+        function v = getClockObsRankPhysical(obj)
+            % getClockObsRankPhysical  Clock-subspace Gramian rank (physical meas only) per epoch.
+            % NaN before the sliding window fills (minWindowEpochs).
+            % Should equal n_clk-1 for one-way pseudorange (common bias nullspace persists).
+            v = [obj.log.clockObsRankPhysical]';
+        end
+
+        function v = getClockObsRankGauged(obj)
+            % getClockObsRankGauged  Clock-subspace Gramian rank (physical + gauge) per epoch.
+            % Should equal n_clk when the gauge removes the common-bias nullspace.
+            v = [obj.log.clockObsRankGauged]';
+        end
+
+        function v = getClockObsCondPhysical(obj)
+            % getClockObsCondPhysical  Gramian condition number (physical only) per epoch.
+            v = [obj.log.clockObsCondPhysical]';
+        end
+
+        function v = getClockObsCondGauged(obj)
+            % getClockObsCondGauged  Gramian condition number (physical + gauge) per epoch.
+            v = [obj.log.clockObsCondGauged]';
+        end
+
+        function v = getClockObsWeakStatesPhysical(obj)
+            % getClockObsWeakStatesPhysical  Number of clock states below rank tolerance (physical only).
+            v = [obj.log.clockObsWeakPhysical]';
+        end
+
+        function v = getClockObsWeakStatesGauged(obj)
+            % getClockObsWeakStatesGauged  Number of clock states below rank tolerance (gauged).
+            % Should be 0 when the gauge fully constrains the clock subspace.
+            v = [obj.log.clockObsWeakGauged]';
         end
 
     end

@@ -521,6 +521,15 @@ classdef ConfigFactory
             cfg.diagnostics.observability.warn          = true;
             cfg.diagnostics.observability.rankTolerance = [];
 
+            % --- Clock observability Gramian (Stage 10) ---------------------
+            % Windowed clock-subspace observability Gramian computed each epoch.
+            % Physical-only rank reveals the persistent one-way pseudorange nullspace.
+            % Gauged rank should equal n_clk after fixReferenceTower or meanGroundClockGauge.
+            cfg.diagnostics.clockObservability.enable             = true;
+            cfg.diagnostics.clockObservability.windowLengthEpochs = 60;
+            cfg.diagnostics.clockObservability.minWindowEpochs    = 5;
+            cfg.diagnostics.clockObservability.rankTolerance      = [];
+
             % --- Plots -------------------------------------------------------
             % showFigures = false: figures created with Visible='off', saved to file.
             % saveIndividualFigures: save each figure as .png and .fig.

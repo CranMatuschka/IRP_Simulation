@@ -577,6 +577,8 @@ classdef ReverseGNSSEKF < handle
             gaugeInfo.driftSigma_mps       = NaN;
             gaugeInfo.clockSubspaceRank    = NaN;
             gaugeInfo.clockSubspaceCondNum = NaN;
+            gaugeInfo.H_gauge              = zeros(0, size(H,2));  % for Gramian computation
+            gaugeInfo.R_gauge_diag         = zeros(0, 1);
 
             if ~obj.estimateTowerClocks || obj.nTowers < 1
                 return;
@@ -618,6 +620,8 @@ classdef ReverseGNSSEKF < handle
                     gaugeInfo.types{end+1}   = 'clockGaugeBias';
                     gaugeInfo.biasResidual_m = obj.x(idxBias);
                     gaugeInfo.rowsAdded      = gaugeInfo.rowsAdded + 1;
+                    gaugeInfo.H_gauge        = [gaugeInfo.H_gauge; Hb];
+                    gaugeInfo.R_gauge_diag   = [gaugeInfo.R_gauge_diag; sigmaBias^2];
 
                     if hasDrift && idxDrft > 0
                         Hd = zeros(1, nx); Hd(idxDrft) = 1;
@@ -628,6 +632,8 @@ classdef ReverseGNSSEKF < handle
                         gaugeInfo.types{end+1}        = 'clockGaugeDrift';
                         gaugeInfo.driftResidual_mps   = obj.x(idxDrft);
                         gaugeInfo.rowsAdded           = gaugeInfo.rowsAdded + 1;
+                        gaugeInfo.H_gauge             = [gaugeInfo.H_gauge; Hd];
+                        gaugeInfo.R_gauge_diag        = [gaugeInfo.R_gauge_diag; sigmaDrift^2];
                     end
 
                 case 'meanGroundClockGauge'
@@ -645,6 +651,8 @@ classdef ReverseGNSSEKF < handle
                     gaugeInfo.types{end+1}   = 'clockGaugeBias';
                     gaugeInfo.biasResidual_m = meanBias;
                     gaugeInfo.rowsAdded      = gaugeInfo.rowsAdded + 1;
+                    gaugeInfo.H_gauge        = [gaugeInfo.H_gauge; Hb];
+                    gaugeInfo.R_gauge_diag   = [gaugeInfo.R_gauge_diag; sigmaBias^2];
 
                     if hasDrift && all(driftIdx > 0)
                         Hd = zeros(1, nx); Hd(driftIdx) = 1/N;
@@ -656,6 +664,8 @@ classdef ReverseGNSSEKF < handle
                         gaugeInfo.types{end+1}        = 'clockGaugeDrift';
                         gaugeInfo.driftResidual_mps   = meanDrift;
                         gaugeInfo.rowsAdded           = gaugeInfo.rowsAdded + 1;
+                        gaugeInfo.H_gauge             = [gaugeInfo.H_gauge; Hd];
+                        gaugeInfo.R_gauge_diag        = [gaugeInfo.R_gauge_diag; sigmaDrift^2];
                     end
 
                 otherwise

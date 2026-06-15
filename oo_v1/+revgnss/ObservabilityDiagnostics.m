@@ -183,5 +183,154 @@ classdef ObservabilityDiagnostics
             end
         end
 
+        % ============================================================
+        function obs = computeClockWindowObservability( ...
+                H_phys_win, Rd_phys_win, H_gauge_win, Rd_gauge_win, ...
+                dt_s, stateMap, rankTol)
+            % computeClockWindowObservability  Windowed clock-subspace observability Gramian.
+            %
+            % Computes a weighted observability Gramian over a sliding time window:
+            %
+            %   W = sum_k  Phi_{k,K}' * H_clk_k' * R_k^{-1} * H_clk_k * Phi_{k,K}
+            %
+            % where Phi_{k,K} is the clock-state STM from epoch k to the newest epoch K.
+            % For receiver+tower clocks, the STM is block-diagonal with [1 dt; 0 1] blocks.
+            %
+            % Physical-only W uses code/Doppler/carrier H rows restricted to clock columns.
+            % Gauged W adds the gauge pseudo-rows to detect whether the gauge removes the
+            % clock-datum nullspace that persists in one-way pseudorange.
+            %
+            % Inputs:
+            %   H_phys_win   {K×1 cell} of [M_k × n_clk] physical H clock-column slices
+            %   Rd_phys_win  {K×1 cell} of [M_k × 1]    physical R diagonal
+            %   H_gauge_win  {K×1 cell} of [ng_k × n_clk] gauge H clock-column slices
+            %   Rd_gauge_win {K×1 cell} of [ng_k × 1]   gauge R diagonal
+            %   dt_s         scalar timestep [s]
+            %   stateMap     struct from ReverseGNSSEKF.buildStateMap_()
+            %   rankTol      [] for auto, or explicit tolerance
+            %
+            % Output (obs struct):
+            %   clockStateIndices, clockStateNames
+            %   rankPhysical, rankGauged
+            %   conditionPhysical, conditionGauged
+            %   singularValuesPhysical, singularValuesGauged
+            %   weakStatesPhysical, weakStatesGauged
+            %   gaugeImprovement.rankDelta, .conditionRatio
+            %   windowLength, numRowsPhysical, numRowsGauged
+
+            if nargin < 7; rankTol = []; end
+
+            % Clock state column indices in the full state vector.
+            % IMPORTANT: must be in interleaved pair order [b_rx;bdot_rx;b_twr1;bdot_twr1;...]
+            % so that kron(eye(n_pairs),[1 dt;0 1]) correctly represents clock dynamics.
+            % towerClockIdx is [N×2] (col1=bias, col2=drift); reshape' gives row-interleaved.
+            clkIdx = [stateMap.b_rx_idx; stateMap.bdot_rx_idx];
+            if isfield(stateMap,'towerClockIdx')
+                tci    = stateMap.towerClockIdx;          % [N × 2]
+                flat   = reshape(tci', [], 1);             % [2N × 1] interleaved
+                clkIdx = [clkIdx; flat(flat > 0)];
+            end
+            clkIdx = clkIdx(clkIdx > 0);
+            n_clk  = numel(clkIdx);
+
+            % Clock state names for weak-state reporting
+            clkNames = cell(n_clk, 1);
+            clkNames{1} = 'b_rx';
+            if n_clk >= 2; clkNames{2} = 'bdot_rx'; end
+            if isfield(stateMap,'towerClockIdx')
+                nT = size(stateMap.towerClockIdx, 1);
+                for ti = 1:nT
+                    bi = stateMap.towerClockIdx(ti,1);
+                    di = stateMap.towerClockIdx(ti,2);
+                    bpos = find(clkIdx == bi, 1);
+                    dpos = find(clkIdx == di, 1);
+                    if ~isempty(bpos); clkNames{bpos} = sprintf('b_twr%d', ti); end
+                    if ~isempty(dpos); clkNames{dpos} = sprintf('bdot_twr%d', ti); end
+                end
+            end
+
+            % Clock-subspace STM: block-diagonal [1 dt; 0 1] per clock pair
+            n_pairs  = n_clk / 2;
+            F_pair   = [1, dt_s; 0, 1];
+            Phi_clk  = kron(eye(n_pairs), F_pair);
+
+            % Build physical and gauge-extra Gramians
+            K = numel(H_phys_win);
+            W_phys  = zeros(n_clk);
+            W_gauge = zeros(n_clk);   % gauge-only extra
+
+            nRowsPhys  = 0;
+            nRowsGauge = 0;
+
+            Phi_acc = eye(n_clk);   % Phi_{k,K}: from newest (I) to oldest (Phi^(K-k))
+
+            for i = K:-1:1          % newest to oldest
+                Hp  = H_phys_win{i};
+                Rdp = Rd_phys_win{i};
+                if ~isempty(Hp) && ~isempty(Rdp) && numel(Rdp) == size(Hp,1) && all(Rdp > 0)
+                    HtRH    = (Hp ./ Rdp)' * Hp;    % n_clk × n_clk
+                    W_phys  = W_phys + Phi_acc' * HtRH * Phi_acc;
+                    nRowsPhys = nRowsPhys + size(Hp,1);
+                end
+
+                Hg  = H_gauge_win{i};
+                Rdg = Rd_gauge_win{i};
+                if ~isempty(Hg) && ~isempty(Rdg) && numel(Rdg) == size(Hg,1) && all(Rdg > 0)
+                    HtRH_g = (Hg ./ Rdg)' * Hg;
+                    W_gauge = W_gauge + Phi_acc' * HtRH_g * Phi_acc;
+                    nRowsGauge = nRowsGauge + size(Hg,1);
+                end
+
+                Phi_acc = Phi_clk * Phi_acc;         % one step further back
+            end
+
+            W_gauged = W_phys + W_gauge;
+
+            % SVD rank and condition
+            [obs.rankPhysical,  obs.conditionPhysical, obs.singularValuesPhysical, ...
+             obs.weakStatesPhysical]  = revgnss.ObservabilityDiagnostics.svdRankCond_(W_phys,   n_clk, rankTol);
+            [obs.rankGauged,    obs.conditionGauged,   obs.singularValuesGauged, ...
+             obs.weakStatesGauged]    = revgnss.ObservabilityDiagnostics.svdRankCond_(W_gauged, n_clk, rankTol);
+
+            obs.clockStateIndices = clkIdx;
+            obs.clockStateNames   = clkNames;
+            obs.windowLength      = K;
+            obs.numRowsPhysical   = nRowsPhys;
+            obs.numRowsGauged     = nRowsPhys + nRowsGauge;
+
+            obs.gaugeImprovement.rankDelta = obs.rankGauged - obs.rankPhysical;
+            if isfinite(obs.conditionPhysical) && obs.conditionGauged > 0
+                obs.gaugeImprovement.conditionRatio = obs.conditionPhysical / obs.conditionGauged;
+            else
+                obs.gaugeImprovement.conditionRatio = NaN;
+            end
+        end
+
+    end
+
+    methods (Static, Access = private)
+
+        function [rk, cond_num, sv, nWeak] = svdRankCond_(W, n_states, tol_override)
+            % svdRankCond_  SVD-based rank, condition, and weak-state count.
+            sv = svd(W, 'econ');
+            if isempty(sv) || max(sv) == 0
+                rk = 0; cond_num = Inf; sv = []; nWeak = n_states;
+                return;
+            end
+            if nargin < 3 || isempty(tol_override)
+                tol = max(n_states, size(W,1)) * eps(max(sv));
+            else
+                tol = tol_override;
+            end
+            sv_pos   = sv(sv > tol);
+            rk       = numel(sv_pos);
+            nWeak    = n_states - rk;
+            if isempty(sv_pos)
+                cond_num = Inf;
+            else
+                cond_num = sv_pos(1) / sv_pos(end);
+            end
+        end
+
     end
 end

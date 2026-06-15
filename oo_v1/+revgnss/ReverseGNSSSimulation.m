@@ -53,7 +53,7 @@ classdef ReverseGNSSSimulation < handle
             obj.tVec    = (0 : dt : dur)';
             obj.nEpochs = numel(obj.tVec);
 
-            obj.diag   = revgnss.Diagnostics();
+            obj.diag   = revgnss.Diagnostics(obj.cfg);
             obj.isInit = true;
 
             nRx = size(obj.asset.receiverLeverArms_body_m, 2);
