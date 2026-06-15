@@ -516,6 +516,21 @@ classdef ConfigFactory
             cfg.clock.gauge.sigmaDrift_mps           = 1e-9;   % pseudo-meas sigma for drift gauge [m/s]
             cfg.clock.hardwareDelay.estimatePerTower = false;
 
+            % --- Transmitter code hardware-delay states (Stage 11) ----------
+            % A transmitter code hardware delay is algebraically similar to a
+            % tower clock bias in one-way pseudorange.  Free simultaneous
+            % estimation of tower clock bias and tx code delay is forbidden
+            % (collinear in one-way code PR).  A delay gauge is mandatory when
+            % useInEKF=true.  All defaults are OFF so prior tests are unchanged.
+            cfg.hardware.txCodeBias.enable                    = false;
+            cfg.hardware.txCodeBias.useInEKF                  = false;
+            cfg.hardware.txCodeBias.mode                      = 'off';           % 'off' | 'perTowerL1'
+            cfg.hardware.txCodeBias.gaugeMode                 = 'fixReferenceTower'; % 'fixReferenceTower' | 'meanGroundDelayGauge'
+            cfg.hardware.txCodeBias.referenceTowerIndex       = 1;
+            cfg.hardware.txCodeBias.initialSigma_m            = 10.0;
+            cfg.hardware.txCodeBias.processSigma_m_per_sqrt_s = 1e-5;
+            cfg.hardware.txCodeBias.gaugeSigma_m              = 1e-6;
+
             % --- Observability diagnostics (Step 8) -------------------------
             cfg.diagnostics.observability.enabled       = false;
             cfg.diagnostics.observability.warn          = true;
@@ -1035,6 +1050,57 @@ classdef ConfigFactory
                         error('ConfigFactory:invalidClockMode', ...
                             ['cfg.clock.mode must be ''spacecraftReceiverClockOnly'' or ' ...
                              '''includeTowerClocksInEKF''; got ''%s''.'], clockMode);
+                end
+            end
+
+            % ---- Stage 11: transmitter code bias identifiability guards ------
+            if isfield(cfg,'hardware') && isfield(cfg.hardware,'txCodeBias')
+                txc = cfg.hardware.txCodeBias;
+                useInEKF11 = isfield(txc,'useInEKF') && txc.useInEKF;
+                if useInEKF11
+                    txMode11 = 'off';
+                    if isfield(txc,'mode'); txMode11 = txc.mode; end
+
+                    % Guard 1: useInEKF=true requires a valid mode
+                    if strcmp(txMode11,'off')
+                        error('ConfigFactory:txCodeBiasModeOff', ...
+                            ['cfg.hardware.txCodeBias.useInEKF=true but mode=''off''. ' ...
+                             'Set cfg.hardware.txCodeBias.mode=''perTowerL1'' to enable states.']);
+                    end
+
+                    % Guard 2: collinear with tower clock bias
+                    estimTwrClk11 = isfield(cfg.estimator,'estimateTowerClocks') && ...
+                                    cfg.estimator.estimateTowerClocks;
+                    if estimTwrClk11
+                        error('ConfigFactory:txCodeBiasCollinear', ...
+                            ['Cannot freely estimate tower clock bias and transmitter code hardware delay together. ' ...
+                             'They are collinear in one-way code pseudorange. ' ...
+                             'Use external tower clock corrections or disable one of the two state groups.']);
+                    end
+
+                    % Guard 3: delay gauge required
+                    gm11 = 'fixReferenceTower';
+                    if isfield(txc,'gaugeMode'); gm11 = txc.gaugeMode; end
+                    if ~any(strcmp(gm11, {'fixReferenceTower','meanGroundDelayGauge'}))
+                        error('ConfigFactory:txCodeBiasGaugeRequired', ...
+                            ['cfg.hardware.txCodeBias.useInEKF=true requires a valid delay gauge. ' ...
+                             'Set cfg.hardware.txCodeBias.gaugeMode to ' ...
+                             '''fixReferenceTower'' or ''meanGroundDelayGauge''. Got ''%s''.'], gm11);
+                    end
+
+                    % Guard 4: two-frequency / ionosphere-free not supported
+                    codeMode11 = '';
+                    if isfield(cfg,'measurements') && isfield(cfg.measurements,'codeMode')
+                        codeMode11 = cfg.measurements.codeMode;
+                    end
+                    if any(strcmp(codeMode11, {'ionoFreeCode','twoFrequency'}))
+                        error('ConfigFactory:txCodeBiasIF', ...
+                            ['Stage 11 supports L1 per-tower code delay only. ' ...
+                             'Per-signal L1/L2 group-delay states are not implemented yet. ' ...
+                             'Disable txCodeBias or use singleFrequency code mode.']);
+                    end
+
+                    cfg.hardware.txCodeBias.enable = true;
                 end
             end
 

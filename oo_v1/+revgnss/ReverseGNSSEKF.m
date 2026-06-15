@@ -54,6 +54,10 @@ classdef ReverseGNSSEKF < handle
         estimateZwd          (1,1) logical = false
         nZwdStates           (1,1) double  = 0
 
+        % Per-tower transmitter code bias states (Stage 11)
+        estimateTxCodeBias   (1,1) logical = false
+        nTxCodeBiasStates    (1,1) double  = 0
+
         % Process noise parameters
         sigma_accel_mps2      (1,1) double = 0.01
         sigma_angAccel_radps2 (1,1) double = 1e-4
@@ -111,6 +115,13 @@ classdef ReverseGNSSEKF < handle
                 obj.nZwdStates     = nTowers;
             end
 
+            % Determine if tx code bias states requested (Stage 11)
+            if isfield(cfg,'hardware') && isfield(cfg.hardware,'txCodeBias') && ...
+                    isfield(cfg.hardware.txCodeBias,'useInEKF') && cfg.hardware.txCodeBias.useInEKF
+                obj.estimateTxCodeBias   = true;
+                obj.nTxCodeBiasStates    = nTowers;
+            end
+
             obj.nx = obj.nxBase;
             if obj.estimateTowerClocks
                 obj.nx = obj.nx + 2 * nTowers;
@@ -120,6 +131,9 @@ classdef ReverseGNSSEKF < handle
             end
             if obj.estimateZwd
                 obj.nx = obj.nx + obj.nZwdStates;
+            end
+            if obj.estimateTxCodeBias
+                obj.nx = obj.nx + obj.nTxCodeBiasStates;
             end
 
             if isfield(cfg.estimator,'sigma_accel_mps2')
@@ -319,6 +333,20 @@ classdef ReverseGNSSEKF < handle
             else
                 sm.zwdIdx = zeros(nTowers, 1);
             end
+
+            % Optional per-tower transmitter code bias states (Stage 11)
+            % d_tx_code_i [m]: random-walk bias, one per tower, L1 code only.
+            % Positive d_tx_code increases measured pseudorange.
+            if obj.estimateTxCodeBias && obj.nTxCodeBiasStates > 0
+                txIdx = zeros(nTowers, 1);
+                for ti = 1:nTowers
+                    txIdx(ti) = nextIdx;
+                    nextIdx   = nextIdx + 1;
+                end
+                sm.txCodeBiasIdx = txIdx;
+            else
+                sm.txCodeBiasIdx = zeros(nTowers, 1);
+            end
         end
 
         % ----------------------------------------------------------------
@@ -515,6 +543,23 @@ classdef ReverseGNSSEKF < handle
                 end
             end
 
+            % --- Tx code bias process noise (random walk, Stage 11) --------
+            % d_tx_code(k+1) = d_tx_code(k) + w,  Q = sigma^2 * dt
+            if obj.estimateTxCodeBias
+                sigTx = 1e-5;
+                if isfield(obj.cfg,'hardware') && isfield(obj.cfg.hardware,'txCodeBias') && ...
+                        isfield(obj.cfg.hardware.txCodeBias,'processSigma_m_per_sqrt_s')
+                    sigTx = obj.cfg.hardware.txCodeBias.processSigma_m_per_sqrt_s;
+                end
+                q_tx = sigTx^2 * dt_s;
+                for ti = 1:obj.nTowers
+                    idx = sm.txCodeBiasIdx(ti);
+                    if idx > 0
+                        Q(idx, idx) = q_tx;
+                    end
+                end
+            end
+
             % Enforce symmetry
             Q = (Q + Q') / 2;
         end
@@ -675,6 +720,108 @@ classdef ReverseGNSSEKF < handle
 
             % Clock-subspace rank diagnostic (uses augmented H)
             gaugeInfo = obj.computeClockSubspaceStats_(H_out, gaugeInfo);
+        end
+
+        % ----------------------------------------------------------------
+        function [z_out, h_out, H_out, R_out, txGaugeInfo] = appendTxDelayGaugeRows(obj, z, h, H, R)
+            % appendTxDelayGaugeRows  Augment measurement stack with tx code delay gauge rows.
+            %
+            % A common shift in all tower transmitter code delays is not separable
+            % from the receiver clock bias without a datum constraint.  This method
+            % adds EKF pseudo-measurement rows that pin the delay datum, analogous
+            % to appendClockGaugeRows for clock states.
+            %
+            % Gauge modes (cfg.hardware.txCodeBias.gaugeMode):
+            %   'fixReferenceTower'     — d_tx_code(refTower) = 0
+            %       H(refIdx) = 1,  R = gaugeSigma_m^2
+            %   'meanGroundDelayGauge'  — mean(d_tx_code_i) = 0
+            %       H(all txIdx) = 1/N, R = gaugeSigma_m^2
+            %
+            % Gauge rows are NOT counted as physical pseudorange measurements.
+            % txGaugeInfo.H_gauge / R_gauge_diag are stored for Gramian use.
+
+            z_out = z; h_out = h; H_out = H; R_out = R;
+            txGaugeInfo.rowsAdded       = 0;
+            txGaugeInfo.gaugeResidual_m = NaN;
+            txGaugeInfo.gaugeSigma_m    = NaN;
+            txGaugeInfo.H_gauge         = zeros(0, size(H,2));
+            txGaugeInfo.R_gauge_diag    = zeros(0, 1);
+            txGaugeInfo.txDelaySubspaceRank    = NaN;
+            txGaugeInfo.txDelaySubspaceCondNum = NaN;
+
+            if ~obj.estimateTxCodeBias || obj.nTxCodeBiasStates < 1
+                return;
+            end
+
+            sm  = obj.stateMap;
+            nx  = obj.nx;
+            cfg = obj.cfg;
+
+            gaugeSigma  = 1e-6;
+            gaugeMode   = 'fixReferenceTower';
+            refTwrIdx   = 1;
+            if isfield(cfg,'hardware') && isfield(cfg.hardware,'txCodeBias')
+                tc = cfg.hardware.txCodeBias;
+                if isfield(tc,'gaugeSigma_m');         gaugeSigma = tc.gaugeSigma_m;         end
+                if isfield(tc,'gaugeMode');             gaugeMode  = tc.gaugeMode;             end
+                if isfield(tc,'referenceTowerIndex');   refTwrIdx  = tc.referenceTowerIndex;   end
+            end
+            txGaugeInfo.gaugeSigma_m = gaugeSigma;
+
+            txIdx = sm.txCodeBiasIdx;   % [nTowers × 1]
+
+            switch gaugeMode
+                case 'fixReferenceTower'
+                    kref = max(1, min(refTwrIdx, obj.nTowers));
+                    idx  = txIdx(kref);
+                    if idx <= 0 || idx > nx; return; end
+
+                    Hg = zeros(1, nx); Hg(idx) = 1;
+                    res = 0 - obj.x(idx);
+                    z_out = [z_out; 0];
+                    h_out = [h_out; obj.x(idx)];
+                    H_out = [H_out; Hg];
+                    R_out = blkdiag(R_out, gaugeSigma^2);
+
+                    txGaugeInfo.rowsAdded       = 1;
+                    txGaugeInfo.gaugeResidual_m = res;
+                    txGaugeInfo.H_gauge         = Hg;
+                    txGaugeInfo.R_gauge_diag    = gaugeSigma^2;
+
+                case 'meanGroundDelayGauge'
+                    validIdx = txIdx(txIdx > 0 & txIdx <= nx);
+                    N = numel(validIdx);
+                    if N < 1; return; end
+
+                    Hg = zeros(1, nx);
+                    Hg(validIdx) = 1/N;
+                    meanDelay = mean(obj.x(validIdx));
+                    z_out = [z_out; 0];
+                    h_out = [h_out; meanDelay];
+                    H_out = [H_out; Hg];
+                    R_out = blkdiag(R_out, gaugeSigma^2);
+
+                    txGaugeInfo.rowsAdded       = 1;
+                    txGaugeInfo.gaugeResidual_m = -meanDelay;
+                    txGaugeInfo.H_gauge         = Hg;
+                    txGaugeInfo.R_gauge_diag    = gaugeSigma^2;
+
+                otherwise
+                    return;
+            end
+
+            % Tx-delay subspace rank diagnostic
+            validTxIdx = txIdx(txIdx > 0 & txIdx <= nx);
+            if ~isempty(H_out) && ~isempty(validTxIdx) && size(H_out,2) >= max(validTxIdx)
+                H_tx = H_out(:, validTxIdx);
+                sv   = svd(H_tx, 'econ');
+                sv   = sv(sv > 0);
+                if ~isempty(sv)
+                    tol = sv(1) * max(size(H_tx)) * eps;
+                    txGaugeInfo.txDelaySubspaceRank    = sum(sv > tol);
+                    txGaugeInfo.txDelaySubspaceCondNum = sv(1) / max(sv(end), eps);
+                end
+            end
         end
 
         % ----------------------------------------------------------------

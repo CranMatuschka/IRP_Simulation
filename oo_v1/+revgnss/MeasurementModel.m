@@ -431,6 +431,12 @@ classdef MeasurementModel < handle
                     h(mi) = h(mi) + mf_h * x_est(stateMap.zwdIdx(ti));
                 end
 
+                % TASK 3: Tx code hardware-delay state contribution (+1 sign: delay increases PR)
+                if isfield(stateMap,'txCodeBiasIdx') && ti <= numel(stateMap.txCodeBiasIdx) && ...
+                        stateMap.txCodeBiasIdx(ti) > 0
+                    h(mi) = h(mi) + x_est(stateMap.txCodeBiasIdx(ti));
+                end
+
                 sigma_i = sqrt(errStruct.sigmaTotal_m(mi)^2 + towerClkSigma(mi)^2);
                 R_diag(mi) = max(sigma_i, sigmaFloor)^2;
             end
@@ -1066,6 +1072,13 @@ classdef MeasurementModel < handle
                         stateMap.towerClockIdx(ti,1) > 0
                     H(mi, stateMap.towerClockIdx(ti,1)) = -1;
                 end
+
+                % Tx code hardware-delay Jacobian: +1 (not on Doppler or carrier rows)
+                if isfield(stateMap,'txCodeBiasIdx') && ...
+                        ti <= numel(stateMap.txCodeBiasIdx) && ...
+                        stateMap.txCodeBiasIdx(ti) > 0
+                    H(mi, stateMap.txCodeBiasIdx(ti)) = 1;
+                end
             end
         end
 
@@ -1255,6 +1268,12 @@ classdef MeasurementModel < handle
                         stateMap.zwdIdx(ti) > 0
                     mf_h = revgnss.MappingFunctions.troposphere(elv, obj.zwdMappingKind_());
                     h_pr(mi) = h_pr(mi) + mf_h * x_state(stateMap.zwdIdx(ti));
+                end
+
+                % TASK 3: Tx code hardware-delay postfit contribution (+1 sign)
+                if isfield(stateMap,'txCodeBiasIdx') && ti <= numel(stateMap.txCodeBiasIdx) && ...
+                        stateMap.txCodeBiasIdx(ti) > 0
+                    h_pr(mi) = h_pr(mi) + x_state(stateMap.txCodeBiasIdx(ti));
                 end
             end
         end

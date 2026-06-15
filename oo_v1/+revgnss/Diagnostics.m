@@ -347,6 +347,28 @@ classdef Diagnostics < handle
                 end
             end
 
+            % --- Tx code bias gauge diagnostics ----------------------------
+            % txGaugeInfo is populated by ReverseGNSSEKF.appendTxDelayGaugeRows
+            % and attached to errStruct.txGaugeInfo by ReverseGNSSSimulation.
+            entry.txCodeBiasGaugeRowsAdded  = 0;
+            entry.txCodeBiasGaugeResidual_m = NaN;
+            entry.txCodeBiasStatesEnabled   = false;
+            entry.nTxCodeBiasStates         = 0;
+            if ~isempty(errStruct) && isfield(errStruct,'txGaugeInfo')
+                tgi = errStruct.txGaugeInfo;
+                if isfield(tgi,'rowsAdded')
+                    entry.txCodeBiasGaugeRowsAdded = tgi.rowsAdded;
+                end
+                if isfield(tgi,'gaugeResidual_m')
+                    entry.txCodeBiasGaugeResidual_m = tgi.gaugeResidual_m;
+                end
+            end
+            % Use ekf state to know whether states are active
+            if ~isempty(ekf) && isprop(ekf,'estimateTxCodeBias')
+                entry.txCodeBiasStatesEnabled = ekf.estimateTxCodeBias;
+                entry.nTxCodeBiasStates       = ekf.nTxCodeBiasStates;
+            end
+
             % --- Windowed clock observability Gramian ----------------------
             % Build a sliding epoch buffer (physical H + gauge H restricted to
             % clock columns) and compute the weighted observability Gramian.
@@ -1034,6 +1056,31 @@ classdef Diagnostics < handle
             % getClockObsWeakStatesGauged  Number of clock states below rank tolerance (gauged).
             % Should be 0 when the gauge fully constrains the clock subspace.
             v = [obj.log.clockObsWeakGauged]';
+        end
+
+        % --- Tx code bias gauge getters ------------------------------------
+
+        function v = getTxCodeBiasGaugeRowsAdded(obj)
+            % getTxCodeBiasGaugeRowsAdded  Tx-code-delay gauge rows inserted per epoch.
+            % 0 when estimateTxCodeBias is off; 1 when fixReferenceTower gauge is active.
+            v = [obj.log.txCodeBiasGaugeRowsAdded]';
+        end
+
+        function v = getTxCodeBiasGaugeResiduals(obj)
+            % getTxCodeBiasGaugeResiduals  Tx code delay gauge residual per epoch [m].
+            % fixReferenceTower: reference-tower delay state value (should converge near 0).
+            % meanGroundDelayGauge: mean of all tower delay states.
+            v = [obj.log.txCodeBiasGaugeResidual_m]';
+        end
+
+        function v = getTxCodeBiasStatesEnabled(obj)
+            % getTxCodeBiasStatesEnabled  True when tx code bias states are in the EKF.
+            v = [obj.log.txCodeBiasStatesEnabled]';
+        end
+
+        function v = getNTxCodeBiasStates(obj)
+            % getNTxCodeBiasStates  Number of tx code bias states per epoch.
+            v = [obj.log.nTxCodeBiasStates]';
         end
 
     end

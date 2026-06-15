@@ -163,6 +163,21 @@ classdef ScenarioFactory
                     end
                 end
             end
+
+            % TASK 2: Tx-code-bias initial covariance (one per tower)
+            if ekf.estimateTxCodeBias && isfield(sm,'txCodeBiasIdx') && ~isempty(sm.txCodeBiasIdx)
+                sigma0_tx = 10.0;
+                if isfield(cfg,'hardware') && isfield(cfg.hardware,'txCodeBias') && ...
+                        isfield(cfg.hardware.txCodeBias,'initialSigma_m')
+                    sigma0_tx = cfg.hardware.txCodeBias.initialSigma_m;
+                end
+                for k = 1:numel(sm.txCodeBiasIdx)
+                    idx_k = sm.txCodeBiasIdx(k);
+                    if idx_k > 0
+                        P0(idx_k, idx_k) = sigma0_tx^2;
+                    end
+                end
+            end
         end
     end
 end

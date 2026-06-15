@@ -126,6 +126,10 @@ classdef ReverseGNSSSimulation < handle
             [z_ekf, h_ekf, H_ekf, R_ekf, gaugeInfo] = obj.ekf.appendClockGaugeRows(z, h, H, R);
             errStruct.gaugeInfo = gaugeInfo;
 
+            % Append tx-code-delay gauge rows (only active when estimateTxCodeBias=true).
+            [z_ekf, h_ekf, H_ekf, R_ekf, txGaugeInfo] = obj.ekf.appendTxDelayGaugeRows(z_ekf, h_ekf, H_ekf, R_ekf);
+            errStruct.txGaugeInfo = txGaugeInfo;
+
             % Visibility for diagnostics
             [visible, elev_rad] = obj.measModel.computeVisibility( ...
                 obj.towers, obj.asset.getAntennaPositionECEF());
