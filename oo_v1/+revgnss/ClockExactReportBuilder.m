@@ -449,6 +449,7 @@ classdef ClockExactReportBuilder
             CE.writeClockObservability_(fid, diag, cfg);
             CE.writeTxCodeBias_(fid, diag, cfg);
             CE.writeBiasArchitecture_(fid, cfg);
+            CE.writeSignalIonosphereArchitecture_(fid, cfg);
             CE.writeDisabledComponents_(fid, cfg);
             CE.writeNumericalSummary_(fid, cfg, summary, diag);
 
@@ -1166,6 +1167,73 @@ classdef ClockExactReportBuilder
 
             fprintf(fid, '\\end{longtable}\n');
             fprintf(fid, '\\clearpage\n');
+        end
+
+        function writeSignalIonosphereArchitecture_(fid, cfg)
+            % writeSignalIonosphereArchitecture_  Stage 13 signal and iono section.
+            CE = revgnss.ClockExactReportBuilder;
+
+            fprintf(fid, '\\section{Signal and Ionosphere Architecture}\n');
+            fprintf(fid, ['\\small\n' ...
+                'First-order ionospheric delay is dispersive and scales with $1/f^2$. ' ...
+                'Code pseudorange receives a positive group delay; carrier phase receives ' ...
+                'a negative phase advance of the same magnitude at the primary frequency.\n\n']);
+            fprintf(fid, ['Ionosphere-free (IF) combinations remove first-order iono but ' ...
+                'mix and amplify signal-specific hardware group delays with coefficients ' ...
+                '$c_1 = f_1^2/(f_1^2-f_2^2)$ and $c_2 = -f_2^2/(f_1^2-f_2^2)$. ' ...
+                'Therefore IF code is disabled when only L1 transmitter/receiver ' ...
+                'code-bias states are available.  ' ...
+                'Carrier IF combination is diagnostic-only: IF wavelength is not an ' ...
+                'integer multiple of L1/L2, so integer ambiguity resolution is not applicable.\n\n']);
+
+            fprintf(fid, CE.plotTableHeader_());
+
+            % Active signals
+            sigNames = CE.getCfgStr_(cfg,{'signals','enabled'},'');
+            if isempty(sigNames)
+                sigNamesStr = 'L1 (default)';
+            elseif iscell(sigNames)
+                sigNamesStr = strjoin(sigNames, ', ');
+            else
+                sigNamesStr = sigNames;
+            end
+            % getCfgStr_ won't handle cell arrays; read directly
+            if isfield(cfg,'signals') && isfield(cfg.signals,'enabled')
+                raw = cfg.signals.enabled;
+                if iscell(raw); sigNamesStr = strjoin(raw, ', ');
+                elseif ischar(raw); sigNamesStr = raw; end
+            end
+            CE.writeRow_(fid,'','Active signals', sigNamesStr);
+
+            pri = CE.getCfgStr_(cfg,{'signals','primary'},'L1');
+            sec = CE.getCfgStr_(cfg,{'signals','secondary'},'L2');
+            CE.writeRow_(fid,'','Primary signal', pri);
+            CE.writeRow_(fid,'','Secondary signal (IF)', sec);
+
+            codeMode = CE.getCfgStr_(cfg,{'measurements','codeMode'},'singleFrequency');
+            carrMode = CE.getCfgStr_(cfg,{'measurements','carrierMode'},'diagnostic');
+            ionoMode = CE.getCfgStr_(cfg,{'ionosphere','mode'},'off');
+            CE.writeRow_(fid,'','Code mode', CE.esc_(codeMode));
+            CE.writeRow_(fid,'','Carrier mode', CE.esc_(carrMode));
+            CE.writeRow_(fid,'','Ionosphere mode', CE.esc_(ionoMode));
+
+            ifCodeEnabled = strcmp(codeMode,'ionosphereFree');
+            CE.writeRow_(fid,'','IF code enabled?', CE.bool2str13_(ifCodeEnabled));
+
+            ifCarrEnabled = isfield(cfg,'measurements') && isfield(cfg.measurements,'carrierCombinationMode') && ...
+                strcmp(cfg.measurements.carrierCombinationMode,'ionosphereFree');
+            CE.writeRow_(fid,'','IF carrier (diagnostic)?', CE.bool2str13_(ifCarrEnabled));
+
+            CE.writeRow_(fid,'','Hardware-bias limitation', ...
+                ['IF code disabled when only L1 code-bias states exist. ' ...
+                 'Per-signal L1/L2 group-delay states not implemented (Stage 13 limit).']);
+
+            fprintf(fid, CE.plotTableFooter_());
+            fprintf(fid, '\\clearpage\n');
+        end
+
+        function s = bool2str13_(v)
+            if v; s = 'yes'; else; s = 'no'; end
         end
 
         function writeDisabledComponents_(fid, cfg)

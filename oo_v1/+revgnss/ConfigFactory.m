@@ -230,6 +230,9 @@ classdef ConfigFactory
             cfg.signals.L2.frequency_Hz  = 1227.60e6;
             cfg.signals.L2.lambda_m      = 299792458 / 1227.60e6;
             cfg.signals.L2.codeSigma0_m  = 0.45;
+            cfg.signals.primary          = 'L1';   % primary signal for iono scaling
+            cfg.signals.secondary        = 'L2';   % secondary for IF combination
+            cfg.ionosphere.mode          = 'off';  % 'off'|'truthOnly'|'model'|'ionosphereFree'
 
             % --- Code noise model --------------------------------------------------
             cfg.measurements.codeNoise.model             = 'constant';
@@ -1121,7 +1124,7 @@ classdef ConfigFactory
                     if isfield(cfg,'measurements') && isfield(cfg.measurements,'codeMode')
                         codeMode11 = cfg.measurements.codeMode;
                     end
-                    if any(strcmp(codeMode11, {'ionoFreeCode','twoFrequency'}))
+                    if any(strcmp(codeMode11, {'ionoFreeCode','twoFrequency','ionosphereFree'}))
                         error('ConfigFactory:txCodeBiasIF', ...
                             ['Stage 11 supports L1 per-tower code delay only. ' ...
                              'Per-signal L1/L2 group-delay states are not implemented yet. ' ...
@@ -1188,6 +1191,30 @@ classdef ConfigFactory
                                  'Absolute carrier phase calibration is not available.'];
                     cfg.validation.warnings{end+1} = warnMsg12;
                     warning('ConfigFactory:rxCarrierBiasAbsorbed', '%s', warnMsg12);
+                end
+            end
+
+            % ---- Stage 13: ionosphere-free + rxCodeBias incompatibility guard ------
+            % IF combines L1 and L2 with different coefficients, so a single scalar
+            % receiver code-bias calibration is not well-defined for both frequencies.
+            % Per-signal receiver code-bias handling is not implemented in Stage 13.
+            codeModeIF13 = '';
+            if isfield(cfg,'measurements') && isfield(cfg.measurements,'codeMode')
+                codeModeIF13 = cfg.measurements.codeMode;
+            end
+            if strcmp(codeModeIF13,'ionosphereFree') && ...
+                    isfield(cfg,'hardware') && isfield(cfg.hardware,'rxCodeBias')
+                rxMode13 = 'absorbedInReceiverClock';
+                if isfield(cfg.hardware.rxCodeBias,'mode')
+                    rxMode13 = cfg.hardware.rxCodeBias.mode;
+                end
+                if any(strcmp(rxMode13, {'fixed','externalCalibration'}))
+                    error('ConfigFactory:rxCodeBiasIFIncompatible', ...
+                        ['cfg.hardware.rxCodeBias.mode=''%s'' is incompatible with ' ...
+                         'codeMode=''ionosphereFree''. Ionosphere-free code requires per-signal ' ...
+                         'hardware delay handling, which is not yet implemented. ' ...
+                         'Use rxCodeBias.mode=''absorbedInReceiverClock'' or codeMode=''singleFrequency''.'], ...
+                        rxMode13);
                 end
             end
 
