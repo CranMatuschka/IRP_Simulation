@@ -272,68 +272,9 @@ classdef MeasurementModel < handle
                     errStruct.carrierPhase = struct();
             end
 
-            % ----- Observability diagnostics ---------------------------
-            if isfield(obj.cfg,'diagnostics') && ...
-                    isfield(obj.cfg.diagnostics,'observability') && ...
-                    obj.cfg.diagnostics.observability.enabled
-                % Build measType_perRow before passing so diagnostics see row types
-                M_rows_obs = size(H, 1);
-                M_dop_obs  = 0;
-                if isfield(errStruct,'doppler') && isstruct(errStruct.doppler) && ...
-                        isfield(errStruct.doppler,'z') && ~isempty(errStruct.doppler.z) && ...
-                        isfield(obj.cfg,'measurements') && isfield(obj.cfg.measurements,'doppler') && ...
-                        obj.cfg.measurements.doppler.useInEKF
-                    M_dop_obs = numel(errStruct.doppler.z);
-                end
-                % Stage 7A.1: label IF-combined code rows as 'ifCode' so
-                % ObservabilityDiagnostics.nIFCodeRows is non-zero in IF mode.
-                isIFCodeObs = isfield(errStruct,'ifCombination') && errStruct.ifCombination;
-                mTypeObs = cell(M_rows_obs, 1);
-                for mi_o = 1:M_rows_obs
-                    if mi_o <= M
-                        if isIFCodeObs
-                            mTypeObs{mi_o} = 'ifCode';
-                        else
-                            mTypeObs{mi_o} = 'code';
-                        end
-                    elseif mi_o <= M + M_dop_obs
-                        mTypeObs{mi_o} = 'doppler';
-                    else
-                        mTypeObs{mi_o} = 'carrier';
-                    end
-                end
-                errStruct.observability = revgnss.ObservabilityDiagnostics.analyze( ...
-                    H, stateMap, obj.cfg, mTypeObs);
-            else
-                errStruct.observability = struct();
-            end
-
-            % ----- Measurement type metadata per EKF row ---------------
-            M_rows     = size(H, 1);
-            M_dop_rows = 0;
-            if isfield(errStruct,'doppler') && isstruct(errStruct.doppler) && ...
-                    isfield(errStruct.doppler,'z') && ~isempty(errStruct.doppler.z) && ...
-                    isfield(obj.cfg,'measurements') && isfield(obj.cfg.measurements,'doppler') && ...
-                    obj.cfg.measurements.doppler.useInEKF
-                M_dop_rows = numel(errStruct.doppler.z);
-            end
-            % Stage 7A.1: label IF rows as 'ifCode' so downstream diagnostics count them.
-            isIFCode = isfield(errStruct,'ifCombination') && errStruct.ifCombination;
-            mType = cell(M_rows, 1);
-            for mi_t = 1:M_rows
-                if mi_t <= M
-                    if isIFCode
-                        mType{mi_t} = 'ifCode';
-                    else
-                        mType{mi_t} = 'code';
-                    end
-                elseif mi_t <= M + M_dop_rows
-                    mType{mi_t} = 'doppler';
-                else
-                    mType{mi_t} = 'carrier';
-                end
-            end
-            errStruct.measType_perRow = mType;
+            % ----- Stack metadata and observability --------------------
+            errStruct = revgnss.MeasurementStackMetadata.annotate( ...
+                obj.cfg, H, M, errStruct, stateMap);
         end
 
         % ----------------------------------------------------------------
