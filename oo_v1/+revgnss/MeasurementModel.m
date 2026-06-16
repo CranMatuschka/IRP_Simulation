@@ -152,112 +152,9 @@ classdef MeasurementModel < handle
             errStruct = obj.errorChain.compute(elv_list, towerIds, twr_list, t_s);
 
             % ----- Tower clock corrections — generated ONCE per epoch --
-            towerClkMode  = obj.getTowerClockMode_();
-            towerClkTruth = zeros(M,1);
-            towerClkModel = zeros(M,1);
-            towerClkSigma = zeros(M,1);
-
-            noiseSigma = obj.cfg.estimator.towerClockCorrectionSigma_m;
-            if isfield(obj.cfg,'towerClockCorrectionSigma_m')
-                noiseSigma = obj.cfg.towerClockCorrectionSigma_m;
-            end
-            if strcmp(towerClkMode,'noisyCorrection')
-                % CHANGED: v3→v4 — Issue 5
-                % SIMULATION NOTE: noisyCorrection is a truth-based simulated external
-                % correction product.  It is NOT a model of what a real receiver
-                % produces; it adds zero-mean Gaussian noise to the true tower clock.
-                % Use for Monte Carlo bias/sigma studies only.
-                % predictedProduct is the more realistic product model.
-                corrNoise_m = noiseSigma * obj.errorChain.drawNormal(M, 1);
-            else
-                corrNoise_m = zeros(M,1);
-            end
-
-            % TASK 6: Product epoch computed ONCE before measurement loop so
-            % 'product' and 'productNoisy' modes can evaluate b_hat(t_s) =
-            % b(t_prod) + bdot(t_prod) * (t_s - t_prod) per tower.
-            updateInterval_s = 300;
-            latency_s        = 0;
-            if isfield(obj.cfg,'errors') && isfield(obj.cfg.errors,'towerClock')
-                tc2 = obj.cfg.errors.towerClock;
-                if isfield(tc2,'updateInterval_s'); updateInterval_s = tc2.updateInterval_s; end
-                if isfield(tc2,'latency_s');        latency_s        = tc2.latency_s;        end
-            end
-            t_available = t_s - latency_s;
-            if updateInterval_s > 0
-                t_prod = floor(t_available / updateInterval_s) * updateInterval_s;
-            else
-                t_prod = t_available;
-            end
-            if t_prod < 0
-                warning('revgnss:productEpoch', ...
-                    'Product epoch negative at t=%.1f s; clamping to 0.', t_s);
-                t_prod = 0;
-            end
-
-            for mi = 1:M
-                ti  = twr_list(mi);
-                b_t = towers{ti}.getClockBiasMeters();
-                towerClkTruth(mi) = b_t;
-                switch towerClkMode
-                    case 'none'
-                        % No correction. EKF must estimate or accept clock bias as error.
-                        towerClkModel(mi) = 0;
-                    case 'perfectCorrection'
-                        % Validation/test use only. Uses truth clock directly.
-                        towerClkModel(mi) = b_t;
-                    case 'noisyCorrection'
-                        % Truth-based simulated correction + Gaussian noise (truthHistoryProductNoisy).
-                        towerClkModel(mi) = b_t + corrNoise_m(mi);
-                        towerClkSigma(mi) = noiseSigma;
-                    case 'truthProduct'
-                        % Stage 7A: truthHistoryProduct — history-based linear prediction.
-                        % Does NOT require cfg.towerClock.products struct.
-                        [b_p, bd_p] = obj.getClockAtProductEpoch_(towers{ti}, t_prod);
-                        towerClkModel(mi) = b_p + bd_p * (t_s - t_prod);
-                    case 'product'
-                        % Stage 7A: explicit cfg.towerClock.products struct REQUIRED.
-                        % NO fallback to truth history. Throws if struct is missing.
-                        hasProd = isfield(obj.cfg,'towerClock') && ...
-                                  isfield(obj.cfg.towerClock,'products') && ...
-                                  ti <= numel(obj.cfg.towerClock.products);
-                        if ~hasProd
-                            nProd = 0;
-                            if isfield(obj.cfg,'towerClock') && isfield(obj.cfg.towerClock,'products')
-                                nProd = numel(obj.cfg.towerClock.products);
-                            end
-                            error('MeasurementModel:productStructMissing', ...
-                                ['correctionMode=''product'' requires cfg.towerClock.products(%d) ' ...
-                                 'to be set. Found only %d product struct(s). ' ...
-                                 'Use correctionMode=''truthHistoryProduct'' for history-based mode.'], ...
-                                ti, nProd);
-                        end
-                        [b_hat, ~] = obj.evalProductStruct_(ti, t_s);
-                        towerClkModel(mi) = b_hat;
-                    case 'productNoisy'
-                        % Stage 7A: explicit struct REQUIRED + uncertainty added to R.
-                        % NO fallback to truth history. Throws if struct is missing.
-                        hasProd = isfield(obj.cfg,'towerClock') && ...
-                                  isfield(obj.cfg.towerClock,'products') && ...
-                                  ti <= numel(obj.cfg.towerClock.products);
-                        if ~hasProd
-                            nProd = 0;
-                            if isfield(obj.cfg,'towerClock') && isfield(obj.cfg.towerClock,'products')
-                                nProd = numel(obj.cfg.towerClock.products);
-                            end
-                            error('MeasurementModel:productStructMissing', ...
-                                ['correctionMode=''productNoisy'' requires cfg.towerClock.products(%d) ' ...
-                                 'to be set. Found only %d product struct(s). ' ...
-                                 'Use correctionMode=''truthHistoryProductNoisy'' for history-based mode.'], ...
-                                ti, nProd);
-                        end
-                        [b_hat, sig_corr] = obj.evalProductStruct_(ti, t_s);
-                        towerClkModel(mi) = b_hat;
-                        towerClkSigma(mi) = sig_corr;
-                    otherwise
-                        towerClkModel(mi) = 0;
-                end
-            end
+            [towerClkTruth, towerClkModel, towerClkSigma, corrNoise_m, t_prod, towerClkMode] = ...
+                revgnss.TowerClockCorrectionProvider.compute( ...
+                    obj.cfg, obj.errorChain, towers, twr_list, t_s);
 
             errStruct.towerClockTruth_m      = towerClkTruth;
             errStruct.towerClockModel_m      = towerClkModel;
@@ -979,12 +876,7 @@ classdef MeasurementModel < handle
 
         % ----------------------------------------------------------------
         function mode = getTowerClockMode_(obj)
-            mode = 'none';
-            if isfield(obj.cfg,'estimator') && isfield(obj.cfg.estimator,'towerClockMode')
-                mode = obj.cfg.estimator.towerClockMode;
-            elseif isfield(obj.cfg,'towerClockMode')
-                mode = obj.cfg.towerClockMode;
-            end
+            mode = revgnss.TowerClockCorrectionProvider.towerClockMode(obj.cfg);
         end
 
         % ----------------------------------------------------------------
@@ -1335,83 +1227,14 @@ classdef MeasurementModel < handle
         end
 
         % ----------------------------------------------------------------
-        function [b_m, bdot_mps] = getClockAtProductEpoch_(obj, tower, t_prod_s)
-            % getClockAtProductEpoch_  Return tower clock bias and drift at product epoch.
-            %
-            % For 'truthHistoryProduct'/'product'/'productNoisy' modes that do NOT have
-            % an explicit cfg.towerClock.products struct, this reads from tower history.
-            % Returns [0, 0] when history is unavailable (first epoch or t_prod=0).
-            b_m      = 0;
-            bdot_mps = 0;
-            hist = tower.history;
-            if isempty(hist.time_s) || isempty(hist.clockBias_m)
-                return;
-            end
-            idx = find(hist.time_s <= t_prod_s + 1e-9, 1, 'last');
-            if isempty(idx); return; end
-            b_m      = hist.clockBias_m(idx);
-            bdot_mps = hist.clockDrift_mps(idx);
+        function [b_m, bdot_mps] = getClockAtProductEpoch_(obj, tower, t_prod_s) %#ok<INUSL>
+            [b_m, bdot_mps] = revgnss.TowerClockCorrectionProvider.clockAtProductEpoch(tower, t_prod_s);
         end
 
         % ----------------------------------------------------------------
         function [b_hat, sigma_corr] = evalProductStruct_(obj, ti, t_eval_s)
-            % evalProductStruct_  Evaluate explicit per-tower product struct.
-            %
-            % Reads cfg.towerClock.products(ti) and returns the linearly-predicted
-            % clock bias at t_eval_s together with the product prediction uncertainty.
-            %
-            %   b_hat = bias_m + drift_mps * dt         [m]
-            %   sigma_corr^2 = sigmaBias^2 + dt^2*sigmaDrift^2 + 2*dt*covBiasDrift
-            %
-            % where dt = t_eval_s - epoch_s.
-            % If validity_s is set and |dt| > validity_s, applies productValidityPolicy.
-            b_hat      = 0;
-            sigma_corr = 0;
-
-            if ~isfield(obj.cfg,'towerClock') || ~isfield(obj.cfg.towerClock,'products')
-                error('MeasurementModel:productStructMissing', ...
-                    ['evalProductStruct_: cfg.towerClock.products is required for explicit ' ...
-                     'product/productNoisy modes but is missing. ' ...
-                     'Provide a products struct array or use truthHistoryProduct instead.']);
-            end
-            products = obj.cfg.towerClock.products;
-            if ti > numel(products)
-                error('MeasurementModel:productStructMissing', ...
-                    ['evalProductStruct_: tower index %d exceeds products array length %d. ' ...
-                     'Ensure cfg.towerClock.products has one entry per tower.'], ...
-                    ti, numel(products));
-            end
-            prod = products(ti);
-
-            epoch_s   = 0;  if isfield(prod,'epoch_s');   epoch_s   = prod.epoch_s;   end
-            bias_m    = 0;  if isfield(prod,'bias_m');    bias_m    = prod.bias_m;    end
-            drift_mps = 0;  if isfield(prod,'drift_mps'); drift_mps = prod.drift_mps; end
-
-            dt = t_eval_s - epoch_s;
-
-            % Validity check
-            if isfield(prod,'validity_s') && prod.validity_s > 0 && abs(dt) > prod.validity_s
-                policy = 'warn';
-                if isfield(obj.cfg.towerClock,'productValidityPolicy')
-                    policy = obj.cfg.towerClock.productValidityPolicy;
-                end
-                msg = sprintf(['Tower %d product validity exceeded: |dt|=%.1f s > %.1f s. ' ...
-                               'Prediction accuracy may be degraded.'], ti, abs(dt), prod.validity_s);
-                if strcmp(policy,'error')
-                    error('MeasurementModel:productValidityExceeded', '%s', msg);
-                else
-                    warning('MeasurementModel:productValidityExceeded', '%s', msg);
-                end
-            end
-
-            b_hat = bias_m + drift_mps * dt;
-
-            % R contribution: sigma_corr^2 = sigmaBias^2 + dt^2*sigmaDrift^2 + 2*dt*cov
-            sBias  = 0; if isfield(prod,'sigmaBias_m');    sBias  = prod.sigmaBias_m;    end
-            sDrift = 0; if isfield(prod,'sigmaDrift_mps'); sDrift = prod.sigmaDrift_mps; end
-            cov    = 0; if isfield(prod,'covBiasDrift');   cov    = prod.covBiasDrift;   end
-            var_corr = sBias^2 + dt^2 * sDrift^2 + 2*dt*cov;
-            sigma_corr = sqrt(max(var_corr, 0));
+            [b_hat, sigma_corr] = revgnss.TowerClockCorrectionProvider.evalProductStruct( ...
+                obj.cfg, ti, t_eval_s);
         end
 
         % ----------------------------------------------------------------
