@@ -432,6 +432,13 @@ classdef ConfigFactory
             cfg.measurements.carrier.cycleSlipMode             = 'none';
             cfg.measurements.carrier.syntheticSlipProbability  = 0;
 
+            % Slip detection (Stage 14)
+            cfg.measurements.carrier.slipDetection.enable                 = false;
+            cfg.measurements.carrier.slipDetection.threshold_m            = 0.1;
+            cfg.measurements.carrier.slipDetection.minEpochsBeforeDetect  = 3;
+            cfg.measurements.carrier.slipDetection.resetSigma_m           = 100;
+            cfg.measurements.carrier.slipDetection.action                 = 'resetAndSkip';
+
             % --- ZWD mapping model (Step 6) ---------------------------------
             % Governs the mapping function used for ZWD state contributions in h,
             % H Jacobian, and postfit recomputation.

@@ -421,6 +421,18 @@ classdef Diagnostics < handle
                 entry.nTxCodeBiasStates       = ekf.nTxCodeBiasStates;
             end
 
+            % --- Carrier slip diagnostics (Stage 14) -----------------------
+            entry.carrierSlipNSlips       = 0;
+            entry.carrierSlipTotalJump_m  = 0;
+            if ~isempty(errStruct) && isfield(errStruct,'slipInfo') && ...
+                    isstruct(errStruct.slipInfo)
+                si14 = errStruct.slipInfo;
+                if isfield(si14,'nSlips'); entry.carrierSlipNSlips = si14.nSlips; end
+                if isfield(si14,'jumpMags_m') && ~isempty(si14.jumpMags_m)
+                    entry.carrierSlipTotalJump_m = sum(si14.jumpMags_m);
+                end
+            end
+
             % --- Windowed clock observability Gramian ----------------------
             % Build a sliding epoch buffer (physical H + gauge H restricted to
             % clock columns) and compute the weighted observability Gramian.
@@ -1148,6 +1160,20 @@ classdef Diagnostics < handle
             % getNTxCodeBiasStates  Number of tx code bias states per epoch.
             if isempty(obj.log); v = []; return; end
             v = [obj.log.nTxCodeBiasStates]';
+        end
+
+        % --- Carrier slip getters (Stage 14) --------------------------------
+
+        function v = getCarrierSlipNSlips(obj)
+            % getCarrierSlipNSlips  Number of cycle slips detected per epoch.
+            if isempty(obj.log); v = []; return; end
+            v = [obj.log.carrierSlipNSlips]';
+        end
+
+        function v = getCarrierSlipTotalJump(obj)
+            % getCarrierSlipTotalJump  Sum of jump magnitudes per epoch [m].
+            if isempty(obj.log); v = []; return; end
+            v = [obj.log.carrierSlipTotalJump_m]';
         end
 
     end

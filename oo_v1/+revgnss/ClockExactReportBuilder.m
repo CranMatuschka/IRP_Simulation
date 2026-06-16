@@ -450,6 +450,7 @@ classdef ClockExactReportBuilder
             CE.writeTxCodeBias_(fid, diag, cfg);
             CE.writeBiasArchitecture_(fid, cfg);
             CE.writeSignalIonosphereArchitecture_(fid, cfg);
+            CE.writeCarrierTrackRobustness_(fid, cfg);
             CE.writeDisabledComponents_(fid, cfg);
             CE.writeNumericalSummary_(fid, cfg, summary, diag);
 
@@ -1234,6 +1235,50 @@ classdef ClockExactReportBuilder
 
         function s = bool2str13_(v)
             if v; s = 'yes'; else; s = 'no'; end
+        end
+
+        function writeCarrierTrackRobustness_(fid, cfg)
+            CE = revgnss.ClockExactReportBuilder;
+
+            fprintf(fid, '\\section{Carrier Track Robustness}\n');
+            fprintf(fid, CE.plotTableHeader_());
+
+            % Carrier mode
+            carrMode = 'diagnostic';
+            if isfield(cfg,'measurements') && isfield(cfg.measurements,'carrierMode')
+                carrMode = cfg.measurements.carrierMode;
+            end
+            CE.writeRow_(fid, 'Carrier mode', carrMode, ...
+                'ekfFloat: float ambiguity state per tower; diagnostic: truth-only carrier.');
+
+            % Slip detection
+            sdEnable = false;
+            if isfield(cfg,'measurements') && isfield(cfg.measurements,'carrier') && ...
+                    isfield(cfg.measurements.carrier,'slipDetection') && ...
+                    isfield(cfg.measurements.carrier.slipDetection,'enable')
+                sdEnable = cfg.measurements.carrier.slipDetection.enable;
+            end
+            CE.writeRow_(fid, 'Slip detection', CE.bool2str13_(sdEnable), ...
+                'CarrierTrackManager: prefit-residual jump threshold detector.');
+
+            if sdEnable
+                sl = cfg.measurements.carrier.slipDetection;
+                thr = 0.1; minEp = 3; act = 'resetAndSkip'; sig = 100;
+                if isfield(sl,'threshold_m');            thr  = sl.threshold_m;            end
+                if isfield(sl,'minEpochsBeforeDetect');  minEp = sl.minEpochsBeforeDetect; end
+                if isfield(sl,'action');                 act  = sl.action;                 end
+                if isfield(sl,'resetSigma_m');           sig  = sl.resetSigma_m;           end
+                CE.writeRow_(fid, 'Jump threshold', sprintf('%.4f m', thr), ...
+                    '|prefit\_k - prefit\_{k-1}| > threshold triggers a slip.');
+                CE.writeRow_(fid, 'Min epochs before detect', sprintf('%d', minEp), ...
+                    'Suppresses false positives during track initialisation.');
+                CE.writeRow_(fid, 'Reset sigma', sprintf('%.1f m', sig), ...
+                    'P(ambiguity,ambiguity) reset to this value squared on slip.');
+                CE.writeRow_(fid, 'Slip action', act, ...
+                    'resetAndSkip: drop carrier row this epoch. resetAndUse: keep row.');
+            end
+
+            fprintf(fid, CE.plotTableFooter_());
         end
 
         function writeDisabledComponents_(fid, cfg)

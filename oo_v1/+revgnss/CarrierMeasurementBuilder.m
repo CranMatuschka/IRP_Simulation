@@ -63,10 +63,13 @@ classdef CarrierMeasurementBuilder
             H_phi = zeros(Mp, nx);
             R_phi = sigma_phi^2 * eye(Mp);
 
-            cpInfo.towerIdx   = twr_pairs;
-            cpInfo.antennaIdx = ant_pairs;
-            cpInfo.phi_m      = zeros(Mp, 1);
-            cpInfo.prefit_m   = zeros(Mp, 1);
+            cpInfo.towerIdx          = twr_pairs;
+            cpInfo.antennaIdx        = ant_pairs;
+            cpInfo.signalIdx         = sigIdx * ones(Mp, 1);
+            cpInfo.phi_m             = zeros(Mp, 1);
+            cpInfo.prefit_m          = zeros(Mp, 1);
+            cpInfo.ambiguityStateIdx = zeros(Mp, 1);
+            cpInfo.trackKey          = cell(Mp, 1);
 
             for mi = 1:Mp
                 ti  = twr_pairs(mi);
@@ -153,6 +156,12 @@ classdef CarrierMeasurementBuilder
 
                 cpInfo.phi_m(mi)    = z_phi(mi);
                 cpInfo.prefit_m(mi) = z_phi(mi) - h_phi(mi);
+                cpInfo.trackKey{mi} = sprintf('T%03d_A%03d_S%02d', ti, ai, sigIdx);
+                if isfield(stateMap,'ambiguityIdx') && ...
+                        ti <= size(stateMap.ambiguityIdx,1) && ...
+                        sigIdx <= size(stateMap.ambiguityIdx,2)
+                    cpInfo.ambiguityStateIdx(mi) = stateMap.ambiguityIdx(ti, sigIdx);
+                end
 
                 % ---- H: position columns (analytic or finite-difference) ------
                 r_cm_est  = x_est(stateMap.r_idx);

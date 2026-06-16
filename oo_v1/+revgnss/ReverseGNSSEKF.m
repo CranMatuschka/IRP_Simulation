@@ -588,6 +588,17 @@ classdef ReverseGNSSEKF < handle
         end
 
         % ----------------------------------------------------------------
+        function applyAmbiguityResets(obj, resetRequests)
+            % applyAmbiguityResets  Batch-reset covariance for slipped tracks.
+            %
+            % resetRequests is a struct array with fields towerIdx, signalIdx.
+            % Calls resetAmbiguityCovariance for each entry.
+            for ri = 1:numel(resetRequests)
+                obj.resetAmbiguityCovariance( ...
+                    resetRequests(ri).towerIdx, resetRequests(ri).signalIdx);
+            end
+        end
+
         % ----------------------------------------------------------------
         function [z_out, h_out, H_out, R_out, gaugeInfo] = appendClockGaugeRows(obj, z, h, H, R)
             % appendClockGaugeRows  Augment measurement stack with clock-gauge pseudo-rows.

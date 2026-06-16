@@ -28,6 +28,8 @@ classdef ReverseGNSSSimulation < handle
         nEpochs     (1,1) double  = 0
         tVec        (:,1) double  = []
         isInit      (1,1) logical = false
+
+        trackMgr    revgnss.CarrierTrackManager
     end
 
     methods
@@ -53,8 +55,9 @@ classdef ReverseGNSSSimulation < handle
             obj.tVec    = (0 : dt : dur)';
             obj.nEpochs = numel(obj.tVec);
 
-            obj.diag   = revgnss.Diagnostics(obj.cfg);
-            obj.isInit = true;
+            obj.diag     = revgnss.Diagnostics(obj.cfg);
+            obj.trackMgr = revgnss.CarrierTrackManager();
+            obj.isInit   = true;
 
             nRx = size(obj.asset.receiverLeverArms_body_m, 2);
             doAttPR = isfield(obj.cfg.estimator,'estimateAttitudeFromPseudorange') && ...
@@ -119,6 +122,33 @@ classdef ReverseGNSSSimulation < handle
             % Compute measurements (also generates and stores tower clock corrections)
             [z, h, H, R, errStruct] = obj.measModel.computeMeasurements( ...
                 obj.asset, obj.towers, obj.ekf.x, t_s, obj.ekf.stateMap);
+
+            % Cycle-slip detection and ambiguity reset (carrier ekfFloat only).
+            % Runs after computeMeasurements but before gauge rows are appended so
+            % keepMask operates only on the physical measurement stack.
+            slipInfo = struct('nSlips', 0, 'slippedKeys', {{}}, 'jumpMags_m', []);
+            if isfield(errStruct,'carrierPhase') && isstruct(errStruct.carrierPhase) && ...
+                    isfield(errStruct.carrierPhase,'prefit_m') && ...
+                    ~isempty(errStruct.carrierPhase.prefit_m) && ...
+                    isfield(errStruct.carrierPhase,'trackKey')
+                cpInfo = errStruct.carrierPhase;
+                [slipInfo, keepMask, resetRequests] = obj.trackMgr.process(cpInfo, obj.cfg);
+                if any(~keepMask)
+                    M_pr  = errStruct.nPseudorange;
+                    M_dop = 0;
+                    if isfield(errStruct,'doppler') && isfield(errStruct.doppler,'z')
+                        M_dop = numel(errStruct.doppler.z);
+                    end
+                    M_car = numel(cpInfo.towerIdx);
+                    fullMask = [true(M_pr + M_dop, 1); keepMask];
+                    if numel(fullMask) == numel(z)
+                        z = z(fullMask); h = h(fullMask);
+                        H = H(fullMask,:); R = R(fullMask, fullMask);
+                    end
+                end
+                obj.ekf.applyAmbiguityResets(resetRequests);
+            end
+            errStruct.slipInfo = slipInfo;
 
             % Append clock-gauge pseudo-measurements for EKF update only.
             % z_ekf/h_ekf/H_ekf/R_ekf include gauge rows.
