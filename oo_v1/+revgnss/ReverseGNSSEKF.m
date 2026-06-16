@@ -565,11 +565,16 @@ classdef ReverseGNSSEKF < handle
         end
 
         % ----------------------------------------------------------------
-        function resetAmbiguityCovariance(obj, towerIdx, sigIdx)
+        function resetAmbiguityCovariance(obj, towerIdx, sigIdx, resetSigma_m)
             % resetAmbiguityCovariance  Reset ambiguity covariance after cycle slip.
             %
-            % Sets P(amb,amb) to initialSigma_m^2 for tower towerIdx, signal sigIdx.
-            % Used when a cycle slip is detected or synthesized.
+            % Sets P(amb,:)=0, P(:,amb)=0, P(amb,amb)=resetSigma_m^2.
+            % The ambiguity STATE VALUE is deliberately left unchanged; the next
+            % update will re-estimate it once the inflated covariance allows
+            % the filter to move.  This avoids injecting a large state transient.
+            %
+            % resetSigma_m (optional): covariance sigma to use on reset.
+            %   If omitted or empty, falls back to cfg.estimation.ambiguity.initialSigma_m.
             if ~obj.estimateAmbiguities; return; end
             sm = obj.stateMap;
             if towerIdx < 1 || towerIdx > obj.nTowers; return; end
@@ -577,25 +582,30 @@ classdef ReverseGNSSEKF < handle
             idx = sm.ambiguityIdx(towerIdx, sigIdx);
             if idx <= 0 || idx > obj.nx; return; end
 
-            initSig = 100;
-            if isfield(obj.cfg,'estimation') && isfield(obj.cfg.estimation,'ambiguity') && ...
-                    isfield(obj.cfg.estimation.ambiguity,'initialSigma_m')
-                initSig = obj.cfg.estimation.ambiguity.initialSigma_m;
+            if nargin < 4 || isempty(resetSigma_m)
+                resetSigma_m = 100;
+                if isfield(obj.cfg,'estimation') && isfield(obj.cfg.estimation,'ambiguity') && ...
+                        isfield(obj.cfg.estimation.ambiguity,'initialSigma_m')
+                    resetSigma_m = obj.cfg.estimation.ambiguity.initialSigma_m;
+                end
             end
             obj.P(idx, :) = 0;
             obj.P(:, idx) = 0;
-            obj.P(idx, idx) = initSig^2;
+            obj.P(idx, idx) = resetSigma_m^2;
         end
 
         % ----------------------------------------------------------------
-        function applyAmbiguityResets(obj, resetRequests)
+        function applyAmbiguityResets(obj, resetRequests, resetSigma_m)
             % applyAmbiguityResets  Batch-reset covariance for slipped tracks.
             %
-            % resetRequests is a struct array with fields towerIdx, signalIdx.
-            % Calls resetAmbiguityCovariance for each entry.
+            % resetRequests: struct array with fields towerIdx, signalIdx.
+            % resetSigma_m (optional): override sigma for this batch of resets.
+            %   Passed directly to resetAmbiguityCovariance; if omitted the
+            %   method falls back to cfg.estimation.ambiguity.initialSigma_m.
+            if nargin < 3; resetSigma_m = []; end
             for ri = 1:numel(resetRequests)
                 obj.resetAmbiguityCovariance( ...
-                    resetRequests(ri).towerIdx, resetRequests(ri).signalIdx);
+                    resetRequests(ri).towerIdx, resetRequests(ri).signalIdx, resetSigma_m);
             end
         end
 

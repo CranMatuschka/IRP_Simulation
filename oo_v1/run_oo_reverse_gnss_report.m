@@ -118,13 +118,17 @@ cfg.measurements.doppler.useInEKF     = true;
 cfg.physics.doppler.truth.enable      = true;
 cfg.physics.doppler.model.enable      = true;
 
-% --- Carrier phase ----------------------------------------------
-% Float ambiguity EKF is available via carrierFloatConfig or by setting:
-%   cfg.measurements.carrierMode = 'ekfFloat';
-%   cfg.estimation.ambiguityMode = 'floatPerTowerSignal';
-% This run uses 'diagnostic' mode: carrier is computed but not fed to EKF.
-cfg.measurements.carrierPhase.enable      = true;
-cfg.measurements.carrierPhase.useInEKF    = false;  % diagnostic only; set carrierMode='ekfFloat' to enable
+% --- Carrier phase (float ambiguity EKF) ------------------------
+cfg.measurements.carrierPhase.enable    = true;
+cfg.measurements.carrierMode            = 'ekfFloat';
+cfg.estimation.ambiguityMode            = 'floatPerTowerSignal';
+
+% --- Carrier slip detection -------------------------------------
+cfg.measurements.carrier.slipDetection.enable                = true;
+cfg.measurements.carrier.slipDetection.threshold_m           = 0.1;
+cfg.measurements.carrier.slipDetection.minEpochsBeforeDetect = 3;
+cfg.measurements.carrier.slipDetection.resetSigma_m          = 100;
+cfg.measurements.carrier.slipDetection.action                = 'resetAndSkip';
 
 % --- Validation policy ------------------------------------------
 % 'disableWithWarning'  ->  unsupported features disabled with console warning

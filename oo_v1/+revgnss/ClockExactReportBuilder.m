@@ -1273,9 +1273,9 @@ classdef ClockExactReportBuilder
                 CE.writeRow_(fid, 'Min epochs before detect', sprintf('%d', minEp), ...
                     'Suppresses false positives during track initialisation.');
                 CE.writeRow_(fid, 'Reset sigma', sprintf('%.1f m', sig), ...
-                    'P(ambiguity,ambiguity) reset to this value squared on slip.');
+                    'Ambiguity covariance P(amb,amb) reset to resetSigma\_m\^{}2. State value kept.');
                 CE.writeRow_(fid, 'Slip action', act, ...
-                    'resetAndSkip: drop carrier row this epoch. resetAndUse: keep row.');
+                    'resetAndSkip: remove carrier row this epoch, reset P. resetAndUse: keep row, rely on inflated P.');
             end
 
             fprintf(fid, CE.plotTableFooter_());

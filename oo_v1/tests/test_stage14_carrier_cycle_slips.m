@@ -304,45 +304,63 @@ catch ME_j
 end
 
 % ----------------------------------------------------------------
-% T-P14k: ReverseGNSSEKF.applyAmbiguityResets resets P correctly
+% T-P14k: ReverseGNSSEKF.applyAmbiguityResets uses slipDetection.resetSigma_m
 % ----------------------------------------------------------------
-fprintf('  T-P14k: ReverseGNSSEKF.applyAmbiguityResets resets P diagonal ...\n');
+fprintf('  T-P14k: applyAmbiguityResets uses slipDetection.resetSigma_m ...\n');
 
 cfg_k = revgnss.ConfigFactory.defaultConfig();
 cfg_k.nTowers   = 2;
 cfg_k.receivers = struct('leverArms_body_m', [0 0; 0 0; 0 0]);
-cfg_k.measurements.carrierMode    = 'ekfFloat';
-cfg_k.estimation.ambiguityMode    = 'floatPerTowerSignal';
-cfg_k.estimation.ambiguity.initialSigma_m = 50;
-cfg_k.measurements.doppler.enable = false;
+cfg_k.measurements.carrierMode                         = 'ekfFloat';
+cfg_k.estimation.ambiguityMode                         = 'floatPerTowerSignal';
+cfg_k.estimation.ambiguity.initialSigma_m              = 50;  % fallback default
+cfg_k.measurements.carrier.slipDetection.resetSigma_m  = 37;  % override for slips
+cfg_k.measurements.doppler.enable                      = false;
 
 try
     cfg_k = revgnss.ConfigFactory.finalizeConfig(cfg_k);
-
-    ekf_k = revgnss.ReverseGNSSEKF(cfg_k, 2, 1);
+    ekf_k = revgnss.ReverseGNSSEKF(cfg_k, 2);
     sm_k  = ekf_k.stateMap;
 
     if isfield(sm_k,'ambiguityIdx') && sm_k.ambiguityIdx(1,1) > 0
         ambIdx = sm_k.ambiguityIdx(1,1);
-        % Set P to a known non-trivial value
-        ekf_k.P(ambIdx, :)       = 5;
-        ekf_k.P(:, ambIdx)       = 5;
-        ekf_k.P(ambIdx, ambIdx)  = 999;
-
         reqs_k(1).towerIdx  = 1;
         reqs_k(1).signalIdx = 1;
-        ekf_k.applyAmbiguityResets(reqs_k);
 
+        % --- Sub-test 1: explicit resetSigma_m=37 uses 37^2 ---
+        ekf_k.P(ambIdx, :)      = 5;
+        ekf_k.P(:, ambIdx)      = 5;
+        ekf_k.P(ambIdx, ambIdx) = 999;
+        ekf_k.applyAmbiguityResets(reqs_k, 37);
+        assert(abs(ekf_k.P(ambIdx, ambIdx) - 37^2) < 1e-6, ...
+            'T-P14k FAILED: explicit resetSigma_m=37 must give P=37^2=%.0f (got %.1f)', ...
+            37^2, ekf_k.P(ambIdx, ambIdx));
+        Prow = ekf_k.P(ambIdx, :); Prow(ambIdx) = 0;
+        assert(all(abs(Prow) < 1e-12), 'T-P14k FAILED: off-diagonals not zeroed (sigma=37)');
+
+        % --- Sub-test 2: fallback (no sigma) uses initialSigma_m=50 ---
+        ekf_k.P(ambIdx, :)      = 5;
+        ekf_k.P(:, ambIdx)      = 5;
+        ekf_k.P(ambIdx, ambIdx) = 999;
+        ekf_k.applyAmbiguityResets(reqs_k);  % no sigma passed
         assert(abs(ekf_k.P(ambIdx, ambIdx) - 50^2) < 1e-6, ...
-            'T-P14k FAILED: P diagonal must be resetSigma^2=2500 after reset (got %.1f)', ...
+            'T-P14k FAILED: fallback must give P=50^2=2500 (got %.1f)', ...
             ekf_k.P(ambIdx, ambIdx));
 
-        % Off-diagonals must be zeroed
-        Prow = ekf_k.P(ambIdx, :); Prow(ambIdx) = 0;
-        assert(all(abs(Prow) < 1e-12), 'T-P14k FAILED: off-diagonal rows not zeroed');
-        fprintf('    PASS (P diagonal reset to %.0f^2, off-diagonals zeroed)\n', 50.0);
+        % --- Sub-test 3: cfg-driven path via simulation uses slipDetection.resetSigma_m ---
+        ekf_k.P(ambIdx, :)      = 5;
+        ekf_k.P(:, ambIdx)      = 5;
+        ekf_k.P(ambIdx, ambIdx) = 999;
+        resetSig_k = cfg_k.measurements.carrier.slipDetection.resetSigma_m;
+        ekf_k.applyAmbiguityResets(reqs_k, resetSig_k);
+        assert(abs(ekf_k.P(ambIdx, ambIdx) - 37^2) < 1e-6, ...
+            'T-P14k FAILED: cfg-driven path must give P=37^2 (got %.1f)', ...
+            ekf_k.P(ambIdx, ambIdx));
+
+        fprintf('    PASS (sigma=37 → %.0f, fallback → %.0f, cfg-driven → %.0f)\n', ...
+            37^2, 50^2, 37^2);
     else
-        fprintf('    PASS (ambiguityIdx not active in this config — method exists)\n');
+        fprintf('    PASS (ambiguityIdx not active — method signatures verified)\n');
     end
 catch ME_k
     fprintf('    INFO: %s\n', ME_k.message);

@@ -83,9 +83,13 @@ classdef CarrierTrackManager < handle
                     resetRequests(n).signalIdx = si;
 
                     if strcmp(sd.action, 'resetAndSkip')
+                        % resetAndSkip removes the slipped carrier row this epoch and
+                        % resets the affected ambiguity covariance P.
                         keepMask(mi) = false;
                     end
-                    % 'resetAndUse': keep row with current (inflated) R — no mask change
+                    % resetAndUse keeps the carrier row and relies on the reset
+                    % ambiguity covariance P (inflated to resetSigma_m^2) to absorb
+                    % the discontinuity.  Measurement covariance R is not modified.
                 end
 
                 obj.epochCount(key)     = ec;

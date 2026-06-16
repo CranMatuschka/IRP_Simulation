@@ -146,7 +146,13 @@ classdef ReverseGNSSSimulation < handle
                         H = H(fullMask,:); R = R(fullMask, fullMask);
                     end
                 end
-                obj.ekf.applyAmbiguityResets(resetRequests);
+                resetSig = [];
+                if isfield(obj.cfg,'measurements') && isfield(obj.cfg.measurements,'carrier') && ...
+                        isfield(obj.cfg.measurements.carrier,'slipDetection') && ...
+                        isfield(obj.cfg.measurements.carrier.slipDetection,'resetSigma_m')
+                    resetSig = obj.cfg.measurements.carrier.slipDetection.resetSigma_m;
+                end
+                obj.ekf.applyAmbiguityResets(resetRequests, resetSig);
             end
             errStruct.slipInfo = slipInfo;
 
