@@ -133,18 +133,26 @@ classdef ScenarioFactory
                 end
             end
 
-            % TASK 1: float ambiguity initial covariance (one per tower×signal)
-            if ekf.estimateAmbiguities && isfield(sm,'ambiguityIdx') && ~isempty(sm.ambiguityIdx)
+            % TASK 1: float ambiguity initial covariance
+            if ekf.estimateAmbiguities
                 sigma0_amb = 100.0;
                 if isfield(cfg,'estimation') && isfield(cfg.estimation,'ambiguity') && ...
                         isfield(cfg.estimation.ambiguity,'initialSigma_m')
                     sigma0_amb = cfg.estimation.ambiguity.initialSigma_m;
                 end
-                idxMat = sm.ambiguityIdx;
-                for k = 1:numel(idxMat)
-                    idx_k = idxMat(k);
-                    if idx_k > 0
-                        P0(idx_k, idx_k) = sigma0_amb^2;
+                if isfield(sm,'ambiguityIdx3d') && ~isempty(sm.ambiguityIdx3d)
+                    % New mode: tower/receiver/signal
+                    idxMat = sm.ambiguityIdx3d;
+                    for k = 1:numel(idxMat)
+                        idx_k = idxMat(k);
+                        if idx_k > 0; P0(idx_k, idx_k) = sigma0_amb^2; end
+                    end
+                elseif isfield(sm,'ambiguityIdx') && ~isempty(sm.ambiguityIdx)
+                    % Legacy mode: tower/signal
+                    idxMat = sm.ambiguityIdx;
+                    for k = 1:numel(idxMat)
+                        idx_k = idxMat(k);
+                        if idx_k > 0; P0(idx_k, idx_k) = sigma0_amb^2; end
                     end
                 end
             end

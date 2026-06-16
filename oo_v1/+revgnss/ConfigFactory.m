@@ -844,15 +844,33 @@ classdef ConfigFactory
         end
 
         function cfg = carrierFloatConfig()
-            % carrierFloatConfig  Carrier phase EKF with float ambiguity states.
+            % carrierFloatConfig  Carrier phase EKF with float ambiguity states (single receiver).
             %
             % ambiguityMode='floatPerTowerSignal': one float ambiguity per tower/signal.
-            % No integer fixing. Ambiguities converge over time absorbing phase offsets.
+            % Use carrierFloatMultiReceiverConfig() for multiple receivers.
             cfg = revgnss.ConfigFactory.defaultConfig();
             cfg.measurements.carrierMode             = 'ekfFloat';
             cfg.measurements.carrierCombinationMode  = 'raw';
             cfg.measurements.observableMode          = 'code+doppler+carrier';
             cfg.estimation.ambiguityMode             = 'floatPerTowerSignal';
+            cfg.estimation.ambiguity.initialSigma_m  = 100;
+            cfg.measurements.doppler.enable          = true;
+            cfg.measurements.doppler.useInEKF        = true;
+            cfg.physics.doppler.truth.enable         = true;
+            cfg.physics.doppler.model.enable         = true;
+        end
+
+        function cfg = carrierFloatMultiReceiverConfig()
+            % carrierFloatMultiReceiverConfig  Carrier EKF with tower/receiver/signal ambiguities.
+            %
+            % ambiguityMode='floatPerTowerReceiverSignal': one float ambiguity per
+            % tower × receiver phase centre × signal.  Valid for nReceivers > 1.
+            cfg = revgnss.ConfigFactory.defaultConfig();
+            cfg.scenario.nReceivers                  = 3;
+            cfg.measurements.carrierMode             = 'ekfFloat';
+            cfg.measurements.carrierCombinationMode  = 'raw';
+            cfg.measurements.observableMode          = 'code+doppler+carrier';
+            cfg.estimation.ambiguityMode             = 'floatPerTowerReceiverSignal';
             cfg.estimation.ambiguity.initialSigma_m  = 100;
             cfg.measurements.doppler.enable          = true;
             cfg.measurements.doppler.useInEKF        = true;
@@ -1301,16 +1319,18 @@ classdef ConfigFactory
                 carrierMode = cfg.measurements.carrierMode;
                 switch carrierMode
                     case 'ekfFloat'
-                        % Require ambiguityMode='floatPerTowerSignal'
+                        % Require a supported ambiguityMode
                         ambMode = '';
                         if isfield(cfg,'estimation') && isfield(cfg.estimation,'ambiguityMode')
                             ambMode = cfg.estimation.ambiguityMode;
                         end
-                        if ~strcmp(ambMode,'floatPerTowerSignal')
+                        validAmbModes = {'floatPerTowerSignal','floatPerTowerReceiverSignal'};
+                        if ~any(strcmp(ambMode, validAmbModes))
                             error('ConfigFactory:carrierEKFRequiresAmbiguities', ...
                                 ['carrierMode=''ekfFloat'' requires ' ...
-                                 'cfg.estimation.ambiguityMode=''floatPerTowerSignal''. ' ...
-                                 'Set ambiguityMode appropriately.']);
+                                 'cfg.estimation.ambiguityMode to be ''floatPerTowerSignal'' ' ...
+                                 '(single receiver) or ''floatPerTowerReceiverSignal'' ' ...
+                                 '(multi-receiver). Got ''%s''.'], ambMode);
                         end
                         % Require carrier signals configured
                         if ~isfield(cfg,'measurements') || ~isfield(cfg.measurements,'codeMode')
@@ -1426,13 +1446,15 @@ classdef ConfigFactory
                 if isfield(cfg,'estimation') && isfield(cfg.estimation,'ambiguityMode')
                     ambMode4F = cfg.estimation.ambiguityMode;
                 end
+                % Task 4F: floatPerTowerSignal with multiple receivers is invalid
+                % (states indexed per tower/signal, rows per tower/receiver → dimension mismatch).
+                % floatPerTowerReceiverSignal is the correct multi-receiver mode.
                 if nRx4F > 1 && strcmp(ambMode4F,'floatPerTowerSignal')
                     error('ConfigFactory:carrierAmbiguityReceiverIndexRequired', ...
-                        ['carrierMode=''ekfFloat'' with multiple receiver phase centres ' ...
-                         'is scientifically invalid in v1 because ambiguity states are ' ...
-                         'indexed per tower/signal, while carrier rows are per tower/receiver. ' ...
-                         'Use one receiver, carrierMode=''diagnostic'', or implement ' ...
-                         'tower-receiver-signal ambiguity indexing.']);
+                        ['carrierMode=''ekfFloat'' with nReceivers=%d requires ' ...
+                         'cfg.estimation.ambiguityMode=''floatPerTowerReceiverSignal''. ' ...
+                         '''floatPerTowerSignal'' is valid for single receiver only — ' ...
+                         'it indexes ambiguities per tower/signal, not tower/receiver/signal.'], nRx4F);
                 end
             end
 

@@ -46,7 +46,7 @@ classdef CarrierTrackManager < handle
 
             M = numel(cpInfo.towerIdx);
             keepMask      = true(M, 1);
-            resetRequests = struct('towerIdx', {}, 'signalIdx', {});
+            resetRequests = struct('towerIdx', {}, 'receiverIdx', {}, 'signalIdx', {});
             slipInfo.nSlips         = 0;
             slipInfo.slippedKeys    = {};
             slipInfo.jumpMags_m     = [];
@@ -79,8 +79,9 @@ classdef CarrierTrackManager < handle
                     slipInfo.jumpMags_m(end+1)  = jumpMag;
 
                     n = numel(resetRequests) + 1;
-                    resetRequests(n).towerIdx  = ti;
-                    resetRequests(n).signalIdx = si;
+                    resetRequests(n).towerIdx   = ti;
+                    resetRequests(n).receiverIdx = ai;
+                    resetRequests(n).signalIdx  = si;
 
                     if strcmp(sd.action, 'resetAndSkip')
                         % resetAndSkip removes the slipped carrier row this epoch and

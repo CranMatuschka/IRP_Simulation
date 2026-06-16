@@ -395,10 +395,27 @@ classdef LatexReportBuilder
             doZwd   = isfield(cfg,'estimation') && isfield(cfg.estimation,'troposphereMode') && ...
                 strcmp(cfg.estimation.troposphereMode,'perTowerZwd');
 
+            % Ambiguity state count depends on indexing mode
+            ambMode = '';
+            if isfield(cfg,'estimation') && isfield(cfg.estimation,'ambiguityMode')
+                ambMode = cfg.estimation.ambiguityMode;
+            end
+            nRx = 1;
+            if isfield(cfg,'scenario') && isfield(cfg.scenario,'nReceivers')
+                nRx = cfg.scenario.nReceivers;
+            end
+
             nBase   = 14;
             nTwrClk = 0; if estimTwr; nTwrClk = 2*nTwr; end
-            nAmb    = 0; if doAmb;    nAmb    = nTwr;    end
-            nZwd    = 0; if doZwd;    nZwd    = nTwr;    end
+            nAmb    = 0;
+            if doAmb
+                if strcmp(ambMode,'floatPerTowerReceiverSignal')
+                    nAmb = nTwr * nRx;  % one per tower × receiver (L1 only)
+                else
+                    nAmb = nTwr;        % legacy: one per tower (L1 only)
+                end
+            end
+            nZwd    = 0; if doZwd; nZwd = nTwr; end
             nTotal  = nBase + nTwrClk + nAmb + nZwd;
             try; nTotal = diag.log(end).ekf_nx; catch; end
 
@@ -453,12 +470,29 @@ classdef LatexReportBuilder
 
             if doAmb
                 idx0 = nBase + nTwrClk;
-                tableLines{end+1} = '';
-                tableLines{end+1} = sprintf('  Float ambiguity states (%d, L1 only — no integer fixing):', nAmb);
-                for k = 1:nTwr
-                    tableLines{end+1} = sprintf(rFmt, sprintf('%d', idx0+k), ...
-                        sprintf('B_L1_twr_%d', k), ...
-                        'L1 carrier float ambiguity', 'm', 'Random-walk; absolute alignment not claimed'); %#ok<AGROW>
+                if strcmp(ambMode,'floatPerTowerReceiverSignal')
+                    tableLines{end+1} = '';
+                    tableLines{end+1} = sprintf( ...
+                        '  Float ambiguity states (%d = %d towers x %d receivers, L1 only, no integer fixing):', ...
+                        nAmb, nTwr, nRx);
+                    stateNum = idx0;
+                    for ti = 1:nTwr
+                        for ri = 1:nRx
+                            stateNum = stateNum + 1;
+                            tableLines{end+1} = sprintf(rFmt, sprintf('%d', stateNum), ...
+                                sprintf('B_L1_t%d_r%d', ti, ri), ...
+                                sprintf('L1 ambiguity tower %d receiver %d', ti, ri), ...
+                                'm', 'Tower/receiver indexed; random-walk'); %#ok<AGROW>
+                        end
+                    end
+                else
+                    tableLines{end+1} = '';
+                    tableLines{end+1} = sprintf('  Float ambiguity states (%d, L1 only — no integer fixing):', nAmb);
+                    for k = 1:nTwr
+                        tableLines{end+1} = sprintf(rFmt, sprintf('%d', idx0+k), ...
+                            sprintf('B_L1_twr_%d', k), ...
+                            'L1 carrier float ambiguity', 'm', 'Random-walk; absolute alignment not claimed'); %#ok<AGROW>
+                    end
                 end
             end
 
@@ -848,8 +882,15 @@ classdef LatexReportBuilder
             if strcmp(carrierMode,'diagnostic')
                 validLines{end+1} = '  ~ Carrier phase (diagnostic mode: computed but NOT fed to EKF)';
             elseif strcmp(carrierMode,'ekfFloat')
-                validLines{end+1} = '  ~ Carrier phase EKF (float ambiguities, L1 only)';
-                validLines{end+1} = '    Ambiguities converge but absolute phase alignment is not claimed.';
+                ambModeStr = '';
+                if isfield(summary,'ambiguityMode'); ambModeStr = summary.ambiguityMode; end
+                if strcmp(ambModeStr,'floatPerTowerReceiverSignal')
+                    validLines{end+1} = '  ~ Carrier phase EKF (float ambiguities, L1 only, tower/receiver/signal indexed)';
+                    validLines{end+1} = '    One ambiguity state per tower × receiver phase centre × signal.';
+                else
+                    validLines{end+1} = '  ~ Carrier phase EKF (float ambiguities, L1 only, tower/signal indexed)';
+                    validLines{end+1} = '    Single-receiver mode; ambiguities converge but absolute alignment not claimed.';
+                end
             end
             validLines{end+1} = '';
             validLines{end+1} = 'What is NOT implemented (hard limitations, v1):';

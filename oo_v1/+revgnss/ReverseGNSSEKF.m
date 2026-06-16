@@ -49,6 +49,8 @@ classdef ReverseGNSSEKF < handle
         estimateAmbiguities  (1,1) logical = false
         nAmbiguities         (1,1) double  = 0
         ambiguityNSignals    (1,1) double  = 1   % signals per tower
+        ambiguityNReceivers  (1,1) double  = 1   % receivers per tower (new mode)
+        ambiguityMode        char          = 'floatPerTowerSignal'
 
         % Per-tower ZWD states
         estimateZwd          (1,1) logical = false
@@ -99,12 +101,22 @@ classdef ReverseGNSSEKF < handle
                 end
                 if strcmp(ambMode,'floatPerTowerSignal')
                     obj.estimateAmbiguities = true;
-                    % Carrier EKF in v1 supports L1 only (computeCarrierEkfRows_
-                    % uses sigIdx=1 only).  Always allocate nTowers ambiguity
-                    % states regardless of how many signals are enabled so no
-                    % unobserved L2 ambiguity states are silently created.
-                    obj.ambiguityNSignals = 1;
+                    obj.ambiguityMode       = 'floatPerTowerSignal';
+                    % Carrier EKF in v1 supports L1 only (sigIdx=1 only).
+                    obj.ambiguityNSignals   = 1;
+                    obj.ambiguityNReceivers = 1;
                     obj.nAmbiguities = nTowers * obj.ambiguityNSignals;
+                elseif strcmp(ambMode,'floatPerTowerReceiverSignal')
+                    obj.estimateAmbiguities = true;
+                    obj.ambiguityMode       = 'floatPerTowerReceiverSignal';
+                    % One ambiguity per tower × receiver × signal (L1 only in v1).
+                    obj.ambiguityNSignals   = 1;
+                    nRx = 1;
+                    if isfield(cfg,'scenario') && isfield(cfg.scenario,'nReceivers')
+                        nRx = cfg.scenario.nReceivers;
+                    end
+                    obj.ambiguityNReceivers = nRx;
+                    obj.nAmbiguities = nTowers * nRx * obj.ambiguityNSignals;
                 end
             end
 
@@ -306,18 +318,37 @@ classdef ReverseGNSSEKF < handle
                 sm.towerClockIdx = zeros(nTowers, 2);
             end
 
-            % Optional float ambiguity states: [nTowers x nSignals]
-            % ambiguityIdx(ti, si) = state index for tower ti, signal si
+            % Optional float ambiguity states.
+            % floatPerTowerSignal:           ambiguityIdx(ti, si)     [nT × nSig]
+            % floatPerTowerReceiverSignal:   ambiguityIdx(ti, si)=0   (legacy zeros)
+            %                                ambiguityIdx3d(ti, ri, si) [nT × nRx × nSig]
             if obj.estimateAmbiguities && obj.nAmbiguities > 0
                 nSig = obj.ambiguityNSignals;
-                ambIdx = zeros(nTowers, nSig);
-                for ti = 1:nTowers
-                    for si = 1:nSig
-                        ambIdx(ti, si) = nextIdx;
-                        nextIdx = nextIdx + 1;
+                nRx  = obj.ambiguityNReceivers;
+                if strcmp(obj.ambiguityMode, 'floatPerTowerReceiverSignal')
+                    % 3D indexing: one state per tower/receiver/signal
+                    ambIdx3d = zeros(nTowers, nRx, nSig);
+                    for ti = 1:nTowers
+                        for ri = 1:nRx
+                            for si = 1:nSig
+                                ambIdx3d(ti, ri, si) = nextIdx;
+                                nextIdx = nextIdx + 1;
+                            end
+                        end
                     end
+                    sm.ambiguityIdx   = zeros(nTowers, nSig);  % empty legacy slot
+                    sm.ambiguityIdx3d = ambIdx3d;
+                else
+                    % Legacy 2D indexing: one state per tower/signal
+                    ambIdx = zeros(nTowers, nSig);
+                    for ti = 1:nTowers
+                        for si = 1:nSig
+                            ambIdx(ti, si) = nextIdx;
+                            nextIdx = nextIdx + 1;
+                        end
+                    end
+                    sm.ambiguityIdx = ambIdx;
                 end
-                sm.ambiguityIdx = ambIdx;
             else
                 sm.ambiguityIdx = zeros(nTowers, max(1, obj.ambiguityNSignals));
             end
@@ -514,11 +545,22 @@ classdef ReverseGNSSEKF < handle
                 end
                 q_amb = q_amb_sigma^2 * dt_s;
                 nSig  = obj.ambiguityNSignals;
-                for ti = 1:obj.nTowers
-                    for si = 1:nSig
-                        idx = sm.ambiguityIdx(ti, si);
-                        if idx > 0
-                            Q(idx, idx) = q_amb;
+                nRx   = obj.ambiguityNReceivers;
+                if strcmp(obj.ambiguityMode,'floatPerTowerReceiverSignal') && ...
+                        isfield(sm,'ambiguityIdx3d')
+                    for ti = 1:obj.nTowers
+                        for ri = 1:nRx
+                            for si = 1:nSig
+                                idx = sm.ambiguityIdx3d(ti, ri, si);
+                                if idx > 0; Q(idx, idx) = q_amb; end
+                            end
+                        end
+                    end
+                else
+                    for ti = 1:obj.nTowers
+                        for si = 1:nSig
+                            idx = sm.ambiguityIdx(ti, si);
+                            if idx > 0; Q(idx, idx) = q_amb; end
                         end
                     end
                 end
@@ -565,22 +607,18 @@ classdef ReverseGNSSEKF < handle
         end
 
         % ----------------------------------------------------------------
-        function resetAmbiguityCovariance(obj, towerIdx, sigIdx, resetSigma_m)
+        function resetAmbiguityCovariance(obj, towerIdx, sigIdx, resetSigma_m, receiverIdx)
             % resetAmbiguityCovariance  Reset ambiguity covariance after cycle slip.
             %
             % Sets P(amb,:)=0, P(:,amb)=0, P(amb,amb)=resetSigma_m^2.
-            % The ambiguity STATE VALUE is deliberately left unchanged; the next
-            % update will re-estimate it once the inflated covariance allows
-            % the filter to move.  This avoids injecting a large state transient.
+            % State value is left unchanged; inflated covariance lets the filter move.
             %
-            % resetSigma_m (optional): covariance sigma to use on reset.
-            %   If omitted or empty, falls back to cfg.estimation.ambiguity.initialSigma_m.
+            % receiverIdx (optional, arg 5): required for floatPerTowerReceiverSignal.
+            %   Omit or pass [] to use receiver 1 (backward compatible).
             if ~obj.estimateAmbiguities; return; end
             sm = obj.stateMap;
             if towerIdx < 1 || towerIdx > obj.nTowers; return; end
             if sigIdx < 1   || sigIdx > obj.ambiguityNSignals; return; end
-            idx = sm.ambiguityIdx(towerIdx, sigIdx);
-            if idx <= 0 || idx > obj.nx; return; end
 
             if nargin < 4 || isempty(resetSigma_m)
                 resetSigma_m = 100;
@@ -589,6 +627,21 @@ classdef ReverseGNSSEKF < handle
                     resetSigma_m = obj.cfg.estimation.ambiguity.initialSigma_m;
                 end
             end
+
+            if nargin < 5 || isempty(receiverIdx); receiverIdx = 1; end
+
+            % Resolve state index based on mode
+            idx = 0;
+            if strcmp(obj.ambiguityMode,'floatPerTowerReceiverSignal') && ...
+                    isfield(sm,'ambiguityIdx3d') && ~isempty(sm.ambiguityIdx3d)
+                if receiverIdx >= 1 && receiverIdx <= size(sm.ambiguityIdx3d,2)
+                    idx = sm.ambiguityIdx3d(towerIdx, receiverIdx, sigIdx);
+                end
+            else
+                idx = sm.ambiguityIdx(towerIdx, sigIdx);
+            end
+            if idx <= 0 || idx > obj.nx; return; end
+
             obj.P(idx, :) = 0;
             obj.P(:, idx) = 0;
             obj.P(idx, idx) = resetSigma_m^2;
@@ -598,14 +651,17 @@ classdef ReverseGNSSEKF < handle
         function applyAmbiguityResets(obj, resetRequests, resetSigma_m)
             % applyAmbiguityResets  Batch-reset covariance for slipped tracks.
             %
-            % resetRequests: struct array with fields towerIdx, signalIdx.
-            % resetSigma_m (optional): override sigma for this batch of resets.
-            %   Passed directly to resetAmbiguityCovariance; if omitted the
-            %   method falls back to cfg.estimation.ambiguity.initialSigma_m.
+            % resetRequests: struct array with fields towerIdx, signalIdx,
+            %   and optionally receiverIdx (required for floatPerTowerReceiverSignal).
             if nargin < 3; resetSigma_m = []; end
             for ri = 1:numel(resetRequests)
+                rIdx = 1;
+                if isfield(resetRequests(ri),'receiverIdx')
+                    rIdx = resetRequests(ri).receiverIdx;
+                end
                 obj.resetAmbiguityCovariance( ...
-                    resetRequests(ri).towerIdx, resetRequests(ri).signalIdx, resetSigma_m);
+                    resetRequests(ri).towerIdx, resetRequests(ri).signalIdx, ...
+                    resetSigma_m, rIdx);
             end
         end
 

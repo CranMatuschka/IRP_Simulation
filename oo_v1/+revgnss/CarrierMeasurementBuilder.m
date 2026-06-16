@@ -90,11 +90,21 @@ classdef CarrierMeasurementBuilder
 
                 % EKF ambiguity state (0 until EKF initialises it via P_0)
                 B_est = 0;
-                if isfield(stateMap,'ambiguityIdx') && ...
+                ambStateIdx = 0;
+                if isfield(stateMap,'ambiguityIdx3d') && ...
+                        ti <= size(stateMap.ambiguityIdx3d,1) && ...
+                        ai <= size(stateMap.ambiguityIdx3d,2) && ...
+                        sigIdx <= size(stateMap.ambiguityIdx3d,3)
+                    % New mode: tower/receiver/signal indexing
+                    ambStateIdx = stateMap.ambiguityIdx3d(ti, ai, sigIdx);
+                elseif isfield(stateMap,'ambiguityIdx') && ...
                         ti <= size(stateMap.ambiguityIdx,1) && ...
-                        sigIdx <= size(stateMap.ambiguityIdx,2) && ...
-                        stateMap.ambiguityIdx(ti,sigIdx) > 0
-                    B_est = x_est(stateMap.ambiguityIdx(ti,sigIdx));
+                        sigIdx <= size(stateMap.ambiguityIdx,2)
+                    % Legacy mode: tower/signal indexing
+                    ambStateIdx = stateMap.ambiguityIdx(ti, sigIdx);
+                end
+                if ambStateIdx > 0 && ambStateIdx <= numel(x_est)
+                    B_est = x_est(ambStateIdx);
                 end
 
                 % Tower clock
@@ -154,14 +164,10 @@ classdef CarrierMeasurementBuilder
                     h_phi(mi) = h_phi(mi) + mf_phi * x_est(stateMap.zwdIdx(ti));
                 end
 
-                cpInfo.phi_m(mi)    = z_phi(mi);
-                cpInfo.prefit_m(mi) = z_phi(mi) - h_phi(mi);
-                cpInfo.trackKey{mi} = sprintf('T%03d_A%03d_S%02d', ti, ai, sigIdx);
-                if isfield(stateMap,'ambiguityIdx') && ...
-                        ti <= size(stateMap.ambiguityIdx,1) && ...
-                        sigIdx <= size(stateMap.ambiguityIdx,2)
-                    cpInfo.ambiguityStateIdx(mi) = stateMap.ambiguityIdx(ti, sigIdx);
-                end
+                cpInfo.phi_m(mi)             = z_phi(mi);
+                cpInfo.prefit_m(mi)          = z_phi(mi) - h_phi(mi);
+                cpInfo.trackKey{mi}          = sprintf('T%03d_A%03d_S%02d', ti, ai, sigIdx);
+                cpInfo.ambiguityStateIdx(mi) = ambStateIdx;
 
                 % ---- H: position columns (analytic or finite-difference) ------
                 r_cm_est  = x_est(stateMap.r_idx);
@@ -195,11 +201,8 @@ classdef CarrierMeasurementBuilder
                     H_phi(mi, stateMap.towerClockIdx(ti,1)) = -1;
                 end
 
-                if isfield(stateMap,'ambiguityIdx') && ...
-                        ti <= size(stateMap.ambiguityIdx,1) && ...
-                        sigIdx <= size(stateMap.ambiguityIdx,2) && ...
-                        stateMap.ambiguityIdx(ti,sigIdx) > 0
-                    H_phi(mi, stateMap.ambiguityIdx(ti,sigIdx)) = 1;
+                if ambStateIdx > 0 && ambStateIdx <= nx
+                    H_phi(mi, ambStateIdx) = 1;
                 end
 
                 % ZWD column: +mf (same sign for carrier and code)

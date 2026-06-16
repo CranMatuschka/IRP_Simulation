@@ -118,13 +118,16 @@ cfg.measurements.doppler.useInEKF     = true;
 cfg.physics.doppler.truth.enable      = true;
 cfg.physics.doppler.model.enable      = true;
 
-% --- Carrier phase (diagnostic only for multi-receiver report) ---
+% --- Carrier phase EKF (multi-receiver mode, Stage 14.6) -------
+% floatPerTowerReceiverSignal: one float ambiguity per tower x receiver x signal.
+% Scientifically valid for nReceivers > 1.  No integer fixing, L1 only.
 cfg.measurements.carrierPhase.enable    = true;
-cfg.measurements.carrierMode            = 'diagnostic';
-cfg.estimation.ambiguityMode            = 'none';
+cfg.measurements.carrierMode            = 'ekfFloat';
+cfg.estimation.ambiguityMode            = 'floatPerTowerReceiverSignal';
+cfg.estimation.ambiguity.initialSigma_m = 100;
 
 % --- Carrier slip detection -------------------------------------
-cfg.measurements.carrier.slipDetection.enable                = false;
+cfg.measurements.carrier.slipDetection.enable                = true;
 cfg.measurements.carrier.slipDetection.threshold_m           = 0.1;
 cfg.measurements.carrier.slipDetection.minEpochsBeforeDetect = 3;
 cfg.measurements.carrier.slipDetection.resetSigma_m          = 100;
