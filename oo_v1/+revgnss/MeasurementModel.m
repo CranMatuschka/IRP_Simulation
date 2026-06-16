@@ -189,7 +189,7 @@ classdef MeasurementModel < handle
 
             % ZWD Jacobian columns (perTowerZwd): H(mi, zwdIdx(ti)) = mf(elv)
             if isfield(stateMap,'zwdIdx') && ~isempty(stateMap.zwdIdx)
-                mfKind = obj.zwdMappingKind_();
+                mfKind = revgnss.MeasurementModelUtils.zwdMappingKind(obj.cfg);
                 for mi_z = 1:M
                     ti_z = twr_list(mi_z);
                     if ti_z <= numel(stateMap.zwdIdx) && stateMap.zwdIdx(ti_z) > 0
@@ -262,8 +262,10 @@ classdef MeasurementModel < handle
                         % carrierMode='diagnostic': carrier for diagnostics only.
                         % finalizeConfig resets legacy useInEKF=true to false when
                         % carrierMode is set. MeasurementModel does not re-check it.
-                        errStruct.carrierPhase = obj.computeCarrierPhase_( ...
-                            asset, towers, twr_list, ant_list, r_ants_truth);
+                        [errStruct.carrierPhase, obj.ambiguityMap] = ...
+                            revgnss.CarrierMeasurementBuilder.buildDiagnostic( ...
+                                obj.cfg, obj.errorChain, obj.ambiguityMap, ...
+                                asset, towers, twr_list, ant_list, r_ants_truth);
                     else
                         errStruct.carrierPhase = struct();
                     end
@@ -278,593 +280,52 @@ classdef MeasurementModel < handle
         end
 
         % ----------------------------------------------------------------
-        function H = computeJacobian_(obj, towers, twr_list, ant_list, ...
-                r_cm_est, euler_est, leverArms_model, x_est, stateMap, nx)
-            H = revgnss.CodeJacobianBuilder.build( ...
-                obj.cfg, obj.attitudeJacStep_rad, towers, twr_list, ant_list, ...
-                r_cm_est, euler_est, leverArms_model, x_est, stateMap, nx);
-        end
-
-        % ----------------------------------------------------------------
-        function mode = getTowerClockMode_(obj)
-            mode = revgnss.TowerClockCorrectionProvider.towerClockMode(obj.cfg);
-        end
-
-        % ----------------------------------------------------------------
-        function cp = computeCarrierPhase_(obj, asset, towers, twr_list, ant_list, r_ants_true)
-            % computeCarrierPhase_  Truth carrier phase observables (diagnostic only).
-            %
-            % z_phi_cycles = (rho + b_rx - b_twr) / lambda + N_ia + noise
-            % N_ia: constant integer ambiguity per (tower, antenna) arc.
-            %
-            % What is included: geometry + clocks + ambiguity + carrier noise.
-            % What is NOT included: atmosphere.
-            %   Troposphere delays carrier like code (same sign).
-            %   Ionosphere ADVANCES carrier (OPPOSITE sign to code, sign = -1).
-            % ErrorChain truthTotal_m is NOT used here to avoid applying iono
-            % with wrong sign.  If atmosphere is later added, apply:
-            %   rho + trop_m - iono_m   (trop positive, iono negative for carrier).
-            % No cycle slips in v1.
-            cpc    = obj.cfg.measurements.carrierPhase;
-            lambda = cpc.lambda_m;
-            sigma  = cpc.sigma_cycles;
-            M      = numel(twr_list);
-
-            if isempty(obj.ambiguityMap)
-                rngAmb = RandStream('mt19937ar','Seed', cpc.seed);
-                obj.ambiguityMap = containers.Map('KeyType','int32','ValueType','double');
-                for mi2 = 1:M
-                    key = int32(twr_list(mi2) * 1000 + ant_list(mi2));
-                    if ~isKey(obj.ambiguityMap, key)
-                        switch cpc.initialAmbiguityMode
-                            case 'randomInteger'
-                                obj.ambiguityMap(key) = round(randn(rngAmb,1,1) * 1e4);
-                            otherwise
-                                obj.ambiguityMap(key) = 0;
-                        end
-                    end
-                end
-            end
-
-            b_rx_true = asset.clock.getBiasMeters();
-            phi   = zeros(M,1);
-            ambig = zeros(M,1);
-            for mi = 1:M
-                ti    = twr_list(mi);
-                ai    = ant_list(mi);
-                r_twr = towers{ti}.getAntennaPositionECEF();
-                b_twr = towers{ti}.getClockBiasMeters();
-                rho   = norm(r_ants_true(:,ai) - r_twr);
-                key   = int32(ti * 1000 + ai);
-                N_ia  = obj.ambiguityMap(key);
-                ambig(mi) = N_ia;
-                % Geometry + clocks + ambiguity + carrier noise (no atmosphere).
-                phi(mi) = (rho + b_rx_true - b_twr) / lambda + N_ia + ...
-                          sigma * obj.errorChain.drawNormal(1,1);
-            end
-            cp.phi_cycles    = phi;
-            cp.ambiguity_int = ambig;
-            cp.lambda_m      = lambda;
-            cp.towerIdx      = twr_list;
-            cp.antennaIdx    = ant_list;
-        end
-
-        % ----------------------------------------------------------------
-        function b_model = getTowerClockModel_(obj, twr, cfg)
-            % getTowerClockModel_  Legacy single-tower clock correction helper.
-            % NOTE: use stored errStruct.towerClockModel_m in main loop to avoid
-            % repeated noise draws.  This method is for test/standalone use only.
-            towerClockMode = obj.getTowerClockMode_();
-            noiseSigma = 0.5;
-            if isfield(cfg,'estimator') && isfield(cfg.estimator,'towerClockCorrectionSigma_m')
-                noiseSigma = cfg.estimator.towerClockCorrectionSigma_m;
-            end
-            switch towerClockMode
-                case 'none'
-                    b_model = 0;
-                case 'perfectCorrection'
-                    b_model = twr.getClockBiasMeters();
-                case 'noisyCorrection'
-                    % CHANGED: v3→v4 — Issue 5
-                    % SIMULATION NOTE: noisyCorrection is a truth-based simulated external
-                    % correction product.  It is NOT a model of what a real receiver
-                    % produces; it adds zero-mean Gaussian noise to the true tower clock.
-                    % Use for Monte Carlo bias/sigma studies only.
-                    b_model = twr.getClockBiasMeters() + noiseSigma * obj.errorChain.drawNormal(1,1);
-                otherwise
-                    b_model = 0;
-            end
-        end
-
-        % ----------------------------------------------------------------
         function h_pr = computePseudorangeModelOnly(obj, asset, towers, x_state, errStruct, stateMap, t_s)
-            % computePseudorangeModelOnly  Recompute h_pr with updated EKF state.
+            % computePseudorangeModelOnly  Thin wrapper — implementation in PseudorangeModelOnlyBuilder.
             if nargin < 7 || isempty(t_s); t_s = 0; end
-            %
-            % Exact same model-side path as computeMeasurements (h side):
-            %   - PCO-adjusted lever arms (model)
-            %   - getTowerPosition_(..., 'model') with survey error
-            %   - Model tower PCO if enabled
-            %   - correctedPseudorange(..., 'model', el) — Sagnac, Shapiro, PCV
-            %   - Receiver + tower clock from state / errStruct
-            %   - errStruct.modelTotal_m — frozen ErrorChain corrections
-            %
-            % Used by ReverseGNSSSimulation.computePostfitResiduals_ so postfit
-            % uses the exact same model path as the EKF h, not a simplified version.
-
-            leverArms = asset.receiverLeverArms_body_m;
-            N_ant = size(leverArms, 2);
-
-            % Model-side lever arms with receiver PCO if enabled
-            leverArms_model = leverArms;
-            if isfield(obj.cfg,'effects') && isfield(obj.cfg.effects,'antennaPCO')
-                pco = obj.cfg.effects.antennaPCO;
-                if isfield(pco,'model') && pco.model.enable
-                    off = pco.receiverOffset_body_m(:);
-                    leverArms_model = leverArms + off * ones(1, N_ant);
-                end
-            end
-
-            r_est     = x_state(stateMap.r_idx);
-            euler_est = x_state(stateMap.euler_idx);
-            b_rx_est  = x_state(stateMap.b_rx_idx);
-
-            r_ants_est = asset.getAntennaPositionsECEF(r_est, euler_est, leverArms_model);
-
-            twr_list = errStruct.towerIdx_perMeas;
-            ant_list = errStruct.antennaIdx_perMeas;
-            M_pr     = errStruct.nPseudorange;
-
-            h_pr = zeros(M_pr, 1);
-
-            for mi = 1:M_pr
-                ti = twr_list(mi);
-                ai = ant_list(mi);
-
-                % Model tower position (with survey error if model.enable)
-                r_twr_model = obj.getTowerPosition_(towers{ti}, ti, 'model');
-
-                % Tower PCO (model side)
-                if isfield(obj.cfg,'effects') && isfield(obj.cfg.effects,'antennaPCO')
-                    pco = obj.cfg.effects.antennaPCO;
-                    if isfield(pco,'model') && pco.model.enable
-                        tOff = pco.towerOffset_enu_m(:);
-                        R_ENU = revgnss.GeometryUtils.enu2ecef( ...
-                            towers{ti}.lat_rad, towers{ti}.lon_rad);
-                        r_twr_model = r_twr_model + R_ENU * tOff;
-                    end
-                end
-
-                % Elevation angle from updated positions (for PCV)
-                r_ant = r_ants_est(:, ai);
-                elv = revgnss.GeometryUtils.elevationAngle(r_twr_model, r_ant);
-
-                % Corrected range (Sagnac, Shapiro, PCV all on model side)
-                rho_est = revgnss.RangeCorrections.correctedPseudorange( ...
-                    r_ant, r_twr_model, obj.cfg, 'model', elv, t_s);
-
-                % Tower clock: EKF state if estimated, else frozen model correction
-                if isfield(stateMap,'towerClockIdx') && ti <= size(stateMap.towerClockIdx,1) && ...
-                        stateMap.towerClockIdx(ti,1) > 0
-                    b_twr = x_state(stateMap.towerClockIdx(ti,1));
-                elseif mi <= numel(errStruct.towerClockModel_m)
-                    b_twr = errStruct.towerClockModel_m(mi);
-                else
-                    b_twr = 0;
-                end
-
-                % Frozen ErrorChain model correction (same realization as original h)
-                model_total = 0;
-                if isfield(errStruct,'modelTotal_m') && mi <= numel(errStruct.modelTotal_m)
-                    model_total = errStruct.modelTotal_m(mi);
-                end
-
-                h_pr(mi) = rho_est + b_rx_est - b_twr + model_total;
-
-                % TASK 2: ZWD state contribution (same as in computeMeasurements h path)
-                if isfield(stateMap,'zwdIdx') && ti <= numel(stateMap.zwdIdx) && ...
-                        stateMap.zwdIdx(ti) > 0
-                    mf_h = revgnss.MappingFunctions.troposphere(elv, obj.zwdMappingKind_());
-                    h_pr(mi) = h_pr(mi) + mf_h * x_state(stateMap.zwdIdx(ti));
-                end
-
-                % TASK 3: Tx code hardware-delay postfit contribution (+1 sign)
-                if isfield(stateMap,'txCodeBiasIdx') && ti <= numel(stateMap.txCodeBiasIdx) && ...
-                        stateMap.txCodeBiasIdx(ti) > 0
-                    h_pr(mi) = h_pr(mi) + x_state(stateMap.txCodeBiasIdx(ti));
-                end
-
-                % TASK 4: Receiver code hardware-delay postfit correction (code rows only)
-                d_rx_code_pr = obj.getRxCodeBiasModel_();
-                if d_rx_code_pr ~= 0
-                    h_pr(mi) = h_pr(mi) + d_rx_code_pr;
-                end
-            end
+            h_pr = revgnss.PseudorangeModelOnlyBuilder.compute( ...
+                obj.cfg, asset, towers, x_state, errStruct, stateMap, t_s);
         end
 
         % ----------------------------------------------------------------
         function h_phi = computeCarrierModelOnly(obj, asset, towers, x_state, errStruct, stateMap, t_s)
-            % computeCarrierModelOnly  Recompute carrier h with updated EKF state.
+            % computeCarrierModelOnly  Thin wrapper — implementation in CarrierModelOnlyBuilder.
             if nargin < 7 || isempty(t_s); t_s = 0; end
-            %
-            % Returns h_phi for each carrier row (one per visible tower) evaluated
-            % at x_state (the post-update EKF state).  Used by
-            % ReverseGNSSSimulation.computePostfitResiduals_ to produce true
-            % postfit residuals rather than prefit residuals.
-            %
-            % Formula (Phase 2):
-            %   h_phi = rho_est + b_rx_est - b_twr_model
-            %           + trop_model - iono_model + B_est + zwd_contribution
-            %
-            % All error-chain corrections are frozen from errStruct (same realization
-            % as original h).  Only the state-dependent terms (r, b_rx, B, ZWD) are
-            % re-evaluated from x_state.
-
-            if ~isfield(errStruct,'carrierPhase') || ...
-                    ~isstruct(errStruct.carrierPhase) || ...
-                    ~isfield(errStruct.carrierPhase,'towerIdx') || ...
-                    isempty(errStruct.carrierPhase.towerIdx)
-                h_phi = [];
-                return
-            end
-
-            cp = errStruct.carrierPhase;
-            twr_pairs = cp.towerIdx;
-            ant_pairs = cp.antennaIdx;
-            Mp = numel(twr_pairs);
-
-            leverArms = asset.receiverLeverArms_body_m;
-            N_ant = size(leverArms, 2);
-
-            % Model-side lever arms with receiver PCO if enabled
-            leverArms_model = leverArms;
-            if isfield(obj.cfg,'effects') && isfield(obj.cfg.effects,'antennaPCO')
-                pco = obj.cfg.effects.antennaPCO;
-                if isfield(pco,'model') && pco.model.enable
-                    off = pco.receiverOffset_body_m(:);
-                    leverArms_model = leverArms + off * ones(1, N_ant);
-                end
-            end
-
-            r_est     = x_state(stateMap.r_idx);
-            euler_est = x_state(stateMap.euler_idx);
-            b_rx_est  = x_state(stateMap.b_rx_idx);
-
-            r_ants_est = asset.getAntennaPositionsECEF(r_est, euler_est, leverArms_model);
-
-            sigIdx = 1;   % L1 only in v1
-            h_phi  = zeros(Mp, 1);
-            mfKind = obj.zwdMappingKind_();
-
-            for mi = 1:Mp
-                ti  = twr_pairs(mi);
-                ai  = ant_pairs(mi);
-
-                % Model tower position (survey + PCO, same as computeMeasurements)
-                r_twr_e = obj.getTowerPosition_(towers{ti}, ti, 'model');
-                if isfield(obj.cfg,'effects') && isfield(obj.cfg.effects,'antennaPCO')
-                    pco = obj.cfg.effects.antennaPCO;
-                    if isfield(pco,'model') && pco.model.enable
-                        tOff = pco.towerOffset_enu_m(:);
-                        R_ENU = revgnss.GeometryUtils.enu2ecef(towers{ti}.lat_rad, towers{ti}.lon_rad);
-                        r_twr_e = r_twr_e + R_ENU * tOff;
-                    end
-                end
-
-                % Updated elevation for ZWD mapping
-                elv = revgnss.GeometryUtils.elevationAngle(r_twr_e, r_ants_est(:, ai));
-
-                % Corrected geometric range (same path as code)
-                rho_e = revgnss.RangeCorrections.correctedPseudorange( ...
-                    r_ants_est(:, ai), r_twr_e, obj.cfg, 'model', elv, t_s);
-
-                % Tower clock: EKF state if estimated, else frozen model correction
-                if isfield(stateMap,'towerClockIdx') && ti <= size(stateMap.towerClockIdx,1) && ...
-                        stateMap.towerClockIdx(ti,1) > 0
-                    b_twr = x_state(stateMap.towerClockIdx(ti,1));
-                elseif isfield(errStruct,'towerClockModel_m') && mi <= numel(errStruct.towerClockModel_m)
-                    b_twr = errStruct.towerClockModel_m(mi);
-                else
-                    b_twr = 0;
-                end
-
-                % Float ambiguity state (updated)
-                B_est = 0;
-                if isfield(stateMap,'ambiguityIdx') && ...
-                        ti <= size(stateMap.ambiguityIdx,1) && ...
-                        sigIdx <= size(stateMap.ambiguityIdx,2) && ...
-                        stateMap.ambiguityIdx(ti,sigIdx) > 0
-                    B_est = x_state(stateMap.ambiguityIdx(ti,sigIdx));
-                end
-
-                % Frozen troposphere and ionosphere (same realization as original h)
-                trop_m = 0; iono_m = 0;
-                if isfield(errStruct,'bySource')
-                    bm = errStruct.bySource.model_m;
-                    if isfield(bm,'trop') && mi <= numel(bm.trop); trop_m = bm.trop(mi); end
-                    if isfield(bm,'iono') && mi <= numel(bm.iono); iono_m = bm.iono(mi); end
-                end
-
-                h_phi(mi) = rho_e + b_rx_est - b_twr + trop_m - iono_m + B_est;
-
-                % ZWD state (updated)
-                if isfield(stateMap,'zwdIdx') && ti <= numel(stateMap.zwdIdx) && ...
-                        stateMap.zwdIdx(ti) > 0
-                    mf = revgnss.MappingFunctions.troposphere(elv, mfKind);
-                    h_phi(mi) = h_phi(mi) + mf * x_state(stateMap.zwdIdx(ti));
-                end
-            end
+            h_phi = revgnss.CarrierModelOnlyBuilder.compute( ...
+                obj.cfg, asset, towers, x_state, errStruct, stateMap, t_s);
         end
 
     end  % public methods
 
-    methods (Access = private)
-
-        % ----------------------------------------------------------------
-        function sigma = computeCodeSigmaForSignal_(obj, sigCfg, elv, cfg) %#ok<INUSL>
-            sigma = revgnss.MeasurementModel.codeSignalSigma(sigCfg, elv, cfg);
-        end
-
-        % ----------------------------------------------------------------
-        function r_twr = getTowerPosition_(obj, tower, towerIdx, side)
-            r_twr = revgnss.MeasurementModel.towerPositionEcef(obj.cfg, tower, towerIdx, side);
-        end
-
-        % ----------------------------------------------------------------
-        function [b_m, bdot_mps] = getClockAtProductEpoch_(obj, tower, t_prod_s) %#ok<INUSL>
-            [b_m, bdot_mps] = revgnss.TowerClockCorrectionProvider.clockAtProductEpoch(tower, t_prod_s);
-        end
-
-        % ----------------------------------------------------------------
-        function [b_hat, sigma_corr] = evalProductStruct_(obj, ti, t_eval_s)
-            [b_hat, sigma_corr] = revgnss.TowerClockCorrectionProvider.evalProductStruct( ...
-                obj.cfg, ti, t_eval_s);
-        end
-
-        % ----------------------------------------------------------------
-        function [z_out, R_out, noiseComp] = applyCorrelatedNoise_(obj, z_in, R_diag, twr_list, M)
-            [z_out, R_out, noiseComp] = revgnss.MeasurementModel.correlatedNoise( ...
-                obj.cfg, obj.rngCorr, z_in, R_diag, twr_list, M);
-        end
-
-        % ----------------------------------------------------------------
-        function rho = computeModelRangeOnly_(obj, towers, ti, ai, r_cm, euler, leverArms_model)
-            rho = revgnss.MeasurementModel.modelRangeOnly(obj.cfg, towers, ti, ai, r_cm, euler, leverArms_model);
-        end
-
-    end  % private methods
-
-    methods (Access = private)
-
-        % ----------------------------------------------------------------
-        function d = getRxCodeBiasModel_(obj)
-            d = revgnss.MeasurementModel.rxCodeBiasModel(obj.cfg);
-        end
-
-        % ----------------------------------------------------------------
-        function kind = zwdMappingKind_(obj)
-            kind = revgnss.MeasurementModel.zwdMappingKind(obj.cfg);
-        end
-
-    end  % private (ZWD helper) methods
-
     methods (Static)
 
-        function [z_isl, h_isl, H_isl] = computeISLMeasurements(asset_rx, asset_tx, ~, ~)
-            % computeISLMeasurements  Future-work stub. ISL is NOT implemented in oo_v1.
-            %
-            % Returns empty z/h/H — no EKF rows, no measurement effect.
-            % Do NOT advertise ISL as supported functionality.
-            %
-            % Candidate future one-way range observable:
-            %   z_{rx,tx} = rho_{rx,tx} + b_rx - b_tx + noise
-            % Sign convention: receiver clock adds positively, transmitter subtracts.
-            z_isl = [];
-            h_isl = [];
-            H_isl = zeros(0, 0);
-        end
+        % Implementations live in MeasurementModelUtils (Stage 12A.2).
+        % These one-line wrappers preserve backward compatibility.
 
+        function varargout = computeISLMeasurements(varargin)
+            [varargout{1:nargout}] = revgnss.MeasurementModelUtils.computeISLMeasurements(varargin{:});
+        end
         function need = needsFiniteDiffH_(cfg)
-            % needsFiniteDiffH_  True when any model-side position-affecting correction is on.
-            %
-            % Sagnac and Shapiro add explicit terms to dh/dr.  PCO and PCV change the
-            % effective antenna positions used in the range computation.
-            % Tower survey offsets do NOT require FD (they shift the baseline h but the
-            % Jacobian structure d(rho)/d(r) = u' is unchanged).
-            need = false;
-            if isfield(cfg,'estimator') && isfield(cfg.estimator,'forceFiniteDifferenceH') && ...
-                    cfg.estimator.forceFiniteDifferenceH
-                need = true; return;
-            end
-            if isfield(cfg,'physics')
-                if isfield(cfg.physics,'sagnac') && isfield(cfg.physics.sagnac,'model') && ...
-                        cfg.physics.sagnac.model.enable
-                    need = true; return;
-                end
-                if isfield(cfg.physics,'relativity') && ...
-                        isfield(cfg.physics.relativity,'shapiro') && ...
-                        isfield(cfg.physics.relativity.shapiro,'model') && ...
-                        cfg.physics.relativity.shapiro.model.enable
-                    need = true; return;
-                end
-            end
-            if isfield(cfg,'effects')
-                if isfield(cfg.effects,'antennaPCO') && ...
-                        isfield(cfg.effects.antennaPCO,'model') && ...
-                        cfg.effects.antennaPCO.model.enable
-                    need = true; return;
-                end
-                if isfield(cfg.effects,'antennaPCV') && ...
-                        isfield(cfg.effects.antennaPCV,'model') && ...
-                        cfg.effects.antennaPCV.model.enable
-                    need = true; return;
-                end
-                % Stage 7A.1: iterative light-time rotates the tower position by
-                % omega_E*tau; the geometric Jacobian dρ/dr = u' is then wrong.
-                % Use finite-difference H when iterative light-time is active.
-                if isfield(cfg.effects,'lightTime') && ...
-                        isfield(cfg.effects.lightTime,'model') && ...
-                        strcmp(cfg.effects.lightTime.model,'iterative')
-                    need = true; return;
-                end
-            end
+            need = revgnss.MeasurementModelUtils.needsFiniteDiffH_(cfg);
         end
-
         function r_twr = towerPositionEcef(cfg, tower, towerIdx, side)
-            % towerPositionEcef  Tower ECEF with optional survey offset.
-            %
-            % Public static for use by external measurement builders (e.g. DopplerMeasurementBuilder).
-            % Logic identical to private getTowerPosition_ instance method.
-            r_nom = tower.getAntennaPositionECEF();
-            if ~isfield(cfg,'effects') || ~isfield(cfg.effects,'towerSurvey')
-                r_twr = r_nom; return;
-            end
-            ts = cfg.effects.towerSurvey;
-            if ~isfield(ts, side) || ~ts.(side).enable
-                r_twr = r_nom; return;
-            end
-            if towerIdx <= numel(cfg.towers) && isfield(cfg.towers(towerIdx),'surveyError_ENU_m')
-                enu_err = cfg.towers(towerIdx).surveyError_ENU_m;
-                r_twr = r_nom + revgnss.GeometryUtils.enu2ecef_vector( ...
-                    tower.lat_rad, tower.lon_rad, enu_err);
-            else
-                r_twr = r_nom;
-            end
+            r_twr = revgnss.MeasurementModelUtils.towerPositionEcef(cfg, tower, towerIdx, side);
         end
-
         function kind = zwdMappingKind(cfg)
-            % zwdMappingKind  Return the configured ZWD troposphere mapping kind.
-            %
-            % Public static for use by external measurement builders.
-            % Reads cfg.effects.troposphere.mappingModel (preferred) or
-            % cfg.errors.troposphere.mappingModel (legacy path).
-            % Defaults to 'simple'. Valid values: 'simple' | 'continuedFraction'
-            kind = 'simple';
-            if isfield(cfg,'effects') && isfield(cfg.effects,'troposphere') && ...
-                    isfield(cfg.effects.troposphere,'mappingModel')
-                kind = cfg.effects.troposphere.mappingModel;
-            elseif isfield(cfg,'errors') && isfield(cfg.errors,'troposphere') && ...
-                    isfield(cfg.errors.troposphere,'mappingModel')
-                kind = cfg.errors.troposphere.mappingModel;
-            end
+            kind = revgnss.MeasurementModelUtils.zwdMappingKind(cfg);
         end
-
         function rho = modelRangeOnly(cfg, towers, ti, ai, r_cm, euler, leverArms_model)
-            % modelRangeOnly  Model geometric range for FD Jacobian.
-            %
-            % Public static for use by external measurement builders.
-            % Includes model-side corrections (Sagnac, Shapiro, PCV) but NOT
-            % clock terms or ErrorChain corrections (constants w.r.t. position/attitude).
-            lever = leverArms_model(:, ai);
-            r_ant = revgnss.AttitudeKinematics.applyLeverArm(r_cm, euler, lever);
-            r_twr = revgnss.MeasurementModel.towerPositionEcef(cfg, towers{ti}, ti, 'model');
-            if isfield(cfg,'effects') && isfield(cfg.effects,'antennaPCO')
-                pco = cfg.effects.antennaPCO;
-                if isfield(pco,'model') && pco.model.enable
-                    tOff = pco.towerOffset_enu_m(:);
-                    R_ENU = revgnss.GeometryUtils.enu2ecef(towers{ti}.lat_rad, towers{ti}.lon_rad);
-                    r_twr = r_twr + R_ENU * tOff;
-                end
-            end
-            elv = revgnss.GeometryUtils.elevationAngle(r_twr, r_ant);
-            rho = revgnss.RangeCorrections.correctedPseudorange(r_ant, r_twr, cfg, 'model', elv);
+            rho = revgnss.MeasurementModelUtils.modelRangeOnly(cfg, towers, ti, ai, r_cm, euler, leverArms_model);
         end
-
         function sigma = codeSignalSigma(sigCfg, elv, cfg)
-            % codeSignalSigma  Per-signal code noise sigma at given elevation.
-            %
-            % Public static for use by external measurement builders.
-            elvFloor = revgnss.Constants.ELEVATION_FLOOR_RAD;
-            sigma0   = sigCfg.codeSigma0_m;
-            codeModel = 'constant';
-            if isfield(cfg,'measurements') && isfield(cfg.measurements,'codeNoise') && ...
-                    isfield(cfg.measurements.codeNoise,'model')
-                codeModel = cfg.measurements.codeNoise.model;
-            end
-            switch lower(codeModel)
-                case 'constant'
-                    sigma = sigma0;
-                case 'elevation'
-                    p = 1.0;
-                    if isfield(cfg,'measurements') && ...
-                            isfield(cfg.measurements,'codeNoise') && ...
-                            isfield(cfg.measurements.codeNoise,'elevationExponent')
-                        p = cfg.measurements.codeNoise.elevationExponent;
-                    end
-                    mapping = 1 / max(sin(elv), sin(elvFloor));
-                    sigma   = sigma0 * mapping^p;
-                otherwise
-                    sigma = sigma0;
-            end
+            sigma = revgnss.MeasurementModelUtils.codeSignalSigma(sigCfg, elv, cfg);
         end
-
         function d = rxCodeBiasModel(cfg)
-            % rxCodeBiasModel  Receiver code hardware-delay model correction [m].
-            %
-            % Public static for use by external measurement builders.
-            % Returns 0 for 'off', 'absorbedInReceiverClock', and 'notImplemented'.
-            % Returns cfg.hardware.rxCodeBias.fixedValue_m for 'fixed' and
-            % 'externalCalibration' modes.
-            d = 0;
-            if ~isfield(cfg,'hardware') || ~isfield(cfg.hardware,'rxCodeBias')
-                return;
-            end
-            rxcb = cfg.hardware.rxCodeBias;
-            if ~isfield(rxcb,'mode'); return; end
-            switch rxcb.mode
-                case {'fixed','externalCalibration'}
-                    if isfield(rxcb,'fixedValue_m') && ~isnan(rxcb.fixedValue_m)
-                        d = rxcb.fixedValue_m;
-                    end
-                otherwise
-                    d = 0;
-            end
+            d = revgnss.MeasurementModelUtils.rxCodeBiasModel(cfg);
         end
-
         function [z_out, R_out, noiseComp] = correlatedNoise(cfg, rngCorr, z_in, R_diag, twr_list, M)
-            % correlatedNoise  Apply correlated truth noise and build full R matrix.
-            %
-            % Public static for use by external measurement builders.
-            % If cfg.effects.correlatedNoise.enable=false, returns z unchanged and
-            % R = diag(R_diag) with zero noiseComp arrays.
-            noiseComp.common_m      = zeros(M,1);
-            noiseComp.sameTower_m   = zeros(M,1);
-            noiseComp.independent_m = zeros(M,1);
-            z_out = z_in;
-            if ~isfield(cfg,'effects') || ~isfield(cfg.effects,'correlatedNoise') || ...
-                    ~cfg.effects.correlatedNoise.enable
-                R_out = diag(R_diag);
-                return
-            end
-            cn  = cfg.effects.correlatedNoise;
-            rng = rngCorr;
-            if cn.commonModeSigma_m > 0
-                common = cn.commonModeSigma_m * randn(rng, 1, 1);
-                noiseComp.common_m = common * ones(M,1);
-                z_out = z_out + noiseComp.common_m;
-            end
-            if cn.sameTowerSigma_m > 0
-                uniqTwrs = unique(twr_list);
-                for k = 1:numel(uniqTwrs)
-                    tNoise = cn.sameTowerSigma_m * randn(rng, 1, 1);
-                    mask = (twr_list == uniqTwrs(k));
-                    noiseComp.sameTower_m(mask) = tNoise;
-                    z_out(mask) = z_out(mask) + tNoise;
-                end
-            end
-            if cn.independentSigma_m > 0
-                noiseComp.independent_m = cn.independentSigma_m * randn(rng, M, 1);
-                z_out = z_out + noiseComp.independent_m;
-            end
-            R_out = diag(R_diag + cn.independentSigma_m^2 * ones(M,1));
-            R_out = R_out + cn.commonModeSigma_m^2 * ones(M,M);
-            if cn.sameTowerSigma_m > 0
-                uniqTwrs = unique(twr_list);
-                for k = 1:numel(uniqTwrs)
-                    idx = find(twr_list == uniqTwrs(k));
-                    R_out(idx,idx) = R_out(idx,idx) + cn.sameTowerSigma_m^2 * ones(numel(idx));
-                end
-            end
+            [z_out, R_out, noiseComp] = revgnss.MeasurementModelUtils.correlatedNoise( ...
+                cfg, rngCorr, z_in, R_diag, twr_list, M);
         end
 
     end  % static methods

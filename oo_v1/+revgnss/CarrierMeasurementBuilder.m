@@ -117,7 +117,7 @@ classdef CarrierMeasurementBuilder
                 end
 
                 % Truth geometric range (survey + PCO + corrections)
-                r_twr_t = revgnss.MeasurementModel.towerPositionEcef(cfg, towers{ti}, ti, 'truth');
+                r_twr_t = revgnss.MeasurementModelUtils.towerPositionEcef(cfg, towers{ti}, ti, 'truth');
                 if isfield(cfg,'effects') && isfield(cfg.effects,'antennaPCO')
                     pco = cfg.effects.antennaPCO;
                     if isfield(pco,'truth') && pco.truth.enable
@@ -131,7 +131,7 @@ classdef CarrierMeasurementBuilder
 
                 % Model geometric range
                 r_ant_e    = r_ants_est(:, ai);
-                r_twr_e    = revgnss.MeasurementModel.towerPositionEcef(cfg, towers{ti}, ti, 'model');
+                r_twr_e    = revgnss.MeasurementModelUtils.towerPositionEcef(cfg, towers{ti}, ti, 'model');
                 delta_e    = r_ant_e - r_twr_e;
                 rho_e_geom = norm(delta_e); if rho_e_geom < 1; rho_e_geom = 1; end
                 rho_e = revgnss.RangeCorrections.correctedPseudorange( ...
@@ -147,7 +147,7 @@ classdef CarrierMeasurementBuilder
                 if isfield(stateMap,'zwdIdx') && ti <= numel(stateMap.zwdIdx) && ...
                         stateMap.zwdIdx(ti) > 0
                     mf_phi = revgnss.MappingFunctions.troposphere(elv, ...
-                        revgnss.MeasurementModel.zwdMappingKind(cfg));
+                        revgnss.MeasurementModelUtils.zwdMappingKind(cfg));
                     h_phi(mi) = h_phi(mi) + mf_phi * x_est(stateMap.zwdIdx(ti));
                 end
 
@@ -157,7 +157,7 @@ classdef CarrierMeasurementBuilder
                 % ---- H: position columns (analytic or finite-difference) ------
                 r_cm_est  = x_est(stateMap.r_idx);
                 euler_est = x_est(stateMap.euler_idx);
-                doFD = revgnss.MeasurementModel.needsFiniteDiffH_(cfg);
+                doFD = revgnss.MeasurementModelUtils.needsFiniteDiffH_(cfg);
 
                 if doFD
                     % Central finite-difference position Jacobian.
@@ -166,9 +166,9 @@ classdef CarrierMeasurementBuilder
                     for ki = 1:3
                         rp = r_cm_est; rp(ki) = rp(ki) + step_r;
                         rm = r_cm_est; rm(ki) = rm(ki) - step_r;
-                        hp = revgnss.MeasurementModel.modelRangeOnly( ...
+                        hp = revgnss.MeasurementModelUtils.modelRangeOnly( ...
                             cfg, towers, ti, ai, rp, euler_est, leverArms_model);
-                        hm = revgnss.MeasurementModel.modelRangeOnly( ...
+                        hm = revgnss.MeasurementModelUtils.modelRangeOnly( ...
                             cfg, towers, ti, ai, rm, euler_est, leverArms_model);
                         H_phi(mi, stateMap.r_idx(ki)) = (hp - hm) / (2*step_r);
                     end
@@ -197,10 +197,70 @@ classdef CarrierMeasurementBuilder
                 if isfield(stateMap,'zwdIdx') && ...
                         ti <= numel(stateMap.zwdIdx) && stateMap.zwdIdx(ti) > 0
                     mf = revgnss.MappingFunctions.troposphere(elv, ...
-                        revgnss.MeasurementModel.zwdMappingKind(cfg));
+                        revgnss.MeasurementModelUtils.zwdMappingKind(cfg));
                     H_phi(mi, stateMap.zwdIdx(ti)) = mf;
                 end
             end
+        end
+
+        function [cp, ambiguityMap] = buildDiagnostic( ...
+                cfg, errorChain, ambiguityMap, asset, towers, twr_list, ant_list, r_ants_true)
+            % buildDiagnostic  Truth carrier phase observables (diagnostic only).
+            %
+            % Extracted from MeasurementModel.computeCarrierPhase_ (Stage 12A.2).
+            %
+            % z_phi_cycles = (rho + b_rx - b_twr) / lambda + N_ia + noise
+            % N_ia: constant integer ambiguity per (tower, antenna) arc.
+            %
+            % What is included: geometry + clocks + ambiguity + carrier noise.
+            % What is NOT included: atmosphere.
+            %   Troposphere delays carrier like code (same sign).
+            %   Ionosphere ADVANCES carrier (OPPOSITE sign to code, sign = -1).
+            % ErrorChain truthTotal_m is NOT used here to avoid applying iono
+            % with wrong sign.  If atmosphere is later added, apply:
+            %   rho + trop_m - iono_m   (trop positive, iono negative for carrier).
+            % No cycle slips in v1.
+            cpc    = cfg.measurements.carrierPhase;
+            lambda = cpc.lambda_m;
+            sigma  = cpc.sigma_cycles;
+            M      = numel(twr_list);
+
+            if isempty(ambiguityMap)
+                rngAmb     = RandStream('mt19937ar','Seed', cpc.seed);
+                ambiguityMap = containers.Map('KeyType','int32','ValueType','double');
+                for mi2 = 1:M
+                    key = int32(twr_list(mi2) * 1000 + ant_list(mi2));
+                    if ~isKey(ambiguityMap, key)
+                        switch cpc.initialAmbiguityMode
+                            case 'randomInteger'
+                                ambiguityMap(key) = round(randn(rngAmb,1,1) * 1e4);
+                            otherwise
+                                ambiguityMap(key) = 0;
+                        end
+                    end
+                end
+            end
+
+            b_rx_true = asset.clock.getBiasMeters();
+            phi   = zeros(M,1);
+            ambig = zeros(M,1);
+            for mi = 1:M
+                ti    = twr_list(mi);
+                ai    = ant_list(mi);
+                r_twr = towers{ti}.getAntennaPositionECEF();
+                b_twr = towers{ti}.getClockBiasMeters();
+                rho   = norm(r_ants_true(:,ai) - r_twr);
+                key   = int32(ti * 1000 + ai);
+                N_ia  = ambiguityMap(key);
+                ambig(mi) = N_ia;
+                phi(mi) = (rho + b_rx_true - b_twr) / lambda + N_ia + ...
+                          sigma * errorChain.drawNormal(1,1);
+            end
+            cp.phi_cycles    = phi;
+            cp.ambiguity_int = ambig;
+            cp.lambda_m      = lambda;
+            cp.towerIdx      = twr_list;
+            cp.antennaIdx    = ant_list;
         end
 
     end  % Static methods

@@ -23,7 +23,7 @@ classdef CodeJacobianBuilder
             M = numel(twr_list);
             H = zeros(M, nx);
 
-            doFD = revgnss.MeasurementModel.needsFiniteDiffH_(cfg);
+            doFD = revgnss.MeasurementModelUtils.needsFiniteDiffH_(cfg);
 
             doAttJac = isfield(cfg.estimator, 'estimateAttitude') && ...
                        cfg.estimator.estimateAttitude && ...
@@ -43,15 +43,15 @@ classdef CodeJacobianBuilder
                     for ki = 1:3
                         r_p = r_cm_est; r_p(ki) = r_p(ki) + step_r;
                         r_m = r_cm_est; r_m(ki) = r_m(ki) - step_r;
-                        hp = revgnss.MeasurementModel.modelRangeOnly( ...
+                        hp = revgnss.MeasurementModelUtils.modelRangeOnly( ...
                             cfg, towers, ti, ai, r_p, euler_est, leverArms_model);
-                        hm = revgnss.MeasurementModel.modelRangeOnly( ...
+                        hm = revgnss.MeasurementModelUtils.modelRangeOnly( ...
                             cfg, towers, ti, ai, r_m, euler_est, leverArms_model);
                         H(mi, stateMap.r_idx(ki)) = (hp - hm) / (2*step_r);
                     end
                 else
                     % Analytic position Jacobian: u' using model tower position + PCO lever
-                    r_twr = revgnss.MeasurementModel.towerPositionEcef(cfg, towers{ti}, ti, 'model');
+                    r_twr = revgnss.MeasurementModelUtils.towerPositionEcef(cfg, towers{ti}, ti, 'model');
                     r_ant = revgnss.AttitudeKinematics.applyLeverArm(r_cm_est, euler_est, lever);
                     delta = r_ant - r_twr;
                     rho   = norm(delta); if rho < 1; rho = 1; end
@@ -59,7 +59,7 @@ classdef CodeJacobianBuilder
                 end
 
                 % Lever-arm ratio diagnostic (Issue 13)
-                r_twr_diag = revgnss.MeasurementModel.towerPositionEcef(cfg, towers{ti}, ti, 'model');
+                r_twr_diag = revgnss.MeasurementModelUtils.towerPositionEcef(cfg, towers{ti}, ti, 'model');
                 r_ant_diag = revgnss.AttitudeKinematics.applyLeverArm(r_cm_est, euler_est, lever);
                 slantRange_diag = norm(r_ant_diag - r_twr_diag);
                 leverNorm_diag  = norm(lever);
@@ -75,9 +75,9 @@ classdef CodeJacobianBuilder
                     for ke = 1:3
                         eul_p = euler_est; eul_p(ke) = eul_p(ke) + step_e;
                         eul_m = euler_est; eul_m(ke) = eul_m(ke) - step_e;
-                        hp = revgnss.MeasurementModel.modelRangeOnly( ...
+                        hp = revgnss.MeasurementModelUtils.modelRangeOnly( ...
                             cfg, towers, ti, ai, r_cm_est, eul_p, leverArms_model);
-                        hm = revgnss.MeasurementModel.modelRangeOnly( ...
+                        hm = revgnss.MeasurementModelUtils.modelRangeOnly( ...
                             cfg, towers, ti, ai, r_cm_est, eul_m, leverArms_model);
                         H(mi, stateMap.euler_idx(ke)) = (hp - hm) / (2*step_e);
                     end

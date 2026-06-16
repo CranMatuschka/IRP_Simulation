@@ -208,7 +208,7 @@ fprintf('  T9: needsFiniteDiffH_ true for iterative light-time ...\n');
 
 cfg9_iter = revgnss.ConfigFactory.defaultConfig();
 cfg9_iter.effects.lightTime.model = 'iterative';
-assert(revgnss.MeasurementModel.needsFiniteDiffH_(cfg9_iter), ...
+assert(revgnss.MeasurementModelUtils.needsFiniteDiffH_(cfg9_iter), ...
     'T9 FAILED: iterative light-time should trigger FD H');
 
 cfg9_sag = revgnss.ConfigFactory.defaultConfig();
@@ -220,7 +220,7 @@ cfg9_sag.physics.sagnac.truth.enable  = false;
 cfg9_sag.effects.antennaPCO.model.enable = false;
 cfg9_sag.effects.antennaPCV.model.enable = false;
 % sagnacFirstOrder lightTime model does NOT use iterative rotation → no FD needed
-assert(~revgnss.MeasurementModel.needsFiniteDiffH_(cfg9_sag), ...
+assert(~revgnss.MeasurementModelUtils.needsFiniteDiffH_(cfg9_sag), ...
     'T9 FAILED: sagnacFirstOrder alone should NOT trigger FD H');
 fprintf('    iterative→FD=true, sagnacFirstOrder→FD=false: PASS\n');
 

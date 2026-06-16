@@ -116,7 +116,7 @@ classdef DopplerMeasurementBuilder
                 towerClockDriftModel_mps(mi) = bdot_twr_model;
 
                 % Truth-side: unit vector from truth tower to truth antenna
-                r_twr_t = revgnss.MeasurementModel.towerPositionEcef(cfg, towers{ti}, ti, 'truth');
+                r_twr_t = revgnss.MeasurementModelUtils.towerPositionEcef(cfg, towers{ti}, ti, 'truth');
                 delta_t = r_ants_truth(:,ai) - r_twr_t;
                 rho_t   = norm(delta_t); if rho_t < 1; rho_t = 1; end
                 u_t     = delta_t / rho_t;
@@ -128,7 +128,7 @@ classdef DopplerMeasurementBuilder
                 end
 
                 % Model-side: unit vector from model tower to estimated antenna
-                r_twr_e = revgnss.MeasurementModel.towerPositionEcef(cfg, towers{ti}, ti, 'model');
+                r_twr_e = revgnss.MeasurementModelUtils.towerPositionEcef(cfg, towers{ti}, ti, 'model');
                 delta_e = r_ants_est(:,ai) - r_twr_e;
                 rho_e   = norm(delta_e); if rho_e < 1; rho_e = 1; end
                 u_e     = delta_e / rho_e;

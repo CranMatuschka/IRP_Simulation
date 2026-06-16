@@ -9,7 +9,7 @@ addpath(fullfile(thisDir, '..'));
 fprintf('=== test_isl_stub (T14) ===\n');
 
 % Call the ISL stub with dummy assets (it ignores them)
-[z_isl, h_isl, H_isl] = revgnss.MeasurementModel.computeISLMeasurements([], [], [], []);
+[z_isl, h_isl, H_isl] = revgnss.MeasurementModelUtils.computeISLMeasurements([], [], [], []);
 
 assert(isempty(z_isl), 'T14 FAILED: z_isl should be empty');
 assert(isempty(h_isl), 'T14 FAILED: h_isl should be empty');
