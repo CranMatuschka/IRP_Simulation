@@ -1050,17 +1050,20 @@ classdef Diagnostics < handle
         function v = getClockGaugeRowsAdded(obj)
             % getClockGaugeRowsAdded  Number of gauge pseudo-rows inserted per epoch.
             % Zero when tower clocks are not in EKF or gauge is 'externalTowerCorrections'.
+            if isempty(obj.log); v = []; return; end
             v = [obj.log.clockGaugeRowsAdded]';
         end
 
         function v = getClockSubspaceRank(obj)
             % getClockSubspaceRank  Numerical rank of H restricted to clock columns.
             % Should equal nClockStates when gauge removes the nullspace.
+            if isempty(obj.log); v = []; return; end
             v = [obj.log.clockSubspaceRank]';
         end
 
         function v = getClockSubspaceCondNum(obj)
             % getClockSubspaceCondNum  Condition number of H_clock (sv_max / sv_min).
+            if isempty(obj.log); v = []; return; end
             v = [obj.log.clockSubspaceCondNum]';
         end
 
@@ -1068,11 +1071,13 @@ classdef Diagnostics < handle
             % getClockGaugeBiasResiduals  Tower clock bias gauge residual per epoch [m].
             % fixReferenceTower: reference tower bias state value.
             % meanGroundClockGauge: mean of all tower bias states.
+            if isempty(obj.log); v = []; return; end
             v = [obj.log.clockGaugeBiasResidual_m]';
         end
 
         function v = getClockGaugeDriftResiduals(obj)
             % getClockGaugeDriftResiduals  Tower clock drift gauge residual per epoch [m/s].
+            if isempty(obj.log); v = []; return; end
             v = [obj.log.clockGaugeDriftResidual_mps]';
         end
 
@@ -1080,33 +1085,39 @@ classdef Diagnostics < handle
             % getClockObsRankPhysical  Clock-subspace Gramian rank (physical meas only) per epoch.
             % NaN before the sliding window fills (minWindowEpochs).
             % Should equal n_clk-1 for one-way pseudorange (common bias nullspace persists).
+            if isempty(obj.log); v = []; return; end
             v = [obj.log.clockObsRankPhysical]';
         end
 
         function v = getClockObsRankGauged(obj)
             % getClockObsRankGauged  Clock-subspace Gramian rank (physical + gauge) per epoch.
             % Should equal n_clk when the gauge removes the common-bias nullspace.
+            if isempty(obj.log); v = []; return; end
             v = [obj.log.clockObsRankGauged]';
         end
 
         function v = getClockObsCondPhysical(obj)
             % getClockObsCondPhysical  Gramian condition number (physical only) per epoch.
+            if isempty(obj.log); v = []; return; end
             v = [obj.log.clockObsCondPhysical]';
         end
 
         function v = getClockObsCondGauged(obj)
             % getClockObsCondGauged  Gramian condition number (physical + gauge) per epoch.
+            if isempty(obj.log); v = []; return; end
             v = [obj.log.clockObsCondGauged]';
         end
 
         function v = getClockObsWeakStatesPhysical(obj)
             % getClockObsWeakStatesPhysical  Number of clock states below rank tolerance (physical only).
+            if isempty(obj.log); v = []; return; end
             v = [obj.log.clockObsWeakPhysical]';
         end
 
         function v = getClockObsWeakStatesGauged(obj)
             % getClockObsWeakStatesGauged  Number of clock states below rank tolerance (gauged).
             % Should be 0 when the gauge fully constrains the clock subspace.
+            if isempty(obj.log); v = []; return; end
             v = [obj.log.clockObsWeakGauged]';
         end
 
@@ -1115,6 +1126,7 @@ classdef Diagnostics < handle
         function v = getTxCodeBiasGaugeRowsAdded(obj)
             % getTxCodeBiasGaugeRowsAdded  Tx-code-delay gauge rows inserted per epoch.
             % 0 when estimateTxCodeBias is off; 1 when fixReferenceTower gauge is active.
+            if isempty(obj.log); v = []; return; end
             v = [obj.log.txCodeBiasGaugeRowsAdded]';
         end
 
@@ -1122,16 +1134,19 @@ classdef Diagnostics < handle
             % getTxCodeBiasGaugeResiduals  Tx code delay gauge residual per epoch [m].
             % fixReferenceTower: reference-tower delay state value (should converge near 0).
             % meanGroundDelayGauge: mean of all tower delay states.
+            if isempty(obj.log); v = []; return; end
             v = [obj.log.txCodeBiasGaugeResidual_m]';
         end
 
         function v = getTxCodeBiasStatesEnabled(obj)
             % getTxCodeBiasStatesEnabled  True when tx code bias states are in the EKF.
+            if isempty(obj.log); v = []; return; end
             v = [obj.log.txCodeBiasStatesEnabled]';
         end
 
         function v = getNTxCodeBiasStates(obj)
             % getNTxCodeBiasStates  Number of tx code bias states per epoch.
+            if isempty(obj.log); v = []; return; end
             v = [obj.log.nTxCodeBiasStates]';
         end
 

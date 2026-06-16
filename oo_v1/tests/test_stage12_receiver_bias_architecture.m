@@ -297,4 +297,30 @@ assert(~rxEntry(1).inEKF, ...
 fprintf('    PASS (%d terms, all required present; rx code status=''%s'', inEKF=%d)\n', ...
     numel(s), rxEntry(1).status, rxEntry(1).inEKF);
 
+% ----------------------------------------------------------------
+% T-P12m: Report includes "Receiver and Observable Hardware Bias Architecture"
+% ----------------------------------------------------------------
+fprintf('  T-P12m: ClockExactReportBuilder .tex includes bias architecture section ...\n');
+cfg_m = revgnss.ConfigFactory.defaultConfig();
+cfg_m.report.style          = 'latex';
+cfg_m.report.layout         = 'clockExact';
+cfg_m.report.writeTex       = true;
+cfg_m.report.compileTex     = 'never';
+cfg_m.report.writePdf       = false;
+cfg_m.report.writeMat       = false;
+cfg_m.report.baseOutputDir  = fullfile(tempdir(), 'revgnss_test_stage12');
+try
+    diag_m = revgnss.Diagnostics(cfg_m);
+catch
+    diag_m = struct();
+end
+res_m = revgnss.ClockExactReportBuilder.build(diag_m, [], [], cfg_m, struct());
+assert(isfield(res_m,'texPath') && isfile(res_m.texPath), ...
+    'T-P12m FAILED: ClockExactReportBuilder.build did not produce a .tex file');
+src_m = fileread(res_m.texPath);
+assert(contains(src_m, 'Receiver and Observable Hardware Bias Architecture'), ...
+    'T-P12m FAILED: .tex missing ''Receiver and Observable Hardware Bias Architecture'' section');
+try; delete(res_m.texPath); catch; end
+fprintf('    PASS (.tex contains ''Receiver and Observable Hardware Bias Architecture'')\n');
+
 fprintf('=== test_stage12_receiver_bias_architecture: ALL PASS ===\n');
