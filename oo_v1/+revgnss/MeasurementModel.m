@@ -784,7 +784,11 @@ classdef MeasurementModel < handle
 
             switch carrierMode_v
                 case 'ekfFloat'
-                    [z_phi, h_phi, H_phi, R_phi, cpInfo] = obj.computeCarrierEkfRows_( ...
+                    if isempty(obj.floatAmbiguityTruth_m)
+                        obj.floatAmbiguityTruth_m = containers.Map('KeyType','int32','ValueType','double');
+                    end
+                    [z_phi, h_phi, H_phi, R_phi, cpInfo] = revgnss.CarrierMeasurementBuilder.buildEkfRows( ...
+                        obj.cfg, obj.errorChain, obj.floatAmbiguityTruth_m, ...
                         asset, towers, twr_list(1:M_pairs_c), ant_list(1:M_pairs_c), ...
                         r_ants_truth, r_ants_est, leverArms_model, x_est, stateMap, nx, ...
                         errStruct, towerClkTruth, towerClkModel, towerClkSigma, t_s);
@@ -1480,233 +1484,8 @@ classdef MeasurementModel < handle
         end
 
         % ----------------------------------------------------------------
-        function [z_phi, h_phi, H_phi, R_phi, cpInfo] = computeCarrierEkfRows_( ...
-                obj, asset, towers, twr_pairs, ant_pairs, r_ants_truth, r_ants_est, ...
-                leverArms_model, x_est, stateMap, nx, errStruct, ...
-                towerClkTruth, towerClkModel, towerClkSigma, t_s)
-            % computeCarrierEkfRows_  Build carrier EKF rows with float ambiguity states.
-            if nargin < 17 || isempty(t_s); t_s = 0; end
-            %
-            % z_phi = rho_true + b_rx_true - b_twr_true + trop_true - iono_true + B_true + noise
-            % h_phi = rho_est  + b_rx_est  - b_twr_model + trop_model - iono_model + B_est
-            %
-            % CRITICAL: ionosphere sign is NEGATIVE for carrier (phase advance).
-            % This is opposite to +iono for code (group delay).
-            % B_phi states are float, in metres, one per (tower, sigIdx=1) arc.
-            %
-            % Stage 7A — Carrier H position Jacobian:
-            % When range corrections (Sagnac, Shapiro, PCV, PCO) are active the
-            % geometric unit vector dρ/dr = u' is insufficient.  If
-            % needsFiniteDiffH_ is true, we use central finite difference on
-            % computeModelRangeOnly_ (identical function used for h_phi range).
-            % Clock, ambiguity, and ZWD columns remain analytic.
-
-            cfg    = obj.cfg;
-            Mp     = numel(twr_pairs);
-
-            % Defensive guard: carrier IF must be caught by ConfigFactory.finalizeConfig.
-            % If it survives to here, throw unless user explicitly opted into silent fallback.
-            if isfield(cfg,'measurements') && ...
-                    isfield(cfg.measurements,'carrierCombinationMode') && ...
-                    strcmp(cfg.measurements.carrierCombinationMode,'ionosphereFree')
-                policy = '';
-                if isfield(cfg,'validation') && ...
-                        isfield(cfg.validation,'unsupportedFeaturePolicy')
-                    policy = cfg.validation.unsupportedFeaturePolicy;
-                end
-                if ~strcmp(policy,'disableWithWarning')
-                    error('MeasurementModel:carrierIFNotImplemented', ...
-                        ['Carrier ionosphere-free combination is NOT implemented in oo_v1. ' ...
-                         'Only raw L1 float carrier EKF is supported. ' ...
-                         'Use code IF (codeMode=''ionosphereFree'') or disable carrier EKF. ' ...
-                         'To suppress this error and use raw L1, set: ' ...
-                         'cfg.validation.unsupportedFeaturePolicy = ''disableWithWarning''.']);
-                else
-                    warning('MeasurementModel:carrierIFNotImplemented', ...
-                        'carrierCombinationMode=ionosphereFree not implemented. Using raw L1 carrier instead.');
-                end
-            end
-
-            sigma_phi = 0.005;
-            if isfield(cfg,'measurements') && isfield(cfg.measurements,'carrier') && ...
-                    isfield(cfg.measurements.carrier,'sigma_m')
-                sigma_phi = cfg.measurements.carrier.sigma_m;
-            end
-
-            sigIdx   = 1;   % carrier rows use signal index 1 (L1) in v1
-            b_rx_true = asset.clock.getBiasMeters();
-            b_rx_est  = x_est(stateMap.b_rx_idx);
-
-            % Lazy-init float ambiguity truth map (metres)
-            if isempty(obj.floatAmbiguityTruth_m)
-                obj.floatAmbiguityTruth_m = containers.Map('KeyType','int32','ValueType','double');
-            end
-
-            z_phi = zeros(Mp, 1);
-            h_phi = zeros(Mp, 1);
-            H_phi = zeros(Mp, nx);
-            R_phi = sigma_phi^2 * eye(Mp);
-
-            cpInfo.towerIdx   = twr_pairs;
-            cpInfo.antennaIdx = ant_pairs;
-            cpInfo.phi_m      = zeros(Mp, 1);
-            cpInfo.prefit_m   = zeros(Mp, 1);
-
-            for mi = 1:Mp
-                ti  = twr_pairs(mi);
-                ai  = ant_pairs(mi);
-                elv = errStruct.elevations_rad(mi);
-
-                % True float ambiguity — initialised once per arc
-                key = int32(ti * 1000 + ai);
-                if ~isKey(obj.floatAmbiguityTruth_m, key)
-                    initSig = 100;
-                    if isfield(cfg,'estimation') && isfield(cfg.estimation,'ambiguity') && ...
-                            isfield(cfg.estimation.ambiguity,'initialSigma_m')
-                        initSig = cfg.estimation.ambiguity.initialSigma_m;
-                    end
-                    obj.floatAmbiguityTruth_m(key) = initSig * obj.errorChain.drawNormal(1,1);
-                end
-                B_true = obj.floatAmbiguityTruth_m(key);
-
-                % EKF ambiguity state (0 until EKF initialises it via P_0)
-                B_est = 0;
-                if isfield(stateMap,'ambiguityIdx') && ...
-                        ti <= size(stateMap.ambiguityIdx,1) && ...
-                        sigIdx <= size(stateMap.ambiguityIdx,2) && ...
-                        stateMap.ambiguityIdx(ti,sigIdx) > 0
-                    B_est = x_est(stateMap.ambiguityIdx(ti,sigIdx));
-                end
-
-                % Tower clock
-                b_twr_t = towerClkTruth(mi);
-                b_twr_m = towerClkModel(mi);
-
-                % Ionosphere — NEGATIVE for carrier (opposite to +iono for code)
-                iono_t = 0; iono_m = 0;
-                if isfield(errStruct,'bySource')
-                    bt = errStruct.bySource.truth_m;
-                    bm = errStruct.bySource.model_m;
-                    if isfield(bt,'iono') && mi <= numel(bt.iono); iono_t = bt.iono(mi); end
-                    if isfield(bm,'iono') && mi <= numel(bm.iono); iono_m = bm.iono(mi); end
-                end
-
-                % Troposphere — same sign as code
-                trop_t = 0; trop_m = 0;
-                if isfield(errStruct,'bySource')
-                    bt = errStruct.bySource.truth_m;
-                    bm = errStruct.bySource.model_m;
-                    if isfield(bt,'trop') && mi <= numel(bt.trop); trop_t = bt.trop(mi); end
-                    if isfield(bm,'trop') && mi <= numel(bm.trop); trop_m = bm.trop(mi); end
-                end
-
-                % Truth and model geometric range (same path as code: survey + PCO + corrections)
-                % Phase 3: use getTowerPosition_ so survey error is included on truth side
-                r_twr_t = obj.getTowerPosition_(towers{ti}, ti, 'truth');
-                % Tower PCO (truth side) — mirrors code path in computeMeasurements
-                if isfield(obj.cfg,'effects') && isfield(obj.cfg.effects,'antennaPCO')
-                    pco = obj.cfg.effects.antennaPCO;
-                    if isfield(pco,'truth') && pco.truth.enable
-                        tOff = pco.towerOffset_enu_m(:);
-                        R_ENU = revgnss.GeometryUtils.enu2ecef(towers{ti}.lat_rad, towers{ti}.lon_rad);
-                        r_twr_t = r_twr_t + R_ENU * tOff;
-                    end
-                end
-                rho_t = revgnss.RangeCorrections.correctedPseudorange( ...
-                    r_ants_truth(:,ai), r_twr_t, obj.cfg, 'truth', elv, t_s);
-
-                r_ant_e  = r_ants_est(:, ai);
-                r_twr_e  = obj.getTowerPosition_(towers{ti}, ti, 'model');
-                delta_e  = r_ant_e - r_twr_e;
-                rho_e_geom = norm(delta_e); if rho_e_geom < 1; rho_e_geom = 1; end
-                rho_e = revgnss.RangeCorrections.correctedPseudorange( ...
-                    r_ant_e, r_twr_e, obj.cfg, 'model', elv, t_s);
-
-                noise_phi = sigma_phi * obj.errorChain.drawNormal(1,1);
-
-                % z: +trop, -iono (carrier ionosphere is OPPOSITE sign to code)
-                z_phi(mi) = rho_t + b_rx_true - b_twr_t + trop_t - iono_t + B_true + noise_phi;
-
-                % h: +trop_model, -iono_model + ZWD state (TASK 2)
-                h_phi(mi) = rho_e + b_rx_est - b_twr_m + trop_m - iono_m + B_est;
-                if isfield(stateMap,'zwdIdx') && ti <= numel(stateMap.zwdIdx) && ...
-                        stateMap.zwdIdx(ti) > 0
-                    mf_phi = revgnss.MappingFunctions.troposphere(elv, obj.zwdMappingKind_());
-                    h_phi(mi) = h_phi(mi) + mf_phi * x_est(stateMap.zwdIdx(ti));
-                end
-
-                cpInfo.phi_m(mi)    = z_phi(mi);
-                cpInfo.prefit_m(mi) = z_phi(mi) - h_phi(mi);
-
-                % ---- H: position columns (analytic or FD) -------------------
-                r_cm_est  = x_est(stateMap.r_idx);
-                euler_est = x_est(stateMap.euler_idx);
-                doFD = revgnss.MeasurementModel.needsFiniteDiffH_(obj.cfg);
-
-                if doFD
-                    % Central finite-difference position Jacobian.
-                    % Uses computeModelRangeOnly_ — same function as h_phi range term.
-                    step_r = 1.0;  % 1 m step
-                    for ki = 1:3
-                        rp = r_cm_est; rp(ki) = rp(ki) + step_r;
-                        rm = r_cm_est; rm(ki) = rm(ki) - step_r;
-                        hp = obj.computeModelRangeOnly_(towers, ti, ai, rp, euler_est, leverArms_model);
-                        hm = obj.computeModelRangeOnly_(towers, ti, ai, rm, euler_est, leverArms_model);
-                        H_phi(mi, stateMap.r_idx(ki)) = (hp - hm) / (2*step_r);
-                    end
-                else
-                    % Analytic unit vector (pure geometry, no range corrections)
-                    H_phi(mi, stateMap.r_idx) = (delta_e / rho_e_geom)';
-                end
-
-                % ---- H: clock, ambiguity, ZWD (always analytic) -------------
-                H_phi(mi, stateMap.b_rx_idx) = 1;
-
-                if isfield(stateMap,'towerClockIdx') && ...
-                        ti <= size(stateMap.towerClockIdx,1) && ...
-                        stateMap.towerClockIdx(ti,1) > 0
-                    H_phi(mi, stateMap.towerClockIdx(ti,1)) = -1;
-                end
-
-                if isfield(stateMap,'ambiguityIdx') && ...
-                        ti <= size(stateMap.ambiguityIdx,1) && ...
-                        sigIdx <= size(stateMap.ambiguityIdx,2) && ...
-                        stateMap.ambiguityIdx(ti,sigIdx) > 0
-                    H_phi(mi, stateMap.ambiguityIdx(ti,sigIdx)) = 1;
-                end
-
-                % ZWD column: +mf (same sign for carrier and code)
-                if isfield(stateMap,'zwdIdx') && ...
-                        ti <= numel(stateMap.zwdIdx) && stateMap.zwdIdx(ti) > 0
-                    mf = revgnss.MappingFunctions.troposphere(elv, obj.zwdMappingKind_());
-                    H_phi(mi, stateMap.zwdIdx(ti)) = mf;
-                end
-            end
-        end
-
-        % ----------------------------------------------------------------
         function rho = computeModelRangeOnly_(obj, towers, ti, ai, r_cm, euler, leverArms_model)
-            % computeModelRangeOnly_  Model geometric range for FD Jacobian.
-            %
-            % Includes model-side corrections (Sagnac, Shapiro, PCV) but NOT
-            % clock terms or ErrorChain corrections (constants w.r.t. position/attitude).
-            lever = leverArms_model(:, ai);
-            r_ant = revgnss.AttitudeKinematics.applyLeverArm(r_cm, euler, lever);
-            r_twr = obj.getTowerPosition_(towers{ti}, ti, 'model');
-
-            % Tower PCO (model side)
-            if isfield(obj.cfg,'effects') && isfield(obj.cfg.effects,'antennaPCO')
-                pco = obj.cfg.effects.antennaPCO;
-                if isfield(pco,'model') && pco.model.enable
-                    tOff = pco.towerOffset_enu_m(:);
-                    R_ENU = revgnss.GeometryUtils.enu2ecef(towers{ti}.lat_rad, towers{ti}.lon_rad);
-                    r_twr = r_twr + R_ENU * tOff;
-                end
-            end
-
-            % Use PCV with elevation from current geometry
-            elv = revgnss.GeometryUtils.elevationAngle(r_twr, r_ant);
-            rho = revgnss.RangeCorrections.correctedPseudorange(r_ant, r_twr, obj.cfg, 'model', elv);
+            rho = revgnss.MeasurementModel.modelRangeOnly(obj.cfg, towers, ti, ai, r_cm, euler, leverArms_model);
         end
 
     end  % private methods
@@ -1739,20 +1518,7 @@ classdef MeasurementModel < handle
 
         % ----------------------------------------------------------------
         function kind = zwdMappingKind_(obj)
-            % zwdMappingKind_  Return the configured ZWD troposphere mapping kind.
-            %
-            % Reads cfg.effects.troposphere.mappingModel (preferred) or
-            % cfg.errors.troposphere.mappingModel (legacy path).
-            % Defaults to 'simple' if neither is set.
-            % Valid values: 'simple' | 'continuedFraction'
-            kind = 'simple';
-            if isfield(obj.cfg,'effects') && isfield(obj.cfg.effects,'troposphere') && ...
-                    isfield(obj.cfg.effects.troposphere,'mappingModel')
-                kind = obj.cfg.effects.troposphere.mappingModel;
-            elseif isfield(obj.cfg,'errors') && isfield(obj.cfg.errors,'troposphere') && ...
-                    isfield(obj.cfg.errors.troposphere,'mappingModel')
-                kind = obj.cfg.errors.troposphere.mappingModel;
-            end
+            kind = revgnss.MeasurementModel.zwdMappingKind(obj.cfg);
         end
 
     end  % private (ZWD helper) methods
@@ -1839,6 +1605,44 @@ classdef MeasurementModel < handle
             else
                 r_twr = r_nom;
             end
+        end
+
+        function kind = zwdMappingKind(cfg)
+            % zwdMappingKind  Return the configured ZWD troposphere mapping kind.
+            %
+            % Public static for use by external measurement builders.
+            % Reads cfg.effects.troposphere.mappingModel (preferred) or
+            % cfg.errors.troposphere.mappingModel (legacy path).
+            % Defaults to 'simple'. Valid values: 'simple' | 'continuedFraction'
+            kind = 'simple';
+            if isfield(cfg,'effects') && isfield(cfg.effects,'troposphere') && ...
+                    isfield(cfg.effects.troposphere,'mappingModel')
+                kind = cfg.effects.troposphere.mappingModel;
+            elseif isfield(cfg,'errors') && isfield(cfg.errors,'troposphere') && ...
+                    isfield(cfg.errors.troposphere,'mappingModel')
+                kind = cfg.errors.troposphere.mappingModel;
+            end
+        end
+
+        function rho = modelRangeOnly(cfg, towers, ti, ai, r_cm, euler, leverArms_model)
+            % modelRangeOnly  Model geometric range for FD Jacobian.
+            %
+            % Public static for use by external measurement builders.
+            % Includes model-side corrections (Sagnac, Shapiro, PCV) but NOT
+            % clock terms or ErrorChain corrections (constants w.r.t. position/attitude).
+            lever = leverArms_model(:, ai);
+            r_ant = revgnss.AttitudeKinematics.applyLeverArm(r_cm, euler, lever);
+            r_twr = revgnss.MeasurementModel.towerPositionEcef(cfg, towers{ti}, ti, 'model');
+            if isfield(cfg,'effects') && isfield(cfg.effects,'antennaPCO')
+                pco = cfg.effects.antennaPCO;
+                if isfield(pco,'model') && pco.model.enable
+                    tOff = pco.towerOffset_enu_m(:);
+                    R_ENU = revgnss.GeometryUtils.enu2ecef(towers{ti}.lat_rad, towers{ti}.lon_rad);
+                    r_twr = r_twr + R_ENU * tOff;
+                end
+            end
+            elv = revgnss.GeometryUtils.elevationAngle(r_twr, r_ant);
+            rho = revgnss.RangeCorrections.correctedPseudorange(r_ant, r_twr, cfg, 'model', elv);
         end
 
     end  % static methods
