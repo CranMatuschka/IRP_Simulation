@@ -747,143 +747,23 @@ classdef MeasurementModel < handle
             end
 
             % ----- Doppler rows (0.5 + 0.6) ----------------------------
-            doCfg = isfield(obj.cfg,'measurements') && ...
-                    isfield(obj.cfg.measurements,'doppler') && ...
-                    obj.cfg.measurements.doppler.enable;
-
-            if doCfg
-                % 0.5: physics flag checks
-                doTruth = isfield(obj.cfg,'physics') && isfield(obj.cfg.physics,'doppler') && ...
-                          isfield(obj.cfg.physics.doppler,'truth') && obj.cfg.physics.doppler.truth.enable;
-                doModel = isfield(obj.cfg,'physics') && isfield(obj.cfg.physics,'doppler') && ...
-                          isfield(obj.cfg.physics.doppler,'model') && obj.cfg.physics.doppler.model.enable;
-                useInEKF = obj.cfg.measurements.doppler.useInEKF;
-
-                if ~doTruth && mod(round(t_s), 300) == 0
-                    warning('MeasurementModel:dopplerNoTruth', ...
-                        ['Doppler enabled but physics.doppler.truth.enable=false. ' ...
-                         'Doppler z will be zeros. Enable physics.doppler.truth for realistic Doppler.']);
+            [dopplerRows, dopplerInfo] = revgnss.DopplerMeasurementBuilder.build( ...
+                obj.cfg, obj.errorChain, asset, towers, twr_list, ant_list, ...
+                r_ants_truth, r_ants_est, x_est, stateMap, towerClkMode, t_s);
+            errStruct.doppler = dopplerInfo;
+            if dopplerRows.ionoRateExclusion
+                H = H_pr;
+                return
+            end
+            if dopplerRows.useInEKF && ~isempty(dopplerRows.z)
+                z    = [z;    dopplerRows.z];
+                h    = [h;    dopplerRows.h];
+                H_pr = [H_pr; dopplerRows.H];
+                if size(R,1) == M
+                    R = blkdiag(R, dopplerRows.R);
+                else
+                    R = diag([diag(R); diag(dopplerRows.R)]);
                 end
-                if ~doModel && useInEKF
-                    error('MeasurementModel:dopplerNoModel', ...
-                        ['Doppler useInEKF=true requires physics.doppler.model.enable=true. ' ...
-                         'Cannot build h model without physics.doppler.model.enable.']);
-                end
-
-                % CHANGED: v3→v4 — Issue 2
-                % V1 LIMITATION: In ionoFreeCode mode, Doppler rows are not
-                % combined.  They are passed through only if the ionosphere model
-                % does not include rate terms (dot{TEC} = 0 in this simulation).
-                % Doppler DOES carry a frequency-dependent ionospheric rate term in
-                % reality (d/dt of first-order iono delay).  If iono-rate modeling
-                % is ever added, either implement a Doppler IF combination or disable
-                % Doppler in ionoFreeCode mode.
-                %
-                % Guard: if iono rate term is enabled, exclude Doppler rows (Issue 2)
-                ionoRateEnabled = isfield(obj.cfg,'errors') && ...
-                    isfield(obj.cfg.errors,'ionosphere') && ...
-                    isfield(obj.cfg.errors.ionosphere,'includeRateTerm') && ...
-                    obj.cfg.errors.ionosphere.includeRateTerm;
-                if ionoRateEnabled
-                    warning('revgnss:ionoFreeCode', ...
-                        ['ionosphere.includeRateTerm is enabled but no Doppler ' ...
-                         'IF combination model exists. ' ...
-                         'Doppler rows are excluded to avoid unmodelled dispersive bias.']);
-                    % Skip Doppler EKF rows this epoch
-                    errStruct.doppler = struct('z',[],'h',[],'prefit',[], ...
-                        'towerClockDriftTruth_mps',[],'towerClockDriftModel_mps',[]);
-                    H = H_pr;
-                    return
-                end
-
-                v_rx_true = asset.v_ecef_mps;
-                v_rx_est  = x_est(stateMap.v_idx);
-                bdot_rx_true = asset.clock.getDriftMetersPerSecond();
-                bdot_rx_est  = x_est(stateMap.bdot_rx_idx);
-                sigma_dop = obj.cfg.measurements.doppler.sigma_mps;
-
-                zd      = zeros(M,1);
-                hd      = zeros(M,1);
-                Hd      = zeros(M,nx);
-                % CHANGED: v3→v4 — Issue 10
-                % V1 SIMPLIFICATION: Doppler R is diagonal.
-                % Clock-drift product uncertainty (driftCorrSigma_m_per_s) is NOT
-                % included here.  This is acceptable when drift product errors are
-                % small compared to Doppler noise sigma, or when tower clocks are
-                % assumed stable.
-                % LIMITATION: If clock-drift corrections are active, add
-                %   cfg.errors.towerClock.driftCorrSigma_m_per_s
-                % as a shared term per tower or document that it remains unmodelled.
-                Rd_diag = sigma_dop^2 * ones(M,1);
-                towerClockDriftTruth_mps = zeros(M,1);
-                towerClockDriftModel_mps = zeros(M,1);
-
-                for mi = 1:M
-                    ti  = twr_list(mi);
-                    ai  = ant_list(mi);
-
-                    % 0.6: tower clock drift in Doppler
-                    bdot_twr = towers{ti}.getClockDriftMetersPerSecond();
-                    towerClockDriftTruth_mps(mi) = bdot_twr;
-                    if strcmp(towerClkMode, 'perfectCorrection')
-                        bdot_twr_model = bdot_twr;   % known drift → cancel in h
-                    else
-                        bdot_twr_model = 0;  % drift correction unavailable
-                    end
-                    towerClockDriftModel_mps(mi) = bdot_twr_model;
-
-                    r_twr_t = obj.getTowerPosition_(towers{ti}, ti, 'truth');
-                    delta_t = r_ants_truth(:,ai) - r_twr_t;
-                    rho_t   = norm(delta_t); if rho_t < 1; rho_t = 1; end
-                    u_t     = delta_t / rho_t;
-
-                    if doTruth
-                        rhoDot_true = u_t' * v_rx_true;
-                        zd(mi) = rhoDot_true + bdot_rx_true - bdot_twr + ...
-                                 sigma_dop * obj.errorChain.drawNormal(1,1);
-                    % else: zd(mi) = 0 (zero-filled, warned above)
-                    end
-
-                    r_twr_e = obj.getTowerPosition_(towers{ti}, ti, 'model');
-                    delta_e = r_ants_est(:,ai) - r_twr_e;
-                    rho_e   = norm(delta_e); if rho_e < 1; rho_e = 1; end
-                    u_e     = delta_e / rho_e;
-
-                    if doModel
-                        rhoDot_est = u_e' * v_rx_est;
-                        hd(mi) = rhoDot_est + bdot_rx_est - bdot_twr_model;
-                    end
-
-                    Hd(mi, stateMap.v_idx)       = u_e';
-                    Hd(mi, stateMap.bdot_rx_idx) = 1;
-                end
-
-                errStruct.doppler.z     = zd;
-                errStruct.doppler.h     = hd;
-                errStruct.doppler.prefit = zd - hd;
-                errStruct.doppler.towerClockDriftTruth_mps = towerClockDriftTruth_mps;
-                errStruct.doppler.towerClockDriftModel_mps = towerClockDriftModel_mps;
-
-                if useInEKF
-                    % CHANGED: v3→v4 — Issue 11
-                    % LIMITATION: Cross-covariance between pseudorange and Doppler rows
-                    % arising from a shared tower-clock product error is ignored in v1.
-                    % The off-diagonal blocks of R between pseudorange and Doppler are
-                    % set to zero.  This is valid only when clock product errors are
-                    % small relative to independent noise terms, or when clock states
-                    % are estimated in the EKF (absorbing the correlation).
-                    z    = [z;    zd];
-                    h    = [h;    hd];
-                    H_pr = [H_pr; Hd];
-                    % Append diagonal Doppler variances to whatever R shape was built
-                    if size(R,1) == M
-                        R = blkdiag(R, diag(Rd_diag));
-                    else
-                        R = diag([diag(R); Rd_diag]);
-                    end
-                end
-            else
-                errStruct.doppler = struct();
             end
 
             H = H_pr;
@@ -941,8 +821,9 @@ classdef MeasurementModel < handle
                 % Build measType_perRow before passing so diagnostics see row types
                 M_rows_obs = size(H, 1);
                 M_dop_obs  = 0;
-                if doCfg && isfield(errStruct,'doppler') && isstruct(errStruct.doppler) && ...
+                if isfield(errStruct,'doppler') && isstruct(errStruct.doppler) && ...
                         isfield(errStruct.doppler,'z') && ~isempty(errStruct.doppler.z) && ...
+                        isfield(obj.cfg,'measurements') && isfield(obj.cfg.measurements,'doppler') && ...
                         obj.cfg.measurements.doppler.useInEKF
                     M_dop_obs = numel(errStruct.doppler.z);
                 end
@@ -972,8 +853,9 @@ classdef MeasurementModel < handle
             % ----- Measurement type metadata per EKF row ---------------
             M_rows     = size(H, 1);
             M_dop_rows = 0;
-            if doCfg && isfield(errStruct,'doppler') && isstruct(errStruct.doppler) && ...
+            if isfield(errStruct,'doppler') && isstruct(errStruct.doppler) && ...
                     isfield(errStruct.doppler,'z') && ~isempty(errStruct.doppler.z) && ...
+                    isfield(obj.cfg,'measurements') && isfield(obj.cfg.measurements,'doppler') && ...
                     obj.cfg.measurements.doppler.useInEKF
                 M_dop_rows = numel(errStruct.doppler.z);
             end
@@ -1445,31 +1327,7 @@ classdef MeasurementModel < handle
 
         % ----------------------------------------------------------------
         function r_twr = getTowerPosition_(obj, tower, towerIdx, side)
-            % getTowerPosition_  Tower antenna position for truth or model side.
-            %
-            % Stage 2: if cfg.effects.towerSurvey.(side).enable, adds the
-            % survey ENU error stored in cfg.towers(towerIdx).surveyError_ENU_m.
-            % Does NOT mutate tower.r_ecef_m — computes on-the-fly.
-
-            r_nom = tower.getAntennaPositionECEF();
-
-            if ~isfield(obj.cfg,'effects') || ~isfield(obj.cfg.effects,'towerSurvey')
-                r_twr = r_nom; return;
-            end
-            ts = obj.cfg.effects.towerSurvey;
-            if ~isfield(ts, side) || ~ts.(side).enable
-                r_twr = r_nom; return;
-            end
-
-            % Survey error (generated once in finalizeConfig, same for truth+model)
-            if towerIdx <= numel(obj.cfg.towers) && ...
-                    isfield(obj.cfg.towers(towerIdx),'surveyError_ENU_m')
-                enu_err = obj.cfg.towers(towerIdx).surveyError_ENU_m;
-                r_twr = r_nom + revgnss.GeometryUtils.enu2ecef_vector( ...
-                    tower.lat_rad, tower.lon_rad, enu_err);
-            else
-                r_twr = r_nom;
-            end
+            r_twr = revgnss.MeasurementModel.towerPositionEcef(obj.cfg, tower, towerIdx, side);
         end
 
         % ----------------------------------------------------------------
@@ -1958,6 +1816,28 @@ classdef MeasurementModel < handle
                         strcmp(cfg.effects.lightTime.model,'iterative')
                     need = true; return;
                 end
+            end
+        end
+
+        function r_twr = towerPositionEcef(cfg, tower, towerIdx, side)
+            % towerPositionEcef  Tower ECEF with optional survey offset.
+            %
+            % Public static for use by external measurement builders (e.g. DopplerMeasurementBuilder).
+            % Logic identical to private getTowerPosition_ instance method.
+            r_nom = tower.getAntennaPositionECEF();
+            if ~isfield(cfg,'effects') || ~isfield(cfg.effects,'towerSurvey')
+                r_twr = r_nom; return;
+            end
+            ts = cfg.effects.towerSurvey;
+            if ~isfield(ts, side) || ~ts.(side).enable
+                r_twr = r_nom; return;
+            end
+            if towerIdx <= numel(cfg.towers) && isfield(cfg.towers(towerIdx),'surveyError_ENU_m')
+                enu_err = cfg.towers(towerIdx).surveyError_ENU_m;
+                r_twr = r_nom + revgnss.GeometryUtils.enu2ecef_vector( ...
+                    tower.lat_rad, tower.lon_rad, enu_err);
+            else
+                r_twr = r_nom;
             end
         end
 
