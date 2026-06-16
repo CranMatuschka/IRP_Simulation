@@ -1417,6 +1417,23 @@ classdef ConfigFactory
                     cfg.validation.disabledFeatures{end+1} = 'carrierCombinationMode.ionosphereFree';
                     warning('ConfigFactory:carrierIFDisabled', '%s', warnMsg4E);
                 end
+
+                nRx4F = 1;
+                if isfield(cfg,'scenario') && isfield(cfg.scenario,'nReceivers')
+                    nRx4F = cfg.scenario.nReceivers;
+                end
+                ambMode4F = '';
+                if isfield(cfg,'estimation') && isfield(cfg.estimation,'ambiguityMode')
+                    ambMode4F = cfg.estimation.ambiguityMode;
+                end
+                if nRx4F > 1 && strcmp(ambMode4F,'floatPerTowerSignal')
+                    error('ConfigFactory:carrierAmbiguityReceiverIndexRequired', ...
+                        ['carrierMode=''ekfFloat'' with multiple receiver phase centres ' ...
+                         'is scientifically invalid in v1 because ambiguity states are ' ...
+                         'indexed per tower/signal, while carrier rows are per tower/receiver. ' ...
+                         'Use one receiver, carrierMode=''diagnostic'', or implement ' ...
+                         'tower-receiver-signal ambiguity indexing.']);
+                end
             end
 
             % ---- Unsupported: Doppler EKF dependency ---------------------

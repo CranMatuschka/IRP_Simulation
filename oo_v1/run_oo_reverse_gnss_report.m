@@ -118,23 +118,23 @@ cfg.measurements.doppler.useInEKF     = true;
 cfg.physics.doppler.truth.enable      = true;
 cfg.physics.doppler.model.enable      = true;
 
-% --- Carrier phase (float ambiguity EKF) ------------------------
+% --- Carrier phase (diagnostic only for multi-receiver report) ---
 cfg.measurements.carrierPhase.enable    = true;
-cfg.measurements.carrierMode            = 'ekfFloat';
-cfg.estimation.ambiguityMode            = 'floatPerTowerSignal';
+cfg.measurements.carrierMode            = 'diagnostic';
+cfg.estimation.ambiguityMode            = 'none';
 
 % --- Carrier slip detection -------------------------------------
-cfg.measurements.carrier.slipDetection.enable                = true;
+cfg.measurements.carrier.slipDetection.enable                = false;
 cfg.measurements.carrier.slipDetection.threshold_m           = 0.1;
 cfg.measurements.carrier.slipDetection.minEpochsBeforeDetect = 3;
 cfg.measurements.carrier.slipDetection.resetSigma_m          = 100;
 cfg.measurements.carrier.slipDetection.action                = 'resetAndSkip';
 
 % --- Troposphere ZWD EKF state ----------------------------------
-% Per-tower zenith wet delay estimated as Gauss-Markov state.
-% Not compatible with: none (observation already without model residual).
-% Compatible with: ekfFloat, code-only, IF-code, Doppler.
-cfg.estimation.troposphereMode         = 'perTowerZwd';
+% Disabled in the default multi-receiver report.  Stage 15 ZWD states are
+% diagnostic/validation tools here and can be weakly observable in this GEO
+% geometry; keep the report configuration scientifically bounded.
+cfg.estimation.troposphereMode         = 'none';
 cfg.estimation.tropoZwd.initialSigma_m = 0.3;
 cfg.estimation.tropoZwd.sigma_ss_m     = 0.05;
 cfg.estimation.tropoZwd.tau_s          = 3600;

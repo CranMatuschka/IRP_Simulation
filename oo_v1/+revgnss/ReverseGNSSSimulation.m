@@ -144,6 +144,7 @@ classdef ReverseGNSSSimulation < handle
                     if numel(fullMask) == numel(z)
                         z = z(fullMask); h = h(fullMask);
                         H = H(fullMask,:); R = R(fullMask, fullMask);
+                        errStruct = obj.filterCarrierErrStruct_(errStruct, keepMask);
                     end
                 end
                 resetSig = [];
@@ -386,6 +387,31 @@ classdef ReverseGNSSSimulation < handle
             else
                 postfit = z(1:M_pr) - h_post_pr;
             end
+        end
+
+        % ----------------------------------------------------------------
+        function errStruct = filterCarrierErrStruct_(~, errStruct, keepMask)
+            if ~isfield(errStruct,'carrierPhase') || ~isstruct(errStruct.carrierPhase)
+                return
+            end
+            cp = errStruct.carrierPhase;
+            fields = fieldnames(cp);
+            for fi = 1:numel(fields)
+                f = fields{fi};
+                v = cp.(f);
+                if isnumeric(v) || islogical(v)
+                    if isvector(v) && numel(v) == numel(keepMask)
+                        cp.(f) = v(keepMask);
+                    elseif size(v,1) == numel(keepMask)
+                        cp.(f) = v(keepMask,:);
+                    elseif size(v,2) == numel(keepMask)
+                        cp.(f) = v(:,keepMask);
+                    end
+                elseif iscell(v) && numel(v) == numel(keepMask)
+                    cp.(f) = v(keepMask);
+                end
+            end
+            errStruct.carrierPhase = cp;
         end
     end
 end

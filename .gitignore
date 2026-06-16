@@ -2,6 +2,7 @@ reports/
 Backup/
 *.asv
 *.ASV
+*.mat
 data/atmosphere/
 
 # macOS metadata
@@ -14,4 +15,5 @@ oo_v1/output/*.pdf
 !oo_v1/output/reverse_gnss_simple_report.pdf
 !oo_v1/output/effect_contribution_validation_report.pdf
 oo_v1/output/Report-*
+
 
