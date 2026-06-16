@@ -99,6 +99,15 @@ classdef CodeJacobianBuilder
                         stateMap.txCodeBiasIdx(ti) > 0
                     H(mi, stateMap.txCodeBiasIdx(ti)) = 1;
                 end
+
+                % ZWD Jacobian: H(mi, zwdIdx) = mapping_factor (same sign as code)
+                if isfield(stateMap,'zwdIdx') && ...
+                        ti <= numel(stateMap.zwdIdx) && stateMap.zwdIdx(ti) > 0
+                    elv_z = revgnss.GeometryUtils.elevationAngle(r_twr_diag, r_ant_diag);
+                    mf_z  = revgnss.MappingFunctions.troposphere(elv_z, ...
+                        revgnss.MeasurementModelUtils.zwdMappingKind(cfg));
+                    H(mi, stateMap.zwdIdx(ti)) = mf_z;
+                end
             end
         end
 

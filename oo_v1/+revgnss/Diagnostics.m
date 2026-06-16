@@ -433,6 +433,21 @@ classdef Diagnostics < handle
                 end
             end
 
+            % --- ZWD state estimates (Stage 15) ----------------------------
+            entry.zwdEstimated = false;
+            entry.nZwdStates   = 0;
+            entry.zwdEst_m     = [];
+            if ~isempty(ekf) && isprop(ekf,'estimateZwd') && ekf.estimateZwd
+                entry.zwdEstimated = true;
+                entry.nZwdStates   = ekf.nZwdStates;
+                if isfield(sm,'zwdIdx')
+                    active = sm.zwdIdx(sm.zwdIdx > 0);
+                    if ~isempty(active)
+                        entry.zwdEst_m = x(active);
+                    end
+                end
+            end
+
             % --- Windowed clock observability Gramian ----------------------
             % Build a sliding epoch buffer (physical H + gauge H restricted to
             % clock columns) and compute the weighted observability Gramian.
@@ -1174,6 +1189,35 @@ classdef Diagnostics < handle
             % getCarrierSlipTotalJump  Sum of jump magnitudes per epoch [m].
             if isempty(obj.log); v = []; return; end
             v = [obj.log.carrierSlipTotalJump_m]';
+        end
+
+        function v = isZwdEstimated(obj)
+            % isZwdEstimated  True when any epoch logged a ZWD state.
+            if isempty(obj.log); v = false; return; end
+            v = any([obj.log.zwdEstimated]);
+        end
+
+        function v = getZwdEstimates(obj)
+            % getZwdEstimates  Per-epoch ZWD estimates [epochs × nTowers] or empty.
+            if isempty(obj.log); v = []; return; end
+            all_v = {obj.log.zwdEst_m};
+            nonempty = find(~cellfun(@isempty, all_v), 1);
+            if isempty(nonempty); v = []; return; end
+            n = numel(all_v{nonempty});
+            v = zeros(numel(all_v), n);
+            for k = 1:numel(all_v)
+                if ~isempty(all_v{k}) && numel(all_v{k}) == n
+                    v(k,:) = all_v{k}';
+                end
+            end
+        end
+
+        function v = getZwdEstimateRms(obj)
+            % getZwdEstimateRms  Per-tower RMS of ZWD estimates [m].
+            v = [];
+            zwd = obj.getZwdEstimates();
+            if isempty(zwd); return; end
+            v = sqrt(mean(zwd.^2, 1))';
         end
 
     end

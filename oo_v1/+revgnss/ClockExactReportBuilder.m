@@ -451,6 +451,7 @@ classdef ClockExactReportBuilder
             CE.writeBiasArchitecture_(fid, cfg);
             CE.writeSignalIonosphereArchitecture_(fid, cfg);
             CE.writeCarrierTrackRobustness_(fid, cfg);
+            CE.writeTroposphereArchitecture_(fid, cfg, diag);
             CE.writeDisabledComponents_(fid, cfg);
             CE.writeNumericalSummary_(fid, cfg, summary, diag);
 
@@ -591,15 +592,21 @@ classdef ClockExactReportBuilder
             idx = 15;
             if doTwrClk
                 for k = 1:nTwr
-                    fprintf(fid, '%d & \\delta b_{twr,%d} & Tower %d clock bias (NEGATIVE sign in meas.) & m & Estimated tower bias\\\\\n', idx, k, k);
+                    fprintf(fid, '%d & $\\delta b_{\\mathrm{twr},%d}$ & Tower %d clock bias (NEGATIVE sign in meas.) & m & Estimated tower bias\\\\\n', idx, k, k);
                     idx = idx+1;
-                    fprintf(fid, '%d & \\delta\\dot{b}_{twr,%d} & Tower %d clock drift & m/s & Estimated tower drift\\\\\n', idx, k, k);
+                    fprintf(fid, '%d & $\\delta\\dot{b}_{\\mathrm{twr},%d}$ & Tower %d clock drift & m/s & Estimated tower drift\\\\\n', idx, k, k);
                     idx = idx+1;
                 end
             end
             if doAmb
                 for k = 1:nTwr
-                    fprintf(fid, '%d & B_{\\phi,twr%d} & L1 carrier float ambiguity, tower %d & m & Random-walk; no integer fixing\\\\\n', idx, k, k);
+                    fprintf(fid, '%d & $B_{\\phi,\\mathrm{twr}%d}$ & L1 carrier float ambiguity, tower %d & m & Random-walk; no integer fixing\\\\\n', idx, k, k);
+                    idx = idx+1;
+                end
+            end
+            if doZwd
+                for k = 1:nTwr
+                    fprintf(fid, '%d & $\\mathrm{ZWD}_{\\mathrm{twr}%d}$ & Zenith wet delay, tower %d & m & Gauss-Markov; mapped by $m_w(\\mathrm{el})$\\\\\n', idx, k, k);
                     idx = idx+1; %#ok<NASGU>
                 end
             end
@@ -964,7 +971,7 @@ classdef ClockExactReportBuilder
                         '$\\sigma_{\\rm drift}=%g$\\,m/s). ' ...
                         'This spreads the datum symmetrically across all towers.'], sigB, sigD);
                 case 'externalTowerCorrections'
-                    gaugeStr = ['\\texttt{externalTowerCorrections}. ' ...
+                    gaugeStr = ['\texttt{externalTowerCorrections}. ' ...
                         'Tower clock biases are provided externally (perfect truth subtracted); ' ...
                         'no gauge pseudo-measurements are added to the EKF. ' ...
                         'The clock nullspace is resolved by assumption, not by constraint.'];
@@ -1276,6 +1283,79 @@ classdef ClockExactReportBuilder
                     'Ambiguity covariance P(amb,amb) reset to resetSigma\_m\^{}2. State value kept.');
                 CE.writeRow_(fid, 'Slip action', act, ...
                     'resetAndSkip: remove carrier row this epoch, reset P. resetAndUse: keep row, rely on inflated P.');
+            end
+
+            fprintf(fid, CE.plotTableFooter_());
+        end
+
+        function writeTroposphereArchitecture_(fid, cfg, diag)
+            CE = revgnss.ClockExactReportBuilder;
+            fprintf(fid, '\\section{Troposphere and ZWD Architecture}\n');
+            fprintf(fid, CE.plotTableHeader_());
+
+            % Get status from TroposphereModel helper
+            stateMap = struct();
+            try
+                if ~isempty(diag) && isobject(diag)
+                    stateMap = struct('zwdIdx', zeros(5,1));
+                end
+            catch; end
+            tropoStatus = revgnss.TroposphereModel.describe(cfg, stateMap);
+            [pSig, tauS, initSig] = revgnss.TroposphereModel.zwdProcessParams(cfg);
+
+            % Scientific background row
+            CE.writeRow_(fid, 'Troposphere background', ...
+                'Non-dispersive delay', ...
+                ['Tropospheric delay is non-dispersive: same sign on code and carrier. ' ...
+                 'Dual-frequency IF combinations do NOT remove troposphere. ' ...
+                 'ZWD state estimates residual wet delay at zenith mapped by elevation function.']);
+
+            CE.writeRow_(fid, 'Truth enabled', ...
+                CE.bool2str13_(tropoStatus.truthEnabled), ...
+                'cfg.errors.troposphere.truth.enable');
+            CE.writeRow_(fid, 'Model enabled', ...
+                CE.bool2str13_(tropoStatus.modelEnabled), ...
+                'cfg.errors.troposphere.model.enable');
+            CE.writeRow_(fid, 'ZWD EKF state', ...
+                CE.bool2str13_(tropoStatus.zwdEstimated), ...
+                'cfg.estimation.troposphereMode = ''perTowerZwd'' enables per-tower zenith wet delay states.');
+            CE.writeRow_(fid, 'Mode', tropoStatus.mode, tropoStatus.note);
+
+            if tropoStatus.zwdEstimated
+                CE.writeRow_(fid, 'Number of ZWD states', ...
+                    sprintf('%d', tropoStatus.nZwdStates), ...
+                    'One ZWD state per visible tower; Gauss-Markov first-order process.');
+                CE.writeRow_(fid, 'Mapping function', tropoStatus.mappingKind, ...
+                    'Applied to slant range: h\_code += m\_w(el) * ZWD\_state');
+                CE.writeRow_(fid, 'Initial sigma', sprintf('%.3f m', initSig), ...
+                    'P(zwd,zwd) at t=0. cfg.estimation.tropoZwd.initialSigma\_m');
+                CE.writeRow_(fid, 'Steady-state sigma', sprintf('%.4f m', pSig), ...
+                    'Gauss-Markov steady-state sigma. cfg.estimation.tropoZwd.sigma\_ss\_m');
+                CE.writeRow_(fid, 'Correlation time', sprintf('%.0f s', tauS), ...
+                    'Gauss-Markov tau. cfg.estimation.tropoZwd.tau\_s');
+                CE.writeRow_(fid, 'Applied to code', 'Yes', ...
+                    'H(code,zwdIdx) = m\_w(el). CodeJacobianBuilder and CodeMeasurementBuilder.');
+                CE.writeRow_(fid, 'Applied to carrier', 'Yes', ...
+                    'Carrier troposphere same sign as code. CarrierMeasurementBuilder.');
+                CE.writeRow_(fid, 'Applied to Doppler', 'No', ...
+                    'No troposphere-rate model. Static ZWD not applied to Doppler (v1).');
+                % ZWD estimate RMS from diagnostics
+                zwdRms = CE.safeDiagRMS_(@() diag.getZwdEstimateRms());
+                if ~isnan(zwdRms) && zwdRms > 0
+                    CE.writeRow_(fid, 'ZWD estimate RMS', ...
+                        sprintf('%.4f m', zwdRms), ...
+                        'Mean per-tower ZWD state RMS over all epochs (wet zenith delay estimate).');
+                else
+                    CE.writeRow_(fid, 'ZWD estimate RMS', 'not available', ...
+                        'Diagnostics not recorded or ZWD estimates all zero.');
+                end
+            else
+                CE.writeRow_(fid, 'ZWD state', 'Not estimated', ...
+                    ['No ZWD state is estimated. Troposphere is either disabled, ' ...
+                     'fixed by model, or residual is absorbed into range/clock error.']);
+                CE.writeRow_(fid, 'Applied to code', ...
+                    CE.bool2str13_(tropoStatus.truthEnabled || tropoStatus.modelEnabled), ...
+                    'Troposphere truth/model correction applied in error chain.');
             end
 
             fprintf(fid, CE.plotTableFooter_());

@@ -130,6 +130,15 @@ cfg.measurements.carrier.slipDetection.minEpochsBeforeDetect = 3;
 cfg.measurements.carrier.slipDetection.resetSigma_m          = 100;
 cfg.measurements.carrier.slipDetection.action                = 'resetAndSkip';
 
+% --- Troposphere ZWD EKF state ----------------------------------
+% Per-tower zenith wet delay estimated as Gauss-Markov state.
+% Not compatible with: none (observation already without model residual).
+% Compatible with: ekfFloat, code-only, IF-code, Doppler.
+cfg.estimation.troposphereMode         = 'perTowerZwd';
+cfg.estimation.tropoZwd.initialSigma_m = 0.3;
+cfg.estimation.tropoZwd.sigma_ss_m     = 0.05;
+cfg.estimation.tropoZwd.tau_s          = 3600;
+
 % --- Validation policy ------------------------------------------
 % 'disableWithWarning'  ->  unsupported features disabled with console warning
 % 'error'              ->  any unsupported feature throws an error
