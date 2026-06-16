@@ -1,0 +1,9 @@
+case,features,finalPositionError_m,finalClockError_m,postfitRms_m,maxNIS,medianPDOP,medianGDOP,zwdRms_m,ambiguityRms_m,classification,flags
+case_01_baseline_code_only,"code,L1,oneReceiver",5.78895008,5.76520949,0.227815139,25.2800091,322.801459,455.055957,NaN,NaN,WARN,"WEAK_GEOMETRY_HIGH_PDOP"
+case_02_code_plus_doppler,"code,doppler,L1,oneReceiver",15.4628604,15.3242747,0.202240445,26.0059199,322.801215,455.055612,NaN,NaN,WARN,"WEAK_GEOMETRY_HIGH_PDOP"
+case_03_code_doppler_three_receivers,"code,doppler,L1,threeReceivers",1.99934752,1.98438722,0.306516947,63.1576453,186.369491,262.726655,NaN,NaN,WARN,"WEAK_GEOMETRY_HIGH_PDOP"
+case_04_carrier_diagnostic_three_receivers,"code,doppler,carrierDiagnostic,L1,threeReceivers",8.37680048,8.33100359,0.267270588,59.506955,186.369265,262.726334,NaN,NaN,WARN,"WEAK_GEOMETRY_HIGH_PDOP"
+case_05_carrier_ekf_one_receiver,"code,doppler,carrierEkfFloat,slipDetection,L1,oneReceiver",17.1413411,17.0389087,0.28315302,37.5975125,322.801494,455.056007,NaN,103.159745,WARN,"WEAK_GEOMETRY_HIGH_PDOP"
+case_06_carrier_ekf_three_receivers,"code,doppler,carrierEkfFloat,slipDetection,L1,threeReceivers",258.252128,256.609309,0.302803212,4.91276452e+09,186.371772,262.729881,NaN,61.8367623,INVALID_CONFIG,"scientifically invalid config"
+case_07_zwd_code_doppler_three_receivers,"code,doppler,perTowerZwd,L1,threeReceivers",101.895676,101.232771,0.30632114,63.1633349,186.36849,262.725237,0.0384221367,NaN,WARN,"WEAK_GEOMETRY_HIGH_PDOP"
+case_08_full_supported_report_smoke,"code,doppler,carrierEkfFloat,perTowerZwd,L1L2,threeReceivers",13793.5706,13631.4745,0.706330363,3.60848809e+09,195.013061,274.91107,28.0203944,27.747758,INVALID_CONFIG,"scientifically invalid config"
