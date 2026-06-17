@@ -838,6 +838,18 @@ classdef Diagnostics < handle
             entry.estimatedPositionSigma_m   = sqrt(sum(Pdiag(sm.r_idx)));
             entry.estimatedAttitudeSigma_rad = sqrt(sum(Pdiag(sm.euler_idx)));
 
+            % --- Stage 15: differential carrier attitude rows (optional) ---
+            if isfield(errStruct,'diffAttRows') && isstruct(errStruct.diffAttRows)
+                da = errStruct.diffAttRows;
+                entry.diffAttNRows    = da.nRows;
+                entry.diffAttResidRMS = da.residualRMS_m;
+                entry.diffAttActive   = da.active;
+            else
+                entry.diffAttNRows    = 0;
+                entry.diffAttResidRMS = NaN;
+                entry.diffAttActive   = false;
+            end
+
             % --- Append to log ----------------------------------------
             obj.nEpochs = obj.nEpochs + 1;
             if obj.nEpochs == 1

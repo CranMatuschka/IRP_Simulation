@@ -392,18 +392,47 @@ classdef ReportRunner
                 end
                 summary.attitudeObsClass = cls2;
 
-                % Attitude-ambiguity separability from diag logs (Stage 14.9)
+                % Stage 14.9: separability metrics (always logged)
                 try
                     sepVec  = logical([diag.log.attitudeSeparable]);
                     corrVec = double([diag.log.attitudeAmbCorrMaxAbs]);
                     summary.attitudeSeparable     = any(sepVec);
                     summary.attitudeAmbCorrMaxAbs = mean(corrVec(isfinite(corrVec)), 'omitnan');
-                    if strcmp(cls2,'NON_CONVERGENT') && ~summary.attitudeSeparable
-                        summary.attitudeObsClass = 'AMBIGUITY_ABSORBED';
-                    end
                 catch
                     summary.attitudeSeparable     = false;
                     summary.attitudeAmbCorrMaxAbs = NaN;
+                end
+
+                % Stage 15: differential carrier attitude classification
+                attMode15 = '';
+                if isfield(cfg,'estimator') && isfield(cfg.estimator,'attitudeCarrierMode')
+                    attMode15 = cfg.estimator.attitudeCarrierMode;
+                end
+                summary.attitudeCarrierMode = attMode15;
+                if strcmp(attMode15,'calibratedDifferentialAmbiguity')
+                    try
+                        daActive = logical([diag.log.diffAttActive]);
+                        summary.diffAttCalibrated = any(daActive);
+                        nVec = double([diag.log.diffAttNRows]);
+                        summary.diffAttMeanNRows  = mean(nVec(nVec>0), 'omitnan');
+                        rVec = double([diag.log.diffAttResidRMS]);
+                        summary.diffAttResidRMS_m = mean(rVec(isfinite(rVec) & daActive), 'omitnan');
+                    catch
+                        summary.diffAttCalibrated = false;
+                        summary.diffAttMeanNRows  = 0;
+                        summary.diffAttResidRMS_m = NaN;
+                    end
+                    if ~summary.diffAttCalibrated
+                        summary.attitudeObsClass = 'CALIBRATION_FAILED';
+                    end
+                    % Do not override with AMBIGUITY_ABSORBED — differential mode breaks absorption
+                else
+                    summary.diffAttCalibrated = false;
+                    summary.diffAttMeanNRows  = 0;
+                    summary.diffAttResidRMS_m = NaN;
+                    if strcmp(cls2,'NON_CONVERGENT') && ~summary.attitudeSeparable
+                        summary.attitudeObsClass = 'AMBIGUITY_ABSORBED';
+                    end
                 end
             catch
                 summary.attitudeObsClass = 'UNKNOWN';
@@ -417,6 +446,10 @@ classdef ReportRunner
                 summary.carrierAttJacActive        = false;
                 summary.attitudeSeparable          = false;
                 summary.attitudeAmbCorrMaxAbs      = NaN;
+                summary.attitudeCarrierMode        = 'off';
+                summary.diffAttCalibrated          = false;
+                summary.diffAttMeanNRows           = 0;
+                summary.diffAttResidRMS_m          = NaN;
             end
 
             % Observables

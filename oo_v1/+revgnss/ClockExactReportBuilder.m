@@ -1509,6 +1509,7 @@ classdef ClockExactReportBuilder
                 case 'BOUNDED_WEAK_GEOMETRY';  clsStr = '\textcolor{orange!70!black}{BOUNDED\_WEAK\_GEOMETRY}';
                 case 'NON_CONVERGENT';         clsStr = '\textcolor{red!70!black}{NON\_CONVERGENT}';
                 case 'AMBIGUITY_ABSORBED';     clsStr = '\textcolor{red!80!black}{AMBIGUITY\_ABSORBED}';
+                case 'CALIBRATION_FAILED';     clsStr = '\textcolor{red!80!black}{CALIBRATION\_FAILED}';
                 case 'WEAKLY_OBSERVABLE';      clsStr = '\textcolor{orange!80!black}{WEAKLY\_OBSERVABLE}';
                 case 'UNOBSERVABLE';           clsStr = '\textcolor{gray}{UNOBSERVABLE}';
                 case 'INVALID_CONFIG';         clsStr = '\textcolor{red!80!black}{INVALID\_CONFIG}';
@@ -1609,6 +1610,54 @@ classdef ClockExactReportBuilder
                 case 'SKIPPED'
                     fprintf(fid, ['\\textit{Known-ambiguity validation not run. ' ...
                         'Enable via cfg.estimator.runKnownAmbiguityValidation = true.}\n\n']);
+            end
+
+            % --- Stage 15: Carrier Differential Attitude Calibration ---
+            daMode  = sf(summary,'attitudeCarrierMode', 'off');
+            daCal   = sf(summary,'diffAttCalibrated',   false);
+            daNRows = sf(summary,'diffAttMeanNRows',    0);
+            daResid = sf(summary,'diffAttResidRMS_m',   NaN);
+            fprintf(fid, '\\subsection*{Carrier Differential Attitude Calibration (Stage~15)}\n');
+            switch daMode
+                case 'calibratedDifferentialAmbiguity'
+                    if daCal
+                        fprintf(fid, ['\\textbf{Mode:} \\textcolor{green!45!black}{CALIBRATED} ' ...
+                            '--- baseline-differenced carrier with calibrated differential ambiguities.\\par\n']);
+                        fprintf(fid, 'Mean differential rows/epoch: %.0f\\quad{}', daNRows);
+                        if ~isnan(daResid)
+                            fprintf(fid, 'Residual RMS: %.5f\\,m\n\n', daResid);
+                        else
+                            fprintf(fid, '\n\n');
+                        end
+                        switch attCls
+                            case {'CONVERGED','BOUNDED_WEAK_GEOMETRY'}
+                                fprintf(fid, ['\\textbf{Assessment:} Attitude is ' ...
+                                    '\\textit{operationally estimated} using calibrated differential ' ...
+                                    'carrier ambiguities. Calibration absorbs the initial attitude ' ...
+                                    'reference; changes relative to calibration epoch are tracked at ' ...
+                                    'carrier-phase precision.\n\n']);
+                            otherwise
+                                fprintf(fid, ['\\textbf{Assessment:} Differential calibration active ' ...
+                                    'but attitude improvement bounded by calibration-period reference ' ...
+                                    'error. Consider longer pre-calibration convergence or KAV seeding.\n\n']);
+                        end
+                    else
+                        fprintf(fid, ['\\textbf{Mode:} \\textcolor{red!70!black}{CALIBRATION\\_FAILED} ' ...
+                            '--- insufficient valid baselines accumulated during calibration window.\n\n']);
+                        fprintf(fid, ['\\textbf{Assessment:} Attitude signal is absorbed by free float ' ...
+                            'ambiguities (AMBIGUITY\\_ABSORBED). Verify nReceivers$\\geq 2$, nonzero ' ...
+                            'lever arms, and stable carrier tracks during calibration window.\n\n']);
+                    end
+                case 'validationKnownAmbiguity'
+                    fprintf(fid, ['\\textbf{Mode:} \\textcolor{orange!70!black}{VALIDATION ONLY} ' ...
+                        '--- known-ambiguity validation (not operational).\n\n']);
+                    fprintf(fid, ['\\textbf{Assessment:} Attitude is constrained via truth ambiguities. ' ...
+                        'For operational use, select calibratedDifferentialAmbiguity mode.\n\n']);
+                otherwise
+                    fprintf(fid, ['\\textbf{Mode:} OFF --- free float ambiguities absorb attitude signal. ' ...
+                        'Enable calibratedDifferentialAmbiguity for operational attitude tracking.\n\n']);
+                    fprintf(fid, ['\\textbf{Assessment:} Attitude is \\textit{absorbed by free float ' ...
+                        'ambiguities} (see Stage~14.9 above). Not operationally estimated.\n\n']);
             end
         end
 

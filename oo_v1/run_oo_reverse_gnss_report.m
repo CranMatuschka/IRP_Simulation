@@ -148,6 +148,13 @@ cfg.estimation.tropoZwd.tau_s          = 3600;
 % Shows whether attitude converges when truth ambiguities are known.
 cfg.estimator.runKnownAmbiguityValidation = true;
 
+% --- Calibrated differential carrier attitude (Stage 15) --------
+% Operational: baseline-differenced carrier with calibrated ambiguity bias.
+% Requires carrierMode=ekfFloat + nReceivers>=2.
+% Calibration absorbs the attitude reference at t < calibWin_s.
+cfg.estimator.attitudeCarrierMode    = 'calibratedDifferentialAmbiguity';
+cfg.estimator.diffAtt.calibWin_s     = 60;
+
 % --- Validation policy ------------------------------------------
 % 'disableWithWarning'  ->  unsupported features disabled with console warning
 % 'error'              ->  any unsupported feature throws an error

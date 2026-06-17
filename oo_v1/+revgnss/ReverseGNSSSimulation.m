@@ -30,6 +30,7 @@ classdef ReverseGNSSSimulation < handle
         isInit      (1,1) logical = false
 
         trackMgr    revgnss.CarrierTrackManager
+        diffAttStore                  = struct()   % Stage 15: differential attitude calibration state
     end
 
     methods
@@ -57,6 +58,18 @@ classdef ReverseGNSSSimulation < handle
 
             obj.diag     = revgnss.Diagnostics(obj.cfg);
             obj.trackMgr = revgnss.CarrierTrackManager();
+
+            % Stage 15: differential carrier attitude calibration store
+            attMode15 = '';
+            if isfield(obj.cfg,'estimator') && isfield(obj.cfg.estimator,'attitudeCarrierMode')
+                attMode15 = obj.cfg.estimator.attitudeCarrierMode;
+            end
+            if strcmp(attMode15,'calibratedDifferentialAmbiguity')
+                obj.diffAttStore = revgnss.DiffAttitudeBuilder.init(obj.cfg, obj.nTowers);
+            else
+                obj.diffAttStore = struct('calibrated',false,'nBaselines',0,'nValidBaselines',0);
+            end
+
             obj.isInit   = true;
 
             nRx = size(obj.asset.receiverLeverArms_body_m, 2);
@@ -190,6 +203,39 @@ classdef ReverseGNSSSimulation < handle
             elseif ~isempty(z) && numel(z) < minMeas && mod(k, 100) == 1
                 fprintf('  [t=%.0f s] EKF update skipped: %d measurements < %d minimum\n', ...
                     t_s, numel(z), minMeas);
+            end
+
+            % Stage 15: differential carrier attitude update (separate sequential update).
+            % Calibration phase: accumulate delta_phi - model_diff for each baseline.
+            % Post-calibration: build attitude-only EKF rows (H non-zero only in euler columns)
+            % and apply a second update.  Sequential updates are mathematically valid.
+            errStruct.diffAttRows = struct('nRows',0,'residualRMS_m',NaN,'active',false);
+            attMode15 = '';
+            if isfield(obj.cfg,'estimator') && isfield(obj.cfg.estimator,'attitudeCarrierMode')
+                attMode15 = obj.cfg.estimator.attitudeCarrierMode;
+            end
+            if strcmp(attMode15,'calibratedDifferentialAmbiguity') && ...
+                    isfield(errStruct,'carrierPhase') && isstruct(errStruct.carrierPhase) && ...
+                    isfield(errStruct.carrierPhase,'phi_m') && ~isempty(errStruct.carrierPhase.phi_m)
+                cpDA    = errStruct.carrierPhase;
+                lArms15 = obj.cfg.asset.receiverLeverArms_body_m;
+                if ~obj.diffAttStore.calibrated && t_s < obj.diffAttStore.calibWin_s
+                    obj.diffAttStore = revgnss.DiffAttitudeBuilder.accumulate( ...
+                        obj.diffAttStore, cpDA, obj.ekf.x, obj.ekf.stateMap, ...
+                        obj.towers, lArms15, obj.cfg);
+                elseif ~obj.diffAttStore.calibrated
+                    obj.diffAttStore = revgnss.DiffAttitudeBuilder.finalize(obj.diffAttStore);
+                end
+                if obj.diffAttStore.calibrated
+                    [z_da, h_da, H_da, R_da, daInfo] = revgnss.DiffAttitudeBuilder.buildRows( ...
+                        obj.diffAttStore, cpDA, obj.ekf.x, obj.ekf.stateMap, ...
+                        obj.towers, lArms15, obj.cfg, obj.ekf.nx);
+                    if ~isempty(z_da)
+                        obj.ekf.update(z_da, h_da, H_da, R_da);
+                        daInfo.active = true;
+                    end
+                    errStruct.diffAttRows = daInfo;
+                end
             end
 
             % Record diagnostics

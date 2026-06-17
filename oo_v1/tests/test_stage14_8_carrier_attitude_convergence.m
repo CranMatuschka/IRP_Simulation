@@ -14,7 +14,8 @@ addpath(fullfile(thisDir, '..'));
 fprintf('=== test_stage14_8_carrier_attitude_convergence ===\n');
 
 VALID_CLASSES = {'CONVERGED','BOUNDED_WEAK_GEOMETRY','NON_CONVERGENT', ...
-                 'AMBIGUITY_ABSORBED','WEAKLY_OBSERVABLE','UNOBSERVABLE','INVALID_CONFIG','UNKNOWN'};
+                 'AMBIGUITY_ABSORBED','CALIBRATION_FAILED','WEAKLY_OBSERVABLE', ...
+                 'UNOBSERVABLE','INVALID_CONFIG','UNKNOWN'};
 
 CARRIER_BASE.measurements.carrierMode          = 'ekfFloat';
 CARRIER_BASE.estimation.ambiguityMode          = 'floatPerTowerReceiverSignal';

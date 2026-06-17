@@ -184,6 +184,10 @@ classdef ConfigFactory
             cfg.estimator.estimateAttitudeFromPseudorange     = false;
             cfg.estimator.estimateAngularRateFromPseudorange  = false;
             cfg.estimator.estimateCarrierAmbiguities          = false;
+            % Stage 15: differential carrier attitude mode.
+            % 'off' (safe default) | 'calibratedDifferentialAmbiguity' | 'validationKnownAmbiguity'
+            cfg.estimator.attitudeCarrierMode     = 'off';
+            cfg.estimator.diffAtt.calibWin_s      = 60;   % calibration window length (s)
             % perfectCorrection: EKF uses known tower clock values (zero here).
             cfg.estimator.towerClockMode          = 'perfectCorrection';
             cfg.estimator.towerClockCorrectionSigma_m = 0.5; % used if noisyCorrection
@@ -1455,6 +1459,26 @@ classdef ConfigFactory
                          'cfg.estimation.ambiguityMode=''floatPerTowerReceiverSignal''. ' ...
                          '''floatPerTowerSignal'' is valid for single receiver only — ' ...
                          'it indexes ambiguities per tower/signal, not tower/receiver/signal.'], nRx4F);
+                end
+            end
+
+            % ---- Stage 15: attitudeCarrierMode validation ----------------
+            if isfield(cfg,'estimator') && isfield(cfg.estimator,'attitudeCarrierMode') && ...
+                    strcmp(cfg.estimator.attitudeCarrierMode,'calibratedDifferentialAmbiguity')
+                carrierOk = isfield(cfg,'measurements') && isfield(cfg.measurements,'carrierMode') && ...
+                    strcmp(cfg.measurements.carrierMode,'ekfFloat');
+                nRx15 = 1;
+                if isfield(cfg,'scenario') && isfield(cfg.scenario,'nReceivers')
+                    nRx15 = cfg.scenario.nReceivers;
+                end
+                if ~carrierOk
+                    cfg.estimator.attitudeCarrierMode = 'off';
+                    cfg.validation.warnings{end+1} = ...
+                        'attitudeCarrierMode=calibratedDifferentialAmbiguity requires carrierMode=ekfFloat. Disabled.';
+                elseif nRx15 < 2
+                    cfg.estimator.attitudeCarrierMode = 'off';
+                    cfg.validation.warnings{end+1} = ...
+                        'attitudeCarrierMode=calibratedDifferentialAmbiguity requires nReceivers>=2. Disabled.';
                 end
             end
 
