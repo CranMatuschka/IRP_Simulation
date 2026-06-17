@@ -51,6 +51,7 @@ classdef ReportRealityHelper
                     'Report state table count (%d) does not match EKF state count (%d).', expectedStates, nStates);
             end
             revgnss.ReportRealityHelper.validateObservableStack_(summary);
+            revgnss.ReportRealityHelper.validateMultiAsset_(cfg, summary);
         end
 
         function fig = plotAttitudeComponents(diag, t)
@@ -140,6 +141,40 @@ classdef ReportRealityHelper
                     revgnss.ReportRealityHelper.safeField_(summary, 'carrierDiagnosticOnly', false)
                 error('ClockExactReportBuilder:carrierStatusContradiction', ...
                     'Carrier descriptor rows exist but report says carrier is diagnostic-only.');
+            end
+        end
+
+        function validateMultiAsset_(cfg, summary)
+            if ~isfield(summary,'multiAsset') || ~isstruct(summary.multiAsset)
+                return
+            end
+            ma = summary.multiAsset;
+            nCfg = revgnss.ReportRealityHelper.getCfgNum_(cfg, {'scenario','nSpaceAssets'}, 1);
+            if ma.nSpaceAssets ~= nCfg
+                error('ClockExactReportBuilder:assetCountMismatch', ...
+                    'Report asset count (%d) differs from cfg.scenario.nSpaceAssets (%d).', ...
+                    ma.nSpaceAssets, nCfg);
+            end
+            if revgnss.ReportRealityHelper.safeField_(ma, 'islRows', 0) ~= 0 || ...
+                    revgnss.ReportRealityHelper.safeField_(ma, 'twstftRows', 0) ~= 0
+                error('ClockExactReportBuilder:falseSpaceLinkClaim', ...
+                    'Stage 20 report must not claim ISL or TWSTFT rows exist.');
+            end
+            if isfield(summary,'observableStack') && isfield(summary.observableStack,'endpointAssetNames')
+                names = {ma.assetTable.name};
+                epNames = summary.observableStack.endpointAssetNames;
+                for k = 1:numel(epNames)
+                    if ~ismember(epNames{k}, names)
+                        error('ClockExactReportBuilder:endpointAssetMismatch', ...
+                            'Endpoint asset %s is missing from the asset table.', epNames{k});
+                    end
+                end
+            end
+            for k = 1:numel(ma.assetTable)
+                if ma.assetTable(k).estimated && ~strcmp(ma.assetTable(k).stateOwner, 'primaryEKF')
+                    error('ClockExactReportBuilder:stateOwnershipMismatch', ...
+                        'Estimated asset %s has no primary EKF state ownership.', ma.assetTable(k).name);
+                end
             end
         end
 

@@ -97,6 +97,7 @@ classdef ConfigFactory
             % --- Scenario topology (simple count fields) ------------------
             cfg.scenario.nTowers    = 5;
             cfg.scenario.nReceivers = 1;
+            cfg.scenario.nSpaceAssets = 1;
 
             % --- GEO asset (stationary in ECEF) ---------------------------
             geoLat_rad = 0.0;
@@ -135,6 +136,10 @@ classdef ConfigFactory
             cfg.asset.clock.deterministic = true;
             cfg.asset.clock.bias_s        = 0.0;
             cfg.asset.clock.fracFreq      = 0.0;
+            cfg.asset.assetIndex = 1;
+            cfg.asset.estimated = true;
+            cfg.asset.stateOwner = 'primaryEKF';
+            cfg.assets = cfg.asset;
 
             % --- No orbit propagator for GEO (stationary in ECEF) --------
             cfg.orbit.useOrbitPropagator = false;
@@ -1697,6 +1702,7 @@ classdef ConfigFactory
                     cfg.towers(k).surveyError_ENU_m = zeros(3,1);
                 end
             end
+            cfg = revgnss.MultiAssetConfig.normalize(cfg);
         end
 
         function tmpl = getClockTemplate_(templateName)

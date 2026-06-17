@@ -62,6 +62,25 @@ cfg.report.compileTex = 'require';   % 'require' | 'auto' | 'never'
 % nReceivers  > 1  ->  attitude estimation ON,  auto cross-pattern lever arms
 cfg.scenario.nReceivers = 3;
 
+% --- Multi-asset scenario metadata (Stage 20) --------------------
+% Measurements and EKF states remain attached to the primary estimated asset.
+% GEO-2 is represented as a non-estimated scenario/report/endpoints object
+% only; no ISL/TWSTFT/relay rows are generated in this stage.
+cfg.scenario.nSpaceAssets = 2;
+cfg.assets(1) = cfg.asset;
+cfg.assets(1).assetIndex = 1;
+cfg.assets(1).estimated = true;
+cfg.assets(1).stateOwner = 'primaryEKF';
+cfg.assets(2) = cfg.assets(1);
+cfg.assets(2).name = 'GEO-2';
+cfg.assets(2).assetIndex = 2;
+cfg.assets(2).estimated = false;
+cfg.assets(2).stateOwner = 'representedOnly';
+cfg.assets(2).r_ecef_m = revgnss.GeometryUtils.geodetic2ecef(0.0, 28.0*pi/180, 35786000.0);
+cfg.assets(2).receiverLeverArm_body_m = [0; 0; 0];
+cfg.assets(2).receiverLeverArms_body_m = [0; 0; 0];
+cfg.assets(2).clock.name = 'RxClock_GEO_2';
+
 % --- Frequency --------------------------------------------------
 % false  ->  L1 only
 % true   ->  L1 + L2

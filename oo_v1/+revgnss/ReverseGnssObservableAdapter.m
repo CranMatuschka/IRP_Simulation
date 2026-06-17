@@ -3,11 +3,12 @@ classdef ReverseGnssObservableAdapter
 
     methods (Static)
         function stack = build(cfg, H, nCodeRows, errStruct, stateMap)
-            assetName = revgnss.ReverseGnssObservableAdapter.getCfgStr_(cfg, {'asset','name'}, 'GEO-1');
             nTwr = revgnss.ReverseGnssObservableAdapter.getCfgNum_(cfg, {'scenario','nTowers'}, 0);
             nRx = revgnss.ReverseGnssObservableAdapter.getCfgNum_(cfg, {'scenario','nReceivers'}, 1);
-            endpoints = revgnss.ReverseGnssObservableAdapter.endpoints_(nTwr, nRx, assetName);
-            links = revgnss.ReverseGnssObservableAdapter.links_(nTwr, nRx, assetName);
+            assetInfos = revgnss.MultiAssetConfig.assetInfos(cfg);
+            assetName = assetInfos(1).name;
+            endpoints = revgnss.ReverseGnssObservableAdapter.endpoints_(nTwr, assetInfos);
+            links = revgnss.ReverseGnssObservableAdapter.links_(nTwr, nRx, assetName, 1);
             rows = revgnss.ReverseGnssObservableAdapter.physicalRows_(cfg, H, nCodeRows, errStruct, stateMap, assetName);
             stack = revgnss.ObservableStackDescriptor.create(endpoints, links, rows);
             revgnss.ReverseGnssObservableAdapter.validatePhysicalRows_(stack, H, stateMap);
@@ -49,7 +50,7 @@ classdef ReverseGnssObservableAdapter
                 typeCounter.(obsType) = typeCounter.(obsType) + 1;
                 [ti, ai, sig] = revgnss.ReverseGnssObservableAdapter.rowIdentity_( ...
                     typeCounter.(obsType), obsType, errStruct);
-                linkId = sprintf('link:t%03d:rx%03d', ti, ai);
+                linkId = sprintf('link:a001:t%03d:rx%03d', ti, ai);
                 stateCols = find(abs(H(ri,:)) > 1e-12);
                 role = revgnss.ReverseGnssObservableAdapter.roleFor_(cfg, obsType);
                 provenance = revgnss.ReverseGnssObservableAdapter.provenanceFor_(obsType);
@@ -176,21 +177,24 @@ classdef ReverseGnssObservableAdapter
             end
         end
 
-        function endpoints = endpoints_(nTwr, nRx, assetName)
+        function endpoints = endpoints_(nTwr, assetInfos)
             endpoints = repmat(revgnss.EndpointDescriptor.tower(1), 0, 1);
             for ti = 1:nTwr
                 endpoints(end+1) = revgnss.EndpointDescriptor.tower(ti); %#ok<AGROW>
             end
-            for ri = 1:nRx
-                endpoints(end+1) = revgnss.EndpointDescriptor.spacecraftReceiver(assetName, ri); %#ok<AGROW>
+            for ai = 1:numel(assetInfos)
+                for ri = 1:assetInfos(ai).nReceivers
+                    endpoints(end+1) = revgnss.EndpointDescriptor.spacecraftReceiver( ...
+                        assetInfos(ai).name, ri, assetInfos(ai).index); %#ok<AGROW>
+                end
             end
         end
 
-        function links = links_(nTwr, nRx, assetName)
-            links = repmat(revgnss.LinkDescriptor.towerToReceiver(1, 1, assetName), 0, 1);
+        function links = links_(nTwr, nRx, assetName, assetIndex)
+            links = repmat(revgnss.LinkDescriptor.towerToReceiver(1, 1, assetName, assetIndex), 0, 1);
             for ti = 1:nTwr
                 for ri = 1:nRx
-                    links(end+1) = revgnss.LinkDescriptor.towerToReceiver(ti, ri, assetName); %#ok<AGROW>
+                    links(end+1) = revgnss.LinkDescriptor.towerToReceiver(ti, ri, assetName, assetIndex); %#ok<AGROW>
                 end
             end
         end

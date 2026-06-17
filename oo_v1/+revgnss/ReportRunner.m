@@ -307,6 +307,7 @@ classdef ReportRunner
             % Topology
             summary.nTowers    = cfg.scenario.nTowers;
             summary.nReceivers = cfg.scenario.nReceivers;
+            summary.multiAsset = revgnss.MultiAssetConfig.summary(cfg);
             summary.signals    = cfg.signals.enabled;
             summary.twoFrequency = isfield(cfg,'signals') && ...
                 isfield(cfg.signals,'twoFrequency') && ...

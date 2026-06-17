@@ -454,6 +454,7 @@ classdef ClockExactReportBuilder
             % ---- Sections -----------------------------------------------
             CE.writeScenarioSummary_(fid, cfg, summary, diag, nTwr, nRx, dur, dt, esc);
             CE.writeModelRealityCheck_(fid, cfg, summary, dur, nTwr, nRx);
+            CE.writeMultiAssetArchitecture_(fid, summary);
             CE.writeObservableRealityCheck_(fid, summary);
             CE.writeStateEstimation_(fid, plotPaths, stem, cfg, diag, figDir);
             CE.writeMeasurementValidation_(fid, plotPaths, stem, figDir);
@@ -730,6 +731,11 @@ classdef ClockExactReportBuilder
             fprintf(fid, '\\toprule\n\\textbf{Quantity} & \\textbf{Actual value}\\\\\n\\midrule\n');
             CE.writeQuantRow_(fid, 'Duration', sprintf('%.0f s', dur));
             CE.writeQuantRow_(fid, 'Receivers / towers', sprintf('%d / %d', nRx, nTwr));
+            ma = CE.safeField_(summary, 'multiAsset', struct());
+            if isstruct(ma) && isfield(ma,'nSpaceAssets')
+                CE.writeQuantRow_(fid, 'Space assets / estimated asset', sprintf('%d / %s', ...
+                    ma.nSpaceAssets, CE.esc_(ma.estimatedAssetName)));
+            end
             CE.writeQuantRow_(fid, 'Code / Doppler / carrier rows', sprintf('%d / %d / %d', ...
                 CE.safeField_(summary,'totalCodeRows',0), CE.safeField_(summary,'totalDopplerRows',0), ...
                 CE.safeField_(summary,'totalCarrierRows',0)));
@@ -752,6 +758,52 @@ classdef ClockExactReportBuilder
                 CE.esc_(CE.getCfgStr_(cfg,{'estimator','attitudeInitMode'},'none')), ...
                 CE.esc_(CE.getCfgStr_(cfg,{'estimator','attitudeCarrierMode'},'off'))));
             CE.writeQuantRow_(fid, 'ZWD mode', sprintf('\\texttt{%s}', CE.esc_(CE.getCfgStr_(cfg,{'estimation','troposphereMode'},'none'))));
+            fprintf(fid, '\\bottomrule\n\\end{tabular}\\end{center}\n\\clearpage\n');
+        end
+
+        % ================================================================
+        % MULTI-ASSET SCENARIO ARCHITECTURE
+        % ================================================================
+
+        function writeMultiAssetArchitecture_(fid, summary)
+            CE = revgnss.ClockExactReportBuilder;
+            fprintf(fid, '\\section{Multi-Asset Scenario Architecture}\n');
+            ma = CE.safeField_(summary, 'multiAsset', struct());
+            if ~isstruct(ma) || ~isfield(ma,'assetTable')
+                fprintf(fid, 'Multi-asset metadata was not available for this run.\\clearpage\n');
+                return
+            end
+            fprintf(fid, ['Stage 20 represents multiple spacecraft as distinct scenario assets. ' ...
+                'Only the primary asset is estimated by the EKF in this stage; additional assets ' ...
+                'are represented as truth/report/endpoints objects only. No ISL, TWSTFT, relay, ' ...
+                'or transponder observable rows are generated.\n\n']);
+            fprintf(fid, '\\begin{center}\\scriptsize\n');
+            fprintf(fid, ['\\begin{longtable}{@{}>{\\raggedright\\arraybackslash}p{0.07\\textwidth}' ...
+                '>{\\raggedright\\arraybackslash}p{0.16\\textwidth}' ...
+                '>{\\raggedright\\arraybackslash}p{0.12\\textwidth}' ...
+                '>{\\raggedright\\arraybackslash}p{0.13\\textwidth}' ...
+                '>{\\raggedright\\arraybackslash}p{0.13\\textwidth}' ...
+                '>{\\raggedright\\arraybackslash}p{0.16\\textwidth}' ...
+                '>{\\raggedright\\arraybackslash}p{0.15\\textwidth}@{}}\n']);
+            fprintf(fid, '\\toprule\n');
+            fprintf(fid, '\\textbf{Asset} & \\textbf{Name} & \\textbf{Estimated} & \\textbf{Receivers} & \\textbf{Endpoints} & \\textbf{Active links} & \\textbf{State/clock owner}\\\\\n\\midrule\n');
+            at = ma.assetTable;
+            for k = 1:numel(at)
+                fprintf(fid, '%d & %s & %s & %d & %d & %d & %s / %s\\\\\n', ...
+                    at(k).index, CE.esc_(at(k).name), mat2str(at(k).estimated), ...
+                    at(k).nReceivers, at(k).endpointCount, at(k).activeLinkCount, ...
+                    CE.esc_(at(k).stateOwner), CE.esc_(at(k).clockOwner));
+            end
+            fprintf(fid, '\\bottomrule\n\\end{longtable}\\normalsize\n\\end{center}\n');
+            fprintf(fid, '\\begin{center}\\small\n');
+            fprintf(fid, '\\begin{tabular}{p{0.42\\textwidth}p{0.42\\textwidth}}\n');
+            fprintf(fid, '\\toprule\n\\textbf{Quantity} & \\textbf{Actual value}\\\\\n\\midrule\n');
+            CE.writeQuantRow_(fid, 'Space assets represented', sprintf('%d', ma.nSpaceAssets));
+            CE.writeQuantRow_(fid, 'Estimated asset', CE.esc_(ma.estimatedAssetName));
+            CE.writeQuantRow_(fid, 'Multi-asset EKF', 'Guarded off: only primary asset has EKF states');
+            CE.writeQuantRow_(fid, 'Inactive future link types', CE.esc_(strjoin(ma.futureInactiveLinkTypes, ', ')));
+            CE.writeQuantRow_(fid, 'ISL / TWSTFT rows', sprintf('%d / %d', ma.islRows, ma.twstftRows));
+            CE.writeQuantRow_(fid, 'Limitation', CE.esc_(ma.guardMessage));
             fprintf(fid, '\\bottomrule\n\\end{tabular}\\end{center}\n\\clearpage\n');
         end
 
@@ -785,6 +837,13 @@ classdef ClockExactReportBuilder
                 CE.safeField_(c,'code',0), CE.safeField_(c,'doppler',0), CE.safeField_(c,'carrier',0)));
             CE.writeQuantRow_(fid, 'Differential carrier attitude rows', sprintf('%d', ...
                 CE.safeField_(c,'diffCarrierAttitude',0)));
+            if isfield(obs,'linksByAsset') && ~isempty(obs.linksByAsset)
+                parts = {};
+                for kk = 1:numel(obs.linksByAsset)
+                    parts{end+1} = sprintf('%s:%d', obs.linksByAsset(kk).assetName, obs.linksByAsset(kk).count); %#ok<AGROW>
+                end
+                CE.writeQuantRow_(fid, 'Active tower-to-space links by asset', CE.esc_(strjoin(parts, ', ')));
+            end
             fprintf(fid, '\\bottomrule\n\\end{tabular}\\end{center}\n\n');
 
             fprintf(fid, '\\begin{center}\\scriptsize\n');

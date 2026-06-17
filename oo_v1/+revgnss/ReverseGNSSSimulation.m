@@ -16,6 +16,7 @@ classdef ReverseGNSSSimulation < handle
         cfg         (1,1) struct
 
         asset       revgnss.SpaceAsset
+        assets      cell = {}
         towers      cell
         measModel   revgnss.MeasurementModel
         errorChain  revgnss.ErrorChain
@@ -60,6 +61,10 @@ classdef ReverseGNSSSimulation < handle
 
             obj.diag     = revgnss.Diagnostics(obj.cfg);
             obj.trackMgr = revgnss.CarrierTrackManager();
+            obj.assets   = revgnss.MultiAssetConfig.instantiateAssets(obj.cfg, obj.asset);
+            for ai = 2:numel(obj.assets)
+                obj.assets{ai}.clock.precomputeNoise(obj.tVec);
+            end
             obj.attInitDone = false;
             obj.attInitInfo = revgnss.AttitudeInitializer.defaultInfo(obj.cfg);
 
@@ -81,6 +86,8 @@ classdef ReverseGNSSSimulation < handle
                 obj.cfg.estimator.estimateAttitudeFromPseudorange;
 
             fprintf('  Asset       : %s\n', obj.cfg.asset.name);
+            fprintf('  Space assets: %d (primary estimated: %s)\n', ...
+                obj.cfg.scenario.nSpaceAssets, obj.cfg.asset.name);
             fprintf('  Towers      : %d\n', obj.nTowers);
             fprintf('  Receivers   : %d\n', nRx);
             fprintf('  Max meas/epoch: %d\n', obj.nTowers * nRx);
@@ -128,6 +135,7 @@ classdef ReverseGNSSSimulation < handle
 
             % Log truth state
             obj.asset.logState(t_s);
+            obj.stepSecondaryAssets_(k, t_s, dt);
 
             % EKF predict (skip at first epoch — no prior state to propagate from)
             if k > 1
@@ -280,6 +288,7 @@ classdef ReverseGNSSSimulation < handle
             results.diag         = obj.diag;
             results.ekfHistory   = obj.ekf.history;
             results.assetHistory = obj.asset.history;
+            results.assetHistories = cellfun(@(a) a.history, obj.assets, 'UniformOutput', false);
             results.tVec         = obj.tVec;
             results.cfg          = obj.cfg;
         end
@@ -486,6 +495,17 @@ classdef ReverseGNSSSimulation < handle
                 end
             end
             errStruct.carrierPhase = cp;
+        end
+
+        function stepSecondaryAssets_(obj, k, t_s, dt)
+            if numel(obj.assets) < 2; return; end
+            for ai = 2:numel(obj.assets)
+                a = obj.assets{ai};
+                if k > 1
+                    a.propagate(dt, [], []);
+                end
+                a.logState(t_s);
+            end
         end
     end
 end
