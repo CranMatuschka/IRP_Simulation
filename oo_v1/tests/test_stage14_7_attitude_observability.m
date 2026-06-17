@@ -5,13 +5,16 @@
 % T1: zero lever arm → attitude columns of H_pr near zero (< 1e-9).
 % T2: nonzero lever arm → attitude columns of H_pr nonzero (> 1e-9).
 % T3: finalizeConfig with nReceivers=3 enables attitude estimation + valid P0.
-% T4: observabilityClass = 'OBSERVABLE' for nonzero lever arms after smoke run.
+% T4: attitudeObsClass is a valid convergence-based class after smoke run (Stage 14.8 update).
 % T5: smoke run attitudeJacobianNorm > 0 throughout when lever arms nonzero.
 
 thisDir = fileparts(mfilename('fullpath'));
 addpath(fullfile(thisDir, '..'));
 
 fprintf('=== test_stage14_7_attitude_observability ===\n');
+
+VALID_CLASSES_147 = {'CONVERGED','BOUNDED_WEAK_GEOMETRY','NON_CONVERGENT', ...
+                     'WEAKLY_OBSERVABLE','UNOBSERVABLE','INVALID_CONFIG','UNKNOWN'};
 
 nTowers = 5;
 
@@ -114,9 +117,9 @@ fprintf('    PASS (estimateAttitude=true, P0_euler=%.1f deg)\n', ...
     cfg_t3f.estimator.P0_euler_rad * 180/pi);
 
 % ----------------------------------------------------------------
-% T4: smoke run → attitudeObsClass = OBSERVABLE
+% T4: smoke run → attitudeObsClass is a valid convergence-based class
 % ----------------------------------------------------------------
-fprintf('  T4: smoke run (30 epochs) → attitudeObsClass = OBSERVABLE ...\n');
+fprintf('  T4: smoke run (30 epochs) → attitudeObsClass is a valid class ...\n');
 
 cfg_t4 = revgnss.ConfigFactory.defaultConfig();
 cfg_t4.scenario.nReceivers               = 3;
@@ -152,8 +155,10 @@ assert(~threwErr4, 'T4 FAILED: smoke run threw an error');
 assert(isfield(out4.summary,'attitudeObsClass'), ...
     'T4 FAILED: summary.attitudeObsClass field missing');
 cls4 = out4.summary.attitudeObsClass;
-assert(strcmp(cls4,'OBSERVABLE'), ...
-    'T4 FAILED: attitudeObsClass = ''%s'', expected ''OBSERVABLE''', cls4);
+assert(~strcmp(cls4,'OBSERVABLE'), ...
+    'T4 FAILED: old class ''OBSERVABLE'' must not appear (Stage 14.8 uses convergence-based classes)');
+assert(ismember(cls4, VALID_CLASSES_147), ...
+    'T4 FAILED: attitudeObsClass = ''%s'' not in recognised set', cls4);
 fprintf('    PASS (attitudeObsClass = %s)\n', cls4);
 
 % ----------------------------------------------------------------

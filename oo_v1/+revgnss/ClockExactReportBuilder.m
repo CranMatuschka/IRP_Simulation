@@ -1482,7 +1482,7 @@ classdef ClockExactReportBuilder
         end
 
         % ================================================================
-        % SECTION 8 — ATTITUDE OBSERVABILITY (Stage 14.7)
+        % SECTION 8 — ATTITUDE OBSERVABILITY (Stage 14.8)
         % ================================================================
         function writeAttitudeObservability_(fid, cfg, summary, diag) %#ok<INUSD,INUSL>
             function v = sf(s, f, def)
@@ -1491,26 +1491,32 @@ classdef ClockExactReportBuilder
             fprintf(fid, '\\clearpage\n');
             fprintf(fid, '\\section{Attitude Observability and Estimation}\n');
 
-            attCls  = sf(summary, 'attitudeObsClass',         'UNKNOWN');
-            estAtt  = sf(summary, 'estimateAttitude',         false);
-            nRxA    = sf(summary, 'nReceivers',               1);
-            lNorms  = sf(summary, 'leverArmNorms_m',          []);
-            initE   = sf(summary, 'initialAttitudeError_deg', NaN);
-            finalE  = sf(summary, 'finalAttitudeError_deg',   NaN);
-            meanJ   = sf(summary, 'meanAttitudeJacNorm',      NaN);
+            attCls  = sf(summary, 'attitudeObsClass',           'UNKNOWN');
+            estAtt  = sf(summary, 'estimateAttitude',           false);
+            nRxA    = sf(summary, 'nReceivers',                 1);
+            lNorms  = sf(summary, 'leverArmNorms_m',            []);
+            initE   = sf(summary, 'initialAttitudeError_deg',   NaN);
+            finalE  = sf(summary, 'finalAttitudeError_deg',     NaN);
+            impR    = sf(summary, 'attitudeImprovementRatio',   NaN);
+            condN   = sf(summary, 'attitudeHattCondNum',        NaN);
+            sigD    = sf(summary, 'finalAttitudeSigma_deg',     NaN);
+            meanJ   = sf(summary, 'meanAttitudeJacNorm',        NaN);
+            cjAct   = sf(summary, 'carrierAttJacActive',        false);
 
             switch attCls
-                case 'OBSERVABLE';        clsStr = '\textcolor{green!45!black}{OBSERVABLE}';
-                case 'WEAKLY_OBSERVABLE'; clsStr = '\textcolor{orange!80!black}{WEAKLY\_OBSERVABLE}';
-                case 'UNOBSERVABLE';      clsStr = '\textcolor{gray}{UNOBSERVABLE}';
-                case 'INVALID_CONFIG';    clsStr = '\textcolor{red!70!black}{INVALID\_CONFIG}';
-                otherwise;                clsStr = attCls;
+                case 'CONVERGED';              clsStr = '\textcolor{green!45!black}{CONVERGED}';
+                case 'BOUNDED_WEAK_GEOMETRY';  clsStr = '\textcolor{orange!70!black}{BOUNDED\_WEAK\_GEOMETRY}';
+                case 'NON_CONVERGENT';         clsStr = '\textcolor{red!70!black}{NON\_CONVERGENT}';
+                case 'WEAKLY_OBSERVABLE';      clsStr = '\textcolor{orange!80!black}{WEAKLY\_OBSERVABLE}';
+                case 'UNOBSERVABLE';           clsStr = '\textcolor{gray}{UNOBSERVABLE}';
+                case 'INVALID_CONFIG';         clsStr = '\textcolor{red!80!black}{INVALID\_CONFIG}';
+                otherwise;                     clsStr = attCls;
             end
-            fprintf(fid, '\\textbf{Classification:} %s\\quad Receivers: %d\\quad Estimated: %s\n\n', ...
-                clsStr, nRxA, mat2str(estAtt));
+            fprintf(fid, '\\textbf{Classification:} %s\\quad Receivers: %d\\quad Estimated: %s\\quad Carrier~Jac: %s\n\n', ...
+                clsStr, nRxA, mat2str(estAtt), mat2str(cjAct));
 
             if ~isempty(lNorms) && numel(lNorms) > 0
-                fprintf(fid, '\\vspace{4pt}\\textbf{Lever arm norms (body frame):} ');
+                fprintf(fid, '\\textbf{Lever arm norms (body frame):} ');
                 for ri = 1:numel(lNorms)
                     fprintf(fid, 'Rx\\,%d: %.4f\\,m', ri, lNorms(ri));
                     if ri < numel(lNorms); fprintf(fid, '; '); end
@@ -1522,19 +1528,32 @@ classdef ClockExactReportBuilder
             fprintf(fid, '\\toprule\n\\textbf{Quantity} & \\textbf{Value}\\\\\n\\midrule\n');
             if ~isnan(initE);  fprintf(fid, 'Initial attitude error (3D norm) & %.4f deg\\\\\n', initE);  end
             if ~isnan(finalE); fprintf(fid, 'Final attitude error (3D norm) & %.4f deg\\\\\n',   finalE); end
-            if ~isnan(meanJ);  fprintf(fid, 'Mean $H_{att}$ Frobenius norm & %.6f\\\\\n',        meanJ);  end
+            if ~isnan(impR);   fprintf(fid, 'Improvement ratio (init/final, >1=improved) & %.3f\\\\\n', impR); end
+            if ~isnan(condN);  fprintf(fid, '$H_{att}$ condition number (mean) & %.2f\\\\\n',    condN); end
+            if ~isnan(sigD);   fprintf(fid, 'Final attitude covariance sigma & %.4f deg\\\\\n',  sigD); end
+            if ~isnan(meanJ);  fprintf(fid, 'Mean $H_{att}$ Frobenius norm & %.4f\\\\\n',        meanJ); end
             fprintf(fid, '\\bottomrule\n\\end{tabular}\n');
 
             switch attCls
+                case 'NON_CONVERGENT'
+                    fprintf(fid, ['\\vspace{6pt}\\textbf{Note (non-convergence):} Float ambiguity states ' ...
+                        '(one per tower$\\times$receiver) absorb the mean carrier phase offset, ' ...
+                        'including the attitude-induced range bias. Attitude is therefore non-convergent ' ...
+                        'despite nonzero Jacobian rank. Use fixed integer ambiguities or baseline differences ' ...
+                        'for reliable attitude determination.\n\n']);
+                case 'BOUNDED_WEAK_GEOMETRY'
+                    fprintf(fid, ['\\vspace{6pt}\\textbf{Note:} Attitude error is bounded but does not ' ...
+                        'converge significantly. GEO geometry limits angular diversity; ' ...
+                        'float ambiguity states absorb carrier attitude signal.\n\n']);
                 case 'WEAKLY_OBSERVABLE'
-                    fprintf(fid, ['\\vspace{6pt}\\textbf{Warning:} Attitude is only \\emph{weakly ' ...
-                        'observable} (partial 1--2 axis sensitivity). Attitude error may not fully converge.\n\n']);
+                    fprintf(fid, ['\\vspace{6pt}\\textbf{Warning:} Attitude Jacobian rank $< 3$. ' ...
+                        'Only partial axis sensitivity available.\n\n']);
                 case 'UNOBSERVABLE'
-                    fprintf(fid, ['\\vspace{6pt}\\textbf{Note:} Attitude is \\emph{unobservable} ' ...
+                    fprintf(fid, ['\\vspace{6pt}\\textbf{Note:} Attitude is unobservable ' ...
                         '(zero lever arm or single receiver). Attitude states frozen at truth.\n\n']);
                 case 'INVALID_CONFIG'
                     fprintf(fid, ['\\vspace{6pt}\\textbf{Warning:} Multi-receiver with zero lever arms ' ...
-                        'is an \\emph{invalid config} for attitude estimation.\n\n']);
+                        'is an invalid configuration for attitude estimation.\n\n']);
             end
         end
 

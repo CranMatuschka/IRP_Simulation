@@ -192,6 +192,26 @@ classdef CarrierMeasurementBuilder
                     H_phi(mi, stateMap.r_idx) = (delta_e / rho_e_geom)';
                 end
 
+                doAttJac = isfield(cfg.estimator, 'estimateAttitude') && ...
+                    cfg.estimator.estimateAttitude && ...
+                    isfield(cfg.estimator, 'estimateAttitudeFromPseudorange') && ...
+                    cfg.estimator.estimateAttitudeFromPseudorange;
+                if doAttJac && norm(leverArms_model(:, ai)) > 1e-9
+                    step_e = 1e-6;
+                    if isfield(cfg.estimator,'attitudeJacobianStep_rad')
+                        step_e = cfg.estimator.attitudeJacobianStep_rad;
+                    end
+                    for ke = 1:3
+                        ep = euler_est; ep(ke) = ep(ke) + step_e;
+                        em = euler_est; em(ke) = em(ke) - step_e;
+                        hp = revgnss.MeasurementModelUtils.modelRangeOnly( ...
+                            cfg, towers, ti, ai, r_cm_est, ep, leverArms_model);
+                        hm = revgnss.MeasurementModelUtils.modelRangeOnly( ...
+                            cfg, towers, ti, ai, r_cm_est, em, leverArms_model);
+                        H_phi(mi, stateMap.euler_idx(ke)) = (hp - hm) / (2*step_e);
+                    end
+                end
+
                 % ---- H: clock, ambiguity, ZWD (always analytic) ---------------
                 H_phi(mi, stateMap.b_rx_idx) = 1;
 

@@ -925,25 +925,28 @@ classdef LatexReportBuilder
         end
 
         % ================================================================
-        % P09 — Attitude Observability and Estimation (Stage 14.7)
+        % P09 — Attitude Observability and Estimation (Stage 14.8)
         % ================================================================
         function fig = makeAttitudePage_(cfg, summary)
             RL  = revgnss.ReportLayout;
             fig = RL.createPage('P09 — Attitude Observability');
             RL.addSectionHeader(fig, '8. Attitude Observability and Estimation', 0.97);
 
-            attCls   = 'UNKNOWN'; if isfield(summary,'attitudeObsClass');       attCls  = summary.attitudeObsClass;       end
-            estAtt   = false;     if isfield(summary,'estimateAttitude');        estAtt  = summary.estimateAttitude;        end
-            nRxAtt   = 1;         if isfield(summary,'nReceivers');              nRxAtt  = summary.nReceivers;              end
-            lNorms   = [];        if isfield(summary,'leverArmNorms_m');         lNorms  = summary.leverArmNorms_m;         end
-            initErr  = NaN;       if isfield(summary,'initialAttitudeError_deg');initErr = summary.initialAttitudeError_deg;end
-            finalErr = NaN;       if isfield(summary,'finalAttitudeError_deg');  finalErr= summary.finalAttitudeError_deg;  end
-            meanJac  = NaN;       if isfield(summary,'meanAttitudeJacNorm');     meanJac = summary.meanAttitudeJacNorm;     end
+            attCls   = 'UNKNOWN'; if isfield(summary,'attitudeObsClass');          attCls   = summary.attitudeObsClass;          end
+            estAtt   = false;     if isfield(summary,'estimateAttitude');           estAtt   = summary.estimateAttitude;          end
+            nRxAtt   = 1;         if isfield(summary,'nReceivers');                 nRxAtt   = summary.nReceivers;                end
+            lNorms   = [];        if isfield(summary,'leverArmNorms_m');            lNorms   = summary.leverArmNorms_m;           end
+            initErr  = NaN;       if isfield(summary,'initialAttitudeError_deg');   initErr  = summary.initialAttitudeError_deg;  end
+            finalErr = NaN;       if isfield(summary,'finalAttitudeError_deg');     finalErr = summary.finalAttitudeError_deg;    end
+            impRat   = NaN;       if isfield(summary,'attitudeImprovementRatio');   impRat   = summary.attitudeImprovementRatio;  end
+            meanJac  = NaN;       if isfield(summary,'meanAttitudeJacNorm');        meanJac  = summary.meanAttitudeJacNorm;       end
+            cjAct    = false;     if isfield(summary,'carrierAttJacActive');        cjAct    = summary.carrierAttJacActive;       end
 
             lines = {};
-            lines{end+1} = sprintf('  Observability classification  : %s', attCls);
-            lines{end+1} = sprintf('  Number of receiver phase centres : %d', nRxAtt);
-            lines{end+1} = sprintf('  Attitude estimation enabled   : %s', mat2str(estAtt));
+            lines{end+1} = sprintf('  Classification               : %s', attCls);
+            lines{end+1} = sprintf('  Receivers                    : %d', nRxAtt);
+            lines{end+1} = sprintf('  Attitude estimation enabled  : %s', mat2str(estAtt));
+            lines{end+1} = sprintf('  Carrier attitude Jac active  : %s', mat2str(cjAct));
             lines{end+1} = '';
             if ~isempty(lNorms)
                 lines{end+1} = '  Lever arm norms (body frame):';
@@ -952,30 +955,28 @@ classdef LatexReportBuilder
                 end
                 lines{end+1} = '';
             end
-            if ~isnan(initErr)
-                lines{end+1} = sprintf('  Initial attitude error (3D norm) : %.4f deg', initErr);
-            end
-            if ~isnan(finalErr)
-                lines{end+1} = sprintf('  Final   attitude error (3D norm) : %.4f deg', finalErr);
-            end
-            if ~isnan(meanJac)
-                lines{end+1} = sprintf('  Mean H_att Frobenius norm        : %.6f', meanJac);
-            end
+            if ~isnan(initErr);  lines{end+1} = sprintf('  Initial attitude error (3D)   : %.4f deg', initErr);  end
+            if ~isnan(finalErr); lines{end+1} = sprintf('  Final   attitude error (3D)   : %.4f deg', finalErr); end
+            if ~isnan(impRat);   lines{end+1} = sprintf('  Improvement ratio (init/final): %.3f', impRat);       end
+            if ~isnan(meanJac);  lines{end+1} = sprintf('  Mean H_att Frobenius norm     : %.4f', meanJac);      end
             lines{end+1} = '';
             switch attCls
+                case 'NON_CONVERGENT'
+                    lines{end+1} = '  [!] NON_CONVERGENT: float ambiguities absorb carrier attitude signal.';
+                    lines{end+1} = '      Attitude worsened despite rank-3 Jacobian.';
+                case 'BOUNDED_WEAK_GEOMETRY'
+                    lines{end+1} = '  [~] BOUNDED: attitude error maintained but not reduced.';
+                    lines{end+1} = '      GEO geometry limits angular diversity for attitude.';
+                case 'CONVERGED'
+                    lines{end+1} = '  [OK] CONVERGED: attitude error significantly reduced.';
                 case 'WEAKLY_OBSERVABLE'
-                    lines{end+1} = '  [W] Attitude is weakly observable (partial 1-2 axis sensitivity).';
-                    lines{end+1} = '      Attitude error may not converge fully.';
+                    lines{end+1} = '  [W] WEAK: H_att rank < 3, partial axis sensitivity only.';
                 case 'UNOBSERVABLE'
-                    lines{end+1} = '  [N] Attitude unobservable (zero lever arm / single receiver).';
-                    lines{end+1} = '      Attitude states are frozen at truth.';
+                    lines{end+1} = '  [N] UNOBSERVABLE: zero lever arm or single receiver.';
                 case 'INVALID_CONFIG'
-                    lines{end+1} = '  [W] Multi-receiver with zero lever arms: invalid for attitude estimation.';
-                case 'OBSERVABLE'
-                    lines{end+1} = '  [OK] Attitude is fully observable (3-axis Jacobian rank 3).';
-                    lines{end+1} = '       Carrier + code rows with nonzero lever arms provide sensitivity.';
+                    lines{end+1} = '  [W] INVALID_CONFIG: multi-rx with zero lever arms.';
             end
-            RL.addBodyText(fig, lines, 0.91, 0.08);
+            RL.addBodyText(fig, lines, 0.91, 0.04);
         end
 
         % ================================================================
@@ -1613,26 +1614,29 @@ classdef LatexReportBuilder
             fprintf(fid,'\\end{tabular}\n\\end{center}\n');
             fprintf(fid,'\\clearpage\n');
 
-            % Section 8: Attitude Observability and Estimation
+            % Section 8: Attitude Observability and Estimation (Stage 14.8)
             fprintf(fid,'\\section{Attitude Observability and Estimation}\n');
-            attCls8  = 'UNKNOWN'; if isfield(summary,'attitudeObsClass');       attCls8  = summary.attitudeObsClass;       end
-            estAtt8  = false;     if isfield(summary,'estimateAttitude');        estAtt8  = summary.estimateAttitude;       end
-            nRx8     = 1;         if isfield(summary,'nReceivers');              nRx8     = summary.nReceivers;             end
-            lN8      = [];        if isfield(summary,'leverArmNorms_m');         lN8      = summary.leverArmNorms_m;        end
-            initE8   = NaN;       if isfield(summary,'initialAttitudeError_deg');initE8   = summary.initialAttitudeError_deg;end
-            finalE8  = NaN;       if isfield(summary,'finalAttitudeError_deg');  finalE8  = summary.finalAttitudeError_deg; end
-            meanJ8   = NaN;       if isfield(summary,'meanAttitudeJacNorm');     meanJ8   = summary.meanAttitudeJacNorm;    end
+            attCls8  = 'UNKNOWN'; if isfield(summary,'attitudeObsClass');          attCls8  = summary.attitudeObsClass;          end
+            estAtt8  = false;     if isfield(summary,'estimateAttitude');           estAtt8  = summary.estimateAttitude;          end
+            nRx8     = 1;         if isfield(summary,'nReceivers');                 nRx8     = summary.nReceivers;                end
+            lN8      = [];        if isfield(summary,'leverArmNorms_m');            lN8      = summary.leverArmNorms_m;           end
+            initE8   = NaN;       if isfield(summary,'initialAttitudeError_deg');   initE8   = summary.initialAttitudeError_deg;  end
+            finalE8  = NaN;       if isfield(summary,'finalAttitudeError_deg');     finalE8  = summary.finalAttitudeError_deg;    end
+            impR8    = NaN;       if isfield(summary,'attitudeImprovementRatio');   impR8    = summary.attitudeImprovementRatio;  end
+            meanJ8   = NaN;       if isfield(summary,'meanAttitudeJacNorm');        meanJ8   = summary.meanAttitudeJacNorm;       end
             switch attCls8
-                case 'OBSERVABLE';         clsCmd = '\textcolor{green!45!black}{OBSERVABLE}';
-                case 'WEAKLY_OBSERVABLE';  clsCmd = '\textcolor{orange!80!black}{WEAKLY\_OBSERVABLE}';
-                case 'UNOBSERVABLE';       clsCmd = '\textcolor{gray}{UNOBSERVABLE}';
-                case 'INVALID_CONFIG';     clsCmd = '\textcolor{red!70!black}{INVALID\_CONFIG}';
-                otherwise;                 clsCmd = attCls8;
+                case 'CONVERGED';             clsCmd = '\textcolor{green!45!black}{CONVERGED}';
+                case 'BOUNDED_WEAK_GEOMETRY'; clsCmd = '\textcolor{orange!70!black}{BOUNDED\_WEAK\_GEOMETRY}';
+                case 'NON_CONVERGENT';        clsCmd = '\textcolor{red!70!black}{NON\_CONVERGENT}';
+                case 'WEAKLY_OBSERVABLE';     clsCmd = '\textcolor{orange!80!black}{WEAKLY\_OBSERVABLE}';
+                case 'UNOBSERVABLE';          clsCmd = '\textcolor{gray}{UNOBSERVABLE}';
+                case 'INVALID_CONFIG';        clsCmd = '\textcolor{red!80!black}{INVALID\_CONFIG}';
+                otherwise;                    clsCmd = attCls8;
             end
             fprintf(fid,'\\textbf{Classification:} %s\\quad Receivers: %d\\quad Estimated: %s\n\n', ...
                 clsCmd, nRx8, mat2str(estAtt8));
             if ~isempty(lN8)
-                fprintf(fid,'\\vspace{4pt}\\textbf{Lever arm norms (body frame):} ');
+                fprintf(fid,'\\textbf{Lever arm norms (body frame):} ');
                 for ri8 = 1:numel(lN8)
                     fprintf(fid,'Rx\\,%d: %.4f\\,m', ri8, lN8(ri8));
                     if ri8 < numel(lN8); fprintf(fid,'; '); end
@@ -1643,20 +1647,26 @@ classdef LatexReportBuilder
             fprintf(fid,'\\toprule\n\\textbf{Quantity} & \\textbf{Value}\\\\\n\\midrule\n');
             if ~isnan(initE8);  fprintf(fid,'Initial attitude error (3D norm) & %.4f deg\\\\\n', initE8);  end
             if ~isnan(finalE8); fprintf(fid,'Final attitude error (3D norm) & %.4f deg\\\\\n',   finalE8); end
-            if ~isnan(meanJ8);  fprintf(fid,'Mean $H_{att}$ Frobenius norm & %.6f\\\\\n',        meanJ8);  end
+            if ~isnan(impR8);   fprintf(fid,'Improvement ratio (init/final, >1=improved) & %.3f\\\\\n', impR8); end
+            if ~isnan(meanJ8);  fprintf(fid,'Mean $H_{att}$ Frobenius norm & %.4f\\\\\n',        meanJ8);  end
             fprintf(fid,'\\bottomrule\n\\end{tabular}\n');
             switch attCls8
+                case 'NON_CONVERGENT'
+                    fprintf(fid,['\\vspace{6pt}\\textbf{Note:} Float ambiguity states per ' ...
+                        'tower$\\times$receiver absorb carrier attitude signal. ' ...
+                        'Attitude is non-convergent despite rank-3 Jacobian.\n\n']);
+                case 'BOUNDED_WEAK_GEOMETRY'
+                    fprintf(fid,['\\vspace{6pt}\\textbf{Note:} Attitude error maintained ' ...
+                        'but not reduced. GEO geometry limits angular diversity.\n\n']);
                 case 'WEAKLY_OBSERVABLE'
-                    fprintf(fid,['\\vspace{6pt}\\textbf{Warning:} Attitude is only \\emph{weakly observable}. ' ...
-                        'Lever arm geometry provides partial 1--2 axis sensitivity. ' ...
-                        'Attitude error may not fully converge.\n\n']);
+                    fprintf(fid,['\\vspace{6pt}\\textbf{Warning:} $H_{att}$ rank $< 3$. ' ...
+                        'Partial axis sensitivity only.\n\n']);
                 case 'UNOBSERVABLE'
-                    fprintf(fid,['\\vspace{6pt}\\textbf{Note:} Attitude is \\emph{unobservable} ' ...
-                        'with this configuration (zero lever arm or single receiver). ' ...
-                        'Attitude states are frozen at truth.\n\n']);
+                    fprintf(fid,['\\vspace{6pt}\\textbf{Note:} Attitude unobservable ' ...
+                        '(zero lever arm or single receiver).\n\n']);
                 case 'INVALID_CONFIG'
-                    fprintf(fid,['\\vspace{6pt}\\textbf{Warning:} Multi-receiver configuration with ' ...
-                        'zero lever arms is an \\emph{invalid config} for attitude estimation.\n\n']);
+                    fprintf(fid,['\\vspace{6pt}\\textbf{Warning:} Multi-receiver with zero lever arms ' ...
+                        'is an invalid configuration.\n\n']);
             end
             fprintf(fid,'\\end{document}\n');
             fclose(fid);

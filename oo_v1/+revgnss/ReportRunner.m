@@ -284,7 +284,13 @@ classdef ReportRunner
                 cfg.estimator.estimateAngularRateFromPseudorange;
             summary.towerClockMode = cfg.estimator.towerClockMode;
 
-            % Attitude observability classification (Stage 14.7)
+            % Attitude classification (Stage 14.8): convergence-based, not rank-only.
+            % CONVERGED          : rank >= 3, final error < 50% of initial
+            % BOUNDED_WEAK_GEOMETRY : rank >= 3, error maintained (0.75–2x ratio)
+            % NON_CONVERGENT     : rank >= 3 but error worsened (ratio < 0.75)
+            % WEAKLY_OBSERVABLE  : rank 1-2
+            % UNOBSERVABLE       : rank 0 or estimation disabled
+            % INVALID_CONFIG     : multi-rx with zero lever arms
             try
                 estAtt2 = isfield(cfg.estimator,'estimateAttitude') && cfg.estimator.estimateAttitude;
                 leverArms2 = zeros(3,1);
@@ -293,43 +299,64 @@ classdef ReportRunner
                 end
                 leverNorms2 = sqrt(sum(leverArms2.^2, 1));
                 summary.leverArmNorms_m = leverNorms2;
-                if ~estAtt2
-                    summary.attitudeObsClass = 'UNOBSERVABLE';
-                elseif all(leverNorms2 < 1e-9)
-                    summary.attitudeObsClass = 'INVALID_CONFIG';
+
+                attErrVec2 = diag.getAttitudeErrorVecs();
+                if ~isempty(attErrVec2)
+                    initE2 = norm(attErrVec2(:,1))   * 180/pi;
+                    finE2  = norm(attErrVec2(:,end)) * 180/pi;
                 else
-                    rankVec2 = diag.getAttitudeRank();
-                    medRank2 = median(rankVec2, 'omitnan');
-                    if medRank2 >= 3
-                        summary.attitudeObsClass = 'OBSERVABLE';
-                    elseif medRank2 >= 1
-                        summary.attitudeObsClass = 'WEAKLY_OBSERVABLE';
-                    else
-                        summary.attitudeObsClass = 'UNOBSERVABLE';
-                    end
+                    initE2 = NaN; finE2 = NaN;
                 end
+                summary.initialAttitudeError_deg = initE2;
+                summary.finalAttitudeError_deg   = finE2;
+                if ~isnan(initE2) && ~isnan(finE2) && finE2 > 0
+                    summary.attitudeImprovementRatio = initE2 / finE2;
+                else
+                    summary.attitudeImprovementRatio = NaN;
+                end
+
+                rankVec2 = diag.getAttitudeRank();
+                medRank2 = median(rankVec2, 'omitnan');
+                condVec2 = [diag.log.attitudeCondNum];
+                summary.attitudeHattCondNum = mean(condVec2(isfinite(condVec2) & condVec2>0), 'omitnan');
+                sigVec2  = [diag.log.estimatedAttitudeSigma_rad];
+                summary.finalAttitudeSigma_deg = sigVec2(end) * 180/pi;
+                jacN2 = [diag.log.attitudeJacobianNorm];
+                summary.meanAttitudeJacNorm = mean(jacN2(jacN2 > 0), 'omitnan');
+                summary.carrierAttJacActive = estAtt2 && ...
+                    isfield(cfg.estimator,'estimateAttitudeFromPseudorange') && ...
+                    cfg.estimator.estimateAttitudeFromPseudorange && ...
+                    isfield(cfg.measurements,'carrierMode') && ...
+                    strcmp(cfg.measurements.carrierMode,'ekfFloat') && ...
+                    any(leverNorms2 > 1e-9);
+
+                impR2 = summary.attitudeImprovementRatio;
+                if ~estAtt2
+                    cls2 = 'UNOBSERVABLE';
+                elseif all(leverNorms2 < 1e-9)
+                    cls2 = 'INVALID_CONFIG';
+                elseif medRank2 < 1
+                    cls2 = 'UNOBSERVABLE';
+                elseif medRank2 < 3
+                    cls2 = 'WEAKLY_OBSERVABLE';
+                elseif ~isnan(impR2) && impR2 >= 2.0
+                    cls2 = 'CONVERGED';
+                elseif ~isnan(impR2) && impR2 >= 0.75
+                    cls2 = 'BOUNDED_WEAK_GEOMETRY';
+                else
+                    cls2 = 'NON_CONVERGENT';
+                end
+                summary.attitudeObsClass = cls2;
             catch
                 summary.attitudeObsClass = 'UNKNOWN';
                 summary.leverArmNorms_m  = [];
-            end
-            try
-                attErrVec = diag.getAttitudeErrorVecs();
-                if ~isempty(attErrVec)
-                    summary.initialAttitudeError_deg = norm(attErrVec(:,1))   * 180/pi;
-                    summary.finalAttitudeError_deg   = norm(attErrVec(:,end)) * 180/pi;
-                else
-                    summary.initialAttitudeError_deg = NaN;
-                    summary.finalAttitudeError_deg   = NaN;
-                end
-            catch
-                summary.initialAttitudeError_deg = NaN;
-                summary.finalAttitudeError_deg   = NaN;
-            end
-            try
-                jacNorms2 = [diag.log.attitudeJacobianNorm];
-                summary.meanAttitudeJacNorm = mean(jacNorms2(jacNorms2 > 0), 'omitnan');
-            catch
-                summary.meanAttitudeJacNorm = NaN;
+                summary.initialAttitudeError_deg   = NaN;
+                summary.finalAttitudeError_deg     = NaN;
+                summary.attitudeImprovementRatio   = NaN;
+                summary.attitudeHattCondNum        = NaN;
+                summary.finalAttitudeSigma_deg     = NaN;
+                summary.meanAttitudeJacNorm        = NaN;
+                summary.carrierAttJacActive        = false;
             end
 
             % Observables
