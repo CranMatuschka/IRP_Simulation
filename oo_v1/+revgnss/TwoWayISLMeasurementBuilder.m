@@ -44,7 +44,8 @@ classdef TwoWayISLMeasurementBuilder
             end
         end
 
-        function [zAdd, hAdd, HAdd, RAdd, info] = build(cfg, primaryAsset, assets, x, stateMap, nx)
+        function [zAdd, hAdd, HAdd, RAdd, info] = build(cfg, primaryAsset, assets, x, stateMap, nx, t_s)
+            if nargin < 7; t_s = 0; end
             info = revgnss.TwoWayISLMeasurementBuilder.defaultInfo(cfg, assets);
             zAdd = []; hAdd = []; HAdd = zeros(0, nx); RAdd = zeros(0, 0);
             if ~info.enabled; return; end
@@ -66,6 +67,11 @@ classdef TwoWayISLMeasurementBuilder
                 info = revgnss.TwoWayISLMeasurementBuilder.addMeta_(info, ...
                     'islTwoWayDopplerDiagnostic', [], false);
                 info.dopplerDiagnostic_mps = rrTruth;
+            end
+            if info.rangeEnabled || info.dopplerEnabled
+                info.linkEvents = revgnss.ISLTimingModel.buildTwoWayEvents( ...
+                    cfg, primaryAsset, tx, info.transmitterAssetIndex, info.receiverAssetIndex, ...
+                    revgnss.TwoWayISLMeasurementBuilder.roleName_(info.rangeUseInEKF), t_s);
             end
             info.zEkf = zAdd;
             info.hEkf = hAdd;
@@ -110,6 +116,7 @@ classdef TwoWayISLMeasurementBuilder
             info.nEkfRows = 0;
             info.prefitRms = NaN;
             info.dopplerDiagnostic_mps = NaN;
+            info.linkEvents = struct([]);
         end
     end
 
@@ -137,6 +144,11 @@ classdef TwoWayISLMeasurementBuilder
         function [z, h, H, R] = append_(z, h, H, R, zi, hi, Hi, ri)
             z = [z; zi]; h = [h; hi]; H = [H; Hi];
             R = blkdiag(R, ri);
+        end
+
+        function role = roleName_(useInEkf)
+            role = 'diagnosticOnly';
+            if useInEkf; role = 'EKF'; end
         end
 
         function tf = isEnabled_(cfg)

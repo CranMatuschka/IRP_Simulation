@@ -925,6 +925,21 @@ classdef Diagnostics < handle
                 entry.observableStack = revgnss.ObservableStackDescriptor.compact([]);
             end
 
+            % --- Stage 23: ISL link-event timing / clock transfer -------
+            entry.islClockTransfer = struct('enabled',false, ...
+                'clockTransferDiagnosticAvailable',false,'eventCount',0, ...
+                'timingMode','sameEpoch','processingDelay_s',0, ...
+                'meanLightTime_s',NaN,'maxLightTime_s',NaN, ...
+                'oneWayClockTermRms_m',NaN,'twoWayClockResidual_m',NaN, ...
+                'clockCancellationAssumption','notEvaluated','isTwstft',false, ...
+                'relayTransponderImplemented',false,'islCarrierEkfUsed',false);
+            if isfield(errStruct,'islClockTransfer') && isstruct(errStruct.islClockTransfer)
+                entry.islClockTransfer = errStruct.islClockTransfer;
+                if isfield(entry.islClockTransfer,'events')
+                    entry.islClockTransfer = rmfield(entry.islClockTransfer,'events');
+                end
+            end
+
             % --- Append to log ----------------------------------------
             obj.nEpochs = obj.nEpochs + 1;
             if obj.nEpochs == 1

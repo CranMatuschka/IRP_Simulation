@@ -86,6 +86,8 @@ cfg.assets(2).clock.name = 'RxClock_GEO_2';
 % estimated spacecraft asset. Stage 22 uses two-way range in the EKF and
 % keeps raw one-way rows diagnostic-only to avoid double-counting. Carrier is
 % diagnostic-only because no ISL ambiguity state exists in this stage.
+% Stage 23 adds report-only link-event timing and clock-transfer diagnostics;
+% it is not TWSTFT and does not add relay/transponder physics.
 cfg.measurements.isl.enable = true;
 cfg.measurements.isl.transmitterAssetIndex = 2;
 cfg.measurements.isl.receiverAssetIndex = 1;
@@ -103,6 +105,12 @@ cfg.measurements.isl.twoWay.range.useInEKF = true;
 cfg.measurements.isl.twoWay.range.sigma_m = 0.25;
 cfg.measurements.isl.twoWay.doppler.enable = true;
 cfg.measurements.isl.twoWay.doppler.useInEKF = false;
+cfg.measurements.isl.timing.enable = true;
+cfg.measurements.isl.timing.mode = 'sameEpoch';
+cfg.measurements.isl.timing.maxIter = 3;
+cfg.measurements.isl.timing.tolerance_s = 1e-12;
+cfg.measurements.isl.timing.processingDelay_s = 0.0;
+cfg.measurements.isl.clockTransferDiagnostics.enable = true;
 
 % --- Frequency --------------------------------------------------
 % false  ->  L1 only

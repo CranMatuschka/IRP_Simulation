@@ -185,7 +185,7 @@ classdef ReverseGNSSSimulation < handle
             % Stage 21: append one-way ISL code/Doppler EKF rows after the
             % ground-carrier slip filter so legacy carrier row ordering stays intact.
             [z_isl, h_isl, H_isl, R_isl, islInfo] = revgnss.ISLMeasurementBuilder.build( ...
-                obj.cfg, obj.asset, obj.assets, obj.ekf.x, obj.ekf.stateMap, obj.ekf.nx);
+                obj.cfg, obj.asset, obj.assets, obj.ekf.x, obj.ekf.stateMap, obj.ekf.nx, t_s);
             if ~isempty(z_isl)
                 z = [z; z_isl];
                 h = [h; h_isl];
@@ -198,7 +198,7 @@ classdef ReverseGNSSSimulation < handle
                     errStruct.observableStack, islInfo);
             end
             [z_2w, h_2w, H_2w, R_2w, twoWayInfo] = revgnss.TwoWayISLMeasurementBuilder.build( ...
-                obj.cfg, obj.asset, obj.assets, obj.ekf.x, obj.ekf.stateMap, obj.ekf.nx);
+                obj.cfg, obj.asset, obj.assets, obj.ekf.x, obj.ekf.stateMap, obj.ekf.nx, t_s);
             if ~isempty(z_2w)
                 z = [z; z_2w];
                 h = [h; h_2w];
@@ -206,6 +206,7 @@ classdef ReverseGNSSSimulation < handle
                 R = blkdiag(R, R_2w);
             end
             errStruct.islTwoWay = twoWayInfo;
+            errStruct.islClockTransfer = revgnss.ISLTimingModel.summarize(obj.cfg, islInfo, twoWayInfo);
             if isfield(errStruct,'observableStack')
                 errStruct.observableStack = revgnss.ReverseGnssObservableAdapter.addTwoWayISLRows( ...
                     errStruct.observableStack, twoWayInfo);

@@ -224,6 +224,38 @@ classdef ReportRealityHelper
                     error('ClockExactReportBuilder:twoWayIslDopplerUnsupported', ...
                         'Two-way ISL Doppler is diagnostic-only in Stage 22.');
                 end
+                revgnss.ReportRealityHelper.validateIslTiming_(cfg, summary);
+            end
+        end
+
+        function validateIslTiming_(cfg, summary)
+            timingOn = revgnss.ReportRealityHelper.getCfgBool_(cfg, {'measurements','isl','timing','enable'}, false);
+            if ~timingOn; return; end
+            if ~isfield(summary,'islTiming') || ~isstruct(summary.islTiming)
+                error('ClockExactReportBuilder:islTimingMissing', ...
+                    'ISL timing is enabled but no clock-transfer timing summary exists.');
+            end
+            st = summary.islTiming;
+            if revgnss.ReportRealityHelper.safeField_(st,'eventCount',0) <= 0
+                error('ClockExactReportBuilder:islTimingEventsMissing', ...
+                    'ISL timing is enabled but no link-event metadata exists.');
+            end
+            if revgnss.ReportRealityHelper.safeField_(st,'isTwstft',false)
+                error('ClockExactReportBuilder:falseTwstftClaim', ...
+                    'Stage 23 report must not claim TWSTFT is implemented.');
+            end
+            if revgnss.ReportRealityHelper.safeField_(st,'relayTransponderImplemented',false)
+                error('ClockExactReportBuilder:falseRelayClaim', ...
+                    'Stage 23 report must not claim relay/transponder modelling is implemented.');
+            end
+            if revgnss.ReportRealityHelper.safeField_(st,'islCarrierEkfUsed',false)
+                error('ClockExactReportBuilder:islCarrierEkfUnsupported', ...
+                    'ISL carrier is diagnostic-only; no ISL ambiguity states exist.');
+            end
+            if revgnss.ReportRealityHelper.safeField_(summary,'islCodeUsedInEkf',false) && ...
+                    revgnss.ReportRealityHelper.safeField_(summary,'islTwoWayRangeUsedInEkf',false)
+                error('ClockExactReportBuilder:islDoubleCounting', ...
+                    'One-way and two-way ISL rows are double-counted in EKF.');
             end
         end
 

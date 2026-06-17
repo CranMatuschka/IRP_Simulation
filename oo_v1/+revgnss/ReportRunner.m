@@ -750,6 +750,7 @@ classdef ReportRunner
             summary.islCarrierUsedInEkf = revgnss.ReportRunner.safeCfgBool_(cfg, {'measurements','isl','carrier','useInEKF'}, false);
             summary.islTwoWayRangeUsedInEkf = revgnss.ReportRunner.safeCfgBool_(cfg, {'measurements','isl','twoWay','range','useInEKF'}, false);
             summary.islTwoWayDopplerUsedInEkf = revgnss.ReportRunner.safeCfgBool_(cfg, {'measurements','isl','twoWay','doppler','useInEKF'}, false);
+            summary.islTiming = revgnss.ReportRunner.emptyIslTimingSummary_();
             summary.observableStack = revgnss.ObservableStackDescriptor.compact([]);
             try
                 if isfield(diag.log(end),'observableStack')
@@ -769,6 +770,21 @@ classdef ReportRunner
                 end
             catch
             end
+            try
+                if isfield(diag.log(end),'islClockTransfer')
+                    summary.islTiming = diag.log(end).islClockTransfer;
+                    if isfield(summary.islTiming,'events'); summary.islTiming = rmfield(summary.islTiming,'events'); end
+                end
+            catch
+            end
+        end
+
+        function s = emptyIslTimingSummary_()
+            s = struct('enabled',false,'clockTransferDiagnosticAvailable',false, ...
+                'eventCount',0,'timingMode','sameEpoch','processingDelay_s',0, ...
+                'meanLightTime_s',NaN,'maxLightTime_s',NaN,'oneWayClockTermRms_m',NaN, ...
+                'twoWayClockResidual_m',NaN,'clockCancellationAssumption','notEvaluated', ...
+                'isTwstft',false,'relayTransponderImplemented',false,'islCarrierEkfUsed',false);
         end
 
         % ================================================================

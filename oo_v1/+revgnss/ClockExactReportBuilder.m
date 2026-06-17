@@ -457,6 +457,7 @@ classdef ClockExactReportBuilder
             CE.writeMultiAssetArchitecture_(fid, summary);
             CE.writeOneWayISLArchitecture_(fid, cfg, summary);
             CE.writeTwoWayISLArchitecture_(fid, cfg, summary);
+            CE.writeIslTimingDiagnostics_(fid, cfg, summary);
             CE.writeObservableRealityCheck_(fid, summary);
             CE.writeStateEstimation_(fid, plotPaths, stem, cfg, diag, figDir);
             CE.writeMeasurementValidation_(fid, plotPaths, stem, figDir);
@@ -885,6 +886,48 @@ classdef ClockExactReportBuilder
             CE.writeQuantRow_(fid, 'Double-counting guard', CE.esc_(guard));
             CE.writeQuantRow_(fid, 'Clock cancellation assumption', 'same-epoch same-spacecraft Tx/Rx clock; range H clock column is zero');
             CE.writeQuantRow_(fid, 'Limitations', 'no TWSTFT; no relay/transponder; no secondary asset EKF state; no ISL carrier EKF');
+            fprintf(fid, '\\bottomrule\n\\end{tabular}\\end{center}\n\\clearpage\n');
+        end
+
+        % ================================================================
+        % ISL LINK TIMING AND CLOCK-TRANSFER DIAGNOSTICS
+        % ================================================================
+
+        function writeIslTimingDiagnostics_(fid, cfg, summary)
+            CE = revgnss.ClockExactReportBuilder;
+            fprintf(fid, '\\section{ISL Link Timing and Clock-Transfer Diagnostics}\n');
+            st = CE.safeField_(summary, 'islTiming', struct());
+            timingOn = CE.getLogical_(cfg, {'measurements','isl','timing','enable'}, false);
+            txIdx = CE.getCfgNum_(cfg, {'measurements','isl','transmitterAssetIndex'}, 2);
+            rxIdx = CE.getCfgNum_(cfg, {'measurements','isl','receiverAssetIndex'}, 1);
+            ma = CE.safeField_(summary, 'multiAsset', struct());
+            txName = sprintf('asset %d', txIdx); rxName = sprintf('asset %d', rxIdx);
+            if isstruct(ma) && isfield(ma,'assetTable')
+                if txIdx <= numel(ma.assetTable); txName = ma.assetTable(txIdx).name; end
+                if rxIdx <= numel(ma.assetTable); rxName = ma.assetTable(rxIdx).name; end
+            end
+            fprintf(fid, ['Stage 23 adds transmit/receive event metadata and clock-transfer ' ...
+                'diagnostics for the ISL scaffold. These quantities are report-only in this ' ...
+                'stage; they do not add EKF rows and they do not make the model TWSTFT.\n\n']);
+            fprintf(fid, '\\begin{center}\\small\n');
+            fprintf(fid, '\\begin{tabular}{p{0.42\\textwidth}p{0.42\\textwidth}}\n');
+            fprintf(fid, '\\toprule\n\\textbf{Quantity} & \\textbf{Actual value}\\\\\n\\midrule\n');
+            CE.writeQuantRow_(fid, 'Timing diagnostics enabled', mat2str(timingOn));
+            CE.writeQuantRow_(fid, 'Timing mode', CE.esc_(CE.safeField_(st,'timingMode','sameEpoch')));
+            CE.writeQuantRow_(fid, 'Transmitter / receiver asset', sprintf('%s / %s', CE.esc_(txName), CE.esc_(rxName)));
+            CE.writeQuantRow_(fid, 'Forward-leg timing policy', 'secondary transmit event to primary receive event');
+            CE.writeQuantRow_(fid, 'Return-leg timing policy', 'primary transmit event to secondary receive event; diagnostic metadata only');
+            CE.writeQuantRow_(fid, 'Link events recorded', sprintf('%d', CE.safeField_(st,'eventCount',0)));
+            CE.writeQuantRow_(fid, 'Mean / max light time', sprintf('%.9g / %.9g s', ...
+                CE.safeField_(st,'meanLightTime_s',NaN), CE.safeField_(st,'maxLightTime_s',NaN)));
+            CE.writeQuantRow_(fid, 'Processing delay', sprintf('%.9g s', CE.safeField_(st,'processingDelay_s',0)));
+            CE.writeQuantRow_(fid, 'One-way clock term RMS', sprintf('%.6g m', CE.safeField_(st,'oneWayClockTermRms_m',NaN)));
+            CE.writeQuantRow_(fid, 'Two-way clock residual diagnostic', sprintf('%.6g m', CE.safeField_(st,'twoWayClockResidual_m',NaN)));
+            CE.writeQuantRow_(fid, 'Clock cancellation classification', CE.esc_(CE.safeField_(st,'clockCancellationAssumption','notEvaluated')));
+            CE.writeQuantRow_(fid, 'Clock-transfer diagnostics available', mat2str(CE.safeField_(st,'clockTransferDiagnosticAvailable',false)));
+            CE.writeQuantRow_(fid, 'Is this TWSTFT?', 'NO');
+            CE.writeQuantRow_(fid, 'Relay/transponder implemented?', 'NO');
+            CE.writeQuantRow_(fid, 'ISL carrier EKF-used?', 'NO');
             fprintf(fid, '\\bottomrule\n\\end{tabular}\\end{center}\n\\clearpage\n');
         end
 

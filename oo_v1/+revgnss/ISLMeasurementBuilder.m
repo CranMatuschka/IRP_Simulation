@@ -38,7 +38,8 @@ classdef ISLMeasurementBuilder
             end
         end
 
-        function [zAdd, hAdd, HAdd, RAdd, info] = build(cfg, primaryAsset, assets, x, stateMap, nx)
+        function [zAdd, hAdd, HAdd, RAdd, info] = build(cfg, primaryAsset, assets, x, stateMap, nx, t_s)
+            if nargin < 7; t_s = 0; end
             info = revgnss.ISLMeasurementBuilder.defaultInfo(cfg, assets);
             zAdd = []; hAdd = []; HAdd = zeros(0, nx); RAdd = zeros(0, 0);
             if ~info.enabled; return; end
@@ -78,6 +79,9 @@ classdef ISLMeasurementBuilder
             if info.carrierEnabled
                 info = revgnss.ISLMeasurementBuilder.addMeta_(info, 'islCarrierDiagnostic', [], false);
             end
+            info.linkEvents = revgnss.ISLTimingModel.buildOneWayEvents( ...
+                cfg, rxTruth, tx, info.transmitterAssetIndex, info.receiverAssetIndex, ...
+                revgnss.ISLMeasurementBuilder.eventRoles_(info), t_s);
             info.zEkf = zAdd;
             info.hEkf = hAdd;
             info.ekfRowTypes = info.ekfRowTypes(:)';
@@ -128,6 +132,7 @@ classdef ISLMeasurementBuilder
             info.nCarrierDiagnosticRows = double(info.carrierEnabled);
             info.nEkfRows = 0;
             info.prefitRms = NaN;
+            info.linkEvents = struct([]);
         end
     end
 
@@ -156,6 +161,24 @@ classdef ISLMeasurementBuilder
         function [z, h, H, R] = append_(z, h, H, R, zi, hi, Hi, ri)
             z = [z; zi]; h = [h; hi]; H = [H; Hi];
             R = blkdiag(R, ri);
+        end
+
+        function roles = eventRoles_(info)
+            roles = {};
+            if info.codeEnabled
+                roles{end+1} = revgnss.ISLMeasurementBuilder.roleName_(info.codeUseInEKF); %#ok<AGROW>
+            end
+            if info.dopplerEnabled
+                roles{end+1} = revgnss.ISLMeasurementBuilder.roleName_(info.dopplerUseInEKF); %#ok<AGROW>
+            end
+            if info.carrierEnabled
+                roles{end+1} = 'diagnosticOnly'; %#ok<AGROW>
+            end
+        end
+
+        function role = roleName_(useInEkf)
+            role = 'diagnosticOnly';
+            if useInEkf; role = 'EKF'; end
         end
 
         function tf = isEnabled_(cfg)
