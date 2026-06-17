@@ -197,8 +197,8 @@ classdef ConfigFactory
             % Initial covariance (1-sigma diagonal)
             cfg.estimator.P0_pos_m        = 1000.0;
             cfg.estimator.P0_vel_mps      = 1.0;
-            % Near-zero attitude uncertainty: EKF treats attitude as known.
-            cfg.estimator.P0_euler_rad    = 1e-12;
+            % 5° initial 1-sigma — consistent with 0.5° initial error; finalizeConfig may increase.
+            cfg.estimator.P0_euler_rad    = deg2rad(5);
             cfg.estimator.P0_omega_radps  = 1e-12;
             cfg.estimator.P0_bRx_m        = 100.0;
             cfg.estimator.P0_bdotRx_mps   = 0.01;
@@ -1528,7 +1528,9 @@ classdef ConfigFactory
             %           Then auto-fill from 4-column cross pattern if nR<=4.
             %           Else require custom arms or error.
             % Auto-attitude: nReceivers==1 → all attitude flags false.
-            %                nReceivers >1 → estimateAttitude/FromPseudorange true.
+            %                nReceivers >1 → attitude estimated from lever arms.
+            % Angular-rate estimation stays disabled unless a rotational velocity
+            % measurement model is implemented.
             nR_req      = cfg.scenario.nReceivers;
             defaultArms = [1 -1 0 0; 0 0 1 -1; 0.2 0.2 -0.2 -0.2];  % 3 × 4
 
@@ -1548,7 +1550,7 @@ classdef ConfigFactory
             else
                 % Multi-receiver: attitude is observable from pseudorange geometry.
                 cfg.estimator.estimateAttitude                   = true;
-                cfg.estimator.estimateAngularRate                = true;
+                cfg.estimator.estimateAngularRate                = false;
                 cfg.estimator.estimateAttitudeFromPseudorange    = true;
                 cfg.estimator.estimateAngularRateFromPseudorange = false;
                 existingArms = cfg.asset.receiverLeverArms_body_m;
@@ -1564,6 +1566,18 @@ classdef ConfigFactory
                          'before calling finalizeConfig.'], nR_req, nR_req, nR_req);
                 end
                 cfg.asset.receiverLeverArm_body_m = cfg.asset.receiverLeverArms_body_m(:, 1);
+
+                initEuler_deg = [0; 0; 0];
+                if isfield(cfg.estimator,'initialError') && ...
+                        isfield(cfg.estimator.initialError,'euler_deg')
+                    initEuler_deg = cfg.estimator.initialError.euler_deg(:);
+                end
+                initEulerMax_rad = max(abs(initEuler_deg)) * pi/180;
+                if initEulerMax_rad > 0 && cfg.estimator.P0_euler_rad < initEulerMax_rad
+                    cfg.estimator.P0_euler_rad = max(deg2rad(5), 2 * initEulerMax_rad);
+                    cfg.validation.warnings{end+1} = ...
+                        'P0_euler_rad increased to be consistent with nonzero initial attitude error.';
+                end
             end
 
             % ---- Tower survey errors (Stage 2) --------------------------------

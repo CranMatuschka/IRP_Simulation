@@ -284,6 +284,54 @@ classdef ReportRunner
                 cfg.estimator.estimateAngularRateFromPseudorange;
             summary.towerClockMode = cfg.estimator.towerClockMode;
 
+            % Attitude observability classification (Stage 14.7)
+            try
+                estAtt2 = isfield(cfg.estimator,'estimateAttitude') && cfg.estimator.estimateAttitude;
+                leverArms2 = zeros(3,1);
+                if isfield(cfg,'asset') && isfield(cfg.asset,'receiverLeverArms_body_m')
+                    leverArms2 = cfg.asset.receiverLeverArms_body_m;
+                end
+                leverNorms2 = sqrt(sum(leverArms2.^2, 1));
+                summary.leverArmNorms_m = leverNorms2;
+                if ~estAtt2
+                    summary.attitudeObsClass = 'UNOBSERVABLE';
+                elseif all(leverNorms2 < 1e-9)
+                    summary.attitudeObsClass = 'INVALID_CONFIG';
+                else
+                    rankVec2 = diag.getAttitudeRank();
+                    medRank2 = median(rankVec2, 'omitnan');
+                    if medRank2 >= 3
+                        summary.attitudeObsClass = 'OBSERVABLE';
+                    elseif medRank2 >= 1
+                        summary.attitudeObsClass = 'WEAKLY_OBSERVABLE';
+                    else
+                        summary.attitudeObsClass = 'UNOBSERVABLE';
+                    end
+                end
+            catch
+                summary.attitudeObsClass = 'UNKNOWN';
+                summary.leverArmNorms_m  = [];
+            end
+            try
+                attErrVec = diag.getAttitudeErrorVecs();
+                if ~isempty(attErrVec)
+                    summary.initialAttitudeError_deg = norm(attErrVec(:,1))   * 180/pi;
+                    summary.finalAttitudeError_deg   = norm(attErrVec(:,end)) * 180/pi;
+                else
+                    summary.initialAttitudeError_deg = NaN;
+                    summary.finalAttitudeError_deg   = NaN;
+                end
+            catch
+                summary.initialAttitudeError_deg = NaN;
+                summary.finalAttitudeError_deg   = NaN;
+            end
+            try
+                jacNorms2 = [diag.log.attitudeJacobianNorm];
+                summary.meanAttitudeJacNorm = mean(jacNorms2(jacNorms2 > 0), 'omitnan');
+            catch
+                summary.meanAttitudeJacNorm = NaN;
+            end
+
             % Observables
             summary.pseudorangeEnabled   = cfg.measurements.pseudorange.enable;
             summary.dopplerEnabled       = cfg.measurements.doppler.enable;

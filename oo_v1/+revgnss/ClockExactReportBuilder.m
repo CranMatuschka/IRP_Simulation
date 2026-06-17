@@ -454,6 +454,7 @@ classdef ClockExactReportBuilder
             CE.writeTroposphereArchitecture_(fid, cfg, diag);
             CE.writeDisabledComponents_(fid, cfg);
             CE.writeNumericalSummary_(fid, cfg, summary, diag);
+            CE.writeAttitudeObservability_(fid, cfg, summary, diag);
 
             fprintf(fid, '\\end{document}\n');
             fclose(fid);
@@ -1478,6 +1479,63 @@ classdef ClockExactReportBuilder
             fprintf(fid, ['\\noindent \\textit{Scientific limitations (v1): float carrier only, ' ...
                 'no integer fixing, no L2 carrier EKF, no carrier IF, no PPP-grade accuracy, ' ...
                 'no ANTEX/IONEX/SP3/CLK parsers.}\n\n']);
+        end
+
+        % ================================================================
+        % SECTION 8 — ATTITUDE OBSERVABILITY (Stage 14.7)
+        % ================================================================
+        function writeAttitudeObservability_(fid, cfg, summary, diag) %#ok<INUSD,INUSL>
+            function v = sf(s, f, def)
+                if isfield(s, f); v = s.(f); else; v = def; end
+            end
+            fprintf(fid, '\\clearpage\n');
+            fprintf(fid, '\\section{Attitude Observability and Estimation}\n');
+
+            attCls  = sf(summary, 'attitudeObsClass',         'UNKNOWN');
+            estAtt  = sf(summary, 'estimateAttitude',         false);
+            nRxA    = sf(summary, 'nReceivers',               1);
+            lNorms  = sf(summary, 'leverArmNorms_m',          []);
+            initE   = sf(summary, 'initialAttitudeError_deg', NaN);
+            finalE  = sf(summary, 'finalAttitudeError_deg',   NaN);
+            meanJ   = sf(summary, 'meanAttitudeJacNorm',      NaN);
+
+            switch attCls
+                case 'OBSERVABLE';        clsStr = '\textcolor{green!45!black}{OBSERVABLE}';
+                case 'WEAKLY_OBSERVABLE'; clsStr = '\textcolor{orange!80!black}{WEAKLY\_OBSERVABLE}';
+                case 'UNOBSERVABLE';      clsStr = '\textcolor{gray}{UNOBSERVABLE}';
+                case 'INVALID_CONFIG';    clsStr = '\textcolor{red!70!black}{INVALID\_CONFIG}';
+                otherwise;                clsStr = attCls;
+            end
+            fprintf(fid, '\\textbf{Classification:} %s\\quad Receivers: %d\\quad Estimated: %s\n\n', ...
+                clsStr, nRxA, mat2str(estAtt));
+
+            if ~isempty(lNorms) && numel(lNorms) > 0
+                fprintf(fid, '\\vspace{4pt}\\textbf{Lever arm norms (body frame):} ');
+                for ri = 1:numel(lNorms)
+                    fprintf(fid, 'Rx\\,%d: %.4f\\,m', ri, lNorms(ri));
+                    if ri < numel(lNorms); fprintf(fid, '; '); end
+                end
+                fprintf(fid, '\n\n');
+            end
+
+            fprintf(fid, '\\vspace{4pt}\\begin{tabular}{p{0.52\\textwidth}p{0.30\\textwidth}}\n');
+            fprintf(fid, '\\toprule\n\\textbf{Quantity} & \\textbf{Value}\\\\\n\\midrule\n');
+            if ~isnan(initE);  fprintf(fid, 'Initial attitude error (3D norm) & %.4f deg\\\\\n', initE);  end
+            if ~isnan(finalE); fprintf(fid, 'Final attitude error (3D norm) & %.4f deg\\\\\n',   finalE); end
+            if ~isnan(meanJ);  fprintf(fid, 'Mean $H_{att}$ Frobenius norm & %.6f\\\\\n',        meanJ);  end
+            fprintf(fid, '\\bottomrule\n\\end{tabular}\n');
+
+            switch attCls
+                case 'WEAKLY_OBSERVABLE'
+                    fprintf(fid, ['\\vspace{6pt}\\textbf{Warning:} Attitude is only \\emph{weakly ' ...
+                        'observable} (partial 1--2 axis sensitivity). Attitude error may not fully converge.\n\n']);
+                case 'UNOBSERVABLE'
+                    fprintf(fid, ['\\vspace{6pt}\\textbf{Note:} Attitude is \\emph{unobservable} ' ...
+                        '(zero lever arm or single receiver). Attitude states frozen at truth.\n\n']);
+                case 'INVALID_CONFIG'
+                    fprintf(fid, ['\\vspace{6pt}\\textbf{Warning:} Multi-receiver with zero lever arms ' ...
+                        'is an \\emph{invalid config} for attitude estimation.\n\n']);
+            end
         end
 
         % ================================================================
