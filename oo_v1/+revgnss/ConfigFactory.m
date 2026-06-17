@@ -419,6 +419,20 @@ classdef ConfigFactory
             cfg.measurements.carrierPhase.seed             = 9001;
             cfg.measurements.carrierPhase.cycleSlip.enable = true;
 
+            % --- One-way inter-spacecraft link scaffold (Stage 21) --------
+            cfg.measurements.isl.enable = false;
+            cfg.measurements.isl.transmitterAssetIndex = 2;
+            cfg.measurements.isl.receiverAssetIndex = 1;
+            cfg.measurements.isl.code.enable = false;
+            cfg.measurements.isl.code.useInEKF = false;
+            cfg.measurements.isl.code.sigma_m = 0.5;
+            cfg.measurements.isl.doppler.enable = false;
+            cfg.measurements.isl.doppler.useInEKF = false;
+            cfg.measurements.isl.doppler.sigma_mps = 0.02;
+            cfg.measurements.isl.carrier.enable = false;
+            cfg.measurements.isl.carrier.useInEKF = false;
+            cfg.measurements.isl.carrier.sigma_m = 0.002;
+
             % --- Observable mode (Step 1) -----------------------------------
             % observableMode: DESCRIPTIVE LABEL (not authoritative — does not gate
             % measurements).  Used for report generation and diagnostics only.
@@ -1703,6 +1717,7 @@ classdef ConfigFactory
                 end
             end
             cfg = revgnss.MultiAssetConfig.normalize(cfg);
+            revgnss.ISLMeasurementBuilder.validateConfig(cfg);
         end
 
         function tmpl = getClockTemplate_(templateName)

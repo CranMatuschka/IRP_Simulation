@@ -740,6 +740,12 @@ classdef ReportRunner
             summary.carrierUsedInEkf = carrInEKF && summary.totalCarrierRows > 0;
             summary.carrierDiagnosticOnly = summary.carrierGenerated && ~summary.carrierUsedInEkf;
             summary.totalDiffAttRows = 0;
+            summary.totalIslCodeRows = 0;
+            summary.totalIslDopplerRows = 0;
+            summary.totalIslCarrierDiagnosticRows = 0;
+            summary.islCodeUsedInEkf = revgnss.ReportRunner.safeCfgBool_(cfg, {'measurements','isl','code','useInEKF'}, false);
+            summary.islDopplerUsedInEkf = revgnss.ReportRunner.safeCfgBool_(cfg, {'measurements','isl','doppler','useInEKF'}, false);
+            summary.islCarrierUsedInEkf = revgnss.ReportRunner.safeCfgBool_(cfg, {'measurements','isl','carrier','useInEKF'}, false);
             summary.observableStack = revgnss.ObservableStackDescriptor.compact([]);
             try
                 if isfield(diag.log(end),'observableStack')
@@ -749,6 +755,9 @@ classdef ReportRunner
                     summary.totalDopplerRows = revgnss.ReportRunner.fieldOr_(cObs,'doppler',0);
                     summary.totalCarrierRows = revgnss.ReportRunner.fieldOr_(cObs,'carrier',0);
                     summary.totalDiffAttRows = revgnss.ReportRunner.fieldOr_(cObs,'diffCarrierAttitude',0);
+                    summary.totalIslCodeRows = revgnss.ReportRunner.fieldOr_(cObs,'islCode',0);
+                    summary.totalIslDopplerRows = revgnss.ReportRunner.fieldOr_(cObs,'islDoppler',0);
+                    summary.totalIslCarrierDiagnosticRows = revgnss.ReportRunner.fieldOr_(cObs,'islCarrierDiagnostic',0);
                     summary.carrierUsedInEkf = carrInEKF && summary.totalCarrierRows > 0;
                     summary.carrierDiagnosticOnly = summary.carrierGenerated && ~summary.carrierUsedInEkf;
                 end
@@ -914,6 +923,18 @@ classdef ReportRunner
             if ischar(node) || isstring(node)
                 val = char(node);
             end
+        end
+
+        function val = safeCfgBool_(cfg, path, default)
+            val = default;
+            node = cfg;
+            for k = 1:numel(path)
+                if ~isstruct(node) || ~isfield(node, path{k})
+                    return
+                end
+                node = node.(path{k});
+            end
+            if islogical(node) && isscalar(node); val = node; end
         end
 
         % ----------------------------------------------------------------

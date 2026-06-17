@@ -81,6 +81,22 @@ cfg.assets(2).receiverLeverArm_body_m = [0; 0; 0];
 cfg.assets(2).receiverLeverArms_body_m = [0; 0; 0];
 cfg.assets(2).clock.name = 'RxClock_GEO_2';
 
+% --- One-way inter-spacecraft link scaffold (Stage 21) -----------
+% GEO-2 is a represented/external transmitter. GEO-1 remains the only
+% estimated spacecraft asset. Carrier is diagnostic-only because no ISL
+% ambiguity state exists in this stage.
+cfg.measurements.isl.enable = true;
+cfg.measurements.isl.transmitterAssetIndex = 2;
+cfg.measurements.isl.receiverAssetIndex = 1;
+cfg.measurements.isl.code.enable = true;
+cfg.measurements.isl.code.useInEKF = true;
+cfg.measurements.isl.code.sigma_m = 0.5;
+cfg.measurements.isl.doppler.enable = true;
+cfg.measurements.isl.doppler.useInEKF = true;
+cfg.measurements.isl.doppler.sigma_mps = 0.02;
+cfg.measurements.isl.carrier.enable = true;
+cfg.measurements.isl.carrier.useInEKF = false;
+
 % --- Frequency --------------------------------------------------
 % false  ->  L1 only
 % true   ->  L1 + L2

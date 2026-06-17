@@ -182,6 +182,22 @@ classdef ReverseGNSSSimulation < handle
             end
             errStruct.slipInfo = slipInfo;
 
+            % Stage 21: append one-way ISL code/Doppler EKF rows after the
+            % ground-carrier slip filter so legacy carrier row ordering stays intact.
+            [z_isl, h_isl, H_isl, R_isl, islInfo] = revgnss.ISLMeasurementBuilder.build( ...
+                obj.cfg, obj.asset, obj.assets, obj.ekf.x, obj.ekf.stateMap, obj.ekf.nx);
+            if ~isempty(z_isl)
+                z = [z; z_isl];
+                h = [h; h_isl];
+                H = [H; H_isl];
+                R = blkdiag(R, R_isl);
+            end
+            errStruct.isl = islInfo;
+            if isfield(errStruct,'observableStack')
+                errStruct.observableStack = revgnss.ReverseGnssObservableAdapter.addISLRows( ...
+                    errStruct.observableStack, islInfo);
+            end
+
             % Stage 16: absolute attitude initialization before differential
             % carrier calibration, so Stage 15 references the initialized attitude.
             attInitMode = 'none';
@@ -463,12 +479,23 @@ classdef ReverseGNSSSimulation < handle
             end
 
             M_car = numel(hc_post);
+            h_isl = [];
+            if isfield(errStruct,'isl') && isstruct(errStruct.isl) && ...
+                    isfield(errStruct.isl,'ekfRowTypes') && ~isempty(errStruct.isl.ekfRowTypes)
+                h_isl = revgnss.ISLMeasurementBuilder.predictEkfRows( ...
+                    obj.cfg, obj.asset, obj.assets, obj.ekf.x, sm, errStruct.isl);
+            end
+            M_isl = numel(h_isl);
             if M_dop > 0 || M_car > 0
+                idxIsl = M_pr + M_dop + M_car + 1;
                 postfit = [z(1:M_pr) - h_post_pr; ...
                            z(M_pr+1:M_pr+M_dop) - hd_post; ...
-                           z(M_pr+M_dop+1:M_pr+M_dop+M_car) - hc_post];
+                           z(M_pr+M_dop+1:M_pr+M_dop+M_car) - hc_post; ...
+                           z(idxIsl:idxIsl+M_isl-1) - h_isl];
             else
-                postfit = z(1:M_pr) - h_post_pr;
+                idxIsl = M_pr + 1;
+                postfit = [z(1:M_pr) - h_post_pr; ...
+                           z(idxIsl:idxIsl+M_isl-1) - h_isl];
             end
         end
 

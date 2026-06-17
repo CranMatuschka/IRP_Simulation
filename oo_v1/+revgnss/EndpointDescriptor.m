@@ -25,5 +25,12 @@ classdef EndpointDescriptor
                 sprintf('spacecraft:%s:rx:%03d', char(assetName), receiverIdx), ...
                 'spacecraftReceiver', 'receiver', NaN, receiverIdx, assetName, assetIndex);
         end
+
+        function ep = spacecraftTransmitter(assetName, assetIndex)
+            if nargin < 2 || isempty(assetIndex); assetIndex = NaN; end
+            ep = revgnss.EndpointDescriptor.create( ...
+                sprintf('spacecraft:%s:tx', char(assetName)), ...
+                'spacecraftTransmitter', 'transmitter', NaN, NaN, assetName, assetIndex);
+        end
     end
 end

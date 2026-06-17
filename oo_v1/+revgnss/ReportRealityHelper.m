@@ -142,6 +142,19 @@ classdef ReportRealityHelper
                 error('ClockExactReportBuilder:carrierStatusContradiction', ...
                     'Carrier descriptor rows exist but report says carrier is diagnostic-only.');
             end
+            if isfield(summary.observableStack,'rowSummary')
+                rs = summary.observableStack.rowSummary;
+                for k = 1:numel(rs)
+                    if strcmp(rs(k).observableType,'islCode') && ~ismember(13, rs(k).stateColumns)
+                        error('ClockExactReportBuilder:islClockColumnMissing', ...
+                            'ISL code metadata must touch primary receiver clock bias column.');
+                    end
+                    if strcmp(rs(k).observableType,'islDoppler') && ~ismember(14, rs(k).stateColumns)
+                        error('ClockExactReportBuilder:islClockColumnMissing', ...
+                            'ISL Doppler metadata must touch primary receiver clock drift column.');
+                    end
+                end
+            end
         end
 
         function validateMultiAsset_(cfg, summary)
@@ -155,10 +168,9 @@ classdef ReportRealityHelper
                     'Report asset count (%d) differs from cfg.scenario.nSpaceAssets (%d).', ...
                     ma.nSpaceAssets, nCfg);
             end
-            if revgnss.ReportRealityHelper.safeField_(ma, 'islRows', 0) ~= 0 || ...
-                    revgnss.ReportRealityHelper.safeField_(ma, 'twstftRows', 0) ~= 0
+            if revgnss.ReportRealityHelper.safeField_(ma, 'twstftRows', 0) ~= 0
                 error('ClockExactReportBuilder:falseSpaceLinkClaim', ...
-                    'Stage 20 report must not claim ISL or TWSTFT rows exist.');
+                    'Stage 21 report must not claim TWSTFT rows exist.');
             end
             if isfield(summary,'observableStack') && isfield(summary.observableStack,'endpointAssetNames')
                 names = {ma.assetTable.name};
@@ -174,6 +186,28 @@ classdef ReportRealityHelper
                 if ma.assetTable(k).estimated && ~strcmp(ma.assetTable(k).stateOwner, 'primaryEKF')
                     error('ClockExactReportBuilder:stateOwnershipMismatch', ...
                         'Estimated asset %s has no primary EKF state ownership.', ma.assetTable(k).name);
+                end
+            end
+            islOn = revgnss.ReportRealityHelper.getCfgBool_(cfg, {'measurements','isl','enable'}, false);
+            if islOn
+                if ma.nSpaceAssets < 2
+                    error('ClockExactReportBuilder:islAssetCount', 'ISL report requires at least two assets.');
+                end
+                if revgnss.ReportRealityHelper.getCfgNum_(cfg, {'measurements','isl','receiverAssetIndex'}, NaN) ~= 1
+                    error('ClockExactReportBuilder:islReceiverGuard', ...
+                        'ISL receiver asset must be the primary estimated asset.');
+                end
+                c = summary.observableStack.rowsByType;
+                nIsl = revgnss.ReportRealityHelper.safeField_(c,'islCode',0) + ...
+                    revgnss.ReportRealityHelper.safeField_(c,'islDoppler',0) + ...
+                    revgnss.ReportRealityHelper.safeField_(c,'islCarrierDiagnostic',0);
+                if nIsl ~= revgnss.ReportRealityHelper.safeField_(ma,'islRows',0)
+                    error('ClockExactReportBuilder:islRowCountMismatch', ...
+                        'ISL metadata rows (%d) do not match multi-asset summary (%d).', nIsl, ma.islRows);
+                end
+                if revgnss.ReportRealityHelper.safeField_(summary,'islCarrierUsedInEkf',false)
+                    error('ClockExactReportBuilder:islCarrierEkfUnsupported', ...
+                        'ISL carrier is reported as EKF-used without ISL ambiguity states.');
                 end
             end
         end
@@ -197,6 +231,11 @@ classdef ReportRealityHelper
             s = revgnss.ReportRealityHelper.walkCfg_(cfg, path, defaultValue);
             if isstring(s); s = char(s); end
             if ~ischar(s); s = defaultValue; end
+        end
+
+        function tf = getCfgBool_(cfg, path, defaultValue)
+            v = revgnss.ReportRealityHelper.walkCfg_(cfg, path, defaultValue);
+            tf = islogical(v) && isscalar(v) && v;
         end
 
         function v = walkCfg_(cfg, path, defaultValue)

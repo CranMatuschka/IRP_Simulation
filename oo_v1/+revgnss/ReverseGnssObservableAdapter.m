@@ -31,6 +31,35 @@ classdef ReverseGnssObservableAdapter
             end
             stack = revgnss.ObservableStackDescriptor.create(stack.endpoints, stack.links, rows);
         end
+
+        function stack = addISLRows(stack, islInfo)
+            if isempty(stack) || isempty(islInfo) || ~isstruct(islInfo) || ...
+                    ~isfield(islInfo,'enabled') || ~islInfo.enabled || ...
+                    ~isfield(islInfo,'rows') || isempty(islInfo.rows)
+                return
+            end
+            endpoints = stack.endpoints;
+            links = stack.links;
+            txEp = revgnss.EndpointDescriptor.spacecraftTransmitter( ...
+                islInfo.transmitterAssetName, islInfo.transmitterAssetIndex);
+            if ~any(strcmp({endpoints.id}, txEp.id))
+                endpoints(end+1) = txEp;
+            end
+            link = revgnss.LinkDescriptor.islOneWay( ...
+                islInfo.transmitterAssetName, islInfo.transmitterAssetIndex, ...
+                islInfo.receiverAssetName, islInfo.receiverAssetIndex);
+            if ~any(strcmp({links.id}, link.id))
+                links(end+1) = link;
+            end
+            rows = stack.rows;
+            startIdx = numel(rows);
+            for k = 1:numel(islInfo.rows)
+                row = islInfo.rows(k);
+                row.rowIndex = startIdx + k;
+                rows(end+1) = row; %#ok<AGROW>
+            end
+            stack = revgnss.ObservableStackDescriptor.create(endpoints, links, rows);
+        end
     end
 
     methods (Static, Access = private)

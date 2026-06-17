@@ -455,6 +455,7 @@ classdef ClockExactReportBuilder
             CE.writeScenarioSummary_(fid, cfg, summary, diag, nTwr, nRx, dur, dt, esc);
             CE.writeModelRealityCheck_(fid, cfg, summary, dur, nTwr, nRx);
             CE.writeMultiAssetArchitecture_(fid, summary);
+            CE.writeOneWayISLArchitecture_(fid, cfg, summary);
             CE.writeObservableRealityCheck_(fid, summary);
             CE.writeStateEstimation_(fid, plotPaths, stem, cfg, diag, figDir);
             CE.writeMeasurementValidation_(fid, plotPaths, stem, figDir);
@@ -740,6 +741,9 @@ classdef ClockExactReportBuilder
                 CE.safeField_(summary,'totalCodeRows',0), CE.safeField_(summary,'totalDopplerRows',0), ...
                 CE.safeField_(summary,'totalCarrierRows',0)));
             CE.writeQuantRow_(fid, 'Differential attitude rows', sprintf('%d', CE.safeField_(summary,'totalDiffAttRows',0)));
+            CE.writeQuantRow_(fid, 'ISL code / Doppler / carrier diagnostic rows', sprintf('%d / %d / %d', ...
+                CE.safeField_(summary,'totalIslCodeRows',0), CE.safeField_(summary,'totalIslDopplerRows',0), ...
+                CE.safeField_(summary,'totalIslCarrierDiagnosticRows',0)));
             CE.writeQuantRow_(fid, 'EKF state count', sprintf('%d', CE.safeField_(summary,'nStates',0)));
             CE.writeQuantRow_(fid, 'Ambiguity / ZWD state count', sprintf('%d / %d', ...
                 CE.safeField_(summary,'nAmbiguityStates',0), CE.safeField_(summary,'nZwdStates',0)));
@@ -775,8 +779,8 @@ classdef ClockExactReportBuilder
             end
             fprintf(fid, ['Stage 20 represents multiple spacecraft as distinct scenario assets. ' ...
                 'Only the primary asset is estimated by the EKF in this stage; additional assets ' ...
-                'are represented as truth/report/endpoints objects only. No ISL, TWSTFT, relay, ' ...
-                'or transponder observable rows are generated.\n\n']);
+                'are represented as truth/report/endpoints objects only. One-way ISL rows may be ' ...
+                'enabled; two-way ISL, TWSTFT, relay, and transponder rows are not generated.\n\n']);
             fprintf(fid, '\\begin{center}\\scriptsize\n');
             fprintf(fid, ['\\begin{longtable}{@{}>{\\raggedright\\arraybackslash}p{0.07\\textwidth}' ...
                 '>{\\raggedright\\arraybackslash}p{0.16\\textwidth}' ...
@@ -808,6 +812,45 @@ classdef ClockExactReportBuilder
         end
 
         % ================================================================
+        % ONE-WAY ISL OBSERVABLE ARCHITECTURE
+        % ================================================================
+
+        function writeOneWayISLArchitecture_(fid, cfg, summary)
+            CE = revgnss.ClockExactReportBuilder;
+            fprintf(fid, '\\section{One-Way ISL Observable Architecture}\n');
+            islOn = CE.getLogical_(cfg, {'measurements','isl','enable'}, false);
+            txIdx = CE.getCfgNum_(cfg, {'measurements','isl','transmitterAssetIndex'}, 2);
+            rxIdx = CE.getCfgNum_(cfg, {'measurements','isl','receiverAssetIndex'}, 1);
+            ma = CE.safeField_(summary, 'multiAsset', struct());
+            txName = sprintf('asset %d', txIdx); rxName = sprintf('asset %d', rxIdx);
+            if isstruct(ma) && isfield(ma,'assetTable')
+                if txIdx <= numel(ma.assetTable); txName = ma.assetTable(txIdx).name; end
+                if rxIdx <= numel(ma.assetTable); rxName = ma.assetTable(rxIdx).name; end
+            end
+            fprintf(fid, ['Stage 21 adds a one-way inter-spacecraft observable scaffold: ' ...
+                '\\texttt{%s} transmitter $\\rightarrow$ \\texttt{%s} primary receiver. ' ...
+                'The secondary transmitter is represented/external in this stage; no secondary ' ...
+                'asset states are estimated. The sign convention is ' ...
+                '$P_{ISL}=\\rho_{AB}+b_{rx,primary}-b_{tx,secondary}$ and ' ...
+                '$D_{ISL}=\\dot{\\rho}_{AB}+\\dot{b}_{rx,primary}-\\dot{b}_{tx,secondary}$.\n\n'], ...
+                CE.esc_(txName), CE.esc_(rxName));
+            fprintf(fid, '\\begin{center}\\small\n');
+            fprintf(fid, '\\begin{tabular}{p{0.42\\textwidth}p{0.42\\textwidth}}\n');
+            fprintf(fid, '\\toprule\n\\textbf{Quantity} & \\textbf{Actual value}\\\\\n\\midrule\n');
+            CE.writeQuantRow_(fid, 'ISL enabled', mat2str(islOn));
+            CE.writeQuantRow_(fid, 'Transmitter / receiver asset', sprintf('%s / %s', CE.esc_(txName), CE.esc_(rxName)));
+            CE.writeQuantRow_(fid, 'ISL link count', sprintf('%d', double(islOn)));
+            CE.writeQuantRow_(fid, 'ISL code rows / EKF-used', sprintf('%d / %s', ...
+                CE.safeField_(summary,'totalIslCodeRows',0), mat2str(CE.safeField_(summary,'islCodeUsedInEkf',false))));
+            CE.writeQuantRow_(fid, 'ISL Doppler rows / EKF-used', sprintf('%d / %s', ...
+                CE.safeField_(summary,'totalIslDopplerRows',0), mat2str(CE.safeField_(summary,'islDopplerUsedInEkf',false))));
+            CE.writeQuantRow_(fid, 'ISL carrier diagnostic rows / EKF-used', sprintf('%d / %s', ...
+                CE.safeField_(summary,'totalIslCarrierDiagnosticRows',0), mat2str(CE.safeField_(summary,'islCarrierUsedInEkf',false))));
+            CE.writeQuantRow_(fid, 'Limitations', 'one-way only; no two-way cancellation; no TWSTFT; no relay/transponder; carrier diagnostic-only');
+            fprintf(fid, '\\bottomrule\n\\end{tabular}\\end{center}\n\\clearpage\n');
+        end
+
+        % ================================================================
         % OBSERVABLE ROW REALITY CHECK
         % ================================================================
 
@@ -816,8 +859,8 @@ classdef ClockExactReportBuilder
             fprintf(fid, '\\section{Observable Row Reality Check}\n');
             fprintf(fid, ['Generic endpoint, link, and observable-row metadata are generated ' ...
                 'around the existing reverse-GNSS builders. The physics remains the current ' ...
-                'tower-to-spacecraft code, Doppler, carrier, and calibrated differential ' ...
-                'carrier attitude logic.\n\n']);
+                'tower-to-spacecraft code, Doppler, carrier, calibrated differential ' ...
+                'carrier attitude logic, plus the Stage 21 one-way ISL scaffold when enabled.\n\n']);
             obs = CE.safeField_(summary, 'observableStack', struct());
             if ~isstruct(obs) || ~isfield(obs,'rowSummary')
                 fprintf(fid, 'Observable metadata was not available for this run.\\clearpage\n');
@@ -837,12 +880,15 @@ classdef ClockExactReportBuilder
                 CE.safeField_(c,'code',0), CE.safeField_(c,'doppler',0), CE.safeField_(c,'carrier',0)));
             CE.writeQuantRow_(fid, 'Differential carrier attitude rows', sprintf('%d', ...
                 CE.safeField_(c,'diffCarrierAttitude',0)));
+            CE.writeQuantRow_(fid, 'ISL code / Doppler / carrier diagnostic rows', sprintf('%d / %d / %d', ...
+                CE.safeField_(c,'islCode',0), CE.safeField_(c,'islDoppler',0), ...
+                CE.safeField_(c,'islCarrierDiagnostic',0)));
             if isfield(obs,'linksByAsset') && ~isempty(obs.linksByAsset)
                 parts = {};
                 for kk = 1:numel(obs.linksByAsset)
                     parts{end+1} = sprintf('%s:%d', obs.linksByAsset(kk).assetName, obs.linksByAsset(kk).count); %#ok<AGROW>
                 end
-                CE.writeQuantRow_(fid, 'Active tower-to-space links by asset', CE.esc_(strjoin(parts, ', ')));
+                CE.writeQuantRow_(fid, 'Active links by receiver asset', CE.esc_(strjoin(parts, ', ')));
             end
             fprintf(fid, '\\bottomrule\n\\end{tabular}\\end{center}\n\n');
 

@@ -61,7 +61,7 @@ classdef MultiAssetConfig
             cfg.multiAsset.estimatedAssetName = cfg.assets(1).name;
             cfg.multiAsset.multiAssetEstimationEnabled = false;
             cfg.multiAsset.guardMessage = 'multi-asset estimation not yet enabled; only primary asset estimated';
-            cfg.multiAsset.islRows = 0;
+            cfg.multiAsset.islRows = revgnss.MultiAssetConfig.islRowCount_(cfg);
             cfg.multiAsset.twstftRows = 0;
         end
 
@@ -83,6 +83,12 @@ classdef MultiAssetConfig
             assetTable = repmat(empty, nAssets, 1);
             nTwr = 0;
             if isfield(cfg,'scenario') && isfield(cfg.scenario,'nTowers'); nTwr = cfg.scenario.nTowers; end
+            islActive = revgnss.MultiAssetConfig.islRowCount_(cfg) > 0;
+            txIdx = 2; rxIdx = 1;
+            if isfield(cfg,'measurements') && isfield(cfg.measurements,'isl')
+                if isfield(cfg.measurements.isl,'transmitterAssetIndex'); txIdx = cfg.measurements.isl.transmitterAssetIndex; end
+                if isfield(cfg.measurements.isl,'receiverAssetIndex'); rxIdx = cfg.measurements.isl.receiverAssetIndex; end
+            end
             for ai = 1:nAssets
                 a = cfg.assets(ai);
                 nRx = revgnss.MultiAssetConfig.receiverCount_(a);
@@ -91,10 +97,12 @@ classdef MultiAssetConfig
                 if isfield(a,'stateOwner'); owner = a.stateOwner; end
                 clkOwner = 'representedTruthClock';
                 if est; clkOwner = 'primaryEKFReceiverClock'; end
+                activeLinks = nTwr*nRx*est;
+                if islActive && (ai == txIdx || ai == rxIdx); activeLinks = activeLinks + 1; end
                 assetTable(ai) = struct('index', ai, 'name', char(a.name), ...
                     'estimated', est, 'stateOwner', char(owner), ...
                     'nReceivers', nRx, 'endpointCount', nRx, ...
-                    'activeLinkCount', nTwr*nRx*est, 'clockOwner', clkOwner);
+                    'activeLinkCount', activeLinks, 'clockOwner', clkOwner);
             end
             s = struct();
             s.nSpaceAssets = nAssets;
@@ -103,9 +111,9 @@ classdef MultiAssetConfig
             s.nonEstimatedAssetNames = {cfg.assets(~[cfg.assets.estimated]).name};
             s.multiAssetEstimationEnabled = false;
             s.guardMessage = cfg.multiAsset.guardMessage;
-            s.islRows = 0;
+            s.islRows = revgnss.MultiAssetConfig.islRowCount_(cfg);
             s.twstftRows = 0;
-            s.futureInactiveLinkTypes = {'ISL','TWSTFT'};
+            s.futureInactiveLinkTypes = {'twoWayISL','TWSTFT'};
             s.assetTable = assetTable;
         end
 
@@ -163,6 +171,18 @@ classdef MultiAssetConfig
             if isfield(assetCfg,'receiverLeverArms_body_m') && ~isempty(assetCfg.receiverLeverArms_body_m)
                 nRx = size(assetCfg.receiverLeverArms_body_m, 2);
             end
+        end
+
+        function n = islRowCount_(cfg)
+            n = 0;
+            if ~isfield(cfg,'measurements') || ~isfield(cfg.measurements,'isl') || ...
+                    ~isfield(cfg.measurements.isl,'enable') || ~cfg.measurements.isl.enable
+                return
+            end
+            isl = cfg.measurements.isl;
+            if isfield(isl,'code') && isfield(isl.code,'enable') && isl.code.enable; n = n + 1; end
+            if isfield(isl,'doppler') && isfield(isl.doppler,'enable') && isl.doppler.enable; n = n + 1; end
+            if isfield(isl,'carrier') && isfield(isl.carrier,'enable') && isl.carrier.enable; n = n + 1; end
         end
     end
 end
