@@ -964,6 +964,9 @@ classdef LatexReportBuilder
                 case 'NON_CONVERGENT'
                     lines{end+1} = '  [!] NON_CONVERGENT: float ambiguities absorb carrier attitude signal.';
                     lines{end+1} = '      Attitude worsened despite rank-3 Jacobian.';
+                case 'AMBIGUITY_ABSORBED'
+                    lines{end+1} = '  [!] AMBIGUITY_ABSORBED: H_amb spans R^M, H_att not separable.';
+                    lines{end+1} = '      Float ambiguities absorb attitude signal mathematically.';
                 case 'BOUNDED_WEAK_GEOMETRY'
                     lines{end+1} = '  [~] BOUNDED: attitude error maintained but not reduced.';
                     lines{end+1} = '      GEO geometry limits angular diversity for attitude.';
@@ -1628,6 +1631,7 @@ classdef LatexReportBuilder
                 case 'CONVERGED';             clsCmd = '\textcolor{green!45!black}{CONVERGED}';
                 case 'BOUNDED_WEAK_GEOMETRY'; clsCmd = '\textcolor{orange!70!black}{BOUNDED\_WEAK\_GEOMETRY}';
                 case 'NON_CONVERGENT';        clsCmd = '\textcolor{red!70!black}{NON\_CONVERGENT}';
+                case 'AMBIGUITY_ABSORBED';    clsCmd = '\textcolor{red!80!black}{AMBIGUITY\_ABSORBED}';
                 case 'WEAKLY_OBSERVABLE';     clsCmd = '\textcolor{orange!80!black}{WEAKLY\_OBSERVABLE}';
                 case 'UNOBSERVABLE';          clsCmd = '\textcolor{gray}{UNOBSERVABLE}';
                 case 'INVALID_CONFIG';        clsCmd = '\textcolor{red!80!black}{INVALID\_CONFIG}';
@@ -1651,7 +1655,7 @@ classdef LatexReportBuilder
             if ~isnan(meanJ8);  fprintf(fid,'Mean $H_{att}$ Frobenius norm & %.4f\\\\\n',        meanJ8);  end
             fprintf(fid,'\\bottomrule\n\\end{tabular}\n');
             switch attCls8
-                case 'NON_CONVERGENT'
+                case {'NON_CONVERGENT','AMBIGUITY_ABSORBED'}
                     fprintf(fid,['\\vspace{6pt}\\textbf{Note:} Float ambiguity states per ' ...
                         'tower$\\times$receiver absorb carrier attitude signal. ' ...
                         'Attitude is non-convergent despite rank-3 Jacobian.\n\n']);

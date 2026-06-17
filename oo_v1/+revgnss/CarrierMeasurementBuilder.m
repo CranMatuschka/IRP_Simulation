@@ -232,6 +232,18 @@ classdef CarrierMeasurementBuilder
                         revgnss.MeasurementModelUtils.zwdMappingKind(cfg));
                     H_phi(mi, stateMap.zwdIdx(ti)) = mf;
                 end
+
+                % ---- Known-ambiguity validation (ATTITUDE VALIDATION ONLY — not operational) ----
+                % Removes truth float ambiguity from both measurement and prediction, zeroes the
+                % ambiguity Jacobian column.  Carrier rows then constrain position/attitude/clock
+                % from ambiguity-corrected phase — proving whether the attitude Jacobian is correct.
+                if isfield(cfg.estimator,'knownAmbiguityAttitudeValidation') && ...
+                        cfg.estimator.knownAmbiguityAttitudeValidation && ambStateIdx > 0
+                    z_phi(mi)           = z_phi(mi) - B_true;
+                    h_phi(mi)           = h_phi(mi) - B_est;
+                    H_phi(mi,ambStateIdx) = 0;
+                    cpInfo.prefit_m(mi) = z_phi(mi) - h_phi(mi);
+                end
             end
         end
 

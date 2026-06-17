@@ -104,6 +104,50 @@ classdef ReportRunner
             % ---- Collect summary metrics --------------------------------
             summary = revgnss.ReportRunner.collectSummary_(diag, cfg, version, reportFolder, pdfPath, matPath);
 
+            % ---- Known-ambiguity attitude validation (ATTITUDE VALIDATION ONLY — not operational) ----
+            % Gated by cfg.estimator.runKnownAmbiguityValidation = true.
+            % Runs a short comparison where truth float ambiguities are subtracted from
+            % carrier measurements.  If attitude converges here but not in float mode,
+            % the Jacobian is correct and ambiguity absorption is the sole blocker.
+            summary.knownAmbClass            = 'SKIPPED';
+            summary.knownAmbImprovementRatio = NaN;
+            summary.knownAmbFinalError_deg   = NaN;
+            summary.knownAmbInitError_deg    = NaN;
+            doKAV = isfield(cfg,'estimator') && ...
+                isfield(cfg.estimator,'runKnownAmbiguityValidation') && ...
+                cfg.estimator.runKnownAmbiguityValidation;
+            if doKAV
+                fprintf('  [KAV] Running 120 s known-ambiguity attitude validation...\n');
+                try
+                    cfg_kav = cfg;
+                    cfg_kav.estimator.knownAmbiguityAttitudeValidation = true;
+                    cfg_kav.estimator.runKnownAmbiguityValidation      = false;
+                    cfg_kav.simulation.duration_s = min(120, cfg.simulation.duration_s);
+                    cfg_kav.report.enable   = false;
+                    cfg_kav.report.writePdf = false;
+                    cfg_kav.report.writeMat = false;
+                    cfg_kav.plots.enable    = false;
+                    out_kav = revgnss.ReportRunner.runSingle(cfg_kav);
+                    r_kav   = out_kav.summary.attitudeImprovementRatio;
+                    summary.knownAmbImprovementRatio = r_kav;
+                    summary.knownAmbFinalError_deg   = out_kav.summary.finalAttitudeError_deg;
+                    summary.knownAmbInitError_deg    = out_kav.summary.initialAttitudeError_deg;
+                    if ~isnan(r_kav) && r_kav >= 2.0
+                        summary.knownAmbClass = 'CONVERGED_VAL';
+                    elseif ~isnan(r_kav) && r_kav >= 1.0
+                        summary.knownAmbClass = 'IMPROVED_VAL';
+                    else
+                        summary.knownAmbClass = 'NON_CONVERGENT_VAL';
+                    end
+                    fprintf('  [KAV] %s  ratio=%.3f  init=%.2f deg  final=%.2f deg\n', ...
+                        summary.knownAmbClass, r_kav, ...
+                        summary.knownAmbInitError_deg, summary.knownAmbFinalError_deg);
+                catch ME_kav
+                    warning('ReportRunner:kavFailed', ...
+                        'Known-ambiguity validation failed: %s', ME_kav.message);
+                end
+            end
+
             % ---- Determine report layout before PDF generation -----------
             reportLayout = 'default';
             if isfield(cfg,'report') && isfield(cfg.report,'layout')
@@ -347,6 +391,20 @@ classdef ReportRunner
                     cls2 = 'NON_CONVERGENT';
                 end
                 summary.attitudeObsClass = cls2;
+
+                % Attitude-ambiguity separability from diag logs (Stage 14.9)
+                try
+                    sepVec  = logical([diag.log.attitudeSeparable]);
+                    corrVec = double([diag.log.attitudeAmbCorrMaxAbs]);
+                    summary.attitudeSeparable     = any(sepVec);
+                    summary.attitudeAmbCorrMaxAbs = mean(corrVec(isfinite(corrVec)), 'omitnan');
+                    if strcmp(cls2,'NON_CONVERGENT') && ~summary.attitudeSeparable
+                        summary.attitudeObsClass = 'AMBIGUITY_ABSORBED';
+                    end
+                catch
+                    summary.attitudeSeparable     = false;
+                    summary.attitudeAmbCorrMaxAbs = NaN;
+                end
             catch
                 summary.attitudeObsClass = 'UNKNOWN';
                 summary.leverArmNorms_m  = [];
@@ -357,6 +415,8 @@ classdef ReportRunner
                 summary.finalAttitudeSigma_deg     = NaN;
                 summary.meanAttitudeJacNorm        = NaN;
                 summary.carrierAttJacActive        = false;
+                summary.attitudeSeparable          = false;
+                summary.attitudeAmbCorrMaxAbs      = NaN;
             end
 
             % Observables

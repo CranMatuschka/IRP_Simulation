@@ -14,7 +14,7 @@ addpath(fullfile(thisDir, '..'));
 fprintf('=== test_stage14_7_attitude_observability ===\n');
 
 VALID_CLASSES_147 = {'CONVERGED','BOUNDED_WEAK_GEOMETRY','NON_CONVERGENT', ...
-                     'WEAKLY_OBSERVABLE','UNOBSERVABLE','INVALID_CONFIG','UNKNOWN'};
+                     'AMBIGUITY_ABSORBED','WEAKLY_OBSERVABLE','UNOBSERVABLE','INVALID_CONFIG','UNKNOWN'};
 
 nTowers = 5;
 

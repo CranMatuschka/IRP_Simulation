@@ -142,6 +142,12 @@ cfg.estimation.tropoZwd.initialSigma_m = 0.3;
 cfg.estimation.tropoZwd.sigma_ss_m     = 0.05;
 cfg.estimation.tropoZwd.tau_s          = 3600;
 
+% --- Attitude/ambiguity separability validation (Stage 14.9) ----
+% Runs a short 120 s known-ambiguity validation after the main run.
+% ATTITUDE VALIDATION ONLY — not operational integer fixing.
+% Shows whether attitude converges when truth ambiguities are known.
+cfg.estimator.runKnownAmbiguityValidation = true;
+
 % --- Validation policy ------------------------------------------
 % 'disableWithWarning'  ->  unsupported features disabled with console warning
 % 'error'              ->  any unsupported feature throws an error

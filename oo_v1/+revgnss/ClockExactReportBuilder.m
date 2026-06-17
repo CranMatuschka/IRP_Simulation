@@ -419,6 +419,7 @@ classdef ClockExactReportBuilder
             fprintf(fid, '\\documentclass[11pt,a4paper]{article}\n');
             fprintf(fid, '\\usepackage[margin=1.7cm]{geometry}\n');
             fprintf(fid, '\\usepackage{amsmath}\n');
+            fprintf(fid, '\\usepackage{amssymb}\n');
             fprintf(fid, '\\usepackage{graphicx}\n');
             fprintf(fid, '\\usepackage{longtable}\n');
             fprintf(fid, '\\usepackage{array}\n');
@@ -1507,6 +1508,7 @@ classdef ClockExactReportBuilder
                 case 'CONVERGED';              clsStr = '\textcolor{green!45!black}{CONVERGED}';
                 case 'BOUNDED_WEAK_GEOMETRY';  clsStr = '\textcolor{orange!70!black}{BOUNDED\_WEAK\_GEOMETRY}';
                 case 'NON_CONVERGENT';         clsStr = '\textcolor{red!70!black}{NON\_CONVERGENT}';
+                case 'AMBIGUITY_ABSORBED';     clsStr = '\textcolor{red!80!black}{AMBIGUITY\_ABSORBED}';
                 case 'WEAKLY_OBSERVABLE';      clsStr = '\textcolor{orange!80!black}{WEAKLY\_OBSERVABLE}';
                 case 'UNOBSERVABLE';           clsStr = '\textcolor{gray}{UNOBSERVABLE}';
                 case 'INVALID_CONFIG';         clsStr = '\textcolor{red!80!black}{INVALID\_CONFIG}';
@@ -1535,7 +1537,7 @@ classdef ClockExactReportBuilder
             fprintf(fid, '\\bottomrule\n\\end{tabular}\n');
 
             switch attCls
-                case 'NON_CONVERGENT'
+                case {'NON_CONVERGENT','AMBIGUITY_ABSORBED'}
                     fprintf(fid, ['\\vspace{6pt}\\textbf{Note (non-convergence):} Float ambiguity states ' ...
                         '(one per tower$\\times$receiver) absorb the mean carrier phase offset, ' ...
                         'including the attitude-induced range bias. Attitude is therefore non-convergent ' ...
@@ -1554,6 +1556,59 @@ classdef ClockExactReportBuilder
                 case 'INVALID_CONFIG'
                     fprintf(fid, ['\\vspace{6pt}\\textbf{Warning:} Multi-receiver with zero lever arms ' ...
                         'is an invalid configuration for attitude estimation.\n\n']);
+            end
+
+            % --- Attitude-Ambiguity Separability subsection (Stage 14.9) ---
+            sepB   = sf(summary,'attitudeSeparable',     false);
+            corrM  = sf(summary,'attitudeAmbCorrMaxAbs', NaN);
+            kavCls = sf(summary,'knownAmbClass',         'SKIPPED');
+            kavR   = sf(summary,'knownAmbImprovementRatio', NaN);
+            kavI   = sf(summary,'knownAmbInitError_deg', NaN);
+            kavF   = sf(summary,'knownAmbFinalError_deg',NaN);
+
+            fprintf(fid, '\\subsection*{Attitude--Ambiguity Separability (Stage~14.9)}\n');
+            if sepB
+                fprintf(fid, 'Attitude separable from ambiguities: \\textcolor{green!45!black}{YES}\\quad{}');
+            else
+                fprintf(fid, 'Attitude separable from ambiguities: \\textcolor{red!70!black}{NO}\\quad{}');
+            end
+            if ~isnan(corrM)
+                fprintf(fid, 'Max $|\\cos(H_{att},H_{amb})|$: %.4f\n\n', corrM);
+            else
+                fprintf(fid, '\n\n');
+            end
+            fprintf(fid, ['\\textit{With one free float ambiguity per carrier measurement, ' ...
+                '$H_{amb}=I_{M\\times M}$ spans all of $\\mathbb{R}^M$. ' ...
+                'Any attitude signal $H_{att}$ lies in $\\mathrm{span}(H_{amb})$, so attitude is ' ...
+                'mathematically non-separable from free float ambiguities ' ...
+                '($\\mathrm{rank}([H_{att}\\;H_{amb}])=\\mathrm{rank}(H_{amb})$).}\n\n']);
+
+            switch kavCls
+                case 'CONVERGED_VAL'
+                    kavStr = '\textcolor{green!45!black}{CONVERGED (validation only)}';
+                case 'IMPROVED_VAL'
+                    kavStr = '\textcolor{orange!70!black}{IMPROVED (validation only)}';
+                case 'NON_CONVERGENT_VAL'
+                    kavStr = '\textcolor{red!70!black}{NON\_CONVERGENT (validation only)}';
+                otherwise
+                    kavStr = kavCls;
+            end
+            fprintf(fid, '\\textbf{Known-ambiguity validation} (\\textsc{attitude validation only --- not operational}): %s\n\n', kavStr);
+            if ~isnan(kavR)
+                fprintf(fid, '\\quad Init: %.3f$^\\circ$\\quad Final: %.3f$^\\circ$\\quad Ratio: %.3f\n\n', kavI, kavF, kavR);
+            end
+            switch kavCls
+                case 'CONVERGED_VAL'
+                    fprintf(fid, ['\\textbf{Conclusion:} Attitude converges when ambiguities are truth-known. ' ...
+                        'The Jacobian, sign convention, and body frame are confirmed correct. ' ...
+                        'The sole blocker is free float ambiguity absorption. ' ...
+                        'Resolution requires integer fixing or baseline-differenced formulation.\n\n']);
+                case 'NON_CONVERGENT_VAL'
+                    fprintf(fid, ['\\textbf{Conclusion:} Attitude fails even with known ambiguities. ' ...
+                        'Inspect attitude FD Jacobian, ECEF/body frame convention, lever arm rotation, and $P_0$.\n\n']);
+                case 'SKIPPED'
+                    fprintf(fid, ['\\textit{Known-ambiguity validation not run. ' ...
+                        'Enable via cfg.estimator.runKnownAmbiguityValidation = true.}\n\n']);
             end
         end
 

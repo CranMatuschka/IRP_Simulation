@@ -570,11 +570,40 @@ classdef Diagnostics < handle
                 else
                     entry.attitudeCondNum = NaN;
                 end
+
+                % Attitude-ambiguity separability (Stage 14.9).
+                % With one float ambiguity per carrier row, H_amb spans R^M so H_att is
+                % never separable.  This computes the diagnostic to confirm analytically.
+                entry.attitudeSeparable     = false;
+                entry.attitudeAmbCorrMaxAbs = NaN;
+                if isfield(sm,'ambiguityIdx3d')
+                    ambFlat = nonzeros(sm.ambiguityIdx3d(:));
+                    if ~isempty(ambFlat) && max(ambFlat) <= size(H,2)
+                        Hb_all  = H(:, ambFlat);
+                        carRows = any(Hb_all ~= 0, 2);
+                        if sum(carRows) > 0
+                            Hac  = H_att(carRows, :);
+                            Hbc  = Hb_all(carRows, :);
+                            tolR = 1e-6 * max(norm(Hac,'fro'), norm(Hbc,'fro'));
+                            rB   = rank(Hbc, tolR);
+                            rAB  = rank([Hac Hbc], tolR);
+                            entry.attitudeSeparable = (rAB > rB);
+                            nHac = norm(Hac,'fro');
+                            if nHac > 1e-15
+                                nn   = max(vecnorm(Hbc), 1e-15);
+                                Ccc  = abs(Hbc' * Hac) ./ nn' ./ max(vecnorm(Hac), 1e-15);
+                                entry.attitudeAmbCorrMaxAbs = max(Ccc(:));
+                            end
+                        end
+                    end
+                end
             else
-                entry.attitudeJacobianNorm = 0;
-                entry.attitudeRank         = 0;
-                entry.attitudeStatus       = 'unobservable';
-                entry.attitudeCondNum      = NaN;
+                entry.attitudeJacobianNorm  = 0;
+                entry.attitudeRank          = 0;
+                entry.attitudeStatus        = 'unobservable';
+                entry.attitudeCondNum       = NaN;
+                entry.attitudeSeparable     = false;
+                entry.attitudeAmbCorrMaxAbs = NaN;
             end
 
             if ~isempty(H)
