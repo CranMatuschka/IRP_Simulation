@@ -717,6 +717,27 @@ classdef ReportRunner
                 cfg.measurements.carrierPhase.useInEKF);
             summary.totalDopplerRows = nTwr * nRx * doppInEKF;
             summary.totalCarrierRows = nTwr * nRx * carrInEKF;
+            summary.nStates = NaN;
+            try
+                summary.nStates = numel(diag.log(end).estimate.x);
+            catch; end
+            summary.nAmbiguityStates = 0;
+            ambMode = revgnss.ReportRunner.safeCfgStr_(cfg, {'estimation','ambiguityMode'}, 'none');
+            if carrInEKF
+                if strcmp(ambMode,'floatPerTowerReceiverSignal')
+                    summary.nAmbiguityStates = nTwr * nRx;
+                elseif strcmp(ambMode,'floatPerTowerSignal')
+                    summary.nAmbiguityStates = nTwr;
+                end
+            end
+            summary.nZwdStates = 0;
+            if strcmp(revgnss.ReportRunner.safeCfgStr_(cfg, {'estimation','troposphereMode'}, 'none'), 'perTowerZwd')
+                summary.nZwdStates = nTwr;
+            end
+            summary.carrierGenerated = isfield(cfg.measurements,'carrierPhase') && ...
+                isfield(cfg.measurements.carrierPhase,'enable') && cfg.measurements.carrierPhase.enable;
+            summary.carrierUsedInEkf = carrInEKF && summary.totalCarrierRows > 0;
+            summary.carrierDiagnosticOnly = summary.carrierGenerated && ~summary.carrierUsedInEkf;
         end
 
         % ================================================================
