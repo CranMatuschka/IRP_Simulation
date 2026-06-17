@@ -19,9 +19,26 @@ classdef AttitudeInitializer
                 'stepDeg', [NaN; NaN; NaN], ...
                 'nCandidates', 0, ...
                 'nDiffRows', 0, ...
+                'nBaselines', 0, ...
+                'nTowers', 0, ...
                 'bestResidual', NaN, ...
                 'secondBestResidual', NaN, ...
                 'ratio', NaN, ...
+                'priorEuler_deg', [NaN; NaN; NaN], ...
+                'truthEuler_deg', [NaN; NaN; NaN], ...
+                'bestCandidateEuler_deg', [NaN; NaN; NaN], ...
+                'secondCandidateEuler_deg', [NaN; NaN; NaN], ...
+                'topCandidateEuler_deg', NaN(3,0), ...
+                'topResidualCycles', NaN(1,0), ...
+                'bestSecondAngularDistance_deg', NaN, ...
+                'priorAttitudeError_deg', NaN, ...
+                'candidateAttitudeError_deg', NaN, ...
+                'candidateImprovementRatio', NaN, ...
+                'candidateImprovement_deg', NaN, ...
+                'confidenceClass', 'NO_ATTITUDE_INFORMATION', ...
+                'acceptedByEkf', false, ...
+                'decisionReason', 'No independent attitude search requested.', ...
+                'shadowMode', 'DISABLED', ...
                 'initializedAttitudeError_deg', NaN);
             if strcmp(mode,'none')
                 info.classification = 'CALIBRATED_TRACKING';
@@ -43,7 +60,9 @@ classdef AttitudeInitializer
             [ok, msg] = revgnss.AttitudeInitializer.basicGuards_(cfg, cpInfo);
             if ~ok
                 info.classification = msg;
+                info.confidenceClass = 'INVALID_GEOMETRY';
                 info.message = ['Attitude initialization guard failed: ' msg];
+                info.decisionReason = info.message;
                 return
             end
 
@@ -53,8 +72,13 @@ classdef AttitudeInitializer
                     sigma = revgnss.AttitudeInitializer.knownSigma_(cfg);
                     ekf.P(ekf.stateMap.euler_idx, ekf.stateMap.euler_idx) = sigma^2 * eye(3);
                     info.classification = 'CALIBRATED_ABSOLUTE_REFERENCE';
+                    info.confidenceClass = 'VALIDATION_ONLY';
+                    info.acceptedByEkf = true;
                     info.message = ['Known attitude declared for calibration; ' ...
                         'differential carrier tracking is referenced to this attitude.'];
+                    info.decisionReason = info.message;
+                    info.truthEuler_deg = asset.attitude_euler_rad(:) * 180/pi;
+                    info.bestCandidateEuler_deg = info.truthEuler_deg;
                     info.initializedAttitudeError_deg = 0;
 
                 case 'coarseBaselineIntegerSearch'
@@ -65,6 +89,7 @@ classdef AttitudeInitializer
                         ekf.x(ekf.stateMap.euler_idx) = bestEuler;
                         sigDeg = revgnss.AttitudeInitializer.searchSigmaDeg_(cfg, info);
                         ekf.P(ekf.stateMap.euler_idx, ekf.stateMap.euler_idx) = deg2rad(sigDeg)^2 * eye(3);
+                        info.acceptedByEkf = true;
                         info.initializedAttitudeError_deg = ...
                             norm(revgnss.AttitudeInitializer.wrapPi_(bestEuler - asset.attitude_euler_rad(:))) * 180/pi;
                     end
@@ -121,17 +146,30 @@ classdef AttitudeInitializer
             info.searchWindowDeg = win;
             info.stepDeg = step;
             info.nCandidates = numel(axesDeg{1}) * numel(axesDeg{2}) * numel(axesDeg{3});
+            info.priorEuler_deg = ekf.x(ekf.stateMap.euler_idx) * 180/pi;
+            info.truthEuler_deg = asset.attitude_euler_rad(:) * 180/pi;
+            info.priorAttitudeError_deg = ...
+                norm(revgnss.AttitudeInitializer.wrapPi_(ekf.x(ekf.stateMap.euler_idx) - asset.attitude_euler_rad(:))) * 180/pi;
+            if isfield(cfg,'estimator') && isfield(cfg.estimator,'attitudeInitShadow') && ...
+                    isfield(cfg.estimator.attitudeInitShadow,'enable') && cfg.estimator.attitudeInitShadow.enable
+                info.shadowMode = 'SHADOW ONLY - not used by main EKF';
+            end
             if info.nCandidates > s.maxCandidates
                 info.classification = 'ABS_ATT_INIT_FAILED';
                 info.message = 'Search window exceeds maxCandidates.';
+                info.decisionReason = info.message;
                 return
             end
 
             [obs_m, tiVec, aiVec] = revgnss.AttitudeInitializer.diffRows_(cpInfo);
             info.nDiffRows = numel(obs_m);
+            info.nBaselines = max(0, cfg.scenario.nReceivers - 1);
+            info.nTowers = numel(unique(tiVec));
             if info.nDiffRows < 6
                 info.classification = 'ABS_ATT_WEAK';
+                info.confidenceClass = 'INVALID_GEOMETRY';
                 info.message = 'Too few differential carrier rows for 3-axis attitude.';
+                info.decisionReason = info.message;
                 return
             end
             lambda = revgnss.AttitudeInitializer.lambdaL1_(cfg);
@@ -141,6 +179,9 @@ classdef AttitudeInitializer
 
             bestCost = inf; secondCost = inf;
             bestCandidate = e0;
+            secondCandidate = e0;
+            topCost = inf(1,10);
+            topEuler = NaN(3,10);
             for a = axesDeg{1}
                 for b = axesDeg{2}
                     for c = axesDeg{3}
@@ -160,11 +201,15 @@ classdef AttitudeInitializer
                         cost = mean(residCycles.^2);
                         if cost < bestCost
                             secondCost = bestCost;
+                            secondCandidate = bestCandidate;
                             bestCost = cost;
                             bestCandidate = e;
                         elseif cost < secondCost
                             secondCost = cost;
+                            secondCandidate = e;
                         end
+                        [topCost, topEuler] = revgnss.AttitudeInitializer.insertTop_( ...
+                            topCost, topEuler, cost, e);
                     end
                 end
             end
@@ -173,10 +218,33 @@ classdef AttitudeInitializer
             info.secondBestResidual = sqrt(secondCost);
             info.ratio = secondCost / max(bestCost, eps);
             bestEuler = revgnss.AttitudeInitializer.wrapPi_(bestCandidate);
+            secondEuler = revgnss.AttitudeInitializer.wrapPi_(secondCandidate);
+            info.bestCandidateEuler_deg = bestEuler * 180/pi;
+            info.secondCandidateEuler_deg = secondEuler * 180/pi;
+            validTop = isfinite(topCost);
+            info.topResidualCycles = sqrt(topCost(validTop));
+            info.topCandidateEuler_deg = topEuler(:, validTop) * 180/pi;
+            info.bestSecondAngularDistance_deg = ...
+                norm(revgnss.AttitudeInitializer.wrapPi_(bestEuler - secondEuler)) * 180/pi;
+            info.candidateAttitudeError_deg = ...
+                norm(revgnss.AttitudeInitializer.wrapPi_(bestEuler - asset.attitude_euler_rad(:))) * 180/pi;
+            info.candidateImprovement_deg = info.priorAttitudeError_deg - info.candidateAttitudeError_deg;
+            info.candidateImprovementRatio = info.priorAttitudeError_deg / ...
+                max(info.candidateAttitudeError_deg, eps);
 
-            if ~isfinite(info.ratio) || info.ratio < s.ratioThreshold
+            [info.confidenceClass, improves, nearEqual] = ...
+                revgnss.AttitudeInitializer.confidence_(cfg, info);
+
+            if ~improves
+                info.classification = 'ABS_ATT_INIT_FAILED';
+                info.message = 'Best candidate does not improve over the prior attitude.';
+            elseif ~isfinite(info.ratio) || info.ratio < s.ratioThreshold
                 info.classification = 'ABS_ATT_WEAK';
-                info.message = 'Integer-search ratio test is weak; attitude/ambiguity candidates are not separable enough.';
+                if nearEqual
+                    info.message = 'Multiple attitude candidates are nearly equal; attitude signal is ambiguous.';
+                else
+                    info.message = 'Weak independent attitude detected, but ratio gate is not strong enough for EKF injection.';
+                end
             elseif info.bestResidual > s.maxRmsCycles
                 info.classification = 'ABS_ATT_INIT_FAILED';
                 info.message = 'Best integer residual is too large.';
@@ -184,6 +252,7 @@ classdef AttitudeInitializer
                 info.classification = 'ABS_ATT_CONVERGED';
                 info.message = 'Coarse attitude integer search passed residual and ratio gates.';
             end
+            info.decisionReason = info.message;
         end
 
         function [obs_m, tiVec, aiVec] = diffRows_(cpInfo)
@@ -221,6 +290,42 @@ classdef AttitudeInitializer
                 scale = cfg.estimator.attitudeInit.search.sigmaScaleDeg;
             end
             sigDeg = max(max(info.stepDeg) * scale, 0.1);
+        end
+
+        function [cls, improves, nearEqual] = confidence_(cfg, info)
+            impTol = 1.05;
+            ambRatio = 1.05;
+            if isfield(cfg.estimator.attitudeInit.search,'improvementRatioThreshold')
+                impTol = cfg.estimator.attitudeInit.search.improvementRatioThreshold;
+            end
+            if isfield(cfg.estimator.attitudeInit.search,'ambiguousRatioThreshold')
+                ambRatio = cfg.estimator.attitudeInit.search.ambiguousRatioThreshold;
+            end
+            improves = isfinite(info.candidateImprovementRatio) && ...
+                info.candidateImprovementRatio >= impTol;
+            nearEqual = isfinite(info.ratio) && info.ratio < ambRatio;
+            if ~isfinite(info.bestResidual) || info.nDiffRows < 6
+                cls = 'INVALID_GEOMETRY';
+            elseif ~improves
+                cls = 'NO_ATTITUDE_INFORMATION';
+            elseif info.ratio >= cfg.estimator.attitudeInit.search.ratioThreshold && ...
+                    info.bestResidual <= cfg.estimator.attitudeInit.search.maxRmsCycles
+                cls = 'ACCEPTED_ABS_ATTITUDE';
+            elseif nearEqual
+                cls = 'AMBIGUOUS_ATTITUDE';
+            else
+                cls = 'WEAK_ATTITUDE_DETECTED';
+            end
+        end
+
+        function [topCost, topEuler] = insertTop_(topCost, topEuler, cost, euler)
+            [worst, idx] = max(topCost);
+            if cost < worst
+                topCost(idx) = cost;
+                topEuler(:,idx) = euler(:);
+                [topCost, order] = sort(topCost, 'ascend');
+                topEuler = topEuler(:, order);
+            end
         end
 
         function out = mergeInfo_(base, add)

@@ -164,7 +164,10 @@ cfg.estimator.attitudeInit.search.windowDeg = [2; 2; 2];
 cfg.estimator.attitudeInit.search.stepDeg = [0.5; 0.5; 0.5];
 cfg.estimator.attitudeInit.search.maxCandidates = 729;
 cfg.estimator.attitudeInit.search.ratioThreshold = 1.20;
+cfg.estimator.attitudeInit.search.ambiguousRatioThreshold = 1.01;
+cfg.estimator.attitudeInit.search.improvementRatioThreshold = 1.05;
 cfg.estimator.attitudeInit.search.maxRmsCycles = 0.30;
+cfg.estimator.attitudeInitShadow.enable = false;
 
 % --- Validation policy ------------------------------------------
 % 'disableWithWarning'  ->  unsupported features disabled with console warning

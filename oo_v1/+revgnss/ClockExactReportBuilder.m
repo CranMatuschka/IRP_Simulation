@@ -1622,6 +1622,23 @@ classdef ClockExactReportBuilder
             initRat  = sf(summary,'attitudeInitRatio', NaN);
             initErr  = sf(summary,'attitudeInitError_deg', NaN);
             initMsg  = sf(summary,'attitudeInitMessage', '');
+            initConf = sf(summary,'attitudeInitConfidenceClass', 'NO_ATTITUDE_INFORMATION');
+            initAccepted = sf(summary,'attitudeInitAcceptedByEkf', false);
+            initReason = sf(summary,'attitudeInitDecisionReason', '');
+            initPrior = sf(summary,'attitudeInitPriorEuler_deg', [NaN; NaN; NaN]);
+            initTruth = sf(summary,'attitudeInitTruthEuler_deg', [NaN; NaN; NaN]);
+            initBestEuler = sf(summary,'attitudeInitBestEuler_deg', [NaN; NaN; NaN]);
+            initSecondEuler = sf(summary,'attitudeInitSecondEuler_deg', [NaN; NaN; NaN]);
+            initPriorErr = sf(summary,'attitudeInitPriorError_deg', NaN);
+            initCandErr = sf(summary,'attitudeInitCandidateError_deg', NaN);
+            initImpR = sf(summary,'attitudeInitCandidateImprovementRatio', NaN);
+            initImpD = sf(summary,'attitudeInitCandidateImprovement_deg', NaN);
+            initDist = sf(summary,'attitudeInitBestSecondDistance_deg', NaN);
+            initNB = sf(summary,'attitudeInitNBaselines', 0);
+            initNT = sf(summary,'attitudeInitNTowers', 0);
+            initShadow = sf(summary,'attitudeInitShadowMode', 'DISABLED');
+            topRes = sf(summary,'attitudeInitTopResidualCycles', []);
+            topEuler = sf(summary,'attitudeInitTopEuler_deg', []);
             daActB  = sf(summary,'diffAttActiveBaselines', 0);
             daLostB = sf(summary,'diffAttLostBaselines', 0);
             daRecB  = sf(summary,'diffAttRecalibratedBaselines', 0);
@@ -1659,6 +1676,35 @@ classdef ClockExactReportBuilder
                 otherwise
                     fprintf(fid, ['\\textbf{Interpretation:} No independent absolute attitude discovery was requested; ' ...
                         'differential carrier mode tracks changes relative to its calibration reference.\n\n']);
+            end
+
+            fprintf(fid, '\\subsection*{Independent Attitude Candidate Search}\n');
+            fprintf(fid, '\\textbf{Confidence:} %s\\quad{}\\textbf{Accepted by main EKF:} %s\\quad{}\\textbf{Shadow:} %s\n\n', ...
+                strrep(initConf,'_','\_'), mat2str(initAccepted), revgnss.ClockExactReportBuilder.esc_(initShadow));
+            fprintf(fid, '\\begin{tabular}{p{0.42\\textwidth}p{0.42\\textwidth}}\n');
+            fprintf(fid, '\\toprule\n\\textbf{Quantity} & \\textbf{Value}\\\\\n\\midrule\n');
+            fprintf(fid, 'Prior attitude [deg] & %s\\\\\n', revgnss.ClockExactReportBuilder.vec3_(initPrior));
+            fprintf(fid, 'Truth attitude [deg] & %s\\\\\n', revgnss.ClockExactReportBuilder.vec3_(initTruth));
+            fprintf(fid, 'Best candidate [deg] & %s\\\\\n', revgnss.ClockExactReportBuilder.vec3_(initBestEuler));
+            fprintf(fid, 'Second candidate [deg] & %s\\\\\n', revgnss.ClockExactReportBuilder.vec3_(initSecondEuler));
+            if ~isnan(initPriorErr); fprintf(fid, 'Prior attitude error & %.4f deg\\\\\n', initPriorErr); end
+            if ~isnan(initCandErr);  fprintf(fid, 'Candidate attitude error & %.4f deg\\\\\n', initCandErr); end
+            if ~isnan(initImpD);     fprintf(fid, 'Candidate improvement & %.4f deg\\\\\n', initImpD); end
+            if ~isnan(initImpR);     fprintf(fid, 'Improvement ratio & %.3f\\\\\n', initImpR); end
+            if ~isnan(initDist);     fprintf(fid, 'Best--second angular separation & %.4f deg\\\\\n', initDist); end
+            fprintf(fid, 'Receiver baselines / towers & %d / %d\\\\\n', initNB, initNT);
+            fprintf(fid, '\\bottomrule\n\\end{tabular}\n\n');
+            if ~isempty(initReason)
+                fprintf(fid, '\\textbf{Decision reason:} %s\n\n', revgnss.ClockExactReportBuilder.esc_(initReason));
+            end
+            if ~isempty(topRes) && ~isempty(topEuler)
+                nTop = min([5, numel(topRes), size(topEuler,2)]);
+                fprintf(fid, '\\textbf{Top residual candidates (first %d of stored top 10):}\n\n', nTop);
+                fprintf(fid, '\\begin{tabular}{rcc}\n\\toprule\nRank & Residual [cycles RMS] & Euler candidate [deg]\\\\\n\\midrule\n');
+                for qi = 1:nTop
+                    fprintf(fid, '%d & %.4f & %s\\\\\n', qi, topRes(qi), revgnss.ClockExactReportBuilder.vec3_(topEuler(:,qi)));
+                end
+                fprintf(fid, '\\bottomrule\n\\end{tabular}\n\n');
             end
 
             % --- Stage 15: Carrier Differential Attitude Calibration ---
@@ -1857,6 +1903,15 @@ classdef ClockExactReportBuilder
             s = strrep(s, '}', '\}');
             s = strrep(s, '^', '\^{}');
             s = strrep(s, '~', '\textasciitilde{}');
+        end
+
+        function s = vec3_(v)
+            v = v(:);
+            if numel(v) < 3 || any(~isfinite(v(1:3)))
+                s = '[---, ---, ---]';
+            else
+                s = sprintf('[%.3f, %.3f, %.3f]', v(1), v(2), v(3));
+            end
         end
 
         % ================================================================

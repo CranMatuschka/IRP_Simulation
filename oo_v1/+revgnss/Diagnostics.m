@@ -868,6 +868,23 @@ classdef Diagnostics < handle
             entry.attitudeInitSecondResidual = NaN;
             entry.attitudeInitRatio = NaN;
             entry.attitudeInitError_deg = NaN;
+            entry.attitudeInitConfidenceClass = 'NO_ATTITUDE_INFORMATION';
+            entry.attitudeInitAcceptedByEkf = false;
+            entry.attitudeInitDecisionReason = '';
+            entry.attitudeInitPriorEuler_deg = [NaN; NaN; NaN];
+            entry.attitudeInitTruthEuler_deg = [NaN; NaN; NaN];
+            entry.attitudeInitBestEuler_deg = [NaN; NaN; NaN];
+            entry.attitudeInitSecondEuler_deg = [NaN; NaN; NaN];
+            entry.attitudeInitTopEuler_deg = NaN(3,0);
+            entry.attitudeInitTopResidualCycles = NaN(1,0);
+            entry.attitudeInitBestSecondDistance_deg = NaN;
+            entry.attitudeInitPriorError_deg = NaN;
+            entry.attitudeInitCandidateError_deg = NaN;
+            entry.attitudeInitCandidateImprovementRatio = NaN;
+            entry.attitudeInitCandidateImprovement_deg = NaN;
+            entry.attitudeInitNBaselines = 0;
+            entry.attitudeInitNTowers = 0;
+            entry.attitudeInitShadowMode = 'DISABLED';
             if isfield(errStruct,'attitudeInit') && isstruct(errStruct.attitudeInit)
                 ai16 = errStruct.attitudeInit;
                 if isfield(ai16,'mode'); entry.attitudeInitMode = ai16.mode; end
@@ -875,12 +892,29 @@ classdef Diagnostics < handle
                 if isfield(ai16,'message'); entry.attitudeInitMessage = ai16.message; end
                 if isfield(ai16,'nCandidates'); entry.attitudeInitCandidates = ai16.nCandidates; end
                 if isfield(ai16,'nDiffRows'); entry.attitudeInitDiffRows = ai16.nDiffRows; end
+                if isfield(ai16,'nBaselines'); entry.attitudeInitNBaselines = ai16.nBaselines; end
+                if isfield(ai16,'nTowers'); entry.attitudeInitNTowers = ai16.nTowers; end
                 if isfield(ai16,'bestResidual'); entry.attitudeInitBestResidual = ai16.bestResidual; end
                 if isfield(ai16,'secondBestResidual'); entry.attitudeInitSecondResidual = ai16.secondBestResidual; end
                 if isfield(ai16,'ratio'); entry.attitudeInitRatio = ai16.ratio; end
                 if isfield(ai16,'initializedAttitudeError_deg')
                     entry.attitudeInitError_deg = ai16.initializedAttitudeError_deg;
                 end
+                if isfield(ai16,'confidenceClass'); entry.attitudeInitConfidenceClass = ai16.confidenceClass; end
+                if isfield(ai16,'acceptedByEkf'); entry.attitudeInitAcceptedByEkf = ai16.acceptedByEkf; end
+                if isfield(ai16,'decisionReason'); entry.attitudeInitDecisionReason = ai16.decisionReason; end
+                if isfield(ai16,'priorEuler_deg'); entry.attitudeInitPriorEuler_deg = ai16.priorEuler_deg; end
+                if isfield(ai16,'truthEuler_deg'); entry.attitudeInitTruthEuler_deg = ai16.truthEuler_deg; end
+                if isfield(ai16,'bestCandidateEuler_deg'); entry.attitudeInitBestEuler_deg = ai16.bestCandidateEuler_deg; end
+                if isfield(ai16,'secondCandidateEuler_deg'); entry.attitudeInitSecondEuler_deg = ai16.secondCandidateEuler_deg; end
+                if isfield(ai16,'topCandidateEuler_deg'); entry.attitudeInitTopEuler_deg = ai16.topCandidateEuler_deg; end
+                if isfield(ai16,'topResidualCycles'); entry.attitudeInitTopResidualCycles = ai16.topResidualCycles; end
+                if isfield(ai16,'bestSecondAngularDistance_deg'); entry.attitudeInitBestSecondDistance_deg = ai16.bestSecondAngularDistance_deg; end
+                if isfield(ai16,'priorAttitudeError_deg'); entry.attitudeInitPriorError_deg = ai16.priorAttitudeError_deg; end
+                if isfield(ai16,'candidateAttitudeError_deg'); entry.attitudeInitCandidateError_deg = ai16.candidateAttitudeError_deg; end
+                if isfield(ai16,'candidateImprovementRatio'); entry.attitudeInitCandidateImprovementRatio = ai16.candidateImprovementRatio; end
+                if isfield(ai16,'candidateImprovement_deg'); entry.attitudeInitCandidateImprovement_deg = ai16.candidateImprovement_deg; end
+                if isfield(ai16,'shadowMode'); entry.attitudeInitShadowMode = ai16.shadowMode; end
             end
 
             % --- Append to log ----------------------------------------

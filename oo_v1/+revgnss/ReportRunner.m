@@ -460,6 +460,23 @@ classdef ReportRunner
                     summary.attitudeInitRatio = double(diag.log(end).attitudeInitRatio);
                     summary.attitudeInitError_deg = double(diag.log(end).attitudeInitError_deg);
                     summary.attitudeInitMessage = diag.log(end).attitudeInitMessage;
+                    summary.attitudeInitConfidenceClass = diag.log(end).attitudeInitConfidenceClass;
+                    summary.attitudeInitAcceptedByEkf = logical(diag.log(end).attitudeInitAcceptedByEkf);
+                    summary.attitudeInitDecisionReason = diag.log(end).attitudeInitDecisionReason;
+                    summary.attitudeInitPriorEuler_deg = diag.log(end).attitudeInitPriorEuler_deg;
+                    summary.attitudeInitTruthEuler_deg = diag.log(end).attitudeInitTruthEuler_deg;
+                    summary.attitudeInitBestEuler_deg = diag.log(end).attitudeInitBestEuler_deg;
+                    summary.attitudeInitSecondEuler_deg = diag.log(end).attitudeInitSecondEuler_deg;
+                    summary.attitudeInitTopEuler_deg = diag.log(end).attitudeInitTopEuler_deg;
+                    summary.attitudeInitTopResidualCycles = diag.log(end).attitudeInitTopResidualCycles;
+                    summary.attitudeInitBestSecondDistance_deg = double(diag.log(end).attitudeInitBestSecondDistance_deg);
+                    summary.attitudeInitPriorError_deg = double(diag.log(end).attitudeInitPriorError_deg);
+                    summary.attitudeInitCandidateError_deg = double(diag.log(end).attitudeInitCandidateError_deg);
+                    summary.attitudeInitCandidateImprovementRatio = double(diag.log(end).attitudeInitCandidateImprovementRatio);
+                    summary.attitudeInitCandidateImprovement_deg = double(diag.log(end).attitudeInitCandidateImprovement_deg);
+                    summary.attitudeInitNBaselines = double(diag.log(end).attitudeInitNBaselines);
+                    summary.attitudeInitNTowers = double(diag.log(end).attitudeInitNTowers);
+                    summary.attitudeInitShadowMode = diag.log(end).attitudeInitShadowMode;
                 catch
                     summary.attitudeInitMode = revgnss.ReportRunner.safeCfgStr_(cfg, ...
                         {'estimator','attitudeInitMode'}, 'none');
@@ -471,6 +488,23 @@ classdef ReportRunner
                     summary.attitudeInitRatio = NaN;
                     summary.attitudeInitError_deg = NaN;
                     summary.attitudeInitMessage = '';
+                    summary.attitudeInitConfidenceClass = 'NO_ATTITUDE_INFORMATION';
+                    summary.attitudeInitAcceptedByEkf = false;
+                    summary.attitudeInitDecisionReason = '';
+                    summary.attitudeInitPriorEuler_deg = [NaN; NaN; NaN];
+                    summary.attitudeInitTruthEuler_deg = [NaN; NaN; NaN];
+                    summary.attitudeInitBestEuler_deg = [NaN; NaN; NaN];
+                    summary.attitudeInitSecondEuler_deg = [NaN; NaN; NaN];
+                    summary.attitudeInitTopEuler_deg = NaN(3,0);
+                    summary.attitudeInitTopResidualCycles = NaN(1,0);
+                    summary.attitudeInitBestSecondDistance_deg = NaN;
+                    summary.attitudeInitPriorError_deg = NaN;
+                    summary.attitudeInitCandidateError_deg = NaN;
+                    summary.attitudeInitCandidateImprovementRatio = NaN;
+                    summary.attitudeInitCandidateImprovement_deg = NaN;
+                    summary.attitudeInitNBaselines = 0;
+                    summary.attitudeInitNTowers = 0;
+                    summary.attitudeInitShadowMode = 'DISABLED';
                 end
             catch
                 summary.attitudeObsClass = 'UNKNOWN';
@@ -501,6 +535,23 @@ classdef ReportRunner
                 summary.attitudeInitRatio          = NaN;
                 summary.attitudeInitError_deg      = NaN;
                 summary.attitudeInitMessage        = '';
+                summary.attitudeInitConfidenceClass = 'NO_ATTITUDE_INFORMATION';
+                summary.attitudeInitAcceptedByEkf  = false;
+                summary.attitudeInitDecisionReason = '';
+                summary.attitudeInitPriorEuler_deg = [NaN; NaN; NaN];
+                summary.attitudeInitTruthEuler_deg = [NaN; NaN; NaN];
+                summary.attitudeInitBestEuler_deg  = [NaN; NaN; NaN];
+                summary.attitudeInitSecondEuler_deg = [NaN; NaN; NaN];
+                summary.attitudeInitTopEuler_deg   = NaN(3,0);
+                summary.attitudeInitTopResidualCycles = NaN(1,0);
+                summary.attitudeInitBestSecondDistance_deg = NaN;
+                summary.attitudeInitPriorError_deg = NaN;
+                summary.attitudeInitCandidateError_deg = NaN;
+                summary.attitudeInitCandidateImprovementRatio = NaN;
+                summary.attitudeInitCandidateImprovement_deg = NaN;
+                summary.attitudeInitNBaselines = 0;
+                summary.attitudeInitNTowers = 0;
+                summary.attitudeInitShadowMode = 'DISABLED';
             end
 
             % Observables

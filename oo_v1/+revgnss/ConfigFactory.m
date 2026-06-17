@@ -197,8 +197,11 @@ classdef ConfigFactory
             cfg.estimator.attitudeInit.search.stepDeg = [1; 1; 1];
             cfg.estimator.attitudeInit.search.maxCandidates = 343;
             cfg.estimator.attitudeInit.search.ratioThreshold = 1.20;
+            cfg.estimator.attitudeInit.search.ambiguousRatioThreshold = 1.01;
+            cfg.estimator.attitudeInit.search.improvementRatioThreshold = 1.05;
             cfg.estimator.attitudeInit.search.maxRmsCycles = 0.30;
             cfg.estimator.attitudeInit.search.sigmaScaleDeg = 2.0;
+            cfg.estimator.attitudeInitShadow.enable = false;
             % perfectCorrection: EKF uses known tower clock values (zero here).
             cfg.estimator.towerClockMode          = 'perfectCorrection';
             cfg.estimator.towerClockCorrectionSigma_m = 0.5; % used if noisyCorrection
