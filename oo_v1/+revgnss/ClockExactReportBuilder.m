@@ -456,6 +456,7 @@ classdef ClockExactReportBuilder
             CE.writeModelRealityCheck_(fid, cfg, summary, dur, nTwr, nRx);
             CE.writeMultiAssetArchitecture_(fid, summary);
             CE.writeOneWayISLArchitecture_(fid, cfg, summary);
+            CE.writeTwoWayISLArchitecture_(fid, cfg, summary);
             CE.writeObservableRealityCheck_(fid, summary);
             CE.writeStateEstimation_(fid, plotPaths, stem, cfg, diag, figDir);
             CE.writeMeasurementValidation_(fid, plotPaths, stem, figDir);
@@ -744,6 +745,9 @@ classdef ClockExactReportBuilder
             CE.writeQuantRow_(fid, 'ISL code / Doppler / carrier diagnostic rows', sprintf('%d / %d / %d', ...
                 CE.safeField_(summary,'totalIslCodeRows',0), CE.safeField_(summary,'totalIslDopplerRows',0), ...
                 CE.safeField_(summary,'totalIslCarrierDiagnosticRows',0)));
+            CE.writeQuantRow_(fid, 'Two-way ISL range / Doppler diagnostic rows', sprintf('%d / %d', ...
+                CE.safeField_(summary,'totalIslTwoWayRangeRows',0), ...
+                CE.safeField_(summary,'totalIslTwoWayDopplerDiagnosticRows',0)));
             CE.writeQuantRow_(fid, 'EKF state count', sprintf('%d', CE.safeField_(summary,'nStates',0)));
             CE.writeQuantRow_(fid, 'Ambiguity / ZWD state count', sprintf('%d / %d', ...
                 CE.safeField_(summary,'nAmbiguityStates',0), CE.safeField_(summary,'nZwdStates',0)));
@@ -846,7 +850,41 @@ classdef ClockExactReportBuilder
                 CE.safeField_(summary,'totalIslDopplerRows',0), mat2str(CE.safeField_(summary,'islDopplerUsedInEkf',false))));
             CE.writeQuantRow_(fid, 'ISL carrier diagnostic rows / EKF-used', sprintf('%d / %s', ...
                 CE.safeField_(summary,'totalIslCarrierDiagnosticRows',0), mat2str(CE.safeField_(summary,'islCarrierUsedInEkf',false))));
-            CE.writeQuantRow_(fid, 'Limitations', 'one-way only; no two-way cancellation; no TWSTFT; no relay/transponder; carrier diagnostic-only');
+            CE.writeQuantRow_(fid, 'Limitations', 'one-way rows have no two-way clock cancellation; no TWSTFT; no relay/transponder; carrier diagnostic-only');
+            fprintf(fid, '\\bottomrule\n\\end{tabular}\\end{center}\n\\clearpage\n');
+        end
+
+        % ================================================================
+        % TWO-WAY ISL OBSERVABLE ARCHITECTURE
+        % ================================================================
+
+        function writeTwoWayISLArchitecture_(fid, cfg, summary)
+            CE = revgnss.ClockExactReportBuilder;
+            fprintf(fid, '\\section{Two-Way ISL Observable Architecture}\n');
+            twOn = CE.getLogical_(cfg, {'measurements','isl','twoWay','enable'}, false);
+            oneCodeEkf = CE.safeField_(summary,'islCodeUsedInEkf',false);
+            twRangeEkf = CE.safeField_(summary,'islTwoWayRangeUsedInEkf',false);
+            guard = 'OK: no raw one-way code / derived two-way range double-counting';
+            if oneCodeEkf && twRangeEkf; guard = 'INVALID: double-counting'; end
+            fprintf(fid, ['Stage 22 forms a same-epoch two-way ISL range scaffold from reciprocal ' ...
+                'one-way code concepts: $P_{2w}=0.5(P_{AB}+P_{BA})$. In the current same-clock ' ...
+                'Tx/Rx model, spacecraft clock terms cancel, so the EKF two-way range row touches ' ...
+                'primary position only and has zero receiver-clock column. The secondary asset ' ...
+                'remains represented/external.\n\n']);
+            fprintf(fid, '\\begin{center}\\small\n');
+            fprintf(fid, '\\begin{tabular}{p{0.42\\textwidth}p{0.42\\textwidth}}\n');
+            fprintf(fid, '\\toprule\n\\textbf{Quantity} & \\textbf{Actual value}\\\\\n\\midrule\n');
+            CE.writeQuantRow_(fid, 'Two-way ISL enabled', mat2str(twOn));
+            CE.writeQuantRow_(fid, 'One-way code / Doppler EKF-used', sprintf('%s / %s', ...
+                mat2str(oneCodeEkf), mat2str(CE.safeField_(summary,'islDopplerUsedInEkf',false))));
+            CE.writeQuantRow_(fid, 'Two-way range rows / EKF-used', sprintf('%d / %s', ...
+                CE.safeField_(summary,'totalIslTwoWayRangeRows',0), mat2str(twRangeEkf)));
+            CE.writeQuantRow_(fid, 'Two-way Doppler diagnostic rows / EKF-used', sprintf('%d / %s', ...
+                CE.safeField_(summary,'totalIslTwoWayDopplerDiagnosticRows',0), ...
+                mat2str(CE.safeField_(summary,'islTwoWayDopplerUsedInEkf',false))));
+            CE.writeQuantRow_(fid, 'Double-counting guard', CE.esc_(guard));
+            CE.writeQuantRow_(fid, 'Clock cancellation assumption', 'same-epoch same-spacecraft Tx/Rx clock; range H clock column is zero');
+            CE.writeQuantRow_(fid, 'Limitations', 'no TWSTFT; no relay/transponder; no secondary asset EKF state; no ISL carrier EKF');
             fprintf(fid, '\\bottomrule\n\\end{tabular}\\end{center}\n\\clearpage\n');
         end
 
@@ -883,6 +921,8 @@ classdef ClockExactReportBuilder
             CE.writeQuantRow_(fid, 'ISL code / Doppler / carrier diagnostic rows', sprintf('%d / %d / %d', ...
                 CE.safeField_(c,'islCode',0), CE.safeField_(c,'islDoppler',0), ...
                 CE.safeField_(c,'islCarrierDiagnostic',0)));
+            CE.writeQuantRow_(fid, 'Two-way ISL range / Doppler diagnostic rows', sprintf('%d / %d', ...
+                CE.safeField_(c,'islTwoWayRange',0), CE.safeField_(c,'islTwoWayDopplerDiagnostic',0)));
             if isfield(obs,'linksByAsset') && ~isempty(obs.linksByAsset)
                 parts = {};
                 for kk = 1:numel(obs.linksByAsset)

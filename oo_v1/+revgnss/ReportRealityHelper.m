@@ -153,6 +153,10 @@ classdef ReportRealityHelper
                         error('ClockExactReportBuilder:islClockColumnMissing', ...
                             'ISL Doppler metadata must touch primary receiver clock drift column.');
                     end
+                    if strcmp(rs(k).observableType,'islTwoWayRange') && any(ismember([13 14], rs(k).stateColumns))
+                        error('ClockExactReportBuilder:twoWayIslClockColumnPresent', ...
+                            'Two-way ISL range claims clock cancellation but touches receiver clock bias/drift columns.');
+                    end
                 end
             end
         end
@@ -200,14 +204,25 @@ classdef ReportRealityHelper
                 c = summary.observableStack.rowsByType;
                 nIsl = revgnss.ReportRealityHelper.safeField_(c,'islCode',0) + ...
                     revgnss.ReportRealityHelper.safeField_(c,'islDoppler',0) + ...
-                    revgnss.ReportRealityHelper.safeField_(c,'islCarrierDiagnostic',0);
+                    revgnss.ReportRealityHelper.safeField_(c,'islCarrierDiagnostic',0) + ...
+                    revgnss.ReportRealityHelper.safeField_(c,'islTwoWayRange',0) + ...
+                    revgnss.ReportRealityHelper.safeField_(c,'islTwoWayDopplerDiagnostic',0);
                 if nIsl ~= revgnss.ReportRealityHelper.safeField_(ma,'islRows',0)
                     error('ClockExactReportBuilder:islRowCountMismatch', ...
                         'ISL metadata rows (%d) do not match multi-asset summary (%d).', nIsl, ma.islRows);
                 end
+                if revgnss.ReportRealityHelper.safeField_(summary,'islCodeUsedInEkf',false) && ...
+                        revgnss.ReportRealityHelper.safeField_(summary,'islTwoWayRangeUsedInEkf',false)
+                    error('ClockExactReportBuilder:islDoubleCounting', ...
+                        'One-way ISL code and two-way ISL range cannot both be EKF-used without a covariance model.');
+                end
                 if revgnss.ReportRealityHelper.safeField_(summary,'islCarrierUsedInEkf',false)
                     error('ClockExactReportBuilder:islCarrierEkfUnsupported', ...
                         'ISL carrier is reported as EKF-used without ISL ambiguity states.');
+                end
+                if revgnss.ReportRealityHelper.safeField_(summary,'islTwoWayDopplerUsedInEkf',false)
+                    error('ClockExactReportBuilder:twoWayIslDopplerUnsupported', ...
+                        'Two-way ISL Doppler is diagnostic-only in Stage 22.');
                 end
             end
         end

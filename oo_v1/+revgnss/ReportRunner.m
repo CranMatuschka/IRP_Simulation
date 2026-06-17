@@ -743,9 +743,13 @@ classdef ReportRunner
             summary.totalIslCodeRows = 0;
             summary.totalIslDopplerRows = 0;
             summary.totalIslCarrierDiagnosticRows = 0;
+            summary.totalIslTwoWayRangeRows = 0;
+            summary.totalIslTwoWayDopplerDiagnosticRows = 0;
             summary.islCodeUsedInEkf = revgnss.ReportRunner.safeCfgBool_(cfg, {'measurements','isl','code','useInEKF'}, false);
             summary.islDopplerUsedInEkf = revgnss.ReportRunner.safeCfgBool_(cfg, {'measurements','isl','doppler','useInEKF'}, false);
             summary.islCarrierUsedInEkf = revgnss.ReportRunner.safeCfgBool_(cfg, {'measurements','isl','carrier','useInEKF'}, false);
+            summary.islTwoWayRangeUsedInEkf = revgnss.ReportRunner.safeCfgBool_(cfg, {'measurements','isl','twoWay','range','useInEKF'}, false);
+            summary.islTwoWayDopplerUsedInEkf = revgnss.ReportRunner.safeCfgBool_(cfg, {'measurements','isl','twoWay','doppler','useInEKF'}, false);
             summary.observableStack = revgnss.ObservableStackDescriptor.compact([]);
             try
                 if isfield(diag.log(end),'observableStack')
@@ -758,6 +762,8 @@ classdef ReportRunner
                     summary.totalIslCodeRows = revgnss.ReportRunner.fieldOr_(cObs,'islCode',0);
                     summary.totalIslDopplerRows = revgnss.ReportRunner.fieldOr_(cObs,'islDoppler',0);
                     summary.totalIslCarrierDiagnosticRows = revgnss.ReportRunner.fieldOr_(cObs,'islCarrierDiagnostic',0);
+                    summary.totalIslTwoWayRangeRows = revgnss.ReportRunner.fieldOr_(cObs,'islTwoWayRange',0);
+                    summary.totalIslTwoWayDopplerDiagnosticRows = revgnss.ReportRunner.fieldOr_(cObs,'islTwoWayDopplerDiagnostic',0);
                     summary.carrierUsedInEkf = carrInEKF && summary.totalCarrierRows > 0;
                     summary.carrierDiagnosticOnly = summary.carrierGenerated && ~summary.carrierUsedInEkf;
                 end

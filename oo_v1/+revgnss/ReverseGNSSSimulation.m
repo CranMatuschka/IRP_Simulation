@@ -197,6 +197,19 @@ classdef ReverseGNSSSimulation < handle
                 errStruct.observableStack = revgnss.ReverseGnssObservableAdapter.addISLRows( ...
                     errStruct.observableStack, islInfo);
             end
+            [z_2w, h_2w, H_2w, R_2w, twoWayInfo] = revgnss.TwoWayISLMeasurementBuilder.build( ...
+                obj.cfg, obj.asset, obj.assets, obj.ekf.x, obj.ekf.stateMap, obj.ekf.nx);
+            if ~isempty(z_2w)
+                z = [z; z_2w];
+                h = [h; h_2w];
+                H = [H; H_2w];
+                R = blkdiag(R, R_2w);
+            end
+            errStruct.islTwoWay = twoWayInfo;
+            if isfield(errStruct,'observableStack')
+                errStruct.observableStack = revgnss.ReverseGnssObservableAdapter.addTwoWayISLRows( ...
+                    errStruct.observableStack, twoWayInfo);
+            end
 
             % Stage 16: absolute attitude initialization before differential
             % carrier calibration, so Stage 15 references the initialized attitude.
@@ -486,16 +499,25 @@ classdef ReverseGNSSSimulation < handle
                     obj.cfg, obj.asset, obj.assets, obj.ekf.x, sm, errStruct.isl);
             end
             M_isl = numel(h_isl);
+            h_2w = [];
+            if isfield(errStruct,'islTwoWay') && isstruct(errStruct.islTwoWay) && ...
+                    isfield(errStruct.islTwoWay,'ekfRowTypes') && ~isempty(errStruct.islTwoWay.ekfRowTypes)
+                h_2w = revgnss.TwoWayISLMeasurementBuilder.predictEkfRows( ...
+                    obj.cfg, obj.asset, obj.assets, obj.ekf.x, sm, errStruct.islTwoWay);
+            end
+            M_2w = numel(h_2w);
             if M_dop > 0 || M_car > 0
                 idxIsl = M_pr + M_dop + M_car + 1;
                 postfit = [z(1:M_pr) - h_post_pr; ...
                            z(M_pr+1:M_pr+M_dop) - hd_post; ...
                            z(M_pr+M_dop+1:M_pr+M_dop+M_car) - hc_post; ...
-                           z(idxIsl:idxIsl+M_isl-1) - h_isl];
+                           z(idxIsl:idxIsl+M_isl-1) - h_isl; ...
+                           z(idxIsl+M_isl:idxIsl+M_isl+M_2w-1) - h_2w];
             else
                 idxIsl = M_pr + 1;
                 postfit = [z(1:M_pr) - h_post_pr; ...
-                           z(idxIsl:idxIsl+M_isl-1) - h_isl];
+                           z(idxIsl:idxIsl+M_isl-1) - h_isl; ...
+                           z(idxIsl+M_isl:idxIsl+M_isl+M_2w-1) - h_2w];
             end
         end
 

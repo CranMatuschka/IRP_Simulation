@@ -432,6 +432,12 @@ classdef ConfigFactory
             cfg.measurements.isl.carrier.enable = false;
             cfg.measurements.isl.carrier.useInEKF = false;
             cfg.measurements.isl.carrier.sigma_m = 0.002;
+            cfg.measurements.isl.twoWay.enable = false;
+            cfg.measurements.isl.twoWay.range.enable = false;
+            cfg.measurements.isl.twoWay.range.useInEKF = false;
+            cfg.measurements.isl.twoWay.range.sigma_m = 0.25;
+            cfg.measurements.isl.twoWay.doppler.enable = false;
+            cfg.measurements.isl.twoWay.doppler.useInEKF = false;
 
             % --- Observable mode (Step 1) -----------------------------------
             % observableMode: DESCRIPTIVE LABEL (not authoritative — does not gate
@@ -1718,6 +1724,7 @@ classdef ConfigFactory
             end
             cfg = revgnss.MultiAssetConfig.normalize(cfg);
             revgnss.ISLMeasurementBuilder.validateConfig(cfg);
+            revgnss.TwoWayISLMeasurementBuilder.validateConfig(cfg);
         end
 
         function tmpl = getClockTemplate_(templateName)

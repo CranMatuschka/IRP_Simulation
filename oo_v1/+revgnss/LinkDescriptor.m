@@ -33,5 +33,13 @@ classdef LinkDescriptor
             link = revgnss.LinkDescriptor.create(id, txId, rxId, 'ISL_ONE_WAY', ...
                 rxAssetName, rxAssetIndex, txAssetName, txAssetIndex);
         end
+
+        function link = islTwoWay(txAssetName, txAssetIndex, rxAssetName, rxAssetIndex)
+            txId = sprintf('spacecraft:%s:tx', char(txAssetName));
+            rxId = sprintf('spacecraft:%s:rx:%03d', char(rxAssetName), 1);
+            id = sprintf('link:isl2w:a%03d:a%03d', txAssetIndex, rxAssetIndex);
+            link = revgnss.LinkDescriptor.create(id, txId, rxId, 'ISL_TWO_WAY_RANGE', ...
+                rxAssetName, rxAssetIndex, txAssetName, txAssetIndex);
+        end
     end
 end

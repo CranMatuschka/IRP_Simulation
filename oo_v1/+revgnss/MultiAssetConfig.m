@@ -83,7 +83,7 @@ classdef MultiAssetConfig
             assetTable = repmat(empty, nAssets, 1);
             nTwr = 0;
             if isfield(cfg,'scenario') && isfield(cfg.scenario,'nTowers'); nTwr = cfg.scenario.nTowers; end
-            islActive = revgnss.MultiAssetConfig.islRowCount_(cfg) > 0;
+            islActiveLinks = revgnss.MultiAssetConfig.islLinkCount_(cfg);
             txIdx = 2; rxIdx = 1;
             if isfield(cfg,'measurements') && isfield(cfg.measurements,'isl')
                 if isfield(cfg.measurements.isl,'transmitterAssetIndex'); txIdx = cfg.measurements.isl.transmitterAssetIndex; end
@@ -98,7 +98,9 @@ classdef MultiAssetConfig
                 clkOwner = 'representedTruthClock';
                 if est; clkOwner = 'primaryEKFReceiverClock'; end
                 activeLinks = nTwr*nRx*est;
-                if islActive && (ai == txIdx || ai == rxIdx); activeLinks = activeLinks + 1; end
+                if islActiveLinks > 0 && (ai == txIdx || ai == rxIdx)
+                    activeLinks = activeLinks + islActiveLinks;
+                end
                 assetTable(ai) = struct('index', ai, 'name', char(a.name), ...
                     'estimated', est, 'stateOwner', char(owner), ...
                     'nReceivers', nRx, 'endpointCount', nRx, ...
@@ -113,7 +115,7 @@ classdef MultiAssetConfig
             s.guardMessage = cfg.multiAsset.guardMessage;
             s.islRows = revgnss.MultiAssetConfig.islRowCount_(cfg);
             s.twstftRows = 0;
-            s.futureInactiveLinkTypes = {'twoWayISL','TWSTFT'};
+            s.futureInactiveLinkTypes = {'TWSTFT','relay/transponder'};
             s.assetTable = assetTable;
         end
 
@@ -183,6 +185,30 @@ classdef MultiAssetConfig
             if isfield(isl,'code') && isfield(isl.code,'enable') && isl.code.enable; n = n + 1; end
             if isfield(isl,'doppler') && isfield(isl.doppler,'enable') && isl.doppler.enable; n = n + 1; end
             if isfield(isl,'carrier') && isfield(isl.carrier,'enable') && isl.carrier.enable; n = n + 1; end
+            if isfield(isl,'twoWay') && isfield(isl.twoWay,'enable') && isl.twoWay.enable
+                tw = isl.twoWay;
+                if isfield(tw,'range') && isfield(tw.range,'enable') && tw.range.enable; n = n + 1; end
+                if isfield(tw,'doppler') && isfield(tw.doppler,'enable') && tw.doppler.enable; n = n + 1; end
+            end
+        end
+
+        function n = islLinkCount_(cfg)
+            n = 0;
+            if ~isfield(cfg,'measurements') || ~isfield(cfg.measurements,'isl') || ...
+                    ~isfield(cfg.measurements.isl,'enable') || ~cfg.measurements.isl.enable
+                return
+            end
+            isl = cfg.measurements.isl;
+            if (isfield(isl,'code') && isfield(isl.code,'enable') && isl.code.enable) || ...
+                    (isfield(isl,'doppler') && isfield(isl.doppler,'enable') && isl.doppler.enable) || ...
+                    (isfield(isl,'carrier') && isfield(isl.carrier,'enable') && isl.carrier.enable)
+                n = n + 1;
+            end
+            if isfield(isl,'twoWay') && isfield(isl.twoWay,'enable') && isl.twoWay.enable && ...
+                    ((isfield(isl.twoWay,'range') && isfield(isl.twoWay.range,'enable') && isl.twoWay.range.enable) || ...
+                     (isfield(isl.twoWay,'doppler') && isfield(isl.twoWay.doppler,'enable') && isl.twoWay.doppler.enable))
+                n = n + 1;
+            end
         end
     end
 end
