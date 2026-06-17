@@ -1535,7 +1535,7 @@ classdef ClockExactReportBuilder
             if ~isnan(condN);  fprintf(fid, '$H_{att}$ condition number (mean) & %.2f\\\\\n',    condN); end
             if ~isnan(sigD);   fprintf(fid, 'Final attitude covariance sigma & %.4f deg\\\\\n',  sigD); end
             if ~isnan(meanJ);  fprintf(fid, 'Mean $H_{att}$ Frobenius norm & %.4f\\\\\n',        meanJ); end
-            fprintf(fid, '\\bottomrule\n\\end{tabular}\n');
+            fprintf(fid, '\\bottomrule\n\\end{tabular}\\par\n');
 
             switch attCls
                 case {'NON_CONVERGENT','AMBIGUITY_ABSORBED'}
@@ -1610,6 +1610,47 @@ classdef ClockExactReportBuilder
                 case 'SKIPPED'
                     fprintf(fid, ['\\textit{Known-ambiguity validation not run. ' ...
                         'Enable via cfg.estimator.runKnownAmbiguityValidation = true.}\n\n']);
+            end
+
+            % --- Stage 16: Absolute Attitude Initialization ---
+            initMode = sf(summary,'attitudeInitMode', 'none');
+            initCls  = sf(summary,'attitudeInitClass','UNKNOWN');
+            initN    = sf(summary,'attitudeInitCandidates', 0);
+            initRows = sf(summary,'attitudeInitDiffRows', 0);
+            initBest = sf(summary,'attitudeInitBestResidual', NaN);
+            initSec  = sf(summary,'attitudeInitSecondResidual', NaN);
+            initRat  = sf(summary,'attitudeInitRatio', NaN);
+            initErr  = sf(summary,'attitudeInitError_deg', NaN);
+            initMsg  = sf(summary,'attitudeInitMessage', '');
+            fprintf(fid, '\\subsection*{Absolute Attitude Initialization}\n');
+            fprintf(fid, '\\textbf{Mode:} %s\\quad{}\\textbf{Classification:} %s\n\n', ...
+                strrep(initMode,'_','\_'), strrep(initCls,'_','\_'));
+            fprintf(fid, '\\begin{tabular}{p{0.52\\textwidth}p{0.30\\textwidth}}\n');
+            fprintf(fid, '\\toprule\n\\textbf{Quantity} & \\textbf{Value}\\\\\n\\midrule\n');
+            fprintf(fid, 'Candidate attitudes searched & %d\\\\\n', initN);
+            fprintf(fid, 'Differential carrier rows & %d\\\\\n', initRows);
+            if ~isnan(initBest); fprintf(fid, 'Best residual (cycles RMS) & %.4f\\\\\n', initBest); end
+            if ~isnan(initSec);  fprintf(fid, 'Second-best residual (cycles RMS) & %.4f\\\\\n', initSec); end
+            if ~isnan(initRat);  fprintf(fid, 'Residual ratio & %.3f\\\\\n', initRat); end
+            if ~isnan(initErr);  fprintf(fid, 'Initialized attitude error & %.4f deg\\\\\n', initErr); end
+            fprintf(fid, '\\bottomrule\n\\end{tabular}\n\n');
+            if ~isempty(initMsg)
+                fprintf(fid, '\\textit{%s}\n\n', strrep(initMsg,'_','\_'));
+            end
+            switch initCls
+                case 'CALIBRATED_ABSOLUTE_REFERENCE'
+                    fprintf(fid, ['\\textbf{Interpretation:} The attitude at calibration was declared known. ' ...
+                        'Stage~15 differential carrier biases are therefore referenced to a calibrated ' ...
+                        'absolute attitude. This is valid validation/calibration, not independent attitude discovery.\n\n']);
+                case 'ABS_ATT_CONVERGED'
+                    fprintf(fid, ['\\textbf{Interpretation:} Coarse baseline integer search selected an ' ...
+                        'attitude that passed residual and ratio gates, then Stage~15 performed calibrated tracking.\n\n']);
+                case {'INIT_FAILED','WEAK_GEOMETRY','UNOBSERVABLE'}
+                    fprintf(fid, ['\\textbf{Warning:} Absolute attitude was not initialized. ' ...
+                        'Any calibrated differential tracking is relative to the calibration reference only.\n\n']);
+                otherwise
+                    fprintf(fid, ['\\textbf{Interpretation:} No independent absolute attitude discovery was requested; ' ...
+                        'differential carrier mode tracks changes relative to its calibration reference.\n\n']);
             end
 
             % --- Stage 15: Carrier Differential Attitude Calibration ---

@@ -434,6 +434,32 @@ classdef ReportRunner
                         summary.attitudeObsClass = 'AMBIGUITY_ABSORBED';
                     end
                 end
+
+                % Stage 16: absolute attitude initialization diagnostics.
+                try
+                    aiClass = {diag.log.attitudeInitClass};
+                    aiMode  = {diag.log.attitudeInitMode};
+                    summary.attitudeInitMode = aiMode{end};
+                    summary.attitudeInitClass = aiClass{end};
+                    summary.attitudeInitCandidates = double(diag.log(end).attitudeInitCandidates);
+                    summary.attitudeInitDiffRows = double(diag.log(end).attitudeInitDiffRows);
+                    summary.attitudeInitBestResidual = double(diag.log(end).attitudeInitBestResidual);
+                    summary.attitudeInitSecondResidual = double(diag.log(end).attitudeInitSecondResidual);
+                    summary.attitudeInitRatio = double(diag.log(end).attitudeInitRatio);
+                    summary.attitudeInitError_deg = double(diag.log(end).attitudeInitError_deg);
+                    summary.attitudeInitMessage = diag.log(end).attitudeInitMessage;
+                catch
+                    summary.attitudeInitMode = revgnss.ReportRunner.safeCfgStr_(cfg, ...
+                        {'estimator','attitudeInitMode'}, 'none');
+                    summary.attitudeInitClass = 'UNKNOWN';
+                    summary.attitudeInitCandidates = 0;
+                    summary.attitudeInitDiffRows = 0;
+                    summary.attitudeInitBestResidual = NaN;
+                    summary.attitudeInitSecondResidual = NaN;
+                    summary.attitudeInitRatio = NaN;
+                    summary.attitudeInitError_deg = NaN;
+                    summary.attitudeInitMessage = '';
+                end
             catch
                 summary.attitudeObsClass = 'UNKNOWN';
                 summary.leverArmNorms_m  = [];
@@ -450,6 +476,15 @@ classdef ReportRunner
                 summary.diffAttCalibrated          = false;
                 summary.diffAttMeanNRows           = 0;
                 summary.diffAttResidRMS_m          = NaN;
+                summary.attitudeInitMode           = 'none';
+                summary.attitudeInitClass          = 'UNKNOWN';
+                summary.attitudeInitCandidates     = 0;
+                summary.attitudeInitDiffRows       = 0;
+                summary.attitudeInitBestResidual   = NaN;
+                summary.attitudeInitSecondResidual = NaN;
+                summary.attitudeInitRatio          = NaN;
+                summary.attitudeInitError_deg      = NaN;
+                summary.attitudeInitMessage        = '';
             end
 
             % Observables

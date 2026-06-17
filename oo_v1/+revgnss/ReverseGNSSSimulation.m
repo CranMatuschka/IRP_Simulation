@@ -31,6 +31,8 @@ classdef ReverseGNSSSimulation < handle
 
         trackMgr    revgnss.CarrierTrackManager
         diffAttStore                  = struct()   % Stage 15: differential attitude calibration state
+        attInitDone    (1,1) logical = false
+        attInitInfo                  = struct()
     end
 
     methods
@@ -58,6 +60,8 @@ classdef ReverseGNSSSimulation < handle
 
             obj.diag     = revgnss.Diagnostics(obj.cfg);
             obj.trackMgr = revgnss.CarrierTrackManager();
+            obj.attInitDone = false;
+            obj.attInitInfo = revgnss.AttitudeInitializer.defaultInfo(obj.cfg);
 
             % Stage 15: differential carrier attitude calibration store
             attMode15 = '';
@@ -169,6 +173,21 @@ classdef ReverseGNSSSimulation < handle
                 obj.ekf.applyAmbiguityResets(resetRequests, resetSig);
             end
             errStruct.slipInfo = slipInfo;
+
+            % Stage 16: absolute attitude initialization before differential
+            % carrier calibration, so Stage 15 references the initialized attitude.
+            attInitMode = 'none';
+            if isfield(obj.cfg.estimator,'attitudeInitMode')
+                attInitMode = obj.cfg.estimator.attitudeInitMode;
+            end
+            if ~obj.attInitDone && ~strcmp(attInitMode,'none') && ...
+                    isfield(errStruct,'carrierPhase') && isstruct(errStruct.carrierPhase) && ...
+                    isfield(errStruct.carrierPhase,'phi_m') && ~isempty(errStruct.carrierPhase.phi_m)
+                [obj.ekf, obj.attInitInfo] = revgnss.AttitudeInitializer.run( ...
+                    obj.cfg, obj.asset, obj.towers, obj.ekf, errStruct.carrierPhase, slipInfo);
+                obj.attInitDone = true;
+            end
+            errStruct.attitudeInit = obj.attInitInfo;
 
             % Append clock-gauge pseudo-measurements for EKF update only.
             % z_ekf/h_ekf/H_ekf/R_ekf include gauge rows.

@@ -188,6 +188,17 @@ classdef ConfigFactory
             % 'off' (safe default) | 'calibratedDifferentialAmbiguity' | 'validationKnownAmbiguity'
             cfg.estimator.attitudeCarrierMode     = 'off';
             cfg.estimator.diffAtt.calibWin_s      = 60;   % calibration window length (s)
+            % Stage 16: absolute multi-antenna attitude initialization.
+            % Safe default is 'none'.  'knownAttitudeCalibration' requires an
+            % explicit declaration that the calibration attitude is known.
+            cfg.estimator.attitudeInitMode = 'none';
+            cfg.estimator.attitudeInit.knownAttitudeCalibration.allow = false;
+            cfg.estimator.attitudeInit.search.windowDeg = [3; 3; 3];
+            cfg.estimator.attitudeInit.search.stepDeg = [1; 1; 1];
+            cfg.estimator.attitudeInit.search.maxCandidates = 343;
+            cfg.estimator.attitudeInit.search.ratioThreshold = 1.20;
+            cfg.estimator.attitudeInit.search.maxRmsCycles = 0.30;
+            cfg.estimator.attitudeInit.search.sigmaScaleDeg = 2.0;
             % perfectCorrection: EKF uses known tower clock values (zero here).
             cfg.estimator.towerClockMode          = 'perfectCorrection';
             cfg.estimator.towerClockCorrectionSigma_m = 0.5; % used if noisyCorrection
@@ -1482,6 +1493,49 @@ classdef ConfigFactory
                 end
             end
 
+            % ---- Stage 16: attitude initialization mode validation --------
+            if ~isfield(cfg.estimator,'attitudeInitMode')
+                cfg.estimator.attitudeInitMode = 'none';
+            end
+            attInitMode16 = cfg.estimator.attitudeInitMode;
+            validInit16 = {'none','knownAttitudeCalibration','coarseBaselineIntegerSearch'};
+            if ~any(strcmp(attInitMode16, validInit16))
+                error('ConfigFactory:invalidAttitudeInitMode', ...
+                    'cfg.estimator.attitudeInitMode must be none, knownAttitudeCalibration, or coarseBaselineIntegerSearch.');
+            end
+            if ~strcmp(attInitMode16,'none')
+                nRx16 = 1;
+                if isfield(cfg,'scenario') && isfield(cfg.scenario,'nReceivers')
+                    nRx16 = cfg.scenario.nReceivers;
+                end
+                carrierOk16 = isfield(cfg,'measurements') && isfield(cfg.measurements,'carrierMode') && ...
+                    strcmp(cfg.measurements.carrierMode,'ekfFloat');
+                ambMode16 = '';
+                if isfield(cfg,'estimation') && isfield(cfg.estimation,'ambiguityMode')
+                    ambMode16 = cfg.estimation.ambiguityMode;
+                end
+                if nRx16 < 3
+                    error('ConfigFactory:attitudeInitReceivers', ...
+                        'attitudeInitMode=%s requires at least 3 receiver phase centres.', attInitMode16);
+                end
+                if ~carrierOk16 || ~strcmp(ambMode16,'floatPerTowerReceiverSignal')
+                    error('ConfigFactory:attitudeInitCarrierMode', ...
+                        ['attitudeInitMode=%s requires carrierMode=ekfFloat and ' ...
+                         'ambiguityMode=floatPerTowerReceiverSignal.'], attInitMode16);
+                end
+                if strcmp(attInitMode16,'knownAttitudeCalibration')
+                    allow16 = isfield(cfg.estimator,'attitudeInit') && ...
+                        isfield(cfg.estimator.attitudeInit,'knownAttitudeCalibration') && ...
+                        isfield(cfg.estimator.attitudeInit.knownAttitudeCalibration,'allow') && ...
+                        cfg.estimator.attitudeInit.knownAttitudeCalibration.allow;
+                    if ~allow16
+                        error('ConfigFactory:knownAttitudeNotDeclared', ...
+                            ['knownAttitudeCalibration requires ' ...
+                             'cfg.estimator.attitudeInit.knownAttitudeCalibration.allow=true.']);
+                    end
+                end
+            end
+
             % ---- Unsupported: Doppler EKF dependency ---------------------
             if isfield(cfg,'measurements') && isfield(cfg.measurements,'doppler') && ...
                     isfield(cfg.measurements.doppler,'useInEKF') && ...
@@ -1601,6 +1655,26 @@ classdef ConfigFactory
                     cfg.estimator.P0_euler_rad = max(deg2rad(5), 2 * initEulerMax_rad);
                     cfg.validation.warnings{end+1} = ...
                         'P0_euler_rad increased to be consistent with nonzero initial attitude error.';
+                end
+                if ~strcmp(cfg.estimator.attitudeInitMode,'none')
+                    arms16 = cfg.asset.receiverLeverArms_body_m;
+                    leverNorm16 = sqrt(sum(arms16.^2, 1));
+                    centered16 = arms16 - mean(arms16, 2);
+                    if sum(leverNorm16 > 0.05) < 3 || rank(centered16, 1e-6) < 2
+                        error('ConfigFactory:attitudeInitLeverGeometry', ...
+                            'attitude initialization requires three non-collinear receiver lever arms.');
+                    end
+                    if strcmp(cfg.estimator.attitudeInitMode,'coarseBaselineIntegerSearch')
+                        s16 = cfg.estimator.attitudeInit.search;
+                        win16 = s16.windowDeg(:); if numel(win16) == 1; win16 = repmat(win16,3,1); end
+                        step16 = s16.stepDeg(:); if numel(step16) == 1; step16 = repmat(step16,3,1); end
+                        nCand16 = prod(floor(2*win16 ./ step16) + 1);
+                        if any(step16 <= 0) || any(win16 < 0) || nCand16 > s16.maxCandidates
+                            error('ConfigFactory:attitudeInitSearchWindow', ...
+                                'coarseBaselineIntegerSearch candidate count (%d) exceeds maxCandidates (%d).', ...
+                                nCand16, s16.maxCandidates);
+                        end
+                    end
                 end
             end
 

@@ -155,6 +155,13 @@ cfg.estimator.runKnownAmbiguityValidation = true;
 cfg.estimator.attitudeCarrierMode    = 'calibratedDifferentialAmbiguity';
 cfg.estimator.diffAtt.calibWin_s     = 60;
 
+% --- Absolute attitude initialization (Stage 16) ----------------
+% This report uses a declared known-attitude calibration reference, not
+% independent integer ambiguity discovery.
+cfg.estimator.attitudeInitMode = 'knownAttitudeCalibration';
+cfg.estimator.attitudeInit.knownAttitudeCalibration.allow = true;
+cfg.estimator.attitudeInit.knownAttitudeCalibration.sigmaDeg = 0.1;
+
 % --- Validation policy ------------------------------------------
 % 'disableWithWarning'  ->  unsupported features disabled with console warning
 % 'error'              ->  any unsupported feature throws an error

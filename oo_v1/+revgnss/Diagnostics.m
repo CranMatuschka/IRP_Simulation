@@ -850,6 +850,31 @@ classdef Diagnostics < handle
                 entry.diffAttActive   = false;
             end
 
+            % --- Stage 16: absolute attitude initialization diagnostics ---
+            entry.attitudeInitMode = 'none';
+            entry.attitudeInitClass = 'CALIBRATED_TRACKING';
+            entry.attitudeInitMessage = '';
+            entry.attitudeInitCandidates = 0;
+            entry.attitudeInitDiffRows = 0;
+            entry.attitudeInitBestResidual = NaN;
+            entry.attitudeInitSecondResidual = NaN;
+            entry.attitudeInitRatio = NaN;
+            entry.attitudeInitError_deg = NaN;
+            if isfield(errStruct,'attitudeInit') && isstruct(errStruct.attitudeInit)
+                ai16 = errStruct.attitudeInit;
+                if isfield(ai16,'mode'); entry.attitudeInitMode = ai16.mode; end
+                if isfield(ai16,'classification'); entry.attitudeInitClass = ai16.classification; end
+                if isfield(ai16,'message'); entry.attitudeInitMessage = ai16.message; end
+                if isfield(ai16,'nCandidates'); entry.attitudeInitCandidates = ai16.nCandidates; end
+                if isfield(ai16,'nDiffRows'); entry.attitudeInitDiffRows = ai16.nDiffRows; end
+                if isfield(ai16,'bestResidual'); entry.attitudeInitBestResidual = ai16.bestResidual; end
+                if isfield(ai16,'secondBestResidual'); entry.attitudeInitSecondResidual = ai16.secondBestResidual; end
+                if isfield(ai16,'ratio'); entry.attitudeInitRatio = ai16.ratio; end
+                if isfield(ai16,'initializedAttitudeError_deg')
+                    entry.attitudeInitError_deg = ai16.initializedAttitudeError_deg;
+                end
+            end
+
             % --- Append to log ----------------------------------------
             obj.nEpochs = obj.nEpochs + 1;
             if obj.nEpochs == 1
