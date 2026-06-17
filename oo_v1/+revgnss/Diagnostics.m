@@ -844,10 +844,18 @@ classdef Diagnostics < handle
                 entry.diffAttNRows    = da.nRows;
                 entry.diffAttResidRMS = da.residualRMS_m;
                 entry.diffAttActive   = da.active;
+                entry.diffAttActiveBaselines = revgnss.Diagnostics.fieldOr_(da,'activeBaselines',0);
+                entry.diffAttLostBaselines = revgnss.Diagnostics.fieldOr_(da,'lostBaselines',0);
+                entry.diffAttRecalibratedBaselines = revgnss.Diagnostics.fieldOr_(da,'recalibratedBaselines',0);
+                entry.diffAttRejectedRows = revgnss.Diagnostics.fieldOr_(da,'rejectedRows',0);
             else
                 entry.diffAttNRows    = 0;
                 entry.diffAttResidRMS = NaN;
                 entry.diffAttActive   = false;
+                entry.diffAttActiveBaselines = 0;
+                entry.diffAttLostBaselines = 0;
+                entry.diffAttRecalibratedBaselines = 0;
+                entry.diffAttRejectedRows = 0;
             end
 
             % --- Stage 16: absolute attitude initialization diagnostics ---
@@ -1286,5 +1294,15 @@ classdef Diagnostics < handle
             v = sqrt(mean(zwd.^2, 1))';
         end
 
+    end
+
+    methods (Static)
+        function v = fieldOr_(s, f, def)
+            if isstruct(s) && isfield(s, f)
+                v = s.(f);
+            else
+                v = def;
+            end
+        end
     end
 end

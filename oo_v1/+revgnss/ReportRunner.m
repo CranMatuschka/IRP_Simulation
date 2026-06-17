@@ -417,10 +417,18 @@ classdef ReportRunner
                         summary.diffAttMeanNRows  = mean(nVec(nVec>0), 'omitnan');
                         rVec = double([diag.log.diffAttResidRMS]);
                         summary.diffAttResidRMS_m = mean(rVec(isfinite(rVec) & daActive), 'omitnan');
+                        summary.diffAttActiveBaselines = double(diag.log(end).diffAttActiveBaselines);
+                        summary.diffAttLostBaselines = double(diag.log(end).diffAttLostBaselines);
+                        summary.diffAttRecalibratedBaselines = double(diag.log(end).diffAttRecalibratedBaselines);
+                        summary.diffAttRejectedRows = double(diag.log(end).diffAttRejectedRows);
                     catch
                         summary.diffAttCalibrated = false;
                         summary.diffAttMeanNRows  = 0;
                         summary.diffAttResidRMS_m = NaN;
+                        summary.diffAttActiveBaselines = 0;
+                        summary.diffAttLostBaselines = 0;
+                        summary.diffAttRecalibratedBaselines = 0;
+                        summary.diffAttRejectedRows = 0;
                     end
                     if ~summary.diffAttCalibrated
                         summary.attitudeObsClass = 'CALIBRATION_FAILED';
@@ -430,6 +438,10 @@ classdef ReportRunner
                     summary.diffAttCalibrated = false;
                     summary.diffAttMeanNRows  = 0;
                     summary.diffAttResidRMS_m = NaN;
+                    summary.diffAttActiveBaselines = 0;
+                    summary.diffAttLostBaselines = 0;
+                    summary.diffAttRecalibratedBaselines = 0;
+                    summary.diffAttRejectedRows = 0;
                     if strcmp(cls2,'NON_CONVERGENT') && ~summary.attitudeSeparable
                         summary.attitudeObsClass = 'AMBIGUITY_ABSORBED';
                     end
@@ -476,6 +488,10 @@ classdef ReportRunner
                 summary.diffAttCalibrated          = false;
                 summary.diffAttMeanNRows           = 0;
                 summary.diffAttResidRMS_m          = NaN;
+                summary.diffAttActiveBaselines     = 0;
+                summary.diffAttLostBaselines       = 0;
+                summary.diffAttRecalibratedBaselines = 0;
+                summary.diffAttRejectedRows        = 0;
                 summary.attitudeInitMode           = 'none';
                 summary.attitudeInitClass          = 'UNKNOWN';
                 summary.attitudeInitCandidates     = 0;

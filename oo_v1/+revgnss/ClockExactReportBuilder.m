@@ -1612,7 +1612,7 @@ classdef ClockExactReportBuilder
                         'Enable via cfg.estimator.runKnownAmbiguityValidation = true.}\n\n']);
             end
 
-            % --- Stage 16: Absolute Attitude Initialization ---
+            % --- Stage 17: Absolute Attitude Initialization and Arc Management ---
             initMode = sf(summary,'attitudeInitMode', 'none');
             initCls  = sf(summary,'attitudeInitClass','UNKNOWN');
             initN    = sf(summary,'attitudeInitCandidates', 0);
@@ -1622,7 +1622,11 @@ classdef ClockExactReportBuilder
             initRat  = sf(summary,'attitudeInitRatio', NaN);
             initErr  = sf(summary,'attitudeInitError_deg', NaN);
             initMsg  = sf(summary,'attitudeInitMessage', '');
-            fprintf(fid, '\\subsection*{Absolute Attitude Initialization}\n');
+            daActB  = sf(summary,'diffAttActiveBaselines', 0);
+            daLostB = sf(summary,'diffAttLostBaselines', 0);
+            daRecB  = sf(summary,'diffAttRecalibratedBaselines', 0);
+            daRejR  = sf(summary,'diffAttRejectedRows', 0);
+            fprintf(fid, '\\subsection*{Absolute Attitude Initialization and Carrier Arc Management}\n');
             fprintf(fid, '\\textbf{Mode:} %s\\quad{}\\textbf{Classification:} %s\n\n', ...
                 strrep(initMode,'_','\_'), strrep(initCls,'_','\_'));
             fprintf(fid, '\\begin{tabular}{p{0.52\\textwidth}p{0.30\\textwidth}}\n');
@@ -1633,6 +1637,10 @@ classdef ClockExactReportBuilder
             if ~isnan(initSec);  fprintf(fid, 'Second-best residual (cycles RMS) & %.4f\\\\\n', initSec); end
             if ~isnan(initRat);  fprintf(fid, 'Residual ratio & %.3f\\\\\n', initRat); end
             if ~isnan(initErr);  fprintf(fid, 'Initialized attitude error & %.4f deg\\\\\n', initErr); end
+            fprintf(fid, 'Active differential baselines & %d\\\\\n', daActB);
+            fprintf(fid, 'Lost differential baselines & %d\\\\\n', daLostB);
+            fprintf(fid, 'Recalibrated differential baselines & %d\\\\\n', daRecB);
+            fprintf(fid, 'Rejected differential rows & %d\\\\\n', daRejR);
             fprintf(fid, '\\bottomrule\n\\end{tabular}\n\n');
             if ~isempty(initMsg)
                 fprintf(fid, '\\textit{%s}\n\n', strrep(initMsg,'_','\_'));
@@ -1645,7 +1653,7 @@ classdef ClockExactReportBuilder
                 case 'ABS_ATT_CONVERGED'
                     fprintf(fid, ['\\textbf{Interpretation:} Coarse baseline integer search selected an ' ...
                         'attitude that passed residual and ratio gates, then Stage~15 performed calibrated tracking.\n\n']);
-                case {'INIT_FAILED','WEAK_GEOMETRY','UNOBSERVABLE'}
+                case {'ABS_ATT_INIT_FAILED','ABS_ATT_WEAK','INIT_FAILED','WEAK_GEOMETRY','UNOBSERVABLE'}
                     fprintf(fid, ['\\textbf{Warning:} Absolute attitude was not initialized. ' ...
                         'Any calibrated differential tracking is relative to the calibration reference only.\n\n']);
                 otherwise

@@ -55,6 +55,10 @@ classdef CarrierMeasurementBuilder
             end
 
             sigIdx    = 1;   % carrier rows use signal index 1 (L1) in v1
+            lambda    = 299792458 / 1575.42e6;
+            if isfield(cfg,'signals') && isfield(cfg.signals,'L1') && isfield(cfg.signals.L1,'lambda_m')
+                lambda = cfg.signals.L1.lambda_m;
+            end
             b_rx_true = asset.clock.getBiasMeters();
             b_rx_est  = x_est(stateMap.b_rx_idx);
 
@@ -84,7 +88,8 @@ classdef CarrierMeasurementBuilder
                             isfield(cfg.estimation.ambiguity,'initialSigma_m')
                         initSig = cfg.estimation.ambiguity.initialSigma_m;
                     end
-                    floatAmbiguityTruth_m(key) = initSig * errorChain.drawNormal(1,1);
+                    nCycles = round((initSig / lambda) * errorChain.drawNormal(1,1));
+                    floatAmbiguityTruth_m(key) = lambda * nCycles;
                 end
                 B_true = floatAmbiguityTruth_m(key);
 

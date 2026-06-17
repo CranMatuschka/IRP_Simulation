@@ -155,12 +155,16 @@ cfg.estimator.runKnownAmbiguityValidation = true;
 cfg.estimator.attitudeCarrierMode    = 'calibratedDifferentialAmbiguity';
 cfg.estimator.diffAtt.calibWin_s     = 60;
 
-% --- Absolute attitude initialization (Stage 16) ----------------
-% This report uses a declared known-attitude calibration reference, not
-% independent integer ambiguity discovery.
-cfg.estimator.attitudeInitMode = 'knownAttitudeCalibration';
-cfg.estimator.attitudeInit.knownAttitudeCalibration.allow = true;
-cfg.estimator.attitudeInit.knownAttitudeCalibration.sigmaDeg = 0.1;
+% --- Absolute attitude initialization (Stage 17) ----------------
+% Independent coarse attitude/integer search.  If the residual/ratio gate is
+% weak, the report classifies it honestly and Stage 15 remains relative
+% calibrated tracking only.
+cfg.estimator.attitudeInitMode = 'coarseBaselineIntegerSearch';
+cfg.estimator.attitudeInit.search.windowDeg = [2; 2; 2];
+cfg.estimator.attitudeInit.search.stepDeg = [0.5; 0.5; 0.5];
+cfg.estimator.attitudeInit.search.maxCandidates = 729;
+cfg.estimator.attitudeInit.search.ratioThreshold = 1.20;
+cfg.estimator.attitudeInit.search.maxRmsCycles = 0.30;
 
 % --- Validation policy ------------------------------------------
 % 'disableWithWarning'  ->  unsupported features disabled with console warning

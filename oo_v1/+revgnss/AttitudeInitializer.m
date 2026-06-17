@@ -34,7 +34,7 @@ classdef AttitudeInitializer
             if strcmp(mode,'none')
                 return
             end
-            info.classification = 'INIT_FAILED';
+            info.classification = 'ABS_ATT_INIT_FAILED';
 
             if nargin >= 6 && isstruct(slipInfo) && isfield(slipInfo,'nSlips') && slipInfo.nSlips > 0
                 info.message = 'Cycle slip detected during attitude initialization.';
@@ -74,7 +74,7 @@ classdef AttitudeInitializer
 
     methods (Static, Access = private)
         function [ok, msg] = basicGuards_(cfg, cpInfo)
-            ok = false; msg = 'INIT_FAILED';
+            ok = false; msg = 'ABS_ATT_INIT_FAILED';
             if ~isfield(cfg,'scenario') || cfg.scenario.nReceivers < 3
                 msg = 'UNOBSERVABLE'; return
             end
@@ -87,11 +87,11 @@ classdef AttitudeInitializer
                 msg = 'UNOBSERVABLE'; return
             end
             if rank(arms - mean(arms,2), 1e-6) < 2
-                msg = 'WEAK_GEOMETRY'; return
+                msg = 'ABS_ATT_WEAK'; return
             end
             if ~isfield(cpInfo,'phi_m') || isempty(cpInfo.phi_m) || ...
                     ~isfield(cpInfo,'towerIdx') || ~isfield(cpInfo,'antennaIdx')
-                msg = 'INIT_FAILED'; return
+                msg = 'ABS_ATT_INIT_FAILED'; return
             end
             ok = true;
         end
@@ -107,7 +107,7 @@ classdef AttitudeInitializer
 
         function [bestEuler, info] = coarseSearch_(cfg, asset, towers, ekf, cpInfo)
             info = revgnss.AttitudeInitializer.defaultInfo(cfg);
-            info.classification = 'INIT_FAILED';
+            info.classification = 'ABS_ATT_INIT_FAILED';
             info.message = 'Coarse baseline integer search did not pass quality gates.';
             bestEuler = ekf.x(ekf.stateMap.euler_idx);
 
@@ -122,6 +122,7 @@ classdef AttitudeInitializer
             info.stepDeg = step;
             info.nCandidates = numel(axesDeg{1}) * numel(axesDeg{2}) * numel(axesDeg{3});
             if info.nCandidates > s.maxCandidates
+                info.classification = 'ABS_ATT_INIT_FAILED';
                 info.message = 'Search window exceeds maxCandidates.';
                 return
             end
@@ -129,7 +130,7 @@ classdef AttitudeInitializer
             [obs_m, tiVec, aiVec] = revgnss.AttitudeInitializer.diffRows_(cpInfo);
             info.nDiffRows = numel(obs_m);
             if info.nDiffRows < 6
-                info.classification = 'WEAK_GEOMETRY';
+                info.classification = 'ABS_ATT_WEAK';
                 info.message = 'Too few differential carrier rows for 3-axis attitude.';
                 return
             end
@@ -174,8 +175,10 @@ classdef AttitudeInitializer
             bestEuler = revgnss.AttitudeInitializer.wrapPi_(bestCandidate);
 
             if ~isfinite(info.ratio) || info.ratio < s.ratioThreshold
-                info.message = 'Integer-search ratio test is weak.';
+                info.classification = 'ABS_ATT_WEAK';
+                info.message = 'Integer-search ratio test is weak; attitude/ambiguity candidates are not separable enough.';
             elseif info.bestResidual > s.maxRmsCycles
+                info.classification = 'ABS_ATT_INIT_FAILED';
                 info.message = 'Best integer residual is too large.';
             else
                 info.classification = 'ABS_ATT_CONVERGED';

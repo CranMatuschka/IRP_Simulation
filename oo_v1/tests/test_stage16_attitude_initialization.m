@@ -14,7 +14,8 @@ addpath(fullfile(thisDir, '..'));
 fprintf('=== test_stage16_attitude_initialization ===\n');
 
 VALID_INIT = {'ABS_ATT_CONVERGED','CALIBRATED_ABSOLUTE_REFERENCE', ...
-              'CALIBRATED_TRACKING','INIT_FAILED','WEAK_GEOMETRY','UNOBSERVABLE'};
+              'CALIBRATED_TRACKING','ABS_ATT_INIT_FAILED','ABS_ATT_WEAK', ...
+              'INIT_FAILED','WEAK_GEOMETRY','UNOBSERVABLE'};
 
 % ----------------------------------------------------------------
 % T1: default mode is safe
