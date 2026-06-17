@@ -26,13 +26,17 @@ classdef ReportRealityHelper
 
             estAtt = isfield(cfg, 'estimator') && isfield(cfg.estimator, 'estimateAttitude') && cfg.estimator.estimateAttitude;
             if estAtt
-                hasData = false;
-                try; hasData = ~isempty(diag.getAttitudeErrorVecs()); catch; end
-                hasPlots = isfield(plotPaths, 'attComp') && isfile(plotPaths.attComp) && ...
-                    isfield(plotPaths, 'attNorm') && isfile(plotPaths.attNorm);
-                if ~hasData || ~hasPlots
-                    error('ClockExactReportBuilder:attitudePlotMissing', ...
-                        'Attitude is estimated but attitude diagnostic data or plots are missing.');
+                hasLoggedEpochs = false;
+                try; hasLoggedEpochs = diag.nEpochs > 0; catch; end
+                if hasLoggedEpochs
+                    hasData = false;
+                    try; hasData = ~isempty(diag.getAttitudeErrorVecs()); catch; end
+                    hasPlots = isfield(plotPaths, 'attComp') && isfile(plotPaths.attComp) && ...
+                        isfield(plotPaths, 'attNorm') && isfile(plotPaths.attNorm);
+                    if ~hasData || ~hasPlots
+                        error('ClockExactReportBuilder:attitudePlotMissing', ...
+                            'Attitude is estimated but attitude diagnostic data or plots are missing.');
+                    end
                 end
             end
 
@@ -46,6 +50,7 @@ classdef ReportRealityHelper
                 error('ClockExactReportBuilder:stateTableCountMismatch', ...
                     'Report state table count (%d) does not match EKF state count (%d).', expectedStates, nStates);
             end
+            revgnss.ReportRealityHelper.validateObservableStack_(summary);
         end
 
         function fig = plotAttitudeComponents(diag, t)
@@ -113,6 +118,29 @@ classdef ReportRealityHelper
                 'HorizontalAlignment', 'center', 'VerticalAlignment', 'middle', ...
                 'FontSize', 8, 'Color', [0.45 0.45 0.45]);
             axis(ax, 'off');
+        end
+
+        function validateObservableStack_(summary)
+            if ~isfield(summary, 'observableStack') || isempty(summary.observableStack) || ...
+                    ~isfield(summary.observableStack, 'rowsByType')
+                return
+            end
+            c = summary.observableStack.rowsByType;
+            nPhys = revgnss.ReportRealityHelper.safeField_(c, 'code', 0) + ...
+                revgnss.ReportRealityHelper.safeField_(c, 'doppler', 0) + ...
+                revgnss.ReportRealityHelper.safeField_(c, 'carrier', 0);
+            nSummary = revgnss.ReportRealityHelper.safeField_(summary, 'totalCodeRows', 0) + ...
+                revgnss.ReportRealityHelper.safeField_(summary, 'totalDopplerRows', 0) + ...
+                revgnss.ReportRealityHelper.safeField_(summary, 'totalCarrierRows', 0);
+            if nPhys ~= nSummary
+                error('ClockExactReportBuilder:observableRowCountMismatch', ...
+                    'Observable descriptor physical rows (%d) do not match report row total (%d).', nPhys, nSummary);
+            end
+            if revgnss.ReportRealityHelper.safeField_(c, 'carrier', 0) > 0 && ...
+                    revgnss.ReportRealityHelper.safeField_(summary, 'carrierDiagnosticOnly', false)
+                error('ClockExactReportBuilder:carrierStatusContradiction', ...
+                    'Carrier descriptor rows exist but report says carrier is diagnostic-only.');
+            end
         end
 
         function v = safeField_(s, name, defaultValue)

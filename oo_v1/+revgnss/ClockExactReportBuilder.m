@@ -454,6 +454,7 @@ classdef ClockExactReportBuilder
             % ---- Sections -----------------------------------------------
             CE.writeScenarioSummary_(fid, cfg, summary, diag, nTwr, nRx, dur, dt, esc);
             CE.writeModelRealityCheck_(fid, cfg, summary, dur, nTwr, nRx);
+            CE.writeObservableRealityCheck_(fid, summary);
             CE.writeStateEstimation_(fid, plotPaths, stem, cfg, diag, figDir);
             CE.writeMeasurementValidation_(fid, plotPaths, stem, figDir);
             CE.writePerReceiverDiagnostics_(fid, plotPaths, stem, figDir, nRx);
@@ -732,6 +733,7 @@ classdef ClockExactReportBuilder
             CE.writeQuantRow_(fid, 'Code / Doppler / carrier rows', sprintf('%d / %d / %d', ...
                 CE.safeField_(summary,'totalCodeRows',0), CE.safeField_(summary,'totalDopplerRows',0), ...
                 CE.safeField_(summary,'totalCarrierRows',0)));
+            CE.writeQuantRow_(fid, 'Differential attitude rows', sprintf('%d', CE.safeField_(summary,'totalDiffAttRows',0)));
             CE.writeQuantRow_(fid, 'EKF state count', sprintf('%d', CE.safeField_(summary,'nStates',0)));
             CE.writeQuantRow_(fid, 'Ambiguity / ZWD state count', sprintf('%d / %d', ...
                 CE.safeField_(summary,'nAmbiguityStates',0), CE.safeField_(summary,'nZwdStates',0)));
@@ -751,6 +753,55 @@ classdef ClockExactReportBuilder
                 CE.esc_(CE.getCfgStr_(cfg,{'estimator','attitudeCarrierMode'},'off'))));
             CE.writeQuantRow_(fid, 'ZWD mode', sprintf('\\texttt{%s}', CE.esc_(CE.getCfgStr_(cfg,{'estimation','troposphereMode'},'none'))));
             fprintf(fid, '\\bottomrule\n\\end{tabular}\\end{center}\n\\clearpage\n');
+        end
+
+        % ================================================================
+        % OBSERVABLE ROW REALITY CHECK
+        % ================================================================
+
+        function writeObservableRealityCheck_(fid, summary)
+            CE = revgnss.ClockExactReportBuilder;
+            fprintf(fid, '\\section{Observable Row Reality Check}\n');
+            fprintf(fid, ['Generic endpoint, link, and observable-row metadata are generated ' ...
+                'around the existing reverse-GNSS builders. The physics remains the current ' ...
+                'tower-to-spacecraft code, Doppler, carrier, and calibrated differential ' ...
+                'carrier attitude logic.\n\n']);
+            obs = CE.safeField_(summary, 'observableStack', struct());
+            if ~isstruct(obs) || ~isfield(obs,'rowSummary')
+                fprintf(fid, 'Observable metadata was not available for this run.\\clearpage\n');
+                return
+            end
+            epTypes = {};
+            if isfield(obs,'endpointTypes'); epTypes = obs.endpointTypes; end
+            if isempty(epTypes); epTypes = {'none'}; end
+            c = obs.rowsByType;
+            fprintf(fid, '\\begin{center}\\small\n');
+            fprintf(fid, '\\begin{tabular}{p{0.42\\textwidth}p{0.42\\textwidth}}\n');
+            fprintf(fid, '\\toprule\n\\textbf{Quantity} & \\textbf{Actual value}\\\\\n\\midrule\n');
+            CE.writeQuantRow_(fid, 'Endpoints / links', sprintf('%d / %d', ...
+                CE.safeField_(obs,'nEndpoints',0), CE.safeField_(obs,'nLinks',0)));
+            CE.writeQuantRow_(fid, 'Endpoint types', CE.esc_(strjoin(epTypes, ', ')));
+            CE.writeQuantRow_(fid, 'Code / Doppler / carrier rows', sprintf('%d / %d / %d', ...
+                CE.safeField_(c,'code',0), CE.safeField_(c,'doppler',0), CE.safeField_(c,'carrier',0)));
+            CE.writeQuantRow_(fid, 'Differential carrier attitude rows', sprintf('%d', ...
+                CE.safeField_(c,'diffCarrierAttitude',0)));
+            fprintf(fid, '\\bottomrule\n\\end{tabular}\\end{center}\n\n');
+
+            fprintf(fid, '\\begin{center}\\scriptsize\n');
+            fprintf(fid, ['\\begin{longtable}{@{}>{\\raggedright\\arraybackslash}p{0.18\\textwidth}' ...
+                '>{\\raggedright\\arraybackslash}p{0.08\\textwidth}' ...
+                '>{\\raggedright\\arraybackslash}p{0.18\\textwidth}' ...
+                '>{\\raggedright\\arraybackslash}p{0.17\\textwidth}' ...
+                '>{\\raggedright\\arraybackslash}p{0.29\\textwidth}@{}}\n']);
+            fprintf(fid, '\\toprule\n');
+            fprintf(fid, '\\textbf{Observable} & \\textbf{Rows} & \\textbf{Role} & \\textbf{State columns} & \\textbf{Provenance}\\\\\n\\midrule\n');
+            rs = obs.rowSummary;
+            for k = 1:numel(rs)
+                fprintf(fid, '%s & %d & %s & %s & %s\\\\\n', ...
+                    CE.esc_(rs(k).observableType), rs(k).count, CE.esc_(rs(k).role), ...
+                    CE.esc_(CE.formatCols_(rs(k).stateColumns)), CE.esc_(rs(k).provenance));
+            end
+            fprintf(fid, '\\bottomrule\n\\end{longtable}\\normalsize\n\\end{center}\n\\clearpage\n');
         end
 
         % ================================================================
@@ -1923,8 +1974,23 @@ classdef ClockExactReportBuilder
         end
 
         function v = safeField_(s, f, def)
-            if isfield(s, f) && ~isnan(s.(f)); v = s.(f);
-            else; v = def; end
+            v = def;
+            if isstruct(s) && isfield(s, f)
+                v0 = s.(f);
+                if ~(isnumeric(v0) && isscalar(v0) && isnan(v0))
+                    v = v0;
+                end
+            end
+        end
+
+        function s = formatCols_(cols)
+            if isempty(cols)
+                s = 'none';
+                return
+            end
+            cols = unique(cols(:))';
+            parts = arrayfun(@(c) sprintf('%d', c), cols, 'UniformOutput', false);
+            s = strjoin(parts, ', ');
         end
 
         % ================================================================

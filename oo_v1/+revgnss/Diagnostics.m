@@ -917,6 +917,14 @@ classdef Diagnostics < handle
                 if isfield(ai16,'shadowMode'); entry.attitudeInitShadowMode = ai16.shadowMode; end
             end
 
+            % --- Stage 19: generic endpoint/link/observable metadata ----
+            if isfield(errStruct,'observableStack')
+                entry.observableStack = revgnss.ObservableStackDescriptor.compact( ...
+                    errStruct.observableStack);
+            else
+                entry.observableStack = revgnss.ObservableStackDescriptor.compact([]);
+            end
+
             % --- Append to log ----------------------------------------
             obj.nEpochs = obj.nEpochs + 1;
             if obj.nEpochs == 1

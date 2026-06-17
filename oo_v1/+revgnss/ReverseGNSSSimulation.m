@@ -261,6 +261,10 @@ classdef ReverseGNSSSimulation < handle
                     errStruct.diffAttRows = daInfo;
                 end
             end
+            if isfield(errStruct,'observableStack')
+                errStruct.observableStack = revgnss.ReverseGnssObservableAdapter.addDifferentialAttitudeRows( ...
+                    errStruct.observableStack, errStruct.diffAttRows, obj.ekf.stateMap);
+            end
 
             % Record diagnostics
             obj.diag.record(t_s, obj.asset, obj.ekf, z, h, H, R, NIS, ...

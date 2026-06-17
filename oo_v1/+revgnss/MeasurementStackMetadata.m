@@ -50,6 +50,8 @@ classdef MeasurementStackMetadata
                 end
             end
             errStruct.measType_perRow = mType;
+            errStruct.observableStack = revgnss.ReverseGnssObservableAdapter.build( ...
+                cfg, H, M, errStruct, stateMap);
 
             % Observability diagnostics (gated by cfg)
             if isfield(cfg,'diagnostics') && ...

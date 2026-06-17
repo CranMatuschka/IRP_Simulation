@@ -738,6 +738,21 @@ classdef ReportRunner
                 isfield(cfg.measurements.carrierPhase,'enable') && cfg.measurements.carrierPhase.enable;
             summary.carrierUsedInEkf = carrInEKF && summary.totalCarrierRows > 0;
             summary.carrierDiagnosticOnly = summary.carrierGenerated && ~summary.carrierUsedInEkf;
+            summary.totalDiffAttRows = 0;
+            summary.observableStack = revgnss.ObservableStackDescriptor.compact([]);
+            try
+                if isfield(diag.log(end),'observableStack')
+                    summary.observableStack = diag.log(end).observableStack;
+                    cObs = summary.observableStack.rowsByType;
+                    summary.totalCodeRows = revgnss.ReportRunner.fieldOr_(cObs,'code',0);
+                    summary.totalDopplerRows = revgnss.ReportRunner.fieldOr_(cObs,'doppler',0);
+                    summary.totalCarrierRows = revgnss.ReportRunner.fieldOr_(cObs,'carrier',0);
+                    summary.totalDiffAttRows = revgnss.ReportRunner.fieldOr_(cObs,'diffCarrierAttitude',0);
+                    summary.carrierUsedInEkf = carrInEKF && summary.totalCarrierRows > 0;
+                    summary.carrierDiagnosticOnly = summary.carrierGenerated && ~summary.carrierUsedInEkf;
+                end
+            catch
+            end
         end
 
         % ================================================================
@@ -897,6 +912,14 @@ classdef ReportRunner
             end
             if ischar(node) || isstring(node)
                 val = char(node);
+            end
+        end
+
+        % ----------------------------------------------------------------
+        function val = fieldOr_(s, name, defaultVal)
+            val = defaultVal;
+            if isstruct(s) && isfield(s, name)
+                val = s.(name);
             end
         end
 
