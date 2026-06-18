@@ -211,6 +211,12 @@ classdef ReverseGNSSSimulation < handle
                 errStruct.observableStack = revgnss.ReverseGnssObservableAdapter.addTwoWayISLRows( ...
                     errStruct.observableStack, twoWayInfo);
             end
+            % Stage 24: TWSTFT code time-transfer diagnostic (no EKF rows).
+            errStruct.twstftDiag = revgnss.TWSTFTDiagnosticBuilder.build(obj.cfg, islInfo, twoWayInfo);
+            if isfield(errStruct,'observableStack')
+                errStruct.observableStack = revgnss.ReverseGnssObservableAdapter.addTWSTFTDiagnosticRows( ...
+                    errStruct.observableStack, errStruct.twstftDiag);
+            end
 
             % Stage 16: absolute attitude initialization before differential
             % carrier calibration, so Stage 15 references the initialized attitude.

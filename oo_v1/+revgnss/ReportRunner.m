@@ -777,6 +777,17 @@ classdef ReportRunner
                 end
             catch
             end
+            summary.twstftDiag = struct('enabled',false,'diagnosticClassification','disabled', ...
+                'useInEKF',false,'clockOffsetDiagnostic_s',NaN,'clockOffsetDiagnostic_m',NaN, ...
+                'calibratedDelay_s',0,'processingDelay_s',0,'timingSource','none', ...
+                'T_AB_s',NaN,'T_BA_s',NaN,'relayTransponderImplemented',false, ...
+                'islCarrierEkfUsed',false,'twstftEkfRows',0, ...
+                'referenceAssetIndex',1,'remoteAssetIndex',2);
+            try
+                if isfield(diag.log(end),'twstftDiag')
+                    summary.twstftDiag = diag.log(end).twstftDiag;
+                end
+            catch; end
         end
 
         function s = emptyIslTimingSummary_()

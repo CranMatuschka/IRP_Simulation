@@ -940,6 +940,19 @@ classdef Diagnostics < handle
                 end
             end
 
+            % --- Stage 24: TWSTFT code time-transfer diagnostic ----------
+            entry.twstftDiag = struct('enabled',false,'diagnosticClassification','disabled', ...
+                'useInEKF',false,'clockOffsetDiagnostic_s',NaN,'clockOffsetDiagnostic_m',NaN, ...
+                'calibratedDelay_s',0,'processingDelay_s',0,'timingSource','none', ...
+                'T_AB_s',NaN,'T_BA_s',NaN,'relayTransponderImplemented',false, ...
+                'islCarrierEkfUsed',false,'twstftEkfRows',0, ...
+                'referenceAssetIndex',1,'remoteAssetIndex',2);
+            if isfield(errStruct,'twstftDiag') && isstruct(errStruct.twstftDiag)
+                td = errStruct.twstftDiag;
+                if isfield(td,'rows'); td = rmfield(td,'rows'); end
+                entry.twstftDiag = td;
+            end
+
             % --- Append to log ----------------------------------------
             obj.nEpochs = obj.nEpochs + 1;
             if obj.nEpochs == 1

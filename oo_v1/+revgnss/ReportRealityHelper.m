@@ -52,6 +52,7 @@ classdef ReportRealityHelper
             end
             revgnss.ReportRealityHelper.validateObservableStack_(summary);
             revgnss.ReportRealityHelper.validateMultiAsset_(cfg, summary);
+            revgnss.ReportRealityHelper.validateTwstft_(cfg, summary);
         end
 
         function fig = plotAttitudeComponents(diag, t)
@@ -256,6 +257,54 @@ classdef ReportRealityHelper
                     revgnss.ReportRealityHelper.safeField_(summary,'islTwoWayRangeUsedInEkf',false)
                 error('ClockExactReportBuilder:islDoubleCounting', ...
                     'One-way and two-way ISL rows are double-counted in EKF.');
+            end
+        end
+
+        function validateTwstft_(cfg, summary)
+            % validateTwstft_  Stage 24 TWSTFT diagnostic reality checks.
+            td = revgnss.ReportRealityHelper.safeField_(summary, 'twstftDiag', struct());
+            twEnabled = revgnss.ReportRealityHelper.getCfgBool_(cfg, {'measurements','twstft','enable'}, false);
+            if ~twEnabled; return; end
+
+            % Guard: TWSTFT enabled but diagnostic missing from summary
+            if ~isstruct(td) || ~isfield(td,'enabled')
+                error('ClockExactReportBuilder:twstftMissingFromReport', ...
+                    'TWSTFT is enabled but twstftDiag is missing from summary.');
+            end
+            % Guard: TWSTFT must not claim EKF use
+            if revgnss.ReportRealityHelper.safeField_(td,'useInEKF',false)
+                error('ClockExactReportBuilder:twstftEkfClaim', ...
+                    'TWSTFT diagnostic claims EKF use. Stage 24 forbids TWSTFT EKF rows.');
+            end
+            % Guard: TWSTFT EKF rows must be zero
+            if revgnss.ReportRealityHelper.safeField_(td,'twstftEkfRows',0) ~= 0
+                error('ClockExactReportBuilder:twstftPhysicalRows', ...
+                    'TWSTFT diagnostic is counted as physical EKF rows. Stage 24 forbids this.');
+            end
+            % Guard: relay/transponder must not be claimed
+            if revgnss.ReportRealityHelper.safeField_(td,'relayTransponderImplemented',false)
+                error('ClockExactReportBuilder:twstftRelayClaim', ...
+                    'TWSTFT must not claim relay/transponder is implemented.');
+            end
+            % Guard: ISL carrier EKF must not be claimed
+            if revgnss.ReportRealityHelper.safeField_(td,'islCarrierEkfUsed',false)
+                error('ClockExactReportBuilder:twstftCarrierEkfClaim', ...
+                    'TWSTFT must not claim ISL carrier EKF is used.');
+            end
+            % Guard: twstftCodeDiagnostic rows must not inflate physical EKF counts
+            if isfield(summary,'observableStack') && isfield(summary.observableStack,'rowsByType')
+                c = summary.observableStack.rowsByType;
+                nTwstftRows = revgnss.ReportRealityHelper.safeField_(c,'twstftCodeDiagnostic',0);
+                nPhysFromStack = revgnss.ReportRealityHelper.safeField_(c,'code',0) + ...
+                    revgnss.ReportRealityHelper.safeField_(c,'doppler',0) + ...
+                    revgnss.ReportRealityHelper.safeField_(c,'carrier',0);
+                nSummaryPhys = revgnss.ReportRealityHelper.safeField_(summary,'totalCodeRows',0) + ...
+                    revgnss.ReportRealityHelper.safeField_(summary,'totalDopplerRows',0) + ...
+                    revgnss.ReportRealityHelper.safeField_(summary,'totalCarrierRows',0);
+                if nTwstftRows > 0 && nPhysFromStack ~= nSummaryPhys
+                    error('ClockExactReportBuilder:twstftCountedAsPhysical', ...
+                        'TWSTFT diagnostic rows are inflating physical EKF row counts.');
+                end
             end
         end
 

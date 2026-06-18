@@ -112,6 +112,20 @@ cfg.measurements.isl.timing.tolerance_s = 1e-12;
 cfg.measurements.isl.timing.processingDelay_s = 0.0;
 cfg.measurements.isl.clockTransferDiagnostics.enable = true;
 
+% --- TWSTFT code time-transfer diagnostics (Stage 24) ----------
+% Diagnostic-only: code diagnostics enabled, useInEKF=false.
+% No TWSTFT EKF rows. No relay/transponder. No ISL carrier EKF.
+% Requires ISL timing enabled (requireIslTiming=true above).
+cfg.measurements.twstft.enable = true;
+cfg.measurements.twstft.code.enable = true;
+cfg.measurements.twstft.code.useInEKF = false;
+cfg.measurements.twstft.code.sigma_s = 1e-9;
+cfg.measurements.twstft.referenceAssetIndex = 1;
+cfg.measurements.twstft.remoteAssetIndex = 2;
+cfg.measurements.twstft.processingDelay_s = 0.0;
+cfg.measurements.twstft.calibratedDelay_s = 0.0;
+cfg.measurements.twstft.requireIslTiming = true;
+
 % --- Frequency --------------------------------------------------
 % false  ->  L1 only
 % true   ->  L1 + L2
@@ -223,6 +237,28 @@ cfg.estimator.attitudeInitShadow.enable = false;
 % 'disableWithWarning'  ->  unsupported features disabled with console warning
 % 'error'              ->  any unsupported feature throws an error
 cfg.validation.unsupportedFeaturePolicy = 'disableWithWarning';
+
+% --- Stage 24: all-toggle mode ----------------------------------
+% Set stage24AllToggles = true to enable every independent boolean toggle.
+% Mutually exclusive string modes (carrierMode, etc.) are NOT changed.
+% Requires unsupportedFeaturePolicy = 'disableWithWarning' (set above).
+% Unsupported features will be silently disabled with a report warning entry.
+% This is the Stage 24 validation run configuration.
+stage24AllToggles = false;
+if stage24AllToggles
+    cfg.errors.hardwareDelay.truth.enable = true;
+    cfg.errors.hardwareDelay.model.enable = true;
+    cfg.errors.multipath.truth.enable     = true;
+    cfg.errors.multipath.model.enable     = true;
+    cfg.effects.towerSurvey.truth.enable  = true;
+    cfg.effects.towerSurvey.model.enable  = true;
+    cfg.effects.antennaPCO.truth.enable   = true;
+    cfg.effects.antennaPCO.model.enable   = true;
+    cfg.effects.antennaPCV.truth.enable   = true;
+    cfg.effects.antennaPCV.model.enable   = true;
+    cfg.effects.correlatedNoise.enable    = true;
+    cfg.validation.stage24AllToggles      = true;
+end
 
 % ============================================================
 % RUN SIMULATION AND WRITE REPORT

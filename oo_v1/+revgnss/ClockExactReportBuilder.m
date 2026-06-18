@@ -451,6 +451,9 @@ classdef ClockExactReportBuilder
             fprintf(fid, '\\end{center}\n');
             fprintf(fid, '\\vspace{0.3cm}\n');
 
+            % ---- Stage 24 validation status page -----------------------
+            CE.writeStage24ValidationStatus_(fid, texPath);
+
             % ---- Sections -----------------------------------------------
             CE.writeScenarioSummary_(fid, cfg, summary, diag, nTwr, nRx, dur, dt, esc);
             CE.writeModelRealityCheck_(fid, cfg, summary, dur, nTwr, nRx);
@@ -458,6 +461,7 @@ classdef ClockExactReportBuilder
             CE.writeOneWayISLArchitecture_(fid, cfg, summary);
             CE.writeTwoWayISLArchitecture_(fid, cfg, summary);
             CE.writeIslTimingDiagnostics_(fid, cfg, summary);
+            CE.writeTwstftDiagnostics_(fid, cfg, summary);
             CE.writeObservableRealityCheck_(fid, summary);
             CE.writeStateEstimation_(fid, plotPaths, stem, cfg, diag, figDir);
             CE.writeMeasurementValidation_(fid, plotPaths, stem, figDir);
@@ -932,6 +936,51 @@ classdef ClockExactReportBuilder
         end
 
         % ================================================================
+        % TWSTFT CODE TIME-TRANSFER DIAGNOSTICS
+        % ================================================================
+
+        function writeTwstftDiagnostics_(fid, cfg, summary)
+            CE = revgnss.ClockExactReportBuilder;
+            fprintf(fid, '\\section{TWSTFT Code Time-Transfer Diagnostics}\n');
+            td = CE.safeField_(summary, 'twstftDiag', struct());
+            twOn = isfield(td,'enabled') && td.enabled;
+            refIdx = CE.safeField_(td, 'referenceAssetIndex', 1);
+            remIdx = CE.safeField_(td, 'remoteAssetIndex', 2);
+            classtr = CE.safeField_(td, 'diagnosticClassification', 'disabled');
+            ma = CE.safeField_(summary, 'multiAsset', struct());
+            refName = sprintf('asset %d', refIdx);
+            remName = sprintf('asset %d', remIdx);
+            if isstruct(ma) && isfield(ma,'assetTable')
+                if refIdx <= numel(ma.assetTable); refName = ma.assetTable(refIdx).name; end
+                if remIdx <= numel(ma.assetTable); remName = ma.assetTable(remIdx).name; end
+            end
+            fprintf(fid, ['Stage 24 adds a toggleable TWSTFT code time-transfer diagnostic scaffold. ' ...
+                'This section is report-only. No TWSTFT EKF rows exist in Stage 24. ' ...
+                'No relay/transponder/bent-pipe model is implemented. ' ...
+                'No ISL carrier EKF. ' ...
+                'The timing source is Stage 23 ISL link-event metadata.\n\n']);
+            fprintf(fid, '\\begin{center}\\small\n');
+            fprintf(fid, '\\begin{tabular}{p{0.48\\textwidth}p{0.38\\textwidth}}\n');
+            fprintf(fid, '\\toprule\n\\textbf{Quantity} & \\textbf{Value}\\\\\n\\midrule\n');
+            CE.writeQuantRow_(fid, 'TWSTFT diagnostics enabled', mat2str(twOn));
+            CE.writeQuantRow_(fid, 'Reference / remote asset', sprintf('%s / %s', CE.esc_(refName), CE.esc_(remName)));
+            CE.writeQuantRow_(fid, 'useInEKF', 'false (Stage 24: no TWSTFT EKF row)');
+            CE.writeQuantRow_(fid, 'Timing source', CE.esc_(CE.safeField_(td,'timingSource','none')));
+            CE.writeQuantRow_(fid, 'Diagnostic classification', CE.esc_(classtr));
+            CE.writeQuantRow_(fid, 'Clock offset diagnostic [s]', sprintf('%.6g', CE.safeField_(td,'clockOffsetDiagnostic_s',NaN)));
+            CE.writeQuantRow_(fid, 'Clock offset diagnostic [m]', sprintf('%.6g', CE.safeField_(td,'clockOffsetDiagnostic_m',NaN)));
+            CE.writeQuantRow_(fid, 'Calibrated delay [s]', sprintf('%.6g', CE.safeField_(td,'calibratedDelay_s',0)));
+            CE.writeQuantRow_(fid, 'Processing delay [s]', sprintf('%.6g', CE.safeField_(td,'processingDelay_s',0)));
+            CE.writeQuantRow_(fid, 'T\_AB diagnostic [s]', sprintf('%.6g', CE.safeField_(td,'T_AB_s',NaN)));
+            CE.writeQuantRow_(fid, 'T\_BA diagnostic [s]', sprintf('%.6g', CE.safeField_(td,'T_BA_s',NaN)));
+            CE.writeQuantRow_(fid, 'TWSTFT EKF rows', sprintf('%d (must be 0)', CE.safeField_(td,'twstftEkfRows',0)));
+            CE.writeQuantRow_(fid, 'Relay/transponder implemented?', 'NO');
+            CE.writeQuantRow_(fid, 'ISL carrier EKF-used?', 'NO');
+            CE.writeQuantRow_(fid, 'Limitation', 'No TWSTFT EKF row; no relay/transponder/bent-pipe; no carrier-frequency transfer');
+            fprintf(fid, '\\bottomrule\n\\end{tabular}\\end{center}\n\\clearpage\n');
+        end
+
+        % ================================================================
         % OBSERVABLE ROW REALITY CHECK
         % ================================================================
 
@@ -966,6 +1015,8 @@ classdef ClockExactReportBuilder
                 CE.safeField_(c,'islCarrierDiagnostic',0)));
             CE.writeQuantRow_(fid, 'Two-way ISL range / Doppler diagnostic rows', sprintf('%d / %d', ...
                 CE.safeField_(c,'islTwoWayRange',0), CE.safeField_(c,'islTwoWayDopplerDiagnostic',0)));
+            CE.writeQuantRow_(fid, 'TWSTFT code diagnostic rows (Stage 24)', sprintf('%d', ...
+                CE.safeField_(c,'twstftCodeDiagnostic',0)));
             if isfield(obs,'linksByAsset') && ~isempty(obs.linksByAsset)
                 parts = {};
                 for kk = 1:numel(obs.linksByAsset)
@@ -2179,6 +2230,71 @@ classdef ClockExactReportBuilder
             cols = unique(cols(:))';
             parts = arrayfun(@(c) sprintf('%d', c), cols, 'UniformOutput', false);
             s = strjoin(parts, ', ');
+        end
+
+        % ================================================================
+        % STAGE 24 VALIDATION STATUS PAGE
+        % ================================================================
+
+        function writeStage24ValidationStatus_(fid, texPath)
+            % writeStage24ValidationStatus_  Insert Stage 24 validation status section.
+            % Reads output/latest_validation_summary.json relative to texPath.
+            CE  = revgnss.ClockExactReportBuilder;
+            esc = @CE.esc_;
+
+            % Locate summary JSON: texPath is in output/Report-YYYYMMDD/; go up two.
+            outDir = fileparts(fileparts(texPath));
+            vs = revgnss.ValidationSummary.read(outDir);
+
+            sha    = CE.getGitSHA_();
+            branch = 'unknown';
+            try
+                [s, b] = system('git rev-parse --abbrev-ref HEAD 2>/dev/null');
+                if s == 0; branch = strtrim(b); end
+            catch; end
+
+            nPass  = 0;   if isfield(vs,'nPassingSelectedTests'); nPass = vs.nPassingSelectedTests; end
+            nSel   = 0;   if isfield(vs,'nSelectedTests');        nSel  = vs.nSelectedTests;        end
+            allTog = false; if isfield(vs,'allToggleReportRun');  allTog = logical(vs.allToggleReportRun); end
+            pdfOK  = false; if isfield(vs,'pdfVerified');         pdfOK = logical(vs.pdfVerified);  end
+            repOK  = false; if isfield(vs,'reportRunPassed');     repOK = logical(vs.reportRunPassed); end
+
+            fprintf(fid, '\\clearpage\n');
+            fprintf(fid, '\\section{Stage 24 Validation Status}\n');
+            fprintf(fid, ['\\textbf{Stage 24: Validation Status Gate + Frame/Time/Light-Time Foundation.} ' ...
+                'This section is generated at report-build time from the validation summary artifact.\n\n']);
+            fprintf(fid, '\\begin{center}\\small\n');
+            fprintf(fid, '\\begin{tabular}{p{0.38\\textwidth}p{0.52\\textwidth}}\n');
+            fprintf(fid, '\\toprule\n');
+            fprintf(fid, '\\textbf{Item} & \\textbf{Value}\\\\\n');
+            fprintf(fid, '\\midrule\n');
+            fprintf(fid, 'Stage & 24 --- Validation Status Gate + Frame Foundation\\\\\n');
+            fprintf(fid, 'Branch & \\texttt{%s}\\\\\n', esc(branch));
+            fprintf(fid, 'Commit SHA & \\texttt{%s}\\\\\n', esc(sha));
+            fprintf(fid, 'Validation mode & targeted-random-smoke\\\\\n');
+            fprintf(fid, 'Selected tests passed & %d / %d\\\\\n', nPass, nSel);
+            fprintf(fid, 'Full suite run & \\textbf{NOT RUN} (targeted smoke only)\\\\\n');
+            fprintf(fid, 'All-toggle report run & %s\\\\\n', esc(mat2str(allTog)));
+            fprintf(fid, 'Report run passed & %s\\\\\n', esc(mat2str(repOK)));
+            fprintf(fid, 'PDF verified & %s\\\\\n', esc(mat2str(pdfOK)));
+            fprintf(fid, '\\bottomrule\n');
+            fprintf(fid, '\\end{tabular}\n');
+            fprintf(fid, '\\end{center}\n');
+            fprintf(fid, ['\\textbf{Warning:} Targeted random smoke validation is \\emph{not} ' ...
+                'equivalent to full regression validation. ' ...
+                'A subset of 2--5 tests was run. ' ...
+                'All tests should be run before claiming full Stage 24 validation.\n\n']);
+
+            % Missing scientific stages
+            ms = revgnss.ReportStatus.current();
+            if isfield(ms, 'missingScientificStages') && ~isempty(ms.missingScientificStages)
+                fprintf(fid, '\\subsection*{Missing Scientific Stages}\n');
+                fprintf(fid, '\\begin{itemize}\n');
+                for k = 1:numel(ms.missingScientificStages)
+                    fprintf(fid, '  \\item %s\n', esc(ms.missingScientificStages{k}));
+                end
+                fprintf(fid, '\\end{itemize}\n');
+            end
         end
 
         % ================================================================

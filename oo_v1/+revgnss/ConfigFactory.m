@@ -445,6 +445,19 @@ classdef ConfigFactory
             cfg.measurements.isl.timing.processingDelay_s = 0.0;
             cfg.measurements.isl.clockTransferDiagnostics.enable = false;
 
+            % --- TWSTFT code time-transfer diagnostic scaffold (Stage 24) ---
+            % All defaults off. Enabling these toggles does NOT add EKF rows.
+            % No relay/transponder, no ISL carrier EKF, no TWSTFT ambiguity states.
+            cfg.measurements.twstft.enable = false;
+            cfg.measurements.twstft.code.enable = false;
+            cfg.measurements.twstft.code.useInEKF = false;
+            cfg.measurements.twstft.code.sigma_s = 1e-9;
+            cfg.measurements.twstft.referenceAssetIndex = 1;
+            cfg.measurements.twstft.remoteAssetIndex = 2;
+            cfg.measurements.twstft.processingDelay_s = 0.0;
+            cfg.measurements.twstft.calibratedDelay_s = 0.0;
+            cfg.measurements.twstft.requireIslTiming = true;
+
             % --- Observable mode (Step 1) -----------------------------------
             % observableMode: DESCRIPTIVE LABEL (not authoritative — does not gate
             % measurements).  Used for report generation and diagnostics only.
@@ -1732,6 +1745,7 @@ classdef ConfigFactory
             revgnss.ISLMeasurementBuilder.validateConfig(cfg);
             revgnss.TwoWayISLMeasurementBuilder.validateConfig(cfg);
             revgnss.ISLTimingModel.validateConfig(cfg);
+            revgnss.TWSTFTDiagnosticBuilder.validateConfig(cfg);
         end
 
         function tmpl = getClockTemplate_(templateName)

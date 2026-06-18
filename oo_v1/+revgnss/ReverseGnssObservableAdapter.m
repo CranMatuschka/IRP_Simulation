@@ -89,6 +89,25 @@ classdef ReverseGnssObservableAdapter
             end
             stack = revgnss.ObservableStackDescriptor.create(endpoints, links, rows);
         end
+
+        function stack = addTWSTFTDiagnosticRows(stack, twstftDiag)
+            % addTWSTFTDiagnosticRows  Append twstftCodeDiagnostic row descriptors.
+            % No EKF rows (no z/h/H/R). Role = diagnosticOnly.
+            % linkId = 'derived:twstft:code:diag' bypasses endpoint/link validation.
+            if isempty(stack) || ~isstruct(twstftDiag) || ...
+                    ~isfield(twstftDiag,'enabled') || ~twstftDiag.enabled || ...
+                    ~isfield(twstftDiag,'rows') || isempty(twstftDiag.rows)
+                return
+            end
+            rows = stack.rows;
+            startIdx = numel(rows);
+            for k = 1:numel(twstftDiag.rows)
+                row = twstftDiag.rows(k);
+                row.rowIndex = startIdx + k;
+                rows(end+1) = row; %#ok<AGROW>
+            end
+            stack = revgnss.ObservableStackDescriptor.create(stack.endpoints, stack.links, rows);
+        end
     end
 
     methods (Static, Access = private)
