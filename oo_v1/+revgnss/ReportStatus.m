@@ -12,8 +12,8 @@ classdef ReportStatus
     methods (Static)
 
         function s = current()
-            s.stage      = '32';
-            s.stageTitle = 'Single-Asset Receiver Geometry Model v1';
+            s.stage      = '33';
+            s.stageTitle = 'Attitude Parameterization Convention Hardening';
             s.validationMode = 'targeted-random-smoke';
             s.fullSuiteRun   = false;
 
@@ -57,7 +57,7 @@ classdef ReportStatus
             end
             vsSHA = '';
             if isfield(vs, 'gitSHA'); vsSHA = strtrim(char(vs.gitSHA)); end
-            s.validationArtifactFresh = (vsStageNum >= 32) && strcmp(vsSHA, runtimeSHA);
+            s.validationArtifactFresh = (vsStageNum >= 33) && strcmp(vsSHA, runtimeSHA);
             if ~s.validationArtifactFresh
                 s.validationWarnings{end+1} = ...
                     'No fresh local validation summary for this commit. Run: setenv(''OO_V1_VALIDATE_REPORT'',''true''); run_oo_reverse_gnss_report';
@@ -124,7 +124,7 @@ classdef ReportStatus
             list = {
                 'Full CI / full test-suite validation (current: targeted random smoke, 2-5 tests only)'
                 'Calibrated antenna PCO/PCV and ANTEX hardware-bias products (geometry model is reference-point only)'
-                'Attitude parameterization hardening (current ZYX Euler has gimbal-lock singularity)'
+                'Quaternion / error-state attitude EKF (current ZYX Euler is documented but singular at pitch +/-90 deg)'
                 'Attitude-sensitive measurement Jacobians (carrier phase lever-arm coupling)'
                 'Multi-antenna single-asset attitude scenario validation'
                 'Carrier-phase attitude preparation and observability analysis'
@@ -146,7 +146,7 @@ classdef ReportStatus
             list = {
                 'ReportStatus: runtime git SHA, branch, validation mode, missing-stages list'
                 'ValidationSummary: JSON + TXT summary writer and reader'
-                'ValidationRunner: deterministic random test selection (seed 30, 2-5 tests)'
+                'ValidationRunner: deterministic random test selection (seed per stage, 2-5 tests)'
                 'FrameTimeUtils: simple ECEF/inertial Earth-rotation and Sagnac foundation'
                 'run_stage24_validation.m: targeted smoke validation + all-toggle report run'
                 'Report Stage 24 validation status section in PDF/TEX'
@@ -161,6 +161,7 @@ classdef ReportStatus
                 'Stage 30: MainScriptValidationGate helper; restored pre/post-run gate in run_oo_reverse_gnss_report.m'
                 'Stage 31: AttitudeObservability audit class; H-column rank/condition/classification; report subsection'
                 'Stage 32: ReceiverGeometry helper; body-frame lever-arm normalisation, baselines, centroid; report subsection'
+                'Stage 33: AttitudeKinematics convention(), eulerToDcm(), gimbal metric, validateDcm(), finite-diff lever-arm Jacobian; report subsection'
             };
         end
 

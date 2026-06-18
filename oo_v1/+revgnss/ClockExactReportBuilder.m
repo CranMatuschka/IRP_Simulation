@@ -2221,6 +2221,45 @@ classdef ClockExactReportBuilder
                     fprintf(fid, '\\end{itemize}\n\n');
                 end
             end
+
+            % --- Stage 33: Attitude Parameterization Convention ---
+            fprintf(fid, '\\subsection*{Attitude Parameterization Convention (Stage~33)}\n');
+            fprintf(fid, ['\\textit{This stage documents and tests the Euler convention only. ' ...
+                'It is not a quaternion EKF, not a multiplicative error-state filter, ' ...
+                'and not an attitude accuracy claim.}\n\n']);
+
+            cv = revgnss.AttitudeKinematics.convention();
+            fprintf(fid, '\\begin{tabular}{p{0.42\\textwidth}p{0.40\\textwidth}}\n');
+            fprintf(fid, '\\toprule\n\\textbf{Property} & \\textbf{Value}\\\\\n\\midrule\n');
+            fprintf(fid, 'Convention name & %s\\\\\n', revgnss.ClockExactReportBuilder.esc_(cv.name));
+            fprintf(fid, 'State order & roll, pitch, yaw\\\\\n');
+            fprintf(fid, 'Units & radians\\\\\n');
+            fprintf(fid, 'Rotation direction & body to reference (ECEF)\\\\\n');
+            fprintf(fid, 'DCM definition & $C_{\\mathrm{ref,body}} = R_z(\\psi)R_y(\\theta)R_x(\\phi)$\\\\\n');
+            fprintf(fid, 'Gimbal metric & $|\\cos(\\mathrm{pitch})|$; near~0 = singular\\\\\n');
+
+            % Try to extract representative pitch from last epoch
+            gmStr = 'unavailable';
+            nearLockStr = '';
+            if isobject(diag) && isprop(diag,'nEpochs') && diag.nEpochs > 0
+                try
+                    eul = diag.log(diag.nEpochs).estimate.euler_rad;
+                    gm  = revgnss.AttitudeKinematics.gimbalMetric(eul);
+                    gmStr = sprintf('%.6f (pitch = %.2f deg)', gm, eul(2)*180/pi);
+                    if revgnss.AttitudeKinematics.isNearGimbalLock(eul)
+                        nearLockStr = 'WARNING: pitch near gimbal-lock singularity at final epoch.';
+                    end
+                catch; end
+            end
+            fprintf(fid, 'Gimbal metric (final epoch) & %s\\\\\n', revgnss.ClockExactReportBuilder.esc_(gmStr));
+            fprintf(fid, '\\bottomrule\n\\end{tabular}\\par\n\n');
+
+            fprintf(fid, ['\\textbf{Limitation:} %s\n\n'], ...
+                revgnss.ClockExactReportBuilder.esc_(cv.limitation));
+            if ~isempty(nearLockStr)
+                fprintf(fid, '\\textbf{\\textcolor{red!70!black}{%s}}\n\n', ...
+                    revgnss.ClockExactReportBuilder.esc_(nearLockStr));
+            end
         end
 
         % ================================================================
@@ -2355,8 +2394,8 @@ classdef ClockExactReportBuilder
             vs = revgnss.ValidationSummary.read(outDir);
 
             % Read dynamic stage/title from JSON (default to current stage).
-            stage      = '32';
-            stageTitle = 'Single-Asset Receiver Geometry Model v1';
+            stage      = '33';
+            stageTitle = 'Attitude Parameterization Convention Hardening';
             if isfield(vs, 'stage') && ~isempty(vs.stage)
                 stage = strtrim(num2str(vs.stage));
             end

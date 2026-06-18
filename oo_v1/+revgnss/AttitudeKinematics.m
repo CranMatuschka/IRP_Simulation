@@ -2,9 +2,13 @@ classdef AttitudeKinematics
     % AttitudeKinematics  Static utility class for Euler-angle attitude math.
     %
     % Convention: 3-2-1 (ZYX) rotation sequence.
-    %   body-to-ECEF: C = Rz(yaw) * Ry(pitch) * Rx(roll)
+    %   body-to-reference (ECEF): C = Rz(yaw) * Ry(pitch) * Rx(roll)
     %
     % State vector attitude: [roll; pitch; yaw] in radians.
+    %
+    % Stage 33 additions: convention(), eulerToDcm(), rotateBodyToReference(),
+    %   rotateReferenceToBody(), gimbalMetric(), isNearGimbalLock(),
+    %   finiteDiffLeverArmJacobian(), validateDcm().
 
     methods (Static)
 
@@ -77,6 +81,73 @@ classdef AttitudeKinematics
             % r_ant_ecef = r_body_origin_ecef + C_ecef_body * leverArm_body
             C = revgnss.AttitudeKinematics.bodyToEcefRotation(euler_rad);
             r_ecef = r_body_origin_ecef(:) + C * leverArm_body_m(:);
+        end
+
+        % ================================================================
+        % Stage 33: convention hardening methods
+        % ================================================================
+
+        function c = convention()
+            % convention  Return struct documenting the ZYX Euler convention.
+            c.name             = 'ZYX Euler roll-pitch-yaw';
+            c.stateOrder       = {'roll','pitch','yaw'};
+            c.units            = 'rad';
+            c.rotationDirection = 'body_to_reference';
+            c.dcmDefinition    = 'C_ref_body = Rz(yaw)*Ry(pitch)*Rx(roll)';
+            c.limitation       = ['Euler pitch near +/-90 deg is singular; ' ...
+                'not a quaternion/error-state filter.'];
+        end
+
+        function C = eulerToDcm(rpy_rad)
+            % eulerToDcm  DCM from body to reference frame; validated alias.
+            assert(isnumeric(rpy_rad) && numel(rpy_rad) == 3 && all(isfinite(rpy_rad(:))), ...
+                'AttitudeKinematics:eulerToDcm: rpy_rad must be finite numeric with 3 elements.');
+            C = revgnss.AttitudeKinematics.bodyToEcefRotation(rpy_rad(:));
+        end
+
+        function v_ref = rotateBodyToReference(rpy_rad, v_body)
+            % rotateBodyToReference  Rotate body vector(s) to reference frame.
+            % Supports v_body as 3 x N.
+            C = revgnss.AttitudeKinematics.eulerToDcm(rpy_rad);
+            v_ref = C * v_body;
+        end
+
+        function v_body = rotateReferenceToBody(rpy_rad, v_ref)
+            % rotateReferenceToBody  Rotate reference vector(s) to body frame.
+            C = revgnss.AttitudeKinematics.eulerToDcm(rpy_rad);
+            v_body = C' * v_ref;
+        end
+
+        function gm = gimbalMetric(rpy_rad)
+            % gimbalMetric  abs(cos(pitch)); approaches 0 near singularity.
+            gm = abs(cos(rpy_rad(2)));
+        end
+
+        function flag = isNearGimbalLock(rpy_rad, threshold)
+            % isNearGimbalLock  True when gimbal metric < threshold.
+            if nargin < 2; threshold = 1e-3; end
+            flag = revgnss.AttitudeKinematics.gimbalMetric(rpy_rad) < threshold;
+        end
+
+        function J = finiteDiffLeverArmJacobian(rpy_rad, lever_body_m, eps_rad)
+            % finiteDiffLeverArmJacobian  d/d(rpy)[C(rpy)*lever], size 3x3.
+            if nargin < 3; eps_rad = 1e-6; end
+            rpy  = rpy_rad(:);
+            lev  = lever_body_m(:);
+            J    = zeros(3, 3);
+            for k = 1:3
+                dp = rpy; dp(k) = dp(k) + eps_rad;
+                dm = rpy; dm(k) = dm(k) - eps_rad;
+                J(:,k) = (revgnss.AttitudeKinematics.bodyToEcefRotation(dp) * lev - ...
+                          revgnss.AttitudeKinematics.bodyToEcefRotation(dm) * lev) / (2 * eps_rad);
+            end
+        end
+
+        function [ok, orthErr, detErr] = validateDcm(C)
+            % validateDcm  Check orthogonality and unit determinant.
+            orthErr = norm(C' * C - eye(3), 'fro');
+            detErr  = abs(det(C) - 1);
+            ok      = orthErr < 1e-10 && detErr < 1e-10;
         end
 
     end  % methods (Static)
