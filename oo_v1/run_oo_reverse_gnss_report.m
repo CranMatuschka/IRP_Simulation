@@ -29,10 +29,13 @@ clear; close all; clc;
 thisDir = fileparts(mfilename('fullpath'));
 addpath(thisDir);
 
-% --- Environment-variable overrides (Stage 25: script-exact validation gate) --
+% --- Environment-variable overrides (Stage 25+, Stage 29 validation gate) ---
+oo_v1_envValidate_   = strcmpi(getenv('OO_V1_VALIDATE_REPORT'), 'true');
 oo_v1_envAllToggles_ = strcmpi(getenv('OO_V1_ALL_TOGGLES'), 'true');
+if oo_v1_envValidate_; oo_v1_envAllToggles_ = true; end  % validate always uses all toggles
 oo_v1_envStage_      = str2double(getenv('OO_V1_VALIDATION_STAGE'));
 if isnan(oo_v1_envStage_); oo_v1_envStage_ = 0; end
+if oo_v1_envValidate_ && oo_v1_envStage_ == 0; oo_v1_envStage_ = 29; end
 oo_v1_envCompile_    = strtrim(getenv('OO_V1_REPORT_COMPILE_TEX'));
 
 cfg = revgnss.ConfigFactory.defaultConfig();
@@ -276,6 +279,36 @@ if ~isempty(oo_v1_envCompile_) && ismember(oo_v1_envCompile_, {'require','auto',
 end
 
 % ============================================================
+% STAGE 29 VALIDATION: PRE-RUN PHASE  (OO_V1_VALIDATE_REPORT=true)
+% ============================================================
+if oo_v1_envValidate_
+    oo_v1_outDir_   = fullfile(thisDir, 'output');
+    oo_v1_stage_    = 29; if oo_v1_envStage_ > 0; oo_v1_stage_ = oo_v1_envStage_; end
+    oo_v1_stageT_   = 'Main-Script Validation Freshness Gate';
+    oo_v1_seed_     = oo_v1_intEnv_('OO_V1_RANDOM_TEST_SEED', 29);
+    oo_v1_cnt_      = max(2, min(5, oo_v1_intEnv_('OO_V1_RANDOM_TEST_COUNT', 4)));
+    fprintf('\n[Validation] Stage %d  seed %d  count %d\n', oo_v1_stage_, oo_v1_seed_, oo_v1_cnt_);
+
+    oo_v1_files_   = oo_v1_pickTests_(fullfile(thisDir,'tests'), oo_v1_seed_, oo_v1_cnt_, oo_v1_stage_);
+    oo_v1_res_     = revgnss.ValidationRunner.runSelected(oo_v1_files_, thisDir);
+    revgnss.ValidationRunner.printSummary(oo_v1_res_);
+    [oo_v1_nP_, oo_v1_nT_] = revgnss.ValidationRunner.countResults(oo_v1_res_);
+    oo_v1_sha_     = oo_v1_gitSHA_(thisDir);
+    oo_v1_branch_  = oo_v1_gitBranch_(thisDir);
+
+    if oo_v1_nP_ < oo_v1_nT_
+        fprintf('[Validation] %d test(s) failed — stopping before report.\n', oo_v1_nT_ - oo_v1_nP_);
+        oo_v1_writeSummary_(oo_v1_outDir_, oo_v1_res_, false, '', false, false, ...
+            oo_v1_stage_, oo_v1_stageT_, oo_v1_sha_, oo_v1_branch_, {});
+        return
+    end
+    cfg.report.compileTex = 'auto';
+    % Write preliminary summary: PDF shows correct stage before simulation runs.
+    oo_v1_writeSummary_(oo_v1_outDir_, oo_v1_res_, false, '', false, false, ...
+        oo_v1_stage_, oo_v1_stageT_, oo_v1_sha_, oo_v1_branch_, {'Preliminary summary, PDF not yet generated.'});
+end
+
+% ============================================================
 % RUN SIMULATION AND WRITE REPORT
 % ============================================================
 
@@ -289,6 +322,97 @@ if cfg.report.writeMat
     fprintf('\nMAT:\n%s\n', out.matPath);
 end
 
-% Stage 25: expose last run output for script-exact validation gate.
+% ---- Stage 29: post-run PDF verification and final summary ----
+if oo_v1_envValidate_
+    pdfP9_ = '';
+    if isfield(out,'pdfPath') && ~isempty(out.pdfPath); pdfP9_ = out.pdfPath; end
+    [pdfOk9_, ptOk9_, texOk9_, w9_] = oo_v1_vfyPdf_(pdfP9_, oo_v1_sha_, oo_v1_nP_, oo_v1_nT_, oo_v1_stage_);
+    oo_v1_writeSummary_(oo_v1_outDir_, oo_v1_res_, pdfOk9_, pdfP9_, ptOk9_, texOk9_, ...
+        oo_v1_stage_, oo_v1_stageT_, oo_v1_sha_, oo_v1_branch_, w9_);
+    fprintf('[Validation] Stage %d done. PDF: %s  TextOK: %s  TEX: %s\n', ...
+        oo_v1_stage_, mat2str(pdfOk9_), mat2str(ptOk9_), mat2str(texOk9_));
+end
+
+% Expose last run output to base workspace (used by older external validation scripts).
 assignin('base', 'oo_v1_last_report_out', out);
 assignin('base', 'oo_v1_last_report_cfg', cfg);
+
+% ============================================================
+% LOCAL FUNCTIONS — Stage 29 validation mode helpers
+% ============================================================
+
+function files = oo_v1_pickTests_(testDir, seed, count, stageNum)
+    files = revgnss.ValidationRunner.selectTests(testDir, seed, count);
+    tag = sprintf('test_stage%d', stageNum);
+    tmp = dir(fullfile(testDir, [tag '*.m']));
+    if ~isempty(tmp) && ~any(strcmp(files, tmp(1).name))
+        files{end} = tmp(1).name; files = sort(files);
+    end
+end
+
+function oo_v1_writeSummary_(outDir, results, pdfOk, pdfPath, ptOk, texOk, stg, title, sha, branch, warns)
+    if ~exist(outDir,'dir'); mkdir(outDir); end
+    [nPass, nTot] = revgnss.ValidationRunner.countResults(results);
+    d.stage = stg; d.stageTitle = title; d.branch = branch; d.gitSHA = sha;
+    d.timestamp = datestr(now, 'yyyy-mm-ddTHH:MM:SS'); %#ok<TNOW1,DATST>
+    d.matlabVersion = version; d.testSeed = stg;
+    d.nSelectedTests = nTot; d.nPassingSelectedTests = nPass;
+    d.selectedTestNames = {results.name};
+    d.fullSuiteRun = false; d.allToggleReportRun = ~isempty(pdfPath);
+    d.reportRunPassed    = ~isempty(pdfPath);
+    d.invokedMainScript = true;
+    d.pdfVerified = pdfOk; d.pdfTextVerified = ptOk; d.texVerified = texOk;
+    d.pdfPath = pdfPath; d.validationWarnings = warns;
+    d.currentStageSmokeTestIncluded = ...
+        any(cellfun(@(n) contains(n, sprintf('stage%d',stg)), {results.name}));
+    d.notes = sprintf('Stage %d smoke (%d/%d). Full suite NOT RUN.', stg, nPass, nTot);
+    revgnss.ValidationSummary.write(outDir, d);
+end
+
+function [pdfOk, ptOk, texOk, warns] = oo_v1_vfyPdf_(pdfPath, sha, nP, nT, stg)
+    pdfOk = false; ptOk = false; texOk = false; warns = {};
+    if isempty(pdfPath) || ~exist(pdfPath,'file')
+        warns{end+1} = 'PDF not found.'; return
+    end
+    info = dir(pdfPath); pdfOk = info.bytes > 50000;
+    if ~pdfOk; warns{end+1} = sprintf('PDF too small: %d bytes', info.bytes); end
+    [st, txt] = system(sprintf('pdftotext "%s" - 2>/dev/null', pdfPath));
+    if st == 0 && ~isempty(strtrim(txt))
+        toks = {['Stage ' num2str(stg)], sha, sprintf('%d / %d', nP, nT), 'NOT RUN', 'Main script'};
+        ptOk = all(cellfun(@(t) ~isempty(strfind(txt, t)), toks)); %#ok<STREMP>
+        if ~ptOk
+            warns{end+1} = sprintf('PDF text: tokens missing (SHA %s, %d/%d).', sha, nP, nT);
+        end
+        return
+    end
+    warns{end+1} = 'pdftotext unavailable; TEX fallback (pdfTextVerified=false).';
+    texPath = strrep(pdfPath, '.pdf', '.tex');
+    if exist(texPath,'file')
+        try
+            t = fileread(texPath);
+            texOk = ~isempty(strfind(t,'NOT RUN')) && ... %#ok<STREMP>
+                    ~isempty(strfind(t, ['Stage ' num2str(stg)])); %#ok<STREMP>
+        catch; end
+    end
+end
+
+function n = oo_v1_intEnv_(name, def)
+    n = def; v = getenv(name);
+    if ~isempty(v); x = str2double(v); if ~isnan(x) && isfinite(x); n = round(x); end; end
+end
+
+function sha = oo_v1_gitSHA_(rootDir)
+    sha = 'unknown';
+    try
+        [s, o] = system(sprintf('git -C "%s" rev-parse --short HEAD 2>/dev/null', rootDir));
+        if s == 0; sha = strtrim(o); end
+    catch; end
+end
+
+function br = oo_v1_gitBranch_(rootDir)
+    br = 'unknown';
+    try
+        [s, o] = system(sprintf('git -C "%s" rev-parse --abbrev-ref HEAD 2>/dev/null', rootDir));
+        if s == 0; br = strtrim(o); end
+    catch; end
+end

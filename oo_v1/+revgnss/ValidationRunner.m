@@ -1,11 +1,11 @@
 classdef ValidationRunner
     % ValidationRunner  Targeted random smoke-test selection and execution.
     %
-    % Stage 24 runs 2-5 randomly selected tests, not the full test suite.
-    % Selection is deterministic for a given seed.  Default seed = 24.
+    % Selects 2-5 randomly chosen tests, not the full test suite.
+    % Selection is deterministic for a given seed.  Default seed = 29.
     %
     % Environment overrides:
-    %   OO_V1_RANDOM_TEST_SEED   — integer seed (default 24)
+    %   OO_V1_RANDOM_TEST_SEED   — integer seed (default 29)
     %   OO_V1_RANDOM_TEST_COUNT  — count clamped to [2, 5] (default 4)
     %
     % Usage:
@@ -15,8 +15,8 @@ classdef ValidationRunner
     methods (Static)
 
         function seed = defaultSeed()
-            % defaultSeed  Return seed from env var or default (24).
-            seed = 24;
+            % defaultSeed  Return seed from env var or default (29).
+            seed = 29;
             v = getenv('OO_V1_RANDOM_TEST_SEED');
             if ~isempty(v)
                 n = str2double(v);

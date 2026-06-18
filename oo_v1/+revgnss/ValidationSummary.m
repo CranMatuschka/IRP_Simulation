@@ -35,8 +35,9 @@ classdef ValidationSummary
             fid = fopen(tPath, 'w', 'n', 'UTF-8');
             if fid < 0; return; end
             VS = revgnss.ValidationSummary;
-            fprintf(fid, 'Stage 24 Validation Summary\n');
-            fprintf(fid, '============================\n');
+            stgHdr = sprintf('Stage %s Validation Summary', VS.safe_(data, 'stage', '?'));
+            fprintf(fid, '%s\n', stgHdr);
+            fprintf(fid, '%s\n', repmat('=', 1, numel(stgHdr)));
             fprintf(fid, 'Stage          : %s\n', VS.safe_(data, 'stage',      '?'));
             fprintf(fid, 'Stage title    : %s\n', VS.safe_(data, 'stageTitle', '?'));
             fprintf(fid, 'Branch         : %s\n', VS.safe_(data, 'branch',     'unknown'));

@@ -2250,8 +2250,8 @@ classdef ClockExactReportBuilder
             vs = revgnss.ValidationSummary.read(outDir);
 
             % Read dynamic stage/title from JSON (default to current stage).
-            stage      = '28';
-            stageTitle = 'Orbit Dynamics Integration Diagnostics';
+            stage      = '29';
+            stageTitle = 'Main-Script Validation Freshness Gate';
             if isfield(vs, 'stage') && ~isempty(vs.stage)
                 stage = strtrim(num2str(vs.stage));
             end
@@ -2279,6 +2279,12 @@ classdef ClockExactReportBuilder
             if isfield(vs,'validationWarnings') && iscell(vs.validationWarnings)
                 warnings = vs.validationWarnings;
             end
+            % Artifact freshness: compare summary SHA with runtime SHA.
+            artFresh = false;
+            runtimeSHA = CE.getGitSHA_();
+            if isfield(vs,'gitSHA') && ~isempty(vs.gitSHA)
+                artFresh = strcmp(strtrim(char(vs.gitSHA)), strtrim(runtimeSHA));
+            end
 
             fprintf(fid, '\\clearpage\n');
             fprintf(fid, '\\section{Stage %s Validation Status}\n', esc(stage));
@@ -2302,9 +2308,14 @@ classdef ClockExactReportBuilder
             fprintf(fid, 'PDF verified & %s\\\\\n', esc(mat2str(pdfOK)));
             fprintf(fid, 'PDF text verified & %s\\\\\n', esc(mat2str(pdfTextOK)));
             fprintf(fid, 'TEX verified (fallback) & %s\\\\\n', esc(mat2str(texVerif)));
+            fprintf(fid, 'Artifact fresh & %s\\\\\n', esc(mat2str(artFresh)));
             fprintf(fid, '\\bottomrule\n');
             fprintf(fid, '\\end{tabular}\n');
             fprintf(fid, '\\end{center}\n');
+            if invMain && ~pdfOK
+                fprintf(fid, ['\\textit{PDF verification is finalized in ' ...
+                    '\\texttt{output/latest\\_validation\\_summary.json} after report generation.}\n\n']);
+            end
             fprintf(fid, ['\\textbf{Warning:} Targeted random smoke validation is \\emph{not} ' ...
                 'equivalent to full regression validation. ' ...
                 'A subset of 2--5 tests was run. ' ...

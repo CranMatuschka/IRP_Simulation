@@ -1,9 +1,9 @@
 classdef ReportStatus
-    % ReportStatus  Stage 28 runtime validation status.
+    % ReportStatus  Stage 29 runtime validation status.
     %
     % Reads runtime values from output/latest_validation_summary.json (if present).
-    % If the JSON is missing, returns safe defaults with a warning note — report
-    % generation continues normally.
+    % If the JSON is missing or has a stale SHA, validationArtifactFresh=false.
+    % Report generation continues normally regardless.
     %
     % Usage:
     %   s     = revgnss.ReportStatus.current();      % full status struct
@@ -12,10 +12,10 @@ classdef ReportStatus
     methods (Static)
 
         function s = current()
-            % current  Return Stage 28 runtime validation status struct.
+            % current  Return Stage 29 runtime validation status struct.
 
-            s.stage      = '28';
-            s.stageTitle = 'Orbit Dynamics Integration Diagnostics';
+            s.stage      = '29';
+            s.stageTitle = 'Main-Script Validation Freshness Gate';
             s.validationMode = 'targeted-random-smoke';
             s.fullSuiteRun   = false;
 
@@ -50,13 +50,20 @@ classdef ReportStatus
                 s.validationWarnings = {};
             end
 
-            % Staleness check: if JSON stage < current stage, flag as not fresh.
+            % Freshness: require matching stage AND matching runtime SHA.
+            runtimeSHA = revgnss.ReportStatus.getGitSHA_();
             vsStageNum = 0;
             if isfield(vs, 'stage')
                 vsStageNum = str2double(strtrim(num2str(vs.stage)));
                 if isnan(vsStageNum); vsStageNum = 0; end
             end
-            s.validationArtifactFresh = (vsStageNum >= 28);
+            vsSHA = '';
+            if isfield(vs, 'gitSHA'); vsSHA = strtrim(char(vs.gitSHA)); end
+            s.validationArtifactFresh = (vsStageNum >= 29) && strcmp(vsSHA, runtimeSHA);
+            if ~s.validationArtifactFresh
+                s.validationWarnings{end+1} = ...
+                    'Validation summary is stale or missing. Run: setenv(''OO_V1_VALIDATE_REPORT'',''true''); run_oo_reverse_gnss_report';
+            end
 
             if isfield(vs, 'selectedTestNames')
                 s.selectedTests = vs.selectedTestNames;
@@ -117,14 +124,21 @@ classdef ReportStatus
 
         function list = missingStages_()
             list = {
-                'Full CI / full test-suite validation (Stage 24 runs targeted smoke only)'
-                'Full IERS/EOP GCRS/ITRF reference-frame and Earth-orientation products'
-                'Full relativistic GNSS clock modelling (Schwarzschild, gravitational redshift)'
-                'Higher-fidelity orbit beyond two-body/J2: drag, SRP, third bodies, EOP-consistent inertial frames, precise orbit products'
+                'Full CI / full test-suite validation (current: targeted random smoke, 2-5 tests only)'
+                'Attitude observability audit for single space asset with current lever-arm geometry'
+                'Space-asset antenna geometry and lever-arm model (v1 uses simplified fixed lever arms)'
+                'Attitude parameterization hardening (current ZYX Euler has gimbal-lock singularity)'
+                'Attitude-sensitive measurement Jacobians (carrier phase lever-arm coupling)'
+                'Multi-antenna single-asset attitude scenario validation'
+                'Carrier-phase attitude preparation and observability analysis'
+                'L2 carrier EKF rows and ionosphere-free carrier combination'
+                'Ambiguity readiness diagnostics and integer ambiguity resolution (LAMBDA/MLAMBDA)'
+                'Monte Carlo / NIS / NEES stochastic consistency validation'
                 'Scientific troposphere: Niell/GMF/VMF3/GPT3/ERA5 mapping functions'
                 'Scientific ionosphere: Klobuchar/IONEX/higher-order ionosphere models'
-                'Carrier ionosphere-free (L4) combination in EKF'
-                'Integer ambiguity resolution (LAMBDA/MLAMBDA)'
+                'Full IERS/EOP GCRS/ITRF reference-frame and Earth-orientation products'
+                'Full relativistic GNSS clock modelling (Schwarzschild, gravitational redshift)'
+                'Higher-fidelity orbit dynamics: drag, SRP, third bodies, precise orbit products'
                 'ANTEX PCO/PCV and calibrated hardware-bias products'
                 'Real TWSTFT / relay / transponder physics'
                 'External GNSS product ingestion: SP3, CLK, RINEX, IONEX, ANTEX'
@@ -146,6 +160,7 @@ classdef ReportStatus
                 'Stage 26: OrbitDynamics two-body + J2 + RK4; OrbitPropagator orbit-mode selector'
                 'Stage 27: validation artifact closure; preliminary summary before report; real PDF text via pdftotext'
                 'Stage 28: OrbitDiagnostics helper; OrbitPropagator time-grid validation; orbit diagnostics in report'
+                'Stage 29: validation gate moved into main script; .gitignore for output artifacts; SHA-based freshness check'
             };
         end
 
