@@ -1,0 +1,17 @@
+Stage 24 Validation Summary
+============================
+Stage          : 24
+Stage title    : Validation Status Gate + Frame/Time/Light-Time Foundation
+Branch         : feature/oo-reverse-gnss-v1
+Commit SHA     : 05054c4
+Timestamp      : 2026-06-18 12:58:11
+MATLAB version : 25.2.0.3042426 (R2025b) Update 1
+Test seed      : 24
+Tests selected : 4
+Tests passed   : 4 / 4
+Full suite run : false
+All-toggle run : true
+Report run OK  : true
+PDF verified   : true
+PDF path       : /Users/ludwigmatuschka/Library/CloudStorage/OneDrive-Persönlich/Dokumente/ICH/Karriere/Cranfield/IRP/Codes/IRP_Simulation/oo_v1/output/Report-20260618/report-v1.01.pdf
+Notes          : PDF+TEX ok (893762 bytes, SHA=05054c4)

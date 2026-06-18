@@ -1,0 +1,42 @@
+{
+  "stage": "24",
+  "stageTitle": "Validation Status Gate + Frame/Time/Light-Time Foundation",
+  "branch": "feature/oo-reverse-gnss-v1",
+  "gitSHA": "05054c4",
+  "timestamp": "2026-06-18 12:58:11",
+  "matlabVersion": "25.2.0.3042426 (R2025b) Update 1",
+  "testSeed": 24,
+  "nSelectedTests": 4,
+  "nPassingSelectedTests": 4,
+  "selectedTestNames": [
+    "test_stage14_carrier_cycle_slips.m",
+    "test_stage22_two_way_isl_observables.m",
+    "test_stage7a_tower_clock.m",
+    "test_stage8_clock_gauge.m"
+  ],
+  "selectedTestResults": [
+    {
+      "name": "test_stage14_carrier_cycle_slips",
+      "passed": true
+    },
+    {
+      "name": "test_stage22_two_way_isl_observables",
+      "passed": true
+    },
+    {
+      "name": "test_stage7a_tower_clock",
+      "passed": true
+    },
+    {
+      "name": "test_stage8_clock_gauge",
+      "passed": true
+    }
+  ],
+  "fullSuiteRun": false,
+  "allToggleReportRun": true,
+  "reportRunPassed": true,
+  "pdfVerified": true,
+  "pdfTextVerified": true,
+  "pdfPath": "/Users/ludwigmatuschka/Library/CloudStorage/OneDrive-Persönlich/Dokumente/ICH/Karriere/Cranfield/IRP/Codes/IRP_Simulation/oo_v1/output/Report-20260618/report-v1.01.pdf",
+  "notes": "PDF+TEX ok (893762 bytes, SHA=05054c4)"
+}
