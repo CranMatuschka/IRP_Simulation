@@ -2260,6 +2260,77 @@ classdef ClockExactReportBuilder
                 fprintf(fid, '\\textbf{\\textcolor{red!70!black}{%s}}\n\n', ...
                     revgnss.ClockExactReportBuilder.esc_(nearLockStr));
             end
+
+            % --- Stage 34: Attitude Jacobian Consistency Audit ---
+            fprintf(fid, '\\subsection*{Attitude Jacobian Consistency Audit (Stage~34)}\n');
+            fprintf(fid, ['\\textit{Consistency check between H attitude columns and finite-difference ' ...
+                'range partials. In production, only row-type metadata is available, so this stage ' ...
+                'reports H-only summary. Finite-diff consistency is available when per-row LOS ' ...
+                'and lever-arm metadata are passed.}\n\n']);
+
+            try
+                ja = diag.getLastAttitudeJacobianAudit();
+            catch
+                ja = struct();
+            end
+
+            jEnabled  = revgnss.ClockExactReportBuilder.safeField_(ja, 'enabled',       false);
+            jClass    = revgnss.ClockExactReportBuilder.safeField_(ja, 'classification', 'not-run');
+            jNorm     = revgnss.ClockExactReportBuilder.safeField_(ja, 'attitudeColumnNorm', NaN);
+            jRank     = revgnss.ClockExactReportBuilder.safeField_(ja, 'attitudeRank',   NaN);
+            jCond     = revgnss.ClockExactReportBuilder.safeField_(ja, 'attitudeCondition', NaN);
+            jSens     = revgnss.ClockExactReportBuilder.safeField_(ja, 'attitudeSensitiveRowCount', NaN);
+            jFdAvail  = revgnss.ClockExactReportBuilder.safeField_(ja, 'finiteDiffAvailable', false);
+            jFdPass   = revgnss.ClockExactReportBuilder.safeField_(ja, 'nFiniteDiffPass', NaN);
+            jFdFail   = revgnss.ClockExactReportBuilder.safeField_(ja, 'nFiniteDiffFail', NaN);
+            jMaxDiff  = revgnss.ClockExactReportBuilder.safeField_(ja, 'maxAbsDiff', NaN);
+            jWarns    = {};
+            if isstruct(ja) && isfield(ja,'warnings') && iscell(ja.warnings)
+                jWarns = ja.warnings;
+            end
+
+            fprintf(fid, '\\begin{tabular}{p{0.48\\textwidth}p{0.40\\textwidth}}\n');
+            fprintf(fid, '\\toprule\n\\textbf{Property} & \\textbf{Value}\\\\\n\\midrule\n');
+            fprintf(fid, 'Audit enabled & %s\\\\\n', mat2str(logical(jEnabled)));
+            fprintf(fid, 'Classification & \\texttt{%s}\\\\\n', esc(char(jClass)));
+            if isnumeric(jNorm) && isfinite(jNorm)
+                fprintf(fid, 'H attitude column norm (Frobenius) & %.4e\\\\\n', jNorm);
+            else
+                fprintf(fid, 'H attitude column norm (Frobenius) & --\\\\\n');
+            end
+            if isnumeric(jRank) && isfinite(jRank)
+                fprintf(fid, 'H attitude rank & %d\\\\\n', jRank);
+            else
+                fprintf(fid, 'H attitude rank & --\\\\\n');
+            end
+            if isnumeric(jCond) && isfinite(jCond)
+                fprintf(fid, 'H attitude condition & %.2e\\\\\n', jCond);
+            else
+                fprintf(fid, 'H attitude condition & --\\\\\n');
+            end
+            if isnumeric(jSens) && isfinite(jSens)
+                fprintf(fid, 'Attitude-sensitive rows & %d\\\\\n', jSens);
+            else
+                fprintf(fid, 'Attitude-sensitive rows & --\\\\\n');
+            end
+            fprintf(fid, 'Finite-diff available & %s\\\\\n', mat2str(logical(jFdAvail)));
+            if logical(jFdAvail)
+                if isnumeric(jFdPass) && isfinite(jFdPass)
+                    fprintf(fid, 'Finite-diff pass / fail & %d / %d\\\\\n', jFdPass, jFdFail);
+                end
+                if isnumeric(jMaxDiff) && isfinite(jMaxDiff)
+                    fprintf(fid, 'Max $|H - J_{\\mathrm{fd}}|$ & %.2e m/rad\\\\\n', jMaxDiff);
+                end
+            end
+            fprintf(fid, '\\bottomrule\n\\end{tabular}\\par\n\n');
+
+            if ~isempty(jWarns)
+                fprintf(fid, '\\textbf{Warnings:}\n\\begin{itemize}\n');
+                for wi = 1:numel(jWarns)
+                    fprintf(fid, '\\item %s\n', esc(char(jWarns{wi})));
+                end
+                fprintf(fid, '\\end{itemize}\n\n');
+            end
         end
 
         % ================================================================
@@ -2394,8 +2465,8 @@ classdef ClockExactReportBuilder
             vs = revgnss.ValidationSummary.read(outDir);
 
             % Read dynamic stage/title from JSON (default to current stage).
-            stage      = '33';
-            stageTitle = 'Attitude Parameterization Convention Hardening';
+            stage      = '34';
+            stageTitle = 'Attitude Jacobian Consistency Audit v1';
             if isfield(vs, 'stage') && ~isempty(vs.stage)
                 stage = strtrim(num2str(vs.stage));
             end

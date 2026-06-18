@@ -185,6 +185,9 @@ classdef ObservabilityDiagnostics
             % --- Stage 31: attitude observability audit ---
             diag.attitude = revgnss.AttitudeObservability.audit(H, stateMap, cfg, measTypePerRow);
             diag.warnings = [diag.warnings, diag.attitude.warnings];
+
+            % --- Stage 34: attitude Jacobian consistency audit ---
+            diag.attitudeJacobian = revgnss.AttitudeJacobianAudit.audit(H, stateMap, cfg, measTypePerRow);
         end
 
         % ============================================================

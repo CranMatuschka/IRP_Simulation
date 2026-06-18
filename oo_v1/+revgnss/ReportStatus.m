@@ -12,8 +12,8 @@ classdef ReportStatus
     methods (Static)
 
         function s = current()
-            s.stage      = '33';
-            s.stageTitle = 'Attitude Parameterization Convention Hardening';
+            s.stage      = '34';
+            s.stageTitle = 'Attitude Jacobian Consistency Audit v1';
             s.validationMode = 'targeted-random-smoke';
             s.fullSuiteRun   = false;
 
@@ -57,7 +57,7 @@ classdef ReportStatus
             end
             vsSHA = '';
             if isfield(vs, 'gitSHA'); vsSHA = strtrim(char(vs.gitSHA)); end
-            s.validationArtifactFresh = (vsStageNum >= 33) && strcmp(vsSHA, runtimeSHA);
+            s.validationArtifactFresh = (vsStageNum >= 34) && strcmp(vsSHA, runtimeSHA);
             if ~s.validationArtifactFresh
                 s.validationWarnings{end+1} = ...
                     'No fresh local validation summary for this commit. Run: setenv(''OO_V1_VALIDATE_REPORT'',''true''); run_oo_reverse_gnss_report';
@@ -125,7 +125,7 @@ classdef ReportStatus
                 'Full CI / full test-suite validation (current: targeted random smoke, 2-5 tests only)'
                 'Calibrated antenna PCO/PCV and ANTEX hardware-bias products (geometry model is reference-point only)'
                 'Quaternion / error-state attitude EKF (current ZYX Euler is documented but singular at pitch +/-90 deg)'
-                'Attitude-sensitive measurement Jacobians (carrier phase lever-arm coupling)'
+                'Full per-row LOS metadata for runtime finite-diff Jacobian consistency (Stage 34 production path uses H-only summary)'
                 'Multi-antenna single-asset attitude scenario validation'
                 'Carrier-phase attitude preparation and observability analysis'
                 'L2 carrier EKF rows and ionosphere-free carrier combination'
@@ -162,6 +162,7 @@ classdef ReportStatus
                 'Stage 31: AttitudeObservability audit class; H-column rank/condition/classification; report subsection'
                 'Stage 32: ReceiverGeometry helper; body-frame lever-arm normalisation, baselines, centroid; report subsection'
                 'Stage 33: AttitudeKinematics convention(), eulerToDcm(), gimbal metric, validateDcm(), finite-diff lever-arm Jacobian; report subsection'
+                'Stage 34: AttitudeJacobianAudit audit(), finiteDiffRangeAttitudePartial(), hOnlySummary(); H-only summary in production; report subsection'
             };
         end
 

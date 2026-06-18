@@ -48,8 +48,9 @@ classdef Diagnostics < handle
         clockObsWinLen_  (1,1) double  = 60
         clockObsMinWin_  (1,1) double  = 5
         clockObsRankTol_
-        cfg_                                    % stored for Stage 31 attitude audit
-        lastAttitudeAudit_  struct = struct()   % most recent AttitudeObservability.audit result
+        cfg_                                        % stored for Stage 31 attitude audit
+        lastAttitudeAudit_       struct = struct() % most recent AttitudeObservability.audit result
+        lastAttitudeJacobianAudit_ struct = struct() % most recent AttitudeJacobianAudit result
     end
 
     methods
@@ -957,15 +958,24 @@ classdef Diagnostics < handle
             end
 
             % --- Stage 31: attitude observability audit (run once per epoch) ---
+            mTypeForAudit = {};
+            if ~isempty(errStruct) && isfield(errStruct,'measType_perRow')
+                mTypeForAudit = errStruct.measType_perRow;
+            end
             if ~isempty(obj.cfg_) && isfield(obj.cfg_,'diagnostics') && ...
                     isfield(obj.cfg_.diagnostics,'attitudeObservability') && ...
                     isfield(obj.cfg_.diagnostics.attitudeObservability,'enable') && ...
                     obj.cfg_.diagnostics.attitudeObservability.enable
-                mTypeForAudit = {};
-                if ~isempty(errStruct) && isfield(errStruct,'measType_perRow')
-                    mTypeForAudit = errStruct.measType_perRow;
-                end
                 obj.lastAttitudeAudit_ = revgnss.AttitudeObservability.audit( ...
+                    H, sm, obj.cfg_, mTypeForAudit);
+            end
+
+            % --- Stage 34: attitude Jacobian consistency audit ---
+            if ~isempty(obj.cfg_) && isfield(obj.cfg_,'diagnostics') && ...
+                    isfield(obj.cfg_.diagnostics,'attitudeJacobianAudit') && ...
+                    isfield(obj.cfg_.diagnostics.attitudeJacobianAudit,'enable') && ...
+                    obj.cfg_.diagnostics.attitudeJacobianAudit.enable
+                obj.lastAttitudeJacobianAudit_ = revgnss.AttitudeJacobianAudit.audit( ...
                     H, sm, obj.cfg_, mTypeForAudit);
             end
 
@@ -1314,6 +1324,14 @@ classdef Diagnostics < handle
             % getLastAttitudeAudit  Return the most recent AttitudeObservability audit.
             % Empty struct when attitudeObservability.enable was false or record() not called.
             s = obj.lastAttitudeAudit_;
+        end
+
+        % --- Stage 34: attitude Jacobian audit getter ----------------------
+
+        function s = getLastAttitudeJacobianAudit(obj)
+            % getLastAttitudeJacobianAudit  Return the most recent AttitudeJacobianAudit result.
+            % Empty struct when attitudeJacobianAudit.enable was false or record() not called.
+            s = obj.lastAttitudeJacobianAudit_;
         end
 
         % --- Tx code bias gauge getters ------------------------------------
