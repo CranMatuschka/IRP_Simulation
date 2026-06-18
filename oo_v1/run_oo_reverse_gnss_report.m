@@ -243,14 +243,15 @@ cfg.estimator.attitudeInitShadow.enable = false;
 % 'disableWithWarning'  ->  unsupported features disabled with console warning
 % 'error'              ->  any unsupported feature throws an error
 cfg.validation.unsupportedFeaturePolicy = 'disableWithWarning';
+cfg.validation.fullSuiteRun             = false;   % full suite never run here
 
-% --- Stage 24/25 all-toggle mode --------------------------------
-% Set stage24AllToggles = true to enable every independent boolean toggle.
+% --- Stage 24-28 all-toggle mode --------------------------------
+% Set stageAllToggles = true to enable every independent boolean toggle.
 % OO_V1_ALL_TOGGLES=true achieves the same via env var (Stage 25 gate).
 % Mutually exclusive string modes (carrierMode, etc.) are NOT changed.
 % Requires unsupportedFeaturePolicy = 'disableWithWarning' (set above).
-stage24AllToggles = false;
-if stage24AllToggles || oo_v1_envAllToggles_
+stageAllToggles = false;
+if stageAllToggles || oo_v1_envAllToggles_
     cfg.errors.hardwareDelay.truth.enable = true;
     cfg.errors.hardwareDelay.model.enable = true;
     cfg.errors.multipath.truth.enable     = true;

@@ -451,8 +451,11 @@ classdef ClockExactReportBuilder
             fprintf(fid, '\\end{center}\n');
             fprintf(fid, '\\vspace{0.3cm}\n');
 
-            % ---- Stage 24 validation status page -----------------------
+            % ---- Stage validation status page --------------------------
             CE.writeStage24ValidationStatus_(fid, texPath);
+
+            % ---- Stage 28 orbit diagnostics ----------------------------
+            CE.writeOrbitDiagnostics_(fid, cfg);
 
             % ---- Sections -----------------------------------------------
             CE.writeScenarioSummary_(fid, cfg, summary, diag, nTwr, nRx, dur, dt, esc);
@@ -2237,7 +2240,7 @@ classdef ClockExactReportBuilder
         % ================================================================
 
         function writeStage24ValidationStatus_(fid, texPath)
-            % writeStage24ValidationStatus_  Insert Stage 24 validation status section.
+            % writeStage24ValidationStatus_  Validation status section (dynamic stage).
             % Reads output/latest_validation_summary.json relative to texPath.
             CE  = revgnss.ClockExactReportBuilder;
             esc = @CE.esc_;
@@ -2245,6 +2248,16 @@ classdef ClockExactReportBuilder
             % Locate summary JSON: texPath is in output/Report-YYYYMMDD/; go up two.
             outDir = fileparts(fileparts(texPath));
             vs = revgnss.ValidationSummary.read(outDir);
+
+            % Read dynamic stage/title from JSON (default to current stage).
+            stage      = '28';
+            stageTitle = 'Orbit Dynamics Integration Diagnostics';
+            if isfield(vs, 'stage') && ~isempty(vs.stage)
+                stage = strtrim(num2str(vs.stage));
+            end
+            if isfield(vs, 'stageTitle') && ~isempty(vs.stageTitle)
+                stageTitle = vs.stageTitle;
+            end
 
             sha    = CE.getGitSHA_();
             branch = 'unknown';
@@ -2259,19 +2272,25 @@ classdef ClockExactReportBuilder
             allTog    = false; if isfield(vs,'allToggleReportRun');    allTog = logical(vs.allToggleReportRun); end
             pdfOK     = false; if isfield(vs,'pdfVerified');           pdfOK = logical(vs.pdfVerified);  end
             pdfTextOK = false; if isfield(vs,'pdfTextVerified');       pdfTextOK = logical(vs.pdfTextVerified); end
+            texVerif  = false; if isfield(vs,'texVerified');           texVerif = logical(vs.texVerified); end
             repOK     = false; if isfield(vs,'reportRunPassed');       repOK = logical(vs.reportRunPassed); end
             invMain   = false; if isfield(vs,'invokedMainScript');     invMain = logical(vs.invokedMainScript); end
+            warnings  = {};
+            if isfield(vs,'validationWarnings') && iscell(vs.validationWarnings)
+                warnings = vs.validationWarnings;
+            end
 
             fprintf(fid, '\\clearpage\n');
-            fprintf(fid, '\\section{Validation Status Gate}\n');
-            fprintf(fid, ['\\textbf{Stages 24--26: Validation Status Gate.} ' ...
-                'This section is generated at report-build time from the validation summary artifact.\n\n']);
+            fprintf(fid, '\\section{Stage %s Validation Status}\n', esc(stage));
+            fprintf(fid, ['\\textbf{Stage %s: %s.} ' ...
+                'This section is generated at report-build time from the validation summary artifact.\n\n'], ...
+                esc(stage), esc(stageTitle));
             fprintf(fid, '\\begin{center}\\small\n');
             fprintf(fid, '\\begin{tabular}{p{0.38\\textwidth}p{0.52\\textwidth}}\n');
             fprintf(fid, '\\toprule\n');
             fprintf(fid, '\\textbf{Item} & \\textbf{Value}\\\\\n');
             fprintf(fid, '\\midrule\n');
-            fprintf(fid, 'Stage & 24 --- Validation Status Gate + Frame Foundation\\\\\n');
+            fprintf(fid, 'Stage & %s --- %s\\\\\n', esc(stage), esc(stageTitle));
             fprintf(fid, 'Branch & \\texttt{%s}\\\\\n', esc(branch));
             fprintf(fid, 'Commit SHA & \\texttt{%s}\\\\\n', esc(sha));
             fprintf(fid, 'Validation mode & targeted-random-smoke\\\\\n');
@@ -2282,13 +2301,24 @@ classdef ClockExactReportBuilder
             fprintf(fid, 'Report run passed & %s\\\\\n', esc(mat2str(repOK)));
             fprintf(fid, 'PDF verified & %s\\\\\n', esc(mat2str(pdfOK)));
             fprintf(fid, 'PDF text verified & %s\\\\\n', esc(mat2str(pdfTextOK)));
+            fprintf(fid, 'TEX verified (fallback) & %s\\\\\n', esc(mat2str(texVerif)));
             fprintf(fid, '\\bottomrule\n');
             fprintf(fid, '\\end{tabular}\n');
             fprintf(fid, '\\end{center}\n');
             fprintf(fid, ['\\textbf{Warning:} Targeted random smoke validation is \\emph{not} ' ...
                 'equivalent to full regression validation. ' ...
                 'A subset of 2--5 tests was run. ' ...
-                'All tests should be run before claiming full Stage 24 validation.\n\n']);
+                'All tests should be run before claiming full Stage %s validation.\n\n'], esc(stage));
+
+            % Validation warnings (e.g. pdftotext unavailable, stale summary)
+            if ~isempty(warnings)
+                fprintf(fid, '\\subsection*{Validation Warnings}\n');
+                fprintf(fid, '\\begin{itemize}\n');
+                for k = 1:numel(warnings)
+                    fprintf(fid, '  \\item %s\n', esc(char(warnings{k})));
+                end
+                fprintf(fid, '\\end{itemize}\n');
+            end
 
             % Missing scientific stages
             ms = revgnss.ReportStatus.current();
@@ -2300,6 +2330,55 @@ classdef ClockExactReportBuilder
                 end
                 fprintf(fid, '\\end{itemize}\n');
             end
+        end
+
+        function writeOrbitDiagnostics_(fid, cfg)
+            % writeOrbitDiagnostics_  Orbit dynamics diagnostics section (Stage 28).
+            CE  = revgnss.ClockExactReportBuilder;
+            esc = @CE.esc_;
+
+            fprintf(fid, '\\clearpage\n');
+            fprintf(fid, '\\section{Orbit Dynamics Diagnostics}\n');
+            fprintf(fid, ['\\textbf{Orbit model:} This section summarises the orbit dynamics ' ...
+                'used in this simulation run. The default mode is \\texttt{circularAnalytic}; ' ...
+                'RK4 modes (\\texttt{twoBodyRk4}, \\texttt{j2Rk4}) are available for higher fidelity.\n\n']);
+
+            try
+                info = revgnss.OrbitDiagnostics.summarizeModes();
+                fprintf(fid, '\\begin{center}\\small\n');
+                fprintf(fid, '\\begin{tabular}{p{0.28\\textwidth}p{0.62\\textwidth}}\n');
+                fprintf(fid, '\\toprule\n');
+                fprintf(fid, '\\textbf{Mode} & \\textbf{Description}\\\\\n');
+                fprintf(fid, '\\midrule\n');
+                modes = fieldnames(info);
+                for k = 1:numel(modes)
+                    fprintf(fid, '\\texttt{%s} & %s\\\\\n', esc(modes{k}), esc(info.(modes{k})));
+                end
+                fprintf(fid, '\\bottomrule\n');
+                fprintf(fid, '\\end{tabular}\n');
+                fprintf(fid, '\\end{center}\n');
+            catch ex
+                fprintf(fid, 'Orbit mode summary unavailable: %s\n\n', esc(ex.message));
+            end
+
+            % Active orbit mode
+            orbitMode = 'circularAnalytic';
+            if isfield(cfg, 'orbit') && isfield(cfg.orbit, 'mode') && ~isempty(cfg.orbit.mode)
+                orbitMode = cfg.orbit.mode;
+            end
+            fprintf(fid, '\\textbf{Active orbit mode for this run:} \\texttt{%s}.\n\n', esc(orbitMode));
+
+            % J2 perturbation ratio at GEO
+            try
+                Re  = revgnss.Constants.EARTH_RADIUS_M;
+                r_i = [Re + 35786e3; 0; 0];
+                ratio = revgnss.OrbitDiagnostics.j2PerturbationRatio(r_i);
+                fprintf(fid, ['\\textbf{J2/two-body ratio at GEO:} $%.2e$ ' ...
+                    '(J2 is a small perturbation at GEO altitude).\n\n'], ratio);
+            catch; end
+
+            fprintf(fid, ['\\textbf{Note:} Drag, SRP, third-body perturbations, and ' ...
+                'EOP-consistent inertial frames are not implemented in v1.\n\n']);
         end
 
         % ================================================================

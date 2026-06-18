@@ -99,6 +99,20 @@ classdef OrbitPropagator
 
         function [r_ecef_m, v_ecef_mps] = propagateRk4_(obj, t_s, model)
             % propagateRk4_  RK4 numerical propagation from analytic circular t=0 state.
+            t_s = t_s(:);
+            if any(isnan(t_s)) || any(isinf(t_s))
+                error('OrbitPropagator:invalidTime', ...
+                    'propagateRk4_: t_s must not contain NaN or Inf.');
+            end
+            if any(t_s < 0)
+                error('OrbitPropagator:negativeTime', ...
+                    'propagateRk4_: t_s must not be negative.');
+            end
+            if numel(t_s) > 1 && any(diff(t_s) < 0)
+                error('OrbitPropagator:nonMonotoneTime', ...
+                    'propagateRk4_: t_s must be nondecreasing.');
+            end
+
             a   = obj.Re + obj.altitudeMean_m;
             inc = obj.inclination_rad;
             OM  = obj.raan_rad;
@@ -110,8 +124,6 @@ classdef OrbitPropagator
             Ri   = rotZ(OM) * rotX(inc) * rotZ(0);
             r_i  = Ri * r_pf;
             v_i  = Ri * v_pf;
-
-            t_s = t_s(:);
             n   = numel(t_s);
             r_ecef_m   = zeros(3, n);
             v_ecef_mps = zeros(3, n);

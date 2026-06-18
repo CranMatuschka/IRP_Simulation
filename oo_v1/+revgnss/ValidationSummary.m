@@ -53,6 +53,8 @@ classdef ValidationSummary
             fprintf(fid, 'Main script    : %s\n', mat2str(VS.safeBool_(data, 'invokedMainScript', false)));
             fprintf(fid, 'Report run OK  : %s\n', mat2str(VS.safeBool_(data, 'reportRunPassed', false)));
             fprintf(fid, 'PDF verified   : %s\n', mat2str(VS.safeBool_(data, 'pdfVerified', false)));
+            fprintf(fid, 'TEX verified   : %s\n', mat2str(VS.safeBool_(data, 'texVerified', false)));
+            fprintf(fid, 'Stage smoke    : %s\n', mat2str(VS.safeBool_(data, 'currentStageSmokeTestIncluded', false)));
             if isfield(data, 'pdfPath') && ~isempty(data.pdfPath)
                 fprintf(fid, 'PDF path       : %s\n', data.pdfPath);
             end
@@ -84,25 +86,27 @@ classdef ValidationSummary
     methods (Static, Access = private)
 
         function s = default_()
-            s.stage                   = '24';
-            s.stageTitle              = 'Validation Status Gate + Frame/Time/Light-Time Foundation';
-            s.branch                  = 'unknown';
-            s.gitSHA                  = 'unknown';
-            s.timestamp               = 'unknown';
-            s.matlabVersion           = version;
-            s.testSeed                = -1;
-            s.nSelectedTests          = 0;
-            s.nPassingSelectedTests   = 0;
-            s.selectedTestNames       = {};
-            s.fullSuiteRun            = false;
-            s.allToggleReportRun      = false;
-            s.reportRunPassed         = false;
-            s.invokedMainScript       = false;
-            s.pdfVerified             = false;
-            s.pdfTextVerified         = false;
-            s.pdfPath                 = '';
-            s.validationWarnings      = {};
-            s.notes                   = '';
+            s.stage                        = '24';
+            s.stageTitle                   = 'Validation Status Gate + Frame/Time/Light-Time Foundation';
+            s.branch                       = 'unknown';
+            s.gitSHA                       = 'unknown';
+            s.timestamp                    = 'unknown';
+            s.matlabVersion                = version;
+            s.testSeed                     = -1;
+            s.nSelectedTests               = 0;
+            s.nPassingSelectedTests        = 0;
+            s.selectedTestNames            = {};
+            s.fullSuiteRun                 = false;
+            s.allToggleReportRun           = false;
+            s.reportRunPassed              = false;
+            s.invokedMainScript            = false;
+            s.pdfVerified                  = false;
+            s.pdfTextVerified              = false;
+            s.texVerified                  = false;
+            s.currentStageSmokeTestIncluded = false;
+            s.pdfPath                      = '';
+            s.validationWarnings           = {};
+            s.notes                        = '';
         end
 
         function v = safe_(s, f, def)

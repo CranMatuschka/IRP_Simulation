@@ -1,5 +1,5 @@
 classdef ReportStatus
-    % ReportStatus  Stage 24 runtime validation status.
+    % ReportStatus  Stage 28 runtime validation status.
     %
     % Reads runtime values from output/latest_validation_summary.json (if present).
     % If the JSON is missing, returns safe defaults with a warning note — report
@@ -12,10 +12,10 @@ classdef ReportStatus
     methods (Static)
 
         function s = current()
-            % current  Return Stage 24 runtime validation status struct.
+            % current  Return Stage 28 runtime validation status struct.
 
-            s.stage      = '25-26';
-            s.stageTitle = 'Script-Exact Validation Gate + Orbit Dynamics Foundation';
+            s.stage      = '28';
+            s.stageTitle = 'Orbit Dynamics Integration Diagnostics';
             s.validationMode = 'targeted-random-smoke';
             s.fullSuiteRun   = false;
 
@@ -38,16 +38,25 @@ classdef ReportStatus
             s.allPass = (s.nPassingSelectedTests == s.nSelectedTests) && ...
                         (s.nSelectedTests > 0);
 
-            s.reportRunPassed   = revgnss.ReportStatus.safeBool_(vs, 'reportRunPassed',    false);
-            s.pdfVerified       = revgnss.ReportStatus.safeBool_(vs, 'pdfVerified',        false);
-            s.allToggleReportRun= revgnss.ReportStatus.safeBool_(vs, 'allToggleReportRun', false);
-            s.invokedMainScript = revgnss.ReportStatus.safeBool_(vs, 'invokedMainScript',  false);
-            s.pdfTextVerified   = revgnss.ReportStatus.safeBool_(vs, 'pdfTextVerified',    false);
+            s.reportRunPassed    = revgnss.ReportStatus.safeBool_(vs, 'reportRunPassed',    false);
+            s.pdfVerified        = revgnss.ReportStatus.safeBool_(vs, 'pdfVerified',        false);
+            s.allToggleReportRun = revgnss.ReportStatus.safeBool_(vs, 'allToggleReportRun', false);
+            s.invokedMainScript  = revgnss.ReportStatus.safeBool_(vs, 'invokedMainScript',  false);
+            s.pdfTextVerified    = revgnss.ReportStatus.safeBool_(vs, 'pdfTextVerified',    false);
+            s.texVerified        = revgnss.ReportStatus.safeBool_(vs, 'texVerified',        false);
             if isfield(vs, 'validationWarnings') && iscell(vs.validationWarnings)
                 s.validationWarnings = vs.validationWarnings;
             else
                 s.validationWarnings = {};
             end
+
+            % Staleness check: if JSON stage < current stage, flag as not fresh.
+            vsStageNum = 0;
+            if isfield(vs, 'stage')
+                vsStageNum = str2double(strtrim(num2str(vs.stage)));
+                if isnan(vsStageNum); vsStageNum = 0; end
+            end
+            s.validationArtifactFresh = (vsStageNum >= 28);
 
             if isfield(vs, 'selectedTestNames')
                 s.selectedTests = vs.selectedTestNames;
@@ -135,6 +144,8 @@ classdef ReportStatus
                 'TWSTFT code time-transfer diagnostic scaffold (Stage 24a, diagnostic-only)'
                 'Stage 25: env-var all-toggle gate; run_stage25_26_validation executes main script directly'
                 'Stage 26: OrbitDynamics two-body + J2 + RK4; OrbitPropagator orbit-mode selector'
+                'Stage 27: validation artifact closure; preliminary summary before report; real PDF text via pdftotext'
+                'Stage 28: OrbitDiagnostics helper; OrbitPropagator time-grid validation; orbit diagnostics in report'
             };
         end
 
