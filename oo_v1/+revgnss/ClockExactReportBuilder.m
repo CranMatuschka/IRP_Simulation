@@ -2397,6 +2397,67 @@ classdef ClockExactReportBuilder
                 end
                 fprintf(fid, '\\end{itemize}\n\n');
             end
+
+            % --- Stage 36: Single-Asset Attitude Scenario Readiness Gate ---
+            fprintf(fid, '\\subsection*{Single-Asset Attitude Scenario Readiness Gate (Stage~36)}\n');
+            fprintf(fid, ['\\textit{This is a readiness gate only. It is not an attitude ' ...
+                'accuracy claim, not integer ambiguity fixing, and not operational certification.}\n\n']);
+
+            try
+                tmp36.diag    = diag;
+                tmp36.summary = summary;
+                sar = revgnss.AttitudeScenarioReadiness.assess(tmp36, cfg);
+            catch ex36
+                fprintf(fid, 'Readiness assessment failed: %s\n\n', ...
+                    revgnss.ClockExactReportBuilder.esc_(ex36.message));
+                sar = revgnss.AttitudeScenarioReadiness.assess(struct(), struct());
+            end
+
+            fprintf(fid, '\\begin{tabular}{p{0.46\\textwidth}p{0.42\\textwidth}}\n');
+            fprintf(fid, '\\toprule\n\\textbf{Property} & \\textbf{Value}\\\\\n\\midrule\n');
+            fprintf(fid, 'Classification & \\texttt{%s}\\\\\n', ...
+                revgnss.ClockExactReportBuilder.esc_(char(sar.classification)));
+            fprintf(fid, 'Ready level & %d\\\\\n', sar.readyLevel);
+            fprintf(fid, 'Readiness score & %d\\\\\n', sar.readinessScore);
+            fprintf(fid, 'Receivers & %d\\\\\n', sar.nReceivers);
+            fprintf(fid, 'Geometry rank & %d\\\\\n', sar.receiverGeometryRank);
+            fprintf(fid, 'Baselines & %d\\\\\n', sar.baselineCount);
+            if isfinite(sar.baselineMin_m) && isfinite(sar.baselineMax_m)
+                fprintf(fid, 'Baseline min / max & %.3f~m / %.3f~m\\\\\n', ...
+                    sar.baselineMin_m, sar.baselineMax_m);
+            end
+            fprintf(fid, 'Nonzero lever arm & %s\\\\\n', mat2str(sar.hasNonzeroLeverArm));
+            fprintf(fid, 'Noncollinear geometry & %s\\\\\n', mat2str(sar.hasNoncollinearGeometry));
+            fprintf(fid, 'Carrier mode & \\texttt{%s}\\\\\n', ...
+                revgnss.ClockExactReportBuilder.esc_(char(sar.measurementModes.carrierMode)));
+            fprintf(fid, 'Carrier float active & %s\\\\\n', ...
+                mat2str(sar.measurementModes.hasCarrierFloat));
+            fprintf(fid, 'Attitude carrier mode & \\texttt{%s}\\\\\n', ...
+                revgnss.ClockExactReportBuilder.esc_(char(sar.measurementModes.attitudeCarrierMode)));
+            fprintf(fid, 'Observability audit & \\texttt{%s}\\\\\n', ...
+                revgnss.ClockExactReportBuilder.esc_(char(sar.observabilityClassification)));
+            fprintf(fid, 'Jacobian audit & \\texttt{%s}\\\\\n', ...
+                revgnss.ClockExactReportBuilder.esc_(char(sar.jacobianAuditClassification)));
+            fprintf(fid, 'Evidence classification & \\texttt{%s}\\\\\n', ...
+                revgnss.ClockExactReportBuilder.esc_(char(sar.evidenceClassification)));
+            fprintf(fid, '\\bottomrule\n\\end{tabular}\\par\n\n');
+
+            if ~isempty(sar.limitations)
+                fprintf(fid, '\\textbf{Limitations:}\n\\begin{itemize}\n');
+                for li = 1:numel(sar.limitations)
+                    fprintf(fid, '\\item %s\n', ...
+                        revgnss.ClockExactReportBuilder.esc_(char(sar.limitations{li})));
+                end
+                fprintf(fid, '\\end{itemize}\n\n');
+            end
+            if ~isempty(sar.warnings)
+                fprintf(fid, '\\textbf{Warnings:}\n\\begin{itemize}\n');
+                for wi = 1:numel(sar.warnings)
+                    fprintf(fid, '\\item %s\n', ...
+                        revgnss.ClockExactReportBuilder.esc_(char(sar.warnings{wi})));
+                end
+                fprintf(fid, '\\end{itemize}\n\n');
+            end
         end
 
         % ================================================================
@@ -2531,8 +2592,8 @@ classdef ClockExactReportBuilder
             vs = revgnss.ValidationSummary.read(outDir);
 
             % Read dynamic stage/title from JSON (default to current stage).
-            stage      = '35';
-            stageTitle = 'Single-Asset Attitude Evidence Report v1';
+            stage      = '36';
+            stageTitle = 'Single-Asset Attitude Scenario Readiness Gate v1';
             if isfield(vs, 'stage') && ~isempty(vs.stage)
                 stage = strtrim(num2str(vs.stage));
             end

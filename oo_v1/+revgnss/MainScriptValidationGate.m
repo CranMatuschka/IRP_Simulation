@@ -29,11 +29,11 @@ classdef MainScriptValidationGate
             state = struct();
 
             % Resolve stage, seed, count from env vars.
-            stg = 35;
+            stg = 36;
             v = str2double(getenv('OO_V1_VALIDATION_STAGE'));
             if ~isnan(v) && v > 0; stg = round(v); end
 
-            seed = 35;
+            seed = 36;
             v = str2double(getenv('OO_V1_RANDOM_TEST_SEED'));
             if ~isnan(v) && isfinite(v); seed = round(v); end
 
@@ -190,6 +190,7 @@ classdef MainScriptValidationGate
                 case 33; t = 'Attitude Parameterization Convention Hardening';
                 case 34; t = 'Attitude Jacobian Consistency Audit v1';
                 case 35; t = 'Single-Asset Attitude Evidence Report v1';
+                case 36; t = 'Single-Asset Attitude Scenario Readiness Gate v1';
                 otherwise
                     try; t = revgnss.ReportStatus.current().stageTitle; catch; t = sprintf('Stage %d', stg); end
             end
