@@ -1,5 +1,5 @@
 classdef ReportStatus
-    % ReportStatus  Stage 29 runtime validation status.
+    % ReportStatus  Stage 30 runtime validation status.
     %
     % Reads runtime values from output/latest_validation_summary.json (if present).
     % If the JSON is missing or has a stale SHA, validationArtifactFresh=false.
@@ -12,10 +12,10 @@ classdef ReportStatus
     methods (Static)
 
         function s = current()
-            % current  Return Stage 29 runtime validation status struct.
+            % current  Return Stage 30 runtime validation status struct.
 
-            s.stage      = '29';
-            s.stageTitle = 'Main-Script Validation Freshness Gate';
+            s.stage      = '30';
+            s.stageTitle = 'Main-Script Validation Gate Restoration';
             s.validationMode = 'targeted-random-smoke';
             s.fullSuiteRun   = false;
 
@@ -59,10 +59,10 @@ classdef ReportStatus
             end
             vsSHA = '';
             if isfield(vs, 'gitSHA'); vsSHA = strtrim(char(vs.gitSHA)); end
-            s.validationArtifactFresh = (vsStageNum >= 29) && strcmp(vsSHA, runtimeSHA);
+            s.validationArtifactFresh = (vsStageNum >= 30) && strcmp(vsSHA, runtimeSHA);
             if ~s.validationArtifactFresh
                 s.validationWarnings{end+1} = ...
-                    'Validation summary is stale or missing. Run: setenv(''OO_V1_VALIDATE_REPORT'',''true''); run_oo_reverse_gnss_report';
+                    'No fresh local validation summary for this commit. Run: setenv(''OO_V1_VALIDATE_REPORT'',''true''); run_oo_reverse_gnss_report';
             end
 
             if isfield(vs, 'selectedTestNames')
@@ -149,7 +149,7 @@ classdef ReportStatus
             list = {
                 'ReportStatus: runtime git SHA, branch, validation mode, missing-stages list'
                 'ValidationSummary: JSON + TXT summary writer and reader'
-                'ValidationRunner: deterministic random test selection (seed 24, 2-5 tests)'
+                'ValidationRunner: deterministic random test selection (seed 30, 2-5 tests)'
                 'FrameTimeUtils: simple ECEF/inertial Earth-rotation and Sagnac foundation'
                 'run_stage24_validation.m: targeted smoke validation + all-toggle report run'
                 'Report Stage 24 validation status section in PDF/TEX'
@@ -161,6 +161,7 @@ classdef ReportStatus
                 'Stage 27: validation artifact closure; preliminary summary before report; real PDF text via pdftotext'
                 'Stage 28: OrbitDiagnostics helper; OrbitPropagator time-grid validation; orbit diagnostics in report'
                 'Stage 29: validation gate moved into main script; .gitignore for output artifacts; SHA-based freshness check'
+                'Stage 30: MainScriptValidationGate helper; restored pre/post-run gate in run_oo_reverse_gnss_report.m'
             };
         end
 

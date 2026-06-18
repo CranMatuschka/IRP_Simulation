@@ -2250,8 +2250,8 @@ classdef ClockExactReportBuilder
             vs = revgnss.ValidationSummary.read(outDir);
 
             % Read dynamic stage/title from JSON (default to current stage).
-            stage      = '29';
-            stageTitle = 'Main-Script Validation Freshness Gate';
+            stage      = '30';
+            stageTitle = 'Main-Script Validation Gate Restoration';
             if isfield(vs, 'stage') && ~isempty(vs.stage)
                 stage = strtrim(num2str(vs.stage));
             end
