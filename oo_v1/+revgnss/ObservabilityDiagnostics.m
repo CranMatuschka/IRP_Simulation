@@ -181,6 +181,10 @@ classdef ObservabilityDiagnostics
                 diag.warnings{end+1} = msg;
                 if doWarn; warning('ObservabilityDiagnostics:highCondNum', '%s', msg); end
             end
+
+            % --- Stage 31: attitude observability audit ---
+            diag.attitude = revgnss.AttitudeObservability.audit(H, stateMap, cfg, measTypePerRow);
+            diag.warnings = [diag.warnings, diag.attitude.warnings];
         end
 
         % ============================================================

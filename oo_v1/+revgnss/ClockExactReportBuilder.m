@@ -1847,7 +1847,7 @@ classdef ClockExactReportBuilder
         % ================================================================
         % SECTION 8 — ATTITUDE OBSERVABILITY (Stage 14.8)
         % ================================================================
-        function writeAttitudeObservability_(fid, cfg, summary, diag) %#ok<INUSD,INUSL>
+        function writeAttitudeObservability_(fid, cfg, summary, diag) %#ok<INUSD>
             function v = sf(s, f, def)
                 if isfield(s, f); v = s.(f); else; v = def; end
             end
@@ -2116,6 +2116,66 @@ classdef ClockExactReportBuilder
                     fprintf(fid, ['\\textbf{Assessment:} Attitude is \\textit{absorbed by free float ' ...
                         'ambiguities} (see Stage~14.9 above). Not operationally estimated.\n\n']);
             end
+
+            % --- Stage 31: Single-Asset Attitude Observability Audit ---
+            fprintf(fid, '\\subsection*{Single-Asset Attitude Observability Audit (Stage~31)}\n');
+            fprintf(fid, ['\\textit{This is an observability audit only; it is not an attitude ' ...
+                'accuracy claim and not integer ambiguity fixing.}\n\n']);
+
+            auditAvailable = isobject(diag) && ismethod(diag, 'getLastAttitudeAudit');
+            auditS = struct();
+            if auditAvailable
+                try; auditS = diag.getLastAttitudeAudit(); catch; end
+            end
+
+            if ~isfield(auditS,'classification') || isempty(auditS.classification)
+                fprintf(fid, 'Attitude observability audit unavailable for this run. Enable via ');
+                fprintf(fid, '\\texttt{cfg.diagnostics.attitudeObservability.enable = true} ');
+                fprintf(fid, 'in the all-toggle block.\n\n');
+            else
+                cls = auditS.classification;
+                switch cls
+                    case 'observable-float-carrier-or-mixed'
+                        clsCol = '\\textcolor{green!45!black}{observable-float-carrier-or-mixed}';
+                    case {'weak-rank-deficient','weak-code-only'}
+                        clsCol = ['\\textcolor{orange!70!black}{' strrep(cls,'-','\\hyp{}') '}'];
+                    case {'unobservable-zero-lever-arm','unobservable-zero-attitude-columns','not-estimated'}
+                        clsCol = ['\\textcolor{gray}{' strrep(cls,'-','\\hyp{}') '}'];
+                    otherwise
+                        clsCol = strrep(cls,'_','\_');
+                end
+                isObs = sf(auditS,'isObservable',false);
+                nRxA  = sf(auditS,'nReceivers',1);
+                haLA  = sf(auditS,'hasNonzeroLeverArm',false);
+                fprintf(fid, '\\textbf{Classification:} %s\\quad Receivers: %d\\quad Lever-arm nonzero: %s\\quad Observable: %s\n\n', ...
+                    clsCol, nRxA, mat2str(haLA), mat2str(isObs));
+
+                fprintf(fid, '\\begin{tabular}{p{0.52\\textwidth}p{0.30\\textwidth}}\n');
+                fprintf(fid, '\\toprule\n\\textbf{Quantity} & \\textbf{Value}\\\\\n\\midrule\n');
+                aRk = sf(auditS,'attitudeRank',NaN);
+                aCn = sf(auditS,'attitudeCondition',NaN);
+                aN  = sf(auditS,'attitudeColumnNorm',NaN);
+                aSR = sf(auditS,'attitudeSensitiveRowCount',NaN);
+                laN = sf(auditS,'leverArmMaxNorm_m',NaN);
+                if ~isnan(aRk); fprintf(fid, '$H_{att}$ Euler rank (of 3) & %d\\\\\n', aRk); end
+                if isfinite(aCn); fprintf(fid, '$H_{att}$ condition number & %.2e\\\\\n', aCn); end
+                if ~isnan(aN);  fprintf(fid, '$H_{att}$ Frobenius norm & %.4f\\\\\n', aN); end
+                if ~isnan(aSR); fprintf(fid, 'Attitude-sensitive measurement rows & %d\\\\\n', aSR); end
+                if ~isnan(laN); fprintf(fid, 'Max lever-arm norm (body frame) & %.4f\\,m\\\\\n', laN); end
+                fprintf(fid, 'Code / Doppler / Carrier rows & %d / %d / %d\\\\\n', ...
+                    sf(auditS,'nCodeRows',0), sf(auditS,'nDopplerRows',0), sf(auditS,'nCarrierRows',0));
+                fprintf(fid, '\\bottomrule\n\\end{tabular}\\par\n\n');
+
+                auditWarns = sf(auditS,'warnings',{});
+                if ~isempty(auditWarns)
+                    fprintf(fid, '\\textbf{Audit warnings:}\n\\begin{itemize}\n');
+                    for wi = 1:numel(auditWarns)
+                        fprintf(fid, '  \\item %s\n', ...
+                            revgnss.ClockExactReportBuilder.esc_(auditWarns{wi}));
+                    end
+                    fprintf(fid, '\\end{itemize}\n\n');
+                end
+            end
         end
 
         % ================================================================
@@ -2250,8 +2310,8 @@ classdef ClockExactReportBuilder
             vs = revgnss.ValidationSummary.read(outDir);
 
             % Read dynamic stage/title from JSON (default to current stage).
-            stage      = '30';
-            stageTitle = 'Main-Script Validation Gate Restoration';
+            stage      = '31';
+            stageTitle = 'Single-Asset Attitude Observability Audit';
             if isfield(vs, 'stage') && ~isempty(vs.stage)
                 stage = strtrim(num2str(vs.stage));
             end

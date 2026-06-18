@@ -14,8 +14,8 @@ classdef ReportStatus
         function s = current()
             % current  Return Stage 30 runtime validation status struct.
 
-            s.stage      = '30';
-            s.stageTitle = 'Main-Script Validation Gate Restoration';
+            s.stage      = '31';
+            s.stageTitle = 'Single-Asset Attitude Observability Audit';
             s.validationMode = 'targeted-random-smoke';
             s.fullSuiteRun   = false;
 
@@ -59,7 +59,7 @@ classdef ReportStatus
             end
             vsSHA = '';
             if isfield(vs, 'gitSHA'); vsSHA = strtrim(char(vs.gitSHA)); end
-            s.validationArtifactFresh = (vsStageNum >= 30) && strcmp(vsSHA, runtimeSHA);
+            s.validationArtifactFresh = (vsStageNum >= 31) && strcmp(vsSHA, runtimeSHA);
             if ~s.validationArtifactFresh
                 s.validationWarnings{end+1} = ...
                     'No fresh local validation summary for this commit. Run: setenv(''OO_V1_VALIDATE_REPORT'',''true''); run_oo_reverse_gnss_report';
@@ -125,7 +125,6 @@ classdef ReportStatus
         function list = missingStages_()
             list = {
                 'Full CI / full test-suite validation (current: targeted random smoke, 2-5 tests only)'
-                'Attitude observability audit for single space asset with current lever-arm geometry'
                 'Space-asset antenna geometry and lever-arm model (v1 uses simplified fixed lever arms)'
                 'Attitude parameterization hardening (current ZYX Euler has gimbal-lock singularity)'
                 'Attitude-sensitive measurement Jacobians (carrier phase lever-arm coupling)'
@@ -162,6 +161,7 @@ classdef ReportStatus
                 'Stage 28: OrbitDiagnostics helper; OrbitPropagator time-grid validation; orbit diagnostics in report'
                 'Stage 29: validation gate moved into main script; .gitignore for output artifacts; SHA-based freshness check'
                 'Stage 30: MainScriptValidationGate helper; restored pre/post-run gate in run_oo_reverse_gnss_report.m'
+                'Stage 31: AttitudeObservability audit class; H-column rank/condition/classification; report subsection'
             };
         end
 

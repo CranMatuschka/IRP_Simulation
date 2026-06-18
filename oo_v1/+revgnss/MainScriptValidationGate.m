@@ -29,11 +29,11 @@ classdef MainScriptValidationGate
             state = struct();
 
             % Resolve stage, seed, count from env vars.
-            stg = 30;
+            stg = 31;
             v = str2double(getenv('OO_V1_VALIDATION_STAGE'));
             if ~isnan(v) && v > 0; stg = round(v); end
 
-            seed = 30;
+            seed = 31;
             v = str2double(getenv('OO_V1_RANDOM_TEST_SEED'));
             if ~isnan(v) && isfinite(v); seed = round(v); end
 
@@ -41,7 +41,7 @@ classdef MainScriptValidationGate
             v = str2double(getenv('OO_V1_RANDOM_TEST_COUNT'));
             if ~isnan(v) && isfinite(v); cnt = max(2, min(5, round(v))); end
 
-            stgTitle = 'Main-Script Validation Gate Restoration';
+            stgTitle = revgnss.MainScriptValidationGate.stageTitle_(stg);
 
             fprintf('\n[ValidationGate] Stage %d  seed %d  count %d\n', stg, seed, cnt);
 
@@ -179,6 +179,15 @@ classdef MainScriptValidationGate
                     texOk = ~isempty(strfind(t, 'NOT RUN')) && ... %#ok<STREMP>
                             ~isempty(strfind(t, ['Stage ' num2str(stg)])); %#ok<STREMP>
                 catch; end
+            end
+        end
+
+        function t = stageTitle_(stg)
+            switch stg
+                case 30; t = 'Main-Script Validation Gate Restoration';
+                case 31; t = 'Single-Asset Attitude Observability Audit';
+                otherwise
+                    try; t = revgnss.ReportStatus.current().stageTitle; catch; t = sprintf('Stage %d', stg); end
             end
         end
 

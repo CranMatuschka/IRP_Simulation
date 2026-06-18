@@ -48,6 +48,8 @@ classdef Diagnostics < handle
         clockObsWinLen_  (1,1) double  = 60
         clockObsMinWin_  (1,1) double  = 5
         clockObsRankTol_
+        cfg_                                    % stored for Stage 31 attitude audit
+        lastAttitudeAudit_  struct = struct()   % most recent AttitudeObservability.audit result
     end
 
     methods
@@ -62,6 +64,7 @@ classdef Diagnostics < handle
         end
 
         function configureCfg(obj, cfg)
+            obj.cfg_ = cfg;
             if isfield(cfg,'diagnostics') && isfield(cfg.diagnostics,'clockObservability')
                 co = cfg.diagnostics.clockObservability;
                 if isfield(co,'enable');             obj.clockObsEnable_ = co.enable;             end
@@ -953,6 +956,19 @@ classdef Diagnostics < handle
                 entry.twstftDiag = td;
             end
 
+            % --- Stage 31: attitude observability audit (run once per epoch) ---
+            if ~isempty(obj.cfg_) && isfield(obj.cfg_,'diagnostics') && ...
+                    isfield(obj.cfg_.diagnostics,'attitudeObservability') && ...
+                    isfield(obj.cfg_.diagnostics.attitudeObservability,'enable') && ...
+                    obj.cfg_.diagnostics.attitudeObservability.enable
+                mTypeForAudit = {};
+                if ~isempty(errStruct) && isfield(errStruct,'measType_perRow')
+                    mTypeForAudit = errStruct.measType_perRow;
+                end
+                obj.lastAttitudeAudit_ = revgnss.AttitudeObservability.audit( ...
+                    H, sm, obj.cfg_, mTypeForAudit);
+            end
+
             % --- Append to log ----------------------------------------
             obj.nEpochs = obj.nEpochs + 1;
             if obj.nEpochs == 1
@@ -1290,6 +1306,14 @@ classdef Diagnostics < handle
             % Should be 0 when the gauge fully constrains the clock subspace.
             if isempty(obj.log); v = []; return; end
             v = [obj.log.clockObsWeakGauged]';
+        end
+
+        % --- Stage 31: attitude observability audit getter -----------------
+
+        function s = getLastAttitudeAudit(obj)
+            % getLastAttitudeAudit  Return the most recent AttitudeObservability audit.
+            % Empty struct when attitudeObservability.enable was false or record() not called.
+            s = obj.lastAttitudeAudit_;
         end
 
         % --- Tx code bias gauge getters ------------------------------------
