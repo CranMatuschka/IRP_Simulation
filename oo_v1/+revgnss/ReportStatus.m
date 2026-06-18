@@ -1,5 +1,5 @@
 classdef ReportStatus
-    % ReportStatus  Stage 30 runtime validation status.
+    % ReportStatus  Runtime validation status.
     %
     % Reads runtime values from output/latest_validation_summary.json (if present).
     % If the JSON is missing or has a stale SHA, validationArtifactFresh=false.
@@ -12,10 +12,8 @@ classdef ReportStatus
     methods (Static)
 
         function s = current()
-            % current  Return Stage 30 runtime validation status struct.
-
-            s.stage      = '31';
-            s.stageTitle = 'Single-Asset Attitude Observability Audit';
+            s.stage      = '32';
+            s.stageTitle = 'Single-Asset Receiver Geometry Model v1';
             s.validationMode = 'targeted-random-smoke';
             s.fullSuiteRun   = false;
 
@@ -59,7 +57,7 @@ classdef ReportStatus
             end
             vsSHA = '';
             if isfield(vs, 'gitSHA'); vsSHA = strtrim(char(vs.gitSHA)); end
-            s.validationArtifactFresh = (vsStageNum >= 31) && strcmp(vsSHA, runtimeSHA);
+            s.validationArtifactFresh = (vsStageNum >= 32) && strcmp(vsSHA, runtimeSHA);
             if ~s.validationArtifactFresh
                 s.validationWarnings{end+1} = ...
                     'No fresh local validation summary for this commit. Run: setenv(''OO_V1_VALIDATE_REPORT'',''true''); run_oo_reverse_gnss_report';
@@ -125,7 +123,7 @@ classdef ReportStatus
         function list = missingStages_()
             list = {
                 'Full CI / full test-suite validation (current: targeted random smoke, 2-5 tests only)'
-                'Space-asset antenna geometry and lever-arm model (v1 uses simplified fixed lever arms)'
+                'Calibrated antenna PCO/PCV and ANTEX hardware-bias products (geometry model is reference-point only)'
                 'Attitude parameterization hardening (current ZYX Euler has gimbal-lock singularity)'
                 'Attitude-sensitive measurement Jacobians (carrier phase lever-arm coupling)'
                 'Multi-antenna single-asset attitude scenario validation'
@@ -162,6 +160,7 @@ classdef ReportStatus
                 'Stage 29: validation gate moved into main script; .gitignore for output artifacts; SHA-based freshness check'
                 'Stage 30: MainScriptValidationGate helper; restored pre/post-run gate in run_oo_reverse_gnss_report.m'
                 'Stage 31: AttitudeObservability audit class; H-column rank/condition/classification; report subsection'
+                'Stage 32: ReceiverGeometry helper; body-frame lever-arm normalisation, baselines, centroid; report subsection'
             };
         end
 

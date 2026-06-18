@@ -1,5 +1,5 @@
 classdef MainScriptValidationGate
-    % MainScriptValidationGate  Stage 30 validation gate for run_oo_reverse_gnss_report.
+    % MainScriptValidationGate  Validation gate for run_oo_reverse_gnss_report.
     %
     % Encapsulates test selection, stop-on-failure, preliminary summary, and
     % post-run PDF verification so run_oo_reverse_gnss_report stays clean.
@@ -29,11 +29,11 @@ classdef MainScriptValidationGate
             state = struct();
 
             % Resolve stage, seed, count from env vars.
-            stg = 31;
+            stg = 32;
             v = str2double(getenv('OO_V1_VALIDATION_STAGE'));
             if ~isnan(v) && v > 0; stg = round(v); end
 
-            seed = 31;
+            seed = 32;
             v = str2double(getenv('OO_V1_RANDOM_TEST_SEED'));
             if ~isnan(v) && isfinite(v); seed = round(v); end
 
@@ -186,6 +186,7 @@ classdef MainScriptValidationGate
             switch stg
                 case 30; t = 'Main-Script Validation Gate Restoration';
                 case 31; t = 'Single-Asset Attitude Observability Audit';
+                case 32; t = 'Single-Asset Receiver Geometry Model v1';
                 otherwise
                     try; t = revgnss.ReportStatus.current().stageTitle; catch; t = sprintf('Stage %d', stg); end
             end

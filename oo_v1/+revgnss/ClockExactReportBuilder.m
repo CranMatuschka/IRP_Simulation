@@ -1847,7 +1847,7 @@ classdef ClockExactReportBuilder
         % ================================================================
         % SECTION 8 — ATTITUDE OBSERVABILITY (Stage 14.8)
         % ================================================================
-        function writeAttitudeObservability_(fid, cfg, summary, diag) %#ok<INUSD>
+        function writeAttitudeObservability_(fid, cfg, summary, diag)
             function v = sf(s, f, def)
                 if isfield(s, f); v = s.(f); else; v = def; end
             end
@@ -2176,6 +2176,51 @@ classdef ClockExactReportBuilder
                     fprintf(fid, '\\end{itemize}\n\n');
                 end
             end
+
+            % --- Stage 32: Single-Asset Receiver Geometry ---
+            fprintf(fid, '\\subsection*{Single-Asset Receiver Geometry (Stage~32)}\n');
+            fprintf(fid, ['\\textit{Body-frame receiver reference-point offsets in metres. ' ...
+                'These are NOT ANTEX PCO/PCV calibrations.}\n\n']);
+
+            geomOk = false;
+            g = struct();
+            try
+                g      = revgnss.ReceiverGeometry.fromConfig(cfg);
+                geomOk = true;
+            catch ME
+                fprintf(fid, '\\textbf{Warning:} Receiver geometry unavailable: %s\n\n', ...
+                    revgnss.ClockExactReportBuilder.esc_(ME.message));
+            end
+
+            if geomOk
+                fprintf(fid, '\\textbf{Asset:} %s (index~%d)\\quad Declared receivers: %d\\quad Geometry receivers: %d\\quad Nonzero lever arm: %s\n\n', ...
+                    revgnss.ClockExactReportBuilder.esc_(g.assetName), g.assetIndex, ...
+                    g.nReceiversDeclared, g.nReceiversGeometry, mat2str(g.hasNonzeroLeverArm));
+
+                fprintf(fid, '\\begin{tabular}{p{0.52\\textwidth}p{0.30\\textwidth}}\n');
+                fprintf(fid, '\\toprule\n\\textbf{Quantity} & \\textbf{Value}\\\\\n\\midrule\n');
+                fprintf(fid, 'Max lever-arm norm (body frame) & %.4f\\,m\\\\\n', g.leverArmMaxNorm_m);
+                c = g.centroid_body_m;
+                fprintf(fid, 'Centroid (body frame) & [%.3f, %.3f, %.3f]\\,m\\\\\n', c(1), c(2), c(3));
+                if ~isempty(g.baselineLengths_m)
+                    fprintf(fid, 'Onboard baselines (count) & %d\\\\\n', numel(g.baselineLengths_m));
+                    fprintf(fid, 'Baseline min / max & %.4f\\,m / %.4f\\,m\\\\\n', ...
+                        g.baselineMin_m, g.baselineMax_m);
+                else
+                    fprintf(fid, 'Onboard baselines & none (single receiver)\\\\\n');
+                end
+                fprintf(fid, '\\bottomrule\n\\end{tabular}\\par\n\n');
+
+                gWarns = g.warnings;
+                if ~isempty(gWarns)
+                    fprintf(fid, '\\textbf{Geometry warnings:}\n\\begin{itemize}\n');
+                    for wi = 1:numel(gWarns)
+                        fprintf(fid, '  \\item %s\n', ...
+                            revgnss.ClockExactReportBuilder.esc_(gWarns{wi}));
+                    end
+                    fprintf(fid, '\\end{itemize}\n\n');
+                end
+            end
         end
 
         % ================================================================
@@ -2310,8 +2355,8 @@ classdef ClockExactReportBuilder
             vs = revgnss.ValidationSummary.read(outDir);
 
             % Read dynamic stage/title from JSON (default to current stage).
-            stage      = '31';
-            stageTitle = 'Single-Asset Attitude Observability Audit';
+            stage      = '32';
+            stageTitle = 'Single-Asset Receiver Geometry Model v1';
             if isfield(vs, 'stage') && ~isempty(vs.stage)
                 stage = strtrim(num2str(vs.stage));
             end

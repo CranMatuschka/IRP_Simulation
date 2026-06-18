@@ -29,7 +29,7 @@ clear; close all; clc;
 thisDir = fileparts(mfilename('fullpath'));
 addpath(thisDir);
 
-% --- Environment-variable overrides (Stage 25+, Stage 30 validation gate) ---
+% --- Environment-variable overrides (Stage 25+ validation gate) ---
 oo_v1_envValidate_   = strcmpi(getenv('OO_V1_VALIDATE_REPORT'), 'true');
 oo_v1_envAllToggles_ = strcmpi(getenv('OO_V1_ALL_TOGGLES'), 'true');
 if oo_v1_envValidate_; oo_v1_envAllToggles_ = true; end  % validate always uses all toggles
@@ -248,7 +248,7 @@ cfg.estimator.attitudeInitShadow.enable = false;
 cfg.validation.unsupportedFeaturePolicy = 'disableWithWarning';
 cfg.validation.fullSuiteRun             = false;   % full suite never run here
 
-% --- Stage 30 all-toggle validation mode --------------------------------
+% --- All-toggle validation mode --------------------------------
 % Set stageAllToggles = true to enable every independent boolean toggle.
 % OO_V1_ALL_TOGGLES=true achieves the same via env var (Stage 25+ gate).
 % Mutually exclusive string modes (carrierMode, etc.) are NOT changed.
@@ -267,6 +267,7 @@ if stageAllToggles || oo_v1_envAllToggles_
     cfg.effects.antennaPCV.model.enable   = true;
     cfg.effects.correlatedNoise.enable    = true;
     cfg.diagnostics.attitudeObservability.enable = true;
+    cfg.diagnostics.receiverGeometry.enable      = true;
     cfg.validation.stageAllToggles        = true;
     if oo_v1_envAllToggles_
         cfg.validation.invokedMainScript = true;

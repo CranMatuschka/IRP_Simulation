@@ -134,24 +134,17 @@ classdef AttitudeObservability
         end
 
         function la = leverArmStats(cfg)
-            % leverArmStats  Return lever-arm statistics from cfg.
-            la.nReceivers        = 1;
-            la.maxNorm_m         = 0;
-            la.norms_m           = 0;
-            la.hasNonzeroLeverArm = false;
-
-            if isfield(cfg,'scenario') && isfield(cfg.scenario,'nReceivers')
-                la.nReceivers = cfg.scenario.nReceivers;
-            end
-            if isfield(cfg,'asset') && isfield(cfg.asset,'receiverLeverArms_body_m')
-                arms = cfg.asset.receiverLeverArms_body_m;
-                if ~isempty(arms) && isnumeric(arms)
-                    norms        = vecnorm(arms, 2, 1);
-                    la.norms_m   = norms(:)';
-                    la.maxNorm_m = max(norms);
-                    la.hasNonzeroLeverArm = la.maxNorm_m > 1e-6;
-                end
-            end
+            % leverArmStats  Return lever-arm statistics via ReceiverGeometry.
+            % Supports both plural receiverLeverArms_body_m and singular
+            % receiverLeverArm_body_m (Stage 32 fix: singular was previously ignored).
+            g = revgnss.ReceiverGeometry.fromConfig(cfg);
+            la.nReceivers         = g.nReceiversGeometry;
+            la.maxNorm_m          = g.leverArmMaxNorm_m;
+            la.norms_m            = g.leverArmNorms_m;
+            la.hasNonzeroLeverArm = g.hasNonzeroLeverArm;
+            la.baselineMin_m      = g.baselineMin_m;
+            la.baselineMax_m      = g.baselineMax_m;
+            la.warnings           = g.warnings;
         end
 
     end
