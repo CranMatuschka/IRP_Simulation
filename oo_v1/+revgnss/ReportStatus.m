@@ -12,8 +12,8 @@ classdef ReportStatus
     methods (Static)
 
         function s = current()
-            s.stage      = '34';
-            s.stageTitle = 'Attitude Jacobian Consistency Audit v1';
+            s.stage      = '35';
+            s.stageTitle = 'Single-Asset Attitude Evidence Report v1';
             s.validationMode = 'targeted-random-smoke';
             s.fullSuiteRun   = false;
 
@@ -57,7 +57,7 @@ classdef ReportStatus
             end
             vsSHA = '';
             if isfield(vs, 'gitSHA'); vsSHA = strtrim(char(vs.gitSHA)); end
-            s.validationArtifactFresh = (vsStageNum >= 34) && strcmp(vsSHA, runtimeSHA);
+            s.validationArtifactFresh = (vsStageNum >= 35) && strcmp(vsSHA, runtimeSHA);
             if ~s.validationArtifactFresh
                 s.validationWarnings{end+1} = ...
                     'No fresh local validation summary for this commit. Run: setenv(''OO_V1_VALIDATE_REPORT'',''true''); run_oo_reverse_gnss_report';
@@ -125,7 +125,7 @@ classdef ReportStatus
                 'Full CI / full test-suite validation (current: targeted random smoke, 2-5 tests only)'
                 'Calibrated antenna PCO/PCV and ANTEX hardware-bias products (geometry model is reference-point only)'
                 'Quaternion / error-state attitude EKF (current ZYX Euler is documented but singular at pitch +/-90 deg)'
-                'Full per-row LOS metadata for runtime finite-diff Jacobian consistency (Stage 34 production path uses H-only summary)'
+                'Full per-row LOS metadata for runtime finite-diff Jacobian consistency (production path uses H-only summary)'
                 'Multi-antenna single-asset attitude scenario validation'
                 'Carrier-phase attitude preparation and observability analysis'
                 'L2 carrier EKF rows and ionosphere-free carrier combination'
@@ -136,7 +136,6 @@ classdef ReportStatus
                 'Full IERS/EOP GCRS/ITRF reference-frame and Earth-orientation products'
                 'Full relativistic GNSS clock modelling (Schwarzschild, gravitational redshift)'
                 'Higher-fidelity orbit dynamics: drag, SRP, third bodies, precise orbit products'
-                'ANTEX PCO/PCV and calibrated hardware-bias products'
                 'Real TWSTFT / relay / transponder physics'
                 'External GNSS product ingestion: SP3, CLK, RINEX, IONEX, ANTEX'
             };
@@ -163,6 +162,7 @@ classdef ReportStatus
                 'Stage 32: ReceiverGeometry helper; body-frame lever-arm normalisation, baselines, centroid; report subsection'
                 'Stage 33: AttitudeKinematics convention(), eulerToDcm(), gimbal metric, validateDcm(), finite-diff lever-arm Jacobian; report subsection'
                 'Stage 34: AttitudeJacobianAudit audit(), finiteDiffRangeAttitudePartial(), hOnlySummary(); H-only summary in production; report subsection'
+                'Stage 35: AttitudeEvidenceReport helper; scenario-level attitude evidence summary linking truth/estimate histories with observability, receiver geometry, Euler convention, and Jacobian audit status'
             };
         end
 

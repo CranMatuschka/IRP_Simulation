@@ -70,8 +70,8 @@ fprintf('T4 PASS: finiteDiffRangeAttitudePartial is 1x3 finite (max|J|=%.4f)\n',
 
 % --- T5: ReportStatus stage == '34' ---
 rs = revgnss.ReportStatus.current();
-assert(strcmp(char(rs.stage), '34'), ...
-    sprintf('T5: expected stage ''34'', got ''%s''', char(rs.stage)));
-fprintf('T5 PASS: ReportStatus.current().stage = ''34''\n');
+assert(str2double(char(rs.stage)) >= 34, ...
+    sprintf('T5: stage should be >= 34, got ''%s''', char(rs.stage)));
+fprintf('T5 PASS: ReportStatus.current().stage = ''%s'' (>= 34)\n', char(rs.stage));
 
 fprintf('\ntest_stage34_attitude_jacobian_audit: all 5 tests passed.\n');

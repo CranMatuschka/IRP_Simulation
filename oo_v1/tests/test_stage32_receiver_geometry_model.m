@@ -43,11 +43,11 @@ g3 = revgnss.ReceiverGeometry.fromConfig(c3);
 assert(~isempty(g3.warnings), 'T3: warnings should be nonempty when nReceivers=3 but geometry=1');
 fprintf('T3 PASS: mismatch warning present: "%s"\n', g3.warnings{1});
 
-% --- T4: ReportStatus stage == '32' ---
+% --- T4: ReportStatus stage >= 32 ---
 rs = revgnss.ReportStatus.current();
-assert(strcmp(char(rs.stage), '32'), ...
-    sprintf('T4: expected stage ''32'', got ''%s''', char(rs.stage)));
-fprintf('T4 PASS: ReportStatus.current().stage = ''32''\n');
+assert(str2double(char(rs.stage)) >= 32, ...
+    sprintf('T4: stage should be >= 32, got ''%s''', char(rs.stage)));
+fprintf('T4 PASS: ReportStatus.current().stage = ''%s'' (>= 32)\n', char(rs.stage));
 
 % --- T5: no stale antenna-geometry wording in missingScientificStages ---
 stale = 'Space-asset antenna geometry and lever-arm model';

@@ -2292,7 +2292,8 @@ classdef ClockExactReportBuilder
             fprintf(fid, '\\begin{tabular}{p{0.48\\textwidth}p{0.40\\textwidth}}\n');
             fprintf(fid, '\\toprule\n\\textbf{Property} & \\textbf{Value}\\\\\n\\midrule\n');
             fprintf(fid, 'Audit enabled & %s\\\\\n', mat2str(logical(jEnabled)));
-            fprintf(fid, 'Classification & \\texttt{%s}\\\\\n', esc(char(jClass)));
+            fprintf(fid, 'Classification & \\texttt{%s}\\\\\n', ...
+                revgnss.ClockExactReportBuilder.esc_(char(jClass)));
             if isnumeric(jNorm) && isfinite(jNorm)
                 fprintf(fid, 'H attitude column norm (Frobenius) & %.4e\\\\\n', jNorm);
             else
@@ -2327,7 +2328,72 @@ classdef ClockExactReportBuilder
             if ~isempty(jWarns)
                 fprintf(fid, '\\textbf{Warnings:}\n\\begin{itemize}\n');
                 for wi = 1:numel(jWarns)
-                    fprintf(fid, '\\item %s\n', esc(char(jWarns{wi})));
+                    fprintf(fid, '\\item %s\n', revgnss.ClockExactReportBuilder.esc_(char(jWarns{wi})));
+                end
+                fprintf(fid, '\\end{itemize}\n\n');
+            end
+
+            % --- Stage 35: Single-Asset Attitude Evidence Report ---
+            fprintf(fid, '\\subsection*{Single-Asset Attitude Evidence Report (Stage~35)}\n');
+            fprintf(fid, ['\\textit{This is evidence reporting only. It is not an attitude ' ...
+                'accuracy claim, not integer ambiguity fixing, and not a quaternion/' ...
+                'error-state EKF.}\n\n']);
+
+            try
+                out_tmp.summary = summary;
+                out_tmp.diag    = diag;
+                aev = revgnss.AttitudeEvidenceReport.summarize(out_tmp, cfg);
+            catch ex
+                fprintf(fid, 'Attitude evidence summary failed: %s\n\n', revgnss.ClockExactReportBuilder.esc_(ex.message));
+                aev = struct('available', false, 'classification', 'unavailable', ...
+                    'nEpochs', 0, 'finalErrorDeg', NaN, 'rmsErrorDeg', NaN, ...
+                    'maxErrorDeg', NaN, 'finalCovSqrtDeg', NaN, ...
+                    'observabilityClassification', 'unavailable', ...
+                    'receiverGeometrySummary', 'unavailable', ...
+                    'attitudeConventionName', 'ZYX Euler roll-pitch-yaw', ...
+                    'jacobianAuditClassification', 'unavailable', ...
+                    'limitations', {{}}, 'warnings', {{}});
+            end
+
+            if ~aev.available
+                fprintf(fid, ['\\textbf{Attitude truth/estimate histories unavailable ' ...
+                    'in this report output.}\n\n']);
+            end
+
+            fprintf(fid, '\\begin{tabular}{p{0.46\\textwidth}p{0.42\\textwidth}}\n');
+            fprintf(fid, '\\toprule\n\\textbf{Property} & \\textbf{Value}\\\\\n\\midrule\n');
+            fprintf(fid, 'Classification & \\texttt{%s}\\\\\n', revgnss.ClockExactReportBuilder.esc_(char(aev.classification)));
+            fprintf(fid, 'Histories available & %s\\\\\n', mat2str(logical(aev.available)));
+            fprintf(fid, 'Epochs & %d\\\\\n', aev.nEpochs);
+            if aev.available && isfinite(aev.finalErrorDeg)
+                fprintf(fid, 'Final attitude error & %.3f deg\\\\\n', aev.finalErrorDeg);
+                fprintf(fid, 'RMS attitude error & %.3f deg\\\\\n',   aev.rmsErrorDeg);
+                fprintf(fid, 'Max attitude error & %.3f deg\\\\\n',   aev.maxErrorDeg);
+            end
+            if aev.available && isfinite(aev.finalCovSqrtDeg)
+                fprintf(fid, 'Final covariance sqrt & %.3f deg\\\\\n', aev.finalCovSqrtDeg);
+            end
+            fprintf(fid, 'Observability audit & \\texttt{%s}\\\\\n', ...
+                revgnss.ClockExactReportBuilder.esc_(char(aev.observabilityClassification)));
+            fprintf(fid, 'Receiver geometry & %s\\\\\n', ...
+                revgnss.ClockExactReportBuilder.esc_(char(aev.receiverGeometrySummary)));
+            fprintf(fid, 'Attitude convention & %s\\\\\n', ...
+                revgnss.ClockExactReportBuilder.esc_(char(aev.attitudeConventionName)));
+            fprintf(fid, 'Jacobian audit & \\texttt{%s}\\\\\n', ...
+                revgnss.ClockExactReportBuilder.esc_(char(aev.jacobianAuditClassification)));
+            fprintf(fid, '\\bottomrule\n\\end{tabular}\\par\n\n');
+
+            if ~isempty(aev.limitations)
+                fprintf(fid, '\\textbf{Limitations:}\n\\begin{itemize}\n');
+                for li = 1:numel(aev.limitations)
+                    fprintf(fid, '\\item %s\n', revgnss.ClockExactReportBuilder.esc_(char(aev.limitations{li})));
+                end
+                fprintf(fid, '\\end{itemize}\n\n');
+            end
+            if ~isempty(aev.warnings)
+                fprintf(fid, '\\textbf{Warnings:}\n\\begin{itemize}\n');
+                for wi = 1:numel(aev.warnings)
+                    fprintf(fid, '\\item %s\n', revgnss.ClockExactReportBuilder.esc_(char(aev.warnings{wi})));
                 end
                 fprintf(fid, '\\end{itemize}\n\n');
             end
@@ -2465,8 +2531,8 @@ classdef ClockExactReportBuilder
             vs = revgnss.ValidationSummary.read(outDir);
 
             % Read dynamic stage/title from JSON (default to current stage).
-            stage      = '34';
-            stageTitle = 'Attitude Jacobian Consistency Audit v1';
+            stage      = '35';
+            stageTitle = 'Single-Asset Attitude Evidence Report v1';
             if isfield(vs, 'stage') && ~isempty(vs.stage)
                 stage = strtrim(num2str(vs.stage));
             end

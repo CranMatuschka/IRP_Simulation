@@ -35,7 +35,7 @@ oo_v1_envAllToggles_ = strcmpi(getenv('OO_V1_ALL_TOGGLES'), 'true');
 if oo_v1_envValidate_; oo_v1_envAllToggles_ = true; end  % validate always uses all toggles
 oo_v1_envStage_      = str2double(getenv('OO_V1_VALIDATION_STAGE'));
 if isnan(oo_v1_envStage_); oo_v1_envStage_ = 0; end
-if oo_v1_envValidate_ && oo_v1_envStage_ == 0; oo_v1_envStage_ = 34; end
+if oo_v1_envValidate_ && oo_v1_envStage_ == 0; oo_v1_envStage_ = 35; end
 oo_v1_envCompile_    = strtrim(getenv('OO_V1_REPORT_COMPILE_TEX'));
 
 cfg = revgnss.ConfigFactory.defaultConfig();
@@ -270,6 +270,7 @@ if stageAllToggles || oo_v1_envAllToggles_
     cfg.diagnostics.receiverGeometry.enable       = true;
     cfg.diagnostics.attitudeKinematics.enable     = true;
     cfg.diagnostics.attitudeJacobianAudit.enable  = true;
+    cfg.diagnostics.attitudeEvidence.enable       = true;
     cfg.validation.stageAllToggles         = true;
     if oo_v1_envAllToggles_
         cfg.validation.invokedMainScript = true;
@@ -286,7 +287,7 @@ end
 % RUN SIMULATION AND WRITE REPORT
 % ============================================================
 
-% --- Stage 30 validation gate (pre-run) ---
+% --- main-script validation gate (pre-run) ---
 oo_v1_doValidate_ = revgnss.MainScriptValidationGate.isEnabled();
 if oo_v1_doValidate_
     [cfg, oo_v1_gateState_, oo_v1_ok_] = ...
@@ -304,7 +305,7 @@ if cfg.report.writeMat
     fprintf('\nMAT:\n%s\n', out.matPath);
 end
 
-% --- Stage 30 validation gate (post-run) ---
+% --- main-script validation gate (post-run) ---
 if oo_v1_doValidate_
     revgnss.MainScriptValidationGate.postRun(oo_v1_gateState_, out);
 end

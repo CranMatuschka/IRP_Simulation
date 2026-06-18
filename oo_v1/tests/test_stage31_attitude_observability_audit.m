@@ -59,11 +59,11 @@ assert(~strcmp(s3.classification, 'observable-float-carrier-or-mixed') || ...
 assert(s3.nCarrierRows == 0, 'T3: nCarrierRows should be 0 for code-only input');
 fprintf('T3 PASS: code-only -> classification ''%s'', nCarrierRows = 0\n', s3.classification);
 
-% --- T4: ReportStatus stage == '31' ---
+% --- T4: ReportStatus stage >= 31 ---
 rs = revgnss.ReportStatus.current();
-assert(strcmp(char(rs.stage), '31'), ...
-    sprintf('T4: stage should be ''31'', got ''%s''', char(rs.stage)));
-fprintf('T4 PASS: ReportStatus.current().stage = ''31''\n');
+assert(str2double(char(rs.stage)) >= 31, ...
+    sprintf('T4: stage should be >= 31, got ''%s''', char(rs.stage)));
+fprintf('T4 PASS: ReportStatus.current().stage = ''%s'' (>= 31)\n', char(rs.stage));
 
 % --- T5: no stale attitude audit wording in missingScientificStages ---
 stale = 'Attitude observability audit for single space asset';

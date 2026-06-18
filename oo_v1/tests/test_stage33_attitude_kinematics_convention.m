@@ -42,8 +42,8 @@ fprintf('T4 PASS: finiteDiffLeverArmJacobian is 3x3 and finite (max|J|=%.4f)\n',
 
 % --- T5: ReportStatus stage == '33' ---
 rs = revgnss.ReportStatus.current();
-assert(strcmp(char(rs.stage), '33'), ...
-    sprintf('T5: expected stage ''33'', got ''%s''', char(rs.stage)));
-fprintf('T5 PASS: ReportStatus.current().stage = ''33''\n');
+assert(str2double(char(rs.stage)) >= 33, ...
+    sprintf('T5: stage should be >= 33, got ''%s''', char(rs.stage)));
+fprintf('T5 PASS: ReportStatus.current().stage = ''%s'' (>= 33)\n', char(rs.stage));
 
 fprintf('\ntest_stage33_attitude_kinematics_convention: all 5 tests passed.\n');
