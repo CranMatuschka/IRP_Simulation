@@ -50,6 +50,7 @@ classdef ValidationSummary
                 VS.safeNum_(data, 'nSelectedTests', 0));
             fprintf(fid, 'Full suite run : %s\n', mat2str(VS.safeBool_(data, 'fullSuiteRun', false)));
             fprintf(fid, 'All-toggle run : %s\n', mat2str(VS.safeBool_(data, 'allToggleReportRun', false)));
+            fprintf(fid, 'Main script    : %s\n', mat2str(VS.safeBool_(data, 'invokedMainScript', false)));
             fprintf(fid, 'Report run OK  : %s\n', mat2str(VS.safeBool_(data, 'reportRunPassed', false)));
             fprintf(fid, 'PDF verified   : %s\n', mat2str(VS.safeBool_(data, 'pdfVerified', false)));
             if isfield(data, 'pdfPath') && ~isempty(data.pdfPath)
@@ -96,9 +97,11 @@ classdef ValidationSummary
             s.fullSuiteRun            = false;
             s.allToggleReportRun      = false;
             s.reportRunPassed         = false;
+            s.invokedMainScript       = false;
             s.pdfVerified             = false;
             s.pdfTextVerified         = false;
             s.pdfPath                 = '';
+            s.validationWarnings      = {};
             s.notes                   = '';
         end
 

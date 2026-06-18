@@ -19,6 +19,9 @@ classdef Constants
         % Earth rotation rate [rad/s]
         EARTH_OMEGA_RADPS = 7.2921150e-5;
 
+        % Earth J2 zonal-harmonic coefficient (EGM2008)
+        EARTH_J2 = 1.08262668e-3;
+
         % WGS84 flattening
         EARTH_FLATTENING = 1 / 298.257223563;
 

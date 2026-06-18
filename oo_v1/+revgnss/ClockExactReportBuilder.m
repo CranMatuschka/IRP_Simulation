@@ -2249,19 +2249,22 @@ classdef ClockExactReportBuilder
             sha    = CE.getGitSHA_();
             branch = 'unknown';
             try
-                [s, b] = system('git rev-parse --abbrev-ref HEAD 2>/dev/null');
+                repoRoot = fileparts(fileparts(fileparts(texPath)));
+                [s, b] = system(sprintf('git -C "%s" rev-parse --abbrev-ref HEAD 2>/dev/null', repoRoot));
                 if s == 0; branch = strtrim(b); end
             catch; end
 
-            nPass  = 0;   if isfield(vs,'nPassingSelectedTests'); nPass = vs.nPassingSelectedTests; end
-            nSel   = 0;   if isfield(vs,'nSelectedTests');        nSel  = vs.nSelectedTests;        end
-            allTog = false; if isfield(vs,'allToggleReportRun');  allTog = logical(vs.allToggleReportRun); end
-            pdfOK  = false; if isfield(vs,'pdfVerified');         pdfOK = logical(vs.pdfVerified);  end
-            repOK  = false; if isfield(vs,'reportRunPassed');     repOK = logical(vs.reportRunPassed); end
+            nPass     = 0;     if isfield(vs,'nPassingSelectedTests'); nPass = vs.nPassingSelectedTests; end
+            nSel      = 0;     if isfield(vs,'nSelectedTests');        nSel  = vs.nSelectedTests;        end
+            allTog    = false; if isfield(vs,'allToggleReportRun');    allTog = logical(vs.allToggleReportRun); end
+            pdfOK     = false; if isfield(vs,'pdfVerified');           pdfOK = logical(vs.pdfVerified);  end
+            pdfTextOK = false; if isfield(vs,'pdfTextVerified');       pdfTextOK = logical(vs.pdfTextVerified); end
+            repOK     = false; if isfield(vs,'reportRunPassed');       repOK = logical(vs.reportRunPassed); end
+            invMain   = false; if isfield(vs,'invokedMainScript');     invMain = logical(vs.invokedMainScript); end
 
             fprintf(fid, '\\clearpage\n');
-            fprintf(fid, '\\section{Stage 24 Validation Status}\n');
-            fprintf(fid, ['\\textbf{Stage 24: Validation Status Gate + Frame/Time/Light-Time Foundation.} ' ...
+            fprintf(fid, '\\section{Validation Status Gate}\n');
+            fprintf(fid, ['\\textbf{Stages 24--26: Validation Status Gate.} ' ...
                 'This section is generated at report-build time from the validation summary artifact.\n\n']);
             fprintf(fid, '\\begin{center}\\small\n');
             fprintf(fid, '\\begin{tabular}{p{0.38\\textwidth}p{0.52\\textwidth}}\n');
@@ -2275,8 +2278,10 @@ classdef ClockExactReportBuilder
             fprintf(fid, 'Selected tests passed & %d / %d\\\\\n', nPass, nSel);
             fprintf(fid, 'Full suite run & \\textbf{NOT RUN} (targeted smoke only)\\\\\n');
             fprintf(fid, 'All-toggle report run & %s\\\\\n', esc(mat2str(allTog)));
+            fprintf(fid, 'Main script invoked & %s\\\\\n', esc(mat2str(invMain)));
             fprintf(fid, 'Report run passed & %s\\\\\n', esc(mat2str(repOK)));
             fprintf(fid, 'PDF verified & %s\\\\\n', esc(mat2str(pdfOK)));
+            fprintf(fid, 'PDF text verified & %s\\\\\n', esc(mat2str(pdfTextOK)));
             fprintf(fid, '\\bottomrule\n');
             fprintf(fid, '\\end{tabular}\n');
             fprintf(fid, '\\end{center}\n');
@@ -2390,7 +2395,8 @@ classdef ClockExactReportBuilder
         function sha = getGitSHA_()
             sha = 'unknown';
             try
-                [st, out] = system('git rev-parse --short HEAD 2>/dev/null');
+                repoRoot = fileparts(fileparts(mfilename('fullpath')));
+                [st, out] = system(sprintf('git -C "%s" rev-parse --short HEAD 2>/dev/null', repoRoot));
                 if st == 0; sha = strtrim(out); end
             catch; end
         end

@@ -29,6 +29,12 @@ clear; close all; clc;
 thisDir = fileparts(mfilename('fullpath'));
 addpath(thisDir);
 
+% --- Environment-variable overrides (Stage 25: script-exact validation gate) --
+oo_v1_envAllToggles_ = strcmpi(getenv('OO_V1_ALL_TOGGLES'), 'true');
+oo_v1_envStage_      = str2double(getenv('OO_V1_VALIDATION_STAGE'));
+if isnan(oo_v1_envStage_); oo_v1_envStage_ = 0; end
+oo_v1_envCompile_    = strtrim(getenv('OO_V1_REPORT_COMPILE_TEX'));
+
 cfg = revgnss.ConfigFactory.defaultConfig();
 
 % ============================================================
@@ -238,14 +244,13 @@ cfg.estimator.attitudeInitShadow.enable = false;
 % 'error'              ->  any unsupported feature throws an error
 cfg.validation.unsupportedFeaturePolicy = 'disableWithWarning';
 
-% --- Stage 24: all-toggle mode ----------------------------------
+% --- Stage 24/25 all-toggle mode --------------------------------
 % Set stage24AllToggles = true to enable every independent boolean toggle.
+% OO_V1_ALL_TOGGLES=true achieves the same via env var (Stage 25 gate).
 % Mutually exclusive string modes (carrierMode, etc.) are NOT changed.
 % Requires unsupportedFeaturePolicy = 'disableWithWarning' (set above).
-% Unsupported features will be silently disabled with a report warning entry.
-% This is the Stage 24 validation run configuration.
 stage24AllToggles = false;
-if stage24AllToggles
+if stage24AllToggles || oo_v1_envAllToggles_
     cfg.errors.hardwareDelay.truth.enable = true;
     cfg.errors.hardwareDelay.model.enable = true;
     cfg.errors.multipath.truth.enable     = true;
@@ -257,7 +262,16 @@ if stage24AllToggles
     cfg.effects.antennaPCV.truth.enable   = true;
     cfg.effects.antennaPCV.model.enable   = true;
     cfg.effects.correlatedNoise.enable    = true;
-    cfg.validation.stage24AllToggles      = true;
+    cfg.validation.stageAllToggles        = true;
+    if oo_v1_envAllToggles_
+        cfg.validation.invokedMainScript = true;
+        if oo_v1_envStage_ > 0
+            cfg.validation.validationStage = oo_v1_envStage_;
+        end
+    end
+end
+if ~isempty(oo_v1_envCompile_) && ismember(oo_v1_envCompile_, {'require','auto','never'})
+    cfg.report.compileTex = oo_v1_envCompile_;
 end
 
 % ============================================================
@@ -273,3 +287,7 @@ end
 if cfg.report.writeMat
     fprintf('\nMAT:\n%s\n', out.matPath);
 end
+
+% Stage 25: expose last run output for script-exact validation gate.
+assignin('base', 'oo_v1_last_report_out', out);
+assignin('base', 'oo_v1_last_report_cfg', cfg);

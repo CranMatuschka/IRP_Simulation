@@ -19,6 +19,7 @@ classdef OrbitPropagator
         raan_rad          (1,1) double = 0         % right ascension of ascending node
         trueAnomaly0_rad  (1,1) double = 0         % initial true anomaly (t=0)
         epochGMST_rad     (1,1) double = 0         % GMST at t=0 [rad]
+        orbitMode = 'circularAnalytic'             % 'circularAnalytic'|'twoBodyRk4'|'j2Rk4'
     end
 
     properties (Constant, Access = private)
@@ -35,12 +36,25 @@ classdef OrbitPropagator
             if isfield(cfg,'raan_rad');         obj.raan_rad         = cfg.raan_rad;         end
             if isfield(cfg,'trueAnomaly0_rad'); obj.trueAnomaly0_rad = cfg.trueAnomaly0_rad; end
             if isfield(cfg,'epochGMST_rad');    obj.epochGMST_rad    = cfg.epochGMST_rad;    end
+            if isfield(cfg,'orbit') && isfield(cfg.orbit,'mode') && ~isempty(cfg.orbit.mode)
+                obj.orbitMode = cfg.orbit.mode;
+            end
         end
 
         function [r_ecef_m, v_ecef_mps] = propagate(obj, t_s)
             % propagate  Return ECEF position and velocity at time t_s.
             %
             % t_s may be a scalar or vector [s].
+            % For RK4 modes pass t_s as a sorted vector for efficiency;
+            % each scalar call integrates from t=0 independently (O(t_k/dt)).
+            if strcmpi(obj.orbitMode, 'twoBodyRk4')
+                [r_ecef_m, v_ecef_mps] = obj.propagateRk4_(t_s, 'twoBody');
+                return
+            end
+            if strcmpi(obj.orbitMode, 'j2Rk4')
+                [r_ecef_m, v_ecef_mps] = obj.propagateRk4_(t_s, 'j2');
+                return
+            end
 
             t_s = t_s(:);
             n = numel(t_s);
@@ -79,6 +93,52 @@ classdef OrbitPropagator
                 v_ecef_mps = v_ecef_mps(:,1);
             end
         end
+    end
+
+    methods (Access = private)
+
+        function [r_ecef_m, v_ecef_mps] = propagateRk4_(obj, t_s, model)
+            % propagateRk4_  RK4 numerical propagation from analytic circular t=0 state.
+            a   = obj.Re + obj.altitudeMean_m;
+            inc = obj.inclination_rad;
+            OM  = obj.raan_rad;
+            nu0 = obj.trueAnomaly0_rad;
+
+            % Initial ECI state from circular analytic formula at t=0
+            r_pf = a * [cos(nu0); sin(nu0); 0];
+            v_pf = sqrt(obj.GM / a) * [-sin(nu0); cos(nu0); 0];
+            Ri   = rotZ(OM) * rotX(inc) * rotZ(0);
+            r_i  = Ri * r_pf;
+            v_i  = Ri * v_pf;
+
+            t_s = t_s(:);
+            n   = numel(t_s);
+            r_ecef_m   = zeros(3, n);
+            v_ecef_mps = zeros(3, n);
+
+            t_prev = 0;
+            for k = 1:n
+                dt = t_s(k) - t_prev;
+                if dt > 0
+                    nSub = max(1, ceil(dt / 10));
+                    dts  = dt / nSub;
+                    for j = 1:nSub
+                        [r_i, v_i] = revgnss.OrbitDynamics.rk4Step(r_i, v_i, dts, model);
+                    end
+                end
+                t_prev = t_s(k);
+                theta  = obj.epochGMST_rad + obj.omgE * t_s(k);
+                R      = rotZ(-theta);
+                r_ecef_m(:,k)   = R * r_i;
+                v_ecef_mps(:,k) = R * (v_i - cross([0;0;obj.omgE], r_i));
+            end
+
+            if n == 1
+                r_ecef_m   = r_ecef_m(:,1);
+                v_ecef_mps = v_ecef_mps(:,1);
+            end
+        end
+
     end
 end
 

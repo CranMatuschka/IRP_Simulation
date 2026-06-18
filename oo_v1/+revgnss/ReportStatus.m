@@ -14,8 +14,8 @@ classdef ReportStatus
         function s = current()
             % current  Return Stage 24 runtime validation status struct.
 
-            s.stage      = '24';
-            s.stageTitle = 'Validation Status Gate + Frame/Time/Light-Time Foundation';
+            s.stage      = '25-26';
+            s.stageTitle = 'Script-Exact Validation Gate + Orbit Dynamics Foundation';
             s.validationMode = 'targeted-random-smoke';
             s.fullSuiteRun   = false;
 
@@ -38,9 +38,16 @@ classdef ReportStatus
             s.allPass = (s.nPassingSelectedTests == s.nSelectedTests) && ...
                         (s.nSelectedTests > 0);
 
-            s.reportRunPassed   = revgnss.ReportStatus.safeBool_(vs, 'reportRunPassed', false);
-            s.pdfVerified       = revgnss.ReportStatus.safeBool_(vs, 'pdfVerified',     false);
+            s.reportRunPassed   = revgnss.ReportStatus.safeBool_(vs, 'reportRunPassed',    false);
+            s.pdfVerified       = revgnss.ReportStatus.safeBool_(vs, 'pdfVerified',        false);
             s.allToggleReportRun= revgnss.ReportStatus.safeBool_(vs, 'allToggleReportRun', false);
+            s.invokedMainScript = revgnss.ReportStatus.safeBool_(vs, 'invokedMainScript',  false);
+            s.pdfTextVerified   = revgnss.ReportStatus.safeBool_(vs, 'pdfTextVerified',    false);
+            if isfield(vs, 'validationWarnings') && iscell(vs.validationWarnings)
+                s.validationWarnings = vs.validationWarnings;
+            else
+                s.validationWarnings = {};
+            end
 
             if isfield(vs, 'selectedTestNames')
                 s.selectedTests = vs.selectedTestNames;
@@ -80,7 +87,8 @@ classdef ReportStatus
         function sha = getGitSHA_()
             sha = 'unknown';
             try
-                [s, out] = system('git rev-parse --short HEAD 2>/dev/null');
+                repoRoot = fileparts(fileparts(mfilename('fullpath')));
+                [s, out] = system(sprintf('git -C "%s" rev-parse --short HEAD 2>/dev/null', repoRoot));
                 if s == 0; sha = strtrim(out); end
             catch; end
         end
@@ -88,7 +96,8 @@ classdef ReportStatus
         function br = getGitBranch_()
             br = 'unknown';
             try
-                [s, out] = system('git rev-parse --abbrev-ref HEAD 2>/dev/null');
+                repoRoot = fileparts(fileparts(mfilename('fullpath')));
+                [s, out] = system(sprintf('git -C "%s" rev-parse --abbrev-ref HEAD 2>/dev/null', repoRoot));
                 if s == 0; br = strtrim(out); end
             catch; end
         end
@@ -102,7 +111,7 @@ classdef ReportStatus
                 'Full CI / full test-suite validation (Stage 24 runs targeted smoke only)'
                 'Full IERS/EOP GCRS/ITRF reference-frame and Earth-orientation products'
                 'Full relativistic GNSS clock modelling (Schwarzschild, gravitational redshift)'
-                'Dynamic orbit/force model (J2, drag, SRP; current: constant-velocity/simple orbit)'
+                'Higher-fidelity orbit beyond two-body/J2: drag, SRP, third bodies, EOP-consistent inertial frames, precise orbit products'
                 'Scientific troposphere: Niell/GMF/VMF3/GPT3/ERA5 mapping functions'
                 'Scientific ionosphere: Klobuchar/IONEX/higher-order ionosphere models'
                 'Carrier ionosphere-free (L4) combination in EKF'
@@ -124,6 +133,8 @@ classdef ReportStatus
                 'All-toggle report mode: all independent boolean features enabled for run'
                 'README updated to Stage 24 with runtime-SHA policy'
                 'TWSTFT code time-transfer diagnostic scaffold (Stage 24a, diagnostic-only)'
+                'Stage 25: env-var all-toggle gate; run_stage25_26_validation executes main script directly'
+                'Stage 26: OrbitDynamics two-body + J2 + RK4; OrbitPropagator orbit-mode selector'
             };
         end
 
