@@ -29,11 +29,11 @@ classdef MainScriptValidationGate
             state = struct();
 
             % Resolve stage, seed, count from env vars.
-            stg = 36;
+            stg = 37;
             v = str2double(getenv('OO_V1_VALIDATION_STAGE'));
             if ~isnan(v) && v > 0; stg = round(v); end
 
-            seed = 36;
+            seed = 37;
             v = str2double(getenv('OO_V1_RANDOM_TEST_SEED'));
             if ~isnan(v) && isfinite(v); seed = round(v); end
 
@@ -152,7 +152,10 @@ classdef MainScriptValidationGate
         end
 
         function [pdfOk, ptOk, texOk, warns] = vfyPdf_(pdfPath, sha, nP, nT, stg)
-            % vfyPdf_  Verify PDF existence, size, and text content.
+            % vfyPdf_  Verify PDF existence, size, and scientific content.
+            % Stage 37+: PDF must have scientific sections and must NOT have a
+            % "Stage N Validation Status" chapter heading.
+            % SHA, test count, and NOT RUN are checked in JSON summary, not PDF.
             pdfOk = false; ptOk = false; texOk = false; warns = {};
             if isempty(pdfPath) || ~exist(pdfPath, 'file')
                 warns{end+1} = 'PDF not found.'; return
@@ -164,10 +167,20 @@ classdef MainScriptValidationGate
             end
             [st, txt] = system(sprintf('pdftotext "%s" - 2>/dev/null', pdfPath));
             if st == 0 && ~isempty(strtrim(txt))
-                toks = {['Stage ' num2str(stg)], sha, sprintf('%d / %d', nP, nT), 'NOT RUN', 'Main script'};
-                ptOk = all(cellfun(@(t) ~isempty(strfind(txt, t)), toks)); %#ok<STREMP>
-                if ~ptOk
-                    warns{end+1} = sprintf('PDF text: tokens missing (SHA %s, %d/%d).', sha, nP, nT);
+                stgTag   = ['Stage ' num2str(stg)];
+                badTok   = [stgTag ' Validation Status'];
+                hasStage = ~isempty(strfind(txt, stgTag)); %#ok<STREMP>
+                hasSci   = ~isempty(strfind(txt, 'Scenario Summary')); %#ok<STREMP>
+                noValSt  =  isempty(strfind(txt, badTok)); %#ok<STREMP>
+                ptOk = hasStage && hasSci && noValSt;
+                if ~hasStage
+                    warns{end+1} = sprintf('PDF text: ''Stage %d'' not found in title block.', stg);
+                end
+                if ~hasSci
+                    warns{end+1} = 'PDF text: ''Scenario Summary'' section not found.';
+                end
+                if ~noValSt
+                    warns{end+1} = sprintf('PDF text: ''%s'' heading still present.', badTok);
                 end
                 return
             end
@@ -176,8 +189,9 @@ classdef MainScriptValidationGate
             if exist(texPath, 'file')
                 try
                     t = fileread(texPath);
-                    texOk = ~isempty(strfind(t, 'NOT RUN')) && ... %#ok<STREMP>
-                            ~isempty(strfind(t, ['Stage ' num2str(stg)])); %#ok<STREMP>
+                    noValSt  = isempty(regexp(t, '\\\\section\{[^}]*Validation Status', 'once'));
+                    hasScene = ~isempty(strfind(t, 'Scenario Summary')); %#ok<STREMP>
+                    texOk = noValSt && hasScene;
                 catch; end
             end
         end
@@ -191,6 +205,7 @@ classdef MainScriptValidationGate
                 case 34; t = 'Attitude Jacobian Consistency Audit v1';
                 case 35; t = 'Single-Asset Attitude Evidence Report v1';
                 case 36; t = 'Single-Asset Attitude Scenario Readiness Gate v1';
+                case 37; t = 'Move Validation Status Out of PDF Into README';
                 otherwise
                     try; t = revgnss.ReportStatus.current().stageTitle; catch; t = sprintf('Stage %d', stg); end
             end
