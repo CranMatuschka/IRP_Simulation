@@ -59,6 +59,24 @@ classdef CodeIonoFreeRowBuilder
             rowIF.metadata.ionosphereFirstOrderCancelled  = true;
             rowIF.metadata.higherOrderIonosphereModelled  = false;
             rowIF.metadata.calibratedBiasProductsAvailable = false;
+            rowIF.metadata.hExplicitlyCombined            = true;
+            rowIF.metadata.hCombination                   = 'alphaH1_betaH2';
+        end
+
+        function H_IF = combineJacobians(H_L1, H_L2)
+            % combineJacobians  Combine L1/L2 Jacobian rows using IF coefficients.
+            %   H_IF = alpha*H_L1 + beta*H_L2
+            %   For synthetic tests and future row-level H verification.
+            if ~isequal(size(H_L1), size(H_L2))
+                error('CodeIonoFreeRowBuilder:dimensionMismatch', ...
+                    'H dimensions do not match: L1 [%s] vs L2 [%s].', ...
+                    num2str(size(H_L1)), num2str(size(H_L2)));
+            end
+            sigL1 = revgnss.SignalDefinition.get('L1');
+            sigL2 = revgnss.SignalDefinition.get('L2');
+            [alpha, beta] = revgnss.IonoFreeCombination.coefficients( ...
+                sigL1.frequency_Hz, sigL2.frequency_Hz);
+            H_IF = alpha * H_L1 + beta * H_L2;
         end
 
         function [ok, reason, nCandidatePairs] = canBuildFromStack(stackOrRows, cfg)

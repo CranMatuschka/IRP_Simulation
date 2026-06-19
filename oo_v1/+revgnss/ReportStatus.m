@@ -12,8 +12,8 @@ classdef ReportStatus
     methods (Static)
 
         function s = current()
-            s.stage      = '45';
-            s.stageTitle = 'Guarded Ionosphere-Free Code EKF Rows v1';
+            s.stage      = '46';
+            s.stageTitle = 'Code IF EKF Consistency and Traceability v1';
             s.validationMode = 'targeted-random-smoke';
             s.fullSuiteRun   = false;
 
@@ -57,10 +57,10 @@ classdef ReportStatus
             end
             vsSHA = '';
             if isfield(vs, 'gitSHA'); vsSHA = strtrim(char(vs.gitSHA)); end
-            s.validationArtifactFresh = (vsStageNum >= 45) && strcmp(vsSHA, runtimeSHA);
+            s.validationArtifactFresh = (vsStageNum >= 46) && strcmp(vsSHA, runtimeSHA);
             if ~s.validationArtifactFresh
                 s.validationWarnings{end+1} = ...
-                    'No fresh local validation summary for this commit. Run: setenv(''OO_V1_VALIDATE_REPORT'',''true''); setenv(''OO_V1_VALIDATION_STAGE'',''45''); run_oo_reverse_gnss_report';
+                    'No fresh local validation summary for this commit. Run: setenv(''OO_V1_VALIDATE_REPORT'',''true''); setenv(''OO_V1_VALIDATION_STAGE'',''46''); run_oo_reverse_gnss_report';
             end
 
             if isfield(vs, 'selectedTestNames')
@@ -174,6 +174,7 @@ classdef ReportStatus
                 'Stage 43: diagnostic-only L1/L2 ionosphere-free combination coefficients, first-order ionosphere cancellation check, and noise amplification reporting; no EKF IF rows and no integer fixing'
                 'Stage 44: SignalConfigResolver for consistent L2 detection from any cfg field; IonosphereFreeBiasBudget diagnostic IF bias residual propagation; fixes l2SignalEnabled_ bug in IFCombinationDiagnostics'
                 'Stage 45: guarded L1/L2 ionosphere-free code EKF rows via IF combination using alpha/beta coefficients; uncorrelated-noise R_IF; explicit bias-budget and noise-amplification limitations; no carrier IF, no integer fixing, no PPP-grade claim'
+                'Stage 46: CodeIonoFreeConsistencyDiagnostics; explicit row-count, H-compatibility, R/noise-amplification, residual/NIS, and bias-state-risk audit for Stage 45 code IF EKF rows; combineJacobians utility in CodeIonoFreeRowBuilder'
             };
         end
 

@@ -2814,6 +2814,57 @@ classdef ClockExactReportBuilder
                 fprintf(fid, 'Integer fixing & false\\\\\n');
                 fprintf(fid, '\\bottomrule\n\\end{tabular}\\par\n\n');
             end
+
+            % --- Stage 46: Code IF EKF Consistency and Traceability ---
+            if isfield(cfg,'diagnostics') && isfield(cfg.diagnostics,'codeIonoFreeConsistency') && ...
+                    isfield(cfg.diagnostics.codeIonoFreeConsistency,'enable') && ...
+                    cfg.diagnostics.codeIonoFreeConsistency.enable
+                fprintf(fid, '\\subsection*{Code IF EKF Consistency and Traceability (Stage~46)}\n');
+                fprintf(fid, ['\\textit{Stage~46 audits the Stage~45 code IF EKF path. ' ...
+                    'It does not implement carrier IF rows, calibrated DCB/IFB products, ' ...
+                    'integer ambiguity fixing, or PPP-grade processing.}\n\n']);
+                s46 = revgnss.CodeIonoFreeConsistencyDiagnostics.assess(summary, cfg);
+                fprintf(fid, '\\begin{tabular}{p{0.46\\textwidth}p{0.42\\textwidth}}\n');
+                fprintf(fid, '\\toprule\n\\textbf{Property} & \\textbf{Value}\\\\\n\\midrule\n');
+                fprintf(fid, 'Classification & \\texttt{%s}\\\\\n', ...
+                    revgnss.ClockExactReportBuilder.esc_(s46.classification));
+                fprintf(fid, 'Requested & %s\\\\\n',    mat2str(s46.requested));
+                fprintf(fid, 'Used in EKF & %s\\\\\n',  mat2str(s46.usedInEkf));
+                fprintf(fid, 'L2 resolved & %s\\\\\n',  mat2str(s46.l2Enabled));
+                if ~isnan(s46.nCodeL1Rows)
+                    fprintf(fid, 'L1 code rows (inferred) & %d\\\\\n', s46.nCodeL1Rows); end
+                if ~isnan(s46.nCodeL2Rows)
+                    fprintf(fid, 'L2 code rows (inferred) & %d\\\\\n', s46.nCodeL2Rows); end
+                if ~isnan(s46.nCodeIfRows)
+                    fprintf(fid, 'IF code rows & %d\\\\\n', s46.nCodeIfRows); end
+                fprintf(fid, 'Row count consistent & %s\\\\\n', mat2str(s46.rowCountConsistent));
+                fprintf(fid, 'Row count source & \\texttt{%s}\\\\\n', ...
+                    revgnss.ClockExactReportBuilder.esc_(s46.rowCountSource));
+                fprintf(fid, 'H compatibility class & \\texttt{%s}\\\\\n', ...
+                    revgnss.ClockExactReportBuilder.esc_(s46.hCompatibilityClass));
+                fprintf(fid, 'H explicitly combined & %s\\\\\n', mat2str(s46.hExplicitlyCombined));
+                if ~isnan(s46.rAmplification)
+                    fprintf(fid, 'R/noise amplification & %.4f\\,x\\\\\n', s46.rAmplification); end
+                if ~isnan(s46.residualRms_m)
+                    fprintf(fid, 'Postfit residual RMS & %.4f\\,m\\\\\n', s46.residualRms_m); end
+                if ~isnan(s46.nisMean)
+                    fprintf(fid, 'NIS mean / expected & %.2f\\,/\\,%.1f\\\\\n', ...
+                        s46.nisMean, s46.expectedNis); end
+                fprintf(fid, 'Signal-dep.\\ bias state risk & \\texttt{%s}\\\\\n', ...
+                    revgnss.ClockExactReportBuilder.esc_(s46.codeBiasStateRisk));
+                fprintf(fid, 'Carrier IF rows impl.\\ & false\\\\\n');
+                fprintf(fid, 'Integer fixing impl.\\ & false\\\\\n');
+                fprintf(fid, 'Calibrated bias products & false\\\\\n');
+                fprintf(fid, '\\bottomrule\n\\end{tabular}\\par\n\n');
+                if ~isempty(s46.warnings)
+                    fprintf(fid, '\\textit{Audit warnings:}\n\\begin{itemize}\n');
+                    for wi46 = 1:numel(s46.warnings)
+                        fprintf(fid, '\\item %s\n', ...
+                            revgnss.ClockExactReportBuilder.esc_(s46.warnings{wi46}));
+                    end
+                    fprintf(fid, '\\end{itemize}\n\n');
+                end
+            end
         end
 
         % ================================================================

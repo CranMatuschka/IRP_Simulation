@@ -35,7 +35,7 @@ oo_v1_envAllToggles_ = strcmpi(getenv('OO_V1_ALL_TOGGLES'), 'true');
 if oo_v1_envValidate_; oo_v1_envAllToggles_ = true; end  % validate always uses all toggles
 oo_v1_envStage_      = str2double(getenv('OO_V1_VALIDATION_STAGE'));
 if isnan(oo_v1_envStage_); oo_v1_envStage_ = 0; end
-if oo_v1_envValidate_ && oo_v1_envStage_ == 0; oo_v1_envStage_ = 45; end
+if oo_v1_envValidate_ && oo_v1_envStage_ == 0; oo_v1_envStage_ = 46; end
 oo_v1_envCompile_    = strtrim(getenv('OO_V1_REPORT_COMPILE_TEX'));
 
 cfg = revgnss.ConfigFactory.defaultConfig();
@@ -148,6 +148,12 @@ cfg.signals.twoFrequency.enable = true;
 cfg.measurements.code.ionosphereFreeRows.enable  = false;
 cfg.measurements.code.ionosphereFreeRows.useInEkf = false;
 cfg.diagnostics.codeIonoFreeRows.enable           = true;
+
+% --- Code IF EKF consistency diagnostic (Stage 46) -------------
+% Audits Stage 45 code IF path: row counts, H compatibility,
+% R/noise amplification, residual/NIS, and bias-state risk.
+% Carrier IF rows, integer fixing, and calibrated DCB are NOT implemented.
+cfg.diagnostics.codeIonoFreeConsistency.enable = true;
 
 % --- Inter-frequency bias budget (Stage 44) --------------------
 % Diagnostic only. Default all to 0 (no calibrated products in v1).
@@ -304,6 +310,7 @@ if stageAllToggles || oo_v1_envAllToggles_
     cfg.measurements.code.ionosphereFreeRows.enable          = true;
     cfg.measurements.code.ionosphereFreeRows.useInEkf        = true;
     cfg.diagnostics.codeIonoFreeRows.enable                  = true;
+    cfg.diagnostics.codeIonoFreeConsistency.enable           = true;
     cfg.validation.stageAllToggles         = true;
     if oo_v1_envAllToggles_
         cfg.validation.invokedMainScript = true;

@@ -804,6 +804,27 @@ classdef ReportRunner
             else
                 summary.totalCodeIonoFreeRows = 0;
             end
+            % Stage 46: compact code IF traceability fields
+            try
+                co46 = revgnss.IonosphereFreeCombinationDiagnostics.coefficients('L1','L2');
+                summary.codeIonoFreeAlpha              = co46.alpha;
+                summary.codeIonoFreeBeta               = co46.beta;
+                summary.codeIonoFreeNoiseAmplification = sqrt(co46.alpha^2 + co46.beta^2);
+            catch
+                summary.codeIonoFreeAlpha              = NaN;
+                summary.codeIonoFreeBeta               = NaN;
+                summary.codeIonoFreeNoiseAmplification = NaN;
+            end
+            summary.totalCodeRowsL1                      = nTwr * nRx;
+            summary.totalCodeRowsL2                      = nTwr * nRx;
+            summary.codeIonoFreeAssumesUncorrelatedNoise = true;
+            summary.codeIonoFreeCarrierIfRowsImplemented = false;
+            summary.codeIonoFreeIntegerFixingImplemented = false;
+            if summary.codeIonoFreeRowsUsedInEkf
+                summary.codeIonoFreeCountsSource = 'measurement-stack-summary';
+            else
+                summary.codeIonoFreeCountsSource = 'inferred-from-nTowers-nReceivers';
+            end
             summary.twstftDiag = struct('enabled',false,'diagnosticClassification','disabled', ...
                 'useInEKF',false,'clockOffsetDiagnostic_s',NaN,'clockOffsetDiagnostic_m',NaN, ...
                 'calibratedDelay_s',0,'processingDelay_s',0,'timingSource','none', ...
