@@ -2683,6 +2683,36 @@ classdef ClockExactReportBuilder
                 fprintf(fid, 'Integer fixing impl. & false\\\\\n');
                 fprintf(fid, '\\bottomrule\n\\end{tabular}\\par\n\n');
             end
+
+            % --- Stage 42: L2 Carrier EKF Row Architecture ---
+            if isfield(cfg,'diagnostics') && isfield(cfg.diagnostics,'l2CarrierArchitecture') && ...
+                    isfield(cfg.diagnostics.l2CarrierArchitecture,'enable') && ...
+                    cfg.diagnostics.l2CarrierArchitecture.enable
+                fprintf(fid, '\\subsection*{L2 Carrier EKF Row Architecture (Stage~42)}\n');
+                fprintf(fid, ['\\textit{Guarded L1/L2 carrier EKF row architecture. ' ...
+                    'Ionosphere-free combination and integer ambiguity resolution ' ...
+                    'are not implemented in v1.}\n\n']);
+
+                s42 = revgnss.L2CarrierArchitectureDiagnostics.assess(summary, cfg);
+                fprintf(fid, '\\begin{tabular}{p{0.46\\textwidth}p{0.42\\textwidth}}\n');
+                fprintf(fid, '\\toprule\n\\textbf{Property} & \\textbf{Value}\\\\\n\\midrule\n');
+                fprintf(fid, 'Classification & \\texttt{%s}\\\\\n', ...
+                    revgnss.ClockExactReportBuilder.esc_(s42.classification));
+                fprintf(fid, 'Active carrier signals & %d\\\\\n', s42.nSignals);
+                fprintf(fid, 'L2 EKF rows enabled & %s\\\\\n', mat2str(s42.l2Enabled));
+                fprintf(fid, 'L1 $\\lambda$ (m) & %.6f\\\\\n', s42.l1Lambda_m);
+                if s42.l2Enabled
+                    fprintf(fid, 'L2 $\\lambda$ (m) & %.6f\\\\\n', s42.l2Lambda_m);
+                    fprintf(fid, 'Iono scale L2/L1 & %.4f\\\\\n', s42.ionoScaleL2RelativeToL1);
+                end
+                if s42.stateMapAvailable
+                    fprintf(fid, 'Amb.\\ states ($T{\\times}R{\\times}S$) & $%d{\\times}%d{\\times}%d=%d$\\\\\n', ...
+                        s42.nTowers, s42.nReceivers, s42.nSignalsFromEkf, s42.nAmbiguityStates);
+                end
+                fprintf(fid, 'IF combination impl.\\ & false\\\\\n');
+                fprintf(fid, 'Integer fixing impl.\\ & false\\\\\n');
+                fprintf(fid, '\\bottomrule\n\\end{tabular}\\par\n\n');
+            end
         end
 
         % ================================================================

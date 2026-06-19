@@ -15,13 +15,14 @@ classdef ReportRealityHelper
             end
 
             nAmb = revgnss.ReportRealityHelper.safeField_(summary, 'nAmbiguityStates', 0);
-            if strcmp(carrierMode, 'ekfFloat') && strcmp(ambMode, 'floatPerTowerReceiverSignal') && nAmb ~= nTwr*nRx
+            nSigRRH = revgnss.SignalCatalog.nCarrierSignals(cfg);
+            if strcmp(carrierMode, 'ekfFloat') && strcmp(ambMode, 'floatPerTowerReceiverSignal') && nAmb ~= nTwr*nRx*nSigRRH
                 error('ClockExactReportBuilder:ambiguityStateCountMismatch', ...
-                    'Receiver-indexed ambiguity mode requires nTowers*nReceivers states; got %d.', nAmb);
+                    'Receiver-indexed ambiguity mode requires nTowers*nReceivers*nSignals states; got %d.', nAmb);
             end
-            if strcmp(carrierMode, 'ekfFloat') && strcmp(ambMode, 'floatPerTowerSignal') && nAmb ~= nTwr
+            if strcmp(carrierMode, 'ekfFloat') && strcmp(ambMode, 'floatPerTowerSignal') && nAmb ~= nTwr*nSigRRH
                 error('ClockExactReportBuilder:ambiguityStateCountMismatch', ...
-                    'Tower/signal ambiguity mode requires nTowers states; got %d.', nAmb);
+                    'Tower/signal ambiguity mode requires nTowers*nSignals states; got %d.', nAmb);
             end
 
             estAtt = isfield(cfg, 'estimator') && isfield(cfg.estimator, 'estimateAttitude') && cfg.estimator.estimateAttitude;

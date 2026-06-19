@@ -54,34 +54,43 @@ classdef CarrierMeasurementBuilder
                 sigma_phi = cfg.measurements.carrier.sigma_m;
             end
 
-            sigIdx    = 1;   % carrier rows use signal index 1 (L1) in v1
-            lambda    = 299792458 / 1575.42e6;
-            if isfield(cfg,'signals') && isfield(cfg.signals,'L1') && isfield(cfg.signals.L1,'lambda_m')
-                lambda = cfg.signals.L1.lambda_m;
-            end
+            % Stage 42: carrier EKF signals from catalog (L1 always; L2 if guarded toggle enabled)
+            carrierSigs_ = revgnss.SignalCatalog.carrierSignalsFromConfig(cfg);
+            nSig_        = numel(carrierSigs_);
             b_rx_true = asset.clock.getBiasMeters();
             b_rx_est  = x_est(stateMap.b_rx_idx);
 
-            z_phi = zeros(Mp, 1);
-            h_phi = zeros(Mp, 1);
-            H_phi = zeros(Mp, nx);
-            R_phi = sigma_phi^2 * eye(Mp);
+            Mp_total = Mp * nSig_;
+            z_phi = zeros(Mp_total, 1);
+            h_phi = zeros(Mp_total, 1);
+            H_phi = zeros(Mp_total, nx);
+            R_phi = sigma_phi^2 * eye(Mp_total);
 
-            cpInfo.towerIdx          = twr_pairs;
-            cpInfo.antennaIdx        = ant_pairs;
-            cpInfo.signalIdx         = sigIdx * ones(Mp, 1);
-            cpInfo.phi_m             = zeros(Mp, 1);
-            cpInfo.prefit_m          = zeros(Mp, 1);
-            cpInfo.ambiguityStateIdx = zeros(Mp, 1);
-            cpInfo.trackKey          = cell(Mp, 1);
+            cpInfo.towerIdx          = zeros(Mp_total, 1);
+            cpInfo.antennaIdx        = zeros(Mp_total, 1);
+            cpInfo.signalIdx         = zeros(Mp_total, 1);
+            cpInfo.phi_m             = zeros(Mp_total, 1);
+            cpInfo.prefit_m          = zeros(Mp_total, 1);
+            cpInfo.ambiguityStateIdx = zeros(Mp_total, 1);
+            cpInfo.trackKey          = cell(Mp_total, 1);
+
+            r_cm_est  = x_est(stateMap.r_idx);
+            euler_est = x_est(stateMap.euler_idx);
+            doFD      = revgnss.MeasurementModelUtils.needsFiniteDiffH_(cfg);
+
+            for si_ = 1:nSig_
+                sigIdx       = si_;
+                lambda       = carrierSigs_(si_).wavelength_m;
+                ionoScaleRel = carrierSigs_(si_).ionoScaleRelativeToL1;
 
             for mi = 1:Mp
+                rowOut = (si_-1)*Mp + mi;
                 ti  = twr_pairs(mi);
                 ai  = ant_pairs(mi);
                 elv = errStruct.elevations_rad(mi);
 
-                % True float ambiguity — initialised once per arc
-                key = int32(ti * 1000 + ai);
+                % True float ambiguity — key includes signal index for multi-signal support
+                key = int32(ti * 1000000 + ai * 10 + si_);
                 if ~isKey(floatAmbiguityTruth_m, key)
                     initSig = 100;
                     if isfield(cfg,'estimation') && isfield(cfg.estimation,'ambiguity') && ...
@@ -116,7 +125,7 @@ classdef CarrierMeasurementBuilder
                 b_twr_t = towerClkTruth(mi);
                 b_twr_m = towerClkModel(mi);
 
-                % Ionosphere — NEGATIVE for carrier (opposite to +iono for code)
+                % Ionosphere — NEGATIVE for carrier; scale by (fL1/f)^2 per signal
                 iono_t = 0; iono_m = 0;
                 if isfield(errStruct,'bySource')
                     bt = errStruct.bySource.truth_m;
@@ -124,8 +133,10 @@ classdef CarrierMeasurementBuilder
                     if isfield(bt,'iono') && mi <= numel(bt.iono); iono_t = bt.iono(mi); end
                     if isfield(bm,'iono') && mi <= numel(bm.iono); iono_m = bm.iono(mi); end
                 end
+                iono_t_sig = iono_t * ionoScaleRel;
+                iono_m_sig = iono_m * ionoScaleRel;
 
-                % Troposphere — same sign as code
+                % Troposphere — same sign as code, signal-independent
                 trop_t = 0; trop_m = 0;
                 if isfield(errStruct,'bySource')
                     bt = errStruct.bySource.truth_m;
@@ -158,30 +169,28 @@ classdef CarrierMeasurementBuilder
                 noise_phi = sigma_phi * errorChain.drawNormal(1,1);
 
                 % z: +trop, -iono (carrier ionosphere is OPPOSITE sign to code)
-                z_phi(mi) = rho_t + b_rx_true - b_twr_t + trop_t - iono_t + B_true + noise_phi;
+                z_phi(rowOut) = rho_t + b_rx_true - b_twr_t + trop_t - iono_t_sig + B_true + noise_phi;
 
                 % h: +trop_model, -iono_model + ZWD state
-                h_phi(mi) = rho_e + b_rx_est - b_twr_m + trop_m - iono_m + B_est;
+                h_phi(rowOut) = rho_e + b_rx_est - b_twr_m + trop_m - iono_m_sig + B_est;
                 if isfield(stateMap,'zwdIdx') && ti <= numel(stateMap.zwdIdx) && ...
                         stateMap.zwdIdx(ti) > 0
                     mf_phi = revgnss.MappingFunctions.troposphere(elv, ...
                         revgnss.MeasurementModelUtils.zwdMappingKind(cfg));
-                    h_phi(mi) = h_phi(mi) + mf_phi * x_est(stateMap.zwdIdx(ti));
+                    h_phi(rowOut) = h_phi(rowOut) + mf_phi * x_est(stateMap.zwdIdx(ti));
                 end
 
-                cpInfo.phi_m(mi)             = z_phi(mi);
-                cpInfo.prefit_m(mi)          = z_phi(mi) - h_phi(mi);
-                cpInfo.trackKey{mi}          = sprintf('T%03d_A%03d_S%02d', ti, ai, sigIdx);
-                cpInfo.ambiguityStateIdx(mi) = ambStateIdx;
+                cpInfo.phi_m(rowOut)             = z_phi(rowOut);
+                cpInfo.prefit_m(rowOut)          = z_phi(rowOut) - h_phi(rowOut);
+                cpInfo.towerIdx(rowOut)           = ti;
+                cpInfo.antennaIdx(rowOut)         = ai;
+                cpInfo.signalIdx(rowOut)          = sigIdx;
+                cpInfo.trackKey{rowOut}           = sprintf('T%03d_A%03d_S%02d', ti, ai, sigIdx);
+                cpInfo.ambiguityStateIdx(rowOut)  = ambStateIdx;
 
                 % ---- H: position columns (analytic or finite-difference) ------
-                r_cm_est  = x_est(stateMap.r_idx);
-                euler_est = x_est(stateMap.euler_idx);
-                doFD = revgnss.MeasurementModelUtils.needsFiniteDiffH_(cfg);
-
                 if doFD
                     % Central finite-difference position Jacobian.
-                    % Uses modelRangeOnly — same function as the h_phi range term.
                     step_r = 1.0;
                     for ki = 1:3
                         rp = r_cm_est; rp(ki) = rp(ki) + step_r;
@@ -190,11 +199,11 @@ classdef CarrierMeasurementBuilder
                             cfg, towers, ti, ai, rp, euler_est, leverArms_model);
                         hm = revgnss.MeasurementModelUtils.modelRangeOnly( ...
                             cfg, towers, ti, ai, rm, euler_est, leverArms_model);
-                        H_phi(mi, stateMap.r_idx(ki)) = (hp - hm) / (2*step_r);
+                        H_phi(rowOut, stateMap.r_idx(ki)) = (hp - hm) / (2*step_r);
                     end
                 else
                     % Analytic unit vector (pure geometry, no range corrections)
-                    H_phi(mi, stateMap.r_idx) = (delta_e / rho_e_geom)';
+                    H_phi(rowOut, stateMap.r_idx) = (delta_e / rho_e_geom)';
                 end
 
                 doAttJac = isfield(cfg.estimator, 'estimateAttitude') && ...
@@ -213,21 +222,21 @@ classdef CarrierMeasurementBuilder
                             cfg, towers, ti, ai, r_cm_est, ep, leverArms_model);
                         hm = revgnss.MeasurementModelUtils.modelRangeOnly( ...
                             cfg, towers, ti, ai, r_cm_est, em, leverArms_model);
-                        H_phi(mi, stateMap.euler_idx(ke)) = (hp - hm) / (2*step_e);
+                        H_phi(rowOut, stateMap.euler_idx(ke)) = (hp - hm) / (2*step_e);
                     end
                 end
 
                 % ---- H: clock, ambiguity, ZWD (always analytic) ---------------
-                H_phi(mi, stateMap.b_rx_idx) = 1;
+                H_phi(rowOut, stateMap.b_rx_idx) = 1;
 
                 if isfield(stateMap,'towerClockIdx') && ...
                         ti <= size(stateMap.towerClockIdx,1) && ...
                         stateMap.towerClockIdx(ti,1) > 0
-                    H_phi(mi, stateMap.towerClockIdx(ti,1)) = -1;
+                    H_phi(rowOut, stateMap.towerClockIdx(ti,1)) = -1;
                 end
 
                 if ambStateIdx > 0 && ambStateIdx <= nx
-                    H_phi(mi, ambStateIdx) = 1;
+                    H_phi(rowOut, ambStateIdx) = 1;
                 end
 
                 % ZWD column: +mf (same sign for carrier and code)
@@ -235,7 +244,7 @@ classdef CarrierMeasurementBuilder
                         ti <= numel(stateMap.zwdIdx) && stateMap.zwdIdx(ti) > 0
                     mf = revgnss.MappingFunctions.troposphere(elv, ...
                         revgnss.MeasurementModelUtils.zwdMappingKind(cfg));
-                    H_phi(mi, stateMap.zwdIdx(ti)) = mf;
+                    H_phi(rowOut, stateMap.zwdIdx(ti)) = mf;
                 end
 
                 % ---- Known-ambiguity validation (ATTITUDE VALIDATION ONLY — not operational) ----
@@ -244,12 +253,13 @@ classdef CarrierMeasurementBuilder
                 % from ambiguity-corrected phase — proving whether the attitude Jacobian is correct.
                 if isfield(cfg.estimator,'knownAmbiguityAttitudeValidation') && ...
                         cfg.estimator.knownAmbiguityAttitudeValidation && ambStateIdx > 0
-                    z_phi(mi)           = z_phi(mi) - B_true;
-                    h_phi(mi)           = h_phi(mi) - B_est;
-                    H_phi(mi,ambStateIdx) = 0;
-                    cpInfo.prefit_m(mi) = z_phi(mi) - h_phi(mi);
+                    z_phi(rowOut)              = z_phi(rowOut) - B_true;
+                    h_phi(rowOut)              = h_phi(rowOut) - B_est;
+                    H_phi(rowOut, ambStateIdx) = 0;
+                    cpInfo.prefit_m(rowOut)    = z_phi(rowOut) - h_phi(rowOut);
                 end
-            end
+            end  % for mi
+            end  % for si_
         end
 
         function [cp, ambiguityMap] = buildDiagnostic( ...

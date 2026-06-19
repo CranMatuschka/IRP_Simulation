@@ -36,32 +36,36 @@ classdef AmbiguityStateMetadata
                     meta.ambiguityIdx3d = sm.ambiguityIdx3d;
                     nT = meta.nTowers; nRx = meta.nReceivers; nSig = meta.nSignals;
                     tbl = repmat(struct('stateIndex',0,'towerIndex',0,'receiverIndex',0, ...
-                        'signalIndex',0,'signalId','L1','label',''), nT*nRx*nSig, 1);
+                        'signalIndex',0,'signalId','','label',''), nT*nRx*nSig, 1);
                     k = 0;
                     for ti = 1:nT
                         for ri = 1:nRx
                             for si = 1:nSig
                                 k = k+1;
+                                sigId = revgnss.SignalCatalog.signalId(si);
                                 tbl(k).stateIndex    = sm.ambiguityIdx3d(ti,ri,si);
                                 tbl(k).towerIndex    = ti;
                                 tbl(k).receiverIndex = ri;
                                 tbl(k).signalIndex   = si;
-                                tbl(k).label         = sprintf('N_T%d_R%d_S%d',ti,ri,si);
+                                tbl(k).signalId      = sigId;
+                                tbl(k).label         = sprintf('N_T%d_R%d_%s',ti,ri,sigId);
                             end
                         end
                     end
                 else
                     nT = meta.nTowers; nSig = meta.nSignals;
                     tbl = repmat(struct('stateIndex',0,'towerIndex',0,'receiverIndex',1, ...
-                        'signalIndex',0,'signalId','L1','label',''), nT*nSig, 1);
+                        'signalIndex',0,'signalId','','label',''), nT*nSig, 1);
                     k = 0;
                     for ti = 1:nT
                         for si = 1:nSig
                             k = k+1;
+                            sigId = revgnss.SignalCatalog.signalId(si);
                             tbl(k).stateIndex  = sm.ambiguityIdx(ti,si);
                             tbl(k).towerIndex  = ti;
                             tbl(k).signalIndex = si;
-                            tbl(k).label       = sprintf('N_T%d_S%d',ti,si);
+                            tbl(k).signalId    = sigId;
+                            tbl(k).label       = sprintf('N_T%d_%s',ti,sigId);
                         end
                     end
                 end
@@ -152,6 +156,7 @@ classdef AmbiguityStateMetadata
                 lines{end+1} = sprintf('nAmbiguities        : %d', meta.nAmbiguities);
                 lines{end+1} = sprintf('nTowers             : %d', meta.nTowers);
                 lines{end+1} = sprintf('nReceivers          : %d', meta.nReceivers);
+                lines{end+1} = sprintf('nSignals            : %d', meta.nSignals);
                 lines{end+1} = 'StateIndexSource    : state-map';
             end
             lines{end+1} = sprintf('CovAvailable        : %s', mat2str(cov.available));

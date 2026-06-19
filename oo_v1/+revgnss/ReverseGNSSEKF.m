@@ -102,15 +102,15 @@ classdef ReverseGNSSEKF < handle
                 if strcmp(ambMode,'floatPerTowerSignal')
                     obj.estimateAmbiguities = true;
                     obj.ambiguityMode       = 'floatPerTowerSignal';
-                    % Carrier EKF in v1 supports L1 only (sigIdx=1 only).
-                    obj.ambiguityNSignals   = 1;
+                    % Stage 42: nSignals from SignalCatalog (1=L1 only, 2=L1+L2 when guarded).
+                    obj.ambiguityNSignals   = revgnss.SignalCatalog.nCarrierSignals(cfg);
                     obj.ambiguityNReceivers = 1;
                     obj.nAmbiguities = nTowers * obj.ambiguityNSignals;
                 elseif strcmp(ambMode,'floatPerTowerReceiverSignal')
                     obj.estimateAmbiguities = true;
                     obj.ambiguityMode       = 'floatPerTowerReceiverSignal';
-                    % One ambiguity per tower × receiver × signal (L1 only in v1).
-                    obj.ambiguityNSignals   = 1;
+                    % Stage 42: nSignals from SignalCatalog (1=L1 only, 2=L1+L2 when guarded).
+                    obj.ambiguityNSignals   = revgnss.SignalCatalog.nCarrierSignals(cfg);
                     nRx = 1;
                     if isfield(cfg,'scenario') && isfield(cfg.scenario,'nReceivers')
                         nRx = cfg.scenario.nReceivers;

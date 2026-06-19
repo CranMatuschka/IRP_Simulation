@@ -52,7 +52,11 @@ classdef CarrierRowMetadataInventory
                 ~strcmp(ai.source,'unavailable');
             s.warnings                   = [s.warnings, ai.warnings];
 
-            s.l2RowsPresent = false;
+            try
+                s.l2RowsPresent = revgnss.SignalCatalog.nCarrierSignals(cfg) > 1;
+            catch
+                s.l2RowsPresent = false;
+            end
             s.available     = s.rowMetadataAvailable;
             s.classification = revgnss.CarrierRowMetadataInventory.classify_(s);
             s.limitations    = revgnss.CarrierRowMetadataInventory.limitations_(s);
@@ -191,7 +195,7 @@ classdef CarrierRowMetadataInventory
         function lims = limitations_(s)
             lims = {
                 'Per-row receiver/tower/signal IDs not available in current architecture.'
-                'L2 carrier EKF rows not implemented in v1.'
+                'L2 carrier EKF rows available via cfg.measurements.carrier.l2EkfRows.enable (Stage 42).'
                 'Integer ambiguity fixing not implemented in v1.'
             };
             if ~isnan(s.ambiguityStateCount) && strcmp(s.ambiguityStateCountSource,'summary-estimate')

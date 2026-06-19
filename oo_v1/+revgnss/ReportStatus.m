@@ -12,8 +12,8 @@ classdef ReportStatus
     methods (Static)
 
         function s = current()
-            s.stage      = '41';
-            s.stageTitle = 'Ambiguity State Metadata and Covariance Export v1';
+            s.stage      = '42';
+            s.stageTitle = 'L2 Carrier EKF Row Architecture v1';
             s.validationMode = 'targeted-random-smoke';
             s.fullSuiteRun   = false;
 
@@ -57,10 +57,10 @@ classdef ReportStatus
             end
             vsSHA = '';
             if isfield(vs, 'gitSHA'); vsSHA = strtrim(char(vs.gitSHA)); end
-            s.validationArtifactFresh = (vsStageNum >= 41) && strcmp(vsSHA, runtimeSHA);
+            s.validationArtifactFresh = (vsStageNum >= 42) && strcmp(vsSHA, runtimeSHA);
             if ~s.validationArtifactFresh
                 s.validationWarnings{end+1} = ...
-                    'No fresh local validation summary for this commit. Run: setenv(''OO_V1_VALIDATE_REPORT'',''true''); run_oo_reverse_gnss_report';
+                    'No fresh local validation summary for this commit. Run: setenv(''OO_V1_VALIDATE_REPORT'',''true''); setenv(''OO_V1_VALIDATION_STAGE'',''42''); run_oo_reverse_gnss_report';
             end
 
             if isfield(vs, 'selectedTestNames')
@@ -127,7 +127,7 @@ classdef ReportStatus
                 'Quaternion / error-state attitude EKF (current ZYX Euler is documented but singular at pitch +/-90 deg)'
                 'Full per-row LOS metadata for runtime finite-diff Jacobian consistency (production path uses H-only summary)'
                 'Multi-antenna single-asset attitude scenario validation'
-                'L2 carrier EKF rows and ionosphere-free carrier combination'
+                'Ionosphere-free carrier combination (L1/L2 IF; IFB bias, P3/L3 observables)'
                 'Integer ambiguity resolution (LAMBDA/MLAMBDA)'
                 'False-fix-risk control and ratio/residual validation'
                 'Monte Carlo / NIS / NEES stochastic consistency validation'
@@ -169,6 +169,7 @@ classdef ReportStatus
                 'Stage 39: CarrierRowMetadataInventory helper; carrier/differential-attitude row and ambiguity metadata inventory with summary fallback and explicit limitations; reused in Stage 38 helper; report subsection'
                 'Stage 40: AmbiguityReadinessDiagnostics helper; float ambiguity readiness assessment using Stage 39 inventory, covariance check, slip detection status, known-ambiguity validation flag; blockers and score; report subsection'
                 'Stage 41: AmbiguityStateMetadata helper; EKF ambiguity state-map export and final ambiguity covariance sub-block diagnostics for float ambiguity readiness'
+                'Stage 42: SignalCatalog signal facade; guarded L2 carrier EKF row architecture (l2EkfRows.enable); L2 ambiguity states, wavelength, iono scaling per signal; L2CarrierArchitectureDiagnostics; AmbiguityStateMetadata signal ID labels (L1/L2)'
             };
         end
 

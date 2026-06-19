@@ -732,7 +732,7 @@ classdef ReportRunner
                 isfield(cfg.measurements.carrierPhase,'useInEKF') && ...
                 cfg.measurements.carrierPhase.useInEKF);
             summary.totalDopplerRows = nTwr * nRx * doppInEKF;
-            summary.totalCarrierRows = nTwr * nRx * carrInEKF;
+            summary.totalCarrierRows = nTwr * nRx * revgnss.SignalCatalog.nCarrierSignals(cfg) * carrInEKF;
             summary.nStates = NaN;
             try
                 summary.nStates = numel(diag.log(end).estimate.x);
@@ -740,10 +740,11 @@ classdef ReportRunner
             summary.nAmbiguityStates = 0;
             ambMode = revgnss.ReportRunner.safeCfgStr_(cfg, {'estimation','ambiguityMode'}, 'none');
             if carrInEKF
+                nSig42 = revgnss.SignalCatalog.nCarrierSignals(cfg);
                 if strcmp(ambMode,'floatPerTowerReceiverSignal')
-                    summary.nAmbiguityStates = nTwr * nRx;
+                    summary.nAmbiguityStates = nTwr * nRx * nSig42;
                 elseif strcmp(ambMode,'floatPerTowerSignal')
-                    summary.nAmbiguityStates = nTwr;
+                    summary.nAmbiguityStates = nTwr * nSig42;
                 end
             end
             summary.nZwdStates = 0;
