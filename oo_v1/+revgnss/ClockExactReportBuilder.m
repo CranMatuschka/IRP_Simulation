@@ -2578,6 +2578,61 @@ classdef ClockExactReportBuilder
                 end
                 fprintf(fid, '\\end{itemize}\n\n');
             end
+
+            % --- Stage 40: Ambiguity Readiness Diagnostics ---
+            if isfield(cfg, 'diagnostics') && isfield(cfg.diagnostics, 'ambiguityReadiness') && ...
+                    isfield(cfg.diagnostics.ambiguityReadiness, 'enable') && ...
+                    cfg.diagnostics.ambiguityReadiness.enable
+                fprintf(fid, '\\subsection*{Ambiguity Readiness Diagnostics (Stage~40)}\n');
+                fprintf(fid, ['\\textit{Float ambiguity readiness diagnostics only. ' ...
+                    'No integer fixing, no LAMBDA/MLAMBDA, no L2 carrier EKF.}\n\n']);
+
+                try
+                    tmp40.diag    = diag;
+                    tmp40.summary = summary;
+                    ard = revgnss.AmbiguityReadinessDiagnostics.assess(tmp40, cfg);
+                catch ex40
+                    fprintf(fid, 'Ambiguity readiness diagnostics failed: %s\n\n', ...
+                        revgnss.ClockExactReportBuilder.esc_(ex40.message));
+                    ard = revgnss.AmbiguityReadinessDiagnostics.assess(struct(), struct());
+                end
+
+                fprintf(fid, '\\begin{tabular}{p{0.46\\textwidth}p{0.42\\textwidth}}\n');
+                fprintf(fid, '\\toprule\n\\textbf{Property} & \\textbf{Value}\\\\\n\\midrule\n');
+                fprintf(fid, 'Classification & \\texttt{%s}\\\\\n', ...
+                    revgnss.ClockExactReportBuilder.esc_(char(ard.classification)));
+                fprintf(fid, 'Readiness score & %d / 7\\\\\n', ard.readinessScore);
+                fprintf(fid, 'Carrier inventory & \\texttt{%s}\\\\\n', ...
+                    revgnss.ClockExactReportBuilder.esc_(char(ard.carrierInventoryClassification)));
+                fprintf(fid, 'Row metadata completeness & \\texttt{%s}\\\\\n', ...
+                    revgnss.ClockExactReportBuilder.esc_(char(ard.rowMetadataCompleteness)));
+                if isfinite(ard.ambiguityStateCount)
+                    fprintf(fid, 'Ambiguity states & %d (\\texttt{%s})\\\\\n', ...
+                        ard.ambiguityStateCount, ...
+                        revgnss.ClockExactReportBuilder.esc_(char(ard.ambiguityStateCountSource)));
+                else
+                    fprintf(fid, 'Ambiguity states & unavailable\\\\\n');
+                end
+                fprintf(fid, 'Covariance available & %s\\\\\n', ...
+                    mat2str(ard.ambiguityCovarianceAvailable));
+                fprintf(fid, 'Slip detection enabled & %s\\\\\n', ...
+                    mat2str(ard.slipDetectionEnabled));
+                fprintf(fid, 'Known-amb val. enabled & %s\\\\\n', ...
+                    mat2str(ard.knownAmbiguityValidationEnabled));
+                fprintf(fid, 'Lambda ready & %s\\\\\n',         mat2str(ard.lambdaReady));
+                fprintf(fid, 'False-fix controlled & %s\\\\\n', mat2str(ard.falseFixRiskControlled));
+                fprintf(fid, 'Integer fixing impl. & %s\\\\\n', mat2str(ard.integerFixingImplemented));
+                fprintf(fid, '\\bottomrule\n\\end{tabular}\\par\n\n');
+
+                if ~isempty(ard.blockers)
+                    fprintf(fid, '\\textbf{Blockers:}\n\\begin{itemize}\n');
+                    for bi40 = 1:numel(ard.blockers)
+                        fprintf(fid, '\\item %s\n', ...
+                            revgnss.ClockExactReportBuilder.esc_(char(ard.blockers{bi40})));
+                    end
+                    fprintf(fid, '\\end{itemize}\n\n');
+                end
+            end
         end
 
         % ================================================================

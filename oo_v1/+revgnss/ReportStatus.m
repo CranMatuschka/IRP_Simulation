@@ -12,8 +12,8 @@ classdef ReportStatus
     methods (Static)
 
         function s = current()
-            s.stage      = '39';
-            s.stageTitle = 'Carrier Row Metadata Inventory v1';
+            s.stage      = '40';
+            s.stageTitle = 'Ambiguity Readiness Diagnostics v1';
             s.validationMode = 'targeted-random-smoke';
             s.fullSuiteRun   = false;
 
@@ -57,7 +57,7 @@ classdef ReportStatus
             end
             vsSHA = '';
             if isfield(vs, 'gitSHA'); vsSHA = strtrim(char(vs.gitSHA)); end
-            s.validationArtifactFresh = (vsStageNum >= 39) && strcmp(vsSHA, runtimeSHA);
+            s.validationArtifactFresh = (vsStageNum >= 40) && strcmp(vsSHA, runtimeSHA);
             if ~s.validationArtifactFresh
                 s.validationWarnings{end+1} = ...
                     'No fresh local validation summary for this commit. Run: setenv(''OO_V1_VALIDATE_REPORT'',''true''); run_oo_reverse_gnss_report';
@@ -128,7 +128,7 @@ classdef ReportStatus
                 'Full per-row LOS metadata for runtime finite-diff Jacobian consistency (production path uses H-only summary)'
                 'Multi-antenna single-asset attitude scenario validation'
                 'L2 carrier EKF rows and ionosphere-free carrier combination'
-                'Ambiguity readiness diagnostics and integer ambiguity resolution (LAMBDA/MLAMBDA)'
+                'Integer ambiguity resolution (LAMBDA/MLAMBDA)'
                 'Monte Carlo / NIS / NEES stochastic consistency validation'
                 'Scientific troposphere: Niell/GMF/VMF3/GPT3/ERA5 mapping functions'
                 'Scientific ionosphere: Klobuchar/IONEX/higher-order ionosphere models'
@@ -166,6 +166,7 @@ classdef ReportStatus
                 'Stage 37: validation-status chapter removed from PDF; README contains validation status and missing-scientific-stages summary; PDF verification checks scientific content and absence of validation-status heading'
                 'Stage 38: CarrierAttitudePreparation helper; rowInventory (totalCarrierRows/totalDiffAttRows from summary), ambiguityInventory (nAmbiguities from nTowers*nReceivers), classify_ priority chain; report subsection in writeAttitudeObservability_'
                 'Stage 39: CarrierRowMetadataInventory helper; carrier/differential-attitude row and ambiguity metadata inventory with summary fallback and explicit limitations; reused in Stage 38 helper; report subsection'
+                'Stage 40: AmbiguityReadinessDiagnostics helper; float ambiguity readiness assessment using Stage 39 inventory, covariance check, slip detection status, known-ambiguity validation flag; blockers and score; report subsection'
             };
         end
 
