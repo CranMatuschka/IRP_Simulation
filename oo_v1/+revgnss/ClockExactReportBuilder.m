@@ -2633,6 +2633,56 @@ classdef ClockExactReportBuilder
                     fprintf(fid, '\\end{itemize}\n\n');
                 end
             end
+
+            % --- Stage 41: Ambiguity State Metadata and Covariance Export ---
+            if isfield(cfg,'diagnostics') && isfield(cfg.diagnostics,'ambiguityStateMetadata') && ...
+                    isfield(cfg.diagnostics.ambiguityStateMetadata,'enable') && ...
+                    cfg.diagnostics.ambiguityStateMetadata.enable
+                fprintf(fid, '\\subsection*{Ambiguity State Metadata and Covariance Export (Stage~41)}\n');
+                fprintf(fid, ['\\textit{This is float ambiguity metadata and covariance export only. ' ...
+                    'It is not integer ambiguity resolution, not LAMBDA/MLAMBDA, ' ...
+                    'and not false-fix-risk control.}\n\n']);
+
+                meta41 = struct('available',false,'ambiguityMode','none','nAmbiguities',0, ...
+                    'nTowers',0,'nReceivers',0,'nSignals',0,'warnings',{{}});
+                cov41  = struct('available',false,'condition',NaN,'correlationMaxAbs',NaN, ...
+                    'std_m',[],'minVariance_m2',NaN,'maxVariance_m2',NaN,'warnings',{{}});
+                try
+                    if isfield(summary,'ambiguityStateMetadata')
+                        meta41 = summary.ambiguityStateMetadata;
+                    end
+                    if isfield(summary,'ambiguityCovarianceSummary')
+                        cov41 = summary.ambiguityCovarianceSummary;
+                    end
+                catch; end
+
+                fprintf(fid, '\\begin{tabular}{p{0.46\\textwidth}p{0.42\\textwidth}}\n');
+                fprintf(fid, '\\toprule\n\\textbf{Property} & \\textbf{Value}\\\\\n\\midrule\n');
+                fprintf(fid, 'Metadata available & %s\\\\\n', mat2str(meta41.available));
+                if meta41.available
+                    fprintf(fid, 'Ambiguity mode & \\texttt{%s}\\\\\n', ...
+                        revgnss.ClockExactReportBuilder.esc_(char(meta41.ambiguityMode)));
+                    fprintf(fid, 'Ambiguity state count & %d\\\\\n', meta41.nAmbiguities);
+                    fprintf(fid, 'State-index source & state-map\\\\\n');
+                    fprintf(fid, 'nTowers / nReceivers & %d / %d\\\\\n', ...
+                        meta41.nTowers, meta41.nReceivers);
+                end
+                fprintf(fid, 'Covariance available & %s\\\\\n', mat2str(cov41.available));
+                if cov41.available
+                    if isfinite(cov41.condition)
+                        fprintf(fid, 'Covariance condition & %.2e\\\\\n', cov41.condition);
+                    end
+                    if isfinite(cov41.correlationMaxAbs)
+                        fprintf(fid, 'Max ambiguity correlation & %.4f\\\\\n', cov41.correlationMaxAbs);
+                    end
+                    if isfinite(cov41.minVariance_m2) && isfinite(cov41.maxVariance_m2)
+                        fprintf(fid, 'Std range (m) & [%.3f, %.3f]\\\\\n', ...
+                            sqrt(max(0,cov41.minVariance_m2)), sqrt(max(0,cov41.maxVariance_m2)));
+                    end
+                end
+                fprintf(fid, 'Integer fixing impl. & false\\\\\n');
+                fprintf(fid, '\\bottomrule\n\\end{tabular}\\par\n\n');
+            end
         end
 
         % ================================================================

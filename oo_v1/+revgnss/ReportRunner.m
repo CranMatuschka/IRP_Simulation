@@ -104,6 +104,21 @@ classdef ReportRunner
             % ---- Collect summary metrics --------------------------------
             summary = revgnss.ReportRunner.collectSummary_(diag, cfg, version, reportFolder, pdfPath, matPath);
 
+            % ---- Stage 41: Export ambiguity state metadata and covariance ----
+            doAmbMeta = isfield(cfg,'diagnostics') && isfield(cfg.diagnostics,'ambiguityStateMetadata') && ...
+                isfield(cfg.diagnostics.ambiguityStateMetadata,'enable') && ...
+                cfg.diagnostics.ambiguityStateMetadata.enable;
+            if doAmbMeta
+                try
+                    meta41 = revgnss.AmbiguityStateMetadata.fromEkf(sim.ekf);
+                    cov41  = revgnss.AmbiguityStateMetadata.covarianceFromEkf(sim.ekf);
+                    summary = revgnss.AmbiguityStateMetadata.attachToSummary(summary, meta41, cov41);
+                catch ex41
+                    warning('ReportRunner:ambiguityMetadataFailed', ...
+                        'Stage 41 ambiguity metadata export failed: %s', ex41.message);
+                end
+            end
+
             % ---- Known-ambiguity attitude validation (ATTITUDE VALIDATION ONLY — not operational) ----
             % Gated by cfg.estimator.runKnownAmbiguityValidation = true.
             % Runs a short comparison where truth float ambiguities are subtracted from

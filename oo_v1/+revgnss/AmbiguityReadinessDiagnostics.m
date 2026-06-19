@@ -68,24 +68,23 @@ classdef AmbiguityReadinessDiagnostics
 
         function cv = covarianceInventory(out, cfg) %#ok<INUSD>
             % covarianceInventory  Check ambiguity covariance availability.
-            % Ambiguity state-map indices are not persisted in out; sub-block
-            % extraction is therefore unavailable without EKF refactoring.
+            % Prefers Stage 41 exported covariance summary if present in out.summary.
             cv.ambiguityCovarianceAvailable = false;
             cv.condition                    = NaN;
             cv.correlationMaxAbs            = NaN;
             cv.warnings                     = {};
             try
-                if isfield(out,'diag') && ~isempty(out.diag) && ...
-                        isprop(out.diag,'log') && ~isempty(out.diag.log) && ...
-                        isfield(out.diag.log(end),'estimate') && ...
-                        isfield(out.diag.log(end).estimate,'P') && ...
-                        ~isempty(out.diag.log(end).estimate.P)
-                    cv.warnings{end+1} = ['Full EKF covariance P is available but ' ...
-                        'ambiguity state-map indices are not persisted; ' ...
-                        'ambiguity sub-block cannot be extracted without refactoring.'];
-                else
-                    cv.warnings{end+1} = 'EKF covariance not found in out.diag.';
+                if isfield(out,'summary') && isfield(out.summary,'ambiguityCovarianceSummary') && ...
+                        isfield(out.summary.ambiguityCovarianceSummary,'available') && ...
+                        out.summary.ambiguityCovarianceSummary.available
+                    cs = out.summary.ambiguityCovarianceSummary;
+                    cv.ambiguityCovarianceAvailable = true;
+                    cv.condition         = cs.condition;
+                    cv.correlationMaxAbs = cs.correlationMaxAbs;
+                    return
                 end
+                cv.warnings{end+1} = ['Ambiguity covariance export not found. ' ...
+                    'Enable cfg.diagnostics.ambiguityStateMetadata.enable for Stage 41 export.'];
             catch ex
                 cv.warnings{end+1} = ['covarianceInventory: ' ex.message];
             end
@@ -162,6 +161,9 @@ classdef AmbiguityReadinessDiagnostics
             if ~isfinite(s.ambiguityStateCount) || s.ambiguityStateCount == 0
                 cls = 'not-ready-no-ambiguity-states'; return
             end
+            if s.knownAmbiguityValidationEnabled
+                cls = 'validation-known-ambiguity-only'; return
+            end
             if strcmp(s.ambiguityStateCountSource,'summary-estimate') || ...
                     strcmp(s.ambiguityStateCountSource,'unavailable')
                 cls = 'not-ready-summary-only'; return
@@ -171,9 +173,6 @@ classdef AmbiguityReadinessDiagnostics
             end
             if isfinite(s.ambiguityCovarianceCondition) && s.ambiguityCovarianceCondition > 1e6
                 cls = 'not-ready-poor-conditioning'; return
-            end
-            if s.knownAmbiguityValidationEnabled
-                cls = 'validation-known-ambiguity-only'; return
             end
             if strcmp(m,'diagnostic-float-only') || strcmp(m,'summary-only')
                 cls = 'diagnostic-float-only'; return

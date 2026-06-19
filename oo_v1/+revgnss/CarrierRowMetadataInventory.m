@@ -99,16 +99,25 @@ classdef CarrierRowMetadataInventory
         end
 
         function ai = ambiguityInventory(out, cfg)
-            % ambiguityInventory  Derive ambiguity state count; prefer state metadata.
+            % ambiguityInventory  Derive ambiguity state count; prefer state-map metadata.
             ai.ambiguityStateCount = NaN;
             ai.source              = 'unavailable';
             ai.warnings            = {};
             try
+                sm = out.summary;
+                % Prefer Stage 41 state-map export if present.
+                if isfield(sm,'ambiguityStateMetadata') && ...
+                        isfield(sm.ambiguityStateMetadata,'available') && ...
+                        sm.ambiguityStateMetadata.available
+                    ai.ambiguityStateCount = sm.ambiguityStateMetadata.nAmbiguities;
+                    ai.source              = 'state-map';
+                    return
+                end
+                % Fallback: summary estimate from topology.
                 mode = '';
                 if isfield(cfg,'estimation') && isfield(cfg.estimation,'ambiguityMode')
                     mode = cfg.estimation.ambiguityMode;
                 end
-                sm = out.summary;
                 if isfield(sm,'nTowers') && isfield(sm,'nReceivers')
                     nT = sm.nTowers; nR = sm.nReceivers;
                     if strcmp(mode,'floatPerTowerReceiverSignal')
