@@ -2865,6 +2865,41 @@ classdef ClockExactReportBuilder
                     fprintf(fid, '\\end{itemize}\n\n');
                 end
             end
+
+            % --- Stage 47: Guarded Carrier IF Float EKF Rows ---
+            if isfield(cfg,'diagnostics') && isfield(cfg.diagnostics,'carrierIonoFreeRows') && ...
+                    isfield(cfg.diagnostics.carrierIonoFreeRows,'enable') && ...
+                    cfg.diagnostics.carrierIonoFreeRows.enable
+                fprintf(fid, '\\subsection*{Carrier IF Float EKF Rows (Stage~47)}\n');
+                fprintf(fid, ['\\textit{Stage~47 adds a guarded carrier ionosphere-free EKF row path ' ...
+                    '(float ambiguity only). ' ...
+                    'The IF ambiguity $B_{\\text{IF}}=\\alpha B_{L1}+\\beta B_{L2}$ is not an integer. ' ...
+                    'Integer fixing, LAMBDA/MLAMBDA, calibrated DCB/IFB products, and PPP-grade ' ...
+                    'processing are NOT implemented in v1.}\n\n']);
+                s47 = revgnss.CarrierIonoFreeEkfDiagnostics.assess(summary, cfg);
+                fprintf(fid, '\\begin{tabular}{p{0.46\\textwidth}p{0.42\\textwidth}}\n');
+                fprintf(fid, '\\toprule\n\\textbf{Property} & \\textbf{Value}\\\\\n\\midrule\n');
+                fprintf(fid, 'Classification & \\texttt{%s}\\\\\n', ...
+                    revgnss.ClockExactReportBuilder.esc_(s47.classification));
+                fprintf(fid, 'Requested & %s\\\\\n',          mat2str(s47.requested));
+                fprintf(fid, 'Used in EKF & %s\\\\\n',        mat2str(s47.usedInEkf));
+                fprintf(fid, 'L2 enabled & %s\\\\\n',         mat2str(s47.l2Enabled));
+                fprintf(fid, 'Carrier mode = ekfFloat & %s\\\\\n', mat2str(s47.carrierIsEkfFloat));
+                if isfinite(s47.carrierIfRows)
+                    fprintf(fid, 'Carrier IF rows & %d\\\\\n', s47.carrierIfRows);
+                end
+                if isfinite(s47.noiseAmplification)
+                    fprintf(fid, 'R/noise amplification & %.4f\\,x\\\\\n', s47.noiseAmplification);
+                end
+                fprintf(fid, 'IF ambiguity is non-integer & %s\\\\\n', ...
+                    mat2str(s47.integerAmbiguityIsNonInteger));
+                fprintf(fid, 'Integer fixing impl.\\ & false\\\\\n');
+                fprintf(fid, 'LAMBDA impl.\\ & false\\\\\n');
+                fprintf(fid, 'Calibrated DCB products & false\\\\\n');
+                fprintf(fid, 'Integer-ready class.\\ & \\texttt{%s}\\\\\n', ...
+                    revgnss.ClockExactReportBuilder.esc_(s47.carrierIfIntegerReadyClassification));
+                fprintf(fid, '\\bottomrule\n\\end{tabular}\\par\n\n');
+            end
         end
 
         % ================================================================

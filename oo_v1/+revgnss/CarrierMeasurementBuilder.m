@@ -260,6 +260,13 @@ classdef CarrierMeasurementBuilder
                 end
             end  % for mi
             end  % for si_
+
+            % Stage 47: carrier IF post-processing (replaces L1+L2 with IF rows)
+            if revgnss.CarrierIonoFreeRowBuilder.shouldCombine(cfg) && nSig_ == 2
+                [z_phi, h_phi, H_phi, R_phi, cpInfo] = ...
+                    revgnss.CarrierIonoFreeRowBuilder.buildFromStack( ...
+                        z_phi, h_phi, H_phi, R_phi, cpInfo, Mp, cfg);
+            end
         end
 
         function [cp, ambiguityMap] = buildDiagnostic( ...

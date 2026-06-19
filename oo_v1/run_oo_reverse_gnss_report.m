@@ -35,7 +35,7 @@ oo_v1_envAllToggles_ = strcmpi(getenv('OO_V1_ALL_TOGGLES'), 'true');
 if oo_v1_envValidate_; oo_v1_envAllToggles_ = true; end  % validate always uses all toggles
 oo_v1_envStage_      = str2double(getenv('OO_V1_VALIDATION_STAGE'));
 if isnan(oo_v1_envStage_); oo_v1_envStage_ = 0; end
-if oo_v1_envValidate_ && oo_v1_envStage_ == 0; oo_v1_envStage_ = 46; end
+if oo_v1_envValidate_ && oo_v1_envStage_ == 0; oo_v1_envStage_ = 47; end
 oo_v1_envCompile_    = strtrim(getenv('OO_V1_REPORT_COMPILE_TEX'));
 
 cfg = revgnss.ConfigFactory.defaultConfig();
@@ -154,6 +154,16 @@ cfg.diagnostics.codeIonoFreeRows.enable           = true;
 % R/noise amplification, residual/NIS, and bias-state risk.
 % Carrier IF rows, integer fixing, and calibrated DCB are NOT implemented.
 cfg.diagnostics.codeIonoFreeConsistency.enable = true;
+
+% --- Carrier IF float EKF rows (Stage 47) ----------------------
+% Guarded L1/L2 carrier IF combination (float ambiguity, non-integer).
+% Requires twoFrequency.enable=true and carrierMode='ekfFloat'.
+% enable=false (default): keep separate L1+L2 carrier rows in EKF.
+% enable=true + useInEkf=true: replace L1+L2 carrier with IF rows.
+% B_IF = alpha*B_L1 + beta*B_L2 — NOT an integer; no fixing in v1.
+cfg.measurements.carrier.ionosphereFreeRows.enable  = false;
+cfg.measurements.carrier.ionosphereFreeRows.useInEkf = false;
+cfg.diagnostics.carrierIonoFreeRows.enable           = true;
 
 % --- Inter-frequency bias budget (Stage 44) --------------------
 % Diagnostic only. Default all to 0 (no calibrated products in v1).
@@ -311,6 +321,9 @@ if stageAllToggles || oo_v1_envAllToggles_
     cfg.measurements.code.ionosphereFreeRows.useInEkf        = true;
     cfg.diagnostics.codeIonoFreeRows.enable                  = true;
     cfg.diagnostics.codeIonoFreeConsistency.enable           = true;
+    cfg.measurements.carrier.ionosphereFreeRows.enable       = true;
+    cfg.measurements.carrier.ionosphereFreeRows.useInEkf     = true;
+    cfg.diagnostics.carrierIonoFreeRows.enable               = true;
     cfg.validation.stageAllToggles         = true;
     if oo_v1_envAllToggles_
         cfg.validation.invokedMainScript = true;

@@ -825,6 +825,33 @@ classdef ReportRunner
             else
                 summary.codeIonoFreeCountsSource = 'inferred-from-nTowers-nReceivers';
             end
+            % Stage 47: compact carrier IF row fields
+            summary.carrierIonoFreeRowsRequested = revgnss.ReportRunner.safeCfgBool_( ...
+                cfg, {'measurements','carrier','ionosphereFreeRows','enable'}, false);
+            summary.carrierIonoFreeRowsUsedInEkf = summary.carrierIonoFreeRowsRequested && ...
+                revgnss.ReportRunner.safeCfgBool_( ...
+                cfg, {'measurements','carrier','ionosphereFreeRows','useInEkf'}, false);
+            if summary.carrierIonoFreeRowsUsedInEkf
+                summary.totalCarrierIfRows = summary.totalCarrierRows;
+            else
+                summary.totalCarrierIfRows = 0;
+            end
+            try
+                sigL1 = revgnss.SignalDefinition.get('L1');
+                sigL2 = revgnss.SignalDefinition.get('L2');
+                [a47, b47] = revgnss.IonoFreeCombination.coefficients( ...
+                    sigL1.frequency_Hz, sigL2.frequency_Hz);
+                summary.carrierIonoFreeAlpha             = a47;
+                summary.carrierIonoFreeBeta              = b47;
+                summary.carrierIonoFreeNoiseAmplification = sqrt(a47^2 + b47^2);
+            catch
+                summary.carrierIonoFreeAlpha             = NaN;
+                summary.carrierIonoFreeBeta              = NaN;
+                summary.carrierIonoFreeNoiseAmplification = NaN;
+            end
+            summary.carrierIfIntegerFixingImplemented  = false;
+            summary.carrierIfLambdaImplemented         = false;
+            summary.carrierIfCalibratedDcbAvailable    = false;
             summary.twstftDiag = struct('enabled',false,'diagnosticClassification','disabled', ...
                 'useInEKF',false,'clockOffsetDiagnostic_s',NaN,'clockOffsetDiagnostic_m',NaN, ...
                 'calibratedDelay_s',0,'processingDelay_s',0,'timingSource','none', ...

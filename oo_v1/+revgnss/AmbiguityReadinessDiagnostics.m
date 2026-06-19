@@ -109,7 +109,7 @@ classdef AmbiguityReadinessDiagnostics
             if s.knownAmbiguityValidationEnabled
                 bl{end+1} = 'Known-ambiguity validation is validation-only, not operational.';
             end
-            bl{end+1} = 'L2 carrier EKF not implemented in v1.';
+            bl{end+1} = 'Carrier IF ambiguity is non-integer (float only); integer fixing not implemented in v1.';
             bl{end+1} = 'Integer ambiguity fixing not implemented in v1.';
         end
 
@@ -197,7 +197,7 @@ classdef AmbiguityReadinessDiagnostics
             lims = {
                 'Integer ambiguity fixing not implemented in v1.'
                 'LAMBDA/MLAMBDA not implemented in v1.'
-                'L2 carrier EKF rows not implemented in v1.'
+                'Carrier IF ambiguity is non-integer (B_IF=alpha*B_L1+beta*B_L2); use wide-lane/narrow-lane or explicit integer strategy in later stage.'
                 'Ambiguity covariance sub-block requires EKF state-map refactoring.'
                 'Per-row receiver/tower/signal metadata not available in current architecture.'
             };
