@@ -2744,6 +2744,37 @@ classdef ClockExactReportBuilder
                 fprintf(fid, 'Bias products & false\\\\\n');
                 fprintf(fid, '\\bottomrule\n\\end{tabular}\\par\n\n');
             end
+
+            % --- Stage 44: Dual-Frequency IF Consistency and Bias Budget ---
+            if isfield(cfg,'diagnostics') && isfield(cfg.diagnostics,'ifBiasBudget') && ...
+                    isfield(cfg.diagnostics.ifBiasBudget,'enable') && ...
+                    cfg.diagnostics.ifBiasBudget.enable
+                fprintf(fid, '\\subsection*{IF Consistency and Bias Budget (Stage~44)}\n');
+                fprintf(fid, ['\\textit{Dual-frequency IF consistency and bias-budget diagnostics only. ' ...
+                    'Biases are not calibrated products, IF rows are not used in the EKF, ' ...
+                    'and no integer ambiguity resolution is implemented.}\n\n']);
+                s44 = revgnss.IonosphereFreeBiasBudget.assess(cfg);
+                fprintf(fid, '\\begin{tabular}{p{0.46\\textwidth}p{0.42\\textwidth}}\n');
+                fprintf(fid, '\\toprule\n\\textbf{Property} & \\textbf{Value}\\\\\n\\midrule\n');
+                fprintf(fid, 'Classification & \\texttt{%s}\\\\\n', ...
+                    revgnss.ClockExactReportBuilder.esc_(s44.classification));
+                fprintf(fid, 'L2 enabled & %s\\\\\n', mat2str(s44.l2Enabled));
+                if s44.l2Enabled && isfinite(s44.alpha)
+                    fprintf(fid, '$\\alpha$ & %.6f\\\\\n', s44.alpha);
+                    fprintf(fid, '$\\beta$ & %.6f\\\\\n',  s44.beta);
+                    fprintf(fid, 'Noise amplification & %.4f\\,x\\\\\n', s44.equalSigmaNoiseAmplification);
+                    fprintf(fid, 'Code IF truth bias & %.4f\\,m\\\\\n',    s44.codeIfTruthBias_m);
+                    fprintf(fid, 'Code IF model bias & %.4f\\,m\\\\\n',    s44.codeIfModelBias_m);
+                    fprintf(fid, 'Code IF residual bias & %.4f\\,m\\\\\n', s44.codeIfResidualBias_m);
+                    fprintf(fid, 'Carrier IF truth bias & %.4f\\,m\\\\\n',    s44.carrierIfTruthBias_m);
+                    fprintf(fid, 'Carrier IF model bias & %.4f\\,m\\\\\n',    s44.carrierIfModelBias_m);
+                    fprintf(fid, 'Carrier IF residual bias & %.4f\\,m\\\\\n', s44.carrierIfResidualBias_m);
+                end
+                fprintf(fid, 'EKF IF rows & false\\\\\n');
+                fprintf(fid, 'Integer fixing & false\\\\\n');
+                fprintf(fid, 'Bias products & false\\\\\n');
+                fprintf(fid, '\\bottomrule\n\\end{tabular}\\par\n\n');
+            end
         end
 
         % ================================================================

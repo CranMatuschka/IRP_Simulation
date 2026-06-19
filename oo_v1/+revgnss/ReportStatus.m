@@ -12,8 +12,8 @@ classdef ReportStatus
     methods (Static)
 
         function s = current()
-            s.stage      = '43';
-            s.stageTitle = 'Ionosphere-Free Combination Diagnostics v1';
+            s.stage      = '44';
+            s.stageTitle = 'Dual-Frequency IF Consistency and Bias Budget v1';
             s.validationMode = 'targeted-random-smoke';
             s.fullSuiteRun   = false;
 
@@ -57,10 +57,10 @@ classdef ReportStatus
             end
             vsSHA = '';
             if isfield(vs, 'gitSHA'); vsSHA = strtrim(char(vs.gitSHA)); end
-            s.validationArtifactFresh = (vsStageNum >= 43) && strcmp(vsSHA, runtimeSHA);
+            s.validationArtifactFresh = (vsStageNum >= 44) && strcmp(vsSHA, runtimeSHA);
             if ~s.validationArtifactFresh
                 s.validationWarnings{end+1} = ...
-                    'No fresh local validation summary for this commit. Run: setenv(''OO_V1_VALIDATE_REPORT'',''true''); setenv(''OO_V1_VALIDATION_STAGE'',''43''); run_oo_reverse_gnss_report';
+                    'No fresh local validation summary for this commit. Run: setenv(''OO_V1_VALIDATE_REPORT'',''true''); setenv(''OO_V1_VALIDATION_STAGE'',''44''); run_oo_reverse_gnss_report';
             end
 
             if isfield(vs, 'selectedTestNames')
@@ -172,6 +172,7 @@ classdef ReportStatus
                 'Stage 41: AmbiguityStateMetadata helper; EKF ambiguity state-map export and final ambiguity covariance sub-block diagnostics for float ambiguity readiness'
                 'Stage 42: SignalCatalog signal facade; guarded L2 carrier EKF row architecture (l2EkfRows.enable); L2 ambiguity states, wavelength, iono scaling per signal; L2CarrierArchitectureDiagnostics; AmbiguityStateMetadata signal ID labels (L1/L2)'
                 'Stage 43: diagnostic-only L1/L2 ionosphere-free combination coefficients, first-order ionosphere cancellation check, and noise amplification reporting; no EKF IF rows and no integer fixing'
+                'Stage 44: SignalConfigResolver for consistent L2 detection from any cfg field; IonosphereFreeBiasBudget diagnostic IF bias residual propagation; fixes l2SignalEnabled_ bug in IFCombinationDiagnostics'
             };
         end
 

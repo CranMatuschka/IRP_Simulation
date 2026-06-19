@@ -35,7 +35,7 @@ oo_v1_envAllToggles_ = strcmpi(getenv('OO_V1_ALL_TOGGLES'), 'true');
 if oo_v1_envValidate_; oo_v1_envAllToggles_ = true; end  % validate always uses all toggles
 oo_v1_envStage_      = str2double(getenv('OO_V1_VALIDATION_STAGE'));
 if isnan(oo_v1_envStage_); oo_v1_envStage_ = 0; end
-if oo_v1_envValidate_ && oo_v1_envStage_ == 0; oo_v1_envStage_ = 43; end
+if oo_v1_envValidate_ && oo_v1_envStage_ == 0; oo_v1_envStage_ = 44; end
 oo_v1_envCompile_    = strtrim(getenv('OO_V1_REPORT_COMPILE_TEX'));
 
 cfg = revgnss.ConfigFactory.defaultConfig();
@@ -139,6 +139,18 @@ cfg.measurements.twstft.requireIslTiming = true;
 % false  ->  L1 only
 % true   ->  L1 + L2
 cfg.signals.twoFrequency.enable = true;
+
+% --- Inter-frequency bias budget (Stage 44) --------------------
+% Diagnostic only. Default all to 0 (no calibrated products in v1).
+% Units: metres. Set to non-zero to exercise bias-budget propagation.
+cfg.biases.interFrequency.code.truth.L1_m    = 0;
+cfg.biases.interFrequency.code.truth.L2_m    = 0;
+cfg.biases.interFrequency.code.model.L1_m    = 0;
+cfg.biases.interFrequency.code.model.L2_m    = 0;
+cfg.biases.interFrequency.carrier.truth.L1_m = 0;
+cfg.biases.interFrequency.carrier.truth.L2_m = 0;
+cfg.biases.interFrequency.carrier.model.L1_m = 0;
+cfg.biases.interFrequency.carrier.model.L2_m = 0;
 
 % --- Geometry / relativity --------------------------------------
 cfg.physics.sagnac.truth.enable          = true;
@@ -279,6 +291,7 @@ if stageAllToggles || oo_v1_envAllToggles_
     cfg.measurements.carrier.l2EkfRows.enable                = true;
     cfg.diagnostics.l2CarrierArchitecture.enable             = true;
     cfg.diagnostics.ionosphereFreeCombination.enable         = true;
+    cfg.diagnostics.ifBiasBudget.enable                      = true;
     cfg.validation.stageAllToggles         = true;
     if oo_v1_envAllToggles_
         cfg.validation.invokedMainScript = true;

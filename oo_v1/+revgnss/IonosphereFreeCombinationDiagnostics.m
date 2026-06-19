@@ -79,10 +79,10 @@ classdef IonosphereFreeCombinationDiagnostics
             end
             s.available = true;
             s.l1Enabled = true;
-            s.l2Enabled = revgnss.IonosphereFreeCombinationDiagnostics.l2SignalEnabled_(cfg);
+            s.l2Enabled = revgnss.SignalConfigResolver.hasL2(cfg);
             if ~s.l2Enabled
                 s.classification = 'l1-only-no-if';
-                s.warnings{end+1} = 'L2 signal not in cfg.signals.enabled; IF combination unavailable.';
+                s.warnings{end+1} = 'L2 not enabled in cfg; IF combination unavailable.';
                 s.limitations = revgnss.IonosphereFreeCombinationDiagnostics.limitations_();
                 return
             end

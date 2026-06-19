@@ -29,11 +29,11 @@ classdef MainScriptValidationGate
             state = struct();
 
             % Resolve stage, seed, count from env vars.
-            stg = 43;
+            stg = 44;
             v = str2double(getenv('OO_V1_VALIDATION_STAGE'));
             if ~isnan(v) && v > 0; stg = round(v); end
 
-            seed = 43;
+            seed = 44;
             v = str2double(getenv('OO_V1_RANDOM_TEST_SEED'));
             if ~isnan(v) && isfinite(v); seed = round(v); end
 
@@ -212,6 +212,7 @@ classdef MainScriptValidationGate
                 case 41; t = 'Ambiguity State Metadata and Covariance Export v1';
                 case 42; t = 'L2 Carrier EKF Row Architecture v1';
                 case 43; t = 'Ionosphere-Free Combination Diagnostics v1';
+                case 44; t = 'Dual-Frequency IF Consistency and Bias Budget v1';
                 otherwise
                     try; t = revgnss.ReportStatus.current().stageTitle; catch; t = sprintf('Stage %d', stg); end
             end
