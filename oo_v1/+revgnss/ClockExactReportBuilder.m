@@ -2713,6 +2713,37 @@ classdef ClockExactReportBuilder
                 fprintf(fid, 'Integer fixing impl.\\ & false\\\\\n');
                 fprintf(fid, '\\bottomrule\n\\end{tabular}\\par\n\n');
             end
+
+            % --- Stage 43: Ionosphere-Free Combination Diagnostics ---
+            if isfield(cfg,'diagnostics') && isfield(cfg.diagnostics,'ionosphereFreeCombination') && ...
+                    isfield(cfg.diagnostics.ionosphereFreeCombination,'enable') && ...
+                    cfg.diagnostics.ionosphereFreeCombination.enable
+                fprintf(fid, '\\subsection*{Ionosphere-Free Combination Diagnostics (Stage~43)}\n');
+                fprintf(fid, ['\\textit{This is diagnostic-only L1/L2 ionosphere-free combination ' ...
+                    'analysis. It is not used in the EKF, not integer ambiguity fixing, ' ...
+                    'not LAMBDA/MLAMBDA, and not PPP-grade.}\n\n']);
+                s43 = revgnss.IonosphereFreeCombinationDiagnostics.assess(summary, cfg);
+                fprintf(fid, '\\begin{tabular}{p{0.46\\textwidth}p{0.42\\textwidth}}\n');
+                fprintf(fid, '\\toprule\n\\textbf{Property} & \\textbf{Value}\\\\\n\\midrule\n');
+                fprintf(fid, 'Classification & \\texttt{%s}\\\\\n', ...
+                    revgnss.ClockExactReportBuilder.esc_(s43.classification));
+                fprintf(fid, 'L2 signal enabled & %s\\\\\n', mat2str(s43.l2Enabled));
+                if isfinite(s43.alpha)
+                    fprintf(fid, '$\\alpha$ (L1 coeff.) & %.6f\\\\\n', s43.alpha);
+                    fprintf(fid, '$\\beta$ (L2 coeff.) & %.6f\\\\\n',  s43.beta);
+                    fprintf(fid, 'L1 freq.\\ [MHz] & %.2f\\\\\n', s43.fL1_Hz/1e6);
+                    fprintf(fid, 'L2 freq.\\ [MHz] & %.2f\\\\\n', s43.fL2_Hz/1e6);
+                    fprintf(fid, 'Code iono residual & $%.2e$ m\\\\\n',    s43.codeIonoResidualCheck_m);
+                    fprintf(fid, 'Carrier iono residual & $%.2e$ m\\\\\n', s43.carrierIonoResidualCheck_m);
+                    fprintf(fid, 'Code noise amp.\\ & %.4f\\\\\n',    s43.codeNoiseAmplification);
+                    fprintf(fid, 'Carrier noise amp.\\ & %.4f\\\\\n', s43.carrierNoiseAmplification);
+                end
+                fprintf(fid, 'IF in EKF & false\\\\\n');
+                fprintf(fid, 'Integer fixing & false\\\\\n');
+                fprintf(fid, 'Higher-order iono & false\\\\\n');
+                fprintf(fid, 'Bias products & false\\\\\n');
+                fprintf(fid, '\\bottomrule\n\\end{tabular}\\par\n\n');
+            end
         end
 
         % ================================================================
