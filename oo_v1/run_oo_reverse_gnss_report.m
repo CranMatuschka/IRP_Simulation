@@ -35,7 +35,7 @@ oo_v1_envAllToggles_ = strcmpi(getenv('OO_V1_ALL_TOGGLES'), 'true');
 if oo_v1_envValidate_; oo_v1_envAllToggles_ = true; end  % validate always uses all toggles
 oo_v1_envStage_      = str2double(getenv('OO_V1_VALIDATION_STAGE'));
 if isnan(oo_v1_envStage_); oo_v1_envStage_ = 0; end
-if oo_v1_envValidate_ && oo_v1_envStage_ == 0; oo_v1_envStage_ = 44; end
+if oo_v1_envValidate_ && oo_v1_envStage_ == 0; oo_v1_envStage_ = 45; end
 oo_v1_envCompile_    = strtrim(getenv('OO_V1_REPORT_COMPILE_TEX'));
 
 cfg = revgnss.ConfigFactory.defaultConfig();
@@ -139,6 +139,15 @@ cfg.measurements.twstft.requireIslTiming = true;
 % false  ->  L1 only
 % true   ->  L1 + L2
 cfg.signals.twoFrequency.enable = true;
+
+% --- Code ionosphere-free EKF rows (Stage 45) ------------------
+% Guarded L1/L2 IF combination in EKF. Requires twoFrequency.enable=true.
+% enable=false (default): keep separate L1+L2 rows in EKF.
+% enable=true + useInEkf=true: replace L1+L2 with IF rows in EKF.
+% Carrier IF rows, integer fixing, and calibrated DCB are NOT implemented.
+cfg.measurements.code.ionosphereFreeRows.enable  = false;
+cfg.measurements.code.ionosphereFreeRows.useInEkf = false;
+cfg.diagnostics.codeIonoFreeRows.enable           = true;
 
 % --- Inter-frequency bias budget (Stage 44) --------------------
 % Diagnostic only. Default all to 0 (no calibrated products in v1).
@@ -292,6 +301,9 @@ if stageAllToggles || oo_v1_envAllToggles_
     cfg.diagnostics.l2CarrierArchitecture.enable             = true;
     cfg.diagnostics.ionosphereFreeCombination.enable         = true;
     cfg.diagnostics.ifBiasBudget.enable                      = true;
+    cfg.measurements.code.ionosphereFreeRows.enable          = true;
+    cfg.measurements.code.ionosphereFreeRows.useInEkf        = true;
+    cfg.diagnostics.codeIonoFreeRows.enable                  = true;
     cfg.validation.stageAllToggles         = true;
     if oo_v1_envAllToggles_
         cfg.validation.invokedMainScript = true;

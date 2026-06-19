@@ -410,6 +410,14 @@ classdef CodeMeasurementBuilder
             if isfield(cfg,'measurements') && isfield(cfg.measurements,'codeMode')
                 codeMode_v = cfg.measurements.codeMode;
             end
+            % Stage 45: ionosphereFreeRows toggle maps to existing codeMode path.
+            if isempty(codeMode_v) && N_sig == 2
+                try
+                    ifEnable = cfg.measurements.code.ionosphereFreeRows.enable;
+                    ifInEkf  = cfg.measurements.code.ionosphereFreeRows.useInEkf;
+                    if ifEnable && ifInEkf; codeMode_v = 'ionosphereFree'; end
+                catch; end
+            end
             M_pairs_if = round(M / max(N_sig, 1));
             if strcmp(codeMode_v,'ionosphereFree') && N_sig == 2 && M == M_pairs_if * 2
                 signals_if = revgnss.SignalUtils.getEnabledSignals(cfg);

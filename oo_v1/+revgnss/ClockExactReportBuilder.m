@@ -2775,6 +2775,45 @@ classdef ClockExactReportBuilder
                 fprintf(fid, 'Bias products & false\\\\\n');
                 fprintf(fid, '\\bottomrule\n\\end{tabular}\\par\n\n');
             end
+
+            % --- Stage 45: Guarded Ionosphere-Free Code EKF Rows ---
+            if isfield(cfg,'diagnostics') && isfield(cfg.diagnostics,'codeIonoFreeRows') && ...
+                    isfield(cfg.diagnostics.codeIonoFreeRows,'enable') && ...
+                    cfg.diagnostics.codeIonoFreeRows.enable
+                fprintf(fid, '\\subsection*{Guarded Ionosphere-Free Code EKF Rows (Stage~45)}\n');
+                fprintf(fid, ['\\textit{This stage implements guarded code IF EKF rows only. ' ...
+                    'It does not implement carrier IF rows, integer ambiguity fixing, ' ...
+                    'calibrated DCB/IFB products, higher-order ionosphere, or PPP-grade processing.}\n\n']);
+                s45 = revgnss.CodeIonoFreeEkfDiagnostics.assess(summary, cfg);
+                fprintf(fid, '\\begin{tabular}{p{0.46\\textwidth}p{0.42\\textwidth}}\n');
+                fprintf(fid, '\\toprule\n\\textbf{Property} & \\textbf{Value}\\\\\n\\midrule\n');
+                fprintf(fid, 'Classification & \\texttt{%s}\\\\\n', ...
+                    revgnss.ClockExactReportBuilder.esc_(s45.classification));
+                fprintf(fid, 'Requested & %s\\\\\n', mat2str(s45.requested));
+                fprintf(fid, 'Used in EKF & %s\\\\\n', mat2str(s45.usedInEkf));
+                fprintf(fid, 'L2 resolved & %s\\\\\n', mat2str(s45.l2Enabled));
+                if isfinite(s45.alpha)
+                    fprintf(fid, '$\\alpha$ & %.6f\\\\\n', s45.alpha);
+                    fprintf(fid, '$\\beta$ & %.6f\\\\\n',  s45.beta);
+                    fprintf(fid, 'Noise amplification & %.4f\\,x\\\\\n', s45.rNoiseAmplification);
+                    if ~isnan(s45.nCodeL1Rows)
+                        fprintf(fid, 'L1 code rows & %d\\\\\n', s45.nCodeL1Rows);
+                    end
+                    if ~isnan(s45.nCodeL2Rows)
+                        fprintf(fid, 'L2 code rows & %d\\\\\n', s45.nCodeL2Rows);
+                    end
+                    if ~isnan(s45.nCodeIfRows)
+                        fprintf(fid, 'IF code rows in EKF & %d\\\\\n', s45.nCodeIfRows);
+                    end
+                    fprintf(fid, 'IF bias residual & %.4f\\,m\\\\\n', s45.biasBudgetResidual_m);
+                    fprintf(fid, 'First-order iono cancelled & true\\\\\n');
+                end
+                fprintf(fid, 'Higher-order iono impl. & false\\\\\n');
+                fprintf(fid, 'Calibrated bias products & false\\\\\n');
+                fprintf(fid, 'Carrier IF rows & false\\\\\n');
+                fprintf(fid, 'Integer fixing & false\\\\\n');
+                fprintf(fid, '\\bottomrule\n\\end{tabular}\\par\n\n');
+            end
         end
 
         % ================================================================

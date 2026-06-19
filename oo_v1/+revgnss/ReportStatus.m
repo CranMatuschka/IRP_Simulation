@@ -12,8 +12,8 @@ classdef ReportStatus
     methods (Static)
 
         function s = current()
-            s.stage      = '44';
-            s.stageTitle = 'Dual-Frequency IF Consistency and Bias Budget v1';
+            s.stage      = '45';
+            s.stageTitle = 'Guarded Ionosphere-Free Code EKF Rows v1';
             s.validationMode = 'targeted-random-smoke';
             s.fullSuiteRun   = false;
 
@@ -57,10 +57,10 @@ classdef ReportStatus
             end
             vsSHA = '';
             if isfield(vs, 'gitSHA'); vsSHA = strtrim(char(vs.gitSHA)); end
-            s.validationArtifactFresh = (vsStageNum >= 44) && strcmp(vsSHA, runtimeSHA);
+            s.validationArtifactFresh = (vsStageNum >= 45) && strcmp(vsSHA, runtimeSHA);
             if ~s.validationArtifactFresh
                 s.validationWarnings{end+1} = ...
-                    'No fresh local validation summary for this commit. Run: setenv(''OO_V1_VALIDATE_REPORT'',''true''); setenv(''OO_V1_VALIDATION_STAGE'',''44''); run_oo_reverse_gnss_report';
+                    'No fresh local validation summary for this commit. Run: setenv(''OO_V1_VALIDATE_REPORT'',''true''); setenv(''OO_V1_VALIDATION_STAGE'',''45''); run_oo_reverse_gnss_report';
             end
 
             if isfield(vs, 'selectedTestNames')
@@ -127,7 +127,7 @@ classdef ReportStatus
                 'Quaternion / error-state attitude EKF (current ZYX Euler is documented but singular at pitch +/-90 deg)'
                 'Full per-row LOS metadata for runtime finite-diff Jacobian consistency (production path uses H-only summary)'
                 'Multi-antenna single-asset attitude scenario validation'
-                'EKF use of ionosphere-free code/carrier rows (IF row construction, P3/L3 observables; diagnostic only in Stage 43)'
+                'EKF use of ionosphere-free carrier rows (carrier IF, P3-like carrier; Stage 45 adds code IF only)'
                 'Calibrated inter-frequency biases / DCB / differential phase biases (not modelled in v1)'
                 'Integer ambiguity resolution (LAMBDA/MLAMBDA)'
                 'False-fix-risk control and ratio/residual validation'
@@ -173,6 +173,7 @@ classdef ReportStatus
                 'Stage 42: SignalCatalog signal facade; guarded L2 carrier EKF row architecture (l2EkfRows.enable); L2 ambiguity states, wavelength, iono scaling per signal; L2CarrierArchitectureDiagnostics; AmbiguityStateMetadata signal ID labels (L1/L2)'
                 'Stage 43: diagnostic-only L1/L2 ionosphere-free combination coefficients, first-order ionosphere cancellation check, and noise amplification reporting; no EKF IF rows and no integer fixing'
                 'Stage 44: SignalConfigResolver for consistent L2 detection from any cfg field; IonosphereFreeBiasBudget diagnostic IF bias residual propagation; fixes l2SignalEnabled_ bug in IFCombinationDiagnostics'
+                'Stage 45: guarded L1/L2 ionosphere-free code EKF rows via IF combination using alpha/beta coefficients; uncorrelated-noise R_IF; explicit bias-budget and noise-amplification limitations; no carrier IF, no integer fixing, no PPP-grade claim'
             };
         end
 
