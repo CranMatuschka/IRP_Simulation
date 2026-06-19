@@ -29,11 +29,11 @@ classdef MainScriptValidationGate
             state = struct();
 
             % Resolve stage, seed, count from env vars.
-            stg = 48;
+            stg = 49;
             v = str2double(getenv('OO_V1_VALIDATION_STAGE'));
             if ~isnan(v) && v > 0; stg = round(v); end
 
-            seed = 48;
+            seed = 49;
             v = str2double(getenv('OO_V1_RANDOM_TEST_SEED'));
             if ~isnan(v) && isfinite(v); seed = round(v); end
 
@@ -217,6 +217,7 @@ classdef MainScriptValidationGate
                 case 46; t = 'Code IF EKF Consistency and Traceability v1';
                 case 47; t = 'Guarded Carrier Ionosphere-Free Float EKF Rows v1';
                 case 48; t = 'Carrier Ionosphere-Free Ambiguity Traceability v1';
+                case 49; t = 'Wide-Lane / Narrow-Lane Float Diagnostics v1';
                 otherwise
                     try; t = revgnss.ReportStatus.current().stageTitle; catch; t = sprintf('Stage %d', stg); end
             end

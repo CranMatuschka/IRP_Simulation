@@ -138,6 +138,45 @@ classdef ReportRunner
                 summary.carrierIfAmbiguityPairCount > 0;
             summary.carrierIfIntegerAmbiguityIsNonInteger = true;
 
+            % ---- Stage 49: wide-lane / narrow-lane compact fields ----
+            wl49Req_ = false;
+            try; wl49Req_ = logical(cfg.diagnostics.wideLaneNarrowLane.enable); catch; end
+            summary.wideLaneNarrowLaneRequested = wl49Req_;
+            summary.wideLaneNarrowLanePairCount = summary.carrierIfAmbiguityPairCount;
+            hasPamb49_ = isfield(summary,'ambiguityCovarianceSummary') && ...
+                isstruct(summary.ambiguityCovarianceSummary) && ...
+                isfield(summary.ambiguityCovarianceSummary,'Pamb') && ...
+                ~isempty(summary.ambiguityCovarianceSummary.Pamb);
+            summary.wideLaneNarrowLaneCovarianceAvailable = hasPamb49_;
+            try
+                sigL1_49_ = revgnss.SignalDefinition.get('L1');
+                sigL2_49_ = revgnss.SignalDefinition.get('L2');
+                c49_      = 299792458;
+                summary.wideLaneLambda_m   = c49_ / (sigL1_49_.frequency_Hz - sigL2_49_.frequency_Hz);
+                summary.narrowLaneLambda_m = c49_ / (sigL1_49_.frequency_Hz + sigL2_49_.frequency_Hz);
+            catch
+                summary.wideLaneLambda_m   = NaN;
+                summary.narrowLaneLambda_m = NaN;
+            end
+            summary.wideLaneSigmaCyclesMean            = NaN;
+            summary.narrowLaneSigmaCyclesMean          = NaN;
+            summary.wideLaneNarrowLaneMaxAbsCorr        = NaN;
+            summary.wideLaneNarrowLaneClassification    = 'disabled';
+            summary.wideLaneNarrowLaneIntegerFixingImplemented = false;
+            summary.wideLaneNarrowLaneLambdaImplemented        = false;
+            if wl49Req_ && summary.wideLaneNarrowLanePairCount > 0 && hasPamb49_
+                try
+                    wl49s_ = revgnss.WideLaneNarrowLaneDiagnostics.assess(summary, cfg);
+                    summary.wideLaneSigmaCyclesMean          = wl49s_.sigmaWideLaneCyclesMean;
+                    summary.narrowLaneSigmaCyclesMean        = wl49s_.sigmaNarrowLaneCyclesMean;
+                    summary.wideLaneNarrowLaneMaxAbsCorr     = wl49s_.maxAbsWideNarrowCorr;
+                    summary.wideLaneNarrowLaneClassification = wl49s_.classification;
+                catch ex49_
+                    warning('ReportRunner:wlnlFailed', ...
+                        'Stage 49 WL/NL diagnostics failed: %s', ex49_.message);
+                end
+            end
+
             % ---- Known-ambiguity attitude validation (ATTITUDE VALIDATION ONLY — not operational) ----
             % Gated by cfg.estimator.runKnownAmbiguityValidation = true.
             % Runs a short comparison where truth float ambiguities are subtracted from

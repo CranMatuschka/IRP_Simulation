@@ -2938,6 +2938,61 @@ classdef ClockExactReportBuilder
                 fprintf(fid, 'LAMBDA impl.\\ & false\\\\\n');
                 fprintf(fid, '\\bottomrule\n\\end{tabular}\\par\n\n');
             end
+
+            % --- Stage 49: Wide-Lane / Narrow-Lane Float Diagnostics ---
+            if isfield(cfg,'diagnostics') && ...
+                    isfield(cfg.diagnostics,'wideLaneNarrowLane') && ...
+                    isfield(cfg.diagnostics.wideLaneNarrowLane,'enable') && ...
+                    cfg.diagnostics.wideLaneNarrowLane.enable
+                fprintf(fid, '\\subsection*{Wide-Lane / Narrow-Lane Float Diagnostics (Stage~49)}\n');
+                fprintf(fid, ['\\textit{Stage~49 computes float wide-lane and narrow-lane ' ...
+                    'ambiguity-combination diagnostics from the traced L1/L2 ambiguity ' ...
+                    'covariance. This is not integer ambiguity resolution. No ambiguity is ' ...
+                    'rounded or fixed. LAMBDA/MLAMBDA, calibrated phase-bias products, and ' ...
+                    'false-fix-risk control are not implemented.}\n\n']);
+                s49 = revgnss.WideLaneNarrowLaneDiagnostics.assess(summary, cfg);
+                fprintf(fid, '\\begin{tabular}{p{0.46\\textwidth}p{0.42\\textwidth}}\n');
+                fprintf(fid, '\\toprule\n\\textbf{Property} & \\textbf{Value}\\\\\n\\midrule\n');
+                fprintf(fid, 'Classification & \\texttt{%s}\\\\\n', ...
+                    revgnss.ClockExactReportBuilder.esc_(s49.classification));
+                if isfinite(s49.l1Frequency_Hz)
+                    fprintf(fid, 'L1 frequency (MHz) & %.2f\\\\\n', s49.l1Frequency_Hz/1e6);
+                    fprintf(fid, 'L2 frequency (MHz) & %.2f\\\\\n', s49.l2Frequency_Hz/1e6);
+                    fprintf(fid, 'L1 wavelength (cm) & %.4f\\\\\n', s49.lambda1_m*100);
+                    fprintf(fid, 'L2 wavelength (cm) & %.4f\\\\\n', s49.lambda2_m*100);
+                end
+                if isfinite(s49.lambdaWideLane_m)
+                    fprintf(fid, 'Wide-lane wavelength (cm) & %.4f\\\\\n', s49.lambdaWideLane_m*100);
+                    fprintf(fid, 'Narrow-lane wavelength (cm) & %.5f\\\\\n', s49.lambdaNarrowLane_m*100);
+                end
+                fprintf(fid, 'Pair metadata available & %s\\\\\n', mat2str(s49.pairMetadataAvailable));
+                fprintf(fid, 'Pair count & %d\\\\\n', s49.pairCount);
+                fprintf(fid, 'Covariance available & %s\\\\\n', mat2str(s49.covarianceAvailable));
+                if isfinite(s49.sigmaWideLaneCyclesMin)
+                    fprintf(fid, 'Wide-lane $\\sigma$ min (cycles) & %.4f\\\\\n', s49.sigmaWideLaneCyclesMin);
+                    fprintf(fid, 'Wide-lane $\\sigma$ mean (cycles) & %.4f\\\\\n', s49.sigmaWideLaneCyclesMean);
+                    fprintf(fid, 'Wide-lane $\\sigma$ max (cycles) & %.4f\\\\\n', s49.sigmaWideLaneCyclesMax);
+                end
+                if isfinite(s49.sigmaNarrowLaneCyclesMin)
+                    fprintf(fid, 'Narrow-lane $\\sigma$ min (cycles) & %.4f\\\\\n', s49.sigmaNarrowLaneCyclesMin);
+                    fprintf(fid, 'Narrow-lane $\\sigma$ mean (cycles) & %.4f\\\\\n', s49.sigmaNarrowLaneCyclesMean);
+                    fprintf(fid, 'Narrow-lane $\\sigma$ max (cycles) & %.4f\\\\\n', s49.sigmaNarrowLaneCyclesMax);
+                end
+                if isfinite(s49.sigmaWideLaneMetresMean)
+                    fprintf(fid, 'Wide-lane $\\sigma$ mean (m) & %.4f\\\\\n', s49.sigmaWideLaneMetresMean);
+                end
+                if isfinite(s49.sigmaNarrowLaneMetresMean)
+                    fprintf(fid, 'Narrow-lane $\\sigma$ mean (m) & %.5f\\\\\n', s49.sigmaNarrowLaneMetresMean);
+                end
+                if isfinite(s49.maxAbsWideNarrowCorr)
+                    fprintf(fid, 'Max abs WL/NL corr. & %.4f\\\\\n', s49.maxAbsWideNarrowCorr);
+                end
+                fprintf(fid, 'Integer fixing impl.\\ & false\\\\\n');
+                fprintf(fid, 'LAMBDA/MLAMBDA impl.\\ & false\\\\\n');
+                fprintf(fid, 'False-fix-risk controlled & false\\\\\n');
+                fprintf(fid, 'Phase-bias products & false\\\\\n');
+                fprintf(fid, '\\bottomrule\n\\end{tabular}\\par\n\n');
+            end
         end
 
         % ================================================================

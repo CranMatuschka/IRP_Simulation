@@ -110,6 +110,7 @@ classdef AmbiguityReadinessDiagnostics
                 bl{end+1} = 'Known-ambiguity validation is validation-only, not operational.';
             end
             bl{end+1} = 'Carrier IF ambiguity is non-integer (float only); integer fixing not implemented in v1.';
+            bl{end+1} = 'Wide-lane/narrow-lane diagnostics are float diagnostics only; integer fixing still requires calibrated phase-bias products and controlled false-fix validation.';
             bl{end+1} = 'Integer ambiguity fixing not implemented in v1.';
         end
 

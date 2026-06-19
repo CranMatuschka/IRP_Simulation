@@ -35,7 +35,7 @@ oo_v1_envAllToggles_ = strcmpi(getenv('OO_V1_ALL_TOGGLES'), 'true');
 if oo_v1_envValidate_; oo_v1_envAllToggles_ = true; end  % validate always uses all toggles
 oo_v1_envStage_      = str2double(getenv('OO_V1_VALIDATION_STAGE'));
 if isnan(oo_v1_envStage_); oo_v1_envStage_ = 0; end
-if oo_v1_envValidate_ && oo_v1_envStage_ == 0; oo_v1_envStage_ = 48; end
+if oo_v1_envValidate_ && oo_v1_envStage_ == 0; oo_v1_envStage_ = 49; end
 oo_v1_envCompile_    = strtrim(getenv('OO_V1_REPORT_COMPILE_TEX'));
 
 cfg = revgnss.ConfigFactory.defaultConfig();
@@ -170,6 +170,12 @@ cfg.diagnostics.carrierIonoFreeRows.enable           = true;
 % propagates Var(B_IF) = [alpha beta] * P_pair * [alpha; beta]'
 % from Stage 41 Pamb export. B_IF is non-integer (float). No integer fixing.
 cfg.diagnostics.carrierIonoFreeAmbiguityTraceability.enable = false;
+
+% --- Wide-lane / narrow-lane float diagnostics (Stage 49) -------
+% Diagnostic only. Computes WL/NL cycle-domain sigma and WL/NL
+% correlation from Stage 41 Pamb. No integer fixing, no LAMBDA/MLAMBDA,
+% no phase-bias products, no false-fix-risk control.
+cfg.diagnostics.wideLaneNarrowLane.enable = false;
 
 % --- Inter-frequency bias budget (Stage 44) --------------------
 % Diagnostic only. Default all to 0 (no calibrated products in v1).
@@ -331,6 +337,7 @@ if stageAllToggles || oo_v1_envAllToggles_
     cfg.measurements.carrier.ionosphereFreeRows.useInEkf     = true;
     cfg.diagnostics.carrierIonoFreeRows.enable               = true;
     cfg.diagnostics.carrierIonoFreeAmbiguityTraceability.enable = true;
+    cfg.diagnostics.wideLaneNarrowLane.enable                    = true;
     cfg.validation.stageAllToggles         = true;
     if oo_v1_envAllToggles_
         cfg.validation.invokedMainScript = true;
