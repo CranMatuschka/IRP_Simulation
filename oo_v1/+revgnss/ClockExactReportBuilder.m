@@ -2516,6 +2516,68 @@ classdef ClockExactReportBuilder
                 end
                 fprintf(fid, '\\end{itemize}\n\n');
             end
+
+            % --- Stage 39: Carrier Row Metadata Inventory ---
+            fprintf(fid, '\\subsection*{Carrier Row Metadata Inventory (Stage~39)}\n');
+            fprintf(fid, ['\\textit{This is metadata inventory only. It is not L2 carrier EKF, ' ...
+                'not ionosphere-free carrier, not integer ambiguity resolution, ' ...
+                'and not an attitude accuracy claim.}\n\n']);
+
+            try
+                tmp39.diag    = diag;
+                tmp39.summary = summary;
+                cri = revgnss.CarrierRowMetadataInventory.inventory(tmp39, cfg);
+            catch ex39
+                fprintf(fid, 'Carrier row metadata inventory failed: %s\n\n', ...
+                    revgnss.ClockExactReportBuilder.esc_(ex39.message));
+                cri = revgnss.CarrierRowMetadataInventory.inventory(struct(), struct());
+            end
+
+            fprintf(fid, '\\begin{tabular}{p{0.46\\textwidth}p{0.42\\textwidth}}\n');
+            fprintf(fid, '\\toprule\n\\textbf{Property} & \\textbf{Value}\\\\\n\\midrule\n');
+            fprintf(fid, 'Classification & \\texttt{%s}\\\\\n', ...
+                revgnss.ClockExactReportBuilder.esc_(char(cri.classification)));
+            fprintf(fid, 'Row metadata completeness & \\texttt{%s}\\\\\n', ...
+                revgnss.ClockExactReportBuilder.esc_(char(cri.rowMetadataCompleteness)));
+            fprintf(fid, 'Carrier mode & \\texttt{%s}\\\\\n', ...
+                revgnss.ClockExactReportBuilder.esc_(char(cri.carrierMode)));
+            fprintf(fid, 'Ambiguity mode & \\texttt{%s}\\\\\n', ...
+                revgnss.ClockExactReportBuilder.esc_(char(cri.ambiguityMode)));
+            if isfinite(cri.carrierRowCount)
+                fprintf(fid, 'Carrier rows & %d\\\\\n', cri.carrierRowCount);
+            else
+                fprintf(fid, 'Carrier rows & unavailable\\\\\n');
+            end
+            if isfinite(cri.differentialAttitudeRowCount)
+                fprintf(fid, 'Diff-att rows & %d\\\\\n', cri.differentialAttitudeRowCount);
+            end
+            if isfinite(cri.ekfCarrierRowCount)
+                fprintf(fid, 'EKF carrier rows & %d\\\\\n', cri.ekfCarrierRowCount);
+            end
+            if isfinite(cri.diagnosticCarrierRowCount)
+                fprintf(fid, 'Diagnostic carrier rows & %d\\\\\n', cri.diagnosticCarrierRowCount);
+            end
+            if cri.ambiguityMetadataAvailable && isfinite(cri.ambiguityStateCount)
+                fprintf(fid, 'Ambiguity states & %d (\\texttt{%s})\\\\\n', ...
+                    cri.ambiguityStateCount, ...
+                    revgnss.ClockExactReportBuilder.esc_(char(cri.ambiguityStateCountSource)));
+            else
+                fprintf(fid, 'Ambiguity states & unavailable\\\\\n');
+            end
+            fprintf(fid, 'L2 carrier EKF impl. & %s\\\\\n', ...
+                mat2str(cri.l2CarrierEkfImplemented));
+            fprintf(fid, 'Integer fixing impl. & %s\\\\\n', ...
+                mat2str(cri.integerFixingImplemented));
+            fprintf(fid, '\\bottomrule\n\\end{tabular}\\par\n\n');
+
+            if ~isempty(cri.limitations)
+                fprintf(fid, '\\textbf{Limitations:}\n\\begin{itemize}\n');
+                for li39 = 1:numel(cri.limitations)
+                    fprintf(fid, '\\item %s\n', ...
+                        revgnss.ClockExactReportBuilder.esc_(char(cri.limitations{li39})));
+                end
+                fprintf(fid, '\\end{itemize}\n\n');
+            end
         end
 
         % ================================================================

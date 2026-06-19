@@ -29,11 +29,11 @@ classdef MainScriptValidationGate
             state = struct();
 
             % Resolve stage, seed, count from env vars.
-            stg = 38;
+            stg = 39;
             v = str2double(getenv('OO_V1_VALIDATION_STAGE'));
             if ~isnan(v) && v > 0; stg = round(v); end
 
-            seed = 38;
+            seed = 39;
             v = str2double(getenv('OO_V1_RANDOM_TEST_SEED'));
             if ~isnan(v) && isfinite(v); seed = round(v); end
 
@@ -207,6 +207,7 @@ classdef MainScriptValidationGate
                 case 36; t = 'Single-Asset Attitude Scenario Readiness Gate v1';
                 case 37; t = 'Move Validation Status Out of PDF Into README';
                 case 38; t = 'Carrier-Phase Attitude Preparation v1';
+                case 39; t = 'Carrier Row Metadata Inventory v1';
                 otherwise
                     try; t = revgnss.ReportStatus.current().stageTitle; catch; t = sprintf('Stage %d', stg); end
             end

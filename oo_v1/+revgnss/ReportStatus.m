@@ -12,8 +12,8 @@ classdef ReportStatus
     methods (Static)
 
         function s = current()
-            s.stage      = '38';
-            s.stageTitle = 'Carrier-Phase Attitude Preparation v1';
+            s.stage      = '39';
+            s.stageTitle = 'Carrier Row Metadata Inventory v1';
             s.validationMode = 'targeted-random-smoke';
             s.fullSuiteRun   = false;
 
@@ -57,7 +57,7 @@ classdef ReportStatus
             end
             vsSHA = '';
             if isfield(vs, 'gitSHA'); vsSHA = strtrim(char(vs.gitSHA)); end
-            s.validationArtifactFresh = (vsStageNum >= 38) && strcmp(vsSHA, runtimeSHA);
+            s.validationArtifactFresh = (vsStageNum >= 39) && strcmp(vsSHA, runtimeSHA);
             if ~s.validationArtifactFresh
                 s.validationWarnings{end+1} = ...
                     'No fresh local validation summary for this commit. Run: setenv(''OO_V1_VALIDATE_REPORT'',''true''); run_oo_reverse_gnss_report';
@@ -165,6 +165,7 @@ classdef ReportStatus
                 'Stage 36: AttitudeScenarioReadiness helper; single-asset attitude scenario readiness classification from receiver geometry rank, measurement modes, observability, Jacobian audit, and evidence status'
                 'Stage 37: validation-status chapter removed from PDF; README contains validation status and missing-scientific-stages summary; PDF verification checks scientific content and absence of validation-status heading'
                 'Stage 38: CarrierAttitudePreparation helper; rowInventory (totalCarrierRows/totalDiffAttRows from summary), ambiguityInventory (nAmbiguities from nTowers*nReceivers), classify_ priority chain; report subsection in writeAttitudeObservability_'
+                'Stage 39: CarrierRowMetadataInventory helper; carrier/differential-attitude row and ambiguity metadata inventory with summary fallback and explicit limitations; reused in Stage 38 helper; report subsection'
             };
         end
 

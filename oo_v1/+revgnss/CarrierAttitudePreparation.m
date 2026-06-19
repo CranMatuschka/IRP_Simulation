@@ -20,8 +20,17 @@ classdef CarrierAttitudePreparation
             end
             s.enabled          = true;
             s.measurementModes = revgnss.CarrierAttitudePreparation.measurementModeSummary(cfg);
-            s.rowInv           = revgnss.CarrierAttitudePreparation.rowInventory(out);
-            s.ambInv           = revgnss.CarrierAttitudePreparation.ambiguityInventory(out, cfg);
+            % Delegate row/ambiguity inventory to Stage 39 helper.
+            inv39 = revgnss.CarrierRowMetadataInventory.inventory(out, cfg);
+            s.rowInv.carrierRowMetadataAvailable = inv39.rowMetadataAvailable;
+            s.rowInv.carrierRowCount             = inv39.carrierRowCount;
+            s.rowInv.diffAttRowCount             = inv39.differentialAttitudeRowCount;
+            s.rowInv.warnings                    = {};
+            s.ambInv.ambiguityMetadataAvailable  = inv39.ambiguityMetadataAvailable;
+            s.ambInv.nAmbiguities                = inv39.ambiguityStateCount;
+            s.ambInv.ambiguityMode               = inv39.ambiguityMode;
+            s.ambInv.nSignals                    = 1;
+            s.ambInv.warnings                    = {};
             if isfield(out,'summary') && isfield(out.summary,'nReceivers')
                 s.nReceivers = out.summary.nReceivers;
             elseif isfield(cfg,'scenario') && isfield(cfg.scenario,'nReceivers')
@@ -33,7 +42,7 @@ classdef CarrierAttitudePreparation
             catch ex
                 s.warnings{end+1} = ['geometry: ' ex.message];
             end
-            s.warnings       = [s.warnings, s.rowInv.warnings, s.ambInv.warnings];
+            s.warnings = [s.warnings, inv39.warnings];
             s.classification = revgnss.CarrierAttitudePreparation.classify_(s);
             s.readyLevel     = revgnss.CarrierAttitudePreparation.levelFor_(s.classification);
         end
