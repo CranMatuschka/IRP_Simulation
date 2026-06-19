@@ -12,8 +12,8 @@ classdef ReportStatus
     methods (Static)
 
         function s = current()
-            s.stage      = '37';
-            s.stageTitle = 'Move Validation Status Out of PDF Into README';
+            s.stage      = '38';
+            s.stageTitle = 'Carrier-Phase Attitude Preparation v1';
             s.validationMode = 'targeted-random-smoke';
             s.fullSuiteRun   = false;
 
@@ -57,7 +57,7 @@ classdef ReportStatus
             end
             vsSHA = '';
             if isfield(vs, 'gitSHA'); vsSHA = strtrim(char(vs.gitSHA)); end
-            s.validationArtifactFresh = (vsStageNum >= 37) && strcmp(vsSHA, runtimeSHA);
+            s.validationArtifactFresh = (vsStageNum >= 38) && strcmp(vsSHA, runtimeSHA);
             if ~s.validationArtifactFresh
                 s.validationWarnings{end+1} = ...
                     'No fresh local validation summary for this commit. Run: setenv(''OO_V1_VALIDATE_REPORT'',''true''); run_oo_reverse_gnss_report';
@@ -127,7 +127,6 @@ classdef ReportStatus
                 'Quaternion / error-state attitude EKF (current ZYX Euler is documented but singular at pitch +/-90 deg)'
                 'Full per-row LOS metadata for runtime finite-diff Jacobian consistency (production path uses H-only summary)'
                 'Multi-antenna single-asset attitude scenario validation'
-                'Carrier-phase attitude preparation and observability analysis'
                 'L2 carrier EKF rows and ionosphere-free carrier combination'
                 'Ambiguity readiness diagnostics and integer ambiguity resolution (LAMBDA/MLAMBDA)'
                 'Monte Carlo / NIS / NEES stochastic consistency validation'
@@ -165,6 +164,7 @@ classdef ReportStatus
                 'Stage 35: AttitudeEvidenceReport helper; scenario-level attitude evidence summary linking truth/estimate histories with observability, receiver geometry, Euler convention, and Jacobian audit status'
                 'Stage 36: AttitudeScenarioReadiness helper; single-asset attitude scenario readiness classification from receiver geometry rank, measurement modes, observability, Jacobian audit, and evidence status'
                 'Stage 37: validation-status chapter removed from PDF; README contains validation status and missing-scientific-stages summary; PDF verification checks scientific content and absence of validation-status heading'
+                'Stage 38: CarrierAttitudePreparation helper; rowInventory (totalCarrierRows/totalDiffAttRows from summary), ambiguityInventory (nAmbiguities from nTowers*nReceivers), classify_ priority chain; report subsection in writeAttitudeObservability_'
             };
         end
 

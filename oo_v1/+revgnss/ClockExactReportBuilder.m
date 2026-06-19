@@ -2456,6 +2456,66 @@ classdef ClockExactReportBuilder
                 end
                 fprintf(fid, '\\end{itemize}\n\n');
             end
+
+            % --- Stage 38: Carrier-Phase Attitude Preparation ---
+            fprintf(fid, '\\subsection*{Carrier-Phase Attitude Preparation (Stage~38)}\n');
+            fprintf(fid, ['\\textit{This is a preparation audit only. ' ...
+                'L2 carrier EKF, integer ambiguity fixing, and quaternion states ' ...
+                'are not implemented in v1.}\n\n']);
+
+            try
+                tmp38.diag    = diag;
+                tmp38.summary = summary;
+                cap = revgnss.CarrierAttitudePreparation.assess(tmp38, cfg);
+            catch ex38
+                fprintf(fid, 'Carrier attitude preparation assessment failed: %s\n\n', ...
+                    revgnss.ClockExactReportBuilder.esc_(ex38.message));
+                cap = revgnss.CarrierAttitudePreparation.assess(struct(), struct());
+            end
+
+            fprintf(fid, '\\begin{tabular}{p{0.46\\textwidth}p{0.42\\textwidth}}\n');
+            fprintf(fid, '\\toprule\n\\textbf{Property} & \\textbf{Value}\\\\\n\\midrule\n');
+            fprintf(fid, 'Classification & \\texttt{%s}\\\\\n', ...
+                revgnss.ClockExactReportBuilder.esc_(char(cap.classification)));
+            fprintf(fid, 'Ready level & %d\\\\\n', cap.readyLevel);
+            fprintf(fid, 'Receivers & %d\\\\\n', cap.nReceivers);
+            fprintf(fid, 'Geometry rank & %d\\\\\n', cap.receiverGeometryRank);
+            m38 = cap.measurementModes;
+            if isstruct(m38) && isfield(m38,'carrierEnabled')
+                fprintf(fid, 'Carrier enabled & %s\\\\\n', mat2str(m38.carrierEnabled));
+                fprintf(fid, 'Carrier mode & \\texttt{%s}\\\\\n', ...
+                    revgnss.ClockExactReportBuilder.esc_(char(m38.carrierMode)));
+                fprintf(fid, 'Ambiguity mode & \\texttt{%s}\\\\\n', ...
+                    revgnss.ClockExactReportBuilder.esc_(char(m38.ambiguityMode)));
+                fprintf(fid, 'Attitude carrier mode & \\texttt{%s}\\\\\n', ...
+                    revgnss.ClockExactReportBuilder.esc_(char(m38.attitudeCarrierMode)));
+                fprintf(fid, 'Float carrier active & %s\\\\\n', mat2str(m38.hasCarrierFloat));
+            end
+            if cap.rowInv.carrierRowMetadataAvailable
+                fprintf(fid, 'Carrier rows (total) & %d\\\\\n', cap.rowInv.carrierRowCount);
+                fprintf(fid, 'Diff-att rows (total) & %d\\\\\n', cap.rowInv.diffAttRowCount);
+            else
+                fprintf(fid, 'Carrier rows & unavailable\\\\\n');
+            end
+            if cap.ambInv.ambiguityMetadataAvailable
+                fprintf(fid, 'Float ambiguity states & %d\\\\\n', cap.ambInv.nAmbiguities);
+            else
+                fprintf(fid, 'Float ambiguity states & unavailable\\\\\n');
+            end
+            fprintf(fid, 'L2 carrier EKF impl. & %s\\\\\n', ...
+                mat2str(cap.l2CarrierEkfImplemented));
+            fprintf(fid, 'Integer fixing impl. & %s\\\\\n', ...
+                mat2str(cap.integerFixingImplemented));
+            fprintf(fid, '\\bottomrule\n\\end{tabular}\\par\n\n');
+
+            if ~isempty(cap.warnings)
+                fprintf(fid, '\\textbf{Warnings:}\n\\begin{itemize}\n');
+                for wi38 = 1:numel(cap.warnings)
+                    fprintf(fid, '\\item %s\n', ...
+                        revgnss.ClockExactReportBuilder.esc_(char(cap.warnings{wi38})));
+                end
+                fprintf(fid, '\\end{itemize}\n\n');
+            end
         end
 
         % ================================================================
