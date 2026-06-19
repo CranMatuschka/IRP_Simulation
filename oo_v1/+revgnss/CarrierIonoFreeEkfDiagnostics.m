@@ -48,6 +48,11 @@ classdef CarrierIonoFreeEkfDiagnostics
             catch
             end
 
+            % Stage 48: ambiguity pair metadata availability
+            s.ambiguityPairMetadataAvailable = ...
+                isfield(summary,'carrierIfPairMetadataAvailable') && ...
+                summary.carrierIfPairMetadataAvailable;
+
             % false-claim guards (always)
             s.integerAmbiguityIsNonInteger       = true;
             s.integerFixingImplemented            = false;
@@ -74,6 +79,7 @@ classdef CarrierIonoFreeEkfDiagnostics
             if isfinite(s.noiseAmplification)
                 lines{end+1} = sprintf('NoiseAmplification   : %.4fx', s.noiseAmplification);
             end
+            lines{end+1} = sprintf('PairMetadataAvail    : %s', mat2str(s.ambiguityPairMetadataAvailable));
             lines{end+1} = sprintf('IntegerAmbigIsNonInt : %s', mat2str(s.integerAmbiguityIsNonInteger));
             lines{end+1} = 'IntegerFixingImpl    : false';
             lines{end+1} = 'LambdaImpl           : false';
@@ -95,6 +101,7 @@ classdef CarrierIonoFreeEkfDiagnostics
             s.ifAlpha                             = NaN;
             s.ifBeta                              = NaN;
             s.noiseAmplification                  = NaN;
+            s.ambiguityPairMetadataAvailable      = false;
             s.integerAmbiguityIsNonInteger        = true;
             s.integerFixingImplemented             = false;
             s.lambdaImplemented                    = false;

@@ -62,18 +62,32 @@ classdef CarrierIonoFreeRowBuilder
             r2   = diag(R(idx2, idx2));
             R_IF = diag(alpha^2 * r1 + beta^2 * r2);
 
-            % cpInfo: L1 block becomes IF; L2 block dropped
-            cpInfo_IF                   = cpInfo;
-            cpInfo_IF.phi_m             = alpha * cpInfo.phi_m(idx1) + beta * cpInfo.phi_m(idx2);
-            cpInfo_IF.prefit_m          = z_IF - h_IF;
-            cpInfo_IF.towerIdx          = cpInfo.towerIdx(idx1);
-            cpInfo_IF.antennaIdx        = cpInfo.antennaIdx(idx1);
-            cpInfo_IF.signalIdx         = ones(Mp, 1);
-            cpInfo_IF.ambiguityStateIdx = cpInfo.ambiguityStateIdx(idx1);
-            cpInfo_IF.trackKey          = cpInfo.trackKey(idx1);
-            cpInfo_IF.ionoFreeCombined  = true;
-            cpInfo_IF.ifAlpha           = alpha;
-            cpInfo_IF.ifBeta            = beta;
+            % cpInfo: L1 block becomes IF; L2 block dropped.
+            % Stage 48 adds explicit L1/L2 ambiguity state pair metadata.
+            cpInfo_IF                         = cpInfo;
+            cpInfo_IF.phi_m                   = alpha * cpInfo.phi_m(idx1) + beta * cpInfo.phi_m(idx2);
+            cpInfo_IF.prefit_m                = z_IF - h_IF;
+            cpInfo_IF.towerIdx                = cpInfo.towerIdx(idx1);
+            cpInfo_IF.antennaIdx              = cpInfo.antennaIdx(idx1);
+            cpInfo_IF.signalIdx               = zeros(Mp, 1);  % 0 = ionosphere-free
+            cpInfo_IF.signalId                = repmat({'L_IF'}, Mp, 1);
+            ambIdxL1_                         = cpInfo.ambiguityStateIdx(idx1);
+            ambIdxL2_                         = cpInfo.ambiguityStateIdx(idx2);
+            cpInfo_IF.ambiguityStateIdx       = ambIdxL1_;  % legacy: L1 index
+            cpInfo_IF.ambiguityStateIdxL1     = ambIdxL1_;
+            cpInfo_IF.ambiguityStateIdxL2     = ambIdxL2_;
+            cpInfo_IF.ambiguityStateIdxPair   = [ambIdxL1_, ambIdxL2_];  % Mp x 2
+            cpInfo_IF.ambiguityWeights        = repmat([alpha, beta], Mp, 1);  % Mp x 2
+            cpInfo_IF.ambiguityCombination    = repmat({'alpha*B_L1+beta*B_L2'}, Mp, 1);
+            cpInfo_IF.ambiguityIsInteger      = false(Mp, 1);
+            cpInfo_IF.integerFixingImplemented = false;
+            cpInfo_IF.lambdaImplemented        = false;
+            cpInfo_IF.trackKey                = cpInfo.trackKey(idx1);
+            cpInfo_IF.ionoFreeCombined        = true;
+            cpInfo_IF.ifAlpha                 = alpha;
+            cpInfo_IF.ifBeta                  = beta;
+            cpInfo_IF.hExplicitlyCombined     = true;
+            cpInfo_IF.hCombination            = 'alphaH1_betaH2';
         end
 
         function H_IF = combineJacobians(H_L1, H_L2)

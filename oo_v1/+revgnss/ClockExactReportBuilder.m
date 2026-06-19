@@ -2900,6 +2900,44 @@ classdef ClockExactReportBuilder
                     revgnss.ClockExactReportBuilder.esc_(s47.carrierIfIntegerReadyClassification));
                 fprintf(fid, '\\bottomrule\n\\end{tabular}\\par\n\n');
             end
+
+            % --- Stage 48: Carrier Ionosphere-Free Ambiguity Traceability ---
+            if isfield(cfg,'diagnostics') && ...
+                    isfield(cfg.diagnostics,'carrierIonoFreeAmbiguityTraceability') && ...
+                    isfield(cfg.diagnostics.carrierIonoFreeAmbiguityTraceability,'enable') && ...
+                    cfg.diagnostics.carrierIonoFreeAmbiguityTraceability.enable
+                fprintf(fid, '\\subsection*{Carrier IF Ambiguity Traceability (Stage~48)}\n');
+                fprintf(fid, ['\\textit{Stage~48 adds explicit traceability for the L1/L2 ' ...
+                    'ambiguity state pair behind each carrier ionosphere-free (IF) EKF row. ' ...
+                    'Each IF row observes $B_{\\text{IF}}=\\alpha B_{L1}+\\beta B_{L2}$, ' ...
+                    'which is \\textbf{not} an integer. ' ...
+                    'The IF ambiguity variance $\\mathrm{Var}(B_{\\text{IF}}) = ' ...
+                    '[\\alpha\\;\\beta]\\,P_{\\mathrm{pair}}\\,[\\alpha\\;\\beta]^\\top$ ' ...
+                    'is propagated from the Stage~41 covariance export for diagnostics only. ' ...
+                    'Integer fixing, LAMBDA/MLAMBDA are NOT implemented in v1.}\n\n']);
+                s48 = revgnss.CarrierIonoFreeAmbiguityTraceability.assess(summary, cfg);
+                fprintf(fid, '\\begin{tabular}{p{0.46\\textwidth}p{0.42\\textwidth}}\n');
+                fprintf(fid, '\\toprule\n\\textbf{Property} & \\textbf{Value}\\\\\n\\midrule\n');
+                fprintf(fid, 'Classification & \\texttt{%s}\\\\\n', ...
+                    revgnss.ClockExactReportBuilder.esc_(s48.classification));
+                fprintf(fid, 'Pair metadata available & %s\\\\\n', ...
+                    mat2str(s48.pairMetadataAvailable));
+                fprintf(fid, 'IF ambiguity pairs & %d\\\\\n', s48.pairCount);
+                if isfinite(s48.alpha)
+                    fprintf(fid, '$\\alpha$ (L1 weight) & %.6f\\\\\n', s48.alpha);
+                    fprintf(fid, '$\\beta$ (L2 weight) & %.6f\\\\\n', s48.beta);
+                end
+                fprintf(fid, 'Std dev available & %s\\\\\n', ...
+                    mat2str(s48.ifAmbiguityStdDevAvailable));
+                if s48.ifAmbiguityStdDevAvailable && ~isempty(s48.ifAmbiguityStdDev)
+                    fprintf(fid, 'Std dev min (m) & %.4f\\\\\n', min(s48.ifAmbiguityStdDev));
+                    fprintf(fid, 'Std dev max (m) & %.4f\\\\\n', max(s48.ifAmbiguityStdDev));
+                end
+                fprintf(fid, '$B_{\\text{IF}}$ is non-integer & true (float only)\\\\\n');
+                fprintf(fid, 'Integer fixing impl.\\ & false\\\\\n');
+                fprintf(fid, 'LAMBDA impl.\\ & false\\\\\n');
+                fprintf(fid, '\\bottomrule\n\\end{tabular}\\par\n\n');
+            end
         end
 
         % ================================================================

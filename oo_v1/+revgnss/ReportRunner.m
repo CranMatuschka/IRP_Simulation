@@ -119,6 +119,25 @@ classdef ReportRunner
                 end
             end
 
+            % ---- Stage 48: carrier IF ambiguity traceability compact fields ----
+            % Depends on ambiguityStateMetadata attached above; must stay here.
+            nAmb48_ = 0;
+            if isfield(summary,'ambiguityStateMetadata') && ...
+                    isfield(summary.ambiguityStateMetadata,'nAmbiguities') && ...
+                    isnumeric(summary.ambiguityStateMetadata.nAmbiguities)
+                nAmb48_ = summary.ambiguityStateMetadata.nAmbiguities;
+            end
+            if nAmb48_ > 0 && mod(nAmb48_, 2) == 0
+                summary.carrierIfAmbiguityPairCount = nAmb48_ / 2;
+            else
+                summary.carrierIfAmbiguityPairCount = 0;
+            end
+            ifRowsUsed48_ = isfield(summary,'carrierIonoFreeRowsUsedInEkf') && ...
+                summary.carrierIonoFreeRowsUsedInEkf;
+            summary.carrierIfPairMetadataAvailable = ifRowsUsed48_ && ...
+                summary.carrierIfAmbiguityPairCount > 0;
+            summary.carrierIfIntegerAmbiguityIsNonInteger = true;
+
             % ---- Known-ambiguity attitude validation (ATTITUDE VALIDATION ONLY — not operational) ----
             % Gated by cfg.estimator.runKnownAmbiguityValidation = true.
             % Runs a short comparison where truth float ambiguities are subtracted from

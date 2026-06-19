@@ -198,7 +198,7 @@ classdef AmbiguityReadinessDiagnostics
                 'Integer ambiguity fixing not implemented in v1.'
                 'LAMBDA/MLAMBDA not implemented in v1.'
                 'Carrier IF ambiguity is non-integer (B_IF=alpha*B_L1+beta*B_L2); use wide-lane/narrow-lane or explicit integer strategy in later stage.'
-                'Ambiguity covariance sub-block requires EKF state-map refactoring.'
+                'Carrier ionosphere-free ambiguity covariance is traceability-only; it is not an integer-fixing criterion by itself.'
                 'Per-row receiver/tower/signal metadata not available in current architecture.'
             };
         end
