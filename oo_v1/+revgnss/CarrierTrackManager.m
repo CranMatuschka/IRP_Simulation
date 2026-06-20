@@ -18,6 +18,7 @@ classdef CarrierTrackManager < handle
         epochCount       % containers.Map: key -> number of epochs tracked
         slipCount_       % containers.Map: key -> cumulative slip count (Stage 52)
         currentArcEpoch_ % containers.Map: key -> epochs in current arc (Stage 52)
+        currentArcId_    % containers.Map: key -> integer arc ID (Stage 53; increments on slip)
     end
 
     methods
@@ -27,6 +28,7 @@ classdef CarrierTrackManager < handle
             obj.epochCount       = containers.Map('KeyType','char','ValueType','double');
             obj.slipCount_       = containers.Map('KeyType','char','ValueType','double');
             obj.currentArcEpoch_ = containers.Map('KeyType','char','ValueType','double');
+            obj.currentArcId_    = containers.Map('KeyType','char','ValueType','double');
         end
 
         function [slipInfo, keepMask, resetRequests] = process(obj, cpInfo, cfg)
@@ -100,11 +102,19 @@ classdef CarrierTrackManager < handle
                     if isKey(obj.slipCount_, key); sc = obj.slipCount_(key); end
                     obj.slipCount_(key)       = sc + 1;
                     obj.currentArcEpoch_(key) = 0;
+                    % Stage 53: increment arc ID on slip (new arc starts after slip).
+                    aid = 1;
+                    if isKey(obj.currentArcId_, key); aid = obj.currentArcId_(key) + 1; end
+                    obj.currentArcId_(key) = aid;
                 else
                     % Stage 52: advance current arc epoch.
                     ca = 0;
                     if isKey(obj.currentArcEpoch_, key); ca = obj.currentArcEpoch_(key); end
                     obj.currentArcEpoch_(key) = ca + 1;
+                    % Stage 53: initialize arc ID to 1 on first observation.
+                    if ~isKey(obj.currentArcId_, key)
+                        obj.currentArcId_(key) = 1;
+                    end
                 end
 
                 obj.epochCount(key)     = ec;
@@ -118,6 +128,72 @@ classdef CarrierTrackManager < handle
             remove(obj.epochCount,       keys(obj.epochCount));
             remove(obj.slipCount_,       keys(obj.slipCount_));
             remove(obj.currentArcEpoch_, keys(obj.currentArcEpoch_));
+            remove(obj.currentArcId_,    keys(obj.currentArcId_));
+        end
+
+        function s = getArcStateSummary(obj, dt_s)
+            % getArcStateSummary  Aggregated arc state summary (Stage 53).
+            %
+            % Returns struct with statistics over all known tracks, parallel
+            % to getArcEvidence but including per-track arc IDs.
+            s.nTracks        = double(obj.epochCount.Count);
+            s.available      = s.nTracks > 0;
+            s.nUniqueArcIds  = 0;
+            s.nRowsMissing   = 0;
+            s.arcEpochs      = [];
+            s.arcIds         = [];
+            s.totalSlipEvents = 0;
+            arcIdSet_ = containers.Map('KeyType','int32','ValueType','logical');
+            ks = keys(obj.epochCount);
+            for i = 1:numel(ks)
+                k = ks{i};
+                aid = 1;
+                if isKey(obj.currentArcId_, k); aid = obj.currentArcId_(k); else; s.nRowsMissing = s.nRowsMissing + 1; end
+                s.arcIds(end+1) = aid; %#ok<AGROW>
+                ca = 0;
+                if isKey(obj.currentArcEpoch_, k); ca = obj.currentArcEpoch_(k); end
+                s.arcEpochs(end+1) = ca * dt_s; %#ok<AGROW>
+                sc = 0;
+                if isKey(obj.slipCount_, k); sc = obj.slipCount_(k); end
+                s.totalSlipEvents = s.totalSlipEvents + sc;
+                arcIdSet_(int32(aid)) = true;
+            end
+            s.nUniqueArcIds = arcIdSet_.Count;
+            if ~isempty(s.arcEpochs)
+                s.minArcEpoch  = min(s.arcEpochs);
+                s.meanArcEpoch = mean(s.arcEpochs);
+                s.maxArcEpoch  = max(s.arcEpochs);
+            else
+                s.minArcEpoch = NaN; s.meanArcEpoch = NaN; s.maxArcEpoch = NaN;
+            end
+        end
+
+        function arcState = getArcStateForRows(obj, cpInfo)
+            % getArcStateForRows  Per-row arc state lookup (Stage 53).
+            %
+            % Called AFTER trackMgr.process() so arc IDs reflect current-epoch slips.
+            % Returns struct arrays parallel to cpInfo rows.
+            M = numel(cpInfo.towerIdx);
+            arcState.arcId          = zeros(M, 1);
+            arcState.currentArcEpoch = zeros(M, 1);
+            arcState.slipCount      = zeros(M, 1);
+            arcState.trackKey       = cpInfo.trackKey;
+            arcState.towerIdx       = cpInfo.towerIdx;
+            arcState.antennaIdx     = cpInfo.antennaIdx;
+            arcState.signalIdx      = cpInfo.signalIdx;
+            arcState.nRows          = M;
+            for mi = 1:M
+                key = cpInfo.trackKey{mi};
+                if isKey(obj.currentArcId_, key)
+                    arcState.arcId(mi) = obj.currentArcId_(key);
+                end
+                if isKey(obj.currentArcEpoch_, key)
+                    arcState.currentArcEpoch(mi) = obj.currentArcEpoch_(key);
+                end
+                if isKey(obj.slipCount_, key)
+                    arcState.slipCount(mi) = obj.slipCount_(key);
+                end
+            end
         end
 
         function n = numTracks(obj)
@@ -180,6 +256,10 @@ classdef CarrierTrackManager < handle
                 ca = 0;
                 if isKey(obj.currentArcEpoch_, key); ca = obj.currentArcEpoch_(key); end
                 obj.currentArcEpoch_(key) = ca + 1;
+                % Stage 53: single arc (ID=1) when detection disabled.
+                if ~isKey(obj.currentArcId_, key)
+                    obj.currentArcId_(key) = 1;
+                end
             end
         end
 

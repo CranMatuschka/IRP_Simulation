@@ -3161,6 +3161,52 @@ classdef ClockExactReportBuilder
                 fprintf(fid, 'LAMBDA/MLAMBDA & false\\\\\n');
                 fprintf(fid, '\\bottomrule\n\\end{tabular}\\par\n\n');
             end
+
+            % --- Stage 53: Arc-Separated Float Ambiguities ---
+            if isfield(cfg,'diagnostics') && ...
+                    isfield(cfg.diagnostics,'arcSeparatedAmbiguities') && ...
+                    isfield(cfg.diagnostics.arcSeparatedAmbiguities,'enable') && ...
+                    cfg.diagnostics.arcSeparatedAmbiguities.enable
+                fprintf(fid, '\\subsection*{Arc-Separated Float Ambiguities (Stage~53)}\n');
+                fprintf(fid, ['\\textit{Stage~53 makes float carrier ambiguity handling ' ...
+                    'cycle-slip-aware by separating ambiguity arcs after slips and by ' ...
+                    'preventing carrier ionosphere-free or wide-lane/narrow-lane diagnostics ' ...
+                    'from silently bridging incompatible arcs. It does not fix ambiguities, ' ...
+                    'does not run LAMBDA/MLAMBDA, and does not control false-fix risk.}\n\n']);
+                fprintf(fid, '\\begin{tabular}{p{0.46\\textwidth}p{0.42\\textwidth}}\n');
+                fprintf(fid, '\\toprule\n\\textbf{Property} & \\textbf{Value}\\\\\n\\midrule\n');
+                if isfield(summary,'ambiguityArcMetadataAvailable')
+                    fprintf(fid, 'Arc metadata available & %s\\\\\n', ...
+                        mat2str(summary.ambiguityArcMetadataAvailable));
+                end
+                if isfield(summary,'ambiguityArcRowCount') && summary.ambiguityArcRowCount > 0
+                    fprintf(fid, 'Active tracks (arc rows) & %d\\\\\n', summary.ambiguityArcRowCount);
+                end
+                if isfield(summary,'ambiguityArcUniqueCount') && summary.ambiguityArcUniqueCount > 0
+                    fprintf(fid, 'Unique arc IDs & %d\\\\\n', summary.ambiguityArcUniqueCount);
+                end
+                if isfield(summary,'ambiguityArcRowsMissingArcId')
+                    fprintf(fid, 'Rows missing arc ID & %d\\\\\n', summary.ambiguityArcRowsMissingArcId);
+                end
+                if isfield(summary,'ambiguityArcMinEpoch') && isfinite(summary.ambiguityArcMinEpoch)
+                    fprintf(fid, 'Min arc epoch (s) & %.1f\\\\\n', summary.ambiguityArcMinEpoch);
+                    fprintf(fid, 'Mean arc epoch (s) & %.1f\\\\\n', summary.ambiguityArcMeanEpoch);
+                    fprintf(fid, 'Max arc epoch (s) & %.1f\\\\\n', summary.ambiguityArcMaxEpoch);
+                end
+                if isfield(summary,'ambiguityResetCount')
+                    fprintf(fid, 'Ambiguity resets (slips) & %d\\\\\n', summary.ambiguityResetCount);
+                end
+                if isfield(summary,'carrierIonoFreeArcConsistentPairs')
+                    fprintf(fid, 'Carrier IF arc-consistent pairs & %d\\\\\n', ...
+                        summary.carrierIonoFreeArcConsistentPairs);
+                    fprintf(fid, 'Carrier IF arc-inconsistent pairs & %d\\\\\n', ...
+                        summary.carrierIonoFreeArcInconsistentPairs);
+                end
+                fprintf(fid, 'Integer fixing impl.\\ & false\\\\\n');
+                fprintf(fid, 'LAMBDA/MLAMBDA & false\\\\\n');
+                fprintf(fid, 'False-fix-risk control & false\\\\\n');
+                fprintf(fid, '\\bottomrule\n\\end{tabular}\\par\n\n');
+            end
         end
 
         % ================================================================

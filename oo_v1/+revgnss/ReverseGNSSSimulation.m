@@ -179,6 +179,16 @@ classdef ReverseGNSSSimulation < handle
                     resetSig = obj.cfg.measurements.carrier.slipDetection.resetSigma_m;
                 end
                 obj.ekf.applyAmbiguityResets(resetRequests, resetSig);
+                errStruct.ambiguityResetCount = numel(resetRequests);
+                % Stage 53: attach per-row arc state to cpInfo after process().
+                arcSepEnabled = false;
+                try; arcSepEnabled = logical(obj.cfg.estimator.arcSeparatedAmbiguities.enable); catch; end
+                if arcSepEnabled
+                    arcSt53_ = obj.trackMgr.getArcStateForRows(cpInfo);
+                    errStruct.carrierPhase.arcId           = arcSt53_.arcId;
+                    errStruct.carrierPhase.currentArcEpoch = arcSt53_.currentArcEpoch;
+                    errStruct.carrierPhase.slipCount       = arcSt53_.slipCount;
+                end
             end
             errStruct.slipInfo = slipInfo;
 

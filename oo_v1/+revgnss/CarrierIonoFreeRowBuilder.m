@@ -88,6 +88,29 @@ classdef CarrierIonoFreeRowBuilder
             cpInfo_IF.ifBeta                  = beta;
             cpInfo_IF.hExplicitlyCombined     = true;
             cpInfo_IF.hCombination            = 'alphaH1_betaH2';
+            % Stage 53: arc consistency check from previous-epoch arc IDs.
+            % arcId is set by getArcStateForRows (after process()) and attached
+            % to errStruct.carrierPhase before buildFromStack is called again.
+            % On the current epoch buildFromStack uses the IDs from cpInfo as
+            % passed in — these are from the current-epoch state post-process().
+            if isfield(cpInfo,'arcId') && numel(cpInfo.arcId) >= 2*Mp
+                arcIdL1_ = cpInfo.arcId(idx1);
+                arcIdL2_ = cpInfo.arcId(idx2);
+                cpInfo_IF.arcIdL1 = arcIdL1_;
+                cpInfo_IF.arcIdL2 = arcIdL2_;
+                cpInfo_IF.arcConsistent = (arcIdL1_ == arcIdL2_) & ...
+                                          (arcIdL1_ > 0) & (arcIdL2_ > 0);
+                cpInfo_IF.nArcConsistentPairs   = sum(cpInfo_IF.arcConsistent);
+                cpInfo_IF.nArcInconsistentPairs = Mp - cpInfo_IF.nArcConsistentPairs;
+                cpInfo_IF.ambiguityArcSeparated = true;
+            else
+                cpInfo_IF.arcIdL1 = zeros(Mp,1);
+                cpInfo_IF.arcIdL2 = zeros(Mp,1);
+                cpInfo_IF.arcConsistent = false(Mp,1);
+                cpInfo_IF.nArcConsistentPairs   = 0;
+                cpInfo_IF.nArcInconsistentPairs = 0;
+                cpInfo_IF.ambiguityArcSeparated = false;
+            end
         end
 
         function H_IF = combineJacobians(H_L1, H_L2)

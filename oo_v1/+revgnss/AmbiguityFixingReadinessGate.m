@@ -62,6 +62,17 @@ classdef AmbiguityFixingReadinessGate
             s.nisMean       = rc.nisMean;
             s.expectedNis   = rc.expectedNis;
             s.warnings      = [s.warnings, rc.warnings];
+            % 7. Stage 53: arc-separated ambiguity metadata blockers.
+            try
+                if isfield(summary,'ambiguityArcRowsMissingArcId') && ...
+                        isnumeric(summary.ambiguityArcRowsMissingArcId)
+                    s.ambiguityArcRowsMissingArcId = summary.ambiguityArcRowsMissingArcId;
+                end
+                if isfield(summary,'carrierIonoFreeArcInconsistentPairs') && ...
+                        isnumeric(summary.carrierIonoFreeArcInconsistentPairs)
+                    s.carrierIonoFreeArcInconsistentPairs = summary.carrierIonoFreeArcInconsistentPairs;
+                end
+            catch; end
             % Score, blockers, classification
             s.readinessScore = double(s.ambiguityMetadataAvailable) + ...
                 double(s.ambiguityCovarianceAvailable) + ...
@@ -71,6 +82,15 @@ classdef AmbiguityFixingReadinessGate
                 double(s.residualDiagnosticsAvailable);
             s.blockers       = revgnss.AmbiguityFixingReadinessGate.blockerList(s);
             s.classification = revgnss.AmbiguityFixingReadinessGate.classify_(s);
+            % Populate Stage 50 report alias fields.
+            s.pairMetadataAvailable           = s.ambiguityMetadataAvailable;
+            s.covarianceAvailable             = s.ambiguityCovarianceAvailable;
+            s.wideLaneNarrowLaneReady         = s.wideLaneNarrowLaneAvailable;
+            s.wideLaneNarrowLaneClassification = ...
+                revgnss.AmbiguityFixingReadinessGate.wlnlClass_(s);
+            s.arcQualityStatus                = s.arcQualityClassification;
+            s.residualConsistencyStatus       = ...
+                revgnss.AmbiguityFixingReadinessGate.residualClass_(s);
         end
 
         function aq = arcQuality(summary, cfg)
@@ -159,6 +179,16 @@ classdef AmbiguityFixingReadinessGate
                 bl{end+1} = 'Arc quality: no slip/arc count summary available in v1.'; end
             if ~isfield(s,'residualDiagnosticsAvailable')  || ~s.residualDiagnosticsAvailable
                 bl{end+1} = 'Residual/NIS consistency unavailable.'; end
+            % Stage 53: arc-separated ambiguity metadata blockers.
+            if isfield(s,'ambiguityArcRowsMissingArcId') && s.ambiguityArcRowsMissingArcId > 0
+                bl{end+1} = sprintf('Arc metadata: %d row(s) missing arc ID (enable Stage 53 arc separation).', ...
+                    s.ambiguityArcRowsMissingArcId);
+            end
+            if isfield(s,'carrierIonoFreeArcInconsistentPairs') && ...
+                    s.carrierIonoFreeArcInconsistentPairs > 0
+                bl{end+1} = sprintf('Arc consistency: %d carrier IF pair(s) span incompatible arcs.', ...
+                    s.carrierIonoFreeArcInconsistentPairs);
+            end
             bl{end+1} = 'Phase-bias products (OSB/WL-FCB) not available; required for integer resolution.';
             bl{end+1} = 'No integer strategy implemented (LAMBDA/MLAMBDA not available in v1).';
             bl{end+1} = 'Integer fixing not implemented in v1.';
@@ -187,6 +217,17 @@ classdef AmbiguityFixingReadinessGate
             try; ok = logical(cfg.diagnostics.ambiguityFixingReadiness.enable); catch; end
         end
 
+        function cls = wlnlClass_(s)
+            if s.wideLaneNarrowLaneAvailable; cls = 'active-float-diagnostics';
+            elseif ~s.enabled;                cls = 'disabled';
+            else;                             cls = 'unavailable'; end
+        end
+
+        function cls = residualClass_(s)
+            if s.residualDiagnosticsAvailable; cls = 'residuals-available';
+            else;                              cls = 'unavailable'; end
+        end
+
         function cls = classify_(s)
             if ~s.enabled;                      cls = 'disabled';                                    return; end
             if ~s.ambiguityMetadataAvailable;   cls = 'not-ready-no-ambiguity-metadata';             return; end
@@ -209,6 +250,13 @@ classdef AmbiguityFixingReadinessGate
             s.integerStrategyAvailable=false; s.integerFixingImplemented=false;
             s.lambdaImplemented=false; s.falseFixRiskControlled=false;
             s.readinessScore=0; s.blockers={}; s.warnings={};
+            % Stage 50 ClockExactReportBuilder alias fields (legacy compatibility).
+            s.pairMetadataAvailable       = false;
+            s.covarianceAvailable         = false;
+            s.wideLaneNarrowLaneReady     = false;
+            s.wideLaneNarrowLaneClassification = 'unavailable';
+            s.arcQualityStatus            = 'unavailable';
+            s.residualConsistencyStatus   = 'unavailable';
             s.limitations={'Float readiness gate only; no ambiguity fixing.'
                 'LAMBDA/MLAMBDA not implemented in v1.'
                 'Calibrated phase-bias products not available.'

@@ -35,7 +35,7 @@ oo_v1_envAllToggles_ = strcmpi(getenv('OO_V1_ALL_TOGGLES'), 'true');
 if oo_v1_envValidate_; oo_v1_envAllToggles_ = true; end  % validate always uses all toggles
 oo_v1_envStage_      = str2double(getenv('OO_V1_VALIDATION_STAGE'));
 if isnan(oo_v1_envStage_); oo_v1_envStage_ = 0; end
-if oo_v1_envValidate_ && oo_v1_envStage_ == 0; oo_v1_envStage_ = 52; end
+if oo_v1_envValidate_ && oo_v1_envStage_ == 0; oo_v1_envStage_ = 53; end
 oo_v1_envCompile_    = strtrim(getenv('OO_V1_REPORT_COMPILE_TEX'));
 
 cfg = revgnss.ConfigFactory.defaultConfig();
@@ -194,6 +194,13 @@ cfg.diagnostics.ambiguityReadinessEvidence.enable = false;
 % arc durations, slip/reset events per track. No integer fixing,
 % no LAMBDA/MLAMBDA. Requires carrierMode='ekfFloat' and slip detection.
 cfg.diagnostics.carrierArcEvidence.enable = false;
+
+% --- Arc-separated float ambiguities (Stage 53) -----------------
+% Makes float carrier ambiguity treatment cycle-slip-aware. Per-track arc IDs
+% are incremented on each cycle slip; arc consistency is checked for carrier IF
+% and WL/NL pairs. No integer fixing, no LAMBDA/MLAMBDA, no false-fix-risk.
+cfg.estimator.arcSeparatedAmbiguities.enable  = false;
+cfg.diagnostics.arcSeparatedAmbiguities.enable = false;
 
 % --- Inter-frequency bias budget (Stage 44) --------------------
 % Diagnostic only. Default all to 0 (no calibrated products in v1).
@@ -359,6 +366,8 @@ if stageAllToggles || oo_v1_envAllToggles_
     cfg.diagnostics.ambiguityFixingReadiness.enable              = true;
     cfg.diagnostics.ambiguityReadinessEvidence.enable            = true;
     cfg.diagnostics.carrierArcEvidence.enable                    = true;
+    cfg.estimator.arcSeparatedAmbiguities.enable                 = true;
+    cfg.diagnostics.arcSeparatedAmbiguities.enable               = true;
     cfg.validation.stageAllToggles         = true;
     if oo_v1_envAllToggles_
         cfg.validation.invokedMainScript = true;

@@ -114,6 +114,25 @@ classdef WideLaneNarrowLaneDiagnostics
                 s.warnings{end+1} = ['computePairMetrics failed: ' ex.message];
                 s.classification = 'inconsistent';
             end
+
+            % Stage 53: arc consistency from summary fields (if available).
+            if isfield(summary,'carrierIonoFreeArcConsistentPairs') && ...
+                    isnumeric(summary.carrierIonoFreeArcConsistentPairs)
+                s.arcMetadataAvailable = true;
+                s.nArcConsistentPairs   = summary.carrierIonoFreeArcConsistentPairs;
+                s.nArcInconsistentPairs = 0;
+                if isfield(summary,'carrierIonoFreeArcInconsistentPairs') && ...
+                        isnumeric(summary.carrierIonoFreeArcInconsistentPairs)
+                    s.nArcInconsistentPairs = summary.carrierIonoFreeArcInconsistentPairs;
+                end
+                if s.nArcInconsistentPairs == 0
+                    s.arcConsistencyClassification = 'all-consistent';
+                elseif s.nArcConsistentPairs == 0
+                    s.arcConsistencyClassification = 'all-inconsistent';
+                else
+                    s.arcConsistencyClassification = 'partial-inconsistency';
+                end
+            end
         end
 
         function m = computePairMetrics(pairIdx, Pamb, stateIndices, f1_Hz, f2_Hz)
@@ -225,6 +244,11 @@ classdef WideLaneNarrowLaneDiagnostics
             s.sigmaWideLaneMetresMean    = NaN;
             s.sigmaNarrowLaneMetresMean  = NaN;
             s.maxAbsWideNarrowCorr       = NaN;
+            % Stage 53: arc consistency fields.
+            s.arcMetadataAvailable         = false;
+            s.nArcConsistentPairs          = 0;
+            s.nArcInconsistentPairs        = 0;
+            s.arcConsistencyClassification = 'unavailable';
             s.integerFixingImplemented   = false;
             s.lambdaImplemented          = false;
             s.falseFixRiskControlled     = false;

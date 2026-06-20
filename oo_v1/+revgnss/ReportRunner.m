@@ -268,6 +268,57 @@ classdef ReportRunner
                 end
             end
 
+            % ---- Stage 53: arc-separated float ambiguity compact fields ----
+            arcSep53Req_ = false;
+            try; arcSep53Req_ = logical(cfg.diagnostics.arcSeparatedAmbiguities.enable); catch; end
+            summary.arcSeparatedAmbiguitiesEnabled   = arcSep53Req_;
+            summary.ambiguityArcMetadataAvailable    = false;
+            summary.ambiguityArcRowCount             = 0;
+            summary.ambiguityArcUniqueCount          = 0;
+            summary.ambiguityArcRowsMissingArcId     = 0;
+            summary.ambiguityArcRowsMissingState     = 0;
+            summary.ambiguityArcMinEpoch             = NaN;
+            summary.ambiguityArcMeanEpoch            = NaN;
+            summary.ambiguityArcMaxEpoch             = NaN;
+            summary.ambiguityResetCount              = 0;
+            summary.carrierIonoFreeArcConsistentPairs   = 0;
+            summary.carrierIonoFreeArcInconsistentPairs = 0;
+            summary.wideLaneNarrowLaneArcConsistentPairs   = 0;
+            summary.wideLaneNarrowLaneArcInconsistentPairs = 0;
+            summary.arcSeparatedIntegerFixingImplemented = false;
+            summary.arcSeparatedLambdaImplemented        = false;
+            summary.arcSeparatedFalseFixRiskControlled   = false;
+            if arcSep53Req_
+                try
+                    dt53_ = 1;
+                    try; dt53_ = cfg.simulation.dt_s; catch; end
+                    asSumm53_ = sim.trackMgr.getArcStateSummary(dt53_);
+                    summary.ambiguityArcMetadataAvailable = asSumm53_.available;
+                    if asSumm53_.available
+                        summary.ambiguityArcRowCount         = asSumm53_.nTracks;
+                        summary.ambiguityArcUniqueCount      = double(asSumm53_.nUniqueArcIds);
+                        summary.ambiguityArcRowsMissingArcId = asSumm53_.nRowsMissing;
+                        summary.ambiguityArcMinEpoch         = asSumm53_.minArcEpoch;
+                        summary.ambiguityArcMeanEpoch        = asSumm53_.meanArcEpoch;
+                        summary.ambiguityArcMaxEpoch         = asSumm53_.maxArcEpoch;
+                        summary.ambiguityResetCount          = asSumm53_.totalSlipEvents;
+                    end
+                    % IF arc consistency from Stage 52 arc evidence if already available.
+                    if summary.carrierArcEvidenceAvailable && ...
+                            isfield(summary,'carrierArcNSlipEvents')
+                        % Derive IF consistency from summary (zero slips = all consistent).
+                        if summary.carrierArcNSlipEvents == 0
+                            summary.carrierIonoFreeArcConsistentPairs = ...
+                                summary.carrierArcNActiveTracks;
+                            summary.carrierIonoFreeArcInconsistentPairs = 0;
+                        end
+                    end
+                catch ex53_
+                    warning('ReportRunner:arcSepFailed', ...
+                        'Stage 53 arc-separated ambiguity summary failed: %s', ex53_.message);
+                end
+            end
+
             % ---- Known-ambiguity attitude validation (ATTITUDE VALIDATION ONLY — not operational) ----
             % Gated by cfg.estimator.runKnownAmbiguityValidation = true.
             % Runs a short comparison where truth float ambiguities are subtracted from
