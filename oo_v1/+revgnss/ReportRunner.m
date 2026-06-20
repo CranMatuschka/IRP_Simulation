@@ -237,6 +237,37 @@ classdef ReportRunner
                 end
             end
 
+            % ---- Stage 52: carrier arc evidence compact fields ----
+            carr52Req_ = false;
+            try; carr52Req_ = logical(cfg.diagnostics.carrierArcEvidence.enable); catch; end
+            summary.carrierArcEvidenceRequested      = carr52Req_;
+            summary.carrierArcEvidenceAvailable      = false;
+            summary.carrierArcEvidenceClassification = 'disabled';
+            summary.carrierArcNActiveTracks          = 0;
+            summary.carrierArcNArcs                  = 0;
+            summary.carrierArcNSlipEvents            = NaN;
+            summary.carrierArcMinLength_s            = NaN;
+            summary.carrierArcMeanLength_s           = NaN;
+            summary.carrierArcMaxLength_s            = NaN;
+            summary.carrierArcTotalEpochs            = 0;
+            if carr52Req_
+                try
+                    ae52_ = revgnss.CarrierArcEvidence.fromTrackManager(sim.trackMgr, cfg);
+                    summary.carrierArcEvidenceAvailable      = ae52_.available;
+                    summary.carrierArcEvidenceClassification = ae52_.classification;
+                    summary.carrierArcNActiveTracks          = ae52_.nActiveTracks;
+                    summary.carrierArcNArcs                  = ae52_.nArcs;
+                    summary.carrierArcNSlipEvents            = ae52_.nSlipEvents;
+                    summary.carrierArcMinLength_s            = ae52_.minArcLength_s;
+                    summary.carrierArcMeanLength_s           = ae52_.meanArcLength_s;
+                    summary.carrierArcMaxLength_s            = ae52_.maxArcLength_s;
+                    summary.carrierArcTotalEpochs            = ae52_.totalCarrierEpochs;
+                catch ex52_
+                    warning('ReportRunner:carrierArcFailed', ...
+                        'Stage 52 carrier arc evidence failed: %s', ex52_.message);
+                end
+            end
+
             % ---- Known-ambiguity attitude validation (ATTITUDE VALIDATION ONLY — not operational) ----
             % Gated by cfg.estimator.runKnownAmbiguityValidation = true.
             % Runs a short comparison where truth float ambiguities are subtracted from

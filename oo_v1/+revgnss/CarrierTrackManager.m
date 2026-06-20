@@ -14,15 +14,19 @@ classdef CarrierTrackManager < handle
     % by ReverseGNSSEKF.applyAmbiguityResets().
 
     properties (Access = private)
-        prevResidual_m  % containers.Map: key -> previous prefit residual [m]
-        epochCount      % containers.Map: key -> number of epochs tracked
+        prevResidual_m   % containers.Map: key -> previous prefit residual [m]
+        epochCount       % containers.Map: key -> number of epochs tracked
+        slipCount_       % containers.Map: key -> cumulative slip count (Stage 52)
+        currentArcEpoch_ % containers.Map: key -> epochs in current arc (Stage 52)
     end
 
     methods
 
         function obj = CarrierTrackManager()
-            obj.prevResidual_m = containers.Map('KeyType','char','ValueType','double');
-            obj.epochCount     = containers.Map('KeyType','char','ValueType','double');
+            obj.prevResidual_m   = containers.Map('KeyType','char','ValueType','double');
+            obj.epochCount       = containers.Map('KeyType','char','ValueType','double');
+            obj.slipCount_       = containers.Map('KeyType','char','ValueType','double');
+            obj.currentArcEpoch_ = containers.Map('KeyType','char','ValueType','double');
         end
 
         function [slipInfo, keepMask, resetRequests] = process(obj, cpInfo, cfg)
@@ -91,6 +95,16 @@ classdef CarrierTrackManager < handle
                     % resetAndUse keeps the carrier row and relies on the reset
                     % ambiguity covariance P (inflated to resetSigma_m^2) to absorb
                     % the discontinuity.  Measurement covariance R is not modified.
+                    % Stage 52: record slip; reset current-arc epoch.
+                    sc = 0;
+                    if isKey(obj.slipCount_, key); sc = obj.slipCount_(key); end
+                    obj.slipCount_(key)       = sc + 1;
+                    obj.currentArcEpoch_(key) = 0;
+                else
+                    % Stage 52: advance current arc epoch.
+                    ca = 0;
+                    if isKey(obj.currentArcEpoch_, key); ca = obj.currentArcEpoch_(key); end
+                    obj.currentArcEpoch_(key) = ca + 1;
                 end
 
                 obj.epochCount(key)     = ec;
@@ -100,12 +114,49 @@ classdef CarrierTrackManager < handle
 
         function reset(obj)
             % reset  Clear all track history (e.g., between simulation runs).
-            remove(obj.prevResidual_m, keys(obj.prevResidual_m));
-            remove(obj.epochCount,     keys(obj.epochCount));
+            remove(obj.prevResidual_m,   keys(obj.prevResidual_m));
+            remove(obj.epochCount,       keys(obj.epochCount));
+            remove(obj.slipCount_,       keys(obj.slipCount_));
+            remove(obj.currentArcEpoch_, keys(obj.currentArcEpoch_));
         end
 
         function n = numTracks(obj)
             n = obj.prevResidual_m.Count;
+        end
+
+        function ev = getArcEvidence(obj, dt_s)
+            % getArcEvidence  Compact arc/slip evidence struct (Stage 52).
+            ev.nActiveTracks      = double(obj.epochCount.Count);
+            ev.available          = ev.nActiveTracks > 0;
+            ev.totalSlipEvents    = 0;
+            ev.nArcs              = 0;
+            ev.totalCarrierEpochs = 0;
+            currentLens_s         = [];
+            ks = keys(obj.epochCount);
+            for i = 1:numel(ks)
+                k  = ks{i};
+                ev.totalCarrierEpochs = ev.totalCarrierEpochs + obj.epochCount(k);
+                sc = 0;
+                if isKey(obj.slipCount_, k); sc = obj.slipCount_(k); end
+                ev.totalSlipEvents = ev.totalSlipEvents + sc;
+                ev.nArcs           = ev.nArcs + sc + 1;
+                ca = 0;
+                if isKey(obj.currentArcEpoch_, k); ca = obj.currentArcEpoch_(k); end
+                if ca > 0; currentLens_s(end+1) = ca * dt_s; end %#ok<AGROW>
+            end
+            ev.nSlipEvents = ev.totalSlipEvents;
+            if isempty(currentLens_s)
+                ev.minArcLength_s  = NaN;
+                ev.meanArcLength_s = NaN;
+                ev.maxArcLength_s  = NaN;
+            else
+                ev.minArcLength_s  = min(currentLens_s);
+                ev.meanArcLength_s = mean(currentLens_s);
+                ev.maxArcLength_s  = max(currentLens_s);
+            end
+            if ev.totalSlipEvents == 0; ev.classification = 'arcs-exported';
+            else;                        ev.classification = 'arcs-exported-with-slips';
+            end
         end
 
     end
@@ -125,6 +176,10 @@ classdef CarrierTrackManager < handle
                 if isKey(obj.epochCount, key); ec = obj.epochCount(key); end
                 obj.epochCount(key)     = ec + 1;
                 obj.prevResidual_m(key) = cpInfo.prefit_m(mi);
+                % Stage 52: no slips when detection disabled; advance arc epoch.
+                ca = 0;
+                if isKey(obj.currentArcEpoch_, key); ca = obj.currentArcEpoch_(key); end
+                obj.currentArcEpoch_(key) = ca + 1;
             end
         end
 

@@ -35,7 +35,7 @@ oo_v1_envAllToggles_ = strcmpi(getenv('OO_V1_ALL_TOGGLES'), 'true');
 if oo_v1_envValidate_; oo_v1_envAllToggles_ = true; end  % validate always uses all toggles
 oo_v1_envStage_      = str2double(getenv('OO_V1_VALIDATION_STAGE'));
 if isnan(oo_v1_envStage_); oo_v1_envStage_ = 0; end
-if oo_v1_envValidate_ && oo_v1_envStage_ == 0; oo_v1_envStage_ = 51; end
+if oo_v1_envValidate_ && oo_v1_envStage_ == 0; oo_v1_envStage_ = 52; end
 oo_v1_envCompile_    = strtrim(getenv('OO_V1_REPORT_COMPILE_TEX'));
 
 cfg = revgnss.ConfigFactory.defaultConfig();
@@ -188,6 +188,12 @@ cfg.diagnostics.ambiguityFixingReadiness.enable = false;
 % without early return, exposes arc-quality and residual/NIS availability.
 % Still does not fix, round, or resolve ambiguities.
 cfg.diagnostics.ambiguityReadinessEvidence.enable = false;
+
+% --- Carrier arc and cycle-slip evidence (Stage 52) -------------
+% Exports compact arc evidence from CarrierTrackManager: arc counts,
+% arc durations, slip/reset events per track. No integer fixing,
+% no LAMBDA/MLAMBDA. Requires carrierMode='ekfFloat' and slip detection.
+cfg.diagnostics.carrierArcEvidence.enable = false;
 
 % --- Inter-frequency bias budget (Stage 44) --------------------
 % Diagnostic only. Default all to 0 (no calibrated products in v1).
@@ -352,6 +358,7 @@ if stageAllToggles || oo_v1_envAllToggles_
     cfg.diagnostics.wideLaneNarrowLane.enable                    = true;
     cfg.diagnostics.ambiguityFixingReadiness.enable              = true;
     cfg.diagnostics.ambiguityReadinessEvidence.enable            = true;
+    cfg.diagnostics.carrierArcEvidence.enable                    = true;
     cfg.validation.stageAllToggles         = true;
     if oo_v1_envAllToggles_
         cfg.validation.invokedMainScript = true;

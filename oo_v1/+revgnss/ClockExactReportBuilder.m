@@ -3129,6 +3129,38 @@ classdef ClockExactReportBuilder
                     fprintf(fid, '}\n\n');
                 end
             end
+
+            % --- Stage 52: Carrier Arc and Cycle-Slip Evidence ---
+            if isfield(cfg,'diagnostics') && ...
+                    isfield(cfg.diagnostics,'carrierArcEvidence') && ...
+                    isfield(cfg.diagnostics.carrierArcEvidence,'enable') && ...
+                    cfg.diagnostics.carrierArcEvidence.enable
+                fprintf(fid, '\\subsection*{Carrier Arc and Cycle-Slip Evidence (Stage~52)}\n');
+                fprintf(fid, ['\\textit{Stage~52 exports compact carrier arc evidence from the ' ...
+                    'existing cycle-slip tracking architecture. Arc lengths reflect the current ' ...
+                    'continuous arc per track (since the last slip). No integer fixing, no ' ...
+                    'LAMBDA/MLAMBDA. Diagnostic and evidence only.}\n\n']);
+                ae52r = revgnss.CarrierArcEvidence.fromSummary(summary);
+                fprintf(fid, '\\begin{tabular}{p{0.46\\textwidth}p{0.42\\textwidth}}\n');
+                fprintf(fid, '\\toprule\n\\textbf{Property} & \\textbf{Value}\\\\\n\\midrule\n');
+                fprintf(fid, 'Classification & \\texttt{%s}\\\\\n', ...
+                    revgnss.ClockExactReportBuilder.esc_(ae52r.classification));
+                fprintf(fid, 'Available & %s\\\\\n', mat2str(ae52r.available));
+                fprintf(fid, 'Active tracks & %d\\\\\n', ae52r.nActiveTracks);
+                fprintf(fid, 'Total arcs & %d\\\\\n', ae52r.nArcs);
+                if isfinite(ae52r.nSlipEvents)
+                    fprintf(fid, 'Slip events & %d\\\\\n', ae52r.nSlipEvents);
+                end
+                fprintf(fid, 'Total carrier epochs & %d\\\\\n', ae52r.totalCarrierEpochs);
+                if isfinite(ae52r.minArcLength_s)
+                    fprintf(fid, 'Min arc length (s) & %.1f\\\\\n', ae52r.minArcLength_s);
+                    fprintf(fid, 'Mean arc length (s) & %.1f\\\\\n', ae52r.meanArcLength_s);
+                    fprintf(fid, 'Max arc length (s) & %.1f\\\\\n', ae52r.maxArcLength_s);
+                end
+                fprintf(fid, 'Integer fixing impl.\\ & false\\\\\n');
+                fprintf(fid, 'LAMBDA/MLAMBDA & false\\\\\n');
+                fprintf(fid, '\\bottomrule\n\\end{tabular}\\par\n\n');
+            end
         end
 
         % ================================================================

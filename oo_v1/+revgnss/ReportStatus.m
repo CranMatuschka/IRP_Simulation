@@ -12,8 +12,8 @@ classdef ReportStatus
     methods (Static)
 
         function s = current()
-            s.stage      = '51';
-            s.stageTitle = 'Ambiguity Readiness Evidence Hardening v1';
+            s.stage      = '52';
+            s.stageTitle = 'Carrier Arc and Cycle-Slip Evidence Export v1';
             s.validationMode = 'targeted-random-smoke';
             s.fullSuiteRun   = false;
 
@@ -57,10 +57,10 @@ classdef ReportStatus
             end
             vsSHA = '';
             if isfield(vs, 'gitSHA'); vsSHA = strtrim(char(vs.gitSHA)); end
-            s.validationArtifactFresh = (vsStageNum >= 51) && strcmp(vsSHA, runtimeSHA);
+            s.validationArtifactFresh = (vsStageNum >= 52) && strcmp(vsSHA, runtimeSHA);
             if ~s.validationArtifactFresh
                 s.validationWarnings{end+1} = ...
-                    'No fresh local validation summary for this commit. Run: setenv(''OO_V1_VALIDATE_REPORT'',''true''); setenv(''OO_V1_VALIDATION_STAGE'',''51''); run_oo_reverse_gnss_report';
+                    'No fresh local validation summary for this commit. Run: setenv(''OO_V1_VALIDATE_REPORT'',''true''); setenv(''OO_V1_VALIDATION_STAGE'',''52''); run_oo_reverse_gnss_report';
             end
 
             if isfield(vs, 'selectedTestNames')
@@ -180,6 +180,7 @@ classdef ReportStatus
                 'Stage 49: wide-lane / narrow-lane float diagnostics from traced L1/L2 ambiguity covariance; no integer fixing, no LAMBDA/MLAMBDA, no phase-bias products, no false-fix-risk control'
                 'Stage 50: ambiguity fixing readiness gate combining Stages 41/48/49, arc-quality availability, and residual/NIS availability; strict readiness gate only; no integer fixing, no LAMBDA/MLAMBDA, no phase-bias products, no false-fix-risk control'
                 'Stage 51: ambiguity readiness evidence hardening; non-early-return evidence collection, explicit arc-quality and residual/NIS availability diagnostics, public arcQuality/residualConsistency/blockerList, readiness score, blocker aggregation, and status-warning consistency; no integer fixing'
+                'Stage 52: carrier arc and cycle-slip evidence export; CarrierTrackManager extended with slipCount_ and currentArcEpoch_ per track; CarrierArcEvidence helper; compact arc fields in summary; AmbiguityFixingReadinessGate.arcQuality() prefers Stage 52 fields; report subsection; no integer fixing'
             };
         end
 

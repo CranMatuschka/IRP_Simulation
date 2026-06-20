@@ -29,11 +29,11 @@ classdef MainScriptValidationGate
             state = struct();
 
             % Resolve stage, seed, count from env vars.
-            stg = 51;
+            stg = 52;
             v = str2double(getenv('OO_V1_VALIDATION_STAGE'));
             if ~isnan(v) && v > 0; stg = round(v); end
 
-            seed = 51;
+            seed = 52;
             v = str2double(getenv('OO_V1_RANDOM_TEST_SEED'));
             if ~isnan(v) && isfinite(v); seed = round(v); end
 
@@ -220,6 +220,7 @@ classdef MainScriptValidationGate
                 case 49; t = 'Wide-Lane / Narrow-Lane Float Diagnostics v1';
                 case 50; t = 'Ambiguity Fixing Readiness Gate v1';
                 case 51; t = 'Ambiguity Readiness Evidence Hardening v1';
+                case 52; t = 'Carrier Arc and Cycle-Slip Evidence Export v1';
                 otherwise
                     try; t = revgnss.ReportStatus.current().stageTitle; catch; t = sprintf('Stage %d', stg); end
             end

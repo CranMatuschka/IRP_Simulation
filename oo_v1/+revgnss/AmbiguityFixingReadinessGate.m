@@ -86,6 +86,21 @@ classdef AmbiguityFixingReadinessGate
                 end
             catch; end
             if ~slipOn; return; end
+            % Stage 52: prefer carrierArcEvidence compact fields when available.
+            if isfield(summary,'carrierArcEvidenceAvailable') && summary.carrierArcEvidenceAvailable
+                aq.available = true;
+                if isfield(summary,'carrierArcNSlipEvents') && isfinite(summary.carrierArcNSlipEvents)
+                    aq.slipCount = summary.carrierArcNSlipEvents;
+                end
+                if isfield(summary,'carrierArcMinLength_s') && isfinite(summary.carrierArcMinLength_s)
+                    aq.minArcLength_s = summary.carrierArcMinLength_s;
+                end
+                if ~isnan(aq.slipCount) && aq.slipCount == 0;     aq.classification = 'no-slips-reported';
+                elseif ~isnan(aq.slipCount) && aq.slipCount > 0;  aq.classification = 'slips-present';
+                else;                                               aq.classification = 'arc-quality-usable';
+                end
+                return
+            end
             for fld = {'slipCount','cycleSlipCount','carrierSlipCount','nCycleSlips'}
                 if isfield(summary,fld{1}) && isfinite(summary.(fld{1}))
                     aq.slipCount = summary.(fld{1}); break
