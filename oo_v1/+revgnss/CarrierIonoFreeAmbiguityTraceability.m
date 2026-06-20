@@ -143,6 +143,27 @@ classdef CarrierIonoFreeAmbiguityTraceability
         function s = fromSummary(summary, cfg)
             % fromSummary  Thin wrapper for report integration.
             s = revgnss.CarrierIonoFreeAmbiguityTraceability.assess(summary, cfg);
+            % Stage 54: populate arc consistency enforcement fields from summary.
+            try
+                if isfield(summary,'carrierArcConsistencyEnforced')
+                    s.arcConsistencyEnforced = logical(summary.carrierArcConsistencyEnforced);
+                end
+                if isfield(summary,'carrierIonoFreeArcConsistentPairs') && ...
+                        isnumeric(summary.carrierIonoFreeArcConsistentPairs)
+                    s.arcConsistentPairCount = summary.carrierIonoFreeArcConsistentPairs;
+                end
+                if isfield(summary,'carrierIonoFreeArcInconsistentPairs') && ...
+                        isnumeric(summary.carrierIonoFreeArcInconsistentPairs)
+                    s.arcInconsistentPairCount = summary.carrierIonoFreeArcInconsistentPairs;
+                end
+                if isfield(summary,'carrierIonoFreeArcSkippedPairs') && ...
+                        isnumeric(summary.carrierIonoFreeArcSkippedPairs)
+                    s.arcSkippedPairCount = summary.carrierIonoFreeArcSkippedPairs;
+                end
+                s.usableCarrierIonoFreePairs = s.pairCount;
+                s.arcMetadataAvailable = s.arcConsistentPairCount > 0 || ...
+                    s.arcSkippedPairCount > 0 || s.arcConsistencyEnforced;
+            catch; end
         end
 
         function lines = summaryLines(s)
@@ -185,6 +206,13 @@ classdef CarrierIonoFreeAmbiguityTraceability
             s.integerAmbiguityIsNonInteger = true;
             s.integerFixingImplemented   = false;
             s.lambdaImplemented          = false;
+            % Stage 54: arc consistency enforcement fields.
+            s.arcConsistencyEnforced     = false;
+            s.arcConsistentPairCount     = 0;
+            s.arcInconsistentPairCount   = 0;
+            s.arcSkippedPairCount        = 0;
+            s.arcMetadataAvailable       = false;
+            s.usableCarrierIonoFreePairs = 0;
             s.warnings                   = {};
         end
 

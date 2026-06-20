@@ -3207,6 +3207,43 @@ classdef ClockExactReportBuilder
                 fprintf(fid, 'False-fix-risk control & false\\\\\n');
                 fprintf(fid, '\\bottomrule\n\\end{tabular}\\par\n\n');
             end
+
+            % --- Stage 54: Enforced Arc-Consistent Carrier Combinations ---
+            if isfield(cfg,'estimator') && ...
+                    isfield(cfg.estimator,'enforceCarrierArcConsistency') && ...
+                    isfield(cfg.estimator.enforceCarrierArcConsistency,'enable') && ...
+                    cfg.estimator.enforceCarrierArcConsistency.enable
+                fprintf(fid, '\\subsection*{Enforced Arc-Consistent Carrier Combinations (Stage~54)}\n');
+                fprintf(fid, ['\\textit{Stage~54 enforces the rule that carrier IF rows must not ' ...
+                    'bridge incompatible ambiguity arcs. L1/L2 pairs whose arc IDs differ after ' ...
+                    'a cycle slip are dropped before IF combination. This prevents forming a ' ...
+                    'combination whose float ambiguity is an incoherent mixture of two ' ...
+                    'arc-separated states. No ambiguity fixing, no LAMBDA/MLAMBDA, no false-fix ' ...
+                    'risk control.}\n\n']);
+                fprintf(fid, '\\begin{tabular}{p{0.46\\textwidth}p{0.42\\textwidth}}\n');
+                fprintf(fid, '\\toprule\n\\textbf{Property} & \\textbf{Value}\\\\\n\\midrule\n');
+                fprintf(fid, 'Arc consistency enforced & true\\\\\n');
+                if isfield(summary,'carrierArcConsistencyArcMetaUsed')
+                    fprintf(fid, 'Arc metadata used & %s\\\\\n', ...
+                        mat2str(summary.carrierArcConsistencyArcMetaUsed));
+                end
+                if isfield(summary,'carrierIonoFreeArcSkippedPairs')
+                    fprintf(fid, 'Carrier IF pairs skipped & %d\\\\\n', ...
+                        summary.carrierIonoFreeArcSkippedPairs);
+                end
+                if isfield(summary,'carrierIonoFreeArcConsistentPairs')
+                    fprintf(fid, 'Carrier IF arc-consistent pairs & %d\\\\\n', ...
+                        summary.carrierIonoFreeArcConsistentPairs);
+                end
+                if isfield(summary,'wideLaneNarrowLaneArcBlocked')
+                    fprintf(fid, 'WL/NL diagnostics arc-blocked & %s\\\\\n', ...
+                        mat2str(summary.wideLaneNarrowLaneArcBlocked));
+                end
+                fprintf(fid, 'Integer fixing impl.\\ & false\\\\\n');
+                fprintf(fid, 'LAMBDA/MLAMBDA & false\\\\\n');
+                fprintf(fid, 'False-fix-risk control & false\\\\\n');
+                fprintf(fid, '\\bottomrule\n\\end{tabular}\\par\n\n');
+            end
         end
 
         % ================================================================

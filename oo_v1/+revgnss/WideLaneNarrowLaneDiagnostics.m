@@ -133,6 +133,26 @@ classdef WideLaneNarrowLaneDiagnostics
                     s.arcConsistencyClassification = 'partial-inconsistency';
                 end
             end
+            % Stage 54: block classification when enforcement is active and
+            % arc-inconsistent pairs were present before filtering.
+            try
+                if isfield(summary,'carrierArcConsistencyEnforced') && ...
+                        logical(summary.carrierArcConsistencyEnforced)
+                    s.arcConsistencyEnforced = true;
+                end
+                if isfield(summary,'carrierIonoFreeArcSkippedPairs') && ...
+                        isnumeric(summary.carrierIonoFreeArcSkippedPairs)
+                    s.nArcSkippedPairs = summary.carrierIonoFreeArcSkippedPairs;
+                end
+                if isfield(summary,'carrierIonoFreeArcConsistentPairs') && ...
+                        isnumeric(summary.carrierIonoFreeArcConsistentPairs)
+                    s.nArcUsablePairs = summary.carrierIonoFreeArcConsistentPairs;
+                end
+                if s.arcConsistencyEnforced && s.nArcInconsistentPairs > 0
+                    s.arcConsistencyBlocksDiagnostics = true;
+                    s.classification = 'blocked-arc-inconsistent-pairs';
+                end
+            catch; end
         end
 
         function m = computePairMetrics(pairIdx, Pamb, stateIndices, f1_Hz, f2_Hz)
@@ -249,6 +269,11 @@ classdef WideLaneNarrowLaneDiagnostics
             s.nArcConsistentPairs          = 0;
             s.nArcInconsistentPairs        = 0;
             s.arcConsistencyClassification = 'unavailable';
+            % Stage 54: enforcement fields.
+            s.arcConsistencyEnforced          = false;
+            s.nArcUsablePairs                 = 0;
+            s.nArcSkippedPairs                = 0;
+            s.arcConsistencyBlocksDiagnostics = false;
             s.integerFixingImplemented   = false;
             s.lambdaImplemented          = false;
             s.falseFixRiskControlled     = false;

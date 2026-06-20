@@ -12,8 +12,8 @@ classdef ReportStatus
     methods (Static)
 
         function s = current()
-            s.stage      = '53';
-            s.stageTitle = 'Cycle-Slip-Aware Arc-Separated Float Ambiguities v1';
+            s.stage      = '54';
+            s.stageTitle = 'Enforced Arc-Consistent Carrier Combinations v1';
             s.validationMode = 'targeted-random-smoke';
             s.fullSuiteRun   = false;
 
@@ -57,10 +57,10 @@ classdef ReportStatus
             end
             vsSHA = '';
             if isfield(vs, 'gitSHA'); vsSHA = strtrim(char(vs.gitSHA)); end
-            s.validationArtifactFresh = (vsStageNum >= 53) && strcmp(vsSHA, runtimeSHA);
+            s.validationArtifactFresh = (vsStageNum >= 54) && strcmp(vsSHA, runtimeSHA);
             if ~s.validationArtifactFresh
                 s.validationWarnings{end+1} = ...
-                    'No fresh local validation summary for this commit. Run: setenv(''OO_V1_VALIDATE_REPORT'',''true''); setenv(''OO_V1_VALIDATION_STAGE'',''53''); run_oo_reverse_gnss_report';
+                    'No fresh local validation summary for this commit. Run: setenv(''OO_V1_VALIDATE_REPORT'',''true''); setenv(''OO_V1_VALIDATION_STAGE'',''54''); run_oo_reverse_gnss_report';
             end
 
             if isfield(vs, 'selectedTestNames')
@@ -182,6 +182,7 @@ classdef ReportStatus
                 'Stage 51: ambiguity readiness evidence hardening; non-early-return evidence collection, explicit arc-quality and residual/NIS availability diagnostics, public arcQuality/residualConsistency/blockerList, readiness score, blocker aggregation, and status-warning consistency; no integer fixing'
                 'Stage 52: carrier arc and cycle-slip evidence export; CarrierTrackManager extended with slipCount_ and currentArcEpoch_ per track; CarrierArcEvidence helper; compact arc fields in summary; AmbiguityFixingReadinessGate.arcQuality() prefers Stage 52 fields; report subsection; no integer fixing'
                 'Stage 53: cycle-slip-aware arc-separated float ambiguities; CarrierTrackManager extended with currentArcId_ per track; AmbiguityArcState helper; per-row arc metadata in summary; arc consistency check for carrier IF and WL/NL pairs; Stage 53 compact fields in summary; report subsection; no integer fixing'
+                'Stage 54: enforceCarrierArcConsistency.enable gate in CarrierIonoFreeRowBuilder.buildFromStack; arc-inconsistent pairs filtered before IF combination; empty-output handling when all pairs skipped; new cpInfo_IF fields (nArcSkippedPairs, arcConsistencyEnforced, arcMetaUsedForEnforcement); arc-blocked classification in WideLaneNarrowLaneDiagnostics; Stage 54 blockers in AmbiguityFixingReadinessGate; Stage 54 compact summary fields; Stage 54 report subsection; no integer fixing'
             };
         end
 

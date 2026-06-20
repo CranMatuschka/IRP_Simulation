@@ -60,6 +60,25 @@ classdef CarrierIonoFreeEkfDiagnostics
             s.calibratedDcbProductsAvailable      = false;
             s.carrierIfIntegerReadyClassification = 'not-integer-ready-float-only';
 
+            % Stage 54: arc consistency enforcement status from summary.
+            try
+                if isfield(summary,'carrierArcConsistencyEnforced')
+                    s.arcConsistencyEnforced = logical(summary.carrierArcConsistencyEnforced);
+                end
+                if isfield(summary,'carrierIonoFreeArcSkippedPairs') && ...
+                        isfinite(summary.carrierIonoFreeArcSkippedPairs)
+                    s.arcSkippedRows = summary.carrierIonoFreeArcSkippedPairs;
+                end
+                if isfield(summary,'carrierIonoFreeArcConsistentPairs') && ...
+                        isfinite(summary.carrierIonoFreeArcConsistentPairs)
+                    s.arcConsistentRows = summary.carrierIonoFreeArcConsistentPairs;
+                end
+                if isfield(summary,'carrierIonoFreeArcInconsistentPairs') && ...
+                        isfinite(summary.carrierIonoFreeArcInconsistentPairs)
+                    s.arcInconsistentRows = summary.carrierIonoFreeArcInconsistentPairs;
+                end
+            catch; end
+
             s.classification = revgnss.CarrierIonoFreeEkfDiagnostics.classify_(s);
         end
 
@@ -107,6 +126,11 @@ classdef CarrierIonoFreeEkfDiagnostics
             s.lambdaImplemented                    = false;
             s.calibratedDcbProductsAvailable       = false;
             s.carrierIfIntegerReadyClassification  = 'not-integer-ready-float-only';
+            % Stage 54: arc consistency enforcement fields.
+            s.arcConsistencyEnforced              = false;
+            s.arcConsistentRows                   = NaN;
+            s.arcSkippedRows                      = NaN;
+            s.arcInconsistentRows                 = NaN;
             s.classification                       = 'disabled';
         end
 
@@ -119,6 +143,12 @@ classdef CarrierIonoFreeEkfDiagnostics
             end
             if ~s.carrierIsEkfFloat
                 cls = 'requested-not-ekf-float'; return
+            end
+            % Stage 54: if enforcement active and all rows were skipped.
+            if s.usedInEkf && s.arcConsistencyEnforced && ...
+                    isfinite(s.arcSkippedRows) && s.arcSkippedRows > 0 && ...
+                    (isnan(s.carrierIfRows) || s.carrierIfRows == 0)
+                cls = 'requested-all-rows-skipped-arc-inconsistent'; return
             end
             if s.usedInEkf && s.ifRowsActive
                 cls = 'active-carrier-if-ekf-float'; return

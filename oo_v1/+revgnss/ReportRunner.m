@@ -319,6 +319,32 @@ classdef ReportRunner
                 end
             end
 
+            % ---- Stage 54: arc-consistency enforcement compact fields ----
+            arcEnf54Req_ = false;
+            try; arcEnf54Req_ = logical(cfg.estimator.enforceCarrierArcConsistency.enable); catch; end
+            summary.carrierArcConsistencyEnforced     = arcEnf54Req_;
+            summary.carrierIonoFreeArcSkippedPairs    = 0;
+            summary.carrierArcConsistencyArcMetaUsed  = false;
+            summary.wideLaneNarrowLaneArcBlocked      = false;
+            summary.arcConsistencyIntegerFixingImpl   = false;
+            summary.arcConsistencyLambdaImpl          = false;
+            summary.arcConsistencyFalseFixRiskCtrl    = false;
+            if arcEnf54Req_
+                try
+                    if isfield(summary,'ambiguityArcMetadataAvailable') && ...
+                            summary.ambiguityArcMetadataAvailable
+                        summary.carrierArcConsistencyArcMetaUsed = true;
+                    end
+                    if isfield(summary,'carrierIonoFreeArcInconsistentPairs') && ...
+                            summary.carrierIonoFreeArcInconsistentPairs > 0
+                        summary.wideLaneNarrowLaneArcBlocked = true;
+                    end
+                catch ex54_
+                    warning('ReportRunner:arcEnfFailed', ...
+                        'Stage 54 arc-consistency enforcement summary failed: %s', ex54_.message);
+                end
+            end
+
             % ---- Known-ambiguity attitude validation (ATTITUDE VALIDATION ONLY — not operational) ----
             % Gated by cfg.estimator.runKnownAmbiguityValidation = true.
             % Runs a short comparison where truth float ambiguities are subtracted from

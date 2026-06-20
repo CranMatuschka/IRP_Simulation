@@ -41,6 +41,11 @@ classdef CarrierIonoFreeRowBuilder
             % Extracts both blocks, applies IF combination, returns Mp IF rows.
             % The IF combination replaces L1+L2 rows (prevents rank deficiency).
             %
+            % Stage 54: when cfg.estimator.enforceCarrierArcConsistency.enable
+            % is true and cpInfo.arcId is present, pairs with mismatched L1/L2
+            % arc IDs are skipped before combining. Returns fewer than Mp rows
+            % when pairs are skipped; returns empty arrays when all are skipped.
+            %
             % Ambiguity H columns: H_IF has alpha on the L1 ambiguity column
             % and beta on the L2 ambiguity column (from H_IF = alpha*H_L1+beta*H_L2).
             % The EKF jointly updates both states via the single IF innovation.
@@ -50,8 +55,81 @@ classdef CarrierIonoFreeRowBuilder
             [alpha, beta] = revgnss.IonoFreeCombination.coefficients( ...
                 sigL1.frequency_Hz, sigL2.frequency_Hz);
 
-            idx1 = 1:Mp;
-            idx2 = Mp + 1 : 2*Mp;
+            idx1    = 1:Mp;
+            idx2    = Mp + 1 : 2*Mp;
+            Mp_orig = Mp;
+
+            % Stage 54: enforce arc consistency before IF combination.
+            enforceArc = false;
+            try; enforceArc = logical(cfg.estimator.enforceCarrierArcConsistency.enable); catch; end
+            nArcSkippedPairs         = 0;
+            skippedForInconsistency  = false(1, Mp);
+            arcConsistencyEnforced   = enforceArc;
+            arcMetaUsedForEnforcement = false;
+
+            if enforceArc
+                if isfield(cpInfo,'arcId') && numel(cpInfo.arcId) >= 2*Mp
+                    arcMetaUsedForEnforcement = true;
+                    arcIdL1_all  = cpInfo.arcId(idx1);
+                    arcIdL2_all  = cpInfo.arcId(idx2);
+                    consistMask  = (arcIdL1_all == arcIdL2_all) & ...
+                                   (arcIdL1_all > 0) & (arcIdL2_all > 0);
+                    skippedForInconsistency = ~consistMask;
+                    nArcSkippedPairs = sum(skippedForInconsistency);
+                    idx1 = idx1(consistMask);
+                    idx2 = idx2(consistMask);
+                    Mp   = sum(consistMask);
+                else
+                    policy_ = 'disableWithWarning';
+                    try; policy_ = cfg.validation.unsupportedFeaturePolicy; catch; end
+                    if strcmp(policy_,'error')
+                        error('CarrierIonoFreeRowBuilder:arcMetadataUnavailable', ...
+                            'enforceCarrierArcConsistency=true but cpInfo has no arcId; enable arcSeparatedAmbiguities.');
+                    else
+                        arcConsistencyEnforced = false;
+                    end
+                end
+            end
+
+            % Empty output when all pairs were skipped by arc enforcement.
+            nSt_ = size(H, 2);
+            if Mp == 0
+                z_IF = zeros(0,1); h_IF = zeros(0,1);
+                H_IF = zeros(0, nSt_); R_IF = zeros(0,0);
+                cpInfo_IF = cpInfo;
+                cpInfo_IF.phi_m                   = zeros(0,1);
+                cpInfo_IF.prefit_m                = zeros(0,1);
+                cpInfo_IF.towerIdx                = zeros(0,1);
+                cpInfo_IF.antennaIdx              = zeros(0,1);
+                cpInfo_IF.signalIdx               = zeros(0,1);
+                cpInfo_IF.signalId                = {};
+                cpInfo_IF.ambiguityStateIdx       = zeros(0,1);
+                cpInfo_IF.ambiguityStateIdxL1     = zeros(0,1);
+                cpInfo_IF.ambiguityStateIdxL2     = zeros(0,1);
+                cpInfo_IF.ambiguityStateIdxPair   = zeros(0,2);
+                cpInfo_IF.ambiguityWeights        = zeros(0,2);
+                cpInfo_IF.ambiguityCombination    = {};
+                cpInfo_IF.ambiguityIsInteger      = false(0,1);
+                cpInfo_IF.integerFixingImplemented = false;
+                cpInfo_IF.lambdaImplemented        = false;
+                cpInfo_IF.trackKey                = {};
+                cpInfo_IF.ionoFreeCombined        = true;
+                cpInfo_IF.ifAlpha                 = alpha;
+                cpInfo_IF.ifBeta                  = beta;
+                cpInfo_IF.hExplicitlyCombined     = true;
+                cpInfo_IF.hCombination            = 'alphaH1_betaH2';
+                cpInfo_IF.nArcSkippedPairs              = nArcSkippedPairs;
+                cpInfo_IF.skippedForArcInconsistency    = skippedForInconsistency;
+                cpInfo_IF.arcConsistencyEnforced        = arcConsistencyEnforced;
+                cpInfo_IF.arcMetaUsedForEnforcement     = arcMetaUsedForEnforcement;
+                cpInfo_IF.arcIdL1               = zeros(0,1);
+                cpInfo_IF.arcIdL2               = zeros(0,1);
+                cpInfo_IF.arcConsistent         = false(0,1);
+                cpInfo_IF.nArcConsistentPairs   = 0;
+                cpInfo_IF.nArcInconsistentPairs = nArcSkippedPairs;
+                cpInfo_IF.ambiguityArcSeparated = true;
+                return
+            end
 
             z_IF = alpha * z(idx1) + beta * z(idx2);
             h_IF = alpha * h(idx1) + beta * h(idx2);
@@ -88,12 +166,13 @@ classdef CarrierIonoFreeRowBuilder
             cpInfo_IF.ifBeta                  = beta;
             cpInfo_IF.hExplicitlyCombined     = true;
             cpInfo_IF.hCombination            = 'alphaH1_betaH2';
-            % Stage 53: arc consistency check from previous-epoch arc IDs.
-            % arcId is set by getArcStateForRows (after process()) and attached
-            % to errStruct.carrierPhase before buildFromStack is called again.
-            % On the current epoch buildFromStack uses the IDs from cpInfo as
-            % passed in — these are from the current-epoch state post-process().
-            if isfield(cpInfo,'arcId') && numel(cpInfo.arcId) >= 2*Mp
+            % Stage 54: arc consistency enforcement metadata.
+            cpInfo_IF.nArcSkippedPairs              = nArcSkippedPairs;
+            cpInfo_IF.skippedForArcInconsistency    = skippedForInconsistency;
+            cpInfo_IF.arcConsistencyEnforced        = arcConsistencyEnforced;
+            cpInfo_IF.arcMetaUsedForEnforcement     = arcMetaUsedForEnforcement;
+            % Stage 53: arc consistency check on remaining (post-filter) pairs.
+            if isfield(cpInfo,'arcId') && numel(cpInfo.arcId) >= 2*Mp_orig
                 arcIdL1_ = cpInfo.arcId(idx1);
                 arcIdL2_ = cpInfo.arcId(idx2);
                 cpInfo_IF.arcIdL1 = arcIdL1_;

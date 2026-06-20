@@ -62,7 +62,7 @@ classdef AmbiguityFixingReadinessGate
             s.nisMean       = rc.nisMean;
             s.expectedNis   = rc.expectedNis;
             s.warnings      = [s.warnings, rc.warnings];
-            % 7. Stage 53: arc-separated ambiguity metadata blockers.
+            % 7. Stage 53/54: arc-separated ambiguity metadata blockers.
             try
                 if isfield(summary,'ambiguityArcRowsMissingArcId') && ...
                         isnumeric(summary.ambiguityArcRowsMissingArcId)
@@ -71,6 +71,15 @@ classdef AmbiguityFixingReadinessGate
                 if isfield(summary,'carrierIonoFreeArcInconsistentPairs') && ...
                         isnumeric(summary.carrierIonoFreeArcInconsistentPairs)
                     s.carrierIonoFreeArcInconsistentPairs = summary.carrierIonoFreeArcInconsistentPairs;
+                end
+                % Stage 54: arc-skipped pairs and WL/NL arc-blocked flag.
+                if isfield(summary,'carrierIonoFreeArcSkippedPairs') && ...
+                        isnumeric(summary.carrierIonoFreeArcSkippedPairs)
+                    s.carrierIonoFreeArcSkippedPairs = summary.carrierIonoFreeArcSkippedPairs;
+                end
+                if isfield(summary,'wideLaneNarrowLaneArcBlocked') && ...
+                        logical(summary.wideLaneNarrowLaneArcBlocked)
+                    s.wideLaneNarrowLaneArcBlocked = true;
                 end
             catch; end
             % Score, blockers, classification
@@ -189,6 +198,14 @@ classdef AmbiguityFixingReadinessGate
                 bl{end+1} = sprintf('Arc consistency: %d carrier IF pair(s) span incompatible arcs.', ...
                     s.carrierIonoFreeArcInconsistentPairs);
             end
+            % Stage 54: arc enforcement blockers.
+            if isfield(s,'carrierIonoFreeArcSkippedPairs') && s.carrierIonoFreeArcSkippedPairs > 0
+                bl{end+1} = sprintf('Arc enforcement: %d carrier IF pair(s) skipped (arc-inconsistent).', ...
+                    s.carrierIonoFreeArcSkippedPairs);
+            end
+            if isfield(s,'wideLaneNarrowLaneArcBlocked') && s.wideLaneNarrowLaneArcBlocked
+                bl{end+1} = 'WL/NL diagnostics blocked by arc-inconsistent carrier IF pairs.';
+            end
             bl{end+1} = 'Phase-bias products (OSB/WL-FCB) not available; required for integer resolution.';
             bl{end+1} = 'No integer strategy implemented (LAMBDA/MLAMBDA not available in v1).';
             bl{end+1} = 'Integer fixing not implemented in v1.';
@@ -250,6 +267,11 @@ classdef AmbiguityFixingReadinessGate
             s.integerStrategyAvailable=false; s.integerFixingImplemented=false;
             s.lambdaImplemented=false; s.falseFixRiskControlled=false;
             s.readinessScore=0; s.blockers={}; s.warnings={};
+            % Stage 53/54: arc metadata blocker fields.
+            s.ambiguityArcRowsMissingArcId        = 0;
+            s.carrierIonoFreeArcInconsistentPairs = 0;
+            s.carrierIonoFreeArcSkippedPairs      = 0;
+            s.wideLaneNarrowLaneArcBlocked        = false;
             % Stage 50 ClockExactReportBuilder alias fields (legacy compatibility).
             s.pairMetadataAvailable       = false;
             s.covarianceAvailable         = false;
