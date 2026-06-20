@@ -345,6 +345,18 @@ classdef ReportRunner
                 end
             end
 
+            % ---- Stage 55: diagnostic plugin registry metadata ----
+            plugReg55_ = false;
+            try; plugReg55_ = logical(cfg.diagnostics.pluginRegistry.enable); catch; end
+            if plugReg55_
+                try
+                    summary = revgnss.DiagnosticPluginRegistry.collectAll(summary, sim, cfg);
+                catch ex55_
+                    warning('ReportRunner:pluginRegistryFailed', ...
+                        'Stage 55 plugin registry collect failed: %s', ex55_.message);
+                end
+            end
+
             % ---- Known-ambiguity attitude validation (ATTITUDE VALIDATION ONLY — not operational) ----
             % Gated by cfg.estimator.runKnownAmbiguityValidation = true.
             % Runs a short comparison where truth float ambiguities are subtracted from

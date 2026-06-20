@@ -3244,6 +3244,39 @@ classdef ClockExactReportBuilder
                 fprintf(fid, 'False-fix-risk control & false\\\\\n');
                 fprintf(fid, '\\bottomrule\n\\end{tabular}\\par\n\n');
             end
+
+            % --- Stage 55: Source Truth and Report Architecture Cleanup ---
+            plugReg55_ = isfield(cfg,'diagnostics') && ...
+                isfield(cfg.diagnostics,'pluginRegistry') && ...
+                isfield(cfg.diagnostics.pluginRegistry,'enable') && ...
+                cfg.diagnostics.pluginRegistry.enable;
+            if plugReg55_
+                fprintf(fid, '\\subsection*{Source Truth and Report Architecture Cleanup (Stage~55)}\n');
+                fprintf(fid, ['\\textit{Stage~55 cleans source-truth, validation-status, and ' ...
+                    'report/diagnostic architecture. StageHistory and DiagnosticPluginRegistry ' ...
+                    'helpers are introduced. ReportStatus delegates long history and missing-stage ' ...
+                    'lists to StageHistory. ReportRunner calls DiagnosticPluginRegistry.collectAll ' ...
+                    'to add plugin metadata to the run summary. No measurement physics, EKF math, ' ...
+                    'carrier arc consistency enforcement, or ambiguity handling is changed. ' ...
+                    'No integer fixing, no LAMBDA/MLAMBDA, no false-fix-risk control.}\n\n']);
+                fprintf(fid, '\\begin{tabular}{p{0.46\\textwidth}p{0.42\\textwidth}}\n');
+                fprintf(fid, '\\toprule\n\\textbf{Property} & \\textbf{Value}\\\\\n\\midrule\n');
+                fprintf(fid, 'Active stage & 55\\\\\n');
+                fprintf(fid, 'Plugin registry present & true\\\\\n');
+                plugNames55_ = {};
+                try; plugNames55_ = revgnss.DiagnosticPluginRegistry.names(cfg); catch; end
+                if ~isempty(plugNames55_)
+                    fprintf(fid, 'Enabled plugins & %s\\\\\n', strjoin(plugNames55_, ', '));
+                else
+                    fprintf(fid, 'Enabled plugins & (none)\\\\\n');
+                end
+                fprintf(fid, 'Measurement physics changed & false\\\\\n');
+                fprintf(fid, 'EKF math changed & false\\\\\n');
+                fprintf(fid, 'Integer fixing impl.\\ & false\\\\\n');
+                fprintf(fid, 'LAMBDA/MLAMBDA & false\\\\\n');
+                fprintf(fid, 'False-fix-risk control & false\\\\\n');
+                fprintf(fid, '\\bottomrule\n\\end{tabular}\\par\n\n');
+            end
         end
 
         % ================================================================

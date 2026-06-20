@@ -35,7 +35,7 @@ oo_v1_envAllToggles_ = strcmpi(getenv('OO_V1_ALL_TOGGLES'), 'true');
 if oo_v1_envValidate_; oo_v1_envAllToggles_ = true; end  % validate always uses all toggles
 oo_v1_envStage_      = str2double(getenv('OO_V1_VALIDATION_STAGE'));
 if isnan(oo_v1_envStage_); oo_v1_envStage_ = 0; end
-if oo_v1_envValidate_ && oo_v1_envStage_ == 0; oo_v1_envStage_ = 54; end
+if oo_v1_envValidate_ && oo_v1_envStage_ == 0; oo_v1_envStage_ = 55; end
 oo_v1_envCompile_    = strtrim(getenv('OO_V1_REPORT_COMPILE_TEX'));
 
 cfg = revgnss.ConfigFactory.defaultConfig();
@@ -210,6 +210,12 @@ cfg.diagnostics.arcSeparatedAmbiguities.enable = false;
 cfg.estimator.enforceCarrierArcConsistency.enable        = false;
 cfg.diagnostics.carrierArcConsistencyEnforcement.enable  = false;
 
+% --- Diagnostic plugin registry (Stage 55) ----------------------
+% Architecture-only toggle: enables DiagnosticPluginRegistry metadata
+% collection in ReportRunner. Defaults to true — adds metadata only, no
+% scientific content, no EKF math, no integer fixing, no LAMBDA/MLAMBDA.
+cfg.diagnostics.pluginRegistry.enable = true;
+
 % --- Inter-frequency bias budget (Stage 44) --------------------
 % Diagnostic only. Default all to 0 (no calibrated products in v1).
 % Units: metres. Set to non-zero to exercise bias-budget propagation.
@@ -378,6 +384,7 @@ if stageAllToggles || oo_v1_envAllToggles_
     cfg.diagnostics.arcSeparatedAmbiguities.enable               = true;
     cfg.estimator.enforceCarrierArcConsistency.enable            = true;
     cfg.diagnostics.carrierArcConsistencyEnforcement.enable      = true;
+    cfg.diagnostics.pluginRegistry.enable                        = true;
     cfg.validation.stageAllToggles         = true;
     if oo_v1_envAllToggles_
         cfg.validation.invokedMainScript = true;
