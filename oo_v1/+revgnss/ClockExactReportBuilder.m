@@ -3043,6 +3043,92 @@ classdef ClockExactReportBuilder
                     fprintf(fid, '\\end{itemize}\n\n');
                 end
             end
+
+            % --- Stage 51: Ambiguity Readiness Evidence Hardening ---
+            if isfield(cfg,'diagnostics') && ...
+                    isfield(cfg.diagnostics,'ambiguityReadinessEvidence') && ...
+                    isfield(cfg.diagnostics.ambiguityReadinessEvidence,'enable') && ...
+                    cfg.diagnostics.ambiguityReadinessEvidence.enable
+                fprintf(fid, '\\subsection*{Ambiguity Readiness Evidence Hardening (Stage~51)}\n');
+                fprintf(fid, ['\\textit{Stage~51 hardens the evidence behind the ambiguity ' ...
+                    'readiness gate. It still does not fix ambiguities, does not round ' ...
+                    'ambiguities, does not run LAMBDA/MLAMBDA, and does not control false-fix ' ...
+                    'risk. Missing arc-quality or residual/NIS summaries remain blockers for ' ...
+                    'future integer ambiguity resolution.}\n\n']);
+                try
+                    cfg51r_ = cfg;
+                    cfg51r_.diagnostics.ambiguityFixingReadiness.enable = true;
+                    s51r = revgnss.AmbiguityFixingReadinessGate.assess(summary, cfg51r_);
+                catch ex51r
+                    fprintf(fid, 'Stage 51 gate failed: %s\n\n', ...
+                        revgnss.ClockExactReportBuilder.esc_(ex51r.message));
+                    s51r = revgnss.AmbiguityFixingReadinessGate.assess(struct(), struct());
+                end
+                fprintf(fid, '\\begin{tabular}{p{0.46\\textwidth}p{0.42\\textwidth}}\n');
+                fprintf(fid, '\\toprule\n\\textbf{Property} & \\textbf{Value}\\\\\n\\midrule\n');
+                fprintf(fid, 'Classification & \\texttt{%s}\\\\\n', ...
+                    revgnss.ClockExactReportBuilder.esc_(s51r.classification));
+                fprintf(fid, 'Readiness score & %d / 6\\\\\n', s51r.readinessScore);
+                fprintf(fid, 'Pair count & %d\\\\\n', s51r.pairCount);
+                fprintf(fid, 'Ambiguity metadata available & %s\\\\\n', ...
+                    mat2str(s51r.ambiguityMetadataAvailable));
+                fprintf(fid, 'Covariance available & %s\\\\\n', ...
+                    mat2str(s51r.ambiguityCovarianceAvailable));
+                fprintf(fid, 'WL/NL available & %s\\\\\n', ...
+                    mat2str(s51r.wideLaneNarrowLaneAvailable));
+                if isfinite(s51r.wideLaneSigmaCyclesMean)
+                    fprintf(fid, 'WL $\\sigma$ mean (cycles) & %.4f\\\\\n', ...
+                        s51r.wideLaneSigmaCyclesMean);
+                    fprintf(fid, 'NL $\\sigma$ mean (cycles) & %.4f\\\\\n', ...
+                        s51r.narrowLaneSigmaCyclesMean);
+                end
+                if isfinite(s51r.maxAbsWideNarrowCorr)
+                    fprintf(fid, 'Max abs WL/NL corr.\\ & %.4f\\\\\n', ...
+                        s51r.maxAbsWideNarrowCorr);
+                end
+                fprintf(fid, 'Arc quality available & %s  (\\texttt{%s})\\\\\n', ...
+                    mat2str(s51r.cycleSlipMetadataAvailable), ...
+                    revgnss.ClockExactReportBuilder.esc_(s51r.arcQualityClassification));
+                if isfinite(s51r.slipCount)
+                    fprintf(fid, 'Slip count & %d\\\\\n', s51r.slipCount);
+                end
+                if isfinite(s51r.minArcLength_s)
+                    fprintf(fid, 'Min arc length (s) & %.1f\\\\\n', s51r.minArcLength_s);
+                end
+                fprintf(fid, 'Residual diagnostics & %s\\\\\n', ...
+                    mat2str(s51r.residualDiagnosticsAvailable));
+                if isfinite(s51r.residualRms_m)
+                    fprintf(fid, 'Residual RMS (m) & %.4f\\\\\n', s51r.residualRms_m);
+                end
+                if isfinite(s51r.nisMean)
+                    fprintf(fid, 'NIS mean & %.2f\\\\\n', s51r.nisMean);
+                end
+                if isfinite(s51r.expectedNis)
+                    fprintf(fid, 'NIS expected & %.1f\\\\\n', s51r.expectedNis);
+                end
+                fprintf(fid, 'Phase-bias products & false\\\\\n');
+                fprintf(fid, 'Integer strategy & false\\\\\n');
+                fprintf(fid, 'Integer fixing impl.\\ & false\\\\\n');
+                fprintf(fid, 'LAMBDA/MLAMBDA & false\\\\\n');
+                fprintf(fid, 'False-fix-risk controlled & false\\\\\n');
+                fprintf(fid, '\\bottomrule\n\\end{tabular}\\par\n\n');
+                if ~isempty(s51r.blockers)
+                    fprintf(fid, '\\textbf{Blockers:}\\begin{itemize}\n');
+                    for bk = 1:numel(s51r.blockers)
+                        fprintf(fid, '\\item %s\n', ...
+                            revgnss.ClockExactReportBuilder.esc_(s51r.blockers{bk}));
+                    end
+                    fprintf(fid, '\\end{itemize}\n');
+                end
+                if ~isempty(s51r.warnings)
+                    fprintf(fid, '\\textit{Warnings: ');
+                    for wk = 1:numel(s51r.warnings)
+                        fprintf(fid, '%s ', ...
+                            revgnss.ClockExactReportBuilder.esc_(s51r.warnings{wk}));
+                    end
+                    fprintf(fid, '}\n\n');
+                end
+            end
         end
 
         % ================================================================

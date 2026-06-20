@@ -12,8 +12,8 @@ classdef ReportStatus
     methods (Static)
 
         function s = current()
-            s.stage      = '50';
-            s.stageTitle = 'Ambiguity Fixing Readiness Gate v1';
+            s.stage      = '51';
+            s.stageTitle = 'Ambiguity Readiness Evidence Hardening v1';
             s.validationMode = 'targeted-random-smoke';
             s.fullSuiteRun   = false;
 
@@ -57,10 +57,10 @@ classdef ReportStatus
             end
             vsSHA = '';
             if isfield(vs, 'gitSHA'); vsSHA = strtrim(char(vs.gitSHA)); end
-            s.validationArtifactFresh = (vsStageNum >= 50) && strcmp(vsSHA, runtimeSHA);
+            s.validationArtifactFresh = (vsStageNum >= 51) && strcmp(vsSHA, runtimeSHA);
             if ~s.validationArtifactFresh
                 s.validationWarnings{end+1} = ...
-                    'No fresh local validation summary for this commit. Run: setenv(''OO_V1_VALIDATE_REPORT'',''true''); setenv(''OO_V1_VALIDATION_STAGE'',''49''); run_oo_reverse_gnss_report';
+                    'No fresh local validation summary for this commit. Run: setenv(''OO_V1_VALIDATE_REPORT'',''true''); setenv(''OO_V1_VALIDATION_STAGE'',''51''); run_oo_reverse_gnss_report';
             end
 
             if isfield(vs, 'selectedTestNames')
@@ -127,7 +127,7 @@ classdef ReportStatus
                 'Quaternion / error-state attitude EKF (current ZYX Euler is documented but singular at pitch +/-90 deg)'
                 'Full per-row LOS metadata for runtime finite-diff Jacobian consistency (production path uses H-only summary)'
                 'Multi-antenna single-asset attitude scenario validation'
-                'Integer ambiguity fixing for carrier IF (LAMBDA/MLAMBDA; Stage 47 adds float IF rows; Stage 48 adds float traceability; Stage 49 adds float WL/NL diagnostics; Stage 50 adds readiness gate; no integer fixing)'
+                'Integer ambiguity fixing for carrier IF (LAMBDA/MLAMBDA; Stage 47 adds float IF rows; Stage 48 adds float traceability; Stage 49 adds float WL/NL diagnostics; Stage 50 adds readiness gate; Stage 51 hardens readiness evidence; no integer fixing)'
                 'Calibrated inter-frequency biases / DCB / differential phase biases (not modelled in v1)'
                 'Integer ambiguity resolution (LAMBDA/MLAMBDA)'
                 'False-fix-risk control and ratio/residual validation'
@@ -179,6 +179,7 @@ classdef ReportStatus
                 'Stage 48: CarrierIonoFreeAmbiguityTraceability helper; explicit L1/L2 ambiguity state pair metadata in cpInfo (ambiguityStateIdxL1/L2, ambiguityStateIdxPair, ambiguityWeights); Var(B_IF)=[alpha beta]*P_pair*[alpha;beta] from Stage 41 Pamb; stale EKF-state-map-refactoring limitation removed from AmbiguityReadinessDiagnostics'
                 'Stage 49: wide-lane / narrow-lane float diagnostics from traced L1/L2 ambiguity covariance; no integer fixing, no LAMBDA/MLAMBDA, no phase-bias products, no false-fix-risk control'
                 'Stage 50: ambiguity fixing readiness gate combining Stages 41/48/49, arc-quality availability, and residual/NIS availability; strict readiness gate only; no integer fixing, no LAMBDA/MLAMBDA, no phase-bias products, no false-fix-risk control'
+                'Stage 51: ambiguity readiness evidence hardening; non-early-return evidence collection, explicit arc-quality and residual/NIS availability diagnostics, public arcQuality/residualConsistency/blockerList, readiness score, blocker aggregation, and status-warning consistency; no integer fixing'
             };
         end
 

@@ -61,7 +61,7 @@ classdef AmbiguityReadinessDiagnostics
             catch; end
 
             s.blockers       = revgnss.AmbiguityReadinessDiagnostics.blockerList(s);
-            % Append Stage 50 gate blockers if available in out.summary
+            % Append Stage 50/51 gate blockers if available in out.summary
             try
                 if isfield(out,'summary') && ...
                         isfield(out.summary,'ambiguityFixingReadinessGate') && ...
@@ -69,6 +69,15 @@ classdef AmbiguityReadinessDiagnostics
                         iscell(out.summary.ambiguityFixingReadinessGate.blockers)
                     s.blockers = [s.blockers, ...
                         out.summary.ambiguityFixingReadinessGate.blockers];
+                end
+            catch; end
+            try
+                if isfield(out,'summary') && ...
+                        isfield(out.summary,'ambiguityReadinessEvidenceGate') && ...
+                        isfield(out.summary.ambiguityReadinessEvidenceGate,'blockers') && ...
+                        iscell(out.summary.ambiguityReadinessEvidenceGate.blockers)
+                    s.blockers = [s.blockers, ...
+                        out.summary.ambiguityReadinessEvidenceGate.blockers];
                 end
             catch; end
             s.classification = revgnss.AmbiguityReadinessDiagnostics.classify_(s);

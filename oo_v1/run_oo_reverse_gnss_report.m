@@ -35,7 +35,7 @@ oo_v1_envAllToggles_ = strcmpi(getenv('OO_V1_ALL_TOGGLES'), 'true');
 if oo_v1_envValidate_; oo_v1_envAllToggles_ = true; end  % validate always uses all toggles
 oo_v1_envStage_      = str2double(getenv('OO_V1_VALIDATION_STAGE'));
 if isnan(oo_v1_envStage_); oo_v1_envStage_ = 0; end
-if oo_v1_envValidate_ && oo_v1_envStage_ == 0; oo_v1_envStage_ = 50; end
+if oo_v1_envValidate_ && oo_v1_envStage_ == 0; oo_v1_envStage_ = 51; end
 oo_v1_envCompile_    = strtrim(getenv('OO_V1_REPORT_COMPILE_TEX'));
 
 cfg = revgnss.ConfigFactory.defaultConfig();
@@ -182,6 +182,12 @@ cfg.diagnostics.wideLaneNarrowLane.enable = false;
 % residual/NIS. Does not fix, round, or resolve ambiguities.
 % No LAMBDA/MLAMBDA, no phase-bias products, no false-fix-risk control.
 cfg.diagnostics.ambiguityFixingReadiness.enable = false;
+
+% --- Ambiguity readiness evidence hardening (Stage 51) ----------
+% Evidence hardening for the Stage 50 gate. Collects all evidence
+% without early return, exposes arc-quality and residual/NIS availability.
+% Still does not fix, round, or resolve ambiguities.
+cfg.diagnostics.ambiguityReadinessEvidence.enable = false;
 
 % --- Inter-frequency bias budget (Stage 44) --------------------
 % Diagnostic only. Default all to 0 (no calibrated products in v1).
@@ -345,6 +351,7 @@ if stageAllToggles || oo_v1_envAllToggles_
     cfg.diagnostics.carrierIonoFreeAmbiguityTraceability.enable = true;
     cfg.diagnostics.wideLaneNarrowLane.enable                    = true;
     cfg.diagnostics.ambiguityFixingReadiness.enable              = true;
+    cfg.diagnostics.ambiguityReadinessEvidence.enable            = true;
     cfg.validation.stageAllToggles         = true;
     if oo_v1_envAllToggles_
         cfg.validation.invokedMainScript = true;

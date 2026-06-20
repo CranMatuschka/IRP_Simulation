@@ -197,6 +197,46 @@ classdef ReportRunner
                 end
             end
 
+            % ---- Stage 51: ambiguity readiness evidence compact fields ----
+            amre51Req_ = false;
+            try; amre51Req_ = logical(cfg.diagnostics.ambiguityReadinessEvidence.enable); catch; end
+            summary.ambiguityReadinessEvidenceRequested         = amre51Req_;
+            summary.ambiguityReadinessEvidenceClassification    = 'disabled';
+            summary.ambiguityReadinessEvidenceScore             = 0;
+            summary.ambiguityReadinessEvidenceBlockerCount      = 0;
+            summary.ambiguityReadinessArcQualityAvailable       = false;
+            summary.ambiguityReadinessSlipCount                 = NaN;
+            summary.ambiguityReadinessMinArcLength_s            = NaN;
+            summary.ambiguityReadinessResidualAvailable         = false;
+            summary.ambiguityReadinessResidualRms_m             = NaN;
+            summary.ambiguityReadinessNisMean                   = NaN;
+            summary.ambiguityReadinessExpectedNis               = NaN;
+            summary.ambiguityReadinessIntegerFixingImplemented  = false;
+            summary.ambiguityReadinessLambdaImplemented         = false;
+            summary.ambiguityReadinessFalseFixRiskControlled    = false;
+            summary.ambiguityReadinessEvidenceGate              = struct('blockers', {{}});
+            if amre51Req_
+                try
+                    cfg51_ = cfg;
+                    cfg51_.diagnostics.ambiguityFixingReadiness.enable = true;
+                    s51_ = revgnss.AmbiguityFixingReadinessGate.assess(summary, cfg51_);
+                    summary.ambiguityReadinessEvidenceClassification  = s51_.classification;
+                    summary.ambiguityReadinessEvidenceScore           = s51_.readinessScore;
+                    summary.ambiguityReadinessEvidenceBlockerCount    = numel(s51_.blockers);
+                    summary.ambiguityReadinessArcQualityAvailable     = s51_.cycleSlipMetadataAvailable;
+                    summary.ambiguityReadinessSlipCount               = s51_.slipCount;
+                    summary.ambiguityReadinessMinArcLength_s          = s51_.minArcLength_s;
+                    summary.ambiguityReadinessResidualAvailable       = s51_.residualDiagnosticsAvailable;
+                    summary.ambiguityReadinessResidualRms_m           = s51_.residualRms_m;
+                    summary.ambiguityReadinessNisMean                 = s51_.nisMean;
+                    summary.ambiguityReadinessExpectedNis             = s51_.expectedNis;
+                    summary.ambiguityReadinessEvidenceGate.blockers   = s51_.blockers;
+                catch ex51_
+                    warning('ReportRunner:amreFailed', ...
+                        'Stage 51 readiness evidence failed: %s', ex51_.message);
+                end
+            end
+
             % ---- Known-ambiguity attitude validation (ATTITUDE VALIDATION ONLY — not operational) ----
             % Gated by cfg.estimator.runKnownAmbiguityValidation = true.
             % Runs a short comparison where truth float ambiguities are subtracted from
