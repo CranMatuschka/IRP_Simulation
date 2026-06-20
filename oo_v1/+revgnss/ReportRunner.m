@@ -177,6 +177,26 @@ classdef ReportRunner
                 end
             end
 
+            % ---- Stage 50: ambiguity fixing readiness gate compact fields ----
+            amfr50Req_ = false;
+            try; amfr50Req_ = logical(cfg.diagnostics.ambiguityFixingReadiness.enable); catch; end
+            summary.ambiguityFixingReadinessRequested       = amfr50Req_;
+            summary.ambiguityFixingReadinessClassification  = 'disabled';
+            summary.ambiguityFixingReadinessPhaseBiasProductsAvailable = false;
+            summary.ambiguityFixingReadinessIntegerFixingImplemented   = false;
+            summary.ambiguityFixingReadinessLambdaImplemented          = false;
+            summary.ambiguityFixingReadinessGate = struct('blockers', {{}});
+            if amfr50Req_
+                try
+                    s50_ = revgnss.AmbiguityFixingReadinessGate.assess(summary, cfg);
+                    summary.ambiguityFixingReadinessClassification = s50_.classification;
+                    summary.ambiguityFixingReadinessGate.blockers  = s50_.blockers;
+                catch ex50_
+                    warning('ReportRunner:amfrFailed', ...
+                        'Stage 50 ambiguity fixing readiness gate failed: %s', ex50_.message);
+                end
+            end
+
             % ---- Known-ambiguity attitude validation (ATTITUDE VALIDATION ONLY — not operational) ----
             % Gated by cfg.estimator.runKnownAmbiguityValidation = true.
             % Runs a short comparison where truth float ambiguities are subtracted from

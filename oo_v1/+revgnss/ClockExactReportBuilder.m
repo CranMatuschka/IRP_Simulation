@@ -2993,6 +2993,56 @@ classdef ClockExactReportBuilder
                 fprintf(fid, 'Phase-bias products & false\\\\\n');
                 fprintf(fid, '\\bottomrule\n\\end{tabular}\\par\n\n');
             end
+
+            % --- Stage 50: Ambiguity Fixing Readiness Gate ---
+            if isfield(cfg,'diagnostics') && ...
+                    isfield(cfg.diagnostics,'ambiguityFixingReadiness') && ...
+                    isfield(cfg.diagnostics.ambiguityFixingReadiness,'enable') && ...
+                    cfg.diagnostics.ambiguityFixingReadiness.enable
+                fprintf(fid, '\\subsection*{Ambiguity Fixing Readiness Gate (Stage~50)}\n');
+                fprintf(fid, ['\\textit{Stage~50 is a strict readiness gate. It does not fix, ' ...
+                    'round, or resolve integer ambiguities. LAMBDA/MLAMBDA, calibrated ' ...
+                    'phase-bias products, and false-fix-risk control are not implemented ' ...
+                    'in v1.}\n\n']);
+                try
+                    s50 = revgnss.AmbiguityFixingReadinessGate.assess(summary, cfg);
+                catch ex50r
+                    fprintf(fid, 'Readiness gate failed: %s\n\n', ...
+                        revgnss.ClockExactReportBuilder.esc_(ex50r.message));
+                    s50 = revgnss.AmbiguityFixingReadinessGate.assess(struct(), struct());
+                end
+                fprintf(fid, '\\begin{tabular}{p{0.46\\textwidth}p{0.42\\textwidth}}\n');
+                fprintf(fid, '\\toprule\n\\textbf{Property} & \\textbf{Value}\\\\\n\\midrule\n');
+                fprintf(fid, 'Classification & \\texttt{%s}\\\\\n', ...
+                    revgnss.ClockExactReportBuilder.esc_(s50.classification));
+                fprintf(fid, 'Enabled & %s\\\\\n', mat2str(s50.enabled));
+                fprintf(fid, 'Pair metadata available & %s\\\\\n', ...
+                    mat2str(s50.pairMetadataAvailable));
+                fprintf(fid, 'Pair count & %d\\\\\n', s50.pairCount);
+                fprintf(fid, 'Covariance available & %s\\\\\n', ...
+                    mat2str(s50.covarianceAvailable));
+                fprintf(fid, 'WL/NL ready & %s  (\\texttt{%s})\\\\\n', ...
+                    mat2str(s50.wideLaneNarrowLaneReady), ...
+                    revgnss.ClockExactReportBuilder.esc_(s50.wideLaneNarrowLaneClassification));
+                fprintf(fid, 'Arc quality & \\texttt{%s}\\\\\n', ...
+                    revgnss.ClockExactReportBuilder.esc_(s50.arcQualityStatus));
+                fprintf(fid, 'Residual consistency & \\texttt{%s}\\\\\n', ...
+                    revgnss.ClockExactReportBuilder.esc_(s50.residualConsistencyStatus));
+                fprintf(fid, 'Phase-bias products & false\\\\\n');
+                fprintf(fid, 'Integer strategy & false\\\\\n');
+                fprintf(fid, 'Integer fixing impl.\\ & false\\\\\n');
+                fprintf(fid, 'LAMBDA/MLAMBDA & false\\\\\n');
+                fprintf(fid, 'False-fix-risk controlled & false\\\\\n');
+                fprintf(fid, '\\bottomrule\n\\end{tabular}\\par\n\n');
+                if ~isempty(s50.blockers)
+                    fprintf(fid, '\\textbf{Blockers:}\\begin{itemize}\n');
+                    for bk = 1:numel(s50.blockers)
+                        fprintf(fid, '\\item %s\n', ...
+                            revgnss.ClockExactReportBuilder.esc_(s50.blockers{bk}));
+                    end
+                    fprintf(fid, '\\end{itemize}\n\n');
+                end
+            end
         end
 
         % ================================================================
