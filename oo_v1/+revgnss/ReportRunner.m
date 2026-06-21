@@ -718,6 +718,42 @@ classdef ReportRunner
                 end
             catch; end
 
+            % ---- Stage 64: scientific closure summary fields ---------------
+            summary.stage64Active = true;
+            scen64_ = '';
+            try; scen64_ = cfg.scenario.name; catch; end
+            summary.stage64ScenarioName = scen64_;
+            % PCV mode: derive from config
+            pcvEn_ = false;
+            try; pcvEn_ = cfg.effects.antennaPCV.truth.enable || cfg.effects.antennaPCV.model.enable; catch; end
+            pcvMdl_ = 'none';
+            try; pcvMdl_ = cfg.effects.antenna.pcvModel; catch; end
+            if ~pcvEn_
+                summary.stage64PcvMode = 'none (disabled)';
+            elseif strcmp(pcvMdl_,'toy')
+                summary.stage64PcvMode = 'toy (synthetic-only; not calibrated)';
+            elseif strcmp(pcvMdl_,'table')
+                summary.stage64PcvMode = 'table (receiver elevation lookup)';
+            else
+                summary.stage64PcvMode = pcvMdl_;
+            end
+            summary.stage64IFCovAssumption = 'Var(IF)=alpha^2*Var(L1)+beta^2*Var(L2), Cov(L1,L2)=0 (uncorrelated)';
+            summary.stage64DopplerStatus   = 'simplified-v1: LOS range-rate + rx/tower clock drift; no Sagnac-rate, no relativistic range-rate, no lever-arm velocity from body rates';
+            att64_ = 'eulerZYX';
+            try; att64_ = cfg.estimator.attitude.parameterization; catch; end
+            summary.stage64AttParamterization = att64_;
+            dyn64_ = 'constantVelocity';
+            try; dyn64_ = cfg.estimator.dynamics.mode; catch; end
+            summary.stage64DynamicsMode = dyn64_;
+            intFix64_ = 'disabled';
+            if isfield(summary,'stage63Classification'); intFix64_ = summary.stage63Classification; end
+            summary.stage64IntFixStatus = intFix64_;
+            summary.stage64LambdaImpl   = false;
+            summary.stage64CarrierIFFixImpl = false;
+            summary.stage64WlNlFixImpl  = false;
+            summary.stage64FalseFixRisk = false;
+            summary.stage64PppGrade     = false;
+
             % ---- Determine report layout before PDF generation -----------
             reportLayout = 'default';
             if isfield(cfg,'report') && isfield(cfg.report,'layout')

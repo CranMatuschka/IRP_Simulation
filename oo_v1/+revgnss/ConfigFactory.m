@@ -533,9 +533,9 @@ classdef ConfigFactory
 
             % --- Antenna PCV model (Step 4) ---------------------------------
             % pcvModel: 'none' | 'toy' | 'table'
-            % 'toy' preserves existing toyAzEl behavior.
+            % Default is 'none' (no PCV applied). 'toy' is synthetic-only (label explicitly).
             % 'table' uses receiverPcvTable (elevation-only or el+az).
-            cfg.effects.antenna.pcvModel                     = 'toy';
+            cfg.effects.antenna.pcvModel                     = 'none';
             cfg.effects.antenna.receiverPcvTable.elDeg       = 0:10:90;
             cfg.effects.antenna.receiverPcvTable.pcv_m       = zeros(1, 10);
 

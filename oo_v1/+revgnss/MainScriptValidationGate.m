@@ -29,11 +29,11 @@ classdef MainScriptValidationGate
             state = struct();
 
             % Resolve stage, seed, count from env vars.
-            stg = 63;
+            stg = 64;
             v = str2double(getenv('OO_V1_VALIDATION_STAGE'));
             if ~isnan(v) && v > 0; stg = round(v); end
 
-            seed = 62;
+            seed = 64;
             v = str2double(getenv('OO_V1_RANDOM_TEST_SEED'));
             if ~isnan(v) && isfinite(v); seed = round(v); end
 
@@ -232,6 +232,7 @@ classdef MainScriptValidationGate
                 case 61; t = 'Quaternion Nominal / Error-State Attitude EKF v1';
                 case 62; t = 'Quaternion Error-State Covariance Consistency Closure v1';
                 case 63; t = 'Controlled Single-Asset Integer Ambiguity Fixing v1';
+                case 64; t = 'Scientific Closure and v1 Freeze';
                 otherwise
                     try; t = revgnss.ReportStatus.current().stageTitle; catch; t = sprintf('Stage %d', stg); end
             end

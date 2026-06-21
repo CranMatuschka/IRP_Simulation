@@ -62,20 +62,21 @@ classdef StageHistory
                 'Stage 61: quaternion nominal / small-angle error-state attitude EKF; AttitudeErrorStateKinematics helper (quatNormalize, eulerToQuatZYX, quatToEulerZYX, quatToDcm, deltaQuat, injectRight, propagateQuatBodyRate, smallAnglePerturbedDcm, wrapEulerError_deg, summaryLines); ReverseGNSSEKF extended with nominalQuat_wxyz, attitudeParameterization, getMeasurementState(), getReportEulerRad(), quaternionErrorState predict/update paths; LinkGeometry.finiteDiffAttitudeJacobian extended with quaternionErrorState mode (perturbs DCM body-frame, not Euler angles); Diagnostics uses getReportEulerRad(); ReverseGNSSSimulation routes measurement state via getMeasurementState(); CarrierAttitudeRowClosure adds stage61CarrierClosureUsesErrorStateJacobian and closed-quaternion-error-state classification; run script selects quaternionErrorState; no integer fixing, no LAMBDA/MLAMBDA, no PPP-grade claim, no new orbit dynamics'
                 'Stage 62: quaternion error-state covariance consistency closure; ReverseGNSSEKF.update now computes S, K, and Joseph posterior covariance from the pre-update covariance Pminus, then injects delta_theta into the nominal quaternion and applies the attitude reset Jacobian G=I-0.5*skew(delta_theta) to the posterior covariance; records covarianceResetOrder=posterior-after-joseph, injection norms, quaternion norm, and reset Jacobian condition number; injection size guard (default 10 deg) warns if exceeded; Stage 57 physical/gauge accounting and Stage 60 carrier-attitude closure preserved; legacy eulerZYX mode unchanged; no integer fixing, no LAMBDA/MLAMBDA, no false-fix-risk control, no PPP-grade claim'
                 'Stage 63: controlled single-asset raw-carrier integer ambiguity fixing; IntegerAmbiguityFixer helper with assess/resetOnSlip/summaryLines; 18 scientific guards (scenario, ambiguity mode, arc length, covariance sigma, distance-to-integer, residual RMS, held/reset management); fixes applied as EKF pseudo-measurements via new applyAmbiguityPseudoMeasurement method in ReverseGNSSEKF; held fixes tracked per arc in ReverseGNSSSimulation.fixState63_; fix counts accumulated in fix63Log_; stage63* summary fields and Stage 63 PDF subsection; NOT LAMBDA/MLAMBDA, NOT carrier-IF integer fixing, NOT wide-lane/narrow-lane, NOT formal false-fix-risk control, NOT calibrated phase-bias products, NOT PPP-grade attitude'
+                'Stage 64: scientific closure and v1 freeze; PCV default corrected to none; IF covariance assumption documented (alpha^2*Var_L1+beta^2*Var_L2, Cov=0); Doppler labelled simplified-v1 (LOS range-rate + rx/tower clock drift only); Stage 64 Final Scientific Closure section in PDF; stage64* summary fields in ReportRunner; scenario semantics clarified (cleanIdeal/matchedError/finalAllToggle); active-no-fixes from Stage 63 acknowledged and not treated as failure; Stage 61/62 quaternion covariance update-order preserved; full suite NOT RUN; v1 frozen as controlled internally consistent MATLAB EKF simulation demonstration'
             };
         end
 
         function list = missingScientificItems(~)
             % missingScientificItems  Not-implemented items that must not be claimed.
-            % The stage argument is reserved for future stage-specific filtering.
+            % v1 is frozen at Stage 64. These items are not implemented and must not be claimed.
             list = {
-                'Full CI / full test-suite validation (current: targeted random smoke, 2-5 tests only)'
-                'Calibrated antenna PCO/PCV and ANTEX hardware-bias products (geometry model is reference-point only)'
-                'Production-grade quaternion attitude robustness: large-error injection bounding, ring-down prevention, and formal reset-transition validation (Stage 61 adds quaternionErrorState mode; Stage 62 fixes covariance reset ordering; production-grade injection clamping and ring-down control not yet implemented)'
-                'Integer ambiguity fixing (advanced): carrier-IF LAMBDA/MLAMBDA, wide-lane/narrow-lane fixing, calibrated phase-bias products, formal false-fix-risk ratio/residual control (Stage 63 adds controlled raw-carrier fixing for the single-asset scenario, but LAMBDA/MLAMBDA, carrier-IF integer fixing, WL/NL fixing, calibrated phase-bias products, and formal false-fix-risk control are not implemented)'
+                'Full CI / full test-suite validation (current: targeted random smoke, 2-5 tests only; full suite NOT RUN)'
+                'Calibrated antenna PCO/PCV and ANTEX hardware-bias products (default PCV=none; toy PCV is synthetic-only; geometry model is reference-point only)'
+                'Production-grade quaternion attitude robustness: large-error injection bounding, ring-down prevention, and formal reset-transition validation (Stage 61 adds quaternionErrorState mode; Stage 62 fixes covariance reset ordering; production-grade injection clamping not implemented)'
+                'Integer ambiguity fixing (LAMBDA/MLAMBDA, carrier-IF, wide-lane/narrow-lane): Stage 63 adds controlled raw-carrier fixing path; active-no-fixes in all-toggle run is correct (IF combination prevents individual L1 sigma convergence); LAMBDA/MLAMBDA, carrier-IF integer fixing, WL/NL, calibrated phase-bias products, and formal false-fix-risk control are NOT implemented'
                 'Calibrated inter-frequency biases / DCB / differential phase biases (not modelled in v1)'
-                'Integer ambiguity resolution (LAMBDA/MLAMBDA)'
-                'False-fix-risk control and ratio/residual validation'
+                'Simplified v1 Doppler only (LOS range-rate + rx/tower clock drift; no Sagnac-rate, no relativistic range-rate, no lever-arm velocity from body rates, no high-fidelity transmitter dynamics)'
+                'IF covariance uses uncorrelated noise assumption (Var_IF=alpha^2*Var_L1+beta^2*Var_L2, Cov(L1,L2)=0); correlated dual-frequency noise modelling not implemented'
                 'Monte Carlo / NIS / NEES stochastic consistency validation'
                 'Scientific troposphere: Niell/GMF/VMF3/GPT3/ERA5 mapping functions'
                 'Scientific ionosphere: Klobuchar/IONEX/higher-order ionosphere models'
@@ -84,6 +85,7 @@ classdef StageHistory
                 'Higher-fidelity orbit dynamics: drag, SRP, third bodies, precise orbit products'
                 'Real TWSTFT / relay / transponder physics'
                 'External GNSS product ingestion: SP3, CLK, RINEX, IONEX, ANTEX'
+                'Operational navigation, precise orbit determination, mission-qualified attitude, or PPP-grade processing (v1 is a controlled EKF demonstration only)'
             };
         end
 

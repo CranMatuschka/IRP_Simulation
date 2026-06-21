@@ -3505,6 +3505,71 @@ classdef ClockExactReportBuilder
                 fprintf(fid, '\\bottomrule\n\\end{tabular}\\par\n\n');
             end
 
+            % --- Stage 64: Final Scientific Closure ---
+            if isfield(summary,'stage64Active') && summary.stage64Active
+                fprintf(fid, '\\subsection*{Stage~64 Final Scientific Closure}\n');
+                fprintf(fid, ['\\textit{v1 is frozen as a controlled, internally consistent MATLAB EKF simulation ' ...
+                    'demonstrating measurement, covariance, ambiguity-state, attitude, dynamics, and reporting ' ...
+                    'architecture under selected synthetic scenarios. ' ...
+                    'It is NOT an operational navigator, NOT a PPP-grade processor, NOT a mission-qualified attitude system, ' ...
+                    'and NOT a real-data GNSS processor.}\n\n']);
+                fprintf(fid, '\\begin{tabular}{p{0.46\\textwidth}p{0.46\\textwidth}}\n');
+                fprintf(fid, '\\toprule\n\\textbf{Property} & \\textbf{Value}\\\\\n\\midrule\n');
+                % Scenario / dynamics / measurement types
+                scen64_ = '';
+                if isfield(summary,'stage64ScenarioName'); scen64_ = strrep(summary.stage64ScenarioName,'_','\_'); end
+                fprintf(fid, 'Active scenario & \\texttt{%s}\\\\\n', scen64_);
+                fprintf(fid, 'Dynamics mode & \\texttt{%s}\\\\\n', ...
+                    strrep(summary.stage64DynamicsMode,'_','\_'));
+                % measurement types enabled
+                measStr_ = revgnss.ClockExactReportBuilder.measTypeStr_(summary);
+                fprintf(fid, 'Measurement types & %s\\\\\n', measStr_);
+                % PCV
+                fprintf(fid, 'PCV mode & \\texttt{%s}\\\\\n', ...
+                    strrep(summary.stage64PcvMode,'_','\_'));
+                % IF covariance
+                ifStr64_ = strrep(summary.stage64IFCovAssumption,'_','\_');
+                ifStr64_ = strrep(ifStr64_,'Var(IF)','\\(\\mathrm{Var}(\\mathrm{IF})\\)');
+                fprintf(fid, 'IF cov assumption & \\texttt{Var(IF)=alpha2*Var(L1)+beta2*Var(L2), Cov(L1,L2)=0}\\\\\n');
+                % Doppler
+                fprintf(fid, 'Doppler model & \\textit{%s}\\\\\n', ...
+                    strrep(summary.stage64DopplerStatus,'>','$>$'));
+                % Attitude
+                fprintf(fid, 'Attitude param. & \\texttt{%s}\\\\\n', ...
+                    strrep(summary.stage64AttParamterization,'_','\_'));
+                % Integer fixing
+                fprintf(fid, 'Int.fix status & \\texttt{%s} (LAMBDA:false, carrIF:false, WL/NL:false, falseFixRisk:false)\\\\\n', ...
+                    strrep(summary.stage64IntFixStatus,'_','\_'));
+                % NIS
+                if isfield(summary,'meanNIS') && isfinite(summary.meanNIS)
+                    fprintf(fid, 'Mean NIS (all rows) & %.2f\\\\\n', summary.meanNIS);
+                end
+                if isfield(summary,'physicalNIS') && isfinite(summary.physicalNIS)
+                    fprintf(fid, 'Physical NIS & %.2f\\\\\n', summary.physicalNIS);
+                end
+                % Final position error
+                if isfield(summary,'finalPositionError_m') && isfinite(summary.finalPositionError_m)
+                    fprintf(fid, 'Final pos error & %.3f m\\\\\n', summary.finalPositionError_m);
+                end
+                % KAV
+                if isfield(summary,'knownAmbClass') && ~isempty(summary.knownAmbClass) && ~strcmp(summary.knownAmbClass,'SKIPPED')
+                    fprintf(fid, 'KAV result & \\texttt{%s}\\\\\n', ...
+                        strrep(summary.knownAmbClass,'_','\_'));
+                end
+                fprintf(fid, '\\midrule\n');
+                fprintf(fid, ['\\multicolumn{2}{p{0.96\\textwidth}}{\\textbf{Known v1 limitations:} ' ...
+                    'full-suite validation not run; ' ...
+                    'calibrated PCO/PCV/ANTEX not implemented; ' ...
+                    'simplified Doppler (no Sagnac-rate/relativistic/lever-arm-velocity); ' ...
+                    'IF covariance assumes Cov(L1,L2)=0; ' ...
+                    'LAMBDA/MLAMBDA/WL/NL integer fixing not implemented; ' ...
+                    'no formal false-fix-risk control; ' ...
+                    'no scientific troposphere/ionosphere/orbit models; ' ...
+                    'no IERS/EOP/SP3/CLK/ANTEX product ingestion; ' ...
+                    'not operational, not PPP-grade, not mission-qualified.}\\\\\n']);
+                fprintf(fid, '\\bottomrule\n\\end{tabular}\\par\n\n');
+            end
+
             % --- Stage 59: Single-Space-Asset Multi-Antenna Carrier Attitude Scenario ---
             if isfield(summary,'stage59ScenarioEnabled') && summary.stage59ScenarioEnabled
                 fprintf(fid, '\\subsection*{Single-Space-Asset Multi-Antenna Carrier Attitude Scenario (Stage~59)}\n');
@@ -4044,6 +4109,19 @@ classdef ClockExactReportBuilder
                 [st, out] = system(sprintf('git -C "%s" rev-parse --short HEAD 2>/dev/null', repoRoot));
                 if st == 0; sha = strtrim(out); end
             catch; end
+        end
+
+        function s = measTypeStr_(summary)
+            % measTypeStr_  Build a short measurement-type string from summary flags.
+            parts = {};
+            if isfield(summary,'pseudorangeEnabled')    && summary.pseudorangeEnabled;    parts{end+1} = 'code'; end
+            if isfield(summary,'carrierPhaseEnabled')   && summary.carrierPhaseEnabled;   parts{end+1} = 'carrier'; end
+            if isfield(summary,'dopplerEnabled')        && summary.dopplerEnabled;        parts{end+1} = 'Doppler'; end
+            if isfield(summary,'stage63IntegerFixingImplemented') && summary.stage63IntegerFixingImplemented
+                parts{end+1} = 'intFix';
+            end
+            parts = unique(parts,'stable');
+            if isempty(parts); s = 'code (default)'; else; s = strjoin(parts,'+'); end
         end
 
     end  % private static
