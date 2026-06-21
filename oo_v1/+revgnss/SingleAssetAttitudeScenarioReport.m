@@ -77,20 +77,47 @@ classdef SingleAssetAttitudeScenarioReport
                     s.dynamicsEkfMode);
             end
 
-            % Attitude truth from config initial condition.
-            try
-                euler_rad = cfg.asset.attitude_euler_rad;
-                s.rollTruth_deg  = euler_rad(1) * 180/pi;
-                s.pitchTruth_deg = euler_rad(2) * 180/pi;
-                s.yawTruth_deg   = euler_rad(3) * 180/pi;
-            catch
-                s.warnings{end+1} = 'cfg.asset.attitude_euler_rad not available; truth angles set NaN.';
+            % Stage 60: component-level attitude truth/estimate/error.
+            % ReportRunner extracts final euler truth/estimate from diag.log.
+            if isfield(summary,'finalTruthEuler_deg') && ...
+                    numel(summary.finalTruthEuler_deg) == 3 && ...
+                    all(isfinite(summary.finalTruthEuler_deg(:)))
+                tru60 = summary.finalTruthEuler_deg(:);
+                s.rollTruth_deg  = tru60(1);
+                s.pitchTruth_deg = tru60(2);
+                s.yawTruth_deg   = tru60(3);
+            else
+                try
+                    euler_rad = cfg.asset.attitude_euler_rad;
+                    s.rollTruth_deg  = euler_rad(1) * 180/pi;
+                    s.pitchTruth_deg = euler_rad(2) * 180/pi;
+                    s.yawTruth_deg   = euler_rad(3) * 180/pi;
+                catch
+                    s.warnings{end+1} = 'cfg.asset.attitude_euler_rad unavailable; truth set NaN.';
+                end
             end
-            % Component-level estimates not stored in summary (only error norm).
-            s.warnings{end+1} = 'Component-level roll/pitch/yaw estimates not in summary; only error norm available.';
+            if isfield(summary,'finalEstimateEuler_deg') && ...
+                    numel(summary.finalEstimateEuler_deg) == 3 && ...
+                    all(isfinite(summary.finalEstimateEuler_deg(:)))
+                est60 = summary.finalEstimateEuler_deg(:);
+                s.rollEstimate_deg  = est60(1);
+                s.pitchEstimate_deg = est60(2);
+                s.yawEstimate_deg   = est60(3);
+                tru3 = [s.rollTruth_deg; s.pitchTruth_deg; s.yawTruth_deg];
+                if all(isfinite(tru3))
+                    err60 = atan2d(sind(est60 - tru3), cosd(est60 - tru3));
+                    s.rollError_deg  = err60(1);
+                    s.pitchError_deg = err60(2);
+                    s.yawError_deg   = err60(3);
+                    s.attitudeErrorNorm_deg = norm(err60);
+                end
+            else
+                s.warnings{end+1} = 'Euler estimate unavailable; component errors set NaN.';
+            end
 
-            % Attitude error norm from summary.
-            if isfield(summary,'finalAttitudeError_deg') && isfinite(summary.finalAttitudeError_deg)
+            % Attitude error norm fallback from finalAttitudeError_deg
+            if isnan(s.attitudeErrorNorm_deg) && ...
+                    isfield(summary,'finalAttitudeError_deg') && isfinite(summary.finalAttitudeError_deg)
                 s.attitudeErrorNorm_deg = summary.finalAttitudeError_deg;
             end
 
@@ -196,8 +223,16 @@ classdef SingleAssetAttitudeScenarioReport
             lines{end+1} = sprintf('EKF dynamics         : %s', s.dynamicsEkfMode);
             lines{end+1} = sprintf('Dynamics consistent  : %s', mat2str(s.dynamicsSelfConsistent));
             if ~isnan(s.rollTruth_deg)
-                lines{end+1} = sprintf('Attitude truth       : R=%.2f P=%.2f Y=%.2f deg', ...
+                lines{end+1} = sprintf('Att. truth (R/P/Y)   : %.2f / %.2f / %.2f deg', ...
                     s.rollTruth_deg, s.pitchTruth_deg, s.yawTruth_deg);
+            end
+            if ~isnan(s.rollEstimate_deg)
+                lines{end+1} = sprintf('Att. estimate (R/P/Y): %.2f / %.2f / %.2f deg', ...
+                    s.rollEstimate_deg, s.pitchEstimate_deg, s.yawEstimate_deg);
+            end
+            if ~isnan(s.rollError_deg)
+                lines{end+1} = sprintf('Att. error (R/P/Y)   : %.3f / %.3f / %.3f deg', ...
+                    s.rollError_deg, s.pitchError_deg, s.yawError_deg);
             end
             if isfinite(s.attitudeErrorNorm_deg)
                 lines{end+1} = sprintf('Att. error norm (final): %.3f deg', s.attitudeErrorNorm_deg);

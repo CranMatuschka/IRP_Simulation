@@ -3310,6 +3310,66 @@ classdef ClockExactReportBuilder
                 fprintf(fid, '\\bottomrule\n\\end{tabular}\\par\n\n');
             end
 
+            % --- Stage 60: Carrier-Attitude Measurement Model Closure ---
+            if isfield(summary,'stage60CarrierAttClosureAvailable') && ...
+                    summary.stage60CarrierAttClosureAvailable
+                fprintf(fid, '\\subsection*{Carrier-Attitude Measurement Model Closure (Stage~60)}\n');
+                fprintf(fid, ['\\textit{Stage~60 closes the carrier-attitude measurement model: ' ...
+                    'verifying that $h$ and $H$ use the same receiver-antenna geometry via a ' ...
+                    'shared LinkGeometry path, and checking attitude Jacobian columns against ' ...
+                    'spot finite differences. ' ...
+                    'No integer fixing, no LAMBDA/MLAMBDA, no quaternion/error-state EKF, ' ...
+                    'no PPP-grade claims.}\n\n']);
+                fprintf(fid, '\\begin{tabular}{p{0.46\\textwidth}p{0.42\\textwidth}}\n');
+                fprintf(fid, '\\toprule\n\\textbf{Property} & \\textbf{Value}\\\\\n\\midrule\n');
+                fprintf(fid, 'Active stage & 60\\\\\n');
+                cls60_ = 'unavailable';
+                if isfield(summary,'stage60CarrierAttClosureClassification')
+                    cls60_ = strrep(summary.stage60CarrierAttClosureClassification,'_','\_');
+                end
+                fprintf(fid, 'Closure classification & \\texttt{%s}\\\\\n', cls60_);
+                rUse60_ = isfield(summary,'stage60CarrierRowsUseLinkGeometry') && ...
+                    summary.stage60CarrierRowsUseLinkGeometry;
+                fprintf(fid, 'Rows use LinkGeometry & %s\\\\\n', mat2str(rUse60_));
+                metaCons60_ = isfield(summary,'stage60CarrierAttMetadataConsistent') && ...
+                    summary.stage60CarrierAttMetadataConsistent;
+                fprintf(fid, 'Metadata consistent & %s\\\\\n', mat2str(metaCons60_));
+                if isfield(summary,'stage60CarrierAttRowsChecked')
+                    fprintf(fid, 'Rows checked & %d\\\\\n', summary.stage60CarrierAttRowsChecked);
+                    fprintf(fid, 'Rows closed & %d\\\\\n', summary.stage60CarrierAttRowsClosed);
+                    if isfield(summary,'stage60CarrierAttRowsMismatch')
+                        fprintf(fid, 'Rows mismatch & %d\\\\\n', summary.stage60CarrierAttRowsMismatch);
+                    end
+                end
+                if isfield(summary,'stage60CarrierAttMaxAbsJacDiff') && ...
+                        isfinite(summary.stage60CarrierAttMaxAbsJacDiff)
+                    fprintf(fid, 'Max $|\\Delta H_{att}|$ & %.2e m/rad\\\\\n', ...
+                        summary.stage60CarrierAttMaxAbsJacDiff);
+                end
+                % Component-level attitude at final epoch
+                if isfield(summary,'stage60RollTruth_deg') && isfinite(summary.stage60RollTruth_deg)
+                    fprintf(fid, 'Truth R/P/Y (final) & %.2f / %.2f / %.2f deg\\\\\n', ...
+                        summary.stage60RollTruth_deg, summary.stage60PitchTruth_deg, summary.stage60YawTruth_deg);
+                end
+                if isfield(summary,'stage60RollEstimate_deg') && isfinite(summary.stage60RollEstimate_deg)
+                    fprintf(fid, 'Estimate R/P/Y (final) & %.2f / %.2f / %.2f deg\\\\\n', ...
+                        summary.stage60RollEstimate_deg, summary.stage60PitchEstimate_deg, summary.stage60YawEstimate_deg);
+                end
+                if isfield(summary,'stage60RollError_deg') && isfinite(summary.stage60RollError_deg)
+                    fprintf(fid, 'Error R/P/Y (wrap-aware) & %.3f / %.3f / %.3f deg\\\\\n', ...
+                        summary.stage60RollError_deg, summary.stage60PitchError_deg, summary.stage60YawError_deg);
+                end
+                if isfield(summary,'stage60AttitudeErrorNorm_deg') && isfinite(summary.stage60AttitudeErrorNorm_deg)
+                    fprintf(fid, 'Attitude error norm & %.3f deg\\\\\n', summary.stage60AttitudeErrorNorm_deg);
+                end
+                fprintf(fid, 'Integer fixing impl. & false\\\\\n');
+                fprintf(fid, 'LAMBDA/MLAMBDA & false\\\\\n');
+                fprintf(fid, 'False-fix-risk control & false\\\\\n');
+                fprintf(fid, 'Quaternion/error-state EKF & false\\\\\n');
+                fprintf(fid, 'PPP-grade claim & false\\\\\n');
+                fprintf(fid, '\\bottomrule\n\\end{tabular}\\par\n\n');
+            end
+
             % --- Stage 59: Single-Space-Asset Multi-Antenna Carrier Attitude Scenario ---
             if isfield(summary,'stage59ScenarioEnabled') && summary.stage59ScenarioEnabled
                 fprintf(fid, '\\subsection*{Single-Space-Asset Multi-Antenna Carrier Attitude Scenario (Stage~59)}\n');
@@ -3364,6 +3424,13 @@ classdef ClockExactReportBuilder
                 fprintf(fid, 'Truth dynamics mode & \\texttt{%s}\\\\\n', tDyn59_);
                 fprintf(fid, 'EKF dynamics mode & \\texttt{%s}\\\\\n', eDyn59_);
                 fprintf(fid, 'Dynamics self-consistent & %s\\\\\n', mat2str(selfC59_));
+                if isfield(summary,'singleAssetAttitudeRollError_deg') && ...
+                        isfinite(summary.singleAssetAttitudeRollError_deg)
+                    fprintf(fid, 'Error R/P/Y (wrap-aware) & %.3f / %.3f / %.3f deg\\\\\n', ...
+                        summary.singleAssetAttitudeRollError_deg, ...
+                        summary.singleAssetAttitudePitchError_deg, ...
+                        summary.singleAssetAttitudeYawError_deg);
+                end
                 if isfield(summary,'singleAssetAttitudeErrorNorm_deg') && ...
                         isfinite(summary.singleAssetAttitudeErrorNorm_deg)
                     fprintf(fid, 'Attitude error norm (final) & %.3f deg\\\\\n', ...

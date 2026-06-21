@@ -76,6 +76,13 @@ classdef CarrierMeasurementBuilder
             cpInfo.prefit_m          = zeros(Mp_total, 1);
             cpInfo.ambiguityStateIdx = zeros(Mp_total, 1);
             cpInfo.trackKey          = cell(Mp_total, 1);
+            % Stage 60: compact carrier-attitude row closure metadata
+            cpInfo.leverArmNorm_m          = zeros(Mp_total, 1);
+            cpInfo.attitudePartialsEnabled = false(Mp_total, 1);
+            cpInfo.attitudeSensitive       = false(Mp_total, 1);
+            cpInfo.hAttitudeNorm           = zeros(Mp_total, 1);
+            cpInfo.rowUsesLinkGeometry     = true;
+            cpInfo.carrierAttClosureAvail  = true;
 
             r_cm_est  = x_est(stateMap.r_idx);
             euler_est = x_est(stateMap.euler_idx);
@@ -205,6 +212,13 @@ classdef CarrierMeasurementBuilder
                     end
                     H_phi(rowOut, stateMap.euler_idx) = revgnss.LinkGeometry.finiteDiffAttitudeJacobian( ...
                         cfg, towers, ti, ai, r_cm_est, euler_est, leverArms_model, step_e);
+                end
+                % Stage 60: record closure metadata for this row (after H_phi is populated)
+                cpInfo.attitudePartialsEnabled(rowOut) = attGate.enabled;
+                cpInfo.leverArmNorm_m(rowOut)          = norm(leverArms_model(:, ai));
+                cpInfo.attitudeSensitive(rowOut)       = attGate.enabled && norm(leverArms_model(:,ai)) > 1e-9;
+                if isfield(stateMap,'euler_idx') && ~isempty(stateMap.euler_idx)
+                    cpInfo.hAttitudeNorm(rowOut) = norm(H_phi(rowOut, stateMap.euler_idx));
                 end
 
                 % ---- H: clock, ambiguity, ZWD (always analytic) ---------------

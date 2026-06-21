@@ -520,6 +520,15 @@ classdef ReportRunner
             if isfield(cfg,'scenario') && isfield(cfg.scenario,'name') && ...
                     strcmp(cfg.scenario.name,'singleAssetCarrierAttitude')
                 try
+                    % Stage 60: pre-extract final euler so assess() can use them
+                    if ~isempty(diag.log) && isfield(diag.log(end),'truth') && ...
+                            isfield(diag.log(end).truth,'euler_rad')
+                        summary.finalTruthEuler_deg = diag.log(end).truth.euler_rad(:)' * 180/pi;
+                    end
+                    if ~isempty(diag.log) && isfield(diag.log(end),'estimate') && ...
+                            isfield(diag.log(end).estimate,'euler_rad')
+                        summary.finalEstimateEuler_deg = diag.log(end).estimate.euler_rad(:)' * 180/pi;
+                    end
                     s59_ = revgnss.SingleAssetAttitudeScenarioReport.assess(summary, cfg);
                     summary.stage59ScenarioEnabled          = s59_.enabled;
                     summary.stage59ScenarioClassification   = s59_.classification;
@@ -534,12 +543,83 @@ classdef ReportRunner
                     summary.singleAssetAttitudeDynamicsTruthMode      = s59_.dynamicsTruthMode;
                     summary.singleAssetAttitudeDynamicsEkfMode        = s59_.dynamicsEkfMode;
                     summary.singleAssetAttitudeDynamicsSelfConsistent = s59_.dynamicsSelfConsistent;
+                    summary.singleAssetAttitudeRollError_deg          = s59_.rollError_deg;
+                    summary.singleAssetAttitudePitchError_deg         = s59_.pitchError_deg;
+                    summary.singleAssetAttitudeYawError_deg           = s59_.yawError_deg;
                     summary.singleAssetAttitudeErrorNorm_deg          = s59_.attitudeErrorNorm_deg;
                     summary.singleAssetAttitudeCarrierResidualRms_m   = s59_.carrierResidualRms_m;
                     summary.singleAssetAttitudePhysicalNisPerDof      = s59_.physicalNisPerDof;
                 catch ex59_
                     warning('ReportRunner:stage59Failed', ...
                         'Stage 59 scenario assessment failed: %s', ex59_.message);
+                end
+            end
+
+            % ---- Stage 60: carrier-attitude measurement model closure --------
+            summary.stage60CarrierAttClosureAvailable      = false;
+            summary.stage60CarrierAttClosureClassification = 'unavailable';
+            summary.stage60CarrierAttRowsChecked           = 0;
+            summary.stage60CarrierAttRowsClosed            = 0;
+            summary.stage60CarrierAttRowsMismatch          = 0;
+            summary.stage60CarrierAttMaxAbsJacDiff         = NaN;
+            summary.stage60CarrierAttMeanAbsJacDiff        = NaN;
+            summary.stage60CarrierAttMetadataConsistent    = false;
+            summary.stage60CarrierRowsUseLinkGeometry      = false;
+            summary.stage60RollTruth_deg                   = NaN;
+            summary.stage60PitchTruth_deg                  = NaN;
+            summary.stage60YawTruth_deg                    = NaN;
+            summary.stage60RollEstimate_deg                = NaN;
+            summary.stage60PitchEstimate_deg               = NaN;
+            summary.stage60YawEstimate_deg                 = NaN;
+            summary.stage60RollError_deg                   = NaN;
+            summary.stage60PitchError_deg                  = NaN;
+            summary.stage60YawError_deg                    = NaN;
+            summary.stage60AttitudeErrorNorm_deg           = NaN;
+            summary.stage60IntegerFixingImplemented        = false;
+            summary.stage60LambdaImplemented               = false;
+            summary.stage60FalseFixRiskControlled          = false;
+            summary.stage60QuaternionEkfImplemented        = false;
+            summary.stage60PppGradeClaim                   = false;
+            if isfield(cfg,'scenario') && isfield(cfg.scenario,'name') && ...
+                    strcmp(cfg.scenario.name,'singleAssetCarrierAttitude')
+                try
+                    summary.stage60CarrierRowsUseLinkGeometry = true;
+                    % Populate component errors from pre-extracted euler
+                    if isfield(summary,'finalTruthEuler_deg') && ...
+                            numel(summary.finalTruthEuler_deg) == 3 && ...
+                            isfield(summary,'finalEstimateEuler_deg') && ...
+                            numel(summary.finalEstimateEuler_deg) == 3
+                        tru60 = summary.finalTruthEuler_deg(:);
+                        est60 = summary.finalEstimateEuler_deg(:);
+                        summary.stage60RollTruth_deg     = tru60(1);
+                        summary.stage60PitchTruth_deg    = tru60(2);
+                        summary.stage60YawTruth_deg      = tru60(3);
+                        summary.stage60RollEstimate_deg  = est60(1);
+                        summary.stage60PitchEstimate_deg = est60(2);
+                        summary.stage60YawEstimate_deg   = est60(3);
+                        err60 = atan2d(sind(est60 - tru60), cosd(est60 - tru60));
+                        summary.stage60RollError_deg     = err60(1);
+                        summary.stage60PitchError_deg    = err60(2);
+                        summary.stage60YawError_deg      = err60(3);
+                        summary.stage60AttitudeErrorNorm_deg = norm(err60);
+                    end
+                    % Carrier-attitude row closure spot-check
+                    sm60_ = sim.ekf.stateMap;
+                    r60_  = sim.ekf.x(sm60_.r_idx);
+                    eu60_ = sim.ekf.x(sm60_.euler_idx);
+                    chk60_ = revgnss.CarrierAttitudeRowClosure.spotCheck( ...
+                        cfg, sim.towers, sm60_, r60_, eu60_);
+                    summary.stage60CarrierAttRowsChecked   = chk60_.rowsChecked;
+                    summary.stage60CarrierAttRowsClosed    = chk60_.rowsClosed;
+                    summary.stage60CarrierAttRowsMismatch  = chk60_.rowsMismatch;
+                    summary.stage60CarrierAttMaxAbsJacDiff = chk60_.maxAbsDiff;
+                    summary.stage60CarrierAttMeanAbsJacDiff = chk60_.meanAbsDiff;
+                    summary.stage60CarrierAttMetadataConsistent = chk60_.metadataConsistent;
+                    summary.stage60CarrierAttClosureClassification = chk60_.classification;
+                    summary.stage60CarrierAttClosureAvailable = chk60_.rowsChecked > 0;
+                catch ex60_
+                    warning('ReportRunner:stage60Failed', ...
+                        'Stage 60 closure check failed: %s', ex60_.message);
                 end
             end
 

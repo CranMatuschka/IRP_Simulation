@@ -66,8 +66,8 @@ cfg.report.layout    = 'clockExact'; % 'clockExact' | 'clockStyle' | 'default'
 cfg.report.writeTex  = true;         % true  = write .tex source file beside PDF
 cfg.report.compileTex = 'require';   % 'require' | 'auto' | 'never'
 
-% --- Stage 59: scenario selector --------------------------------
-% Set scenario name to activate the multi-antenna carrier attitude scenario.
+% --- Stage 60: scenario selector --------------------------------
+% Carrier-attitude measurement model closure runs on the Stage 59 scenario.
 % ScenarioPresets.apply() is called after all toggles (see below).
 cfg.scenario.name = 'singleAssetCarrierAttitude';
 
