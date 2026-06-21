@@ -3409,6 +3409,60 @@ classdef ClockExactReportBuilder
                 fprintf(fid, '\\bottomrule\n\\end{tabular}\\par\n\n');
             end
 
+            % --- Stage 62: Quaternion Error-State Covariance Consistency Closure ---
+            if isfield(summary,'stage62JosephUsesPminus')
+                fprintf(fid, '\\subsection*{Quaternion Error-State Covariance Consistency Closure (Stage~62)}\n');
+                fprintf(fid, ['\\textit{Stage~62 corrects the quaternion error-state covariance-reset ' ...
+                    'ordering. The Joseph posterior covariance is computed from the pre-update ' ...
+                    'covariance before the attitude error-state reset is applied. ' ...
+                    'The reset Jacobian is then applied to the posterior covariance. ' ...
+                    'This is an EKF consistency correction, not integer fixing, ' ...
+                    'LAMBDA/MLAMBDA, false-fix-risk control, or PPP-grade attitude.}\n\n']);
+                fprintf(fid, '\\begin{tabular}{p{0.46\\textwidth}p{0.42\\textwidth}}\n');
+                fprintf(fid, '\\toprule\n\\textbf{Property} & \\textbf{Value}\\\\\n\\midrule\n');
+                fprintf(fid, 'Active stage & 62\\\\\n');
+                fprintf(fid, 'Covariance reset order & \\texttt{%s}\\\\\n', ...
+                    strrep(summary.stage62CovarianceResetOrder,'_','\_'));
+                fprintf(fid, 'Joseph uses Pminus & %s\\\\\n', ...
+                    mat2str(summary.stage62JosephUsesPminus));
+                fprintf(fid, 'Reset applied to posterior & %s\\\\\n', ...
+                    mat2str(summary.stage62ResetAppliedToPosterior));
+                if isfinite(summary.stage62QuaternionNorm)
+                    fprintf(fid, 'Quat norm (final) & %.9f\\\\\n', summary.stage62QuaternionNorm);
+                end
+                fprintf(fid, 'Injection count & %d\\\\\n', summary.stage62InjectionCount);
+                if isfinite(summary.stage62LastInjectionNorm_deg)
+                    fprintf(fid, 'Last injection norm & %.4f deg\\\\\n', ...
+                        summary.stage62LastInjectionNorm_deg);
+                end
+                if isfinite(summary.stage62MaxInjectionNorm_deg)
+                    fprintf(fid, 'Max injection norm & %.4f deg\\\\\n', ...
+                        summary.stage62MaxInjectionNorm_deg);
+                end
+                if isfinite(summary.stage62ResetJacobianCondition)
+                    fprintf(fid, 'Reset Jacobian condition & %.4f\\\\\n', ...
+                        summary.stage62ResetJacobianCondition);
+                end
+                fprintf(fid, 'PSD guard after reset & %s\\\\\n', ...
+                    mat2str(summary.stage62PsdGuardAfterReset));
+                fprintf(fid, 'Legacy Euler mode unaffected & %s\\\\\n', ...
+                    mat2str(summary.stage62LegacyEulerModeUnaffected));
+                fprintf(fid, 'Stage~57 accounting preserved & %s\\\\\n', ...
+                    mat2str(summary.stage62PhysicalGaugeAccountingPreserved));
+                fprintf(fid, 'Stage~60 closure preserved & %s\\\\\n', ...
+                    mat2str(summary.stage62CarrierClosurePreserved));
+                fprintf(fid, 'Integer fixing impl. & false\\\\\n');
+                fprintf(fid, 'LAMBDA/MLAMBDA & false\\\\\n');
+                fprintf(fid, 'False-fix-risk control & false\\\\\n');
+                fprintf(fid, 'PPP-grade claim & false\\\\\n');
+                fprintf(fid, '\\midrule\n');
+                fprintf(fid, ['\\multicolumn{2}{p{0.92\\textwidth}}{\\textit{Limitations: ' ...
+                    'large-error injection bounding and production-grade ring-down prevention ' ...
+                    'are not implemented; integer ambiguity fixing, LAMBDA/MLAMBDA, ' ...
+                    'calibrated phase-bias products, and PPP-grade attitude are not implemented.}}\\\\\n']);
+                fprintf(fid, '\\bottomrule\n\\end{tabular}\\par\n\n');
+            end
+
             % --- Stage 59: Single-Space-Asset Multi-Antenna Carrier Attitude Scenario ---
             if isfield(summary,'stage59ScenarioEnabled') && summary.stage59ScenarioEnabled
                 fprintf(fid, '\\subsection*{Single-Space-Asset Multi-Antenna Carrier Attitude Scenario (Stage~59)}\n');

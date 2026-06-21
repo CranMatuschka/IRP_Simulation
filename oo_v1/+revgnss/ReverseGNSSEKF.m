@@ -330,62 +330,88 @@ classdef ReverseGNSSEKF < handle
         function [K, nu, S, NIS] = update(obj, z, h, H, R)
             % update  EKF measurement update (Joseph stabilised form).
             %
+            % Stage 62: S, K, and Joseph posterior covariance are computed from
+            % the pre-update covariance Pminus.  The quaternion error-state reset
+            % Jacobian is then applied to the POSTERIOR covariance, not the prior.
+            %
             % NIS = nu' * (S \ nu)   — uses MATLAB backslash for numerical safety.
-            % Kalman gain K = (P * H') / S  (right division, equivalent to P*H'*inv(S)).
+            % Kalman gain K = (Pminus * H') / S  (right division).
 
             if isempty(z)
                 K = []; nu = []; S = []; NIS = NaN;
                 return
             end
 
+            % 1. Save pre-update covariance (Stage 62: all innovation/Joseph ops use Pminus)
+            Pminus = obj.P;
+
+            % 2. Innovation
             nu = z - h;
 
-            S = H * obj.P * H' + R;
+            % 3. Innovation covariance and Kalman gain (from Pminus)
+            S = H * Pminus * H' + R;
             S = (S + S') / 2;
 
             % Kalman gain: right-division avoids explicit matrix inverse
-            K = obj.P * H' / S;
+            K = Pminus * H' / S;
 
-            % State update
-            obj.x = obj.x + K * nu;
+            % 4. State update (local variable — assigned to obj.x after Joseph)
+            xUpdated = obj.x + K * nu;
+
+            % 5. Joseph stabilised posterior covariance (Stage 62: uses Pminus)
+            nx  = obj.nx;
+            IKH = eye(nx) - K * H;
+            Pplus = IKH * Pminus * IKH' + K * R * K';
+            Pplus = (Pplus + Pplus') / 2;
+
+            % 6. Assign updated state and posterior covariance
+            obj.x = xUpdated;
+            obj.P = Pplus;
+
+            % 7. Quaternion error-state injection + covariance reset
+            %    Stage 62: applied to posterior Pplus, NOT to prior Pminus
             if strcmp(obj.attitudeParameterization, 'quaternionErrorState')
-                % Stage 61: inject error-state into nominal quaternion, then reset
                 deltaTheta = obj.x(obj.stateMap.euler_idx);
                 [obj.nominalQuat_wxyz, injInfo] = revgnss.AttitudeErrorStateKinematics.injectRight( ...
                     obj.nominalQuat_wxyz, deltaTheta);
                 obj.x(obj.stateMap.euler_idx) = zeros(3, 1);
-                % First-order covariance reset: G ≈ I - 0.5*skew(deltaTheta)
-                d = deltaTheta(:);
+                % First-order covariance reset applied to posterior
+                d  = deltaTheta(:);
                 sk = [0,-d(3),d(2); d(3),0,-d(1); -d(2),d(1),0];
                 G  = eye(3) - 0.5 * sk;
                 ei = obj.stateMap.euler_idx;
                 obj.P(ei, :) = G * obj.P(ei, :);
                 obj.P(:, ei) = obj.P(:, ei) * G';
                 obj.P = (obj.P + obj.P') / 2;
-                % Update injection diagnostics
+                % Injection diagnostics (Stage 62: reset order, guard, Jacobian condition)
                 injNorm = injInfo.injectionNorm_rad;
                 obj.attitudeInjectionCount       = obj.attitudeInjectionCount + 1;
                 obj.maxAttitudeInjectionNorm_rad = max(obj.maxAttitudeInjectionNorm_rad, injNorm);
+                maxGuard = deg2rad(10);
+                try; maxGuard = obj.cfg.estimator.attitude.maxErrorStateInjection_rad; catch; end
+                if injNorm > maxGuard
+                    warning('ReverseGNSSEKF:update', ...
+                        'Injection norm %.2e rad (%.2f deg) exceeds guard %.2e rad.', ...
+                        injNorm, rad2deg(injNorm), maxGuard);
+                end
+                Gcond = cond(G);
                 obj.lastAttitudeErrorStateInfo = struct( ...
-                    'parameterization',    'quaternionErrorState', ...
-                    'qNorm',               injInfo.qNormPost, ...
+                    'parameterization',      'quaternionErrorState', ...
+                    'qNorm',                 injInfo.qNormPost, ...
                     'lastInjectionNorm_rad', injNorm, ...
                     'maxInjectionNorm_rad',  obj.maxAttitudeInjectionNorm_rad, ...
-                    'injectionCount',       obj.attitudeInjectionCount, ...
-                    'covarianceResetApplied', true, ...
-                    'eulerReportingOnly',    true);
+                    'injectionCount',        obj.attitudeInjectionCount, ...
+                    'covarianceResetApplied',  true, ...
+                    'covarianceResetOrder',    'posterior-after-joseph', ...
+                    'covarianceResetJacobianCondition', Gcond, ...
+                    'eulerReportingOnly',      true);
             else
+                % Legacy Euler mode: wrap Euler after state update
                 obj.x(obj.stateMap.euler_idx) = revgnss.AttitudeKinematics.wrapEuler( ...
                     obj.x(obj.stateMap.euler_idx));
             end
 
-            % Joseph stabilised covariance
-            nx  = obj.nx;
-            IKH = eye(nx) - K * H;
-            obj.P = IKH * obj.P * IKH' + K * R * K';
-            obj.P = (obj.P + obj.P') / 2;
-
-            % Numerical sanity
+            % 8. Numerical sanity / PSD guard (after attitude reset if any)
             if any(~isfinite(obj.P(:)))
                 warning('ReverseGNSSEKF:update','NaN/Inf in P after update');
             end
@@ -397,14 +423,14 @@ classdef ReverseGNSSEKF < handle
                 warning('ReverseGNSSEKF:update', ...
                     'P not PSD (minEig=%.2e); projecting to nearest SPD.', minEig);
                 obj.P = nearestSPD_(obj.P);
-                obj.P = (obj.P + obj.P') / 2;   % extra symmetrise after projection
+                obj.P = (obj.P + obj.P') / 2;
             elseif minEig < 0
                 % Tiny negative eigenvalue from floating-point: nudge diagonal
                 obj.P = (obj.P + obj.P') / 2;
                 obj.P = obj.P + eye(obj.nx) * (tol - minEig);
             end
 
-            % NIS: nu' * S^{-1} * nu  via backslash
+            % 9. NIS: nu' * S^{-1} * nu  via backslash
             NIS = nu' * (S \ nu);
         end
 

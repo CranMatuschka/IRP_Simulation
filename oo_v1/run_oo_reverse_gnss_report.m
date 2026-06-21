@@ -35,7 +35,7 @@ oo_v1_envAllToggles_ = strcmpi(getenv('OO_V1_ALL_TOGGLES'), 'true');
 if oo_v1_envValidate_; oo_v1_envAllToggles_ = true; end  % validate always uses all toggles
 oo_v1_envStage_      = str2double(getenv('OO_V1_VALIDATION_STAGE'));
 if isnan(oo_v1_envStage_); oo_v1_envStage_ = 0; end
-if oo_v1_envValidate_ && oo_v1_envStage_ == 0; oo_v1_envStage_ = 61; end
+if oo_v1_envValidate_ && oo_v1_envStage_ == 0; oo_v1_envStage_ = 62; end
 oo_v1_envCompile_    = strtrim(getenv('OO_V1_REPORT_COMPILE_TEX'));
 
 cfg = revgnss.ConfigFactory.defaultConfig();
@@ -66,12 +66,16 @@ cfg.report.layout    = 'clockExact'; % 'clockExact' | 'clockStyle' | 'default'
 cfg.report.writeTex  = true;         % true  = write .tex source file beside PDF
 cfg.report.compileTex = 'require';   % 'require' | 'auto' | 'never'
 
-% --- Stage 61: scenario selector and attitude parameterization ---
+% --- Stage 61/62: scenario selector and attitude parameterization ---
 % Quaternion nominal / error-state EKF runs on the Stage 59 scenario.
 % ScenarioPresets.apply() is called after all toggles (see below).
 cfg.scenario.name = 'singleAssetCarrierAttitude';
 % Stage 61: select quaternion error-state EKF ('eulerZYX' | 'quaternionErrorState')
 cfg.estimator.attitude.parameterization = 'quaternionErrorState';
+% Stage 62: injection size guard (warn if |delta_theta| exceeds this; not a clamp)
+cfg.estimator.attitude.maxErrorStateInjection_rad = deg2rad(10);
+% Stage 62: attitude covariance reset diagnostics
+cfg.diagnostics.attitudeCovarianceReset.enable = true;
 
 % --- Receivers / attitude ---------------------------------------
 % nReceivers == 1  ->  attitude estimation OFF, zero lever arms

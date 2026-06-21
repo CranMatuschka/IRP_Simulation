@@ -143,11 +143,15 @@ catch ex
     results(end+1) = mkr_('T6:getMeasState', false, ex.message);
 end
 
-% --- T7: Stage 61 metadata ---
+% --- T7: Stage 61 implemented (historical metadata; current stage may be >= 61) ---
 try
     rs = revgnss.ReportStatus.current();
-    stageOk = strcmp(rs.stage, '61');
-    titleOk = contains(rs.stageTitle, 'Quaternion') || contains(rs.stageTitle, 'Error-State');
+    % Stage 61 may be historical (current stage >= 61) — check implemented, not current
+    stageGeq61 = str2double(rs.stage) >= 61;
+    titleOk    = contains(rs.stageTitle, 'Quaternion') || ...
+                 contains(rs.stageTitle, 'Covariance') || ...
+                 contains(rs.stageTitle, 'Error-State') || ...
+                 contains(rs.stageTitle, 'Closure');
 
     allImp  = revgnss.StageHistory.implementedItems();
     hist61  = any(cellfun(@(s) startsWith(s,'Stage 61:'), allImp));
@@ -161,10 +165,10 @@ try
     % AttitudeErrorStateKinematics must be in +revgnss package
     aeskClass = exist('revgnss.AttitudeErrorStateKinematics','class') == 8;
 
-    ok = stageOk && titleOk && hist61 && gateTitleOk && aeskClass;
+    ok = stageGeq61 && titleOk && hist61 && gateTitleOk && aeskClass;
     results(end+1) = mkr_('T7:metadata', ok, ...
-        sprintf('stage=%s titleOk=%s hist61=%s gateOk=%s class=%s', ...
-        rs.stage, mat2str(titleOk), mat2str(hist61), ...
+        sprintf('stage=%s (>=61)=%s hist61=%s gateOk=%s class=%s', ...
+        rs.stage, mat2str(stageGeq61), mat2str(hist61), ...
         mat2str(gateTitleOk), mat2str(aeskClass)));
 catch ex
     results(end+1) = mkr_('T7:metadata', false, ex.message);

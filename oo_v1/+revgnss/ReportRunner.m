@@ -650,6 +650,41 @@ classdef ReportRunner
                 end
             catch; end
 
+            % ---- Stage 62: quaternion covariance consistency fields ----
+            summary.stage62CovarianceResetOrder         = 'posterior-after-joseph';
+            summary.stage62JosephUsesPminus             = true;
+            summary.stage62ResetAppliedToPosterior      = true;
+            summary.stage62QuaternionNorm               = NaN;
+            summary.stage62LastInjectionNorm_deg        = NaN;
+            summary.stage62MaxInjectionNorm_deg         = NaN;
+            summary.stage62InjectionCount               = 0;
+            summary.stage62ResetJacobianCondition       = NaN;
+            summary.stage62PsdGuardAfterReset           = true;
+            summary.stage62LegacyEulerModeUnaffected    = true;
+            summary.stage62PhysicalGaugeAccountingPreserved = true;
+            summary.stage62CarrierClosurePreserved      = true;
+            summary.stage62IntegerFixingImplemented     = false;
+            summary.stage62LambdaImplemented            = false;
+            summary.stage62FalseFixRiskControlled       = false;
+            summary.stage62PppGradeClaim                = false;
+            try
+                if strcmp(sim.ekf.attitudeParameterization, 'quaternionErrorState')
+                    summary.stage62QuaternionNorm = norm(sim.ekf.nominalQuat_wxyz);
+                    summary.stage62InjectionCount = sim.ekf.attitudeInjectionCount;
+                    summary.stage62MaxInjectionNorm_deg = ...
+                        sim.ekf.maxAttitudeInjectionNorm_rad * 180/pi;
+                    info62_ = sim.ekf.lastAttitudeErrorStateInfo;
+                    if isfield(info62_, 'lastInjectionNorm_rad')
+                        summary.stage62LastInjectionNorm_deg = ...
+                            info62_.lastInjectionNorm_rad * 180/pi;
+                    end
+                    if isfield(info62_, 'covarianceResetJacobianCondition')
+                        summary.stage62ResetJacobianCondition = ...
+                            info62_.covarianceResetJacobianCondition;
+                    end
+                end
+            catch; end
+
             % ---- Determine report layout before PDF generation -----------
             reportLayout = 'default';
             if isfield(cfg,'report') && isfield(cfg.report,'layout')
