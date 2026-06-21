@@ -35,7 +35,7 @@ oo_v1_envAllToggles_ = strcmpi(getenv('OO_V1_ALL_TOGGLES'), 'true');
 if oo_v1_envValidate_; oo_v1_envAllToggles_ = true; end  % validate always uses all toggles
 oo_v1_envStage_      = str2double(getenv('OO_V1_VALIDATION_STAGE'));
 if isnan(oo_v1_envStage_); oo_v1_envStage_ = 0; end
-if oo_v1_envValidate_ && oo_v1_envStage_ == 0; oo_v1_envStage_ = 64; end
+if oo_v1_envValidate_ && oo_v1_envStage_ == 0; oo_v1_envStage_ = 65; end
 oo_v1_envCompile_    = strtrim(getenv('OO_V1_REPORT_COMPILE_TEX'));
 
 cfg = revgnss.ConfigFactory.defaultConfig();
@@ -65,6 +65,11 @@ cfg.report.style     = 'latex';      % 'latex' | '' (simple)
 cfg.report.layout    = 'clockExact'; % 'clockExact' | 'clockStyle' | 'default'
 cfg.report.writeTex  = true;         % true  = write .tex source file beside PDF
 cfg.report.compileTex = 'require';   % 'require' | 'auto' | 'never'
+% Stage 65: compact final report flags
+cfg.report.zoomLastFraction      = 0.10;  % zoom plots show last 10% of simulation time
+cfg.report.compactFinalReport    = true;  % suppress stage-history chapters
+cfg.report.suppressStageSections = true;  % no architecture-diary sections in PDF
+cfg.report.deduplicateFigures    = true;  % no repeated figure paths in TEX
 
 % --- Stage 61/62: scenario selector and attitude parameterization ---
 % Quaternion nominal / error-state EKF runs on the Stage 59 scenario.
