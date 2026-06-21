@@ -418,6 +418,40 @@ classdef ReportRunner
                 end
             end
 
+            % ---- Stage 57: EKF innovation accounting and gauge/NIS cleanup ----
+            summary.stage57EkfAccountingEnabled   = false;
+            summary.stage57MeasPhysicsChanged     = false;
+            summary.stage57EkfMathChanged         = false;
+            summary.stage57IntegerFixing          = false;
+            summary.stage57Lambda                 = false;
+            summary.legacyMeanNisIncludesGauge    = true;  % meanNIS = augmented NIS
+            summary.physicalConsistencyUsesGaugeRows = false;
+            summary.physicalNIS      = NaN;
+            summary.gaugeNIS         = NaN;
+            summary.physicalDof      = NaN;
+            summary.gaugeRowsPresent = false;
+            summary.physicalResidualRms_m   = NaN;
+            summary.gaugeResidualRms_m      = NaN;
+            summary.codeResidualRms57_m     = NaN;
+            summary.carrierResidualRms57_m  = NaN;
+            summary.dopplerResidualRms57_m  = NaN;
+            try
+                acc57_ = diag.getInnovationAccountingSummary57();
+                if acc57_.available
+                    summary.stage57EkfAccountingEnabled  = true;
+                    summary.physicalNIS                  = acc57_.meanPhysicalNIS;
+                    summary.gaugeNIS                     = acc57_.meanGaugeNIS;
+                    summary.physicalDof                  = acc57_.meanPhysicalDof;
+                    summary.gaugeRowsPresent             = isfinite(acc57_.meanGaugeDof) && acc57_.meanGaugeDof > 0;
+                    summary.physicalResidualRms_m        = acc57_.meanPhysicalRms;
+                    summary.gaugeResidualRms_m           = acc57_.meanGaugeRms;
+                    summary.codeResidualRms57_m          = acc57_.meanCodeRms;
+                    summary.carrierResidualRms57_m       = acc57_.meanCarrierRms;
+                    summary.dopplerResidualRms57_m       = acc57_.meanDopplerRms;
+                    summary.physicalConsistencyUsesGaugeRows = acc57_.physicalConsistencyUsesGaugeRows;
+                end
+            catch; end
+
             % ---- Determine report layout before PDF generation -----------
             reportLayout = 'default';
             if isfield(cfg,'report') && isfield(cfg.report,'layout')

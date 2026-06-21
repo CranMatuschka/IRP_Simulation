@@ -266,7 +266,19 @@ classdef ReverseGNSSSimulation < handle
             postfitResidual = [];
 
             if ~isempty(z) && numel(z) >= minMeas
-                [~, ~, ~, NIS] = obj.ekf.update(z_ekf, h_ekf, H_ekf, R_ekf);
+                [~, nu57_, S57_, NIS] = obj.ekf.update(z_ekf, h_ekf, H_ekf, R_ekf);
+
+                % Stage 57: separated EKF innovation accounting (physical / gauge / augmented).
+                nPhys57_  = numel(z);
+                nGauge57_ = errStruct.gaugeInfo.rowsAdded + errStruct.txGaugeInfo.rowsAdded;
+                mType57_  = {};
+                if isfield(errStruct,'measType_perRow') && iscell(errStruct.measType_perRow) && ...
+                        numel(errStruct.measType_perRow) == nPhys57_
+                    mType57_ = errStruct.measType_perRow;
+                end
+                rowClass57_ = revgnss.EkfInnovationAccounting.classifyRows(mType57_, nPhys57_, nGauge57_);
+                errStruct.ekfAccounting57    = revgnss.EkfInnovationAccounting.compute(nu57_, S57_, rowClass57_);
+                errStruct.ekfAccountingRms57 = revgnss.EkfInnovationAccounting.residualRms(nu57_, rowClass57_);
 
                 % Postfit residuals: recompute h with updated EKF state.
                 % Use physical z/errStruct (not augmented) so gauge rows

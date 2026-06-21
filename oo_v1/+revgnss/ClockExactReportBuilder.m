@@ -3309,6 +3309,43 @@ classdef ClockExactReportBuilder
                 fprintf(fid, 'False-fix-risk control & false\\\\\n');
                 fprintf(fid, '\\bottomrule\n\\end{tabular}\\par\n\n');
             end
+
+            % --- Stage 57: EKF Innovation Accounting and Gauge/NIS Cleanup ---
+            if isfield(summary,'stage57EkfAccountingEnabled') && summary.stage57EkfAccountingEnabled
+                fprintf(fid, '\\subsection*{EKF Innovation Accounting and Gauge/NIS Cleanup (Stage~57)}\n');
+                fprintf(fid, ['\\textit{Stage~57 separates the EKF innovation NIS into physical ' ...
+                    '(real measurement rows) and gauge (datum/clock constraint rows appended before ' ...
+                    'update) contributions. ' ...
+                    'The existing summary.meanNIS is the augmented (physical~+~gauge) NIS and is ' ...
+                    'retained as a legacy alias (legacyMeanNisIncludesGauge~=~true). ' ...
+                    'physicalNIS is the correct chi-squared diagnostic. ' ...
+                    'No measurement physics, EKF update math, carrier arc consistency, ' ...
+                    'or ambiguity handling is changed. No integer fixing, no LAMBDA/MLAMBDA.}\n\n']);
+                fprintf(fid, '\\begin{tabular}{p{0.46\\textwidth}p{0.42\\textwidth}}\n');
+                fprintf(fid, '\\toprule\n\\textbf{Property} & \\textbf{Value}\\\\\n\\midrule\n');
+                fprintf(fid, 'Active stage & 57\\\\\n');
+                fprintf(fid, 'EKF accounting enabled & true\\\\\n');
+                if isfield(summary,'physicalNIS') && isfinite(summary.physicalNIS)
+                    fprintf(fid, 'Mean physical NIS & %.3f\\\\\n', summary.physicalNIS);
+                end
+                if isfield(summary,'gaugeNIS') && isfinite(summary.gaugeNIS)
+                    fprintf(fid, 'Mean gauge NIS & %.3f\\\\\n', summary.gaugeNIS);
+                end
+                if isfield(summary,'meanNIS') && isfinite(summary.meanNIS)
+                    fprintf(fid, 'Mean augmented NIS (legacy) & %.3f\\\\\n', summary.meanNIS);
+                end
+                fprintf(fid, 'Legacy NIS includes gauge rows & %s\\\\\n', ...
+                    mat2str(isfield(summary,'legacyMeanNisIncludesGauge') && summary.legacyMeanNisIncludesGauge));
+                fprintf(fid, 'Physical consistency uses gauge rows & %s\\\\\n', ...
+                    mat2str(isfield(summary,'physicalConsistencyUsesGaugeRows') && summary.physicalConsistencyUsesGaugeRows));
+                fprintf(fid, 'Gauge rows present & %s\\\\\n', ...
+                    mat2str(isfield(summary,'gaugeRowsPresent') && summary.gaugeRowsPresent));
+                fprintf(fid, 'Measurement physics changed & false\\\\\n');
+                fprintf(fid, 'EKF update math changed & false\\\\\n');
+                fprintf(fid, 'Integer fixing impl.\\ & false\\\\\n');
+                fprintf(fid, 'LAMBDA/MLAMBDA & false\\\\\n');
+                fprintf(fid, '\\bottomrule\n\\end{tabular}\\par\n\n');
+            end
         end
 
         % ================================================================

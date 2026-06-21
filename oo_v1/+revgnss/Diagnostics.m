@@ -425,6 +425,35 @@ classdef Diagnostics < handle
                 entry.nTxCodeBiasStates       = ekf.nTxCodeBiasStates;
             end
 
+            % --- Stage 57: separated EKF innovation accounting -------------
+            entry.physicalNIS57   = NaN;
+            entry.gaugeNIS57      = NaN;
+            entry.augmentedNIS57  = NaN;
+            entry.physicalDof57   = 0;
+            entry.gaugeDof57      = 0;
+            entry.physicalRms57   = NaN;
+            entry.gaugeRms57      = NaN;
+            entry.augRms57        = NaN;
+            entry.codeRms57       = NaN;
+            entry.carrierRms57    = NaN;
+            entry.dopplerRms57    = NaN;
+            if ~isempty(errStruct) && isfield(errStruct,'ekfAccounting57') && ...
+                    isfield(errStruct.ekfAccounting57,'physicalNIS')
+                a57 = errStruct.ekfAccounting57;
+                r57 = errStruct.ekfAccountingRms57;
+                entry.physicalNIS57  = a57.physicalNIS;
+                entry.gaugeNIS57     = a57.gaugeNIS;
+                entry.augmentedNIS57 = a57.augmentedNIS;
+                entry.physicalDof57  = a57.physicalDof;
+                entry.gaugeDof57     = a57.gaugeDof;
+                entry.physicalRms57  = r57.physicalRms;
+                entry.gaugeRms57     = r57.gaugeRms;
+                entry.augRms57       = r57.augmentedRms;
+                entry.codeRms57      = r57.codeRms;
+                entry.carrierRms57   = r57.carrierRms;
+                entry.dopplerRms57   = r57.dopplerRms;
+            end
+
             % --- Carrier slip diagnostics (Stage 14) -----------------------
             entry.carrierSlipNSlips       = 0;
             entry.carrierSlipTotalJump_m  = 0;
@@ -1019,6 +1048,43 @@ classdef Diagnostics < handle
 
         function n = getNIS(obj)
             n = [obj.log.NIS]';
+        end
+
+        function s = getInnovationAccountingSummary57(obj)
+            % getInnovationAccountingSummary57  Mean Stage 57 innovation accounting over all epochs.
+            s = struct('available', false, ...
+                'meanPhysicalNIS', NaN, 'meanGaugeNIS', NaN, 'meanAugmentedNIS', NaN, ...
+                'meanPhysicalDof', NaN, 'meanGaugeDof', NaN, ...
+                'meanPhysicalRms', NaN, 'meanGaugeRms', NaN, 'meanAugRms', NaN, ...
+                'meanCodeRms', NaN, 'meanCarrierRms', NaN, 'meanDopplerRms', NaN, ...
+                'physicalConsistencyUsesGaugeRows', false);
+            if obj.nEpochs < 1 || ~isfield(obj.log(1),'physicalNIS57'); return; end
+            try
+                physNIS = [obj.log.physicalNIS57]';
+                gaugNIS = [obj.log.gaugeNIS57]';
+                augNIS  = [obj.log.augmentedNIS57]';
+                physDof = [obj.log.physicalDof57]';
+                gauDof  = [obj.log.gaugeDof57]';
+                pRms    = [obj.log.physicalRms57]';
+                gRms    = [obj.log.gaugeRms57]';
+                aRms    = [obj.log.augRms57]';
+                cRms    = [obj.log.codeRms57]';
+                carRms  = [obj.log.carrierRms57]';
+                dopRms  = [obj.log.dopplerRms57]';
+                s.available          = any(isfinite(physNIS));
+                s.meanPhysicalNIS    = mean(physNIS, 'omitnan');
+                s.meanGaugeNIS       = mean(gaugNIS, 'omitnan');
+                s.meanAugmentedNIS   = mean(augNIS,  'omitnan');
+                s.meanPhysicalDof    = mean(physDof, 'omitnan');
+                s.meanGaugeDof       = mean(gauDof,  'omitnan');
+                s.meanPhysicalRms    = mean(pRms,    'omitnan');
+                s.meanGaugeRms       = mean(gRms,    'omitnan');
+                s.meanAugRms         = mean(aRms,    'omitnan');
+                s.meanCodeRms        = mean(cRms,    'omitnan');
+                s.meanCarrierRms     = mean(carRms,  'omitnan');
+                s.meanDopplerRms     = mean(dopRms,  'omitnan');
+                s.physicalConsistencyUsesGaugeRows = false;
+            catch; end
         end
 
         function nu = getPrefitInnovationRMS(obj)

@@ -35,7 +35,7 @@ oo_v1_envAllToggles_ = strcmpi(getenv('OO_V1_ALL_TOGGLES'), 'true');
 if oo_v1_envValidate_; oo_v1_envAllToggles_ = true; end  % validate always uses all toggles
 oo_v1_envStage_      = str2double(getenv('OO_V1_VALIDATION_STAGE'));
 if isnan(oo_v1_envStage_); oo_v1_envStage_ = 0; end
-if oo_v1_envValidate_ && oo_v1_envStage_ == 0; oo_v1_envStage_ = 56; end
+if oo_v1_envValidate_ && oo_v1_envStage_ == 0; oo_v1_envStage_ = 57; end
 oo_v1_envCompile_    = strtrim(getenv('OO_V1_REPORT_COMPILE_TEX'));
 
 cfg = revgnss.ConfigFactory.defaultConfig();
@@ -226,6 +226,10 @@ cfg.diagnostics.pluginRegistry.enable = true;
 %   cfg.estimator.attitude.useCodePartials    = true;
 %   cfg.estimator.attitude.useCarrierPartials = true;
 %   cfg.estimator.attitude.useDopplerPartials = false;
+
+% --- Stage 57: EKF innovation accounting and gauge/NIS cleanup --
+% Separate physical/gauge/augmented NIS in summary. Default enabled.
+cfg.diagnostics.ekfInnovationAccounting.enable = true;
 
 % --- Inter-frequency bias budget (Stage 44) --------------------
 % Diagnostic only. Default all to 0 (no calibrated products in v1).
