@@ -16,24 +16,22 @@
 > validation run and must not be treated as source truth.
 > Do not hard-code a commit SHA in this README — it becomes stale on the next commit.
 
-### Stage 60 validation procedure
+### Stage 61 validation procedure
 
-Stage 60 closes the carrier-attitude measurement model by verifying that `h` and `H` use the
-same receiver-antenna geometry via the shared `LinkGeometry` path, checking attitude Jacobian
-columns against spot finite differences, and exposing component-level roll/pitch/yaw
-truth/estimate/error at the final epoch. Runs on the Stage 59 `singleAssetCarrierAttitude`
-scenario (4-receiver cross-pattern, carrier partials, arc-consistent float ambiguities).
-No integer fixing, LAMBDA/MLAMBDA, quaternion/error-state EKF, PPP-grade claims.
+Stage 61 adds a selectable quaternion nominal / small-angle error-state attitude EKF path.
+The nominal attitude is stored as a scalar-first Hamilton unit quaternion `[qw;qx;qy;qz]`.
+After each EKF update, the small-angle error state is injected into the nominal quaternion via
+right-multiplication and reset to zero (body-frame injection). The FD attitude Jacobian
+in `LinkGeometry` perturbs the nominal DCM body-frame (not Euler angles) so that
+`H(theta)` columns represent `d(range)/d(delta_theta)`. Runs on the Stage 59
+`singleAssetCarrierAttitude` scenario. No integer fixing, LAMBDA/MLAMBDA, PPP-grade claims.
 
-Stage 60 is:
-- float carrier attitude only
-- carrier-attitude model closure verified (FD spot-check)
-- component roll/pitch/yaw errors reported
-- no integer fixing
-- no LAMBDA/MLAMBDA
-- no false-fix-risk control
-- no quaternion/error-state EKF
-- no PPP-grade claim
+Stage 61 is:
+- quaternion nominal / error-state EKF active via `cfg.estimator.attitude.parameterization`
+- float carrier attitude with error-state injection and covariance reset at each update
+- FD attitude Jacobian uses body-frame DCM perturbation in quaternionErrorState mode
+- Stage 59/60 scenario and carrier-attitude closure checks preserved
+- no integer fixing, no LAMBDA/MLAMBDA, no false-fix-risk control, no PPP-grade claim
 
 `run_oo_reverse_gnss_report.m` is the **single active validation entry point**.
 The validation gate is implemented in `+revgnss/MainScriptValidationGate.m`.
@@ -42,18 +40,18 @@ The validation gate is implemented in `+revgnss/MainScriptValidationGate.m`.
 cd oo_v1
 setenv('OO_V1_VALIDATE_REPORT', 'true')
 setenv('OO_V1_ALL_TOGGLES',     'true')
-setenv('OO_V1_VALIDATION_STAGE','60')
+setenv('OO_V1_VALIDATION_STAGE','61')
 run_oo_reverse_gnss_report
 ```
 
 This will:
-1. Select 4 random tests (seed 60), force `test_stage60*` if present
+1. Select 4 random tests (seed 61), force `test_stage61*` if present
 2. Stop before report generation if any selected test fails
-3. Run the main 3600 s report with all-toggles enabled and the `singleAssetCarrierAttitude` scenario active (ISL disabled, CV dynamics, 4-receiver cross-pattern, carrier attitude partials, arc consistency enforcement, Stage 57 physical/gauge NIS, Stage 60 closure spot-check)
-4. Verify the PDF: scientific sections present, no "Stage 60 Validation Status" heading
+3. Run the main 3600 s report with all-toggles enabled and the `singleAssetCarrierAttitude` scenario active (ISL disabled, CV dynamics, 4-receiver cross-pattern, carrier attitude partials, arc consistency enforcement, Stage 57 physical/gauge NIS, Stage 60 closure spot-check, Stage 61 quaternion error-state)
+4. Verify the PDF: scientific sections present, no "Stage 61 Validation Status" heading
 5. Write `output/latest_validation_summary.json` and `.txt`
 
-Full suite is **NOT RUN**. Validation selects 2–5 tests only (default seed 60, default count 4).
+Full suite is **NOT RUN**. Validation selects 2–5 tests only (default seed 61, default count 4).
 Runtime summaries are local evidence only — never committed.
 
 > **Historical scripts:** `run_stage27_validation.m` and `run_stage28_validation.m` remain in
@@ -71,23 +69,27 @@ setenv('OO_V1_ALL_TOGGLES', '');
 
 ## Validation status and missing stages
 
-**Current stage:** Stage 60 — Carrier-Attitude Measurement Model Closure v1
+**Current stage:** Stage 61 — Quaternion Nominal / Error-State Attitude EKF v1
 
-Stage 60 closes the carrier-attitude measurement model and adds component-level roll/pitch/yaw
-reporting. Runs on the Stage 59 `singleAssetCarrierAttitude` scenario. Float carrier attitude
-only. No integer fixing, LAMBDA/MLAMBDA, quaternion/error-state EKF, false-fix-risk control,
-PPP-grade claim. Full suite is **NOT RUN**.
+Stage 61 adds a selectable quaternion nominal / small-angle error-state attitude EKF path.
+The nominal attitude is stored as a scalar-first Hamilton unit quaternion. After each EKF update,
+the small-angle error state is injected into the nominal quaternion via right-multiplication and
+reset to zero (body-frame injection). The singularity at pitch ±90° is resolved. Measurement
+evaluation and FD Jacobians use the nominal Euler (from `quatToEulerZYX`) so that all Stage 59/60
+carrier-attitude model paths are preserved. Runs on the Stage 59 `singleAssetCarrierAttitude`
+scenario. No integer fixing, LAMBDA/MLAMBDA, false-fix-risk control, PPP-grade claim. Full suite
+is **NOT RUN**.
 
 **Active validation command:**
 ```matlab
 cd oo_v1
 setenv('OO_V1_VALIDATE_REPORT','true')
 setenv('OO_V1_ALL_TOGGLES','true')
-setenv('OO_V1_VALIDATION_STAGE','60')
+setenv('OO_V1_VALIDATION_STAGE','61')
 run_oo_reverse_gnss_report
 ```
 
-**Validation mode:** Targeted random smoke — 2–5 selected tests only (default seed 60, default count 4). Full suite is **NOT RUN**.
+**Validation mode:** Targeted random smoke — 2–5 selected tests only (default seed 61, default count 4). Full suite is **NOT RUN**.
 
 **Runtime metadata** (runtime artifacts, never committed):
 - `output/latest_validation_summary.json` — machine-readable (SHA, test results, PDF status)

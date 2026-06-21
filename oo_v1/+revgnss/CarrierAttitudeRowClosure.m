@@ -154,7 +154,8 @@ classdef CarrierAttitudeRowClosure
 
         function s = spotCheck(cfg, towers, stateMap, r_final, euler_final)
             % spotCheck  Run compareRow on tower 1 / antenna 1 using supplied state.
-            %   Returns compact summary for Stage 60 report fields.
+            %   Returns compact summary for Stage 60/61 report fields.
+            %   Stage 61: adds stage61CarrierClosureUsesErrorStateJacobian field.
             s.rowsChecked = 0;
             s.rowsClosed  = 0;
             s.rowsMismatch = 0;
@@ -162,6 +163,10 @@ classdef CarrierAttitudeRowClosure
             s.meanAbsDiff = NaN;
             s.metadataConsistent = false;
             s.classification = 'unavailable';
+            % Stage 61: detect parameterization mode for classification suffix
+            useQES = false;
+            try; useQES = strcmp(cfg.estimator.attitude.parameterization,'quaternionErrorState'); catch; end
+            s.stage61CarrierClosureUsesErrorStateJacobian = useQES;
             try
                 nRx = 1;
                 try; nRx = size(cfg.asset.receiverLeverArms_body_m, 2); catch; end
@@ -194,7 +199,12 @@ classdef CarrierAttitudeRowClosure
                 end
                 if s.rowsChecked > 0 && s.rowsMismatch == 0
                     s.metadataConsistent = true;
-                    s.classification     = 'closed';
+                    % Stage 61: suffix classification when using error-state Jacobian
+                    if useQES
+                        s.classification = 'closed-quaternion-error-state';
+                    else
+                        s.classification = 'closed';
+                    end
                 elseif s.rowsMismatch > 0
                     s.classification = 'mismatch';
                 end

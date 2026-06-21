@@ -3365,7 +3365,46 @@ classdef ClockExactReportBuilder
                 fprintf(fid, 'Integer fixing impl. & false\\\\\n');
                 fprintf(fid, 'LAMBDA/MLAMBDA & false\\\\\n');
                 fprintf(fid, 'False-fix-risk control & false\\\\\n');
-                fprintf(fid, 'Quaternion/error-state EKF & false\\\\\n');
+                qes60_ = isfield(summary,'stage61QuatEkfActive') && summary.stage61QuatEkfActive;
+                fprintf(fid, 'Quaternion/error-state EKF & %s\\\\\n', mat2str(qes60_));
+                fprintf(fid, 'PPP-grade claim & false\\\\\n');
+                fprintf(fid, '\\bottomrule\n\\end{tabular}\\par\n\n');
+            end
+
+            % --- Stage 61: Quaternion Nominal / Error-State Attitude EKF ---
+            if isfield(summary,'stage61QuatEkfActive')
+                fprintf(fid, '\\subsection*{Quaternion Nominal / Error-State Attitude EKF (Stage~61)}\n');
+                fprintf(fid, ['\\textit{Stage~61 adds a selectable quaternion nominal / small-angle ' ...
+                    'error-state attitude EKF path. ' ...
+                    'The nominal attitude is stored as a scalar-first Hamilton unit quaternion. ' ...
+                    'After each EKF update, the small-angle error state is injected into the ' ...
+                    'nominal quaternion via right-multiplication and reset to zero. ' ...
+                    'No integer fixing, no LAMBDA/MLAMBDA, no PPP-grade claim.}\n\n']);
+                fprintf(fid, '\\begin{tabular}{p{0.46\\textwidth}p{0.42\\textwidth}}\n');
+                fprintf(fid, '\\toprule\n\\textbf{Property} & \\textbf{Value}\\\\\n\\midrule\n');
+                fprintf(fid, 'Active stage & 61\\\\\n');
+                if isfield(summary,'stage61Parameterization')
+                    fprintf(fid, 'Parameterization & \\texttt{%s}\\\\\n', ...
+                        summary.stage61Parameterization);
+                end
+                qes61_ = isfield(summary,'stage61QuatEkfActive') && summary.stage61QuatEkfActive;
+                fprintf(fid, 'Error-state EKF active & %s\\\\\n', mat2str(qes61_));
+                if isfield(summary,'stage61InjectionCount')
+                    fprintf(fid, 'Injection count & %d\\\\\n', summary.stage61InjectionCount);
+                end
+                if isfield(summary,'stage61MaxInjectionNorm_deg') && ...
+                        isfinite(summary.stage61MaxInjectionNorm_deg)
+                    fprintf(fid, 'Max injection norm & %.4f deg (%.4e rad)\\\\\n', ...
+                        summary.stage61MaxInjectionNorm_deg, summary.stage61MaxInjectionNorm_rad);
+                end
+                if isfield(summary,'stage61QuatNormFinal') && isfinite(summary.stage61QuatNormFinal)
+                    fprintf(fid, 'Quat norm (final) & %.9f\\\\\n', summary.stage61QuatNormFinal);
+                end
+                errState61_ = isfield(summary,'stage61CarrierClosureUsesErrorStateJacobian') && ...
+                    summary.stage61CarrierClosureUsesErrorStateJacobian;
+                fprintf(fid, 'Carrier FD uses error-state Jac. & %s\\\\\n', mat2str(errState61_));
+                fprintf(fid, 'Integer fixing impl. & false\\\\\n');
+                fprintf(fid, 'LAMBDA/MLAMBDA & false\\\\\n');
                 fprintf(fid, 'PPP-grade claim & false\\\\\n');
                 fprintf(fid, '\\bottomrule\n\\end{tabular}\\par\n\n');
             end

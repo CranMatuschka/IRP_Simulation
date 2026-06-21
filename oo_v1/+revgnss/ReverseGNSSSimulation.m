@@ -144,9 +144,10 @@ classdef ReverseGNSSSimulation < handle
                 obj.ekf.predict(dt, towerClockModels, t_s - dt);
             end
 
-            % Compute measurements (also generates and stores tower clock corrections)
+            % Compute measurements — use getMeasurementState() so quaternionErrorState
+            % mode evaluates h/H at the nominal attitude rather than the error state.
             [z, h, H, R, errStruct] = obj.measModel.computeMeasurements( ...
-                obj.asset, obj.towers, obj.ekf.x, t_s, obj.ekf.stateMap);
+                obj.asset, obj.towers, obj.ekf.getMeasurementState(), t_s, obj.ekf.stateMap);
 
             % Cycle-slip detection and ambiguity reset (carrier ekfFloat only).
             % Runs after computeMeasurements but before gauge rows are appended so
@@ -306,19 +307,22 @@ classdef ReverseGNSSSimulation < handle
                 lArms15 = obj.cfg.asset.receiverLeverArms_body_m;
                 obj.diffAttStore = revgnss.DiffAttitudeBuilder.handleSlips( ...
                     obj.diffAttStore, slipInfo);
+                % Stage 61: use getMeasurementState() so DiffAttitudeBuilder receives
+                % nominal euler (not near-zero error state) in quaternionErrorState mode.
+                xDA_ = obj.ekf.getMeasurementState();
                 if ~obj.diffAttStore.calibrated && t_s < obj.diffAttStore.calibWin_s
                     obj.diffAttStore = revgnss.DiffAttitudeBuilder.accumulate( ...
-                        obj.diffAttStore, cpDA, obj.ekf.x, obj.ekf.stateMap, ...
+                        obj.diffAttStore, cpDA, xDA_, obj.ekf.stateMap, ...
                         obj.towers, lArms15, obj.cfg);
                 elseif ~obj.diffAttStore.calibrated
                     obj.diffAttStore = revgnss.DiffAttitudeBuilder.finalize(obj.diffAttStore);
                 end
                 if obj.diffAttStore.calibrated
                     obj.diffAttStore = revgnss.DiffAttitudeBuilder.accumulate( ...
-                        obj.diffAttStore, cpDA, obj.ekf.x, obj.ekf.stateMap, ...
+                        obj.diffAttStore, cpDA, xDA_, obj.ekf.stateMap, ...
                         obj.towers, lArms15, obj.cfg);
                     [z_da, h_da, H_da, R_da, daInfo] = revgnss.DiffAttitudeBuilder.buildRows( ...
-                        obj.diffAttStore, cpDA, obj.ekf.x, obj.ekf.stateMap, ...
+                        obj.diffAttStore, cpDA, xDA_, obj.ekf.stateMap, ...
                         obj.towers, lArms15, obj.cfg, obj.ekf.nx);
                     if ~isempty(z_da)
                         obj.ekf.update(z_da, h_da, H_da, R_da);
@@ -446,8 +450,9 @@ classdef ReverseGNSSSimulation < handle
             M_pr = errStruct.nPseudorange;
 
             % Pseudorange postfit via exact model path
+            % Stage 61: use getMeasurementState() so postfit uses nominal euler
             h_post_pr = obj.measModel.computePseudorangeModelOnly( ...
-                obj.asset, obj.towers, obj.ekf.x, errStruct, sm, t_s);
+                obj.asset, obj.towers, obj.ekf.getMeasurementState(), errStruct, sm, t_s);
 
             % Doppler postfit (if useInEKF=true rows are stacked after pseudorange)
             doDoppler = isfield(obj.cfg,'measurements') && ...
@@ -466,7 +471,7 @@ classdef ReverseGNSSSimulation < handle
             hd_post = zeros(M_dop, 1);
             if M_dop > 0
                 r_post    = obj.ekf.x(sm.r_idx);
-                eul_post  = obj.ekf.x(sm.euler_idx);
+                eul_post  = obj.ekf.getReportEulerRad();
                 v_post    = obj.ekf.x(sm.v_idx);
                 bdot_post = obj.ekf.x(sm.bdot_rx_idx);
                 leverArms = obj.asset.receiverLeverArms_body_m;
@@ -513,7 +518,7 @@ classdef ReverseGNSSSimulation < handle
                         ~isempty(errStruct.carrierPhase.phi_m);
             if doCarrier
                 hc_post = obj.measModel.computeCarrierModelOnly( ...
-                    obj.asset, obj.towers, obj.ekf.x, errStruct, sm, t_s);
+                    obj.asset, obj.towers, obj.ekf.getMeasurementState(), errStruct, sm, t_s);
                 if isempty(hc_post)
                     % Fallback: no carrier state map — use prefit h approximation
                     hc_post = errStruct.carrierPhase.phi_m - errStruct.carrierPhase.prefit_m;

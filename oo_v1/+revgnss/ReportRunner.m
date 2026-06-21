@@ -606,7 +606,7 @@ classdef ReportRunner
                     % Carrier-attitude row closure spot-check
                     sm60_ = sim.ekf.stateMap;
                     r60_  = sim.ekf.x(sm60_.r_idx);
-                    eu60_ = sim.ekf.x(sm60_.euler_idx);
+                    eu60_ = sim.ekf.getReportEulerRad();  % Stage 61: use nominal euler
                     chk60_ = revgnss.CarrierAttitudeRowClosure.spotCheck( ...
                         cfg, sim.towers, sm60_, r60_, eu60_);
                     summary.stage60CarrierAttRowsChecked   = chk60_.rowsChecked;
@@ -622,6 +622,33 @@ classdef ReportRunner
                         'Stage 60 closure check failed: %s', ex60_.message);
                 end
             end
+
+            % ---- Stage 61: quaternion error-state EKF summary fields ----
+            summary.stage61Parameterization           = 'eulerZYX';
+            summary.stage61QuatEkfActive              = false;
+            summary.stage61InjectionCount             = 0;
+            summary.stage61MaxInjectionNorm_rad        = NaN;
+            summary.stage61MaxInjectionNorm_deg        = NaN;
+            summary.stage61QuatNormFinal               = NaN;
+            summary.stage61CarrierClosureUsesErrorStateJacobian = false;
+            summary.stage61IntegerFixingImplemented    = false;
+            summary.stage61LambdaImplemented           = false;
+            summary.stage61PppGradeClaim               = false;
+            try
+                summary.stage61Parameterization = sim.ekf.attitudeParameterization;
+                summary.stage61QuatEkfActive    = strcmp(sim.ekf.attitudeParameterization, ...
+                    'quaternionErrorState');
+                if summary.stage61QuatEkfActive
+                    summary.stage61InjectionCount        = sim.ekf.attitudeInjectionCount;
+                    summary.stage61MaxInjectionNorm_rad  = sim.ekf.maxAttitudeInjectionNorm_rad;
+                    summary.stage61MaxInjectionNorm_deg  = sim.ekf.maxAttitudeInjectionNorm_rad * 180/pi;
+                    summary.stage61QuatNormFinal         = norm(sim.ekf.nominalQuat_wxyz);
+                    if isfield(chk60_,'stage61CarrierClosureUsesErrorStateJacobian')
+                        summary.stage61CarrierClosureUsesErrorStateJacobian = ...
+                            chk60_.stage61CarrierClosureUsesErrorStateJacobian;
+                    end
+                end
+            catch; end
 
             % ---- Determine report layout before PDF generation -----------
             reportLayout = 'default';

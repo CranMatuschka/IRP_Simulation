@@ -142,16 +142,19 @@ classdef Diagnostics < handle
             entry.truth.rxClockDrift_mps  = asset.clock.getDriftMetersPerSecond();
 
             % --- Estimate state ----------------------------------------
+            % Stage 61: use getReportEulerRad so quaternionErrorState mode reports
+            % nominal euler (from quaternion) rather than the near-zero error state.
+            reportEuler_rad = ekf.getReportEulerRad();
             entry.estimate.x                 = x;
             entry.estimate.P                 = ekf.P;
             entry.estimate.r_cm_ecef_m       = x(sm.r_idx);
             entry.estimate.v_cm_ecef_mps     = x(sm.v_idx);
-            entry.estimate.euler_rad         = x(sm.euler_idx);
+            entry.estimate.euler_rad         = reportEuler_rad;
             entry.estimate.omega_body_radps  = x(sm.omega_idx);
             entry.estimate.rxClockBias_m     = x(sm.b_rx_idx);
             entry.estimate.rxClockDrift_mps  = x(sm.bdot_rx_idx);
             entry.estimate.r_ant_ecef_m      = revgnss.AttitudeKinematics.applyLeverArm( ...
-                x(sm.r_idx), x(sm.euler_idx), asset.receiverLeverArm_body_m);
+                x(sm.r_idx), reportEuler_rad, asset.receiverLeverArm_body_m);
 
             % --- Measurements ------------------------------------------
             if ~isempty(z)
@@ -258,8 +261,9 @@ classdef Diagnostics < handle
             entry.positionError_m    = norm(r_err);
             entry.positionErrorVec_m = r_err;
 
+            % Stage 61: use reportEuler_rad (nominal attitude in quaternionErrorState mode)
             eul_err = revgnss.AttitudeKinematics.wrapEuler( ...
-                x(sm.euler_idx) - asset.attitude_euler_rad);
+                reportEuler_rad - asset.attitude_euler_rad);
             entry.attitudeError_rad = eul_err;
 
             entry.clockBiasError_m     = x(sm.b_rx_idx) - asset.clock.getBiasMeters();

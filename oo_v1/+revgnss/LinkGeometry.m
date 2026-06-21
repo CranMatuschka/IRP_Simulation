@@ -92,16 +92,48 @@ classdef LinkGeometry
         function H_att = finiteDiffAttitudeJacobian(cfg, towers, towerIdx, antennaIdx, ...
                 r_cm, euler_rad, leverArms_model, step_rad)
             % finiteDiffAttitudeJacobian  1x3 central-difference attitude Jacobian.
+            %
+            % eulerZYX mode (default):       perturbs Euler angles ±step.
+            % quaternionErrorState mode:     perturbs body-frame DCM ±step along
+            %   each axis ke: C_pert = C_nominal * Exp([±step*e_ke]_x)
+            %   → d(range)/d(delta_theta_ke), consistent with error-state EKF.
             if nargin < 8 || isempty(step_rad); step_rad = 1e-6; end
             H_att = zeros(1, 3);
-            for ke = 1:3
-                ep = euler_rad; ep(ke) = ep(ke) + step_rad;
-                em = euler_rad; em(ke) = em(ke) - step_rad;
-                hp = revgnss.MeasurementModelUtils.modelRangeOnly( ...
-                    cfg, towers, towerIdx, antennaIdx, r_cm, ep, leverArms_model);
-                hm = revgnss.MeasurementModelUtils.modelRangeOnly( ...
-                    cfg, towers, towerIdx, antennaIdx, r_cm, em, leverArms_model);
-                H_att(ke) = (hp - hm) / (2 * step_rad);
+            % Check parameterization
+            useQES = false;
+            try
+                useQES = strcmp(cfg.estimator.attitude.parameterization, 'quaternionErrorState');
+            catch; end
+            if useQES
+                % quaternionErrorState: perturb nominal DCM in body frame
+                if numel(leverArms_model) < 3 || antennaIdx > size(leverArms_model,2)
+                    return
+                end
+                lever = leverArms_model(:, antennaIdx);
+                r_twr = revgnss.LinkGeometry.modelTowerPosition(cfg, towers{towerIdx}, towerIdx);
+                C_nom = revgnss.AttitudeKinematics.bodyToEcefRotation(euler_rad);
+                for ke = 1:3
+                    dp = zeros(3,1); dp(ke) = step_rad;
+                    dm = zeros(3,1); dm(ke) = -step_rad;
+                    Cp = revgnss.AttitudeErrorStateKinematics.smallAnglePerturbedDcm(C_nom, dp);
+                    Cm = revgnss.AttitudeErrorStateKinematics.smallAnglePerturbedDcm(C_nom, dm);
+                    rp = r_cm(:) + Cp * lever(:);
+                    rm = r_cm(:) + Cm * lever(:);
+                    hp = max(norm(r_twr(:) - rp), 1);
+                    hm = max(norm(r_twr(:) - rm), 1);
+                    H_att(ke) = (hp - hm) / (2 * step_rad);
+                end
+            else
+                % eulerZYX: perturb Euler angles (legacy behavior)
+                for ke = 1:3
+                    ep = euler_rad; ep(ke) = ep(ke) + step_rad;
+                    em = euler_rad; em(ke) = em(ke) - step_rad;
+                    hp = revgnss.MeasurementModelUtils.modelRangeOnly( ...
+                        cfg, towers, towerIdx, antennaIdx, r_cm, ep, leverArms_model);
+                    hm = revgnss.MeasurementModelUtils.modelRangeOnly( ...
+                        cfg, towers, towerIdx, antennaIdx, r_cm, em, leverArms_model);
+                    H_att(ke) = (hp - hm) / (2 * step_rad);
+                end
             end
         end
 

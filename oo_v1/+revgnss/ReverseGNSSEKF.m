@@ -76,6 +76,13 @@ classdef ReverseGNSSEKF < handle
 
         % Stage 58: last dynamics predict info (compact, overwritten each epoch)
         lastDynamicsPredictInfo (1,1) struct
+
+        % Stage 61: quaternion nominal / error-state attitude EKF
+        nominalQuat_wxyz          double = [1;0;0;0]   % scalar-first unit quaternion
+        attitudeParameterization  char   = 'eulerZYX'  % 'eulerZYX' | 'quaternionErrorState'
+        lastAttitudeErrorStateInfo (1,1) struct
+        attitudeInjectionCount    (1,1) double = 0
+        maxAttitudeInjectionNorm_rad (1,1) double = 0
     end
 
     methods
@@ -162,6 +169,14 @@ classdef ReverseGNSSEKF < handle
                 obj.rxClockModel = rxClockModel;
             end
 
+            % Stage 61: read attitude parameterization from config
+            try
+                p61 = cfg.estimator.attitude.parameterization;
+                if ischar(p61) && ismember(p61, {'eulerZYX','quaternionErrorState'})
+                    obj.attitudeParameterization = p61;
+                end
+            catch; end
+
             obj.stateMap = obj.buildStateMap_(nTowers);
             obj.x = zeros(obj.nx, 1);
             obj.P = eye(obj.nx);
@@ -182,6 +197,37 @@ classdef ReverseGNSSEKF < handle
         function initState(obj, x0, P0)
             obj.x = x0(:);
             obj.P = P0;
+            % Stage 61: initialize nominal quaternion from initial Euler state
+            if strcmp(obj.attitudeParameterization, 'quaternionErrorState')
+                eul0 = obj.x(obj.stateMap.euler_idx);
+                obj.nominalQuat_wxyz = revgnss.AttitudeErrorStateKinematics.eulerToQuatZYX(eul0);
+                obj.x(obj.stateMap.euler_idx) = zeros(3, 1);  % error state starts at zero
+                obj.attitudeInjectionCount    = 0;
+                obj.maxAttitudeInjectionNorm_rad = 0;
+            end
+        end
+
+        % ----------------------------------------------------------------
+        function xMeas = getMeasurementState(obj)
+            % getMeasurementState  State vector for measurement evaluation.
+            % In quaternionErrorState mode: replaces x(euler_idx) with the
+            % nominal euler angles from quatToEulerZYX(nominalQuat_wxyz) so
+            % that h and H are evaluated at the nominal attitude.
+            xMeas = obj.x;
+            if strcmp(obj.attitudeParameterization, 'quaternionErrorState')
+                xMeas(obj.stateMap.euler_idx) = ...
+                    revgnss.AttitudeErrorStateKinematics.quatToEulerZYX(obj.nominalQuat_wxyz);
+            end
+        end
+
+        function euler_rad = getReportEulerRad(obj)
+            % getReportEulerRad  Attitude angles for reporting/diagnostics.
+            if strcmp(obj.attitudeParameterization, 'quaternionErrorState')
+                euler_rad = revgnss.AttitudeErrorStateKinematics.quatToEulerZYX( ...
+                    obj.nominalQuat_wxyz);
+            else
+                euler_rad = obj.x(obj.stateMap.euler_idx);
+            end
         end
 
         % ----------------------------------------------------------------
@@ -229,10 +275,17 @@ classdef ReverseGNSSEKF < handle
             end
             obj.lastDynamicsPredictInfo = dynInfo;
 
-            % Attitude: Euler kinematics (frozen when estimation disabled)
+            % Attitude: kinematics update (frozen when estimation disabled)
             if obj.estimateAttitude
-                edot    = revgnss.AttitudeKinematics.eulerRatesFromBodyRates(eul, omg);
-                eul_new = revgnss.AttitudeKinematics.wrapEuler(eul + dt_s * edot);
+                if strcmp(obj.attitudeParameterization, 'quaternionErrorState')
+                    % Stage 61: propagate nominal quaternion; error state stays near zero
+                    obj.nominalQuat_wxyz = revgnss.AttitudeErrorStateKinematics.propagateQuatBodyRate( ...
+                        obj.nominalQuat_wxyz, omg, dt_s);
+                    eul_new = zeros(3, 1);   % error state kept at zero in prediction
+                else
+                    edot    = revgnss.AttitudeKinematics.eulerRatesFromBodyRates(eul, omg);
+                    eul_new = revgnss.AttitudeKinematics.wrapEuler(eul + dt_s * edot);
+                end
             else
                 eul_new = eul;   % freeze state — no kinematics update
             end
@@ -295,8 +348,36 @@ classdef ReverseGNSSEKF < handle
 
             % State update
             obj.x = obj.x + K * nu;
-            obj.x(obj.stateMap.euler_idx) = revgnss.AttitudeKinematics.wrapEuler( ...
-                obj.x(obj.stateMap.euler_idx));
+            if strcmp(obj.attitudeParameterization, 'quaternionErrorState')
+                % Stage 61: inject error-state into nominal quaternion, then reset
+                deltaTheta = obj.x(obj.stateMap.euler_idx);
+                [obj.nominalQuat_wxyz, injInfo] = revgnss.AttitudeErrorStateKinematics.injectRight( ...
+                    obj.nominalQuat_wxyz, deltaTheta);
+                obj.x(obj.stateMap.euler_idx) = zeros(3, 1);
+                % First-order covariance reset: G ≈ I - 0.5*skew(deltaTheta)
+                d = deltaTheta(:);
+                sk = [0,-d(3),d(2); d(3),0,-d(1); -d(2),d(1),0];
+                G  = eye(3) - 0.5 * sk;
+                ei = obj.stateMap.euler_idx;
+                obj.P(ei, :) = G * obj.P(ei, :);
+                obj.P(:, ei) = obj.P(:, ei) * G';
+                obj.P = (obj.P + obj.P') / 2;
+                % Update injection diagnostics
+                injNorm = injInfo.injectionNorm_rad;
+                obj.attitudeInjectionCount       = obj.attitudeInjectionCount + 1;
+                obj.maxAttitudeInjectionNorm_rad = max(obj.maxAttitudeInjectionNorm_rad, injNorm);
+                obj.lastAttitudeErrorStateInfo = struct( ...
+                    'parameterization',    'quaternionErrorState', ...
+                    'qNorm',               injInfo.qNormPost, ...
+                    'lastInjectionNorm_rad', injNorm, ...
+                    'maxInjectionNorm_rad',  obj.maxAttitudeInjectionNorm_rad, ...
+                    'injectionCount',       obj.attitudeInjectionCount, ...
+                    'covarianceResetApplied', true, ...
+                    'eulerReportingOnly',    true);
+            else
+                obj.x(obj.stateMap.euler_idx) = revgnss.AttitudeKinematics.wrapEuler( ...
+                    obj.x(obj.stateMap.euler_idx));
+            end
 
             % Joseph stabilised covariance
             nx  = obj.nx;
@@ -435,35 +516,49 @@ classdef ReverseGNSSEKF < handle
                 F(sm.r_idx, sm.v_idx) = dt_s * eye(3);
             end
 
-            % Euler-euler block: FD of euler kinematics w.r.t. euler
-            fdStep = 1e-7;
-            for ai = 1:3
-                eul_p = euler; eul_p(ai) = eul_p(ai) + fdStep;
-                eul_m = euler; eul_m(ai) = eul_m(ai) - fdStep;
+            if strcmp(obj.attitudeParameterization, 'quaternionErrorState')
+                % Stage 61: error-state F blocks — linearized around nominal.
+                % d(delta_theta)/dt = -skew(omega)*delta_theta + delta_omega
+                % F(theta,theta) ≈ I - skew(omega)*dt
+                % F(theta,omega) ≈ I*dt
+                if obj.estimateAttitude
+                    omg = omega(:);
+                    sk3 = [0,-omg(3),omg(2); omg(3),0,-omg(1); -omg(2),omg(1),0];
+                    F(sm.euler_idx, sm.euler_idx) = eye(3) - sk3 * dt_s;
+                    F(sm.euler_idx, sm.omega_idx) = eye(3) * dt_s;
+                else
+                    F(sm.euler_idx, sm.euler_idx) = eye(3);
+                    F(sm.euler_idx, sm.omega_idx) = zeros(3);
+                end
+            else
+                % Euler-euler block: FD of euler kinematics w.r.t. euler
+                fdStep = 1e-7;
+                for ai = 1:3
+                    eul_p = euler; eul_p(ai) = eul_p(ai) + fdStep;
+                    eul_m = euler; eul_m(ai) = eul_m(ai) - fdStep;
 
-                edot_p = revgnss.AttitudeKinematics.eulerRatesFromBodyRates(eul_p, omega);
-                edot_m = revgnss.AttitudeKinematics.eulerRatesFromBodyRates(eul_m, omega);
+                    edot_p = revgnss.AttitudeKinematics.eulerRatesFromBodyRates(eul_p, omega);
+                    edot_m = revgnss.AttitudeKinematics.eulerRatesFromBodyRates(eul_m, omega);
 
-                eul_new_p = eul_p + dt_s * edot_p;
-                eul_new_m = eul_m + dt_s * edot_m;
+                    eul_new_p = eul_p + dt_s * edot_p;
+                    eul_new_m = eul_m + dt_s * edot_m;
 
-                % Column ai of the euler-euler Jacobian block
-                F(sm.euler_idx, sm.euler_idx(ai)) = (eul_new_p - eul_new_m) / (2 * fdStep);
-            end
+                    F(sm.euler_idx, sm.euler_idx(ai)) = (eul_new_p - eul_new_m) / (2 * fdStep);
+                end
 
-            % Euler-omega block: dt * T(euler)
-            cr = cos(euler(1)); sr = sin(euler(1));
-            cp = cos(euler(2)); tp = tan(euler(2));
-            if abs(cp) < 1e-6; cp = sign(cp + eps) * 1e-6; end
+                % Euler-omega block: dt * T(euler)
+                cr = cos(euler(1)); sr = sin(euler(1));
+                cp = cos(euler(2)); tp = tan(euler(2));
+                if abs(cp) < 1e-6; cp = sign(cp + eps) * 1e-6; end
 
-            T = [1, sr*tp, cr*tp; 0, cr, -sr; 0, sr/cp, cr/cp];
-            F(sm.euler_idx, sm.omega_idx) = dt_s * T;
+                T = [1, sr*tp, cr*tp; 0, cr, -sr; 0, sr/cp, cr/cp];
+                F(sm.euler_idx, sm.omega_idx) = dt_s * T;
 
-            % Freeze attitude kinematics when estimation is disabled.
-            % This prevents numerical drift of the euler/omega states.
-            if ~obj.estimateAttitude
-                F(sm.euler_idx, sm.euler_idx) = eye(3);
-                F(sm.euler_idx, sm.omega_idx) = zeros(3);
+                % Freeze attitude kinematics when estimation is disabled.
+                if ~obj.estimateAttitude
+                    F(sm.euler_idx, sm.euler_idx) = eye(3);
+                    F(sm.euler_idx, sm.omega_idx) = zeros(3);
+                end
             end
             if ~obj.estimateAngularRate
                 F(sm.omega_idx, sm.omega_idx) = eye(3);
