@@ -35,7 +35,7 @@ oo_v1_envAllToggles_ = strcmpi(getenv('OO_V1_ALL_TOGGLES'), 'true');
 if oo_v1_envValidate_; oo_v1_envAllToggles_ = true; end  % validate always uses all toggles
 oo_v1_envStage_      = str2double(getenv('OO_V1_VALIDATION_STAGE'));
 if isnan(oo_v1_envStage_); oo_v1_envStage_ = 0; end
-if oo_v1_envValidate_ && oo_v1_envStage_ == 0; oo_v1_envStage_ = 57; end
+if oo_v1_envValidate_ && oo_v1_envStage_ == 0; oo_v1_envStage_ = 58; end
 oo_v1_envCompile_    = strtrim(getenv('OO_V1_REPORT_COMPILE_TEX'));
 
 cfg = revgnss.ConfigFactory.defaultConfig();
@@ -231,6 +231,15 @@ cfg.diagnostics.pluginRegistry.enable = true;
 % Separate physical/gauge/augmented NIS in summary. Default enabled.
 cfg.diagnostics.ekfInnovationAccounting.enable = true;
 
+% --- Stage 58: EKF translational dynamics prediction mode -------
+% Default: constant-velocity (backward compatible).
+% Set mode to 'twoBody' or 'j2' to enable inertial orbit prediction.
+% Frame model: constant Earth rotation only (no EOP/IERS).
+cfg.estimator.dynamics.mode          = 'constantVelocity';
+cfg.estimator.dynamics.fdPositionStep_m   = 1.0;
+cfg.estimator.dynamics.fdVelocityStep_mps = 1e-3;
+cfg.diagnostics.ekfDynamics.enable  = true;
+
 % --- Inter-frequency bias budget (Stage 44) --------------------
 % Diagnostic only. Default all to 0 (no calibrated products in v1).
 % Units: metres. Set to non-zero to exercise bias-budget propagation.
@@ -400,6 +409,9 @@ if stageAllToggles || oo_v1_envAllToggles_
     cfg.estimator.enforceCarrierArcConsistency.enable            = true;
     cfg.diagnostics.carrierArcConsistencyEnforcement.enable      = true;
     cfg.diagnostics.pluginRegistry.enable                        = true;
+    % Stage 58: enable J2 dynamics in all-toggle mode to exercise inertial prediction
+    cfg.estimator.dynamics.mode          = 'j2';
+    cfg.diagnostics.ekfDynamics.enable  = true;
     cfg.validation.stageAllToggles         = true;
     if oo_v1_envAllToggles_
         cfg.validation.invokedMainScript = true;

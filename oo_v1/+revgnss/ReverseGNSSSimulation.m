@@ -141,7 +141,7 @@ classdef ReverseGNSSSimulation < handle
             if k > 1
                 towerClockModels = cellfun(@(t) t.clock, obj.towers, ...
                     'UniformOutput', false);
-                obj.ekf.predict(dt, towerClockModels);
+                obj.ekf.predict(dt, towerClockModels, t_s - dt);
             end
 
             % Compute measurements (also generates and stores tower clock corrections)

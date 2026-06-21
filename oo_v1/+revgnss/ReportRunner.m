@@ -452,6 +452,48 @@ classdef ReportRunner
                 end
             catch; end
 
+            % ---- Stage 58: EKF two-body/J2 dynamics prediction ----
+            summary.ekfDynamicsMode                  = 'constantVelocity';
+            summary.ekfDynamicsForceModel            = 'none';
+            summary.ekfDynamicsFrameModel            = 'none';
+            summary.ekfDynamicsUsedInertialPropagation = false;
+            summary.ekfDynamicsEnergyInitial_Jkg     = NaN;
+            summary.ekfDynamicsEnergyFinal_Jkg       = NaN;
+            summary.ekfDynamicsEnergyDrift_Jkg       = NaN;
+            summary.ekfDynamicsFrameLimitations      = '';
+            summary.ekfDynamicsFiniteDiffStmUsed     = false;
+            summary.stage58DynamicsEnabled           = false;
+            summary.stage58MeasurementPhysicsChanged = false;
+            summary.stage58EkfUpdateMathChanged      = false;
+            summary.stage58IntegerFixing             = false;
+            summary.stage58Lambda                    = false;
+            summary.stage58FalseFixRisk              = false;
+            try
+                info58_ = sim.ekf.lastDynamicsPredictInfo;
+                if isstruct(info58_) && isfield(info58_,'mode')
+                    summary.ekfDynamicsMode   = info58_.mode;
+                    summary.stage58DynamicsEnabled = ~strcmp(info58_.mode,'constantVelocity');
+                    if isfield(info58_,'forceModel');  summary.ekfDynamicsForceModel  = info58_.forceModel;  end
+                    if isfield(info58_,'frameModel');  summary.ekfDynamicsFrameModel  = info58_.frameModel;  end
+                    if isfield(info58_,'usedInertialPropagation')
+                        summary.ekfDynamicsUsedInertialPropagation = info58_.usedInertialPropagation;
+                        summary.ekfDynamicsFiniteDiffStmUsed = info58_.usedInertialPropagation;
+                    end
+                    if isfield(info58_,'specificEnergyInitial_Jkg')
+                        summary.ekfDynamicsEnergyInitial_Jkg = info58_.specificEnergyInitial_Jkg;
+                    end
+                    if isfield(info58_,'specificEnergyFinal_Jkg')
+                        summary.ekfDynamicsEnergyFinal_Jkg = info58_.specificEnergyFinal_Jkg;
+                    end
+                    if isfield(info58_,'energyDrift_Jkg')
+                        summary.ekfDynamicsEnergyDrift_Jkg = info58_.energyDrift_Jkg;
+                    end
+                    if isfield(info58_,'limitations')
+                        summary.ekfDynamicsFrameLimitations = info58_.limitations;
+                    end
+                end
+            catch; end
+
             % ---- Determine report layout before PDF generation -----------
             reportLayout = 'default';
             if isfield(cfg,'report') && isfield(cfg.report,'layout')

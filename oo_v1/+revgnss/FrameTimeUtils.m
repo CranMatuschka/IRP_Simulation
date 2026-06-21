@@ -62,6 +62,41 @@ classdef FrameTimeUtils
             r_rot = R * r_ecef_m(:);
         end
 
+        % ---- Stage 58: full ECEF/inertial state transforms -----------------
+
+        function omega_vec = omegaEcef_radps()
+            % omegaEcef_radps  Earth rotation vector in ECEF [rad/s].
+            omega_vec = [0; 0; revgnss.FrameTimeUtils.earthRotationRate_radps()];
+        end
+
+        function [r_i, v_i] = ecefStateToInertial(r_ecef_m, v_ecef_mps, t_s)
+            % ecefStateToInertial  Convert ECEF position+velocity to inertial-like frame.
+            %   r_i = R * r_e
+            %   v_i = R * (v_e + omega_E x r_e)
+            R   = revgnss.FrameTimeUtils.rotMatEcefToInertial(t_s);
+            omg = revgnss.FrameTimeUtils.omegaEcef_radps();
+            r_i = R * r_ecef_m(:);
+            v_i = R * (v_ecef_mps(:) + cross(omg, r_ecef_m(:)));
+        end
+
+        function [r_e, v_e] = inertialStateToEcef(r_i_m, v_i_mps, t_s)
+            % inertialStateToEcef  Convert inertial-like position+velocity to ECEF.
+            %   r_e = R' * r_i
+            %   v_e = R' * v_i - omega_E x r_e
+            R   = revgnss.FrameTimeUtils.rotMatEcefToInertial(t_s);
+            omg = revgnss.FrameTimeUtils.omegaEcef_radps();
+            r_e = R' * r_i_m(:);
+            v_e = R' * v_i_mps(:) - cross(omg, r_e);
+        end
+
+        function [dr, dv] = roundTripStateError(r_ecef_m, v_ecef_mps, t_s)
+            % roundTripStateError  ECEF->inertial->ECEF round-trip error norms.
+            [ri, vi] = revgnss.FrameTimeUtils.ecefStateToInertial(r_ecef_m, v_ecef_mps, t_s);
+            [re, ve] = revgnss.FrameTimeUtils.inertialStateToEcef(ri, vi, t_s);
+            dr = norm(re - r_ecef_m(:));
+            dv = norm(ve - v_ecef_mps(:));
+        end
+
         function dRho_m = sagnacCorrection_m(rx_ecef_m, tx_ecef_m)
             % sagnacCorrection_m  First-order Sagnac correction in metres.
             %

@@ -3310,6 +3310,49 @@ classdef ClockExactReportBuilder
                 fprintf(fid, '\\bottomrule\n\\end{tabular}\\par\n\n');
             end
 
+            % --- Stage 58: EKF Two-Body/J2 Dynamics Prediction ---
+            if isfield(summary,'ekfDynamicsMode')
+                fprintf(fid, '\\subsection*{EKF Two-Body/J2 Dynamics Prediction (Stage~58)}\n');
+                fprintf(fid, ['\\textit{Stage~58 adds an optional EKF translational prediction ' ...
+                    'mode using inertial two-body/J2 propagation with constant-Earth-rotation ' ...
+                    'ECEF/inertial state transforms. ' ...
+                    'This is not a full precise orbit-determination model: ' ...
+                    'drag, SRP, third bodies, EOP/IERS transformations, and relativistic ' ...
+                    'clock modelling are not implemented.}\n\n']);
+                fprintf(fid, '\\begin{tabular}{p{0.46\\textwidth}p{0.42\\textwidth}}\n');
+                fprintf(fid, '\\toprule\n\\textbf{Property} & \\textbf{Value}\\\\\n\\midrule\n');
+                fprintf(fid, 'Active stage & 58\\\\\n');
+                fprintf(fid, 'Dynamics mode & \\texttt{%s}\\\\\n', ...
+                    strrep(summary.ekfDynamicsMode,'_','\_'));
+                if isfield(summary,'ekfDynamicsForceModel')
+                    fprintf(fid, 'Force model & \\texttt{%s}\\\\\n', summary.ekfDynamicsForceModel);
+                end
+                if isfield(summary,'ekfDynamicsFrameModel')
+                    fprintf(fid, 'Frame model & \\texttt{%s}\\\\\n', summary.ekfDynamicsFrameModel);
+                end
+                fprintf(fid, 'Inertial prop.\\ used & %s\\\\\n', ...
+                    mat2str(isfield(summary,'ekfDynamicsUsedInertialPropagation') && ...
+                    summary.ekfDynamicsUsedInertialPropagation));
+                fprintf(fid, 'Finite-diff STM used & %s\\\\\n', ...
+                    mat2str(isfield(summary,'ekfDynamicsFiniteDiffStmUsed') && ...
+                    summary.ekfDynamicsFiniteDiffStmUsed));
+                if isfield(summary,'ekfDynamicsEnergyDrift_Jkg') && isfinite(summary.ekfDynamicsEnergyDrift_Jkg)
+                    fprintf(fid, 'Energy drift (last epoch) & %.4e J/kg\\\\\n', ...
+                        summary.ekfDynamicsEnergyDrift_Jkg);
+                end
+                fprintf(fid, 'Measurement physics changed & false\\\\\n');
+                fprintf(fid, 'EKF update math changed & false\\\\\n');
+                fprintf(fid, 'Integer fixing impl.\\ & false\\\\\n');
+                fprintf(fid, 'LAMBDA/MLAMBDA & false\\\\\n');
+                fprintf(fid, 'False-fix-risk control & false\\\\\n');
+                lim = 'No drag, SRP, third bodies, EOP/IERS, relativistic clock model, or precise orbit products.';
+                if isfield(summary,'ekfDynamicsFrameLimitations') && ~isempty(summary.ekfDynamicsFrameLimitations)
+                    lim = strrep(summary.ekfDynamicsFrameLimitations,'_','\_');
+                end
+                fprintf(fid, 'Limitations & \\textit{%s}\\\\\n', lim);
+                fprintf(fid, '\\bottomrule\n\\end{tabular}\\par\n\n');
+            end
+
             % --- Stage 57: EKF Innovation Accounting and Gauge/NIS Cleanup ---
             if isfield(summary,'stage57EkfAccountingEnabled') && summary.stage57EkfAccountingEnabled
                 fprintf(fid, '\\subsection*{EKF Innovation Accounting and Gauge/NIS Cleanup (Stage~57)}\n');

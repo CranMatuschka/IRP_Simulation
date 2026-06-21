@@ -73,6 +73,9 @@ classdef ReverseGNSSEKF < handle
 
         % Diagnostics
         history          (1,1) struct
+
+        % Stage 58: last dynamics predict info (compact, overwritten each epoch)
+        lastDynamicsPredictInfo (1,1) struct
     end
 
     methods
@@ -182,7 +185,11 @@ classdef ReverseGNSSEKF < handle
         end
 
         % ----------------------------------------------------------------
-        function predict(obj, dt_s, towerClockModels)
+        function predict(obj, dt_s, towerClockModels, t0_s)
+            % predict  EKF time propagation.
+            %   t0_s — simulation time at start of prediction interval (Stage 58).
+            if nargin < 4 || isempty(t0_s); t0_s = 0; end
+
             x  = obj.x;
             sm = obj.stateMap;
 
@@ -193,9 +200,34 @@ classdef ReverseGNSSEKF < handle
             b_rx    = x(sm.b_rx_idx);
             bdot_rx = x(sm.bdot_rx_idx);
 
-            % Position: constant-velocity
-            r_new = r + dt_s * v;
-            v_new = v;
+            % Stage 58: optional physical translational dynamics
+            dynInfo = struct('mode','constantVelocity','usedInertialPropagation',false, ...
+                'forceModel','none','frameModel','none', ...
+                'specificEnergyInitial_Jkg',NaN,'specificEnergyFinal_Jkg',NaN, ...
+                'energyDrift_Jkg',NaN,'warnings',{{}});
+            Phi6 = [];  % empty = use default F block in buildF_
+            dynMode = revgnss.EkfDynamicsPredictor.mode(obj.cfg);
+            if strcmp(dynMode, 'constantVelocity')
+                r_new = r + dt_s * v;
+                v_new = v;
+                dynInfo.mode = 'constantVelocity';
+            else
+                try
+                    [r_new, v_new, dynInfo] = revgnss.EkfDynamicsPredictor.propagateEcef( ...
+                        r, v, dt_s, t0_s, obj.cfg);
+                    Phi6 = revgnss.EkfDynamicsPredictor.finiteDiffStm6( ...
+                        r, v, dt_s, t0_s, obj.cfg);
+                catch ME_dyn
+                    warning('ReverseGNSSEKF:dynamicsFailed', ...
+                        'Stage 58 dynamics failed (%s); reverting to constantVelocity.', ...
+                        ME_dyn.message);
+                    r_new = r + dt_s * v;
+                    v_new = v;
+                    dynInfo.mode = 'constantVelocity';
+                    dynInfo.warnings{end+1} = ME_dyn.message;
+                end
+            end
+            obj.lastDynamicsPredictInfo = dynInfo;
 
             % Attitude: Euler kinematics (frozen when estimation disabled)
             if obj.estimateAttitude
@@ -230,8 +262,8 @@ classdef ReverseGNSSEKF < handle
             end
             obj.x = x_new;
 
-            % State transition Jacobian F
-            F = obj.buildF_(dt_s, eul, omg);
+            % State transition Jacobian F (Stage 58: pass Phi6 override for r/v block)
+            F = obj.buildF_(dt_s, eul, omg, Phi6);
 
             % Process noise Q
             Q = obj.buildQ_(dt_s, towerClockModels);
@@ -381,20 +413,27 @@ classdef ReverseGNSSEKF < handle
         end
 
         % ----------------------------------------------------------------
-        function F = buildF_(obj, dt_s, euler, omega)
+        function F = buildF_(obj, dt_s, euler, omega, Phi6)
             % buildF_  Linearised state-transition Jacobian.
             %
             % Euler-euler block: FD derivative of (eul + dt * T(eul,omg)*omg) w.r.t. eul.
-            %   This is more accurate than the identity approximation used previously,
-            %   especially when omega or euler are non-zero.
             % Euler-omega block: dt * T(euler)  [kinematic transformation].
+            % Phi6 (optional, Stage 58): 6x6 translational STM replacing default [I dtI;0 I] block.
+
+            if nargin < 5; Phi6 = []; end
 
             nx = obj.nx;
             F  = eye(nx);
             sm = obj.stateMap;
 
-            % Position-velocity coupling
-            F(sm.r_idx, sm.v_idx) = dt_s * eye(3);
+            % Position-velocity block: use Phi6 from EkfDynamicsPredictor or default
+            rv_idx = [sm.r_idx; sm.v_idx];
+            if ~isempty(Phi6) && isequal(size(Phi6), [6,6]) && all(isfinite(Phi6(:)))
+                F(rv_idx, rv_idx) = Phi6;
+            else
+                % Default constant-velocity coupling (backward compatible)
+                F(sm.r_idx, sm.v_idx) = dt_s * eye(3);
+            end
 
             % Euler-euler block: FD of euler kinematics w.r.t. euler
             fdStep = 1e-7;
