@@ -214,6 +214,13 @@ classdef ReverseGnssObservableAdapter
             if ~isfield(cfg,'estimator') || ~isfield(cfg.estimator,'estimateAttitude') || ~cfg.estimator.estimateAttitude
                 return
             end
+            % Stage 56 preferred controls gate sensitivity before legacy lever-arm test.
+            % Falls through to legacy (estimateAttitudeFromPseudorange) when preferred
+            % controls are absent, preserving backward compatibility.
+            try
+                attGate = revgnss.LinkGeometry.shouldUseAttitudePartials(cfg, obsType);
+                if ~attGate.enabled; return; end
+            catch; end
             if ~isfield(cfg,'asset') || ~isfield(cfg.asset,'receiverLeverArms_body_m') || isnan(rxIdx)
                 return
             end

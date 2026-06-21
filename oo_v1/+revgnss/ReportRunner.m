@@ -494,6 +494,55 @@ classdef ReportRunner
                 end
             catch; end
 
+            % ---- Stage 59: single-asset carrier attitude scenario ----
+            summary.stage59ScenarioEnabled          = false;
+            summary.stage59ScenarioClassification   = 'disabled';
+            summary.singleAssetAttitudeScenarioName = '';
+            summary.singleAssetAttitudeNSpaceAssets = 0;
+            summary.singleAssetAttitudeNReceivers   = 0;
+            summary.singleAssetAttitudeBaselineGeometryRank      = 0;
+            summary.singleAssetAttitudeCarrierPartialsEnabled    = false;
+            summary.singleAssetAttitudeCodePartialsEnabled       = false;
+            summary.singleAssetAttitudeDopplerPartialsEnabled    = false;
+            summary.singleAssetAttitudeArcConsistencyEnforced    = false;
+            summary.singleAssetAttitudeDynamicsTruthMode         = 'staticEcef';
+            summary.singleAssetAttitudeDynamicsEkfMode           = 'unknown';
+            summary.singleAssetAttitudeDynamicsSelfConsistent    = false;
+            summary.singleAssetAttitudeRollError_deg             = NaN;
+            summary.singleAssetAttitudePitchError_deg            = NaN;
+            summary.singleAssetAttitudeYawError_deg              = NaN;
+            summary.singleAssetAttitudeErrorNorm_deg             = NaN;
+            summary.singleAssetAttitudeCarrierResidualRms_m      = NaN;
+            summary.singleAssetAttitudePhysicalNisPerDof         = NaN;
+            summary.singleAssetAttitudeIntegerFixingImplemented  = false;
+            summary.singleAssetAttitudeLambdaImplemented         = false;
+            summary.singleAssetAttitudeFalseFixRiskControlled    = false;
+            if isfield(cfg,'scenario') && isfield(cfg.scenario,'name') && ...
+                    strcmp(cfg.scenario.name,'singleAssetCarrierAttitude')
+                try
+                    s59_ = revgnss.SingleAssetAttitudeScenarioReport.assess(summary, cfg);
+                    summary.stage59ScenarioEnabled          = s59_.enabled;
+                    summary.stage59ScenarioClassification   = s59_.classification;
+                    summary.singleAssetAttitudeScenarioName = s59_.scenarioName;
+                    summary.singleAssetAttitudeNSpaceAssets = s59_.nSpaceAssets;
+                    summary.singleAssetAttitudeNReceivers   = s59_.nReceivers;
+                    summary.singleAssetAttitudeBaselineGeometryRank   = s59_.baselineGeometryRank;
+                    summary.singleAssetAttitudeCarrierPartialsEnabled = s59_.carrierPartialsEnabled;
+                    summary.singleAssetAttitudeCodePartialsEnabled    = s59_.codePartialsEnabled;
+                    summary.singleAssetAttitudeDopplerPartialsEnabled = s59_.dopplerPartialsEnabled;
+                    summary.singleAssetAttitudeArcConsistencyEnforced = s59_.carrierArcConsistencyEnforced;
+                    summary.singleAssetAttitudeDynamicsTruthMode      = s59_.dynamicsTruthMode;
+                    summary.singleAssetAttitudeDynamicsEkfMode        = s59_.dynamicsEkfMode;
+                    summary.singleAssetAttitudeDynamicsSelfConsistent = s59_.dynamicsSelfConsistent;
+                    summary.singleAssetAttitudeErrorNorm_deg          = s59_.attitudeErrorNorm_deg;
+                    summary.singleAssetAttitudeCarrierResidualRms_m   = s59_.carrierResidualRms_m;
+                    summary.singleAssetAttitudePhysicalNisPerDof      = s59_.physicalNisPerDof;
+                catch ex59_
+                    warning('ReportRunner:stage59Failed', ...
+                        'Stage 59 scenario assessment failed: %s', ex59_.message);
+                end
+            end
+
             % ---- Determine report layout before PDF generation -----------
             reportLayout = 'default';
             if isfield(cfg,'report') && isfield(cfg.report,'layout')

@@ -3310,6 +3310,86 @@ classdef ClockExactReportBuilder
                 fprintf(fid, '\\bottomrule\n\\end{tabular}\\par\n\n');
             end
 
+            % --- Stage 59: Single-Space-Asset Multi-Antenna Carrier Attitude Scenario ---
+            if isfield(summary,'stage59ScenarioEnabled') && summary.stage59ScenarioEnabled
+                fprintf(fid, '\\subsection*{Single-Space-Asset Multi-Antenna Carrier Attitude Scenario (Stage~59)}\n');
+                fprintf(fid, ['\\textit{Stage~59 introduces a controlled single-space-asset, ' ...
+                    'multi-antenna float-carrier attitude scenario. ' ...
+                    'It uses carrier-phase attitude partials and arc-consistent float ambiguities, ' ...
+                    'but it does not fix ambiguities, does not run LAMBDA/MLAMBDA, ' ...
+                    'and does not control false-fix risk. ' ...
+                    'Results are simulation-only and are not PPP-grade or operational precise attitude claims.}\n\n']);
+                fprintf(fid, '\\begin{tabular}{p{0.46\\textwidth}p{0.42\\textwidth}}\n');
+                fprintf(fid, '\\toprule\n\\textbf{Property} & \\textbf{Value}\\\\\n\\midrule\n');
+                fprintf(fid, 'Active stage & 59\\\\\n');
+                scenNm59_ = '';
+                if isfield(summary,'singleAssetAttitudeScenarioName')
+                    scenNm59_ = strrep(summary.singleAssetAttitudeScenarioName,'_','\_');
+                end
+                fprintf(fid, 'Scenario & \\texttt{%s}\\\\\n', scenNm59_);
+                fprintf(fid, 'Classification & \\texttt{%s}\\\\\n', ...
+                    strrep(summary.stage59ScenarioClassification,'_','\_'));
+                if isfield(summary,'singleAssetAttitudeNSpaceAssets')
+                    fprintf(fid, 'Space assets & %d\\\\\n', summary.singleAssetAttitudeNSpaceAssets);
+                end
+                if isfield(summary,'singleAssetAttitudeNReceivers')
+                    fprintf(fid, 'Receiver antennas & %d\\\\\n', summary.singleAssetAttitudeNReceivers);
+                end
+                if isfield(summary,'singleAssetAttitudeBaselineGeometryRank')
+                    fprintf(fid, 'Baseline geometry rank & %d\\\\\n', summary.singleAssetAttitudeBaselineGeometryRank);
+                end
+                carrP59_ = isfield(summary,'singleAssetAttitudeCarrierPartialsEnabled') && ...
+                    summary.singleAssetAttitudeCarrierPartialsEnabled;
+                codeP59_ = isfield(summary,'singleAssetAttitudeCodePartialsEnabled') && ...
+                    summary.singleAssetAttitudeCodePartialsEnabled;
+                doppP59_ = isfield(summary,'singleAssetAttitudeDopplerPartialsEnabled') && ...
+                    summary.singleAssetAttitudeDopplerPartialsEnabled;
+                fprintf(fid, 'Carrier partials enabled & %s\\\\\n', mat2str(carrP59_));
+                fprintf(fid, 'Code partials enabled & %s\\\\\n', mat2str(codeP59_));
+                fprintf(fid, 'Doppler partials enabled & %s\\\\\n', mat2str(doppP59_));
+                arcE59_ = isfield(summary,'singleAssetAttitudeArcConsistencyEnforced') && ...
+                    summary.singleAssetAttitudeArcConsistencyEnforced;
+                fprintf(fid, 'Arc-separated ambiguities & true\\\\\n');
+                fprintf(fid, 'Arc consistency enforced & %s\\\\\n', mat2str(arcE59_));
+                tDyn59_ = 'staticEcef';
+                if isfield(summary,'singleAssetAttitudeDynamicsTruthMode')
+                    tDyn59_ = strrep(summary.singleAssetAttitudeDynamicsTruthMode,'_','\_');
+                end
+                eDyn59_ = 'constantVelocity';
+                if isfield(summary,'singleAssetAttitudeDynamicsEkfMode')
+                    eDyn59_ = strrep(summary.singleAssetAttitudeDynamicsEkfMode,'_','\_');
+                end
+                selfC59_ = isfield(summary,'singleAssetAttitudeDynamicsSelfConsistent') && ...
+                    summary.singleAssetAttitudeDynamicsSelfConsistent;
+                fprintf(fid, 'Truth dynamics mode & \\texttt{%s}\\\\\n', tDyn59_);
+                fprintf(fid, 'EKF dynamics mode & \\texttt{%s}\\\\\n', eDyn59_);
+                fprintf(fid, 'Dynamics self-consistent & %s\\\\\n', mat2str(selfC59_));
+                if isfield(summary,'singleAssetAttitudeErrorNorm_deg') && ...
+                        isfinite(summary.singleAssetAttitudeErrorNorm_deg)
+                    fprintf(fid, 'Attitude error norm (final) & %.3f deg\\\\\n', ...
+                        summary.singleAssetAttitudeErrorNorm_deg);
+                end
+                if isfield(summary,'singleAssetAttitudeCarrierResidualRms_m') && ...
+                        isfinite(summary.singleAssetAttitudeCarrierResidualRms_m)
+                    fprintf(fid, 'Carrier residual RMS & %.4f m\\\\\n', ...
+                        summary.singleAssetAttitudeCarrierResidualRms_m);
+                end
+                if isfield(summary,'singleAssetAttitudePhysicalNisPerDof') && ...
+                        isfinite(summary.singleAssetAttitudePhysicalNisPerDof)
+                    fprintf(fid, 'Physical NIS/DOF & %.3f\\\\\n', ...
+                        summary.singleAssetAttitudePhysicalNisPerDof);
+                end
+                fprintf(fid, 'Integer fixing impl. & false\\\\\n');
+                fprintf(fid, 'LAMBDA/MLAMBDA & false\\\\\n');
+                fprintf(fid, 'False-fix-risk control & false\\\\\n');
+                fprintf(fid, 'PPP-grade claim & false\\\\\n');
+                lim59_ = ['ZYX Euler singular near pitch $\pm$90$^{\circ}$; not quaternion/error-state ' ...
+                    'EKF; float ambiguities only; no calibrated phase-bias products; ' ...
+                    'no external PCO/PCV calibration.'];
+                fprintf(fid, 'Limitations & \\textit{%s}\\\\\n', lim59_);
+                fprintf(fid, '\\bottomrule\n\\end{tabular}\\par\n\n');
+            end
+
             % --- Stage 58: EKF Two-Body/J2 Dynamics Prediction ---
             if isfield(summary,'ekfDynamicsMode')
                 fprintf(fid, '\\subsection*{EKF Two-Body/J2 Dynamics Prediction (Stage~58)}\n');

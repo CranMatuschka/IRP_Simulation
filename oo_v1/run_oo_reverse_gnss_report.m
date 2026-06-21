@@ -35,7 +35,7 @@ oo_v1_envAllToggles_ = strcmpi(getenv('OO_V1_ALL_TOGGLES'), 'true');
 if oo_v1_envValidate_; oo_v1_envAllToggles_ = true; end  % validate always uses all toggles
 oo_v1_envStage_      = str2double(getenv('OO_V1_VALIDATION_STAGE'));
 if isnan(oo_v1_envStage_); oo_v1_envStage_ = 0; end
-if oo_v1_envValidate_ && oo_v1_envStage_ == 0; oo_v1_envStage_ = 58; end
+if oo_v1_envValidate_ && oo_v1_envStage_ == 0; oo_v1_envStage_ = 59; end
 oo_v1_envCompile_    = strtrim(getenv('OO_V1_REPORT_COMPILE_TEX'));
 
 cfg = revgnss.ConfigFactory.defaultConfig();
@@ -65,6 +65,11 @@ cfg.report.style     = 'latex';      % 'latex' | '' (simple)
 cfg.report.layout    = 'clockExact'; % 'clockExact' | 'clockStyle' | 'default'
 cfg.report.writeTex  = true;         % true  = write .tex source file beside PDF
 cfg.report.compileTex = 'require';   % 'require' | 'auto' | 'never'
+
+% --- Stage 59: scenario selector --------------------------------
+% Set scenario name to activate the multi-antenna carrier attitude scenario.
+% ScenarioPresets.apply() is called after all toggles (see below).
+cfg.scenario.name = 'singleAssetCarrierAttitude';
 
 % --- Receivers / attitude ---------------------------------------
 % nReceivers == 1  ->  attitude estimation OFF, zero lever arms
@@ -419,9 +424,29 @@ if stageAllToggles || oo_v1_envAllToggles_
             cfg.validation.validationStage = oo_v1_envStage_;
         end
     end
+    % Stage 59: enforce scenario constraints — prevent truth/EKF dynamics mismatch.
+    % J2 EKF dynamics above would contaminate the carrier-attitude scenario because
+    % the default GEO truth is static ECEF (no truth orbit propagator in v1).
+    if isfield(cfg,'scenario') && isfield(cfg.scenario,'name') && ...
+            strcmp(cfg.scenario.name,'singleAssetCarrierAttitude')
+        cfg.scenario.nSpaceAssets = 1;
+        cfg.measurements.isl.enable             = false;
+        cfg.measurements.isl.twoWay.enable      = false;
+        cfg.measurements.isl.twoWay.range.enable   = false;
+        cfg.measurements.isl.twoWay.range.useInEKF = false;
+        cfg.measurements.isl.timing.enable      = false;
+        cfg.measurements.twstft.enable          = false;
+        cfg.estimator.dynamics.mode             = 'constantVelocity';
+    end
 end
 if ~isempty(oo_v1_envCompile_) && ismember(oo_v1_envCompile_, {'require','auto','never'})
     cfg.report.compileTex = oo_v1_envCompile_;
+end
+
+% Apply scenario preset after all toggles (preset overrides what it needs to).
+if isfield(cfg,'scenario') && isfield(cfg.scenario,'name') && ...
+        strcmp(cfg.scenario.name,'singleAssetCarrierAttitude')
+    cfg = revgnss.ScenarioPresets.apply(cfg, 'singleAssetCarrierAttitude');
 end
 
 % ============================================================

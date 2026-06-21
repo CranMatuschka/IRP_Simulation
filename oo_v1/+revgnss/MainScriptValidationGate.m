@@ -29,11 +29,11 @@ classdef MainScriptValidationGate
             state = struct();
 
             % Resolve stage, seed, count from env vars.
-            stg = 58;
+            stg = 59;
             v = str2double(getenv('OO_V1_VALIDATION_STAGE'));
             if ~isnan(v) && v > 0; stg = round(v); end
 
-            seed = 58;
+            seed = 59;
             v = str2double(getenv('OO_V1_RANDOM_TEST_SEED'));
             if ~isnan(v) && isfinite(v); seed = round(v); end
 
@@ -227,6 +227,7 @@ classdef MainScriptValidationGate
                 case 56; t = 'Measurement Geometry Core Consolidation v1';
                 case 57; t = 'EKF Innovation Accounting and Gauge/NIS Cleanup v1';
                 case 58; t = 'EKF Two-Body/J2 Dynamics Prediction v1';
+                case 59; t = 'Single-Space-Asset Multi-Antenna Carrier Attitude Scenario v1';
                 otherwise
                     try; t = revgnss.ReportStatus.current().stageTitle; catch; t = sprintf('Stage %d', stg); end
             end

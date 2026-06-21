@@ -1,0 +1,163 @@
+classdef ScenarioPresets
+    % ScenarioPresets  Named scenario preset configurations.
+    %
+    % Supported scenario names:
+    %   'default'                   — config unchanged.
+    %   'singleAssetCarrierAttitude' — single-space-asset multi-antenna float-carrier attitude.
+    %
+    % Usage:
+    %   cfg = revgnss.ConfigFactory.defaultConfig();
+    %   cfg = revgnss.ScenarioPresets.apply(cfg, 'singleAssetCarrierAttitude');
+
+    methods (Static)
+
+        function cfg = apply(cfg, scenarioName)
+            % apply  Apply named scenario preset to config.
+            if nargin < 2 || isempty(scenarioName); scenarioName = 'default'; end
+            switch scenarioName
+                case 'default'
+                    % No changes.
+                case 'singleAssetCarrierAttitude'
+                    cfg = revgnss.ScenarioPresets.singleAssetCarrierAttitude(cfg);
+                otherwise
+                    warning('ScenarioPresets:unknownScenario', ...
+                        'Unknown scenario ''%s''; config unchanged.', scenarioName);
+            end
+        end
+
+        function cfg = singleAssetCarrierAttitude(cfg)
+            % singleAssetCarrierAttitude  Single-asset multi-antenna float-carrier attitude.
+            %
+            % Configures one estimated space asset with a 4-receiver non-collinear
+            % cross-pattern geometry, carrier attitude partials, EKF float ambiguities,
+            % arc-separated ambiguities, and enforced carrier arc consistency.
+            % Uses constantVelocity EKF dynamics for self-consistency with the
+            % default static-ECEF GEO truth (no truth orbit propagator exists).
+            % No integer fixing, LAMBDA/MLAMBDA, calibrated phase-bias products,
+            % PPP-grade claims, or multi-space-asset estimation.
+
+            cfg.scenario.name         = 'singleAssetCarrierAttitude';
+            cfg.scenario.nSpaceAssets = 1;
+            cfg.scenario.nReceivers   = 4;
+
+            % Non-collinear ±1 m cross pattern with z-offset (rank-3 geometry).
+            arms = [ 1.0  -1.0   0.0   0.0; ...
+                     0.0   0.0   1.0  -1.0; ...
+                     0.2   0.2  -0.2  -0.2 ];
+            cfg.asset.receiverLeverArms_body_m = arms;
+            cfg.asset.receiverLeverArm_body_m  = arms(:,1);
+
+            % Strip to single estimated asset; preserve fields.
+            if isfield(cfg,'assets') && numel(cfg.assets) > 1
+                cfg.assets = cfg.assets(1);
+            elseif ~isfield(cfg,'assets')
+                cfg.assets = cfg.asset;
+            end
+            cfg.assets(1).receiverLeverArms_body_m = arms;
+            cfg.assets(1).receiverLeverArm_body_m  = arms(:,1);
+
+            % Attitude estimation. Use preferred Stage 56 controls exclusively so the
+            % legacy estimateAttitudeFromPseudorange flag does not cause H/metadata
+            % inconsistencies (code rows must not declare attitude sensitivity while
+            % H attitude columns are zero).
+            cfg.estimator.estimateAttitude                    = true;
+            cfg.estimator.estimateAngularRate                 = false;
+            cfg.estimator.estimateAttitudeFromPseudorange     = false; % code OFF via preferred
+            cfg.estimator.estimateAngularRateFromPseudorange  = false;
+            cfg.estimator.attitude.useCarrierPartials         = true;  % preferred: carrier ON
+            cfg.estimator.attitude.useCodePartials            = false; % preferred: code OFF
+            cfg.estimator.attitude.useDopplerPartials         = false; % preferred: Doppler OFF
+
+            % Initial attitude covariance and error.
+            cfg.estimator.P0_euler_rad              = deg2rad(5);
+            cfg.estimator.P0_omega_radps            = 1e-12;
+            cfg.estimator.sigma_angAccel_radps2     = 1e-10;
+            cfg.estimator.initialError.euler_deg    = [1; -1; 0.5];
+            cfg.estimator.initialError.omega_radps  = [0; 0; 0];
+
+            % Carrier measurements and ambiguity mode.
+            cfg.measurements.carrierPhase.enable = true;
+            cfg.measurements.carrierMode         = 'ekfFloat';
+            cfg.estimation.ambiguityMode         = 'floatPerTowerReceiverSignal';
+
+            % Carrier slip detection (keep defaults if already set).
+            cfg.measurements.carrier.slipDetection.enable = true;
+            if ~isfield(cfg.measurements.carrier.slipDetection,'threshold_m')
+                cfg.measurements.carrier.slipDetection.threshold_m           = 0.1;
+                cfg.measurements.carrier.slipDetection.minEpochsBeforeDetect = 3;
+                cfg.measurements.carrier.slipDetection.resetSigma_m          = 100;
+                cfg.measurements.carrier.slipDetection.action                = 'resetAndSkip';
+            end
+
+            % Stage 53/54: arc-separated ambiguities and arc consistency enforcement.
+            cfg.estimator.arcSeparatedAmbiguities.enable             = true;
+            cfg.estimator.enforceCarrierArcConsistency.enable        = true;
+            cfg.diagnostics.arcSeparatedAmbiguities.enable           = true;
+            cfg.diagnostics.carrierArcConsistencyEnforcement.enable  = true;
+            cfg.diagnostics.carrierArcEvidence.enable                = true;
+
+            % Observability and geometry diagnostics.
+            cfg.diagnostics.attitudeObservability.enable = true;
+            cfg.diagnostics.receiverGeometry.enable      = true;
+            cfg.diagnostics.ekfInnovationAccounting.enable = true;
+            if isfield(cfg,'diagnostics') && isfield(cfg.diagnostics,'attitudeEvidence')
+                cfg.diagnostics.attitudeEvidence.enable = true;
+            end
+
+            % Dynamics: constantVelocity for self-consistency with static-ECEF truth.
+            % If all-toggle tried to set j2, this override ensures no truth/EKF mismatch.
+            cfg.estimator.dynamics.mode = 'constantVelocity';
+
+            % Disable ISL/TWSTFT: single-asset scenario has no inter-spacecraft links.
+            if isfield(cfg,'measurements') && isfield(cfg.measurements,'isl')
+                cfg.measurements.isl.enable = false;
+                % TwoWayISLMeasurementBuilder.validateConfig requires isl.enable=true
+                % when twoWay.enable=true, so we must also disable twoWay.
+                if isfield(cfg.measurements.isl,'twoWay')
+                    cfg.measurements.isl.twoWay.enable = false;
+                    if isfield(cfg.measurements.isl.twoWay,'range')
+                        cfg.measurements.isl.twoWay.range.enable = false;
+                        cfg.measurements.isl.twoWay.range.useInEKF = false;
+                    end
+                    if isfield(cfg.measurements.isl.twoWay,'doppler')
+                        cfg.measurements.isl.twoWay.doppler.enable = false;
+                        cfg.measurements.isl.twoWay.doppler.useInEKF = false;
+                    end
+                end
+                if isfield(cfg.measurements.isl,'timing')
+                    cfg.measurements.isl.timing.enable = false;
+                end
+            end
+            if isfield(cfg,'measurements') && isfield(cfg.measurements,'twstft')
+                cfg.measurements.twstft.enable = false;
+            end
+        end
+
+        function lines = summaryLines(cfg)
+            % summaryLines  Report-ready lines for the active scenario preset.
+            lines = {};
+            name_ = '';
+            if isfield(cfg,'scenario') && isfield(cfg.scenario,'name')
+                name_ = cfg.scenario.name;
+            end
+            lines{end+1} = sprintf('Scenario preset      : %s', name_);
+            if strcmp(name_, 'singleAssetCarrierAttitude')
+                nRx_ = 4;
+                if isfield(cfg,'scenario') && isfield(cfg.scenario,'nReceivers')
+                    nRx_ = cfg.scenario.nReceivers;
+                end
+                lines{end+1} = sprintf('Receivers            : %d multi-antenna', nRx_);
+                lines{end+1} = 'Carrier partials     : enabled';
+                lines{end+1} = 'Code partials        : disabled';
+                lines{end+1} = 'Doppler partials     : disabled';
+                lines{end+1} = 'ISL / TWSTFT         : disabled';
+                lines{end+1} = 'EKF dynamics         : constantVelocity (self-consistent with static-ECEF truth)';
+                lines{end+1} = 'Integer fixing        : false';
+                lines{end+1} = 'LAMBDA/MLAMBDA        : false';
+                lines{end+1} = 'False-fix-risk control: false';
+                lines{end+1} = 'PPP-grade claim       : false';
+            end
+        end
+
+    end
+end
