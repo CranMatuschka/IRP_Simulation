@@ -3463,6 +3463,48 @@ classdef ClockExactReportBuilder
                 fprintf(fid, '\\bottomrule\n\\end{tabular}\\par\n\n');
             end
 
+            % --- Stage 63: Controlled Single-Asset Integer Ambiguity Fixing ---
+            if isfield(summary,'stage63IntegerFixingImplemented')
+                fprintf(fid, '\\subsection*{Controlled Single-Asset Integer Ambiguity Fixing (Stage~63)}\n');
+                fprintf(fid, ['\\textit{Stage~63 implements guarded raw-carrier integer ambiguity fixing ' ...
+                    'for the controlled singleAssetCarrierAttitude scenario. ' ...
+                    'Only floatPerTowerReceiverSignal ambiguity states are eligible. ' ...
+                    'Fixes pass 18~scientific guards (arc length, covariance, ' ...
+                    'distance-to-integer, residual) and are applied as EKF pseudo-measurements. ' ...
+                    'NOT LAMBDA/MLAMBDA, NOT carrier-IF fixing, NOT WL/NL, ' ...
+                    'NOT formal false-fix-risk control, NOT PPP-grade.}\n\n']);
+                fprintf(fid, '\\begin{tabular}{p{0.46\\textwidth}p{0.42\\textwidth}}\n');
+                fprintf(fid, '\\toprule\n\\textbf{Property} & \\textbf{Value}\\\\\n\\midrule\n');
+                fprintf(fid, 'Active stage & 63\\\\\n');
+                fprintf(fid, 'Integer fixing impl. & %s\\\\\n', mat2str(summary.stage63IntegerFixingImplemented));
+                fprintf(fid, 'Mode & \\texttt{%s}\\\\\n', strrep(summary.stage63Mode,'_','\_'));
+                fprintf(fid, 'Classification & \\texttt{%s}\\\\\n', strrep(summary.stage63Classification,'_','\_'));
+                fprintf(fid, 'Candidates (last epoch) & %d\\\\\n', summary.stage63nCandidates);
+                fprintf(fid, 'Accepted (cumulative) & %d\\\\\n', summary.stage63nAccepted);
+                fprintf(fid, 'Held (cumulative) & %d\\\\\n', summary.stage63nHeld);
+                fprintf(fid, 'Rejected (cumulative) & %d\\\\\n', summary.stage63nRejected);
+                if isfinite(summary.stage63MinSigmaCycles)
+                    fprintf(fid, 'Min $\\sigma$ (cycles, last) & %.4f\\\\\n', summary.stage63MinSigmaCycles);
+                end
+                if isfinite(summary.stage63MeanSigmaCycles)
+                    fprintf(fid, 'Mean $\\sigma$ (cycles, last) & %.4f\\\\\n', summary.stage63MeanSigmaCycles);
+                end
+                if isfinite(summary.stage63MaxDistToInt)
+                    fprintf(fid, 'Max dist-to-int (last) & %.4f cycles\\\\\n', summary.stage63MaxDistToInt);
+                end
+                fprintf(fid, 'LAMBDA/MLAMBDA & false\\\\\n');
+                fprintf(fid, 'Carrier-IF integer fixing & false\\\\\n');
+                fprintf(fid, 'Wide-lane/narrow-lane fixing & false\\\\\n');
+                fprintf(fid, 'False-fix-risk control & false\\\\\n');
+                fprintf(fid, 'PPP-grade claim & false\\\\\n');
+                fprintf(fid, '\\midrule\n');
+                fprintf(fid, ['\\multicolumn{2}{p{0.92\\textwidth}}{\\textit{Limitations: ' ...
+                    'LAMBDA/MLAMBDA integer resolution, carrier ionosphere-free integer fixing, ' ...
+                    'formal false-fix-risk ratio validation, calibrated phase-bias products, ' ...
+                    'and PPP-grade precise attitude are not implemented.}}\\\\\n']);
+                fprintf(fid, '\\bottomrule\n\\end{tabular}\\par\n\n');
+            end
+
             % --- Stage 59: Single-Space-Asset Multi-Antenna Carrier Attitude Scenario ---
             if isfield(summary,'stage59ScenarioEnabled') && summary.stage59ScenarioEnabled
                 fprintf(fid, '\\subsection*{Single-Space-Asset Multi-Antenna Carrier Attitude Scenario (Stage~59)}\n');

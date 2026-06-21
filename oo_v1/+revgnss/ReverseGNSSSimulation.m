@@ -34,6 +34,12 @@ classdef ReverseGNSSSimulation < handle
         diffAttStore                  = struct()   % Stage 15: differential attitude calibration state
         attInitDone    (1,1) logical = false
         attInitInfo                  = struct()
+        fixState63_                  = []         % Stage 63: containers.Map for held integer fixes
+        intFix63Enabled_             = false      % Stage 63: cached enable flag (set in initialize)
+        fix63Log_                    = struct('nAccepted',0,'nHeld',0,'nRejected',0,'nReset',0, ...
+                                         'lastClassification','disabled','lastSigmaMin',NaN, ...
+                                         'lastSigmaMean',NaN,'lastDistToInt',NaN, ...
+                                         'enabled',false,'mode','disabled')  % Stage 63 cumulative log
     end
 
     methods
@@ -67,6 +73,16 @@ classdef ReverseGNSSSimulation < handle
             end
             obj.attInitDone = false;
             obj.attInitInfo = revgnss.AttitudeInitializer.defaultInfo(obj.cfg);
+
+            % Stage 63: initialize integer fix state and cache enable flag
+            obj.fixState63_ = containers.Map('KeyType','char','ValueType','any');
+            obj.fix63Log_ = struct('nAccepted',0,'nHeld',0,'nRejected',0,'nReset',0, ...
+                'lastClassification','disabled','lastSigmaMin',NaN,'lastSigmaMean',NaN, ...
+                'lastDistToInt',NaN,'enabled',false,'mode','disabled');
+            obj.intFix63Enabled_ = isfield(obj.cfg,'estimator') && ...
+                isfield(obj.cfg.estimator,'integerAmbiguity') && ...
+                isfield(obj.cfg.estimator.integerAmbiguity,'enable') && ...
+                logical(obj.cfg.estimator.integerAmbiguity.enable);
 
             % Stage 15: differential carrier attitude calibration store
             attMode15 = '';
@@ -114,6 +130,7 @@ classdef ReverseGNSSSimulation < handle
         function step(obj, k)
             t_s = obj.tVec(k);
             dt  = obj.cfg.simulation.dt_s;
+            cpInfo = [];  % Stage 63: float carrier cpInfo captured in slip-detection block
 
             % Truth orbit propagation (external propagator, if any)
             if ~isempty(obj.orbitProp)
@@ -181,6 +198,8 @@ classdef ReverseGNSSSimulation < handle
                 end
                 obj.ekf.applyAmbiguityResets(resetRequests, resetSig);
                 errStruct.ambiguityResetCount = numel(resetRequests);
+                % Stage 63: remove held fixes for slipped tracks
+                revgnss.IntegerAmbiguityFixer.resetOnSlip(obj.fixState63_, resetRequests);
                 % Stage 53: attach per-row arc state to cpInfo after process().
                 arcSepEnabled = false;
                 try; arcSepEnabled = logical(obj.cfg.estimator.arcSeparatedAmbiguities.enable); catch; end
@@ -189,6 +208,9 @@ classdef ReverseGNSSSimulation < handle
                     errStruct.carrierPhase.arcId           = arcSt53_.arcId;
                     errStruct.carrierPhase.currentArcEpoch = arcSt53_.currentArcEpoch;
                     errStruct.carrierPhase.slipCount       = arcSt53_.slipCount;
+                    % Stage 63: propagate arc state into cpInfo for integer fixing gates
+                    cpInfo.arcId           = arcSt53_.arcId;
+                    cpInfo.currentArcEpoch = arcSt53_.currentArcEpoch;
                 end
             end
             errStruct.slipInfo = slipInfo;
@@ -280,6 +302,41 @@ classdef ReverseGNSSSimulation < handle
                 rowClass57_ = revgnss.EkfInnovationAccounting.classifyRows(mType57_, nPhys57_, nGauge57_);
                 errStruct.ekfAccounting57    = revgnss.EkfInnovationAccounting.compute(nu57_, S57_, rowClass57_);
                 errStruct.ekfAccountingRms57 = revgnss.EkfInnovationAccounting.residualRms(nu57_, rowClass57_);
+
+                % Stage 63: guarded raw-carrier integer ambiguity fixing.
+                % cpInfo63_: use embedded float rows when IF post-processing replaced cpInfo.
+                cpInfo63_ = cpInfo;
+                if isstruct(cpInfo) && isfield(cpInfo,'floatRows') && isstruct(cpInfo.floatRows)
+                    cpInfo63_ = cpInfo.floatRows;
+                    if arcSepEnabled && isfield(cpInfo,'arcId')
+                        cpInfo63_.arcId           = cpInfo.arcId;
+                        cpInfo63_.currentArcEpoch = cpInfo.currentArcEpoch;
+                    end
+                end
+                if obj.intFix63Enabled_ && isstruct(cpInfo63_) && ...
+                        isfield(cpInfo63_,'ambiguityStateIdx') && ~isempty(cpInfo63_.ambiguityStateIdx)
+                    rt63_.fixState = obj.fixState63_;
+                    rt63_.dt_s     = obj.cfg.simulation.dt_s;
+                    fix63_ = revgnss.IntegerAmbiguityFixer.assess( ...
+                        rt63_, obj.ekf, cpInfo63_, obj.cfg);
+                    for fi63_ = 1:numel(fix63_.candidateTable)
+                        cand63_ = fix63_.candidateTable(fi63_);
+                        obj.ekf.applyAmbiguityPseudoMeasurement( ...
+                            cand63_.ambiguityStateIdx, cand63_.Bfixed_m, cand63_.fixSigma_m);
+                        ent63_.arcId    = cand63_.arcId;
+                        ent63_.Bfixed_m = cand63_.Bfixed_m;
+                        obj.fixState63_(cand63_.trackKey) = ent63_;
+                    end
+                    obj.fix63Log_.nAccepted = obj.fix63Log_.nAccepted + fix63_.nAccepted;
+                    obj.fix63Log_.nHeld     = obj.fix63Log_.nHeld     + fix63_.nHeld;
+                    obj.fix63Log_.nRejected = obj.fix63Log_.nRejected + fix63_.nRejected;
+                    obj.fix63Log_.lastClassification = fix63_.classification;
+                    obj.fix63Log_.lastSigmaMin  = fix63_.minSigmaCycles;
+                    obj.fix63Log_.lastSigmaMean = fix63_.meanSigmaCycles;
+                    obj.fix63Log_.lastDistToInt = fix63_.maxDistanceToIntegerCycles;
+                    obj.fix63Log_.enabled = fix63_.enabled;
+                    obj.fix63Log_.mode    = fix63_.mode;
+                end
 
                 % Postfit residuals: recompute h with updated EKF state.
                 % Use physical z/errStruct (not augmented) so gauge rows

@@ -685,6 +685,39 @@ classdef ReportRunner
                 end
             catch; end
 
+            % ---- Stage 63: controlled raw-carrier integer ambiguity fixing ----
+            summary.stage63IntegerFixingImplemented = false;
+            summary.stage63Mode                     = 'disabled';
+            summary.stage63Classification           = 'disabled';
+            summary.stage63nCandidates              = 0;
+            summary.stage63nAccepted                = 0;
+            summary.stage63nHeld                    = 0;
+            summary.stage63nRejected                = 0;
+            summary.stage63nReset                   = 0;
+            summary.stage63MinSigmaCycles           = NaN;
+            summary.stage63MeanSigmaCycles          = NaN;
+            summary.stage63MaxSigmaCycles           = NaN;
+            summary.stage63MaxDistToInt             = NaN;
+            summary.stage63LambdaImplemented        = false;
+            summary.stage63CarrierIfFixingImpl      = false;
+            summary.stage63WideNarrowLaneFixingImpl = false;
+            summary.stage63FalseFixRiskControlled   = false;
+            summary.stage63PppGradeClaim            = false;
+            try
+                lg63 = sim.fix63Log_;  % property access throws if absent; caught below
+                if isstruct(lg63)
+                    summary.stage63IntegerFixingImplemented = lg63.enabled;
+                    if isfield(lg63,'mode');               summary.stage63Mode              = lg63.mode;              end
+                    if isfield(lg63,'lastClassification'); summary.stage63Classification    = lg63.lastClassification; end
+                    if isfield(lg63,'nAccepted');          summary.stage63nAccepted         = lg63.nAccepted;          end
+                    if isfield(lg63,'nHeld');              summary.stage63nHeld             = lg63.nHeld;              end
+                    if isfield(lg63,'nRejected');          summary.stage63nRejected         = lg63.nRejected;          end
+                    if isfield(lg63,'lastSigmaMin');       summary.stage63MinSigmaCycles    = lg63.lastSigmaMin;       end
+                    if isfield(lg63,'lastSigmaMean');      summary.stage63MeanSigmaCycles   = lg63.lastSigmaMean;      end
+                    if isfield(lg63,'lastDistToInt');      summary.stage63MaxDistToInt      = lg63.lastDistToInt;      end
+                end
+            catch; end
+
             % ---- Determine report layout before PDF generation -----------
             reportLayout = 'default';
             if isfield(cfg,'report') && isfield(cfg.report,'layout')

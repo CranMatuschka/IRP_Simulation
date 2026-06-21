@@ -808,6 +808,25 @@ classdef ReverseGNSSEKF < handle
         end
 
         % ----------------------------------------------------------------
+        function info = applyAmbiguityPseudoMeasurement(obj, ambIdx, fixedValue_m, sigma_m)
+            % applyAmbiguityPseudoMeasurement  Stage 63: constrain one ambiguity state.
+            %
+            % Builds a scalar pseudo-measurement z=fixedValue_m, h=x(ambIdx), H=[0..1..0],
+            % R=sigma_m^2 and calls update().  Preserves Stage 62 Joseph/posterior order.
+            info.applied = false; info.idx = ambIdx;
+            info.fixedValue_m = fixedValue_m; info.sigma_m = sigma_m;
+            info.postSigma_m = NaN; info.NIS = NaN; info.warning = '';
+            if ambIdx < 1 || ambIdx > obj.nx
+                info.warning = sprintf('ambIdx %d out of range [1,%d]', ambIdx, obj.nx); return
+            end
+            H_fix = zeros(1, obj.nx); H_fix(ambIdx) = 1;
+            [~, ~, ~, nis] = obj.update(fixedValue_m, obj.x(ambIdx), H_fix, sigma_m^2);
+            info.applied     = true;
+            info.postSigma_m = sqrt(max(0, obj.P(ambIdx, ambIdx)));
+            info.NIS         = nis;
+        end
+
+        % ----------------------------------------------------------------
         function applyAmbiguityResets(obj, resetRequests, resetSigma_m)
             % applyAmbiguityResets  Batch-reset covariance for slipped tracks.
             %

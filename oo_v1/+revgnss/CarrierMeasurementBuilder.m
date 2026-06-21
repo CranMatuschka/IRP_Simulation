@@ -258,9 +258,11 @@ classdef CarrierMeasurementBuilder
 
             % Stage 47: carrier IF post-processing (replaces L1+L2 with IF rows)
             if revgnss.CarrierIonoFreeRowBuilder.shouldCombine(cfg) && nSig_ == 2
+                cpInfo_float63_ = cpInfo;  % Stage 63: preserve float rows before IF replacement
                 [z_phi, h_phi, H_phi, R_phi, cpInfo] = ...
                     revgnss.CarrierIonoFreeRowBuilder.buildFromStack( ...
                         z_phi, h_phi, H_phi, R_phi, cpInfo, Mp, cfg);
+                cpInfo.floatRows = cpInfo_float63_;  % Stage 63: embedded for integer fixing
             end
         end
 

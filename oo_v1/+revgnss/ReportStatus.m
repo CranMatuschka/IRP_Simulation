@@ -12,8 +12,8 @@ classdef ReportStatus
     methods (Static)
 
         function s = current()
-            s.stage      = '62';
-            s.stageTitle = 'Quaternion Error-State Covariance Consistency Closure v1';
+            s.stage      = '63';
+            s.stageTitle = 'Controlled Single-Asset Integer Ambiguity Fixing v1';
             s.validationMode = 'targeted-random-smoke';
             s.fullSuiteRun   = false;
 
@@ -57,10 +57,10 @@ classdef ReportStatus
             end
             vsSHA = '';
             if isfield(vs, 'gitSHA'); vsSHA = strtrim(char(vs.gitSHA)); end
-            s.validationArtifactFresh = (vsStageNum >= 62) && strcmp(vsSHA, runtimeSHA);
+            s.validationArtifactFresh = (vsStageNum >= 63) && strcmp(vsSHA, runtimeSHA);
             if ~s.validationArtifactFresh
                 s.validationWarnings{end+1} = ...
-                    'No fresh local validation summary for this commit. Run: setenv(''OO_V1_VALIDATE_REPORT'',''true''); setenv(''OO_V1_VALIDATION_STAGE'',''62''); run_oo_reverse_gnss_report';
+                    'No fresh local validation summary for this commit. Run: setenv(''OO_V1_VALIDATE_REPORT'',''true''); setenv(''OO_V1_VALIDATION_STAGE'',''63''); run_oo_reverse_gnss_report';
             end
 
             if isfield(vs, 'selectedTestNames')
@@ -74,7 +74,7 @@ classdef ReportStatus
                 s.validationNote = '';
             end
 
-            s.missingScientificStages = revgnss.StageHistory.missingScientificItems(62);
+            s.missingScientificStages = revgnss.StageHistory.missingScientificItems(63);
             s.implementedStage24Items = revgnss.StageHistory.implementedItems();
         end
 
