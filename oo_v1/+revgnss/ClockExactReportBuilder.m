@@ -3277,6 +3277,38 @@ classdef ClockExactReportBuilder
                 fprintf(fid, 'False-fix-risk control & false\\\\\n');
                 fprintf(fid, '\\bottomrule\n\\end{tabular}\\par\n\n');
             end
+
+            % --- Stage 56: Measurement Geometry Core Consolidation ---
+            if isfield(summary,'linkGeometryPresent') && summary.linkGeometryPresent
+                fprintf(fid, '\\subsection*{Measurement Geometry Core Consolidation (Stage~56)}\n');
+                fprintf(fid, ['\\textit{Stage~56 consolidates duplicated measurement geometry ' ...
+                    'and Jacobian logic from CodeJacobianBuilder and CarrierMeasurementBuilder ' ...
+                    'into a shared LinkGeometry helper. Provides analytic LOS Jacobian, ' ...
+                    'finite-difference position/attitude Jacobians, and preferred attitude ' ...
+                    'partial controls (cfg.estimator.attitude.use\\{Code,Carrier,Doppler\\}Partials) ' ...
+                    'with backward-compatible legacy fallback. ' ...
+                    'No measurement physics, EKF math, carrier arc consistency, or ambiguity ' ...
+                    'handling is changed. No integer fixing, no LAMBDA/MLAMBDA.}\n\n']);
+                fprintf(fid, '\\begin{tabular}{p{0.46\\textwidth}p{0.42\\textwidth}}\n');
+                fprintf(fid, '\\toprule\n\\textbf{Property} & \\textbf{Value}\\\\\n\\midrule\n');
+                fprintf(fid, 'Active stage & 56\\\\\n');
+                fprintf(fid, 'LinkGeometry helper present & true\\\\\n');
+                fprintf(fid, 'CodeJacobianBuilder migrated & %s\\\\\n', ...
+                    mat2str(isfield(summary,'codeJacUsesSharedGeometry') && summary.codeJacUsesSharedGeometry));
+                fprintf(fid, 'CarrierMeasurementBuilder migrated & %s\\\\\n', ...
+                    mat2str(isfield(summary,'carrierMeasUsesSharedGeometry') && summary.carrierMeasUsesSharedGeometry));
+                attSrc56r_ = 'unknown';
+                if isfield(summary,'stage56AttPartialSource')
+                    attSrc56r_ = strrep(summary.stage56AttPartialSource,'_','\_');
+                end
+                fprintf(fid, 'Att.\\ partial source & \\texttt{%s}\\\\\n', attSrc56r_);
+                fprintf(fid, 'Measurement physics changed & false\\\\\n');
+                fprintf(fid, 'EKF math changed & false\\\\\n');
+                fprintf(fid, 'Integer fixing impl.\\ & false\\\\\n');
+                fprintf(fid, 'LAMBDA/MLAMBDA & false\\\\\n');
+                fprintf(fid, 'False-fix-risk control & false\\\\\n');
+                fprintf(fid, '\\bottomrule\n\\end{tabular}\\par\n\n');
+            end
         end
 
         % ================================================================

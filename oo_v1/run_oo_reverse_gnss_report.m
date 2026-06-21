@@ -35,7 +35,7 @@ oo_v1_envAllToggles_ = strcmpi(getenv('OO_V1_ALL_TOGGLES'), 'true');
 if oo_v1_envValidate_; oo_v1_envAllToggles_ = true; end  % validate always uses all toggles
 oo_v1_envStage_      = str2double(getenv('OO_V1_VALIDATION_STAGE'));
 if isnan(oo_v1_envStage_); oo_v1_envStage_ = 0; end
-if oo_v1_envValidate_ && oo_v1_envStage_ == 0; oo_v1_envStage_ = 55; end
+if oo_v1_envValidate_ && oo_v1_envStage_ == 0; oo_v1_envStage_ = 56; end
 oo_v1_envCompile_    = strtrim(getenv('OO_V1_REPORT_COMPILE_TEX'));
 
 cfg = revgnss.ConfigFactory.defaultConfig();
@@ -215,6 +215,17 @@ cfg.diagnostics.carrierArcConsistencyEnforcement.enable  = false;
 % collection in ReportRunner. Defaults to true — adds metadata only, no
 % scientific content, no EKF math, no integer fixing, no LAMBDA/MLAMBDA.
 cfg.diagnostics.pluginRegistry.enable = true;
+
+% --- Stage 56: preferred attitude partial controls ---------------
+% LinkGeometry.shouldUseAttitudePartials prefers cfg.estimator.attitude.use*Partials
+% when present, and falls back to the legacy estimateAttitudeFromPseudorange flag
+% when absent. The preferred fields are set explicitly below only when the user
+% wants to override. For default runs the legacy fallback handles everything.
+%
+% To enable attitude partials explicitly:
+%   cfg.estimator.attitude.useCodePartials    = true;
+%   cfg.estimator.attitude.useCarrierPartials = true;
+%   cfg.estimator.attitude.useDopplerPartials = false;
 
 % --- Inter-frequency bias budget (Stage 44) --------------------
 % Diagnostic only. Default all to 0 (no calibrated products in v1).

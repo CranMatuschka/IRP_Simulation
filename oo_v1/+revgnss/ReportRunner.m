@@ -357,6 +357,23 @@ classdef ReportRunner
                 end
             end
 
+            % ---- Stage 56: measurement geometry core consolidation ----
+            summary.linkGeometryPresent           = true;
+            summary.codeJacUsesSharedGeometry     = true;
+            summary.carrierMeasUsesSharedGeometry = true;
+            summary.stage56MeasPhysicsChanged     = false;
+            summary.stage56EkfMathChanged         = false;
+            summary.stage56IntegerFixing          = false;
+            summary.stage56Lambda                 = false;
+            summary.stage56FalseFixRisk           = false;
+            attSrc56_ = 'none';
+            try
+                attSrc56_ = revgnss.LinkGeometry.shouldUseAttitudePartials(cfg,'code').source;
+            catch; end
+            summary.stage56AttPartialSource = attSrc56_;
+            summary.preferredAttPartialsAvailable = true;
+            summary.legacyAttPartialsCompatible   = true;
+
             % ---- Known-ambiguity attitude validation (ATTITUDE VALIDATION ONLY — not operational) ----
             % Gated by cfg.estimator.runKnownAmbiguityValidation = true.
             % Runs a short comparison where truth float ambiguities are subtracted from

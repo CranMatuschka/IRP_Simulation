@@ -29,11 +29,11 @@ classdef MainScriptValidationGate
             state = struct();
 
             % Resolve stage, seed, count from env vars.
-            stg = 55;
+            stg = 56;
             v = str2double(getenv('OO_V1_VALIDATION_STAGE'));
             if ~isnan(v) && v > 0; stg = round(v); end
 
-            seed = 55;
+            seed = 56;
             v = str2double(getenv('OO_V1_RANDOM_TEST_SEED'));
             if ~isnan(v) && isfinite(v); seed = round(v); end
 
@@ -224,6 +224,7 @@ classdef MainScriptValidationGate
                 case 53; t = 'Cycle-Slip-Aware Arc-Separated Float Ambiguities v1';
                 case 54; t = 'Enforced Arc-Consistent Carrier Combinations v1';
                 case 55; t = 'Source Truth and Report Architecture Cleanup v1';
+                case 56; t = 'Measurement Geometry Core Consolidation v1';
                 otherwise
                     try; t = revgnss.ReportStatus.current().stageTitle; catch; t = sprintf('Stage %d', stg); end
             end

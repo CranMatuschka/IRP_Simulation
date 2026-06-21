@@ -26,7 +26,10 @@ classdef CarrierMeasurementBuilder
 
             Mp = numel(twr_pairs);
 
-            % Carrier IF not implemented in oo_v1.
+            % Carrier IF float rows are supported through CarrierIonoFreeRowBuilder when
+            % the guarded row toggle is enabled (Stage 47+). Integer ambiguity fixing is
+            % not implemented. Legacy cfg.measurements.carrierCombinationMode='ionosphereFree'
+            % is a deprecated path — reject it here to prevent silent raw-L1 fallback.
             if isfield(cfg,'measurements') && ...
                     isfield(cfg.measurements,'carrierCombinationMode') && ...
                     strcmp(cfg.measurements.carrierCombinationMode,'ionosphereFree')
@@ -36,15 +39,15 @@ classdef CarrierMeasurementBuilder
                     policy = cfg.validation.unsupportedFeaturePolicy;
                 end
                 if ~strcmp(policy,'disableWithWarning')
-                    error('MeasurementModel:carrierIFNotImplemented', ...
-                        ['Carrier ionosphere-free combination is NOT implemented in oo_v1. ' ...
-                         'Only raw L1 float carrier EKF is supported. ' ...
-                         'Use code IF (codeMode=''ionosphereFree'') or disable carrier EKF. ' ...
+                    error('MeasurementModel:carrierIFLegacyPath', ...
+                        ['cfg.measurements.carrierCombinationMode=''ionosphereFree'' is a ' ...
+                         'deprecated path. Carrier IF float rows use CarrierIonoFreeRowBuilder ' ...
+                         '(enabled via cfg.measurements.carrier.ionoFreeRows.enable=true). ' ...
                          'To suppress this error and use raw L1, set: ' ...
                          'cfg.validation.unsupportedFeaturePolicy = ''disableWithWarning''.']);
                 else
-                    warning('MeasurementModel:carrierIFNotImplemented', ...
-                        'carrierCombinationMode=ionosphereFree not implemented. Using raw L1 carrier instead.');
+                    warning('MeasurementModel:carrierIFLegacyPath', ...
+                        'carrierCombinationMode=ionosphereFree is deprecated; using raw L1 carrier instead.');
                 end
             end
 
@@ -158,13 +161,11 @@ classdef CarrierMeasurementBuilder
                 rho_t = revgnss.RangeCorrections.correctedPseudorange( ...
                     r_ants_truth(:,ai), r_twr_t, cfg, 'truth', elv, t_s);
 
-                % Model geometric range
-                r_ant_e    = r_ants_est(:, ai);
-                r_twr_e    = revgnss.MeasurementModelUtils.towerPositionEcef(cfg, towers{ti}, ti, 'model');
-                delta_e    = r_ant_e - r_twr_e;
-                rho_e_geom = norm(delta_e); if rho_e_geom < 1; rho_e_geom = 1; end
+                % Model geometric range — analytic geometry via shared helper
+                g_e = revgnss.LinkGeometry.analyticLosJacobian( ...
+                    cfg, towers, ti, ai, r_cm_est, euler_est, leverArms_model);
                 rho_e = revgnss.RangeCorrections.correctedPseudorange( ...
-                    r_ant_e, r_twr_e, cfg, 'model', elv, t_s);
+                    g_e.r_ant_model_m, g_e.r_tower_model_m, cfg, 'model', elv, t_s);
 
                 noise_phi = sigma_phi * errorChain.drawNormal(1,1);
 
@@ -190,40 +191,20 @@ classdef CarrierMeasurementBuilder
 
                 % ---- H: position columns (analytic or finite-difference) ------
                 if doFD
-                    % Central finite-difference position Jacobian.
-                    step_r = 1.0;
-                    for ki = 1:3
-                        rp = r_cm_est; rp(ki) = rp(ki) + step_r;
-                        rm = r_cm_est; rm(ki) = rm(ki) - step_r;
-                        hp = revgnss.MeasurementModelUtils.modelRangeOnly( ...
-                            cfg, towers, ti, ai, rp, euler_est, leverArms_model);
-                        hm = revgnss.MeasurementModelUtils.modelRangeOnly( ...
-                            cfg, towers, ti, ai, rm, euler_est, leverArms_model);
-                        H_phi(rowOut, stateMap.r_idx(ki)) = (hp - hm) / (2*step_r);
-                    end
+                    H_phi(rowOut, stateMap.r_idx) = revgnss.LinkGeometry.finiteDiffPositionJacobian( ...
+                        cfg, towers, ti, ai, r_cm_est, euler_est, leverArms_model, 1.0);
                 else
-                    % Analytic unit vector (pure geometry, no range corrections)
-                    H_phi(rowOut, stateMap.r_idx) = (delta_e / rho_e_geom)';
+                    H_phi(rowOut, stateMap.r_idx) = g_e.losRow;
                 end
 
-                doAttJac = isfield(cfg.estimator, 'estimateAttitude') && ...
-                    cfg.estimator.estimateAttitude && ...
-                    isfield(cfg.estimator, 'estimateAttitudeFromPseudorange') && ...
-                    cfg.estimator.estimateAttitudeFromPseudorange;
-                if doAttJac && norm(leverArms_model(:, ai)) > 1e-9
+                attGate = revgnss.LinkGeometry.shouldUseAttitudePartials(cfg, 'carrier');
+                if attGate.enabled && norm(leverArms_model(:, ai)) > 1e-9
                     step_e = 1e-6;
                     if isfield(cfg.estimator,'attitudeJacobianStep_rad')
                         step_e = cfg.estimator.attitudeJacobianStep_rad;
                     end
-                    for ke = 1:3
-                        ep = euler_est; ep(ke) = ep(ke) + step_e;
-                        em = euler_est; em(ke) = em(ke) - step_e;
-                        hp = revgnss.MeasurementModelUtils.modelRangeOnly( ...
-                            cfg, towers, ti, ai, r_cm_est, ep, leverArms_model);
-                        hm = revgnss.MeasurementModelUtils.modelRangeOnly( ...
-                            cfg, towers, ti, ai, r_cm_est, em, leverArms_model);
-                        H_phi(rowOut, stateMap.euler_idx(ke)) = (hp - hm) / (2*step_e);
-                    end
+                    H_phi(rowOut, stateMap.euler_idx) = revgnss.LinkGeometry.finiteDiffAttitudeJacobian( ...
+                        cfg, towers, ti, ai, r_cm_est, euler_est, leverArms_model, step_e);
                 end
 
                 % ---- H: clock, ambiguity, ZWD (always analytic) ---------------
