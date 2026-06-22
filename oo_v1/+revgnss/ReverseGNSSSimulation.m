@@ -402,7 +402,7 @@ classdef ReverseGNSSSimulation < handle
                         obj.diffAttStore, cpDA, xDA_, obj.ekf.stateMap, ...
                         obj.towers, lArms15, obj.cfg);
                 elseif ~obj.diffAttStore.calibrated
-                    obj.diffAttStore = revgnss.DiffAttitudeBuilder.finalize(obj.diffAttStore);
+                    obj.diffAttStore = revgnss.DiffAttitudeBuilder.finalize(obj.diffAttStore, obj.cfg);
                 end
                 if obj.diffAttStore.calibrated
                     obj.diffAttStore = revgnss.DiffAttitudeBuilder.accumulate( ...

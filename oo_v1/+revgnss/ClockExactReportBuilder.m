@@ -1374,9 +1374,11 @@ classdef ClockExactReportBuilder
                 fprintf(fid, '\\vspace{0.2cm}\n\\noindent \\textit{%s}\n\n', ...
                     CE.esc_(testLines{1}));
             end
-            fprintf(fid, ['\\noindent \\textit{Scientific limitations (v1): float carrier only, ' ...
-                'no integer fixing, no L2 carrier EKF, no carrier IF, no PPP-grade accuracy, ' ...
-                'no ANTEX/IONEX/SP3/CLK parsers. Full validation suite NOT RUN (targeted random smoke only).}\n\n']);
+            fprintf(fid, ['\\noindent \\textit{Scientific limitations (v1): ' ...
+                'baseline differential integer fixing implemented (Stage 70); ' ...
+                'no LAMBDA/MLAMBDA, no WL/NL, no carrier-IF integer fixing; ' ...
+                'no L2 carrier EKF, no PPP-grade accuracy, no ANTEX/IONEX/SP3/CLK parsers. ' ...
+                'Full validation suite NOT RUN (targeted random smoke only).}\n\n']);
         end
 
         % ================================================================
@@ -1464,8 +1466,30 @@ classdef ClockExactReportBuilder
             fprintf(fid, 'Initializer & \\texttt{%s} (optional; not primary estimator)\\\\\n', strrep(attInit_,'_','\_'));
             attCar_ = 'calibratedDifferentialAmbiguity';
             if isfield(summary,'stage67AttCarrierMode'); attCar_ = summary.stage67AttCarrierMode; end
-            fprintf(fid, 'Carrier tracking & \\texttt{%s} (relative; no absolute attitude reference)\\\\\n', strrep(attCar_,'_','\_'));
-            fprintf(fid, 'Absolute attitude claim & false (differential carrier = relative only)\\\\\n');
+            fprintf(fid, 'Carrier tracking & \\texttt{%s}\\\\\n', strrep(attCar_,'_','\_'));
+            % Stage 70: baseline integer fix status
+            arAttempted_ = false; arAccepted_ = false; arClass_ = 'notAttempted';
+            arExtSrc_ = true; arExtSrch_ = false;
+            if isfield(summary,'baselineIntegerFixAttempted'); arAttempted_ = summary.baselineIntegerFixAttempted; end
+            if isfield(summary,'baselineIntegerFixAccepted');  arAccepted_  = summary.baselineIntegerFixAccepted;  end
+            if isfield(summary,'baselineIntegerFixClassification'); arClass_ = summary.baselineIntegerFixClassification; end
+            if isfield(summary,'externalReferenceUsedForCalibration'); arExtSrc_ = summary.externalReferenceUsedForCalibration; end
+            if isfield(summary,'externalReferenceUsedAsSearchCenter'); arExtSrch_ = summary.externalReferenceUsedAsSearchCenter; end
+            nFix_ = 0; nRej_ = 0;
+            if isfield(summary,'nBaselineIntegerFixed');   nFix_ = summary.nBaselineIntegerFixed;   end
+            if isfield(summary,'nBaselineIntegerRejected'); nRej_ = summary.nBaselineIntegerRejected; end
+            if arAttempted_ && arAccepted_
+                fprintf(fid, 'Baseline $\\Delta N$ integer fix & \\texttt{%s} (%d fixed, %d rejected; extRef=searchCentreOnly)\\\\\n', ...
+                    strrep(arClass_,'_','\_'), nFix_, nRej_);
+                fprintf(fid, 'Absolute attitude claim & true (integer-fixed baseline carrier; $\\lambda_{L1} \\Delta N$ removed)\\\\\n');
+            elseif arAttempted_
+                fprintf(fid, 'Baseline $\\Delta N$ integer fix & \\texttt{%s} (0 fixed; fallback to float calibration)\\\\\n', ...
+                    strrep(arClass_,'_','\_'));
+                fprintf(fid, 'Absolute attitude claim & false (integer fix failed; differential tracking only)\\\\\n');
+            else
+                fprintf(fid, 'Baseline $\\Delta N$ integer fix & not attempted (AR disabled)\\\\\n');
+                fprintf(fid, 'Absolute attitude claim & false (differential carrier = relative only)\\\\\n');
+            end
             fprintf(fid, '\\bottomrule\n\\end{tabular}\n\n\\vspace{6pt}\n');
 
             % ---- 5. Clocks ---
@@ -1505,8 +1529,8 @@ classdef ClockExactReportBuilder
             fprintf(fid, '\\begin{tabular}{p{0.92\\textwidth}}\n\\toprule\n');
             fprintf(fid, 'No external RINEX/SP3/CLK/ANTEX/IONEX products ingested.\\\\\n');
             fprintf(fid, 'No PPP-grade or operational navigation claim.\\\\\n');
-            fprintf(fid, 'No LAMBDA/MLAMBDA or formal integer ambiguity fixing; no WL/NL; no false-fix-risk control.\\\\\n');
-            fprintf(fid, 'No mission-qualified attitude determination (differential carrier = relative tracking only).\\\\\n');
+            fprintf(fid, 'No LAMBDA/MLAMBDA, no WL/NL, no false-fix-risk control; baseline differential integer fixing implemented (Stage 70).\\\\\n');
+            fprintf(fid, 'No mission-qualified attitude determination (synthetic controlled scenario only).\\\\\n');
             fprintf(fid, 'No calibrated hardware bias/DCB/phase-bias products.\\\\\n');
             fprintf(fid, 'Doppler simplified v1: LOS range-rate + clock drift; no Sagnac-rate, no relativistic range-rate, no lever-arm velocity.\\\\\n');
             fprintf(fid, 'IF covariance: uncorrelated noise assumption ($\\mathrm{Cov}(L_1,L_2)=0$).\\\\\n');

@@ -29,11 +29,11 @@ classdef MainScriptValidationGate
             state = struct();
 
             % Resolve stage, seed, count from env vars.
-            stg = 69;
+            stg = 70;
             v = str2double(getenv('OO_V1_VALIDATION_STAGE'));
             if ~isnan(v) && v > 0; stg = round(v); end
 
-            seed = 69;
+            seed = 70;
             v = str2double(getenv('OO_V1_RANDOM_TEST_SEED'));
             if ~isnan(v) && isfinite(v); seed = round(v); end
 
@@ -241,6 +241,7 @@ classdef MainScriptValidationGate
                 case 67; t = 'Single-Asset Attitude, Clock, and Dynamics Realism Closure';
                 case 68; t = 'Single-Asset One-Way Realistic Physics Closure';
                 case 69; t = 'Carrier-Lever-Arm Attitude Closure';
+                case 70; t = 'Baseline Carrier Attitude Ambiguity Resolution';
                 otherwise
                     try; t = revgnss.ReportStatus.current().stageTitle; catch; t = sprintf('Stage %d', stg); end
             end

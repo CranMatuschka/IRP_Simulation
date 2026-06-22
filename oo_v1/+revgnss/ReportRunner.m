@@ -916,6 +916,26 @@ classdef ReportRunner
                 fprintf('  PDF written: %s  (%.1f kB)\n', pdfPath, info.bytes/1024);
             end
 
+            % ---- Stage 70: baseline carrier integer fix summary fields --------
+            try
+                st70_ = sim.diffAttStore;
+                summary.baselineIntegerFixAttempted         = st70_.integerFixAttempted;
+                summary.baselineIntegerFixAccepted          = st70_.integerFixAccepted;
+                summary.nBaselineIntegerFixed               = st70_.nIntegerFixed;
+                summary.nBaselineIntegerRejected            = st70_.nIntegerRejected;
+                summary.baselineIntegerFixClassification    = st70_.integerClassification;
+                summary.externalReferenceUsedAsSearchCenter = st70_.externalRefUsedAsSearchCenter;
+                summary.externalReferenceUsedForCalibration = st70_.externalRefUsedForCalibration;
+            catch
+                summary.baselineIntegerFixAttempted         = false;
+                summary.baselineIntegerFixAccepted          = false;
+                summary.nBaselineIntegerFixed               = 0;
+                summary.nBaselineIntegerRejected            = 0;
+                summary.baselineIntegerFixClassification    = 'notAttempted';
+                summary.externalReferenceUsedAsSearchCenter = false;
+                summary.externalReferenceUsedForCalibration = true;
+            end
+
             % ---- MAT: save ----------------------------------------------
             cs = diag.getContributionSeries();
             if writeMat

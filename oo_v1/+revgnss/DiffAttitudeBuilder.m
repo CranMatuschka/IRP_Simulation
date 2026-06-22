@@ -3,23 +3,26 @@ classdef DiffAttitudeBuilder
     %
     % Scientific basis: phi(t,i) - phi(t,1) cancels b_rx and b_twr; the
     % differential ambiguity delta_B(t,i) = B(t,i) - B(t,1) is constant per arc.
-    % After calibrating delta_B via a dedicated window, the residual observable
-    % constrains attitude without a free ambiguity column — breaking the absorption.
+    % Stage 69: delta_B calibrated at an external reference attitude so the
+    % calibration window does not absorb the initial attitude error.
+    % Stage 70: integer ambiguity resolution for delta_B via
+    %   BaselineCarrierAmbiguityResolver (raw L1 candidate search, RMS gate,
+    %   ratio test).  If accepted, delta_B = lambda_L1 * N_int (integer metres).
+    %   If rejected, falls back to the Stage 69 float mean.
     %
-    % LIMITATION: calibration absorbs the attitude error present at calibration
-    % time. The mode tracks attitude CHANGES from the calibration reference.
-    % For absolute attitude from a wrong initial estimate, KAV is needed first.
-    %
-    % store struct fields:
+    % store struct fields (partial list):
     %   calibrated   logical   - true after finalize() with enough epochs
     %   nBaselines   int       - number of receiver baselines (nRx - 1)
     %   nTowers      int
     %   calibWin_s   double    - calibration window end time (s)
     %   accumN       [nT x nB] - epoch count per baseline
-    %   accumSum     [nT x nB] - sum of (delta_phi - model_diff) per baseline
+    %   accumSum     [nT x nB] - sum of (delta_phi - model_diff) [m]
+    %   accumSumSq   [nT x nB] - sum of squares of (delta_phi - model_diff) [m²]
     %   delta_B      [nT x nB] - calibrated differential ambiguity (m)
-    %   calibResidRMS_m        - RMS of calibration mean biases
-    %   nValidBaselines        - baselines with >= minCalibEpochs data
+    %   N_int        [nT x nB] - fixed integer ΔN (0 when not fixed)
+    %   integerFixAttempted / Accepted / nIntegerFixed / nIntegerRejected
+    %   integerClassification string
+    %   externalRefUsedAsSearchCenter / externalRefUsedForCalibration logical
 
     methods (Static)
 
@@ -35,8 +38,8 @@ classdef DiffAttitudeBuilder
                 calibWin = cfg.estimator.diffAtt.calibWin_s;
             end
             % Stage 69: referenceMode controls calibration attitude source.
-            % 'selfCalibrated'         — use current EKF attitude (relative tracking only)
-            % 'externalInitialAttitude'— use external reference set via setReference()
+            % 'selfCalibrated'          — use current EKF attitude (relative tracking only)
+            % 'externalInitialAttitude' — use external reference set via setReference()
             refMode = 'selfCalibrated';
             if isfield(cfg,'estimator') && isfield(cfg.estimator,'diffAtt') && ...
                     isfield(cfg.estimator.diffAtt,'referenceMode')
@@ -49,6 +52,7 @@ classdef DiffAttitudeBuilder
             store.calibWin_s       = calibWin;
             store.accumN           = zeros(nTowers, nBase);
             store.accumSum         = zeros(nTowers, nBase);
+            store.accumSumSq       = zeros(nTowers, nBase);   % Stage 70: for integer search
             store.delta_B          = zeros(nTowers, nBase);
             store.calibResidRMS_m  = NaN;
             store.nValidBaselines  = 0;
@@ -58,7 +62,16 @@ classdef DiffAttitudeBuilder
             store.recalibCount     = 0;
             store.referenceMode               = refMode;
             store.referenceAttitude_euler_rad = [];
-            store.calibDoneAtTime_s           = NaN;   % set by finalize(); guards post-calib slip reset
+            store.calibDoneAtTime_s           = NaN;
+            % Stage 70: integer ambiguity resolution result fields.
+            store.N_int                         = zeros(nTowers, nBase);
+            store.integerFixAttempted           = false;
+            store.integerFixAccepted            = false;
+            store.nIntegerFixed                 = 0;
+            store.nIntegerRejected              = 0;
+            store.integerClassification         = 'notAttempted';
+            store.externalRefUsedAsSearchCenter = false;
+            store.externalRefUsedForCalibration = true;
         end
 
         % ----------------------------------------------------------------
@@ -74,13 +87,9 @@ classdef DiffAttitudeBuilder
             % accumulate  Collect one calibration epoch.
             %
             % Stage 69 fixes:
-            %   (a) Primary-signal filter: when two frequencies are enabled,
-            %       select only the primary (lowest signalIdx) row per tower-antenna
-            %       pair so 'sum(mask)==1' is satisfied even with L1+L2 in cpInfo.
-            %   (b) External reference attitude: when referenceMode='externalInitialAttitude'
-            %       and ~store.calibrated, use store.referenceAttitude_euler_rad for model
-            %       evaluation so delta_B is calibrated at the reference attitude, not the
-            %       (potentially wrong) EKF attitude.
+            %   (a) Primary-signal filter: only lowest signalIdx row per tower-antenna pair.
+            %   (b) External reference attitude used for model when ~calibrated.
+            % Stage 70: also accumulate sum-of-squares for integer candidate search.
             if ~isfield(cpInfo,'phi_m') || isempty(cpInfo.phi_m); return; end
             if store.nBaselines < 1; return; end
             r_cm = x_est(sm.r_idx);
@@ -93,11 +102,9 @@ classdef DiffAttitudeBuilder
             else
                 euler = x_est(sm.euler_idx);
             end
-            % Stage 69 (a): helper to pick primary-signal row.
             hasSigIdx = isfield(cpInfo,'signalIdx');
             for ti = 1:store.nTowers
                 refMask = (cpInfo.towerIdx == ti) & (cpInfo.antennaIdx == 1);
-                % With two frequencies, keep only the primary (lowest) signal index.
                 if hasSigIdx && sum(refMask) > 1
                     primSig = min(cpInfo.signalIdx(refMask));
                     refMask = refMask & (cpInfo.signalIdx == primSig);
@@ -120,9 +127,10 @@ classdef DiffAttitudeBuilder
                     if store.calibrated && store.activeMask(ti,bi)
                         continue
                     end
-                    store.accumN(ti,bi)   = store.accumN(ti,bi)   + 1;
-                    store.accumSum(ti,bi) = store.accumSum(ti,bi) + ...
-                        (phi_i - phi_ref) - (h_i - h_ref);
+                    dv = (phi_i - phi_ref) - (h_i - h_ref);   % Stage 70: named variable
+                    store.accumN(ti,bi)     = store.accumN(ti,bi)     + 1;
+                    store.accumSum(ti,bi)   = store.accumSum(ti,bi)   + dv;
+                    store.accumSumSq(ti,bi) = store.accumSumSq(ti,bi) + dv^2;  % Stage 70
                     if store.calibrated && store.accumN(ti,bi) >= 5
                         store.delta_B(ti,bi) = store.accumSum(ti,bi) / store.accumN(ti,bi);
                         store.activeMask(ti,bi)  = true;
@@ -161,8 +169,13 @@ classdef DiffAttitudeBuilder
         end
 
         % ----------------------------------------------------------------
-        function store = finalize(store)
-            % finalize  Compute calibrated differential biases from accumulation.
+        function store = finalize(store, cfg)
+            % finalize  Compute calibrated differential biases; attempt integer fix.
+            %
+            % Stage 69: float delta_B = accumSum / n (at external reference attitude).
+            % Stage 70: then calls BaselineCarrierAmbiguityResolver.resolve() to
+            %   attempt integer fix; on success delta_B = lambda_L1 * N_int.
+            if nargin < 2; cfg = struct(); end  % backward-compat guard
             minEpochs = 5;
             nValid = 0; rssB = 0;
             for ti = 1:store.nTowers
@@ -187,6 +200,8 @@ classdef DiffAttitudeBuilder
             end
             fprintf('  [DiffAtt] Calibration done: %d/%d baselines OK\n', ...
                 nValid, store.nTowers * store.nBaselines);
+            % Stage 70: attempt integer ambiguity resolution for delta_B.
+            store = revgnss.BaselineCarrierAmbiguityResolver.resolve(store, cfg);
         end
 
         % ----------------------------------------------------------------
@@ -194,12 +209,22 @@ classdef DiffAttitudeBuilder
                 store, cpInfo, x_est, sm, towers, leverArms, cfg, nx)
             % buildRows  Post-calibration differential carrier EKF rows.
             %
-            % H is NON-ZERO only for attitude (Euler) columns.
-            % Clock, position, and ambiguity columns are zero (all cancel in diff).
+            % H is NON-ZERO only for attitude (error-state delta_theta) columns.
+            % Stage 70: Jacobian uses LinkGeometry.finiteDiffAttitudeJacobian
+            %   (quaternion error-state convention) in place of direct Euler
+            %   perturbation, consistent with the QES EKF attitude state.
             z_da = []; h_da = []; H_da = zeros(0,nx); R_da = [];
             info.nRows = 0; info.residualRMS_m = NaN; info.active = false;
             info.activeBaselines = 0; info.lostBaselines = 0;
             info.recalibratedBaselines = 0; info.rejectedRows = 0;
+            % Stage 70: propagate integer fix status into every daInfo struct.
+            info.integerFixAttempted           = store.integerFixAttempted;
+            info.integerFixAccepted            = store.integerFixAccepted;
+            info.nIntegerFixed                 = store.nIntegerFixed;
+            info.nIntegerRejected              = store.nIntegerRejected;
+            info.integerClassification         = store.integerClassification;
+            info.externalRefUsedAsSearchCenter = store.externalRefUsedAsSearchCenter;
+            info.externalRefUsedForCalibration = store.externalRefUsedForCalibration;
 
             if ~store.calibrated || ~isfield(cpInfo,'phi_m') || isempty(cpInfo.phi_m)
                 return
@@ -226,7 +251,6 @@ classdef DiffAttitudeBuilder
             rows_z = zeros(0,1); rows_h = zeros(0,1); rows_H = zeros(0,nx);
             for ti = 1:store.nTowers
                 refMask = (cpInfo.towerIdx==ti) & (cpInfo.antennaIdx==1);
-                % Stage 69: primary-signal filter — keep only lowest signalIdx.
                 if hasSigIdx && sum(refMask) > 1
                     primSig = min(cpInfo.signalIdx(refMask));
                     refMask = refMask & (cpInfo.signalIdx == primSig);
@@ -235,16 +259,9 @@ classdef DiffAttitudeBuilder
                 phi_ref = cpInfo.phi_m(refMask);
                 h_ref = revgnss.MeasurementModelUtils.modelRangeOnly( ...
                     cfg, towers, ti, 1, r_cm, euler, leverArms);
-                % Cache perturbed reference ranges for efficient Jacobian
-                hp_ref = zeros(1,3); hm_ref = zeros(1,3);
-                for ke = 1:3
-                    ep = euler; ep(ke) = ep(ke) + step_e;
-                    em = euler; em(ke) = em(ke) - step_e;
-                    hp_ref(ke) = revgnss.MeasurementModelUtils.modelRangeOnly( ...
-                        cfg, towers, ti, 1, r_cm, ep, leverArms);
-                    hm_ref(ke) = revgnss.MeasurementModelUtils.modelRangeOnly( ...
-                        cfg, towers, ti, 1, r_cm, em, leverArms);
-                end
+                % Stage 70: QES differential Jacobian — compute reference once per tower.
+                H_att_ref = revgnss.LinkGeometry.finiteDiffAttitudeJacobian( ...
+                    cfg, towers, ti, 1, r_cm, euler, leverArms, step_e);
                 for bi = 1:store.nBaselines
                     ai = bi + 1;
                     if isfield(store,'activeMask')
@@ -263,22 +280,15 @@ classdef DiffAttitudeBuilder
                         cfg, towers, ti, ai, r_cm, euler, leverArms);
                     z_row = phi_i - phi_ref;
                     h_row = (h_i - h_ref) + store.delta_B(ti,bi);
-                    % Slip guard: if |innovation| > 1 m the arc restarted after calibration
                     if abs(z_row - h_row) > 1.0
                         info.rejectedRows = info.rejectedRows + 1;
                         continue
                     end
+                    % Stage 70: QES Jacobian H = ∂Δρ/∂δθ = H_att_i − H_att_ref.
+                    H_att_i = revgnss.LinkGeometry.finiteDiffAttitudeJacobian( ...
+                        cfg, towers, ti, ai, r_cm, euler, leverArms, step_e);
                     H_row = zeros(1,nx);
-                    for ke = 1:3
-                        ep = euler; ep(ke) = ep(ke) + step_e;
-                        em = euler; em(ke) = em(ke) - step_e;
-                        hp_i = revgnss.MeasurementModelUtils.modelRangeOnly( ...
-                            cfg, towers, ti, ai, r_cm, ep, leverArms);
-                        hm_i = revgnss.MeasurementModelUtils.modelRangeOnly( ...
-                            cfg, towers, ti, ai, r_cm, em, leverArms);
-                        H_row(sm.euler_idx(ke)) = ...
-                            ((hp_i - hp_ref(ke)) - (hm_i - hm_ref(ke))) / (2*step_e);
-                    end
+                    H_row(sm.euler_idx) = H_att_i - H_att_ref;
                     rows_z(end+1,1) = z_row; %#ok<AGROW>
                     rows_h(end+1,1) = h_row; %#ok<AGROW>
                     rows_H(end+1,:) = H_row; %#ok<AGROW>

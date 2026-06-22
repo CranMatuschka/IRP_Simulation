@@ -35,7 +35,7 @@ oo_v1_envAllToggles_ = strcmpi(getenv('OO_V1_ALL_TOGGLES'), 'true');
 if oo_v1_envValidate_; oo_v1_envAllToggles_ = true; end  % validate always uses all toggles
 oo_v1_envStage_      = str2double(getenv('OO_V1_VALIDATION_STAGE'));
 if isnan(oo_v1_envStage_); oo_v1_envStage_ = 0; end
-if oo_v1_envValidate_ && oo_v1_envStage_ == 0; oo_v1_envStage_ = 69; end
+if oo_v1_envValidate_ && oo_v1_envStage_ == 0; oo_v1_envStage_ = 70; end
 oo_v1_envCompile_    = strtrim(getenv('OO_V1_REPORT_COMPILE_TEX'));
 
 cfg = revgnss.ConfigFactory.defaultConfig();
@@ -330,10 +330,25 @@ cfg.estimator.diffAtt.referenceSigma_deg     = 0.1;                         % St
 cfg.estimator.attitude.carrierSignal         = 'L1';
 cfg.estimator.attitude.useRawCarrierForAttitude = true;
 
-% --- Coarse attitude initializer (Stage 17) — DISABLED in Stage 69 ------
+% --- Stage 70: baseline carrier attitude ambiguity resolution ---------------
+% Controlled raw-L1 receiver-baseline integer ambiguity resolver for the
+% lever-arm attitude system.  External initial attitude used ONLY as search
+% centre; it is NOT the primary calibration source when integer fix succeeds.
+% Candidate search as primary attitude estimator remains disabled.
+cfg.estimator.diffAtt.ambiguityResolution.enable                       = true;
+cfg.estimator.diffAtt.ambiguityResolution.method                       = 'constrainedBaselineIntegerSearch';
+cfg.estimator.diffAtt.ambiguityResolution.signal                       = 'L1';
+cfg.estimator.diffAtt.ambiguityResolution.searchHalfWidth_cycles       = 5;
+cfg.estimator.diffAtt.ambiguityResolution.minArcEpochs                 = 10;
+cfg.estimator.diffAtt.ambiguityResolution.rmsThreshold_cycles          = 0.10;
+cfg.estimator.diffAtt.ambiguityResolution.ratioThreshold               = 2.0;
+cfg.estimator.diffAtt.ambiguityResolution.useExternalReferenceAsSearchCenter = true;
+cfg.estimator.diffAtt.ambiguityResolution.allowExternalReferenceFallback     = true;
+
+% --- Coarse attitude initializer (Stage 17) — DISABLED in Stage 69+ -----
 % Disabled: 'coarseBaselineIntegerSearch' was injecting a potentially wrong
 % initial attitude into the quaternion EKF.  The differential calibration with
-% externalInitialAttitude reference is now the sole absolute attitude source.
+% externalInitialAttitude reference + Stage 70 integer fix is now the attitude source.
 cfg.estimator.attitudeInitMode = 'none';
 cfg.estimator.attitudeInit.search.windowDeg = [2; 2; 2];
 cfg.estimator.attitudeInit.search.stepDeg = [0.5; 0.5; 0.5];
