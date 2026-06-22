@@ -593,9 +593,8 @@ classdef ClockExactReportBuilder
             CE.writeOscillatorValidation_(fid, plotPaths, stem, figDir, cfg);
             CE.writeClockObservability_(fid, diag, cfg);
             CE.writeTxCodeBias_(fid, diag, cfg);
+            CE.writeActivePhysicsConfig_(fid, cfg, summary, plotPaths, stem, figDir);
             CE.writeNumericalSummary_(fid, cfg, summary, diag);
-            CE.writeFinalScientificClosure_(fid, summary);
-            CE.writeStage67Closure_(fid, summary, plotPaths, stem, figDir);
 
             fprintf(fid, '\\end{document}\n');
             fclose(fid);
@@ -1364,7 +1363,145 @@ classdef ClockExactReportBuilder
             end
             fprintf(fid, ['\\noindent \\textit{Scientific limitations (v1): float carrier only, ' ...
                 'no integer fixing, no L2 carrier EKF, no carrier IF, no PPP-grade accuracy, ' ...
-                'no ANTEX/IONEX/SP3/CLK parsers.}\n\n']);
+                'no ANTEX/IONEX/SP3/CLK parsers. Full validation suite NOT RUN (targeted random smoke only).}\n\n']);
+        end
+
+        % ================================================================
+        % STAGE 68: ACTIVE PHYSICS MODEL CONFIGURATION (non-stage-titled)
+        % ================================================================
+        function writeActivePhysicsConfig_(fid, cfg, summary, plotPaths, stem, figDir)
+            CE = revgnss.ClockExactReportBuilder;
+            if ~isfield(summary,'stage64Active') || ~summary.stage64Active; return; end
+            fprintf(fid, '\\clearpage\n');
+            fprintf(fid, '\\section{Simulation Physics and Configuration}\n');
+            fprintf(fid, ['\\textit{Controlled, internally consistent MATLAB reverse-GNSS EKF simulation: ' ...
+                'one spacecraft estimated from one-way ground-tower uplinks. ' ...
+                'NOT operational, NOT PPP-grade, NOT mission-qualified, NOT real-data GNSS processor.}\n\n']);
+            fprintf(fid, '\\begin{center}\\small\n');
+
+            % ---- 1. Scenario topology ---
+            fprintf(fid, '\\textbf{Scenario topology}\n\n');
+            fprintf(fid, '\\begin{tabular}{p{0.38\\textwidth}p{0.52\\textwidth}}\n');
+            fprintf(fid, '\\toprule\n\\textbf{Property} & \\textbf{Value}\\\\\n\\midrule\n');
+            nSA_ = 1; if isfield(summary,'stage66NSpaceAssets'); nSA_ = summary.stage66NSpaceAssets; end
+            fprintf(fid, 'nSpaceAssets & %d (single estimated spacecraft)\\\\\n', nSA_);
+            oc_ = 'GEO'; if isfield(summary,'stage66OrbitClass'); oc_ = summary.stage66OrbitClass; end
+            fprintf(fid, 'Orbit class & \\texttt{%s} (GEO equatorial, 35786~km)\\\\\n', oc_);
+            nTwr_ = 0; if isfield(summary,'nTowers'); nTwr_ = summary.nTowers; end
+            fprintf(fid, 'nTowers & %d (Earth transmitters; one-way tower-to-spacecraft)\\\\\n', nTwr_);
+            nRx_ = 4; if isfield(summary,'nReceivers'); nRx_ = summary.nReceivers; end
+            fprintf(fid, 'nReceivers & %d (spacecraft phase-centre antennas)\\\\\n', nRx_);
+            fprintf(fid, 'Link direction & one-way uplink only (no two-way, no relay, no transponder)\\\\\n');
+            islDis_ = true; if isfield(summary,'stage66IslDisabled'); islDis_ = summary.stage66IslDisabled; end
+            fprintf(fid, 'ISL & %s\\\\\n', CE.yesNo_(islDis_,'disabled','ACTIVE (unexpected)'));
+            twDis_ = true; if isfield(summary,'stage66TwstftDisabled'); twDis_ = summary.stage66TwstftDisabled; end
+            fprintf(fid, 'TWSTFT & %s\\\\\n', CE.yesNo_(twDis_,'disabled','ACTIVE (unexpected)'));
+            twoWDis_ = true; if isfield(summary,'stage66TwoWayDisabled'); twoWDis_ = summary.stage66TwoWayDisabled; end
+            fprintf(fid, 'Two-way / multi-asset & %s\\\\\n', CE.yesNo_(twoWDis_,'disabled','ACTIVE (unexpected)'));
+            fprintf(fid, '\\bottomrule\n\\end{tabular}\n\n\\vspace{6pt}\n');
+
+            % ---- 2. Measurement model ---
+            fprintf(fid, '\\textbf{Measurement model (one-way; clock sign: receiver $-$ transmitter)}\n\n');
+            fprintf(fid, '\\begin{tabular}{p{0.38\\textwidth}p{0.52\\textwidth}}\n');
+            fprintf(fid, '\\toprule\n\\textbf{Observable} & \\textbf{Model}\\\\\n\\midrule\n');
+            fprintf(fid, 'Code & $z_P = \\rho + c(\\delta t_{\\rm rx}-\\delta t_{\\rm tx}) + T + I_{\\rm code} + d + \\varepsilon$\\\\\n');
+            fprintf(fid, 'Carrier & $z_L = \\rho + c(\\delta t_{\\rm rx}-\\delta t_{\\rm tx}) + T - I_{\\rm carr} + \\lambda N + d_{\\phi} + \\varepsilon$\\\\\n');
+            fprintf(fid, 'Doppler (v1) & $z_D = \\dot{\\rho} + c(\\dot{\\delta t}_{\\rm rx}-\\dot{\\delta t}_{\\rm tx}) + \\varepsilon$ (simplified LOS rate)\\\\\n');
+            fprintf(fid, 'Iono sign & code: $+I_{\\rm L1}(f_p/f)^2$ (group delay); carrier: $-I_{\\rm L1}(f_p/f)^2$ (phase advance)\\\\\n');
+            fprintf(fid, 'IF covariance & $\\mathrm{Var}(z_{\\rm IF})=\\alpha^2 V_{L1}+\\beta^2 V_{L2}$; $\\mathrm{Cov}(L_1,L_2)=0$ assumed\\\\\n');
+            fprintf(fid, 'Ambiguity & float metres; no integer fixing; no LAMBDA/MLAMBDA/WL/NL\\\\\n');
+            fprintf(fid, '\\bottomrule\n\\end{tabular}\n\n\\vspace{6pt}\n');
+
+            % ---- 3. Atmosphere, antenna, and bias ---
+            fprintf(fid, '\\textbf{Atmosphere, antenna, and bias corrections}\n\n');
+            fprintf(fid, '\\begin{tabular}{p{0.38\\textwidth}p{0.52\\textwidth}}\n');
+            fprintf(fid, '\\toprule\n\\textbf{Effect} & \\textbf{Status}\\\\\n\\midrule\n');
+            tropTr_ = false; if isfield(summary,'stage68TropTruthEn'); tropTr_ = summary.stage68TropTruthEn; end
+            tropMd_ = false; if isfield(summary,'stage68TropModelEn'); tropMd_ = summary.stage68TropModelEn; end
+            tropTyp_ = 'simpleMapped'; if isfield(summary,'stage68TropModelType'); tropTyp_ = summary.stage68TropModelType; end
+            fprintf(fid, 'Troposphere & truth~%s, model~%s (\\texttt{%s}; Saastamoinen-style mapping; synthetic, no GPT3/VMF3)\\\\\n', ...
+                CE.yesNo_(tropTr_,'on','off'), CE.yesNo_(tropMd_,'on','off'), strrep(tropTyp_,'_','\_'));
+            ionoTr_ = false; if isfield(summary,'stage68IonoTruthEn'); ionoTr_ = summary.stage68IonoTruthEn; end
+            ionoMd_ = false; if isfield(summary,'stage68IonoModelEn'); ionoMd_ = summary.stage68IonoModelEn; end
+            ionoTyp_ = 'simpleMapped'; if isfield(summary,'stage68IonoModelType'); ionoTyp_ = summary.stage68IonoModelType; end
+            fprintf(fid, 'Ionosphere & truth~%s, model~%s (\\texttt{%s}; $1/f^2$ dispersion; synthetic, no Klobuchar/IONEX)\\\\\n', ...
+                CE.yesNo_(ionoTr_,'on','off'), CE.yesNo_(ionoMd_,'on','off'), strrep(ionoTyp_,'_','\_'));
+            sagEn_ = false; if isfield(summary,'stage68SagnacEn'); sagEn_ = summary.stage68SagnacEn; end
+            fprintf(fid, 'Sagnac / light-time & %s (first-order; no relativistic rate)\\\\\n', CE.yesNo_(sagEn_,'enabled','disabled'));
+            pcoEn_ = false; if isfield(summary,'stage68PcoEn'); pcoEn_ = summary.stage68PcoEn; end
+            fprintf(fid, 'Antenna PCO & %s (synthetic calibrated constants; no ANTEX)\\\\\n', CE.yesNo_(pcoEn_,'enabled','disabled (unexpected)'));
+            pcvEn_ = false; if isfield(summary,'stage68PcvEn'); pcvEn_ = summary.stage68PcvEn; end
+            fprintf(fid, 'Antenna PCV & %s (none by default; no ANTEX)\\\\\n', CE.yesNo_(pcvEn_,'enabled','disabled'));
+            hwEn_ = false; if isfield(summary,'stage68HwDelayEn'); hwEn_ = summary.stage68HwDelayEn; end
+            fprintf(fid, 'Hardware bias & %s (synthetic; no calibrated DCB/phase-bias products)\\\\\n', CE.yesNo_(hwEn_,'enabled','disabled'));
+            mpEn_ = false; if isfield(summary,'stage68MultipathEn'); mpEn_ = summary.stage68MultipathEn; end
+            fprintf(fid, 'Multipath & %s\\\\\n', CE.yesNo_(mpEn_,'enabled (synthetic)','disabled'));
+            fprintf(fid, '\\bottomrule\n\\end{tabular}\n\n\\vspace{6pt}\n');
+
+            % ---- 4. Attitude ---
+            fprintf(fid, '\\textbf{Attitude determination}\n\n');
+            fprintf(fid, '\\begin{tabular}{p{0.38\\textwidth}p{0.52\\textwidth}}\n');
+            fprintf(fid, '\\toprule\n\\textbf{Property} & \\textbf{Value}\\\\\n\\midrule\n');
+            attPrim_ = 'carrierLeverArmQuaternionEkf';
+            if isfield(summary,'stage67PrimaryAttMode'); attPrim_ = summary.stage67PrimaryAttMode; end
+            fprintf(fid, 'Primary estimator & \\texttt{%s}\\\\\n', strrep(attPrim_,'_','\_'));
+            fprintf(fid, 'EKF type & nominal $q$ + error-state $\\delta\\theta$; Joseph posterior reset\\\\\n');
+            attInit_ = 'coarseBaselineIntegerSearch';
+            if isfield(summary,'stage67AttInitMode'); attInit_ = summary.stage67AttInitMode; end
+            fprintf(fid, 'Initializer & \\texttt{%s} (optional; not primary estimator)\\\\\n', strrep(attInit_,'_','\_'));
+            attCar_ = 'calibratedDifferentialAmbiguity';
+            if isfield(summary,'stage67AttCarrierMode'); attCar_ = summary.stage67AttCarrierMode; end
+            fprintf(fid, 'Carrier tracking & \\texttt{%s} (relative; no absolute attitude reference)\\\\\n', strrep(attCar_,'_','\_'));
+            fprintf(fid, 'Absolute attitude claim & false (differential carrier = relative only)\\\\\n');
+            fprintf(fid, '\\bottomrule\n\\end{tabular}\n\n\\vspace{6pt}\n');
+
+            % ---- 5. Clocks ---
+            fprintf(fid, '\\textbf{Clock model}\n\n');
+            fprintf(fid, '\\begin{tabular}{p{0.38\\textwidth}p{0.52\\textwidth}}\n');
+            fprintf(fid, '\\toprule\n\\textbf{Property} & \\textbf{Value}\\\\\n\\midrule\n');
+            rxDet_ = false; if isfield(summary,'stage67RxClockDet'); rxDet_ = summary.stage67RxClockDet; end
+            fprintf(fid, 'Asset Rx clock & %s (Brown-Hwang two-state process model)\\\\\n', CE.yesNo_(rxDet_,'deterministic (unexpected)','stochastic'));
+            tClkMode_ = 'noisyCorrection';
+            if isfield(summary,'stage67TowerClockMode'); tClkMode_ = summary.stage67TowerClockMode; end
+            fprintf(fid, 'Tower correction mode & \\texttt{%s} (non-perfect broadcast correction)\\\\\n', strrep(tClkMode_,'_','\_'));
+            tClkSig_ = 0.5;
+            if isfield(summary,'stage67TowerClockSigma_m'); tClkSig_ = summary.stage67TowerClockSigma_m; end
+            fprintf(fid, 'Correction $\\sigma$ & %.2f m\\\\\n', tClkSig_);
+            allanPath_ = CE.figRef_(plotPaths, 'allanDev', figDir, stem);
+            allanAvail_ = ~isempty(allanPath_) && isfile(allanPath_);
+            fprintf(fid, 'Allan deviation & %s\\\\\n', CE.yesNo_(allanAvail_,'plot available (Oscillator Stability section)','not generated'));
+            fprintf(fid, '\\bottomrule\n\\end{tabular}\n\n\\vspace{6pt}\n');
+
+            % ---- 6. Orbital dynamics ---
+            fprintf(fid, '\\textbf{Orbital dynamics}\n\n');
+            fprintf(fid, '\\begin{tabular}{p{0.38\\textwidth}p{0.52\\textwidth}}\n');
+            fprintf(fid, '\\toprule\n\\textbf{Property} & \\textbf{Value}\\\\\n\\midrule\n');
+            propMode_ = 'twoBodyRk4';
+            if isfield(summary,'stage67OrbitPropMode'); propMode_ = summary.stage67OrbitPropMode; end
+            fprintf(fid, 'Truth propagator & \\texttt{%s} (GEO 35786~km, $i\\!=\\!0$, $\\nu_0\\!=\\!23^\\circ$)\\\\\n', strrep(propMode_,'_','\_'));
+            dynMode_ = 'twoBody';
+            if isfield(summary,'stage67DynamicsMode'); dynMode_ = summary.stage67DynamicsMode; end
+            fprintf(fid, 'EKF predictor & \\texttt{%s} (matched to truth propagator)\\\\\n', strrep(dynMode_,'_','\_'));
+            fprintf(fid, 'Static-ECEF truth & false (replaced by \\texttt{twoBodyRk4} propagator)\\\\\n');
+            fprintf(fid, 'J2 / drag / SRP / 3rd-body & false (two-body family only in active scenario)\\\\\n');
+            fprintf(fid, 'IERS/EOP frame & not implemented; simplified Earth-rotation model\\\\\n');
+            fprintf(fid, '\\bottomrule\n\\end{tabular}\n\n\\vspace{6pt}\n');
+
+            % ---- 7. Known limitations ---
+            fprintf(fid, '\\textbf{Known v1 limitations}\n\n');
+            fprintf(fid, '\\begin{tabular}{p{0.92\\textwidth}}\n\\toprule\n');
+            fprintf(fid, 'No external RINEX/SP3/CLK/ANTEX/IONEX products ingested.\\\\\n');
+            fprintf(fid, 'No PPP-grade or operational navigation claim.\\\\\n');
+            fprintf(fid, 'No LAMBDA/MLAMBDA or formal integer ambiguity fixing; no WL/NL; no false-fix-risk control.\\\\\n');
+            fprintf(fid, 'No mission-qualified attitude determination (differential carrier = relative tracking only).\\\\\n');
+            fprintf(fid, 'No calibrated hardware bias/DCB/phase-bias products.\\\\\n');
+            fprintf(fid, 'Doppler simplified v1: LOS range-rate + clock drift; no Sagnac-rate, no relativistic range-rate, no lever-arm velocity.\\\\\n');
+            fprintf(fid, 'IF covariance: uncorrelated noise assumption ($\\mathrm{Cov}(L_1,L_2)=0$).\\\\\n');
+            fprintf(fid, 'Scientific atmosphere: no GPT3/VMF3/ERA5 troposphere; no Klobuchar/IONEX ionosphere.\\\\\n');
+            fprintf(fid, 'No IERS/EOP-grade GCRS/ITRF reference-frame processing.\\\\\n');
+            fprintf(fid, 'Full validation suite NOT RUN (targeted random smoke only).\\\\\n');
+            fprintf(fid, '\\bottomrule\n\\end{tabular}\n');
+            fprintf(fid, '\\end{center}\n');
         end
 
         % ================================================================

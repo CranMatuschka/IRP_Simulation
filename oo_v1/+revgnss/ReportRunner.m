@@ -804,6 +804,30 @@ classdef ReportRunner
             summary.stage67OrbitPropMode = propMode67_;
             summary.stage67PerfectCorrectionFalse = ~strcmp(tClkMode67_, 'perfectCorrection');
 
+            % Stage 68: atmosphere / antenna / bias enable status.
+            summary.stage68TropTruthEn = false;
+            try; summary.stage68TropTruthEn = cfg.errors.troposphere.truth.enable; catch; end
+            summary.stage68TropModelEn = false;
+            try; summary.stage68TropModelEn = cfg.errors.troposphere.model.enable; catch; end
+            summary.stage68TropModelType = 'simpleMapped';
+            try; summary.stage68TropModelType = cfg.errors.troposphere.modelType; catch; end
+            summary.stage68IonoTruthEn = false;
+            try; summary.stage68IonoTruthEn = cfg.errors.ionosphere.truth.enable; catch; end
+            summary.stage68IonoModelEn = false;
+            try; summary.stage68IonoModelEn = cfg.errors.ionosphere.model.enable; catch; end
+            summary.stage68IonoModelType = 'simpleMapped';
+            try; summary.stage68IonoModelType = cfg.errors.ionosphere.modelType; catch; end
+            summary.stage68SagnacEn = false;
+            try; summary.stage68SagnacEn = cfg.physics.sagnac.truth.enable || cfg.physics.sagnac.model.enable; catch; end
+            summary.stage68PcoEn = false;
+            try; summary.stage68PcoEn = cfg.effects.antennaPCO.truth.enable || cfg.effects.antennaPCO.model.enable; catch; end
+            summary.stage68PcvEn = false;
+            try; summary.stage68PcvEn = cfg.effects.antennaPCV.truth.enable || cfg.effects.antennaPCV.model.enable; catch; end
+            summary.stage68HwDelayEn = false;
+            try; summary.stage68HwDelayEn = cfg.errors.hardwareDelay.truth.enable || cfg.errors.hardwareDelay.model.enable; catch; end
+            summary.stage68MultipathEn = false;
+            try; summary.stage68MultipathEn = cfg.errors.multipath.truth.enable || cfg.errors.multipath.model.enable; catch; end
+
             % ---- Determine report layout before PDF generation -----------
             reportLayout = 'default';
             if isfield(cfg,'report') && isfield(cfg.report,'layout')

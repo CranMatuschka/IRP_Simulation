@@ -35,7 +35,7 @@ oo_v1_envAllToggles_ = strcmpi(getenv('OO_V1_ALL_TOGGLES'), 'true');
 if oo_v1_envValidate_; oo_v1_envAllToggles_ = true; end  % validate always uses all toggles
 oo_v1_envStage_      = str2double(getenv('OO_V1_VALIDATION_STAGE'));
 if isnan(oo_v1_envStage_); oo_v1_envStage_ = 0; end
-if oo_v1_envValidate_ && oo_v1_envStage_ == 0; oo_v1_envStage_ = 67; end
+if oo_v1_envValidate_ && oo_v1_envStage_ == 0; oo_v1_envStage_ = 68; end
 oo_v1_envCompile_    = strtrim(getenv('OO_V1_REPORT_COMPILE_TEX'));
 
 cfg = revgnss.ConfigFactory.defaultConfig();
@@ -255,8 +255,10 @@ cfg.errors.multipath.model.enable     = false;
 % --- Survey / antenna -------------------------------------------
 cfg.effects.towerSurvey.truth.enable  = false;
 cfg.effects.towerSurvey.model.enable  = false;
-cfg.effects.antennaPCO.truth.enable   = false;
-cfg.effects.antennaPCO.model.enable   = false;
+% Stage 68: antenna PCO enabled by default (synthetic calibrated constants; no ANTEX).
+cfg.effects.antennaPCO.truth.enable   = true;
+cfg.effects.antennaPCO.model.enable   = true;
+% PCV kept disabled by default (no ANTEX; set to true in all-toggle run only).
 cfg.effects.antennaPCV.truth.enable   = false;
 cfg.effects.antennaPCV.model.enable   = false;
 
