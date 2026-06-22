@@ -754,6 +754,26 @@ classdef ReportRunner
             summary.stage64FalseFixRisk = false;
             summary.stage64PppGrade     = false;
 
+            % ---- Stage 66: single-asset one-way closure summary fields -----
+            summary.stage66Active         = true;
+            summary.stage66NSpaceAssets   = 1;
+            orbitClass66_ = 'GEO';
+            try; orbitClass66_ = cfg.scenario.orbitClass; catch; end
+            summary.stage66OrbitClass     = orbitClass66_;
+            islEn66_ = false;
+            try; islEn66_ = cfg.measurements.isl.enable; catch; end
+            summary.stage66IslDisabled    = ~islEn66_;
+            twstftEn66_ = false;
+            try; twstftEn66_ = cfg.measurements.twstft.enable; catch; end
+            summary.stage66TwstftDisabled = ~twstftEn66_;
+            twoWayEn66_ = false;
+            try; twoWayEn66_ = cfg.measurements.isl.twoWay.enable; catch; end
+            summary.stage66TwoWayDisabled = ~twoWayEn66_;
+            summary.stage66OneWayOnly     = summary.stage66IslDisabled && ...
+                                            summary.stage66TwstftDisabled && ...
+                                            summary.stage66TwoWayDisabled;
+            summary.stage66OperationalClaim = false;
+
             % ---- Determine report layout before PDF generation -----------
             reportLayout = 'default';
             if isfield(cfg,'report') && isfield(cfg.report,'layout')

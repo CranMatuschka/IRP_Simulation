@@ -35,7 +35,7 @@ oo_v1_envAllToggles_ = strcmpi(getenv('OO_V1_ALL_TOGGLES'), 'true');
 if oo_v1_envValidate_; oo_v1_envAllToggles_ = true; end  % validate always uses all toggles
 oo_v1_envStage_      = str2double(getenv('OO_V1_VALIDATION_STAGE'));
 if isnan(oo_v1_envStage_); oo_v1_envStage_ = 0; end
-if oo_v1_envValidate_ && oo_v1_envStage_ == 0; oo_v1_envStage_ = 65; end
+if oo_v1_envValidate_ && oo_v1_envStage_ == 0; oo_v1_envStage_ = 66; end
 oo_v1_envCompile_    = strtrim(getenv('OO_V1_REPORT_COMPILE_TEX'));
 
 cfg = revgnss.ConfigFactory.defaultConfig();
@@ -96,69 +96,14 @@ cfg.estimator.integerAmbiguity.resetOnSlip                = true;
 % nReceivers  > 1  ->  attitude estimation ON,  auto cross-pattern lever arms
 cfg.scenario.nReceivers = 3;
 
-% --- Multi-asset scenario metadata (Stage 20) --------------------
-% Measurements and EKF states remain attached to the primary estimated asset.
-% GEO-2 is represented as a non-estimated scenario/report/endpoints object
-% only; no ISL/TWSTFT/relay rows are generated in this stage.
-cfg.scenario.nSpaceAssets = 2;
-cfg.assets(1) = cfg.asset;
-cfg.assets(1).assetIndex = 1;
-cfg.assets(1).estimated = true;
-cfg.assets(1).stateOwner = 'primaryEKF';
-cfg.assets(2) = cfg.assets(1);
-cfg.assets(2).name = 'GEO-2';
-cfg.assets(2).assetIndex = 2;
-cfg.assets(2).estimated = false;
-cfg.assets(2).stateOwner = 'representedOnly';
-cfg.assets(2).r_ecef_m = revgnss.GeometryUtils.geodetic2ecef(0.0, 28.0*pi/180, 35786000.0);
-cfg.assets(2).receiverLeverArm_body_m = [0; 0; 0];
-cfg.assets(2).receiverLeverArms_body_m = [0; 0; 0];
-cfg.assets(2).clock.name = 'RxClock_GEO_2';
-
-% --- One-way inter-spacecraft link scaffold (Stage 21) -----------
-% GEO-2 is a represented/external transmitter. GEO-1 remains the only
-% estimated spacecraft asset. Stage 22 uses two-way range in the EKF and
-% keeps raw one-way rows diagnostic-only to avoid double-counting. Carrier is
-% diagnostic-only because no ISL ambiguity state exists in this stage.
-% Stage 23 adds report-only link-event timing and clock-transfer diagnostics;
-% it is not TWSTFT and does not add relay/transponder physics.
-cfg.measurements.isl.enable = true;
-cfg.measurements.isl.transmitterAssetIndex = 2;
-cfg.measurements.isl.receiverAssetIndex = 1;
-cfg.measurements.isl.code.enable = true;
-cfg.measurements.isl.code.useInEKF = false;
-cfg.measurements.isl.code.sigma_m = 0.5;
-cfg.measurements.isl.doppler.enable = true;
-cfg.measurements.isl.doppler.useInEKF = false;
-cfg.measurements.isl.doppler.sigma_mps = 0.02;
-cfg.measurements.isl.carrier.enable = true;
-cfg.measurements.isl.carrier.useInEKF = false;
-cfg.measurements.isl.twoWay.enable = true;
-cfg.measurements.isl.twoWay.range.enable = true;
-cfg.measurements.isl.twoWay.range.useInEKF = true;
-cfg.measurements.isl.twoWay.range.sigma_m = 0.25;
-cfg.measurements.isl.twoWay.doppler.enable = true;
-cfg.measurements.isl.twoWay.doppler.useInEKF = false;
-cfg.measurements.isl.timing.enable = true;
-cfg.measurements.isl.timing.mode = 'sameEpoch';
-cfg.measurements.isl.timing.maxIter = 3;
-cfg.measurements.isl.timing.tolerance_s = 1e-12;
-cfg.measurements.isl.timing.processingDelay_s = 0.0;
-cfg.measurements.isl.clockTransferDiagnostics.enable = true;
-
-% --- TWSTFT code time-transfer diagnostics (Stage 24) ----------
-% Diagnostic-only: code diagnostics enabled, useInEKF=false.
-% No TWSTFT EKF rows. No relay/transponder. No ISL carrier EKF.
-% Requires ISL timing enabled (requireIslTiming=true above).
-cfg.measurements.twstft.enable = true;
-cfg.measurements.twstft.code.enable = true;
-cfg.measurements.twstft.code.useInEKF = false;
-cfg.measurements.twstft.code.sigma_s = 1e-9;
-cfg.measurements.twstft.referenceAssetIndex = 1;
-cfg.measurements.twstft.remoteAssetIndex = 2;
-cfg.measurements.twstft.processingDelay_s = 0.0;
-cfg.measurements.twstft.calibratedDelay_s = 0.0;
-cfg.measurements.twstft.requireIslTiming = true;
+% --- Single-asset one-way scenario (Stage 66) ----------------------------
+% One estimated spacecraft. Ground towers transmit reference signals upward
+% one-way (tower-to-space only). No ISL, no TWSTFT, no two-way, no relay,
+% no multi-asset estimation. ISL/TWSTFT remain at ConfigFactory defaults
+% (all disabled) — do not enable them here.
+cfg.scenario.nSpaceAssets = 1;        % one estimated spacecraft only
+cfg.scenario.orbitClass   = 'GEO';    % 'GEO' | 'MEO' | 'LEO' (initial state only;
+%                                      %  truth is static ECEF in v1 — no propagator)
 
 % --- Frequency --------------------------------------------------
 % false  ->  L1 only
@@ -444,19 +389,11 @@ if stageAllToggles || oo_v1_envAllToggles_
             cfg.validation.validationStage = oo_v1_envStage_;
         end
     end
-    % Stage 59: enforce scenario constraints — prevent truth/EKF dynamics mismatch.
-    % J2 EKF dynamics above would contaminate the carrier-attitude scenario because
-    % the default GEO truth is static ECEF (no truth orbit propagator in v1).
+    % Stage 66: static ECEF GEO truth is inconsistent with inertial J2 dynamics.
+    % Reset to constantVelocity for the single-asset one-way scenario.
     if isfield(cfg,'scenario') && isfield(cfg.scenario,'name') && ...
             strcmp(cfg.scenario.name,'singleAssetCarrierAttitude')
-        cfg.scenario.nSpaceAssets = 1;
-        cfg.measurements.isl.enable             = false;
-        cfg.measurements.isl.twoWay.enable      = false;
-        cfg.measurements.isl.twoWay.range.enable   = false;
-        cfg.measurements.isl.twoWay.range.useInEKF = false;
-        cfg.measurements.isl.timing.enable      = false;
-        cfg.measurements.twstft.enable          = false;
-        cfg.estimator.dynamics.mode             = 'constantVelocity';
+        cfg.estimator.dynamics.mode = 'constantVelocity';
     end
 end
 if ~isempty(oo_v1_envCompile_) && ismember(oo_v1_envCompile_, {'require','auto','never'})

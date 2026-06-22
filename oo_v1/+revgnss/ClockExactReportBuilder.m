@@ -1318,23 +1318,50 @@ classdef ClockExactReportBuilder
         end
 
         % ================================================================
-        % FINAL SCIENTIFIC CLOSURE (Stage 65 compact section)
+        % FINAL SCIENTIFIC CLOSURE (Stage 66 compact section)
         % ================================================================
         function writeFinalScientificClosure_(fid, summary)
             % writeFinalScientificClosure_  Compact final model closure table.
             CE = revgnss.ClockExactReportBuilder;
             if ~isfield(summary,'stage64Active') || ~summary.stage64Active; return; end
             fprintf(fid, '\\clearpage\n');
-            fprintf(fid, '\\section{Final Scientific Model Closure}\n');
-            fprintf(fid, ['\\textit{v1 is frozen as a controlled, internally consistent MATLAB EKF simulation ' ...
-                'demonstrating measurement, covariance, ambiguity-state, attitude, dynamics, and reporting ' ...
-                'architecture. ' ...
+            fprintf(fid, '\\section{Single-Asset One-Way Scientific Closure}\n');
+            fprintf(fid, ['\\textit{v1 is a controlled, internally consistent MATLAB reverse-GNSS EKF simulation: ' ...
+                'one estimated spacecraft, Earth towers transmit one-way reference signals upward, ' ...
+                'spacecraft estimates position/velocity/clock/attitude using code, carrier, Doppler, ' ...
+                'and configurable error models. ' ...
                 'It is \\textbf{NOT} an operational navigator, \\textbf{NOT} PPP-grade, ' ...
-                '\\textbf{NOT} mission-qualified attitude, and \\textbf{NOT} a real-data GNSS processor.}\n\n']);
+                '\\textbf{NOT} mission-qualified, and \\textbf{NOT} a real-data GNSS processor.}\n\n']);
             % --- Compact closure table ---
             fprintf(fid, '\\begin{center}\\small\n');
             fprintf(fid, '\\begin{tabular}{p{0.38\\textwidth}p{0.52\\textwidth}}\n');
             fprintf(fid, '\\toprule\n\\textbf{Property} & \\textbf{Value / Status}\\\\\n\\midrule\n');
+            % Stage 66: single-asset one-way topology rows
+            nSA_ = 1;
+            if isfield(summary,'stage66NSpaceAssets'); nSA_ = summary.stage66NSpaceAssets; end
+            fprintf(fid, 'nSpaceAssets & %d (single estimated spacecraft)\\\\\n', nSA_);
+            oc66_ = 'GEO';
+            if isfield(summary,'stage66OrbitClass'); oc66_ = summary.stage66OrbitClass; end
+            fprintf(fid, 'Orbit class & \\texttt{%s} (static ECEF truth in v1; no propagator)\\\\\n', oc66_);
+            nTwr_ = 0;
+            if isfield(summary,'nTowers'); nTwr_ = summary.nTowers; end
+            fprintf(fid, 'nTowers & %d (transmitters; tower-to-space one-way)\\\\\n', nTwr_);
+            nRx_ = 0;
+            if isfield(summary,'nReceivers'); nRx_ = summary.nReceivers; end
+            fprintf(fid, 'nReceivers & %d (spacecraft antennas)\\\\\n', nRx_);
+            islDis_ = true;
+            if isfield(summary,'stage66IslDisabled'); islDis_ = summary.stage66IslDisabled; end
+            fprintf(fid, 'ISL & %s\\\\\n', CE.yesNo_(islDis_, 'disabled', 'ACTIVE (unexpected)'));
+            twDis_ = true;
+            if isfield(summary,'stage66TwstftDisabled'); twDis_ = summary.stage66TwstftDisabled; end
+            fprintf(fid, 'TWSTFT & %s\\\\\n', CE.yesNo_(twDis_, 'disabled', 'ACTIVE (unexpected)'));
+            twoWayDis_ = true;
+            if isfield(summary,'stage66TwoWayDisabled'); twoWayDis_ = summary.stage66TwoWayDisabled; end
+            fprintf(fid, 'Two-way range & %s\\\\\n', CE.yesNo_(twoWayDis_, 'disabled', 'ACTIVE (unexpected)'));
+            fprintf(fid, 'Relay/transponder & disabled\\\\\n');
+            fprintf(fid, 'Multi-asset estimation & disabled (nSpaceAssets=1)\\\\\n');
+            fprintf(fid, '\\midrule\n');
+            % Scenario and dynamics
             scen64_ = '';
             if isfield(summary,'stage64ScenarioName'); scen64_ = strrep(summary.stage64ScenarioName,'_','\_'); end
             fprintf(fid, 'Active scenario & \\texttt{%s}\\\\\n', scen64_);
@@ -1356,6 +1383,9 @@ classdef ClockExactReportBuilder
             intFix_ = 'disabled';
             if isfield(summary,'stage64IntFixStatus'); intFix_ = strrep(summary.stage64IntFixStatus,'_','\_'); end
             fprintf(fid, 'Int.fix status & \\texttt{%s} (LAMBDA:false, WL/NL:false, falseFixRisk:false)\\\\\n', intFix_);
+            fprintf(fid, 'Operational claim & false (NOT operational, NOT PPP-grade, NOT mission-qualified)\\\\\n');
+            fprintf(fid, '\\midrule\n');
+            % Metrics
             if isfield(summary,'finalPositionError_m') && isfinite(summary.finalPositionError_m)
                 fprintf(fid, 'Final pos error & %.3f m\\\\\n', summary.finalPositionError_m);
             end
@@ -1370,14 +1400,20 @@ classdef ClockExactReportBuilder
             end
             fprintf(fid, '\\midrule\n');
             fprintf(fid, ['\\multicolumn{2}{p{0.94\\textwidth}}{\\textbf{Known v1 limitations:} ' ...
-                'full-suite validation not run; no calibrated PCO/PCV/ANTEX; ' ...
-                'simplified Doppler (no Sagnac-rate, no relativistic range-rate, no lever-arm velocity from body rates); ' ...
+                'full-suite validation not run; no ISL/TWSTFT/two-way/relay physics; ' ...
+                'no calibrated PCO/PCV/ANTEX; ' ...
+                'static ECEF truth (no truth orbit propagator); ' ...
+                'simplified Doppler (no Sagnac-rate, no relativistic range-rate, no lever-arm velocity); ' ...
                 'IF covariance assumes Cov(L1,L2)=0; ' ...
                 'no LAMBDA/MLAMBDA/WL/NL integer fixing; ' ...
                 'no formal false-fix-risk control; ' ...
                 'no scientific troposphere/ionosphere/orbit models; ' ...
                 'no IERS/EOP/SP3/CLK/ANTEX ingestion.}\\\\\n']);
             fprintf(fid, '\\bottomrule\n\\end{tabular}\n\\end{center}\n');
+        end
+
+        function s = yesNo_(flag, yes, no)
+            if flag; s = yes; else; s = no; end
         end
 
         function writeRow_(fid, imgPath, boldTitle, description)

@@ -29,11 +29,11 @@ classdef MainScriptValidationGate
             state = struct();
 
             % Resolve stage, seed, count from env vars.
-            stg = 65;
+            stg = 66;
             v = str2double(getenv('OO_V1_VALIDATION_STAGE'));
             if ~isnan(v) && v > 0; stg = round(v); end
 
-            seed = 65;
+            seed = 66;
             v = str2double(getenv('OO_V1_RANDOM_TEST_SEED'));
             if ~isnan(v) && isfinite(v); seed = round(v); end
 
@@ -234,6 +234,7 @@ classdef MainScriptValidationGate
                 case 63; t = 'Controlled Single-Asset Integer Ambiguity Fixing v1';
                 case 64; t = 'Scientific Closure and v1 Freeze';
                 case 65; t = 'Lean Scientific Report and Code Cleanup';
+                case 66; t = 'Single-Asset One-Way Realistic Reverse-GNSS v1 Closure';
                 otherwise
                     try; t = revgnss.ReportStatus.current().stageTitle; catch; t = sprintf('Stage %d', stg); end
             end
