@@ -1446,6 +1446,11 @@ classdef ClockExactReportBuilder
                 'no synthetic cycle-slip guarantee; v1 robustness demonstration only; ' ...
                 'baseline differential integer fixing implemented (Stage 70); ' ...
                 'no LAMBDA/MLAMBDA, no WL/NL, no carrier-IF integer fixing; ' ...
+                'Stage 75 ambiguity hardening: per-baseline classification, float-distance gate ($|\\hat{N}-N_{\\mathrm{best}}|<0.25$ cyc), ' ...
+                'ratio test tightened to 3.0, arc gate 60 epochs; ' ...
+                'GNSS-only attitude claim requires all baselines fixed with no external-reference calibration; ' ...
+                'phase bias not independently calibrated (\\texttt{notCalibratedExternalProduct}); ' ...
+                'false-fix risk classification is \\texttt{screenedNotFormal} (no LAMBDA/ILS); ' ...
                 'no real CLK product ingestion, no PPP-grade accuracy, no ANTEX/IONEX/SP3/CLK parsers. ' ...
                 'Full validation suite NOT RUN (targeted random smoke only).}\n\n']);
         end
@@ -1568,29 +1573,44 @@ classdef ClockExactReportBuilder
             attCar_ = 'calibratedDifferentialAmbiguity';
             if isfield(summary,'stage67AttCarrierMode'); attCar_ = summary.stage67AttCarrierMode; end
             fprintf(fid, 'Carrier tracking & \\texttt{%s}\\\\\n', strrep(attCar_,'_','\_'));
-            % Stage 70: baseline integer fix status
+            % Stage 70/75: baseline integer fix status + GNSS-only claim
             arAttempted_ = false; arAccepted_ = false; arClass_ = 'notAttempted';
             arExtSrc_ = true; arExtSrch_ = false;
             if isfield(summary,'baselineIntegerFixAttempted'); arAttempted_ = summary.baselineIntegerFixAttempted; end
             if isfield(summary,'baselineIntegerFixAccepted');  arAccepted_  = summary.baselineIntegerFixAccepted;  end
-            if isfield(summary,'baselineIntegerFixClassification'); arClass_ = summary.baselineIntegerFixClassification; end
+            % Stage 75 classification takes precedence over Stage 70 if available
+            arClass_ = CE.safeField_(summary,'baselineArClassification', ...
+                       CE.safeField_(summary,'baselineIntegerFixClassification','notAttempted'));
             if isfield(summary,'externalReferenceUsedForCalibration'); arExtSrc_ = summary.externalReferenceUsedForCalibration; end
             if isfield(summary,'externalReferenceUsedAsSearchCenter'); arExtSrch_ = summary.externalReferenceUsedAsSearchCenter; end
-            nFix_ = 0; nRej_ = 0;
-            if isfield(summary,'nBaselineIntegerFixed');   nFix_ = summary.nBaselineIntegerFixed;   end
-            if isfield(summary,'nBaselineIntegerRejected'); nRej_ = summary.nBaselineIntegerRejected; end
+            nFix_ = CE.safeField_(summary,'nBaselineArFixed', ...
+                    CE.safeField_(summary,'nBaselineIntegerFixed',0));
+            nRej_ = CE.safeField_(summary,'nBaselineIntegerRejected',0);
+            nUsed75_ = CE.safeField_(summary,'nBaselineArUsedInEkf', nFix_);
+            nRejArc75_ = CE.safeField_(summary,'nBaselineArRejectedArc', 0);
+            nFloat75_  = CE.safeField_(summary,'nBaselineArFloatExternal', 0);
+            gnssOnly75_ = CE.safeField_(summary,'baselineArGnssOnlyClaim', false);
+            falseFix75_ = CE.safeField_(summary,'baselineArFalseFixClassification','screenedNotFormal');
+            phaseBias75_ = CE.safeField_(summary,'baselineArPhaseBiasStatus','notCalibratedExternalProduct');
+            policy75_    = CE.safeField_(summary,'baselineArPartialPolicy','mixedFixedFloat');
             if arAttempted_ && arAccepted_
-                fprintf(fid, 'Baseline $\\Delta N$ integer fix & \\texttt{%s} (%d fixed, %d rejected; extRef=searchCentreOnly)\\\\\n', ...
-                    strrep(arClass_,'_','\_'), nFix_, nRej_);
-                fprintf(fid, 'Absolute attitude claim & true (integer-fixed baseline carrier; $\\lambda_{L1} \\Delta N$ removed)\\\\\n');
+                fprintf(fid, 'Baseline $\\Delta N$ integer fix & \\texttt{%s} (%d fixed, %d float, %d arc-rejected; used in EKF: %d)\\\\\n', ...
+                    strrep(arClass_,'_','\_'), nFix_, nFloat75_, nRejArc75_, nUsed75_);
+                fprintf(fid, 'Partial-fix policy (Stage~75) & \\texttt{%s}\\\\\n', strrep(policy75_,'_','\_'));
+                gnssClaimStr_ = CE.yesNo_(gnssOnly75_, ...
+                    'true (all baselines fixed; no extRef calibration)', ...
+                    'false (partial fix or extRef calibration used)');
+                fprintf(fid, 'GNSS-only attitude claim (Stage~75) & %s\\\\\n', gnssClaimStr_);
+                fprintf(fid, 'False-fix classification (Stage~75) & \\texttt{%s}\\\\\n', strrep(falseFix75_,'_','\_'));
             elseif arAttempted_
                 fprintf(fid, 'Baseline $\\Delta N$ integer fix & \\texttt{%s} (0 fixed; fallback to float calibration)\\\\\n', ...
                     strrep(arClass_,'_','\_'));
-                fprintf(fid, 'Absolute attitude claim & false (integer fix failed; differential tracking only)\\\\\n');
+                fprintf(fid, 'GNSS-only attitude claim (Stage~75) & false (integer fix failed; differential tracking only)\\\\\n');
             else
                 fprintf(fid, 'Baseline $\\Delta N$ integer fix & not attempted (AR disabled)\\\\\n');
-                fprintf(fid, 'Absolute attitude claim & false (differential carrier = relative only)\\\\\n');
+                fprintf(fid, 'GNSS-only attitude claim (Stage~75) & false (differential carrier = relative only)\\\\\n');
             end
+            fprintf(fid, 'Phase-bias status (Stage~75) & \\texttt{%s}\\\\\n', strrep(phaseBias75_,'_','\_'));
             fprintf(fid, '\\bottomrule\n\\end{tabular}\n\n\\vspace{6pt}\n');
 
             % ---- 5. Clocks ---
@@ -1656,7 +1676,7 @@ classdef ClockExactReportBuilder
             fprintf(fid, '\\begin{tabular}{p{0.92\\textwidth}}\n\\toprule\n');
             fprintf(fid, 'No external RINEX/SP3/CLK/ANTEX/IONEX products ingested; tower clock product is synthetic (Stage 71/72).\\\\\n');
             fprintf(fid, 'No PPP-grade or operational navigation claim.\\\\\n');
-            fprintf(fid, 'No LAMBDA/MLAMBDA, no WL/NL, no false-fix-risk control; baseline differential integer fixing implemented (Stage 70).\\\\\n');
+            fprintf(fid, 'No LAMBDA/MLAMBDA, no WL/NL; baseline differential integer fixing (Stage 70); Stage 75 hardening: per-baseline classification, float-distance gate, ratio 3.0, arc 60 epochs; false-fix risk is \\texttt{screenedNotFormal}.\\\\\n');
             fprintf(fid, 'No mission-qualified attitude determination (synthetic controlled scenario only).\\\\\n');
             fprintf(fid, 'No calibrated hardware bias/DCB/phase-bias products.\\\\\n');
             fprintf(fid, 'Doppler simplified v1: LOS range-rate + clock drift; no Sagnac-rate, no relativistic range-rate, no lever-arm velocity.\\\\\n');

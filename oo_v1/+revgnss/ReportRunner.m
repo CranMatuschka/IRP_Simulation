@@ -1116,6 +1116,36 @@ classdef ReportRunner
                 summary.externalReferenceUsedForCalibration = true;
             end
 
+            % ---- Stage 75: per-baseline ambiguity classification fields --------
+            try
+                st75_ = sim.diffAttStore;
+                summary.baselineArClassification          = st75_.integerClassification;
+                summary.baselineArGnssOnlyClaim           = st75_.gnssOnlyAttitudeClaim;
+                summary.baselineArFalseFixClassification  = st75_.falseFixClassification;
+                summary.baselineArPhaseBiasStatus         = st75_.phaseBiasStatus;
+                summary.baselineArPartialPolicy           = st75_.partialFixPolicy;
+                summary.nBaselineArFixed                  = st75_.nIntegerFixed;
+                summary.nBaselineArRejectedArc            = st75_.nBaselineArRejectedArc;
+                summary.nBaselineArFloatExternal          = st75_.nBaselineArFloatExternal;
+                summary.externalRefUsedForAnyCalibration  = st75_.externalRefUsedForCalibration;
+                if strcmp(st75_.partialFixPolicy,'useFixedOnlyOrExplicitMixed') || ...
+                        strcmp(st75_.partialFixPolicy,'fixedOnly')
+                    summary.nBaselineArUsedInEkf = st75_.nIntegerFixed;
+                else
+                    summary.nBaselineArUsedInEkf = st75_.nIntegerFixed + st75_.nBaselineArFloatExternal;
+                end
+            catch ME75_
+                warning('ReportRunner:stage75ArFailed', ...
+                    'Stage 75 AR summary fields failed: %s', ME75_.message);
+                summary.baselineArGnssOnlyClaim          = false;
+                summary.baselineArFalseFixClassification = 'screenedNotFormal';
+                summary.baselineArPhaseBiasStatus        = 'notCalibratedExternalProduct';
+                summary.baselineArPartialPolicy          = 'mixedFixedFloat';
+                summary.nBaselineArUsedInEkf             = 0;
+                summary.nBaselineArRejectedArc           = 0;
+                summary.nBaselineArFloatExternal         = 0;
+            end
+
             % Stage 71/72 summary fields already computed before PDF generation (above).
 
             % ---- MAT: save ----------------------------------------------

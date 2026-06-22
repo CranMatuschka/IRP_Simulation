@@ -13,7 +13,7 @@
 % T-P14i: CarrierTrackManager action=resetAndSkip sets keepMask false for slipped row.
 % T-P14j: CarrierMeasurementBuilder.buildEkfRows returns trackKey and signalIdx.
 % T-P14k: ReverseGNSSEKF.applyAmbiguityResets calls resetAmbiguityCovariance.
-% T-P14l: Report .tex includes 'Carrier Track Robustness'.
+% T-P14l: Report .tex includes carrier slip detector row (Stage 73+).
 
 thisDir = fileparts(mfilename('fullpath'));
 addpath(fullfile(thisDir, '..'));
@@ -368,9 +368,11 @@ catch ME_k
 end
 
 % ----------------------------------------------------------------
-% T-P14l: Report .tex includes 'Carrier Track Robustness'
+% T-P14l: Report .tex includes carrier slip detector row (Stage 73+)
+% The old 'Carrier Track Robustness' stage-titled chapter was removed in Stage 65.
+% The numerical summary now contains 'Carrier slip detector' from Stage 73.
 % ----------------------------------------------------------------
-fprintf('  T-P14l: ClockExactReportBuilder .tex includes ''Carrier Track Robustness'' ...\n');
+fprintf('  T-P14l: ClockExactReportBuilder .tex includes carrier slip detector row ...\n');
 
 cfg_l = revgnss.ConfigFactory.defaultConfig();
 cfg_l.report.style         = 'latex';
@@ -391,12 +393,12 @@ assert(isfield(res_l,'texPath') && isfile(res_l.texPath), ...
     'T-P14l FAILED: ClockExactReportBuilder did not produce a .tex file');
 
 src_l = fileread(res_l.texPath);
-assert(contains(src_l, 'Carrier Track Robustness'), ...
-    'T-P14l FAILED: .tex missing ''Carrier Track Robustness'' section');
+assert(contains(src_l, 'Carrier slip detector'), ...
+    'T-P14l FAILED: .tex missing carrier slip detector row (Stage 73+)');
 
 try; delete(res_l.texPath); catch; end
 
-fprintf('    PASS (.tex contains ''Carrier Track Robustness'')\n');
+fprintf('    PASS (.tex contains carrier slip detector row)\n');
 
 % ----------------------------------------------------------------
 fprintf('=== test_stage14_carrier_cycle_slips: ALL PASS ===\n');

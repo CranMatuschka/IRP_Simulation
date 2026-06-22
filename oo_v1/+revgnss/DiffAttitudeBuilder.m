@@ -225,6 +225,15 @@ classdef DiffAttitudeBuilder
             info.integerClassification         = store.integerClassification;
             info.externalRefUsedAsSearchCenter = store.externalRefUsedAsSearchCenter;
             info.externalRefUsedForCalibration = store.externalRefUsedForCalibration;
+            % Stage 75: per-baseline classification and GNSS-only claim fields.
+            info.gnssOnlyAttitudeClaim    = revgnss.DiffAttitudeBuilder.storeField_(store,'gnssOnlyAttitudeClaim',false);
+            info.falseFixClassification   = revgnss.DiffAttitudeBuilder.storeField_(store,'falseFixClassification','screenedNotFormal');
+            info.phaseBiasStatus          = revgnss.DiffAttitudeBuilder.storeField_(store,'phaseBiasStatus','notCalibratedExternalProduct');
+            info.partialFixPolicy         = revgnss.DiffAttitudeBuilder.storeField_(store,'partialFixPolicy','mixedFixedFloat');
+            info.nBaselineArFloatExternal = revgnss.DiffAttitudeBuilder.storeField_(store,'nBaselineArFloatExternal',0);
+            info.nBaselineArRejectedArc   = revgnss.DiffAttitudeBuilder.storeField_(store,'nBaselineArRejectedArc',0);
+            info.ambiguityStatus          = revgnss.DiffAttitudeBuilder.storeField_(store,'ambiguityStatus',{});
+            info.nBaselineArExcludedFromEkf = 0;
 
             if ~store.calibrated || ~isfield(cpInfo,'phi_m') || isempty(cpInfo.phi_m)
                 return
@@ -269,6 +278,18 @@ classdef DiffAttitudeBuilder
                     elseif store.accumN(ti,bi) < 5
                         continue
                     end
+                    % Stage 75: partial-fix policy — skip non-fixed baselines
+                    % when policy is 'useFixedOnlyOrExplicitMixed' or 'fixedOnly'.
+                    if ~isempty(info.ambiguityStatus) && ...
+                            (strcmp(info.partialFixPolicy,'useFixedOnlyOrExplicitMixed') || ...
+                             strcmp(info.partialFixPolicy,'fixedOnly'))
+                        if bi <= size(info.ambiguityStatus,2) && ti <= size(info.ambiguityStatus,1)
+                            if ~strcmp(info.ambiguityStatus{ti,bi},'fixedInteger')
+                                info.nBaselineArExcludedFromEkf = info.nBaselineArExcludedFromEkf + 1;
+                                continue
+                            end
+                        end
+                    end
                     bMask = (cpInfo.towerIdx==ti) & (cpInfo.antennaIdx==ai);
                     if hasSigIdx && sum(bMask) > 1
                         primSig = min(cpInfo.signalIdx(bMask));
@@ -298,10 +319,17 @@ classdef DiffAttitudeBuilder
                 z_da = rows_z; h_da = rows_h; H_da = rows_H;
                 R_da = R_row * eye(numel(rows_z));
                 resid = rows_z - rows_h;
-                info.nRows        = numel(rows_z);
-                info.residualRMS_m = sqrt(mean(resid.^2));
-                info.active       = true;
+                info.nRows             = numel(rows_z);
+                info.residualRMS_m     = sqrt(mean(resid.^2));
+                info.active            = true;
+                info.nBaselineArUsedInEkf = numel(rows_z);  % Stage 75: baselines contributing EKF rows
             end
+        end
+
+        % ----------------------------------------------------------------
+        function v = storeField_(store, field, def)
+            % storeField_  Safe field read from store with default fallback.
+            if isfield(store, field); v = store.(field); else; v = def; end
         end
 
         % ----------------------------------------------------------------

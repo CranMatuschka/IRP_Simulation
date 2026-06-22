@@ -29,11 +29,11 @@ classdef MainScriptValidationGate
             state = struct();
 
             % Resolve stage, seed, count from env vars.
-            stg = 74;
+            stg = 75;
             v = str2double(getenv('OO_V1_VALIDATION_STAGE'));
             if ~isnan(v) && v > 0; stg = round(v); end
 
-            seed = 74;
+            seed = 75;
             v = str2double(getenv('OO_V1_RANDOM_TEST_SEED'));
             if ~isnan(v) && isfinite(v); seed = round(v); end
 
@@ -246,6 +246,7 @@ classdef MainScriptValidationGate
                 case 72; t = 'Clock Product Consistency and Navigation Recovery';
                 case 73; t = 'Carrier Arc and Cycle-Slip Robustness';
                 case 74; t = 'Covariance and Shared-Error Consistency';
+                case 75; t = 'Baseline Attitude Ambiguity Classification and False-Fix Hardening';
                 otherwise
                     try; t = revgnss.ReportStatus.current().stageTitle; catch; t = sprintf('Stage %d', stg); end
             end
