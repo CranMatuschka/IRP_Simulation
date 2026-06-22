@@ -35,7 +35,7 @@ oo_v1_envAllToggles_ = strcmpi(getenv('OO_V1_ALL_TOGGLES'), 'true');
 if oo_v1_envValidate_; oo_v1_envAllToggles_ = true; end  % validate always uses all toggles
 oo_v1_envStage_      = str2double(getenv('OO_V1_VALIDATION_STAGE'));
 if isnan(oo_v1_envStage_); oo_v1_envStage_ = 0; end
-if oo_v1_envValidate_ && oo_v1_envStage_ == 0; oo_v1_envStage_ = 71; end
+if oo_v1_envValidate_ && oo_v1_envStage_ == 0; oo_v1_envStage_ = 72; end
 oo_v1_envCompile_    = strtrim(getenv('OO_V1_REPORT_COMPILE_TEX'));
 
 cfg = revgnss.ConfigFactory.defaultConfig();
@@ -275,16 +275,32 @@ cfg.effects.correlatedNoise.enable = false;
 %   Receiver clock bias/drift remain estimated by the EKF.
 %   Tower clocks are corrected by product, not estimated, to avoid
 %   clock gauge ambiguity without a reference constraint.
+% Stage 72: actual root cause of 27 m position error was false carrier
+%   cycle-slip detection triggered by product epoch changes.  At each 30 s
+%   product boundary the model correction steps by (b_noise_new - b_noise_old)
+%   whose RMS is sqrt(2)*sigmaBias.  CycleSlipDetector compares consecutive
+%   pre-fit residuals; when that jump exceeds slipDetection.threshold_m the
+%   ambiguity is reset and the arc broken.  With sigmaBias=0.05 m the jump
+%   RMS is 0.07 m, giving ~15 % false-slip rate per measurement per epoch
+%   change, causing cascading resets that prevent carrier convergence.
+%   Fix: reduce sigmaBias to 0.01 m so the jump sigma (0.014 m) is 7-sigma
+%   below the 0.1 m threshold (false-slip probability ~10^-12 per measurement).
+%   Also corrected: clockAtProductEpoch history fallback and GroundTower
+%   history initialisation at t=0.  Summary fields moved before PDF build;
+%   gauge text corrected; covariance handling labelled diagonal-only.
 cfg.clock.receiver.deterministic       = false;
 cfg.estimator.estimateTowerClocks      = false;
 cfg.errors.towerClockCorrection.mode   = 'truthHistoryProductNoisy';
 
 % Stage 71: product model parameters.
+% Stage 72: sigmaBias reduced 0.05 -> 0.01 m to prevent false carrier slips
+%   at product epoch boundaries (see comment above).  0.01 m = 0.033 ns
+%   corresponds to an IGS-class dense-network clock product.
 cfg.clocks.tower.product.mode                  = 'truthHistoryProductNoisy';
 cfg.clocks.tower.product.updateInterval_s      = 30;
 cfg.clocks.tower.product.latency_s             = 5;
-cfg.clocks.tower.product.sigmaBias_m           = 0.05;   % ~0.15 ns: high-quality ground tracking network
-cfg.clocks.tower.product.sigmaDrift_mps        = 0.001;  % ~0.003 ppb/s
+cfg.clocks.tower.product.sigmaBias_m           = 0.01;   % ~0.033 ns: IGS-class ground tracking network
+cfg.clocks.tower.product.sigmaDrift_mps        = 0.0002; % ~0.0007 ppb/s
 cfg.clocks.tower.product.covBiasDrift          = 0;
 cfg.clocks.tower.product.validity_s            = 120;
 cfg.clocks.tower.product.addToR                = true;

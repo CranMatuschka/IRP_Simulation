@@ -78,9 +78,14 @@ classdef GroundTower < handle
             % Build clock
             obj.clock = revgnss.ClockModel(cfg.clock);
 
-            obj.history.time_s       = [];
-            obj.history.clockBias_m  = [];
-            obj.history.clockDrift_mps = [];
+            % Stage 72: seed history with the t=0 initial state so that product
+            % epoch lookups at t_prod=0 (the first 30+latency seconds of the
+            % simulation) always find a valid history entry.  Without this seed,
+            % clockAtProductEpoch returns the fallback (current-state) value for
+            % the entire first product block.
+            obj.history.time_s         = obj.clock.lastTime_s;
+            obj.history.clockBias_m    = obj.clock.getBiasMeters();
+            obj.history.clockDrift_mps = obj.clock.getDriftMetersPerSecond();
         end
 
         % ----------------------------------------------------------------

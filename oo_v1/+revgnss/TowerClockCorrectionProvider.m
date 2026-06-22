@@ -167,17 +167,34 @@ classdef TowerClockCorrectionProvider
         function [b_m, bdot_mps] = clockAtProductEpoch(tower, t_prod_s)
             % clockAtProductEpoch  Tower clock bias and drift at the product epoch.
             %
-            % For 'truthHistoryProduct'/'product'/'productNoisy' modes that do NOT have
-            % an explicit cfg.towerClock.products struct, reads from tower history.
-            % Returns [0, 0] when history is unavailable (first epoch or t_prod=0).
+            % Reads from tower history (GroundTower initialises history at t=0
+            % so t_prod=0 always has a valid entry after Stage 72).
+            %
+            % Fallback: when history is empty or predates t_prod, the current
+            % tower state is returned with zero effective prediction age.  This
+            % is equivalent to the product epoch being "now" — safe because
+            % tower clocks initialise at (0,0) and the prediction error from a
+            % wrong age anchor would be larger than this approximation.
             b_m      = 0;
             bdot_mps = 0;
             hist = tower.history;
             if isempty(hist.time_s) || isempty(hist.clockBias_m)
+                % History not yet populated (edge case; GroundTower init at t=0
+                % prevents this in normal operation).
+                b_m      = tower.getClockBiasMeters();
+                bdot_mps = tower.getClockDriftMetersPerSecond();
                 return;
             end
             idx = find(hist.time_s <= t_prod_s + 1e-9, 1, 'last');
-            if isempty(idx); return; end
+            if isempty(idx)
+                % All recorded history is AFTER t_prod (startup before first step).
+                % Use current state rather than projecting from a later anchor —
+                % projecting forward from the earliest entry would apply an extra
+                % age = (t_earliest - t_prod) that overcorrects the prediction.
+                b_m      = tower.getClockBiasMeters();
+                bdot_mps = tower.getClockDriftMetersPerSecond();
+                return;
+            end
             b_m      = hist.clockBias_m(idx);
             bdot_mps = hist.clockDrift_mps(idx);
         end

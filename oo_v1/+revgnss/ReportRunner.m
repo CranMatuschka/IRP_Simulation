@@ -828,6 +828,68 @@ classdef ReportRunner
             summary.stage68MultipathEn = false;
             try; summary.stage68MultipathEn = cfg.errors.multipath.truth.enable || cfg.errors.multipath.model.enable; catch; end
 
+            % ---- Stage 71/72: tower clock product summary fields -------
+            % MUST be computed before PDF generation so ClockExactReportBuilder
+            % receives finite product metadata (not NaN).  All values derive
+            % from cfg, not from simulation results, so early placement is safe.
+            try
+                tClkMode71_ = cfg.estimator.towerClockMode;
+                isProd71_   = strcmp(tClkMode71_, 'truthHistoryProductNoisy');
+                summary.towerClockProductMode              = tClkMode71_;
+                summary.towerClockPerfectCorrection        = strcmp(tClkMode71_, 'perfectCorrection');
+                summary.receiverClockEstimated             = true;
+                summary.towerClockStatesEstimated          = isfield(cfg.estimator,'estimateTowerClocks') && ...
+                                                            logical(cfg.estimator.estimateTowerClocks);
+                if isProd71_
+                    dT71_  = cfg.clocks.tower.product.updateInterval_s;
+                    lat71_ = cfg.clocks.tower.product.latency_s;
+                    sB71_  = cfg.clocks.tower.product.sigmaBias_m;
+                    sD71_  = cfg.clocks.tower.product.sigmaDrift_mps;
+                    cBD71_ = cfg.clocks.tower.product.covBiasDrift;
+                    maxAge71_  = dT71_ + lat71_;
+                    meanAge71_ = dT71_ / 2 + lat71_;
+                    varMax71_  = sB71_^2 + maxAge71_^2  * sD71_^2 + 2*maxAge71_*cBD71_;
+                    varMean71_ = sB71_^2 + meanAge71_^2 * sD71_^2 + 2*meanAge71_*cBD71_;
+                    summary.towerClockProductUpdateInterval_s  = dT71_;
+                    summary.towerClockProductLatency_s         = lat71_;
+                    summary.towerClockProductMeanAge_s         = meanAge71_;
+                    summary.towerClockProductMaxAge_s          = maxAge71_;
+                    summary.towerClockProductMeanSigma_m       = sqrt(max(varMean71_,0));
+                    summary.towerClockProductMaxSigma_m        = sqrt(max(varMax71_,0));
+                    % Stage 72: shared covariance not implemented; only diagonal R inflation.
+                    summary.towerClockSharedCovarianceApplied  = false;
+                    summary.towerClockProductDiagonalInflation = true;
+                    summary.dopplerClockProductUncertaintyStatus = ...
+                        'code-R inflated (diagonal only); carrier R unchanged (float ambiguity absorbs bias); Doppler clock-drift sigma simplified v1';
+                else
+                    summary.towerClockProductUpdateInterval_s  = NaN;
+                    summary.towerClockProductLatency_s         = NaN;
+                    summary.towerClockProductMeanAge_s         = NaN;
+                    summary.towerClockProductMaxAge_s          = NaN;
+                    summary.towerClockProductMeanSigma_m       = NaN;
+                    summary.towerClockProductMaxSigma_m        = NaN;
+                    summary.towerClockSharedCovarianceApplied  = false;
+                    summary.towerClockProductDiagonalInflation = false;
+                    summary.dopplerClockProductUncertaintyStatus = 'notApplicable';
+                end
+            catch ME71_
+                warning('ReportRunner:stage71SummaryFailed', ...
+                    'Stage 71/72 summary fields failed: %s', ME71_.message);
+                summary.towerClockProductMode              = 'unknown';
+                summary.towerClockPerfectCorrection        = false;
+                summary.receiverClockEstimated             = true;
+                summary.towerClockStatesEstimated          = false;
+                summary.towerClockProductUpdateInterval_s  = NaN;
+                summary.towerClockProductLatency_s         = NaN;
+                summary.towerClockProductMeanAge_s         = NaN;
+                summary.towerClockProductMaxAge_s          = NaN;
+                summary.towerClockProductMeanSigma_m       = NaN;
+                summary.towerClockProductMaxSigma_m        = NaN;
+                summary.towerClockSharedCovarianceApplied  = false;
+                summary.towerClockProductDiagonalInflation = false;
+                summary.dopplerClockProductUncertaintyStatus = 'unknown';
+            end
+
             % ---- Determine report layout before PDF generation -----------
             reportLayout = 'default';
             if isfield(cfg,'report') && isfield(cfg.report,'layout')
@@ -936,61 +998,7 @@ classdef ReportRunner
                 summary.externalReferenceUsedForCalibration = true;
             end
 
-            % ---- Stage 71: tower clock product summary fields ---------------
-            try
-                tClkMode71_ = cfg.estimator.towerClockMode;
-                isProd71_   = strcmp(tClkMode71_, 'truthHistoryProductNoisy');
-                summary.towerClockProductMode              = tClkMode71_;
-                summary.towerClockPerfectCorrection        = strcmp(tClkMode71_, 'perfectCorrection');
-                summary.receiverClockEstimated             = true;
-                summary.towerClockStatesEstimated          = isfield(cfg.estimator,'estimateTowerClocks') && ...
-                                                            logical(cfg.estimator.estimateTowerClocks);
-                if isProd71_
-                    dT71_  = cfg.clocks.tower.product.updateInterval_s;
-                    lat71_ = cfg.clocks.tower.product.latency_s;
-                    sB71_  = cfg.clocks.tower.product.sigmaBias_m;
-                    sD71_  = cfg.clocks.tower.product.sigmaDrift_mps;
-                    cBD71_ = cfg.clocks.tower.product.covBiasDrift;
-                    shrd71_= isfield(cfg.clocks.tower.product,'sharedErrorCorrelation') && ...
-                             cfg.clocks.tower.product.sharedErrorCorrelation;
-                    maxAge71_  = dT71_ + lat71_;
-                    meanAge71_ = dT71_ / 2 + lat71_;
-                    varMax71_  = sB71_^2 + maxAge71_^2  * sD71_^2 + 2*maxAge71_*cBD71_;
-                    varMean71_ = sB71_^2 + meanAge71_^2 * sD71_^2 + 2*meanAge71_*cBD71_;
-                    summary.towerClockProductUpdateInterval_s = dT71_;
-                    summary.towerClockProductLatency_s        = lat71_;
-                    summary.towerClockProductMeanAge_s        = meanAge71_;
-                    summary.towerClockProductMaxAge_s         = maxAge71_;
-                    summary.towerClockProductMeanSigma_m      = sqrt(max(varMean71_,0));
-                    summary.towerClockProductMaxSigma_m       = sqrt(max(varMax71_,0));
-                    summary.towerClockSharedCovarianceApplied = shrd71_;
-                    summary.dopplerClockProductUncertaintyStatus = 'code-R inflated only; carrier float-ambiguity absorbs clock bias; Doppler clock-drift sigma simplified v1';
-                else
-                    summary.towerClockProductUpdateInterval_s = NaN;
-                    summary.towerClockProductLatency_s        = NaN;
-                    summary.towerClockProductMeanAge_s        = NaN;
-                    summary.towerClockProductMaxAge_s         = NaN;
-                    summary.towerClockProductMeanSigma_m      = NaN;
-                    summary.towerClockProductMaxSigma_m       = NaN;
-                    summary.towerClockSharedCovarianceApplied = false;
-                    summary.dopplerClockProductUncertaintyStatus = 'notApplicable';
-                end
-            catch ME71_
-                warning('ReportRunner:stage71SummaryFailed', ...
-                    'Stage 71 summary fields failed: %s', ME71_.message);
-                summary.towerClockProductMode         = 'unknown';
-                summary.towerClockPerfectCorrection   = false;
-                summary.receiverClockEstimated        = true;
-                summary.towerClockStatesEstimated     = false;
-                summary.towerClockProductUpdateInterval_s = NaN;
-                summary.towerClockProductLatency_s    = NaN;
-                summary.towerClockProductMeanAge_s    = NaN;
-                summary.towerClockProductMaxAge_s     = NaN;
-                summary.towerClockProductMeanSigma_m  = NaN;
-                summary.towerClockProductMaxSigma_m   = NaN;
-                summary.towerClockSharedCovarianceApplied = false;
-                summary.dopplerClockProductUncertaintyStatus = 'unknown';
-            end
+            % Stage 71/72 summary fields already computed before PDF generation (above).
 
             % ---- MAT: save ----------------------------------------------
             cs = diag.getContributionSeries();

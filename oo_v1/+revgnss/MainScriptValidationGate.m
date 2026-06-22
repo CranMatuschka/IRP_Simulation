@@ -29,11 +29,11 @@ classdef MainScriptValidationGate
             state = struct();
 
             % Resolve stage, seed, count from env vars.
-            stg = 71;
+            stg = 72;
             v = str2double(getenv('OO_V1_VALIDATION_STAGE'));
             if ~isnan(v) && v > 0; stg = round(v); end
 
-            seed = 71;
+            seed = 72;
             v = str2double(getenv('OO_V1_RANDOM_TEST_SEED'));
             if ~isnan(v) && isfinite(v); seed = round(v); end
 
@@ -243,6 +243,7 @@ classdef MainScriptValidationGate
                 case 69; t = 'Carrier-Lever-Arm Attitude Closure';
                 case 70; t = 'Baseline Carrier Attitude Ambiguity Resolution';
                 case 71; t = 'Realistic Clock Product and Clock-State Handling';
+                case 72; t = 'Clock Product Consistency and Navigation Recovery';
                 otherwise
                     try; t = revgnss.ReportStatus.current().stageTitle; catch; t = sprintf('Stage %d', stg); end
             end
