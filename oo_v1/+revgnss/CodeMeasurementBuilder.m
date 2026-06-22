@@ -466,6 +466,58 @@ classdef CodeMeasurementBuilder
                 cfg, rngCorr, z, R_diag, twr_list, M);
             errStruct.correlatedNoise = correlNoise;
 
+            % Stage 74: block covariance for shared tower clock product errors.
+            % The same tower clock product error is common to all code rows that
+            % reference the same tower at the same product epoch.  Treating it as
+            % independent (diagonal-only) makes the EKF too confident.
+            % Fix: R_ij += sigma_twr^2 for all (i,j) pairs from the same tower
+            % (i != j only — diagonal already contains sigma_twr^2 from R_diag).
+            % Result: R = diag(sigma_tracking^2) + sum_t(sigma_t^2 * ones(k_t))
+            % which is symmetric positive definite whenever all sigma_tracking > 0.
+            sharedErrEnable_ = false;
+            sharedErrCode_   = false;
+            try
+                sharedErrEnable_ = cfg.covariance.sharedErrors.enable;
+                sharedErrCode_   = cfg.covariance.sharedErrors.applyTowerClockToCode;
+            catch; end
+            cbc_.applied     = false;
+            cbc_.nBlocks     = 0;
+            cbc_.blockSizes  = zeros(0,1);
+            cbc_.jitterAdded = false;
+            cbc_.spd         = true;
+            if sharedErrEnable_ && sharedErrCode_
+                jitter_m2_ = 1e-12;
+                try; jitter_m2_ = cfg.covariance.sharedErrors.jitter_m2; catch; end
+                % Per-row tower clock sigma after multi-signal expansion
+                sigTwr_ = zeros(M,1);
+                if isfield(errStruct,'towerClockModelSigma_m') && ...
+                        numel(errStruct.towerClockModelSigma_m) == M
+                    sigTwr_ = errStruct.towerClockModelSigma_m;
+                end
+                uniqT_ = unique(twr_list);
+                for kt_ = 1:numel(uniqT_)
+                    idx_ = find(twr_list == uniqT_(kt_));
+                    if numel(idx_) < 2; continue; end
+                    sig_t_ = mean(sigTwr_(idx_));
+                    if sig_t_ <= 0; continue; end
+                    % Off-diagonal only: diagonal already has sigma_twr^2 in R_diag
+                    cov_add_ = sig_t_^2 * (ones(numel(idx_)) - eye(numel(idx_)));
+                    R(idx_,idx_) = R(idx_,idx_) + cov_add_;
+                    cbc_.nBlocks = cbc_.nBlocks + 1;
+                    cbc_.blockSizes(end+1) = numel(idx_);
+                end
+                % SPD guard (should never trigger for sigma_tracking > 0)
+                [~, pfail_] = chol(R);
+                if pfail_ ~= 0
+                    R = R + jitter_m2_ * eye(size(R,1));
+                    cbc_.jitterAdded = true;
+                    [~, pfail2_] = chol(R);
+                    cbc_.spd = (pfail2_ == 0);
+                end
+                cbc_.applied = true;
+            end
+            errStruct.codeBlockCov = cbc_;
+
             % R validity guard
             rDiag = diag(R);
             if any(~isfinite(rDiag)) || any(rDiag <= 0)

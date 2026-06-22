@@ -195,6 +195,11 @@ classdef Diagnostics < handle
                     entry.towerClockCorrectionError_m = [];
                 end
 
+                % Stage 74: code block covariance diagnostics
+                if isfield(errStruct,'codeBlockCov')
+                    entry.codeBlockCov = errStruct.codeBlockCov;
+                end
+
                 % Doppler prefit RMS (if enabled)
                 if isfield(errStruct,'doppler') && isfield(errStruct.doppler,'prefit') && ...
                         ~isempty(errStruct.doppler.prefit)

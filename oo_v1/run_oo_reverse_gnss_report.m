@@ -35,7 +35,7 @@ oo_v1_envAllToggles_ = strcmpi(getenv('OO_V1_ALL_TOGGLES'), 'true');
 if oo_v1_envValidate_; oo_v1_envAllToggles_ = true; end  % validate always uses all toggles
 oo_v1_envStage_      = str2double(getenv('OO_V1_VALIDATION_STAGE'));
 if isnan(oo_v1_envStage_); oo_v1_envStage_ = 0; end
-if oo_v1_envValidate_ && oo_v1_envStage_ == 0; oo_v1_envStage_ = 73; end
+if oo_v1_envValidate_ && oo_v1_envStage_ == 0; oo_v1_envStage_ = 74; end
 oo_v1_envCompile_    = strtrim(getenv('OO_V1_REPORT_COMPILE_TEX'));
 
 cfg = revgnss.ConfigFactory.defaultConfig();
@@ -353,6 +353,31 @@ cfg.carrierSlip.syntheticSlipInjection.towerIndex   = 1;
 cfg.carrierSlip.syntheticSlipInjection.receiverIndex = 2;
 cfg.carrierSlip.syntheticSlipInjection.signal       = 'L1';
 cfg.carrierSlip.syntheticSlipInjection.jumpCycles   = 1;
+
+% --- Stage 74: shared-error covariance consistency ---------------
+% Code rows sharing the same tower and product epoch share a common tower
+% clock product error.  Treating them as fully independent (diagonal-only R)
+% makes the EKF too confident and NIS misleading.
+%
+% Stage 74 implements block covariance for code rows:
+%   R_ij += sigma_twr^2   for all (i,j) from the same tower, i != j
+% This is equivalent to R = diag(sigma_tracking^2) + sum_t(sigma_t^2*J_t)
+% where J_t is the all-ones block for tower t.  R remains symmetric PD.
+%
+% Carrier R: unchanged.  Float ambiguity absorbs constant arc bias; Stage 74
+%   does not add time-varying product error covariance to carrier R because
+%   that would require modelling product-error time correlation correctly.
+% Doppler R: simplified v1 (no tower-clock drift sigma added).
+cfg.covariance.sharedErrors.enable                     = true;
+cfg.covariance.sharedErrors.mode                       = 'blockTowerClockProduct';
+cfg.covariance.sharedErrors.applyTowerClockToCode      = true;
+cfg.covariance.sharedErrors.applyTowerClockToCarrier   = false;
+cfg.covariance.sharedErrors.applyTowerClockToDoppler   = false;
+cfg.covariance.sharedErrors.carrierPolicy              = 'arcBiasAbsorbsConstantProductBias';
+cfg.covariance.sharedErrors.dopplerPolicy              = 'simplifiedV1';
+cfg.covariance.sharedErrors.ensureSPD                  = true;
+cfg.covariance.sharedErrors.jitter_m2                  = 1e-12;
+cfg.covariance.sharedErrors.reportDiagnostics          = true;
 
 % --- Troposphere ZWD EKF state ----------------------------------
 % Disabled in the default multi-receiver report.  Stage 15 ZWD states are

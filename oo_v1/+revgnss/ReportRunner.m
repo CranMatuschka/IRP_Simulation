@@ -961,6 +961,53 @@ classdef ReportRunner
                 summary.carrierArcRobustnessStatus     = 'unknown';
             end
 
+            % ---- Stage 74: shared-error covariance summary fields ----------
+            % Defaults (safe if cfg.covariance block absent or run pre-Stage74)
+            summary.covarianceMode                         = 'diagonalOnly';
+            summary.codeTowerClockBlockCovarianceApplied   = false;
+            summary.nCodeClockCovarianceBlocks             = 0;
+            summary.meanCodeClockBlockSize                 = NaN;
+            summary.maxCodeClockBlockSize                  = NaN;
+            summary.carrierTowerClockCovariancePolicy      = 'notAppliedFloatAmbiguityAbsorbsConstantBias';
+            summary.dopplerClockProductCovariancePolicy    = 'simplifiedV1NotApplied';
+            summary.sharedErrorCovarianceSPD               = true;
+            summary.covarianceJitterAdded                  = false;
+            summary.nisInterpretation                      = 'diagonalR: code tower-clock product correlation not modelled';
+            try
+                se74_ = cfg.covariance.sharedErrors;
+                if se74_.enable
+                    summary.covarianceMode = se74_.mode;
+                    if se74_.applyTowerClockToCode
+                        % Extract codeBlockCov from last diag log entry
+                        cbc74_ = struct('applied',false,'nBlocks',0,'blockSizes',zeros(0,1),'jitterAdded',false,'spd',true);
+                        if ~isempty(diag.log) && isfield(diag.log(end),'codeBlockCov') && ...
+                                ~isempty(diag.log(end).codeBlockCov)
+                            cbc74_ = diag.log(end).codeBlockCov;
+                        end
+                        summary.codeTowerClockBlockCovarianceApplied = cbc74_.applied;
+                        summary.nCodeClockCovarianceBlocks           = cbc74_.nBlocks;
+                        if ~isempty(cbc74_.blockSizes)
+                            summary.meanCodeClockBlockSize = mean(cbc74_.blockSizes);
+                            summary.maxCodeClockBlockSize  = max(cbc74_.blockSizes);
+                        end
+                        summary.sharedErrorCovarianceSPD   = cbc74_.spd;
+                        summary.covarianceJitterAdded       = cbc74_.jitterAdded;
+                        summary.nisInterpretation           = ['blockR(code): code tower-clock product ' ...
+                            'off-diagonal correlation applied; carrier/Doppler remain diagonal ' ...
+                            '(mixed covariance: NIS is partial/not fully chi-square)'];
+                    end
+                    if isfield(se74_,'carrierPolicy')
+                        summary.carrierTowerClockCovariancePolicy = se74_.carrierPolicy;
+                    end
+                    if isfield(se74_,'dopplerPolicy')
+                        summary.dopplerClockProductCovariancePolicy = se74_.dopplerPolicy;
+                    end
+                end
+            catch ME74_
+                warning('ReportRunner:stage74CovFailed', ...
+                    'Stage 74 covariance summary fields failed: %s', ME74_.message);
+            end
+
             % ---- Determine report layout before PDF generation -----------
             reportLayout = 'default';
             if isfield(cfg,'report') && isfield(cfg.report,'layout')
