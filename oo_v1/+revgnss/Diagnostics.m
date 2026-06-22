@@ -1266,6 +1266,14 @@ classdef Diagnostics < handle
             end
         end
 
+        function x_s = getRxClockBiasTrue(obj)
+            % Returns [nEpochs x 1] truth receiver clock bias time series [s].
+            x_s = NaN(obj.nEpochs, 1);
+            for k = 1:obj.nEpochs
+                try; x_s(k) = obj.log(k).truth.rxClockBias_s; catch; end
+            end
+        end
+
         function v = getGDOPLike(obj)
             v = [obj.log.gdopLike]';
         end

@@ -35,7 +35,7 @@ oo_v1_envAllToggles_ = strcmpi(getenv('OO_V1_ALL_TOGGLES'), 'true');
 if oo_v1_envValidate_; oo_v1_envAllToggles_ = true; end  % validate always uses all toggles
 oo_v1_envStage_      = str2double(getenv('OO_V1_VALIDATION_STAGE'));
 if isnan(oo_v1_envStage_); oo_v1_envStage_ = 0; end
-if oo_v1_envValidate_ && oo_v1_envStage_ == 0; oo_v1_envStage_ = 66; end
+if oo_v1_envValidate_ && oo_v1_envStage_ == 0; oo_v1_envStage_ = 67; end
 oo_v1_envCompile_    = strtrim(getenv('OO_V1_REPORT_COMPILE_TEX'));
 
 cfg = revgnss.ConfigFactory.defaultConfig();
@@ -96,14 +96,14 @@ cfg.estimator.integerAmbiguity.resetOnSlip                = true;
 % nReceivers  > 1  ->  attitude estimation ON,  auto cross-pattern lever arms
 cfg.scenario.nReceivers = 3;
 
-% --- Single-asset one-way scenario (Stage 66) ----------------------------
+% --- Single-asset one-way scenario (Stage 66/67) -------------------------
 % One estimated spacecraft. Ground towers transmit reference signals upward
 % one-way (tower-to-space only). No ISL, no TWSTFT, no two-way, no relay,
 % no multi-asset estimation. ISL/TWSTFT remain at ConfigFactory defaults
 % (all disabled) — do not enable them here.
 cfg.scenario.nSpaceAssets = 1;        % one estimated spacecraft only
-cfg.scenario.orbitClass   = 'GEO';    % 'GEO' | 'MEO' | 'LEO' (initial state only;
-%                                      %  truth is static ECEF in v1 — no propagator)
+cfg.scenario.orbitClass   = 'GEO';    % 'GEO' | 'MEO' | 'LEO'
+%                                      % Stage 67: twoBodyRk4 truth propagator (see ScenarioPresets)
 
 % --- Frequency --------------------------------------------------
 % false  ->  L1 only
@@ -264,8 +264,10 @@ cfg.effects.antennaPCV.model.enable   = false;
 cfg.effects.correlatedNoise.enable = false;
 
 % --- Clocks -----------------------------------------------------
-cfg.clock.receiver.deterministic      = true;
-cfg.errors.towerClockCorrection.mode  = 'perfectCorrection';
+% Stage 67: stochastic receiver and tower clocks (non-perfect correction).
+% Tower clock stochastic mode is applied per-tower in ScenarioPresets.
+cfg.clock.receiver.deterministic      = false;
+cfg.errors.towerClockCorrection.mode  = 'noisyCorrection';
 
 % --- Doppler ----------------------------------------------------
 cfg.measurements.doppler.enable       = true;
@@ -303,17 +305,25 @@ cfg.estimation.tropoZwd.tau_s          = 3600;
 % Shows whether attitude converges when truth ambiguities are known.
 cfg.estimator.runKnownAmbiguityValidation = true;
 
+% --- Attitude primary estimator (Stage 67) ----------------------
+% Primary attitude estimator: carrier lever-arm quaternion error-state EKF.
+% Baselined differential carrier phases from the 4-antenna cross pattern
+% drive the quaternion nominal/error-state EKF (Stages 61/62).
+% This label is documentary — the EKF runs regardless of this field.
+cfg.estimator.attitude.primaryMode   = 'carrierLeverArmQuaternionEkf';
+
 % --- Calibrated differential carrier attitude (Stage 15) --------
 % Operational: baseline-differenced carrier with calibrated ambiguity bias.
 % Requires carrierMode=ekfFloat + nReceivers>=2.
 % Calibration absorbs the attitude reference at t < calibWin_s.
+% This mode provides relative attitude tracking only (not absolute reference).
 cfg.estimator.attitudeCarrierMode    = 'calibratedDifferentialAmbiguity';
 cfg.estimator.diffAtt.calibWin_s     = 60;
 
-% --- Absolute attitude initialization (Stage 17) ----------------
-% Independent coarse attitude/integer search.  If the residual/ratio gate is
-% weak, the report classifies it honestly and Stage 15 remains relative
-% calibrated tracking only.
+% --- Coarse attitude initializer (Stage 17) — optional, not primary -
+% Independent integer search for initial attitude. If ratio gate is weak,
+% Stage 15 calibrated tracking remains the primary attitude source.
+% This initializer supplements but does not replace the quaternion EKF.
 cfg.estimator.attitudeInitMode = 'coarseBaselineIntegerSearch';
 cfg.estimator.attitudeInit.search.windowDeg = [2; 2; 2];
 cfg.estimator.attitudeInit.search.stepDeg = [0.5; 0.5; 0.5];
@@ -389,12 +399,8 @@ if stageAllToggles || oo_v1_envAllToggles_
             cfg.validation.validationStage = oo_v1_envStage_;
         end
     end
-    % Stage 66: static ECEF GEO truth is inconsistent with inertial J2 dynamics.
-    % Reset to constantVelocity for the single-asset one-way scenario.
-    if isfield(cfg,'scenario') && isfield(cfg.scenario,'name') && ...
-            strcmp(cfg.scenario.name,'singleAssetCarrierAttitude')
-        cfg.estimator.dynamics.mode = 'constantVelocity';
-    end
+    % Stage 67: ScenarioPresets.apply() (called below) overrides dynamics
+    % to 'twoBody' with matched twoBodyRk4 truth propagator. No override needed here.
 end
 if ~isempty(oo_v1_envCompile_) && ismember(oo_v1_envCompile_, {'require','auto','never'})
     cfg.report.compileTex = oo_v1_envCompile_;

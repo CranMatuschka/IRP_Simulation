@@ -36,7 +36,11 @@ classdef OrbitPropagator
             if isfield(cfg,'raan_rad');         obj.raan_rad         = cfg.raan_rad;         end
             if isfield(cfg,'trueAnomaly0_rad'); obj.trueAnomaly0_rad = cfg.trueAnomaly0_rad; end
             if isfield(cfg,'epochGMST_rad');    obj.epochGMST_rad    = cfg.epochGMST_rad;    end
-            if isfield(cfg,'orbit') && isfield(cfg.orbit,'mode') && ~isempty(cfg.orbit.mode)
+            % Accept cfg.mode (when called as OrbitPropagator(cfg.orbit))
+            % or cfg.orbit.mode (when called as OrbitPropagator(cfg)).
+            if isfield(cfg,'mode') && ~isempty(cfg.mode)
+                obj.orbitMode = cfg.mode;
+            elseif isfield(cfg,'orbit') && isfield(cfg.orbit,'mode') && ~isempty(cfg.orbit.mode)
                 obj.orbitMode = cfg.orbit.mode;
             end
         end

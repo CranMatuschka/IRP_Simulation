@@ -774,6 +774,36 @@ classdef ReportRunner
                                             summary.stage66TwoWayDisabled;
             summary.stage66OperationalClaim = false;
 
+            % ---- Stage 67: attitude, clock, and dynamics realism summary ----
+            attPrim67_ = 'carrierLeverArmQuaternionEkf';
+            try; attPrim67_ = cfg.estimator.attitude.primaryMode; catch; end
+            summary.stage67PrimaryAttMode = attPrim67_;
+            attInit67_ = 'coarseBaselineIntegerSearch';
+            try; attInit67_ = cfg.estimator.attitudeInitMode; catch; end
+            summary.stage67AttInitMode = attInit67_;
+            attCar67_ = 'calibratedDifferentialAmbiguity';
+            try; attCar67_ = cfg.estimator.attitudeCarrierMode; catch; end
+            summary.stage67AttCarrierMode = attCar67_;
+            rxDet67_ = false;
+            try; rxDet67_ = cfg.asset.clock.deterministic; catch; end
+            summary.stage67RxClockDet = rxDet67_;
+            tClkMode67_ = 'noisyCorrection';
+            try; tClkMode67_ = cfg.estimator.towerClockMode; catch; end
+            summary.stage67TowerClockMode = tClkMode67_;
+            tClkSig67_ = 0.5;
+            try; tClkSig67_ = cfg.estimator.towerClockCorrectionSigma_m; catch; end
+            summary.stage67TowerClockSigma_m = tClkSig67_;
+            dyn67_ = 'twoBody';
+            try; dyn67_ = cfg.estimator.dynamics.mode; catch; end
+            summary.stage67DynamicsMode = dyn67_;
+            propEn67_ = false;
+            try; propEn67_ = cfg.orbit.useOrbitPropagator; catch; end
+            summary.stage67OrbitProp = propEn67_;
+            propMode67_ = 'twoBodyRk4';
+            try; propMode67_ = cfg.orbit.mode; catch; end
+            summary.stage67OrbitPropMode = propMode67_;
+            summary.stage67PerfectCorrectionFalse = ~strcmp(tClkMode67_, 'perfectCorrection');
+
             % ---- Determine report layout before PDF generation -----------
             reportLayout = 'default';
             if isfield(cfg,'report') && isfield(cfg.report,'layout')

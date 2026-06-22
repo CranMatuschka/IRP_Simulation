@@ -189,6 +189,10 @@ classdef ClockExactReportBuilder
                 CE.plotSignalZoom_(diag, t, 'clkDrift', zoomFrac));
             paths.attCompZoom = CE.tryPlot_(figDir, [stem '_attitude_components_zoom10.pdf'], @() ...
                 CE.plotAttZoom_(diag, t, zoomFrac));
+
+            % Allan deviation (Stage 67)
+            paths.allanDev = CE.tryPlot_(figDir, [stem '_allan_deviation.pdf'], @() ...
+                CE.plotAllanDeviation_(diag, t));
         end
 
         % ................................................................
@@ -250,6 +254,62 @@ classdef ClockExactReportBuilder
                     end
                 end
             catch; end
+            revgnss.ClockExactReportBuilder.noDataAxes_(ax);
+        end
+
+        % ................................................................
+        function fig = plotAllanDeviation_(diag, t)
+            % plotAllanDeviation_  Overlapping ADEV for asset Rx and tower clocks.
+            fig = revgnss.ClockExactReportBuilder.makeCompactFig_('');
+            ax = gca(fig);
+            try
+                c = 299792458;
+                hold(ax, 'on');
+                nLines = 0;
+
+                % Asset Rx clock truth [s]
+                x_rx = revgnss.AllanDeviation.getRxClockBiasTrue(diag);
+                if sum(isfinite(x_rx)) > 8
+                    adev = revgnss.AllanDeviation.compute(x_rx(isfinite(x_rx)), ...
+                        t(isfinite(x_rx)));
+                    if ~isempty(adev.tau)
+                        loglog(ax, adev.tau, adev.sigma_y, 'k-', ...
+                            'LineWidth', 1.4, 'DisplayName', 'Asset Rx');
+                        nLines = nLines + 1;
+                    end
+                end
+
+                % Tower clocks [m → s]
+                twr_m = revgnss.AllanDeviation.getTowerClockBiasMatrix(diag);
+                nT = size(twr_m, 2);
+                if nT > 0
+                    cols_ = lines(max(nT, 1));
+                    for tk = 1:nT
+                        x_col = twr_m(:, tk);
+                        ok = isfinite(x_col);
+                        if sum(ok) < 8; continue; end
+                        x_s = x_col(ok) / c;
+                        t_v = t(ok);
+                        adev = revgnss.AllanDeviation.compute(x_s(:), t_v(:));
+                        if ~isempty(adev.tau)
+                            loglog(ax, adev.tau, adev.sigma_y, '-', ...
+                                'Color', cols_(tk,:), 'LineWidth', 0.8, ...
+                                'DisplayName', sprintf('Tower %d', tk));
+                            nLines = nLines + 1;
+                        end
+                    end
+                end
+
+                if nLines > 0
+                    hold(ax, 'off');
+                    xlabel(ax, '\tau [s]', 'FontSize', 7);
+                    ylabel(ax, '\sigma_y(\tau)', 'FontSize', 7);
+                    grid(ax, 'on'); grid(ax, 'minor');
+                    legend(ax, 'show', 'Location', 'best', 'FontSize', 6);
+                    return
+                end
+            catch; end
+            hold(ax, 'off');
             revgnss.ClockExactReportBuilder.noDataAxes_(ax);
         end
 
@@ -535,6 +595,7 @@ classdef ClockExactReportBuilder
             CE.writeTxCodeBias_(fid, diag, cfg);
             CE.writeNumericalSummary_(fid, cfg, summary, diag);
             CE.writeFinalScientificClosure_(fid, summary);
+            CE.writeStage67Closure_(fid, summary, plotPaths, stem, figDir);
 
             fprintf(fid, '\\end{document}\n');
             fclose(fid);
@@ -1008,10 +1069,14 @@ classdef ClockExactReportBuilder
             fprintf(fid, '\\section{Oscillator Stability Validation}\n');
             fprintf(fid, CE.plotTableHeader_());
 
-            CE.writeRow_(fid, '', ...
-                'Oscillator Stability Check (Allan Deviation)', ...
-                ['Theoretical Allan deviation profiles for the spacecraft oscillator and tower oscillators. ' ...
-                 'No Allan deviation plot generated in this oo\_v1 run (no overlapping-ADEV estimator).']);
+            CE.writeRow_(fid, CE.figRef_(plotPaths,'allanDev',figDir,stem), ...
+                'Oscillator Stability: Overlapping Allan Deviation', ...
+                ['Overlapping ADEV $\sigma_y(\tau)$ computed from truth clock-bias time series. ' ...
+                 'Black: asset receiver clock (Brown-Hwang two-state model). ' ...
+                 'Coloured: tower transmitter clocks (stochastic, Stage~67). ' ...
+                 'Slope $-0.5$ indicates white frequency noise; slope $+0.5$ indicates ' ...
+                 'random-walk frequency; flat region indicates frequency flicker. ' ...
+                 'No NIST-grade calibration; v1 synthetic oscillator parameters only.']);
 
             CE.writeRow_(fid, CE.figRef_(plotPaths,'clkErr',figDir,stem), ...
                 'Receiver Clock Bias Tracking', ...
@@ -1342,7 +1407,7 @@ classdef ClockExactReportBuilder
             fprintf(fid, 'nSpaceAssets & %d (single estimated spacecraft)\\\\\n', nSA_);
             oc66_ = 'GEO';
             if isfield(summary,'stage66OrbitClass'); oc66_ = summary.stage66OrbitClass; end
-            fprintf(fid, 'Orbit class & \\texttt{%s} (static ECEF truth in v1; no propagator)\\\\\n', oc66_);
+            fprintf(fid, 'Orbit class & \\texttt{%s} (Stage~67: twoBodyRk4 truth propagator)\\\\\n', oc66_);
             nTwr_ = 0;
             if isfield(summary,'nTowers'); nTwr_ = summary.nTowers; end
             fprintf(fid, 'nTowers & %d (transmitters; tower-to-space one-way)\\\\\n', nTwr_);
@@ -1402,7 +1467,6 @@ classdef ClockExactReportBuilder
             fprintf(fid, ['\\multicolumn{2}{p{0.94\\textwidth}}{\\textbf{Known v1 limitations:} ' ...
                 'full-suite validation not run; no ISL/TWSTFT/two-way/relay physics; ' ...
                 'no calibrated PCO/PCV/ANTEX; ' ...
-                'static ECEF truth (no truth orbit propagator); ' ...
                 'simplified Doppler (no Sagnac-rate, no relativistic range-rate, no lever-arm velocity); ' ...
                 'IF covariance assumes Cov(L1,L2)=0; ' ...
                 'no LAMBDA/MLAMBDA/WL/NL integer fixing; ' ...
@@ -1410,6 +1474,90 @@ classdef ClockExactReportBuilder
                 'no scientific troposphere/ionosphere/orbit models; ' ...
                 'no IERS/EOP/SP3/CLK/ANTEX ingestion.}\\\\\n']);
             fprintf(fid, '\\bottomrule\n\\end{tabular}\n\\end{center}\n');
+        end
+
+        % ================================================================
+        % STAGE 67 CLOSURE: ATTITUDE, CLOCK, AND DYNAMICS REALISM
+        % ================================================================
+        function writeStage67Closure_(fid, summary, plotPaths, stem, figDir)
+            CE = revgnss.ClockExactReportBuilder;
+            if ~isfield(summary,'stage66Active') || ~summary.stage66Active; return; end
+            fprintf(fid, '\\clearpage\n');
+            fprintf(fid, '\\section{Stage 67 Attitude, Clock, and Dynamics Realism Closure}\n');
+            fprintf(fid, ['\\textit{Stage~67 makes three physical realism upgrades to the ' ...
+                'Stage~66 single-asset one-way simulation: ' ...
+                '(A) attitude estimator clearly identified as a carrier lever-arm quaternion EKF; ' ...
+                '(B) stochastic tower and spacecraft clocks replace perfect corrections; ' ...
+                '(C) matched twoBodyRk4 truth propagator + twoBody EKF dynamics replace static-ECEF truth.}\n\n']);
+
+            fprintf(fid, '\\begin{center}\\small\n');
+
+            % ---- A: Attitude table ---------------------------------------
+            fprintf(fid, '\\textbf{A.~Attitude determination}\n\n');
+            fprintf(fid, '\\begin{tabular}{p{0.42\\textwidth}p{0.48\\textwidth}}\n');
+            fprintf(fid, '\\toprule\n\\textbf{Property} & \\textbf{Value / Status}\\\\\n\\midrule\n');
+            attPrim_ = 'carrierLeverArmQuaternionEkf';
+            if isfield(summary,'stage67PrimaryAttMode'); attPrim_ = summary.stage67PrimaryAttMode; end
+            fprintf(fid, 'Primary estimator & \\texttt{%s}\\\\\n', strrep(attPrim_,'_','\_'));
+            fprintf(fid, 'Quaternion EKF type & nominal + error-state $\\delta\\theta$ (Stages~61/62)\\\\\n');
+            fprintf(fid, 'Covariance reset & Joseph form + attitude reset Jacobian\\\\\n');
+            attInit_ = 'coarseBaselineIntegerSearch';
+            if isfield(summary,'stage67AttInitMode'); attInit_ = summary.stage67AttInitMode; end
+            fprintf(fid, 'Initializer & \\texttt{%s} (optional; not primary estimator)\\\\\n', ...
+                strrep(attInit_,'_','\_'));
+            attCar_ = 'calibratedDifferentialAmbiguity';
+            if isfield(summary,'stage67AttCarrierMode'); attCar_ = summary.stage67AttCarrierMode; end
+            fprintf(fid, 'Carrier tracking & \\texttt{%s} (relative only; not absolute reference)\\\\\n', ...
+                strrep(attCar_,'_','\_'));
+            fprintf(fid, '\\bottomrule\n\\end{tabular}\n\n\\vspace{6pt}\n');
+
+            % ---- B: Clock table ------------------------------------------
+            fprintf(fid, '\\textbf{B.~Clock model}\n\n');
+            fprintf(fid, '\\begin{tabular}{p{0.42\\textwidth}p{0.48\\textwidth}}\n');
+            fprintf(fid, '\\toprule\n\\textbf{Property} & \\textbf{Value / Status}\\\\\n\\midrule\n');
+            rxDet_ = false;
+            if isfield(summary,'stage67RxClockDet'); rxDet_ = summary.stage67RxClockDet; end
+            fprintf(fid, 'Asset Rx clock & %s (Brown-Hwang two-state)\\\\\n', ...
+                CE.yesNo_(rxDet_, 'deterministic (unexpected)', 'stochastic'));
+            tClkMode_ = 'noisyCorrection';
+            if isfield(summary,'stage67TowerClockMode'); tClkMode_ = summary.stage67TowerClockMode; end
+            fprintf(fid, 'Tower clock correction & \\texttt{%s}\\\\\n', strrep(tClkMode_,'_','\_'));
+            tClkSig_ = 0.5;
+            if isfield(summary,'stage67TowerClockSigma_m'); tClkSig_ = summary.stage67TowerClockSigma_m; end
+            fprintf(fid, 'Tower correction $\\sigma$ & %.2f m\\\\\n', tClkSig_);
+            fprintf(fid, 'Perfect tower correction & false (stochastic biases + broadcast uncertainty)\\\\\n');
+            fprintf(fid, '\\bottomrule\n\\end{tabular}\n\n\\vspace{6pt}\n');
+
+            % ---- C: Dynamics table ---------------------------------------
+            fprintf(fid, '\\textbf{C.~Orbital dynamics}\n\n');
+            fprintf(fid, '\\begin{tabular}{p{0.42\\textwidth}p{0.48\\textwidth}}\n');
+            fprintf(fid, '\\toprule\n\\textbf{Property} & \\textbf{Value / Status}\\\\\n\\midrule\n');
+            propMode_ = 'twoBodyRk4';
+            if isfield(summary,'stage67OrbitPropMode'); propMode_ = summary.stage67OrbitPropMode; end
+            fprintf(fid, 'Truth propagator & \\texttt{%s} (GEO: alt~=~35786~km, inc~=~0, $\\nu_0$~=~23\\textdegree)\\\\\n', ...
+                strrep(propMode_,'_','\_'));
+            dynMode_ = 'twoBody';
+            if isfield(summary,'stage67DynamicsMode'); dynMode_ = summary.stage67DynamicsMode; end
+            fprintf(fid, 'EKF dynamics & \\texttt{%s} (matched to truth propagator)\\\\\n', ...
+                strrep(dynMode_,'_','\_'));
+            propEn_ = true;
+            if isfield(summary,'stage67OrbitProp'); propEn_ = summary.stage67OrbitProp; end
+            fprintf(fid, 'Orbit propagator active & %s\\\\\n', ...
+                CE.yesNo_(propEn_, 'true', 'false (unexpected)'));
+            fprintf(fid, 'Static ECEF truth & false (replaced by twoBodyRk4 propagator)\\\\\n');
+            fprintf(fid, '\\bottomrule\n\\end{tabular}\n\n\\end{center}\n');
+
+            % ---- Allan deviation plot reference ---------------------------
+            allanPath = CE.figRef_(plotPaths, 'allanDev', figDir, stem);
+            if ~isempty(allanPath) && isfile(allanPath)
+                [~, nm, ext] = fileparts(allanPath);
+                fprintf(fid, ['\\begin{center}\n' ...
+                    '\\includegraphics[width=0.65\\textwidth]{figures/%s}\n' ...
+                    '\\end{center}\n'], [nm ext]);
+                fprintf(fid, ['\\textit{Figure: Overlapping Allan deviation $\\sigma_y(\\tau)$ for the asset ' ...
+                    'receiver clock (black) and tower transmitter clocks (coloured). ' ...
+                    'Stage~67 stochastic clock model; synthetic v1 oscillator parameters.}\n\n']);
+            end
         end
 
         function s = yesNo_(flag, yes, no)

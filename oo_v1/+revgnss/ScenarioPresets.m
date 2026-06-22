@@ -104,9 +104,25 @@ classdef ScenarioPresets
                 cfg.diagnostics.attitudeEvidence.enable = true;
             end
 
-            % Dynamics: constantVelocity for self-consistency with static-ECEF truth.
-            % If all-toggle tried to set j2, this override ensures no truth/EKF mismatch.
-            cfg.estimator.dynamics.mode = 'constantVelocity';
+            % Stage 67: matched twoBodyRk4 truth propagator + twoBody EKF dynamics.
+            % Orbit is GEO (35786 km, equatorial). GEO in ECEF moves very slowly
+            % (orbital period ≈ Earth rotation period) so twoBody is nearly equivalent
+            % to static ECEF but physically correct. Overrides any all-toggle j2 attempt.
+            cfg.orbit.useOrbitPropagator = true;
+            cfg.orbit.altitudeMean_m     = 35786000;
+            cfg.orbit.inclination_rad    = 0;
+            cfg.orbit.raan_rad           = 0;
+            cfg.orbit.trueAnomaly0_rad   = 23 * pi/180;
+            cfg.orbit.epochGMST_rad      = 0;
+            cfg.orbit.mode               = 'twoBodyRk4';
+            cfg.estimator.dynamics.mode  = 'twoBody';
+
+            % Stage 67: stochastic tower clocks — non-perfect broadcast correction.
+            % Each tower clock is driven by the Brown-Hwang two-state process.
+            % The EKF uses noisyCorrection: broadcast product with uncertainty sigma.
+            for k = 1:numel(cfg.towers)
+                cfg.towers(k).clock.deterministic = false;
+            end
 
             % Disable ISL/TWSTFT: single-asset scenario has no inter-spacecraft links.
             if isfield(cfg,'measurements') && isfield(cfg.measurements,'isl')
@@ -151,7 +167,7 @@ classdef ScenarioPresets
                 lines{end+1} = 'Code partials        : disabled';
                 lines{end+1} = 'Doppler partials     : disabled';
                 lines{end+1} = 'ISL / TWSTFT         : disabled';
-                lines{end+1} = 'EKF dynamics         : constantVelocity (self-consistent with static-ECEF truth)';
+                lines{end+1} = 'EKF dynamics         : twoBody (matched twoBodyRk4 truth propagator; GEO equatorial)';
                 lines{end+1} = 'Integer fixing        : false';
                 lines{end+1} = 'LAMBDA/MLAMBDA        : false';
                 lines{end+1} = 'False-fix-risk control: false';
