@@ -6,6 +6,37 @@ classdef CycleSlipDetector
 
     methods (Static)
 
+        function [isSlip, slipMetric_m] = detectCompensated(observedJump_m, ...
+                expectedModelJump_m, threshold_m, epochCount, minEpochsBeforeDetect)
+            % detectCompensated  Stage 73: model-step-compensated slip detection.
+            %
+            % Tests the residual jump AFTER removing the expected contribution from
+            % known model/product correction changes.  Tower clock product epoch
+            % boundary steps are deterministic and must not trigger ambiguity resets.
+            %
+            %   slipMetric = observedJump - expectedModelJump
+            %   isSlip = |slipMetric| >= threshold  (after warmup)
+            %
+            % Inputs:
+            %   observedJump_m       prefit_k - prefit_{k-1}  (signed, [m])
+            %   expectedModelJump_m  towerClkModel_k - towerClkModel_{k-1} (signed, [m])
+            %   threshold_m          slip threshold [m]
+            %   epochCount           epochs tracked so far (including this one)
+            %   minEpochsBeforeDetect  warmup epochs before detection active
+            %
+            % Outputs:
+            %   isSlip        true if |slipMetric_m| >= threshold and epoch >= min
+            %   slipMetric_m  compensated jump metric (signed; 0 before warmup)
+
+            if epochCount < minEpochsBeforeDetect
+                isSlip       = false;
+                slipMetric_m = 0;
+                return;
+            end
+            slipMetric_m = observedJump_m - expectedModelJump_m;
+            isSlip       = abs(slipMetric_m) >= threshold_m;
+        end
+
         function [isSlip, jumpMag_m] = detect(currentResidual_m, prevResidual_m, ...
                 threshold_m, epochCount)
             % detect  Test a single carrier residual for a cycle slip.

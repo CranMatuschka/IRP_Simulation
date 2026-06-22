@@ -19,16 +19,24 @@ classdef CarrierTrackManager < handle
         slipCount_       % containers.Map: key -> cumulative slip count (Stage 52)
         currentArcEpoch_ % containers.Map: key -> epochs in current arc (Stage 52)
         currentArcId_    % containers.Map: key -> integer arc ID (Stage 53; increments on slip)
+        % Stage 73: model-step-compensated slip detection state
+        prevTowerClkModel_m_        % containers.Map: key -> previous tower clock model [m]
+        nProductBoundaries_         (1,1) double = 0  % product epoch boundary events (per-track sum)
+        nCompensatedBoundaries_     (1,1) double = 0  % boundaries NOT declared slips
+        nConfirmedSlips_            (1,1) double = 0  % slips confirmed after compensation
+        nUnclassifiedJumps_         (1,1) double = 0  % slips declared without model metadata
+        nFalseProductBoundaryResets_ (1,1) double = 0 % boundaries that DID trigger slips
     end
 
     methods
 
         function obj = CarrierTrackManager()
-            obj.prevResidual_m   = containers.Map('KeyType','char','ValueType','double');
-            obj.epochCount       = containers.Map('KeyType','char','ValueType','double');
-            obj.slipCount_       = containers.Map('KeyType','char','ValueType','double');
-            obj.currentArcEpoch_ = containers.Map('KeyType','char','ValueType','double');
-            obj.currentArcId_    = containers.Map('KeyType','char','ValueType','double');
+            obj.prevResidual_m        = containers.Map('KeyType','char','ValueType','double');
+            obj.epochCount            = containers.Map('KeyType','char','ValueType','double');
+            obj.slipCount_            = containers.Map('KeyType','char','ValueType','double');
+            obj.currentArcEpoch_      = containers.Map('KeyType','char','ValueType','double');
+            obj.currentArcId_         = containers.Map('KeyType','char','ValueType','double');
+            obj.prevTowerClkModel_m_  = containers.Map('KeyType','char','ValueType','double');
         end
 
         function [slipInfo, keepMask, resetRequests] = process(obj, cpInfo, cfg)
@@ -62,6 +70,11 @@ classdef CarrierTrackManager < handle
                 return
             end
 
+            % Stage 73: model-step-compensated detection metadata.
+            hasModelMeta = isfield(cpInfo, 'towerClkModel_m') && ...
+                           numel(cpInfo.towerClkModel_m) == M;
+            doCompensate = hasModelMeta && sd.productStepCompensation;
+
             for mi = 1:M
                 ti  = cpInfo.towerIdx(mi);
                 ai  = cpInfo.antennaIdx(mi);
@@ -76,8 +89,40 @@ classdef CarrierTrackManager < handle
                 prevRes = 0;
                 if isKey(obj.prevResidual_m, key); prevRes = obj.prevResidual_m(key); end
 
-                [isSlip, jumpMag] = revgnss.CycleSlipDetector.detectWithMinEpochs( ...
-                    res, prevRes, sd.threshold_m, ec, sd.minEpochsBeforeDetect);
+                % Stage 73: compensated detection when tower clock model metadata
+                % is available.  Otherwise fall back to legacy raw-jump detection.
+                jumpMag  = 0;
+                isSlip   = false;
+                if doCompensate
+                    currModel = cpInfo.towerClkModel_m(mi);
+                    prevModel = 0;
+                    if isKey(obj.prevTowerClkModel_m_, key)
+                        prevModel = obj.prevTowerClkModel_m_(key);
+                    end
+                    expectedJump = currModel - prevModel;
+                    [isSlip, slipMetric_] = revgnss.CycleSlipDetector.detectCompensated( ...
+                        res - prevRes, expectedJump, sd.threshold_m, ec, sd.minEpochsBeforeDetect);
+                    jumpMag = abs(slipMetric_);
+                    % Count product boundary events (|expectedJump| > 1mm after warmup).
+                    if ec >= sd.minEpochsBeforeDetect && abs(expectedJump) > 1e-3
+                        obj.nProductBoundaries_ = obj.nProductBoundaries_ + 1;
+                        if ~isSlip
+                            obj.nCompensatedBoundaries_ = obj.nCompensatedBoundaries_ + 1;
+                        else
+                            obj.nFalseProductBoundaryResets_ = obj.nFalseProductBoundaryResets_ + 1;
+                        end
+                    end
+                    if isSlip; obj.nConfirmedSlips_ = obj.nConfirmedSlips_ + 1; end
+                    obj.prevTowerClkModel_m_(key) = currModel;
+                else
+                    [isSlip, jumpMag] = revgnss.CycleSlipDetector.detectWithMinEpochs( ...
+                        res, prevRes, sd.threshold_m, ec, sd.minEpochsBeforeDetect);
+                    % No model metadata: slip classified as unclassified if declared.
+                    if isSlip
+                        obj.nConfirmedSlips_    = obj.nConfirmedSlips_ + 1;
+                        obj.nUnclassifiedJumps_ = obj.nUnclassifiedJumps_ + 1;
+                    end
+                end
 
                 if isSlip
                     slipInfo.nSlips = slipInfo.nSlips + 1;
@@ -124,11 +169,17 @@ classdef CarrierTrackManager < handle
 
         function reset(obj)
             % reset  Clear all track history (e.g., between simulation runs).
-            remove(obj.prevResidual_m,   keys(obj.prevResidual_m));
-            remove(obj.epochCount,       keys(obj.epochCount));
-            remove(obj.slipCount_,       keys(obj.slipCount_));
-            remove(obj.currentArcEpoch_, keys(obj.currentArcEpoch_));
-            remove(obj.currentArcId_,    keys(obj.currentArcId_));
+            remove(obj.prevResidual_m,       keys(obj.prevResidual_m));
+            remove(obj.epochCount,           keys(obj.epochCount));
+            remove(obj.slipCount_,           keys(obj.slipCount_));
+            remove(obj.currentArcEpoch_,     keys(obj.currentArcEpoch_));
+            remove(obj.currentArcId_,        keys(obj.currentArcId_));
+            remove(obj.prevTowerClkModel_m_, keys(obj.prevTowerClkModel_m_));
+            obj.nProductBoundaries_          = 0;
+            obj.nCompensatedBoundaries_      = 0;
+            obj.nConfirmedSlips_             = 0;
+            obj.nUnclassifiedJumps_          = 0;
+            obj.nFalseProductBoundaryResets_ = 0;
         end
 
         function s = getArcStateSummary(obj, dt_s)
@@ -233,6 +284,12 @@ classdef CarrierTrackManager < handle
             if ev.totalSlipEvents == 0; ev.classification = 'arcs-exported';
             else;                        ev.classification = 'arcs-exported-with-slips';
             end
+            % Stage 73: compensated slip detection diagnostics
+            ev.nProductBoundaries         = obj.nProductBoundaries_;
+            ev.nCompensatedBoundaries     = obj.nCompensatedBoundaries_;
+            ev.nConfirmedSlips            = obj.nConfirmedSlips_;
+            ev.nUnclassifiedJumps         = obj.nUnclassifiedJumps_;
+            ev.nFalseProductBoundaryResets = obj.nFalseProductBoundaryResets_;
         end
 
     end
@@ -243,6 +300,7 @@ classdef CarrierTrackManager < handle
             % Update history even when detection is disabled or M=0.
             if ~sd.enable; return; end
             M = numel(cpInfo.towerIdx);
+            hasModelMeta = isfield(cpInfo,'towerClkModel_m') && numel(cpInfo.towerClkModel_m)==M;
             for mi = 1:M
                 ti  = cpInfo.towerIdx(mi);
                 ai  = cpInfo.antennaIdx(mi);
@@ -252,6 +310,9 @@ classdef CarrierTrackManager < handle
                 if isKey(obj.epochCount, key); ec = obj.epochCount(key); end
                 obj.epochCount(key)     = ec + 1;
                 obj.prevResidual_m(key) = cpInfo.prefit_m(mi);
+                if hasModelMeta
+                    obj.prevTowerClkModel_m_(key) = cpInfo.towerClkModel_m(mi);
+                end
                 % Stage 52: no slips when detection disabled; advance arc epoch.
                 ca = 0;
                 if isKey(obj.currentArcEpoch_, key); ca = obj.currentArcEpoch_(key); end
@@ -268,20 +329,28 @@ classdef CarrierTrackManager < handle
     methods (Static, Access = private)
 
         function sd = slipCfg_(cfg)
-            sd.enable                 = false;
-            sd.threshold_m            = 0.1;
-            sd.minEpochsBeforeDetect  = 3;
-            sd.action                 = 'resetAndSkip';
+            sd.enable                  = false;
+            sd.threshold_m             = 0.1;
+            sd.minEpochsBeforeDetect   = 3;
+            sd.action                  = 'resetAndSkip';
+            sd.productStepCompensation = false; % Stage 73 default: off until explicitly enabled
 
-            if ~isfield(cfg,'measurements'); return; end
-            if ~isfield(cfg.measurements,'carrier'); return; end
-            cr = cfg.measurements.carrier;
-            if ~isfield(cr,'slipDetection'); return; end
-            sl = cr.slipDetection;
-            if isfield(sl,'enable');                sd.enable                 = sl.enable;                end
-            if isfield(sl,'threshold_m');           sd.threshold_m            = sl.threshold_m;           end
-            if isfield(sl,'minEpochsBeforeDetect'); sd.minEpochsBeforeDetect  = sl.minEpochsBeforeDetect; end
-            if isfield(sl,'action');                sd.action                 = sl.action;                end
+            if isfield(cfg,'measurements') && isfield(cfg.measurements,'carrier')
+                cr = cfg.measurements.carrier;
+                if isfield(cr,'slipDetection')
+                    sl = cr.slipDetection;
+                    if isfield(sl,'enable');                sd.enable                 = sl.enable;                end
+                    if isfield(sl,'threshold_m');           sd.threshold_m            = sl.threshold_m;           end
+                    if isfield(sl,'minEpochsBeforeDetect'); sd.minEpochsBeforeDetect  = sl.minEpochsBeforeDetect; end
+                    if isfield(sl,'action');                sd.action                 = sl.action;                end
+                end
+            end
+            % Stage 73: productStepCompensation read from cfg.carrierSlip.productStepCompensation.
+            try
+                if isfield(cfg,'carrierSlip') && isfield(cfg.carrierSlip,'productStepCompensation')
+                    sd.productStepCompensation = logical(cfg.carrierSlip.productStepCompensation);
+                end
+            catch; end
         end
 
     end

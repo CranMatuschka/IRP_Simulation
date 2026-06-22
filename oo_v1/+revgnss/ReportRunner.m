@@ -237,6 +237,13 @@ classdef ReportRunner
                 end
             end
 
+            % ---- Stage 73: carrier arc robustness defaults (updated below) ----
+            summary.nCarrierProductBoundaries            = 0;
+            summary.nCarrierProductBoundariesCompensated = 0;
+            summary.nConfirmedCarrierSlips               = 0;
+            summary.nUnclassifiedCarrierJumps            = 0;
+            summary.nFalseProductBoundaryResets          = 0;
+
             % ---- Stage 52: carrier arc evidence compact fields ----
             carr52Req_ = false;
             try; carr52Req_ = logical(cfg.diagnostics.carrierArcEvidence.enable); catch; end
@@ -888,6 +895,70 @@ classdef ReportRunner
                 summary.towerClockSharedCovarianceApplied  = false;
                 summary.towerClockProductDiagonalInflation = false;
                 summary.dopplerClockProductUncertaintyStatus = 'unknown';
+            end
+
+            % ---- Stage 73: carrier arc robustness summary fields ------------
+            % Must be computed before PDF generation so ClockExactReportBuilder
+            % receives finite slip-detection diagnostics.
+            try
+                dt73_ = 1.0;
+                if isfield(cfg,'simulation') && isfield(cfg.simulation,'dt_s')
+                    dt73_ = cfg.simulation.dt_s;
+                elseif isfield(cfg,'dt_s')
+                    dt73_ = cfg.dt_s;
+                end
+                ae73_  = sim.trackMgr.getArcEvidence(dt73_);
+                summary.nCarrierProductBoundaries            = ae73_.nProductBoundaries;
+                summary.nCarrierProductBoundariesCompensated = ae73_.nCompensatedBoundaries;
+                summary.nConfirmedCarrierSlips               = ae73_.nConfirmedSlips;
+                summary.nUnclassifiedCarrierJumps            = ae73_.nUnclassifiedJumps;
+                summary.nFalseProductBoundaryResets          = ae73_.nFalseProductBoundaryResets;
+            catch ME73a_
+                warning('ReportRunner:stage73CountersFailed', ...
+                    'Stage 73 runtime slip counters failed: %s', ME73a_.message);
+            end
+            try
+                cfg73method_ = 'rawResidualJump';
+                if isfield(cfg,'carrierSlip') && isfield(cfg.carrierSlip,'method')
+                    cfg73method_ = cfg.carrierSlip.method;
+                end
+                cfg73comp_ = false;
+                if isfield(cfg,'carrierSlip') && isfield(cfg.carrierSlip,'productStepCompensation')
+                    cfg73comp_ = logical(cfg.carrierSlip.productStepCompensation);
+                end
+                summary.carrierSlipDetectorMethod      = cfg73method_;
+                summary.carrierSlipThreshold_m         = cfg.measurements.carrier.slipDetection.threshold_m;
+                summary.productStepCompensationEnabled = cfg73comp_;
+                summary.syntheticSlipInjectionEnabled  = false;
+                try; summary.syntheticSlipInjectionEnabled = ...
+                    logical(cfg.carrierSlip.syntheticSlipInjection.enable); catch; end
+                summary.nDiffAttBaselineResets = 0;  % DiffAtt slip detection disabled per Stage 69
+                nda73_ = NaN;
+                try; nda73_ = double(diag.log(end).diffAttActiveBaselines); catch; end
+                summary.nDiffAttBaselinesActiveFinal = nda73_;
+                summary.nAmbiguityResets = summary.ambiguityResetCount;
+                if isfield(summary,'nConfirmedCarrierSlips') && ...
+                        summary.nConfirmedCarrierSlips == 0 && ...
+                        isfield(summary,'nFalseProductBoundaryResets') && ...
+                        summary.nFalseProductBoundaryResets == 0
+                    summary.carrierArcRobustnessStatus = ...
+                        'nominal: no confirmed slips; product boundaries compensated';
+                else
+                    summary.carrierArcRobustnessStatus = sprintf( ...
+                        'degraded: %d confirmed slips; %d false product boundary resets', ...
+                        summary.nConfirmedCarrierSlips, summary.nFalseProductBoundaryResets);
+                end
+            catch ME73b_
+                warning('ReportRunner:stage73SummaryFailed', ...
+                    'Stage 73 summary fields failed: %s', ME73b_.message);
+                summary.carrierSlipDetectorMethod      = 'unknown';
+                summary.carrierSlipThreshold_m         = NaN;
+                summary.productStepCompensationEnabled = false;
+                summary.syntheticSlipInjectionEnabled  = false;
+                summary.nDiffAttBaselineResets         = 0;
+                summary.nDiffAttBaselinesActiveFinal   = NaN;
+                summary.nAmbiguityResets               = NaN;
+                summary.carrierArcRobustnessStatus     = 'unknown';
             end
 
             % ---- Determine report layout before PDF generation -----------

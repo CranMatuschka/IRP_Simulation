@@ -35,7 +35,7 @@ oo_v1_envAllToggles_ = strcmpi(getenv('OO_V1_ALL_TOGGLES'), 'true');
 if oo_v1_envValidate_; oo_v1_envAllToggles_ = true; end  % validate always uses all toggles
 oo_v1_envStage_      = str2double(getenv('OO_V1_VALIDATION_STAGE'));
 if isnan(oo_v1_envStage_); oo_v1_envStage_ = 0; end
-if oo_v1_envValidate_ && oo_v1_envStage_ == 0; oo_v1_envStage_ = 72; end
+if oo_v1_envValidate_ && oo_v1_envStage_ == 0; oo_v1_envStage_ = 73; end
 oo_v1_envCompile_    = strtrim(getenv('OO_V1_REPORT_COMPILE_TEX'));
 
 cfg = revgnss.ConfigFactory.defaultConfig();
@@ -320,12 +320,39 @@ cfg.measurements.carrierMode            = 'ekfFloat';
 cfg.estimation.ambiguityMode            = 'floatPerTowerReceiverSignal';
 cfg.estimation.ambiguity.initialSigma_m = 100;
 
-% --- Carrier slip detection -------------------------------------
+% --- Carrier slip detection (Stage 73: model-step-compensated) -
+% Stage 73 replaces the raw residual-jump test with a compensated test:
+%   slipMetric = observed_jump - expected_model_jump
+%   isSlip = |slipMetric| >= threshold
+% Expected jump = towerClkModel_k - towerClkModel_{k-1}. Tower clock product
+% epoch boundary steps are thereby removed from the slip statistic, making
+% arc handling robust to product update intervals regardless of clock sigma.
+% Real cycle slips (B_true discontinuity) still produce large slipMetric.
 cfg.measurements.carrier.slipDetection.enable                = true;
 cfg.measurements.carrier.slipDetection.threshold_m           = 0.1;
 cfg.measurements.carrier.slipDetection.minEpochsBeforeDetect = 3;
 cfg.measurements.carrier.slipDetection.resetSigma_m          = 100;
 cfg.measurements.carrier.slipDetection.action                = 'resetAndSkip';
+
+% Stage 73: carrier arc robustness config
+cfg.carrierSlip.enable                          = true;
+cfg.carrierSlip.method                          = 'modelStepCompensatedResidualJump';
+cfg.carrierSlip.threshold_m                     = 0.10;
+cfg.carrierSlip.minArcLength_s                  = 300;
+cfg.carrierSlip.productStepCompensation         = true;
+cfg.carrierSlip.atmosphereStepCompensation      = true;  % documented intent (v1: atm model is smooth)
+cfg.carrierSlip.antennaStepCompensation         = true;  % documented intent (v1: PCO is static)
+cfg.carrierSlip.hardwareStepCompensation        = true;  % documented intent (v1: HW delay is static)
+cfg.carrierSlip.diffAttitudeBaselineMode        = true;  % DiffAtt slip detector disabled per Stage 69
+cfg.carrierSlip.resetAmbiguityOnConfirmedSlip   = true;
+cfg.carrierSlip.ignoreKnownProductBoundaryJumps = false; % compensate then test; do not ignore
+cfg.carrierSlip.logDiagnostics                  = true;
+cfg.carrierSlip.syntheticSlipInjection.enable       = false;
+cfg.carrierSlip.syntheticSlipInjection.time_s       = 1800;
+cfg.carrierSlip.syntheticSlipInjection.towerIndex   = 1;
+cfg.carrierSlip.syntheticSlipInjection.receiverIndex = 2;
+cfg.carrierSlip.syntheticSlipInjection.signal       = 'L1';
+cfg.carrierSlip.syntheticSlipInjection.jumpCycles   = 1;
 
 % --- Troposphere ZWD EKF state ----------------------------------
 % Disabled in the default multi-receiver report.  Stage 15 ZWD states are

@@ -76,6 +76,7 @@ classdef CarrierMeasurementBuilder
             cpInfo.prefit_m          = zeros(Mp_total, 1);
             cpInfo.ambiguityStateIdx = zeros(Mp_total, 1);
             cpInfo.trackKey          = cell(Mp_total, 1);
+            cpInfo.towerClkModel_m   = zeros(Mp_total, 1); % Stage 73: per-row correction for compensated slip detection
             % Stage 60: compact carrier-attitude row closure metadata
             cpInfo.leverArmNorm_m          = zeros(Mp_total, 1);
             cpInfo.attitudePartialsEnabled = false(Mp_total, 1);
@@ -200,6 +201,7 @@ classdef CarrierMeasurementBuilder
                 cpInfo.signalIdx(rowOut)          = sigIdx;
                 cpInfo.trackKey{rowOut}           = sprintf('T%03d_A%03d_S%02d', ti, ai, sigIdx);
                 cpInfo.ambiguityStateIdx(rowOut)  = ambStateIdx;
+                cpInfo.towerClkModel_m(rowOut)    = b_twr_m; % Stage 73
 
                 % ---- H: position columns (analytic or finite-difference) ------
                 if doFD
