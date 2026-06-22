@@ -35,7 +35,7 @@ oo_v1_envAllToggles_ = strcmpi(getenv('OO_V1_ALL_TOGGLES'), 'true');
 if oo_v1_envValidate_; oo_v1_envAllToggles_ = true; end  % validate always uses all toggles
 oo_v1_envStage_      = str2double(getenv('OO_V1_VALIDATION_STAGE'));
 if isnan(oo_v1_envStage_); oo_v1_envStage_ = 0; end
-if oo_v1_envValidate_ && oo_v1_envStage_ == 0; oo_v1_envStage_ = 68; end
+if oo_v1_envValidate_ && oo_v1_envStage_ == 0; oo_v1_envStage_ = 69; end
 oo_v1_envCompile_    = strtrim(getenv('OO_V1_REPORT_COMPILE_TEX'));
 
 cfg = revgnss.ConfigFactory.defaultConfig();
@@ -314,19 +314,27 @@ cfg.estimator.runKnownAmbiguityValidation = true;
 % This label is documentary — the EKF runs regardless of this field.
 cfg.estimator.attitude.primaryMode   = 'carrierLeverArmQuaternionEkf';
 
-% --- Calibrated differential carrier attitude (Stage 15) --------
+% --- Calibrated differential carrier attitude (Stage 15, Stage 69) ------
 % Operational: baseline-differenced carrier with calibrated ambiguity bias.
 % Requires carrierMode=ekfFloat + nReceivers>=2.
-% Calibration absorbs the attitude reference at t < calibWin_s.
-% This mode provides relative attitude tracking only (not absolute reference).
-cfg.estimator.attitudeCarrierMode    = 'calibratedDifferentialAmbiguity';
-cfg.estimator.diffAtt.calibWin_s     = 60;
+% Stage 69: referenceMode='externalInitialAttitude' prevents delta_B from
+% absorbing the initial EKF attitude error.  DiffAttitudeBuilder.setReference()
+% injects truth attitude + referenceSigma_deg noise during simulation init.
+% Stage 69: DiffAtt always uses raw L1 rows (primary signalIdx); floatRows
+% unwrapped from IF-combined cpInfo in ReverseGNSSSimulation when IF is active.
+cfg.estimator.attitudeCarrierMode            = 'calibratedDifferentialAmbiguity';
+cfg.estimator.diffAtt.calibWin_s             = 60;
+cfg.estimator.diffAtt.referenceMode          = 'externalInitialAttitude';  % Stage 69
+cfg.estimator.diffAtt.referenceSigma_deg     = 0.1;                         % Stage 69
+% Documentary flags (read by report builder, not controlling EKF code paths):
+cfg.estimator.attitude.carrierSignal         = 'L1';
+cfg.estimator.attitude.useRawCarrierForAttitude = true;
 
-% --- Coarse attitude initializer (Stage 17) — optional, not primary -
-% Independent integer search for initial attitude. If ratio gate is weak,
-% Stage 15 calibrated tracking remains the primary attitude source.
-% This initializer supplements but does not replace the quaternion EKF.
-cfg.estimator.attitudeInitMode = 'coarseBaselineIntegerSearch';
+% --- Coarse attitude initializer (Stage 17) — DISABLED in Stage 69 ------
+% Disabled: 'coarseBaselineIntegerSearch' was injecting a potentially wrong
+% initial attitude into the quaternion EKF.  The differential calibration with
+% externalInitialAttitude reference is now the sole absolute attitude source.
+cfg.estimator.attitudeInitMode = 'none';
 cfg.estimator.attitudeInit.search.windowDeg = [2; 2; 2];
 cfg.estimator.attitudeInit.search.stepDeg = [0.5; 0.5; 0.5];
 cfg.estimator.attitudeInit.search.maxCandidates = 729;

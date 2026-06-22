@@ -34,6 +34,14 @@ classdef DiffAttitudeBuilder
                     isfield(cfg.estimator.diffAtt,'calibWin_s')
                 calibWin = cfg.estimator.diffAtt.calibWin_s;
             end
+            % Stage 69: referenceMode controls calibration attitude source.
+            % 'selfCalibrated'         — use current EKF attitude (relative tracking only)
+            % 'externalInitialAttitude'— use external reference set via setReference()
+            refMode = 'selfCalibrated';
+            if isfield(cfg,'estimator') && isfield(cfg.estimator,'diffAtt') && ...
+                    isfield(cfg.estimator.diffAtt,'referenceMode')
+                refMode = cfg.estimator.diffAtt.referenceMode;
+            end
             nBase = max(0, nRx - 1);
             store.calibrated       = false;
             store.nTowers          = nTowers;
@@ -48,17 +56,52 @@ classdef DiffAttitudeBuilder
             store.invalidMask      = false(nTowers, nBase);
             store.lostCount        = 0;
             store.recalibCount     = 0;
+            store.referenceMode               = refMode;
+            store.referenceAttitude_euler_rad = [];
+            store.calibDoneAtTime_s           = NaN;   % set by finalize(); guards post-calib slip reset
+        end
+
+        % ----------------------------------------------------------------
+        function store = setReference(store, euler_ref)
+            % setReference  Set external initial attitude reference for calibration.
+            % Called once at simulation init when referenceMode='externalInitialAttitude'.
+            store.referenceAttitude_euler_rad = euler_ref(:);
+            store.referenceMode = 'externalInitialAttitude';
         end
 
         % ----------------------------------------------------------------
         function store = accumulate(store, cpInfo, x_est, sm, towers, leverArms, cfg)
             % accumulate  Collect one calibration epoch.
+            %
+            % Stage 69 fixes:
+            %   (a) Primary-signal filter: when two frequencies are enabled,
+            %       select only the primary (lowest signalIdx) row per tower-antenna
+            %       pair so 'sum(mask)==1' is satisfied even with L1+L2 in cpInfo.
+            %   (b) External reference attitude: when referenceMode='externalInitialAttitude'
+            %       and ~store.calibrated, use store.referenceAttitude_euler_rad for model
+            %       evaluation so delta_B is calibrated at the reference attitude, not the
+            %       (potentially wrong) EKF attitude.
             if ~isfield(cpInfo,'phi_m') || isempty(cpInfo.phi_m); return; end
             if store.nBaselines < 1; return; end
-            r_cm  = x_est(sm.r_idx);
-            euler = x_est(sm.euler_idx);
+            r_cm = x_est(sm.r_idx);
+            % Stage 69 (b): choose attitude for model evaluation during calibration.
+            useRef = ~store.calibrated && ...
+                strcmp(store.referenceMode,'externalInitialAttitude') && ...
+                ~isempty(store.referenceAttitude_euler_rad);
+            if useRef
+                euler = store.referenceAttitude_euler_rad;
+            else
+                euler = x_est(sm.euler_idx);
+            end
+            % Stage 69 (a): helper to pick primary-signal row.
+            hasSigIdx = isfield(cpInfo,'signalIdx');
             for ti = 1:store.nTowers
                 refMask = (cpInfo.towerIdx == ti) & (cpInfo.antennaIdx == 1);
+                % With two frequencies, keep only the primary (lowest) signal index.
+                if hasSigIdx && sum(refMask) > 1
+                    primSig = min(cpInfo.signalIdx(refMask));
+                    refMask = refMask & (cpInfo.signalIdx == primSig);
+                end
                 if sum(refMask) ~= 1; continue; end
                 phi_ref = cpInfo.phi_m(refMask);
                 h_ref = revgnss.MeasurementModelUtils.modelRangeOnly( ...
@@ -66,6 +109,10 @@ classdef DiffAttitudeBuilder
                 for bi = 1:store.nBaselines
                     ai = bi + 1;
                     bMask = (cpInfo.towerIdx == ti) & (cpInfo.antennaIdx == ai);
+                    if hasSigIdx && sum(bMask) > 1
+                        primSig = min(cpInfo.signalIdx(bMask));
+                        bMask = bMask & (cpInfo.signalIdx == primSig);
+                    end
                     if sum(bMask) ~= 1; continue; end
                     phi_i = cpInfo.phi_m(bMask);
                     h_i = revgnss.MeasurementModelUtils.modelRangeOnly( ...
@@ -132,6 +179,9 @@ classdef DiffAttitudeBuilder
             store.calibrated      = (nValid >= 1);
             store.activeMask      = store.accumN >= minEpochs;
             store.invalidMask     = false(size(store.activeMask));
+            if store.calibrated
+                store.calibDoneAtTime_s = store.calibWin_s;
+            end
             if nValid > 0
                 store.calibResidRMS_m = sqrt(rssB / nValid);
             end
@@ -171,10 +221,16 @@ classdef DiffAttitudeBuilder
             end
             r_cm  = x_est(sm.r_idx);
             euler = x_est(sm.euler_idx);
+            hasSigIdx = isfield(cpInfo,'signalIdx');
 
             rows_z = zeros(0,1); rows_h = zeros(0,1); rows_H = zeros(0,nx);
             for ti = 1:store.nTowers
                 refMask = (cpInfo.towerIdx==ti) & (cpInfo.antennaIdx==1);
+                % Stage 69: primary-signal filter — keep only lowest signalIdx.
+                if hasSigIdx && sum(refMask) > 1
+                    primSig = min(cpInfo.signalIdx(refMask));
+                    refMask = refMask & (cpInfo.signalIdx == primSig);
+                end
                 if sum(refMask) ~= 1; continue; end
                 phi_ref = cpInfo.phi_m(refMask);
                 h_ref = revgnss.MeasurementModelUtils.modelRangeOnly( ...
@@ -197,6 +253,10 @@ classdef DiffAttitudeBuilder
                         continue
                     end
                     bMask = (cpInfo.towerIdx==ti) & (cpInfo.antennaIdx==ai);
+                    if hasSigIdx && sum(bMask) > 1
+                        primSig = min(cpInfo.signalIdx(bMask));
+                        bMask = bMask & (cpInfo.signalIdx == primSig);
+                    end
                     if sum(bMask) ~= 1; continue; end
                     phi_i = cpInfo.phi_m(bMask);
                     h_i = revgnss.MeasurementModelUtils.modelRangeOnly( ...

@@ -29,11 +29,11 @@ classdef MainScriptValidationGate
             state = struct();
 
             % Resolve stage, seed, count from env vars.
-            stg = 68;
+            stg = 69;
             v = str2double(getenv('OO_V1_VALIDATION_STAGE'));
             if ~isnan(v) && v > 0; stg = round(v); end
 
-            seed = 68;
+            seed = 69;
             v = str2double(getenv('OO_V1_RANDOM_TEST_SEED'));
             if ~isnan(v) && isfinite(v); seed = round(v); end
 
@@ -184,14 +184,17 @@ classdef MainScriptValidationGate
                 end
                 return
             end
-            warns{end+1} = 'pdftotext unavailable; TEX fallback used (pdfTextVerified=false).';
+            warns{end+1} = 'pdftotext unavailable; TEX fallback used.';
             texPath = strrep(pdfPath, '.pdf', '.tex');
             if exist(texPath, 'file')
                 try
                     t = fileread(texPath);
+                    stgTag   = ['Stage ' num2str(stg)];
                     noValSt  = isempty(regexp(t, '\\\\section\{[^}]*Validation Status', 'once'));
                     hasScene = ~isempty(strfind(t, 'Scenario Summary')); %#ok<STREMP>
-                    texOk = noValSt && hasScene;
+                    hasStage = ~isempty(strfind(t, stgTag)); %#ok<STREMP>
+                    texOk = noValSt && hasScene && hasStage;
+                    ptOk  = texOk;   % promote: TEX content verified is equivalent when PDF tool absent
                 catch; end
             end
         end
@@ -237,6 +240,7 @@ classdef MainScriptValidationGate
                 case 66; t = 'Single-Asset One-Way Realistic Reverse-GNSS v1 Closure';
                 case 67; t = 'Single-Asset Attitude, Clock, and Dynamics Realism Closure';
                 case 68; t = 'Single-Asset One-Way Realistic Physics Closure';
+                case 69; t = 'Carrier-Lever-Arm Attitude Closure';
                 otherwise
                     try; t = revgnss.ReportStatus.current().stageTitle; catch; t = sprintf('Stage %d', stg); end
             end

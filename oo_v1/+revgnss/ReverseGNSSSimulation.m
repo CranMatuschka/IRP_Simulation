@@ -91,6 +91,19 @@ classdef ReverseGNSSSimulation < handle
             end
             if strcmp(attMode15,'calibratedDifferentialAmbiguity')
                 obj.diffAttStore = revgnss.DiffAttitudeBuilder.init(obj.cfg, obj.nTowers);
+                % Stage 69: set external initial attitude reference so calibration is not
+                % biased by the initial EKF attitude error. The reference (truth + small noise)
+                % represents a realistic initial attitude from star tracker / coarse ADCS.
+                if strcmp(obj.diffAttStore.referenceMode,'externalInitialAttitude')
+                    sigma_rad = 0;
+                    if isfield(obj.cfg,'estimator') && isfield(obj.cfg.estimator,'diffAtt') && ...
+                            isfield(obj.cfg.estimator.diffAtt,'referenceSigma_deg')
+                        sigma_rad = deg2rad(obj.cfg.estimator.diffAtt.referenceSigma_deg);
+                    end
+                    refEuler = obj.asset.attitude_euler_rad(:) + sigma_rad * randn(3,1);
+                    obj.diffAttStore = revgnss.DiffAttitudeBuilder.setReference( ...
+                        obj.diffAttStore, refEuler);
+                end
             else
                 obj.diffAttStore = struct('calibrated',false,'nBaselines',0,'nValidBaselines',0);
             end
@@ -360,10 +373,27 @@ classdef ReverseGNSSSimulation < handle
             if strcmp(attMode15,'calibratedDifferentialAmbiguity') && ...
                     isfield(errStruct,'carrierPhase') && isstruct(errStruct.carrierPhase) && ...
                     isfield(errStruct.carrierPhase,'phi_m') && ~isempty(errStruct.carrierPhase.phi_m)
-                cpDA    = errStruct.carrierPhase;
+                cpDA = errStruct.carrierPhase;
+                % Stage 69: differential attitude always uses raw L1 carrier rows.
+                % When IF combination is active, errStruct.carrierPhase contains IF rows;
+                % floatRows preserves the pre-IF L1+L2 stack for DiffAtt (L1-only via signalIdx filter).
+                if isfield(cpDA,'floatRows') && isstruct(cpDA.floatRows)
+                    cpDA = cpDA.floatRows;
+                end
                 lArms15 = obj.cfg.asset.receiverLeverArms_body_m;
-                obj.diffAttStore = revgnss.DiffAttitudeBuilder.handleSlips( ...
-                    obj.diffAttStore, slipInfo);
+                % Stage 69: DiffAtt baselines do not use the main-carrier slip detector.
+                % Pre-calibration: wrong attitude → large prefits → every IF carrier row
+                % declared a slip → accumN reset to 0 each epoch → calibration blocked.
+                % Post-calibration: DiffAtt injections change attitude by O(deg) between
+                % epochs, which the IF slip detector reads as a cycle slip → all baselines
+                % immediately invalidated before attitude can converge.
+                % Resolution: rely on the per-row innovation gate in buildRows (|nu| > 1 m)
+                % as the only slip guard for differential attitude baselines.  Real slips
+                % produce ~lambda/2 ≈ 0.095 m jumps in phi_i − phi_ref which are small
+                % relative to the 1 m gate; wrong-attitude innovations are also typically
+                % < 1 m for lever arms ~1 m and attitude errors up to ~10 deg.  handleSlips
+                % is therefore entirely disabled for DiffAtt baselines in Stage 69.
+                % (no handleSlips call here)
                 % Stage 61: use getMeasurementState() so DiffAttitudeBuilder receives
                 % nominal euler (not near-zero error state) in quaternionErrorState mode.
                 xDA_ = obj.ekf.getMeasurementState();

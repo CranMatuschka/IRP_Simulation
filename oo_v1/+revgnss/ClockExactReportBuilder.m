@@ -345,14 +345,27 @@ classdef ClockExactReportBuilder
 
         % ................................................................
         function fig = plotPositionError_(diag, t)
+            % Stage 69: show X/Y/Z ECEF components plus 3D norm.
             fig = revgnss.ClockExactReportBuilder.makeCompactFig_('');
             ax  = gca(fig);
             try
-                e = diag.getPositionErrors();
-                if ~isempty(t) && ~isempty(e)
+                ev = diag.getPositionErrorVecs();  % [3 x n]
+                e  = diag.getPositionErrors();     % [1 x n] 3D norm
+                if ~isempty(t) && ~isempty(ev) && size(ev,2) == numel(t)
+                    hold(ax,'on');
+                    plot(ax, t, ev(1,:), 'r-',  'LineWidth', 0.7, 'DisplayName', 'X');
+                    plot(ax, t, ev(2,:), 'g-',  'LineWidth', 0.7, 'DisplayName', 'Y');
+                    plot(ax, t, ev(3,:), 'b-',  'LineWidth', 0.7, 'DisplayName', 'Z');
+                    plot(ax, t, e,       'k-',  'LineWidth', 1.0, 'DisplayName', '3D');
+                    legend(ax, 'show', 'Location', 'northeast', 'FontSize', 5);
+                    xlabel(ax, 'Time [s]', 'FontSize', 7);
+                    ylabel(ax, 'Error [m]', 'FontSize', 7);
+                    grid(ax, 'on');
+                    return;
+                elseif ~isempty(t) && ~isempty(e)
                     plot(ax, t, e, 'b-', 'LineWidth', 0.8);
-                    xlabel(ax, 'Time [s]', 'FontSize',7);
-                    ylabel(ax, 'Error [m]', 'FontSize',7);
+                    xlabel(ax, 'Time [s]', 'FontSize', 7);
+                    ylabel(ax, 'Error [m]', 'FontSize', 7);
                     grid(ax, 'on');
                     return;
                 end
