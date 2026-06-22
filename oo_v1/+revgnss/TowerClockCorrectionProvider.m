@@ -3,6 +3,17 @@ classdef TowerClockCorrectionProvider
     %
     % Extracted from MeasurementModel.computeMeasurements (Stage 12A Step 3).
     % All physics are preserved exactly — this is a pure structural refactor.
+    %
+    % Stage 71: adds 'truthHistoryProductNoisy' mode — a realistic synthetic
+    % broadcast-product-like clock correction using:
+    %   1. Delayed/quantised product epoch: t_prod = floor((t-lat)/dT)*dT
+    %   2. Truth clock state at t_prod from tower history
+    %   3. Deterministic per-(tower,t_prod) product bias/drift noise (seeded cache)
+    %   4. Linear prediction: b_model(t) = (b_true+b_noise) + (bdot_true+d_noise)*age
+    %   5. Prediction sigma: sqrt(sigmaBias^2 + age^2*sigmaDrift^2 + 2*age*covBD)
+    %   6. Sigma added to measurement R via towerClkSigma return value
+    % Unlike 'noisyCorrection', the noise is NOT re-drawn every epoch — it is
+    % fixed per product epoch, consistent with a real broadcast product.
 
     methods (Static)
 
@@ -33,7 +44,7 @@ classdef TowerClockCorrectionProvider
                 % correction product.  It is NOT a model of what a real receiver
                 % produces; it adds zero-mean Gaussian noise to the true tower clock.
                 % Use for Monte Carlo bias/sigma studies only.
-                % predictedProduct is the more realistic product model.
+                % truthHistoryProductNoisy is the more realistic product model.
                 corrNoise_m = noiseSigma * errorChain.drawNormal(M, 1);
             else
                 corrNoise_m = zeros(M,1);
@@ -49,6 +60,15 @@ classdef TowerClockCorrectionProvider
                 if isfield(tc2,'updateInterval_s'); updateInterval_s = tc2.updateInterval_s; end
                 if isfield(tc2,'latency_s');        latency_s        = tc2.latency_s;        end
             end
+            % Stage 71: clocks.tower.product.* takes precedence
+            [~, prodCfg] = revgnss.TowerClockCorrectionProvider.productConfig_(cfg);
+            if prodCfg.updateInterval_s > 0
+                updateInterval_s = prodCfg.updateInterval_s;
+            end
+            if prodCfg.latency_s >= 0
+                latency_s = prodCfg.latency_s;
+            end
+
             t_available = t_s - latency_s;
             if updateInterval_s > 0
                 t_prod = floor(t_available / updateInterval_s) * updateInterval_s;
@@ -56,8 +76,6 @@ classdef TowerClockCorrectionProvider
                 t_prod = t_available;
             end
             if t_prod < 0
-                warning('revgnss:productEpoch', ...
-                    'Product epoch negative at t=%.1f s; clamping to 0.', t_s);
                 t_prod = 0;
             end
 
@@ -77,6 +95,22 @@ classdef TowerClockCorrectionProvider
                         [b_p, bd_p] = revgnss.TowerClockCorrectionProvider.clockAtProductEpoch( ...
                             towers{ti}, t_prod);
                         towerClkModel(mi) = b_p + bd_p * (t_s - t_prod);
+                    case 'truthHistoryProductNoisy'
+                        % Stage 71: realistic product correction.
+                        % 1. Read truth clock at product epoch from tower history.
+                        [b_p, bd_p] = revgnss.TowerClockCorrectionProvider.clockAtProductEpoch( ...
+                            towers{ti}, t_prod);
+                        % 2. Deterministic per-(tower,t_prod) product noise (seeded cache).
+                        [b_noise, d_noise] = revgnss.TowerClockCorrectionProvider.productNoise_( ...
+                            ti, t_prod, prodCfg.sigmaBias_m, prodCfg.sigmaDrift_mps);
+                        % 3. Linear prediction to measurement time.
+                        age = t_s - t_prod;
+                        towerClkModel(mi) = (b_p + b_noise) + (bd_p + d_noise) * age;
+                        % 4. Prediction uncertainty sigma (added to R by caller).
+                        var_corr = prodCfg.sigmaBias_m^2 + ...
+                                   age^2 * prodCfg.sigmaDrift_mps^2 + ...
+                                   2 * age * prodCfg.covBiasDrift;
+                        towerClkSigma(mi) = sqrt(max(var_corr, 0));
                     case 'product'
                         hasProd = isfield(cfg,'towerClock') && ...
                                   isfield(cfg.towerClock,'products') && ...
@@ -209,4 +243,61 @@ classdef TowerClockCorrectionProvider
         end
 
     end  % Static methods
+
+    methods (Static, Access = private)
+
+        function [hasProductCfg, pc] = productConfig_(cfg)
+            % productConfig_  Parse cfg.clocks.tower.product.* for truthHistoryProductNoisy.
+            % Defaults match a moderate-quality synthetic broadcast product.
+            pc.sigmaBias_m          = 0.05;   % ~0.15 ns — high-quality ground tracking network
+            pc.sigmaDrift_mps       = 0.001;  % ~0.003 ppb/s
+            pc.covBiasDrift         = 0;
+            pc.updateInterval_s     = 30;
+            pc.latency_s            = 5;
+            pc.validity_s           = 120;
+            pc.addToR               = true;
+            pc.sharedErrorCorrelation = true;
+            hasProductCfg = false;
+            try
+                tp = cfg.clocks.tower.product;
+                hasProductCfg = true;
+                if isfield(tp,'sigmaBias_m');          pc.sigmaBias_m          = tp.sigmaBias_m;          end
+                if isfield(tp,'sigmaDrift_mps');       pc.sigmaDrift_mps       = tp.sigmaDrift_mps;       end
+                if isfield(tp,'covBiasDrift');         pc.covBiasDrift         = tp.covBiasDrift;         end
+                if isfield(tp,'updateInterval_s');     pc.updateInterval_s     = tp.updateInterval_s;     end
+                if isfield(tp,'latency_s');            pc.latency_s            = tp.latency_s;            end
+                if isfield(tp,'validity_s');           pc.validity_s           = tp.validity_s;           end
+                if isfield(tp,'addToR');               pc.addToR               = tp.addToR;               end
+                if isfield(tp,'sharedErrorCorrelation'); pc.sharedErrorCorrelation = tp.sharedErrorCorrelation; end
+            catch
+            end
+        end
+
+        function [b_noise, d_noise] = productNoise_(ti, t_prod, sigmaBias, sigmaDrift)
+            % productNoise_  Deterministic per-(tower,t_prod) product noise.
+            %
+            % Uses a seeded RNG with per-(ti,t_prod) seed so the same product
+            % epoch always yields the same noise regardless of call order.
+            % The global RNG state is saved and restored.
+            % This models a real broadcast product: the error is fixed at broadcast
+            % time and does not redraw for every measurement epoch.
+            persistent cache_;
+            if isempty(cache_)
+                cache_ = containers.Map('KeyType','char','ValueType','any');
+            end
+            key = sprintf('%d_%.4f', ti, t_prod);
+            if ~isKey(cache_, key)
+                seed = mod(uint64(ti) * uint64(2654435761) + uint64(round(abs(t_prod)*100)) * uint64(2246822519), uint64(2^31));
+                s0 = rng();
+                rng(double(seed), 'twister');
+                noise = randn(2,1);
+                rng(s0);
+                cache_(key) = struct('b', sigmaBias * noise(1), 'd', sigmaDrift * noise(2));
+            end
+            n = cache_(key);
+            b_noise = n.b;
+            d_noise = n.d;
+        end
+
+    end  % private Static methods
 end

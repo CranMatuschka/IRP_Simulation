@@ -1105,7 +1105,8 @@ classdef ConfigFactory
             %
             % Internal estimator.towerClockMode values:
             %   'none' | 'perfectCorrection' | 'noisyCorrection' |
-            %   'truthProduct' | 'product' | 'productNoisy'
+            %   'truthProduct' | 'truthHistoryProductNoisy' |
+            %   'product' | 'productNoisy'
             if isfield(cfg,'towerClock') && isfield(cfg.towerClock,'correctionMode')
                 newMode = cfg.towerClock.correctionMode;
                 switch newMode
@@ -1119,8 +1120,9 @@ classdef ConfigFactory
                         % require cfg.towerClock.products — it uses tower truth history.
                         cfg.estimator.towerClockMode = 'truthProduct';
                     case 'truthHistoryProductNoisy'
-                        % History-based + Gaussian noise added to R.
-                        cfg.estimator.towerClockMode = 'noisyCorrection';
+                        % Stage 71: history-based product with deterministic per-product
+                        % noise and prediction-uncertainty sigma added to R.
+                        cfg.estimator.towerClockMode = 'truthHistoryProductNoisy';
                     case 'product'
                         % Explicit per-tower product struct required. NO fallback.
                         cfg.estimator.towerClockMode = 'product';

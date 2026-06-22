@@ -35,7 +35,7 @@ oo_v1_envAllToggles_ = strcmpi(getenv('OO_V1_ALL_TOGGLES'), 'true');
 if oo_v1_envValidate_; oo_v1_envAllToggles_ = true; end  % validate always uses all toggles
 oo_v1_envStage_      = str2double(getenv('OO_V1_VALIDATION_STAGE'));
 if isnan(oo_v1_envStage_); oo_v1_envStage_ = 0; end
-if oo_v1_envValidate_ && oo_v1_envStage_ == 0; oo_v1_envStage_ = 70; end
+if oo_v1_envValidate_ && oo_v1_envStage_ == 0; oo_v1_envStage_ = 71; end
 oo_v1_envCompile_    = strtrim(getenv('OO_V1_REPORT_COMPILE_TEX'));
 
 cfg = revgnss.ConfigFactory.defaultConfig();
@@ -266,10 +266,29 @@ cfg.effects.antennaPCV.model.enable   = false;
 cfg.effects.correlatedNoise.enable = false;
 
 % --- Clocks -----------------------------------------------------
-% Stage 67: stochastic receiver and tower clocks (non-perfect correction).
-% Tower clock stochastic mode is applied per-tower in ScenarioPresets.
-cfg.clock.receiver.deterministic      = false;
-cfg.errors.towerClockCorrection.mode  = 'noisyCorrection';
+% Stage 67: stochastic receiver and tower clocks.
+% Stage 71: tower clock correction upgraded from truth-plus-noise to
+%   synthetic product-prediction mode (truthHistoryProductNoisy).
+%   Product epoch is delayed/quantised; correction contains per-product
+%   bias/drift noise fixed at product broadcast time; prediction error
+%   grows with product age and enters measurement covariance.
+%   Receiver clock bias/drift remain estimated by the EKF.
+%   Tower clocks are corrected by product, not estimated, to avoid
+%   clock gauge ambiguity without a reference constraint.
+cfg.clock.receiver.deterministic       = false;
+cfg.estimator.estimateTowerClocks      = false;
+cfg.errors.towerClockCorrection.mode   = 'truthHistoryProductNoisy';
+
+% Stage 71: product model parameters.
+cfg.clocks.tower.product.mode                  = 'truthHistoryProductNoisy';
+cfg.clocks.tower.product.updateInterval_s      = 30;
+cfg.clocks.tower.product.latency_s             = 5;
+cfg.clocks.tower.product.sigmaBias_m           = 0.05;   % ~0.15 ns: high-quality ground tracking network
+cfg.clocks.tower.product.sigmaDrift_mps        = 0.001;  % ~0.003 ppb/s
+cfg.clocks.tower.product.covBiasDrift          = 0;
+cfg.clocks.tower.product.validity_s            = 120;
+cfg.clocks.tower.product.addToR                = true;
+cfg.clocks.tower.product.sharedErrorCorrelation = true;
 
 % --- Doppler ----------------------------------------------------
 cfg.measurements.doppler.enable       = true;

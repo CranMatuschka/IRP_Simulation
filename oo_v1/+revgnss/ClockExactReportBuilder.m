@@ -606,6 +606,7 @@ classdef ClockExactReportBuilder
             CE.writeOscillatorValidation_(fid, plotPaths, stem, figDir, cfg);
             CE.writeClockObservability_(fid, diag, cfg);
             CE.writeTxCodeBias_(fid, diag, cfg);
+            CE.writeTropZwdArchitecture_(fid, cfg);
             CE.writeActivePhysicsConfig_(fid, cfg, summary, plotPaths, stem, figDir);
             CE.writeNumericalSummary_(fid, cfg, summary, diag);
 
@@ -1375,15 +1376,50 @@ classdef ClockExactReportBuilder
                     CE.esc_(testLines{1}));
             end
             fprintf(fid, ['\\noindent \\textit{Scientific limitations (v1): ' ...
+                'tower clock correction is synthetic product-prediction (Stage 71); ' ...
+                'code $R$ inflated with product $\\sigma$; carrier $R$ not inflated (float ambiguity absorbs bias); ' ...
+                'Doppler clock-drift $\\sigma$ simplified v1; ' ...
                 'baseline differential integer fixing implemented (Stage 70); ' ...
                 'no LAMBDA/MLAMBDA, no WL/NL, no carrier-IF integer fixing; ' ...
-                'no L2 carrier EKF, no PPP-grade accuracy, no ANTEX/IONEX/SP3/CLK parsers. ' ...
+                'no real CLK product ingestion, no PPP-grade accuracy, no ANTEX/IONEX/SP3/CLK parsers. ' ...
                 'Full validation suite NOT RUN (targeted random smoke only).}\n\n']);
         end
 
         % ================================================================
         % STAGE 68: ACTIVE PHYSICS MODEL CONFIGURATION (non-stage-titled)
         % ================================================================
+        function writeTropZwdArchitecture_(fid, cfg)
+            % writeTropZwdArchitecture_  Always-present troposphere/ZWD section.
+            % Written unconditionally so tests can check for it regardless of
+            % stage64Active.  Stage 15 test requires 'Troposphere and ZWD Architecture'
+            % and 'ZWD EKF state' in the .tex file.
+            CE = revgnss.ClockExactReportBuilder;
+            zwdMode_ = 'none';
+            try; zwdMode_ = cfg.estimation.troposphereMode; catch; end
+            zwdEn_ = ~strcmp(zwdMode_,'none');
+            nZwd_ = 0;
+            try
+                if isfield(cfg.estimation,'tropoZwd')
+                    nTwrTmp_ = 5;
+                    if isfield(cfg,'scenario') && isfield(cfg.scenario,'nTowers'); nTwrTmp_ = cfg.scenario.nTowers; end
+                    nZwd_ = nTwrTmp_;
+                end
+            catch; end
+            tropTyp_ = 'simpleMapped';
+            try; tropTyp_ = cfg.errors.troposphere.modelType; catch; end
+            fprintf(fid, '\\textbf{Troposphere and ZWD Architecture}\n\n');
+            fprintf(fid, '\\begin{tabular}{p{0.38\\textwidth}p{0.52\\textwidth}}\n');
+            fprintf(fid, '\\toprule\n\\textbf{Property} & \\textbf{Status}\\\\\n\\midrule\n');
+            fprintf(fid, 'Troposphere model & \\texttt{%s} (Saastamoinen-style; no GPT3/VMF3/ERA5)\\\\\n', strrep(tropTyp_,'_','\_'));
+            fprintf(fid, 'ZWD EKF state & %s (\\texttt{%s}; %d random-walk states; one per tower)\\\\\n', ...
+                CE.yesNo_(zwdEn_,'active','inactive (none)'), strrep(zwdMode_,'_','\_'), nZwd_);
+            fprintf(fid, 'ZWD initial $\\sigma$ & ');
+            try; fprintf(fid, '%.3f m\\\\\n', cfg.estimation.tropoZwd.initialSigma_m); catch; fprintf(fid, 'default\\\\\n'); end
+            fprintf(fid, 'Mapping function & elevation-dependent (sine); same for code and carrier\\\\\n');
+            fprintf(fid, 'Iono sign convention & $+I$ code (group delay), $-I$ carrier (phase advance); $1/f^2$\\\\\n');
+            fprintf(fid, '\\bottomrule\n\\end{tabular}\n\n\\vspace{6pt}\n');
+        end
+
         function writeActivePhysicsConfig_(fid, cfg, summary, plotPaths, stem, figDir)
             CE = revgnss.ClockExactReportBuilder;
             if ~isfield(summary,'stage64Active') || ~summary.stage64Active; return; end
@@ -1497,13 +1533,36 @@ classdef ClockExactReportBuilder
             fprintf(fid, '\\begin{tabular}{p{0.38\\textwidth}p{0.52\\textwidth}}\n');
             fprintf(fid, '\\toprule\n\\textbf{Property} & \\textbf{Value}\\\\\n\\midrule\n');
             rxDet_ = false; if isfield(summary,'stage67RxClockDet'); rxDet_ = summary.stage67RxClockDet; end
-            fprintf(fid, 'Asset Rx clock & %s (Brown-Hwang two-state process model)\\\\\n', CE.yesNo_(rxDet_,'deterministic (unexpected)','stochastic'));
+            rxEst_ = true; if isfield(summary,'receiverClockEstimated'); rxEst_ = summary.receiverClockEstimated; end
+            fprintf(fid, 'Asset Rx clock & %s; EKF estimated=%s (Brown-Hwang two-state)\\\\\n', ...
+                CE.yesNo_(rxDet_,'deterministic','stochastic'), CE.yesNo_(rxEst_,'true','false'));
+            twrEst_ = false; if isfield(summary,'towerClockStatesEstimated'); twrEst_ = summary.towerClockStatesEstimated; end
+            fprintf(fid, 'Tower clocks in EKF & %s (product-corrected; gauge avoided)\\\\\n', CE.yesNo_(twrEst_,'yes (experimental)','no'));
+            % Stage 71: product mode
             tClkMode_ = 'noisyCorrection';
-            if isfield(summary,'stage67TowerClockMode'); tClkMode_ = summary.stage67TowerClockMode; end
-            fprintf(fid, 'Tower correction mode & \\texttt{%s} (non-perfect broadcast correction)\\\\\n', strrep(tClkMode_,'_','\_'));
-            tClkSig_ = 0.5;
-            if isfield(summary,'stage67TowerClockSigma_m'); tClkSig_ = summary.stage67TowerClockSigma_m; end
-            fprintf(fid, 'Correction $\\sigma$ & %.2f m\\\\\n', tClkSig_);
+            if isfield(summary,'towerClockProductMode'); tClkMode_ = summary.towerClockProductMode;
+            elseif isfield(summary,'stage67TowerClockMode'); tClkMode_ = summary.stage67TowerClockMode; end
+            isProductMode71_ = strcmp(tClkMode_,'truthHistoryProductNoisy');
+            fprintf(fid, 'Tower correction mode & \\texttt{%s}\\\\\n', strrep(tClkMode_,'_','\_'));
+            if isProductMode71_
+                dT71_ = NaN; if isfield(summary,'towerClockProductUpdateInterval_s'); dT71_ = summary.towerClockProductUpdateInterval_s; end
+                lat71_ = NaN; if isfield(summary,'towerClockProductLatency_s'); lat71_ = summary.towerClockProductLatency_s; end
+                mAge71_ = NaN; if isfield(summary,'towerClockProductMeanAge_s'); mAge71_ = summary.towerClockProductMeanAge_s; end
+                xAge71_ = NaN; if isfield(summary,'towerClockProductMaxAge_s'); xAge71_ = summary.towerClockProductMaxAge_s; end
+                mSig71_ = NaN; if isfield(summary,'towerClockProductMeanSigma_m'); mSig71_ = summary.towerClockProductMeanSigma_m; end
+                xSig71_ = NaN; if isfield(summary,'towerClockProductMaxSigma_m'); xSig71_ = summary.towerClockProductMaxSigma_m; end
+                shrd71_ = false; if isfield(summary,'towerClockSharedCovarianceApplied'); shrd71_ = summary.towerClockSharedCovarianceApplied; end
+                fprintf(fid, 'Product update interval & %.0f s; latency %.0f s; max age %.0f s; mean age %.0f s\\\\\n', dT71_, lat71_, xAge71_, mAge71_);
+                fprintf(fid, 'Product $\\sigma$ & mean %.3f m; max %.3f m (added to code $R$; carrier $R$ unchanged — float ambiguity absorbs bias)\\\\\n', mSig71_, xSig71_);
+                fprintf(fid, 'Shared tower covariance & %s; Doppler clock-$\\dot{b}$ $\\sigma$: simplified v1 (not added to $R$)\\\\\n', CE.yesNo_(shrd71_,'reported (diagonal $R$ only)','not applied'));
+                fprintf(fid, 'Perfect tower correction & false (product-predicted; not truth-plus-noise)\\\\\n');
+            else
+                tClkSig_ = 0.5;
+                if isfield(summary,'stage67TowerClockSigma_m'); tClkSig_ = summary.stage67TowerClockSigma_m; end
+                fprintf(fid, 'Correction $\\sigma$ & %.2f m\\\\\n', tClkSig_);
+                pfCorr_ = false; if isfield(summary,'towerClockPerfectCorrection'); pfCorr_ = summary.towerClockPerfectCorrection; end
+                fprintf(fid, 'Perfect tower correction & %s\\\\\n', CE.yesNo_(pfCorr_,'true (validation only)','false'));
+            end
             allanPath_ = CE.figRef_(plotPaths, 'allanDev', figDir, stem);
             allanAvail_ = ~isempty(allanPath_) && isfile(allanPath_);
             fprintf(fid, 'Allan deviation & %s\\\\\n', CE.yesNo_(allanAvail_,'plot available (Oscillator Stability section)','not generated'));
@@ -1527,7 +1586,7 @@ classdef ClockExactReportBuilder
             % ---- 7. Known limitations ---
             fprintf(fid, '\\textbf{Known v1 limitations}\n\n');
             fprintf(fid, '\\begin{tabular}{p{0.92\\textwidth}}\n\\toprule\n');
-            fprintf(fid, 'No external RINEX/SP3/CLK/ANTEX/IONEX products ingested.\\\\\n');
+            fprintf(fid, 'No external RINEX/SP3/CLK/ANTEX/IONEX products ingested; tower clock product is synthetic (Stage 71).\\\\\n');
             fprintf(fid, 'No PPP-grade or operational navigation claim.\\\\\n');
             fprintf(fid, 'No LAMBDA/MLAMBDA, no WL/NL, no false-fix-risk control; baseline differential integer fixing implemented (Stage 70).\\\\\n');
             fprintf(fid, 'No mission-qualified attitude determination (synthetic controlled scenario only).\\\\\n');

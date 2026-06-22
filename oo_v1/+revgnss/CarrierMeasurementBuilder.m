@@ -10,7 +10,7 @@ classdef CarrierMeasurementBuilder
                 cfg, errorChain, floatAmbiguityTruth_m, ...
                 asset, towers, twr_pairs, ant_pairs, r_ants_truth, r_ants_est, ...
                 leverArms_model, x_est, stateMap, nx, errStruct, ...
-                towerClkTruth, towerClkModel, ~, t_s)
+                towerClkTruth, towerClkModel, towerClkSigma, t_s)
             % buildEkfRows  Carrier EKF measurement rows.
             %
             % z_phi = rho_true + b_rx_true - b_twr_true + trop_true - iono_true + B_true + noise
@@ -187,6 +187,11 @@ classdef CarrierMeasurementBuilder
                         revgnss.MeasurementModelUtils.zwdMappingKind(cfg));
                     h_phi(rowOut) = h_phi(rowOut) + mf_phi * x_est(stateMap.zwdIdx(ti));
                 end
+
+                % Stage 71 NOTE: towerClkSigma is NOT added to carrier R.
+                % Float ambiguity B_est absorbs constant clock bias per arc; inflating
+                % R would incorrectly degrade carrier from ~5mm to ~0.5m precision.
+                % towerClkSigma is applied to CODE rows only (in CodeMeasurementBuilder).
 
                 cpInfo.phi_m(rowOut)             = z_phi(rowOut);
                 cpInfo.prefit_m(rowOut)          = z_phi(rowOut) - h_phi(rowOut);
