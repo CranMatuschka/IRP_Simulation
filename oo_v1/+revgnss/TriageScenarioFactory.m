@@ -76,7 +76,8 @@ classdef TriageScenarioFactory
             cfg.simulation.duration_s = 600;
             cfg.simulation.dt_s = 1;
             cfg.scenario.nReceivers = 1;
-            cfg.signals.twoFrequency.enable = false;
+            cfg.signals.names = {'L1','L2'};
+            cfg.signals.enabledMask = [true,false];
             cfg.signals.enabled = {'L1'};
             cfg.measurements.codeMode = 'singleFrequency';
             cfg.measurements.observableMode = 'code';
@@ -164,7 +165,8 @@ classdef TriageScenarioFactory
             cfg.plots.enable = false;
             cfg.plots.showFigures = false;
             cfg.scenario.nReceivers = 3;
-            cfg.signals.twoFrequency.enable = true;
+            cfg.signals.names = {'L1','L2'};
+            cfg.signals.enabledMask = [true,true];
             cfg.physics.sagnac.truth.enable = true;
             cfg.physics.sagnac.model.enable = true;
             cfg.physics.lightTime.truth.enable = true;

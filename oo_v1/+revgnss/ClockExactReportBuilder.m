@@ -1648,16 +1648,18 @@ classdef ClockExactReportBuilder
             fprintf(fid, 'Phase-bias status & \\texttt{%s}\\\\\n', strrep(phaseBias75_,'_','\_'));
             fprintf(fid, 'Carrier-IF integer fixing & %s (explicitly unsupported in v1)\\\\\n', CE.yesNo_(carrIfFix76_,'true','false'));
             fprintf(fid, 'Differential iono in baseline AR & \\texttt{%s}\\\\\n', strrep(dIono76_,'_','\_'));
-            % Stage 77: canonical config source row
-            sigMaskCfg77_ = CE.safeField_(summary,'canonicalSignalEnabledMask',[true]);
-            slipThr77_    = CE.safeField_(summary,'canonicalSlipThreshold_m',0.1);
-            fprintf(fid, 'Config source (Stage~77) & signal mask: %s; slip thr: %.2f\\,m (canonical owners in finalizeConfig)\\\\\n', ...
-                mat2str(logical(sigMaskCfg77_)), slipThr77_);
-            % Stage 78: source-truth audit row
-            auditSt78_  = CE.safeField_(summary,'frequencyHardcodeAuditStatus','unknown');
-            sigOwn78_   = CE.safeField_(summary,'signalConfigOwner','SignalDefinition+ConfigFactory.finalizeConfig');
-            fprintf(fid, 'Source truth (Stage~78) & freq hardcodes: %s; signal owner: %s\\\\\n', ...
-                auditSt78_, sigOwn78_);
+            % Stage 79: final central configuration lock rows
+            sigMaskCfg79_ = CE.safeField_(summary,'canonicalSignalEnabledMask',[true]);
+            slipThr79_    = CE.safeField_(summary,'canonicalSlipThreshold_m',0.1);
+            audit79_      = CE.safeField_(summary,'centralConfigAuditStatus','unknown');
+            fprintf(fid, 'Config lock (Stage~79) & status: %s; signal mask: %s; slip thr: %.2f\\,m\\\\\n', ...
+                audit79_, mat2str(logical(sigMaskCfg79_)), slipThr79_);
+            freqAudit79_ = CE.safeField_(summary,'frequencyHardcodeAuditStatus','unknown');
+            sigOwn79_    = CE.safeField_(summary,'signalConfigOwner','cfg.signals.names+cfg.signals.enabledMask');
+            nWarn79_     = CE.safeField_(summary,'centralConfigWarnings',0);
+            nErr79_      = CE.safeField_(summary,'centralConfigErrors',0);
+            fprintf(fid, 'Config owners (Stage~79) & signal owner: %s; freq audit: %s; warnings/errors: %d/%d\\\\\n', ...
+                sigOwn79_, freqAudit79_, nWarn79_, nErr79_);
             fprintf(fid, '\\bottomrule\n\\end{tabular}\n\n\\vspace{6pt}\n');
 
             % ---- 5. Clocks ---

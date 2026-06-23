@@ -126,7 +126,7 @@ classdef ErrorChain < handle
             obj.envModel.step(dt);
 
             % L1 frequency for scintillation and iono scaling reference
-            f_L1 = 1575.42e6;
+            f_L1 = revgnss.SignalDefinition.get('L1').frequency_Hz;
             if isfield(obj.cfg,'signals') && isfield(obj.cfg.signals,'L1') && ...
                     isfield(obj.cfg.signals.L1,'frequency_Hz')
                 f_L1 = obj.cfg.signals.L1.frequency_Hz;

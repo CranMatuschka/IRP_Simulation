@@ -21,7 +21,7 @@ classdef ConfigFactory
     %                            for the matched-error intent.
     %
     % -----------------------------------------------------------------------
-    % SUPPORTED OBSERVABLES (Stage 7A, updated Stage 78)
+    % SUPPORTED OBSERVABLES (Stage 7A, updated Stage 79)
     %   Code pseudorange (single-frequency or IF L1/L2 combination)
     %   Simplified Doppler
     %   Raw L1/L2 float carrier EKF; raw dual-frequency baseline attitude AR
@@ -33,7 +33,7 @@ classdef ConfigFactory
     %   Ionosphere mapping: simpleSecant (1/sin) or thinShell
     %   Thin-shell mapping: M(e)=1/sqrt(1-(Re*cos(e)/(Re+hI))^2); NOT Klobuchar
     %
-    % NOT SUPPORTED (updated Stage 78)
+    % NOT SUPPORTED (updated Stage 79)
     %   Carrier-IF integer fixing | LAMBDA/MLAMBDA | formal ILS false-fix-risk control
     %   Azimuth-dependent PCV | ANTEX parser | IONEX | SP3/CLK | RINEX
     %   VMF3 / GPT3 / ERA5 | Klobuchar ionosphere model
@@ -246,23 +246,25 @@ classdef ConfigFactory
             cfg.errors.codeNoise.sigma_m = 0.3;
 
             % --- Signal / frequency config ----------------------------------------
+            sigL1Default_ = revgnss.SignalDefinition.get('L1');
+            sigL2Default_ = revgnss.SignalDefinition.get('L2');
             cfg.signals.enabled = {'L1'};
             cfg.signals.twoFrequency.enable = false;
             cfg.signals.L1.name          = 'L1';
-            cfg.signals.L1.frequency_Hz  = 1575.42e6;
-            cfg.signals.L1.lambda_m      = 299792458 / 1575.42e6;
+            cfg.signals.L1.frequency_Hz  = sigL1Default_.frequency_Hz;
+            cfg.signals.L1.lambda_m      = sigL1Default_.wavelength_m;
             cfg.signals.L1.codeSigma0_m  = 0.30;
             cfg.signals.L2.name          = 'L2';
-            cfg.signals.L2.frequency_Hz  = 1227.60e6;
-            cfg.signals.L2.lambda_m      = 299792458 / 1227.60e6;
+            cfg.signals.L2.frequency_Hz  = sigL2Default_.frequency_Hz;
+            cfg.signals.L2.lambda_m      = sigL2Default_.wavelength_m;
             cfg.signals.L2.codeSigma0_m  = 0.45;
             cfg.signals.primary          = 'L1';   % primary signal for iono scaling
             cfg.signals.secondary        = 'L2';   % secondary for IF combination
             cfg.ionosphere.mode          = 'off';  % 'off'|'truthOnly'|'model'|'ionosphereFree'
             % Stage 76: central signal list (names, Hz, boolean masks).
-            % Populated by finalizeConfig from twoFrequency/enabled resolution.
+            % Populated by finalizeConfig from canonical names/enabledMask resolution.
             cfg.signals.names            = {'L1'};
-            cfg.signals.frequencyHz      = [1575.42e6];
+            cfg.signals.frequencyHz      = sigL1Default_.frequency_Hz;
             cfg.signals.enabledMask      = [true];
             cfg.measurements.code.enabledByFrequency    = [true];
             cfg.measurements.carrier.enabledByFrequency = [true];
@@ -422,8 +424,8 @@ classdef ConfigFactory
 
             cfg.measurements.carrierPhase.enable           = true;
             cfg.measurements.carrierPhase.useInEKF         = false;   % governed by carrierMode in v4+
-            cfg.measurements.carrierPhase.frequency_Hz     = 1575.42e6;
-            cfg.measurements.carrierPhase.lambda_m         = 299792458 / 1575.42e6;
+            cfg.measurements.carrierPhase.frequency_Hz     = sigL1Default_.frequency_Hz;
+            cfg.measurements.carrierPhase.lambda_m         = sigL1Default_.wavelength_m;
             cfg.measurements.carrierPhase.sigma_cycles     = 0.01;
             cfg.measurements.carrierPhase.initialAmbiguityMode = 'randomInteger';
             cfg.measurements.carrierPhase.seed             = 9001;
@@ -908,7 +910,8 @@ classdef ConfigFactory
             % Enables IF pseudorange combination.  First-order ionosphere cancels.
             % Requires both L1 and L2 active.
             cfg = revgnss.ConfigFactory.defaultConfig();
-            cfg.signals.twoFrequency.enable      = true;
+            cfg.signals.names                    = {'L1','L2'};
+            cfg.signals.enabledMask              = [true,true];
             cfg.measurements.codeMode            = 'ionosphereFree';
             cfg.measurements.observableMode      = 'code+doppler';
             cfg.errors.ionosphere.truth.enable   = true;
@@ -982,7 +985,8 @@ classdef ConfigFactory
             %   drift_mps    — clock drift at epoch_s [m/s]
             %   epoch_s      — reference epoch for linear prediction [s]
             %   sigmaBias_m  — 1-sigma bias uncertainty [m]
-            %   sigmaDrift_mps — 1-sigma drift uncertainty [m/s]
+            %   sigmaDrift_mps — 1-sigma range-rate clock prediction uncertainty [m/s];
+            %                    fractional-frequency equivalent is sigmaDrift_mps / c
             %   covBiasDrift — bias-drift covariance [m^2/s]
             %   validity_s   — max |dt| before policy triggers [s]
             cfg = revgnss.ConfigFactory.defaultConfig();
@@ -1106,6 +1110,11 @@ classdef ConfigFactory
                 if ~isfield(cfg.errors,'towerClockCorrection')
                     cfg.errors.towerClockCorrection = struct();
                 end
+                if isfield(cfg.errors.towerClockCorrection,'mode') && ...
+                        ~strcmp(cfg.errors.towerClockCorrection.mode, cfg.clocks.tower.product.mode)
+                    cfg.validation.warnings{end+1} = ...
+                        'cfg.errors.towerClockCorrection.mode is derived from cfg.clocks.tower.product.mode; canonical product mode wins.';
+                end
                 cfg.errors.towerClockCorrection.mode = cfg.clocks.tower.product.mode;
             end
             % cfg.errors.towerClockCorrection.mode → cfg.estimator.towerClockMode (legacy)
@@ -1163,6 +1172,19 @@ classdef ConfigFactory
             if isfield(cfg,'carrierSlip') && isfield(cfg.carrierSlip,'threshold_m')
                 if isfield(cfg,'measurements') && isfield(cfg.measurements,'carrier') && ...
                         isfield(cfg.measurements.carrier,'slipDetection')
+                    if isfield(cfg.measurements.carrier.slipDetection,'threshold_m') && ...
+                            cfg.measurements.carrier.slipDetection.threshold_m ~= cfg.carrierSlip.threshold_m
+                        cfg.validation.warnings{end+1} = ...
+                            'cfg.measurements.carrier.slipDetection.threshold_m is derived from cfg.carrierSlip.threshold_m; canonical slip threshold wins.';
+                    end
+                    if isfield(cfg.carrierSlip,'enable') && isfield(cfg.measurements.carrier.slipDetection,'enable') && ...
+                            logical(cfg.measurements.carrier.slipDetection.enable) ~= logical(cfg.carrierSlip.enable)
+                        cfg.validation.warnings{end+1} = ...
+                            'cfg.measurements.carrier.slipDetection.enable is derived from cfg.carrierSlip.enable; canonical carrierSlip enable wins.';
+                    end
+                    if isfield(cfg.carrierSlip,'enable')
+                        cfg.measurements.carrier.slipDetection.enable = logical(cfg.carrierSlip.enable);
+                    end
                     cfg.measurements.carrier.slipDetection.threshold_m = ...
                         cfg.carrierSlip.threshold_m;
                 end
@@ -1462,115 +1484,155 @@ classdef ConfigFactory
                 end
             end
 
-            % Stage 77: canonical enabledMask input path (highest priority)
-            % cfg.signals.enabledMask with 2 elements is the new canonical signal source.
-            % Wins over twoFrequency.enable alias; maps mask to cfg.signals.enabled.
-            if isfield(cfg,'signals') && isfield(cfg.signals,'enabledMask') && ...
-                    numel(cfg.signals.enabledMask) >= 2
-                allSigNames77_ = {'L1','L2'};
-                mask77_ = logical(cfg.signals.enabledMask(1:2));
-                cfg.signals.enabled = allSigNames77_(mask77_);
-                if ~isfield(cfg.signals,'twoFrequency')
-                    cfg.signals.twoFrequency = struct();
-                end
-                cfg.signals.twoFrequency.enable = all(mask77_);
-            end
+            % ---- Stage 79: central signal and frequency ownership --------
+            if ~isfield(cfg,'signals'); cfg.signals = struct(); end
+            if ~isfield(cfg,'measurements'); cfg.measurements = struct(); end
+            if ~isfield(cfg.measurements,'code'); cfg.measurements.code = struct(); end
+            if ~isfield(cfg.measurements,'carrier'); cfg.measurements.carrier = struct(); end
+            if ~isfield(cfg.measurements,'doppler'); cfg.measurements.doppler = struct(); end
 
-            % ---- twoFrequency early apply (must run before codeMode validation) ----
-            if isfield(cfg,'signals') && isfield(cfg.signals,'twoFrequency') && ...
-                    isfield(cfg.signals.twoFrequency,'enable')
-                if cfg.signals.twoFrequency.enable
-                    cfg.signals.enabled = {'L1','L2'};
-                else
-                    cfg.signals.enabled = {'L1'};
-                end
-            end
-            % Stage 76: also sync cfg.signals.enabled from cfg.twoFrequency.enable
-            % (run-script path; backward-compat with pre-76 scripts that use cfg.twoFrequency directly)
-            if isfield(cfg,'twoFrequency') && isfield(cfg.twoFrequency,'enable')
-                if cfg.twoFrequency.enable
-                    cfg.signals.enabled = {'L1','L2'};
-                else
-                    if ~isfield(cfg.signals,'enabled')
-                        cfg.signals.enabled = {'L1'};
+            sigNames79_ = {};
+            if isfield(cfg.signals,'names'); sigNames79_ = cfg.signals.names; end
+            if ischar(sigNames79_); sigNames79_ = {sigNames79_}; end
+            if isfield(cfg.signals,'enabledMask')
+                sigMask79_ = logical(cfg.signals.enabledMask(:)).';
+                if isempty(sigNames79_) || numel(sigMask79_) > numel(sigNames79_)
+                    defaultNames79_ = {'L1','L2','L5'};
+                    if numel(sigMask79_) > numel(defaultNames79_)
+                        error('ConfigFactory:signalMaskUnsupported', ...
+                            'cfg.signals.enabledMask has %d entries but only L1/L2/L5 are defined in v1.', ...
+                            numel(sigMask79_));
                     end
+                    sigNames79_ = defaultNames79_(1:numel(sigMask79_));
                 end
-            end
-
-            % ---- Stage 76/78: centralize signal names/frequencies/masks -------
-            % Stage 78: error on unknown signal — no silent L1 fallback.
-            % Also populates cfg.signals.wavelength_m and legacy per-signal alias fields.
-            if isfield(cfg,'signals') && isfield(cfg.signals,'enabled')
-                sigList = cfg.signals.enabled;
-                if ischar(sigList); sigList = {sigList}; end
-                nSig = numel(sigList);
-                freqHz = zeros(1,nSig);
-                waveM  = zeros(1,nSig);
-                for si76_ = 1:nSig
-                    % SignalDefinition.get errors on unknown signal — no catch fallback.
-                    sd76_           = revgnss.SignalDefinition.get(sigList{si76_});
-                    freqHz(si76_)   = sd76_.frequency_Hz;
-                    waveM(si76_)    = sd76_.wavelength_m;
-                end
-                cfg.signals.names        = sigList;
-                cfg.signals.frequencyHz  = freqHz;
-                cfg.signals.wavelength_m = waveM;
-                cfg.signals.enabledMask  = true(1,nSig);
-                % Stage 78: derive legacy per-signal alias fields from canonical arrays.
-                for si78_ = 1:nSig
-                    sn78_ = sigList{si78_};
-                    cfg.signals.(sn78_).frequency_Hz = freqHz(si78_);
-                    cfg.signals.(sn78_).lambda_m     = waveM(si78_);
-                end
-                % Resize per-frequency toggles to match signal count.
-                if ~isfield(cfg,'measurements'); cfg.measurements = struct(); end
-                if ~isfield(cfg.measurements,'code'); cfg.measurements.code = struct(); end
-                if ~isfield(cfg.measurements,'carrier'); cfg.measurements.carrier = struct(); end
-                if ~isfield(cfg.measurements.code,'enabledByFrequency') || ...
-                        numel(cfg.measurements.code.enabledByFrequency) ~= nSig
-                    cfg.measurements.code.enabledByFrequency = true(1,nSig);
-                end
-                if ~isfield(cfg.measurements.carrier,'enabledByFrequency') || ...
-                        numel(cfg.measurements.carrier.enabledByFrequency) ~= nSig
-                    cfg.measurements.carrier.enabledByFrequency = true(1,nSig);
-                end
-            end
-
-            % Stage 77: derive AR enabledByFrequency from signals.enabledMask
-            % Ensures one mask change propagates to AR without editing downstream config.
-            if isfield(cfg,'estimator') && isfield(cfg.estimator,'diffAtt') && ...
-                    isfield(cfg.estimator.diffAtt,'ambiguityResolution') && ...
-                    isfield(cfg,'signals') && isfield(cfg.signals,'enabledMask')
-                arCfg77_ = cfg.estimator.diffAtt.ambiguityResolution;
-                nSig77_  = numel(cfg.signals.enabledMask);
-                if ~isfield(arCfg77_,'enabledByFrequency') || ...
-                        numel(arCfg77_.enabledByFrequency) ~= nSig77_
-                    cfg.estimator.diffAtt.ambiguityResolution.enabledByFrequency = ...
-                        logical(cfg.signals.enabledMask);
-                end
-            end
-
-            % ---- Stage 76: multi-space-asset guard ---------------------------
-            % nSpaceAssets > 1 is unsupported; fail loudly to prevent silent truncation.
-            if isfield(cfg,'scenario') && isfield(cfg.scenario,'nSpaceAssets')
-                nSA76_ = cfg.scenario.nSpaceAssets;
-                if nSA76_ > 1
-                    policy76_ = 'error';
-                    if isfield(cfg,'validation') && ...
-                            isfield(cfg.validation,'unsupportedFeaturePolicy')
-                        policy76_ = cfg.validation.unsupportedFeaturePolicy;
-                    end
-                    msg76_ = sprintf( ...
-                        'nSpaceAssets=%d requested but multi-space-asset estimation is explicitly unsupported in v1. Set cfg.scenario.nSpaceAssets=1.', ...
-                        nSA76_);
-                    if strcmp(policy76_,'disableWithWarning')
-                        cfg.scenario.nSpaceAssets = 1;
-                        cfg.validation.warnings{end+1} = msg76_;
-                        warning('ConfigFactory:multiAssetUnsupported', '%s', msg76_);
+            else
+                if isempty(sigNames79_)
+                    if isfield(cfg.signals,'enabled')
+                        sigNames79_ = cfg.signals.enabled;
+                        if ischar(sigNames79_); sigNames79_ = {sigNames79_}; end
                     else
-                        error('ConfigFactory:multiAssetUnsupported', '%s', msg76_);
+                        sigNames79_ = {'L1'};
                     end
                 end
+                sigMask79_ = true(1,numel(sigNames79_));
+            end
+            if numel(sigMask79_) ~= numel(sigNames79_)
+                error('ConfigFactory:signalMaskSize', ...
+                    'cfg.signals.enabledMask length (%d) must match cfg.signals.names length (%d).', ...
+                    numel(sigMask79_), numel(sigNames79_));
+            end
+
+            legacyTwo79_ = isfield(cfg.signals,'twoFrequency') && ...
+                isfield(cfg.signals.twoFrequency,'enable') && cfg.signals.twoFrequency.enable;
+            if legacyTwo79_ && nnz(sigMask79_) <= 1
+                cfg.validation.warnings{end+1} = ...
+                    'cfg.signals.twoFrequency.enable is legacy and disagrees with cfg.signals.enabledMask; enabledMask wins.';
+            end
+
+            nSig79_ = numel(sigNames79_);
+            freqHz79_ = zeros(1,nSig79_);
+            waveM79_  = zeros(1,nSig79_);
+            for si79_ = 1:nSig79_
+                sd79_ = revgnss.SignalDefinition.get(sigNames79_{si79_});
+                freqHz79_(si79_) = sd79_.frequency_Hz;
+                waveM79_(si79_)  = sd79_.wavelength_m;
+            end
+            cfg.signals.names        = sigNames79_;
+            cfg.signals.frequencyHz  = freqHz79_;
+            cfg.signals.wavelength_m = waveM79_;
+            cfg.signals.enabledMask  = sigMask79_;
+            cfg.signals.enabled      = sigNames79_(sigMask79_);
+            if ~isfield(cfg.signals,'twoFrequency'); cfg.signals.twoFrequency = struct(); end
+            cfg.signals.twoFrequency.enable = nnz(sigMask79_) > 1;
+
+            for si79_ = 1:nSig79_
+                sn79_ = sigNames79_{si79_};
+                cfg.signals.(sn79_).frequency_Hz = freqHz79_(si79_);
+                cfg.signals.(sn79_).lambda_m     = waveM79_(si79_);
+            end
+
+            codeMask79_ = sigMask79_;
+            if isfield(cfg.measurements.code,'enabledByFrequency')
+                codeMask79_ = logical(cfg.measurements.code.enabledByFrequency(:)).';
+                if numel(codeMask79_) ~= nSig79_
+                    codeMask79_ = sigMask79_;
+                end
+            end
+            carrierMask79_ = sigMask79_;
+            if isfield(cfg.measurements.carrier,'enabledByFrequency')
+                carrierMask79_ = logical(cfg.measurements.carrier.enabledByFrequency(:)).';
+                if numel(carrierMask79_) ~= nSig79_
+                    carrierMask79_ = sigMask79_;
+                end
+            end
+            dopplerMask79_ = sigMask79_;
+            if isfield(cfg.measurements.doppler,'enabledByFrequency')
+                dopplerMask79_ = logical(cfg.measurements.doppler.enabledByFrequency(:)).';
+                if numel(dopplerMask79_) ~= nSig79_
+                    dopplerMask79_ = sigMask79_;
+                end
+            end
+            if numel(codeMask79_) ~= nSig79_ || numel(carrierMask79_) ~= nSig79_ || numel(dopplerMask79_) ~= nSig79_
+                error('ConfigFactory:frequencyMaskSize', ...
+                    'Per-observable enabledByFrequency masks must match cfg.signals.names length (%d).', nSig79_);
+            end
+            if any(codeMask79_ & ~sigMask79_) || any(carrierMask79_ & ~sigMask79_) || any(dopplerMask79_ & ~sigMask79_)
+                error('ConfigFactory:observableMaskExceedsSignalMask', ...
+                    'Observable frequency masks may not enable a signal disabled by cfg.signals.enabledMask.');
+            end
+            cfg.measurements.code.enabledByFrequency    = codeMask79_ & sigMask79_;
+            cfg.measurements.carrier.enabledByFrequency = carrierMask79_ & sigMask79_;
+            cfg.measurements.doppler.enabledByFrequency = dopplerMask79_ & sigMask79_;
+
+            if ~isfield(cfg.measurements.carrier,'l2EkfRows')
+                cfg.measurements.carrier.l2EkfRows = struct();
+            end
+            l2Idx79_ = find(strcmpi(sigNames79_,'L2'), 1);
+            if ~isfield(cfg.measurements.code,'l2Rows')
+                cfg.measurements.code.l2Rows = struct();
+            end
+            l2Code79_ = ~isempty(l2Idx79_) && cfg.measurements.code.enabledByFrequency(l2Idx79_);
+            if isfield(cfg.measurements.code.l2Rows,'enable') && ...
+                    logical(cfg.measurements.code.l2Rows.enable) ~= l2Code79_
+                cfg.validation.warnings{end+1} = ...
+                    'cfg.measurements.code.l2Rows.enable is derived from code.enabledByFrequency; canonical code mask wins.';
+            end
+            cfg.measurements.code.l2Rows.enable = l2Code79_;
+
+            l2Carrier79_ = ~isempty(l2Idx79_) && cfg.measurements.carrier.enabledByFrequency(l2Idx79_);
+            if isfield(cfg.measurements.carrier.l2EkfRows,'enable') && ...
+                    logical(cfg.measurements.carrier.l2EkfRows.enable) ~= l2Carrier79_
+                cfg.validation.warnings{end+1} = ...
+                    'cfg.measurements.carrier.l2EkfRows.enable is derived from carrier.enabledByFrequency; canonical carrier mask wins.';
+            end
+            cfg.measurements.carrier.l2EkfRows.enable = l2Carrier79_;
+
+            if isfield(cfg,'estimator') && isfield(cfg.estimator,'diffAtt') && ...
+                    isfield(cfg.estimator.diffAtt,'ambiguityResolution')
+                arMask79_ = cfg.measurements.carrier.enabledByFrequency;
+                arCfg79_ = cfg.estimator.diffAtt.ambiguityResolution;
+                if isfield(arCfg79_,'enabledByFrequency')
+                    arMask79_ = logical(arCfg79_.enabledByFrequency(:)).';
+                    if numel(arMask79_) ~= nSig79_
+                        error('ConfigFactory:arFrequencyMaskSize', ...
+                            'cfg.estimator.diffAtt.ambiguityResolution.enabledByFrequency must match cfg.signals.names length (%d).', nSig79_);
+                    end
+                    if any(arMask79_ & ~cfg.measurements.carrier.enabledByFrequency)
+                        error('ConfigFactory:arMaskExceedsCarrierMask', ...
+                            'Attitude ambiguity-resolution frequencies must be a subset of carrier.enabledByFrequency.');
+                    end
+                end
+                cfg.estimator.diffAtt.ambiguityResolution.enabledByFrequency = arMask79_;
+            end
+
+            % ---- Stage 79: multi-space-asset guard ---------------------------
+            msg79Multi_ = ['Multi-space-asset estimation is unsupported in oo_v1 active scenario. ' ...
+                'This stage intentionally does not truncate assets.'];
+            if isfield(cfg,'scenario') && isfield(cfg.scenario,'nSpaceAssets') && cfg.scenario.nSpaceAssets > 1
+                error('ConfigFactory:multiAssetUnsupported', '%s', msg79Multi_);
+            end
+            if isfield(cfg,'assets') && numel(cfg.assets) > 1
+                error('ConfigFactory:multiAssetUnsupported', '%s', msg79Multi_);
             end
 
             % ---- codeMode validation -------------------------------------
@@ -1587,7 +1649,7 @@ classdef ConfigFactory
                         hasL2 = any(strcmpi(sigNames,'L2'));
                         if ~hasL1 || ~hasL2
                             error('ConfigFactory:ionoFreeRequiresDualFreq', ...
-                                'codeMode=''ionosphereFree'' requires L1 and L2 signals. Enable cfg.signals.twoFrequency.enable=true.');
+                                'codeMode=''ionosphereFree'' requires L1 and L2 signals. Enable cfg.signals.enabledMask=[true true].');
                         end
                     case {'singleFrequency','dualFrequencyStacked'}
                         % OK
@@ -1597,13 +1659,12 @@ classdef ConfigFactory
                 end
             end
 
-            % ---- Task 4D/4E: carrier ekfFloat v1 restrictions -----------
-            % Runs AFTER twoFrequency apply so cfg.signals.enabled is final.
+            % ---- Carrier ekfFloat v1 restrictions -----------------------
+            % Runs AFTER Stage 79 canonical masks are finalized.
             if isfield(cfg,'measurements') && isfield(cfg.measurements,'carrierMode') && ...
                     strcmp(cfg.measurements.carrierMode,'ekfFloat')
 
-                % Task 4D: Stage 42 — L2 EKF rows supported via l2EkfRows.enable guard.
-                % Warn only when two-frequency signals are enabled but L2 EKF rows are not.
+                % L2 carrier EKF rows are selected by carrier.enabledByFrequency.
                 sigEnabled = {};
                 if isfield(cfg,'signals') && isfield(cfg.signals,'enabled')
                     sigEnabled = cfg.signals.enabled;
@@ -1614,10 +1675,9 @@ classdef ConfigFactory
                     isfield(cfg.measurements.carrier.l2EkfRows,'enable') && ...
                     cfg.measurements.carrier.l2EkfRows.enable;
                 if numel(sigEnabled) > 1 && ~l2EkfGuardOn
-                    warnMsg4D = ['ekfFloat carrier mode: two-frequency signals enabled but ' ...
-                                 'L2 carrier EKF rows are OFF (cfg.measurements.carrier.l2EkfRows.enable=false). ' ...
-                                 'Only L1 rows will be added. ' ...
-                                 'Enable the guard toggle for L1+L2 float EKF (Stage 42).'];
+                    warnMsg4D = ['ekfFloat carrier mode: multiple signals enabled but ' ...
+                                 'L2 carrier EKF rows are OFF by cfg.measurements.carrier.enabledByFrequency. ' ...
+                                 'Only enabled carrier-mask rows will be added.'];
                     cfg.validation.warnings{end+1} = warnMsg4D;
                     warning('ConfigFactory:carrierL2EkfGuardOff', '%s', warnMsg4D);
                 end
@@ -1887,6 +1947,27 @@ classdef ConfigFactory
             revgnss.TwoWayISLMeasurementBuilder.validateConfig(cfg);
             revgnss.ISLTimingModel.validateConfig(cfg);
             revgnss.TWSTFTDiagnosticBuilder.validateConfig(cfg);
+
+            nWarn79_ = 0;
+            if isfield(cfg,'validation') && isfield(cfg.validation,'warnings')
+                nWarn79_ = numel(cfg.validation.warnings);
+            end
+            cfg.validation.centralConfigAudit = struct( ...
+                'stage', '79', ...
+                'status', 'pass', ...
+                'signalConfigOwner', 'cfg.signals.names+cfg.signals.enabledMask', ...
+                'frequencyHardcodeAuditStatus', 'canonicalSignalDefinition', ...
+                'legacySignalAliasStatus', 'derivedFromCanonicalSignals', ...
+                'receiverGeometryOwner', 'revgnss.ReceiverGeometry.defaultLeverArms+ScenarioPresets', ...
+                'multiAssetTruncationGuard', 'hardErrorNoTruncation', ...
+                'clockConfigOwner', 'cfg.clocks.tower.product', ...
+                'slipConfigOwner', 'cfg.carrierSlip', ...
+                'ambiguityConfigOwner', 'cfg.estimator.diffAtt.ambiguityResolution', ...
+                'orbitConfigOwner', 'ScenarioPresets.twoBodyRk4+twoBody', ...
+                'nWarnings', nWarn79_, ...
+                'nErrors', 0, ...
+                'centralConfigWarnings', nWarn79_, ...
+                'centralConfigErrors', 0);
         end
 
         function tmpl = getClockTemplate_(templateName)

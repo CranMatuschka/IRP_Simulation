@@ -37,42 +37,42 @@ classdef ScenarioPresets
             %   unsupported. LAMBDA/MLAMBDA, calibrated phase-bias products, and
             %   PPP-grade claims are not implemented. Multi-space-asset is guarded.
 
-            cfg.scenario.name         = 'singleAssetCarrierAttitude';
-            cfg.scenario.nSpaceAssets = 1;
-            cfg.scenario.nReceivers   = 4;
-
-            % Non-collinear ±1 m cross pattern with z-offset (rank-3 geometry).
-            arms = [ 1.0  -1.0   0.0   0.0; ...
-                     0.0   0.0   1.0  -1.0; ...
-                     0.2   0.2  -0.2  -0.2 ];
-            cfg.asset.receiverLeverArms_body_m = arms;
-            cfg.asset.receiverLeverArm_body_m  = arms(:,1);
-
-            % Stage 78: guard against silent multi-asset truncation.
+            msg79_ = ['Multi-space-asset estimation is unsupported in oo_v1 active scenario. ' ...
+                'This stage intentionally does not truncate assets.'];
+            if isfield(cfg,'scenario') && isfield(cfg.scenario,'nSpaceAssets') && cfg.scenario.nSpaceAssets > 1
+                error('ScenarioPresets:multiAssetUnsupported', '%s', msg79_);
+            end
             if isfield(cfg,'assets') && numel(cfg.assets) > 1
-                policy78_ = 'error';
-                if isfield(cfg,'validation') && ...
-                        isfield(cfg.validation,'unsupportedFeaturePolicy')
-                    policy78_ = cfg.validation.unsupportedFeaturePolicy;
-                end
-                msg78_ = sprintf(['Multi-space-asset estimation is unsupported in ' ...
-                    'oo_v1 active scenario (%d assets found). Do not silently ' ...
-                    'truncate assets. Set cfg.scenario.nSpaceAssets=1 and ensure ' ...
-                    'cfg.assets has one entry.'], numel(cfg.assets));
-                if strcmp(policy78_, 'disableWithWarning')
-                    if ~isfield(cfg,'validation'); cfg.validation = struct(); end
-                    if ~isfield(cfg.validation,'warnings')
-                        cfg.validation.warnings = {};
-                    end
-                    cfg.validation.warnings{end+1} = msg78_;
-                    warning('ScenarioPresets:multiAssetTruncation', '%s', msg78_);
-                    cfg.assets = cfg.assets(1);
-                else
-                    error('ScenarioPresets:multiAssetTruncation', '%s', msg78_);
-                end
+                error('ScenarioPresets:multiAssetUnsupported', '%s', msg79_);
             elseif ~isfield(cfg,'assets')
                 cfg.assets = cfg.asset;
             end
+
+            nReq79_ = 4;
+            if isfield(cfg,'scenario') && isfield(cfg.scenario,'nReceivers') && cfg.scenario.nReceivers > 1
+                nReq79_ = cfg.scenario.nReceivers;
+            end
+            arms = [];
+            if isfield(cfg,'asset') && isfield(cfg.asset,'receiverLeverArms_body_m')
+                cand79_ = cfg.asset.receiverLeverArms_body_m;
+                if isnumeric(cand79_) && size(cand79_,1) == 3 && size(cand79_,2) > 1
+                    arms = cand79_;
+                end
+            end
+            if ~isempty(arms) && size(arms,2) ~= nReq79_
+                error('ScenarioPresets:receiverGeometryMismatch', ...
+                    'cfg.scenario.nReceivers=%d but receiverLeverArms_body_m has %d columns.', ...
+                    nReq79_, size(arms,2));
+            end
+            if isempty(arms)
+                arms = revgnss.ReceiverGeometry.defaultLeverArms(nReq79_);
+            end
+
+            cfg.scenario.name         = 'singleAssetCarrierAttitude';
+            cfg.scenario.nSpaceAssets = 1;
+            cfg.scenario.nReceivers   = size(arms,2);
+            cfg.asset.receiverLeverArms_body_m = arms;
+            cfg.asset.receiverLeverArm_body_m  = arms(:,1);
             cfg.assets(1).receiverLeverArms_body_m = arms;
             cfg.assets(1).receiverLeverArm_body_m  = arms(:,1);
 

@@ -195,7 +195,7 @@ classdef CarrierRowMetadataInventory
         function lims = limitations_(s)
             lims = {
                 'Per-row receiver/tower/signal IDs not available in current architecture.'
-                'L2 carrier EKF rows available via cfg.measurements.carrier.l2EkfRows.enable (Stage 42).'
+                'L2 carrier EKF rows are selected by cfg.measurements.carrier.enabledByFrequency after canonical signal-mask finalization.'
                 'Integer ambiguity fixing not implemented in v1.'
             };
             if ~isnan(s.ambiguityStateCount) && strcmp(s.ambiguityStateCountSource,'summary-estimate')

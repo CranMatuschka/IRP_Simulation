@@ -231,7 +231,8 @@ classdef LatexReportBuilder
 
             RL.addSectionHeader(fig, '1.1  Measurement Model and Observation Matrix', 0.97);
 
-            f1 = 1575.42e6; f2 = 1227.60e6;
+            f1 = revgnss.SignalDefinition.get('L1').frequency_Hz;
+            f2 = revgnss.SignalDefinition.get('L2').frequency_Hz;
             a  = f1^2 / (f1^2 - f2^2);
             b  = -f2^2 / (f1^2 - f2^2);
 
@@ -1414,7 +1415,8 @@ classdef LatexReportBuilder
 
             % Subsection: Measurement model
             fprintf(fid,'\\subsection{Pseudorange Measurement Model}\n');
-            f1 = 1575.42e6; f2 = 1227.60e6;
+            f1 = revgnss.SignalDefinition.get('L1').frequency_Hz;
+            f2 = revgnss.SignalDefinition.get('L2').frequency_Hz;
             a  = f1^2 / (f1^2 - f2^2);
             b2 = -f2^2 / (f1^2 - f2^2);
             fprintf(fid,'\\[\nP_f = \\rho + b_{rx} - b_{twr} + T + I_f + \\varepsilon_P, \\quad I_f \\geq 0 \\text{ (positive for code)}\n\\]\n');

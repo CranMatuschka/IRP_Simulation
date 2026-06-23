@@ -35,7 +35,7 @@ oo_v1_envAllToggles_ = strcmpi(getenv('OO_V1_ALL_TOGGLES'), 'true');
 if oo_v1_envValidate_; oo_v1_envAllToggles_ = true; end  % validate always uses all toggles
 oo_v1_envStage_      = str2double(getenv('OO_V1_VALIDATION_STAGE'));
 if isnan(oo_v1_envStage_); oo_v1_envStage_ = 0; end
-if oo_v1_envValidate_ && oo_v1_envStage_ == 0; oo_v1_envStage_ = 78; end
+if oo_v1_envValidate_ && oo_v1_envStage_ == 0; oo_v1_envStage_ = 79; end
 oo_v1_envCompile_    = strtrim(getenv('OO_V1_REPORT_COMPILE_TEX'));
 
 cfg = revgnss.ConfigFactory.defaultConfig();
@@ -503,7 +503,6 @@ if stageAllToggles || oo_v1_envAllToggles_
     cfg.diagnostics.carrierRowMetadataInventory.enable  = true;
     cfg.diagnostics.ambiguityReadiness.enable           = true;
     cfg.diagnostics.ambiguityStateMetadata.enable       = true;
-    cfg.measurements.carrier.l2EkfRows.enable                = true;
     cfg.diagnostics.l2CarrierArchitecture.enable             = true;
     cfg.diagnostics.ionosphereFreeCombination.enable         = true;
     cfg.diagnostics.ifBiasBudget.enable                      = true;
@@ -524,8 +523,8 @@ if stageAllToggles || oo_v1_envAllToggles_
     cfg.estimator.enforceCarrierArcConsistency.enable            = true;
     cfg.diagnostics.carrierArcConsistencyEnforcement.enable      = true;
     cfg.diagnostics.pluginRegistry.enable                        = true;
-    % Stage 58: enable J2 dynamics in all-toggle mode to exercise inertial prediction
-    cfg.estimator.dynamics.mode          = 'j2';
+    % Stage 79: active scenario dynamics are owned by ScenarioPresets
+    % (twoBodyRk4 truth + matched twoBody EKF); no temporary J2 override.
     cfg.diagnostics.ekfDynamics.enable  = true;
     cfg.validation.stageAllToggles         = true;
     if oo_v1_envAllToggles_
@@ -534,8 +533,6 @@ if stageAllToggles || oo_v1_envAllToggles_
             cfg.validation.validationStage = oo_v1_envStage_;
         end
     end
-    % Stage 67: ScenarioPresets.apply() (called below) overrides dynamics
-    % to 'twoBody' with matched twoBodyRk4 truth propagator. No override needed here.
 end
 if ~isempty(oo_v1_envCompile_) && ismember(oo_v1_envCompile_, {'require','auto','never'})
     cfg.report.compileTex = oo_v1_envCompile_;

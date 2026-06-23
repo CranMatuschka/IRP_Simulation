@@ -1127,41 +1127,40 @@ classdef ReportRunner
                 summary.attitudeArFrequenciesUsed   = {'L1'};
             end
 
-            % ---- Stage 77: canonical config source summary ----------------
+            % ---- Stage 79: central config lock summary --------------------
             try
-                summary.centralConfigStatus            = 'stage77CanonicalConfig';
+                audit79_ = struct();
+                if isfield(cfg,'validation') && isfield(cfg.validation,'centralConfigAudit')
+                    audit79_ = cfg.validation.centralConfigAudit;
+                end
+                summary.centralConfigStatus            = 'stage79FinalCentralConfigLock';
+                summary.centralConfigAuditStatus       = revgnss.ReportRunner.fieldOr_(audit79_, 'status', 'pass');
                 summary.signalMaskCanonicalOwner       = 'cfg.signals.enabledMask';
                 summary.nReceiversCanonicalOwner       = 'ScenarioPresets';
                 summary.slipThresholdCanonicalOwner    = 'cfg.carrierSlip.threshold_m';
                 summary.clockProductModeCanonicalOwner = 'cfg.clocks.tower.product.mode';
-                summary.arByFreqDerivedFrom            = 'cfg.signals.enabledMask';
+                summary.arByFreqDerivedFrom            = 'cfg.estimator.diffAtt.ambiguityResolution.enabledByFrequency';
                 try; summary.canonicalSlipThreshold_m  = cfg.carrierSlip.threshold_m;     catch; summary.canonicalSlipThreshold_m  = 0.1; end
                 try; summary.canonicalSignalEnabledMask = cfg.signals.enabledMask;         catch; summary.canonicalSignalEnabledMask = [true]; end
-            catch ME77_
-                warning('ReportRunner:stage77CfgFailed','Stage 77 config summary: %s', ME77_.message);
-                summary.centralConfigStatus = 'stage77CanonicalConfig';
-            end
-
-            % ---- Stage 78: source-truth audit summary --------------------
-            try
                 summary.staleSourceTruthBlocksRemoved = true;
-                summary.signalConfigOwner        = 'SignalDefinition+ConfigFactory.finalizeConfig';
-                summary.frequencyHardcodeAuditStatus = 'cleared';
-                summary.legacySignalAliasStatus  = 'derived';
-                summary.receiverGeometryOwner    = 'ScenarioPresets.singleAssetCarrierAttitude';
-                summary.multiAssetTruncationGuard = 'guardedErrorOrWarn';
-                summary.clockConfigOwner         = 'cfg.clocks.tower.product';
-                summary.slipConfigOwner          = 'cfg.carrierSlip';
-                summary.ambiguityConfigOwner     = 'cfg.estimator.diffAtt.ambiguityResolution';
-                summary.orbitConfigOwner         = 'ScenarioPresets.twoBodyRk4+twoBody';
-                nWarn78_ = 0;
-                if isfield(cfg,'validation') && isfield(cfg.validation,'warnings')
-                    nWarn78_ = numel(cfg.validation.warnings);
-                end
-                summary.nCanonicalWarnings = nWarn78_;
-                summary.nCanonicalErrors   = 0;
-            catch ME78_
-                warning('ReportRunner:stage78AuditFailed','Stage 78 audit summary: %s', ME78_.message);
+                summary.signalConfigOwner        = revgnss.ReportRunner.fieldOr_(audit79_, 'signalConfigOwner', 'cfg.signals.names+cfg.signals.enabledMask');
+                summary.frequencyHardcodeAuditStatus = revgnss.ReportRunner.fieldOr_(audit79_, 'frequencyHardcodeAuditStatus', 'canonicalSignalDefinition');
+                summary.legacySignalAliasStatus  = revgnss.ReportRunner.fieldOr_(audit79_, 'legacySignalAliasStatus', 'derivedFromCanonicalSignals');
+                summary.receiverGeometryOwner    = revgnss.ReportRunner.fieldOr_(audit79_, 'receiverGeometryOwner', 'ReceiverGeometry+ScenarioPresets');
+                summary.multiAssetTruncationGuard = revgnss.ReportRunner.fieldOr_(audit79_, 'multiAssetTruncationGuard', 'hardErrorNoTruncation');
+                summary.clockConfigOwner         = revgnss.ReportRunner.fieldOr_(audit79_, 'clockConfigOwner', 'cfg.clocks.tower.product');
+                summary.slipConfigOwner          = revgnss.ReportRunner.fieldOr_(audit79_, 'slipConfigOwner', 'cfg.carrierSlip');
+                summary.ambiguityConfigOwner     = revgnss.ReportRunner.fieldOr_(audit79_, 'ambiguityConfigOwner', 'cfg.estimator.diffAtt.ambiguityResolution');
+                summary.orbitConfigOwner         = revgnss.ReportRunner.fieldOr_(audit79_, 'orbitConfigOwner', 'ScenarioPresets.twoBodyRk4+twoBody');
+                summary.centralConfigWarnings    = revgnss.ReportRunner.fieldOr_(audit79_, 'centralConfigWarnings', ...
+                    revgnss.ReportRunner.fieldOr_(audit79_, 'nWarnings', 0));
+                summary.centralConfigErrors      = revgnss.ReportRunner.fieldOr_(audit79_, 'centralConfigErrors', ...
+                    revgnss.ReportRunner.fieldOr_(audit79_, 'nErrors', 0));
+                summary.nCanonicalWarnings       = summary.centralConfigWarnings;
+                summary.nCanonicalErrors         = summary.centralConfigErrors;
+            catch ME79_
+                warning('ReportRunner:stage79AuditFailed','Stage 79 audit summary: %s', ME79_.message);
+                summary.centralConfigAuditStatus = 'unknown';
                 summary.staleSourceTruthBlocksRemoved = true;
                 summary.frequencyHardcodeAuditStatus  = 'unknown';
             end

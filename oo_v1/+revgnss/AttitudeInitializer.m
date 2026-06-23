@@ -275,7 +275,7 @@ classdef AttitudeInitializer
         end
 
         function lambda = lambdaL1_(cfg)
-            lambda = 299792458 / 1575.42e6;
+            lambda = revgnss.SignalDefinition.get('L1').wavelength_m;
             if isfield(cfg,'signals') && isfield(cfg.signals,'L1') && isfield(cfg.signals.L1,'lambda_m')
                 lambda = cfg.signals.L1.lambda_m;
             elseif isfield(cfg,'measurements') && isfield(cfg.measurements,'carrierPhase') && ...

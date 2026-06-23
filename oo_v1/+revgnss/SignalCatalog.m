@@ -1,15 +1,17 @@
 classdef SignalCatalog
-    % SignalCatalog  Stage 42 carrier signal catalog for EKF ambiguity state sizing.
+    % SignalCatalog  Carrier signal catalog for EKF ambiguity state sizing.
     %
     % Thin facade over SignalDefinition. Provides:
     %   carrierSignalsFromConfig(cfg)  — ordered struct array of active carrier EKF signals
-    %   nCarrierSignals(cfg)           — number of active carrier EKF signals (1 or 2)
-    %   signalId(si)                   — 'L1' or 'L2' for signal index si (1-based)
+    %   nCarrierSignals(cfg)           — number of active carrier EKF signals
+    %   signalId(si)                   — signal name for signal index si (1-based)
     %   signalFromIndex(si, cfg)       — signal struct for EKF carrier index si
     %
-    % Only L1 and L2 are in scope for v1. L5 is not supported.
-    % Ionosphere-free carrier combination and integer ambiguity resolution
-    % are not implemented in v1.
+    % cfg.signals.names plus cfg.signals.enabledMask is the canonical signal
+    % list. cfg.measurements.carrier.enabledByFrequency selects which enabled
+    % signals enter carrier EKF rows. L1/L2 raw rows are supported in v1;
+    % ionosphere-free carrier rows and global integer ambiguity resolution are
+    % explicitly unsupported.
     %
     % Usage:
     %   sigs = revgnss.SignalCatalog.carrierSignalsFromConfig(cfg);  % [1x1] or [1x2]
@@ -20,19 +22,27 @@ classdef SignalCatalog
 
         function sigs = carrierSignalsFromConfig(cfg)
             % carrierSignalsFromConfig  Return ordered struct array of active carrier EKF signals.
-            % Always includes L1. Includes L2 if cfg.measurements.carrier.l2EkfRows.enable=true.
-            sigs = revgnss.SignalDefinition.get('L1');
-            if revgnss.SignalCatalog.l2EkfEnabled_(cfg)
-                sigs(2) = revgnss.SignalDefinition.get('L2');
+            if nargin < 1 || isempty(cfg)
+                sigs = revgnss.SignalDefinition.get('L1');
+                return
+            end
+
+            [names, activeMask] = revgnss.SignalCatalog.carrierMask_(cfg);
+            idx = find(activeMask);
+            if isempty(idx)
+                sigs = repmat(revgnss.SignalDefinition.get('L1'), 1, 0);
+                return
+            end
+
+            sigs = repmat(revgnss.SignalDefinition.get(names{idx(1)}), 1, numel(idx));
+            for k = 2:numel(idx)
+                sigs(k) = revgnss.SignalDefinition.get(names{idx(k)});
             end
         end
 
         function n = nCarrierSignals(cfg)
-            % nCarrierSignals  Number of active carrier EKF signals (1 or 2).
-            n = 1;
-            if revgnss.SignalCatalog.l2EkfEnabled_(cfg)
-                n = 2;
-            end
+            % nCarrierSignals  Number of active carrier EKF signals.
+            n = numel(revgnss.SignalCatalog.carrierSignalsFromConfig(cfg));
         end
 
         function id = signalId(si)
@@ -50,7 +60,9 @@ classdef SignalCatalog
             if si >= 1 && si <= numel(sigs)
                 sig = sigs(si);
             else
-                sig = revgnss.SignalDefinition.get('L1');
+                error('SignalCatalog:invalidSignalIndex', ...
+                    'Carrier signal index %d is invalid for %d active carrier signal(s).', ...
+                    si, numel(sigs));
             end
         end
 
@@ -58,12 +70,35 @@ classdef SignalCatalog
 
     methods (Static, Access = private)
 
-        function ok = l2EkfEnabled_(cfg)
-            ok = isfield(cfg,'measurements') && ...
-                 isfield(cfg.measurements,'carrier') && ...
-                 isfield(cfg.measurements.carrier,'l2EkfRows') && ...
-                 isfield(cfg.measurements.carrier.l2EkfRows,'enable') && ...
-                 cfg.measurements.carrier.l2EkfRows.enable;
+        function [names, activeMask] = carrierMask_(cfg)
+            names = {'L1'};
+            if isfield(cfg,'signals') && isfield(cfg.signals,'names')
+                names = cfg.signals.names;
+                if ischar(names); names = {names}; end
+            end
+            n = numel(names);
+
+            signalMask = true(1,n);
+            if isfield(cfg,'signals') && isfield(cfg.signals,'enabledMask')
+                signalMask = logical(cfg.signals.enabledMask(:)).';
+            end
+            if numel(signalMask) ~= n
+                error('SignalCatalog:signalMaskSize', ...
+                    'cfg.signals.enabledMask length (%d) must match cfg.signals.names length (%d).', ...
+                    numel(signalMask), n);
+            end
+
+            carrierMask = signalMask;
+            if isfield(cfg,'measurements') && isfield(cfg.measurements,'carrier') && ...
+                    isfield(cfg.measurements.carrier,'enabledByFrequency')
+                carrierMask = logical(cfg.measurements.carrier.enabledByFrequency(:)).';
+            end
+            if numel(carrierMask) ~= n
+                error('SignalCatalog:carrierMaskSize', ...
+                    'cfg.measurements.carrier.enabledByFrequency length (%d) must match cfg.signals.names length (%d).', ...
+                    numel(carrierMask), n);
+            end
+            activeMask = signalMask & carrierMask;
         end
 
     end

@@ -12,6 +12,28 @@ classdef ReceiverGeometry
 
     methods (Static)
 
+        function arms = defaultLeverArms(nReceivers)
+            % defaultLeverArms  Deterministic non-collinear body-frame receiver layout.
+            if nargin < 1 || isempty(nReceivers); nReceivers = 1; end
+            if nReceivers < 1 || nReceivers ~= round(nReceivers)
+                error('ReceiverGeometry:invalidReceiverCount', ...
+                    'nReceivers must be a positive integer.');
+            end
+            base = [ 1.0  -1.0   0.0   0.0; ...
+                     0.0   0.0   1.0  -1.0; ...
+                     0.2   0.2  -0.2  -0.2 ];
+            if nReceivers <= size(base,2)
+                arms = base(:,1:nReceivers);
+                return
+            end
+            arms = zeros(3,nReceivers);
+            arms(:,1:size(base,2)) = base;
+            theta = linspace(0, 2*pi, nReceivers + 1);
+            for k = (size(base,2)+1):nReceivers
+                arms(:,k) = [cos(theta(k)); sin(theta(k)); 0.15*(-1)^k];
+            end
+        end
+
         function g = fromConfig(cfg)
             % fromConfig  Parse single-asset receiver geometry from cfg.
             %
