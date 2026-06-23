@@ -637,6 +637,14 @@ classdef ReverseGNSSEKF < handle
 
             % --- Position / velocity process noise ----------------------
             sa  = obj.sigma_accel_mps2;
+            try
+                if obj.cfg.estimator.processNoise.modelMismatch.enable
+                    sm_ = obj.cfg.estimator.processNoise.modelMismatch.sigma_mps2;
+                    if isnumeric(sm_) && isscalar(sm_) && sm_ > 0
+                        sa = sqrt(sa^2 + sm_^2);
+                    end
+                end
+            catch; end
             q_r  = sa^2 * dt_s^3 / 3;
             q_v  = sa^2 * dt_s;
             q_rv = sa^2 * dt_s^2 / 2;

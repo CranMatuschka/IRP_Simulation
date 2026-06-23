@@ -849,6 +849,29 @@ classdef ReportRunner
                     summary.processNoiseMismatchSigma_mps2 = cfg.estimator.processNoise.modelMismatch.sigma_mps2;
                 end
             catch; end
+
+            % ---- Stage 82: J2 diagnostics and source-truth summary --------
+            summary.representativeJ2Accel_mps2 = 0;
+            try; summary.representativeJ2Accel_mps2 = cfg.diagnostics.dynamicsMismatch.representativeJ2Accel_mps2; catch; end
+            summary.j2DefaultPolicy = 'twoBodyDefaultJ2Available';
+            try; summary.j2DefaultPolicy = cfg.diagnostics.dynamicsMismatch.j2DefaultPolicy; catch; end
+            summary.j2ActiveByDefault = false;
+            try; summary.j2ActiveByDefault = cfg.diagnostics.dynamicsMismatch.j2ActiveByDefault; catch; end
+            summary.j2FallbackReason = 'none';
+            try; summary.j2FallbackReason = cfg.diagnostics.dynamicsMismatch.j2FallbackReason; catch; end
+            summary.dynamicsMismatchValidationStatus = summary.dynamicsMismatchStatus;
+            summary.dynamicsProcessNoiseConsistency = 'unknown';
+            try; summary.dynamicsProcessNoiseConsistency = cfg.diagnostics.dynamicsMismatch.dynamicsProcessNoiseConsistency; catch; end
+            summary.sigmaAccelMismatch_mps2 = 0;
+            try; summary.sigmaAccelMismatch_mps2 = cfg.diagnostics.dynamicsMismatch.sigmaAccelMismatch_mps2; catch; end
+            summary.sigmaAccelBase_mps2 = 0;
+            try; summary.sigmaAccelBase_mps2 = cfg.diagnostics.dynamicsMismatch.sigmaAccelBase_mps2; catch; end
+            summary.sourceTruthStatus = 'unknown';
+            try; summary.sourceTruthStatus = cfg.diagnostics.sourceTruthStatus; catch; end
+            summary.reportStatusFreshnessStage = 0;
+            try; summary.reportStatusFreshnessStage = cfg.diagnostics.reportStatusFreshnessStage; catch; end
+            summary.eopStatus = 'notImplementedNoIERS';
+            try; summary.eopStatus = cfg.diagnostics.eopStatus; catch; end
             summary.meanLightTime_s = 0;
             summary.maxLightTime_s = 0;
             try

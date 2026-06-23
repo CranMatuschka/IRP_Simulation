@@ -29,11 +29,11 @@ classdef MainScriptValidationGate
             state = struct();
 
             % Resolve stage, seed, count from env vars.
-            stg = 81;
+            stg = 82;
             v = str2double(getenv('OO_V1_VALIDATION_STAGE'));
             if ~isnan(v) && v > 0; stg = round(v); end
 
-            seed = 81;
+            seed = 82;
             v = str2double(getenv('OO_V1_RANDOM_TEST_SEED'));
             if ~isnan(v) && isfinite(v); seed = round(v); end
 
@@ -197,8 +197,8 @@ classdef MainScriptValidationGate
 
         function [pdfOk, ptOk, texOk, warns] = vfyPdf_(pdfPath, sha, nP, nT, stg)
             % vfyPdf_  Verify PDF existence, size, and scientific content.
-            % Stage 37+: PDF must have scientific sections and must NOT have a
-            % "Stage N Validation Status" chapter heading.
+            % Stage 37+: PDF must have existing scientific summary fields and model-coverage
+            % table entries present; must NOT have a "Stage N Validation Status" chapter heading.
             % SHA, test count, and NOT RUN are checked in JSON summary, not PDF.
             pdfOk = false; ptOk = false; texOk = false; warns = {};
             if isempty(pdfPath) || ~exist(pdfPath, 'file')
@@ -297,6 +297,7 @@ classdef MainScriptValidationGate
                 case 79; t = 'Final Central Configuration Lock';
                 case 80; t = 'Realistic Propagation and One-Way Timing Consistency';
                 case 81; t = 'Single-Asset One-Way Scientific Closure and Model Coverage';
+                case 82; t = 'Source-Truth Integrity and J2 Dynamics Mismatch Validation';
                 otherwise
                     try; t = revgnss.ReportStatus.current().stageTitle; catch; t = sprintf('Stage %d', stg); end
             end

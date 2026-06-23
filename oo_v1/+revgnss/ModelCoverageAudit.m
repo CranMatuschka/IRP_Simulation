@@ -64,7 +64,7 @@ classdef ModelCoverageAudit
             try; dynMode = cfg.estimator.dynamics.mode; catch; end
             c{end+1} = revgnss.ModelCoverageAudit.cat_( ...
                 'propagation','implementedSynthetic', ...
-                sprintf('truth=%s; EKF predictor=%s; J2 available via j2Rk4 mode', propMode, dynMode));
+                sprintf('truth=%s (Stage 82 default: j2Rk4); EKF predictor=%s; j2DefaultPolicy reported in cfg.diagnostics.dynamicsMismatch', propMode, dynMode));
 
             % 3. frameRotation
             earthRot = 'constantOmegaV1';

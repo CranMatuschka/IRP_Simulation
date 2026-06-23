@@ -12,7 +12,7 @@
 % T-P13g: codeMode=ionosphereFree with only one signal fails clearly.
 % T-P13h: codeMode=ionosphereFree + txCodeBias.useInEKF=true fails (no per-signal delays).
 % T-P13i: Carrier IF EKF request fails or stays diagnostic-only.
-% T-P13j: Report includes "Signal and Ionosphere Architecture" section.
+% T-P13j: Report includes ionosphere sign-convention documentation (Troposphere and ZWD Architecture subsection).
 
 thisDir = fileparts(mfilename('fullpath'));
 addpath(fullfile(thisDir, '..'));
@@ -256,9 +256,11 @@ else
 end
 
 % ----------------------------------------------------------------
-% T-P13j: Report includes "Signal and Ionosphere Architecture"
+% T-P13j: Report includes ionosphere sign-convention documentation
+% (Stage 65+: 'Signal and Ionosphere Architecture' section was merged into
+% Troposphere and ZWD Architecture; check for Iono sign convention instead.)
 % ----------------------------------------------------------------
-fprintf('  T-P13j: ClockExactReportBuilder .tex includes ''Signal and Ionosphere Architecture'' ...\n');
+fprintf('  T-P13j: ClockExactReportBuilder .tex includes iono sign-convention documentation ...\n');
 
 cfg_j = revgnss.ConfigFactory.defaultConfig();
 cfg_j.report.style          = 'latex';
@@ -279,12 +281,12 @@ assert(isfield(res_j,'texPath') && isfile(res_j.texPath), ...
     'T-P13j FAILED: ClockExactReportBuilder did not produce a .tex file');
 
 src_j = fileread(res_j.texPath);
-assert(contains(src_j, 'Signal and Ionosphere Architecture'), ...
-    'T-P13j FAILED: .tex missing ''Signal and Ionosphere Architecture'' section');
+assert(contains(src_j, 'Iono sign convention'), ...
+    'T-P13j FAILED: .tex missing iono sign-convention documentation (Troposphere and ZWD Architecture)');
 
 try; delete(res_j.texPath); catch; end
 
-fprintf('    PASS (.tex contains ''Signal and Ionosphere Architecture'')\n');
+fprintf('    PASS (.tex contains iono sign-convention documentation)\n');
 
 % ----------------------------------------------------------------
 fprintf('=== test_stage13_dual_frequency_ionosphere: ALL PASS ===\n');

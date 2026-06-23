@@ -31,7 +31,8 @@ classdef ScenarioPresets
             % Configures one estimated space asset with a 4-receiver non-collinear
             % cross-pattern geometry, carrier attitude partials, EKF float ambiguities,
             % arc-separated ambiguities, and enforced carrier arc consistency.
-            % Stage 67+: uses twoBodyRk4 truth propagator with matched twoBody EKF dynamics.
+            % Stage 67/80: twoBodyRk4 truth propagator, matched twoBody EKF.
+            % Stage 82: j2Rk4 truth propagator (J2-perturbed RK4) + twoBody EKF (mismatch mode).
             % Stage 76: raw dual-frequency (L1+L2) baseline attitude AR is supported
             %   in controlled synthetic form. Carrier-IF integer fixing is explicitly
             %   unsupported. LAMBDA/MLAMBDA, calibrated phase-bias products, and
@@ -124,9 +125,11 @@ classdef ScenarioPresets
                 cfg.diagnostics.attitudeEvidence.enable = true;
             end
 
-            % Stage 80: truth propagation is centrally owned by cfg.orbit.truth.mode.
-            % Default active run remains matched twoBodyRk4/twoBody for validation
-            % stability; j2Rk4 is available by config without changing downstream code.
+            % Stage 82: j2Rk4 truth + twoBody EKF is the preferred default.
+            % At GEO equatorial (~42164 km), J2 perturbation ~8.3e-6 m/s2 (radial only,
+            % z-component zero for equatorial orbit). sigma_accel=0.01 >> 0.1*J2 so
+            % the EKF absorbs the mismatch; process noise auto-scaled in finalizeConfig.
+            % Stage 80: cfg.orbit.truth.mode is centrally owned; j2Rk4 was available.
             % Orbit is GEO (35786 km, equatorial). GEO in ECEF moves very slowly
             % (orbital period ≈ Earth rotation period) so twoBody is nearly equivalent
             % to static ECEF but physically correct.
@@ -138,7 +141,7 @@ classdef ScenarioPresets
             cfg.orbit.epochGMST_rad      = 0;
             if ~isfield(cfg.orbit,'truth') || ~isfield(cfg.orbit.truth,'mode') || ...
                     strcmp(cfg.orbit.truth.mode,'stationaryEcef')
-                cfg.orbit.truth.mode = 'twoBodyRk4';
+                cfg.orbit.truth.mode = 'j2Rk4';
             end
             cfg.orbit.mode               = cfg.orbit.truth.mode;
             cfg.estimator.dynamics.mode  = 'twoBody';
@@ -193,7 +196,7 @@ classdef ScenarioPresets
                 lines{end+1} = 'Code partials        : disabled';
                 lines{end+1} = 'Doppler partials     : disabled';
                 lines{end+1} = 'ISL / TWSTFT         : disabled';
-                lines{end+1} = 'EKF dynamics         : twoBody (matched twoBodyRk4 truth propagator; GEO equatorial)';
+                lines{end+1} = 'EKF dynamics         : twoBody (j2Rk4 truth / twoBody EKF mismatch; J2 accel ~8.3e-6 m/s2; sigma_accel=0.01 consistent; GEO equatorial)';
                 lines{end+1} = 'Integer fixing        : false';
                 lines{end+1} = 'LAMBDA/MLAMBDA        : false';
                 lines{end+1} = 'False-fix-risk control: false';

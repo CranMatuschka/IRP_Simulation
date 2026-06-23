@@ -2094,6 +2094,92 @@ classdef ConfigFactory
                 cfg.validation.statistics.nis.mode = 'partialCovarianceAware';
             end
 
+
+            % --- Stage 82: J2 dynamics mismatch validation fields ---
+            % All canonical Stage 82 diagnostics are owned here in finalizeConfig.
+
+            % Compute representative J2 accel at initial GEO orbit state (equatorial, z=0).
+            cfg82_j2Norm_ = 0;
+            try
+                if isfield(cfg.orbit, 'altitudeMean_m') && cfg.orbit.useOrbitPropagator
+                    Re82_ = revgnss.Constants.EARTH_RADIUS_M;
+                    r82_  = cfg.orbit.altitudeMean_m + Re82_;
+                    a82_  = revgnss.OrbitDynamics.j2Accel_mps2([r82_; 0; 0]);
+                    cfg82_j2Norm_ = norm(a82_);
+                end
+            catch; end
+            cfg.diagnostics.dynamicsMismatch.representativeJ2Accel_mps2 = cfg82_j2Norm_;
+
+            % Classify dynamics mismatch and set j2 default policy.
+            truthMode82_ = 'unknown';
+            try; truthMode82_ = cfg.orbit.truth.mode; catch; end
+            ekfMode82_   = 'unknown';
+            try; ekfMode82_   = cfg.estimator.dynamics.mode; catch; end
+            isJ2Truth82_      = any(strcmpi({'j2Rk4','j2'}, truthMode82_));
+            isTwoBodyEkf82_   = any(strcmpi({'twoBody','two_body','twobody'}, ekfMode82_));
+            isJ2EkfMode82_    = any(strcmpi({'j2','twobodyj2'}, ekfMode82_));
+
+            if isJ2Truth82_ && isTwoBodyEkf82_
+                cfg.diagnostics.dynamicsMismatch.j2DefaultPolicy  = 'j2TruthTwoBodyEkfMismatch';
+                cfg.diagnostics.dynamicsMismatch.j2ActiveByDefault = true;
+                cfg.diagnostics.dynamicsMismatch.mismatchLabel    = ...
+                    sprintf('%s truth / %s EKF', truthMode82_, ekfMode82_);
+                if ~cfg.estimator.processNoise.modelMismatch.enable
+                    cfg.estimator.processNoise.modelMismatch.enable = true;
+                end
+                autoSigma82_ = max(1e-8, 0.25 * cfg82_j2Norm_);
+                if cfg.estimator.processNoise.modelMismatch.sigma_mps2 <= 1e-6
+                    cfg.estimator.processNoise.modelMismatch.sigma_mps2 = autoSigma82_;
+                end
+            elseif isJ2Truth82_ && isJ2EkfMode82_
+                cfg.diagnostics.dynamicsMismatch.j2DefaultPolicy  = 'j2TruthJ2EkfMatched';
+                cfg.diagnostics.dynamicsMismatch.j2ActiveByDefault = true;
+                cfg.diagnostics.dynamicsMismatch.mismatchLabel    = 'j2 matched';
+            else
+                cfg.diagnostics.dynamicsMismatch.j2DefaultPolicy  = 'twoBodyDefaultJ2Available';
+                cfg.diagnostics.dynamicsMismatch.j2ActiveByDefault = false;
+                cfg.diagnostics.dynamicsMismatch.mismatchLabel    = 'matchedOrStationary';
+            end
+
+            % Process-noise consistency audit: sigma_accel must be >= 0.1 * J2 accel.
+            cfg82_sigBase_ = 0.01;
+            try; cfg82_sigBase_ = cfg.estimator.sigma_accel_mps2; catch; end
+            if cfg82_sigBase_ <= 0; cfg82_sigBase_ = 0.01; end
+            cfg.diagnostics.dynamicsMismatch.sigmaAccelBase_mps2    = cfg82_sigBase_;
+            cfg.diagnostics.dynamicsMismatch.sigmaAccelMismatch_mps2 = ...
+                cfg.estimator.processNoise.modelMismatch.sigma_mps2;
+            if cfg82_j2Norm_ > 0 && cfg82_sigBase_ < 0.1 * cfg82_j2Norm_
+                warning('ConfigFactory:processNoiseTooSmall', ...
+                    'sigma_accel_mps2 (%.2e) < 0.1*J2 accel (%.2e); increase sigma_accel_mps2.', ...
+                    cfg82_sigBase_, cfg82_j2Norm_);
+                cfg.diagnostics.dynamicsMismatch.dynamicsProcessNoiseConsistency = 'marginalBelowThreshold';
+            else
+                cfg.diagnostics.dynamicsMismatch.dynamicsProcessNoiseConsistency = 'consistent';
+            end
+
+            % Source truth, report freshness, EOP status.
+            if isJ2Truth82_
+                cfg.diagnostics.sourceTruthStatus = 'j2Rk4DefaultOrConfigured';
+            else
+                cfg.diagnostics.sourceTruthStatus = 'twoBodyRk4DefaultOrConfigured';
+            end
+            cfg.diagnostics.reportStatusFreshnessStage = 82;
+            cfg.diagnostics.eopStatus = 'notImplementedNoIERS';
+            try
+                if strcmpi(cfg.products.eop.mode, 'externalFile')
+                    cfg.diagnostics.eopStatus = 'externalFile';
+                end
+            catch; end
+
+            % Earth-rotation model guard.
+            try
+                erm82_ = cfg.frames.earthRotationModel;
+                if ~strcmp(erm82_, 'constantOmegaV1')
+                    warning('ConfigFactory:earthRotationModelNonCanonical', ...
+                        'cfg.frames.earthRotationModel = ''%s'' is non-canonical; expected ''constantOmegaV1''.', erm82_);
+                end
+            catch; end
+
             % Run model coverage audit and guard on missingUnsafe
             cfg.validation.modelCoverageAudit = revgnss.ModelCoverageAudit.run(cfg);
             if cfg.validation.modelCoverageAudit.nModelCategoriesMissingUnsafe > 0
