@@ -16,6 +16,62 @@
 > validation run and must not be treated as source truth.
 > Do not hard-code a commit SHA in this README — it becomes stale on the next commit.
 
+### Stage 81 validation procedure
+
+Stage 81 adds a complete scientific closure audit for the active single-space-asset, one-way
+reverse-GNSS simulation. A new `ModelCoverageAudit` class classifies all 22 major model
+categories and blocks finalizeConfig if any category is `missingUnsafe`. The real-world claim
+gate (`cfg.scientificProfile.allowRealWorldClaim=false` by default) explicitly documents which
+external product parsers are not yet implemented. All new config fields are owned by
+`ConfigFactory.finalizeConfig()`.
+
+**Scientific closure additions (Stage 81):**
+
+*Model coverage audit* — `revgnss.ModelCoverageAudit.run(cfg)` classifies 22 categories:
+topology, propagation, frameRotation, lightTime, sagnac, relativity, receiverClock,
+towerClockProduct, troposphere, ionosphere, antennaPCO, antennaPCV, hardwareCodeBias,
+hardwarePhaseBias, interFrequencyBias, multipath, measurementNoise, carrierSlip,
+ambiguityResolution, covariance, validationStatistics, externalProducts.
+`nModelCategoriesMissingUnsafe=0` is required.
+
+*Real-world claim gate* — `cfg.scientificProfile.allowRealWorldClaim=false` (default; cannot
+be set to true without implementing real external product parsers).
+
+*External product interface contracts* — `cfg.products.sp3/clk/rinex/antex/ionex/eop/bias.mode`
+are declared. All default to `notImplemented` or `syntheticTruthHistory`. `externalFile` mode
+is blocked by a ConfigFactory guard.
+
+*Bias mode canonical fields* — `cfg.biases.code/phase/interFrequency.mode` declared.
+
+*Troposphere and ionosphere closure* — higher-order, Klobuchar, IONEX remain `notImplemented`
+and not claimed. `carrierIfIntegerFixing=false` explicitly confirmed.
+
+*Validation statistics* — Monte Carlo, NEES remain disabled. NIS mode = `partialCovarianceAware`.
+
+All Stage 80 propagation/timing changes, Stage 72-79 clock/slip/covariance/ambiguity/central-config
+behaviour, and the compact report structure with Numerical Summary as final section are preserved.
+
+NOT ISL. NOT TWSTFT. NOT two-way. NOT multi-asset.
+No LAMBDA/MLAMBDA. No carrier-IF integer fixing. No real external product parsers.
+
+`run_oo_reverse_gnss_report.m` is the **single active validation entry point**.
+
+```matlab
+cd oo_v1
+setenv('OO_V1_VALIDATE_REPORT', 'true')
+setenv('OO_V1_ALL_TOGGLES',     'true')
+setenv('OO_V1_VALIDATION_STAGE','81')
+run_oo_reverse_gnss_report
+```
+
+This will:
+1. Select 4 tests (seed 81) from the active-scope pool (inactive TWSTFT/ISL/two-way/multi-asset tests excluded), stop if any fail
+2. Run the main 3600 s report with all-toggles, dual-freq L1+L2 AR, full scientific audit
+3. Verify the PDF: scientific sections present, model coverage table included, Numerical Summary is final section
+4. Write `output/latest_validation_summary.json` and `.txt`
+
+Full suite is **NOT RUN**. Validation selects 2-5 tests only (default seed 81, default count 4).
+
 ### Stage 80 validation procedure
 
 Stage 80 fixes the Stage 79 DiffAtt/AR schema blocker and adds configurable propagation and
@@ -92,12 +148,11 @@ setenv('OO_V1_ALL_TOGGLES', '');
 
 ## Validation status and missing stages
 
-**Current stage:** Stage 80 — Realistic Propagation and One-Way Timing Consistency
+**Current stage:** Stage 81 — Single-Asset One-Way Scientific Closure and Model Coverage
 
-Stage 80 fixes the DiffAtt schema blocker and adds centrally configured propagation, frame,
-one-way light-time, and Sagnac-consistency diagnostics while preserving the current one-way
-single-space-asset validation setup. See the Stage 80 validation procedure above for the full
-description.
+Stage 81 adds scientific closure audit for the single-asset one-way simulation. All 22 model
+categories are audited; none may be missingUnsafe. Real-world claim gate blocks false claims.
+See the Stage 81 validation procedure above for the full description.
 
 **Runtime metadata** (runtime artifacts, never committed):
 - `output/latest_validation_summary.json` — machine-readable (SHA, test results, PDF status)

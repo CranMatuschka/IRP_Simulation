@@ -12,8 +12,8 @@ classdef ReportStatus
     methods (Static)
 
         function s = current()
-            s.stage      = '80';
-            s.stageTitle = 'Realistic Propagation and One-Way Timing Consistency';
+            s.stage      = '81';
+            s.stageTitle = 'Single-Asset One-Way Scientific Closure and Model Coverage';
             s.validationMode = 'targeted-random-smoke';
             s.fullSuiteRun   = false;
 
@@ -74,7 +74,7 @@ classdef ReportStatus
                 s.validationNote = '';
             end
 
-            s.missingScientificStages = revgnss.StageHistory.missingScientificItems(80);
+            s.missingScientificStages = revgnss.StageHistory.missingScientificItems(81);
             s.implementedStage24Items = revgnss.StageHistory.implementedItems();
         end
 

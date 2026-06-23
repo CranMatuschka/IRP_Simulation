@@ -878,6 +878,52 @@ classdef ReportRunner
                 'test_stage23_isl_link_timing.m', ...
                 'test_stage24_twstft_diagnostics.m' };
 
+            % Stage 81: scientific profile and model coverage audit fields.
+            summary.scientificProfileMode  = 'singleAssetOneWaySyntheticClosedV1';
+            try; summary.scientificProfileMode = cfg.scientificProfile.mode; catch; end
+            summary.claimLevel = 'controlledSynthetic';
+            try; summary.claimLevel = cfg.scientificProfile.claimLevel; catch; end
+            summary.allowRealWorldClaim = false;
+            try; summary.allowRealWorldClaim = cfg.scientificProfile.allowRealWorldClaim; catch; end
+            summary.modelCoverageStatus = 'notRun';
+            summary.nModelCategoriesMissingUnsafe = -1;
+            summary.nModelCategoriesImplementedSynthetic = -1;
+            summary.nModelCategoriesGuardedNotImplemented = -1;
+            summary.nModelCategoriesDisabledByConfig = -1;
+            summary.realWorldClaimGateStatus = 'blockedWithReasons';
+            summary.externalProductsStatus = 'notImplemented';
+            summary.carrierIfIntegerFixing = false;
+            try; summary.carrierIfIntegerFixing = cfg.effects.ionosphere.carrierIfIntegerFixing; catch; end
+            summary.biasCodeMode = 'syntheticConfiguredZero';
+            try; summary.biasCodeMode = cfg.biases.code.mode; catch; end
+            summary.biasPhaseMode = 'syntheticKnownZero';
+            try; summary.biasPhaseMode = cfg.biases.phase.mode; catch; end
+            summary.biasInterFrequencyMode = 'syntheticConfiguredZero';
+            try; summary.biasInterFrequencyMode = cfg.biases.interFrequency.mode; catch; end
+            summary.troposphereClaimStatus = 'syntheticSimpleMappedV1';
+            try; summary.troposphereClaimStatus = cfg.effects.troposphere.claimStatus; catch; end
+            summary.ionosphereClaimStatus = 'syntheticSimpleMappedV1';
+            try; summary.ionosphereClaimStatus = cfg.effects.ionosphere.claimStatus; catch; end
+            summary.validationStatisticsMcEnable = false;
+            try; summary.validationStatisticsMcEnable = cfg.validation.statistics.monteCarlo.enable; catch; end
+            summary.validationStatisticsNeesEnable = false;
+            try; summary.validationStatisticsNeesEnable = cfg.validation.statistics.nees.enable; catch; end
+            summary.validationStatisticsNisMode = 'partialCovarianceAware';
+            try; summary.validationStatisticsNisMode = cfg.validation.statistics.nis.mode; catch; end
+            if isfield(cfg,'validation') && isfield(cfg.validation,'modelCoverageAudit')
+                mca = cfg.validation.modelCoverageAudit;
+                summary.modelCoverageStatus                    = mca.modelCoverageStatus;
+                summary.nModelCategoriesMissingUnsafe          = mca.nModelCategoriesMissingUnsafe;
+                summary.nModelCategoriesImplementedSynthetic   = mca.nModelCategoriesImplementedSynthetic;
+                summary.nModelCategoriesGuardedNotImplemented  = mca.nModelCategoriesGuardedNotImplemented;
+                summary.nModelCategoriesDisabledByConfig       = mca.nModelCategoriesDisabledByConfig;
+                summary.realWorldClaimGateStatus               = mca.realWorldClaimGateStatus;
+            end
+            % externalProducts status from product contract
+            sp3Mode = 'notImplemented';
+            try; sp3Mode = cfg.products.sp3.mode; catch; end
+            summary.externalProductsStatus = sp3Mode;
+
             % Stage 68: atmosphere / antenna / bias enable status.
             summary.stage68TropTruthEn = false;
             try; summary.stage68TropTruthEn = cfg.errors.troposphere.truth.enable; catch; end

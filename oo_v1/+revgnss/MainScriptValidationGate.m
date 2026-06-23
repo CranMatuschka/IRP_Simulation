@@ -29,11 +29,11 @@ classdef MainScriptValidationGate
             state = struct();
 
             % Resolve stage, seed, count from env vars.
-            stg = 80;
+            stg = 81;
             v = str2double(getenv('OO_V1_VALIDATION_STAGE'));
             if ~isnan(v) && v > 0; stg = round(v); end
 
-            seed = 80;
+            seed = 81;
             v = str2double(getenv('OO_V1_RANDOM_TEST_SEED'));
             if ~isnan(v) && isfinite(v); seed = round(v); end
 
@@ -296,6 +296,7 @@ classdef MainScriptValidationGate
                 case 78; t = 'Central Configuration Completion and Source-Truth Cleanup';
                 case 79; t = 'Final Central Configuration Lock';
                 case 80; t = 'Realistic Propagation and One-Way Timing Consistency';
+                case 81; t = 'Single-Asset One-Way Scientific Closure and Model Coverage';
                 otherwise
                     try; t = revgnss.ReportStatus.current().stageTitle; catch; t = sprintf('Stage %d', stg); end
             end

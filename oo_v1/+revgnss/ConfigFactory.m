@@ -1994,6 +1994,116 @@ classdef ConfigFactory
                 'nErrors', 0, ...
                 'centralConfigWarnings', nWarn79_, ...
                 'centralConfigErrors', 0);
+
+            % --- Stage 81: Scientific profile, product contracts, and model coverage ---
+            % All canonical Stage 81 config fields are owned here in finalizeConfig.
+
+            % Scientific profile
+            if ~isfield(cfg, 'scientificProfile') || ~isfield(cfg.scientificProfile, 'mode')
+                cfg.scientificProfile.mode = 'singleAssetOneWaySyntheticClosedV1';
+            end
+            if ~isfield(cfg.scientificProfile, 'claimLevel')
+                cfg.scientificProfile.claimLevel = 'controlledSynthetic';
+            end
+            if ~isfield(cfg.scientificProfile, 'allowRealWorldClaim')
+                cfg.scientificProfile.allowRealWorldClaim = false;
+            end
+            if cfg.scientificProfile.allowRealWorldClaim
+                error('ConfigFactory:realWorldClaimBlocked', ...
+                    ['cfg.scientificProfile.allowRealWorldClaim=true is blocked in v1. ' ...
+                     'Real external product parsers (SP3/CLK/RINEX/ANTEX/IONEX) are not implemented. ' ...
+                     'Set allowRealWorldClaim=false (default).']);
+            end
+
+            % External product interface contracts
+            prodNames = {'sp3','clk','rinex','antex','ionex','eop','bias'};
+            defMode   = {'notImplemented','syntheticTruthHistory','notImplemented', ...
+                         'notImplemented','notImplemented','constantEarthRotationV1', ...
+                         'syntheticKnownZero'};
+            for pi_ = 1:numel(prodNames)
+                pn_ = prodNames{pi_};
+                if ~isfield(cfg,'products') || ~isfield(cfg.products,pn_) || ...
+                        ~isfield(cfg.products.(pn_),'mode')
+                    cfg.products.(pn_).mode = defMode{pi_};
+                end
+                if strcmp(cfg.products.(pn_).mode, 'externalFile')
+                    error('ConfigFactory:externalFileNotImplemented', ...
+                        ['cfg.products.%s.mode=''externalFile'' is not implemented. ' ...
+                         'Only notImplemented / syntheticTruthHistory modes are valid in v1.'], pn_);
+                end
+            end
+
+            % Bias mode canonical fields
+            if ~isfield(cfg,'biases') || ~isfield(cfg.biases,'code') || ~isfield(cfg.biases.code,'mode')
+                cfg.biases.code.mode = 'syntheticConfiguredZero';
+            end
+            if ~isfield(cfg.biases,'phase') || ~isfield(cfg.biases.phase,'mode')
+                cfg.biases.phase.mode = 'syntheticKnownZero';
+            end
+            if ~isfield(cfg.biases,'interFrequency') || ~isfield(cfg.biases.interFrequency,'mode')
+                cfg.biases.interFrequency.mode = 'syntheticConfiguredZero';
+            end
+
+            % Troposphere closure fields
+            if ~isfield(cfg,'effects') || ~isfield(cfg.effects,'troposphere')
+                cfg.effects.troposphere.claimStatus = 'syntheticSimpleMappedV1';
+            end
+            if ~isfield(cfg.effects.troposphere,'claimStatus')
+                cfg.effects.troposphere.claimStatus = 'syntheticSimpleMappedV1';
+            end
+            if ~isfield(cfg.effects.troposphere,'gradientStatus')
+                cfg.effects.troposphere.gradientStatus = 'disabled';
+            end
+            if ~isfield(cfg.effects.troposphere,'vmdStatus')
+                cfg.effects.troposphere.vmdStatus = 'notImplemented';
+            end
+
+            % Ionosphere closure fields
+            if ~isfield(cfg.effects,'ionosphere')
+                cfg.effects.ionosphere.claimStatus = 'syntheticSimpleMappedV1';
+            end
+            if ~isfield(cfg.effects.ionosphere,'claimStatus')
+                cfg.effects.ionosphere.claimStatus = 'syntheticSimpleMappedV1';
+            end
+            if ~isfield(cfg.effects.ionosphere,'higherOrderStatus')
+                cfg.effects.ionosphere.higherOrderStatus = 'disabled';
+            end
+            if ~isfield(cfg.effects.ionosphere,'klobucharStatus')
+                cfg.effects.ionosphere.klobucharStatus = 'notImplemented';
+            end
+            if ~isfield(cfg.effects.ionosphere,'ionexStatus')
+                cfg.effects.ionosphere.ionexStatus = 'notImplemented';
+            end
+            if ~isfield(cfg.effects.ionosphere,'carrierIfIntegerFixing')
+                cfg.effects.ionosphere.carrierIfIntegerFixing = false;
+            end
+
+            % Validation statistics canonical fields
+            if ~isfield(cfg,'validation') || ~isfield(cfg.validation,'statistics')
+                cfg.validation.statistics.monteCarlo.enable = false;
+                cfg.validation.statistics.nees.enable       = false;
+                cfg.validation.statistics.nis.mode          = 'partialCovarianceAware';
+            end
+            if ~isfield(cfg.validation.statistics,'monteCarlo')
+                cfg.validation.statistics.monteCarlo.enable = false;
+            end
+            if ~isfield(cfg.validation.statistics,'nees')
+                cfg.validation.statistics.nees.enable = false;
+            end
+            if ~isfield(cfg.validation.statistics,'nis')
+                cfg.validation.statistics.nis.mode = 'partialCovarianceAware';
+            end
+
+            % Run model coverage audit and guard on missingUnsafe
+            cfg.validation.modelCoverageAudit = revgnss.ModelCoverageAudit.run(cfg);
+            if cfg.validation.modelCoverageAudit.nModelCategoriesMissingUnsafe > 0
+                error('ConfigFactory:modelCoverageMissingUnsafe', ...
+                    ['Model coverage audit: %d category/ies are missingUnsafe. ' ...
+                     'Every category must be implementedSynthetic, disabledByConfig, or guardedNotImplemented. ' ...
+                     'Missing: %s'], ...
+                    cfg.validation.modelCoverageAudit.nModelCategoriesMissingUnsafe, ...
+                    strjoin(cfg.validation.modelCoverageAudit.modelCoverageBlockingItems, ', '));
+            end
         end
 
         function tmpl = getClockTemplate_(templateName)
