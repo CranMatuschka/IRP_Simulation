@@ -35,7 +35,7 @@ oo_v1_envAllToggles_ = strcmpi(getenv('OO_V1_ALL_TOGGLES'), 'true');
 if oo_v1_envValidate_; oo_v1_envAllToggles_ = true; end  % validate always uses all toggles
 oo_v1_envStage_      = str2double(getenv('OO_V1_VALIDATION_STAGE'));
 if isnan(oo_v1_envStage_); oo_v1_envStage_ = 0; end
-if oo_v1_envValidate_ && oo_v1_envStage_ == 0; oo_v1_envStage_ = 76; end
+if oo_v1_envValidate_ && oo_v1_envStage_ == 0; oo_v1_envStage_ = 77; end
 oo_v1_envCompile_    = strtrim(getenv('OO_V1_REPORT_COMPILE_TEX'));
 
 cfg = revgnss.ConfigFactory.defaultConfig();
@@ -92,9 +92,9 @@ cfg.estimator.integerAmbiguity.fixVariance_cycles2        = 1e-4;
 cfg.estimator.integerAmbiguity.resetOnSlip                = true;
 
 % --- Receivers / attitude ---------------------------------------
-% nReceivers == 1  ->  attitude estimation OFF, zero lever arms
-% nReceivers  > 1  ->  attitude estimation ON,  auto cross-pattern lever arms
-cfg.scenario.nReceivers = 3;
+% Stage 77: ScenarioPresets.singleAssetCarrierAttitude is the single owner of nReceivers.
+% It sets nReceivers=4 (non-collinear cross pattern). Do not set it here.
+% (nReceivers=1 → attitude OFF; nReceivers>1 → attitude ON, auto lever arms)
 
 % --- Single-asset one-way scenario (Stage 66/67) -------------------------
 % One estimated spacecraft. Ground towers transmit reference signals upward
@@ -106,9 +106,12 @@ cfg.scenario.orbitClass   = 'GEO';    % 'GEO' | 'MEO' | 'LEO'
 %                                      % Stage 67: twoBodyRk4 truth propagator (see ScenarioPresets)
 
 % --- Frequency --------------------------------------------------
-% false  ->  L1 only
-% true   ->  L1 + L2
-cfg.signals.twoFrequency.enable = true;
+% Stage 77 canonical: cfg.signals.enabledMask is the single frequency control.
+% [true, true]  -> L1 + L2 (dual-frequency)
+% [true, false] -> L1 only (single-frequency)
+% finalizeConfig derives twoFrequency.enable, code/carrier.enabledByFrequency,
+% and diffAtt.ambiguityResolution.enabledByFrequency from this mask.
+cfg.signals.enabledMask = [true, true];
 
 % --- Code ionosphere-free EKF rows (Stage 45) ------------------
 % Guarded L1/L2 IF combination in EKF. Requires twoFrequency.enable=true.
@@ -290,7 +293,8 @@ cfg.effects.correlatedNoise.enable = false;
 %   gauge text corrected; covariance handling labelled diagonal-only.
 cfg.clock.receiver.deterministic       = false;
 cfg.estimator.estimateTowerClocks      = false;
-cfg.errors.towerClockCorrection.mode   = 'truthHistoryProductNoisy';
+% Stage 77: cfg.clocks.tower.product.mode is canonical (set below).
+% cfg.errors.towerClockCorrection.mode is derived from it in finalizeConfig.
 
 % Stage 71: product model parameters.
 % Stage 72: sigmaBias reduced 0.05 -> 0.01 m to prevent false carrier slips
@@ -329,7 +333,7 @@ cfg.estimation.ambiguity.initialSigma_m = 100;
 % arc handling robust to product update intervals regardless of clock sigma.
 % Real cycle slips (B_true discontinuity) still produce large slipMetric.
 cfg.measurements.carrier.slipDetection.enable                = true;
-cfg.measurements.carrier.slipDetection.threshold_m           = 0.1;
+% Stage 77: threshold_m derived from canonical cfg.carrierSlip.threshold_m in finalizeConfig.
 cfg.measurements.carrier.slipDetection.minEpochsBeforeDetect = 3;
 cfg.measurements.carrier.slipDetection.resetSigma_m          = 100;
 cfg.measurements.carrier.slipDetection.action                = 'resetAndSkip';
@@ -441,10 +445,10 @@ cfg.estimator.diffAtt.ambiguityResolution.phaseBiasStatus              = 'synthe
 cfg.estimator.diffAtt.ambiguityResolution.falseFixClassification       = 'screenedNotFormal';
 
 % --- Stage 76: dual-frequency baseline attitude AR and dimension contract ------
-% When twoFrequency.enable=true (L1+L2), dual-frequency raw integer-pair AR is
+% When enabledMask=[true,true] (L1+L2), dual-frequency raw integer-pair AR is
 % attempted. Carrier-IF integer fixing remains explicitly unsupported and false.
 % Wide-lane used as consistency screening gate only (not full WL/NL fixing).
-cfg.estimator.diffAtt.ambiguityResolution.enabledByFrequency                = [true true];  % L1+L2 AR
+% Stage 77: enabledByFrequency derived from cfg.signals.enabledMask in finalizeConfig.
 cfg.estimator.diffAtt.ambiguityResolution.maxWideLaneFloatDistance_cycles   = 0.5;
 cfg.estimator.diffAtt.ambiguityResolution.differentialIonosphereInBaselineAr = 'neglectedShortBaselineV1';
 % Dimension contract: nSpaceAssets > 1 is unsupported and guarded in ConfigFactory.

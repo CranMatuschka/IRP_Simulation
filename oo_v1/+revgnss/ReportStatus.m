@@ -12,8 +12,8 @@ classdef ReportStatus
     methods (Static)
 
         function s = current()
-            s.stage      = '76';
-            s.stageTitle = 'Dimension-General Configuration and Dual-Frequency Baseline Attitude AR';
+            s.stage      = '77';
+            s.stageTitle = 'Central Configuration Source of Truth';
             s.validationMode = 'targeted-random-smoke';
             s.fullSuiteRun   = false;
 

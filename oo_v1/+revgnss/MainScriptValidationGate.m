@@ -29,11 +29,11 @@ classdef MainScriptValidationGate
             state = struct();
 
             % Resolve stage, seed, count from env vars.
-            stg = 76;
+            stg = 77;
             v = str2double(getenv('OO_V1_VALIDATION_STAGE'));
             if ~isnan(v) && v > 0; stg = round(v); end
 
-            seed = 76;
+            seed = 77;
             v = str2double(getenv('OO_V1_RANDOM_TEST_SEED'));
             if ~isnan(v) && isfinite(v); seed = round(v); end
 
@@ -248,6 +248,7 @@ classdef MainScriptValidationGate
                 case 74; t = 'Covariance and Shared-Error Consistency';
                 case 75; t = 'Baseline Attitude Ambiguity Classification and False-Fix Hardening';
                 case 76; t = 'Dimension-General Configuration and Dual-Frequency Baseline Attitude AR';
+                case 77; t = 'Central Configuration Source of Truth';
                 otherwise
                     try; t = revgnss.ReportStatus.current().stageTitle; catch; t = sprintf('Stage %d', stg); end
             end

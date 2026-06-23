@@ -1127,6 +1127,21 @@ classdef ReportRunner
                 summary.attitudeArFrequenciesUsed   = {'L1'};
             end
 
+            % ---- Stage 77: canonical config source summary ----------------
+            try
+                summary.centralConfigStatus            = 'stage77CanonicalConfig';
+                summary.signalMaskCanonicalOwner       = 'cfg.signals.enabledMask';
+                summary.nReceiversCanonicalOwner       = 'ScenarioPresets';
+                summary.slipThresholdCanonicalOwner    = 'cfg.carrierSlip.threshold_m';
+                summary.clockProductModeCanonicalOwner = 'cfg.clocks.tower.product.mode';
+                summary.arByFreqDerivedFrom            = 'cfg.signals.enabledMask';
+                try; summary.canonicalSlipThreshold_m  = cfg.carrierSlip.threshold_m;     catch; summary.canonicalSlipThreshold_m  = 0.1; end
+                try; summary.canonicalSignalEnabledMask = cfg.signals.enabledMask;         catch; summary.canonicalSignalEnabledMask = [true]; end
+            catch ME77_
+                warning('ReportRunner:stage77CfgFailed','Stage 77 config summary: %s', ME77_.message);
+                summary.centralConfigStatus = 'stage77CanonicalConfig';
+            end
+
             % ---- Determine report layout before PDF generation -----------
             reportLayout = 'default';
             if isfield(cfg,'report') && isfield(cfg.report,'layout')

@@ -1094,6 +1094,17 @@ classdef ConfigFactory
                     isfield(cfg.clock.receiver,'deterministic')
                 cfg.asset.clock.deterministic = cfg.clock.receiver.deterministic;
             end
+            % Stage 77: canonical clock product mode → legacy alias sync
+            % cfg.clocks.tower.product.mode is canonical; derive errors.towerClockCorrection.mode
+            % before the legacy mapping below picks it up.
+            if isfield(cfg,'clocks') && isfield(cfg.clocks,'tower') && ...
+                    isfield(cfg.clocks.tower,'product') && isfield(cfg.clocks.tower.product,'mode')
+                if ~isfield(cfg,'errors'); cfg.errors = struct(); end
+                if ~isfield(cfg.errors,'towerClockCorrection')
+                    cfg.errors.towerClockCorrection = struct();
+                end
+                cfg.errors.towerClockCorrection.mode = cfg.clocks.tower.product.mode;
+            end
             % cfg.errors.towerClockCorrection.mode → cfg.estimator.towerClockMode (legacy)
             if isfield(cfg,'errors') && isfield(cfg.errors,'towerClockCorrection') && ...
                     isfield(cfg.errors.towerClockCorrection,'mode')
@@ -1140,6 +1151,17 @@ classdef ConfigFactory
                         cfg.estimator.towerClockMode = 'none';
                     otherwise
                         cfg.estimator.towerClockMode = newMode;
+                end
+            end
+
+            % Stage 77: canonical slip threshold sync
+            % cfg.carrierSlip.threshold_m is canonical; derive slipDetection.threshold_m.
+            % CarrierTrackManager reads cfg.measurements.carrier.slipDetection.threshold_m at runtime.
+            if isfield(cfg,'carrierSlip') && isfield(cfg.carrierSlip,'threshold_m')
+                if isfield(cfg,'measurements') && isfield(cfg.measurements,'carrier') && ...
+                        isfield(cfg.measurements.carrier,'slipDetection')
+                    cfg.measurements.carrier.slipDetection.threshold_m = ...
+                        cfg.carrierSlip.threshold_m;
                 end
             end
 
@@ -1437,6 +1459,20 @@ classdef ConfigFactory
                 end
             end
 
+            % Stage 77: canonical enabledMask input path (highest priority)
+            % cfg.signals.enabledMask with 2 elements is the new canonical signal source.
+            % Wins over twoFrequency.enable alias; maps mask to cfg.signals.enabled.
+            if isfield(cfg,'signals') && isfield(cfg.signals,'enabledMask') && ...
+                    numel(cfg.signals.enabledMask) >= 2
+                allSigNames77_ = {'L1','L2'};
+                mask77_ = logical(cfg.signals.enabledMask(1:2));
+                cfg.signals.enabled = allSigNames77_(mask77_);
+                if ~isfield(cfg.signals,'twoFrequency')
+                    cfg.signals.twoFrequency = struct();
+                end
+                cfg.signals.twoFrequency.enable = all(mask77_);
+            end
+
             % ---- twoFrequency early apply (must run before codeMode validation) ----
             if isfield(cfg,'signals') && isfield(cfg.signals,'twoFrequency') && ...
                     isfield(cfg.signals.twoFrequency,'enable')
@@ -1488,6 +1524,20 @@ classdef ConfigFactory
                 if ~isfield(cfg.measurements.carrier,'enabledByFrequency') || ...
                         numel(cfg.measurements.carrier.enabledByFrequency) ~= nSig
                     cfg.measurements.carrier.enabledByFrequency = true(1,nSig);
+                end
+            end
+
+            % Stage 77: derive AR enabledByFrequency from signals.enabledMask
+            % Ensures one mask change propagates to AR without editing downstream config.
+            if isfield(cfg,'estimator') && isfield(cfg.estimator,'diffAtt') && ...
+                    isfield(cfg.estimator.diffAtt,'ambiguityResolution') && ...
+                    isfield(cfg,'signals') && isfield(cfg.signals,'enabledMask')
+                arCfg77_ = cfg.estimator.diffAtt.ambiguityResolution;
+                nSig77_  = numel(cfg.signals.enabledMask);
+                if ~isfield(arCfg77_,'enabledByFrequency') || ...
+                        numel(arCfg77_.enabledByFrequency) ~= nSig77_
+                    cfg.estimator.diffAtt.ambiguityResolution.enabledByFrequency = ...
+                        logical(cfg.signals.enabledMask);
                 end
             end
 

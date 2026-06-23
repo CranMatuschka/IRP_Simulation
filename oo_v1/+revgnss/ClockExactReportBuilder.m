@@ -1642,6 +1642,11 @@ classdef ClockExactReportBuilder
             fprintf(fid, 'Phase-bias status & \\texttt{%s}\\\\\n', strrep(phaseBias75_,'_','\_'));
             fprintf(fid, 'Carrier-IF integer fixing & %s (explicitly unsupported in v1)\\\\\n', CE.yesNo_(carrIfFix76_,'true','false'));
             fprintf(fid, 'Differential iono in baseline AR & \\texttt{%s}\\\\\n', strrep(dIono76_,'_','\_'));
+            % Stage 77: canonical config source row
+            sigMaskCfg77_ = CE.safeField_(summary,'canonicalSignalEnabledMask',[true]);
+            slipThr77_    = CE.safeField_(summary,'canonicalSlipThreshold_m',0.1);
+            fprintf(fid, 'Config source (Stage~77) & signal mask: %s; slip thr: %.2f\\,m (canonical owners in finalizeConfig)\\\\\n', ...
+                mat2str(logical(sigMaskCfg77_)), slipThr77_);
             fprintf(fid, '\\bottomrule\n\\end{tabular}\n\n\\vspace{6pt}\n');
 
             % ---- 5. Clocks ---
