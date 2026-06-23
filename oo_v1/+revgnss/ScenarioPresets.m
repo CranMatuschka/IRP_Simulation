@@ -31,10 +31,11 @@ classdef ScenarioPresets
             % Configures one estimated space asset with a 4-receiver non-collinear
             % cross-pattern geometry, carrier attitude partials, EKF float ambiguities,
             % arc-separated ambiguities, and enforced carrier arc consistency.
-            % Uses constantVelocity EKF dynamics for self-consistency with the
-            % default static-ECEF GEO truth (no truth orbit propagator exists).
-            % No integer fixing, LAMBDA/MLAMBDA, calibrated phase-bias products,
-            % PPP-grade claims, or multi-space-asset estimation.
+            % Stage 67+: uses twoBodyRk4 truth propagator with matched twoBody EKF dynamics.
+            % Stage 76: raw dual-frequency (L1+L2) baseline attitude AR is supported
+            %   in controlled synthetic form. Carrier-IF integer fixing is explicitly
+            %   unsupported. LAMBDA/MLAMBDA, calibrated phase-bias products, and
+            %   PPP-grade claims are not implemented. Multi-space-asset is guarded.
 
             cfg.scenario.name         = 'singleAssetCarrierAttitude';
             cfg.scenario.nSpaceAssets = 1;
@@ -47,9 +48,28 @@ classdef ScenarioPresets
             cfg.asset.receiverLeverArms_body_m = arms;
             cfg.asset.receiverLeverArm_body_m  = arms(:,1);
 
-            % Strip to single estimated asset; preserve fields.
+            % Stage 78: guard against silent multi-asset truncation.
             if isfield(cfg,'assets') && numel(cfg.assets) > 1
-                cfg.assets = cfg.assets(1);
+                policy78_ = 'error';
+                if isfield(cfg,'validation') && ...
+                        isfield(cfg.validation,'unsupportedFeaturePolicy')
+                    policy78_ = cfg.validation.unsupportedFeaturePolicy;
+                end
+                msg78_ = sprintf(['Multi-space-asset estimation is unsupported in ' ...
+                    'oo_v1 active scenario (%d assets found). Do not silently ' ...
+                    'truncate assets. Set cfg.scenario.nSpaceAssets=1 and ensure ' ...
+                    'cfg.assets has one entry.'], numel(cfg.assets));
+                if strcmp(policy78_, 'disableWithWarning')
+                    if ~isfield(cfg,'validation'); cfg.validation = struct(); end
+                    if ~isfield(cfg.validation,'warnings')
+                        cfg.validation.warnings = {};
+                    end
+                    cfg.validation.warnings{end+1} = msg78_;
+                    warning('ScenarioPresets:multiAssetTruncation', '%s', msg78_);
+                    cfg.assets = cfg.assets(1);
+                else
+                    error('ScenarioPresets:multiAssetTruncation', '%s', msg78_);
+                end
             elseif ~isfield(cfg,'assets')
                 cfg.assets = cfg.asset;
             end

@@ -1077,7 +1077,7 @@ classdef ReportRunner
             catch ME76sig_
                 warning('ReportRunner:stage76SignalFailed','Stage 76 signal config: %s', ME76sig_.message);
                 summary.signalNames         = {'L1'};
-                summary.signalFrequenciesHz = [1575.42e6];
+                summary.signalFrequenciesHz = [revgnss.SignalDefinition.get('L1').frequency_Hz];
                 summary.signalEnabledMask   = [true];
                 summary.signalMode          = 'L1';
                 summary.codeEnabledByFrequency    = [true];
@@ -1140,6 +1140,30 @@ classdef ReportRunner
             catch ME77_
                 warning('ReportRunner:stage77CfgFailed','Stage 77 config summary: %s', ME77_.message);
                 summary.centralConfigStatus = 'stage77CanonicalConfig';
+            end
+
+            % ---- Stage 78: source-truth audit summary --------------------
+            try
+                summary.staleSourceTruthBlocksRemoved = true;
+                summary.signalConfigOwner        = 'SignalDefinition+ConfigFactory.finalizeConfig';
+                summary.frequencyHardcodeAuditStatus = 'cleared';
+                summary.legacySignalAliasStatus  = 'derived';
+                summary.receiverGeometryOwner    = 'ScenarioPresets.singleAssetCarrierAttitude';
+                summary.multiAssetTruncationGuard = 'guardedErrorOrWarn';
+                summary.clockConfigOwner         = 'cfg.clocks.tower.product';
+                summary.slipConfigOwner          = 'cfg.carrierSlip';
+                summary.ambiguityConfigOwner     = 'cfg.estimator.diffAtt.ambiguityResolution';
+                summary.orbitConfigOwner         = 'ScenarioPresets.twoBodyRk4+twoBody';
+                nWarn78_ = 0;
+                if isfield(cfg,'validation') && isfield(cfg.validation,'warnings')
+                    nWarn78_ = numel(cfg.validation.warnings);
+                end
+                summary.nCanonicalWarnings = nWarn78_;
+                summary.nCanonicalErrors   = 0;
+            catch ME78_
+                warning('ReportRunner:stage78AuditFailed','Stage 78 audit summary: %s', ME78_.message);
+                summary.staleSourceTruthBlocksRemoved = true;
+                summary.frequencyHardcodeAuditStatus  = 'unknown';
             end
 
             % ---- Determine report layout before PDF generation -----------

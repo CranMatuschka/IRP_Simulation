@@ -214,10 +214,13 @@ classdef CodeMeasurementBuilder
             signals = revgnss.SignalUtils.getEnabledSignals(cfg);
             N_sig   = numel(signals);
 
-            f_L1 = 1575.42e6;
-            if isfield(cfg,'signals') && isfield(cfg.signals,'L1') && ...
-                    isfield(cfg.signals.L1,'frequency_Hz')
-                f_L1 = cfg.signals.L1.frequency_Hz;
+            % Stage 78: use canonical cfg.signals.frequencyHz (set by finalizeConfig)
+            % or SignalDefinition; no hardcoded frequency fallback constant.
+            if isfield(cfg,'signals') && isfield(cfg.signals,'frequencyHz') && ...
+                    numel(cfg.signals.frequencyHz) >= 1
+                f_L1 = cfg.signals.frequencyHz(1);
+            else
+                f_L1 = revgnss.SignalDefinition.get('L1').frequency_Hz;
             end
 
             if N_sig > 1

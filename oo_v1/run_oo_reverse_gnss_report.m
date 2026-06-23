@@ -35,7 +35,7 @@ oo_v1_envAllToggles_ = strcmpi(getenv('OO_V1_ALL_TOGGLES'), 'true');
 if oo_v1_envValidate_; oo_v1_envAllToggles_ = true; end  % validate always uses all toggles
 oo_v1_envStage_      = str2double(getenv('OO_V1_VALIDATION_STAGE'));
 if isnan(oo_v1_envStage_); oo_v1_envStage_ = 0; end
-if oo_v1_envValidate_ && oo_v1_envStage_ == 0; oo_v1_envStage_ = 77; end
+if oo_v1_envValidate_ && oo_v1_envStage_ == 0; oo_v1_envStage_ = 78; end
 oo_v1_envCompile_    = strtrim(getenv('OO_V1_REPORT_COMPILE_TEX'));
 
 cfg = revgnss.ConfigFactory.defaultConfig();
@@ -114,7 +114,7 @@ cfg.scenario.orbitClass   = 'GEO';    % 'GEO' | 'MEO' | 'LEO'
 cfg.signals.enabledMask = [true, true];
 
 % --- Code ionosphere-free EKF rows (Stage 45) ------------------
-% Guarded L1/L2 IF combination in EKF. Requires twoFrequency.enable=true.
+% Guarded L1/L2 IF combination in EKF. Requires L1+L2 (cfg.signals.enabledMask=[true,true]).
 % enable=false (default): keep separate L1+L2 rows in EKF.
 % enable=true + useInEkf=true: replace L1+L2 with IF rows in EKF.
 % Carrier IF rows, integer fixing, and calibrated DCB are NOT implemented.
@@ -130,7 +130,7 @@ cfg.diagnostics.codeIonoFreeConsistency.enable = true;
 
 % --- Carrier IF float EKF rows (Stage 47) ----------------------
 % Guarded L1/L2 carrier IF combination (float ambiguity, non-integer).
-% Requires twoFrequency.enable=true and carrierMode='ekfFloat'.
+% Requires L1+L2 (cfg.signals.enabledMask=[true,true]) and carrierMode='ekfFloat'.
 % enable=false (default): keep separate L1+L2 carrier rows in EKF.
 % enable=true + useInEkf=true: replace L1+L2 carrier with IF rows.
 % B_IF = alpha*B_L1 + beta*B_L2 — NOT an integer; no fixing in v1.

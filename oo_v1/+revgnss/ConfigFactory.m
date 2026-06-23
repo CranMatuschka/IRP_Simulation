@@ -21,21 +21,24 @@ classdef ConfigFactory
     %                            for the matched-error intent.
     %
     % -----------------------------------------------------------------------
-    % SUPPORTED OBSERVABLES (Stage 7A)
+    % SUPPORTED OBSERVABLES (Stage 7A, updated Stage 78)
     %   Code pseudorange (single-frequency or IF L1/L2 combination)
     %   Simplified Doppler
-    %   Raw L1 float carrier EKF (no L2 carrier, no IF carrier, no integer fixing)
+    %   Raw L1/L2 float carrier EKF; raw dual-frequency baseline attitude AR
+    %     (Stage 76 adds L2 EKF attitude rows and joint L1+L2 integer-pair search;
+    %      carrier-IF integer fixing is explicitly unsupported; LAMBDA/MLAMBDA unsupported)
     %   ZWD per-tower EKF state
     %   Tower-clock product structs (explicit or truth-history)
     %   PCV: none / toy (elevation only) / table (elevation-only, no azimuth)
     %   Ionosphere mapping: simpleSecant (1/sin) or thinShell
     %   Thin-shell mapping: M(e)=1/sqrt(1-(Re*cos(e)/(Re+hI))^2); NOT Klobuchar
     %
-    % NOT SUPPORTED (Stage 7A)
-    %   L2 carrier EKF | carrier IF | integer ambiguity resolution
+    % NOT SUPPORTED (updated Stage 78)
+    %   Carrier-IF integer fixing | LAMBDA/MLAMBDA | formal ILS false-fix-risk control
     %   Azimuth-dependent PCV | ANTEX parser | IONEX | SP3/CLK | RINEX
     %   VMF3 / GPT3 / ERA5 | Klobuchar ionosphere model
     %   PPP-grade or mm-level accuracy claims
+    %   Multi-space-asset estimation (guarded; nSpaceAssets > 1 errors)
     % -----------------------------------------------------------------------
     %
     % Clock templates available (see clockTemplates sub-struct):
@@ -1494,25 +1497,31 @@ classdef ConfigFactory
                 end
             end
 
-            % ---- Stage 76: centralize signal names/frequencies/masks --------
-            % Also handles backward-compat: if cfg.signals.enabled is a cell
-            % list, derive the boolean mask and Hz arrays from SignalDefinition.
+            % ---- Stage 76/78: centralize signal names/frequencies/masks -------
+            % Stage 78: error on unknown signal — no silent L1 fallback.
+            % Also populates cfg.signals.wavelength_m and legacy per-signal alias fields.
             if isfield(cfg,'signals') && isfield(cfg.signals,'enabled')
                 sigList = cfg.signals.enabled;
                 if ischar(sigList); sigList = {sigList}; end
                 nSig = numel(sigList);
                 freqHz = zeros(1,nSig);
+                waveM  = zeros(1,nSig);
                 for si76_ = 1:nSig
-                    try
-                        sd76_ = revgnss.SignalDefinition.get(sigList{si76_});
-                        freqHz(si76_) = sd76_.frequency_Hz;
-                    catch
-                        freqHz(si76_) = 1575.42e6;
-                    end
+                    % SignalDefinition.get errors on unknown signal — no catch fallback.
+                    sd76_           = revgnss.SignalDefinition.get(sigList{si76_});
+                    freqHz(si76_)   = sd76_.frequency_Hz;
+                    waveM(si76_)    = sd76_.wavelength_m;
                 end
-                cfg.signals.names       = sigList;
-                cfg.signals.frequencyHz = freqHz;
-                cfg.signals.enabledMask = true(1,nSig);
+                cfg.signals.names        = sigList;
+                cfg.signals.frequencyHz  = freqHz;
+                cfg.signals.wavelength_m = waveM;
+                cfg.signals.enabledMask  = true(1,nSig);
+                % Stage 78: derive legacy per-signal alias fields from canonical arrays.
+                for si78_ = 1:nSig
+                    sn78_ = sigList{si78_};
+                    cfg.signals.(sn78_).frequency_Hz = freqHz(si78_);
+                    cfg.signals.(sn78_).lambda_m     = waveM(si78_);
+                end
                 % Resize per-frequency toggles to match signal count.
                 if ~isfield(cfg,'measurements'); cfg.measurements = struct(); end
                 if ~isfield(cfg.measurements,'code'); cfg.measurements.code = struct(); end

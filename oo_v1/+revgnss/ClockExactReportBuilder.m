@@ -780,7 +780,11 @@ classdef ClockExactReportBuilder
 
             % 1.4 Measurement Model
             fprintf(fid, '\\subsection{Pseudorange Measurement Model and Observation Matrix}\n');
-            f1 = 1575.42e6; f2 = 1227.60e6;
+            % Stage 78: use SignalDefinition; no hardcoded frequency constants in builder.
+            sd78_L1_ = revgnss.SignalDefinition.get('L1');
+            sd78_L2_ = revgnss.SignalDefinition.get('L2');
+            f1 = sd78_L1_.frequency_Hz;
+            f2 = sd78_L2_.frequency_Hz;
             alpha =  f1^2 / (f1^2 - f2^2);
             beta  = -f2^2 / (f1^2 - f2^2);
             fprintf(fid, ['\\[\nP_f = \\rho + b_{rx} - b_{twr} + T + I_f + d_{\\rm code} + \\nu_P,' ...
@@ -1595,7 +1599,9 @@ classdef ClockExactReportBuilder
             policy75_    = CE.safeField_(summary,'baselineArPartialPolicy','mixedFixedFloat');
             % Stage 76: signal and dimension fields
             sigNames76_  = CE.safeField_(summary,'signalNames',{'L1'});
-            sigFreqs76_  = CE.safeField_(summary,'signalFrequenciesHz',[1575.42e6]);
+            % Stage 78: use SignalDefinition for default; no hardcoded constant.
+            sigFreqs76_  = CE.safeField_(summary,'signalFrequenciesHz', ...
+                [revgnss.SignalDefinition.get('L1').frequency_Hz]);
             sigMask76_   = CE.safeField_(summary,'signalEnabledMask',[true]);
             sigMode76_   = CE.safeField_(summary,'signalMode','L1');
             arFreqEn76_  = CE.safeField_(summary,'attitudeArEnabledByFrequency',[true false]);
@@ -1647,6 +1653,11 @@ classdef ClockExactReportBuilder
             slipThr77_    = CE.safeField_(summary,'canonicalSlipThreshold_m',0.1);
             fprintf(fid, 'Config source (Stage~77) & signal mask: %s; slip thr: %.2f\\,m (canonical owners in finalizeConfig)\\\\\n', ...
                 mat2str(logical(sigMaskCfg77_)), slipThr77_);
+            % Stage 78: source-truth audit row
+            auditSt78_  = CE.safeField_(summary,'frequencyHardcodeAuditStatus','unknown');
+            sigOwn78_   = CE.safeField_(summary,'signalConfigOwner','SignalDefinition+ConfigFactory.finalizeConfig');
+            fprintf(fid, 'Source truth (Stage~78) & freq hardcodes: %s; signal owner: %s\\\\\n', ...
+                auditSt78_, sigOwn78_);
             fprintf(fid, '\\bottomrule\n\\end{tabular}\n\n\\vspace{6pt}\n');
 
             % ---- 5. Clocks ---

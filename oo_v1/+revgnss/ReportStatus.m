@@ -12,8 +12,8 @@ classdef ReportStatus
     methods (Static)
 
         function s = current()
-            s.stage      = '77';
-            s.stageTitle = 'Central Configuration Source of Truth';
+            s.stage      = '78';
+            s.stageTitle = 'Central Configuration Completion and Source-Truth Cleanup';
             s.validationMode = 'targeted-random-smoke';
             s.fullSuiteRun   = false;
 
@@ -74,7 +74,7 @@ classdef ReportStatus
                 s.validationNote = '';
             end
 
-            s.missingScientificStages = revgnss.StageHistory.missingScientificItems(76);
+            s.missingScientificStages = revgnss.StageHistory.missingScientificItems(78);
             s.implementedStage24Items = revgnss.StageHistory.implementedItems();
         end
 

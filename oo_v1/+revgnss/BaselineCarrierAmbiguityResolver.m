@@ -367,9 +367,18 @@ classdef BaselineCarrierAmbiguityResolver
         function [en, c] = parseCfg_(cfg)
             en = false; c = struct();
             try; en = logical(cfg.estimator.diffAtt.ambiguityResolution.enable); catch; return; end
-            C_ = 299792458;
-            c.lambda_m          = C_ / 1575.42e6;   % GPS L1 wavelength ≈ 0.1903 m
-            c.lambda_m_L2       = C_ / 1227.60e6;   % GPS L2 wavelength ≈ 0.2442 m
+            % Stage 78: derive wavelengths from canonical cfg.signals (set by finalizeConfig)
+            % or SignalDefinition; no local hardcoded frequency constants.
+            try
+                c.lambda_m = cfg.signals.wavelength_m(1);
+            catch
+                c.lambda_m = revgnss.SignalDefinition.get('L1').wavelength_m;
+            end
+            try
+                c.lambda_m_L2 = cfg.signals.wavelength_m(2);
+            catch
+                c.lambda_m_L2 = revgnss.SignalDefinition.get('L2').wavelength_m;
+            end
             c.searchHalfWidth   = 5;
             c.minArcEpochs      = 10;
             c.rmsThreshold_m    = 0.10 * c.lambda_m;    % 0.10 cycles (L1 metres)
