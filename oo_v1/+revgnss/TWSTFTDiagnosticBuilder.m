@@ -93,13 +93,12 @@ classdef TWSTFTDiagnosticBuilder
 
         function validateConfig(cfg)
             % validateConfig  Guard TWSTFT configuration. Called by finalizeConfig.
-            if ~revgnss.TWSTFTDiagnosticBuilder.isEnabled_(cfg); return; end
-
             % Guard 1: useInEKF must be false in Stage 24
             if revgnss.TWSTFTDiagnosticBuilder.getBool_(cfg, {'measurements','twstft','code','useInEKF'}, false)
                 error('TWSTFTDiagnosticBuilder:useInEkfBlocked', ...
                     'TWSTFT useInEKF=true is not supported in Stage 24. Set useInEKF=false.');
             end
+            if ~revgnss.TWSTFTDiagnosticBuilder.isEnabled_(cfg); return; end
 
             % Guard 2: at least 2 assets required
             nAssets = revgnss.TWSTFTDiagnosticBuilder.getNum_(cfg, {'scenario','nSpaceAssets'}, 1);

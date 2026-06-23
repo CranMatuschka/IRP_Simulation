@@ -124,17 +124,23 @@ classdef ScenarioPresets
                 cfg.diagnostics.attitudeEvidence.enable = true;
             end
 
-            % Stage 67: matched twoBodyRk4 truth propagator + twoBody EKF dynamics.
+            % Stage 80: truth propagation is centrally owned by cfg.orbit.truth.mode.
+            % Default active run remains matched twoBodyRk4/twoBody for validation
+            % stability; j2Rk4 is available by config without changing downstream code.
             % Orbit is GEO (35786 km, equatorial). GEO in ECEF moves very slowly
             % (orbital period ≈ Earth rotation period) so twoBody is nearly equivalent
-            % to static ECEF but physically correct. Overrides any all-toggle j2 attempt.
+            % to static ECEF but physically correct.
             cfg.orbit.useOrbitPropagator = true;
             cfg.orbit.altitudeMean_m     = 35786000;
             cfg.orbit.inclination_rad    = 0;
             cfg.orbit.raan_rad           = 0;
             cfg.orbit.trueAnomaly0_rad   = 23 * pi/180;
             cfg.orbit.epochGMST_rad      = 0;
-            cfg.orbit.mode               = 'twoBodyRk4';
+            if ~isfield(cfg.orbit,'truth') || ~isfield(cfg.orbit.truth,'mode') || ...
+                    strcmp(cfg.orbit.truth.mode,'stationaryEcef')
+                cfg.orbit.truth.mode = 'twoBodyRk4';
+            end
+            cfg.orbit.mode               = cfg.orbit.truth.mode;
             cfg.estimator.dynamics.mode  = 'twoBody';
 
             % Stage 67: stochastic tower clocks — non-perfect broadcast correction.

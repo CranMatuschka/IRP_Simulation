@@ -811,6 +811,73 @@ classdef ReportRunner
             summary.stage67OrbitPropMode = propMode67_;
             summary.stage67PerfectCorrectionFalse = ~strcmp(tClkMode67_, 'perfectCorrection');
 
+            % ---- Stage 80: propagation and one-way timing summary --------
+            summary.truthPropagatorMode = propMode67_;
+            try; summary.truthPropagatorMode = cfg.orbit.truth.mode; catch; end
+            summary.estimatorDynamicsMode = dyn67_;
+            summary.propagationFrame = 'ECI';
+            try; summary.propagationFrame = cfg.frames.truthFrame; catch; end
+            summary.measurementFrame = 'ECEF';
+            try; summary.measurementFrame = cfg.frames.measurementFrame; catch; end
+            summary.earthRotationModel = 'constantOmegaV1';
+            try; summary.earthRotationModel = cfg.frames.earthRotationModel; catch; end
+            summary.lightTimeEnabled = false;
+            try; summary.lightTimeEnabled = logical(cfg.physics.lightTime.enable); catch; end
+            summary.lightTimeMode = 'sagnacFirstOrder';
+            try; summary.lightTimeMode = cfg.physics.lightTime.mode; catch; end
+            summary.lightTimeIterations = 0;
+            try; summary.lightTimeIterations = cfg.physics.lightTime.iterations; catch; end
+            summary.sagnacHandling = 'firstOrderCorrection';
+            try; summary.sagnacHandling = cfg.physics.lightTime.sagnacHandling; catch; end
+            summary.sagnacDoubleCountGuard = 'notEvaluated';
+            try; summary.sagnacDoubleCountGuard = cfg.physics.lightTime.doubleCountGuard; catch; end
+            summary.dopplerLightTimeDerivative = 'simplifiedV1';
+            try; summary.dopplerLightTimeDerivative = cfg.physics.lightTime.dopplerDerivative; catch; end
+            summary.dynamicsMismatchStatus = 'matchedOrStationary';
+            if ~strcmpi(summary.truthPropagatorMode,'stationaryEcef') && ...
+                    ~contains(lower(summary.truthPropagatorMode), lower(summary.estimatorDynamicsMode))
+                summary.dynamicsMismatchStatus = sprintf('%s truth / %s EKF', ...
+                    summary.truthPropagatorMode, summary.estimatorDynamicsMode);
+            elseif contains(lower(summary.truthPropagatorMode),'j2') && strcmpi(summary.estimatorDynamicsMode,'j2')
+                summary.dynamicsMismatchStatus = 'matched J2';
+            elseif contains(lower(summary.truthPropagatorMode),'twobody') && strcmpi(summary.estimatorDynamicsMode,'twoBody')
+                summary.dynamicsMismatchStatus = 'two-body matched';
+            end
+            summary.processNoiseMismatchSigma_mps2 = 0;
+            try
+                if cfg.estimator.processNoise.modelMismatch.enable
+                    summary.processNoiseMismatchSigma_mps2 = cfg.estimator.processNoise.modelMismatch.sigma_mps2;
+                end
+            catch; end
+            summary.meanLightTime_s = 0;
+            summary.maxLightTime_s = 0;
+            try
+                log80_ = diag.log;
+                if ~isempty(log80_) && isfield(log80_,'meanLightTime_s')
+                    ltMean_ = [log80_.meanLightTime_s];
+                    ltMax_ = [log80_.maxLightTime_s];
+                    ltMean_ = ltMean_(isfinite(ltMean_));
+                    ltMax_ = ltMax_(isfinite(ltMax_));
+                    if ~isempty(ltMean_); summary.meanLightTime_s = mean(ltMean_); end
+                    if ~isempty(ltMax_); summary.maxLightTime_s = max(ltMax_); end
+                end
+            catch; end
+            summary.diffAttSchemaStatus = 'notEvaluated';
+            try
+                log80_ = diag.log;
+                if ~isempty(log80_) && isfield(log80_,'diffAttRows')
+                    summary.diffAttSchemaStatus = 'complete';
+                end
+            catch; end
+            % Stage 80: validation scope — active single-asset one-way report.
+            summary.validationScope = 'singleAssetOneWayActive';
+            summary.excludedInactiveFeatureTests = { ...
+                'test_isl_stub.m', 'test_stage20_multi_space_assets.m', ...
+                'test_stage21_one_way_isl_observables.m', ...
+                'test_stage22_two_way_isl_observables.m', ...
+                'test_stage23_isl_link_timing.m', ...
+                'test_stage24_twstft_diagnostics.m' };
+
             % Stage 68: atmosphere / antenna / bias enable status.
             summary.stage68TropTruthEn = false;
             try; summary.stage68TropTruthEn = cfg.errors.troposphere.truth.enable; catch; end
@@ -1031,7 +1098,7 @@ classdef ReportRunner
 
             % ---- Stage 75: per-baseline ambiguity classification fields --------
             try
-                st75_ = sim.diffAttStore;
+                st75_ = revgnss.DiffAttitudeBuilder.defaultStoreFields(sim.diffAttStore, cfg);
                 summary.baselineArClassification          = st75_.integerClassification;
                 summary.baselineArGnssOnlyClaim           = st75_.gnssOnlyAttitudeClaim;
                 summary.baselineArFalseFixClassification  = st75_.falseFixClassification;

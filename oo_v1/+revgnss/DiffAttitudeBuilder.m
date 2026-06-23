@@ -84,6 +84,7 @@ classdef DiffAttitudeBuilder
             store.accumSum_L2       = zeros(nTowers, nBase);
             store.accumSumSq_L2     = zeros(nTowers, nBase);
             store.delta_B_L2        = zeros(nTowers, nBase);
+            store = revgnss.DiffAttitudeBuilder.defaultStoreFields(store, cfg);
         end
 
         % ----------------------------------------------------------------
@@ -245,6 +246,39 @@ classdef DiffAttitudeBuilder
                 nValid, store.nTowers * store.nBaselines);
             % Stage 70: attempt integer ambiguity resolution for delta_B.
             store = revgnss.BaselineCarrierAmbiguityResolver.resolve(store, cfg);
+            store = revgnss.DiffAttitudeBuilder.defaultStoreFields(store, cfg);
+        end
+
+        % ----------------------------------------------------------------
+        function store = defaultStoreFields(store, cfg)
+            % defaultStoreFields  Complete Stage 75/76 DiffAtt store schema.
+            if nargin < 2; cfg = struct(); end
+            nT = revgnss.DiffAttitudeBuilder.storeField_(store,'nTowers',0);
+            nB = revgnss.DiffAttitudeBuilder.storeField_(store,'nBaselines',0);
+
+            phaseBias = 'notCalibratedExternalProduct';
+            partialPolicy = 'mixedFixedFloat';
+            falseFix = 'screenedNotFormal';
+            diffIono = 'neglectedShortBaselineV1';
+            try; phaseBias = cfg.estimator.diffAtt.ambiguityResolution.phaseBiasStatus; catch; end
+            try; partialPolicy = cfg.estimator.diffAtt.ambiguityResolution.partialFixPolicy; catch; end
+            try; falseFix = cfg.estimator.diffAtt.ambiguityResolution.falseFixClassification; catch; end
+            try; diffIono = cfg.estimator.diffAtt.ambiguityResolution.differentialIonosphereInBaselineAr; catch; end
+
+            store = setIfMissing_(store,'falseFixClassification',falseFix);
+            store = setIfMissing_(store,'phaseBiasStatus',phaseBias);
+            store = setIfMissing_(store,'partialFixPolicy',partialPolicy);
+            store = setIfMissing_(store,'gnssOnlyAttitudeClaim',false);
+            store = setIfMissing_(store,'nBaselineArFloatExternal',nT*nB);
+            store = setIfMissing_(store,'nBaselineArRejectedArc',0);
+            store = setIfMissing_(store,'nBaselineArFixedDualFrequency',0);
+            store = setIfMissing_(store,'nBaselineArFixedL1Only',0);
+            store = setIfMissing_(store,'attitudeArMode','rawL1Only');
+            store = setIfMissing_(store,'differentialIonosphereInBaselineAr',diffIono);
+            store = setIfMissing_(store,'ambiguityStatus',repmat({'floatExternalReference'}, nT, nB));
+            store = setIfMissing_(store,'dualFreqStatus',repmat({'notAttempted'}, nT, nB));
+            store = setIfMissing_(store,'wideLaneStatus',repmat({'notAttempted'}, nT, nB));
+            store.diffAttSchemaStatus = 'complete';
         end
 
         % ----------------------------------------------------------------
@@ -282,6 +316,7 @@ classdef DiffAttitudeBuilder
             info.attitudeArMode           = revgnss.DiffAttitudeBuilder.storeField_(store,'attitudeArMode','rawL1Only');
             info.nBaselineArFixedDual     = revgnss.DiffAttitudeBuilder.storeField_(store,'nBaselineArFixedDualFrequency',0);
             info.nBaselineArFixedL1Only   = revgnss.DiffAttitudeBuilder.storeField_(store,'nBaselineArFixedL1Only',0);
+            info.diffAttSchemaStatus      = revgnss.DiffAttitudeBuilder.storeField_(store,'diffAttSchemaStatus','complete');
 
             if ~store.calibrated || ~isfield(cpInfo,'phi_m') || isempty(cpInfo.phi_m)
                 return
@@ -415,4 +450,10 @@ classdef DiffAttitudeBuilder
         end
 
     end  % Static methods
+end
+
+function s = setIfMissing_(s, fieldName, value)
+    if ~isfield(s, fieldName)
+        s.(fieldName) = value;
+    end
 end

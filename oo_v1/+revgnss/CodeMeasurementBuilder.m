@@ -48,6 +48,10 @@ classdef CodeMeasurementBuilder
             receiverPCOModel_m  = zeros(M,1);
             towerPCOTruth_m     = zeros(M,1);
             towerPCOModel_m     = zeros(M,1);
+            lightTimeTruth_s    = zeros(M,1);
+            lightTimeModel_s    = zeros(M,1);
+            transmitTimeTruth_s = NaN(M,1);
+            transmitTimeModel_s = NaN(M,1);
 
             for mi = 1:M
                 ti  = twr_list(mi);
@@ -115,6 +119,8 @@ classdef CodeMeasurementBuilder
                 sagnacTruth_m(mi)  = cTruth.sagnac;
                 shapiroTruth_m(mi) = cTruth.shapiro;
                 pcvTruth_m(mi)     = cTruth.pcv;
+                lightTimeTruth_s(mi) = cTruth.tau_s;
+                if ~isempty(cTruth.t_tx_s); transmitTimeTruth_s(mi) = cTruth.t_tx_s; end
 
                 % Stage 7A: transmit-time tower clock for truth side
                 b_twr_truth_h = towerClkTruth(mi);
@@ -131,6 +137,8 @@ classdef CodeMeasurementBuilder
                 sagnacModel_m(mi)  = cModel.sagnac;
                 shapiroModel_m(mi) = cModel.shapiro;
                 pcvModel_m(mi)     = cModel.pcv;
+                lightTimeModel_s(mi) = cModel.tau_s;
+                if ~isempty(cModel.t_tx_s); transmitTimeModel_s(mi) = cModel.t_tx_s; end
 
                 % Stage 7A: transmit-time tower clock for model side
                 if ~isempty(cModel.t_tx_s) && ...
@@ -209,6 +217,10 @@ classdef CodeMeasurementBuilder
             errStruct.receiverPCOModel_m  = receiverPCOModel_m;
             errStruct.towerPCOTruth_m     = towerPCOTruth_m;
             errStruct.towerPCOModel_m     = towerPCOModel_m;
+            errStruct.lightTimeTruth_s    = lightTimeTruth_s;
+            errStruct.lightTimeModel_s    = lightTimeModel_s;
+            errStruct.transmitTimeTruth_s = transmitTimeTruth_s;
+            errStruct.transmitTimeModel_s = transmitTimeModel_s;
 
             % ----- Multi-signal expansion ----------------------------------
             signals = revgnss.SignalUtils.getEnabledSignals(cfg);

@@ -29,11 +29,11 @@ classdef MainScriptValidationGate
             state = struct();
 
             % Resolve stage, seed, count from env vars.
-            stg = 79;
+            stg = 80;
             v = str2double(getenv('OO_V1_VALIDATION_STAGE'));
             if ~isnan(v) && v > 0; stg = round(v); end
 
-            seed = 79;
+            seed = 80;
             v = str2double(getenv('OO_V1_RANDOM_TEST_SEED'));
             if ~isnan(v) && isfinite(v); seed = round(v); end
 
@@ -46,23 +46,30 @@ classdef MainScriptValidationGate
             fprintf('\n[ValidationGate] Stage %d  seed %d  count %d\n', stg, seed, cnt);
 
             % Select and run tests.
+            % Stage 80: pickTests_ excludes inactive-feature (TWSTFT/ISL/two-way/multi-asset) tests.
             testDir = fullfile(thisDir, 'tests');
-            files   = revgnss.MainScriptValidationGate.pickTests_(testDir, seed, cnt, stg);
+            [files, excludedTests80_] = revgnss.MainScriptValidationGate.pickTests_( ...
+                testDir, seed, cnt, stg);
+            if ~isempty(excludedTests80_)
+                fprintf('[ValidationGate] Excluded %d inactive-feature tests (scope: singleAssetOneWayActive).\n', ...
+                    numel(excludedTests80_));
+            end
             results = revgnss.ValidationRunner.runSelected(files, thisDir);
             revgnss.ValidationRunner.printSummary(results);
             [nPass, nTot] = revgnss.ValidationRunner.countResults(results);
 
             % Build state struct.
-            outDir         = fullfile(thisDir, 'output');
-            state.stage    = stg;
+            outDir           = fullfile(thisDir, 'output');
+            state.stage      = stg;
             state.stageTitle = stgTitle;
-            state.seed     = seed;
-            state.sha      = revgnss.MainScriptValidationGate.gitSHA_(thisDir);
-            state.branch   = revgnss.MainScriptValidationGate.gitBranch_(thisDir);
-            state.results  = results;
-            state.nPass    = nPass;
-            state.nTot     = nTot;
-            state.outDir   = outDir;
+            state.seed       = seed;
+            state.sha        = revgnss.MainScriptValidationGate.gitSHA_(thisDir);
+            state.branch     = revgnss.MainScriptValidationGate.gitBranch_(thisDir);
+            state.results    = results;
+            state.nPass      = nPass;
+            state.nTot       = nTot;
+            state.outDir     = outDir;
+            state.excludedTests = excludedTests80_;
 
             % Stop before report on any test failure.
             if nPass < nTot
@@ -108,12 +115,42 @@ classdef MainScriptValidationGate
 
     methods (Static, Access = private)
 
-        function files = pickTests_(testDir, seed, count, stageNum)
-            % pickTests_  Select 2-5 random tests, force test_stage<N>* if present.
-            files = revgnss.ValidationRunner.selectTests(testDir, seed, count);
+        function [files, excludedFiles] = pickTests_(testDir, seed, count, stageNum)
+            % pickTests_  Select 2-5 random tests from active-scope pool.
+            %
+            % Stage 80: tests for inactive features (TWSTFT, ISL, two-way, multi-asset)
+            % are excluded from random selection for the single-asset one-way smoke gate.
+            % They remain in the repository as historical reference; they are not deleted.
+            inactiveFiles_ = { ...
+                'test_isl_stub.m', ...
+                'test_stage20_multi_space_assets.m', ...
+                'test_stage21_one_way_isl_observables.m', ...
+                'test_stage22_two_way_isl_observables.m', ...
+                'test_stage23_isl_link_timing.m', ...
+                'test_stage24_twstft_diagnostics.m' };
+
+            allTmp = dir(fullfile(testDir, 'test_*.m'));
+            if isempty(allTmp)
+                files = {}; excludedFiles = {}; return;
+            end
+            allNames = sort({allTmp.name});
+
+            isExcluded_ = cellfun(@(f) any(strcmp(inactiveFiles_, f)), allNames);
+            activePool_  = allNames(~isExcluded_);
+            excludedFiles = allNames(isExcluded_);
+
+            n = min(count, numel(activePool_));
+            if n < 1; files = {}; return; end
+            s = RandStream('mt19937ar', 'Seed', seed);
+            perm = randperm(s, numel(activePool_));
+            idx  = sort(perm(1:n));
+            files = activePool_(idx);
+
+            % Force current-stage test if present and not already selected.
             tag = sprintf('test_stage%d', stageNum);
             tmp = dir(fullfile(testDir, [tag '*.m']));
-            if ~isempty(tmp) && ~any(strcmp(files, tmp(1).name))
+            if ~isempty(tmp) && ~any(strcmp(files, tmp(1).name)) && ...
+                    ~any(strcmp(inactiveFiles_, tmp(1).name))
                 files{end} = tmp(1).name;
                 files = sort(files);
             end
@@ -146,7 +183,14 @@ classdef MainScriptValidationGate
             d.currentStageSmokeTestIncluded = any(cellfun( ...
                 @(n) contains(n, sprintf('stage%d', state.stage)), {state.results.name}));
             d.validationArtifactFresh       = true;   % fresh when written; staleness detected on read
-            d.notes = sprintf('Stage %d smoke (%d/%d). Full suite NOT RUN.', state.stage, nPass, nTot);
+            d.validationScope               = 'singleAssetOneWayActive';
+            if isfield(state,'excludedTests') && ~isempty(state.excludedTests)
+                d.excludedInactiveFeatureTests = state.excludedTests;
+            else
+                d.excludedInactiveFeatureTests = {};
+            end
+            d.notes = sprintf('Stage %d smoke (%d/%d). Full suite NOT RUN. Scope: singleAssetOneWayActive.', ...
+                state.stage, nPass, nTot);
 
             revgnss.ValidationSummary.write(state.outDir, d);
         end
@@ -251,6 +295,7 @@ classdef MainScriptValidationGate
                 case 77; t = 'Central Configuration Source of Truth';
                 case 78; t = 'Central Configuration Completion and Source-Truth Cleanup';
                 case 79; t = 'Final Central Configuration Lock';
+                case 80; t = 'Realistic Propagation and One-Way Timing Consistency';
                 otherwise
                     try; t = revgnss.ReportStatus.current().stageTitle; catch; t = sprintf('Stage %d', stg); end
             end

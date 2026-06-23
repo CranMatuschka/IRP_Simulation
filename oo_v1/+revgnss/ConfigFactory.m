@@ -144,8 +144,12 @@ classdef ConfigFactory
             cfg.asset.stateOwner = 'primaryEKF';
             cfg.assets = cfg.asset;
 
-            % --- No orbit propagator for GEO (stationary in ECEF) --------
+            % --- Orbit propagation owner fields --------------------------
+            % defaultConfig may remain stationary; active report presets set truth/estimator modes.
             cfg.orbit.useOrbitPropagator = false;
+            cfg.orbit.mode = 'stationaryEcef';
+            cfg.orbit.truth.mode = 'stationaryEcef';
+            cfg.orbit.truth.availableModes = {'twoBodyRk4','j2Rk4'};
 
             % --- Five ground towers (from SimulationConfig.m) -------------
             towerDefs = { ...
@@ -216,6 +220,9 @@ classdef ConfigFactory
             cfg.estimator.elevationMask_rad       = 5 * pi/180;
             cfg.estimator.attitudeJacobianStep_rad = 1e-6;
             cfg.estimator.sigma_accel_mps2        = 0.01;
+            cfg.estimator.dynamics.mode           = 'constantVelocity';
+            cfg.estimator.processNoise.modelMismatch.enable = false;
+            cfg.estimator.processNoise.modelMismatch.sigma_mps2 = 1e-6;
             % Near-zero angular-acceleration noise: attitude stays frozen at truth.
             cfg.estimator.sigma_angAccel_radps2   = 1e-15;
             cfg.estimator.minMeasurementsForUpdate = 4;
@@ -391,18 +398,31 @@ classdef ConfigFactory
             cfg.effects.correlatedNoise.independentSigma_m = 0.0;
             cfg.effects.correlatedNoise.seed              = 4100;
 
-            % --- Physics constants and range-correction toggles ---------------
-            % All physics corrections default to false. Enable in realisticPseudorangeConfig.
-            cfg.physics.c_mps              = 299792458;
-            cfg.physics.omegaEarth_radps   = 7.2921151467e-5;
-            cfg.physics.muEarth_m3ps2      = 3.986004418e14;
+            % --- Constants, frames, and range-correction toggles --------------
+            cfg.constants.c_mps            = revgnss.Constants.SPEED_OF_LIGHT_MPS;
+            cfg.constants.muEarth_m3s2     = revgnss.Constants.EARTH_GM_M3PS2;
+            cfg.constants.omegaEarth_radps = revgnss.Constants.EARTH_OMEGA_RADPS;
+            cfg.constants.radiusEarth_m    = revgnss.Constants.EARTH_RADIUS_M;
+            cfg.constants.J2               = revgnss.Constants.EARTH_J2;
+            cfg.frames.truthFrame          = 'ECI';
+            cfg.frames.measurementFrame    = 'ECEF';
+            cfg.frames.earthRotationModel  = 'constantOmegaV1';
+            cfg.physics.c_mps              = cfg.constants.c_mps;
+            cfg.physics.omegaEarth_radps   = cfg.constants.omegaEarth_radps;
+            cfg.physics.muEarth_m3ps2      = cfg.constants.muEarth_m3s2;
 
             cfg.physics.sagnac.truth.enable    = true;
             cfg.physics.sagnac.model.enable    = true;
+            cfg.physics.sagnac.mode            = 'firstOrderCorrection';
 
             cfg.physics.lightTime.truth.enable = false;
             cfg.physics.lightTime.model.enable = false;
             cfg.physics.lightTime.maxIter      = 2;
+            cfg.physics.lightTime.enable       = false;
+            cfg.physics.lightTime.mode         = 'sagnacFirstOrder';
+            cfg.physics.lightTime.iterations   = 2;
+            cfg.physics.lightTime.tolerance_s  = 1e-12;
+            cfg.physics.lightTime.dopplerDerivative = 'simplifiedV1';
 
             cfg.physics.relativity.shapiro.truth.enable = false;
             cfg.physics.relativity.shapiro.model.enable = false;
@@ -1361,46 +1381,52 @@ classdef ConfigFactory
                 end
             end
 
-            % ---- Unsupported: light-time ----------------------------------
-            % Full light-time not implemented. Map to first-order Sagnac or error.
+            % ---- Stage 80: one-way light-time / Sagnac consistency -------
             if isfield(cfg,'physics') && isfield(cfg.physics,'lightTime')
                 lt = cfg.physics.lightTime;
                 ltTruth = isfield(lt,'truth') && isfield(lt.truth,'enable') && lt.truth.enable;
                 ltModel = isfield(lt,'model') && isfield(lt.model,'enable') && lt.model.enable;
-                if ltTruth || ltModel
-                    if strcmp(policy,'error')
-                        error('ConfigFactory:lightTimeNotSupported', ...
-                            ['Full light-time correction is not implemented in v1. ' ...
-                             'Set unsupportedFeaturePolicy=''disableWithWarning'' to map to Sagnac.']);
+                ltEnable = (isfield(lt,'enable') && lt.enable) || ltTruth || ltModel;
+                if ~isfield(lt,'mode') || isempty(lt.mode)
+                    cfg.physics.lightTime.mode = 'sagnacFirstOrder';
+                end
+                if ~isfield(lt,'iterations') && isfield(lt,'maxIter')
+                    cfg.physics.lightTime.iterations = lt.maxIter;
+                end
+                if ~isfield(lt,'tolerance_s')
+                    cfg.physics.lightTime.tolerance_s = getf_(lt,'tol_s',1e-12);
+                end
+                if ltEnable
+                    mode80_ = cfg.physics.lightTime.mode;
+                    switch mode80_
+                        case {'sameEpoch','sagnacFirstOrder','firstOrderCorrection'}
+                            cfg.effects.lightTime.model = 'sagnacFirstOrder';
+                            cfg.physics.sagnac.mode = 'firstOrderCorrection';
+                            cfg.physics.sagnac.truth.enable = ltTruth || cfg.physics.sagnac.truth.enable;
+                            cfg.physics.sagnac.model.enable = ltModel || cfg.physics.sagnac.model.enable;
+                            cfg.physics.lightTime.enable = true;
+                            cfg.physics.lightTime.sagnacHandling = 'firstOrderCorrection';
+                            cfg.physics.lightTime.doubleCountGuard = 'pass';
+                        case {'iterativeOneWay','iterative'}
+                            cfg.effects.lightTime.model = 'iterative';
+                            cfg.effects.lightTime.maxIter = cfg.physics.lightTime.iterations;
+                            cfg.effects.lightTime.tol_s = cfg.physics.lightTime.tolerance_s;
+                            if (cfg.physics.sagnac.truth.enable || cfg.physics.sagnac.model.enable)
+                                cfg.validation.warnings{end+1} = ...
+                                    'Stage 80: iterativeOneWay light-time uses geometric Earth rotation; separate Sagnac truth/model disabled to prevent double counting.';
+                            end
+                            cfg.physics.sagnac.truth.enable = false;
+                            cfg.physics.sagnac.model.enable = false;
+                            cfg.physics.lightTime.enable = true;
+                            cfg.physics.lightTime.sagnacHandling = 'geometricLightTime';
+                            cfg.physics.lightTime.doubleCountGuard = 'pass';
+                        otherwise
+                            error('ConfigFactory:invalidLightTimeMode', ...
+                                'Unsupported cfg.physics.lightTime.mode=''%s''.', mode80_);
                     end
-                    parts = {'Full light-time not implemented in v1.'};
-                    if ltTruth
-                        sOn = isfield(cfg.physics,'sagnac') && isfield(cfg.physics.sagnac,'truth') && ...
-                              isfield(cfg.physics.sagnac.truth,'enable') && cfg.physics.sagnac.truth.enable;
-                        if ~sOn
-                            cfg.physics.sagnac.truth.enable    = true;
-                            parts{end+1}                       = 'lightTime.truth mapped to sagnac.truth.';
-                            cfg.validation.mappedFeatures{end+1} = 'lightTime.truth -> sagnac.truth';
-                        else
-                            parts{end+1} = 'lightTime.truth: sagnac.truth already enabled; lightTime disabled.';
-                        end
-                        cfg.physics.lightTime.truth.enable = false;
-                    end
-                    if ltModel
-                        sOn = isfield(cfg.physics,'sagnac') && isfield(cfg.physics.sagnac,'model') && ...
-                              isfield(cfg.physics.sagnac.model,'enable') && cfg.physics.sagnac.model.enable;
-                        if ~sOn
-                            cfg.physics.sagnac.model.enable    = true;
-                            parts{end+1}                       = 'lightTime.model mapped to sagnac.model.';
-                            cfg.validation.mappedFeatures{end+1} = 'lightTime.model -> sagnac.model';
-                        else
-                            parts{end+1} = 'lightTime.model: sagnac.model already enabled; lightTime disabled.';
-                        end
-                        cfg.physics.lightTime.model.enable = false;
-                    end
-                    warnMsg = strjoin(parts, ' ');
-                    cfg.validation.warnings{end+1} = warnMsg;
-                    warning('ConfigFactory:lightTimeMapped', '%s', warnMsg);
+                else
+                    cfg.physics.lightTime.sagnacHandling = 'firstOrderCorrection';
+                    cfg.physics.lightTime.doubleCountGuard = 'notNeeded';
                 end
             end
 

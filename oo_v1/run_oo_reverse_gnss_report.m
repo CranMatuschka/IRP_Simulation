@@ -35,7 +35,7 @@ oo_v1_envAllToggles_ = strcmpi(getenv('OO_V1_ALL_TOGGLES'), 'true');
 if oo_v1_envValidate_; oo_v1_envAllToggles_ = true; end  % validate always uses all toggles
 oo_v1_envStage_      = str2double(getenv('OO_V1_VALIDATION_STAGE'));
 if isnan(oo_v1_envStage_); oo_v1_envStage_ = 0; end
-if oo_v1_envValidate_ && oo_v1_envStage_ == 0; oo_v1_envStage_ = 79; end
+if oo_v1_envValidate_ && oo_v1_envStage_ == 0; oo_v1_envStage_ = 80; end
 oo_v1_envCompile_    = strtrim(getenv('OO_V1_REPORT_COMPILE_TEX'));
 
 cfg = revgnss.ConfigFactory.defaultConfig();
@@ -228,8 +228,12 @@ cfg.biases.interFrequency.carrier.model.L2_m = 0;
 % --- Geometry / relativity --------------------------------------
 cfg.physics.sagnac.truth.enable          = true;
 cfg.physics.sagnac.model.enable          = true;
-cfg.physics.lightTime.truth.enable       = true;   % mapped to Sagnac if enabled
-cfg.physics.lightTime.model.enable       = true;   % mapped to Sagnac if enabled
+cfg.physics.lightTime.enable             = true;
+cfg.physics.lightTime.mode               = 'iterativeOneWay';
+cfg.physics.lightTime.iterations         = 2;
+cfg.physics.lightTime.tolerance_s        = 1e-12;
+cfg.physics.lightTime.truth.enable       = true;
+cfg.physics.lightTime.model.enable       = true;
 cfg.physics.relativity.shapiro.truth.enable = true;
 cfg.physics.relativity.shapiro.model.enable = true;
 cfg.physics.relativity.clock.truth.enable   = true; % disabled/warned: not validated v1

@@ -50,6 +50,10 @@ classdef BaselineCarrierAmbiguityResolver
         function store = resolve(store, cfg)
             % resolve  Attempt integer fix for all baselines; update store.delta_B.
             [arEn, c] = revgnss.BaselineCarrierAmbiguityResolver.parseCfg_(cfg);
+            if ~isfield(c,'falseFixClassification'); c.falseFixClassification = 'screenedNotFormal'; end
+            if ~isfield(c,'phaseBiasStatus'); c.phaseBiasStatus = 'notCalibratedExternalProduct'; end
+            if ~isfield(c,'partialFixPolicy'); c.partialFixPolicy = 'mixedFixedFloat'; end
+            if ~isfield(c,'differentialIonosphereMode'); c.differentialIonosphereMode = 'neglectedShortBaselineV1'; end
             % Stage 70/75: initialise summary fields
             store.integerFixAttempted           = false;
             store.integerFixAccepted            = false;

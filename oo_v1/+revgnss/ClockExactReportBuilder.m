@@ -1710,14 +1710,31 @@ classdef ClockExactReportBuilder
             fprintf(fid, '\\begin{tabular}{p{0.38\\textwidth}p{0.52\\textwidth}}\n');
             fprintf(fid, '\\toprule\n\\textbf{Property} & \\textbf{Value}\\\\\n\\midrule\n');
             propMode_ = 'twoBodyRk4';
-            if isfield(summary,'stage67OrbitPropMode'); propMode_ = summary.stage67OrbitPropMode; end
+            if isfield(summary,'truthPropagatorMode'); propMode_ = summary.truthPropagatorMode;
+            elseif isfield(summary,'stage67OrbitPropMode'); propMode_ = summary.stage67OrbitPropMode; end
             fprintf(fid, 'Truth propagator & \\texttt{%s} (GEO 35786~km, $i\\!=\\!0$, $\\nu_0\\!=\\!23^\\circ$)\\\\\n', strrep(propMode_,'_','\_'));
             dynMode_ = 'twoBody';
-            if isfield(summary,'stage67DynamicsMode'); dynMode_ = summary.stage67DynamicsMode; end
-            fprintf(fid, 'EKF predictor & \\texttt{%s} (matched to truth propagator)\\\\\n', strrep(dynMode_,'_','\_'));
-            fprintf(fid, 'Static-ECEF truth & false (replaced by \\texttt{twoBodyRk4} propagator)\\\\\n');
-            fprintf(fid, 'J2 / drag / SRP / 3rd-body & false (two-body family only in active scenario)\\\\\n');
-            fprintf(fid, 'IERS/EOP frame & not implemented; simplified Earth-rotation model\\\\\n');
+            if isfield(summary,'estimatorDynamicsMode'); dynMode_ = summary.estimatorDynamicsMode;
+            elseif isfield(summary,'stage67DynamicsMode'); dynMode_ = summary.stage67DynamicsMode; end
+            mismatch80_ = CE.safeField_(summary,'dynamicsMismatchStatus','not evaluated');
+            fprintf(fid, 'EKF predictor & \\texttt{%s}; mismatch status: %s\\\\\n', strrep(dynMode_,'_','\_'), strrep(mismatch80_,'_','\_'));
+            fprintf(fid, 'Frames & truth: \\texttt{%s}; measurements: \\texttt{%s}; Earth rotation: \\texttt{%s}\\\\\n', ...
+                CE.safeField_(summary,'propagationFrame','ECI'), ...
+                CE.safeField_(summary,'measurementFrame','ECEF'), ...
+                CE.safeField_(summary,'earthRotationModel','constantOmegaV1'));
+            fprintf(fid, 'One-way light time & enabled=%s; mode=\\texttt{%s}; iter=%d; mean/max %.6f/%.6f~s\\\\\n', ...
+                CE.yesNo_(CE.safeField_(summary,'lightTimeEnabled',false),'true','false'), ...
+                CE.safeField_(summary,'lightTimeMode','sagnacFirstOrder'), ...
+                CE.safeField_(summary,'lightTimeIterations',0), ...
+                CE.safeField_(summary,'meanLightTime_s',0), ...
+                CE.safeField_(summary,'maxLightTime_s',0));
+            fprintf(fid, 'Sagnac handling & \\texttt{%s}; double-count guard: \\texttt{%s}; Doppler light-time derivative: \\texttt{%s}\\\\\n', ...
+                CE.safeField_(summary,'sagnacHandling','firstOrderCorrection'), ...
+                CE.safeField_(summary,'sagnacDoubleCountGuard','notEvaluated'), ...
+                CE.safeField_(summary,'dopplerLightTimeDerivative','simplifiedV1'));
+            fprintf(fid, 'J2 / drag / SRP / 3rd-body & J2 truth mode available; drag/SRP/3rd-body false in active scenario\\\\\n');
+            fprintf(fid, 'IERS/EOP frame & not implemented; simplified constant-$\\Omega_E$ Earth rotation\\\\\n');
+            fprintf(fid, 'DiffAtt schema & \\texttt{%s}\\\\\n', CE.safeField_(summary,'diffAttSchemaStatus','notEvaluated'));
             fprintf(fid, '\\bottomrule\n\\end{tabular}\n\n\\vspace{6pt}\n');
 
             % ---- 7. Known limitations ---

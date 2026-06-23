@@ -213,9 +213,20 @@ classdef Diagnostics < handle
                     diff_s = errStruct.sagnacTruth_m - errStruct.sagnacModel_m;
                     entry.sagnacDiffRMS_m  = sqrt(mean(diff_s.^2));
                     entry.shapiroDiffRMS_m = sqrt(mean((errStruct.shapiroTruth_m - errStruct.shapiroModel_m).^2));
+                    if isfield(errStruct,'lightTimeModel_s') && ~isempty(errStruct.lightTimeModel_s)
+                        ltVals_ = errStruct.lightTimeModel_s(isfinite(errStruct.lightTimeModel_s));
+                        if isempty(ltVals_); ltVals_ = 0; end
+                        entry.meanLightTime_s = mean(ltVals_);
+                        entry.maxLightTime_s = max(ltVals_);
+                    else
+                        entry.meanLightTime_s = 0;
+                        entry.maxLightTime_s = 0;
+                    end
                 else
                     entry.sagnacDiffRMS_m  = 0;
                     entry.shapiroDiffRMS_m = 0;
+                    entry.meanLightTime_s = 0;
+                    entry.maxLightTime_s = 0;
                 end
 
                 % Per-source RMS(truth_m - model_m) for this epoch.
