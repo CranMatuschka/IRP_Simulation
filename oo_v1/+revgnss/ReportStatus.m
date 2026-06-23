@@ -12,8 +12,8 @@ classdef ReportStatus
     methods (Static)
 
         function s = current()
-            s.stage      = '83';
-            s.stageTitle = 'Doppler Dynamics and Carrier Product-Covariance Closure';
+            s.stage      = '84';
+            s.stageTitle = 'Doppler/Product-Covariance Correctness Hardening';
             s.validationMode = 'targeted-random-smoke';
             s.fullSuiteRun   = false;
 
@@ -57,10 +57,10 @@ classdef ReportStatus
             end
             vsSHA = '';
             if isfield(vs, 'gitSHA'); vsSHA = strtrim(char(vs.gitSHA)); end
-            s.validationArtifactFresh = (vsStageNum == 83) && strcmp(vsSHA, runtimeSHA);
+            s.validationArtifactFresh = (vsStageNum == 84) && strcmp(vsSHA, runtimeSHA);
             if ~s.validationArtifactFresh
                 s.validationWarnings{end+1} = ...
-                    'No fresh local validation summary for this commit. Run: setenv(''OO_V1_VALIDATE_REPORT'',''true''); setenv(''OO_V1_VALIDATION_STAGE'',''82''); run_oo_reverse_gnss_report';
+                    'No fresh local validation summary for this commit. Run: setenv(''OO_V1_VALIDATE_REPORT'',''true''); setenv(''OO_V1_VALIDATION_STAGE'',''84''); run_oo_reverse_gnss_report';
             end
 
             if isfield(vs, 'selectedTestNames')
@@ -74,7 +74,7 @@ classdef ReportStatus
                 s.validationNote = '';
             end
 
-            s.missingScientificStages = revgnss.StageHistory.missingScientificItems(82);
+            s.missingScientificStages = revgnss.StageHistory.missingScientificItems(84);
             s.implementedStage24Items = revgnss.StageHistory.implementedItems();
         end
 

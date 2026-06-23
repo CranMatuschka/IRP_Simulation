@@ -88,6 +88,9 @@ classdef CarrierMeasurementBuilder
             cpInfo.productEpoch_s  = zeros(Mp_total, 1);
             cpInfo.productAge_s    = zeros(Mp_total, 1);
             cpInfo.sigmaDrift_mps  = zeros(Mp_total, 1);
+            % Stage 84: arc-reference status — no arc identifier available yet;
+            % product-epoch age used as proxy for time-varying drift residual covariance.
+            cpInfo.carrierProductArcReferenceStatus = 'notAvailableUsingProductEpochAgeV1';
 
             % Stage 83: get product epoch and drift sigma for carrier rows
             t_prod_carrier  = zeros(Mp, 1);

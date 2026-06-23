@@ -232,13 +232,51 @@ classdef ModelCoverageAudit
                 'ambiguityResolution','implementedSynthetic', ...
                 'Stage 76 raw L1+L2 joint integer-pair AR; wide-lane consistency screening; syntheticKnownZero phase bias; controlledSyntheticClaim; LAMBDA/MLAMBDA not implemented and not claimed');
 
-            % 20. covariance
-            covEn = true;
-            try; covEn = cfg.covariance.sharedErrors.enable; catch; end
-            if covEn
+            % 20. covariance (Stage 84: use canonical productClock config)
+            prodClkEn  = false;
+            try; prodClkEn = cfg.covariance.productClock.enable; catch; end
+            legacyEn   = false;
+            try; legacyEn  = cfg.covariance.sharedErrors.enable; catch; end
+            codeEn_    = false;
+            try; codeEn_   = cfg.covariance.productClock.applyToCode; catch; end
+            doppEn_    = false;
+            try; doppEn_   = cfg.covariance.productClock.applyToDoppler; catch; end
+            carrEn_    = false;
+            try; carrEn_   = cfg.covariance.productClock.applyToCarrier; catch; end
+            doppPol_   = 'unknown';
+            try; doppPol_  = cfg.covariance.productClock.dopplerPolicy; catch; end
+            carrPol_   = 'unknown';
+            try; carrPol_  = cfg.covariance.productClock.carrierPolicy; catch; end
+
+            if prodClkEn && codeEn_ && doppEn_ && carrEn_
+                covStatus_ = 'productClockCovarianceAwareV2';
+            elseif prodClkEn || legacyEn
+                covStatus_ = 'partialCovarianceAware';
+            else
+                covStatus_ = 'diagonalOnly';
+            end
+
+            codeStatus_  = 'disabledByConfig';
+            try
+                if cfg.covariance.sharedErrors.applyTowerClockToCode
+                    codeStatus_ = 'stage74BlockRTowerClockCorrelation';
+                end
+            catch; end
+            doppStatus_  = 'disabledByConfig';
+            if doppEn_
+                doppStatus_ = sprintf('stage83ProductDriftBlock_%s', doppPol_);
+            end
+            carrStatus_  = 'disabledByConfig';
+            if carrEn_
+                carrStatus_ = sprintf('stage83TimeVaryingDriftResidual_%s', carrPol_);
+            end
+
+            covNote_ = sprintf('%s; code=%s; doppler=%s; carrier=%s; crossCodeDoppler=notImplemented', ...
+                covStatus_, codeStatus_, doppStatus_, carrStatus_);
+
+            if prodClkEn || legacyEn
                 c{end+1} = revgnss.ModelCoverageAudit.cat_( ...
-                    'covariance','implementedSynthetic', ...
-                    'Stage 83 productClockCovarianceAwareV2; code block-R (Stage 74) + Doppler product-drift blocks + carrier time-varying product residual');
+                    'covariance','implementedSynthetic', covNote_);
             else
                 c{end+1} = revgnss.ModelCoverageAudit.cat_( ...
                     'covariance','disabledByConfig', ...

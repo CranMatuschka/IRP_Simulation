@@ -303,35 +303,105 @@ classdef TowerClockCorrectionProvider
             end
             if t_prod_scalar < 0; t_prod_scalar = 0; end
 
+            explicitProductDriftUsed  = false;
+            truthHistoryProductDriftUsed = false;
+            driftAnchorStatus         = 'notApplicable';
+            driftProductMode_out      = mode;
+            driftSigmaSource_out      = 'zero';
+
             for mi = 1:M
                 ti = twr_list(mi);
-                bdot_truth(mi) = towers{ti}.getClockDriftMetersPerSecond();
+                % Default: use current truth drift (fallback)
+                bdot_truth_current = towers{ti}.getClockDriftMetersPerSecond();
+                bdot_truth(mi) = bdot_truth_current;
                 t_prod_out(mi) = t_prod_scalar;
 
                 switch mode
                     case 'perfectCorrection'
-                        bdot_model(mi)  = bdot_truth(mi);
+                        % Use product-epoch truth drift to be consistent with bias path.
+                        [~, bd_p] = revgnss.TowerClockCorrectionProvider.clockAtProductEpoch( ...
+                            towers{ti}, t_prod_scalar);
+                        bdot_truth(mi)  = bd_p;
+                        bdot_model(mi)  = bd_p;
                         drift_sigma(mi) = 0;
+                        driftAnchorStatus = 'productEpochTruth';
+                        driftSigmaSource_out = 'zero';
 
                     case 'truthHistoryProductNoisy'
+                        % Stage 84: anchor at product-epoch truth drift (not current-epoch).
+                        % Consistent with bias path in compute() which uses clockAtProductEpoch.
+                        [~, bd_p] = revgnss.TowerClockCorrectionProvider.clockAtProductEpoch( ...
+                            towers{ti}, t_prod_scalar);
                         [~, d_noise] = revgnss.TowerClockCorrectionProvider.productNoise_( ...
                             ti, t_prod_scalar, pc.sigmaBias_m, pc.sigmaDrift_mps);
-                        bdot_model(mi)  = bdot_truth(mi) + d_noise;
+                        bdot_truth(mi)  = bd_p;  % product-epoch truth
+                        bdot_model(mi)  = bd_p + d_noise;
                         drift_sigma(mi) = pc.sigmaDrift_mps;
+                        truthHistoryProductDriftUsed = true;
+                        driftAnchorStatus = 'productEpochTruth';
+                        driftSigmaSource_out = 'productConfig';
 
-                    case {'truthProduct', 'product', 'productNoisy'}
-                        [~, d_noise] = revgnss.TowerClockCorrectionProvider.productNoise_( ...
-                            ti, t_prod_scalar, pc.sigmaBias_m, pc.sigmaDrift_mps);
-                        bdot_model(mi)  = bdot_truth(mi) + d_noise;
-                        drift_sigma(mi) = pc.sigmaDrift_mps;
+                    case 'truthProduct'
+                        % Pure history-based product drift, no noise.
+                        [~, bd_p] = revgnss.TowerClockCorrectionProvider.clockAtProductEpoch( ...
+                            towers{ti}, t_prod_scalar);
+                        bdot_truth(mi)  = bd_p;
+                        bdot_model(mi)  = bd_p;
+                        drift_sigma(mi) = 0;
+                        truthHistoryProductDriftUsed = true;
+                        driftAnchorStatus = 'productEpochTruth';
+                        driftSigmaSource_out = 'zero';
 
-                    otherwise  % 'none', 'noisyCorrection'
+                    case {'product', 'productNoisy'}
+                        % Explicit product struct required; no truth-history fallback.
+                        hasProd = isfield(cfg,'towerClock') && ...
+                                  isfield(cfg.towerClock,'products') && ...
+                                  ti <= numel(cfg.towerClock.products);
+                        if hasProd
+                            prod = cfg.towerClock.products(ti);
+                            if isfield(prod,'drift_mps')
+                                bdot_model(mi) = prod.drift_mps;
+                            end
+                            if strcmp(mode,'productNoisy') && isfield(prod,'sigmaDrift_mps')
+                                drift_sigma(mi) = prod.sigmaDrift_mps;
+                            elseif strcmp(mode,'productNoisy')
+                                drift_sigma(mi) = pc.sigmaDrift_mps;
+                            end
+                            if isfield(prod,'epoch_s')
+                                t_prod_out(mi) = prod.epoch_s;
+                            end
+                            explicitProductDriftUsed = true;
+                            driftAnchorStatus = 'explicitProductStruct';
+                            driftSigmaSource_out = 'explicitProduct';
+                        else
+                            % Missing explicit product — use zero drift, report clearly.
+                            bdot_model(mi)  = 0;
+                            drift_sigma(mi) = 0;
+                            driftAnchorStatus = 'missingExplicitProductFallbackZero';
+                            driftSigmaSource_out = 'zero';
+                        end
+
+                    case 'noisyCorrection'
+                        % noisyCorrection is a bias-only toy correction; no drift noise modelled.
                         bdot_model(mi)  = 0;
                         drift_sigma(mi) = 0;
+                        driftAnchorStatus = 'notApplicableNoisyCorrection';
+                        driftSigmaSource_out = 'zero';
+
+                    otherwise  % 'none'
+                        bdot_model(mi)  = 0;
+                        drift_sigma(mi) = 0;
+                        driftAnchorStatus = 'notApplicableNoCorrection';
+                        driftSigmaSource_out = 'zero';
                 end
             end
 
-            meta.mode = mode;
+            meta.mode                        = mode;
+            meta.driftProductMode            = driftProductMode_out;
+            meta.driftAnchorStatus           = driftAnchorStatus;
+            meta.driftSigmaSource            = driftSigmaSource_out;
+            meta.explicitProductDriftUsed    = explicitProductDriftUsed;
+            meta.truthHistoryProductDriftUsed = truthHistoryProductDriftUsed;
         end
 
     end  % Static methods

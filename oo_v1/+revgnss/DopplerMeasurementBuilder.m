@@ -96,9 +96,12 @@ classdef DopplerMeasurementBuilder
             twr_drift_model  = zeros(M,1);
             twr_drift_sigma  = zeros(M,1);
             t_prod_per_row   = zeros(M,1);
+            driftMeta_ = struct('driftAnchorStatus','unknown','driftProductMode','unknown', ...
+                'driftSigmaSource','zero','explicitProductDriftUsed',false, ...
+                'truthHistoryProductDriftUsed',false);
             if includeProdDrift
                 try
-                    [~, bdot_mod_vec, dsig_vec, tprod_vec, ~] = ...
+                    [~, bdot_mod_vec, dsig_vec, tprod_vec, driftMeta_] = ...
                         revgnss.TowerClockCorrectionProvider.computeDrift( ...
                         cfg, towers, twr_list, t_s);
                     twr_drift_model = bdot_mod_vec;
@@ -171,19 +174,27 @@ classdef DopplerMeasurementBuilder
                 Hd(mi, stateMap.bdot_rx_idx) = 1;
             end
 
-            % Stage 83: add product drift sigma^2 to R diagonal
-            Rd_diag = Rd_diag + twr_drift_sigma.^2;
-            Rd = diag(Rd_diag);
+            % Stage 84: Doppler R diagonal policy — product drift variance counted exactly once.
+            % addDopplerDriftBlock adds the full block (diagonal + off-diagonal) for same-tower/epoch rows.
+            % When that helper is NOT called, add drift variance to diagonal only.
+            Rd = diag(Rd_diag);  % tracking noise only at this point
 
-            % Stage 83: add shared product-drift covariance blocks to R
             doppCovInfo = struct('dopplerProductCovApplied',false,'dopplerProductCovBlocks',0, ...
                 'dopplerProductCovMaxSigma_mps',0,'dopplerProductCovSPD',false,'dopplerRCondition',NaN);
+            dopplerDriftDiagPolicy = 'trackingOnlyNoProductDrift';
 
             if applyDopplerProdCov && any(twr_drift_sigma > 0) && M > 0
+                % Block + diagonal: let addDopplerDriftBlock own the full drift contribution.
+                % Do NOT pre-add drift sigma to Rd_diag — that would double-count.
                 try
                     [Rd, doppCovInfo] = revgnss.ProductClockCovarianceBuilder.addDopplerDriftBlock( ...
                         Rd, twr_list, t_prod_per_row, twr_drift_sigma, cfg);
+                    dopplerDriftDiagPolicy = 'trackingOnlyPlusBlock';
                 catch; end
+            elseif any(twr_drift_sigma > 0)
+                % Product cov disabled: add diagonal-only drift contribution (no block).
+                Rd = Rd + diag(twr_drift_sigma.^2);
+                dopplerDriftDiagPolicy = 'diagonalOnlyProductDrift';
             end
 
             dopplerInfo.z       = zd;
@@ -206,6 +217,12 @@ classdef DopplerMeasurementBuilder
             dopplerInfo.dopplerProductCovMaxSigma_mps   = doppCovInfo.dopplerProductCovMaxSigma_mps;
             dopplerInfo.dopplerProductCovSPD            = doppCovInfo.dopplerProductCovSPD;
             dopplerInfo.dopplerRCondition               = doppCovInfo.dopplerRCondition;
+            dopplerInfo.dopplerDriftVarianceDiagonalPolicy = dopplerDriftDiagPolicy;
+            dopplerInfo.driftAnchorStatus                = driftMeta_.driftAnchorStatus;
+            dopplerInfo.driftProductMode                 = driftMeta_.driftProductMode;
+            dopplerInfo.driftSigmaSource                 = driftMeta_.driftSigmaSource;
+            dopplerInfo.explicitProductDriftUsed         = driftMeta_.explicitProductDriftUsed;
+            dopplerInfo.truthHistoryProductDriftUsed     = driftMeta_.truthHistoryProductDriftUsed;
             dopplerInfo.codeDopplerCrossCovStatus       = 'notImplementedGuarded';
 
             rows.useInEKF = useInEKF;

@@ -1002,10 +1002,26 @@ classdef ReportRunner
             summary.carrierProductDriftTermIncluded  = false;
             summary.carrierProductBoundaryHandling   = 'withinProductEpochOnlyV1';
             summary.carrierRCondition                = NaN;
+            % Stage 84 new summary fields
+            summary.dopplerDriftVarianceDiagonalPolicy   = 'trackingOnlyPlusBlock';
+            summary.codeProductCovarianceStatus          = 'stage74BlockRTowerClockCorrelation';
+            summary.dopplerProductCovarianceStatus       = 'stage83ProductDriftBlock';
+            summary.carrierProductCovarianceStatus       = 'stage83TimeVaryingDriftResidual';
+            summary.carrierProductArcReferenceStatus     = 'notAvailableUsingProductEpochAgeV1';
+            summary.sigmaToRmsJ2Ratio                    = NaN;
+            summary.sigmaToMaxJ2Ratio                    = NaN;
+            summary.driftAnchorStatus                    = 'productEpochTruth';
+            summary.explicitProductDriftUsed             = false;
+            summary.truthHistoryProductDriftUsed         = false;
+            summary.driftSigmaSource                     = 'productConfig';
+            try; summary.sigmaToRmsJ2Ratio = cfg.diagnostics.dynamicsMismatch.sigmaToRmsJ2Ratio; catch; end
+            try; summary.sigmaToMaxJ2Ratio = cfg.diagnostics.dynamicsMismatch.sigmaToMaxJ2Ratio; catch; end
+            try; summary.dopplerDriftVarianceDiagonalPolicy = cfg.covariance.productClock.dopplerDriftDiagonalPolicy; catch; end
             summary.codeDopplerCrossCovStatus        = 'notImplementedGuarded';
-            summary.carrierDopplerConsistencyStatus  = 'notEvaluated';
+            summary.carrierDopplerConsistencyStatus  = 'notImplementedGuarded';
+            try; summary.carrierDopplerConsistencyStatus = cfg.diagnostics.carrierDoppler.consistencyStatus; catch; end
             summary.carrierDopplerRms_mps            = NaN;
-            summary.covarianceCompletenessStatus     = 'stage83productClockCovarianceAwareV2';
+            summary.covarianceCompletenessStatus     = 'stage84productClockCovarianceHardenedV2';
             % Populate from dopplerInfo in diag.log if available
             try
                 dlog83_ = diag.log;
@@ -1042,6 +1058,26 @@ classdef ReportRunner
                         rc83_ = [di83_.dopplerRCondition];
                         rc83_ = rc83_(isfinite(rc83_));
                         if ~isempty(rc83_); summary.dopplerRCondition = min(rc83_); end
+                    end
+                    % Stage 84: harvest drift diagonal policy and carrier arc reference status
+                    if isfield(di83_,'dopplerDriftVarianceDiagonalPolicy')
+                        uPols_ = unique({di83_.dopplerDriftVarianceDiagonalPolicy});
+                        if numel(uPols_) == 1
+                            summary.dopplerDriftVarianceDiagonalPolicy = uPols_{1};
+                        else
+                            summary.dopplerDriftVarianceDiagonalPolicy = 'mixed';
+                        end
+                    end
+                    % Stage 84: harvest driftAnchorStatus from dopplerInfo meta
+                    if isfield(di83_,'driftAnchorStatus')
+                        das84_ = unique({di83_.driftAnchorStatus});
+                        if numel(das84_) == 1; summary.driftAnchorStatus = das84_{1}; end
+                    end
+                    if isfield(di83_,'explicitProductDriftUsed')
+                        summary.explicitProductDriftUsed = any([di83_.explicitProductDriftUsed]);
+                    end
+                    if isfield(di83_,'truthHistoryProductDriftUsed')
+                        summary.truthHistoryProductDriftUsed = any([di83_.truthHistoryProductDriftUsed]);
                     end
                 end
             catch; end

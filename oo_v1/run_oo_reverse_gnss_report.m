@@ -35,7 +35,7 @@ oo_v1_envAllToggles_ = strcmpi(getenv('OO_V1_ALL_TOGGLES'), 'true');
 if oo_v1_envValidate_; oo_v1_envAllToggles_ = true; end  % validate always uses all toggles
 oo_v1_envStage_      = str2double(getenv('OO_V1_VALIDATION_STAGE'));
 if isnan(oo_v1_envStage_); oo_v1_envStage_ = 0; end
-if oo_v1_envValidate_ && oo_v1_envStage_ == 0; oo_v1_envStage_ = 83; end
+if oo_v1_envValidate_ && oo_v1_envStage_ == 0; oo_v1_envStage_ = 84; end
 oo_v1_envCompile_    = strtrim(getenv('OO_V1_REPORT_COMPILE_TEX'));
 
 cfg = revgnss.ConfigFactory.defaultConfig();
@@ -402,6 +402,13 @@ cfg.covariance.productClock.carrierPolicy               = 'timeVaryingProductRes
 cfg.covariance.productClock.dopplerPolicy               = 'sharedClockDriftProductBlock';
 cfg.covariance.productClock.ensureSPD                   = true;
 cfg.covariance.productClock.jitter_m2                   = 1e-12;
+
+% --- Stage 84: Doppler/product-covariance correctness hardening ---
+% Doppler R diagonal policy: trackingOnlyPlusBlock (no pre-add, helper owns all drift cov).
+% Carrier: arc-reference status metadata.
+% J2 ratio diagnostics: sigma/RMS and sigma/max for process-noise adequacy.
+cfg.diagnostics.dynamicsMismatch.computeJ2Ratios       = true;
+cfg.diagnostics.carrierDopplerConsistency.status       = 'notImplementedGuarded';
 
 % --- Troposphere ZWD EKF state ----------------------------------
 % Disabled in the default multi-receiver report.  Stage 15 ZWD states are

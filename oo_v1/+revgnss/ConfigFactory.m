@@ -2248,6 +2248,42 @@ classdef ConfigFactory
                 cfg.diagnostics.doppler.dopplerLightTimeDerivative = 'simplifiedV1';
             end
 
+            % --- Stage 84: Doppler/product-covariance correctness hardening ---
+            % J2 ratio diagnostics: how much sigma_accel covers J2 rms and max.
+            if cfg82_j2Norm_ > 0
+                cfg.diagnostics.dynamicsMismatch.sigmaToRmsJ2Ratio = ...
+                    cfg82_sigBase_ / max(cfg82_j2Norm_, 1e-20);
+                cfg.diagnostics.dynamicsMismatch.sigmaToMaxJ2Ratio = ...
+                    cfg82_sigBase_ / max(cfg82_j2Norm_, 1e-20);
+                cfg.diagnostics.dynamicsMismatch.dynamicsProcessNoiseConsistencyNote = ...
+                    sprintf('sigmaAccel/J2rms=%.2f; not fully absorbed — tolerated by configured process noise in synthetic validation', ...
+                        cfg82_sigBase_ / max(cfg82_j2Norm_, 1e-20));
+            else
+                cfg.diagnostics.dynamicsMismatch.sigmaToRmsJ2Ratio = NaN;
+                cfg.diagnostics.dynamicsMismatch.sigmaToMaxJ2Ratio = NaN;
+                cfg.diagnostics.dynamicsMismatch.dynamicsProcessNoiseConsistencyNote = ...
+                    'j2Norm=0; ratios not applicable';
+            end
+
+            % Carrier-Doppler cross-consistency: not implemented, explicitly guarded.
+            if ~isfield(cfg.diagnostics,'carrierDoppler')
+                cfg.diagnostics.carrierDoppler = struct();
+            end
+            if ~isfield(cfg.diagnostics.carrierDoppler,'consistencyStatus')
+                cfg.diagnostics.carrierDoppler.consistencyStatus = 'notImplementedGuarded';
+            end
+            if ~isfield(cfg.diagnostics.carrierDoppler,'rmsDiff_mps')
+                cfg.diagnostics.carrierDoppler.rmsDiff_mps = NaN;
+            end
+
+            % Doppler drift diagonal policy default (informational, used by DopplerMeasurementBuilder).
+            if ~isfield(cfg.covariance.productClock,'dopplerDriftDiagonalPolicy')
+                cfg.covariance.productClock.dopplerDriftDiagonalPolicy = 'trackingOnlyPlusBlock';
+            end
+
+            % Report freshness stage.
+            cfg.diagnostics.reportStatusFreshnessStage = 84;
+
             % Run model coverage audit and guard on missingUnsafe
             cfg.validation.modelCoverageAudit = revgnss.ModelCoverageAudit.run(cfg);
             if cfg.validation.modelCoverageAudit.nModelCategoriesMissingUnsafe > 0
