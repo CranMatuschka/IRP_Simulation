@@ -1,8 +1,13 @@
 classdef DopplerMeasurementBuilder
     % DopplerMeasurementBuilder  Constructs Doppler EKF measurement rows.
     %
-    % Extracted from MeasurementModel.computeMeasurements (Stage 12A, Step 1).
-    % All physics identical to the original block — no numerical changes.
+    % Stage 83 upgrade: frame-consistent one-way range-rate model.
+    %   - Adds tower ECI rotational velocity (sagnacRate term) to both truth
+    %     and model; captures the Sagnac-rate effect consistently.
+    %   - Tower clock product drift model used (not zeroed in product modes).
+    %   - Doppler R includes product-drift covariance blocks (same tower/epoch).
+    %   - Sagnac rate guard: capturedByTowerVelocityTerm (no double count).
+    %   - Light-time rate derivative: metadataOnlyV1 (simplified).
 
     methods (Static)
 
@@ -10,26 +15,6 @@ classdef DopplerMeasurementBuilder
                 twr_list, ant_list, r_ants_truth, r_ants_est, x_est, stateMap, ...
                 towerClkMode, t_s)
             % build  Construct Doppler measurement rows from a pre-built visibility list.
-            %
-            % Inputs:
-            %   cfg          — simulation config struct
-            %   errorChain   — ErrorChain object (for drawNormal)
-            %   asset        — SpaceAsset (for truth velocity and clock drift)
-            %   towers       — cell array of GroundTower objects
-            %   twr_list     — M×1 tower indices for visible (tower, antenna) pairs
-            %   ant_list     — M×1 antenna indices
-            %   r_ants_truth — 3×N_ant truth antenna positions ECEF [m]
-            %   r_ants_est   — 3×N_ant estimated antenna positions ECEF [m]
-            %   x_est        — EKF state vector
-            %   stateMap     — struct with v_idx, bdot_rx_idx fields
-            %   towerClkMode — string from getTowerClockMode_
-            %   t_s          — current epoch [s] (for periodic warnings)
-            %
-            % Outputs:
-            %   rows.z / .h / .H / .R  — EKF rows (empty when not stacked)
-            %   rows.useInEKF           — true when rows should be appended
-            %   rows.ionoRateExclusion  — true: caller must set H=H_pr and return
-            %   dopplerInfo             — struct set as errStruct.doppler by caller
 
             if nargin < 12 || isempty(t_s); t_s = 0; end
 
@@ -53,7 +38,6 @@ classdef DopplerMeasurementBuilder
                 return
             end
 
-            % Physics enable flags
             doTruth  = isfield(cfg,'physics') && isfield(cfg.physics,'doppler') && ...
                        isfield(cfg.physics.doppler,'truth') && cfg.physics.doppler.truth.enable;
             doModel  = isfield(cfg,'physics') && isfield(cfg.physics,'doppler') && ...
@@ -71,8 +55,6 @@ classdef DopplerMeasurementBuilder
                      'Cannot build h model without physics.doppler.model.enable.']);
             end
 
-            % Ionosphere-rate guard: no Doppler IF combination exists, so exclude rows
-            % rather than pass a biased observable.  Caller must early-return.
             ionoRateEnabled = isfield(cfg,'errors') && ...
                 isfield(cfg.errors,'ionosphere') && ...
                 isfield(cfg.errors.ionosphere,'includeRateTerm') && ...
@@ -88,6 +70,14 @@ classdef DopplerMeasurementBuilder
                 return
             end
 
+            % --- Stage 83: read config flags ---
+            includeTowerVel     = true;
+            try; includeTowerVel = cfg.measurements.doppler.includeTowerRotationalVelocity; catch; end
+            includeProdDrift    = true;
+            try; includeProdDrift = cfg.measurements.doppler.includeTowerClockProductDrift; catch; end
+            applyDopplerProdCov = true;
+            try; applyDopplerProdCov = cfg.covariance.productClock.applyToDoppler; catch; end
+
             v_rx_true    = asset.v_ecef_mps;
             v_rx_est     = x_est(stateMap.v_idx);
             bdot_rx_true = asset.clock.getDriftMetersPerSecond();
@@ -98,63 +88,132 @@ classdef DopplerMeasurementBuilder
             hd      = zeros(M,1);
             Hd      = zeros(M,nx);
             Rd_diag = sigma_dop^2 * ones(M,1);
+
             towerClockDriftTruth_mps = zeros(M,1);
             towerClockDriftModel_mps = zeros(M,1);
 
-            for mi = 1:M
-                ti  = twr_list(mi);
-                ai  = ant_list(mi);
+            % Stage 83: product drift for all towers (shared cache; consistent with compute())
+            twr_drift_model  = zeros(M,1);
+            twr_drift_sigma  = zeros(M,1);
+            t_prod_per_row   = zeros(M,1);
+            if includeProdDrift
+                try
+                    [~, bdot_mod_vec, dsig_vec, tprod_vec, ~] = ...
+                        revgnss.TowerClockCorrectionProvider.computeDrift( ...
+                        cfg, towers, twr_list, t_s);
+                    twr_drift_model = bdot_mod_vec;
+                    twr_drift_sigma = dsig_vec;
+                    t_prod_per_row  = tprod_vec;
+                catch
+                    for mi2 = 1:M
+                        ti2 = twr_list(mi2);
+                        if strcmp(towerClkMode, 'perfectCorrection')
+                            twr_drift_model(mi2) = towers{ti2}.getClockDriftMetersPerSecond();
+                        end
+                    end
+                end
+            else
+                for mi2 = 1:M
+                    ti2 = twr_list(mi2);
+                    if strcmp(towerClkMode, 'perfectCorrection')
+                        twr_drift_model(mi2) = towers{ti2}.getClockDriftMetersPerSecond();
+                    end
+                end
+            end
 
-                % Tower clock drift: use truth in perfectCorrection mode, else 0
+            sagnacRateVec  = zeros(M,1);
+            towerRotSpeeds = zeros(M,1);
+
+            for mi = 1:M
+                ti = twr_list(mi);
+                ai = ant_list(mi);
+
                 bdot_twr = towers{ti}.getClockDriftMetersPerSecond();
                 towerClockDriftTruth_mps(mi) = bdot_twr;
-                if strcmp(towerClkMode, 'perfectCorrection')
-                    bdot_twr_model = bdot_twr;
-                else
-                    bdot_twr_model = 0;
-                end
-                towerClockDriftModel_mps(mi) = bdot_twr_model;
+                towerClockDriftModel_mps(mi) = twr_drift_model(mi);
 
-                % Truth-side: unit vector from truth tower to truth antenna
+                % Truth side
                 r_twr_t = revgnss.MeasurementModelUtils.towerPositionEcef(cfg, towers{ti}, ti, 'truth');
                 delta_t = r_ants_truth(:,ai) - r_twr_t;
                 rho_t   = norm(delta_t); if rho_t < 1; rho_t = 1; end
                 u_t     = delta_t / rho_t;
 
                 if doTruth
-                    rhoDot_true = u_t' * v_rx_true;
+                    if includeTowerVel
+                        [rhoDot_true, ~, ~, sagnac_t, ~] = revgnss.OneWayRangeRateModel.compute( ...
+                            r_ants_truth(:,ai), v_rx_true, r_twr_t, cfg);
+                        sagnacRateVec(mi) = sagnac_t;
+                    else
+                        rhoDot_true = u_t' * v_rx_true;
+                    end
                     zd(mi) = rhoDot_true + bdot_rx_true - bdot_twr + ...
                              sigma_dop * errorChain.drawNormal(1,1);
                 end
 
-                % Model-side: unit vector from model tower to estimated antenna
+                % Model side
                 r_twr_e = revgnss.MeasurementModelUtils.towerPositionEcef(cfg, towers{ti}, ti, 'model');
                 delta_e = r_ants_est(:,ai) - r_twr_e;
                 rho_e   = norm(delta_e); if rho_e < 1; rho_e = 1; end
                 u_e     = delta_e / rho_e;
 
                 if doModel
-                    rhoDot_est = u_e' * v_rx_est;
-                    hd(mi) = rhoDot_est + bdot_rx_est - bdot_twr_model;
+                    if includeTowerVel
+                        [rhoDot_est, ~, v_twr_eci, ~, ~] = revgnss.OneWayRangeRateModel.compute( ...
+                            r_ants_est(:,ai), v_rx_est, r_twr_e, cfg);
+                        towerRotSpeeds(mi) = norm(v_twr_eci);
+                    else
+                        rhoDot_est = u_e' * v_rx_est;
+                    end
+                    hd(mi) = rhoDot_est + bdot_rx_est - twr_drift_model(mi);
                 end
 
-                % H: velocity columns (unit vector) and clock drift column (+1)
                 Hd(mi, stateMap.v_idx)       = u_e';
                 Hd(mi, stateMap.bdot_rx_idx) = 1;
             end
 
-            dopplerInfo.z     = zd;
-            dopplerInfo.h     = hd;
-            dopplerInfo.prefit = zd - hd;
-            dopplerInfo.towerClockDriftTruth_mps = towerClockDriftTruth_mps;
-            dopplerInfo.towerClockDriftModel_mps = towerClockDriftModel_mps;
+            % Stage 83: add product drift sigma^2 to R diagonal
+            Rd_diag = Rd_diag + twr_drift_sigma.^2;
+            Rd = diag(Rd_diag);
+
+            % Stage 83: add shared product-drift covariance blocks to R
+            doppCovInfo = struct('dopplerProductCovApplied',false,'dopplerProductCovBlocks',0, ...
+                'dopplerProductCovMaxSigma_mps',0,'dopplerProductCovSPD',false,'dopplerRCondition',NaN);
+
+            if applyDopplerProdCov && any(twr_drift_sigma > 0) && M > 0
+                try
+                    [Rd, doppCovInfo] = revgnss.ProductClockCovarianceBuilder.addDopplerDriftBlock( ...
+                        Rd, twr_list, t_prod_per_row, twr_drift_sigma, cfg);
+                catch; end
+            end
+
+            dopplerInfo.z       = zd;
+            dopplerInfo.h       = hd;
+            dopplerInfo.prefit  = zd - hd;
+            dopplerInfo.towerClockDriftTruth_mps        = towerClockDriftTruth_mps;
+            dopplerInfo.towerClockDriftModel_mps        = towerClockDriftModel_mps;
+            dopplerInfo.sagnacRateVec_mps               = sagnacRateVec;
+            dopplerInfo.sagnacRateMax_mps               = max(abs(sagnacRateVec));
+            dopplerInfo.towerRotSpeeds_mps              = towerRotSpeeds;
+            dopplerInfo.meanTowerRotSpeed_mps           = mean(towerRotSpeeds(towerRotSpeeds > 0));
+            dopplerInfo.maxTowerRotSpeed_mps            = max(towerRotSpeeds);
+            dopplerInfo.dopplerModelLevel               = 'frameConsistentV2';
+            dopplerInfo.towerRotationalVelocityIncluded = includeTowerVel;
+            dopplerInfo.sagnacRateHandling              = 'capturedByTowerVelocityTerm';
+            dopplerInfo.lightTimeRateHandling           = 'metadataOnlyV1';
+            dopplerInfo.towerClockProductDriftInDoppler = includeProdDrift;
+            dopplerInfo.dopplerProductCovApplied        = doppCovInfo.dopplerProductCovApplied;
+            dopplerInfo.dopplerProductCovBlocks         = doppCovInfo.dopplerProductCovBlocks;
+            dopplerInfo.dopplerProductCovMaxSigma_mps   = doppCovInfo.dopplerProductCovMaxSigma_mps;
+            dopplerInfo.dopplerProductCovSPD            = doppCovInfo.dopplerProductCovSPD;
+            dopplerInfo.dopplerRCondition               = doppCovInfo.dopplerRCondition;
+            dopplerInfo.codeDopplerCrossCovStatus       = 'notImplementedGuarded';
 
             rows.useInEKF = useInEKF;
             if useInEKF
                 rows.z = zd;
                 rows.h = hd;
                 rows.H = Hd;
-                rows.R = diag(Rd_diag);
+                rows.R = Rd;
             end
         end
 

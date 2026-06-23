@@ -35,7 +35,7 @@ oo_v1_envAllToggles_ = strcmpi(getenv('OO_V1_ALL_TOGGLES'), 'true');
 if oo_v1_envValidate_; oo_v1_envAllToggles_ = true; end  % validate always uses all toggles
 oo_v1_envStage_      = str2double(getenv('OO_V1_VALIDATION_STAGE'));
 if isnan(oo_v1_envStage_); oo_v1_envStage_ = 0; end
-if oo_v1_envValidate_ && oo_v1_envStage_ == 0; oo_v1_envStage_ = 82; end
+if oo_v1_envValidate_ && oo_v1_envStage_ == 0; oo_v1_envStage_ = 83; end
 oo_v1_envCompile_    = strtrim(getenv('OO_V1_REPORT_COMPILE_TEX'));
 
 cfg = revgnss.ConfigFactory.defaultConfig();
@@ -103,7 +103,7 @@ cfg.estimator.integerAmbiguity.resetOnSlip                = true;
 % (all disabled) — do not enable them here.
 cfg.scenario.nSpaceAssets = 1;        % one estimated spacecraft only
 cfg.scenario.orbitClass   = 'GEO';    % 'GEO' | 'MEO' | 'LEO'
-%                                      % Stage 67: twoBodyRk4 truth propagator (see ScenarioPresets)
+%                                      % Stage 82: j2Rk4 truth (j2Rk4 + twoBody EKF mismatch; see ScenarioPresets, Stage 82)
 
 % --- Frequency --------------------------------------------------
 % Stage 77 canonical: cfg.signals.enabledMask is the single frequency control.
@@ -372,20 +372,36 @@ cfg.carrierSlip.syntheticSlipInjection.jumpCycles   = 1;
 % This is equivalent to R = diag(sigma_tracking^2) + sum_t(sigma_t^2*J_t)
 % where J_t is the all-ones block for tower t.  R remains symmetric PD.
 %
-% Carrier R: unchanged.  Float ambiguity absorbs constant arc bias; Stage 74
-%   does not add time-varying product error covariance to carrier R because
-%   that would require modelling product-error time correlation correctly.
-% Doppler R: simplified v1 (no tower-clock drift sigma added).
+% Carrier R: Stage 83 adds time-varying product drift residual (age-weighted outer product).
+%   Float ambiguity absorbs constant arc bias; drift covariance from arc-start is included.
+% Doppler R: Stage 83 frameConsistentV2 — tower rotation + product-drift covariance blocks.
 cfg.covariance.sharedErrors.enable                     = true;
 cfg.covariance.sharedErrors.mode                       = 'blockTowerClockProduct';
 cfg.covariance.sharedErrors.applyTowerClockToCode      = true;
 cfg.covariance.sharedErrors.applyTowerClockToCarrier   = false;
 cfg.covariance.sharedErrors.applyTowerClockToDoppler   = false;
 cfg.covariance.sharedErrors.carrierPolicy              = 'arcBiasAbsorbsConstantProductBias';
-cfg.covariance.sharedErrors.dopplerPolicy              = 'simplifiedV1';
+cfg.covariance.sharedErrors.dopplerPolicy              = 'frameConsistentV2';
 cfg.covariance.sharedErrors.ensureSPD                  = true;
 cfg.covariance.sharedErrors.jitter_m2                  = 1e-12;
 cfg.covariance.sharedErrors.reportDiagnostics          = true;
+
+% --- Stage 83: Doppler and carrier product-covariance closure ---
+cfg.measurements.doppler.modelLevel                     = 'frameConsistentV2';
+cfg.measurements.doppler.includeTowerRotationalVelocity = true;
+cfg.measurements.doppler.includeSagnacRate              = false;
+cfg.measurements.doppler.includeLightTimeRate           = false;
+cfg.measurements.doppler.includeTowerClockProductDrift  = true;
+cfg.measurements.doppler.jacobianMode                   = 'analyticRangeRateV1';
+cfg.covariance.productClock.enable                      = true;
+cfg.covariance.productClock.applyToCode                 = true;
+cfg.covariance.productClock.applyToDoppler              = true;
+cfg.covariance.productClock.applyToCarrier              = true;
+cfg.covariance.productClock.crossCodeDoppler            = false;
+cfg.covariance.productClock.carrierPolicy               = 'timeVaryingProductResidualOnly';
+cfg.covariance.productClock.dopplerPolicy               = 'sharedClockDriftProductBlock';
+cfg.covariance.productClock.ensureSPD                   = true;
+cfg.covariance.productClock.jitter_m2                   = 1e-12;
 
 % --- Troposphere ZWD EKF state ----------------------------------
 % Disabled in the default multi-receiver report.  Stage 15 ZWD states are
@@ -534,8 +550,8 @@ if stageAllToggles || oo_v1_envAllToggles_
     cfg.estimator.enforceCarrierArcConsistency.enable            = true;
     cfg.diagnostics.carrierArcConsistencyEnforcement.enable      = true;
     cfg.diagnostics.pluginRegistry.enable                        = true;
-    % Stage 79: active scenario dynamics are owned by ScenarioPresets
-    % (twoBodyRk4 truth + matched twoBody EKF); no temporary J2 override.
+    % Stage 82: active scenario dynamics are owned by ScenarioPresets
+    % (j2Rk4 truth + twoBody EKF mismatch; Stage 82 default); no temporary J2 override.
     cfg.diagnostics.ekfDynamics.enable  = true;
     cfg.validation.stageAllToggles         = true;
     if oo_v1_envAllToggles_

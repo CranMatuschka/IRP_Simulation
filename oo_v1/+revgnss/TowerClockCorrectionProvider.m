@@ -259,6 +259,81 @@ classdef TowerClockCorrectionProvider
             sigma_corr = sqrt(max(var_corr, 0));
         end
 
+        function [bdot_truth, bdot_model, drift_sigma, t_prod_out, meta] = ...
+                computeDrift(cfg, towers, twr_list, t_s)
+            % computeDrift  Tower clock drift for Doppler model (Stage 83).
+            %
+            % Returns per-measurement drift truth, product model, sigma, and product epoch.
+            % Compatible with all tower clock modes. Uses the same persistent product-noise
+            % cache as compute(), so noise is deterministic and consistent across callers.
+            %
+            % Outputs:
+            %   bdot_truth  [M×1] tower truth drift [m/s]
+            %   bdot_model  [M×1] product-model drift (mode-dependent) [m/s]
+            %   drift_sigma [M×1] product drift sigma [m/s]
+            %   t_prod_out  [M×1] product epoch per measurement [s]
+            %   meta        struct (mode string)
+
+            M    = numel(twr_list);
+            mode = revgnss.TowerClockCorrectionProvider.towerClockMode(cfg);
+            [~, pc] = revgnss.TowerClockCorrectionProvider.productConfig_(cfg);
+
+            bdot_truth  = zeros(M,1);
+            bdot_model  = zeros(M,1);
+            drift_sigma = zeros(M,1);
+            t_prod_out  = zeros(M,1);
+
+            % Product epoch scalar — same logic as compute()
+            updateInterval_s = pc.updateInterval_s;
+            latency_s        = pc.latency_s;
+            try
+                tc2 = cfg.errors.towerClock;
+                if isfield(tc2,'updateInterval_s') && pc.updateInterval_s <= 0
+                    updateInterval_s = tc2.updateInterval_s;
+                end
+                if isfield(tc2,'latency_s') && pc.latency_s < 0
+                    latency_s = tc2.latency_s;
+                end
+            catch; end
+            t_avail = t_s - latency_s;
+            if updateInterval_s > 0
+                t_prod_scalar = floor(t_avail / updateInterval_s) * updateInterval_s;
+            else
+                t_prod_scalar = t_avail;
+            end
+            if t_prod_scalar < 0; t_prod_scalar = 0; end
+
+            for mi = 1:M
+                ti = twr_list(mi);
+                bdot_truth(mi) = towers{ti}.getClockDriftMetersPerSecond();
+                t_prod_out(mi) = t_prod_scalar;
+
+                switch mode
+                    case 'perfectCorrection'
+                        bdot_model(mi)  = bdot_truth(mi);
+                        drift_sigma(mi) = 0;
+
+                    case 'truthHistoryProductNoisy'
+                        [~, d_noise] = revgnss.TowerClockCorrectionProvider.productNoise_( ...
+                            ti, t_prod_scalar, pc.sigmaBias_m, pc.sigmaDrift_mps);
+                        bdot_model(mi)  = bdot_truth(mi) + d_noise;
+                        drift_sigma(mi) = pc.sigmaDrift_mps;
+
+                    case {'truthProduct', 'product', 'productNoisy'}
+                        [~, d_noise] = revgnss.TowerClockCorrectionProvider.productNoise_( ...
+                            ti, t_prod_scalar, pc.sigmaBias_m, pc.sigmaDrift_mps);
+                        bdot_model(mi)  = bdot_truth(mi) + d_noise;
+                        drift_sigma(mi) = pc.sigmaDrift_mps;
+
+                    otherwise  % 'none', 'noisyCorrection'
+                        bdot_model(mi)  = 0;
+                        drift_sigma(mi) = 0;
+                end
+            end
+
+            meta.mode = mode;
+        end
+
     end  % Static methods
 
     methods (Static, Access = private)

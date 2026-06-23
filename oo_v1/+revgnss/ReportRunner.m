@@ -971,6 +971,81 @@ classdef ReportRunner
             summary.stage68MultipathEn = false;
             try; summary.stage68MultipathEn = cfg.errors.multipath.truth.enable || cfg.errors.multipath.model.enable; catch; end
 
+            % ---- Stage 83: Doppler dynamics and carrier product-covariance ----
+            summary.dopplerModelLevel                = 'ecefOnlyV1';
+            try; summary.dopplerModelLevel           = cfg.measurements.doppler.modelLevel; catch; end
+            summary.towerRotationalVelocityIncluded  = false;
+            try; summary.towerRotationalVelocityIncluded = cfg.measurements.doppler.includeTowerRotationalVelocity; catch; end
+            summary.meanTowerRotSpeed_mps            = NaN;
+            summary.maxTowerRotSpeed_mps             = NaN;
+            summary.sagnacRateHandling               = 'capturedByTowerVelocityTerm';
+            try; summary.sagnacRateHandling          = cfg.diagnostics.doppler.sagnacRateHandling; catch; end
+            summary.sagnacRateMax_mps                = NaN;
+            summary.lightTimeRateHandling            = 'metadataOnlyV1';
+            try; summary.lightTimeRateHandling       = cfg.diagnostics.doppler.lightTimeRateHandling; catch; end
+            summary.towerClockProductDriftInDoppler  = false;
+            try; summary.towerClockProductDriftInDoppler = cfg.measurements.doppler.includeTowerClockProductDrift; catch; end
+            summary.dopplerProductCovApplied         = false;
+            summary.dopplerProductCovBlocks          = 0;
+            summary.dopplerProductCovMaxSigma_mps    = 0;
+            summary.dopplerProductCovSPD             = false;
+            summary.dopplerRCondition                = NaN;
+            summary.carrierProductCovApplied         = false;
+            summary.carrierProductCovPolicy          = 'timeVaryingProductResidualOnly';
+            try; summary.carrierProductCovPolicy     = cfg.covariance.productClock.carrierPolicy; catch; end
+            summary.carrierProductTemporalModel      = 'perProductEpochBiasDriftV1';
+            try; summary.carrierProductTemporalModel = cfg.covariance.productClock.temporalModel; catch; end
+            summary.carrierProductCovBlocks          = 0;
+            summary.carrierProductCovMaxSigma_m      = NaN;
+            summary.carrierProductCovSPD             = false;
+            summary.carrierProductBiasTermIncluded   = false;
+            summary.carrierProductDriftTermIncluded  = false;
+            summary.carrierProductBoundaryHandling   = 'withinProductEpochOnlyV1';
+            summary.carrierRCondition                = NaN;
+            summary.codeDopplerCrossCovStatus        = 'notImplementedGuarded';
+            summary.carrierDopplerConsistencyStatus  = 'notEvaluated';
+            summary.carrierDopplerRms_mps            = NaN;
+            summary.covarianceCompletenessStatus     = 'stage83productClockCovarianceAwareV2';
+            % Populate from dopplerInfo in diag.log if available
+            try
+                dlog83_ = diag.log;
+                if ~isempty(dlog83_)
+                    di83_ = [dlog83_.dopplerInfo];
+                    if isfield(di83_,'sagnacRateMax_mps')
+                        snr83_ = [di83_.sagnacRateMax_mps];
+                        snr83_ = snr83_(isfinite(snr83_));
+                        if ~isempty(snr83_); summary.sagnacRateMax_mps = max(snr83_); end
+                    end
+                    if isfield(di83_,'meanTowerRotSpeed_mps')
+                        mtr83_ = [di83_.meanTowerRotSpeed_mps];
+                        mtr83_ = mtr83_(isfinite(mtr83_));
+                        if ~isempty(mtr83_); summary.meanTowerRotSpeed_mps = mean(mtr83_); end
+                    end
+                    if isfield(di83_,'maxTowerRotSpeed_mps')
+                        xtr83_ = [di83_.maxTowerRotSpeed_mps];
+                        xtr83_ = xtr83_(isfinite(xtr83_));
+                        if ~isempty(xtr83_); summary.maxTowerRotSpeed_mps = max(xtr83_); end
+                    end
+                    if isfield(di83_,'dopplerProductCovApplied')
+                        summary.dopplerProductCovApplied  = any([di83_.dopplerProductCovApplied]);
+                    end
+                    if isfield(di83_,'dopplerProductCovBlocks')
+                        summary.dopplerProductCovBlocks   = max([di83_.dopplerProductCovBlocks]);
+                    end
+                    if isfield(di83_,'dopplerProductCovMaxSigma_mps')
+                        summary.dopplerProductCovMaxSigma_mps = max([di83_.dopplerProductCovMaxSigma_mps]);
+                    end
+                    if isfield(di83_,'dopplerProductCovSPD')
+                        summary.dopplerProductCovSPD      = all([di83_.dopplerProductCovSPD]);
+                    end
+                    if isfield(di83_,'dopplerRCondition')
+                        rc83_ = [di83_.dopplerRCondition];
+                        rc83_ = rc83_(isfinite(rc83_));
+                        if ~isempty(rc83_); summary.dopplerRCondition = min(rc83_); end
+                    end
+                end
+            catch; end
+
             % ---- Stage 71/72: tower clock product summary fields -------
             % MUST be computed before PDF generation so ClockExactReportBuilder
             % receives finite product metadata (not NaN).  All values derive

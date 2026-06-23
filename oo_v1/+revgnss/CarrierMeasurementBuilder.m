@@ -84,6 +84,25 @@ classdef CarrierMeasurementBuilder
             cpInfo.hAttitudeNorm           = zeros(Mp_total, 1);
             cpInfo.rowUsesLinkGeometry     = true;
             cpInfo.carrierAttClosureAvail  = true;
+            % Stage 83: product-clock drift residual covariance metadata
+            cpInfo.productEpoch_s  = zeros(Mp_total, 1);
+            cpInfo.productAge_s    = zeros(Mp_total, 1);
+            cpInfo.sigmaDrift_mps  = zeros(Mp_total, 1);
+
+            % Stage 83: get product epoch and drift sigma for carrier rows
+            t_prod_carrier  = zeros(Mp, 1);
+            dsig_carrier    = zeros(Mp, 1);
+            applyCarrierProdCov = true;
+            try; applyCarrierProdCov = cfg.covariance.productClock.applyToCarrier; catch; end
+            if applyCarrierProdCov
+                try
+                    [~, ~, dsig_vec, tprod_vec, ~] = ...
+                        revgnss.TowerClockCorrectionProvider.computeDrift( ...
+                        cfg, towers, twr_pairs, t_s);
+                    t_prod_carrier = tprod_vec;
+                    dsig_carrier   = dsig_vec;
+                catch; end
+            end
 
             r_cm_est  = x_est(stateMap.r_idx);
             euler_est = x_est(stateMap.euler_idx);
@@ -202,6 +221,10 @@ classdef CarrierMeasurementBuilder
                 cpInfo.trackKey{rowOut}           = sprintf('T%03d_A%03d_S%02d', ti, ai, sigIdx);
                 cpInfo.ambiguityStateIdx(rowOut)  = ambStateIdx;
                 cpInfo.towerClkModel_m(rowOut)    = b_twr_m; % Stage 73
+                % Stage 83: product-clock drift residual metadata (per row)
+                cpInfo.productEpoch_s(rowOut) = t_prod_carrier(mi);
+                cpInfo.productAge_s(rowOut)   = t_s - t_prod_carrier(mi);
+                cpInfo.sigmaDrift_mps(rowOut) = dsig_carrier(mi);
 
                 % ---- H: position columns (analytic or finite-difference) ------
                 if doFD
@@ -262,6 +285,20 @@ classdef CarrierMeasurementBuilder
                 end
             end  % for mi
             end  % for si_
+
+            % Stage 83: add time-varying product drift covariance to carrier R
+            % Policy: timeVaryingProductResidualOnly — constant bias absorbed by float ambiguity;
+            % only age-weighted residual (from arc start) enters R.
+            carrierCovInfo = struct('carrierProductCovApplied',false,'carrierProductCovBlocks',0, ...
+                'carrierProductCovMaxSigma_m',0,'carrierProductCovSPD',false,'carrierRCondition',NaN);
+            if applyCarrierProdCov && any(dsig_carrier > 0)
+                try
+                    [R_phi, carrierCovInfo] = revgnss.ProductClockCovarianceBuilder.addCarrierDriftBlock( ...
+                        R_phi, cpInfo.towerIdx, cpInfo.productEpoch_s, cpInfo.productAge_s, ...
+                        cpInfo.sigmaDrift_mps, cfg);
+                catch; end
+            end
+            cpInfo.carrierProductCovInfo = carrierCovInfo;
 
             % Stage 47: carrier IF post-processing (replaces L1+L2 with IF rows)
             if revgnss.CarrierIonoFreeRowBuilder.shouldCombine(cfg) && nSig_ == 2

@@ -2180,6 +2180,74 @@ classdef ConfigFactory
                 end
             catch; end
 
+            % --- Stage 83: Doppler dynamics and carrier product-covariance closure ---
+            if ~isfield(cfg,'measurements'); cfg.measurements = struct(); end
+            if ~isfield(cfg.measurements,'doppler'); cfg.measurements.doppler = struct(); end
+            if ~isfield(cfg.measurements.doppler,'modelLevel')
+                cfg.measurements.doppler.modelLevel = 'frameConsistentV2';
+            end
+            if ~isfield(cfg.measurements.doppler,'includeTowerRotationalVelocity')
+                cfg.measurements.doppler.includeTowerRotationalVelocity = true;
+            end
+            if ~isfield(cfg.measurements.doppler,'includeSagnacRate')
+                cfg.measurements.doppler.includeSagnacRate = false;
+            end
+            if ~isfield(cfg.measurements.doppler,'includeLightTimeRate')
+                cfg.measurements.doppler.includeLightTimeRate = false;
+            end
+            if ~isfield(cfg.measurements.doppler,'includeTowerClockProductDrift')
+                cfg.measurements.doppler.includeTowerClockProductDrift = true;
+            end
+            if ~isfield(cfg.measurements.doppler,'jacobianMode')
+                cfg.measurements.doppler.jacobianMode = 'analyticRangeRateV1';
+            end
+            if ~isfield(cfg,'covariance'); cfg.covariance = struct(); end
+            if ~isfield(cfg.covariance,'productClock'); cfg.covariance.productClock = struct(); end
+            if ~isfield(cfg.covariance.productClock,'enable')
+                cfg.covariance.productClock.enable = true;
+            end
+            if ~isfield(cfg.covariance.productClock,'applyToCode')
+                cfg.covariance.productClock.applyToCode = true;
+            end
+            if ~isfield(cfg.covariance.productClock,'applyToDoppler')
+                cfg.covariance.productClock.applyToDoppler = true;
+            end
+            if ~isfield(cfg.covariance.productClock,'applyToCarrier')
+                cfg.covariance.productClock.applyToCarrier = true;
+            end
+            if ~isfield(cfg.covariance.productClock,'crossCodeDoppler')
+                cfg.covariance.productClock.crossCodeDoppler = false;
+            end
+            if ~isfield(cfg.covariance.productClock,'carrierPolicy')
+                cfg.covariance.productClock.carrierPolicy = 'timeVaryingProductResidualOnly';
+            end
+            if ~isfield(cfg.covariance.productClock,'dopplerPolicy')
+                cfg.covariance.productClock.dopplerPolicy = 'sharedClockDriftProductBlock';
+            end
+            if ~isfield(cfg.covariance.productClock,'temporalModel')
+                cfg.covariance.productClock.temporalModel = 'perProductEpochBiasDriftV1';
+            end
+            if ~isfield(cfg.covariance.productClock,'ensureSPD')
+                cfg.covariance.productClock.ensureSPD = true;
+            end
+            if ~isfield(cfg.covariance.productClock,'jitter_m2')
+                cfg.covariance.productClock.jitter_m2 = 1e-12;
+            end
+            if ~isfield(cfg,'diagnostics'); cfg.diagnostics = struct(); end
+            if ~isfield(cfg.diagnostics,'doppler'); cfg.diagnostics.doppler = struct(); end
+            if ~isfield(cfg.diagnostics.doppler,'modelLevel')
+                cfg.diagnostics.doppler.modelLevel = 'frameConsistentV2';
+            end
+            if ~isfield(cfg.diagnostics.doppler,'sagnacRateHandling')
+                cfg.diagnostics.doppler.sagnacRateHandling = 'capturedByTowerVelocityTerm';
+            end
+            if ~isfield(cfg.diagnostics.doppler,'lightTimeRateHandling')
+                cfg.diagnostics.doppler.lightTimeRateHandling = 'metadataOnlyV1';
+            end
+            if ~isfield(cfg.diagnostics.doppler,'dopplerLightTimeDerivative')
+                cfg.diagnostics.doppler.dopplerLightTimeDerivative = 'simplifiedV1';
+            end
+
             % Run model coverage audit and guard on missingUnsafe
             cfg.validation.modelCoverageAudit = revgnss.ModelCoverageAudit.run(cfg);
             if cfg.validation.modelCoverageAudit.nModelCategoriesMissingUnsafe > 0
