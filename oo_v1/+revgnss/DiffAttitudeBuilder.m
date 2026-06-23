@@ -72,6 +72,18 @@ classdef DiffAttitudeBuilder
             store.integerClassification         = 'notAttempted';
             store.externalRefUsedAsSearchCenter = false;
             store.externalRefUsedForCalibration = true;
+            % Stage 76: dual-frequency AR accumulation stores.
+            arFreqEn = [true, false];
+            try
+                arFreqEn = logical( ...
+                    cfg.estimator.diffAtt.ambiguityResolution.enabledByFrequency);
+            catch; end
+            store.arFreqEnabled     = arFreqEn;
+            store.dualFreqArEnabled = numel(arFreqEn) >= 2 && arFreqEn(2);
+            store.accumN_L2         = zeros(nTowers, nBase);
+            store.accumSum_L2       = zeros(nTowers, nBase);
+            store.accumSumSq_L2     = zeros(nTowers, nBase);
+            store.delta_B_L2        = zeros(nTowers, nBase);
         end
 
         % ----------------------------------------------------------------
@@ -138,6 +150,31 @@ classdef DiffAttitudeBuilder
                         store.recalibCount = store.recalibCount + 1;
                     end
                 end
+                % Stage 76: L2 accumulation for dual-frequency baseline AR.
+                % Uses same geometric model (h_i-h_ref is frequency-independent).
+                if store.dualFreqArEnabled && hasSigIdx
+                    refMskL2_ = (cpInfo.towerIdx == ti) & (cpInfo.antennaIdx == 1) & ...
+                        (cpInfo.signalIdx == 2);
+                    if sum(refMskL2_) == 1
+                        phi_ref_L2_ = cpInfo.phi_m(refMskL2_);
+                        h_ref_L2_ = revgnss.MeasurementModelUtils.modelRangeOnly( ...
+                            cfg, towers, ti, 1, r_cm, euler, leverArms);
+                        for bi = 1:store.nBaselines
+                            ai = bi + 1;
+                            if store.calibrated && store.activeMask(ti,bi); continue; end
+                            bMskL2_ = (cpInfo.towerIdx == ti) & (cpInfo.antennaIdx == ai) & ...
+                                (cpInfo.signalIdx == 2);
+                            if sum(bMskL2_) ~= 1; continue; end
+                            phi_i_L2_ = cpInfo.phi_m(bMskL2_);
+                            h_i_L2_   = revgnss.MeasurementModelUtils.modelRangeOnly( ...
+                                cfg, towers, ti, ai, r_cm, euler, leverArms);
+                            dv_L2_ = (phi_i_L2_ - phi_ref_L2_) - (h_i_L2_ - h_ref_L2_);
+                            store.accumN_L2(ti,bi)     = store.accumN_L2(ti,bi)     + 1;
+                            store.accumSum_L2(ti,bi)   = store.accumSum_L2(ti,bi)   + dv_L2_;
+                            store.accumSumSq_L2(ti,bi) = store.accumSumSq_L2(ti,bi) + dv_L2_^2;
+                        end
+                    end
+                end
             end
         end
 
@@ -164,6 +201,12 @@ classdef DiffAttitudeBuilder
                     store.invalidMask(ti,bi) = true;
                     store.accumN(ti,bi)      = 0;
                     store.accumSum(ti,bi)    = 0;
+                    % Stage 76: also reset L2 accumulators on slip
+                    if isfield(store,'accumN_L2')
+                        store.accumN_L2(ti,bi)     = 0;
+                        store.accumSum_L2(ti,bi)   = 0;
+                        store.accumSumSq_L2(ti,bi) = 0;
+                    end
                 end
             end
         end
@@ -234,6 +277,11 @@ classdef DiffAttitudeBuilder
             info.nBaselineArRejectedArc   = revgnss.DiffAttitudeBuilder.storeField_(store,'nBaselineArRejectedArc',0);
             info.ambiguityStatus          = revgnss.DiffAttitudeBuilder.storeField_(store,'ambiguityStatus',{});
             info.nBaselineArExcludedFromEkf = 0;
+            % Stage 76: dual-frequency fields propagated into info.
+            info.dualFreqArEnabled        = revgnss.DiffAttitudeBuilder.storeField_(store,'dualFreqArEnabled',false);
+            info.attitudeArMode           = revgnss.DiffAttitudeBuilder.storeField_(store,'attitudeArMode','rawL1Only');
+            info.nBaselineArFixedDual     = revgnss.DiffAttitudeBuilder.storeField_(store,'nBaselineArFixedDualFrequency',0);
+            info.nBaselineArFixedL1Only   = revgnss.DiffAttitudeBuilder.storeField_(store,'nBaselineArFixedL1Only',0);
 
             if ~store.calibrated || ~isfield(cpInfo,'phi_m') || isempty(cpInfo.phi_m)
                 return
@@ -278,13 +326,17 @@ classdef DiffAttitudeBuilder
                     elseif store.accumN(ti,bi) < 5
                         continue
                     end
-                    % Stage 75: partial-fix policy — skip non-fixed baselines
-                    % when policy is 'useFixedOnlyOrExplicitMixed' or 'fixedOnly'.
+                    % Stage 75/76: partial-fix policy — skip non-fixed baselines.
+                    % Stage 76 extends fixed set: fixedInteger (L1), fixedDualFrequencyRaw, fixedL1Only.
                     if ~isempty(info.ambiguityStatus) && ...
                             (strcmp(info.partialFixPolicy,'useFixedOnlyOrExplicitMixed') || ...
                              strcmp(info.partialFixPolicy,'fixedOnly'))
                         if bi <= size(info.ambiguityStatus,2) && ti <= size(info.ambiguityStatus,1)
-                            if ~strcmp(info.ambiguityStatus{ti,bi},'fixedInteger')
+                            stBI_ = info.ambiguityStatus{ti,bi};
+                            isFixed76_ = strcmp(stBI_,'fixedInteger') || ...
+                                strcmp(stBI_,'fixedDualFrequencyRaw') || ...
+                                strcmp(stBI_,'fixedL1Only');
+                            if ~isFixed76_
                                 info.nBaselineArExcludedFromEkf = info.nBaselineArExcludedFromEkf + 1;
                                 continue
                             end
@@ -313,6 +365,26 @@ classdef DiffAttitudeBuilder
                     rows_z(end+1,1) = z_row; %#ok<AGROW>
                     rows_h(end+1,1) = h_row; %#ok<AGROW>
                     rows_H(end+1,:) = H_row; %#ok<AGROW>
+                    % Stage 76: add L2 EKF row for dual-frequency-fixed baselines.
+                    % Uses same H (geometry only); different bias = lambda2*N2.
+                    isDualFix76_ = ~isempty(info.ambiguityStatus) && ...
+                        bi <= size(info.ambiguityStatus,2) && ti <= size(info.ambiguityStatus,1) && ...
+                        strcmp(info.ambiguityStatus{ti,bi},'fixedDualFrequencyRaw');
+                    if isDualFix76_ && hasSigIdx && isfield(store,'delta_B_L2')
+                        refMskL2r_ = (cpInfo.towerIdx==ti) & (cpInfo.antennaIdx==1) & (cpInfo.signalIdx==2);
+                        bMskL2r_   = (cpInfo.towerIdx==ti) & (cpInfo.antennaIdx==ai) & (cpInfo.signalIdx==2);
+                        if sum(refMskL2r_)==1 && sum(bMskL2r_)==1
+                            phi_ref_L2r_ = cpInfo.phi_m(refMskL2r_);
+                            phi_i_L2r_   = cpInfo.phi_m(bMskL2r_);
+                            z_row_L2_ = phi_i_L2r_ - phi_ref_L2r_;
+                            h_row_L2_ = (h_i - h_ref) + store.delta_B_L2(ti,bi);
+                            if abs(z_row_L2_ - h_row_L2_) <= 1.0
+                                rows_z(end+1,1) = z_row_L2_; %#ok<AGROW>
+                                rows_h(end+1,1) = h_row_L2_; %#ok<AGROW>
+                                rows_H(end+1,:) = H_row;     %#ok<AGROW>
+                            end
+                        end
+                    end
                 end
             end
             if ~isempty(rows_z)

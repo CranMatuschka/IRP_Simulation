@@ -1593,9 +1593,38 @@ classdef ClockExactReportBuilder
             falseFix75_ = CE.safeField_(summary,'baselineArFalseFixClassification','screenedNotFormal');
             phaseBias75_ = CE.safeField_(summary,'baselineArPhaseBiasStatus','notCalibratedExternalProduct');
             policy75_    = CE.safeField_(summary,'baselineArPartialPolicy','mixedFixedFloat');
+            % Stage 76: signal and dimension fields
+            sigNames76_  = CE.safeField_(summary,'signalNames',{'L1'});
+            sigFreqs76_  = CE.safeField_(summary,'signalFrequenciesHz',[1575.42e6]);
+            sigMask76_   = CE.safeField_(summary,'signalEnabledMask',[true]);
+            sigMode76_   = CE.safeField_(summary,'signalMode','L1');
+            arFreqEn76_  = CE.safeField_(summary,'attitudeArEnabledByFrequency',[true false]);
+            arMode76_    = CE.safeField_(summary,'attitudeArMode','rawL1Only');
+            wlEn76_      = CE.safeField_(summary,'wideLaneScreeningEnabled',false);
+            nDual76_     = CE.safeField_(summary,'nBaselineArFixedDualFrequency',0);
+            nL1Only76_   = CE.safeField_(summary,'nBaselineArFixedL1Only',0);
+            nTow76_      = CE.safeField_(summary,'nTowers',5);
+            nRx76_       = CE.safeField_(summary,'nReceivers',4);
+            nActBsl76_   = CE.safeField_(summary,'nActiveDiffAttBaselines',nTow76_*(nRx76_-1));
+            carrIfFix76_ = false;  % never true in v1
+            dIono76_     = CE.safeField_(summary,'differentialIonosphereInBaselineAr','neglectedShortBaselineV1');
+            multiAS76_   = CE.safeField_(summary,'multiAssetSupported',false);
+            % Signal summary row
+            sigFreqStr_ = strjoin(arrayfun(@(f) sprintf('%.2f MHz', f/1e6), sigFreqs76_, 'UniformOutput', false), ', ');
+            sigMaskStr_ = mat2str(sigMask76_);
+            fprintf(fid, 'Signal names & \\texttt{%s} (%s); enabled mask: %s\\\\\n', ...
+                strjoin(sigNames76_,'+'), sigFreqStr_, sigMaskStr_);
+            fprintf(fid, 'Signal mode & \\texttt{%s}; AR by-freq: %s; WL screening: %s\\\\\n', ...
+                sigMode76_, mat2str(arFreqEn76_), CE.yesNo_(wlEn76_,'enabled','disabled'));
+            fprintf(fid, 'Topology (Stage~76) & %d towers $\\times$ %d receivers = %d active DiffAtt baselines\\\\\n', ...
+                nTow76_, nRx76_, nActBsl76_);
+            fprintf(fid, 'Multi-asset & supported: %s; requested: %s\\\\\n', ...
+                CE.yesNo_(multiAS76_,'true','false'), ...
+                CE.yesNo_(CE.safeField_(summary,'multiAssetRequested',false),'true','false'));
             if arAttempted_ && arAccepted_
-                fprintf(fid, 'Baseline $\\Delta N$ integer fix & \\texttt{%s} (%d fixed, %d float, %d arc-rejected; used in EKF: %d)\\\\\n', ...
-                    strrep(arClass_,'_','\_'), nFix_, nFloat75_, nRejArc75_, nUsed75_);
+                fprintf(fid, 'Baseline $\\Delta N$ integer fix & \\texttt{%s} (%d fixed: %d dual, %d L1-only; float: %d; arc-rej: %d; EKF: %d)\\\\\n', ...
+                    strrep(arClass_,'_','\_'), nFix_, nDual76_, nL1Only76_, nFloat75_, nRejArc75_, nUsed75_);
+                fprintf(fid, 'AR mode (Stage~76) & \\texttt{%s}\\\\\n', strrep(arMode76_,'_','\_'));
                 fprintf(fid, 'Partial-fix policy (Stage~75) & \\texttt{%s}\\\\\n', strrep(policy75_,'_','\_'));
                 gnssClaimStr_ = CE.yesNo_(gnssOnly75_, ...
                     'true (all baselines fixed; no extRef calibration)', ...
@@ -1610,7 +1639,9 @@ classdef ClockExactReportBuilder
                 fprintf(fid, 'Baseline $\\Delta N$ integer fix & not attempted (AR disabled)\\\\\n');
                 fprintf(fid, 'GNSS-only attitude claim (Stage~75) & false (differential carrier = relative only)\\\\\n');
             end
-            fprintf(fid, 'Phase-bias status (Stage~75) & \\texttt{%s}\\\\\n', strrep(phaseBias75_,'_','\_'));
+            fprintf(fid, 'Phase-bias status & \\texttt{%s}\\\\\n', strrep(phaseBias75_,'_','\_'));
+            fprintf(fid, 'Carrier-IF integer fixing & %s (explicitly unsupported in v1)\\\\\n', CE.yesNo_(carrIfFix76_,'true','false'));
+            fprintf(fid, 'Differential iono in baseline AR & \\texttt{%s}\\\\\n', strrep(dIono76_,'_','\_'));
             fprintf(fid, '\\bottomrule\n\\end{tabular}\n\n\\vspace{6pt}\n');
 
             % ---- 5. Clocks ---
@@ -1676,7 +1707,7 @@ classdef ClockExactReportBuilder
             fprintf(fid, '\\begin{tabular}{p{0.92\\textwidth}}\n\\toprule\n');
             fprintf(fid, 'No external RINEX/SP3/CLK/ANTEX/IONEX products ingested; tower clock product is synthetic (Stage 71/72).\\\\\n');
             fprintf(fid, 'No PPP-grade or operational navigation claim.\\\\\n');
-            fprintf(fid, 'No LAMBDA/MLAMBDA, no WL/NL; baseline differential integer fixing (Stage 70); Stage 75 hardening: per-baseline classification, float-distance gate, ratio 3.0, arc 60 epochs; false-fix risk is \\texttt{screenedNotFormal}.\\\\\n');
+            fprintf(fid, 'No LAMBDA/MLAMBDA; Stage 70/75/76 baseline AR: raw L1 (Stage 70/75) and raw L1+L2 integer-pair with wide-lane consistency screening (Stage 76); carrier-IF integer fixing is explicitly unsupported; false-fix risk is \\texttt{screenedNotFormal}; multi-asset estimation unsupported and guarded; differential ionosphere in baseline AR neglected (short receiver baselines).\\\\\n');
             fprintf(fid, 'No mission-qualified attitude determination (synthetic controlled scenario only).\\\\\n');
             fprintf(fid, 'No calibrated hardware bias/DCB/phase-bias products.\\\\\n');
             fprintf(fid, 'Doppler simplified v1: LOS range-rate + clock drift; no Sagnac-rate, no relativistic range-rate, no lever-arm velocity.\\\\\n');

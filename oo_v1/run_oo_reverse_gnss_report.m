@@ -35,7 +35,7 @@ oo_v1_envAllToggles_ = strcmpi(getenv('OO_V1_ALL_TOGGLES'), 'true');
 if oo_v1_envValidate_; oo_v1_envAllToggles_ = true; end  % validate always uses all toggles
 oo_v1_envStage_      = str2double(getenv('OO_V1_VALIDATION_STAGE'));
 if isnan(oo_v1_envStage_); oo_v1_envStage_ = 0; end
-if oo_v1_envValidate_ && oo_v1_envStage_ == 0; oo_v1_envStage_ = 75; end
+if oo_v1_envValidate_ && oo_v1_envStage_ == 0; oo_v1_envStage_ = 76; end
 oo_v1_envCompile_    = strtrim(getenv('OO_V1_REPORT_COMPILE_TEX'));
 
 cfg = revgnss.ConfigFactory.defaultConfig();
@@ -437,8 +437,19 @@ cfg.estimator.diffAtt.ambiguityResolution.allowExternalReferenceFallback     = t
 cfg.estimator.diffAtt.ambiguityResolution.maxFloatDistance_cycles      = 0.25;
 cfg.estimator.diffAtt.ambiguityResolution.requireAllForGnssOnlyClaim   = true;
 cfg.estimator.diffAtt.ambiguityResolution.partialFixPolicy             = 'useFixedOnlyOrExplicitMixed';
-cfg.estimator.diffAtt.ambiguityResolution.phaseBiasStatus              = 'notCalibratedExternalProduct';
+cfg.estimator.diffAtt.ambiguityResolution.phaseBiasStatus              = 'syntheticKnownZero';  % Stage 76: synthetic zero biases
 cfg.estimator.diffAtt.ambiguityResolution.falseFixClassification       = 'screenedNotFormal';
+
+% --- Stage 76: dual-frequency baseline attitude AR and dimension contract ------
+% When twoFrequency.enable=true (L1+L2), dual-frequency raw integer-pair AR is
+% attempted. Carrier-IF integer fixing remains explicitly unsupported and false.
+% Wide-lane used as consistency screening gate only (not full WL/NL fixing).
+cfg.estimator.diffAtt.ambiguityResolution.enabledByFrequency                = [true true];  % L1+L2 AR
+cfg.estimator.diffAtt.ambiguityResolution.maxWideLaneFloatDistance_cycles   = 0.5;
+cfg.estimator.diffAtt.ambiguityResolution.differentialIonosphereInBaselineAr = 'neglectedShortBaselineV1';
+% Dimension contract: nSpaceAssets > 1 is unsupported and guarded in ConfigFactory.
+% nTowers and nReceivers are dimension-supported; active count reported in summary.
+% Signal list is centralized; cfg.signals.names, frequencyHz, enabledMask set by finalizeConfig.
 
 % --- Coarse attitude initializer (Stage 17) — DISABLED in Stage 69+ -----
 % Disabled: 'coarseBaselineIntegerSearch' was injecting a potentially wrong

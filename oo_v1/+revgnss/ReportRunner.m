@@ -1008,6 +1008,125 @@ classdef ReportRunner
                     'Stage 74 covariance summary fields failed: %s', ME74_.message);
             end
 
+            % ---- Stage 70: baseline carrier integer fix summary fields --------
+            % (Must run before PDF generation so ClockExactReportBuilder sees these fields.)
+            try
+                st70_ = sim.diffAttStore;
+                summary.baselineIntegerFixAttempted         = st70_.integerFixAttempted;
+                summary.baselineIntegerFixAccepted          = st70_.integerFixAccepted;
+                summary.nBaselineIntegerFixed               = st70_.nIntegerFixed;
+                summary.nBaselineIntegerRejected            = st70_.nIntegerRejected;
+                summary.baselineIntegerFixClassification    = st70_.integerClassification;
+                summary.externalReferenceUsedAsSearchCenter = st70_.externalRefUsedAsSearchCenter;
+                summary.externalReferenceUsedForCalibration = st70_.externalRefUsedForCalibration;
+            catch
+                summary.baselineIntegerFixAttempted         = false;
+                summary.baselineIntegerFixAccepted          = false;
+                summary.nBaselineIntegerFixed               = 0;
+                summary.nBaselineIntegerRejected            = 0;
+                summary.baselineIntegerFixClassification    = 'notAttempted';
+                summary.externalReferenceUsedAsSearchCenter = false;
+                summary.externalReferenceUsedForCalibration = true;
+            end
+
+            % ---- Stage 75: per-baseline ambiguity classification fields --------
+            try
+                st75_ = sim.diffAttStore;
+                summary.baselineArClassification          = st75_.integerClassification;
+                summary.baselineArGnssOnlyClaim           = st75_.gnssOnlyAttitudeClaim;
+                summary.baselineArFalseFixClassification  = st75_.falseFixClassification;
+                summary.baselineArPhaseBiasStatus         = st75_.phaseBiasStatus;
+                summary.baselineArPartialPolicy           = st75_.partialFixPolicy;
+                summary.nBaselineArFixed                  = st75_.nIntegerFixed;
+                summary.nBaselineArRejectedArc            = st75_.nBaselineArRejectedArc;
+                summary.nBaselineArFloatExternal          = st75_.nBaselineArFloatExternal;
+                summary.externalRefUsedForAnyCalibration  = st75_.externalRefUsedForCalibration;
+                if strcmp(st75_.partialFixPolicy,'useFixedOnlyOrExplicitMixed') || ...
+                        strcmp(st75_.partialFixPolicy,'fixedOnly')
+                    summary.nBaselineArUsedInEkf = st75_.nIntegerFixed;
+                else
+                    summary.nBaselineArUsedInEkf = st75_.nIntegerFixed + st75_.nBaselineArFloatExternal;
+                end
+            catch ME75_
+                warning('ReportRunner:stage75ArFailed', ...
+                    'Stage 75 AR summary fields failed: %s', ME75_.message);
+                summary.baselineArGnssOnlyClaim          = false;
+                summary.baselineArFalseFixClassification = 'screenedNotFormal';
+                summary.baselineArPhaseBiasStatus        = 'notCalibratedExternalProduct';
+                summary.baselineArPartialPolicy          = 'mixedFixedFloat';
+                summary.nBaselineArUsedInEkf             = 0;
+                summary.nBaselineArRejectedArc           = 0;
+                summary.nBaselineArFloatExternal         = 0;
+            end
+
+            % ---- Stage 76: signal config + dimension contract + dual-freq AR ----
+            try
+                % Central signal list from finalized cfg
+                summary.signalNames         = cfg.signals.names;
+                summary.signalFrequenciesHz = cfg.signals.frequencyHz;
+                summary.signalEnabledMask   = cfg.signals.enabledMask;
+                nSig76_ = numel(summary.signalNames);
+                if nSig76_ == 1
+                    summary.signalMode = summary.signalNames{1};
+                else
+                    summary.signalMode = strjoin(summary.signalNames,'');  % e.g. 'L1L2'
+                end
+                try; summary.codeEnabledByFrequency    = cfg.measurements.code.enabledByFrequency;    catch; summary.codeEnabledByFrequency    = true(1,nSig76_); end
+                try; summary.carrierEnabledByFrequency = cfg.measurements.carrier.enabledByFrequency; catch; summary.carrierEnabledByFrequency = true(1,nSig76_); end
+                try; summary.attitudeArEnabledByFrequency = cfg.estimator.diffAtt.ambiguityResolution.enabledByFrequency; catch; summary.attitudeArEnabledByFrequency = [true, false]; end
+            catch ME76sig_
+                warning('ReportRunner:stage76SignalFailed','Stage 76 signal config: %s', ME76sig_.message);
+                summary.signalNames         = {'L1'};
+                summary.signalFrequenciesHz = [1575.42e6];
+                summary.signalEnabledMask   = [true];
+                summary.signalMode          = 'L1';
+                summary.codeEnabledByFrequency    = [true];
+                summary.carrierEnabledByFrequency = [true];
+                summary.attitudeArEnabledByFrequency = [true, false];
+            end
+            try
+                % Dimension contract fields
+                nT76_  = sim.nTowers;
+                nRx76_ = cfg.scenario.nReceivers;
+                nBase76_ = max(0, nRx76_ - 1);
+                summary.nTowers                    = nT76_;
+                summary.nReceivers                 = nRx76_;
+                summary.nReceiverBaselinesPerTower = nBase76_;
+                summary.nActiveDiffAttBaselines    = nT76_ * nBase76_;
+                summary.multiAssetSupported        = false;
+                summary.multiAssetRequested        = (cfg.scenario.nSpaceAssets > 1);
+                summary.nSpaceAssetsSupported      = 1;
+                summary.dimensionContractStatus    = 'active_singleAsset_nTowersNReceiversVariable';
+            catch ME76dim_
+                warning('ReportRunner:stage76DimFailed','Stage 76 dimension: %s', ME76dim_.message);
+                summary.multiAssetSupported     = false;
+                summary.multiAssetRequested     = false;
+                summary.nSpaceAssetsSupported   = 1;
+                summary.dimensionContractStatus = 'unknown';
+            end
+            try
+                % Stage 76: dual-frequency AR summary from diffAttStore
+                st76_ = sim.diffAttStore;
+                summary.attitudeArMode              = revgnss.DiffAttitudeBuilder.storeField_(st76_,'attitudeArMode','rawL1Only');
+                summary.attitudeArSignalMode        = summary.signalMode;
+                summary.wideLaneScreeningEnabled    = (numel(summary.attitudeArEnabledByFrequency) >= 2 && all(summary.attitudeArEnabledByFrequency(1:2)));
+                summary.carrierIfIntegerFixing      = false;
+                summary.differentialIonosphereInBaselineAr = revgnss.DiffAttitudeBuilder.storeField_(st76_,'differentialIonosphereInBaselineAr','neglectedShortBaselineV1');
+                summary.nBaselineArFixedDualFrequency = revgnss.DiffAttitudeBuilder.storeField_(st76_,'nBaselineArFixedDualFrequency',0);
+                summary.nBaselineArFixedL1Only        = revgnss.DiffAttitudeBuilder.storeField_(st76_,'nBaselineArFixedL1Only',0);
+                summary.attitudeArFrequenciesUsed   = summary.signalNames(logical(summary.attitudeArEnabledByFrequency(1:min(end,numel(summary.signalNames)))));
+            catch ME76ar_
+                warning('ReportRunner:stage76ArFailed','Stage 76 AR summary: %s', ME76ar_.message);
+                summary.attitudeArMode              = 'rawL1Only';
+                summary.attitudeArSignalMode        = 'L1';
+                summary.wideLaneScreeningEnabled    = false;
+                summary.carrierIfIntegerFixing      = false;
+                summary.nBaselineArFixedDualFrequency = 0;
+                summary.nBaselineArFixedL1Only        = 0;
+                summary.differentialIonosphereInBaselineAr = 'neglectedShortBaselineV1';
+                summary.attitudeArFrequenciesUsed   = {'L1'};
+            end
+
             % ---- Determine report layout before PDF generation -----------
             reportLayout = 'default';
             if isfield(cfg,'report') && isfield(cfg.report,'layout')
@@ -1096,57 +1215,7 @@ classdef ReportRunner
                 fprintf('  PDF written: %s  (%.1f kB)\n', pdfPath, info.bytes/1024);
             end
 
-            % ---- Stage 70: baseline carrier integer fix summary fields --------
-            try
-                st70_ = sim.diffAttStore;
-                summary.baselineIntegerFixAttempted         = st70_.integerFixAttempted;
-                summary.baselineIntegerFixAccepted          = st70_.integerFixAccepted;
-                summary.nBaselineIntegerFixed               = st70_.nIntegerFixed;
-                summary.nBaselineIntegerRejected            = st70_.nIntegerRejected;
-                summary.baselineIntegerFixClassification    = st70_.integerClassification;
-                summary.externalReferenceUsedAsSearchCenter = st70_.externalRefUsedAsSearchCenter;
-                summary.externalReferenceUsedForCalibration = st70_.externalRefUsedForCalibration;
-            catch
-                summary.baselineIntegerFixAttempted         = false;
-                summary.baselineIntegerFixAccepted          = false;
-                summary.nBaselineIntegerFixed               = 0;
-                summary.nBaselineIntegerRejected            = 0;
-                summary.baselineIntegerFixClassification    = 'notAttempted';
-                summary.externalReferenceUsedAsSearchCenter = false;
-                summary.externalReferenceUsedForCalibration = true;
-            end
-
-            % ---- Stage 75: per-baseline ambiguity classification fields --------
-            try
-                st75_ = sim.diffAttStore;
-                summary.baselineArClassification          = st75_.integerClassification;
-                summary.baselineArGnssOnlyClaim           = st75_.gnssOnlyAttitudeClaim;
-                summary.baselineArFalseFixClassification  = st75_.falseFixClassification;
-                summary.baselineArPhaseBiasStatus         = st75_.phaseBiasStatus;
-                summary.baselineArPartialPolicy           = st75_.partialFixPolicy;
-                summary.nBaselineArFixed                  = st75_.nIntegerFixed;
-                summary.nBaselineArRejectedArc            = st75_.nBaselineArRejectedArc;
-                summary.nBaselineArFloatExternal          = st75_.nBaselineArFloatExternal;
-                summary.externalRefUsedForAnyCalibration  = st75_.externalRefUsedForCalibration;
-                if strcmp(st75_.partialFixPolicy,'useFixedOnlyOrExplicitMixed') || ...
-                        strcmp(st75_.partialFixPolicy,'fixedOnly')
-                    summary.nBaselineArUsedInEkf = st75_.nIntegerFixed;
-                else
-                    summary.nBaselineArUsedInEkf = st75_.nIntegerFixed + st75_.nBaselineArFloatExternal;
-                end
-            catch ME75_
-                warning('ReportRunner:stage75ArFailed', ...
-                    'Stage 75 AR summary fields failed: %s', ME75_.message);
-                summary.baselineArGnssOnlyClaim          = false;
-                summary.baselineArFalseFixClassification = 'screenedNotFormal';
-                summary.baselineArPhaseBiasStatus        = 'notCalibratedExternalProduct';
-                summary.baselineArPartialPolicy          = 'mixedFixedFloat';
-                summary.nBaselineArUsedInEkf             = 0;
-                summary.nBaselineArRejectedArc           = 0;
-                summary.nBaselineArFloatExternal         = 0;
-            end
-
-            % Stage 71/72 summary fields already computed before PDF generation (above).
+            % Stage 70/75/76 summary fields populated before PDF generation (above).
 
             % ---- MAT: save ----------------------------------------------
             cs = diag.getContributionSeries();

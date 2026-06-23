@@ -256,6 +256,13 @@ classdef ConfigFactory
             cfg.signals.primary          = 'L1';   % primary signal for iono scaling
             cfg.signals.secondary        = 'L2';   % secondary for IF combination
             cfg.ionosphere.mode          = 'off';  % 'off'|'truthOnly'|'model'|'ionosphereFree'
+            % Stage 76: central signal list (names, Hz, boolean masks).
+            % Populated by finalizeConfig from twoFrequency/enabled resolution.
+            cfg.signals.names            = {'L1'};
+            cfg.signals.frequencyHz      = [1575.42e6];
+            cfg.signals.enabledMask      = [true];
+            cfg.measurements.code.enabledByFrequency    = [true];
+            cfg.measurements.carrier.enabledByFrequency = [true];
 
             % --- Code noise model --------------------------------------------------
             cfg.measurements.codeNoise.model             = 'constant';
@@ -1437,6 +1444,73 @@ classdef ConfigFactory
                     cfg.signals.enabled = {'L1','L2'};
                 else
                     cfg.signals.enabled = {'L1'};
+                end
+            end
+            % Stage 76: also sync cfg.signals.enabled from cfg.twoFrequency.enable
+            % (run-script path; backward-compat with pre-76 scripts that use cfg.twoFrequency directly)
+            if isfield(cfg,'twoFrequency') && isfield(cfg.twoFrequency,'enable')
+                if cfg.twoFrequency.enable
+                    cfg.signals.enabled = {'L1','L2'};
+                else
+                    if ~isfield(cfg.signals,'enabled')
+                        cfg.signals.enabled = {'L1'};
+                    end
+                end
+            end
+
+            % ---- Stage 76: centralize signal names/frequencies/masks --------
+            % Also handles backward-compat: if cfg.signals.enabled is a cell
+            % list, derive the boolean mask and Hz arrays from SignalDefinition.
+            if isfield(cfg,'signals') && isfield(cfg.signals,'enabled')
+                sigList = cfg.signals.enabled;
+                if ischar(sigList); sigList = {sigList}; end
+                nSig = numel(sigList);
+                freqHz = zeros(1,nSig);
+                for si76_ = 1:nSig
+                    try
+                        sd76_ = revgnss.SignalDefinition.get(sigList{si76_});
+                        freqHz(si76_) = sd76_.frequency_Hz;
+                    catch
+                        freqHz(si76_) = 1575.42e6;
+                    end
+                end
+                cfg.signals.names       = sigList;
+                cfg.signals.frequencyHz = freqHz;
+                cfg.signals.enabledMask = true(1,nSig);
+                % Resize per-frequency toggles to match signal count.
+                if ~isfield(cfg,'measurements'); cfg.measurements = struct(); end
+                if ~isfield(cfg.measurements,'code'); cfg.measurements.code = struct(); end
+                if ~isfield(cfg.measurements,'carrier'); cfg.measurements.carrier = struct(); end
+                if ~isfield(cfg.measurements.code,'enabledByFrequency') || ...
+                        numel(cfg.measurements.code.enabledByFrequency) ~= nSig
+                    cfg.measurements.code.enabledByFrequency = true(1,nSig);
+                end
+                if ~isfield(cfg.measurements.carrier,'enabledByFrequency') || ...
+                        numel(cfg.measurements.carrier.enabledByFrequency) ~= nSig
+                    cfg.measurements.carrier.enabledByFrequency = true(1,nSig);
+                end
+            end
+
+            % ---- Stage 76: multi-space-asset guard ---------------------------
+            % nSpaceAssets > 1 is unsupported; fail loudly to prevent silent truncation.
+            if isfield(cfg,'scenario') && isfield(cfg.scenario,'nSpaceAssets')
+                nSA76_ = cfg.scenario.nSpaceAssets;
+                if nSA76_ > 1
+                    policy76_ = 'error';
+                    if isfield(cfg,'validation') && ...
+                            isfield(cfg.validation,'unsupportedFeaturePolicy')
+                        policy76_ = cfg.validation.unsupportedFeaturePolicy;
+                    end
+                    msg76_ = sprintf( ...
+                        'nSpaceAssets=%d requested but multi-space-asset estimation is explicitly unsupported in v1. Set cfg.scenario.nSpaceAssets=1.', ...
+                        nSA76_);
+                    if strcmp(policy76_,'disableWithWarning')
+                        cfg.scenario.nSpaceAssets = 1;
+                        cfg.validation.warnings{end+1} = msg76_;
+                        warning('ConfigFactory:multiAssetUnsupported', '%s', msg76_);
+                    else
+                        error('ConfigFactory:multiAssetUnsupported', '%s', msg76_);
+                    end
                 end
             end
 
