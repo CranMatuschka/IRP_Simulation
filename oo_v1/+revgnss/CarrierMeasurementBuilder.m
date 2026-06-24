@@ -91,6 +91,8 @@ classdef CarrierMeasurementBuilder
             % Stage 84: arc-reference status — no arc identifier available yet;
             % product-epoch age used as proxy for time-varying drift residual covariance.
             cpInfo.carrierProductArcReferenceStatus = 'notAvailableUsingProductEpochAgeV1';
+            % Stage 85: per-row injected slip (metres); zero when slip injection disabled.
+            cpInfo.injectedSlip_m = zeros(Mp_total, 1);
 
             % Stage 83: get product epoch and drift sigma for carrier rows
             t_prod_carrier  = zeros(Mp, 1);
@@ -201,6 +203,19 @@ classdef CarrierMeasurementBuilder
 
                 % z: +trop, -iono (carrier ionosphere is OPPOSITE sign to code)
                 z_phi(rowOut) = rho_t + b_rx_true - b_twr_t + trop_t - iono_t_sig + B_true + noise_phi;
+
+                % Stage 85: synthetic slip injection for stress testing
+                try
+                    sl = cfg.validation.stress.slips;
+                    if sl.enable && any(abs(t_s - sl.injectEpochs_s) < 0.5) && ...
+                            any(sl.towers == ti) && any(sl.signals == sigIdx)
+                        epIdx = find(abs(t_s - sl.injectEpochs_s) < 0.5, 1);
+                        slipCyc = sl.magnitude_cycles(min(epIdx, numel(sl.magnitude_cycles)));
+                        slipM   = slipCyc * lambda;
+                        z_phi(rowOut)           = z_phi(rowOut) + slipM;
+                        cpInfo.injectedSlip_m(rowOut) = slipM;
+                    end
+                catch; end
 
                 % h: +trop_model, -iono_model + ZWD state
                 h_phi(rowOut) = rho_e + b_rx_est - b_twr_m + trop_m - iono_m_sig + B_est;

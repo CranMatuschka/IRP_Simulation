@@ -2281,8 +2281,46 @@ classdef ConfigFactory
                 cfg.covariance.productClock.dopplerDriftDiagonalPolicy = 'trackingOnlyPlusBlock';
             end
 
-            % Report freshness stage.
+            % Report freshness stage (overwritten by Stage 85 block below).
             cfg.diagnostics.reportStatusFreshnessStage = 84;
+
+            % --- Stage 85: formal synthetic validation campaign ---
+            if ~isfield(cfg,'validation'); cfg.validation = struct(); end
+            if ~isfield(cfg.validation,'scientificCampaign')
+                cfg.validation.scientificCampaign = struct();
+            end
+            sc = cfg.validation.scientificCampaign;
+            if ~isfield(sc,'enable');                   sc.enable   = false;            end
+            if ~isfield(sc,'profile');                  sc.profile  = 'light';          end
+            if ~isfield(sc,'seedList');                 sc.seedList = [85, 185, 285];   end
+            if ~isfield(sc,'duration_s');               sc.duration_s = 900;            end
+            if ~isfield(sc,'runNominal');               sc.runNominal              = true;  end
+            if ~isfield(sc,'runL1Only');                sc.runL1Only               = true;  end
+            if ~isfield(sc,'runDegradedClockProduct');  sc.runDegradedClockProduct = true;  end
+            if ~isfield(sc,'runSlipInjection');         sc.runSlipInjection        = true;  end
+            if ~isfield(sc,'runReducedTowerGeometry');  sc.runReducedTowerGeometry = false; end
+            cfg.validation.scientificCampaign = sc;
+
+            if ~isfield(cfg.validation,'statistics'); cfg.validation.statistics = struct(); end
+            vs = cfg.validation.statistics;
+            if ~isfield(vs,'nis'); vs.nis = struct(); end
+            if ~isfield(vs.nis,'minSamplesPerGroup');  vs.nis.minSamplesPerGroup = 20; end
+            if ~isfield(vs.nis,'confidenceLevel');     vs.nis.confidenceLevel    = 0.95; end
+            if ~isfield(vs,'nees'); vs.nees = struct(); end
+            if ~isfield(vs,'monteCarlo'); vs.monteCarlo = struct(); end
+            if ~isfield(vs.monteCarlo,'enable'); vs.monteCarlo.enable = false; end
+            cfg.validation.statistics = vs;
+
+            if ~isfield(cfg.validation,'stress'); cfg.validation.stress = struct(); end
+            vst = cfg.validation.stress;
+            if ~isfield(vst,'slips'); vst.slips = struct(); end
+            if ~isfield(vst.slips,'enable');       vst.slips.enable     = false; end
+            if ~isfield(vst,'clockProduct'); vst.clockProduct = struct(); end
+            if ~isfield(vst.clockProduct,'scaleBiasSigma');  vst.clockProduct.scaleBiasSigma  = 3; end
+            if ~isfield(vst.clockProduct,'scaleDriftSigma'); vst.clockProduct.scaleDriftSigma = 3; end
+            cfg.validation.stress = vst;
+
+            cfg.diagnostics.reportStatusFreshnessStage = 85;
 
             % Run model coverage audit and guard on missingUnsafe
             cfg.validation.modelCoverageAudit = revgnss.ModelCoverageAudit.run(cfg);

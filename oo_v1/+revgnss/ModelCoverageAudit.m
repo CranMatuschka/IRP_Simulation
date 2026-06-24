@@ -290,10 +290,20 @@ classdef ModelCoverageAudit
             try; neesEn = logical(cfg.validation.statistics.nees.enable); catch; end
             nisMode = 'partialCovarianceAware';
             try; nisMode = cfg.validation.statistics.nis.mode; catch; end
+            campEn = false;
+            try; campEn = logical(cfg.validation.scientificCampaign.enable); catch; end
+            % Stage 85: campaign enabled → implementedSynthetic; otherwise disabledByConfig
+            if campEn
+                valStatStatus = 'implementedSynthetic';
+                valStatNote   = sprintf('stage85LightCampaign; MC=%s; NEES=%s; NIS=%s; partialCovarianceAwareSynthetic', ...
+                    mat2str(mcEn), mat2str(neesEn), nisMode);
+            else
+                valStatStatus = 'disabledByConfig';
+                valStatNote   = sprintf('campaign disabled; MC=%s; NEES=%s; NIS=%s; partial NIS documented; no false chi-square claim', ...
+                    mat2str(mcEn), mat2str(neesEn), nisMode);
+            end
             c{end+1} = revgnss.ModelCoverageAudit.cat_( ...
-                'validationStatistics','disabledByConfig', ...
-                sprintf('MC=%s; NEES=%s; NIS=%s; partial NIS documented; no false chi-square claim', ...
-                    mat2str(mcEn), mat2str(neesEn), nisMode));
+                'validationStatistics', valStatStatus, valStatNote);
 
             % 22. externalProducts
             c{end+1} = revgnss.ModelCoverageAudit.cat_( ...

@@ -29,11 +29,11 @@ classdef MainScriptValidationGate
             state = struct();
 
             % Resolve stage, seed, count from env vars.
-            stg = 84;
+            stg = 85;
             v = str2double(getenv('OO_V1_VALIDATION_STAGE'));
             if ~isnan(v) && v > 0; stg = round(v); end
 
-            seed = 84;
+            seed = 85;
             v = str2double(getenv('OO_V1_RANDOM_TEST_SEED'));
             if ~isnan(v) && isfinite(v); seed = round(v); end
 
@@ -300,6 +300,7 @@ classdef MainScriptValidationGate
                 case 82; t = 'Source-Truth Integrity and J2 Dynamics Mismatch Validation';
                 case 83; t = 'Doppler Dynamics and Carrier Product-Covariance Closure';
                 case 84; t = 'Doppler/Product-Covariance Correctness Hardening';
+                case 85; t = 'Formal Synthetic Validation Campaign and Statistical Consistency Audit';
                 otherwise
                     try; t = revgnss.ReportStatus.current().stageTitle; catch; t = sprintf('Stage %d', stg); end
             end

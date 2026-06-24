@@ -572,6 +572,16 @@ if ~isempty(oo_v1_envCompile_) && ismember(oo_v1_envCompile_, {'require','auto',
     cfg.report.compileTex = oo_v1_envCompile_;
 end
 
+% --- Stage 85: Formal synthetic validation campaign ---
+% Enabled automatically when OO_V1_ALL_TOGGLES=true; off by default.
+% ConfigFactory Stage 85 block owns all cfg.validation.scientificCampaign.* defaults.
+if stageAllToggles || oo_v1_envAllToggles_
+    cfg.validation.scientificCampaign.enable     = true;
+    cfg.validation.scientificCampaign.profile    = 'light';
+    cfg.validation.scientificCampaign.seedList   = [85, 185, 285];
+    cfg.validation.scientificCampaign.duration_s = 900;
+end
+
 % Apply scenario preset after all toggles (preset overrides what it needs to).
 if isfield(cfg,'scenario') && isfield(cfg.scenario,'name') && ...
         strcmp(cfg.scenario.name,'singleAssetCarrierAttitude')

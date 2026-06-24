@@ -298,6 +298,7 @@ classdef Diagnostics < handle
             entry.numPseudorangeMeasurements = M_pr;
             entry.numMeasurements            = M_pr;   % pseudorange count for observation plot
             entry.numMeasurementRows         = numel(z); % total EKF z dimension
+            entry.numDopplerRows             = 0;       % filled below after M_dop_rows is known
 
             % --- Innovation / residual RMS split by measurement type -------
             % Use measType_perRow when available to separate code/Doppler/carrier.
@@ -309,6 +310,7 @@ classdef Diagnostics < handle
                     isfield(errStruct.doppler,'z') && ~isempty(errStruct.doppler.z)
                 M_dop_rows = numel(errStruct.doppler.z);
             end
+            entry.numDopplerRows = M_dop_rows;
 
             if ~isempty(z) && M_pr > 0 && numel(z) >= M_pr
                 innPR = z(1:M_pr) - h(1:M_pr);
@@ -393,6 +395,36 @@ classdef Diagnostics < handle
                 P_pos = ekf.P(sm.r_idx, sm.r_idx);
                 if rcond(P_pos) > 1e-15
                     entry.NEES_pos = (r_err' * (P_pos \ r_err)) / 3;
+                end
+            catch; end
+
+            % --- Stage 85: velocity / clock / attitude NEES -----------------
+            entry.NEES_vel = NaN;
+            try
+                v_err = x(sm.v_idx) - asset.v_ecef_mps;
+                P_vel = ekf.P(sm.v_idx, sm.v_idx);
+                if rcond(P_vel) > 1e-15
+                    entry.NEES_vel = (v_err' * (P_vel \ v_err)) / 3;
+                end
+            catch; end
+
+            entry.NEES_clk = NaN;
+            try
+                clk_err = [x(sm.b_rx_idx)    - asset.clock.getBiasMeters();
+                           x(sm.bdot_rx_idx) - asset.clock.getDriftMetersPerSecond()];
+                clk_idx = [sm.b_rx_idx; sm.bdot_rx_idx];
+                P_clk   = ekf.P(clk_idx, clk_idx);
+                if rcond(P_clk) > 1e-15
+                    entry.NEES_clk = (clk_err' * (P_clk \ clk_err)) / 2;
+                end
+            catch; end
+
+            entry.NEES_att = NaN;
+            try
+                att_err = revgnss.AttitudeKinematics.wrapEuler(eul_err);
+                P_att   = ekf.P(sm.euler_idx, sm.euler_idx);
+                if rcond(P_att) > 1e-15
+                    entry.NEES_att = (att_err' * (P_att \ att_err)) / 3;
                 end
             catch; end
 
@@ -1336,6 +1368,24 @@ classdef Diagnostics < handle
             % Values >> 1: filter is too optimistic (P too small).
             % Values << 1: filter is too pessimistic (P too large).
             v = [obj.log.NEES_pos]';
+        end
+
+        function v = getVelocityNEES(obj)
+            % getVelocityNEES  Velocity NEES per epoch [nEpochs x 1].  Stage 85.
+            if isempty(obj.log); v = []; return; end
+            v = [obj.log.NEES_vel]';
+        end
+
+        function v = getClockNEES(obj)
+            % getClockNEES  Clock (bias+drift joint) NEES per epoch [nEpochs x 1].  Stage 85.
+            if isempty(obj.log); v = []; return; end
+            v = [obj.log.NEES_clk]';
+        end
+
+        function v = getAttitudeNEES(obj)
+            % getAttitudeNEES  Euler-angle NEES per epoch [nEpochs x 1].  Stage 85.
+            if isempty(obj.log); v = []; return; end
+            v = [obj.log.NEES_att]';
         end
 
         function v = getClockGaugeRowsAdded(obj)

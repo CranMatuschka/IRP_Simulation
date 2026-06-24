@@ -404,6 +404,8 @@ classdef ReportRunner
                     cfg_kav.report.writePdf = false;
                     cfg_kav.report.writeMat = false;
                     cfg_kav.plots.enable    = false;
+                    % Stage 85: KAV sub-run must not trigger campaign recursion.
+                    try; cfg_kav.validation.scientificCampaign.enable = false; catch; end
                     out_kav = revgnss.ReportRunner.runSingle(cfg_kav);
                     r_kav   = out_kav.summary.attitudeImprovementRatio;
                     summary.knownAmbImprovementRatio = r_kav;
@@ -933,6 +935,44 @@ classdef ReportRunner
             try; summary.validationStatisticsNeesEnable = cfg.validation.statistics.nees.enable; catch; end
             summary.validationStatisticsNisMode = 'partialCovarianceAware';
             try; summary.validationStatisticsNisMode = cfg.validation.statistics.nis.mode; catch; end
+
+            % --- Stage 85: campaign placeholders (populated later by ScientificValidationCampaign.run) ---
+            summary.scientificCampaignStatus       = 'notRun';
+            summary.scientificCampaignProfile      = 'off';
+            summary.campaignOverallStatus          = 'notRun';
+            summary.campaignNominalStatus          = 'notRun';
+            summary.campaignL1OnlyStatus           = 'notRun';
+            summary.campaignClockStressStatus      = 'notRun';
+            summary.campaignSlipStressStatus       = 'notRun';
+            summary.campaignGeometryStressStatus   = 'notRun';
+            summary.campaignMedianPosRms_m         = NaN;
+            summary.campaignMaxPosRms_m            = NaN;
+            summary.campaignMedianClockRms_m       = NaN;
+            summary.campaignMaxClockRms_m          = NaN;
+            summary.campaignMedianAttitude_deg     = NaN;
+            summary.campaignMaxAttitude_deg        = NaN;
+            summary.campaignAmbiguityFixRate       = NaN;
+            summary.campaignSlipDetectionRate      = NaN;
+            summary.campaignProductBoundaryFalseResetRate = NaN;
+            summary.nisOverallStatus               = 'notAvailable';
+            summary.nisCodeStatus                  = 'notAvailable';
+            summary.nisCarrierStatus               = 'notAvailable';
+            summary.nisDopplerStatus               = 'notAvailable';
+            summary.nisDiffAttStatus               = 'notAvailable';
+            summary.neesPositionStatus             = 'notAvailable';
+            summary.neesVelocityStatus             = 'notAvailable';
+            summary.neesClockStatus                = 'notAvailable';
+            summary.neesAttitudeStatus             = 'notAvailable';
+            summary.neesCoreStatus                 = 'notAvailable';
+            summary.nisCodeMean                    = NaN;
+            summary.nisCarrierMean                 = NaN;
+            summary.nisDopplerMean                 = NaN;
+            summary.neesPositionMean               = NaN;
+            summary.neesVelocityMean               = NaN;
+            summary.neesClockMean                  = NaN;
+            summary.neesAttitudeMean               = NaN;
+            summary.monteCarloStatus               = 'notRun';
+            summary.validationStatisticsInterpretation = 'notRun';
             if isfield(cfg,'validation') && isfield(cfg.validation,'modelCoverageAudit')
                 mca = cfg.validation.modelCoverageAudit;
                 summary.modelCoverageStatus                    = mca.modelCoverageStatus;
@@ -1542,6 +1582,20 @@ classdef ReportRunner
                 for k = 1:numel(cfg.validation.warnings)
                     fprintf('    %d. %s\n', k, cfg.validation.warnings{k});
                 end
+            end
+
+            % ---- Stage 85: Scientific Validation Campaign ------------------
+            % Runs inside same invocation; no PDF produced by sub-simulations.
+            campResult85_ = revgnss.ScientificValidationCampaign.run(cfg);
+            % Merge all campaign fields into summary
+            campFns85_ = fieldnames(campResult85_);
+            for k85_ = 1:numel(campFns85_)
+                summary.(campFns85_{k85_}) = campResult85_.(campFns85_{k85_});
+            end
+            if campResult85_.scientificCampaignStatus ~= "notRun"
+                fprintf('=== Campaign: %s (overall=%s) ===\n', ...
+                    campResult85_.scientificCampaignProfile, ...
+                    campResult85_.campaignOverallStatus);
             end
 
             % ---- Assemble output struct ---------------------------------
