@@ -1,0 +1,4 @@
+# Runtime validation artifacts — overwritten on each run, not source truth.
+output/latest_validation_summary.json
+output/latest_validation_summary.txt
+output/notion_stage*.md
