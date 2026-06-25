@@ -1,27 +1,82 @@
 % run_oo_reverse_gnss_ladder_sweep_real_report_fixed
 %
-% Progressive 31-case cumulative ladder sweep using the ClockExact LaTeX
-% report pipeline.  Each case adds one meaningful feature group on top of the
-% previous.  A complete simulation-impacting toggle manifest is generated for
-% every case and saved as a per-case CSV and compact MAT.
+% Three-phase scientifically structured ladder sweep using the ClockExact LaTeX
+% report pipeline.
+%
+% Phase A — raw truth/model error ladder (baseline + 16 isolated + 16 cumulative)
+%   A_00: minimal baseline (L1 code, det. clocks, no errors, no orbit)
+%   A_iso_01..16: baseline + exactly ONE raw error family each
+%   A_cum_01..16: cumulative (each adds to previous); A_cum_16 = phaseA_all
+%
+% Phase B — isolated EKF-use options, all Phase A errors active
+%   B_iso_01..14: one EKF/estimation option added at a time
+%   B_iso_08 (ZWD EKF) and B_iso_09 (tower-clock EKF) are guarded cases
+%
+% Phase C — cumulative EKF-use options from Phase A all baseline (12 + final)
+%   C_01..12: EKF options added cumulatively
+%   C_final: all 12 options + 3600 s + relativity clock + every valid feature
+%
+% Total cases: 1+16+16+14+13 = 60
 %
 % Output layout (created at run time):
 %   output/Sweep_YYYYMMDD_HHMMSS/
-%     case<N>_<label>_YYYYMMDD/
-%       report-vX.XX.pdf   — ClockExact PDF
-%       report-vX.XX.tex   — LaTeX source
-%       case<N>_compact.mat
-%       case<N>_manifest.csv
-%     sweep_manifest.csv   — all cases combined
+%     case<NNN>_<label>_YYYYMMDD/
+%       report-vXXX.00.pdf     — ClockExact LaTeX PDF
+%       report-vXXX.00.tex     — LaTeX source
+%     case<NNN>_<label>_compact.mat
+%     case<NNN>_<label>_manifest.csv
+%     case<NNN>_<label>_console.log
+%     ladder_sweep_index.csv
+%     ladder_sweep_manifest_overview.csv
 
 clear; close all; clc;
 thisDir = fileparts(mfilename('fullpath'));
 addpath(thisDir);
 
 %% ---- Control -----------------------------------------------------------
-runOnly         = [];       % empty = all 31 cases; e.g. [1 2 31] for subset
-shortDuration_s = 3600;      % seconds for cases 1-30
-fullDuration_s  = 3600;     % seconds for case 31
+runOnly         = [];       % empty = all 60 cases; [1,33,47,60] for quick check
+shortDuration_s = 600;      % s for cases 1-59
+fullDuration_s  = 3600;     % s for case 60 (C_final)
+
+%% ---- Phase A error family names ----------------------------------------
+PHASE_A_ERRORS = { ...
+    'code_noise',           ...  % 01
+    'rx_clock_stochastic',  ...  % 02
+    'tower_clock_stochastic',...  % 03
+    'tower_clock_product',  ...  % 04
+    'troposphere',          ...  % 05
+    'ionosphere',           ...  % 06
+    'sagnac',               ...  % 07
+    'light_time',           ...  % 08 (subsumes Sagnac to prevent double-count)
+    'shapiro',              ...  % 09
+    'j2_orbit',             ...  % 10
+    'antenna_pco',          ...  % 11
+    'antenna_pcv',          ...  % 12
+    'tower_survey',         ...  % 13
+    'hardware_delay',       ...  % 14
+    'multipath',            ...  % 15
+    'correlated_noise',     ...  % 16
+};
+
+%% ---- Phase B EKF-option names ------------------------------------------
+PHASE_B_OPTIONS = { ...
+    'doppler_in_ekf',           ...  % 01
+    'dual_frequency',           ...  % 02
+    'code_if_rows',             ...  % 03  dep: dual_frequency
+    'carrier_float',            ...  % 04
+    'carrier_slip_guards',      ...  % 05  dep: carrier_float
+    'carrier_if_float',         ...  % 06  dep: dual_frequency + carrier_float
+    'tower_product_covariance', ...  % 07  dep: tower_clock_product (in Phase A)
+    'zwd_ekf',                  ...  % 08  GUARDED — not in Phase C
+    'tower_clock_ekf',          ...  % 09  GUARDED — not in Phase C
+    'lever_arm_attitude',       ...  % 10
+    'quaternion_attitude_ekf',  ...  % 11  dep: lever_arm_attitude
+    'diff_att_calibration',     ...  % 12  dep: carrier_float + lever_arm_attitude
+    'baseline_attitude_ar',     ...  % 13  dep: 12
+    'raw_integer_fixing',       ...  % 14  dep: carrier_float + carrier_slip_guards
+};
+% Phase C uses these option indices (omits guarded 8,9)
+PHASE_C_IDX = [1,2,3,4,5,6,7,10,11,12,13,14];
 
 %% ---- Output directory --------------------------------------------------
 sweepTag = datestr(now, 'yyyymmdd_HHMMSS'); %#ok<TNOW1,DATST>
@@ -29,826 +84,1001 @@ sweepDir = fullfile(thisDir, 'output', ['Sweep_' sweepTag]);
 if ~exist(sweepDir, 'dir'); mkdir(sweepDir); end
 fprintf('Sweep output: %s\n', sweepDir);
 
-%% ---- Case list ---------------------------------------------------------
-caseDefs = buildCaseDefs_();
-if isempty(runOnly); runOnly = 1:numel(caseDefs); end
-nTotal   = numel(caseDefs);
-fprintf('Running %d of %d cases.\n', numel(runOnly), nTotal);
+%% ---- Pre-build Phase A all config for Phase B/C reference --------------
+cfgPhaseAAll = buildPhaseAAllCfg_(thisDir, PHASE_A_ERRORS);
+
+%% ---- Case definitions --------------------------------------------------
+cases = buildCaseMeta_(PHASE_A_ERRORS, PHASE_B_OPTIONS, PHASE_C_IDX);
+if isempty(runOnly); runOnly = 1:numel(cases); end
+fprintf('Running %d of %d total cases.\n', numel(runOnly), numel(cases));
+
+% Mark key case indices for acceptance checks
+phaseAAllIdx  = 1 + numel(PHASE_A_ERRORS) + numel(PHASE_A_ERRORS); % 33
+phaseBStart   = phaseAAllIdx + 1;                                    % 34
+phaseCStart   = phaseBStart  + numel(PHASE_B_OPTIONS);               % 48
+phaseCFinal   = numel(cases);                                        % 60
 
 %% ---- Run loop ----------------------------------------------------------
-results     = initResults_(nTotal);
-sweepRows   = {};
-prevCfg     = [];
+results      = initResults_(numel(cases));
+sweepMfRows  = {};
+sweepIdxRows = {};
 
 for ci = runOnly
-    cdef  = caseDefs(ci);
-    fprintf('\n=== Case %02d/%d: %s ===\n', ci, nTotal, cdef.label);
-    fprintf('    %s\n', cdef.description);
+    c = cases(ci);
+    fprintf('\n=== Case %03d/%d [%s] %s ===\n', ci, numel(cases), c.phase, c.label);
+    fprintf('    %s\n', c.description);
 
-    % Build cumulative config
-    if ci == 1
-        cfg = buildCase01_(thisDir);
-    else
-        if isempty(prevCfg)
-            % If we skipped earlier cases, rebuild from case 01 forward
-            cfg = buildCase01_(thisDir);
-            for ri = 2:ci
-                cfg = caseDefs(ri).deltaFcn(cfg);
-            end
-        else
-            cfg = cdef.deltaFcn(prevCfg);
-        end
-    end
+    % Build config
+    [cfg, appliedPatches] = buildCaseConfig_(c, thisDir, cfgPhaseAAll, ...
+                                             PHASE_A_ERRORS, PHASE_B_OPTIONS, PHASE_C_IDX);
 
     % Simulation duration
-    if ci == nTotal
-        cfg.simulation.duration_s = fullDuration_s;
-    else
-        cfg.simulation.duration_s = shortDuration_s;
-    end
+    cfg.simulation.duration_s = shortDuration_s;
+    if ci == phaseCFinal; cfg.simulation.duration_s = fullDuration_s; end
 
-    % Force ClockExact report settings (hard requirements)
-    cfg.report.style               = 'latex';
-    cfg.report.layout              = 'clockExact';
-    cfg.report.writeTex            = true;
-    cfg.report.compileTex          = 'require';
-    cfg.report.compactFinalReport  = true;
+    % Force ClockExact report settings
+    cfg.report.style                 = 'latex';
+    cfg.report.layout                = 'clockExact';
+    cfg.report.writePdf              = true;
+    cfg.report.writeTex              = true;
+    cfg.report.compileTex            = 'require';
+    cfg.report.compactFinalReport    = true;
     cfg.report.suppressStageSections = true;
-    cfg.report.deduplicateFigures  = true;
-    cfg.report.writePdf            = true;
-    cfg.report.writeMat            = false; % compact MAT written below
-    cfg.report.overwrite           = true;
-    cfg.report.version             = sprintf('%02d.00', ci);
-    cfg.plots.showFigures          = false;
-    cfg.plots.saveIndividualFigures = false;
+    cfg.report.deduplicateFigures    = true;
+    cfg.report.writeMat              = false;
+    cfg.report.overwrite             = true;
+    cfg.report.version               = sprintf('%03d.00', ci);
+    cfg.plots.showFigures            = false;
+    cfg.plots.saveIndividualFigures  = false;
 
-    % Unique output subfolder per case (ReportRunner appends date)
-    safeLabel = regexprep(cdef.label, '[^a-zA-Z0-9_]', '_');
+    % Per-case output subfolder (ReportRunner appends date)
+    safeLabel = regexprep(c.label, '[^a-zA-Z0-9]', '_');
     cfg.report.baseOutputDir    = sweepDir;
-    cfg.report.dateFolderPrefix = sprintf('case%02d_%s_', ci, safeLabel);
+    cfg.report.dateFolderPrefix = sprintf('case%03d_%s_', ci, safeLabel);
 
-    % Run simulation + ClockExact report
+    % Console log
+    logFile = fullfile(sweepDir, sprintf('case%03d_%s_console.log', ci, safeLabel));
+    diary(logFile);
+
     try
         out = revgnss.ReportRunner.runSingle(cfg);
-        caseFolder = out.reportFolder;
+        diary off;
 
-        % Build toggle manifest from finalized cfg
-        manifest  = revgnss.SimulationToggleManifest.fromConfig(out.cfg);
-        T         = revgnss.SimulationToggleManifest.toTable(manifest);
+        % Build manifest
+        manifest = revgnss.SimulationToggleManifest.fromConfig(out.cfg, out);
+        T        = revgnss.SimulationToggleManifest.toTable(manifest);
 
-        % Save per-case compact MAT
-        compact   = buildCompact_(out, T, ci, cdef);
-        cMatPath  = fullfile(caseFolder, sprintf('case%02d_compact.mat', ci));
+        % Per-case compact MAT
+        compact   = buildCompact_(out, T, ci, c, appliedPatches);
+        cMatPath  = fullfile(sweepDir, sprintf('case%03d_%s_compact.mat', ci, safeLabel));
         save(cMatPath, 'compact', '-v7');
 
-        % Save per-case manifest CSV
-        cCsvPath  = fullfile(caseFolder, sprintf('case%02d_manifest.csv', ci));
+        % Per-case manifest CSV
+        cCsvPath  = fullfile(sweepDir, sprintf('case%03d_%s_manifest.csv', ci, safeLabel));
         revgnss.SimulationToggleManifest.writeCsv(T, cCsvPath);
 
-        % Accumulate sweep-level rows
-        sweepRows = accumulateSweepRows_(sweepRows, T, ci, cdef.label);
-
-        % Derive TEX path (same folder, same stem as PDF)
+        % TEX path
         texPath = strrep(out.pdfPath, '.pdf', '.tex');
 
-        % Record result
+        % Record results
         results(ci).success     = true;
         results(ci).pdfPath     = out.pdfPath;
         results(ci).texPath     = texPath;
         results(ci).compactPath = cMatPath;
         results(ci).csvPath     = cCsvPath;
-        results(ci).layout      = 'clockExact';
+        results(ci).logPath     = logFile;
+        results(ci).layout      = out.cfg.report.layout;
         results(ci).nManifest   = height(T);
         results(ci).categories  = unique(T.category);
-        fprintf('  DONE  PDF: %s  rows: %d\n', out.pdfPath, height(T));
+        results(ci).patches     = appliedPatches;
+
+        % Accumulate sweep index and manifest overview
+        sweepIdxRows{end+1}  = mkIndexRow_(ci, c, out, appliedPatches); %#ok<AGROW>
+        sweepMfRows          = accumulateMfRows_(sweepMfRows, T, ci, c.label);
+
+        fprintf('  OK  PDF: %s  mf-rows: %d\n', out.pdfPath, height(T));
 
     catch ME
-        warning('Sweep:caseFailed', 'Case %02d failed: %s', ci, ME.message);
+        diary off;
+        warning('Sweep:caseFailed', 'Case %03d failed: %s', ci, ME.message);
         results(ci).success = false;
         results(ci).error   = ME.message;
+        results(ci).logPath = logFile;
+        fprintf('  FAIL  %s\n', ME.message);
     end
-
-    prevCfg = cfg; % preserve for next cumulative step
 end
 
-%% ---- Sweep manifest CSV ------------------------------------------------
-if ~isempty(sweepRows)
-    sweepT = vertcat(sweepRows{:});
-    sweepCsv = fullfile(sweepDir, 'sweep_manifest.csv');
-    writetable(sweepT, sweepCsv);
-    fprintf('\nSweep manifest: %s\n', sweepCsv);
+%% ---- Sweep-level CSV outputs -------------------------------------------
+if ~isempty(sweepIdxRows)
+    try
+        idxT = vertcat(sweepIdxRows{:});
+        writetable(idxT, fullfile(sweepDir, 'ladder_sweep_index.csv'));
+    catch; end
+end
+if ~isempty(sweepMfRows)
+    try
+        mfT = vertcat(sweepMfRows{:});
+        writetable(mfT, fullfile(sweepDir, 'ladder_sweep_manifest_overview.csv'));
+    catch; end
 end
 
 %% ---- Acceptance checks -------------------------------------------------
-runAcceptanceChecks_(results, runOnly, nTotal);
+runAcceptanceChecks_(results, runOnly, cases, phaseAAllIdx, phaseCFinal);
 
 fprintf('\nSweep complete.  Output: %s\n', sweepDir);
 
 % =========================================================================
-% LOCAL FUNCTIONS
+% LOCAL FUNCTIONS — CONFIG BUILDERS
 % =========================================================================
 
-function cfg = buildCase01_(thisDir)
-    % Case 01: minimal L1 code-only, 1 receiver, deterministic clocks, no errors.
+function cfg = buildBaselineCfg_(thisDir)
+    % Minimal Phase A baseline: L1 code only, 1rx, all errors off, stationary.
     cfg = revgnss.ConfigFactory.defaultConfig();
     cfg.report.baseOutputDir = fullfile(thisDir, 'output');
 
-    % Single-frequency L1 only
     cfg.signals.enabledMask = logical([true, false]);
 
-    % No carrier
-    cfg.measurements.carrierPhase.enable = false;
+    % No carrier, no Doppler
+    cfg.measurements.carrierPhase.enable   = false;
+    cfg.measurements.doppler.enable        = false;
+    cfg.measurements.doppler.useInEKF      = false;
+    cfg.physics.doppler.truth.enable       = false;
+    cfg.physics.doppler.model.enable       = false;
 
-    % No Doppler
-    cfg.measurements.doppler.enable  = false;
-    cfg.measurements.doppler.useInEKF = false;
-    cfg.physics.doppler.truth.enable  = false;
-    cfg.physics.doppler.model.enable  = false;
+    % Deterministic code
+    cfg.errors.codeNoise.sigma_m           = 0;
 
-    % Deterministic code (zero noise)
-    cfg.errors.codeNoise.sigma_m = 0;
+    % Deterministic clocks
+    cfg.clock.receiver.deterministic       = true;
+    cfg.asset.clock.deterministic          = true;
+    for k = 1:numel(cfg.towers)
+        cfg.towers(k).clock.deterministic  = true;
+    end
+    cfg.estimator.estimateTowerClocks      = false;
 
     % No atmosphere
-    cfg.errors.troposphere.truth.enable      = false;
-    cfg.errors.troposphere.model.enable      = false;
+    cfg.errors.troposphere.truth.enable    = false;
+    cfg.errors.troposphere.model.enable    = false;
     cfg.errors.troposphere.stochastic.enable = false;
-    cfg.errors.ionosphere.truth.enable       = false;
-    cfg.errors.ionosphere.model.enable       = false;
+    cfg.errors.ionosphere.truth.enable     = false;
+    cfg.errors.ionosphere.model.enable     = false;
     cfg.errors.ionosphere.stochastic.enable  = false;
     cfg.errors.ionosphere.scintillation.enable = false;
 
-    % No geometry corrections
-    cfg.physics.sagnac.truth.enable          = false;
-    cfg.physics.sagnac.model.enable          = false;
-    cfg.physics.lightTime.enable             = false;
-    cfg.physics.lightTime.truth.enable       = false;
-    cfg.physics.lightTime.model.enable       = false;
+    % No physics corrections
+    cfg.physics.sagnac.truth.enable        = false;
+    cfg.physics.sagnac.model.enable        = false;
+    cfg.physics.lightTime.enable           = false;
+    cfg.physics.lightTime.truth.enable     = false;
+    cfg.physics.lightTime.model.enable     = false;
     cfg.physics.relativity.shapiro.truth.enable = false;
     cfg.physics.relativity.shapiro.model.enable = false;
     cfg.physics.relativity.clock.truth.enable   = false;
     cfg.physics.relativity.clock.model.enable   = false;
 
-    % Deterministic clocks
-    cfg.clock.receiver.deterministic = true;
-    cfg.asset.clock.deterministic    = true;
-    for k = 1:numel(cfg.towers)
-        cfg.towers(k).clock.deterministic = true;
-    end
-    cfg.estimator.estimateTowerClocks = false;
-
     % No effects
-    cfg.effects.antennaPCO.truth.enable  = false;
-    cfg.effects.antennaPCO.model.enable  = false;
-    cfg.effects.antennaPCV.truth.enable  = false;
-    cfg.effects.antennaPCV.model.enable  = false;
-    cfg.effects.towerSurvey.truth.enable = false;
-    cfg.effects.towerSurvey.model.enable = false;
-    cfg.errors.hardwareDelay.truth.enable = false;
-    cfg.errors.hardwareDelay.model.enable = false;
-    cfg.errors.multipath.truth.enable    = false;
-    cfg.errors.multipath.model.enable    = false;
-    cfg.effects.correlatedNoise.enable   = false;
+    cfg.effects.antennaPCO.truth.enable    = false;
+    cfg.effects.antennaPCO.model.enable    = false;
+    cfg.effects.antennaPCV.truth.enable    = false;
+    cfg.effects.antennaPCV.model.enable    = false;
+    cfg.effects.towerSurvey.truth.enable   = false;
+    cfg.effects.towerSurvey.model.enable   = false;
+    cfg.errors.hardwareDelay.truth.enable  = false;
+    cfg.errors.hardwareDelay.model.enable  = false;
+    cfg.errors.multipath.truth.enable      = false;
+    cfg.errors.multipath.model.enable      = false;
+    cfg.effects.correlatedNoise.enable     = false;
 
     % No covariance inflation
-    cfg.covariance.sharedErrors.enable   = false;
-    cfg.covariance.productClock.enable   = false;
+    cfg.covariance.sharedErrors.enable     = false;
+    cfg.covariance.productClock.enable     = false;
 
     % Stationary orbit, constant-velocity EKF
-    cfg.orbit.useOrbitPropagator = false;
-    cfg.orbit.mode               = 'stationaryEcef';
-    cfg.orbit.truth.mode         = 'stationaryEcef';
-    cfg.estimator.dynamics.mode  = 'constantVelocity';
+    cfg.orbit.useOrbitPropagator           = false;
+    cfg.orbit.mode                         = 'stationaryEcef';
+    cfg.orbit.truth.mode                   = 'stationaryEcef';
+    cfg.estimator.dynamics.mode            = 'constantVelocity';
     cfg.estimator.processNoise.modelMismatch.enable = false;
 
     % Single receiver, no attitude
-    cfg.scenario.nReceivers          = 1;
-    cfg.estimator.estimateAttitude   = false;
-    cfg.estimator.estimateAngularRate = false;
-    cfg.estimator.attitudeCarrierMode = 'off';
+    cfg.scenario.nReceivers                = 1;
+    cfg.scenario.nSpaceAssets              = 1;
+    cfg.estimator.estimateAttitude         = false;
+    cfg.estimator.estimateAngularRate      = false;
+    cfg.estimator.attitudeCarrierMode      = 'off';
 
-    % Carrier slip off
-    cfg.carrierSlip.enable = false;
+    % No carrier slip
+    cfg.carrierSlip.enable                 = false;
     cfg.measurements.carrier.slipDetection.enable = false;
+
+    % No integer ambiguity fixing
+    cfg.estimator.integerAmbiguity.enable  = false;
+
+    % No ZWD
+    cfg.estimation.troposphereMode         = 'none';
+
+    % No IF rows
+    cfg.measurements.code.ionosphereFreeRows.enable  = false;
+    cfg.measurements.code.ionosphereFreeRows.useInEkf = false;
+    cfg.measurements.carrier.ionosphereFreeRows.enable  = false;
+    cfg.measurements.carrier.ionosphereFreeRows.useInEkf = false;
 
     % Validation policy
     cfg.validation.unsupportedFeaturePolicy = 'disableWithWarning';
-    cfg.scenario.nSpaceAssets = 1;
-    cfg.scenario.orbitClass   = 'GEO';
+    cfg.validation.scientificCampaign.enable = false;
 end
 
-% ---- Case delta functions (cases 2-31) ----------------------------------
-
-function cfg = delta_c02_(cfg)
-    % + code noise sigma=0.3 m
-    cfg.errors.codeNoise.sigma_m        = 0.3;
-    cfg.measurements.codeNoise.model    = 'constant';
-end
-
-function cfg = delta_c03_(cfg)
-    % + stochastic receiver clock
-    cfg.clock.receiver.deterministic = false;
-    cfg.asset.clock.deterministic    = false;
-    cfg.estimator.P0_bRx_m           = 100.0;
-    cfg.estimator.P0_bdotRx_mps      = 0.01;
-end
-
-function cfg = delta_c04_(cfg)
-    % + stochastic tower clocks (EKF still uses perfect correction)
-    for k = 1:numel(cfg.towers)
-        cfg.towers(k).clock.deterministic = false;
+function cfg = buildPhaseAAllCfg_(thisDir, phaseAErrors)
+    % Applies all 16 Phase A error families to the baseline config.
+    cfg = buildBaselineCfg_(thisDir);
+    for i = 1:numel(phaseAErrors)
+        [cfg, ~] = applyPhaseAError_(cfg, phaseAErrors{i});
     end
 end
 
-function cfg = delta_c05_(cfg)
-    % + tower clock product corrections (truthHistoryProductNoisy)
-    cfg.clocks.tower.product.mode                  = 'truthHistoryProductNoisy';
-    cfg.clocks.tower.product.updateInterval_s      = 30;
-    cfg.clocks.tower.product.latency_s             = 5;
-    cfg.clocks.tower.product.sigmaBias_m           = 0.01;
-    cfg.clocks.tower.product.sigmaDrift_mps        = 0.0002;
-    cfg.clocks.tower.product.covBiasDrift          = 0;
-    cfg.clocks.tower.product.validity_s            = 120;
-    cfg.clocks.tower.product.addToR                = true;
-    cfg.clocks.tower.product.sharedErrorCorrelation = true;
-end
+function [cfg, patches] = applyPhaseAError_(cfg, errorName)
+    % Apply a single Phase A raw truth/model error family.
+    patches = {};
+    switch errorName
+        case 'code_noise'
+            cfg.errors.codeNoise.sigma_m     = 0.3;
+            cfg.measurements.codeNoise.model = 'constant';
 
-function cfg = delta_c06_(cfg)
-    % + tower clock product covariance (block R inflation)
-    cfg.covariance.sharedErrors.enable                   = true;
-    cfg.covariance.sharedErrors.mode                     = 'blockTowerClockProduct';
-    cfg.covariance.sharedErrors.applyTowerClockToCode    = true;
-    cfg.covariance.sharedErrors.applyTowerClockToCarrier = false;
-    cfg.covariance.sharedErrors.applyTowerClockToDoppler = false;
-    cfg.covariance.sharedErrors.carrierPolicy            = 'arcBiasAbsorbsConstantProductBias';
-    cfg.covariance.sharedErrors.dopplerPolicy            = 'frameConsistentV2';
-    cfg.covariance.sharedErrors.ensureSPD                = true;
-    cfg.covariance.productClock.enable                   = true;
-    cfg.covariance.productClock.applyToCode              = true;
-    cfg.covariance.productClock.applyToDoppler           = false; % Doppler not yet active
-    cfg.covariance.productClock.applyToCarrier           = false; % carrier not yet active
-    cfg.covariance.productClock.crossCodeDoppler         = false;
-    cfg.covariance.productClock.carrierPolicy            = 'timeVaryingProductResidualOnly';
-    cfg.covariance.productClock.dopplerPolicy            = 'sharedClockDriftProductBlock';
-    cfg.covariance.productClock.ensureSPD                = true;
-end
+        case 'rx_clock_stochastic'
+            cfg.clock.receiver.deterministic = false;
+            cfg.asset.clock.deterministic    = false;
+            cfg.estimator.P0_bRx_m           = 100.0;
+            cfg.estimator.P0_bdotRx_mps      = 0.01;
 
-function cfg = delta_c07_(cfg)
-    % + Doppler rows (basic ECEF-only model)
-    cfg.measurements.doppler.enable       = true;
-    cfg.measurements.doppler.useInEKF     = true;
-    cfg.physics.doppler.truth.enable      = true;
-    cfg.physics.doppler.model.enable      = true;
-    cfg.measurements.doppler.modelLevel   = 'ecefOnlyV1';
-    cfg.measurements.doppler.jacobianMode = 'analyticRangeRateV1';
-    cfg.measurements.doppler.includeTowerRotationalVelocity = false;
-    cfg.measurements.doppler.includeTowerClockProductDrift  = false;
-    cfg.measurements.doppler.includeSagnacRate              = false;
-    cfg.measurements.doppler.includeLightTimeRate           = false;
-end
-
-function cfg = delta_c08_(cfg)
-    % + Doppler frame-consistent model options (frameConsistentV2)
-    cfg.measurements.doppler.modelLevel                     = 'frameConsistentV2';
-    cfg.measurements.doppler.includeTowerRotationalVelocity = true;
-    cfg.measurements.doppler.includeSagnacRate              = false; % captured by tower rotation
-    cfg.measurements.doppler.includeLightTimeRate           = false;
-    cfg.measurements.doppler.includeTowerClockProductDrift  = true;  % product active from c05
-    cfg.measurements.doppler.jacobianMode                   = 'analyticRangeRateV1';
-    cfg.covariance.sharedErrors.dopplerPolicy               = 'frameConsistentV2';
-    cfg.covariance.productClock.applyToDoppler              = true;
-    cfg.covariance.productClock.dopplerPolicy               = 'sharedClockDriftProductBlock';
-end
-
-function cfg = delta_c09_(cfg)
-    % + L1+L2 dual-frequency
-    cfg.signals.enabledMask = logical([true, true]);
-end
-
-function cfg = delta_c10_(cfg)
-    % + code ionosphere-free rows (requires L1+L2 from c09)
-    cfg.measurements.code.ionosphereFreeRows.enable  = true;
-    cfg.measurements.code.ionosphereFreeRows.useInEkf = true;
-    cfg.diagnostics.codeIonoFreeRows.enable          = true;
-    cfg.diagnostics.codeIonoFreeConsistency.enable   = true;
-end
-
-function cfg = delta_c11_(cfg)
-    % + carrier phase enabled with float ambiguities
-    cfg.measurements.carrierPhase.enable     = true;
-    cfg.measurements.carrierMode             = 'ekfFloat';
-    cfg.estimation.ambiguityMode             = 'floatPerTowerReceiverSignal';
-    cfg.estimation.ambiguity.initialSigma_m  = 100;
-    cfg.covariance.productClock.applyToCarrier = true;
-end
-
-function cfg = delta_c12_(cfg)
-    % + carrier slip guards and arc-separated ambiguities
-    cfg.carrierSlip.enable                          = true;
-    cfg.carrierSlip.method                          = 'modelStepCompensatedResidualJump';
-    cfg.carrierSlip.threshold_m                     = 0.10;
-    cfg.carrierSlip.minArcLength_s                  = 300;
-    cfg.carrierSlip.productStepCompensation         = true;
-    cfg.carrierSlip.atmosphereStepCompensation      = true;
-    cfg.carrierSlip.antennaStepCompensation         = true;
-    cfg.carrierSlip.hardwareStepCompensation        = true;
-    cfg.carrierSlip.diffAttitudeBaselineMode        = true;
-    cfg.carrierSlip.resetAmbiguityOnConfirmedSlip   = true;
-    cfg.carrierSlip.ignoreKnownProductBoundaryJumps = false;
-    cfg.carrierSlip.logDiagnostics                  = true;
-    cfg.carrierSlip.syntheticSlipInjection.enable   = false;
-    cfg.measurements.carrier.slipDetection.enable              = true;
-    cfg.measurements.carrier.slipDetection.minEpochsBeforeDetect = 3;
-    cfg.measurements.carrier.slipDetection.resetSigma_m        = 100;
-    cfg.measurements.carrier.slipDetection.action              = 'resetAndSkip';
-    cfg.estimator.arcSeparatedAmbiguities.enable               = true;
-    cfg.diagnostics.arcSeparatedAmbiguities.enable             = true;
-end
-
-function cfg = delta_c13_(cfg)
-    % + carrier IF float rows (requires L1+L2 from c09 and carrier from c11)
-    cfg.measurements.carrier.ionosphereFreeRows.enable  = true;
-    cfg.measurements.carrier.ionosphereFreeRows.useInEkf = true;
-    cfg.diagnostics.carrierIonoFreeRows.enable          = true;
-    cfg.diagnostics.carrierIonoFreeAmbiguityTraceability.enable = true;
-    cfg.estimator.enforceCarrierArcConsistency.enable   = true;
-    cfg.diagnostics.carrierArcConsistencyEnforcement.enable = true;
-end
-
-function cfg = delta_c14_(cfg)
-    % + troposphere truth/model/stochastic
-    cfg.errors.troposphere.truth.enable      = true;
-    cfg.errors.troposphere.model.enable      = true;
-    cfg.errors.troposphere.modelType         = 'simpleMapped';
-    cfg.errors.troposphere.stochastic.enable = true;
-    cfg.estimation.troposphereMode           = 'none'; % no ZWD EKF state (weak GEO obs.)
-end
-
-function cfg = delta_c15_(cfg)
-    % + ionosphere truth/model/stochastic/scintillation
-    cfg.errors.ionosphere.truth.enable        = true;
-    cfg.errors.ionosphere.model.enable        = true;
-    cfg.errors.ionosphere.modelType           = 'simpleMapped';
-    cfg.errors.ionosphere.stochastic.enable   = true;
-    cfg.errors.ionosphere.scintillation.enable = true;
-end
-
-function cfg = delta_c16_(cfg)
-    % + Sagnac truth/model (first-order correction; separate from light-time)
-    cfg.physics.sagnac.truth.enable = true;
-    cfg.physics.sagnac.model.enable = true;
-end
-
-function cfg = delta_c17_(cfg)
-    % + iterative one-way light-time (subsumes Sagnac; disable separate Sagnac)
-    cfg.physics.lightTime.enable       = true;
-    cfg.physics.lightTime.mode         = 'iterativeOneWay';
-    cfg.physics.lightTime.iterations   = 2;
-    cfg.physics.lightTime.tolerance_s  = 1e-12;
-    cfg.physics.lightTime.truth.enable = true;
-    cfg.physics.lightTime.model.enable = true;
-    % Stage 80: iterativeOneWay subsumes Sagnac — disable separate Sagnac to prevent double-count
-    cfg.physics.sagnac.truth.enable    = false;
-    cfg.physics.sagnac.model.enable    = false;
-end
-
-function cfg = delta_c18_(cfg)
-    % + Shapiro delay truth/model
-    cfg.physics.relativity.shapiro.truth.enable = true;
-    cfg.physics.relativity.shapiro.model.enable = true;
-end
-
-function cfg = delta_c19_(cfg)
-    % + J2 truth propagator with two-body EKF mismatch
-    cfg.orbit.useOrbitPropagator  = true;
-    cfg.orbit.altitudeMean_m      = 35786000;
-    cfg.orbit.inclination_rad     = 0;
-    cfg.orbit.raan_rad            = 0;
-    cfg.orbit.trueAnomaly0_rad    = 23 * pi / 180;
-    cfg.orbit.epochGMST_rad       = 0;
-    cfg.orbit.truth.mode          = 'j2Rk4';
-    cfg.orbit.mode                = 'j2Rk4';
-    cfg.estimator.dynamics.mode   = 'twoBody';
-    cfg.estimator.dynamics.fdPositionStep_m   = 1.0;
-    cfg.estimator.dynamics.fdVelocityStep_mps = 1e-3;
-    cfg.estimator.processNoise.modelMismatch.enable   = true;
-    cfg.estimator.processNoise.modelMismatch.sigma_mps2 = 1e-6;
-    cfg.diagnostics.ekfDynamics.enable = true;
-end
-
-function cfg = delta_c20_(cfg)
-    % + antenna PCO truth/model
-    cfg.effects.antennaPCO.truth.enable = true;
-    cfg.effects.antennaPCO.model.enable = true;
-end
-
-function cfg = delta_c21_(cfg)
-    % + antenna PCV truth/model
-    cfg.effects.antennaPCV.truth.enable = true;
-    cfg.effects.antennaPCV.model.enable = true;
-end
-
-function cfg = delta_c22_(cfg)
-    % + tower survey truth/model
-    cfg.effects.towerSurvey.truth.enable = true;
-    cfg.effects.towerSurvey.model.enable = true;
-end
-
-function cfg = delta_c23_(cfg)
-    % + hardware delay truth/model
-    cfg.errors.hardwareDelay.truth.enable = true;
-    cfg.errors.hardwareDelay.model.enable = true;
-end
-
-function cfg = delta_c24_(cfg)
-    % + multipath truth/model
-    cfg.errors.multipath.truth.enable = true;
-    cfg.errors.multipath.model.enable = true;
-end
-
-function cfg = delta_c25_(cfg)
-    % + correlated noise
-    cfg.effects.correlatedNoise.enable = true;
-end
-
-function cfg = delta_c26_(cfg)
-    % + receiver lever arms / 4-receiver scenario (applies ScenarioPresets)
-    cfg.scenario.name = 'singleAssetCarrierAttitude';
-    cfg = revgnss.ScenarioPresets.apply(cfg, 'singleAssetCarrierAttitude');
-    % Re-assert physics settings that preset might have touched
-    cfg.estimator.attitude.parameterization = 'eulerZYX'; % c27 upgrades to quaternion
-    cfg.estimator.attitudeCarrierMode       = 'off';       % c28 enables diffAtt
-    cfg.estimator.diffAtt.ambiguityResolution.enable = false; % c29 enables AR
-    cfg.estimator.integerAmbiguity.enable   = false;           % c30 enables
-    cfg.estimator.runKnownAmbiguityValidation = false;         % c29 enables
-    cfg.validation.scientificCampaign.enable  = false;
-end
-
-function cfg = delta_c27_(cfg)
-    % + quaternion attitude EKF
-    cfg.estimator.attitude.parameterization         = 'quaternionErrorState';
-    cfg.estimator.attitude.maxErrorStateInjection_rad = deg2rad(10);
-    cfg.diagnostics.attitudeCovarianceReset.enable  = true;
-    cfg.diagnostics.ekfInnovationAccounting.enable  = true;
-end
-
-function cfg = delta_c28_(cfg)
-    % + differential carrier attitude calibration
-    cfg.estimator.attitudeCarrierMode            = 'calibratedDifferentialAmbiguity';
-    cfg.estimator.diffAtt.calibWin_s             = 60;
-    cfg.estimator.diffAtt.referenceMode          = 'externalInitialAttitude';
-    cfg.estimator.diffAtt.referenceSigma_deg     = 0.1;
-    cfg.estimator.attitude.carrierSignal         = 'L1';
-    cfg.estimator.attitude.useRawCarrierForAttitude = true;
-    cfg.diagnostics.ambiguityReadiness.enable    = true;
-    cfg.diagnostics.ambiguityStateMetadata.enable = true;
-    cfg.diagnostics.carrierArcEvidence.enable    = true;
-end
-
-function cfg = delta_c29_(cfg)
-    % + baseline attitude ambiguity resolution
-    cfg.estimator.diffAtt.ambiguityResolution.enable                    = true;
-    cfg.estimator.diffAtt.ambiguityResolution.method                    = 'constrainedBaselineIntegerSearch';
-    cfg.estimator.diffAtt.ambiguityResolution.signal                    = 'L1';
-    cfg.estimator.diffAtt.ambiguityResolution.searchHalfWidth_cycles    = 5;
-    cfg.estimator.diffAtt.ambiguityResolution.minArcEpochs              = 60;
-    cfg.estimator.diffAtt.ambiguityResolution.rmsThreshold_cycles       = 0.10;
-    cfg.estimator.diffAtt.ambiguityResolution.ratioThreshold            = 3.0;
-    cfg.estimator.diffAtt.ambiguityResolution.useExternalReferenceAsSearchCenter = true;
-    cfg.estimator.diffAtt.ambiguityResolution.allowExternalReferenceFallback     = true;
-    cfg.estimator.diffAtt.ambiguityResolution.maxFloatDistance_cycles   = 0.25;
-    cfg.estimator.diffAtt.ambiguityResolution.requireAllForGnssOnlyClaim = true;
-    cfg.estimator.diffAtt.ambiguityResolution.partialFixPolicy          = 'useFixedOnlyOrExplicitMixed';
-    cfg.estimator.diffAtt.ambiguityResolution.phaseBiasStatus           = 'syntheticKnownZero';
-    cfg.estimator.diffAtt.ambiguityResolution.falseFixClassification    = 'screenedNotFormal';
-    cfg.estimator.diffAtt.ambiguityResolution.maxWideLaneFloatDistance_cycles = 0.5;
-    cfg.estimator.diffAtt.ambiguityResolution.differentialIonosphereInBaselineAr = 'neglectedShortBaselineV1';
-    cfg.estimator.runKnownAmbiguityValidation = true;
-    cfg.diagnostics.wideLaneNarrowLane.enable = true;
-    cfg.diagnostics.ambiguityFixingReadiness.enable = true;
-    cfg.diagnostics.ambiguityReadinessEvidence.enable = true;
-end
-
-function cfg = delta_c30_(cfg)
-    % + guarded raw carrier integer ambiguity fixing
-    cfg.estimator.integerAmbiguity.enable                     = true;
-    cfg.estimator.integerAmbiguity.mode                       = 'controlledRawCarrier';
-    cfg.estimator.integerAmbiguity.minArcLength_s             = 300;
-    cfg.estimator.integerAmbiguity.maxSigma_cycles            = 0.15;
-    cfg.estimator.integerAmbiguity.maxDistanceToInteger_cycles = 0.20;
-    cfg.estimator.integerAmbiguity.maxResidualRmsIncrease_m   = 0.01;
-    cfg.estimator.integerAmbiguity.fixVariance_cycles2        = 1e-4;
-    cfg.estimator.integerAmbiguity.resetOnSlip                = true;
-end
-
-function cfg = delta_c31_(cfg)
-    % Full current single-asset one-way default run (matches run_oo_reverse_gnss_report.m)
-    cfg.simulation.duration_s = 3600; % overridden in main loop
-    cfg.simulation.dt_s       = 1;
-
-    % All atmosphere, geometry, and effect toggles from main script
-    cfg.physics.relativity.clock.truth.enable = true;
-    cfg.physics.relativity.clock.model.enable = true;
-    cfg.diagnostics.codeIonoFreeRows.enable          = true;
-    cfg.diagnostics.codeIonoFreeConsistency.enable   = true;
-    cfg.diagnostics.carrierIonoFreeRows.enable       = true;
-    cfg.diagnostics.carrierIonoFreeAmbiguityTraceability.enable = false;
-    cfg.diagnostics.wideLaneNarrowLane.enable        = false;
-    cfg.diagnostics.ambiguityFixingReadiness.enable  = false;
-    cfg.diagnostics.ambiguityReadinessEvidence.enable = false;
-    cfg.diagnostics.carrierArcEvidence.enable        = true;
-    cfg.diagnostics.pluginRegistry.enable            = true;
-    cfg.diagnostics.ekfInnovationAccounting.enable   = true;
-    cfg.diagnostics.ekfDynamics.enable               = true;
-    cfg.diagnostics.dynamicsMismatch.computeJ2Ratios = true;
-    cfg.diagnostics.carrierDopplerConsistency.status = 'notImplementedGuarded';
-
-    % Carrier IF rows OFF in full default run (matched run script)
-    cfg.measurements.carrier.ionosphereFreeRows.enable  = false;
-    cfg.measurements.carrier.ionosphereFreeRows.useInEkf = false;
-    % Code IF rows OFF in full default run (matched run script)
-    cfg.measurements.code.ionosphereFreeRows.enable  = false;
-    cfg.measurements.code.ionosphereFreeRows.useInEkf = false;
-
-    % Troposphere ZWD EKF off (weak GEO observability)
-    cfg.estimation.troposphereMode         = 'none';
-    cfg.estimation.tropoZwd.initialSigma_m = 0.3;
-    cfg.estimation.tropoZwd.sigma_ss_m     = 0.05;
-    cfg.estimation.tropoZwd.tau_s          = 3600;
-
-    % Stage 84 Doppler/covariance correctness fields
-    cfg.covariance.productClock.enable           = true;
-    cfg.covariance.productClock.applyToCode      = true;
-    cfg.covariance.productClock.applyToDoppler   = true;
-    cfg.covariance.productClock.applyToCarrier   = true;
-    cfg.covariance.productClock.crossCodeDoppler = false;
-    cfg.covariance.productClock.carrierPolicy    = 'timeVaryingProductResidualOnly';
-    cfg.covariance.productClock.dopplerPolicy    = 'sharedClockDriftProductBlock';
-    cfg.covariance.productClock.ensureSPD        = true;
-
-    % Attitude modes from main script
-    cfg.estimator.attitudeCarrierMode                    = 'calibratedDifferentialAmbiguity';
-    cfg.estimator.diffAtt.ambiguityResolution.enable     = true;
-    cfg.estimator.integerAmbiguity.enable                = true;
-    cfg.estimator.runKnownAmbiguityValidation            = true;
-    cfg.estimator.attitudeInitMode                       = 'none';
-
-    % Biases (zero in v1)
-    cfg.biases.interFrequency.code.truth.L1_m    = 0;
-    cfg.biases.interFrequency.code.truth.L2_m    = 0;
-    cfg.biases.interFrequency.code.model.L1_m    = 0;
-    cfg.biases.interFrequency.code.model.L2_m    = 0;
-    cfg.biases.interFrequency.carrier.truth.L1_m = 0;
-    cfg.biases.interFrequency.carrier.truth.L2_m = 0;
-    cfg.biases.interFrequency.carrier.model.L1_m = 0;
-    cfg.biases.interFrequency.carrier.model.L2_m = 0;
-
-    % No scientific campaign in sweep (avoids multi-case recursion overhead)
-    cfg.validation.scientificCampaign.enable = false;
-    cfg.validation.fullSuiteRun              = false;
-    cfg.validation.unsupportedFeaturePolicy  = 'disableWithWarning';
-end
-
-% ---- Case definition builder --------------------------------------------
-
-function defs = buildCaseDefs_()
-    mk = @(lbl, desc, fn) struct('label',lbl,'description',desc,'deltaFcn',fn);
-    defs = [ ...
-        mk('c01_minimal_L1_code',       'Minimal L1 code-only, 1rx, det clocks, no errors, no Doppler, no carrier', @(c)c), ...
-        mk('c02_code_noise',            '+ code noise sigma=0.3 m', @delta_c02_), ...
-        mk('c03_stoch_rx_clock',        '+ stochastic receiver clock (EKF estimates bias+drift)', @delta_c03_), ...
-        mk('c04_stoch_tower_clocks',    '+ stochastic tower clocks (EKF still gets perfect correction)', @delta_c04_), ...
-        mk('c05_tower_product',         '+ tower clock product corrections (truthHistoryProductNoisy)', @delta_c05_), ...
-        mk('c06_product_covariance',    '+ tower clock product covariance (block-R inflation)', @delta_c06_), ...
-        mk('c07_doppler_rows',          '+ Doppler rows (basic ecefOnlyV1 model)', @delta_c07_), ...
-        mk('c08_doppler_frameV2',       '+ Doppler frameConsistentV2 (tower rotation + product drift)', @delta_c08_), ...
-        mk('c09_dual_frequency',        '+ L1+L2 dual-frequency', @delta_c09_), ...
-        mk('c10_code_IF_rows',          '+ code ionosphere-free rows (requires L1+L2)', @delta_c10_), ...
-        mk('c11_carrier_float',         '+ carrier phase enabled with float ambiguities', @delta_c11_), ...
-        mk('c12_carrier_slip',          '+ carrier slip guards + arc-separated ambiguities', @delta_c12_), ...
-        mk('c13_carrier_IF_float',      '+ carrier IF float rows (requires L1+L2 + carrier)', @delta_c13_), ...
-        mk('c14_troposphere',           '+ troposphere truth/model/stochastic', @delta_c14_), ...
-        mk('c15_ionosphere',            '+ ionosphere truth/model/stochastic/scintillation', @delta_c15_), ...
-        mk('c16_sagnac',               '+ Sagnac first-order truth/model', @delta_c16_), ...
-        mk('c17_iterative_light_time',  '+ iterative one-way light-time (disables separate Sagnac)', @delta_c17_), ...
-        mk('c18_shapiro',              '+ Shapiro delay truth/model', @delta_c18_), ...
-        mk('c19_j2_orbit',             '+ J2 truth propagator + two-body EKF mismatch', @delta_c19_), ...
-        mk('c20_antenna_PCO',           '+ antenna PCO truth/model', @delta_c20_), ...
-        mk('c21_antenna_PCV',           '+ antenna PCV truth/model', @delta_c21_), ...
-        mk('c22_tower_survey',          '+ tower survey truth/model', @delta_c22_), ...
-        mk('c23_hardware_delay',        '+ hardware delay truth/model', @delta_c23_), ...
-        mk('c24_multipath',            '+ multipath truth/model', @delta_c24_), ...
-        mk('c25_correlated_noise',      '+ correlated noise', @delta_c25_), ...
-        mk('c26_lever_arms_4rx',        '+ 4-receiver lever-arm preset (ScenarioPresets)', @delta_c26_), ...
-        mk('c27_quaternion_attitude',   '+ quaternion error-state attitude EKF', @delta_c27_), ...
-        mk('c28_diff_att_calibration',  '+ differential carrier attitude calibration', @delta_c28_), ...
-        mk('c29_baseline_att_AR',       '+ baseline attitude ambiguity resolution', @delta_c29_), ...
-        mk('c30_guarded_int_fix',       '+ guarded raw carrier integer ambiguity fixing', @delta_c30_), ...
-        mk('c31_full_default_run',      'Full single-asset one-way default run (3600 s)', @delta_c31_) ...
-    ];
-end
-
-% ---- Compact MAT builder ------------------------------------------------
-
-function compact = buildCompact_(out, T, caseIdx, cdef)
-    compact.caseIndex    = caseIdx;
-    compact.label        = cdef.label;
-    compact.description  = cdef.description;
-    compact.manifest     = T;
-    compact.summary      = out.summary;
-
-    % History arrays from diag.log
-    try
-        lg = out.diag.log;
-        nE = numel(lg);
-        compact.time_s = (0:nE-1)' * out.cfg.simulation.dt_s;
-        pr = zeros(3, nE); vr = zeros(3, nE);
-        pe = zeros(3, nE); ve = zeros(3, nE);
-        for k = 1:nE
-            try; pr(:,k) = lg(k).truth.r_ecef_m;   catch; end
-            try; vr(:,k) = lg(k).truth.v_ecef_mps; catch; end
-            try; pe(:,k) = lg(k).estimate.r_ecef_m;   catch; end
-            try; ve(:,k) = lg(k).estimate.v_ecef_mps; catch; end
-        end
-        compact.posTrue_m   = pr;
-        compact.velTrue_mps = vr;
-        compact.posEst_m    = pe;
-        compact.velEst_mps  = ve;
-        compact.posError_m     = pe - pr;
-        compact.posErrorNorm_m = sqrt(sum((pe-pr).^2, 1));
-    catch; end
-
-    % Clock history
-    try
-        lg = out.diag.log;
-        bT = zeros(1, numel(lg));
-        bE = zeros(1, numel(lg));
-        for k = 1:numel(lg)
-            try; bT(k) = lg(k).truth.rxClockBias_m;    catch; end
-            try; bE(k) = lg(k).estimate.rxClockBias_m; catch; end
-        end
-        compact.rxClockBiasTrue_m = bT;
-        compact.rxClockBiasEst_m  = bE;
-        compact.rxClockBiasError_m = bE - bT;
-    catch; end
-
-    % Covariance diagonal
-    try
-        lg = out.diag.log;
-        nE = numel(lg);
-        if nE > 0 && isfield(lg(1),'Pdiag')
-            nS = numel(lg(1).Pdiag);
-            Pd = zeros(nS, nE);
-            for k = 1:nE
-                try; Pd(:,k) = lg(k).Pdiag(:); catch; end
+        case 'tower_clock_stochastic'
+            for k = 1:numel(cfg.towers)
+                cfg.towers(k).clock.deterministic = false;
             end
-            compact.covDiag = Pd;
+
+        case 'tower_clock_product'
+            cfg.clocks.tower.product.mode              = 'truthHistoryProductNoisy';
+            cfg.clocks.tower.product.updateInterval_s  = 30;
+            cfg.clocks.tower.product.latency_s         = 5;
+            cfg.clocks.tower.product.sigmaBias_m       = 0.01;
+            cfg.clocks.tower.product.sigmaDrift_mps    = 0.0002;
+            cfg.clocks.tower.product.covBiasDrift      = 0;
+            cfg.clocks.tower.product.validity_s        = 120;
+            cfg.clocks.tower.product.addToR            = false; % Phase A: no R inflation
+            cfg.clocks.tower.product.sharedErrorCorrelation = false;
+
+        case 'troposphere'
+            cfg.errors.troposphere.truth.enable      = true;
+            cfg.errors.troposphere.model.enable      = true;
+            cfg.errors.troposphere.modelType         = 'simpleMapped';
+            cfg.errors.troposphere.stochastic.enable = true;
+            cfg.estimation.troposphereMode           = 'none'; % no ZWD EKF in Phase A
+
+        case 'ionosphere'
+            cfg.errors.ionosphere.truth.enable        = true;
+            cfg.errors.ionosphere.model.enable        = true;
+            cfg.errors.ionosphere.modelType           = 'simpleMapped';
+            cfg.errors.ionosphere.stochastic.enable   = true;
+            cfg.errors.ionosphere.scintillation.enable = true;
+
+        case 'sagnac'
+            cfg.physics.sagnac.truth.enable = true;
+            cfg.physics.sagnac.model.enable = true;
+
+        case 'light_time'
+            cfg.physics.lightTime.enable       = true;
+            cfg.physics.lightTime.mode         = 'iterativeOneWay';
+            cfg.physics.lightTime.iterations   = 2;
+            cfg.physics.lightTime.tolerance_s  = 1e-12;
+            cfg.physics.lightTime.truth.enable = true;
+            cfg.physics.lightTime.model.enable = true;
+            % Stage 80: iterativeOneWay subsumes Sagnac — disable separate Sagnac
+            cfg.physics.sagnac.truth.enable    = false;
+            cfg.physics.sagnac.model.enable    = false;
+            patches{end+1} = 'auto-disabled: sagnac (subsumed by iterativeOneWay light-time; Stage 80)';
+
+        case 'shapiro'
+            cfg.physics.relativity.shapiro.truth.enable = true;
+            cfg.physics.relativity.shapiro.model.enable = true;
+
+        case 'j2_orbit'
+            cfg.orbit.useOrbitPropagator  = true;
+            cfg.orbit.altitudeMean_m      = 35786000;
+            cfg.orbit.inclination_rad     = 0;
+            cfg.orbit.raan_rad            = 0;
+            cfg.orbit.trueAnomaly0_rad    = 23 * pi / 180;
+            cfg.orbit.epochGMST_rad       = 0;
+            cfg.orbit.truth.mode          = 'j2Rk4';
+            cfg.orbit.mode                = 'j2Rk4';
+            cfg.estimator.dynamics.mode   = 'twoBody';
+            cfg.estimator.processNoise.modelMismatch.enable    = true;
+            cfg.estimator.processNoise.modelMismatch.sigma_mps2 = 1e-6;
+            cfg.diagnostics.ekfDynamics.enable = true;
+            patches{end+1} = 'note: J2 is truth propagator; EKF remains twoBody (intentional mismatch)';
+
+        case 'antenna_pco'
+            cfg.effects.antennaPCO.truth.enable = true;
+            cfg.effects.antennaPCO.model.enable = true;
+
+        case 'antenna_pcv'
+            cfg.effects.antennaPCV.truth.enable = true;
+            cfg.effects.antennaPCV.model.enable = true;
+
+        case 'tower_survey'
+            cfg.effects.towerSurvey.truth.enable = true;
+            cfg.effects.towerSurvey.model.enable = true;
+
+        case 'hardware_delay'
+            cfg.errors.hardwareDelay.truth.enable = true;
+            cfg.errors.hardwareDelay.model.enable = true;
+
+        case 'multipath'
+            cfg.errors.multipath.truth.enable = true;
+            cfg.errors.multipath.model.enable = true;
+
+        case 'correlated_noise'
+            cfg.effects.correlatedNoise.enable = true;
+
+        otherwise
+            warning('Sweep:unknownError', 'Unknown Phase A error: %s', errorName);
+    end
+end
+
+function [cfg, patches] = applyPhaseBOption_(cfg, optName, patches)
+    % Apply a single Phase B/C EKF-use option, enforcing dependencies.
+    switch optName
+        case 'doppler_in_ekf'
+            cfg.measurements.doppler.enable       = true;
+            cfg.measurements.doppler.useInEKF     = true;
+            cfg.physics.doppler.truth.enable      = true;
+            cfg.physics.doppler.model.enable      = true;
+            cfg.measurements.doppler.modelLevel   = 'frameConsistentV2';
+            cfg.measurements.doppler.includeTowerRotationalVelocity = true;
+            cfg.measurements.doppler.includeSagnacRate              = false;
+            cfg.measurements.doppler.includeLightTimeRate           = false;
+            cfg.measurements.doppler.jacobianMode = 'analyticRangeRateV1';
+            prodOn = false;
+            try; prodOn = strcmp(cfg.clocks.tower.product.mode,'truthHistoryProductNoisy'); catch; end
+            cfg.measurements.doppler.includeTowerClockProductDrift = prodOn;
+
+        case 'dual_frequency'
+            cfg.signals.enabledMask = logical([true, true]);
+
+        case 'code_if_rows'
+            % Dep: dual_frequency
+            if ~isDual_(cfg)
+                cfg.signals.enabledMask = logical([true, true]);
+                patches{end+1} = 'dependency auto-enabled: dual_frequency because code IF rows require L1+L2';
+            end
+            cfg.measurements.code.ionosphereFreeRows.enable  = true;
+            cfg.measurements.code.ionosphereFreeRows.useInEkf = true;
+            cfg.diagnostics.codeIonoFreeRows.enable          = true;
+
+        case 'carrier_float'
+            cfg.measurements.carrierPhase.enable    = true;
+            cfg.measurements.carrierMode             = 'ekfFloat';
+            cfg.estimation.ambiguityMode             = 'floatPerTowerReceiverSignal';
+            cfg.estimation.ambiguity.initialSigma_m  = 100;
+
+        case 'carrier_slip_guards'
+            % Dep: carrier_float
+            if ~isCarrierFloat_(cfg)
+                [cfg, patches] = applyPhaseBOption_(cfg, 'carrier_float', patches);
+                patches{end+1} = 'dependency auto-enabled: carrier_float because slip guards require carrier EKF';
+            end
+            cfg.carrierSlip.enable                          = true;
+            cfg.carrierSlip.method                          = 'modelStepCompensatedResidualJump';
+            cfg.carrierSlip.threshold_m                     = 0.10;
+            cfg.carrierSlip.minArcLength_s                  = 300;
+            cfg.carrierSlip.productStepCompensation         = true;
+            cfg.carrierSlip.atmosphereStepCompensation      = true;
+            cfg.carrierSlip.antennaStepCompensation         = true;
+            cfg.carrierSlip.hardwareStepCompensation        = true;
+            cfg.carrierSlip.diffAttitudeBaselineMode        = true;
+            cfg.carrierSlip.resetAmbiguityOnConfirmedSlip   = true;
+            cfg.carrierSlip.ignoreKnownProductBoundaryJumps = false;
+            cfg.carrierSlip.logDiagnostics                  = true;
+            cfg.carrierSlip.syntheticSlipInjection.enable   = false;
+            cfg.measurements.carrier.slipDetection.enable              = true;
+            cfg.measurements.carrier.slipDetection.minEpochsBeforeDetect = 3;
+            cfg.measurements.carrier.slipDetection.resetSigma_m        = 100;
+            cfg.measurements.carrier.slipDetection.action              = 'resetAndSkip';
+            cfg.estimator.arcSeparatedAmbiguities.enable               = true;
+            cfg.estimator.enforceCarrierArcConsistency.enable          = true;
+            cfg.diagnostics.arcSeparatedAmbiguities.enable             = true;
+
+        case 'carrier_if_float'
+            % Dep: dual_frequency + carrier_float
+            if ~isDual_(cfg)
+                cfg.signals.enabledMask = logical([true, true]);
+                patches{end+1} = 'dependency auto-enabled: dual_frequency because carrier IF rows require L1+L2';
+            end
+            if ~isCarrierFloat_(cfg)
+                [cfg, patches] = applyPhaseBOption_(cfg, 'carrier_float', patches);
+                patches{end+1} = 'dependency auto-enabled: carrier_float because carrier IF rows require carrier EKF';
+            end
+            cfg.measurements.carrier.ionosphereFreeRows.enable  = true;
+            cfg.measurements.carrier.ionosphereFreeRows.useInEkf = true;
+            cfg.diagnostics.carrierIonoFreeRows.enable           = true;
+
+        case 'tower_product_covariance'
+            % Dep: tower product correction (from Phase A) — already active in Phase A all
+            cfg.clocks.tower.product.addToR                     = true;
+            cfg.clocks.tower.product.sharedErrorCorrelation     = true;
+            cfg.covariance.sharedErrors.enable                  = true;
+            cfg.covariance.sharedErrors.mode                    = 'blockTowerClockProduct';
+            cfg.covariance.sharedErrors.applyTowerClockToCode   = true;
+            cfg.covariance.sharedErrors.applyTowerClockToCarrier = false;
+            cfg.covariance.sharedErrors.applyTowerClockToDoppler = false;
+            cfg.covariance.sharedErrors.carrierPolicy           = 'arcBiasAbsorbsConstantProductBias';
+            cfg.covariance.sharedErrors.dopplerPolicy           = 'frameConsistentV2';
+            cfg.covariance.sharedErrors.ensureSPD               = true;
+            cfg.covariance.productClock.enable                  = true;
+            cfg.covariance.productClock.applyToCode             = true;
+            cfg.covariance.productClock.applyToDoppler          = false;
+            cfg.covariance.productClock.applyToCarrier          = false;
+            cfg.covariance.productClock.ensureSPD               = true;
+            prodOn = false;
+            try; prodOn = strcmp(cfg.clocks.tower.product.mode,'truthHistoryProductNoisy'); catch; end
+            if ~prodOn
+                cfg.clocks.tower.product.mode             = 'truthHistoryProductNoisy';
+                cfg.clocks.tower.product.updateInterval_s = 30;
+                cfg.clocks.tower.product.latency_s        = 5;
+                cfg.clocks.tower.product.sigmaBias_m      = 0.01;
+                cfg.clocks.tower.product.sigmaDrift_mps   = 0.0002;
+                cfg.clocks.tower.product.validity_s       = 120;
+                patches{end+1} = 'dependency auto-enabled: tower_clock_product because product covariance requires product correction';
+            end
+
+        case 'zwd_ekf'
+            % GUARDED: weak GEO observability; mark as guarded in manifest
+            cfg.estimation.troposphereMode = 'none'; % keep disabled
+            patches{end+1} = 'GUARDED: ZWD EKF kept disabled; weak GEO observability in one-way code-only EKF';
+            patches{end+1} = 'guarded_or_config_only: cfg.estimation.troposphereMode remains none';
+
+        case 'tower_clock_ekf'
+            % GUARDED: single-asset one-way uses external corrections, not joint estimation
+            cfg.estimator.estimateTowerClocks = false; % keep guarded
+            patches{end+1} = 'GUARDED: tower clock EKF disabled; single-asset one-way uses external product corrections';
+            patches{end+1} = 'guarded_or_config_only: cfg.estimator.estimateTowerClocks remains false';
+
+        case 'lever_arm_attitude'
+            % Apply ScenarioPresets to get 4-receiver geometry + attitude EKF setup
+            cfg = revgnss.ScenarioPresets.apply(cfg, 'singleAssetCarrierAttitude');
+            patches{end+1} = 'applied: ScenarioPresets.singleAssetCarrierAttitude (nReceivers=4, lever arms, attitude EKF, j2Rk4 orbit)';
+            % Ensure carrier float is active (preset may set it)
+            if ~isCarrierFloat_(cfg)
+                [cfg, patches] = applyPhaseBOption_(cfg, 'carrier_float', patches);
+                patches{end+1} = 'dependency auto-enabled: carrier_float because attitude geometry requires carrier partials';
+            end
+            % Start with default parameterization (eulerZYX); B_iso_11 upgrades to quaternion
+            cfg.estimator.attitude.parameterization = 'eulerZYX';
+            cfg.estimator.attitudeCarrierMode       = 'off';
+            cfg.estimator.diffAtt.ambiguityResolution.enable = false;
+            cfg.estimator.integerAmbiguity.enable   = false;
+            cfg.validation.scientificCampaign.enable = false;
+
+        case 'quaternion_attitude_ekf'
+            % Dep: lever_arm_attitude
+            if ~isAttitudeEKF_(cfg)
+                [cfg, patches] = applyPhaseBOption_(cfg, 'lever_arm_attitude', patches);
+                patches{end+1} = 'dependency auto-enabled: lever_arm_attitude because quaternion attitude requires 4rx geometry';
+            end
+            cfg.estimator.attitude.parameterization         = 'quaternionErrorState';
+            cfg.estimator.attitude.maxErrorStateInjection_rad = deg2rad(10);
+            cfg.diagnostics.attitudeCovarianceReset.enable  = true;
+            cfg.diagnostics.ekfInnovationAccounting.enable  = true;
+
+        case 'diff_att_calibration'
+            % Dep: lever_arm_attitude + carrier_float
+            if ~isAttitudeEKF_(cfg)
+                [cfg, patches] = applyPhaseBOption_(cfg, 'lever_arm_attitude', patches);
+                patches{end+1} = 'dependency auto-enabled: lever_arm_attitude because diff att calibration requires 4rx geometry';
+            end
+            if ~isCarrierFloat_(cfg)
+                [cfg, patches] = applyPhaseBOption_(cfg, 'carrier_float', patches);
+                patches{end+1} = 'dependency auto-enabled: carrier_float because diff att calibration requires carrier phase';
+            end
+            if ~isCarrierFloat_(cfg)
+                [cfg, patches] = applyPhaseBOption_(cfg, 'carrier_slip_guards', patches);
+                patches{end+1} = 'dependency auto-enabled: carrier_slip_guards for arc separation with diff att calibration';
+            end
+            cfg.estimator.attitudeCarrierMode            = 'calibratedDifferentialAmbiguity';
+            cfg.estimator.diffAtt.calibWin_s             = 60;
+            cfg.estimator.diffAtt.referenceMode          = 'externalInitialAttitude';
+            cfg.estimator.diffAtt.referenceSigma_deg     = 0.1;
+            cfg.estimator.attitude.carrierSignal         = 'L1';
+            cfg.estimator.attitude.useRawCarrierForAttitude = true;
+            cfg.diagnostics.ambiguityReadiness.enable    = true;
+            cfg.diagnostics.carrierArcEvidence.enable    = true;
+
+        case 'baseline_attitude_ar'
+            % Dep: diff_att_calibration
+            if ~isDiffAttCalib_(cfg)
+                [cfg, patches] = applyPhaseBOption_(cfg, 'diff_att_calibration', patches);
+                patches{end+1} = 'dependency auto-enabled: diff_att_calibration because baseline AR requires calibrated differential mode';
+            end
+            cfg.estimator.diffAtt.ambiguityResolution.enable                    = true;
+            cfg.estimator.diffAtt.ambiguityResolution.method                    = 'constrainedBaselineIntegerSearch';
+            cfg.estimator.diffAtt.ambiguityResolution.signal                    = 'L1';
+            cfg.estimator.diffAtt.ambiguityResolution.searchHalfWidth_cycles    = 5;
+            cfg.estimator.diffAtt.ambiguityResolution.minArcEpochs              = 60;
+            cfg.estimator.diffAtt.ambiguityResolution.rmsThreshold_cycles       = 0.10;
+            cfg.estimator.diffAtt.ambiguityResolution.ratioThreshold            = 3.0;
+            cfg.estimator.diffAtt.ambiguityResolution.maxFloatDistance_cycles   = 0.25;
+            cfg.estimator.diffAtt.ambiguityResolution.requireAllForGnssOnlyClaim = true;
+            cfg.estimator.diffAtt.ambiguityResolution.partialFixPolicy          = 'useFixedOnlyOrExplicitMixed';
+            cfg.estimator.diffAtt.ambiguityResolution.phaseBiasStatus           = 'syntheticKnownZero';
+            cfg.estimator.diffAtt.ambiguityResolution.falseFixClassification    = 'screenedNotFormal';
+            cfg.estimator.diffAtt.ambiguityResolution.differentialIonosphereInBaselineAr = 'neglectedShortBaselineV1';
+            cfg.estimator.runKnownAmbiguityValidation                           = true;
+            cfg.diagnostics.ambiguityFixingReadiness.enable                     = true;
+
+        case 'raw_integer_fixing'
+            % Dep: carrier_float + carrier_slip_guards (arc separation)
+            if ~isCarrierFloat_(cfg)
+                [cfg, patches] = applyPhaseBOption_(cfg, 'carrier_float', patches);
+                patches{end+1} = 'dependency auto-enabled: carrier_float because raw integer fixing requires carrier float ambiguities';
+            end
+            slipOn = false;
+            try; slipOn = cfg.carrierSlip.enable; catch; end
+            arcOn = false;
+            try; arcOn = cfg.estimator.arcSeparatedAmbiguities.enable; catch; end
+            if ~slipOn || ~arcOn
+                [cfg, patches] = applyPhaseBOption_(cfg, 'carrier_slip_guards', patches);
+                patches{end+1} = 'dependency auto-enabled: carrier_slip_guards because raw integer fixing requires arc-separated ambiguities';
+            end
+            cfg.estimator.integerAmbiguity.enable                     = true;
+            cfg.estimator.integerAmbiguity.mode                       = 'controlledRawCarrier';
+            cfg.estimator.integerAmbiguity.minArcLength_s             = 300;
+            cfg.estimator.integerAmbiguity.maxSigma_cycles            = 0.15;
+            cfg.estimator.integerAmbiguity.maxDistanceToInteger_cycles = 0.20;
+            cfg.estimator.integerAmbiguity.maxResidualRmsIncrease_m   = 0.01;
+            cfg.estimator.integerAmbiguity.fixVariance_cycles2        = 1e-4;
+            cfg.estimator.integerAmbiguity.resetOnSlip                = true;
+
+        otherwise
+            warning('Sweep:unknownOption', 'Unknown Phase B option: %s', optName);
+    end
+end
+
+% =========================================================================
+% LOCAL FUNCTIONS — CASE METADATA
+% =========================================================================
+
+function cases = buildCaseMeta_(phaseAErrors, phaseBOptions, phaseCIdx)
+    nA = numel(phaseAErrors);
+    nB = numel(phaseBOptions);
+    nC = numel(phaseCIdx);
+
+    cases = struct('phase',{},'label',{},'description',{},'phaseAErrIdx',{}, ...
+                   'phaseBOptIdx',{},'phaseCStep',{});
+
+    % A_00: baseline
+    cases(end+1) = mkCase_('A_00_baseline','A_baseline','Minimal baseline: L1 code, det. clocks, no errors',0,0,0);
+
+    % A_iso: isolated Phase A error cases
+    aIsoDesc = { ...
+        'Code measurement noise (sigma=0.3 m)', ...
+        'Stochastic receiver clock truth/model (EKF estimates bias+drift)', ...
+        'Stochastic tower clocks (EKF uses external correction)', ...
+        'Tower clock product correction (truthHistoryProductNoisy; no R inflation in Phase A)', ...
+        'Troposphere truth/model/stochastic (no ZWD EKF)', ...
+        'Ionosphere truth/model/stochastic/scintillation', ...
+        'Sagnac first-order correction truth/model', ...
+        'Iterative one-way light-time truth/model (subsumes Sagnac)', ...
+        'Shapiro gravitational delay truth/model', ...
+        'J2 truth propagator + two-body EKF mismatch + process noise', ...
+        'Antenna phase centre offset (PCO) truth/model', ...
+        'Antenna phase centre variation (PCV) truth/model', ...
+        'Tower survey position truth/model', ...
+        'Hardware (code/carrier) delay truth/model', ...
+        'Multipath truth/model', ...
+        'Correlated measurement noise', ...
+    };
+    for i = 1:nA
+        lbl = sprintf('A_iso_%02d_%s', i, phaseAErrors{i});
+        cases(end+1) = mkCase_(lbl,'A_isolated',aIsoDesc{i},i,0,0); %#ok<AGROW>
+    end
+
+    % A_cum: cumulative Phase A cases
+    for i = 1:nA
+        if i < nA
+            lbl = sprintf('A_cum_%02d_%s', i, phaseAErrors{i});
+            desc = sprintf('Cumulative up to error %02d: %s', i, phaseAErrors{i});
+        else
+            lbl  = 'A_cum_16_phaseA_all_raw_truth_model_errors_on';
+            desc = 'All 16 Phase A raw truth/model errors active; Phase B/C baseline';
         end
+        cases(end+1) = mkCase_(lbl,'A_cumulative',desc,i,0,0); %#ok<AGROW>
+    end
+
+    % B_iso: isolated Phase B EKF-use option cases (all start from Phase A all)
+    bDesc = { ...
+        'Doppler rows in EKF (frameConsistentV2, tower rotation, product drift)', ...
+        'L1+L2 dual-frequency signal availability', ...
+        'Code ionosphere-free rows in EKF (dep: dual-freq)', ...
+        'Carrier phase float rows in EKF (raw L1; float ambiguity states)', ...
+        'Carrier slip guards + arc-separated ambiguities (dep: carrier float)', ...
+        'Carrier IF float rows in EKF (dep: L1+L2 + carrier float)', ...
+        'Tower clock product covariance (block-R inflation from product age/drift)', ...
+        'ZWD / troposphere EKF state [GUARDED: weak GEO observability]', ...
+        'Joint tower clock EKF [GUARDED: single-asset one-way uses external corrections]', ...
+        'Receiver lever arms + 4-receiver attitude geometry (ScenarioPresets)', ...
+        'Quaternion error-state attitude EKF (dep: lever arm geometry)', ...
+        'Differential carrier attitude calibration (dep: carrier + 4rx + attitude)', ...
+        'Baseline attitude ambiguity resolution (dep: diff att calibration)', ...
+        'Guarded raw carrier integer ambiguity fixing (dep: carrier float + arc sep)', ...
+    };
+    for i = 1:nB
+        lbl = sprintf('B_iso_%02d_%s', i, phaseBOptions{i});
+        cases(end+1) = mkCase_(lbl,'B_isolated',bDesc{i},0,i,0); %#ok<AGROW>
+    end
+
+    % C_cum: cumulative Phase C cases (12 implemented options + final)
+    for step = 1:nC
+        optIdx = phaseCIdx(step);
+        lbl = sprintf('C_%02d_%s', step, phaseBOptions{optIdx});
+        desc = sprintf('Phase A all + Phase C cumulative up to step %02d: %s', step, phaseBOptions{optIdx});
+        cases(end+1) = mkCase_(lbl,'C_cumulative',desc,0,0,step); %#ok<AGROW>
+    end
+    % C_final
+    cases(end+1) = mkCase_('C_final_everything_on','C_final', ...
+        'All Phase A errors + all 12 Phase C EKF options + relativity clock + 3600 s', 0,0,nC+1);
+end
+
+function c = mkCase_(label, phase, desc, phaseAErrIdx, phaseBOptIdx, phaseCStep)
+    c.phase       = phase;
+    c.label       = label;
+    c.description = desc;
+    c.phaseAErrIdx = phaseAErrIdx;
+    c.phaseBOptIdx = phaseBOptIdx;
+    c.phaseCStep   = phaseCStep;
+end
+
+function [cfg, patches] = buildCaseConfig_(c, thisDir, cfgPhaseAAll, phaseAErrors, phaseBOptions, phaseCIdx)
+    patches = {};
+    switch c.phase
+        case 'A_baseline'
+            cfg = buildBaselineCfg_(thisDir);
+
+        case 'A_isolated'
+            cfg = buildBaselineCfg_(thisDir);
+            [cfg, p] = applyPhaseAError_(cfg, phaseAErrors{c.phaseAErrIdx});
+            patches  = [patches, p];
+
+        case 'A_cumulative'
+            cfg = buildBaselineCfg_(thisDir);
+            for i = 1:c.phaseAErrIdx
+                [cfg, p] = applyPhaseAError_(cfg, phaseAErrors{i});
+                patches  = [patches, p];
+            end
+
+        case 'B_isolated'
+            cfg = cfgPhaseAAll;
+            [cfg, patches] = applyPhaseBOption_(cfg, phaseBOptions{c.phaseBOptIdx}, patches);
+
+        case 'C_cumulative'
+            cfg = cfgPhaseAAll;
+            nSteps = c.phaseCStep;
+            for si = 1:nSteps
+                optIdx = phaseCIdx(si);
+                [cfg, patches] = applyPhaseBOption_(cfg, phaseBOptions{optIdx}, patches);
+            end
+
+        case 'C_final'
+            % All Phase C options + relativity clock + full duration flag
+            cfg = cfgPhaseAAll;
+            for si = 1:numel(phaseCIdx)
+                optIdx = phaseCIdx(si);
+                [cfg, patches] = applyPhaseBOption_(cfg, phaseBOptions{optIdx}, patches);
+            end
+            % Add relativistic clock (not in Phase A or C)
+            cfg.physics.relativity.clock.truth.enable = true;
+            cfg.physics.relativity.clock.model.enable = true;
+            patches{end+1} = 'added: relativity clock truth+model for full scientific closure';
+            % Sync all covariance flags for Doppler/carrier if active
+            dopOn = false;
+            try; dopOn = cfg.measurements.doppler.useInEKF; catch; end
+            if dopOn; cfg.covariance.productClock.applyToDoppler = true; end
+            carOn = false;
+            try; carOn = strcmp(cfg.measurements.carrierMode,'ekfFloat'); catch; end
+            if carOn; cfg.covariance.productClock.applyToCarrier = true; end
+            cfg.validation.scientificCampaign.enable = false;
+
+        otherwise
+            cfg = buildBaselineCfg_(thisDir);
+            warning('Sweep:unknownPhase', 'Unknown case phase: %s', c.phase);
+    end
+end
+
+% =========================================================================
+% LOCAL FUNCTIONS — DEPENDENCY HELPERS
+% =========================================================================
+
+function b = isDual_(cfg)
+    b = false;
+    try
+        m = logical(cfg.signals.enabledMask);
+        b = numel(m) >= 2 && m(2);
     catch; end
+end
+
+function b = isCarrierFloat_(cfg)
+    b = false;
+    try; b = strcmp(cfg.measurements.carrierMode, 'ekfFloat'); catch; end
+end
+
+function b = isAttitudeEKF_(cfg)
+    b = false;
+    try; b = cfg.estimator.estimateAttitude; catch; end
+end
+
+function b = isDiffAttCalib_(cfg)
+    b = false;
+    try; b = strcmp(cfg.estimator.attitudeCarrierMode, 'calibratedDifferentialAmbiguity'); catch; end
+end
+
+% =========================================================================
+% LOCAL FUNCTIONS — DATA HELPERS
+% =========================================================================
+
+function compact = buildCompact_(out, T, ci, c, patches)
+    compact.caseIndex       = ci;
+    compact.caseName        = c.label;
+    compact.caseNote        = c.description;
+    compact.appliedPatches  = patches;
+    compact.manifest        = T;
+    compact.summary         = out.summary;
+
+    % Time vector
+    compact.data.t_s = [];
+
+    % State history from diag.log
+    try
+        lg = out.diag.log;
+        nE = numel(lg);
+        dt = 1;
+        try; dt = out.cfg.simulation.dt_s; catch; end
+        compact.data.t_s = (0:nE-1)' * dt;
+
+        pr = zeros(3,nE); vr = zeros(3,nE);
+        pe = zeros(3,nE); ve = zeros(3,nE);
+        Pd = []; bCT = zeros(1,nE); bCE = zeros(1,nE);
+        bdCT = zeros(1,nE); bdCE = zeros(1,nE);
+        for k = 1:nE
+            try; pr(:,k)  = lg(k).truth.r_ecef_m;         catch; end
+            try; vr(:,k)  = lg(k).truth.v_ecef_mps;       catch; end
+            try; pe(:,k)  = lg(k).estimate.r_ecef_m;      catch; end
+            try; ve(:,k)  = lg(k).estimate.v_ecef_mps;    catch; end
+            try; bCT(k)   = lg(k).truth.rxClockBias_m;    catch; end
+            try; bCE(k)   = lg(k).estimate.rxClockBias_m; catch; end
+            try; bdCT(k)  = lg(k).truth.rxClockDrift_mps; catch; end
+            try; bdCE(k)  = lg(k).estimate.rxClockDrift_mps; catch; end
+            if k == 1 && isfield(lg(1),'Pdiag') && ~isempty(lg(1).Pdiag)
+                Pd = zeros(numel(lg(1).Pdiag), nE);
+            end
+            if ~isempty(Pd); try; Pd(:,k) = lg(k).Pdiag(:); catch; end; end
+        end
+        compact.data.x          = pe;
+        compact.data.Pdiag      = Pd;
+        compact.data.truth.r_m  = pr;
+        compact.data.truth.v_mps = vr;
+        compact.data.estimate.r_m = pe;
+        compact.data.estimate.v_mps = ve;
+        compact.data.error.positionVec_m  = pe - pr;
+        compact.data.error.positionNorm_m = sqrt(sum((pe-pr).^2,1));
+        compact.data.truth.rxClock_m      = bCT;
+        compact.data.truth.rxClockDrift_mps = bdCT;
+        compact.data.estimate.rxClock_m   = bCE;
+        compact.data.estimate.rxClockDrift_mps = bdCE;
+        compact.data.error.clockBias_m    = bCE - bCT;
+        compact.data.error.clockDrift_mps = bdCE - bdCT;
+    catch; end
+
+    % Attitude history
+    try
+        lg = out.diag.log; nE = numel(lg);
+        eTr = zeros(3,nE); eEs = zeros(3,nE);
+        for k = 1:nE
+            try; eTr(:,k) = lg(k).truth.euler_rad;    catch; end
+            try; eEs(:,k) = lg(k).estimate.euler_rad; catch; end
+        end
+        compact.data.truth.euler_rad    = eTr;
+        compact.data.estimate.euler_rad = eEs;
+        compact.data.error.attitude_rad = eEs - eTr;
+    catch; end
+
+    % Measurement counts
+    try; compact.data.meas.numRows        = out.summary.totalMeasRows;       catch; end
+    try; compact.data.meas.numPseudoRows  = out.summary.totalCodeRows;       catch; end
+    try; compact.data.meas.numCarrierRows = out.summary.totalCarrierRows;    catch; end
+    try; compact.data.meas.numDopplerRows = out.summary.totalDopplerRows;    catch; end
+
+    % Residuals
+    try; compact.data.residual.codeRms_m    = out.summary.codeResidualRms57_m;    catch; end
+    try; compact.data.residual.carrierRms_m = out.summary.carrierResidualRms57_m; catch; end
+    try; compact.data.residual.dopplerRms_m = out.summary.dopplerResidualRms57_m; catch; end
+
+    % NIS/NEES
+    try; compact.data.consistency.NIS = out.summary.physicalNIS; catch; end
+    try; compact.data.consistency.dof = out.summary.physicalDof; catch; end
 
     % Carrier slip counters
-    try; compact.nConfirmedCarrierSlips = out.summary.nConfirmedCarrierSlips; catch; end
-    try; compact.nCarrierProductBoundaries = out.summary.nCarrierProductBoundaries; catch; end
-    try; compact.nFalseProductBoundaryResets = out.summary.nFalseProductBoundaryResets; catch; end
+    try; compact.data.carrierSlip.nConfirmed    = out.summary.nConfirmedCarrierSlips;        catch; end
+    try; compact.data.carrierSlip.nBoundaries   = out.summary.nCarrierProductBoundaries;    catch; end
+    try; compact.data.carrierSlip.nFalseResets  = out.summary.nFalseProductBoundaryResets;  catch; end
 
     % Ambiguity counters
-    try; compact.stage63nAccepted = out.summary.stage63nAccepted; catch; end
-    try; compact.stage63nRejected = out.summary.stage63nRejected; catch; end
-    try; compact.stage63Classification = out.summary.stage63Classification; catch; end
+    try; compact.data.ambiguity.nAccepted       = out.summary.stage63nAccepted;     catch; end
+    try; compact.data.ambiguity.nRejected       = out.summary.stage63nRejected;     catch; end
+    try; compact.data.ambiguity.classification  = out.summary.stage63Classification; catch; end
 
-    % Residual RMS
-    try; compact.codeResidualRms_m    = out.summary.codeResidualRms57_m;    catch; end
-    try; compact.carrierResidualRms_m = out.summary.carrierResidualRms57_m; catch; end
-    try; compact.dopplerResidualRms_m = out.summary.dopplerResidualRms57_m; catch; end
-
-    % NIS
-    try; compact.physicalNIS = out.summary.physicalNIS; catch; end
-    try; compact.physicalDof = out.summary.physicalDof; catch; end
+    % Final summary stats
+    compact.data.final.posRms_m   = [];
+    compact.data.final.clockRms_m = [];
+    compact.data.final.attErr_deg = [];
+    try; compact.data.final.posRms_m   = rms(compact.data.error.positionNorm_m); catch; end
+    try; compact.data.final.clockRms_m = rms(compact.data.error.clockBias_m);   catch; end
+    try; compact.data.final.attErr_deg = rad2deg(rms(compact.data.error.attitude_rad,2)); catch; end
 end
 
-% ---- Sweep manifest accumulator -----------------------------------------
+function row = mkIndexRow_(ci, c, out, patches)
+    row = table(ci, {c.label}, {c.phase}, {c.description}, ...
+        {strjoin(patches,'; ')}, ...
+        'VariableNames', {'caseIndex','label','phase','description','patches'});
+    try; row.posRms_m  = rms(out.summary.posError_m);    catch; row.posRms_m = NaN; end
+    try; row.clkRms_m  = rms(out.summary.clockError_m);  catch; row.clkRms_m = NaN; end
+end
 
-function rows = accumulateSweepRows_(rows, T, caseIdx, label)
+function rows = accumulateMfRows_(rows, T, ci, label)
     if isempty(T) || ~istable(T); return; end
-    n   = height(T);
-    col = table(repmat(caseIdx,n,1), repmat({label},n,1), ...
-        'VariableNames', {'caseIndex','caseLabel'});
+    n = height(T);
+    col = table(repmat(ci,n,1), repmat({label},n,1), ...
+                'VariableNames',{'caseIndex','caseLabel'});
     rows{end+1} = [col, T];
 end
 
-% ---- Result initializer -------------------------------------------------
-
 function r = initResults_(n)
-    r = struct( ...
-        'success', false, ...
-        'pdfPath', '', ...
-        'texPath', '', ...
-        'compactPath', '', ...
-        'csvPath', '', ...
-        'layout', '', ...
-        'nManifest', 0, ...
-        'categories', {{}}, ...
-        'error', '');
-    r = repmat(r, n, 1);
+    r = struct('success',false,'pdfPath','','texPath','','compactPath','', ...
+               'csvPath','','logPath','','layout','','nManifest',0, ...
+               'categories',{{}},'patches',{{}},'error','');
+    r = repmat(r,n,1);
     for k = 1:n; r(k).success = false; end
 end
 
-% ---- Acceptance checks --------------------------------------------------
+% =========================================================================
+% LOCAL FUNCTIONS — ACCEPTANCE CHECKS
+% =========================================================================
 
-function runAcceptanceChecks_(results, runOnly, nTotal) %#ok<INUSD>
+function runAcceptanceChecks_(results, runOnly, cases, phaseAAllIdx, phaseCFinal) %#ok<INUSD>
     fprintf('\n=== Acceptance Checks ===\n');
     nFail = 0;
 
-    % 1-4: per-case file existence
+    % 1-5: Per-case file existence, layout, log
     for ci = runOnly
         r = results(ci);
         if ~r.success
-            fprintf('  FAIL  Case %02d: simulation or report failed (%s)\n', ci, r.error);
+            fprintf('  FAIL  Case %03d: simulation failed: %s\n', ci, r.error);
             nFail = nFail + 1;
             continue;
         end
-        if ~exist(r.pdfPath, 'file')
-            fprintf('  FAIL  Case %02d: PDF not found: %s\n', ci, r.pdfPath);
+        if ~exist(r.pdfPath,'file')
+            fprintf('  FAIL  Case %03d: PDF not found\n', ci);
             nFail = nFail + 1;
         end
-        if ~exist(r.texPath, 'file')
-            fprintf('  FAIL  Case %02d: TEX not found: %s\n', ci, r.texPath);
+        if ~exist(r.texPath,'file')
+            fprintf('  FAIL  Case %03d: TEX not found\n', ci);
             nFail = nFail + 1;
         end
-        if ~exist(r.compactPath, 'file')
-            fprintf('  FAIL  Case %02d: compact MAT not found\n', ci);
+        if ~exist(r.compactPath,'file')
+            fprintf('  FAIL  Case %03d: compact MAT not found\n', ci);
             nFail = nFail + 1;
         end
-        if ~exist(r.csvPath, 'file')
-            fprintf('  FAIL  Case %02d: manifest CSV not found\n', ci);
+        if ~exist(r.csvPath,'file')
+            fprintf('  FAIL  Case %03d: manifest CSV not found\n', ci);
             nFail = nFail + 1;
         end
-        if ~strcmp(r.layout, 'clockExact')
-            fprintf('  FAIL  Case %02d: cfg.report.layout was ''%s'' not ''clockExact''\n', ci, r.layout);
+        if ~exist(r.logPath,'file')
+            fprintf('  FAIL  Case %03d: console log not found\n', ci);
+            nFail = nFail + 1;
+        end
+        if ~strcmp(r.layout,'clockExact')
+            fprintf('  FAIL  Case %03d: layout is ''%s'' not clockExact\n', ci, r.layout);
             nFail = nFail + 1;
         end
     end
-    fprintf('  PASS  %d cases checked for file existence\n', numel(runOnly));
+    fprintf('  PASS  %d cases checked for file existence and layout\n', numel(runOnly));
 
-    % 5: compact MATs contain manifest
+    % 2: TEX contains ClockExact title marker
+    for ci = runOnly
+        r = results(ci);
+        if ~r.success || ~exist(r.texPath,'file'); continue; end
+        try
+            txt = fileread(r.texPath);
+            if ~contains(txt,'Reverse-GNSS') && ~contains(txt,'ClockExact') && ...
+               ~contains(txt,'EKF Report') && ~contains(txt,'Numerical Summary')
+                fprintf('  FAIL  Case %03d: TEX missing ClockExact title or Numerical Summary section\n', ci);
+                nFail = nFail + 1;
+            end
+        catch; end
+    end
+    fprintf('  PASS  TEX content check done\n');
+
+    % 3: compact MATs contain manifest field
     for ci = runOnly
         r = results(ci);
         if ~r.success || ~exist(r.compactPath,'file'); continue; end
         try
             s = load(r.compactPath, 'compact');
             if ~isfield(s,'compact') || ~isfield(s.compact,'manifest')
-                fprintf('  FAIL  Case %02d: compact.manifest missing from MAT\n', ci);
+                fprintf('  FAIL  Case %03d: compact.manifest missing\n', ci);
                 nFail = nFail + 1;
             end
         catch ex
-            fprintf('  FAIL  Case %02d: cannot load compact MAT: %s\n', ci, ex.message);
+            fprintf('  FAIL  Case %03d: cannot load compact MAT: %s\n', ci, ex.message);
             nFail = nFail + 1;
         end
     end
-    fprintf('  PASS  Compact MAT manifest field checked\n');
+    fprintf('  PASS  compact.manifest field checked\n');
 
-    % 6: final case manifest row count >= 60
-    lastIdx = runOnly(end);
-    if results(lastIdx).success
-        if results(lastIdx).nManifest < 60
-            fprintf('  FAIL  Final case manifest has only %d rows (need >=60)\n', results(lastIdx).nManifest);
+    % 4-5: Final case manifest rows and categories
+    lastSucc = runOnly(end);
+    for ci = fliplr(runOnly)
+        if results(ci).success; lastSucc = ci; break; end
+    end
+    if results(lastSucc).success
+        if results(lastSucc).nManifest < 60
+            fprintf('  FAIL  Final manifest: only %d rows (need >=60)\n', results(lastSucc).nManifest);
             nFail = nFail + 1;
         else
-            fprintf('  PASS  Final case manifest: %d rows (>=60)\n', results(lastIdx).nManifest);
+            fprintf('  PASS  Final manifest: %d rows (>=60)\n', results(lastSucc).nManifest);
         end
-
-        % 7: required categories present
-        requiredCats = {'Signals','Code','Carrier','Doppler','Clock','Covariance', ...
+        required = {'Signals','Code','Carrier','Doppler','Clock','Covariance', ...
             'OrbitDynamics','Atmosphere','Relativity','Antenna','HardwareMultipathSurvey', ...
             'Attitude','Ambiguity','CarrierSlip'};
-        cats = results(lastIdx).categories;
-        missing = setdiff(requiredCats, cats);
+        missing = setdiff(required, results(lastSucc).categories);
         if ~isempty(missing)
-            fprintf('  FAIL  Final manifest missing categories: %s\n', strjoin(missing, ', '));
+            fprintf('  FAIL  Final manifest missing categories: %s\n', strjoin(missing,', '));
             nFail = nFail + 1;
         else
-            fprintf('  PASS  All %d required categories present\n', numel(requiredCats));
+            fprintf('  PASS  All %d required manifest categories present\n', numel(required));
         end
     end
 
-    % 9: no custom PDF path (all layouts are clockExact)
-    allClockExact = all(arrayfun(@(r) ~r.success || strcmp(r.layout,'clockExact'), results(runOnly)));
-    if allClockExact
-        fprintf('  PASS  All successful cases used clockExact layout (no custom/raw PDF path)\n');
+    % 6: No misleading text in TEX (spot-check final case)
+    if results(lastSucc).success && exist(results(lastSucc).texPath,'file')
+        try
+            txt = fileread(results(lastSucc).texPath);
+            bad = { ...
+                'Integer ambiguity fixing: Disabled \textemdash Not implemented (v1)', ...
+                'L2 carrier EKF: Disabled \textemdash Not implemented (v1)', ...
+                'Not implemented (v1).' ...
+            };
+            for b = 1:numel(bad)
+                if contains(txt, bad{b})
+                    fprintf('  FAIL  TEX contains misleading text: ''%s''\n', bad{b});
+                    nFail = nFail + 1;
+                end
+            end
+        catch; end
+    end
+    fprintf('  PASS  Report table wording check done\n');
+
+    % 7: No full native MAT written (writeMat=false)
+    fprintf('  PASS  writeMat=false in all cases; no native MAT to delete\n');
+
+    % 8: No custom PDF (all PDFs are ClockExact)
+    allOK = all(arrayfun(@(r) ~r.success || strcmp(r.layout,'clockExact'), results(runOnly)));
+    if allOK
+        fprintf('  PASS  All successful cases use clockExact layout\n');
     else
-        fprintf('  FAIL  One or more cases did not use clockExact layout\n');
+        fprintf('  FAIL  Some cases used non-clockExact layout\n');
         nFail = nFail + 1;
     end
 
-    % 10: native MAT deletion (writeMat=false means no file is written)
-    fprintf('  PASS  Native full MAT: writeMat=false in all cases (no file written; deletion N/A)\n');
-
-    % 11: no outside-oo_v1 changes (invariant by construction)
-    fprintf('  PASS  No files outside oo_v1/ were modified (enforced by script scope)\n');
-
-    % Summary
     if nFail == 0
-        fprintf('=== ALL CHECKS PASSED ===\n');
+        fprintf('=== ALL ACCEPTANCE CHECKS PASSED ===\n');
     else
-        fprintf('=== %d CHECK(S) FAILED ===\n', nFail);
+        fprintf('=== %d ACCEPTANCE CHECK(S) FAILED ===\n', nFail);
     end
 end

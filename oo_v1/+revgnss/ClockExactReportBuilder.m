@@ -867,45 +867,223 @@ classdef ClockExactReportBuilder
 
         function writeComponentRows_(fid, cfg, esc)
             CE = revgnss.ClockExactReportBuilder;
-            % Clock mode / gauge for status rows
+
+            % --- Clock / gauge ---
             clkMd2  = CE.getCfgStr_(cfg, {'clock','mode'}, 'spacecraftReceiverClockOnly');
             gaugMd2 = CE.getCfgStr_(cfg, {'clock','gauge','mode'}, 'externalTowerCorrections');
-            hwDel2  = CE.getLogical_(cfg, {'clock','hardwareDelay','estimatePerTower'}, false);
-            carrEKF2 = strcmp(CE.getCfgStr_(cfg, {'measurements','carrierMode'}, 'diagnostic'), 'ekfFloat') || ...
-                CE.getLogical_(cfg, {'measurements','carrierPhase','useInEKF'}, false);
+
+            % --- Signal mask: read cfg.signals.enabledMask (not twoFrequency.enable) ---
+            sigMask2 = logical([true, false]);
+            try
+                nd = cfg.signals.enabledMask;
+                if islogical(nd)||isnumeric(nd); sigMask2 = logical(nd); end
+            catch; end
+            isDual2 = numel(sigMask2) >= 2 && sigMask2(2);
+
+            % --- Carrier ---
+            carMode2 = CE.getCfgStr_(cfg, {'measurements','carrierMode'}, '');
+            carEn2   = CE.getLogical_(cfg, {'measurements','carrierPhase','enable'}, false);
+            carEKF2  = strcmp(carMode2, 'ekfFloat');
+            carL2EKF2  = carEKF2 && isDual2;
+            codeIF2    = CE.getLogical_(cfg, {'measurements','code','ionosphereFreeRows','useInEkf'}, false);
+            carIF2     = CE.getLogical_(cfg, {'measurements','carrier','ionosphereFreeRows','useInEkf'}, false);
+            carSlip2   = CE.getLogical_(cfg, {'carrierSlip','enable'}, false);
+            arcSep2    = CE.getLogical_(cfg, {'estimator','arcSeparatedAmbiguities','enable'}, false);
+
+            % --- Integer ambiguity ---
+            intFixEn2  = CE.getLogical_(cfg, {'estimator','integerAmbiguity','enable'}, false);
+            intFixMode2 = CE.getCfgStr_(cfg, {'estimator','integerAmbiguity','mode'}, '');
+            baseArEn2  = CE.getLogical_(cfg, {'estimator','diffAtt','ambiguityResolution','enable'}, false);
+            baseArMeth2 = CE.getCfgStr_(cfg, {'estimator','diffAtt','ambiguityResolution','method'}, '');
+
+            % --- Tower product correction ---
+            prodMode2  = CE.getCfgStr_(cfg, {'clocks','tower','product','mode'}, '');
+            prodEn2    = strcmp(prodMode2, 'truthHistoryProductNoisy');
+            prodCovEn2 = CE.getLogical_(cfg, {'covariance','productClock','enable'}, false);
+            sharedEn2  = CE.getLogical_(cfg, {'covariance','sharedErrors','enable'}, false);
+
+            % --- Light-time ---
+            ltEn2   = CE.getLogical_(cfg, {'physics','lightTime','enable'}, false);
+            ltMode2 = CE.getCfgStr_(cfg, {'physics','lightTime','mode'}, '');
+
+            % --- Doppler ---
+            dopEKF2 = CE.getLogical_(cfg, {'measurements','doppler','useInEKF'}, false);
+            dopMdl2 = CE.getCfgStr_(cfg, {'measurements','doppler','modelLevel'}, '');
+
+            % --- Attitude ---
+            attEn2     = CE.getLogical_(cfg, {'estimator','estimateAttitude'}, false);
+            attParam2  = CE.getCfgStr_(cfg, {'estimator','attitude','parameterization'}, '');
+            diffAttEn2 = strcmp(CE.getCfgStr_(cfg, {'estimator','attitudeCarrierMode'}, ''), ...
+                                'calibratedDifferentialAmbiguity');
+
+            % --- ZWD EKF ---
+            zwdMode2 = CE.getCfgStr_(cfg, {'estimation','troposphereMode'}, 'none');
+            zwdEKF2  = ~strcmp(zwdMode2, 'none') && ~isempty(zwdMode2);
+
+            % ---- Build row descriptions ----
+            % Status values: true=Enabled, false=Disabled, 'guarded'=Guarded/config-only, 'nimpl'=Not implemented
+
+            % Carrier L1 float note
+            if carEKF2 && carEn2
+                carL1Note = 'Float ambiguity EKF, raw L1.';
+            elseif carEn2
+                carL1Note = 'Carrier enabled but not in EKF.';
+            else
+                carL1Note = 'Carrier phase disabled.';
+            end
+
+            % Carrier L2 status/note
+            if carL2EKF2
+                carL2St = true;
+                carL2Note = 'Float ambiguity EKF, raw L2 (L1+L2 active).';
+            elseif carEKF2 && ~isDual2
+                carL2St = false;
+                carL2Note = 'L1 only; L2 float rows available when dual-freq enabled.';
+            else
+                carL2St = false;
+                carL2Note = 'Carrier or dual-freq not active.';
+            end
+
+            % Code IF status/note
+            if codeIF2
+                codeIFSt = true;
+                codeIFNote = 'Code IF rows reduce ionosphere in EKF.';
+            elseif isDual2
+                codeIFSt = false;
+                codeIFNote = 'L1+L2 available; code IF rows not enabled.';
+            else
+                codeIFSt = false;
+                codeIFNote = 'Requires L1+L2; L1 only active.';
+            end
+
+            % Carrier IF float status/note
+            if carIF2
+                carIFSt = true;
+                carIFNote = 'IF carrier float rows in EKF; no integer fixing.';
+            elseif carEKF2 && isDual2
+                carIFSt = false;
+                carIFNote = 'Carrier float+dual-freq active; IF float rows not enabled.';
+            else
+                carIFSt = false;
+                carIFNote = 'Requires carrier float and L1+L2.';
+            end
+
+            % Raw integer fixing status/note
+            if intFixEn2
+                intFixSt = true;
+                intFixNote = sprintf('Guarded %s; fixes attempted only when arc/sigma/distance/RMS gates pass.', intFixMode2);
+            else
+                intFixSt = false;
+                intFixNote = 'Disabled; controlledRawCarrier fixing available, not active in this run.';
+            end
+
+            % Baseline attitude AR status/note
+            if baseArEn2
+                baseArSt = true;
+                baseArNote = sprintf('method=%s; requires carrier float+4rx+attitude EKF+diffAtt mode.', baseArMeth2);
+            else
+                baseArSt = false;
+                baseArNote = 'Not active; requires carrier float + 4rx + attitude EKF + diffAtt mode.';
+            end
+
+            % Tower product correction status/note
+            if prodEn2
+                prodSt = true;
+                prodNote = sprintf('External noisy product correction (%s).', prodMode2);
+            else
+                prodSt = false;
+                prodNote = 'Perfect external tower correction assumed.';
+            end
+
+            % Light-time / Sagnac status and note
+            sagEn2 = CE.getLogical_(cfg, {'physics','sagnac','truth','enable'}, false) || ...
+                     CE.getLogical_(cfg, {'physics','sagnac','model','enable'}, false);
+            if ltEn2
+                ltSt   = true;
+                ltNote = sprintf('%s; Sagnac subsumed when iterative light-time active.', ltMode2);
+            elseif sagEn2
+                ltSt   = true;
+                ltNote = 'First-order Sagnac only (no iterative light-time).';
+            else
+                ltSt   = false;
+                ltNote = '';
+            end
+
+            % Pre-compute conditional notes (avoids need for ternary helper)
+            if isDual2; dualNote2 = 'L1+L2; IF combination available.'; else; dualNote2 = 'L1 only.'; end
+            dopNote2    = ''; if dopEKF2; dopNote2 = sprintf('model: %s', dopMdl2); end
+            zwdSt2      = 'guarded'; if zwdEKF2; zwdSt2 = true; end
+            zwdNote2    = 'Guarded/config-only; weak GEO observability at GEO.';
+            if zwdEKF2; zwdNote2 = sprintf('mode: %s', zwdMode2); end
+            slipNote2   = '';
+            if carSlip2 && arcSep2; slipNote2 = 'modelStepCompensatedResidualJump; arc-separated float ambiguities.'; end
+            prodCovSt2  = prodCovEn2 || sharedEn2;
+            prodCovN2   = 'No product covariance applied to R.';
+            if prodCovSt2; prodCovN2 = 'R-inflation from product age and drift uncertainty.'; end
+            tClkNote2   = sprintf('mode: %s; gauge: %s.', clkMd2, gaugMd2);
+            attNote2    = 'No attitude states.'; if attEn2; attNote2 = sprintf('param: %s', attParam2); end
+            diffAttN2   = ''; if diffAttEn2; diffAttN2 = 'calibratedDifferentialAmbiguity active.'; end
+
             rows = { ...
-                'Ground segment geometry',           true,   'Included in this report.'; ...
-                'Receiver clock (spacecraft)',        true,   'Included in this report.'; ...
-                'Tower transmitter clock',           CE.getLogical_(cfg,{'errors','towerClock','enable'},false), ''; ...
-                'Sagnac correction (truth)',          CE.getLogical_(cfg,{'physics','sagnac','truth','enable'},false), ''; ...
-                'Sagnac correction (model)',          CE.getLogical_(cfg,{'physics','sagnac','model','enable'},false), ''; ...
-                'Shapiro delay (truth)',              CE.getLogical_(cfg,{'physics','relativity','shapiro','truth','enable'},false), ''; ...
+                % Core scenario
+                'Ground segment geometry',           true,           'Included in this report.'; ...
+                'Receiver clock (spacecraft)',        true,           'Included in this report.'; ...
+                'L1+L2 dual-frequency signals',       isDual2,        dualNote2; ...
+                % Physics corrections
+                'Light-time / Sagnac correction',     ltSt,           ltNote; ...
+                'Shapiro delay (truth)',               CE.getLogical_(cfg,{'physics','relativity','shapiro','truth','enable'},false), ''; ...
+                'Relativity clock (truth)',            CE.getLogical_(cfg,{'physics','relativity','clock','truth','enable'},false), ''; ...
+                % Atmosphere
                 'Troposphere (truth)',                CE.getLogical_(cfg,{'errors','troposphere','truth','enable'},false), ''; ...
                 'Troposphere (model)',                CE.getLogical_(cfg,{'errors','troposphere','model','enable'},false), ''; ...
+                'ZWD / troposphere EKF state',        zwdSt2,         zwdNote2; ...
                 'Ionosphere (truth)',                 CE.getLogical_(cfg,{'errors','ionosphere','truth','enable'},false), ''; ...
                 'Ionosphere (model)',                 CE.getLogical_(cfg,{'errors','ionosphere','model','enable'},false), ''; ...
-                'Two-frequency L1+L2',               CE.getLogical_(cfg,{'signals','twoFrequency','enable'},false), ''; ...
-                'Doppler in EKF',                    CE.getLogical_(cfg,{'measurements','doppler','useInEKF'},false), ''; ...
-                'Carrier phase (enabled)',            CE.getLogical_(cfg,{'measurements','carrierPhase','enable'},false), ''; ...
-                'Carrier phase in EKF',              carrEKF2, 'Float ambiguity EKF (L1 raw, no integer fixing).'; ...
-                'Hardware delay (truth)',             CE.getLogical_(cfg,{'errors','hardwareDelay','truth','enable'},false), ''; ...
-                'Multipath (truth)',                  CE.getLogical_(cfg,{'errors','multipath','truth','enable'},false), ''; ...
+                % Antenna & hardware
                 'Antenna PCO (truth)',                CE.getLogical_(cfg,{'effects','antennaPCO','truth','enable'},false), ''; ...
                 'Antenna PCV (truth)',                CE.getLogical_(cfg,{'effects','antennaPCV','truth','enable'},false), ''; ...
-                'Joint tower clock EKF',             strcmp(clkMd2,'includeTowerClocksInEKF'), sprintf('Clock mode: %s. Gauge: %s.', clkMd2, gaugMd2); ...
-                'Per-tower hardware delay EKF',      hwDel2, 'Not implemented (v1 -- config flag only).'; ...
-                'Integer ambiguity fixing',           false, 'Not implemented (v1).'; ...
-                'L2 carrier EKF',                    false, 'Not implemented (v1).'; ...
-                'ANTEX / SP3 / CLK parsers',         false, 'Not implemented (v1).'; ...
-                'PPP-grade processing',              false, 'Not implemented (v1).'; ...
+                'Hardware delay (truth)',             CE.getLogical_(cfg,{'errors','hardwareDelay','truth','enable'},false), ''; ...
+                'Multipath (truth)',                  CE.getLogical_(cfg,{'errors','multipath','truth','enable'},false), ''; ...
+                % Doppler
+                'Doppler in EKF',                    dopEKF2,        dopNote2; ...
+                % Carrier
+                'Carrier phase enabled',             carEn2,         ''; ...
+                'Carrier L1 float rows in EKF',      carEKF2 && carEn2, carL1Note; ...
+                'Carrier L2 float rows in EKF',      carL2St,        carL2Note; ...
+                'Code IF rows in EKF',               codeIFSt,       codeIFNote; ...
+                'Carrier IF float rows in EKF',      carIFSt,        carIFNote; ...
+                'Carrier slip guards + arc sep',     carSlip2 && arcSep2, slipNote2; ...
+                % Ambiguity fixing
+                'Carrier IF integer fixing',         'nimpl',        'Explicitly unsupported in v1; IF ambiguity is not an integer.'; ...
+                'Raw carrier integer fixing',        intFixSt,       intFixNote; ...
+                'LAMBDA / MLAMBDA',                  'nimpl',        'No decorrelated ILS in v1; distance-to-integer gate only.'; ...
+                'Baseline attitude AR',              baseArSt,       baseArNote; ...
+                % Clocks
+                'Tower clock product correction',    prodSt,         prodNote; ...
+                'Tower clock product covariance',    prodCovSt2,     prodCovN2; ...
+                'Joint tower clock EKF',             strcmp(clkMd2,'includeTowerClocksInEKF'), tClkNote2; ...
+                'Per-tower hardware delay EKF',      'guarded',      'Config flag exists; no dedicated EKF state in v1.'; ...
+                % Attitude
+                'Attitude EKF (spacecraft)',         attEn2,         attNote2; ...
+                'Diff. carrier att. calibration',    diffAttEn2,     diffAttN2; ...
+                % Unsupported
+                'ANTEX / SP3 / CLK parsers',         'nimpl',        'Synthetic constants only; no file-based corrections.'; ...
+                'PPP-grade processing',              'nimpl',        'Not implemented in v1.'; ...
             };
+
             for k = 1:size(rows,1)
                 comp = esc(rows{k,1});
                 isEn = rows{k,2};
                 act  = rows{k,3};
-                if isEn
+                if isequal(isEn, true)
                     stTex = '\textcolor{green!45!black}{Enabled}';
                     if isempty(act); act = 'Included in this report.'; end
+                elseif isequal(isEn, 'guarded')
+                    stTex = '\textcolor{orange!70!black}{Guarded/config-only}';
+                    if isempty(act); act = 'Not active in current run.'; end
+                elseif isequal(isEn, 'nimpl')
+                    stTex = '\textcolor{gray!80}{Not\,implemented}';
+                    if isempty(act); act = 'Not available in v1.'; end
                 else
                     stTex = '\textcolor{gray}{Disabled}';
                     if isempty(act); act = 'Not part of current run.'; end

@@ -2,7 +2,8 @@ classdef SimulationToggleManifest
     % SimulationToggleManifest  Simulation-impacting toggle manifest from cfg.
     %
     % Usage:
-    %   manifest = revgnss.SimulationToggleManifest.fromConfig(cfg);
+    %   manifest = revgnss.SimulationToggleManifest.fromConfig(cfg);          % cfg only
+    %   manifest = revgnss.SimulationToggleManifest.fromConfig(cfg, out);     % cfg + runtime out
     %   T        = revgnss.SimulationToggleManifest.toTable(manifest);
     %   revgnss.SimulationToggleManifest.writeCsv(T, '/path/manifest.csv');
     %   compact  = revgnss.SimulationToggleManifest.compact(manifest);
@@ -16,8 +17,12 @@ classdef SimulationToggleManifest
     methods (Static)
 
         % ----------------------------------------------------------------
-        function manifest = fromConfig(cfg)
+        function manifest = fromConfig(cfg, varargin)
             % fromConfig  Build manifest struct array from finalized cfg.
+            %   manifest = fromConfig(cfg)       — cfg-based classification only
+            %   manifest = fromConfig(cfg, out)  — out.summary used for runtime status
+            % The 'out' struct (optional) is currently unused beyond validation; the
+            % manifest is fully determined by cfg at this time.
             G  = @(p) revgnss.SimulationToggleManifest.getf_(cfg, p);
             FV = @(v) revgnss.SimulationToggleManifest.fmtVal_(v);
             MK = @(cat,path,val,st,si,aff,cond,notes) ...
