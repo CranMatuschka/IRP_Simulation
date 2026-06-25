@@ -1,13 +1,19 @@
 classdef OrbitPropagator
-    % OrbitPropagator  Simple circular-orbit propagator in ECEF.
+    % OrbitPropagator  Circular analytic, two-body RK4, and J2 RK4 propagation.
     %
-    % Limitations (v1):
-    %   - Assumes circular orbit (eccentricity = 0)
-    %   - No J2 or higher-order gravity terms
-    %   - No drag, SRP, or third-body perturbations
-    %   - Earth rotation applied via simple ECI->ECEF transformation
-    %   - No light-time iteration
-    %   - No Sagnac correction
+    % Supported modes:
+    %   - circularAnalytic
+    %   - twoBodyRk4
+    %   - j2Rk4
+    %
+    % Frame model:
+    %   RK4 propagation is performed in an Earth-centred inertial-like frame, then
+    %   mapped to the ECEF-like measurement frame using constant Earth rotation.
+    %
+    % Limitations:
+    %   J2 is implemented. Higher-order gravity, SRP, drag, third bodies,
+    %   stationkeeping, manoeuvres, real orbit products, and full IERS/EOP frame
+    %   handling are not implemented in oo_v1.
     %
     % Usage:
     %   op = revgnss.OrbitPropagator(cfg);

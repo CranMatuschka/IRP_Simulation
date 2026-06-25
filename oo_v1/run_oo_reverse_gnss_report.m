@@ -322,7 +322,7 @@ cfg.physics.doppler.model.enable      = true;
 
 % --- Carrier phase EKF (multi-receiver mode, Stage 14.6) -------
 % floatPerTowerReceiverSignal: one float ambiguity per tower x receiver x signal.
-% Scientifically valid for nReceivers > 1.  No integer fixing, L1 only.
+% Scientifically valid for nReceivers > 1.  Float ambiguities; no LAMBDA/MLAMBDA integer fixing.
 cfg.measurements.carrierPhase.enable    = true;
 cfg.measurements.carrierMode            = 'ekfFloat';
 cfg.estimation.ambiguityMode            = 'floatPerTowerReceiverSignal';

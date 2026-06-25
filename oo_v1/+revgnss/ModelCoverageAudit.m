@@ -1,5 +1,5 @@
 classdef ModelCoverageAudit
-    % ModelCoverageAudit  Stage 81 model coverage audit and real-world claim gate.
+    % ModelCoverageAudit  Stage 85 model coverage audit and real-world claim gate.
     %
     % Audits all 22 major model categories for the active single-asset one-way
     % synthetic reverse-GNSS simulation. Every category must be one of:
@@ -11,7 +11,7 @@ classdef ModelCoverageAudit
     % Usage:
     %   result = revgnss.ModelCoverageAudit.run(cfg)
     %
-    % nModelCategoriesMissingUnsafe must be 0 for Stage 81 acceptance.
+    % nModelCategoriesMissingUnsafe must be 0 for Stage 85 acceptance.
 
     methods (Static)
 

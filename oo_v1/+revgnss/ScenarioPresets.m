@@ -128,7 +128,7 @@ classdef ScenarioPresets
             % Stage 82: j2Rk4 truth + twoBody EKF is the preferred default.
             % At GEO equatorial (~42164 km), J2 perturbation ~8.3e-6 m/s2 (radial only,
             % z-component zero for equatorial orbit). sigma_accel=0.01 >> 0.1*J2 so
-            % the EKF absorbs the mismatch; process noise auto-scaled in finalizeConfig.
+            % the EKF tolerates the mismatch; process noise auto-scaled in finalizeConfig.
             % Stage 80: cfg.orbit.truth.mode is centrally owned; j2Rk4 was available.
             % Orbit is GEO (35786 km, equatorial). GEO in ECEF moves very slowly
             % (orbital period ≈ Earth rotation period) so twoBody is nearly equivalent

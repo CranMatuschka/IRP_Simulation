@@ -1858,7 +1858,7 @@ classdef ClockExactReportBuilder
             fprintf(fid, 'nSpaceAssets & %d (single estimated spacecraft)\\\\\n', nSA_);
             oc66_ = 'GEO';
             if isfield(summary,'stage66OrbitClass'); oc66_ = summary.stage66OrbitClass; end
-            fprintf(fid, 'Orbit class & \\texttt{%s} (Stage~67: twoBodyRk4 truth propagator)\\\\\n', oc66_);
+            fprintf(fid, 'Orbit class & \\texttt{%s} (Stage~82+ default: j2Rk4 truth, twoBody EKF)\\\\\n', oc66_);
             nTwr_ = 0;
             if isfield(summary,'nTowers'); nTwr_ = summary.nTowers; end
             fprintf(fid, 'nTowers & %d (transmitters; tower-to-space one-way)\\\\\n', nTwr_);
