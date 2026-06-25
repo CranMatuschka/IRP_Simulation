@@ -20,7 +20,7 @@ addpath(thisDir);
 
 %% ---- Control -----------------------------------------------------------
 runOnly         = [];       % empty = all 31 cases; e.g. [1 2 31] for subset
-shortDuration_s = 600;      % seconds for cases 1-30
+shortDuration_s = 3600;      % seconds for cases 1-30
 fullDuration_s  = 3600;     % seconds for case 31
 
 %% ---- Output directory --------------------------------------------------
