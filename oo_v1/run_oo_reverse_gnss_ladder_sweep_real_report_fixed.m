@@ -32,9 +32,12 @@
 %     ladder_sweep_index.csv
 %     ladder_sweep_manifest_overview.csv
 
-clear; close all; clc;
+clear; close all force; clc;
 thisDir = fileparts(mfilename('fullpath'));
 addpath(thisDir);
+
+% Renderer safety: hidden figures for long sweep runs
+set(0, 'DefaultFigureVisible', 'off');
 
 %% ---- Control -----------------------------------------------------------
 runOnly         = [];       % empty = all 60 cases; [1,33,47,60] for quick check
@@ -131,6 +134,7 @@ for ci = runOnly
     cfg.report.writeMat              = false;
     cfg.report.overwrite             = true;
     cfg.report.version               = sprintf('%03d.00', ci);
+    cfg.report.plotExportMode        = 'rasterSafe';
     cfg.plots.showFigures            = false;
     cfg.plots.saveIndividualFigures  = false;
 
@@ -216,6 +220,10 @@ for ci = runOnly
         results(ci).logPath = logFile;
         fprintf('  FAIL  %s\n', ME.message);
     end
+    % Between-case renderer cleanup (prevents renderer accumulation crash)
+    try; close all hidden; catch; end
+    drawnow limitrate;
+    pause(0.1);
 end
 
 %% ---- Sweep-level CSV outputs -------------------------------------------

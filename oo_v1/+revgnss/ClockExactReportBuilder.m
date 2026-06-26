@@ -125,8 +125,9 @@ classdef ClockExactReportBuilder
         % COMPACT PLOT GENERATION
         % ================================================================
 
-        function paths = generateCompactPlots_(diag, cfg, summary, figDir, stem)
-            % generateCompactPlots_  Create compact PDF plots for each report row.
+        function paths = generateCompactPlots_(diag, cfg, summary, figDir, stem) %#ok<INUSD>
+            % generateCompactPlots_  Create compact plots for each report row.
+            % cfg.report.plotExportMode controls PNG (rasterSafe) vs PDF (vectorPdf).
             paths = struct();
             isDiag = isobject(diag) && ismethod(diag, 'getTimeVector');
 
@@ -137,62 +138,62 @@ classdef ClockExactReportBuilder
 
             % Position error
             paths.posErr = CE.tryPlot_(figDir, [stem '_position_error.pdf'], @() ...
-                CE.plotPositionError_(diag, t));
+                CE.plotPositionError_(diag, t), cfg);
 
             % Clock bias error
             paths.clkErr = CE.tryPlot_(figDir, [stem '_clock_error.pdf'], @() ...
-                CE.plotClockError_(diag, t));
+                CE.plotClockError_(diag, t), cfg);
 
             % Clock drift
             paths.clkDrift = CE.tryPlot_(figDir, [stem '_clock_drift.pdf'], @() ...
-                CE.plotClockDrift_(diag, t));
+                CE.plotClockDrift_(diag, t), cfg);
 
             % Innovation RMS (prefit / postfit)
             paths.innovRMS = CE.tryPlot_(figDir, [stem '_innovation_rms.pdf'], @() ...
-                CE.plotInnovationRMS_(diag, t));
+                CE.plotInnovationRMS_(diag, t), cfg);
 
             % NIS
             paths.nis = CE.tryPlot_(figDir, [stem '_nis.pdf'], @() ...
-                CE.plotNIS_(diag, t));
+                CE.plotNIS_(diag, t), cfg);
 
             % Attitude diagnostics
             paths.attComp = CE.tryPlot_(figDir, [stem '_attitude_components.pdf'], @() ...
-                revgnss.ReportRealityHelper.plotAttitudeComponents(diag, t));
+                revgnss.ReportRealityHelper.plotAttitudeComponents(diag, t), cfg);
             paths.attNorm = CE.tryPlot_(figDir, [stem '_attitude_norm.pdf'], @() ...
-                revgnss.ReportRealityHelper.plotAttitudeNorm(diag, t));
+                revgnss.ReportRealityHelper.plotAttitudeNorm(diag, t), cfg);
             paths.attSigma = CE.tryPlot_(figDir, [stem '_attitude_sigma.pdf'], @() ...
-                revgnss.ReportRealityHelper.plotAttitudeSigma(diag, t));
+                revgnss.ReportRealityHelper.plotAttitudeSigma(diag, t), cfg);
 
             % Visible towers
             paths.visTowers = CE.tryPlot_(figDir, [stem '_visible_towers.pdf'], @() ...
-                CE.plotVisibleTowers_(diag, t));
+                CE.plotVisibleTowers_(diag, t), cfg);
 
             % DOP metrics
             paths.dop = CE.tryPlot_(figDir, [stem '_dop.pdf'], @() ...
-                CE.plotDOP_(diag, t));
+                CE.plotDOP_(diag, t), cfg);
 
             % Tower clock biases (bar chart)
             paths.twrClocks = CE.tryPlot_(figDir, [stem '_tower_clocks.pdf'], @() ...
-                CE.plotTowerClocks_(diag));
+                CE.plotTowerClocks_(diag), cfg);
 
             % Per-source error breakdown
             paths.perSrc = CE.tryPlot_(figDir, [stem '_per_source_error.pdf'], @() ...
-                CE.plotPerSourceError_(diag, t));
+                CE.plotPerSourceError_(diag, t), cfg);
 
             % Zoom plots: last 10% of time
             zoomFrac = 0.10;
             paths.posErrZoom  = CE.tryPlot_(figDir, [stem '_position_error_zoom10.pdf'], @() ...
-                CE.plotSignalZoom_(diag, t, 'posErr',  zoomFrac));
+                CE.plotSignalZoom_(diag, t, 'posErr',  zoomFrac), cfg);
             paths.clkErrZoom  = CE.tryPlot_(figDir, [stem '_clock_error_zoom10.pdf'], @() ...
-                CE.plotSignalZoom_(diag, t, 'clkErr',  zoomFrac));
+                CE.plotSignalZoom_(diag, t, 'clkErr',  zoomFrac), cfg);
             paths.clkDriftZoom = CE.tryPlot_(figDir, [stem '_clock_drift_zoom10.pdf'], @() ...
-                CE.plotSignalZoom_(diag, t, 'clkDrift', zoomFrac));
+                CE.plotSignalZoom_(diag, t, 'clkDrift', zoomFrac), cfg);
             paths.attCompZoom = CE.tryPlot_(figDir, [stem '_attitude_components_zoom10.pdf'], @() ...
-                CE.plotAttZoom_(diag, t, zoomFrac));
+                CE.plotAttZoom_(diag, t, zoomFrac), cfg);
 
             % Allan deviation (Stage 67)
             paths.allanDev = CE.tryPlot_(figDir, [stem '_allan_deviation.pdf'], @() ...
-                CE.plotAllanDeviation_(diag, t));
+                CE.plotAllanDeviation_(diag, t), cfg);
         end
 
         % ................................................................
@@ -314,19 +315,46 @@ classdef ClockExactReportBuilder
         end
 
         % ................................................................
-        function outPath = tryPlot_(figDir, fname, plotFcn)
-            % tryPlot_  Run plotFcn returning a figure; export; return path or ''.
+        function outPath = tryPlot_(figDir, fname, plotFcn, cfg)
+            % tryPlot_  Run plotFcn; export PNG or vector PDF; return path or ''.
+            % cfg (optional): cfg.report.plotExportMode = 'rasterSafe'|'vectorPdf'.
+            % 'rasterSafe' exports PNG at 180 dpi — safe for long sweeps.
+            % 'vectorPdf' exports vector PDF — original behaviour (may crash renderer).
+            if nargin < 4; cfg = struct(); end
             outPath = '';
+            mode = revgnss.ClockExactReportBuilder.getCfgStr_( ...
+                cfg, {'report','plotExportMode'}, 'vectorPdf');
+            [~, stem_name, ~] = fileparts(fname);
+            if strcmpi(mode, 'rasterSafe')
+                outPath = fullfile(figDir, [stem_name '.png']);
+            else
+                outPath = fullfile(figDir, fname);
+            end
+            fig = [];
             try
                 fig = plotFcn();
-                if isgraphics(fig)
-                    outPath = fullfile(figDir, fname);
-                    exportgraphics(fig, outPath, 'ContentType','vector', ...
-                        'BackgroundColor','white');
-                    close(fig);
+                if ~isgraphics(fig)
+                    outPath = '';
+                else
+                    set(fig, 'Visible', 'off');
+                    set(fig, 'Color', 'white');
+                    set(fig, 'InvertHardcopy', 'off');
+                    if strcmpi(mode, 'rasterSafe')
+                        set(fig, 'Renderer', 'painters');
+                        print(fig, outPath, '-dpng', '-r180');
+                    else
+                        set(fig, 'Renderer', 'painters');
+                        exportgraphics(fig, outPath, 'ContentType','vector', ...
+                            'BackgroundColor','white');
+                    end
                 end
-            catch
+            catch ME
+                warning('ClockExactReportBuilder:plotExportFailed', ...
+                    'Plot export failed for %s: %s', fname, ME.message);
+                outPath = '';
             end
+            try; if ~isempty(fig) && isgraphics(fig); close(fig); end; catch; end
+            try; drawnow limitrate; catch; end
         end
 
         % ................................................................
