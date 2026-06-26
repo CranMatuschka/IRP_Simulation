@@ -20,12 +20,15 @@
 %
 % Output layout (created at run time):
 %   output/Sweep_YYYYMMDD_HHMMSS/
-%     case<NNN>_<label>_YYYYMMDD/
-%       report-vXXX.00.pdf     — ClockExact LaTeX PDF
-%       report-vXXX.00.tex     — LaTeX source
-%     case<NNN>_<label>_compact.mat
-%     case<NNN>_<label>_manifest.csv
-%     case<NNN>_<label>_console.log
+%     case<NNN>_<label>/
+%       native_clockexact_YYYYMMDD/
+%         report-vNNN.00.pdf     — ClockExact LaTeX PDF (native location)
+%         report-vNNN.00.tex     — LaTeX source (native location)
+%       case<NNN>_<label>_report.pdf   — copied ClockExact PDF (case-stem named)
+%       case<NNN>_<label>_report.tex   — copied LaTeX source (case-stem named)
+%       case<NNN>_<label>_compact.mat
+%       case<NNN>_<label>_manifest.csv
+%       case<NNN>_<label>_console.log
 %     ladder_sweep_index.csv
 %     ladder_sweep_manifest_overview.csv
 
@@ -131,52 +134,79 @@ for ci = runOnly
     cfg.plots.showFigures            = false;
     cfg.plots.saveIndividualFigures  = false;
 
-    % Per-case output subfolder (ReportRunner appends date)
+    % Per-case folder: all outputs go inside caseDir
     safeLabel = regexprep(c.label, '[^a-zA-Z0-9]', '_');
-    cfg.report.baseOutputDir    = sweepDir;
-    cfg.report.dateFolderPrefix = sprintf('case%03d_%s_', ci, safeLabel);
+    caseStem  = sprintf('case%03d_%s', ci, safeLabel);
+    caseDir   = fullfile(sweepDir, caseStem);
+    if ~exist(caseDir, 'dir'); mkdir(caseDir); end
 
-    % Console log
-    logFile = fullfile(sweepDir, sprintf('case%03d_%s_console.log', ci, safeLabel));
+    % ReportRunner writes native ClockExact output to caseDir/native_clockexact_*/
+    cfg.report.baseOutputDir    = caseDir;
+    cfg.report.dateFolderPrefix = 'native_clockexact_';
+
+    % Console log inside case folder
+    logFile = fullfile(caseDir, [caseStem '_console.log']);
     diary(logFile);
 
     try
         out = revgnss.ReportRunner.runSingle(cfg);
         diary off;
 
+        % Copy ClockExact PDF and TEX from native subfolder into case folder
+        nativePdfPath = out.pdfPath;
+        nativeTexPath = strrep(nativePdfPath, '.pdf', '.tex');
+        casePdfPath   = fullfile(caseDir, [caseStem '_report.pdf']);
+        caseTexPath   = fullfile(caseDir, [caseStem '_report.tex']);
+
+        if exist(nativePdfPath, 'file') == 2
+            copyfile(nativePdfPath, casePdfPath);
+        else
+            error('Sweep:missingPdf', 'PDF missing for %s: %s', caseStem, nativePdfPath);
+        end
+        if exist(nativeTexPath, 'file') == 2
+            copyfile(nativeTexPath, caseTexPath);
+        else
+            error('Sweep:missingTex', 'TEX missing for %s: %s', caseStem, nativeTexPath);
+        end
+
+        % Delete native full MAT if unexpectedly written (writeMat=false by default)
+        if isfield(out,'matPath') && ~isempty(out.matPath) && exist(out.matPath,'file') == 2
+            delete(out.matPath);
+        end
+
         % Build manifest
         manifest = revgnss.SimulationToggleManifest.fromConfig(out.cfg, out);
         T        = revgnss.SimulationToggleManifest.toTable(manifest);
 
-        % Per-case compact MAT
-        compact   = buildCompact_(out, T, ci, c, appliedPatches);
-        cMatPath  = fullfile(sweepDir, sprintf('case%03d_%s_compact.mat', ci, safeLabel));
+        % Per-case compact MAT inside case folder
+        compact  = buildCompact_(out, T, ci, c, appliedPatches);
+        cMatPath = fullfile(caseDir, [caseStem '_compact.mat']);
         save(cMatPath, 'compact', '-v7');
 
-        % Per-case manifest CSV
-        cCsvPath  = fullfile(sweepDir, sprintf('case%03d_%s_manifest.csv', ci, safeLabel));
+        % Per-case manifest CSV inside case folder
+        cCsvPath = fullfile(caseDir, [caseStem '_manifest.csv']);
         revgnss.SimulationToggleManifest.writeCsv(T, cCsvPath);
 
-        % TEX path
-        texPath = strrep(out.pdfPath, '.pdf', '.tex');
-
-        % Record results
-        results(ci).success     = true;
-        results(ci).pdfPath     = out.pdfPath;
-        results(ci).texPath     = texPath;
-        results(ci).compactPath = cMatPath;
-        results(ci).csvPath     = cCsvPath;
-        results(ci).logPath     = logFile;
-        results(ci).layout      = out.cfg.report.layout;
-        results(ci).nManifest   = height(T);
-        results(ci).categories  = unique(T.category);
-        results(ci).patches     = appliedPatches;
+        % Record results — copied paths and native paths
+        results(ci).success       = true;
+        results(ci).pdfPath       = casePdfPath;
+        results(ci).texPath       = caseTexPath;
+        results(ci).nativePdfPath = nativePdfPath;
+        results(ci).nativeTexPath = nativeTexPath;
+        results(ci).caseDir       = caseDir;
+        results(ci).compactPath   = cMatPath;
+        results(ci).csvPath       = cCsvPath;
+        results(ci).logPath       = logFile;
+        results(ci).layout        = out.cfg.report.layout;
+        results(ci).nManifest     = height(T);
+        results(ci).categories    = unique(T.category);
+        results(ci).patches       = appliedPatches;
 
         % Accumulate sweep index and manifest overview
         sweepIdxRows{end+1}  = mkIndexRow_(ci, c, out, appliedPatches); %#ok<AGROW>
         sweepMfRows          = accumulateMfRows_(sweepMfRows, T, ci, c.label);
 
-        fprintf('  OK  PDF: %s  mf-rows: %d\n', out.pdfPath, height(T));
+        fprintf('  OK  caseDir: %s  mf-rows: %d\n', caseDir, height(T));
 
     catch ME
         diary off;
@@ -203,7 +233,7 @@ if ~isempty(sweepMfRows)
 end
 
 %% ---- Acceptance checks -------------------------------------------------
-runAcceptanceChecks_(results, runOnly, cases, phaseAAllIdx, phaseCFinal);
+runAcceptanceChecks_(results, runOnly, cases, phaseAAllIdx, phaseCFinal, sweepDir);
 
 fprintf('\nSweep complete.  Output: %s\n', sweepDir);
 
@@ -939,8 +969,10 @@ function rows = accumulateMfRows_(rows, T, ci, label)
 end
 
 function r = initResults_(n)
-    r = struct('success',false,'pdfPath','','texPath','','compactPath','', ...
-               'csvPath','','logPath','','layout','','nManifest',0, ...
+    r = struct('success',false,'pdfPath','','texPath','', ...
+               'nativePdfPath','','nativeTexPath','','caseDir','', ...
+               'compactPath','','csvPath','','logPath','', ...
+               'layout','','nManifest',0, ...
                'categories',{{}},'patches',{{}},'error','');
     r = repmat(r,n,1);
     for k = 1:n; r(k).success = false; end
@@ -950,7 +982,7 @@ end
 % LOCAL FUNCTIONS — ACCEPTANCE CHECKS
 % =========================================================================
 
-function runAcceptanceChecks_(results, runOnly, cases, phaseAAllIdx, phaseCFinal) %#ok<INUSD>
+function runAcceptanceChecks_(results, runOnly, cases, phaseAAllIdx, phaseCFinal, sweepDir) %#ok<INUSD>
     fprintf('\n=== Acceptance Checks ===\n');
     nFail = 0;
 
@@ -1063,6 +1095,25 @@ function runAcceptanceChecks_(results, runOnly, cases, phaseAAllIdx, phaseCFinal
         catch; end
     end
     fprintf('  PASS  Report table wording check done\n');
+
+    % 6b: No flat per-case files in sweep root (only 2 sweep-level CSVs allowed)
+    nFlatBad = 0;
+    if exist(sweepDir, 'dir') == 7
+        rootItems = dir(sweepDir);
+        for rf = 1:numel(rootItems)
+            fi = rootItems(rf);
+            if fi.isdir; continue; end
+            if ismember(fi.name, {'ladder_sweep_index.csv', 'ladder_sweep_manifest_overview.csv'}); continue; end
+            if strncmp(fi.name, 'case', 4)
+                fprintf('  FAIL  Flat case file in sweep root: %s\n', fi.name);
+                nFlatBad = nFlatBad + 1;
+                nFail = nFail + 1;
+            end
+        end
+    end
+    if nFlatBad == 0
+        fprintf('  PASS  No flat case files in sweep root\n');
+    end
 
     % 7: No full native MAT written (writeMat=false)
     fprintf('  PASS  writeMat=false in all cases; no native MAT to delete\n');
