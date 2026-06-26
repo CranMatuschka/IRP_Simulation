@@ -41,7 +41,7 @@ set(0, 'DefaultFigureVisible', 'off');
 
 %% ---- Control -----------------------------------------------------------
 runOnly         = [];       % empty = all 60 cases; [1,33,47,60] for quick check
-shortDuration_s = 600;      % s for cases 1-59
+shortDuration_s = 3600;      % s for cases 1-59
 fullDuration_s  = 3600;     % s for case 60 (C_final)
 
 %% ---- Phase A error family names ----------------------------------------
