@@ -134,7 +134,8 @@ for ci = runOnly
     cfg.report.writeMat              = false;
     cfg.report.overwrite             = true;
     cfg.report.version               = sprintf('%03d.00', ci);
-    cfg.report.plotExportMode        = 'rasterSafe';
+    cfg.report.plotExportMode         = 'vectorPdf';
+    cfg.report.vectorFallbackToRaster = true;
     cfg.plots.showFigures            = false;
     cfg.plots.saveIndividualFigures  = false;
 

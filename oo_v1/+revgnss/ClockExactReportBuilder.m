@@ -316,36 +316,57 @@ classdef ClockExactReportBuilder
 
         % ................................................................
         function outPath = tryPlot_(figDir, fname, plotFcn, cfg)
-            % tryPlot_  Run plotFcn; export PNG or vector PDF; return path or ''.
-            % cfg (optional): cfg.report.plotExportMode = 'rasterSafe'|'vectorPdf'.
-            % 'rasterSafe' exports PNG at 180 dpi — safe for long sweeps.
-            % 'vectorPdf' exports vector PDF — original behaviour (may crash renderer).
+            % tryPlot_  Run plotFcn, export vector PDF (default) or PNG, return path or ''.
+            %
+            % cfg.report.plotExportMode (default 'vectorPdf'):
+            %   'vectorPdf'  — export PDF via exportgraphics ContentType=vector.
+            %   'rasterSafe' — export PNG via print -dpng -r180.
+            %
+            % cfg.report.vectorFallbackToRaster (default true):
+            %   On vector export failure, fall back to PNG for this figure only.
             if nargin < 4; cfg = struct(); end
             outPath = '';
             mode = revgnss.ClockExactReportBuilder.getCfgStr_( ...
                 cfg, {'report','plotExportMode'}, 'vectorPdf');
+            doFallback = revgnss.ClockExactReportBuilder.getLogical_( ...
+                cfg, {'report','vectorFallbackToRaster'}, true);
             [~, stem_name, ~] = fileparts(fname);
-            if strcmpi(mode, 'rasterSafe')
-                outPath = fullfile(figDir, [stem_name '.png']);
-            else
-                outPath = fullfile(figDir, fname);
-            end
+            pdfPath = fullfile(figDir, [stem_name '.pdf']);
+            pngPath = fullfile(figDir, [stem_name '.png']);
             fig = [];
             try
                 fig = plotFcn();
                 if ~isgraphics(fig)
-                    outPath = '';
+                    return;
+                end
+                cleanupObj = onCleanup( ...
+                    @() revgnss.ClockExactReportBuilder.safeCloseFig_(fig)); %#ok<NASGU>
+                set(fig, 'Visible',        'off');
+                set(fig, 'Color',          'white');
+                set(fig, 'InvertHardcopy', 'off');
+                set(fig, 'Renderer',       'painters');
+                if strcmpi(mode, 'rasterSafe')
+                    print(fig, pngPath, '-dpng', '-r180');
+                    outPath = pngPath;
                 else
-                    set(fig, 'Visible', 'off');
-                    set(fig, 'Color', 'white');
-                    set(fig, 'InvertHardcopy', 'off');
-                    if strcmpi(mode, 'rasterSafe')
-                        set(fig, 'Renderer', 'painters');
-                        print(fig, outPath, '-dpng', '-r180');
-                    else
-                        set(fig, 'Renderer', 'painters');
-                        exportgraphics(fig, outPath, 'ContentType','vector', ...
+                    try
+                        exportgraphics(fig, pdfPath, 'ContentType','vector', ...
                             'BackgroundColor','white');
+                        outPath = pdfPath;
+                    catch vecME
+                        if doFallback
+                            warning('ClockExactReportBuilder:vectorFallback', ...
+                                'Vector export failed for %s (%s); falling back to PNG.', ...
+                                fname, vecME.message);
+                            try
+                                print(fig, pngPath, '-dpng', '-r220');
+                                outPath = pngPath;
+                            catch
+                                outPath = '';
+                            end
+                        else
+                            rethrow(vecME);
+                        end
                     end
                 end
             catch ME
@@ -353,8 +374,18 @@ classdef ClockExactReportBuilder
                     'Plot export failed for %s: %s', fname, ME.message);
                 outPath = '';
             end
-            try; if ~isempty(fig) && isgraphics(fig); close(fig); end; catch; end
             try; drawnow limitrate; catch; end
+        end
+
+        % ................................................................
+        function safeCloseFig_(fig)
+            % safeCloseFig_  Close a figure handle silently (for onCleanup use).
+            try
+                if ~isempty(fig) && isgraphics(fig)
+                    close(fig);
+                end
+            catch
+            end
         end
 
         % ................................................................
