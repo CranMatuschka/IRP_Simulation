@@ -150,6 +150,10 @@ classdef ConfigFactory
             cfg.orbit.mode = 'stationaryEcef';
             cfg.orbit.truth.mode = 'stationaryEcef';
             cfg.orbit.truth.availableModes = {'twoBodyRk4','j2Rk4'};
+            % Performance switch: precompute full trajectory once (vectorized) instead
+            % of re-integrating from t=0 at every epoch (O(N^2)). Science unchanged.
+            cfg.orbit.truth.cache.enable = true;
+            cfg.orbit.truth.cache.mode   = 'precomputeVector';
 
             % --- Five ground towers (from SimulationConfig.m) -------------
             towerDefs = { ...

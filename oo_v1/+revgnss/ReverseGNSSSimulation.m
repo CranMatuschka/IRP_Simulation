@@ -31,6 +31,7 @@ classdef ReverseGNSSSimulation < handle
         isInit      (1,1) logical = false
 
         trackMgr    revgnss.CarrierTrackManager
+        orbitTruthCache               = struct('enabled',false,'built',false,'mode','','source','none','t_s',[],'r_ecef_m',[],'v_ecef_mps',[])
         diffAttStore                  = struct()   % Stage 15: differential attitude calibration state
         attInitDone    (1,1) logical = false
         attInitInfo                  = struct()
@@ -64,6 +65,26 @@ classdef ReverseGNSSSimulation < handle
             dur = obj.cfg.simulation.duration_s;
             obj.tVec    = (0 : dt : dur)';
             obj.nEpochs = numel(obj.tVec);
+
+            % Pre-compute deterministic truth orbit trajectory once.
+            % Avoids O(N^2) repeated scalar RK4 re-integration from t=0 at every epoch.
+            obj.orbitTruthCache = struct('enabled',false,'built',false,'mode','', ...
+                'source','none','t_s',[],'r_ecef_m',[],'v_ecef_mps',[]);
+            if obj.shouldUseOrbitTruthCache_()
+                orbitMode_ = string(obj.cfg.orbit.mode);
+                fprintf('  Precomputing orbit truth cache (%s, %d epochs)... ', ...
+                    orbitMode_, obj.nEpochs);
+                tBuildCache_ = tic;
+                [rAll_, vAll_] = obj.orbitProp.propagate(obj.tVec);
+                obj.orbitTruthCache.enabled    = true;
+                obj.orbitTruthCache.built      = true;
+                obj.orbitTruthCache.mode       = char(orbitMode_);
+                obj.orbitTruthCache.source     = 'OrbitPropagator.propagate(tVec)';
+                obj.orbitTruthCache.t_s        = obj.tVec(:).';
+                obj.orbitTruthCache.r_ecef_m   = rAll_;
+                obj.orbitTruthCache.v_ecef_mps = vAll_;
+                fprintf('done (%.2f s)\n', toc(tBuildCache_));
+            end
 
             obj.diag     = revgnss.Diagnostics(obj.cfg);
             obj.trackMgr = revgnss.CarrierTrackManager();
@@ -145,8 +166,13 @@ classdef ReverseGNSSSimulation < handle
             dt  = obj.cfg.simulation.dt_s;
             cpInfo = [];  % Stage 63: float carrier cpInfo captured in slip-detection block
 
-            % Truth orbit propagation (external propagator, if any)
-            if ~isempty(obj.orbitProp)
+            % Truth orbit propagation: use precomputed cache (O(1)) when available,
+            % fall back to scalar integration (O(N) per call, O(N^2) total) otherwise.
+            if obj.orbitTruthCache.enabled
+                r_ecef = obj.orbitTruthCache.r_ecef_m(:, k);
+                v_ecef = obj.orbitTruthCache.v_ecef_mps(:, k);
+                obj.asset.setTruthFromOrbit(r_ecef, v_ecef);
+            elseif ~isempty(obj.orbitProp)
                 [r_ecef, v_ecef] = obj.orbitProp.propagate(t_s);
                 obj.asset.setTruthFromOrbit(r_ecef, v_ecef);
             end
@@ -676,6 +702,34 @@ classdef ReverseGNSSSimulation < handle
                 end
                 a.logState(t_s);
             end
+        end
+
+        % ----------------------------------------------------------------
+        function tf = shouldUseOrbitTruthCache_(obj)
+            % shouldUseOrbitTruthCache_  True when a deterministic orbit propagator
+            % exists and caching is permitted by config.
+            tf = false;
+            if isempty(obj.orbitProp); return; end
+            if ~isfield(obj.cfg,'orbit') || ~isfield(obj.cfg.orbit,'mode'); return; end
+            mode = string(obj.cfg.orbit.mode);
+            cacheableModes = ["j2Rk4","twoBodyRk4","circularAnalytic","twoBody","j2"];
+            if ~any(strcmpi(mode, cacheableModes)); return; end
+            % Config override: cfg.orbit.truth.cache.enable = false disables caching.
+            if isfield(obj.cfg.orbit,'truth') && isfield(obj.cfg.orbit.truth,'cache') && ...
+                    isfield(obj.cfg.orbit.truth.cache,'enable') && ...
+                    isequal(obj.cfg.orbit.truth.cache.enable, false)
+                return;
+            end
+            tf = true;
+        end
+
+        % ----------------------------------------------------------------
+        function s = getOrbitCacheDiagnostics_(obj)
+            % getOrbitCacheDiagnostics_  Return orbit cache status fields for summaries.
+            s.orbitTruthCacheEnabled = obj.orbitTruthCache.enabled;
+            s.orbitTruthCacheMode    = obj.orbitTruthCache.mode;
+            s.orbitTruthCacheEpochs  = numel(obj.orbitTruthCache.t_s);
+            s.orbitTruthCacheSource  = obj.orbitTruthCache.source;
         end
     end
 end
