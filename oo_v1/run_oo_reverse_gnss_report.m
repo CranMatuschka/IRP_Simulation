@@ -48,6 +48,16 @@ cfg = revgnss.ConfigFactory.defaultConfig();
 cfg.simulation.duration_s = 3600;
 cfg.simulation.dt_s       = 1;
 
+% --- Diagnostics storage ---------------------------------------
+% 'compact'     : never store full P/H/R/z/h (small MAT; all science preserved)
+% 'sampledFull' : compact + full-matrix snapshots every snapshot.interval_s
+% 'full'        : full matrices every epoch (large MAT; debug only)
+cfg.diagnostics.storage.mode                   = 'compact';
+cfg.diagnostics.storage.snapshot.enable        = true;
+cfg.diagnostics.storage.snapshot.interval_s    = 300;
+% To enable full matrices for a short debug run:
+%   cfg.diagnostics.storage.mode = 'full';
+
 % --- Report output ----------------------------------------------
 cfg.report.writePdf       = true;   % false = skip PDF (fast testing)
 cfg.report.writeMat       = true;   % false = skip MAT (fast testing)

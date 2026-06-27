@@ -139,6 +139,10 @@ for ci = runOnly
     cfg.plots.showFigures            = false;
     cfg.plots.saveIndividualFigures  = false;
 
+    % Compact diagnostics: ladder sweep never needs full P/H/R/z/h per epoch.
+    cfg.diagnostics.storage.mode            = 'compact';
+    cfg.diagnostics.storage.snapshot.enable = false;
+
     % Per-case folder: all outputs go inside caseDir
     safeLabel = regexprep(c.label, '[^a-zA-Z0-9]', '_');
     caseStem  = sprintf('case%03d_%s', ci, safeLabel);

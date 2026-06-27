@@ -51,6 +51,18 @@ classdef Diagnostics < handle
         cfg_                                        % stored for Stage 31 attitude audit
         lastAttitudeAudit_       struct = struct() % most recent AttitudeObservability.audit result
         lastAttitudeJacobianAudit_ struct = struct() % most recent AttitudeJacobianAudit result
+        % Storage policy (set from cfg.diagnostics.storage in configureCfg)
+        storagePolicyMode_         char    = 'compact'
+        storeFullP_                logical = false
+        storeFullH_                logical = false
+        storeFullR_                logical = false
+        storeFullZ_                logical = false
+        snapshotEnable_            logical = true
+        snapshotInterval_s_        double  = 600
+        snapshotMaxSnapshots_      double  = 200
+        snapshotStoreFirstLast_    logical = true
+        snapshotCount_             double  = 0
+        lastSnapshotTime_s_        double  = -Inf
     end
 
     methods
@@ -73,6 +85,43 @@ classdef Diagnostics < handle
                 if isfield(co,'minWindowEpochs');    obj.clockObsMinWin_ = co.minWindowEpochs;    end
                 if isfield(co,'rankTolerance');      obj.clockObsRankTol_ = co.rankTolerance;     end
             end
+
+            % --- Storage policy (cfg.diagnostics.storage) ---------------------
+            if isfield(cfg,'diagnostics') && isfield(cfg.diagnostics,'storage')
+                st = cfg.diagnostics.storage;
+                if isfield(st,'mode')       && ischar(st.mode);         obj.storagePolicyMode_ = st.mode;                     end
+                if isfield(st,'storeFullP') && ~isempty(st.storeFullP); obj.storeFullP_ = logical(st.storeFullP);             end
+                if isfield(st,'storeFullH') && ~isempty(st.storeFullH); obj.storeFullH_ = logical(st.storeFullH);             end
+                if isfield(st,'storeFullR') && ~isempty(st.storeFullR); obj.storeFullR_ = logical(st.storeFullR);             end
+                if isfield(st,'storeFullZ') && ~isempty(st.storeFullZ); obj.storeFullZ_ = logical(st.storeFullZ);             end
+                if isfield(st,'snapshot')
+                    sn = st.snapshot;
+                    if isfield(sn,'enable')         && ~isempty(sn.enable);         obj.snapshotEnable_         = logical(sn.enable);       end
+                    if isfield(sn,'interval_s')     && ~isempty(sn.interval_s);     obj.snapshotInterval_s_     = sn.interval_s;            end
+                    if isfield(sn,'maxSnapshots')   && ~isempty(sn.maxSnapshots);   obj.snapshotMaxSnapshots_   = sn.maxSnapshots;          end
+                    if isfield(sn,'storeFirstLast') && ~isempty(sn.storeFirstLast); obj.snapshotStoreFirstLast_ = logical(sn.storeFirstLast); end
+                end
+                % Long-run auto-compact: protect memory for large simulations.
+                % Only kicks in when mode was explicitly set to 'full'.
+                if isfield(st,'longRunAutoCompact') && isfield(st.longRunAutoCompact,'enable') && ...
+                        st.longRunAutoCompact.enable && strcmp(obj.storagePolicyMode_,'full')
+                    dur_s = 0;  nEp = 0;
+                    if isfield(cfg,'simulation') && isfield(cfg.simulation,'duration_s')
+                        dur_s = cfg.simulation.duration_s;
+                    end
+                    if isfield(cfg,'simulation') && isfield(cfg.simulation,'dt_s') && cfg.simulation.dt_s > 0
+                        nEp = round(dur_s / cfg.simulation.dt_s) + 1;
+                    end
+                    thr_s  = st.longRunAutoCompact.durationThreshold_s;
+                    thr_ep = st.longRunAutoCompact.epochThreshold;
+                    if dur_s >= thr_s || nEp >= thr_ep
+                        obj.storagePolicyMode_ = 'compact';
+                        warning('Diagnostics:longRunAutoCompact', ...
+                            'Diagnostics storage forced to compact (dur=%.0fs, epochs=%d).', dur_s, nEp);
+                    end
+                end
+            end
+            fprintf('  Diagnostics storage: %s\n', obj.storagePolicyMode_);
 
             % --- Stage 12: receiver bias architecture metadata ---------------
             if isfield(cfg,'hardware') && isfield(cfg.hardware,'rxCodeBias')
@@ -128,6 +177,9 @@ classdef Diagnostics < handle
             x  = ekf.x;
             c  = revgnss.Constants.SPEED_OF_LIGHT_MPS;
 
+            % Determine whether to store full matrices (P/H/R/z/h) this epoch.
+            storeFullThisEpoch = obj.shouldStoreFullSnapshot_(t_s, obj.nEpochs + 1);
+
             entry.time_s = t_s;
 
             % --- Truth state -------------------------------------------
@@ -146,7 +198,7 @@ classdef Diagnostics < handle
             % nominal euler (from quaternion) rather than the near-zero error state.
             reportEuler_rad = ekf.getReportEulerRad();
             entry.estimate.x                 = x;
-            entry.estimate.P                 = ekf.P;
+            entry.estimate.P                 = [];   % filled below if storeFullThisEpoch
             entry.estimate.r_cm_ecef_m       = x(sm.r_idx);
             entry.estimate.v_cm_ecef_mps     = x(sm.v_idx);
             entry.estimate.euler_rad         = reportEuler_rad;
@@ -157,18 +209,29 @@ classdef Diagnostics < handle
                 x(sm.r_idx), reportEuler_rad, asset.receiverLeverArm_body_m);
 
             % --- Measurements ------------------------------------------
+            % Full vectors (z, h, innovations) gated by storage policy.
+            % Row counts, tower IDs, elevations always kept (small).
             if ~isempty(z)
-                entry.measurements.z                = z;
-                entry.measurements.h                = h;
-                entry.measurements.prefitInnovation = z - h;
-                if nargin >= 13 && ~isempty(postfitResidual)
-                    entry.measurements.postfitResidual = postfitResidual;
+                entry.measurements.nRows = numel(z);
+                if storeFullThisEpoch
+                    entry.measurements.z                = z;
+                    entry.measurements.h                = h;
+                    entry.measurements.prefitInnovation = z - h;
+                    if nargin >= 13 && ~isempty(postfitResidual)
+                        entry.measurements.postfitResidual = postfitResidual;
+                    else
+                        entry.measurements.postfitResidual = z - h;
+                    end
                 else
-                    entry.measurements.postfitResidual = z - h;  % fallback
+                    entry.measurements.z                = [];
+                    entry.measurements.h                = [];
+                    entry.measurements.prefitInnovation = [];
+                    entry.measurements.postfitResidual  = [];
                 end
                 entry.measurements.visibleTowerIds  = visibleTowerIds;
                 entry.measurements.elevation_rad    = elevations_rad;
             else
+                entry.measurements.nRows            = 0;
                 entry.measurements.z                = [];
                 entry.measurements.h                = [];
                 entry.measurements.prefitInnovation = [];
@@ -268,9 +331,21 @@ classdef Diagnostics < handle
                 end
             end
 
-            entry.R   = R;
-            entry.H   = H;
-            entry.NIS = NIS;
+            % Full H/R gated by storage policy; compact summaries always stored.
+            if storeFullThisEpoch
+                entry.H = H;
+                entry.R = R;
+            else
+                entry.H = [];
+                entry.R = [];
+            end
+            entry.NIS  = NIS;
+            entry.Rsize = [0, 0];
+            entry.Rdiag = [];
+            if ~isempty(R)
+                entry.Rsize = [size(R,1), size(R,2)];
+                entry.Rdiag = diag(R);
+            end
 
             % --- Scalar error metrics ----------------------------------
             r_err = x(sm.r_idx) - asset.r_ecef_m;
@@ -311,6 +386,12 @@ classdef Diagnostics < handle
                 M_dop_rows = numel(errStruct.doppler.z);
             end
             entry.numDopplerRows = M_dop_rows;
+
+            M_car_rows = 0;
+            if ~isempty(errStruct) && isfield(errStruct,'measType_perRow')
+                M_car_rows = sum(strcmp(errStruct.measType_perRow,'carrier'));
+            end
+            entry.numCarrierRows = M_car_rows;
 
             if ~isempty(z) && M_pr > 0 && numel(z) >= M_pr
                 innPR = z(1:M_pr) - h(1:M_pr);
@@ -920,6 +1001,12 @@ classdef Diagnostics < handle
 
             % --- 1-sigma position bound from P diagonal ---------------
             Pdiag = diag(ekf.P);
+            entry.Pdiag              = Pdiag;               % top-level: for compact extractors
+            entry.estimate.Pdiag     = Pdiag;
+            entry.estimate.sigma     = sqrt(max(0, Pdiag));
+            if storeFullThisEpoch
+                entry.estimate.P     = ekf.P;
+            end
             entry.estimatedPositionSigma_m   = sqrt(sum(Pdiag(sm.r_idx)));
             entry.estimatedAttitudeSigma_rad = sqrt(sum(Pdiag(sm.euler_idx)));
 
@@ -1548,6 +1635,93 @@ classdef Diagnostics < handle
             zwd = obj.getZwdEstimates();
             if isempty(zwd); return; end
             v = sqrt(mean(zwd.^2, 1))';
+        end
+
+        % --- Compact field getters --------------------------------------
+
+        function v = getPdiag(obj)
+            % getPdiag  Per-epoch P diagonal [nx x nEpochs] or cell array.
+            if isempty(obj.log); v = []; return; end
+            try
+                v = cell2mat({obj.log.Pdiag});
+            catch
+                v = [];
+            end
+        end
+
+        function v = getSigma(obj)
+            % getSigma  Per-epoch sqrt(diag(P)) [nx x nEpochs].
+            if isempty(obj.log); v = []; return; end
+            try
+                v = cell2mat({obj.log.estimate}).sigma;
+            catch
+                Pd = obj.getPdiag();
+                if isempty(Pd); v = []; else; v = sqrt(max(0, Pd)); end
+            end
+        end
+
+        function v = getNumCarrierRows(obj)
+            % getNumCarrierRows  Number of carrier-phase rows in EKF per epoch.
+            if isempty(obj.log) || ~isfield(obj.log(1),'numCarrierRows'); v = []; return; end
+            v = [obj.log.numCarrierRows]';
+        end
+
+        function v = getRdiag(obj)
+            % getRdiag  Diagonal of R per epoch as cell array (rows may vary).
+            if isempty(obj.log); v = {}; return; end
+            v = {obj.log.Rdiag}';
+        end
+
+        % --- Storage diagnostics ----------------------------------------
+
+        function mode = getStorageMode(obj)
+            % getStorageMode  Returns the active storage policy mode string.
+            mode = obj.storagePolicyMode_;
+        end
+
+        function n = getSnapshotCount(obj)
+            % getSnapshotCount  Number of full-matrix snapshots stored so far.
+            n = obj.snapshotCount_;
+        end
+
+        function printStorageSummary(obj)
+            % printStorageSummary  Print storage statistics to stdout.
+            fprintf('  Diagnostics log entries: %d\n', obj.nEpochs);
+            fprintf('  Diagnostics storage mode: %s\n', obj.storagePolicyMode_);
+            isFullEveryEpoch = strcmp(obj.storagePolicyMode_, 'full');
+            if ~isFullEveryEpoch && obj.snapshotCount_ > 0
+                fprintf('  Full matrix snapshots stored: %d\n', obj.snapshotCount_);
+            end
+            fprintf('  Store full P/H/R/z/h every epoch: %s\n', mat2str(isFullEveryEpoch));
+        end
+
+    end
+
+    methods (Access = private)
+
+        % ----------------------------------------------------------------
+        function tf = shouldStoreFullSnapshot_(obj, t_s, k)
+            % shouldStoreFullSnapshot_  True when full matrices should be stored this epoch.
+            switch obj.storagePolicyMode_
+                case 'full'
+                    tf = true;
+                    return;
+                case 'compact'
+                    tf = false;
+                    return;
+                otherwise  % 'sampledFull'
+            end
+            % sampledFull: check interval and snapshot budget
+            tf = false;
+            if ~obj.snapshotEnable_; return; end
+            if obj.snapshotCount_ >= obj.snapshotMaxSnapshots_; return; end
+            isFirst = (k == 1);
+            if (obj.snapshotStoreFirstLast_ && isFirst) || ...
+                    (t_s - obj.lastSnapshotTime_s_ >= obj.snapshotInterval_s_)
+                tf = true;
+                obj.snapshotCount_ = obj.snapshotCount_ + 1;
+                obj.lastSnapshotTime_s_ = t_s;
+            end
         end
 
     end

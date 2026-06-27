@@ -1542,6 +1542,9 @@ classdef ReportRunner
 
             % Stage 70/75/76 summary fields populated before PDF generation (above).
 
+            % ---- Diagnostics storage summary ----------------------------
+            try; diag.printStorageSummary(); catch; end
+
             % ---- MAT: save ----------------------------------------------
             cs = diag.getContributionSeries();
             if writeMat

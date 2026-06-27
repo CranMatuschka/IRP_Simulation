@@ -681,6 +681,45 @@ classdef ConfigFactory
             cfg.diagnostics.clockObservability.minWindowEpochs    = 5;
             cfg.diagnostics.clockObservability.rankTolerance      = [];
 
+            % --- Diagnostics storage policy ---------------------------------
+            % mode: 'compact'     — never store full P/H/R/z/h (default; large runs safe)
+            %        'full'        — store full matrices every epoch (old behaviour; debug only)
+            %        'sampledFull' — compact every epoch + full snapshots every snapshot.interval_s
+            % Individual storeFullX flags: override per-field within compact/sampledFull.
+            % longRunAutoCompact: if a 'full'-mode run exceeds the duration/epoch thresholds,
+            %   automatically switch to 'compact' to protect memory.
+            cfg.diagnostics.storage.mode             = 'compact';
+            cfg.diagnostics.storage.storeFullP       = false;
+            cfg.diagnostics.storage.storeFullH       = false;
+            cfg.diagnostics.storage.storeFullR       = false;
+            cfg.diagnostics.storage.storeFullZ       = false;
+            cfg.diagnostics.storage.storeFullHpred   = false;
+
+            cfg.diagnostics.storage.storeStateVector          = true;
+            cfg.diagnostics.storage.storePdiag                = true;
+            cfg.diagnostics.storage.storeTruthEstimateErrors  = true;
+            cfg.diagnostics.storage.storeResidualSummaries    = true;
+            cfg.diagnostics.storage.storeConsistencyScalars   = true;
+            cfg.diagnostics.storage.storeMeasurementCounts    = true;
+            cfg.diagnostics.storage.storeClockSummaries       = true;
+            cfg.diagnostics.storage.storeAmbiguitySummaries   = true;
+            cfg.diagnostics.storage.storeSlipSummaries        = true;
+            cfg.diagnostics.storage.storeOrbitDiagnostics     = true;
+
+            cfg.diagnostics.storage.snapshot.enable          = true;
+            cfg.diagnostics.storage.snapshot.interval_s      = 600;
+            cfg.diagnostics.storage.snapshot.storeFullP      = true;
+            cfg.diagnostics.storage.snapshot.storeFullH      = true;
+            cfg.diagnostics.storage.snapshot.storeFullR      = true;
+            cfg.diagnostics.storage.snapshot.storeFullZ      = true;
+            cfg.diagnostics.storage.snapshot.storeFullHpred  = true;
+            cfg.diagnostics.storage.snapshot.maxSnapshots    = 200;
+            cfg.diagnostics.storage.snapshot.storeFirstLast  = true;
+
+            cfg.diagnostics.storage.longRunAutoCompact.enable             = true;
+            cfg.diagnostics.storage.longRunAutoCompact.durationThreshold_s = 7200;
+            cfg.diagnostics.storage.longRunAutoCompact.epochThreshold     = 10000;
+
             % --- Plots -------------------------------------------------------
             % showFigures = false: figures created with Visible='off', saved to file.
             % saveIndividualFigures: save each figure as .png and .fig.
