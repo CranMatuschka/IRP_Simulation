@@ -151,9 +151,10 @@ classdef Plotter
             % Fig 05: receiver clock bias [m] and [ns] (2 subplots)
             c       = revgnss.Constants.SPEED_OF_LIGHT_MPS;
             mPerNs  = c * 1e-9;
-            truth_m = arrayfun(@(e) e.truth.rxClockBias_m,    diag.log)';
-            est_m   = arrayfun(@(e) e.estimate.rxClockBias_m, diag.log)';
-            err_m   = arrayfun(@(e) e.clockBiasError_m,        diag.log)';
+            d_      = diag.getData();
+            truth_m = d_.truth.rxClockBias_m(:)';
+            est_m   = d_.estimate.rxClockBias_m(:)';
+            err_m   = d_.error.clockBias_m(:)';
 
             fig = revgnss.Plotter.newFig_('05 — Receiver Clock Bias', cfg);
 
@@ -174,10 +175,11 @@ classdef Plotter
         function fig = plotRxClockDrift(diag, t, cfg)
             % Fig 06: fractional frequency truth vs estimate, and drift error
             c         = revgnss.Constants.SPEED_OF_LIGHT_MPS;
-            truth_y   = arrayfun(@(e) e.truth.rxFracFreq,          diag.log)';
-            est_mps   = arrayfun(@(e) e.estimate.rxClockDrift_mps, diag.log)';
+            d_        = diag.getData();
+            truth_y   = d_.truth.rxFracFreq(:)';
+            est_mps   = d_.estimate.rxClockDrift_mps(:)';
             est_y     = est_mps / c;
-            drift_err = arrayfun(@(e) e.clockDriftError_mps,       diag.log)';
+            drift_err = d_.error.clockDrift_mps(:)';
 
             fig = revgnss.Plotter.newFig_('06 — Receiver Clock Drift', cfg);
 

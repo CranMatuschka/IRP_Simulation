@@ -60,10 +60,11 @@ classdef AllanDeviation
 
         function x_s = getRxClockBiasTrue(diag)
             % getRxClockBiasTrue  Extract truth Rx clock bias time series [s].
-            n = diag.nEpochs;
-            x_s = NaN(n, 1);
-            for k = 1:n
-                try; x_s(k) = diag.log(k).truth.rxClockBias_s; catch; end
+            try
+                d_ = diag.getData();
+                x_s = d_.truth.rxClockBias_s(:);
+            catch
+                x_s = NaN(diag.nEpochs, 1);
             end
         end
 

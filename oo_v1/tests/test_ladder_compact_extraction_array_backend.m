@@ -1,12 +1,12 @@
 % test_ladder_compact_extraction_array_backend
 %
 % Verifies that the compact data extraction path used by the ladder sweep
-% works correctly when the array backend is active.
+% works correctly when the SimulationDataStore (flat schema v3) is active.
 %
-% T1: getData() from array backend contains all fields needed by analysis script.
+% T1: getData() from SimulationDataStore contains all fields needed by analysis script.
 % T2: getData aliases match what analyse_oo_reverse_gnss_ladder_sweep.m reads.
-% T3: toCompactStruct() produces v2 compact with correct nested data.
-% T4: safeGet_ paths from analysis script resolve to non-empty finite data.
+% T3: toCompactStruct() produces v3 compact with correct nested data.
+% T4: Data values are finite and correctly sized.
 
 fprintf('test_ladder_compact_extraction_array_backend\n');
 
@@ -17,9 +17,6 @@ function cfg = buildCfg_()
     cfg.simulation.dt_s                    = 10;
     cfg.report.enable                      = false;
     cfg.plots.enable                       = false;
-    cfg.diagnostics.storage.mode           = 'compact';
-    cfg.diagnostics.storage.backend        = 'array';
-    cfg.diagnostics.storage.snapshot.enable= false;
 end
 
 function v = safeGet_(s, path)
@@ -35,14 +32,14 @@ function v = safeGet_(s, path)
 end
 
 % =========================================================================
-% Run a simulation with array backend
+% Run a simulation with SimulationDataStore backend
 % =========================================================================
 sim = revgnss.ReverseGNSSSimulation(buildCfg_());
 sim.initialize();
 sim.run();
-diag = sim.diag;
-assert(diag.hasArrayData(), 'Setup FAIL: array backend not active');
-d = diag.getData();
+simData = sim.simData;
+assert(simData.hasArrayData(), 'Setup FAIL: SimulationDataStore not active');
+d = simData.getData();
 
 % =========================================================================
 % T1: Field groups present
@@ -58,7 +55,6 @@ analysisFields = {
     {'data','meas','numRows'}
     {'data','carrierSlip','count'}
 };
-compact.data = d;
 nFail = 0;
 for fi = 1:numel(analysisFields)
     path = analysisFields{fi}(2:end);  % strip 'data' prefix
@@ -83,26 +79,27 @@ assert(isequal(d.carrierSlip.count, d.slip.nSlips),           'T2 FAIL: carrierS
 fprintf('T2 PASS: all aliases match primary fields\n');
 
 % =========================================================================
-% T3: toCompactStruct v2 schema
+% T3: toCompactStruct v3 schema (FlatSimulationDataStore)
 % =========================================================================
-fprintf('\nT3: toCompactStruct v2 schema...\n');
-cs = diag.store_.toCompactStruct();
-assert(cs.version == 2,                              'T3 FAIL: version != 2');
-assert(strcmp(cs.schema,'SimulationDataStoreCompact'), 'T3 FAIL: wrong schema');
-assert(isfield(cs.data,'t_s'),                       'T3 FAIL: cs.data.t_s missing');
-assert(isfield(cs.data,'error'),                     'T3 FAIL: cs.data.error missing');
-fprintf('T3 PASS: compact v2 schema verified\n');
+fprintf('\nT3: toCompactStruct v3 schema...\n');
+cs = simData.toCompactStruct();
+assert(cs.version == 3,                                   'T3 FAIL: version != 3');
+assert(strcmp(cs.schema,'FlatSimulationDataStoreCompact'), 'T3 FAIL: wrong schema');
+assert(isfield(cs.data,'t_s'),                            'T3 FAIL: cs.data.t_s missing');
+assert(isfield(cs.data,'error'),                          'T3 FAIL: cs.data.error missing');
+assert(isfield(cs,'meta'),                                'T3 FAIL: cs.meta missing');
+assert(cs.meta.schemaVersion == 3,                        'T3 FAIL: meta.schemaVersion != 3');
+fprintf('T3 PASS: compact v3 schema verified\n');
 
 % =========================================================================
 % T4: Data values finite and correct size
 % =========================================================================
 fprintf('\nT4: Data values finite and correct...\n');
-nE = diag.nEpochs;
+nE = simData.nEpochs;
 assert(numel(d.t_s) == nE,                              'T4 FAIL: t_s size');
 assert(numel(d.error.positionNorm_m) == nE,             'T4 FAIL: positionNorm_m size');
 assert(numel(d.error.clockBias_m) == nE,                'T4 FAIL: clockBias_m size');
 assert(numel(d.consistency.NIS) == nE,                  'T4 FAIL: NIS size');
-% At least some epochs should have finite position error
 finPos = d.error.positionNorm_m(isfinite(d.error.positionNorm_m));
 assert(~isempty(finPos), 'T4 FAIL: no finite position errors');
 assert(all(finPos >= 0),  'T4 FAIL: negative position errors');

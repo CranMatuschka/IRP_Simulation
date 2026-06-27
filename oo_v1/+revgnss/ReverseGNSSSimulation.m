@@ -23,7 +23,7 @@ classdef ReverseGNSSSimulation < handle
         ekf         revgnss.ReverseGNSSEKF
         orbitProp
 
-        diag        revgnss.Diagnostics
+        simData     revgnss.SimulationDataStore
 
         nTowers     (1,1) double  = 5
         nEpochs     (1,1) double  = 0
@@ -43,10 +43,18 @@ classdef ReverseGNSSSimulation < handle
                                          'enabled',false,'mode','disabled')  % Stage 63 cumulative log
     end
 
+    properties (Dependent)
+        diag    % Deprecated: returns simData for backward compatibility with existing tests
+    end
+
     methods
         function obj = ReverseGNSSSimulation(cfg)
             if nargin == 0; return; end
             obj.cfg = cfg;
+        end
+
+        function d = get.diag(obj)
+            d = obj.simData;
         end
 
         % ----------------------------------------------------------------
@@ -86,7 +94,13 @@ classdef ReverseGNSSSimulation < handle
                 fprintf('done (%.2f s)\n', toc(tBuildCache_));
             end
 
-            obj.diag     = revgnss.Diagnostics(obj.cfg);
+            nRx_ = size(obj.asset.receiverLeverArms_body_m, 2);
+            obj.simData = revgnss.SimulationDataStore(obj.cfg, obj.nEpochs, ...
+                obj.ekf.stateMap, obj.nTowers, nRx_);
+            fprintf('  Data backend: SimulationDataStore\n');
+            fprintf('  Schema: FlatSimulationDataStore v3\n');
+            fprintf('  Legacy diagnostics: disabled\n');
+            fprintf('  Per-epoch struct log: disabled\n');
             obj.trackMgr = revgnss.CarrierTrackManager();
             obj.assets   = revgnss.MultiAssetConfig.instantiateAssets(obj.cfg, obj.asset);
             for ai = 2:numel(obj.assets)
@@ -495,8 +509,8 @@ classdef ReverseGNSSSimulation < handle
                     errStruct.observableStack, errStruct.diffAttRows, obj.ekf.stateMap);
             end
 
-            % Record diagnostics
-            obj.diag.record(t_s, obj.asset, obj.ekf, z, h, H, R, NIS, ...
+            % Record to canonical database
+            obj.simData.recordEpoch(k, t_s, obj.asset, obj.ekf, z, h, H, R, NIS, ...
                 errStruct, visIds, visElevs, postfitResidual);
 
             % EKF history log
@@ -506,7 +520,9 @@ classdef ReverseGNSSSimulation < handle
 
         % ----------------------------------------------------------------
         function results = getResults(obj)
-            results.diag         = obj.diag;
+            results.simData      = obj.simData;
+            results.data         = obj.simData.getData();
+            results.dataMeta     = obj.simData.getMeta();
             results.ekfHistory   = obj.ekf.history;
             results.assetHistory = obj.asset.history;
             results.assetHistories = cellfun(@(a) a.history, obj.assets, 'UniformOutput', false);
@@ -516,13 +532,13 @@ classdef ReverseGNSSSimulation < handle
 
         % ----------------------------------------------------------------
         function summarize(obj)
-            t      = obj.diag.getTimeVector();
-            posErr = obj.diag.getPositionErrors();
-            clkErr = obj.diag.getClockBiasErrors();
-            innRms = obj.diag.getPrefitInnovationRMS();
-            nisVec = obj.diag.getNIS();
-            nVis   = obj.diag.getNumVisibleTowers();
-            nMeas  = obj.diag.getNumMeasurements();
+            t      = obj.simData.getTimeVector();
+            posErr = obj.simData.getPositionErrors();
+            clkErr = obj.simData.getClockBiasErrors();
+            innRms = obj.simData.getPrefitInnovationRMS();
+            nisVec = obj.simData.getNIS();
+            nVis   = obj.simData.getNumVisibleTowers();
+            nMeas  = obj.simData.getNumMeasurements();
 
             idx20  = max(1, round(0.8 * numel(t)));
             posRms = rms(posErr(idx20:end));
@@ -552,7 +568,7 @@ classdef ReverseGNSSSimulation < handle
                 return
             end
             figHandles = revgnss.Plotter.plotAll( ...
-                obj.diag, obj.asset, obj.towers, obj.cfg);
+                obj.simData, obj.asset, obj.towers, obj.cfg);
         end
 
         % ----------------------------------------------------------------

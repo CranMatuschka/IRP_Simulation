@@ -12,10 +12,10 @@ classdef ConsistencyStatistics
     methods (Static)
 
         function result = computeFromDiag(diag, cfg)
-            % computeFromDiag  Compute NIS/NEES statistics from a Diagnostics object.
+            % computeFromDiag  Compute NIS/NEES statistics from a SimulationDataStore or Diagnostics.
 
             result = revgnss.ConsistencyStatistics.defaultResult_();
-            if isempty(diag) || ~isa(diag,'revgnss.Diagnostics') || diag.nEpochs < 2
+            if isempty(diag) || diag.nEpochs < 2
                 return;
             end
 
@@ -24,9 +24,10 @@ classdef ConsistencyStatistics
 
             % ----- NIS -------------------------------------------------------
             nisByType = diag.getNISByType();
-            codeDof   = double([diag.log.numPseudorangeMeasurements]');
-            doppDof   = revgnss.ConsistencyStatistics.getDopplerDof_(diag);
-            allRows   = double([diag.log.numMeasurementRows]');
+            d_        = diag.getData();
+            codeDof   = double(d_.meas.nCodeRows(:));
+            doppDof   = double(d_.meas.nDopplerRows(:));
+            allRows   = double(d_.meas.nRows(:));
             carrRows  = max(allRows - codeDof - doppDof, 0);
 
             result.nisCode    = revgnss.ConsistencyStatistics.groupStat_( ...
@@ -38,7 +39,7 @@ classdef ConsistencyStatistics
             result.nisDiffAtt.status = 'notAvailable';
             result.nisDiffAtt.note   = 'diffAttRows not separately NIS-tracked in base diagnostics v1';
 
-            nisAll = [diag.log.NIS]';
+            nisAll = d_.consistency.NIS(:);
             result.nisOverall = revgnss.ConsistencyStatistics.groupStat_( ...
                 nisAll, allRows, minSamp);
 
@@ -131,16 +132,20 @@ classdef ConsistencyStatistics
 
         function v = getDopplerDof_(diag)
             try
-                v = double([diag.log.numDopplerRows]');
+                v = double(diag.getData().meas.nDopplerRows(:));
             catch
-                nisD = [diag.log.NIS_doppler]';
-                v = 5 * double(nisD > 0);
+                v = zeros(diag.nEpochs, 1);
             end
         end
 
         function v = getField_(diag, fieldName)
             try
-                v = [diag.log.(fieldName)]';
+                d_ = diag.getData();
+                if isfield(d_.consistency, fieldName)
+                    v = d_.consistency.(fieldName)(:);
+                else
+                    v = [];
+                end
             catch
                 v = [];
             end

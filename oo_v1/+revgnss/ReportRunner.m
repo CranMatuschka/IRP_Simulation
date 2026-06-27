@@ -98,11 +98,11 @@ classdef ReportRunner
             sim = revgnss.ReverseGNSSSimulation(cfg);
             sim.initialize();
             sim.run();
-            cfg  = sim.cfg;
-            diag = sim.diag;
+            cfg     = sim.cfg;
+            simData = sim.simData;
 
             % ---- Collect summary metrics --------------------------------
-            summary = revgnss.ReportRunner.collectSummary_(diag, cfg, version, reportFolder, pdfPath, matPath);
+            summary = revgnss.ReportRunner.collectSummary_(simData, cfg, version, reportFolder, pdfPath, matPath);
 
             % ---- Stage 41: Export ambiguity state metadata and covariance ----
             doAmbMeta = isfield(cfg,'diagnostics') && isfield(cfg.diagnostics,'ambiguityStateMetadata') && ...
@@ -445,7 +445,7 @@ classdef ReportRunner
             summary.carrierResidualRms57_m  = NaN;
             summary.dopplerResidualRms57_m  = NaN;
             try
-                acc57_ = diag.getInnovationAccountingSummary57();
+                acc57_ = simData.getInnovationAccountingSummary57();
                 if acc57_.available
                     summary.stage57EkfAccountingEnabled  = true;
                     summary.physicalNIS                  = acc57_.meanPhysicalNIS;
@@ -530,19 +530,13 @@ classdef ReportRunner
                     strcmp(cfg.scenario.name,'singleAssetCarrierAttitude')
                 try
                     % Stage 60: pre-extract final euler so assess() can use them
-                    eu_tr = diag.getFinalTruthEuler_rad();
-                    eu_es = diag.getFinalEstimateEuler_rad();
+                    eu_tr = simData.getFinalTruthEuler_rad();
+                    eu_es = simData.getFinalEstimateEuler_rad();
                     if ~isempty(eu_tr)
                         summary.finalTruthEuler_deg    = eu_tr(:)' * 180/pi;
-                    elseif ~isempty(diag.log) && isfield(diag.log(end),'truth') && ...
-                            isfield(diag.log(end).truth,'euler_rad')
-                        summary.finalTruthEuler_deg    = diag.log(end).truth.euler_rad(:)' * 180/pi;
                     end
                     if ~isempty(eu_es)
                         summary.finalEstimateEuler_deg = eu_es(:)' * 180/pi;
-                    elseif ~isempty(diag.log) && isfield(diag.log(end),'estimate') && ...
-                            isfield(diag.log(end).estimate,'euler_rad')
-                        summary.finalEstimateEuler_deg = diag.log(end).estimate.euler_rad(:)' * 180/pi;
                     end
                     s59_ = revgnss.SingleAssetAttitudeScenarioReport.assess(summary, cfg);
                     summary.stage59ScenarioEnabled          = s59_.enabled;
@@ -887,20 +881,11 @@ classdef ReportRunner
                 if ~isempty(ltMn80_) && any(isfinite(ltMn80_))
                     summary.meanLightTime_s = mean(ltMn80_(isfinite(ltMn80_)));
                     summary.maxLightTime_s  = max(ltMx80_(isfinite(ltMx80_)));
-                elseif ~isempty(diag.log) && isfield(diag.log,'meanLightTime_s')
-                    ltMean_ = [diag.log.meanLightTime_s]; ltMax_ = [diag.log.maxLightTime_s];
-                    ltMean_ = ltMean_(isfinite(ltMean_)); ltMax_ = ltMax_(isfinite(ltMax_));
-                    if ~isempty(ltMean_); summary.meanLightTime_s = mean(ltMean_); end
-                    if ~isempty(ltMax_);  summary.maxLightTime_s  = max(ltMax_);  end
                 end
             catch; end
             summary.diffAttSchemaStatus = 'notEvaluated';
             try
-                if diag.hasArrayData()
-                    if any(diag.getDiffAttActive())
-                        summary.diffAttSchemaStatus = 'complete';
-                    end
-                elseif ~isempty(diag.log) && isfield(diag.log,'diffAttRows')
+                if any(diag.getDiffAttActive())
                     summary.diffAttSchemaStatus = 'complete';
                 end
             catch; end
@@ -1272,10 +1257,7 @@ classdef ReportRunner
                     if se74_.applyTowerClockToCode
                         % Extract codeBlockCov from last diag log entry
                         cbc74_ = struct('applied',false,'nBlocks',0,'blockSizes',zeros(0,1),'jitterAdded',false,'spd',true);
-                        if ~isempty(diag.log) && isfield(diag.log(end),'codeBlockCov') && ...
-                                ~isempty(diag.log(end).codeBlockCov)
-                            cbc74_ = diag.log(end).codeBlockCov;
-                        end
+                        % codeBlockCov not stored in flat array — skip
                         summary.codeTowerClockBlockCovarianceApplied = cbc74_.applied;
                         summary.nCodeClockCovarianceBlocks           = cbc74_.nBlocks;
                         if ~isempty(cbc74_.blockSizes)
@@ -1467,7 +1449,7 @@ classdef ReportRunner
             texPath2 = '';
             if writePdf && strcmp(reportLayout,'clockExact')
                 ceResult = revgnss.ClockExactReportBuilder.build( ...
-                    diag, sim.asset, sim.towers, cfg, summary);
+                    simData, simData.getMeta(), sim.asset, sim.towers, cfg, summary);
                 texPath2 = ceResult.texPath;
                 if ceResult.success && ~isempty(ceResult.pdfPath)
                     pdfPath = ceResult.pdfPath;
@@ -1490,12 +1472,12 @@ classdef ReportRunner
 
             % ---- PDF: MATLAB figure path (default / clockStyle) ----------
             elseif writePdf
-                figHandles = revgnss.Plotter.plotAll(diag, sim.asset, sim.towers, cfg);
+                figHandles = revgnss.Plotter.plotAll(simData, sim.asset, sim.towers, cfg);
                 nRx = size(sim.asset.receiverLeverArms_body_m, 2);
                 if nRx == 1
                     figHandles = revgnss.ReportRunner.replaceAttitudeFigs_(figHandles);
                 end
-                contribFigs = revgnss.ContributionPlotter.plotSingleCaseContributionPages(diag, cfg);
+                contribFigs = revgnss.ContributionPlotter.plotSingleCaseContributionPages(simData, cfg);
 
                 % Determine report style and appendRawPlots (default false for latex)
                 reportStyle = 'default';
@@ -1609,7 +1591,9 @@ classdef ReportRunner
             % ---- Assemble output struct ---------------------------------
             out.cfg               = cfg;
             out.sim               = sim;
-            out.diag              = diag;
+            out.simData           = simData;
+            out.data              = simData.getData();
+            out.dataMeta          = simData.getMeta();
             out.summary           = summary;
             out.contributionSeries = cs;
             out.reportFolder      = reportFolder;
@@ -1777,35 +1761,9 @@ classdef ReportRunner
                 end
 
                 % Stage 16: absolute attitude initialization diagnostics.
+                % Not stored in flat array schema v3 — populate from cfg defaults.
                 try
-                    aiClass = {diag.log.attitudeInitClass};
-                    aiMode  = {diag.log.attitudeInitMode};
-                    summary.attitudeInitMode = aiMode{end};
-                    summary.attitudeInitClass = aiClass{end};
-                    summary.attitudeInitCandidates = double(diag.log(end).attitudeInitCandidates);
-                    summary.attitudeInitDiffRows = double(diag.log(end).attitudeInitDiffRows);
-                    summary.attitudeInitBestResidual = double(diag.log(end).attitudeInitBestResidual);
-                    summary.attitudeInitSecondResidual = double(diag.log(end).attitudeInitSecondResidual);
-                    summary.attitudeInitRatio = double(diag.log(end).attitudeInitRatio);
-                    summary.attitudeInitError_deg = double(diag.log(end).attitudeInitError_deg);
-                    summary.attitudeInitMessage = diag.log(end).attitudeInitMessage;
-                    summary.attitudeInitConfidenceClass = diag.log(end).attitudeInitConfidenceClass;
-                    summary.attitudeInitAcceptedByEkf = logical(diag.log(end).attitudeInitAcceptedByEkf);
-                    summary.attitudeInitDecisionReason = diag.log(end).attitudeInitDecisionReason;
-                    summary.attitudeInitPriorEuler_deg = diag.log(end).attitudeInitPriorEuler_deg;
-                    summary.attitudeInitTruthEuler_deg = diag.log(end).attitudeInitTruthEuler_deg;
-                    summary.attitudeInitBestEuler_deg = diag.log(end).attitudeInitBestEuler_deg;
-                    summary.attitudeInitSecondEuler_deg = diag.log(end).attitudeInitSecondEuler_deg;
-                    summary.attitudeInitTopEuler_deg = diag.log(end).attitudeInitTopEuler_deg;
-                    summary.attitudeInitTopResidualCycles = diag.log(end).attitudeInitTopResidualCycles;
-                    summary.attitudeInitBestSecondDistance_deg = double(diag.log(end).attitudeInitBestSecondDistance_deg);
-                    summary.attitudeInitPriorError_deg = double(diag.log(end).attitudeInitPriorError_deg);
-                    summary.attitudeInitCandidateError_deg = double(diag.log(end).attitudeInitCandidateError_deg);
-                    summary.attitudeInitCandidateImprovementRatio = double(diag.log(end).attitudeInitCandidateImprovementRatio);
-                    summary.attitudeInitCandidateImprovement_deg = double(diag.log(end).attitudeInitCandidateImprovement_deg);
-                    summary.attitudeInitNBaselines = double(diag.log(end).attitudeInitNBaselines);
-                    summary.attitudeInitNTowers = double(diag.log(end).attitudeInitNTowers);
-                    summary.attitudeInitShadowMode = diag.log(end).attitudeInitShadowMode;
+                    error('attitudeInit:notInFlatSchema','not stored');
                 catch
                     summary.attitudeInitMode = revgnss.ReportRunner.safeCfgStr_(cfg, ...
                         {'estimator','attitudeInitMode'}, 'none');
@@ -2048,7 +2006,9 @@ classdef ReportRunner
             summary.totalCarrierRows = nTwr * nRx * revgnss.SignalCatalog.nCarrierSignals(cfg) * carrInEKF;
             summary.nStates = NaN;
             try
-                summary.nStates = numel(diag.log(end).estimate.x);
+                if diag.hasArrayData() && ~isempty(diag.getData().estimate.x)
+                    summary.nStates = size(diag.getData().estimate.x, 1);
+                end
             catch; end
             summary.nAmbiguityStates = 0;
             ambMode = revgnss.ReportRunner.safeCfgStr_(cfg, {'estimation','ambiguityMode'}, 'none');
@@ -2081,31 +2041,7 @@ classdef ReportRunner
             summary.islTwoWayDopplerUsedInEkf = revgnss.ReportRunner.safeCfgBool_(cfg, {'measurements','isl','twoWay','doppler','useInEKF'}, false);
             summary.islTiming = revgnss.ReportRunner.emptyIslTimingSummary_();
             summary.observableStack = revgnss.ObservableStackDescriptor.compact([]);
-            try
-                if isfield(diag.log(end),'observableStack')
-                    summary.observableStack = diag.log(end).observableStack;
-                    cObs = summary.observableStack.rowsByType;
-                    summary.totalCodeRows = revgnss.ReportRunner.fieldOr_(cObs,'code',0);
-                    summary.totalDopplerRows = revgnss.ReportRunner.fieldOr_(cObs,'doppler',0);
-                    summary.totalCarrierRows = revgnss.ReportRunner.fieldOr_(cObs,'carrier',0);
-                    summary.totalDiffAttRows = revgnss.ReportRunner.fieldOr_(cObs,'diffCarrierAttitude',0);
-                    summary.totalIslCodeRows = revgnss.ReportRunner.fieldOr_(cObs,'islCode',0);
-                    summary.totalIslDopplerRows = revgnss.ReportRunner.fieldOr_(cObs,'islDoppler',0);
-                    summary.totalIslCarrierDiagnosticRows = revgnss.ReportRunner.fieldOr_(cObs,'islCarrierDiagnostic',0);
-                    summary.totalIslTwoWayRangeRows = revgnss.ReportRunner.fieldOr_(cObs,'islTwoWayRange',0);
-                    summary.totalIslTwoWayDopplerDiagnosticRows = revgnss.ReportRunner.fieldOr_(cObs,'islTwoWayDopplerDiagnostic',0);
-                    summary.carrierUsedInEkf = carrInEKF && summary.totalCarrierRows > 0;
-                    summary.carrierDiagnosticOnly = summary.carrierGenerated && ~summary.carrierUsedInEkf;
-                end
-            catch
-            end
-            try
-                if isfield(diag.log(end),'islClockTransfer')
-                    summary.islTiming = diag.log(end).islClockTransfer;
-                    if isfield(summary.islTiming,'events'); summary.islTiming = rmfield(summary.islTiming,'events'); end
-                end
-            catch
-            end
+            % observableStack and islClockTransfer not stored in flat array schema v3
             % Stage 45: compact code IF row fields
             summary.codeIonoFreeRowsRequested = revgnss.ReportRunner.safeCfgBool_( ...
                 cfg, {'measurements','code','ionosphereFreeRows','enable'}, false);
@@ -2171,11 +2107,7 @@ classdef ReportRunner
                 'T_AB_s',NaN,'T_BA_s',NaN,'relayTransponderImplemented',false, ...
                 'islCarrierEkfUsed',false,'twstftEkfRows',0, ...
                 'referenceAssetIndex',1,'remoteAssetIndex',2);
-            try
-                if isfield(diag.log(end),'twstftDiag')
-                    summary.twstftDiag = diag.log(end).twstftDiag;
-                end
-            catch; end
+            % twstftDiag not stored in flat array schema v3
         end
 
         function s = emptyIslTimingSummary_()

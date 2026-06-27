@@ -721,9 +721,20 @@ classdef ConfigFactory
             cfg.diagnostics.storage.longRunAutoCompact.epochThreshold     = 10000;
 
             % --- Array backend (SimulationDataStore) ------------------------
-            % 'legacyStruct': existing struct-array log (default, backward-compat)
-            % 'array': preallocated flat numeric arrays — O(1) per epoch, O(N) total
-            cfg.diagnostics.storage.backend = 'legacyStruct';
+            % 'legacyStruct': kept for backward compat but deprecated (SimulationDataStore is always active)
+            cfg.diagnostics.storage.backend = 'array';
+
+            % --- Data backend (v3 canonical) --------------------------------
+            cfg.data.backend                              = 'SimulationDataStore';
+            cfg.data.schemaVersion                        = 3;
+            cfg.data.storeFullMatricesEveryEpoch          = false;
+            cfg.data.snapshots.enable                     = false;
+            cfg.data.snapshots.interval_s                 = 600;
+            cfg.data.snapshots.maxSnapshots               = 200;
+            cfg.data.snapshots.storeFirstLast             = true;
+            cfg.data.heavyDiagnosticsInterval_s           = 300;
+            cfg.data.computeHeavyDiagnosticsEveryEpoch    = false;
+            cfg.data.legacyDiagnosticsEnable              = false;
 
             % Full-matrix snapshot settings for array backend
             cfg.diagnostics.storage.fullSnapshot.enable         = true;

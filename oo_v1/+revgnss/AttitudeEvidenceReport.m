@@ -148,7 +148,7 @@ classdef AttitudeEvidenceReport
             catch; end
 
             try
-                sv = [diag.log.estimatedAttitudeSigma_rad];
+                sv = diag.getEstimatedAttitudeSigma_rad();
                 if numel(sv) == h.nEpochs
                     h.sigmaVec_rad = sv;
                 end

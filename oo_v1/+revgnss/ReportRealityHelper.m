@@ -94,7 +94,7 @@ classdef ReportRealityHelper
             fig = revgnss.ReportRealityHelper.makeCompactFig_();
             ax = gca(fig);
             try
-                s = [diag.log.estimatedAttitudeSigma_rad] * 180/pi;
+                s = diag.getEstimatedAttitudeSigma_rad() * 180/pi;
                 if ~isempty(t) && ~isempty(s) && numel(s) == numel(t)
                     plot(ax, t, s, 'k-', 'LineWidth', 0.8);
                     xlabel(ax, 'Time [s]', 'FontSize', 7);

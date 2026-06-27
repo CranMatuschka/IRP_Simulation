@@ -419,7 +419,7 @@ classdef LatexReportBuilder
             end
             nZwd    = 0; if doZwd; nZwd = nTwr; end
             nTotal  = nBase + nTwrClk + nAmb + nZwd;
-            try; nTotal = diag.log(end).ekf_nx; catch; end
+            try; nTotal = diag.getData().estimate.x; nTotal = size(nTotal,1); catch; end
 
             RL.addSectionHeader(fig, '1.3  EKF State Vector', 0.97);
 
@@ -741,16 +741,7 @@ classdef LatexReportBuilder
                 'nCodeRows',NaN,'nDopplerRows',NaN,'nCarrierRows',NaN, ...
                 'nAmbiguityStates',NaN,'nZwdStates',NaN,'nTowerClockStates',NaN);
             try
-                for ep = numel(diag.log):-1:1
-                    if isfield(diag.log(ep),'measurements') && ...
-                            isfield(diag.log(ep).measurements,'errStruct') && ...
-                            isfield(diag.log(ep).measurements.errStruct,'observability')
-                        o = diag.log(ep).measurements.errStruct.observability;
-                        if isstruct(o) && isfield(o,'rank')
-                            obs = o; break;
-                        end
-                    end
-                end
+                % observability struct not stored in flat arrays — skip gracefully
             catch; end
 
             % Row 1: Observability rank time series

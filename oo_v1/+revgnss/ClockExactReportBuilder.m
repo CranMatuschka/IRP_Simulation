@@ -32,10 +32,13 @@ classdef ClockExactReportBuilder
     methods (Static)
 
         % ================================================================
-        function result = build(diag, asset, towers, cfg, summary)
+        function result = build(diag, dataMeta, asset, towers, cfg, summary)
             % build  Full ClockExact report pipeline.
-            if nargin < 5; summary = struct(); end
-            if nargin < 4 || isempty(cfg); cfg = struct(); end
+            % diag: SimulationDataStore (or legacy Diagnostics for compat)
+            % dataMeta: schema metadata from simData.getMeta()
+            if nargin < 6; summary = struct(); end
+            if nargin < 5 || isempty(cfg); cfg = struct(); end
+            if nargin < 2; dataMeta = struct(); end
 
             result.texPath        = '';
             result.pdfPath        = '';
