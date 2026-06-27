@@ -720,6 +720,31 @@ classdef ConfigFactory
             cfg.diagnostics.storage.longRunAutoCompact.durationThreshold_s = 7200;
             cfg.diagnostics.storage.longRunAutoCompact.epochThreshold     = 10000;
 
+            % --- Array backend (SimulationDataStore) ------------------------
+            % 'legacyStruct': existing struct-array log (default, backward-compat)
+            % 'array': preallocated flat numeric arrays — O(1) per epoch, O(N) total
+            cfg.diagnostics.storage.backend = 'legacyStruct';
+
+            % Full-matrix snapshot settings for array backend
+            cfg.diagnostics.storage.fullSnapshot.enable         = true;
+            cfg.diagnostics.storage.fullSnapshot.interval_s     = 600;
+            cfg.diagnostics.storage.fullSnapshot.maxSnapshots   = 200;
+            cfg.diagnostics.storage.fullSnapshot.storeFirstLast = true;
+            cfg.diagnostics.storage.fullSnapshot.storeP         = true;
+            cfg.diagnostics.storage.fullSnapshot.storeH         = true;
+            cfg.diagnostics.storage.fullSnapshot.storeR         = true;
+            cfg.diagnostics.storage.fullSnapshot.storeZ         = true;
+            cfg.diagnostics.storage.fullSnapshot.storeHpred     = true;
+
+            % --- Diagnostic sampling ----------------------------------------
+            % heavyDiagnosticsInterval_s: sample rank/cond/SVD at this interval
+            % (0 = every epoch). For 24h at 1s: 60s → 1440 heavy epochs vs 86400.
+            cfg.diagnostics.sampling.heavyDiagnosticsInterval_s    = 0;  % 0 = every epoch
+            cfg.diagnostics.sampling.computeRankEveryEpoch          = true;
+            cfg.diagnostics.sampling.computeConditionEveryEpoch     = true;
+            cfg.diagnostics.sampling.computeAttitudeSvdEveryEpoch   = true;
+            cfg.diagnostics.sampling.computeClockObservabilityEveryEpoch = true;
+
             % --- Plots -------------------------------------------------------
             % showFigures = false: figures created with Visible='off', saved to file.
             % saveIndividualFigures: save each figure as .png and .fig.

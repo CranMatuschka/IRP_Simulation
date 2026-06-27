@@ -530,11 +530,17 @@ classdef ReportRunner
                     strcmp(cfg.scenario.name,'singleAssetCarrierAttitude')
                 try
                     % Stage 60: pre-extract final euler so assess() can use them
-                    if ~isempty(diag.log) && isfield(diag.log(end),'truth') && ...
+                    eu_tr = diag.getFinalTruthEuler_rad();
+                    eu_es = diag.getFinalEstimateEuler_rad();
+                    if ~isempty(eu_tr)
+                        summary.finalTruthEuler_deg    = eu_tr(:)' * 180/pi;
+                    elseif ~isempty(diag.log) && isfield(diag.log(end),'truth') && ...
                             isfield(diag.log(end).truth,'euler_rad')
-                        summary.finalTruthEuler_deg = diag.log(end).truth.euler_rad(:)' * 180/pi;
+                        summary.finalTruthEuler_deg    = diag.log(end).truth.euler_rad(:)' * 180/pi;
                     end
-                    if ~isempty(diag.log) && isfield(diag.log(end),'estimate') && ...
+                    if ~isempty(eu_es)
+                        summary.finalEstimateEuler_deg = eu_es(:)' * 180/pi;
+                    elseif ~isempty(diag.log) && isfield(diag.log(end),'estimate') && ...
                             isfield(diag.log(end).estimate,'euler_rad')
                         summary.finalEstimateEuler_deg = diag.log(end).estimate.euler_rad(:)' * 180/pi;
                     end
@@ -877,20 +883,24 @@ classdef ReportRunner
             summary.meanLightTime_s = 0;
             summary.maxLightTime_s = 0;
             try
-                log80_ = diag.log;
-                if ~isempty(log80_) && isfield(log80_,'meanLightTime_s')
-                    ltMean_ = [log80_.meanLightTime_s];
-                    ltMax_ = [log80_.maxLightTime_s];
-                    ltMean_ = ltMean_(isfinite(ltMean_));
-                    ltMax_ = ltMax_(isfinite(ltMax_));
+                [ltMn80_, ltMx80_] = diag.getMeanMaxLightTime_s();
+                if ~isempty(ltMn80_) && any(isfinite(ltMn80_))
+                    summary.meanLightTime_s = mean(ltMn80_(isfinite(ltMn80_)));
+                    summary.maxLightTime_s  = max(ltMx80_(isfinite(ltMx80_)));
+                elseif ~isempty(diag.log) && isfield(diag.log,'meanLightTime_s')
+                    ltMean_ = [diag.log.meanLightTime_s]; ltMax_ = [diag.log.maxLightTime_s];
+                    ltMean_ = ltMean_(isfinite(ltMean_)); ltMax_ = ltMax_(isfinite(ltMax_));
                     if ~isempty(ltMean_); summary.meanLightTime_s = mean(ltMean_); end
-                    if ~isempty(ltMax_); summary.maxLightTime_s = max(ltMax_); end
+                    if ~isempty(ltMax_);  summary.maxLightTime_s  = max(ltMax_);  end
                 end
             catch; end
             summary.diffAttSchemaStatus = 'notEvaluated';
             try
-                log80_ = diag.log;
-                if ~isempty(log80_) && isfield(log80_,'diffAttRows')
+                if diag.hasArrayData()
+                    if any(diag.getDiffAttActive())
+                        summary.diffAttSchemaStatus = 'complete';
+                    end
+                elseif ~isempty(diag.log) && isfield(diag.log,'diffAttRows')
                     summary.diffAttSchemaStatus = 'complete';
                 end
             catch; end
@@ -1062,28 +1072,24 @@ classdef ReportRunner
             try; summary.carrierDopplerConsistencyStatus = cfg.diagnostics.carrierDoppler.consistencyStatus; catch; end
             summary.carrierDopplerRms_mps            = NaN;
             summary.covarianceCompletenessStatus     = 'stage84productClockCovarianceHardenedV2';
-            % Populate from dopplerInfo in diag.log if available
+            % Populate from dopplerInfo in diag log (array or legacy) if available
             try
-                dlog83_ = diag.log;
-                if ~isempty(dlog83_)
-                    di83_ = [dlog83_.dopplerInfo];
+                di83_ = diag.getDopplerInfo();
+                if ~isempty(di83_) && isstruct(di83_)
                     if isfield(di83_,'sagnacRateMax_mps')
-                        snr83_ = [di83_.sagnacRateMax_mps];
-                        snr83_ = snr83_(isfinite(snr83_));
+                        snr83_ = di83_.sagnacRateMax_mps; snr83_ = snr83_(isfinite(snr83_));
                         if ~isempty(snr83_); summary.sagnacRateMax_mps = max(snr83_); end
                     end
                     if isfield(di83_,'meanTowerRotSpeed_mps')
-                        mtr83_ = [di83_.meanTowerRotSpeed_mps];
-                        mtr83_ = mtr83_(isfinite(mtr83_));
+                        mtr83_ = di83_.meanTowerRotSpeed_mps; mtr83_ = mtr83_(isfinite(mtr83_));
                         if ~isempty(mtr83_); summary.meanTowerRotSpeed_mps = mean(mtr83_); end
                     end
                     if isfield(di83_,'maxTowerRotSpeed_mps')
-                        xtr83_ = [di83_.maxTowerRotSpeed_mps];
-                        xtr83_ = xtr83_(isfinite(xtr83_));
+                        xtr83_ = di83_.maxTowerRotSpeed_mps; xtr83_ = xtr83_(isfinite(xtr83_));
                         if ~isempty(xtr83_); summary.maxTowerRotSpeed_mps = max(xtr83_); end
                     end
                     if isfield(di83_,'dopplerProductCovApplied')
-                        summary.dopplerProductCovApplied  = any([di83_.dopplerProductCovApplied]);
+                        summary.dopplerProductCovApplied  = any(di83_.dopplerProductCovApplied);
                     end
                     if isfield(di83_,'dopplerProductCovBlocks')
                         summary.dopplerProductCovBlocks   = max([di83_.dopplerProductCovBlocks]);
@@ -1092,11 +1098,10 @@ classdef ReportRunner
                         summary.dopplerProductCovMaxSigma_mps = max([di83_.dopplerProductCovMaxSigma_mps]);
                     end
                     if isfield(di83_,'dopplerProductCovSPD')
-                        summary.dopplerProductCovSPD      = all([di83_.dopplerProductCovSPD]);
+                        summary.dopplerProductCovSPD      = all(di83_.dopplerProductCovSPD);
                     end
                     if isfield(di83_,'dopplerRCondition')
-                        rc83_ = [di83_.dopplerRCondition];
-                        rc83_ = rc83_(isfinite(rc83_));
+                        rc83_ = di83_.dopplerRCondition; rc83_ = rc83_(isfinite(rc83_));
                         if ~isempty(rc83_); summary.dopplerRCondition = min(rc83_); end
                     end
                     % Stage 84: harvest drift diagonal policy and carrier arc reference status
@@ -1221,7 +1226,7 @@ classdef ReportRunner
                     logical(cfg.carrierSlip.syntheticSlipInjection.enable); catch; end
                 summary.nDiffAttBaselineResets = 0;  % DiffAtt slip detection disabled per Stage 69
                 nda73_ = NaN;
-                try; nda73_ = double(diag.log(end).diffAttActiveBaselines); catch; end
+                try; nda73_ = double(diag.getDiffAttActiveBaselines()); catch; end
                 summary.nDiffAttBaselinesActiveFinal = nda73_;
                 summary.nAmbiguityResets = summary.ambiguityResetCount;
                 if isfield(summary,'nConfirmedCarrierSlips') && ...
@@ -1685,11 +1690,11 @@ classdef ReportRunner
 
                 rankVec2 = diag.getAttitudeRank();
                 medRank2 = median(rankVec2, 'omitnan');
-                condVec2 = [diag.log.attitudeCondNum];
+                condVec2 = diag.getAttitudeCondNum();
                 summary.attitudeHattCondNum = mean(condVec2(isfinite(condVec2) & condVec2>0), 'omitnan');
-                sigVec2  = [diag.log.estimatedAttitudeSigma_rad];
-                summary.finalAttitudeSigma_deg = sigVec2(end) * 180/pi;
-                jacN2 = [diag.log.attitudeJacobianNorm];
+                sigVec2  = diag.getEstimatedAttitudeSigma_rad();
+                if ~isempty(sigVec2); summary.finalAttitudeSigma_deg = sigVec2(end) * 180/pi; end
+                jacN2 = diag.getAttitudeJacobianNorm();
                 summary.meanAttitudeJacNorm = mean(jacN2(jacN2 > 0), 'omitnan');
                 summary.carrierAttJacActive = estAtt2 && ...
                     isfield(cfg.estimator,'estimateAttitudeFromPseudorange') && ...
@@ -1718,8 +1723,8 @@ classdef ReportRunner
 
                 % Stage 14.9: separability metrics (always logged)
                 try
-                    sepVec  = logical([diag.log.attitudeSeparable]);
-                    corrVec = double([diag.log.attitudeAmbCorrMaxAbs]);
+                    sepVec  = diag.getAttitudeSeparable();
+                    corrVec = diag.getAttitudeAmbCorrMaxAbs();
                     summary.attitudeSeparable     = any(sepVec);
                     summary.attitudeAmbCorrMaxAbs = mean(corrVec(isfinite(corrVec)), 'omitnan');
                 catch
@@ -1735,16 +1740,16 @@ classdef ReportRunner
                 summary.attitudeCarrierMode = attMode15;
                 if strcmp(attMode15,'calibratedDifferentialAmbiguity')
                     try
-                        daActive = logical([diag.log.diffAttActive]);
+                        daActive = diag.getDiffAttActive();
                         summary.diffAttCalibrated = any(daActive);
-                        nVec = double([diag.log.diffAttNRows]);
+                        nVec = diag.getDiffAttNRows();
                         summary.diffAttMeanNRows  = mean(nVec(nVec>0), 'omitnan');
-                        rVec = double([diag.log.diffAttResidRMS]);
+                        rVec = diag.getDiffAttResidRMS();
                         summary.diffAttResidRMS_m = mean(rVec(isfinite(rVec) & daActive), 'omitnan');
-                        summary.diffAttActiveBaselines = double(diag.log(end).diffAttActiveBaselines);
-                        summary.diffAttLostBaselines = double(diag.log(end).diffAttLostBaselines);
-                        summary.diffAttRecalibratedBaselines = double(diag.log(end).diffAttRecalibratedBaselines);
-                        summary.diffAttRejectedRows = double(diag.log(end).diffAttRejectedRows);
+                        summary.diffAttActiveBaselines      = double(diag.getDiffAttActiveBaselines());
+                        summary.diffAttLostBaselines        = double(diag.getDiffAttLostBaselines());
+                        summary.diffAttRecalibratedBaselines= double(diag.getDiffAttRecalibratedBaselines());
+                        summary.diffAttRejectedRows         = double(diag.getDiffAttRejectedRows());
                     catch
                         summary.diffAttCalibrated = false;
                         summary.diffAttMeanNRows  = 0;

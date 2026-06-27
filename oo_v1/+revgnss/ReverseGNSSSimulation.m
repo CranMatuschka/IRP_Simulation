@@ -152,10 +152,56 @@ classdef ReverseGNSSSimulation < handle
         % ----------------------------------------------------------------
         function run(obj)
             if ~obj.isInit; obj.initialize(); end
+        
             fprintf('Running simulation...\n');
+        
+            wallStart = tic;
+            lastPrint = tic;
+        
+            dt_s = obj.cfg.simulation.dt_s;
+            progressInterval_s = 300;      % print every 5 simulated minutes
+            minWallInterval_s  = 10;       % but not more often than every 10 wall seconds
+        
+            try
+                if isfield(obj.cfg, 'progress') && isfield(obj.cfg.progress, 'interval_s')
+                    progressInterval_s = obj.cfg.progress.interval_s;
+                end
+                if isfield(obj.cfg, 'progress') && isfield(obj.cfg.progress, 'minWallInterval_s')
+                    minWallInterval_s = obj.cfg.progress.minWallInterval_s;
+                end
+            catch
+            end
+        
+            progressEveryEpochs = max(1, round(progressInterval_s / max(dt_s, eps)));
+        
             for k = 1:obj.nEpochs
                 obj.step(k);
+        
+                doPrint = (k == 1) || ...
+                          (k == obj.nEpochs) || ...
+                          (mod(k, progressEveryEpochs) == 0 && toc(lastPrint) >= minWallInterval_s);
+        
+                if doPrint
+                    pct = 100.0 * k / obj.nEpochs;
+        
+                    simNow_h   = obj.tVec(k) / 3600;
+                    simTotal_h = obj.tVec(end) / 3600;
+        
+                    elapsed_s = toc(wallStart);
+                    rate_ep_s = k / max(elapsed_s, eps);
+                    eta_s     = (obj.nEpochs - k) / max(rate_ep_s, eps);
+        
+                    fprintf(['  progress %6.2f%% | epoch %d/%d | sim %.2f/%.2f h | ', ...
+                             'elapsed %s | ETA %s | %.1f ep/s\n'], ...
+                             pct, k, obj.nEpochs, simNow_h, simTotal_h, ...
+                             revgnss.ReverseGNSSSimulation.formatDuration_(elapsed_s), ...
+                             revgnss.ReverseGNSSSimulation.formatDuration_(eta_s), ...
+                             rate_ep_s);
+        
+                    lastPrint = tic;
+                end
             end
+        
             fprintf('Simulation complete. %d epochs processed.\n', obj.nEpochs);
             obj.summarize();
         end
@@ -731,5 +777,27 @@ classdef ReverseGNSSSimulation < handle
             s.orbitTruthCacheEpochs  = numel(obj.orbitTruthCache.t_s);
             s.orbitTruthCacheSource  = obj.orbitTruthCache.source;
         end
+    end
+
+    methods (Static, Access = private)
+        function s = formatDuration_(sec)
+            if ~isfinite(sec) || sec < 0
+                s = 'unknown';
+                return;
+            end
+    
+            h = floor(sec / 3600);
+            m = floor((sec - 3600*h) / 60);
+            r = floor(sec - 3600*h - 60*m);
+    
+            if h > 0
+                s = sprintf('%02dh:%02dm:%02ds', h, m, r);
+            elseif m > 0
+                s = sprintf('%02dm:%02ds', m, r);
+            else
+                s = sprintf('%02ds', r);
+            end
+        end
+       
     end
 end

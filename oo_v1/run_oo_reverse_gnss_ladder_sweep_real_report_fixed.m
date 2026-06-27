@@ -876,56 +876,68 @@ function compact = buildCompact_(out, T, ci, c, patches)
     % Time vector
     compact.data.t_s = [];
 
-    % State history from diag.log
+    % State history — try array backend first, fall back to legacy struct log
     try
-        lg = out.diag.log;
-        nE = numel(lg);
-        dt = 1;
-        try; dt = out.cfg.simulation.dt_s; catch; end
-        compact.data.t_s = (0:nE-1)' * dt;
-
-        pr = zeros(3,nE); vr = zeros(3,nE);
-        pe = zeros(3,nE); ve = zeros(3,nE);
-        Pd = []; bCT = zeros(1,nE); bCE = zeros(1,nE);
-        bdCT = zeros(1,nE); bdCE = zeros(1,nE);
-        for k = 1:nE
-            try; pr(:,k)  = lg(k).truth.r_ecef_m;         catch; end
-            try; vr(:,k)  = lg(k).truth.v_ecef_mps;       catch; end
-            try; pe(:,k)  = lg(k).estimate.r_ecef_m;      catch; end
-            try; ve(:,k)  = lg(k).estimate.v_ecef_mps;    catch; end
-            try; bCT(k)   = lg(k).truth.rxClockBias_m;    catch; end
-            try; bCE(k)   = lg(k).estimate.rxClockBias_m; catch; end
-            try; bdCT(k)  = lg(k).truth.rxClockDrift_mps; catch; end
-            try; bdCE(k)  = lg(k).estimate.rxClockDrift_mps; catch; end
-            if k == 1 && isfield(lg(1),'Pdiag') && ~isempty(lg(1).Pdiag)
-                Pd = zeros(numel(lg(1).Pdiag), nE);
+        if out.diag.hasArrayData()
+            ad = out.diag.getData();
+            nE = out.diag.nEpochs;
+            dt = 1; try; dt = out.cfg.simulation.dt_s; catch; end
+            compact.data.t_s = ad.t_s;
+            if isempty(compact.data.t_s) || numel(compact.data.t_s) ~= nE
+                compact.data.t_s = (0:nE-1)' * dt;
             end
-            if ~isempty(Pd); try; Pd(:,k) = lg(k).Pdiag(:); catch; end; end
+            pr  = ad.truth.r_ecef_m;
+            vr  = ad.truth.v_ecef_mps;
+            pe  = ad.estimate.r_ecef_m;
+            ve  = ad.estimate.v_ecef_mps;
+            bCT = ad.truth.rxClockBias_m(:)';
+            bCE = ad.estimate.rxClockBias_m(:)';
+            bdCT= ad.truth.rxClockDrift_mps(:)';
+            bdCE= ad.estimate.rxClockDrift_mps(:)';
+            Pd  = ad.estimate.Pdiag;
+            eTr = ad.truth.euler_rad;
+            eEs = ad.estimate.euler_rad;
+        else
+            lg = out.diag.log;
+            nE = numel(lg);
+            dt = 1; try; dt = out.cfg.simulation.dt_s; catch; end
+            compact.data.t_s = (0:nE-1)' * dt;
+            pr = zeros(3,nE); vr = zeros(3,nE);
+            pe = zeros(3,nE); ve = zeros(3,nE);
+            Pd = []; bCT = zeros(1,nE); bCE = zeros(1,nE);
+            bdCT = zeros(1,nE); bdCE = zeros(1,nE);
+            eTr = zeros(3,nE); eEs = zeros(3,nE);
+            for k = 1:nE
+                try; pr(:,k)  = lg(k).truth.r_ecef_m;            catch; end
+                try; vr(:,k)  = lg(k).truth.v_ecef_mps;          catch; end
+                try; pe(:,k)  = lg(k).estimate.r_ecef_m;         catch; end
+                try; ve(:,k)  = lg(k).estimate.v_ecef_mps;       catch; end
+                try; bCT(k)   = lg(k).truth.rxClockBias_m;       catch; end
+                try; bCE(k)   = lg(k).estimate.rxClockBias_m;    catch; end
+                try; bdCT(k)  = lg(k).truth.rxClockDrift_mps;    catch; end
+                try; bdCE(k)  = lg(k).estimate.rxClockDrift_mps; catch; end
+                try; eTr(:,k) = lg(k).truth.euler_rad;            catch; end
+                try; eEs(:,k) = lg(k).estimate.euler_rad;         catch; end
+                if k == 1 && isfield(lg(1),'Pdiag') && ~isempty(lg(1).Pdiag)
+                    Pd = zeros(numel(lg(1).Pdiag), nE);
+                end
+                if ~isempty(Pd); try; Pd(:,k) = lg(k).Pdiag(:); catch; end; end
+            end
         end
-        compact.data.x          = pe;
-        compact.data.Pdiag      = Pd;
-        compact.data.truth.r_m  = pr;
-        compact.data.truth.v_mps = vr;
-        compact.data.estimate.r_m = pe;
-        compact.data.estimate.v_mps = ve;
+        compact.data.x             = pe;
+        compact.data.Pdiag         = Pd;
+        compact.data.truth.r_m     = pr;
+        compact.data.truth.v_mps   = vr;
+        compact.data.estimate.r_m  = pe;
+        compact.data.estimate.v_mps= ve;
         compact.data.error.positionVec_m  = pe - pr;
         compact.data.error.positionNorm_m = sqrt(sum((pe-pr).^2,1));
-        compact.data.truth.rxClock_m      = bCT;
-        compact.data.truth.rxClockDrift_mps = bdCT;
-        compact.data.estimate.rxClock_m   = bCE;
-        compact.data.estimate.rxClockDrift_mps = bdCE;
-        compact.data.error.clockBias_m    = bCE - bCT;
-        compact.data.error.clockDrift_mps = bdCE - bdCT;
-    catch; end
-
-    % Attitude history
-    try
-        lg = out.diag.log; nE = numel(lg);
-        eTr = zeros(3,nE); eEs = zeros(3,nE);
-        for k = 1:nE
-            try; eTr(:,k) = lg(k).truth.euler_rad;    catch; end
-            try; eEs(:,k) = lg(k).estimate.euler_rad; catch; end
-        end
+        compact.data.truth.rxClock_m          = bCT;
+        compact.data.truth.rxClockDrift_mps   = bdCT;
+        compact.data.estimate.rxClock_m       = bCE;
+        compact.data.estimate.rxClockDrift_mps= bdCE;
+        compact.data.error.clockBias_m        = bCE - bCT;
+        compact.data.error.clockDrift_mps     = bdCE - bdCT;
         compact.data.truth.euler_rad    = eTr;
         compact.data.estimate.euler_rad = eEs;
         compact.data.error.attitude_rad = eEs - eTr;

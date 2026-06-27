@@ -63,6 +63,13 @@ classdef Diagnostics < handle
         snapshotStoreFirstLast_    logical = true
         snapshotCount_             double  = 0
         lastSnapshotTime_s_        double  = -Inf
+        % Array backend (new in SimulationDataStore refactor)
+        useArrayBackend_           logical = false
+        store_                              % revgnss.SimulationDataStore or []
+        heavyDiagInterval_s_       double  = 60
+        heavyDiagEveryEpoch_       logical = true   % default: no sampling
+        lastHeavyDiagTime_s_       double  = -Inf
+        lastRecordedTime_s_        double  = NaN    % used for clock obs dt10
     end
 
     methods
@@ -121,6 +128,42 @@ classdef Diagnostics < handle
                     end
                 end
             end
+            % --- Array backend (cfg.diagnostics.storage.backend) ---------------
+            obj.useArrayBackend_ = false;
+            try
+                if isfield(cfg.diagnostics.storage,'backend') && ...
+                        strcmp(cfg.diagnostics.storage.backend,'array')
+                    obj.useArrayBackend_ = true;
+                end
+            catch; end
+
+            % --- Diagnostic sampling (cfg.diagnostics.sampling) ----------------
+            obj.heavyDiagEveryEpoch_ = true;  % safe default: compute every epoch
+            try
+                if isfield(cfg,'diagnostics') && isfield(cfg.diagnostics,'sampling')
+                    sa = cfg.diagnostics.sampling;
+                    if isfield(sa,'heavyDiagnosticsInterval_s') && sa.heavyDiagnosticsInterval_s > 0
+                        obj.heavyDiagInterval_s_  = sa.heavyDiagnosticsInterval_s;
+                        obj.heavyDiagEveryEpoch_  = false;
+                    end
+                    % explicit per-category overrides
+                    if isfield(sa,'computeRankEveryEpoch') && sa.computeRankEveryEpoch
+                        obj.heavyDiagEveryEpoch_ = true;
+                    end
+                end
+            catch; end
+
+            % --- Create array store if needed ----------------------------------
+            if obj.useArrayBackend_
+                try
+                    nEp = round(cfg.simulation.duration_s / cfg.simulation.dt_s) + 1;
+                catch
+                    nEp = 1;
+                end
+                obj.store_ = revgnss.SimulationDataStore(cfg, nEp);
+                fprintf('  Diagnostics: array backend (%d epochs preallocated)\n', nEp);
+            end
+
             fprintf('  Diagnostics storage: %s\n', obj.storagePolicyMode_);
 
             % --- Stage 12: receiver bias architecture metadata ---------------
@@ -674,12 +717,12 @@ classdef Diagnostics < handle
 
                 if numel(buf10.H_phys) >= obj.clockObsMinWin_ && ...
                         ~isempty(clkIdx10) && mod(numel(clkIdx10), 2) == 0
-                    if obj.nEpochs >= 1
-                        dt10 = t_s - obj.log(obj.nEpochs).time_s;
+                    if obj.nEpochs >= 1 && isfinite(obj.lastRecordedTime_s_)
+                        dt10 = t_s - obj.lastRecordedTime_s_;
                     else
                         dt10 = 1;
                     end
-                    if dt10 <= 0; dt10 = 1; end
+                    if dt10 <= 0 || ~isfinite(dt10); dt10 = 1; end
                     try
                         obs10 = revgnss.ObservabilityDiagnostics.computeClockWindowObservability( ...
                             buf10.H_phys, buf10.Rd_phys, buf10.H_gauge, buf10.Rd_gauge, ...
@@ -695,6 +738,15 @@ classdef Diagnostics < handle
                     end
                 end
             end
+
+            % --- Heavy diagnostic sampling gate --------------------------------
+            % rank(), cond(), svd(), R\eye are expensive for long runs.
+            % Sample at heavyDiagInterval_s_ when heavyDiagEveryEpoch_ is false.
+            heavyDiag_ = obj.heavyDiagEveryEpoch_ || ...
+                strcmp(obj.storagePolicyMode_,'full') || ...
+                (obj.nEpochs == 0) || ...
+                (t_s - obj.lastHeavyDiagTime_s_ >= obj.heavyDiagInterval_s_);
+            if heavyDiag_; obj.lastHeavyDiagTime_s_ = t_s; end
 
             % --- Jacobian diagnostics ----------------------------------
             if ~isempty(H) && size(H,2) >= 9
@@ -716,25 +768,26 @@ classdef Diagnostics < handle
                 % Attitude observability via SVD rank (not just max singular value).
                 % Using only maxSV cannot distinguish partial (1-2 axis) from full
                 % 3-axis sensitivity.
-                sv_att       = svd(H_att);
-                tol_sv       = max(sv_att) * 1e-6;  % relative tolerance
-                attRank      = sum(sv_att > tol_sv);
-                switch attRank
-                    case 0
-                        attStatus = 'unobservable';
-                    case {1,2}
-                        attStatus = 'partial';
-                    case 3
-                        attStatus = 'full';
-                    otherwise
-                        attStatus = 'full';
-                end
-                entry.attitudeRank   = attRank;
-                entry.attitudeStatus = attStatus;
-                if attRank >= 2
-                    entry.attitudeCondNum = max(sv_att(1:attRank)) / min(sv_att(1:attRank));
+                if heavyDiag_
+                    sv_att   = svd(H_att);
+                    tol_sv   = max(sv_att) * 1e-6;
+                    attRank  = sum(sv_att > tol_sv);
+                    switch attRank
+                        case 0;      attStatus = 'unobservable';
+                        case {1,2};  attStatus = 'partial';
+                        otherwise;   attStatus = 'full';
+                    end
+                    entry.attitudeRank   = attRank;
+                    entry.attitudeStatus = attStatus;
+                    if attRank >= 2
+                        entry.attitudeCondNum = max(sv_att(1:attRank)) / min(sv_att(1:attRank));
+                    else
+                        entry.attitudeCondNum = NaN;
+                    end
                 else
-                    entry.attitudeCondNum = NaN;
+                    entry.attitudeRank   = NaN;
+                    entry.attitudeStatus = 'sampled';
+                    entry.attitudeCondNum= NaN;
                 end
 
                 % Attitude-ambiguity separability (Stage 14.9).
@@ -742,7 +795,7 @@ classdef Diagnostics < handle
                 % never separable.  This computes the diagnostic to confirm analytically.
                 entry.attitudeSeparable     = false;
                 entry.attitudeAmbCorrMaxAbs = NaN;
-                if isfield(sm,'ambiguityIdx3d')
+                if heavyDiag_ && isfield(sm,'ambiguityIdx3d')
                     ambFlat = nonzeros(sm.ambiguityIdx3d(:));
                     if ~isempty(ambFlat) && max(ambFlat) <= size(H,2)
                         Hb_all  = H(:, ambFlat);
@@ -772,13 +825,13 @@ classdef Diagnostics < handle
                 entry.attitudeAmbCorrMaxAbs = NaN;
             end
 
-            if ~isempty(H)
+            if heavyDiag_ && ~isempty(H)
                 entry.measurementRank = rank(H);
             else
                 entry.measurementRank = 0;
             end
 
-            if ~isempty(H) && ~isempty(R)
+            if heavyDiag_ && ~isempty(H) && ~isempty(R)
                 S_mat = H * ekf.P * H' + R;
                 entry.conditionNumberS = cond(S_mat);
             else
@@ -795,8 +848,8 @@ classdef Diagnostics < handle
             entry.tdopLike               = NaN;
             entry.positionClockCondition = NaN;
             posClkIdx = [sm.r_idx(:); sm.b_rx_idx]';   % [1 2 3 13] for default state
-            if ~isempty(H) && ~isempty(R) && M_pr >= 4 && numel(posClkIdx) == 4 && ...
-                    size(H, 2) >= max(posClkIdx)
+            if heavyDiag_ && ~isempty(H) && ~isempty(R) && M_pr >= 4 && ...
+                    numel(posClkIdx) == 4 && size(H, 2) >= max(posClkIdx)
                 H_pr = H(1:M_pr, :);
                 R_pr = R(1:M_pr, 1:M_pr);
                 H_pc = H_pr(:, posClkIdx);
@@ -1147,12 +1200,17 @@ classdef Diagnostics < handle
                     H, sm, obj.cfg_, mTypeForAudit);
             end
 
-            % --- Append to log ----------------------------------------
+            % --- Append to log / array store --------------------------
             obj.nEpochs = obj.nEpochs + 1;
-            if obj.nEpochs == 1
-                obj.log = entry;
+            obj.lastRecordedTime_s_ = t_s;
+            if obj.useArrayBackend_
+                obj.store_.storeEntry(obj.nEpochs, entry);
             else
-                obj.log(obj.nEpochs) = entry;
+                if obj.nEpochs == 1
+                    obj.log = entry;
+                else
+                    obj.log(obj.nEpochs) = entry;
+                end
             end
         end
 
@@ -1160,32 +1218,55 @@ classdef Diagnostics < handle
         %  GETTERS
         % ================================================================
 
+        % --- Array-backend accessor helpers ----------------------------
+
+        function tf = hasArrayData(obj)
+            tf = obj.useArrayBackend_ && ~isempty(obj.store_);
+        end
+
+        function d = getData(obj)
+            if obj.hasArrayData()
+                d = obj.store_.getData();
+            else
+                d = struct();
+            end
+        end
+
+        % --- Time series getters (array-backend aware) -----------------
+
         function t = getTimeVector(obj)
+            if obj.hasArrayData(); t = obj.store_.getData().t_s; return; end
             t = [obj.log.time_s]';
         end
 
         function e = getPositionErrors(obj)
+            if obj.hasArrayData(); e = obj.store_.getData().error.positionNorm_m; return; end
             e = [obj.log.positionError_m]';
         end
 
         function e = getPositionErrorVecs(obj)
             % Returns [3 x nEpochs] matrix
+            if obj.hasArrayData(); e = obj.store_.getData().error.positionVec_m; return; end
             e = cell2mat({obj.log.positionErrorVec_m});
         end
 
         function e = getClockBiasErrors(obj)
+            if obj.hasArrayData(); e = obj.store_.getData().error.clockBias_m; return; end
             e = [obj.log.clockBiasError_m]';
         end
 
         function e = getClockDriftErrors(obj)
+            if obj.hasArrayData(); e = obj.store_.getData().error.clockDrift_mps; return; end
             e = [obj.log.clockDriftError_mps]';
         end
 
         function e = getFractionalFrequencyErrors(obj)
+            if obj.hasArrayData(); e = obj.store_.getData().error.fracFreq; return; end
             e = [obj.log.fracFreqError]';
         end
 
         function n = getNIS(obj)
+            if obj.hasArrayData(); n = obj.store_.getData().consistency.NIS; return; end
             n = [obj.log.NIS]';
         end
 
@@ -1197,8 +1278,16 @@ classdef Diagnostics < handle
                 'meanPhysicalRms', NaN, 'meanGaugeRms', NaN, 'meanAugRms', NaN, ...
                 'meanCodeRms', NaN, 'meanCarrierRms', NaN, 'meanDopplerRms', NaN, ...
                 'physicalConsistencyUsesGaugeRows', false);
-            if obj.nEpochs < 1 || ~isfield(obj.log(1),'physicalNIS57'); return; end
+            if obj.nEpochs < 1; return; end
+            if ~obj.hasArrayData() && ~isfield(obj.log(1),'physicalNIS57'); return; end
             try
+                if obj.hasArrayData()
+                    d57 = obj.store_.getData().stage57;
+                    physNIS = d57.physicalNIS;  gaugNIS = d57.gaugeNIS;   augNIS  = d57.augmentedNIS;
+                    physDof = d57.physicalDof;  gauDof  = d57.gaugeDof;
+                    pRms    = d57.physicalRms;  gRms    = d57.gaugeRms;   aRms    = d57.augmentedRms;
+                    cRms    = d57.codeRms;      carRms  = d57.carrierRms; dopRms  = d57.dopplerRms;
+                else
                 physNIS = [obj.log.physicalNIS57]';
                 gaugNIS = [obj.log.gaugeNIS57]';
                 augNIS  = [obj.log.augmentedNIS57]';
@@ -1210,6 +1299,7 @@ classdef Diagnostics < handle
                 cRms    = [obj.log.codeRms57]';
                 carRms  = [obj.log.carrierRms57]';
                 dopRms  = [obj.log.dopplerRms57]';
+                end
                 s.available          = any(isfinite(physNIS));
                 s.meanPhysicalNIS    = mean(physNIS, 'omitnan');
                 s.meanGaugeNIS       = mean(gaugNIS, 'omitnan');
@@ -1227,23 +1317,28 @@ classdef Diagnostics < handle
         end
 
         function nu = getPrefitInnovationRMS(obj)
+            if obj.hasArrayData(); nu = obj.store_.getData().residual.prefitAllRMS; return; end
             nu = [obj.log.prefitInnovationRMS]';
         end
 
         function res = getPostfitResidualRMS(obj)
+            if obj.hasArrayData(); res = obj.store_.getData().residual.postfitAllRMS; return; end
             res = [obj.log.postfitResidualRMS]';
         end
 
         function nv = getNumVisibleTowers(obj)
+            if obj.hasArrayData(); nv = obj.store_.getData().meas.nVisibleTowers; return; end
             nv = [obj.log.numVisibleTowers]';
         end
 
         function nm = getNumMeasurements(obj)
+            if obj.hasArrayData(); nm = obj.store_.getData().meas.nCodeRows; return; end
             nm = [obj.log.numMeasurements]';   % pseudorange count
         end
 
         function nr = getNumMeasurementRows(obj)
             % getNumMeasurementRows  Total EKF z dimension (PR + Doppler if in EKF).
+            if obj.hasArrayData(); nr = obj.store_.getData().meas.nRows; return; end
             nr = [obj.log.numMeasurementRows]';
         end
 
@@ -1273,18 +1368,22 @@ classdef Diagnostics < handle
         end
 
         function v = getPrefitPseudorangeRMS(obj)
+            if obj.hasArrayData(); v = obj.store_.getData().residual.prefitCodeRMS_m; return; end
             v = [obj.log.prefitPseudorangeRMS_m]';
         end
 
         function v = getPostfitPseudorangeRMS(obj)
+            if obj.hasArrayData(); v = obj.store_.getData().residual.postfitCodeRMS_m; return; end
             v = [obj.log.postfitPseudorangeRMS_m]';
         end
 
         function v = getPrefitDopplerRMS(obj)
+            if obj.hasArrayData(); v = obj.store_.getData().residual.prefitDopplerRMS_mps; return; end
             v = [obj.log.prefitDopplerRMS_mps]';
         end
 
         function v = getPostfitDopplerRMS(obj)
+            if obj.hasArrayData(); v = obj.store_.getData().residual.postfitDopplerRMS_mps; return; end
             v = [obj.log.postfitDopplerRMS_mps]';
         end
 
@@ -1296,6 +1395,10 @@ classdef Diagnostics < handle
             %   C.effectName.modelRMS_m    [nEpochs x 1]
             %   C.effectName.mismatchRMS_m [nEpochs x 1]
             %   (Doppler: _mps suffix; carrier: _cycles suffix)
+            if obj.hasArrayData()
+                C = obj.store_.getData().contributions;
+                return;
+            end
             if obj.nEpochs == 0; C = struct(); return; end
             C = struct();
             effects = fieldnames(obj.log(1).contributions);
@@ -1323,6 +1426,7 @@ classdef Diagnostics < handle
             %   B.L1.ionosphere.mismatchRMS_m
             %   B.L1.codeSigma_m             [nEpochs x 1]  (scalar per epoch, not rms3m)
             %   etc.
+            if obj.hasArrayData(); B = struct(); return; end  % bySignal not stored in array mode
             if obj.nEpochs == 0; B = struct(); return; end
             B = struct();
             bs = obj.log(1).contributions.bySignal;
@@ -1363,21 +1467,34 @@ classdef Diagnostics < handle
         end
 
         function v = getSagnacDiffRMS(obj)
-            v = [obj.log.sagnacDiffRMS_m]';
+            if obj.hasArrayData() || isempty(obj.log); v = []; return; end
+            try; v = [obj.log.sagnacDiffRMS_m]'; catch; v = []; end
         end
 
         function v = getShapiroDiffRMS(obj)
-            v = [obj.log.shapiroDiffRMS_m]';
+            if obj.hasArrayData() || isempty(obj.log); v = []; return; end
+            try; v = [obj.log.shapiroDiffRMS_m]'; catch; v = []; end
         end
 
         function e = getAttitudeErrorVecs(obj)
             % Returns [3 x nEpochs] matrix of attitude errors [rad]
+            if obj.hasArrayData(); e = obj.store_.getData().error.attitude_rad; return; end
+            if isempty(obj.log); e = []; return; end
             e = cell2mat({obj.log.attitudeError_rad});
         end
 
         function perSrc = getPerSourceErrorRMS(obj)
             % getPerSourceErrorRMS  RMS(truth_m - model_m) per source per epoch [m].
             % Title: "Truth - Model" residual RMS.
+            if obj.hasArrayData()
+                d = obj.store_.getData();
+                perSrc.code    = d.perSource.code;
+                perSrc.trop    = d.perSource.trop;
+                perSrc.iono    = d.perSource.iono;
+                perSrc.hwDelay = d.perSource.hwDelay;
+                perSrc.mp      = d.perSource.mp;
+                return;
+            end
             labels = {'code','trop','iono','hwDelay','mp'};
             for j = 1:numel(labels)
                 lbl = labels{j};
@@ -1403,6 +1520,7 @@ classdef Diagnostics < handle
 
         function x_s = getRxClockBiasTrue(obj)
             % Returns [nEpochs x 1] truth receiver clock bias time series [s].
+            if obj.hasArrayData(); x_s = obj.store_.getData().truth.rxClockBias_s; return; end
             x_s = NaN(obj.nEpochs, 1);
             for k = 1:obj.nEpochs
                 try; x_s(k) = obj.log(k).truth.rxClockBias_s; catch; end
@@ -1410,28 +1528,34 @@ classdef Diagnostics < handle
         end
 
         function v = getGDOPLike(obj)
+            if obj.hasArrayData(); v = obj.store_.getData().geom.gdopLike; return; end
             v = [obj.log.gdopLike]';
         end
 
         function v = getPDOPLike(obj)
+            if obj.hasArrayData(); v = obj.store_.getData().geom.pdopLike; return; end
             v = [obj.log.pdopLike]';
         end
 
         function v = getTDOPLike(obj)
+            if obj.hasArrayData(); v = obj.store_.getData().geom.tdopLike; return; end
             v = [obj.log.tdopLike]';
         end
 
         function v = getGeometryRank(obj)
+            if obj.hasArrayData(); v = obj.store_.getData().geom.geometryRank; return; end
             v = [obj.log.geometryRank]';
         end
 
         function v = getAttitudeRank(obj)
             % CHANGED: v3→v4 — Issue 8
+            if obj.hasArrayData(); v = obj.store_.getData().geom.attitudeRank; return; end
             v = [obj.log.attitudeRank]';
         end
 
         function v = getAttitudeStatus(obj)
             % CHANGED: v3→v4 — Issue 8
+            if obj.hasArrayData(); v = []; return; end  % string data not stored in array mode
             v = {obj.log.attitudeStatus}';
         end
 
@@ -1442,6 +1566,13 @@ classdef Diagnostics < handle
             % Each is sum((inn_k)^2 / R_kk) for the relevant measurement type.
             % These are prefit chi-squared diagnostics, NOT the full EKF NIS
             % (which uses S = H*P*H'+R).  E[NIS_k/dof_k] approx 1 in steady state.
+            if obj.hasArrayData()
+                d = obj.store_.getData();
+                C.code    = d.consistency.NIS_code;
+                C.doppler = d.consistency.NIS_doppler;
+                C.carrier = d.consistency.NIS_carrier;
+                return;
+            end
             C.code    = [obj.log.NIS_code]';
             C.doppler = [obj.log.NIS_doppler]';
             C.carrier = [obj.log.NIS_carrier]';
@@ -1454,23 +1585,27 @@ classdef Diagnostics < handle
             % Under a consistent filter, E[NEES_pos] = 1.
             % Values >> 1: filter is too optimistic (P too small).
             % Values << 1: filter is too pessimistic (P too large).
+            if obj.hasArrayData(); v = obj.store_.getData().consistency.NEES_pos; return; end
             v = [obj.log.NEES_pos]';
         end
 
         function v = getVelocityNEES(obj)
             % getVelocityNEES  Velocity NEES per epoch [nEpochs x 1].  Stage 85.
+            if obj.hasArrayData(); v = obj.store_.getData().consistency.NEES_vel; return; end
             if isempty(obj.log); v = []; return; end
             v = [obj.log.NEES_vel]';
         end
 
         function v = getClockNEES(obj)
             % getClockNEES  Clock (bias+drift joint) NEES per epoch [nEpochs x 1].  Stage 85.
+            if obj.hasArrayData(); v = obj.store_.getData().consistency.NEES_clk; return; end
             if isempty(obj.log); v = []; return; end
             v = [obj.log.NEES_clk]';
         end
 
         function v = getAttitudeNEES(obj)
             % getAttitudeNEES  Euler-angle NEES per epoch [nEpochs x 1].  Stage 85.
+            if obj.hasArrayData(); v = obj.store_.getData().consistency.NEES_att; return; end
             if isempty(obj.log); v = []; return; end
             v = [obj.log.NEES_att]';
         end
@@ -1610,6 +1745,7 @@ classdef Diagnostics < handle
 
         function v = isZwdEstimated(obj)
             % isZwdEstimated  True when any epoch logged a ZWD state.
+            if obj.hasArrayData(); v = any(obj.store_.getData().zwd.estimated); return; end
             if isempty(obj.log); v = false; return; end
             v = any([obj.log.zwdEstimated]);
         end
@@ -1641,6 +1777,7 @@ classdef Diagnostics < handle
 
         function v = getPdiag(obj)
             % getPdiag  Per-epoch P diagonal [nx x nEpochs] or cell array.
+            if obj.hasArrayData(); v = obj.store_.getData().estimate.Pdiag; return; end
             if isempty(obj.log); v = []; return; end
             try
                 v = cell2mat({obj.log.Pdiag});
@@ -1651,6 +1788,7 @@ classdef Diagnostics < handle
 
         function v = getSigma(obj)
             % getSigma  Per-epoch sqrt(diag(P)) [nx x nEpochs].
+            if obj.hasArrayData(); v = obj.store_.getData().estimate.sigma; return; end
             if isempty(obj.log); v = []; return; end
             try
                 v = cell2mat({obj.log.estimate}).sigma;
@@ -1662,14 +1800,126 @@ classdef Diagnostics < handle
 
         function v = getNumCarrierRows(obj)
             % getNumCarrierRows  Number of carrier-phase rows in EKF per epoch.
+            if obj.hasArrayData(); v = obj.store_.getData().meas.nCarrierRows; return; end
             if isempty(obj.log) || ~isfield(obj.log(1),'numCarrierRows'); v = []; return; end
             v = [obj.log.numCarrierRows]';
         end
 
         function v = getRdiag(obj)
             % getRdiag  Diagonal of R per epoch as cell array (rows may vary).
+            if obj.hasArrayData(); v = {}; return; end  % not stored per-epoch in array mode
             if isempty(obj.log); v = {}; return; end
             v = {obj.log.Rdiag}';
+        end
+
+        % --- New getters for array-backend fields (also work via store) ---
+
+        function v = getAttitudeCondNum(obj)
+            if obj.hasArrayData(); v = obj.store_.getData().geom.attitudeCondNum; return; end
+            if isempty(obj.log); v = []; return; end
+            try; v = [obj.log.attitudeCondNum]'; catch; v = nan(obj.nEpochs,1); end
+        end
+
+        function v = getEstimatedAttitudeSigma_rad(obj)
+            if obj.hasArrayData(); v = obj.store_.getData().attitude.attitudeSigma_rad; return; end
+            if isempty(obj.log); v = []; return; end
+            try; v = [obj.log.estimatedAttitudeSigma_rad]'; catch; v = nan(obj.nEpochs,1); end
+        end
+
+        function v = getAttitudeJacobianNorm(obj)
+            if obj.hasArrayData(); v = obj.store_.getData().geom.attitudeJacobianNorm; return; end
+            if isempty(obj.log); v = []; return; end
+            try; v = [obj.log.attitudeJacobianNorm]'; catch; v = nan(obj.nEpochs,1); end
+        end
+
+        function v = getAttitudeSeparable(obj)
+            if obj.hasArrayData(); v = obj.store_.getData().attitude.separable; return; end
+            if isempty(obj.log); v = []; return; end
+            try; v = [obj.log.attitudeSeparable]'; catch; v = false(obj.nEpochs,1); end
+        end
+
+        function v = getAttitudeAmbCorrMaxAbs(obj)
+            if obj.hasArrayData(); v = obj.store_.getData().attitude.ambCorrMaxAbs; return; end
+            if isempty(obj.log); v = []; return; end
+            try; v = [obj.log.attitudeAmbCorrMaxAbs]'; catch; v = nan(obj.nEpochs,1); end
+        end
+
+        function v = getDiffAttActive(obj)
+            if obj.hasArrayData(); v = obj.store_.getData().diffAtt.active; return; end
+            if isempty(obj.log); v = []; return; end
+            try; v = [obj.log.diffAttActive]'; catch; v = false(obj.nEpochs,1); end
+        end
+
+        function v = getDiffAttNRows(obj)
+            if obj.hasArrayData(); v = obj.store_.getData().diffAtt.nRows; return; end
+            if isempty(obj.log); v = []; return; end
+            try; v = [obj.log.diffAttNRows]'; catch; v = nan(obj.nEpochs,1); end
+        end
+
+        function v = getDiffAttResidRMS(obj)
+            if obj.hasArrayData(); v = obj.store_.getData().diffAtt.residRMS; return; end
+            if isempty(obj.log); v = []; return; end
+            try; v = [obj.log.diffAttResidRMS]'; catch; v = nan(obj.nEpochs,1); end
+        end
+
+        function v = getDiffAttActiveBaselines(obj)
+            if obj.hasArrayData(); v = obj.store_.getData().diffAtt.activeBaselines; return; end
+            if isempty(obj.log); v = NaN; return; end
+            try; v = obj.log(end).diffAttActiveBaselines; catch; v = NaN; end
+        end
+
+        function v = getDiffAttLostBaselines(obj)
+            if obj.hasArrayData(); v = obj.store_.getData().diffAtt.lostBaselines; return; end
+            if isempty(obj.log); v = NaN; return; end
+            try; v = obj.log(end).diffAttLostBaselines; catch; v = NaN; end
+        end
+
+        function v = getDiffAttRecalibratedBaselines(obj)
+            if obj.hasArrayData(); v = obj.store_.getData().diffAtt.recalBaselines; return; end
+            if isempty(obj.log); v = NaN; return; end
+            try; v = obj.log(end).diffAttRecalibratedBaselines; catch; v = NaN; end
+        end
+
+        function v = getDiffAttRejectedRows(obj)
+            if obj.hasArrayData(); v = obj.store_.getData().diffAtt.rejectedRows; return; end
+            if isempty(obj.log); v = NaN; return; end
+            try; v = obj.log(end).diffAttRejectedRows; catch; v = NaN; end
+        end
+
+        function [mn, mx] = getMeanMaxLightTime_s(obj)
+            if obj.hasArrayData()
+                d = obj.store_.getData();
+                mn = d.lightTime.mean_s; mx = d.lightTime.max_s; return;
+            end
+            if isempty(obj.log); mn = []; mx = []; return; end
+            try; mn = [obj.log.meanLightTime_s]'; mx = [obj.log.maxLightTime_s]';
+            catch; mn = nan(obj.nEpochs,1); mx = nan(obj.nEpochs,1); end
+        end
+
+        function v = getDopplerInfo(obj)
+            if obj.hasArrayData(); v = obj.store_.getData().dopplerInfo; return; end
+            if isempty(obj.log); v = struct(); return; end
+            try
+                v.sagnacRateMax_mps       = [obj.log.sagnacRateMax_mps]';
+                v.meanTowerRotSpeed_mps   = [obj.log.meanTowerRotSpeed_mps]';
+                v.dopplerProductCovApplied= [obj.log.dopplerProductCovApplied]';
+            catch; v = struct(); end
+        end
+
+        function eu = getFinalTruthEuler_rad(obj)
+            if obj.hasArrayData()
+                eu = obj.store_.getData().truth.lastEuler_rad; return;
+            end
+            if isempty(obj.log); eu = []; return; end
+            try; eu = obj.log(end).truth.euler_rad; catch; eu = []; end
+        end
+
+        function eu = getFinalEstimateEuler_rad(obj)
+            if obj.hasArrayData()
+                eu = obj.store_.getData().estimate.lastEuler_rad; return;
+            end
+            if isempty(obj.log); eu = []; return; end
+            try; eu = obj.log(end).estimate.euler_rad; catch; eu = []; end
         end
 
         % --- Storage diagnostics ----------------------------------------
@@ -1681,7 +1931,11 @@ classdef Diagnostics < handle
 
         function n = getSnapshotCount(obj)
             % getSnapshotCount  Number of full-matrix snapshots stored so far.
-            n = obj.snapshotCount_;
+            if obj.hasArrayData()
+                n = obj.store_.getSnapshotCount();
+            else
+                n = obj.snapshotCount_;
+            end
         end
 
         function printStorageSummary(obj)
