@@ -82,45 +82,105 @@ classdef SimulationDataStore < handle
         rs_pomax_ % [N x 1] postfit max abs
 
         % ---- Consistency (NIS/NEES)
-        cn_NIS_    cn_NIScod_   cn_NIScar_   cn_NISdop_
-        cn_NEESp_  cn_NEESv_    cn_NEESc_    cn_NEESa_
+        cn_NIS_
+        cn_NIScod_
+        cn_NIScar_
+        cn_NISdop_
+        cn_NEESp_
+        cn_NEESv_
+        cn_NEESc_
+        cn_NEESa_
 
         % ---- Covariance / R summary
-        cv_Rtrc_  cv_Rmin_  cv_Rmax_  cv_Rmn_  cv_Rnr_
+        cv_Rtrc_
+        cv_Rmin_
+        cv_Rmax_
+        cv_Rmn_
+        cv_Rnr_
 
         % ---- Geometry / Jacobian
-        gm_mRk_  gm_cS_  gm_gRk_  gm_gdop_  gm_pdop_  gm_tdop_
-        gm_pclk_ gm_ajN_ gm_ajRk_ gm_ajCd_
+        gm_mRk_
+        gm_cS_
+        gm_gRk_
+        gm_gdop_
+        gm_pdop_
+        gm_tdop_
+        gm_pclk_
+        gm_ajN_
+        gm_ajRk_
+        gm_ajCd_
 
         % ---- Sigma summary and attitude
-        sg_pSig_  sg_aSig_  sg_aCd_
-        sg_aSep_  sg_aAmb_   % logical, scalar
+        sg_pSig_
+        sg_aSig_
+        sg_aCd_
+        sg_aSep_
+        sg_aAmb_
 
         % ---- Clock diagnostics
-        ck_gauR_  ck_gbR_  ck_gdR_  ck_sRk_  ck_sCd_
-        ck_oRkP_  ck_oRkG_  ck_oCdP_  ck_oCdG_
+        ck_gauR_
+        ck_gbR_
+        ck_gdR_
+        ck_sRk_
+        ck_sCd_
+        ck_oRkP_
+        ck_oRkG_
+        ck_oCdP_
+        ck_oCdG_
 
         % ---- Stage 57
-        s57_pN_  s57_gN_  s57_aN_  s57_pD_  s57_gD_
-        s57_pR_  s57_gR_  s57_aR_  s57_cR_  s57_carR_  s57_dR_
+        s57_pN_
+        s57_gN_
+        s57_aN_
+        s57_pD_
+        s57_gD_
+        s57_pR_
+        s57_gR_
+        s57_aR_
+        s57_cR_
+        s57_carR_
+        s57_dR_
 
         % ---- Differential attitude
-        da_act_   da_nR_   da_rR_
-        da_aBl_   da_lBl_  da_rcBl_ da_rjR_
+        da_act_
+        da_nR_
+        da_rR_
+        da_aBl_
+        da_lBl_
+        da_rcBl_
+        da_rjR_
 
         % ---- Slip / ZWD / tx bias / light time
-        sl_nSl_   sl_jmp_
-        zw_nZwd_  zw_est_
-        tx_gR_    tx_gRes_ tx_nSt_
-        lt_mn_    lt_mx_
+        sl_nSl_
+        sl_jmp_
+        zw_nZwd_
+        zw_est_
+        tx_gR_
+        tx_gRes_
+        tx_nSt_
+        lt_mn_
+        lt_mx_
 
         % ---- Doppler info
-        di_sagR_  di_mRot_  di_xRot_
-        di_pCovA_ di_pCovB_ di_pCovS_ di_pCovP_
+        di_sagR_
+        di_mRot_
+        di_xRot_
+        di_pCovA_
+        di_pCovB_
+        di_pCovS_
+        di_pCovP_
 
         % ---- Per-source error RMS
-        ps_cT_  ps_tT_  ps_iT_  ps_hT_  ps_mT_
-        ps_cM_  ps_tM_  ps_iM_  ps_hM_  ps_mM_
+        ps_cT_
+        ps_tT_
+        ps_iT_
+        ps_hT_
+        ps_mT_
+        ps_cM_
+        ps_tM_
+        ps_iM_
+        ps_hM_
+        ps_mM_
 
         % ---- Effect contributions (struct of [N x 1])
         eff_
@@ -643,8 +703,9 @@ classdef SimulationDataStore < handle
                 entry.towerClockTruth_m = []; entry.towerClockModel_m = [];
                 entry.towerClockCorrectionError_m = [];
                 entry.meanLightTime_s = 0; entry.maxLightTime_s = 0;
-                for j_ = 1:numel({'code','trop','iono','hwDelay','mp'})
-                    lbl_ = {'code','trop','iono','hwDelay','mp'}{j_};
+                srcLabels_ = {'code','trop','iono','hwDelay','mp'};
+                for j_ = 1:numel(srcLabels_)
+                    lbl_ = srcLabels_{j_};
                     entry.perSourceTruthRMS.(lbl_) = 0;
                     entry.perSourceModelRMS.(lbl_) = 0;
                 end
