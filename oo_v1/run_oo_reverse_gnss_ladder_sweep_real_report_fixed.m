@@ -37,7 +37,7 @@ addpath(thisDir);
 set(0, 'DefaultFigureVisible', 'off');
 
 %% ---- Control -----------------------------------------------------------
-runOnly      = [1, 33, 60]; % empty = all 60 cases; [1,33,60] for quick check
+runOnly      = []; % empty = all 60 cases; [1,33,60] for quick check
 duration_s   = 3600;        % all cases run for exactly 3600 s
 
 %% ---- Phase A error family names ----------------------------------------
