@@ -26,14 +26,6 @@ classdef ReportRunner
             % runSingle  Finalize cfg, run simulation, optionally write report.
 
             % ---- Resolve output paths -----------------------------------
-            baseDir = fullfile(fileparts(mfilename('fullpath')), '..', 'output');
-            if isfield(cfg,'report') && isfield(cfg.report,'baseOutputDir')
-                baseDir = cfg.report.baseOutputDir;
-            end
-            prefix = 'Report-';
-            if isfield(cfg,'report') && isfield(cfg.report,'dateFolderPrefix')
-                prefix = cfg.report.dateFolderPrefix;
-            end
             version = '1.00';
             if isfield(cfg,'report') && isfield(cfg.report,'version')
                 version = cfg.report.version;
@@ -51,9 +43,31 @@ classdef ReportRunner
                 writeMat = cfg.report.writeMat;
             end
 
-            reportFolder = fullfile(baseDir, [prefix datestr(now,'yyyymmdd')]);
-            pdfPath = fullfile(reportFolder, sprintf('report-v%s.pdf', version));
-            matPath = fullfile(reportFolder, sprintf('report-v%s.mat', version));
+            % cfg.report.reportFolder bypasses the date-stamped subfolder.
+            reportFolder = '';
+            try; reportFolder = cfg.report.reportFolder; catch; end
+            if isempty(reportFolder)
+                baseDir = fullfile(fileparts(mfilename('fullpath')), '..', 'output');
+                if isfield(cfg,'report') && isfield(cfg.report,'baseOutputDir')
+                    baseDir = cfg.report.baseOutputDir;
+                end
+                prefix = 'Report-';
+                if isfield(cfg,'report') && isfield(cfg.report,'dateFolderPrefix')
+                    prefix = cfg.report.dateFolderPrefix;
+                end
+                reportFolder = fullfile(baseDir, [prefix datestr(now,'yyyymmdd')]); %#ok<TNOW1,DATST>
+            end
+
+            % cfg.report.stem overrides the default versioned file names.
+            pdfStem = '';
+            try; pdfStem = cfg.report.stem; catch; end
+            if ~isempty(pdfStem)
+                pdfPath = fullfile(reportFolder, [pdfStem '.pdf']);
+                matPath = fullfile(reportFolder, [pdfStem '.mat']);
+            else
+                pdfPath = fullfile(reportFolder, sprintf('report-v%s.pdf', version));
+                matPath = fullfile(reportFolder, sprintf('report-v%s.mat', version));
+            end
 
             fprintf('=== ReportRunner: starting ===\n');
             fprintf('  Version : %s\n', version);
@@ -877,7 +891,7 @@ classdef ReportRunner
             summary.meanLightTime_s = 0;
             summary.maxLightTime_s = 0;
             try
-                [ltMn80_, ltMx80_] = diag.getMeanMaxLightTime_s();
+                [ltMn80_, ltMx80_] = simData.getMeanMaxLightTime_s();
                 if ~isempty(ltMn80_) && any(isfinite(ltMn80_))
                     summary.meanLightTime_s = mean(ltMn80_(isfinite(ltMn80_)));
                     summary.maxLightTime_s  = max(ltMx80_(isfinite(ltMx80_)));
@@ -885,7 +899,7 @@ classdef ReportRunner
             catch; end
             summary.diffAttSchemaStatus = 'notEvaluated';
             try
-                if any(diag.getDiffAttActive())
+                if any(simData.getDiffAttActive())
                     summary.diffAttSchemaStatus = 'complete';
                 end
             catch; end
@@ -1059,7 +1073,7 @@ classdef ReportRunner
             summary.covarianceCompletenessStatus     = 'stage84productClockCovarianceHardenedV2';
             % Populate from dopplerInfo in diag log (array or legacy) if available
             try
-                di83_ = diag.getDopplerInfo();
+                di83_ = simData.getDopplerInfo();
                 if ~isempty(di83_) && isstruct(di83_)
                     if isfield(di83_,'sagnacRateMax_mps')
                         snr83_ = di83_.sagnacRateMax_mps; snr83_ = snr83_(isfinite(snr83_));
@@ -1211,7 +1225,7 @@ classdef ReportRunner
                     logical(cfg.carrierSlip.syntheticSlipInjection.enable); catch; end
                 summary.nDiffAttBaselineResets = 0;  % DiffAtt slip detection disabled per Stage 69
                 nda73_ = NaN;
-                try; nda73_ = double(diag.getDiffAttActiveBaselines()); catch; end
+                try; nda73_ = double(simData.getDiffAttActiveBaselines()); catch; end
                 summary.nDiffAttBaselinesActiveFinal = nda73_;
                 summary.nAmbiguityResets = summary.ambiguityResetCount;
                 if isfield(summary,'nConfirmedCarrierSlips') && ...
@@ -1493,7 +1507,7 @@ classdef ReportRunner
                 texFigs = gobjects(0);
                 if strcmp(reportStyle,'latex')
                     [texFigs, texPath2] = revgnss.LatexReportBuilder.build( ...
-                        diag, sim.asset, sim.towers, cfg, summary);
+                        simData, sim.asset, sim.towers, cfg, summary);
                 end
                 texFigs = texFigs(isgraphics(texFigs));
 
@@ -1530,14 +1544,14 @@ classdef ReportRunner
             % Stage 70/75/76 summary fields populated before PDF generation (above).
 
             % ---- Diagnostics storage summary ----------------------------
-            try; diag.printStorageSummary(); catch; end
+            try; simData.printStorageSummary(); catch; end
 
             % ---- MAT: save ----------------------------------------------
-            cs = diag.getContributionSeries();
+            cs = simData.getContributionSeries();
             if writeMat
                 reportVersion   = version;
                 reportTimestamp = datestr(now,'yyyy-mm-dd HH:MM:SS');
-                diagnostics     = diag;
+                diagnostics     = simData;
                 finalStateEstimate = [];
                 finalTruthState    = [];
                 try

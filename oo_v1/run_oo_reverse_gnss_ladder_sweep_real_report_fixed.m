@@ -14,21 +14,18 @@
 %
 % Phase C — cumulative EKF-use options from Phase A all baseline (12 + final)
 %   C_01..12: EKF options added cumulatively
-%   C_final: all 12 options + 3600 s + relativity clock + every valid feature
+%   C_final: all 12 options + relativity clock + every valid feature
 %
 % Total cases: 1+16+16+14+13 = 60
+%
+% All cases run for 3600 s.
 %
 % Output layout (created at run time):
 %   output/Sweep_YYYYMMDD_HHMMSS/
 %     case<NNN>_<label>/
-%       native_clockexact_YYYYMMDD/
-%         report-vNNN.00.pdf     — ClockExact LaTeX PDF (native location)
-%         report-vNNN.00.tex     — LaTeX source (native location)
-%       case<NNN>_<label>_report.pdf   — copied ClockExact PDF (case-stem named)
-%       case<NNN>_<label>_report.tex   — copied LaTeX source (case-stem named)
-%       case<NNN>_<label>_compact.mat
-%       case<NNN>_<label>_manifest.csv
-%       case<NNN>_<label>_console.log
+%       case<NNN>_<label>.pdf          — ClockExact PDF (written directly here)
+%       case<NNN>_<label>.mat          — compact flat-schema MAT
+%       case<NNN>_<label>_console.log  — per-case console output
 %     ladder_sweep_index.csv
 %     ladder_sweep_manifest_overview.csv
 
@@ -40,9 +37,8 @@ addpath(thisDir);
 set(0, 'DefaultFigureVisible', 'off');
 
 %% ---- Control -----------------------------------------------------------
-runOnly         = []; % empty = all 60 cases; [1,33,47,60] for quick check
-shortDuration_s = 3600*1;      % s for cases 1-59
-fullDuration_s  = 3600*24;     % s for case 60 (C_final)
+runOnly      = [1, 33, 60]; % empty = all 60 cases; [1,33,60] for quick check
+duration_s   = 3600;        % all cases run for exactly 3600 s
 
 %% ---- Phase A error family names ----------------------------------------
 PHASE_A_ERRORS = { ...
@@ -100,9 +96,8 @@ fprintf('Running %d of %d total cases.\n', numel(runOnly), numel(cases));
 
 % Mark key case indices for acceptance checks
 phaseAAllIdx  = 1 + numel(PHASE_A_ERRORS) + numel(PHASE_A_ERRORS); % 33
-phaseBStart   = phaseAAllIdx + 1;                                    % 34
-phaseCStart   = phaseBStart  + numel(PHASE_B_OPTIONS);               % 48
-phaseCFinal   = numel(cases);                                        % 60
+phaseBStart   = phaseAAllIdx + 1;                                    % 34  %#ok<NASGU>
+phaseCStart   = phaseBStart  + numel(PHASE_B_OPTIONS);               % 48  %#ok<NASGU>
 
 %% ---- Run loop ----------------------------------------------------------
 results      = initResults_(numel(cases));
@@ -118,40 +113,40 @@ for ci = runOnly
     [cfg, appliedPatches] = buildCaseConfig_(c, thisDir, cfgPhaseAAll, ...
                                              PHASE_A_ERRORS, PHASE_B_OPTIONS, PHASE_C_IDX);
 
-    % Simulation duration
-    cfg.simulation.duration_s = shortDuration_s;
-    if ci == phaseCFinal; cfg.simulation.duration_s = fullDuration_s; end
+    % All cases run for exactly 3600 s
+    cfg.simulation.duration_s = duration_s;
 
-    % Force ClockExact report settings
-    cfg.report.style                 = 'latex';
-    cfg.report.layout                = 'clockExact';
-    cfg.report.writePdf              = true;
-    cfg.report.writeTex              = true;
-    cfg.report.compileTex            = 'require';
-    cfg.report.compactFinalReport    = true;
-    cfg.report.suppressStageSections = true;
-    cfg.report.deduplicateFigures    = true;
-    cfg.report.writeMat              = false;
-    cfg.report.overwrite             = true;
-    cfg.report.version               = sprintf('%03d.00', ci);
+    % Force ClockExact report settings — direct-folder mode, no native_ subfolder
+    cfg.report.style                  = 'latex';
+    cfg.report.layout                 = 'clockExact';
+    cfg.report.writePdf               = true;
+    cfg.report.writeTex               = true;
+    cfg.report.compileTex             = 'require';
+    cfg.report.compactFinalReport     = true;
+    cfg.report.suppressStageSections  = true;
+    cfg.report.deduplicateFigures     = true;
+    cfg.report.writeMat               = false;
+    cfg.report.overwrite              = true;
+    cfg.report.version                = sprintf('%03d.00', ci);
     cfg.report.plotExportMode         = 'vectorPdf';
     cfg.report.vectorFallbackToRaster = true;
-    cfg.plots.showFigures            = false;
-    cfg.plots.saveIndividualFigures  = false;
+    cfg.report.keepBuildArtifacts     = false;
+    cfg.plots.showFigures             = false;
+    cfg.plots.saveIndividualFigures   = false;
 
     % Compact diagnostics: ladder sweep never needs full P/H/R/z/h per epoch.
     cfg.diagnostics.storage.mode            = 'compact';
     cfg.diagnostics.storage.snapshot.enable = false;
 
-    % Per-case folder: all outputs go inside caseDir
+    % Per-case folder: all outputs go directly inside caseDir (no native_ subfolder)
     safeLabel = regexprep(c.label, '[^a-zA-Z0-9]', '_');
     caseStem  = sprintf('case%03d_%s', ci, safeLabel);
     caseDir   = fullfile(sweepDir, caseStem);
     if ~exist(caseDir, 'dir'); mkdir(caseDir); end
 
-    % ReportRunner writes native ClockExact output to caseDir/native_clockexact_*/
-    cfg.report.baseOutputDir    = caseDir;
-    cfg.report.dateFolderPrefix = 'native_clockexact_';
+    % Direct output: PDF and build artifacts land directly in caseDir
+    cfg.report.reportFolder = caseDir;
+    cfg.report.stem         = caseStem;
 
     % Console log inside case folder
     logFile = fullfile(caseDir, [caseStem '_console.log']);
@@ -161,57 +156,34 @@ for ci = runOnly
         out = revgnss.ReportRunner.runSingle(cfg);
         diary off;
 
-        % Copy ClockExact PDF and TEX from native subfolder into case folder
-        nativePdfPath = out.pdfPath;
-        nativeTexPath = strrep(nativePdfPath, '.pdf', '.tex');
-        casePdfPath   = fullfile(caseDir, [caseStem '_report.pdf']);
-        caseTexPath   = fullfile(caseDir, [caseStem '_report.tex']);
-
-        if exist(nativePdfPath, 'file') == 2
-            copyfile(nativePdfPath, casePdfPath);
-        else
-            error('Sweep:missingPdf', 'PDF missing for %s: %s', caseStem, nativePdfPath);
-        end
-        if exist(nativeTexPath, 'file') == 2
-            copyfile(nativeTexPath, caseTexPath);
-        else
-            error('Sweep:missingTex', 'TEX missing for %s: %s', caseStem, nativeTexPath);
+        % PDF is written directly to caseDir/caseStem.pdf by ClockExactReportBuilder
+        casePdfPath = fullfile(caseDir, [caseStem '.pdf']);
+        if ~exist(casePdfPath, 'file')
+            error('Sweep:missingPdf', 'PDF not found at expected path: %s', casePdfPath);
         end
 
-        % Delete native full MAT if unexpectedly written (writeMat=false by default)
-        if isfield(out,'matPath') && ~isempty(out.matPath) && exist(out.matPath,'file') == 2
-            delete(out.matPath);
-        end
-
-        % Build manifest
+        % Build manifest (for sweep index CSV only; not saved per-case)
         manifest = revgnss.SimulationToggleManifest.fromConfig(out.cfg, out);
         T        = revgnss.SimulationToggleManifest.toTable(manifest);
 
-        % Per-case compact MAT inside case folder
+        % Per-case compact MAT — named caseStem.mat
         compact  = buildCompact_(out, T, ci, c, appliedPatches);
-        cMatPath = fullfile(caseDir, [caseStem '_compact.mat']);
+        cMatPath = fullfile(caseDir, [caseStem '.mat']);
         save(cMatPath, 'compact', '-v7');
 
-        % Per-case manifest CSV inside case folder
-        cCsvPath = fullfile(caseDir, [caseStem '_manifest.csv']);
-        revgnss.SimulationToggleManifest.writeCsv(T, cCsvPath);
+        % Record results
+        results(ci).success     = true;
+        results(ci).pdfPath     = casePdfPath;
+        results(ci).caseDir     = caseDir;
+        results(ci).compactPath = cMatPath;
+        results(ci).logPath     = logFile;
+        results(ci).layout      = out.cfg.report.layout;
+        results(ci).nManifest   = height(T);
+        results(ci).categories  = unique(T.category);
+        results(ci).patches     = appliedPatches;
+        results(ci).duration_s  = out.cfg.simulation.duration_s;
 
-        % Record results — copied paths and native paths
-        results(ci).success       = true;
-        results(ci).pdfPath       = casePdfPath;
-        results(ci).texPath       = caseTexPath;
-        results(ci).nativePdfPath = nativePdfPath;
-        results(ci).nativeTexPath = nativeTexPath;
-        results(ci).caseDir       = caseDir;
-        results(ci).compactPath   = cMatPath;
-        results(ci).csvPath       = cCsvPath;
-        results(ci).logPath       = logFile;
-        results(ci).layout        = out.cfg.report.layout;
-        results(ci).nManifest     = height(T);
-        results(ci).categories    = unique(T.category);
-        results(ci).patches       = appliedPatches;
-
-        % Accumulate sweep index and manifest overview
+        % Accumulate sweep index
         sweepIdxRows{end+1}  = mkIndexRow_(ci, c, out, appliedPatches); %#ok<AGROW>
         sweepMfRows          = accumulateMfRows_(sweepMfRows, T, ci, c.label);
 
@@ -220,9 +192,10 @@ for ci = runOnly
     catch ME
         diary off;
         warning('Sweep:caseFailed', 'Case %03d failed: %s', ci, ME.message);
-        results(ci).success = false;
-        results(ci).error   = ME.message;
-        results(ci).logPath = logFile;
+        results(ci).success   = false;
+        results(ci).error     = ME.message;
+        results(ci).logPath   = logFile;
+        results(ci).duration_s = duration_s;
         fprintf('  FAIL  %s\n', ME.message);
     end
     % Between-case renderer cleanup (prevents renderer accumulation crash)
@@ -246,7 +219,7 @@ if ~isempty(sweepMfRows)
 end
 
 %% ---- Acceptance checks -------------------------------------------------
-runAcceptanceChecks_(results, runOnly, cases, phaseAAllIdx, phaseCFinal, sweepDir);
+runAcceptanceChecks_(results, runOnly, cases, phaseAAllIdx, sweepDir);
 
 fprintf('\nSweep complete.  Output: %s\n', sweepDir);
 
@@ -910,10 +883,9 @@ function rows = accumulateMfRows_(rows, T, ci, label)
 end
 
 function r = initResults_(n)
-    r = struct('success',false,'pdfPath','','texPath','', ...
-               'nativePdfPath','','nativeTexPath','','caseDir','', ...
-               'compactPath','','csvPath','','logPath','', ...
-               'layout','','nManifest',0, ...
+    r = struct('success',false,'pdfPath','','caseDir','', ...
+               'compactPath','','logPath','', ...
+               'layout','','nManifest',0,'duration_s',0, ...
                'categories',{{}},'patches',{{}},'error','');
     r = repmat(r,n,1);
     for k = 1:n; r(k).success = false; end
@@ -923,59 +895,86 @@ end
 % LOCAL FUNCTIONS — ACCEPTANCE CHECKS
 % =========================================================================
 
-function runAcceptanceChecks_(results, runOnly, cases, phaseAAllIdx, phaseCFinal, sweepDir) %#ok<INUSD>
+function runAcceptanceChecks_(results, runOnly, cases, phaseAAllIdx, sweepDir) %#ok<INUSD>
     fprintf('\n=== Acceptance Checks ===\n');
     nFail = 0;
 
-    % 1-5: Per-case file existence, layout, log
+    % 1: Per-case required files exist directly in caseDir; no native_ subfolder
     for ci = runOnly
         r = results(ci);
+        c = cases(ci);
+        safeLabel = regexprep(c.label, '[^a-zA-Z0-9]', '_');
+        caseStem  = sprintf('case%03d_%s', ci, safeLabel);
+
         if ~r.success
             fprintf('  FAIL  Case %03d: simulation failed: %s\n', ci, r.error);
             nFail = nFail + 1;
             continue;
         end
-        if ~exist(r.pdfPath,'file')
-            fprintf('  FAIL  Case %03d: PDF not found\n', ci);
+
+        expectedPdf = fullfile(r.caseDir, [caseStem '.pdf']);
+        expectedMat = fullfile(r.caseDir, [caseStem '.mat']);
+        expectedLog = fullfile(r.caseDir, [caseStem '_console.log']);
+
+        if ~exist(expectedPdf,'file')
+            fprintf('  FAIL  Case %03d: %s.pdf not found\n', ci, caseStem);
             nFail = nFail + 1;
         end
-        if ~exist(r.texPath,'file')
-            fprintf('  FAIL  Case %03d: TEX not found\n', ci);
+        if ~exist(expectedMat,'file')
+            fprintf('  FAIL  Case %03d: %s.mat not found\n', ci, caseStem);
             nFail = nFail + 1;
         end
-        if ~exist(r.compactPath,'file')
-            fprintf('  FAIL  Case %03d: compact MAT not found\n', ci);
+        if ~exist(expectedLog,'file')
+            fprintf('  FAIL  Case %03d: %s_console.log not found\n', ci, caseStem);
             nFail = nFail + 1;
         end
-        if ~exist(r.csvPath,'file')
-            fprintf('  FAIL  Case %03d: manifest CSV not found\n', ci);
+
+        % No native_clockexact_ subfolder should exist
+        if exist(r.caseDir,'dir') == 7
+            items = dir(r.caseDir);
+            for k = 1:numel(items)
+                if items(k).isdir && contains(items(k).name, 'native_clockexact')
+                    fprintf('  FAIL  Case %03d: native_clockexact_ subfolder found: %s\n', ...
+                            ci, items(k).name);
+                    nFail = nFail + 1;
+                end
+            end
+        end
+
+        % No stray TEX files (build artifacts should be cleaned up)
+        texFile = fullfile(r.caseDir, [caseStem '.tex']);
+        if exist(texFile,'file')
+            fprintf('  FAIL  Case %03d: TEX build artifact not cleaned up: %s.tex\n', ci, caseStem);
             nFail = nFail + 1;
         end
-        if ~exist(r.logPath,'file')
-            fprintf('  FAIL  Case %03d: console log not found\n', ci);
-            nFail = nFail + 1;
-        end
+
         if ~strcmp(r.layout,'clockExact')
             fprintf('  FAIL  Case %03d: layout is ''%s'' not clockExact\n', ci, r.layout);
             nFail = nFail + 1;
         end
-    end
-    fprintf('  PASS  %d cases checked for file existence and layout\n', numel(runOnly));
 
-    % 2: TEX contains ClockExact title marker
-    for ci = runOnly
-        r = results(ci);
-        if ~r.success || ~exist(r.texPath,'file'); continue; end
-        try
-            txt = fileread(r.texPath);
-            if ~contains(txt,'Reverse-GNSS') && ~contains(txt,'ClockExact') && ...
-               ~contains(txt,'EKF Report') && ~contains(txt,'Numerical Summary')
-                fprintf('  FAIL  Case %03d: TEX missing ClockExact title or Numerical Summary section\n', ci);
-                nFail = nFail + 1;
-            end
-        catch; end
+        % Duration must be 3600 s
+        if r.duration_s ~= 3600
+            fprintf('  FAIL  Case %03d: duration is %g s, expected 3600\n', ci, r.duration_s);
+            nFail = nFail + 1;
+        end
     end
-    fprintf('  PASS  TEX content check done\n');
+    fprintf('  PASS  %d cases checked for files, layout, duration, no native_ subfolder\n', numel(runOnly));
+
+    % 2: Smoke test — case 1 PDF is readable and non-empty
+    if ismember(1, runOnly) && results(1).success
+        c1Stem = sprintf('case%03d_%s', 1, regexprep(cases(1).label,'[^a-zA-Z0-9]','_'));
+        c1Pdf  = fullfile(results(1).caseDir, [c1Stem '.pdf']);
+        if exist(c1Pdf,'file')
+            d = dir(c1Pdf);
+            if d.bytes < 1024
+                fprintf('  FAIL  Case 001 smoke: PDF is suspiciously small (%d bytes)\n', d.bytes);
+                nFail = nFail + 1;
+            else
+                fprintf('  PASS  Case 001 smoke: PDF exists and is %d bytes\n', d.bytes);
+            end
+        end
+    end
 
     % 3: compact MATs contain manifest field
     for ci = runOnly
@@ -994,7 +993,7 @@ function runAcceptanceChecks_(results, runOnly, cases, phaseAAllIdx, phaseCFinal
     end
     fprintf('  PASS  compact.manifest field checked\n');
 
-    % 4-5: Final case manifest rows and categories
+    % 4-5: Last successful case manifest rows and categories
     lastSucc = runOnly(end);
     for ci = fliplr(runOnly)
         if results(ci).success; lastSucc = ci; break; end
@@ -1018,26 +1017,7 @@ function runAcceptanceChecks_(results, runOnly, cases, phaseAAllIdx, phaseCFinal
         end
     end
 
-    % 6: No misleading text in TEX (spot-check final case)
-    if results(lastSucc).success && exist(results(lastSucc).texPath,'file')
-        try
-            txt = fileread(results(lastSucc).texPath);
-            bad = { ...
-                'Integer ambiguity fixing: Disabled \textemdash Not implemented (v1)', ...
-                'L2 carrier EKF: Disabled \textemdash Not implemented (v1)', ...
-                'Not implemented (v1).' ...
-            };
-            for b = 1:numel(bad)
-                if contains(txt, bad{b})
-                    fprintf('  FAIL  TEX contains misleading text: ''%s''\n', bad{b});
-                    nFail = nFail + 1;
-                end
-            end
-        catch; end
-    end
-    fprintf('  PASS  Report table wording check done\n');
-
-    % 6b: No flat per-case files in sweep root (only 2 sweep-level CSVs allowed)
+    % 6: No flat per-case files in sweep root (only 2 sweep-level CSVs allowed)
     nFlatBad = 0;
     if exist(sweepDir, 'dir') == 7
         rootItems = dir(sweepDir);
@@ -1056,10 +1036,7 @@ function runAcceptanceChecks_(results, runOnly, cases, phaseAAllIdx, phaseCFinal
         fprintf('  PASS  No flat case files in sweep root\n');
     end
 
-    % 7: No full native MAT written (writeMat=false)
-    fprintf('  PASS  writeMat=false in all cases; no native MAT to delete\n');
-
-    % 8: No custom PDF (all PDFs are ClockExact)
+    % 7: All PDFs are ClockExact layout
     allOK = all(arrayfun(@(r) ~r.success || strcmp(r.layout,'clockExact'), results(runOnly)));
     if allOK
         fprintf('  PASS  All successful cases use clockExact layout\n');

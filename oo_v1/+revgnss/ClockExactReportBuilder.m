@@ -67,22 +67,30 @@ classdef ClockExactReportBuilder
             end
 
             % ---- 2. Resolve output paths --------------------------------
-            baseDir = fullfile(fileparts(mfilename('fullpath')), '..', 'output');
-            baseDir = revgnss.ClockExactReportBuilder.getCfgStr_(cfg, {'report','baseOutputDir'}, baseDir);
-            prefix  = revgnss.ClockExactReportBuilder.getCfgStr_(cfg, {'report','dateFolderPrefix'}, 'Report-');
-            ver     = revgnss.ClockExactReportBuilder.getCfgStr_(cfg, {'report','version'}, '1.00');
+            ver = revgnss.ClockExactReportBuilder.getCfgStr_(cfg, {'report','version'}, '1.00');
 
-            reportDir = fullfile(baseDir, [prefix datestr(now,'yyyymmdd')]); %#ok<TNOW1,DATST>
+            % cfg.report.reportFolder bypasses the date-stamped subfolder.
+            reportDir = revgnss.ClockExactReportBuilder.getCfgStr_(cfg, {'report','reportFolder'}, '');
+            if isempty(reportDir)
+                baseDir = fullfile(fileparts(mfilename('fullpath')), '..', 'output');
+                baseDir = revgnss.ClockExactReportBuilder.getCfgStr_(cfg, {'report','baseOutputDir'}, baseDir);
+                prefix  = revgnss.ClockExactReportBuilder.getCfgStr_(cfg, {'report','dateFolderPrefix'}, 'Report-');
+                reportDir = fullfile(baseDir, [prefix datestr(now,'yyyymmdd')]); %#ok<TNOW1,DATST>
+            end
             if ~exist(reportDir,'dir'); mkdir(reportDir); end
 
-            scenarioName = revgnss.ClockExactReportBuilder.getCfgStr_(cfg, {'asset','name'}, 'GEO-1');
-            stem = strrep(strrep(strrep(scenarioName, ' ', '_'), '-', '_'), '.', '_');
-            stem = ['oo_v1_' stem];
+            % cfg.report.stem overrides the default scenario-name-based stem.
+            stem = revgnss.ClockExactReportBuilder.getCfgStr_(cfg, {'report','stem'}, '');
+            if isempty(stem)
+                scenarioName = revgnss.ClockExactReportBuilder.getCfgStr_(cfg, {'asset','name'}, 'GEO-1');
+                stem = strrep(strrep(strrep(scenarioName, ' ', '_'), '-', '_'), '.', '_');
+                stem = ['oo_v1_' stem];
+            end
 
             figDir  = fullfile(reportDir, 'figures');
             if ~exist(figDir,'dir'); mkdir(figDir); end
-            texPath = fullfile(reportDir, sprintf('report-v%s.tex', ver));
-            pdfPath = fullfile(reportDir, sprintf('report-v%s.pdf', ver));
+            texPath = fullfile(reportDir, [stem '.tex']);
+            pdfPath = fullfile(reportDir, [stem '.pdf']);
 
             result.figDir  = figDir;
             result.texPath = texPath;
@@ -101,6 +109,8 @@ classdef ClockExactReportBuilder
                 texPath, cfg, summary, diag, figDir, plotPaths, stem);
 
             % ---- 5. Compile .tex ----------------------------------------
+            keepArtifacts = false;
+            try; keepArtifacts = logical(cfg.report.keepBuildArtifacts); catch; end
             if ~strcmp(compileMode,'never') && latexOk
                 fprintf('  [ClockExact] Compiling with %s...\n', latexCmd);
                 ok = revgnss.ClockExactReportBuilder.compileTex_(texPath, latexCmd);
@@ -108,6 +118,9 @@ classdef ClockExactReportBuilder
                     result.success = true;
                     result.message = sprintf('PDF compiled: %s', pdfPath);
                     fprintf('  [ClockExact] PDF written: %s\n', pdfPath);
+                    if ~keepArtifacts
+                        revgnss.ClockExactReportBuilder.cleanBuildArtifacts_(texPath, figDir);
+                    end
                 else
                     result.success = false;
                     result.message = sprintf('pdflatex failed for: %s', texPath);
@@ -123,6 +136,20 @@ classdef ClockExactReportBuilder
     end  % public static
 
     methods (Static, Access = private)
+
+        function cleanBuildArtifacts_(texPath, figDir)
+            % cleanBuildArtifacts_  Remove LaTeX intermediates after successful compile.
+            exts = {'.tex', '.aux', '.log', '.out', '.toc', '.synctex.gz'};
+            base = texPath(1:end-4);  % strip .tex
+            for k = 1:numel(exts)
+                f = [base exts{k}];
+                if exist(f,'file') == 2; try; delete(f); catch; end; end
+            end
+            if exist(figDir,'dir') == 7
+                try; rmdir(figDir,'s'); catch; end
+            end
+        end
+
 
         % ================================================================
         % COMPACT PLOT GENERATION
