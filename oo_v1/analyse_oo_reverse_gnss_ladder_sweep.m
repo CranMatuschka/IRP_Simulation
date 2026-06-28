@@ -98,12 +98,21 @@ end
 
 function files = findCompactFiles_(sweepDir)
 files   = {};
-listing = dir(fullfile(sweepDir, '**', '*_compact.mat'));
+listing = dir(fullfile(sweepDir, '**', '*.mat'));
 for k = 1:numel(listing)
     p   = fullfile(listing(k).folder, listing(k).name);
     rel = strrep(p, sweepDir, '');
     parts = strsplit(rel, filesep);
-    if any(strcmpi(parts, 'analysis')); continue; end
+    skip = false;
+    for pi = 1:numel(parts)
+        if strcmpi(parts{pi}, 'analysis'); skip = true; break; end
+        if ~isempty(parts{pi}) && startsWith(parts{pi}, '.'); skip = true; break; end
+        if strncmpi(parts{pi}, 'native_clockexact_', 18); skip = true; break; end
+        if strncmpi(parts{pi}, 'figures', 7) && numel(parts{pi})<=8; skip = true; break; end
+    end
+    if skip; continue; end
+    w = whos('-file', p);
+    if ~any(strcmp({w.name}, 'compact')); continue; end
     files{end+1} = p; %#ok<AGROW>
 end
 end
@@ -135,9 +144,11 @@ for k = 1:numel(cases)
     cmp = cases(k).compact;
     cases(k).caseName   = safeGet_(cmp, {'caseName'},  sprintf('case_%03d', k));
     cases(k).caseIndex  = safeGet_(cmp, {'caseIndex'}, k);
-    cases(k).ok         = safeGet_(cmp, {'ok'},        false);
+    cases(k).ok         = safeGet_(cmp, {'ok'}, cases(k).loadOk);
     cases(k).duration_s = safeGet_(cmp, {'duration_s'}, NaN);
-    cases(k).appliedPatches = safeGet_(cmp, {'meta','appliedPatches'}, {});
+    ap = safeGet_(cmp, {'appliedPatches'}, []);
+    if isempty(ap); ap = safeGet_(cmp, {'meta','appliedPatches'}, {}); end
+    cases(k).appliedPatches = ap;
 
     name = lower(char(cases(k).caseName));
     if startsWith(name, 'a_00')
@@ -431,7 +442,9 @@ end
 function grp = buildImpactGroup_(mT, targetIdxs, refIdx, names, metKeys)
 grp = struct([]);
 if isempty(targetIdxs) || isempty(refIdx); return; end
+sArr = cell(1, numel(targetIdxs));
 for ki = 1:numel(targetIdxs)
+    s = struct();
     ti = targetIdxs(ki);
     s.caseIndex = mT(ti).caseIndex;
     s.caseName  = mT(ti).caseName;
@@ -444,15 +457,18 @@ for ki = 1:numel(targetIdxs)
     s.dClkRms  = s.d_clkRms_m;
     s.dAttRms  = s.d_attRms_deg;
     s.combinedScore = NaN;
-    grp(ki) = s;
+    sArr{ki} = s;
 end
+if ~isempty(sArr); grp = [sArr{:}]; end
 grp = normalizeScores_(grp);
 end
 
 function grp = buildIncrementalGroup_(mT, seqIdxs, baseIdx, names, metKeys)
 grp = struct([]);
-if isempty(seqIdxs); return; end
+if isempty(seqIdxs) || isempty(baseIdx); return; end
+sArr = cell(1, numel(seqIdxs));
 for ki = 1:numel(seqIdxs)
+    s = struct();
     ti  = seqIdxs(ki);
     rfi = baseIdx; if ki > 1; rfi = seqIdxs(ki-1); end
     s.caseIndex = mT(ti).caseIndex;
@@ -467,8 +483,9 @@ for ki = 1:numel(seqIdxs)
     s.dClkRms = s.d_clkRms_m;
     s.dAttRms = s.d_attRms_deg;
     s.combinedScore = NaN;
-    grp(ki) = s;
+    sArr{ki} = s;
 end
+if ~isempty(sArr); grp = [sArr{:}]; end
 grp = normalizeScores_(grp);
 end
 
@@ -793,7 +810,7 @@ for k = 1:numel(vals)
     bar(ax, k, vals(k), 'FaceColor', phCol(g,:), 'EdgeColor','none');
 end
 hold(ax,'off');
-xlabel(ax,'Case'); ylabel(ax,ylbl); grid(ax,'on','minor');
+xlabel(ax,'Case'); ylabel(ax,ylbl); grid(ax,'on');
 end
 
 function plotImpactBars5_(plotDir, grp, n10, n11, n12, n13, n14, doFallback)
@@ -1044,7 +1061,7 @@ fprintf(fid,'\\section{Global Metric Summary}\n');
 fprintf(fid,'Colour coding: blue=baseline, orange=A\\_iso, dark-red=A\\_all, green=B\\_iso, blue/purple=C phases.\n\n');
 texFig_(fid, plotDir,'01_final_metrics_by_case.pdf','Final metrics by case.','01_final',0.9);
 texFig_(fid, plotDir,'02_rms_metrics_by_case.pdf',  'RMS metrics by case.',  '02_rms',  0.9);
-texFig_(fid, plotDir,'03_steady_state_metrics_by_case.pdf','Steady-state (last 10\\%) RMS.','03_ss',0.9);
+texFig_(fid, plotDir,'03_steady_state_metrics_by_case.pdf','Steady-state (last 10%) RMS.','03_ss',0.9);
 texFig_(fid, plotDir,'04_state_dimension_by_case.pdf','EKF state dimension.','04_nd',0.9);
 
 % Key comparison table
@@ -1253,7 +1270,7 @@ if ~exist(p,'file')
 end
 fprintf(fid,'\\begin{figure}[H]\\centering\n');
 fprintf(fid,'\\includegraphics[width=%.2f\\textwidth]{plots/%s}\n', scale, fname);
-fprintf(fid,'\\caption{%s}\\label{fig:%s}\n\\end{figure}\n\n', caption, label);
+fprintf(fid,'\\caption{%s}\\label{fig:%s}\n\\end{figure}\n\n', escTex_(caption), label);
 end
 
 function texTopN_(fid, grp, fld, caption, label)
@@ -1261,7 +1278,7 @@ if isempty(grp) || ~isstruct(grp) || ~isfield(grp(1),fld)
     fprintf(fid,'\\textit{[No data for %s.]}\n\n', escTex_(caption)); return;
 end
 vals = [grp.(fld)]; [~,ord] = sort(abs(vals),'descend'); N = min(10,numel(ord));
-fprintf(fid,'\\begin{table}[H]\\centering\\small\\caption{%s.}\n', caption);
+fprintf(fid,'\\begin{table}[H]\\centering\\small\\caption{%s.}\n', escTex_(caption));
 fprintf(fid,'\\begin{tabular}{rlr}\\toprule Rank & Case & $\\Delta$\\\\\\midrule\n');
 for ki = 1:N
     k=ord(ki);
@@ -1274,8 +1291,9 @@ function texStatTable_(fid, mT, flds, caption, keyIdxs, label)
 valid = keyIdxs(~cellfun(@isempty,num2cell(keyIdxs)));
 valid = valid(valid>0 & valid<=numel(mT));
 if isempty(valid); return; end
-hdr = strjoin(flds,' & ');
-fprintf(fid,'\\begin{table}[H]\\centering\\small\\caption{%s.}\n', caption);
+escapedFlds = cellfun(@(f) strrep(f,'_','\_'), flds, 'UniformOutput', false);
+hdr = strjoin(escapedFlds,' & ');
+fprintf(fid,'\\begin{table}[H]\\centering\\small\\caption{%s.}\n', escTex_(caption));
 fprintf(fid,'\\begin{tabular}{l%s}\\toprule Case & %s\\\\\\midrule\n', repmat('r',1,numel(flds)), hdr);
 for k = valid
     fprintf(fid,'\\texttt{%s}', escTex_(char(mT(k).caseName)));
@@ -1287,9 +1305,10 @@ end
 
 function s = escTex_(s)
 s = char(s);
-s = strrep(s,'\','\\'); s = strrep(s,'_','\\_'); s = strrep(s,'%','\\%');
-s = strrep(s,'&','\\&'); s = strrep(s,'#','\\#'); s = strrep(s,'$','\\$');
-s = strrep(s,'^','\\^{}'); s = strrep(s,'{','\\{'); s = strrep(s,'}','\\}');
+s = strrep(s,'\','\textbackslash{}');
+s = strrep(s,'_','\_'); s = strrep(s,'%','\%');
+s = strrep(s,'&','\&'); s = strrep(s,'#','\#'); s = strrep(s,'$','\$');
+s = strrep(s,'^','\^{}'); s = strrep(s,'{','\{'); s = strrep(s,'}','\}');
 end
 
 function v = nanD_(v)
@@ -1297,10 +1316,23 @@ if ~isfinite(v); v = 0; end
 end
 
 function compilePdfLatex_(texFile)
+latexCmd = '';
 [~, ok] = system('which pdflatex 2>/dev/null');
-if ok ~= 0; warning('analyse:noPdfLatex','pdflatex not found; .tex written only.'); return; end
+if ok == 0
+    [~,latexCmd] = system('which pdflatex 2>/dev/null');
+    latexCmd = strtrim(latexCmd);
+end
+if isempty(latexCmd)
+    knownPaths = {'/Library/TeX/texbin/pdflatex', '/usr/local/bin/pdflatex', '/opt/homebrew/bin/pdflatex'};
+    for kp = 1:numel(knownPaths)
+        if exist(knownPaths{kp}, 'file') == 2; latexCmd = knownPaths{kp}; break; end
+    end
+end
+if isempty(latexCmd)
+    warning('analyse:noPdfLatex','pdflatex not found; .tex written only.'); return;
+end
 texDir = fileparts(texFile); [~,nm,~] = fileparts(texFile);
-cmd = sprintf('cd "%s" && pdflatex -interaction=nonstopmode "%s.tex" > /dev/null 2>&1', texDir, nm);
+cmd = sprintf('cd "%s" && "%s" -interaction=nonstopmode "%s.tex" > /dev/null 2>&1', texDir, latexCmd, nm);
 system(cmd); system(cmd);
 pdf = fullfile(texDir,[nm '.pdf']);
 if exist(pdf,'file'); fprintf('      PDF: %s\n',pdf);
