@@ -2040,8 +2040,18 @@ classdef ReportRunner
             summary.islTwoWayRangeUsedInEkf = revgnss.ReportRunner.safeCfgBool_(cfg, {'measurements','isl','twoWay','range','useInEKF'}, false);
             summary.islTwoWayDopplerUsedInEkf = revgnss.ReportRunner.safeCfgBool_(cfg, {'measurements','isl','twoWay','doppler','useInEKF'}, false);
             summary.islTiming = revgnss.ReportRunner.emptyIslTimingSummary_();
-            summary.observableStack = revgnss.ObservableStackDescriptor.compact([]);
-            % observableStack and islClockTransfer not stored in flat array schema v3
+            % Build observableStack from summary totals already derived from cfg/data above.
+            % The flat schema v3 does not carry a live ObservableStackDescriptor object, so
+            % reconstruct rowsByType from the scalar totals to satisfy validateConsistency.
+            obs_rbt_      = struct('code', summary.totalCodeRows, ...
+                                   'doppler', summary.totalDopplerRows, ...
+                                   'carrier', summary.totalCarrierRows, ...
+                                   'diffCarrierAttitude', 0);
+            obs_stack_    = revgnss.ObservableStackDescriptor.compact([]);
+            obs_stack_.rowsByType = obs_rbt_;
+            obs_stack_.nRows      = summary.totalCodeRows + summary.totalDopplerRows + ...
+                                    summary.totalCarrierRows;
+            summary.observableStack = obs_stack_;
             % Stage 45: compact code IF row fields
             summary.codeIonoFreeRowsRequested = revgnss.ReportRunner.safeCfgBool_( ...
                 cfg, {'measurements','code','ionosphereFreeRows','enable'}, false);

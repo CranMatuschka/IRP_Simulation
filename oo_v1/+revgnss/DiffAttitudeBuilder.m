@@ -265,6 +265,13 @@ classdef DiffAttitudeBuilder
             try; falseFix = cfg.estimator.diffAtt.ambiguityResolution.falseFixClassification; catch; end
             try; diffIono = cfg.estimator.diffAtt.ambiguityResolution.differentialIonosphereInBaselineAr; catch; end
 
+            store = setIfMissing_(store,'integerClassification','notAttempted');
+            store = setIfMissing_(store,'integerFixAttempted',false);
+            store = setIfMissing_(store,'integerFixAccepted',false);
+            store = setIfMissing_(store,'nIntegerFixed',0);
+            store = setIfMissing_(store,'nIntegerRejected',0);
+            store = setIfMissing_(store,'externalRefUsedAsSearchCenter',false);
+            store = setIfMissing_(store,'externalRefUsedForCalibration',true);
             store = setIfMissing_(store,'falseFixClassification',falseFix);
             store = setIfMissing_(store,'phaseBiasStatus',phaseBias);
             store = setIfMissing_(store,'partialFixPolicy',partialPolicy);
