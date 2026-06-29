@@ -37,7 +37,7 @@ addpath(thisDir);
 set(0, 'DefaultFigureVisible', 'off');
 
 %% ---- Control -----------------------------------------------------------
-runOnly      = [1]; % empty = all 60 cases; [1,33,60] for quick check
+runOnly      = [2]; % empty = all 60 cases; [1,33,60] for quick check
 duration_s   = 3600;        % all cases run for exactly 3600 s
 
 %% ---- Phase A error family names ----------------------------------------
@@ -338,19 +338,62 @@ function [cfg, patches] = applyPhaseAError_(cfg, errorName)
     patches = {};
     switch errorName
         case 'zero'
-            cfg.errors.codeNoise.sigma_m     = 0;
-            cfg.asset.clock.bias_s               = 0;
-            cfg.asset.clock.fracFreq             = 0;
+            % Everything zero case.
+        
+            % Measurement noise
+            cfg.errors.codeNoise.sigma_m = 0;
+            cfg.measurement.sigmaFloor_m = 1e-12;   % numerical regularization only
+        
+            % Initial EKF error
+            cfg.estimator.initialError.pos_m          = [0;0;0];
+            cfg.estimator.initialError.vel_mps        = [0;0;0];
+            cfg.estimator.initialError.euler_deg      = [0;0;0];
+            cfg.estimator.initialError.omega_radps    = [0;0;0];
+            cfg.estimator.initialError.clockBias_m    = 0;
+            cfg.estimator.initialError.clockDrift_mps = 0;
+        
+            % Receiver clock
+            cfg.clock.receiver.deterministic = true;
+            cfg.asset.clock.deterministic    = true;
+            cfg.asset.clock.bias_s           = 0;
+            cfg.asset.clock.fracFreq         = 0;
             cfg.asset.clock.driftRate_fracPerSec = 0;
-            
+        
             cfg.asset.clock.noiseCoeffs.h2      = 0;
             cfg.asset.clock.noiseCoeffs.h1      = 0;
             cfg.asset.clock.noiseCoeffs.h0      = 0;
             cfg.asset.clock.noiseCoeffs.hMinus1 = 0;
             cfg.asset.clock.noiseCoeffs.hMinus2 = 0;
-            
-            cfg.estimator.initialError.clockBias_m    = 0;
-            cfg.estimator.initialError.clockDrift_mps = 0;
+        
+            % Tower clocks
+            for kk = 1:numel(cfg.towers)
+                cfg.towers(kk).clock.deterministic = true;
+                cfg.towers(kk).clock.bias_s        = 0;
+                cfg.towers(kk).clock.fracFreq      = 0;
+        
+                if isfield(cfg.towers(kk).clock, 'driftRate_fracPerSec')
+                    cfg.towers(kk).clock.driftRate_fracPerSec = 0;
+                end
+        
+                cfg.towers(kk).clock.noiseCoeffs.h2      = 0;
+                cfg.towers(kk).clock.noiseCoeffs.h1      = 0;
+                cfg.towers(kk).clock.noiseCoeffs.h0      = 0;
+                cfg.towers(kk).clock.noiseCoeffs.hMinus1 = 0;
+                cfg.towers(kk).clock.noiseCoeffs.hMinus2 = 0;
+            end
+        
+            % Process/model noise
+            cfg.estimator.sigma_accel_mps2      = 0;
+            cfg.estimator.sigma_angAccel_radps2 = 0;
+            cfg.estimator.processNoise.modelMismatch.enable = false;
+        
+            % Tiny covariance, not physical error
+            cfg.estimator.P0_pos_m       = 1e-9;
+            cfg.estimator.P0_vel_mps     = 1e-12;
+            cfg.estimator.P0_euler_rad   = 1e-12;
+            cfg.estimator.P0_omega_radps = 1e-12;
+            cfg.estimator.P0_bRx_m       = 1e-9;
+            cfg.estimator.P0_bdotRx_mps  = 1e-12;
         case 'code_noise'
             cfg.errors.codeNoise.sigma_m     = 0.3;
             cfg.measurements.codeNoise.model = 'constant';
