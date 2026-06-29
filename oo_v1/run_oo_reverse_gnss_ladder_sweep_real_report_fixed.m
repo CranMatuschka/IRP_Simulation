@@ -340,13 +340,19 @@ function [cfg, patches] = applyPhaseAError_(cfg, errorName)
         case 'zero'
             % Everything zero case.
         
-            % Measurement noise
+            % Measurement noise: zero all code sigma sources
             cfg.errors.codeNoise.sigma_m = 0;
-            cfg.measurement.sigmaFloor_m = 1e-12;   % numerical regularization only
+            cfg.measurements.codeNoise.model = 'constant';
+            
+            cfg.signals.L1.codeSigma0_m = 0;
+            cfg.signals.L2.codeSigma0_m = 0;
+            
+            % Numerical R floor only
+            cfg.measurement.sigmaFloor_m = 1e-12;
         
             % Initial EKF error
-            cfg.estimator.initialError.pos_m          = [0;0;0];
-            cfg.estimator.initialError.vel_mps        = [0;0;0];
+            cfg.estimator.initialError.pos_m          = [1000;0;0];
+            cfg.estimator.initialError.vel_mps        = [0.5;0;0];
             cfg.estimator.initialError.euler_deg      = [0;0;0];
             cfg.estimator.initialError.omega_radps    = [0;0;0];
             cfg.estimator.initialError.clockBias_m    = 0;
@@ -388,12 +394,12 @@ function [cfg, patches] = applyPhaseAError_(cfg, errorName)
             cfg.estimator.processNoise.modelMismatch.enable = false;
         
             % Tiny covariance, not physical error
-            cfg.estimator.P0_pos_m       = 1e-9;
-            cfg.estimator.P0_vel_mps     = 1e-12;
-            cfg.estimator.P0_euler_rad   = 1e-12;
-            cfg.estimator.P0_omega_radps = 1e-12;
-            cfg.estimator.P0_bRx_m       = 1e-9;
-            cfg.estimator.P0_bdotRx_mps  = 1e-12;
+            % cfg.estimator.P0_pos_m       = 1e-9;
+            % cfg.estimator.P0_vel_mps     = 1e-12;
+            % cfg.estimator.P0_euler_rad   = 1e-12;
+            % cfg.estimator.P0_omega_radps = 1e-12;
+            % cfg.estimator.P0_bRx_m       = 1e-9;
+            % cfg.estimator.P0_bdotRx_mps  = 1e-12;
         case 'code_noise'
             cfg.errors.codeNoise.sigma_m     = 0.3;
             cfg.measurements.codeNoise.model = 'constant';

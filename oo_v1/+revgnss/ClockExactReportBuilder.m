@@ -228,26 +228,61 @@ classdef ClockExactReportBuilder
 
         % ................................................................
         function fig = plotSignalZoom_(diag, t, signal, zoomFrac)
-            % plotSignalZoom_  Plot last zoomFrac of a time series (position, clock, drift).
             fig = revgnss.ClockExactReportBuilder.makeCompactFig_('');
             ax  = gca(fig);
+        
             try
-                switch signal
-                    case 'posErr';   data = diag.getPositionErrors();     yLbl = 'Error [m]';
-                    case 'clkErr';   data = diag.getClockBiasErrors()*1e3; yLbl = 'Clk err [mm]';
-                    case 'clkDrift'; data = diag.getClockDriftErrors();   yLbl = 'Drift [m/s]';
-                    otherwise;       data = [];                            yLbl = '';
-                end
-                if ~isempty(t) && ~isempty(data)
-                    n  = numel(t);
-                    i0 = max(1, round(n * (1-zoomFrac)));
-                    plot(ax, t(i0:end), data(i0:end), 'b-', 'LineWidth', 0.8);
-                    xlabel(ax, 'Time [s]', 'FontSize', 7);
-                    ylabel(ax, yLbl, 'FontSize', 7);
-                    grid(ax, 'on');
+                c0 = revgnss.Constants.SPEED_OF_LIGHT_MPS;
+                ppm = 1e6;
+        
+                if isempty(t)
+                    revgnss.ClockExactReportBuilder.noDataAxes_(ax);
                     return;
                 end
-            catch; end
+        
+                n  = numel(t);
+                i0 = max(1, round(n * (1 - zoomFrac)));
+        
+                switch signal
+                    case 'posErr'
+                        ev = diag.getPositionErrorVecs();   % [3 x N]
+                        if ~isempty(ev) && size(ev,2) == n
+                            hold(ax,'on');
+                            plot(ax, t(i0:end), ev(1,i0:end), 'r-', 'LineWidth',0.8, 'DisplayName','X');
+                            plot(ax, t(i0:end), ev(2,i0:end), 'g-', 'LineWidth',0.8, 'DisplayName','Y');
+                            plot(ax, t(i0:end), ev(3,i0:end), 'b-', 'LineWidth',0.8, 'DisplayName','Z');
+                            plot(ax, t(i0:end), sqrt(sum(ev(:,i0:end).^2,1)), ...
+                                'k-', 'LineWidth',1.0, 'DisplayName','3D');
+                            legend(ax,'show','Location','northeast','FontSize',5);
+                            xlabel(ax,'Time [s]','FontSize',7);
+                            ylabel(ax,'Position error [m]','FontSize',7);
+                            grid(ax,'on');
+                            return;
+                        end
+        
+                    case 'clkErr'
+                        y = diag.getClockBiasErrors() ./ c0;   % m -> s
+                        if ~isempty(y)
+                            plot(ax, t(i0:end), y(i0:end), 'r-', 'LineWidth',0.8);
+                            xlabel(ax,'Time [s]','FontSize',7);
+                            ylabel(ax,'Clock bias error [s]','FontSize',7);
+                            grid(ax,'on');
+                            return;
+                        end
+        
+                    case 'clkDrift'
+                        y = diag.getClockDriftErrors() ./ c0 .* ppm;  % m/s -> ppm
+                        if ~isempty(y)
+                            plot(ax, t(i0:end), y(i0:end), 'b-', 'LineWidth',0.8);
+                            xlabel(ax,'Time [s]','FontSize',7);
+                            ylabel(ax,'Clock drift error [ppm]','FontSize',7);
+                            grid(ax,'on');
+                            return;
+                        end
+                end
+            catch
+            end
+        
             revgnss.ClockExactReportBuilder.noDataAxes_(ax);
         end
 
