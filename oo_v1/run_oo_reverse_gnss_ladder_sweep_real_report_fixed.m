@@ -37,27 +37,28 @@ addpath(thisDir);
 set(0, 'DefaultFigureVisible', 'off');
 
 %% ---- Control -----------------------------------------------------------
-runOnly      = []; % empty = all 60 cases; [1,33,60] for quick check
+runOnly      = [1]; % empty = all 60 cases; [1,33,60] for quick check
 duration_s   = 3600;        % all cases run for exactly 3600 s
 
 %% ---- Phase A error family names ----------------------------------------
 PHASE_A_ERRORS = { ...
-    'code_noise',           ...  % 01
-    'rx_clock_stochastic',  ...  % 02
-    'tower_clock_stochastic',...  % 03
-    'tower_clock_product',  ...  % 04
-    'troposphere',          ...  % 05
-    'ionosphere',           ...  % 06
-    'sagnac',               ...  % 07
-    'light_time',           ...  % 08 (subsumes Sagnac to prevent double-count)
-    'shapiro',              ...  % 09
-    'j2_orbit',             ...  % 10
-    'antenna_pco',          ...  % 11
-    'antenna_pcv',          ...  % 12
-    'tower_survey',         ...  % 13
-    'hardware_delay',       ...  % 14
-    'multipath',            ...  % 15
-    'correlated_noise',     ...  % 16
+    'zero',                 ...% 01
+    'code_noise',           ...  % 02
+    'rx_clock_stochastic',  ...   % 03
+    'tower_clock_stochastic',... % 04
+    'tower_clock_product',  ...  % 05
+    'troposphere',          ...  % 06
+    'ionosphere',           ...  % 07
+    'sagnac',               ...  % 08
+    'light_time',           ...  % 09 (subsumes Sagnac to prevent double-count)
+    'shapiro',              ...  % 10
+    'j2_orbit',             ...  % 11
+    'antenna_pco',          ...  % 12
+    'antenna_pcv',          ...  % 13
+    'tower_survey',         ...  % 14
+    'hardware_delay',       ...  % 15
+    'multipath',            ...  % 16
+    'correlated_noise',     ...  % 17
 };
 
 %% ---- Phase B EKF-option names ------------------------------------------
@@ -336,6 +337,8 @@ function [cfg, patches] = applyPhaseAError_(cfg, errorName)
     % Apply a single Phase A raw truth/model error family.
     patches = {};
     switch errorName
+        case 'zero'
+            cfg.errors.codeNoise.sigma_m     = 0;
         case 'code_noise'
             cfg.errors.codeNoise.sigma_m     = 0.3;
             cfg.measurements.codeNoise.model = 'constant';
@@ -674,6 +677,7 @@ function cases = buildCaseMeta_(phaseAErrors, phaseBOptions, phaseCIdx)
 
     % A_iso: isolated Phase A error cases
     aIsoDesc = { ...
+        'No Error at all',...
         'Code measurement noise (sigma=0.3 m)', ...
         'Stochastic receiver clock truth/model (EKF estimates bias+drift)', ...
         'Stochastic tower clocks (EKF uses external correction)', ...
@@ -692,6 +696,7 @@ function cases = buildCaseMeta_(phaseAErrors, phaseBOptions, phaseCIdx)
         'Correlated measurement noise', ...
     };
     for i = 1:nA
+        
         lbl = sprintf('A_iso_%02d_%s', i, phaseAErrors{i});
         cases(end+1) = mkCase_(lbl,'A_isolated',aIsoDesc{i},i,0,0); %#ok<AGROW>
     end
