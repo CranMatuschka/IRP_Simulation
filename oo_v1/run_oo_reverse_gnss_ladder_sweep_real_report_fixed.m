@@ -339,6 +339,18 @@ function [cfg, patches] = applyPhaseAError_(cfg, errorName)
     switch errorName
         case 'zero'
             cfg.errors.codeNoise.sigma_m     = 0;
+            cfg.asset.clock.bias_s               = 0;
+            cfg.asset.clock.fracFreq             = 0;
+            cfg.asset.clock.driftRate_fracPerSec = 0;
+            
+            cfg.asset.clock.noiseCoeffs.h2      = 0;
+            cfg.asset.clock.noiseCoeffs.h1      = 0;
+            cfg.asset.clock.noiseCoeffs.h0      = 0;
+            cfg.asset.clock.noiseCoeffs.hMinus1 = 0;
+            cfg.asset.clock.noiseCoeffs.hMinus2 = 0;
+            
+            cfg.estimator.initialError.clockBias_m    = 0;
+            cfg.estimator.initialError.clockDrift_mps = 0;
         case 'code_noise'
             cfg.errors.codeNoise.sigma_m     = 0.3;
             cfg.measurements.codeNoise.model = 'constant';
