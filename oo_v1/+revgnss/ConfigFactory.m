@@ -2454,7 +2454,7 @@ classdef ConfigFactory
                     tmpl.hMinus1 = 1e-28;
                     tmpl.hMinus2 = 1e-30;
 
-                case 'CUSTOM'
+                case 'ZERO'
                     % All zeros; caller fills in values
                     tmpl.h2      = 0;
                     tmpl.h1      = 0;

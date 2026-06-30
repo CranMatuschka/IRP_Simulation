@@ -37,8 +37,8 @@ addpath(thisDir);
 set(0, 'DefaultFigureVisible', 'off');
 
 %% ---- Control -----------------------------------------------------------
-runOnly      = [60]; % empty = all 60 cases; [1,33,60] for quick check
-duration_s   = 3600*24;        % all cases run for exactly 3600 s
+runOnly      = [1]; % empty = all 60 cases; [1,33,60] for quick check
+duration_s   = 120 ;%3600*24;        % all cases run for exactly 3600 s
 
 %% ---- Phase A error family names ----------------------------------------
 PHASE_A_ERRORS = { ...
@@ -277,11 +277,7 @@ function cfg = buildBaselineCfg_(thisDir)
     cfg.asset.clock.fracFreq         = 0;
     cfg.asset.clock.driftRate_fracPerSec = 0;
 
-    cfg.asset.clock.noiseCoeffs.h2      = 0;
-    cfg.asset.clock.noiseCoeffs.h1      = 0;
-    cfg.asset.clock.noiseCoeffs.h0      = 0;
-    cfg.asset.clock.noiseCoeffs.hMinus1 = 0;
-    cfg.asset.clock.noiseCoeffs.hMinus2 = 0;
+    cfg.asset.clockType = "ZERO"
 
     % Tower clocks
     for kk = 1:numel(cfg.towers)
@@ -292,12 +288,7 @@ function cfg = buildBaselineCfg_(thisDir)
         if isfield(cfg.towers(kk).clock, 'driftRate_fracPerSec')
             cfg.towers(kk).clock.driftRate_fracPerSec = 0;
         end
-
-        cfg.towers(kk).clock.noiseCoeffs.h2      = 0;
-        cfg.towers(kk).clock.noiseCoeffs.h1      = 0;
-        cfg.towers(kk).clock.noiseCoeffs.h0      = 0;
-        cfg.towers(kk).clock.noiseCoeffs.hMinus1 = 0;
-        cfg.towers(kk).clock.noiseCoeffs.hMinus2 = 0;
+        cfg.towers(kk).clockType = "ZERO"
     end
 
     % Process/model noise
@@ -383,7 +374,7 @@ function cfg = buildPhaseAAllCfg_(thisDir, phaseAErrors)
         [cfg, ~] = applyPhaseAError_(cfg, phaseAErrors{i});
     end
 end
-
+%%
 function [cfg, patches] = applyPhaseAError_(cfg, errorName)
     % Apply a single Phase A raw truth/model error family.
     patches = {};
