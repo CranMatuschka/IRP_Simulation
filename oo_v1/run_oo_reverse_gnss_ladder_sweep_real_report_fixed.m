@@ -37,8 +37,8 @@ addpath(thisDir);
 set(0, 'DefaultFigureVisible', 'off');
 
 %% ---- Control -----------------------------------------------------------
-runOnly      = [1]; % empty = all 60 cases; [1,33,60] for quick check
-duration_s   = 120 ;%3600*24;        % all cases run for exactly 3600 s
+runOnly      = [60]; % empty = all 60 cases; [1,33,60] for quick check
+duration_s   = 3600*24;        % all cases run for exactly 3600 s
 
 %% ---- Phase A error family names ----------------------------------------
 PHASE_A_ERRORS = { ...
@@ -380,6 +380,13 @@ function [cfg, patches] = applyPhaseAError_(cfg, errorName)
     patches = {};
     switch errorName
         case 'code_noise'
+
+            cfg.asset.clockType = 'CESIUM1'
+
+            % Tower clocks
+            for kk = 1:numel(cfg.towers)
+                cfg.towers(kk).clockType = 'CESIUM1'
+            end
             cfg.errors.codeNoise.sigma_m     = 0.3;
             cfg.measurements.codeNoise.model = 'constant';
 

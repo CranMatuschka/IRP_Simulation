@@ -2446,7 +2446,7 @@ classdef ConfigFactory
                     tmpl.hMinus1 = 4.5e-24;   % FFM
                     tmpl.hMinus2 = 3e-28;     % RWFM (better long-term than OCXO)
 
-                case 'ATOMICLIKE'
+                case 'CESIUM1'
                     % Cesium beam / hydrogen maser class (excellent stability)
                     tmpl.h2      = 0;
                     tmpl.h1      = 0;

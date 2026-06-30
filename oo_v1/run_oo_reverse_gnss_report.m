@@ -62,7 +62,7 @@ cfg.diagnostics.storage.snapshot.interval_s    = 300;
 cfg.report.writePdf       = true;   % false = skip PDF (fast testing)
 cfg.report.writeMat       = true;   % false = skip MAT (fast testing)
 cfg.plots.showFigures     = false;
-cfg.report.version        = '1.01';
+cfg.report.version        = '2.01';
 cfg.report.baseOutputDir  = fullfile(thisDir, 'output');
 cfg.report.overwrite      = true;
 
@@ -128,8 +128,8 @@ cfg.signals.enabledMask = [true, true];
 % enable=false (default): keep separate L1+L2 rows in EKF.
 % enable=true + useInEkf=true: replace L1+L2 with IF rows in EKF.
 % Carrier IF rows, integer fixing, and calibrated DCB are NOT implemented.
-cfg.measurements.code.ionosphereFreeRows.enable  = false;
-cfg.measurements.code.ionosphereFreeRows.useInEkf = false;
+cfg.measurements.code.ionosphereFreeRows.enable  = true;
+cfg.measurements.code.ionosphereFreeRows.useInEkf = true;
 cfg.diagnostics.codeIonoFreeRows.enable           = true;
 
 % --- Code IF EKF consistency diagnostic (Stage 46) -------------
@@ -144,8 +144,8 @@ cfg.diagnostics.codeIonoFreeConsistency.enable = true;
 % enable=false (default): keep separate L1+L2 carrier rows in EKF.
 % enable=true + useInEkf=true: replace L1+L2 carrier with IF rows.
 % B_IF = alpha*B_L1 + beta*B_L2 — NOT an integer; no fixing in v1.
-cfg.measurements.carrier.ionosphereFreeRows.enable  = false;
-cfg.measurements.carrier.ionosphereFreeRows.useInEkf = false;
+cfg.measurements.carrier.ionosphereFreeRows.enable  = true;
+cfg.measurements.carrier.ionosphereFreeRows.useInEkf = true;
 cfg.diagnostics.carrierIonoFreeRows.enable           = true;
 
 % --- Carrier IF ambiguity traceability (Stage 48) ---------------
