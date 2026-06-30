@@ -36,6 +36,18 @@ MATLAB CLI not available in this environment — tests written but not runtime-v
 test_atmosphere_mismatch, test_noise_scaling, test_tower_clock_effect,
 test_attitude_lever_arm_observability, test_stage1_physics_disabled_unchanged, test_stage2_doppler
 
+## Sweep scripts
+- `run_oo_reverse_gnss_ladder_sweep_real_report_fixed.m` — original 60-case Phase A/B/C sweep (untouched)
+- `run_oo_reverse_gnss_ladder_sweep_progressive_report.m` — new 46-case B/Z/E/U progressive sweep (2026-06-30)
+  - Group B(2): identity-zero + convergence baselines
+  - Group Z(16): cumulative zero-sigma infrastructure ladder (starts from B00)
+  - Group E(16): cumulative physical error stack (starts from B01 = init:pos1km_vel0p5)
+  - Group U(12): cumulative EKF-use stack (starts from E16)
+  - Patch-based case definition via applyPatch_ dispatcher
+  - Strict absolute baseline: all clocks, sigmas, errors, init errors = 0
+  - Config audit printed per case; identity-zero assertions for B00 and Z cases
+  - Writes sweep_acceptance_summary.txt; output dir: SweepProgressive_YYYYMMDD_HHMMSS/
+
 ## NOT implemented
 Phase wind-up, Klobuchar, IONEX, SP3/CLK, integer ambiguity resolution, L2 carrier EKF,
 carrier IF, azimuth-dependent PCV, ANTEX, VMF3/GPT3/ERA5

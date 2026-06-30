@@ -37,12 +37,11 @@ addpath(thisDir);
 set(0, 'DefaultFigureVisible', 'off');
 
 %% ---- Control -----------------------------------------------------------
-runOnly      = [1]; % empty = all 60 cases; [1,33,60] for quick check
-duration_s   = 3600;        % all cases run for exactly 3600 s
+runOnly      = [60]; % empty = all 60 cases; [1,33,60] for quick check
+duration_s   = 3600*24;        % all cases run for exactly 3600 s
 
 %% ---- Phase A error family names ----------------------------------------
 PHASE_A_ERRORS = { ...
-    'zero',                 ...% 01
     'code_noise',           ...  % 02
     'rx_clock_stochastic',  ...   % 03
     'tower_clock_stochastic',... % 04
@@ -389,18 +388,6 @@ function [cfg, patches] = applyPhaseAError_(cfg, errorName)
     % Apply a single Phase A raw truth/model error family.
     patches = {};
     switch errorName
-        case 'zero'
-            % Everything zero case.
-        
-
-        
-            % Tiny covariance, not physical error
-            % cfg.estimator.P0_pos_m       = 1e-9;
-            % cfg.estimator.P0_vel_mps     = 1e-12;
-            % cfg.estimator.P0_euler_rad   = 1e-12;
-            % cfg.estimator.P0_omega_radps = 1e-12;
-            % cfg.estimator.P0_bRx_m       = 1e-9;
-            % cfg.estimator.P0_bdotRx_mps  = 1e-12;
         case 'code_noise'
             cfg.errors.codeNoise.sigma_m     = 0.3;
             cfg.measurements.codeNoise.model = 'constant';
@@ -470,7 +457,7 @@ function [cfg, patches] = applyPhaseAError_(cfg, errorName)
             cfg.orbit.epochGMST_rad       = 0;
             cfg.orbit.truth.mode          = 'j2Rk4';
             cfg.orbit.mode                = 'j2Rk4';
-            cfg.estimator.dynamics.mode   = 'twoBody';
+            cfg.estimator.dynamics.mode   = 'j2Rk4';
             cfg.estimator.processNoise.modelMismatch.enable    = true;
             cfg.estimator.processNoise.modelMismatch.sigma_mps2 = 1e-6;
             cfg.diagnostics.ekfDynamics.enable = true;
@@ -739,7 +726,6 @@ function cases = buildCaseMeta_(phaseAErrors, phaseBOptions, phaseCIdx)
 
     % A_iso: isolated Phase A error cases
     aIsoDesc = { ...
-        'No Error at all',...
         'Code measurement noise (sigma=0.3 m)', ...
         'Stochastic receiver clock truth/model (EKF estimates bias+drift)', ...
         'Stochastic tower clocks (EKF uses external correction)', ...
