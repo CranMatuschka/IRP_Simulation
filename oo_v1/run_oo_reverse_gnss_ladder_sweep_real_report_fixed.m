@@ -880,6 +880,12 @@ function [cfg, patches] = buildCaseConfig_(c, thisDir, cfgPhaseAAll, phaseAError
             cfg.physics.relativity.clock.truth.enable = true;
             cfg.physics.relativity.clock.model.enable = true;
             patches{end+1} = 'added: relativity clock truth+model for full scientific closure';
+            obj.estimateTowerClocks == true;
+            cfg.estimator.estimateTowerClocks = true;
+            cfg.clock.gauge.mode = 'fixReferenceTower';
+            cfg.clock.gauge.referenceTowerIndex = 1;
+            cfg.clock.gauge.sigmaBias_m = 1e-6;
+            cfg.clock.gauge.sigmaDrift_mps = 1e-9;
             % Sync all covariance flags for Doppler/carrier if active
             dopOn = false;
             try; dopOn = cfg.measurements.doppler.useInEKF; catch; end
