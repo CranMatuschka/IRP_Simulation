@@ -38,7 +38,7 @@ set(0, 'DefaultFigureVisible', 'off');
 
 %% ---- Control -----------------------------------------------------------
 runOnly      = [60]; % empty = all 60 cases; [1,33,60] for quick check
-duration_s   = 3600*24;        % all cases run for exactly 3600 s
+duration_s   = 3600*6;        % all cases run for exactly 3600 s
 
 %% ---- Phase A error family names ----------------------------------------
 PHASE_A_ERRORS = { ...
@@ -839,6 +839,43 @@ function [cfg, patches] = buildCaseConfig_(c, thisDir, cfgPhaseAAll, phaseAError
                 optIdx = phaseCIdx(si);
                 [cfg, patches] = applyPhaseBOption_(cfg, phaseBOptions{optIdx}, patches);
             end
+            % ============================================================
+            % CASE 60: realistic matched-model validation
+            %
+            % Goal:
+            %   - keep realistic stochastic errors
+            %   - keep real EKF estimation problem
+            %   - remove artificial truth/model stress mismatches
+            % ============================================================
+            
+            % ------------------------------------------------------------
+            % 1) Matched orbit dynamics
+            % ------------------------------------------------------------
+            cfg.orbit.useOrbitPropagator = true;
+            cfg.orbit.altitudeMean_m     = 35786000;
+            cfg.orbit.inclination_rad    = 0;
+            cfg.orbit.raan_rad           = 0;
+            cfg.orbit.trueAnomaly0_rad   = 23 * pi / 180;
+            cfg.orbit.epochGMST_rad      = 0;
+            
+            % Truth trajectory
+            cfg.orbit.truth.mode = 'j2Rk4';
+            
+            % Scenario/orbit label
+            cfg.orbit.mode = 'j2Rk4';
+            
+            % EKF predictor.
+            % IMPORTANT:
+            % EKF accepts 'j2', not 'j2Rk4'.
+            cfg.estimator.dynamics.mode = 'j2';
+            
+            % This is no longer a J2-vs-twoBody stress test.
+            cfg.estimator.processNoise.modelMismatch.enable = false;
+            cfg.estimator.processNoise.modelMismatch.sigma_mps2 = 0;
+            
+            % Keep a small realistic/numerical acceleration process noise.
+            % This is EKF uncertainty, not a deliberate truth/model mismatch.
+            cfg.estimator.sigma_accel_mps2 = 1e-8;
             % Add relativistic clock (not in Phase A or C)
             cfg.physics.relativity.clock.truth.enable = true;
             cfg.physics.relativity.clock.model.enable = true;
