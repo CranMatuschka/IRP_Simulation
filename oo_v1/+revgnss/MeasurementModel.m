@@ -274,6 +274,12 @@ classdef MeasurementModel < handle
                     errStruct.carrierPhase = struct();
             end
 
+            % Stage 86: restore cross-observable covariance for shared clock
+            % product errors after code/Doppler/carrier rows have been stacked.
+            [R, stackCovInfo] = revgnss.ProductClockCovarianceBuilder.addSharedProductClockStack( ...
+                R, errStruct, obj.cfg);
+            errStruct.productClockStackCov = stackCovInfo;
+
             % ----- Stack metadata and observability --------------------
             errStruct = revgnss.MeasurementStackMetadata.annotate( ...
                 obj.cfg, H, M, errStruct, stateMap);

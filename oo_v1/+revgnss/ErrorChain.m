@@ -312,11 +312,26 @@ classdef ErrorChain < handle
                 end
             end
 
-            if isfield(tc,'sigma_m')
-                sigma_m = tc.sigma_m * mappingFn(elv);
-            else
-                sigma_m = 0.1 * mappingFn(elv);  % fallback 10 cm * mapping
+            stochOn = isfield(tc,'stochastic') && isfield(tc.stochastic,'enable') && tc.stochastic.enable;
+            residualOn = stochOn;
+            try; residualOn = stochOn && tc.stochastic.modelResidual.enable; catch; end
+            sigmaWet = 0;
+            sigmaResidual = 0;
+            try; sigmaWet = tc.stochastic.sigmaWet_ss_m; catch; end
+            try; sigmaResidual = tc.stochastic.sigmaModelResidual_m; catch; end
+            sigmaStoch = sqrt((sigmaWet * mappingFn(elv)).^2 + sigmaResidual.^2);
+            if residualOn && any(sigmaStoch > 0) && ...
+                    isfield(tc,'truth') && isfield(tc.truth,'enable') && tc.truth.enable
+                % Stage 86: the matched mean delay is augmented by a seeded
+                % residual that the estimator cannot know; its variance enters R.
+                truth_m = truth_m + sigmaStoch .* randn(obj.rngStream, N, 1);
             end
+
+            sigmaBase = zeros(N,1);
+            if isfield(tc,'sigma_m')
+                sigmaBase = tc.sigma_m * mappingFn(elv);
+            end
+            sigma_m = sqrt(sigmaBase.^2 + sigmaStoch.^2);
         end
 
         % ----------------------------------------------------------------
@@ -438,11 +453,26 @@ classdef ErrorChain < handle
                 end
             end
 
-            if isfield(ic,'sigma_m')
-                sigma_m = ic.sigma_m * mapping;
-            else
-                sigma_m = 0.3 * mapping;  % fallback
+            stochOn = isfield(ic,'stochastic') && isfield(ic.stochastic,'enable') && ic.stochastic.enable;
+            residualOn = stochOn;
+            try; residualOn = stochOn && ic.stochastic.modelResidual.enable; catch; end
+            sigmaVDelay = 0;
+            sigmaResidual = 0;
+            try; sigmaVDelay = ic.stochastic.sigmaVDelayL1_ss_m; catch; end
+            try; sigmaResidual = ic.stochastic.sigmaModelResidualL1_m; catch; end
+            sigmaStoch = sqrt((sigmaVDelay * mapping).^2 + sigmaResidual.^2);
+            if residualOn && any(sigmaStoch > 0) && ...
+                    isfield(ic,'truth') && isfield(ic.truth,'enable') && ic.truth.enable
+                % Stage 86: first-order mean is matched; this seeded residual
+                % represents surviving ionosphere/scintillation/model error.
+                truth_m = truth_m + sigmaStoch .* randn(obj.rngStream, N, 1);
             end
+
+            sigmaBase = zeros(N,1);
+            if isfield(ic,'sigma_m')
+                sigmaBase = ic.sigma_m * mapping;
+            end
+            sigma_m = sqrt(sigmaBase.^2 + sigmaStoch.^2);
         end
 
         % ----------------------------------------------------------------
@@ -467,6 +497,14 @@ classdef ErrorChain < handle
                         model_m(k) = hc.model.default_m;
                     end
                 end
+            end
+            if isfield(hc,'sigma_m')
+                sigma_m(:) = hc.sigma_m;
+            end
+            stochHw = false;
+            try; stochHw = hc.residualStochastic.enable; catch; end
+            if stochHw && any(sigma_m > 0) && hc.truth.enable
+                truth_m = truth_m + sigma_m .* randn(obj.rngStream, N, 1);
             end
         end
 

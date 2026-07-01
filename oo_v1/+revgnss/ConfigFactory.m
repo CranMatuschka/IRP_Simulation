@@ -1003,6 +1003,22 @@ classdef ConfigFactory
             cfg = revgnss.ConfigFactory.defaultConfig();
         end
 
+        function cfg = geoRealWorldTruthComparisonConfig()
+            % geoRealWorldTruthComparisonConfig  Canonical Stage 86 GEO scenario.
+            %
+            % Single source of truth for run_geo_realworld_truth_comparison.m.
+            % The scenario uses matched J2 truth/EKF dynamics and seeded stochastic
+            % residuals in clocks, atmosphere, hardware, multipath, and measurements.
+            cfg = revgnss.ConfigFactory.defaultConfig();
+            cfg = revgnss.ScenarioPresets.apply(cfg, 'geoRealWorldTruthComparison');
+            cfg.validation.unsupportedFeaturePolicy = 'error';
+            cfg.validation.synthetic = true;
+            cfg.validation.allowTruthModelMismatch = false;
+            cfg.scientificProfile.mode = 'geoRealisticTruthComparisonV1';
+            cfg.scientificProfile.claimLevel = 'realisticSimulationTruthComparison';
+            cfg.scientificProfile.allowRealWorldClaim = false;
+        end
+
         function cfg = dualFrequencyIFConfig()
             % dualFrequencyIFConfig  L1+L2 ionosphere-free code combination.
             %
@@ -1984,6 +2000,13 @@ classdef ConfigFactory
                 cfg.estimator.estimateAngularRate                = false;
                 cfg.estimator.estimateAttitudeFromPseudorange    = true;
                 cfg.estimator.estimateAngularRateFromPseudorange = false;
+                try
+                    if isfield(cfg.estimator,'attitude') && ...
+                            isfield(cfg.estimator.attitude,'useCodePartials') && ...
+                            ~cfg.estimator.attitude.useCodePartials
+                        cfg.estimator.estimateAttitudeFromPseudorange = false;
+                    end
+                catch; end
                 existingArms = cfg.asset.receiverLeverArms_body_m;
                 isCustom = (size(existingArms,1) == 3) && (size(existingArms,2) == nR_req);
                 if isCustom

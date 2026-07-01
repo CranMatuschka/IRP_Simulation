@@ -796,18 +796,17 @@ classdef SimulationDataStore < handle
             entry.NIS_code = 0; entry.NIS_doppler = 0; entry.NIS_carrier = 0;
             if ~isempty(z) && ~isempty(h) && ~isempty(R) && numel(z) == numel(h)
                 inn_all = z - h;
-                Rdiag_  = max(diag(R), 1e-20);
                 if ~isempty(errStruct) && isfield(errStruct,'measType_perRow') && ...
                         numel(errStruct.measType_perRow) == numel(z)
                     mtype_r = errStruct.measType_perRow;
                     prMask  = strcmp(mtype_r,'code') | strcmp(mtype_r,'ifCode');
                     dopMask = strcmp(mtype_r,'doppler');
                     carMask = strcmp(mtype_r,'carrier');
-                    if any(prMask);  entry.NIS_code    = sum(inn_all(prMask).^2  ./ Rdiag_(prMask));  end
-                    if any(dopMask); entry.NIS_doppler = sum(inn_all(dopMask).^2 ./ Rdiag_(dopMask)); end
-                    if any(carMask); entry.NIS_carrier = sum(inn_all(carMask).^2 ./ Rdiag_(carMask)); end
+                    if any(prMask);  entry.NIS_code    = localNis_(inn_all(prMask),  R(prMask,prMask));   end
+                    if any(dopMask); entry.NIS_doppler = localNis_(inn_all(dopMask), R(dopMask,dopMask)); end
+                    if any(carMask); entry.NIS_carrier = localNis_(inn_all(carMask), R(carMask,carMask)); end
                 elseif M_pr > 0 && numel(z) >= M_pr
-                    entry.NIS_code = sum(inn_all(1:M_pr).^2 ./ Rdiag_(1:M_pr));
+                    entry.NIS_code = localNis_(inn_all(1:M_pr), R(1:M_pr,1:M_pr));
                 end
             end
 
@@ -1979,5 +1978,22 @@ function d = trimEff_(eff, N)
         for si = 1:numel(sf)
             d.(fn{fi}).(sf{si}) = eff.(fn{fi}).(sf{si})(1:N);
         end
+    end
+end
+
+function nis = localNis_(innov, Rsub)
+    nis = 0;
+    if isempty(innov) || isempty(Rsub); return; end
+    innov = innov(:);
+    Rsub = (Rsub + Rsub') / 2;
+    try
+        if rcond(Rsub) > 1e-15
+            nis = innov' * (Rsub \ innov);
+        else
+            nis = innov' * (pinv(Rsub) * innov);
+        end
+    catch
+        rd = max(diag(Rsub), 1e-20);
+        nis = sum(innov.^2 ./ rd);
     end
 end

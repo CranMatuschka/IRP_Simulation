@@ -71,6 +71,7 @@ classdef ConsistencyStatistics
 
         function r = defaultResult_()
             empty = struct('status','notAvailable','mean',NaN,'nisPerDof',NaN, ...
+                           'median',NaN,'p95',NaN,'expectedDof',NaN, ...
                            'fractionInside',NaN,'nSamples',0);
             r.available      = false;
             r.nisOverall     = empty;
@@ -78,7 +79,8 @@ classdef ConsistencyStatistics
             r.nisDoppler     = empty;
             r.nisCarrier     = empty;
             r.nisDiffAtt     = struct('status','notAvailable','note','');
-            r.neesPos        = struct('status','notAvailable','mean',NaN,'fractionInside',NaN,'nSamples',0);
+            r.neesPos        = struct('status','notAvailable','mean',NaN,'median',NaN,'p95',NaN, ...
+                                      'fractionInside',NaN,'nSamples',0);
             r.neesVel        = r.neesPos;
             r.neesClk        = r.neesPos;
             r.neesAtt        = r.neesPos;
@@ -89,6 +91,7 @@ classdef ConsistencyStatistics
 
         function s = groupStat_(nisVec, dofVec, minSamp)
             s = struct('status','notAvailable','mean',NaN,'nisPerDof',NaN,...
+                       'median',NaN,'p95',NaN,'expectedDof',NaN, ...
                        'fractionInside',NaN,'nSamples',0);
             if isempty(nisVec) || isempty(dofVec); return; end
             ok = isfinite(nisVec) & isfinite(dofVec) & dofVec > 0 & nisVec >= 0;
@@ -98,6 +101,9 @@ classdef ConsistencyStatistics
                 s.status = 'insufficientSamples'; return;
             end
             s.mean = mean(nv);
+            s.median = median(nv);
+            s.p95 = revgnss.ConsistencyStatistics.percentile_(nv, 95);
+            s.expectedDof = mean(dv);
             s.nisPerDof = s.mean / mean(dv);
             ratio = nv ./ max(dv, 1);
             s.fractionInside = mean(ratio >= 0.1 & ratio <= 5.0);
@@ -105,13 +111,16 @@ classdef ConsistencyStatistics
         end
 
         function s = neesStat_(v, minSamp)
-            s = struct('status','notAvailable','mean',NaN,'fractionInside',NaN,'nSamples',0);
+            s = struct('status','notAvailable','mean',NaN,'median',NaN,'p95',NaN, ...
+                       'fractionInside',NaN,'nSamples',0);
             if isempty(v); return; end
             ok = isfinite(v) & v >= 0;
             nv = v(ok);
             s.nSamples = numel(nv);
             if s.nSamples < minSamp; s.status = 'insufficientSamples'; return; end
             s.mean = mean(nv);
+            s.median = median(nv);
+            s.p95 = revgnss.ConsistencyStatistics.percentile_(nv, 95);
             s.fractionInside = mean(nv >= 0.1 & nv <= 5.0);
             s.status = revgnss.ConsistencyStatistics.nisStatus_(s.mean);
         end
@@ -121,6 +130,18 @@ classdef ConsistencyStatistics
             if perDof < 0.5;  st = 'warnLow';      return; end
             if perDof > 2.0;  st = 'warnHigh';     return; end
             st = 'pass';
+        end
+
+        function p = percentile_(v, pct)
+            v = sort(v(:));
+            if isempty(v); p = NaN; return; end
+            q = 1 + (numel(v)-1) * pct / 100;
+            lo = floor(q); hi = ceil(q);
+            if lo == hi
+                p = v(lo);
+            else
+                p = v(lo) + (q-lo) * (v(hi)-v(lo));
+            end
         end
 
         function st = worseStat_(a, b)

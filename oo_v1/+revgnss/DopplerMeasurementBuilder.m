@@ -202,6 +202,9 @@ classdef DopplerMeasurementBuilder
             dopplerInfo.prefit  = zd - hd;
             dopplerInfo.towerClockDriftTruth_mps        = towerClockDriftTruth_mps;
             dopplerInfo.towerClockDriftModel_mps        = towerClockDriftModel_mps;
+            dopplerInfo.towerIdx                         = twr_list(:);
+            dopplerInfo.productEpoch_s                   = t_prod_per_row(:);
+            dopplerInfo.sigmaDrift_mps                   = twr_drift_sigma(:);
             dopplerInfo.sagnacRateVec_mps               = sagnacRateVec;
             dopplerInfo.sagnacRateMax_mps               = max(abs(sagnacRateVec));
             dopplerInfo.towerRotSpeeds_mps              = towerRotSpeeds;

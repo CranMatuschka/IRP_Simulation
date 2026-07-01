@@ -4,10 +4,12 @@ classdef ScenarioPresets
     % Supported scenario names:
     %   'default'                   — config unchanged.
     %   'singleAssetCarrierAttitude' — single-space-asset multi-antenna float-carrier attitude.
+    %   'geoRealWorldTruthComparison' — Stage 86 GEO realistic truth-comparison.
     %
     % Usage:
     %   cfg = revgnss.ConfigFactory.defaultConfig();
     %   cfg = revgnss.ScenarioPresets.apply(cfg, 'singleAssetCarrierAttitude');
+    %   cfg = revgnss.ScenarioPresets.apply(cfg, 'geoRealWorldTruthComparison');
 
     methods (Static)
 
@@ -19,6 +21,8 @@ classdef ScenarioPresets
                     % No changes.
                 case 'singleAssetCarrierAttitude'
                     cfg = revgnss.ScenarioPresets.singleAssetCarrierAttitude(cfg);
+                case 'geoRealWorldTruthComparison'
+                    cfg = revgnss.ScenarioPresets.geoRealWorldTruthComparison(cfg);
                 otherwise
                     warning('ScenarioPresets:unknownScenario', ...
                         'Unknown scenario ''%s''; config unchanged.', scenarioName);
@@ -178,6 +182,192 @@ classdef ScenarioPresets
             end
         end
 
+        function cfg = geoRealWorldTruthComparison(cfg)
+            % geoRealWorldTruthComparison  Stage 86 GEO closed-loop truth comparison.
+            %
+            % Truth and EKF use the same J2 mean dynamics. Innovations are driven by
+            % seeded stochastic residuals and by estimation error, not by a deliberate
+            % truth/model force mismatch or truth-derived calibration.
+
+            cfg.scenario.name         = 'geoRealWorldTruthComparison';
+            cfg.scenario.orbitClass   = 'GEO';
+            cfg.scenario.nSpaceAssets = 1;
+            cfg.scenario.nReceivers   = 4;
+            cfg.scenario.nTowers      = max(5, cfg.scenario.nTowers);
+
+            arms = [ ...
+                 1.20  -1.05   0.15  -0.35; ...
+                -0.15   0.35   1.10  -1.25; ...
+                 0.35  -0.25   0.70  -0.55 ];
+            cfg.asset.receiverLeverArms_body_m = arms;
+            cfg.asset.receiverLeverArm_body_m  = arms(:,1);
+            cfg.assets = cfg.asset;
+
+            cfg.estimator.estimateAttitude                   = true;
+            cfg.estimator.estimateAngularRate                = false;
+            cfg.estimator.estimateAttitudeFromPseudorange    = false;
+            cfg.estimator.estimateAngularRateFromPseudorange = false;
+            cfg.estimator.attitude.useCarrierPartials        = true;
+            cfg.estimator.attitude.useCodePartials           = false;
+            cfg.estimator.attitude.useDopplerPartials        = false;
+            cfg.estimator.attitude.parameterization          = 'quaternionErrorState';
+            cfg.estimator.attitudeCarrierMode                = 'off';
+            cfg.estimator.attitudeInitMode                   = 'none';
+            cfg.estimator.knownAmbiguityAttitudeValidation   = false;
+
+            cfg.orbit.useOrbitPropagator = true;
+            cfg.orbit.altitudeMean_m     = 35786000;
+            cfg.orbit.inclination_rad    = 0;
+            cfg.orbit.raan_rad           = 0;
+            cfg.orbit.trueAnomaly0_rad   = 23 * pi/180;
+            cfg.orbit.epochGMST_rad      = 0;
+            cfg.orbit.truth.mode         = 'j2Rk4';
+            cfg.orbit.mode               = 'j2Rk4';
+            cfg.estimator.dynamics.mode  = 'j2';
+
+            cfg.estimator.sigma_accel_mps2 = 1e-6;
+            cfg.estimator.processNoise.modelMismatch.enable = false;
+            cfg.estimator.processNoise.modelMismatch.sigma_mps2 = 0;
+            cfg.estimator.sigma_angAccel_radps2 = 1e-9;
+
+            cfg.estimator.P0_pos_m       = 3000;
+            cfg.estimator.P0_vel_mps     = 1.0;
+            cfg.estimator.P0_euler_rad   = deg2rad(10);
+            cfg.estimator.P0_omega_radps = 1e-5;
+            cfg.estimator.P0_bRx_m       = 300;
+            cfg.estimator.P0_bdotRx_mps  = 0.05;
+            cfg.estimator.initialError.pos_m          = [900; -650; 350];
+            cfg.estimator.initialError.vel_mps        = [0.12; -0.08; 0.04];
+            cfg.estimator.initialError.euler_deg      = [4; -3; 2];
+            cfg.estimator.initialError.omega_radps    = [0; 0; 0];
+            cfg.estimator.initialError.clockBias_m    = 120;
+            cfg.estimator.initialError.clockDrift_mps = 0.02;
+
+            cfg.asset.clock.deterministic = false;
+            cfg.clock.receiver.deterministic = false;
+            cfg.asset.clockType = 'OCXO';
+            cfg.asset.clockFactors.hMinus2Factor = max(10, cfg.asset.clockFactors.hMinus2Factor);
+            for k = 1:numel(cfg.towers)
+                cfg.towers(k).clock.deterministic = false;
+                cfg.towers(k).clock.bias_s   = (k-1) * 2e-8;
+                cfg.towers(k).clock.fracFreq = k * 1e-12;
+            end
+            cfg.clocks.tower.deterministic = false;
+            cfg.towerClock.correctionMode = 'truthHistoryProductNoisy';
+            cfg.clocks.tower.product.mode = 'truthHistoryProductNoisy';
+            cfg.clocks.tower.product.updateInterval_s = 30;
+            cfg.clocks.tower.product.latency_s = 5;
+            cfg.clocks.tower.product.sigmaBias_m = 0.10;
+            cfg.clocks.tower.product.sigmaDrift_mps = 1e-3;
+            cfg.clocks.tower.product.covBiasDrift = 0;
+            cfg.clocks.tower.product.validity_s = 120;
+            cfg.clocks.tower.product.addToR = true;
+            cfg.clocks.tower.product.sharedErrorCorrelation = true;
+            cfg.estimator.towerClockMode = 'truthHistoryProductNoisy';
+
+            cfg.measurement.sigmaFloor_m = 0.01;
+            cfg.errors.codeNoise.sigma_m = 0.60;
+            cfg.signals.L1.codeSigma0_m = 0.60;
+            cfg.signals.L2.codeSigma0_m = 0.90;
+            cfg.measurements.codeNoise.model = 'constant';
+            cfg.measurements.codeNoise.cn0.sigmaAt45dBHz_m = 0.60;
+            cfg.measurements.doppler.enable = true;
+            cfg.measurements.doppler.useInEKF = true;
+            cfg.measurements.doppler.sigma_mps = 0.03;
+            cfg.physics.doppler.truth.enable = true;
+            cfg.physics.doppler.model.enable = true;
+            cfg.measurements.carrierPhase.enable = true;
+            cfg.measurements.carrierMode = 'ekfFloat';
+            cfg.measurements.carrierCombinationMode = 'raw';
+            cfg.measurements.carrier.sigma_m = 0.010;
+            cfg.measurements.carrierPhase.sigma_cycles = ...
+                cfg.measurements.carrier.sigma_m / cfg.measurements.carrierPhase.lambda_m;
+            cfg.estimation.ambiguityMode = 'floatPerTowerReceiverSignal';
+
+            cfg.carrierSlip.enable = true;
+            cfg.carrierSlip.method = 'modelStepCompensatedResidualJump';
+            cfg.carrierSlip.threshold_m = 0.15;
+            cfg.carrierSlip.syntheticSlipInjection.enable = false;
+            cfg.measurements.carrier.slipDetection.enable = true;
+            cfg.measurements.carrier.slipDetection.threshold_m = 0.15;
+            cfg.measurements.carrier.syntheticSlipProbability = 0;
+            cfg.validation.stress.slips.enable = false;
+
+            cfg.errors.troposphere.truth.enable = true;
+            cfg.errors.troposphere.model.enable = true;
+            cfg.errors.troposphere.modelType = 'simpleMapped';
+            cfg.errors.troposphere.stochastic.enable = true;
+            cfg.errors.troposphere.stochastic.sigmaWet_ss_m = 0.08;
+            cfg.errors.troposphere.stochastic.sigmaModelResidual_m = 0.05;
+            cfg.errors.troposphere.stochastic.modelResidual.enable = true;
+            cfg.errors.troposphere.stochastic.modelResidual.mode = 'seededTruthResidual';
+
+            cfg.errors.ionosphere.truth.enable = true;
+            cfg.errors.ionosphere.model.enable = true;
+            cfg.errors.ionosphere.modelType = 'simpleMapped';
+            cfg.errors.ionosphere.stochastic.enable = true;
+            cfg.errors.ionosphere.stochastic.sigmaVDelayL1_ss_m = 2.0;
+            cfg.errors.ionosphere.stochastic.sigmaModelResidualL1_m = 1.0;
+            cfg.errors.ionosphere.stochastic.modelResidual.enable = true;
+            cfg.errors.ionosphere.stochastic.modelResidual.mode = 'seededTruthResidual';
+            cfg.errors.ionosphere.scintillation.enable = true;
+            cfg.errors.ionosphere.scintillation.sigmaCodeL1_m = 0.50;
+
+            cfg.errors.hardwareDelay.truth.enable = true;
+            cfg.errors.hardwareDelay.truth.default_m = 0.0;
+            cfg.errors.hardwareDelay.model.enable = true;
+            cfg.errors.hardwareDelay.model.default_m = 0.0;
+            cfg.errors.hardwareDelay.sigma_m = 0.20;
+            cfg.errors.hardwareDelay.residualStochastic.enable = true;
+
+            cfg.errors.multipath.truth.enable = true;
+            cfg.errors.multipath.truth.amplitude_m = 0.05;
+            cfg.errors.multipath.truth.stochastic_sigma_m = 0.20;
+            cfg.errors.multipath.sigma_m = 0.20;
+
+            cfg.effects.antennaPCO.truth.enable = true;
+            cfg.effects.antennaPCO.model.enable = true;
+            cfg.effects.antennaPCO.receiverOffset_body_m = [0.02; -0.01; 0.03];
+            cfg.effects.antennaPCO.towerOffset_enu_m = [0.01; 0.00; 0.02];
+            cfg.effects.antennaPCV.truth.enable = false;
+            cfg.effects.antennaPCV.model.enable = false;
+            cfg.effects.towerSurvey.truth.enable = true;
+            cfg.effects.towerSurvey.model.enable = true;
+            cfg.effects.towerSurvey.sigmaENU_m = [0.02; 0.02; 0.05];
+
+            cfg.covariance.sharedErrors.enable = true;
+            cfg.covariance.sharedErrors.mode = 'sharedTowerClockProductFullStack';
+            cfg.covariance.sharedErrors.applyTowerClockToCode = true;
+            cfg.covariance.sharedErrors.applyTowerClockToCarrier = true;
+            cfg.covariance.sharedErrors.applyTowerClockToDoppler = true;
+            cfg.covariance.sharedErrors.jitter_m2 = 1e-12;
+            cfg.covariance.productClock.enable = true;
+            cfg.covariance.productClock.applyToCode = true;
+            cfg.covariance.productClock.applyToDoppler = true;
+            cfg.covariance.productClock.applyToCarrier = true;
+            cfg.covariance.productClock.crossCodeDoppler = true;
+            cfg.covariance.productClock.ensureSPD = true;
+            cfg.covariance.productClock.jitter_m2 = 1e-12;
+
+            cfg.measurements.isl.enable = false;
+            cfg.measurements.isl.twoWay.enable = false;
+            cfg.measurements.twstft.enable = false;
+            cfg.estimator.integerAmbiguityFixing.enable = false;
+            cfg.estimator.arcSeparatedAmbiguities.enable = true;
+            cfg.estimator.enforceCarrierArcConsistency.enable = true;
+
+            cfg.validation.unsupportedFeaturePolicy = 'error';
+            cfg.validation.synthetic = true;
+            cfg.validation.allowTruthModelMismatch = false;
+            cfg.scientificProfile.mode = 'geoRealisticTruthComparisonV1';
+            cfg.scientificProfile.claimLevel = 'realisticSimulationTruthComparison';
+            cfg.scientificProfile.allowRealWorldClaim = false;
+            cfg.diagnostics.stage86.forceModelLimitation = ...
+                ['Force model is J2-only; lunisolar third-body and solar radiation ' ...
+                 'pressure are not modelled. Process noise represents residual ' ...
+                 'acceleration uncertainty, not those forces. Not a POD product.'];
+        end
+
         function lines = summaryLines(cfg)
             % summaryLines  Report-ready lines for the active scenario preset.
             lines = {};
@@ -201,6 +391,11 @@ classdef ScenarioPresets
                 lines{end+1} = 'LAMBDA/MLAMBDA        : false';
                 lines{end+1} = 'False-fix-risk control: false';
                 lines{end+1} = 'PPP-grade claim       : false';
+            elseif strcmp(name_, 'geoRealWorldTruthComparison')
+                lines{end+1} = 'EKF dynamics         : matched J2 truth-comparison; no intentional truth/model dynamics mismatch.';
+                lines{end+1} = 'Clock products       : simulated noisy product; no perfect tower-clock correction.';
+                lines{end+1} = 'Ambiguities          : float carrier ambiguities only.';
+                lines{end+1} = 'Force limitation     : J2-only; no SRP, third bodies, EOP, SP3/CLK, ANTEX, IONEX, VMF3, or GPT3.';
             end
         end
 

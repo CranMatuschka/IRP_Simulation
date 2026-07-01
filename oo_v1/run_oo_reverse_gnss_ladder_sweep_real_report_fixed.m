@@ -880,7 +880,6 @@ function [cfg, patches] = buildCaseConfig_(c, thisDir, cfgPhaseAAll, phaseAError
             cfg.physics.relativity.clock.truth.enable = true;
             cfg.physics.relativity.clock.model.enable = true;
             patches{end+1} = 'added: relativity clock truth+model for full scientific closure';
-            obj.estimateTowerClocks == true;
             cfg.estimator.estimateTowerClocks = true;
             cfg.clock.gauge.mode = 'fixReferenceTower';
             cfg.clock.gauge.referenceTowerIndex = 1;
