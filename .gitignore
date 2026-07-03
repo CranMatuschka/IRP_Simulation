@@ -4,6 +4,14 @@ Backup/
 *.ASV
 *.mat
 data/atmosphere/
+*.png
+*.aux
+*.pdf
+*.out
+*.tex
+*.txt
+*.json
+*.log
 
 # macOS metadata
 .DS_Store
