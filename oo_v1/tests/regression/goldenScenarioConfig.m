@@ -14,8 +14,7 @@ function cfg = goldenScenarioConfig(durationOverride_s)
     addpath(oo_v1Root);                                % +revgnss
     addpath(fullfile(oo_v1Root, 'config'));            % masterConfig
 
-    cfg = masterConfig();
-    cfg = revgnss.ScenarioPresets.apply(cfg, 'singleAssetCarrierAttitude');
+    cfg = masterConfig();   % masterConfig now includes the singleAssetCarrierAttitude preset (1.2)
 
     % Gate overrides: summary is collected before any report build, so skip PDF/MAT.
     cfg.report.writePdf   = false;

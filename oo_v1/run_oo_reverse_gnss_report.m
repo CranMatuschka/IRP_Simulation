@@ -117,11 +117,10 @@ if stageAllToggles || oo_v1_envAllToggles_
     cfg.validation.scientificCampaign.duration_s = 900;
 end
 
-% Apply scenario preset after all toggles (preset overrides what it needs to).
-if isfield(cfg,'scenario') && isfield(cfg.scenario,'name') && ...
-        strcmp(cfg.scenario.name,'singleAssetCarrierAttitude')
-    cfg = revgnss.ScenarioPresets.apply(cfg, 'singleAssetCarrierAttitude');
-end
+% Scenario preset (singleAssetCarrierAttitude) is now applied inside masterConfig
+% (Phase 1.2). For the default (non-all-toggles) run this is identical; in all-toggle
+% mode the preset now precedes the all-toggle overrides instead of following them
+% (all-toggle is non-gated validation tooling, retired in Phase 6).
 
 % ============================================================
 % RUN SIMULATION AND WRITE REPORT

@@ -494,3 +494,150 @@ cfg.validation.fullSuiteRun             = false;   % full suite never run here
 % cfg.scientificProfile.mode = 'singleAssetOneWaySyntheticClosedV1';
 % cfg.scientificProfile.claimLevel = 'controlledSynthetic';
 % cfg.scientificProfile.allowRealWorldClaim = false;  % MUST stay false until real parsers added
+
+% ============================================================
+% Scenario preset: singleAssetCarrierAttitude
+%   Inlined from ScenarioPresets.apply (Phase 1.2). Applies AFTER the toggle
+%   block above, exactly as the old apply() did. ReceiverGeometry.defaultLeverArms
+%   is kept as a structural builder. The geoRealWorldTruthComparison preset stays
+%   in +revgnss/ScenarioPresets.m for run_geo_realworld_truth_comparison.m.
+% ============================================================
+
+msg79_ = ['Multi-space-asset estimation is unsupported in oo_v1 active scenario. ' ...
+    'This stage intentionally does not truncate assets.'];
+if isfield(cfg,'scenario') && isfield(cfg.scenario,'nSpaceAssets') && cfg.scenario.nSpaceAssets > 1
+    error('ScenarioPresets:multiAssetUnsupported', '%s', msg79_);
+end
+if isfield(cfg,'assets') && numel(cfg.assets) > 1
+    error('ScenarioPresets:multiAssetUnsupported', '%s', msg79_);
+elseif ~isfield(cfg,'assets')
+    cfg.assets = cfg.asset;
+end
+
+nReq79_ = 4;
+if isfield(cfg,'scenario') && isfield(cfg.scenario,'nReceivers') && cfg.scenario.nReceivers > 1
+    nReq79_ = cfg.scenario.nReceivers;
+end
+arms = [];
+if isfield(cfg,'asset') && isfield(cfg.asset,'receiverLeverArms_body_m')
+    cand79_ = cfg.asset.receiverLeverArms_body_m;
+    if isnumeric(cand79_) && size(cand79_,1) == 3 && size(cand79_,2) > 1
+        arms = cand79_;
+    end
+end
+if ~isempty(arms) && size(arms,2) ~= nReq79_
+    error('ScenarioPresets:receiverGeometryMismatch', ...
+        'cfg.scenario.nReceivers=%d but receiverLeverArms_body_m has %d columns.', ...
+        nReq79_, size(arms,2));
+end
+if isempty(arms)
+    arms = revgnss.ReceiverGeometry.defaultLeverArms(nReq79_);
+end
+
+cfg.scenario.name         = 'singleAssetCarrierAttitude';
+cfg.scenario.nSpaceAssets = 1;
+cfg.scenario.nReceivers   = size(arms,2);
+cfg.asset.receiverLeverArms_body_m = arms;
+cfg.asset.receiverLeverArm_body_m  = arms(:,1);
+cfg.assets(1).receiverLeverArms_body_m = arms;
+cfg.assets(1).receiverLeverArm_body_m  = arms(:,1);
+
+% Attitude estimation. Use preferred Stage 56 controls exclusively so the
+% legacy estimateAttitudeFromPseudorange flag does not cause H/metadata
+% inconsistencies (code rows must not declare attitude sensitivity while
+% H attitude columns are zero).
+cfg.estimator.estimateAttitude                    = true;
+cfg.estimator.estimateAngularRate                 = false;
+cfg.estimator.estimateAttitudeFromPseudorange     = false; % code OFF via preferred
+cfg.estimator.estimateAngularRateFromPseudorange  = false;
+cfg.estimator.attitude.useCarrierPartials         = true;  % preferred: carrier ON
+cfg.estimator.attitude.useCodePartials            = false; % preferred: code OFF
+cfg.estimator.attitude.useDopplerPartials         = false; % preferred: Doppler OFF
+
+% Initial attitude covariance and error.
+cfg.estimator.P0_euler_rad              = deg2rad(5);
+cfg.estimator.P0_omega_radps            = 1e-12;
+cfg.estimator.sigma_angAccel_radps2     = 1e-10;
+cfg.estimator.initialError.euler_deg    = [1; -1; 0.5];
+cfg.estimator.initialError.omega_radps  = [0; 0; 0];
+
+% Carrier measurements and ambiguity mode.
+cfg.measurements.carrierPhase.enable = true;
+cfg.measurements.carrierMode         = 'ekfFloat';
+cfg.estimation.ambiguityMode         = 'floatPerTowerReceiverSignal';
+
+% Carrier slip detection (keep defaults if already set).
+cfg.measurements.carrier.slipDetection.enable = true;
+if ~isfield(cfg.measurements.carrier.slipDetection,'threshold_m')
+    cfg.measurements.carrier.slipDetection.threshold_m           = 0.1;
+    cfg.measurements.carrier.slipDetection.minEpochsBeforeDetect = 3;
+    cfg.measurements.carrier.slipDetection.resetSigma_m          = 100;
+    cfg.measurements.carrier.slipDetection.action                = 'resetAndSkip';
+end
+
+% Stage 53/54: arc-separated ambiguities and arc consistency enforcement.
+cfg.estimator.arcSeparatedAmbiguities.enable             = true;
+cfg.estimator.enforceCarrierArcConsistency.enable        = true;
+cfg.diagnostics.arcSeparatedAmbiguities.enable           = true;
+cfg.diagnostics.carrierArcConsistencyEnforcement.enable  = true;
+cfg.diagnostics.carrierArcEvidence.enable                = true;
+
+% Observability and geometry diagnostics.
+cfg.diagnostics.attitudeObservability.enable = true;
+cfg.diagnostics.receiverGeometry.enable      = true;
+cfg.diagnostics.ekfInnovationAccounting.enable = true;
+if isfield(cfg,'diagnostics') && isfield(cfg.diagnostics,'attitudeEvidence')
+    cfg.diagnostics.attitudeEvidence.enable = true;
+end
+
+% Stage 82: j2Rk4 truth + twoBody EKF is the preferred default.
+% At GEO equatorial (~42164 km), J2 perturbation ~8.3e-6 m/s2 (radial only,
+% z-component zero for equatorial orbit). sigma_accel=0.01 >> 0.1*J2 so
+% the EKF tolerates the mismatch; process noise auto-scaled in finalizeConfig.
+% Stage 80: cfg.orbit.truth.mode is centrally owned; j2Rk4 was available.
+% Orbit is GEO (35786 km, equatorial). GEO in ECEF moves very slowly
+% (orbital period ≈ Earth rotation period) so twoBody is nearly equivalent
+% to static ECEF but physically correct.
+cfg.orbit.useOrbitPropagator = true;
+cfg.orbit.altitudeMean_m     = 35786000;
+cfg.orbit.inclination_rad    = 0;
+cfg.orbit.raan_rad           = 0;
+cfg.orbit.trueAnomaly0_rad   = 23 * pi/180;
+cfg.orbit.epochGMST_rad      = 0;
+if ~isfield(cfg.orbit,'truth') || ~isfield(cfg.orbit.truth,'mode') || ...
+        strcmp(cfg.orbit.truth.mode,'stationaryEcef')
+    cfg.orbit.truth.mode = 'j2Rk4';
+end
+cfg.orbit.mode               = cfg.orbit.truth.mode;
+cfg.estimator.dynamics.mode  = 'twoBody';
+
+% Stage 67: stochastic tower clocks — non-perfect broadcast correction.
+% Each tower clock is driven by the Brown-Hwang two-state process.
+% The EKF uses noisyCorrection: broadcast product with uncertainty sigma.
+for k = 1:numel(cfg.towers)
+    cfg.towers(k).clock.deterministic = false;
+end
+
+% Disable ISL/TWSTFT: single-asset scenario has no inter-spacecraft links.
+if isfield(cfg,'measurements') && isfield(cfg.measurements,'isl')
+    cfg.measurements.isl.enable = false;
+    % TwoWayISLMeasurementBuilder.validateConfig requires isl.enable=true
+    % when twoWay.enable=true, so we must also disable twoWay.
+    if isfield(cfg.measurements.isl,'twoWay')
+        cfg.measurements.isl.twoWay.enable = false;
+        if isfield(cfg.measurements.isl.twoWay,'range')
+            cfg.measurements.isl.twoWay.range.enable = false;
+            cfg.measurements.isl.twoWay.range.useInEKF = false;
+        end
+        if isfield(cfg.measurements.isl.twoWay,'doppler')
+            cfg.measurements.isl.twoWay.doppler.enable = false;
+            cfg.measurements.isl.twoWay.doppler.useInEKF = false;
+        end
+    end
+    if isfield(cfg.measurements.isl,'timing')
+        cfg.measurements.isl.timing.enable = false;
+    end
+end
+if isfield(cfg,'measurements') && isfield(cfg.measurements,'twstft')
+    cfg.measurements.twstft.enable = false;
+end
