@@ -215,27 +215,20 @@ cfg.biases.interFrequency.carrier.truth.L2_m = 0;
 cfg.biases.interFrequency.carrier.model.L1_m = 0;
 cfg.biases.interFrequency.carrier.model.L2_m = 0;
 
-% --- Geometry / relativity --------------------------------------
-cfg.physics.sagnac.truth.enable          = true;
-cfg.physics.sagnac.model.enable          = true;
+% --- Geometry / relativity (one master enable per effect; Phase 2.1) ------------
+cfg.physics.sagnac.enable                = true;
 cfg.physics.lightTime.enable             = true;
 cfg.physics.lightTime.mode               = 'iterativeOneWay';
 cfg.physics.lightTime.iterations         = 2;
 cfg.physics.lightTime.tolerance_s        = 1e-12;
-cfg.physics.lightTime.truth.enable       = true;
-cfg.physics.lightTime.model.enable       = true;
-cfg.physics.relativity.shapiro.truth.enable = true;
-cfg.physics.relativity.shapiro.model.enable = true;
-cfg.physics.relativity.clock.truth.enable   = true; % disabled/warned: not validated v1
-cfg.physics.relativity.clock.model.enable   = true; % disabled/warned: not validated v1
+cfg.physics.relativity.shapiro.enable    = true;
+cfg.physics.relativity.clock.enable      = true;  % disabled/warned in finalize: not validated v1
 
-% --- Atmosphere -------------------------------------------------
-cfg.errors.troposphere.truth.enable       = true;
-cfg.errors.troposphere.model.enable       = true;
+% --- Atmosphere (one master enable per effect; Phase 2.1) -----------------------
+cfg.errors.troposphere.enable             = true;
 cfg.errors.troposphere.modelType          = 'simpleMapped';
 cfg.errors.troposphere.stochastic.enable  = true;
-cfg.errors.ionosphere.truth.enable        = true;
-cfg.errors.ionosphere.model.enable        = true;
+cfg.errors.ionosphere.enable              = true;
 cfg.errors.ionosphere.modelType           = 'simpleMapped';
 cfg.errors.ionosphere.stochastic.enable   = true;
 cfg.errors.ionosphere.scintillation.enable = true;
@@ -243,21 +236,16 @@ cfg.errors.ionosphere.scintillation.enable = true;
 % --- Measurement noise ------------------------------------------
 cfg.measurements.codeNoise.model = 'constant';
 
-% --- Hardware / multipath ---------------------------------------
-cfg.errors.hardwareDelay.truth.enable = false;
-cfg.errors.hardwareDelay.model.enable = false;
-cfg.errors.multipath.truth.enable     = false;
-cfg.errors.multipath.model.enable     = false;
+% --- Hardware / multipath (one master enable per effect; Phase 2.1) -------------
+cfg.errors.hardwareDelay.enable = false;
+cfg.errors.multipath.enable     = false;
 
-% --- Survey / antenna -------------------------------------------
-cfg.effects.towerSurvey.truth.enable  = false;
-cfg.effects.towerSurvey.model.enable  = false;
+% --- Survey / antenna (one master enable per effect; Phase 2.1) -----------------
+cfg.effects.towerSurvey.enable  = false;
 % Stage 68: antenna PCO enabled by default (synthetic calibrated constants; no ANTEX).
-cfg.effects.antennaPCO.truth.enable   = true;
-cfg.effects.antennaPCO.model.enable   = true;
+cfg.effects.antennaPCO.enable   = true;
 % PCV kept disabled by default (no ANTEX; set to true in all-toggle run only).
-cfg.effects.antennaPCV.truth.enable   = false;
-cfg.effects.antennaPCV.model.enable   = false;
+cfg.effects.antennaPCV.enable   = false;
 
 % --- Correlated noise -------------------------------------------
 cfg.effects.correlatedNoise.enable = false;
@@ -307,8 +295,18 @@ cfg.clocks.tower.product.sharedErrorCorrelation = true;
 % --- Doppler ----------------------------------------------------
 cfg.measurements.doppler.enable       = true;
 cfg.measurements.doppler.useInEKF     = true;
-cfg.physics.doppler.truth.enable      = true;
-cfg.physics.doppler.model.enable      = true;
+cfg.physics.doppler.enable            = true;
+
+% --- Phase 2.1: one master enable per effect -> internal truth/model pair --------
+% Every effect above sets a SINGLE .enable, so the config surface can no longer
+% manufacture a truth!=model mismatch. expandEnableToggles slaves the internal
+% .truth.enable/.model.enable pair (still read by ~150 pipeline sites) to that value;
+% migrating those read-sites to read .enable directly is a later cleanup commit.
+cfg = expandEnableToggles(cfg, { ...
+    'physics.sagnac', 'physics.lightTime', 'physics.relativity.shapiro', ...
+    'physics.relativity.clock', 'physics.doppler', ...
+    'errors.troposphere', 'errors.ionosphere', 'errors.hardwareDelay', 'errors.multipath', ...
+    'effects.towerSurvey', 'effects.antennaPCO', 'effects.antennaPCV' });
 
 % --- Carrier phase EKF (multi-receiver mode, Stage 14.6) -------
 % floatPerTowerReceiverSignal: one float ambiguity per tower x receiver x signal.
