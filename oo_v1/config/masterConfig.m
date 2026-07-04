@@ -1,13 +1,14 @@
 function cfg = masterConfig()
-%MASTERCONFIG  The single canonical oo_v1 configuration (Phase-1 clarity refactor).
-%   Returns the resolved DEFAULT (non-all-toggles) config for the canonical
-%   singleAssetCarrierAttitude GEO scenario, up to but NOT including
-%   ScenarioPresets.apply and the all-toggle / validation-campaign overrides
-%   (those remain the runner's responsibility during the strangle and are folded
-%   in / collapsed in later Phase-1 commits). This file is becoming the ONE place
-%   every value and toggle lives; it currently still seeds structure from
-%   ConfigFactory.defaultConfig, and later commits inline the value layer and drop
-%   that dependency.
+%MASTERCONFIG  The single canonical oo_v1 configuration (clarity refactor, Phase 1).
+%   THE one place the scientific config lives. Reads top-to-bottom:
+%     1. seed structure + low-level defaults from config/baseConfig.m
+%     2. every human-facing value and toggle (this file)
+%     3. the singleAssetCarrierAttitude scenario preset (inlined below)
+%     4. contract checks via validateMasterConfig (returns cfg unchanged)
+%   No dependency on the +revgnss config layer. Value derivations (e.g.
+%   enabledByFrequency from enabledMask, the time vector, thresholds) remain in
+%   ConfigFactory.finalizeConfig, run once by the simulation. The all-toggle and
+%   validation-campaign env overrides remain in the runner (retired in Phase 6).
 %
 %   v1 known limitations (unchanged): signal-dependent hardware delays / DCB set to
 %   zero (IF residual not modelled); Doppler ionosphere-rate term not modelled;
@@ -643,3 +644,6 @@ end
 if isfield(cfg,'measurements') && isfield(cfg.measurements,'twstft')
     cfg.measurements.twstft.enable = false;
 end
+
+% --- Phase 1.4: contract-check the assembled config (asserts only; returns cfg unchanged) ---
+cfg = validateMasterConfig(cfg);
