@@ -12,10 +12,12 @@ function cfg = masterConfig()
 %   v1 known limitations (unchanged): signal-dependent hardware delays / DCB set to
 %   zero (IF residual not modelled); Doppler ionosphere-rate term not modelled;
 %   PR/Doppler shared tower-clock cross-covariance ignored (block-diagonal R).
-    oo_v1Root = fileparts(fileparts(mfilename('fullpath')));  % .../oo_v1
-    addpath(oo_v1Root);                                       % so +revgnss resolves
+    thisDir   = fileparts(mfilename('fullpath'));   % .../oo_v1/config
+    oo_v1Root = fileparts(thisDir);                 % .../oo_v1
+    addpath(oo_v1Root);                             % +revgnss builders
+    addpath(thisDir);                               % baseConfig (same folder)
 
-cfg = revgnss.ConfigFactory.defaultConfig();
+cfg = baseConfig();   % structural + default base (config/baseConfig.m); no +revgnss config-layer dep
 
 % ============================================================
 % USER CONFIGURATION TOGGLES
