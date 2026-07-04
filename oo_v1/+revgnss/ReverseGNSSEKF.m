@@ -636,6 +636,9 @@ classdef ReverseGNSSEKF < handle
             sm = obj.stateMap;
 
             % --- Position / velocity process noise ----------------------
+            % Inflate the process-noise sigma by the unmodeled-dynamics term (e.g. the J2
+            % acceleration when truth is j2Rk4 but the EKF propagates two-body). This is
+            % LOAD-BEARING EKF tuning, not "mismatch analysis" - see finalizeConfig (2.2).
             sa  = obj.sigma_accel_mps2;
             try
                 if obj.cfg.estimator.processNoise.modelMismatch.enable

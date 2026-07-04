@@ -1491,8 +1491,14 @@ classdef ConfigFactory
             end
 
 
-            % --- Stage 82: J2 dynamics mismatch validation fields ---
-            % All canonical Stage 82 diagnostics are owned here in finalizeConfig.
+            % --- J2 unmodeled-dynamics process-noise tuning + consistency diagnostics ---
+            % NOTE (clarity refactor 2.2): this is NOT an artificial "mismatch analysis"
+            % subsystem. j2Rk4 truth + twoBody EKF is a legitimate MODELLING CHOICE (truth
+            % includes J2; the EKF propagates two-body). The block below (a) tunes process
+            % noise for the unmodeled J2 acceleration - LOAD-BEARING for the validated EKF,
+            % must not be removed (see ReverseGNSSEKF process-noise) - and (b) records
+            % consistency diagnostics that are redundant with residual/NIS. Config can no
+            % longer manufacture a truth!=model mismatch (2.1 collapsed the dual toggles).
 
             % Compute representative J2 accel at initial GEO orbit state (equatorial, z=0).
             cfg82_j2Norm_ = 0;
