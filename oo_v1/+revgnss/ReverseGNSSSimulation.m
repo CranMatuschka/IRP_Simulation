@@ -218,6 +218,7 @@ classdef ReverseGNSSSimulation < handle
         
             fprintf('Simulation complete. %d epochs processed.\n', obj.nEpochs);
             obj.summarize();
+            obj.simData.freeze();   % Phase 4a: store is immutable when run() returns; post/report read-only
         end
 
         % ----------------------------------------------------------------

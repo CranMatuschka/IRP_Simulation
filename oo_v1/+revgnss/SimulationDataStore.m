@@ -21,6 +21,7 @@ classdef SimulationDataStore < handle
         nAlloc_   (1,1) double = 0
         nx_       (1,1) double = 0    % state dim (lazy, set on first write)
         initialized_  (1,1) logical = false
+        frozen_       (1,1) logical = false   % Phase 4a immutability guard (set by freeze())
         cfg_
 
         % ---- Time
@@ -340,6 +341,7 @@ classdef SimulationDataStore < handle
 
         % -----------------------------------------------------------------
         function storeEntry_(obj, k, entry)
+            if obj.frozen_; error('SimulationDataStore:frozen', 'Store is frozen after the simulation stage; post/report may only read.'); end
             if k < 1 || k > obj.nAlloc_; return; end
             if ~obj.initialized_; obj.lazyInit_(entry); end
             obj.nEpochs = max(obj.nEpochs, k);
@@ -578,6 +580,7 @@ classdef SimulationDataStore < handle
 
         % -----------------------------------------------------------------
         function storeSnapshot(obj, t_s, k, P, H, R, z, h)
+            if obj.frozen_; error('SimulationDataStore:frozen', 'Store is frozen after the simulation stage; post/report may only read.'); end
             if ~obj.snapshotEnable_; return; end
             if obj.snapshotCount_ >= obj.snapshotMax_; return; end
             isFirst = (obj.snapshotCount_ == 0);
@@ -590,8 +593,17 @@ classdef SimulationDataStore < handle
         end
 
         % -----------------------------------------------------------------
+        function freeze(obj)
+            % freeze  Make the store immutable after the simulation stage (Phase 4a).
+            % Post-processing and report may then only READ; any write method throws
+            % SimulationDataStore:frozen. Idempotent.
+            obj.frozen_ = true;
+        end
+
+        % -----------------------------------------------------------------
         function recordEpoch(obj, k, t_s, asset, ekf, z, h, H, R, NIS, ...
                 errStruct, visibleTowerIds, elevations_rad, postfitResidual)
+            if obj.frozen_; error('SimulationDataStore:frozen', 'Store is frozen after the simulation stage; post/report may only read.'); end
             % recordEpoch  Canonical per-epoch recording — the only write path.
             %
             % Contains all computation previously in Diagnostics.record().
@@ -1537,6 +1549,7 @@ classdef SimulationDataStore < handle
 
         % -----------------------------------------------------------------
         function recordOrbitCache(obj, oc)
+            if obj.frozen_; error('SimulationDataStore:frozen', 'Store is frozen after the simulation stage; post/report may only read.'); end
             if ~isstruct(oc); return; end
             obj.orbitCacheEnabled_ = logical(g_(oc,'enabled',false));
             obj.orbitCacheMode_    = char(g_(oc,'mode',''));
