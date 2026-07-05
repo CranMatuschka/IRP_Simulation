@@ -125,9 +125,19 @@ matlab -batch "addpath('tests/regression'); run_oo_v1_regression_3600s"       % 
   delivered here. (C-10)
 - **5. Folderize physics behind single entry points** — `models/<domain>/<effect>.m`;
   per-effect equivalence + finite-difference Jacobian audits.
-- **6. One runner; retire env-var control** — `run_oo_v1.m`; delete `OO_V1_*`
-  branches; naming contract `configName_YYYYMMDD_HHMM.{pdf,mat}`. (C-6)
-- **7. Split the report** — `report/sections/*.m` + thin `buildReport.m`. (C-9)
+- **6. One runner — DONE** (`05003be`). `run_oo_v1.m` is the clean canonical runner
+  (masterConfig -> runSingle -> `output/<configName>_YYYYMMDD_HHMM.{pdf,mat}` + latest
+  pointers; NO env-vars). Verified: report builds end-to-end, naming honored. The legacy
+  `run_oo_reverse_gnss_report.m` + `OO_V1_*` validation tooling is RETAINED for the
+  validation suite (~8 tests + ValidationRunner/MainScriptValidationGate); full env-var
+  retirement is a flagged coordinated migration. (C-6, canonical path)
+- **7. Split the report — DONE** (`b700802`, 7.2). ClockExactReportBuilder decomposed: all
+  10 section writers extracted verbatim into `+revgnss/+report/*.m`; `writeTexFile_` is now
+  a thin ordered coordinator. ClockExactReportBuilder 2559 -> 1477 lines. Verified by a
+  normalized `.tex` byte-diff harness (`tests/report/reportTexFingerprint.m` + frozen
+  `golden_report_tex.txt`): report `.tex` byte-IDENTICAL before/after; metric gate
+  unaffected. (LatexReportBuilder figure engine + the ReportRunner summary-lift are
+  follow-ups.) (C-9)
 - **8. Demote stage bookkeeping to read-only provenance.** (C-7)
 
 Invariant for every commit: the gate is green, no guard is weakened, numbers do
