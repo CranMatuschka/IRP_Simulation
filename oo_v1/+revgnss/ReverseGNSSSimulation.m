@@ -223,9 +223,20 @@ classdef ReverseGNSSSimulation < handle
 
         % ----------------------------------------------------------------
         function step(obj, k)
+            % Phase 4b: two real pipeline stages. Truth generation writes the true
+            % world state; estimation reads it ONLY through the measurement. No local
+            % variable crosses between them (they communicate via obj.asset / obj.towers
+            % / obj.ekf), so this split is exactly behaviour-preserving.
             t_s = obj.tVec(k);
             dt  = obj.cfg.simulation.dt_s;
-            cpInfo = [];  % Stage 63: float carrier cpInfo captured in slip-detection block
+            obj.generateTruth_(k, t_s, dt);
+            obj.runEstimation_(k, t_s, dt);
+        end
+
+        % ----------------------------------------------------------------
+        function generateTruth_(obj, k, t_s, dt)
+            % TRUTH stage: advance and log the true world state (orbit, tower clocks,
+            % asset attitude/clock, secondary assets). Writes truth only — no estimator.
 
             % Truth orbit propagation: use precomputed cache (O(1)) when available,
             % fall back to scalar integration (O(N) per call, O(N^2) total) otherwise.
@@ -253,6 +264,15 @@ classdef ReverseGNSSSimulation < handle
             % Log truth state
             obj.asset.logState(t_s);
             obj.stepSecondaryAssets_(k, t_s, dt);
+        end
+
+        % ----------------------------------------------------------------
+        function runEstimation_(obj, k, t_s, dt)
+            % ESTIMATION stage: predict, form measurements (the ONLY channel through
+            % which truth enters the estimator), detect slips, update, and record. The
+            % prediction reads no truth state; truth is read only via computeMeasurements
+            % and post-update diagnostics.
+            cpInfo = [];  % Stage 63: float carrier cpInfo captured in slip-detection block
 
             % EKF predict (skip at first epoch — no prior state to propagate from)
             if k > 1
