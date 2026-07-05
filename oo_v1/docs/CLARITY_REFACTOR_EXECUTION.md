@@ -113,8 +113,16 @@ matlab -batch "addpath('tests/regression'); run_oo_v1_regression_3600s"       % 
   `idealConfig` (|sumNIS-dof|=2838 identically on main and here; matched-vs-off atmosphere
   cancels in the innovation, so C-5 cannot affect it), and `test_stage6_config_presets` T5
   asserted a pre-finalize derived field — fixed to check the canonical `enabledMask`. (C-4, C-5, C-11)
-- **4. Immutable simData + pipeline split** — `data/SimData.m` contract + runtime
-  guard; `generateTruth.m` / `runEstimation.m`; no-truth-leakage assert. (C-10)
+- **4. Immutable simData + pipeline split — DONE** (`6d6c435`, `b9ab1da`, + assert; full gate green).
+  4a: `SimulationDataStore` is frozen after `run()` (`freeze()` + guard on all four write
+  methods; the data arrays were already private) — post/report receive a read-only store;
+  `test_simdata_freeze` asserts writes throw and reads still work. 4b.1: `step()` split into
+  `generateTruth_` + `runEstimation_` (two real stages; no local variable crosses the boundary
+  — they communicate via obj state — so numbers are unchanged). 4b.2:
+  `test_no_truth_leak_in_prediction` proves the EKF prediction is invariant to tower-clock
+  truth realization (truth enters only via the measurement). The `data/SimData.m` file
+  relocation is deferred to Phase 5 (folderization); the immutability + no-leak CONTRACT is
+  delivered here. (C-10)
 - **5. Folderize physics behind single entry points** — `models/<domain>/<effect>.m`;
   per-effect equivalence + finite-difference Jacobian audits.
 - **6. One runner; retire env-var control** — `run_oo_v1.m`; delete `OO_V1_*`
