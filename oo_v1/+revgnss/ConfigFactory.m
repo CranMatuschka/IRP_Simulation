@@ -295,6 +295,12 @@ classdef ConfigFactory
             % Innovations remain small because model matches truth. This is the
             % matched-error baseline (NOT "all errors off" — same corrections both sides).
             cfg = revgnss.ConfigFactory.defaultConfig();
+            % The base default is now honest off=off (clarity refactor C-5); re-assert
+            % this preset's matched-error meaning by enabling tropo+iono on both sides.
+            cfg.errors.troposphere.truth.enable = true;
+            cfg.errors.troposphere.model.enable = true;
+            cfg.errors.ionosphere.truth.enable  = true;
+            cfg.errors.ionosphere.model.enable  = true;
         end
 
         function cfg = geoRealWorldTruthComparisonConfig()

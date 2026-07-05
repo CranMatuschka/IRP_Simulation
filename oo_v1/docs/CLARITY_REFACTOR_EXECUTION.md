@@ -92,15 +92,27 @@ matlab -batch "addpath('tests/regression'); run_oo_v1_regression_3600s"       % 
   `ConfigFactory.defaultConfig/cleanConfig/matchedErrorBaselineConfig` +
   `ScenarioPresets` layering for the canonical path; necessary derivations →
   `validateMasterConfig.m`; `configGEO` becomes a small override. (C-3, C-5, C-7)
-- **2. One toggle per feature; delete mismatch machinery** — collapse dual toggles
-  (plan §6 mapping) after per-effect audit; delete `dynamicsMismatch`/`modelMismatch`
-  scaffolding (keep J2-truth/two-body-EKF as a modelling choice); fold ~40
-  diagnostic flags into grouped switches; pick one scientific default (raw rows in
-  EKF, IF diagnostic). (C-1, C-2, C-8, C-12)
-- **3. Honest default + single control surface** — off = off; mode strings →
-  documented enums/booleans; one signal path (`enabledMask`), delete
-  `twoFrequency.enable`. New default gets its own sanity test (separate from the
-  frozen-scenario equivalence gate). (C-4, C-5, C-11)
+- **2. One toggle per feature; reframe mismatch — DONE** (`8feaaae`, `8f49831`; full gate green).
+  2.1: one master `.enable` per effect via `config/expandEnableToggles.m` (the config
+  surface can no longer manufacture a truth!=model mismatch). 2.2: the dynamics
+  "mismatch" is LOAD-BEARING (process-noise tuning for the unmodeled J2 accel) — reframed
+  and documented in place, NOT deleted (deleting would change the EKF's Q and move the
+  numbers). Findings: clean switch-grouping of the ~40 diagnostic flags (C-8) is NOT
+  equivalence-safe — the golden uses a specific on/off mix with overrides + a conditional
+  that a single group on/off cannot reproduce; left sectioned. C-12 default → Phase 3.
+  (C-1, C-2 done; C-8 infeasible-clean; C-12 → P3)
+- **3. Honest default + single control surface — DONE** (`baseConfig` off=off; gate green).
+  C-5: `config/baseConfig.m` default is now honest off=off (troposphere/ionosphere and the
+  hardwareDelay model enable are OFF; raw EKF rows were already the effective default).
+  masterConfig sets every error explicitly, so the golden is unchanged (gate PASS);
+  `matchedErrorBaselineConfig` re-asserts its matched meaning explicitly; `test_stage7a_config`
+  T1/T3 updated to the new contract. C-11 already satisfied (masterConfig uses only
+  `enabledMask`). C-4 mode strings: already-documented multi-way selections, left as-is (low
+  value). FINDINGS (pre-existing on `main`, NOT caused by this refactor — verified in a `main`
+  git worktree): `test_nis_accumulated_dof` is inconsistent for the zero-code-noise
+  `idealConfig` (|sumNIS-dof|=2838 identically on main and here; matched-vs-off atmosphere
+  cancels in the innovation, so C-5 cannot affect it), and `test_stage6_config_presets` T5
+  asserted a pre-finalize derived field — fixed to check the canonical `enabledMask`. (C-4, C-5, C-11)
 - **4. Immutable simData + pipeline split** — `data/SimData.m` contract + runtime
   guard; `generateTruth.m` / `runEstimation.m`; no-truth-leakage assert. (C-10)
 - **5. Folderize physics behind single entry points** — `models/<domain>/<effect>.m`;

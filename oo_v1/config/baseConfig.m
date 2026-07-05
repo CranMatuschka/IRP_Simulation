@@ -8,11 +8,17 @@ function cfg = baseConfig()
 %   masterConfig seeds from this base and owns every human-facing value/toggle on top.
     addpath(fileparts(fileparts(mfilename('fullpath'))));  % oo_v1 root, for +revgnss builders
 
-% defaultConfig  GEO-1 matched-error baseline.
+% defaultConfig  GEO-1 honest off=off baseline (clarity refactor C-5).
 %
-% Troposphere and ionosphere are BOTH enabled (truth=model), so they cancel
-% in innovations.  This is NOT "all errors off" — it is a matched-error
-% baseline.  Use cleanConfig() for a genuinely error-free code-only run.
+% The base default injects NO error effects: troposphere, ionosphere, hardware delay,
+% multipath, tower survey and antenna PCV/PCO are all OFF, and the EKF uses RAW
+% measurement rows (ionosphere-free rows are opt-in and require L1+L2). Turning an
+% effect on adds a REAL error the estimator does not perfectly cancel (it uses the
+% estimated state, clock products and estimated atmosphere). Named presets set what
+% they need on top: masterConfig (the canonical run), atmosphereConfig,
+% matchedErrorBaselineConfig (tropo+iono matched), cleanConfig (explicit all-off).
+% (Matched vs off atmosphere cancels in the innovation, so this change does not affect
+% the pre-existing zero-noise idealConfig NIS test, which is inconsistent on main too.)
 % Tower clocks: perfectTruth (validation mode).
 % Code noise: 0.3 m sigma.
 % Doppler: enabled with useInEKF=true; requires physics.doppler.model.enable=true
@@ -267,16 +273,19 @@ cfg.errors.troposphere.stochastic.modelResidual.mode   = 'zero';
 cfg.errors.ionosphere.stochastic.modelResidual.enable  = false;
 cfg.errors.ionosphere.stochastic.modelResidual.mode    = 'zero';
 
-cfg.errors.troposphere.truth.enable        = true;
+% Honest off=off default (clarity refactor C-5): the base injects NO atmosphere.
+% masterConfig / atmosphereConfig / matchedErrorBaselineConfig enable these
+% explicitly. Delay parameters are retained (inert while the enables are false).
+cfg.errors.troposphere.truth.enable        = false;
 cfg.errors.troposphere.truth.zenithDelay_m = 2.3;
-cfg.errors.troposphere.model.enable        = true;
+cfg.errors.troposphere.model.enable        = false;
 cfg.errors.troposphere.model.zenithDelay_m = 2.3;
 cfg.errors.troposphere.model.biasFraction  = 1.0;
 cfg.errors.troposphere.sigma_m             = 0.0;
 
-cfg.errors.ionosphere.truth.enable         = true;
+cfg.errors.ionosphere.truth.enable         = false;
 cfg.errors.ionosphere.truth.zenithDelay_m  = 5.0;
-cfg.errors.ionosphere.model.enable         = true;
+cfg.errors.ionosphere.model.enable         = false;
 cfg.errors.ionosphere.model.zenithDelay_m  = 5.0;
 cfg.errors.ionosphere.model.biasFraction   = 1.0;
 cfg.errors.ionosphere.sigma_m              = 0.0;
@@ -295,7 +304,7 @@ cfg.errors.towerClock.driftCorrSigma_m_per_s = 0;  % [m/s], default: unmodelled
 
 cfg.errors.hardwareDelay.truth.enable      = false;
 cfg.errors.hardwareDelay.truth.default_m   = 0.0;
-cfg.errors.hardwareDelay.model.enable      = true;
+cfg.errors.hardwareDelay.model.enable      = false;  % honest off=off (was true; default_m=0 made it a no-op)
 cfg.errors.hardwareDelay.model.default_m   = 0.0;
 
 cfg.errors.multipath.truth.enable              = false;
