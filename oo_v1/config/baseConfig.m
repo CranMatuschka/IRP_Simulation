@@ -418,17 +418,31 @@ cfg.measurements.carrierPhase.cycleSlip.enable = true;
 
 % --- One-way inter-spacecraft link scaffold (Stage 21) --------
 cfg.measurements.isl.enable = false;
-cfg.measurements.isl.transmitterAssetIndex = 2;
+cfg.measurements.isl.transmitterAssetIndex = 2;   % legacy single-link default
+cfg.measurements.isl.transmitters = 'all';        % 'all' secondaries (2..N) or a specific index
 cfg.measurements.isl.receiverAssetIndex = 1;
 cfg.measurements.isl.code.enable = false;
 cfg.measurements.isl.code.useInEKF = false;
-cfg.measurements.isl.code.sigma_m = 0.5;
+cfg.measurements.isl.code.sigma_m = 0.5;          % one-way ISL code thermal 1-sigma [m]
 cfg.measurements.isl.doppler.enable = false;
 cfg.measurements.isl.doppler.useInEKF = false;
 cfg.measurements.isl.doppler.sigma_mps = 0.02;
 cfg.measurements.isl.carrier.enable = false;
 cfg.measurements.isl.carrier.useInEKF = false;
 cfg.measurements.isl.carrier.sigma_m = 0.002;
+% ISL acquisition warm-up [s]: ISL rows are diagnostic-only until the ground-only
+% fix has converged (initial covariance shrunk), then they enter the EKF. Prevents
+% the tight-ISL-on-huge-initial-covariance transient overshoot.
+cfg.measurements.isl.warmup_s = 300;
+% Represented-secondary product uncertainty (productAidedExternal): the secondary
+% ephemeris/clock is a broadcast PRODUCT with a fixed-per-run error that both biases
+% the ISL model h and inflates R. This floors the achievable primary accuracy by the
+% reference-product quality (honest aiding, not perfect-truth knowledge).
+cfg.measurements.isl.product.enable              = false;
+cfg.measurements.isl.product.sigmaPos_m          = 0.05;   % secondary ephemeris product 1-sigma/axis [m]
+cfg.measurements.isl.product.sigmaClock_m        = 0.03;   % secondary clock product 1-sigma [m] (~100 ps)
+cfg.measurements.isl.product.sigmaVel_mps        = 1e-4;   % secondary velocity product 1-sigma [m/s]
+cfg.measurements.isl.product.sigmaClockDrift_mps = 1e-4;   % secondary clock-drift product 1-sigma [m/s]
 cfg.measurements.isl.twoWay.enable = false;
 cfg.measurements.isl.twoWay.range.enable = false;
 cfg.measurements.isl.twoWay.range.useInEKF = false;
