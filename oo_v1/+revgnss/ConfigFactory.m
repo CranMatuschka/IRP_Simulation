@@ -1571,6 +1571,21 @@ classdef ConfigFactory
             cfg.estimator.processNoise.residualAccelerationUncertainty = ...
                 cfg.estimator.processNoise.modelMismatch;
 
+            % MD Stage 88/96: hard-block a SILENT truth-vs-EKF dynamics FAMILY mismatch,
+            % but ONLY when the run opts in via cfg.validation.enforceModelFamilyConsistency.
+            % Keeping it opt-in stops it firing on legitimate reduced-dynamics or non-realistic
+            % runners; the same-family default sets the flag true. assertModelFamilyConsistent
+            % itself still allows an explicitly-labelled mismatch analysis. This is the single
+            % chokepoint: runSingle -> ReverseGNSSSimulation.initialize -> finalizeConfig, so
+            % every run path is covered transitively.
+            enforceFam82_ = false;
+            if isfield(cfg,'validation') && isfield(cfg.validation,'enforceModelFamilyConsistency')
+                enforceFam82_ = logical(cfg.validation.enforceModelFamilyConsistency);
+            end
+            if enforceFam82_
+                revgnss.GeoRealWorldScenarioGuard.assertModelFamilyConsistent(cfg);
+            end
+
             % Source truth, report freshness, EOP status.
             if isJ2Truth82_
                 cfg.diagnostics.sourceTruthStatus = 'j2Rk4DefaultOrConfigured';
