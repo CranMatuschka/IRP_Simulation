@@ -159,10 +159,19 @@ cfg.estimator.towerClockMode          = 'perfectCorrection';
 cfg.estimator.towerClockCorrectionSigma_m = 0.5; % used if noisyCorrection
 cfg.estimator.elevationMask_rad       = 5 * pi/180;
 cfg.estimator.attitudeJacobianStep_rad = 1e-6;
-cfg.estimator.sigma_accel_mps2        = 0.01;
+cfg.estimator.sigma_accel_mps2        = 0.01;   % baseline residual-acceleration process noise (SNC): absorbs unmodeled accelerations (SRP, third body, higher-order gravity) in a J2-only filter
 cfg.estimator.dynamics.mode           = 'constantVelocity';
+% Dynamic-model residual-acceleration process noise. processNoise.modelMismatch is the
+% back-compat field the EKF (ReverseGNSSEKF.buildQ_) reads; it carries the EXTRA process
+% noise sized to a truth-vs-EKF propagator gap. It is ZERO/off in a same-family (matched)
+% run and only active in an explicit reduced-dynamics / mismatch run.
 cfg.estimator.processNoise.modelMismatch.enable = false;
 cfg.estimator.processNoise.modelMismatch.sigma_mps2 = 1e-6;
+% Canonical (honest) name for the SAME quantity. finalizeConfig keeps this a read-only
+% mirror of processNoise.modelMismatch (after any auto-scale), so reports can name it by
+% its physical meaning instead of the loaded word "mismatch". Do NOT read this in the EKF.
+cfg.estimator.processNoise.residualAccelerationUncertainty.enable     = false;
+cfg.estimator.processNoise.residualAccelerationUncertainty.sigma_mps2 = 1e-6;
 % Near-zero angular-acceleration noise: attitude stays frozen at truth.
 cfg.estimator.sigma_angAccel_radps2   = 1e-15;
 cfg.estimator.minMeasurementsForUpdate = 4;

@@ -1565,6 +1565,12 @@ classdef ConfigFactory
                 cfg.diagnostics.dynamicsMismatch.dynamicsProcessNoiseConsistency = 'consistent';
             end
 
+            % Keep the honest canonical name a read-only MIRROR of the (possibly auto-scaled)
+            % modelMismatch alias. Never write modelMismatch here: the EKF reads that field,
+            % so mirroring one-way guarantees the resolved process noise Q is unchanged.
+            cfg.estimator.processNoise.residualAccelerationUncertainty = ...
+                cfg.estimator.processNoise.modelMismatch;
+
             % Source truth, report freshness, EOP status.
             if isJ2Truth82_
                 cfg.diagnostics.sourceTruthStatus = 'j2Rk4DefaultOrConfigured';
