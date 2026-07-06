@@ -147,11 +147,32 @@ run_oo_reverse_gnss_report
 
 This will:
 1. Select 4 tests (seed 83) from the active-scope pool, stop if any fail
-2. Run the main 3600 s report with all-toggles, j2Rk4 truth, twoBody EKF, dual-freq L1+L2 AR, full scientific audit
+2. Run the main 3600 s report with all-toggles, j2Rk4 truth, j2 EKF (same-family truth-estimation), dual-freq L1+L2 AR, full scientific audit
 
 ---
 
-### Stage 82 validation procedure (archived)
+### Truth-estimation separation (current default — supersedes the Stage 82 mismatch below)
+
+The default scientific run is now a **realistic synthetic truth-estimation comparison**, not a
+model-mismatch analysis. Truth and estimator share the **same J2 model family**: `masterConfig`
+(and `ScenarioPresets.singleAssetCarrierAttitude`) set `orbit.truth.mode='j2Rk4'` **and**
+`estimator.dynamics.mode='j2'`. The estimator is imperfect only for realistic reasons — perturbed
+initial state + covariance, noisy code/carrier/Doppler measurements, stochastic receiver clock +
+delayed/noisy tower-clock products, atmosphere residuals, antenna calibration uncertainty, float
+ambiguities, and residual-acceleration process noise (`sigma_accel_mps2`). At GEO-equatorial the
+J2 acceleration (~8.3×10⁻⁶ m/s²) is ~1200× below `sigma_accel=0.01 m/s²`, so switching the EKF
+from the old `twoBody` to same-family `j2` moved the converged metrics <0.1 % (the frozen golden
+was deliberately re-captured as the new baseline).
+
+`cfg.validation.enforceModelFamilyConsistency=true` makes `finalizeConfig` hard-block a silent
+truth-vs-EKF family mismatch (via `GeoRealWorldScenarioGuard.assertModelFamilyConsistent`). A
+reduced-dynamics / mismatch experiment is a **non-default, opt-in** analysis mode:
+`cfg.validation.analysisType='explicitMismatchAnalysis'` + `allowTruthModelMismatch=true`. The
+report's "Simulation Physics and Configuration" section carries a **Truth-estimation separation
+audit** table + honest flags (`sameModelFamilies`, `mismatchAnalysis`, `perfectCorrection`,
+`truthAssistedDiagnostics`, `realWorldClaim`, `realisticSyntheticTruthEstimationComparison`).
+
+### Stage 82 validation procedure (archived — historical; the default is now same-family j2, see above)
 
 Stage 82 fixes all stale Stage 80/81 source-truth references and validates J2 dynamics mismatch
 for the GEO single-asset one-way simulation. The preferred truth propagator is now `j2Rk4`
@@ -192,7 +213,7 @@ run_oo_reverse_gnss_report
 
 This will:
 1. Select 4 tests (seed 82) from the active-scope pool (inactive TWSTFT/ISL/two-way/multi-asset tests excluded), stop if any fail
-2. Run the main 3600 s report with all-toggles, j2Rk4 truth, twoBody EKF, dual-freq L1+L2 AR, full scientific audit
+2. Run the main 3600 s report with all-toggles, j2Rk4 truth, j2 EKF (same-family truth-estimation), dual-freq L1+L2 AR, full scientific audit
 3. Verify the PDF: existing scientific summary fields and model-coverage table entries present; Numerical Summary remains final section
 4. Write `output/latest_validation_summary.json` and `.txt`
 
