@@ -123,8 +123,38 @@ matlab -batch "addpath('tests/regression'); run_oo_v1_regression_3600s"       % 
   truth realization (truth enters only via the measurement). The `data/SimData.m` file
   relocation is deferred to Phase 5 (folderization); the immutability + no-leak CONTRACT is
   delivered here. (C-10)
-- **5. Folderize physics behind single entry points** — `models/<domain>/<effect>.m`;
-  per-effect equivalence + finite-difference Jacobian audits.
+- **5. Folderize physics/filter/store out of `+revgnss` — DONE** (`7e254bb`..`9ee2b03`, 22
+  atomic commits 5.3–5.24). Phases 5.1/5.2 first added the discoverable atmosphere façades
+  (`models/atmosphere/{ionosphere,troposphere}.m`). 5.3–5.24 then physically RELOCATED all 25
+  validated physics/filter/store classes into new top-level packages, keeping every classdef
+  NAME identical and retargeting every reference tree-wide (word-boundary safe):
+    - `+models/+atmosphere/` — IonosphereModel, TroposphereModel, MappingFunctions
+    - `+models/+orbit/` — OrbitDynamics, OrbitPropagator
+    - `+models/+frames/` — FrameTimeUtils, GeometryUtils, LightTimeSolver
+    - `+models/+clocks/` — ClockModel, TowerClockCorrectionProvider, ProductClockCovarianceBuilder
+    - `+models/+noise/` — StochasticProcess
+    - `+models/+corrections/` — RangeCorrections
+    - `+models/+errors/` — EnvironmentModel, ErrorChain, BiasArchitecture
+    - `+models/+measurements/` — MeasurementModelUtils, {Code,Carrier,Doppler}MeasurementBuilder,
+      CodeJacobianBuilder, MeasurementModel
+    - `+filter/` — EkfDynamicsPredictor, ReverseGNSSEKF
+    - `+data/` — SimulationDataStore
+  The `models.`/`filter.`/`data.` package prefix (NOT bare flat names) was mandatory: a bare
+  class `ekf`/`orbit`/`data` would silently shadow the ubiquitous same-named VARIABLES. Verified
+  none of `models`/`filter`/`data` is ever used as a variable, no `filter()` builtin is called,
+  and no target file for a `data.SimulationDataStore` ref contains a bare `data` token. The
+  load-bearing typed handle-property decls in ReverseGNSSSimulation.m (`ekf`, `simData`,
+  `errorChain`, `measModel`) and ReverseGNSSEKF.m (`rxClockModel`) were all retargeted; isa()/
+  which() string refs too. The atmosphere façades were repointed to `models.atmosphere.*` and
+  re-pass their bit-for-bit equivalence tests. Diagnostics/report/config/scenario classes stay
+  in `+revgnss` (out of scope). Certification: full 3600s numbers gate PASS (177/177, rel 1e-9)
+  and report `.tex` IDENTICAL=1 at EVERY one of the 10 domain boundaries; smoke gate PASS after
+  every commit. Whole-suite regression diff vs untouched `main` (run_all_tests): ZERO new
+  failures (43 branch failures ⊆ 45 main failures, all pre-existing; +2 fixed, +4 new passing
+  facade/freeze tests) and ZERO "Unable to resolve/Undefined models./filter./data." across all
+  160 tests. Pre-existing (main-baseline) failures NOT caused by this refactor: ClockExact-
+  ReportBuilder `.tex`-output stage sub-tests (~30), legacy `getResults().diag` accesses (8,
+  legacy diagnostics disabled by default), ReportRunner.runSingle "Too many input arguments" (1).
 - **6. One runner — DONE** (`05003be`). `run_oo_v1.m` is the clean canonical runner
   (masterConfig -> runSingle -> `output/<configName>_YYYYMMDD_HHMM.{pdf,mat}` + latest
   pointers; NO env-vars). Verified: report builds end-to-end, naming honored. The legacy
