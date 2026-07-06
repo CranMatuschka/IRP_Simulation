@@ -92,7 +92,12 @@ cfg.estimator.integerAmbiguity.resetOnSlip                = true;
 % one-way (tower-to-space only). No ISL, no TWSTFT, no two-way, no relay,
 % no multi-asset estimation. ISL/TWSTFT remain at ConfigFactory defaults
 % (all disabled) — do not enable them here.
-cfg.scenario.nSpaceAssets = 3;        % 1 = single asset; >1 = helix ISL swarm aiding the primary
+% nSpaceAssets is THE swarm control: 1 = single asset (ground-only, ~8 m / ~26 ns);
+% >1 = helix ISL swarm aiding the primary. The per-reference product bias averages
+% down over the (N-1) secondaries, so the primary clock scales ~1/sqrt(N-1): N=3
+% gives ~0.10 m / ~200 ps, N=6 gives ~0.03 m / ~50 ps (meets the 100 ps = 3 cm
+% budget). Increase for margin; the helix separation is cfg.formation.baseline_m.
+cfg.scenario.nSpaceAssets = 6;        % helix ISL swarm (5 secondaries) -> ~3 cm / ~50 ps
 cfg.scenario.orbitClass   = 'GEO';    % 'GEO' | 'MEO' | 'LEO'
 %                                      % Truth-estimation separation: j2Rk4 truth + j2 EKF (SAME model family, not a mismatch)
 
