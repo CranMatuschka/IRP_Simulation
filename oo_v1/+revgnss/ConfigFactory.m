@@ -1046,15 +1046,11 @@ classdef ConfigFactory
                 cfg.estimator.diffAtt.ambiguityResolution.enabledByFrequency = arMask79_;
             end
 
-            % ---- Stage 79: multi-space-asset guard ---------------------------
-            msg79Multi_ = ['Multi-space-asset estimation is unsupported in oo_v1 active scenario. ' ...
-                'This stage intentionally does not truncate assets.'];
-            if isfield(cfg,'scenario') && isfield(cfg.scenario,'nSpaceAssets') && cfg.scenario.nSpaceAssets > 1
-                error('ConfigFactory:multiAssetUnsupported', '%s', msg79Multi_);
-            end
-            if isfield(cfg,'assets') && numel(cfg.assets) > 1
-                error('ConfigFactory:multiAssetUnsupported', '%s', msg79Multi_);
-            end
+            % ---- Multi-space-asset policy ------------------------------------
+            % nSpaceAssets>1 is supported as a represented-only helix swarm that aids
+            % the PRIMARY (asset 1) EKF via ISL. Joint estimation of secondary states
+            % is NOT enabled; MultiAssetConfig.normalize enforces primary-only
+            % estimation (only asset 1 gets EKF columns). No truncation of assets.
 
             % ---- codeMode validation -------------------------------------
             if isfield(cfg,'measurements') && isfield(cfg.measurements,'codeMode')

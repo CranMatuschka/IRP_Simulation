@@ -505,14 +505,10 @@ cfg.validation.fullSuiteRun             = false;   % full suite never run here
 %   in +revgnss/ScenarioPresets.m for run_geo_realworld_truth_comparison.m.
 % ============================================================
 
-msg79_ = ['Multi-space-asset estimation is unsupported in oo_v1 active scenario. ' ...
-    'This stage intentionally does not truncate assets.'];
-if isfield(cfg,'scenario') && isfield(cfg.scenario,'nSpaceAssets') && cfg.scenario.nSpaceAssets > 1
-    error('ScenarioPresets:multiAssetUnsupported', '%s', msg79_);
-end
-if isfield(cfg,'assets') && numel(cfg.assets) > 1
-    error('ScenarioPresets:multiAssetUnsupported', '%s', msg79_);
-elseif ~isfield(cfg,'assets')
+% Multi-asset swarm: nSpaceAssets>1 is supported as a represented-only helix swarm
+% that aids the PRIMARY (asset 1) EKF via ISL. Only the primary is estimated
+% (enforced in MultiAssetConfig.normalize); secondaries are represented-only truth.
+if ~isfield(cfg,'assets') || isempty(cfg.assets)
     cfg.assets = cfg.asset;
 end
 
@@ -537,7 +533,8 @@ if isempty(arms)
 end
 
 cfg.scenario.name         = 'singleAssetCarrierAttitude';
-cfg.scenario.nSpaceAssets = 1;
+% nSpaceAssets is preserved from the user toggle above (default 1). Setting it > 1
+% activates the represented-only helix swarm; do NOT force it back to 1 here.
 cfg.scenario.nReceivers   = size(arms,2);
 cfg.asset.receiverLeverArms_body_m = arms;
 cfg.asset.receiverLeverArm_body_m  = arms(:,1);
