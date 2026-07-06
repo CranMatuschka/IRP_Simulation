@@ -29,7 +29,7 @@ classdef TowerClockCorrectionProvider
             %   t_prod          product epoch [s]
             %   mode            mode string (towerClockMode from cfg)
             M    = numel(twr_list);
-            mode = revgnss.TowerClockCorrectionProvider.towerClockMode(cfg);
+            mode = models.clocks.TowerClockCorrectionProvider.towerClockMode(cfg);
 
             towerClkTruth = zeros(M,1);
             towerClkModel = zeros(M,1);
@@ -61,7 +61,7 @@ classdef TowerClockCorrectionProvider
                 if isfield(tc2,'latency_s');        latency_s        = tc2.latency_s;        end
             end
             % Stage 71: clocks.tower.product.* takes precedence
-            [~, prodCfg] = revgnss.TowerClockCorrectionProvider.productConfig_(cfg);
+            [~, prodCfg] = models.clocks.TowerClockCorrectionProvider.productConfig_(cfg);
             if prodCfg.updateInterval_s > 0
                 updateInterval_s = prodCfg.updateInterval_s;
             end
@@ -92,16 +92,16 @@ classdef TowerClockCorrectionProvider
                         towerClkModel(mi) = b_t + corrNoise_m(mi);
                         towerClkSigma(mi) = noiseSigma;
                     case 'truthProduct'
-                        [b_p, bd_p] = revgnss.TowerClockCorrectionProvider.clockAtProductEpoch( ...
+                        [b_p, bd_p] = models.clocks.TowerClockCorrectionProvider.clockAtProductEpoch( ...
                             towers{ti}, t_prod);
                         towerClkModel(mi) = b_p + bd_p * (t_s - t_prod);
                     case 'truthHistoryProductNoisy'
                         % Stage 71: realistic product correction.
                         % 1. Read truth clock at product epoch from tower history.
-                        [b_p, bd_p] = revgnss.TowerClockCorrectionProvider.clockAtProductEpoch( ...
+                        [b_p, bd_p] = models.clocks.TowerClockCorrectionProvider.clockAtProductEpoch( ...
                             towers{ti}, t_prod);
                         % 2. Deterministic per-(tower,t_prod) product noise (seeded cache).
-                        [b_noise, d_noise] = revgnss.TowerClockCorrectionProvider.productNoise_( ...
+                        [b_noise, d_noise] = models.clocks.TowerClockCorrectionProvider.productNoise_( ...
                             ti, t_prod, prodCfg.sigmaBias_m, prodCfg.sigmaDrift_mps);
                         % 3. Linear prediction to measurement time.
                         age = t_s - t_prod;
@@ -126,7 +126,7 @@ classdef TowerClockCorrectionProvider
                                  'Use correctionMode=''truthHistoryProduct'' for history-based mode.'], ...
                                 ti, nProd);
                         end
-                        [b_hat, ~] = revgnss.TowerClockCorrectionProvider.evalProductStruct( ...
+                        [b_hat, ~] = models.clocks.TowerClockCorrectionProvider.evalProductStruct( ...
                             cfg, ti, t_s);
                         towerClkModel(mi) = b_hat;
                     case 'productNoisy'
@@ -144,7 +144,7 @@ classdef TowerClockCorrectionProvider
                                  'Use correctionMode=''truthHistoryProductNoisy'' for history-based mode.'], ...
                                 ti, nProd);
                         end
-                        [b_hat, sig_corr] = revgnss.TowerClockCorrectionProvider.evalProductStruct( ...
+                        [b_hat, sig_corr] = models.clocks.TowerClockCorrectionProvider.evalProductStruct( ...
                             cfg, ti, t_s);
                         towerClkModel(mi) = b_hat;
                         towerClkSigma(mi) = sig_corr;
@@ -275,8 +275,8 @@ classdef TowerClockCorrectionProvider
             %   meta        struct (mode string)
 
             M    = numel(twr_list);
-            mode = revgnss.TowerClockCorrectionProvider.towerClockMode(cfg);
-            [~, pc] = revgnss.TowerClockCorrectionProvider.productConfig_(cfg);
+            mode = models.clocks.TowerClockCorrectionProvider.towerClockMode(cfg);
+            [~, pc] = models.clocks.TowerClockCorrectionProvider.productConfig_(cfg);
 
             bdot_truth  = zeros(M,1);
             bdot_model  = zeros(M,1);
@@ -319,7 +319,7 @@ classdef TowerClockCorrectionProvider
                 switch mode
                     case 'perfectCorrection'
                         % Use product-epoch truth drift to be consistent with bias path.
-                        [~, bd_p] = revgnss.TowerClockCorrectionProvider.clockAtProductEpoch( ...
+                        [~, bd_p] = models.clocks.TowerClockCorrectionProvider.clockAtProductEpoch( ...
                             towers{ti}, t_prod_scalar);
                         bdot_truth(mi)  = bd_p;
                         bdot_model(mi)  = bd_p;
@@ -330,9 +330,9 @@ classdef TowerClockCorrectionProvider
                     case 'truthHistoryProductNoisy'
                         % Stage 84: anchor at product-epoch truth drift (not current-epoch).
                         % Consistent with bias path in compute() which uses clockAtProductEpoch.
-                        [~, bd_p] = revgnss.TowerClockCorrectionProvider.clockAtProductEpoch( ...
+                        [~, bd_p] = models.clocks.TowerClockCorrectionProvider.clockAtProductEpoch( ...
                             towers{ti}, t_prod_scalar);
-                        [~, d_noise] = revgnss.TowerClockCorrectionProvider.productNoise_( ...
+                        [~, d_noise] = models.clocks.TowerClockCorrectionProvider.productNoise_( ...
                             ti, t_prod_scalar, pc.sigmaBias_m, pc.sigmaDrift_mps);
                         bdot_truth(mi)  = bd_p;  % product-epoch truth
                         bdot_model(mi)  = bd_p + d_noise;
@@ -343,7 +343,7 @@ classdef TowerClockCorrectionProvider
 
                     case 'truthProduct'
                         % Pure history-based product drift, no noise.
-                        [~, bd_p] = revgnss.TowerClockCorrectionProvider.clockAtProductEpoch( ...
+                        [~, bd_p] = models.clocks.TowerClockCorrectionProvider.clockAtProductEpoch( ...
                             towers{ti}, t_prod_scalar);
                         bdot_truth(mi)  = bd_p;
                         bdot_model(mi)  = bd_p;

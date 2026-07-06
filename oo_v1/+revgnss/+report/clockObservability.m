@@ -46,7 +46,7 @@ function clockObservability(fid, diag, cfg)
         case 'externalTowerCorrections'
             % Stage 72: distinguish product-corrected from perfect/noisy.
             % Read mode from cfg (summary not in scope in this helper).
-            tClkMdG_ = revgnss.TowerClockCorrectionProvider.towerClockMode(cfg);
+            tClkMdG_ = models.clocks.TowerClockCorrectionProvider.towerClockMode(cfg);
             if strcmp(tClkMdG_, 'truthHistoryProductNoisy')
                 diagInfl_ = true;  % Stage 72: diagonal per-row code-R only
                 gaugeStr = ['\texttt{externalTowerCorrections} (product-corrected). ' ...
