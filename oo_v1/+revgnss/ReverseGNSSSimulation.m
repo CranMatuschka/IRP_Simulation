@@ -20,7 +20,7 @@ classdef ReverseGNSSSimulation < handle
         towers      cell
         measModel   models.measurements.MeasurementModel
         errorChain  models.errors.ErrorChain
-        ekf         revgnss.ReverseGNSSEKF
+        ekf         filter.ReverseGNSSEKF
         orbitProp
 
         simData     revgnss.SimulationDataStore

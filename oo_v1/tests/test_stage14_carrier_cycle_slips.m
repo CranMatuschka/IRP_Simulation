@@ -319,7 +319,7 @@ cfg_k.measurements.doppler.enable                      = false;
 
 try
     cfg_k = revgnss.ConfigFactory.finalizeConfig(cfg_k);
-    ekf_k = revgnss.ReverseGNSSEKF(cfg_k, 2);
+    ekf_k = filter.ReverseGNSSEKF(cfg_k, 2);
     sm_k  = ekf_k.stateMap;
 
     if isfield(sm_k,'ambiguityIdx') && sm_k.ambiguityIdx(1,1) > 0

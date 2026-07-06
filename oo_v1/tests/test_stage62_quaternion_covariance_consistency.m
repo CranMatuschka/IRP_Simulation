@@ -12,7 +12,7 @@ results = struct('name',{},'pass',{},'message',{});
 
 % --- T1: Source-order check ---
 try
-    ekfFile = which('revgnss.ReverseGNSSEKF');
+    ekfFile = which('filter.ReverseGNSSEKF');
     src = fileread(ekfFile);
     hasPminus   = ~isempty(strfind(src, 'Pminus = obj.P'));      %#ok<STREMP>
     hasJosephPm = ~isempty(strfind(src, 'IKH * Pminus * IKH'''));  %#ok<STREMP>
@@ -36,7 +36,7 @@ try
     cfg = revgnss.ConfigFactory.defaultConfig();
     cfg = revgnss.ScenarioPresets.apply(cfg, 'singleAssetCarrierAttitude');
     cfg.estimator.attitude.parameterization = 'quaternionErrorState';
-    ekf = revgnss.ReverseGNSSEKF(cfg, cfg.scenario.nTowers);
+    ekf = filter.ReverseGNSSEKF(cfg, cfg.scenario.nTowers);
     x0 = zeros(ekf.nx, 1);
     eul0 = [0.2; -0.1; 0.5];
     x0(ekf.stateMap.euler_idx) = eul0;
@@ -70,7 +70,7 @@ try
     cfg = revgnss.ConfigFactory.defaultConfig();
     cfg = revgnss.ScenarioPresets.apply(cfg, 'singleAssetCarrierAttitude');
     cfg.estimator.attitude.parameterization = 'eulerZYX';
-    ekf = revgnss.ReverseGNSSEKF(cfg, cfg.scenario.nTowers);
+    ekf = filter.ReverseGNSSEKF(cfg, cfg.scenario.nTowers);
     x0 = zeros(ekf.nx, 1);
     x0(ekf.stateMap.euler_idx) = [0.5; -0.2; 1.0];
     ekf.initState(x0, eye(ekf.nx) * 0.01);
@@ -97,7 +97,7 @@ try
     cfg = revgnss.ConfigFactory.defaultConfig();
     cfg = revgnss.ScenarioPresets.apply(cfg, 'singleAssetCarrierAttitude');
     cfg.estimator.attitude.parameterization = 'quaternionErrorState';
-    ekf = revgnss.ReverseGNSSEKF(cfg, cfg.scenario.nTowers);
+    ekf = filter.ReverseGNSSEKF(cfg, cfg.scenario.nTowers);
     x0 = zeros(ekf.nx, 1);
     x0(ekf.stateMap.euler_idx) = [0.1; 0.05; 0.3];
     ekf.initState(x0, eye(ekf.nx) * 0.01);
@@ -123,7 +123,7 @@ try
     cfg = revgnss.ConfigFactory.defaultConfig();
     cfg = revgnss.ScenarioPresets.apply(cfg, 'singleAssetCarrierAttitude');
     cfg.estimator.attitude.parameterization = 'quaternionErrorState';
-    ekf = revgnss.ReverseGNSSEKF(cfg, cfg.scenario.nTowers);
+    ekf = filter.ReverseGNSSEKF(cfg, cfg.scenario.nTowers);
     x0 = zeros(ekf.nx, 1);
     ekf.initState(x0, eye(ekf.nx) * 0.1);
     H   = zeros(2, ekf.nx);

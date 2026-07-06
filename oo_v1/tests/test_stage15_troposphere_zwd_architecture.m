@@ -76,14 +76,14 @@ fprintf('  T-P15d: ZWD state enabled adds nTowers states to EKF dimension ...\n'
 cfg_d = revgnss.ConfigFactory.defaultConfig();
 cfg_d.estimation.troposphereMode = 'none';
 cfg_d = revgnss.ConfigFactory.finalizeConfig(cfg_d);
-ekf_d_off = revgnss.ReverseGNSSEKF(cfg_d, cfg_d.scenario.nTowers);
+ekf_d_off = filter.ReverseGNSSEKF(cfg_d, cfg_d.scenario.nTowers);
 nx_off = ekf_d_off.nx;
 
 cfg_d2 = revgnss.ConfigFactory.defaultConfig();
 cfg_d2.estimation.troposphereMode = 'perTowerZwd';
 cfg_d2 = revgnss.ConfigFactory.finalizeConfig(cfg_d2);
 nT = cfg_d2.scenario.nTowers;
-ekf_d_on = revgnss.ReverseGNSSEKF(cfg_d2, nT);
+ekf_d_on = filter.ReverseGNSSEKF(cfg_d2, nT);
 nx_on = ekf_d_on.nx;
 
 assert(nx_on == nx_off + nT, ...
@@ -149,7 +149,7 @@ cfg_f.measurements.doppler.enable = false;
 try
     cfg_f = revgnss.ConfigFactory.finalizeConfig(cfg_f);
     nT_f  = cfg_f.scenario.nTowers;
-    ekf_f = revgnss.ReverseGNSSEKF(cfg_f, nT_f);
+    ekf_f = filter.ReverseGNSSEKF(cfg_f, nT_f);
     sm_f  = ekf_f.stateMap;
     % Verify both code H and carrier H have positive ZWD columns.
     % We use a synthetic setup: compute carrier H at zenith (el=pi/2).

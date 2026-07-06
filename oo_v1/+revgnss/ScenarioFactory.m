@@ -46,7 +46,7 @@ classdef ScenarioFactory
             measModel = models.measurements.MeasurementModel(cfg, errorChain);
 
             % --- EKF ---------------------------------------------------
-            ekf = revgnss.ReverseGNSSEKF(cfg, nT, asset.clock);
+            ekf = filter.ReverseGNSSEKF(cfg, nT, asset.clock);
 
             % Build initial state from truth + perturbation
             x0 = revgnss.ScenarioFactory.buildInitialState_(cfg, asset, towers, ekf);

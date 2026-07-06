@@ -94,7 +94,7 @@ try
     cfg = revgnss.ConfigFactory.defaultConfig();
     cfg = revgnss.ScenarioPresets.apply(cfg, 'singleAssetCarrierAttitude');
     cfg.estimator.attitude.parameterization = 'quaternionErrorState';
-    ekf = revgnss.ReverseGNSSEKF(cfg, cfg.scenario.nTowers);
+    ekf = filter.ReverseGNSSEKF(cfg, cfg.scenario.nTowers);
     paramOk  = strcmp(ekf.attitudeParameterization, 'quaternionErrorState');
     hasQuatProp = isnumeric(ekf.nominalQuat_wxyz) && numel(ekf.nominalQuat_wxyz) == 4;
     % initState should initialize nominal quaternion from euler
@@ -119,7 +119,7 @@ try
     cfg = revgnss.ConfigFactory.defaultConfig();
     cfg = revgnss.ScenarioPresets.apply(cfg, 'singleAssetCarrierAttitude');
     cfg.estimator.attitude.parameterization = 'quaternionErrorState';
-    ekf = revgnss.ReverseGNSSEKF(cfg, cfg.scenario.nTowers);
+    ekf = filter.ReverseGNSSEKF(cfg, cfg.scenario.nTowers);
     x0 = zeros(ekf.nx, 1);
     eul0 = [0.25; -0.12; 1.1];
     x0(ekf.stateMap.euler_idx) = eul0;

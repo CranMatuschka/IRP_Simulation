@@ -115,7 +115,7 @@ end
 
 % --- T5: Stage 62 quaternion covariance keywords exist in ReverseGNSSEKF ---
 try
-    f = which('revgnss.ReverseGNSSEKF');
+    f = which('filter.ReverseGNSSEKF');
     ok = false;
     if ~isempty(f)
         src = fileread(f);
