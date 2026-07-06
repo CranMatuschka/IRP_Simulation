@@ -2,8 +2,8 @@ classdef BiasArchitecture
     % BiasArchitecture  Static helper: classify all bias/delay terms in a simulation config.
     %
     % Usage:
-    %   s = revgnss.BiasArchitecture.describe(cfg);        % struct array
-    %   T = revgnss.BiasArchitecture.toTable(cfg);         % for report rows
+    %   s = models.errors.BiasArchitecture.describe(cfg);        % struct array
+    %   T = models.errors.BiasArchitecture.toTable(cfg);         % for report rows
     %
     % Each entry in the returned struct array has fields:
     %   term          — human-readable name
@@ -19,12 +19,12 @@ classdef BiasArchitecture
             s = struct('term',{},'status',{},'inEKF',{},'appliedToObs',{},'note',{});
 
             % --- 1. Receiver clock bias ----------------------------------------
-            s(end+1) = revgnss.BiasArchitecture.entry_( ...
+            s(end+1) = models.errors.BiasArchitecture.entry_( ...
                 'Receiver clock bias', 'estimated', true, 'code + carrier + doppler', ...
                 'EKF state b_{rx} (index b_rx_idx). Absorbs unmodelled rx code delays in single-freq mode.');
 
             % --- 2. Receiver clock drift ------------------------------------------
-            s(end+1) = revgnss.BiasArchitecture.entry_( ...
+            s(end+1) = models.errors.BiasArchitecture.entry_( ...
                 'Receiver clock drift', 'estimated', true, 'doppler', ...
                 'EKF state \dot{b}_{rx} (index bdot_rx_idx). Used in Doppler predicted observable.');
 
@@ -43,11 +43,11 @@ classdef BiasArchitecture
                 twrClkStatus = 'external';
                 twrClkNote   = sprintf('Tower clock applied as model correction (mode=%s).', clkMode);
             end
-            s(end+1) = revgnss.BiasArchitecture.entry_( ...
+            s(end+1) = models.errors.BiasArchitecture.entry_( ...
                 'Tower clock bias', twrClkStatus, estimTwr, 'code', twrClkNote);
 
             % --- 4. Tower clock drift ----------------------------------------
-            s(end+1) = revgnss.BiasArchitecture.entry_( ...
+            s(end+1) = models.errors.BiasArchitecture.entry_( ...
                 'Tower clock drift', twrClkStatus, estimTwr, 'doppler', ...
                 ['Drift coupled with bias via [1 dt;0 1] STM. ' twrClkNote]);
 
@@ -65,7 +65,7 @@ classdef BiasArchitecture
                 txStatus = 'disabled';
                 txNote   = 'txCodeBias.useInEKF=false; not in EKF. Set to ''perTowerL1'' to enable.';
             end
-            s(end+1) = revgnss.BiasArchitecture.entry_( ...
+            s(end+1) = models.errors.BiasArchitecture.entry_( ...
                 'Transmitter code hardware delay', txStatus, txInEKF, 'code', txNote);
 
             % --- 6. Receiver code hardware delay --------------------------------
@@ -92,7 +92,7 @@ classdef BiasArchitecture
             end
             rxObs12 = 'none';
             if strcmp(rxStatus,'fixed'); rxObs12 = 'code'; end
-            s(end+1) = revgnss.BiasArchitecture.entry_( ...
+            s(end+1) = models.errors.BiasArchitecture.entry_( ...
                 'Receiver code hardware delay', rxStatus, false, rxObs12, rxNote);
 
             % --- 7. Receiver carrier phase hardware bias ----------------------
@@ -116,11 +116,11 @@ classdef BiasArchitecture
                     rxCStatus = 'disabled';
                     rxCNote   = sprintf('mode=''%s''.', rxCMode12);
             end
-            s(end+1) = revgnss.BiasArchitecture.entry_( ...
+            s(end+1) = models.errors.BiasArchitecture.entry_( ...
                 'Receiver carrier phase hardware bias', rxCStatus, false, 'none', rxCNote);
 
             % --- 8. Transmitter carrier phase hardware bias ------------------
-            s(end+1) = revgnss.BiasArchitecture.entry_( ...
+            s(end+1) = models.errors.BiasArchitecture.entry_( ...
                 'Transmitter carrier phase hardware bias', 'not implemented', false, 'none', ...
                 'Not modelled in Stage 12. In float mode, absorbs into ambiguity with rx phase bias.');
 
@@ -145,7 +145,7 @@ classdef BiasArchitecture
                 ambInEKF  = false;
                 ambObs    = 'none';
             end
-            s(end+1) = revgnss.BiasArchitecture.entry_( ...
+            s(end+1) = models.errors.BiasArchitecture.entry_( ...
                 'Carrier ambiguity (float L1)', ambStatus, ambInEKF, ambObs, ambNote);
 
             % --- 10. Troposphere -----------------------------------------------
@@ -177,7 +177,7 @@ classdef BiasArchitecture
                 tropoNote   = 'Troposphere truth active but no model correction; biases position.';
                 tropoInEKF  = false;
             end
-            s(end+1) = revgnss.BiasArchitecture.entry_( ...
+            s(end+1) = models.errors.BiasArchitecture.entry_( ...
                 'Troposphere (ZWD)', tropoStatus, tropoInEKF, 'code + carrier', tropoNote);
 
             % --- 11. Ionosphere -----------------------------------------------
@@ -206,19 +206,19 @@ classdef BiasArchitecture
                 ionoStatus = 'absorbed';
                 ionoNote   = 'Ionosphere truth active but no model; biases position and clock.';
             end
-            s(end+1) = revgnss.BiasArchitecture.entry_( ...
+            s(end+1) = models.errors.BiasArchitecture.entry_( ...
                 'Ionosphere (L1 code)', ionoStatus, false, 'code', ionoNote);
         end
 
         function rows = toTable(cfg)
             % toTable  Return Nx5 cell array suitable for a LaTeX longtable.
             % Columns: {Term, Status, In EKF?, Applied to observable, Note}
-            s = revgnss.BiasArchitecture.describe(cfg);
+            s = models.errors.BiasArchitecture.describe(cfg);
             rows = cell(numel(s), 5);
             for k = 1:numel(s)
                 rows{k,1} = s(k).term;
                 rows{k,2} = s(k).status;
-                rows{k,3} = revgnss.BiasArchitecture.bool2str_(s(k).inEKF);
+                rows{k,3} = models.errors.BiasArchitecture.bool2str_(s(k).inEKF);
                 rows{k,4} = s(k).appliedToObs;
                 rows{k,5} = s(k).note;
             end

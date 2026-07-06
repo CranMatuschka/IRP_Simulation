@@ -257,7 +257,7 @@ fprintf('    PASS (ConfigFactory:rxCarrierBiasEstimate thrown)\n');
 % ----------------------------------------------------------------
 fprintf('  T-P12l: BiasArchitecture.describe() returns all required terms ...\n');
 cfg_l = revgnss.ConfigFactory.defaultConfig();
-s = revgnss.BiasArchitecture.describe(cfg_l);
+s = models.errors.BiasArchitecture.describe(cfg_l);
 
 requiredTerms = { ...
     'Receiver clock bias', ...
