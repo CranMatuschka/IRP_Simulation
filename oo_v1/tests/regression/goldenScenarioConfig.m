@@ -16,6 +16,19 @@ function cfg = goldenScenarioConfig(durationOverride_s)
 
     cfg = masterConfig();   % masterConfig now includes the singleAssetCarrierAttitude preset (1.2)
 
+    % The frozen golden protects the SINGLE-ASSET reverse-GNSS physics. masterConfig
+    % now defaults to a multi-asset ISL swarm (nSpaceAssets>1); force the single-asset
+    % baseline here so this gate keeps testing the frozen contract regardless of the
+    % swarm default. nSpaceAssets=1 => no formation, and ISL rows never enter the EKF.
+    cfg.scenario.nSpaceAssets           = 1;
+    cfg.measurements.isl.enable         = false;
+    cfg.measurements.isl.code.useInEKF  = false;
+    cfg.measurements.isl.doppler.useInEKF = false;
+    cfg.measurements.isl.timing.enable  = false;
+    cfg.measurements.isl.twoWay.enable  = false;
+    cfg.measurements.isl.twoWay.range.useInEKF   = false;
+    cfg.measurements.isl.twoWay.doppler.useInEKF = false;
+
     % Gate overrides: summary is collected before any report build, so skip PDF/MAT.
     cfg.report.writePdf   = false;
     cfg.report.writeMat   = false;

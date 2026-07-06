@@ -92,7 +92,7 @@ cfg.estimator.integerAmbiguity.resetOnSlip                = true;
 % one-way (tower-to-space only). No ISL, no TWSTFT, no two-way, no relay,
 % no multi-asset estimation. ISL/TWSTFT remain at ConfigFactory defaults
 % (all disabled) — do not enable them here.
-cfg.scenario.nSpaceAssets = 1;        % one estimated spacecraft only
+cfg.scenario.nSpaceAssets = 3;        % 1 = single asset; >1 = helix ISL swarm aiding the primary
 cfg.scenario.orbitClass   = 'GEO';    % 'GEO' | 'MEO' | 'LEO'
 %                                      % Truth-estimation separation: j2Rk4 truth + j2 EKF (SAME model family, not a mismatch)
 
@@ -623,25 +623,49 @@ for k = 1:numel(cfg.towers)
     cfg.towers(k).clock.deterministic = false;
 end
 
-% Disable ISL/TWSTFT: single-asset scenario has no inter-spacecraft links.
-if isfield(cfg,'measurements') && isfield(cfg.measurements,'isl')
+% --- Inter-spacecraft links (ISL) -------------------------------------------
+% Single feature control: cfg.scenario.nSpaceAssets. With one asset there are no
+% links (ISL off, golden single-asset path). With a helix swarm (nSpaceAssets>1)
+% the primary (asset 1) EKF is aided by one-way ISL code+Doppler from every
+% secondary "beacon in space": an extra pseudorange with a non-vertical line of
+% sight that breaks the ground-only radial/clock degeneracy. Secondaries are
+% represented-only precise-orbit references (productAidedExternal); their product
+% uncertainty enters R so the aiding is honest, not perfect-truth. Two-way range
+% and TWSTFT stay diagnostic (no EKF rows).
+if cfg.scenario.nSpaceAssets <= 1
     cfg.measurements.isl.enable = false;
-    % TwoWayISLMeasurementBuilder.validateConfig requires isl.enable=true
-    % when twoWay.enable=true, so we must also disable twoWay.
-    if isfield(cfg.measurements.isl,'twoWay')
-        cfg.measurements.isl.twoWay.enable = false;
-        if isfield(cfg.measurements.isl.twoWay,'range')
-            cfg.measurements.isl.twoWay.range.enable = false;
-            cfg.measurements.isl.twoWay.range.useInEKF = false;
-        end
-        if isfield(cfg.measurements.isl.twoWay,'doppler')
-            cfg.measurements.isl.twoWay.doppler.enable = false;
-            cfg.measurements.isl.twoWay.doppler.useInEKF = false;
-        end
-    end
-    if isfield(cfg.measurements.isl,'timing')
-        cfg.measurements.isl.timing.enable = false;
-    end
+    cfg.measurements.isl.timing.enable = false;
+    cfg.measurements.isl.twoWay.enable = false;
+    cfg.measurements.isl.twoWay.range.enable   = false;
+    cfg.measurements.isl.twoWay.range.useInEKF  = false;
+    cfg.measurements.isl.twoWay.doppler.enable  = false;
+    cfg.measurements.isl.twoWay.doppler.useInEKF = false;
+else
+    cfg.measurements.isl.enable        = true;
+    cfg.measurements.isl.transmitters  = 'all';   % aid from every secondary
+    cfg.measurements.isl.receiverAssetIndex = 1;  % into the primary only
+    cfg.measurements.isl.warmup_s      = 300;     % acquire ISL after the ground fix converges
+    cfg.measurements.isl.timing.enable = true;
+    cfg.measurements.isl.timing.mode   = 'oneWayLightTime';
+    cfg.measurements.isl.code.enable    = true;
+    cfg.measurements.isl.code.useInEKF  = true;
+    cfg.measurements.isl.code.sigma_m   = 1.0;    % one-way ISL code thermal 1-sigma [m]
+    cfg.measurements.isl.doppler.enable   = true;
+    cfg.measurements.isl.doppler.useInEKF = true;
+    cfg.measurements.isl.doppler.sigma_mps = 0.05;
+    cfg.measurements.isl.carrier.enable   = true; % diagnostic-only until ambiguity states exist
+    cfg.measurements.isl.carrier.useInEKF = false;
+    % Represented-secondary precise-orbit/clock product uncertainty (honest aiding).
+    cfg.measurements.isl.product.enable        = true;
+    cfg.measurements.isl.product.sigmaPos_m    = 0.05;
+    cfg.measurements.isl.product.sigmaClock_m  = 0.03;   % ~100 ps reference clock product
+    % Two-way ISL range is ill-conditioned into this near-degenerate filter; keep it
+    % diagnostic (double-counting guard also forbids it alongside one-way code).
+    cfg.measurements.isl.twoWay.enable          = false;
+    cfg.measurements.isl.twoWay.range.enable    = false;
+    cfg.measurements.isl.twoWay.range.useInEKF  = false;
+    cfg.measurements.isl.twoWay.doppler.enable  = false;
+    cfg.measurements.isl.twoWay.doppler.useInEKF = false;
 end
 if isfield(cfg,'measurements') && isfield(cfg.measurements,'twstft')
     cfg.measurements.twstft.enable = false;
