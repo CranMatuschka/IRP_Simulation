@@ -648,7 +648,7 @@ classdef ReportRunner
 
             % ---- Stage 61: quaternion error-state EKF summary fields ----
             summary.stage61Parameterization           = 'eulerZYX';
-            summary.stage61QuatEkfActive              = false;
+            summary.quaternionErrorStateEkfActive              = false;
             summary.stage61InjectionCount             = 0;
             summary.stage61MaxInjectionNorm_rad        = NaN;
             summary.stage61MaxInjectionNorm_deg        = NaN;
@@ -659,9 +659,9 @@ classdef ReportRunner
             summary.stage61PppGradeClaim               = false;
             try
                 summary.stage61Parameterization = sim.ekf.attitudeParameterization;
-                summary.stage61QuatEkfActive    = strcmp(sim.ekf.attitudeParameterization, ...
+                summary.quaternionErrorStateEkfActive    = strcmp(sim.ekf.attitudeParameterization, ...
                     'quaternionErrorState');
-                if summary.stage61QuatEkfActive
+                if summary.quaternionErrorStateEkfActive
                     summary.stage61InjectionCount        = sim.ekf.attitudeInjectionCount;
                     summary.stage61MaxInjectionNorm_rad  = sim.ekf.maxAttitudeInjectionNorm_rad;
                     summary.stage61MaxInjectionNorm_deg  = sim.ekf.maxAttitudeInjectionNorm_rad * 180/pi;
