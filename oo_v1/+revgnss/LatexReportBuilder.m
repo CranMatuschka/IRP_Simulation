@@ -210,7 +210,8 @@ classdef LatexReportBuilder
 
             useLines = {};
             useLines{end+1} = '  + EKF convergence validation (deterministic truth differencing)';
-            useLines{end+1} = '  + Error-budget sensitivity studies (truth-model mismatch)';
+            useLines{end+1} = '  + Realistic synthetic truth-estimation comparison (truth & EKF share the J2 model family)';
+            useLines{end+1} = '  + Explicit reduced-dynamics / model-mismatch analysis (non-default, opt-in)';
             useLines{end+1} = '  + Observable-mode comparison (single-frequency vs IF, carrier float)';
             useLines{end+1} = '  + Algorithm-development scaffold for reverse-GNSS GEO navigation';
             useLines{end+1} = '';

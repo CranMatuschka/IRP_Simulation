@@ -1155,7 +1155,7 @@ classdef ClockExactReportBuilder
                 fprintf(fid, 'Physical NIS & %.2f\\\\\n', summary.physicalNIS);
             end
             if isfield(summary,'knownAmbClass') && ~strcmp(summary.knownAmbClass,'SKIPPED')
-                fprintf(fid, 'KAV result & \\texttt{%s}\\\\\n', strrep(summary.knownAmbClass,'_','\_'));
+                fprintf(fid, 'KAV result (truth-assisted diagnostic; not part of the realistic claim) & \\texttt{%s}\\\\\n', strrep(summary.knownAmbClass,'_','\_'));
             end
             fprintf(fid, '\\midrule\n');
             fprintf(fid, ['\\multicolumn{2}{p{0.94\\textwidth}}{\\textbf{Known v1 limitations:} ' ...

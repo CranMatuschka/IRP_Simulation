@@ -226,8 +226,8 @@ function activePhysicsConfig(fid, cfg, summary, plotPaths, stem, figDir)
     dynMode_ = 'twoBody';
     if isfield(summary,'estimatorDynamicsMode'); dynMode_ = summary.estimatorDynamicsMode;
     elseif isfield(summary,'stage67DynamicsMode'); dynMode_ = summary.stage67DynamicsMode; end
-    mismatch80_ = CE.safeField_(summary,'dynamicsMismatchStatus','not evaluated');
-    fprintf(fid, 'EKF predictor & \\texttt{%s}; mismatch status: %s\\\\\n', strrep(dynMode_,'_','\_'), strrep(mismatch80_,'_','\_'));
+    famStatus80_ = CE.safeField_(summary,'dynamicsMismatchStatus','not evaluated');
+    fprintf(fid, 'EKF predictor & \\texttt{%s}; truth/EKF dynamics family: %s\\\\\n', strrep(dynMode_,'_','\_'), strrep(famStatus80_,'_','\_'));
     fprintf(fid, 'Frames & truth: \\texttt{%s}; measurements: \\texttt{%s}; Earth rotation: \\texttt{%s}\\\\\n', ...
         CE.safeField_(summary,'propagationFrame','ECI'), ...
         CE.safeField_(summary,'measurementFrame','ECEF'), ...
@@ -244,7 +244,7 @@ function activePhysicsConfig(fid, cfg, summary, plotPaths, stem, figDir)
         CE.safeField_(summary,'dopplerLightTimeDerivative','simplifiedV1'), ...
         CE.safeField_(summary,'dopplerModelLevel','frameConsistentV2'));
     fprintf(fid, 'J2 / drag / SRP / 3rd-body & J2 truth mode available; drag/SRP/3rd-body false in active scenario\\\\\n');
-    fprintf(fid, 'J2 mismatch policy & \\texttt{%s}; J2 accel @ GEO: %.2e~m/s$^2$; process-noise consistency: \\texttt{%s}; $\\sigma$/J2\\,ratio=%.2f (tolerated by proc.~noise)\\\\n', ...
+    fprintf(fid, 'J2 dynamics policy & \\texttt{%s}; J2 accel @ GEO: %.2e~m/s$^2$; process-noise consistency: \\texttt{%s}; $\\sigma_{accel}$/J2\\,ratio=%.2f\\\\n', ...
         strrep(CE.safeField_(summary,'j2DefaultPolicy','twoBodyDefaultJ2Available'),'_','\_'), ...
         CE.safeField_(summary,'representativeJ2Accel_mps2',0), ...
         CE.safeField_(summary,'dynamicsProcessNoiseConsistency','unknown'), ...
@@ -256,6 +256,36 @@ function activePhysicsConfig(fid, cfg, summary, plotPaths, stem, figDir)
     fprintf(fid, 'IERS/EOP frame & not implemented; simplified constant-$\\Omega_E$ Earth rotation\\\\\n');
     fprintf(fid, 'DiffAtt schema & \\texttt{%s}\\\\\n', CE.safeField_(summary,'diffAttSchemaStatus','notEvaluated'));
     fprintf(fid, '\\bottomrule\n\\end{tabular}\n\n\\vspace{6pt}\n');
+
+    % ---- Truth-estimation separation audit (MD Stage 95) ---
+    if isfield(summary,'truthEstimationSeparationRows') && iscell(summary.truthEstimationSeparationRows)
+        rows_ = summary.truthEstimationSeparationRows;
+        esc_  = @(s) strrep(strrep(strrep(strrep(strrep(char(s),'&','\&'),'%','\%'),'_','\_'),'#','\#'),'$','\$');
+        yn_   = @(b) CE.yesNo_(logical(b),'true','false');
+        fprintf(fid, '\\textbf{Truth-estimation separation audit}\n\n');
+        fprintf(fid, ['\\textit{Realistic synthetic truth-estimation comparison: truth and estimator use the ' ...
+            'same physical model families; the estimator is imperfect only from initial-state uncertainty, ' ...
+            'noisy measurements, stochastic clocks/products, atmosphere residuals, calibration uncertainty, ' ...
+            'and process noise. Not real-data validation, not POD, not PPP, not a model-mismatch analysis.}\n\n']);
+        fprintf(fid, '\\begin{tabular}{p{0.16\\textwidth}p{0.14\\textwidth}p{0.16\\textwidth}p{0.05\\textwidth}p{0.34\\textwidth}}\n');
+        fprintf(fid, ['\\toprule\n\\textbf{Model} & \\textbf{Truth family} & \\textbf{Estimator family} & ' ...
+            '\\textbf{Same?} & \\textbf{Estimator imperfection source}\\\\\n\\midrule\n']);
+        for ri_ = 1:size(rows_,1)
+            fprintf(fid, '%s & %s & %s & %s & %s\\\\\n', ...
+                esc_(rows_{ri_,1}), esc_(rows_{ri_,2}), esc_(rows_{ri_,3}), esc_(rows_{ri_,4}), esc_(rows_{ri_,5}));
+        end
+        fprintf(fid, '\\bottomrule\n\\end{tabular}\n\n\\vspace{4pt}\n');
+        fprintf(fid, '\\begin{tabular}{lp{0.30\\textwidth}}\n\\toprule\n\\textbf{Separation flag} & \\textbf{Value}\\\\\n\\midrule\n');
+        fprintf(fid, 'Same model families & %s\\\\\n', yn_(CE.safeField_(summary,'teSepSameModelFamilies',false)));
+        fprintf(fid, 'Reduced-dynamics (process noise) & %s\\\\\n', yn_(CE.safeField_(summary,'teSepReducedDynamics',false)));
+        fprintf(fid, 'Model-mismatch analysis & %s\\\\\n', yn_(CE.safeField_(summary,'teSepMismatchAnalysis',false)));
+        fprintf(fid, 'Perfect tower-clock correction & %s\\\\\n', yn_(CE.safeField_(summary,'teSepPerfectCorrection',false)));
+        fprintf(fid, 'Truth-assisted diagnostics (labelled) & %s\\\\\n', yn_(CE.safeField_(summary,'teSepTruthAssistedDiagnostics',false)));
+        fprintf(fid, 'Truth leakage in main filter & %s\\\\\n', yn_(CE.safeField_(summary,'teSepTruthLeakageInMainFilter',false)));
+        fprintf(fid, 'Real-world validation claim & %s\\\\\n', yn_(CE.safeField_(summary,'teSepRealWorldClaim',false)));
+        fprintf(fid, 'Realistic synthetic TE comparison & %s\\\\\n', yn_(CE.safeField_(summary,'realisticSyntheticTruthEstimationComparison',false)));
+        fprintf(fid, '\\bottomrule\n\\end{tabular}\n\n\\vspace{6pt}\n');
+    end
 
     % Stage 81/82: Scientific closure sub-table (no new chapter)
     fprintf(fid, '\\textbf{Scientific closure (Stage~81/82)}\n\n');
