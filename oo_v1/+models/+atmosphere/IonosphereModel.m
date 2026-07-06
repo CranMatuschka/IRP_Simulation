@@ -33,7 +33,7 @@ classdef IonosphereModel
             %   delay_m = +delayPrimary_m * (f_primary / f_signal)^2
             %
             % Code pseudorange is delayed (increases measured range).
-            scale   = revgnss.IonosphereModel.scaleForSignal(signalName, primaryName);
+            scale   = models.atmosphere.IonosphereModel.scaleForSignal(signalName, primaryName);
             delay_m = +delayPrimary_m .* scale;
         end
 
@@ -43,7 +43,7 @@ classdef IonosphereModel
             %   delay_m = -delayPrimary_m * (f_primary / f_signal)^2
             %
             % Carrier phase is advanced (reduces measured range equivalent).
-            scale   = revgnss.IonosphereModel.scaleForSignal(signalName, primaryName);
+            scale   = models.atmosphere.IonosphereModel.scaleForSignal(signalName, primaryName);
             delay_m = -delayPrimary_m .* scale;
         end
 

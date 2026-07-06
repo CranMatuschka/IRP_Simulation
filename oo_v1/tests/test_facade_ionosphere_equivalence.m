@@ -1,5 +1,5 @@
 % test_facade_ionosphere_equivalence  Phase 5: the models/atmosphere/ionosphere façade
-%   must produce output BIT-FOR-BIT identical to revgnss.IonosphereModel. The façade is a
+%   must produce output BIT-FOR-BIT identical to models.atmosphere.IonosphereModel. The façade is a
 %   pure delegation layer, so equivalence is asserted with isequaln (no tolerance).
 thisDir = fileparts(mfilename('fullpath'));
 addpath(fullfile(thisDir, '..'));                          % +revgnss
@@ -16,9 +16,9 @@ for s = 1:numel(signals)
     for d = delays
         a = struct('delayPrimary_m', d, 'signalName', signals{s}, 'primaryName', 'L1');
         o = ionosphere('model', a);
-        assert(isequaln(o.codeDelay_m,    revgnss.IonosphereModel.applyCodeSign(d, signals{s}, 'L1')), ...
+        assert(isequaln(o.codeDelay_m,    models.atmosphere.IonosphereModel.applyCodeSign(d, signals{s}, 'L1')), ...
             'model.codeDelay mismatch (%s, %g)', signals{s}, d);
-        assert(isequaln(o.carrierDelay_m, revgnss.IonosphereModel.applyCarrierSign(d, signals{s}, 'L1')), ...
+        assert(isequaln(o.carrierDelay_m, models.atmosphere.IonosphereModel.applyCarrierSign(d, signals{s}, 'L1')), ...
             'model.carrierDelay mismatch (%s, %g)', signals{s}, d);
         nCheck = nCheck + 2;
     end
@@ -27,14 +27,14 @@ end
 % ---- 'diagnostic' mode: iono scale ----
 for s = 1:numel(signals)
     o = ionosphere('diagnostic', struct('signalName', signals{s}, 'primaryName', 'L1'));
-    assert(isequaln(o.scale, revgnss.IonosphereModel.scaleForSignal(signals{s}, 'L1')), ...
+    assert(isequaln(o.scale, models.atmosphere.IonosphereModel.scaleForSignal(signals{s}, 'L1')), ...
         'diagnostic.scale mismatch (%s)', signals{s});
     nCheck = nCheck + 1;
 end
 
 % ---- 'covariance' mode: IF coefficients ----
 o = ionosphere('covariance', struct('f1_Hz', fL1, 'f2_Hz', fL2));
-[c1, c2] = revgnss.IonosphereModel.ionoFreeCoefficients(fL1, fL2);
+[c1, c2] = models.atmosphere.IonosphereModel.ionoFreeCoefficients(fL1, fL2);
 assert(isequaln(o.c1, c1) && isequaln(o.c2, c2), 'covariance coefficient mismatch');
 nCheck = nCheck + 2;
 

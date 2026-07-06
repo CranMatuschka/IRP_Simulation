@@ -97,7 +97,7 @@ assert(abs(scale_L2_got - scale_L2_expected) < 1e-12, ...
 assert(scale_L2_got > 1.0, 'T-P13c FAILED: L2 iono scale must be > 1 (L2 < L1 freq)');
 
 % Check IonosphereModel.scaleForSignal agrees
-scale_via_model = revgnss.IonosphereModel.scaleForSignal('L2','L1');
+scale_via_model = models.atmosphere.IonosphereModel.scaleForSignal('L2','L1');
 assert(abs(scale_via_model - scale_L2_expected) < 1e-12, ...
     'T-P13c FAILED: IonosphereModel.scaleForSignal L2 mismatch');
 
@@ -116,13 +116,13 @@ fprintf('  T-P13d: Code ionosphere sign is positive (group delay) ...\n');
 I_L1 = 5.0;  % 5 m L1 iono delay
 
 % L1/L1: scale = 1, sign = positive
-code_delay_L1 = revgnss.IonosphereModel.applyCodeSign(I_L1, 'L1', 'L1');
+code_delay_L1 = models.atmosphere.IonosphereModel.applyCodeSign(I_L1, 'L1', 'L1');
 assert(code_delay_L1 > 0, 'T-P13d FAILED: code iono delay on L1 must be positive');
 assert(abs(code_delay_L1 - I_L1) < 1e-12, ...
     'T-P13d FAILED: code iono on L1 must equal I_L1 (scale=1)');
 
 % L2/L1: scaled up by (f1/f2)^2 > 1
-code_delay_L2 = revgnss.IonosphereModel.applyCodeSign(I_L1, 'L2', 'L1');
+code_delay_L2 = models.atmosphere.IonosphereModel.applyCodeSign(I_L1, 'L2', 'L1');
 assert(code_delay_L2 > I_L1, ...
     'T-P13d FAILED: L2 code iono delay must exceed L1 (larger scale)');
 
@@ -134,7 +134,7 @@ fprintf('    L1 code iono = +%.4f m  L2 code iono = +%.4f m  PASS\n', ...
 % ----------------------------------------------------------------
 fprintf('  T-P13e: Carrier ionosphere sign is negative (phase advance) ...\n');
 
-carr_delay_L1 = revgnss.IonosphereModel.applyCarrierSign(I_L1, 'L1', 'L1');
+carr_delay_L1 = models.atmosphere.IonosphereModel.applyCarrierSign(I_L1, 'L1', 'L1');
 assert(carr_delay_L1 < 0, 'T-P13e FAILED: carrier iono delay on L1 must be negative');
 assert(abs(carr_delay_L1 + I_L1) < 1e-12, ...
     'T-P13e FAILED: carrier iono on L1 must equal -I_L1');
@@ -143,7 +143,7 @@ assert(abs(carr_delay_L1 + I_L1) < 1e-12, ...
 assert(abs(code_delay_L1 + carr_delay_L1) < 1e-12, ...
     'T-P13e FAILED: code + carrier iono must sum to zero at L1');
 
-carr_delay_L2 = revgnss.IonosphereModel.applyCarrierSign(I_L1, 'L2', 'L1');
+carr_delay_L2 = models.atmosphere.IonosphereModel.applyCarrierSign(I_L1, 'L2', 'L1');
 assert(carr_delay_L2 < carr_delay_L1, ...
     'T-P13e FAILED: L2 carrier iono must be more negative than L1');
 
@@ -157,7 +157,7 @@ fprintf('  T-P13f: IF coefficients satisfy c1+c2=1 and c1/f1^2+c2/f2^2=0 ...\n')
 
 f1 = 1575.42e6;
 f2 = 1227.60e6;
-[c1, c2] = revgnss.IonosphereModel.ionoFreeCoefficients(f1, f2);
+[c1, c2] = models.atmosphere.IonosphereModel.ionoFreeCoefficients(f1, f2);
 
 tol = 1e-12;
 assert(abs(c1 + c2 - 1) < tol, ...
