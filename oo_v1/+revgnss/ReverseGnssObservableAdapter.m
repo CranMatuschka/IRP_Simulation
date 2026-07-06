@@ -40,16 +40,20 @@ classdef ReverseGnssObservableAdapter
             end
             endpoints = stack.endpoints;
             links = stack.links;
-            txEp = revgnss.EndpointDescriptor.spacecraftTransmitter( ...
-                islInfo.transmitterAssetName, islInfo.transmitterAssetIndex);
-            if ~any(strcmp({endpoints.id}, txEp.id))
-                endpoints(end+1) = txEp;
+            % Register an endpoint + one-way link for every transmitting secondary
+            % (the swarm can aid the primary from multiple assets at once).
+            txIdxList  = islInfo.transmitterAssetIndex;
+            txNameList = {islInfo.transmitterAssetName};
+            if isfield(islInfo,'transmitterList') && ~isempty(islInfo.transmitterList)
+                txIdxList  = islInfo.transmitterList;
+                txNameList = islInfo.transmitterNames;
             end
-            link = revgnss.LinkDescriptor.islOneWay( ...
-                islInfo.transmitterAssetName, islInfo.transmitterAssetIndex, ...
-                islInfo.receiverAssetName, islInfo.receiverAssetIndex);
-            if ~any(strcmp({links.id}, link.id))
-                links(end+1) = link;
+            for tt = 1:numel(txIdxList)
+                txEp = revgnss.EndpointDescriptor.spacecraftTransmitter(txNameList{tt}, txIdxList(tt));
+                if ~any(strcmp({endpoints.id}, txEp.id)); endpoints(end+1) = txEp; end %#ok<AGROW>
+                link = revgnss.LinkDescriptor.islOneWay( ...
+                    txNameList{tt}, txIdxList(tt), islInfo.receiverAssetName, islInfo.receiverAssetIndex);
+                if ~any(strcmp({links.id}, link.id)); links(end+1) = link; end %#ok<AGROW>
             end
             rows = stack.rows;
             startIdx = numel(rows);
