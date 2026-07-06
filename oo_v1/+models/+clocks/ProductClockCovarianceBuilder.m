@@ -59,14 +59,14 @@ classdef ProductClockCovarianceBuilder
             end
 
             if doSPD && nBlocks > 0
-                R = revgnss.ProductClockCovarianceBuilder.spdGuard_(R, jitter_m2);
+                R = models.clocks.ProductClockCovarianceBuilder.spdGuard_(R, jitter_m2);
             end
 
             info.dopplerProductCovApplied     = nBlocks > 0;
             info.dopplerProductCovBlocks       = nBlocks;
             info.dopplerProductCovMaxSigma_mps = maxSigma;
             info.dopplerProductCovSPD          = doSPD;
-            info.dopplerRCondition             = revgnss.ProductClockCovarianceBuilder.rcond_(R);
+            info.dopplerRCondition             = models.clocks.ProductClockCovarianceBuilder.rcond_(R);
         end
 
         function [R, info] = addCarrierDriftBlock(R, towerIdx, t_prod, age, sigmaDrift, cfg)
@@ -111,7 +111,7 @@ classdef ProductClockCovarianceBuilder
             end
 
             if doSPD && nBlocks > 0
-                R = revgnss.ProductClockCovarianceBuilder.spdGuard_(R, jitter_m2);
+                R = models.clocks.ProductClockCovarianceBuilder.spdGuard_(R, jitter_m2);
             end
 
             info.carrierProductCovApplied       = nBlocks > 0;
@@ -121,7 +121,7 @@ classdef ProductClockCovarianceBuilder
             info.carrierProductBiasTermIncluded  = false;
             info.carrierProductDriftTermIncluded = nBlocks > 0;
             info.carrierProductBoundaryHandling  = 'withinProductEpochOnlyV1';
-            info.carrierRCondition               = revgnss.ProductClockCovarianceBuilder.rcond_(R);
+            info.carrierRCondition               = models.clocks.ProductClockCovarianceBuilder.rcond_(R);
         end
 
         function [R, info] = addSharedProductClockStack(R, errStruct, cfg)
@@ -157,22 +157,22 @@ classdef ProductClockCovarianceBuilder
             nRows = size(R,1);
             if M_code <= 0 || nRows ~= M_code + M_dop + M_car; return; end
 
-            pc = revgnss.ProductClockCovarianceBuilder.productCfg_(cfg);
+            pc = models.clocks.ProductClockCovarianceBuilder.productCfg_(cfg);
 
             codeRows = (1:M_code)';
             codeTower = zeros(M_code,1);
             try; codeTower = errStruct.towerIdx_perMeas(:); catch; end
             if numel(codeTower) ~= M_code; codeTower = zeros(M_code,1); end
-            codeEpoch = revgnss.ProductClockCovarianceBuilder.expand_( ...
-                revgnss.ProductClockCovarianceBuilder.fieldOr_(errStruct,'towerClockProductEpoch_s',0), M_code);
-            codeAge = revgnss.ProductClockCovarianceBuilder.expand_( ...
-                revgnss.ProductClockCovarianceBuilder.fieldOr_(errStruct,'towerClockProductAge_s',0), M_code);
+            codeEpoch = models.clocks.ProductClockCovarianceBuilder.expand_( ...
+                models.clocks.ProductClockCovarianceBuilder.fieldOr_(errStruct,'towerClockProductEpoch_s',0), M_code);
+            codeAge = models.clocks.ProductClockCovarianceBuilder.expand_( ...
+                models.clocks.ProductClockCovarianceBuilder.fieldOr_(errStruct,'towerClockProductAge_s',0), M_code);
 
             if applyDop && M_dop > 0 && crossCodeDop
                 dopRows = (M_code + (1:M_dop))';
-                dopTower = revgnss.ProductClockCovarianceBuilder.fieldOr_(errStruct.doppler,'towerIdx',zeros(M_dop,1));
-                dopEpoch = revgnss.ProductClockCovarianceBuilder.fieldOr_(errStruct.doppler,'productEpoch_s',zeros(M_dop,1));
-                dopSigma = revgnss.ProductClockCovarianceBuilder.fieldOr_(errStruct.doppler,'sigmaDrift_mps',zeros(M_dop,1));
+                dopTower = models.clocks.ProductClockCovarianceBuilder.fieldOr_(errStruct.doppler,'towerIdx',zeros(M_dop,1));
+                dopEpoch = models.clocks.ProductClockCovarianceBuilder.fieldOr_(errStruct.doppler,'productEpoch_s',zeros(M_dop,1));
+                dopSigma = models.clocks.ProductClockCovarianceBuilder.fieldOr_(errStruct.doppler,'sigmaDrift_mps',zeros(M_dop,1));
                 for i = 1:M_code
                     for j = 1:M_dop
                         if codeTower(i) == dopTower(j) && abs(codeEpoch(i)-dopEpoch(j)) < 1e-6
@@ -190,10 +190,10 @@ classdef ProductClockCovarianceBuilder
             if applyCar && M_car > 0
                 carRows = (M_code + M_dop + (1:M_car))';
                 cp = errStruct.carrierPhase;
-                carTower = revgnss.ProductClockCovarianceBuilder.fieldOr_(cp,'towerIdx',zeros(M_car,1));
-                carEpoch = revgnss.ProductClockCovarianceBuilder.fieldOr_(cp,'productEpoch_s',zeros(M_car,1));
-                carAge = revgnss.ProductClockCovarianceBuilder.fieldOr_(cp,'productAge_s',zeros(M_car,1));
-                carSigma = revgnss.ProductClockCovarianceBuilder.fieldOr_(cp,'sigmaDrift_mps',zeros(M_car,1));
+                carTower = models.clocks.ProductClockCovarianceBuilder.fieldOr_(cp,'towerIdx',zeros(M_car,1));
+                carEpoch = models.clocks.ProductClockCovarianceBuilder.fieldOr_(cp,'productEpoch_s',zeros(M_car,1));
+                carAge = models.clocks.ProductClockCovarianceBuilder.fieldOr_(cp,'productAge_s',zeros(M_car,1));
+                carSigma = models.clocks.ProductClockCovarianceBuilder.fieldOr_(cp,'sigmaDrift_mps',zeros(M_car,1));
                 for i = 1:M_code
                     for j = 1:M_car
                         if codeTower(i) == carTower(j) && abs(codeEpoch(i)-carEpoch(j)) < 1e-6
@@ -225,7 +225,7 @@ classdef ProductClockCovarianceBuilder
                 end
             end
             info.applied = info.nCrossTerms > 0;
-            info.condition = revgnss.ProductClockCovarianceBuilder.rcond_(R);
+            info.condition = models.clocks.ProductClockCovarianceBuilder.rcond_(R);
         end
 
     end

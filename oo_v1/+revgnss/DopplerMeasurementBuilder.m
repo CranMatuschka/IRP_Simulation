@@ -187,7 +187,7 @@ classdef DopplerMeasurementBuilder
                 % Block + diagonal: let addDopplerDriftBlock own the full drift contribution.
                 % Do NOT pre-add drift sigma to Rd_diag — that would double-count.
                 try
-                    [Rd, doppCovInfo] = revgnss.ProductClockCovarianceBuilder.addDopplerDriftBlock( ...
+                    [Rd, doppCovInfo] = models.clocks.ProductClockCovarianceBuilder.addDopplerDriftBlock( ...
                         Rd, twr_list, t_prod_per_row, twr_drift_sigma, cfg);
                     dopplerDriftDiagPolicy = 'trackingOnlyPlusBlock';
                 catch; end

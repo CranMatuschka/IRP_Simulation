@@ -276,7 +276,7 @@ classdef MeasurementModel < handle
 
             % Stage 86: restore cross-observable covariance for shared clock
             % product errors after code/Doppler/carrier rows have been stacked.
-            [R, stackCovInfo] = revgnss.ProductClockCovarianceBuilder.addSharedProductClockStack( ...
+            [R, stackCovInfo] = models.clocks.ProductClockCovarianceBuilder.addSharedProductClockStack( ...
                 R, errStruct, obj.cfg);
             errStruct.productClockStackCov = stackCovInfo;
 
