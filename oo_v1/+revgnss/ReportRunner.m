@@ -1920,6 +1920,36 @@ classdef ReportRunner
                 summary.finalClockBiasRMS_m = NaN;
             end
 
+            % --- Honest whole-run error metrics (NOT just the final 20 epochs) ---
+            % finalPositionRMS_m / finalClockBiasRMS_m above are the RMS over only the
+            % last 20 epochs, which can read as "converged" even when the estimate
+            % wanders for most of the run. In a single-asset / ground-tower geometry the
+            % receiver clock and the nadir position are near-degenerate (weak
+            % observability), so the two error series track each other. These fields
+            % report the whole-run figures and that coupling so the summary cannot
+            % overstate convergence.
+            try
+                peW = diag.getPositionErrors();  peW = peW(:);
+                cbW = diag.getClockBiasErrors(); cbW = cbW(:);
+                summary.positionRMS_runwide_m  = rms(peW);
+                summary.positionErrorMedian_m  = median(peW);
+                summary.positionErrorMax_m     = max(peW);
+                summary.clockBiasRMS_runwide_m = rms(cbW);
+                m = min(numel(peW), numel(cbW));
+                if m > 2 && std(peW(1:m)) > 0 && std(abs(cbW(1:m))) > 0
+                    cc = corrcoef(peW(1:m), abs(cbW(1:m)));
+                    summary.positionClockErrorCorr = cc(1, 2);
+                else
+                    summary.positionClockErrorCorr = NaN;
+                end
+            catch
+                summary.positionRMS_runwide_m  = NaN;
+                summary.positionErrorMedian_m  = NaN;
+                summary.positionErrorMax_m     = NaN;
+                summary.clockBiasRMS_runwide_m = NaN;
+                summary.positionClockErrorCorr = NaN;
+            end
+
             % Contribution-based metrics
             summary.deterministicMismatchRMS_last20_m = NaN;
             summary.stochasticNoiseRMS_last20_m       = NaN;
@@ -2252,10 +2282,15 @@ classdef ReportRunner
                 end
             end
             L{end+1} = '';
-            L{end+1} = '--- Metrics (last 20 epochs) ---';
-            L{end+1} = sprintf('Final pos error       : %.4f m', summary.finalPositionError_m);
-            L{end+1} = sprintf('Position RMS (last20%%) : %.4f m', summary.finalPositionRMS_m);
-            L{end+1} = sprintf('Clock bias RMS (last20%%): %.4f m', summary.finalClockBiasRMS_m);
+            L{end+1} = '--- Metrics: whole run (honest) vs final 20 epochs ---';
+            L{end+1} = sprintf('Position RMS  whole-run : %.4f m   (median %.4f, max %.4f)', ...
+                summary.positionRMS_runwide_m, summary.positionErrorMedian_m, summary.positionErrorMax_m);
+            L{end+1} = sprintf('Clock RMS     whole-run : %.4f m', summary.clockBiasRMS_runwide_m);
+            L{end+1} = sprintf('Position<->clock err corr: %+.3f   (|corr|~1 => near-unobservable coupling)', ...
+                summary.positionClockErrorCorr);
+            L{end+1} = sprintf('Final pos error         : %.4f m', summary.finalPositionError_m);
+            L{end+1} = sprintf('Position RMS  final 20ep: %.4f m', summary.finalPositionRMS_m);
+            L{end+1} = sprintf('Clock bias RMS final 20ep: %.4f m', summary.finalClockBiasRMS_m);
             L{end+1} = sprintf('Mean NIS              : %.2f  (expected %.1f)', ...
                 summary.meanNIS, summary.expectedNIS);
             L{end+1} = sprintf('Det. mismatch RMS     : %.4f m', ...

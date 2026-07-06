@@ -584,6 +584,9 @@ Post-fit residual RMS [m] & --- & 0.756969 m\\
 \end{tabular}
 \end{center}
 \normalsize
+\vspace{0.15cm}
+\noindent \textit{Whole-run vs final window: 3D position error is 22.514215 m median (max 91.577454 m) over the whole run, versus 11.707929 m RMS over the final 20 epochs. The position$\leftrightarrow$clock error correlation is +1.00 --- in this single-asset ground-tower geometry the receiver clock and the nadir position are near-degenerate (weak observability), so the final-window figure understates the whole-run error.}
+
 \vspace{0.2cm}
 \noindent \textit{Stage        : 85 -- Formal Synthetic Validation Campaign and Statistical Consistency Audit}
 

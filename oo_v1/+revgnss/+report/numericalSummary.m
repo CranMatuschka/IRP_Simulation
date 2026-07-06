@@ -98,6 +98,24 @@ function numericalSummary(fid, cfg, summary, diag)
     fprintf(fid, 'Post-fit residual RMS [m] & --- & %s\\\\\n', CE.fmtM_(poRMS));
     fprintf(fid, '\\bottomrule\n\\end{tabular}\n\\end{center}\n\\normalsize\n');
 
+    % Honest whole-run caveat: the "Final sample" / final-20-epoch numbers can read
+    % as converged even when the estimate wanders for most of the run, because in this
+    % single-asset ground-tower geometry the receiver clock and the nadir position are
+    % near-degenerate (weak observability). Surface the whole-run median/max and the
+    % position<->clock error coupling so the report cannot overstate convergence.
+    posMedH   = CE.safeField_(summary, 'positionErrorMedian_m', NaN);
+    posMaxH   = CE.safeField_(summary, 'positionErrorMax_m',    NaN);
+    finalRmsH = CE.safeField_(summary, 'finalPositionRMS_m',    NaN);
+    pcCorrH   = CE.safeField_(summary, 'positionClockErrorCorr', NaN);
+    if isfinite(posMedH) && isfinite(finalRmsH)
+        fprintf(fid, ['\\vspace{0.15cm}\n\\noindent \\textit{Whole-run vs final window: 3D position ' ...
+            'error is %s median (max %s) over the whole run, versus %s RMS over the final 20 epochs. ' ...
+            'The position$\\leftrightarrow$clock error correlation is %+.2f --- in this single-asset ' ...
+            'ground-tower geometry the receiver clock and the nadir position are near-degenerate ' ...
+            '(weak observability), so the final-window figure understates the whole-run error.}\n\n'], ...
+            CE.fmtM_(posMedH), CE.fmtM_(posMaxH), CE.fmtM_(finalRmsH), pcCorrH);
+    end
+
     % Version and test status note
     testLines = revgnss.ReportStatus.summaryLines();
     if ~isempty(testLines)
