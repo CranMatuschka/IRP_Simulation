@@ -47,7 +47,7 @@ classdef EkfDynamicsPredictor
             %
             % Returns info struct with energy, frame, mode diagnostics.
 
-            info.mode                    = revgnss.EkfDynamicsPredictor.mode(cfg);
+            info.mode                    = filter.EkfDynamicsPredictor.mode(cfg);
             info.frameModel              = 'constantEarthRotation';
             info.usedInertialPropagation = false;
             info.limitations             = ['No drag, SRP, third bodies, EOP/IERS, ', ...
@@ -118,7 +118,7 @@ classdef EkfDynamicsPredictor
             %   Columns 1-3: derivatives w.r.t. r (position perturbation).
             %   Columns 4-6: derivatives w.r.t. v (velocity perturbation).
 
-            m = revgnss.EkfDynamicsPredictor.mode(cfg);
+            m = filter.EkfDynamicsPredictor.mode(cfg);
 
             if strcmp(m, 'constantVelocity')
                 % Analytic STM for constant-velocity: [I dtI; 0 I]
@@ -142,8 +142,8 @@ classdef EkfDynamicsPredictor
             % Columns 1-3: position derivatives
             for k = 1:3
                 dp = zeros(3,1); dp(k) = dr_step;
-                [rp,vp] = revgnss.EkfDynamicsPredictor.propagateEcef(r+dp, v, dt_s, t0_s, cfg);
-                [rm,vm] = revgnss.EkfDynamicsPredictor.propagateEcef(r-dp, v, dt_s, t0_s, cfg);
+                [rp,vp] = filter.EkfDynamicsPredictor.propagateEcef(r+dp, v, dt_s, t0_s, cfg);
+                [rm,vm] = filter.EkfDynamicsPredictor.propagateEcef(r-dp, v, dt_s, t0_s, cfg);
                 Phi6(1:3, k) = (rp - rm) / (2*dr_step);
                 Phi6(4:6, k) = (vp - vm) / (2*dr_step);
             end
@@ -151,8 +151,8 @@ classdef EkfDynamicsPredictor
             % Columns 4-6: velocity derivatives
             for k = 1:3
                 dv = zeros(3,1); dv(k) = dv_step;
-                [rp,vp] = revgnss.EkfDynamicsPredictor.propagateEcef(r, v+dv, dt_s, t0_s, cfg);
-                [rm,vm] = revgnss.EkfDynamicsPredictor.propagateEcef(r, v-dv, dt_s, t0_s, cfg);
+                [rp,vp] = filter.EkfDynamicsPredictor.propagateEcef(r, v+dv, dt_s, t0_s, cfg);
+                [rm,vm] = filter.EkfDynamicsPredictor.propagateEcef(r, v-dv, dt_s, t0_s, cfg);
                 Phi6(1:3, k+3) = (rp - rm) / (2*dv_step);
                 Phi6(4:6, k+3) = (vp - vm) / (2*dv_step);
             end

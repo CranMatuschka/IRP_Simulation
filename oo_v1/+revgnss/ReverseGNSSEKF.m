@@ -252,16 +252,16 @@ classdef ReverseGNSSEKF < handle
                 'specificEnergyInitial_Jkg',NaN,'specificEnergyFinal_Jkg',NaN, ...
                 'energyDrift_Jkg',NaN,'warnings',{{}});
             Phi6 = [];  % empty = use default F block in buildF_
-            dynMode = revgnss.EkfDynamicsPredictor.mode(obj.cfg);
+            dynMode = filter.EkfDynamicsPredictor.mode(obj.cfg);
             if strcmp(dynMode, 'constantVelocity')
                 r_new = r + dt_s * v;
                 v_new = v;
                 dynInfo.mode = 'constantVelocity';
             else
                 try
-                    [r_new, v_new, dynInfo] = revgnss.EkfDynamicsPredictor.propagateEcef( ...
+                    [r_new, v_new, dynInfo] = filter.EkfDynamicsPredictor.propagateEcef( ...
                         r, v, dt_s, t0_s, obj.cfg);
-                    Phi6 = revgnss.EkfDynamicsPredictor.finiteDiffStm6( ...
+                    Phi6 = filter.EkfDynamicsPredictor.finiteDiffStm6( ...
                         r, v, dt_s, t0_s, obj.cfg);
                 catch ME_dyn
                     warning('ReverseGNSSEKF:dynamicsFailed', ...
