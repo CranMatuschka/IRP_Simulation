@@ -866,6 +866,30 @@ classdef ReportRunner
                 end
             catch; end
 
+            % ---- MD Stage 95: truth-estimation separation audit (honest, COMPUTED) --------
+            % Booleans/strings are ignored by extractMetrics (logicals are not numeric in
+            % MATLAB), so these never touch the frozen golden fingerprint; the report reads
+            % them directly. Computed from cfg via the guard, so they stay honest in every
+            % scenario (reduced-dynamics default reports sameModelFamilies=false; a matched
+            % same-family run reports true). The rows cell drives the report table (Step 6).
+            try
+                teAudit_ = revgnss.GeoRealWorldScenarioGuard.auditImperfectionSources(cfg);
+                summary.teSepTruthDynamicsFamily      = teAudit_.truthDynamicsFamily;
+                summary.teSepEkfDynamicsFamily        = teAudit_.ekfDynamicsFamily;
+                summary.teSepSameModelFamilies        = logical(teAudit_.sameModelFamilies);
+                summary.teSepReducedDynamics          = logical(teAudit_.reducedDynamicsWithProcessNoise);
+                summary.teSepMismatchAnalysis         = logical(teAudit_.mismatchAnalysis);
+                summary.teSepPerfectCorrection        = logical(teAudit_.perfectCorrection);
+                summary.teSepTruthAssistedDiagnostics = logical(teAudit_.truthAssistedDiagnostics);
+                summary.teSepTruthLeakageInMainFilter = logical(teAudit_.truthLeakageInMainFilter);
+                summary.teSepRealWorldClaim           = logical(teAudit_.realWorldClaim);
+                summary.realisticSyntheticTruthEstimationComparison = ...
+                    logical(teAudit_.realisticSyntheticTruthEstimationComparison);
+                summary.truthEstimationSeparationRows = teAudit_.rows;   % cell table for the report
+            catch teErr_
+                summary.teSepStatus = ['auditUnavailable: ' teErr_.message];
+            end
+
             % ---- Stage 82: J2 diagnostics and source-truth summary --------
             summary.representativeJ2Accel_mps2 = 0;
             try; summary.representativeJ2Accel_mps2 = cfg.diagnostics.dynamicsMismatch.representativeJ2Accel_mps2; catch; end
