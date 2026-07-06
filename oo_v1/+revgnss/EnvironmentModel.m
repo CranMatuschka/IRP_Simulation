@@ -249,7 +249,7 @@ classdef EnvironmentModel < handle
                 if isfield(ef,'mappingModel');  ionoMapKind   = ef.mappingModel;  end
                 if isfield(ef,'shellHeight_m'); shellHeight_m = ef.shellHeight_m; end
             end
-            mapping   = revgnss.MappingFunctions.ionosphere( ...
+            mapping   = models.atmosphere.MappingFunctions.ionosphere( ...
                 max(elevation_rad, elvFloor), ionoMapKind, shellHeight_m);
             freqScale = (f_L1_Hz / freqHz)^2;
 

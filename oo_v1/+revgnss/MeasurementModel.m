@@ -193,7 +193,7 @@ classdef MeasurementModel < handle
                 for mi_z = 1:M
                     ti_z = twr_list(mi_z);
                     if ti_z <= numel(stateMap.zwdIdx) && stateMap.zwdIdx(ti_z) > 0
-                        mf_z = revgnss.MappingFunctions.troposphere( ...
+                        mf_z = models.atmosphere.MappingFunctions.troposphere( ...
                             errStruct.elevations_rad(mi_z), mfKind);
                         H_pr(mi_z, stateMap.zwdIdx(ti_z)) = mf_z;
                     end

@@ -59,7 +59,7 @@ classdef TroposphereModel
             % Returns mapping factor (dimensionless, >= 1 for el in (0, pi/2]).
             if nargin < 2; cfg = struct(); end
             kind = revgnss.MeasurementModelUtils.zwdMappingKind(cfg);
-            mf   = revgnss.MappingFunctions.troposphere(elevation_rad, kind);
+            mf   = models.atmosphere.MappingFunctions.troposphere(elevation_rad, kind);
         end
 
         function flag = isZwdEstimated(cfg, stateMap)

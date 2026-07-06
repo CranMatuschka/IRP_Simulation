@@ -18,7 +18,7 @@ fprintf('=== test_stage7a_iono_mapping ===\n');
 % T1: simpleSecant at zenith = 1/sin(90) = 1.0
 % ----------------------------------------------------------------
 fprintf('  T1: simpleSecant at zenith ...\n');
-m_zen = revgnss.MappingFunctions.ionosphere(pi/2, 'simpleSecant');
+m_zen = models.atmosphere.MappingFunctions.ionosphere(pi/2, 'simpleSecant');
 assert(abs(m_zen - 1.0) < 1e-12, 'T1 FAILED: simpleSecant at zenith=%.10f, expected 1.0', m_zen);
 fprintf('    simpleSecant at 90 deg = %.10f: PASS\n', m_zen);
 
@@ -26,7 +26,7 @@ fprintf('    simpleSecant at 90 deg = %.10f: PASS\n', m_zen);
 % T2: thinShell at zenith returns exactly 1.0
 % ----------------------------------------------------------------
 fprintf('  T2: thinShell at zenith = 1.0 ...\n');
-m_ts_zen = revgnss.MappingFunctions.ionosphere(pi/2, 'thinShell', 350e3);
+m_ts_zen = models.atmosphere.MappingFunctions.ionosphere(pi/2, 'thinShell', 350e3);
 % At zenith, cos(90) = 0, so arg = 0, sqrt(1-0) = 1, M = 1
 assert(abs(m_ts_zen - 1.0) < 1e-10, 'T2 FAILED: thinShell at zenith=%.10f, expected 1.0', m_ts_zen);
 fprintf('    thinShell at 90 deg = %.10f: PASS\n', m_ts_zen);
@@ -38,8 +38,8 @@ fprintf('    thinShell at 90 deg = %.10f: PASS\n', m_ts_zen);
 % ----------------------------------------------------------------
 fprintf('  T3: thinShell < simpleSecant at low elevation ...\n');
 el_low = 10 * pi/180;
-m_sec = revgnss.MappingFunctions.ionosphere(el_low, 'simpleSecant');
-m_ts  = revgnss.MappingFunctions.ionosphere(el_low, 'thinShell', 350e3);
+m_sec = models.atmosphere.MappingFunctions.ionosphere(el_low, 'simpleSecant');
+m_ts  = models.atmosphere.MappingFunctions.ionosphere(el_low, 'thinShell', 350e3);
 assert(m_ts < m_sec, 'T3 FAILED: thinShell(10 deg)=%.4f should be < simpleSecant(10 deg)=%.4f', m_ts, m_sec);
 fprintf('    thinShell(10 deg)=%.4f < simpleSecant(10 deg)=%.4f: PASS\n', m_ts, m_sec);
 
@@ -84,7 +84,7 @@ fprintf('    thinShell(10 deg)=%.4f vs secant=%.4f, diff=%.1f%%: PASS\n', ...
 % T6: no magic constant 1.57 in mapping code paths
 % ----------------------------------------------------------------
 fprintf('  T6: no magic 1.57 in MappingFunctions.ionosphere ...\n');
-src = fileread(which('revgnss.MappingFunctions'));
+src = fileread(which('models.atmosphere.MappingFunctions'));
 % The critical check: 1.57 was a bogus approximation used in some Klobuchar code
 % Our thin-shell uses only Earth radius, shell height, and sqrt/cos
 assert(~contains(src, '1.57'), ...

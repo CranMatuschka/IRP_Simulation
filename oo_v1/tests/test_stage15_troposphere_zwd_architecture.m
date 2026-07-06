@@ -154,8 +154,8 @@ try
     % Verify both code H and carrier H have positive ZWD columns.
     % We use a synthetic setup: compute carrier H at zenith (el=pi/2).
     if isfield(sm_f,'zwdIdx') && any(sm_f.zwdIdx > 0)
-        mf_code = revgnss.MappingFunctions.troposphere(pi/2, 'simple');
-        mf_carr = revgnss.MappingFunctions.troposphere(pi/2, 'simple');
+        mf_code = models.atmosphere.MappingFunctions.troposphere(pi/2, 'simple');
+        mf_carr = models.atmosphere.MappingFunctions.troposphere(pi/2, 'simple');
         assert(mf_code > 0 && mf_carr > 0, ...
             'T-P15f FAILED: mapping factors should be positive');
         assert(sign(mf_code) == sign(mf_carr), ...

@@ -372,7 +372,7 @@ classdef ErrorChain < handle
                 if isfield(ef,'shellHeight_m'); shellHeight_m = ef.shellHeight_m; end
             end
             % Compute mapping vector for all elevations.
-            mapping = revgnss.MappingFunctions.ionosphere(elv, ionoMapKind, shellHeight_m);
+            mapping = models.atmosphere.MappingFunctions.ionosphere(elv, ionoMapKind, shellHeight_m);
 
             modelType = 'simpleMapped';
             if isfield(ic,'modelType'); modelType = ic.modelType; end

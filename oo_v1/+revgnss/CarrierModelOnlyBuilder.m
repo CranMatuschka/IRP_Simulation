@@ -111,7 +111,7 @@ classdef CarrierModelOnlyBuilder
 
                 if isfield(stateMap,'zwdIdx') && ti <= numel(stateMap.zwdIdx) && ...
                         stateMap.zwdIdx(ti) > 0
-                    mf = revgnss.MappingFunctions.troposphere(elv, mfKind);
+                    mf = models.atmosphere.MappingFunctions.troposphere(elv, mfKind);
                     h_phi(mi) = h_phi(mi) + mf * x_state(stateMap.zwdIdx(ti));
                 end
             end

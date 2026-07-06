@@ -90,7 +90,7 @@ classdef PseudorangeModelOnlyBuilder
 
                 if isfield(stateMap,'zwdIdx') && ti <= numel(stateMap.zwdIdx) && ...
                         stateMap.zwdIdx(ti) > 0
-                    mf_h = revgnss.MappingFunctions.troposphere(elv, mfKind);
+                    mf_h = models.atmosphere.MappingFunctions.troposphere(elv, mfKind);
                     h_pr(mi) = h_pr(mi) + mf_h * x_state(stateMap.zwdIdx(ti));
                 end
 

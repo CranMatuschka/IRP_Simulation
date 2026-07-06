@@ -89,7 +89,7 @@ if ti1
     for mi = 1:M_pr   % pseudorange rows only
         if mask1(mi)
             elv   = errSt.elevations_rad(mi);
-            mf    = revgnss.MappingFunctions.troposphere(elv, 'simple');
+            mf    = models.atmosphere.MappingFunctions.troposphere(elv, 'simple');
             expected_dh = mf * delta;
             actual_dh   = dh_h(mi);
             % Tolerance: floating-point residual at 36 Mm range, step 0.1 m
