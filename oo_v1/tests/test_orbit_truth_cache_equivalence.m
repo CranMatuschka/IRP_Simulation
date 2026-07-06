@@ -37,7 +37,7 @@ cfg1.trueAnomaly0_rad = 23 * pi/180;
 cfg1.epochGMST_rad    = 0;
 cfg1.mode             = 'j2Rk4';
 
-op1 = revgnss.OrbitPropagator(cfg1);
+op1 = models.orbit.OrbitPropagator(cfg1);
 
 % Vector call — single pre-computation
 [rVec1, vVec1] = op1.propagate(tVec1);
@@ -69,7 +69,7 @@ fprintf('T1 PASS: j2Rk4 vector vs scalar — maxPos=%.2e m, maxVel=%.2e m/s\n', 
 fprintf('\nT2: twoBodyRk4 vector vs scalar propagation...\n');
 
 cfg2 = cfg1; cfg2.mode = 'twoBodyRk4';
-op2  = revgnss.OrbitPropagator(cfg2);
+op2  = models.orbit.OrbitPropagator(cfg2);
 [rVec2, vVec2] = op2.propagate(tVec1);
 
 maxPosErr2 = 0;

@@ -21,7 +21,7 @@ classdef ScenarioFactory
             orbitProp = [];
             if isfield(cfg,'orbit') && isfield(cfg.orbit,'useOrbitPropagator') ...
                     && cfg.orbit.useOrbitPropagator
-                orbitProp = revgnss.OrbitPropagator(cfg.orbit);
+                orbitProp = models.orbit.OrbitPropagator(cfg.orbit);
                 [r0, v0]  = orbitProp.propagate(0);
                 cfg.asset.r_ecef_m   = r0;
                 cfg.asset.v_ecef_mps = v0;

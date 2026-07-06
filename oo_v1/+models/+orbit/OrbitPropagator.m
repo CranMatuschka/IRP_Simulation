@@ -16,7 +16,7 @@ classdef OrbitPropagator
     %   handling are not implemented in oo_v1.
     %
     % Usage:
-    %   op = revgnss.OrbitPropagator(cfg);
+    %   op = models.orbit.OrbitPropagator(cfg);
     %   [r_ecef, v_ecef] = op.propagate(t_s);
 
     properties

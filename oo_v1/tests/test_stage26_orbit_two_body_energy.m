@@ -52,7 +52,7 @@ cfg_op.raan_rad         = 0;
 cfg_op.trueAnomaly0_rad = 0;
 cfg_op.epochGMST_rad    = 0;
 cfg_op.orbit.mode       = 'twoBodyRk4';
-op = revgnss.OrbitPropagator(cfg_op);
+op = models.orbit.OrbitPropagator(cfg_op);
 [r_t0, ~] = op.propagate(0);
 assert(abs(norm(r_t0) - a) < 1.0, ...
     sprintf('T4: twoBodyRk4 radius at t=0 error %.4e m', abs(norm(r_t0) - a)));

@@ -46,7 +46,7 @@ classdef OrbitDiagnostics
 
             cfgCirc       = cfgOrbit;
             cfgCirc.orbit.mode = 'circularAnalytic';
-            opCirc = revgnss.OrbitPropagator(cfgCirc);
+            opCirc = models.orbit.OrbitPropagator(cfgCirc);
             r_circ_ecef = zeros(3, numel(tGrid_s));
             for k = 1:numel(tGrid_s)
                 [rc, ~] = opCirc.propagate(tGrid_s(k));
@@ -55,7 +55,7 @@ classdef OrbitDiagnostics
 
             cfgRk4       = cfgOrbit;
             cfgRk4.orbit.mode = 'twoBodyRk4';
-            opRk4 = revgnss.OrbitPropagator(cfgRk4);
+            opRk4 = models.orbit.OrbitPropagator(cfgRk4);
             [r_rk4_ecef, ~] = opRk4.propagate(tGrid_s);
 
             diffNorm_m = zeros(1, numel(tGrid_s));
