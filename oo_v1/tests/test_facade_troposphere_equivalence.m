@@ -1,5 +1,5 @@
 % test_facade_troposphere_equivalence  Phase 5: the models/atmosphere/troposphere façade
-%   must produce output BIT-FOR-BIT identical to revgnss.TroposphereModel (pure delegation).
+%   must produce output BIT-FOR-BIT identical to models.atmosphere.TroposphereModel (pure delegation).
 thisDir = fileparts(mfilename('fullpath'));
 addpath(fullfile(thisDir, '..'));
 addpath(fullfile(thisDir, '..', 'models', 'atmosphere'));
@@ -13,14 +13,14 @@ n = 0;
 for elDeg = [5, 10, 30, 45, 89]
     el = deg2rad(elDeg);
     o  = troposphere('model', struct('elevation_rad', el), cfg);
-    assert(isequaln(o.mappingFactor, revgnss.TroposphereModel.mapping(el, cfg)), ...
+    assert(isequaln(o.mappingFactor, models.atmosphere.TroposphereModel.mapping(el, cfg)), ...
         'mapping mismatch (%g deg)', elDeg);
     n = n + 1;
 end
 
 % ---- 'covariance': ZWD Gauss-Markov process parameters ----
 o = troposphere('covariance', struct(), cfg);
-[p, t, i] = revgnss.TroposphereModel.zwdProcessParams(cfg);
+[p, t, i] = models.atmosphere.TroposphereModel.zwdProcessParams(cfg);
 assert(isequaln(o.sigma_ss_m, p) && isequaln(o.tau_s, t) && isequaln(o.initialSigma_m, i), ...
     'zwd process params mismatch');
 n = n + 3;
@@ -28,8 +28,8 @@ n = n + 3;
 % ---- 'diagnostic': architecture struct + weak-observability note ----
 elevs = deg2rad([10, 12, 14]);   % low diversity -> weak-observability note fires
 o = troposphere('diagnostic', struct('stateMap', struct(), 'elevations_rad', elevs), cfg);
-assert(isequaln(o.describe, revgnss.TroposphereModel.describe(cfg, struct())), 'describe mismatch');
-assert(isequaln(o.weakObsNote, revgnss.TroposphereModel.weakObservabilityNote(elevs)), 'weakObsNote mismatch');
+assert(isequaln(o.describe, models.atmosphere.TroposphereModel.describe(cfg, struct())), 'describe mismatch');
+assert(isequaln(o.weakObsNote, models.atmosphere.TroposphereModel.weakObservabilityNote(elevs)), 'weakObsNote mismatch');
 n = n + 2;
 
 % ---- mode guards ----

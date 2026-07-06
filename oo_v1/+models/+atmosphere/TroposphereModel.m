@@ -28,12 +28,12 @@ classdef TroposphereModel
 
             if nargin < 2; stateMap = struct(); end
 
-            s.truthEnabled = revgnss.TroposphereModel.getLogical_( ...
+            s.truthEnabled = models.atmosphere.TroposphereModel.getLogical_( ...
                 cfg, {'errors','troposphere','truth','enable'}, false);
-            s.modelEnabled = revgnss.TroposphereModel.getLogical_( ...
+            s.modelEnabled = models.atmosphere.TroposphereModel.getLogical_( ...
                 cfg, {'errors','troposphere','model','enable'}, false);
-            s.zwdEstimated = revgnss.TroposphereModel.isZwdEstimated(cfg, stateMap);
-            s.nZwdStates   = revgnss.TroposphereModel.nZwdStates_(cfg, stateMap);
+            s.zwdEstimated = models.atmosphere.TroposphereModel.isZwdEstimated(cfg, stateMap);
+            s.nZwdStates   = models.atmosphere.TroposphereModel.nZwdStates_(cfg, stateMap);
             s.mappingKind  = revgnss.MeasurementModelUtils.zwdMappingKind(cfg);
 
             if s.zwdEstimated
@@ -48,7 +48,7 @@ classdef TroposphereModel
                 s.mode = 'disabled';
             end
 
-            s.note = revgnss.TroposphereModel.modeNote_(s);
+            s.note = models.atmosphere.TroposphereModel.modeNote_(s);
         end
 
         function mf = mapping(elevation_rad, cfg)

@@ -1,6 +1,6 @@
 function out = troposphere(mode, args, cfg)
 %TROPOSPHERE  Single entry point for troposphere / ZWD (Phase 5 façade).
-%   Delegates VERBATIM to revgnss.TroposphereModel — no physics here. The stochastic
+%   Delegates VERBATIM to models.atmosphere.TroposphereModel — no physics here. The stochastic
 %   truth/model DELAY draws live in the stateful revgnss.ErrorChain (per-epoch); this
 %   façade exposes the deterministic mapping, ZWD process parameters, and the
 %   architecture / weak-observability diagnostics only. Standalone (not wired into the
@@ -16,15 +16,15 @@ function out = troposphere(mode, args, cfg)
     if nargin < 3; cfg = struct(); end
     switch mode
         case 'model'
-            out.mappingFactor = revgnss.TroposphereModel.mapping(args.elevation_rad, cfg);
+            out.mappingFactor = models.atmosphere.TroposphereModel.mapping(args.elevation_rad, cfg);
         case 'covariance'
             [out.sigma_ss_m, out.tau_s, out.initialSigma_m] = ...
-                revgnss.TroposphereModel.zwdProcessParams(cfg);
+                models.atmosphere.TroposphereModel.zwdProcessParams(cfg);
         case 'diagnostic'
             sm = struct(); if isfield(args, 'stateMap');       sm = args.stateMap;       end
             el = [];       if isfield(args, 'elevations_rad'); el = args.elevations_rad; end
-            out.describe    = revgnss.TroposphereModel.describe(cfg, sm);
-            out.weakObsNote = revgnss.TroposphereModel.weakObservabilityNote(el);
+            out.describe    = models.atmosphere.TroposphereModel.describe(cfg, sm);
+            out.weakObsNote = models.atmosphere.TroposphereModel.weakObservabilityNote(el);
         case 'truth'
             error('troposphere:truthNotHere', ...
                 ['Troposphere TRUTH delay is realized inside revgnss.ErrorChain ', ...
