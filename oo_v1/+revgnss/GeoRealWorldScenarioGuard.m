@@ -102,9 +102,114 @@ classdef GeoRealWorldScenarioGuard
                 error('GeoRealWorldScenarioGuard:invalidConfig', '%s', strjoin(errs, newline));
             end
         end
+
+        function assertRealisticSimulation(cfg)
+            % assertRealisticSimulation  MD Stage 93 name; alias for assertValid.
+            %   The "realistic synthetic truth-estimation comparison" guard. Kept as an
+            %   alias (not a second class) to honour the project no-proliferation rule.
+            revgnss.GeoRealWorldScenarioGuard.assertValid(cfg);
+        end
+
+        function assertModelFamilyConsistent(cfg)
+            % assertModelFamilyConsistent  MD Stage 88/97 family-parity rule.
+            %   Errors when the truth dynamics family differs from the EKF dynamics family
+            %   UNLESS the run is explicitly labelled a mismatch analysis
+            %   (cfg.validation.analysisType='explicitMismatchAnalysis' AND
+            %    cfg.validation.allowTruthModelMismatch=true). Reduced-dynamics filtering
+            %   (e.g. two-body EKF vs J2 truth) is a legitimate operational choice, but it
+            %   must be opted into explicitly, never the silent default. Callers gate WHEN
+            %   this runs (see ConfigFactory.finalizeConfig / ReportRunner) so it never
+            %   fires on non-realistic runners.
+            gs = @(p, d) revgnss.GeoRealWorldScenarioGuard.getStr_(cfg, p, d);
+            tf = revgnss.GeoRealWorldScenarioGuard.dynamicsFamily_(gs({'orbit','truth','mode'}, ''));
+            ef = revgnss.GeoRealWorldScenarioGuard.dynamicsFamily_(gs({'estimator','dynamics','mode'}, ''));
+            if strcmp(tf, ef); return; end
+            analysisType = gs({'validation','analysisType'}, '');
+            allowMM = revgnss.GeoRealWorldScenarioGuard.getLogical_(cfg, {'validation','allowTruthModelMismatch'}, false);
+            if strcmpi(analysisType, 'explicitMismatchAnalysis') && allowMM
+                return;   % explicitly opted into a reduced-dynamics / mismatch analysis
+            end
+            error('GeoRealWorldScenarioGuard:modelFamilyMismatch', ...
+                ['Truth dynamics family (%s, from orbit.truth.mode) differs from EKF dynamics ', ...
+                 'family (%s, from estimator.dynamics.mode). Match the estimator to the truth ', ...
+                 'family, or set cfg.validation.analysisType=''explicitMismatchAnalysis'' and ', ...
+                 'cfg.validation.allowTruthModelMismatch=true to run an explicit reduced-dynamics ', ...
+                 'mismatch analysis.'], tf, ef);
+        end
+
+        function audit = auditImperfectionSources(cfg)
+            % auditImperfectionSources  MD Stage 95 truth-estimation separation audit.
+            %   Returns COMPUTED (never hard-coded) flags describing where the estimator's
+            %   imperfection comes from, plus a per-model table for the report. Honest in
+            %   every state: reports sameModelFamilies=false / reducedDynamics=true for a
+            %   two-body-EKF reduced-dynamics run, and =true / false once truth and EKF match.
+            gs = @(p, d) revgnss.GeoRealWorldScenarioGuard.getStr_(cfg, p, d);
+            gl = @(p, d) revgnss.GeoRealWorldScenarioGuard.getLogical_(cfg, p, d);
+            pick = @revgnss.GeoRealWorldScenarioGuard.pick_;
+
+            tf = revgnss.GeoRealWorldScenarioGuard.dynamicsFamily_(gs({'orbit','truth','mode'}, ''));
+            ef = revgnss.GeoRealWorldScenarioGuard.dynamicsFamily_(gs({'estimator','dynamics','mode'}, ''));
+            audit.truthDynamicsFamily = tf;
+            audit.ekfDynamicsFamily   = ef;
+            audit.sameModelFamilies   = strcmp(tf, ef);
+            audit.reducedDynamicsWithProcessNoise = ~audit.sameModelFamilies && ...
+                ((strcmp(tf,'J2') && strcmp(ef,'twoBody')) || strcmp(ef,'kinematic'));
+
+            audit.mismatchAnalysis = strcmpi(gs({'validation','analysisType'},''), 'explicitMismatchAnalysis') || ...
+                gl({'validation','allowTruthModelMismatch'}, false);
+            audit.perfectCorrection = strcmpi(gs({'estimator','towerClockMode'},''), 'perfectCorrection');
+
+            % Truth-assisted DIAGNOSTICS: labelled, non-leaking (KAV run, external-attitude ref).
+            audit.truthAssistedDiagnostics = gl({'estimator','runKnownAmbiguityValidation'}, false) || ...
+                strcmpi(gs({'estimator','diffAtt','referenceMode'},''), 'externalInitialAttitude');
+            % Truth LEAKAGE into the main filter: the genuinely forbidden reads.
+            audit.truthLeakageInMainFilter = gl({'estimator','knownAmbiguityAttitudeValidation'}, false) || ...
+                strcmpi(gs({'estimator','attitudeInitMode'},''), 'knownAttitudeCalibration') || ...
+                strcmpi(gs({'estimator','attitudeCarrierMode'},''), 'validationKnownAmbiguity');
+            audit.realWorldClaim = gl({'scientificProfile','allowRealWorldClaim'}, false);
+
+            audit.realisticSyntheticTruthEstimationComparison = ...
+                (audit.sameModelFamilies || audit.reducedDynamicsWithProcessNoise) && ...
+                ~audit.perfectCorrection && ~audit.truthLeakageInMainFilter && ~audit.realWorldClaim;
+
+            % Per-model rows: {model, truthFamily, estimatorFamily, sameFamily?, imperfectionSource}.
+            tropOn = gl({'errors','troposphere','enable'}, false);
+            ionoOn = gl({'errors','ionosphere','enable'}, false);
+            pcoOn  = gl({'effects','antennaPCO','enable'}, false);
+            rows = cell(0,5);
+            rows(end+1,:) = {'Orbit dynamics', tf, ef, pick(audit.sameModelFamilies,'yes','no'), ...
+                'initial state error + covariance, residual-acceleration process noise'};
+            rows(end+1,:) = {'Receiver clock', 'stochastic', 'bias+drift EKF states', 'yes', ...
+                'initial covariance + clock process noise'};
+            rows(end+1,:) = {'Tower clock', 'stochastic', 'noisy delayed product', 'yes', ...
+                'product latency/quantisation + bias/drift noise'};
+            rows(end+1,:) = {'Troposphere', pick(tropOn,'mapped ZTD','off'), pick(tropOn,'mapped ZTD','off'), ...
+                pick(tropOn,'yes','n/a'), 'stochastic ZWD residual'};
+            rows(end+1,:) = {'Ionosphere', pick(ionoOn,'mapped 1st-order','off'), pick(ionoOn,'mapped 1st-order','off'), ...
+                pick(ionoOn,'yes','n/a'), 'stochastic residual'};
+            rows(end+1,:) = {'Antenna PCO', pick(pcoOn,'PCO','off'), pick(pcoOn,'PCO','off'), ...
+                pick(pcoOn,'yes','n/a'), 'calibration uncertainty'};
+            rows(end+1,:) = {'Carrier ambiguity', 'generated (unknown)', 'estimated float', 'yes', ...
+                'unknown float ambiguity states'};
+            audit.rows = rows;
+        end
     end
 
     methods (Static, Access = private)
+        function fam = dynamicsFamily_(mode)
+            % dynamicsFamily_  Map an orbit/EKF dynamics mode string to its model FAMILY.
+            m = lower(strtrim(mode));
+            switch m
+                case {'j2rk4','j2','twobodyj2','two_body_j2'}; fam = 'J2';
+                case {'twobody','two_body','twobodyrk4'};      fam = 'twoBody';
+                case {'constantvelocity'};                     fam = 'kinematic';
+                case {'stationaryecef'};                       fam = 'static';
+                otherwise; fam = m;
+            end
+        end
+        function s = pick_(cond, a, b)
+            if cond; s = a; else; s = b; end
+        end
         function v = getNum_(s, path, def)
             v = revgnss.GeoRealWorldScenarioGuard.get_(s, path, def);
             if isempty(v) || ~isnumeric(v); v = def; end
