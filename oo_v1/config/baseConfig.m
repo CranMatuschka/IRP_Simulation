@@ -91,6 +91,19 @@ cfg.orbit.truth.availableModes = {'twoBodyRk4','j2Rk4'};
 cfg.orbit.truth.cache.enable = true;
 cfg.orbit.truth.cache.mode   = 'precomputeVector';
 
+% --- Swarm formation (helix) truth ---------------------------
+% One master control: cfg.scenario.nSpaceAssets. When it is > 1 (and an orbit
+% propagator is active) the secondary assets are placed on a bounded
+% Clohessy-Wiltshire projected-circular (helix) relative orbit around the
+% primary chief and propagated with the SAME dynamics as the primary, so the
+% swarm truth is physically real (not dead-reckoned). Only the primary
+% (asset 1) is EKF-estimated; secondaries are represented-only truth that can
+% provide ISL aiding. cfg.measurements.isl.* is the separate feature toggle for
+% feeding those links into the EKF.
+cfg.formation.mode        = 'helix';   % only supported formation mode
+cfg.formation.baseline_m  = 1000.0;    % inter-satellite separation [m] (>500 m); changeable
+cfg.formation.phase0_rad  = 0.0;       % phase of the first secondary on the projected-circular ring
+
 % --- Five ground towers (from SimulationConfig.m) -------------
 towerDefs = { ...
     'Tenerife',        28.3,      -16.5,    0.0; ...
