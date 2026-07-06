@@ -223,7 +223,7 @@ r_twr7 = [6378e3;  0; 0];
 cfg7   = revgnss.ConfigFactory.defaultConfig();
 cfg7.effects.lightTime.model = 'iterative';
 
-[~, c7] = revgnss.RangeCorrections.correctedPseudorange(r_rx7, r_twr7, cfg7, 'model', pi/4);
+[~, c7] = models.corrections.RangeCorrections.correctedPseudorange(r_rx7, r_twr7, cfg7, 'model', pi/4);
 assert(c7.tau_s > 0.1, 'T7 FAILED: tau_s=%.4f s, expected > 0.1 s for GEO', c7.tau_s);
 assert(~isempty(c7.t_tx_s), 'T7 FAILED: t_tx_s should not be empty in iterative mode');
 fprintf('    iterative tau_s=%.4f s (>0.1 s): PASS\n', c7.tau_s);

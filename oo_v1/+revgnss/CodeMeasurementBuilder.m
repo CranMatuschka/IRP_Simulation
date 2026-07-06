@@ -114,7 +114,7 @@ classdef CodeMeasurementBuilder
                 end
 
                 % Truth pseudorange with corrections + toy PCV (Stage 3)
-                [rho_true, cTruth] = revgnss.RangeCorrections.correctedPseudorange( ...
+                [rho_true, cTruth] = models.corrections.RangeCorrections.correctedPseudorange( ...
                     r_ants_truth(:,ai), r_twr_truth, cfg, 'truth', elv, t_s);
                 sagnacTruth_m(mi)  = cTruth.sagnac;
                 shapiroTruth_m(mi) = cTruth.shapiro;
@@ -132,7 +132,7 @@ classdef CodeMeasurementBuilder
                 z(mi) = rho_true + b_rx_true - b_twr_truth_h + errStruct.truthTotal_m(mi);
 
                 % Predicted pseudorange with corrections
-                [rho_est, cModel] = revgnss.RangeCorrections.correctedPseudorange( ...
+                [rho_est, cModel] = models.corrections.RangeCorrections.correctedPseudorange( ...
                     r_ants_est(:,ai), r_twr_model, cfg, 'model', elv, t_s);
                 sagnacModel_m(mi)  = cModel.sagnac;
                 shapiroModel_m(mi) = cModel.shapiro;

@@ -100,7 +100,7 @@ classdef RangeCorrections
                 contrib.t_tx_s = t_tx_lt;
             end
 
-            rho = revgnss.RangeCorrections.geometricRange(rx_ecef, tx_ecef_eff);
+            rho = models.corrections.RangeCorrections.geometricRange(rx_ecef, tx_ecef_eff);
 
             if isfield(cfg, 'physics')
                 ph = cfg.physics;
@@ -109,7 +109,7 @@ classdef RangeCorrections
                 if ~strcmp(ltModel,'iterative') && ...
                         isfield(ph, 'sagnac') && isfield(ph.sagnac, side) && ...
                         ph.sagnac.(side).enable
-                    dS = revgnss.RangeCorrections.sagnacCorrectionMeters(rx_ecef, tx_ecef_eff, cfg);
+                    dS = models.corrections.RangeCorrections.sagnacCorrectionMeters(rx_ecef, tx_ecef_eff, cfg);
                     contrib.sagnac = dS;
                     rho = rho + dS;
                 end
@@ -118,7 +118,7 @@ classdef RangeCorrections
                 if isfield(ph, 'relativity') && isfield(ph.relativity, 'shapiro') && ...
                         isfield(ph.relativity.shapiro, side) && ...
                         ph.relativity.shapiro.(side).enable
-                    dSh = revgnss.RangeCorrections.shapiroDelayMeters(rx_ecef, tx_ecef_eff, cfg);
+                    dSh = models.corrections.RangeCorrections.shapiroDelayMeters(rx_ecef, tx_ecef_eff, cfg);
                     contrib.shapiro = dSh;
                     rho = rho + dSh;
                 end
@@ -127,7 +127,7 @@ classdef RangeCorrections
             % PCV correction: 'toy', 'table', or 'none'
             % Legacy cfg.effects.antennaPCV.(side).enable preserved.
             if nargin >= 5 && ~isempty(el_rad)
-                dPCV = revgnss.RangeCorrections.pcvCorrection_(el_rad, cfg, side);
+                dPCV = models.corrections.RangeCorrections.pcvCorrection_(el_rad, cfg, side);
                 contrib.pcv = dPCV;
                 rho = rho + dPCV;
             end

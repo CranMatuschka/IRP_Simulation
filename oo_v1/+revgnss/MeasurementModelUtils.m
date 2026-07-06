@@ -122,7 +122,7 @@ classdef MeasurementModelUtils
                 end
             end
             elv = models.frames.GeometryUtils.elevationAngle(r_twr, r_ant);
-            rho = revgnss.RangeCorrections.correctedPseudorange(r_ant, r_twr, cfg, 'model', elv);
+            rho = models.corrections.RangeCorrections.correctedPseudorange(r_ant, r_twr, cfg, 'model', elv);
         end
 
         function sigma = codeSignalSigma(sigCfg, elv, cfg)

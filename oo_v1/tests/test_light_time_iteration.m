@@ -61,10 +61,10 @@ full_cfg.effects.lightTime.maxIter    = 5;
 full_cfg.effects.lightTime.tol_s      = 1e-12;
 full_cfg.physics.sagnac.model.enable  = false;   % sagnac correction skipped by iterative anyway
 
-[rho_no_sag, ~] = revgnss.RangeCorrections.correctedPseudorange(r_rx, r_twr, full_cfg, 'model');
+[rho_no_sag, ~] = models.corrections.RangeCorrections.correctedPseudorange(r_rx, r_twr, full_cfg, 'model');
 
 full_cfg.physics.sagnac.model.enable  = true;    % would add Sagnac in non-iterative mode
-[rho_with_sag, ~] = revgnss.RangeCorrections.correctedPseudorange(r_rx, r_twr, full_cfg, 'model');
+[rho_with_sag, ~] = models.corrections.RangeCorrections.correctedPseudorange(r_rx, r_twr, full_cfg, 'model');
 
 sag_diff = abs(rho_with_sag - rho_no_sag);
 assert(sag_diff < 1e-10, ...
@@ -79,9 +79,9 @@ r_rx_sag  = [0; 42164e3; 0];   % GEO on y-axis
 r_twr_sag = [6371e3; 0; 0];    % tower on x-axis
 full_cfg.effects.lightTime.model     = 'sagnacFirstOrder';
 full_cfg.physics.sagnac.model.enable = false;
-[rho_sfo_off, ~] = revgnss.RangeCorrections.correctedPseudorange(r_rx_sag, r_twr_sag, full_cfg, 'model');
+[rho_sfo_off, ~] = models.corrections.RangeCorrections.correctedPseudorange(r_rx_sag, r_twr_sag, full_cfg, 'model');
 full_cfg.physics.sagnac.model.enable = true;
-[rho_sfo_on, ~] = revgnss.RangeCorrections.correctedPseudorange(r_rx_sag, r_twr_sag, full_cfg, 'model');
+[rho_sfo_on, ~] = models.corrections.RangeCorrections.correctedPseudorange(r_rx_sag, r_twr_sag, full_cfg, 'model');
 sfo_diff = abs(rho_sfo_on - rho_sfo_off);
 assert(sfo_diff > 1e-3, ...
     'sanity FAILED: sagnacFirstOrder should change by >1e-3 m when flag toggled, got %.2e', sfo_diff);

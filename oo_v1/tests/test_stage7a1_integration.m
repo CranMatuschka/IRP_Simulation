@@ -73,7 +73,7 @@ cfg3   = revgnss.ConfigFactory.defaultConfig();
 cfg3.effects.lightTime.model = 'iterative';
 t_rx3  = 1000.0;  % s
 
-[~, c3] = revgnss.RangeCorrections.correctedPseudorange(r_rx3, r_twr3, cfg3, 'model', pi/4, t_rx3);
+[~, c3] = models.corrections.RangeCorrections.correctedPseudorange(r_rx3, r_twr3, cfg3, 'model', pi/4, t_rx3);
 assert(c3.tau_s > 0.05, 'T3 FAILED: tau_s=%.4f should be >0.05 s for GEO range', c3.tau_s);
 t_tx_expected = t_rx3 - c3.tau_s;
 assert(abs(c3.t_tx_s - t_tx_expected) < 1e-9, ...
@@ -88,7 +88,7 @@ fprintf('    t_rx=%.1f s, tau=%.4f s, t_tx=%.4f s (positive, correct): PASS\n', 
 % ----------------------------------------------------------------
 fprintf('  T4: backward compat — no t_rx_s, t_tx_s ≈ -tau ...\n');
 
-[~, c4] = revgnss.RangeCorrections.correctedPseudorange(r_rx3, r_twr3, cfg3, 'model', pi/4);
+[~, c4] = models.corrections.RangeCorrections.correctedPseudorange(r_rx3, r_twr3, cfg3, 'model', pi/4);
 assert(abs(c4.t_tx_s - (0 - c4.tau_s)) < 1e-9, ...
     'T4 FAILED: without t_rx_s, t_tx_s should be -tau_s');
 fprintf('    no t_rx_s: t_tx_s=%.4f ≈ -tau_s=%.4f: PASS\n', c4.t_tx_s, -c4.tau_s);
@@ -130,7 +130,7 @@ cfg6.effects.antennaPCV.truth.enable = false;  % legacy gate OFF
 cfg6.effects.antenna.receiverPcvTable.elDeg = [0 30 60 90];
 cfg6.effects.antenna.receiverPcvTable.pcv_m = [0.020 0.010 0.005 0.000];
 
-[~, c6] = revgnss.RangeCorrections.correctedPseudorange(r_rx6, r_twr6, cfg6, 'truth', el30);
+[~, c6] = models.corrections.RangeCorrections.correctedPseudorange(r_rx6, r_twr6, cfg6, 'truth', el30);
 assert(abs(c6.pcv - 0.010) < 1e-8, ...
     'T6 FAILED: pcvModel=table should give pcv=0.010 regardless of legacy gate, got %.6f', c6.pcv);
 fprintf('    pcvModel=table with legacy enable=false: pcv=%.4f (correct): PASS\n', c6.pcv);
@@ -146,13 +146,13 @@ cfg7_off.effects.antenna = rmfield(cfg7_off.effects.antenna, 'pcvModel');
 cfg7_off.effects.antennaPCV.truth.enable  = false;   % legacy gate OFF
 cfg7_off.effects.antennaPCV.amplitude_m   = 0.05;
 
-[~, c7_off] = revgnss.RangeCorrections.correctedPseudorange(r_rx6, r_twr6, cfg7_off, 'truth', el30);
+[~, c7_off] = models.corrections.RangeCorrections.correctedPseudorange(r_rx6, r_twr6, cfg7_off, 'truth', el30);
 assert(abs(c7_off.pcv) < 1e-12, ...
     'T7 FAILED: legacy gate OFF should give zero pcv, got %.2e', c7_off.pcv);
 
 cfg7_on = cfg7_off;  % already has pcvModel removed
 cfg7_on.effects.antennaPCV.truth.enable = true;  % legacy gate ON
-[~, c7_on] = revgnss.RangeCorrections.correctedPseudorange(r_rx6, r_twr6, cfg7_on, 'truth', el30);
+[~, c7_on] = models.corrections.RangeCorrections.correctedPseudorange(r_rx6, r_twr6, cfg7_on, 'truth', el30);
 assert(abs(c7_on.pcv) > 1e-6, ...
     'T7 FAILED: legacy gate ON should give non-zero pcv, got %.2e', c7_on.pcv);
 fprintf('    legacy off → pcv=0; legacy on → pcv=%.4f: PASS\n', c7_on.pcv);

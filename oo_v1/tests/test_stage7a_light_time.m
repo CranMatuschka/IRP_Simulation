@@ -77,7 +77,7 @@ cfg5 = revgnss.ConfigFactory.defaultConfig();
 cfg5.effects.lightTime.model   = 'iterative';
 cfg5.physics.sagnac.model.enable = true;
 
-[~, contrib5] = revgnss.RangeCorrections.correctedPseudorange( ...
+[~, contrib5] = models.corrections.RangeCorrections.correctedPseudorange( ...
     r_rx, r_twr, cfg5, 'model', pi/4);
 assert(contrib5.tau_s > 0, 'T5 FAILED: contrib.tau_s should be positive in iterative mode');
 assert(~isempty(contrib5.t_tx_s), 'T5 FAILED: contrib.t_tx_s should not be empty');
@@ -92,13 +92,13 @@ fprintf('  T6: no double Sagnac in iterative mode ...\n');
 cfg6a = revgnss.ConfigFactory.defaultConfig();
 cfg6a.effects.lightTime.model    = 'sagnacFirstOrder';
 cfg6a.physics.sagnac.model.enable = true;
-[rho6a, ~] = revgnss.RangeCorrections.correctedPseudorange(r_rx, r_twr, cfg6a, 'model', pi/4);
+[rho6a, ~] = models.corrections.RangeCorrections.correctedPseudorange(r_rx, r_twr, cfg6a, 'model', pi/4);
 
 % iterative mode skips analytic Sagnac (handles it via rotation)
 cfg6b = revgnss.ConfigFactory.defaultConfig();
 cfg6b.effects.lightTime.model    = 'iterative';
 cfg6b.physics.sagnac.model.enable = true;  % should be suppressed internally
-[rho6b, ~] = revgnss.RangeCorrections.correctedPseudorange(r_rx, r_twr, cfg6b, 'model', pi/4);
+[rho6b, ~] = models.corrections.RangeCorrections.correctedPseudorange(r_rx, r_twr, cfg6b, 'model', pi/4);
 
 % Both should give similar range (within ~1 m for this geometry) — not double-counted
 rho_diff = abs(rho6a - rho6b);
