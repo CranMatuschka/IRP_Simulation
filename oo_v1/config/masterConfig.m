@@ -57,7 +57,7 @@ cfg.report.layout    = 'clockExact'; % 'clockExact' | 'clockStyle' | 'default'
 cfg.report.writeTex  = true;         % true  = write .tex source file beside PDF
 cfg.report.compileTex = 'require';   % 'require' | 'auto' | 'never'
 % Stage 65: compact final report flags
-cfg.report.zoomLastFraction      = 0.10;  % zoom plots show last 10% of simulation time
+cfg.report.zoomLastSeconds       = 120;   % zoom plots show the LAST 120 s (fixed window, not a fraction)
 cfg.report.compactFinalReport    = true;  % suppress stage-history chapters
 cfg.report.suppressStageSections = true;  % no architecture-diary sections in PDF
 cfg.report.deduplicateFigures    = true;  % no repeated figure paths in TEX

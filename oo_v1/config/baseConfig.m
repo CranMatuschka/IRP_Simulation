@@ -729,6 +729,7 @@ cfg.report.writeMat            = true;
 cfg.report.appendRawPlots         = false;
 cfg.report.layout                 = 'default'; % 'default' | 'clockStyle' | 'clockExact'
 cfg.report.includeRawDiagnostics  = false;
+cfg.report.zoomLastSeconds        = 120;       % EKF zoom plots show the last N seconds (fixed window)
 
 % --- Validation policy ----------------------------------------
 % 'error'             — unsupported features throw (default; safe)

@@ -210,16 +210,22 @@ classdef ClockExactReportBuilder
             paths.perSrc = CE.tryPlot_(figDir, [stem '_per_source_error.pdf'], @() ...
                 CE.plotPerSourceError_(diag, t), cfg);
 
-            % Zoom plots: last 10% of time
-            zoomFrac = 0.10;
-            paths.posErrZoom  = CE.tryPlot_(figDir, [stem '_position_error_zoom10.pdf'], @() ...
-                CE.plotSignalZoom_(diag, t, 'posErr',  zoomFrac), cfg);
-            paths.clkErrZoom  = CE.tryPlot_(figDir, [stem '_clock_error_zoom10.pdf'], @() ...
-                CE.plotSignalZoom_(diag, t, 'clkErr',  zoomFrac), cfg);
-            paths.clkDriftZoom = CE.tryPlot_(figDir, [stem '_clock_drift_zoom10.pdf'], @() ...
-                CE.plotSignalZoom_(diag, t, 'clkDrift', zoomFrac), cfg);
-            paths.attCompZoom = CE.tryPlot_(figDir, [stem '_attitude_components_zoom10.pdf'], @() ...
-                CE.plotAttZoom_(diag, t, zoomFrac), cfg);
+            % Zoom plots: last cfg.report.zoomLastSeconds seconds (fixed window, default 120 s).
+            zoomSec = 120;
+            try
+                if isfield(cfg,'report') && isfield(cfg.report,'zoomLastSeconds') && ...
+                        isnumeric(cfg.report.zoomLastSeconds) && cfg.report.zoomLastSeconds > 0
+                    zoomSec = cfg.report.zoomLastSeconds;
+                end
+            catch; end
+            paths.posErrZoom  = CE.tryPlot_(figDir, [stem '_position_error_zoomlast.pdf'], @() ...
+                CE.plotSignalZoom_(diag, t, 'posErr',  zoomSec), cfg);
+            paths.clkErrZoom  = CE.tryPlot_(figDir, [stem '_clock_error_zoomlast.pdf'], @() ...
+                CE.plotSignalZoom_(diag, t, 'clkErr',  zoomSec), cfg);
+            paths.clkDriftZoom = CE.tryPlot_(figDir, [stem '_clock_drift_zoomlast.pdf'], @() ...
+                CE.plotSignalZoom_(diag, t, 'clkDrift', zoomSec), cfg);
+            paths.attCompZoom = CE.tryPlot_(figDir, [stem '_attitude_components_zoomlast.pdf'], @() ...
+                CE.plotAttZoom_(diag, t, zoomSec), cfg);
 
             % Allan deviation (Stage 67)
             paths.allanDev = CE.tryPlot_(figDir, [stem '_allan_deviation.pdf'], @() ...
@@ -227,68 +233,67 @@ classdef ClockExactReportBuilder
         end
 
         % ................................................................
-        function fig = plotSignalZoom_(diag, t, signal, zoomFrac)
+        function fig = plotSignalZoom_(diag, t, signal, zoomSec)
+            % Zoom to the LAST zoomSec seconds (fixed window), with +/-3 sigma covariance
+            % borders overlaid (dotted). State indices per ReverseGNSSEKF.buildStateMap_:
+            % position 1:3, clock bias 13, clock drift 14.
             fig = revgnss.ClockExactReportBuilder.makeCompactFig_('');
             ax  = gca(fig);
-        
+            CE  = revgnss.ClockExactReportBuilder;
             try
                 c0 = revgnss.Constants.SPEED_OF_LIGHT_MPS;
                 ppm = 1e6;
-        
                 if isempty(t)
-                    revgnss.ClockExactReportBuilder.noDataAxes_(ax);
-                    return;
+                    CE.noDataAxes_(ax); return;
                 end
-        
-                n  = numel(t);
-                i0 = max(1, round(n * (1 - zoomFrac)));
-        
+                i0 = find(t >= t(end) - zoomSec, 1, 'first');
+                if isempty(i0); i0 = 1; end
+                tz = t(i0:end);
+                ttl = sprintf('Last %g s (dotted = \\pm3\\sigma)', zoomSec);
+
                 switch signal
                     case 'posErr'
                         ev = diag.getPositionErrorVecs();   % [3 x N]
-                        if ~isempty(ev) && size(ev,2) == n
+                        if ~isempty(ev) && size(ev,2) == numel(t)
                             hold(ax,'on');
-                            plot(ax, t(i0:end), ev(1,i0:end), 'r-', 'LineWidth',0.8, 'DisplayName','X');
-                            plot(ax, t(i0:end), ev(2,i0:end), 'g-', 'LineWidth',0.8, 'DisplayName','Y');
-                            plot(ax, t(i0:end), ev(3,i0:end), 'b-', 'LineWidth',0.8, 'DisplayName','Z');
-                            plot(ax, t(i0:end), sqrt(sum(ev(:,i0:end).^2,1)), ...
-                                'k-', 'LineWidth',1.0, 'DisplayName','3D');
+                            plot(ax, tz, ev(1,i0:end), 'r-', 'LineWidth',0.8, 'DisplayName','X');
+                            plot(ax, tz, ev(2,i0:end), 'g-', 'LineWidth',0.8, 'DisplayName','Y');
+                            plot(ax, tz, ev(3,i0:end), 'b-', 'LineWidth',0.8, 'DisplayName','Z');
+                            plot(ax, tz, sqrt(sum(ev(:,i0:end).^2,1)), 'k-', 'LineWidth',1.0, 'DisplayName','3D');
+                            CE.overlaySigma_(ax, tz, CE.stateSigmaWin_(diag,1,1,i0), 3, 'r:');
+                            CE.overlaySigma_(ax, tz, CE.stateSigmaWin_(diag,2,1,i0), 3, 'g:');
+                            CE.overlaySigma_(ax, tz, CE.stateSigmaWin_(diag,3,1,i0), 3, 'b:');
                             legend(ax,'show','Location','northeast','FontSize',5);
-                            xlabel(ax,'Time [s]','FontSize',7);
-                            ylabel(ax,'Position error [m]','FontSize',7);
-                            grid(ax,'on');
-                            return;
+                            xlabel(ax,'Time [s]','FontSize',7); ylabel(ax,'Position error [m]','FontSize',7);
+                            title(ax, ttl,'FontSize',7); grid(ax,'on'); return;
                         end
-        
                     case 'clkErr'
                         y = diag.getClockBiasErrors() ./ c0;   % m -> s
                         if ~isempty(y)
-                            plot(ax, t(i0:end), y(i0:end), 'r-', 'LineWidth',0.8);
-                            xlabel(ax,'Time [s]','FontSize',7);
-                            ylabel(ax,'Clock bias error [s]','FontSize',7);
-                            grid(ax,'on');
-                            return;
+                            hold(ax,'on');
+                            plot(ax, tz, y(i0:end), 'r-', 'LineWidth',0.8);
+                            CE.overlaySigma_(ax, tz, CE.stateSigmaWin_(diag,13,1/c0,i0), 3, 'k:');
+                            xlabel(ax,'Time [s]','FontSize',7); ylabel(ax,'Clock bias error [s]','FontSize',7);
+                            title(ax, ttl,'FontSize',7); grid(ax,'on'); return;
                         end
-        
                     case 'clkDrift'
                         y = diag.getClockDriftErrors() ./ c0 .* ppm;  % m/s -> ppm
                         if ~isempty(y)
-                            plot(ax, t(i0:end), y(i0:end), 'b-', 'LineWidth',0.8);
-                            xlabel(ax,'Time [s]','FontSize',7);
-                            ylabel(ax,'Clock drift error [ppm]','FontSize',7);
-                            grid(ax,'on');
-                            return;
+                            hold(ax,'on');
+                            plot(ax, tz, y(i0:end), 'b-', 'LineWidth',0.8);
+                            CE.overlaySigma_(ax, tz, CE.stateSigmaWin_(diag,14,ppm/c0,i0), 3, 'k:');
+                            xlabel(ax,'Time [s]','FontSize',7); ylabel(ax,'Clock drift error [ppm]','FontSize',7);
+                            title(ax, ttl,'FontSize',7); grid(ax,'on'); return;
                         end
                 end
             catch
             end
-        
-            revgnss.ClockExactReportBuilder.noDataAxes_(ax);
+            CE.noDataAxes_(ax);
         end
 
         % ................................................................
-        function fig = plotAttZoom_(diag, t, zoomFrac)
-            % plotAttZoom_  Attitude component errors, zoomed to last zoomFrac.
+        function fig = plotAttZoom_(diag, t, zoomSec)
+            % plotAttZoom_  Attitude component errors, zoomed to the last zoomSec seconds.
             fig = revgnss.ClockExactReportBuilder.makeCompactFig_('');
             ax  = gca(fig);
             try
@@ -296,7 +301,7 @@ classdef ClockExactReportBuilder
                 tmpFig = revgnss.ReportRealityHelper.plotAttitudeComponents(diag, t);
                 if isgraphics(tmpFig)
                     n  = numel(t);
-                    i0 = max(1, round(n * (1-zoomFrac)));
+                    i0 = find(t >= t(end) - zoomSec, 1, 'first'); if isempty(i0); i0 = 1; end
                     ax2 = get(tmpFig,'CurrentAxes');
                     lines_ = findobj(ax2,'Type','line');
                     cmap = {'b','r','g'};
@@ -475,15 +480,20 @@ classdef ClockExactReportBuilder
             try
                 ev = diag.getPositionErrorVecs();  % [3 x n]
                 e  = diag.getPositionErrors();     % [1 x n] 3D norm
+                CE = revgnss.ClockExactReportBuilder;
                 if ~isempty(t) && ~isempty(ev) && size(ev,2) == numel(t)
                     hold(ax,'on');
                     plot(ax, t, ev(1,:), 'r-',  'LineWidth', 0.7, 'DisplayName', 'X');
                     plot(ax, t, ev(2,:), 'g-',  'LineWidth', 0.7, 'DisplayName', 'Y');
                     plot(ax, t, ev(3,:), 'b-',  'LineWidth', 0.7, 'DisplayName', 'Z');
                     plot(ax, t, e,       'k-',  'LineWidth', 1.0, 'DisplayName', '3D');
+                    CE.overlaySigma_(ax, t, CE.stateSigmaWin_(diag,1,1,1), 3, 'r:');
+                    CE.overlaySigma_(ax, t, CE.stateSigmaWin_(diag,2,1,1), 3, 'g:');
+                    CE.overlaySigma_(ax, t, CE.stateSigmaWin_(diag,3,1,1), 3, 'b:');
                     legend(ax, 'show', 'Location', 'northeast', 'FontSize', 5);
                     xlabel(ax, 'Time [s]', 'FontSize', 7);
                     ylabel(ax, 'Error [m]', 'FontSize', 7);
+                    title(ax, 'ECEF position error (dotted = \pm3\sigma)', 'FontSize', 7);
                     grid(ax, 'on');
                     return;
                 elseif ~isempty(t) && ~isempty(e)
@@ -504,9 +514,13 @@ classdef ClockExactReportBuilder
             try
                 c = diag.getClockBiasErrors();
                 if ~isempty(t) && ~isempty(c)
+                    CE = revgnss.ClockExactReportBuilder;
+                    hold(ax,'on');
                     plot(ax, t, c * 1e3, 'r-', 'LineWidth', 0.8);
+                    CE.overlaySigma_(ax, t, CE.stateSigmaWin_(diag,13,1e3,1), 3, 'k:');
                     xlabel(ax, 'Time [s]', 'FontSize',7);
                     ylabel(ax, 'Clock error [mm]', 'FontSize',7);
+                    title(ax, 'Receiver clock bias error (dotted = \pm3\sigma)', 'FontSize',7);
                     grid(ax, 'on');
                     return;
                 end
@@ -521,9 +535,13 @@ classdef ClockExactReportBuilder
             try
                 d = diag.getClockDriftErrors();
                 if ~isempty(t) && ~isempty(d)
+                    CE = revgnss.ClockExactReportBuilder;
+                    hold(ax,'on');
                     plot(ax, t, d, 'b-', 'LineWidth', 0.8);
+                    CE.overlaySigma_(ax, t, CE.stateSigmaWin_(diag,14,1,1), 3, 'k:');
                     xlabel(ax, 'Time [s]', 'FontSize',7);
                     ylabel(ax, 'Drift err [m/s]', 'FontSize',7);
+                    title(ax, 'Receiver clock drift error (dotted = \pm3\sigma)', 'FontSize',7);
                     grid(ax, 'on');
                     return;
                 end
@@ -670,6 +688,30 @@ classdef ClockExactReportBuilder
                 'HorizontalAlignment','center', 'VerticalAlignment','middle', ...
                 'FontSize',7, 'FontAngle','italic', 'Color',[0.5 0.5 0.5], ...
                 'Interpreter','none');
+        end
+
+        function s = stateSigmaWin_(diag, idx, scale, i0)
+            % stateSigmaWin_  Windowed 1-sigma (sqrt of covariance diagonal) for EKF state
+            %   row idx, scaled to the plot's units, from sample i0 to the end. Returns []
+            %   if the covariance is unavailable or too small (graceful no-band).
+            s = [];
+            try
+                d_ = diag.getData();
+                if isfield(d_,'Pdiag') && ~isempty(d_.Pdiag) && size(d_.Pdiag,1) >= idx
+                    row = sqrt(max(d_.Pdiag(idx,:), 0)) * scale;
+                    if i0 < 1; i0 = 1; end
+                    s = row(i0:end);
+                end
+            catch; end
+        end
+
+        function overlaySigma_(ax, tt, sig, k, style)
+            % overlaySigma_  Draw +/- k*sigma dotted covariance borders on ax over time tt.
+            %   Hidden from the legend; no-op if the sigma vector is unavailable/mismatched.
+            if isempty(sig) || numel(sig) ~= numel(tt) || all(~isfinite(sig)); return; end
+            hold(ax,'on');
+            plot(ax, tt,  k*sig, style, 'LineWidth',0.6, 'HandleVisibility','off');
+            plot(ax, tt, -k*sig, style, 'LineWidth',0.6, 'HandleVisibility','off');
         end
 
         % ================================================================
