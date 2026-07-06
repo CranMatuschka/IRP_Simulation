@@ -88,7 +88,7 @@ classdef EkfDynamicsPredictor
             info.forceModel = fmodel;
 
             % ECEF -> inertial at t0
-            [r_i0, v_i0] = revgnss.FrameTimeUtils.ecefStateToInertial(r, v, t0_s);
+            [r_i0, v_i0] = models.frames.FrameTimeUtils.ecefStateToInertial(r, v, t0_s);
 
             % Energy before propagation
             info.specificEnergyInitial_Jkg = models.orbit.OrbitDynamics.specificEnergy_Jkg(r_i0, v_i0);
@@ -101,7 +101,7 @@ classdef EkfDynamicsPredictor
             info.energyDrift_Jkg = info.specificEnergyFinal_Jkg - info.specificEnergyInitial_Jkg;
 
             % Inertial -> ECEF at t1
-            [r1, v1] = revgnss.FrameTimeUtils.inertialStateToEcef(r_i1, v_i1, t1_s);
+            [r1, v1] = models.frames.FrameTimeUtils.inertialStateToEcef(r_i1, v_i1, t1_s);
             info.usedInertialPropagation = true;
 
             % Sanity check

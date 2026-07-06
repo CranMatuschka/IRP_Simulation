@@ -16,9 +16,9 @@ C     = 299792458;
 % T1: earthRotationAngle at t=0 is zero; increases with time
 % ----------------------------------------------------------------
 fprintf('  T1: earthRotationAngle ...\n');
-assert(revgnss.FrameTimeUtils.earthRotationAngle(0) == 0, ...
+assert(models.frames.FrameTimeUtils.earthRotationAngle(0) == 0, ...
     'T1 FAILED: angle at t=0 must be 0');
-theta10 = revgnss.FrameTimeUtils.earthRotationAngle(10);
+theta10 = models.frames.FrameTimeUtils.earthRotationAngle(10);
 assert(abs(theta10 - OMEGA * 10) < 1e-15, ...
     'T1 FAILED: angle at t=10 s must equal OMEGA*10');
 fprintf('    PASS (theta_10 = %.6e rad)\n', theta10);
@@ -29,8 +29,8 @@ fprintf('    PASS (theta_10 = %.6e rad)\n', theta10);
 fprintf('  T2: ecefToInertial / inertialToEcef round-trip ...\n');
 r_ecef = [6378000; 0; 0];
 t_s    = 3600;
-r_i    = revgnss.FrameTimeUtils.ecefToInertial(r_ecef, t_s);
-r_back = revgnss.FrameTimeUtils.inertialToEcef(r_i, t_s);
+r_i    = models.frames.FrameTimeUtils.ecefToInertial(r_ecef, t_s);
+r_back = models.frames.FrameTimeUtils.inertialToEcef(r_i, t_s);
 assert(norm(r_back - r_ecef) < 1e-8, ...
     'T2 FAILED: round-trip error exceeds 1e-8 m');
 % Rotation should change the x-y components, not z
@@ -43,12 +43,12 @@ fprintf('    PASS (round-trip error = %.2e m)\n', norm(r_back - r_ecef));
 % ----------------------------------------------------------------
 fprintf('  T3: rotateEcefDuringLightTime ...\n');
 r_test = [1e7; 2e7; 3e7];
-r_rot0 = revgnss.FrameTimeUtils.rotateEcefDuringLightTime(r_test, 0);
+r_rot0 = models.frames.FrameTimeUtils.rotateEcefDuringLightTime(r_test, 0);
 assert(norm(r_rot0 - r_test) < 1e-8, ...
     'T3 FAILED: tau=0 must return identity');
 % GEO light time ~0.12 s; rotation should be small but non-zero
 tau_geo = 0.12;
-r_rot_geo = revgnss.FrameTimeUtils.rotateEcefDuringLightTime(r_test, tau_geo);
+r_rot_geo = models.frames.FrameTimeUtils.rotateEcefDuringLightTime(r_test, tau_geo);
 delta_rot = norm(r_rot_geo - r_test);
 assert(delta_rot > 0 && delta_rot < 1e4, ...
     'T3 FAILED: light-time rotation should be small but non-zero');
@@ -62,8 +62,8 @@ fprintf('  T4: sagnacCorrection_m ...\n');
 rx_gnd  = [6378000; 0; 0];        % receiver on ground, along +x
 tx_geo  = [0; 42164000; 0];       % transmitter at GEO, along +y
 
-dRho_A = revgnss.FrameTimeUtils.sagnacCorrection_m(rx_gnd, tx_geo);
-dRho_B = revgnss.FrameTimeUtils.sagnacCorrection_m(tx_geo, rx_gnd);
+dRho_A = models.frames.FrameTimeUtils.sagnacCorrection_m(rx_gnd, tx_geo);
+dRho_B = models.frames.FrameTimeUtils.sagnacCorrection_m(tx_geo, rx_gnd);
 
 % Sagnac must be antisymmetric when rx and tx are swapped
 assert(abs(dRho_A + dRho_B) < 1e-6, ...
@@ -82,7 +82,7 @@ fprintf('    PASS (sagnac A->B = %.4f m)\n', dRho_A);
 % T5: rotMatEcefToInertial is orthogonal (det=1, R'*R=I)
 % ----------------------------------------------------------------
 fprintf('  T5: rotMatEcefToInertial orthogonality ...\n');
-R = revgnss.FrameTimeUtils.rotMatEcefToInertial(7200);
+R = models.frames.FrameTimeUtils.rotMatEcefToInertial(7200);
 assert(abs(det(R) - 1) < 1e-14, 'T5 FAILED: det(R) must be 1');
 assert(norm(R' * R - eye(3)) < 1e-13, 'T5 FAILED: R must be orthogonal');
 fprintf('    PASS\n');

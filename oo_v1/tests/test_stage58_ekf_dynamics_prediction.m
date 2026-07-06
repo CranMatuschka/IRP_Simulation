@@ -19,7 +19,7 @@ v_geo = [0; 0; 0];  % geostationary in ECEF
 
 % T1: Frame state round trip
 try
-    [dr, dv] = revgnss.FrameTimeUtils.roundTripStateError(r_geo, v_geo, 0);
+    [dr, dv] = models.frames.FrameTimeUtils.roundTripStateError(r_geo, v_geo, 0);
     ok = dr < 1e-6 && dv < 1e-9;
     results(end+1) = makeResult('T1_frame_round_trip', ok, ...
         sprintf('dr=%.2e m  dv=%.2e m/s (tol 1e-6, 1e-9)', dr, dv));

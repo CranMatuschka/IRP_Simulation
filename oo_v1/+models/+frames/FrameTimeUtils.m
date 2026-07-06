@@ -15,9 +15,9 @@ classdef FrameTimeUtils
     % timing (< 1 ns) or precise orbit determination, full EOP products are needed.
     %
     % Usage:
-    %   theta = revgnss.FrameTimeUtils.earthRotationAngle(t_s);
-    %   r_i   = revgnss.FrameTimeUtils.ecefToInertial(r_ecef_m, t_s);
-    %   dRho  = revgnss.FrameTimeUtils.sagnacCorrection_m(rx_ecef_m, tx_ecef_m);
+    %   theta = models.frames.FrameTimeUtils.earthRotationAngle(t_s);
+    %   r_i   = models.frames.FrameTimeUtils.ecefToInertial(r_ecef_m, t_s);
+    %   dRho  = models.frames.FrameTimeUtils.sagnacCorrection_m(rx_ecef_m, tx_ecef_m);
 
     methods (Static)
 
@@ -28,27 +28,27 @@ classdef FrameTimeUtils
 
         function theta = earthRotationAngle(t_s)
             % earthRotationAngle  Approximate Earth rotation angle at time t_s [rad].
-            theta = revgnss.FrameTimeUtils.earthRotationRate_radps() * t_s;
+            theta = models.frames.FrameTimeUtils.earthRotationRate_radps() * t_s;
         end
 
         function R = rotMatEcefToInertial(t_s)
             % rotMatEcefToInertial  3×3 rotation matrix from ECEF to inertial-like.
             %   Rotates the ECEF frame by +theta about +z to align with a
             %   vernal-equinox-fixed inertial frame (constant-rotation approximation).
-            theta = revgnss.FrameTimeUtils.earthRotationAngle(t_s);
+            theta = models.frames.FrameTimeUtils.earthRotationAngle(t_s);
             c = cos(theta); s = sin(theta);
             R = [c, -s, 0; s, c, 0; 0, 0, 1];
         end
 
         function r_i = ecefToInertial(r_ecef_m, t_s)
             % ecefToInertial  Rotate ECEF position to inertial-like frame at time t_s.
-            R = revgnss.FrameTimeUtils.rotMatEcefToInertial(t_s);
+            R = models.frames.FrameTimeUtils.rotMatEcefToInertial(t_s);
             r_i = R * r_ecef_m(:);
         end
 
         function r_e = inertialToEcef(r_inertial_m, t_s)
             % inertialToEcef  Inverse of ecefToInertial (R' * r_inertial).
-            R = revgnss.FrameTimeUtils.rotMatEcefToInertial(t_s);
+            R = models.frames.FrameTimeUtils.rotMatEcefToInertial(t_s);
             r_e = R' * r_inertial_m(:);
         end
 
@@ -56,7 +56,7 @@ classdef FrameTimeUtils
             % rotateEcefDuringLightTime  Rotate ECEF position by Earth-rotation during tau_s.
             %   Used to account for the movement of an ECEF-fixed transmitter or
             %   receiver during signal flight time.
-            theta = revgnss.FrameTimeUtils.earthRotationRate_radps() * tau_s;
+            theta = models.frames.FrameTimeUtils.earthRotationRate_radps() * tau_s;
             c = cos(theta); s = sin(theta);
             R = [c, -s, 0; s, c, 0; 0, 0, 1];
             r_rot = R * r_ecef_m(:);
@@ -66,15 +66,15 @@ classdef FrameTimeUtils
 
         function omega_vec = omegaEcef_radps()
             % omegaEcef_radps  Earth rotation vector in ECEF [rad/s].
-            omega_vec = [0; 0; revgnss.FrameTimeUtils.earthRotationRate_radps()];
+            omega_vec = [0; 0; models.frames.FrameTimeUtils.earthRotationRate_radps()];
         end
 
         function [r_i, v_i] = ecefStateToInertial(r_ecef_m, v_ecef_mps, t_s)
             % ecefStateToInertial  Convert ECEF position+velocity to inertial-like frame.
             %   r_i = R * r_e
             %   v_i = R * (v_e + omega_E x r_e)
-            R   = revgnss.FrameTimeUtils.rotMatEcefToInertial(t_s);
-            omg = revgnss.FrameTimeUtils.omegaEcef_radps();
+            R   = models.frames.FrameTimeUtils.rotMatEcefToInertial(t_s);
+            omg = models.frames.FrameTimeUtils.omegaEcef_radps();
             r_i = R * r_ecef_m(:);
             v_i = R * (v_ecef_mps(:) + cross(omg, r_ecef_m(:)));
         end
@@ -83,16 +83,16 @@ classdef FrameTimeUtils
             % inertialStateToEcef  Convert inertial-like position+velocity to ECEF.
             %   r_e = R' * r_i
             %   v_e = R' * v_i - omega_E x r_e
-            R   = revgnss.FrameTimeUtils.rotMatEcefToInertial(t_s);
-            omg = revgnss.FrameTimeUtils.omegaEcef_radps();
+            R   = models.frames.FrameTimeUtils.rotMatEcefToInertial(t_s);
+            omg = models.frames.FrameTimeUtils.omegaEcef_radps();
             r_e = R' * r_i_m(:);
             v_e = R' * v_i_mps(:) - cross(omg, r_e);
         end
 
         function [dr, dv] = roundTripStateError(r_ecef_m, v_ecef_mps, t_s)
             % roundTripStateError  ECEF->inertial->ECEF round-trip error norms.
-            [ri, vi] = revgnss.FrameTimeUtils.ecefStateToInertial(r_ecef_m, v_ecef_mps, t_s);
-            [re, ve] = revgnss.FrameTimeUtils.inertialStateToEcef(ri, vi, t_s);
+            [ri, vi] = models.frames.FrameTimeUtils.ecefStateToInertial(r_ecef_m, v_ecef_mps, t_s);
+            [re, ve] = models.frames.FrameTimeUtils.inertialStateToEcef(ri, vi, t_s);
             dr = norm(re - r_ecef_m(:));
             dv = norm(ve - v_ecef_mps(:));
         end
@@ -106,7 +106,7 @@ classdef FrameTimeUtils
             %   to the receiver.  Sign convention consistent with RangeCorrections.
             %   This is a first-order approximation; full iterative correction
             %   requires the light-time solution.
-            OMEGA = revgnss.FrameTimeUtils.earthRotationRate_radps();
+            OMEGA = models.frames.FrameTimeUtils.earthRotationRate_radps();
             C     = 299792458;                     % speed of light [m/s]
             rx = rx_ecef_m(:);
             tx = tx_ecef_m(:);
