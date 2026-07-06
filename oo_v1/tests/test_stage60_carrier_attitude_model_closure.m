@@ -104,7 +104,7 @@ end
 % --- T4: CarrierMeasurementBuilder source declares Stage 60 cpInfo fields ---
 try
     % Verify Stage 60 closure fields are in the builder source (smoke check).
-    srcFile = which('revgnss.CarrierMeasurementBuilder');
+    srcFile = which('models.measurements.CarrierMeasurementBuilder');
     if isempty(srcFile)
         results(end+1) = mkr_('T4:cpInfoFields', false, 'CarrierMeasurementBuilder not on path');
     else
