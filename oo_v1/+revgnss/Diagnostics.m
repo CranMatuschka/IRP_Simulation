@@ -65,7 +65,7 @@ classdef Diagnostics < handle
         lastSnapshotTime_s_        double  = -Inf
         % Array backend (new in SimulationDataStore refactor)
         useArrayBackend_           logical = false
-        store_                              % revgnss.SimulationDataStore or []
+        store_                              % data.SimulationDataStore or []
         heavyDiagInterval_s_       double  = 60
         heavyDiagEveryEpoch_       logical = true   % default: no sampling
         lastHeavyDiagTime_s_       double  = -Inf
@@ -160,7 +160,7 @@ classdef Diagnostics < handle
                 catch
                     nEp = 1;
                 end
-                obj.store_ = revgnss.SimulationDataStore(cfg, nEp);
+                obj.store_ = data.SimulationDataStore(cfg, nEp);
                 fprintf('  Diagnostics: array backend (%d epochs preallocated)\n', nEp);
             end
 

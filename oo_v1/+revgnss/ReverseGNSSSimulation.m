@@ -23,7 +23,7 @@ classdef ReverseGNSSSimulation < handle
         ekf         filter.ReverseGNSSEKF
         orbitProp
 
-        simData     revgnss.SimulationDataStore
+        simData     data.SimulationDataStore
 
         nTowers     (1,1) double  = 5
         nEpochs     (1,1) double  = 0
@@ -95,7 +95,7 @@ classdef ReverseGNSSSimulation < handle
             end
 
             nRx_ = size(obj.asset.receiverLeverArms_body_m, 2);
-            obj.simData = revgnss.SimulationDataStore(obj.cfg, obj.nEpochs, ...
+            obj.simData = data.SimulationDataStore(obj.cfg, obj.nEpochs, ...
                 obj.ekf.stateMap, obj.nTowers, nRx_);
             fprintf('  Data backend: SimulationDataStore\n');
             fprintf('  Schema: FlatSimulationDataStore v3\n');

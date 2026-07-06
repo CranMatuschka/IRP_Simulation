@@ -9,7 +9,7 @@ addpath(fullfile(thisDir, '..', 'config'));
 fprintf('=== test_simdata_freeze ===\n');
 
 cfg   = revgnss.ConfigFactory.defaultConfig();
-store = revgnss.SimulationDataStore(cfg, 10);
+store = data.SimulationDataStore(cfg, 10);
 
 % Before freeze the store is writable; recordOrbitCache is a harmless write.
 store.recordOrbitCache(struct('enabled', false));

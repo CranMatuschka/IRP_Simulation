@@ -66,9 +66,9 @@ fprintf('T3 PASS: schemaVersion=3, schemaName=%s\n', out.dataMeta.schemaName);
 % =========================================================================
 fprintf('\nT4: out.simData class...\n');
 assert(isfield(out,'simData') || isprop(out,'simData'), 'T4 FAIL: out.simData missing');
-assert(isa(out.simData, 'revgnss.SimulationDataStore'), ...
+assert(isa(out.simData, 'data.SimulationDataStore'), ...
     sprintf('T4 FAIL: out.simData class=%s', class(out.simData)));
-fprintf('T4 PASS: out.simData is revgnss.SimulationDataStore\n');
+fprintf('T4 PASS: out.simData is data.SimulationDataStore\n');
 
 % =========================================================================
 % T5: out.data.t_s length matches out.dataMeta.nEpochs

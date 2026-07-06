@@ -5,8 +5,8 @@ classdef SimulationDataStore < handle
     % one value per epoch. All EKF computation is performed inside recordEpoch().
     %
     % Usage:
-    %   store = revgnss.SimulationDataStore(cfg, nEpochs);            % backward compat
-    %   store = revgnss.SimulationDataStore(cfg, nEpochs, stateMap, nTowers, nRx);
+    %   store = data.SimulationDataStore(cfg, nEpochs);            % backward compat
+    %   store = data.SimulationDataStore(cfg, nEpochs, stateMap, nTowers, nRx);
     %   store.recordEpoch(k, t_s, asset, ekf, z, h, H, R, NIS, ...
     %       errStruct, visibleTowerIds, elevations_rad, postfitResidual);
     %   d = store.getData();        % FlatSimulationDataStore v3 struct
