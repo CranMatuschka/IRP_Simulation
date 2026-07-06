@@ -650,8 +650,10 @@ else
     cfg.measurements.isl.transmitters  = 'all';   % aid from every secondary
     cfg.measurements.isl.receiverAssetIndex = 1;  % into the primary only
     cfg.measurements.isl.warmup_s      = 300;     % acquire ISL after the ground fix converges
-    cfg.measurements.isl.timing.enable = true;
-    cfg.measurements.isl.timing.mode   = 'oneWayLightTime';
+    % ISL ranging uses same-epoch geometry: for a ~1 km baseline the light time is
+    % ~3.3 us and both endpoints move ~0.07 m/s, so the retardation is sub-nm and
+    % negligible (unlike the 0.1 s ground-space leg). Timing metadata stays off.
+    cfg.measurements.isl.timing.enable = false;
     cfg.measurements.isl.code.enable    = true;
     cfg.measurements.isl.code.useInEKF  = true;
     cfg.measurements.isl.code.sigma_m   = 1.0;    % one-way ISL code thermal 1-sigma [m]
