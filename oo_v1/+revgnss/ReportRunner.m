@@ -778,7 +778,7 @@ classdef ReportRunner
             summary.stage64PppGrade     = false;
 
             % ---- Stage 66: single-asset one-way closure summary fields -----
-            summary.stage66Active         = true;
+            summary.oneWayClosureSectionActive         = true;
             summary.stage66NSpaceAssets   = 1;
             orbitClass66_ = 'GEO';
             try; orbitClass66_ = cfg.scenario.orbitClass; catch; end

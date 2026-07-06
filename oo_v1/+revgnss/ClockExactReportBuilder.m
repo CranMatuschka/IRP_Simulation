@@ -1175,7 +1175,7 @@ classdef ClockExactReportBuilder
         % ================================================================
         function writeStage67Closure_(fid, summary, plotPaths, stem, figDir)
             CE = revgnss.ClockExactReportBuilder;
-            if ~isfield(summary,'stage66Active') || ~summary.stage66Active; return; end
+            if ~isfield(summary,'oneWayClosureSectionActive') || ~summary.oneWayClosureSectionActive; return; end
             fprintf(fid, '\\clearpage\n');
             fprintf(fid, '\\section{Stage 67 Attitude, Clock, and Dynamics Realism Closure}\n');
             fprintf(fid, ['\\textit{Stage~67 makes three physical realism upgrades to the ' ...
