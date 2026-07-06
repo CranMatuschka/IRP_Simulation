@@ -73,10 +73,11 @@ classdef ISLMeasurementBuilder
             end
             brxTruth = primaryAsset.clock.getBiasMeters();
             drxTruth = primaryAsset.clock.getDriftMetersPerSecond();
+            info.productIntervalIdx = revgnss.ISLMeasurementBuilder.productInterval_(info.product, t_s);
 
             for txi = info.transmitterList(:)'
                 tx  = assets{txi};
-                pb  = revgnss.ISLMeasurementBuilder.productBias_(cfg, info.product, txi);
+                pb  = revgnss.ISLMeasurementBuilder.productBias_(cfg, info.product, txi, info.productIntervalIdx);
                 rTxTruth = tx.r_ecef_m(:);   vTxTruth = tx.v_ecef_mps(:);
                 rTxProd  = rTxTruth + pb.pos; vTxProd = vTxTruth + pb.vel;
                 btxTruth = tx.clock.getBiasMeters();           dtxTruth = tx.clock.getDriftMetersPerSecond();
@@ -130,10 +131,12 @@ classdef ISLMeasurementBuilder
         function h = predictEkfRows(cfg, primaryAsset, assets, x, stateMap, info)
             h = [];
             if isempty(info) || ~isfield(info,'ekfRowTypes') || isempty(info.ekfRowTypes); return; end
+            intervalIdx = 0;
+            if isfield(info,'productIntervalIdx'); intervalIdx = info.productIntervalIdx; end
             for k = 1:numel(info.ekfRowTypes)
                 txi = info.ekfRowTx(k);
                 tx  = assets{txi};
-                pb  = revgnss.ISLMeasurementBuilder.productBias_(cfg, info.product, txi);
+                pb  = revgnss.ISLMeasurementBuilder.productBias_(cfg, info.product, txi, intervalIdx);
                 [rhoModel, rrModel] = revgnss.ISLMeasurementBuilder.geometry_( ...
                     x(stateMap.r_idx), x(stateMap.v_idx), tx.r_ecef_m(:) + pb.pos, tx.v_ecef_mps(:) + pb.vel);
                 switch info.ekfRowTypes{k}
@@ -176,6 +179,7 @@ classdef ISLMeasurementBuilder
             info.warmup_s = revgnss.ISLMeasurementBuilder.getNum_(cfg, {'measurements','isl','warmup_s'}, 0);
             info.warmupActive = false;
             info.product = revgnss.ISLMeasurementBuilder.productCfg_(cfg);
+            info.productIntervalIdx = 0;
             info.rows = struct([]);
             info.ekfRowTypes = {};
             info.ekfRowTx = [];
@@ -215,20 +219,34 @@ classdef ISLMeasurementBuilder
             p.sigmaClock_m      = revgnss.ISLMeasurementBuilder.getNum_(cfg, {'measurements','isl','product','sigmaClock_m'}, 0.0);
             p.sigmaVel_mps      = revgnss.ISLMeasurementBuilder.getNum_(cfg, {'measurements','isl','product','sigmaVel_mps'}, 0.0);
             p.sigmaClockDrift_mps = revgnss.ISLMeasurementBuilder.getNum_(cfg, {'measurements','isl','product','sigmaClockDrift_mps'}, 0.0);
+            p.updateInterval_s = revgnss.ISLMeasurementBuilder.getNum_(cfg, {'measurements','isl','product','updateInterval_s'}, 300);
             if ~p.enable
                 p.sigmaPos_m = 0; p.sigmaClock_m = 0; p.sigmaVel_mps = 0; p.sigmaClockDrift_mps = 0;
             end
             p.seed = revgnss.ISLMeasurementBuilder.getNum_(cfg, {'simulation','seed'}, 42);
         end
 
-        function pb = productBias_(cfg, product, txi)
-            % Fixed-per-run represented-secondary product error (correlated OD/clock
-            % offset). Deterministic in (seed, txi) so build() and predictEkfRows()
-            % see the same anchor. Zero when the product model is disabled.
+        function idx = productInterval_(product, t_s)
+            % Broadcast-interval index: the product is re-issued every
+            % updateInterval_s, so its error is piecewise-constant (correlated within
+            % an interval, independent across intervals) -> it averages down over the
+            % run and the white-R model stays consistent.
+            dt = 300;
+            if isstruct(product) && isfield(product,'updateInterval_s') && product.updateInterval_s > 0
+                dt = product.updateInterval_s;
+            end
+            idx = floor(t_s / dt);
+        end
+
+        function pb = productBias_(cfg, product, txi, intervalIdx)
+            % Represented-secondary product error for one broadcast interval.
+            % Deterministic in (seed, txi, intervalIdx) so build() and predictEkfRows()
+            % see the same anchor at a given epoch. Zero when the model is disabled.
+            if nargin < 4; intervalIdx = 0; end
             if isstruct(product); p = product; else; p = revgnss.ISLMeasurementBuilder.productCfg_(cfg); end
             pb = struct('pos',zeros(3,1),'vel',zeros(3,1),'clk',0,'clkDrift',0);
             if ~p.enable; return; end
-            s = revgnss.ISLMeasurementBuilder.stream_(p.seed, txi, 0, 555);
+            s = revgnss.ISLMeasurementBuilder.stream_(p.seed, txi, 555, intervalIdx);
             pb.pos      = p.sigmaPos_m        * randn(s,3,1);
             pb.vel      = p.sigmaVel_mps      * randn(s,3,1);
             pb.clk      = p.sigmaClock_m      * randn(s,1);

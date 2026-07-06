@@ -443,6 +443,9 @@ cfg.measurements.isl.product.sigmaPos_m          = 0.05;   % secondary ephemeris
 cfg.measurements.isl.product.sigmaClock_m        = 0.03;   % secondary clock product 1-sigma [m] (~100 ps)
 cfg.measurements.isl.product.sigmaVel_mps        = 1e-4;   % secondary velocity product 1-sigma [m/s]
 cfg.measurements.isl.product.sigmaClockDrift_mps = 1e-4;   % secondary clock-drift product 1-sigma [m/s]
+cfg.measurements.isl.product.updateInterval_s    = 300;    % product re-broadcast cadence [s]: the
+                                                           % error is piecewise-constant per interval,
+                                                           % so it averages down and R stays consistent
 cfg.measurements.isl.twoWay.enable = false;
 cfg.measurements.isl.twoWay.range.enable = false;
 cfg.measurements.isl.twoWay.range.useInEKF = false;
