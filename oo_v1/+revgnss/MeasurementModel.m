@@ -68,7 +68,7 @@ classdef MeasurementModel < handle
             N = numel(towers);
             elevations_rad = zeros(N,1);
             for k = 1:N
-                elevations_rad(k) = revgnss.GeometryUtils.elevationAngle( ...
+                elevations_rad(k) = models.frames.GeometryUtils.elevationAngle( ...
                     towers{k}.r_ecef_m, r_ant_ecef_m);
             end
             visible = elevations_rad >= obj.elevMask_rad;
@@ -128,7 +128,7 @@ classdef MeasurementModel < handle
             for ti = 1:N_twr
                 r_twr_nom = towers{ti}.getAntennaPositionECEF();
                 for ai = 1:N_ant
-                    elv = revgnss.GeometryUtils.elevationAngle(r_twr_nom, r_ants_truth(:,ai));
+                    elv = models.frames.GeometryUtils.elevationAngle(r_twr_nom, r_ants_truth(:,ai));
                     if elv >= obj.elevMask_rad
                         cnt = cnt + 1;
                         twr_list(cnt) = ti;

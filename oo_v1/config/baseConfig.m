@@ -42,7 +42,7 @@ cfg.scenario.nSpaceAssets = 1;
 geoLat_rad = 0.0;
 geoLon_rad = 23.0 * pi / 180;
 geoAlt_m   = 35786000.0;
-r_geo      = revgnss.GeometryUtils.geodetic2ecef(geoLat_rad, geoLon_rad, geoAlt_m);
+r_geo      = models.frames.GeometryUtils.geodetic2ecef(geoLat_rad, geoLon_rad, geoAlt_m);
 
 cfg.asset.name                    = 'GEO-1';
 cfg.asset.mass_kg                 = 70;

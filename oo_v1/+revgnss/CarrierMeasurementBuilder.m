@@ -186,7 +186,7 @@ classdef CarrierMeasurementBuilder
                     pco = cfg.effects.antennaPCO;
                     if isfield(pco,'truth') && pco.truth.enable
                         tOff = pco.towerOffset_enu_m(:);
-                        R_ENU = revgnss.GeometryUtils.enu2ecef(towers{ti}.lat_rad, towers{ti}.lon_rad);
+                        R_ENU = models.frames.GeometryUtils.enu2ecef(towers{ti}.lat_rad, towers{ti}.lon_rad);
                         r_twr_t = r_twr_t + R_ENU * tOff;
                     end
                 end

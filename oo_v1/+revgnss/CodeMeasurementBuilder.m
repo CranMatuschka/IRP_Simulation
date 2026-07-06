@@ -80,12 +80,12 @@ classdef CodeMeasurementBuilder
                     pco = cfg.effects.antennaPCO;
                     if isfield(pco,'truth') && pco.truth.enable
                         tOff = pco.towerOffset_enu_m(:);
-                        R_ENU = revgnss.GeometryUtils.enu2ecef(towers{ti}.lat_rad, towers{ti}.lon_rad);
+                        R_ENU = models.frames.GeometryUtils.enu2ecef(towers{ti}.lat_rad, towers{ti}.lon_rad);
                         r_twr_truth = r_twr_truth + R_ENU * tOff;
                     end
                     if isfield(pco,'model') && pco.model.enable
                         tOff = pco.towerOffset_enu_m(:);
-                        R_ENU = revgnss.GeometryUtils.enu2ecef(towers{ti}.lat_rad, towers{ti}.lon_rad);
+                        R_ENU = models.frames.GeometryUtils.enu2ecef(towers{ti}.lat_rad, towers{ti}.lon_rad);
                         r_twr_model = r_twr_model + R_ENU * tOff;
                     end
                 end

@@ -69,7 +69,7 @@ classdef GroundTower < handle
             end
 
             % Compute ECEF tower reference position
-            obj.r_ecef_m = revgnss.GeometryUtils.geodetic2ecef( ...
+            obj.r_ecef_m = models.frames.GeometryUtils.geodetic2ecef( ...
                 obj.lat_rad, obj.lon_rad, obj.alt_m);
 
             % Compute antenna phase center ECEF
@@ -109,7 +109,7 @@ classdef GroundTower < handle
         end
 
         function elev_rad = computeElevationTo(obj, target_ecef_m)
-            elev_rad = revgnss.GeometryUtils.elevationAngle( ...
+            elev_rad = models.frames.GeometryUtils.elevationAngle( ...
                 obj.r_ecef_m, target_ecef_m);
         end
     end
@@ -121,7 +121,7 @@ classdef GroundTower < handle
                 r = obj.r_ecef_m;
                 return
             end
-            R = revgnss.GeometryUtils.enu2ecef(obj.lat_rad, obj.lon_rad);
+            R = models.frames.GeometryUtils.enu2ecef(obj.lat_rad, obj.lon_rad);
             r = obj.r_ecef_m + R * obj.antennaOffset_enu_m;
         end
     end

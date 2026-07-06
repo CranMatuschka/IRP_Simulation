@@ -35,7 +35,7 @@ classdef GeometryUtils
             % elevationAngle  Elevation angle from observer to target [rad].
             %
             % Positive when target is above local horizon.
-            [lat, lon, ~] = revgnss.GeometryUtils.ecef2geodetic(r_obs_ecef);
+            [lat, lon, ~] = models.frames.GeometryUtils.ecef2geodetic(r_obs_ecef);
             los = r_target_ecef(:) - r_obs_ecef(:);
             los_norm = los / norm(los);
 
@@ -59,7 +59,7 @@ classdef GeometryUtils
 
         function r_ecef = enu2ecef_vector(lat_rad, lon_rad, v_enu)
             % enu2ecef_vector  Rotate a vector from ENU to ECEF.
-            R = revgnss.GeometryUtils.enu2ecef(lat_rad, lon_rad);
+            R = models.frames.GeometryUtils.enu2ecef(lat_rad, lon_rad);
             r_ecef = R * v_enu(:);
         end
 

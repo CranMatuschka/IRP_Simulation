@@ -66,13 +66,13 @@ classdef CarrierModelOnlyBuilder
                     pco = cfg.effects.antennaPCO;
                     if isfield(pco,'model') && pco.model.enable
                         tOff  = pco.towerOffset_enu_m(:);
-                        R_ENU = revgnss.GeometryUtils.enu2ecef( ...
+                        R_ENU = models.frames.GeometryUtils.enu2ecef( ...
                             towers{ti}.lat_rad, towers{ti}.lon_rad);
                         r_twr_e = r_twr_e + R_ENU * tOff;
                     end
                 end
 
-                elv = revgnss.GeometryUtils.elevationAngle(r_twr_e, r_ants_est(:, ai));
+                elv = models.frames.GeometryUtils.elevationAngle(r_twr_e, r_ants_est(:, ai));
 
                 rho_e = revgnss.RangeCorrections.correctedPseudorange( ...
                     r_ants_est(:, ai), r_twr_e, cfg, 'model', elv, t_s);

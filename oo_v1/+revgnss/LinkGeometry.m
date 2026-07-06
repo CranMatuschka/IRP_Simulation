@@ -70,7 +70,7 @@ classdef LinkGeometry
             g.delta_m         = delta;
             g.range_m         = rho;
             g.losRow          = (delta / rho)';
-            g.elevation_rad   = revgnss.GeometryUtils.elevationAngle(r_twr, r_ant);
+            g.elevation_rad   = models.frames.GeometryUtils.elevationAngle(r_twr, r_ant);
         end
 
         function H_pos = finiteDiffPositionJacobian(cfg, towers, towerIdx, antennaIdx, ...

@@ -82,7 +82,7 @@ classdef MeasurementModelUtils
             end
             if towerIdx <= numel(cfg.towers) && isfield(cfg.towers(towerIdx),'surveyError_ENU_m')
                 enu_err = cfg.towers(towerIdx).surveyError_ENU_m;
-                r_twr = r_nom + revgnss.GeometryUtils.enu2ecef_vector( ...
+                r_twr = r_nom + models.frames.GeometryUtils.enu2ecef_vector( ...
                     tower.lat_rad, tower.lon_rad, enu_err);
             else
                 r_twr = r_nom;
@@ -117,11 +117,11 @@ classdef MeasurementModelUtils
                 pco = cfg.effects.antennaPCO;
                 if isfield(pco,'model') && pco.model.enable
                     tOff = pco.towerOffset_enu_m(:);
-                    R_ENU = revgnss.GeometryUtils.enu2ecef(towers{ti}.lat_rad, towers{ti}.lon_rad);
+                    R_ENU = models.frames.GeometryUtils.enu2ecef(towers{ti}.lat_rad, towers{ti}.lon_rad);
                     r_twr = r_twr + R_ENU * tOff;
                 end
             end
-            elv = revgnss.GeometryUtils.elevationAngle(r_twr, r_ant);
+            elv = models.frames.GeometryUtils.elevationAngle(r_twr, r_ant);
             rho = revgnss.RangeCorrections.correctedPseudorange(r_ant, r_twr, cfg, 'model', elv);
         end
 

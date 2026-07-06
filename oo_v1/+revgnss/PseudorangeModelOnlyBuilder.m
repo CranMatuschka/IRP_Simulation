@@ -60,14 +60,14 @@ classdef PseudorangeModelOnlyBuilder
                     pco = cfg.effects.antennaPCO;
                     if isfield(pco,'model') && pco.model.enable
                         tOff  = pco.towerOffset_enu_m(:);
-                        R_ENU = revgnss.GeometryUtils.enu2ecef( ...
+                        R_ENU = models.frames.GeometryUtils.enu2ecef( ...
                             towers{ti}.lat_rad, towers{ti}.lon_rad);
                         r_twr_model = r_twr_model + R_ENU * tOff;
                     end
                 end
 
                 r_ant = r_ants_est(:, ai);
-                elv   = revgnss.GeometryUtils.elevationAngle(r_twr_model, r_ant);
+                elv   = models.frames.GeometryUtils.elevationAngle(r_twr_model, r_ant);
 
                 rho_est = revgnss.RangeCorrections.correctedPseudorange( ...
                     r_ant, r_twr_model, cfg, 'model', elv, t_s);
