@@ -40,7 +40,7 @@ classdef ScenarioFactory
             % --- ErrorChain --------------------------------------------
             % Pass the full cfg so ErrorChain can access signals, measurements,
             % environment, and scenario fields alongside cfg.errors.
-            errorChain = revgnss.ErrorChain(cfg, cfg.simulation.seed);
+            errorChain = models.errors.ErrorChain(cfg, cfg.simulation.seed);
 
             % --- MeasurementModel --------------------------------------
             measModel = revgnss.MeasurementModel(cfg, errorChain);

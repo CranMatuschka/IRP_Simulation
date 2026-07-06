@@ -1,7 +1,7 @@
 function out = troposphere(mode, args, cfg)
 %TROPOSPHERE  Single entry point for troposphere / ZWD (Phase 5 façade).
 %   Delegates VERBATIM to models.atmosphere.TroposphereModel — no physics here. The stochastic
-%   truth/model DELAY draws live in the stateful revgnss.ErrorChain (per-epoch); this
+%   truth/model DELAY draws live in the stateful models.errors.ErrorChain (per-epoch); this
 %   façade exposes the deterministic mapping, ZWD process parameters, and the
 %   architecture / weak-observability diagnostics only. Standalone (not wired into the
 %   sim), so it cannot move the regression golden.
@@ -12,7 +12,7 @@ function out = troposphere(mode, args, cfg)
 %     mode = 'diagnostic'  -> out.describe (architecture struct), out.weakObsNote (string)
 %                             args: stateMap (optional), elevations_rad (optional)
 %     mode = 'truth'       -> UNSUPPORTED: tropo truth delay is realized inside the
-%                             stateful revgnss.ErrorChain, not via this stateless façade.
+%                             stateful models.errors.ErrorChain, not via this stateless façade.
     if nargin < 3; cfg = struct(); end
     switch mode
         case 'model'
@@ -27,7 +27,7 @@ function out = troposphere(mode, args, cfg)
             out.weakObsNote = models.atmosphere.TroposphereModel.weakObservabilityNote(el);
         case 'truth'
             error('troposphere:truthNotHere', ...
-                ['Troposphere TRUTH delay is realized inside revgnss.ErrorChain ', ...
+                ['Troposphere TRUTH delay is realized inside models.errors.ErrorChain ', ...
                  '(stateful, per-epoch), not via this stateless façade — run the simulation.']);
         otherwise
             error('troposphere:badMode', ...

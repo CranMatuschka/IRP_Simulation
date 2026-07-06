@@ -33,7 +33,7 @@ cfg1.effects.ionosphere.mappingModel         = 'thinShell';
 cfg1.effects.ionosphere.shellHeight_m        = 350e3;
 seed1 = 0;
 
-ec1 = revgnss.ErrorChain(cfg1, seed1);
+ec1 = models.errors.ErrorChain(cfg1, seed1);
 el_low = 10 * pi/180;
 f_L1   = 1575.42e6;
 
@@ -43,7 +43,7 @@ d_ts = err1.bySource.truth_m.iono(1);
 % Same config with simpleSecant
 cfg1b = cfg1;
 cfg1b.effects.ionosphere.mappingModel = 'simpleSecant';
-ec1b  = revgnss.ErrorChain(cfg1b, seed1);
+ec1b  = models.errors.ErrorChain(cfg1b, seed1);
 err1b = ec1b.compute([el_low], [1], [1], 0);
 d_sec = err1b.bySource.truth_m.iono(1);
 
@@ -280,7 +280,7 @@ cfg12.errors.ionosphere.truth.enable        = true;
 cfg12.errors.ionosphere.truth.zenithDelay_m = 5.0;
 cfg12.errors.ionosphere.model.enable        = false;
 
-ec12 = revgnss.ErrorChain(cfg12, 0);
+ec12 = models.errors.ErrorChain(cfg12, 0);
 err12 = ec12.compute([el_low], [1], [1], 0);
 d12 = err12.bySource.truth_m.iono(1);
 

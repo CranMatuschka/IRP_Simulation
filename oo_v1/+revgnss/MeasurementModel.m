@@ -35,7 +35,7 @@ classdef MeasurementModel < handle
 
     properties
         cfg             (1,1) struct
-        errorChain      revgnss.ErrorChain
+        errorChain      models.errors.ErrorChain
         elevMask_rad    (1,1) double = 5 * pi/180
         attitudeJacStep_rad (1,1) double = 1e-6
         ambiguityMap                       % containers.Map: (tower*1000+antenna) → integer N (diagnostic)

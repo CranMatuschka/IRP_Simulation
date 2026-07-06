@@ -32,7 +32,7 @@ cfg.errors.ionosphere.truth.verticalDelayL1_m = vdel;
 cfg.errors.ionosphere.model.enable           = true;
 cfg.errors.ionosphere.model.verticalDelayL1_m = vdel;
 
-ec = revgnss.ErrorChain(cfg, 1);
+ec = models.errors.ErrorChain(cfg, 1);
 err = ec.compute(el_rad, 1, 1, 0);
 
 I_slant_truth = err.bySource.truth_m.iono(1);
@@ -56,7 +56,7 @@ cfg2 = revgnss.ConfigFactory.defaultConfig();
 cfg2.errors.ionosphere.modelType = 'constantVerticalTEC';
 % Do NOT set verticalTEC_TECU — should throw an error
 
-ec2 = revgnss.ErrorChain(cfg2, 1);
+ec2 = models.errors.ErrorChain(cfg2, 1);
 try
     ec2.compute(el_rad, 1, 1, 0);
     error('T1b FAILED: expected error for constantVerticalTEC without verticalTEC_TECU');

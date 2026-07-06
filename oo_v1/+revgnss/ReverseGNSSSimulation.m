@@ -19,7 +19,7 @@ classdef ReverseGNSSSimulation < handle
         assets      cell = {}
         towers      cell
         measModel   revgnss.MeasurementModel
-        errorChain  revgnss.ErrorChain
+        errorChain  models.errors.ErrorChain
         ekf         revgnss.ReverseGNSSEKF
         orbitProp
 

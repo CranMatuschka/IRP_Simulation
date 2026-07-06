@@ -13,7 +13,7 @@ function out = ionosphere(mode, args, cfg)   %#ok<INUSD>
 %     mode = 'diagnostic'  -> out.scale : (f_primary/f_signal)^2 first-order iono scale
 %                             args: signalName, primaryName
 %     mode = 'truth'       -> UNSUPPORTED: first-order ionosphere TRUTH is drawn inside
-%                             the stateful revgnss.ErrorChain per-epoch pass, not
+%                             the stateful models.errors.ErrorChain per-epoch pass, not
 %                             reachable as an isolated stateless call. Use the sim.
 %   (cfg is accepted for signature uniformity across effect façades; ionosphere ignores it.)
     switch mode
@@ -30,7 +30,7 @@ function out = ionosphere(mode, args, cfg)   %#ok<INUSD>
                 args.signalName, args.primaryName);
         case 'truth'
             error('ionosphere:truthNotHere', ...
-                ['First-order ionosphere TRUTH is realized inside revgnss.ErrorChain ', ...
+                ['First-order ionosphere TRUTH is realized inside models.errors.ErrorChain ', ...
                  '(stateful, per-epoch), not via this stateless façade — run the simulation.']);
         otherwise
             error('ionosphere:badMode', ...
