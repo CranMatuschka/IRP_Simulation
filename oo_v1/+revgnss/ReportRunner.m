@@ -709,7 +709,7 @@ classdef ReportRunner
             catch; end
 
             % ---- Stage 63: controlled raw-carrier integer ambiguity fixing ----
-            summary.stage63IntegerFixingImplemented = false;
+            summary.integerAmbiguityFixingActive = false;
             summary.stage63Mode                     = 'disabled';
             summary.stage63Classification           = 'disabled';
             summary.stage63nCandidates              = 0;
@@ -729,7 +729,7 @@ classdef ReportRunner
             try
                 lg63 = sim.fix63Log_;  % property access throws if absent; caught below
                 if isstruct(lg63)
-                    summary.stage63IntegerFixingImplemented = lg63.enabled;
+                    summary.integerAmbiguityFixingActive = lg63.enabled;
                     if isfield(lg63,'mode');               summary.stage63Mode              = lg63.mode;              end
                     if isfield(lg63,'lastClassification'); summary.stage63Classification    = lg63.lastClassification; end
                     if isfield(lg63,'nAccepted');          summary.stage63nAccepted         = lg63.nAccepted;          end

@@ -1465,7 +1465,7 @@ classdef ClockExactReportBuilder
             if isfield(summary,'pseudorangeEnabled')    && summary.pseudorangeEnabled;    parts{end+1} = 'code'; end
             if isfield(summary,'carrierPhaseEnabled')   && summary.carrierPhaseEnabled;   parts{end+1} = 'carrier'; end
             if isfield(summary,'dopplerEnabled')        && summary.dopplerEnabled;        parts{end+1} = 'Doppler'; end
-            if isfield(summary,'stage63IntegerFixingImplemented') && summary.stage63IntegerFixingImplemented
+            if isfield(summary,'integerAmbiguityFixingActive') && summary.integerAmbiguityFixingActive
                 parts{end+1} = 'intFix';
             end
             parts = unique(parts,'stable');
