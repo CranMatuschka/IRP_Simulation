@@ -6,7 +6,7 @@ function activePhysicsConfig(fid, cfg, summary, plotPaths, stem, figDir)
 %   emitted LaTeX is byte-identical to the original method (verified by the normalized
 %   .tex diff harness, tests/report/reportTexFingerprint.m).
     CE = revgnss.ClockExactReportBuilder;
-    if ~isfield(summary,'stage64Active') || ~summary.stage64Active; return; end
+    if ~isfield(summary,'physicsConfigSectionActive') || ~summary.physicsConfigSectionActive; return; end
     fprintf(fid, '\\clearpage\n');
     fprintf(fid, '\\section{Simulation Physics and Configuration}\n');
     fprintf(fid, ['\\textit{Controlled, internally consistent MATLAB reverse-GNSS EKF simulation: ' ...

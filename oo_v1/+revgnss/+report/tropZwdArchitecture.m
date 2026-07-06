@@ -1,7 +1,7 @@
 function tropZwdArchitecture(fid, cfg)
 % tropZwdArchitecture  Always-present troposphere/ZWD section.
 % Written unconditionally so tests can check for it regardless of
-% stage64Active.  Stage 15 test requires 'Troposphere and ZWD Architecture'
+% physicsConfigSectionActive.  Stage 15 test requires 'Troposphere and ZWD Architecture'
 % and 'ZWD EKF state' in the .tex file.
 %
 % Extracted verbatim from ClockExactReportBuilder.writeTropZwdArchitecture_ as

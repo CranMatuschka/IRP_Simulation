@@ -1082,7 +1082,7 @@ classdef ClockExactReportBuilder
         function writeFinalScientificClosure_(fid, summary)
             % writeFinalScientificClosure_  Compact final model closure table.
             CE = revgnss.ClockExactReportBuilder;
-            if ~isfield(summary,'stage64Active') || ~summary.stage64Active; return; end
+            if ~isfield(summary,'physicsConfigSectionActive') || ~summary.physicsConfigSectionActive; return; end
             fprintf(fid, '\\clearpage\n');
             fprintf(fid, '\\section{Single-Asset One-Way Scientific Closure}\n');
             fprintf(fid, ['\\textit{v1 is a controlled, internally consistent MATLAB reverse-GNSS EKF simulation: ' ...

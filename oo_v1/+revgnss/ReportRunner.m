@@ -742,7 +742,7 @@ classdef ReportRunner
             catch; end
 
             % ---- Stage 64: scientific closure summary fields ---------------
-            summary.stage64Active = true;
+            summary.physicsConfigSectionActive = true;
             scen64_ = '';
             try; scen64_ = cfg.scenario.name; catch; end
             summary.stage64ScenarioName = scen64_;
