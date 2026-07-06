@@ -168,7 +168,8 @@ matlab -batch "addpath('tests/regression'); run_oo_v1_regression_3600s"       % 
   `golden_report_tex.txt`): report `.tex` byte-IDENTICAL before/after; metric gate
   unaffected. (LatexReportBuilder figure engine + the ReportRunner summary-lift are
   follow-ups.) (C-9)
-- **8. Demote stage bookkeeping to read-only provenance — IN PROGRESS** (C-7).
+- **8. Demote stage bookkeeping to read-only provenance — DONE** (`678ebe2`..`ac5397d`;
+  both gates green throughout) (C-7).
 
   **8.1 MAP & CLASSIFY (done).** Every "Stage NN" reference partitions into four
   classes. The critical safety fact FIRST: **no stage number gates physics / EKF /
@@ -205,12 +206,34 @@ matlab -batch "addpath('tests/regression'); run_oo_v1_regression_3600s"       % 
     DiffAttitudeBuilder ~28, `+filter/ReverseGNSSEKF` ~24, etc.). Pure archaeology, never
     rendered, zero gate impact. LEFT AS-IS (8.4).
 
-  **8.2 SINGLE READ-ONLY LEDGER (pending):** label StageHistory in its docstring as
-  provenance-only / not-control-flow; change no exposed string.
-  **8.3 THE REAL DEMOTION (pending):** rename each of the four (A) gate flags to a
-  feature-descriptive name (SET expression unchanged — it already IS the feature predicate),
-  one atomic commit each, `.tex` IDENTICAL=1 + smoke PASS verified.
-  **8.4 inert comments:** LEFT AS-IS (opt-in only).
+  **8.2 SINGLE READ-ONLY LEDGER (done, `573af59`):** StageHistory's classdef docstring now
+  carries a "PROVENANCE ONLY — NOT CONTROL FLOW" banner. No method, no exposed string, no
+  rendered content changed; report `.tex` IDENTICAL=1; test_stage60-63 pass.
+  **8.3 THE REAL DEMOTION (done, `315840f`..`ac5397d`):** all four (A) gate flags renamed to
+  feature predicates, one atomic commit each, every one `.tex` IDENTICAL=1 + smoke PASS:
+    `stage61QuatEkfActive` → `quaternionErrorStateEkfActive` (SET stays
+    `strcmp(attitudeParameterization,'quaternionErrorState')`);
+    `stage63IntegerFixingImplemented` → `integerAmbiguityFixingActive` (SET stays `lg63.enabled`);
+    `stage64Active` → `physicsConfigSectionActive`;
+    `stage66Active` → `oneWayClosureSectionActive`.
+  No stage number remains in the report's control-flow vocabulary. Sub-step boundary
+  certified: full 3600 s numeric gate RESULT PASS (177/177) + report `.tex` IDENTICAL=1 +
+  test_stage60/61/62/63 all pass.
+  **8.4 inert comments:** LEFT AS-IS (deliberate; opt-in only). Also left: the (A2) stage-
+  numbered display DATA fields (stage56*..stage68* value fields) — honest content, cosmetic
+  to rename, and out of the gating-logic scope Phase 8 targets.
 
 Invariant for every commit: the gate is green, no guard is weakened, numbers do
 not move. The gate certifies "done" — not any edit or model.
+
+## Refactor complete
+
+All eight phases are DONE and gate-certified on `feature/oo-v1-clarity-refactor`
+(`main` untouched as the rollback point). The validated physics/filter/store classes live in
+`+models/ +filter/ +data/`; config is one literal `masterConfig`; one `.enable` per effect;
+honest off=off default; immutable `SimulationDataStore` with a truth/estimation split;
+one clean `run_oo_v1.m` runner; the report is decomposed into `+revgnss/+report/*`; and stage
+bookkeeping is now a labelled read-only provenance ledger (`StageHistory`) with the report
+gated by feature predicates, not stage numbers. Across Phases 5–8 the 177 Stage-85 metrics
+never moved (rel 1e-9) and the report `.tex` stayed byte-identical (`IDENTICAL=1`) at every
+domain/sub-step boundary; a whole-suite diff vs `main` showed zero new test failures.
