@@ -43,7 +43,7 @@ classdef ScenarioFactory
             errorChain = models.errors.ErrorChain(cfg, cfg.simulation.seed);
 
             % --- MeasurementModel --------------------------------------
-            measModel = revgnss.MeasurementModel(cfg, errorChain);
+            measModel = models.measurements.MeasurementModel(cfg, errorChain);
 
             % --- EKF ---------------------------------------------------
             ekf = revgnss.ReverseGNSSEKF(cfg, nT, asset.clock);
