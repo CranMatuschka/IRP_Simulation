@@ -47,13 +47,13 @@ classdef PseudorangeModelOnlyBuilder
             M_pr     = errStruct.nPseudorange;
 
             h_pr   = zeros(M_pr, 1);
-            mfKind = revgnss.MeasurementModelUtils.zwdMappingKind(cfg);
+            mfKind = models.measurements.MeasurementModelUtils.zwdMappingKind(cfg);
 
             for mi = 1:M_pr
                 ti = twr_list(mi);
                 ai = ant_list(mi);
 
-                r_twr_model = revgnss.MeasurementModelUtils.towerPositionEcef( ...
+                r_twr_model = models.measurements.MeasurementModelUtils.towerPositionEcef( ...
                     cfg, towers{ti}, ti, 'model');
 
                 if isfield(cfg,'effects') && isfield(cfg.effects,'antennaPCO')
@@ -99,7 +99,7 @@ classdef PseudorangeModelOnlyBuilder
                     h_pr(mi) = h_pr(mi) + x_state(stateMap.txCodeBiasIdx(ti));
                 end
 
-                d_rx = revgnss.MeasurementModelUtils.rxCodeBiasModel(cfg);
+                d_rx = models.measurements.MeasurementModelUtils.rxCodeBiasModel(cfg);
                 if d_rx ~= 0
                     h_pr(mi) = h_pr(mi) + d_rx;
                 end

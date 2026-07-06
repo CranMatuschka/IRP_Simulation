@@ -19,13 +19,13 @@ classdef LinkGeometry
 
         function r_twr = modelTowerPosition(cfg, tower, towerIdx)
             % modelTowerPosition  Model-side tower ECEF with optional survey offset.
-            r_twr = revgnss.MeasurementModelUtils.towerPositionEcef( ...
+            r_twr = models.measurements.MeasurementModelUtils.towerPositionEcef( ...
                 cfg, tower, towerIdx, 'model');
         end
 
         function r_twr = truthTowerPosition(cfg, tower, towerIdx)
             % truthTowerPosition  Truth-side tower ECEF with optional survey offset.
-            r_twr = revgnss.MeasurementModelUtils.towerPositionEcef( ...
+            r_twr = models.measurements.MeasurementModelUtils.towerPositionEcef( ...
                 cfg, tower, towerIdx, 'truth');
         end
 
@@ -38,7 +38,7 @@ classdef LinkGeometry
                 r_cm, euler_rad, leverArms_model, ~)
             % modelRangeOnly  Model corrected range for FD Jacobian evaluation.
             % Delegates to MeasurementModelUtils. No clock or stochastic terms.
-            rho = revgnss.MeasurementModelUtils.modelRangeOnly( ...
+            rho = models.measurements.MeasurementModelUtils.modelRangeOnly( ...
                 cfg, towers, towerIdx, antennaIdx, r_cm, euler_rad, leverArms_model);
         end
 
@@ -59,7 +59,7 @@ classdef LinkGeometry
             % PCO is therefore not applied here — it is only needed in FD mode
             % (where MeasurementModelUtils.modelRangeOnly handles it).
             lever = leverArms_model(:, antennaIdx);
-            r_twr = revgnss.MeasurementModelUtils.towerPositionEcef( ...
+            r_twr = models.measurements.MeasurementModelUtils.towerPositionEcef( ...
                 cfg, towers{towerIdx}, towerIdx, 'model');
             r_ant = revgnss.AttitudeKinematics.applyLeverArm(r_cm, euler_rad, lever);
             delta = r_ant - r_twr;
@@ -81,9 +81,9 @@ classdef LinkGeometry
             for ki = 1:3
                 rp = r_cm; rp(ki) = rp(ki) + step_m;
                 rm = r_cm; rm(ki) = rm(ki) - step_m;
-                hp = revgnss.MeasurementModelUtils.modelRangeOnly( ...
+                hp = models.measurements.MeasurementModelUtils.modelRangeOnly( ...
                     cfg, towers, towerIdx, antennaIdx, rp, euler_rad, leverArms_model);
-                hm = revgnss.MeasurementModelUtils.modelRangeOnly( ...
+                hm = models.measurements.MeasurementModelUtils.modelRangeOnly( ...
                     cfg, towers, towerIdx, antennaIdx, rm, euler_rad, leverArms_model);
                 H_pos(ki) = (hp - hm) / (2 * step_m);
             end
@@ -128,9 +128,9 @@ classdef LinkGeometry
                 for ke = 1:3
                     ep = euler_rad; ep(ke) = ep(ke) + step_rad;
                     em = euler_rad; em(ke) = em(ke) - step_rad;
-                    hp = revgnss.MeasurementModelUtils.modelRangeOnly( ...
+                    hp = models.measurements.MeasurementModelUtils.modelRangeOnly( ...
                         cfg, towers, towerIdx, antennaIdx, r_cm, ep, leverArms_model);
-                    hm = revgnss.MeasurementModelUtils.modelRangeOnly( ...
+                    hm = models.measurements.MeasurementModelUtils.modelRangeOnly( ...
                         cfg, towers, towerIdx, antennaIdx, r_cm, em, leverArms_model);
                     H_att(ke) = (hp - hm) / (2 * step_rad);
                 end

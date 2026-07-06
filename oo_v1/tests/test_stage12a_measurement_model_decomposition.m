@@ -18,21 +18,21 @@ fprintf('=== test_stage12a_measurement_model_decomposition ===\n');
 %% T1: rxCodeBiasModel
 fprintf('  T1: MeasurementModelUtils.rxCodeBiasModel ...\n');
 cfg_off.hardware.rxCodeBias.mode = 'off';
-assert(revgnss.MeasurementModelUtils.rxCodeBiasModel(cfg_off) == 0, ...
+assert(models.measurements.MeasurementModelUtils.rxCodeBiasModel(cfg_off) == 0, ...
     'T1a FAILED: off mode should return 0');
 
 cfg_fixed.hardware.rxCodeBias.mode       = 'fixed';
 cfg_fixed.hardware.rxCodeBias.fixedValue_m = 3.14;
-assert(abs(revgnss.MeasurementModelUtils.rxCodeBiasModel(cfg_fixed) - 3.14) < 1e-12, ...
+assert(abs(models.measurements.MeasurementModelUtils.rxCodeBiasModel(cfg_fixed) - 3.14) < 1e-12, ...
     'T1b FAILED: fixed mode should return fixedValue_m');
 
 cfg_nohw = struct();
-assert(revgnss.MeasurementModelUtils.rxCodeBiasModel(cfg_nohw) == 0, ...
+assert(models.measurements.MeasurementModelUtils.rxCodeBiasModel(cfg_nohw) == 0, ...
     'T1c FAILED: missing hardware field should return 0');
 
 % Wrapper parity
 assert(revgnss.MeasurementModel.rxCodeBiasModel(cfg_fixed) == ...
-       revgnss.MeasurementModelUtils.rxCodeBiasModel(cfg_fixed), ...
+       models.measurements.MeasurementModelUtils.rxCodeBiasModel(cfg_fixed), ...
     'T1d FAILED: MeasurementModel wrapper should match Utils');
 fprintf('    rxCodeBiasModel: off=0, fixed=3.14, missing=0, wrapper agrees: PASS\n');
 
@@ -41,12 +41,12 @@ fprintf('  T2: MeasurementModelUtils.codeSignalSigma ...\n');
 sigCfg.codeSigma0_m = 2.0;
 
 cfg_const.measurements.codeNoise.model = 'constant';
-sigma_c = revgnss.MeasurementModelUtils.codeSignalSigma(sigCfg, pi/6, cfg_const);
+sigma_c = models.measurements.MeasurementModelUtils.codeSignalSigma(sigCfg, pi/6, cfg_const);
 assert(abs(sigma_c - 2.0) < 1e-12, 'T2a FAILED: constant mode should return sigma0');
 
 cfg_elev.measurements.codeNoise.model = 'elevation';
 cfg_elev.measurements.codeNoise.elevationExponent = 1.0;
-sigma_e = revgnss.MeasurementModelUtils.codeSignalSigma(sigCfg, pi/6, cfg_elev);
+sigma_e = models.measurements.MeasurementModelUtils.codeSignalSigma(sigCfg, pi/6, cfg_elev);
 assert(sigma_e > sigma_c, 'T2b FAILED: elevation model should give higher sigma at 30 deg');
 
 % Wrapper parity
@@ -57,11 +57,11 @@ fprintf('    codeSignalSigma: constant=%.2f, elevation>constant, wrapper agrees:
 %% T3: zwdMappingKind
 fprintf('  T3: MeasurementModelUtils.zwdMappingKind ...\n');
 cfg_def = struct();
-assert(strcmp(revgnss.MeasurementModelUtils.zwdMappingKind(cfg_def), 'simple'), ...
+assert(strcmp(models.measurements.MeasurementModelUtils.zwdMappingKind(cfg_def), 'simple'), ...
     'T3a FAILED: default should be simple');
 
 cfg_cf.effects.troposphere.mappingModel = 'continuedFraction';
-assert(strcmp(revgnss.MeasurementModelUtils.zwdMappingKind(cfg_cf), 'continuedFraction'), ...
+assert(strcmp(models.measurements.MeasurementModelUtils.zwdMappingKind(cfg_cf), 'continuedFraction'), ...
     'T3b FAILED: should read effects.troposphere.mappingModel');
 
 % Wrapper parity
@@ -76,17 +76,17 @@ cfg_plain.physics.sagnac.model.enable = false;
 cfg_plain.physics.relativity.shapiro.model.enable = false;
 cfg_plain.effects.antennaPCO.model.enable = false;
 cfg_plain.effects.antennaPCV.model.enable = false;
-assert(~revgnss.MeasurementModelUtils.needsFiniteDiffH_(cfg_plain), ...
+assert(~models.measurements.MeasurementModelUtils.needsFiniteDiffH_(cfg_plain), ...
     'T4a FAILED: plain config should not need FD');
 
 cfg_sag = cfg_plain;
 cfg_sag.physics.sagnac.model.enable = true;
-assert(revgnss.MeasurementModelUtils.needsFiniteDiffH_(cfg_sag), ...
+assert(models.measurements.MeasurementModelUtils.needsFiniteDiffH_(cfg_sag), ...
     'T4b FAILED: sagnac model should trigger FD');
 
 % Wrapper parity
 assert(revgnss.MeasurementModel.needsFiniteDiffH_(cfg_sag) == ...
-       revgnss.MeasurementModelUtils.needsFiniteDiffH_(cfg_sag), ...
+       models.measurements.MeasurementModelUtils.needsFiniteDiffH_(cfg_sag), ...
     'T4c FAILED: MeasurementModel wrapper should match Utils');
 fprintf('    needsFiniteDiffH_: plain=false, sagnac=true, wrapper agrees: PASS\n');
 

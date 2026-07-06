@@ -62,8 +62,8 @@ classdef CodeMeasurementBuilder
                 r_twr_nom = towers{ti}.getAntennaPositionECEF();
 
                 % Stage 2: truth and model tower positions (survey error only, no PCO yet)
-                r_twr_survey_truth = revgnss.MeasurementModelUtils.towerPositionEcef(cfg, towers{ti}, ti, 'truth');
-                r_twr_survey_model = revgnss.MeasurementModelUtils.towerPositionEcef(cfg, towers{ti}, ti, 'model');
+                r_twr_survey_truth = models.measurements.MeasurementModelUtils.towerPositionEcef(cfg, towers{ti}, ti, 'truth');
+                r_twr_survey_model = models.measurements.MeasurementModelUtils.towerPositionEcef(cfg, towers{ti}, ti, 'model');
 
                 % Tower survey range contribution (truth-model mismatch in range domain)
                 towerSurveyTruth_m(mi) = norm(r_ants_truth(:,ai) - r_twr_survey_truth) - ...
@@ -184,7 +184,7 @@ classdef CodeMeasurementBuilder
                 if isfield(stateMap,'zwdIdx') && ti <= numel(stateMap.zwdIdx) && ...
                         stateMap.zwdIdx(ti) > 0
                     mf_h = models.atmosphere.MappingFunctions.troposphere(elv, ...
-                        revgnss.MeasurementModelUtils.zwdMappingKind(cfg));
+                        models.measurements.MeasurementModelUtils.zwdMappingKind(cfg));
                     h(mi) = h(mi) + mf_h * x_est(stateMap.zwdIdx(ti));
                 end
 
@@ -195,7 +195,7 @@ classdef CodeMeasurementBuilder
                 end
 
                 % Receiver code hardware-delay model correction
-                d_rx_code_h = revgnss.MeasurementModelUtils.rxCodeBiasModel(cfg);
+                d_rx_code_h = models.measurements.MeasurementModelUtils.rxCodeBiasModel(cfg);
                 if d_rx_code_h ~= 0
                     h(mi) = h(mi) + d_rx_code_h;
                 end
@@ -297,11 +297,11 @@ classdef CodeMeasurementBuilder
                             end
                             btOut.scintillation(mi) = scint_t;
                             elv_pi = errStruct.elevations_rad(pi);
-                            sigma_code_si = revgnss.MeasurementModelUtils.codeSignalSigma(sigCfg, elv_pi, cfg);
+                            sigma_code_si = models.measurements.MeasurementModelUtils.codeSignalSigma(sigCfg, elv_pi, cfg);
                             bsOut.code(mi) = sigma_code_si;
                         else
                             elv_pi        = errStruct.elevations_rad(pi);
-                            sigma_code_si = revgnss.MeasurementModelUtils.codeSignalSigma(sigCfg, elv_pi, cfg);
+                            sigma_code_si = models.measurements.MeasurementModelUtils.codeSignalSigma(sigCfg, elv_pi, cfg);
                             code_t        = sigma_code_si * randn(errorChain.rngStream, 1, 1);
 
                             iono_t_si = 0; iono_m_si = 0;
@@ -484,7 +484,7 @@ classdef CodeMeasurementBuilder
             end
 
             % ----- Correlated noise + full R matrix -----------------------
-            [z, R, correlNoise] = revgnss.MeasurementModelUtils.correlatedNoise( ...
+            [z, R, correlNoise] = models.measurements.MeasurementModelUtils.correlatedNoise( ...
                 cfg, rngCorr, z, R_diag, twr_list, M);
             errStruct.correlatedNoise = correlNoise;
 

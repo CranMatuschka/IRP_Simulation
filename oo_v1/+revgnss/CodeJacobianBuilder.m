@@ -23,7 +23,7 @@ classdef CodeJacobianBuilder
             M = numel(twr_list);
             H = zeros(M, nx);
 
-            doFD   = revgnss.MeasurementModelUtils.needsFiniteDiffH_(cfg);
+            doFD   = models.measurements.MeasurementModelUtils.needsFiniteDiffH_(cfg);
             step_e = attitudeJacStep_rad;
 
             for mi = 1:M
@@ -80,7 +80,7 @@ classdef CodeJacobianBuilder
                 if isfield(stateMap,'zwdIdx') && ...
                         ti <= numel(stateMap.zwdIdx) && stateMap.zwdIdx(ti) > 0
                     mf_z = models.atmosphere.MappingFunctions.troposphere(g.elevation_rad, ...
-                        revgnss.MeasurementModelUtils.zwdMappingKind(cfg));
+                        models.measurements.MeasurementModelUtils.zwdMappingKind(cfg));
                     H(mi, stateMap.zwdIdx(ti)) = mf_z;
                 end
             end

@@ -189,7 +189,7 @@ classdef MeasurementModel < handle
 
             % ZWD Jacobian columns (perTowerZwd): H(mi, zwdIdx(ti)) = mf(elv)
             if isfield(stateMap,'zwdIdx') && ~isempty(stateMap.zwdIdx)
-                mfKind = revgnss.MeasurementModelUtils.zwdMappingKind(obj.cfg);
+                mfKind = models.measurements.MeasurementModelUtils.zwdMappingKind(obj.cfg);
                 for mi_z = 1:M
                     ti_z = twr_list(mi_z);
                     if ti_z <= numel(stateMap.zwdIdx) && stateMap.zwdIdx(ti_z) > 0
@@ -309,28 +309,28 @@ classdef MeasurementModel < handle
         % These one-line wrappers preserve backward compatibility.
 
         function varargout = computeISLMeasurements(varargin)
-            [varargout{1:nargout}] = revgnss.MeasurementModelUtils.computeISLMeasurements(varargin{:});
+            [varargout{1:nargout}] = models.measurements.MeasurementModelUtils.computeISLMeasurements(varargin{:});
         end
         function need = needsFiniteDiffH_(cfg)
-            need = revgnss.MeasurementModelUtils.needsFiniteDiffH_(cfg);
+            need = models.measurements.MeasurementModelUtils.needsFiniteDiffH_(cfg);
         end
         function r_twr = towerPositionEcef(cfg, tower, towerIdx, side)
-            r_twr = revgnss.MeasurementModelUtils.towerPositionEcef(cfg, tower, towerIdx, side);
+            r_twr = models.measurements.MeasurementModelUtils.towerPositionEcef(cfg, tower, towerIdx, side);
         end
         function kind = zwdMappingKind(cfg)
-            kind = revgnss.MeasurementModelUtils.zwdMappingKind(cfg);
+            kind = models.measurements.MeasurementModelUtils.zwdMappingKind(cfg);
         end
         function rho = modelRangeOnly(cfg, towers, ti, ai, r_cm, euler, leverArms_model)
-            rho = revgnss.MeasurementModelUtils.modelRangeOnly(cfg, towers, ti, ai, r_cm, euler, leverArms_model);
+            rho = models.measurements.MeasurementModelUtils.modelRangeOnly(cfg, towers, ti, ai, r_cm, euler, leverArms_model);
         end
         function sigma = codeSignalSigma(sigCfg, elv, cfg)
-            sigma = revgnss.MeasurementModelUtils.codeSignalSigma(sigCfg, elv, cfg);
+            sigma = models.measurements.MeasurementModelUtils.codeSignalSigma(sigCfg, elv, cfg);
         end
         function d = rxCodeBiasModel(cfg)
-            d = revgnss.MeasurementModelUtils.rxCodeBiasModel(cfg);
+            d = models.measurements.MeasurementModelUtils.rxCodeBiasModel(cfg);
         end
         function [z_out, R_out, noiseComp] = correlatedNoise(cfg, rngCorr, z_in, R_diag, twr_list, M)
-            [z_out, R_out, noiseComp] = revgnss.MeasurementModelUtils.correlatedNoise( ...
+            [z_out, R_out, noiseComp] = models.measurements.MeasurementModelUtils.correlatedNoise( ...
                 cfg, rngCorr, z_in, R_diag, twr_list, M);
         end
 

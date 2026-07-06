@@ -111,7 +111,7 @@ classdef CarrierMeasurementBuilder
 
             r_cm_est  = x_est(stateMap.r_idx);
             euler_est = x_est(stateMap.euler_idx);
-            doFD      = revgnss.MeasurementModelUtils.needsFiniteDiffH_(cfg);
+            doFD      = models.measurements.MeasurementModelUtils.needsFiniteDiffH_(cfg);
 
             for si_ = 1:nSig_
                 sigIdx       = si_;
@@ -181,7 +181,7 @@ classdef CarrierMeasurementBuilder
                 end
 
                 % Truth geometric range (survey + PCO + corrections)
-                r_twr_t = revgnss.MeasurementModelUtils.towerPositionEcef(cfg, towers{ti}, ti, 'truth');
+                r_twr_t = models.measurements.MeasurementModelUtils.towerPositionEcef(cfg, towers{ti}, ti, 'truth');
                 if isfield(cfg,'effects') && isfield(cfg.effects,'antennaPCO')
                     pco = cfg.effects.antennaPCO;
                     if isfield(pco,'truth') && pco.truth.enable
@@ -222,7 +222,7 @@ classdef CarrierMeasurementBuilder
                 if isfield(stateMap,'zwdIdx') && ti <= numel(stateMap.zwdIdx) && ...
                         stateMap.zwdIdx(ti) > 0
                     mf_phi = models.atmosphere.MappingFunctions.troposphere(elv, ...
-                        revgnss.MeasurementModelUtils.zwdMappingKind(cfg));
+                        models.measurements.MeasurementModelUtils.zwdMappingKind(cfg));
                     h_phi(rowOut) = h_phi(rowOut) + mf_phi * x_est(stateMap.zwdIdx(ti));
                 end
 
@@ -286,7 +286,7 @@ classdef CarrierMeasurementBuilder
                 if isfield(stateMap,'zwdIdx') && ...
                         ti <= numel(stateMap.zwdIdx) && stateMap.zwdIdx(ti) > 0
                     mf = models.atmosphere.MappingFunctions.troposphere(elv, ...
-                        revgnss.MeasurementModelUtils.zwdMappingKind(cfg));
+                        models.measurements.MeasurementModelUtils.zwdMappingKind(cfg));
                     H_phi(rowOut, stateMap.zwdIdx(ti)) = mf;
                 end
 

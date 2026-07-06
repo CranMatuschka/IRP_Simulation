@@ -34,7 +34,7 @@ classdef TroposphereModel
                 cfg, {'errors','troposphere','model','enable'}, false);
             s.zwdEstimated = models.atmosphere.TroposphereModel.isZwdEstimated(cfg, stateMap);
             s.nZwdStates   = models.atmosphere.TroposphereModel.nZwdStates_(cfg, stateMap);
-            s.mappingKind  = revgnss.MeasurementModelUtils.zwdMappingKind(cfg);
+            s.mappingKind  = models.measurements.MeasurementModelUtils.zwdMappingKind(cfg);
 
             if s.zwdEstimated
                 s.mode = 'zwdEkf';
@@ -58,7 +58,7 @@ classdef TroposphereModel
             % elevation_rad: scalar or array of elevation angles [rad]
             % Returns mapping factor (dimensionless, >= 1 for el in (0, pi/2]).
             if nargin < 2; cfg = struct(); end
-            kind = revgnss.MeasurementModelUtils.zwdMappingKind(cfg);
+            kind = models.measurements.MeasurementModelUtils.zwdMappingKind(cfg);
             mf   = models.atmosphere.MappingFunctions.troposphere(elevation_rad, kind);
         end
 

@@ -54,13 +54,13 @@ classdef CarrierModelOnlyBuilder
 
             sigIdx = 1;   % L1 only in v1
             h_phi  = zeros(Mp, 1);
-            mfKind = revgnss.MeasurementModelUtils.zwdMappingKind(cfg);
+            mfKind = models.measurements.MeasurementModelUtils.zwdMappingKind(cfg);
 
             for mi = 1:Mp
                 ti = twr_pairs(mi);
                 ai = ant_pairs(mi);
 
-                r_twr_e = revgnss.MeasurementModelUtils.towerPositionEcef( ...
+                r_twr_e = models.measurements.MeasurementModelUtils.towerPositionEcef( ...
                     cfg, towers{ti}, ti, 'model');
                 if isfield(cfg,'effects') && isfield(cfg.effects,'antennaPCO')
                     pco = cfg.effects.antennaPCO;

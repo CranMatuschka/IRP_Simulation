@@ -112,7 +112,7 @@ classdef MeasurementModelUtils
             % clock terms or ErrorChain corrections (constants w.r.t. position/attitude).
             lever = leverArms_model(:, ai);
             r_ant = revgnss.AttitudeKinematics.applyLeverArm(r_cm, euler, lever);
-            r_twr = revgnss.MeasurementModelUtils.towerPositionEcef(cfg, towers{ti}, ti, 'model');
+            r_twr = models.measurements.MeasurementModelUtils.towerPositionEcef(cfg, towers{ti}, ti, 'model');
             if isfield(cfg,'effects') && isfield(cfg.effects,'antennaPCO')
                 pco = cfg.effects.antennaPCO;
                 if isfield(pco,'model') && pco.model.enable
