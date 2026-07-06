@@ -24,13 +24,13 @@ cfg.effects.lightTime.maxIter = 5;
 cfg.effects.lightTime.tol_s   = 1e-12;
 
 % 'none' mode: returns nominal tower position
-[r_twr_none, tau_none] = revgnss.LightTimeSolver.solve(r_rx, r_twr, cfg);
+[r_twr_none, tau_none] = models.frames.LightTimeSolver.solve(r_rx, r_twr, cfg);
 assert(norm(r_twr_none - r_twr) < 1e-10, 'none mode must return nominal tower position');
 assert(tau_none > 0 && isfinite(tau_none), 'tau_s must be positive finite');
 
 % 'iterative' mode: position should change (Earth rotates during signal travel)
 cfg.effects.lightTime.model = 'iterative';
-[r_twr_iter, tau_iter] = revgnss.LightTimeSolver.solve(r_rx, r_twr, cfg);
+[r_twr_iter, tau_iter] = models.frames.LightTimeSolver.solve(r_rx, r_twr, cfg);
 pos_shift = norm(r_twr_iter - r_twr);
 assert(tau_iter > 0 && isfinite(tau_iter), 'iterative tau_s must be positive finite');
 % Sagnac shift: omega * tau * R_twr ~ 7.3e-5 * 0.13 * 6.37e6 ~ 60 m
@@ -44,7 +44,7 @@ fprintf('  iterative: tau=%.4f s  pos_shift=%.2f m\n', tau_iter, pos_shift);
 % 'sagnacFirstOrder': returns nominal position (Sagnac applied separately as correction)
 cfg_sfo = cfg;
 cfg_sfo.effects.lightTime.model = 'sagnacFirstOrder';
-[r_twr_sfo, tau_sfo] = revgnss.LightTimeSolver.solve(r_rx, r_twr, cfg_sfo);
+[r_twr_sfo, tau_sfo] = models.frames.LightTimeSolver.solve(r_rx, r_twr, cfg_sfo);
 assert(norm(r_twr_sfo - r_twr) < 1e-10, 'sagnacFirstOrder must return nominal tower position');
 assert(tau_sfo > 0 && isfinite(tau_sfo), 'sagnacFirstOrder tau must be positive finite');
 fprintf('  sagnacFirstOrder: tau=%.4f s  pos_shift=%.2e m\n', tau_sfo, norm(r_twr_sfo - r_twr));

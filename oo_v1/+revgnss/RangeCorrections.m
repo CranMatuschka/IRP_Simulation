@@ -94,7 +94,7 @@ classdef RangeCorrections
             % Stage 7A: t_rx_s is passed so t_tx_s = t_rx_s - tau_s is an absolute epoch.
             tx_ecef_eff = tx_ecef;
             if strcmp(ltModel,'iterative')
-                [tx_ecef_eff, tau_s_lt, t_tx_lt] = revgnss.LightTimeSolver.solve( ...
+                [tx_ecef_eff, tau_s_lt, t_tx_lt] = models.frames.LightTimeSolver.solve( ...
                     rx_ecef, tx_ecef, cfg, t_rx_s);
                 contrib.tau_s  = tau_s_lt;
                 contrib.t_tx_s = t_tx_lt;
