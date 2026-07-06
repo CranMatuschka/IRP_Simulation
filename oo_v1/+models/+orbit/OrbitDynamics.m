@@ -7,9 +7,9 @@ classdef OrbitDynamics
     % Limitations: no drag, no SRP, no third bodies, constant Omega_E only.
     %
     % Usage:
-    %   a = revgnss.OrbitDynamics.accel_mps2(r_i_m, 'j2');
-    %   [r1, v1] = revgnss.OrbitDynamics.rk4Step(r_i_m, v_i_mps, dt_s, 'j2');
-    %   E = revgnss.OrbitDynamics.specificEnergy_Jkg(r_i_m, v_i_mps);
+    %   a = models.orbit.OrbitDynamics.accel_mps2(r_i_m, 'j2');
+    %   [r1, v1] = models.orbit.OrbitDynamics.rk4Step(r_i_m, v_i_mps, dt_s, 'j2');
+    %   E = models.orbit.OrbitDynamics.specificEnergy_Jkg(r_i_m, v_i_mps);
 
     methods (Static)
 
@@ -30,7 +30,7 @@ classdef OrbitDynamics
 
         function a = twoBodyAccel_mps2(r_i_m)
             % twoBodyAccel_mps2  Point-mass two-body acceleration [m/s^2].
-            mu = revgnss.OrbitDynamics.muEarth_m3ps2();
+            mu = models.orbit.OrbitDynamics.muEarth_m3ps2();
             r  = norm(r_i_m);
             a  = -(mu / r^3) * r_i_m(:);
         end
@@ -40,9 +40,9 @@ classdef OrbitDynamics
             %
             % Oblate-Earth J2 correction in inertial (ECI) coordinates.
             % Valid when z-axis is aligned with Earth rotation axis (no polar motion).
-            J2 = revgnss.OrbitDynamics.earthJ2();
-            mu = revgnss.OrbitDynamics.muEarth_m3ps2();
-            Re = revgnss.OrbitDynamics.earthRadius_m();
+            J2 = models.orbit.OrbitDynamics.earthJ2();
+            mu = models.orbit.OrbitDynamics.muEarth_m3ps2();
+            Re = models.orbit.OrbitDynamics.earthRadius_m();
             r  = norm(r_i_m(:));
             x  = r_i_m(1); y = r_i_m(2); z = r_i_m(3);
             fac = -1.5 * J2 * mu * Re^2 / r^5;
@@ -54,9 +54,9 @@ classdef OrbitDynamics
             % accel_mps2  Total acceleration for specified force model [m/s^2].
             %   model: 'twoBody' (default) | 'j2'
             if nargin < 2; model = 'twoBody'; end
-            a = revgnss.OrbitDynamics.twoBodyAccel_mps2(r_i_m);
+            a = models.orbit.OrbitDynamics.twoBodyAccel_mps2(r_i_m);
             if strcmpi(model, 'j2')
-                a = a + revgnss.OrbitDynamics.j2Accel_mps2(r_i_m);
+                a = a + models.orbit.OrbitDynamics.j2Accel_mps2(r_i_m);
             end
         end
 
@@ -64,7 +64,7 @@ classdef OrbitDynamics
             % rk4Step  Fourth-order Runge-Kutta step for orbit EOM [m, m/s].
             %   model: 'twoBody' (default) | 'j2'
             if nargin < 4; model = 'twoBody'; end
-            acc = @(r) revgnss.OrbitDynamics.accel_mps2(r, model);
+            acc = @(r) models.orbit.OrbitDynamics.accel_mps2(r, model);
             r0 = r_i_m(:); v0 = v_i_mps(:);
 
             k1r = v0;                k1v = acc(r0);
@@ -79,7 +79,7 @@ classdef OrbitDynamics
         function E = specificEnergy_Jkg(r_i_m, v_i_mps)
             % specificEnergy_Jkg  Two-body specific orbital energy [J/kg].
             %   E = 0.5*v^2 - mu/r  (conservative; does not include J2).
-            mu = revgnss.OrbitDynamics.muEarth_m3ps2();
+            mu = models.orbit.OrbitDynamics.muEarth_m3ps2();
             E  = 0.5 * norm(v_i_mps)^2 - mu / norm(r_i_m);
         end
 

@@ -28,8 +28,8 @@ classdef OrbitDiagnostics
             %
             % Returns a dimensionless ratio. Values < 1e-4 indicate J2 is a
             % small perturbation (typical at GEO; larger at LEO ~1e-3).
-            a_tb  = revgnss.OrbitDynamics.twoBodyAccel_mps2(r_i_m);
-            a_j2  = revgnss.OrbitDynamics.j2Accel_mps2(r_i_m);
+            a_tb  = models.orbit.OrbitDynamics.twoBodyAccel_mps2(r_i_m);
+            a_j2  = models.orbit.OrbitDynamics.j2Accel_mps2(r_i_m);
             ratio = norm(a_j2) / norm(a_tb);
         end
 
@@ -80,15 +80,15 @@ classdef OrbitDiagnostics
 
             r = [a; 0; 0];
             v = [0; sqrt(mu / a); 0];
-            E0 = revgnss.OrbitDynamics.specificEnergy_Jkg(r, v);
+            E0 = models.orbit.OrbitDynamics.specificEnergy_Jkg(r, v);
 
             nSteps = floor(duration_s / dt_s);
             t_s    = (0:nSteps) * dt_s;
             dE_Jkg = zeros(1, nSteps + 1);
 
             for k = 1:nSteps
-                [r, v] = revgnss.OrbitDynamics.rk4Step(r, v, dt_s, 'twoBody');
-                dE_Jkg(k + 1) = abs(revgnss.OrbitDynamics.specificEnergy_Jkg(r, v) - E0);
+                [r, v] = models.orbit.OrbitDynamics.rk4Step(r, v, dt_s, 'twoBody');
+                dE_Jkg(k + 1) = abs(models.orbit.OrbitDynamics.specificEnergy_Jkg(r, v) - E0);
             end
         end
 

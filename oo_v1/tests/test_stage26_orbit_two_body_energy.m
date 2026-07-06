@@ -14,7 +14,7 @@ a  = Re + 600e3;   % 600 km LEO semi-major axis
 r0    = [a; 0; 0];
 v0    = [0; sqrt(mu/a); 0];   % circular orbit in XY plane
 
-E0    = revgnss.OrbitDynamics.specificEnergy_Jkg(r0, v0);
+E0    = models.orbit.OrbitDynamics.specificEnergy_Jkg(r0, v0);
 
 % T2: analytic formula
 E_analytic = -mu / (2*a);
@@ -25,9 +25,9 @@ fprintf('T2 PASS: specificEnergy error = %.4e J/kg\n', abs(E0 - E_analytic));
 r = r0; v = v0;
 dt = 1.0;
 for k = 1:1000
-    [r, v] = revgnss.OrbitDynamics.rk4Step(r, v, dt, 'twoBody');
+    [r, v] = models.orbit.OrbitDynamics.rk4Step(r, v, dt, 'twoBody');
 end
-Ef = revgnss.OrbitDynamics.specificEnergy_Jkg(r, v);
+Ef = models.orbit.OrbitDynamics.specificEnergy_Jkg(r, v);
 assert(abs(Ef - E0) < 1.0, ...
     sprintf('T1: Two-body energy error %.4e J/kg > 1 J/kg tolerance', abs(Ef - E0)));
 fprintf('T1 PASS: two-body energy drift over 1000 s = %.4e J/kg\n', abs(Ef - E0));
@@ -35,11 +35,11 @@ fprintf('T1 PASS: two-body energy drift over 1000 s = %.4e J/kg\n', abs(Ef - E0)
 % T3: J2 mode — just verify it runs and returns a different trajectory
 r_j2 = r0; v_j2 = v0;
 for k = 1:100
-    [r_j2, v_j2] = revgnss.OrbitDynamics.rk4Step(r_j2, v_j2, dt, 'j2');
+    [r_j2, v_j2] = models.orbit.OrbitDynamics.rk4Step(r_j2, v_j2, dt, 'j2');
 end
 r_tb = r0; v_tb = v0;
 for k = 1:100
-    [r_tb, v_tb] = revgnss.OrbitDynamics.rk4Step(r_tb, v_tb, dt, 'twoBody');
+    [r_tb, v_tb] = models.orbit.OrbitDynamics.rk4Step(r_tb, v_tb, dt, 'twoBody');
 end
 assert(norm(r_j2 - r_tb) > 1e-3, 'T3: J2 and two-body should give different trajectories after 100 s');
 fprintf('T3 PASS: J2/two-body position divergence after 100 s = %.4e m\n', norm(r_j2 - r_tb));

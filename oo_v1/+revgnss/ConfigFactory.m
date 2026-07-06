@@ -1512,7 +1512,7 @@ classdef ConfigFactory
                 if isfield(cfg.orbit, 'altitudeMean_m') && cfg.orbit.useOrbitPropagator
                     Re82_ = revgnss.Constants.EARTH_RADIUS_M;
                     r82_  = cfg.orbit.altitudeMean_m + Re82_;
-                    a82_  = revgnss.OrbitDynamics.j2Accel_mps2([r82_; 0; 0]);
+                    a82_  = models.orbit.OrbitDynamics.j2Accel_mps2([r82_; 0; 0]);
                     cfg82_j2Norm_ = norm(a82_);
                 end
             catch; end

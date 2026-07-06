@@ -145,7 +145,7 @@ classdef OrbitPropagator
                     nSub = max(1, ceil(dt / 10));
                     dts  = dt / nSub;
                     for j = 1:nSub
-                        [r_i, v_i] = revgnss.OrbitDynamics.rk4Step(r_i, v_i, dts, model);
+                        [r_i, v_i] = models.orbit.OrbitDynamics.rk4Step(r_i, v_i, dts, model);
                     end
                 end
                 t_prev = t_s(k);

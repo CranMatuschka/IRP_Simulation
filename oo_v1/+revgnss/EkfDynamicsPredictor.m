@@ -91,13 +91,13 @@ classdef EkfDynamicsPredictor
             [r_i0, v_i0] = revgnss.FrameTimeUtils.ecefStateToInertial(r, v, t0_s);
 
             % Energy before propagation
-            info.specificEnergyInitial_Jkg = revgnss.OrbitDynamics.specificEnergy_Jkg(r_i0, v_i0);
+            info.specificEnergyInitial_Jkg = models.orbit.OrbitDynamics.specificEnergy_Jkg(r_i0, v_i0);
 
             % RK4 step in inertial frame
-            [r_i1, v_i1] = revgnss.OrbitDynamics.rk4Step(r_i0, v_i0, dt_s, fmodel);
+            [r_i1, v_i1] = models.orbit.OrbitDynamics.rk4Step(r_i0, v_i0, dt_s, fmodel);
 
             % Energy after propagation
-            info.specificEnergyFinal_Jkg = revgnss.OrbitDynamics.specificEnergy_Jkg(r_i1, v_i1);
+            info.specificEnergyFinal_Jkg = models.orbit.OrbitDynamics.specificEnergy_Jkg(r_i1, v_i1);
             info.energyDrift_Jkg = info.specificEnergyFinal_Jkg - info.specificEnergyInitial_Jkg;
 
             % Inertial -> ECEF at t1
