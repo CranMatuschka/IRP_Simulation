@@ -168,7 +168,49 @@ matlab -batch "addpath('tests/regression'); run_oo_v1_regression_3600s"       % 
   `golden_report_tex.txt`): report `.tex` byte-IDENTICAL before/after; metric gate
   unaffected. (LatexReportBuilder figure engine + the ReportRunner summary-lift are
   follow-ups.) (C-9)
-- **8. Demote stage bookkeeping to read-only provenance.** (C-7)
+- **8. Demote stage bookkeeping to read-only provenance — IN PROGRESS** (C-7).
+
+  **8.1 MAP & CLASSIFY (done).** Every "Stage NN" reference partitions into four
+  classes. The critical safety fact FIRST: **no stage number gates physics / EKF /
+  covariance / measurement math** — a `grep -E '(if|elseif|while|&&|\|\|).*[Ss]tage ?[0-9]+'`
+  over `+filter/`, `+models/`, and `ReverseGNSSSimulation.m` is empty. Every stage
+  reference is report-facing or a comment. So Phase 8 cannot move a number; the
+  REPORT `.tex` byte-diff is the primary guard.
+
+  - **(A) Report-load-bearing GATES — the only control-flow coupling, the 8.3 target.**
+    Exactly four boolean `summary.stageNN*` flags are used in `if`-conditions that gate
+    what the report renders. All four are LOGICAL, so `extractMetrics` (numeric-scalar
+    only) never captures them — renaming them cannot perturb the 177 metrics.
+      | flag | SET (ReportRunner.m) — the real feature it encodes | READ (gate) |
+      |---|---|---|
+      | `stage61QuatEkfActive` | `strcmp(sim.ekf.attitudeParameterization,'quaternionErrorState')` | ReportRunner:664 (live) |
+      | `stage63IntegerFixingImplemented` | `lg63.enabled` (sim.fix63Log_) | ClockExact `measTypeStr_`:1468 (live) |
+      | `stage64Active` | `= true` (unconditional) | `report.activePhysicsConfig`:9 (LIVE); `writeFinalScientificClosure_`:1085 (DEAD) |
+      | `stage66Active` | `= true` (unconditional) | `writeStage67Closure_`:1178 (DEAD — no caller) |
+    (`writeFinalScientificClosure_` and `writeStage67Closure_` are orphaned since the
+    Phase-7 extraction — `writeTexFile_` calls the ten `+revgnss/+report/*` writers, not
+    these. Confirmed by an exhaustive caller grep.)
+  - **(A2) Stage-numbered display DATA fields** (`stage56*`..`stage68*` scalars/strings set
+    in ReportRunner, read for display in `activePhysicsConfig` with `isfield` fallbacks).
+    Honest content derived from config/feature state, NOT control flow. Renaming them is
+    pure cosmetic churn across two big report files with high `.tex`-regression risk and
+    no logic-clarity gain — same cost/benefit as 8.4 inert comments. LEFT AS-IS (a future
+    opt-in pass), so 8.3's real rewire is not buried under field-rename churn.
+  - **(B) Test-pinned LEDGER.** `+revgnss/StageHistory.m` — static/immutable changelog:
+    `implementedItems()` (~85 "Stage NN: ..." strings) + `missingScientificItems(85)`, READ
+    by `+revgnss/ReportStatus.m:77-78` into the report and asserted by
+    `test_stage60/61/62/63`. This is the natural single provenance ledger (8.2). Its exposed
+    strings are load-bearing for both the `.tex` and the tests — DO NOT alter any of them.
+  - **(C) Inert provenance comments** (masterConfig ~72, ReportRunner ~73, ConfigFactory ~30,
+    DiffAttitudeBuilder ~28, `+filter/ReverseGNSSEKF` ~24, etc.). Pure archaeology, never
+    rendered, zero gate impact. LEFT AS-IS (8.4).
+
+  **8.2 SINGLE READ-ONLY LEDGER (pending):** label StageHistory in its docstring as
+  provenance-only / not-control-flow; change no exposed string.
+  **8.3 THE REAL DEMOTION (pending):** rename each of the four (A) gate flags to a
+  feature-descriptive name (SET expression unchanged — it already IS the feature predicate),
+  one atomic commit each, `.tex` IDENTICAL=1 + smoke PASS verified.
+  **8.4 inert comments:** LEFT AS-IS (opt-in only).
 
 Invariant for every commit: the gate is green, no guard is weakened, numbers do
 not move. The gate certifies "done" — not any edit or model.
