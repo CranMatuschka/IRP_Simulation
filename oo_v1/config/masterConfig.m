@@ -42,7 +42,8 @@ cfg.diagnostics.storage.snapshot.interval_s    = 300;
 cfg.report.writePdf       = true;   % false = skip PDF (fast testing)
 cfg.report.writeMat       = true;   % false = skip MAT (fast testing)
 cfg.plots.showFigures     = false;
-cfg.report.version        = '2.01';
+cfg.report.version        = '2.01';   % report FORMAT/content version (shown in the PDF)
+cfg.report.runVersion     = 1;        % per-RUN version tag -> output folder Report_v%03d_HHMM
 cfg.report.baseOutputDir  = fullfile(oo_v1Root, 'output');
 cfg.report.overwrite      = true;
 
