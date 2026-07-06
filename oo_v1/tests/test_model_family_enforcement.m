@@ -1,8 +1,8 @@
 function test_model_family_enforcement
-% test_model_family_enforcement  Step 3: finalizeConfig enforces model-family consistency
-%   ONLY when cfg.validation.enforceModelFamilyConsistency=true, and still permits an
-%   explicitly-labelled mismatch analysis. Proves the gate never fires on the default
-%   (opt-in absent) so the frozen golden path is untouched.
+% test_model_family_enforcement  finalizeConfig enforces model-family consistency when
+%   cfg.validation.enforceModelFamilyConsistency=true. The default now sets that flag and
+%   is same-family (j2+j2) so it finalizes cleanly; a reduced twoBody variant is rejected
+%   unless explicitly labelled a mismatch analysis, and enforcement can be opted out.
 
 fprintf('=== test_model_family_enforcement ===\n');
 
@@ -16,29 +16,32 @@ addpath(fullfile(oo_v1Root, 'config'));
         try; fn(); catch; threw = true; end
     end
 
-% --- Default (opt-in ABSENT): j2Rk4 truth + twoBody EKF must finalize WITHOUT throwing ---
-assert(~didThrow(@() revgnss.ConfigFactory.finalizeConfig(masterConfig())), ...
-    'default finalizeConfig must not enforce family consistency (golden path untouched).');
+% --- Default (enforce=true, matched j2+j2): MUST finalize WITHOUT throwing ---
+cfg = masterConfig();
+assert(cfg.validation.enforceModelFamilyConsistency, 'default must opt into family enforcement.');
+assert(~didThrow(@() revgnss.ConfigFactory.finalizeConfig(cfg)), ...
+    'matched same-family default must finalize cleanly with enforcement on.');
 
-% --- Opt-in TRUE on the mismatched default: MUST throw ---
+% --- Enforcement ON + reduced twoBody variant, no label: MUST throw ---
 cfgE = masterConfig();
-cfgE.validation.enforceModelFamilyConsistency = true;
+cfgE.estimator.dynamics.mode = 'twoBody';
 assert(didThrow(@() revgnss.ConfigFactory.finalizeConfig(cfgE)), ...
-    'enforceModelFamilyConsistency=true must reject the silent j2/twoBody mismatch.');
+    'enforcement must reject a silent j2-truth / twoBody-EKF mismatch.');
 
-% --- Opt-in TRUE + explicit mismatch label: MUST pass ---
+% --- Enforcement ON + reduced variant + explicit mismatch label: MUST pass ---
 cfgX = masterConfig();
-cfgX.validation.enforceModelFamilyConsistency = true;
+cfgX.estimator.dynamics.mode = 'twoBody';
 cfgX.validation.analysisType = 'explicitMismatchAnalysis';
 cfgX.validation.allowTruthModelMismatch = true;
 assert(~didThrow(@() revgnss.ConfigFactory.finalizeConfig(cfgX)), ...
     'explicitly-labelled mismatch analysis must pass even with enforcement on.');
 
-% --- Opt-in TRUE on a matched same-family (Stage-86 j2+j2) config: MUST pass ---
-cfgG = revgnss.ConfigFactory.geoRealWorldTruthComparisonConfig();
-cfgG.validation.enforceModelFamilyConsistency = true;
-assert(~didThrow(@() revgnss.ConfigFactory.finalizeConfig(cfgG)), ...
-    'matched j2 truth + j2 EKF must pass with enforcement on.');
+% --- Enforcement OFF (opt-out) + reduced variant: MUST pass (gating still works) ---
+cfgOff = masterConfig();
+cfgOff.estimator.dynamics.mode = 'twoBody';
+cfgOff.validation.enforceModelFamilyConsistency = false;
+assert(~didThrow(@() revgnss.ConfigFactory.finalizeConfig(cfgOff)), ...
+    'with enforcement opted out, a reduced-dynamics run must finalize (no family check).');
 
 fprintf('=== test_model_family_enforcement: PASS ===\n');
 end

@@ -8,3 +8,4 @@ output/notion_stage*.md
 !tests/regression/golden/*.mat
 # Phase-7 report .tex byte-diff reference (overrides the repo-root "*.txt" ignore).
 !tests/report/golden_report_tex.txt
+tests/regression/full_gate_marker.txt

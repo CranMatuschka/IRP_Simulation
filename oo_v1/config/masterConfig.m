@@ -94,7 +94,7 @@ cfg.estimator.integerAmbiguity.resetOnSlip                = true;
 % (all disabled) — do not enable them here.
 cfg.scenario.nSpaceAssets = 1;        % one estimated spacecraft only
 cfg.scenario.orbitClass   = 'GEO';    % 'GEO' | 'MEO' | 'LEO'
-%                                      % Stage 82: j2Rk4 truth (j2Rk4 + twoBody EKF mismatch; see ScenarioPresets, Stage 82)
+%                                      % Truth-estimation separation: j2Rk4 truth + j2 EKF (SAME model family, not a mismatch)
 
 % --- Frequency --------------------------------------------------
 % Stage 77 canonical: cfg.signals.enabledMask is the single frequency control.
@@ -592,14 +592,17 @@ if isfield(cfg,'diagnostics') && isfield(cfg.diagnostics,'attitudeEvidence')
     cfg.diagnostics.attitudeEvidence.enable = true;
 end
 
-% Stage 82: j2Rk4 truth + twoBody EKF is the preferred default.
-% At GEO equatorial (~42164 km), J2 perturbation ~8.3e-6 m/s2 (radial only,
-% z-component zero for equatorial orbit). sigma_accel=0.01 >> 0.1*J2 so
-% the EKF tolerates the mismatch; process noise auto-scaled in finalizeConfig.
-% Stage 80: cfg.orbit.truth.mode is centrally owned; j2Rk4 was available.
-% Orbit is GEO (35786 km, equatorial). GEO in ECEF moves very slowly
-% (orbital period ≈ Earth rotation period) so twoBody is nearly equivalent
-% to static ECEF but physically correct.
+% Truth-estimation separation (SAME model family): J2 truth propagator + J2 EKF dynamics.
+% Truth and estimator share the J2 family; the estimator does NOT use a deliberately
+% degraded (two-body) propagator. Its imperfection comes from realistic sources only:
+% the perturbed initial state + covariance, noisy code/carrier/Doppler measurements,
+% the stochastic receiver clock + delayed/noisy tower-clock products, atmosphere
+% residuals, antenna calibration uncertainty, float carrier ambiguities, and
+% residual-acceleration process noise (sigma_accel_mps2 — covers SRP / third body /
+% higher-order gravity, none of which are in this J2-only truth). At GEO equatorial the
+% J2 accel is ~8.3e-6 m/s2 (radial only). cfg.orbit.truth.mode is centrally owned.
+% An explicit reduced-dynamics/mismatch experiment is a NON-default analysis mode
+% (set validation.analysisType='explicitMismatchAnalysis' + allowTruthModelMismatch=true).
 cfg.orbit.useOrbitPropagator = true;
 cfg.orbit.altitudeMean_m     = 35786000;
 cfg.orbit.inclination_rad    = 0;
@@ -611,7 +614,10 @@ if ~isfield(cfg.orbit,'truth') || ~isfield(cfg.orbit.truth,'mode') || ...
     cfg.orbit.truth.mode = 'j2Rk4';
 end
 cfg.orbit.mode               = cfg.orbit.truth.mode;
-cfg.estimator.dynamics.mode  = 'twoBody';
+cfg.estimator.dynamics.mode  = 'j2';   % SAME family as truth (truth-estimation separation, not mismatch)
+% MD Stage 88/89/96: enforce truth/EKF dynamics family parity for this default run.
+% Safe now that both are J2; assertModelFamilyConsistent runs in finalizeConfig.
+cfg.validation.enforceModelFamilyConsistency = true;
 
 % Stage 67: stochastic tower clocks — non-perfect broadcast correction.
 % Each tower clock is driven by the Brown-Hwang two-state process.

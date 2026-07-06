@@ -35,8 +35,10 @@ classdef ScenarioPresets
             % Configures one estimated space asset with a 4-receiver non-collinear
             % cross-pattern geometry, carrier attitude partials, EKF float ambiguities,
             % arc-separated ambiguities, and enforced carrier arc consistency.
-            % Stage 67/80: twoBodyRk4 truth propagator, matched twoBody EKF.
-            % Stage 82: j2Rk4 truth propagator (J2-perturbed RK4) + twoBody EKF (mismatch mode).
+            % Truth-estimation separation: j2Rk4 truth propagator (J2-perturbed RK4) + j2 EKF
+            %   dynamics — SAME model family (not a mismatch). Estimator error comes from
+            %   realistic sources (init state/covariance, measurement/clock/atmosphere noise,
+            %   float ambiguities, residual-acceleration process noise), never a degraded model.
             % Stage 76: raw dual-frequency (L1+L2) baseline attitude AR is supported
             %   in controlled synthetic form. Carrier-IF integer fixing is explicitly
             %   unsupported. LAMBDA/MLAMBDA, calibrated phase-bias products, and
@@ -129,14 +131,12 @@ classdef ScenarioPresets
                 cfg.diagnostics.attitudeEvidence.enable = true;
             end
 
-            % Stage 82: j2Rk4 truth + twoBody EKF is the preferred default.
-            % At GEO equatorial (~42164 km), J2 perturbation ~8.3e-6 m/s2 (radial only,
-            % z-component zero for equatorial orbit). sigma_accel=0.01 >> 0.1*J2 so
-            % the EKF tolerates the mismatch; process noise auto-scaled in finalizeConfig.
-            % Stage 80: cfg.orbit.truth.mode is centrally owned; j2Rk4 was available.
-            % Orbit is GEO (35786 km, equatorial). GEO in ECEF moves very slowly
-            % (orbital period ≈ Earth rotation period) so twoBody is nearly equivalent
-            % to static ECEF but physically correct.
+            % Truth-estimation separation (SAME model family): j2Rk4 truth + j2 EKF dynamics.
+            % Truth and estimator share the J2 family; the estimator is imperfect for realistic
+            % reasons only (initial state/covariance, measurement/clock/atmosphere noise, float
+            % ambiguities, residual-acceleration process noise), not a degraded propagator.
+            % At GEO equatorial the J2 accel is ~8.3e-6 m/s2 (radial only). cfg.orbit.truth.mode
+            % is centrally owned. Orbit is GEO (35786 km, equatorial).
             cfg.orbit.useOrbitPropagator = true;
             cfg.orbit.altitudeMean_m     = 35786000;
             cfg.orbit.inclination_rad    = 0;
@@ -148,7 +148,8 @@ classdef ScenarioPresets
                 cfg.orbit.truth.mode = 'j2Rk4';
             end
             cfg.orbit.mode               = cfg.orbit.truth.mode;
-            cfg.estimator.dynamics.mode  = 'twoBody';
+            cfg.estimator.dynamics.mode  = 'j2';   % SAME family as truth (truth-estimation separation)
+            cfg.validation.enforceModelFamilyConsistency = true;   % both J2: enforce parity
 
             % Stage 67: stochastic tower clocks — non-perfect broadcast correction.
             % Each tower clock is driven by the Brown-Hwang two-state process.
@@ -386,7 +387,7 @@ classdef ScenarioPresets
                 lines{end+1} = 'Code partials        : disabled';
                 lines{end+1} = 'Doppler partials     : disabled';
                 lines{end+1} = 'ISL / TWSTFT         : disabled';
-                lines{end+1} = 'EKF dynamics         : twoBody (j2Rk4 truth / twoBody EKF mismatch; J2 accel ~8.3e-6 m/s2; sigma_accel=0.01 consistent; GEO equatorial)';
+                lines{end+1} = 'EKF dynamics         : j2 (j2Rk4 truth / j2 EKF, SAME family; residual-acceleration process noise sigma_accel=0.01 m/s2; GEO equatorial)';
                 lines{end+1} = 'Integer fixing        : false';
                 lines{end+1} = 'LAMBDA/MLAMBDA        : false';
                 lines{end+1} = 'False-fix-risk control: false';
