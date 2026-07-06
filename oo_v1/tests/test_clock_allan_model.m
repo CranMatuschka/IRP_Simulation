@@ -20,7 +20,7 @@ tVec = 0:DT:DUR;
 cfg1 = struct('name','WFM','clockType','WFM', ...
     'noiseCoeffs', struct('h2',0,'h1',0,'h0',1e-20,'hMinus1',0,'hMinus2',0), ...
     'deterministic', false, 'seed', 11, 'bias_s', 0, 'fracFreq', 0);
-clk1 = revgnss.ClockModel(cfg1);
+clk1 = models.clocks.ClockModel(cfg1);
 clk1.precomputeNoise(tVec);
 for k=1:numel(tVec); clk1.step(DT); end
 
@@ -28,7 +28,7 @@ for k=1:numel(tVec); clk1.step(DT); end
 cfg2 = struct('name','RWFM','clockType','RWFM', ...
     'noiseCoeffs', struct('h2',0,'h1',0,'h0',0,'hMinus1',0,'hMinus2',1e-20), ...
     'deterministic', false, 'seed', 22, 'bias_s', 0, 'fracFreq', 0);
-clk2 = revgnss.ClockModel(cfg2);
+clk2 = models.clocks.ClockModel(cfg2);
 clk2.precomputeNoise(tVec);
 for k=1:numel(tVec); clk2.step(DT); end
 
@@ -36,7 +36,7 @@ for k=1:numel(tVec); clk2.step(DT); end
 cfg3 = struct('name','OCXO','clockType','OCXO', ...
     'noiseCoeffs', struct('h2',0,'h1',0,'h0',2e-25,'hMinus1',7e-27,'hMinus2',2e-29), ...
     'deterministic', false, 'seed', 33, 'bias_s', 0, 'fracFreq', 0);
-clk3 = revgnss.ClockModel(cfg3);
+clk3 = models.clocks.ClockModel(cfg3);
 clk3.precomputeNoise(tVec);
 for k=1:numel(tVec); clk3.step(DT); end
 

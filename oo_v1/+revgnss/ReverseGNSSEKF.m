@@ -69,7 +69,7 @@ classdef ReverseGNSSEKF < handle
         estimateAngularRate   (1,1) logical = true
 
         % Clock model (for process noise)
-        rxClockModel     revgnss.ClockModel
+        rxClockModel     models.clocks.ClockModel
 
         % Diagnostics
         history          (1,1) struct

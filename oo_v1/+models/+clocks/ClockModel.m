@@ -64,7 +64,7 @@ classdef ClockModel < handle
     % -----------------------------------------------------------------------
     % Usage:
     %   cfg = revgnss.ConfigFactory.makeClockConfig('OCXO', 42, struct(), struct());
-    %   clk = revgnss.ClockModel(cfg);
+    %   clk = models.clocks.ClockModel(cfg);
     %   clk.precomputeNoise(0:1:3600);
     %   clk.step(1.0);
     %   b_m = clk.getBiasMeters();   % total bias

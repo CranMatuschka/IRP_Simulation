@@ -45,7 +45,7 @@ classdef SpaceAsset < handle
         receiverLeverArms_body_m (3,:) double  = zeros(3,1)
 
         % Receiver clock
-        clock                    revgnss.ClockModel
+        clock                    models.clocks.ClockModel
 
         % History log
         history                  (1,1) struct
@@ -74,7 +74,7 @@ classdef SpaceAsset < handle
                 obj.receiverLeverArms_body_m = cfg.receiverLeverArm_body_m(:);  % 3x1
             end
 
-            obj.clock = revgnss.ClockModel(cfg.clock);
+            obj.clock = models.clocks.ClockModel(cfg.clock);
 
             obj.history.time_s                = [];
             obj.history.r_ecef_m              = [];

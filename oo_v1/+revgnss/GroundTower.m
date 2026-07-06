@@ -40,8 +40,8 @@ classdef GroundTower < handle
         % Antenna phase center in ECEF [m]
         antennaPhaseCenter_ecef_m (3,1) double = zeros(3,1)
 
-        % Clock object (revgnss.ClockModel)
-        clock           revgnss.ClockModel
+        % Clock object (models.clocks.ClockModel)
+        clock           models.clocks.ClockModel
 
         % Hardware delay (constant) [m]
         hardwareDelay_m (1,1) double  = 0
@@ -76,7 +76,7 @@ classdef GroundTower < handle
             obj.antennaPhaseCenter_ecef_m = obj.computeAntennaECEF_();
 
             % Build clock
-            obj.clock = revgnss.ClockModel(cfg.clock);
+            obj.clock = models.clocks.ClockModel(cfg.clock);
 
             % Stage 72: seed history with the t=0 initial state so that product
             % epoch lookups at t_prod=0 (the first 30+latency seconds of the
