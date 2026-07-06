@@ -106,6 +106,21 @@ classdef ReverseGNSSSimulation < handle
             for ai = 2:numel(obj.assets)
                 obj.assets{ai}.clock.precomputeNoise(obj.tVec);
             end
+
+            % Helix swarm truth: physically-real secondary orbits (represented-only).
+            % Secondaries ride a bounded CW projected-circular formation around the
+            % primary chief and are propagated with the same dynamics, so their truth
+            % is real (not dead-reckoned). Only the primary is EKF-estimated.
+            if revgnss.SwarmFormation.isActive(obj.cfg) && obj.orbitTruthCache.enabled
+                [sr_, sv_, fmeta_] = revgnss.SwarmFormation.buildSecondaryCaches( ...
+                    obj.cfg, obj.orbitProp, obj.tVec, obj.orbitTruthCache.r_ecef_m);
+                obj.orbitTruthCache.secondary_r_ecef_m   = sr_;
+                obj.orbitTruthCache.secondary_v_ecef_mps = sv_;
+                obj.orbitTruthCache.formationMeta        = fmeta_;
+                fprintf('  Swarm formation: %s, %d secondaries, baseline=%.0f m, sep=[%.0f, %.0f] m\n', ...
+                    fmeta_.mode, fmeta_.nSecondaries, fmeta_.baseline_m, ...
+                    fmeta_.minSeparation_m, fmeta_.maxSeparation_m);
+            end
             obj.attInitDone = false;
             obj.attInitInfo = revgnss.AttitudeInitializer.defaultInfo(obj.cfg);
 
@@ -778,9 +793,18 @@ classdef ReverseGNSSSimulation < handle
 
         function stepSecondaryAssets_(obj, k, t_s, dt)
             if numel(obj.assets) < 2; return; end
+            haveCache = isfield(obj.orbitTruthCache,'secondary_r_ecef_m') && ...
+                ~isempty(obj.orbitTruthCache.secondary_r_ecef_m);
             for ai = 2:numel(obj.assets)
                 a = obj.assets{ai};
-                if k > 1
+                if haveCache
+                    % Physically-real helix truth from the precomputed cache; step
+                    % attitude/clock only (mirrors the primary truth path).
+                    si = ai - 1;
+                    a.setTruthFromOrbit(obj.orbitTruthCache.secondary_r_ecef_m{si}(:,k), ...
+                                        obj.orbitTruthCache.secondary_v_ecef_mps{si}(:,k));
+                    if k > 1; a.propagateAttitudeAndClock(dt); end
+                elseif k > 1
                     a.propagate(dt, [], []);
                 end
                 a.logState(t_s);
