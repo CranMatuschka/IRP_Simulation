@@ -103,12 +103,47 @@ classdef OrbitPropagator
                 v_ecef_mps = v_ecef_mps(:,1);
             end
         end
+
+        function [r_i, v_i] = initialEciState(obj)
+            % initialEciState  ECI position/velocity at t=0 from the circular elements.
+            % This is the same t=0 inertial state the RK4 modes integrate from.
+            a    = obj.Re + obj.altitudeMean_m;
+            nu0  = obj.trueAnomaly0_rad;
+            r_pf = a * [cos(nu0); sin(nu0); 0];
+            v_pf = sqrt(obj.GM / a) * [-sin(nu0); cos(nu0); 0];
+            Ri   = rotZ(obj.raan_rad) * rotX(obj.inclination_rad) * rotZ(0);
+            r_i  = Ri * r_pf;
+            v_i  = Ri * v_pf;
+        end
+
+        function n = meanMotion(obj)
+            % meanMotion  Circular mean motion [rad/s] of the reference orbit.
+            a = obj.Re + obj.altitudeMean_m;
+            n = sqrt(obj.GM / a^3);
+        end
+
+        function [r_ecef_m, v_ecef_mps] = propagateFromEciState(obj, r0_eci, v0_eci, t_s)
+            % propagateFromEciState  RK4-propagate an ARBITRARY initial ECI state and
+            % rotate to ECEF, using the same dynamics family as the configured RK4 mode.
+            % Used to propagate physically-real swarm-formation members from a relative
+            % (Clohessy-Wiltshire) offset off the primary chief. t_s is a nondecreasing
+            % vector [s]; the returned columns align with t_s.
+            model = 'twoBody';
+            if contains(lower(obj.orbitMode), 'j2'); model = 'j2'; end
+            [r_ecef_m, v_ecef_mps] = obj.integrateAndRotate_(r0_eci(:), v0_eci(:), t_s, model);
+        end
     end
 
     methods (Access = private)
 
         function [r_ecef_m, v_ecef_mps] = propagateRk4_(obj, t_s, model)
             % propagateRk4_  RK4 numerical propagation from analytic circular t=0 state.
+            [r_i, v_i] = obj.initialEciState();
+            [r_ecef_m, v_ecef_mps] = obj.integrateAndRotate_(r_i, v_i, t_s, model);
+        end
+
+        function [r_ecef_m, v_ecef_mps] = integrateAndRotate_(obj, r_i, v_i, t_s, model)
+            % integrateAndRotate_  Shared RK4-in-ECI + ECI->ECEF core for the RK4 modes.
             t_s = t_s(:);
             if any(isnan(t_s)) || any(isinf(t_s))
                 error('OrbitPropagator:invalidTime', ...
@@ -123,17 +158,7 @@ classdef OrbitPropagator
                     'propagateRk4_: t_s must be nondecreasing.');
             end
 
-            a   = obj.Re + obj.altitudeMean_m;
-            inc = obj.inclination_rad;
-            OM  = obj.raan_rad;
-            nu0 = obj.trueAnomaly0_rad;
-
-            % Initial ECI state from circular analytic formula at t=0
-            r_pf = a * [cos(nu0); sin(nu0); 0];
-            v_pf = sqrt(obj.GM / a) * [-sin(nu0); cos(nu0); 0];
-            Ri   = rotZ(OM) * rotX(inc) * rotZ(0);
-            r_i  = Ri * r_pf;
-            v_i  = Ri * v_pf;
+            % r_i, v_i are the caller-supplied initial ECI state at t=0.
             n   = numel(t_s);
             r_ecef_m   = zeros(3, n);
             v_ecef_mps = zeros(3, n);
