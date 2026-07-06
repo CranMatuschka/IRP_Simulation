@@ -10,7 +10,7 @@ classdef EnvironmentModel < handle
     % no bare randn calls appear in this class.
     %
     % Usage:
-    %   env = revgnss.EnvironmentModel(cfg, nTowers);
+    %   env = models.errors.EnvironmentModel(cfg, nTowers);
     %   env.step(dt_s);
     %   delay_m = env.getTropDelay(towerIdx, elevation_rad, 'truth');
     %   delay_m = env.getIonoDelay(towerIdx, elevation_rad, 'truth', freqHz, f_L1_Hz);

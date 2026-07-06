@@ -42,7 +42,7 @@ classdef ErrorChain < handle
         cfg         (1,1) struct   % FULL simulation config (not just errors sub-struct)
         rngStream                  % MATLAB random number stream
         seed        (1,1) double = 0
-        envModel                   % revgnss.EnvironmentModel (always created)
+        envModel                   % models.errors.EnvironmentModel (always created)
         envRng                     % RandStream for elevation-dependent code noise
         lastT_s     (1,1) double = -1   % last t_s for dt computation
     end
@@ -78,7 +78,7 @@ classdef ErrorChain < handle
             if isfield(cfg,'scenario') && isfield(cfg.scenario,'nTowers')
                 nT = cfg.scenario.nTowers;
             end
-            obj.envModel = revgnss.EnvironmentModel(cfg, nT);
+            obj.envModel = models.errors.EnvironmentModel(cfg, nT);
 
             % --- Separate RNG for elevation-based code noise ---------------
             seed2 = 6101;

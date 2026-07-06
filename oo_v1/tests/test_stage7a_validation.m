@@ -113,14 +113,14 @@ cfgSec = revgnss.ConfigFactory.defaultConfig();
 cfgSec.errors.ionosphere.truth.enable = true;
 cfgSec.errors.ionosphere.truth.verticalDelayL1_m = 5.0;
 cfgSec.effects.ionosphere.mappingModel = 'simpleSecant';
-envSec = revgnss.EnvironmentModel(cfgSec, 1);
+envSec = models.errors.EnvironmentModel(cfgSec, 1);
 dSec = envSec.getIonoDelay(1, el_10, 'truth', f_L1, f_L1);
 
 % thinShell config
 cfgTS = cfgSec;
 cfgTS.effects.ionosphere.mappingModel  = 'thinShell';
 cfgTS.effects.ionosphere.shellHeight_m = 350e3;
-envTS = revgnss.EnvironmentModel(cfgTS, 1);
+envTS = models.errors.EnvironmentModel(cfgTS, 1);
 dTS = envTS.getIonoDelay(1, el_10, 'truth', f_L1, f_L1);
 
 relDiff = abs(dSec - dTS) / abs(dSec);

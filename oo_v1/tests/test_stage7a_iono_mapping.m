@@ -52,7 +52,7 @@ cfg4 = revgnss.ConfigFactory.defaultConfig();
 cfg4.effects.ionosphere.mappingModel = 'simpleSecant';
 cfg4.errors.ionosphere.truth.enable  = true;
 cfg4.errors.ionosphere.truth.verticalDelayL1_m = 5.0;
-env4 = revgnss.EnvironmentModel(cfg4, 1);
+env4 = models.errors.EnvironmentModel(cfg4, 1);
 
 el_45 = 45 * pi/180;
 f_L1 = 1575.42e6;
@@ -70,7 +70,7 @@ fprintf('  T5: thinShell via EnvironmentModel differs from simpleSecant ...\n');
 cfg5 = cfg4;
 cfg5.effects.ionosphere.mappingModel  = 'thinShell';
 cfg5.effects.ionosphere.shellHeight_m = 350e3;
-env5 = revgnss.EnvironmentModel(cfg5, 1);
+env5 = models.errors.EnvironmentModel(cfg5, 1);
 delay5 = env5.getIonoDelay(1, el_low, 'truth', f_L1, f_L1);
 delay5_sec = 5.0 / sin(el_low);
 % thinShell delay should differ meaningfully from secant at low elevation
