@@ -165,10 +165,6 @@ classdef ClockExactReportBuilder
 
             CE = revgnss.ClockExactReportBuilder;
 
-            % Scenario geometry: spacecraft body + reference frames (3-D -> raster PDF).
-            paths.scGeom = CE.tryPlot3D_(figDir, [stem '_sc_frames.pdf'], @() ...
-                CE.plotSpacecraftFrames_(cfg));
-
             % Position error
             paths.posErr = CE.tryPlot_(figDir, [stem '_position_error.pdf'], @() ...
                 CE.plotPositionError_(diag, t), cfg);
