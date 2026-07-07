@@ -191,10 +191,11 @@ function testRacGeoUsesInertialVelocity(tc)
 end
 
 function testSpacecraftFramesPlotRenders(tc)
-    % The schematic now lives in the standalone, editable utils/make_spacecraft_frames.m
-    % (single source of truth). Exercise it end-to-end: render + export a PDF.
+    % The schematic now lives in the standalone, editable
+    % output/utils/make_spacecraft_frames.m (single source of truth).
+    % Exercise it end-to-end: render + export a PDF.
     rootDir = fileparts(fileparts(mfilename('fullpath')));   % .../oo_v1
-    addpath(fullfile(rootDir, 'utils'));
+    addpath(fullfile(rootDir, 'output', 'utils'));
     cfg = masterConfig(); cfg.scenario.nSpaceAssets = 6;     % swarm -> helix overlaid
     tmp = tempname; mkdir(tmp);
     guard = onCleanup(@() rmdir(tmp, 's')); %#ok<NASGU>

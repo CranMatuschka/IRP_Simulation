@@ -22,12 +22,14 @@ function outPath = make_spacecraft_frames(cfg)
 %     make_spacecraft_frames(cfg)            % override the config
 %     p = make_spacecraft_frames(...);       % also returns the written PDF path
 %
-%   Run this once (or after each edit); the report just references the PDF via
-%   scenarioSummary section 1.3. make_utils_figures.m (repo root) calls this.
+%   This script lives in output/utils/ next to the PDF it produces. Run it from
+%   the repo root with:  run('output/utils/make_spacecraft_frames.m')  (or cd
+%   here first). The report just references the PDF via scenarioSummary 1.3;
+%   the sibling make_utils_figures.m aggregator also calls this.
 
     thisFile   = mfilename('fullpath');
-    utilsSrc   = fileparts(thisFile);          % .../oo_v1/utils
-    rootDir    = fileparts(utilsSrc);          % .../oo_v1
+    utilsSrc   = fileparts(thisFile);              % .../oo_v1/output/utils
+    rootDir    = fileparts(fileparts(utilsSrc));   % .../oo_v1
     addpath(rootDir); addpath(fullfile(rootDir, 'config'));
 
     if nargin < 1 || isempty(cfg)

@@ -1178,8 +1178,8 @@ classdef ClockExactReportBuilder
         % writeActivePhysicsConfig_ extracted to +revgnss/+report/activePhysicsConfig.m (Phase 7).
 
         % Spacecraft + reference-frame schematic moved to the standalone, editable
-        % utils/make_spacecraft_frames.m (scenario-independent; exported via tryPlot3D_
-        % to output/utils/spacecraft_frames.pdf, which the report references).
+        % output/utils/make_spacecraft_frames.m (scenario-independent; exported via
+        % tryPlot3D_ to output/utils/spacecraft_frames.pdf, which the report references).
 
         % ================================================================
         % LONGTABLE HELPERS
