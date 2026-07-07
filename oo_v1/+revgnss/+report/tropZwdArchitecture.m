@@ -26,9 +26,10 @@ function tropZwdArchitecture(fid, cfg)
     fprintf(fid, '\\textbf{Troposphere and ZWD Architecture}\n\n');
     fprintf(fid, '\\begin{tabular}{p{0.38\\textwidth}p{0.52\\textwidth}}\n');
     fprintf(fid, '\\toprule\n\\textbf{Property} & \\textbf{Status}\\\\\n\\midrule\n');
-    fprintf(fid, 'Troposphere model & \\texttt{%s} (Saastamoinen-style; no GPT3/VMF3/ERA5)\\\\\n', strrep(tropTyp_,'_','\_'));
-    fprintf(fid, 'ZWD EKF state & %s (\\texttt{%s}; %d random-walk states; one per tower)\\\\\n', ...
-        CE.yesNo_(zwdEn_,'active','inactive (none)'), strrep(zwdMode_,'_','\_'), nZwd_);
+    fprintf(fid, 'Troposphere model & %s (Saastamoinen-style; no GPT3/VMF3/ERA5)\\\\\n', ...
+        CE.esc_(revgnss.ReportLabel.humanize(tropTyp_)));
+    fprintf(fid, 'ZWD EKF state & %s (%s; %d random-walk states; one per tower)\\\\\n', ...
+        CE.yesNo_(zwdEn_,'active','inactive'), CE.esc_(revgnss.ReportLabel.humanize(zwdMode_)), nZwd_);
     fprintf(fid, 'ZWD initial $\\sigma$ & ');
     try; fprintf(fid, '%.3f m\\\\\n', cfg.estimation.tropoZwd.initialSigma_m); catch; fprintf(fid, 'default\\\\\n'); end
     fprintf(fid, 'Mapping function & elevation-dependent (sine); same for code and carrier\\\\\n');

@@ -72,7 +72,14 @@ classdef AllanDeviation
             % getTowerClockBiasMatrix  [nEpochs x nTowers] tower truth bias matrix [m].
             %   Columns correspond to tower index in the visibility order.
             %   NaN for epochs where a tower is not visible.
-            cells = diag.getTowerClockBiasMatrix();
+            raw = diag.getTowerClockBiasMatrix();
+            if isnumeric(raw)
+                % Compact SimulationDataStore returns a [nRows x nEpochs] double;
+                % transpose to the [nEpochs x nRows] convention used below.
+                M = raw.';
+                return;
+            end
+            cells = raw;
             nEp = numel(cells);
             nT = 0;
             for k = 1:nEp

@@ -1261,6 +1261,14 @@ classdef SimulationDataStore < handle
             e = obj.er_pv_(:,1:obj.nEpochs);
         end
 
+        function r = getTruthPositionVecs(obj)
+            r = obj.tr_r_(:,1:obj.nEpochs);
+        end
+
+        function v = getTruthVelocityVecs(obj)
+            v = obj.tr_v_(:,1:obj.nEpochs);
+        end
+
         function e = getClockBiasErrors(obj)
             e = obj.er_cb_(1:obj.nEpochs);
         end

@@ -253,28 +253,46 @@ classdef ClockExactReportBuilder
 
                 switch signal
                     case 'posErr'
-                        ev = diag.getPositionErrorVecs();   % [3 x N]
-                        if ~isempty(ev) && size(ev,2) == numel(t)
-                            hold(ax,'on');
-                            plot(ax, tz, ev(1,i0:end), 'r-', 'LineWidth',0.8, 'DisplayName','X');
-                            plot(ax, tz, ev(2,i0:end), 'g-', 'LineWidth',0.8, 'DisplayName','Y');
-                            plot(ax, tz, ev(3,i0:end), 'b-', 'LineWidth',0.8, 'DisplayName','Z');
-                            plot(ax, tz, sqrt(sum(ev(:,i0:end).^2,1)), 'k-', 'LineWidth',1.0, 'DisplayName','3D');
-                            CE.overlaySigma_(ax, tz, CE.stateSigmaWin_(diag,1,1,i0), 3, 'r:');
-                            CE.overlaySigma_(ax, tz, CE.stateSigmaWin_(diag,2,1,i0), 3, 'g:');
-                            CE.overlaySigma_(ax, tz, CE.stateSigmaWin_(diag,3,1,i0), 3, 'b:');
-                            legend(ax,'show','Location','northeast','FontSize',5);
-                            xlabel(ax,'Time [s]','FontSize',7); ylabel(ax,'Position error [m]','FontSize',7);
-                            title(ax, ttl,'FontSize',7); grid(ax,'on'); return;
+                        ev = diag.getPositionErrorVecs();   % [3 x N] estimate - truth
+                        nAll = numel(t);
+                        rTr = []; vTr = [];
+                        try; rTr = diag.getTruthPositionVecs(); vTr = diag.getTruthVelocityVecs(); catch; end
+                        if ~isempty(ev) && size(ev,2) == nAll
+                            nrm = sqrt(sum(ev.^2,1));
+                            rac = [];
+                            if ~isempty(rTr) && ~isempty(vTr) && size(rTr,2) >= nAll && size(vTr,2) >= nAll
+                                rac = revgnss.OrbitFrame.ecefToRacGeo(ev, rTr(:,1:nAll), vTr(:,1:nAll));
+                                if all(~isfinite(rac(:))); rac = []; end
+                            end
+                            seg = i0:nAll;
+                            if ~isempty(rac)
+                                [~, unit, sc] = revgnss.PlotUnitScaler.scaleMetric(reshape(rac(:,seg),[],1), 'm');
+                                hold(ax,'on');
+                                plot(ax, tz, rac(1,seg)*sc, 'r-', 'LineWidth',0.8, 'DisplayName','radial');
+                                plot(ax, tz, rac(2,seg)*sc, 'g-', 'LineWidth',0.8, 'DisplayName','along-track');
+                                plot(ax, tz, rac(3,seg)*sc, 'b-', 'LineWidth',0.8, 'DisplayName','cross-track');
+                                legend(ax,'show','Location','northeast','FontSize',5);
+                            else
+                                [~, unit, sc] = revgnss.PlotUnitScaler.scaleMetric(nrm(seg), 'm');
+                                plot(ax, tz, nrm(seg)*sc, 'b-', 'LineWidth',0.8);
+                            end
+                            xlabel(ax,'Time [s]','FontSize',7);
+                            ylabel(ax, revgnss.PlotUnitScaler.axisLabel('Position error', unit),'FontSize',7);
+                            title(ax, ttl,'FontSize',7); grid(ax,'on');
+                            revgnss.PlotUnitScaler.disableExponent(ax); return;
                         end
                     case 'clkErr'
-                        y = diag.getClockBiasErrors() ./ c0;   % m -> s
-                        if ~isempty(y)
+                        c = diag.getClockBiasErrors();   % metres
+                        if ~isempty(c)
+                            y = c ./ c0;   % seconds
+                            [~, unit, sc] = revgnss.PlotUnitScaler.scaleMetric(y(i0:end), 's');
                             hold(ax,'on');
-                            plot(ax, tz, y(i0:end), 'r-', 'LineWidth',0.8);
-                            CE.overlaySigma_(ax, tz, CE.stateSigmaWin_(diag,13,1/c0,i0), 3, 'k:');
-                            xlabel(ax,'Time [s]','FontSize',7); ylabel(ax,'Clock bias error [s]','FontSize',7);
-                            title(ax, ttl,'FontSize',7); grid(ax,'on'); return;
+                            plot(ax, tz, y(i0:end)*sc, 'r-', 'LineWidth',0.8);
+                            CE.overlaySigma_(ax, tz, CE.stateSigmaWin_(diag,13,sc/c0,i0), 3, 'k:');
+                            xlabel(ax,'Time [s]','FontSize',7);
+                            ylabel(ax, revgnss.PlotUnitScaler.axisLabel('Clock bias error', unit),'FontSize',7);
+                            title(ax, ttl,'FontSize',7); grid(ax,'on');
+                            revgnss.PlotUnitScaler.disableExponent(ax); return;
                         end
                     case 'clkDrift'
                         y = diag.getClockDriftErrors() ./ c0 .* ppm;  % m/s -> ppm
@@ -283,7 +301,8 @@ classdef ClockExactReportBuilder
                             plot(ax, tz, y(i0:end), 'b-', 'LineWidth',0.8);
                             CE.overlaySigma_(ax, tz, CE.stateSigmaWin_(diag,14,ppm/c0,i0), 3, 'k:');
                             xlabel(ax,'Time [s]','FontSize',7); ylabel(ax,'Clock drift error [ppm]','FontSize',7);
-                            title(ax, ttl,'FontSize',7); grid(ax,'on'); return;
+                            title(ax, ttl,'FontSize',7); grid(ax,'on');
+                            revgnss.PlotUnitScaler.disableExponent(ax); return;
                         end
                 end
             catch
@@ -352,7 +371,13 @@ classdef ClockExactReportBuilder
 
                 % Tower clocks [m → s]
                 twr_m = revgnss.AllanDeviation.getTowerClockBiasMatrix(diag);
-                nT = size(twr_m, 2);
+                % The store carries one column per measurement row (tower repeated
+                % across receivers/signals); collapse to distinct tower time series.
+                if ~isempty(twr_m)
+                    [~, ia] = unique(twr_m', 'rows', 'stable');
+                    twr_m = twr_m(:, sort(ia));
+                end
+                nT = min(size(twr_m, 2), 8);   % cap curves on the compact plot
                 if nT > 0
                     cols_ = lines(max(nT, 1));
                     for tk = 1:nT
@@ -474,33 +499,46 @@ classdef ClockExactReportBuilder
 
         % ................................................................
         function fig = plotPositionError_(diag, t)
-            % Stage 69: show X/Y/Z ECEF components plus 3D norm.
+            % Position error in the RAC (radial / along-track / cross-track)
+            % orbital frame, estimate minus truth, with auto SI-prefix units.
             fig = revgnss.ClockExactReportBuilder.makeCompactFig_('');
             ax  = gca(fig);
+            PU  = @revgnss.PlotUnitScaler.scaleMetric;
             try
-                ev = diag.getPositionErrorVecs();  % [3 x n]
+                ev = diag.getPositionErrorVecs();  % [3 x n] estimate - truth ECEF
                 e  = diag.getPositionErrors();     % [1 x n] 3D norm
-                CE = revgnss.ClockExactReportBuilder;
-                if ~isempty(t) && ~isempty(ev) && size(ev,2) == numel(t)
+                rTr = []; vTr = [];
+                try; rTr = diag.getTruthPositionVecs(); vTr = diag.getTruthVelocityVecs(); catch; end
+                n = numel(t);
+                haveRac = ~isempty(t) && ~isempty(ev) && size(ev,2) == n && ...
+                          ~isempty(rTr) && ~isempty(vTr) && size(rTr,2) >= n && size(vTr,2) >= n;
+                rac = [];
+                if haveRac
+                    rac = revgnss.OrbitFrame.ecefToRacGeo(ev, rTr(:,1:n), vTr(:,1:n));
+                    if all(~isfinite(rac(:))); haveRac = false; end
+                end
+                if haveRac
+                    [~, unit, sc] = PU(rac(:), 'm');
                     hold(ax,'on');
-                    plot(ax, t, ev(1,:), 'r-',  'LineWidth', 0.7, 'DisplayName', 'X');
-                    plot(ax, t, ev(2,:), 'g-',  'LineWidth', 0.7, 'DisplayName', 'Y');
-                    plot(ax, t, ev(3,:), 'b-',  'LineWidth', 0.7, 'DisplayName', 'Z');
-                    plot(ax, t, e,       'k-',  'LineWidth', 1.0, 'DisplayName', '3D');
-                    CE.overlaySigma_(ax, t, CE.stateSigmaWin_(diag,1,1,1), 3, 'r:');
-                    CE.overlaySigma_(ax, t, CE.stateSigmaWin_(diag,2,1,1), 3, 'g:');
-                    CE.overlaySigma_(ax, t, CE.stateSigmaWin_(diag,3,1,1), 3, 'b:');
+                    plot(ax, t, rac(1,:)*sc, 'r-', 'LineWidth', 0.8, 'DisplayName', 'radial');
+                    plot(ax, t, rac(2,:)*sc, 'g-', 'LineWidth', 0.8, 'DisplayName', 'along-track');
+                    plot(ax, t, rac(3,:)*sc, 'b-', 'LineWidth', 0.8, 'DisplayName', 'cross-track');
                     legend(ax, 'show', 'Location', 'northeast', 'FontSize', 5);
                     xlabel(ax, 'Time [s]', 'FontSize', 7);
-                    ylabel(ax, 'Error [m]', 'FontSize', 7);
-                    title(ax, 'ECEF position error (dotted = \pm3\sigma)', 'FontSize', 7);
+                    ylabel(ax, revgnss.PlotUnitScaler.axisLabel('Error', unit), 'FontSize', 7);
+                    title(ax, 'Position error: RAC frame (estimate - truth)', 'FontSize', 7);
                     grid(ax, 'on');
+                    revgnss.PlotUnitScaler.disableExponent(ax);
                     return;
                 elseif ~isempty(t) && ~isempty(e)
-                    plot(ax, t, e, 'b-', 'LineWidth', 0.8);
+                    % Fallback: clearly-labelled 3D norm (RAC basis unavailable).
+                    [es, unit] = PU(e, 'm');
+                    plot(ax, t, es, 'b-', 'LineWidth', 0.8);
                     xlabel(ax, 'Time [s]', 'FontSize', 7);
-                    ylabel(ax, 'Error [m]', 'FontSize', 7);
+                    ylabel(ax, revgnss.PlotUnitScaler.axisLabel('Error (3D norm)', unit), 'FontSize', 7);
+                    title(ax, 'Position error: 3D norm (RAC basis unavailable)', 'FontSize', 7);
                     grid(ax, 'on');
+                    revgnss.PlotUnitScaler.disableExponent(ax);
                     return;
                 end
             catch; end
@@ -515,13 +553,15 @@ classdef ClockExactReportBuilder
                 c = diag.getClockBiasErrors();
                 if ~isempty(t) && ~isempty(c)
                     CE = revgnss.ClockExactReportBuilder;
+                    [cs, unit, sc] = revgnss.PlotUnitScaler.scaleMetric(c, 'm');
                     hold(ax,'on');
-                    plot(ax, t, c * 1e3, 'r-', 'LineWidth', 0.8);
-                    CE.overlaySigma_(ax, t, CE.stateSigmaWin_(diag,13,1e3,1), 3, 'k:');
+                    plot(ax, t, cs, 'r-', 'LineWidth', 0.8);
+                    CE.overlaySigma_(ax, t, CE.stateSigmaWin_(diag,13,sc,1), 3, 'k:');
                     xlabel(ax, 'Time [s]', 'FontSize',7);
-                    ylabel(ax, 'Clock error [mm]', 'FontSize',7);
+                    ylabel(ax, revgnss.PlotUnitScaler.axisLabel('Clock error', unit), 'FontSize',7);
                     title(ax, 'Receiver clock bias error (dotted = \pm3\sigma)', 'FontSize',7);
                     grid(ax, 'on');
+                    revgnss.PlotUnitScaler.disableExponent(ax);
                     return;
                 end
             catch; end
@@ -536,13 +576,15 @@ classdef ClockExactReportBuilder
                 d = diag.getClockDriftErrors();
                 if ~isempty(t) && ~isempty(d)
                     CE = revgnss.ClockExactReportBuilder;
+                    [ds, unit, sc] = revgnss.PlotUnitScaler.scaleMetric(d, 'm/s');
                     hold(ax,'on');
-                    plot(ax, t, d, 'b-', 'LineWidth', 0.8);
-                    CE.overlaySigma_(ax, t, CE.stateSigmaWin_(diag,14,1,1), 3, 'k:');
+                    plot(ax, t, ds, 'b-', 'LineWidth', 0.8);
+                    CE.overlaySigma_(ax, t, CE.stateSigmaWin_(diag,14,sc,1), 3, 'k:');
                     xlabel(ax, 'Time [s]', 'FontSize',7);
-                    ylabel(ax, 'Drift err [m/s]', 'FontSize',7);
+                    ylabel(ax, revgnss.PlotUnitScaler.axisLabel('Drift error', unit), 'FontSize',7);
                     title(ax, 'Receiver clock drift error (dotted = \pm3\sigma)', 'FontSize',7);
                     grid(ax, 'on');
+                    revgnss.PlotUnitScaler.disableExponent(ax);
                     return;
                 end
             catch; end
@@ -636,15 +678,21 @@ classdef ClockExactReportBuilder
             ax  = gca(fig);
             try
                 M = diag.getTowerClockBiasMatrix();
+                v = [];
                 if iscell(M) && ~isempty(M) && ~isempty(M{end})
                     v = M{end};
-                    if isnumeric(v) && ~isempty(v)
-                        bar(ax, 1:numel(v), v*1e3, 0.5);
-                        xlabel(ax,'Tower index','FontSize',7);
-                        ylabel(ax,'Bias [mm]','FontSize',7);
-                        grid(ax,'on');
-                        return;
-                    end
+                elseif isnumeric(M) && ~isempty(M)
+                    % Compact store: [nRows x nEpochs]; take the last epoch and
+                    % collapse the per-row duplication to distinct tower biases.
+                    lastCol = M(:, end);
+                    v = unique(lastCol(isfinite(lastCol)), 'stable');
+                end
+                if isnumeric(v) && ~isempty(v)
+                    bar(ax, 1:numel(v), v*1e3, 0.5);
+                    xlabel(ax,'Tower index','FontSize',7);
+                    ylabel(ax,'Bias [mm]','FontSize',7);
+                    grid(ax,'on');
+                    return;
                 end
             catch; end
             revgnss.ClockExactReportBuilder.noDataAxes_(ax);
@@ -755,26 +803,25 @@ classdef ClockExactReportBuilder
             fprintf(fid, '\\begin{document}\n');
 
             % ---- Title block -------------------------------------------
-            try; stgNum = char(revgnss.ReportStatus.current().stage); catch; stgNum = '37'; end
             fprintf(fid, '\\begin{center}\n');
             fprintf(fid, '{\\Large \\textbf{Reverse-GNSS Spacecraft Multi-Observable EKF Report}}\\\\[4pt]\n');
             fprintf(fid, '{\\large Scenario: \\textbf{%s}}\\\\[4pt]\n', esc(scenarioName));
-            fprintf(fid, '{\\small Generated by \\texttt{oo\\_v1} v%s on %s \\\\ Stage %s \\\\ Commit: %s}\n', ...
-                esc(ver), esc(ts), esc(stgNum), sha);
+            fprintf(fid, '{\\small Reverse-GNSS EKF simulator \\textemdash{} validation version %s \\\\ Generated %s}\\\\[3pt]\n', ...
+                esc(ver), esc(ts));
+            fprintf(fid, ['{\\footnotesize Controlled synthetic reverse-GNSS scenario. Results are compared against the ' ...
+                'known synthetic truth and are not a real-data or PPP-grade performance claim.}\n']);
             fprintf(fid, '\\end{center}\n');
             fprintf(fid, '\\vspace{0.3cm}\n');
 
             % ---- Sections -----------------------------------------------
             revgnss.report.scenarioSummary(fid, cfg, summary, diag, nTwr, nRx, dur, dt, esc);
             revgnss.report.stateEstimation(fid, plotPaths, stem, cfg, diag, figDir);
-            revgnss.report.measurementValidation(fid, plotPaths, stem, figDir);
-            revgnss.report.perReceiverDiagnostics(fid, plotPaths, stem, figDir, nRx);
+            revgnss.report.measurementValidation(fid, plotPaths, stem, figDir, diag);
             revgnss.report.oscillatorValidation(fid, plotPaths, stem, figDir, cfg);
-            revgnss.report.clockObservability(fid, diag, cfg);
             revgnss.report.txCodeBias(fid, diag, cfg);
             revgnss.report.tropZwdArchitecture(fid, cfg);
-            revgnss.report.activePhysicsConfig(fid, cfg, summary, plotPaths, stem, figDir);
             revgnss.report.numericalSummary(fid, cfg, summary, diag);
+            revgnss.report.activePhysicsConfig(fid, cfg, summary, plotPaths, stem, figDir);
 
             fprintf(fid, '\\end{document}\n');
             fclose(fid);
@@ -897,16 +944,16 @@ classdef ClockExactReportBuilder
             % Raw integer fixing status/note
             if intFixEn2
                 intFixSt = true;
-                intFixNote = sprintf('Guarded %s; fixes attempted only when arc/sigma/distance/RMS gates pass.', intFixMode2);
+                intFixNote = sprintf('Guarded %s; fixes attempted only when arc/sigma/distance/RMS gates pass.', revgnss.ReportLabel.humanize(intFixMode2));
             else
                 intFixSt = false;
-                intFixNote = 'Disabled; controlledRawCarrier fixing available, not active in this run.';
+                intFixNote = 'Disabled; guarded raw-carrier fixing available, not active in this run.';
             end
 
             % Baseline attitude AR status/note
             if baseArEn2
                 baseArSt = true;
-                baseArNote = sprintf('method=%s; requires carrier float+4rx+attitude EKF+diffAtt mode.', baseArMeth2);
+                baseArNote = sprintf('method: %s; requires carrier float, 4 receivers, attitude EKF, and differential-attitude mode.', revgnss.ReportLabel.humanize(baseArMeth2));
             else
                 baseArSt = false;
                 baseArNote = 'Not active; requires carrier float + 4rx + attitude EKF + diffAtt mode.';
@@ -915,7 +962,7 @@ classdef ClockExactReportBuilder
             % Tower product correction status/note
             if prodEn2
                 prodSt = true;
-                prodNote = sprintf('External noisy product correction (%s).', prodMode2);
+                prodNote = sprintf('External noisy product correction (%s).', revgnss.ReportLabel.humanize(prodMode2));
             else
                 prodSt = false;
                 prodNote = 'Perfect external tower correction assumed.';
@@ -926,7 +973,7 @@ classdef ClockExactReportBuilder
                      CE.getLogical_(cfg, {'physics','sagnac','model','enable'}, false);
             if ltEn2
                 ltSt   = true;
-                ltNote = sprintf('%s; Sagnac subsumed when iterative light-time active.', ltMode2);
+                ltNote = sprintf('%s; Sagnac subsumed when iterative light-time active.', revgnss.ReportLabel.humanize(ltMode2));
             elseif sagEn2
                 ltSt   = true;
                 ltNote = 'First-order Sagnac only (no iterative light-time).';
@@ -937,18 +984,18 @@ classdef ClockExactReportBuilder
 
             % Pre-compute conditional notes (avoids need for ternary helper)
             if isDual2; dualNote2 = 'L1+L2; IF combination available.'; else; dualNote2 = 'L1 only.'; end
-            dopNote2    = ''; if dopEKF2; dopNote2 = sprintf('model: %s', dopMdl2); end
+            dopNote2    = ''; if dopEKF2; dopNote2 = sprintf('model: %s', revgnss.ReportLabel.humanize(dopMdl2)); end
             zwdSt2      = 'guarded'; if zwdEKF2; zwdSt2 = true; end
             zwdNote2    = 'Guarded/config-only; weak GEO observability at GEO.';
-            if zwdEKF2; zwdNote2 = sprintf('mode: %s', zwdMode2); end
+            if zwdEKF2; zwdNote2 = sprintf('mode: %s', revgnss.ReportLabel.humanize(zwdMode2)); end
             slipNote2   = '';
-            if carSlip2 && arcSep2; slipNote2 = 'modelStepCompensatedResidualJump; arc-separated float ambiguities.'; end
+            if carSlip2 && arcSep2; slipNote2 = 'model-step-compensated residual jump; arc-separated float ambiguities.'; end
             prodCovSt2  = prodCovEn2 || sharedEn2;
             prodCovN2   = 'No product covariance applied to R.';
             if prodCovSt2; prodCovN2 = 'R-inflation from product age and drift uncertainty.'; end
-            tClkNote2   = sprintf('mode: %s; gauge: %s.', clkMd2, gaugMd2);
-            attNote2    = 'No attitude states.'; if attEn2; attNote2 = sprintf('param: %s', attParam2); end
-            diffAttN2   = ''; if diffAttEn2; diffAttN2 = 'calibratedDifferentialAmbiguity active.'; end
+            tClkNote2   = sprintf('mode: %s; gauge: %s.', revgnss.ReportLabel.humanize(clkMd2), revgnss.ReportLabel.humanize(gaugMd2));
+            attNote2    = 'No attitude states.'; if attEn2; attNote2 = sprintf('parameterisation: %s', revgnss.ReportLabel.humanize(attParam2)); end
+            diffAttN2   = ''; if diffAttEn2; diffAttN2 = 'calibrated differential ambiguity active.'; end
 
             % ---- Five compact group tables (avoids single-table page overflow) ----
             gTitles = { ...
@@ -1108,7 +1155,8 @@ classdef ClockExactReportBuilder
         % ================================================================
 
         function s = plotTableHeader_()
-            s = ['\\begin{longtable}{@{}p{0.46\\textwidth}p{0.48\\textwidth}@{}}\n' ...
+            % 66/33 split: the plot column dominates; the description stays compact.
+            s = ['\\begin{longtable}{@{}p{0.62\\textwidth}p{0.30\\textwidth}@{}}\n' ...
                  '\\toprule\n' ...
                  '\\textbf{Plot} & \\textbf{Description and statistical approach}\\\\\n' ...
                  '\\midrule\n'];
@@ -1498,6 +1546,15 @@ classdef ClockExactReportBuilder
                 repoRoot = fileparts(fileparts(mfilename('fullpath')));
                 [st, out] = system(sprintf('git -C "%s" rev-parse --short HEAD 2>/dev/null', repoRoot));
                 if st == 0; sha = strtrim(out); end
+            catch; end
+        end
+
+        function br = getGitBranch_()
+            br = 'unknown';
+            try
+                repoRoot = fileparts(fileparts(mfilename('fullpath')));
+                [st, out] = system(sprintf('git -C "%s" rev-parse --abbrev-ref HEAD 2>/dev/null', repoRoot));
+                if st == 0 && ~isempty(strtrim(out)); br = strtrim(out); end
             catch; end
         end
 
