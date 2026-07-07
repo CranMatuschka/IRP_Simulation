@@ -191,10 +191,17 @@ function testRacGeoUsesInertialVelocity(tc)
 end
 
 function testSpacecraftFramesPlotRenders(tc)
-    cfg = masterConfig(); cfg.scenario.nSpaceAssets = 6;   % swarm -> helix overlaid
-    fig = revgnss.ClockExactReportBuilder.plotSpacecraftFrames_(cfg);
-    guard = onCleanup(@() close(fig)); %#ok<NASGU>
-    verifyTrue(tc, isgraphics(fig), 'Spacecraft-frames plot did not return a figure.');
-    verifyFalse(tc, isempty(findobj(fig,'Type','axes')), 'Plot has no axes.');
-    verifyGreaterThan(tc, numel(findobj(fig,'Type','patch')), 3, 'Spacecraft body/panels not drawn.');
+    % The schematic now lives in the standalone, editable utils/make_spacecraft_frames.m
+    % (single source of truth). Exercise it end-to-end: render + export a PDF.
+    rootDir = fileparts(fileparts(mfilename('fullpath')));   % .../oo_v1
+    addpath(fullfile(rootDir, 'utils'));
+    cfg = masterConfig(); cfg.scenario.nSpaceAssets = 6;     % swarm -> helix overlaid
+    tmp = tempname; mkdir(tmp);
+    guard = onCleanup(@() rmdir(tmp, 's')); %#ok<NASGU>
+    cfg.report.baseOutputDir = tmp;
+    outPath = make_spacecraft_frames(cfg);
+    verifyNotEmpty(tc, outPath, 'make_spacecraft_frames returned no path (render/export failed).');
+    verifyEqual(tc, exist(outPath,'file'), 2, 'spacecraft_frames.pdf was not written.');
+    info = dir(outPath);
+    verifyGreaterThan(tc, info.bytes, 5000, 'spacecraft_frames.pdf is implausibly small.');
 end
