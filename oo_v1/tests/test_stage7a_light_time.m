@@ -27,7 +27,7 @@ fprintf('  T1: LightTimeSolver.solve returns t_tx_s ...\n');
 
 cfg1 = revgnss.ConfigFactory.defaultConfig();
 cfg1.effects.lightTime.model = 'iterative';
-[r_twr_at_tx, tau_s, t_tx_s] = revgnss.LightTimeSolver.solve(r_rx, r_twr, cfg1, 100.0);
+[r_twr_at_tx, tau_s, t_tx_s] = models.frames.LightTimeSolver.solve(r_rx, r_twr, cfg1, 100.0);
 
 assert(~isempty(tau_s),   'T1 FAILED: tau_s is empty');
 assert(~isempty(t_tx_s),  'T1 FAILED: t_tx_s is empty');
@@ -40,7 +40,7 @@ fprintf('    tau_s=%.6f s, t_tx_s=%.6f s (t_rx=100.0): PASS\n', tau_s, t_tx_s);
 fprintf('  T2: t_tx_s = t_rx_s - tau_s (iterative) ...\n');
 
 t_rx = 500.0;
-[~, tau2, t_tx2] = revgnss.LightTimeSolver.solve(r_rx, r_twr, cfg1, t_rx);
+[~, tau2, t_tx2] = models.frames.LightTimeSolver.solve(r_rx, r_twr, cfg1, t_rx);
 assert(abs(t_tx2 - (t_rx - tau2)) < 1e-15, ...
     'T2 FAILED: t_tx_s=%.12f, t_rx-tau=%.12f', t_tx2, t_rx - tau2);
 fprintf('    t_tx_s = %.6f = t_rx - tau = %.6f: PASS\n', t_tx2, t_rx-tau2);
@@ -52,7 +52,7 @@ fprintf('  T3: t_tx_s for sagnacFirstOrder mode ...\n');
 
 cfg3 = revgnss.ConfigFactory.defaultConfig();
 cfg3.effects.lightTime.model = 'sagnacFirstOrder';
-[~, tau3, t_tx3] = revgnss.LightTimeSolver.solve(r_rx, r_twr, cfg3, t_rx);
+[~, tau3, t_tx3] = models.frames.LightTimeSolver.solve(r_rx, r_twr, cfg3, t_rx);
 assert(abs(t_tx3 - (t_rx - tau3)) < 1e-15, ...
     'T3 FAILED: t_tx_s=%.12f, t_rx-tau=%.12f', t_tx3, t_rx-tau3);
 fprintf('    sagnacFirstOrder t_tx_s = %.6f s: PASS\n', t_tx3);
@@ -77,7 +77,7 @@ cfg5 = revgnss.ConfigFactory.defaultConfig();
 cfg5.effects.lightTime.model   = 'iterative';
 cfg5.physics.sagnac.model.enable = true;
 
-[~, contrib5] = revgnss.RangeCorrections.correctedPseudorange( ...
+[~, contrib5] = models.corrections.RangeCorrections.correctedPseudorange( ...
     r_rx, r_twr, cfg5, 'model', pi/4);
 assert(contrib5.tau_s > 0, 'T5 FAILED: contrib.tau_s should be positive in iterative mode');
 assert(~isempty(contrib5.t_tx_s), 'T5 FAILED: contrib.t_tx_s should not be empty');
@@ -92,13 +92,13 @@ fprintf('  T6: no double Sagnac in iterative mode ...\n');
 cfg6a = revgnss.ConfigFactory.defaultConfig();
 cfg6a.effects.lightTime.model    = 'sagnacFirstOrder';
 cfg6a.physics.sagnac.model.enable = true;
-[rho6a, ~] = revgnss.RangeCorrections.correctedPseudorange(r_rx, r_twr, cfg6a, 'model', pi/4);
+[rho6a, ~] = models.corrections.RangeCorrections.correctedPseudorange(r_rx, r_twr, cfg6a, 'model', pi/4);
 
 % iterative mode skips analytic Sagnac (handles it via rotation)
 cfg6b = revgnss.ConfigFactory.defaultConfig();
 cfg6b.effects.lightTime.model    = 'iterative';
 cfg6b.physics.sagnac.model.enable = true;  % should be suppressed internally
-[rho6b, ~] = revgnss.RangeCorrections.correctedPseudorange(r_rx, r_twr, cfg6b, 'model', pi/4);
+[rho6b, ~] = models.corrections.RangeCorrections.correctedPseudorange(r_rx, r_twr, cfg6b, 'model', pi/4);
 
 % Both should give similar range (within ~1 m for this geometry) — not double-counted
 rho_diff = abs(rho6a - rho6b);

@@ -267,7 +267,7 @@ fprintf('    doppler.useInEKF=false after finalization, no throw: PASS\n');
 % ----------------------------------------------------------------
 fprintf('  T11: ISL stub returns empty z, h, H (not implemented) ...\n');
 
-[z11, h11, H11] = revgnss.MeasurementModelUtils.computeISLMeasurements([], [], [], []);
+[z11, h11, H11] = models.measurements.MeasurementModelUtils.computeISLMeasurements([], [], [], []);
 assert(isempty(z11), 'T11 FAILED: z_isl should be empty');
 assert(isempty(h11), 'T11 FAILED: h_isl should be empty');
 assert(size(H11,1) == 0, 'T11 FAILED: H_isl should have 0 rows');

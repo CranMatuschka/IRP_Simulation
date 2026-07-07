@@ -88,12 +88,17 @@ try
             isfield(cfg.estimator.dynamics,'mode')
         ekfMode = cfg.estimator.dynamics.mode;
     end
-    % For Stage 59 with static-ECEF truth, EKF mode must be constantVelocity.
-    cvOk = strcmp(ekfMode, 'constantVelocity');
+    % Truth-estimation separation: singleAssetCarrierAttitude uses j2Rk4 truth + j2 EKF
+    % (SAME model family). The EKF dynamics mode must be 'j2', matching the truth family.
+    truthMode = '';
+    if isfield(cfg,'orbit') && isfield(cfg.orbit,'truth') && isfield(cfg.orbit.truth,'mode')
+        truthMode = cfg.orbit.truth.mode;
+    end
+    sameFamilyOk = strcmp(ekfMode, 'j2') && strcmp(truthMode, 'j2Rk4');
 
-    ok = cvOk;
+    ok = sameFamilyOk;
     results(end+1) = makeResult('T4_dynamics_consistency', ok, ...
-        sprintf('ekfMode=%s  constantVelocityRequired=%d', ekfMode, cvOk));
+        sprintf('truthMode=%s ekfMode=%s  sameFamilyJ2=%d', truthMode, ekfMode, sameFamilyOk));
 catch ME
     results(end+1) = makeResult('T4_dynamics_consistency', false, ME.message);
 end

@@ -15,17 +15,17 @@ addpath(fullfile(thisDir, '..'));
 fprintf('=== test_stage7a_config ===\n');
 
 % ----------------------------------------------------------------
-% T1: defaultConfig has matched-error (trop truth=true, model=true)
+% T1: defaultConfig is an honest off=off baseline (clarity refactor C-5)
 % ----------------------------------------------------------------
-fprintf('  T1: defaultConfig is matched-error baseline ...\n');
+fprintf('  T1: defaultConfig is honest off=off baseline ...\n');
 
 cfg1 = revgnss.ConfigFactory.defaultConfig();
 assert(isfield(cfg1.errors.troposphere.truth,'enable') && ...
-       cfg1.errors.troposphere.truth.enable == true, ...
-    'T1 FAILED: defaultConfig should have troposphere.truth.enable=true (matched baseline)');
-assert(cfg1.errors.troposphere.model.enable == true, ...
-    'T1 FAILED: defaultConfig should have troposphere.model.enable=true (matched baseline)');
-fprintf('    troposphere truth=true, model=true (matched): PASS\n');
+       cfg1.errors.troposphere.truth.enable == false, ...
+    'T1 FAILED: defaultConfig should have troposphere.truth.enable=false (honest off=off default)');
+assert(cfg1.errors.troposphere.model.enable == false, ...
+    'T1 FAILED: defaultConfig should have troposphere.model.enable=false (honest off=off default)');
+fprintf('    troposphere truth=false, model=false (honest off=off): PASS\n');
 
 % ----------------------------------------------------------------
 % T2: cleanConfig has all errors off
@@ -42,15 +42,18 @@ assert(~cfg2.effects.antennaPCO.truth.enable,  'T2 FAILED: cleanConfig PCO truth
 fprintf('    cleanConfig: all major errors off: PASS\n');
 
 % ----------------------------------------------------------------
-% T3: matchedErrorBaselineConfig same as defaultConfig on key fields
+% T3: matchedErrorBaselineConfig is the explicit matched-error baseline (tropo/iono ON)
 % ----------------------------------------------------------------
-fprintf('  T3: matchedErrorBaselineConfig same as defaultConfig ...\n');
+fprintf('  T3: matchedErrorBaselineConfig has tropo/iono matched ON ...\n');
 
 cfg3 = revgnss.ConfigFactory.matchedErrorBaselineConfig();
-cfg1b = revgnss.ConfigFactory.defaultConfig();
-assert(cfg3.errors.troposphere.truth.enable == cfg1b.errors.troposphere.truth.enable, ...
-    'T3 FAILED: matchedErrorBaselineConfig differs from defaultConfig on trop.truth.enable');
-fprintf('    matchedErrorBaselineConfig matches defaultConfig on trop settings: PASS\n');
+assert(cfg3.errors.troposphere.truth.enable == true && ...
+       cfg3.errors.troposphere.model.enable == true, ...
+    'T3 FAILED: matchedErrorBaselineConfig should have troposphere truth=model=true');
+assert(cfg3.errors.ionosphere.truth.enable == true && ...
+       cfg3.errors.ionosphere.model.enable == true, ...
+    'T3 FAILED: matchedErrorBaselineConfig should have ionosphere truth=model=true');
+fprintf('    matchedErrorBaselineConfig: tropo/iono matched ON: PASS\n');
 
 % ----------------------------------------------------------------
 % T4: observableMode is a string field in defaultConfig

@@ -85,9 +85,12 @@ cfg5 = revgnss.ConfigFactory.dualFrequencyIFConfig();
 assert(isfield(cfg5.measurements,'codeMode'), 'T5 FAILED: codeMode missing');
 assert(strcmp(cfg5.measurements.codeMode,'ionosphereFree'), ...
     'T5 FAILED: codeMode=%s, expected ionosphereFree', cfg5.measurements.codeMode);
-assert(cfg5.signals.twoFrequency.enable, ...
-    'T5 FAILED: dualFrequencyIFConfig should have twoFrequency enabled');
-fprintf('    codeMode=ionosphereFree, twoFrequency=true: PASS\n');
+% twoFrequency.enable is a DERIVED field (finalizeConfig sets it from enabledMask);
+% assert the canonical dual-frequency control instead (clarity refactor C-11).
+% (Pre-existing bug: T5 checked the pre-finalize derived field; identical on main.)
+assert(isequal(logical(cfg5.signals.enabledMask), [true true]), ...
+    'T5 FAILED: dualFrequencyIFConfig should have enabledMask=[true true]');
+fprintf('    codeMode=ionosphereFree, enabledMask=[true true]: PASS\n');
 
 % ----------------------------------------------------------------
 % T6: cleanConfig has all effects disabled

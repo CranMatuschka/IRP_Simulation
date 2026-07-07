@@ -65,7 +65,7 @@ classdef Diagnostics < handle
         lastSnapshotTime_s_        double  = -Inf
         % Array backend (new in SimulationDataStore refactor)
         useArrayBackend_           logical = false
-        store_                              % revgnss.SimulationDataStore or []
+        store_                              % data.SimulationDataStore or []
         heavyDiagInterval_s_       double  = 60
         heavyDiagEveryEpoch_       logical = true   % default: no sampling
         lastHeavyDiagTime_s_       double  = -Inf
@@ -160,7 +160,7 @@ classdef Diagnostics < handle
                 catch
                     nEp = 1;
                 end
-                obj.store_ = revgnss.SimulationDataStore(cfg, nEp);
+                obj.store_ = data.SimulationDataStore(cfg, nEp);
                 fprintf('  Diagnostics: array backend (%d epochs preallocated)\n', nEp);
             end
 
@@ -258,9 +258,21 @@ classdef Diagnostics < handle
         end
 
         function e = getPositionErrorVecs(obj)
-            % Returns [3 x nEpochs] matrix
+            % Returns [3 x nEpochs] matrix (estimate - truth, ECEF)
             if obj.hasArrayData(); e = obj.store_.getData().error.positionVec_m; return; end
             e = cell2mat({obj.log.positionErrorVec_m});
+        end
+
+        function r = getTruthPositionVecs(obj)
+            % Returns [3 x nEpochs] truth centre-of-mass ECEF position (metres).
+            if obj.hasArrayData(); r = obj.store_.getData().truth.r_cm_ecef_m; return; end
+            r = cell2mat(arrayfun(@(s) s.truth.r_cm_ecef_m(:), obj.log, 'UniformOutput', false));
+        end
+
+        function v = getTruthVelocityVecs(obj)
+            % Returns [3 x nEpochs] truth centre-of-mass ECEF velocity (m/s).
+            if obj.hasArrayData(); v = obj.store_.getData().truth.v_cm_ecef_mps; return; end
+            v = cell2mat(arrayfun(@(s) s.truth.v_cm_ecef_mps(:), obj.log, 'UniformOutput', false));
         end
 
         function e = getClockBiasErrors(obj)

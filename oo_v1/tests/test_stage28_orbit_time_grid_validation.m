@@ -15,7 +15,7 @@ cfg_base.trueAnomaly0_rad = 0;
 cfg_base.epochGMST_rad    = 0;
 cfg_base.orbit.mode       = 'twoBodyRk4';
 
-op = revgnss.OrbitPropagator(cfg_base);
+op = models.orbit.OrbitPropagator(cfg_base);
 
 % T1: valid sorted vector accepted
 try

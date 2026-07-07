@@ -15,7 +15,7 @@ cfg_a.errors.troposphere.truth.enable = true;
 cfg_a.errors.troposphere.model.enable = true;
 cfg_a.estimation.troposphereMode      = 'none';
 
-s_a = revgnss.TroposphereModel.describe(cfg_a, struct());
+s_a = models.atmosphere.TroposphereModel.describe(cfg_a, struct());
 assert(isfield(s_a,'truthEnabled'),   'T-P15a FAILED: missing truthEnabled');
 assert(isfield(s_a,'modelEnabled'),   'T-P15a FAILED: missing modelEnabled');
 assert(isfield(s_a,'zwdEstimated'),   'T-P15a FAILED: missing zwdEstimated');
@@ -38,7 +38,7 @@ fprintf('  T-P15b: TroposphereModel.describe detects perTowerZwd mode ...\n');
 cfg_b = revgnss.ConfigFactory.defaultConfig();
 cfg_b.nTowers = 4;
 cfg_b.estimation.troposphereMode = 'perTowerZwd';
-s_b = revgnss.TroposphereModel.describe(cfg_b, struct());
+s_b = models.atmosphere.TroposphereModel.describe(cfg_b, struct());
 assert(s_b.zwdEstimated, 'T-P15b FAILED: zwdEstimated should be true when perTowerZwd');
 assert(strcmp(s_b.mode,'zwdEkf'), ...
     'T-P15b FAILED: mode should be zwdEkf (got %s)', s_b.mode);
@@ -54,17 +54,17 @@ cfg_c = revgnss.ConfigFactory.defaultConfig();
 cfg_c.effects.troposphere.mappingModel = 'simple';
 elevs = [deg2rad(5), deg2rad(15), deg2rad(30), deg2rad(45), deg2rad(90)];
 for k = 1:numel(elevs)
-    mf = revgnss.TroposphereModel.mapping(elevs(k), cfg_c);
+    mf = models.atmosphere.TroposphereModel.mapping(elevs(k), cfg_c);
     assert(isfinite(mf) && mf > 0, ...
         'T-P15c FAILED: mapping = %.4f for el=%.0f deg (must be finite positive)', ...
         mf, rad2deg(elevs(k)));
 end
 % At 90 deg (zenith), simple mapping = 1/sin(90) = 1
-mf90 = revgnss.TroposphereModel.mapping(pi/2, cfg_c);
+mf90 = models.atmosphere.TroposphereModel.mapping(pi/2, cfg_c);
 assert(abs(mf90 - 1.0) < 0.01, ...
     'T-P15c FAILED: mapping at 90 deg should be ~1.0 (got %.4f)', mf90);
 % At low elevation, mapping > 1 (larger slant delay)
-mf5 = revgnss.TroposphereModel.mapping(deg2rad(5), cfg_c);
+mf5 = models.atmosphere.TroposphereModel.mapping(deg2rad(5), cfg_c);
 assert(mf5 > 5.0, 'T-P15c FAILED: mapping at 5 deg should be > 5 (got %.2f)', mf5);
 fprintf('    PASS (el=5deg→%.2f, el=90deg→%.3f)\n', mf5, mf90);
 
@@ -76,14 +76,14 @@ fprintf('  T-P15d: ZWD state enabled adds nTowers states to EKF dimension ...\n'
 cfg_d = revgnss.ConfigFactory.defaultConfig();
 cfg_d.estimation.troposphereMode = 'none';
 cfg_d = revgnss.ConfigFactory.finalizeConfig(cfg_d);
-ekf_d_off = revgnss.ReverseGNSSEKF(cfg_d, cfg_d.scenario.nTowers);
+ekf_d_off = filter.ReverseGNSSEKF(cfg_d, cfg_d.scenario.nTowers);
 nx_off = ekf_d_off.nx;
 
 cfg_d2 = revgnss.ConfigFactory.defaultConfig();
 cfg_d2.estimation.troposphereMode = 'perTowerZwd';
 cfg_d2 = revgnss.ConfigFactory.finalizeConfig(cfg_d2);
 nT = cfg_d2.scenario.nTowers;
-ekf_d_on = revgnss.ReverseGNSSEKF(cfg_d2, nT);
+ekf_d_on = filter.ReverseGNSSEKF(cfg_d2, nT);
 nx_on = ekf_d_on.nx;
 
 assert(nx_on == nx_off + nT, ...
@@ -149,13 +149,13 @@ cfg_f.measurements.doppler.enable = false;
 try
     cfg_f = revgnss.ConfigFactory.finalizeConfig(cfg_f);
     nT_f  = cfg_f.scenario.nTowers;
-    ekf_f = revgnss.ReverseGNSSEKF(cfg_f, nT_f);
+    ekf_f = filter.ReverseGNSSEKF(cfg_f, nT_f);
     sm_f  = ekf_f.stateMap;
     % Verify both code H and carrier H have positive ZWD columns.
     % We use a synthetic setup: compute carrier H at zenith (el=pi/2).
     if isfield(sm_f,'zwdIdx') && any(sm_f.zwdIdx > 0)
-        mf_code = revgnss.MappingFunctions.troposphere(pi/2, 'simple');
-        mf_carr = revgnss.MappingFunctions.troposphere(pi/2, 'simple');
+        mf_code = models.atmosphere.MappingFunctions.troposphere(pi/2, 'simple');
+        mf_carr = models.atmosphere.MappingFunctions.troposphere(pi/2, 'simple');
         assert(mf_code > 0 && mf_carr > 0, ...
             'T-P15f FAILED: mapping factors should be positive');
         assert(sign(mf_code) == sign(mf_carr), ...
@@ -251,8 +251,8 @@ fprintf('  T-P15i: weakObservabilityNote warns when elevation range < 15 deg ...
 
 narrow_el = deg2rad([30, 35, 32, 33, 31]);  % 5 deg range
 wide_el   = deg2rad([10, 30, 50, 70, 85]);  % 75 deg range
-note_narrow = revgnss.TroposphereModel.weakObservabilityNote(narrow_el);
-note_wide   = revgnss.TroposphereModel.weakObservabilityNote(wide_el);
+note_narrow = models.atmosphere.TroposphereModel.weakObservabilityNote(narrow_el);
+note_wide   = models.atmosphere.TroposphereModel.weakObservabilityNote(wide_el);
 assert(~isempty(note_narrow), ...
     'T-P15i FAILED: should warn for narrow elevation range (5 deg)');
 assert(isempty(note_wide), ...

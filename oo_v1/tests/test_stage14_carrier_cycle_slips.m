@@ -281,7 +281,7 @@ cfg_j.effects.towerSurvey.model.enable = false;
 cfg_j.estimator.finiteHJacobian = false;
 
 try
-    [~, ~, ~, ~, cpInfo_j] = revgnss.CarrierMeasurementBuilder.buildEkfRows( ...
+    [~, ~, ~, ~, cpInfo_j] = models.measurements.CarrierMeasurementBuilder.buildEkfRows( ...
         cfg_j, ec_j, fam_j, asset_j, towers_j, twr_pairs_j, ant_pairs_j, ...
         r_ants_truth, r_ants_est, leverArms_j, x_j, stateMap_j, nx_j, ...
         errStruct_j, [0;0], [0;0], [], 0);
@@ -319,7 +319,7 @@ cfg_k.measurements.doppler.enable                      = false;
 
 try
     cfg_k = revgnss.ConfigFactory.finalizeConfig(cfg_k);
-    ekf_k = revgnss.ReverseGNSSEKF(cfg_k, 2);
+    ekf_k = filter.ReverseGNSSEKF(cfg_k, 2);
     sm_k  = ekf_k.stateMap;
 
     if isfield(sm_k,'ambiguityIdx') && sm_k.ambiguityIdx(1,1) > 0

@@ -1,28 +1,43 @@
 classdef ISLMeasurementBuilder
-    % ISLMeasurementBuilder  One-way secondary-to-primary ISL observable scaffold.
+    % ISLMeasurementBuilder  One-way secondary-to-primary ISL observables.
     %
-    % Stage 21 supports one-way code and Doppler EKF rows from a represented
-    % secondary spacecraft transmitter to the primary estimated spacecraft
-    % receiver. ISL carrier is diagnostic-only until ISL ambiguity states exist.
+    % Physically, each represented secondary spacecraft is a "beacon in space":
+    % it transmits a signal that the primary (estimated) spacecraft receives, so a
+    % one-way ISL code row is an extra pseudorange with a NON-vertical line of
+    % sight. The ground beacons all sit below the GEO primary (upward cone, huge
+    % VDOP, near-degenerate radial/clock); the ISL rows supply the missing
+    % geometry and break that degeneracy.
+    %
+    % Honesty (the aiding must be realistic, not perfect-truth):
+    %   * z carries thermal measurement noise (sigma_m), drawn per epoch/link.
+    %   * the secondary is represented by a PRODUCT (broadcast ephemeris + clock)
+    %     with a fixed-per-run product error; the model h uses the product, z uses
+    %     the true secondary, so the residual contains the product error, and the
+    %     product covariance is added to R (productAidedExternal). The achievable
+    %     primary accuracy is therefore floored by the reference-product quality.
+    %
+    % Convention (tx -> rx): u = (r_rx - r_tx)/|r_rx - r_tx|, so H(r_rx)=+u',
+    % H(b_rx)=+1 (code) and H(v_rx)=+u', H(bdot_rx)=+1 (Doppler). ISL carrier is
+    % diagnostic-only until ISL ambiguity states exist.
 
     methods (Static)
         function validateConfig(cfg)
             if ~revgnss.ISLMeasurementBuilder.isEnabled_(cfg); return; end
             nAssets = revgnss.ISLMeasurementBuilder.getNum_(cfg, {'scenario','nSpaceAssets'}, 1);
-            txIdx = revgnss.ISLMeasurementBuilder.getNum_(cfg, {'measurements','isl','transmitterAssetIndex'}, NaN);
-            rxIdx = revgnss.ISLMeasurementBuilder.getNum_(cfg, {'measurements','isl','receiverAssetIndex'}, NaN);
+            rxIdx = revgnss.ISLMeasurementBuilder.getNum_(cfg, {'measurements','isl','receiverAssetIndex'}, 1);
             if nAssets < 2
                 error('ISLMeasurementBuilder:assetCount', 'ISL requires at least two represented space assets.');
             end
-            if ~isfinite(txIdx) || txIdx < 1 || txIdx > nAssets || ~isfinite(rxIdx) || rxIdx < 1 || rxIdx > nAssets
-                error('ISLMeasurementBuilder:assetIndex', 'ISL transmitter/receiver asset indices must exist.');
-            end
             if rxIdx ~= 1
                 error('ISLMeasurementBuilder:receiverGuard', ...
-                    'Stage 21 supports ISL updates only into the primary estimated asset (receiverAssetIndex=1).');
+                    'ISL updates only into the primary estimated asset (receiverAssetIndex=1).');
             end
-            if txIdx == rxIdx
-                error('ISLMeasurementBuilder:selfLink', 'ISL transmitter and receiver assets must differ.');
+            txList = revgnss.ISLMeasurementBuilder.txList_(cfg, nAssets);
+            if isempty(txList)
+                error('ISLMeasurementBuilder:noTransmitter', 'No valid ISL transmitter asset selected.');
+            end
+            if any(txList < 2 | txList > nAssets)
+                error('ISLMeasurementBuilder:assetIndex', 'ISL transmitter asset indices must be secondary (2..N).');
             end
             if revgnss.ISLMeasurementBuilder.getBool_(cfg, {'measurements','isl','code','useInEKF'}, false) && ...
                     ~revgnss.ISLMeasurementBuilder.getBool_(cfg, {'measurements','isl','code','enable'}, false)
@@ -34,7 +49,7 @@ classdef ISLMeasurementBuilder
             end
             if revgnss.ISLMeasurementBuilder.getBool_(cfg, {'measurements','isl','carrier','useInEKF'}, false)
                 error('ISLMeasurementBuilder:carrierEkfUnsupported', ...
-                    'ISL carrier EKF use requires ISL ambiguity states; Stage 21 carrier is diagnostic-only.');
+                    'ISL carrier EKF use requires ISL ambiguity states; carrier is diagnostic-only here.');
             end
         end
 
@@ -43,45 +58,70 @@ classdef ISLMeasurementBuilder
             info = revgnss.ISLMeasurementBuilder.defaultInfo(cfg, assets);
             zAdd = []; hAdd = []; HAdd = zeros(0, nx); RAdd = zeros(0, 0);
             if ~info.enabled; return; end
-            tx = assets{info.transmitterAssetIndex};
-            rxTruth = primaryAsset;
-            [rhoTruth, rrTruth] = revgnss.ISLMeasurementBuilder.geometry_( ...
-                rxTruth.r_ecef_m, rxTruth.v_ecef_mps, tx.r_ecef_m, tx.v_ecef_mps);
-            [rhoModel, rrModel, u] = revgnss.ISLMeasurementBuilder.geometry_( ...
-                x(stateMap.r_idx), x(stateMap.v_idx), tx.r_ecef_m, tx.v_ecef_mps);
-            btx = tx.clock.getBiasMeters();
-            dtx = tx.clock.getDriftMetersPerSecond();
-            brxTruth = rxTruth.clock.getBiasMeters();
-            drxTruth = rxTruth.clock.getDriftMetersPerSecond();
+            % ISL acquisition warm-up: the primary first gets a coarse fix from the
+            % ground beacons (initial covariance shrinks to a moderate level), THEN
+            % ISL rows enter the EKF. Applying a tight ISL row to the huge initial
+            % covariance would overshoot the transient. Before warm-up the rows are
+            % still built as diagnostics (metadata/prefit) but not used in the EKF.
+            info.warmupActive = t_s < info.warmup_s;
+            if info.warmupActive
+                info.codeUseInEKF = false; info.dopplerUseInEKF = false;
+            end
+            epochIdx = 0;
+            if isfield(cfg,'simulation') && isfield(cfg.simulation,'dt_s') && cfg.simulation.dt_s > 0
+                epochIdx = round(t_s / cfg.simulation.dt_s);
+            end
+            brxTruth = primaryAsset.clock.getBiasMeters();
+            drxTruth = primaryAsset.clock.getDriftMetersPerSecond();
+            info.productIntervalIdx = revgnss.ISLMeasurementBuilder.productInterval_(info.product, t_s);
 
-            if info.codeEnabled
-                z = rhoTruth + brxTruth - btx;
-                h = rhoModel + x(stateMap.b_rx_idx) - btx;
-                cols = [stateMap.r_idx(:)' stateMap.b_rx_idx];
-                info = revgnss.ISLMeasurementBuilder.addMeta_(info, 'islCode', cols, info.codeUseInEKF);
-                if info.codeUseInEKF
-                    row = zeros(1, nx); row(stateMap.r_idx) = u'; row(stateMap.b_rx_idx) = 1;
-                    [zAdd, hAdd, HAdd, RAdd] = revgnss.ISLMeasurementBuilder.append_( ...
-                        zAdd, hAdd, HAdd, RAdd, z, h, row, info.codeSigma_m^2);
+            for txi = info.transmitterList(:)'
+                tx  = assets{txi};
+                pb  = revgnss.ISLMeasurementBuilder.productBias_(cfg, info.product, txi, info.productIntervalIdx);
+                rTxTruth = tx.r_ecef_m(:);   vTxTruth = tx.v_ecef_mps(:);
+                rTxProd  = rTxTruth + pb.pos; vTxProd = vTxTruth + pb.vel;
+                btxTruth = tx.clock.getBiasMeters();           dtxTruth = tx.clock.getDriftMetersPerSecond();
+                btxProd  = btxTruth + pb.clk;                  dtxProd  = dtxTruth + pb.clkDrift;
+
+                [rhoTruth, rrTruth]   = revgnss.ISLMeasurementBuilder.geometry_( ...
+                    primaryAsset.r_ecef_m, primaryAsset.v_ecef_mps, rTxTruth, vTxTruth);
+                [rhoModel, rrModel, u] = revgnss.ISLMeasurementBuilder.geometry_( ...
+                    x(stateMap.r_idx), x(stateMap.v_idx), rTxProd, vTxProd);
+
+                if info.codeEnabled
+                    nz = revgnss.ISLMeasurementBuilder.drawNoise_(cfg, txi, epochIdx, 1, info.codeSigma_m, 1);
+                    z  = rhoTruth + brxTruth - btxTruth + nz;
+                    h  = rhoModel + x(stateMap.b_rx_idx) - btxProd;
+                    Rii = info.codeSigma_m^2 + info.product.sigmaPos_m^2 + info.product.sigmaClock_m^2;
+                    info = revgnss.ISLMeasurementBuilder.addMeta_(info, 'islCode', txi, ...
+                        [stateMap.r_idx(:)' stateMap.b_rx_idx], info.codeUseInEKF);
+                    if info.codeUseInEKF
+                        row = zeros(1, nx); row(stateMap.r_idx) = u'; row(stateMap.b_rx_idx) = 1;
+                        [zAdd, hAdd, HAdd, RAdd] = revgnss.ISLMeasurementBuilder.append_( ...
+                            zAdd, hAdd, HAdd, RAdd, z, h, row, Rii);
+                    end
                 end
-            end
-            if info.dopplerEnabled
-                z = rrTruth + drxTruth - dtx;
-                h = rrModel + x(stateMap.bdot_rx_idx) - dtx;
-                cols = [stateMap.v_idx(:)' stateMap.bdot_rx_idx];
-                info = revgnss.ISLMeasurementBuilder.addMeta_(info, 'islDoppler', cols, info.dopplerUseInEKF);
-                if info.dopplerUseInEKF
-                    row = zeros(1, nx); row(stateMap.v_idx) = u'; row(stateMap.bdot_rx_idx) = 1;
-                    [zAdd, hAdd, HAdd, RAdd] = revgnss.ISLMeasurementBuilder.append_( ...
-                        zAdd, hAdd, HAdd, RAdd, z, h, row, info.dopplerSigma_mps^2);
+                if info.dopplerEnabled
+                    nz = revgnss.ISLMeasurementBuilder.drawNoise_(cfg, txi, epochIdx, 2, info.dopplerSigma_mps, 1);
+                    z  = rrTruth + drxTruth - dtxTruth + nz;
+                    h  = rrModel + x(stateMap.bdot_rx_idx) - dtxProd;
+                    Rii = info.dopplerSigma_mps^2 + info.product.sigmaVel_mps^2 + info.product.sigmaClockDrift_mps^2;
+                    info = revgnss.ISLMeasurementBuilder.addMeta_(info, 'islDoppler', txi, ...
+                        [stateMap.v_idx(:)' stateMap.bdot_rx_idx], info.dopplerUseInEKF);
+                    if info.dopplerUseInEKF
+                        row = zeros(1, nx); row(stateMap.v_idx) = u'; row(stateMap.bdot_rx_idx) = 1;
+                        [zAdd, hAdd, HAdd, RAdd] = revgnss.ISLMeasurementBuilder.append_( ...
+                            zAdd, hAdd, HAdd, RAdd, z, h, row, Rii);
+                    end
                 end
+                if info.carrierEnabled
+                    info = revgnss.ISLMeasurementBuilder.addMeta_(info, 'islCarrierDiagnostic', txi, [], false);
+                end
+                info.linkEvents = revgnss.ISLTimingModel.buildOneWayEvents( ...
+                    cfg, primaryAsset, tx, txi, info.receiverAssetIndex, ...
+                    revgnss.ISLMeasurementBuilder.eventRoles_(info), t_s);
             end
-            if info.carrierEnabled
-                info = revgnss.ISLMeasurementBuilder.addMeta_(info, 'islCarrierDiagnostic', [], false);
-            end
-            info.linkEvents = revgnss.ISLTimingModel.buildOneWayEvents( ...
-                cfg, rxTruth, tx, info.transmitterAssetIndex, info.receiverAssetIndex, ...
-                revgnss.ISLMeasurementBuilder.eventRoles_(info), t_s);
+
             info.zEkf = zAdd;
             info.hEkf = hAdd;
             info.ekfRowTypes = info.ekfRowTypes(:)';
@@ -91,17 +131,19 @@ classdef ISLMeasurementBuilder
         function h = predictEkfRows(cfg, primaryAsset, assets, x, stateMap, info)
             h = [];
             if isempty(info) || ~isfield(info,'ekfRowTypes') || isempty(info.ekfRowTypes); return; end
-            tx = assets{info.transmitterAssetIndex};
-            [rhoModel, rrModel] = revgnss.ISLMeasurementBuilder.geometry_( ...
-                x(stateMap.r_idx), x(stateMap.v_idx), tx.r_ecef_m, tx.v_ecef_mps);
-            btx = tx.clock.getBiasMeters();
-            dtx = tx.clock.getDriftMetersPerSecond();
+            intervalIdx = 0;
+            if isfield(info,'productIntervalIdx'); intervalIdx = info.productIntervalIdx; end
             for k = 1:numel(info.ekfRowTypes)
+                txi = info.ekfRowTx(k);
+                tx  = assets{txi};
+                pb  = revgnss.ISLMeasurementBuilder.productBias_(cfg, info.product, txi, intervalIdx);
+                [rhoModel, rrModel] = revgnss.ISLMeasurementBuilder.geometry_( ...
+                    x(stateMap.r_idx), x(stateMap.v_idx), tx.r_ecef_m(:) + pb.pos, tx.v_ecef_mps(:) + pb.vel);
                 switch info.ekfRowTypes{k}
                     case 'islCode'
-                        h(end+1,1) = rhoModel + x(stateMap.b_rx_idx) - btx; %#ok<AGROW>
+                        h(end+1,1) = rhoModel + x(stateMap.b_rx_idx) - (tx.clock.getBiasMeters() + pb.clk); %#ok<AGROW>
                     case 'islDoppler'
-                        h(end+1,1) = rrModel + x(stateMap.bdot_rx_idx) - dtx; %#ok<AGROW>
+                        h(end+1,1) = rrModel + x(stateMap.bdot_rx_idx) - (tx.clock.getDriftMetersPerSecond() + pb.clkDrift); %#ok<AGROW>
                 end
             end
         end
@@ -109,10 +151,19 @@ classdef ISLMeasurementBuilder
         function info = defaultInfo(cfg, assets)
             info = struct();
             info.enabled = revgnss.ISLMeasurementBuilder.isEnabled_(cfg);
-            info.transmitterAssetIndex = revgnss.ISLMeasurementBuilder.getNum_(cfg, {'measurements','isl','transmitterAssetIndex'}, 2);
+            nAssets = revgnss.ISLMeasurementBuilder.getNum_(cfg, {'scenario','nSpaceAssets'}, numel(assets));
             info.receiverAssetIndex = revgnss.ISLMeasurementBuilder.getNum_(cfg, {'measurements','isl','receiverAssetIndex'}, 1);
+            info.transmitterList = revgnss.ISLMeasurementBuilder.txList_(cfg, nAssets);
+            if isempty(info.transmitterList); info.transmitterList = 2; end
+            info.transmitterAssetIndex = info.transmitterList(1);   % representative (first) tx for descriptors
             info.transmitterAssetName = '';
             info.receiverAssetName = '';
+            info.transmitterNames = {};
+            for ii = 1:numel(info.transmitterList)
+                ti = info.transmitterList(ii);
+                if numel(assets) >= ti; info.transmitterNames{ii} = assets{ti}.name;
+                else; info.transmitterNames{ii} = sprintf('GEO-%d', ti); end
+            end
             if info.enabled && numel(assets) >= info.transmitterAssetIndex
                 info.transmitterAssetName = assets{info.transmitterAssetIndex}.name;
                 info.receiverAssetName = assets{info.receiverAssetIndex}.name;
@@ -125,11 +176,16 @@ classdef ISLMeasurementBuilder
             info.carrierUseInEKF = false;
             info.codeSigma_m = revgnss.ISLMeasurementBuilder.getNum_(cfg, {'measurements','isl','code','sigma_m'}, 0.5);
             info.dopplerSigma_mps = revgnss.ISLMeasurementBuilder.getNum_(cfg, {'measurements','isl','doppler','sigma_mps'}, 0.02);
+            info.warmup_s = revgnss.ISLMeasurementBuilder.getNum_(cfg, {'measurements','isl','warmup_s'}, 0);
+            info.warmupActive = false;
+            info.product = revgnss.ISLMeasurementBuilder.productCfg_(cfg);
+            info.productIntervalIdx = 0;
             info.rows = struct([]);
             info.ekfRowTypes = {};
-            info.nCodeRows = double(info.codeEnabled);
-            info.nDopplerRows = double(info.dopplerEnabled);
-            info.nCarrierDiagnosticRows = double(info.carrierEnabled);
+            info.ekfRowTx = [];
+            info.nCodeRows = double(info.codeEnabled) * numel(info.transmitterList);
+            info.nDopplerRows = double(info.dopplerEnabled) * numel(info.transmitterList);
+            info.nCarrierDiagnosticRows = double(info.carrierEnabled) * numel(info.transmitterList);
             info.nEkfRows = 0;
             info.prefitRms = NaN;
             info.linkEvents = struct([]);
@@ -144,8 +200,73 @@ classdef ISLMeasurementBuilder
             rangeRate = u' * (vRx(:) - vTx(:));
         end
 
-        function info = addMeta_(info, obsType, cols, useInEkf)
-            linkId = sprintf('link:isl:a%03d:a%03d', info.transmitterAssetIndex, info.receiverAssetIndex);
+        function list = txList_(cfg, nAssets)
+            % Transmitter selection: 'all' secondaries (2..N), or a specific index.
+            sel = revgnss.ISLMeasurementBuilder.walk_(cfg, {'measurements','isl','transmitters'}, 'all');
+            if (ischar(sel) || isstring(sel)) && strcmpi(char(sel),'all')
+                list = 2:nAssets;
+            elseif isnumeric(sel) && ~isempty(sel)
+                list = round(sel(:)');
+            else
+                list = revgnss.ISLMeasurementBuilder.getNum_(cfg, {'measurements','isl','transmitterAssetIndex'}, 2);
+            end
+            list = list(list >= 2 & list <= nAssets);
+        end
+
+        function p = productCfg_(cfg)
+            p.enable            = revgnss.ISLMeasurementBuilder.getBool_(cfg, {'measurements','isl','product','enable'}, false);
+            p.sigmaPos_m        = revgnss.ISLMeasurementBuilder.getNum_(cfg, {'measurements','isl','product','sigmaPos_m'}, 0.0);
+            p.sigmaClock_m      = revgnss.ISLMeasurementBuilder.getNum_(cfg, {'measurements','isl','product','sigmaClock_m'}, 0.0);
+            p.sigmaVel_mps      = revgnss.ISLMeasurementBuilder.getNum_(cfg, {'measurements','isl','product','sigmaVel_mps'}, 0.0);
+            p.sigmaClockDrift_mps = revgnss.ISLMeasurementBuilder.getNum_(cfg, {'measurements','isl','product','sigmaClockDrift_mps'}, 0.0);
+            p.updateInterval_s = revgnss.ISLMeasurementBuilder.getNum_(cfg, {'measurements','isl','product','updateInterval_s'}, 300);
+            if ~p.enable
+                p.sigmaPos_m = 0; p.sigmaClock_m = 0; p.sigmaVel_mps = 0; p.sigmaClockDrift_mps = 0;
+            end
+            p.seed = revgnss.ISLMeasurementBuilder.getNum_(cfg, {'simulation','seed'}, 42);
+        end
+
+        function idx = productInterval_(product, t_s)
+            % Broadcast-interval index: the product is re-issued every
+            % updateInterval_s, so its error is piecewise-constant (correlated within
+            % an interval, independent across intervals) -> it averages down over the
+            % run and the white-R model stays consistent.
+            dt = 300;
+            if isstruct(product) && isfield(product,'updateInterval_s') && product.updateInterval_s > 0
+                dt = product.updateInterval_s;
+            end
+            idx = floor(t_s / dt);
+        end
+
+        function pb = productBias_(cfg, product, txi, intervalIdx)
+            % Represented-secondary product error for one broadcast interval.
+            % Deterministic in (seed, txi, intervalIdx) so build() and predictEkfRows()
+            % see the same anchor at a given epoch. Zero when the model is disabled.
+            if nargin < 4; intervalIdx = 0; end
+            if isstruct(product); p = product; else; p = revgnss.ISLMeasurementBuilder.productCfg_(cfg); end
+            pb = struct('pos',zeros(3,1),'vel',zeros(3,1),'clk',0,'clkDrift',0);
+            if ~p.enable; return; end
+            s = revgnss.ISLMeasurementBuilder.stream_(p.seed, txi, 555, intervalIdx);
+            pb.pos      = p.sigmaPos_m        * randn(s,3,1);
+            pb.vel      = p.sigmaVel_mps      * randn(s,3,1);
+            pb.clk      = p.sigmaClock_m      * randn(s,1);
+            pb.clkDrift = p.sigmaClockDrift_mps * randn(s,1);
+        end
+
+        function n = drawNoise_(cfg, txi, epochIdx, kind, sigma, dim)
+            % Per-epoch, per-link thermal measurement noise on z (reproducible).
+            seed = revgnss.ISLMeasurementBuilder.getNum_(cfg, {'simulation','seed'}, 42);
+            s = revgnss.ISLMeasurementBuilder.stream_(seed, txi, epochIdx, kind);
+            n = sigma * randn(s, dim, 1);
+        end
+
+        function s = stream_(seed, txi, epochIdx, kind)
+            key = mod(round(seed)*100003 + round(txi)*10007 + round(epochIdx)*97 + round(kind)*7 + 12345, 2^31-1);
+            s = RandStream('mt19937ar', 'Seed', key);
+        end
+
+        function info = addMeta_(info, obsType, txi, cols, useInEkf)
+            linkId = sprintf('link:isl:a%03d:a%03d', txi, info.receiverAssetIndex);
             role = 'diagnosticOnly'; if useInEkf; role = 'physicalEKF'; end
             row = revgnss.ObservableRowDescriptor.create(0, obsType, linkId, 'ISL-L1', ...
                 NaN, 1, cols, 'ISLMeasurementBuilder one-way spacecraft-to-spacecraft row', role);
@@ -154,6 +275,7 @@ classdef ISLMeasurementBuilder
             if isempty(info.rows); info.rows = row; else; info.rows(end+1) = row; end
             if useInEkf
                 info.ekfRowTypes{end+1} = obsType;
+                info.ekfRowTx(end+1)    = txi;
                 info.nEkfRows = info.nEkfRows + 1;
             end
         end
@@ -165,15 +287,9 @@ classdef ISLMeasurementBuilder
 
         function roles = eventRoles_(info)
             roles = {};
-            if info.codeEnabled
-                roles{end+1} = revgnss.ISLMeasurementBuilder.roleName_(info.codeUseInEKF); %#ok<AGROW>
-            end
-            if info.dopplerEnabled
-                roles{end+1} = revgnss.ISLMeasurementBuilder.roleName_(info.dopplerUseInEKF); %#ok<AGROW>
-            end
-            if info.carrierEnabled
-                roles{end+1} = 'diagnosticOnly'; %#ok<AGROW>
-            end
+            if info.codeEnabled;    roles{end+1} = revgnss.ISLMeasurementBuilder.roleName_(info.codeUseInEKF); end
+            if info.dopplerEnabled; roles{end+1} = revgnss.ISLMeasurementBuilder.roleName_(info.dopplerUseInEKF); end
+            if info.carrierEnabled; roles{end+1} = 'diagnosticOnly'; end
         end
 
         function role = roleName_(useInEkf)

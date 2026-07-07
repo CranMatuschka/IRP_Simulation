@@ -94,9 +94,9 @@ function testClockExactCorrectSectionOrder(tc)
     src = tc7b4_readTex_(result.texPath);
     tc7b4_cleanup_(result);
 
-    markers = {'\section{Scenario', '\section{State Estim', ...
-               '\section{Measurement', '\section{Per-Receiver', ...
-               '\section{Oscillator', '\section{Disabled', '\section{Numerical'};
+    markers = {'\section{Goal and Scenario', '\section{State Estim', ...
+               '\section{Measurement', '\section{Oscillator', ...
+               '\section{Scientific Verdict'};
     idxs = zeros(1, numel(markers));
     for m = 1:numel(markers)
         pos = strfind(src, markers{m});
@@ -123,8 +123,8 @@ function testClockExactHasScenarioSummary(tc)
     result = revgnss.ClockExactReportBuilder.build(diag, [], [], cfg, struct());
     src = tc7b4_readTex_(result.texPath);
     tc7b4_cleanup_(result);
-    verifyTrue(tc, contains(src, 'Scenario Summary'), ...
-        '"Scenario Summary" not found in .tex');
+    verifyTrue(tc, contains(src, 'Goal and Scenario'), ...
+        '"Goal and Scenario" not found in .tex');
 end
 
 % ======================================================================
@@ -136,11 +136,11 @@ function testClockExactHasStateVectorLongtable(tc)
     result = revgnss.ClockExactReportBuilder.build(diag, [], [], cfg, struct());
     src = tc7b4_readTex_(result.texPath);
     tc7b4_cleanup_(result);
-    hasIdx = contains(src, 'Index');
-    hasSym = contains(src, 'Symbol');
+    hasGrp = contains(src, 'State group');
+    hasRng = contains(src, 'x[1:3]');
     hasLT  = contains(src, 'longtable');
-    verifyTrue(tc, hasIdx && hasSym && hasLT, ...
-        'State vector longtable (Index/Symbol/longtable) not found in .tex');
+    verifyTrue(tc, hasGrp && hasRng && hasLT, ...
+        'Grouped state vector longtable (State group/x[1:3]/longtable) not found in .tex');
 end
 
 % ======================================================================
@@ -190,29 +190,31 @@ function testClockExactHasPlotDescriptionLongtable(tc)
 end
 
 % ======================================================================
-% T10 — .tex contains "No plot generated." rows (empty plot cells)
+% T10 — refactor: no "No plot generated." placeholders; RAC label present
 % ======================================================================
-function testClockExactHasNoPlotGeneratedRows(tc)
+function testClockExactHasRacPositionLabel(tc)
     cfg = tc7b4_minimalCfg_();
     diag = tc7b4_emptyDiag_();
     result = revgnss.ClockExactReportBuilder.build(diag, [], [], cfg, struct());
     src = tc7b4_readTex_(result.texPath);
     tc7b4_cleanup_(result);
-    verifyTrue(tc, contains(src, 'No plot generated.'), ...
-        '"No plot generated." not found in .tex');
+    verifyFalse(tc, contains(src, 'No plot generated.'), ...
+        'Report still contains a "No plot generated." placeholder.');
+    verifyTrue(tc, contains(src, 'RAC'), ...
+        'RAC position-frame label not found in .tex');
 end
 
 % ======================================================================
-% T11 — .tex contains "Disabled Components" section (§6)
+% T11 — refactor: always-present DOP metrics section
 % ======================================================================
-function testClockExactHasDisabledComponentsSection(tc)
+function testClockExactHasDopMetricsSection(tc)
     cfg = tc7b4_minimalCfg_();
     diag = tc7b4_emptyDiag_();
     result = revgnss.ClockExactReportBuilder.build(diag, [], [], cfg, struct());
     src = tc7b4_readTex_(result.texPath);
     tc7b4_cleanup_(result);
-    verifyTrue(tc, contains(src, 'Disabled Components'), ...
-        '"Disabled Components" section not found in .tex');
+    verifyTrue(tc, contains(src, 'Ground-to-Space Geometry and DOP Metrics'), ...
+        'DOP metrics section not found in .tex');
 end
 
 % ======================================================================
@@ -224,10 +226,10 @@ function testClockExactHasNumericalSummaryTables(tc)
     result = revgnss.ClockExactReportBuilder.build(diag, [], [], cfg, struct());
     src = tc7b4_readTex_(result.texPath);
     tc7b4_cleanup_(result);
-    hasNS = contains(src, 'Numerical Summary');
+    hasNS = contains(src, 'Scientific Verdict');
     hasQt = contains(src, 'Quantity');
     verifyTrue(tc, hasNS && hasQt, ...
-        '"Numerical Summary" with Quantity table not found in .tex');
+        '"Scientific Verdict" with Quantity table not found in .tex');
 end
 
 % ======================================================================

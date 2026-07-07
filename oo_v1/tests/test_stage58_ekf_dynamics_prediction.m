@@ -19,7 +19,7 @@ v_geo = [0; 0; 0];  % geostationary in ECEF
 
 % T1: Frame state round trip
 try
-    [dr, dv] = revgnss.FrameTimeUtils.roundTripStateError(r_geo, v_geo, 0);
+    [dr, dv] = models.frames.FrameTimeUtils.roundTripStateError(r_geo, v_geo, 0);
     ok = dr < 1e-6 && dv < 1e-9;
     results(end+1) = makeResult('T1_frame_round_trip', ok, ...
         sprintf('dr=%.2e m  dv=%.2e m/s (tol 1e-6, 1e-9)', dr, dv));
@@ -31,7 +31,7 @@ end
 try
     cfg.estimator.dynamics.mode = 'constantVelocity';
     r0 = [7e6; 1e6; 0.5e6]; v0 = [100; -50; 10]; dt = 1.0;
-    [r1, v1, info] = revgnss.EkfDynamicsPredictor.propagateEcef(r0, v0, dt, 0, cfg);
+    [r1, v1, info] = filter.EkfDynamicsPredictor.propagateEcef(r0, v0, dt, 0, cfg);
     ok = norm(r1 - (r0 + dt*v0)) < 1e-9 && norm(v1 - v0) < 1e-12 && ...
          strcmp(info.mode, 'constantVelocity') && ~info.usedInertialPropagation;
     results(end+1) = makeResult('T2_constant_velocity', ok, ...
@@ -45,7 +45,7 @@ end
 try
     cfg.estimator.dynamics.mode = 'twoBody';
     dt = 10.0;  % 10 s propagation
-    [r1, v1, info] = revgnss.EkfDynamicsPredictor.propagateEcef(r_geo, v_geo, dt, 0, cfg);
+    [r1, v1, info] = filter.EkfDynamicsPredictor.propagateEcef(r_geo, v_geo, dt, 0, cfg);
     r1_norm = norm(r1);
     ok = all(isfinite(r1)) && all(isfinite(v1)) && ...
          r1_norm > 6.4e6 && r1_norm < 5e7 && ...  % physically plausible
@@ -61,7 +61,7 @@ end
 % T4: J2 mode
 try
     cfg.estimator.dynamics.mode = 'j2';
-    [r1j2, v1j2, info_j2] = revgnss.EkfDynamicsPredictor.propagateEcef(r_geo, v_geo, 10, 0, cfg);
+    [r1j2, v1j2, info_j2] = filter.EkfDynamicsPredictor.propagateEcef(r_geo, v_geo, 10, 0, cfg);
     ok = all(isfinite(r1j2)) && all(isfinite(v1j2)) && ...
          strcmp(info_j2.forceModel, 'j2') && info_j2.usedInertialPropagation;
     results(end+1) = makeResult('T4_j2_mode', ok, ...
@@ -76,8 +76,8 @@ try
     cfg_cv.estimator.dynamics.mode = 'constantVelocity';
     cfg_j2.estimator.dynamics.mode = 'j2';
     dt = 1.0;
-    Phi_cv = revgnss.EkfDynamicsPredictor.finiteDiffStm6(r_geo, v_geo, dt, 0, cfg_cv);
-    Phi_j2 = revgnss.EkfDynamicsPredictor.finiteDiffStm6(r_geo, v_geo, dt, 0, cfg_j2);
+    Phi_cv = filter.EkfDynamicsPredictor.finiteDiffStm6(r_geo, v_geo, dt, 0, cfg_cv);
+    Phi_j2 = filter.EkfDynamicsPredictor.finiteDiffStm6(r_geo, v_geo, dt, 0, cfg_j2);
     Phi_cv_expected = [eye(3), dt*eye(3); zeros(3), eye(3)];
     dim_ok = isequal(size(Phi_cv),[6,6]) && isequal(size(Phi_j2),[6,6]);
     cv_ok  = all(abs(Phi_cv - Phi_cv_expected) < 1e-10, 'all');
@@ -108,8 +108,8 @@ end
 % T7: No false claims
 try
     cfg_j2.estimator.dynamics.mode = 'j2';
-    [~, ~, info_j2] = revgnss.EkfDynamicsPredictor.propagateEcef(r_geo, v_geo, 10, 0, cfg_j2);
-    c = revgnss.EkfDynamicsPredictor.summaryLines(info_j2);
+    [~, ~, info_j2] = filter.EkfDynamicsPredictor.propagateEcef(r_geo, v_geo, 10, 0, cfg_j2);
+    c = filter.EkfDynamicsPredictor.summaryLines(info_j2);
     lines = strjoin(c, ' ');
     noIntFix  = ~contains(lower(lines), 'integer fix');
     noLambda  = ~contains(lower(lines), 'lambda');

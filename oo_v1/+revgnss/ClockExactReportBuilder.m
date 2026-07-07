@@ -135,7 +135,7 @@ classdef ClockExactReportBuilder
 
     end  % public static
 
-    methods (Static, Access = private)
+    methods (Static)  % (Phase 7: report toolkit callable by extracted +revgnss/+report/ sections)
 
         function cleanBuildArtifacts_(texPath, figDir)
             % cleanBuildArtifacts_  Remove LaTeX intermediates after successful compile.
@@ -210,16 +210,22 @@ classdef ClockExactReportBuilder
             paths.perSrc = CE.tryPlot_(figDir, [stem '_per_source_error.pdf'], @() ...
                 CE.plotPerSourceError_(diag, t), cfg);
 
-            % Zoom plots: last 10% of time
-            zoomFrac = 0.10;
-            paths.posErrZoom  = CE.tryPlot_(figDir, [stem '_position_error_zoom10.pdf'], @() ...
-                CE.plotSignalZoom_(diag, t, 'posErr',  zoomFrac), cfg);
-            paths.clkErrZoom  = CE.tryPlot_(figDir, [stem '_clock_error_zoom10.pdf'], @() ...
-                CE.plotSignalZoom_(diag, t, 'clkErr',  zoomFrac), cfg);
-            paths.clkDriftZoom = CE.tryPlot_(figDir, [stem '_clock_drift_zoom10.pdf'], @() ...
-                CE.plotSignalZoom_(diag, t, 'clkDrift', zoomFrac), cfg);
-            paths.attCompZoom = CE.tryPlot_(figDir, [stem '_attitude_components_zoom10.pdf'], @() ...
-                CE.plotAttZoom_(diag, t, zoomFrac), cfg);
+            % Zoom plots: last cfg.report.zoomLastSeconds seconds (fixed window, default 120 s).
+            zoomSec = 120;
+            try
+                if isfield(cfg,'report') && isfield(cfg.report,'zoomLastSeconds') && ...
+                        isnumeric(cfg.report.zoomLastSeconds) && cfg.report.zoomLastSeconds > 0
+                    zoomSec = cfg.report.zoomLastSeconds;
+                end
+            catch; end
+            paths.posErrZoom  = CE.tryPlot_(figDir, [stem '_position_error_zoomlast.pdf'], @() ...
+                CE.plotSignalZoom_(diag, t, 'posErr',  zoomSec), cfg);
+            paths.clkErrZoom  = CE.tryPlot_(figDir, [stem '_clock_error_zoomlast.pdf'], @() ...
+                CE.plotSignalZoom_(diag, t, 'clkErr',  zoomSec), cfg);
+            paths.clkDriftZoom = CE.tryPlot_(figDir, [stem '_clock_drift_zoomlast.pdf'], @() ...
+                CE.plotSignalZoom_(diag, t, 'clkDrift', zoomSec), cfg);
+            paths.attCompZoom = CE.tryPlot_(figDir, [stem '_attitude_components_zoomlast.pdf'], @() ...
+                CE.plotAttZoom_(diag, t, zoomSec), cfg);
 
             % Allan deviation (Stage 67)
             paths.allanDev = CE.tryPlot_(figDir, [stem '_allan_deviation.pdf'], @() ...
@@ -227,68 +233,86 @@ classdef ClockExactReportBuilder
         end
 
         % ................................................................
-        function fig = plotSignalZoom_(diag, t, signal, zoomFrac)
+        function fig = plotSignalZoom_(diag, t, signal, zoomSec)
+            % Zoom to the LAST zoomSec seconds (fixed window), with +/-3 sigma covariance
+            % borders overlaid (dotted). State indices per ReverseGNSSEKF.buildStateMap_:
+            % position 1:3, clock bias 13, clock drift 14.
             fig = revgnss.ClockExactReportBuilder.makeCompactFig_('');
             ax  = gca(fig);
-        
+            CE  = revgnss.ClockExactReportBuilder;
             try
                 c0 = revgnss.Constants.SPEED_OF_LIGHT_MPS;
                 ppm = 1e6;
-        
                 if isempty(t)
-                    revgnss.ClockExactReportBuilder.noDataAxes_(ax);
-                    return;
+                    CE.noDataAxes_(ax); return;
                 end
-        
-                n  = numel(t);
-                i0 = max(1, round(n * (1 - zoomFrac)));
-        
+                i0 = find(t >= t(end) - zoomSec, 1, 'first');
+                if isempty(i0); i0 = 1; end
+                tz = t(i0:end);
+                ttl = sprintf('Last %g s (dotted = \\pm3\\sigma)', zoomSec);
+
                 switch signal
                     case 'posErr'
-                        ev = diag.getPositionErrorVecs();   % [3 x N]
-                        if ~isempty(ev) && size(ev,2) == n
-                            hold(ax,'on');
-                            plot(ax, t(i0:end), ev(1,i0:end), 'r-', 'LineWidth',0.8, 'DisplayName','X');
-                            plot(ax, t(i0:end), ev(2,i0:end), 'g-', 'LineWidth',0.8, 'DisplayName','Y');
-                            plot(ax, t(i0:end), ev(3,i0:end), 'b-', 'LineWidth',0.8, 'DisplayName','Z');
-                            plot(ax, t(i0:end), sqrt(sum(ev(:,i0:end).^2,1)), ...
-                                'k-', 'LineWidth',1.0, 'DisplayName','3D');
-                            legend(ax,'show','Location','northeast','FontSize',5);
+                        ev = diag.getPositionErrorVecs();   % [3 x N] estimate - truth
+                        nAll = numel(t);
+                        rTr = []; vTr = [];
+                        try; rTr = diag.getTruthPositionVecs(); vTr = diag.getTruthVelocityVecs(); catch; end
+                        if ~isempty(ev) && size(ev,2) == nAll
+                            nrm = sqrt(sum(ev.^2,1));
+                            rac = [];
+                            if ~isempty(rTr) && ~isempty(vTr) && size(rTr,2) >= nAll && size(vTr,2) >= nAll
+                                rac = revgnss.OrbitFrame.ecefToRacGeo(ev, rTr(:,1:nAll), vTr(:,1:nAll));
+                                if all(~isfinite(rac(:))); rac = []; end
+                            end
+                            seg = i0:nAll;
+                            if ~isempty(rac)
+                                [~, unit, sc] = revgnss.PlotUnitScaler.scaleMetric(reshape(rac(:,seg),[],1), 'm');
+                                hold(ax,'on');
+                                plot(ax, tz, rac(1,seg)*sc, 'r-', 'LineWidth',0.8, 'DisplayName','radial');
+                                plot(ax, tz, rac(2,seg)*sc, 'g-', 'LineWidth',0.8, 'DisplayName','along-track');
+                                plot(ax, tz, rac(3,seg)*sc, 'b-', 'LineWidth',0.8, 'DisplayName','cross-track');
+                                legend(ax,'show','Location','northeast','FontSize',5);
+                            else
+                                [~, unit, sc] = revgnss.PlotUnitScaler.scaleMetric(nrm(seg), 'm');
+                                plot(ax, tz, nrm(seg)*sc, 'b-', 'LineWidth',0.8);
+                            end
                             xlabel(ax,'Time [s]','FontSize',7);
-                            ylabel(ax,'Position error [m]','FontSize',7);
-                            grid(ax,'on');
-                            return;
+                            ylabel(ax, revgnss.PlotUnitScaler.axisLabel('Position error', unit),'FontSize',7);
+                            title(ax, ttl,'FontSize',7); grid(ax,'on');
+                            revgnss.PlotUnitScaler.disableExponent(ax); return;
                         end
-        
                     case 'clkErr'
-                        y = diag.getClockBiasErrors() ./ c0;   % m -> s
-                        if ~isempty(y)
-                            plot(ax, t(i0:end), y(i0:end), 'r-', 'LineWidth',0.8);
+                        c = diag.getClockBiasErrors();   % metres
+                        if ~isempty(c)
+                            y = c ./ c0;   % seconds
+                            [~, unit, sc] = revgnss.PlotUnitScaler.scaleMetric(y(i0:end), 's');
+                            hold(ax,'on');
+                            plot(ax, tz, y(i0:end)*sc, 'r-', 'LineWidth',0.8);
+                            CE.overlaySigma_(ax, tz, CE.stateSigmaWin_(diag,13,sc/c0,i0), 3, 'k:');
                             xlabel(ax,'Time [s]','FontSize',7);
-                            ylabel(ax,'Clock bias error [s]','FontSize',7);
-                            grid(ax,'on');
-                            return;
+                            ylabel(ax, revgnss.PlotUnitScaler.axisLabel('Clock bias error', unit),'FontSize',7);
+                            title(ax, ttl,'FontSize',7); grid(ax,'on');
+                            revgnss.PlotUnitScaler.disableExponent(ax); return;
                         end
-        
                     case 'clkDrift'
                         y = diag.getClockDriftErrors() ./ c0 .* ppm;  % m/s -> ppm
                         if ~isempty(y)
-                            plot(ax, t(i0:end), y(i0:end), 'b-', 'LineWidth',0.8);
-                            xlabel(ax,'Time [s]','FontSize',7);
-                            ylabel(ax,'Clock drift error [ppm]','FontSize',7);
-                            grid(ax,'on');
-                            return;
+                            hold(ax,'on');
+                            plot(ax, tz, y(i0:end), 'b-', 'LineWidth',0.8);
+                            CE.overlaySigma_(ax, tz, CE.stateSigmaWin_(diag,14,ppm/c0,i0), 3, 'k:');
+                            xlabel(ax,'Time [s]','FontSize',7); ylabel(ax,'Clock drift error [ppm]','FontSize',7);
+                            title(ax, ttl,'FontSize',7); grid(ax,'on');
+                            revgnss.PlotUnitScaler.disableExponent(ax); return;
                         end
                 end
             catch
             end
-        
-            revgnss.ClockExactReportBuilder.noDataAxes_(ax);
+            CE.noDataAxes_(ax);
         end
 
         % ................................................................
-        function fig = plotAttZoom_(diag, t, zoomFrac)
-            % plotAttZoom_  Attitude component errors, zoomed to last zoomFrac.
+        function fig = plotAttZoom_(diag, t, zoomSec)
+            % plotAttZoom_  Attitude component errors, zoomed to the last zoomSec seconds.
             fig = revgnss.ClockExactReportBuilder.makeCompactFig_('');
             ax  = gca(fig);
             try
@@ -296,7 +320,7 @@ classdef ClockExactReportBuilder
                 tmpFig = revgnss.ReportRealityHelper.plotAttitudeComponents(diag, t);
                 if isgraphics(tmpFig)
                     n  = numel(t);
-                    i0 = max(1, round(n * (1-zoomFrac)));
+                    i0 = find(t >= t(end) - zoomSec, 1, 'first'); if isempty(i0); i0 = 1; end
                     ax2 = get(tmpFig,'CurrentAxes');
                     lines_ = findobj(ax2,'Type','line');
                     cmap = {'b','r','g'};
@@ -347,7 +371,13 @@ classdef ClockExactReportBuilder
 
                 % Tower clocks [m → s]
                 twr_m = revgnss.AllanDeviation.getTowerClockBiasMatrix(diag);
-                nT = size(twr_m, 2);
+                % The store carries one column per measurement row (tower repeated
+                % across receivers/signals); collapse to distinct tower time series.
+                if ~isempty(twr_m)
+                    [~, ia] = unique(twr_m', 'rows', 'stable');
+                    twr_m = twr_m(:, sort(ia));
+                end
+                nT = min(size(twr_m, 2), 8);   % cap curves on the compact plot
                 if nT > 0
                     cols_ = lines(max(nT, 1));
                     for tk = 1:nT
@@ -469,28 +499,46 @@ classdef ClockExactReportBuilder
 
         % ................................................................
         function fig = plotPositionError_(diag, t)
-            % Stage 69: show X/Y/Z ECEF components plus 3D norm.
+            % Position error in the RAC (radial / along-track / cross-track)
+            % orbital frame, estimate minus truth, with auto SI-prefix units.
             fig = revgnss.ClockExactReportBuilder.makeCompactFig_('');
             ax  = gca(fig);
+            PU  = @revgnss.PlotUnitScaler.scaleMetric;
             try
-                ev = diag.getPositionErrorVecs();  % [3 x n]
+                ev = diag.getPositionErrorVecs();  % [3 x n] estimate - truth ECEF
                 e  = diag.getPositionErrors();     % [1 x n] 3D norm
-                if ~isempty(t) && ~isempty(ev) && size(ev,2) == numel(t)
+                rTr = []; vTr = [];
+                try; rTr = diag.getTruthPositionVecs(); vTr = diag.getTruthVelocityVecs(); catch; end
+                n = numel(t);
+                haveRac = ~isempty(t) && ~isempty(ev) && size(ev,2) == n && ...
+                          ~isempty(rTr) && ~isempty(vTr) && size(rTr,2) >= n && size(vTr,2) >= n;
+                rac = [];
+                if haveRac
+                    rac = revgnss.OrbitFrame.ecefToRacGeo(ev, rTr(:,1:n), vTr(:,1:n));
+                    if all(~isfinite(rac(:))); haveRac = false; end
+                end
+                if haveRac
+                    [~, unit, sc] = PU(rac(:), 'm');
                     hold(ax,'on');
-                    plot(ax, t, ev(1,:), 'r-',  'LineWidth', 0.7, 'DisplayName', 'X');
-                    plot(ax, t, ev(2,:), 'g-',  'LineWidth', 0.7, 'DisplayName', 'Y');
-                    plot(ax, t, ev(3,:), 'b-',  'LineWidth', 0.7, 'DisplayName', 'Z');
-                    plot(ax, t, e,       'k-',  'LineWidth', 1.0, 'DisplayName', '3D');
+                    plot(ax, t, rac(1,:)*sc, 'r-', 'LineWidth', 0.8, 'DisplayName', 'radial');
+                    plot(ax, t, rac(2,:)*sc, 'g-', 'LineWidth', 0.8, 'DisplayName', 'along-track');
+                    plot(ax, t, rac(3,:)*sc, 'b-', 'LineWidth', 0.8, 'DisplayName', 'cross-track');
                     legend(ax, 'show', 'Location', 'northeast', 'FontSize', 5);
                     xlabel(ax, 'Time [s]', 'FontSize', 7);
-                    ylabel(ax, 'Error [m]', 'FontSize', 7);
+                    ylabel(ax, revgnss.PlotUnitScaler.axisLabel('Error', unit), 'FontSize', 7);
+                    title(ax, 'Position error: RAC frame (estimate - truth)', 'FontSize', 7);
                     grid(ax, 'on');
+                    revgnss.PlotUnitScaler.disableExponent(ax);
                     return;
                 elseif ~isempty(t) && ~isempty(e)
-                    plot(ax, t, e, 'b-', 'LineWidth', 0.8);
+                    % Fallback: clearly-labelled 3D norm (RAC basis unavailable).
+                    [es, unit] = PU(e, 'm');
+                    plot(ax, t, es, 'b-', 'LineWidth', 0.8);
                     xlabel(ax, 'Time [s]', 'FontSize', 7);
-                    ylabel(ax, 'Error [m]', 'FontSize', 7);
+                    ylabel(ax, revgnss.PlotUnitScaler.axisLabel('Error (3D norm)', unit), 'FontSize', 7);
+                    title(ax, 'Position error: 3D norm (RAC basis unavailable)', 'FontSize', 7);
                     grid(ax, 'on');
+                    revgnss.PlotUnitScaler.disableExponent(ax);
                     return;
                 end
             catch; end
@@ -504,10 +552,16 @@ classdef ClockExactReportBuilder
             try
                 c = diag.getClockBiasErrors();
                 if ~isempty(t) && ~isempty(c)
-                    plot(ax, t, c * 1e3, 'r-', 'LineWidth', 0.8);
+                    CE = revgnss.ClockExactReportBuilder;
+                    [cs, unit, sc] = revgnss.PlotUnitScaler.scaleMetric(c, 'm');
+                    hold(ax,'on');
+                    plot(ax, t, cs, 'r-', 'LineWidth', 0.8);
+                    CE.overlaySigma_(ax, t, CE.stateSigmaWin_(diag,13,sc,1), 3, 'k:');
                     xlabel(ax, 'Time [s]', 'FontSize',7);
-                    ylabel(ax, 'Clock error [mm]', 'FontSize',7);
+                    ylabel(ax, revgnss.PlotUnitScaler.axisLabel('Clock error', unit), 'FontSize',7);
+                    title(ax, 'Receiver clock bias error (dotted = \pm3\sigma)', 'FontSize',7);
                     grid(ax, 'on');
+                    revgnss.PlotUnitScaler.disableExponent(ax);
                     return;
                 end
             catch; end
@@ -521,10 +575,16 @@ classdef ClockExactReportBuilder
             try
                 d = diag.getClockDriftErrors();
                 if ~isempty(t) && ~isempty(d)
-                    plot(ax, t, d, 'b-', 'LineWidth', 0.8);
+                    CE = revgnss.ClockExactReportBuilder;
+                    [ds, unit, sc] = revgnss.PlotUnitScaler.scaleMetric(d, 'm/s');
+                    hold(ax,'on');
+                    plot(ax, t, ds, 'b-', 'LineWidth', 0.8);
+                    CE.overlaySigma_(ax, t, CE.stateSigmaWin_(diag,14,sc,1), 3, 'k:');
                     xlabel(ax, 'Time [s]', 'FontSize',7);
-                    ylabel(ax, 'Drift err [m/s]', 'FontSize',7);
+                    ylabel(ax, revgnss.PlotUnitScaler.axisLabel('Drift error', unit), 'FontSize',7);
+                    title(ax, 'Receiver clock drift error (dotted = \pm3\sigma)', 'FontSize',7);
                     grid(ax, 'on');
+                    revgnss.PlotUnitScaler.disableExponent(ax);
                     return;
                 end
             catch; end
@@ -618,15 +678,21 @@ classdef ClockExactReportBuilder
             ax  = gca(fig);
             try
                 M = diag.getTowerClockBiasMatrix();
+                v = [];
                 if iscell(M) && ~isempty(M) && ~isempty(M{end})
                     v = M{end};
-                    if isnumeric(v) && ~isempty(v)
-                        bar(ax, 1:numel(v), v*1e3, 0.5);
-                        xlabel(ax,'Tower index','FontSize',7);
-                        ylabel(ax,'Bias [mm]','FontSize',7);
-                        grid(ax,'on');
-                        return;
-                    end
+                elseif isnumeric(M) && ~isempty(M)
+                    % Compact store: [nRows x nEpochs]; take the last epoch and
+                    % collapse the per-row duplication to distinct tower biases.
+                    lastCol = M(:, end);
+                    v = unique(lastCol(isfinite(lastCol)), 'stable');
+                end
+                if isnumeric(v) && ~isempty(v)
+                    bar(ax, 1:numel(v), v*1e3, 0.5);
+                    xlabel(ax,'Tower index','FontSize',7);
+                    ylabel(ax,'Bias [mm]','FontSize',7);
+                    grid(ax,'on');
+                    return;
                 end
             catch; end
             revgnss.ClockExactReportBuilder.noDataAxes_(ax);
@@ -672,6 +738,30 @@ classdef ClockExactReportBuilder
                 'Interpreter','none');
         end
 
+        function s = stateSigmaWin_(diag, idx, scale, i0)
+            % stateSigmaWin_  Windowed 1-sigma (sqrt of covariance diagonal) for EKF state
+            %   row idx, scaled to the plot's units, from sample i0 to the end. Returns []
+            %   if the covariance is unavailable or too small (graceful no-band).
+            s = [];
+            try
+                d_ = diag.getData();
+                if isfield(d_,'Pdiag') && ~isempty(d_.Pdiag) && size(d_.Pdiag,1) >= idx
+                    row = sqrt(max(d_.Pdiag(idx,:), 0)) * scale;
+                    if i0 < 1; i0 = 1; end
+                    s = row(i0:end);
+                end
+            catch; end
+        end
+
+        function overlaySigma_(ax, tt, sig, k, style)
+            % overlaySigma_  Draw +/- k*sigma dotted covariance borders on ax over time tt.
+            %   Hidden from the legend; no-op if the sigma vector is unavailable/mismatched.
+            if isempty(sig) || numel(sig) ~= numel(tt) || all(~isfinite(sig)); return; end
+            hold(ax,'on');
+            plot(ax, tt,  k*sig, style, 'LineWidth',0.6, 'HandleVisibility','off');
+            plot(ax, tt, -k*sig, style, 'LineWidth',0.6, 'HandleVisibility','off');
+        end
+
         % ================================================================
         % TEX FILE WRITER
         % ================================================================
@@ -713,26 +803,25 @@ classdef ClockExactReportBuilder
             fprintf(fid, '\\begin{document}\n');
 
             % ---- Title block -------------------------------------------
-            try; stgNum = char(revgnss.ReportStatus.current().stage); catch; stgNum = '37'; end
             fprintf(fid, '\\begin{center}\n');
             fprintf(fid, '{\\Large \\textbf{Reverse-GNSS Spacecraft Multi-Observable EKF Report}}\\\\[4pt]\n');
             fprintf(fid, '{\\large Scenario: \\textbf{%s}}\\\\[4pt]\n', esc(scenarioName));
-            fprintf(fid, '{\\small Generated by \\texttt{oo\\_v1} v%s on %s \\\\ Stage %s \\\\ Commit: %s}\n', ...
-                esc(ver), esc(ts), esc(stgNum), sha);
+            fprintf(fid, '{\\small Reverse-GNSS EKF simulator \\textemdash{} validation version %s \\\\ Generated %s}\\\\[3pt]\n', ...
+                esc(ver), esc(ts));
+            fprintf(fid, ['{\\footnotesize Controlled synthetic reverse-GNSS scenario. Results are compared against the ' ...
+                'known synthetic truth and are not a real-data or PPP-grade performance claim.}\n']);
             fprintf(fid, '\\end{center}\n');
             fprintf(fid, '\\vspace{0.3cm}\n');
 
             % ---- Sections -----------------------------------------------
-            CE.writeScenarioSummary_(fid, cfg, summary, diag, nTwr, nRx, dur, dt, esc);
-            CE.writeStateEstimation_(fid, plotPaths, stem, cfg, diag, figDir);
-            CE.writeMeasurementValidation_(fid, plotPaths, stem, figDir);
-            CE.writePerReceiverDiagnostics_(fid, plotPaths, stem, figDir, nRx);
-            CE.writeOscillatorValidation_(fid, plotPaths, stem, figDir, cfg);
-            CE.writeClockObservability_(fid, diag, cfg);
-            CE.writeTxCodeBias_(fid, diag, cfg);
-            CE.writeTropZwdArchitecture_(fid, cfg);
-            CE.writeActivePhysicsConfig_(fid, cfg, summary, plotPaths, stem, figDir);
-            CE.writeNumericalSummary_(fid, cfg, summary, diag);
+            revgnss.report.scenarioSummary(fid, cfg, summary, diag, nTwr, nRx, dur, dt, esc);
+            revgnss.report.stateEstimation(fid, plotPaths, stem, cfg, diag, figDir);
+            revgnss.report.measurementValidation(fid, plotPaths, stem, figDir, diag);
+            revgnss.report.oscillatorValidation(fid, plotPaths, stem, figDir, cfg);
+            revgnss.report.txCodeBias(fid, diag, cfg);
+            revgnss.report.tropZwdArchitecture(fid, cfg);
+            revgnss.report.numericalSummary(fid, cfg, summary, diag);
+            revgnss.report.activePhysicsConfig(fid, cfg, summary, plotPaths, stem, figDir);
 
             fprintf(fid, '\\end{document}\n');
             fclose(fid);
@@ -742,241 +831,7 @@ classdef ClockExactReportBuilder
         % SECTION 1 — SCENARIO SUMMARY
         % ================================================================
 
-        function writeScenarioSummary_(fid, cfg, summary, diag, nTwr, nRx, dur, dt, esc)
-            CE = revgnss.ClockExactReportBuilder;
-
-            scenarioName = CE.getCfgStr_(cfg, {'asset','name'}, 'GEO-1');
-            codeMode = CE.getCfgStr_(cfg, {'measurements','codeMode'},   'singleFrequency');
-            carrMode = CE.getCfgStr_(cfg, {'measurements','carrierMode'}, 'diagnostic');
-            clkMode  = CE.getCfgStr_(cfg, {'estimator','towerClockMode'}, 'perfectTruth');
-            testLine = revgnss.ReportStatus.summaryLines();
-            if isempty(testLine); testLine = {'Test status: see tests/ folder.'}; end
-            testStr  = testLine{1};
-
-            fprintf(fid, '\\section{Scenario Summary}\n');
-            fprintf(fid, ['This report documents a reverse-GNSS simulation run using the oo\\_v1 ' ...
-                'MATLAB simulator. ' ...
-                'The ground segment transmits reverse-GNSS code, Doppler, and carrier observables to a GEO space receiver when enabled. ' ...
-                'The EKF estimates spacecraft position, velocity, attitude, and receiver clock states ' ...
-                'from the available observables. ' ...
-                'The run length is %.2f hours (%.0f s) with %.1f s sampling and %d ground towers, ' ...
-                '%d receiver phase centre(s). ' ...
-                'Code mode: \\texttt{%s}. Carrier mode: \\texttt{%s}. ' ...
-                'Tower clock mode: \\texttt{%s}. ' ...
-                '%s\n\n'], ...
-                dur/3600, dur, dt, nTwr, nRx, esc(codeMode), esc(carrMode), esc(clkMode), ...
-                esc(testStr));
-
-            % 1.1 Receiver Clock Architecture
-            fprintf(fid, '\\subsection{Receiver Clock Architecture Interpretation}\n');
-            fprintf(fid, ['Receiver clock bias $b_{rx}$ has a \\textbf{positive} sign ' ...
-                '(adds to pseudorange). ' ...
-                'Tower transmitter clock bias $b_{twr}$ has a \\textbf{negative} sign ' ...
-                '(subtracts from pseudorange). ' ...
-                'Troposphere delay $T$ is \\textbf{positive} for both code and carrier. ' ...
-                'Ionosphere delay $I_f$ is \\textbf{positive} for code (group delay) and ' ...
-                '\\textbf{negative} for carrier (phase advance). ' ...
-                'Carrier ambiguity $B_\\phi$ is a float value in metres (raw L1, no integer fixing).\n\n']);
-            % Clock mode / gauge summary (Stage 9: per-mode scientific narrative)
-            clockMd1  = CE.getCfgStr_(cfg, {'clock','mode'}, 'spacecraftReceiverClockOnly');
-            gaugeMd1  = CE.getCfgStr_(cfg, {'clock','gauge','mode'}, 'externalTowerCorrections');
-            refTwr1   = CE.getCfgNum_(cfg, {'clock','gauge','referenceTowerIndex'}, 1);
-            sigBias1  = CE.getCfgNum_(cfg, {'clock','gauge','sigmaBias_m'},    1e-6);
-            sigDrift1 = CE.getCfgNum_(cfg, {'clock','gauge','sigmaDrift_mps'}, 1e-9);
-            fprintf(fid, ['\\textbf{Clock architecture:} \\texttt{%s}. ' ...
-                '\\textbf{Clock gauge:} \\texttt{%s}.\n\n'], esc(clockMd1), esc(gaugeMd1));
-            if strcmp(clockMd1,'spacecraftReceiverClockOnly')
-                fprintf(fid, ['Tower clock states are not included in the EKF. ' ...
-                    'The EKF estimates the spacecraft receiver clock only. ' ...
-                    'One-way pseudorange is gauge-ambiguous: $b_{rx}$ and $b_{twr}$ cannot be ' ...
-                    'separated without an external datum or gauge constraint; here the gauge ' ...
-                    'is resolved by external tower clock corrections.\n\n']);
-            elseif strcmp(gaugeMd1,'fixReferenceTower')
-                fprintf(fid, ['\\textbf{Gauge -- fixReferenceTower (tower %d):} ' ...
-                    'The selected reference tower defines the ground clock gauge. ' ...
-                    'Its tower clock bias and drift are constrained to zero by EKF ' ...
-                    'pseudo-measurement rows ($\\sigma_{bias}=%g$\\,m, ' ...
-                    '$\\sigma_{drift}=%g$\\,m/s). ' ...
-                    'All receiver and tower clock estimates are therefore relative to ' ...
-                    'this tower timescale. ' ...
-                    'Pseudo-measurement: $z=0$, $h=\\hat{b}_{twr,ref}$, ' ...
-                    '$H_{gauge}(b_{twr,ref})=1$, $R_{gauge}=\\sigma_{bias}^2$.\n\n'], ...
-                    refTwr1, sigBias1, sigDrift1);
-            elseif strcmp(gaugeMd1,'meanGroundClockGauge')
-                fprintf(fid, ['\\textbf{Gauge -- meanGroundClockGauge:} ' ...
-                    'The mean of all estimated tower clocks defines the ground clock gauge. ' ...
-                    'The EKF inserts zero-mean pseudo-measurement rows for tower clock bias ' ...
-                    '($\\sigma_{bias}=%g$\\,m) and drift ($\\sigma_{drift}=%g$\\,m/s). ' ...
-                    'The spacecraft receiver clock is therefore estimated relative to the ' ...
-                    'mean ground-clock timescale. ' ...
-                    'Pseudo-measurement: $z=0$, $h=\\frac{1}{N}\\sum_i \\hat{b}_{twr,i}$, ' ...
-                    '$H_{gauge}(b_{twr,i})=\\frac{1}{N}$, $R_{gauge}=\\sigma_{bias}^2$.\n\n'], ...
-                    sigBias1, sigDrift1);
-            else
-                fprintf(fid, ['One-way pseudorange is gauge-ambiguous: $b_{rx}$ and $b_{twr}$ ' ...
-                    'cannot be separated without an external datum or gauge constraint. ' ...
-                    'The gauge mode specifies how this datum ambiguity is resolved.\n\n']);
-            end
-
-            % 1.2 Scenario Geometry
-            fprintf(fid, '\\subsection{Scenario Geometry and Receiver Architecture}\n');
-            fprintf(fid, ['Truth pseudorange: ' ...
-                '$P = \\|\\mathbf{r}_{sc} + \\mathbf{C}_{BI}\\mathbf{l}_{a,B} - \\mathbf{r}_{twr}\\|' ...
-                '+ b_{rx}^{true} - b_{twr}^{true} + d_{truth} + \\nu$. ' ...
-                'Estimator prediction: $\\hat{P} = \\|\\hat{\\mathbf{r}}_{sc} + \\hat{\\mathbf{C}}_{BI}' ...
-                '\\mathbf{l}_{a,B} - \\mathbf{r}_{twr}\\| + \\hat{b}_{rx} + d_{model}$. ' ...
-                'Range geometry uses ECEF positions at the receiver epoch. ' ...
-                'Optional light-time and Sagnac corrections are applied when enabled.\n\n']);
-
-            % 1.3 EKF State Vector
-            fprintf(fid, '\\subsection{EKF State Vector}\n');
-            fprintf(fid, ['The filter is an error-state EKF. The 14 base states are: ' ...
-                'position (3), velocity (3), attitude error (3), angular rate (3), ' ...
-                'receiver clock bias (1), receiver clock drift (1).\n\n']);
-            fprintf(fid, '\\begin{center}\n\\scriptsize\n');
-            fprintf(fid, ['\\begin{longtable}{@{}>{\\raggedright\\arraybackslash}p{0.055\\textwidth}' ...
-                '>{\\raggedright\\arraybackslash}p{0.175\\textwidth}' ...
-                '>{\\raggedright\\arraybackslash}p{0.295\\textwidth}' ...
-                '>{\\raggedright\\arraybackslash}p{0.070\\textwidth}' ...
-                '>{\\raggedright\\arraybackslash}p{0.270\\textwidth}@{}}\n']);
-            fprintf(fid, '\\toprule\n');
-            fprintf(fid, '\\textbf{Index} & \\textbf{Symbol} & \\textbf{Description} & \\textbf{Unit} & \\textbf{DynamicCouplingNote}\\\\\n');
-            fprintf(fid, '\\midrule\n');
-            stRows = { ...
-                '1','$\delta r_{E,x}$','ECEF X position','m','Coupled to velocity'; ...
-                '2','$\delta r_{E,y}$','ECEF Y position','m','Coupled to velocity'; ...
-                '3','$\delta r_{E,z}$','ECEF Z position','m','Coupled to velocity'; ...
-                '4','$\delta v_{E,x}$','ECEF X velocity','m/s','Affects future position'; ...
-                '5','$\delta v_{E,y}$','ECEF Y velocity','m/s','Affects future position'; ...
-                '6','$\delta v_{E,z}$','ECEF Z velocity','m/s','Affects future position'; ...
-                '7','$\delta\theta_{B,x}$','Body attitude error x','rad','Observable via lever arms'; ...
-                '8','$\delta\theta_{B,y}$','Body attitude error y','rad','Observable via lever arms'; ...
-                '9','$\delta\theta_{B,z}$','Body attitude error z','rad','Observable via lever arms'; ...
-                '10','$\delta\omega_{B,x}$','Body angular rate x','rad/s','Affects future attitude'; ...
-                '11','$\delta\omega_{B,y}$','Body angular rate y','rad/s','Affects future attitude'; ...
-                '12','$\delta\omega_{B,z}$','Body angular rate z','rad/s','Affects future attitude'; ...
-                '13','$\delta b_{rx}$','RX clock bias (POSITIVE sign)','m','Directly estimated'; ...
-                '14','$\delta\dot{b}_{rx}$','RX clock drift','m/s','Propagates to clock bias'; ...
-            };
-            for k = 1:size(stRows,1)
-                fprintf(fid, '%s & %s & %s & %s & %s\\\\\n', stRows{k,:});
-            end
-            % Extended states
-            doTwrClk = isfield(cfg,'estimator') && isfield(cfg.estimator,'estimateTowerClocks') ...
-                && cfg.estimator.estimateTowerClocks;
-            doAmb = isfield(cfg,'measurements') && isfield(cfg.measurements,'carrierMode') ...
-                && strcmp(cfg.measurements.carrierMode,'ekfFloat');
-            ambMode = CE.getCfgStr_(cfg, {'estimation','ambiguityMode'}, 'none');
-            doZwd = isfield(cfg,'estimation') && isfield(cfg.estimation,'troposphereMode') ...
-                && strcmp(cfg.estimation.troposphereMode,'perTowerZwd');
-            idx = 15;
-            if doTwrClk
-                for k = 1:nTwr
-                    fprintf(fid, '%d & $\\delta b_{\\mathrm{twr},%d}$ & Tower %d clock bias (NEGATIVE sign in meas.) & m & Estimated tower bias\\\\\n', idx, k, k);
-                    idx = idx+1;
-                    fprintf(fid, '%d & $\\delta\\dot{b}_{\\mathrm{twr},%d}$ & Tower %d clock drift & m/s & Estimated tower drift\\\\\n', idx, k, k);
-                    idx = idx+1;
-                end
-            end
-            if doAmb
-                if strcmp(ambMode,'floatPerTowerReceiverSignal')
-                    for k = 1:nTwr
-                        for ri = 1:nRx
-                            fprintf(fid, '%d & $B_{\\phi,L1,t%d,r%d}$ & L1 carrier float ambiguity, tower %d receiver %d & m & Receiver-indexed float state; no integer fixing\\\\\n', ...
-                                idx, k, ri, k, ri);
-                            idx = idx+1;
-                        end
-                    end
-                else
-                    for k = 1:nTwr
-                        fprintf(fid, '%d & $B_{\\phi,L1,t%d}$ & L1 carrier float ambiguity, tower %d & m & Tower/signal float state; no integer fixing\\\\\n', idx, k, k);
-                        idx = idx+1;
-                    end
-                end
-            end
-            if doZwd
-                for k = 1:nTwr
-                    fprintf(fid, '%d & $\\mathrm{ZWD}_{\\mathrm{twr}%d}$ & Zenith wet delay, tower %d & m & Gauss-Markov; mapped by $m_w(\\mathrm{el})$\\\\\n', idx, k, k);
-                    idx = idx+1; %#ok<NASGU>
-                end
-            end
-            fprintf(fid, '\\bottomrule\n\\end{longtable}\n\\normalsize\n\\end{center}\n');
-
-            % 1.4 Measurement Model
-            fprintf(fid, '\\subsection{Pseudorange Measurement Model and Observation Matrix}\n');
-            % Stage 78: use SignalDefinition; no hardcoded frequency constants in builder.
-            sd78_L1_ = revgnss.SignalDefinition.get('L1');
-            sd78_L2_ = revgnss.SignalDefinition.get('L2');
-            f1 = sd78_L1_.frequency_Hz;
-            f2 = sd78_L2_.frequency_Hz;
-            alpha =  f1^2 / (f1^2 - f2^2);
-            beta  = -f2^2 / (f1^2 - f2^2);
-            fprintf(fid, ['\\[\nP_f = \\rho + b_{rx} - b_{twr} + T + I_f + d_{\\rm code} + \\nu_P,' ...
-                '\\quad I_f \\geq 0 \\;(\\text{positive for code})\n\\]\n']);
-            fprintf(fid, ['\\[\n\\Phi_f = \\rho + b_{rx} - b_{twr} + T - I_f + B_\\phi + d_{\\rm phase} + \\nu_\\Phi,' ...
-                '\\quad -I_f \\;(\\text{negative for carrier})\n\\]\n']);
-            fprintf(fid, '\\[\\quad B_\\phi \\text{ is float ambiguity in metres (L1 only, no integer fixing)}\\]\n');
-            fprintf(fid, ['\\[\nP_{\\rm IF} = \\alpha P_{L1} + \\beta P_{L2},' ...
-                '\\quad \\alpha = %.6f,\\quad \\beta = %.6f\n\\]\n'], alpha, beta);
-
-            fprintf(fid, '\\begin{center}\n\\scriptsize\n');
-            fprintf(fid, ['\\begin{longtable}{@{}>{\\raggedright\\arraybackslash}p{0.273\\textwidth}' ...
-                '>{\\raggedright\\arraybackslash}p{0.273\\textwidth}' ...
-                '>{\\raggedright\\arraybackslash}p{0.273\\textwidth}@{}}\n']);
-            fprintf(fid, '\\toprule\n');
-            fprintf(fid, '\\textbf{Term} & \\textbf{Expression} & \\textbf{Meaning}\\\\\n');
-            fprintf(fid, '\\midrule\n');
-            termRows = { ...
-                'geometric range', '$\rho = \|\mathbf{r}_{sc} + \mathbf{C}_{BI}\mathbf{l}_{a,B} - \mathbf{r}_{twr}\|$', 'Phase-centre to tower range'; ...
-                'receiver clock', '$+b_{rx}$ [m] (POSITIVE sign)', 'Shared spacecraft RX clock bias'; ...
-                'tower clock', '$-b_{twr}$ [m] (NEGATIVE sign)', 'Ground transmitter clock bias'; ...
-                'troposphere', '$+T$ (code and carrier, POSITIVE)', 'Slant wet+dry delay, same sign'; ...
-                'iono code', '$+I_f$ (POSITIVE for code)', 'First-order group delay'; ...
-                'iono carrier', '$-I_f$ (NEGATIVE for carrier)', 'First-order phase advance'; ...
-                'float ambiguity', '$+B_\phi$ [m] (L1 only)', 'L1 carrier cycle ambiguity, float'; ...
-                'measurement noise', '$\nu \sim N(0, R)$', 'Code / carrier / Doppler noise'; ...
-            };
-            for k = 1:size(termRows,1)
-                fprintf(fid, '%s & %s & %s\\\\\n', termRows{k,:});
-            end
-            fprintf(fid, '\\bottomrule\n\\end{longtable}\n\\normalsize\n\\end{center}\n');
-
-            % 1.5 Starting positions
-            fprintf(fid, '\\subsection{Starting Positions}\n');
-            fprintf(fid, '\\begin{center}\n\\scriptsize\n');
-            fprintf(fid, ['\\begin{longtable}{@{}>{\\raggedright\\arraybackslash}p{0.12\\textwidth}' ...
-                '>{\\raggedright\\arraybackslash}p{0.14\\textwidth}' ...
-                '>{\\raggedright\\arraybackslash}p{0.17\\textwidth}' ...
-                '>{\\raggedright\\arraybackslash}p{0.15\\textwidth}' ...
-                '>{\\raggedright\\arraybackslash}p{0.15\\textwidth}' ...
-                '>{\\raggedright\\arraybackslash}p{0.12\\textwidth}@{}}\n']);
-            fprintf(fid, '\\toprule\n');
-            fprintf(fid, '\\textbf{Type} & \\textbf{Name} & \\textbf{Frame} & \\textbf{Coord 1} & \\textbf{Coord 2} & \\textbf{Coord 3}\\\\\n');
-            fprintf(fid, '\\midrule\n');
-            % Asset
-            rGeo = zeros(3,1);
-            try; rGeo = cfg.asset.r_ecef_m; catch; end
-            fprintf(fid, 'SpaceAsset & %s & ECEF center of mass & X %.5g m & Y %.5g m & Z %.5g m\\\\\n', ...
-                esc(scenarioName), rGeo(1), rGeo(2), rGeo(3));
-            % Towers
-            if isfield(cfg,'towers')
-                nT = min(nTwr, numel(cfg.towers));
-                for k = 1:nT
-                    tname = ''; lat_d = 0; lon_d = 0; alt_m = 0;
-                    try; tname = cfg.towers(k).name; catch; end
-                    try; lat_d = cfg.towers(k).lat_rad * 180/pi; catch; end
-                    try; lon_d = cfg.towers(k).lon_rad * 180/pi; catch; end
-                    try; alt_m = cfg.towers(k).alt_m; catch; end
-                    fprintf(fid, 'Tower & %s & Fixed geodetic & Lat %.2f deg & Lon %.2f deg & Alt %.1f m\\\\\n', ...
-                        esc(tname), lat_d, lon_d, alt_m);
-                end
-            end
-            fprintf(fid, '\\bottomrule\n\\end{longtable}\n\\normalsize\n\\end{center}\n');
-
-            % 1.6 Component Status — compact grouped multi-tables (5 categories)
-            CE.writeComponentRows_(fid, cfg, esc);
-            fprintf(fid, '\\clearpage\n');
-        end
+        % writeScenarioSummary_ extracted to +revgnss/+report/scenarioSummary.m (Phase 7).
 
 
         % ================================================================
@@ -1089,16 +944,16 @@ classdef ClockExactReportBuilder
             % Raw integer fixing status/note
             if intFixEn2
                 intFixSt = true;
-                intFixNote = sprintf('Guarded %s; fixes attempted only when arc/sigma/distance/RMS gates pass.', intFixMode2);
+                intFixNote = sprintf('Guarded %s; fixes attempted only when arc/sigma/distance/RMS gates pass.', revgnss.ReportLabel.humanize(intFixMode2));
             else
                 intFixSt = false;
-                intFixNote = 'Disabled; controlledRawCarrier fixing available, not active in this run.';
+                intFixNote = 'Disabled; guarded raw-carrier fixing available, not active in this run.';
             end
 
             % Baseline attitude AR status/note
             if baseArEn2
                 baseArSt = true;
-                baseArNote = sprintf('method=%s; requires carrier float+4rx+attitude EKF+diffAtt mode.', baseArMeth2);
+                baseArNote = sprintf('method: %s; requires carrier float, 4 receivers, attitude EKF, and differential-attitude mode.', revgnss.ReportLabel.humanize(baseArMeth2));
             else
                 baseArSt = false;
                 baseArNote = 'Not active; requires carrier float + 4rx + attitude EKF + diffAtt mode.';
@@ -1107,7 +962,7 @@ classdef ClockExactReportBuilder
             % Tower product correction status/note
             if prodEn2
                 prodSt = true;
-                prodNote = sprintf('External noisy product correction (%s).', prodMode2);
+                prodNote = sprintf('External noisy product correction (%s).', revgnss.ReportLabel.humanize(prodMode2));
             else
                 prodSt = false;
                 prodNote = 'Perfect external tower correction assumed.';
@@ -1118,7 +973,7 @@ classdef ClockExactReportBuilder
                      CE.getLogical_(cfg, {'physics','sagnac','model','enable'}, false);
             if ltEn2
                 ltSt   = true;
-                ltNote = sprintf('%s; Sagnac subsumed when iterative light-time active.', ltMode2);
+                ltNote = sprintf('%s; Sagnac subsumed when iterative light-time active.', revgnss.ReportLabel.humanize(ltMode2));
             elseif sagEn2
                 ltSt   = true;
                 ltNote = 'First-order Sagnac only (no iterative light-time).';
@@ -1129,18 +984,18 @@ classdef ClockExactReportBuilder
 
             % Pre-compute conditional notes (avoids need for ternary helper)
             if isDual2; dualNote2 = 'L1+L2; IF combination available.'; else; dualNote2 = 'L1 only.'; end
-            dopNote2    = ''; if dopEKF2; dopNote2 = sprintf('model: %s', dopMdl2); end
+            dopNote2    = ''; if dopEKF2; dopNote2 = sprintf('model: %s', revgnss.ReportLabel.humanize(dopMdl2)); end
             zwdSt2      = 'guarded'; if zwdEKF2; zwdSt2 = true; end
             zwdNote2    = 'Guarded/config-only; weak GEO observability at GEO.';
-            if zwdEKF2; zwdNote2 = sprintf('mode: %s', zwdMode2); end
+            if zwdEKF2; zwdNote2 = sprintf('mode: %s', revgnss.ReportLabel.humanize(zwdMode2)); end
             slipNote2   = '';
-            if carSlip2 && arcSep2; slipNote2 = 'modelStepCompensatedResidualJump; arc-separated float ambiguities.'; end
+            if carSlip2 && arcSep2; slipNote2 = 'model-step-compensated residual jump; arc-separated float ambiguities.'; end
             prodCovSt2  = prodCovEn2 || sharedEn2;
             prodCovN2   = 'No product covariance applied to R.';
             if prodCovSt2; prodCovN2 = 'R-inflation from product age and drift uncertainty.'; end
-            tClkNote2   = sprintf('mode: %s; gauge: %s.', clkMd2, gaugMd2);
-            attNote2    = 'No attitude states.'; if attEn2; attNote2 = sprintf('param: %s', attParam2); end
-            diffAttN2   = ''; if diffAttEn2; diffAttN2 = 'calibratedDifferentialAmbiguity active.'; end
+            tClkNote2   = sprintf('mode: %s; gauge: %s.', revgnss.ReportLabel.humanize(clkMd2), revgnss.ReportLabel.humanize(gaugMd2));
+            attNote2    = 'No attitude states.'; if attEn2; attNote2 = sprintf('parameterisation: %s', revgnss.ReportLabel.humanize(attParam2)); end
+            diffAttN2   = ''; if diffAttEn2; diffAttN2 = 'calibrated differential ambiguity active.'; end
 
             % ---- Five compact group tables (avoids single-table page overflow) ----
             gTitles = { ...
@@ -1244,203 +1099,25 @@ classdef ClockExactReportBuilder
         % SECTION 2 — STATE ESTIMATION VALIDATION
         % ================================================================
 
-        function writeStateEstimation_(fid, plotPaths, stem, cfg, diag, figDir)
-            CE = revgnss.ClockExactReportBuilder;
-            fprintf(fid, '\\section{State Estimation Validation}\n');
-            fprintf(fid, ['The plots compare EKF state estimates with truth using deterministic truth ' ...
-                'differencing. No measurement noise is injected unless the noise toggle is enabled. ' ...
-                'Position error is the 3-D Euclidean norm of the estimated-minus-true ECEF position.\n\n']);
-            fprintf(fid, CE.plotTableHeader_());
-
-            CE.writeRow_(fid, CE.figRef_(plotPaths,'posErr',figDir,stem), ...
-                'Combined EKF Local Position Error', ...
-                ['The plot compares the EKF 3D position estimate with truth. ' ...
-                 'The diagnostic is deterministic truth differencing; no stochastic noise is ' ...
-                 'injected unless the noise toggle is enabled.']);
-
-            CE.writeRow_(fid, CE.figRef_(plotPaths,'posErrZoom',figDir,stem), ...
-                'Position Error — Final 10\% Zoom', ...
-                'Position error over the final 10\% of simulation time. Confirms convergence.');
-
-            CE.writeRow_(fid, CE.figRef_(plotPaths,'clkErr',figDir,stem), ...
-                'Clock Synchronisation Error', ...
-                ['The EKF clock-bias estimation error against the covariance envelope. ' ...
-                 'The clock process follows the selected oscillator power-law noise model ' ...
-                 '(Brown-Hwang two-state). Receiver clock sign is POSITIVE.']);
-
-            CE.writeRow_(fid, CE.figRef_(plotPaths,'clkErrZoom',figDir,stem), ...
-                'Clock Bias Error — Final 10\% Zoom', ...
-                'Clock bias estimation error over the final 10\% of simulation time.');
-
-            CE.writeRow_(fid, CE.figRef_(plotPaths,'clkDrift',figDir,stem), ...
-                'Clock Drift / Fractional Frequency', ...
-                ['The clock drift state (m/s equivalent). ' ...
-                 'Fractional frequency deviation = drift / c. ' ...
-                 'Brown-Hwang two-state process noise model.']);
-
-            CE.writeRow_(fid, CE.figRef_(plotPaths,'clkDriftZoom',figDir,stem), ...
-                'Clock Drift Error — Final 10\% Zoom', ...
-                'Clock drift estimation error over the final 10\% of simulation time.');
-
-            CE.writeRow_(fid, CE.figRef_(plotPaths,'nis',figDir,stem), ...
-                'Normalised Innovation Squared', ...
-                ['NIS is a chi-square consistency diagnostic only when measurement noise is ' ...
-                 'stochastic, zero-mean, and correctly represented in R. ' ...
-                 'In deterministic validation runs NIS is a numerical conditioning diagnostic only.']);
-
-            % Attitude rows — conditional
-            doAtt = isfield(cfg,'estimator') && isfield(cfg.estimator,'estimateAttitude') ...
-                && cfg.estimator.estimateAttitude;
-            if doAtt
-                CE.writeRow_(fid, CE.figRef_(plotPaths,'attComp',figDir,stem), ...
-                    'Attitude Error Components: Roll, Pitch, Yaw', ...
-                    ['Roll, pitch, and yaw estimation errors from diagnostic truth history. ' ...
-                     'If absent, attitude history or plot export was unavailable.']);
-                CE.writeRow_(fid, CE.figRef_(plotPaths,'attNorm',figDir,stem), ...
-                    '3D Attitude Error Norm', ...
-                    'Euclidean norm of roll/pitch/yaw error in degrees.');
-                CE.writeRow_(fid, CE.figRef_(plotPaths,'attCompZoom',figDir,stem), ...
-                    'Attitude Components — Final 10\% Zoom', ...
-                    'Roll/pitch/yaw errors over the final 10\% of simulation time.');
-                CE.writeRow_(fid, CE.figRef_(plotPaths,'attSigma',figDir,stem), ...
-                    'Attitude Covariance Sigma', ...
-                    'Square-root sum of EKF Euler-angle covariance diagonal in degrees.');
-            else
-                CE.writeRow_(fid, '', ...
-                    'EKF Attitude States', ...
-                    ['Attitude estimation is not active in this run; no attitude plot is produced.']);
-            end
-
-            fprintf(fid, CE.plotTableFooter_());
-            fprintf(fid, '\\clearpage\n');
-        end
+        % writeStateEstimation_ extracted to +revgnss/+report/stateEstimation.m (Phase 7).
 
         % ================================================================
         % SECTION 3 — MEASUREMENT AND GEOMETRY VALIDATION
         % ================================================================
 
-        function writeMeasurementValidation_(fid, plotPaths, stem, figDir)
-            CE = revgnss.ClockExactReportBuilder;
-            fprintf(fid, '\\section{Measurement and Geometry Validation}\n');
-            fprintf(fid, ['Pre-fit residuals test the predicted measurement model before correction. ' ...
-                'Post-fit residuals show how much error remains after the EKF update. ' ...
-                'RMS residuals are useful diagnostics, but they are not by themselves a proof ' ...
-                'of statistical consistency. ' ...
-                'In deterministic or partly deterministic validation runs, NIS should be interpreted ' ...
-                'as a numerical conditioning and model-coupling diagnostic.\n\n']);
-            fprintf(fid, CE.plotTableHeader_());
-
-            CE.writeRow_(fid, CE.figRef_(plotPaths,'innovRMS',figDir,stem), ...
-                'Pseudorange Pre-Fit and Post-Fit Residual RMS', ...
-                ['The pre-fit innovation (before EKF correction) and post-fit residual (after update) ' ...
-                 'are plotted separately. With noise disabled this is a deterministic geometry, ' ...
-                 'clock-state coupling, and estimator convergence diagnostic.']);
-
-            CE.writeRow_(fid, CE.figRef_(plotPaths,'perSrc',figDir,stem), ...
-                'Error Source Contributions', ...
-                ['Breakdown of the raw code error into physical contributions: ' ...
-                 'code (geometric and clock residual), troposphere truth-model mismatch, ' ...
-                 'ionosphere truth-model mismatch.']);
-
-            CE.writeRow_(fid, CE.figRef_(plotPaths,'visTowers',figDir,stem), ...
-                'Tower Rows Used by the EKF', ...
-                ['The number of ground towers passing the elevation mask at each epoch. ' ...
-                 'Elevation mask applied per-tower before including in the EKF update.']);
-
-            CE.writeRow_(fid, '', ...
-                'Measurement Covariance Contribution', ...
-                ['Per-row root-variance contributions represented in the measurement covariance. ' ...
-                 'Receiver tracking noise, atmospheric residual, and tower-clock contributions ' ...
-                 'are kept separate. No plot generated in this oo\_v1 run.']);
-
-            CE.writeRow_(fid, CE.figRef_(plotPaths,'dop',figDir,stem), ...
-                'Ground-to-Space Geometry (DOP Metrics)', ...
-                ['GDOP, PDOP, TDOP are geometry-derived scaling factors computed from the ' ...
-                 'pseudorange observation matrix. Lower DOP values indicate better geometric diversity. ' ...
-                 'Tower network DOP near 1--2 is typical for GEO coverage.']);
-
-            fprintf(fid, CE.plotTableFooter_());
-            fprintf(fid, '\\clearpage\n');
-        end
+        % writeMeasurementValidation_ extracted to +revgnss/+report/measurementValidation.m (Phase 7).
 
         % ================================================================
         % SECTION 4 — PER-RECEIVER MEASUREMENT DIAGNOSTICS
         % ================================================================
 
-        function writePerReceiverDiagnostics_(fid, plotPaths, stem, figDir, nRx)
-            CE = revgnss.ClockExactReportBuilder;
-            fprintf(fid, '\\section{Per-Receiver Measurement Diagnostics}\n');
-            fprintf(fid, ['Receiver rows are generated from the enabled RX phase centres ' ...
-                'mounted on the SpaceAsset. This run has %d receiver phase centre(s). ' ...
-                'Receiver clock, hardware delays, and attitude-derived antenna offsets ' ...
-                'are included in the pseudorange model.\n\n'], nRx);
-            fprintf(fid, CE.plotTableHeader_());
-
-            CE.writeRow_(fid, '', ...
-                'Per-Receiver Pre-Fit Pseudorange Residual RMS', ...
-                ['Each curve is the tower-wise RMS pre-fit pseudorange residual for one receiver ' ...
-                 'element. No separate per-receiver diagnostic plot available in this oo\_v1 run.']);
-
-            CE.writeRow_(fid, '', ...
-                'Per-Receiver Post-Fit Pseudorange Residual RMS', ...
-                ['Each curve is the tower-wise RMS post-fit pseudorange residual after the EKF update. ' ...
-                 'No separate per-receiver diagnostic plot available in this oo\_v1 run.']);
-
-            CE.writeRow_(fid, '', ...
-                'Per-Receiver Per-Tower Residual Heatmaps', ...
-                ['Residuals by receiver and tower. ' ...
-                 'Blank samples are non-visible or unused tower/receiver links. ' ...
-                 'Not available in this oo\_v1 run.']);
-
-            CE.writeRow_(fid, '', ...
-                'Per-Receiver Pseudorange-Minus-Geometric Range', ...
-                ['Pseudorange excess over geometric range per receiver. Contains clock terms. ' ...
-                 'Not available as a standalone diagnostic in this oo\_v1 run.']);
-
-            fprintf(fid, CE.plotTableFooter_());
-            fprintf(fid, '\\clearpage\n');
-        end
+        % writePerReceiverDiagnostics_ extracted to +revgnss/+report/perReceiverDiagnostics.m (Phase 7).
 
         % ================================================================
         % SECTION 5 — OSCILLATOR STABILITY VALIDATION
         % ================================================================
 
-        function writeOscillatorValidation_(fid, plotPaths, stem, figDir, cfg)
-            CE = revgnss.ClockExactReportBuilder;
-            clkMode = CE.getCfgStr_(cfg, {'estimator','towerClockMode'}, 'perfectTruth');
-            fprintf(fid, '\\section{Oscillator Stability Validation}\n');
-            fprintf(fid, CE.plotTableHeader_());
-
-            CE.writeRow_(fid, CE.figRef_(plotPaths,'allanDev',figDir,stem), ...
-                'Oscillator Stability: Overlapping Allan Deviation', ...
-                ['Overlapping ADEV $\sigma_y(\tau)$ computed from truth clock-bias time series. ' ...
-                 'Black: asset receiver clock (Brown-Hwang two-state model). ' ...
-                 'Coloured: tower transmitter clocks (stochastic, Stage~67). ' ...
-                 'Slope $-0.5$ indicates white frequency noise; slope $+0.5$ indicates ' ...
-                 'random-walk frequency; flat region indicates frequency flicker. ' ...
-                 'No NIST-grade calibration; v1 synthetic oscillator parameters only.']);
-
-            CE.writeRow_(fid, CE.figRef_(plotPaths,'clkErr',figDir,stem), ...
-                'Receiver Clock Bias Tracking', ...
-                ['Spacecraft receiver clock bias estimation error. ' ...
-                 'Receiver clock sign is POSITIVE (adds to pseudorange). ' ...
-                 'The clock bias converges as pseudorange innovations correct the clock state.']);
-
-            CE.writeRow_(fid, CE.figRef_(plotPaths,'clkDrift',figDir,stem), ...
-                'Clock Drift / Fractional Frequency', ...
-                ['Clock drift state (m/s equivalent). Brown-Hwang two-state model. ' ...
-                 'Fractional frequency deviation = drift / c.']);
-
-            CE.writeRow_(fid, CE.figRef_(plotPaths,'twrClocks',figDir,stem), ...
-                'Tower Clock Product Validation', ...
-                ['Bar chart of per-tower clock truth bias at the final epoch. ' ...
-                 sprintf('Tower clock mode: \\texttt{%s}. ', CE.esc_(clkMode)) ...
-                 'Tower clock sign is NEGATIVE in the pseudorange model. ' ...
-                 'Zero bar means truth and model clock agree.']);
-
-            fprintf(fid, CE.plotTableFooter_());
-            fprintf(fid, '\\clearpage\n');
-        end
+        % writeOscillatorValidation_ extracted to +revgnss/+report/oscillatorValidation.m (Phase 7).
 
         % ================================================================
         % SECTION 6 — DISABLED COMPONENTS
@@ -1450,211 +1127,13 @@ classdef ClockExactReportBuilder
         % SECTION 6B — CLOCK OBSERVABILITY AND GAUGE VALIDATION
         % ================================================================
 
-        function writeClockObservability_(fid, diag, cfg)
-            CE = revgnss.ClockExactReportBuilder;
-
-            fprintf(fid, '\\section{Clock Observability and Gauge Validation}\n');
-            fprintf(fid, CE.plotTableHeader_());
-
-            gaugeMd = CE.getCfgStr_(cfg, {'clock','gauge','mode'}, 'externalTowerCorrections');
-            clkMd   = CE.getCfgStr_(cfg, {'clock','mode'}, 'spacecraftReceiverClockOnly');
-
-            % --- Background ---------------------------------------------------
-            fprintf(fid, ['\\multicolumn{2}{|p{\\linewidth}|}{\\textbf{Background.} ' ...
-                'One-way pseudorange is insensitive to \\emph{two} persistent common-mode perturbations: ' ...
-                '(a) a common bias shift added simultaneously to all clock biases, and ' ...
-                '(b) a common drift shift added simultaneously to all clock drifts. ' ...
-                'Both null vectors persist for all observation epochs regardless of tower count. ' ...
-                'The physical observability Gramian therefore has rank at most $n_{\\text{clk}}-2$. ' ...
-                'A gauge constraint (\\texttt{fixReferenceTower} or \\texttt{meanGroundClockGauge}) ' ...
-                'pins both the bias and drift of the datum tower, removing both null modes and ' ...
-                'lifting the gauged Gramian $W_{\\text{gauged}}$ to full rank $n_{\\text{clk}}$.} \\\\ \\hline\n']);
-
-            % --- Gauge mode ---------------------------------------------------
-            switch gaugeMd
-                case 'fixReferenceTower'
-                    refTwr = CE.getCfgNum_(cfg, {'clock','gauge','referenceTowerIndex'}, 1);
-                    sigB   = CE.getCfgNum_(cfg, {'clock','gauge','sigmaBias_m'}, 1e-6);
-                    sigD   = CE.getCfgNum_(cfg, {'clock','gauge','sigmaDrift_mps'}, 1e-9);
-                    gaugeStr = sprintf(['\\texttt{fixReferenceTower} (tower~%d). ' ...
-                        'EKF pseudo-measurements pin tower~%d clock bias and drift to zero ' ...
-                        'with $\\sigma_{\\rm bias}=%g$\\,m and $\\sigma_{\\rm drift}=%g$\\,m/s. ' ...
-                        'The reference tower absorbs the common-bias datum.'], ...
-                        refTwr, refTwr, sigB, sigD);
-                case 'meanGroundClockGauge'
-                    sigB   = CE.getCfgNum_(cfg, {'clock','gauge','sigmaBias_m'}, 1e-6);
-                    sigD   = CE.getCfgNum_(cfg, {'clock','gauge','sigmaDrift_mps'}, 1e-9);
-                    gaugeStr = sprintf(['\\texttt{meanGroundClockGauge}. ' ...
-                        'EKF pseudo-measurements constrain the mean of all tower clock biases ' ...
-                        'and drifts to zero ($\\sigma_{\\rm bias}=%g$\\,m, ' ...
-                        '$\\sigma_{\\rm drift}=%g$\\,m/s). ' ...
-                        'This spreads the datum symmetrically across all towers.'], sigB, sigD);
-                case 'externalTowerCorrections'
-                    % Stage 72: distinguish product-corrected from perfect/noisy.
-                    % Read mode from cfg (summary not in scope in this helper).
-                    tClkMdG_ = revgnss.TowerClockCorrectionProvider.towerClockMode(cfg);
-                    if strcmp(tClkMdG_, 'truthHistoryProductNoisy')
-                        diagInfl_ = true;  % Stage 72: diagonal per-row code-R only
-                        gaugeStr = ['\texttt{externalTowerCorrections} (product-corrected). ' ...
-                            'Tower clocks corrected by synthetic product predictions (Stage~72): ' ...
-                            'delayed/quantised product epoch, per-product deterministic noise, ' ...
-                            'linear prediction to measurement time. ' ...
-                            'Receiver clock bias/drift estimated in EKF; ' ...
-                            'tower clock states NOT estimated to avoid gauge ambiguity. ' ...
-                            'Code $R$ inflated by product $\sigma$' ...
-                            CE.yesNo_(diagInfl_, ' (diagonal per-row)', '') ...
-                            '; carrier $R$ unchanged (float ambiguity absorbs constant-per-arc bias).'];
-                    else
-                        gaugeStr = ['\texttt{externalTowerCorrections}. ' ...
-                            'Tower clock biases provided externally (truth-plus-noise); ' ...
-                            'no gauge pseudo-measurements added to the EKF. ' ...
-                            'The clock nullspace is resolved by assumption, not by constraint.'];
-                    end
-                otherwise
-                    gaugeStr = sprintf('Gauge mode: \\texttt{%s} (spacecraft receiver clock only; no tower clocks in EKF).', ...
-                        CE.esc_(gaugeMd));
-            end
-            CE.writeRow_(fid, '', 'Clock Gauge Mode', gaugeStr);
-
-            % --- Windowed Gramian results ----------------------------------
-            rankPhy  = diag.getClockObsRankPhysical();
-            rankGau  = diag.getClockObsRankGauged();
-            condPhy  = diag.getClockObsCondPhysical();
-            condGau  = diag.getClockObsCondGauged();
-            weakPhy  = diag.getClockObsWeakStatesPhysical();
-            weakGau  = diag.getClockObsWeakStatesGauged();
-
-            finPhy = rankPhy(isfinite(rankPhy));
-            finGau = rankGau(isfinite(rankGau));
-
-            if isempty(finPhy)
-                CE.writeRow_(fid, '', 'Clock Observability Gramian', ...
-                    ['Windowed Gramian not computed (fewer epochs than \\texttt{minWindowEpochs} ' ...
-                     'or clock states not in EKF).']);
-            else
-                mRkPhy = median(finPhy);
-                mRkGau = median(finGau(isfinite(finGau)));
-                mCdPhy = median(condPhy(isfinite(condPhy) & condPhy > 0));
-                mCdGau = median(condGau(isfinite(condGau) & condGau > 0));
-                mWkPhy = median(weakPhy(isfinite(weakPhy)));
-                mWkGau = median(weakGau(isfinite(weakGau)));
-
-                gramStr = sprintf(['Median physical rank~$%g$, median gauged rank~$%g$. ' ...
-                    'Median condition: physical~$%.1e$, gauged~$%.1e$. ' ...
-                    'Weak states (physical/gauged): $%g$ / $%g$.'], ...
-                    mRkPhy, mRkGau, mCdPhy, mCdGau, mWkPhy, mWkGau);
-
-                % Scientific interpretation
-                if mWkGau == 0 && mWkPhy > 0
-                    gramStr = [gramStr, ' The gauge successfully eliminates all weak clock states: ' ...
-                        'the gauged Gramian achieves full rank.'];
-                elseif mWkGau > 0
-                    gramStr = [gramStr, sprintf(' \\textbf{Warning:} %g weak state(s) remain after gauging. ', mWkGau), ...
-                        'The gauge may not fully constrain the clock nullspace over this window.'];
-                elseif mWkPhy == 0 && ~strcmp(clkMd,'includeTowerClocksInEKF')
-                    gramStr = [gramStr, ' No tower clock states in EKF: spacecraft receiver ' ...
-                        'clock is fully observable via multi-tower geometry.'];
-                end
-                CE.writeRow_(fid, '', 'Clock Observability Gramian', gramStr);
-            end
-
-            % --- NIS confirmation ----------------------------------------
-            gaugeRows = diag.getClockGaugeRowsAdded();
-            biasRes   = diag.getClockGaugeBiasResiduals();
-            finBR     = biasRes(isfinite(biasRes));
-            if ~isempty(finBR) && max(gaugeRows) > 0
-                mBR = median(abs(finBR));
-                CE.writeRow_(fid, '', 'Gauge Residuals', ...
-                    sprintf(['Median gauge bias residual~$%.2e$\\,m. ' ...
-                    'Values near zero confirm the gauge constraint is numerically effective.'], mBR));
-            end
-
-            fprintf(fid, CE.plotTableFooter_());
-            fprintf(fid, '\\clearpage\n');
-        end
+        % writeClockObservability_ extracted to +revgnss/+report/clockObservability.m (Phase 7).
 
         % ================================================================
         % SECTION 7 — TRANSMITTER CODE HARDWARE-DELAY STATES (Stage 11)
         % ================================================================
 
-        function writeTxCodeBias_(fid, diag, cfg)
-            % writeTxCodeBias_  Report section for per-tower L1 transmitter code hardware delays.
-            %
-            % Only printed when cfg.hardware.txCodeBias.enable == true.
-            % Shows gauge type, gauge residual convergence, and number of states.
-
-            CE = revgnss.ClockExactReportBuilder;
-
-            txEnable = false;
-            if isfield(cfg,'hardware') && isfield(cfg.hardware,'txCodeBias')
-                txEnable = CE.getLogical_(cfg,{'hardware','txCodeBias','enable'},false);
-            end
-            if ~txEnable; return; end
-
-            gaugeMode = CE.getCfgStr_(cfg,{'hardware','txCodeBias','gaugeMode'},'fixReferenceTower');
-            refIdx    = CE.getCfgNum_(cfg,{'hardware','txCodeBias','referenceTowerIndex'},1);
-            sigTx     = CE.getCfgNum_(cfg,{'hardware','txCodeBias','processSigma_m_per_sqrt_s'},1e-5);
-            sig0Tx    = CE.getCfgNum_(cfg,{'hardware','txCodeBias','initialSigma_m'},10.0);
-            sigGauge  = CE.getCfgNum_(cfg,{'hardware','txCodeBias','gaugeSigma_m'},1e-6);
-
-            fprintf(fid, '\\section{Transmitter Code Hardware-Delay States}\n');
-            fprintf(fid, CE.plotTableHeader_());
-
-            % --- Gauge type ---
-            switch gaugeMode
-                case 'fixReferenceTower'
-                    gaugeDesc = sprintf('fixReferenceTower (tower %d pinned to zero, $\\sigma_{\\rm gauge}=%.0e$\\,m)', ...
-                        refIdx, sigGauge);
-                case 'meanGroundDelayGauge'
-                    gaugeDesc = sprintf('meanGroundDelayGauge (mean of all tower delays = 0, $\\sigma_{\\rm gauge}=%.0e$\\,m)', ...
-                        sigGauge);
-                otherwise
-                    gaugeDesc = sprintf('%s (gauge sigma $%.0e$\\,m)', gaugeMode, sigGauge);
-            end
-            CE.writeRow_(fid, '', 'Delay gauge mode', gaugeDesc);
-
-            % --- Process model ---
-            CE.writeQuantRow_(fid, 'Initial sigma (all towers)', ...
-                sprintf('$\\sigma_0 = %.1f$\\,m', sig0Tx));
-            CE.writeQuantRow_(fid, 'Process noise', ...
-                sprintf('$\\sigma_w = %.1e$\\,m/$\\sqrt{\\rm s}$ (random walk)', sigTx));
-
-            % --- Active states ---
-            nStates = 0;
-            if ~isempty(diag) && ismethod(diag,'getNTxCodeBiasStates')
-                ns = diag.getNTxCodeBiasStates();
-                ns = ns(isfinite(ns) & ns > 0);
-                if ~isempty(ns); nStates = median(ns); end
-            end
-            CE.writeQuantRow_(fid, 'Active tx-code-bias states', ...
-                sprintf('%d (one per tower)', nStates));
-
-            % --- Gauge residuals ---
-            if ~isempty(diag) && ismethod(diag,'getTxCodeBiasGaugeResiduals')
-                res = diag.getTxCodeBiasGaugeResiduals();
-                res = res(isfinite(res));
-                if ~isempty(res)
-                    mRes = mean(abs(res));
-                    CE.writeQuantRow_(fid, 'Gauge residual |mean| (absolute)', ...
-                        sprintf('%.4f\\,m (should be $\\approx 0$ when gauge is effective)', mRes));
-                    rowsAdded = diag.getTxCodeBiasGaugeRowsAdded();
-                    mRows = mean(rowsAdded(isfinite(rowsAdded)));
-                    CE.writeQuantRow_(fid, 'Gauge rows added per epoch', ...
-                        sprintf('%.1f', mRows));
-                end
-            end
-
-            % --- Identifiability note ---
-            CE.writeRow_(fid, '', 'Identifiability constraint', ...
-                ['Transmitter code hardware delay and tower clock bias are collinear in ' ...
-                 'one-way code pseudorange ($\\partial P/\\partial d_{\\rm tx} = ' ...
-                 '\\partial P/\\partial b_{\\rm twr} = 1$). ' ...
-                 'The ConfigFactory identifiability guard prevents free estimation of both ' ...
-                 'simultaneously; a delay-datum gauge is required.']);
-
-            fprintf(fid, CE.plotTableFooter_());
-            fprintf(fid, '\\clearpage\n');
-        end
+        % writeTxCodeBias_ extracted to +revgnss/+report/txCodeBias.m (Phase 7).
 
 
 
@@ -1662,493 +1141,22 @@ classdef ClockExactReportBuilder
         % SECTION 7 — NUMERICAL SUMMARY
         % ================================================================
 
-        function writeNumericalSummary_(fid, cfg, summary, diag)
-            CE = revgnss.ClockExactReportBuilder;
-            fprintf(fid, '\\section{Numerical Summary}\n');
-            fprintf(fid, ['The final-sample values are endpoint diagnostics; do not use them alone ' ...
-                'to rank performance. Run-level statistics below cover the full record ' ...
-                'and the final window.\n\n']);
-
-            % Collect metrics
-            pos3D = CE.safeDiagScalar_(@() diag.getPositionErrors(), 'last');
-            clkM  = CE.safeDiagScalar_(@() diag.getClockBiasErrors(), 'last');
-            c_mps = 299792458.0;
-            clkPs = CE.safeCalc_(@() clkM / c_mps * 1e12);
-            pfRMS = CE.safeDiagScalar_(@() diag.getPrefitInnovationRMS(), 'last');
-            poRMS = CE.safeDiagScalar_(@() diag.getPostfitResidualRMS(), 'last');
-
-            posRMSFull = CE.safeDiagRMS_(@() diag.getPositionErrors());
-            clkRMSFull = CE.safeDiagRMS_(@() diag.getClockBiasErrors());
-
-            mxEKF = CE.safeField_(summary, 'maxEKFRows', NaN);
-            nCd   = CE.safeField_(summary, 'totalCodeRows', NaN);
-            nDp   = CE.safeField_(summary, 'totalDopplerRows', NaN);
-            nCr   = CE.safeField_(summary, 'totalCarrierRows', NaN);
-
-            % Table 1: Quantity / Value
-            fprintf(fid, '\\begin{center}\n');
-            fprintf(fid, '\\begin{tabular}{p{0.52\\textwidth}p{0.30\\textwidth}}\n');
-            fprintf(fid, '\\toprule\n');
-            fprintf(fid, '\\textbf{Quantity} & \\textbf{Value}\\\\\n');
-            fprintf(fid, '\\midrule\n');
-            CE.writeQuantRow_(fid, 'Final 3D position estimation error',        CE.fmtM_(pos3D));
-            CE.writeQuantRow_(fid, 'Final receiver clock estimation error',     CE.fmtM_(clkM));
-            CE.writeQuantRow_(fid, 'Final clock range-equivalent error (ps)',   CE.fmtPs_(clkPs));
-            CE.writeQuantRow_(fid, 'Final pre-fit pseudorange innovation RMS',  CE.fmtM_(pfRMS));
-            CE.writeQuantRow_(fid, 'Final post-fit pseudorange residual RMS',   CE.fmtM_(poRMS));
-            CE.writeQuantRow_(fid, 'Max EKF measurement rows / epoch',          CE.fmtN_(mxEKF));
-            CE.writeQuantRow_(fid, 'Total code pseudorange rows',               CE.fmtN_(nCd));
-            CE.writeQuantRow_(fid, 'Total Doppler rows',                        CE.fmtN_(nDp));
-            CE.writeQuantRow_(fid, 'Total carrier phase rows',                  CE.fmtN_(nCr));
-            % Stage 73: slip detection diagnostics
-            slipMeth73_ = CE.safeField_(summary, 'carrierSlipDetectorMethod', 'rawResidualJump');
-            nProdBnd73_ = CE.safeField_(summary, 'nCarrierProductBoundaries', NaN);
-            nProdCmp73_ = CE.safeField_(summary, 'nCarrierProductBoundariesCompensated', NaN);
-            nSlips73_   = CE.safeField_(summary, 'nConfirmedCarrierSlips', NaN);
-            nFalse73_   = CE.safeField_(summary, 'nFalseProductBoundaryResets', NaN);
-            CE.writeQuantRow_(fid, 'Carrier slip detector (Stage~73)', ...
-                CE.esc_(strrep(slipMeth73_,'_','\_')));
-            CE.writeQuantRow_(fid, 'Product epoch boundary events (Stage~73)', ...
-                sprintf('%s compensated / %s total', CE.fmtN_(nProdCmp73_), CE.fmtN_(nProdBnd73_)));
-            if isfield(summary,'nConfirmedCarrierSlips') && summary.nConfirmedCarrierSlips == 0
-                CE.writeQuantRow_(fid, 'Confirmed carrier slips (Stage~73)', ...
-                    'No confirmed slips in nominal run');
-            else
-                CE.writeQuantRow_(fid, 'Confirmed carrier slips (Stage~73)', CE.fmtN_(nSlips73_));
-            end
-            CE.writeQuantRow_(fid, 'False product-boundary resets (Stage~73)', CE.fmtN_(nFalse73_));
-            % Stage 74: shared-error covariance rows
-            covMode74_  = CE.safeField_(summary, 'covarianceMode', 'diagonalOnly');
-            cbcAppl74_  = CE.safeField_(summary, 'codeTowerClockBlockCovarianceApplied', false);
-            nBlk74_     = CE.safeField_(summary, 'nCodeClockCovarianceBlocks', 0);
-            meanBlk74_  = CE.safeField_(summary, 'meanCodeClockBlockSize', NaN);
-            maxBlk74_   = CE.safeField_(summary, 'maxCodeClockBlockSize', NaN);
-            carrPol74_  = CE.safeField_(summary, 'carrierTowerClockCovariancePolicy', 'notApplied');
-            doppPol74_  = CE.safeField_(summary, 'dopplerClockProductCovariancePolicy', 'simplifiedV1NotApplied');
-            spdOk74_    = CE.safeField_(summary, 'sharedErrorCovarianceSPD', true);
-            jit74_      = CE.safeField_(summary, 'covarianceJitterAdded', false);
-            CE.writeQuantRow_(fid, 'Covariance mode (Stage~74)', CE.esc_(strrep(covMode74_,'_','\_')));
-            if cbcAppl74_
-                CE.writeQuantRow_(fid, 'Code block covariance (Stage~74)', ...
-                    sprintf('%d blocks, mean %.0f rows, max %.0f rows', ...
-                    nBlk74_, meanBlk74_, maxBlk74_));
-            else
-                CE.writeQuantRow_(fid, 'Code block covariance (Stage~74)', 'fallback: diagonal only');
-            end
-            CE.writeQuantRow_(fid, 'Carrier $R$ policy (Stage~74)', ...
-                CE.esc_(strrep(carrPol74_,'_','\_')));
-            CE.writeQuantRow_(fid, 'Doppler $R$ policy (Stage~74/83)', ...
-                CE.esc_(strrep(doppPol74_,'_','\_')));
-            jitStr74_ = ''; if jit74_; jitStr74_ = ' (jitter added)'; end
-            CE.writeQuantRow_(fid, '$R$ symmetric PD (Stage~74)', ...
-                sprintf('%s%s', mat2str(spdOk74_), jitStr74_));
-            fprintf(fid, '\\bottomrule\n\\end{tabular}\n\\end{center}\n');
-
-            % Table 2: Metric / Full RMS / Final window
-            fprintf(fid, '\\vspace{0.25cm}\n\\begin{center}\n\\scriptsize\n');
-            fprintf(fid, '\\begin{tabular}{p{0.28\\textwidth}p{0.14\\textwidth}p{0.14\\textwidth}}\n');
-            fprintf(fid, '\\toprule\n');
-            fprintf(fid, '\\textbf{Metric} & \\textbf{Full RMS} & \\textbf{Final sample}\\\\\n');
-            fprintf(fid, '\\midrule\n');
-            fprintf(fid, '3D position error [m] & %s & %s\\\\\n', CE.fmtM_(posRMSFull), CE.fmtM_(pos3D));
-            fprintf(fid, 'Clock error [m] & %s & %s\\\\\n', CE.fmtM_(clkRMSFull), CE.fmtM_(clkM));
-            fprintf(fid, 'Pre-fit innovation RMS [m] & --- & %s\\\\\n', CE.fmtM_(pfRMS));
-            fprintf(fid, 'Post-fit residual RMS [m] & --- & %s\\\\\n', CE.fmtM_(poRMS));
-            fprintf(fid, '\\bottomrule\n\\end{tabular}\n\\end{center}\n\\normalsize\n');
-
-            % Version and test status note
-            testLines = revgnss.ReportStatus.summaryLines();
-            if ~isempty(testLines)
-                fprintf(fid, '\\vspace{0.2cm}\n\\noindent \\textit{%s}\n\n', ...
-                    CE.esc_(testLines{1}));
-            end
-            fprintf(fid, ['\\noindent \\textit{Scientific limitations (v1): ' ...
-                'tower clock correction is synthetic product-prediction (Stage 71); ' ...
-                'code $R$ uses block covariance for same-tower rows (Stage 74): ' ...
-                'shared product-clock error modelled as off-diagonal; ' ...
-                'carrier $R$ not inflated (float ambiguity absorbs constant arc bias; ' ...
-                'time-varying product error not fully modelled); ' ...
-                'Doppler clock-drift $\\sigma$ simplified v1 (no shared product-drift covariance); ' ...
-                'NIS is partially covariance-aware: carrier and Doppler product correlations remain simplified; ' ...
-                'carrier slip detection is model-step-compensated (Stage 73): product epoch steps removed from slip statistic, ' ...
-                'DiffAtt slip detection disabled per Stage 69 design (innovation gate only); ' ...
-                'no synthetic cycle-slip guarantee; v1 robustness demonstration only; ' ...
-                'baseline differential integer fixing implemented (Stage 70); ' ...
-                'no LAMBDA/MLAMBDA, no WL/NL, no carrier-IF integer fixing; ' ...
-                'Stage 75 ambiguity hardening: per-baseline classification, float-distance gate ($|\\hat{N}-N_{\\mathrm{best}}|<0.25$ cyc), ' ...
-                'ratio test tightened to 3.0, arc gate 60 epochs; ' ...
-                'GNSS-only attitude claim requires all baselines fixed with no external-reference calibration; ' ...
-                'phase bias not independently calibrated (\\texttt{notCalibratedExternalProduct}); ' ...
-                'false-fix risk classification is \\texttt{screenedNotFormal} (no LAMBDA/ILS); ' ...
-                'no real CLK product ingestion, no PPP-grade accuracy, no ANTEX/IONEX/SP3/CLK parsers. ' ...
-                'Full validation suite NOT RUN (targeted random smoke only).}\n\n']);
-        end
+        % writeNumericalSummary_ extracted to +revgnss/+report/numericalSummary.m (Phase 7).
 
         % ================================================================
         % STAGE 68: ACTIVE PHYSICS MODEL CONFIGURATION (non-stage-titled)
         % ================================================================
-        function writeTropZwdArchitecture_(fid, cfg)
-            % writeTropZwdArchitecture_  Always-present troposphere/ZWD section.
-            % Written unconditionally so tests can check for it regardless of
-            % stage64Active.  Stage 15 test requires 'Troposphere and ZWD Architecture'
-            % and 'ZWD EKF state' in the .tex file.
-            CE = revgnss.ClockExactReportBuilder;
-            zwdMode_ = 'none';
-            try; zwdMode_ = cfg.estimation.troposphereMode; catch; end
-            zwdEn_ = ~strcmp(zwdMode_,'none');
-            nZwd_ = 0;
-            try
-                if isfield(cfg.estimation,'tropoZwd')
-                    nTwrTmp_ = 5;
-                    if isfield(cfg,'scenario') && isfield(cfg.scenario,'nTowers'); nTwrTmp_ = cfg.scenario.nTowers; end
-                    nZwd_ = nTwrTmp_;
-                end
-            catch; end
-            tropTyp_ = 'simpleMapped';
-            try; tropTyp_ = cfg.errors.troposphere.modelType; catch; end
-            fprintf(fid, '\\textbf{Troposphere and ZWD Architecture}\n\n');
-            fprintf(fid, '\\begin{tabular}{p{0.38\\textwidth}p{0.52\\textwidth}}\n');
-            fprintf(fid, '\\toprule\n\\textbf{Property} & \\textbf{Status}\\\\\n\\midrule\n');
-            fprintf(fid, 'Troposphere model & \\texttt{%s} (Saastamoinen-style; no GPT3/VMF3/ERA5)\\\\\n', strrep(tropTyp_,'_','\_'));
-            fprintf(fid, 'ZWD EKF state & %s (\\texttt{%s}; %d random-walk states; one per tower)\\\\\n', ...
-                CE.yesNo_(zwdEn_,'active','inactive (none)'), strrep(zwdMode_,'_','\_'), nZwd_);
-            fprintf(fid, 'ZWD initial $\\sigma$ & ');
-            try; fprintf(fid, '%.3f m\\\\\n', cfg.estimation.tropoZwd.initialSigma_m); catch; fprintf(fid, 'default\\\\\n'); end
-            fprintf(fid, 'Mapping function & elevation-dependent (sine); same for code and carrier\\\\\n');
-            fprintf(fid, 'Iono sign convention & $+I$ code (group delay), $-I$ carrier (phase advance); $1/f^2$\\\\\n');
-            fprintf(fid, '\\bottomrule\n\\end{tabular}\n\n\\vspace{6pt}\n');
-        end
+        % writeTropZwdArchitecture_ extracted to +revgnss/+report/tropZwdArchitecture.m (Phase 7).
 
-        function writeActivePhysicsConfig_(fid, cfg, summary, plotPaths, stem, figDir)
-            CE = revgnss.ClockExactReportBuilder;
-            if ~isfield(summary,'stage64Active') || ~summary.stage64Active; return; end
-            fprintf(fid, '\\clearpage\n');
-            fprintf(fid, '\\section{Simulation Physics and Configuration}\n');
-            fprintf(fid, ['\\textit{Controlled, internally consistent MATLAB reverse-GNSS EKF simulation: ' ...
-                'one spacecraft estimated from one-way ground-tower uplinks. ' ...
-                'NOT operational, NOT PPP-grade, NOT mission-qualified, NOT real-data GNSS processor.}\n\n']);
-            fprintf(fid, '\\begin{center}\\small\n');
-
-            % ---- 1. Scenario topology ---
-            fprintf(fid, '\\textbf{Scenario topology}\n\n');
-            fprintf(fid, '\\begin{tabular}{p{0.38\\textwidth}p{0.52\\textwidth}}\n');
-            fprintf(fid, '\\toprule\n\\textbf{Property} & \\textbf{Value}\\\\\n\\midrule\n');
-            nSA_ = 1; if isfield(summary,'stage66NSpaceAssets'); nSA_ = summary.stage66NSpaceAssets; end
-            fprintf(fid, 'nSpaceAssets & %d (single estimated spacecraft)\\\\\n', nSA_);
-            oc_ = 'GEO'; if isfield(summary,'stage66OrbitClass'); oc_ = summary.stage66OrbitClass; end
-            fprintf(fid, 'Orbit class & \\texttt{%s} (GEO equatorial, 35786~km)\\\\\n', oc_);
-            nTwr_ = 0; if isfield(summary,'nTowers'); nTwr_ = summary.nTowers; end
-            fprintf(fid, 'nTowers & %d (Earth transmitters; one-way tower-to-spacecraft)\\\\\n', nTwr_);
-            nRx_ = 4; if isfield(summary,'nReceivers'); nRx_ = summary.nReceivers; end
-            fprintf(fid, 'nReceivers & %d (spacecraft phase-centre antennas)\\\\\n', nRx_);
-            fprintf(fid, 'Link direction & one-way uplink only (no two-way, no relay, no transponder)\\\\\n');
-            islDis_ = true; if isfield(summary,'stage66IslDisabled'); islDis_ = summary.stage66IslDisabled; end
-            fprintf(fid, 'ISL & %s\\\\\n', CE.yesNo_(islDis_,'disabled','ACTIVE (unexpected)'));
-            twDis_ = true; if isfield(summary,'stage66TwstftDisabled'); twDis_ = summary.stage66TwstftDisabled; end
-            fprintf(fid, 'TWSTFT & %s\\\\\n', CE.yesNo_(twDis_,'disabled','ACTIVE (unexpected)'));
-            twoWDis_ = true; if isfield(summary,'stage66TwoWayDisabled'); twoWDis_ = summary.stage66TwoWayDisabled; end
-            fprintf(fid, 'Two-way / multi-asset & %s\\\\\n', CE.yesNo_(twoWDis_,'disabled','ACTIVE (unexpected)'));
-            fprintf(fid, '\\bottomrule\n\\end{tabular}\n\n\\vspace{6pt}\n');
-
-            % ---- 2. Measurement model ---
-            fprintf(fid, '\\textbf{Measurement model (one-way; clock sign: receiver $-$ transmitter)}\n\n');
-            fprintf(fid, '\\begin{tabular}{p{0.38\\textwidth}p{0.52\\textwidth}}\n');
-            fprintf(fid, '\\toprule\n\\textbf{Observable} & \\textbf{Model}\\\\\n\\midrule\n');
-            fprintf(fid, 'Code & $z_P = \\rho + c(\\delta t_{\\rm rx}-\\delta t_{\\rm tx}) + T + I_{\\rm code} + d + \\varepsilon$\\\\\n');
-            fprintf(fid, 'Carrier & $z_L = \\rho + c(\\delta t_{\\rm rx}-\\delta t_{\\rm tx}) + T - I_{\\rm carr} + \\lambda N + d_{\\phi} + \\varepsilon$\\\\\n');
-            fprintf(fid, 'Doppler (v1) & $z_D = \\dot{\\rho} + c(\\dot{\\delta t}_{\\rm rx}-\\dot{\\delta t}_{\\rm tx}) + \\varepsilon$ (simplified LOS rate)\\\\\n');
-            fprintf(fid, 'Iono sign & code: $+I_{\\rm L1}(f_p/f)^2$ (group delay); carrier: $-I_{\\rm L1}(f_p/f)^2$ (phase advance)\\\\\n');
-            fprintf(fid, 'IF covariance & $\\mathrm{Var}(z_{\\rm IF})=\\alpha^2 V_{L1}+\\beta^2 V_{L2}$; $\\mathrm{Cov}(L_1,L_2)=0$ assumed\\\\\n');
-            fprintf(fid, 'Ambiguity & float metres; no integer fixing; no LAMBDA/MLAMBDA/WL/NL\\\\\n');
-            fprintf(fid, '\\bottomrule\n\\end{tabular}\n\n\\vspace{6pt}\n');
-
-            % ---- 3. Atmosphere, antenna, and bias ---
-            fprintf(fid, '\\textbf{Atmosphere, antenna, and bias corrections}\n\n');
-            fprintf(fid, '\\begin{tabular}{p{0.38\\textwidth}p{0.52\\textwidth}}\n');
-            fprintf(fid, '\\toprule\n\\textbf{Effect} & \\textbf{Status}\\\\\n\\midrule\n');
-            tropTr_ = false; if isfield(summary,'stage68TropTruthEn'); tropTr_ = summary.stage68TropTruthEn; end
-            tropMd_ = false; if isfield(summary,'stage68TropModelEn'); tropMd_ = summary.stage68TropModelEn; end
-            tropTyp_ = 'simpleMapped'; if isfield(summary,'stage68TropModelType'); tropTyp_ = summary.stage68TropModelType; end
-            fprintf(fid, 'Troposphere & truth~%s, model~%s (\\texttt{%s}; Saastamoinen-style mapping; synthetic, no GPT3/VMF3)\\\\\n', ...
-                CE.yesNo_(tropTr_,'on','off'), CE.yesNo_(tropMd_,'on','off'), strrep(tropTyp_,'_','\_'));
-            ionoTr_ = false; if isfield(summary,'stage68IonoTruthEn'); ionoTr_ = summary.stage68IonoTruthEn; end
-            ionoMd_ = false; if isfield(summary,'stage68IonoModelEn'); ionoMd_ = summary.stage68IonoModelEn; end
-            ionoTyp_ = 'simpleMapped'; if isfield(summary,'stage68IonoModelType'); ionoTyp_ = summary.stage68IonoModelType; end
-            fprintf(fid, 'Ionosphere & truth~%s, model~%s (\\texttt{%s}; $1/f^2$ dispersion; synthetic, no Klobuchar/IONEX)\\\\\n', ...
-                CE.yesNo_(ionoTr_,'on','off'), CE.yesNo_(ionoMd_,'on','off'), strrep(ionoTyp_,'_','\_'));
-            sagEn_ = false; if isfield(summary,'stage68SagnacEn'); sagEn_ = summary.stage68SagnacEn; end
-            fprintf(fid, 'Sagnac / light-time & %s (first-order; no relativistic rate)\\\\\n', CE.yesNo_(sagEn_,'enabled','disabled'));
-            pcoEn_ = false; if isfield(summary,'stage68PcoEn'); pcoEn_ = summary.stage68PcoEn; end
-            fprintf(fid, 'Antenna PCO & %s (synthetic calibrated constants; no ANTEX)\\\\\n', CE.yesNo_(pcoEn_,'enabled','disabled (unexpected)'));
-            pcvEn_ = false; if isfield(summary,'stage68PcvEn'); pcvEn_ = summary.stage68PcvEn; end
-            fprintf(fid, 'Antenna PCV & %s (none by default; no ANTEX)\\\\\n', CE.yesNo_(pcvEn_,'enabled','disabled'));
-            hwEn_ = false; if isfield(summary,'stage68HwDelayEn'); hwEn_ = summary.stage68HwDelayEn; end
-            fprintf(fid, 'Hardware bias & %s (synthetic; no calibrated DCB/phase-bias products)\\\\\n', CE.yesNo_(hwEn_,'enabled','disabled'));
-            mpEn_ = false; if isfield(summary,'stage68MultipathEn'); mpEn_ = summary.stage68MultipathEn; end
-            fprintf(fid, 'Multipath & %s\\\\\n', CE.yesNo_(mpEn_,'enabled (synthetic)','disabled'));
-            fprintf(fid, '\\bottomrule\n\\end{tabular}\n\n\\vspace{6pt}\n');
-
-            % ---- 4. Attitude ---
-            fprintf(fid, '\\textbf{Attitude determination}\n\n');
-            fprintf(fid, '\\begin{tabular}{p{0.38\\textwidth}p{0.52\\textwidth}}\n');
-            fprintf(fid, '\\toprule\n\\textbf{Property} & \\textbf{Value}\\\\\n\\midrule\n');
-            attPrim_ = 'carrierLeverArmQuaternionEkf';
-            if isfield(summary,'stage67PrimaryAttMode'); attPrim_ = summary.stage67PrimaryAttMode; end
-            fprintf(fid, 'Primary estimator & \\texttt{%s}\\\\\n', strrep(attPrim_,'_','\_'));
-            fprintf(fid, 'EKF type & nominal $q$ + error-state $\\delta\\theta$; Joseph posterior reset\\\\\n');
-            attInit_ = 'coarseBaselineIntegerSearch';
-            if isfield(summary,'stage67AttInitMode'); attInit_ = summary.stage67AttInitMode; end
-            fprintf(fid, 'Initializer & \\texttt{%s} (optional; not primary estimator)\\\\\n', strrep(attInit_,'_','\_'));
-            attCar_ = 'calibratedDifferentialAmbiguity';
-            if isfield(summary,'stage67AttCarrierMode'); attCar_ = summary.stage67AttCarrierMode; end
-            fprintf(fid, 'Carrier tracking & \\texttt{%s}\\\\\n', strrep(attCar_,'_','\_'));
-            % Stage 70/75: baseline integer fix status + GNSS-only claim
-            arAttempted_ = false; arAccepted_ = false; arClass_ = 'notAttempted';
-            arExtSrc_ = true; arExtSrch_ = false;
-            if isfield(summary,'baselineIntegerFixAttempted'); arAttempted_ = summary.baselineIntegerFixAttempted; end
-            if isfield(summary,'baselineIntegerFixAccepted');  arAccepted_  = summary.baselineIntegerFixAccepted;  end
-            % Stage 75 classification takes precedence over Stage 70 if available
-            arClass_ = CE.safeField_(summary,'baselineArClassification', ...
-                       CE.safeField_(summary,'baselineIntegerFixClassification','notAttempted'));
-            if isfield(summary,'externalReferenceUsedForCalibration'); arExtSrc_ = summary.externalReferenceUsedForCalibration; end
-            if isfield(summary,'externalReferenceUsedAsSearchCenter'); arExtSrch_ = summary.externalReferenceUsedAsSearchCenter; end
-            nFix_ = CE.safeField_(summary,'nBaselineArFixed', ...
-                    CE.safeField_(summary,'nBaselineIntegerFixed',0));
-            nRej_ = CE.safeField_(summary,'nBaselineIntegerRejected',0);
-            nUsed75_ = CE.safeField_(summary,'nBaselineArUsedInEkf', nFix_);
-            nRejArc75_ = CE.safeField_(summary,'nBaselineArRejectedArc', 0);
-            nFloat75_  = CE.safeField_(summary,'nBaselineArFloatExternal', 0);
-            gnssOnly75_ = CE.safeField_(summary,'baselineArGnssOnlyClaim', false);
-            falseFix75_ = CE.safeField_(summary,'baselineArFalseFixClassification','screenedNotFormal');
-            phaseBias75_ = CE.safeField_(summary,'baselineArPhaseBiasStatus','notCalibratedExternalProduct');
-            policy75_    = CE.safeField_(summary,'baselineArPartialPolicy','mixedFixedFloat');
-            % Stage 76: signal and dimension fields
-            sigNames76_  = CE.safeField_(summary,'signalNames',{'L1'});
-            % Stage 78: use SignalDefinition for default; no hardcoded constant.
-            sigFreqs76_  = CE.safeField_(summary,'signalFrequenciesHz', ...
-                [revgnss.SignalDefinition.get('L1').frequency_Hz]);
-            sigMask76_   = CE.safeField_(summary,'signalEnabledMask',[true]);
-            sigMode76_   = CE.safeField_(summary,'signalMode','L1');
-            arFreqEn76_  = CE.safeField_(summary,'attitudeArEnabledByFrequency',[true false]);
-            arMode76_    = CE.safeField_(summary,'attitudeArMode','rawL1Only');
-            wlEn76_      = CE.safeField_(summary,'wideLaneScreeningEnabled',false);
-            nDual76_     = CE.safeField_(summary,'nBaselineArFixedDualFrequency',0);
-            nL1Only76_   = CE.safeField_(summary,'nBaselineArFixedL1Only',0);
-            nTow76_      = CE.safeField_(summary,'nTowers',5);
-            nRx76_       = CE.safeField_(summary,'nReceivers',4);
-            nActBsl76_   = CE.safeField_(summary,'nActiveDiffAttBaselines',nTow76_*(nRx76_-1));
-            carrIfFix76_ = false;  % never true in v1
-            dIono76_     = CE.safeField_(summary,'differentialIonosphereInBaselineAr','neglectedShortBaselineV1');
-            multiAS76_   = CE.safeField_(summary,'multiAssetSupported',false);
-            % Signal summary row
-            sigFreqStr_ = strjoin(arrayfun(@(f) sprintf('%.2f MHz', f/1e6), sigFreqs76_, 'UniformOutput', false), ', ');
-            sigMaskStr_ = mat2str(sigMask76_);
-            fprintf(fid, 'Signal names & \\texttt{%s} (%s); enabled mask: %s\\\\\n', ...
-                strjoin(sigNames76_,'+'), sigFreqStr_, sigMaskStr_);
-            fprintf(fid, 'Signal mode & \\texttt{%s}; AR by-freq: %s; WL screening: %s\\\\\n', ...
-                sigMode76_, mat2str(arFreqEn76_), CE.yesNo_(wlEn76_,'enabled','disabled'));
-            fprintf(fid, 'Topology (Stage~76) & %d towers $\\times$ %d receivers = %d active DiffAtt baselines\\\\\n', ...
-                nTow76_, nRx76_, nActBsl76_);
-            fprintf(fid, 'Multi-asset & supported: %s; requested: %s\\\\\n', ...
-                CE.yesNo_(multiAS76_,'true','false'), ...
-                CE.yesNo_(CE.safeField_(summary,'multiAssetRequested',false),'true','false'));
-            if arAttempted_ && arAccepted_
-                fprintf(fid, 'Baseline $\\Delta N$ integer fix & \\texttt{%s} (%d fixed: %d dual, %d L1-only; float: %d; arc-rej: %d; EKF: %d)\\\\\n', ...
-                    strrep(arClass_,'_','\_'), nFix_, nDual76_, nL1Only76_, nFloat75_, nRejArc75_, nUsed75_);
-                fprintf(fid, 'AR mode (Stage~76) & \\texttt{%s}\\\\\n', strrep(arMode76_,'_','\_'));
-                fprintf(fid, 'Partial-fix policy (Stage~75) & \\texttt{%s}\\\\\n', strrep(policy75_,'_','\_'));
-                gnssClaimStr_ = CE.yesNo_(gnssOnly75_, ...
-                    'true (all baselines fixed; no extRef calibration)', ...
-                    'false (partial fix or extRef calibration used)');
-                fprintf(fid, 'GNSS-only attitude claim (Stage~75) & %s\\\\\n', gnssClaimStr_);
-                fprintf(fid, 'False-fix classification (Stage~75) & \\texttt{%s}\\\\\n', strrep(falseFix75_,'_','\_'));
-            elseif arAttempted_
-                fprintf(fid, 'Baseline $\\Delta N$ integer fix & \\texttt{%s} (0 fixed; fallback to float calibration)\\\\\n', ...
-                    strrep(arClass_,'_','\_'));
-                fprintf(fid, 'GNSS-only attitude claim (Stage~75) & false (integer fix failed; differential tracking only)\\\\\n');
-            else
-                fprintf(fid, 'Baseline $\\Delta N$ integer fix & not attempted (AR disabled)\\\\\n');
-                fprintf(fid, 'GNSS-only attitude claim (Stage~75) & false (differential carrier = relative only)\\\\\n');
-            end
-            fprintf(fid, 'Phase-bias status & \\texttt{%s}\\\\\n', strrep(phaseBias75_,'_','\_'));
-            fprintf(fid, 'Carrier-IF integer fixing & %s (explicitly unsupported in v1)\\\\\n', CE.yesNo_(carrIfFix76_,'true','false'));
-            fprintf(fid, 'Differential iono in baseline AR & \\texttt{%s}\\\\\n', strrep(dIono76_,'_','\_'));
-            % Stage 79: final central configuration lock rows
-            sigMaskCfg79_ = CE.safeField_(summary,'canonicalSignalEnabledMask',[true]);
-            slipThr79_    = CE.safeField_(summary,'canonicalSlipThreshold_m',0.1);
-            audit79_      = CE.safeField_(summary,'centralConfigAuditStatus','unknown');
-            fprintf(fid, 'Config lock (Stage~79) & status: %s; signal mask: %s; slip thr: %.2f\\,m\\\\\n', ...
-                audit79_, mat2str(logical(sigMaskCfg79_)), slipThr79_);
-            freqAudit79_ = CE.safeField_(summary,'frequencyHardcodeAuditStatus','unknown');
-            sigOwn79_    = CE.safeField_(summary,'signalConfigOwner','cfg.signals.names+cfg.signals.enabledMask');
-            nWarn79_     = CE.safeField_(summary,'centralConfigWarnings',0);
-            nErr79_      = CE.safeField_(summary,'centralConfigErrors',0);
-            fprintf(fid, 'Config owners (Stage~79) & signal owner: %s; freq audit: %s; warnings/errors: %d/%d\\\\\n', ...
-                sigOwn79_, freqAudit79_, nWarn79_, nErr79_);
-            fprintf(fid, '\\bottomrule\n\\end{tabular}\n\n\\vspace{6pt}\n');
-
-            % ---- 5. Clocks ---
-            fprintf(fid, '\\textbf{Clock model}\n\n');
-            fprintf(fid, '\\begin{tabular}{p{0.38\\textwidth}p{0.52\\textwidth}}\n');
-            fprintf(fid, '\\toprule\n\\textbf{Property} & \\textbf{Value}\\\\\n\\midrule\n');
-            rxDet_ = false; if isfield(summary,'stage67RxClockDet'); rxDet_ = summary.stage67RxClockDet; end
-            rxEst_ = true; if isfield(summary,'receiverClockEstimated'); rxEst_ = summary.receiverClockEstimated; end
-            fprintf(fid, 'Asset Rx clock & %s; EKF estimated=%s (Brown-Hwang two-state)\\\\\n', ...
-                CE.yesNo_(rxDet_,'deterministic','stochastic'), CE.yesNo_(rxEst_,'true','false'));
-            twrEst_ = false; if isfield(summary,'towerClockStatesEstimated'); twrEst_ = summary.towerClockStatesEstimated; end
-            fprintf(fid, 'Tower clocks in EKF & %s (product-corrected; gauge avoided)\\\\\n', CE.yesNo_(twrEst_,'yes (experimental)','no'));
-            % Stage 71: product mode
-            tClkMode_ = 'noisyCorrection';
-            if isfield(summary,'towerClockProductMode'); tClkMode_ = summary.towerClockProductMode;
-            elseif isfield(summary,'stage67TowerClockMode'); tClkMode_ = summary.stage67TowerClockMode; end
-            isProductMode71_ = strcmp(tClkMode_,'truthHistoryProductNoisy');
-            fprintf(fid, 'Tower correction mode & \\texttt{%s}\\\\\n', strrep(tClkMode_,'_','\_'));
-            if isProductMode71_
-                dT71_ = NaN; if isfield(summary,'towerClockProductUpdateInterval_s'); dT71_ = summary.towerClockProductUpdateInterval_s; end
-                lat71_ = NaN; if isfield(summary,'towerClockProductLatency_s'); lat71_ = summary.towerClockProductLatency_s; end
-                mAge71_ = NaN; if isfield(summary,'towerClockProductMeanAge_s'); mAge71_ = summary.towerClockProductMeanAge_s; end
-                xAge71_ = NaN; if isfield(summary,'towerClockProductMaxAge_s'); xAge71_ = summary.towerClockProductMaxAge_s; end
-                mSig71_ = NaN; if isfield(summary,'towerClockProductMeanSigma_m'); mSig71_ = summary.towerClockProductMeanSigma_m; end
-                xSig71_ = NaN; if isfield(summary,'towerClockProductMaxSigma_m'); xSig71_ = summary.towerClockProductMaxSigma_m; end
-                shrd71_  = false; if isfield(summary,'towerClockSharedCovarianceApplied'); shrd71_  = summary.towerClockSharedCovarianceApplied; end
-                diagInf_ = false; if isfield(summary,'towerClockProductDiagonalInflation'); diagInf_ = summary.towerClockProductDiagonalInflation; end
-                fprintf(fid, 'Product update interval & %.0f s; latency %.0f s; max age %.0f s; mean age %.0f s\\\\\n', dT71_, lat71_, xAge71_, mAge71_);
-                fprintf(fid, 'Product $\\sigma$ & mean %.3f m; max %.3f m (added to code $R$ per row; carrier $R$ unchanged)\\\\\n', mSig71_, xSig71_);
-                fprintf(fid, 'Covariance handling & %s; Doppler clock-$\\dot{b}$ $\\sigma$: simplified v1 (not added to $R$)\\\\\n', ...
-                    CE.yesNo_(shrd71_, 'off-diagonal shared $R$ applied', ...
-                    CE.yesNo_(diagInf_, 'diagonal per-row $R$ inflation only (Stage~72)', 'not applied')));
-                fprintf(fid, 'Perfect tower correction & false (product-predicted; not truth-plus-noise)\\\\\n');
-            else
-                tClkSig_ = 0.5;
-                if isfield(summary,'stage67TowerClockSigma_m'); tClkSig_ = summary.stage67TowerClockSigma_m; end
-                fprintf(fid, 'Correction $\\sigma$ & %.2f m\\\\\n', tClkSig_);
-                pfCorr_ = false; if isfield(summary,'towerClockPerfectCorrection'); pfCorr_ = summary.towerClockPerfectCorrection; end
-                fprintf(fid, 'Perfect tower correction & %s\\\\\n', CE.yesNo_(pfCorr_,'true (validation only)','false'));
-            end
-            allanPath_ = CE.figRef_(plotPaths, 'allanDev', figDir, stem);
-            allanAvail_ = ~isempty(allanPath_) && isfile(allanPath_);
-            fprintf(fid, 'Allan deviation & %s\\\\\n', CE.yesNo_(allanAvail_,'plot available (Oscillator Stability section)','not generated'));
-            fprintf(fid, '\\bottomrule\n\\end{tabular}\n\n\\vspace{6pt}\n');
-
-            % ---- 6. Orbital dynamics ---
-            fprintf(fid, '\\textbf{Orbital dynamics}\n\n');
-            fprintf(fid, '\\begin{tabular}{p{0.38\\textwidth}p{0.52\\textwidth}}\n');
-            fprintf(fid, '\\toprule\n\\textbf{Property} & \\textbf{Value}\\\\\n\\midrule\n');
-            propMode_ = 'twoBodyRk4';
-            if isfield(summary,'truthPropagatorMode'); propMode_ = summary.truthPropagatorMode;
-            elseif isfield(summary,'stage67OrbitPropMode'); propMode_ = summary.stage67OrbitPropMode; end
-            fprintf(fid, 'Truth propagator & \\texttt{%s} (GEO 35786~km, $i\\!=\\!0$, $\\nu_0\\!=\\!23^\\circ$)\\\\\n', strrep(propMode_,'_','\_'));
-            dynMode_ = 'twoBody';
-            if isfield(summary,'estimatorDynamicsMode'); dynMode_ = summary.estimatorDynamicsMode;
-            elseif isfield(summary,'stage67DynamicsMode'); dynMode_ = summary.stage67DynamicsMode; end
-            mismatch80_ = CE.safeField_(summary,'dynamicsMismatchStatus','not evaluated');
-            fprintf(fid, 'EKF predictor & \\texttt{%s}; mismatch status: %s\\\\\n', strrep(dynMode_,'_','\_'), strrep(mismatch80_,'_','\_'));
-            fprintf(fid, 'Frames & truth: \\texttt{%s}; measurements: \\texttt{%s}; Earth rotation: \\texttt{%s}\\\\\n', ...
-                CE.safeField_(summary,'propagationFrame','ECI'), ...
-                CE.safeField_(summary,'measurementFrame','ECEF'), ...
-                CE.safeField_(summary,'earthRotationModel','constantOmegaV1'));
-            fprintf(fid, 'One-way light time & enabled=%s; mode=\\texttt{%s}; iter=%d; mean/max %.6f/%.6f~s\\\\\n', ...
-                CE.yesNo_(CE.safeField_(summary,'lightTimeEnabled',false),'true','false'), ...
-                CE.safeField_(summary,'lightTimeMode','sagnacFirstOrder'), ...
-                CE.safeField_(summary,'lightTimeIterations',0), ...
-                CE.safeField_(summary,'meanLightTime_s',0), ...
-                CE.safeField_(summary,'maxLightTime_s',0));
-            fprintf(fid, 'Sagnac handling & \\texttt{%s}; double-count guard: \\texttt{%s}; Doppler light-time derivative: \\texttt{%s}; Doppler model: \\texttt{%s}\\\\\n', ...
-                CE.safeField_(summary,'sagnacHandling','firstOrderCorrection'), ...
-                CE.safeField_(summary,'sagnacDoubleCountGuard','notEvaluated'), ...
-                CE.safeField_(summary,'dopplerLightTimeDerivative','simplifiedV1'), ...
-                CE.safeField_(summary,'dopplerModelLevel','frameConsistentV2'));
-            fprintf(fid, 'J2 / drag / SRP / 3rd-body & J2 truth mode available; drag/SRP/3rd-body false in active scenario\\\\\n');
-            fprintf(fid, 'J2 mismatch policy & \\texttt{%s}; J2 accel @ GEO: %.2e~m/s$^2$; process-noise consistency: \\texttt{%s}; $\\sigma$/J2\\,ratio=%.2f (tolerated by proc.~noise)\\\\n', ...
-                strrep(CE.safeField_(summary,'j2DefaultPolicy','twoBodyDefaultJ2Available'),'_','\_'), ...
-                CE.safeField_(summary,'representativeJ2Accel_mps2',0), ...
-                CE.safeField_(summary,'dynamicsProcessNoiseConsistency','unknown'), ...
-                CE.safeField_(summary,'sigmaToRmsJ2Ratio',NaN));
-            fprintf(fid, 'Source truth & \\texttt{%s}; EOP: \\texttt{%s}; freshness stage: %d\\\\\n', ...
-                strrep(CE.safeField_(summary,'sourceTruthStatus','unknown'),'_','\_'), ...
-                strrep(CE.safeField_(summary,'eopStatus','notImplementedNoIERS'),'_','\_'), ...
-                CE.safeField_(summary,'reportStatusFreshnessStage',0));
-            fprintf(fid, 'IERS/EOP frame & not implemented; simplified constant-$\\Omega_E$ Earth rotation\\\\\n');
-            fprintf(fid, 'DiffAtt schema & \\texttt{%s}\\\\\n', CE.safeField_(summary,'diffAttSchemaStatus','notEvaluated'));
-            fprintf(fid, '\\bottomrule\n\\end{tabular}\n\n\\vspace{6pt}\n');
-
-            % Stage 81/82: Scientific closure sub-table (no new chapter)
-            fprintf(fid, '\\textbf{Scientific closure (Stage~81/82)}\n\n');
-            fprintf(fid, '\\begin{tabular}{lp{0.74\\textwidth}}\n\\toprule\n');
-            fprintf(fid, '\\textbf{Category} & \\textbf{Status}\\\\\\\\\n\\midrule\n');
-            fprintf(fid, 'Scientific profile & \\texttt{%s}; claim: \\texttt{%s}\\\\\\\\\n', ...
-                CE.safeField_(summary,'scientificProfileMode','singleAssetOneWaySyntheticClosedV1'), ...
-                CE.safeField_(summary,'claimLevel','controlledSynthetic'));
-            fprintf(fid, 'Model coverage & \\texttt{%s}; impl=%d guard=%d disabled=%d missing=%d\\\\\\\\\n', ...
-                CE.safeField_(summary,'modelCoverageStatus','notRun'), ...
-                CE.safeField_(summary,'nModelCategoriesImplementedSynthetic',0), ...
-                CE.safeField_(summary,'nModelCategoriesGuardedNotImplemented',0), ...
-                CE.safeField_(summary,'nModelCategoriesDisabledByConfig',0), ...
-                CE.safeField_(summary,'nModelCategoriesMissingUnsafe',-1));
-            fprintf(fid, 'Real-world claim gate & \\texttt{%s}\\\\\\\\\n', ...
-                CE.safeField_(summary,'realWorldClaimGateStatus','blockedWithReasons'));
-            fprintf(fid, 'External products & \\texttt{%s} (SP3/CLK/RINEX/ANTEX/IONEX not ingested)\\\\\\\\\n', ...
-                CE.safeField_(summary,'externalProductsStatus','notImplemented'));
-            fprintf(fid, 'Troposphere & \\texttt{%s}; gradient=disabled; VMD=notImpl.\\\\\\\\\n', ...
-                CE.safeField_(summary,'troposphereClaimStatus','syntheticSimpleMappedV1'));
-            fprintf(fid, 'Ionosphere & \\texttt{%s}; higher-order=disabled; IONEX=notImpl.\\\\\\\\\n', ...
-                CE.safeField_(summary,'ionosphereClaimStatus','syntheticSimpleMappedV1'));
-            fprintf(fid, 'Phase bias / DCB & \\texttt{%s} (no real product; real-world AR blocked)\\\\\\\\\n', ...
-                CE.safeField_(summary,'biasPhaseMode','syntheticKnownZero'));
-            fprintf(fid, 'Carrier-IF fixing & \\texttt{%s} (unsupported; IF ambiguity not integer)\\\\\\\\\n', ...
-                mat2str(CE.safeField_(summary,'carrierIfIntegerFixing',false)));
-            fprintf(fid, 'NIS / MC / NEES & NIS=\\texttt{%s}; MC=\\texttt{%s}; NEES=\\texttt{%s}\\\\\\\\\n', ...
-                CE.safeField_(summary,'validationStatisticsNisMode','partialCovarianceAware'), ...
-                mat2str(CE.safeField_(summary,'validationStatisticsMcEnable',false)), ...
-                mat2str(CE.safeField_(summary,'validationStatisticsNeesEnable',false)));
-            % Stage 85: synthetic campaign status rows
-            campSt = CE.safeField_(summary,'scientificCampaignStatus','notRun');
-            if ~strcmp(campSt,'notRun')
-                fprintf(fid, 'Campaign overall & \\texttt{%s} (\\texttt{%s} profile; %s)\\\\\\\\\n', ...
-                    CE.safeField_(summary,'campaignOverallStatus','notRun'), ...
-                    CE.safeField_(summary,'scientificCampaignProfile','off'), ...
-                    CE.safeField_(summary,'validationStatisticsInterpretation','notRun'));
-                fprintf(fid, 'Campaign nominal/L1/clk/slip & \\texttt{%s} / \\texttt{%s} / \\texttt{%s} / \\texttt{%s}\\\\\\\\\n', ...
-                    CE.safeField_(summary,'campaignNominalStatus','notRun'), ...
-                    CE.safeField_(summary,'campaignL1OnlyStatus','notRun'), ...
-                    CE.safeField_(summary,'campaignClockStressStatus','notRun'), ...
-                    CE.safeField_(summary,'campaignSlipStressStatus','notRun'));
-                fprintf(fid, 'NIS code/dopp/carrier & \\texttt{%s} / \\texttt{%s} / \\texttt{%s} (partialCovarianceAwareSynthetic)\\\\\\\\\n', ...
-                    CE.safeField_(summary,'nisCodeStatus','notAvailable'), ...
-                    CE.safeField_(summary,'nisDopplerStatus','notAvailable'), ...
-                    CE.safeField_(summary,'nisCarrierStatus','notAvailable'));
-                fprintf(fid, 'NEES pos/vel/clk/att & \\texttt{%s} / \\texttt{%s} / \\texttt{%s} / \\texttt{%s}\\\\\\\\\n', ...
-                    CE.safeField_(summary,'neesPositionStatus','notAvailable'), ...
-                    CE.safeField_(summary,'neesVelocityStatus','notAvailable'), ...
-                    CE.safeField_(summary,'neesClockStatus','notAvailable'), ...
-                    CE.safeField_(summary,'neesAttitudeStatus','notAvailable'));
-            end
-            fprintf(fid, '\\bottomrule\n\\end{tabular}\n\n\\vspace{6pt}\n');
-
-
-            % ---- 7. Known limitations ---
-            fprintf(fid, '\\textbf{Known v1 limitations}\n\n');
-            fprintf(fid, '\\begin{tabular}{p{0.92\\textwidth}}\n\\toprule\n');
-            fprintf(fid, 'No external RINEX/SP3/CLK/ANTEX/IONEX products ingested; tower clock product is synthetic (Stage 71/72).\\\\\n');
-            fprintf(fid, 'No PPP-grade or operational navigation claim.\\\\\n');
-            fprintf(fid, 'No LAMBDA/MLAMBDA; Stage 70/75/76 baseline AR: raw L1 (Stage 70/75) and raw L1+L2 integer-pair with wide-lane consistency screening (Stage 76); carrier-IF integer fixing is explicitly unsupported; false-fix risk is \\texttt{screenedNotFormal}; multi-asset estimation unsupported and guarded; differential ionosphere in baseline AR neglected (short receiver baselines).\\\\\n');
-            fprintf(fid, 'No mission-qualified attitude determination (synthetic controlled scenario only).\\\\\n');
-            fprintf(fid, 'No calibrated hardware bias/DCB/phase-bias products.\\\\\n');
-            fprintf(fid, 'Doppler Stage~84 frameConsistentV2 (hardened): ECI-consistent range-rate (tower rotational velocity / Sagnac-rate capturedByTowerVelocityTerm); Doppler R diagonal double-count fixed (trackingOnlyPlusBlock); product-drift anchored at product-epoch truth; lever-arm velocity and relativistic range-rate not implemented.\\\\\n');
-            fprintf(fid, 'IF covariance: uncorrelated noise assumption ($\\mathrm{Cov}(L_1,L_2)=0$).\\\\\n');
-            fprintf(fid, 'Scientific atmosphere: no GPT3/VMF3/ERA5 troposphere; no Klobuchar/IONEX ionosphere.\\\\\n');
-            fprintf(fid, 'No IERS/EOP-grade GCRS/ITRF reference-frame processing.\\\\\n');
-            fprintf(fid, 'Full validation suite NOT RUN (targeted random smoke only).\\\\\n');
-            fprintf(fid, '\\bottomrule\n\\end{tabular}\n');
-            fprintf(fid, '\\end{center}\n');
-        end
+        % writeActivePhysicsConfig_ extracted to +revgnss/+report/activePhysicsConfig.m (Phase 7).
 
         % ================================================================
         % LONGTABLE HELPERS
         % ================================================================
 
         function s = plotTableHeader_()
-            s = ['\\begin{longtable}{@{}p{0.46\\textwidth}p{0.48\\textwidth}@{}}\n' ...
+            % 66/33 split: the plot column dominates; the description stays compact.
+            s = ['\\begin{longtable}{@{}p{0.62\\textwidth}p{0.30\\textwidth}@{}}\n' ...
                  '\\toprule\n' ...
                  '\\textbf{Plot} & \\textbf{Description and statistical approach}\\\\\n' ...
                  '\\midrule\n'];
@@ -2164,7 +1172,7 @@ classdef ClockExactReportBuilder
         function writeFinalScientificClosure_(fid, summary)
             % writeFinalScientificClosure_  Compact final model closure table.
             CE = revgnss.ClockExactReportBuilder;
-            if ~isfield(summary,'stage64Active') || ~summary.stage64Active; return; end
+            if ~isfield(summary,'physicsConfigSectionActive') || ~summary.physicsConfigSectionActive; return; end
             fprintf(fid, '\\clearpage\n');
             fprintf(fid, '\\section{Single-Asset One-Way Scientific Closure}\n');
             fprintf(fid, ['\\textit{v1 is a controlled, internally consistent MATLAB reverse-GNSS EKF simulation: ' ...
@@ -2237,7 +1245,7 @@ classdef ClockExactReportBuilder
                 fprintf(fid, 'Physical NIS & %.2f\\\\\n', summary.physicalNIS);
             end
             if isfield(summary,'knownAmbClass') && ~strcmp(summary.knownAmbClass,'SKIPPED')
-                fprintf(fid, 'KAV result & \\texttt{%s}\\\\\n', strrep(summary.knownAmbClass,'_','\_'));
+                fprintf(fid, 'KAV result (truth-assisted diagnostic; not part of the realistic claim) & \\texttt{%s}\\\\\n', strrep(summary.knownAmbClass,'_','\_'));
             end
             fprintf(fid, '\\midrule\n');
             fprintf(fid, ['\\multicolumn{2}{p{0.94\\textwidth}}{\\textbf{Known v1 limitations:} ' ...
@@ -2257,7 +1265,7 @@ classdef ClockExactReportBuilder
         % ================================================================
         function writeStage67Closure_(fid, summary, plotPaths, stem, figDir)
             CE = revgnss.ClockExactReportBuilder;
-            if ~isfield(summary,'stage66Active') || ~summary.stage66Active; return; end
+            if ~isfield(summary,'oneWayClosureSectionActive') || ~summary.oneWayClosureSectionActive; return; end
             fprintf(fid, '\\clearpage\n');
             fprintf(fid, '\\section{Stage 67 Attitude, Clock, and Dynamics Realism Closure}\n');
             fprintf(fid, ['\\textit{Stage~67 makes three physical realism upgrades to the ' ...
@@ -2541,13 +1549,22 @@ classdef ClockExactReportBuilder
             catch; end
         end
 
+        function br = getGitBranch_()
+            br = 'unknown';
+            try
+                repoRoot = fileparts(fileparts(mfilename('fullpath')));
+                [st, out] = system(sprintf('git -C "%s" rev-parse --abbrev-ref HEAD 2>/dev/null', repoRoot));
+                if st == 0 && ~isempty(strtrim(out)); br = strtrim(out); end
+            catch; end
+        end
+
         function s = measTypeStr_(summary)
             % measTypeStr_  Build a short measurement-type string from summary flags.
             parts = {};
             if isfield(summary,'pseudorangeEnabled')    && summary.pseudorangeEnabled;    parts{end+1} = 'code'; end
             if isfield(summary,'carrierPhaseEnabled')   && summary.carrierPhaseEnabled;   parts{end+1} = 'carrier'; end
             if isfield(summary,'dopplerEnabled')        && summary.dopplerEnabled;        parts{end+1} = 'Doppler'; end
-            if isfield(summary,'stage63IntegerFixingImplemented') && summary.stage63IntegerFixingImplemented
+            if isfield(summary,'integerAmbiguityFixingActive') && summary.integerAmbiguityFixingActive
                 parts{end+1} = 'intFix';
             end
             parts = unique(parts,'stable');

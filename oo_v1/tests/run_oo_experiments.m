@@ -158,7 +158,7 @@ for ci = 1:3
     cfg.asset.clock.noiseCoeffs.hMinus1 = ct.hm1;
     cfg.asset.clock.noiseCoeffs.hMinus2 = ct.hm2;
     cfg.asset.clock.clockType           = ct.name;
-    tmpClk = revgnss.ClockModel(cfg.asset.clock);
+    tmpClk = models.clocks.ClockModel(cfg.asset.clock);
     tVec   = 0:DT:DUR;
     tmpClk.precomputeNoise(tVec);
     for i = 1:numel(tVec); tmpClk.step(DT); end

@@ -21,7 +21,7 @@ classdef ScenarioFactory
             orbitProp = [];
             if isfield(cfg,'orbit') && isfield(cfg.orbit,'useOrbitPropagator') ...
                     && cfg.orbit.useOrbitPropagator
-                orbitProp = revgnss.OrbitPropagator(cfg.orbit);
+                orbitProp = models.orbit.OrbitPropagator(cfg.orbit);
                 [r0, v0]  = orbitProp.propagate(0);
                 cfg.asset.r_ecef_m   = r0;
                 cfg.asset.v_ecef_mps = v0;
@@ -40,13 +40,13 @@ classdef ScenarioFactory
             % --- ErrorChain --------------------------------------------
             % Pass the full cfg so ErrorChain can access signals, measurements,
             % environment, and scenario fields alongside cfg.errors.
-            errorChain = revgnss.ErrorChain(cfg, cfg.simulation.seed);
+            errorChain = models.errors.ErrorChain(cfg, cfg.simulation.seed);
 
             % --- MeasurementModel --------------------------------------
-            measModel = revgnss.MeasurementModel(cfg, errorChain);
+            measModel = models.measurements.MeasurementModel(cfg, errorChain);
 
             % --- EKF ---------------------------------------------------
-            ekf = revgnss.ReverseGNSSEKF(cfg, nT, asset.clock);
+            ekf = filter.ReverseGNSSEKF(cfg, nT, asset.clock);
 
             % Build initial state from truth + perturbation
             x0 = revgnss.ScenarioFactory.buildInitialState_(cfg, asset, towers, ekf);

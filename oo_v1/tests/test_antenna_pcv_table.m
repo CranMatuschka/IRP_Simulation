@@ -22,14 +22,14 @@ cfg.effects.antennaPCV.model.enable = true;
 
 % At 30 deg: expect 0.01 m
 el_30 = 30 * pi/180;
-[~, contrib30] = revgnss.RangeCorrections.correctedPseudorange( ...
+[~, contrib30] = models.corrections.RangeCorrections.correctedPseudorange( ...
     [0;0;42e6], [0;1e6;0], cfg, 'truth', el_30);
 assert(abs(contrib30.pcv - 0.01) < 1e-10, ...
     'PCV table at 30 deg should be 0.01 m, got %.6f', contrib30.pcv);
 
 % At 0 deg: expect 0.02 m (first entry)
 el_0 = 0;
-[~, contrib0] = revgnss.RangeCorrections.correctedPseudorange( ...
+[~, contrib0] = models.corrections.RangeCorrections.correctedPseudorange( ...
     [0;0;42e6], [0;1e6;0], cfg, 'truth', el_0);
 assert(abs(contrib0.pcv - 0.02) < 1e-10, ...
     'PCV table at 0 deg should be 0.02 m, got %.6f', contrib0.pcv);
@@ -37,7 +37,7 @@ assert(abs(contrib0.pcv - 0.02) < 1e-10, ...
 % pcvModel='none': correction should be 0
 cfg_none = cfg;
 cfg_none.effects.antenna.pcvModel = 'none';
-[~, contrib_none] = revgnss.RangeCorrections.correctedPseudorange( ...
+[~, contrib_none] = models.corrections.RangeCorrections.correctedPseudorange( ...
     [0;0;42e6], [0;1e6;0], cfg_none, 'truth', el_30);
 assert(abs(contrib_none.pcv) < 1e-12, ...
     'pcvModel=none should give 0 PCV, got %.2e', contrib_none.pcv);
@@ -54,7 +54,7 @@ cfg_bad.effects.antenna.receiverPcvTable.pcv_m = [0.02 0.01];  % wrong length
 
 threwBad = false;
 try
-    revgnss.RangeCorrections.correctedPseudorange([0;0;42e6], [0;1e6;0], cfg_bad, 'truth', el_30);
+    models.corrections.RangeCorrections.correctedPseudorange([0;0;42e6], [0;1e6;0], cfg_bad, 'truth', el_30);
 catch ME
     threwBad = true;
     assert(contains(ME.identifier, 'pcvTable') || contains(ME.identifier, 'RangeCorrections'), ...
@@ -72,7 +72,7 @@ cfg_az.effects.antenna.receiverPcvTable.azDeg = 0:10:350;
 
 threwAz = false;
 try
-    revgnss.RangeCorrections.correctedPseudorange([0;0;42e6], [0;1e6;0], cfg_az, 'truth', el_30);
+    models.corrections.RangeCorrections.correctedPseudorange([0;0;42e6], [0;1e6;0], cfg_az, 'truth', el_30);
 catch ME
     threwAz = true;
     assert(contains(ME.identifier, 'pcvAzimuth') || contains(ME.identifier, 'RangeCorrections'), ...

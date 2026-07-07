@@ -28,7 +28,7 @@ for k = 1:numel(cfg_low.towers)
 end
 
 lastwarn('');
-env_low = revgnss.EnvironmentModel(cfg_low, cfg_low.scenario.nTowers);
+env_low = models.errors.EnvironmentModel(cfg_low, cfg_low.scenario.nTowers);
 [wmsg, wid] = lastwarn();
 hasWarn_low = contains(wid, 'saastHeight') || contains(wmsg, 'Saastamoinen') || ...
               contains(wmsg, 'validity') || contains(wmsg, 'clamping');
@@ -55,7 +55,7 @@ for k = 1:numel(cfg_high.towers)
 end
 
 lastwarn('');
-env_high = revgnss.EnvironmentModel(cfg_high, cfg_high.scenario.nTowers);
+env_high = models.errors.EnvironmentModel(cfg_high, cfg_high.scenario.nTowers);
 [wmsg2, wid2] = lastwarn();
 hasWarn_high = contains(wid2, 'saastHeight') || contains(wmsg2, 'Saastamoinen') || ...
                contains(wmsg2, 'validity') || contains(wmsg2, 'clamping');
@@ -82,7 +82,7 @@ for k = 1:numel(cfg_rh.towers)
 end
 cfg_rh.environment.weather.defaultRelativeHumidity = 1.5;
 
-env_rh = revgnss.EnvironmentModel(cfg_rh, cfg_rh.scenario.nTowers);
+env_rh = models.errors.EnvironmentModel(cfg_rh, cfg_rh.scenario.nTowers);
 for k = 1:cfg_rh.scenario.nTowers
     assert(isfinite(env_rh.weatherState(k).ZWD_m), 'T10c FAILED: ZWD NaN for tower %d', k);
     assert(env_rh.weatherState(k).ZWD_m <= 0.15 * 1.0 + 0.01, ...
@@ -106,7 +106,7 @@ for k = 1:numel(cfg_ok.towers)
     cfg_ok.towers(k).alt_m = 500;
 end
 
-env_ok = revgnss.EnvironmentModel(cfg_ok, cfg_ok.scenario.nTowers);
+env_ok = models.errors.EnvironmentModel(cfg_ok, cfg_ok.scenario.nTowers);
 for k = 1:cfg_ok.scenario.nTowers
     assert(isfinite(env_ok.weatherState(k).ZHD_m), 'T10d FAILED: ZHD NaN for tower %d', k);
     assert(isfinite(env_ok.weatherState(k).ZWD_m), 'T10d FAILED: ZWD NaN for tower %d', k);

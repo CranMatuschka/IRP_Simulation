@@ -33,7 +33,7 @@ try
     cfg = revgnss.ConfigFactory.defaultConfig();
     cfg = revgnss.ScenarioPresets.apply(cfg, 'singleAssetCarrierAttitude');
     cfg.estimator.attitude.parameterization = 'quaternionErrorState';
-    ekf = revgnss.ReverseGNSSEKF(cfg, cfg.scenario.nTowers);
+    ekf = filter.ReverseGNSSEKF(cfg, cfg.scenario.nTowers);
     x0  = zeros(ekf.nx, 1);
     P0  = eye(ekf.nx);
     P0(7:9, 7:9) = 0.01 * eye(3);
@@ -83,7 +83,7 @@ try
     cfg.estimator.integerAmbiguity.maxResidualRmsIncrease_m = 0.01;
     cfg.estimator.integerAmbiguity.fixVariance_cycles2 = 1e-4;
 
-    ekf = revgnss.ReverseGNSSEKF(cfg, cfg.scenario.nTowers);
+    ekf = filter.ReverseGNSSEKF(cfg, cfg.scenario.nTowers);
     x0  = zeros(ekf.nx, 1);
     P0  = eye(ekf.nx) * 0.01;
     ekf.initState(x0, P0);
@@ -138,7 +138,7 @@ try
     cfg5 = revgnss.ConfigFactory.defaultConfig();
     cfg5 = revgnss.ScenarioPresets.apply(cfg5, 'singleAssetCarrierAttitude');
     cfg5.estimator.integerAmbiguity.enable = false;  % disabled
-    ekf5 = revgnss.ReverseGNSSEKF(cfg5, cfg5.scenario.nTowers);
+    ekf5 = filter.ReverseGNSSEKF(cfg5, cfg5.scenario.nTowers);
     ekf5.initState(zeros(ekf5.nx,1), eye(ekf5.nx)*0.01);
     rt5.fixState = containers.Map('KeyType','char','ValueType','any'); rt5.dt_s = 1;
     s5 = revgnss.IntegerAmbiguityFixer.assess(rt5, ekf5, struct('towerIdx',[]), cfg5);

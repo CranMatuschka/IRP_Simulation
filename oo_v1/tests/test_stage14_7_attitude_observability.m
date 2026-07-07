@@ -47,7 +47,7 @@ r_est1  = x0_1(sm1.r_idx);
 eul_est1 = x0_1(sm1.euler_idx);
 twr_list1 = (1:nTowers)';
 ant_list1 = ones(nTowers,1);
-H1 = revgnss.CodeJacobianBuilder.build(cfg_t1f, 1e-6, towers1, twr_list1, ant_list1, ...
+H1 = models.measurements.CodeJacobianBuilder.build(cfg_t1f, 1e-6, towers1, twr_list1, ant_list1, ...
     r_est1, eul_est1, leverArms1m, x0_1, sm1, ekf1.nx);
 
 H_att1 = H1(:, sm1.euler_idx);
@@ -85,7 +85,7 @@ eul_est2 = x0_2(sm2.euler_idx);
 twr_list2 = repmat((1:nTowers)', 3, 1);
 ant_list2 = [ones(nTowers,1); 2*ones(nTowers,1); 3*ones(nTowers,1)];
 
-H2 = revgnss.CodeJacobianBuilder.build(cfg_t2f, 1e-6, towers2, twr_list2, ant_list2, ...
+H2 = models.measurements.CodeJacobianBuilder.build(cfg_t2f, 1e-6, towers2, twr_list2, ant_list2, ...
     r_est2, eul_est2, leverArms2m, x0_2, sm2, ekf2.nx);
 
 H_att2 = H2(:, sm2.euler_idx);

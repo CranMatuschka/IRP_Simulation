@@ -648,7 +648,7 @@ classdef ReportRunner
 
             % ---- Stage 61: quaternion error-state EKF summary fields ----
             summary.stage61Parameterization           = 'eulerZYX';
-            summary.stage61QuatEkfActive              = false;
+            summary.quaternionErrorStateEkfActive              = false;
             summary.stage61InjectionCount             = 0;
             summary.stage61MaxInjectionNorm_rad        = NaN;
             summary.stage61MaxInjectionNorm_deg        = NaN;
@@ -659,9 +659,9 @@ classdef ReportRunner
             summary.stage61PppGradeClaim               = false;
             try
                 summary.stage61Parameterization = sim.ekf.attitudeParameterization;
-                summary.stage61QuatEkfActive    = strcmp(sim.ekf.attitudeParameterization, ...
+                summary.quaternionErrorStateEkfActive    = strcmp(sim.ekf.attitudeParameterization, ...
                     'quaternionErrorState');
-                if summary.stage61QuatEkfActive
+                if summary.quaternionErrorStateEkfActive
                     summary.stage61InjectionCount        = sim.ekf.attitudeInjectionCount;
                     summary.stage61MaxInjectionNorm_rad  = sim.ekf.maxAttitudeInjectionNorm_rad;
                     summary.stage61MaxInjectionNorm_deg  = sim.ekf.maxAttitudeInjectionNorm_rad * 180/pi;
@@ -709,7 +709,7 @@ classdef ReportRunner
             catch; end
 
             % ---- Stage 63: controlled raw-carrier integer ambiguity fixing ----
-            summary.stage63IntegerFixingImplemented = false;
+            summary.integerAmbiguityFixingActive = false;
             summary.stage63Mode                     = 'disabled';
             summary.stage63Classification           = 'disabled';
             summary.stage63nCandidates              = 0;
@@ -729,7 +729,7 @@ classdef ReportRunner
             try
                 lg63 = sim.fix63Log_;  % property access throws if absent; caught below
                 if isstruct(lg63)
-                    summary.stage63IntegerFixingImplemented = lg63.enabled;
+                    summary.integerAmbiguityFixingActive = lg63.enabled;
                     if isfield(lg63,'mode');               summary.stage63Mode              = lg63.mode;              end
                     if isfield(lg63,'lastClassification'); summary.stage63Classification    = lg63.lastClassification; end
                     if isfield(lg63,'nAccepted');          summary.stage63nAccepted         = lg63.nAccepted;          end
@@ -742,7 +742,7 @@ classdef ReportRunner
             catch; end
 
             % ---- Stage 64: scientific closure summary fields ---------------
-            summary.stage64Active = true;
+            summary.physicsConfigSectionActive = true;
             scen64_ = '';
             try; scen64_ = cfg.scenario.name; catch; end
             summary.stage64ScenarioName = scen64_;
@@ -778,7 +778,7 @@ classdef ReportRunner
             summary.stage64PppGrade     = false;
 
             % ---- Stage 66: single-asset one-way closure summary fields -----
-            summary.stage66Active         = true;
+            summary.oneWayClosureSectionActive         = true;
             summary.stage66NSpaceAssets   = 1;
             orbitClass66_ = 'GEO';
             try; orbitClass66_ = cfg.scenario.orbitClass; catch; end
@@ -865,6 +865,30 @@ classdef ReportRunner
                     summary.processNoiseMismatchSigma_mps2 = cfg.estimator.processNoise.modelMismatch.sigma_mps2;
                 end
             catch; end
+
+            % ---- MD Stage 95: truth-estimation separation audit (honest, COMPUTED) --------
+            % Booleans/strings are ignored by extractMetrics (logicals are not numeric in
+            % MATLAB), so these never touch the frozen golden fingerprint; the report reads
+            % them directly. Computed from cfg via the guard, so they stay honest in every
+            % scenario (reduced-dynamics default reports sameModelFamilies=false; a matched
+            % same-family run reports true). The rows cell drives the report table (Step 6).
+            try
+                teAudit_ = revgnss.GeoRealWorldScenarioGuard.auditImperfectionSources(cfg);
+                summary.teSepTruthDynamicsFamily      = teAudit_.truthDynamicsFamily;
+                summary.teSepEkfDynamicsFamily        = teAudit_.ekfDynamicsFamily;
+                summary.teSepSameModelFamilies        = logical(teAudit_.sameModelFamilies);
+                summary.teSepReducedDynamics          = logical(teAudit_.reducedDynamicsWithProcessNoise);
+                summary.teSepMismatchAnalysis         = logical(teAudit_.mismatchAnalysis);
+                summary.teSepPerfectCorrection        = logical(teAudit_.perfectCorrection);
+                summary.teSepTruthAssistedDiagnostics = logical(teAudit_.truthAssistedDiagnostics);
+                summary.teSepTruthLeakageInMainFilter = logical(teAudit_.truthLeakageInMainFilter);
+                summary.teSepRealWorldClaim           = logical(teAudit_.realWorldClaim);
+                summary.realisticSyntheticTruthEstimationComparison = ...
+                    logical(teAudit_.realisticSyntheticTruthEstimationComparison);
+                summary.truthEstimationSeparationRows = teAudit_.rows;   % cell table for the report
+            catch teErr_
+                summary.teSepStatus = ['auditUnavailable: ' teErr_.message];
+            end
 
             % ---- Stage 82: J2 diagnostics and source-truth summary --------
             summary.representativeJ2Accel_mps2 = 0;
@@ -1920,6 +1944,36 @@ classdef ReportRunner
                 summary.finalClockBiasRMS_m = NaN;
             end
 
+            % --- Honest whole-run error metrics (NOT just the final 20 epochs) ---
+            % finalPositionRMS_m / finalClockBiasRMS_m above are the RMS over only the
+            % last 20 epochs, which can read as "converged" even when the estimate
+            % wanders for most of the run. In a single-asset / ground-tower geometry the
+            % receiver clock and the nadir position are near-degenerate (weak
+            % observability), so the two error series track each other. These fields
+            % report the whole-run figures and that coupling so the summary cannot
+            % overstate convergence.
+            try
+                peW = diag.getPositionErrors();  peW = peW(:);
+                cbW = diag.getClockBiasErrors(); cbW = cbW(:);
+                summary.positionRMS_runwide_m  = rms(peW);
+                summary.positionErrorMedian_m  = median(peW);
+                summary.positionErrorMax_m     = max(peW);
+                summary.clockBiasRMS_runwide_m = rms(cbW);
+                m = min(numel(peW), numel(cbW));
+                if m > 2 && std(peW(1:m)) > 0 && std(abs(cbW(1:m))) > 0
+                    cc = corrcoef(peW(1:m), abs(cbW(1:m)));
+                    summary.positionClockErrorCorr = cc(1, 2);
+                else
+                    summary.positionClockErrorCorr = NaN;
+                end
+            catch
+                summary.positionRMS_runwide_m  = NaN;
+                summary.positionErrorMedian_m  = NaN;
+                summary.positionErrorMax_m     = NaN;
+                summary.clockBiasRMS_runwide_m = NaN;
+                summary.positionClockErrorCorr = NaN;
+            end
+
             % Contribution-based metrics
             summary.deterministicMismatchRMS_last20_m = NaN;
             summary.stochasticNoiseRMS_last20_m       = NaN;
@@ -2043,11 +2097,25 @@ classdef ReportRunner
             summary.carrierUsedInEkf = carrInEKF && summary.totalCarrierRows > 0;
             summary.carrierDiagnosticOnly = summary.carrierGenerated && ~summary.carrierUsedInEkf;
             summary.totalDiffAttRows = 0;
-            summary.totalIslCodeRows = 0;
-            summary.totalIslDopplerRows = 0;
-            summary.totalIslCarrierDiagnosticRows = 0;
-            summary.totalIslTwoWayRangeRows = 0;
-            summary.totalIslTwoWayDopplerDiagnosticRows = 0;
+            % ISL rows generated per epoch: one-way types x transmitting secondaries.
+            islOn_   = revgnss.ReportRunner.safeCfgBool_(cfg, {'measurements','isl','enable'}, false);
+            nIslTx_  = 0;
+            if islOn_; nIslTx_ = revgnss.MultiAssetConfig.islTxCount_(cfg); end
+            summary.totalIslCodeRows    = nIslTx_ * double(islOn_ && revgnss.ReportRunner.safeCfgBool_(cfg, {'measurements','isl','code','enable'}, false));
+            summary.totalIslDopplerRows = nIslTx_ * double(islOn_ && revgnss.ReportRunner.safeCfgBool_(cfg, {'measurements','isl','doppler','enable'}, false));
+            summary.totalIslCarrierDiagnosticRows = nIslTx_ * double(islOn_ && revgnss.ReportRunner.safeCfgBool_(cfg, {'measurements','isl','carrier','enable'}, false));
+            summary.totalIslTwoWayRangeRows = double(islOn_ && ...
+                revgnss.ReportRunner.safeCfgBool_(cfg, {'measurements','isl','twoWay','enable'}, false) && ...
+                revgnss.ReportRunner.safeCfgBool_(cfg, {'measurements','isl','twoWay','range','enable'}, false));
+            summary.totalIslTwoWayDopplerDiagnosticRows = double(islOn_ && ...
+                revgnss.ReportRunner.safeCfgBool_(cfg, {'measurements','isl','twoWay','enable'}, false) && ...
+                revgnss.ReportRunner.safeCfgBool_(cfg, {'measurements','isl','twoWay','doppler','enable'}, false));
+            nSA_ = 1;
+            if isfield(cfg,'scenario') && isfield(cfg.scenario,'nSpaceAssets') && ~isempty(cfg.scenario.nSpaceAssets)
+                nSA_ = cfg.scenario.nSpaceAssets;
+            end
+            summary.nRepresentedAssets = max(0, nSA_ - 1);
+            summary.nEstimatedAssets   = 1;
             summary.islCodeUsedInEkf = revgnss.ReportRunner.safeCfgBool_(cfg, {'measurements','isl','code','useInEKF'}, false);
             summary.islDopplerUsedInEkf = revgnss.ReportRunner.safeCfgBool_(cfg, {'measurements','isl','doppler','useInEKF'}, false);
             summary.islCarrierUsedInEkf = revgnss.ReportRunner.safeCfgBool_(cfg, {'measurements','isl','carrier','useInEKF'}, false);
@@ -2060,11 +2128,18 @@ classdef ReportRunner
             obs_rbt_      = struct('code', summary.totalCodeRows, ...
                                    'doppler', summary.totalDopplerRows, ...
                                    'carrier', summary.totalCarrierRows, ...
-                                   'diffCarrierAttitude', 0);
+                                   'diffCarrierAttitude', 0, ...
+                                   'islCode', summary.totalIslCodeRows, ...
+                                   'islDoppler', summary.totalIslDopplerRows, ...
+                                   'islCarrierDiagnostic', summary.totalIslCarrierDiagnosticRows, ...
+                                   'islTwoWayRange', summary.totalIslTwoWayRangeRows, ...
+                                   'islTwoWayDopplerDiagnostic', summary.totalIslTwoWayDopplerDiagnosticRows);
             obs_stack_    = revgnss.ObservableStackDescriptor.compact([]);
             obs_stack_.rowsByType = obs_rbt_;
             obs_stack_.nRows      = summary.totalCodeRows + summary.totalDopplerRows + ...
-                                    summary.totalCarrierRows;
+                                    summary.totalCarrierRows + summary.totalIslCodeRows + ...
+                                    summary.totalIslDopplerRows + summary.totalIslCarrierDiagnosticRows + ...
+                                    summary.totalIslTwoWayRangeRows + summary.totalIslTwoWayDopplerDiagnosticRows;
             summary.observableStack = obs_stack_;
             % Stage 45: compact code IF row fields
             summary.codeIonoFreeRowsRequested = revgnss.ReportRunner.safeCfgBool_( ...
@@ -2252,10 +2327,15 @@ classdef ReportRunner
                 end
             end
             L{end+1} = '';
-            L{end+1} = '--- Metrics (last 20 epochs) ---';
-            L{end+1} = sprintf('Final pos error       : %.4f m', summary.finalPositionError_m);
-            L{end+1} = sprintf('Position RMS (last20%%) : %.4f m', summary.finalPositionRMS_m);
-            L{end+1} = sprintf('Clock bias RMS (last20%%): %.4f m', summary.finalClockBiasRMS_m);
+            L{end+1} = '--- Metrics: whole run (honest) vs final 20 epochs ---';
+            L{end+1} = sprintf('Position RMS  whole-run : %.4f m   (median %.4f, max %.4f)', ...
+                summary.positionRMS_runwide_m, summary.positionErrorMedian_m, summary.positionErrorMax_m);
+            L{end+1} = sprintf('Clock RMS     whole-run : %.4f m', summary.clockBiasRMS_runwide_m);
+            L{end+1} = sprintf('Position<->clock err corr: %+.3f   (|corr|~1 => near-unobservable coupling)', ...
+                summary.positionClockErrorCorr);
+            L{end+1} = sprintf('Final pos error         : %.4f m', summary.finalPositionError_m);
+            L{end+1} = sprintf('Position RMS  final 20ep: %.4f m', summary.finalPositionRMS_m);
+            L{end+1} = sprintf('Clock bias RMS final 20ep: %.4f m', summary.finalClockBiasRMS_m);
             L{end+1} = sprintf('Mean NIS              : %.2f  (expected %.1f)', ...
                 summary.meanNIS, summary.expectedNIS);
             L{end+1} = sprintf('Det. mismatch RMS     : %.4f m', ...

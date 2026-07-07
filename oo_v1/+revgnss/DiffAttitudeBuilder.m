@@ -124,7 +124,7 @@ classdef DiffAttitudeBuilder
                 end
                 if sum(refMask) ~= 1; continue; end
                 phi_ref = cpInfo.phi_m(refMask);
-                h_ref = revgnss.MeasurementModelUtils.modelRangeOnly( ...
+                h_ref = models.measurements.MeasurementModelUtils.modelRangeOnly( ...
                     cfg, towers, ti, 1, r_cm, euler, leverArms);
                 for bi = 1:store.nBaselines
                     ai = bi + 1;
@@ -135,7 +135,7 @@ classdef DiffAttitudeBuilder
                     end
                     if sum(bMask) ~= 1; continue; end
                     phi_i = cpInfo.phi_m(bMask);
-                    h_i = revgnss.MeasurementModelUtils.modelRangeOnly( ...
+                    h_i = models.measurements.MeasurementModelUtils.modelRangeOnly( ...
                         cfg, towers, ti, ai, r_cm, euler, leverArms);
                     if store.calibrated && store.activeMask(ti,bi)
                         continue
@@ -158,7 +158,7 @@ classdef DiffAttitudeBuilder
                         (cpInfo.signalIdx == 2);
                     if sum(refMskL2_) == 1
                         phi_ref_L2_ = cpInfo.phi_m(refMskL2_);
-                        h_ref_L2_ = revgnss.MeasurementModelUtils.modelRangeOnly( ...
+                        h_ref_L2_ = models.measurements.MeasurementModelUtils.modelRangeOnly( ...
                             cfg, towers, ti, 1, r_cm, euler, leverArms);
                         for bi = 1:store.nBaselines
                             ai = bi + 1;
@@ -167,7 +167,7 @@ classdef DiffAttitudeBuilder
                                 (cpInfo.signalIdx == 2);
                             if sum(bMskL2_) ~= 1; continue; end
                             phi_i_L2_ = cpInfo.phi_m(bMskL2_);
-                            h_i_L2_   = revgnss.MeasurementModelUtils.modelRangeOnly( ...
+                            h_i_L2_   = models.measurements.MeasurementModelUtils.modelRangeOnly( ...
                                 cfg, towers, ti, ai, r_cm, euler, leverArms);
                             dv_L2_ = (phi_i_L2_ - phi_ref_L2_) - (h_i_L2_ - h_ref_L2_);
                             store.accumN_L2(ti,bi)     = store.accumN_L2(ti,bi)     + 1;
@@ -356,7 +356,7 @@ classdef DiffAttitudeBuilder
                 end
                 if sum(refMask) ~= 1; continue; end
                 phi_ref = cpInfo.phi_m(refMask);
-                h_ref = revgnss.MeasurementModelUtils.modelRangeOnly( ...
+                h_ref = models.measurements.MeasurementModelUtils.modelRangeOnly( ...
                     cfg, towers, ti, 1, r_cm, euler, leverArms);
                 % Stage 70: QES differential Jacobian — compute reference once per tower.
                 H_att_ref = revgnss.LinkGeometry.finiteDiffAttitudeJacobian( ...
@@ -391,7 +391,7 @@ classdef DiffAttitudeBuilder
                     end
                     if sum(bMask) ~= 1; continue; end
                     phi_i = cpInfo.phi_m(bMask);
-                    h_i = revgnss.MeasurementModelUtils.modelRangeOnly( ...
+                    h_i = models.measurements.MeasurementModelUtils.modelRangeOnly( ...
                         cfg, towers, ti, ai, r_cm, euler, leverArms);
                     z_row = phi_i - phi_ref;
                     h_row = (h_i - h_ref) + store.delta_B(ti,bi);

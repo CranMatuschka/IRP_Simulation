@@ -130,6 +130,27 @@ classdef MultiAssetConfig
                 infos(ai).estimated = cfg.assets(ai).estimated;
             end
         end
+
+        function nTx = islTxCount_(cfg)
+            % Number of transmitting secondaries: 'all' -> nSpaceAssets-1, else the
+            % count of valid explicit indices (default single legacy transmitter).
+            nAssets = 1;
+            if isfield(cfg,'scenario') && isfield(cfg.scenario,'nSpaceAssets')
+                nAssets = max(1, round(cfg.scenario.nSpaceAssets));
+            end
+            sel = 'all';
+            if isfield(cfg,'measurements') && isfield(cfg.measurements,'isl') && ...
+                    isfield(cfg.measurements.isl,'transmitters')
+                sel = cfg.measurements.isl.transmitters;
+            end
+            if (ischar(sel) || isstring(sel)) && strcmpi(char(sel),'all')
+                nTx = max(0, nAssets - 1);
+            elseif isnumeric(sel) && ~isempty(sel)
+                v = round(sel(:)'); nTx = numel(v(v >= 2 & v <= nAssets));
+            else
+                nTx = double(nAssets >= 2);
+            end
+        end
     end
 
     methods (Static, Access = private)
@@ -176,15 +197,20 @@ classdef MultiAssetConfig
         end
 
         function n = islRowCount_(cfg)
+            % Total ISL rows generated per epoch = (one-way row types) x (number of
+            % transmitting secondaries) + (two-way row types, single link).
             n = 0;
             if ~isfield(cfg,'measurements') || ~isfield(cfg.measurements,'isl') || ...
                     ~isfield(cfg.measurements.isl,'enable') || ~cfg.measurements.isl.enable
                 return
             end
             isl = cfg.measurements.isl;
-            if isfield(isl,'code') && isfield(isl.code,'enable') && isl.code.enable; n = n + 1; end
-            if isfield(isl,'doppler') && isfield(isl.doppler,'enable') && isl.doppler.enable; n = n + 1; end
-            if isfield(isl,'carrier') && isfield(isl.carrier,'enable') && isl.carrier.enable; n = n + 1; end
+            nTx = revgnss.MultiAssetConfig.islTxCount_(cfg);
+            oneWayTypes = 0;
+            if isfield(isl,'code') && isfield(isl.code,'enable') && isl.code.enable; oneWayTypes = oneWayTypes + 1; end
+            if isfield(isl,'doppler') && isfield(isl.doppler,'enable') && isl.doppler.enable; oneWayTypes = oneWayTypes + 1; end
+            if isfield(isl,'carrier') && isfield(isl.carrier,'enable') && isl.carrier.enable; oneWayTypes = oneWayTypes + 1; end
+            n = n + oneWayTypes * nTx;
             if isfield(isl,'twoWay') && isfield(isl.twoWay,'enable') && isl.twoWay.enable
                 tw = isl.twoWay;
                 if isfield(tw,'range') && isfield(tw.range,'enable') && tw.range.enable; n = n + 1; end

@@ -38,7 +38,7 @@ addpath(fullfile(thisDir, '..'));
     % ---- Test 1: formula vs. explicit rotation (eastward tower) ----
     rho0    = norm(rx_ecef - tx_east);
     tau     = rho0 / c;                    % signal flight time
-    dR_formula = revgnss.RangeCorrections.sagnacCorrectionMeters(rx_ecef, tx_east, cfg);
+    dR_formula = models.corrections.RangeCorrections.sagnacCorrectionMeters(rx_ecef, tx_east, cfg);
 
     % Rotate tx by -omega*tau (Earth rotated, so tx at transmit time was
     % at a position rotated BACK by omega*tau relative to receive-time ECEF frame)
@@ -65,7 +65,7 @@ addpath(fullfile(thisDir, '..'));
     % Place rx north of equator and tx on equator east of rx's meridian.
     rx2 = [R_earth*0.5; 0; R_earth*0.8];  % northern hemisphere rx
     tx2 = [R_earth;     0; 0];             % tx on equator, same meridian as rx
-    dR2 = revgnss.RangeCorrections.sagnacCorrectionMeters(rx2, tx2, cfg);
+    dR2 = models.corrections.RangeCorrections.sagnacCorrectionMeters(rx2, tx2, cfg);
     % tx2_x*rx2_y - tx2_y*rx2_x = R*0 - 0*R*0.5 = 0
     % Near-zero is expected here; just check it runs without error.
     fprintf('  PASS  sign check (near-zero geometry): dR=%.4e m\n', dR2);
@@ -74,7 +74,7 @@ addpath(fullfile(thisDir, '..'));
     % GEO (~36000 km altitude), tower with 500 km eastward offset
     % Expected: dR = omega/c * (r_tx.x*r_rx.y - r_tx.y*r_rx.x) ≈ -4.4 m
     tx_geo_tower = [R_earth; 5e5; 0];  % eastward offset
-    dR3 = revgnss.RangeCorrections.sagnacCorrectionMeters(rx_ecef, tx_geo_tower, cfg);
+    dR3 = models.corrections.RangeCorrections.sagnacCorrectionMeters(rx_ecef, tx_geo_tower, cfg);
     % Check magnitude is in physically plausible range (< 100 m, not zero)
     if abs(dR3) > 100.0 || abs(dR3) < 1e-6
         error('test_sagnac_sign: FAIL — GEO Sagnac out of expected range: %.4f m', dR3);

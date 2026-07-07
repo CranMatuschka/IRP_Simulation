@@ -47,29 +47,29 @@ classdef PseudorangeModelOnlyBuilder
             M_pr     = errStruct.nPseudorange;
 
             h_pr   = zeros(M_pr, 1);
-            mfKind = revgnss.MeasurementModelUtils.zwdMappingKind(cfg);
+            mfKind = models.measurements.MeasurementModelUtils.zwdMappingKind(cfg);
 
             for mi = 1:M_pr
                 ti = twr_list(mi);
                 ai = ant_list(mi);
 
-                r_twr_model = revgnss.MeasurementModelUtils.towerPositionEcef( ...
+                r_twr_model = models.measurements.MeasurementModelUtils.towerPositionEcef( ...
                     cfg, towers{ti}, ti, 'model');
 
                 if isfield(cfg,'effects') && isfield(cfg.effects,'antennaPCO')
                     pco = cfg.effects.antennaPCO;
                     if isfield(pco,'model') && pco.model.enable
                         tOff  = pco.towerOffset_enu_m(:);
-                        R_ENU = revgnss.GeometryUtils.enu2ecef( ...
+                        R_ENU = models.frames.GeometryUtils.enu2ecef( ...
                             towers{ti}.lat_rad, towers{ti}.lon_rad);
                         r_twr_model = r_twr_model + R_ENU * tOff;
                     end
                 end
 
                 r_ant = r_ants_est(:, ai);
-                elv   = revgnss.GeometryUtils.elevationAngle(r_twr_model, r_ant);
+                elv   = models.frames.GeometryUtils.elevationAngle(r_twr_model, r_ant);
 
-                rho_est = revgnss.RangeCorrections.correctedPseudorange( ...
+                rho_est = models.corrections.RangeCorrections.correctedPseudorange( ...
                     r_ant, r_twr_model, cfg, 'model', elv, t_s);
 
                 if isfield(stateMap,'towerClockIdx') && ti <= size(stateMap.towerClockIdx,1) && ...
@@ -90,7 +90,7 @@ classdef PseudorangeModelOnlyBuilder
 
                 if isfield(stateMap,'zwdIdx') && ti <= numel(stateMap.zwdIdx) && ...
                         stateMap.zwdIdx(ti) > 0
-                    mf_h = revgnss.MappingFunctions.troposphere(elv, mfKind);
+                    mf_h = models.atmosphere.MappingFunctions.troposphere(elv, mfKind);
                     h_pr(mi) = h_pr(mi) + mf_h * x_state(stateMap.zwdIdx(ti));
                 end
 
@@ -99,7 +99,7 @@ classdef PseudorangeModelOnlyBuilder
                     h_pr(mi) = h_pr(mi) + x_state(stateMap.txCodeBiasIdx(ti));
                 end
 
-                d_rx = revgnss.MeasurementModelUtils.rxCodeBiasModel(cfg);
+                d_rx = models.measurements.MeasurementModelUtils.rxCodeBiasModel(cfg);
                 if d_rx ~= 0
                     h_pr(mi) = h_pr(mi) + d_rx;
                 end

@@ -2,3 +2,11 @@
 output/latest_validation_summary.json
 output/latest_validation_summary.txt
 output/notion_stage*.md
+
+# Phase-0 regression contract fixtures — committed on purpose (overrides the
+# repo-root "*.mat" ignore). These frozen golden references ARE the contract.
+!tests/regression/golden/*.mat
+# Phase-7 report .tex byte-diff reference (overrides the repo-root "*.txt" ignore).
+!tests/report/golden_report_tex.txt
+tests/regression/full_gate_marker.txt
+tests/regression/verify_report_marker.txt

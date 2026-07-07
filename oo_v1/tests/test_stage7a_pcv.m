@@ -29,7 +29,7 @@ cfg1.effects.antennaPCV.truth.enable  = true;   % legacy ON — should be ignore
 cfg1.effects.antennaPCV.model.enable  = true;
 
 for side = {'truth','model'}
-    [~, c1] = revgnss.RangeCorrections.correctedPseudorange(r_rx, r_twr, cfg1, side{1}, el_low);
+    [~, c1] = models.corrections.RangeCorrections.correctedPseudorange(r_rx, r_twr, cfg1, side{1}, el_low);
     assert(abs(c1.pcv) < 1e-12, 'T1 FAILED: pcvModel=none side=%s pcv=%.2e', side{1}, c1.pcv);
     fprintf('    side=%-5s pcv=%.2e (zero): PASS\n', side{1}, c1.pcv);
 end
@@ -44,7 +44,7 @@ cfg2.effects.antenna.pcvModel         = 'toy';
 cfg2.effects.antennaPCV.truth.enable  = true;
 cfg2.effects.antennaPCV.amplitude_m   = 0.05;
 
-[~, c2] = revgnss.RangeCorrections.correctedPseudorange(r_rx, r_twr, cfg2, 'truth', el_low);
+[~, c2] = models.corrections.RangeCorrections.correctedPseudorange(r_rx, r_twr, cfg2, 'truth', el_low);
 assert(abs(c2.pcv) > 1e-4, 'T2 FAILED: toy PCV at 10 deg should be non-zero, got %.2e', c2.pcv);
 fprintf('    toy PCV(10 deg) = %.4f m (non-zero): PASS\n', c2.pcv);
 
@@ -61,7 +61,7 @@ cfg3.effects.antenna = rmfield(cfg3.effects.antenna, 'receiverPcvTable');
 
 threw3 = false;
 try
-    revgnss.RangeCorrections.correctedPseudorange(r_rx, r_twr, cfg3, 'truth', el_low);
+    models.corrections.RangeCorrections.correctedPseudorange(r_rx, r_twr, cfg3, 'truth', el_low);
 catch ME
     threw3 = true;
     assert(contains(ME.identifier,'pcvTableMissing') || contains(ME.identifier,'RangeCorrections'), ...
@@ -83,7 +83,7 @@ cfg4.effects.antenna.receiverPcvTable.elDeg = [0 30 60 90];
 cfg4.effects.antenna.receiverPcvTable.pcv_m = [0.020 0.010 0.005 0.000];
 
 el30 = 30 * pi/180;
-[~, c4] = revgnss.RangeCorrections.correctedPseudorange(r_rx, r_twr, cfg4, 'truth', el30);
+[~, c4] = models.corrections.RangeCorrections.correctedPseudorange(r_rx, r_twr, cfg4, 'truth', el30);
 assert(abs(c4.pcv - 0.010) < 1e-8, 'T4 FAILED: PCV(30 deg)=%.6f, expected 0.010', c4.pcv);
 fprintf('    PCV(30 deg) = %.4f m (expected 0.010): PASS\n', c4.pcv);
 
@@ -97,7 +97,7 @@ cfg5.effects.antenna.receiverPcvTable.azDeg = 0:10:350;  % azimuth field
 
 threw5 = false;
 try
-    revgnss.RangeCorrections.correctedPseudorange(r_rx, r_twr, cfg5, 'truth', el30);
+    models.corrections.RangeCorrections.correctedPseudorange(r_rx, r_twr, cfg5, 'truth', el30);
 catch ME
     threw5 = true;
     assert(contains(ME.identifier,'pcvAzimuth') || contains(ME.identifier,'RangeCorrections'), ...
@@ -120,7 +120,7 @@ cfg6.effects.antenna.receiverPcvTable.pcv_m = [0.010];
 
 threw6 = false;
 try
-    revgnss.RangeCorrections.correctedPseudorange(r_rx, r_twr, cfg6, 'truth', el30);
+    models.corrections.RangeCorrections.correctedPseudorange(r_rx, r_twr, cfg6, 'truth', el30);
 catch ME
     threw6 = true;
     assert(contains(ME.identifier,'pcvTable') || contains(ME.identifier,'RangeCorrections'), ...

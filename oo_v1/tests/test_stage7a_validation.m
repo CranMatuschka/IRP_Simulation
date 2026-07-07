@@ -113,14 +113,14 @@ cfgSec = revgnss.ConfigFactory.defaultConfig();
 cfgSec.errors.ionosphere.truth.enable = true;
 cfgSec.errors.ionosphere.truth.verticalDelayL1_m = 5.0;
 cfgSec.effects.ionosphere.mappingModel = 'simpleSecant';
-envSec = revgnss.EnvironmentModel(cfgSec, 1);
+envSec = models.errors.EnvironmentModel(cfgSec, 1);
 dSec = envSec.getIonoDelay(1, el_10, 'truth', f_L1, f_L1);
 
 % thinShell config
 cfgTS = cfgSec;
 cfgTS.effects.ionosphere.mappingModel  = 'thinShell';
 cfgTS.effects.ionosphere.shellHeight_m = 350e3;
-envTS = revgnss.EnvironmentModel(cfgTS, 1);
+envTS = models.errors.EnvironmentModel(cfgTS, 1);
 dTS = envTS.getIonoDelay(1, el_10, 'truth', f_L1, f_L1);
 
 relDiff = abs(dSec - dTS) / abs(dSec);
@@ -223,7 +223,7 @@ r_twr7 = [6378e3;  0; 0];
 cfg7   = revgnss.ConfigFactory.defaultConfig();
 cfg7.effects.lightTime.model = 'iterative';
 
-[~, c7] = revgnss.RangeCorrections.correctedPseudorange(r_rx7, r_twr7, cfg7, 'model', pi/4);
+[~, c7] = models.corrections.RangeCorrections.correctedPseudorange(r_rx7, r_twr7, cfg7, 'model', pi/4);
 assert(c7.tau_s > 0.1, 'T7 FAILED: tau_s=%.4f s, expected > 0.1 s for GEO', c7.tau_s);
 assert(~isempty(c7.t_tx_s), 'T7 FAILED: t_tx_s should not be empty in iterative mode');
 fprintf('    iterative tau_s=%.4f s (>0.1 s): PASS\n', c7.tau_s);

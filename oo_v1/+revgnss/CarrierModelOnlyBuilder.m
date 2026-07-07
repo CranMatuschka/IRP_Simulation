@@ -54,27 +54,27 @@ classdef CarrierModelOnlyBuilder
 
             sigIdx = 1;   % L1 only in v1
             h_phi  = zeros(Mp, 1);
-            mfKind = revgnss.MeasurementModelUtils.zwdMappingKind(cfg);
+            mfKind = models.measurements.MeasurementModelUtils.zwdMappingKind(cfg);
 
             for mi = 1:Mp
                 ti = twr_pairs(mi);
                 ai = ant_pairs(mi);
 
-                r_twr_e = revgnss.MeasurementModelUtils.towerPositionEcef( ...
+                r_twr_e = models.measurements.MeasurementModelUtils.towerPositionEcef( ...
                     cfg, towers{ti}, ti, 'model');
                 if isfield(cfg,'effects') && isfield(cfg.effects,'antennaPCO')
                     pco = cfg.effects.antennaPCO;
                     if isfield(pco,'model') && pco.model.enable
                         tOff  = pco.towerOffset_enu_m(:);
-                        R_ENU = revgnss.GeometryUtils.enu2ecef( ...
+                        R_ENU = models.frames.GeometryUtils.enu2ecef( ...
                             towers{ti}.lat_rad, towers{ti}.lon_rad);
                         r_twr_e = r_twr_e + R_ENU * tOff;
                     end
                 end
 
-                elv = revgnss.GeometryUtils.elevationAngle(r_twr_e, r_ants_est(:, ai));
+                elv = models.frames.GeometryUtils.elevationAngle(r_twr_e, r_ants_est(:, ai));
 
-                rho_e = revgnss.RangeCorrections.correctedPseudorange( ...
+                rho_e = models.corrections.RangeCorrections.correctedPseudorange( ...
                     r_ants_est(:, ai), r_twr_e, cfg, 'model', elv, t_s);
 
                 if isfield(stateMap,'towerClockIdx') && ti <= size(stateMap.towerClockIdx,1) && ...
@@ -111,7 +111,7 @@ classdef CarrierModelOnlyBuilder
 
                 if isfield(stateMap,'zwdIdx') && ti <= numel(stateMap.zwdIdx) && ...
                         stateMap.zwdIdx(ti) > 0
-                    mf = revgnss.MappingFunctions.troposphere(elv, mfKind);
+                    mf = models.atmosphere.MappingFunctions.troposphere(elv, mfKind);
                     h_phi(mi) = h_phi(mi) + mf * x_state(stateMap.zwdIdx(ti));
                 end
             end
