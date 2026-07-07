@@ -656,7 +656,7 @@ else
     cfg.measurements.isl.timing.enable = false;
     cfg.measurements.isl.code.enable    = true;
     cfg.measurements.isl.code.useInEKF  = true;
-    cfg.measurements.isl.code.sigma_m   = 1.0;    % one-way ISL code thermal 1-sigma [m]
+    cfg.measurements.isl.code.sigma_m   = 0.3;    % one-way ISL code thermal 1-sigma [m] (good microwave ISL)
     cfg.measurements.isl.doppler.enable   = true;
     cfg.measurements.isl.doppler.useInEKF = true;
     cfg.measurements.isl.doppler.sigma_mps = 0.05;
@@ -664,8 +664,8 @@ else
     cfg.measurements.isl.carrier.useInEKF = false;
     % Represented-secondary precise-orbit/clock product uncertainty (honest aiding).
     cfg.measurements.isl.product.enable        = true;
-    cfg.measurements.isl.product.sigmaPos_m    = 0.05;
-    cfg.measurements.isl.product.sigmaClock_m  = 0.03;   % ~100 ps reference clock product
+    cfg.measurements.isl.product.sigmaPos_m    = 0.03;   % ~3 cm SLR-class precise reference orbit
+    cfg.measurements.isl.product.sigmaClock_m  = 0.02;   % ~67 ps reference clock product
     % Two-way ISL range is ill-conditioned into this near-degenerate filter; keep it
     % diagnostic (double-counting guard also forbids it alongside one-way code).
     cfg.measurements.isl.twoWay.enable          = false;
