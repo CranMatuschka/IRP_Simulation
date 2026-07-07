@@ -137,16 +137,15 @@ classdef ClockExactReportBuilder
 
     methods (Static)  % (Phase 7: report toolkit callable by extracted +revgnss/+report/ sections)
 
-        function cleanBuildArtifacts_(texPath, figDir)
-            % cleanBuildArtifacts_  Remove LaTeX intermediates after successful compile.
+        function cleanBuildArtifacts_(texPath, figDir) %#ok<INUSD>
+            % cleanBuildArtifacts_  Remove LaTeX intermediates after a successful
+            % compile. The figures/ folder is preserved next to the report PDF and
+            % MAT file so the individual figure PDFs remain available to the user.
             exts = {'.tex', '.aux', '.log', '.out', '.toc', '.synctex.gz'};
             base = texPath(1:end-4);  % strip .tex
             for k = 1:numel(exts)
                 f = [base exts{k}];
                 if exist(f,'file') == 2; try; delete(f); catch; end; end
-            end
-            if exist(figDir,'dir') == 7
-                try; rmdir(figDir,'s'); catch; end
             end
         end
 
@@ -165,6 +164,10 @@ classdef ClockExactReportBuilder
             if isDiag; try; t = diag.getTimeVector(); catch; end; end
 
             CE = revgnss.ClockExactReportBuilder;
+
+            % Scenario geometry: spacecraft body + reference frames (3-D -> raster PDF).
+            paths.scGeom = CE.tryPlot3D_(figDir, [stem '_sc_frames.pdf'], @() ...
+                CE.plotSpacecraftFrames_(cfg));
 
             % Position error
             paths.posErr = CE.tryPlot_(figDir, [stem '_position_error.pdf'], @() ...
@@ -451,11 +454,12 @@ classdef ClockExactReportBuilder
                     catch vecME
                         if doFallback
                             warning('ClockExactReportBuilder:vectorFallback', ...
-                                'Vector export failed for %s (%s); falling back to PNG.', ...
+                                'Vector export failed for %s (%s); falling back to a raster PDF.', ...
                                 fname, vecME.message);
                             try
-                                print(fig, pngPath, '-dpng', '-r220');
-                                outPath = pngPath;
+                                exportgraphics(fig, pdfPath, 'ContentType','image', ...
+                                    'Resolution',220, 'BackgroundColor','white');
+                                outPath = pdfPath;
                             catch
                                 outPath = '';
                             end
@@ -467,6 +471,33 @@ classdef ClockExactReportBuilder
             catch ME
                 warning('ClockExactReportBuilder:plotExportFailed', ...
                     'Plot export failed for %s: %s', fname, ME.message);
+                outPath = '';
+            end
+            try; drawnow limitrate; catch; end
+        end
+
+        % ................................................................
+        function outPath = tryPlot3D_(figDir, fname, plotFcn)
+            % tryPlot3D_  Render a lit 3-D scene and export it as a PDF holding a
+            % rasterised image (ContentType='image'). Unlike tryPlot_ this keeps the
+            % default (OpenGL) renderer so lighting and transparency survive; a true
+            % vector export would flatten them.
+            outPath = '';
+            [~, stem_name, ~] = fileparts(fname);
+            pdfPath = fullfile(figDir, [stem_name '.pdf']);
+            fig = [];
+            try
+                fig = plotFcn();
+                if ~isgraphics(fig); return; end
+                cleanupObj = onCleanup( ...
+                    @() revgnss.ClockExactReportBuilder.safeCloseFig_(fig)); %#ok<NASGU>
+                set(fig, 'Visible','off', 'Color','white', 'InvertHardcopy','off');
+                exportgraphics(fig, pdfPath, 'ContentType','image', ...
+                    'Resolution', 200, 'BackgroundColor','white');
+                outPath = pdfPath;
+            catch ME
+                warning('ClockExactReportBuilder:plot3DFailed', ...
+                    '3-D plot export failed for %s: %s', fname, ME.message);
                 outPath = '';
             end
             try; drawnow limitrate; catch; end
@@ -814,7 +845,7 @@ classdef ClockExactReportBuilder
             fprintf(fid, '\\vspace{0.3cm}\n');
 
             % ---- Sections -----------------------------------------------
-            revgnss.report.scenarioSummary(fid, cfg, summary, diag, nTwr, nRx, dur, dt, esc);
+            revgnss.report.scenarioSummary(fid, cfg, summary, diag, nTwr, nRx, dur, dt, esc, plotPaths, stem, figDir);
             revgnss.report.stateEstimation(fid, plotPaths, stem, cfg, diag, figDir);
             revgnss.report.measurementValidation(fid, plotPaths, stem, figDir, diag);
             revgnss.report.oscillatorValidation(fid, plotPaths, stem, figDir, cfg);
@@ -1149,6 +1180,154 @@ classdef ClockExactReportBuilder
         % writeTropZwdArchitecture_ extracted to +revgnss/+report/tropZwdArchitecture.m (Phase 7).
 
         % writeActivePhysicsConfig_ extracted to +revgnss/+report/activePhysicsConfig.m (Phase 7).
+
+        % ================================================================
+        % SPACECRAFT + REFERENCE-FRAME SCHEMATIC (scenario geometry)
+        % ================================================================
+        function fig = plotSpacecraftFrames_(cfg)
+            % plotSpacecraftFrames_  Stylised 3-D schematic of the primary space
+            % asset (octagonal bus + two octagonal solar panels), Earth in the
+            % nadir direction, and the ECI / ECEF / RAC / body reference frames.
+            % When a helix swarm is active the secondary formation is overlaid.
+            % Explicitly NOT to scale (body ~m, formation ~km, orbit ~10^4 km).
+            CE  = revgnss.ClockExactReportBuilder;
+            fig = figure('Visible','off','Color','white');
+            set(fig, 'Units','centimeters', 'Position',[0 0 13 10], ...
+                'PaperUnits','centimeters','PaperSize',[13 10],'PaperPositionMode','auto');
+            ax = axes(fig); hold(ax,'on');
+
+            % --- Canonical equatorial-GEO layout (schematic) ---
+            % Radial along +X (Earth to the left), along-track +Y, cross-track +Z.
+            % For an equatorial orbit the cross-track axis is the spin axis, so RAC
+            % and ECI share the C / Z_I axis -- a useful thing to show.
+            r_hat = [1;0;0]; a_hat = [0;1;0]; h_hat = [0;0;1];
+
+            % --- Schematic scene (Earth in nadir direction, not to scale) ---
+            U = 1; scPos = [0;0;0];
+            earthDist = 5.6*U; Re = 1.3*U;
+            earthPos  = -earthDist * r_hat;
+
+            [xe,ye,ze] = sphere(28);
+            surf(ax, earthPos(1)+Re*xe, earthPos(2)+Re*ye, earthPos(3)+Re*ze, ...
+                'FaceColor',[0.30 0.55 0.85], 'EdgeColor','none', 'FaceAlpha',0.65, ...
+                'FaceLighting','gouraud','AmbientStrength',0.6);
+            text(ax, earthPos(1), earthPos(2), earthPos(3)-Re-0.7, 'Earth', ...
+                'Color',[0.15 0.30 0.55], 'FontSize',9, 'FontWeight','bold', ...
+                'HorizontalAlignment','center');
+
+            nadirTip = (-earthDist + Re) * r_hat;
+            plot3(ax, [scPos(1) nadirTip(1)], [scPos(2) nadirTip(2)], [scPos(3) nadirTip(3)], ...
+                ':', 'Color',[0.45 0.45 0.45], 'LineWidth',1);
+            text(ax, 0.45*nadirTip(1), 0.45*nadirTip(2), 0.45*nadirTip(3)+0.35, 'nadir', ...
+                'Color',[0.4 0.4 0.4], 'FontSize',7, 'HorizontalAlignment','center');
+
+            % --- Body attitude: nadir-pointing base + representative offset ---
+            bx = a_hat; bz = -r_hat; by = cross(bz,bx); by = by/norm(by); bx = cross(by,bz);
+            Cnadir = [bx by bz];
+            ry = deg2rad(12); rz = deg2rad(22);
+            Roff = [cos(rz) -sin(rz) 0; sin(rz) cos(rz) 0; 0 0 1] * ...
+                   [cos(ry) 0 sin(ry); 0 1 0; -sin(ry) 0 cos(ry)];
+            Cbody = Cnadir * Roff;
+
+            CE.drawSpacecraftBody_(ax, scPos, Cbody, 0.85*U);
+
+            % --- Reference frames (RAC + body at the spacecraft; ECI + ECEF at Earth) ---
+            Lr = 2.0*U; Le = 3.0*U;
+            CE.drawFrameTriad_(ax, scPos, [r_hat a_hat h_hat], Lr, {'R','A','C'}, [0.85 0.33 0.10], '-');
+            CE.drawFrameTriad_(ax, scPos, Cbody, 0.92*Lr, {'x_B','y_B','z_B'}, [0.10 0.60 0.20], '-');
+            CE.drawFrameTriad_(ax, earthPos, eye(3), Le, {'X_I','Y_I','Z_I'}, [0 0 0], '-');
+            th = deg2rad(35); Rz = [cos(th) -sin(th) 0; sin(th) cos(th) 0; 0 0 1];
+            CE.drawFrameTriad_(ax, earthPos, Rz, 0.9*Le, {'X_E','Y_E','Z_E'}, [0.20 0.35 0.95], '--');
+
+            % --- Helix formation (only when secondary assets exist) ---
+            hasSwarm = false;
+            try; hasSwarm = revgnss.SwarmFormation.nSecondaries(cfg) >= 1; catch; end
+            if hasSwarm
+                A = [r_hat a_hat h_hat]; rho = 2.3*U;
+                ph = linspace(0, 2*pi, 80);
+                Wr = A * [(rho/2)*sin(ph); rho*cos(ph); rho*sin(ph)] + scPos;
+                plot3(ax, Wr(1,:), Wr(2,:), Wr(3,:), '-', 'Color',[0.60 0.20 0.60], 'LineWidth',1.2);
+                nSec = revgnss.SwarmFormation.nSecondaries(cfg);
+                for k = 1:min(nSec,8)
+                    phk = 2*pi*(k-1)/max(nSec,1);
+                    pk = A*[(rho/2)*sin(phk); rho*cos(phk); rho*sin(phk)] + scPos;
+                    plot3(ax, pk(1),pk(2),pk(3), 'o', 'MarkerFaceColor',[0.60 0.20 0.60], ...
+                        'MarkerEdgeColor','k', 'MarkerSize',5);
+                end
+            end
+
+            % --- Frame colour key (drawn via off-screen handles) ---
+            k1 = plot3(ax, nan,nan,nan, '-',  'Color',[0.85 0.33 0.10], 'LineWidth',2.5);
+            k2 = plot3(ax, nan,nan,nan, '-',  'Color',[0.10 0.60 0.20], 'LineWidth',2.5);
+            k3 = plot3(ax, nan,nan,nan, '-',  'Color',[0 0 0],          'LineWidth',2.5);
+            k4 = plot3(ax, nan,nan,nan, '--', 'Color',[0.20 0.35 0.95], 'LineWidth',2.5);
+            keyLbl = {'RAC (orbital)','Body (attitude)','ECI (inertial)','ECEF (Earth-fixed)'};
+            keyH = [k1 k2 k3 k4];
+            if hasSwarm
+                k5 = plot3(ax, nan,nan,nan, '-o', 'Color',[0.60 0.20 0.60], 'LineWidth',1.5, ...
+                    'MarkerFaceColor',[0.60 0.20 0.60], 'MarkerSize',4);
+                keyH(end+1) = k5; keyLbl{end+1} = 'Helix formation';
+            end
+            lg = legend(ax, keyH, keyLbl, 'Location','southoutside', ...
+                'Orientation','horizontal', 'FontSize',7.5);
+            try; lg.NumColumns = min(numel(keyLbl),3); catch; end
+
+            % --- Cosmetics ---
+            axis(ax,'equal'); axis(ax,'off'); view(ax, -37, 18);
+            light('Parent',ax,'Position',[1 1 1],'Style','infinite');
+            light('Parent',ax,'Position',[-1 -0.5 0.5],'Style','infinite');
+            material(ax,'dull');
+            title(ax, 'Spacecraft body and reference frames (schematic, not to scale)', ...
+                'FontSize',9, 'FontWeight','bold');
+        end
+
+        function drawSpacecraftBody_(ax, center, C, s)
+            % drawSpacecraftBody_  Octagonal bus + two octagonal solar panels,
+            % oriented by rotation C (body->world), centred at 'center', scale s.
+            th = ((0:7)' + 0.5) / 8 * 2*pi;      % 8 vertices (flat top/bottom)
+            oc = [cos(th) sin(th)];
+            c0 = center(:)';
+            W  = @(P) (C * P')' + c0;            % body [Nx3] -> world [Nx3]
+            rB = 0.62*s; hB = 0.85*s;
+            botW = W([rB*oc, -hB*ones(8,1)]);
+            topW = W([rB*oc,  hB*ones(8,1)]);
+            grey = [0.78 0.78 0.80];
+            patch(ax,'Vertices',botW,'Faces',1:8,'FaceColor',grey*0.9,'EdgeColor',[0.25 0.25 0.25],'LineWidth',0.5);
+            patch(ax,'Vertices',topW,'Faces',1:8,'FaceColor',grey,    'EdgeColor',[0.25 0.25 0.25],'LineWidth',0.5);
+            for i = 1:8
+                j = mod(i,8) + 1;
+                patch(ax,'Vertices',[botW(i,:);botW(j,:);topW(j,:);topW(i,:)], ...
+                    'Faces',[1 2 3 4],'FaceColor',grey,'EdgeColor',[0.25 0.25 0.25],'LineWidth',0.5);
+            end
+            % Two octagonal solar panels in the body x-y plane (broad face along the
+            % body z axis), on +/- y booms.
+            rP = 1.2*s; boom = 1.15*s; panel = [rP*oc(:,1), rP*oc(:,2), zeros(8,1)];
+            blue = [0.16 0.28 0.58];
+            for sgn = [-1 1]
+                ctr = [0, sgn*(boom+rP), 0];
+                patch(ax,'Vertices',W(panel + ctr),'Faces',1:8, ...
+                    'FaceColor',blue,'EdgeColor',[0.10 0.10 0.35],'LineWidth',0.5);
+                for gx = [-0.45 0 0.45]            % solar-cell grid lines
+                    g0 = W([gx*rP, ctr(2)-rP*0.7, 0]); g1 = W([gx*rP, ctr(2)+rP*0.7, 0]);
+                    plot3(ax,[g0(1) g1(1)],[g0(2) g1(2)],[g0(3) g1(3)],'-','Color',[0.4 0.5 0.8],'LineWidth',0.5);
+                end
+                b0 = W([0, sgn*rB, 0]); b1 = W([0, sgn*boom, 0]);
+                plot3(ax,[b0(1) b1(1)],[b0(2) b1(2)],[b0(3) b1(3)],'-','Color',[0.3 0.3 0.3],'LineWidth',2);
+            end
+        end
+
+        function drawFrameTriad_(ax, origin, R, L, labels, color, style)
+            % drawFrameTriad_  Three labelled arrows for a coordinate frame.
+            o = origin(:);
+            for i = 1:3
+                d = R(:,i) * L;
+                quiver3(ax, o(1),o(2),o(3), d(1),d(2),d(3), 0, ...
+                    'Color',color, 'LineWidth',1.6, 'MaxHeadSize',0.55, 'LineStyle',style);
+                p = o + d*1.10;
+                text(ax, p(1),p(2),p(3), labels{i}, 'Color',color, ...
+                    'FontSize',8, 'FontWeight','bold', 'HorizontalAlignment','center');
+            end
+        end
 
         % ================================================================
         % LONGTABLE HELPERS

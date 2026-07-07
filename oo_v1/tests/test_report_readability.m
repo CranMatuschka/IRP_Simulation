@@ -179,3 +179,22 @@ function testRacDegenerateFallback(tc)
     rac = revgnss.OrbitFrame.ecefToRac([1;2;3], [0;0;0], [0;0;0]);
     verifyTrue(tc, all(isnan(rac)), 'Degenerate epoch should produce NaN RAC.');
 end
+
+function testRacGeoUsesInertialVelocity(tc)
+    % A geostationary asset has ~zero ECEF velocity; ecefToRacGeo must still work.
+    r = [4.2164e7;0;0]; v = [0;0;0];
+    racPlain = revgnss.OrbitFrame.ecefToRac([1;2;3], r, v);
+    racGeo   = revgnss.OrbitFrame.ecefToRacGeo([1;2;3], r, v);
+    verifyTrue(tc, all(isnan(racPlain)), 'Plain RAC should be degenerate for v_ecef=0.');
+    verifyTrue(tc, all(isfinite(racGeo)), 'GEO RAC should be finite via inertial velocity.');
+    verifyEqual(tc, norm(racGeo), norm([1;2;3]), 'AbsTol', 1e-9, 'RAC projection must preserve the norm.');
+end
+
+function testSpacecraftFramesPlotRenders(tc)
+    cfg = masterConfig(); cfg.scenario.nSpaceAssets = 6;   % swarm -> helix overlaid
+    fig = revgnss.ClockExactReportBuilder.plotSpacecraftFrames_(cfg);
+    guard = onCleanup(@() close(fig)); %#ok<NASGU>
+    verifyTrue(tc, isgraphics(fig), 'Spacecraft-frames plot did not return a figure.');
+    verifyFalse(tc, isempty(findobj(fig,'Type','axes')), 'Plot has no axes.');
+    verifyGreaterThan(tc, numel(findobj(fig,'Type','patch')), 3, 'Spacecraft body/panels not drawn.');
+end
