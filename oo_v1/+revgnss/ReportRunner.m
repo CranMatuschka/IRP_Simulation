@@ -43,7 +43,10 @@ classdef ReportRunner
                 writeMat = cfg.report.writeMat;
             end
 
-            % cfg.report.reportFolder bypasses the date-stamped subfolder.
+            % cfg.report.reportFolder bypasses the per-run folder (used by test harnesses).
+            % Otherwise every run gets its own folder:
+            %   output/Report_YYYYMMDD/Report_HHMM_v###_G#S#R#/
+            % where G/S/R = number of ground towers / space assets / receivers.
             reportFolder = '';
             try; reportFolder = cfg.report.reportFolder; catch; end
             if isempty(reportFolder)
@@ -51,23 +54,32 @@ classdef ReportRunner
                 if isfield(cfg,'report') && isfield(cfg.report,'baseOutputDir')
                     baseDir = cfg.report.baseOutputDir;
                 end
-                prefix = 'Report-';
-                if isfield(cfg,'report') && isfield(cfg.report,'dateFolderPrefix')
-                    prefix = cfg.report.dateFolderPrefix;
+                dateFolder = fullfile(baseDir, ['Report_' datestr(now,'yyyymmdd')]); %#ok<TNOW1,DATST>
+                runVer = 1; try; runVer = cfg.report.runVersion;     catch; end
+                nG = 0;     try; nG = cfg.scenario.nTowers;           catch; end
+                nS = 1;     try; nS = cfg.scenario.nSpaceAssets;      catch; end
+                nR = 1;     try; nR = cfg.scenario.nReceivers;        catch; end
+                runName = sprintf('Report_%s_v%03d_G%dS%dR%d', ...
+                    datestr(now,'HHMM'), runVer, nG, nS, nR); %#ok<TNOW1,DATST>
+                reportFolder = fullfile(dateFolder, runName);
+                if exist(reportFolder,'dir')   % same-minute collision -> use seconds
+                    runName = sprintf('Report_%s_v%03d_G%dS%dR%d', ...
+                        datestr(now,'HHMMSS'), runVer, nG, nS, nR); %#ok<TNOW1,DATST>
+                    reportFolder = fullfile(dateFolder, runName);
                 end
-                reportFolder = fullfile(baseDir, [prefix datestr(now,'yyyymmdd')]); %#ok<TNOW1,DATST>
+                cfg.report.reportFolder = reportFolder;   % share with ClockExactReportBuilder
             end
 
-            % cfg.report.stem overrides the default versioned file names.
+            % Unified file stem: the PDF, MAT, .out and figures all share one name;
+            % the version and topology live in the folder name, not the file names.
             pdfStem = '';
             try; pdfStem = cfg.report.stem; catch; end
-            if ~isempty(pdfStem)
-                pdfPath = fullfile(reportFolder, [pdfStem '.pdf']);
-                matPath = fullfile(reportFolder, [pdfStem '.mat']);
-            else
-                pdfPath = fullfile(reportFolder, sprintf('report-v%s.pdf', version));
-                matPath = fullfile(reportFolder, sprintf('report-v%s.mat', version));
+            if isempty(pdfStem)
+                pdfStem = 'report';
+                cfg.report.stem = pdfStem;                % share with ClockExactReportBuilder
             end
+            pdfPath = fullfile(reportFolder, [pdfStem '.pdf']);
+            matPath = fullfile(reportFolder, [pdfStem '.mat']);
 
             fprintf('=== ReportRunner: starting ===\n');
             fprintf('  Version : %s\n', version);
@@ -1639,6 +1651,11 @@ classdef ReportRunner
             out.matPath           = matPath;
             out.texPath           = texPath2;
 
+            % Run log (<stem>.out) beside the PDF/MAT.
+            if writePdf || writeMat
+                revgnss.ReportRunner.writeRunLog_(reportFolder, pdfStem, cfg, summary, pdfPath, matPath);
+            end
+
             fprintf('=== ReportRunner: done ===\n');
         end
 
@@ -2382,6 +2399,48 @@ classdef ReportRunner
             end
         end
 
+        function writeRunLog_(reportFolder, stem, cfg, summary, pdfPath, matPath)
+            % writeRunLog_  Write a concise <stem>.out run log beside the PDF/MAT.
+            try
+                fid = fopen(fullfile(reportFolder, [stem '.out']), 'w');
+                if fid < 0; return; end
+                closer = onCleanup(@() fclose(fid)); %#ok<NASGU>
+                gc = @(p,d) revgnss.ReportRunner.fieldOrPath_(cfg, p, d);
+                fprintf(fid, 'oo_v1 reverse-GNSS run log\n');
+                fprintf(fid, 'generated : %s\n', datestr(now)); %#ok<TNOW1,DATST>
+                fprintf(fid, 'version   : %s\n', gc({'report','version'}, '?'));
+                fprintf(fid, 'scenario  : %s\n', gc({'scenario','name'}, '?'));
+                fprintf(fid, 'topology  : G%g towers, S%g space assets, R%g receivers\n', ...
+                    gc({'scenario','nTowers'}, NaN), gc({'scenario','nSpaceAssets'}, NaN), ...
+                    gc({'scenario','nReceivers'}, NaN));
+                fprintf(fid, 'duration  : %g s (dt %g s)\n', ...
+                    gc({'simulation','duration_s'}, NaN), gc({'simulation','dt_s'}, NaN));
+                fprintf(fid, '\n-- final metrics --\n');
+                mkeys = {'finalPositionError_m','finalPositionRMS_m','finalClockErr_m', ...
+                         'finalAttitudeError_deg','maxEKFRows'};
+                for i = 1:numel(mkeys)
+                    if isfield(summary, mkeys{i}) && isnumeric(summary.(mkeys{i})) && isscalar(summary.(mkeys{i}))
+                        fprintf(fid, '  %-22s : %.6g\n', mkeys{i}, summary.(mkeys{i}));
+                    end
+                end
+                fprintf(fid, '\n-- outputs --\n');
+                fprintf(fid, '  pdf     : %s\n', pdfPath);
+                fprintf(fid, '  mat     : %s\n', matPath);
+                fprintf(fid, '  figures : %s\n', fullfile(reportFolder, 'figures'));
+            catch; end
+        end
+
+        function v = fieldOrPath_(s, path, default)
+            % fieldOrPath_  Nested struct field lookup with a default.
+            v = default; node = s;
+            for k = 1:numel(path)
+                if ~isstruct(node) || ~isfield(node, path{k}); v = default; return; end
+                node = node.(path{k});
+            end
+            v = node;
+        end
+
+        % ----------------------------------------------------------------
         function val = safeCfgBool_(cfg, path, default)
             val = default;
             node = cfg;

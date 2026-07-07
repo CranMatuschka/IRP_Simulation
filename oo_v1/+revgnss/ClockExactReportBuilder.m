@@ -137,16 +137,15 @@ classdef ClockExactReportBuilder
 
     methods (Static)  % (Phase 7: report toolkit callable by extracted +revgnss/+report/ sections)
 
-        function cleanBuildArtifacts_(texPath, figDir)
-            % cleanBuildArtifacts_  Remove LaTeX intermediates after successful compile.
+        function cleanBuildArtifacts_(texPath, figDir) %#ok<INUSD>
+            % cleanBuildArtifacts_  Remove LaTeX intermediates after a successful
+            % compile. The figures/ folder is preserved next to the report PDF and
+            % MAT file so the individual figure PDFs remain available to the user.
             exts = {'.tex', '.aux', '.log', '.out', '.toc', '.synctex.gz'};
             base = texPath(1:end-4);  % strip .tex
             for k = 1:numel(exts)
                 f = [base exts{k}];
                 if exist(f,'file') == 2; try; delete(f); catch; end; end
-            end
-            if exist(figDir,'dir') == 7
-                try; rmdir(figDir,'s'); catch; end
             end
         end
 
@@ -451,11 +450,12 @@ classdef ClockExactReportBuilder
                     catch vecME
                         if doFallback
                             warning('ClockExactReportBuilder:vectorFallback', ...
-                                'Vector export failed for %s (%s); falling back to PNG.', ...
+                                'Vector export failed for %s (%s); falling back to a raster PDF.', ...
                                 fname, vecME.message);
                             try
-                                print(fig, pngPath, '-dpng', '-r220');
-                                outPath = pngPath;
+                                exportgraphics(fig, pdfPath, 'ContentType','image', ...
+                                    'Resolution',220, 'BackgroundColor','white');
+                                outPath = pdfPath;
                             catch
                                 outPath = '';
                             end
@@ -467,6 +467,34 @@ classdef ClockExactReportBuilder
             catch ME
                 warning('ClockExactReportBuilder:plotExportFailed', ...
                     'Plot export failed for %s: %s', fname, ME.message);
+                outPath = '';
+            end
+            try; drawnow limitrate; catch; end
+        end
+
+        % ................................................................
+        function outPath = tryPlot3D_(figDir, fname, plotFcn, resolution)
+            % tryPlot3D_  Render a lit 3-D scene and export it as a PDF holding a
+            % rasterised image (ContentType='image'). Unlike tryPlot_ this keeps the
+            % default (OpenGL) renderer so lighting and transparency survive; a true
+            % vector export would flatten them. Optional resolution (DPI) defaults to 200.
+            if nargin < 4 || isempty(resolution); resolution = 200; end
+            outPath = '';
+            [~, stem_name, ~] = fileparts(fname);
+            pdfPath = fullfile(figDir, [stem_name '.pdf']);
+            fig = [];
+            try
+                fig = plotFcn();
+                if ~isgraphics(fig); return; end
+                cleanupObj = onCleanup( ...
+                    @() revgnss.ClockExactReportBuilder.safeCloseFig_(fig)); %#ok<NASGU>
+                set(fig, 'Visible','off', 'Color','white', 'InvertHardcopy','off');
+                exportgraphics(fig, pdfPath, 'ContentType','image', ...
+                    'Resolution', resolution, 'BackgroundColor','white');
+                outPath = pdfPath;
+            catch ME
+                warning('ClockExactReportBuilder:plot3DFailed', ...
+                    '3-D plot export failed for %s: %s', fname, ME.message);
                 outPath = '';
             end
             try; drawnow limitrate; catch; end
@@ -814,7 +842,7 @@ classdef ClockExactReportBuilder
             fprintf(fid, '\\vspace{0.3cm}\n');
 
             % ---- Sections -----------------------------------------------
-            revgnss.report.scenarioSummary(fid, cfg, summary, diag, nTwr, nRx, dur, dt, esc);
+            revgnss.report.scenarioSummary(fid, cfg, summary, diag, nTwr, nRx, dur, dt, esc, plotPaths, stem, figDir);
             revgnss.report.stateEstimation(fid, plotPaths, stem, cfg, diag, figDir);
             revgnss.report.measurementValidation(fid, plotPaths, stem, figDir, diag);
             revgnss.report.oscillatorValidation(fid, plotPaths, stem, figDir, cfg);
@@ -1149,6 +1177,10 @@ classdef ClockExactReportBuilder
         % writeTropZwdArchitecture_ extracted to +revgnss/+report/tropZwdArchitecture.m (Phase 7).
 
         % writeActivePhysicsConfig_ extracted to +revgnss/+report/activePhysicsConfig.m (Phase 7).
+
+        % Spacecraft + reference-frame schematic moved to the standalone, editable
+        % output/utils/make_spacecraft_frames.m (scenario-independent; exported via
+        % tryPlot3D_ to output/utils/spacecraft_frames.pdf, which the report references).
 
         % ================================================================
         % LONGTABLE HELPERS

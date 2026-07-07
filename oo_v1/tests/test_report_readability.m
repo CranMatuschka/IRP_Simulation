@@ -179,3 +179,30 @@ function testRacDegenerateFallback(tc)
     rac = revgnss.OrbitFrame.ecefToRac([1;2;3], [0;0;0], [0;0;0]);
     verifyTrue(tc, all(isnan(rac)), 'Degenerate epoch should produce NaN RAC.');
 end
+
+function testRacGeoUsesInertialVelocity(tc)
+    % A geostationary asset has ~zero ECEF velocity; ecefToRacGeo must still work.
+    r = [4.2164e7;0;0]; v = [0;0;0];
+    racPlain = revgnss.OrbitFrame.ecefToRac([1;2;3], r, v);
+    racGeo   = revgnss.OrbitFrame.ecefToRacGeo([1;2;3], r, v);
+    verifyTrue(tc, all(isnan(racPlain)), 'Plain RAC should be degenerate for v_ecef=0.');
+    verifyTrue(tc, all(isfinite(racGeo)), 'GEO RAC should be finite via inertial velocity.');
+    verifyEqual(tc, norm(racGeo), norm([1;2;3]), 'AbsTol', 1e-9, 'RAC projection must preserve the norm.');
+end
+
+function testSpacecraftFramesPlotRenders(tc)
+    % The schematic now lives in the standalone, editable
+    % output/utils/make_spacecraft_frames.m (single source of truth).
+    % Exercise it end-to-end: render + export a PDF.
+    rootDir = fileparts(fileparts(mfilename('fullpath')));   % .../oo_v1
+    addpath(fullfile(rootDir, 'output', 'utils'));
+    cfg = masterConfig(); cfg.scenario.nSpaceAssets = 6;     % swarm -> helix overlaid
+    tmp = tempname; mkdir(tmp);
+    guard = onCleanup(@() rmdir(tmp, 's')); %#ok<NASGU>
+    cfg.report.baseOutputDir = tmp;
+    outPath = make_spacecraft_frames(cfg);
+    verifyNotEmpty(tc, outPath, 'make_spacecraft_frames returned no path (render/export failed).');
+    verifyEqual(tc, exist(outPath,'file'), 2, 'spacecraft_frames.pdf was not written.');
+    info = dir(outPath);
+    verifyGreaterThan(tc, info.bytes, 5000, 'spacecraft_frames.pdf is implausibly small.');
+end
