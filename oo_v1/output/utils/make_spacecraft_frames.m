@@ -42,7 +42,7 @@ function outPath = make_spacecraft_frames(cfg)
     if ~exist(utilsOut, 'dir'); mkdir(utilsOut); end
 
     % Export resolution in DPI -- raise for crisper output (200 was the old default).
-    res = 300;
+    res = 600;
     outPath = revgnss.ClockExactReportBuilder.tryPlot3D_( ...
         utilsOut, 'spacecraft_frames.pdf', @() localPlotSpacecraftFrames(cfg), res);
 
@@ -75,7 +75,7 @@ function fig = localPlotSpacecraftFrames(cfg)
 
     % --- Schematic scene (Earth in nadir direction, not to scale) ---
     U = 1; scPos = [0;0;0];
-    earthDist = 5.6*U; Re = 1.3*U;
+    earthDist = 7.5*U; Re = 1.3*U;   % Earth<->spacecraft separation (raise for a bigger gap)
     earthPos  = -earthDist * r_hat;
 
     [xe,ye,ze] = sphere(48);   % higher tessellation -> smoother Earth
@@ -106,9 +106,11 @@ function fig = localPlotSpacecraftFrames(cfg)
     Lr = 2.0*U; Le = 3.0*U;
     drawFrameTriad(ax, scPos, [r_hat a_hat h_hat], Lr, {'R','A','C'}, [0.85 0.33 0.10], '-', lwScale);
     drawFrameTriad(ax, scPos, Cbody, 0.92*Lr, {'x_B','y_B','z_B'}, [0.10 0.60 0.20], '-', lwScale);
-    drawFrameTriad(ax, earthPos, eye(3), Le, {'X_I','Y_I','Z_I'}, [0 0 0], '-', lwScale);
+    % ECI and ECEF share the +Z (spin) axis, so their Z arrows coincide; pull the
+    % Z_I / Z_E labels to opposite sides of that shared arrow (+Y is screen-left).
+    drawFrameTriad(ax, earthPos, eye(3), Le, {'X_I','Y_I','Z_I'}, [0 0 0], '-', lwScale, [0  1.1 -0.4]);
     th = deg2rad(35); Rz = [cos(th) -sin(th) 0; sin(th) cos(th) 0; 0 0 1];
-    drawFrameTriad(ax, earthPos, Rz, 0.9*Le, {'X_E','Y_E','Z_E'}, [0.20 0.35 0.95], '--', lwScale);
+    drawFrameTriad(ax, earthPos, Rz, 0.9*Le, {'X_E','Y_E','Z_E'}, [0.20 0.35 0.95], '--', lwScale, [0 -1.1 -0.1]);
 
     % --- Helix formation (only when secondary assets exist) ---
     hasSwarm = false;
@@ -191,16 +193,20 @@ function drawSpacecraftBody(ax, center, C, s, lwScale)
 end
 
 % --------------------------------------------------------------------
-function drawFrameTriad(ax, origin, R, L, labels, color, style, lwScale)
+function drawFrameTriad(ax, origin, R, L, labels, color, style, lwScale, zLabelOffset)
     % drawFrameTriad  Three labelled arrows for a coordinate frame.
-    % lwScale multiplies the arrow line width (default 1).
+    % lwScale multiplies the arrow line width (default 1). zLabelOffset (1x3, world
+    % units) shifts ONLY the 3rd-axis (Z) label -- use it to pull overlapping Z
+    % labels to either side of a shared vertical arrow (default no shift).
     if nargin < 8 || isempty(lwScale); lwScale = 1; end
+    if nargin < 9 || isempty(zLabelOffset); zLabelOffset = [0 0 0]; end
     o = origin(:);
     for i = 1:3
         d = R(:,i) * L;
         quiver3(ax, o(1),o(2),o(3), d(1),d(2),d(3), 0, ...
             'Color',color, 'LineWidth',1.6*lwScale, 'MaxHeadSize',0.55, 'LineStyle',style);
         p = o + d*1.10;
+        if i == 3; p = p + zLabelOffset(:); end
         text(ax, p(1),p(2),p(3), labels{i}, 'Color',color, ...
             'FontSize',8, 'FontWeight','bold', 'HorizontalAlignment','center');
     end
