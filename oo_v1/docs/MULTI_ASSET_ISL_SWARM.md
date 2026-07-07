@@ -45,7 +45,9 @@ Formation (`cfg.formation`):
 - `transmitters = 'all'` — every secondary aids the primary (multi-transmitter).
 - one-way **code** + **Doppler** enter the EKF; **carrier** is diagnostic-only
   (needs ISL ambiguity states, not implemented).
-- `code.sigma_m`, `doppler.sigma_mps` — thermal measurement noise added to z.
+- `code.sigma_m` (0.3 m, good microwave ISL), `doppler.sigma_mps` — thermal
+  measurement noise added to z. The ISL code ranging noise sets the clock floor
+  (not the reference products): 1.0 -> 0.3 m halves the primary clock (~92 -> ~47 ps).
 - `product.*` — the secondary is a broadcast **product** (ephemeris + clock) with a
   piecewise-constant error re-issued every `updateInterval_s` (300 s)
   (`productAidedExternal`). This biases the model and inflates R, so the achievable
@@ -60,30 +62,33 @@ Formation (`cfg.formation`):
 Two-way ISL range and TWSTFT stay diagnostic (two-way range has no clock column and
 is ill-conditioned into this near-degenerate filter).
 
-## Result (default 6-asset helix, 1 km baseline, 3600 s)
+## Result (default 6-asset helix, 1 km baseline)
 
 Primary asset, one-way ISL code+Doppler from 5 references (last-20% RMS):
 
-| metric | ground-only | + helix ISL swarm |
-|---|---|---|
-| position | ~8 m | **~0.09 m** |
-| height (Up) RMS | ~14 m | **~0.03 m** |
-| vertical/horizontal ratio | ~21 | **~0.3** |
-| clock | ~26 ns | **~86 ps** (meets the 100 ps = 3 cm budget) |
-| clock NEES (consistency) | — | ~0.6 (consistent) |
+| metric | ground-only | + helix ISL swarm (3600 s) | + swarm (12 h) |
+|---|---|---|---|
+| position | ~8 m | ~0.084 m | **~0.095 m** |
+| height (Up) RMS | ~14 m | ~0.03 m | **~0.022 m** |
+| vertical/horizontal ratio | ~21 | ~0.3 | **~0.24** |
+| clock | ~26 ns | ~47 ps | **~72 ps** (meets 100 ps = 3 cm) |
+| clock NEES (consistency) | — | ~1 (consistent) | ~2 (≈consistent) |
 
-The clock scales ~`1/sqrt(N-1)` with swarm size: N=3 → ~200 ps, N=6 → ~86 ps,
-N=8 → ~67 ps. Increase `nSpaceAssets` for more margin.
+The clock floor is set by the **ISL code ranging noise**, not the reference products
+(tightening product position 5→3 cm or clock 100→50 ps barely moved it). ISL code
+1.0→0.3 m halves the clock. Swarm size gives further margin (clock ~`1/sqrt(N-1)`).
 
 Honest limitations:
 - The reference-product error is correlated **within** each broadcast interval
-  (~300 epochs) but R models it as white, so the **position** NEES (~9 vs 3) is
-  mildly optimistic — reported, not hidden. The clock NEES (~0.6-1) is consistent.
-  A per-reference bias state (consider/Schmidt-Kalman filter) is the principled fix.
-- The 100 ps **clock** (timing) budget is met with margin. Driving **position** to
-  3 cm (vs ~9 cm) needs tighter reference products (cm-level OD) or more members.
-- ISL carrier phase (mm ranging) is generated but diagnostic-only (needs ISL
-  ambiguity states); one-way code+Doppler already meet the timing budget.
+  (~300 epochs) but R models it as white, so the **position** NEES grows above the
+  ideal over long runs (~10–15 vs 3): the position covariance is optimistic —
+  reported, not hidden. The clock NEES stays ≈1–2 (consistent). A per-reference bias
+  state (consider/Schmidt-Kalman filter) is the principled fix.
+- The 100 ps **clock** (timing) budget is met with margin over the full 12 h. The
+  **position** (~9 cm) is sub-wavelength (L1 ≈ 19 cm) but ground/atmosphere-limited,
+  not ISL-limited; driving it to 3 cm needs ISL carrier phase (mm ranging).
+- ISL carrier phase is generated but diagnostic-only (needs ISL ambiguity states);
+  one-way code+Doppler already meet the timing budget.
 
 ## Regression
 
