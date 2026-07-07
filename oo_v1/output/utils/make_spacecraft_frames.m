@@ -41,8 +41,10 @@ function outPath = make_spacecraft_frames(cfg)
     utilsOut = fullfile(baseDir, 'utils');
     if ~exist(utilsOut, 'dir'); mkdir(utilsOut); end
 
+    % Export resolution in DPI -- raise for crisper output (200 was the old default).
+    res = 300;
     outPath = revgnss.ClockExactReportBuilder.tryPlot3D_( ...
-        utilsOut, 'spacecraft_frames.pdf', @() localPlotSpacecraftFrames(cfg));
+        utilsOut, 'spacecraft_frames.pdf', @() localPlotSpacecraftFrames(cfg), res);
 
     if isempty(outPath)
         warning('make_spacecraft_frames:failed', ...
@@ -61,6 +63,10 @@ function fig = localPlotSpacecraftFrames(cfg)
         'PaperUnits','centimeters','PaperSize',[13 10],'PaperPositionMode','auto');
     ax = axes(fig); hold(ax,'on');
 
+    % Global line-thickness multiplier -- nudge everything thinner/thicker at once
+    % (0.9 = ~10 % thinner than the original 1.0).
+    lwScale = 0.9;
+
     % --- Canonical equatorial-GEO layout (schematic) ---
     % Radial along +X (Earth to the left), along-track +Y, cross-track +Z.
     % For an equatorial orbit the cross-track axis is the spin axis, so RAC
@@ -72,7 +78,7 @@ function fig = localPlotSpacecraftFrames(cfg)
     earthDist = 5.6*U; Re = 1.3*U;
     earthPos  = -earthDist * r_hat;
 
-    [xe,ye,ze] = sphere(28);
+    [xe,ye,ze] = sphere(48);   % higher tessellation -> smoother Earth
     surf(ax, earthPos(1)+Re*xe, earthPos(2)+Re*ye, earthPos(3)+Re*ze, ...
         'FaceColor',[0.30 0.55 0.85], 'EdgeColor','none', 'FaceAlpha',0.65, ...
         'FaceLighting','gouraud','AmbientStrength',0.6);
@@ -82,7 +88,7 @@ function fig = localPlotSpacecraftFrames(cfg)
 
     nadirTip = (-earthDist + Re) * r_hat;
     plot3(ax, [scPos(1) nadirTip(1)], [scPos(2) nadirTip(2)], [scPos(3) nadirTip(3)], ...
-        ':', 'Color',[0.45 0.45 0.45], 'LineWidth',1);
+        ':', 'Color',[0.45 0.45 0.45], 'LineWidth',1*lwScale);
     text(ax, 0.45*nadirTip(1), 0.45*nadirTip(2), 0.45*nadirTip(3)+0.35, 'nadir', ...
         'Color',[0.4 0.4 0.4], 'FontSize',7, 'HorizontalAlignment','center');
 
@@ -94,24 +100,24 @@ function fig = localPlotSpacecraftFrames(cfg)
            [cos(ry) 0 sin(ry); 0 1 0; -sin(ry) 0 cos(ry)];
     Cbody = Cnadir * Roff;
 
-    drawSpacecraftBody(ax, scPos, Cbody, 0.85*U);
+    drawSpacecraftBody(ax, scPos, Cbody, 0.85*U, lwScale);
 
     % --- Reference frames (RAC + body at the spacecraft; ECI + ECEF at Earth) ---
     Lr = 2.0*U; Le = 3.0*U;
-    drawFrameTriad(ax, scPos, [r_hat a_hat h_hat], Lr, {'R','A','C'}, [0.85 0.33 0.10], '-');
-    drawFrameTriad(ax, scPos, Cbody, 0.92*Lr, {'x_B','y_B','z_B'}, [0.10 0.60 0.20], '-');
-    drawFrameTriad(ax, earthPos, eye(3), Le, {'X_I','Y_I','Z_I'}, [0 0 0], '-');
+    drawFrameTriad(ax, scPos, [r_hat a_hat h_hat], Lr, {'R','A','C'}, [0.85 0.33 0.10], '-', lwScale);
+    drawFrameTriad(ax, scPos, Cbody, 0.92*Lr, {'x_B','y_B','z_B'}, [0.10 0.60 0.20], '-', lwScale);
+    drawFrameTriad(ax, earthPos, eye(3), Le, {'X_I','Y_I','Z_I'}, [0 0 0], '-', lwScale);
     th = deg2rad(35); Rz = [cos(th) -sin(th) 0; sin(th) cos(th) 0; 0 0 1];
-    drawFrameTriad(ax, earthPos, Rz, 0.9*Le, {'X_E','Y_E','Z_E'}, [0.20 0.35 0.95], '--');
+    drawFrameTriad(ax, earthPos, Rz, 0.9*Le, {'X_E','Y_E','Z_E'}, [0.20 0.35 0.95], '--', lwScale);
 
     % --- Helix formation (only when secondary assets exist) ---
     hasSwarm = false;
     try; hasSwarm = revgnss.SwarmFormation.nSecondaries(cfg) >= 1; catch; end
     if hasSwarm
         A = [r_hat a_hat h_hat]; rho = 2.3*U;
-        ph = linspace(0, 2*pi, 80);
+        ph = linspace(0, 2*pi, 160);
         Wr = A * [(rho/2)*sin(ph); rho*cos(ph); rho*sin(ph)] + scPos;
-        plot3(ax, Wr(1,:), Wr(2,:), Wr(3,:), '-', 'Color',[0.60 0.20 0.60], 'LineWidth',1.2);
+        plot3(ax, Wr(1,:), Wr(2,:), Wr(3,:), '-', 'Color',[0.60 0.20 0.60], 'LineWidth',1.2*lwScale);
         nSec = revgnss.SwarmFormation.nSecondaries(cfg);
         for k = 1:min(nSec,8)
             phk = 2*pi*(k-1)/max(nSec,1);
@@ -122,14 +128,14 @@ function fig = localPlotSpacecraftFrames(cfg)
     end
 
     % --- Frame colour key (drawn via off-screen handles) ---
-    k1 = plot3(ax, nan,nan,nan, '-',  'Color',[0.85 0.33 0.10], 'LineWidth',2.5);
-    k2 = plot3(ax, nan,nan,nan, '-',  'Color',[0.10 0.60 0.20], 'LineWidth',2.5);
-    k3 = plot3(ax, nan,nan,nan, '-',  'Color',[0 0 0],          'LineWidth',2.5);
-    k4 = plot3(ax, nan,nan,nan, '--', 'Color',[0.20 0.35 0.95], 'LineWidth',2.5);
+    k1 = plot3(ax, nan,nan,nan, '-',  'Color',[0.85 0.33 0.10], 'LineWidth',2.5*lwScale);
+    k2 = plot3(ax, nan,nan,nan, '-',  'Color',[0.10 0.60 0.20], 'LineWidth',2.5*lwScale);
+    k3 = plot3(ax, nan,nan,nan, '-',  'Color',[0 0 0],          'LineWidth',2.5*lwScale);
+    k4 = plot3(ax, nan,nan,nan, '--', 'Color',[0.20 0.35 0.95], 'LineWidth',2.5*lwScale);
     keyLbl = {'RAC (orbital)','Body (attitude)','ECI (inertial)','ECEF (Earth-fixed)'};
     keyH = [k1 k2 k3 k4];
     if hasSwarm
-        k5 = plot3(ax, nan,nan,nan, '-o', 'Color',[0.60 0.20 0.60], 'LineWidth',1.5, ...
+        k5 = plot3(ax, nan,nan,nan, '-o', 'Color',[0.60 0.20 0.60], 'LineWidth',1.5*lwScale, ...
             'MarkerFaceColor',[0.60 0.20 0.60], 'MarkerSize',4);
         keyH(end+1) = k5; keyLbl{end+1} = 'Helix formation';
     end
@@ -147,9 +153,11 @@ function fig = localPlotSpacecraftFrames(cfg)
 end
 
 % --------------------------------------------------------------------
-function drawSpacecraftBody(ax, center, C, s)
+function drawSpacecraftBody(ax, center, C, s, lwScale)
     % drawSpacecraftBody  Octagonal bus + two octagonal solar panels,
     % oriented by rotation C (body->world), centred at 'center', scale s.
+    % lwScale multiplies every edge/boom/grid line width (default 1).
+    if nargin < 5 || isempty(lwScale); lwScale = 1; end
     th = ((0:7)' + 0.5) / 8 * 2*pi;      % 8 vertices (flat top/bottom)
     oc = [cos(th) sin(th)];
     c0 = center(:)';
@@ -158,12 +166,12 @@ function drawSpacecraftBody(ax, center, C, s)
     botW = W([rB*oc, -hB*ones(8,1)]);
     topW = W([rB*oc,  hB*ones(8,1)]);
     grey = [0.78 0.78 0.80];
-    patch(ax,'Vertices',botW,'Faces',1:8,'FaceColor',grey*0.9,'EdgeColor',[0.25 0.25 0.25],'LineWidth',0.5);
-    patch(ax,'Vertices',topW,'Faces',1:8,'FaceColor',grey,    'EdgeColor',[0.25 0.25 0.25],'LineWidth',0.5);
+    patch(ax,'Vertices',botW,'Faces',1:8,'FaceColor',grey*0.9,'EdgeColor',[0.25 0.25 0.25],'LineWidth',0.5*lwScale);
+    patch(ax,'Vertices',topW,'Faces',1:8,'FaceColor',grey,    'EdgeColor',[0.25 0.25 0.25],'LineWidth',0.5*lwScale);
     for i = 1:8
         j = mod(i,8) + 1;
         patch(ax,'Vertices',[botW(i,:);botW(j,:);topW(j,:);topW(i,:)], ...
-            'Faces',[1 2 3 4],'FaceColor',grey,'EdgeColor',[0.25 0.25 0.25],'LineWidth',0.5);
+            'Faces',[1 2 3 4],'FaceColor',grey,'EdgeColor',[0.25 0.25 0.25],'LineWidth',0.5*lwScale);
     end
     % Two octagonal solar panels in the body x-y plane (broad face along the
     % body z axis), on +/- y booms.
@@ -172,24 +180,26 @@ function drawSpacecraftBody(ax, center, C, s)
     for sgn = [-1 1]
         ctr = [0, sgn*(boom+rP), 0];
         patch(ax,'Vertices',W(panel + ctr),'Faces',1:8, ...
-            'FaceColor',blue,'EdgeColor',[0.10 0.10 0.35],'LineWidth',0.5);
+            'FaceColor',blue,'EdgeColor',[0.10 0.10 0.35],'LineWidth',0.5*lwScale);
         for gx = [-0.45 0 0.45]            % solar-cell grid lines
             g0 = W([gx*rP, ctr(2)-rP*0.7, 0]); g1 = W([gx*rP, ctr(2)+rP*0.7, 0]);
-            plot3(ax,[g0(1) g1(1)],[g0(2) g1(2)],[g0(3) g1(3)],'-','Color',[0.4 0.5 0.8],'LineWidth',0.5);
+            plot3(ax,[g0(1) g1(1)],[g0(2) g1(2)],[g0(3) g1(3)],'-','Color',[0.4 0.5 0.8],'LineWidth',0.5*lwScale);
         end
         b0 = W([0, sgn*rB, 0]); b1 = W([0, sgn*boom, 0]);
-        plot3(ax,[b0(1) b1(1)],[b0(2) b1(2)],[b0(3) b1(3)],'-','Color',[0.3 0.3 0.3],'LineWidth',2);
+        plot3(ax,[b0(1) b1(1)],[b0(2) b1(2)],[b0(3) b1(3)],'-','Color',[0.3 0.3 0.3],'LineWidth',2*lwScale);
     end
 end
 
 % --------------------------------------------------------------------
-function drawFrameTriad(ax, origin, R, L, labels, color, style)
+function drawFrameTriad(ax, origin, R, L, labels, color, style, lwScale)
     % drawFrameTriad  Three labelled arrows for a coordinate frame.
+    % lwScale multiplies the arrow line width (default 1).
+    if nargin < 8 || isempty(lwScale); lwScale = 1; end
     o = origin(:);
     for i = 1:3
         d = R(:,i) * L;
         quiver3(ax, o(1),o(2),o(3), d(1),d(2),d(3), 0, ...
-            'Color',color, 'LineWidth',1.6, 'MaxHeadSize',0.55, 'LineStyle',style);
+            'Color',color, 'LineWidth',1.6*lwScale, 'MaxHeadSize',0.55, 'LineStyle',style);
         p = o + d*1.10;
         text(ax, p(1),p(2),p(3), labels{i}, 'Color',color, ...
             'FontSize',8, 'FontWeight','bold', 'HorizontalAlignment','center');

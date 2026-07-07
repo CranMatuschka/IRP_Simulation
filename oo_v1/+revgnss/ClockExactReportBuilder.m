@@ -473,11 +473,12 @@ classdef ClockExactReportBuilder
         end
 
         % ................................................................
-        function outPath = tryPlot3D_(figDir, fname, plotFcn)
+        function outPath = tryPlot3D_(figDir, fname, plotFcn, resolution)
             % tryPlot3D_  Render a lit 3-D scene and export it as a PDF holding a
             % rasterised image (ContentType='image'). Unlike tryPlot_ this keeps the
             % default (OpenGL) renderer so lighting and transparency survive; a true
-            % vector export would flatten them.
+            % vector export would flatten them. Optional resolution (DPI) defaults to 200.
+            if nargin < 4 || isempty(resolution); resolution = 200; end
             outPath = '';
             [~, stem_name, ~] = fileparts(fname);
             pdfPath = fullfile(figDir, [stem_name '.pdf']);
@@ -489,7 +490,7 @@ classdef ClockExactReportBuilder
                     @() revgnss.ClockExactReportBuilder.safeCloseFig_(fig)); %#ok<NASGU>
                 set(fig, 'Visible','off', 'Color','white', 'InvertHardcopy','off');
                 exportgraphics(fig, pdfPath, 'ContentType','image', ...
-                    'Resolution', 200, 'BackgroundColor','white');
+                    'Resolution', resolution, 'BackgroundColor','white');
                 outPath = pdfPath;
             catch ME
                 warning('ClockExactReportBuilder:plot3DFailed', ...
