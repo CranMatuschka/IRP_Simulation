@@ -1154,6 +1154,13 @@ Consistency is a **two-sided** χ² test, not the mean-only heuristic "NIS ≈ M
 
 NEES is computed per-epoch by `SimulationDataStore` (position/velocity/clock/attitude) and on demand by `ReverseGNSSEKF.computeNEES(truth)`, which forms the joint NEES over the estimated core states and uses the **small-angle** attitude error in P's space (quaternion-aware error DCM), not a raw Euler subtraction. Note the shipped scenarios run **conservatively** (R and the unmodelled-dynamics Q inflation are intentionally large), so their NIS/NEES sit **below** the band by design — the desirable direction for a conservative feasibility study. `tests/test_filter_consistency_nees_nis.m` proves the two-sided machinery on a provably-matched linear-Gaussian filter (in-band NEES + NIS, with a negative control that halves R and detects the resulting over-confidence) and confirms the real filter is not over-confident.
 
+### Attitude process noise `sigma_angAccel` — torque budget (WP3)
+For **attitude-estimating** presets, `cfg.estimator.sigma_angAccel_radps2` is derived from a residual disturbance-torque budget rather than an optimistic literal: `α = τ / I` via `ConfigFactory.angAccelFromTorqueBudget_(cfg.asset.inertia_kgm2, cfg.asset.residualDisturbanceTorque_Nm)`. The defaults (I = 10 kg·m², τ = 1e-6 N·m) give **α ≈ 1e-7 rad/s²** — the conservative (higher) end of the 1e-9…1e-6 rad/s² range real spacecraft see from gravity-gradient / solar-radiation-pressure / residual-magnetic torques (Wertz, *Spacecraft Attitude Determination and Control*, 1978; at GEO SRP dominates). The previous 1e-10…1e-9 literals made the attitude covariance over-confident. This is an **intentional default change** for attitude-estimating presets (masterConfig, singleAssetCarrierAttitude, multiAntennaAttitudeConfig, geoRealWorldTruthComparison); it slightly raises the reported attitude 1σ and perturbs the coupled carrier/position/clock solution at the ~0.1% level.
+
+`positionClockOnlyConfig` keeps `sigma_angAccel = 1e-15` deliberately: attitude is **not** estimated there (`estimateAttitude=false`), so the EKF freezes the attitude Q block and the value is inert.
+
+**Observability tie-in:** when attitude is estimated but `AttitudeObservability.audit` classifies it `weak-*` or `unobservable-*`, the audit emits a warning that the reported attitude covariance is **process-noise-limited** (driven by `sigma_angAccel`), not measurement-constrained — so a small `sigma_angAccel` is not mistaken for a genuinely well-observed attitude. It warns; it does not auto-disable.
+
 ### Angular cross-term Q
 The angular process noise block includes an off-diagonal cross term:
 ```

@@ -343,7 +343,10 @@ cfg.estimator.attitude.useDopplerPartials        = false;
 % Initial attitude error and the diagonal covariance/process-noise seeds for the run.
 cfg.estimator.P0_euler_rad             = deg2rad(5);
 cfg.estimator.P0_omega_radps           = 1e-12;
-cfg.estimator.sigma_angAccel_radps2    = 1e-10;
+% WP3: torque-budget-justified attitude process noise (~1e-7 rad/s^2), replacing the
+% over-optimistic 1e-10. alpha = tau / I from cfg.asset (Wertz environmental torques).
+cfg.estimator.sigma_angAccel_radps2    = revgnss.ConfigFactory.angAccelFromTorqueBudget_( ...
+    cfg.asset.inertia_kgm2, cfg.asset.residualDisturbanceTorque_Nm);
 cfg.estimator.initialError.euler_deg   = [1; -1; 0.5];
 cfg.estimator.initialError.omega_radps = [0; 0; 0];
 

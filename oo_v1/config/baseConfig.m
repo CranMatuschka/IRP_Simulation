@@ -46,6 +46,16 @@ r_geo      = models.frames.GeometryUtils.geodetic2ecef(geoLat_rad, geoLon_rad, g
 
 cfg.asset.name                    = 'GEO-1';
 cfg.asset.mass_kg                 = 70;
+% Attitude process-noise budget (WP3). The angular-acceleration 1-sigma driving the
+% EKF attitude Q is derived from a residual disturbance-torque budget alpha = tau / I.
+% Representative small-satellite values (Wertz, "Spacecraft Attitude Determination and
+% Control", 1978, environmental-torque chapters: gravity-gradient, solar-radiation
+% pressure, residual-magnetic; at GEO SRP dominates). Conservative choices: a modest
+% principal inertia and a residual (post-modelling) disturbance torque, giving
+% alpha ~ 1e-7 rad/s^2 — the higher (more conservative) end of the plausible range,
+% so the attitude covariance is not artificially over-confident.
+cfg.asset.inertia_kgm2               = 10;      % principal moment of inertia [kg m^2]
+cfg.asset.residualDisturbanceTorque_Nm = 1e-6;  % residual disturbance torque 1-sigma [N m]
 cfg.asset.r_ecef_m                = r_geo;
 cfg.asset.v_ecef_mps              = [0; 0; 0];   % geostationary in ECEF
 cfg.asset.attitude_euler_rad      = [0; 0; 0];

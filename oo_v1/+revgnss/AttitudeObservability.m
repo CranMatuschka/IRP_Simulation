@@ -40,6 +40,15 @@ classdef AttitudeObservability
 
             s = revgnss.AttitudeObservability.blankStruct_();
 
+            % WP3: is attitude actually being estimated? Used below to warn that a
+            % weak/unobservable-but-estimated attitude has a process-noise-limited
+            % covariance (driven by sigma_angAccel), not a measurement-constrained one.
+            estAtt = isfield(cfg,'estimator') && isfield(cfg.estimator,'estimateAttitude') ...
+                     && cfg.estimator.estimateAttitude;
+            pnlMsg = @(cls) ['Attitude estimated but ' cls ': reported attitude ' ...
+                'covariance is process-noise-limited (sigma_angAccel), not ' ...
+                'measurement-constrained.'];
+
             if isempty(H) || ~isnumeric(H)
                 s.classification = 'unobservable-zero-attitude-columns';
                 s.warnings{end+1} = 'H is empty; attitude columns unavailable.';
@@ -82,6 +91,7 @@ classdef AttitudeObservability
             if ~s.hasNonzeroLeverArm
                 s.classification = 'unobservable-zero-lever-arm';
                 s.warnings{end+1} = 'All receiver lever arms are zero: attitude is structurally unobservable.';
+                if estAtt; s.warnings{end+1} = pnlMsg(s.classification); end
                 return
             end
 
@@ -95,6 +105,7 @@ classdef AttitudeObservability
             if s.attitudeColumnNorm < 1e-12
                 s.classification = 'unobservable-zero-attitude-columns';
                 s.warnings{end+1} = 'Attitude H columns near-zero despite nonzero lever arms; check body-frame geometry.';
+                if estAtt; s.warnings{end+1} = pnlMsg(s.classification); end
                 return
             end
 
@@ -130,6 +141,16 @@ classdef AttitudeObservability
             else
                 s.classification = 'unobservable-zero-attitude-columns';
                 s.warnings{end+1} = 'Attitude SVD rank = 0 after lever-arm check.';
+            end
+
+            % WP3 observability tie-in: when attitude is being ESTIMATED but the
+            % geometry makes it weak/rank-deficient, the reported attitude covariance is
+            % PROCESS-NOISE-limited (driven by sigma_angAccel), not measurement-
+            % constrained. Warn — do not auto-disable — so a small sigma_angAccel is not
+            % mistaken for a genuinely well-observed attitude. (The structurally
+            % unobservable early-return cases above warn at their own exit points.)
+            if estAtt && ~s.isObservable
+                s.warnings{end+1} = pnlMsg(s.classification);
             end
         end
 

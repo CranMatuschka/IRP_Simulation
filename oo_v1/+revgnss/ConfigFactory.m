@@ -119,6 +119,10 @@ classdef ConfigFactory
             cfg.estimator.estimateAngularRateFromPseudorange = false;
             cfg.estimator.P0_euler_rad                       = 1e-12;
             cfg.estimator.P0_omega_radps                     = 1e-12;
+            % WP3: kept at 1e-15 deliberately. Attitude is NOT estimated here
+            % (estimateAttitude=false, nReceivers=1), so this value is inert — the EKF
+            % zeroes the attitude Q block (ReverseGNSSEKF.buildQ_ freeze). The
+            % torque-budget default applies only to attitude-ESTIMATING presets.
             cfg.estimator.sigma_angAccel_radps2              = 1e-15;
         end
 
@@ -148,7 +152,10 @@ classdef ConfigFactory
 
             cfg.estimator.P0_euler_rad              = deg2rad(5);
             cfg.estimator.P0_omega_radps            = 1e-12;
-            cfg.estimator.sigma_angAccel_radps2     = 1e-10;
+            % WP3: torque-budget-justified attitude process noise (~1e-7 rad/s^2),
+            % replacing the over-optimistic 1e-10. alpha = tau / I (Wertz).
+            cfg.estimator.sigma_angAccel_radps2     = revgnss.ConfigFactory.angAccelFromTorqueBudget_( ...
+                cfg.asset.inertia_kgm2, cfg.asset.residualDisturbanceTorque_Nm);
             cfg.estimator.initialError.euler_deg    = [1; -1; 0.5];
             cfg.estimator.initialError.omega_radps  = [0; 0; 0];
 
@@ -1870,6 +1877,23 @@ classdef ConfigFactory
             tmpl.bias_s   = 0.0;
             tmpl.fracFreq = 0.0;
             tmpl.driftRate_fracPerSec = 0.0;
+        end
+
+        function saa = angAccelFromTorqueBudget_(inertia_kgm2, torque_Nm)
+            % angAccelFromTorqueBudget_  Angular-acceleration 1-sigma [rad/s^2] from a
+            % residual disturbance-torque budget: alpha = tau / I  (Euler's equation,
+            % single-axis). Used to set a physically defensible cfg.estimator.
+            % sigma_angAccel_radps2 for attitude-estimating presets instead of an
+            % over-optimistic literal. Source for the environmental-torque magnitudes:
+            % Wertz, "Spacecraft Attitude Determination and Control", 1978 (gravity-
+            % gradient, solar-radiation-pressure, residual-magnetic, aerodynamic torques
+            % — at GEO SRP dominates). Choose the conservative (higher) torque / lower
+            % inertia end so the attitude process noise is not under-modelled.
+            %   inertia_kgm2  principal moment of inertia [kg m^2] (> 0)
+            %   torque_Nm     residual (unmodelled) disturbance torque 1-sigma [N m]
+            assert(isscalar(inertia_kgm2) && inertia_kgm2 > 0 && isfinite(inertia_kgm2), ...
+                'ConfigFactory:angAccelInertia', 'inertia_kgm2 must be a positive finite scalar');
+            saa = torque_Nm / inertia_kgm2;
         end
 
     end  % methods (Static)
