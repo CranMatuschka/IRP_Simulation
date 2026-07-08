@@ -605,6 +605,35 @@ classdef ConfigFactory
                 end
             end
 
+            % ---- WP1: cfg.estimator.clockGauge alias -> canonical cfg.clock.gauge ----
+            % Optional convenience surface exposing the plan's datum vocabulary
+            % ('none' | 'masterClock' | 'zeroMeanEnsemble' + masterIndex). Present-only:
+            % there is NO baseConfig default for cfg.estimator.clockGauge, so configs that
+            % set cfg.clock.gauge.mode directly (the canonical Stage-8 surface) are never
+            % clobbered. This alias only maps the datum mode onto the existing gauge engine;
+            % it does not by itself enable tower-clock estimation (use cfg.clock.mode for
+            % that). Datum rationale: for n clocks only n-1 clock states are separable,
+            % leaving one unobservable common-mode datum (Kaplan & Hegarty, control segment).
+            if isfield(cfg,'estimator') && isfield(cfg.estimator,'clockGauge')
+                eg = cfg.estimator.clockGauge;
+                if ~isfield(cfg,'clock');       cfg.clock = struct();       end
+                if ~isfield(cfg.clock,'gauge'); cfg.clock.gauge = struct(); end
+                if isfield(eg,'mode')
+                    switch eg.mode
+                        case 'none';             cfg.clock.gauge.mode = 'externalTowerCorrections';
+                        case 'masterClock';      cfg.clock.gauge.mode = 'fixReferenceTower';
+                        case 'zeroMeanEnsemble'; cfg.clock.gauge.mode = 'meanGroundClockGauge';
+                        otherwise
+                            error('ConfigFactory:invalidClockGaugeMode', ...
+                                ['cfg.estimator.clockGauge.mode must be ''none'', ''masterClock'', ' ...
+                                 'or ''zeroMeanEnsemble''; got ''%s''.'], eg.mode);
+                    end
+                end
+                if isfield(eg,'masterIndex')
+                    cfg.clock.gauge.referenceTowerIndex = eg.masterIndex;
+                end
+            end
+
             % ---- Clock mode / gauge validation (Stage 8) ------------------
             % Map cfg.clock.mode to estimator.estimateTowerClocks and validate gauge.
             if isfield(cfg,'clock') && isfield(cfg.clock,'mode')
@@ -613,6 +642,29 @@ classdef ConfigFactory
                 if isfield(cfg.clock,'gauge') && isfield(cfg.clock.gauge,'mode')
                     gaugeMode = cfg.clock.gauge.mode;
                 end
+
+                % WP1 (clock gauge): accept the datum-vocabulary synonyms
+                % 'masterClock' and 'zeroMeanEnsemble' as aliases for the EXISTING
+                % gauge machinery, so plan/preset configs written in that vocabulary
+                % drive the same pseudo-measurement update path (no parallel gauge).
+                %   masterClock      == fixReferenceTower   (one clock held as datum)
+                %   zeroMeanEnsemble == meanGroundClockGauge (zero-mean composite clock)
+                % Rationale: for n clocks only n-1 clock states are separable, leaving
+                % one unobservable common-mode datum (Kaplan & Hegarty, control-segment
+                % discussion). The gauge pins that datum. masterIndex aliases
+                % referenceTowerIndex.
+                switch gaugeMode
+                    case 'masterClock'
+                        gaugeMode = 'fixReferenceTower';
+                        cfg.clock.gauge.mode = gaugeMode;
+                    case 'zeroMeanEnsemble'
+                        gaugeMode = 'meanGroundClockGauge';
+                        cfg.clock.gauge.mode = gaugeMode;
+                end
+                if isfield(cfg.clock,'gauge') && isfield(cfg.clock.gauge,'masterIndex')
+                    cfg.clock.gauge.referenceTowerIndex = cfg.clock.gauge.masterIndex;
+                end
+
                 switch clockMode
                     case 'spacecraftReceiverClockOnly'
                         cfg.estimator.estimateTowerClocks = false;

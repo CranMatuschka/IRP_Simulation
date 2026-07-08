@@ -1125,6 +1125,19 @@ This config sets:
 
 When `estimateAttitude = false`, the EKF still carries the attitude states but sets their Q contribution to `~0`, effectively freezing them. The state dimension is unchanged for code simplicity.
 
+### Clock gauge when tower clocks are estimated (WP1)
+One-way pseudorange observes only **differences** of clocks, so for a system of *n* clocks only *n − 1* clock states are separable; one common-mode (uniform clock shift) datum is unobservable (Kaplan & Hegarty, control-segment discussion). When tower clocks are estimated in the EKF (`cfg.clock.mode = 'includeTowerClocksInEKF'`, which sets `cfg.estimator.estimateTowerClocks = true`), the clock subspace is therefore rank-deficient and the common-mode variance is unconstrained unless a **gauge** pins the datum.
+
+Policy: **estimated-tower-clock runs must set a gauge.** `finalizeConfig` enforces this — `cfg.clock.gauge.mode = 'free'` under estimated tower clocks raises `ConfigFactory:clockGaugeRequired`. The available gauges (soft pseudo-measurement rows appended in the same Joseph update, not a parallel path) are:
+
+| `cfg.clock.gauge.mode` | Plan-vocabulary alias | Datum constraint |
+|------------------------|-----------------------|------------------|
+| `externalTowerCorrections` (default) | `none` | no EKF gauge; external tower corrections assumed |
+| `fixReferenceTower` | `masterClock` | pins reference tower bias+drift (`referenceTowerIndex` / `masterIndex`) |
+| `meanGroundClockGauge` | `zeroMeanEnsemble` | pins the zero-mean ensemble `Σ bᵢ = 0` (composite clock) |
+
+The plan-vocabulary aliases (and the convenience surface `cfg.estimator.clockGauge.mode ∈ {'none','masterClock','zeroMeanEnsemble'}` + `masterIndex`) resolve to the canonical modes in `finalizeConfig`; they drive the existing gauge engine (`ReverseGNSSEKF.appendClockGaugeRows`) with no behaviour change to the default path. `tests/test_clock_gauge_observability.m` asserts the common-mode direction is unobservable without a gauge and observable with one, and that a gauged run keeps `P` symmetric + PSD with the common-mode variance bounded.
+
 ### EKF consistency checks
 | Metric | Good | Potential issue |
 |--------|------|----------------|
