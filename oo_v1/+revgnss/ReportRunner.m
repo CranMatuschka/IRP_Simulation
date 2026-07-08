@@ -44,9 +44,11 @@ classdef ReportRunner
             end
 
             % cfg.report.reportFolder bypasses the per-run folder (used by test harnesses).
-            % Otherwise every run gets its own folder:
-            %   output/Report_YYYYMMDD/Report_HHMM_v###_G#S#R#/
-            % where G/S/R = number of ground towers / space assets / receivers.
+            % Otherwise every run gets its own self-describing folder:
+            %   output/Report_YYYYMMDD/Report_v###_G#S#R#/
+            % where v### = runVersion and G/S/R = ground towers / space assets / receivers.
+            % The PDF, MAT, .out and .tex share that name (only figures keep their own).
+            runName      = 'report';   % default file stem in the reportFolder-bypass case
             reportFolder = '';
             try; reportFolder = cfg.report.reportFolder; catch; end
             if isempty(reportFolder)
@@ -59,23 +61,22 @@ classdef ReportRunner
                 nG = 0;     try; nG = cfg.scenario.nTowers;           catch; end
                 nS = 1;     try; nS = cfg.scenario.nSpaceAssets;      catch; end
                 nR = 1;     try; nR = cfg.scenario.nReceivers;        catch; end
-                runName = sprintf('Report_%s_v%03d_G%dS%dR%d', ...
-                    datestr(now,'HHMM'), runVer, nG, nS, nR); %#ok<TNOW1,DATST>
-                reportFolder = fullfile(dateFolder, runName);
-                if exist(reportFolder,'dir')   % same-minute collision -> use seconds
-                    runName = sprintf('Report_%s_v%03d_G%dS%dR%d', ...
-                        datestr(now,'HHMMSS'), runVer, nG, nS, nR); %#ok<TNOW1,DATST>
-                    reportFolder = fullfile(dateFolder, runName);
+                if isnumeric(runVer) && isscalar(runVer)
+                    verStr = sprintf('v%03d', round(runVer));
+                else
+                    verStr = ['v' regexprep(char(string(runVer)), '[^A-Za-z0-9._-]', '_')];
                 end
+                runName = sprintf('Report_%s_G%dS%dR%d', verStr, nG, nS, nR);
+                reportFolder = fullfile(dateFolder, runName);
                 cfg.report.reportFolder = reportFolder;   % share with ClockExactReportBuilder
             end
 
-            % Unified file stem: the PDF, MAT, .out and figures all share one name;
-            % the version and topology live in the folder name, not the file names.
+            % Unified file stem: the PDF, MAT, .out and .tex share the folder name
+            % (Report_v###_G#S#R#); only figures keep their own names.
             pdfStem = '';
             try; pdfStem = cfg.report.stem; catch; end
             if isempty(pdfStem)
-                pdfStem = 'report';
+                pdfStem = runName;
                 cfg.report.stem = pdfStem;                % share with ClockExactReportBuilder
             end
             pdfPath = fullfile(reportFolder, [pdfStem '.pdf']);

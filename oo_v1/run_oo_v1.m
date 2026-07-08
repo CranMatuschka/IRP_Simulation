@@ -6,8 +6,10 @@
 % the validation test suite; retiring it fully is a separate coordinated migration.)
 %
 % Output (per-run folder):
-%   output/Report_YYYYMMDD/Report_v###_HHMM/<configName>_v###_HHMM.{pdf,mat,tex}
-%     (### = cfg.report.runVersion, set in config/masterConfig.m)
+%   output/Report_YYYYMMDD/Report_v###_G#S#R#/Report_v###_G#S#R#.{pdf,mat,out,tex}
+%     v### = cfg.report.runVersion (numeric -> v%03d, else sanitised as-is);
+%     G/S/R = ground towers / space assets / receivers.
+%   The PDF, MAT, .out and .tex share the folder's name; only figures keep their own.
 %   output/latest_<configName>.{pdf,mat}   (convenience pointers to the most recent run)
 close all;
 
@@ -18,26 +20,26 @@ addpath(fullfile(thisDir, 'config'));
 % ---- Load THE config -------------------------------------------------------
 cfg = masterConfig();
 
-% ---- Per-run output folder: output/Report_YYYYMMDD/Report_v###_HHMM/ -------
-% Every run gets its OWN folder (no more overwriting two files). The version tag
-% is cfg.report.runVersion (part of the config): numeric -> v%03d, else as-is.
+% ---- Per-run output folder: output/Report_YYYYMMDD/Report_v###_G#S#R#/ ------
+% Self-describing per-run folder + file stem. The version tag is
+% cfg.report.runVersion (numeric -> v%03d, else sanitised); the topology suffix
+% G#S#R# is read from the resolved scenario, so the name is fully deterministic.
 configName = cfg.scenario.name;
-nowClock   = now;                                     %#ok<TNOW1>
-dateStr    = datestr(nowClock, 'yyyymmdd');           %#ok<DATST>
-timeStr    = datestr(nowClock, 'HHMM');               %#ok<DATST>
+dateStr    = datestr(now, 'yyyymmdd');                %#ok<TNOW1,DATST>
 if isnumeric(cfg.report.runVersion)
     verTag = sprintf('v%03d', round(cfg.report.runVersion));
 else
     verTag = ['v' regexprep(char(cfg.report.runVersion), '[^A-Za-z0-9._-]', '_')];
 end
+nG = 0; try; nG = cfg.scenario.nTowers;      catch; end %#ok<*NASGU>
+nS = 1; try; nS = cfg.scenario.nSpaceAssets; catch; end
+nR = 1; try; nR = cfg.scenario.nReceivers;   catch; end
+runName    = sprintf('Report_%s_G%dS%dR%d', verTag, nG, nS, nR);
 outputDir  = fullfile(thisDir, 'output');
-runFolder  = fullfile(outputDir, ['Report_' dateStr], ['Report_' verTag '_' timeStr]);
-if isfolder(runFolder)                                % avoid clobber on same-minute reruns
-    runFolder = [runFolder '_' datestr(nowClock, 'ss')];  %#ok<DATST>
-end
+runFolder  = fullfile(outputDir, ['Report_' dateStr], runName);
 if ~isfolder(runFolder); mkdir(runFolder); end
-cfg.report.reportFolder = runFolder;                  % PDF + MAT (+ TEX) land in the run folder
-cfg.report.stem         = sprintf('%s_%s_%s', configName, verTag, timeStr);
+cfg.report.reportFolder = runFolder;                  % PDF + MAT (+ TEX + .out) land here
+cfg.report.stem         = runName;                    % files: Report_v###_G#S#R#.{pdf,mat,out,tex}
 
 % ---- Run the pipeline (truth -> estimation -> post -> report) --------------
 out = revgnss.ReportRunner.runSingle(cfg);
