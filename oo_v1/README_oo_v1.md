@@ -1234,6 +1234,10 @@ The dual-frequency ionosphere-free (L3) combination cancels the first-order `40.
 
 The second-order term scales as **f⁻³** (∝ `TEC·B·cosθ/f³`) and the third-order as **f⁻⁴** (∝ `TEC²/f⁴`) — sources: Bassiri & Hajj 1993, Hoque & Jakowski 2007, Kaplan & Hegarty. Because these are **not** the `f⁻²` first-order term, they do **not cancel** in the L3 combination: `tests/test_iono_higher_order.m` verifies the first-order cancels to ~0 while the higher-order residual is retained at the cm level. It is a **truth-side** residual (added to truth, magnitude into R, not estimated), derived from the first-order slant delay the ionosphere model already produces. When enabled, `cfg.effects.ionosphere.higherOrderStatus` becomes `'boundedResidualTruthSide'`. Scope note: the residual is injected on the primary (L1) code truth; the IF-survival property is proven algebraically — full per-signal injection into the dual-frequency IF **EKF** path is a documented future extension.
 
+### Error budget and the L3 noise-amplification cost (WP8)
+
+The full accounting of every modelled error term — its magnitude, whether it is truth-side (in R) or estimated, and whether it cancels in the ionosphere-free (L3) combination — plus the terms that are deliberately **absent** (phase wind-up, antenna PCV, relativistic clock-rate, signal-dependent DCB), is in **[docs/ERROR_BUDGET.md](docs/ERROR_BUDGET.md)**. Key L3 fact: the ionosphere-free combination removes the first-order ionosphere but **amplifies noise** — for equal per-frequency σ, `σ_IF = √(α²+β²)·σ ≈ 2.98·σ` (variance ≈ 8.87·σ²) for GPS L1/L2 (`tests/test_iono_free_noise_amplification.m`). This is a real cost of L3 and is why the higher-order residual (which survives L3) becomes the dominant ionospheric term once first-order is removed.
+
 ### Troposphere: local weather Gauss-Markov
 
 Set `cfg.errors.troposphere.modelType = 'localWeatherGM'` to activate a per-tower first-order Gauss-Markov wet residual:
