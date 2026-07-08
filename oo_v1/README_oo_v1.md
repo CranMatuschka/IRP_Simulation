@@ -1138,15 +1138,21 @@ Policy: **estimated-tower-clock runs must set a gauge.** `finalizeConfig` enforc
 
 The plan-vocabulary aliases (and the convenience surface `cfg.estimator.clockGauge.mode ∈ {'none','masterClock','zeroMeanEnsemble'}` + `masterIndex`) resolve to the canonical modes in `finalizeConfig`; they drive the existing gauge engine (`ReverseGNSSEKF.appendClockGaugeRows`) with no behaviour change to the default path. `tests/test_clock_gauge_observability.m` asserts the common-mode direction is unobservable without a gauge and observable with one, and that a gauged run keeps `P` symmetric + PSD with the common-mode variance bounded.
 
-### EKF consistency checks
+### EKF consistency checks (NIS and NEES, two-sided χ²)
+Consistency is a **two-sided** χ² test, not the mean-only heuristic "NIS ≈ M". The single-epoch NIS (M measurements) is χ²(M) and the single-epoch NEES (`x̃'P⁻¹x̃`, nₓ error states) is χ²(nₓ); the sum of K such statistics is χ²(K·M) / χ²(K·nₓ) (Bar-Shalom, Li & Kirubarajan 2001, §5.4). Because the mean of χ²_M is M, "NIS ≈ M" only checks the mean and passes a mildly inconsistent filter. Use the interval `[χ²ₐ/₂(dof), χ²₁₋ₐ/₂(dof)]` — `revgnss.ChiSquareConsistency.bounds(dof, confidence)`.
+
 | Metric | Good | Potential issue |
 |--------|------|----------------|
-| NIS ≈ M (visible towers) | Consistent filter | — |
-| NIS >> M | Under-modelled noise | Increase R or Q |
-| NIS << M | Over-modelled noise | Decrease R or Q |
+| NIS inside `[χ²₀.₀₂₅(M), χ²₀.₉₇₅(M)]` | Consistent filter | — |
+| NIS above the band | Under-modelled noise (over-confident) | Increase R or Q |
+| NIS below the band | Over-modelled noise (under-confident, conservative) | Decrease R or Q |
+| NEES inside `[χ²₀.₀₂₅(nₓ), χ²₀.₉₇₅(nₓ)]` | Estimate error matches P | — |
+| NEES above the band | Filter over-confident (P too small / bad F Jacobian) | Check Q and F (WP7) |
 | Postfit RMS < Prefit RMS | Filter is updating usefully | — |
 | Attitude Jacobian norm ≈ 0 | Zero lever arm or poor geometry | Set leverArm ≠ 0 or use positionClockOnlyConfig |
 | Condition number S > 1e12 | Numerical ill-conditioning | Check R and H for near-singular cases |
+
+NEES is computed per-epoch by `SimulationDataStore` (position/velocity/clock/attitude) and on demand by `ReverseGNSSEKF.computeNEES(truth)`, which forms the joint NEES over the estimated core states and uses the **small-angle** attitude error in P's space (quaternion-aware error DCM), not a raw Euler subtraction. Note the shipped scenarios run **conservatively** (R and the unmodelled-dynamics Q inflation are intentionally large), so their NIS/NEES sit **below** the band by design — the desirable direction for a conservative feasibility study. `tests/test_filter_consistency_nees_nis.m` proves the two-sided machinery on a provably-matched linear-Gaussian filter (in-band NEES + NIS, with a negative control that halves R and detects the resulting over-confidence) and confirms the real filter is not over-confident.
 
 ### Angular cross-term Q
 The angular process noise block includes an off-diagonal cross term:
