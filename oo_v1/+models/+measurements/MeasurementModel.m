@@ -149,7 +149,8 @@ classdef MeasurementModel < handle
 
             % ----- Error chain (per measurement) -----------------------
             towerIds = arrayfun(@(ti) towers{ti}.id, twr_list);
-            errStruct = obj.errorChain.compute(elv_list, towerIds, twr_list, t_s);
+            % WP5: pass ant_list so coloured multipath can key its GM state per link.
+            errStruct = obj.errorChain.compute(elv_list, towerIds, twr_list, t_s, ant_list);
 
             % ----- Tower clock corrections — generated ONCE per epoch --
             [towerClkTruth, towerClkModel, towerClkSigma, corrNoise_m, t_prod, towerClkMode] = ...

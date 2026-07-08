@@ -1206,6 +1206,20 @@ With dual frequency enabled, the measurement vector doubles (blocked ordering: a
 | `'elevation'` | `sigma₀ / sin(el)^p` per signal |
 | `'cn0'` | Derived from simulated C/N0 |
 
+### Multipath: coloured Gauss-Markov (WP5)
+
+Multipath is the **dominant** code error in nominal conditions — larger than thermal noise — and is strongly **time-correlated** (correlation times of tens of seconds to minutes, tied to geometry) (Kaplan & Hegarty §7.2.6). Modelling it as white under-represents its low-frequency, per-link-correlated impact. Set `cfg.errors.multipath.coloredGM.enable = true` to replace the legacy white-sinusoid model with a first-order Gauss-Markov process:
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `coloredGM.enable` | `false` | Off = legacy white-sinusoid path (bit-identical) |
+| `coloredGM.tau_s` | `60` | Correlation time [s] (tens of seconds) |
+| `coloredGM.sigmaCodeL1_ss_m` | `0.30` | Steady-state code multipath 1σ at L1 [m] |
+| `coloredGM.elevationExponent` | `1` | Envelope `∝ 1/sin(el)^p` (more multipath at low elevation) |
+| `coloredGM.seed` | `6301` | Dedicated per-link `RandStream` seed |
+
+One persistent GM state is held **per link** (tower × antenna, keyed `tower·1000 + antenna`) and stepped once per epoch via `StochasticProcess.gaussMarkovStep`, so the realised multipath is coherent in time along a link. It is a **truth-side** error: the realised value is added to the truth pseudorange and its steady-state variance enters **R**, but it is **not** an EKF state (the estimator does not know the instantaneous value — that is the point of a conservative, unmodelled correlated error). Enabling it increases end-to-end position error, as a conservative term should (`tests/test_multipath_gaussmarkov.m`).
+
 ### Troposphere: local weather Gauss-Markov
 
 Set `cfg.errors.troposphere.modelType = 'localWeatherGM'` to activate a per-tower first-order Gauss-Markov wet residual:

@@ -349,6 +349,20 @@ cfg.errors.multipath.truth.amplitude_m         = 0.3;
 cfg.errors.multipath.truth.frequency_radps     = 0.01;
 cfg.errors.multipath.truth.stochastic_sigma_m  = 0.1;
 cfg.errors.multipath.sigma_m                   = 0.0;
+% WP5: multipath as a coloured (first-order Gauss-Markov) process. Multipath is the
+% dominant code error in nominal conditions and is strongly time-correlated (tens of
+% seconds to minutes, tied to geometry) — modelling it as white under-represents its
+% low-frequency, per-link-correlated impact (Kaplan & Hegarty §7.2.6). One GM state per
+% link (tower x antenna) is stepped each epoch; the realised value is added to the TRUTH
+% pseudorange and its steady-state variance enters R (the estimator does not know the
+% instantaneous value). It is NOT an EKF state — this is a truth-side conservative error.
+% Default OFF (coloredGM.enable=false) => legacy white-sinusoid path, bit-identical.
+cfg.errors.multipath.coloredGM.enable              = false;
+cfg.errors.multipath.coloredGM.tau_s               = 60;     % correlation time [s] (tens of seconds)
+cfg.errors.multipath.coloredGM.sigmaCodeL1_ss_m    = 0.30;   % steady-state code multipath 1-sigma at L1 [m]
+cfg.errors.multipath.coloredGM.elevationExponent   = 1;      % envelope ~ 1/sin(el)^exp (1 or 2); low elev = more MP
+cfg.errors.multipath.coloredGM.carrierScale        = 0.01;   % phase multipath ~ 1/100 of code (reserved)
+cfg.errors.multipath.coloredGM.seed                = 6301;   % dedicated per-link RNG seed
 
 % --- Effect toggles: deterministic geometric/structural effects ------
 % cfg.effects groups new deterministic effects added in Stages 2–4.
