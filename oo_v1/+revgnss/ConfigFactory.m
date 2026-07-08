@@ -449,7 +449,10 @@ classdef ConfigFactory
             if nargin < 3 || isempty(factors);       factors       = struct(); end
             if nargin < 4 || isempty(globalScaling); globalScaling = struct(); end
 
-            tmpl = revgnss.ConfigFactory.getClockTemplate_(templateName);
+            % WP4: select the h-coefficient source ('legacy' | 'jowTable2p1'), threaded
+            % via cfg.clockScaling.templateSource (synced from cfg.clock.templateSource).
+            tsrc = getf_(globalScaling, 'templateSource', 'legacy');
+            tmpl = revgnss.ConfigFactory.getClockTemplate_(templateName, tsrc);
 
             % Extract global scale factors
             gNoise = getf_(globalScaling, 'globalNoiseFactor', 1.0);
@@ -1294,6 +1297,11 @@ classdef ConfigFactory
 
             % ---- Recreate tower clocks from type + factors (idempotent) ----
             gs = cfg.clockScaling;
+            % WP4: canonical h-coefficient source is cfg.clock.templateSource; mirror it
+            % into the clockScaling struct that makeClockConfig reads.
+            gs.templateSource = getf_(getf_(cfg,'clock',struct()), 'templateSource', ...
+                getf_(gs,'templateSource','legacy'));
+            cfg.clockScaling.templateSource = gs.templateSource;
             for k = 1:nT_req
                 if isfield(cfg.towers(k),'clockType') && ...
                         isfield(cfg.towers(k),'clockFactors')
@@ -1818,11 +1826,29 @@ classdef ConfigFactory
             end
         end
 
-        function tmpl = getClockTemplate_(templateName)
+        function tmpl = getClockTemplate_(templateName, templateSource)
             % getClockTemplate_  Return base h-coefficient struct for a clock type.
             %
             % h-values are one-sided PSD of fractional frequency.
             % References: IEEE Std 1139-2008; Sesia et al.; GPS ICD.
+            %
+            % templateSource (WP4): 'legacy' (default here — the original numbers, kept
+            % for exact reproducibility of past results) or 'jowTable2p1' (h-coefficients
+            % re-anchored to the project primary-source JOW Table 2.1; less optimistic).
+            % The canonical selector is cfg.clock.templateSource, threaded through
+            % makeClockConfig -> cfg.clockScaling.templateSource.
+            if nargin < 2 || isempty(templateSource); templateSource = 'legacy'; end
+            switch lower(templateSource)
+                case 'jowtable2p1'
+                    tmpl = revgnss.ConfigFactory.getClockTemplateJow_(templateName);
+                    return
+                case 'legacy'
+                    % fall through to the legacy table below
+                otherwise
+                    error('ConfigFactory:invalidTemplateSource', ...
+                        'cfg.clock.templateSource must be ''legacy'' or ''jowTable2p1''; got ''%s''.', ...
+                        templateSource);
+            end
 
             switch upper(templateName)
                 case 'TCXO'
@@ -1871,6 +1897,78 @@ classdef ConfigFactory
                     warning('ConfigFactory:unknownTemplate', ...
                         'Unknown clock template "%s"; defaulting to OCXO.', templateName);
                     tmpl = revgnss.ConfigFactory.getClockTemplate_('OCXO');
+            end
+
+            % Shared fields for all templates
+            tmpl.bias_s   = 0.0;
+            tmpl.fracFreq = 0.0;
+            tmpl.driftRate_fracPerSec = 0.0;
+        end
+
+        function tmpl = getClockTemplateJow_(templateName)
+            % getClockTemplateJow_  h-coefficients re-anchored to JOW Table 2.1 (WP4).
+            %
+            % The legacy OCXO/CESIUM templates are optimistic versus the project's own
+            % primary-source analogue (JOW Table 2.1): the OCXO random-walk-FM term
+            % hMinus2 (which dominates the Allan deviation at long averaging times and
+            % drives the Sg*dt^3/3 growth of clock-bias variance between updates) was
+            % 2e-29, and CESIUM1 h0 was ~7 orders below a real caesium beam. Those make
+            % the clock look more stable over a pass than the real hardware.
+            %
+            % h-values are one-sided PSD of fractional frequency (IEEE Std 1139-2008
+            % power-law convention). Sources are cited per coefficient below.
+            switch upper(templateName)
+                case 'TCXO'
+                    % Aligned to JOW Table 2.1 TCXO; already close to the legacy values.
+                    tmpl.h2      = 0;
+                    tmpl.h1      = 0;
+                    tmpl.h0      = 9e-22;     % WFM  (JOW Table 2.1)
+                    tmpl.hMinus1 = 2e-21;     % FFM
+                    tmpl.hMinus2 = 1e-20;     % RWFM
+
+                case 'OCXO'
+                    % JOW Table 2.1 OCXO2 (conservative long-term choice). The RWFM term
+                    % is the re-anchored coefficient: hMinus2 = 2.51e-22 (JOW OCXO2),
+                    % NOT the optimistic legacy 2e-29 (JOW OCXO1 = 4e-23 is the less
+                    % pessimistic alternative). h0/hMinus1 retained from the legacy OCXO
+                    % (JOW does not flag them as optimistic and they set only the short-
+                    % term/flicker floor, not the long-term random walk).
+                    tmpl.h2      = 0;
+                    tmpl.h1      = 0;
+                    tmpl.h0      = 2e-25;     % WFM  (retained; short-term floor)
+                    tmpl.hMinus1 = 7e-27;     % FFM  (retained)
+                    tmpl.hMinus2 = 2.51e-22;  % RWFM (JOW Table 2.1 OCXO2 — re-anchored)
+
+                case 'RUBIDIUM'
+                    % Aligned to JOW Table 2.1 rubidium; already close to legacy.
+                    tmpl.h2      = 0;
+                    tmpl.h1      = 0;
+                    tmpl.h0      = 1e-22;     % WFM
+                    tmpl.hMinus1 = 4.5e-24;   % FFM
+                    tmpl.hMinus2 = 3e-28;     % RWFM
+
+                case 'CESIUM1'
+                    % JOW Table 2.1 Cesium1 (caesium beam): white-FM dominated short term,
+                    % very stable long term. h0 re-anchored ~7 orders up from the legacy
+                    % 1e-26 (which behaved like an idealised maser, not a caesium beam).
+                    tmpl.h2      = 0;
+                    tmpl.h1      = 0;
+                    tmpl.h0      = 1e-19;     % WFM  (JOW Table 2.1 Cesium1 — re-anchored)
+                    tmpl.hMinus1 = 1e-25;     % FFM  (JOW Table 2.1 Cesium1)
+                    tmpl.hMinus2 = 2e-32;     % RWFM (JOW Table 2.1 Cesium1)
+
+                case 'ZERO'
+                    tmpl.h2      = 0;
+                    tmpl.h1      = 0;
+                    tmpl.h0      = 0;
+                    tmpl.hMinus1 = 0;
+                    tmpl.hMinus2 = 0;
+
+                otherwise
+                    warning('ConfigFactory:unknownTemplate', ...
+                        'Unknown clock template "%s"; defaulting to OCXO (jowTable2p1).', templateName);
+                    tmpl = revgnss.ConfigFactory.getClockTemplateJow_('OCXO');
+                    return
             end
 
             % Shared fields for all templates

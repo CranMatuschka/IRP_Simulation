@@ -71,6 +71,11 @@ cfg.clockScaling.globalFreqFactor    = 1.0;
 cfg.clockScaling.globalNoiseFactor   = 1.0;
 cfg.clockScaling.receiverNoiseFactor = 1.0;
 cfg.clockScaling.towerNoiseFactor    = 1.0;
+% WP4: clock h-coefficient source. 'legacy' = original (optimistic) numbers, kept for
+% exact reproducibility; 'jowTable2p1' = re-anchored to JOW Table 2.1 (less optimistic
+% OCXO/CESIUM). Canonical selector is cfg.clock.templateSource (below); this mirror is
+% read by the config-build-time makeClockConfig calls before cfg.clock exists.
+cfg.clockScaling.templateSource      = 'legacy';
 
 % Asset receiver clock fields (simple config fields)
 cfg.asset.clockName    = 'SpaceReceiverClock';
@@ -606,6 +611,10 @@ cfg.towerClock.productValidityPolicy  = 'warn';  % 'warn' | 'error'
 %
 % clock.hardwareDelay.estimatePerTower — hardware delay EKF state placeholder (v1: not implemented)
 cfg.clock.mode                           = 'spacecraftReceiverClockOnly';
+% WP4: h-coefficient source for clock templates (canonical selector). 'legacy' keeps
+% every current number bit-identical; 'jowTable2p1' re-anchors OCXO/CESIUM to the
+% project primary source (JOW Table 2.1) — less optimistic, more conservative.
+cfg.clock.templateSource                 = 'legacy';
 cfg.clock.gauge.mode                     = 'externalTowerCorrections';
 cfg.clock.gauge.referenceTowerIndex      = 1;      % used by fixReferenceTower
 cfg.clock.gauge.sigmaBias_m              = 1e-6;   % pseudo-meas sigma for bias gauge [m]

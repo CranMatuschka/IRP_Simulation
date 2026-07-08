@@ -1034,15 +1034,22 @@ Q_22 = 2·π²·h₋₂·dt
 The `2·ln2·h₋₁` term conservatively captures FFM's white contribution to phase noise at `τ = dt`.
 
 ### Clock templates (per `ConfigFactory.makeClockConfig`)
-| Template | h₀ | h₋₁ | h₋₂ | Typical use |
-|----------|-----|------|------|-------------|
-| TCXO | 9e-22 | 2e-21 | 1e-20 | Low-grade tower |
-| OCXO | 2e-25 | 7e-27 | 2e-29 | Standard tower |
-| RUBIDIUM | 1e-22 | 4.5e-24 | 3e-28 | Mid-grade tower |
-| ATOMICLIKE | 1e-26 | 1e-28 | 1e-30 | High-grade reference |
-| CUSTOM | user-supplied | | | |
+The h-coefficient table is selected by **`cfg.clock.templateSource`** (WP4):
 
-h-coefficients scale as **amplitude²** (PSD units). A noise factor of `f` scales h as `f²`, preserving the physical interpretation of h as a spectral density level.
+- **`'legacy'`** (default) — the original numbers, kept for exact reproducibility of past results.
+- **`'jowTable2p1'`** — re-anchored to the project primary source **JOW Table 2.1**; less optimistic (opt-in).
+
+| Template | source | h₀ | h₋₁ | h₋₂ | Notes |
+|----------|--------|-----|------|------|-------|
+| TCXO | both | 9e-22 | 2e-21 | 1e-20 | already close to JOW |
+| OCXO | legacy | 2e-25 | 7e-27 | **2e-29** | optimistic RWFM |
+| OCXO | jowTable2p1 | 2e-25 | 7e-27 | **2.51e-22** | JOW OCXO2 (RWFM re-anchored) |
+| RUBIDIUM | both | 1e-22 | 4.5e-24 | 3e-28 | already close to JOW |
+| CESIUM1 | legacy | **1e-26** | 1e-28 | 1e-30 | maser-like (optimistic) |
+| CESIUM1 | jowTable2p1 | **1e-19** | 1e-25 | 2e-32 | JOW Cesium1 (caesium beam) |
+| ZERO | both | 0 | 0 | 0 | caller fills in |
+
+The legacy OCXO `h₋₂ = 2e-29` is optimistic: the random-walk-FM term dominates the Allan deviation at long averaging times and drives the `Sg·dt³/3` growth of clock-bias variance between updates, so an optimistic `h₋₂` makes the clock look more stable over a pass than the real hardware. `jowTable2p1` re-anchors it to the JOW Table 2.1 OCXO2 value. **Caveat:** with the model's IEEE-1139 convention the JOW OCXO2 `h₋₂` yields a long-term ADEV (~1.8e-9 at τ=1000 s, and RWFM-dominated even at τ=1 s) that is pessimistic for a good OCXO; it is offered as a conservative bound, and the default is left at `'legacy'` (see `tests/test_clock_template_sourcing.m`). h-coefficients scale as **amplitude²** (PSD units); a noise factor `f` scales h as `f²`.
 
 ### Allan deviation vs Allan variance
 Throughout this codebase:
