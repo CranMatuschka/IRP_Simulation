@@ -45,6 +45,8 @@ classdef ErrorChain < handle
         envModel                   % models.errors.EnvironmentModel (always created)
         envRng                     % RandStream for elevation-dependent code noise
         lastT_s     (1,1) double = -1   % last t_s for dt computation
+        mpRng                      % WP5: dedicated RandStream for coloured multipath
+        mpState                    % WP5: containers.Map link-key -> GM state [m] (persistent)
     end
 
     methods
@@ -87,6 +89,16 @@ classdef ErrorChain < handle
                 seed2 = cfg.measurements.codeNoise.seed;
             end
             obj.envRng = RandStream('mt19937ar', 'Seed', seed2);
+
+            % --- WP5: coloured multipath per-link GM state + dedicated RNG -----
+            mpSeed = 6301;
+            if isfield(cfg,'errors') && isfield(cfg.errors,'multipath') && ...
+                    isfield(cfg.errors.multipath,'coloredGM') && ...
+                    isfield(cfg.errors.multipath.coloredGM,'seed')
+                mpSeed = cfg.errors.multipath.coloredGM.seed;
+            end
+            obj.mpRng   = RandStream('mt19937ar', 'Seed', mpSeed);
+            obj.mpState = containers.Map('KeyType', 'int64', 'ValueType', 'double');
         end
 
         % ----------------------------------------------------------------
@@ -96,7 +108,7 @@ classdef ErrorChain < handle
         end
 
         % ----------------------------------------------------------------
-        function err = compute(obj, elevations_rad, towerIds, towerIdx, t_s)
+        function err = compute(obj, elevations_rad, towerIds, towerIdx, t_s, antennaIdx)
             % compute  Evaluate all error sources for N visible towers.
             %
             % Inputs:
@@ -104,12 +116,18 @@ classdef ErrorChain < handle
             %   towerIds         [N x 1]  tower id integers (for hw delay lookup)
             %   towerIdx         [N x 1]  indices into towers array
             %   t_s              scalar   current time
+            %   antennaIdx       [N x 1]  (optional, WP5) receiver/antenna index per row,
+            %                             for per-link coloured multipath keying. Defaults
+            %                             to all-ones (per-tower keying) when omitted.
             %
             % Returns: err struct as described in class header.
             % All results are at L1 level.
 
             N   = numel(elevations_rad);
             elv = elevations_rad(:);
+            if nargin < 6 || isempty(antennaIdx)
+                antennaIdx = ones(N, 1);
+            end
 
             % Floor elevation for atmosphere mapping
             elvFloor = revgnss.Constants.ELEVATION_FLOOR_RAD;
@@ -158,7 +176,14 @@ classdef ErrorChain < handle
 
             % -------- 5. Multipath ------------------------------------
             [truth_m.mp, model_m.mp, sigma_m.mp] = ...
-                obj.multipath_(elv, t_s);
+                obj.multipath_(elv, t_s, towerIdx, antennaIdx, dt, elvFloor);
+
+            % -------- 5b. Higher-order ionosphere (WP6) ----------------
+            % Second/third-order residual that survives the IF combination. Derived from
+            % the first-order L1 slant delay just computed. Zero (and label harmless) when
+            % cfg.errors.ionosphere.higherOrder.enable is false.
+            [truth_m.ionoHO, model_m.ionoHO, sigma_m.ionoHO] = ...
+                obj.higherOrderIono_(truth_m.iono, f_L1);
 
             % -------- 6. Scintillation sigma (L1 level) ---------------
             scintSigmaL1_m = zeros(N,1);
@@ -173,7 +198,7 @@ classdef ErrorChain < handle
             end
 
             % -------- Aggregate ----------------------------------------
-            labels = {'code','trop','iono','hwDelay','mp'};
+            labels = {'code','trop','iono','hwDelay','mp','ionoHO'};
             truthTotal = zeros(N,1);
             modelTotal = zeros(N,1);
             sigmaTotal = zeros(N,1);
@@ -509,15 +534,44 @@ classdef ErrorChain < handle
         end
 
         % ----------------------------------------------------------------
-        function [truth_m, model_m, sigma_m] = multipath_(obj, elv, t_s)
+        function [truth_m, model_m, sigma_m] = multipath_(obj, elv, t_s, towerIdx, antennaIdx, dt, elvFloor)
             N = numel(elv);
             mc = obj.cfg.errors.multipath;
             truth_m = zeros(N,1);
             model_m = zeros(N,1);
             sigma_m = zeros(N,1);
 
+            % WP5: coloured (first-order Gauss-Markov) multipath. One persistent GM state
+            % per link (tower x antenna) is stepped each epoch; the realised value is the
+            % TRUTH bias (-> z) and its elevation-scaled steady-state sigma enters R (the
+            % estimator does not know the instantaneous value). Kaplan & Hegarty §7.2.6:
+            % multipath is the dominant code error and is strongly time-correlated.
+            useGM = isfield(mc,'coloredGM') && isfield(mc.coloredGM,'enable') && mc.coloredGM.enable;
+            if useGM
+                g       = mc.coloredGM;
+                tau     = g.tau_s;
+                sigmaSS = g.sigmaCodeL1_ss_m;
+                elExp   = 1;  if isfield(g,'elevationExponent'); elExp = g.elevationExponent; end
+                if nargin < 7 || isempty(elvFloor); elvFloor = revgnss.Constants.ELEVATION_FLOOR_RAD; end
+                for mi = 1:N
+                    ti  = towerIdx(mi);
+                    ai  = 1; if nargin >= 5 && ~isempty(antennaIdx); ai = antennaIdx(mi); end
+                    key = int64(round(ti) * 1000 + round(ai));
+                    % Elevation-dependent envelope: more multipath at low elevation.
+                    sinEl   = max(sin(elv(mi)), sin(elvFloor));
+                    sigmaEl = sigmaSS / sinEl^elExp;
+                    if isKey(obj.mpState, key); xPrev = obj.mpState(key); else; xPrev = 0; end
+                    xNew = models.noise.StochasticProcess.gaussMarkovStep( ...
+                        xPrev, dt, tau, sigmaEl, obj.mpRng);
+                    obj.mpState(key) = xNew;
+                    truth_m(mi) = xNew;       % correlated truth-side bias -> pseudorange
+                    sigma_m(mi) = sigmaEl;    % steady-state 1-sigma -> R
+                end
+                return
+            end
+
             if mc.truth.enable
-                % Simple sinusoidal + bounded stochastic multipath
+                % Legacy: simple sinusoidal + bounded stochastic (white) multipath
                 amp  = mc.truth.amplitude_m;
                 freq = mc.truth.frequency_radps;
                 sig  = mc.truth.stochastic_sigma_m;
@@ -528,6 +582,28 @@ classdef ErrorChain < handle
             if isfield(mc,'sigma_m')
                 sigma_m = mc.sigma_m * ones(N,1);
             end
+        end
+
+        % ----------------------------------------------------------------
+        function [truth_m, model_m, sigma_m] = higherOrderIono_(obj, ionoL1_slant_m, f_L1)
+            % higherOrderIono_  Second/third-order ionosphere residual at L1 (WP6).
+            %   Derived from the first-order L1 slant delay. Truth-side, unmodelled
+            %   (model_m = 0); its magnitude enters R. Zero when disabled (bit-identical).
+            N = numel(ionoL1_slant_m);
+            truth_m = zeros(N,1);
+            model_m = zeros(N,1);
+            sigma_m = zeros(N,1);
+            ic = obj.cfg.errors.ionosphere;
+            if ~isfield(ic,'higherOrder') || ~isfield(ic.higherOrder,'enable') || ...
+                    ~ic.higherOrder.enable
+                return
+            end
+            % Evaluated at L1 here (freqHz = f_L1); the f^-3/f^-4 frequency scaling to
+            % other signals is a property of models.errors.HigherOrderIonosphere and is
+            % exercised in the IF-survival test. Truth-side bounded residual.
+            truth_m = models.errors.HigherOrderIonosphere.totalDelay( ...
+                ionoL1_slant_m(:), f_L1, f_L1, ic.higherOrder);
+            sigma_m = abs(truth_m);   % conservative: full unmodelled HO magnitude -> R
         end
 
     end

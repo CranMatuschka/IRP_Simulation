@@ -435,6 +435,84 @@ classdef ReverseGNSSEKF < handle
         end
 
         % ----------------------------------------------------------------
+        function nees = computeNEES(obj, truth)
+            % computeNEES  Normalised estimation error squared vs truth (consistency).
+            %
+            % NEES = (x_hat - x_true)' * (P \ (x_hat - x_true)) over the estimated core
+            % states, per Bar-Shalom, Li & Kirubarajan 2001 ("Estimation with
+            % Applications to Tracking and Navigation"), §5.4. For a consistent filter
+            % E[NEES] = dof, so the returned per-block and .core values (divided by
+            % their dof) have expectation 1.
+            %
+            % The attitude error is the SMALL-ANGLE error between the nominal attitude
+            % and truth in P's attitude-block space (quaternion-aware via the error DCM),
+            % NOT a raw Euler subtraction — the latter lives in a different space and is
+            % ill-defined near gimbal lock. Backslash on P-submatrices (no explicit inv).
+            %
+            % truth: struct with optional fields (only estimated blocks are scored):
+            %   .r_ecef_m [3x1], .v_ecef_mps [3x1], .clockBias_m, .clockDrift_mps,
+            %   .euler_rad [3x1]
+            % Returns struct: .pos .vel .clock .attitude (per-block NEES/dof, NaN if not
+            %   scored), .core (joint NEES/dof over all scored states), .coreRaw (joint,
+            %   un-normalised), .coreDof.
+            sm   = obj.stateMap;
+            nees = struct('pos',NaN,'vel',NaN,'clock',NaN,'attitude',NaN, ...
+                          'core',NaN,'coreRaw',NaN,'coreDof',0);
+            idx = []; err = [];
+
+            if isfield(truth,'r_ecef_m') && ~isempty(truth.r_ecef_m)
+                e = obj.x(sm.r_idx) - truth.r_ecef_m(:);
+                nees.pos = neesBlock_(obj.P, sm.r_idx, e);
+                idx = [idx; sm.r_idx(:)]; err = [err; e];
+            end
+            if isfield(truth,'v_ecef_mps') && ~isempty(truth.v_ecef_mps)
+                e = obj.x(sm.v_idx) - truth.v_ecef_mps(:);
+                nees.vel = neesBlock_(obj.P, sm.v_idx, e);
+                idx = [idx; sm.v_idx(:)]; err = [err; e];
+            end
+            if isfield(truth,'clockBias_m')
+                cIdx = sm.b_rx_idx; e = obj.x(sm.b_rx_idx) - truth.clockBias_m;
+                if isfield(truth,'clockDrift_mps')
+                    cIdx = [sm.b_rx_idx; sm.bdot_rx_idx];
+                    e    = [e; obj.x(sm.bdot_rx_idx) - truth.clockDrift_mps];
+                end
+                nees.clock = neesBlock_(obj.P, cIdx, e);
+                idx = [idx; cIdx(:)]; err = [err; e];
+            end
+            if obj.estimateAttitude && isfield(truth,'euler_rad') && ~isempty(truth.euler_rad)
+                aErr = obj.attitudeSmallAngleError_(truth.euler_rad(:));
+                nees.attitude = neesBlock_(obj.P, sm.euler_idx, aErr);
+                idx = [idx; sm.euler_idx(:)]; err = [err; aErr];
+            end
+
+            % Joint (core) NEES uses the full submatrix incl. cross-covariances.
+            if ~isempty(idx)
+                Pblk = obj.P(idx, idx); Pblk = (Pblk + Pblk') / 2;
+                if rcond(Pblk) > 1e-15
+                    nees.coreRaw = err' * (Pblk \ err);
+                    nees.coreDof = numel(idx);
+                    nees.core    = nees.coreRaw / nees.coreDof;
+                end
+            end
+        end
+
+        % ----------------------------------------------------------------
+        function aErr = attitudeSmallAngleError_(obj, truthEuler_rad)
+            % attitudeSmallAngleError_  Small-angle attitude error in P(euler_idx)
+            % space. Quaternion mode uses the error DCM between nominal and truth;
+            % Euler mode uses the wrap-aware reported-minus-truth Euler difference.
+            if strcmp(obj.attitudeParameterization, 'quaternionErrorState')
+                C_nom = revgnss.AttitudeErrorStateKinematics.quatToDcm(obj.nominalQuat_wxyz);
+                C_tru = revgnss.AttitudeKinematics.bodyToEcefRotation(truthEuler_rad);
+                dC    = C_nom' * C_tru;   % small rotation body(nominal)->body(truth)
+                aErr  = 0.5 * [dC(3,2)-dC(2,3); dC(1,3)-dC(3,1); dC(2,1)-dC(1,2)];
+            else
+                aErr = revgnss.AttitudeKinematics.wrapEuler( ...
+                    obj.getReportEulerRad() - truthEuler_rad);
+            end
+        end
+
+        % ----------------------------------------------------------------
         function sm = buildStateMap_(obj, nTowers)
             sm.r_idx       = (1:3)';
             sm.v_idx       = (4:6)';
@@ -557,20 +635,13 @@ classdef ReverseGNSSEKF < handle
                     F(sm.euler_idx, sm.omega_idx) = zeros(3);
                 end
             else
-                % Euler-euler block: FD of euler kinematics w.r.t. euler
-                fdStep = 1e-7;
-                for ai = 1:3
-                    eul_p = euler; eul_p(ai) = eul_p(ai) + fdStep;
-                    eul_m = euler; eul_m(ai) = eul_m(ai) - fdStep;
-
-                    edot_p = revgnss.AttitudeKinematics.eulerRatesFromBodyRates(eul_p, omega);
-                    edot_m = revgnss.AttitudeKinematics.eulerRatesFromBodyRates(eul_m, omega);
-
-                    eul_new_p = eul_p + dt_s * edot_p;
-                    eul_new_m = eul_m + dt_s * edot_m;
-
-                    F(sm.euler_idx, sm.euler_idx(ai)) = (eul_new_p - eul_new_m) / (2 * fdStep);
-                end
+                % Euler-euler block: analytic Jacobian of eul + dt*T(eul)*omg w.r.t. eul
+                % (WP7). Replaces the fdStep=1e-7 central difference with the closed-form
+                % derivative F(eul,eul) = I + dt*J, removing FD round-off. Guarded near
+                % gimbal lock inside eulerRateJacobian; the singularity-free path is the
+                % quaternion error-state parameterisation.
+                Jeul = revgnss.AttitudeKinematics.eulerRateJacobian(euler, omega);
+                F(sm.euler_idx, sm.euler_idx) = eye(3) + dt_s * Jeul;
 
                 % Euler-omega block: dt * T(euler)
                 cr = cos(euler(1)); sr = sin(euler(1));
@@ -1150,4 +1221,16 @@ function Aout = nearestSPD_(A)
     d = max(diag(D), 1e-12);
     Aout = V * diag(d) * V';
     Aout = (Aout + Aout') / 2;
+end
+
+function v = neesBlock_(P, idx, err)
+    % neesBlock_  Per-block normalised NEES = err' * (P_block \ err) / dof.
+    % Returns NaN when the covariance sub-block is numerically singular (e.g. a
+    % frozen state), mirroring the rcond guard used in SimulationDataStore.
+    Pb = P(idx, idx); Pb = (Pb + Pb') / 2;
+    if rcond(Pb) > 1e-15
+        v = (err(:)' * (Pb \ err(:))) / numel(idx);
+    else
+        v = NaN;
+    end
 end

@@ -1034,15 +1034,22 @@ Q_22 = 2·π²·h₋₂·dt
 The `2·ln2·h₋₁` term conservatively captures FFM's white contribution to phase noise at `τ = dt`.
 
 ### Clock templates (per `ConfigFactory.makeClockConfig`)
-| Template | h₀ | h₋₁ | h₋₂ | Typical use |
-|----------|-----|------|------|-------------|
-| TCXO | 9e-22 | 2e-21 | 1e-20 | Low-grade tower |
-| OCXO | 2e-25 | 7e-27 | 2e-29 | Standard tower |
-| RUBIDIUM | 1e-22 | 4.5e-24 | 3e-28 | Mid-grade tower |
-| ATOMICLIKE | 1e-26 | 1e-28 | 1e-30 | High-grade reference |
-| CUSTOM | user-supplied | | | |
+The h-coefficient table is selected by **`cfg.clock.templateSource`** (WP4):
 
-h-coefficients scale as **amplitude²** (PSD units). A noise factor of `f` scales h as `f²`, preserving the physical interpretation of h as a spectral density level.
+- **`'legacy'`** (default) — the original numbers, kept for exact reproducibility of past results.
+- **`'jowTable2p1'`** — re-anchored to the project primary source **JOW Table 2.1**; less optimistic (opt-in).
+
+| Template | source | h₀ | h₋₁ | h₋₂ | Notes |
+|----------|--------|-----|------|------|-------|
+| TCXO | both | 9e-22 | 2e-21 | 1e-20 | already close to JOW |
+| OCXO | legacy | 2e-25 | 7e-27 | **2e-29** | optimistic RWFM |
+| OCXO | jowTable2p1 | 2e-25 | 7e-27 | **2.51e-22** | JOW OCXO2 (RWFM re-anchored) |
+| RUBIDIUM | both | 1e-22 | 4.5e-24 | 3e-28 | already close to JOW |
+| CESIUM1 | legacy | **1e-26** | 1e-28 | 1e-30 | maser-like (optimistic) |
+| CESIUM1 | jowTable2p1 | **1e-19** | 1e-25 | 2e-32 | JOW Cesium1 (caesium beam) |
+| ZERO | both | 0 | 0 | 0 | caller fills in |
+
+The legacy OCXO `h₋₂ = 2e-29` is optimistic: the random-walk-FM term dominates the Allan deviation at long averaging times and drives the `Sg·dt³/3` growth of clock-bias variance between updates, so an optimistic `h₋₂` makes the clock look more stable over a pass than the real hardware. `jowTable2p1` re-anchors it to the JOW Table 2.1 OCXO2 value. **Caveat:** with the model's IEEE-1139 convention the JOW OCXO2 `h₋₂` yields a long-term ADEV (~1.8e-9 at τ=1000 s, and RWFM-dominated even at τ=1 s) that is pessimistic for a good OCXO; it is offered as a conservative bound, and the default is left at `'legacy'` (see `tests/test_clock_template_sourcing.m`). h-coefficients scale as **amplitude²** (PSD units); a noise factor `f` scales h as `f²`.
 
 ### Allan deviation vs Allan variance
 Throughout this codebase:
@@ -1125,15 +1132,41 @@ This config sets:
 
 When `estimateAttitude = false`, the EKF still carries the attitude states but sets their Q contribution to `~0`, effectively freezing them. The state dimension is unchanged for code simplicity.
 
-### EKF consistency checks
+### Clock gauge when tower clocks are estimated (WP1)
+One-way pseudorange observes only **differences** of clocks, so for a system of *n* clocks only *n − 1* clock states are separable; one common-mode (uniform clock shift) datum is unobservable (Kaplan & Hegarty, control-segment discussion). When tower clocks are estimated in the EKF (`cfg.clock.mode = 'includeTowerClocksInEKF'`, which sets `cfg.estimator.estimateTowerClocks = true`), the clock subspace is therefore rank-deficient and the common-mode variance is unconstrained unless a **gauge** pins the datum.
+
+Policy: **estimated-tower-clock runs must set a gauge.** `finalizeConfig` enforces this — `cfg.clock.gauge.mode = 'free'` under estimated tower clocks raises `ConfigFactory:clockGaugeRequired`. The available gauges (soft pseudo-measurement rows appended in the same Joseph update, not a parallel path) are:
+
+| `cfg.clock.gauge.mode` | Plan-vocabulary alias | Datum constraint |
+|------------------------|-----------------------|------------------|
+| `externalTowerCorrections` (default) | `none` | no EKF gauge; external tower corrections assumed |
+| `fixReferenceTower` | `masterClock` | pins reference tower bias+drift (`referenceTowerIndex` / `masterIndex`) |
+| `meanGroundClockGauge` | `zeroMeanEnsemble` | pins the zero-mean ensemble `Σ bᵢ = 0` (composite clock) |
+
+The plan-vocabulary aliases (and the convenience surface `cfg.estimator.clockGauge.mode ∈ {'none','masterClock','zeroMeanEnsemble'}` + `masterIndex`) resolve to the canonical modes in `finalizeConfig`; they drive the existing gauge engine (`ReverseGNSSEKF.appendClockGaugeRows`) with no behaviour change to the default path. `tests/test_clock_gauge_observability.m` asserts the common-mode direction is unobservable without a gauge and observable with one, and that a gauged run keeps `P` symmetric + PSD with the common-mode variance bounded.
+
+### EKF consistency checks (NIS and NEES, two-sided χ²)
+Consistency is a **two-sided** χ² test, not the mean-only heuristic "NIS ≈ M". The single-epoch NIS (M measurements) is χ²(M) and the single-epoch NEES (`x̃'P⁻¹x̃`, nₓ error states) is χ²(nₓ); the sum of K such statistics is χ²(K·M) / χ²(K·nₓ) (Bar-Shalom, Li & Kirubarajan 2001, §5.4). Because the mean of χ²_M is M, "NIS ≈ M" only checks the mean and passes a mildly inconsistent filter. Use the interval `[χ²ₐ/₂(dof), χ²₁₋ₐ/₂(dof)]` — `revgnss.ChiSquareConsistency.bounds(dof, confidence)`.
+
 | Metric | Good | Potential issue |
 |--------|------|----------------|
-| NIS ≈ M (visible towers) | Consistent filter | — |
-| NIS >> M | Under-modelled noise | Increase R or Q |
-| NIS << M | Over-modelled noise | Decrease R or Q |
+| NIS inside `[χ²₀.₀₂₅(M), χ²₀.₉₇₅(M)]` | Consistent filter | — |
+| NIS above the band | Under-modelled noise (over-confident) | Increase R or Q |
+| NIS below the band | Over-modelled noise (under-confident, conservative) | Decrease R or Q |
+| NEES inside `[χ²₀.₀₂₅(nₓ), χ²₀.₉₇₅(nₓ)]` | Estimate error matches P | — |
+| NEES above the band | Filter over-confident (P too small / bad F Jacobian) | Check Q and F (WP7) |
 | Postfit RMS < Prefit RMS | Filter is updating usefully | — |
 | Attitude Jacobian norm ≈ 0 | Zero lever arm or poor geometry | Set leverArm ≠ 0 or use positionClockOnlyConfig |
 | Condition number S > 1e12 | Numerical ill-conditioning | Check R and H for near-singular cases |
+
+NEES is computed per-epoch by `SimulationDataStore` (position/velocity/clock/attitude) and on demand by `ReverseGNSSEKF.computeNEES(truth)`, which forms the joint NEES over the estimated core states and uses the **small-angle** attitude error in P's space (quaternion-aware error DCM), not a raw Euler subtraction. Note the shipped scenarios run **conservatively** (R and the unmodelled-dynamics Q inflation are intentionally large), so their NIS/NEES sit **below** the band by design — the desirable direction for a conservative feasibility study. `tests/test_filter_consistency_nees_nis.m` proves the two-sided machinery on a provably-matched linear-Gaussian filter (in-band NEES + NIS, with a negative control that halves R and detects the resulting over-confidence) and confirms the real filter is not over-confident.
+
+### Attitude process noise `sigma_angAccel` — torque budget (WP3)
+For **attitude-estimating** presets, `cfg.estimator.sigma_angAccel_radps2` is derived from a residual disturbance-torque budget rather than an optimistic literal: `α = τ / I` via `ConfigFactory.angAccelFromTorqueBudget_(cfg.asset.inertia_kgm2, cfg.asset.residualDisturbanceTorque_Nm)`. The defaults (I = 10 kg·m², τ = 1e-6 N·m) give **α ≈ 1e-7 rad/s²** — the conservative (higher) end of the 1e-9…1e-6 rad/s² range real spacecraft see from gravity-gradient / solar-radiation-pressure / residual-magnetic torques (Wertz, *Spacecraft Attitude Determination and Control*, 1978; at GEO SRP dominates). The previous 1e-10…1e-9 literals made the attitude covariance over-confident. This is an **intentional default change** for attitude-estimating presets (masterConfig, singleAssetCarrierAttitude, multiAntennaAttitudeConfig, geoRealWorldTruthComparison); it slightly raises the reported attitude 1σ and perturbs the coupled carrier/position/clock solution at the ~0.1% level.
+
+`positionClockOnlyConfig` keeps `sigma_angAccel = 1e-15` deliberately: attitude is **not** estimated there (`estimateAttitude=false`), so the EKF freezes the attitude Q block and the value is inert.
+
+**Observability tie-in:** when attitude is estimated but `AttitudeObservability.audit` classifies it `weak-*` or `unobservable-*`, the audit emits a warning that the reported attitude covariance is **process-noise-limited** (driven by `sigma_angAccel`), not measurement-constrained — so a small `sigma_angAccel` is not mistaken for a genuinely well-observed attitude. It warns; it does not auto-disable.
 
 ### Angular cross-term Q
 The angular process noise block includes an off-diagonal cross term:
@@ -1142,12 +1175,12 @@ Q_euler_omega = σ²_angAccel · dt² / 2
 ```
 This accounts for the correlation between integrated attitude error and angular rate noise over a timestep. Without it, the EKF can become overconfident in attitude shortly after update.
 
-### Finite-difference F matrix (Euler-Euler block)
-The transition matrix F uses numerical (central-difference) differentiation of the Euler kinematic equation with respect to the Euler angles:
-```matlab
-F(euler_idx, euler_idx(ai)) = (eul_new(eul+ε) − eul_new(eul−ε)) / (2ε)
+### Analytic F matrix (Euler-Euler block) (WP7)
+The Euler-euler block of the transition matrix is the **closed-form** Jacobian of the Euler kinematic update `eul + dt·T(eul)·ω`:
 ```
-with `ε = 1e-7 rad`. This avoids analytically differentiating the T(e,ω) matrix and is correct when Euler angles change slowly (GEO scenario).
+F(euler_idx, euler_idx) = I + dt · AttitudeKinematics.eulerRateJacobian(eul, ω)
+```
+This replaces the earlier central finite difference (`ε = 1e-7 rad`), which carried avoidable round-off and could only be spot-checked FD-vs-FD. `eulerRateJacobian` is derived (and symbolically verified) from `T = [1, sr·tp, cr·tp; 0, cr, −sr; 0, sr/cp, cr/cp]`; the yaw column is exactly zero (T is yaw-independent). It is **guarded** near pitch = ±90° (cos pitch clamped so the `sec²`/`tan` entries stay finite). The truly singularity-free path is the **quaternion error-state** parameterisation (`cfg.estimator.attitude.parameterization = 'quaternionErrorState'`), which is the default scenario's choice and whose F blocks are already closed-form (`F(θ,θ)=I−[ω]×dt`, `F(θ,ω)=I·dt`) — so this analytic change hardens the legacy `eulerZYX` path and does not move the golden. `tests/test_euler_jacobian_analytic.m` validates the analytic block against an independent **complex-step** Jacobian (agreement ~1e-16) and against the replaced finite difference (~1e-9), and checks the gimbal-lock guard.
 
 ---
 
@@ -1172,6 +1205,38 @@ With dual frequency enabled, the measurement vector doubles (blocked ordering: a
 | `'constant'` (default) | Fixed sigma from `cfg.errors.codeNoise.sigma_m` |
 | `'elevation'` | `sigma₀ / sin(el)^p` per signal |
 | `'cn0'` | Derived from simulated C/N0 |
+
+### Multipath: coloured Gauss-Markov (WP5)
+
+Multipath is the **dominant** code error in nominal conditions — larger than thermal noise — and is strongly **time-correlated** (correlation times of tens of seconds to minutes, tied to geometry) (Kaplan & Hegarty §7.2.6). Modelling it as white under-represents its low-frequency, per-link-correlated impact. Set `cfg.errors.multipath.coloredGM.enable = true` to replace the legacy white-sinusoid model with a first-order Gauss-Markov process:
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `coloredGM.enable` | `false` | Off = legacy white-sinusoid path (bit-identical) |
+| `coloredGM.tau_s` | `60` | Correlation time [s] (tens of seconds) |
+| `coloredGM.sigmaCodeL1_ss_m` | `0.30` | Steady-state code multipath 1σ at L1 [m] |
+| `coloredGM.elevationExponent` | `1` | Envelope `∝ 1/sin(el)^p` (more multipath at low elevation) |
+| `coloredGM.seed` | `6301` | Dedicated per-link `RandStream` seed |
+
+One persistent GM state is held **per link** (tower × antenna, keyed `tower·1000 + antenna`) and stepped once per epoch via `StochasticProcess.gaussMarkovStep`, so the realised multipath is coherent in time along a link. It is a **truth-side** error: the realised value is added to the truth pseudorange and its steady-state variance enters **R**, but it is **not** an EKF state (the estimator does not know the instantaneous value — that is the point of a conservative, unmodelled correlated error). Enabling it increases end-to-end position error, as a conservative term should (`tests/test_multipath_gaussmarkov.m`).
+
+### Higher-order ionosphere (WP6)
+
+The dual-frequency ionosphere-free (L3) combination cancels the first-order `40.3·TEC/f²` term (~99.9% of the ionospheric delay), but the **second- and third-order residuals survive it** and are of order **centimetres at L1 under high solar activity** — no longer negligible at a ~3 cm / ~100 ps target. Set `cfg.errors.ionosphere.higherOrder.enable = true` to add a **Branch A bounded-residual** model (`models.errors.HigherOrderIonosphere`):
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `higherOrder.enable` | `false` | Off = bit-identical |
+| `higherOrder.secondOrderFractionL1` | `0.003` | 2nd-order at L1 as a fraction of the first-order slant delay (∝ TEC) |
+| `higherOrder.secondOrderCap_m` | `0.05` | Cap on the 2nd-order L1 magnitude [m] |
+| `higherOrder.thirdOrderCoeff_perm` | `5e-5` | 3rd-order coefficient [1/m]: `d3_L1 = coeff·I_L1²` (∝ TEC²) |
+| `higherOrder.thirdOrderCap_m` | `0.005` | Cap on the 3rd-order L1 magnitude [m] |
+
+The second-order term scales as **f⁻³** (∝ `TEC·B·cosθ/f³`) and the third-order as **f⁻⁴** (∝ `TEC²/f⁴`) — sources: Bassiri & Hajj 1993, Hoque & Jakowski 2007, Kaplan & Hegarty. Because these are **not** the `f⁻²` first-order term, they do **not cancel** in the L3 combination: `tests/test_iono_higher_order.m` verifies the first-order cancels to ~0 while the higher-order residual is retained at the cm level. It is a **truth-side** residual (added to truth, magnitude into R, not estimated), derived from the first-order slant delay the ionosphere model already produces. When enabled, `cfg.effects.ionosphere.higherOrderStatus` becomes `'boundedResidualTruthSide'`. Scope note: the residual is injected on the primary (L1) code truth; the IF-survival property is proven algebraically — full per-signal injection into the dual-frequency IF **EKF** path is a documented future extension.
+
+### Error budget and the L3 noise-amplification cost (WP8)
+
+The full accounting of every modelled error term — its magnitude, whether it is truth-side (in R) or estimated, and whether it cancels in the ionosphere-free (L3) combination — plus the terms that are deliberately **absent** (phase wind-up, antenna PCV, relativistic clock-rate, signal-dependent DCB), is in **[docs/ERROR_BUDGET.md](docs/ERROR_BUDGET.md)**. Key L3 fact: the ionosphere-free combination removes the first-order ionosphere but **amplifies noise** — for equal per-frequency σ, `σ_IF = √(α²+β²)·σ ≈ 2.98·σ` (variance ≈ 8.87·σ²) for GPS L1/L2 (`tests/test_iono_free_noise_amplification.m`). This is a real cost of L3 and is why the higher-order residual (which survives L3) becomes the dominant ionospheric term once first-order is removed.
 
 ### Troposphere: local weather Gauss-Markov
 

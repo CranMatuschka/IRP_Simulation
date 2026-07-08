@@ -98,7 +98,10 @@ classdef ScenarioPresets
             % Initial attitude covariance and error.
             cfg.estimator.P0_euler_rad              = deg2rad(5);
             cfg.estimator.P0_omega_radps            = 1e-12;
-            cfg.estimator.sigma_angAccel_radps2     = 1e-10;
+            % WP3: torque-budget-justified attitude process noise (~1e-7 rad/s^2),
+            % replacing the over-optimistic 1e-10. alpha = tau / I (Wertz).
+            cfg.estimator.sigma_angAccel_radps2     = revgnss.ConfigFactory.angAccelFromTorqueBudget_( ...
+                cfg.asset.inertia_kgm2, cfg.asset.residualDisturbanceTorque_Nm);
             cfg.estimator.initialError.euler_deg    = [1; -1; 0.5];
             cfg.estimator.initialError.omega_radps  = [0; 0; 0];
 
@@ -229,7 +232,10 @@ classdef ScenarioPresets
             cfg.estimator.sigma_accel_mps2 = 1e-6;
             cfg.estimator.processNoise.modelMismatch.enable = false;
             cfg.estimator.processNoise.modelMismatch.sigma_mps2 = 0;
-            cfg.estimator.sigma_angAccel_radps2 = 1e-9;
+            % WP3: torque-budget-justified attitude process noise (~1e-7 rad/s^2),
+            % replacing the over-optimistic 1e-9. alpha = tau / I (Wertz).
+            cfg.estimator.sigma_angAccel_radps2 = revgnss.ConfigFactory.angAccelFromTorqueBudget_( ...
+                cfg.asset.inertia_kgm2, cfg.asset.residualDisturbanceTorque_Nm);
 
             cfg.estimator.P0_pos_m       = 3000;
             cfg.estimator.P0_vel_mps     = 1.0;

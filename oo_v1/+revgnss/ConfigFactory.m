@@ -119,6 +119,10 @@ classdef ConfigFactory
             cfg.estimator.estimateAngularRateFromPseudorange = false;
             cfg.estimator.P0_euler_rad                       = 1e-12;
             cfg.estimator.P0_omega_radps                     = 1e-12;
+            % WP3: kept at 1e-15 deliberately. Attitude is NOT estimated here
+            % (estimateAttitude=false, nReceivers=1), so this value is inert — the EKF
+            % zeroes the attitude Q block (ReverseGNSSEKF.buildQ_ freeze). The
+            % torque-budget default applies only to attitude-ESTIMATING presets.
             cfg.estimator.sigma_angAccel_radps2              = 1e-15;
         end
 
@@ -148,7 +152,10 @@ classdef ConfigFactory
 
             cfg.estimator.P0_euler_rad              = deg2rad(5);
             cfg.estimator.P0_omega_radps            = 1e-12;
-            cfg.estimator.sigma_angAccel_radps2     = 1e-10;
+            % WP3: torque-budget-justified attitude process noise (~1e-7 rad/s^2),
+            % replacing the over-optimistic 1e-10. alpha = tau / I (Wertz).
+            cfg.estimator.sigma_angAccel_radps2     = revgnss.ConfigFactory.angAccelFromTorqueBudget_( ...
+                cfg.asset.inertia_kgm2, cfg.asset.residualDisturbanceTorque_Nm);
             cfg.estimator.initialError.euler_deg    = [1; -1; 0.5];
             cfg.estimator.initialError.omega_radps  = [0; 0; 0];
 
@@ -442,7 +449,10 @@ classdef ConfigFactory
             if nargin < 3 || isempty(factors);       factors       = struct(); end
             if nargin < 4 || isempty(globalScaling); globalScaling = struct(); end
 
-            tmpl = revgnss.ConfigFactory.getClockTemplate_(templateName);
+            % WP4: select the h-coefficient source ('legacy' | 'jowTable2p1'), threaded
+            % via cfg.clockScaling.templateSource (synced from cfg.clock.templateSource).
+            tsrc = getf_(globalScaling, 'templateSource', 'legacy');
+            tmpl = revgnss.ConfigFactory.getClockTemplate_(templateName, tsrc);
 
             % Extract global scale factors
             gNoise = getf_(globalScaling, 'globalNoiseFactor', 1.0);
@@ -605,6 +615,35 @@ classdef ConfigFactory
                 end
             end
 
+            % ---- WP1: cfg.estimator.clockGauge alias -> canonical cfg.clock.gauge ----
+            % Optional convenience surface exposing the plan's datum vocabulary
+            % ('none' | 'masterClock' | 'zeroMeanEnsemble' + masterIndex). Present-only:
+            % there is NO baseConfig default for cfg.estimator.clockGauge, so configs that
+            % set cfg.clock.gauge.mode directly (the canonical Stage-8 surface) are never
+            % clobbered. This alias only maps the datum mode onto the existing gauge engine;
+            % it does not by itself enable tower-clock estimation (use cfg.clock.mode for
+            % that). Datum rationale: for n clocks only n-1 clock states are separable,
+            % leaving one unobservable common-mode datum (Kaplan & Hegarty, control segment).
+            if isfield(cfg,'estimator') && isfield(cfg.estimator,'clockGauge')
+                eg = cfg.estimator.clockGauge;
+                if ~isfield(cfg,'clock');       cfg.clock = struct();       end
+                if ~isfield(cfg.clock,'gauge'); cfg.clock.gauge = struct(); end
+                if isfield(eg,'mode')
+                    switch eg.mode
+                        case 'none';             cfg.clock.gauge.mode = 'externalTowerCorrections';
+                        case 'masterClock';      cfg.clock.gauge.mode = 'fixReferenceTower';
+                        case 'zeroMeanEnsemble'; cfg.clock.gauge.mode = 'meanGroundClockGauge';
+                        otherwise
+                            error('ConfigFactory:invalidClockGaugeMode', ...
+                                ['cfg.estimator.clockGauge.mode must be ''none'', ''masterClock'', ' ...
+                                 'or ''zeroMeanEnsemble''; got ''%s''.'], eg.mode);
+                    end
+                end
+                if isfield(eg,'masterIndex')
+                    cfg.clock.gauge.referenceTowerIndex = eg.masterIndex;
+                end
+            end
+
             % ---- Clock mode / gauge validation (Stage 8) ------------------
             % Map cfg.clock.mode to estimator.estimateTowerClocks and validate gauge.
             if isfield(cfg,'clock') && isfield(cfg.clock,'mode')
@@ -613,6 +652,29 @@ classdef ConfigFactory
                 if isfield(cfg.clock,'gauge') && isfield(cfg.clock.gauge,'mode')
                     gaugeMode = cfg.clock.gauge.mode;
                 end
+
+                % WP1 (clock gauge): accept the datum-vocabulary synonyms
+                % 'masterClock' and 'zeroMeanEnsemble' as aliases for the EXISTING
+                % gauge machinery, so plan/preset configs written in that vocabulary
+                % drive the same pseudo-measurement update path (no parallel gauge).
+                %   masterClock      == fixReferenceTower   (one clock held as datum)
+                %   zeroMeanEnsemble == meanGroundClockGauge (zero-mean composite clock)
+                % Rationale: for n clocks only n-1 clock states are separable, leaving
+                % one unobservable common-mode datum (Kaplan & Hegarty, control-segment
+                % discussion). The gauge pins that datum. masterIndex aliases
+                % referenceTowerIndex.
+                switch gaugeMode
+                    case 'masterClock'
+                        gaugeMode = 'fixReferenceTower';
+                        cfg.clock.gauge.mode = gaugeMode;
+                    case 'zeroMeanEnsemble'
+                        gaugeMode = 'meanGroundClockGauge';
+                        cfg.clock.gauge.mode = gaugeMode;
+                end
+                if isfield(cfg.clock,'gauge') && isfield(cfg.clock.gauge,'masterIndex')
+                    cfg.clock.gauge.referenceTowerIndex = cfg.clock.gauge.masterIndex;
+                end
+
                 switch clockMode
                     case 'spacecraftReceiverClockOnly'
                         cfg.estimator.estimateTowerClocks = false;
@@ -1235,6 +1297,11 @@ classdef ConfigFactory
 
             % ---- Recreate tower clocks from type + factors (idempotent) ----
             gs = cfg.clockScaling;
+            % WP4: canonical h-coefficient source is cfg.clock.templateSource; mirror it
+            % into the clockScaling struct that makeClockConfig reads.
+            gs.templateSource = getf_(getf_(cfg,'clock',struct()), 'templateSource', ...
+                getf_(gs,'templateSource','legacy'));
+            cfg.clockScaling.templateSource = gs.templateSource;
             for k = 1:nT_req
                 if isfield(cfg.towers(k),'clockType') && ...
                         isfield(cfg.towers(k),'clockFactors')
@@ -1465,6 +1532,13 @@ classdef ConfigFactory
             end
             if ~isfield(cfg.effects.ionosphere,'higherOrderStatus')
                 cfg.effects.ionosphere.higherOrderStatus = 'disabled';
+            end
+            % WP6: reflect the actual higher-order iono model state honestly.
+            if isfield(cfg,'errors') && isfield(cfg.errors,'ionosphere') && ...
+                    isfield(cfg.errors.ionosphere,'higherOrder') && ...
+                    isfield(cfg.errors.ionosphere.higherOrder,'enable') && ...
+                    cfg.errors.ionosphere.higherOrder.enable
+                cfg.effects.ionosphere.higherOrderStatus = 'boundedResidualTruthSide';
             end
             if ~isfield(cfg.effects.ionosphere,'klobucharStatus')
                 cfg.effects.ionosphere.klobucharStatus = 'notImplemented';
@@ -1759,11 +1833,29 @@ classdef ConfigFactory
             end
         end
 
-        function tmpl = getClockTemplate_(templateName)
+        function tmpl = getClockTemplate_(templateName, templateSource)
             % getClockTemplate_  Return base h-coefficient struct for a clock type.
             %
             % h-values are one-sided PSD of fractional frequency.
             % References: IEEE Std 1139-2008; Sesia et al.; GPS ICD.
+            %
+            % templateSource (WP4): 'legacy' (default here — the original numbers, kept
+            % for exact reproducibility of past results) or 'jowTable2p1' (h-coefficients
+            % re-anchored to the project primary-source JOW Table 2.1; less optimistic).
+            % The canonical selector is cfg.clock.templateSource, threaded through
+            % makeClockConfig -> cfg.clockScaling.templateSource.
+            if nargin < 2 || isempty(templateSource); templateSource = 'legacy'; end
+            switch lower(templateSource)
+                case 'jowtable2p1'
+                    tmpl = revgnss.ConfigFactory.getClockTemplateJow_(templateName);
+                    return
+                case 'legacy'
+                    % fall through to the legacy table below
+                otherwise
+                    error('ConfigFactory:invalidTemplateSource', ...
+                        'cfg.clock.templateSource must be ''legacy'' or ''jowTable2p1''; got ''%s''.', ...
+                        templateSource);
+            end
 
             switch upper(templateName)
                 case 'TCXO'
@@ -1818,6 +1910,95 @@ classdef ConfigFactory
             tmpl.bias_s   = 0.0;
             tmpl.fracFreq = 0.0;
             tmpl.driftRate_fracPerSec = 0.0;
+        end
+
+        function tmpl = getClockTemplateJow_(templateName)
+            % getClockTemplateJow_  h-coefficients re-anchored to JOW Table 2.1 (WP4).
+            %
+            % The legacy OCXO/CESIUM templates are optimistic versus the project's own
+            % primary-source analogue (JOW Table 2.1): the OCXO random-walk-FM term
+            % hMinus2 (which dominates the Allan deviation at long averaging times and
+            % drives the Sg*dt^3/3 growth of clock-bias variance between updates) was
+            % 2e-29, and CESIUM1 h0 was ~7 orders below a real caesium beam. Those make
+            % the clock look more stable over a pass than the real hardware.
+            %
+            % h-values are one-sided PSD of fractional frequency (IEEE Std 1139-2008
+            % power-law convention). Sources are cited per coefficient below.
+            switch upper(templateName)
+                case 'TCXO'
+                    % Aligned to JOW Table 2.1 TCXO; already close to the legacy values.
+                    tmpl.h2      = 0;
+                    tmpl.h1      = 0;
+                    tmpl.h0      = 9e-22;     % WFM  (JOW Table 2.1)
+                    tmpl.hMinus1 = 2e-21;     % FFM
+                    tmpl.hMinus2 = 1e-20;     % RWFM
+
+                case 'OCXO'
+                    % JOW Table 2.1 OCXO2 (conservative long-term choice). The RWFM term
+                    % is the re-anchored coefficient: hMinus2 = 2.51e-22 (JOW OCXO2),
+                    % NOT the optimistic legacy 2e-29 (JOW OCXO1 = 4e-23 is the less
+                    % pessimistic alternative). h0/hMinus1 retained from the legacy OCXO
+                    % (JOW does not flag them as optimistic and they set only the short-
+                    % term/flicker floor, not the long-term random walk).
+                    tmpl.h2      = 0;
+                    tmpl.h1      = 0;
+                    tmpl.h0      = 2e-25;     % WFM  (retained; short-term floor)
+                    tmpl.hMinus1 = 7e-27;     % FFM  (retained)
+                    tmpl.hMinus2 = 2.51e-22;  % RWFM (JOW Table 2.1 OCXO2 — re-anchored)
+
+                case 'RUBIDIUM'
+                    % Aligned to JOW Table 2.1 rubidium; already close to legacy.
+                    tmpl.h2      = 0;
+                    tmpl.h1      = 0;
+                    tmpl.h0      = 1e-22;     % WFM
+                    tmpl.hMinus1 = 4.5e-24;   % FFM
+                    tmpl.hMinus2 = 3e-28;     % RWFM
+
+                case 'CESIUM1'
+                    % JOW Table 2.1 Cesium1 (caesium beam): white-FM dominated short term,
+                    % very stable long term. h0 re-anchored ~7 orders up from the legacy
+                    % 1e-26 (which behaved like an idealised maser, not a caesium beam).
+                    tmpl.h2      = 0;
+                    tmpl.h1      = 0;
+                    tmpl.h0      = 1e-19;     % WFM  (JOW Table 2.1 Cesium1 — re-anchored)
+                    tmpl.hMinus1 = 1e-25;     % FFM  (JOW Table 2.1 Cesium1)
+                    tmpl.hMinus2 = 2e-32;     % RWFM (JOW Table 2.1 Cesium1)
+
+                case 'ZERO'
+                    tmpl.h2      = 0;
+                    tmpl.h1      = 0;
+                    tmpl.h0      = 0;
+                    tmpl.hMinus1 = 0;
+                    tmpl.hMinus2 = 0;
+
+                otherwise
+                    warning('ConfigFactory:unknownTemplate', ...
+                        'Unknown clock template "%s"; defaulting to OCXO (jowTable2p1).', templateName);
+                    tmpl = revgnss.ConfigFactory.getClockTemplateJow_('OCXO');
+                    return
+            end
+
+            % Shared fields for all templates
+            tmpl.bias_s   = 0.0;
+            tmpl.fracFreq = 0.0;
+            tmpl.driftRate_fracPerSec = 0.0;
+        end
+
+        function saa = angAccelFromTorqueBudget_(inertia_kgm2, torque_Nm)
+            % angAccelFromTorqueBudget_  Angular-acceleration 1-sigma [rad/s^2] from a
+            % residual disturbance-torque budget: alpha = tau / I  (Euler's equation,
+            % single-axis). Used to set a physically defensible cfg.estimator.
+            % sigma_angAccel_radps2 for attitude-estimating presets instead of an
+            % over-optimistic literal. Source for the environmental-torque magnitudes:
+            % Wertz, "Spacecraft Attitude Determination and Control", 1978 (gravity-
+            % gradient, solar-radiation-pressure, residual-magnetic, aerodynamic torques
+            % — at GEO SRP dominates). Choose the conservative (higher) torque / lower
+            % inertia end so the attitude process noise is not under-modelled.
+            %   inertia_kgm2  principal moment of inertia [kg m^2] (> 0)
+            %   torque_Nm     residual (unmodelled) disturbance torque 1-sigma [N m]
+            assert(isscalar(inertia_kgm2) && inertia_kgm2 > 0 && isfinite(inertia_kgm2), ...
+                'ConfigFactory:angAccelInertia', 'inertia_kgm2 must be a positive finite scalar');
+            saa = torque_Nm / inertia_kgm2;
         end
 
     end  % methods (Static)

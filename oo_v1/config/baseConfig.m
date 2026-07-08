@@ -46,6 +46,16 @@ r_geo      = models.frames.GeometryUtils.geodetic2ecef(geoLat_rad, geoLon_rad, g
 
 cfg.asset.name                    = 'GEO-1';
 cfg.asset.mass_kg                 = 70;
+% Attitude process-noise budget (WP3). The angular-acceleration 1-sigma driving the
+% EKF attitude Q is derived from a residual disturbance-torque budget alpha = tau / I.
+% Representative small-satellite values (Wertz, "Spacecraft Attitude Determination and
+% Control", 1978, environmental-torque chapters: gravity-gradient, solar-radiation
+% pressure, residual-magnetic; at GEO SRP dominates). Conservative choices: a modest
+% principal inertia and a residual (post-modelling) disturbance torque, giving
+% alpha ~ 1e-7 rad/s^2 — the higher (more conservative) end of the plausible range,
+% so the attitude covariance is not artificially over-confident.
+cfg.asset.inertia_kgm2               = 10;      % principal moment of inertia [kg m^2]
+cfg.asset.residualDisturbanceTorque_Nm = 1e-6;  % residual disturbance torque 1-sigma [N m]
 cfg.asset.r_ecef_m                = r_geo;
 cfg.asset.v_ecef_mps              = [0; 0; 0];   % geostationary in ECEF
 cfg.asset.attitude_euler_rad      = [0; 0; 0];
@@ -61,6 +71,11 @@ cfg.clockScaling.globalFreqFactor    = 1.0;
 cfg.clockScaling.globalNoiseFactor   = 1.0;
 cfg.clockScaling.receiverNoiseFactor = 1.0;
 cfg.clockScaling.towerNoiseFactor    = 1.0;
+% WP4: clock h-coefficient source. 'legacy' = original (optimistic) numbers, kept for
+% exact reproducibility; 'jowTable2p1' = re-anchored to JOW Table 2.1 (less optimistic
+% OCXO/CESIUM). Canonical selector is cfg.clock.templateSource (below); this mirror is
+% read by the config-build-time makeClockConfig calls before cfg.clock exists.
+cfg.clockScaling.templateSource      = 'legacy';
 
 % Asset receiver clock fields (simple config fields)
 cfg.asset.clockName    = 'SpaceReceiverClock';
@@ -282,6 +297,17 @@ cfg.errors.ionosphere.stochastic.process              = 'gaussMarkov';
 cfg.errors.ionosphere.stochastic.tau_s                = 1800;
 cfg.errors.ionosphere.stochastic.sigmaVDelayL1_ss_m   = 1.0;
 cfg.errors.ionosphere.stochastic.sigmaModelResidualL1_m = 0.5;
+% WP6: second/third-order ionosphere (Branch A bounded residual). The dual-frequency
+% IF combination cancels the first-order 40.3*TEC/f^2 term, but the second-order
+% (~f^-3) and third-order (~f^-4) residuals SURVIVE it and are of order cm at L1 under
+% high solar activity. Modelled as a truth-side bounded residual tied to the first-order
+% slant delay; enters R; NOT estimated. Default OFF => bit-identical. Conservative
+% (high-activity) magnitudes. Sources: Bassiri & Hajj 1993; Hoque & Jakowski 2007; K&H.
+cfg.errors.ionosphere.higherOrder.enable                = false;
+cfg.errors.ionosphere.higherOrder.secondOrderFractionL1 = 0.003;  % 2nd-order as fraction of |I_L1| (~TEC)
+cfg.errors.ionosphere.higherOrder.secondOrderCap_m      = 0.05;   % cap 2nd-order at L1 [m] (~1-2 cm typical)
+cfg.errors.ionosphere.higherOrder.thirdOrderCoeff_perm  = 5e-5;   % 3rd-order coeff [1/m]: d3_L1 = coeff*I_L1^2 (~TEC^2)
+cfg.errors.ionosphere.higherOrder.thirdOrderCap_m       = 0.005;  % cap 3rd-order at L1 [m] (~few mm)
 cfg.errors.ionosphere.scintillation.enable            = true;
 cfg.errors.ionosphere.scintillation.process           = 'gaussMarkov';
 cfg.errors.ionosphere.scintillation.tau_s             = 30;
@@ -334,6 +360,20 @@ cfg.errors.multipath.truth.amplitude_m         = 0.3;
 cfg.errors.multipath.truth.frequency_radps     = 0.01;
 cfg.errors.multipath.truth.stochastic_sigma_m  = 0.1;
 cfg.errors.multipath.sigma_m                   = 0.0;
+% WP5: multipath as a coloured (first-order Gauss-Markov) process. Multipath is the
+% dominant code error in nominal conditions and is strongly time-correlated (tens of
+% seconds to minutes, tied to geometry) — modelling it as white under-represents its
+% low-frequency, per-link-correlated impact (Kaplan & Hegarty §7.2.6). One GM state per
+% link (tower x antenna) is stepped each epoch; the realised value is added to the TRUTH
+% pseudorange and its steady-state variance enters R (the estimator does not know the
+% instantaneous value). It is NOT an EKF state — this is a truth-side conservative error.
+% Default OFF (coloredGM.enable=false) => legacy white-sinusoid path, bit-identical.
+cfg.errors.multipath.coloredGM.enable              = false;
+cfg.errors.multipath.coloredGM.tau_s               = 60;     % correlation time [s] (tens of seconds)
+cfg.errors.multipath.coloredGM.sigmaCodeL1_ss_m    = 0.30;   % steady-state code multipath 1-sigma at L1 [m]
+cfg.errors.multipath.coloredGM.elevationExponent   = 1;      % envelope ~ 1/sin(el)^exp (1 or 2); low elev = more MP
+cfg.errors.multipath.coloredGM.carrierScale        = 0.01;   % phase multipath ~ 1/100 of code (reserved)
+cfg.errors.multipath.coloredGM.seed                = 6301;   % dedicated per-link RNG seed
 
 % --- Effect toggles: deterministic geometric/structural effects ------
 % cfg.effects groups new deterministic effects added in Stages 2–4.
@@ -596,6 +636,10 @@ cfg.towerClock.productValidityPolicy  = 'warn';  % 'warn' | 'error'
 %
 % clock.hardwareDelay.estimatePerTower — hardware delay EKF state placeholder (v1: not implemented)
 cfg.clock.mode                           = 'spacecraftReceiverClockOnly';
+% WP4: h-coefficient source for clock templates (canonical selector). 'legacy' keeps
+% every current number bit-identical; 'jowTable2p1' re-anchors OCXO/CESIUM to the
+% project primary source (JOW Table 2.1) — less optimistic, more conservative.
+cfg.clock.templateSource                 = 'legacy';
 cfg.clock.gauge.mode                     = 'externalTowerCorrections';
 cfg.clock.gauge.referenceTowerIndex      = 1;      % used by fixReferenceTower
 cfg.clock.gauge.sigmaBias_m              = 1e-6;   % pseudo-meas sigma for bias gauge [m]
