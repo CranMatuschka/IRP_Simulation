@@ -54,7 +54,7 @@ function results = run_ladder(idx)
                    'clkErr_ns',NaN,'attErr_deg',NaN,'wall_s',NaN,'message','');
         tStart = tic;
         try
-            cfg = i_buildCfg(nS, nR, dur, tag);
+            cfg = i_buildCfg(k, nS, nR, dur, tag);
             out = revgnss.ReportRunner.runSingle(cfg);
 
             r.folder = out.reportFolder;
@@ -80,7 +80,7 @@ function results = run_ladder(idx)
 end
 
 % ===========================================================================
-function cfg = i_buildCfg(nSpaceAssets, nReceivers, duration_s, tag)
+function cfg = i_buildCfg(k, nSpaceAssets, nReceivers, duration_s, tag)
     % Start from the canonical config, then apply the ladder deltas.
     cfg = masterConfig();
 
@@ -101,7 +101,7 @@ function cfg = i_buildCfg(nSpaceAssets, nReceivers, duration_s, tag)
     cfg.scenario.nReceivers   = nReceivers;   % finalizeConfig rebuilds lever arms
                                               % from this and sets attitude on/off.
     cfg.simulation.duration_s = duration_s;
-    cfg.report.runVersion     = tag;
+    cfg.report.runVersion     = k;   % numeric -> v### in the folder/file name
 
     % masterConfig's scenario assembly wired the ISL swarm for its default (6 assets).
     % Overriding nSpaceAssets afterwards does NOT re-run that branch, so mirror it here:
@@ -121,17 +121,16 @@ function cfg = i_buildCfg(nSpaceAssets, nReceivers, duration_s, tag)
         cfg.diagnostics.storage.snapshot.interval_s = 900;
     end
 
-    % Set the per-run output folder explicitly (mirrors run_oo_v1). This bypasses
-    % ReportRunner's native naming, whose %03d assumes a NUMERIC runVersion and would
-    % otherwise mangle the string tag. Folder name carries the full topology.
+    % Set the per-run output folder explicitly (mirrors run_oo_v1). Self-describing name
+    % Report_v###_G#S#R# (v### = ladder step k; G/S/R = ground towers / space assets /
+    % receivers). The PDF, MAT, .out and .tex share this stem; only figures keep their
+    % own names. A same-name re-run overwrites (cfg.report.overwrite handles the files).
     base    = cfg.report.baseOutputDir;
     dateStr = datestr(now, 'yyyymmdd');                 %#ok<TNOW1,DATST>
-    timeStr = datestr(now, 'HHMMSS');                   %#ok<TNOW1,DATST>
-    runFolder = fullfile(base, ['Report_' dateStr], ...
-        sprintf('Report_%s_%s_G5S%dR%d', timeStr, tag, nSpaceAssets, nReceivers));
-    if isfolder(runFolder); runFolder = [runFolder '_' timeStr]; end
+    runName = sprintf('Report_v%03d_G%dS%dR%d', k, cfg.scenario.nTowers, nSpaceAssets, nReceivers);
+    runFolder = fullfile(base, ['Report_' dateStr], runName);
     cfg.report.reportFolder = runFolder;
-    cfg.report.stem         = 'report';
+    cfg.report.stem         = runName;
 end
 
 % ===========================================================================
