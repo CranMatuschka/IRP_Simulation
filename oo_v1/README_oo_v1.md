@@ -1175,12 +1175,12 @@ Q_euler_omega = σ²_angAccel · dt² / 2
 ```
 This accounts for the correlation between integrated attitude error and angular rate noise over a timestep. Without it, the EKF can become overconfident in attitude shortly after update.
 
-### Finite-difference F matrix (Euler-Euler block)
-The transition matrix F uses numerical (central-difference) differentiation of the Euler kinematic equation with respect to the Euler angles:
-```matlab
-F(euler_idx, euler_idx(ai)) = (eul_new(eul+ε) − eul_new(eul−ε)) / (2ε)
+### Analytic F matrix (Euler-Euler block) (WP7)
+The Euler-euler block of the transition matrix is the **closed-form** Jacobian of the Euler kinematic update `eul + dt·T(eul)·ω`:
 ```
-with `ε = 1e-7 rad`. This avoids analytically differentiating the T(e,ω) matrix and is correct when Euler angles change slowly (GEO scenario).
+F(euler_idx, euler_idx) = I + dt · AttitudeKinematics.eulerRateJacobian(eul, ω)
+```
+This replaces the earlier central finite difference (`ε = 1e-7 rad`), which carried avoidable round-off and could only be spot-checked FD-vs-FD. `eulerRateJacobian` is derived (and symbolically verified) from `T = [1, sr·tp, cr·tp; 0, cr, −sr; 0, sr/cp, cr/cp]`; the yaw column is exactly zero (T is yaw-independent). It is **guarded** near pitch = ±90° (cos pitch clamped so the `sec²`/`tan` entries stay finite). The truly singularity-free path is the **quaternion error-state** parameterisation (`cfg.estimator.attitude.parameterization = 'quaternionErrorState'`), which is the default scenario's choice and whose F blocks are already closed-form (`F(θ,θ)=I−[ω]×dt`, `F(θ,ω)=I·dt`) — so this analytic change hardens the legacy `eulerZYX` path and does not move the golden. `tests/test_euler_jacobian_analytic.m` validates the analytic block against an independent **complex-step** Jacobian (agreement ~1e-16) and against the replaced finite difference (~1e-9), and checks the gimbal-lock guard.
 
 ---
 

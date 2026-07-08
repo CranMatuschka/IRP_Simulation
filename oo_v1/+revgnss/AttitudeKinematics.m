@@ -70,6 +70,40 @@ classdef AttitudeKinematics
             euler_out = wrapToPi(euler_rad);
         end
 
+        function J = eulerRateJacobian(euler_rad, omega_body_radps)
+            % eulerRateJacobian  Analytic Jacobian d/d(eul)[ T(eul) * omega_body ], 3x3.
+            %
+            % Closed-form replacement (WP7) for the finite-difference Euler-euler block
+            % of the EKF state-transition Jacobian: F(eul,eul) = I + dt * J. Removes the
+            % round-off of the central difference and its FD-vs-FD-only spot check.
+            % Columns are d/droll, d/dpitch, d/dyaw; the YAW column is exactly zero
+            % because T(eul) is yaw-independent (ZYX). Derived and symbolically verified
+            % from T = [1 sr*tp cr*tp; 0 cr -sr; 0 sr/cp cr/cp] (see
+            % tests/test_euler_jacobian_analytic.m).
+            %
+            % Guard: near pitch = +/- 90 deg (gimbal lock) cos(pitch) is clamped so the
+            % sec^2 / tan entries stay finite (mirrors eulerRatesFromBodyRates). The
+            % singularity-FREE path is the quaternion error-state parameterisation
+            % (attitude.parameterization = 'quaternionErrorState'), which the default
+            % scenario uses; this analytic form hardens the legacy eulerZYX path.
+            roll  = euler_rad(1);
+            pitch = euler_rad(2);
+            w     = omega_body_radps(:);
+            w2 = w(2); w3 = w(3);
+            cr = cos(roll);  sr = sin(roll);
+            cp = cos(pitch); sp = sin(pitch);
+            if abs(cp) < 1e-6
+                cp = sign(cp + eps) * 1e-6;   % clamp toward the pole (finite, guarded)
+            end
+            tp   = sp / cp;
+            sec2 = 1 / cp^2;
+            a = sr*w2 + cr*w3;      % sin(roll)*w2 + cos(roll)*w3
+            b = cr*w2 - sr*w3;      % cos(roll)*w2 - sin(roll)*w3
+            J = [ tp*b,           sec2*a,     0; ...
+                  -sr*w2 - cr*w3, 0,          0; ...
+                  b/cp,           (tp/cp)*a,  0];
+        end
+
         function C = eul2rotm321(euler_rad)
             % eul2rotm321  Alias for bodyToEcefRotation (ZYX = 3-2-1 sequence).
             C = revgnss.AttitudeKinematics.bodyToEcefRotation(euler_rad);

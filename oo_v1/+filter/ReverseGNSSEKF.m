@@ -635,20 +635,13 @@ classdef ReverseGNSSEKF < handle
                     F(sm.euler_idx, sm.omega_idx) = zeros(3);
                 end
             else
-                % Euler-euler block: FD of euler kinematics w.r.t. euler
-                fdStep = 1e-7;
-                for ai = 1:3
-                    eul_p = euler; eul_p(ai) = eul_p(ai) + fdStep;
-                    eul_m = euler; eul_m(ai) = eul_m(ai) - fdStep;
-
-                    edot_p = revgnss.AttitudeKinematics.eulerRatesFromBodyRates(eul_p, omega);
-                    edot_m = revgnss.AttitudeKinematics.eulerRatesFromBodyRates(eul_m, omega);
-
-                    eul_new_p = eul_p + dt_s * edot_p;
-                    eul_new_m = eul_m + dt_s * edot_m;
-
-                    F(sm.euler_idx, sm.euler_idx(ai)) = (eul_new_p - eul_new_m) / (2 * fdStep);
-                end
+                % Euler-euler block: analytic Jacobian of eul + dt*T(eul)*omg w.r.t. eul
+                % (WP7). Replaces the fdStep=1e-7 central difference with the closed-form
+                % derivative F(eul,eul) = I + dt*J, removing FD round-off. Guarded near
+                % gimbal lock inside eulerRateJacobian; the singularity-free path is the
+                % quaternion error-state parameterisation.
+                Jeul = revgnss.AttitudeKinematics.eulerRateJacobian(euler, omega);
+                F(sm.euler_idx, sm.euler_idx) = eye(3) + dt_s * Jeul;
 
                 % Euler-omega block: dt * T(euler)
                 cr = cos(euler(1)); sr = sin(euler(1));
