@@ -1220,6 +1220,20 @@ Multipath is the **dominant** code error in nominal conditions — larger than t
 
 One persistent GM state is held **per link** (tower × antenna, keyed `tower·1000 + antenna`) and stepped once per epoch via `StochasticProcess.gaussMarkovStep`, so the realised multipath is coherent in time along a link. It is a **truth-side** error: the realised value is added to the truth pseudorange and its steady-state variance enters **R**, but it is **not** an EKF state (the estimator does not know the instantaneous value — that is the point of a conservative, unmodelled correlated error). Enabling it increases end-to-end position error, as a conservative term should (`tests/test_multipath_gaussmarkov.m`).
 
+### Higher-order ionosphere (WP6)
+
+The dual-frequency ionosphere-free (L3) combination cancels the first-order `40.3·TEC/f²` term (~99.9% of the ionospheric delay), but the **second- and third-order residuals survive it** and are of order **centimetres at L1 under high solar activity** — no longer negligible at a ~3 cm / ~100 ps target. Set `cfg.errors.ionosphere.higherOrder.enable = true` to add a **Branch A bounded-residual** model (`models.errors.HigherOrderIonosphere`):
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `higherOrder.enable` | `false` | Off = bit-identical |
+| `higherOrder.secondOrderFractionL1` | `0.003` | 2nd-order at L1 as a fraction of the first-order slant delay (∝ TEC) |
+| `higherOrder.secondOrderCap_m` | `0.05` | Cap on the 2nd-order L1 magnitude [m] |
+| `higherOrder.thirdOrderCoeff_perm` | `5e-5` | 3rd-order coefficient [1/m]: `d3_L1 = coeff·I_L1²` (∝ TEC²) |
+| `higherOrder.thirdOrderCap_m` | `0.005` | Cap on the 3rd-order L1 magnitude [m] |
+
+The second-order term scales as **f⁻³** (∝ `TEC·B·cosθ/f³`) and the third-order as **f⁻⁴** (∝ `TEC²/f⁴`) — sources: Bassiri & Hajj 1993, Hoque & Jakowski 2007, Kaplan & Hegarty. Because these are **not** the `f⁻²` first-order term, they do **not cancel** in the L3 combination: `tests/test_iono_higher_order.m` verifies the first-order cancels to ~0 while the higher-order residual is retained at the cm level. It is a **truth-side** residual (added to truth, magnitude into R, not estimated), derived from the first-order slant delay the ionosphere model already produces. When enabled, `cfg.effects.ionosphere.higherOrderStatus` becomes `'boundedResidualTruthSide'`. Scope note: the residual is injected on the primary (L1) code truth; the IF-survival property is proven algebraically — full per-signal injection into the dual-frequency IF **EKF** path is a documented future extension.
+
 ### Troposphere: local weather Gauss-Markov
 
 Set `cfg.errors.troposphere.modelType = 'localWeatherGM'` to activate a per-tower first-order Gauss-Markov wet residual:

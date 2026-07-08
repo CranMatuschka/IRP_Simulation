@@ -297,6 +297,17 @@ cfg.errors.ionosphere.stochastic.process              = 'gaussMarkov';
 cfg.errors.ionosphere.stochastic.tau_s                = 1800;
 cfg.errors.ionosphere.stochastic.sigmaVDelayL1_ss_m   = 1.0;
 cfg.errors.ionosphere.stochastic.sigmaModelResidualL1_m = 0.5;
+% WP6: second/third-order ionosphere (Branch A bounded residual). The dual-frequency
+% IF combination cancels the first-order 40.3*TEC/f^2 term, but the second-order
+% (~f^-3) and third-order (~f^-4) residuals SURVIVE it and are of order cm at L1 under
+% high solar activity. Modelled as a truth-side bounded residual tied to the first-order
+% slant delay; enters R; NOT estimated. Default OFF => bit-identical. Conservative
+% (high-activity) magnitudes. Sources: Bassiri & Hajj 1993; Hoque & Jakowski 2007; K&H.
+cfg.errors.ionosphere.higherOrder.enable                = false;
+cfg.errors.ionosphere.higherOrder.secondOrderFractionL1 = 0.003;  % 2nd-order as fraction of |I_L1| (~TEC)
+cfg.errors.ionosphere.higherOrder.secondOrderCap_m      = 0.05;   % cap 2nd-order at L1 [m] (~1-2 cm typical)
+cfg.errors.ionosphere.higherOrder.thirdOrderCoeff_perm  = 5e-5;   % 3rd-order coeff [1/m]: d3_L1 = coeff*I_L1^2 (~TEC^2)
+cfg.errors.ionosphere.higherOrder.thirdOrderCap_m       = 0.005;  % cap 3rd-order at L1 [m] (~few mm)
 cfg.errors.ionosphere.scintillation.enable            = true;
 cfg.errors.ionosphere.scintillation.process           = 'gaussMarkov';
 cfg.errors.ionosphere.scintillation.tau_s             = 30;

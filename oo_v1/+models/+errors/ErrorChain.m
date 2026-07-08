@@ -178,6 +178,13 @@ classdef ErrorChain < handle
             [truth_m.mp, model_m.mp, sigma_m.mp] = ...
                 obj.multipath_(elv, t_s, towerIdx, antennaIdx, dt, elvFloor);
 
+            % -------- 5b. Higher-order ionosphere (WP6) ----------------
+            % Second/third-order residual that survives the IF combination. Derived from
+            % the first-order L1 slant delay just computed. Zero (and label harmless) when
+            % cfg.errors.ionosphere.higherOrder.enable is false.
+            [truth_m.ionoHO, model_m.ionoHO, sigma_m.ionoHO] = ...
+                obj.higherOrderIono_(truth_m.iono, f_L1);
+
             % -------- 6. Scintillation sigma (L1 level) ---------------
             scintSigmaL1_m = zeros(N,1);
             ec = obj.cfg.errors;
@@ -191,7 +198,7 @@ classdef ErrorChain < handle
             end
 
             % -------- Aggregate ----------------------------------------
-            labels = {'code','trop','iono','hwDelay','mp'};
+            labels = {'code','trop','iono','hwDelay','mp','ionoHO'};
             truthTotal = zeros(N,1);
             modelTotal = zeros(N,1);
             sigmaTotal = zeros(N,1);
@@ -575,6 +582,28 @@ classdef ErrorChain < handle
             if isfield(mc,'sigma_m')
                 sigma_m = mc.sigma_m * ones(N,1);
             end
+        end
+
+        % ----------------------------------------------------------------
+        function [truth_m, model_m, sigma_m] = higherOrderIono_(obj, ionoL1_slant_m, f_L1)
+            % higherOrderIono_  Second/third-order ionosphere residual at L1 (WP6).
+            %   Derived from the first-order L1 slant delay. Truth-side, unmodelled
+            %   (model_m = 0); its magnitude enters R. Zero when disabled (bit-identical).
+            N = numel(ionoL1_slant_m);
+            truth_m = zeros(N,1);
+            model_m = zeros(N,1);
+            sigma_m = zeros(N,1);
+            ic = obj.cfg.errors.ionosphere;
+            if ~isfield(ic,'higherOrder') || ~isfield(ic.higherOrder,'enable') || ...
+                    ~ic.higherOrder.enable
+                return
+            end
+            % Evaluated at L1 here (freqHz = f_L1); the f^-3/f^-4 frequency scaling to
+            % other signals is a property of models.errors.HigherOrderIonosphere and is
+            % exercised in the IF-survival test. Truth-side bounded residual.
+            truth_m = models.errors.HigherOrderIonosphere.totalDelay( ...
+                ionoL1_slant_m(:), f_L1, f_L1, ic.higherOrder);
+            sigma_m = abs(truth_m);   % conservative: full unmodelled HO magnitude -> R
         end
 
     end

@@ -1533,6 +1533,13 @@ classdef ConfigFactory
             if ~isfield(cfg.effects.ionosphere,'higherOrderStatus')
                 cfg.effects.ionosphere.higherOrderStatus = 'disabled';
             end
+            % WP6: reflect the actual higher-order iono model state honestly.
+            if isfield(cfg,'errors') && isfield(cfg.errors,'ionosphere') && ...
+                    isfield(cfg.errors.ionosphere,'higherOrder') && ...
+                    isfield(cfg.errors.ionosphere.higherOrder,'enable') && ...
+                    cfg.errors.ionosphere.higherOrder.enable
+                cfg.effects.ionosphere.higherOrderStatus = 'boundedResidualTruthSide';
+            end
             if ~isfield(cfg.effects.ionosphere,'klobucharStatus')
                 cfg.effects.ionosphere.klobucharStatus = 'notImplemented';
             end
