@@ -103,12 +103,40 @@ function cfg = i_buildCfg(k, nSpaceAssets, nReceivers, duration_s, tag)
     cfg.simulation.duration_s = duration_s;
     cfg.report.runVersion     = k;   % numeric -> v### in the folder/file name
 
-    % masterConfig's scenario assembly wired the ISL swarm for its default (6 assets).
-    % Overriding nSpaceAssets afterwards does NOT re-run that branch, so mirror it here:
-    % a single asset is the ground-only golden path with no inter-satellite links.
+    % masterConfig's scenario assembly wires the ISL swarm from ITS nSpaceAssets value.
+    % run_ladder overrides nSpaceAssets AFTER masterConfig, which does NOT re-run that
+    % gate, so mirror the FULL gate here (both branches) — otherwise a swarm sweep leaves
+    % ISL in whatever state masterConfig's default produced (e.g. off when its
+    % nSpaceAssets<=1), building the secondaries as truth but never feeding their links
+    % into the EKF. Values mirror config/masterConfig.m (one-way code+Doppler aiding).
     if nSpaceAssets <= 1
+        % Single asset: ground-only golden path, no inter-satellite links.
         cfg.measurements.isl.enable                  = false;
         cfg.measurements.isl.timing.enable           = false;
+        cfg.measurements.isl.twoWay.enable           = false;
+        cfg.measurements.isl.twoWay.range.enable     = false;
+        cfg.measurements.isl.twoWay.range.useInEKF   = false;
+        cfg.measurements.isl.twoWay.doppler.enable   = false;
+        cfg.measurements.isl.twoWay.doppler.useInEKF = false;
+    else
+        % Helix swarm: one-way ISL code+Doppler from each represented secondary aids the
+        % primary EKF (product-aided), acquired after a 300 s ground-fix warm-up.
+        cfg.measurements.isl.enable                  = true;
+        cfg.measurements.isl.transmitters            = 'all';
+        cfg.measurements.isl.receiverAssetIndex      = 1;
+        cfg.measurements.isl.warmup_s                = 300;
+        cfg.measurements.isl.timing.enable           = false;
+        cfg.measurements.isl.code.enable             = true;
+        cfg.measurements.isl.code.useInEKF           = true;
+        cfg.measurements.isl.code.sigma_m            = 0.3;
+        cfg.measurements.isl.doppler.enable          = true;
+        cfg.measurements.isl.doppler.useInEKF        = true;
+        cfg.measurements.isl.doppler.sigma_mps       = 0.05;
+        cfg.measurements.isl.carrier.enable          = true;   % diagnostic-only
+        cfg.measurements.isl.carrier.useInEKF        = false;
+        cfg.measurements.isl.product.enable          = true;
+        cfg.measurements.isl.product.sigmaPos_m      = 0.03;   % ~3 cm SLR-class reference orbit
+        cfg.measurements.isl.product.sigmaClock_m    = 0.02;   % ~67 ps reference clock product
         cfg.measurements.isl.twoWay.enable           = false;
         cfg.measurements.isl.twoWay.range.enable     = false;
         cfg.measurements.isl.twoWay.range.useInEKF   = false;
