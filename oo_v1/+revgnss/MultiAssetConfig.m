@@ -176,6 +176,12 @@ classdef MultiAssetConfig
             a.receiverLeverArm_body_m = a.receiverLeverArms_body_m(:,1);
             if ai > 1 && isfield(a,'clock')
                 a.clock.name = sprintf('RxClock_%s', regexprep(char(a.name), '\W+', '_'));
+                % Independent clock seed per secondary asset. Without this every
+                % secondary is cloned from the primary and shares seed 100, so all
+                % swarm clocks produce an identical noise realization (masked today
+                % only because one-way ISL cancels the true tx clock). 300+ai keeps
+                % it distinct from receiver(100) and towers(200+k).
+                a.clock.seed = 300 + ai;
             end
             if ~isfield(a,'estimated'); a.estimated = ai == 1; end
         end

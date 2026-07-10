@@ -150,7 +150,8 @@ classdef DopplerMeasurementBuilder
                         rhoDot_true = u_t' * v_rx_true;
                     end
                     zd(mi) = rhoDot_true + bdot_rx_true - bdot_twr + ...
-                             sigma_dop * errorChain.drawNormal(1,1);
+                             sigma_dop * errorChain.drawKeyed( ...
+                                 models.noise.RngSource.DOPPLER, ti, ai, 0, errorChain.epochIdx_, 1, 1);
                 end
 
                 % Model side

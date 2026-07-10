@@ -150,7 +150,13 @@ classdef ReverseGNSSSimulation < handle
                             isfield(obj.cfg.estimator.diffAtt,'referenceSigma_deg')
                         sigma_rad = deg2rad(obj.cfg.estimator.diffAtt.referenceSigma_deg);
                     end
-                    refEuler = obj.asset.attitude_euler_rad(:) + sigma_rad * randn(3,1);
+                    if obj.errorChain.useIndependentStreams
+                        sAtt = obj.errorChain.registry.persistentStream( ...
+                            models.noise.RngSource.ATT_REF, 0);
+                        refEuler = obj.asset.attitude_euler_rad(:) + sigma_rad * randn(sAtt,3,1);
+                    else
+                        refEuler = obj.asset.attitude_euler_rad(:) + sigma_rad * randn(3,1);
+                    end
                     obj.diffAttStore = revgnss.DiffAttitudeBuilder.setReference( ...
                         obj.diffAttStore, refEuler);
                 end

@@ -26,24 +26,35 @@ classdef EnvironmentModel < handle
         weatherState struct
         % Global scalar scintillation amplitude (GM state; unit amplitude at init)
         scintAmplitude (1,1) double = 1.0
-        % RandStream for all environment stochastic steps
+        % RandStream for all environment stochastic steps (legacy shared, OFF path)
         envRng
+        % Seed-independence refactor: identity-keyed streams (ON path)
+        registry
+        useIndep (1,1) logical = false
     end
 
     methods
 
-        function obj = EnvironmentModel(cfg, nTowers)
+        function obj = EnvironmentModel(cfg, nTowers, registry)
             % Constructor.
             %
             % Inputs:
             %   cfg      struct   full simulation configuration
             %   nTowers  scalar   number of ground towers
+            %   registry (optional) models.noise.RngRegistry. When supplied
+            %            (seed-independence ON), each per-tower GM state draws
+            %            from its own identity-keyed substream instead of the
+            %            single shared envRng below. Empty/omitted => legacy path.
 
             if nargin == 0; return; end
             obj.cfg     = cfg;
             obj.nTowers = nTowers;
+            if nargin >= 3 && ~isempty(registry)
+                obj.registry = registry;
+                obj.useIndep = true;
+            end
 
-            % Seeded RNG
+            % Seeded RNG (legacy shared stream; also the OFF-path stream)
             seed = 7201;
             if isfield(cfg,'environment') && isfield(cfg.environment,'weather') && ...
                     isfield(cfg.environment.weather,'seed')
@@ -57,6 +68,19 @@ classdef EnvironmentModel < handle
             obj.initWeatherFromTowers_();
             % scintAmplitude starts at 1.0 (unit amplitude)
             obj.scintAmplitude = 1.0;
+        end
+
+        % ----------------------------------------------------------------
+        function s = envStream_(obj, src, node)
+            % envStream_  Stream for a per-tower atmosphere GM state.
+            %   ON : identity-keyed persistent substream (per source & tower),
+            %        so towers/sources are mutually independent and order-free.
+            %   OFF: the single shared envRng -- byte-identical to legacy.
+            if obj.useIndep
+                s = obj.registry.persistentStream(src, node);
+            else
+                s = obj.envRng;
+            end
         end
 
         % ----------------------------------------------------------------
@@ -100,7 +124,8 @@ classdef EnvironmentModel < handle
                     obj.tropState(k).wetResidualTruth_m = ...
                         models.noise.StochasticProcess.gaussMarkovStep( ...
                             obj.tropState(k).wetResidualTruth_m, dt, ...
-                            tau_trop, sig_trop, obj.envRng);
+                            tau_trop, sig_trop, ...
+                            obj.envStream_(models.noise.RngSource.ENV_TROP_TRUTH, k));
                     if mrEnable
                         switch mrMode
                             case 'sameAsTruth'
@@ -110,7 +135,8 @@ classdef EnvironmentModel < handle
                                 obj.tropState(k).wetResidualModel_m = ...
                                     models.noise.StochasticProcess.gaussMarkovStep( ...
                                         obj.tropState(k).wetResidualModel_m, dt, ...
-                                        tau_trop, sigModel, obj.envRng);
+                                        tau_trop, sigModel, ...
+                                        obj.envStream_(models.noise.RngSource.ENV_TROP_MODEL, k));
                             otherwise  % 'zero'
                                 obj.tropState(k).wetResidualModel_m = 0;
                         end
@@ -132,7 +158,8 @@ classdef EnvironmentModel < handle
                     obj.ionoState(k).tecResidualTruth_m = ...
                         models.noise.StochasticProcess.gaussMarkovStep( ...
                             obj.ionoState(k).tecResidualTruth_m, dt, ...
-                            tau_iono, sig_iono, obj.envRng);
+                            tau_iono, sig_iono, ...
+                            obj.envStream_(models.noise.RngSource.ENV_IONO_TRUTH, k));
                 end
             end
 
@@ -144,7 +171,8 @@ classdef EnvironmentModel < handle
                 % Unit amplitude GM (sigma_ss = 1.0)
                 obj.scintAmplitude = ...
                     models.noise.StochasticProcess.gaussMarkovStep( ...
-                        obj.scintAmplitude, dt, tau_sc, 1.0, obj.envRng);
+                        obj.scintAmplitude, dt, tau_sc, 1.0, ...
+                        obj.envStream_(models.noise.RngSource.ENV_SCINT, 0));
                 % Keep amplitude non-negative (scintillation severity is a magnitude)
                 obj.scintAmplitude = abs(obj.scintAmplitude);
             end

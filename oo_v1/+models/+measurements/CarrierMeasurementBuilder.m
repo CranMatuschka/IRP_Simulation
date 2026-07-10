@@ -132,7 +132,8 @@ classdef CarrierMeasurementBuilder
                             isfield(cfg.estimation.ambiguity,'initialSigma_m')
                         initSig = cfg.estimation.ambiguity.initialSigma_m;
                     end
-                    nCycles = round((initSig / lambda) * errorChain.drawNormal(1,1));
+                    nCycles = round((initSig / lambda) * errorChain.drawKeyedPersistent( ...
+                        models.noise.RngSource.CARR_AMB, ti, ai, si_, 1, 1));
                     floatAmbiguityTruth_m(key) = lambda * nCycles;
                 end
                 B_true = floatAmbiguityTruth_m(key);
@@ -199,7 +200,8 @@ classdef CarrierMeasurementBuilder
                 rho_e = models.corrections.RangeCorrections.correctedPseudorange( ...
                     g_e.r_ant_model_m, g_e.r_tower_model_m, cfg, 'model', elv, t_s);
 
-                noise_phi = sigma_phi * errorChain.drawNormal(1,1);
+                noise_phi = sigma_phi * errorChain.drawKeyed( ...
+                    models.noise.RngSource.CARR_PHASE, ti, ai, si_, errorChain.epochIdx_, 1, 1);
 
                 % z: +trop, -iono (carrier ionosphere is OPPOSITE sign to code)
                 z_phi(rowOut) = rho_t + b_rx_true - b_twr_t + trop_t - iono_t_sig + B_true + noise_phi;
@@ -379,7 +381,8 @@ classdef CarrierMeasurementBuilder
                 N_ia  = ambiguityMap(key);
                 ambig(mi) = N_ia;
                 phi(mi) = (rho + b_rx_true - b_twr) / lambda + N_ia + ...
-                          sigma * errorChain.drawNormal(1,1);
+                          sigma * errorChain.drawKeyed( ...
+                              models.noise.RngSource.CARR_PHASE, ti, ai, 0, errorChain.epochIdx_, 1, 1);
             end
             cp.phi_cycles    = phi;
             cp.ambiguity_int = ambig;

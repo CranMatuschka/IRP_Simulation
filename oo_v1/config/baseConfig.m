@@ -33,6 +33,18 @@ cfg.simulation.dt_s       = 1.0;
 cfg.simulation.duration_s = 3600.0;
 cfg.simulation.seed       = 42;
 
+% --- RNG stream independence ----------------------------------
+% When enable=true (default) every physically-independent noise source draws
+% from its own identity-keyed substream (models.noise.RngRegistry) rooted at
+% cfg.simulation.seed, instead of sharing one draw order. This gives true
+% per-tower / per-asset / per-source independence and ORDER-independence:
+% toggling one effect or changing tower visibility cannot perturb any other
+% source's realization (enabling one-factor-at-a-time and common-random-number
+% studies). Set enable=false to reproduce the legacy shared-stream behaviour
+% bit-for-bit. engine is the counter-based generator used for the substreams.
+cfg.rng.independentStreams.enable = true;
+cfg.rng.independentStreams.engine = 'threefry';
+
 % --- Scenario topology (simple count fields) ------------------
 cfg.scenario.nTowers    = 5;
 cfg.scenario.nReceivers = 1;

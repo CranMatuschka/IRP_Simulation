@@ -1439,6 +1439,36 @@ classdef ConfigFactory
             revgnss.ISLTimingModel.validateConfig(cfg);
             revgnss.TWSTFTDiagnosticBuilder.validateConfig(cfg);
 
+            % --- Clock-seed independence contract (seed-independence refactor) ---
+            % Every physical clock must own a distinct RNG seed so its noise
+            % realization is independent of every other clock. Canonical seeds:
+            % receiver=100, tower k=200+k, secondary asset ai=300+ai (assigned in
+            % MultiAssetConfig.finalizeAsset_). assets(1) IS the receiver clock, so
+            % it is counted once (via cfg.asset) and skipped in the assets loop.
+            clkSeeds_ = [];
+            if isfield(cfg,'asset') && isfield(cfg.asset,'clock') && isfield(cfg.asset.clock,'seed')
+                clkSeeds_(end+1) = cfg.asset.clock.seed; %#ok<AGROW>
+            end
+            if isfield(cfg,'towers')
+                for kSeed_ = 1:numel(cfg.towers)
+                    if isfield(cfg.towers(kSeed_),'clock') && isfield(cfg.towers(kSeed_).clock,'seed')
+                        clkSeeds_(end+1) = cfg.towers(kSeed_).clock.seed; %#ok<AGROW>
+                    end
+                end
+            end
+            if isfield(cfg,'assets')
+                for aiSeed_ = 2:numel(cfg.assets)
+                    if isfield(cfg.assets(aiSeed_),'clock') && isfield(cfg.assets(aiSeed_).clock,'seed')
+                        clkSeeds_(end+1) = cfg.assets(aiSeed_).clock.seed; %#ok<AGROW>
+                    end
+                end
+            end
+            assert(numel(clkSeeds_) == numel(unique(clkSeeds_)), ...
+                'ConfigFactory:duplicateClockSeed', ...
+                ['Clock RNG seeds must be pairwise distinct so each clock is independent; ' ...
+                 'got [%s]. Check receiver(100)/tower(200+k)/secondary-asset(300+ai) seeds.'], ...
+                num2str(clkSeeds_));
+
             nWarn79_ = 0;
             if isfield(cfg,'validation') && isfield(cfg.validation,'warnings')
                 nWarn79_ = numel(cfg.validation.warnings);

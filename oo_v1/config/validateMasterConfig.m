@@ -22,6 +22,22 @@ function cfg = validateMasterConfig(cfg)
     assert(isfield(cfg.simulation,'dt_s') && cfg.simulation.dt_s > 0, ...
         'validateMasterConfig:dt', 'cfg.simulation.dt_s must be > 0.');
 
+    % --- RNG stream-independence contract (guarded: legacy configs may omit) ---
+    if isfield(cfg,'rng') && isfield(cfg.rng,'independentStreams')
+        is = cfg.rng.independentStreams;
+        if isfield(is,'enable')
+            assert(islogical(is.enable) && isscalar(is.enable), ...
+                'validateMasterConfig:rngEnable', ...
+                'cfg.rng.independentStreams.enable must be a logical scalar.');
+        end
+        if isfield(is,'engine')
+            supported = {'threefry','philox','mrg32k3a','mlfg6331_64','mt19937ar'};
+            assert(ischar(is.engine) && any(strcmp(is.engine, supported)), ...
+                'validateMasterConfig:rngEngine', ...
+                'cfg.rng.independentStreams.engine must be one of: %s.', strjoin(supported, ', '));
+        end
+    end
+
     % --- Claim discipline (warn; brief section 0.9: synthetic only) ---
     if isfield(cfg,'scientificProfile') && isfield(cfg.scientificProfile,'allowRealWorldClaim') ...
             && cfg.scientificProfile.allowRealWorldClaim

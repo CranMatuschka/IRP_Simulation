@@ -280,7 +280,8 @@ classdef CodeMeasurementBuilder
 
                         scintSigL1_pi = errStruct.scintSigmaL1_m(pi);
                         scintSig_si   = scintSigL1_pi * (f_L1 / sigCfg.frequency_Hz)^scintExpF;
-                        scint_t       = scintSig_si * randn(errorChain.rngStream, 1, 1);
+                        scint_t       = scintSig_si * errorChain.drawKeyed( ...
+                            models.noise.RngSource.SCINT_TRUTH, twr_list(pi), ant_list(pi), si, errorChain.epochIdx_, 1, 1);
 
                         if si == 1
                             z_new(mi)      = z(pi) + scint_t;
@@ -302,7 +303,8 @@ classdef CodeMeasurementBuilder
                         else
                             elv_pi        = errStruct.elevations_rad(pi);
                             sigma_code_si = models.measurements.MeasurementModelUtils.codeSignalSigma(sigCfg, elv_pi, cfg);
-                            code_t        = sigma_code_si * randn(errorChain.rngStream, 1, 1);
+                            code_t        = sigma_code_si * errorChain.drawKeyed( ...
+                                models.noise.RngSource.CODE_MULTISIG, twr_list(pi), ant_list(pi), si, errorChain.epochIdx_, 1, 1);
 
                             iono_t_si = 0; iono_m_si = 0;
                             if isfield(errStruct.bySource.truth_m,'iono')
@@ -413,7 +415,15 @@ classdef CodeMeasurementBuilder
 
                 % Add scintillation to bySource (L1 only)
                 if isfield(errStruct,'scintSigmaL1_m') && any(errStruct.scintSigmaL1_m > 0)
-                    scintTruth = errStruct.scintSigmaL1_m .* randn(errorChain.rngStream, M, 1);
+                    if errorChain.useIndependentStreams
+                        scintTruth = zeros(M,1);
+                        for miS = 1:M
+                            scintTruth(miS) = errStruct.scintSigmaL1_m(miS) * errorChain.drawKeyed( ...
+                                models.noise.RngSource.SCINT_TRUTH, twr_list(miS), ant_list(miS), 1, errorChain.epochIdx_, 1, 1);
+                        end
+                    else
+                        scintTruth = errStruct.scintSigmaL1_m .* randn(errorChain.rngStream, M, 1);
+                    end
                     z = z + scintTruth;
                     errStruct.bySource.truth_m.scintillation = scintTruth;
                     errStruct.bySource.model_m.scintillation = zeros(M,1);
