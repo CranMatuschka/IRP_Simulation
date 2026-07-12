@@ -17,8 +17,8 @@ term below is chosen at the conservative (error-increasing) end where uncertain.
 |------|-------|-------------------|-----------------------------|----------------|-------|
 | Code thermal noise | White, elevation-dependent | σ ≈ 0.30 m at L1 (`signals.L1.codeSigma0_m`) | truth + R | No (per-frequency) | `cfg.measurements.codeNoise.model` |
 | Carrier phase noise | White, mm-level | ~few mm | truth + R | No | receiver carrier bias absorbed into float ambiguities (`carrierMode='ekfFloat'`) |
-| Troposphere | Saastamoinen + optional local-weather Gauss-Markov wet residual | dm-level slant | truth + R (optional per-tower ZWD estimated) | **No** (non-dispersive) | survives L3 — must be modelled/estimated separately |
-| Ionosphere, 1st order | `40.3·TEC/f²`, mapped slant | ~5 m vertical L1 (`errors.ionosphere.truth.verticalDelayL1_m`) | truth + R (or per-frequency estimated) | **Yes** (`f⁻²`) | removed by L3 |
+| Troposphere | Saastamoinen/Davis ZHD + Gauss-Markov ZWD truth, Niell (NMF) mapping; per-tower ZWD EKF model | ~3 cm zenith → ~20–40 cm at low elevation (residual) | truth + estimated (per-tower ZWD) | **No** (non-dispersive) | realistic path = `localWeatherGM` (see [atmosphere_realism.md](atmosphere_realism.md)); matched `simpleMapped` is the default |
+| Ionosphere, 1st order | `40.3·TEC/f²`, diurnal + GM VTEC truth, thin-shell obliquity, uplink `f_seen`; Klobuchar / IF model | ~1–3 m single-freq residual; removed to <1 mm by L3 | truth + estimated / removed by L3 | **Yes** (`f⁻²`) | realistic path = `tecGaussMarkov`; single-freq residual ~50% (Klobuchar) is a bias |
 | Ionosphere, 2nd/3rd order (WP6) | Bounded residual `f⁻³` / `f⁻⁴` | ~1–2 cm / few mm at L1 (high activity) | truth + R | **No** (survives L3) | opt-in `errors.ionosphere.higherOrder.enable` (default off) |
 | Multipath (WP5) | Coloured Gauss-Markov, per link | σ ≈ 0.30 m, τ ≈ 60 s | truth + R | Partially (frequency-independent in this model) | opt-in `errors.multipath.coloredGM.enable`; legacy white-sinusoid default |
 | Scintillation | Gauss-Markov amplitude, frequency-scaled | σ ~0.3 m at L1 (code) | truth + R (σ) | No | `errors.ionosphere.scintillation` |
