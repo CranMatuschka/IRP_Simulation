@@ -29,6 +29,12 @@ function cfg = goldenScenarioConfig(durationOverride_s)
     cfg.measurements.isl.twoWay.range.useInEKF   = false;
     cfg.measurements.isl.twoWay.doppler.useInEKF = false;
 
+    % masterConfig now defaults to the physically-realistic atmosphere overlay
+    % (cfg.atmosphere.realistic=true). The frozen golden certifies the MATCHED
+    % synthetic atmosphere, so opt out here -> ConfigFactory.applyAtmosphereProfile
+    % becomes a no-op and the metrics stay byte-identical to the contract.
+    cfg.atmosphere.realistic = false;
+
     % Gate overrides: summary is collected before any report build, so skip PDF/MAT.
     cfg.report.writePdf   = false;
     cfg.report.writeMat   = false;

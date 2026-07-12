@@ -32,7 +32,7 @@ cfg.diagnostics.storage.snapshot.interval_s = 300;
 % One estimated GEO spacecraft; nSpaceAssets is the swarm switch (1 = ground-only,
 % >1 = helix ISL swarm aiding the primary, primary clock scaling ~1/sqrt(N-1)).
 cfg.scenario.name         = 'singleAssetCarrierAttitude';
-cfg.scenario.nSpaceAssets = 6;        % helix ISL swarm (5 secondaries) -> ~3 cm / ~50 ps
+cfg.scenario.nSpaceAssets = 1;        % helix ISL swarm (5 secondaries) -> ~3 cm / ~50 ps
 cfg.scenario.orbitClass   = 'GEO';    % 'GEO' | 'MEO' | 'LEO'
 % nReceivers is owned by the scenario assembly below (4-antenna cross pattern);
 % do not set it here. nReceivers=1 -> attitude off; >1 -> attitude on.
@@ -78,10 +78,10 @@ cfg.measurements.doppler.useInEKF     = true;
 %% Atmosphere
 % Troposphere and ionosphere truth+model with a shared master enable each. Both use
 % the synthetic simpleMapped model; ionosphere adds a stochastic scintillation term.
-cfg.errors.troposphere.enable              = true;
+cfg.errors.troposphere.enable              = false;
 cfg.errors.troposphere.modelType           = 'simpleMapped';
 cfg.errors.troposphere.stochastic.enable   = true;
-cfg.errors.ionosphere.enable               = true;
+cfg.errors.ionosphere.enable               = false;
 cfg.errors.ionosphere.modelType            = 'simpleMapped';
 cfg.errors.ionosphere.stochastic.enable    = true;
 cfg.errors.ionosphere.scintillation.enable = true;
@@ -302,7 +302,7 @@ cfg.estimator.runKnownAmbiguityValidation = true;
 if ~isfield(cfg,'assets') || isempty(cfg.assets)
     cfg.assets = cfg.asset;
 end
-nRecvReq_ = 4;
+nRecvReq_ = 1;
 if isfield(cfg,'scenario') && isfield(cfg.scenario,'nReceivers') && cfg.scenario.nReceivers > 1
     nRecvReq_ = cfg.scenario.nReceivers;
 end
@@ -438,6 +438,34 @@ end
 if isfield(cfg,'measurements') && isfield(cfg.measurements,'twstft')
     cfg.measurements.twstft.enable = false;
 end
+
+%% Atmosphere realism + ionosphere handling  (SINGLE SOURCE OF TRUTH)
+% The physically-realistic troposphere/ionosphere/scintillation overlay and the
+% ionosphere-handling choice live HERE, not in run_oo_v1. These are DATA toggles;
+% the overlay itself is applied in ConfigFactory.finalizeConfig (via
+% applyAtmosphereProfile) so the Stage-85 golden opts out with the single flag below.
+%
+%   atmosphere.realistic
+%     true  -> Saastamoinen/Niell troposphere (+per-tower ZWD EKF) and a
+%              diurnal+stochastic ionosphere (Klobuchar + higher-order + gated
+%              scintillation): non-cancelling, physically-sized truth-model residuals.
+%     false -> matched synthetic atmosphere (truth==model; the frozen-golden physics).
+%
+%   atmosphere.ionosphereHandling  (only meaningful when realistic==true)
+%     'single'         raw dual-frequency L1+L2; the ionosphere is left in the
+%                      measurement and largely absorbed by the receiver clock. BEST
+%                      for the default 5-tower geometry (fewest unknowns; converges).
+%     'ionosphereFree' L1/L2 IF combination: removes 1st-order iono per link, but
+%                      halves the code rows and amplifies noise x2.98 -> only pays off
+%                      when the geometry is measurement-rich (~10+ well-spread towers).
+%     'ekfState'       per-tower slant-ionosphere EKF states: removes iono and keeps
+%                      all rows, but adds nTowers unknowns -> over-parameterises a thin
+%                      geometry. Best ONLY with a rich tower network.
+% NOTE: ionosphere ELIMINATION is per dual-frequency link (tower-count independent);
+% POSITION accuracy is geometry-limited. At 5 towers 'single' wins; IF/ekfState recover
+% and then surpass it once enough well-distributed towers make the geometry rich.
+cfg.atmosphere.realistic          = true;
+cfg.atmosphere.ionosphereHandling = 'single';
 
 % ================================================================
 % Contract check (asserts only; returns cfg unchanged)

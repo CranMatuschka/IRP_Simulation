@@ -489,6 +489,43 @@ classdef ConfigFactory
             cfgClock.noiseCoeffs.hMinus2  = tmpl.hMinus2  * hm2F;
         end
 
+        function cfg = applyAtmosphereProfile(cfg)
+            % applyAtmosphereProfile  Apply masterConfig's atmosphere toggles.
+            %   Opt-in: returns cfg unchanged unless cfg.atmosphere.realistic is
+            %   true. When true, overlays the physically-realistic troposphere/
+            %   ionosphere/scintillation (realisticAtmosphereConfig) and resolves
+            %   cfg.atmosphere.ionosphereHandling into the measurement/estimation
+            %   settings. Idempotent (re-running yields the same cfg), so it is safe
+            %   under finalizeConfig being called more than once per run.
+            if ~(isfield(cfg,'atmosphere') && isfield(cfg.atmosphere,'realistic') ...
+                    && cfg.atmosphere.realistic)
+                return;   % matched synthetic atmosphere (golden / bespoke tests)
+            end
+            if isempty(which('realisticAtmosphereConfig'))
+                error('revgnss:ConfigFactory:missingAtmosphereProfile', ...
+                    ['cfg.atmosphere.realistic is true but realisticAtmosphereConfig.m ' ...
+                     'is not on the path (expected in oo_v1/config).']);
+            end
+            cfg  = realisticAtmosphereConfig(cfg);
+            mode = 'single';
+            if isfield(cfg.atmosphere,'ionosphereHandling')
+                mode = cfg.atmosphere.ionosphereHandling;
+            end
+            switch mode
+                case 'ionosphereFree'
+                    cfg.measurements.codeMode = 'ionosphereFree';
+                case 'ekfState'
+                    cfg.measurements.codeMode              = 'singleFrequency';
+                    cfg.estimation.ionosphereMode          = 'perTowerSlant';
+                    cfg.errors.ionosphere.model.correction = 'none';
+                case 'single'
+                    cfg.measurements.codeMode = 'singleFrequency';
+                otherwise
+                    error('revgnss:ConfigFactory:badIonosphereHandling', ...
+                        'Unknown cfg.atmosphere.ionosphereHandling ''%s''.', mode);
+            end
+        end
+
         function cfg = finalizeConfig(cfg)
             % finalizeConfig  Resolve nTowers/nReceivers, lever arms, recreate clocks.
             %
@@ -507,6 +544,13 @@ classdef ConfigFactory
             %
             % Clock recreation is idempotent: noiseCoeffs are re-derived from
             % clockType + clockFactors; name/deterministic/bias_s/fracFreq preserved.
+
+            % ---- Atmosphere profile (opt-in via masterConfig) -------------
+            % Apply the physically-realistic atmosphere overlay + ionosphere
+            % handling requested by cfg.atmosphere.realistic. Opt-in only:
+            % configs that never set the toggle (bespoke tests, and the golden,
+            % which sets it false) are left byte-identical.
+            cfg = revgnss.ConfigFactory.applyAtmosphereProfile(cfg);
 
             % ---- Initialize validation tracking ---------------------------
             if ~isfield(cfg,'validation')
