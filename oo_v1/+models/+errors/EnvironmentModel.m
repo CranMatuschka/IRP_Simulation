@@ -26,6 +26,9 @@ classdef EnvironmentModel < handle
         weatherState struct
         % Global scalar scintillation amplitude (GM state; unit amplitude at init)
         scintAmplitude (1,1) double = 1.0
+        % Per-tower unit phase-scintillation GM state [dimensionless]; scaled to sigma_phi
+        % (rad) and elevation in getPhaseScintRad. Zero unless scintillation.phaseScint is on.
+        phaseScintState double = []
         % Absolute simulation time [s] (for the diurnal ionosphere profile). Updated by step().
         tNow_s (1,1) double = 0
         % RandStream for all environment stochastic steps (legacy shared, OFF path)
@@ -70,6 +73,8 @@ classdef EnvironmentModel < handle
             obj.initWeatherFromTowers_();
             % scintAmplitude starts at 1.0 (unit amplitude)
             obj.scintAmplitude = 1.0;
+            % Per-tower phase-scintillation GM states start at zero (off unless enabled)
+            obj.phaseScintState = zeros(max(nTowers,1), 1);
         end
 
         % ----------------------------------------------------------------
@@ -193,6 +198,52 @@ classdef EnvironmentModel < handle
                 % Keep amplitude non-negative (scintillation severity is a magnitude)
                 obj.scintAmplitude = abs(obj.scintAmplitude);
             end
+
+            % --- Phase-scintillation GM (per tower) ----------------------
+            % Time-correlated (NOT white) carrier-phase jitter: a first-order Gauss-Markov
+            % (Lorentzian) unit process with a short correlation time (~1-2 s), scaled to
+            % sigma_phi and elevation in getPhaseScintRad. Gated (default off) so the golden
+            % carrier path is unchanged. Kept separate from the amplitude GM (different
+            % physics: amplitude fading -> R, phase jitter -> truth carrier/Doppler).
+            if isfield(ic,'scintillation') && isfield(ic.scintillation,'phaseScint') && ...
+                    isfield(ic.scintillation.phaseScint,'enable') && ic.scintillation.phaseScint.enable
+                tau_ph = 1.5;
+                if isfield(ic.scintillation.phaseScint,'tau_s'); tau_ph = ic.scintillation.phaseScint.tau_s; end
+                if numel(obj.phaseScintState) < obj.nTowers
+                    obj.phaseScintState = zeros(max(obj.nTowers,1),1);
+                end
+                for k = 1:obj.nTowers
+                    obj.phaseScintState(k) = models.noise.StochasticProcess.gaussMarkovStep( ...
+                        obj.phaseScintState(k), dt, tau_ph, 1.0, ...
+                        obj.envStream_(models.noise.RngSource.PHASE_SCINT, k));
+                end
+            end
+        end
+
+        % ----------------------------------------------------------------
+        function phi_rad = getPhaseScintRad(obj, towerIdx, elevation_rad)
+            % getPhaseScintRad  Truth carrier phase-scintillation perturbation [rad].
+            %
+            % Returns 0 when scintillation.phaseScint is disabled. Otherwise the per-tower
+            % unit GM state scaled by the zenith sigma_phi and the elevation factor
+            % F(el)^0.9 (scintillation intensifies toward low elevation). Convert to metres
+            % at the carrier via phi_rad * lambda/(2*pi).
+            phi_rad = 0;
+            ic = obj.cfg.errors.ionosphere;
+            if ~isfield(ic,'scintillation') || ~isfield(ic.scintillation,'phaseScint') || ...
+                    ~isfield(ic.scintillation.phaseScint,'enable') || ~ic.scintillation.phaseScint.enable
+                return;
+            end
+            ti = max(1, min(towerIdx, obj.nTowers));
+            if numel(obj.phaseScintState) < ti; return; end
+
+            sigmaPhiZen = 0.2;   % rad (disturbed default)
+            if isfield(ic.scintillation.phaseScint,'sigmaPhi_rad')
+                sigmaPhiZen = ic.scintillation.phaseScint.sigmaPhi_rad;
+            end
+            elvFloor  = revgnss.Constants.ELEVATION_FLOOR_RAD;
+            elvFactor = (1 / max(sin(elevation_rad), sin(elvFloor)))^0.9;
+            phi_rad   = obj.phaseScintState(ti) * sigmaPhiZen * elvFactor;
         end
 
         % ----------------------------------------------------------------
@@ -419,8 +470,11 @@ classdef EnvironmentModel < handle
             %
             % Returns 0 if scintillation is disabled.
             %
-            % Model:
+            % Model (default 'legacy'):
             %   sigma = |scintAmplitude| * sigmaCodeL1 * (f_L1/f)^exp / sqrt(sin(el))
+            % Model 'conker' (gated by scintillation.model='conker'):
+            %   amplitude fading raises the tracking noise by the Conker et al. (2003) factor
+            %   1/sqrt(1 - 2*S4^2), with S4 = min(0.7, |scintAmplitude|*S4zen*(1/sin e)^0.9).
             %
             % Inputs:
             %   elevation_rad  scalar   elevation angle [rad]
@@ -442,11 +496,23 @@ classdef EnvironmentModel < handle
 
             freqExp = 1.0;
             if isfield(sc,'frequencyExponent'); freqExp = sc.frequencyExponent; end
-
             freqFactor = (f_L1_Hz / freqHz)^freqExp;
-            elvFactor  = 1 / sqrt(max(sin(elevation_rad), sin(elvFloor)));
 
-            sigma = abs(obj.scintAmplitude) * sigmaL1 * freqFactor * elvFactor;
+            scintModel = 'legacy';
+            if isfield(sc,'model'); scintModel = sc.model; end
+
+            if strcmp(scintModel,'conker')
+                % Amplitude scintillation as an effective C/N0 loss (Conker et al. 2003).
+                S4zen = 0.3;
+                if isfield(sc,'S4zen'); S4zen = sc.S4zen; end
+                sec  = 1 / max(sin(elevation_rad), sin(elvFloor));   % secant obliquity proxy
+                S4   = min(0.7, abs(obj.scintAmplitude) * S4zen * sec^0.9);  % clamp below loss-of-lock
+                sigma = sigmaL1 * freqFactor / sqrt(1 - 2*S4^2);
+            else
+                % Legacy 1/sqrt(sin el) scaling (default; keeps the golden byte-identical).
+                elvFactor = 1 / sqrt(max(sin(elevation_rad), sin(elvFloor)));
+                sigma = abs(obj.scintAmplitude) * sigmaL1 * freqFactor * elvFactor;
+            end
         end
 
     end  % public methods

@@ -26,5 +26,6 @@ classdef RngSource
         CARR_PHASE     = 14   % carrier phase noise (white)
         DOPPLER        = 15   % Doppler measurement noise (white)
         ATT_REF        = 16   % external attitude-reference perturbation (one-shot)
+        PHASE_SCINT    = 17   % EnvironmentModel phase-scintillation GM, per tower (persistent)
     end
 end

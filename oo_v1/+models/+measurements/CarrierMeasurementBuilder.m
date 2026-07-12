@@ -203,8 +203,13 @@ classdef CarrierMeasurementBuilder
                 noise_phi = sigma_phi * errorChain.drawKeyed( ...
                     models.noise.RngSource.CARR_PHASE, ti, ai, si_, errorChain.epochIdx_, 1, 1);
 
+                % Phase scintillation: a time-correlated truth-side carrier jitter [rad -> m
+                % via lambda/(2*pi)]. getPhaseScintRad returns exactly 0 unless
+                % scintillation.phaseScint is enabled, so the carrier golden path is unchanged.
+                phaseScint_m = errorChain.envModel.getPhaseScintRad(ti, elv) * lambda / (2*pi);
+
                 % z: +trop, -iono (carrier ionosphere is OPPOSITE sign to code)
-                z_phi(rowOut) = rho_t + b_rx_true - b_twr_t + trop_t - iono_t_sig + B_true + noise_phi;
+                z_phi(rowOut) = rho_t + b_rx_true - b_twr_t + trop_t - iono_t_sig + B_true + noise_phi + phaseScint_m;
 
                 % Stage 85: synthetic slip injection for stress testing
                 try

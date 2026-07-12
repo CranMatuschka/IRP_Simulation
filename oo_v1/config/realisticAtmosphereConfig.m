@@ -66,4 +66,16 @@ function cfg = realisticAtmosphereConfig(cfg)
     % Thin-shell obliquity (not the flat-Earth secant) for the ionospheric mapping
     cfg.effects.ionosphere.mappingModel  = 'thinShell';
     cfg.effects.ionosphere.shellHeight_m = 350e3;
+
+    % ---------------- Scintillation ----------------
+    % Amplitude fading -> extra code/carrier measurement noise (into R) via the Conker
+    % et al. (2003) 1/sqrt(1-2*S4^2) factor; phase scintillation -> a time-correlated
+    % truth-side carrier-phase jitter the estimator cannot predict (into the innovation).
+    cfg.errors.ionosphere.scintillation.enable  = true;
+    cfg.errors.ionosphere.scintillation.model   = 'conker';   % amplitude fading -> R
+    cfg.errors.ionosphere.scintillation.S4zen   = 0.3;         % moderate zenith S4
+    cfg.errors.ionosphere.scintillation.tau_s   = 30;          % amplitude GM correlation time
+    cfg.errors.ionosphere.scintillation.phaseScint.enable      = true;   % phase jitter -> truth carrier
+    cfg.errors.ionosphere.scintillation.phaseScint.sigmaPhi_rad = 0.2;   % ~6 mm at L1 (disturbed)
+    cfg.errors.ionosphere.scintillation.phaseScint.tau_s        = 1.5;   % s (time-correlated, not white)
 end
