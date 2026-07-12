@@ -157,16 +157,26 @@ Three ways to handle the (now honest) ionosphere, selectable in `run_oo_v1.m`:
 | `'ionosphereFree'` | L1/L2 IF combination (`codeMode='ionosphereFree'`) | **halves code rows, ×2.98 noise** | many redundant ranging sources |
 | `'ekfState'` | per-tower slant-iono EKF states (`estimation.ionosphereMode='perTowerSlant'`) | +1 state/tower | measurement-rich geometry |
 
-**Finding (single-asset, 5-tower scenario):** the IF combination is correctly implemented
-(cancels first-order iono to machine precision) but *degrades* absolute position (~28 m →
-~130 m) because it discards half the code information in a geometry that is already
-measurement-starved, and the ionosphere is largely clock-absorbed (position ≈ clock). The
-`ekfState` prototype correctly estimates the slant iono (states converge from a 5 m prior to
-~0.15 m 1-σ, estimating ~0.4–2.4 m/tower) but likewise does not recover *absolute* position,
-because position here is **geometry/clock-limited, not iono-limited**. Both iono-removal
-methods are sound; the binding constraint is the number of independent tower ranges. IF/
-`ekfState` pay off in measurement-rich geometries (more towers), or for relative/attitude
-solutions where the ionosphere is not clock-absorbable.
+**Finding — it depends entirely on measurement geometry.** The IF combination and the
+`ekfState` prototype are both correct (IF cancels first-order iono to machine precision; the
+iono states converge from a 5 m prior to ~0.15 m 1-σ, estimating ~0.4–2.4 m/tower). Whether
+they *recover position* depends on whether there are enough independent tower ranges to
+afford IF's row-halving:
+
+| config | 5 towers (starved) | 12 towers (rich) |
+|--------|--------------------|-------------------|
+| matched baseline (no atmosphere) | 2.28 m | 0.28 m |
+| `single` (iono uncorrected) | 35 m | **108.6 m** (worse — more uncorrected iono) |
+| `ionosphereFree` | 130 m (diverges) | **3.89 m** |
+| `ekfState` (iono EKF states) | ~geometry-limited | **1.27 m** (best) |
+
+At **5 towers** the geometry is measurement-starved: IF's ×2.98 noise / half-rows tips it into
+divergence, and the ionosphere is largely clock-absorbed, so neither method helps. At **12
+towers** the ionosphere becomes the binding constraint — `single` *worsens* to ~109 m (the
+per-tower slant iono no longer cancels into the clock and corrupts position), while `IF`
+recovers to ~3.9 m and `ekfState` to ~1.3 m (near the 0.28 m matched floor). **`ekfState` beats
+`IF`** because it removes the iono without discarding half the code information — exactly the
+advantage of estimating the ionosphere over combining it away.
 
 Two IF **diagnostics** were also fixed (they misreported the IF path, not the filter): the
 postfit recompute now re-applies the IF combination (postfit ≤ prefit), and the reported code
