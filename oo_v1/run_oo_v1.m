@@ -20,6 +20,17 @@ addpath(fullfile(thisDir, 'config'));
 % ---- Load THE config -------------------------------------------------------
 cfg = masterConfig();
 
+% ---- Physically-realistic atmosphere ---------------------------------------
+% Overlay the physically-grounded troposphere/ionosphere/scintillation so the normal
+% run shows non-cancelling, physically-sized truth-model residuals (Saastamoinen/Niell
+% troposphere with a per-tower ZWD EKF; diurnal+stochastic ionosphere with Klobuchar and
+% higher-order terms; gated scintillation). Set this false for the matched synthetic
+% atmosphere. The Stage-85 golden uses masterConfig directly and is unaffected either way.
+useRealisticAtmosphere = true;
+if useRealisticAtmosphere
+    cfg = realisticAtmosphereConfig(cfg);
+end
+
 % ---- Per-run output folder: output/Report_YYYYMMDD/Report_v###_G#S#R#/ ------
 % Self-describing per-run folder + file stem. The version tag is
 % cfg.report.runVersion (numeric -> v%03d, else sanitised); the topology suffix
@@ -54,6 +65,18 @@ end
 if cfg.report.writeMat && isfile(out.matPath)
     copyfile(out.matPath, fullfile(outputDir, sprintf('latest_%s.mat', configName)));
     fprintf('MAT: %s\n', out.matPath);
+end
+
+% ---- Atmosphere-only residual diagnostics (log-scale, own axis) ------------
+% Write the atmosphere truth-model residual figures (vs time and vs elevation) next to
+% the report, so the physically-sized troposphere/ionosphere residuals are visible on
+% their own scale rather than buried under the code-noise floor. Never fatal to the run.
+try
+    revgnss.AtmosphereResidualPlots.generate(cfg, runFolder);
+    fprintf('Atmosphere residual diagnostics: %s\n', ...
+        fullfile(runFolder, 'atmosphere_residuals_time.png'));
+catch me
+    fprintf('Atmosphere diagnostics skipped: %s\n', me.message);
 end
 
 assignin('base', 'oo_v1_last_out', out);

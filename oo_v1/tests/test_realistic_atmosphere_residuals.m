@@ -66,7 +66,23 @@ assert(max(ionoTruthZen) > 1.5*min(ionoTruthZen), ...
     'iono truth should show a diurnal day/night contrast (max %.3f min %.3f)', ...
     max(ionoTruthZen), min(ionoTruthZen));
 
+% --- Before/after contrast: the matched DEFAULT atmosphere cancels to ~0
+ecDef = models.errors.ErrorChain(masterConfig(), 42);   % simpleMapped, matched truth/model
+defTrop = 0; defIono = 0;
+for k = 1:numel(ts)
+    err = ecDef.compute(el, tid, tidx, ts(k));
+    if isfield(err.bySource.truth_m,'trop')
+        defTrop = max(defTrop, rms(err.bySource.truth_m.trop - err.bySource.model_m.trop));
+    end
+    if isfield(err.bySource.truth_m,'iono')
+        defIono = max(defIono, rms(err.bySource.truth_m.iono - err.bySource.model_m.iono));
+    end
+end
+assert(defTrop < 1e-9 && defIono < 1e-9, ...
+    'matched default residuals must cancel to ~0 (trop %.2e, iono %.2e)', defTrop, defIono);
+
 fprintf('  trop residual RMS = %.4f m (low-el %.3f, zenith %.3f) | iono residual RMS = %.4f m\n', ...
     tropMean, mean(tropMisLow(2:end)), mean(tropMisZen(2:end)), ionoMean);
 fprintf('  iono truth zenith range = [%.3f, %.3f] m (diurnal)\n', min(ionoTruthZen), max(ionoTruthZen));
+fprintf('  matched default (before): trop %.2e m, iono %.2e m (cancels)\n', defTrop, defIono);
 fprintf('  PASS\n');
