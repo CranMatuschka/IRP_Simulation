@@ -2110,6 +2110,10 @@ classdef ReportRunner
             if strcmp(revgnss.ReportRunner.safeCfgStr_(cfg, {'estimation','troposphereMode'}, 'none'), 'perTowerZwd')
                 summary.nZwdStates = nTwr;
             end
+            summary.nIonoStates = 0;
+            if strcmp(revgnss.ReportRunner.safeCfgStr_(cfg, {'estimation','ionosphereMode'}, 'none'), 'perTowerSlant')
+                summary.nIonoStates = nTwr;
+            end
             summary.carrierGenerated = isfield(cfg.measurements,'carrierPhase') && ...
                 isfield(cfg.measurements.carrierPhase,'enable') && cfg.measurements.carrierPhase.enable;
             summary.carrierUsedInEkf = carrInEKF && summary.totalCarrierRows > 0;
