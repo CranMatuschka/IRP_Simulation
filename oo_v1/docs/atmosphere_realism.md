@@ -147,6 +147,31 @@ the no-oracle property, the `sameAsTruth` rejection, and the physical residual b
 (`run_oo_v1_regression('smoke')` — 183/183, `rtol = 1e-9`). The new physics is strictly opt-in;
 `masterConfig`'s default (matched `simpleMapped`) is untouched.
 
+## Ionosphere handling & accuracy (run_oo_v1 `ionosphereHandling`)
+
+Three ways to handle the (now honest) ionosphere, selectable in `run_oo_v1.m`:
+
+| Mode | Mechanism | Cost | When it helps |
+|------|-----------|------|---------------|
+| `'single'` | raw dual-frequency L1+L2 | iono partly absorbed into the receiver clock | default |
+| `'ionosphereFree'` | L1/L2 IF combination (`codeMode='ionosphereFree'`) | **halves code rows, ×2.98 noise** | many redundant ranging sources |
+| `'ekfState'` | per-tower slant-iono EKF states (`estimation.ionosphereMode='perTowerSlant'`) | +1 state/tower | measurement-rich geometry |
+
+**Finding (single-asset, 5-tower scenario):** the IF combination is correctly implemented
+(cancels first-order iono to machine precision) but *degrades* absolute position (~28 m →
+~130 m) because it discards half the code information in a geometry that is already
+measurement-starved, and the ionosphere is largely clock-absorbed (position ≈ clock). The
+`ekfState` prototype correctly estimates the slant iono (states converge from a 5 m prior to
+~0.15 m 1-σ, estimating ~0.4–2.4 m/tower) but likewise does not recover *absolute* position,
+because position here is **geometry/clock-limited, not iono-limited**. Both iono-removal
+methods are sound; the binding constraint is the number of independent tower ranges. IF/
+`ekfState` pay off in measurement-rich geometries (more towers), or for relative/attitude
+solutions where the ionosphere is not clock-absorbable.
+
+Two IF **diagnostics** were also fixed (they misreported the IF path, not the filter): the
+postfit recompute now re-applies the IF combination (postfit ≤ prefit), and the reported code
+residual is finite under IF (`'ifCode'` rows are counted).
+
 ## Not yet implemented (follow-up)
 
 - **Doppler phase-scintillation rate.** The phase jitter is injected on the truth carrier;

@@ -31,6 +31,24 @@ if useRealisticAtmosphere
     cfg = realisticAtmosphereConfig(cfg);
 end
 
+% Ionosphere handling under the realistic atmosphere:
+%   'single'         raw dual-frequency L1+L2 (ionosphere absorbed into the estimate)
+%   'ionosphereFree' L1/L2 ionosphere-free combination (removes 1st-order iono; noise x2.98,
+%                    half the code rows -- best only when the geometry is measurement-rich)
+%   'ekfState'       per-tower slant-ionosphere EKF states (removes iono, keeps all rows;
+%                    the physically-right choice when there are enough measurements)
+ionosphereHandling = 'single';
+if useRealisticAtmosphere
+    switch ionosphereHandling
+        case 'ionosphereFree'
+            cfg.measurements.codeMode = 'ionosphereFree';
+        case 'ekfState'
+            cfg.measurements.codeMode              = 'singleFrequency';
+            cfg.estimation.ionosphereMode          = 'perTowerSlant';
+            cfg.errors.ionosphere.model.correction = 'none';
+    end
+end
+
 % ---- Per-run output folder: output/Report_YYYYMMDD/Report_v###_G#S#R#/ ------
 % Self-describing per-run folder + file stem. The version tag is
 % cfg.report.runVersion (numeric -> v%03d, else sanitised); the topology suffix
