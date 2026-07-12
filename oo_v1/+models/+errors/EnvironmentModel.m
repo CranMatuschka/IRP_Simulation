@@ -120,6 +120,16 @@ classdef EnvironmentModel < handle
                     sigModel = tc.stochastic.sigmaModelResidual_m;
                 end
 
+                % Forbidden oracle read: 'sameAsTruth' copies the truth wet realisation into
+                % the model, forcing the innovation residual to exactly zero. Reject it so the
+                % estimator can never see the truth draw. Use 'independentGM' or the perTowerZwd
+                % EKF state for a genuine, structurally-divergent model correction.
+                if mrEnable && strcmp(mrMode,'sameAsTruth')
+                    error('revgnss:oracleTropModelResidual', ...
+                        ['troposphere modelResidual.mode=''sameAsTruth'' is a forbidden oracle ' ...
+                         'read. Use ''independentGM'' or estimation.troposphereMode=''perTowerZwd''.']);
+                end
+
                 for k = 1:obj.nTowers
                     obj.tropState(k).wetResidualTruth_m = ...
                         models.noise.StochasticProcess.gaussMarkovStep( ...
@@ -128,9 +138,6 @@ classdef EnvironmentModel < handle
                             obj.envStream_(models.noise.RngSource.ENV_TROP_TRUTH, k));
                     if mrEnable
                         switch mrMode
-                            case 'sameAsTruth'
-                                obj.tropState(k).wetResidualModel_m = ...
-                                    obj.tropState(k).wetResidualTruth_m;
                             case 'independentGM'
                                 obj.tropState(k).wetResidualModel_m = ...
                                     models.noise.StochasticProcess.gaussMarkovStep( ...
@@ -222,27 +229,35 @@ classdef EnvironmentModel < handle
                     end
 
                 case 'localWeatherGM'
-                    % Total zenith = dry + wet from per-tower weatherState + residual
+                    % Dry/wet split: STD = ZHD*m_h(e) + ZWD*m_w(e). The TRUTH side carries
+                    % the stochastic wet fluctuation wetResidualTruth (a GM process on its own
+                    % ENV_TROP_TRUTH stream); the MODEL side applies only the climatological
+                    % mean wet delay plus any INDEPENDENT model residual (ENV_TROP_MODEL) --
+                    % never the truth realisation. The surviving residual m_w(e)*wetResidualTruth
+                    % (minus whatever the perTowerZwd EKF estimates in CodeMeasurementBuilder)
+                    % is the physical innovation, amplified ~1/sin(e) toward the horizon.
+                    % Mapping kind is per-side ('simple' 1/sin, or 'niell' NMF).
                     ti = max(1, min(towerIdx, obj.nTowers));
-                    if strcmp(side,'truth')
-                        if obj.nTowers > 0 && numel(obj.weatherState) >= ti
-                            zenithDry = obj.weatherState(ti).ZHD_m;
-                            zenithWet = obj.weatherState(ti).ZWD_m;
-                        else
-                            zenithDry = 2.3; zenithWet = 0.15;
-                        end
-                        residual = obj.tropState(ti).wetResidualTruth_m;
-                        delay    = (zenithDry + zenithWet + residual) * mapping;
-                    else % 'model'
-                        if obj.nTowers > 0 && numel(obj.weatherState) >= ti
-                            zenithDry = obj.weatherState(ti).ZHD_m;
-                            zenithWet = obj.weatherState(ti).ZWD_m;
-                        else
-                            zenithDry = 2.3; zenithWet = 0.15;
-                        end
-                        residual = obj.tropState(ti).wetResidualModel_m;
-                        delay    = (zenithDry + zenithWet + residual) * mapping;
+                    if obj.nTowers > 0 && numel(obj.weatherState) >= ti
+                        zhd     = obj.weatherState(ti).ZHD_m;
+                        zwdMean = obj.weatherState(ti).ZWD_m;
+                        latR    = obj.weatherState(ti).latRad;
+                        hkm     = obj.weatherState(ti).heightKm;
+                    else
+                        zhd = 2.3; zwdMean = 0.15; latR = 0; hkm = 0;
                     end
+                    doy = 1;
+                    if isfield(tc,'dayOfYear'); doy = tc.dayOfYear; end
+                    if strcmp(side,'truth')
+                        wetRes  = obj.tropState(ti).wetResidualTruth_m;
+                        mapKind = models.errors.EnvironmentModel.tropMapKind_(tc,'truth');
+                    else
+                        wetRes  = obj.tropState(ti).wetResidualModel_m;
+                        mapKind = models.errors.EnvironmentModel.tropMapKind_(tc,'model');
+                    end
+                    [m_h, m_w] = models.errors.EnvironmentModel.tropMapping_( ...
+                        elevation_rad, mapKind, latR, doy, hkm);
+                    delay = zhd * m_h + (zwdMean + wetRes) * m_w;
 
                 otherwise
                     delay = 0;
@@ -387,6 +402,38 @@ classdef EnvironmentModel < handle
 
     end  % public methods
 
+    methods (Static, Access = private)
+
+        function kind = tropMapKind_(tc, side)
+            % tropMapKind_  Per-side troposphere mapping kind ('simple' | 'niell').
+            %   Defaults to 'simple' (the backward-compatible secant) when unset, so the
+            %   localWeatherGM path is numerically identical to its pre-split behaviour.
+            kind = 'simple';
+            if isfield(tc, side) && isfield(tc.(side), 'mappingType')
+                kind = tc.(side).mappingType;
+            end
+        end
+
+        function [m_h, m_w] = tropMapping_(elevation_rad, kind, latRad, doy, heightKm)
+            % tropMapping_  Hydrostatic and wet mapping factors for the dry/wet split.
+            %   'simple' -> m_h == m_w == 1/sin(e) (floored): the sum ZHD*m_h+ZWD*m_w then
+            %               collapses to (ZHD+ZWD)/sin(e), i.e. the legacy behaviour.
+            %   'niell'  -> Niell (1996) hydrostatic/wet mapping (latitude/season/height).
+            elvFloor = revgnss.Constants.ELEVATION_FLOOR_RAD;
+            switch kind
+                case 'niell'
+                    m_h = models.atmosphere.MappingFunctions.niellHydrostatic( ...
+                        elevation_rad, latRad, doy, heightKm);
+                    m_w = models.atmosphere.MappingFunctions.niellWet(elevation_rad, latRad);
+                otherwise  % 'simple'
+                    m   = 1 / max(sin(elevation_rad), sin(elvFloor));
+                    m_h = m;
+                    m_w = m;
+            end
+        end
+
+    end
+
     methods (Access = private)
 
         function initTropState_(obj)
@@ -421,7 +468,8 @@ classdef EnvironmentModel < handle
             %   ZWD  = 0.15 * RH0 * exp(-h / 2000)
             nT = obj.nTowers;
             if nT == 0
-                obj.weatherState = struct('ZHD_m',{},'ZWD_m',{},'pressure_hPa',{},'temperature_K',{});
+                obj.weatherState = struct('ZHD_m',{},'ZWD_m',{},'pressure_hPa',{}, ...
+                    'temperature_K',{},'latRad',{},'heightKm',{});
                 return;
             end
 
@@ -436,7 +484,8 @@ classdef EnvironmentModel < handle
             Tmin = 220.0;   if isfield(wc,'minTemperature_K');        Tmin = wc.minTemperature_K;        end
             Tmax = 320.0;   if isfield(wc,'maxTemperature_K');        Tmax = wc.maxTemperature_K;        end
 
-            proto = struct('ZHD_m', 0, 'ZWD_m', 0, 'pressure_hPa', P0, 'temperature_K', T0);
+            proto = struct('ZHD_m', 0, 'ZWD_m', 0, 'pressure_hPa', P0, 'temperature_K', T0, ...
+                'latRad', 0, 'heightKm', 0);
             obj.weatherState = repmat(proto, nT, 1);
 
             for k = 1:nT
@@ -490,10 +539,12 @@ classdef EnvironmentModel < handle
                 assert(isfinite(ZHD_k) && isfinite(ZWD_k), ...
                     'EnvironmentModel: Saastamoinen ZHD/ZWD is NaN/Inf for tower %d', k);
 
-                obj.weatherState(k).ZHD_m        = ZHD_k;
-                obj.weatherState(k).ZWD_m        = ZWD_k;
-                obj.weatherState(k).pressure_hPa = P_k;
+                obj.weatherState(k).ZHD_m         = ZHD_k;
+                obj.weatherState(k).ZWD_m         = ZWD_k;
+                obj.weatherState(k).pressure_hPa  = P_k;
                 obj.weatherState(k).temperature_K = T_k;
+                obj.weatherState(k).latRad        = lat_rad;
+                obj.weatherState(k).heightKm      = h_km;
             end
         end
 
