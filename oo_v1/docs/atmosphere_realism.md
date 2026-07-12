@@ -66,6 +66,16 @@ the ionosphere-free combination).
 
 **Resulting residual:** ~3 cm at zenith, growing as ~1/sin(e) to ~20–40 cm at 5–10°.
 
+### Scintillation (gated)
+
+- **Amplitude fading → R:** the Conker et al. (2003) model (`scintillation.model='conker'`)
+  raises the code/carrier tracking noise by `1/√(1 − 2·S4²)`, with `S4` elevation-scaled and
+  clamped at the 0.707 loss-of-lock limit. Default `legacy` keeps the previous formula.
+- **Phase scintillation → truth carrier:** a per-tower, time-correlated first-order
+  Gauss–Markov jitter (`τ ≈ 1.5 s`, **not white**) scaled to `σ_φ` and elevation, injected
+  into the truth carrier as `φ·λ/(2π)` (mm-level). Gated by `scintillation.phaseScint.enable`;
+  off ⇒ exactly zero, no RNG consumed, carrier golden untouched.
+
 ### Ionosphere (dispersive 1/f²; `tecGaussMarkov`)
 
 `I = 40.308·STEC/f²` (`+` code, `−` carrier); `K_L1 = 40.308e16/f_L1² ≈ 0.162 m/TECU`.
@@ -88,7 +98,9 @@ order ~1–2 cm; both grow toward low elevation and peak with the diurnal TEC.
 ## Config knobs (all opt-in; defaults reproduce the legacy behaviour)
 
 The realistic scenario is assembled by `config/realisticAtmosphereConfig.m`
-(applied on top of `masterConfig`); run it with `run_realistic_atmosphere.m`.
+(applied on top of `masterConfig`). It is wired into `run_oo_v1.m` behind the
+`useRealisticAtmosphere` toggle (default true), so the normal run exercises it and
+writes the log-scale residual figures into the run folder — no separate driver script.
 
 | Field | Meaning | Legacy default |
 |-------|---------|----------------|
@@ -104,10 +116,15 @@ The realistic scenario is assembled by `config/realisticAtmosphereConfig.m`
 | `errors.ionosphere.model.klobuchar.{amplitude_ns,period_h,dc_ns}` | Klobuchar parameters | — |
 | `errors.ionosphere.higherOrder.enable` | 2nd/3rd-order residual | off |
 | `effects.ionosphere.mappingModel` / `.shellHeight_m` | `simpleSecant` \| `thinShell` | `simpleSecant` |
+| `errors.ionosphere.scintillation.model` | `legacy` \| `conker` (S4 amplitude fading → R) | `legacy` |
+| `errors.ionosphere.scintillation.S4zen` | zenith S4 index | — |
+| `errors.ionosphere.scintillation.phaseScint.{enable,sigmaPhi_rad,tau_s}` | time-correlated phase jitter → truth carrier | off |
 
 ## Before / after (evidence)
 
-Run `diagnostics/atmosphere_residual_probe.m` (writes two log-scale PNGs and prints):
+Running `run_oo_v1.m` (with `useRealisticAtmosphere = true`) writes two log-scale PNGs
+(`atmosphere_residuals_time.png`, `..._elevation.png`) into the run folder; the acceptance
+test `test_realistic_atmosphere_residuals` asserts the same contrast:
 
 | Quantity | Matched default | Realistic atmosphere |
 |----------|-----------------|----------------------|
@@ -120,10 +137,11 @@ Run `diagnostics/atmosphere_residual_probe.m` (writes two log-scale PNGs and pri
 
 New tests (all pass; run via `tests/run_all_tests.m`):
 `test_niell_mapping_function`, `test_saastamoinen_zhd`, `test_troposphere_structural_residual`,
-`test_ionosphere_truth_realism`, `test_klobuchar_correction`, `test_realistic_atmosphere_residuals`.
-They verify mapping functions vs published values, the ZHD constant, first-order dispersion
-`(f1/f2)²`, thin-shell obliquity, exact-zero when truth ≡ model and non-zero otherwise, the
-no-oracle property, the `sameAsTruth` rejection, and the physical residual bands.
+`test_ionosphere_truth_realism`, `test_klobuchar_correction`, `test_scintillation_gated`,
+`test_realistic_atmosphere_residuals`. They verify mapping functions vs published values, the
+ZHD constant, first-order dispersion `(f1/f2)²`, thin-shell obliquity, the Conker amplitude
+factor and time-correlated phase jitter, exact-zero when truth ≡ model and non-zero otherwise,
+the no-oracle property, the `sameAsTruth` rejection, and the physical residual bands.
 
 **Regression:** every commit keeps the Stage-85 golden byte-identical
 (`run_oo_v1_regression('smoke')` — 183/183, `rtol = 1e-9`). The new physics is strictly opt-in;
@@ -131,10 +149,12 @@ no-oracle property, the `sameAsTruth` rejection, and the physical residual bands
 
 ## Not yet implemented (follow-up)
 
-- **Phase scintillation on carrier/Doppler** and the S4/Conker amplitude-fading refinement into R.
-  The amplitude-scintillation σ already feeds R via `EnvironmentModel.getScintillationSigma`; a
-  time-correlated phase-scintillation truth perturbation on the carrier is a further step (it
-  touches the carrier measurement path and should be gated behind a flag to keep the golden stable).
+- **Doppler phase-scintillation rate.** The phase jitter is injected on the truth carrier;
+  the corresponding truth-side Doppler perturbation (`δf_d = φ̇/(2π)`) is not yet added to the
+  Doppler builder. Straightforward to add behind the same `phaseScint` flag.
+- **Full IS-GPS-200 Klobuchar geometry** (broadcast α/β coefficients + geomagnetic pierce
+  point). The current model uses the half-cosine algorithm with supplied amplitude/period,
+  adequate for a feasibility study.
 
 ## Verified physics reference table
 
