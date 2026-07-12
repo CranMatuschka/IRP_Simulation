@@ -372,15 +372,40 @@ classdef EnvironmentModel < handle
                         vertical = fSeen * (vMean + obj.ionoState(ti).tecResidualTruth_m);
                         delay    = vertical * mapping * freqScale;
                     else % 'model'
-                        baseVdelL1 = 0;
-                        if isfield(ic,'model') && isfield(ic.model,'verticalDelayL1_m')
-                            baseVdelL1 = ic.model.verticalDelayL1_m;
-                        elseif isfield(ic,'model') && isfield(ic.model,'zenithDelay_m')
-                            baseVdelL1 = ic.model.zenithDelay_m;
+                        % On-board correction. 'biasFraction' (legacy) is a constant vertical
+                        % delay; 'klobuchar' is the single-frequency broadcast climatology, a
+                        % genuinely imperfect corrector that removes ~50% of the RMS iono range
+                        % error (its ~50% residual is a physical bias, not a hand-scaled number).
+                        % Dual-frequency users instead rely on the ionosphere-free rows already
+                        % in the measurement pipeline, which remove the first-order term.
+                        correction = 'biasFraction';
+                        if isfield(ic,'model') && isfield(ic.model,'correction')
+                            correction = ic.model.correction;
                         end
-                        residual = obj.ionoState(ti).tecResidualModel_m;
-                        slantL1  = (baseVdelL1 + residual) * mapping;
-                        delay    = slantL1 * freqScale;
+                        if strcmp(correction, 'klobuchar')
+                            lonR = 0;
+                            if numel(obj.weatherState) >= ti; lonR = obj.weatherState(ti).lonRad; end
+                            ltS   = mod(obj.tNow_s + lonR * (43200/pi), 86400);  % local time [s]
+                            amp_s = 20e-9; per_s = 86400; dc_s = models.atmosphere.Klobuchar.NIGHT_DC_S;
+                            if isfield(ic,'model') && isfield(ic.model,'klobuchar')
+                                kb = ic.model.klobuchar;
+                                if isfield(kb,'amplitude_ns'); amp_s = kb.amplitude_ns * 1e-9; end
+                                if isfield(kb,'period_h');     per_s = kb.period_h * 3600;     end
+                                if isfield(kb,'dc_ns');        dc_s  = kb.dc_ns * 1e-9;         end
+                            end
+                            vModel = models.atmosphere.Klobuchar.verticalDelayMetres(ltS, amp_s, per_s, dc_s);
+                            fSeen  = models.errors.EnvironmentModel.ionoTopsideFraction_(ic);
+                            delay  = fSeen * vModel * mapping * freqScale;
+                        else  % 'biasFraction' (legacy constant vertical delay)
+                            baseVdelL1 = 0;
+                            if isfield(ic,'model') && isfield(ic.model,'verticalDelayL1_m')
+                                baseVdelL1 = ic.model.verticalDelayL1_m;
+                            elseif isfield(ic,'model') && isfield(ic.model,'zenithDelay_m')
+                                baseVdelL1 = ic.model.zenithDelay_m;
+                            end
+                            residual = obj.ionoState(ti).tecResidualModel_m;
+                            delay    = (baseVdelL1 + residual) * mapping * freqScale;
+                        end
                     end
 
                 otherwise
