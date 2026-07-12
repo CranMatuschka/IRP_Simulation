@@ -343,6 +343,16 @@ classdef CodeMeasurementBuilder
                             btOut.scintillation(mi) = scint_t;
                             bsOut.code(mi)          = sigma_code_si;
                         end
+
+                        % Per-tower slant-iono EKF state (prototype): the state supplies the
+                        % model ionosphere (pair with model.correction='none' so it is not
+                        % double-counted). It enters each signal through its 1/f^2 dispersion
+                        % (freqScale = (f_L1/f_sig)^2), which is what makes it observable from L1/L2.
+                        ti_io = twr_list(pi);
+                        if isfield(stateMap,'ionoIdx') && ti_io <= numel(stateMap.ionoIdx) && ...
+                                stateMap.ionoIdx(ti_io) > 0
+                            h_new(mi) = h_new(mi) + freqScale * x_est(stateMap.ionoIdx(ti_io));
+                        end
                     end
                 end
 

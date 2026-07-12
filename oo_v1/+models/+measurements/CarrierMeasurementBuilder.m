@@ -232,6 +232,14 @@ classdef CarrierMeasurementBuilder
                         models.measurements.MeasurementModelUtils.zwdMappingKind(cfg));
                     h_phi(rowOut) = h_phi(rowOut) + mf_phi * x_est(stateMap.zwdIdx(ti));
                 end
+                % Slant-iono EKF state (prototype): carrier ionosphere is a phase ADVANCE
+                % (negative), so the partial is the NEGATIVE 1/f^2 dispersion.
+                if isfield(stateMap,'ionoIdx') && ti <= numel(stateMap.ionoIdx) && ...
+                        stateMap.ionoIdx(ti) > 0
+                    fL1c  = revgnss.SignalDefinition.get('L1').frequency_Hz;
+                    fSigc = revgnss.Constants.SPEED_OF_LIGHT_MPS / lambda;
+                    h_phi(rowOut) = h_phi(rowOut) - (fL1c / fSigc)^2 * x_est(stateMap.ionoIdx(ti));
+                end
 
                 % Stage 71 NOTE: towerClkSigma is NOT added to carrier R.
                 % Float ambiguity B_est absorbs constant clock bias per arc; inflating
@@ -295,6 +303,13 @@ classdef CarrierMeasurementBuilder
                     mf = models.atmosphere.MappingFunctions.troposphere(elv, ...
                         models.measurements.MeasurementModelUtils.zwdMappingKind(cfg));
                     H_phi(rowOut, stateMap.zwdIdx(ti)) = mf;
+                end
+                % Slant-iono column: -(f_L1/f)^2 (carrier ionosphere is a phase advance)
+                if isfield(stateMap,'ionoIdx') && ...
+                        ti <= numel(stateMap.ionoIdx) && stateMap.ionoIdx(ti) > 0
+                    fL1c  = revgnss.SignalDefinition.get('L1').frequency_Hz;
+                    fSigc = revgnss.Constants.SPEED_OF_LIGHT_MPS / lambda;
+                    H_phi(rowOut, stateMap.ionoIdx(ti)) = -(fL1c / fSigc)^2;
                 end
 
                 % ---- Known-ambiguity validation (ATTITUDE VALIDATION ONLY — not operational) ----

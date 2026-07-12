@@ -597,6 +597,16 @@ cfg.estimation.tropoZwd.tau_s          = 3600;
 cfg.estimation.tropoZwd.sigma_ss_m     = 0.05;
 cfg.estimation.tropoZwd.initialSigma_m = 0.10;
 
+% ionosphereMode: 'none' | 'perTowerSlant' (prototype). 'perTowerSlant' adds one EKF
+% state per tower = the L1 slant ionospheric delay [m], observable from the L1/L2
+% dispersion. It removes the ionosphere while keeping all dual-frequency rows (no
+% ionosphere-free noise/row penalty). Pair with errors.ionosphere.model.correction='none'
+% so the state supplies the model iono (not double-counted). Default 'none' => no states.
+cfg.estimation.ionosphereMode = 'none';
+cfg.estimation.slantIono.tau_s          = 900;    % slant-iono GM correlation time [s]
+cfg.estimation.slantIono.sigma_ss_m     = 1.0;    % steady-state slant-iono sigma [m]
+cfg.estimation.slantIono.initialSigma_m = 5.0;    % initial 1-sigma [m]
+
 % --- Antenna PCV model (Step 4) ---------------------------------
 % pcvModel: 'none' | 'toy' | 'table'
 % Default is 'none' (no PCV applied). 'toy' is synthetic-only (label explicitly).

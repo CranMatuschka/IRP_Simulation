@@ -433,7 +433,11 @@ classdef EnvironmentModel < handle
                         if isfield(ic,'model') && isfield(ic.model,'correction')
                             correction = ic.model.correction;
                         end
-                        if strcmp(correction, 'klobuchar')
+                        if strcmp(correction, 'none')
+                            % No deterministic model iono: an external corrector (e.g. the
+                            % perTowerSlant EKF ionosphere state) supplies it instead.
+                            delay = 0;
+                        elseif strcmp(correction, 'klobuchar')
                             lonR = 0;
                             if numel(obj.weatherState) >= ti; lonR = obj.weatherState(ti).lonRad; end
                             ltS   = mod(obj.tNow_s + lonR * (43200/pi), 86400);  % local time [s]
