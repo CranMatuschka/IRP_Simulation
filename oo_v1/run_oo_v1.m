@@ -31,13 +31,16 @@ if useRealisticAtmosphere
     cfg = realisticAtmosphereConfig(cfg);
 end
 
-% Ionosphere handling under the realistic atmosphere:
+% Ionosphere handling under the realistic atmosphere (default 'ekfState'):
 %   'single'         raw dual-frequency L1+L2 (ionosphere absorbed into the estimate)
 %   'ionosphereFree' L1/L2 ionosphere-free combination (removes 1st-order iono; noise x2.98,
 %                    half the code rows -- best only when the geometry is measurement-rich)
 %   'ekfState'       per-tower slant-ionosphere EKF states (removes iono, keeps all rows;
-%                    the physically-right choice when there are enough measurements)
-ionosphereHandling = 'single';
+%                    the physically-right choice, and the most efficient use of the geometry).
+% NOTE: iono ELIMINATION is per dual-frequency link (tower count irrelevant); POSITION
+% accuracy is geometry-limited. With the default 5 towers the GEO->ground geometry is thin,
+% so the recovered accuracy is modest; it improves markedly with more well-distributed towers.
+ionosphereHandling = 'ekfState';
 if useRealisticAtmosphere
     switch ionosphereHandling
         case 'ionosphereFree'
