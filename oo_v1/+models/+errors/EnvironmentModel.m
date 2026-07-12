@@ -26,6 +26,8 @@ classdef EnvironmentModel < handle
         weatherState struct
         % Global scalar scintillation amplitude (GM state; unit amplitude at init)
         scintAmplitude (1,1) double = 1.0
+        % Absolute simulation time [s] (for the diurnal ionosphere profile). Updated by step().
+        tNow_s (1,1) double = 0
         % RandStream for all environment stochastic steps (legacy shared, OFF path)
         envRng
         % Seed-independence refactor: identity-keyed streams (ON path)
@@ -84,11 +86,19 @@ classdef EnvironmentModel < handle
         end
 
         % ----------------------------------------------------------------
-        function step(obj, dt)
+        function step(obj, dt, t_s)
             % step  Advance all stochastic atmosphere states by dt seconds.
             %
-            % Called once per epoch (before getTropDelay / getIonoDelay).
-            % Steps ALL towers in one call.
+            % Called once per epoch (before getTropDelay / getIonoDelay). Steps ALL
+            % towers in one call. The optional t_s sets the absolute simulation time
+            % used by the diurnal ionosphere profile; when omitted, time accumulates
+            % from dt (so direct step(dt) callers still advance the clock).
+
+            if nargin >= 3 && ~isempty(t_s)
+                obj.tNow_s = t_s;
+            else
+                obj.tNow_s = obj.tNow_s + max(dt, 0);
+            end
 
             if dt <= 0; return; end
 
@@ -335,18 +345,32 @@ classdef EnvironmentModel < handle
                     end
 
                 case 'tecGaussMarkov'
-                    % Base vertical L1 delay + stochastic TEC residual
-                    ti = max(1, min(towerIdx, obj.nTowers));
+                    % Base/diurnal vertical L1 delay + stochastic TEC residual, scaled by the
+                    % uplink column fraction the asset actually sees and mapped to slant by the
+                    % (thin-shell) obliquity. K_L1 = 40.308e16/f_L1^2 ~ 0.162 m per TECU at L1.
+                    ti   = max(1, min(towerIdx, obj.nTowers));
+                    K_L1 = 40.308e16 / f_L1_Hz^2;   % m per (1e16 el/m^2) at the L1 frequency
                     if strcmp(side,'truth')
-                        baseVdelL1 = 0;
-                        if isfield(ic,'truth') && isfield(ic.truth,'verticalDelayL1_m')
-                            baseVdelL1 = ic.truth.verticalDelayL1_m;
-                        elseif isfield(ic,'truth') && isfield(ic.truth,'zenithDelay_m')
-                            baseVdelL1 = ic.truth.zenithDelay_m;
+                        % Vertical L1 delay mean: a diurnal VTEC profile (optional) or a constant.
+                        useDiurnal = isfield(ic,'truth') && isfield(ic.truth,'diurnal') && ...
+                            isfield(ic.truth.diurnal,'enable') && ic.truth.diurnal.enable;
+                        if useDiurnal
+                            lonR = 0;
+                            if numel(obj.weatherState) >= ti; lonR = obj.weatherState(ti).lonRad; end
+                            vMean = models.errors.EnvironmentModel.diurnalVTEC_(ic, obj.tNow_s, lonR) * K_L1;
+                        else
+                            vMean = 0;
+                            if isfield(ic,'truth') && isfield(ic.truth,'verticalDelayL1_m')
+                                vMean = ic.truth.verticalDelayL1_m;
+                            elseif isfield(ic,'truth') && isfield(ic.truth,'zenithDelay_m')
+                                vMean = ic.truth.zenithDelay_m;
+                            end
                         end
-                        residual = obj.ionoState(ti).tecResidualTruth_m;
-                        slantL1  = (baseVdelL1 + residual) * mapping;
-                        delay    = slantL1 * freqScale;
+                        % Topside/uplink column fraction: a GEO asset sees ~the full column
+                        % (f_seen->1), a LEO within/above the F2 peak only a topside fraction.
+                        fSeen    = models.errors.EnvironmentModel.ionoTopsideFraction_(ic);
+                        vertical = fSeen * (vMean + obj.ionoState(ti).tecResidualTruth_m);
+                        delay    = vertical * mapping * freqScale;
                     else % 'model'
                         baseVdelL1 = 0;
                         if isfield(ic,'model') && isfield(ic.model,'verticalDelayL1_m')
@@ -432,6 +456,43 @@ classdef EnvironmentModel < handle
             end
         end
 
+        function fSeen = ionoTopsideFraction_(ic)
+            % ionoTopsideFraction_  Fraction of the vertical TEC column the space asset sees.
+            %   GEO (beyond the plasmapause) -> ~1; a LEO within/above the F2 peak sees only
+            %   the topside above it excluded, i.e. a reduced fraction. Either a resolved
+            %   scalar ic.topsideFraction, or the exponential-topside parameterisation
+            %   f_seen = clamp(B + T*(1 - exp(-(h_sat - h_peak)/H_top)), 0, 1) [ILLUSTRATIVE].
+            fSeen = 1.0;
+            if isfield(ic,'topsideFraction'); fSeen = ic.topsideFraction; end
+            if isfield(ic,'topside') && isfield(ic.topside,'enable') && ic.topside.enable
+                tp = ic.topside;
+                B = 0.30; T = 0.55; hPeak = 350; Htop = 100; hSat = 550;
+                if isfield(tp,'B');        B     = tp.B;        end
+                if isfield(tp,'T');        T     = tp.T;        end
+                if isfield(tp,'hPeak_km'); hPeak = tp.hPeak_km; end
+                if isfield(tp,'Htop_km');  Htop  = tp.Htop_km;  end
+                if isfield(tp,'hSat_km');  hSat  = tp.hSat_km;  end
+                fSeen = B + T * (1 - exp(-(hSat - hPeak) / Htop));
+                fSeen = max(0, min(1, fSeen));
+            end
+        end
+
+        function vtec = diurnalVTEC_(ic, tNow_s, lonRad)
+            % diurnalVTEC_  Smooth diurnal VTEC [TECU]: a night floor plus a daytime bump
+            %   peaking at ~14:00 local solar time (the Klobuchar phase).
+            %     VTEC(t) = VTEC_n + (VTEC_d - VTEC_n)*max(0, cos(2*pi*(LT - peakLT)/24))
+            %   LT is local solar time [h] from the absolute time and tower longitude.
+            vDay = 30; vNight = 5; peakLT = 14;
+            if isfield(ic,'truth') && isfield(ic.truth,'diurnal')
+                d = ic.truth.diurnal;
+                if isfield(d,'vtecDay_TECU');    vDay   = d.vtecDay_TECU;    end
+                if isfield(d,'vtecNight_TECU');  vNight = d.vtecNight_TECU;  end
+                if isfield(d,'peakLocalTime_h'); peakLT = d.peakLocalTime_h; end
+            end
+            LT   = mod(tNow_s/3600 + lonRad * 12/pi, 24);   % local solar time [h]
+            vtec = vNight + (vDay - vNight) * max(0, cos(2*pi*(LT - peakLT)/24));
+        end
+
     end
 
     methods (Access = private)
@@ -469,7 +530,7 @@ classdef EnvironmentModel < handle
             nT = obj.nTowers;
             if nT == 0
                 obj.weatherState = struct('ZHD_m',{},'ZWD_m',{},'pressure_hPa',{}, ...
-                    'temperature_K',{},'latRad',{},'heightKm',{});
+                    'temperature_K',{},'latRad',{},'lonRad',{},'heightKm',{});
                 return;
             end
 
@@ -485,15 +546,17 @@ classdef EnvironmentModel < handle
             Tmax = 320.0;   if isfield(wc,'maxTemperature_K');        Tmax = wc.maxTemperature_K;        end
 
             proto = struct('ZHD_m', 0, 'ZWD_m', 0, 'pressure_hPa', P0, 'temperature_K', T0, ...
-                'latRad', 0, 'heightKm', 0);
+                'latRad', 0, 'lonRad', 0, 'heightKm', 0);
             obj.weatherState = repmat(proto, nT, 1);
 
             for k = 1:nT
                 alt_m   = 0;
                 lat_rad = 0;
+                lon_rad = 0;
                 if isfield(obj.cfg,'towers') && numel(obj.cfg.towers) >= k
                     if isfield(obj.cfg.towers(k),'alt_m');   alt_m   = obj.cfg.towers(k).alt_m;   end
                     if isfield(obj.cfg.towers(k),'lat_rad'); lat_rad = obj.cfg.towers(k).lat_rad; end
+                    if isfield(obj.cfg.towers(k),'lon_rad'); lon_rad = obj.cfg.towers(k).lon_rad; end
                 end
 
                 % Saastamoinen/Davis standard-atmosphere validity guard.
@@ -544,6 +607,7 @@ classdef EnvironmentModel < handle
                 obj.weatherState(k).pressure_hPa  = P_k;
                 obj.weatherState(k).temperature_K = T_k;
                 obj.weatherState(k).latRad        = lat_rad;
+                obj.weatherState(k).lonRad        = lon_rad;
                 obj.weatherState(k).heightKm      = h_km;
             end
         end

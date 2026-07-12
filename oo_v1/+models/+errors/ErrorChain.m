@@ -190,8 +190,9 @@ classdef ErrorChain < handle
             % Epoch index for identity-keyed white-noise substreams (ON path).
             obj.epochIdx_ = int64(round(t_s / obj.dtCache_s));
 
-            % Step environment once per epoch (ALL towers)
-            obj.envModel.step(dt);
+            % Step environment once per epoch (ALL towers). Pass absolute time so the
+            % diurnal ionosphere profile (localWeatherGM/tecGaussMarkov paths) is anchored.
+            obj.envModel.step(dt, t_s);
 
             % L1 frequency for scintillation and iono scaling reference
             f_L1 = revgnss.SignalDefinition.get('L1').frequency_Hz;
