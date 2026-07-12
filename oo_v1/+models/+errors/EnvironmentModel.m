@@ -432,7 +432,6 @@ classdef EnvironmentModel < handle
             P0   = 1013.25; if isfield(wc,'defaultPressure_hPa');    P0   = wc.defaultPressure_hPa;    end
             T0   = 293.15;  if isfield(wc,'defaultTemperature_K');   T0   = wc.defaultTemperature_K;   end
             RH0  = 0.50;    if isfield(wc,'defaultRelativeHumidity'); RH0  = wc.defaultRelativeHumidity; end
-            hSc  = 8400;    if isfield(wc,'heightScale_m');           hSc  = wc.heightScale_m;           end
             lr   = 0.0065;  if isfield(wc,'lapseRate_K_per_m');       lr   = wc.lapseRate_K_per_m;       end
             Tmin = 220.0;   if isfield(wc,'minTemperature_K');        Tmin = wc.minTemperature_K;        end
             Tmax = 320.0;   if isfield(wc,'maxTemperature_K');        Tmax = wc.maxTemperature_K;        end
@@ -441,14 +440,14 @@ classdef EnvironmentModel < handle
             obj.weatherState = repmat(proto, nT, 1);
 
             for k = 1:nT
-                alt_m = 0;
-                if isfield(obj.cfg,'towers') && numel(obj.cfg.towers) >= k && ...
-                        isfield(obj.cfg.towers(k),'alt_m')
-                    alt_m = obj.cfg.towers(k).alt_m;
+                alt_m   = 0;
+                lat_rad = 0;
+                if isfield(obj.cfg,'towers') && numel(obj.cfg.towers) >= k
+                    if isfield(obj.cfg.towers(k),'alt_m');   alt_m   = obj.cfg.towers(k).alt_m;   end
+                    if isfield(obj.cfg.towers(k),'lat_rad'); lat_rad = obj.cfg.towers(k).lat_rad; end
                 end
 
-                % CHANGED: v3→v4 — Issue 14
-                % Saastamoinen (1972) standard atmosphere validity guards.
+                % Saastamoinen/Davis standard-atmosphere validity guard.
                 % P(h) = 1013.25*(1 - 2.2557e-5*h)^5.2559  valid for h in [-500, 11000] m.
                 if alt_m < -500 || alt_m > 11000
                     warning('revgnss:saastHeight', ...
@@ -457,7 +456,10 @@ classdef EnvironmentModel < handle
                     alt_m = max(-500, min(alt_m, 11000));
                 end
 
-                P_k  = P0 * exp(-alt_m / hSc);
+                % Surface pressure from the ICAO standard atmosphere (hPa). This is the
+                % physically-standard pressure profile the Saastamoinen model assumes;
+                % it reduces to P0 at sea level.
+                P_k  = P0 * (1 - 2.2557e-5 * alt_m)^5.2559;
                 T_k  = T0 - lr * alt_m;
 
                 % Guard temperature: physically > 0; 150 K as conservative floor
@@ -472,7 +474,16 @@ classdef EnvironmentModel < handle
                 % Guard relative humidity: [0, 1]
                 RH_k = max(0, min(RH0, 1));
 
-                ZHD_k = 2.3 * P_k / P0;
+                % Zenith HYDROSTATIC delay from the Saastamoinen model in the Davis et al.
+                % (1985) form: ZHD = 0.0022768*P / (1 - 0.00266*cos(2*phi) - 0.00028*h_km),
+                % P in hPa, phi geodetic latitude, h in km. Constant 0.0022768 +/- 5e-7 m/hPa;
+                % ~2.307 m at sea level, mid-latitude, and predictable to ~mm from surface
+                % pressure. (Davis, Herring, Shapiro, Rogers & Elgered 1985, Radio Science
+                % 20(6):1593.) The zenith WET delay remains a simple humidity-scaled mean here;
+                % its stochastic realisation is generated per-epoch in step() (localWeatherGM).
+                h_km  = alt_m / 1000;
+                fLat  = 1 - 0.00266 * cos(2 * lat_rad) - 0.00028 * h_km;
+                ZHD_k = 0.0022768 * P_k / fLat;
                 ZWD_k = 0.15 * RH_k * exp(-alt_m / 2000);
 
                 % Guard output: assert finite
