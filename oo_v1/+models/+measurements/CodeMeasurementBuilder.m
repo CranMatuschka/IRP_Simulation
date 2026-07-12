@@ -462,6 +462,20 @@ classdef CodeMeasurementBuilder
                 h_if    = alpha_if * h(idx1)         + beta_if * h(idx2);
                 R_if    = alpha_if^2 * R_diag(idx1)  + beta_if^2 * R_diag(idx2);
 
+                % Postfit consistency: computePostfitResiduals_ rebuilds h from
+                % errStruct.modelTotal_m, so store the IF-COMBINED totals (first-order iono
+                % cancelled: alpha*I + beta*I*(f1/f2)^2 = 0) rather than the L1-only values.
+                % Otherwise the postfit reintroduces the single-frequency model ionosphere
+                % and the reported postfit RMS is spuriously inflated (> prefit).
+                modelTotal_if = [];
+                truthTotal_if = [];
+                if isfield(errStruct,'modelTotal_m') && numel(errStruct.modelTotal_m) >= 2*M_pairs_if
+                    modelTotal_if = alpha_if * errStruct.modelTotal_m(idx1) + beta_if * errStruct.modelTotal_m(idx2);
+                end
+                if isfield(errStruct,'truthTotal_m') && numel(errStruct.truthTotal_m) >= 2*M_pairs_if
+                    truthTotal_if = alpha_if * errStruct.truthTotal_m(idx1) + beta_if * errStruct.truthTotal_m(idx2);
+                end
+
                 z = z_if;
                 h = h_if;
                 R_diag   = R_if;
@@ -487,6 +501,9 @@ classdef CodeMeasurementBuilder
                 if isfield(errStruct,'signalName_perMeas') && numel(errStruct.signalName_perMeas) >= M_pairs_if
                     errStruct.signalName_perMeas = repmat({'IF'}, M_pairs_if, 1);
                 end
+                % Override the idx1-compressed totals with the IF-combined values (above).
+                if ~isempty(modelTotal_if); errStruct.modelTotal_m = modelTotal_if; end
+                if ~isempty(truthTotal_if); errStruct.truthTotal_m = truthTotal_if; end
                 errStruct.towerIdx_perMeas   = twr_list;
                 errStruct.antennaIdx_perMeas = ant_list;
                 errStruct.nPseudorange       = M;
