@@ -171,8 +171,15 @@ classdef DopplerMeasurementBuilder
                     hd(mi) = rhoDot_est + bdot_rx_est - twr_drift_model(mi);
                 end
 
-                Hd(mi, stateMap.v_idx)       = u_e';
-                Hd(mi, stateMap.bdot_rx_idx) = 1;
+                % Jacobian columns: partial wrt velocity and receiver clock-drift only.
+                % The partial d(rhoDot)/dr (the LOS-rotation term plus the position-
+                % dependent tower Earth-rotation term inside u_e'*(omega x delta)) is
+                % intentionally OMITTED: at GEO the position/velocity uncertainty is small
+                % enough that it is negligible, so H is a documented approximation of the
+                % range-rate model h above. Add a d(rhoDot)/dr column here for a non-GEO
+                % regime where the tower-rotation partial matters. (WP-9)
+                Hd(mi, stateMap.v_idx)       = u_e';   % d(rhoDot)/dv
+                Hd(mi, stateMap.bdot_rx_idx) = 1;      % d(rhoDot)/d(bdot_rx)
             end
 
             % Stage 84: Doppler R diagonal policy — product drift variance counted exactly once.

@@ -126,6 +126,14 @@ function activePhysicsConfig(fid, cfg, summary, plotPaths, stem, figDir) %#ok<IN
     fprintf(fid, 'No LAMBDA/MLAMBDA and no wide-lane/narrow-lane; carrier ionosphere-free integer fixing is unsupported.\\\\\n');
     fprintf(fid, 'No calibrated hardware bias/DCB/phase-bias products; no IERS/EOP-grade reference-frame processing.\\\\\n');
     fprintf(fid, 'Ionosphere-free covariance assumes uncorrelated L1/L2 noise.\\\\\n');
+    % WP-7: relativistic clock-rate claim boundary. Applied identically to truth and
+    % estimator (both disabled), so it creates no filter inconsistency; it is a
+    % modelling/claim-scope omission a picosecond-class GEO result must declare.
+    fprintf(fid, ['Relativistic clock-rate offset (gravitational + special-relativistic, ' ...
+        '$\\sim\\!5.4\\times10^{-10}$ fractional, $\\sim\\!47~\\mu$s/day for a GEO clock versus ground) is ' ...
+        'not modelled; it is applied identically to truth and estimator (both disabled), so it introduces no ' ...
+        'filter inconsistency, but picosecond-class timing statements are scoped to the estimated/differential ' ...
+        'clock states, which absorb a constant frequency offset.\\\\\n']);
     fprintf(fid, '\\bottomrule\n\\end{tabular}\n');
 
     % ---- Provenance (dynamic branch + commit) -------------------------------
