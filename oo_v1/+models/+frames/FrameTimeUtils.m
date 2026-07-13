@@ -23,7 +23,7 @@ classdef FrameTimeUtils
 
         function omega = earthRotationRate_radps()
             % earthRotationRate_radps  WGS-84 Earth rotation rate [rad/s].
-            omega = 7.2921150e-5;
+            omega = revgnss.Constants.EARTH_OMEGA_RADPS;   % single source (WP-12a)
         end
 
         function theta = earthRotationAngle(t_s)
@@ -107,7 +107,7 @@ classdef FrameTimeUtils
             %   This is a first-order approximation; full iterative correction
             %   requires the light-time solution.
             OMEGA = models.frames.FrameTimeUtils.earthRotationRate_radps();
-            C     = 299792458;                     % speed of light [m/s]
+            C     = revgnss.Constants.SPEED_OF_LIGHT_MPS;   % speed of light [m/s] (WP-12a)
             rx = rx_ecef_m(:);
             tx = tx_ecef_m(:);
             omega_cross_tx = OMEGA * [-tx(2); tx(1); 0];  % omega_E × r_tx
