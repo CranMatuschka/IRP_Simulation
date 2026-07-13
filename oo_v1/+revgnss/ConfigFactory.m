@@ -1364,6 +1364,12 @@ classdef ConfigFactory
             gs.templateSource = getf_(getf_(cfg,'clock',struct()), 'templateSource', ...
                 getf_(gs,'templateSource','legacy'));
             cfg.clockScaling.templateSource = gs.templateSource;
+            % WP-5: optional per-draw clock-seed offset for the Monte-Carlo consistency
+            % harness, so tower/receiver CLOCK truth realisations vary across seeds.
+            % Default (field absent) resolves to 0 -> seeds unchanged, byte-identical.
+            % Spacing (harness uses j*1000) >> #clocks keeps the distinctness assert below.
+            mcOff_ = 0;
+            try; mcOff_ = round(cfg.simulation.mcSeedOffset); catch; end
             for k = 1:nT_req
                 if isfield(cfg.towers(k),'clockType') && ...
                         isfield(cfg.towers(k),'clockFactors')
@@ -1372,7 +1378,7 @@ classdef ConfigFactory
                         gs.towerNoiseFactor;
                     prev = cfg.towers(k).clock;
                     clk  = revgnss.ConfigFactory.makeClockConfig( ...
-                        cfg.towers(k).clockType, 200+k, ...
+                        cfg.towers(k).clockType, 200+k+mcOff_, ...
                         cfg.towers(k).clockFactors, gs);
                     clk.name          = prev.name;
                     clk.deterministic = prev.deterministic;
@@ -1387,7 +1393,7 @@ classdef ConfigFactory
                 cfg.asset.clockFactors.roleNoiseFactor = gs.receiverNoiseFactor;
                 prev = cfg.asset.clock;
                 clk  = revgnss.ConfigFactory.makeClockConfig( ...
-                    cfg.asset.clockType, 100, cfg.asset.clockFactors, gs);
+                    cfg.asset.clockType, 100+mcOff_, cfg.asset.clockFactors, gs);
                 clk.name          = prev.name;
                 clk.deterministic = prev.deterministic;
                 clk.bias_s        = prev.bias_s;
