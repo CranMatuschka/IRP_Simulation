@@ -470,7 +470,70 @@ classdef CodeMeasurementBuilder
 
                 z_if    = alpha_if * z(idx1)         + beta_if * z(idx2);
                 h_if    = alpha_if * h(idx1)         + beta_if * h(idx2);
-                R_if    = alpha_if^2 * R_diag(idx1)  + beta_if^2 * R_diag(idx2);
+
+                % ----- Correlation-aware IF measurement variance (R_if) -----
+                % The naive R_if = alpha^2*R(L1) + beta^2*R(L2) charges EVERY error
+                % source at (alpha^2+beta^2) ~= 8.9x. That gain is correct ONLY for
+                % sources that are statistically INDEPENDENT between L1 and L2. Two
+                % classes of source are mishandled by that formula:
+                %   * Non-dispersive sources (troposphere, tower-clock) are IDENTICAL on
+                %     L1 and L2 (100% correlated), so they pass the IF at unit gain
+                %     (alpha+beta = 1) and their IF variance is (alpha+beta)^2*sigma^2 =
+                %     sigma^2, NOT (alpha^2+beta^2)*sigma^2.
+                %   * The first-order ionosphere is DETERMINISTICALLY CANCELLED by
+                %     construction (alpha/f1^2 + beta/f2^2 = 0). Its stochastic-TEC
+                %     uncertainty is the SAME physical TEC scaled by 1/f^2, so it cancels
+                %     too. It contributes EXACTLY ZERO to the IF innovation and must
+                %     contribute zero to R_if.
+                % We therefore rebuild R_if per source with source-appropriate IF gains:
+                %   code / multipath / scintillation / signal-dependent HW delay
+                %       -> INDEPENDENT per signal: alpha^2*sigmaL1^2 + beta^2*sigmaL2^2
+                %   troposphere, tower-clock (non-dispersive, equal on L1/L2)
+                %       -> CORRELATED unit gain: (alpha+beta)^2*sigma^2 = sigma^2
+                %   first-order ionosphere (dispersive 1/f^2, same physical TEC)
+                %       -> CANCELS: 0
+                %   higher-order ionosphere (dispersive ~1/f^3, same physical TEC)
+                %       -> SURVIVES with gain (alpha + beta*(f1/f2)^3) rel. to its L1 value
+                %
+                % Implementation: the four independent-per-signal sources all share the
+                % SAME alpha^2/beta^2 gain, so we keep them bundled. We strip only the
+                % correlated + cancelled variance (trop + iono-1st + iono-HO + tower-clock)
+                % out of R_diag -- these sigmas are tiled EQUAL on the L1 and L2 rows, so
+                % the stripped amount is identical for idx1 and idx2 -- apply alpha^2/beta^2
+                % to the independent remainder, then re-add the correlated and higher-order
+                % terms with their correct gains. Keeping the independent remainder inside
+                % R_diag preserves the per-signal code/scintillation frequency scaling
+                % byte-identically (no re-derivation of those sigmas here).
+                smSig_    = errStruct.bySource.sigma_m;
+                sigTrop_  = zeros(M_pairs_if,1);
+                sigIono1_ = zeros(M_pairs_if,1);
+                sigIonoHO_= zeros(M_pairs_if,1);
+                if isfield(smSig_,'trop')   && numel(smSig_.trop)   >= M_pairs_if; sigTrop_   = smSig_.trop(idx1);   end
+                if isfield(smSig_,'iono')   && numel(smSig_.iono)   >= M_pairs_if; sigIono1_  = smSig_.iono(idx1);   end
+                if isfield(smSig_,'ionoHO') && numel(smSig_.ionoHO) >= M_pairs_if; sigIonoHO_ = smSig_.ionoHO(idx1); end
+                sigTwr_if_ = zeros(M_pairs_if,1);
+                if numel(towerClkSigma) >= M_pairs_if; sigTwr_if_ = towerClkSigma(1:M_pairs_if); end
+
+                % Correlated + cancelled variance baked into BOTH the L1 and L2 rows of
+                % R_diag (trop/iono/iono-HO sigmas are tiled equal on L1/L2; tower-clock
+                % sigma is common to the pair). Identical for idx1 and idx2.
+                corrBaked_ = sigTrop_.^2 + sigIono1_.^2 + sigIonoHO_.^2 + sigTwr_if_.^2;
+
+                % Independent-per-signal remainder still carries the native per-signal
+                % L1/L2 sigmas (code + multipath + scintillation + signal-dependent HW
+                % delay). Non-negative by construction; max() guards floating-point only.
+                Rindep_L1_ = max(R_diag(idx1) - corrBaked_, 0);
+                Rindep_L2_ = max(R_diag(idx2) - corrBaked_, 0);
+
+                % Higher-order ionosphere IF survival gain (dispersive ~1/f^3): HO on L2 is
+                % HO_L1*(f1/f2)^3, so IF passes HO_L1 at gain (alpha + beta*(f1/f2)^3).
+                gIonoHO_ = alpha_if + beta_if * (f_L1 / f_L2_if)^3;
+
+                R_if = alpha_if^2 * Rindep_L1_ + beta_if^2 * Rindep_L2_ ... % independent per signal
+                     + sigTrop_.^2 ...                                      % troposphere: unit gain
+                     + 0 * sigIono1_.^2 ...                                 % first-order iono: cancels -> 0
+                     + gIonoHO_^2 * sigIonoHO_.^2 ...                       % higher-order iono: survives
+                     + sigTwr_if_.^2;                                       % tower-clock: unit gain
 
                 % Postfit consistency: computePostfitResiduals_ rebuilds h from
                 % errStruct.modelTotal_m, so store the IF-COMBINED totals (first-order iono
