@@ -356,6 +356,12 @@ classdef ClockModel < handle
             % leaves the actual-error/filter-sigma ratio unchanged, so it does NOT
             % restore drift +/-3sigma consistency (that is an R / observability issue,
             % not a process-noise magnitude issue). Kept as an opt-in lever.
+            % ROOT CAUSE (WP-6): for the CESIUM1 receiver the drift wander (~1e-6 m/s per
+            % step) is 3-4 decades below the Doppler resolution (sigma ~0.01 m/s), so
+            % bdot_rx is measurement-limited and its +/-3sigma envelope reflects Q, not
+            % information -- a FUNDAMENTAL observability limit, not a Q bug. The report
+            % surfaces the empirical drift +/-3sigma coverage (Plotter Fig 06,
+            % revgnss.Plotter.driftCoverage) so the limit is measured, not just asserted.
             %
             % WPM (h2) and FPM (h1) are excluded from Q: they affect
             % timescales << dt and are represented in the truth model only.
