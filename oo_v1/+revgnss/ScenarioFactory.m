@@ -172,6 +172,21 @@ classdef ScenarioFactory
                 end
             end
 
+            % Slant-ionosphere initial covariance (one per tower, prototype)
+            if ekf.estimateIono && isfield(sm,'ionoIdx') && ~isempty(sm.ionoIdx)
+                sigma0_iono = 5.0;   % [m] generous prior on the L1 slant iono
+                if isfield(cfg,'estimation') && isfield(cfg.estimation,'slantIono') && ...
+                        isfield(cfg.estimation.slantIono,'initialSigma_m')
+                    sigma0_iono = cfg.estimation.slantIono.initialSigma_m;
+                end
+                for k = 1:numel(sm.ionoIdx)
+                    idx_k = sm.ionoIdx(k);
+                    if idx_k > 0
+                        P0(idx_k, idx_k) = sigma0_iono^2;
+                    end
+                end
+            end
+
             % TASK 2: Tx-code-bias initial covariance (one per tower)
             if ekf.estimateTxCodeBias && isfield(sm,'txCodeBiasIdx') && ~isempty(sm.txCodeBiasIdx)
                 sigma0_tx = 10.0;

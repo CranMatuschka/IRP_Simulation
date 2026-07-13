@@ -40,13 +40,17 @@ classdef ErrorChain < handle
 
     properties
         cfg         (1,1) struct   % FULL simulation config (not just errors sub-struct)
-        rngStream                  % MATLAB random number stream
+        rngStream                  % MATLAB random number stream (legacy shared stream, OFF path)
         seed        (1,1) double = 0
         envModel                   % models.errors.EnvironmentModel (always created)
-        envRng                     % RandStream for elevation-dependent code noise
         lastT_s     (1,1) double = -1   % last t_s for dt computation
-        mpRng                      % WP5: dedicated RandStream for coloured multipath
+        mpRng                      % WP5: dedicated RandStream for coloured multipath (legacy, OFF path)
         mpState                    % WP5: containers.Map link-key -> GM state [m] (persistent)
+        % Seed-independence refactor: identity-keyed streams (ON path, default)
+        useIndependentStreams (1,1) logical = false
+        registry                   % models.noise.RngRegistry (built only when ON)
+        dtCache_s   (1,1) double = 1    % dt_s cached for epoch-index derivation
+        epochIdx_   (1,1) int64  = 0    % current epoch index (refreshed each compute())
     end
 
     methods
@@ -75,20 +79,31 @@ classdef ErrorChain < handle
             if nargin >= 2; obj.seed = seed; end
             obj.rngStream = RandStream('mt19937ar','Seed', obj.seed);
 
+            % --- Seed-independence refactor: identity-keyed stream registry ----
+            % ON (default): every noise source draws from its own substream rooted
+            % at obj.seed (= cfg.simulation.seed). OFF: the legacy shared streams
+            % (rngStream/mpRng and EnvironmentModel.envRng) are used verbatim.
+            eng = 'threefry';
+            if isfield(cfg,'rng') && isfield(cfg.rng,'independentStreams')
+                is_ = cfg.rng.independentStreams;
+                if isfield(is_,'enable'); obj.useIndependentStreams = logical(is_.enable); end
+                if isfield(is_,'engine') && ~isempty(is_.engine); eng = is_.engine; end
+            end
+            if obj.useIndependentStreams
+                obj.registry = models.noise.RngRegistry(obj.seed, eng);
+            end
+            if isfield(cfg,'simulation') && isfield(cfg.simulation,'dt_s') && cfg.simulation.dt_s > 0
+                obj.dtCache_s = cfg.simulation.dt_s;
+            end
+
             % --- EnvironmentModel: always created --------------------------
             nT = 1;
             if isfield(cfg,'scenario') && isfield(cfg.scenario,'nTowers')
                 nT = cfg.scenario.nTowers;
             end
-            obj.envModel = models.errors.EnvironmentModel(cfg, nT);
-
-            % --- Separate RNG for elevation-based code noise ---------------
-            seed2 = 6101;
-            if isfield(cfg,'measurements') && isfield(cfg.measurements,'codeNoise') && ...
-                    isfield(cfg.measurements.codeNoise,'seed')
-                seed2 = cfg.measurements.codeNoise.seed;
-            end
-            obj.envRng = RandStream('mt19937ar', 'Seed', seed2);
+            % Pass the registry (empty when OFF) so per-tower atmosphere GM states
+            % draw from independent substreams instead of one shared envRng.
+            obj.envModel = models.errors.EnvironmentModel(cfg, nT, obj.registry);
 
             % --- WP5: coloured multipath per-link GM state + dedicated RNG -----
             mpSeed = 6301;
@@ -105,6 +120,38 @@ classdef ErrorChain < handle
         function x = drawNormal(obj, m, n)
             % drawNormal  Draw m-by-n standard-normal samples from the stream.
             x = randn(obj.rngStream, m, n);
+        end
+
+        % ----------------------------------------------------------------
+        function x = drawKeyed(obj, src, node, ant, sig, epochIdx, m, n)
+            % drawKeyed  White per-epoch draw for a single (src,node,ant,sig).
+            %   ON : identity-keyed substream via the registry (order-independent).
+            %   OFF: legacy shared stream -- byte-identical to the historical
+            %        randn(obj.rngStream, m, n) / drawNormal call it replaces.
+            if nargin < 8 || isempty(n); n = 1; end
+            if nargin < 7 || isempty(m); m = 1; end
+            if obj.useIndependentStreams
+                s = obj.registry.epochStream(src, node, ant, sig, epochIdx);
+                x = randn(s, m, n);
+            else
+                x = randn(obj.rngStream, m, n);
+            end
+        end
+
+        % ----------------------------------------------------------------
+        function x = drawKeyedPersistent(obj, src, node, ant, sig, m, n)
+            % drawKeyedPersistent  Cached per-identity draw for one-shot init
+            %   (e.g. carrier float-ambiguity truth).
+            %   ON : cached identity substream via the registry.
+            %   OFF: legacy shared stream -- byte-identical to drawNormal.
+            if nargin < 7 || isempty(n); n = 1; end
+            if nargin < 6 || isempty(m); m = 1; end
+            if obj.useIndependentStreams
+                s = obj.registry.persistentStream(src, node, ant, sig);
+                x = randn(s, m, n);
+            else
+                x = randn(obj.rngStream, m, n);
+            end
         end
 
         % ----------------------------------------------------------------
@@ -140,8 +187,12 @@ classdef ErrorChain < handle
             end
             obj.lastT_s = t_s;
 
-            % Step environment once per epoch (ALL towers)
-            obj.envModel.step(dt);
+            % Epoch index for identity-keyed white-noise substreams (ON path).
+            obj.epochIdx_ = int64(round(t_s / obj.dtCache_s));
+
+            % Step environment once per epoch (ALL towers). Pass absolute time so the
+            % diurnal ionosphere profile (localWeatherGM/tecGaussMarkov paths) is anchored.
+            obj.envModel.step(dt, t_s);
 
             % L1 frequency for scintillation and iono scaling reference
             f_L1 = revgnss.SignalDefinition.get('L1').frequency_Hz;
@@ -158,7 +209,8 @@ classdef ErrorChain < handle
             % -------- 1. Code measurement noise (sigma only, no bias) ---
             % Compute elevation-dependent sigma vector (L1 level)
             sigma_code_vec = obj.computeCodeSigmaVec_(elv, elvFloor);
-            truth_m.code  = sigma_code_vec .* randn(obj.rngStream, N, 1);
+            truth_m.code  = sigma_code_vec .* ...
+                obj.drawWhiteVec_(models.noise.RngSource.CODE, towerIdx, antennaIdx, N);
             model_m.code  = zeros(N,1);
             sigma_m.code  = sigma_code_vec;
 
@@ -228,6 +280,27 @@ classdef ErrorChain < handle
     end
 
     methods (Access = private)
+
+        % ----------------------------------------------------------------
+        function x = drawWhiteVec_(obj, src, nodes, ants, N)
+            % drawWhiteVec_  N-by-1 white draws for a compute() vector site.
+            %   ON : each node k draws from its own (src, nodes(k), ant, epoch)
+            %        substream, so the realization is invariant to how many other
+            %        sources/nodes drew or in what order.
+            %   OFF: one vector draw from the shared stream -- byte-identical to
+            %        the legacy randn(obj.rngStream, N, 1).
+            if obj.useIndependentStreams
+                x  = zeros(N,1);
+                ep = obj.epochIdx_;
+                for k = 1:N
+                    a = 0; if ~isempty(ants); a = ants(k); end
+                    s = obj.registry.epochStream(src, nodes(k), a, 0, ep);
+                    x(k) = randn(s, 1, 1);
+                end
+            else
+                x = randn(obj.rngStream, N, 1);
+            end
+        end
 
         % ----------------------------------------------------------------
         function sigma_vec = computeCodeSigmaVec_(obj, elv, elvFloor)
@@ -349,14 +422,36 @@ classdef ErrorChain < handle
                     isfield(tc,'truth') && isfield(tc.truth,'enable') && tc.truth.enable
                 % Stage 86: the matched mean delay is augmented by a seeded
                 % residual that the estimator cannot know; its variance enters R.
-                truth_m = truth_m + sigmaStoch .* randn(obj.rngStream, N, 1);
+                truth_m = truth_m + sigmaStoch .* ...
+                    obj.drawWhiteVec_(models.noise.RngSource.TROP_RESID, towerIdx, [], N);
             end
 
             sigmaBase = zeros(N,1);
             if isfield(tc,'sigma_m')
                 sigmaBase = tc.sigma_m * mappingFn(elv);
             end
-            sigma_m = sqrt(sigmaBase.^2 + sigmaStoch.^2);
+
+            % Variance double-count fix: when the per-tower ZWD is an EKF STATE
+            % (estimation.troposphereMode='perTowerZwd'), the estimator TRACKS the slow
+            % wet delay -- its steady-state variance lives in the ZWD state covariance.
+            % Charging the full sigmaWet_ss into R as well would count that same variance
+            % twice (estimate it AND pay for it). When the state is active, R therefore
+            % carries only the FAST, un-trackable wet residual (the per-step Gauss-Markov
+            % increment sigma_ss*sqrt(1-exp(-2dt/tau))); the slow part is the state's job.
+            % Golden-safe: the matched golden runs troposphereMode='none' -> full sigma,
+            % byte-identical. The TRUTH injection above is unchanged (full sigmaStoch).
+            sigmaWetR = sigmaWet;
+            zwdStateActive = false;
+            try; zwdStateActive = strcmp(obj.cfg.estimation.troposphereMode, 'perTowerZwd'); catch; end
+            if zwdStateActive
+                tauZwd = 3600; sigSs = sigmaWet; dtZwd = 1;
+                try; tauZwd = obj.cfg.estimation.tropoZwd.tau_s;      catch; end
+                try; sigSs  = obj.cfg.estimation.tropoZwd.sigma_ss_m; catch; end
+                try; dtZwd  = obj.cfg.simulation.dt_s;               catch; end
+                sigmaWetR = sigSs * sqrt(max(1 - exp(-2*dtZwd / max(tauZwd,eps)), 0));
+            end
+            sigmaStochR = sqrt((sigmaWetR * mappingFn(elv)).^2 + sigmaResidual.^2);
+            sigma_m = sqrt(sigmaBase.^2 + sigmaStochR.^2);
         end
 
         % ----------------------------------------------------------------
@@ -490,14 +585,36 @@ classdef ErrorChain < handle
                     isfield(ic,'truth') && isfield(ic.truth,'enable') && ic.truth.enable
                 % Stage 86: first-order mean is matched; this seeded residual
                 % represents surviving ionosphere/scintillation/model error.
-                truth_m = truth_m + sigmaStoch .* randn(obj.rngStream, N, 1);
+                truth_m = truth_m + sigmaStoch .* ...
+                    obj.drawWhiteVec_(models.noise.RngSource.IONO_RESID, towerIdx, [], N);
             end
 
             sigmaBase = zeros(N,1);
             if isfield(ic,'sigma_m')
                 sigmaBase = ic.sigma_m * mapping;
             end
-            sigma_m = sqrt(sigmaBase.^2 + sigmaStoch.^2);
+
+            % Variance double-count fix (twin of the ZWD case in troposphere_): when the
+            % per-tower slant iono is an EKF STATE (estimation.ionosphereMode='perTowerSlant',
+            % set by cfg.atmosphere.estimateIono), the estimator TRACKS the slow TEC -- its
+            % steady-state variance lives in the slant-iono state covariance. Charging the
+            % full sigmaVDelayL1_ss into R as well would count that same variance twice
+            % (estimate it in P AND pay for it in R). When the state is active, R carries
+            % only the fast, un-trackable per-step Gauss-Markov increment; the slow part is
+            % the state's job. Golden-safe: the matched golden runs ionosphereMode='none' ->
+            % full sigma, byte-identical. The TRUTH injection above is unchanged.
+            sigmaVDelayR = sigmaVDelay;
+            ionoStateActive = false;
+            try; ionoStateActive = strcmp(obj.cfg.estimation.ionosphereMode, 'perTowerSlant'); catch; end
+            if ionoStateActive
+                tauIono = 900; sigSsIono = sigmaVDelay; dtIono = 1;
+                try; tauIono   = obj.cfg.estimation.slantIono.tau_s;      catch; end
+                try; sigSsIono = obj.cfg.estimation.slantIono.sigma_ss_m; catch; end
+                try; dtIono    = obj.cfg.simulation.dt_s;                catch; end
+                sigmaVDelayR = sigSsIono * sqrt(max(1 - exp(-2*dtIono / max(tauIono,eps)), 0));
+            end
+            sigmaStochR = sqrt((sigmaVDelayR * mapping).^2 + sigmaResidual.^2);
+            sigma_m = sqrt(sigmaBase.^2 + sigmaStochR.^2);
         end
 
         % ----------------------------------------------------------------
@@ -529,7 +646,8 @@ classdef ErrorChain < handle
             stochHw = false;
             try; stochHw = hc.residualStochastic.enable; catch; end
             if stochHw && any(sigma_m > 0) && hc.truth.enable
-                truth_m = truth_m + sigma_m .* randn(obj.rngStream, N, 1);
+                truth_m = truth_m + sigma_m .* ...
+                    obj.drawWhiteVec_(models.noise.RngSource.HWDELAY_RESID, towerIds, [], N);
             end
         end
 
@@ -561,8 +679,14 @@ classdef ErrorChain < handle
                     sinEl   = max(sin(elv(mi)), sin(elvFloor));
                     sigmaEl = sigmaSS / sinEl^elExp;
                     if isKey(obj.mpState, key); xPrev = obj.mpState(key); else; xPrev = 0; end
+                    if obj.useIndependentStreams
+                        mpStream = obj.registry.persistentStream( ...
+                            models.noise.RngSource.MP_GM, ti, ai);
+                    else
+                        mpStream = obj.mpRng;
+                    end
                     xNew = models.noise.StochasticProcess.gaussMarkovStep( ...
-                        xPrev, dt, tau, sigmaEl, obj.mpRng);
+                        xPrev, dt, tau, sigmaEl, mpStream);
                     obj.mpState(key) = xNew;
                     truth_m(mi) = xNew;       % correlated truth-side bias -> pseudorange
                     sigma_m(mi) = sigmaEl;    % steady-state 1-sigma -> R
@@ -576,7 +700,7 @@ classdef ErrorChain < handle
                 freq = mc.truth.frequency_radps;
                 sig  = mc.truth.stochastic_sigma_m;
                 truth_m = amp * sin(freq * t_s + elv) + ...
-                          sig * randn(obj.rngStream, N, 1);
+                          sig * obj.drawWhiteVec_(models.noise.RngSource.MP_WHITE, towerIdx, antennaIdx, N);
             end
             % Multipath model is usually off; model = 0 is correct default
             if isfield(mc,'sigma_m')

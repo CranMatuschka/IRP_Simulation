@@ -489,6 +489,61 @@ classdef ConfigFactory
             cfgClock.noiseCoeffs.hMinus2  = tmpl.hMinus2  * hm2F;
         end
 
+        function cfg = applyAtmosphereProfile(cfg)
+            % applyAtmosphereProfile  Apply masterConfig's atmosphere toggles.
+            %   Opt-in: returns cfg unchanged unless cfg.atmosphere.realistic is
+            %   true. When true, overlays the physically-realistic troposphere/
+            %   ionosphere/scintillation (realisticAtmosphereConfig) and resolves the
+            %   two orthogonal ionosphere toggles into the measurement/estimation
+            %   settings:
+            %     cfg.atmosphere.ionosphereFree -> codeMode 'ionosphereFree' (IF combo)
+            %     cfg.atmosphere.estimateIono   -> ionosphereMode 'perTowerSlant' state
+            %     both false                    -> codeMode 'singleFrequency' (RAW dual-freq)
+            %   Idempotent (re-running yields the same cfg), so it is safe under
+            %   finalizeConfig being called more than once per run.
+            if ~(isfield(cfg,'atmosphere') && isfield(cfg.atmosphere,'realistic') ...
+                    && cfg.atmosphere.realistic)
+                return;   % matched synthetic atmosphere (golden / bespoke tests)
+            end
+            if isempty(which('realisticAtmosphereConfig'))
+                error('revgnss:ConfigFactory:missingAtmosphereProfile', ...
+                    ['cfg.atmosphere.realistic is true but realisticAtmosphereConfig.m ' ...
+                     'is not on the path (expected in oo_v1/config).']);
+            end
+            cfg  = realisticAtmosphereConfig(cfg);
+
+            % Resolve the ionosphere toggles. Prefer the two booleans; accept the
+            % legacy 'ionosphereHandling' string for back-compat and map it.
+            ionoFree   = false;
+            estimIono  = false;
+            if isfield(cfg.atmosphere,'ionosphereFree'); ionoFree  = logical(cfg.atmosphere.ionosphereFree); end
+            if isfield(cfg.atmosphere,'estimateIono');   estimIono = logical(cfg.atmosphere.estimateIono);   end
+            if isfield(cfg.atmosphere,'ionosphereHandling')   % legacy alias
+                switch cfg.atmosphere.ionosphereHandling
+                    case 'ionosphereFree'; ionoFree = true;
+                    case 'ekfState';       estimIono = true;
+                    case 'single'          % raw dual-frequency -> both false
+                    otherwise
+                        error('revgnss:ConfigFactory:badIonosphereHandling', ...
+                            'Unknown cfg.atmosphere.ionosphereHandling ''%s''.', cfg.atmosphere.ionosphereHandling);
+                end
+            end
+            if ionoFree && estimIono
+                error('revgnss:ConfigFactory:conflictingIonosphere', ...
+                    'cfg.atmosphere.ionosphereFree and .estimateIono are mutually exclusive.');
+            end
+
+            if ionoFree
+                cfg.measurements.codeMode = 'ionosphereFree';
+            elseif estimIono
+                cfg.measurements.codeMode              = 'singleFrequency';
+                cfg.estimation.ionosphereMode          = 'perTowerSlant';
+                cfg.errors.ionosphere.model.correction = 'none';
+            else
+                cfg.measurements.codeMode = 'singleFrequency';   % RAW uncombined dual-freq
+            end
+        end
+
         function cfg = finalizeConfig(cfg)
             % finalizeConfig  Resolve nTowers/nReceivers, lever arms, recreate clocks.
             %
@@ -507,6 +562,13 @@ classdef ConfigFactory
             %
             % Clock recreation is idempotent: noiseCoeffs are re-derived from
             % clockType + clockFactors; name/deterministic/bias_s/fracFreq preserved.
+
+            % ---- Atmosphere profile (opt-in via masterConfig) -------------
+            % Apply the physically-realistic atmosphere overlay + ionosphere
+            % handling requested by cfg.atmosphere.realistic. Opt-in only:
+            % configs that never set the toggle (bespoke tests, and the golden,
+            % which sets it false) are left byte-identical.
+            cfg = revgnss.ConfigFactory.applyAtmosphereProfile(cfg);
 
             % ---- Initialize validation tracking ---------------------------
             if ~isfield(cfg,'validation')
@@ -1438,6 +1500,36 @@ classdef ConfigFactory
             revgnss.TwoWayISLMeasurementBuilder.validateConfig(cfg);
             revgnss.ISLTimingModel.validateConfig(cfg);
             revgnss.TWSTFTDiagnosticBuilder.validateConfig(cfg);
+
+            % --- Clock-seed independence contract (seed-independence refactor) ---
+            % Every physical clock must own a distinct RNG seed so its noise
+            % realization is independent of every other clock. Canonical seeds:
+            % receiver=100, tower k=200+k, secondary asset ai=300+ai (assigned in
+            % MultiAssetConfig.finalizeAsset_). assets(1) IS the receiver clock, so
+            % it is counted once (via cfg.asset) and skipped in the assets loop.
+            clkSeeds_ = [];
+            if isfield(cfg,'asset') && isfield(cfg.asset,'clock') && isfield(cfg.asset.clock,'seed')
+                clkSeeds_(end+1) = cfg.asset.clock.seed; %#ok<AGROW>
+            end
+            if isfield(cfg,'towers')
+                for kSeed_ = 1:numel(cfg.towers)
+                    if isfield(cfg.towers(kSeed_),'clock') && isfield(cfg.towers(kSeed_).clock,'seed')
+                        clkSeeds_(end+1) = cfg.towers(kSeed_).clock.seed; %#ok<AGROW>
+                    end
+                end
+            end
+            if isfield(cfg,'assets')
+                for aiSeed_ = 2:numel(cfg.assets)
+                    if isfield(cfg.assets(aiSeed_),'clock') && isfield(cfg.assets(aiSeed_).clock,'seed')
+                        clkSeeds_(end+1) = cfg.assets(aiSeed_).clock.seed; %#ok<AGROW>
+                    end
+                end
+            end
+            assert(numel(clkSeeds_) == numel(unique(clkSeeds_)), ...
+                'ConfigFactory:duplicateClockSeed', ...
+                ['Clock RNG seeds must be pairwise distinct so each clock is independent; ' ...
+                 'got [%s]. Check receiver(100)/tower(200+k)/secondary-asset(300+ai) seeds.'], ...
+                num2str(clkSeeds_));
 
             nWarn79_ = 0;
             if isfield(cfg,'validation') && isfield(cfg.validation,'warnings')

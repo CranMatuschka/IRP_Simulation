@@ -15,8 +15,9 @@ classdef PlotUnitScaler
     %   revgnss.PlotUnitScaler.disableExponent(ax)
     %       Forces ax.XAxis/YAxis/ZAxis.Exponent = 0 (no "x10^n" offset).
     %
-    %   Supported base units: 'm' (length), 'm/s' (rate), 's' (time). Anything
-    %   else is passed through unscaled.
+    %   Supported base units: 'm' (length), 'm/s' (rate), 's' (time), 's/s'
+    %   (fractional frequency / clock-drift time-rate). Anything else is passed
+    %   through unscaled.
 
     methods (Static)
 
@@ -80,6 +81,10 @@ classdef PlotUnitScaler
                 case 's'
                     ladder = {1,'s'; 1e-3,'ms'; 1e-6,'\mus'; 1e-9,'ns'; ...
                               1e-12,'ps'; 1e-15,'fs'};
+                case 's/s'
+                    % Fractional frequency (clock drift in the time domain).
+                    ladder = {1,'s/s'; 1e-3,'ms/s'; 1e-6,'\mus/s'; 1e-9,'ns/s'; ...
+                              1e-12,'ps/s'; 1e-15,'fs/s'};
                 otherwise
                     ladder = {};
             end

@@ -132,7 +132,8 @@ classdef CarrierMeasurementBuilder
                             isfield(cfg.estimation.ambiguity,'initialSigma_m')
                         initSig = cfg.estimation.ambiguity.initialSigma_m;
                     end
-                    nCycles = round((initSig / lambda) * errorChain.drawNormal(1,1));
+                    nCycles = round((initSig / lambda) * errorChain.drawKeyedPersistent( ...
+                        models.noise.RngSource.CARR_AMB, ti, ai, si_, 1, 1));
                     floatAmbiguityTruth_m(key) = lambda * nCycles;
                 end
                 B_true = floatAmbiguityTruth_m(key);
@@ -199,10 +200,16 @@ classdef CarrierMeasurementBuilder
                 rho_e = models.corrections.RangeCorrections.correctedPseudorange( ...
                     g_e.r_ant_model_m, g_e.r_tower_model_m, cfg, 'model', elv, t_s);
 
-                noise_phi = sigma_phi * errorChain.drawNormal(1,1);
+                noise_phi = sigma_phi * errorChain.drawKeyed( ...
+                    models.noise.RngSource.CARR_PHASE, ti, ai, si_, errorChain.epochIdx_, 1, 1);
+
+                % Phase scintillation: a time-correlated truth-side carrier jitter [rad -> m
+                % via lambda/(2*pi)]. getPhaseScintRad returns exactly 0 unless
+                % scintillation.phaseScint is enabled, so the carrier golden path is unchanged.
+                phaseScint_m = errorChain.envModel.getPhaseScintRad(ti, elv) * lambda / (2*pi);
 
                 % z: +trop, -iono (carrier ionosphere is OPPOSITE sign to code)
-                z_phi(rowOut) = rho_t + b_rx_true - b_twr_t + trop_t - iono_t_sig + B_true + noise_phi;
+                z_phi(rowOut) = rho_t + b_rx_true - b_twr_t + trop_t - iono_t_sig + B_true + noise_phi + phaseScint_m;
 
                 % Stage 85: synthetic slip injection for stress testing
                 try
@@ -224,6 +231,14 @@ classdef CarrierMeasurementBuilder
                     mf_phi = models.atmosphere.MappingFunctions.troposphere(elv, ...
                         models.measurements.MeasurementModelUtils.zwdMappingKind(cfg));
                     h_phi(rowOut) = h_phi(rowOut) + mf_phi * x_est(stateMap.zwdIdx(ti));
+                end
+                % Slant-iono EKF state (prototype): carrier ionosphere is a phase ADVANCE
+                % (negative), so the partial is the NEGATIVE 1/f^2 dispersion.
+                if isfield(stateMap,'ionoIdx') && ti <= numel(stateMap.ionoIdx) && ...
+                        stateMap.ionoIdx(ti) > 0
+                    fL1c  = revgnss.SignalDefinition.get('L1').frequency_Hz;
+                    fSigc = revgnss.Constants.SPEED_OF_LIGHT_MPS / lambda;
+                    h_phi(rowOut) = h_phi(rowOut) - (fL1c / fSigc)^2 * x_est(stateMap.ionoIdx(ti));
                 end
 
                 % Stage 71 NOTE: towerClkSigma is NOT added to carrier R.
@@ -288,6 +303,13 @@ classdef CarrierMeasurementBuilder
                     mf = models.atmosphere.MappingFunctions.troposphere(elv, ...
                         models.measurements.MeasurementModelUtils.zwdMappingKind(cfg));
                     H_phi(rowOut, stateMap.zwdIdx(ti)) = mf;
+                end
+                % Slant-iono column: -(f_L1/f)^2 (carrier ionosphere is a phase advance)
+                if isfield(stateMap,'ionoIdx') && ...
+                        ti <= numel(stateMap.ionoIdx) && stateMap.ionoIdx(ti) > 0
+                    fL1c  = revgnss.SignalDefinition.get('L1').frequency_Hz;
+                    fSigc = revgnss.Constants.SPEED_OF_LIGHT_MPS / lambda;
+                    H_phi(rowOut, stateMap.ionoIdx(ti)) = -(fL1c / fSigc)^2;
                 end
 
                 % ---- Known-ambiguity validation (ATTITUDE VALIDATION ONLY — not operational) ----
@@ -379,7 +401,8 @@ classdef CarrierMeasurementBuilder
                 N_ia  = ambiguityMap(key);
                 ambig(mi) = N_ia;
                 phi(mi) = (rho + b_rx_true - b_twr) / lambda + N_ia + ...
-                          sigma * errorChain.drawNormal(1,1);
+                          sigma * errorChain.drawKeyed( ...
+                              models.noise.RngSource.CARR_PHASE, ti, ai, 0, errorChain.epochIdx_, 1, 1);
             end
             cp.phi_cycles    = phi;
             cp.ambiguity_int = ambig;

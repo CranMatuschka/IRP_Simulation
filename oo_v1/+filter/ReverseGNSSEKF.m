@@ -55,6 +55,12 @@ classdef ReverseGNSSEKF < handle
         % Per-tower ZWD states
         estimateZwd          (1,1) logical = false
         nZwdStates           (1,1) double  = 0
+        % Per-tower slant-ionosphere states (prototype: estimation.ionosphereMode='perTowerSlant').
+        % One state per tower = the L1 slant ionospheric delay [m]; observable from the L1/L2
+        % dispersion. An alternative to the ionosphere-free combination that keeps all
+        % dual-frequency rows (no IF information penalty).
+        estimateIono         (1,1) logical = false
+        nIonoStates          (1,1) double  = 0
 
         % Per-tower transmitter code bias states (Stage 11)
         estimateTxCodeBias   (1,1) logical = false
@@ -137,6 +143,13 @@ classdef ReverseGNSSEKF < handle
                 obj.nZwdStates     = nTowers;
             end
 
+            % Determine if per-tower slant-ionosphere states requested (prototype)
+            if isfield(cfg,'estimation') && isfield(cfg.estimation,'ionosphereMode') && ...
+                    strcmp(cfg.estimation.ionosphereMode,'perTowerSlant')
+                obj.estimateIono   = true;
+                obj.nIonoStates    = nTowers;
+            end
+
             % Determine if tx code bias states requested (Stage 11)
             if isfield(cfg,'hardware') && isfield(cfg.hardware,'txCodeBias') && ...
                     isfield(cfg.hardware.txCodeBias,'useInEKF') && cfg.hardware.txCodeBias.useInEKF
@@ -153,6 +166,9 @@ classdef ReverseGNSSEKF < handle
             end
             if obj.estimateZwd
                 obj.nx = obj.nx + obj.nZwdStates;
+            end
+            if obj.estimateIono
+                obj.nx = obj.nx + obj.nIonoStates;
             end
             if obj.estimateTxCodeBias
                 obj.nx = obj.nx + obj.nTxCodeBiasStates;
@@ -582,6 +598,19 @@ classdef ReverseGNSSEKF < handle
                 sm.zwdIdx = zeros(nTowers, 1);
             end
 
+            % Optional per-tower slant-ionosphere states (prototype)
+            % I_L1_i [m]: the L1 slant ionospheric delay at tower i.
+            if obj.estimateIono && obj.nIonoStates > 0
+                ionoIdx = zeros(nTowers, 1);
+                for ti = 1:nTowers
+                    ionoIdx(ti) = nextIdx;
+                    nextIdx     = nextIdx + 1;
+                end
+                sm.ionoIdx = ionoIdx;
+            else
+                sm.ionoIdx = zeros(nTowers, 1);
+            end
+
             % Optional per-tower transmitter code bias states (Stage 11)
             % d_tx_code_i [m]: random-walk bias, one per tower, L1 code only.
             % Positive d_tx_code increases measured pseudorange.
@@ -685,6 +714,22 @@ classdef ReverseGNSSEKF < handle
                     idx = sm.zwdIdx(ti);
                     if idx > 0
                         F(idx, idx) = phi_zwd;
+                    end
+                end
+            end
+
+            % Slant-iono states: first-order Gauss-Markov phi = exp(-dt/tau)
+            if obj.estimateIono
+                tau_iono = 900;
+                if isfield(obj.cfg,'estimation') && isfield(obj.cfg.estimation,'slantIono') && ...
+                        isfield(obj.cfg.estimation.slantIono,'tau_s')
+                    tau_iono = obj.cfg.estimation.slantIono.tau_s;
+                end
+                phi_iono = exp(-dt_s / tau_iono);
+                for ti = 1:obj.nTowers
+                    idx = sm.ionoIdx(ti);
+                    if idx > 0
+                        F(idx, idx) = phi_iono;
                     end
                 end
             end
@@ -823,6 +868,25 @@ classdef ReverseGNSSEKF < handle
                     idx = sm.zwdIdx(ti);
                     if idx > 0
                         Q(idx, idx) = q_zwd;
+                    end
+                end
+            end
+
+            % --- Slant-iono process noise (Gauss-Markov steady-state) ------
+            if obj.estimateIono
+                tau_iono  = 900;
+                sigma_iono = 1.0;   % steady-state slant-iono sigma [m]
+                if isfield(obj.cfg,'estimation') && isfield(obj.cfg.estimation,'slantIono')
+                    si_ = obj.cfg.estimation.slantIono;
+                    if isfield(si_,'tau_s');      tau_iono   = si_.tau_s;      end
+                    if isfield(si_,'sigma_ss_m'); sigma_iono = si_.sigma_ss_m; end
+                end
+                phi_iono = exp(-dt_s / tau_iono);
+                q_iono   = sigma_iono^2 * (1 - phi_iono^2);
+                for ti = 1:obj.nTowers
+                    idx = sm.ionoIdx(ti);
+                    if idx > 0
+                        Q(idx, idx) = q_iono;
                     end
                 end
             end

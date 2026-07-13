@@ -200,7 +200,18 @@ classdef CodeMeasurementBuilder
                     h(mi) = h(mi) + d_rx_code_h;
                 end
 
-                sigma_i = sqrt(errStruct.sigmaTotal_m(mi)^2 + towerClkSigma(mi)^2);
+                % Tower-clock R guard (variance double-count): when this tower's clock is
+                % an estimated EKF state (towerClockIdx>0, i.e. estimateTowerClocks=true)
+                % its uncertainty already lives in the state covariance, so the broadcast-
+                % product sigma must NOT also be charged into R. Mirror the h-side (which
+                % reads the state instead of the product). Default estimateTowerClocks=false
+                % -> towerClockIdx=0 -> no-op (golden-safe, byte-identical).
+                twrClkSig_mi = towerClkSigma(mi);
+                if isfield(stateMap,'towerClockIdx') && size(stateMap.towerClockIdx,1) >= ti ...
+                        && stateMap.towerClockIdx(ti,1) > 0
+                    twrClkSig_mi = 0;
+                end
+                sigma_i = sqrt(errStruct.sigmaTotal_m(mi)^2 + twrClkSig_mi^2);
                 R_diag(mi) = max(sigma_i, sigmaFloor)^2;
             end
 
@@ -280,7 +291,8 @@ classdef CodeMeasurementBuilder
 
                         scintSigL1_pi = errStruct.scintSigmaL1_m(pi);
                         scintSig_si   = scintSigL1_pi * (f_L1 / sigCfg.frequency_Hz)^scintExpF;
-                        scint_t       = scintSig_si * randn(errorChain.rngStream, 1, 1);
+                        scint_t       = scintSig_si * errorChain.drawKeyed( ...
+                            models.noise.RngSource.SCINT_TRUTH, twr_list(pi), ant_list(pi), si, errorChain.epochIdx_, 1, 1);
 
                         if si == 1
                             z_new(mi)      = z(pi) + scint_t;
@@ -302,7 +314,8 @@ classdef CodeMeasurementBuilder
                         else
                             elv_pi        = errStruct.elevations_rad(pi);
                             sigma_code_si = models.measurements.MeasurementModelUtils.codeSignalSigma(sigCfg, elv_pi, cfg);
-                            code_t        = sigma_code_si * randn(errorChain.rngStream, 1, 1);
+                            code_t        = sigma_code_si * errorChain.drawKeyed( ...
+                                models.noise.RngSource.CODE_MULTISIG, twr_list(pi), ant_list(pi), si, errorChain.epochIdx_, 1, 1);
 
                             iono_t_si = 0; iono_m_si = 0;
                             if isfield(errStruct.bySource.truth_m,'iono')
@@ -340,6 +353,16 @@ classdef CodeMeasurementBuilder
                             btOut.code(mi)          = code_t;
                             btOut.scintillation(mi) = scint_t;
                             bsOut.code(mi)          = sigma_code_si;
+                        end
+
+                        % Per-tower slant-iono EKF state (prototype): the state supplies the
+                        % model ionosphere (pair with model.correction='none' so it is not
+                        % double-counted). It enters each signal through its 1/f^2 dispersion
+                        % (freqScale = (f_L1/f_sig)^2), which is what makes it observable from L1/L2.
+                        ti_io = twr_list(pi);
+                        if isfield(stateMap,'ionoIdx') && ti_io <= numel(stateMap.ionoIdx) && ...
+                                stateMap.ionoIdx(ti_io) > 0
+                            h_new(mi) = h_new(mi) + freqScale * x_est(stateMap.ionoIdx(ti_io));
                         end
                     end
                 end
@@ -413,7 +436,15 @@ classdef CodeMeasurementBuilder
 
                 % Add scintillation to bySource (L1 only)
                 if isfield(errStruct,'scintSigmaL1_m') && any(errStruct.scintSigmaL1_m > 0)
-                    scintTruth = errStruct.scintSigmaL1_m .* randn(errorChain.rngStream, M, 1);
+                    if errorChain.useIndependentStreams
+                        scintTruth = zeros(M,1);
+                        for miS = 1:M
+                            scintTruth(miS) = errStruct.scintSigmaL1_m(miS) * errorChain.drawKeyed( ...
+                                models.noise.RngSource.SCINT_TRUTH, twr_list(miS), ant_list(miS), 1, errorChain.epochIdx_, 1, 1);
+                        end
+                    else
+                        scintTruth = errStruct.scintSigmaL1_m .* randn(errorChain.rngStream, M, 1);
+                    end
                     z = z + scintTruth;
                     errStruct.bySource.truth_m.scintillation = scintTruth;
                     errStruct.bySource.model_m.scintillation = zeros(M,1);
@@ -450,7 +481,93 @@ classdef CodeMeasurementBuilder
 
                 z_if    = alpha_if * z(idx1)         + beta_if * z(idx2);
                 h_if    = alpha_if * h(idx1)         + beta_if * h(idx2);
-                R_if    = alpha_if^2 * R_diag(idx1)  + beta_if^2 * R_diag(idx2);
+
+                % ----- Correlation-aware IF measurement variance (R_if) -----
+                % The naive R_if = alpha^2*R(L1) + beta^2*R(L2) charges EVERY error
+                % source at (alpha^2+beta^2) ~= 8.9x. That gain is correct ONLY for
+                % sources that are statistically INDEPENDENT between L1 and L2. Two
+                % classes of source are mishandled by that formula:
+                %   * Non-dispersive sources (troposphere, tower-clock) are IDENTICAL on
+                %     L1 and L2 (100% correlated), so they pass the IF at unit gain
+                %     (alpha+beta = 1) and their IF variance is (alpha+beta)^2*sigma^2 =
+                %     sigma^2, NOT (alpha^2+beta^2)*sigma^2.
+                %   * The first-order ionosphere is DETERMINISTICALLY CANCELLED by
+                %     construction (alpha/f1^2 + beta/f2^2 = 0). Its stochastic-TEC
+                %     uncertainty is the SAME physical TEC scaled by 1/f^2, so it cancels
+                %     too. It contributes EXACTLY ZERO to the IF innovation and must
+                %     contribute zero to R_if.
+                % We therefore rebuild R_if per source with source-appropriate IF gains:
+                %   code / multipath / scintillation / signal-dependent HW delay
+                %       -> INDEPENDENT per signal: alpha^2*sigmaL1^2 + beta^2*sigmaL2^2
+                %   troposphere, tower-clock (non-dispersive, equal on L1/L2)
+                %       -> CORRELATED unit gain: (alpha+beta)^2*sigma^2 = sigma^2
+                %   first-order ionosphere (dispersive 1/f^2, same physical TEC)
+                %       -> CANCELS: 0
+                %   higher-order ionosphere (dispersive ~1/f^3, same physical TEC)
+                %       -> SURVIVES with gain (alpha + beta*(f1/f2)^3) rel. to its L1 value
+                %
+                % Implementation: the four independent-per-signal sources all share the
+                % SAME alpha^2/beta^2 gain, so we keep them bundled. We strip only the
+                % correlated + cancelled variance (trop + iono-1st + iono-HO + tower-clock)
+                % out of R_diag -- these sigmas are tiled EQUAL on the L1 and L2 rows, so
+                % the stripped amount is identical for idx1 and idx2 -- apply alpha^2/beta^2
+                % to the independent remainder, then re-add the correlated and higher-order
+                % terms with their correct gains. Keeping the independent remainder inside
+                % R_diag preserves the per-signal code/scintillation frequency scaling
+                % byte-identically (no re-derivation of those sigmas here).
+                smSig_    = errStruct.bySource.sigma_m;
+                sigTrop_  = zeros(M_pairs_if,1);
+                sigIono1_ = zeros(M_pairs_if,1);
+                sigIonoHO_= zeros(M_pairs_if,1);
+                if isfield(smSig_,'trop')   && numel(smSig_.trop)   >= M_pairs_if; sigTrop_   = smSig_.trop(idx1);   end
+                if isfield(smSig_,'iono')   && numel(smSig_.iono)   >= M_pairs_if; sigIono1_  = smSig_.iono(idx1);   end
+                if isfield(smSig_,'ionoHO') && numel(smSig_.ionoHO) >= M_pairs_if; sigIonoHO_ = smSig_.ionoHO(idx1); end
+                sigTwr_if_ = zeros(M_pairs_if,1);
+                if numel(towerClkSigma) >= M_pairs_if; sigTwr_if_ = towerClkSigma(1:M_pairs_if); end
+                % Hardware delay is emitted NON-DISPERSIVE by this simulator (one per-tower
+                % value copied unscaled onto the L2 row), so like troposphere/tower-clock it
+                % passes the IF at unit gain, NOT (alpha^2+beta^2). Strip it from the
+                % independent remainder and re-add at unit gain below. (Latent today:
+                % hardwareDelay.sigma_m defaults to 0; this prevents a silent x8.9 over-count
+                % if a hardware-delay sigma is ever enabled.)
+                sigHw_ = zeros(M_pairs_if,1);
+                if isfield(smSig_,'hwDelay') && numel(smSig_.hwDelay) >= M_pairs_if; sigHw_ = smSig_.hwDelay(idx1); end
+
+                % Correlated + cancelled variance baked into BOTH the L1 and L2 rows of
+                % R_diag (trop/iono/iono-HO/hwDelay sigmas are tiled equal on L1/L2; tower-
+                % clock sigma is common to the pair). Identical for idx1 and idx2.
+                corrBaked_ = sigTrop_.^2 + sigIono1_.^2 + sigIonoHO_.^2 + sigTwr_if_.^2 + sigHw_.^2;
+
+                % Independent-per-signal remainder still carries the native per-signal
+                % L1/L2 sigmas (code + multipath + scintillation + signal-dependent HW
+                % delay). Non-negative by construction; max() guards floating-point only.
+                Rindep_L1_ = max(R_diag(idx1) - corrBaked_, 0);
+                Rindep_L2_ = max(R_diag(idx2) - corrBaked_, 0);
+
+                % Higher-order ionosphere IF survival gain (dispersive ~1/f^3): HO on L2 is
+                % HO_L1*(f1/f2)^3, so IF passes HO_L1 at gain (alpha + beta*(f1/f2)^3).
+                gIonoHO_ = alpha_if + beta_if * (f_L1 / f_L2_if)^3;
+
+                R_if = alpha_if^2 * Rindep_L1_ + beta_if^2 * Rindep_L2_ ... % independent per signal
+                     + sigTrop_.^2 ...                                      % troposphere: unit gain
+                     + 0 * sigIono1_.^2 ...                                 % first-order iono: cancels -> 0
+                     + gIonoHO_^2 * sigIonoHO_.^2 ...                       % higher-order iono: survives
+                     + sigTwr_if_.^2 ...                                    % tower-clock: unit gain
+                     + sigHw_.^2;                                           % hardware delay: unit gain (non-dispersive)
+
+                % Postfit consistency: computePostfitResiduals_ rebuilds h from
+                % errStruct.modelTotal_m, so store the IF-COMBINED totals (first-order iono
+                % cancelled: alpha*I + beta*I*(f1/f2)^2 = 0) rather than the L1-only values.
+                % Otherwise the postfit reintroduces the single-frequency model ionosphere
+                % and the reported postfit RMS is spuriously inflated (> prefit).
+                modelTotal_if = [];
+                truthTotal_if = [];
+                if isfield(errStruct,'modelTotal_m') && numel(errStruct.modelTotal_m) >= 2*M_pairs_if
+                    modelTotal_if = alpha_if * errStruct.modelTotal_m(idx1) + beta_if * errStruct.modelTotal_m(idx2);
+                end
+                if isfield(errStruct,'truthTotal_m') && numel(errStruct.truthTotal_m) >= 2*M_pairs_if
+                    truthTotal_if = alpha_if * errStruct.truthTotal_m(idx1) + beta_if * errStruct.truthTotal_m(idx2);
+                end
 
                 z = z_if;
                 h = h_if;
@@ -477,6 +594,9 @@ classdef CodeMeasurementBuilder
                 if isfield(errStruct,'signalName_perMeas') && numel(errStruct.signalName_perMeas) >= M_pairs_if
                     errStruct.signalName_perMeas = repmat({'IF'}, M_pairs_if, 1);
                 end
+                % Override the idx1-compressed totals with the IF-combined values (above).
+                if ~isempty(modelTotal_if); errStruct.modelTotal_m = modelTotal_if; end
+                if ~isempty(truthTotal_if); errStruct.truthTotal_m = truthTotal_if; end
                 errStruct.towerIdx_perMeas   = twr_list;
                 errStruct.antennaIdx_perMeas = ant_list;
                 errStruct.nPseudorange       = M;

@@ -42,7 +42,8 @@ classdef ReportRealityHelper
             end
 
             expectedStates = 14 + revgnss.ReportRealityHelper.safeField_(summary, 'nAmbiguityStates', 0) + ...
-                revgnss.ReportRealityHelper.safeField_(summary, 'nZwdStates', 0);
+                revgnss.ReportRealityHelper.safeField_(summary, 'nZwdStates', 0) + ...
+                revgnss.ReportRealityHelper.safeField_(summary, 'nIonoStates', 0);
             if isfield(cfg, 'estimator') && isfield(cfg.estimator, 'estimateTowerClocks') && cfg.estimator.estimateTowerClocks
                 expectedStates = expectedStates + 2*nTwr;
             end

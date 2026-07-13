@@ -201,6 +201,34 @@ classdef MeasurementModel < handle
                 end
             end
 
+            % Slant-iono Jacobian columns (perTowerSlant): H(mi, ionoIdx(ti)) = (f_L1/f_row)^2
+            % Code group delay is +iono, so the code partial is the positive 1/f^2 dispersion.
+            % Guard on dispersion (>=2 frequencies): CodeMeasurementBuilder adds the iono
+            % STATE to h ONLY in the multi-signal path, and with a single frequency the iono
+            % is unobservable (it aliases with the receiver clock). Setting H without the
+            % matching h term would be an H/h mismatch; with L1 only, neither is set and the
+            % iono is (correctly) absorbed by the clock. No effect on the default L1+L2
+            % estimateIono path (dispersion present) or the golden (no iono state).
+            hasDispersion_io = false;
+            try; hasDispersion_io = revgnss.SignalConfigResolver.hasL2(obj.cfg); catch; end
+            if hasDispersion_io && isfield(stateMap,'ionoIdx') && ~isempty(stateMap.ionoIdx) && any(stateMap.ionoIdx > 0)
+                f_L1_io = revgnss.SignalDefinition.get('L1').frequency_Hz;
+                if isfield(obj.cfg,'signals') && isfield(obj.cfg.signals,'L1') && ...
+                        isfield(obj.cfg.signals.L1,'frequency_Hz')
+                    f_L1_io = obj.cfg.signals.L1.frequency_Hz;
+                end
+                for mi_i = 1:M
+                    ti_i = twr_list(mi_i);
+                    if ti_i <= numel(stateMap.ionoIdx) && stateMap.ionoIdx(ti_i) > 0
+                        f_row = f_L1_io;
+                        if isfield(errStruct,'frequencyHz_perMeas') && mi_i <= numel(errStruct.frequencyHz_perMeas)
+                            f_row = errStruct.frequencyHz_perMeas(mi_i);
+                        end
+                        H_pr(mi_i, stateMap.ionoIdx(ti_i)) = (f_L1_io / f_row)^2;
+                    end
+                end
+            end
+
             % ----- Doppler rows (0.5 + 0.6) ----------------------------
             [dopplerRows, dopplerInfo] = models.measurements.DopplerMeasurementBuilder.build( ...
                 obj.cfg, obj.errorChain, asset, towers, twr_list, ant_list, ...

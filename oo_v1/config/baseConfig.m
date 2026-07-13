@@ -33,6 +33,18 @@ cfg.simulation.dt_s       = 1.0;
 cfg.simulation.duration_s = 3600.0;
 cfg.simulation.seed       = 42;
 
+% --- RNG stream independence ----------------------------------
+% When enable=true (default) every physically-independent noise source draws
+% from its own identity-keyed substream (models.noise.RngRegistry) rooted at
+% cfg.simulation.seed, instead of sharing one draw order. This gives true
+% per-tower / per-asset / per-source independence and ORDER-independence:
+% toggling one effect or changing tower visibility cannot perturb any other
+% source's realization (enabling one-factor-at-a-time and common-random-number
+% studies). Set enable=false to reproduce the legacy shared-stream behaviour
+% bit-for-bit. engine is the counter-based generator used for the substreams.
+cfg.rng.independentStreams.enable = true;
+cfg.rng.independentStreams.engine = 'threefry';
+
 % --- Scenario topology (simple count fields) ------------------
 cfg.scenario.nTowers    = 5;
 cfg.scenario.nReceivers = 1;
@@ -78,8 +90,13 @@ cfg.clockScaling.towerNoiseFactor    = 1.0;
 cfg.clockScaling.templateSource      = 'legacy';
 
 % Asset receiver clock fields (simple config fields)
+% CESIUM1 (Cesium beam / H-maser class) is the physically-correct on-board clock for
+% a precision GEO nav/comms spacecraft. OCXO is a ground / control-segment oscillator
+% and was unrealistic here. Note this does NOT materially change the radial error (the
+% clock process noise is not the radial driver -- radial=clock is a geometry/observability
+% degeneracy, not a clock-Q limit); it is a realism correction only.
 cfg.asset.clockName    = 'SpaceReceiverClock';
-cfg.asset.clockType    = 'OCXO';
+cfg.asset.clockType    = 'CESIUM1';
 cfg.asset.clockFactors = struct( ...
     'biasFactor',1,'freqFactor',1,'noiseFactor',1, ...
     'roleNoiseFactor', cfg.clockScaling.receiverNoiseFactor, ...
@@ -119,13 +136,25 @@ cfg.formation.mode        = 'helix';   % only supported formation mode
 cfg.formation.baseline_m  = 1000.0;    % inter-satellite separation [m] (>500 m); changeable
 cfg.formation.phase0_rad  = 0.0;       % phase of the first secondary on the projected-circular ring
 
-% --- Five ground towers (from SimulationConfig.m) -------------
+% --- Ground towers: real ground-station sites in the 23 deg-E GEO footprint ---
+% Name, lat[deg], lon[deg], alt[m]. The first 5 are the frozen-golden network (do
+% NOT reorder or edit them: the Stage-85 golden trims to nTowers=5 = these five).
+% Towers 6-12 are additional real space-tracking / geodetic sites (ESA/ASI/IGS/NASA)
+% spread across the visible hemisphere to break the radial<->clock degeneracy of a
+% single ground-only GEO (wide lat -26..+68 deg, lon -25..+78 deg angular spread).
 towerDefs = { ...
-    'Tenerife',        28.3,      -16.5,    0.0; ...
-    'Stockholm',       59.3,       18.1,    0.0; ...
-    'Hartebeesthoek', -25.9,       27.7,    0.0; ...
-    'Bengaluru',       13.0,       77.6,    0.0; ...
-    'Libreville',       0.0355,    -9.4496,  0.0 };
+    'Tenerife',        28.3,      -16.5,    0.0; ...   % 1  ESA/INTA (frozen golden)
+    'Stockholm',       59.3,       18.1,    0.0; ...   % 2  (frozen golden)
+    'Hartebeesthoek', -25.9,       27.7,    0.0; ...   % 3  SANSA/HartRAO (frozen golden)
+    'Bengaluru',       13.0,       77.6,    0.0; ...   % 4  ISRO ISTRAC (frozen golden)
+    'Libreville',       0.0355,    -9.4496,  0.0; ...  % 5  (frozen golden)
+    'Kiruna',          67.88,      21.10,    0.0; ...  % 6  ESA Esrange (far north lever)
+    'Cebreros',        40.45,      -4.37,    0.0; ...  % 7  ESA DSA-2 deep-space
+    'Matera',          40.65,      16.70,    0.0; ...  % 8  ASI Space Geodesy Centre
+    'SantaMaria',      36.97,     -25.17,    0.0; ...  % 9  Azores (west Atlantic lever)
+    'Malindi',         -2.996,     40.19,    0.0; ...  % 10 ASI Luigi Broglio (east equ.)
+    'Ascension',       -7.95,     -14.41,    0.0; ...  % 11 NASA/IGS (south Atlantic)
+    'AbuDhabi',        24.43,      54.62,    0.0 };    % 12 Yahsat (Middle East / east)
 
 % Build ALL defined towers; finalizeConfig() trims to cfg.scenario.nTowers.
 cfg.towers = struct();
@@ -187,7 +216,7 @@ cfg.estimator.towerClockMode          = 'perfectCorrection';
 cfg.estimator.towerClockCorrectionSigma_m = 0.5; % used if noisyCorrection
 cfg.estimator.elevationMask_rad       = 5 * pi/180;
 cfg.estimator.attitudeJacobianStep_rad = 1e-6;
-cfg.estimator.sigma_accel_mps2        = 0.01;   % baseline residual-acceleration process noise (SNC): absorbs unmodeled accelerations (SRP, third body, higher-order gravity) in a J2-only filter
+cfg.estimator.sigma_accel_mps2        = 1e-6;   % baseline residual-acceleration process noise (SNC) for a MATCHED-J2 GEO EKF: covers SRP (~1e-7), luni-solar third-body (~1e-6) and higher-order geopotential residuals. The old 0.01 was ~1e4x too large and let the weakly-observable radial<->receiver-clock mode random-walk (radial 10 m -> 1.9 m when corrected). For an explicit reduced-dynamics/mismatch run, size the EXTRA noise via processNoise.modelMismatch below, not this baseline.
 cfg.estimator.dynamics.mode           = 'constantVelocity';
 % Dynamic-model residual-acceleration process noise. processNoise.modelMismatch is the
 % back-compat field the EKF (ReverseGNSSEKF.buildQ_) reads; it carries the EXTRA process
@@ -584,6 +613,16 @@ cfg.estimation.troposphereMode = 'none';
 cfg.estimation.tropoZwd.tau_s          = 3600;
 cfg.estimation.tropoZwd.sigma_ss_m     = 0.05;
 cfg.estimation.tropoZwd.initialSigma_m = 0.10;
+
+% ionosphereMode: 'none' | 'perTowerSlant' (prototype). 'perTowerSlant' adds one EKF
+% state per tower = the L1 slant ionospheric delay [m], observable from the L1/L2
+% dispersion. It removes the ionosphere while keeping all dual-frequency rows (no
+% ionosphere-free noise/row penalty). Pair with errors.ionosphere.model.correction='none'
+% so the state supplies the model iono (not double-counted). Default 'none' => no states.
+cfg.estimation.ionosphereMode = 'none';
+cfg.estimation.slantIono.tau_s          = 900;    % slant-iono GM correlation time [s]
+cfg.estimation.slantIono.sigma_ss_m     = 1.0;    % steady-state slant-iono sigma [m]
+cfg.estimation.slantIono.initialSigma_m = 5.0;    % initial 1-sigma [m]
 
 % --- Antenna PCV model (Step 4) ---------------------------------
 % pcvModel: 'none' | 'toy' | 'table'

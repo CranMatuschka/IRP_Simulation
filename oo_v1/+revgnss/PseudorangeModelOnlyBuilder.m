@@ -94,6 +94,19 @@ classdef PseudorangeModelOnlyBuilder
                     h_pr(mi) = h_pr(mi) + mf_h * x_state(stateMap.zwdIdx(ti));
                 end
 
+                if isfield(stateMap,'ionoIdx') && ti <= numel(stateMap.ionoIdx) && ...
+                        stateMap.ionoIdx(ti) > 0
+                    f_L1_io = revgnss.SignalDefinition.get('L1').frequency_Hz;
+                    if isfield(cfg,'signals') && isfield(cfg.signals,'L1') && isfield(cfg.signals.L1,'frequency_Hz')
+                        f_L1_io = cfg.signals.L1.frequency_Hz;
+                    end
+                    f_row = f_L1_io;
+                    if isfield(errStruct,'frequencyHz_perMeas') && mi <= numel(errStruct.frequencyHz_perMeas)
+                        f_row = errStruct.frequencyHz_perMeas(mi);
+                    end
+                    h_pr(mi) = h_pr(mi) + (f_L1_io / f_row)^2 * x_state(stateMap.ionoIdx(ti));
+                end
+
                 if isfield(stateMap,'txCodeBiasIdx') && ti <= numel(stateMap.txCodeBiasIdx) && ...
                         stateMap.txCodeBiasIdx(ti) > 0
                     h_pr(mi) = h_pr(mi) + x_state(stateMap.txCodeBiasIdx(ti));

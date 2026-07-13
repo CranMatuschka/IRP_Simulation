@@ -113,7 +113,13 @@ classdef EkfInnovationAccounting
             rms_.augmentedRms       = revgnss.EkfInnovationAccounting.rmsForMask_(residual, true(numel(residual),1));
             rms_.physicalRms        = revgnss.EkfInnovationAccounting.rmsForMask_(residual, rowClass.physicalMask);
             rms_.gaugeRms           = revgnss.EkfInnovationAccounting.rmsForMask_(residual, rowClass.gaugeMask);
-            rms_.codeRms            = revgnss.EkfInnovationAccounting.rmsForMask_(residual, rowClass.codeMask);
+            % codeRms covers ALL code-domain rows (raw single-frequency OR ionosphere-free),
+            % so the reported code residual is finite under codeMode='ionosphereFree' (whose
+            % rows are tagged 'ifCode'). For single-frequency codeIonoFreeMask is empty, so
+            % this is identical to the raw-code mask (golden-safe). The IF-only breakdown
+            % remains available separately in codeIonoFreeRms.
+            rms_.codeRms            = revgnss.EkfInnovationAccounting.rmsForMask_(residual, ...
+                rowClass.codeMask | rowClass.codeIonoFreeMask);
             rms_.codeIonoFreeRms    = revgnss.EkfInnovationAccounting.rmsForMask_(residual, rowClass.codeIonoFreeMask);
             rms_.dopplerRms         = revgnss.EkfInnovationAccounting.rmsForMask_(residual, rowClass.dopplerMask);
             rms_.carrierRms         = revgnss.EkfInnovationAccounting.rmsForMask_(residual, rowClass.carrierMask);

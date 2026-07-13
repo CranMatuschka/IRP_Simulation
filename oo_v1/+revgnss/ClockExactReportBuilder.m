@@ -294,12 +294,14 @@ classdef ClockExactReportBuilder
                             revgnss.PlotUnitScaler.disableExponent(ax); return;
                         end
                     case 'clkDrift'
-                        y = diag.getClockDriftErrors() ./ c0 .* ppm;  % m/s -> ppm
-                        if ~isempty(y)
+                        yf = diag.getClockDriftErrors() ./ c0;  % m/s -> fractional [s/s]
+                        if ~isempty(yf)
+                            [~, unit, sc] = revgnss.PlotUnitScaler.scaleMetric(yf(i0:end), 's/s');
                             hold(ax,'on');
-                            plot(ax, tz, y(i0:end), 'b-', 'LineWidth',0.8);
-                            CE.overlaySigma_(ax, tz, CE.stateSigmaWin_(diag,14,ppm/c0,i0), 3, 'k:');
-                            xlabel(ax,'Time [s]','FontSize',7); ylabel(ax,'Clock drift error [ppm]','FontSize',7);
+                            plot(ax, tz, yf(i0:end)*sc, 'b-', 'LineWidth',0.8);
+                            CE.overlaySigma_(ax, tz, CE.stateSigmaWin_(diag,14,sc/c0,i0), 3, 'k:');
+                            xlabel(ax,'Time [s]','FontSize',7);
+                            ylabel(ax, revgnss.PlotUnitScaler.axisLabel('Clock drift error', unit),'FontSize',7);
                             title(ax, ttl,'FontSize',7); grid(ax,'on');
                             revgnss.PlotUnitScaler.disableExponent(ax); return;
                         end
@@ -578,13 +580,15 @@ classdef ClockExactReportBuilder
             fig = revgnss.ClockExactReportBuilder.makeCompactFig_('');
             ax  = gca(fig);
             try
-                c = diag.getClockBiasErrors();
+                c = diag.getClockBiasErrors();     % stored range domain [m]
                 if ~isempty(t) && ~isempty(c)
                     CE = revgnss.ClockExactReportBuilder;
-                    [cs, unit, sc] = revgnss.PlotUnitScaler.scaleMetric(c, 'm');
+                    c0 = revgnss.Constants.SPEED_OF_LIGHT_MPS;
+                    [cs, unit, sc] = revgnss.PlotUnitScaler.scaleMetric(c / c0, 's');   % -> time domain
                     hold(ax,'on');
                     plot(ax, t, cs, 'r-', 'LineWidth', 0.8);
-                    CE.overlaySigma_(ax, t, CE.stateSigmaWin_(diag,13,sc,1), 3, 'k:');
+                    % Pdiag(13) is range-domain; divide by c to match the time-domain plot.
+                    CE.overlaySigma_(ax, t, CE.stateSigmaWin_(diag,13,sc/c0,1), 3, 'k:');
                     xlabel(ax, 'Time [s]', 'FontSize',7);
                     ylabel(ax, revgnss.PlotUnitScaler.axisLabel('Clock error', unit), 'FontSize',7);
                     title(ax, 'Receiver clock bias error (dotted = \pm3\sigma)', 'FontSize',7);
@@ -601,13 +605,15 @@ classdef ClockExactReportBuilder
             fig = revgnss.ClockExactReportBuilder.makeCompactFig_('');
             ax  = gca(fig);
             try
-                d = diag.getClockDriftErrors();
+                d = diag.getClockDriftErrors();    % stored range-rate domain [m/s]
                 if ~isempty(t) && ~isempty(d)
                     CE = revgnss.ClockExactReportBuilder;
-                    [ds, unit, sc] = revgnss.PlotUnitScaler.scaleMetric(d, 'm/s');
+                    c0 = revgnss.Constants.SPEED_OF_LIGHT_MPS;
+                    [ds, unit, sc] = revgnss.PlotUnitScaler.scaleMetric(d / c0, 's/s');  % -> fractional frequency
                     hold(ax,'on');
                     plot(ax, t, ds, 'b-', 'LineWidth', 0.8);
-                    CE.overlaySigma_(ax, t, CE.stateSigmaWin_(diag,14,sc,1), 3, 'k:');
+                    % Pdiag(14) is range-rate domain; divide by c to match the fractional plot.
+                    CE.overlaySigma_(ax, t, CE.stateSigmaWin_(diag,14,sc/c0,1), 3, 'k:');
                     xlabel(ax, 'Time [s]', 'FontSize',7);
                     ylabel(ax, revgnss.PlotUnitScaler.axisLabel('Drift error', unit), 'FontSize',7);
                     title(ax, 'Receiver clock drift error (dotted = \pm3\sigma)', 'FontSize',7);
@@ -716,9 +722,11 @@ classdef ClockExactReportBuilder
                     v = unique(lastCol(isfinite(lastCol)), 'stable');
                 end
                 if isnumeric(v) && ~isempty(v)
-                    bar(ax, 1:numel(v), v*1e3, 0.5);
+                    c0 = revgnss.Constants.SPEED_OF_LIGHT_MPS;
+                    [vs, unit] = revgnss.PlotUnitScaler.scaleMetric(v / c0, 's');   % -> time domain
+                    bar(ax, 1:numel(vs), vs, 0.5);
                     xlabel(ax,'Tower index','FontSize',7);
-                    ylabel(ax,'Bias [mm]','FontSize',7);
+                    ylabel(ax, revgnss.PlotUnitScaler.axisLabel('Bias', unit),'FontSize',7);
                     grid(ax,'on');
                     return;
                 end

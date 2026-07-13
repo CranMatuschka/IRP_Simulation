@@ -176,9 +176,9 @@ function i_tabClockBias(tg, diag, t)
     tl = i_tab(tg, 'Clock bias', 2);
 
     ax1 = nexttile(tl); hold(ax1, 'on');
-    plot(ax1, t, tr, 'b',   'LineWidth', 1.2, 'DisplayName', 'Truth');
-    plot(ax1, t, es, 'r--', 'LineWidth', 1.2, 'DisplayName', 'Estimate');
-    grid(ax1, 'on'); ylabel(ax1, 'Clock bias [m]');
+    plot(ax1, t, tr / c * 1e9, 'b',   'LineWidth', 1.2, 'DisplayName', 'Truth');
+    plot(ax1, t, es / c * 1e9, 'r--', 'LineWidth', 1.2, 'DisplayName', 'Estimate');
+    grid(ax1, 'on'); ylabel(ax1, 'Clock bias [ns]');
     title(ax1, 'Receiver Clock Bias — Truth vs Estimate');
     legend(ax1, 'Location', 'best');
 
@@ -205,8 +205,8 @@ function i_tabClockDrift(tg, diag, t)
     legend(ax1, 'Location', 'best');
 
     ax2 = nexttile(tl);
-    plot(ax2, t, er, 'k', 'LineWidth', 1.2);
-    grid(ax2, 'on'); xlabel(ax2, 'Time [s]'); ylabel(ax2, 'Drift error [m/s]');
+    plot(ax2, t, er / c * 1e12, 'k', 'LineWidth', 1.2);
+    grid(ax2, 'on'); xlabel(ax2, 'Time [s]'); ylabel(ax2, 'Drift error [ps/s]');
     title(ax2, 'Receiver Clock Drift Error');
 end
 

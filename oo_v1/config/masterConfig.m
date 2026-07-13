@@ -22,7 +22,7 @@ cfg = baseConfig();   % structural + default base; no +revgnss config-layer depe
 %% Simulation run
 % How long the run is and how densely diagnostics are stored. 'compact' keeps a
 % small MAT while preserving all science; 'sampledFull'/'full' add matrix snapshots.
-cfg.simulation.duration_s = 3600;
+cfg.simulation.duration_s = 3600*4;
 cfg.simulation.dt_s       = 1;
 cfg.diagnostics.storage.mode                = 'compact';
 cfg.diagnostics.storage.snapshot.enable     = true;
@@ -32,7 +32,11 @@ cfg.diagnostics.storage.snapshot.interval_s = 300;
 % One estimated GEO spacecraft; nSpaceAssets is the swarm switch (1 = ground-only,
 % >1 = helix ISL swarm aiding the primary, primary clock scaling ~1/sqrt(N-1)).
 cfg.scenario.name         = 'singleAssetCarrierAttitude';
-cfg.scenario.nSpaceAssets = 6;        % helix ISL swarm (5 secondaries) -> ~3 cm / ~50 ps
+cfg.scenario.nSpaceAssets = 1;        % helix ISL swarm (5 secondaries) -> ~3 cm / ~50 ps
+cfg.scenario.nTowers      = 5;        % 5-tower default (frozen-golden network). baseConfig
+                                      % defines 12 real sites; set nTowers=12 for the wide
+                                      % network that breaks the single-GEO radial<->clock
+                                      % degeneracy (towers 6-12 are the extra real sites).
 cfg.scenario.orbitClass   = 'GEO';    % 'GEO' | 'MEO' | 'LEO'
 % nReceivers is owned by the scenario assembly below (4-antenna cross pattern);
 % do not set it here. nReceivers=1 -> attitude off; >1 -> attitude on.
@@ -78,10 +82,10 @@ cfg.measurements.doppler.useInEKF     = true;
 %% Atmosphere
 % Troposphere and ionosphere truth+model with a shared master enable each. Both use
 % the synthetic simpleMapped model; ionosphere adds a stochastic scintillation term.
-cfg.errors.troposphere.enable              = true;
+cfg.errors.troposphere.enable              = false;
 cfg.errors.troposphere.modelType           = 'simpleMapped';
 cfg.errors.troposphere.stochastic.enable   = true;
-cfg.errors.ionosphere.enable               = true;
+cfg.errors.ionosphere.enable               = false;
 cfg.errors.ionosphere.modelType            = 'simpleMapped';
 cfg.errors.ionosphere.stochastic.enable    = true;
 cfg.errors.ionosphere.scintillation.enable = true;
@@ -130,8 +134,13 @@ cfg = expandEnableToggles(cfg, { ...
     'effects.towerSurvey', 'effects.antennaPCO', 'effects.antennaPCV' });
 
 %% Measurement observables
-% Code and carrier both use guarded L1/L2 ionosphere-free EKF rows. Carrier phase runs
-% as a float-ambiguity EKF with one ambiguity per tower x receiver x signal (no fixing).
+% DIAGNOSTIC ionosphere-free rows: these build L1/L2 IF code/carrier rows for the REPORT
+% and consistency diagnostics ONLY -- NOT a second EKF path. Per CodeIonoFreeRowBuilder:
+% "EKF integration uses the existing CodeMeasurementBuilder codeMode path." The EKF's
+% actual ionosphere handling is the codeMode chosen by cfg.atmosphere.ionosphereFree /
+% .estimateIono above; the '.useInEkf' field below is diagnostic metadata, not a toggle
+% that puts a second (double-counting) IF row into the filter. Carrier phase runs as a
+% float-ambiguity EKF (one ambiguity per tower x receiver x signal, no fixing).
 cfg.measurements.code.ionosphereFreeRows.enable     = true;
 cfg.measurements.code.ionosphereFreeRows.useInEkf    = true;
 cfg.diagnostics.codeIonoFreeRows.enable              = true;
@@ -302,7 +311,7 @@ cfg.estimator.runKnownAmbiguityValidation = true;
 if ~isfield(cfg,'assets') || isempty(cfg.assets)
     cfg.assets = cfg.asset;
 end
-nRecvReq_ = 4;
+nRecvReq_ = 1;
 if isfield(cfg,'scenario') && isfield(cfg.scenario,'nReceivers') && cfg.scenario.nReceivers > 1
     nRecvReq_ = cfg.scenario.nReceivers;
 end
@@ -438,6 +447,46 @@ end
 if isfield(cfg,'measurements') && isfield(cfg.measurements,'twstft')
     cfg.measurements.twstft.enable = false;
 end
+
+%% Atmosphere realism + ionosphere handling  (SINGLE SOURCE OF TRUTH)
+% The physically-realistic troposphere/ionosphere/scintillation overlay and the
+% ionosphere-handling choice live HERE, not in run_oo_v1. These are DATA toggles;
+% the overlay itself is applied in ConfigFactory.finalizeConfig (via
+% applyAtmosphereProfile) so the Stage-85 golden opts out with the single flag below.
+%
+%   atmosphere.realistic
+%     true  -> Saastamoinen/Niell troposphere (+per-tower ZWD EKF) and a
+%              diurnal+stochastic ionosphere (Klobuchar + higher-order + gated
+%              scintillation): non-cancelling, physically-sized truth-model residuals.
+%     false -> matched synthetic atmosphere (truth==model; the frozen-golden physics).
+%
+%   Ionosphere handling -- TWO orthogonal boolean TOGGLES (only meaningful when
+%   realistic==true). Both false = the default RAW dual-frequency processing.
+%
+%   atmosphere.ionosphereFree  (default false)
+%     false -> RAW dual-frequency: L1 and L2 are kept as SEPARATE uncombined code rows,
+%              each carrying its own ionosphere (Klobuchar-corrected residual left in,
+%              largely absorbed by the receiver clock). NB this is the old 'single' name
+%              -- it is NOT one frequency; both L1 and L2 are used, just uncombined.
+%              BEST for the default 5-tower geometry (fewest unknowns; converges).
+%     true  -> L1/L2 IONOSPHERE-FREE combination: removes the 1st-order iono per link,
+%              but halves the code rows and amplifies noise x2.98 -> only pays off when
+%              the geometry is measurement-rich (~10+ well-spread towers).
+%
+%   atmosphere.estimateIono  (default false)
+%     true  -> add a per-tower slant-ionosphere EKF STATE (removes iono, keeps all rows,
+%              but adds nTowers unknowns -> over-parameterises a thin geometry). Best only
+%              with a rich tower network. Mutually exclusive with ionosphereFree.
+%
+% NOTE: ionosphere ELIMINATION is per dual-frequency link (tower-count independent);
+% POSITION accuracy is geometry-limited. At 5 towers RAW wins; IF / iono-state recover
+% and then surpass it once enough well-distributed towers make the geometry rich.
+% (These map to cfg.measurements.codeMode / cfg.estimation.ionosphereMode inside
+% ConfigFactory.applyAtmosphereProfile. codeMode='singleFrequency' is the internal name
+% for RAW uncombined dual-frequency -- again, not one frequency.)
+cfg.atmosphere.realistic      = true;
+cfg.atmosphere.ionosphereFree = false;   % L1/L2 ionosphere-free combination
+cfg.atmosphere.estimateIono   = false;   % per-tower slant-ionosphere EKF state
 
 % ================================================================
 % Contract check (asserts only; returns cfg unchanged)
