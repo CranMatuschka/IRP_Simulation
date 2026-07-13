@@ -131,13 +131,25 @@ cfg.formation.mode        = 'helix';   % only supported formation mode
 cfg.formation.baseline_m  = 1000.0;    % inter-satellite separation [m] (>500 m); changeable
 cfg.formation.phase0_rad  = 0.0;       % phase of the first secondary on the projected-circular ring
 
-% --- Five ground towers (from SimulationConfig.m) -------------
+% --- Ground towers: real ground-station sites in the 23 deg-E GEO footprint ---
+% Name, lat[deg], lon[deg], alt[m]. The first 5 are the frozen-golden network (do
+% NOT reorder or edit them: the Stage-85 golden trims to nTowers=5 = these five).
+% Towers 6-12 are additional real space-tracking / geodetic sites (ESA/ASI/IGS/NASA)
+% spread across the visible hemisphere to break the radial<->clock degeneracy of a
+% single ground-only GEO (wide lat -26..+68 deg, lon -25..+78 deg angular spread).
 towerDefs = { ...
-    'Tenerife',        28.3,      -16.5,    0.0; ...
-    'Stockholm',       59.3,       18.1,    0.0; ...
-    'Hartebeesthoek', -25.9,       27.7,    0.0; ...
-    'Bengaluru',       13.0,       77.6,    0.0; ...
-    'Libreville',       0.0355,    -9.4496,  0.0 };
+    'Tenerife',        28.3,      -16.5,    0.0; ...   % 1  ESA/INTA (frozen golden)
+    'Stockholm',       59.3,       18.1,    0.0; ...   % 2  (frozen golden)
+    'Hartebeesthoek', -25.9,       27.7,    0.0; ...   % 3  SANSA/HartRAO (frozen golden)
+    'Bengaluru',       13.0,       77.6,    0.0; ...   % 4  ISRO ISTRAC (frozen golden)
+    'Libreville',       0.0355,    -9.4496,  0.0; ...  % 5  (frozen golden)
+    'Kiruna',          67.88,      21.10,    0.0; ...  % 6  ESA Esrange (far north lever)
+    'Cebreros',        40.45,      -4.37,    0.0; ...  % 7  ESA DSA-2 deep-space
+    'Matera',          40.65,      16.70,    0.0; ...  % 8  ASI Space Geodesy Centre
+    'SantaMaria',      36.97,     -25.17,    0.0; ...  % 9  Azores (west Atlantic lever)
+    'Malindi',         -2.996,     40.19,    0.0; ...  % 10 ASI Luigi Broglio (east equ.)
+    'Ascension',       -7.95,     -14.41,    0.0; ...  % 11 NASA/IGS (south Atlantic)
+    'AbuDhabi',        24.43,      54.62,    0.0 };    % 12 Yahsat (Middle East / east)
 
 % Build ALL defined towers; finalizeConfig() trims to cfg.scenario.nTowers.
 cfg.towers = struct();

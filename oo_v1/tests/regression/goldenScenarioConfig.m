@@ -35,6 +35,11 @@ function cfg = goldenScenarioConfig(durationOverride_s)
     % becomes a no-op and the metrics stay byte-identical to the contract.
     cfg.atmosphere.realistic = false;
 
+    % masterConfig now defaults to nTowers=12 (real ground network). The frozen golden
+    % certifies the original 5-tower physics; finalizeConfig trims to the first 5
+    % towerDefs (= the frozen network), so the metrics stay byte-identical.
+    cfg.scenario.nTowers = 5;
+
     % Gate overrides: summary is collected before any report build, so skip PDF/MAT.
     cfg.report.writePdf   = false;
     cfg.report.writeMat   = false;
