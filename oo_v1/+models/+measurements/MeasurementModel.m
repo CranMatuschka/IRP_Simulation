@@ -203,7 +203,15 @@ classdef MeasurementModel < handle
 
             % Slant-iono Jacobian columns (perTowerSlant): H(mi, ionoIdx(ti)) = (f_L1/f_row)^2
             % Code group delay is +iono, so the code partial is the positive 1/f^2 dispersion.
-            if isfield(stateMap,'ionoIdx') && ~isempty(stateMap.ionoIdx) && any(stateMap.ionoIdx > 0)
+            % Guard on dispersion (>=2 frequencies): CodeMeasurementBuilder adds the iono
+            % STATE to h ONLY in the multi-signal path, and with a single frequency the iono
+            % is unobservable (it aliases with the receiver clock). Setting H without the
+            % matching h term would be an H/h mismatch; with L1 only, neither is set and the
+            % iono is (correctly) absorbed by the clock. No effect on the default L1+L2
+            % estimateIono path (dispersion present) or the golden (no iono state).
+            hasDispersion_io = false;
+            try; hasDispersion_io = revgnss.SignalConfigResolver.hasL2(obj.cfg); catch; end
+            if hasDispersion_io && isfield(stateMap,'ionoIdx') && ~isempty(stateMap.ionoIdx) && any(stateMap.ionoIdx > 0)
                 f_L1_io = revgnss.SignalDefinition.get('L1').frequency_Hz;
                 if isfield(obj.cfg,'signals') && isfield(obj.cfg.signals,'L1') && ...
                         isfield(obj.cfg.signals.L1,'frequency_Hz')
