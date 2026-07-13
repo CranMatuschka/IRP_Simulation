@@ -57,9 +57,25 @@ function cfg = realisticAtmosphereConfig(cfg)
     cfg.errors.ionosphere.stochastic.process            = 'gaussMarkov';
     cfg.errors.ionosphere.stochastic.tau_s              = 600;
     cfg.errors.ionosphere.stochastic.sigmaVDelayL1_ss_m = 0.3;   % ~2 TECU at L1
-    % Single-frequency broadcast correction (imperfect climatology, ~50% RMS removal)
+    % Single-frequency broadcast correction (imperfect climatology, ~50% RMS removal).
+    % The Klobuchar amplitude/DC are DERIVED from the same diurnal VTEC the truth uses
+    % (that is precisely what the broadcast alpha/beta coefficients approximate), scaled
+    % by a <1 accuracy factor for the climatology's imperfection. This replaces the old
+    % hand-set 16 ns/5 ns, which over-corrected: its 5 ns night floor (1.5 m) sat ~1.5x
+    % above the 6 TECU truth floor (3.25 ns / 0.97 m), so the "correction" made the
+    % single-frequency residual LARGER than the raw ionosphere. Deriving from VTEC keeps
+    % the model honest but self-consistent; the residual is the (1-accuracy) climatology
+    % error plus the stochastic TEC and half-cosine shape mismatch Klobuchar cannot forecast.
     cfg.errors.ionosphere.model.correction = 'klobuchar';
-    cfg.errors.ionosphere.model.klobuchar  = struct('amplitude_ns', 16, 'period_h', 24, 'dc_ns', 5);
+    K_L1_m_per_TECU = 40.308e16 / (1575.42e6)^2;             % ~0.1624 m per TECU at L1
+    nsPerTECU       = K_L1_m_per_TECU / 2.99792458e8 * 1e9;   % ~0.5417 ns per TECU at L1
+    klobAccuracy    = 0.75;                                   % broadcast climatology skill (~50-65% RMS removal)
+    vDay_TECU       = cfg.errors.ionosphere.truth.diurnal.vtecDay_TECU;
+    vNight_TECU     = cfg.errors.ionosphere.truth.diurnal.vtecNight_TECU;
+    cfg.errors.ionosphere.model.klobuchar = struct( ...
+        'amplitude_ns', (vDay_TECU - vNight_TECU) * nsPerTECU * klobAccuracy, ...
+        'period_h',     24, ...
+        'dc_ns',        vNight_TECU * nsPerTECU * klobAccuracy);
     % Second/third-order residual that survives the ionosphere-free combination (WP6)
     cfg.errors.ionosphere.higherOrder.enable = true;
 
