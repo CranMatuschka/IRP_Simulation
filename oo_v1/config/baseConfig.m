@@ -90,8 +90,13 @@ cfg.clockScaling.towerNoiseFactor    = 1.0;
 cfg.clockScaling.templateSource      = 'legacy';
 
 % Asset receiver clock fields (simple config fields)
+% CESIUM1 (Cesium beam / H-maser class) is the physically-correct on-board clock for
+% a precision GEO nav/comms spacecraft. OCXO is a ground / control-segment oscillator
+% and was unrealistic here. Note this does NOT materially change the radial error (the
+% clock process noise is not the radial driver -- radial=clock is a geometry/observability
+% degeneracy, not a clock-Q limit); it is a realism correction only.
 cfg.asset.clockName    = 'SpaceReceiverClock';
-cfg.asset.clockType    = 'OCXO';
+cfg.asset.clockType    = 'CESIUM1';
 cfg.asset.clockFactors = struct( ...
     'biasFactor',1,'freqFactor',1,'noiseFactor',1, ...
     'roleNoiseFactor', cfg.clockScaling.receiverNoiseFactor, ...
