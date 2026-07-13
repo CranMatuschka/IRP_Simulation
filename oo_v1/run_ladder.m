@@ -1,9 +1,11 @@
-function results = run_ladder(idx)
+function results = run_ladder(idx, durationOverride_s)
 %RUN_LADDER  Execute the step-wise scenario ladder (see RUN_PLAN_scenario_ladder.md).
 %
-%   run_ladder            % run ALL scenarios in order (long; the last is 24 h)
-%   run_ladder(k)         % run only scenario k (1..10)
-%   run_ladder([1 2 3])   % run a subset, in order
+%   run_ladder                 % run ALL scenarios in order (long; the last is 24 h)
+%   run_ladder(k)              % run only scenario k (1..10)
+%   run_ladder([1 2 3])        % run a subset, in order
+%   run_ladder(k, 43200)       % override the rung duration (e.g. 12 h) but keep its
+%                              % exact topology/config; empty = use the rung's own duration
 %
 %   Each scenario starts from the canonical config (masterConfig), applies the
 %   ladder deltas below, and runs the SAME pipeline the main script uses
@@ -46,6 +48,7 @@ function results = run_ladder(idx)
     for ii = 1:numel(idx)
         k   = idx(ii);
         tag = ladder{k,1}; nS = ladder{k,2}; nR = ladder{k,3}; dur = ladder{k,4};
+        if nargin >= 2 && ~isempty(durationOverride_s); dur = durationOverride_s; end
         fprintf('\n===== LADDER %d/%d : %s  (G5 S%d R%d, %g s) =====\n', ...
             k, size(ladder,1), tag, nS, nR, dur);
 
