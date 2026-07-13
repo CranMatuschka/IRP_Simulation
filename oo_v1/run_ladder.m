@@ -1,4 +1,4 @@
-function results = run_ladder(idx, durationOverride_s)
+function results = run_ladder(idx, durationOverride_s, description)
 %RUN_LADDER  Execute the step-wise scenario ladder (see RUN_PLAN_scenario_ladder.md).
 %
 %   run_ladder                 % run ALL scenarios in order (long; the last is 24 h)
@@ -25,6 +25,14 @@ function results = run_ladder(idx, durationOverride_s)
     addpath(thisDir);
     addpath(fullfile(thisDir, 'config'));
 
+    % All rungs of one ladder run share a single group folder + combined summary:
+    % output/Report_YYYYMMDD/Ladder_{description}/ . Pass a description to name it.
+    if nargin < 3 || isempty(description); description = 'sweep'; end
+    dateStr   = datestr(now, 'yyyymmdd');                 %#ok<TNOW1,DATST>
+    groupName = ['Ladder_' regexprep(char(description), '[^A-Za-z0-9._-]', '_')];
+    groupDir  = fullfile(thisDir, 'output', ['Report_' dateStr], groupName);
+    if ~isfolder(groupDir); mkdir(groupDir); end
+
     % tag        nSpaceAssets  nReceivers  duration_s
     ladder = { ...
         'S1R1',      1,           1,          3600;  ...   % A1
@@ -41,7 +49,7 @@ function results = run_ladder(idx, durationOverride_s)
 
     if nargin < 1 || isempty(idx); idx = 1:size(ladder,1); end
 
-    resultsFile = fullfile(thisDir, 'output', 'ladder_results.txt');
+    resultsFile = fullfile(groupDir, [groupName '.txt']);   % combined Ladder_{description} summary
     results = struct('tag',{},'ok',{},'folder',{},'posErr_m',{},'clkErr_ns',{}, ...
                      'attErr_deg',{},'wall_s',{},'message',{});
 
@@ -57,7 +65,7 @@ function results = run_ladder(idx, durationOverride_s)
                    'clkErr_ns',NaN,'attErr_deg',NaN,'wall_s',NaN,'message','');
         tStart = tic;
         try
-            cfg = i_buildCfg(k, nS, nR, dur, tag);
+            cfg = i_buildCfg(k, nS, nR, dur, tag, groupDir);
             out = revgnss.ReportRunner.runSingle(cfg);
 
             r.folder = out.reportFolder;
@@ -83,7 +91,7 @@ function results = run_ladder(idx, durationOverride_s)
 end
 
 % ===========================================================================
-function cfg = i_buildCfg(k, nSpaceAssets, nReceivers, duration_s, tag)
+function cfg = i_buildCfg(k, nSpaceAssets, nReceivers, duration_s, tag, groupDir)
     % Start from the canonical config, then apply the ladder deltas.
     cfg = masterConfig();
 
@@ -152,16 +160,14 @@ function cfg = i_buildCfg(k, nSpaceAssets, nReceivers, duration_s, tag)
         cfg.diagnostics.storage.snapshot.interval_s = 900;
     end
 
-    % Set the per-run output folder explicitly (mirrors run_oo_v1). Self-describing name
-    % Report_v###_G#S#R# (v### = ladder step k; G/S/R = ground towers / space assets /
-    % receivers). The PDF, MAT, .out and .tex share this stem; only figures keep their
-    % own names. A same-name re-run overwrites (cfg.report.overwrite handles the files).
-    base    = cfg.report.baseOutputDir;
-    dateStr = datestr(now, 'yyyymmdd');                 %#ok<TNOW1,DATST>
-    runName = sprintf('Report_v%03d_G%dS%dR%d', k, cfg.scenario.nTowers, nSpaceAssets, nReceivers);
-    runFolder = fullfile(base, ['Report_' dateStr], runName);
+    % Per-rung folder inside the shared Ladder_{description} group. The folder keeps the
+    % G#S#R# topology; the file stem adds ts# = duration. PDF/MAT/.out/.tex share the stem.
+    runName   = sprintf('Report_v%03d_G%dS%dR%d', k, cfg.scenario.nTowers, nSpaceAssets, nReceivers);
+    fileStem  = sprintf('Report_v%03d_ts%d_G%dS%dR%d', k, round(duration_s), ...
+                        cfg.scenario.nTowers, nSpaceAssets, nReceivers);
+    runFolder = fullfile(groupDir, runName);
     cfg.report.reportFolder = runFolder;
-    cfg.report.stem         = runName;
+    cfg.report.stem         = fileStem;
 end
 
 % ===========================================================================

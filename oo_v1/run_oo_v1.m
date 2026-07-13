@@ -6,10 +6,9 @@
 % the validation test suite; retiring it fully is a separate coordinated migration.)
 %
 % Output (per-run folder):
-%   output/Report_YYYYMMDD/Report_v###_G#S#R#/Report_v###_G#S#R#.{pdf,mat,out,tex}
-%     v### = cfg.report.runVersion (numeric -> v%03d, else sanitised as-is);
-%     G/S/R = ground towers / space assets / receivers.
-%   The PDF, MAT, .out and .tex share the folder's name; only figures keep their own.
+%   output/Report_YYYYMMDD/Report_v###_G#S#R#/Report_v###_ts#_G#S#R#.{pdf,mat,out,tex}
+%     v### = cfg.report.runVersion (numeric -> v%03d, else sanitised as-is).
+%     ts#  = simulation duration in seconds; G/S/R = ground towers / space assets / receivers.
 %   output/latest_<configName>.{pdf,mat}   (convenience pointers to the most recent run)
 close all;
 
@@ -37,12 +36,14 @@ end
 nG = 0; try; nG = cfg.scenario.nTowers;      catch; end %#ok<*NASGU>
 nS = 1; try; nS = cfg.scenario.nSpaceAssets; catch; end
 nR = 1; try; nR = cfg.scenario.nReceivers;   catch; end
-runName    = sprintf('Report_%s_G%dS%dR%d', verTag, nG, nS, nR);
+durS = 0; try; durS = round(cfg.simulation.duration_s); catch; end
+folderName = sprintf('Report_%s_G%dS%dR%d', verTag, nG, nS, nR);            % per-run folder
+fileStem   = sprintf('Report_%s_ts%d_G%dS%dR%d', verTag, durS, nG, nS, nR); % file stem, ts# = duration
 outputDir  = fullfile(thisDir, 'output');
-runFolder  = fullfile(outputDir, ['Report_' dateStr], runName);
+runFolder  = fullfile(outputDir, ['Report_' dateStr], folderName);
 if ~isfolder(runFolder); mkdir(runFolder); end
-cfg.report.reportFolder = runFolder;                  % PDF + MAT (+ TEX + .out) land here
-cfg.report.stem         = runName;                    % files: Report_v###_G#S#R#.{pdf,mat,out,tex}
+cfg.report.reportFolder = runFolder;                  % PDF + MAT + TEX + .out land here
+cfg.report.stem         = fileStem;                   % Report_v###_ts#_G#S#R#.{pdf,mat,out,tex}
 
 % ---- Run the pipeline (truth -> estimation -> post -> report) --------------
 out = revgnss.ReportRunner.runSingle(cfg);
