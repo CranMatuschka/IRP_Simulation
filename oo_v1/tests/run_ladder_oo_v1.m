@@ -39,6 +39,7 @@ function results = run_ladder_oo_v1(duration_s)
         '13_floor_all_clean',    'floor',       @rung_floorClean
         '14_geom_5towers',       'geometry',    @rung_fiveTowers
         '15_geom_swarm_ISL',     'geometry',    @rung_swarmISL
+        '16_realistic_cesium',   'clock',       @rung_realisticClock
     };
 
     csvPath = fullfile(oo_v1Root, 'output', sprintf('ladder_%ds.csv', duration_s));
@@ -120,6 +121,11 @@ function cfg = rung_ionoFree(cfg);       cfg.measurements.codeMode = 'ionosphere
 function cfg = rung_carrierOff(cfg);     cfg.measurements.carrierMode = 'off'; end
 function cfg = rung_dopplerOff(cfg);     cfg.measurements.doppler.useInEKF = false; end
 function cfg = rung_rxDeterministic(cfg);cfg.clock.receiver.deterministic = true; end
+function cfg = rung_realisticClock(cfg)
+    % WP-4 sensitivity: swap the idealised legacy clock for the realistic,
+    % literature-anchored JOW Table 2.1 set (real caesium / OCXO2). One string.
+    cfg.clock.templateSource = 'jowTable2p1';
+end
 function cfg = rung_towerPerfect(cfg)
     cfg.estimator.towerClockMode = 'perfectCorrection';
     cfg.clocks.tower.product.sigmaBias_m    = 0;

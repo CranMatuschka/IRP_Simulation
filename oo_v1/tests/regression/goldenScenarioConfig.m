@@ -48,6 +48,12 @@ function cfg = goldenScenarioConfig(durationOverride_s)
     % (goldenHeadlineScenarioConfig); do NOT retarget this single-antenna golden.
     cfg.scenario.nReceivers = 1;
 
+    % masterConfig exposes cfg.clock.templateSource (idealised 'legacy' | realistic
+    % 'jowTable2p1'). The frozen golden certifies the idealised legacy clock; pin it so a
+    % future default flip to a realistic (noisier) clock cannot disturb the frozen numbers.
+    % (goldenHeadlineScenarioConfig inherits this pin via delegation.)
+    cfg.clock.templateSource = 'legacy';
+
     % Gate overrides: summary is collected before any report build, so skip PDF/MAT.
     cfg.report.writePdf   = false;
     cfg.report.writeMat   = false;

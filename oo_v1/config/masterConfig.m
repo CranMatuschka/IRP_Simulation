@@ -117,6 +117,14 @@ cfg.biases.interFrequency.carrier.model.L2_m = 0;
 % scenario assembly) and corrected by a delayed, noisy broadcast product whose
 % age-grown uncertainty enters R.
 cfg.clock.receiver.deterministic  = false;
+% Receiver oscillator + clock realism (both single strings, changed right here).
+% clockType picks the oscillator class ('CESIUM1' | 'OCXO' | 'RUBIDIUM' | 'TCXO');
+% templateSource picks the h-coefficient realism: 'legacy' = idealised/optimistic (the
+% frozen-golden and headline default) | 'jowTable2p1' = realistic, literature-anchored
+% (JOW Table 2.1 real caesium / OCXO2 -> the sub-100 ps timing result degrades honestly).
+% Change either ONE string; ConfigFactory.finalizeConfig rebuilds every clock from them.
+cfg.asset.clockType               = 'CESIUM1';
+cfg.clock.templateSource          = 'legacy';
 cfg.estimator.estimateTowerClocks = false;
 cfg.clocks.tower.product.mode                   = 'truthHistoryProductNoisy';
 cfg.clocks.tower.product.updateInterval_s       = 30;

@@ -70,4 +70,30 @@ assert(aJ(2) >= 1e-10, 'Part B FAILED: jow OCXO ADEV@1000s=%.2e still optimistic
 fprintf('    OCXO ADEV @1000s: legacy=%.2e  jow=%.2e  (jow > legacy, conservative)\n', aL(2), aJ(2));
 fprintf('    PASS\n');
 
+% ================================================================
+% Part C: WP-4 exposure. masterConfig exposes the realism string as a one-line knob;
+% both frozen goldens PIN the idealised 'legacy' clock; the realistic CESIUM is noisier.
+% ================================================================
+fprintf('  C. masterConfig exposes templateSource; goldens pin legacy ...\n');
+addpath(fullfile(thisDir, 'regression'));
+assert(strcmp(masterConfig().clock.templateSource, 'legacy'), ...
+    'Part C FAILED: masterConfig default templateSource must be ''legacy''.');
+assert(strcmp(goldenScenarioConfig().clock.templateSource, 'legacy'), ...
+    'Part C FAILED: single-antenna golden must pin templateSource=''legacy''.');
+assert(strcmp(goldenHeadlineScenarioConfig().clock.templateSource, 'legacy'), ...
+    'Part C FAILED: headline golden must pin templateSource=''legacy''.');
+
+% Sensitivity: the realistic caesium receiver clock is noisier than legacy at tau=1 s.
+cLl = revgnss.ConfigFactory.makeClockConfig('CESIUM1', 100, struct(), struct('templateSource','legacy'));
+cLj = revgnss.ConfigFactory.makeClockConfig('CESIUM1', 100, struct(), struct('templateSource','jowTable2p1'));
+clkCl = models.clocks.ClockModel(cLl);
+clkCj = models.clocks.ClockModel(cLj);
+[~, adCl] = clkCl.theoreticalAllanDeviation([1 1000]);
+[~, adCj] = clkCj.theoreticalAllanDeviation([1 1000]);
+assert(adCj(1) > adCl(1), ...
+    'Part C FAILED: realistic CESIUM not noisier @1s (%.2e vs %.2e)', adCj(1), adCl(1));
+fprintf('    masterConfig=legacy; goldens pinned; realistic CESIUM ADEV@1s=%.2e > legacy %.2e\n', ...
+    adCj(1), adCl(1));
+fprintf('    PASS\n');
+
 fprintf('=== test_clock_template_sourcing: ALL PASS ===\n');
