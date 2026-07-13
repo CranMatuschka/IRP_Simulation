@@ -81,6 +81,9 @@ classdef ClockModel < handle
         % Noise configuration
         noiseCoeffs     (1,1) struct        % h2, h1, h0, hMinus1, hMinus2
         deterministic   (1,1) logical = false  % if true, no stochastic noise
+        driftFlickerInQ (1,1) logical = false  % opt-in: inject flicker-FM into the drift (freq) Q22
+                                               % (A/B showed it inflates Q22 ~26x but leaves the
+                                               %  actual/sigma ratio unchanged -> not the consistency fix)
         seed            (1,1) double  = 42
         lastTime_s      (1,1) double  = 0
 
@@ -117,6 +120,7 @@ classdef ClockModel < handle
             end
 
             if isfield(cfg,'deterministic');         obj.deterministic        = cfg.deterministic;        end
+            if isfield(cfg,'driftFlickerInQ');       obj.driftFlickerInQ      = logical(cfg.driftFlickerInQ); end
             if isfield(cfg,'seed');                  obj.seed                 = cfg.seed;                 end
             if isfield(cfg,'bias_s');                obj.bias_s               = cfg.bias_s;               end
             if isfield(cfg,'fracFreq');              obj.fracFreq             = cfg.fracFreq;             end
@@ -338,10 +342,20 @@ classdef ClockModel < handle
             %
             %   q1  = h0/2          [WFM phase variance rate, s^2/s]
             %   q2  = 2*pi^2*hm2    [RWFM freq variance rate, 1/s]
-            %   q_f = 2*ln(2)*hm1   [conservative FFM phase variance rate]
+            %   q_f = 2*ln(2)*hm1   [flicker-FM (FFM) variance term]
             %
-            %   Q_s = [(q1+q_f)*dt + q2*dt^3/3,  q2*dt^2/2]
-            %         [q2*dt^2/2,                 q2*dt    ]
+            %   Q_s = [(q1+q_f)*dt + q2*dt^3/3,  q2*dt^2/2  ]
+            %         [q2*dt^2/2,                 q2*dt + q_f*dt]   (FFM in freq, if enabled)
+            %
+            % Flicker FM (hMinus1) is a FREQUENCY noise, so its variance is added to
+            % the drift (frequency) state Q22 where it physically acts -- otherwise
+            % the RWFM-only Q22 is too small and the drift +/-3sigma envelope
+            % under-covers the true frequency wander. The historical conservative
+            % FFM term in the phase entry Q11 is retained. Gated by driftFlickerInQ
+            % (default false): an A/B test showed adding FFM inflates Q22 ~26x but
+            % leaves the actual-error/filter-sigma ratio unchanged, so it does NOT
+            % restore drift +/-3sigma consistency (that is an R / observability issue,
+            % not a process-noise magnitude issue). Kept as an opt-in lever.
             %
             % WPM (h2) and FPM (h1) are excluded from Q: they affect
             % timescales << dt and are represented in the truth model only.
@@ -353,11 +367,17 @@ classdef ClockModel < handle
 
             q1    = h.h0 / 2;                     % WFM phase variance rate
             q2    = 2 * pi^2 * h.hMinus2;         % RWFM freq-drift variance rate
-            q_ffm = 2 * log(2) * h.hMinus1;       % conservative FFM additive term
+            q_ffm = 2 * log(2) * h.hMinus1;       % flicker-FM (FFM) variance term
+
+            % Drift (frequency) process-noise entry: RWFM, plus flicker-FM when enabled.
+            q22 = q2 * dt_s;
+            if obj.driftFlickerInQ
+                q22 = q22 + q_ffm * dt_s;
+            end
 
             % Discrete-time integral: Q over interval dt
             Q_s = [(q1 + q_ffm)*dt_s + q2*dt_s^3/3,  q2*dt_s^2/2; ...
-                    q2*dt_s^2/2,                       q2*dt_s];
+                    q2*dt_s^2/2,                       q22];
 
             % Ensure symmetry (floating-point safety)
             Q_s = (Q_s + Q_s') / 2;
