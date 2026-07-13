@@ -430,7 +430,28 @@ classdef ErrorChain < handle
             if isfield(tc,'sigma_m')
                 sigmaBase = tc.sigma_m * mappingFn(elv);
             end
-            sigma_m = sqrt(sigmaBase.^2 + sigmaStoch.^2);
+
+            % Variance double-count fix: when the per-tower ZWD is an EKF STATE
+            % (estimation.troposphereMode='perTowerZwd'), the estimator TRACKS the slow
+            % wet delay -- its steady-state variance lives in the ZWD state covariance.
+            % Charging the full sigmaWet_ss into R as well would count that same variance
+            % twice (estimate it AND pay for it). When the state is active, R therefore
+            % carries only the FAST, un-trackable wet residual (the per-step Gauss-Markov
+            % increment sigma_ss*sqrt(1-exp(-2dt/tau))); the slow part is the state's job.
+            % Golden-safe: the matched golden runs troposphereMode='none' -> full sigma,
+            % byte-identical. The TRUTH injection above is unchanged (full sigmaStoch).
+            sigmaWetR = sigmaWet;
+            zwdStateActive = false;
+            try; zwdStateActive = strcmp(obj.cfg.estimation.troposphereMode, 'perTowerZwd'); catch; end
+            if zwdStateActive
+                tauZwd = 3600; sigSs = sigmaWet; dtZwd = 1;
+                try; tauZwd = obj.cfg.estimation.tropoZwd.tau_s;      catch; end
+                try; sigSs  = obj.cfg.estimation.tropoZwd.sigma_ss_m; catch; end
+                try; dtZwd  = obj.cfg.simulation.dt_s;               catch; end
+                sigmaWetR = sigSs * sqrt(max(1 - exp(-2*dtZwd / max(tauZwd,eps)), 0));
+            end
+            sigmaStochR = sqrt((sigmaWetR * mappingFn(elv)).^2 + sigmaResidual.^2);
+            sigma_m = sqrt(sigmaBase.^2 + sigmaStochR.^2);
         end
 
         % ----------------------------------------------------------------
