@@ -87,4 +87,20 @@ assert(abs(log10(ratio13)) > 1, ...
     'test_clock_allan_model FAILED: WFM and OCXO ADEV curves are suspiciously similar');
 
 fprintf('  All three clock types have distinct ADEV curves: PASS\n');
+
+% --- Magnitude check (WP-8): theoretical RWFM ADEV matches the empirical curve
+% After the coefficient fix the theoretical overlay uses sigma_y^2 = (2*pi^2/3) h_-2 tau,
+% which matches the empirical RWFM ADEV; the old (8*pi^2/6 = 4*pi^2/3) was sqrt(2) high,
+% so the median theoretical/empirical ratio would sit near 1.41 instead of ~1.
+[~, adev2_th] = clk2.theoreticalAllanDeviation(tauV);
+at = adev2_th(:); ae = adev2(:); tv = tauV(:);
+midMask = tv >= 3 & tv <= DUR/8 & ae > 0 & ~isnan(ae) & isfinite(at) & at > 0;
+assert(sum(midMask) >= 4, ...
+    'test_clock_allan_model FAILED: too few valid RWFM points for the magnitude check');
+medRatio = median(at(midMask) ./ ae(midMask));
+fprintf('  RWFM theoretical/empirical ADEV median ratio: %.3f (expect ~1, not ~1.41)\n', medRatio);
+assert(medRatio > 0.6 && medRatio < 1.25, ...
+    ['test_clock_allan_model FAILED: RWFM theoretical ADEV magnitude off ' ...
+     '(median ratio %.3f); check the RWFM coefficient (WP-8: 2*pi^2/3).'], medRatio);
+
 fprintf('=== test_clock_allan_model PASS ===\n');

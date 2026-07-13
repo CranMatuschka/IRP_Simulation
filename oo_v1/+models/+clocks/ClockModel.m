@@ -439,11 +439,18 @@ classdef ClockModel < handle
             tau  = tauVec_s(:);
             var_y = zeros(size(tau));
 
+            % NOTE: WPM/FPM terms omit the high-cutoff-frequency (f_h) factors
+            % (WPM propto 3*f_h; FPM propto [1.038 + 3 ln(2 pi f_h tau)]); this
+            % overlay is a magnitude approximation for those two branches.
             var_y = var_y + 3 * h.h2 ./ (4*pi^2 * tau.^2);          % WPM
             var_y = var_y + 1.038 * h.h1 ./ (4*pi^2 * tau.^2);      % FPM
             var_y = var_y + h.h0 ./ (2 * tau);                       % WFM
             var_y = var_y + 2 * log(2) * h.hMinus1;                  % FFM (floor)
-            var_y = var_y + (8*pi^2/6) * h.hMinus2 .* tau;           % RWFM
+            % RWFM: IEEE-1139 Allan VARIANCE is (2*pi^2/3) h_-2 tau. This matches the
+            % code's own process noise (q2 = 2*pi^2 h_-2) and RWFM truth synthesis
+            % (sigma = sqrt(2*pi^2 h_-2 dt)); the previous 8*pi^2/6 = 4*pi^2/3 was 2x
+            % too large in variance (sqrt(2) in deviation). (WP-8)
+            var_y = var_y + (2*pi^2/3) * h.hMinus2 .* tau;           % RWFM
 
             adev_th = sqrt(max(var_y, 0));
         end
