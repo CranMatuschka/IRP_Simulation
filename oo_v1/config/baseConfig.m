@@ -211,7 +211,7 @@ cfg.estimator.towerClockMode          = 'perfectCorrection';
 cfg.estimator.towerClockCorrectionSigma_m = 0.5; % used if noisyCorrection
 cfg.estimator.elevationMask_rad       = 5 * pi/180;
 cfg.estimator.attitudeJacobianStep_rad = 1e-6;
-cfg.estimator.sigma_accel_mps2        = 0.01;   % baseline residual-acceleration process noise (SNC): absorbs unmodeled accelerations (SRP, third body, higher-order gravity) in a J2-only filter
+cfg.estimator.sigma_accel_mps2        = 1e-6;   % baseline residual-acceleration process noise (SNC) for a MATCHED-J2 GEO EKF: covers SRP (~1e-7), luni-solar third-body (~1e-6) and higher-order geopotential residuals. The old 0.01 was ~1e4x too large and let the weakly-observable radial<->receiver-clock mode random-walk (radial 10 m -> 1.9 m when corrected). For an explicit reduced-dynamics/mismatch run, size the EXTRA noise via processNoise.modelMismatch below, not this baseline.
 cfg.estimator.dynamics.mode           = 'constantVelocity';
 % Dynamic-model residual-acceleration process noise. processNoise.modelMismatch is the
 % back-compat field the EKF (ReverseGNSSEKF.buildQ_) reads; it carries the EXTRA process
