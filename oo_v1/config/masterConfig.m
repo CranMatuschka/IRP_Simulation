@@ -33,9 +33,10 @@ cfg.diagnostics.storage.snapshot.interval_s = 300;
 % >1 = helix ISL swarm aiding the primary, primary clock scaling ~1/sqrt(N-1)).
 cfg.scenario.name         = 'singleAssetCarrierAttitude';
 cfg.scenario.nSpaceAssets = 1;        % helix ISL swarm (5 secondaries) -> ~3 cm / ~50 ps
-cfg.scenario.nTowers      = 12;       % 12 real ground sites (baseConfig towerDefs); wide
-                                      % lat/lon spread breaks the single-GEO radial<->clock
-                                      % degeneracy. Set 5 for the frozen-golden network.
+cfg.scenario.nTowers      = 5;        % 5-tower default (frozen-golden network). baseConfig
+                                      % defines 12 real sites; set nTowers=12 for the wide
+                                      % network that breaks the single-GEO radial<->clock
+                                      % degeneracy (towers 6-12 are the extra real sites).
 cfg.scenario.orbitClass   = 'GEO';    % 'GEO' | 'MEO' | 'LEO'
 % nReceivers is owned by the scenario assembly below (4-antenna cross pattern);
 % do not set it here. nReceivers=1 -> attitude off; >1 -> attitude on.
