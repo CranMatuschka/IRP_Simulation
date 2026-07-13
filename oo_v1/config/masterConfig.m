@@ -38,8 +38,11 @@ cfg.scenario.nTowers      = 5;        % 5-tower default (frozen-golden network).
                                       % network that breaks the single-GEO radial<->clock
                                       % degeneracy (towers 6-12 are the extra real sites).
 cfg.scenario.orbitClass   = 'GEO';    % 'GEO' | 'MEO' | 'LEO'
-% nReceivers is owned by the scenario assembly below (4-antenna cross pattern);
-% do not set it here. nReceivers=1 -> attitude off; >1 -> attitude on.
+% Receiver antennas. The scenario assembly + finalizeConfig rebuild the lever-arm
+% cross from this and turn attitude estimation ON (>1) or OFF (==1). 4 = headline
+% 4-antenna cross pattern (attitude ON, the stated objective); set to 1 for the
+% ground-only single-antenna knob (G5S1R1, attitude OFF).
+cfg.scenario.nReceivers   = 4;
 
 %% Report output
 % What the run writes and in which style. 'clockExact' compiles a LaTeX PDF (needs
