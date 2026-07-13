@@ -122,6 +122,7 @@ classdef ReportRunner
             cfg.plots.closeAfterSave        = false;
 
             % ---- Run simulation (finalizeConfig called inside) ----------
+            cfgLiteral = cfg;   % literal (pre-finalizeConfig) snapshot for the .out override dump (WP-2)
             sim = revgnss.ReverseGNSSSimulation(cfg);
             sim.initialize();
             sim.run();
@@ -1654,7 +1655,7 @@ classdef ReportRunner
 
             % Run log (<stem>.out) beside the PDF/MAT.
             if writePdf || writeMat
-                revgnss.ReportRunner.writeRunLog_(reportFolder, pdfStem, cfg, summary, pdfPath, matPath);
+                revgnss.ReportRunner.writeRunLog_(reportFolder, pdfStem, cfg, cfgLiteral, summary, pdfPath, matPath);
             end
 
             fprintf('=== ReportRunner: done ===\n');
@@ -2404,8 +2405,10 @@ classdef ReportRunner
             end
         end
 
-        function writeRunLog_(reportFolder, stem, cfg, summary, pdfPath, matPath)
+        function writeRunLog_(reportFolder, stem, cfg, cfgLiteral, summary, pdfPath, matPath)
             % writeRunLog_  Write a concise <stem>.out run log beside the PDF/MAT.
+            %   cfg is the RESOLVED config (post-finalizeConfig); cfgLiteral is the
+            %   pre-finalizeConfig snapshot, so the .out can show the overrides (WP-2).
             try
                 fid = fopen(fullfile(reportFolder, [stem '.out']), 'w');
                 if fid < 0; return; end
@@ -2432,6 +2435,24 @@ classdef ReportRunner
                 fprintf(fid, '  pdf     : %s\n', pdfPath);
                 fprintf(fid, '  mat     : %s\n', matPath);
                 fprintf(fid, '  figures : %s\n', fullfile(reportFolder, 'figures'));
+
+                % WP-2: make the run self-describing WITHOUT MATLAB. The literal
+                % masterConfig is not what ran; finalizeConfig resolved/overrode many
+                % toggles. Dump the resolved config + the literal-vs-resolved overrides.
+                try
+                    rl = revgnss.ConfigTextDump.flatten(cfg);
+                    fprintf(fid, '\n-- resolved config (post-finalizeConfig; %d fields) --\n', numel(rl));
+                    for i = 1:numel(rl); fprintf(fid, '  %s\n', rl{i}); end
+                    ov = revgnss.ConfigTextDump.diff(cfgLiteral, cfg);
+                    fprintf(fid, ['\n-- literal vs resolved overrides ' ...
+                        '(finalizeConfig changed %d field(s); +%d derived field(s) added) --\n'], ...
+                        size(ov.changed, 1), size(ov.added, 1));
+                    for i = 1:size(ov.changed, 1)
+                        fprintf(fid, '  %s : %s -> %s\n', ov.changed{i,1}, ov.changed{i,2}, ov.changed{i,3});
+                    end
+                catch dumpErr
+                    fprintf(fid, '\n-- resolved-config dump failed: %s --\n', dumpErr.message);
+                end
             catch; end
         end
 
