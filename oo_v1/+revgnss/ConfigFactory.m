@@ -493,10 +493,14 @@ classdef ConfigFactory
             % applyAtmosphereProfile  Apply masterConfig's atmosphere toggles.
             %   Opt-in: returns cfg unchanged unless cfg.atmosphere.realistic is
             %   true. When true, overlays the physically-realistic troposphere/
-            %   ionosphere/scintillation (realisticAtmosphereConfig) and resolves
-            %   cfg.atmosphere.ionosphereHandling into the measurement/estimation
-            %   settings. Idempotent (re-running yields the same cfg), so it is safe
-            %   under finalizeConfig being called more than once per run.
+            %   ionosphere/scintillation (realisticAtmosphereConfig) and resolves the
+            %   two orthogonal ionosphere toggles into the measurement/estimation
+            %   settings:
+            %     cfg.atmosphere.ionosphereFree -> codeMode 'ionosphereFree' (IF combo)
+            %     cfg.atmosphere.estimateIono   -> ionosphereMode 'perTowerSlant' state
+            %     both false                    -> codeMode 'singleFrequency' (RAW dual-freq)
+            %   Idempotent (re-running yields the same cfg), so it is safe under
+            %   finalizeConfig being called more than once per run.
             if ~(isfield(cfg,'atmosphere') && isfield(cfg.atmosphere,'realistic') ...
                     && cfg.atmosphere.realistic)
                 return;   % matched synthetic atmosphere (golden / bespoke tests)
@@ -507,22 +511,36 @@ classdef ConfigFactory
                      'is not on the path (expected in oo_v1/config).']);
             end
             cfg  = realisticAtmosphereConfig(cfg);
-            mode = 'single';
-            if isfield(cfg.atmosphere,'ionosphereHandling')
-                mode = cfg.atmosphere.ionosphereHandling;
+
+            % Resolve the ionosphere toggles. Prefer the two booleans; accept the
+            % legacy 'ionosphereHandling' string for back-compat and map it.
+            ionoFree   = false;
+            estimIono  = false;
+            if isfield(cfg.atmosphere,'ionosphereFree'); ionoFree  = logical(cfg.atmosphere.ionosphereFree); end
+            if isfield(cfg.atmosphere,'estimateIono');   estimIono = logical(cfg.atmosphere.estimateIono);   end
+            if isfield(cfg.atmosphere,'ionosphereHandling')   % legacy alias
+                switch cfg.atmosphere.ionosphereHandling
+                    case 'ionosphereFree'; ionoFree = true;
+                    case 'ekfState';       estimIono = true;
+                    case 'single'          % raw dual-frequency -> both false
+                    otherwise
+                        error('revgnss:ConfigFactory:badIonosphereHandling', ...
+                            'Unknown cfg.atmosphere.ionosphereHandling ''%s''.', cfg.atmosphere.ionosphereHandling);
+                end
             end
-            switch mode
-                case 'ionosphereFree'
-                    cfg.measurements.codeMode = 'ionosphereFree';
-                case 'ekfState'
-                    cfg.measurements.codeMode              = 'singleFrequency';
-                    cfg.estimation.ionosphereMode          = 'perTowerSlant';
-                    cfg.errors.ionosphere.model.correction = 'none';
-                case 'single'
-                    cfg.measurements.codeMode = 'singleFrequency';
-                otherwise
-                    error('revgnss:ConfigFactory:badIonosphereHandling', ...
-                        'Unknown cfg.atmosphere.ionosphereHandling ''%s''.', mode);
+            if ionoFree && estimIono
+                error('revgnss:ConfigFactory:conflictingIonosphere', ...
+                    'cfg.atmosphere.ionosphereFree and .estimateIono are mutually exclusive.');
+            end
+
+            if ionoFree
+                cfg.measurements.codeMode = 'ionosphereFree';
+            elseif estimIono
+                cfg.measurements.codeMode              = 'singleFrequency';
+                cfg.estimation.ionosphereMode          = 'perTowerSlant';
+                cfg.errors.ionosphere.model.correction = 'none';
+            else
+                cfg.measurements.codeMode = 'singleFrequency';   % RAW uncombined dual-freq
             end
         end
 

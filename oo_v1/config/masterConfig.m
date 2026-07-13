@@ -133,8 +133,13 @@ cfg = expandEnableToggles(cfg, { ...
     'effects.towerSurvey', 'effects.antennaPCO', 'effects.antennaPCV' });
 
 %% Measurement observables
-% Code and carrier both use guarded L1/L2 ionosphere-free EKF rows. Carrier phase runs
-% as a float-ambiguity EKF with one ambiguity per tower x receiver x signal (no fixing).
+% DIAGNOSTIC ionosphere-free rows: these build L1/L2 IF code/carrier rows for the REPORT
+% and consistency diagnostics ONLY -- NOT a second EKF path. Per CodeIonoFreeRowBuilder:
+% "EKF integration uses the existing CodeMeasurementBuilder codeMode path." The EKF's
+% actual ionosphere handling is the codeMode chosen by cfg.atmosphere.ionosphereFree /
+% .estimateIono above; the '.useInEkf' field below is diagnostic metadata, not a toggle
+% that puts a second (double-counting) IF row into the filter. Carrier phase runs as a
+% float-ambiguity EKF (one ambiguity per tower x receiver x signal, no fixing).
 cfg.measurements.code.ionosphereFreeRows.enable     = true;
 cfg.measurements.code.ionosphereFreeRows.useInEkf    = true;
 cfg.diagnostics.codeIonoFreeRows.enable              = true;
@@ -454,21 +459,33 @@ end
 %              scintillation): non-cancelling, physically-sized truth-model residuals.
 %     false -> matched synthetic atmosphere (truth==model; the frozen-golden physics).
 %
-%   atmosphere.ionosphereHandling  (only meaningful when realistic==true)
-%     'single'         raw dual-frequency L1+L2; the ionosphere is left in the
-%                      measurement and largely absorbed by the receiver clock. BEST
-%                      for the default 5-tower geometry (fewest unknowns; converges).
-%     'ionosphereFree' L1/L2 IF combination: removes 1st-order iono per link, but
-%                      halves the code rows and amplifies noise x2.98 -> only pays off
-%                      when the geometry is measurement-rich (~10+ well-spread towers).
-%     'ekfState'       per-tower slant-ionosphere EKF states: removes iono and keeps
-%                      all rows, but adds nTowers unknowns -> over-parameterises a thin
-%                      geometry. Best ONLY with a rich tower network.
+%   Ionosphere handling -- TWO orthogonal boolean TOGGLES (only meaningful when
+%   realistic==true). Both false = the default RAW dual-frequency processing.
+%
+%   atmosphere.ionosphereFree  (default false)
+%     false -> RAW dual-frequency: L1 and L2 are kept as SEPARATE uncombined code rows,
+%              each carrying its own ionosphere (Klobuchar-corrected residual left in,
+%              largely absorbed by the receiver clock). NB this is the old 'single' name
+%              -- it is NOT one frequency; both L1 and L2 are used, just uncombined.
+%              BEST for the default 5-tower geometry (fewest unknowns; converges).
+%     true  -> L1/L2 IONOSPHERE-FREE combination: removes the 1st-order iono per link,
+%              but halves the code rows and amplifies noise x2.98 -> only pays off when
+%              the geometry is measurement-rich (~10+ well-spread towers).
+%
+%   atmosphere.estimateIono  (default false)
+%     true  -> add a per-tower slant-ionosphere EKF STATE (removes iono, keeps all rows,
+%              but adds nTowers unknowns -> over-parameterises a thin geometry). Best only
+%              with a rich tower network. Mutually exclusive with ionosphereFree.
+%
 % NOTE: ionosphere ELIMINATION is per dual-frequency link (tower-count independent);
-% POSITION accuracy is geometry-limited. At 5 towers 'single' wins; IF/ekfState recover
+% POSITION accuracy is geometry-limited. At 5 towers RAW wins; IF / iono-state recover
 % and then surpass it once enough well-distributed towers make the geometry rich.
-cfg.atmosphere.realistic          = true;
-cfg.atmosphere.ionosphereHandling = 'single';
+% (These map to cfg.measurements.codeMode / cfg.estimation.ionosphereMode inside
+% ConfigFactory.applyAtmosphereProfile. codeMode='singleFrequency' is the internal name
+% for RAW uncombined dual-frequency -- again, not one frequency.)
+cfg.atmosphere.realistic      = true;
+cfg.atmosphere.ionosphereFree = false;   % L1/L2 ionosphere-free combination
+cfg.atmosphere.estimateIono   = false;   % per-tower slant-ionosphere EKF state
 
 % ================================================================
 % Contract check (asserts only; returns cfg unchanged)
