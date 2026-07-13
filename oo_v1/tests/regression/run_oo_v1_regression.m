@@ -1,7 +1,11 @@
-function result = run_oo_v1_regression(tier)
-%RUN_OO_V1_REGRESSION  Stage-85 equivalence gate versus the frozen Phase-0 golden.
-%   result = run_oo_v1_regression('smoke')   % 120 s, per-commit iteration
-%   result = run_oo_v1_regression('full')    % 3600 s, phase-boundary certification
+function result = run_oo_v1_regression(tier, scenario)
+%RUN_OO_V1_REGRESSION  Stage-85 equivalence gate versus a frozen Phase-0 golden.
+%   result = run_oo_v1_regression('smoke')               % single-antenna, 120 s
+%   result = run_oo_v1_regression('full')                % single-antenna, 3600 s
+%   result = run_oo_v1_regression('smoke','headline')    % 4-antenna headline, 120 s
+%
+%   scenario: 'single' (default) | 'headline' (4-antenna cross); the headline gate
+%   diffs against golden/golden_headline_<tier>.mat.
 %
 %   Re-runs the frozen golden scenario, extracts the ReportRunner summary metrics,
 %   and diffs them against tests/regression/golden/golden_<tier>.mat.
@@ -14,7 +18,8 @@ function result = run_oo_v1_regression(tier)
 %   The gate certifies "done" — not any edit or model. Deviation = bug. NEVER
 %   loosen rtol/atol or trim coreMetricNames to make a change pass.
     if nargin < 1 || isempty(tier); tier = 'smoke'; end
-    tier = lower(tier);
+    if nargin < 2 || isempty(scenario); scenario = 'single'; end
+    tier = lower(tier); scenario = lower(scenario);
     thisDir = fileparts(mfilename('fullpath'));
     addpath(thisDir);                        % harness helpers
     addpath(fullfile(thisDir, '..', '..'));  % oo_v1 root, for +revgnss
@@ -22,17 +27,23 @@ function result = run_oo_v1_regression(tier)
     rtol = 1e-9;    % relative tolerance: allows only FP-reassociation noise
     atol = 1e-12;   % absolute floor for near-zero metrics
 
-    goldFile = fullfile(thisDir, 'golden', ['golden_' tier '.mat']);
+    switch scenario
+        case 'single';   goldName = ['golden_' tier '.mat'];
+        case 'headline'; goldName = ['golden_headline_' tier '.mat'];
+        otherwise; error('run_oo_v1_regression:scenario', ...
+            'scenario must be ''single'' or ''headline'' (got ''%s'').', scenario);
+    end
+    goldFile = fullfile(thisDir, 'golden', goldName);
     assert(isfile(goldFile), 'run_oo_v1_regression:noGolden', ...
-        'Golden reference missing: %s\nRun captureGolden(''%s'') from the validated Phase-0 state first.', ...
-        goldFile, tier);
+        'Golden reference missing: %s\nRun captureGolden(''%s'',''%s'') from the validated Phase-0 state first.', ...
+        goldFile, tier, scenario);
     G = load(goldFile);
 
     dur = [];
     if strcmp(tier, 'smoke'); dur = 120; end
 
     t0  = tic;
-    out = runGoldenScenario(dur);
+    out = runGoldenScenario(dur, [], scenario);
     cur = extractMetrics(out.summary);
     wall = toc(t0);
 
@@ -70,7 +81,7 @@ function result = run_oo_v1_regression(tier)
     corePass = isempty(missingCore) && isempty(addedCore) && isempty(coreFail);
 
     % ---- report ----
-    fprintf('\n===== OO_V1 REGRESSION GATE [%s] =====\n', upper(tier));
+    fprintf('\n===== OO_V1 REGRESSION GATE [%s / %s] =====\n', upper(tier), upper(scenario));
     fprintf('golden: dur=%gs epochs=%d MATLAB %s\n', G.duration_s, G.capturedEpochs, G.matlabVersion);
     fprintf('metrics: golden=%d current=%d shared=%d | tol rel=%.0e abs=%.0e | wall=%.1fs\n', ...
         numel(goldNames), numel(curNames), numel(shared), rtol, atol, wall);
@@ -90,7 +101,7 @@ function result = run_oo_v1_regression(tier)
         end
     end
 
-    result = struct('pass', corePass, 'tier', tier, 'nMetrics', numel(goldNames), ...
+    result = struct('pass', corePass, 'tier', tier, 'scenario', scenario, 'nMetrics', numel(goldNames), ...
         'nShared', numel(shared), 'coreFail', {coreFail}, 'nonCoreFail', {nonCoreFail}, ...
         'missing', {missing}, 'added', {added}, 'wallSec', wall);
 
