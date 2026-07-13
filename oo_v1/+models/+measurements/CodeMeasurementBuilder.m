@@ -200,7 +200,18 @@ classdef CodeMeasurementBuilder
                     h(mi) = h(mi) + d_rx_code_h;
                 end
 
-                sigma_i = sqrt(errStruct.sigmaTotal_m(mi)^2 + towerClkSigma(mi)^2);
+                % Tower-clock R guard (variance double-count): when this tower's clock is
+                % an estimated EKF state (towerClockIdx>0, i.e. estimateTowerClocks=true)
+                % its uncertainty already lives in the state covariance, so the broadcast-
+                % product sigma must NOT also be charged into R. Mirror the h-side (which
+                % reads the state instead of the product). Default estimateTowerClocks=false
+                % -> towerClockIdx=0 -> no-op (golden-safe, byte-identical).
+                twrClkSig_mi = towerClkSigma(mi);
+                if isfield(stateMap,'towerClockIdx') && size(stateMap.towerClockIdx,1) >= ti ...
+                        && stateMap.towerClockIdx(ti,1) > 0
+                    twrClkSig_mi = 0;
+                end
+                sigma_i = sqrt(errStruct.sigmaTotal_m(mi)^2 + twrClkSig_mi^2);
                 R_diag(mi) = max(sigma_i, sigmaFloor)^2;
             end
 
@@ -513,11 +524,19 @@ classdef CodeMeasurementBuilder
                 if isfield(smSig_,'ionoHO') && numel(smSig_.ionoHO) >= M_pairs_if; sigIonoHO_ = smSig_.ionoHO(idx1); end
                 sigTwr_if_ = zeros(M_pairs_if,1);
                 if numel(towerClkSigma) >= M_pairs_if; sigTwr_if_ = towerClkSigma(1:M_pairs_if); end
+                % Hardware delay is emitted NON-DISPERSIVE by this simulator (one per-tower
+                % value copied unscaled onto the L2 row), so like troposphere/tower-clock it
+                % passes the IF at unit gain, NOT (alpha^2+beta^2). Strip it from the
+                % independent remainder and re-add at unit gain below. (Latent today:
+                % hardwareDelay.sigma_m defaults to 0; this prevents a silent x8.9 over-count
+                % if a hardware-delay sigma is ever enabled.)
+                sigHw_ = zeros(M_pairs_if,1);
+                if isfield(smSig_,'hwDelay') && numel(smSig_.hwDelay) >= M_pairs_if; sigHw_ = smSig_.hwDelay(idx1); end
 
                 % Correlated + cancelled variance baked into BOTH the L1 and L2 rows of
-                % R_diag (trop/iono/iono-HO sigmas are tiled equal on L1/L2; tower-clock
-                % sigma is common to the pair). Identical for idx1 and idx2.
-                corrBaked_ = sigTrop_.^2 + sigIono1_.^2 + sigIonoHO_.^2 + sigTwr_if_.^2;
+                % R_diag (trop/iono/iono-HO/hwDelay sigmas are tiled equal on L1/L2; tower-
+                % clock sigma is common to the pair). Identical for idx1 and idx2.
+                corrBaked_ = sigTrop_.^2 + sigIono1_.^2 + sigIonoHO_.^2 + sigTwr_if_.^2 + sigHw_.^2;
 
                 % Independent-per-signal remainder still carries the native per-signal
                 % L1/L2 sigmas (code + multipath + scintillation + signal-dependent HW
@@ -533,7 +552,8 @@ classdef CodeMeasurementBuilder
                      + sigTrop_.^2 ...                                      % troposphere: unit gain
                      + 0 * sigIono1_.^2 ...                                 % first-order iono: cancels -> 0
                      + gIonoHO_^2 * sigIonoHO_.^2 ...                       % higher-order iono: survives
-                     + sigTwr_if_.^2;                                       % tower-clock: unit gain
+                     + sigTwr_if_.^2 ...                                    % tower-clock: unit gain
+                     + sigHw_.^2;                                           % hardware delay: unit gain (non-dispersive)
 
                 % Postfit consistency: computePostfitResiduals_ rebuilds h from
                 % errStruct.modelTotal_m, so store the IF-COMBINED totals (first-order iono

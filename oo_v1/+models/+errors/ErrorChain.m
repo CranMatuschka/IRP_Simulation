@@ -593,7 +593,28 @@ classdef ErrorChain < handle
             if isfield(ic,'sigma_m')
                 sigmaBase = ic.sigma_m * mapping;
             end
-            sigma_m = sqrt(sigmaBase.^2 + sigmaStoch.^2);
+
+            % Variance double-count fix (twin of the ZWD case in troposphere_): when the
+            % per-tower slant iono is an EKF STATE (estimation.ionosphereMode='perTowerSlant',
+            % set by cfg.atmosphere.estimateIono), the estimator TRACKS the slow TEC -- its
+            % steady-state variance lives in the slant-iono state covariance. Charging the
+            % full sigmaVDelayL1_ss into R as well would count that same variance twice
+            % (estimate it in P AND pay for it in R). When the state is active, R carries
+            % only the fast, un-trackable per-step Gauss-Markov increment; the slow part is
+            % the state's job. Golden-safe: the matched golden runs ionosphereMode='none' ->
+            % full sigma, byte-identical. The TRUTH injection above is unchanged.
+            sigmaVDelayR = sigmaVDelay;
+            ionoStateActive = false;
+            try; ionoStateActive = strcmp(obj.cfg.estimation.ionosphereMode, 'perTowerSlant'); catch; end
+            if ionoStateActive
+                tauIono = 900; sigSsIono = sigmaVDelay; dtIono = 1;
+                try; tauIono   = obj.cfg.estimation.slantIono.tau_s;      catch; end
+                try; sigSsIono = obj.cfg.estimation.slantIono.sigma_ss_m; catch; end
+                try; dtIono    = obj.cfg.simulation.dt_s;                catch; end
+                sigmaVDelayR = sigSsIono * sqrt(max(1 - exp(-2*dtIono / max(tauIono,eps)), 0));
+            end
+            sigmaStochR = sqrt((sigmaVDelayR * mapping).^2 + sigmaResidual.^2);
+            sigma_m = sqrt(sigmaBase.^2 + sigmaStochR.^2);
         end
 
         % ----------------------------------------------------------------
