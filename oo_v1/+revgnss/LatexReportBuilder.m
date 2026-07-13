@@ -1,6 +1,11 @@
 classdef LatexReportBuilder
     % LatexReportBuilder  Generate original-style scientific report figures.
     %
+    % WP-3c: LEGACY report path. Production is superseded by ClockExactReportBuilder
+    % (the only builder ReportRunner constructs under the default layout='clockExact').
+    % This cluster is unreachable in production but retained for the Stage-6/7 report
+    % test suite; do not delete without migrating those tests.
+    %
     % Produces 10 numbered section figures (P00–P09) that follow the style
     % of the original generateReport / Clock_20260602_v001_report layout:
     %   - Two-column rows: left = plot or "No plot generated.", right = description
