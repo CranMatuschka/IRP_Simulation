@@ -1,6 +1,8 @@
 % test_documented_limitations
-% WP-7: the relativistic clock-rate offset is disabled in truth AND model and DECLARED
-%       as an explicit claim boundary in the report physics appendix.
+% WP-7: the relativistic clock-rate offset is a gated, MODELED feature (WP-D) that is
+%       OFF by default in truth AND model, and DECLARED as an explicit claim boundary
+%       in the report physics appendix. When enabled, it maps onto a nonzero
+%       cfg.asset.clock.relativisticFracFreq (revgnss.Relativity).
 % WP-9: the Doppler Jacobian's omission of d(rhoDot)/dr is documented in source.
 % Both are documentation/scope items (no physics change); the golden is byte-identical.
 
@@ -10,17 +12,27 @@ addpath(fullfile(thisDir, '..', 'config'));
 
 fprintf('=== test_documented_limitations ===\n');
 
-% --- WP-7: relativistic clock disabled in truth+model and flagged -----------
+% --- WP-7: relativistic clock OFF by default (truth+model) ------------------
 cfg = masterConfig();
 cfg.report.writePdf = false; cfg.report.writeMat = false;
 cfg.report.compileTex = 'never'; cfg.plots.showFigures = false;
 cfgR = revgnss.ConfigFactory.finalizeConfig(cfg);
-df = cfgR.validation.disabledFeatures;
-assert(iscell(df) && any(strcmp(df, 'relativity.clock')), ...
-    'WP-7: resolved validation.disabledFeatures must contain ''relativity.clock''.');
 assert(~cfgR.physics.relativity.clock.truth.enable && ~cfgR.physics.relativity.clock.model.enable, ...
-    'WP-7: relativistic clock rate must be disabled in BOTH truth and model.');
-fprintf('  WP-7: relativity.clock disabled (truth+model) + flagged in disabledFeatures\n');
+    'WP-7: relativistic clock rate must be disabled in BOTH truth and model by default.');
+fprintf('  WP-7: relativity.clock disabled (truth+model) by default\n');
+
+% --- WP-7 (WP-D): relativity.clock is a gated MODELED feature, not force-disabled ----
+cfg2 = masterConfig();
+cfg2.report.writePdf = false; cfg2.report.writeMat = false;
+cfg2.report.compileTex = 'never'; cfg2.plots.showFigures = false;
+cfg2.physics.relativity.clock.enable = true;
+cfg2.physics.relativity.clock.truth.enable = true;
+cfg2.physics.relativity.clock.model.enable = true;
+cfgR2 = revgnss.ConfigFactory.finalizeConfig(cfg2);
+assert(cfgR2.asset.clock.relativisticFracFreq ~= 0, ...
+    'WP-D: enabling relativity.clock must produce a nonzero relativisticFracFreq.');
+fprintf('  WP-D: relativity.clock enable maps to relativisticFracFreq=%.3e\n', ...
+    cfgR2.asset.clock.relativisticFracFreq);
 
 % --- WP-7: the report appendix declares the claim boundary ------------------
 caveatFound = false;

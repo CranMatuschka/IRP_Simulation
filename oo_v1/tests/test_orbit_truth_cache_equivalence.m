@@ -113,7 +113,7 @@ assert(simOn.orbitTruthCache.enabled, 'T3 FAIL: cache should be enabled');
 assert(simOn.orbitTruthCache.built,   'T3 FAIL: cache should be built');
 simOn.run();
 resOn = simOn.getResults();
-posErrOn = resOn.diag.getPositionErrors();
+posErrOn = resOn.simData.getPositionErrors();
 
 % Run with cache disabled
 cfgOff          = cfgSim;
@@ -123,7 +123,7 @@ simOff.initialize();
 assert(~simOff.orbitTruthCache.enabled, 'T3 FAIL: cache should be disabled');
 simOff.run();
 resOff = simOff.getResults();
-posErrOff = resOff.diag.getPositionErrors();
+posErrOff = resOff.simData.getPositionErrors();
 
 assert(numel(posErrOn) == numel(posErrOff), 'T3 FAIL: epoch count mismatch');
 

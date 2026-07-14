@@ -3,7 +3,8 @@
 % T4: fixedReference mode — b_tower_hat never equals any b_rx value.
 % T5: noisyCorrection — correction = true_clock + noise, noise ~ N(0, sigma^2).
 % T6: Product epoch — t_prod = floor((t-latency)/interval)*interval,
-%     negative t_prod clamped to 0 with warning.
+%     negative t_prod silently clamped to 0 (Stage 71 removed the warning;
+%     see T6c for the current, no-warning behavior).
 %
 % CHANGED: v3→v4 — Issues 4, 5, 6
 
@@ -107,8 +108,8 @@ fprintf('  T6: Product epoch computation and clamping ...\n');
 cfg6 = revgnss.ConfigFactory.defaultConfig();
 cfg6.plots.enable  = false;
 cfg6.report.enable = false;
-cfg6.errors.towerClock.updateInterval_s = 300;
-cfg6.errors.towerClock.latency_s        = 0;
+cfg6.clocks.tower.product.updateInterval_s = 300;
+cfg6.clocks.tower.product.latency_s        = 0;
 
 [asset6, towers6, ekf6, measModel6, ~, ~] = revgnss.ScenarioFactory.build(cfg6);
 
@@ -133,33 +134,23 @@ if ~isempty(es6b)
         es6b.towerClockProductEpoch_s, es6b.towerClockProductAge_s);
 end
 
-% T6c: negative t_prod → clamped to 0 with warning (need latency > t)
+% T6c: negative t_prod → silently clamped to 0 (need latency > t).
+% Stage 71 ("realistic clock product handling", commit 73e7eff) deliberately
+% removed the revgnss:productEpoch warning when it introduced the
+% truthHistoryProductNoisy model: a negative t_prod is the normal startup
+% transient before the first product epoch is available, not an error
+% condition, so production no longer warns on it. Only the clamping behavior
+% is verified here; no warning is expected (or re-added to production).
 cfg6c = cfg6;
-cfg6c.errors.towerClock.latency_s = 600;  % latency > t → t_available = -600 → t_prod < 0
+cfg6c.clocks.tower.product.latency_s = 600;  % latency > t → t_available = -600 → t_prod < 0
 [asset6c, towers6c, ekf6c, measModel6c, ~, ~] = revgnss.ScenarioFactory.build(cfg6c);
 
-% Verify warning fires: convert to error so it's reliably catchable
-ws6c = warning('error', 'revgnss:productEpoch');
-warnFired6c = false;
-try
-    measModel6c.computeMeasurements(asset6c, towers6c, ekf6c.x, 0, ekf6c.stateMap);
-catch warnErr
-    if strcmp(warnErr.identifier, 'revgnss:productEpoch')
-        warnFired6c = true;
-    end
-end
-warning(ws6c);  % restore warning state
-assert(warnFired6c, 'T6c FAILED: no warning emitted for negative product epoch');
-
-% Verify clamping: run again with warning suppressed and check t_prod=0
-ws6c_off = warning('off', 'revgnss:productEpoch');
 [~,~,~,~, es6c] = measModel6c.computeMeasurements(asset6c, towers6c, ekf6c.x, 0, ekf6c.stateMap);
-warning(ws6c_off);
 if ~isempty(es6c)
     assert(es6c.towerClockProductEpoch_s == 0, ...
         'T6c FAILED: negative t_prod should be clamped to 0 (got %.1f)', ...
         es6c.towerClockProductEpoch_s);
 end
-fprintf('    t=0, latency=600: t_prod clamped to 0, warning emitted: PASS\n');
+fprintf('    t=0, latency=600: t_prod clamped to 0 (no warning expected, Stage 71): PASS\n');
 
 fprintf('=== test_tower_clock_v4: ALL PASS ===\n');

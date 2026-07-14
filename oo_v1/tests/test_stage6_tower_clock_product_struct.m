@@ -22,7 +22,7 @@ cfg1 = revgnss.ConfigFactory.towerClockProductConfig();
 assert(isfield(cfg1.towerClock,'products'), ...
     'T1 FAILED: towerClock.products field missing');
 nP = numel(cfg1.towerClock.products);
-nT = cfg1.scenario.nTowers;
+nT = numel(cfg1.towers);  % one product per defined tower template (pre-finalize)
 assert(nP == nT, 'T1 FAILED: products has %d entries, expected %d towers', nP, nT);
 
 for k = 1:nP

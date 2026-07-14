@@ -41,6 +41,8 @@ cfg_t1.simulation.duration_s         = 4;
 cfg_t1.simulation.dt_s               = 1;
 cfg_t1.plots.enable                  = false;
 cfg_t1.report.enable                 = false;
+cfg_t1.report.writePdf               = false;
+cfg_t1.report.writeMat               = false;
 cfg_t1.validation.unsupportedFeaturePolicy = 'disableWithWarning';
 
 wS1 = warning('off','all');
@@ -54,7 +56,7 @@ end
 warning(wS1);
 
 assert(~threwErr1, 'T1 FAILED: smoke run threw an error');
-jacNorms1 = [out1.diag.log.attitudeJacobianNorm];
+jacNorms1 = out1.simData.getAttitudeJacobianNorm();
 assert(all(jacNorms1 < 1e-10), ...
     'T1 FAILED: %d of %d epochs have attitudeJacobianNorm > 0 (expected 0 for zero lever arm)', ...
     sum(jacNorms1 >= 1e-10), numel(jacNorms1));
@@ -72,6 +74,8 @@ cfg_t2.simulation.duration_s = 4;
 cfg_t2.simulation.dt_s       = 1;
 cfg_t2.plots.enable          = false;
 cfg_t2.report.enable         = false;
+cfg_t2.report.writePdf       = false;
+cfg_t2.report.writeMat       = false;
 cfg_t2.validation.unsupportedFeaturePolicy = 'disableWithWarning';
 
 wS2 = warning('off','all');
@@ -85,7 +89,7 @@ end
 warning(wS2);
 
 assert(~threwErr2, 'T2 FAILED: smoke run threw an error');
-jacNorms2 = [out2.diag.log.attitudeJacobianNorm];
+jacNorms2 = out2.simData.getAttitudeJacobianNorm();
 assert(any(jacNorms2 > 1e-9), ...
     'T2 FAILED: all attitudeJacobianNorm <= 1e-9 (expected > 0 for nRx=3 + carrier EKF)');
 fprintf('    PASS (max norm = %.4e over %d epochs)\n', max(jacNorms2), numel(jacNorms2));

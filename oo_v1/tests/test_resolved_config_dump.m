@@ -35,10 +35,11 @@ allPaths   = [ov.changed(:,1); ov.added(:,1)];
 changedMap = containers.Map(ov.changed(:,1), ov.changed(:,3));   % path -> resolvedStr
 chgTo = @(p, vals) isKey(changedMap, p) && ismember(changedMap(p), vals);
 
-% Relativistic clock-rate disabled by finalize (literal true -> resolved false).
-assert(chgTo('physics.relativity.clock.truth.enable', {'false','0'}) && ...
-       chgTo('physics.relativity.clock.model.enable', {'false','0'}), ...
-    'relativity.clock truth+model enable must be a CHANGED override -> false (WP-2 opacity).');
+% Relativistic clock-rate offset (WP-D): a gated, MODELED feature that defaults OFF
+% in masterConfig itself (cfg.physics.relativity.clock.enable=false), so it is already
+% false in the literal config and finalizeConfig no longer force-disables/overrides it.
+% (No changed-override assertion here; see test_documented_limitations for the WP-D
+% enable -> relativisticFracFreq mapping.)
 
 % Standalone first-order Sagnac folded into the iterative light-time (true -> false).
 assert(chgTo('physics.sagnac.truth.enable', {'false','0'}) && ...
@@ -61,6 +62,6 @@ assert(~any(contains(allPaths, 'estimateAttitude')) && ...
        ~any(contains(allPaths, 'receiverLeverArm')), ...
     'default attitude/lever-arm must NOT be a finalizeConfig override (WP-1).');
 
-fprintf('  overrides: %d changed, %d added; relativity+sagnac+atmosphere surfaced; attitude not overridden\n', ...
+fprintf('  overrides: %d changed, %d added; sagnac+atmosphere surfaced; attitude not overridden\n', ...
     size(ov.changed,1), size(ov.added,1));
 fprintf('  PASS\n');

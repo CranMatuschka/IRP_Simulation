@@ -34,12 +34,15 @@ assert(max(nm) <= 20, 'Max measurements/epoch should be <= 20 (5 towers × 4 ant
 assert(mean(nm) >= 15, 'Mean meas/epoch should be >= 15 (most towers visible), got %.1f', mean(nm));
 
 % Check attitude Jacobian was nonzero (attitude observable with lever arms)
-attNorm = [sim.diag.log.attitudeJacobianNorm];
+attNorm = sim.diag.getAttitudeJacobianNorm();
 assert(max(attNorm) > 1e-6, 'Attitude Jacobian should be nonzero with lever arms');
 
-% Check omega H columns are zero (no rate estimation from pseudorange)
+% Check omega H columns are zero (no rate estimation from pseudorange).
+% The array-backed store keeps no per-epoch H, so recompute H at the
+% final epoch directly via the measurement model.
 sm = sim.ekf.stateMap;
-lastH = sim.diag.log(end).H;
+[~, ~, lastH, ~, ~] = sim.measModel.computeMeasurements( ...
+    sim.asset, sim.towers, sim.ekf.getMeasurementState(), sim.tVec(end), sm);
 if ~isempty(lastH) && size(lastH,2) >= 12
     omgNorm = norm(lastH(:, sm.omega_idx), 'fro');
     assert(omgNorm < 1e-10, 'Omega H columns should be zero in pseudorange-only mode');

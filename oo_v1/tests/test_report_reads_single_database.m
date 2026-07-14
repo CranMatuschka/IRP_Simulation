@@ -25,7 +25,8 @@ end
 outDir = tempname();
 mkdir(outDir);
 cfg = buildCfg_();
-out = revgnss.ReportRunner.runSingle(cfg, outDir);
+cfg.report.reportFolder = outDir;
+out = revgnss.ReportRunner.runSingle(cfg);
 
 % =========================================================================
 % T1: out.data is non-empty with flat schema v3

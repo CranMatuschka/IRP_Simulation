@@ -21,7 +21,12 @@ fprintf('  T1 (4D): ekfFloat + L1+L2 produces multi-freq warning ...\n');
 cfg_t1 = revgnss.ConfigFactory.defaultConfig();
 cfg_t1.measurements.carrierMode      = 'ekfFloat';
 cfg_t1.estimation.ambiguityMode      = 'floatPerTowerSignal';
-cfg_t1.signals.twoFrequency.enable   = true;
+cfg_t1.signals.names = {'L1','L2'}; cfg_t1.signals.enabledMask = [true true];
+% L2 carrier EKF rows are derived from carrier.enabledByFrequency (which
+% otherwise defaults to mirror signals.enabledMask and would enable L2 carrier
+% rows too). Explicitly keep carrier EKF rows L1-only so the ekfFloat v1
+% "multiple signals enabled but L2 carrier EKF rows are OFF" warning fires.
+cfg_t1.measurements.carrier.enabledByFrequency = [true false];
 % Use ionosphereFree code (not IF carrier) to satisfy dual-freq codeMode
 cfg_t1.measurements.codeMode         = 'ionosphereFree';
 cfg_t1.plots.enable  = false;
@@ -29,13 +34,11 @@ cfg_t1.report.enable = false;
 
 % Capture warnings
 warnState = warning('off','all');
-lastwarn('');
 cfg_t1f = revgnss.ConfigFactory.finalizeConfig(cfg_t1);
-[lastMsg, lastId] = lastwarn();
 warning(warnState);
 
-% Check that the multi-freq warning was issued via warning()
-foundWarn4D = contains(lastMsg,'L1') || any(cellfun(@(w) contains(w,'L1 rows'), ...
+% Check that the multi-freq / L2-carrier-rows-off warning was recorded.
+foundWarn4D = any(cellfun(@(w) contains(w,'L2 carrier EKF rows'), ...
     cfg_t1f.validation.warnings));
 assert(foundWarn4D, ...
     'T1 FAILED: expected L1-only warning for ekfFloat+L1+L2, none found');
@@ -73,7 +76,7 @@ warnState3 = warning('off','all');
 cfg_t3 = revgnss.ConfigFactory.defaultConfig();
 cfg_t3.measurements.carrierMode    = 'ekfFloat';
 cfg_t3.estimation.ambiguityMode    = 'floatPerTowerSignal';
-cfg_t3.signals.twoFrequency.enable = true;
+cfg_t3.signals.names = {'L1','L2'}; cfg_t3.signals.enabledMask = [true true];
 cfg_t3.measurements.codeMode       = 'ionosphereFree';
 cfg_t3.plots.enable  = false;
 cfg_t3.report.enable = false;

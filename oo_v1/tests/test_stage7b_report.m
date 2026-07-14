@@ -40,7 +40,7 @@ cfg01.report.writeMat       = false;
 
 out01 = revgnss.ReportRunner.runSingle(cfg01);
 assert(isfield(out01,'sim'),  'T01 FAILED: runSingle did not return sim field');
-assert(isfield(out01,'diag'), 'T01 FAILED: runSingle did not return diag field');
+assert(isfield(out01,'simData'), 'T01 FAILED: runSingle did not return simData field');
 fprintf('    simple style completed without error: PASS\n');
 
 % ----------------------------------------------------------------
@@ -380,7 +380,7 @@ cfg18.validation.unsupportedFeaturePolicy = 'disableWithWarning';
 
 out18 = revgnss.ReportRunner.runSingle(cfg18);
 assert(isfield(out18,'sim'),  'T18 FAILED: runSingle missing sim field');
-assert(isfield(out18,'diag'), 'T18 FAILED: runSingle missing diag field');
+assert(isfield(out18,'simData'), 'T18 FAILED: runSingle missing simData field');
 fprintf('    ReportRunner with latex style completed in 60 s: PASS\n');
 
 fprintf('=== test_stage7b_report: ALL PASS ===\n');

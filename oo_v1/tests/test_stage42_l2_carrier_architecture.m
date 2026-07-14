@@ -27,7 +27,7 @@ function test_stage42_l2_carrier_architecture
 
     % ---- T2: L2-enabled config ----
     try
-        cfg2.measurements.carrier.l2EkfRows.enable = true;
+        cfg2.signals.names = {'L1','L2'}; cfg2.signals.enabledMask = [true true];
         sigs2 = revgnss.SignalCatalog.carrierSignalsFromConfig(cfg2);
         assert(numel(sigs2) == 2, 'T2: expected 2 signals');
         assert(strcmp(sigs2(1).name, 'L1'), 'T2: L1 first');
@@ -61,7 +61,7 @@ function test_stage42_l2_carrier_architecture
 
     % ---- T4: L2CarrierArchitectureDiagnostics — L2-enabled ----
     try
-        cfg4.measurements.carrier.l2EkfRows.enable = true;
+        cfg4.signals.names = {'L1','L2'}; cfg4.signals.enabledMask = [true true];
         s4 = revgnss.L2CarrierArchitectureDiagnostics.assess([], cfg4);
         assert(s4.available, 'T4: should be available');
         assert(s4.l2Enabled, 'T4: L2 enabled');

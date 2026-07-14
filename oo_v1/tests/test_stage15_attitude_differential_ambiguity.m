@@ -44,7 +44,7 @@ fprintf('    PASS (calibrated, nValidBaselines in diag log verified below)\n');
 % ----------------------------------------------------------------
 fprintf('  T2: post-calibration epochs have diffAttNRows > 0 ...\n');
 
-nRowsVec = double([out1.diag.log.diffAttNRows]);
+nRowsVec = double(out1.simData.getDiffAttNRows());
 assert(any(nRowsVec > 0), ...
     'T2 FAILED: no epoch has diffAttNRows > 0 (differential rows never generated)');
 nActive = sum(nRowsVec > 0);
@@ -56,9 +56,9 @@ fprintf('    PASS (%d/%d epochs have diffAttNRows > 0, mean=%.1f)\n', ...
 % ----------------------------------------------------------------
 fprintf('  T3: estimated attitude sigma drops after calibration ...\n');
 
-sigVec = double([out1.diag.log.estimatedAttitudeSigma_rad]);
+sigVec = double(out1.simData.getEstimatedAttitudeSigma_rad());
 % Find the epoch where diffAtt first activates
-activeVec = logical([out1.diag.log.diffAttActive]);
+activeVec = logical(out1.simData.getDiffAttActive());
 if any(activeVec)
     iFirst = find(activeVec, 1, 'first');
     % Sigma before calibration (first epoch)

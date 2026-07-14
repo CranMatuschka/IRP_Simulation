@@ -65,7 +65,7 @@ cfgL1.report.enable = false;
 
 % IF config: rebuild from scratch (avoids double-finalization and inherited state issues)
 cfgIF = revgnss.ConfigFactory.defaultConfig();
-cfgIF.signals.twoFrequency.enable               = true;
+cfgIF.signals.names = {'L1','L2'}; cfgIF.signals.enabledMask = [true true];
 cfgIF.measurements.codeMode                     = 'ionosphereFree';
 cfgIF.errors.ionosphere.truth.verticalDelayL1_m = 5.0;
 cfgIF.errors.ionosphere.model.verticalDelayL1_m = 0.0;

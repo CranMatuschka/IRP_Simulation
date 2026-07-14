@@ -336,13 +336,17 @@ classdef Plotter
                 end
             end
 
-            % Range-correction diagnostics (sagnac, shapiro truth−model)
-            sagRMS = diag.getSagnacDiffRMS();
+            % Range-correction diagnostics (sagnac, shapiro truth−model). These getters
+            % exist only on the legacy Diagnostics backend, not the array store; guard so
+            % the figure path works with either (both return [] on the store).
+            sagRMS = [];
+            if ismethod(diag, 'getSagnacDiffRMS'); sagRMS = diag.getSagnacDiffRMS(); end
             if any(sagRMS > 0)
                 plot(t, sagRMS, 'c--', 'LineWidth',1.2, 'DisplayName','Sagnac (T-M)');
                 hold on; hasAny = true;
             end
-            shaRMS = diag.getShapiroDiffRMS();
+            shaRMS = [];
+            if ismethod(diag, 'getShapiroDiffRMS'); shaRMS = diag.getShapiroDiffRMS(); end
             if any(shaRMS > 0)
                 plot(t, shaRMS, 'k--', 'LineWidth',1.2, 'DisplayName','Shapiro (T-M)');
                 hold on; hasAny = true;

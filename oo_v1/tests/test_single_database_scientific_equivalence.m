@@ -35,7 +35,7 @@ assert(sd.hasArrayData(), 'Setup FAIL: SimulationDataStore not active');
 % =========================================================================
 fprintf('\nT1: Position error norm consistency...\n');
 pnFromVec = sqrt(sum(d.error.positionVec_m.^2, 1));
-maxDiff = max(abs(d.error.positionNorm_m - pnFromVec));
+maxDiff = max(abs(d.error.positionNorm_m(:) - pnFromVec(:)));
 assert(maxDiff < 1e-9, sprintf('T1 FAIL: positionNorm vs positionVec mismatch %.2e m', maxDiff));
 fprintf('T1 PASS: positionNorm consistent with positionVec (max diff=%.2e m)\n', maxDiff);
 

@@ -233,7 +233,7 @@ try
 catch
     diag_h = struct();
 end
-res_h = revgnss.ClockExactReportBuilder.build(diag_h, [], [], cfg_h, struct());
+res_h = revgnss.ClockExactReportBuilder.build(diag_h, [], [], [], cfg_h, struct());
 assert(isfield(res_h,'texPath') && isfile(res_h.texPath), ...
     'T-P15h FAILED: ClockExactReportBuilder did not produce a .tex file');
 src_h = fileread(res_h.texPath);

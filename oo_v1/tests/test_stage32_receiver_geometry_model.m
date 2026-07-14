@@ -8,6 +8,8 @@
 
 fprintf('test_stage32_receiver_geometry_model\n');
 
+c1 = struct(); c2 = struct(); c3 = struct();
+
 % --- T1: plural lever-arm field ---
 c1.scenario.nReceivers = 3;
 c1.asset.name          = 'GEO-1';

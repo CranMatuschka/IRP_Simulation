@@ -9,6 +9,8 @@
 
 fprintf('test_stage36_attitude_scenario_readiness\n');
 
+c1 = struct(); c2 = struct(); c3 = struct();
+
 % --- T1: single receiver -> early readiness failure ---
 c1.scenario.nReceivers = 1;
 c1.asset.receiverLeverArm_body_m = [0; 0; 0];
