@@ -105,6 +105,14 @@ classdef MeasurementModel < handle
                 pco = obj.cfg.effects.antennaPCO;
                 if isfield(pco,'truth') && pco.truth.enable
                     off = pco.receiverOffset_body_m(:);
+                    % WP-E: optional gated truth-only PCO calibration residual -- an antenna
+                    % phase-centre mis-calibration the estimator does NOT know (the model side
+                    % below is unchanged), so it survives z-h as a real imperfection rather than
+                    % cancelling. Default off -> off unchanged -> golden byte-identical.
+                    if isfield(pco,'calibrationResidual') && isfield(pco.calibrationResidual,'enable') && ...
+                            pco.calibrationResidual.enable && isfield(pco.calibrationResidual,'receiverOffset_body_m')
+                        off = off + pco.calibrationResidual.receiverOffset_body_m(:);
+                    end
                     leverArms_truth = leverArms + off * ones(1, N_ant);
                 end
                 if isfield(pco,'model') && pco.model.enable

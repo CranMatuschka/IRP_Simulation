@@ -383,6 +383,14 @@ cfg.errors.hardwareDelay.truth.enable      = false;
 cfg.errors.hardwareDelay.truth.default_m   = 0.0;
 cfg.errors.hardwareDelay.model.enable      = false;  % honest off=off (was true; default_m=0 made it a no-op)
 cfg.errors.hardwareDelay.model.default_m   = 0.0;
+% WP-F: hardware-delay real-residual channels, default inert. residualStochastic adds a
+% truth-only white residual (needs enable + sigma_m>0 + truth.enable) that survives z-h;
+% declaring the fields removes the runtime try/catch reliance. NB: enabling hardwareDelay
+% with matched truth==model default_m AND these off contributes EXACTLY 0 -> validateMasterConfig
+% warns (validateMasterConfig:hwDelayNoResidual). A differing truth/model default_m also leaves
+% a constant residual (already supported).
+cfg.errors.hardwareDelay.sigma_m                   = 0.0;
+cfg.errors.hardwareDelay.residualStochastic.enable = false;
 
 cfg.errors.multipath.truth.enable              = false;
 cfg.errors.multipath.truth.amplitude_m         = 0.3;
@@ -419,6 +427,11 @@ cfg.effects.antennaPCO.truth.enable          = false;
 cfg.effects.antennaPCO.model.enable          = false;
 cfg.effects.antennaPCO.receiverOffset_body_m = [0; 0; 0];
 cfg.effects.antennaPCO.towerOffset_enu_m     = [0; 0; 0];
+% WP-E: optional gated truth-only PCO calibration residual -- a receiver antenna phase-centre
+% mis-calibration the estimator does NOT know (applied to the truth side only), so it survives
+% z-h as a REAL imperfection instead of cancelling. Default OFF -> zero -> golden byte-identical.
+cfg.effects.antennaPCO.calibrationResidual.enable               = false;
+cfg.effects.antennaPCO.calibrationResidual.receiverOffset_body_m = [0; 0; 0];
 
 % antennaPCV: toy elevation model only.  NOT calibrated ANTEX.
 cfg.effects.antennaPCV.truth.enable  = false;

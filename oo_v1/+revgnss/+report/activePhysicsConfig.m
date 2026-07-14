@@ -85,9 +85,16 @@ function activePhysicsConfig(fid, cfg, summary, plotPaths, stem, figDir) %#ok<IN
         esc_  = @(s) strrep(strrep(strrep(strrep(strrep(char(s),'&','\&'),'%','\%'),'_','\_'),'#','\#'),'$','\$');
         yn_   = @(b) Y(b,'true','false');
         fprintf(fid, '\\textbf{Truth-estimation separation audit}\n\n');
+        % WP-E/F: only claim "calibration residuals" as an imperfection source when antenna
+        % PCO or hardware delay actually leaves a truth~=model residual. In the shipped config
+        % they are matched (zero residual), so the clause is dropped for honesty.
+        calibClause_ = '';
+        if revgnss.ImperfectionAudit.pcoLeavesResidual(cfg) || revgnss.ImperfectionAudit.hwDelayLeavesResidual(cfg)
+            calibClause_ = 'calibration residuals, ';
+        end
         fprintf(fid, ['\\textit{Realistic synthetic truth-estimation comparison: truth and estimator use the ' ...
             'same physical model families; the estimator is imperfect only from initial-state uncertainty, ' ...
-            'noisy measurements, stochastic clocks/products, atmosphere residuals, calibration uncertainty, ' ...
+            'noisy measurements, stochastic clocks/products, atmosphere residuals, ' calibClause_ ...
             'and process noise. Not real-data validation, not POD, not PPP, not a model-mismatch analysis.}\n\n']);
         fprintf(fid, '\\begin{tabular}{p{0.16\\textwidth}p{0.14\\textwidth}p{0.16\\textwidth}p{0.05\\textwidth}p{0.34\\textwidth}}\n');
         fprintf(fid, ['\\toprule\n\\textbf{Model} & \\textbf{Truth family} & \\textbf{Estimator family} & ' ...

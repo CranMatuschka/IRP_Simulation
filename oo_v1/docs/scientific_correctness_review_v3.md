@@ -31,8 +31,8 @@ Secondary completeness gaps: the headline run still uses the self-labelled "opti
 | **WP-B** | **High** | Default report is single-run; WP-5 MC harness exists but `run_oo_v1`/`ReportRunner` never call it. | Wire MC into the headline (or a report appendix) | PDF shows averaged NEES/NIS over N seeds within χ² bounds |
 | **WP-C** | Medium | Headline clock defaults to `legacy` (CESIUM1 h0=1e-26 = ~7 orders below JOW Table 2.1 Cesium1 h0=1e-19). | Make `jowTable2p1` the headline default OR run both and report the delta prominently | Report states the clock basis + a realistic-vs-optimistic sensitivity row |
 | **WP-D** ✅ | Medium | Relativistic clock-rate offset (grav.+SR) not modelled. **DONE** — gated truth-side offset (`revgnss.Relativity` → `ClockModel.relativisticFracFreq`) + numeric bound; audit confirmed the constant offset is absorbed by the drift state (zero solution impact for the circular GEO). | Model the constant offset on truth, or bound it in the budget | Effect modelled + numeric bound stated (+46.6 µs/day, ~2.3 km/run, periodic residual 0) ✅ |
-| **WP-E** | Low | Antenna PCO enabled by default but truth==model with zero offset → contributes 0 to innovations, yet listed as an imperfection source. | Give PCO a truth≠model calibration residual, or relabel as "known/removed". | Imperfection-audit table matches actual non-zero contributions |
-| **WP-F** | Low | Hardware delay would collapse to a zero residual if enabled with equal truth/model `default_m`. | Enforce/warn truth≠model when enabled. | Enabling HW delay yields a non-zero, R-covered residual |
+| **WP-E** ✅ | Low | Antenna PCO enabled by default but truth==model → contributes 0, yet audited as "calibration uncertainty". **DONE** — audit/caption now conditioned on a real residual (`ImperfectionAudit.pcoLeavesResidual`); added a gated truth-only PCO calibration residual. | Give PCO a truth≠model calibration residual + relabel as "known/removed" | Audit shows "zero residual (matched)"; gated residual makes z−h nonzero ✅ |
+| **WP-F** ✅ | Low | Hardware delay collapses to a zero residual if enabled with equal truth/model `default_m`. **DONE** — `validateMasterConfig` warns when enabled-but-matched; `residualStochastic` field declared as the real truth-only residual channel. | Enforce/warn truth≠model when enabled | Warning fires on enabled-but-matched; `residualStochastic` yields a real residual ✅ |
 | **WP-G** | Low | Doppler H omits `∂ρ̇/∂r` (documented). | Add the partial or keep the documented bound. | H includes the LOS/tower-rotation position partial |
 | **WP-H** | Low | Ionosphere lacks the symmetric `sameAsTruth` oracle guard the troposphere has (currently no iono oracle *path* exists, so it is safe but asymmetric). | Add the twin guard for defence-in-depth. | Iono `sameAsTruth` throws like troposphere |
 | **WP-I** ✅ | Medium (reachable) | Tower-clock R double-count guard was incomplete — present only on the single-freq diagonal; L2/IF/block + Doppler/carrier drift + cross-stack re-charged the product variance (F1). **Reachable** via `includeTowerClocksInEKF` + a noisy product mode (audit corrected the earlier "dormant" call). **DONE** — one bias/drift column-aware mask on all sinks. | With `estimateTowerClocks=true` + noisy product, no tower-clock variance appears in both P and R ✅ |
@@ -125,6 +125,26 @@ from the orbit when enabled). Default OFF → goldens byte-identical (SMOKE sing
 headline 185/185). Test `tests/test_wpD_relativistic_clock.m` locks the helper value/bound,
 the linear-ramp signature, golden-safety, and the enabled-path injection. *Future:* a
 per-epoch `r·v` term for eccentric orbits.
+
+### WP-E / WP-F — IMPLEMENTED (this session)
+
+An audit workflow confirmed that antenna PCO and hardware delay contribute **exactly 0** to
+z−h in every shipped config (PCO: truth and model apply the same zero offset → cancels;
+hardware delay: off, and inert even if enabled with matched `default_m`) — yet the
+truth-estimation-separation audit advertised PCO as "calibration uncertainty". New
+`+revgnss/ImperfectionAudit.m` provides `pcoLeavesResidual`/`hwDelayLeavesResidual`
+predicates; the audit row (`GeoRealWorldScenarioGuard`) and the report caption
+(`activePhysicsConfig`) are now conditioned on a **real** residual — the default shows
+"Antenna PCO … matched … known & removed, zero residual" and drops the "calibration
+uncertainty" clause. **WP-F:** `validateMasterConfig` warns
+(`validateMasterConfig:hwDelayNoResidual`) when hardware delay is enabled but leaves no
+residual; the `residualStochastic` channel (a genuine truth-only white residual, already in
+`ErrorChain`) is now declared in config. **WP-E:** a gated **truth-only** PCO calibration
+residual (`effects.antennaPCO.calibrationResidual`, applied at the single truth-injection
+site so the estimator does not know it) gives PCO a real truth≠model imperfection on demand.
+All default-off → goldens byte-identical (SMOKE single 184/184, headline 185/185). Test
+`tests/test_wpEF_imperfection_honesty.m` locks the honest relabeling, the predicate flips,
+the warning, and a functional run where the residual moves the solution (~0.29 m).
 
 ---
 

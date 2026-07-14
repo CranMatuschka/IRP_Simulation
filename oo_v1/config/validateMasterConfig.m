@@ -51,4 +51,16 @@ function cfg = validateMasterConfig(cfg)
         warning('validateMasterConfig:negativeSigma', ...
             'cfg.clocks.tower.product.sigmaBias_m is negative.');
     end
+
+    % --- WP-F: warn when hardware delay is enabled but leaves NO residual ---
+    % Enabled with truth==model (matched default_m) and residualStochastic off contributes
+    % exactly 0 to z-h -- flag it so it is not silently treated as an active imperfection.
+    % Off by default -> never fires on the shipped/golden run. (The analogous PCO case is
+    % on-by-default-but-matched, so it is handled by the honest audit relabeling, not a warn.)
+    if revgnss.ImperfectionAudit.hwDelayEnabled(cfg) && ~revgnss.ImperfectionAudit.hwDelayLeavesResidual(cfg)
+        warning('validateMasterConfig:hwDelayNoResidual', ...
+            ['cfg.errors.hardwareDelay is enabled but truth==model (matched default_m) and ' ...
+             'residualStochastic is off -> it contributes EXACTLY 0 to z-h. Use differing ' ...
+             'truth/model default_m, or residualStochastic.enable=true with sigma_m>0.']);
+    end
 end

@@ -187,8 +187,13 @@ classdef GeoRealWorldScenarioGuard
                 pick(tropOn,'yes','n/a'), 'stochastic ZWD residual'};
             rows(end+1,:) = {'Ionosphere', pick(ionoOn,'mapped 1st-order','off'), pick(ionoOn,'mapped 1st-order','off'), ...
                 pick(ionoOn,'yes','n/a'), 'stochastic residual'};
+            % WP-E: only advertise PCO as a separated imperfection when it actually leaves a
+            % truth~=model residual. In the shipped config truth and model apply the SAME
+            % (zero) offset, so it cancels in z-h -> 'known & removed, zero residual'.
+            pcoResid = revgnss.ImperfectionAudit.pcoLeavesResidual(cfg);
             rows(end+1,:) = {'Antenna PCO', pick(pcoOn,'PCO','off'), pick(pcoOn,'PCO','off'), ...
-                pick(pcoOn,'yes','n/a'), 'calibration uncertainty'};
+                pick(pcoResid,'yes','matched'), ...
+                pick(pcoResid,'calibration residual (uncorrected PCO)','known & removed, zero residual (matched truth+model)')};
             rows(end+1,:) = {'Carrier ambiguity', 'generated (unknown)', 'estimated float', 'yes', ...
                 'unknown float ambiguity states'};
             audit.rows = rows;
