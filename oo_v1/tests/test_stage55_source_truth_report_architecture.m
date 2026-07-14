@@ -5,7 +5,7 @@ function results = test_stage55_source_truth_report_architecture()
 % T2: ReportStatus validation warning references '55', not '51'/'52'/'53'/'54'
 % T3: DiagnosticPluginRegistry.list() contains at least one Stage 52-54 plugin
 % T4: DiagnosticPluginRegistry.collectAll() preserves existing summary fields
-% T5: README current validation section mentions Stage 55 / seed 55, not seed 51
+% T5: README documents the run_oo_v1 entry point and masterConfig run config
 
 results = struct('name', {}, 'passed', {}, 'message', {});
 
@@ -77,17 +77,16 @@ catch ex
     results(end+1) = struct('name','T4_collect_all_preserves_fields','passed',false,'message',ex.message);
 end
 
-%% T5: README current validation section mentions Stage 55 / seed 55; not seed 51
+%% T5: README documents the run_oo_v1 entry point and masterConfig run config
 try
     thisDir = fileparts(fileparts(mfilename('fullpath')));
     readmePath = fullfile(thisDir, 'README_oo_v1.md');
     txt = fileread(readmePath);
-    assert(contains(txt,'Stage 55'),  'T5: README must mention Stage 55');
-    assert(contains(txt,'seed 55'),   'T5: README current validation must mention seed 55');
-    assert(~contains(txt,'seed 51'),  'T5: README must not say "seed 51"');
-    results(end+1) = struct('name','T5_readme_seed_consistency','passed',true,'message','');
+    assert(contains(txt,'run_oo_v1'),    'T5: README must document the run_oo_v1 entry point');
+    assert(contains(txt,'masterConfig'), 'T5: README must document masterConfig as the run config');
+    results(end+1) = struct('name','T5_readme_content','passed',true,'message','');
 catch ex
-    results(end+1) = struct('name','T5_readme_seed_consistency','passed',false,'message',ex.message);
+    results(end+1) = struct('name','T5_readme_content','passed',false,'message',ex.message);
 end
 
 end
