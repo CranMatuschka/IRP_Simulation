@@ -30,7 +30,7 @@ Secondary completeness gaps: the headline run still uses the self-labelled "opti
 | **WP-A** | **High (completeness)** | Two-way / TWSTFT is the literature's only path to sub-100 ps but is diagnostic-only (no clock-diff state, not in EKF); ISL two-way disabled. | Design + implement a two-way observation + clock-difference state | A two-way run drives the receiver-clock error below the one-way floor; NEES/NIS consistent |
 | **WP-B** | **High** | Default report is single-run; WP-5 MC harness exists but `run_oo_v1`/`ReportRunner` never call it. | Wire MC into the headline (or a report appendix) | PDF shows averaged NEES/NIS over N seeds within χ² bounds |
 | **WP-C** | Medium | Headline clock defaults to `legacy` (CESIUM1 h0=1e-26 = ~7 orders below JOW Table 2.1 Cesium1 h0=1e-19). | Make `jowTable2p1` the headline default OR run both and report the delta prominently | Report states the clock basis + a realistic-vs-optimistic sensitivity row |
-| **WP-D** | Medium | Relativistic clock-rate offset (grav.+SR) not modelled — first-order for a ps-class GEO clock. | Model the constant offset on truth+model, or bound it in the budget | Effect modelled or a numeric bound stated in the error budget |
+| **WP-D** ✅ | Medium | Relativistic clock-rate offset (grav.+SR) not modelled. **DONE** — gated truth-side offset (`revgnss.Relativity` → `ClockModel.relativisticFracFreq`) + numeric bound; audit confirmed the constant offset is absorbed by the drift state (zero solution impact for the circular GEO). | Model the constant offset on truth, or bound it in the budget | Effect modelled + numeric bound stated (+46.6 µs/day, ~2.3 km/run, periodic residual 0) ✅ |
 | **WP-E** | Low | Antenna PCO enabled by default but truth==model with zero offset → contributes 0 to innovations, yet listed as an imperfection source. | Give PCO a truth≠model calibration residual, or relabel as "known/removed". | Imperfection-audit table matches actual non-zero contributions |
 | **WP-F** | Low | Hardware delay would collapse to a zero residual if enabled with equal truth/model `default_m`. | Enforce/warn truth≠model when enabled. | Enabling HW delay yields a non-zero, R-covered residual |
 | **WP-G** | Low | Doppler H omits `∂ρ̇/∂r` (documented). | Add the partial or keep the documented bound. | H includes the LOS/tower-rotation position partial |
@@ -103,6 +103,28 @@ product σ. Default `estimateTowerClocks=false` → `towerClockIdx==0` → ident
 byte-identical (SMOKE single 184/184, headline 185/185). Test
 `tests/test_wpI_tower_clock_R_double_count.m` locks the column discipline, gauge retention,
 golden-safety identity, and a functional `includeTowerClocksInEKF` + noisy-product run.
+
+### WP-D — IMPLEMENTED (this session)
+
+The relativistic clock-rate offset is now modelled (gated, default OFF) with its numeric
+bound documented. `+revgnss/Relativity.m` centralises the physics: for a clock on the GEO
+spacecraft relative to a ground clock the **constant** fractional-frequency offset is
+`y_rel = (GM/c²)(1/R_e − 1/r) − v²/(2c²) + v_ground²/(2c²) = +5.39×10⁻¹⁰` — i.e.
+**+46.6 µs/day**, accumulating **~2.3 km** of clock-range over a 4 h run; the **periodic
+(eccentricity) term is exactly 0** for the circular default orbit (≤0.06 ns worst-case from
+J2). A design workflow confirmed the key physics: the constant offset is a constant clock
+**drift**, **fully observable and absorbed by the estimated receiver clock-drift state**
+(Doppler observes it directly), so for a circular GEO it **does not bias the solution** —
+its omission was a truth-completeness / error-budget gap, not an estimation error.
+Implementation: a gated `ClockModel.relativisticFracFreq` added to the *bias phase increment*
+(not `driftRate_fracPerSec`, which would be quadratic-in-time) so the truth clock accumulates
+a **linear** relativistic ramp reaching the truth pseudorange, deliberately excluded from the
+reported fractional frequency/drift. The previously force-disabled `physics.relativity.clock`
+toggle is now implemented (masterConfig default **false**; `ConfigFactory` injects the offset
+from the orbit when enabled). Default OFF → goldens byte-identical (SMOKE single 184/184,
+headline 185/185). Test `tests/test_wpD_relativistic_clock.m` locks the helper value/bound,
+the linear-ramp signature, golden-safety, and the enabled-path injection. *Future:* a
+per-epoch `r·v` term for eccentric orbits.
 
 ---
 

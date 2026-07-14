@@ -85,7 +85,12 @@ cfg.physics.lightTime.mode            = 'iterativeOneWay';
 cfg.physics.lightTime.iterations      = 2;
 cfg.physics.lightTime.tolerance_s     = 1e-12;
 cfg.physics.relativity.shapiro.enable = true;
-cfg.physics.relativity.clock.enable   = true;   % disabled/warned in finalize: not validated v1
+cfg.physics.relativity.clock.enable   = false;  % WP-D: gated relativistic clock-rate offset on the
+                                                % TRUTH receiver clock (~+46.6 us/day / ~2.3 km over a
+                                                % 4 h GEO run). Default OFF: the constant offset is fully
+                                                % absorbed by the estimated clock-drift state (observable),
+                                                % so for the circular GEO it does not bias the solution;
+                                                % set true to make the truth physically complete.
 cfg.physics.doppler.enable            = true;
 cfg.measurements.doppler.enable       = true;
 cfg.measurements.doppler.useInEKF     = true;

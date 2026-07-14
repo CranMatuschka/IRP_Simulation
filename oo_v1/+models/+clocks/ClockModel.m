@@ -77,6 +77,14 @@ classdef ClockModel < handle
         bias_s          (1,1) double  = 0   % WFM+RWFM clock time bias [s]
         fracFreq        (1,1) double  = 0   % RWFM fractional frequency error [-]
         driftRate_fracPerSec (1,1) double = 0  % deterministic frequency drift [1/s^2]
+        relativisticFracFreq (1,1) double = 0  % WP-D: constant relativistic fractional-frequency
+                                               % offset [-] (gated, default 0). Added to the phase
+                                               % (bias) increment each step so it accumulates as a
+                                               % LINEAR clock-bias ramp; deliberately NOT part of
+                                               % fracFreq, so it is excluded from getFractional-
+                                               % Frequency()/getDriftMetersPerSecond() and reaches
+                                               % the truth pseudorange as an (initially) unmodelled
+                                               % relativistic clock-rate signature.
 
         % Noise configuration
         noiseCoeffs     (1,1) struct        % h2, h1, h0, hMinus1, hMinus2
@@ -125,6 +133,7 @@ classdef ClockModel < handle
             if isfield(cfg,'bias_s');                obj.bias_s               = cfg.bias_s;               end
             if isfield(cfg,'fracFreq');              obj.fracFreq             = cfg.fracFreq;             end
             if isfield(cfg,'driftRate_fracPerSec'); obj.driftRate_fracPerSec = cfg.driftRate_fracPerSec; end
+            if isfield(cfg,'relativisticFracFreq'); obj.relativisticFracFreq = cfg.relativisticFracFreq; end
 
             % Dedicated RNG stream — independent of global rand state
             obj.rngStream = RandStream('mt19937ar', 'Seed', obj.seed);
@@ -270,7 +279,10 @@ classdef ClockModel < handle
             % If index exceeds array, colored component keeps its last value.
 
             % Propagate WFM+RWFM bias state
-            new_bias_s = obj.bias_s + dt_s * obj.fracFreq + n_bias_wfm;
+            % WP-D: add the (gated) constant relativistic fractional-frequency offset to the
+            % phase increment so the clock bias accumulates a LINEAR relativistic ramp
+            % (c*relativisticFracFreq [m/s]); default 0 -> unchanged / golden byte-identical.
+            new_bias_s = obj.bias_s + dt_s * (obj.fracFreq + obj.relativisticFracFreq) + n_bias_wfm;
 
             % Propagate RWFM fractional-frequency state
             new_frac = obj.fracFreq + det_drift_frac + dn_freq_rwfm;

@@ -949,26 +949,23 @@ classdef ConfigFactory
                 end
             end
 
-            % ---- Unsupported: relativistic clock-rate correction ----------
+            % ---- Relativistic clock-rate offset (WP-D) --------------------
+            % Implemented as a gated TRUTH-side constant relativistic fractional-frequency
+            % offset on the receiver clock (applied at the receiver-clock recreate below via
+            % revgnss.Relativity -> cfg.asset.clock.relativisticFracFreq). Previously force-
+            % disabled as "not validated v1"; now supported and default OFF (masterConfig).
+            % No separate model-side (broadcast) correction is applied: the constant offset
+            % is observable and absorbed by the estimated receiver clock-drift state, so the
+            % estimation residual for a circular orbit is zero (only an eccentric orbit's
+            % periodic term would survive). See docs/scientific_correctness_review_v3.md WP-D.
             if isfield(cfg,'physics') && isfield(cfg.physics,'relativity') && ...
                     isfield(cfg.physics.relativity,'clock')
-                rc    = cfg.physics.relativity.clock;
-                rcOn  = (isfield(rc,'truth') && isfield(rc.truth,'enable') && rc.truth.enable) || ...
-                        (isfield(rc,'model') && isfield(rc.model,'enable') && rc.model.enable);
+                rc   = cfg.physics.relativity.clock;
+                rcOn = (isfield(rc,'truth') && isfield(rc.truth,'enable') && rc.truth.enable) || ...
+                       (isfield(rc,'model') && isfield(rc.model,'enable') && rc.model.enable);
                 if rcOn
-                    warnMsg = 'Relativistic clock-rate correction is not implemented as a validated v1 model and was disabled.';
-                    if strcmp(policy,'error')
-                        error('ConfigFactory:relClockNotSupported', '%s', warnMsg);
-                    end
-                    if isfield(rc,'truth') && isfield(rc.truth,'enable')
-                        cfg.physics.relativity.clock.truth.enable = false;
-                    end
-                    if isfield(rc,'model') && isfield(rc.model,'enable')
-                        cfg.physics.relativity.clock.model.enable = false;
-                    end
-                    cfg.validation.warnings{end+1}         = warnMsg;
-                    cfg.validation.disabledFeatures{end+1} = 'relativity.clock';
-                    warning('ConfigFactory:relClockDisabled', '%s', warnMsg);
+                    cfg.validation.mappedFeatures{end+1} = ...
+                        'relativity.clock: gated truth-side relativistic offset on receiver clock (WP-D)';
                 end
             end
 
@@ -1399,6 +1396,19 @@ classdef ConfigFactory
                 clk.bias_s        = prev.bias_s;
                 clk.fracFreq      = prev.fracFreq;
                 cfg.asset.clock   = clk;
+            end
+
+            % WP-D: gated relativistic clock-rate offset on the TRUTH receiver clock. When
+            % physics.relativity.clock.truth is enabled, set the receiver clock's constant
+            % relativistic fractional-frequency offset from the orbit (revgnss.Relativity);
+            % it accumulates as a linear clock-bias ramp in the truth pseudorange. Default
+            % OFF -> field stays 0 -> golden byte-identical.
+            relClkTruth_ = false;
+            try; relClkTruth_ = logical(cfg.physics.relativity.clock.truth.enable); catch; end
+            if relClkTruth_ && isfield(cfg,'asset') && isfield(cfg.asset,'clock')
+                alt_ = 35786000;
+                try; alt_ = cfg.orbit.altitudeMean_m; catch; end
+                cfg.asset.clock.relativisticFracFreq = revgnss.Relativity.geoClockFracFreq(alt_);
             end
 
             % ---- Receiver lever arms and auto-attitude ----------------------
