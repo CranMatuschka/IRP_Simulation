@@ -89,12 +89,10 @@ classdef MeasurementModel < handle
             % ----- Truth state -----------------------------------------
             r_cm_true  = asset.r_ecef_m;
             euler_true = asset.attitude_euler_rad;
-            b_rx_true  = asset.clock.getBiasMeters();
 
             % ----- EKF state extraction --------------------------------
             r_est     = x_est(stateMap.r_idx);
             euler_est = x_est(stateMap.euler_idx);
-            b_rx_est  = x_est(stateMap.b_rx_idx);
 
             % ----- Effective lever arms with PCO offset ----------------
             % Stage 3: receiverOffset_body_m is extra common body-frame offset

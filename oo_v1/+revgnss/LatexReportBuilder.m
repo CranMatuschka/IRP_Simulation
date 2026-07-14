@@ -746,9 +746,7 @@ classdef LatexReportBuilder
             obs = struct('rank',NaN,'condNum',NaN,'warnings',{{}},'errors',{{}}, ...
                 'nCodeRows',NaN,'nDopplerRows',NaN,'nCarrierRows',NaN, ...
                 'nAmbiguityStates',NaN,'nZwdStates',NaN,'nTowerClockStates',NaN);
-            try
-                % observability struct not stored in flat arrays — skip gracefully
-            catch; end
+            % observability struct not stored in flat arrays — skipped
 
             % Row 1: Observability rank time series
             [axL1, axR1] = RL.addTwoColRow(fig, 0.62, 0.90);

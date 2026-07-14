@@ -323,7 +323,6 @@ classdef ReverseGNSSSimulation < handle
                     if isfield(errStruct,'doppler') && isfield(errStruct.doppler,'z')
                         M_dop = numel(errStruct.doppler.z);
                     end
-                    M_car = numel(cpInfo.towerIdx);
                     fullMask = [true(M_pr + M_dop, 1); keepMask];
                     if numel(fullMask) == numel(z)
                         z = z(fullMask); h = h(fullMask);

@@ -38,7 +38,6 @@ classdef ClockExactReportBuilder
             % dataMeta: schema metadata from simData.getMeta()
             if nargin < 6; summary = struct(); end
             if nargin < 5 || isempty(cfg); cfg = struct(); end
-            if nargin < 2; dataMeta = struct(); end
 
             result.texPath        = '';
             result.pdfPath        = '';
@@ -67,7 +66,6 @@ classdef ClockExactReportBuilder
             end
 
             % ---- 2. Resolve output paths --------------------------------
-            ver = revgnss.ClockExactReportBuilder.getCfgStr_(cfg, {'report','version'}, '1.00');
 
             % cfg.report.reportFolder bypasses the date-stamped subfolder.
             reportDir = revgnss.ClockExactReportBuilder.getCfgStr_(cfg, {'report','reportFolder'}, '');
@@ -1496,8 +1494,7 @@ classdef ClockExactReportBuilder
 
         function ok = compileTex_(texPath, latexCmd)
             texDir = fileparts(texPath);
-            [~,stem] = fileparts(texPath);
-            cmdFmt = '"%s" -interaction=nonstopmode -output-directory "%s" "%s" > /dev/null 2>&1';
+            cmdFmt ='"%s" -interaction=nonstopmode -output-directory "%s" "%s" > /dev/null 2>&1';
             % Run twice for proper table cross-references
             cmd1 = sprintf(cmdFmt, latexCmd, texDir, texPath);
             s1 = system(cmd1);

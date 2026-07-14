@@ -335,7 +335,6 @@ classdef ClockModel < handle
 
         function x = getStateVectorMeters(obj)
             % getStateVectorMeters  [bias_m; drift_mps] from TOTAL output.
-            c = revgnss.Constants.SPEED_OF_LIGHT_MPS;
             x = [obj.getBiasMeters(); obj.getDriftMetersPerSecond()];
         end
 

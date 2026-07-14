@@ -149,8 +149,6 @@ classdef Plotter
 
         function fig = plotRxClockBias(diag, t, cfg)
             % Fig 05: receiver clock bias [m] and [ns] (2 subplots)
-            c       = revgnss.Constants.SPEED_OF_LIGHT_MPS;
-            mPerNs  = c * 1e-9;
             d_      = diag.getData();
             truth_m = d_.truth.rxClockBias_m(:)';
             est_m   = d_.estimate.rxClockBias_m(:)';
