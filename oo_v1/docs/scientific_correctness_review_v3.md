@@ -51,11 +51,18 @@ the one-way path uses; the product σ enters R only when the tower clock is *not
 byte-identical (**SMOKE/SINGLE 184/184, SMOKE/HEADLINE 185/185 PASS**). Unit test
 `tests/test_wpA_two_way_time_transfer.m` asserts the H structure, the truth/estimate
 separation (perturbing the estimate moves `h` but not `z`), and the config guard.
-**Result (30-min run, enable+useInEKF):** receiver-clock RMS 39 ns → **16 ps (2465×)**,
-position RMS 13.3 m → 5.4 m. *Documented limitation:* R is block-diagonal across observable
-types, so the within-product-interval correlation of a tower's clock error is neglected
-(same simplification already stated for PR/Doppler), making the ps-level clock mildly
-optimistic; two-way carrier and the shared-product cross-covariance are future refinements.
+**Result (30-min run, enable+useInEKF):** receiver-clock RMS 39 ns → ps-class,
+position RMS 13.3 m → ~5 m.
+
+**Conservative refinement (default on, `conservativeProductCorrelation`):** the reference-
+tower broadcast-product error is piecewise-constant over each update interval, so the two-
+way rows within an interval share it; a sequential EKF that treats them as independent
+over-averages it and drives the clock *below* the reference-clock floor (optimistic — the
+first cut reached 16 ps). The builder now inflates the product variance by `N = interval/dt`
+so within-interval averaging lands back at the true product σ (the honest reference-clock
+floor) while legitimate cross-interval averaging still applies — a conservative (never
+under-confident) treatment. The rigorous alternative — a per-tower product-bias EKF state,
+and two-way *carrier* for the sub-ps regime — remains future work.
 
 ---
 

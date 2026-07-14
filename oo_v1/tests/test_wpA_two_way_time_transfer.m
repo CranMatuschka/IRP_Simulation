@@ -83,4 +83,24 @@ assert(max(abs((h2 - h) - delta)) < 1e-9, ...
     'T4 FAILED: h must move by exactly +delta on the receiver-clock perturbation.');
 fprintf('  T4 separation (perturb estimate: z fixed, h shifts by +delta): PASS\n');
 
+% ---- T6: conservative product correlation inflates R (never optimistic) -----
+% With conservativeProductCorrelation ON (default), the correlated broadcast-product
+% variance is inflated by N=interval/dt so a sequential EKF cannot average it below
+% the reference-clock floor. R_conservative must be >= R_idealised element-wise.
+cfgIdeal = cfgOn; cfgIdeal.measurements.twoWayTimeTransfer.conservativeProductCorrelation = false;
+cfgCons  = cfgOn; cfgCons.measurements.twoWayTimeTransfer.conservativeProductCorrelation  = true;
+[~,~,~,Rideal,infoI] = revgnss.TwoWayTimeTransferBuilder.build( ...
+    cfgIdeal, sim.errorChain, sim.asset, sim.towers, sim.ekf.x, sm, nx, t_final);
+[~,~,~,Rcons, infoC] = revgnss.TwoWayTimeTransferBuilder.build( ...
+    cfgCons,  sim.errorChain, sim.asset, sim.towers, sim.ekf.x, sm, nx, t_final);
+assert(all(diag(Rcons) >= diag(Rideal) - 1e-15), ...
+    'T6 FAILED: conservative R must be >= idealised R (never optimistic).');
+assert(infoC.productCorrelationN >= 1 && infoI.productCorrelationN == 1, ...
+    'T6 FAILED: productCorrelationN wiring wrong.');
+if any(diag(Rideal) < diag(Rcons) - 1e-12)
+    fprintf('  T6 conservative product correlation inflates R (N=%d): PASS (strict)\n', infoC.productCorrelationN);
+else
+    fprintf('  T6 conservative product correlation (N=%d, product sigma ~0 this epoch): PASS (non-strict)\n', infoC.productCorrelationN);
+end
+
 fprintf('=== test_wpA_two_way_time_transfer: ALL PASSED ===\n');

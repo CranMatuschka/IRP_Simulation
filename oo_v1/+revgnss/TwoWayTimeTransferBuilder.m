@@ -85,6 +85,28 @@ classdef TwoWayTimeTransferBuilder
             recipSig  = revgnss.TwoWayTimeTransferBuilder.getNum_(cfg, {'measurements','twoWayTimeTransfer','reciprocitySigma_m'}, 0.005);
             elevMask  = revgnss.TwoWayTimeTransferBuilder.getNum_(cfg, {'estimator','elevationMask_rad'}, 5*pi/180);
 
+            % CONSERVATIVE product-error correlation (default ON). The reference-tower
+            % broadcast-product error is piecewise-CONSTANT over each update interval, so
+            % the ~(interval/dt) two-way rows of a tower within one interval share the
+            % SAME product bias. A sequential EKF that treats them as independent averages
+            % that shared error down by ~sqrt(N) and drives the clock BELOW the reference-
+            % clock floor (optimistic). We instead inflate the product variance by N_corr,
+            % the number of correlated epochs per interval, so within-interval averaging
+            % lands back at the true product sigma (the honest reference-clock floor) while
+            % legitimate cross-interval averaging still applies. This is a conservative
+            % (never under-confident) treatment of the time-correlated product error; the
+            % rigorous alternative is a per-tower product-bias EKF state (future WP).
+            consProdCorr = revgnss.TwoWayTimeTransferBuilder.getBool_(cfg, ...
+                {'measurements','twoWayTimeTransfer','conservativeProductCorrelation'}, true);
+            nCorr = 1;
+            if consProdCorr
+                updInt = revgnss.TwoWayTimeTransferBuilder.getNum_(cfg, {'clocks','tower','product','updateInterval_s'}, 30);
+                dt_s   = revgnss.TwoWayTimeTransferBuilder.getNum_(cfg, {'simulation','dt_s'}, 1);
+                if isfinite(updInt) && isfinite(dt_s) && dt_s > 0
+                    nCorr = max(1, round(updInt / dt_s));
+                end
+            end
+
             estTowerClocks = revgnss.TwoWayTimeTransferBuilder.getBool_(cfg, {'estimator','estimateTowerClocks'}, false);
             hasTowerState  = estTowerClocks && isfield(stateMap,'towerClockIdx') && ~isempty(stateMap.towerClockIdx);
 
@@ -169,7 +191,7 @@ classdef TwoWayTimeTransferBuilder
                 if recipOn; Hi(stateMap.v_idx) = Hi(stateMap.v_idx) + velRow; end
 
                 Ri = sigma_m^2;
-                if addProductVar; Ri = Ri + sig_prod^2; end
+                if addProductVar; Ri = Ri + nCorr * sig_prod^2; end   % conservative: correlated product error
                 if recipOn;       Ri = Ri + recipSig^2; end
 
                 if useInEKF
@@ -197,6 +219,8 @@ classdef TwoWayTimeTransferBuilder
             info.rows        = rowsMeta;
             info.nRows       = numel(rowsMeta);
             info.nEkfRows    = double(useInEKF) * numel(rowsMeta);
+            info.conservativeProductCorrelation = consProdCorr;
+            info.productCorrelationN = nCorr;   % epochs/interval the product bias is shared over
             if ~isempty(zAdd); info.prefitRms_m = sqrt(mean((zAdd - hAdd).^2)); end
         end
 

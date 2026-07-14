@@ -555,6 +555,12 @@ cfg.measurements.twoWayTimeTransfer.sigma_m                    = 0.03;    % two-
 cfg.measurements.twoWayTimeTransfer.includeReciprocityResidual = false;  % model motion non-reciprocity (both sides)
 cfg.measurements.twoWayTimeTransfer.reciprocitySigma_m         = 0.005;  % residual non-reciprocity 1-sigma [m]
 cfg.measurements.twoWayTimeTransfer.warmup_s                   = 0;       % start two-way after this time [s]
+% CONSERVATIVE (default true): the reference-clock broadcast-product error is constant
+% per update interval, so the two-way rows within an interval share it. Inflating the
+% product variance by N=interval/dt stops the sequential EKF over-averaging it below the
+% reference-clock floor -> honest, never-optimistic clock. Set false for the idealised
+% (independent-product) treatment.
+cfg.measurements.twoWayTimeTransfer.conservativeProductCorrelation = true;
 
 % --- Observable mode (Step 1) -----------------------------------
 % observableMode: DESCRIPTIVE LABEL (not authoritative — does not gate
