@@ -77,6 +77,12 @@ classdef DopplerMeasurementBuilder
             try; includeProdDrift = cfg.measurements.doppler.includeTowerClockProductDrift; catch; end
             applyDopplerProdCov = true;
             try; applyDopplerProdCov = cfg.covariance.productClock.applyToDoppler; catch; end
+            % WP-G: include the range-rate position partial d(rhoDot)/dr in the Doppler H.
+            % Default OFF -> H has only d/dv and d/d(bdot_rx) (the documented approximation);
+            % golden byte-identical. ON -> the LOS-rotation + tower-rotation position partial
+            % is added (small for a GEO, ~1e-5..1e-4 per metre).
+            includePosPartial = false;
+            try; includePosPartial = cfg.measurements.doppler.includePositionPartial; catch; end
 
             v_rx_true    = asset.v_ecef_mps;
             v_rx_est     = x_est(stateMap.v_idx);
@@ -191,6 +197,10 @@ classdef DopplerMeasurementBuilder
                 % regime where the tower-rotation partial matters. (WP-9)
                 Hd(mi, stateMap.v_idx)       = u_e';   % d(rhoDot)/dv
                 Hd(mi, stateMap.bdot_rx_idx) = 1;      % d(rhoDot)/d(bdot_rx)
+                if includePosPartial                    % WP-G: gated d(rhoDot)/dr (default off)
+                    Hd(mi, stateMap.r_idx) = revgnss.OneWayRangeRateModel.positionPartial( ...
+                        r_ants_est(:,ai), v_rx_est, r_twr_e, cfg);
+                end
             end
 
             % Stage 84: Doppler R diagonal policy — product drift variance counted exactly once.

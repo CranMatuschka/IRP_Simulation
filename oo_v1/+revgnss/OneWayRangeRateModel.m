@@ -73,5 +73,33 @@ classdef OneWayRangeRateModel
             meta.towerRotSpeedEci_mps   = norm(v_tower_eci);
         end
 
+        function drr_dr = positionPartial(r_rx_ecef, v_rx_ecef, r_tx_ecef, cfg)
+            % positionPartial  d(rhoDot)/d(r_rx) [1x3], consistent with compute() (WP-G).
+            %
+            % With rhoDot = u'*v_eff, u = Delta/rho, Delta = r_rx - r_tx, and
+            % v_eff = v_rx + omegaVec x Delta (the tower-rotation term when included):
+            %   d(rhoDot)/d(r_rx) = (v_eff' - rhoDot*u')/rho  +  u'*[omegaVec x]
+            % The first term is the LOS-rotation partial; the second is the direct
+            % dependence of the tower-rotation velocity on r_rx. When the tower
+            % rotational velocity is excluded, the omega term drops out. Small for a
+            % GEO (~1e-5..1e-4 per metre) -- this is the partial the analytic Doppler H
+            % omits by default (see cfg.measurements.doppler.includePositionPartial).
+            delta = r_rx_ecef(:) - r_tx_ecef(:);
+            rho   = norm(delta); if rho < 1; rho = 1; end
+            u     = delta / rho;
+            omega_e = revgnss.Constants.EARTH_OMEGA_RADPS;
+            includeTowerVel = true;
+            try; includeTowerVel = cfg.measurements.doppler.includeTowerRotationalVelocity; catch; end
+            if includeTowerVel
+                v_eff     = v_rx_ecef(:) + [-omega_e*delta(2); omega_e*delta(1); 0];  % v_rx + omega x Delta
+                omegaPart = [omega_e*u(2), -omega_e*u(1), 0];                          % u' * [omega x]
+            else
+                v_eff     = v_rx_ecef(:);
+                omegaPart = [0, 0, 0];
+            end
+            rhoDot  = u' * v_eff;
+            drr_dr  = (v_eff' - rhoDot*u') / rho + omegaPart;
+        end
+
     end
 end

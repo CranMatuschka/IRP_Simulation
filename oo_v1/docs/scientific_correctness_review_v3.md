@@ -33,8 +33,8 @@ Secondary completeness gaps: the headline run still uses the self-labelled "opti
 | **WP-D** ✅ | Medium | Relativistic clock-rate offset (grav.+SR) not modelled. **DONE** — gated truth-side offset (`revgnss.Relativity` → `ClockModel.relativisticFracFreq`) + numeric bound; audit confirmed the constant offset is absorbed by the drift state (zero solution impact for the circular GEO). | Model the constant offset on truth, or bound it in the budget | Effect modelled + numeric bound stated (+46.6 µs/day, ~2.3 km/run, periodic residual 0) ✅ |
 | **WP-E** ✅ | Low | Antenna PCO enabled by default but truth==model → contributes 0, yet audited as "calibration uncertainty". **DONE** — audit/caption now conditioned on a real residual (`ImperfectionAudit.pcoLeavesResidual`); added a gated truth-only PCO calibration residual. | Give PCO a truth≠model calibration residual + relabel as "known/removed" | Audit shows "zero residual (matched)"; gated residual makes z−h nonzero ✅ |
 | **WP-F** ✅ | Low | Hardware delay collapses to a zero residual if enabled with equal truth/model `default_m`. **DONE** — `validateMasterConfig` warns when enabled-but-matched; `residualStochastic` field declared as the real truth-only residual channel. | Enforce/warn truth≠model when enabled | Warning fires on enabled-but-matched; `residualStochastic` yields a real residual ✅ |
-| **WP-G** | Low | Doppler H omits `∂ρ̇/∂r` (documented). | Add the partial or keep the documented bound. | H includes the LOS/tower-rotation position partial |
-| **WP-H** | Low | Ionosphere lacks the symmetric `sameAsTruth` oracle guard the troposphere has (currently no iono oracle *path* exists, so it is safe but asymmetric). | Add the twin guard for defence-in-depth. | Iono `sameAsTruth` throws like troposphere |
+| **WP-G** ✅ | Low | Doppler H omits `∂ρ̇/∂r`. **DONE** — `OneWayRangeRateModel.positionPartial` (LOS + tower-rotation partial, FD-verified) behind gated `doppler.includePositionPartial` (default off). | Add the partial or keep the documented bound | Analytic partial matches FD to <1e-9; gated, default off ✅ |
+| **WP-H** ✅ | Low | Ionosphere lacked the symmetric `sameAsTruth` oracle guard. **DONE** — twin guard added in `EnvironmentModel`. | Add the twin guard for defence-in-depth | Iono `sameAsTruth` throws `revgnss:oracleIonoModelResidual` ✅ |
 | **WP-I** ✅ | Medium (reachable) | Tower-clock R double-count guard was incomplete — present only on the single-freq diagonal; L2/IF/block + Doppler/carrier drift + cross-stack re-charged the product variance (F1). **Reachable** via `includeTowerClocksInEKF` + a noisy product mode (audit corrected the earlier "dormant" call). **DONE** — one bias/drift column-aware mask on all sinks. | With `estimateTowerClocks=true` + noisy product, no tower-clock variance appears in both P and R ✅ |
 
 ### WP-A — IMPLEMENTED (this session)
@@ -145,6 +145,28 @@ site so the estimator does not know it) gives PCO a real truth≠model imperfect
 All default-off → goldens byte-identical (SMOKE single 184/184, headline 185/185). Test
 `tests/test_wpEF_imperfection_honesty.m` locks the honest relabeling, the predicate flips,
 the warning, and a functional run where the residual moves the solution (~0.29 m).
+
+### WP-G / WP-H — IMPLEMENTED (this session)
+
+**WP-G:** the Doppler Jacobian's missing range-rate position partial `∂ρ̇/∂r` is now
+available. `revgnss.OneWayRangeRateModel.positionPartial` computes it consistently with the
+range-rate model — `(v_eff − ρ̇·û)ᵀ/ρ + [ω·u_y, −ω·u_x, 0]` (the LOS-rotation term plus the
+direct dependence of the tower Earth-rotation velocity on `r_rx`). It is gated behind
+`cfg.measurements.doppler.includePositionPartial` (default **off** → the Doppler H is the
+documented `∂/∂v`,`∂/∂ḃ` approximation, golden byte-identical). The test verifies the
+analytic partial against a central finite-difference of the model to <1e-9 — and confirms it
+is genuinely tiny for a GEO (~10⁻⁹–10⁻⁷/m; the LOS and ω terms nearly cancel), validating the
+"negligible for GEO" assessment. **WP-H:** `EnvironmentModel` now rejects
+`ionosphere.modelResidual.mode='sameAsTruth'` with `revgnss:oracleIonoModelResidual` — the
+symmetric twin of the existing troposphere oracle guard (defensive: no such iono path exists
+today, so the guard is inert by default). Both default-off/inert → goldens byte-identical
+(SMOKE single 184/184, headline 185/185). Test
+`tests/test_wpGH_doppler_partial_iono_guard.m`.
+
+**With WP-G/H the v3 forward plan is fully executed** except WP-C (clock realism, deferred by
+choice — the realistic `jowTable2p1` clock is a one-line opt-in). Every change is gated
+default-off and golden byte-identical; the frozen single-antenna and 4-antenna headline
+goldens are unchanged across all eight work packages.
 
 ---
 

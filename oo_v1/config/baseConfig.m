@@ -488,6 +488,11 @@ cfg.measurements.pseudorange.enable   = true;
 cfg.measurements.doppler.enable       = true;
 cfg.measurements.doppler.sigma_mps    = 0.01;
 cfg.measurements.doppler.useInEKF     = true;
+% WP-G: include the range-rate position partial d(rhoDot)/dr in the Doppler Jacobian.
+% Default false -> H has only d/dv and d/d(bdot_rx) (documented approximation; golden
+% byte-identical). true -> the LOS-rotation + tower-rotation partial is added (small for a
+% GEO). See revgnss.OneWayRangeRateModel.positionPartial.
+cfg.measurements.doppler.includePositionPartial = false;
 
 cfg.measurements.carrierPhase.enable           = true;
 cfg.measurements.carrierPhase.useInEKF         = false;   % governed by carrierMode in v4+
