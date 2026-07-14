@@ -888,25 +888,45 @@ classdef Diagnostics < handle
         end
 
         function v = getDiffAttActiveBaselines(obj)
-            if obj.hasArrayData(); v = obj.store_.getData().diffAtt.activeBaselines; return; end
+            % Final-epoch scalar count, consistent across both backends.
+            if obj.hasArrayData()
+                s = obj.store_.getData().diffAtt.activeBaselines;
+                if isempty(s); v = NaN; else; v = s(end); end
+                return;
+            end
             if isempty(obj.log); v = NaN; return; end
             try; v = obj.log(end).diffAttActiveBaselines; catch; v = NaN; end
         end
 
         function v = getDiffAttLostBaselines(obj)
-            if obj.hasArrayData(); v = obj.store_.getData().diffAtt.lostBaselines; return; end
+            % Final-epoch scalar count, consistent across both backends.
+            if obj.hasArrayData()
+                s = obj.store_.getData().diffAtt.lostBaselines;
+                if isempty(s); v = NaN; else; v = s(end); end
+                return;
+            end
             if isempty(obj.log); v = NaN; return; end
             try; v = obj.log(end).diffAttLostBaselines; catch; v = NaN; end
         end
 
         function v = getDiffAttRecalibratedBaselines(obj)
-            if obj.hasArrayData(); v = obj.store_.getData().diffAtt.recalBaselines; return; end
+            % Final-epoch scalar count, consistent across both backends.
+            if obj.hasArrayData()
+                s = obj.store_.getData().diffAtt.recalBaselines;
+                if isempty(s); v = NaN; else; v = s(end); end
+                return;
+            end
             if isempty(obj.log); v = NaN; return; end
             try; v = obj.log(end).diffAttRecalibratedBaselines; catch; v = NaN; end
         end
 
         function v = getDiffAttRejectedRows(obj)
-            if obj.hasArrayData(); v = obj.store_.getData().diffAtt.rejectedRows; return; end
+            % Final-epoch scalar count, consistent across both backends.
+            if obj.hasArrayData()
+                s = obj.store_.getData().diffAtt.rejectedRows;
+                if isempty(s); v = NaN; else; v = s(end); end
+                return;
+            end
             if isempty(obj.log); v = NaN; return; end
             try; v = obj.log(end).diffAttRejectedRows; catch; v = NaN; end
         end

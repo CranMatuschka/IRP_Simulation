@@ -132,7 +132,7 @@ classdef ReportRunner
             % ---- Collect summary metrics --------------------------------
             summary = revgnss.ReportRunner.collectSummary_(simData, cfg, version, reportFolder, pdfPath, matPath);
 
-            % ---- Stage 41: Export ambiguity state metadata and covariance ----
+            % ---- Export ambiguity state metadata and covariance ----
             doAmbMeta = isfield(cfg,'diagnostics') && isfield(cfg.diagnostics,'ambiguityStateMetadata') && ...
                 isfield(cfg.diagnostics.ambiguityStateMetadata,'enable') && ...
                 cfg.diagnostics.ambiguityStateMetadata.enable;
@@ -147,7 +147,7 @@ classdef ReportRunner
                 end
             end
 
-            % ---- Stage 48: carrier IF ambiguity traceability compact fields ----
+            % ---- Carrier IF ambiguity traceability compact fields ----
             % Depends on ambiguityStateMetadata attached above; must stay here.
             nAmb48_ = 0;
             if isfield(summary,'ambiguityStateMetadata') && ...
@@ -166,7 +166,7 @@ classdef ReportRunner
                 summary.carrierIfAmbiguityPairCount > 0;
             summary.carrierIfIntegerAmbiguityIsNonInteger = true;
 
-            % ---- Stage 49: wide-lane / narrow-lane compact fields ----
+            % ---- Wide-lane / narrow-lane compact fields ----
             wl49Req_ = false;
             try; wl49Req_ = logical(cfg.diagnostics.wideLaneNarrowLane.enable); catch; end
             summary.wideLaneNarrowLaneRequested = wl49Req_;
@@ -205,7 +205,7 @@ classdef ReportRunner
                 end
             end
 
-            % ---- Stage 50: ambiguity fixing readiness gate compact fields ----
+            % ---- Ambiguity fixing readiness gate compact fields ----
             amfr50Req_ = false;
             try; amfr50Req_ = logical(cfg.diagnostics.ambiguityFixingReadiness.enable); catch; end
             summary.ambiguityFixingReadinessRequested       = amfr50Req_;
@@ -225,7 +225,7 @@ classdef ReportRunner
                 end
             end
 
-            % ---- Stage 51: ambiguity readiness evidence compact fields ----
+            % ---- Ambiguity readiness evidence compact fields ----
             amre51Req_ = false;
             try; amre51Req_ = logical(cfg.diagnostics.ambiguityReadinessEvidence.enable); catch; end
             summary.ambiguityReadinessEvidenceRequested         = amre51Req_;
@@ -265,14 +265,14 @@ classdef ReportRunner
                 end
             end
 
-            % ---- Stage 73: carrier arc robustness defaults (updated below) ----
+            % ---- Carrier arc robustness defaults (updated below) ----
             summary.nCarrierProductBoundaries            = 0;
             summary.nCarrierProductBoundariesCompensated = 0;
             summary.nConfirmedCarrierSlips               = 0;
             summary.nUnclassifiedCarrierJumps            = 0;
             summary.nFalseProductBoundaryResets          = 0;
 
-            % ---- Stage 52: carrier arc evidence compact fields ----
+            % ---- Carrier arc evidence compact fields ----
             carr52Req_ = false;
             try; carr52Req_ = logical(cfg.diagnostics.carrierArcEvidence.enable); catch; end
             summary.carrierArcEvidenceRequested      = carr52Req_;
@@ -303,7 +303,7 @@ classdef ReportRunner
                 end
             end
 
-            % ---- Stage 53: arc-separated float ambiguity compact fields ----
+            % ---- Arc-separated float ambiguity compact fields ----
             arcSep53Req_ = false;
             try; arcSep53Req_ = logical(cfg.diagnostics.arcSeparatedAmbiguities.enable); catch; end
             summary.arcSeparatedAmbiguitiesEnabled   = arcSep53Req_;
@@ -338,7 +338,7 @@ classdef ReportRunner
                         summary.ambiguityArcMaxEpoch         = asSumm53_.maxArcEpoch;
                         summary.ambiguityResetCount          = asSumm53_.totalSlipEvents;
                     end
-                    % IF arc consistency from Stage 52 arc evidence if already available.
+                    % IF arc consistency from arc evidence if already available.
                     if summary.carrierArcEvidenceAvailable && ...
                             isfield(summary,'carrierArcNSlipEvents')
                         % Derive IF consistency from summary (zero slips = all consistent).
@@ -354,7 +354,7 @@ classdef ReportRunner
                 end
             end
 
-            % ---- Stage 54: arc-consistency enforcement compact fields ----
+            % ---- Arc-consistency enforcement compact fields ----
             arcEnf54Req_ = false;
             try; arcEnf54Req_ = logical(cfg.estimator.enforceCarrierArcConsistency.enable); catch; end
             summary.carrierArcConsistencyEnforced     = arcEnf54Req_;
@@ -380,7 +380,7 @@ classdef ReportRunner
                 end
             end
 
-            % ---- Stage 55: diagnostic plugin registry metadata ----
+            % ---- Diagnostic plugin registry metadata ----
             plugReg55_ = false;
             try; plugReg55_ = logical(cfg.diagnostics.pluginRegistry.enable); catch; end
             if plugReg55_
@@ -392,7 +392,7 @@ classdef ReportRunner
                 end
             end
 
-            % ---- Stage 56: measurement geometry core consolidation ----
+            % ---- Measurement geometry core consolidation ----
             summary.linkGeometryPresent           = true;
             summary.codeJacUsesSharedGeometry     = true;
             summary.carrierMeasUsesSharedGeometry = true;
@@ -432,7 +432,7 @@ classdef ReportRunner
                     cfg_kav.report.writePdf = false;
                     cfg_kav.report.writeMat = false;
                     cfg_kav.plots.enable    = false;
-                    % Stage 85: KAV sub-run must not trigger campaign recursion.
+                    % KAV sub-run must not trigger campaign recursion.
                     try; cfg_kav.validation.scientificCampaign.enable = false; catch; end
                     % WP-B: the KAV sub-run must not launch the Monte-Carlo ensemble.
                     try; cfg_kav.report.monteCarlo.enable = false; catch; end
@@ -457,7 +457,7 @@ classdef ReportRunner
                 end
             end
 
-            % ---- Stage 57: EKF innovation accounting and gauge/NIS cleanup ----
+            % ---- EKF innovation accounting and gauge/NIS cleanup ----
             summary.stage57EkfAccountingEnabled   = false;
             summary.stage57MeasPhysicsChanged     = false;
             summary.stage57EkfMathChanged         = false;
@@ -491,7 +491,7 @@ classdef ReportRunner
                 end
             catch; end
 
-            % ---- Stage 58: EKF two-body/J2 dynamics prediction ----
+            % ---- EKF two-body/J2 dynamics prediction ----
             summary.ekfDynamicsMode                  = 'constantVelocity';
             summary.ekfDynamicsForceModel            = 'none';
             summary.ekfDynamicsFrameModel            = 'none';
@@ -533,7 +533,7 @@ classdef ReportRunner
                 end
             catch; end
 
-            % ---- Stage 59: single-asset carrier attitude scenario ----
+            % ---- Single-asset carrier attitude scenario ----
             summary.stage59ScenarioEnabled          = false;
             summary.stage59ScenarioClassification   = 'disabled';
             summary.singleAssetAttitudeScenarioName = '';
@@ -559,7 +559,7 @@ classdef ReportRunner
             if isfield(cfg,'scenario') && isfield(cfg.scenario,'name') && ...
                     strcmp(cfg.scenario.name,'singleAssetCarrierAttitude')
                 try
-                    % Stage 60: pre-extract final euler so assess() can use them
+                    % Pre-extract final euler so assess() can use them
                     eu_tr = simData.getFinalTruthEuler_rad();
                     eu_es = simData.getFinalEstimateEuler_rad();
                     if ~isempty(eu_tr)
@@ -594,7 +594,7 @@ classdef ReportRunner
                 end
             end
 
-            % ---- Stage 60: carrier-attitude measurement model closure --------
+            % ---- Carrier-attitude measurement model closure --------
             summary.stage60CarrierAttClosureAvailable      = false;
             summary.stage60CarrierAttClosureClassification = 'unavailable';
             summary.stage60CarrierAttRowsChecked           = 0;
@@ -662,7 +662,7 @@ classdef ReportRunner
                 end
             end
 
-            % ---- Stage 61: quaternion error-state EKF summary fields ----
+            % ---- Quaternion error-state EKF summary fields ----
             summary.stage61Parameterization           = 'eulerZYX';
             summary.quaternionErrorStateEkfActive              = false;
             summary.stage61InjectionCount             = 0;
@@ -689,7 +689,7 @@ classdef ReportRunner
                 end
             catch; end
 
-            % ---- Stage 62: quaternion covariance consistency fields ----
+            % ---- Quaternion covariance consistency fields ----
             summary.stage62CovarianceResetOrder         = 'posterior-after-joseph';
             summary.stage62JosephUsesPminus             = true;
             summary.stage62ResetAppliedToPosterior      = true;
@@ -724,7 +724,7 @@ classdef ReportRunner
                 end
             catch; end
 
-            % ---- Stage 63: controlled raw-carrier integer ambiguity fixing ----
+            % ---- Controlled raw-carrier integer ambiguity fixing ----
             summary.integerAmbiguityFixingActive = false;
             summary.stage63Mode                     = 'disabled';
             summary.stage63Classification           = 'disabled';
@@ -757,7 +757,7 @@ classdef ReportRunner
                 end
             catch; end
 
-            % ---- Stage 64: scientific closure summary fields ---------------
+            % ---- Scientific closure summary fields ---------------
             summary.physicsConfigSectionActive = true;
             scen64_ = '';
             try; scen64_ = cfg.scenario.name; catch; end
@@ -793,7 +793,7 @@ classdef ReportRunner
             summary.stage64FalseFixRisk = false;
             summary.stage64PppGrade     = false;
 
-            % ---- Stage 66: single-asset one-way closure summary fields -----
+            % ---- Single-asset one-way closure summary fields -----
             summary.oneWayClosureSectionActive         = true;
             summary.stage66NSpaceAssets   = 1;
             orbitClass66_ = 'GEO';
@@ -813,7 +813,7 @@ classdef ReportRunner
                                             summary.stage66TwoWayDisabled;
             summary.stage66OperationalClaim = false;
 
-            % ---- Stage 67: attitude, clock, and dynamics realism summary ----
+            % ---- Attitude, clock, and dynamics realism summary ----
             attPrim67_ = 'carrierLeverArmQuaternionEkf';
             try; attPrim67_ = cfg.estimator.attitude.primaryMode; catch; end
             summary.stage67PrimaryAttMode = attPrim67_;
@@ -843,7 +843,7 @@ classdef ReportRunner
             summary.stage67OrbitPropMode = propMode67_;
             summary.stage67PerfectCorrectionFalse = ~strcmp(tClkMode67_, 'perfectCorrection');
 
-            % ---- Stage 80: propagation and one-way timing summary --------
+            % ---- Propagation and one-way timing summary --------
             summary.truthPropagatorMode = propMode67_;
             try; summary.truthPropagatorMode = cfg.orbit.truth.mode; catch; end
             summary.estimatorDynamicsMode = dyn67_;
@@ -882,7 +882,7 @@ classdef ReportRunner
                 end
             catch; end
 
-            % ---- MD Stage 95: truth-estimation separation audit (honest, COMPUTED) --------
+            % ---- MD truth-estimation separation audit (honest, COMPUTED) --------
             % Booleans/strings are ignored by extractMetrics (logicals are not numeric in
             % MATLAB), so these never touch the frozen golden fingerprint; the report reads
             % them directly. Computed from cfg via the guard, so they stay honest in every
@@ -906,7 +906,7 @@ classdef ReportRunner
                 summary.teSepStatus = ['auditUnavailable: ' teErr_.message];
             end
 
-            % ---- Stage 82: J2 diagnostics and source-truth summary --------
+            % ---- J2 diagnostics and source-truth summary --------
             summary.representativeJ2Accel_mps2 = 0;
             try; summary.representativeJ2Accel_mps2 = cfg.diagnostics.dynamicsMismatch.representativeJ2Accel_mps2; catch; end
             summary.j2DefaultPolicy = 'twoBodyDefaultJ2Available';
@@ -943,7 +943,7 @@ classdef ReportRunner
                     summary.diffAttSchemaStatus = 'complete';
                 end
             catch; end
-            % Stage 80: validation scope — active single-asset one-way report.
+            % Validation scope — active single-asset one-way report.
             summary.validationScope = 'singleAssetOneWayActive';
             summary.excludedInactiveFeatureTests = { ...
                 'test_isl_stub.m', 'test_stage20_multi_space_assets.m', ...
@@ -952,7 +952,7 @@ classdef ReportRunner
                 'test_stage23_isl_link_timing.m', ...
                 'test_stage24_twstft_diagnostics.m' };
 
-            % Stage 81: scientific profile and model coverage audit fields.
+            % Scientific profile and model coverage audit fields.
             summary.scientificProfileMode  = 'singleAssetOneWaySyntheticClosedV1';
             try; summary.scientificProfileMode = cfg.scientificProfile.mode; catch; end
             summary.claimLevel = 'controlledSynthetic';
@@ -985,7 +985,7 @@ classdef ReportRunner
             summary.validationStatisticsNisMode = 'partialCovarianceAware';
             try; summary.validationStatisticsNisMode = cfg.validation.statistics.nis.mode; catch; end
 
-            % --- Stage 85: campaign placeholders (populated later by ScientificValidationCampaign.run) ---
+            % --- Campaign placeholders (populated later by ScientificValidationCampaign.run) ---
             summary.scientificCampaignStatus       = 'notRun';
             summary.scientificCampaignProfile      = 'off';
             summary.campaignOverallStatus          = 'notRun';
@@ -1036,7 +1036,7 @@ classdef ReportRunner
             try; sp3Mode = cfg.products.sp3.mode; catch; end
             summary.externalProductsStatus = sp3Mode;
 
-            % Stage 68: atmosphere / antenna / bias enable status.
+            % Atmosphere / antenna / bias enable status.
             summary.stage68TropTruthEn = false;
             try; summary.stage68TropTruthEn = cfg.errors.troposphere.truth.enable; catch; end
             summary.stage68TropModelEn = false;
@@ -1060,7 +1060,7 @@ classdef ReportRunner
             summary.stage68MultipathEn = false;
             try; summary.stage68MultipathEn = cfg.errors.multipath.truth.enable || cfg.errors.multipath.model.enable; catch; end
 
-            % ---- Stage 83: Doppler dynamics and carrier product-covariance ----
+            % ---- Doppler dynamics and carrier product-covariance ----
             summary.dopplerModelLevel                = 'ecefOnlyV1';
             try; summary.dopplerModelLevel           = cfg.measurements.doppler.modelLevel; catch; end
             summary.towerRotationalVelocityIncluded  = false;
@@ -1091,7 +1091,7 @@ classdef ReportRunner
             summary.carrierProductDriftTermIncluded  = false;
             summary.carrierProductBoundaryHandling   = 'withinProductEpochOnlyV1';
             summary.carrierRCondition                = NaN;
-            % Stage 84 new summary fields
+            % New summary fields
             summary.dopplerDriftVarianceDiagonalPolicy   = 'trackingOnlyPlusBlock';
             summary.codeProductCovarianceStatus          = 'stage74BlockRTowerClockCorrelation';
             summary.dopplerProductCovarianceStatus       = 'stage83ProductDriftBlock';
@@ -1143,7 +1143,7 @@ classdef ReportRunner
                         rc83_ = di83_.dopplerRCondition; rc83_ = rc83_(isfinite(rc83_));
                         if ~isempty(rc83_); summary.dopplerRCondition = min(rc83_); end
                     end
-                    % Stage 84: harvest drift diagonal policy and carrier arc reference status
+                    % Harvest drift diagonal policy and carrier arc reference status
                     if isfield(di83_,'dopplerDriftVarianceDiagonalPolicy')
                         uPols_ = unique({di83_.dopplerDriftVarianceDiagonalPolicy});
                         if numel(uPols_) == 1
@@ -1152,7 +1152,7 @@ classdef ReportRunner
                             summary.dopplerDriftVarianceDiagonalPolicy = 'mixed';
                         end
                     end
-                    % Stage 84: harvest driftAnchorStatus from dopplerInfo meta
+                    % Harvest driftAnchorStatus from dopplerInfo meta
                     if isfield(di83_,'driftAnchorStatus')
                         das84_ = unique({di83_.driftAnchorStatus});
                         if numel(das84_) == 1; summary.driftAnchorStatus = das84_{1}; end
@@ -1166,7 +1166,7 @@ classdef ReportRunner
                 end
             catch; end
 
-            % ---- Stage 71/72: tower clock product summary fields -------
+            % ---- Tower clock product summary fields -------
             % MUST be computed before PDF generation so ClockExactReportBuilder
             % receives finite product metadata (not NaN).  All values derive
             % from cfg, not from simulation results, so early placement is safe.
@@ -1194,7 +1194,7 @@ classdef ReportRunner
                     summary.towerClockProductMaxAge_s          = maxAge71_;
                     summary.towerClockProductMeanSigma_m       = sqrt(max(varMean71_,0));
                     summary.towerClockProductMaxSigma_m        = sqrt(max(varMax71_,0));
-                    % Stage 72: shared covariance not implemented; only diagonal R inflation.
+                    % Shared covariance not implemented; only diagonal R inflation.
                     summary.towerClockSharedCovarianceApplied  = false;
                     summary.towerClockProductDiagonalInflation = true;
                     summary.dopplerClockProductUncertaintyStatus = ...
@@ -1228,7 +1228,7 @@ classdef ReportRunner
                 summary.dopplerClockProductUncertaintyStatus = 'unknown';
             end
 
-            % ---- Stage 73: carrier arc robustness summary fields ------------
+            % ---- Carrier arc robustness summary fields ------------
             % Must be computed before PDF generation so ClockExactReportBuilder
             % receives finite slip-detection diagnostics.
             try
@@ -1265,7 +1265,8 @@ classdef ReportRunner
                     logical(cfg.carrierSlip.syntheticSlipInjection.enable); catch; end
                 summary.nDiffAttBaselineResets = 0;  % DiffAtt slip detection disabled per Stage 69
                 nda73_ = NaN;
-                try; nda73_ = double(simData.getDiffAttActiveBaselines()); catch; end
+                try; nda73_ = double(revgnss.ReportRunner.finalScalar_( ...
+                    simData.getDiffAttActiveBaselines(), NaN)); catch; end
                 summary.nDiffAttBaselinesActiveFinal = nda73_;
                 summary.nAmbiguityResets = summary.ambiguityResetCount;
                 if isfield(summary,'nConfirmedCarrierSlips') && ...
@@ -1292,7 +1293,7 @@ classdef ReportRunner
                 summary.carrierArcRobustnessStatus     = 'unknown';
             end
 
-            % ---- Stage 74: shared-error covariance summary fields ----------
+            % ---- Shared-error covariance summary fields ----------
             % Defaults (safe if cfg.covariance block absent or run pre-Stage74)
             summary.covarianceMode                         = 'diagonalOnly';
             summary.codeTowerClockBlockCovarianceApplied   = false;
@@ -1336,7 +1337,7 @@ classdef ReportRunner
                     'Stage 74 covariance summary fields failed: %s', ME74_.message);
             end
 
-            % ---- Stage 70: baseline carrier integer fix summary fields --------
+            % ---- Baseline carrier integer fix summary fields --------
             % (Must run before PDF generation so ClockExactReportBuilder sees these fields.)
             try
                 st70_ = sim.diffAttStore;
@@ -1357,7 +1358,7 @@ classdef ReportRunner
                 summary.externalReferenceUsedForCalibration = true;
             end
 
-            % ---- Stage 75: per-baseline ambiguity classification fields --------
+            % ---- Per-baseline ambiguity classification fields --------
             try
                 st75_ = revgnss.DiffAttitudeBuilder.defaultStoreFields(sim.diffAttStore, cfg);
                 summary.baselineArClassification          = st75_.integerClassification;
@@ -1387,7 +1388,7 @@ classdef ReportRunner
                 summary.nBaselineArFloatExternal         = 0;
             end
 
-            % ---- Stage 76: signal config + dimension contract + dual-freq AR ----
+            % ---- Signal config + dimension contract + dual-freq AR ----
             try
                 % Central signal list from finalized cfg
                 summary.signalNames         = cfg.signals.names;
@@ -1433,7 +1434,7 @@ classdef ReportRunner
                 summary.dimensionContractStatus = 'unknown';
             end
             try
-                % Stage 76: dual-frequency AR summary from diffAttStore
+                % Dual-frequency AR summary from diffAttStore
                 st76_ = sim.diffAttStore;
                 summary.attitudeArMode              = revgnss.DiffAttitudeBuilder.storeField_(st76_,'attitudeArMode','rawL1Only');
                 summary.attitudeArSignalMode        = summary.signalMode;
@@ -1455,7 +1456,7 @@ classdef ReportRunner
                 summary.attitudeArFrequenciesUsed   = {'L1'};
             end
 
-            % ---- Stage 79: central config lock summary --------------------
+            % ---- Central config lock summary --------------------
             try
                 audit79_ = struct();
                 if isfield(cfg,'validation') && isfield(cfg.validation,'centralConfigAudit')
@@ -1581,7 +1582,7 @@ classdef ReportRunner
                 fprintf('  PDF written: %s  (%.1f kB)\n', pdfPath, info.bytes/1024);
             end
 
-            % Stage 70/75/76 summary fields populated before PDF generation (above).
+            % Summary fields populated before PDF generation (above).
 
             % ---- Diagnostics storage summary ----------------------------
             try; simData.printStorageSummary(); catch; end
@@ -1628,7 +1629,7 @@ classdef ReportRunner
                 end
             end
 
-            % ---- Stage 85: Scientific Validation Campaign ------------------
+            % ---- Scientific Validation Campaign ------------------
             % Runs inside same invocation; no PDF produced by sub-simulations.
             campResult85_ = revgnss.ScientificValidationCampaign.run(cfg);
             % Merge all campaign fields into summary
@@ -1673,6 +1674,16 @@ classdef ReportRunner
 
     methods (Static, Access = private)
 
+        function s = finalScalar_(v, dflt)
+            % Reduce a possibly per-epoch series to its final-epoch scalar.
+            % Array-backend accessors return an N-by-1 series; the summary wants
+            % the last epoch. Scalars pass through; empty returns the default.
+            if isempty(v);      s = dflt;
+            elseif isscalar(v); s = v;
+            else;               s = v(end);
+            end
+        end
+
         % ================================================================
         function summary = collectSummary_(diag, cfg, version, reportFolder, pdfPath, matPath)
             summary.version      = version;
@@ -1706,7 +1717,7 @@ classdef ReportRunner
                 cfg.estimator.estimateAngularRateFromPseudorange;
             summary.towerClockMode = cfg.estimator.towerClockMode;
 
-            % Attitude classification (Stage 14.8): convergence-based, not rank-only.
+            % Attitude classification: convergence-based, not rank-only.
             % CONVERGED          : rank >= 3, final error < 50% of initial
             % BOUNDED_WEAK_GEOMETRY : rank >= 3, error maintained (0.75–2x ratio)
             % NON_CONVERGENT     : rank >= 3 but error worsened (ratio < 0.75)
@@ -1770,7 +1781,7 @@ classdef ReportRunner
                 end
                 summary.attitudeObsClass = cls2;
 
-                % Stage 14.9: separability metrics (always logged)
+                % Separability metrics (always logged)
                 try
                     sepVec  = diag.getAttitudeSeparable();
                     corrVec = diag.getAttitudeAmbCorrMaxAbs();
@@ -1781,7 +1792,7 @@ classdef ReportRunner
                     summary.attitudeAmbCorrMaxAbs = NaN;
                 end
 
-                % Stage 15: differential carrier attitude classification
+                % Differential carrier attitude classification
                 attMode15 = '';
                 if isfield(cfg,'estimator') && isfield(cfg.estimator,'attitudeCarrierMode')
                     attMode15 = cfg.estimator.attitudeCarrierMode;
@@ -1795,10 +1806,10 @@ classdef ReportRunner
                         summary.diffAttMeanNRows  = mean(nVec(nVec>0), 'omitnan');
                         rVec = diag.getDiffAttResidRMS();
                         summary.diffAttResidRMS_m = mean(rVec(isfinite(rVec) & daActive), 'omitnan');
-                        summary.diffAttActiveBaselines      = double(diag.getDiffAttActiveBaselines());
-                        summary.diffAttLostBaselines        = double(diag.getDiffAttLostBaselines());
-                        summary.diffAttRecalibratedBaselines= double(diag.getDiffAttRecalibratedBaselines());
-                        summary.diffAttRejectedRows         = double(diag.getDiffAttRejectedRows());
+                        summary.diffAttActiveBaselines      = double(revgnss.ReportRunner.finalScalar_(diag.getDiffAttActiveBaselines(), 0));
+                        summary.diffAttLostBaselines        = double(revgnss.ReportRunner.finalScalar_(diag.getDiffAttLostBaselines(), 0));
+                        summary.diffAttRecalibratedBaselines= double(revgnss.ReportRunner.finalScalar_(diag.getDiffAttRecalibratedBaselines(), 0));
+                        summary.diffAttRejectedRows         = double(revgnss.ReportRunner.finalScalar_(diag.getDiffAttRejectedRows(), 0));
                     catch
                         summary.diffAttCalibrated = false;
                         summary.diffAttMeanNRows  = 0;
@@ -1825,7 +1836,7 @@ classdef ReportRunner
                     end
                 end
 
-                % Stage 16: absolute attitude initialization diagnostics.
+                % Absolute attitude initialization diagnostics.
                 % Not stored in flat array schema v3 — populate from cfg defaults.
                 try
                     error('attitudeInit:notInFlatSchema','not stored');
@@ -2172,7 +2183,7 @@ classdef ReportRunner
                                     summary.totalIslDopplerRows + summary.totalIslCarrierDiagnosticRows + ...
                                     summary.totalIslTwoWayRangeRows + summary.totalIslTwoWayDopplerDiagnosticRows;
             summary.observableStack = obs_stack_;
-            % Stage 45: compact code IF row fields
+            % Compact code IF row fields
             summary.codeIonoFreeRowsRequested = revgnss.ReportRunner.safeCfgBool_( ...
                 cfg, {'measurements','code','ionosphereFreeRows','enable'}, false);
             summary.codeIonoFreeRowsUsedInEkf = summary.codeIonoFreeRowsRequested && ...
@@ -2183,7 +2194,7 @@ classdef ReportRunner
             else
                 summary.totalCodeIonoFreeRows = 0;
             end
-            % Stage 46: compact code IF traceability fields
+            % Compact code IF traceability fields
             try
                 co46 = revgnss.IonosphereFreeCombinationDiagnostics.coefficients('L1','L2');
                 summary.codeIonoFreeAlpha              = co46.alpha;
@@ -2204,7 +2215,7 @@ classdef ReportRunner
             else
                 summary.codeIonoFreeCountsSource = 'inferred-from-nTowers-nReceivers';
             end
-            % Stage 47: compact carrier IF row fields
+            % Compact carrier IF row fields
             summary.carrierIonoFreeRowsRequested = revgnss.ReportRunner.safeCfgBool_( ...
                 cfg, {'measurements','carrier','ionosphereFreeRows','enable'}, false);
             summary.carrierIonoFreeRowsUsedInEkf = summary.carrierIonoFreeRowsRequested && ...
