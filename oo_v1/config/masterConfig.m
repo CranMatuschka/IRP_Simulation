@@ -62,6 +62,14 @@ cfg.report.zoomLastSeconds       = 120;    % zoom plots show the last 120 s (fix
 cfg.report.compactFinalReport    = true;
 cfg.report.suppressStageSections = true;
 cfg.report.deduplicateFigures    = true;
+% WP-B: Monte-Carlo filter-consistency evidence written to the run .out log. A single run
+% gives one NEES/NIS sample; chi-squared consistency needs an ensemble. Default OFF
+% (goldens byte-identical; N extra full runs). Set enable=true to append an averaged
+% NIS/NEES-vs-chi-square-band verdict; the shipped filter is conservative-by-design and is
+% expected to read BELOW the band (under-confident, honest). Tune nSeeds/duration_s below.
+cfg.report.monteCarlo.enable     = false;   % <- true to append MC consistency evidence
+cfg.report.monteCarlo.nSeeds     = 12;
+cfg.report.monteCarlo.duration_s = 900;
 
 %% Signals and frequency
 % enabledMask is the single frequency control; finalizeConfig derives twoFrequency

@@ -434,6 +434,8 @@ classdef ReportRunner
                     cfg_kav.plots.enable    = false;
                     % Stage 85: KAV sub-run must not trigger campaign recursion.
                     try; cfg_kav.validation.scientificCampaign.enable = false; catch; end
+                    % WP-B: the KAV sub-run must not launch the Monte-Carlo ensemble.
+                    try; cfg_kav.report.monteCarlo.enable = false; catch; end
                     out_kav = revgnss.ReportRunner.runSingle(cfg_kav);
                     r_kav   = out_kav.summary.attitudeImprovementRatio;
                     summary.knownAmbImprovementRatio = r_kav;
@@ -1653,9 +1655,15 @@ classdef ReportRunner
             out.matPath           = matPath;
             out.texPath           = texPath2;
 
+            % WP-B: Monte-Carlo NEES/NIS filter-consistency evidence (opt-in, default OFF
+            % -> golden byte-identical). Ensemble consistency is the honest alternative to
+            % a single-run NEES/NIS sample. Runs after the main pipeline so it never
+            % perturbs it; the shipped conservative filter is expected to sit below band.
+            out.monteCarlo = revgnss.ReportRunner.runMonteCarloConsistency_(cfg);
+
             % Run log (<stem>.out) beside the PDF/MAT.
             if writePdf || writeMat
-                revgnss.ReportRunner.writeRunLog_(reportFolder, pdfStem, cfg, cfgLiteral, summary, pdfPath, matPath);
+                revgnss.ReportRunner.writeRunLog_(reportFolder, pdfStem, cfg, cfgLiteral, summary, pdfPath, matPath, out.monteCarlo);
             end
 
             fprintf('=== ReportRunner: done ===\n');
@@ -2405,10 +2413,12 @@ classdef ReportRunner
             end
         end
 
-        function writeRunLog_(reportFolder, stem, cfg, cfgLiteral, summary, pdfPath, matPath)
+        function writeRunLog_(reportFolder, stem, cfg, cfgLiteral, summary, pdfPath, matPath, mc)
             % writeRunLog_  Write a concise <stem>.out run log beside the PDF/MAT.
             %   cfg is the RESOLVED config (post-finalizeConfig); cfgLiteral is the
             %   pre-finalizeConfig snapshot, so the .out can show the overrides (WP-2).
+            %   mc (optional) is the WP-B Monte-Carlo consistency result.
+            if nargin < 8; mc = struct('enabled', false); end
             try
                 fid = fopen(fullfile(reportFolder, [stem '.out']), 'w');
                 if fid < 0; return; end
@@ -2431,6 +2441,24 @@ classdef ReportRunner
                         fprintf(fid, '  %-22s : %.6g\n', mkeys{i}, summary.(mkeys{i}));
                     end
                 end
+                % WP-B: Monte-Carlo NEES/NIS filter-consistency evidence (opt-in).
+                if isstruct(mc) && isfield(mc,'enabled') && mc.enabled
+                    fprintf(fid, '\n-- monte-carlo filter consistency (WP-B) --\n');
+                    if isfield(mc,'ran') && mc.ran && isfield(mc,'result')
+                        r = mc.result;
+                        fprintf(fid, '  seeds used         : %d (confidence %.2f)\n', r.nUsed, r.confidence);
+                        fprintf(fid, '  interpretation     : %s\n', r.interpretation);
+                        fprintf(fid, '  NIS  per dof       : %.4f   (band [%.4f, %.4f])\n', ...
+                            r.nisPerDof, r.nisBand(1)/max(r.nisDof,1), r.nisBand(2)/max(r.nisDof,1));
+                        fprintf(fid, '  NEES per dof       : %.4f   (band [%.4f, %.4f])\n', ...
+                            r.neesPerDof, r.neesBand(1)/max(r.neesDof,1), r.neesBand(2)/max(r.neesDof,1));
+                        fprintf(fid, '  verdict            : %s\n', mc.verdict);
+                    else
+                        m_ = ''; if isfield(mc,'error'); m_ = mc.error; end
+                        fprintf(fid, '  (not run: %s)\n', m_);
+                    end
+                end
+
                 fprintf(fid, '\n-- outputs --\n');
                 fprintf(fid, '  pdf     : %s\n', pdfPath);
                 fprintf(fid, '  mat     : %s\n', matPath);
@@ -2454,6 +2482,64 @@ classdef ReportRunner
                     fprintf(fid, '\n-- resolved-config dump failed: %s --\n', dumpErr.message);
                 end
             catch; end
+        end
+
+        function mc = runMonteCarloConsistency_(cfg)
+            % runMonteCarloConsistency_  WP-B: ensemble NEES/NIS filter-consistency.
+            %   A single run yields a single NEES/NIS sample; chi-squared consistency is
+            %   only meaningful over an ensemble. When cfg.report.monteCarlo.enable is
+            %   true, run N seeded pipeline draws (initial error from P0, varied
+            %   measurement/atmosphere AND clock-truth seeds), pool post-burn-in NIS/NEES
+            %   and band-check them. Default OFF -> golden byte-identical (build never runs
+            %   the ensemble). Expensive: N extra full pipeline runs, so it uses a short
+            %   duration override by default.
+            mc = struct('enabled', false, 'ran', false, 'verdict', 'disabled');
+            en = false;
+            try; en = logical(cfg.report.monteCarlo.enable); catch; end
+            if ~en; return; end
+            mc.enabled = true;
+
+            nSeeds = 12; dur = 900; conf = 0.99; baseSel = 'self';
+            try; nSeeds = cfg.report.monteCarlo.nSeeds;     catch; end
+            try; dur    = cfg.report.monteCarlo.duration_s; catch; end
+            try; conf   = cfg.report.monteCarlo.confidence; catch; end
+            try; baseSel = cfg.report.monteCarlo.baseConfig; catch; end
+
+            % 'self' (default) characterises the SHIPPED filter (conservative-by-design,
+            % expected below-band); 'matchedBaseline' gives a two-sided verdict.
+            baseCfg = cfg;
+            if ischar(baseSel) && strcmpi(baseSel, 'matchedbaseline')
+                baseCfg = revgnss.ConfigFactory.matchedErrorBaselineConfig();
+            end
+            baseCfg.report.monteCarlo.enable = false;   % never recurse
+
+            fprintf('  [WP-B] Monte-Carlo consistency: %d seeds x %g s ...\n', nSeeds, dur);
+            try
+                res = revgnss.MonteCarloConsistency.run(baseCfg, ...
+                    struct('nSeeds', nSeeds, 'duration_s', dur, 'confidence', conf));
+                mc.ran = true; mc.result = res;
+                mc.verdict = revgnss.ReportRunner.mcVerdict_(res);
+                fprintf(['  [WP-B] %s | NIS/dof=%.3f (band [%.3f, %.3f]) | ' ...
+                         'NEES/dof=%.3f (band [%.3f, %.3f]) | seeds=%d\n'], mc.verdict, ...
+                    res.nisPerDof,  res.nisBand(1)/max(res.nisDof,1),  res.nisBand(2)/max(res.nisDof,1), ...
+                    res.neesPerDof, res.neesBand(1)/max(res.neesDof,1), res.neesBand(2)/max(res.neesDof,1), res.nUsed);
+            catch me
+                mc.ran = false; mc.verdict = 'error'; mc.error = me.message;
+                fprintf('  [WP-B] Monte-Carlo consistency FAILED: %s\n', me.message);
+            end
+        end
+
+        function v = mcVerdict_(res)
+            % mcVerdict_  Human-readable NIS-based consistency verdict.
+            if res.nisInBand
+                v = 'CONSISTENT (NIS within chi-square band)';
+            elseif res.nisBelowBand
+                v = 'CONSERVATIVE (NIS below band: filter under-confident; R/Q inflated)';
+            elseif res.nisAboveBand
+                v = 'OPTIMISTIC (NIS above band: filter over-confident)';
+            else
+                v = 'indeterminate';
+            end
         end
 
         function v = fieldOrPath_(s, path, default)

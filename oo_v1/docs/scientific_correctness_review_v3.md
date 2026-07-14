@@ -64,6 +64,24 @@ floor) while legitimate cross-interval averaging still applies — a conservativ
 under-confident) treatment. The rigorous alternative — a per-tower product-bias EKF state,
 and two-way *carrier* for the sub-ps regime — remains future work.
 
+### WP-B — IMPLEMENTED (this session)
+
+The Monte-Carlo consistency harness (`+revgnss/MonteCarloConsistency.m`) is now wired into
+the report path (`ReportRunner.runMonteCarloConsistency_`, called from `runSingle` after the
+main pipeline; verdict written to the `<stem>.out` log and returned in `out.monteCarlo`).
+Config `cfg.report.monteCarlo.{enable,nSeeds,duration_s,confidence,baseConfig}` — default
+**OFF** (goldens byte-identical: SMOKE single 184/184, headline 185/185; the KAV sub-run is
+guarded so it never re-launches the ensemble). When enabled it runs N seeded pipeline draws
+(initial error from P0, varied measurement/atmosphere *and* clock-truth seeds), pools the
+post-burn-in NIS (dof = measurement rows) and position NEES (dof = 3), and χ²-band-checks
+them, emitting a verdict: **CONSISTENT / CONSERVATIVE / OPTIMISTIC**. On the shipped filter
+the verdict is **CONSERVATIVE** (e.g. NIS/dof ≈ 0.92 below the [0.977, 1.023] band; NEES/dof
+≈ 0.36 below [0.87, 1.14]) — i.e. the filter is measurably *under-confident* (R/Q inflated),
+which is the safe side and the honest evidence a single deterministic run could not give.
+Test `tests/test_wpB_monte_carlo_report_hook.m` locks the default-OFF contract and the
+result-struct/band-verdict interface. Rendering the verdict as a PDF report section (rather
+than only the `.out` log) is a future nicety.
+
 ---
 
 ## 1. What the system is — and the one-way vs two-way frame

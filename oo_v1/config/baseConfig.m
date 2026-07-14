@@ -855,6 +855,18 @@ cfg.plots.outputDir             = fullfile(fileparts(mfilename('fullpath')), ...
 % --- Report ---------------------------------------------------
 cfg.report.enable              = true;
 cfg.report.version             = '1.00';
+% WP-B: Monte-Carlo NEES/NIS filter-consistency evidence appended to the run (.out log).
+% A single run gives one NEES/NIS sample; chi-squared consistency is only meaningful over
+% an ensemble. Default OFF (golden byte-identical; expensive = N extra full runs). When on,
+% ReportRunner runs N seeded draws (initial error from P0, varied measurement/atmosphere +
+% clock-truth seeds) and band-checks the pooled NIS/NEES. baseConfig 'self' characterises
+% the SHIPPED filter (conservative-by-design -> expected below band); 'matchedBaseline'
+% gives a two-sided verdict.
+cfg.report.monteCarlo.enable      = false;
+cfg.report.monteCarlo.nSeeds      = 12;
+cfg.report.monteCarlo.duration_s  = 900;      % short override; the shipped run is much longer
+cfg.report.monteCarlo.confidence  = 0.99;
+cfg.report.monteCarlo.baseConfig  = 'self';   % 'self' | 'matchedBaseline'
 cfg.report.baseOutputDir       = fullfile(fileparts(mfilename('fullpath')), '..', 'output');
 cfg.report.dateFolderPrefix    = 'Report-';
 cfg.report.overwrite           = true;
