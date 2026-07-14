@@ -215,6 +215,22 @@ classdef CodeMeasurementBuilder
                 R_diag(mi) = max(sigma_i, sigmaFloor)^2;
             end
 
+            % WP-I: complete the tower-clock product-sigma R double-count guard. The
+            % single-freq diagonal above (lines 209-213) guards only a LOCAL copy; the
+            % downstream L2/multi-sig diagonal, ionosphere-free R rebuild, and shared-tower
+            % off-diagonal block read the RAW towerClkSigma / errStruct.towerClockModelSigma_m
+            % and would re-charge the product variance while the tower BIAS state already
+            % carries it in P (F1 double-count -- reachable via includeTowerClocksInEKF + a
+            % noisy product mode). Mask the BIAS product sigma in place here (twr_list is
+            % still the original per-row list, aligned with towerClkSigma) so lines 344/526
+            % inherit the guard; the shared-tower block masks errStruct.towerClockModelSigma_m
+            % locally below. Guard on column 1 (bias); errStruct.towerClockModelSigma_m is
+            % left UNMASKED so diagnostics report the true product sigma. Gauge/reference
+            % towers and non-estimated towers keep towerClockIdx==0 -> product sigma retained
+            % (no under-count). Default estimateTowerClocks=false -> no-op (golden byte-identical).
+            towerClkSigma = models.measurements.CodeMeasurementBuilder.maskStateTowerSigma_( ...
+                towerClkSigma, twr_list, stateMap, 1);
+
             % Attach diagnostics
             errStruct.sagnacTruth_m  = sagnacTruth_m;
             errStruct.sagnacModel_m  = sagnacModel_m;
@@ -636,6 +652,12 @@ classdef CodeMeasurementBuilder
                         numel(errStruct.towerClockModelSigma_m) == M
                     sigTwr_ = errStruct.towerClockModelSigma_m;
                 end
+                % WP-I: same bias-state guard for the shared-tower off-diagonal block --
+                % a tower whose bias is an EKF state must contribute no product-sigma
+                % correlation here (its uncertainty is in P). twr_list is the post-expansion
+                % per-row list; guard on column 1 (bias). No-op when estimateTowerClocks=false.
+                sigTwr_ = models.measurements.CodeMeasurementBuilder.maskStateTowerSigma_( ...
+                    sigTwr_, twr_list, stateMap, 1);
                 uniqT_ = unique(twr_list);
                 for kt_ = 1:numel(uniqT_)
                     idx_ = find(twr_list == uniqT_(kt_));
@@ -667,6 +689,30 @@ classdef CodeMeasurementBuilder
                 error('MeasurementModel:invalidR', ...
                     ['R has %d invalid diagonal values (NaN/Inf/<=0). ' ...
                      'Check cfg.errors.codeNoise.sigma_m, cfg.effects, and cfg.errors toggles.'], nBad);
+            end
+        end
+
+        % ----------------------------------------------------------------
+        function s = maskStateTowerSigma_(sigVec, towerList, stateMap, col)
+            % maskStateTowerSigma_  Zero broadcast-product sigma entries for towers whose
+            % clock quantity is an EKF state (WP-I double-count guard).
+            %   col=1 -> tower BIAS state (stateMap.towerClockIdx(ti,1)>0)
+            %   col=2 -> tower DRIFT state (stateMap.towerClockIdx(ti,2)>0)
+            % When the quantity is a free state its uncertainty lives in P, so its product
+            % sigma must not also enter R. Per-tower / per-column so gauge-reference towers
+            % and non-estimated (towerClockIdx==0) towers correctly RETAIN their sigma (no
+            % under-count). No-op (identity) when no tower clock states exist.
+            s = sigVec;
+            if isempty(sigVec) || ~isstruct(stateMap) || ~isfield(stateMap,'towerClockIdx') ...
+                    || isempty(stateMap.towerClockIdx)
+                return
+            end
+            nT = size(stateMap.towerClockIdx, 1);
+            for k = 1:numel(towerList)
+                ti = towerList(k);
+                if ti >= 1 && ti <= nT && stateMap.towerClockIdx(ti, col) > 0
+                    s(k) = 0;
+                end
             end
         end
 

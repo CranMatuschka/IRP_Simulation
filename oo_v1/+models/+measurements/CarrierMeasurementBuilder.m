@@ -108,6 +108,13 @@ classdef CarrierMeasurementBuilder
                     dsig_carrier   = dsig_vec;
                 catch; end
             end
+            % WP-I: tower-clock DRIFT product-sigma R double-count guard (carrier). When a
+            % tower's clock drift is an EKF state (towerClockIdx(ti,2)>0) its uncertainty is
+            % in P, so the product drift sigma must not also enter the carrier drift block
+            % or the code x carrier cross-stack (via cpInfo.sigmaDrift_mps). Mask on column 2
+            % using the carrier row tower list. No-op when estimateTowerClocks=false (golden).
+            dsig_carrier = models.measurements.CodeMeasurementBuilder.maskStateTowerSigma_( ...
+                dsig_carrier, twr_pairs, stateMap, 2);
 
             r_cm_est  = x_est(stateMap.r_idx);
             euler_est = x_est(stateMap.euler_idx);

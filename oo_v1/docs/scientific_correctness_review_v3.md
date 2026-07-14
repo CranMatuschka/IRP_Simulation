@@ -13,7 +13,7 @@
 
 **Internal correctness is now in very good shape.** All 12 v2 work packages are implemented correctly (Appendix D), the EKF logic is sound, and — the two points the brief stresses most — **the error chain does not double-count any effect**, and **truth is cleanly separated from estimation**. I verified both independently, line by line, and two independent audit passes concurred.
 
-- **Double-counting: none active or material in the default path.** The architecture is deliberately built to prevent it: clocks are excluded from `ErrorChain` and added exactly once downstream; the "estimate-it-*and*-charge-R" traps (ZWD, slant-ionosphere, tower clock) each have a guard; the ionosphere-free R is rebuilt per-source with correct gains; light-time and Sagnac are mutually exclusive. **Three caveats surfaced, all currently dormant or negligible** and worth a small hardening pass: (F1) the tower-clock R guard is **incomplete** — it fires only on the single-frequency diagonal, while the L2 / IF / off-diagonal-block paths re-charge the product variance unguarded (a latent double-count that can only activate if `estimateTowerClocks=true` is paired with a noisy product mode — the config presently forces `perfectCorrection` in that case, so it cannot fire); (F2) the ZWD/slant-iono guards leave the per-step Gauss–Markov *increment* `σ²(1−φ²)` in R while that same increment is already added via Q — a negligible (~10⁻⁴–10⁻³) over-conservatism; (F3) if the `simpleMapped` **white** truth-residual injection were ever combined with a slow GM EKF state, R would be under-charged (over-confidence) — dormant because the default realistic profile uses the trackable `localWeatherGM` slow residual, not the white one. Full matrix in §4 / Appendix A.
+- **Double-counting: none active or material in the default path.** The architecture is deliberately built to prevent it: clocks are excluded from `ErrorChain` and added exactly once downstream; the "estimate-it-*and*-charge-R" traps (ZWD, slant-ionosphere, tower clock) each have a guard; the ionosphere-free R is rebuilt per-source with correct gains; light-time and Sagnac are mutually exclusive. **Three caveats surfaced** (F1 now FIXED — see WP-I): (F1) the tower-clock R guard was **incomplete** — it fired only on the single-frequency diagonal, while the L2 / IF / off-diagonal-block paths (and the Doppler/carrier drift blocks + cross-stack) re-charged the product variance unguarded. A follow-up audit corrected the v3 severity: this is **reachable**, not dormant — `clock.mode='includeTowerClocksInEKF'` does *not* force a zero-σ product mode, and presets already use `truthHistoryProductNoisy`, so estimating tower clocks double-counts the product variance in P and R. **Fixed in WP-I** (all sinks now routed through one bias/drift column-aware mask); (F2) the ZWD/slant-iono guards leave the per-step Gauss–Markov *increment* `σ²(1−φ²)` in R while that same increment is already added via Q — a negligible (~10⁻⁴–10⁻³) over-conservatism; (F3) if the `simpleMapped` **white** truth-residual injection were ever combined with a slow GM EKF state, R would be under-charged (over-confidence) — dormant because the default realistic profile uses the trackable `localWeatherGM` slow residual, not the white one. Full matrix in §4 / Appendix A.
 - **Truth/estimation separation: clean.** `z` is built only from truth; `h`/`H` only from the estimated state and the receiver's *assumed* models; RNG streams are identity-keyed and independent; the model prediction draws no randomness, so truth and model realizations are structurally independent; the `sameAsTruth` oracle is hard-blocked. §5 / Appendix B.
 - **Physics matches the literature.** The clock templates, Allan/Kalman-Q mapping, Saastamoinen/Niell troposphere, Sagnac, and higher-order ionosphere all agree with the supplied references (Winkel/JOW dissertation, Kaplan & Hegarty, IEEE-1139). §6–§8.
 
@@ -35,7 +35,7 @@ Secondary completeness gaps: the headline run still uses the self-labelled "opti
 | **WP-F** | Low | Hardware delay would collapse to a zero residual if enabled with equal truth/model `default_m`. | Enforce/warn truth≠model when enabled. | Enabling HW delay yields a non-zero, R-covered residual |
 | **WP-G** | Low | Doppler H omits `∂ρ̇/∂r` (documented). | Add the partial or keep the documented bound. | H includes the LOS/tower-rotation position partial |
 | **WP-H** | Low | Ionosphere lacks the symmetric `sameAsTruth` oracle guard the troposphere has (currently no iono oracle *path* exists, so it is safe but asymmetric). | Add the twin guard for defence-in-depth. | Iono `sameAsTruth` throws like troposphere |
-| **WP-I** | Low (latent) | Tower-clock R double-count guard is incomplete — present only on the single-frequency diagonal; L2/IF/off-diagonal-block paths re-charge the product variance (F1). Dormant only because `estimateTowerClocks=true` is force-paired with `perfectCorrection`. | Extend the guard to the L2/IF/block/stack paths. | With `estimateTowerClocks=true` + noisy product, no tower-clock variance appears in both P and R |
+| **WP-I** ✅ | Medium (reachable) | Tower-clock R double-count guard was incomplete — present only on the single-freq diagonal; L2/IF/block + Doppler/carrier drift + cross-stack re-charged the product variance (F1). **Reachable** via `includeTowerClocksInEKF` + a noisy product mode (audit corrected the earlier "dormant" call). **DONE** — one bias/drift column-aware mask on all sinks. | With `estimateTowerClocks=true` + noisy product, no tower-clock variance appears in both P and R ✅ |
 
 ### WP-A — IMPLEMENTED (this session)
 
@@ -81,6 +81,28 @@ which is the safe side and the honest evidence a single deterministic run could 
 Test `tests/test_wpB_monte_carlo_report_hook.m` locks the default-OFF contract and the
 result-struct/band-verdict interface. Rendering the verdict as a PDF report section (rather
 than only the `.out` log) is a future nicety.
+
+### WP-I — IMPLEMENTED (this session)
+
+The tower-clock broadcast-product-σ double-count guard is now **complete**. An audit
+workflow mapped every sink where a product σ enters R and found the pre-existing guard
+covered only the single-frequency code diagonal — the L2/multi-sig diagonal
+(`CodeMeasurementBuilder:344`), the ionosphere-free rebuild (`:526/:555`), the shared-tower
+off-diagonal block (`:646`), the **Doppler drift** block/diagonal (`DopplerMeasurementBuilder`
++ `ProductClockCovarianceBuilder.addDopplerDriftBlock`), the **carrier drift** block, and the
+code×Doppler/carrier **cross-stack** all re-charged it. The audit also corrected the v3
+severity: F1 is **reachable** (not dormant) — `includeTowerClocksInEKF` doesn't force a
+zero-σ product mode and presets use `truthHistoryProductNoisy`. Fix: one helper
+`CodeMeasurementBuilder.maskStateTowerSigma_(sig, towerList, stateMap, col)` zeroes the
+product σ for towers whose clock quantity is a free EKF state, applied at every sink —
+**bias on column 1, drift on column 2** (the wrong-column trap would delete variance a
+bias-only model legitimately needs). Per-tower/per-column, so gauge-reference and
+non-estimated towers (`towerClockIdx==0`) **retain** their σ (no under-count).
+`errStruct.towerClockModelSigma_m` is left unmasked so diagnostics still report the true
+product σ. Default `estimateTowerClocks=false` → `towerClockIdx==0` → identity → goldens
+byte-identical (SMOKE single 184/184, headline 185/185). Test
+`tests/test_wpI_tower_clock_R_double_count.m` locks the column discipline, gauge retention,
+golden-safety identity, and a functional `includeTowerClocksInEKF` + noisy-product run.
 
 ---
 

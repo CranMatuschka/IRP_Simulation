@@ -127,6 +127,17 @@ classdef DopplerMeasurementBuilder
             sagnacRateVec  = zeros(M,1);
             towerRotSpeeds = zeros(M,1);
 
+            % WP-I: tower-clock DRIFT product-sigma R double-count guard. When a tower's
+            % clock DRIFT is an EKF state (stateMap.towerClockIdx(ti,2)>0) its uncertainty
+            % lives in P, so the broadcast-product drift sigma must not also enter the
+            % Doppler R -- neither the diagonal-only path, the same-tower/epoch drift block
+            % (ProductClockCovarianceBuilder.addDopplerDriftBlock), nor the code x Doppler
+            % cross-stack (which reads dopplerInfo.sigmaDrift_mps). Mask once here on column
+            % 2 (drift) so all three inherit it; gauge/non-estimated towers (towerClockIdx==0)
+            % keep their sigma. Default estimateTowerClocks=false -> no-op (golden-safe).
+            twr_drift_sigma = models.measurements.CodeMeasurementBuilder.maskStateTowerSigma_( ...
+                twr_drift_sigma, twr_list, stateMap, 2);
+
             for mi = 1:M
                 ti = twr_list(mi);
                 ai = ant_list(mi);
