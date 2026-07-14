@@ -1,4 +1,4 @@
-function results = run_ladder(idx, durationOverride_s, description)
+function results = run_ladder(idx, durationOverride_s, description, nTowersOverride)
 %RUN_LADDER  Execute the step-wise scenario ladder (see RUN_PLAN_scenario_ladder.md).
 %
 %   run_ladder                 % run ALL scenarios in order (long; the last is 24 h)
@@ -6,6 +6,8 @@ function results = run_ladder(idx, durationOverride_s, description)
 %   run_ladder([1 2 3])        % run a subset, in order
 %   run_ladder(k, 43200)       % override the rung duration (e.g. 12 h) but keep its
 %                              % exact topology/config; empty = use the rung's own duration
+%   run_ladder(k, [], 'desc', 12)  % override ground towers (G#); empty = masterConfig
+%                              % default (5). Up to the 12 real sites defined in baseConfig.
 %
 %   Each scenario starts from the canonical config (masterConfig), applies the
 %   ladder deltas below, and runs the SAME pipeline the main script uses
@@ -28,6 +30,7 @@ function results = run_ladder(idx, durationOverride_s, description)
     % All rungs of one ladder run share a single group folder + combined summary:
     % output/Report_YYYYMMDD/Ladder_{description}/ . Pass a description to name it.
     if nargin < 3 || isempty(description); description = 'sweep'; end
+    if nargin < 4; nTowersOverride = []; end
     dateStr   = datestr(now, 'yyyymmdd');                 %#ok<TNOW1,DATST>
     groupName = ['Ladder_' regexprep(char(description), '[^A-Za-z0-9._-]', '_')];
     groupDir  = fullfile(thisDir, 'output', ['Report_' dateStr], groupName);
@@ -65,7 +68,7 @@ function results = run_ladder(idx, durationOverride_s, description)
                    'clkErr_ns',NaN,'attErr_deg',NaN,'wall_s',NaN,'message','');
         tStart = tic;
         try
-            cfg = i_buildCfg(k, nS, nR, dur, tag, groupDir);
+            cfg = i_buildCfg(k, nS, nR, dur, tag, groupDir, nTowersOverride);
             out = revgnss.ReportRunner.runSingle(cfg);
 
             r.folder = out.reportFolder;
@@ -91,9 +94,14 @@ function results = run_ladder(idx, durationOverride_s, description)
 end
 
 % ===========================================================================
-function cfg = i_buildCfg(k, nSpaceAssets, nReceivers, duration_s, tag, groupDir)
+function cfg = i_buildCfg(k, nSpaceAssets, nReceivers, duration_s, tag, groupDir, nTowersOverride)
     % Start from the canonical config, then apply the ladder deltas.
     cfg = masterConfig();
+
+    % Optional ground-tower count override; finalizeConfig trims cfg.towers to it.
+    if nargin >= 7 && ~isempty(nTowersOverride)
+        cfg.scenario.nTowers = nTowersOverride;
+    end
 
     % --- "All toggles on": the five error-source effects that are off by default.
     cfg.errors.hardwareDelay.enable    = true;
