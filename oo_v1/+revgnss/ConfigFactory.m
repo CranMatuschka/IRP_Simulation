@@ -1506,6 +1506,7 @@ classdef ConfigFactory
             revgnss.TwoWayISLMeasurementBuilder.validateConfig(cfg);
             revgnss.ISLTimingModel.validateConfig(cfg);
             revgnss.TWSTFTDiagnosticBuilder.validateConfig(cfg);
+            revgnss.TwoWayTimeTransferBuilder.validateConfig(cfg);   % WP-A
 
             % --- Clock-seed independence contract (seed-independence refactor) ---
             % Every physical clock must own a distinct RNG seed so its noise

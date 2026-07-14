@@ -541,6 +541,21 @@ cfg.measurements.twstft.processingDelay_s = 0.0;
 cfg.measurements.twstft.calibratedDelay_s = 0.0;
 cfg.measurements.twstft.requireIslTiming = true;
 
+% --- Tower<->spacecraft two-way time transfer (WP-A) -------------
+% A REAL EKF observable (unlike the spacecraft<->spacecraft TWSTFT scaffold above):
+% each two-way-capable ground tower exchanges signals with the spacecraft, yielding
+% a range-cancelled measurement of the clock difference (b_rx - b_tower). Because the
+% geometric range cancels by reciprocity, the row observes the RECEIVER CLOCK directly
+% (H has +1 on b_rx and NO position column), breaking the GEO radial<->clock degeneracy
+% that limits the one-way uplink. Default OFF -> goldens byte-identical.
+cfg.measurements.twoWayTimeTransfer.enable                     = false;
+cfg.measurements.twoWayTimeTransfer.useInEKF                   = false;
+cfg.measurements.twoWayTimeTransfer.towers                     = 'all';   % 'all' or vector of tower indices
+cfg.measurements.twoWayTimeTransfer.sigma_m                    = 0.03;    % two-way time uncertainty 1-sigma [m] (~100 ps)
+cfg.measurements.twoWayTimeTransfer.includeReciprocityResidual = false;  % model motion non-reciprocity (both sides)
+cfg.measurements.twoWayTimeTransfer.reciprocitySigma_m         = 0.005;  % residual non-reciprocity 1-sigma [m]
+cfg.measurements.twoWayTimeTransfer.warmup_s                   = 0;       % start two-way after this time [s]
+
 % --- Observable mode (Step 1) -----------------------------------
 % observableMode: DESCRIPTIVE LABEL (not authoritative — does not gate
 % measurements).  Used for report generation and diagnostics only.

@@ -459,6 +459,22 @@ if isfield(cfg,'measurements') && isfield(cfg.measurements,'twstft')
     cfg.measurements.twstft.enable = false;
 end
 
+%% Two-way time transfer (TWSTFT into the EKF)  [WP-A]
+% Tower<->spacecraft two-way time transfer: a REAL EKF observable that measures the
+% clock difference (b_rx - b_tower) with the geometric range cancelled by reciprocity,
+% so it constrains the RECEIVER CLOCK directly and breaks the GEO radial<->clock
+% degeneracy that limits the one-way uplink. This is the literature-standard route to
+% the sub-100 ps regime (Merlo & Nanzer 2023; EM-WaTT/TWSTFT; T2L2 — all two-way).
+%   enable/useInEKF -> flip BOTH true to add the two-way rows to the filter.
+% Default OFF so the frozen goldens stay byte-identical; set true to exercise WP-A.
+% sigma_m is the two-way time uncertainty (~0.03 m = 100 ps); the achievable receiver-
+% clock accuracy is floored by max(sigma_m, tower-clock-product sigma) — a better
+% ground reference clock is needed to push below ~100 ps (honest reference-clock limit).
+cfg.measurements.twoWayTimeTransfer.enable   = false;   % <- set true (with useInEKF) to enable WP-A
+cfg.measurements.twoWayTimeTransfer.useInEKF = false;
+cfg.measurements.twoWayTimeTransfer.towers   = 'all';   % which ground towers are two-way capable
+cfg.measurements.twoWayTimeTransfer.sigma_m  = 0.03;    % two-way time uncertainty 1-sigma [m] (~100 ps)
+
 %% Atmosphere realism + ionosphere handling  (SINGLE SOURCE OF TRUTH)
 % The physically-realistic troposphere/ionosphere/scintillation overlay and the
 % ionosphere-handling choice live HERE, not in run_oo_v1. These are DATA toggles;

@@ -385,6 +385,21 @@ classdef ReverseGNSSSimulation < handle
                 errStruct.observableStack = revgnss.ReverseGnssObservableAdapter.addTwoWayISLRows( ...
                     errStruct.observableStack, twoWayInfo);
             end
+
+            % WP-A: tower<->spacecraft two-way time transfer (TWSTFT). Range-cancelled
+            % clock-difference rows that observe the receiver clock directly, breaking
+            % the GEO radial<->clock degeneracy. Disabled by default (golden byte-identical:
+            % build returns empty when cfg.measurements.twoWayTimeTransfer.enable=false).
+            [z_twtt, h_twtt, H_twtt, R_twtt, twttInfo] = revgnss.TwoWayTimeTransferBuilder.build( ...
+                obj.cfg, obj.errorChain, obj.asset, obj.towers, obj.ekf.x, obj.ekf.stateMap, obj.ekf.nx, t_s);
+            if ~isempty(z_twtt)
+                z = [z; z_twtt];
+                h = [h; h_twtt];
+                H = [H; H_twtt];
+                R = blkdiag(R, R_twtt);
+            end
+            errStruct.twoWayTimeTransfer = twttInfo;
+
             % Stage 24: TWSTFT code time-transfer diagnostic (no EKF rows).
             errStruct.twstftDiag = revgnss.TWSTFTDiagnosticBuilder.build(obj.cfg, islInfo, twoWayInfo);
             if isfield(errStruct,'observableStack')

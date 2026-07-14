@@ -27,5 +27,6 @@ classdef RngSource
         DOPPLER        = 15   % Doppler measurement noise (white)
         ATT_REF        = 16   % external attitude-reference perturbation (one-shot)
         PHASE_SCINT    = 17   % EnvironmentModel phase-scintillation GM, per tower (persistent)
+        TWSTFT_TWOWAY  = 18   % tower<->spacecraft two-way time-transfer noise (white, WP-A)
     end
 end
