@@ -188,7 +188,7 @@ classdef Plotter
 
             subplot(2,1,2);
             plot(t, drift_err, 'k', 'LineWidth',1.2); hold on;
-            % WP-6: overlay the filter +-3 sigma drift envelope and annotate empirical
+            % Overlay the filter +-3 sigma drift envelope and annotate empirical
             % coverage. Under-coverage here is the documented FUNDAMENTAL Cesium+Doppler
             % drift observability limit (drift wander << Doppler resolution), not a bug.
             [coverPct, nrms, s3] = revgnss.Plotter.driftCoverage(d_, drift_err);
@@ -212,7 +212,7 @@ classdef Plotter
             % (fraction of epochs with |error| <= 3 sigma), the normalised RMS
             % (rms(error/sigma); ~1 = covariance-consistent, >1 = under-covered), and
             % the +-3 sigma series for plotting. sigma3 is empty if the drift sigma
-            % series is unavailable. (WP-6 diagnostic.)
+            % series is unavailable.
             coveragePct = NaN; normalizedRms = NaN; sigma3 = [];
             bdotIdx = 14;   % base state index of bdot_rx (r,v,euler,omega,b_rx,bdot_rx)
             if ~isstruct(d_) || ~isfield(d_,'estimate') || ~isfield(d_.estimate,'sigma') ...

@@ -23,7 +23,7 @@ classdef FrameTimeUtils
 
         function omega = earthRotationRate_radps()
             % earthRotationRate_radps  WGS-84 Earth rotation rate [rad/s].
-            omega = revgnss.Constants.EARTH_OMEGA_RADPS;   % single source (WP-12a)
+            omega = revgnss.Constants.EARTH_OMEGA_RADPS;   % single source
         end
 
         function theta = earthRotationAngle(t_s)
@@ -62,7 +62,7 @@ classdef FrameTimeUtils
             r_rot = R * r_ecef_m(:);
         end
 
-        % ---- Stage 58: full ECEF/inertial state transforms -----------------
+        % ---- Full ECEF/inertial state transforms -----------------
 
         function omega_vec = omegaEcef_radps()
             % omegaEcef_radps  Earth rotation vector in ECEF [rad/s].
@@ -107,7 +107,7 @@ classdef FrameTimeUtils
             %   This is a first-order approximation; full iterative correction
             %   requires the light-time solution.
             OMEGA = models.frames.FrameTimeUtils.earthRotationRate_radps();
-            C     = revgnss.Constants.SPEED_OF_LIGHT_MPS;   % speed of light [m/s] (WP-12a)
+            C     = revgnss.Constants.SPEED_OF_LIGHT_MPS;   % speed of light [m/s]
             rx = rx_ecef_m(:);
             tx = tx_ecef_m(:);
             omega_cross_tx = OMEGA * [-tx(2); tx(1); 0];  % omega_E × r_tx

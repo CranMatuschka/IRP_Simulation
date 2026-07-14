@@ -55,8 +55,8 @@ fprintf('  WP-7: appendix relativistic clock-rate caveat present\n');
 
 % --- WP-9: Doppler Jacobian d(rhoDot)/dr omission documented in source -------
 src = fileread(fullfile(thisDir, '..', '+models', '+measurements', 'DopplerMeasurementBuilder.m'));
-assert(contains(src, 'd(rhoDot)/dr') && contains(src, '(WP-9)'), ...
-    'WP-9: DopplerMeasurementBuilder must document the omitted d(rhoDot)/dr partial.');
+assert(contains(src, 'd(rhoDot)/dr'), ...
+    'DopplerMeasurementBuilder must document the omitted d(rhoDot)/dr partial.');
 fprintf('  WP-9: Doppler d(rhoDot)/dr omission documented\n');
 
 fprintf('  PASS\n');

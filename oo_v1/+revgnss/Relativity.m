@@ -1,5 +1,5 @@
 classdef Relativity
-    % Relativity  Relativistic clock-rate offset for a space clock vs a ground clock (WP-D).
+    % Relativity  Relativistic clock-rate offset for a space clock vs a ground clock.
     %
     % A clock on an orbiting spacecraft runs at a different rate than a ground clock due to
     % (a) the gravitational potential difference (higher potential in orbit -> clock runs

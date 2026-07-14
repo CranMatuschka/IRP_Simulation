@@ -103,7 +103,7 @@ classdef MappingFunctions
             %
             % kind:
             %   'simpleSecant' — 1/sin(el), floored at ELEVATION_FLOOR_RAD.
-            %                    Backwards-compatible with Stage 6 and earlier.
+            %                    Backwards-compatible with earlier versions.
             %   'thinShell'    — single thin-shell model:
             %                      M(e) = 1/sqrt(1 - (Re*cos(e)/(Re+hI))^2)
             %                    where Re = Earth radius, hI = shell height.

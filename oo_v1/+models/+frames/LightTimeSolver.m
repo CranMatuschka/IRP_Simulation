@@ -16,7 +16,7 @@ classdef LightTimeSolver
     %   'sagnacFirstOrder' — apply Sagnac correction analytically; no iteration
     %   'iterative'        — iterate tau = rho_rotated / c until convergence
     %
-    % Stage 7A: solve() now returns an optional third output t_tx_s.
+    % solve() returns an optional third output t_tx_s.
     % Tower clock products should be evaluated at t_tx_s when in iterative mode.
 
     methods (Static)

@@ -1,11 +1,11 @@
 classdef DiagnosticPluginRegistry
     % DiagnosticPluginRegistry  Central registry for optional diagnostic collectors.
     %
-    % Stage 55 introduces this registry so future stages can register optional
-    % diagnostics without adding procedural blocks directly to ReportRunner.
-    % Existing Stage 52-54 collection blocks in ReportRunner are preserved for
-    % safety; full migration to plugin-only collection is deferred to a future
-    % stage (see StageHistory.implementedItems for the migration note).
+    % This registry allows optional diagnostics to be registered without adding
+    % procedural blocks directly to ReportRunner.  Existing collection blocks in
+    % ReportRunner are preserved for safety; full migration to plugin-only
+    % collection is deferred to a future enhancement
+    % (see StageHistory.implementedItems for the migration note).
     %
     % API:
     %   plugins = revgnss.DiagnosticPluginRegistry.list(cfg)
@@ -19,9 +19,9 @@ classdef DiagnosticPluginRegistry
     %   description — human-readable string
     %   collectFcn  — @(summary, sim, cfg) → status struct (metadata only)
     %
-    % Stage 55 collectFcn behaviour:
+    % collectFcn behaviour:
     %   Each plugin reads fields already present in summary (populated by the
-    %   existing Stage 52-54 ReportRunner blocks) and returns a compact status
+    %   existing ReportRunner blocks) and returns a compact status
     %   struct. The main summary fields are never overwritten.
 
     methods (Static)
@@ -30,7 +30,7 @@ classdef DiagnosticPluginRegistry
             % list  Return cell array of plugin descriptor structs.
             plugins = {};
 
-            % Stage 52: carrier arc evidence.
+            % Carrier arc evidence.
             p52.name        = 'carrierArcEvidence';
             p52.stage       = 52;
             p52.description = 'Carrier arc and cycle-slip evidence export (Stage 52)';
@@ -38,7 +38,7 @@ classdef DiagnosticPluginRegistry
             p52.collectFcn  = @(smry,~,~) revgnss.DiagnosticPluginRegistry.statusCarrierArc_(smry);
             plugins{end+1}  = p52;
 
-            % Stage 53: arc-separated float ambiguities.
+            % Arc-separated float ambiguities.
             p53.name        = 'arcSeparatedAmbiguities';
             p53.stage       = 53;
             p53.description = 'Arc-separated float ambiguity metadata (Stage 53)';
@@ -46,7 +46,7 @@ classdef DiagnosticPluginRegistry
             p53.collectFcn  = @(smry,~,~) revgnss.DiagnosticPluginRegistry.statusArcSep_(smry);
             plugins{end+1}  = p53;
 
-            % Stage 54: enforced arc-consistent carrier IF combinations.
+            % Enforced arc-consistent carrier IF combinations.
             p54.name        = 'enforcedCarrierArcConsistency';
             p54.stage       = 54;
             p54.description = 'Enforced arc-consistent carrier IF combinations (Stage 54)';

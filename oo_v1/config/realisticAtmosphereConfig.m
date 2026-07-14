@@ -76,7 +76,7 @@ function cfg = realisticAtmosphereConfig(cfg)
         'amplitude_ns', (vDay_TECU - vNight_TECU) * nsPerTECU * klobAccuracy, ...
         'period_h',     24, ...
         'dc_ns',        vNight_TECU * nsPerTECU * klobAccuracy);
-    % Second/third-order residual that survives the ionosphere-free combination (WP6)
+    % Second/third-order residual that survives the ionosphere-free combination
     cfg.errors.ionosphere.higherOrder.enable = true;
 
     % Thin-shell obliquity (not the flat-Earth secant) for the ionospheric mapping

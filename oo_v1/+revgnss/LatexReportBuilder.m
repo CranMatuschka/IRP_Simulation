@@ -1,7 +1,7 @@
 classdef LatexReportBuilder
     % LatexReportBuilder  Generate original-style scientific report figures.
     %
-    % WP-3c: LEGACY report path. Production is superseded by ClockExactReportBuilder
+    % LEGACY report path. Production is superseded by ClockExactReportBuilder
     % (the only builder ReportRunner constructs under the default layout='clockExact').
     % This cluster is unreachable in production but retained for the Stage-6/7 report
     % test suite; do not delete without migrating those tests.
@@ -921,7 +921,7 @@ classdef LatexReportBuilder
         end
 
         % ================================================================
-        % P09 — Attitude Observability and Estimation (Stage 14.8)
+        % P09 — Attitude Observability and Estimation
         % ================================================================
         function fig = makeAttitudePage_(cfg, summary)
             RL  = revgnss.ReportLayout;
@@ -1614,7 +1614,7 @@ classdef LatexReportBuilder
             fprintf(fid,'\\end{tabular}\n\\end{center}\n');
             fprintf(fid,'\\clearpage\n');
 
-            % Section 8: Attitude Observability and Estimation (Stage 14.8)
+            % Section 8: Attitude Observability and Estimation
             fprintf(fid,'\\section{Attitude Observability and Estimation}\n');
             attCls8  = 'UNKNOWN'; if isfield(summary,'attitudeObsClass');          attCls8  = summary.attitudeObsClass;          end
             estAtt8  = false;     if isfield(summary,'estimateAttitude');           estAtt8  = summary.estimateAttitude;          end

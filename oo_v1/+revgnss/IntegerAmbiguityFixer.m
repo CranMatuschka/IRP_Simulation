@@ -1,5 +1,5 @@
 classdef IntegerAmbiguityFixer
-% IntegerAmbiguityFixer  Stage 63 guarded raw-carrier integer ambiguity fixing.
+% IntegerAmbiguityFixer  Guarded raw-carrier integer ambiguity fixing.
 %
 % Only for the controlled singleAssetCarrierAttitude scenario.
 % Only for raw carrier floatPerTowerReceiverSignal ambiguity states.

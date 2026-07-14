@@ -1,5 +1,5 @@
 classdef SingleAssetAttitudeScenarioReport
-    % SingleAssetAttitudeScenarioReport  Assessment helper for Stage 59 scenario.
+    % SingleAssetAttitudeScenarioReport  Assessment helper for single-space-asset scenario.
     %
     % Assesses the single-space-asset multi-antenna float-carrier attitude scenario.
     % Hard flags: integerFixingImplemented=false, lambdaImplemented=false,
@@ -51,7 +51,7 @@ classdef SingleAssetAttitudeScenarioReport
             % Attitude estimation enabled.
             try; s.attitudeEstimationEnabled = logical(cfg.estimator.estimateAttitude); catch; end
 
-            % Preferred Stage 56 attitude partial controls.
+            % Preferred attitude partial controls.
             try; s.carrierPartialsEnabled  = logical(cfg.estimator.attitude.useCarrierPartials); catch; end
             try; s.codePartialsEnabled     = logical(cfg.estimator.attitude.useCodePartials);    catch; end
             try; s.dopplerPartialsEnabled  = logical(cfg.estimator.attitude.useDopplerPartials); catch; end
@@ -77,7 +77,7 @@ classdef SingleAssetAttitudeScenarioReport
                     s.dynamicsEkfMode);
             end
 
-            % Stage 60: component-level attitude truth/estimate/error.
+            % Component-level attitude truth/estimate/error.
             % ReportRunner extracts final euler truth/estimate from diag.log.
             if isfield(summary,'finalTruthEuler_deg') && ...
                     numel(summary.finalTruthEuler_deg) == 3 && ...
@@ -121,7 +121,7 @@ classdef SingleAssetAttitudeScenarioReport
                 s.attitudeErrorNorm_deg = summary.finalAttitudeError_deg;
             end
 
-            % Carrier residual RMS from Stage 57 accounting.
+            % Carrier residual RMS from attitude accounting.
             if isfield(summary,'carrierResidualRms57_m') && isfinite(summary.carrierResidualRms57_m)
                 s.carrierResidualRms_m = summary.carrierResidualRms57_m;
             end

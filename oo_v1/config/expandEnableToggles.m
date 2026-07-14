@@ -1,6 +1,6 @@
 function cfg = expandEnableToggles(cfg, effectPaths)
 %EXPANDENABLETOGGLES  Slave the internal truth/model enable pair to one master enable.
-%   Phase 2.1 (one toggle per feature). masterConfig sets a SINGLE cfg.<effect>.enable
+%   One toggle per feature. masterConfig sets a SINGLE cfg.<effect>.enable
 %   per physical effect; this expands it into the cfg.<effect>.truth.enable /
 %   cfg.<effect>.model.enable pair that ~150 pipeline read-sites still consume. Because
 %   truth and model are driven from the SAME value, the config surface can no longer

@@ -1,5 +1,5 @@
 classdef AttitudeScenarioReadiness
-    % AttitudeScenarioReadiness  Stage 36 single-asset attitude scenario readiness gate.
+    % AttitudeScenarioReadiness  single-asset attitude scenario readiness gate.
     %
     % Combines receiver geometry rank, measurement modes, attitude observability,
     % Jacobian audit, and evidence classification into a readiness assessment.
@@ -58,7 +58,7 @@ classdef AttitudeScenarioReadiness
                 return
             end
 
-            % Stage 31 observability
+            % Observability
             try
                 ao = out.diag.getLastAttitudeAudit();
                 if isstruct(ao) && isfield(ao,'classification')
@@ -66,7 +66,7 @@ classdef AttitudeScenarioReadiness
                 end
             catch; end
 
-            % Stage 34 Jacobian audit
+            % Jacobian audit
             try
                 ja = out.diag.getLastAttitudeJacobianAudit();
                 if isstruct(ja) && isfield(ja,'classification')
@@ -74,7 +74,7 @@ classdef AttitudeScenarioReadiness
                 end
             catch; end
 
-            % Stage 35 evidence
+            % Evidence
             try
                 tmp.diag    = out.diag;
                 tmp.summary = out.summary;

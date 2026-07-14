@@ -16,10 +16,10 @@ classdef CarrierTrackManager < handle
     properties (Access = private)
         prevResidual_m   % containers.Map: key -> previous prefit residual [m]
         epochCount       % containers.Map: key -> number of epochs tracked
-        slipCount_       % containers.Map: key -> cumulative slip count (Stage 52)
-        currentArcEpoch_ % containers.Map: key -> epochs in current arc (Stage 52)
-        currentArcId_    % containers.Map: key -> integer arc ID (Stage 53; increments on slip)
-        % Stage 73: model-step-compensated slip detection state
+        slipCount_       % containers.Map: key -> cumulative slip count
+        currentArcEpoch_ % containers.Map: key -> epochs in current arc
+        currentArcId_    % containers.Map: key -> integer arc ID; increments on slip
+        % Model-step-compensated slip detection state
         prevTowerClkModel_m_        % containers.Map: key -> previous tower clock model [m]
         nProductBoundaries_         (1,1) double = 0  % product epoch boundary events (per-track sum)
         nCompensatedBoundaries_     (1,1) double = 0  % boundaries NOT declared slips
@@ -70,7 +70,7 @@ classdef CarrierTrackManager < handle
                 return
             end
 
-            % Stage 73: model-step-compensated detection metadata.
+            % Model-step-compensated detection metadata.
             hasModelMeta = isfield(cpInfo, 'towerClkModel_m') && ...
                            numel(cpInfo.towerClkModel_m) == M;
             doCompensate = hasModelMeta && sd.productStepCompensation;
@@ -89,8 +89,8 @@ classdef CarrierTrackManager < handle
                 prevRes = 0;
                 if isKey(obj.prevResidual_m, key); prevRes = obj.prevResidual_m(key); end
 
-                % Stage 73: compensated detection when tower clock model metadata
-                % is available.  Otherwise fall back to legacy raw-jump detection.
+                % Compensated detection when tower clock model metadata
+                % is available; otherwise fall back to legacy raw-jump detection.
                 jumpMag  = 0;
                 isSlip   = false;
                 if doCompensate
@@ -142,21 +142,21 @@ classdef CarrierTrackManager < handle
                     % resetAndUse keeps the carrier row and relies on the reset
                     % ambiguity covariance P (inflated to resetSigma_m^2) to absorb
                     % the discontinuity.  Measurement covariance R is not modified.
-                    % Stage 52: record slip; reset current-arc epoch.
+                    % Record slip; reset current-arc epoch.
                     sc = 0;
                     if isKey(obj.slipCount_, key); sc = obj.slipCount_(key); end
                     obj.slipCount_(key)       = sc + 1;
                     obj.currentArcEpoch_(key) = 0;
-                    % Stage 53: increment arc ID on slip (new arc starts after slip).
+                    % Increment arc ID on slip (new arc starts after slip).
                     aid = 1;
                     if isKey(obj.currentArcId_, key); aid = obj.currentArcId_(key) + 1; end
                     obj.currentArcId_(key) = aid;
                 else
-                    % Stage 52: advance current arc epoch.
+                    % Advance current arc epoch.
                     ca = 0;
                     if isKey(obj.currentArcEpoch_, key); ca = obj.currentArcEpoch_(key); end
                     obj.currentArcEpoch_(key) = ca + 1;
-                    % Stage 53: initialize arc ID to 1 on first observation.
+                    % Initialize arc ID to 1 on first observation.
                     if ~isKey(obj.currentArcId_, key)
                         obj.currentArcId_(key) = 1;
                     end
@@ -183,7 +183,7 @@ classdef CarrierTrackManager < handle
         end
 
         function s = getArcStateSummary(obj, dt_s)
-            % getArcStateSummary  Aggregated arc state summary (Stage 53).
+            % getArcStateSummary  Aggregated arc state summary.
             %
             % Returns struct with statistics over all known tracks, parallel
             % to getArcEvidence but including per-track arc IDs.
@@ -220,7 +220,7 @@ classdef CarrierTrackManager < handle
         end
 
         function arcState = getArcStateForRows(obj, cpInfo)
-            % getArcStateForRows  Per-row arc state lookup (Stage 53).
+            % getArcStateForRows  Per-row arc state lookup.
             %
             % Called AFTER trackMgr.process() so arc IDs reflect current-epoch slips.
             % Returns struct arrays parallel to cpInfo rows.
@@ -252,7 +252,7 @@ classdef CarrierTrackManager < handle
         end
 
         function ev = getArcEvidence(obj, dt_s)
-            % getArcEvidence  Compact arc/slip evidence struct (Stage 52).
+            % getArcEvidence  Compact arc/slip evidence struct.
             ev.nActiveTracks      = double(obj.epochCount.Count);
             ev.available          = ev.nActiveTracks > 0;
             ev.totalSlipEvents    = 0;
@@ -284,7 +284,7 @@ classdef CarrierTrackManager < handle
             if ev.totalSlipEvents == 0; ev.classification = 'arcs-exported';
             else;                        ev.classification = 'arcs-exported-with-slips';
             end
-            % Stage 73: compensated slip detection diagnostics
+            % Compensated slip detection diagnostics
             ev.nProductBoundaries         = obj.nProductBoundaries_;
             ev.nCompensatedBoundaries     = obj.nCompensatedBoundaries_;
             ev.nConfirmedSlips            = obj.nConfirmedSlips_;
@@ -313,11 +313,11 @@ classdef CarrierTrackManager < handle
                 if hasModelMeta
                     obj.prevTowerClkModel_m_(key) = cpInfo.towerClkModel_m(mi);
                 end
-                % Stage 52: no slips when detection disabled; advance arc epoch.
+                % No slips when detection disabled; advance arc epoch.
                 ca = 0;
                 if isKey(obj.currentArcEpoch_, key); ca = obj.currentArcEpoch_(key); end
                 obj.currentArcEpoch_(key) = ca + 1;
-                % Stage 53: single arc (ID=1) when detection disabled.
+                % Single arc (ID=1) when detection disabled.
                 if ~isKey(obj.currentArcId_, key)
                     obj.currentArcId_(key) = 1;
                 end
@@ -333,7 +333,7 @@ classdef CarrierTrackManager < handle
             sd.threshold_m             = 0.1;
             sd.minEpochsBeforeDetect   = 3;
             sd.action                  = 'resetAndSkip';
-            sd.productStepCompensation = false; % Stage 73 default: off until explicitly enabled
+            sd.productStepCompensation = false; % default: off until explicitly enabled
 
             if isfield(cfg,'measurements') && isfield(cfg.measurements,'carrier')
                 cr = cfg.measurements.carrier;
@@ -345,7 +345,7 @@ classdef CarrierTrackManager < handle
                     if isfield(sl,'action');                sd.action                 = sl.action;                end
                 end
             end
-            % Stage 73: productStepCompensation read from cfg.carrierSlip.productStepCompensation.
+            % productStepCompensation read from cfg.carrierSlip.productStepCompensation.
             try
                 if isfield(cfg,'carrierSlip') && isfield(cfg.carrierSlip,'productStepCompensation')
                     sd.productStepCompensation = logical(cfg.carrierSlip.productStepCompensation);

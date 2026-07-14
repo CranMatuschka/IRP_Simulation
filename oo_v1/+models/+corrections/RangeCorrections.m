@@ -91,7 +91,7 @@ classdef RangeCorrections
             end
 
             % Apply light-time iteration when requested.
-            % Stage 7A: t_rx_s is passed so t_tx_s = t_rx_s - tau_s is an absolute epoch.
+            % t_rx_s is passed so t_tx_s = t_rx_s - tau_s is an absolute epoch.
             tx_ecef_eff = tx_ecef;
             if strcmp(ltModel,'iterative')
                 [tx_ecef_eff, tau_s_lt, t_tx_lt] = models.frames.LightTimeSolver.solve( ...

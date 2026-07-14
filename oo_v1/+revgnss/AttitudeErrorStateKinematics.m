@@ -1,5 +1,5 @@
 classdef AttitudeErrorStateKinematics
-    % AttitudeErrorStateKinematics  Stage 61: quaternion / small-angle error-state helpers.
+    % AttitudeErrorStateKinematics Quaternion / small-angle error-state helpers.
     %
     % Convention: scalar-first unit quaternion  q = [qw; qx; qy; qz].
     % Body-to-ECEF attitude matching AttitudeKinematics ZYX (3-2-1) convention.

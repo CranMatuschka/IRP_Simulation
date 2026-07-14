@@ -5,7 +5,7 @@ classdef ConfigFactory
     % ground towers from the original SimulationConfig.m layout.
     %
     % -----------------------------------------------------------------------
-    % CONFIGURATION HIERARCHY (Stage 7A)
+    % CONFIGURATION HIERARCHY
     %
     %   defaultConfig()          MATCHED-ERROR BASELINE (not "all errors off").
     %                            Troposphere and ionosphere are BOTH enabled with
@@ -21,11 +21,11 @@ classdef ConfigFactory
     %                            for the matched-error intent.
     %
     % -----------------------------------------------------------------------
-    % SUPPORTED OBSERVABLES (Stage 7A, updated Stage 79)
+    % SUPPORTED OBSERVABLES
     %   Code pseudorange (single-frequency or IF L1/L2 combination)
     %   Simplified Doppler
     %   Raw L1/L2 float carrier EKF; raw dual-frequency baseline attitude AR
-    %     (Stage 76 adds L2 EKF attitude rows and joint L1+L2 integer-pair search;
+    %     (L2 EKF attitude rows and joint L1+L2 integer-pair search are supported;
     %      carrier-IF integer fixing is explicitly unsupported; LAMBDA/MLAMBDA unsupported)
     %   ZWD per-tower EKF state
     %   Tower-clock product structs (explicit or truth-history)
@@ -33,7 +33,7 @@ classdef ConfigFactory
     %   Ionosphere mapping: simpleSecant (1/sin) or thinShell
     %   Thin-shell mapping: M(e)=1/sqrt(1-(Re*cos(e)/(Re+hI))^2); NOT Klobuchar
     %
-    % NOT SUPPORTED (updated Stage 79)
+    % NOT SUPPORTED
     %   Carrier-IF integer fixing | LAMBDA/MLAMBDA | formal ILS false-fix-risk control
     %   Azimuth-dependent PCV | ANTEX parser | IONEX | SP3/CLK | RINEX
     %   VMF3 / GPT3 / ERA5 | Klobuchar ionosphere model
@@ -78,7 +78,7 @@ classdef ConfigFactory
         %  MAIN DEFAULT CONFIGURATION
         % ==================================================================
         function cfg = defaultConfig()
-            % defaultConfig  Delegates to config/baseConfig.m (Phase 1.3 relocation).
+            % defaultConfig  Delegates to config/baseConfig.m for base configuration.
             %   Body moved to config/baseConfig.m to lift the config base out of this
             %   2512-line monolith; all existing callers keep working via this delegation.
             addpath(fullfile(fileparts(fileparts(mfilename('fullpath'))), 'config'));
@@ -119,7 +119,7 @@ classdef ConfigFactory
             cfg.estimator.estimateAngularRateFromPseudorange = false;
             cfg.estimator.P0_euler_rad                       = 1e-12;
             cfg.estimator.P0_omega_radps                     = 1e-12;
-            % WP3: kept at 1e-15 deliberately. Attitude is NOT estimated here
+            % Kept at 1e-15 deliberately. Attitude is NOT estimated here
             % (estimateAttitude=false, nReceivers=1), so this value is inert — the EKF
             % zeroes the attitude Q block (ReverseGNSSEKF.buildQ_ freeze). The
             % torque-budget default applies only to attitude-ESTIMATING presets.
@@ -152,7 +152,7 @@ classdef ConfigFactory
 
             cfg.estimator.P0_euler_rad              = deg2rad(5);
             cfg.estimator.P0_omega_radps            = 1e-12;
-            % WP3: torque-budget-justified attitude process noise (~1e-7 rad/s^2),
+            % Torque-budget-justified attitude process noise (~1e-7 rad/s^2),
             % replacing the over-optimistic 1e-10. alpha = tau / I (Wertz).
             cfg.estimator.sigma_angAccel_radps2     = revgnss.ConfigFactory.angAccelFromTorqueBudget_( ...
                 cfg.asset.inertia_kgm2, cfg.asset.residualDisturbanceTorque_Nm);
@@ -311,7 +311,7 @@ classdef ConfigFactory
         end
 
         function cfg = geoRealWorldTruthComparisonConfig()
-            % geoRealWorldTruthComparisonConfig  Canonical Stage 86 GEO scenario.
+            % geoRealWorldTruthComparisonConfig  Canonical GEO scenario.
             %
             % Single source of truth for run_geo_realworld_truth_comparison.m.
             % The scenario uses matched J2 truth/EKF dynamics and seeded stochastic
@@ -390,7 +390,7 @@ classdef ConfigFactory
             cfg.errors.troposphere.model.enable    = true;
             cfg.errors.ionosphere.truth.enable     = true;
             cfg.errors.ionosphere.model.enable     = true;
-            % Stage 7A: use truthHistoryProductNoisy (history-based + noise) consistently.
+            % Use truthHistoryProductNoisy (history-based + noise) consistently.
             % Do NOT set estimator.towerClockMode directly; let finalizeConfig map it.
             cfg.towerClock.correctionMode = 'truthHistoryProductNoisy';
         end
@@ -449,7 +449,7 @@ classdef ConfigFactory
             if nargin < 3 || isempty(factors);       factors       = struct(); end
             if nargin < 4 || isempty(globalScaling); globalScaling = struct(); end
 
-            % WP4: select the h-coefficient source ('legacy' | 'jowTable2p1'), threaded
+            % Select the h-coefficient source ('legacy' | 'jowTable2p1'), threaded
             % via cfg.clockScaling.templateSource (synced from cfg.clock.templateSource).
             tsrc = getf_(globalScaling, 'templateSource', 'legacy');
             tmpl = revgnss.ConfigFactory.getClockTemplate_(templateName, tsrc);
@@ -588,7 +588,7 @@ classdef ConfigFactory
                     isfield(cfg.clock.receiver,'deterministic')
                 cfg.asset.clock.deterministic = cfg.clock.receiver.deterministic;
             end
-            % Stage 77: canonical clock product mode → legacy alias sync
+            % Canonical clock product mode → legacy alias sync
             % cfg.clocks.tower.product.mode is canonical; derive errors.towerClockCorrection.mode
             % before the legacy mapping below picks it up.
             if isfield(cfg,'clocks') && isfield(cfg.clocks,'tower') && ...
@@ -610,7 +610,7 @@ classdef ConfigFactory
                 cfg.estimator.towerClockMode = cfg.errors.towerClockCorrection.mode;
             end
             % cfg.towerClock.correctionMode → cfg.estimator.towerClockMode (new mapping)
-            % Stage 7A: truth-history modes and explicit-struct modes are now distinct.
+            % Truth-history modes and explicit-struct modes are now distinct.
             %
             % Supported correctionMode values:
             %   'none'                  — no tower clock correction
@@ -637,7 +637,7 @@ classdef ConfigFactory
                         % require cfg.towerClock.products — it uses tower truth history.
                         cfg.estimator.towerClockMode = 'truthProduct';
                     case 'truthHistoryProductNoisy'
-                        % Stage 71: history-based product with deterministic per-product
+                        % History-based product with deterministic per-product
                         % noise and prediction-uncertainty sigma added to R.
                         cfg.estimator.towerClockMode = 'truthHistoryProductNoisy';
                     case 'product'
@@ -653,7 +653,7 @@ classdef ConfigFactory
                 end
             end
 
-            % Stage 77: canonical slip threshold sync
+            % Canonical slip threshold sync
             % cfg.carrierSlip.threshold_m is canonical; derive slipDetection.threshold_m.
             % CarrierTrackManager reads cfg.measurements.carrier.slipDetection.threshold_m at runtime.
             if isfield(cfg,'carrierSlip') && isfield(cfg.carrierSlip,'threshold_m')
@@ -677,7 +677,7 @@ classdef ConfigFactory
                 end
             end
 
-            % ---- WP1: cfg.estimator.clockGauge alias -> canonical cfg.clock.gauge ----
+            % ---- cfg.estimator.clockGauge alias -> canonical cfg.clock.gauge ----
             % Optional convenience surface exposing the plan's datum vocabulary
             % ('none' | 'masterClock' | 'zeroMeanEnsemble' + masterIndex). Present-only:
             % there is NO baseConfig default for cfg.estimator.clockGauge, so configs that
@@ -706,7 +706,7 @@ classdef ConfigFactory
                 end
             end
 
-            % ---- Clock mode / gauge validation (Stage 8) ------------------
+            % ---- Clock mode / gauge validation ------------------
             % Map cfg.clock.mode to estimator.estimateTowerClocks and validate gauge.
             if isfield(cfg,'clock') && isfield(cfg.clock,'mode')
                 clockMode = cfg.clock.mode;
@@ -715,7 +715,7 @@ classdef ConfigFactory
                     gaugeMode = cfg.clock.gauge.mode;
                 end
 
-                % WP1 (clock gauge): accept the datum-vocabulary synonyms
+                % Accept the datum-vocabulary synonyms
                 % 'masterClock' and 'zeroMeanEnsemble' as aliases for the EXISTING
                 % gauge machinery, so plan/preset configs written in that vocabulary
                 % drive the same pseudo-measurement update path (no parallel gauge).
@@ -766,7 +766,7 @@ classdef ConfigFactory
                 end
             end
 
-            % ---- Stage 11: transmitter code bias identifiability guards ------
+            % ---- Transmitter code bias identifiability guards ------
             if isfield(cfg,'hardware') && isfield(cfg.hardware,'txCodeBias')
                 txc = cfg.hardware.txCodeBias;
                 useInEKF11 = isfield(txc,'useInEKF') && txc.useInEKF;
@@ -817,7 +817,7 @@ classdef ConfigFactory
                 end
             end
 
-            % ---- Stage 12: receiver hardware-bias identifiability guards ------
+            % ---- Receiver hardware-bias identifiability guards ------
             if isfield(cfg,'hardware') && isfield(cfg.hardware,'rxCodeBias')
                 rxcb = cfg.hardware.rxCodeBias;
                 rxMode12 = 'absorbedInReceiverClock';
@@ -876,10 +876,10 @@ classdef ConfigFactory
                 end
             end
 
-            % ---- Stage 13: ionosphere-free + rxCodeBias incompatibility guard ------
+            % ---- Ionosphere-free + rxCodeBias incompatibility guard ------
             % IF combines L1 and L2 with different coefficients, so a single scalar
             % receiver code-bias calibration is not well-defined for both frequencies.
-            % Per-signal receiver code-bias handling is not implemented in Stage 13.
+            % Per-signal receiver code-bias handling is not implemented.
             codeModeIF13 = '';
             if isfield(cfg,'measurements') && isfield(cfg.measurements,'codeMode')
                 codeModeIF13 = cfg.measurements.codeMode;
@@ -900,7 +900,7 @@ classdef ConfigFactory
                 end
             end
 
-            % ---- Stage 80: one-way light-time / Sagnac consistency -------
+            % ---- One-way light-time / Sagnac consistency -------
             if isfield(cfg,'physics') && isfield(cfg.physics,'lightTime')
                 lt = cfg.physics.lightTime;
                 ltTruth = isfield(lt,'truth') && isfield(lt.truth,'enable') && lt.truth.enable;
@@ -949,7 +949,7 @@ classdef ConfigFactory
                 end
             end
 
-            % ---- Relativistic clock-rate offset (WP-D) --------------------
+            % ---- Relativistic clock-rate offset --------------------
             % Implemented as a gated TRUTH-side constant relativistic fractional-frequency
             % offset on the receiver clock (applied at the receiver-clock recreate below via
             % revgnss.Relativity -> cfg.asset.clock.relativisticFracFreq). Previously force-
@@ -957,7 +957,7 @@ classdef ConfigFactory
             % No separate model-side (broadcast) correction is applied: the constant offset
             % is observable and absorbed by the estimated receiver clock-drift state, so the
             % estimation residual for a circular orbit is zero (only an eccentric orbit's
-            % periodic term would survive). See docs/scientific_correctness_review_v3.md WP-D.
+            % periodic term would survive). See docs/scientific_correctness_review_v3.md.
             if isfield(cfg,'physics') && isfield(cfg.physics,'relativity') && ...
                     isfield(cfg.physics.relativity,'clock')
                 rc   = cfg.physics.relativity.clock;
@@ -1026,7 +1026,7 @@ classdef ConfigFactory
                 end
             end
 
-            % ---- Stage 79: central signal and frequency ownership --------
+            % ---- Central signal and frequency ownership --------
             if ~isfield(cfg,'signals'); cfg.signals = struct(); end
             if ~isfield(cfg,'measurements'); cfg.measurements = struct(); end
             if ~isfield(cfg.measurements,'code'); cfg.measurements.code = struct(); end
@@ -1198,7 +1198,7 @@ classdef ConfigFactory
             end
 
             % ---- Carrier ekfFloat v1 restrictions -----------------------
-            % Runs AFTER Stage 79 canonical masks are finalized.
+            % Runs after canonical masks are finalized.
             if isfield(cfg,'measurements') && isfield(cfg.measurements,'carrierMode') && ...
                     strcmp(cfg.measurements.carrierMode,'ekfFloat')
 
@@ -1259,7 +1259,7 @@ classdef ConfigFactory
                 end
             end
 
-            % ---- Stage 15: attitudeCarrierMode validation ----------------
+            % ---- attitudeCarrierMode validation ----------------
             if isfield(cfg,'estimator') && isfield(cfg.estimator,'attitudeCarrierMode') && ...
                     strcmp(cfg.estimator.attitudeCarrierMode,'calibratedDifferentialAmbiguity')
                 carrierOk = isfield(cfg,'measurements') && isfield(cfg.measurements,'carrierMode') && ...
@@ -1279,7 +1279,7 @@ classdef ConfigFactory
                 end
             end
 
-            % ---- Stage 16: attitude initialization mode validation --------
+            % ---- Attitude initialization mode validation --------
             if ~isfield(cfg.estimator,'attitudeInitMode')
                 cfg.estimator.attitudeInitMode = 'none';
             end
@@ -1356,12 +1356,12 @@ classdef ConfigFactory
 
             % ---- Recreate tower clocks from type + factors (idempotent) ----
             gs = cfg.clockScaling;
-            % WP4: canonical h-coefficient source is cfg.clock.templateSource; mirror it
+            % Canonical h-coefficient source is cfg.clock.templateSource; mirror it
             % into the clockScaling struct that makeClockConfig reads.
             gs.templateSource = getf_(getf_(cfg,'clock',struct()), 'templateSource', ...
                 getf_(gs,'templateSource','legacy'));
             cfg.clockScaling.templateSource = gs.templateSource;
-            % WP-5: optional per-draw clock-seed offset for the Monte-Carlo consistency
+            % Optional per-draw clock-seed offset for the Monte-Carlo consistency
             % harness, so tower/receiver CLOCK truth realisations vary across seeds.
             % Default (field absent) resolves to 0 -> seeds unchanged, byte-identical.
             % Spacing (harness uses j*1000) >> #clocks keeps the distinctness assert below.
@@ -1398,7 +1398,7 @@ classdef ConfigFactory
                 cfg.asset.clock   = clk;
             end
 
-            % WP-D: gated relativistic clock-rate offset on the TRUTH receiver clock. When
+            % Gated relativistic clock-rate offset on the TRUTH receiver clock. When
             % physics.relativity.clock.truth is enabled, set the receiver clock's constant
             % relativistic fractional-frequency offset from the orbit (revgnss.Relativity);
             % it accumulates as a linear clock-bias ramp in the truth pseudorange. Default
@@ -1495,7 +1495,7 @@ classdef ConfigFactory
                 end
             end
 
-            % ---- Tower survey errors (Stage 2) --------------------------------
+            % ---- Tower survey errors --------------------------------
             % One deterministic ENU error per tower drawn from a seeded RNG.
             % Same realization stored for truth and model use:
             %   truth=on / model=off  → innovation shows deterministic bias.
@@ -1516,7 +1516,7 @@ classdef ConfigFactory
             revgnss.TwoWayISLMeasurementBuilder.validateConfig(cfg);
             revgnss.ISLTimingModel.validateConfig(cfg);
             revgnss.TWSTFTDiagnosticBuilder.validateConfig(cfg);
-            revgnss.TwoWayTimeTransferBuilder.validateConfig(cfg);   % WP-A
+            revgnss.TwoWayTimeTransferBuilder.validateConfig(cfg);
 
             % --- Clock-seed independence contract (seed-independence refactor) ---
             % Every physical clock must own a distinct RNG seed so its noise
@@ -1569,8 +1569,8 @@ classdef ConfigFactory
                 'centralConfigWarnings', nWarn79_, ...
                 'centralConfigErrors', 0);
 
-            % --- Stage 81: Scientific profile, product contracts, and model coverage ---
-            % All canonical Stage 81 config fields are owned here in finalizeConfig.
+            % --- Scientific profile, product contracts, and model coverage ---
+            % All canonical config fields are owned here in finalizeConfig.
 
             % Scientific profile
             if ~isfield(cfg, 'scientificProfile') || ~isfield(cfg.scientificProfile, 'mode')
@@ -1642,7 +1642,7 @@ classdef ConfigFactory
             if ~isfield(cfg.effects.ionosphere,'higherOrderStatus')
                 cfg.effects.ionosphere.higherOrderStatus = 'disabled';
             end
-            % WP6: reflect the actual higher-order iono model state honestly.
+            % Reflect the actual higher-order iono model state honestly.
             if isfield(cfg,'errors') && isfield(cfg.errors,'ionosphere') && ...
                     isfield(cfg.errors.ionosphere,'higherOrder') && ...
                     isfield(cfg.errors.ionosphere.higherOrder,'enable') && ...
@@ -1750,7 +1750,7 @@ classdef ConfigFactory
             cfg.estimator.processNoise.residualAccelerationUncertainty = ...
                 cfg.estimator.processNoise.modelMismatch;
 
-            % MD Stage 88/96: hard-block a SILENT truth-vs-EKF dynamics FAMILY mismatch,
+            % Hard-block a SILENT truth-vs-EKF dynamics FAMILY mismatch,
             % but ONLY when the run opts in via cfg.validation.enforceModelFamilyConsistency.
             % Keeping it opt-in stops it firing on legitimate reduced-dynamics or non-realistic
             % runners; the same-family default sets the flag true. assertModelFamilyConsistent
@@ -1788,7 +1788,7 @@ classdef ConfigFactory
                 end
             catch; end
 
-            % --- Stage 83: Doppler dynamics and carrier product-covariance closure ---
+            % --- Doppler dynamics and carrier product-covariance closure ---
             if ~isfield(cfg,'measurements'); cfg.measurements = struct(); end
             if ~isfield(cfg.measurements,'doppler'); cfg.measurements.doppler = struct(); end
             if ~isfield(cfg.measurements.doppler,'modelLevel')
@@ -1856,7 +1856,7 @@ classdef ConfigFactory
                 cfg.diagnostics.doppler.dopplerLightTimeDerivative = 'simplifiedV1';
             end
 
-            % --- Stage 84: Doppler/product-covariance correctness hardening ---
+            % --- Doppler/product-covariance correctness hardening ---
             % J2 ratio diagnostics: how much sigma_accel covers J2 rms and max.
             if cfg82_j2Norm_ > 0
                 cfg.diagnostics.dynamicsMismatch.sigmaToRmsJ2Ratio = ...
@@ -1889,10 +1889,10 @@ classdef ConfigFactory
                 cfg.covariance.productClock.dopplerDriftDiagonalPolicy = 'trackingOnlyPlusBlock';
             end
 
-            % Report freshness stage (overwritten by Stage 85 block below).
+            % Report freshness stage (overwritten below).
             cfg.diagnostics.reportStatusFreshnessStage = 84;
 
-            % --- Stage 85: formal synthetic validation campaign ---
+            % --- Formal synthetic validation campaign ---
             if ~isfield(cfg,'validation'); cfg.validation = struct(); end
             if ~isfield(cfg.validation,'scientificCampaign')
                 cfg.validation.scientificCampaign = struct();
@@ -1948,7 +1948,7 @@ classdef ConfigFactory
             % h-values are one-sided PSD of fractional frequency.
             % References: IEEE Std 1139-2008; Sesia et al.; GPS ICD.
             %
-            % templateSource (WP4): 'legacy' (default here — the original numbers, kept
+            % templateSource: 'legacy' (default here — the original numbers, kept
             % for exact reproducibility of past results) or 'jowTable2p1' (h-coefficients
             % re-anchored to the project primary-source JOW Table 2.1; less optimistic).
             % The canonical selector is cfg.clock.templateSource, threaded through
@@ -2022,7 +2022,7 @@ classdef ConfigFactory
         end
 
         function tmpl = getClockTemplateJow_(templateName)
-            % getClockTemplateJow_  h-coefficients re-anchored to JOW Table 2.1 (WP4).
+            % getClockTemplateJow_  h-coefficients re-anchored to JOW Table 2.1.
             %
             % The legacy OCXO/CESIUM templates are optimistic versus the project's own
             % primary-source analogue (JOW Table 2.1): the OCXO random-walk-FM term

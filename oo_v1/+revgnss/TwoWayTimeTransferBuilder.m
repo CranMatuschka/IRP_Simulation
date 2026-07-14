@@ -1,5 +1,5 @@
 classdef TwoWayTimeTransferBuilder
-    % TwoWayTimeTransferBuilder  Tower<->spacecraft two-way time-transfer EKF rows (WP-A).
+    % TwoWayTimeTransferBuilder  Tower<->spacecraft two-way time-transfer EKF rows.
     %
     % PURPOSE (scientific-completeness gap closed)
     %   Every sub-100 ps result in the project reference set (Merlo & Nanzer 2023;

@@ -21,7 +21,7 @@ classdef SimulationDataStore < handle
         nAlloc_   (1,1) double = 0
         nx_       (1,1) double = 0    % state dim (lazy, set on first write)
         initialized_  (1,1) logical = false
-        frozen_       (1,1) logical = false   % Phase 4a immutability guard (set by freeze())
+        frozen_       (1,1) logical = false   % Immutability guard (set by freeze())
         cfg_
 
         % ---- Time
@@ -129,7 +129,7 @@ classdef SimulationDataStore < handle
         ck_oCdP_
         ck_oCdG_
 
-        % ---- Stage 57
+        % ---- EKF innovation accounting
         s57_pN_
         s57_gN_
         s57_aN_
@@ -493,7 +493,7 @@ classdef SimulationDataStore < handle
             obj.ck_oCdP_(k) = g_(entry,'clockObsCondPhysical',NaN);
             obj.ck_oCdG_(k) = g_(entry,'clockObsCondGauged',NaN);
 
-            % Stage 57
+            % EKF innovation accounting
             obj.s57_pN_(k)   = g_(entry,'physicalNIS57',NaN);
             obj.s57_gN_(k)   = g_(entry,'gaugeNIS57',NaN);
             obj.s57_aN_(k)   = g_(entry,'augmentedNIS57',NaN);
@@ -594,7 +594,7 @@ classdef SimulationDataStore < handle
 
         % -----------------------------------------------------------------
         function freeze(obj)
-            % freeze  Make the store immutable after the simulation stage (Phase 4a).
+            % freeze  Make the store immutable after the simulation stage.
             % Post-processing and report may then only READ; any write method throws
             % SimulationDataStore:frozen. Idempotent.
             obj.frozen_ = true;
@@ -876,7 +876,7 @@ classdef SimulationDataStore < handle
                 entry.nTxCodeBiasStates = ekf.nTxCodeBiasStates;
             end
 
-            % --- Stage 57: separated EKF innovation accounting ---
+            % --- Separated EKF innovation accounting ---
             entry.physicalNIS57  = NaN; entry.gaugeNIS57     = NaN;
             entry.augmentedNIS57 = NaN; entry.physicalDof57  = 0;
             entry.gaugeDof57     = 0;   entry.physicalRms57  = NaN;
@@ -1183,7 +1183,7 @@ classdef SimulationDataStore < handle
                 entry.diffAttRejectedRows  = 0;
             end
 
-            % --- Attitude observability audit (Stage 31) ---
+            % --- Attitude observability audit ---
             mTypeForAudit_ = {};
             if ~isempty(errStruct) && isfield(errStruct,'measType_perRow')
                 mTypeForAudit_ = errStruct.measType_perRow;
@@ -1706,7 +1706,7 @@ classdef SimulationDataStore < handle
             d.clock.obsCondPhysical  = obj.ck_oCdP_(1:N);
             d.clock.obsCondGauged    = obj.ck_oCdG_(1:N);
 
-            % Stage 57
+            % EKF innovation accounting
             d.stage57.physicalNIS    = obj.s57_pN_(1:N);
             d.stage57.gaugeNIS       = obj.s57_gN_(1:N);
             d.stage57.augmentedNIS   = obj.s57_aN_(1:N);

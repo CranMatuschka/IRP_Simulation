@@ -1,6 +1,6 @@
 classdef EkfInnovationAccounting
     % EkfInnovationAccounting  Separate EKF innovation NIS into physical / gauge /
-    %   augmented contributions.  Stage 57.
+    %   augmented contributions.
     %
     % Physical rows: real measurement rows passed by MeasurementModel (code, doppler,
     %   carrier, IF combinations).  Gauge rows: datum/clock constraint rows appended by
@@ -128,7 +128,7 @@ classdef EkfInnovationAccounting
         end
 
         function c = compact(acc, rms_)
-            % compact  Report-safe struct summarising Stage 57 innovation accounting.
+            % compact  Report-safe struct summarising innovation accounting.
 
             c.physicalNIS          = acc.physicalNIS;
             c.gaugeNIS             = acc.gaugeNIS;

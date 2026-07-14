@@ -29,7 +29,7 @@ clear; close all; clc;
 thisDir = fileparts(mfilename('fullpath'));
 addpath(thisDir);
 
-% --- Environment-variable overrides (Stage 25+ validation gate) ---
+% --- Environment-variable overrides (validation gate) ---
 oo_v1_envValidate_   = strcmpi(getenv('OO_V1_VALIDATE_REPORT'), 'true');
 oo_v1_envAllToggles_ = strcmpi(getenv('OO_V1_ALL_TOGGLES'), 'true');
 if oo_v1_envValidate_; oo_v1_envAllToggles_ = true; end  % validate always uses all toggles
@@ -38,7 +38,7 @@ if isnan(oo_v1_envStage_); oo_v1_envStage_ = 0; end
 if oo_v1_envValidate_ && oo_v1_envStage_ == 0; oo_v1_envStage_ = 84; end
 oo_v1_envCompile_    = strtrim(getenv('OO_V1_REPORT_COMPILE_TEX'));
 
-% --- Phase-1: canonical scientific config now lives in config/masterConfig.m ---
+% --- Canonical scientific config now lives in config/masterConfig.m ---
 addpath(fullfile(thisDir, 'config'));
 cfg = masterConfig();
 
@@ -46,7 +46,7 @@ cfg = masterConfig();
 
 % --- All-toggle validation mode --------------------------------
 % Set stageAllToggles = true to enable every independent boolean toggle.
-% OO_V1_ALL_TOGGLES=true achieves the same via env var (Stage 25+ gate).
+% OO_V1_ALL_TOGGLES=true achieves the same via env var (gate).
 % Mutually exclusive string modes (carrierMode, etc.) are NOT changed.
 % Requires unsupportedFeaturePolicy = 'disableWithWarning' (set above).
 stageAllToggles = false;
@@ -92,8 +92,8 @@ if stageAllToggles || oo_v1_envAllToggles_
     cfg.estimator.enforceCarrierArcConsistency.enable            = true;
     cfg.diagnostics.carrierArcConsistencyEnforcement.enable      = true;
     cfg.diagnostics.pluginRegistry.enable                        = true;
-    % Stage 82: active scenario dynamics are owned by ScenarioPresets
-    % (j2Rk4 truth + twoBody EKF mismatch; Stage 82 default); no temporary J2 override.
+    % Active scenario dynamics are owned by ScenarioPresets
+    % (j2Rk4 truth + twoBody EKF mismatch; default); no temporary J2 override.
     cfg.diagnostics.ekfDynamics.enable  = true;
     cfg.validation.stageAllToggles         = true;
     if oo_v1_envAllToggles_
@@ -107,9 +107,9 @@ if ~isempty(oo_v1_envCompile_) && ismember(oo_v1_envCompile_, {'require','auto',
     cfg.report.compileTex = oo_v1_envCompile_;
 end
 
-% --- Stage 85: Formal synthetic validation campaign ---
+% --- Formal synthetic validation campaign ---
 % Enabled automatically when OO_V1_ALL_TOGGLES=true; off by default.
-% ConfigFactory Stage 85 block owns all cfg.validation.scientificCampaign.* defaults.
+% ConfigFactory block owns all cfg.validation.scientificCampaign.* defaults.
 if stageAllToggles || oo_v1_envAllToggles_
     cfg.validation.scientificCampaign.enable     = true;
     cfg.validation.scientificCampaign.profile    = 'light';
@@ -117,10 +117,10 @@ if stageAllToggles || oo_v1_envAllToggles_
     cfg.validation.scientificCampaign.duration_s = 900;
 end
 
-% Scenario preset (singleAssetCarrierAttitude) is now applied inside masterConfig
-% (Phase 1.2). For the default (non-all-toggles) run this is identical; in all-toggle
+% Scenario preset (singleAssetCarrierAttitude) is now applied inside masterConfig.
+% For the default (non-all-toggles) run this is identical; in all-toggle
 % mode the preset now precedes the all-toggle overrides instead of following them
-% (all-toggle is non-gated validation tooling, retired in Phase 6).
+% (all-toggle is non-gated validation tooling, retired).
 
 % ============================================================
 % RUN SIMULATION AND WRITE REPORT

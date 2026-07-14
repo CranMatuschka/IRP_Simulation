@@ -1,5 +1,5 @@
 classdef IonosphereFreeBiasBudget
-    % IonosphereFreeBiasBudget  Stage 44 diagnostic IF bias budget.
+    % IonosphereFreeBiasBudget  Diagnostic IF bias budget.
     %
     % Computes how inter-frequency code and carrier biases propagate into
     % the ionosphere-free (IF) combination using IF coefficients alpha/beta.
@@ -25,7 +25,7 @@ classdef IonosphereFreeBiasBudget
                 s.classification = 'l1-only-no-if-budget'; return
             end
 
-            % Get IF coefficients from Stage 43 class
+            % Get IF coefficients
             co = revgnss.IonosphereFreeCombinationDiagnostics.coefficients('L1','L2');
             s.alpha = co.alpha;
             s.beta  = co.beta;
@@ -51,7 +51,7 @@ classdef IonosphereFreeBiasBudget
             s.carrierIfModelBias_m   = s.alpha * bv.carrierModelL1   + s.beta * bv.carrierModelL2;
             s.carrierIfResidualBias_m = s.carrierIfTruthBias_m - s.carrierIfModelBias_m;
 
-            % Noise amplification from Stage 43
+            % Noise amplification
             try
                 na = revgnss.IonosphereFreeCombinationDiagnostics.noiseAmplification('L1','L2',1,1);
                 s.equalSigmaNoiseAmplification = na.amplificationVsEqualSigma;

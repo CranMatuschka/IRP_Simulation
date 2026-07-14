@@ -122,7 +122,7 @@ classdef ReportRunner
             cfg.plots.closeAfterSave        = false;
 
             % ---- Run simulation (finalizeConfig called inside) ----------
-            cfgLiteral = cfg;   % literal (pre-finalizeConfig) snapshot for the .out override dump (WP-2)
+            cfgLiteral = cfg;   % literal (pre-finalizeConfig) snapshot for the .out override dump
             sim = revgnss.ReverseGNSSSimulation(cfg);
             sim.initialize();
             sim.run();
@@ -434,7 +434,7 @@ classdef ReportRunner
                     cfg_kav.plots.enable    = false;
                     % KAV sub-run must not trigger campaign recursion.
                     try; cfg_kav.validation.scientificCampaign.enable = false; catch; end
-                    % WP-B: the KAV sub-run must not launch the Monte-Carlo ensemble.
+                    % the KAV sub-run must not launch the Monte-Carlo ensemble.
                     try; cfg_kav.report.monteCarlo.enable = false; catch; end
                     out_kav = revgnss.ReportRunner.runSingle(cfg_kav);
                     r_kav   = out_kav.summary.attitudeImprovementRatio;
@@ -645,7 +645,7 @@ classdef ReportRunner
                     % Carrier-attitude row closure spot-check
                     sm60_ = sim.ekf.stateMap;
                     r60_  = sim.ekf.x(sm60_.r_idx);
-                    eu60_ = sim.ekf.getReportEulerRad();  % Stage 61: use nominal euler
+                    eu60_ = sim.ekf.getReportEulerRad();  % use nominal euler
                     chk60_ = revgnss.CarrierAttitudeRowClosure.spotCheck( ...
                         cfg, sim.towers, sm60_, r60_, eu60_);
                     summary.stage60CarrierAttRowsChecked   = chk60_.rowsChecked;
@@ -1263,7 +1263,7 @@ classdef ReportRunner
                 summary.syntheticSlipInjectionEnabled  = false;
                 try; summary.syntheticSlipInjectionEnabled = ...
                     logical(cfg.carrierSlip.syntheticSlipInjection.enable); catch; end
-                summary.nDiffAttBaselineResets = 0;  % DiffAtt slip detection disabled per Stage 69
+                summary.nDiffAttBaselineResets = 0;  % DiffAtt slip detection disabled
                 nda73_ = NaN;
                 try; nda73_ = double(revgnss.ReportRunner.finalScalar_( ...
                     simData.getDiffAttActiveBaselines(), NaN)); catch; end
@@ -1294,7 +1294,7 @@ classdef ReportRunner
             end
 
             % ---- Shared-error covariance summary fields ----------
-            % Defaults (safe if cfg.covariance block absent or run pre-Stage74)
+            % Defaults (safe if cfg.covariance block absent or run pre)
             summary.covarianceMode                         = 'diagonalOnly';
             summary.codeTowerClockBlockCovarianceApplied   = false;
             summary.nCodeClockCovarianceBlocks             = 0;
@@ -1544,7 +1544,7 @@ classdef ReportRunner
                     appendRawPlots = cfg.report.appendRawPlots;
                 end
 
-                % Phase 9: latex-style scientific section pages
+                % latex-style scientific section pages
                 texFigs = gobjects(0);
                 if strcmp(reportStyle,'latex')
                     [texFigs, texPath2] = revgnss.LatexReportBuilder.build( ...
@@ -1656,7 +1656,7 @@ classdef ReportRunner
             out.matPath           = matPath;
             out.texPath           = texPath2;
 
-            % WP-B: Monte-Carlo NEES/NIS filter-consistency evidence (opt-in, default OFF
+            % Monte-Carlo NEES/NIS filter-consistency evidence (opt-in, default OFF
             % -> golden byte-identical). Ensemble consistency is the honest alternative to
             % a single-run NEES/NIS sample. Runs after the main pipeline so it never
             % perturbs it; the shipped conservative filter is expected to sit below band.
@@ -2427,8 +2427,8 @@ classdef ReportRunner
         function writeRunLog_(reportFolder, stem, cfg, cfgLiteral, summary, pdfPath, matPath, mc)
             % writeRunLog_  Write a concise <stem>.out run log beside the PDF/MAT.
             %   cfg is the RESOLVED config (post-finalizeConfig); cfgLiteral is the
-            %   pre-finalizeConfig snapshot, so the .out can show the overrides (WP-2).
-            %   mc (optional) is the WP-B Monte-Carlo consistency result.
+            %   pre-finalizeConfig snapshot, so the .out can show the overrides.
+            %   mc (optional) is the Monte-Carlo consistency result.
             if nargin < 8; mc = struct('enabled', false); end
             try
                 fid = fopen(fullfile(reportFolder, [stem '.out']), 'w');
@@ -2452,7 +2452,7 @@ classdef ReportRunner
                         fprintf(fid, '  %-22s : %.6g\n', mkeys{i}, summary.(mkeys{i}));
                     end
                 end
-                % WP-B: Monte-Carlo NEES/NIS filter-consistency evidence (opt-in).
+                % Monte-Carlo NEES/NIS filter-consistency evidence (opt-in).
                 if isstruct(mc) && isfield(mc,'enabled') && mc.enabled
                     fprintf(fid, '\n-- monte-carlo filter consistency (WP-B) --\n');
                     if isfield(mc,'ran') && mc.ran && isfield(mc,'result')
@@ -2475,7 +2475,7 @@ classdef ReportRunner
                 fprintf(fid, '  mat     : %s\n', matPath);
                 fprintf(fid, '  figures : %s\n', fullfile(reportFolder, 'figures'));
 
-                % WP-2: make the run self-describing WITHOUT MATLAB. The literal
+                % make the run self-describing WITHOUT MATLAB. The literal
                 % masterConfig is not what ran; finalizeConfig resolved/overrode many
                 % toggles. Dump the resolved config + the literal-vs-resolved overrides.
                 try
@@ -2496,7 +2496,7 @@ classdef ReportRunner
         end
 
         function mc = runMonteCarloConsistency_(cfg)
-            % runMonteCarloConsistency_  WP-B: ensemble NEES/NIS filter-consistency.
+            % runMonteCarloConsistency_  ensemble NEES/NIS filter-consistency.
             %   A single run yields a single NEES/NIS sample; chi-squared consistency is
             %   only meaningful over an ensemble. When cfg.report.monteCarlo.enable is
             %   true, run N seeded pipeline draws (initial error from P0, varied

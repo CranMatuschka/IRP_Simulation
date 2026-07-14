@@ -6,7 +6,7 @@ classdef AttitudeKinematics
     %
     % State vector attitude: [roll; pitch; yaw] in radians.
     %
-    % Stage 33 additions: convention(), eulerToDcm(), rotateBodyToReference(),
+    % convention(), eulerToDcm(), rotateBodyToReference(),
     %   rotateReferenceToBody(), gimbalMetric(), isNearGimbalLock(),
     %   finiteDiffLeverArmJacobian(), validateDcm().
 
@@ -73,7 +73,7 @@ classdef AttitudeKinematics
         function J = eulerRateJacobian(euler_rad, omega_body_radps)
             % eulerRateJacobian  Analytic Jacobian d/d(eul)[ T(eul) * omega_body ], 3x3.
             %
-            % Closed-form replacement (WP7) for the finite-difference Euler-euler block
+            % Closed-form replacement for the finite-difference Euler-euler block
             % of the EKF state-transition Jacobian: F(eul,eul) = I + dt * J. Removes the
             % round-off of the central difference and its FD-vs-FD-only spot check.
             % Columns are d/droll, d/dpitch, d/dyaw; the YAW column is exactly zero
@@ -118,7 +118,7 @@ classdef AttitudeKinematics
         end
 
         % ================================================================
-        % Stage 33: convention hardening methods
+        % Convention hardening methods
         % ================================================================
 
         function c = convention()

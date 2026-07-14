@@ -44,8 +44,8 @@ classdef ErrorChain < handle
         seed        (1,1) double = 0
         envModel                   % models.errors.EnvironmentModel (always created)
         lastT_s     (1,1) double = -1   % last t_s for dt computation
-        mpRng                      % WP5: dedicated RandStream for coloured multipath (legacy, OFF path)
-        mpState                    % WP5: containers.Map link-key -> GM state [m] (persistent)
+        mpRng                      % Dedicated RandStream for coloured multipath (legacy, OFF path)
+        mpState                    % containers.Map link-key -> GM state [m] (persistent)
         % Seed-independence refactor: identity-keyed streams (ON path, default)
         useIndependentStreams (1,1) logical = false
         registry                   % models.noise.RngRegistry (built only when ON)
@@ -105,7 +105,7 @@ classdef ErrorChain < handle
             % draw from independent substreams instead of one shared envRng.
             obj.envModel = models.errors.EnvironmentModel(cfg, nT, obj.registry);
 
-            % --- WP5: coloured multipath per-link GM state + dedicated RNG -----
+            % --- Coloured multipath per-link GM state + dedicated RNG -----
             mpSeed = 6301;
             if isfield(cfg,'errors') && isfield(cfg.errors,'multipath') && ...
                     isfield(cfg.errors.multipath,'coloredGM') && ...
@@ -163,7 +163,7 @@ classdef ErrorChain < handle
             %   towerIds         [N x 1]  tower id integers (for hw delay lookup)
             %   towerIdx         [N x 1]  indices into towers array
             %   t_s              scalar   current time
-            %   antennaIdx       [N x 1]  (optional, WP5) receiver/antenna index per row,
+            %   antennaIdx       [N x 1]  (optional) receiver/antenna index per row,
             %                             for per-link coloured multipath keying. Defaults
             %                             to all-ones (per-tower keying) when omitted.
             %
@@ -230,7 +230,7 @@ classdef ErrorChain < handle
             [truth_m.mp, model_m.mp, sigma_m.mp] = ...
                 obj.multipath_(elv, t_s, towerIdx, antennaIdx, dt, elvFloor);
 
-            % -------- 5b. Higher-order ionosphere (WP6) ----------------
+            % -------- 5b. Higher-order ionosphere ----------------
             % Second/third-order residual that survives the IF combination. Derived from
             % the first-order L1 slant delay just computed. Zero (and label harmless) when
             % cfg.errors.ionosphere.higherOrder.enable is false.
@@ -420,7 +420,7 @@ classdef ErrorChain < handle
             sigmaStoch = sqrt((sigmaWet * mappingFn(elv)).^2 + sigmaResidual.^2);
             if residualOn && any(sigmaStoch > 0) && ...
                     isfield(tc,'truth') && isfield(tc.truth,'enable') && tc.truth.enable
-                % Stage 86: the matched mean delay is augmented by a seeded
+                % The matched mean delay is augmented by a seeded
                 % residual that the estimator cannot know; its variance enters R.
                 truth_m = truth_m + sigmaStoch .* ...
                     obj.drawWhiteVec_(models.noise.RngSource.TROP_RESID, towerIdx, [], N);
@@ -466,9 +466,9 @@ classdef ErrorChain < handle
             %                           I_slant = verticalDelayL1_m * M(el) at L1
             %   'tecGaussMarkov'       – EnvironmentModel Gauss-Markov TEC residual
             %
-            % Stage 7A.1: mapping uses MappingFunctions.ionosphere() with
+            % Mapping uses MappingFunctions.ionosphere() with
             % cfg.effects.ionosphere.mappingModel ('simpleSecant' or 'thinShell').
-            % Default is 'simpleSecant' (backward-compatible with Stage 6 and earlier).
+            % Default is 'simpleSecant' (backward-compatible default).
             % This is NOT Klobuchar. Klobuchar is not implemented.
             %
             % CHANGED: v3→v4 — Issue 1
@@ -482,8 +482,8 @@ classdef ErrorChain < handle
             N  = numel(elv);
             ic = obj.cfg.errors.ionosphere;
 
-            % Stage 7A.1: config-driven ionosphere mapping (not hardcoded 1/sin).
-            % Default 'simpleSecant' preserves Stage 6 backward-compatibility.
+            % Config-driven ionosphere mapping (not hardcoded 1/sin).
+            % Default 'simpleSecant' preserves backward-compatibility.
             ionoMapKind   = 'simpleSecant';
             shellHeight_m = 350e3;
             if isfield(obj.cfg,'effects') && isfield(obj.cfg.effects,'ionosphere')
@@ -528,7 +528,7 @@ classdef ErrorChain < handle
                 % constantVerticalDelay: cfg.errors.ionosphere.*.verticalDelayL1_m [m] is
                 % the vertical L1 delay in metres.
                 % I_slant = verticalDelayL1_m * mapping(el)  [Leick et al. 2015 eq. 9.11]
-                % Stage 7A.1: mapping uses MappingFunctions.ionosphere() (not hardcoded secant).
+                % Mapping uses MappingFunctions.ionosphere() (not hardcoded secant).
                 if isfield(ic,'truth') && isfield(ic.truth,'enable') && ic.truth.enable
                     vdel = 0;
                     if isfield(ic.truth,'verticalDelayL1_m')
@@ -555,7 +555,7 @@ classdef ErrorChain < handle
                 end
             else
                 % simpleMapped (backward compat).
-                % Stage 7A.1: mapping uses MappingFunctions.ionosphere() (not hardcoded secant).
+                % Mapping uses MappingFunctions.ionosphere() (not hardcoded secant).
                 if isfield(ic,'truth') && isfield(ic.truth,'enable') && ic.truth.enable
                     iono_zenith_m = ic.truth.zenithDelay_m;
                     truth_m = iono_zenith_m * mapping;
@@ -583,7 +583,7 @@ classdef ErrorChain < handle
             sigmaStoch = sqrt((sigmaVDelay * mapping).^2 + sigmaResidual.^2);
             if residualOn && any(sigmaStoch > 0) && ...
                     isfield(ic,'truth') && isfield(ic.truth,'enable') && ic.truth.enable
-                % Stage 86: first-order mean is matched; this seeded residual
+                % First-order mean is matched; this seeded residual
                 % represents surviving ionosphere/scintillation/model error.
                 truth_m = truth_m + sigmaStoch .* ...
                     obj.drawWhiteVec_(models.noise.RngSource.IONO_RESID, towerIdx, [], N);
@@ -659,7 +659,7 @@ classdef ErrorChain < handle
             model_m = zeros(N,1);
             sigma_m = zeros(N,1);
 
-            % WP5: coloured (first-order Gauss-Markov) multipath. One persistent GM state
+            % Coloured (first-order Gauss-Markov) multipath. One persistent GM state
             % per link (tower x antenna) is stepped each epoch; the realised value is the
             % TRUTH bias (-> z) and its elevation-scaled steady-state sigma enters R (the
             % estimator does not know the instantaneous value). Kaplan & Hegarty §7.2.6:
@@ -710,7 +710,7 @@ classdef ErrorChain < handle
 
         % ----------------------------------------------------------------
         function [truth_m, model_m, sigma_m] = higherOrderIono_(obj, ionoL1_slant_m, f_L1)
-            % higherOrderIono_  Second/third-order ionosphere residual at L1 (WP6).
+            % higherOrderIono_  Second/third-order ionosphere residual at L1.
             %   Derived from the first-order L1 slant delay. Truth-side, unmodelled
             %   (model_m = 0); its magnitude enters R. Zero when disabled (bit-identical).
             N = numel(ionoL1_slant_m);

@@ -1,5 +1,5 @@
 classdef AttitudeJacobianAudit
-    % AttitudeJacobianAudit  Stage 34 attitude Jacobian consistency audit.
+    % AttitudeJacobianAudit  Attitude Jacobian consistency audit.
     %
     % Compares H attitude columns against finite-difference range partials when
     % per-row LOS + lever metadata is available. When only row-type strings are

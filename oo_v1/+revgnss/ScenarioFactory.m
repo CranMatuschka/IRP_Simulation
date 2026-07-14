@@ -100,7 +100,7 @@ classdef ScenarioFactory
             x0(sm.bdot_rx_idx) = asset.clock.getDriftMetersPerSecond() + cdot_pert;
 
             if ekf.estimateTowerClocks
-                % WP-10: draw the tower-clock init from the SAME P0 the filter is told
+                % Draw the tower-clock init from the SAME P0 the filter is told
                 % it has, so the initial tower-clock NEES is O(1) instead of exactly 0
                 % (exact-truth init against a 1000 m / 10 m/s stated sigma drove a
                 % meaningless NEES and a covariance transient). Dedicated seeded stream
@@ -120,7 +120,7 @@ classdef ScenarioFactory
             % towerClockInitSigmas_  Single source for the tower-clock P0 1-sigma,
             % shared by buildInitialState_ (seeded init perturbation) and
             % buildInitialCovariance_ (stated covariance) so they cannot drift apart.
-            % Only reached when estimateTowerClocks=true. (WP-10)
+            % Only reached when estimateTowerClocks=true.
             sigma_b_m      = 1e3;   % 1000 m  initial tower clock-bias uncertainty
             sigma_bdot_mps = 1e1;   % 10 m/s  initial tower clock-drift uncertainty
         end
@@ -140,7 +140,7 @@ classdef ScenarioFactory
 
             if ekf.estimateTowerClocks
                 % Shared with buildInitialState_ so the stated 1-sigma and the initial
-                % perturbation cannot drift apart (WP-10).
+                % perturbation cannot drift apart.
                 [sigma_b_twr, sigma_bd_twr] = revgnss.ScenarioFactory.towerClockInitSigmas_();
                 for ti = 1:ekf.nTowers
                     idx_b    = sm.towerClockIdx(ti,1);

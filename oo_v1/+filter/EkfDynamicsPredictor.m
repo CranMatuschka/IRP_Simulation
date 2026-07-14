@@ -1,5 +1,5 @@
 classdef EkfDynamicsPredictor
-    % EkfDynamicsPredictor  Optional physical EKF translational prediction. Stage 58.
+    % EkfDynamicsPredictor  Optional physical EKF translational prediction.
     %
     % Converts the ECEF position/velocity state to an inertial-like frame using a
     % constant-Earth-rotation model, propagates with OrbitDynamics RK4 two-body or J2,

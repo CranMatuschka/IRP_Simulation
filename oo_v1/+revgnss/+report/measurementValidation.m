@@ -1,5 +1,5 @@
 function measurementValidation(fid, plotPaths, stem, figDir, diag)
-%MEASUREMENTVALIDATION  "Measurement and Geometry Validation" report section (Phase 7).
+%MEASUREMENTVALIDATION  "Measurement and Geometry Validation" report section.
 %   Extracted verbatim from ClockExactReportBuilder.writeMeasurementValidation_ as part
 %   of the C-9 report decomposition. Read-only: consumes only the precomputed plotPaths
 %   + figure dir and the (now-public) ClockExactReportBuilder formatting toolkit. The

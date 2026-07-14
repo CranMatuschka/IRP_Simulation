@@ -1,5 +1,5 @@
 classdef CodeIonoFreeEkfDiagnostics
-    % CodeIonoFreeEkfDiagnostics  Stage 45 diagnostic: guarded code IF EKF row status.
+    % CodeIonoFreeEkfDiagnostics  Diagnostic: guarded code IF EKF row status.
     %
     % Reports whether L1/L2 ionosphere-free code rows are requested, enabled,
     % and actually used in the EKF. Carries explicit false flags for carrier IF,
@@ -59,7 +59,7 @@ classdef CodeIonoFreeEkfDiagnostics
                 s.classification  = 'inconsistent'; return
             end
 
-            % Bias budget residual (Stage 44)
+            % Bias budget residual
             try
                 bb = revgnss.IonosphereFreeBiasBudget.assess(cfg);
                 s.biasBudgetResidual_m = bb.codeIfResidualBias_m;

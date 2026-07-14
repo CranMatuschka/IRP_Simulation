@@ -1,6 +1,6 @@
 function cfg = baseConfig()
 %BASECONFIG  Structural + default base config (relocated from ConfigFactory.defaultConfig).
-%   Phase 1.3: moves the config base out of the 2512-line +revgnss/ConfigFactory
+%   Moves the config base out of the 2512-line +revgnss/ConfigFactory
 %   monolith into the config/ folder. revgnss.ConfigFactory.defaultConfig now
 %   delegates here, so the 20+ derived configs and tests keep working, while the
 %   canonical masterConfig depends on config/, not the monolith. Structural builders
@@ -58,7 +58,7 @@ r_geo      = models.frames.GeometryUtils.geodetic2ecef(geoLat_rad, geoLon_rad, g
 
 cfg.asset.name                    = 'GEO-1';
 cfg.asset.mass_kg                 = 70;
-% Attitude process-noise budget (WP3). The angular-acceleration 1-sigma driving the
+% Attitude process-noise budget. The angular-acceleration 1-sigma driving the
 % EKF attitude Q is derived from a residual disturbance-torque budget alpha = tau / I.
 % Representative small-satellite values (Wertz, "Spacecraft Attitude Determination and
 % Control", 1978, environmental-torque chapters: gravity-gradient, solar-radiation
@@ -83,7 +83,7 @@ cfg.clockScaling.globalFreqFactor    = 1.0;
 cfg.clockScaling.globalNoiseFactor   = 1.0;
 cfg.clockScaling.receiverNoiseFactor = 1.0;
 cfg.clockScaling.towerNoiseFactor    = 1.0;
-% WP4: clock h-coefficient source. 'legacy' = original (optimistic) numbers, kept for
+% Clock h-coefficient source. 'legacy' = original (optimistic) numbers, kept for
 % exact reproducibility; 'jowTable2p1' = re-anchored to JOW Table 2.1 (less optimistic
 % OCXO/CESIUM). Canonical selector is cfg.clock.templateSource (below); this mirror is
 % read by the config-build-time makeClockConfig calls before cfg.clock exists.
@@ -193,11 +193,11 @@ cfg.estimator.estimateAngularRate     = false;
 cfg.estimator.estimateAttitudeFromPseudorange     = false;
 cfg.estimator.estimateAngularRateFromPseudorange  = false;
 cfg.estimator.estimateCarrierAmbiguities          = false;
-% Stage 15: differential carrier attitude mode.
+% Differential carrier attitude mode.
 % 'off' (safe default) | 'calibratedDifferentialAmbiguity' | 'validationKnownAmbiguity'
 cfg.estimator.attitudeCarrierMode     = 'off';
 cfg.estimator.diffAtt.calibWin_s      = 60;   % calibration window length (s)
-% Stage 16: absolute multi-antenna attitude initialization.
+% Absolute multi-antenna attitude initialization.
 % Safe default is 'none'.  'knownAttitudeCalibration' requires an
 % explicit declaration that the calibration attitude is known.
 cfg.estimator.attitudeInitMode = 'none';
@@ -274,7 +274,7 @@ cfg.signals.L2.codeSigma0_m  = 0.45;
 cfg.signals.primary          = 'L1';   % primary signal for iono scaling
 cfg.signals.secondary        = 'L2';   % secondary for IF combination
 cfg.ionosphere.mode          = 'off';  % 'off'|'truthOnly'|'model'|'ionosphereFree'
-% Stage 76: central signal list (names, Hz, boolean masks).
+% Central signal list (names, Hz, boolean masks).
 % Populated by finalizeConfig from canonical names/enabledMask resolution.
 cfg.signals.names            = {'L1'};
 cfg.signals.frequencyHz      = sigL1Default_.frequency_Hz;
@@ -326,7 +326,7 @@ cfg.errors.ionosphere.stochastic.process              = 'gaussMarkov';
 cfg.errors.ionosphere.stochastic.tau_s                = 1800;
 cfg.errors.ionosphere.stochastic.sigmaVDelayL1_ss_m   = 1.0;
 cfg.errors.ionosphere.stochastic.sigmaModelResidualL1_m = 0.5;
-% WP6: second/third-order ionosphere (Branch A bounded residual). The dual-frequency
+% Second/third-order ionosphere (Branch A bounded residual). The dual-frequency
 % IF combination cancels the first-order 40.3*TEC/f^2 term, but the second-order
 % (~f^-3) and third-order (~f^-4) residuals SURVIVE it and are of order cm at L1 under
 % high solar activity. Modelled as a truth-side bounded residual tied to the first-order
@@ -383,7 +383,7 @@ cfg.errors.hardwareDelay.truth.enable      = false;
 cfg.errors.hardwareDelay.truth.default_m   = 0.0;
 cfg.errors.hardwareDelay.model.enable      = false;  % honest off=off (was true; default_m=0 made it a no-op)
 cfg.errors.hardwareDelay.model.default_m   = 0.0;
-% WP-F: hardware-delay real-residual channels, default inert. residualStochastic adds a
+% Hardware-delay real-residual channels, default inert. residualStochastic adds a
 % truth-only white residual (needs enable + sigma_m>0 + truth.enable) that survives z-h;
 % declaring the fields removes the runtime try/catch reliance. NB: enabling hardwareDelay
 % with matched truth==model default_m AND these off contributes EXACTLY 0 -> validateMasterConfig
@@ -397,7 +397,7 @@ cfg.errors.multipath.truth.amplitude_m         = 0.3;
 cfg.errors.multipath.truth.frequency_radps     = 0.01;
 cfg.errors.multipath.truth.stochastic_sigma_m  = 0.1;
 cfg.errors.multipath.sigma_m                   = 0.0;
-% WP5: multipath as a coloured (first-order Gauss-Markov) process. Multipath is the
+% Multipath as a coloured (first-order Gauss-Markov) process. Multipath is the
 % dominant code error in nominal conditions and is strongly time-correlated (tens of
 % seconds to minutes, tied to geometry) — modelling it as white under-represents its
 % low-frequency, per-link-correlated impact (Kaplan & Hegarty §7.2.6). One GM state per
@@ -413,7 +413,7 @@ cfg.errors.multipath.coloredGM.carrierScale        = 0.01;   % phase multipath ~
 cfg.errors.multipath.coloredGM.seed                = 6301;   % dedicated per-link RNG seed
 
 % --- Effect toggles: deterministic geometric/structural effects ------
-% cfg.effects groups new deterministic effects added in Stages 2–4.
+% cfg.effects groups deterministic geometric/structural effects.
 % Each effect has truth/model toggle so mismatches appear as innovation bias.
 % If truth=true and model=true with same params, the effect mostly cancels.
 % R contains stochastic uncertainty only — deterministic bias belongs here.
@@ -427,7 +427,7 @@ cfg.effects.antennaPCO.truth.enable          = false;
 cfg.effects.antennaPCO.model.enable          = false;
 cfg.effects.antennaPCO.receiverOffset_body_m = [0; 0; 0];
 cfg.effects.antennaPCO.towerOffset_enu_m     = [0; 0; 0];
-% WP-E: optional gated truth-only PCO calibration residual -- a receiver antenna phase-centre
+% Optional gated truth-only PCO calibration residual -- a receiver antenna phase-centre
 % mis-calibration the estimator does NOT know (applied to the truth side only), so it survives
 % z-h as a REAL imperfection instead of cancelling. Default OFF -> zero -> golden byte-identical.
 cfg.effects.antennaPCO.calibrationResidual.enable               = false;
@@ -488,7 +488,7 @@ cfg.measurements.pseudorange.enable   = true;
 cfg.measurements.doppler.enable       = true;
 cfg.measurements.doppler.sigma_mps    = 0.01;
 cfg.measurements.doppler.useInEKF     = true;
-% WP-G: include the range-rate position partial d(rhoDot)/dr in the Doppler Jacobian.
+% Include the range-rate position partial d(rhoDot)/dr in the Doppler Jacobian.
 % Default false -> H has only d/dv and d/d(bdot_rx) (documented approximation; golden
 % byte-identical). true -> the LOS-rotation + tower-rotation partial is added (small for a
 % GEO). See revgnss.OneWayRangeRateModel.positionPartial.
@@ -503,7 +503,7 @@ cfg.measurements.carrierPhase.initialAmbiguityMode = 'randomInteger';
 cfg.measurements.carrierPhase.seed             = 9001;
 cfg.measurements.carrierPhase.cycleSlip.enable = true;
 
-% --- One-way inter-spacecraft link scaffold (Stage 21) --------
+% --- One-way inter-spacecraft link scaffold --------
 cfg.measurements.isl.enable = false;
 cfg.measurements.isl.transmitterAssetIndex = 2;   % legacy single-link default
 cfg.measurements.isl.transmitters = 'all';        % 'all' secondaries (2..N) or a specific index
@@ -546,7 +546,7 @@ cfg.measurements.isl.timing.tolerance_s = 1e-12;
 cfg.measurements.isl.timing.processingDelay_s = 0.0;
 cfg.measurements.isl.clockTransferDiagnostics.enable = false;
 
-% --- TWSTFT code time-transfer diagnostic scaffold (Stage 24) ---
+% --- TWSTFT code time-transfer diagnostic scaffold ---
 % All defaults off. Enabling these toggles does NOT add EKF rows.
 % No relay/transponder, no ISL carrier EKF, no TWSTFT ambiguity states.
 cfg.measurements.twstft.enable = false;
@@ -559,7 +559,7 @@ cfg.measurements.twstft.processingDelay_s = 0.0;
 cfg.measurements.twstft.calibratedDelay_s = 0.0;
 cfg.measurements.twstft.requireIslTiming = true;
 
-% --- Tower<->spacecraft two-way time transfer (WP-A) -------------
+% --- Tower<->spacecraft two-way time transfer ---
 % A REAL EKF observable (unlike the spacecraft<->spacecraft TWSTFT scaffold above):
 % each two-way-capable ground tower exchanges signals with the spacecraft, yielding
 % a range-cancelled measurement of the clock difference (b_rx - b_tower). Because the
@@ -616,7 +616,7 @@ cfg.measurements.carrier.minElevationDeg           = 5;
 cfg.measurements.carrier.cycleSlipMode             = 'none';
 cfg.measurements.carrier.syntheticSlipProbability  = 0;
 
-% Slip detection (Stage 14)
+% Slip detection
 cfg.measurements.carrier.slipDetection.enable                 = false;
 cfg.measurements.carrier.slipDetection.threshold_m            = 0.1;
 cfg.measurements.carrier.slipDetection.minEpochsBeforeDetect  = 3;
@@ -631,10 +631,10 @@ cfg.measurements.carrier.slipDetection.action                 = 'resetAndSkip';
 % NOTE: VMF3, GPT3, and Niell are NOT implemented.
 cfg.effects.troposphere.mappingModel = 'simple';
 
-% --- Ionosphere mapping model (Stage 7A) ------------------------
+% --- Ionosphere mapping model ------------------------
 % Governs the mapping function used to project vertical ionosphere
 % delays to slant delays in EnvironmentModel.getIonoDelay().
-% 'simpleSecant' — 1/sin(el) (backward-compatible, Stage 6 and earlier)
+% 'simpleSecant' — 1/sin(el) (backward-compatible default)
 % 'thinShell'    — single thin-shell: M(e)=1/sqrt(1-(Re*cos(e)/(Re+hI))^2)
 %                  hI set via cfg.effects.ionosphere.shellHeight_m
 % NOTE: This is NOT a Klobuchar model. Klobuchar is not implemented.
@@ -701,7 +701,7 @@ cfg.towerClock.productValidityPolicy  = 'warn';  % 'warn' | 'error'
 % cfg.towerClock.products is not set in defaultConfig (optional field).
 % Set it in towerClockProductConfig() or manually per tower.
 
-% --- Clock architecture mode (Stage 8) ---------------------------
+% --- Clock architecture mode ---------------------------
 % clock.mode: which clocks are in the EKF state vector.
 %   'spacecraftReceiverClockOnly' — only rx clock (default; 14-state base)
 %   'includeTowerClocksInEKF'     — add tower clock states (+2/tower)
@@ -714,7 +714,7 @@ cfg.towerClock.productValidityPolicy  = 'warn';  % 'warn' | 'error'
 %
 % clock.hardwareDelay.estimatePerTower — hardware delay EKF state placeholder (v1: not implemented)
 cfg.clock.mode                           = 'spacecraftReceiverClockOnly';
-% WP4: h-coefficient source for clock templates (canonical selector). 'legacy' keeps
+% h-coefficient source for clock templates (canonical selector). 'legacy' keeps
 % every current number bit-identical; 'jowTable2p1' re-anchors OCXO/CESIUM to the
 % project primary source (JOW Table 2.1) — less optimistic, more conservative.
 cfg.clock.templateSource                 = 'legacy';
@@ -724,7 +724,7 @@ cfg.clock.gauge.sigmaBias_m              = 1e-6;   % pseudo-meas sigma for bias 
 cfg.clock.gauge.sigmaDrift_mps           = 1e-9;   % pseudo-meas sigma for drift gauge [m/s]
 cfg.clock.hardwareDelay.estimatePerTower = false;
 
-% --- Transmitter code hardware-delay states (Stage 11) ----------
+% --- Transmitter code hardware-delay states ----------
 % A transmitter code hardware delay is algebraically similar to a
 % tower clock bias in one-way pseudorange.  Free simultaneous
 % estimation of tower clock bias and tx code delay is forbidden
@@ -739,7 +739,7 @@ cfg.hardware.txCodeBias.initialSigma_m            = 10.0;
 cfg.hardware.txCodeBias.processSigma_m_per_sqrt_s = 1e-5;
 cfg.hardware.txCodeBias.gaugeSigma_m              = 1e-6;
 
-% --- Receiver code / carrier hardware-bias architecture (Stage 12) ---
+% --- Receiver code / carrier hardware-bias architecture ---
 % Receiver code hardware delay has the same first-order sensitivity as
 % receiver clock bias in single-frequency one-way pseudorange:
 %   dP/d(b_rx) = +1,  dP/d(d_rx_code) = +1
@@ -772,7 +772,7 @@ cfg.diagnostics.observability.enabled       = false;
 cfg.diagnostics.observability.warn          = true;
 cfg.diagnostics.observability.rankTolerance = [];
 
-% --- Clock observability Gramian (Stage 10) ---------------------
+% --- Clock observability Gramian ---------------------
 % Windowed clock-subspace observability Gramian computed each epoch.
 % Physical-only rank reveals the persistent one-way pseudorange nullspace.
 % Gauged rank should equal n_clk after fixReferenceTower or meanGroundClockGauge.
@@ -873,7 +873,7 @@ cfg.plots.outputDir             = fullfile(fileparts(mfilename('fullpath')), ...
 % --- Report ---------------------------------------------------
 cfg.report.enable              = true;
 cfg.report.version             = '1.00';
-% WP-B: Monte-Carlo NEES/NIS filter-consistency evidence appended to the run (.out log).
+% Monte-Carlo NEES/NIS filter-consistency evidence appended to the run (.out log).
 % A single run gives one NEES/NIS sample; chi-squared consistency is only meaningful over
 % an ensemble. Default OFF (golden byte-identical; expensive = N extra full runs). When on,
 % ReportRunner runs N seeded draws (initial error from P0, varied measurement/atmosphere +

@@ -32,15 +32,15 @@ classdef ReverseGNSSSimulation < handle
 
         trackMgr    revgnss.CarrierTrackManager
         orbitTruthCache               = struct('enabled',false,'built',false,'mode','','source','none','t_s',[],'r_ecef_m',[],'v_ecef_mps',[])
-        diffAttStore                  = struct()   % Stage 15: differential attitude calibration state
+        diffAttStore                  = struct()   % Differential attitude calibration state
         attInitDone    (1,1) logical = false
         attInitInfo                  = struct()
-        fixState63_                  = []         % Stage 63: containers.Map for held integer fixes
-        intFix63Enabled_             = false      % Stage 63: cached enable flag (set in initialize)
+        fixState63_                  = []         % containers.Map for held integer fixes
+        intFix63Enabled_             = false      % Cached enable flag (set in initialize)
         fix63Log_                    = struct('nAccepted',0,'nHeld',0,'nRejected',0,'nReset',0, ...
                                          'lastClassification','disabled','lastSigmaMin',NaN, ...
                                          'lastSigmaMean',NaN,'lastDistToInt',NaN, ...
-                                         'enabled',false,'mode','disabled')  % Stage 63 cumulative log
+                                         'enabled',false,'mode','disabled')  % Cumulative log
     end
 
     properties (Dependent)
@@ -124,7 +124,7 @@ classdef ReverseGNSSSimulation < handle
             obj.attInitDone = false;
             obj.attInitInfo = revgnss.AttitudeInitializer.defaultInfo(obj.cfg);
 
-            % Stage 63: initialize integer fix state and cache enable flag
+            % Initialize integer fix state and cache enable flag
             obj.fixState63_ = containers.Map('KeyType','char','ValueType','any');
             obj.fix63Log_ = struct('nAccepted',0,'nHeld',0,'nRejected',0,'nReset',0, ...
                 'lastClassification','disabled','lastSigmaMin',NaN,'lastSigmaMean',NaN, ...
@@ -134,14 +134,14 @@ classdef ReverseGNSSSimulation < handle
                 isfield(obj.cfg.estimator.integerAmbiguity,'enable') && ...
                 logical(obj.cfg.estimator.integerAmbiguity.enable);
 
-            % Stage 15: differential carrier attitude calibration store
+            % Differential carrier attitude calibration store
             attMode15 = '';
             if isfield(obj.cfg,'estimator') && isfield(obj.cfg.estimator,'attitudeCarrierMode')
                 attMode15 = obj.cfg.estimator.attitudeCarrierMode;
             end
             if strcmp(attMode15,'calibratedDifferentialAmbiguity')
                 obj.diffAttStore = revgnss.DiffAttitudeBuilder.init(obj.cfg, obj.nTowers);
-                % Stage 69: set external initial attitude reference so calibration is not
+                % Set external initial attitude reference so calibration is not
                 % biased by the initial EKF attitude error. The reference (truth + small noise)
                 % represents a realistic initial attitude from star tracker / coarse ADCS.
                 if strcmp(obj.diffAttStore.referenceMode,'externalInitialAttitude')
@@ -239,12 +239,12 @@ classdef ReverseGNSSSimulation < handle
         
             fprintf('Simulation complete. %d epochs processed.\n', obj.nEpochs);
             obj.summarize();
-            obj.simData.freeze();   % Phase 4a: store is immutable when run() returns; post/report read-only
+            obj.simData.freeze();   % Store is immutable when run() returns; post/report read-only
         end
 
         % ----------------------------------------------------------------
         function step(obj, k)
-            % Phase 4b: two real pipeline stages. Truth generation writes the true
+            % Two real pipeline stages: truth generation writes the true
             % world state; estimation reads it ONLY through the measurement. No local
             % variable crosses between them (they communicate via obj.asset / obj.towers
             % / obj.ekf), so this split is exactly behaviour-preserving.
@@ -293,7 +293,7 @@ classdef ReverseGNSSSimulation < handle
             % which truth enters the estimator), detect slips, update, and record. The
             % prediction reads no truth state; truth is read only via computeMeasurements
             % and post-update diagnostics.
-            cpInfo = [];  % Stage 63: float carrier cpInfo captured in slip-detection block
+            cpInfo = [];  % Float carrier cpInfo captured in slip-detection block
 
             % EKF predict (skip at first epoch — no prior state to propagate from)
             if k > 1
@@ -338,9 +338,9 @@ classdef ReverseGNSSSimulation < handle
                 end
                 obj.ekf.applyAmbiguityResets(resetRequests, resetSig);
                 errStruct.ambiguityResetCount = numel(resetRequests);
-                % Stage 63: remove held fixes for slipped tracks
+                % Remove held fixes for slipped tracks
                 revgnss.IntegerAmbiguityFixer.resetOnSlip(obj.fixState63_, resetRequests);
-                % Stage 53: attach per-row arc state to cpInfo after process().
+                % Attach per-row arc state to cpInfo after process().
                 arcSepEnabled = false;
                 try; arcSepEnabled = logical(obj.cfg.estimator.arcSeparatedAmbiguities.enable); catch; end
                 if arcSepEnabled
@@ -348,14 +348,14 @@ classdef ReverseGNSSSimulation < handle
                     errStruct.carrierPhase.arcId           = arcSt53_.arcId;
                     errStruct.carrierPhase.currentArcEpoch = arcSt53_.currentArcEpoch;
                     errStruct.carrierPhase.slipCount       = arcSt53_.slipCount;
-                    % Stage 63: propagate arc state into cpInfo for integer fixing gates
+                    % Propagate arc state into cpInfo for integer fixing gates
                     cpInfo.arcId           = arcSt53_.arcId;
                     cpInfo.currentArcEpoch = arcSt53_.currentArcEpoch;
                 end
             end
             errStruct.slipInfo = slipInfo;
 
-            % Stage 21: append one-way ISL code/Doppler EKF rows after the
+            % Append one-way ISL code/Doppler EKF rows after the
             % ground-carrier slip filter so legacy carrier row ordering stays intact.
             [z_isl, h_isl, H_isl, R_isl, islInfo] = revgnss.ISLMeasurementBuilder.build( ...
                 obj.cfg, obj.asset, obj.assets, obj.ekf.x, obj.ekf.stateMap, obj.ekf.nx, t_s);
@@ -385,7 +385,7 @@ classdef ReverseGNSSSimulation < handle
                     errStruct.observableStack, twoWayInfo);
             end
 
-            % WP-A: tower<->spacecraft two-way time transfer (TWSTFT). Range-cancelled
+            % Tower<->spacecraft two-way time transfer (TWSTFT). Range-cancelled
             % clock-difference rows that observe the receiver clock directly, breaking
             % the GEO radial<->clock degeneracy. Disabled by default (golden byte-identical:
             % build returns empty when cfg.measurements.twoWayTimeTransfer.enable=false).
@@ -399,15 +399,15 @@ classdef ReverseGNSSSimulation < handle
             end
             errStruct.twoWayTimeTransfer = twttInfo;
 
-            % Stage 24: TWSTFT code time-transfer diagnostic (no EKF rows).
+            % TWSTFT code time-transfer diagnostic (no EKF rows).
             errStruct.twstftDiag = revgnss.TWSTFTDiagnosticBuilder.build(obj.cfg, islInfo, twoWayInfo);
             if isfield(errStruct,'observableStack')
                 errStruct.observableStack = revgnss.ReverseGnssObservableAdapter.addTWSTFTDiagnosticRows( ...
                     errStruct.observableStack, errStruct.twstftDiag);
             end
 
-            % Stage 16: absolute attitude initialization before differential
-            % carrier calibration, so Stage 15 references the initialized attitude.
+            % Absolute attitude initialization before differential
+            % carrier calibration, so the initialized attitude is referenced.
             attInitMode = 'none';
             if isfield(obj.cfg.estimator,'attitudeInitMode')
                 attInitMode = obj.cfg.estimator.attitudeInitMode;
@@ -446,7 +446,7 @@ classdef ReverseGNSSSimulation < handle
             if ~isempty(z) && numel(z) >= minMeas
                 [~, nu57_, S57_, NIS] = obj.ekf.update(z_ekf, h_ekf, H_ekf, R_ekf);
 
-                % Stage 57: separated EKF innovation accounting (physical / gauge / augmented).
+                % Separated EKF innovation accounting (physical / gauge / augmented).
                 nPhys57_  = numel(z);
                 nGauge57_ = errStruct.gaugeInfo.rowsAdded + errStruct.txGaugeInfo.rowsAdded;
                 mType57_  = {};
@@ -458,7 +458,7 @@ classdef ReverseGNSSSimulation < handle
                 errStruct.ekfAccounting57    = revgnss.EkfInnovationAccounting.compute(nu57_, S57_, rowClass57_);
                 errStruct.ekfAccountingRms57 = revgnss.EkfInnovationAccounting.residualRms(nu57_, rowClass57_);
 
-                % Stage 63: guarded raw-carrier integer ambiguity fixing.
+                % Guarded raw-carrier integer ambiguity fixing.
                 % cpInfo63_: use embedded float rows when IF post-processing replaced cpInfo.
                 cpInfo63_ = cpInfo;
                 if isstruct(cpInfo) && isfield(cpInfo,'floatRows') && isstruct(cpInfo.floatRows)
@@ -503,10 +503,9 @@ classdef ReverseGNSSSimulation < handle
                     t_s, numel(z), minMeas);
             end
 
-            % Stage 15: differential carrier attitude update (separate sequential update).
-            % Calibration phase: accumulate delta_phi - model_diff for each baseline.
-            % Post-calibration: build attitude-only EKF rows (H non-zero only in euler columns)
-            % and apply a second update.  Sequential updates are mathematically valid.
+            % Differential carrier attitude update (separate sequential update): calibration
+            % accumulates delta_phi - model_diff for each baseline, then applies attitude-only
+            % EKF rows (H non-zero in euler columns only).
             errStruct.diffAttRows = struct('nRows',0,'residualRMS_m',NaN,'active',false);
             attMode15 = '';
             if isfield(obj.cfg,'estimator') && isfield(obj.cfg.estimator,'attitudeCarrierMode')
@@ -516,27 +515,18 @@ classdef ReverseGNSSSimulation < handle
                     isfield(errStruct,'carrierPhase') && isstruct(errStruct.carrierPhase) && ...
                     isfield(errStruct.carrierPhase,'phi_m') && ~isempty(errStruct.carrierPhase.phi_m)
                 cpDA = errStruct.carrierPhase;
-                % Stage 69: differential attitude always uses raw L1 carrier rows.
-                % When IF combination is active, errStruct.carrierPhase contains IF rows;
-                % floatRows preserves the pre-IF L1+L2 stack for DiffAtt (L1-only via signalIdx filter).
+                % Differential attitude uses raw L1 carrier rows.
+                % When IF combination is active, floatRows preserves the pre-IF L1+L2 stack
+                % for DiffAtt (L1-only via signalIdx filter).
                 if isfield(cpDA,'floatRows') && isstruct(cpDA.floatRows)
                     cpDA = cpDA.floatRows;
                 end
                 lArms15 = obj.cfg.asset.receiverLeverArms_body_m;
-                % Stage 69: DiffAtt baselines do not use the main-carrier slip detector.
-                % Pre-calibration: wrong attitude → large prefits → every IF carrier row
-                % declared a slip → accumN reset to 0 each epoch → calibration blocked.
-                % Post-calibration: DiffAtt injections change attitude by O(deg) between
-                % epochs, which the IF slip detector reads as a cycle slip → all baselines
-                % immediately invalidated before attitude can converge.
-                % Resolution: rely on the per-row innovation gate in buildRows (|nu| > 1 m)
-                % as the only slip guard for differential attitude baselines.  Real slips
-                % produce ~lambda/2 ≈ 0.095 m jumps in phi_i − phi_ref which are small
-                % relative to the 1 m gate; wrong-attitude innovations are also typically
-                % < 1 m for lever arms ~1 m and attitude errors up to ~10 deg.  handleSlips
-                % is therefore entirely disabled for DiffAtt baselines in Stage 69.
-                % (no handleSlips call here)
-                % Stage 61: use getMeasurementState() so DiffAttitudeBuilder receives
+                % Differential attitude baselines do not use the main-carrier slip detector;
+                % rely on per-row innovation gate (|nu| > 1 m) instead. DiffAtt injections cause
+                % O(deg) attitude changes per epoch which the IF slip detector misreads as slips
+                % (real slips ~lambda/2 ≈ 0.095 m are small vs. 1 m gate); handleSlips disabled.
+                % Use getMeasurementState() so DiffAttitudeBuilder receives
                 % nominal euler (not near-zero error state) in quaternionErrorState mode.
                 xDA_ = obj.ekf.getMeasurementState();
                 if ~obj.diffAttStore.calibrated && t_s < obj.diffAttStore.calibWin_s
@@ -681,7 +671,7 @@ classdef ReverseGNSSSimulation < handle
             M_pr = errStruct.nPseudorange;
 
             % Pseudorange postfit via exact model path
-            % Stage 61: use getMeasurementState() so postfit uses nominal euler
+            % Use getMeasurementState() so postfit uses nominal euler
             h_post_pr = obj.measModel.computePseudorangeModelOnly( ...
                 obj.asset, obj.towers, obj.ekf.getMeasurementState(), errStruct, sm, t_s);
 
@@ -737,7 +727,7 @@ classdef ReverseGNSSSimulation < handle
                 end
             end
 
-            % Phase 2: carrier postfit — recompute h_phi from UPDATED EKF state.
+            % Carrier postfit — recompute h_phi from UPDATED EKF state.
             % computeCarrierModelOnly uses the post-update x with the same frozen
             % error-chain corrections (frozen trop/iono/tower-clock) from errStruct.
             hc_post  = [];

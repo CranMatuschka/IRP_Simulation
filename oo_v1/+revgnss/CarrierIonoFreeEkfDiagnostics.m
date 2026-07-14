@@ -1,5 +1,5 @@
 classdef CarrierIonoFreeEkfDiagnostics
-    % Stage 47: Carrier IF float EKF row diagnostic.
+    % Carrier IF float EKF row diagnostic.
     %
     % Reads summary and cfg; classifies the carrier IF EKF path.
     % Does NOT implement integer fixing, LAMBDA/MLAMBDA, or calibrated DCB/IFB.
@@ -48,7 +48,7 @@ classdef CarrierIonoFreeEkfDiagnostics
             catch
             end
 
-            % Stage 48: ambiguity pair metadata availability
+            % Ambiguity pair metadata availability
             s.ambiguityPairMetadataAvailable = ...
                 isfield(summary,'carrierIfPairMetadataAvailable') && ...
                 summary.carrierIfPairMetadataAvailable;
@@ -60,7 +60,7 @@ classdef CarrierIonoFreeEkfDiagnostics
             s.calibratedDcbProductsAvailable      = false;
             s.carrierIfIntegerReadyClassification = 'not-integer-ready-float-only';
 
-            % Stage 54: arc consistency enforcement status from summary.
+            % Arc consistency enforcement status from summary.
             try
                 if isfield(summary,'carrierArcConsistencyEnforced')
                     s.arcConsistencyEnforced = logical(summary.carrierArcConsistencyEnforced);
@@ -126,7 +126,7 @@ classdef CarrierIonoFreeEkfDiagnostics
             s.lambdaImplemented                    = false;
             s.calibratedDcbProductsAvailable       = false;
             s.carrierIfIntegerReadyClassification  = 'not-integer-ready-float-only';
-            % Stage 54: arc consistency enforcement fields.
+            % Arc consistency enforcement fields.
             s.arcConsistencyEnforced              = false;
             s.arcConsistentRows                   = NaN;
             s.arcSkippedRows                      = NaN;
@@ -144,7 +144,7 @@ classdef CarrierIonoFreeEkfDiagnostics
             if ~s.carrierIsEkfFloat
                 cls = 'requested-not-ekf-float'; return
             end
-            % Stage 54: if enforcement active and all rows were skipped.
+            % If enforcement active and all rows were skipped.
             if s.usedInEkf && s.arcConsistencyEnforced && ...
                     isfinite(s.arcSkippedRows) && s.arcSkippedRows > 0 && ...
                     (isnan(s.carrierIfRows) || s.carrierIfRows == 0)

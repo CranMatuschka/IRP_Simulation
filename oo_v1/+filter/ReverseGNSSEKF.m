@@ -62,7 +62,7 @@ classdef ReverseGNSSEKF < handle
         estimateIono         (1,1) logical = false
         nIonoStates          (1,1) double  = 0
 
-        % Per-tower transmitter code bias states (Stage 11)
+        % Per-tower transmitter code bias states
         estimateTxCodeBias   (1,1) logical = false
         nTxCodeBiasStates    (1,1) double  = 0
 
@@ -80,10 +80,10 @@ classdef ReverseGNSSEKF < handle
         % Diagnostics
         history          (1,1) struct
 
-        % Stage 58: last dynamics predict info (compact, overwritten each epoch)
+        % Last dynamics predict info (compact, overwritten each epoch)
         lastDynamicsPredictInfo (1,1) struct
 
-        % Stage 61: quaternion nominal / error-state attitude EKF
+        % Quaternion nominal / error-state attitude EKF
         nominalQuat_wxyz          double = [1;0;0;0]   % scalar-first unit quaternion
         attitudeParameterization  char   = 'eulerZYX'  % 'eulerZYX' | 'quaternionErrorState'
         lastAttitudeErrorStateInfo (1,1) struct
@@ -118,14 +118,14 @@ classdef ReverseGNSSEKF < handle
                 if strcmp(ambMode,'floatPerTowerSignal')
                     obj.estimateAmbiguities = true;
                     obj.ambiguityMode       = 'floatPerTowerSignal';
-                    % Stage 42: nSignals from SignalCatalog (1=L1 only, 2=L1+L2 when guarded).
+                    % nSignals from SignalCatalog (1=L1 only, 2=L1+L2 when guarded).
                     obj.ambiguityNSignals   = revgnss.SignalCatalog.nCarrierSignals(cfg);
                     obj.ambiguityNReceivers = 1;
                     obj.nAmbiguities = nTowers * obj.ambiguityNSignals;
                 elseif strcmp(ambMode,'floatPerTowerReceiverSignal')
                     obj.estimateAmbiguities = true;
                     obj.ambiguityMode       = 'floatPerTowerReceiverSignal';
-                    % Stage 42: nSignals from SignalCatalog (1=L1 only, 2=L1+L2 when guarded).
+                    % nSignals from SignalCatalog (1=L1 only, 2=L1+L2 when guarded).
                     obj.ambiguityNSignals   = revgnss.SignalCatalog.nCarrierSignals(cfg);
                     nRx = 1;
                     if isfield(cfg,'scenario') && isfield(cfg.scenario,'nReceivers')
@@ -150,7 +150,7 @@ classdef ReverseGNSSEKF < handle
                 obj.nIonoStates    = nTowers;
             end
 
-            % Determine if tx code bias states requested (Stage 11)
+            % Determine if tx code bias states requested
             if isfield(cfg,'hardware') && isfield(cfg.hardware,'txCodeBias') && ...
                     isfield(cfg.hardware.txCodeBias,'useInEKF') && cfg.hardware.txCodeBias.useInEKF
                 obj.estimateTxCodeBias   = true;
@@ -185,7 +185,7 @@ classdef ReverseGNSSEKF < handle
                 obj.rxClockModel = rxClockModel;
             end
 
-            % Stage 61: read attitude parameterization from config
+            % Read attitude parameterization from config
             try
                 p61 = cfg.estimator.attitude.parameterization;
                 if ischar(p61) && ismember(p61, {'eulerZYX','quaternionErrorState'})
@@ -213,7 +213,7 @@ classdef ReverseGNSSEKF < handle
         function initState(obj, x0, P0)
             obj.x = x0(:);
             obj.P = P0;
-            % Stage 61: initialize nominal quaternion from initial Euler state
+            % Initialize nominal quaternion from initial Euler state
             if strcmp(obj.attitudeParameterization, 'quaternionErrorState')
                 eul0 = obj.x(obj.stateMap.euler_idx);
                 obj.nominalQuat_wxyz = revgnss.AttitudeErrorStateKinematics.eulerToQuatZYX(eul0);
@@ -249,7 +249,7 @@ classdef ReverseGNSSEKF < handle
         % ----------------------------------------------------------------
         function predict(obj, dt_s, towerClockModels, t0_s)
             % predict  EKF time propagation.
-            %   t0_s — simulation time at start of prediction interval (Stage 58).
+            %   t0_s — simulation time at start of prediction interval.
             if nargin < 4 || isempty(t0_s); t0_s = 0; end
 
             x  = obj.x;
@@ -262,7 +262,7 @@ classdef ReverseGNSSEKF < handle
             b_rx    = x(sm.b_rx_idx);
             bdot_rx = x(sm.bdot_rx_idx);
 
-            % Stage 58: optional physical translational dynamics
+            % Optional physical translational dynamics
             dynInfo = struct('mode','constantVelocity','usedInertialPropagation',false, ...
                 'forceModel','none','frameModel','none', ...
                 'specificEnergyInitial_Jkg',NaN,'specificEnergyFinal_Jkg',NaN, ...
@@ -294,7 +294,7 @@ classdef ReverseGNSSEKF < handle
             % Attitude: kinematics update (frozen when estimation disabled)
             if obj.estimateAttitude
                 if strcmp(obj.attitudeParameterization, 'quaternionErrorState')
-                    % Stage 61: propagate nominal quaternion; error state stays near zero
+                    % Propagate nominal quaternion; error state stays near zero
                     obj.nominalQuat_wxyz = revgnss.AttitudeErrorStateKinematics.propagateQuatBodyRate( ...
                         obj.nominalQuat_wxyz, omg, dt_s);
                     eul_new = zeros(3, 1);   % error state kept at zero in prediction
@@ -331,7 +331,7 @@ classdef ReverseGNSSEKF < handle
             end
             obj.x = x_new;
 
-            % State transition Jacobian F (Stage 58: pass Phi6 override for r/v block)
+            % State transition Jacobian F (pass Phi6 override for r/v block)
             F = obj.buildF_(dt_s, eul, omg, Phi6);
 
             % Process noise Q
@@ -346,7 +346,7 @@ classdef ReverseGNSSEKF < handle
         function [K, nu, S, NIS] = update(obj, z, h, H, R)
             % update  EKF measurement update (Joseph stabilised form).
             %
-            % Stage 62: S, K, and Joseph posterior covariance are computed from
+            % S, K, and Joseph posterior covariance are computed from
             % the pre-update covariance Pminus.  The quaternion error-state reset
             % Jacobian is then applied to the POSTERIOR covariance, not the prior.
             %
@@ -358,7 +358,7 @@ classdef ReverseGNSSEKF < handle
                 return
             end
 
-            % 1. Save pre-update covariance (Stage 62: all innovation/Joseph ops use Pminus)
+            % 1. Save pre-update covariance (all innovation/Joseph ops use Pminus)
             Pminus = obj.P;
 
             % 2. Innovation
@@ -374,7 +374,7 @@ classdef ReverseGNSSEKF < handle
             % 4. State update (local variable — assigned to obj.x after Joseph)
             xUpdated = obj.x + K * nu;
 
-            % 5. Joseph stabilised posterior covariance (Stage 62: uses Pminus)
+            % 5. Joseph stabilised posterior covariance (uses Pminus)
             nx  = obj.nx;
             IKH = eye(nx) - K * H;
             Pplus = IKH * Pminus * IKH' + K * R * K';
@@ -385,7 +385,7 @@ classdef ReverseGNSSEKF < handle
             obj.P = Pplus;
 
             % 7. Quaternion error-state injection + covariance reset
-            %    Stage 62: applied to posterior Pplus, NOT to prior Pminus
+            %    Applied to posterior Pplus, NOT to prior Pminus
             if strcmp(obj.attitudeParameterization, 'quaternionErrorState')
                 deltaTheta = obj.x(obj.stateMap.euler_idx);
                 [obj.nominalQuat_wxyz, injInfo] = revgnss.AttitudeErrorStateKinematics.injectRight( ...
@@ -399,7 +399,7 @@ classdef ReverseGNSSEKF < handle
                 obj.P(ei, :) = G * obj.P(ei, :);
                 obj.P(:, ei) = obj.P(:, ei) * G';
                 obj.P = (obj.P + obj.P') / 2;
-                % Injection diagnostics (Stage 62: reset order, guard, Jacobian condition)
+                % Injection diagnostics (reset order, guard, Jacobian condition)
                 injNorm = injInfo.injectionNorm_rad;
                 obj.attitudeInjectionCount       = obj.attitudeInjectionCount + 1;
                 obj.maxAttitudeInjectionNorm_rad = max(obj.maxAttitudeInjectionNorm_rad, injNorm);
@@ -611,7 +611,7 @@ classdef ReverseGNSSEKF < handle
                 sm.ionoIdx = zeros(nTowers, 1);
             end
 
-            % Optional per-tower transmitter code bias states (Stage 11)
+            % Optional per-tower transmitter code bias states
             % d_tx_code_i [m]: random-walk bias, one per tower, L1 code only.
             % Positive d_tx_code increases measured pseudorange.
             if obj.estimateTxCodeBias && obj.nTxCodeBiasStates > 0
@@ -632,7 +632,7 @@ classdef ReverseGNSSEKF < handle
             %
             % Euler-euler block: FD derivative of (eul + dt * T(eul,omg)*omg) w.r.t. eul.
             % Euler-omega block: dt * T(euler)  [kinematic transformation].
-            % Phi6 (optional, Stage 58): 6x6 translational STM replacing default [I dtI;0 I] block.
+            % Phi6 (optional): 6x6 translational STM replacing default [I dtI;0 I] block.
 
             if nargin < 5; Phi6 = []; end
 
@@ -650,7 +650,7 @@ classdef ReverseGNSSEKF < handle
             end
 
             if strcmp(obj.attitudeParameterization, 'quaternionErrorState')
-                % Stage 61: error-state F blocks — linearized around nominal.
+                % Error-state F blocks — linearized around nominal.
                 % d(delta_theta)/dt = -skew(omega)*delta_theta + delta_omega
                 % F(theta,theta) ≈ I - skew(omega)*dt
                 % F(theta,omega) ≈ I*dt
@@ -665,7 +665,7 @@ classdef ReverseGNSSEKF < handle
                 end
             else
                 % Euler-euler block: analytic Jacobian of eul + dt*T(eul)*omg w.r.t. eul
-                % (WP7). Replaces the fdStep=1e-7 central difference with the closed-form
+                % Replaces the fdStep=1e-7 central difference with the closed-form
                 % derivative F(eul,eul) = I + dt*J, removing FD round-off. Guarded near
                 % gimbal lock inside eulerRateJacobian; the singularity-free path is the
                 % quaternion error-state parameterisation.
@@ -891,7 +891,7 @@ classdef ReverseGNSSEKF < handle
                 end
             end
 
-            % --- Tx code bias process noise (random walk, Stage 11) --------
+            % --- Tx code bias process noise (random walk) --------
             % d_tx_code(k+1) = d_tx_code(k) + w,  Q = sigma^2 * dt
             if obj.estimateTxCodeBias
                 sigTx = 1e-5;
@@ -955,10 +955,10 @@ classdef ReverseGNSSEKF < handle
 
         % ----------------------------------------------------------------
         function info = applyAmbiguityPseudoMeasurement(obj, ambIdx, fixedValue_m, sigma_m)
-            % applyAmbiguityPseudoMeasurement  Stage 63: constrain one ambiguity state.
+            % applyAmbiguityPseudoMeasurement  Constrain one ambiguity state.
             %
             % Builds a scalar pseudo-measurement z=fixedValue_m, h=x(ambIdx), H=[0..1..0],
-            % R=sigma_m^2 and calls update().  Preserves Stage 62 Joseph/posterior order.
+            % R=sigma_m^2 and calls update().  Preserves Joseph/posterior order.
             info.applied = false; info.idx = ambIdx;
             info.fixedValue_m = fixedValue_m; info.sigma_m = sigma_m;
             info.postSigma_m = NaN; info.NIS = NaN; info.warning = '';

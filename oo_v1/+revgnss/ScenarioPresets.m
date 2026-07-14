@@ -4,7 +4,7 @@ classdef ScenarioPresets
     % Supported scenario names:
     %   'default'                   — config unchanged.
     %   'singleAssetCarrierAttitude' — single-space-asset multi-antenna float-carrier attitude.
-    %   'geoRealWorldTruthComparison' — Stage 86 GEO realistic truth-comparison.
+    %   'geoRealWorldTruthComparison' — GEO closed-loop truth comparison.
     %
     % Usage:
     %   cfg = revgnss.ConfigFactory.defaultConfig();
@@ -39,7 +39,7 @@ classdef ScenarioPresets
             %   dynamics — SAME model family (not a mismatch). Estimator error comes from
             %   realistic sources (init state/covariance, measurement/clock/atmosphere noise,
             %   float ambiguities, residual-acceleration process noise), never a degraded model.
-            % Stage 76: raw dual-frequency (L1+L2) baseline attitude AR is supported
+            % Raw dual-frequency (L1+L2) baseline attitude ambiguity resolution is supported
             %   in controlled synthetic form. Carrier-IF integer fixing is explicitly
             %   unsupported. LAMBDA/MLAMBDA, calibrated phase-bias products, and
             %   PPP-grade claims are not implemented. Multi-space-asset is guarded.
@@ -83,7 +83,7 @@ classdef ScenarioPresets
             cfg.assets(1).receiverLeverArms_body_m = arms;
             cfg.assets(1).receiverLeverArm_body_m  = arms(:,1);
 
-            % Attitude estimation. Use preferred Stage 56 controls exclusively so the
+            % Attitude estimation. Use preferred controls exclusively so the
             % legacy estimateAttitudeFromPseudorange flag does not cause H/metadata
             % inconsistencies (code rows must not declare attitude sensitivity while
             % H attitude columns are zero).
@@ -98,7 +98,7 @@ classdef ScenarioPresets
             % Initial attitude covariance and error.
             cfg.estimator.P0_euler_rad              = deg2rad(5);
             cfg.estimator.P0_omega_radps            = 1e-12;
-            % WP3: torque-budget-justified attitude process noise (~1e-7 rad/s^2),
+            % Torque-budget-justified attitude process noise (~1e-7 rad/s^2),
             % replacing the over-optimistic 1e-10. alpha = tau / I (Wertz).
             cfg.estimator.sigma_angAccel_radps2     = revgnss.ConfigFactory.angAccelFromTorqueBudget_( ...
                 cfg.asset.inertia_kgm2, cfg.asset.residualDisturbanceTorque_Nm);
@@ -119,7 +119,7 @@ classdef ScenarioPresets
                 cfg.measurements.carrier.slipDetection.action                = 'resetAndSkip';
             end
 
-            % Stage 53/54: arc-separated ambiguities and arc consistency enforcement.
+            % Arc-separated ambiguities and arc consistency enforcement.
             cfg.estimator.arcSeparatedAmbiguities.enable             = true;
             cfg.estimator.enforceCarrierArcConsistency.enable        = true;
             cfg.diagnostics.arcSeparatedAmbiguities.enable           = true;
@@ -154,7 +154,7 @@ classdef ScenarioPresets
             cfg.estimator.dynamics.mode  = 'j2';   % SAME family as truth (truth-estimation separation)
             cfg.validation.enforceModelFamilyConsistency = true;   % both J2: enforce parity
 
-            % Stage 67: stochastic tower clocks — non-perfect broadcast correction.
+            % Stochastic tower clocks with non-perfect broadcast correction.
             % Each tower clock is driven by the Brown-Hwang two-state process.
             % The EKF uses noisyCorrection: broadcast product with uncertainty sigma.
             for k = 1:numel(cfg.towers)
@@ -187,7 +187,7 @@ classdef ScenarioPresets
         end
 
         function cfg = geoRealWorldTruthComparison(cfg)
-            % geoRealWorldTruthComparison  Stage 86 GEO closed-loop truth comparison.
+            % geoRealWorldTruthComparison  GEO closed-loop truth comparison.
             %
             % Truth and EKF use the same J2 mean dynamics. Innovations are driven by
             % seeded stochastic residuals and by estimation error, not by a deliberate
@@ -232,7 +232,7 @@ classdef ScenarioPresets
             cfg.estimator.sigma_accel_mps2 = 1e-6;
             cfg.estimator.processNoise.modelMismatch.enable = false;
             cfg.estimator.processNoise.modelMismatch.sigma_mps2 = 0;
-            % WP3: torque-budget-justified attitude process noise (~1e-7 rad/s^2),
+            % Torque-budget-justified attitude process noise (~1e-7 rad/s^2),
             % replacing the over-optimistic 1e-9. alpha = tau / I (Wertz).
             cfg.estimator.sigma_angAccel_radps2 = revgnss.ConfigFactory.angAccelFromTorqueBudget_( ...
                 cfg.asset.inertia_kgm2, cfg.asset.residualDisturbanceTorque_Nm);

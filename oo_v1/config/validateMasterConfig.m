@@ -1,5 +1,5 @@
 function cfg = validateMasterConfig(cfg)
-%VALIDATEMASTERCONFIG  Contract checks for the master config (Phase 1.4).
+%VALIDATEMASTERCONFIG  Contract checks for the master config.
 %   Asserts the assembled config satisfies the clarity-refactor contract (scenario
 %   set, deterministic master seed, positive timing, claim discipline) and returns
 %   cfg UNCHANGED. Value DERIVATIONS remain in ConfigFactory.finalizeConfig, the
@@ -52,7 +52,7 @@ function cfg = validateMasterConfig(cfg)
             'cfg.clocks.tower.product.sigmaBias_m is negative.');
     end
 
-    % --- WP-F: warn when hardware delay is enabled but leaves NO residual ---
+    % --- Warn when hardware delay is enabled but leaves NO residual ---
     % Enabled with truth==model (matched default_m) and residualStochastic off contributes
     % exactly 0 to z-h -- flag it so it is not silently treated as an active imperfection.
     % Off by default -> never fires on the shipped/golden run. (The analogous PCO case is

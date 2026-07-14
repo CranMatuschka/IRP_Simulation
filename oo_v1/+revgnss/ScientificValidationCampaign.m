@@ -8,7 +8,6 @@ classdef ScientificValidationCampaign
     % Usage (from ReportRunner after the main simulation):
     %   campResult = revgnss.ScientificValidationCampaign.run(cfg);
     %
-    % Stage 85.
 
     methods (Static)
 

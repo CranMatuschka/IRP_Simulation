@@ -1,5 +1,5 @@
 classdef L2CarrierArchitectureDiagnostics
-    % L2CarrierArchitectureDiagnostics  Stage 42 L2 carrier EKF row architecture assessment.
+    % L2CarrierArchitectureDiagnostics  L2 carrier EKF row architecture assessment.
     %
     % Reports L1/L2 carrier EKF signal architecture: enabled signals, wavelengths,
     % ionosphere scaling, and ambiguity state sizing from state-map metadata.

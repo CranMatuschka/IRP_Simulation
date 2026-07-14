@@ -1,5 +1,5 @@
 function clockObservability(fid, diag, cfg)
-%CLOCKOBSERVABILITY  "Clock Observability and Gauge Validation" report section (Phase 7).
+%CLOCKOBSERVABILITY  "Clock Observability and Gauge Validation" report section.
 %   Extracted verbatim from ClockExactReportBuilder.writeClockObservability_ as part
 %   of the C-9 report decomposition. Read-only: consumes only the precomputed plotPaths
 %   + figure dir and the (now-public) ClockExactReportBuilder formatting toolkit. The
@@ -44,11 +44,11 @@ function clockObservability(fid, diag, cfg)
                 '$\\sigma_{\\rm drift}=%g$\\,m/s). ' ...
                 'This spreads the datum symmetrically across all towers.'], sigB, sigD);
         case 'externalTowerCorrections'
-            % Stage 72: distinguish product-corrected from perfect/noisy.
+            % Distinguish product-corrected from perfect/noisy.
             % Read mode from cfg (summary not in scope in this helper).
             tClkMdG_ = models.clocks.TowerClockCorrectionProvider.towerClockMode(cfg);
             if strcmp(tClkMdG_, 'truthHistoryProductNoisy')
-                diagInfl_ = true;  % Stage 72: diagonal per-row code-R only
+                diagInfl_ = true;  % Diagonal per-row code-R only
                 gaugeStr = ['\texttt{externalTowerCorrections} (product-corrected). ' ...
                     'Tower clocks corrected by synthetic product predictions (Stage~72): ' ...
                     'delayed/quantised product epoch, per-product deterministic noise, ' ...

@@ -1,8 +1,8 @@
 classdef AmbiguityReadinessDiagnostics
-    % AmbiguityReadinessDiagnostics  Stage 40 float ambiguity readiness diagnostics.
+    % AmbiguityReadinessDiagnostics  Float ambiguity readiness diagnostics.
     %
-    % Assesses readiness for future integer ambiguity work using Stage 39
-    % carrier-row inventory, ambiguity count/source, covariance availability,
+    % Assesses readiness for future integer ambiguity work using carrier-row
+    % inventory, ambiguity count/source, covariance availability,
     % slip detection status, and known-ambiguity validation state.
     % Readiness diagnostics only — no integer fixing, no LAMBDA/MLAMBDA.
     %
@@ -24,7 +24,7 @@ classdef AmbiguityReadinessDiagnostics
             end
             s.enabled = true;
 
-            % Stage 39 inventory for row/ambiguity counts
+            % Inventory for row/ambiguity counts
             inv = revgnss.CarrierRowMetadataInventory.inventory(out, cfg);
             s.carrierInventoryClassification = inv.classification;
             s.carrierRowCount                = inv.carrierRowCount;
@@ -61,7 +61,7 @@ classdef AmbiguityReadinessDiagnostics
             catch; end
 
             s.blockers       = revgnss.AmbiguityReadinessDiagnostics.blockerList(s);
-            % Append Stage 50/51 gate blockers if available in out.summary
+            % Append gate blockers if available in out.summary
             try
                 if isfield(out,'summary') && ...
                         isfield(out.summary,'ambiguityFixingReadinessGate') && ...
@@ -87,7 +87,7 @@ classdef AmbiguityReadinessDiagnostics
 
         function cv = covarianceInventory(out, cfg) %#ok<INUSD>
             % covarianceInventory  Check ambiguity covariance availability.
-            % Prefers Stage 41 exported covariance summary if present in out.summary.
+            % Prefers exported covariance summary if present in out.summary.
             cv.ambiguityCovarianceAvailable = false;
             cv.condition                    = NaN;
             cv.correlationMaxAbs            = NaN;

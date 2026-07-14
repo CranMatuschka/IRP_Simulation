@@ -133,7 +133,7 @@ classdef ClockExactReportBuilder
 
     end  % public static
 
-    methods (Static)  % (Phase 7: report toolkit callable by extracted +revgnss/+report/ sections)
+    methods (Static)  % (Report toolkit callable by extracted +revgnss/+report/ sections)
 
         function cleanBuildArtifacts_(texPath, figDir) %#ok<INUSD>
             % cleanBuildArtifacts_  Remove LaTeX intermediates after a successful
@@ -224,7 +224,7 @@ classdef ClockExactReportBuilder
             paths.attCompZoom = CE.tryPlot_(figDir, [stem '_attitude_components_zoomlast.pdf'], @() ...
                 CE.plotAttZoom_(diag, t, zoomSec), cfg);
 
-            % Allan deviation (Stage 67)
+            % Allan deviation
             paths.allanDev = CE.tryPlot_(figDir, [stem '_allan_deviation.pdf'], @() ...
                 CE.plotAllanDeviation_(diag, t), cfg);
         end
@@ -865,7 +865,7 @@ classdef ClockExactReportBuilder
         % SECTION 1 — SCENARIO SUMMARY
         % ================================================================
 
-        % writeScenarioSummary_ extracted to +revgnss/+report/scenarioSummary.m (Phase 7).
+        % writeScenarioSummary_ extracted to +revgnss/+report/scenarioSummary.m.
 
 
         % ================================================================
@@ -1133,25 +1133,25 @@ classdef ClockExactReportBuilder
         % SECTION 2 — STATE ESTIMATION VALIDATION
         % ================================================================
 
-        % writeStateEstimation_ extracted to +revgnss/+report/stateEstimation.m (Phase 7).
+        % writeStateEstimation_ extracted to +revgnss/+report/stateEstimation.m.
 
         % ================================================================
         % SECTION 3 — MEASUREMENT AND GEOMETRY VALIDATION
         % ================================================================
 
-        % writeMeasurementValidation_ extracted to +revgnss/+report/measurementValidation.m (Phase 7).
+        % writeMeasurementValidation_ extracted to +revgnss/+report/measurementValidation.m.
 
         % ================================================================
         % SECTION 4 — PER-RECEIVER MEASUREMENT DIAGNOSTICS
         % ================================================================
 
-        % writePerReceiverDiagnostics_ extracted to +revgnss/+report/perReceiverDiagnostics.m (Phase 7).
+        % writePerReceiverDiagnostics_ extracted to +revgnss/+report/perReceiverDiagnostics.m.
 
         % ================================================================
         % SECTION 5 — OSCILLATOR STABILITY VALIDATION
         % ================================================================
 
-        % writeOscillatorValidation_ extracted to +revgnss/+report/oscillatorValidation.m (Phase 7).
+        % writeOscillatorValidation_ extracted to +revgnss/+report/oscillatorValidation.m.
 
         % ================================================================
         % SECTION 6 — DISABLED COMPONENTS
@@ -1161,13 +1161,13 @@ classdef ClockExactReportBuilder
         % SECTION 6B — CLOCK OBSERVABILITY AND GAUGE VALIDATION
         % ================================================================
 
-        % writeClockObservability_ extracted to +revgnss/+report/clockObservability.m (Phase 7).
+        % writeClockObservability_ extracted to +revgnss/+report/clockObservability.m.
 
         % ================================================================
-        % SECTION 7 — TRANSMITTER CODE HARDWARE-DELAY STATES (Stage 11)
+        % SECTION 7 — TRANSMITTER CODE HARDWARE-DELAY STATES
         % ================================================================
 
-        % writeTxCodeBias_ extracted to +revgnss/+report/txCodeBias.m (Phase 7).
+        % writeTxCodeBias_ extracted to +revgnss/+report/txCodeBias.m.
 
 
 
@@ -1175,14 +1175,14 @@ classdef ClockExactReportBuilder
         % SECTION 7 — NUMERICAL SUMMARY
         % ================================================================
 
-        % writeNumericalSummary_ extracted to +revgnss/+report/numericalSummary.m (Phase 7).
+        % writeNumericalSummary_ extracted to +revgnss/+report/numericalSummary.m.
 
         % ================================================================
-        % STAGE 68: ACTIVE PHYSICS MODEL CONFIGURATION (non-stage-titled)
+        % ACTIVE PHYSICS MODEL CONFIGURATION
         % ================================================================
-        % writeTropZwdArchitecture_ extracted to +revgnss/+report/tropZwdArchitecture.m (Phase 7).
+        % writeTropZwdArchitecture_ extracted to +revgnss/+report/tropZwdArchitecture.m.
 
-        % writeActivePhysicsConfig_ extracted to +revgnss/+report/activePhysicsConfig.m (Phase 7).
+        % writeActivePhysicsConfig_ extracted to +revgnss/+report/activePhysicsConfig.m.
 
         % Spacecraft + reference-frame schematic moved to the standalone, editable
         % output/utils/make_spacecraft_frames.m (scenario-independent; exported via
@@ -1205,7 +1205,7 @@ classdef ClockExactReportBuilder
         end
 
         % ================================================================
-        % FINAL SCIENTIFIC CLOSURE (Stage 66 compact section)
+        % FINAL SCIENTIFIC CLOSURE
         % ================================================================
         function writeFinalScientificClosure_(fid, summary)
             % writeFinalScientificClosure_  Compact final model closure table.
@@ -1223,7 +1223,7 @@ classdef ClockExactReportBuilder
             fprintf(fid, '\\begin{center}\\small\n');
             fprintf(fid, '\\begin{tabular}{p{0.38\\textwidth}p{0.52\\textwidth}}\n');
             fprintf(fid, '\\toprule\n\\textbf{Property} & \\textbf{Value / Status}\\\\\n\\midrule\n');
-            % Stage 66: single-asset one-way topology rows
+            % Single-asset one-way topology rows
             nSA_ = 1;
             if isfield(summary,'stage66NSpaceAssets'); nSA_ = summary.stage66NSpaceAssets; end
             fprintf(fid, 'nSpaceAssets & %d (single estimated spacecraft)\\\\\n', nSA_);

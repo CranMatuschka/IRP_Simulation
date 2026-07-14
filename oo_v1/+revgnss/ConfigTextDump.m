@@ -6,7 +6,7 @@ classdef ConfigTextDump
     %   WITHOUT MATLAB: the literal masterConfig is NOT what runs. finalizeConfig
     %   overrides attitude, codeMode, the standalone Sagnac term, the relativistic
     %   clock, the atmosphere overlay, etc. (review v2 section 4.3). This surfaces
-    %   that opacity as plain text (WP-2).
+    %   that opacity as plain text.
     %
     %   Scalars, char/string, logicals and short numeric vectors are printed verbatim;
     %   large arrays / cells / objects / handles collapse to a class-and-size

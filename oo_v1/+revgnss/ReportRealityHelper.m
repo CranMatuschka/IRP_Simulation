@@ -263,7 +263,7 @@ classdef ReportRealityHelper
         end
 
         function validateTwstft_(cfg, summary)
-            % validateTwstft_  Stage 24 TWSTFT diagnostic reality checks.
+            % validateTwstft_  TWSTFT diagnostic reality checks.
             td = revgnss.ReportRealityHelper.safeField_(summary, 'twstftDiag', struct());
             twEnabled = revgnss.ReportRealityHelper.getCfgBool_(cfg, {'measurements','twstft','enable'}, false);
             if ~twEnabled; return; end

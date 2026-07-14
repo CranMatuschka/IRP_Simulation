@@ -40,7 +40,7 @@ classdef MeasurementModel < handle
         attitudeJacStep_rad (1,1) double = 1e-6
         ambiguityMap                       % containers.Map: (tower*1000+antenna) → integer N (diagnostic)
         floatAmbiguityTruth_m              % containers.Map: (tower*1000+ant) → float B_phi [m] (ekfFloat)
-        rngCorr                            % RandStream for correlated noise (Stage 4)
+        rngCorr                            % RandStream for correlated noise
     end
 
     methods
@@ -55,7 +55,7 @@ classdef MeasurementModel < handle
             if isfield(cfg.estimator,'attitudeJacobianStep_rad')
                 obj.attitudeJacStep_rad = cfg.estimator.attitudeJacobianStep_rad;
             end
-            % Stage 4: correlated noise RNG
+            % Correlated noise RNG
             if isfield(cfg,'effects') && isfield(cfg.effects,'correlatedNoise') && ...
                     isfield(cfg.effects.correlatedNoise,'seed')
                 obj.rngCorr = RandStream('mt19937ar','Seed', cfg.effects.correlatedNoise.seed);
@@ -95,7 +95,7 @@ classdef MeasurementModel < handle
             euler_est = x_est(stateMap.euler_idx);
 
             % ----- Effective lever arms with PCO offset ----------------
-            % Stage 3: receiverOffset_body_m is extra common body-frame offset
+            % receiverOffset_body_m is extra common body-frame offset
             % added to all antennas on truth/model side independently.
             leverArms_truth = leverArms;
             leverArms_model = leverArms;
@@ -103,7 +103,7 @@ classdef MeasurementModel < handle
                 pco = obj.cfg.effects.antennaPCO;
                 if isfield(pco,'truth') && pco.truth.enable
                     off = pco.receiverOffset_body_m(:);
-                    % WP-E: optional gated truth-only PCO calibration residual -- an antenna
+                    % Optional gated truth-only PCO calibration residual -- an antenna
                     % phase-centre mis-calibration the estimator does NOT know (the model side
                     % below is unchanged), so it survives z-h as a real imperfection rather than
                     % cancelling. Default off -> off unchanged -> golden byte-identical.
@@ -155,7 +155,7 @@ classdef MeasurementModel < handle
 
             % ----- Error chain (per measurement) -----------------------
             towerIds = arrayfun(@(ti) towers{ti}.id, twr_list);
-            % WP5: pass ant_list so coloured multipath can key its GM state per link.
+            % Pass ant_list so coloured multipath can key its GM state per link.
             errStruct = obj.errorChain.compute(elv_list, towerIds, twr_list, t_s, ant_list);
 
             % ----- Tower clock corrections — generated ONCE per epoch --
@@ -309,7 +309,7 @@ classdef MeasurementModel < handle
                     errStruct.carrierPhase = struct();
             end
 
-            % Stage 86: restore cross-observable covariance for shared clock
+            % Restore cross-observable covariance for shared clock
             % product errors after code/Doppler/carrier rows have been stacked.
             [R, stackCovInfo] = models.clocks.ProductClockCovarianceBuilder.addSharedProductClockStack( ...
                 R, errStruct, obj.cfg);
@@ -340,7 +340,7 @@ classdef MeasurementModel < handle
 
     methods (Static)
 
-        % Implementations live in MeasurementModelUtils (Stage 12A.2).
+        % Implementations live in MeasurementModelUtils.
         % These one-line wrappers preserve backward compatibility.
 
         function varargout = computeISLMeasurements(varargin)

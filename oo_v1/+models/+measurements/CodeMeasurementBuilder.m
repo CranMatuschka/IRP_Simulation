@@ -1,7 +1,7 @@
 classdef CodeMeasurementBuilder
     % CodeMeasurementBuilder  Builds pseudorange EKF rows (z, h, R).
     %
-    % Extracted from MeasurementModel.computeMeasurements (Stage 12A Step 4).
+    % Extracted from MeasurementModel.computeMeasurements.
     % Covers: single-signal pseudorange loop, multi-signal expansion,
     % ionosphere-free IF combination, and correlated noise application.
     % All physics are preserved exactly — pure structural refactor.
@@ -61,7 +61,7 @@ classdef CodeMeasurementBuilder
                 % Nominal tower position (no survey, no PCO) for contribution baseline
                 r_twr_nom = towers{ti}.getAntennaPositionECEF();
 
-                % Stage 2: truth and model tower positions (survey error only, no PCO yet)
+                % Truth and model tower positions (survey error only, no PCO yet)
                 r_twr_survey_truth = models.measurements.MeasurementModelUtils.towerPositionEcef(cfg, towers{ti}, ti, 'truth');
                 r_twr_survey_model = models.measurements.MeasurementModelUtils.towerPositionEcef(cfg, towers{ti}, ti, 'model');
 
@@ -75,7 +75,7 @@ classdef CodeMeasurementBuilder
                 r_twr_truth = r_twr_survey_truth;
                 r_twr_model = r_twr_survey_model;
 
-                % Stage 3: tower PCO on top of survey-shifted position
+                % Tower PCO on top of survey-shifted position
                 if isfield(cfg,'effects') && isfield(cfg.effects,'antennaPCO')
                     pco = cfg.effects.antennaPCO;
                     if isfield(pco,'truth') && pco.truth.enable
@@ -113,7 +113,7 @@ classdef CodeMeasurementBuilder
                     end
                 end
 
-                % Truth pseudorange with corrections + toy PCV (Stage 3)
+                % Truth pseudorange with corrections + toy PCV
                 [rho_true, cTruth] = models.corrections.RangeCorrections.correctedPseudorange( ...
                     r_ants_truth(:,ai), r_twr_truth, cfg, 'truth', elv, t_s);
                 sagnacTruth_m(mi)  = cTruth.sagnac;
@@ -122,7 +122,7 @@ classdef CodeMeasurementBuilder
                 lightTimeTruth_s(mi) = cTruth.tau_s;
                 if ~isempty(cTruth.t_tx_s); transmitTimeTruth_s(mi) = cTruth.t_tx_s; end
 
-                % Stage 7A: transmit-time tower clock for truth side
+                % Transmit-time tower clock for truth side
                 b_twr_truth_h = towerClkTruth(mi);
                 if ~isempty(cTruth.t_tx_s)
                     tau_truth = t_s - cTruth.t_tx_s;
@@ -140,7 +140,7 @@ classdef CodeMeasurementBuilder
                 lightTimeModel_s(mi) = cModel.tau_s;
                 if ~isempty(cModel.t_tx_s); transmitTimeModel_s(mi) = cModel.t_tx_s; end
 
-                % Stage 7A: transmit-time tower clock for model side
+                % Transmit-time tower clock for model side
                 if ~isempty(cModel.t_tx_s) && ...
                         ~(isfield(stateMap,'towerClockIdx') && ti <= size(stateMap.towerClockIdx,1) && ...
                           stateMap.towerClockIdx(ti,1) > 0)
@@ -215,7 +215,7 @@ classdef CodeMeasurementBuilder
                 R_diag(mi) = max(sigma_i, sigmaFloor)^2;
             end
 
-            % WP-I: complete the tower-clock product-sigma R double-count guard. The
+            % Complete the tower-clock product-sigma R double-count guard. The
             % single-freq diagonal above (lines 209-213) guards only a LOCAL copy; the
             % downstream L2/multi-sig diagonal, ionosphere-free R rebuild, and shared-tower
             % off-diagonal block read the RAW towerClkSigma / errStruct.towerClockModelSigma_m
@@ -253,7 +253,7 @@ classdef CodeMeasurementBuilder
             signals = revgnss.SignalUtils.getEnabledSignals(cfg);
             N_sig   = numel(signals);
 
-            % Stage 78: use canonical cfg.signals.frequencyHz (set by finalizeConfig)
+            % Use canonical cfg.signals.frequencyHz (set by finalizeConfig)
             % or SignalDefinition; no hardcoded frequency fallback constant.
             if isfield(cfg,'signals') && isfield(cfg.signals,'frequencyHz') && ...
                     numel(cfg.signals.frequencyHz) >= 1
@@ -348,7 +348,7 @@ classdef CodeMeasurementBuilder
                             if isfield(errStruct.bySource.model_m,'hwDelay'), hw_m   = errStruct.bySource.model_m.hwDelay(pi); end
                             if isfield(errStruct.bySource.truth_m,'mp'),      mp_t   = errStruct.bySource.truth_m.mp(pi);      end
 
-                            % Geometry + clocks (strips L1 error terms from Phase-1 z/h)
+                            % Geometry + clocks (strips L1 error terms from z/h)
                             z_geom_pi = z(pi) - errStruct.truthTotal_m(pi);
                             h_geom_pi = h(pi) - errStruct.modelTotal_m(pi);
 
@@ -478,7 +478,7 @@ classdef CodeMeasurementBuilder
             if isfield(cfg,'measurements') && isfield(cfg.measurements,'codeMode')
                 codeMode_v = cfg.measurements.codeMode;
             end
-            % Stage 45: ionosphereFreeRows toggle maps to existing codeMode path.
+            % ionosphereFreeRows toggle maps to existing codeMode path.
             if isempty(codeMode_v) && N_sig == 2
                 try
                     ifEnable = cfg.measurements.code.ionosphereFreeRows.enable;
@@ -624,7 +624,7 @@ classdef CodeMeasurementBuilder
                 cfg, rngCorr, z, R_diag, twr_list, M);
             errStruct.correlatedNoise = correlNoise;
 
-            % Stage 74: block covariance for shared tower clock product errors.
+            % Block covariance for shared tower clock product errors.
             % The same tower clock product error is common to all code rows that
             % reference the same tower at the same product epoch.  Treating it as
             % independent (diagonal-only) makes the EKF too confident.
@@ -652,7 +652,7 @@ classdef CodeMeasurementBuilder
                         numel(errStruct.towerClockModelSigma_m) == M
                     sigTwr_ = errStruct.towerClockModelSigma_m;
                 end
-                % WP-I: same bias-state guard for the shared-tower off-diagonal block --
+                % Same bias-state guard for the shared-tower off-diagonal block --
                 % a tower whose bias is an EKF state must contribute no product-sigma
                 % correlation here (its uncertainty is in P). twr_list is the post-expansion
                 % per-row list; guard on column 1 (bias). No-op when estimateTowerClocks=false.
@@ -695,7 +695,7 @@ classdef CodeMeasurementBuilder
         % ----------------------------------------------------------------
         function s = maskStateTowerSigma_(sigVec, towerList, stateMap, col)
             % maskStateTowerSigma_  Zero broadcast-product sigma entries for towers whose
-            % clock quantity is an EKF state (WP-I double-count guard).
+            % clock quantity is an EKF state (double-count guard).
             %   col=1 -> tower BIAS state (stateMap.towerClockIdx(ti,1)>0)
             %   col=2 -> tower DRIFT state (stateMap.towerClockIdx(ti,2)>0)
             % When the quantity is a free state its uncertainty lives in P, so its product

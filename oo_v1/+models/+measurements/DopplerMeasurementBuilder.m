@@ -1,7 +1,7 @@
 classdef DopplerMeasurementBuilder
     % DopplerMeasurementBuilder  Constructs Doppler EKF measurement rows.
     %
-    % Stage 83 upgrade: frame-consistent one-way range-rate model.
+    % Frame-consistent one-way range-rate model.
     %   - Adds tower ECI rotational velocity (sagnacRate term) to both truth
     %     and model; captures the Sagnac-rate effect consistently.
     %   - Tower clock product drift model used (not zeroed in product modes).
@@ -70,14 +70,14 @@ classdef DopplerMeasurementBuilder
                 return
             end
 
-            % --- Stage 83: read config flags ---
+            % --- Read config flags ---
             includeTowerVel     = true;
             try; includeTowerVel = cfg.measurements.doppler.includeTowerRotationalVelocity; catch; end
             includeProdDrift    = true;
             try; includeProdDrift = cfg.measurements.doppler.includeTowerClockProductDrift; catch; end
             applyDopplerProdCov = true;
             try; applyDopplerProdCov = cfg.covariance.productClock.applyToDoppler; catch; end
-            % WP-G: include the range-rate position partial d(rhoDot)/dr in the Doppler H.
+            % Include the range-rate position partial d(rhoDot)/dr in the Doppler H.
             % Default OFF -> H has only d/dv and d/d(bdot_rx) (the documented approximation);
             % golden byte-identical. ON -> the LOS-rotation + tower-rotation position partial
             % is added (small for a GEO, ~1e-5..1e-4 per metre).
@@ -98,7 +98,7 @@ classdef DopplerMeasurementBuilder
             towerClockDriftTruth_mps = zeros(M,1);
             towerClockDriftModel_mps = zeros(M,1);
 
-            % Stage 83: product drift for all towers (shared cache; consistent with compute())
+            % Product drift for all towers (shared cache; consistent with compute())
             twr_drift_model  = zeros(M,1);
             twr_drift_sigma  = zeros(M,1);
             t_prod_per_row   = zeros(M,1);
@@ -133,7 +133,7 @@ classdef DopplerMeasurementBuilder
             sagnacRateVec  = zeros(M,1);
             towerRotSpeeds = zeros(M,1);
 
-            % WP-I: tower-clock DRIFT product-sigma R double-count guard. When a tower's
+            % Tower-clock DRIFT product-sigma R double-count guard. When a tower's
             % clock DRIFT is an EKF state (stateMap.towerClockIdx(ti,2)>0) its uncertainty
             % lives in P, so the broadcast-product drift sigma must not also enter the
             % Doppler R -- neither the diagonal-only path, the same-tower/epoch drift block
@@ -194,16 +194,16 @@ classdef DopplerMeasurementBuilder
                 % intentionally OMITTED: at GEO the position/velocity uncertainty is small
                 % enough that it is negligible, so H is a documented approximation of the
                 % range-rate model h above. Add a d(rhoDot)/dr column here for a non-GEO
-                % regime where the tower-rotation partial matters. (WP-9)
+                % regime where the tower-rotation partial matters.
                 Hd(mi, stateMap.v_idx)       = u_e';   % d(rhoDot)/dv
                 Hd(mi, stateMap.bdot_rx_idx) = 1;      % d(rhoDot)/d(bdot_rx)
-                if includePosPartial                    % WP-G: gated d(rhoDot)/dr (default off)
+                if includePosPartial                    % gated d(rhoDot)/dr (default off)
                     Hd(mi, stateMap.r_idx) = revgnss.OneWayRangeRateModel.positionPartial( ...
                         r_ants_est(:,ai), v_rx_est, r_twr_e, cfg);
                 end
             end
 
-            % Stage 84: Doppler R diagonal policy — product drift variance counted exactly once.
+            % Doppler R diagonal policy — product drift variance counted exactly once.
             % addDopplerDriftBlock adds the full block (diagonal + off-diagonal) for same-tower/epoch rows.
             % When that helper is NOT called, add drift variance to diagonal only.
             Rd = diag(Rd_diag);  % tracking noise only at this point

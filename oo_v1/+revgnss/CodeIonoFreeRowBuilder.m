@@ -1,5 +1,5 @@
 classdef CodeIonoFreeRowBuilder
-    % CodeIonoFreeRowBuilder  Stage 45 helper: combine L1/L2 code rows into IF rows.
+    % CodeIonoFreeRowBuilder  Helper: combine L1/L2 code rows into IF rows.
     %
     % Combines aligned L1/L2 code-measurement row structs using IonoFreeCombination
     % coefficients. Noise covariance uses the uncorrelated assumption:

@@ -1,7 +1,7 @@
 classdef MeasurementModelUtils
     % MeasurementModelUtils  Static utility helpers for measurement builders.
     %
-    % Extracted from MeasurementModel.m (Stage 12A.2).
+    % Extracted from MeasurementModel.m.
     % All physics preserved exactly — pure structural refactor.
     %
     % These methods are called by: CodeMeasurementBuilder, CodeJacobianBuilder,
@@ -59,7 +59,7 @@ classdef MeasurementModelUtils
                         cfg.effects.antennaPCV.model.enable
                     need = true; return;
                 end
-                % Stage 7A.1: iterative light-time rotates the tower position by
+                % Iterative light-time rotates the tower position by
                 % omega_E*tau; the geometric Jacobian dρ/dr = u' is then wrong.
                 % Use finite-difference H when iterative light-time is active.
                 if isfield(cfg.effects,'lightTime') && ...

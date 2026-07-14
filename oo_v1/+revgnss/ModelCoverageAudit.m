@@ -1,5 +1,5 @@
 classdef ModelCoverageAudit
-    % ModelCoverageAudit  Stage 85 model coverage audit and real-world claim gate.
+    % ModelCoverageAudit  Model coverage audit and real-world claim gate.
     %
     % Audits all 22 major model categories for the active single-asset one-way
     % synthetic reverse-GNSS simulation. Every category must be one of:
@@ -11,7 +11,7 @@ classdef ModelCoverageAudit
     % Usage:
     %   result = revgnss.ModelCoverageAudit.run(cfg)
     %
-    % nModelCategoriesMissingUnsafe must be 0 for Stage 85 acceptance.
+    % nModelCategoriesMissingUnsafe must be 0 for complete model coverage acceptance.
 
     methods (Static)
 
@@ -232,7 +232,7 @@ classdef ModelCoverageAudit
                 'ambiguityResolution','implementedSynthetic', ...
                 'Stage 76 raw L1+L2 joint integer-pair AR; wide-lane consistency screening; syntheticKnownZero phase bias; controlledSyntheticClaim; LAMBDA/MLAMBDA not implemented and not claimed');
 
-            % 20. covariance (Stage 84: use canonical productClock config)
+            % 20. covariance (use canonical productClock config)
             prodClkEn  = false;
             try; prodClkEn = cfg.covariance.productClock.enable; catch; end
             legacyEn   = false;
@@ -292,7 +292,7 @@ classdef ModelCoverageAudit
             try; nisMode = cfg.validation.statistics.nis.mode; catch; end
             campEn = false;
             try; campEn = logical(cfg.validation.scientificCampaign.enable); catch; end
-            % Stage 85: campaign enabled → implementedSynthetic; otherwise disabledByConfig
+            % Campaign enabled → implementedSynthetic; otherwise disabledByConfig
             if campEn
                 valStatStatus = 'implementedSynthetic';
                 valStatNote   = sprintf('stage85LightCampaign; MC=%s; NEES=%s; NIS=%s; partialCovarianceAwareSynthetic', ...

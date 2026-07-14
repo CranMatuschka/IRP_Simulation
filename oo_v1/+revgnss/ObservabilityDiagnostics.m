@@ -182,11 +182,11 @@ classdef ObservabilityDiagnostics
                 if doWarn; warning('ObservabilityDiagnostics:highCondNum', '%s', msg); end
             end
 
-            % --- Stage 31: attitude observability audit ---
+            % --- Attitude observability audit ---
             diag.attitude = revgnss.AttitudeObservability.audit(H, stateMap, cfg, measTypePerRow);
             diag.warnings = [diag.warnings, diag.attitude.warnings];
 
-            % --- Stage 34: attitude Jacobian consistency audit ---
+            % --- Attitude Jacobian consistency audit ---
             diag.attitudeJacobian = revgnss.AttitudeJacobianAudit.audit(H, stateMap, cfg, measTypePerRow);
         end
 

@@ -62,7 +62,7 @@ cfg.report.zoomLastSeconds       = 120;    % zoom plots show the last 120 s (fix
 cfg.report.compactFinalReport    = true;
 cfg.report.suppressStageSections = true;
 cfg.report.deduplicateFigures    = true;
-% WP-B: Monte-Carlo filter-consistency evidence written to the run .out log. A single run
+% Monte-Carlo filter-consistency evidence written to the run .out log. A single run
 % gives one NEES/NIS sample; chi-squared consistency needs an ensemble. Default OFF
 % (goldens byte-identical; N extra full runs). Set enable=true to append an averaged
 % NIS/NEES-vs-chi-square-band verdict; the shipped filter is conservative-by-design and is
@@ -85,7 +85,7 @@ cfg.physics.lightTime.mode            = 'iterativeOneWay';
 cfg.physics.lightTime.iterations      = 2;
 cfg.physics.lightTime.tolerance_s     = 1e-12;
 cfg.physics.relativity.shapiro.enable = true;
-cfg.physics.relativity.clock.enable   = false;  % WP-D: gated relativistic clock-rate offset on the
+cfg.physics.relativity.clock.enable   = false;  % Gated relativistic clock-rate offset on the
                                                 % TRUTH receiver clock (~+46.6 us/day / ~2.3 km over a
                                                 % 4 h GEO run). Default OFF: the constant offset is fully
                                                 % absorbed by the estimated clock-drift state (observable),
@@ -376,7 +376,7 @@ cfg.estimator.attitude.useDopplerPartials        = false;
 % Initial attitude error and the diagonal covariance/process-noise seeds for the run.
 cfg.estimator.P0_euler_rad             = deg2rad(5);
 cfg.estimator.P0_omega_radps           = 1e-12;
-% WP3: torque-budget-justified attitude process noise (~1e-7 rad/s^2), replacing the
+% Torque-budget-justified attitude process noise (~1e-7 rad/s^2), replacing the
 % over-optimistic 1e-10. alpha = tau / I from cfg.asset (Wertz environmental torques).
 cfg.estimator.sigma_angAccel_radps2    = revgnss.ConfigFactory.angAccelFromTorqueBudget_( ...
     cfg.asset.inertia_kgm2, cfg.asset.residualDisturbanceTorque_Nm);
@@ -472,18 +472,18 @@ if isfield(cfg,'measurements') && isfield(cfg.measurements,'twstft')
     cfg.measurements.twstft.enable = false;
 end
 
-%% Two-way time transfer (TWSTFT into the EKF)  [WP-A]
+%% Two-way time transfer (TWSTFT into the EKF)
 % Tower<->spacecraft two-way time transfer: a REAL EKF observable that measures the
 % clock difference (b_rx - b_tower) with the geometric range cancelled by reciprocity,
 % so it constrains the RECEIVER CLOCK directly and breaks the GEO radial<->clock
 % degeneracy that limits the one-way uplink. This is the literature-standard route to
 % the sub-100 ps regime (Merlo & Nanzer 2023; EM-WaTT/TWSTFT; T2L2 — all two-way).
 %   enable/useInEKF -> flip BOTH true to add the two-way rows to the filter.
-% Default OFF so the frozen goldens stay byte-identical; set true to exercise WP-A.
+% Default OFF so the frozen goldens stay byte-identical; set true to enable this.
 % sigma_m is the two-way time uncertainty (~0.03 m = 100 ps); the achievable receiver-
 % clock accuracy is floored by max(sigma_m, tower-clock-product sigma) — a better
 % ground reference clock is needed to push below ~100 ps (honest reference-clock limit).
-cfg.measurements.twoWayTimeTransfer.enable   = false;   % <- set true (with useInEKF) to enable WP-A
+cfg.measurements.twoWayTimeTransfer.enable   = false;   % <- set true (with useInEKF) to enable
 cfg.measurements.twoWayTimeTransfer.useInEKF = false;
 cfg.measurements.twoWayTimeTransfer.towers   = 'all';   % which ground towers are two-way capable
 cfg.measurements.twoWayTimeTransfer.sigma_m  = 0.03;    % two-way time uncertainty 1-sigma [m] (~100 ps)

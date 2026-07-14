@@ -77,7 +77,7 @@ classdef ClockModel < handle
         bias_s          (1,1) double  = 0   % WFM+RWFM clock time bias [s]
         fracFreq        (1,1) double  = 0   % RWFM fractional frequency error [-]
         driftRate_fracPerSec (1,1) double = 0  % deterministic frequency drift [1/s^2]
-        relativisticFracFreq (1,1) double = 0  % WP-D: constant relativistic fractional-frequency
+        relativisticFracFreq (1,1) double = 0  % Constant relativistic fractional-frequency
                                                % offset [-] (gated, default 0). Added to the phase
                                                % (bias) increment each step so it accumulates as a
                                                % LINEAR clock-bias ramp; deliberately NOT part of
@@ -367,7 +367,7 @@ classdef ClockModel < handle
             % leaves the actual-error/filter-sigma ratio unchanged, so it does NOT
             % restore drift +/-3sigma consistency (that is an R / observability issue,
             % not a process-noise magnitude issue). Kept as an opt-in lever.
-            % ROOT CAUSE (WP-6): for the CESIUM1 receiver the drift wander (~1e-6 m/s per
+            % ROOT CAUSE: for the CESIUM1 receiver the drift wander (~1e-6 m/s per
             % step) is 3-4 decades below the Doppler resolution (sigma ~0.01 m/s), so
             % bdot_rx is measurement-limited and its +/-3sigma envelope reflects Q, not
             % information -- a FUNDAMENTAL observability limit, not a Q bug. The report
@@ -466,7 +466,7 @@ classdef ClockModel < handle
             % RWFM: IEEE-1139 Allan VARIANCE is (2*pi^2/3) h_-2 tau. This matches the
             % code's own process noise (q2 = 2*pi^2 h_-2) and RWFM truth synthesis
             % (sigma = sqrt(2*pi^2 h_-2 dt)); the previous 8*pi^2/6 = 4*pi^2/3 was 2x
-            % too large in variance (sqrt(2) in deviation). (WP-8)
+            % too large in variance (sqrt(2) in deviation).
             var_y = var_y + (2*pi^2/3) * h.hMinus2 .* tau;           % RWFM
 
             adev_th = sqrt(max(var_y, 0));

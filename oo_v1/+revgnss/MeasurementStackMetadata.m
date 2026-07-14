@@ -1,7 +1,7 @@
 classdef MeasurementStackMetadata
     % MeasurementStackMetadata  Annotates errStruct with row-type labels and observability.
     %
-    % Extracted from MeasurementModel.computeMeasurements (Stage 12A Step 6).
+    % Extracted from MeasurementModel.computeMeasurements.
     % All physics are preserved exactly — pure structural refactor.
 
     methods (Static)
@@ -31,7 +31,7 @@ classdef MeasurementStackMetadata
                 M_dop = numel(errStruct.doppler.z);
             end
 
-            % Stage 7A.1: label IF-combined code rows as 'ifCode'
+            % Label IF-combined code rows as 'ifCode'
             isIFCode = isfield(errStruct,'ifCombination') && errStruct.ifCombination;
 
             % Build per-row type cell array

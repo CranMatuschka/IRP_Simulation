@@ -1,5 +1,5 @@
 function oscillatorValidation(fid, plotPaths, stem, figDir, cfg)
-%OSCILLATORVALIDATION  "Oscillator Stability Validation" report section (Phase 7).
+%OSCILLATORVALIDATION  "Oscillator Stability Validation" report section.
 %   Extracted verbatim from ClockExactReportBuilder.writeOscillatorValidation_ as part
 %   of the C-9 report decomposition. Read-only: consumes only the precomputed plotPaths
 %   + figure dir and the (now-public) ClockExactReportBuilder formatting toolkit. The

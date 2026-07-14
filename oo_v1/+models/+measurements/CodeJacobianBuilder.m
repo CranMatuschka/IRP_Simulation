@@ -1,8 +1,8 @@
 classdef CodeJacobianBuilder
     % CodeJacobianBuilder  Builds the pseudorange measurement Jacobian H.
     %
-    % Extracted from MeasurementModel.computeJacobian_ (Stage 12A Step 5).
-    % Stage 56: geometry/Jacobian paths delegated to LinkGeometry.
+    % Extracted from MeasurementModel.computeJacobian_.
+    % Geometry/Jacobian paths delegated to LinkGeometry.
 
     methods (Static)
 

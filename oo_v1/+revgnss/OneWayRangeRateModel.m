@@ -1,5 +1,5 @@
 classdef OneWayRangeRateModel
-    % OneWayRangeRateModel  Frame-consistent one-way range-rate model (Stage 83).
+    % OneWayRangeRateModel  Frame-consistent one-way range-rate model.
     %
     % For tower-to-spacecraft one-way link:
     %   rhoDot = u' * v_rx_ecef + sagnacRate
@@ -59,7 +59,7 @@ classdef OneWayRangeRateModel
                 modelLevel = 'frameConsistentV2';
                 sagnacHandling = 'capturedByTowerVelocityTerm';
             else
-                % Legacy: ECEF-only, omits tower rotation (Stage 82 and earlier)
+                % Legacy: ECEF-only, omits tower rotation
                 rhoDot = u_los' * v_rx_ecef(:);
                 sagnacRate = 0;
                 modelLevel = 'ecefOnlyV1';
@@ -74,7 +74,7 @@ classdef OneWayRangeRateModel
         end
 
         function drr_dr = positionPartial(r_rx_ecef, v_rx_ecef, r_tx_ecef, cfg)
-            % positionPartial  d(rhoDot)/d(r_rx) [1x3], consistent with compute() (WP-G).
+            % positionPartial  d(rhoDot)/d(r_rx) [1x3], consistent with compute().
             %
             % With rhoDot = u'*v_eff, u = Delta/rho, Delta = r_rx - r_tx, and
             % v_eff = v_rx + omegaVec x Delta (the tower-rotation term when included):

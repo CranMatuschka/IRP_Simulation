@@ -1,5 +1,5 @@
 classdef GeoRealWorldScenarioGuard
-    % GeoRealWorldScenarioGuard  Hard guard for Stage 86 GEO truth comparison.
+    % GeoRealWorldScenarioGuard  Hard guard for GEO truth comparison.
 
     methods (Static)
         function assertValid(cfg)
@@ -104,14 +104,14 @@ classdef GeoRealWorldScenarioGuard
         end
 
         function assertRealisticSimulation(cfg)
-            % assertRealisticSimulation  MD Stage 93 name; alias for assertValid.
+            % assertRealisticSimulation  Alias for assertValid.
             %   The "realistic synthetic truth-estimation comparison" guard. Kept as an
             %   alias (not a second class) to honour the project no-proliferation rule.
             revgnss.GeoRealWorldScenarioGuard.assertValid(cfg);
         end
 
         function assertModelFamilyConsistent(cfg)
-            % assertModelFamilyConsistent  MD Stage 88/97 family-parity rule.
+            % assertModelFamilyConsistent  MD family-parity rule.
             %   Errors when the truth dynamics family differs from the EKF dynamics family
             %   UNLESS the run is explicitly labelled a mismatch analysis
             %   (cfg.validation.analysisType='explicitMismatchAnalysis' AND
@@ -138,7 +138,7 @@ classdef GeoRealWorldScenarioGuard
         end
 
         function audit = auditImperfectionSources(cfg)
-            % auditImperfectionSources  MD Stage 95 truth-estimation separation audit.
+            % auditImperfectionSources  Truth-estimation separation audit.
             %   Returns COMPUTED (never hard-coded) flags describing where the estimator's
             %   imperfection comes from, plus a per-model table for the report. Honest in
             %   every state: reports sameModelFamilies=false / reducedDynamics=true for a
@@ -187,7 +187,7 @@ classdef GeoRealWorldScenarioGuard
                 pick(tropOn,'yes','n/a'), 'stochastic ZWD residual'};
             rows(end+1,:) = {'Ionosphere', pick(ionoOn,'mapped 1st-order','off'), pick(ionoOn,'mapped 1st-order','off'), ...
                 pick(ionoOn,'yes','n/a'), 'stochastic residual'};
-            % WP-E: only advertise PCO as a separated imperfection when it actually leaves a
+            % Only advertise PCO as a separated imperfection when it actually leaves a
             % truth~=model residual. In the shipped config truth and model apply the SAME
             % (zero) offset, so it cancels in z-h -> 'known & removed, zero residual'.
             pcoResid = revgnss.ImperfectionAudit.pcoLeavesResidual(cfg);

@@ -46,7 +46,7 @@ classdef MainScriptValidationGate
             fprintf('\n[ValidationGate] Stage %d  seed %d  count %d\n', stg, seed, cnt);
 
             % Select and run tests.
-            % Stage 80: pickTests_ excludes inactive-feature (TWSTFT/ISL/two-way/multi-asset) tests.
+            % pickTests_ excludes inactive-feature (TWSTFT/ISL/two-way/multi-asset) tests.
             testDir = fullfile(thisDir, 'tests');
             [files, excludedTests80_] = revgnss.MainScriptValidationGate.pickTests_( ...
                 testDir, seed, cnt, stg);
@@ -118,7 +118,7 @@ classdef MainScriptValidationGate
         function [files, excludedFiles] = pickTests_(testDir, seed, count, stageNum)
             % pickTests_  Select 2-5 random tests from active-scope pool.
             %
-            % Stage 80: tests for inactive features (TWSTFT, ISL, two-way, multi-asset)
+            % Tests for inactive features (TWSTFT, ISL, two-way, multi-asset)
             % are excluded from random selection for the single-asset one-way smoke gate.
             % They remain in the repository as historical reference; they are not deleted.
             inactiveFiles_ = { ...
@@ -197,7 +197,7 @@ classdef MainScriptValidationGate
 
         function [pdfOk, ptOk, texOk, warns] = vfyPdf_(pdfPath, sha, nP, nT, stg)
             % vfyPdf_  Verify PDF existence, size, and scientific content.
-            % Stage 37+: PDF must have existing scientific summary fields and model-coverage
+            % PDF must have existing scientific summary fields and model-coverage
             % table entries present; must NOT have a "Stage N Validation Status" chapter heading.
             % SHA, test count, and NOT RUN are checked in JSON summary, not PDF.
             pdfOk = false; ptOk = false; texOk = false; warns = {};

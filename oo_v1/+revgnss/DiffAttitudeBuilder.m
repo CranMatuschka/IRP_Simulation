@@ -3,12 +3,12 @@ classdef DiffAttitudeBuilder
     %
     % Scientific basis: phi(t,i) - phi(t,1) cancels b_rx and b_twr; the
     % differential ambiguity delta_B(t,i) = B(t,i) - B(t,1) is constant per arc.
-    % Stage 69: delta_B calibrated at an external reference attitude so the
+    % Differential ambiguity calibrated at an external reference attitude so the
     % calibration window does not absorb the initial attitude error.
-    % Stage 70: integer ambiguity resolution for delta_B via
+    % Integer ambiguity resolution for delta_B via
     %   BaselineCarrierAmbiguityResolver (raw L1 candidate search, RMS gate,
     %   ratio test).  If accepted, delta_B = lambda_L1 * N_int (integer metres).
-    %   If rejected, falls back to the Stage 69 float mean.
+    %   If rejected, falls back to the float mean.
     %
     % store struct fields (partial list):
     %   calibrated   logical   - true after finalize() with enough epochs
@@ -37,7 +37,7 @@ classdef DiffAttitudeBuilder
                     isfield(cfg.estimator.diffAtt,'calibWin_s')
                 calibWin = cfg.estimator.diffAtt.calibWin_s;
             end
-            % Stage 69: referenceMode controls calibration attitude source.
+            % Reference mode controls calibration attitude source.
             % 'selfCalibrated'          — use current EKF attitude (relative tracking only)
             % 'externalInitialAttitude' — use external reference set via setReference()
             refMode = 'selfCalibrated';
@@ -52,7 +52,7 @@ classdef DiffAttitudeBuilder
             store.calibWin_s       = calibWin;
             store.accumN           = zeros(nTowers, nBase);
             store.accumSum         = zeros(nTowers, nBase);
-            store.accumSumSq       = zeros(nTowers, nBase);   % Stage 70: for integer search
+            store.accumSumSq       = zeros(nTowers, nBase);   % For integer search
             store.delta_B          = zeros(nTowers, nBase);
             store.calibResidRMS_m  = NaN;
             store.nValidBaselines  = 0;
@@ -63,7 +63,7 @@ classdef DiffAttitudeBuilder
             store.referenceMode               = refMode;
             store.referenceAttitude_euler_rad = [];
             store.calibDoneAtTime_s           = NaN;
-            % Stage 70: integer ambiguity resolution result fields.
+            % Integer ambiguity resolution result fields.
             store.N_int                         = zeros(nTowers, nBase);
             store.integerFixAttempted           = false;
             store.integerFixAccepted            = false;
@@ -72,7 +72,7 @@ classdef DiffAttitudeBuilder
             store.integerClassification         = 'notAttempted';
             store.externalRefUsedAsSearchCenter = false;
             store.externalRefUsedForCalibration = true;
-            % Stage 76: dual-frequency AR accumulation stores.
+            % Dual-frequency AR accumulation stores.
             arFreqEn = [true, false];
             try
                 arFreqEn = logical( ...
@@ -99,14 +99,14 @@ classdef DiffAttitudeBuilder
         function store = accumulate(store, cpInfo, x_est, sm, towers, leverArms, cfg)
             % accumulate  Collect one calibration epoch.
             %
-            % Stage 69 fixes:
+            % Calibration fixes:
             %   (a) Primary-signal filter: only lowest signalIdx row per tower-antenna pair.
             %   (b) External reference attitude used for model when ~calibrated.
-            % Stage 70: also accumulate sum-of-squares for integer candidate search.
+            % Also accumulate sum-of-squares for integer candidate search.
             if ~isfield(cpInfo,'phi_m') || isempty(cpInfo.phi_m); return; end
             if store.nBaselines < 1; return; end
             r_cm = x_est(sm.r_idx);
-            % Stage 69 (b): choose attitude for model evaluation during calibration.
+            % Choose attitude for model evaluation during calibration.
             useRef = ~store.calibrated && ...
                 strcmp(store.referenceMode,'externalInitialAttitude') && ...
                 ~isempty(store.referenceAttitude_euler_rad);
@@ -140,10 +140,10 @@ classdef DiffAttitudeBuilder
                     if store.calibrated && store.activeMask(ti,bi)
                         continue
                     end
-                    dv = (phi_i - phi_ref) - (h_i - h_ref);   % Stage 70: named variable
+                    dv = (phi_i - phi_ref) - (h_i - h_ref);   % Named variable
                     store.accumN(ti,bi)     = store.accumN(ti,bi)     + 1;
                     store.accumSum(ti,bi)   = store.accumSum(ti,bi)   + dv;
-                    store.accumSumSq(ti,bi) = store.accumSumSq(ti,bi) + dv^2;  % Stage 70
+                    store.accumSumSq(ti,bi) = store.accumSumSq(ti,bi) + dv^2;
                     if store.calibrated && store.accumN(ti,bi) >= 5
                         store.delta_B(ti,bi) = store.accumSum(ti,bi) / store.accumN(ti,bi);
                         store.activeMask(ti,bi)  = true;
@@ -151,7 +151,7 @@ classdef DiffAttitudeBuilder
                         store.recalibCount = store.recalibCount + 1;
                     end
                 end
-                % Stage 76: L2 accumulation for dual-frequency baseline AR.
+                % L2 accumulation for dual-frequency baseline AR.
                 % Uses same geometric model (h_i-h_ref is frequency-independent).
                 if store.dualFreqArEnabled && hasSigIdx
                     refMskL2_ = (cpInfo.towerIdx == ti) & (cpInfo.antennaIdx == 1) & ...
@@ -202,7 +202,7 @@ classdef DiffAttitudeBuilder
                     store.invalidMask(ti,bi) = true;
                     store.accumN(ti,bi)      = 0;
                     store.accumSum(ti,bi)    = 0;
-                    % Stage 76: also reset L2 accumulators on slip
+                    % Also reset L2 accumulators on slip
                     if isfield(store,'accumN_L2')
                         store.accumN_L2(ti,bi)     = 0;
                         store.accumSum_L2(ti,bi)   = 0;
@@ -216,8 +216,8 @@ classdef DiffAttitudeBuilder
         function store = finalize(store, cfg)
             % finalize  Compute calibrated differential biases; attempt integer fix.
             %
-            % Stage 69: float delta_B = accumSum / n (at external reference attitude).
-            % Stage 70: then calls BaselineCarrierAmbiguityResolver.resolve() to
+            % Float differential ambiguity = accumSum / n (at external reference attitude).
+            % Then calls BaselineCarrierAmbiguityResolver.resolve() to
             %   attempt integer fix; on success delta_B = lambda_L1 * N_int.
             if nargin < 2; cfg = struct(); end  % backward-compat guard
             minEpochs = 5;
@@ -244,14 +244,14 @@ classdef DiffAttitudeBuilder
             end
             fprintf('  [DiffAtt] Calibration done: %d/%d baselines OK\n', ...
                 nValid, store.nTowers * store.nBaselines);
-            % Stage 70: attempt integer ambiguity resolution for delta_B.
+            % Attempt integer ambiguity resolution for delta_B.
             store = revgnss.BaselineCarrierAmbiguityResolver.resolve(store, cfg);
             store = revgnss.DiffAttitudeBuilder.defaultStoreFields(store, cfg);
         end
 
         % ----------------------------------------------------------------
         function store = defaultStoreFields(store, cfg)
-            % defaultStoreFields  Complete Stage 75/76 DiffAtt store schema.
+            % defaultStoreFields  Complete DiffAtt store schema.
             if nargin < 2; cfg = struct(); end
             nT = revgnss.DiffAttitudeBuilder.storeField_(store,'nTowers',0);
             nB = revgnss.DiffAttitudeBuilder.storeField_(store,'nBaselines',0);
@@ -294,14 +294,14 @@ classdef DiffAttitudeBuilder
             % buildRows  Post-calibration differential carrier EKF rows.
             %
             % H is NON-ZERO only for attitude (error-state delta_theta) columns.
-            % Stage 70: Jacobian uses LinkGeometry.finiteDiffAttitudeJacobian
+            % Jacobian uses LinkGeometry.finiteDiffAttitudeJacobian
             %   (quaternion error-state convention) in place of direct Euler
             %   perturbation, consistent with the QES EKF attitude state.
             z_da = []; h_da = []; H_da = zeros(0,nx); R_da = [];
             info.nRows = 0; info.residualRMS_m = NaN; info.active = false;
             info.activeBaselines = 0; info.lostBaselines = 0;
             info.recalibratedBaselines = 0; info.rejectedRows = 0;
-            % Stage 70: propagate integer fix status into every daInfo struct.
+            % Propagate integer fix status into every daInfo struct.
             info.integerFixAttempted           = store.integerFixAttempted;
             info.integerFixAccepted            = store.integerFixAccepted;
             info.nIntegerFixed                 = store.nIntegerFixed;
@@ -309,7 +309,7 @@ classdef DiffAttitudeBuilder
             info.integerClassification         = store.integerClassification;
             info.externalRefUsedAsSearchCenter = store.externalRefUsedAsSearchCenter;
             info.externalRefUsedForCalibration = store.externalRefUsedForCalibration;
-            % Stage 75: per-baseline classification and GNSS-only claim fields.
+            % Per-baseline classification and GNSS-only claim fields.
             info.gnssOnlyAttitudeClaim    = revgnss.DiffAttitudeBuilder.storeField_(store,'gnssOnlyAttitudeClaim',false);
             info.falseFixClassification   = revgnss.DiffAttitudeBuilder.storeField_(store,'falseFixClassification','screenedNotFormal');
             info.phaseBiasStatus          = revgnss.DiffAttitudeBuilder.storeField_(store,'phaseBiasStatus','notCalibratedExternalProduct');
@@ -318,7 +318,7 @@ classdef DiffAttitudeBuilder
             info.nBaselineArRejectedArc   = revgnss.DiffAttitudeBuilder.storeField_(store,'nBaselineArRejectedArc',0);
             info.ambiguityStatus          = revgnss.DiffAttitudeBuilder.storeField_(store,'ambiguityStatus',{});
             info.nBaselineArExcludedFromEkf = 0;
-            % Stage 76: dual-frequency fields propagated into info.
+            % Dual-frequency fields propagated into info.
             info.dualFreqArEnabled        = revgnss.DiffAttitudeBuilder.storeField_(store,'dualFreqArEnabled',false);
             info.attitudeArMode           = revgnss.DiffAttitudeBuilder.storeField_(store,'attitudeArMode','rawL1Only');
             info.nBaselineArFixedDual     = revgnss.DiffAttitudeBuilder.storeField_(store,'nBaselineArFixedDualFrequency',0);
@@ -358,7 +358,7 @@ classdef DiffAttitudeBuilder
                 phi_ref = cpInfo.phi_m(refMask);
                 h_ref = models.measurements.MeasurementModelUtils.modelRangeOnly( ...
                     cfg, towers, ti, 1, r_cm, euler, leverArms);
-                % Stage 70: QES differential Jacobian — compute reference once per tower.
+                % QES differential Jacobian — compute reference once per tower.
                 H_att_ref = revgnss.LinkGeometry.finiteDiffAttitudeJacobian( ...
                     cfg, towers, ti, 1, r_cm, euler, leverArms, step_e);
                 for bi = 1:store.nBaselines
@@ -368,8 +368,8 @@ classdef DiffAttitudeBuilder
                     elseif store.accumN(ti,bi) < 5
                         continue
                     end
-                    % Stage 75/76: partial-fix policy — skip non-fixed baselines.
-                    % Stage 76 extends fixed set: fixedInteger (L1), fixedDualFrequencyRaw, fixedL1Only.
+                    % Partial-fix policy — skip non-fixed baselines.
+                    % Fixed set: fixedInteger (L1), fixedDualFrequencyRaw, fixedL1Only.
                     if ~isempty(info.ambiguityStatus) && ...
                             (strcmp(info.partialFixPolicy,'useFixedOnlyOrExplicitMixed') || ...
                              strcmp(info.partialFixPolicy,'fixedOnly'))
@@ -399,7 +399,7 @@ classdef DiffAttitudeBuilder
                         info.rejectedRows = info.rejectedRows + 1;
                         continue
                     end
-                    % Stage 70: QES Jacobian H = ∂Δρ/∂δθ = H_att_i − H_att_ref.
+                    % QES Jacobian H = ∂Δρ/∂δθ = H_att_i − H_att_ref.
                     H_att_i = revgnss.LinkGeometry.finiteDiffAttitudeJacobian( ...
                         cfg, towers, ti, ai, r_cm, euler, leverArms, step_e);
                     H_row = zeros(1,nx);
@@ -407,7 +407,7 @@ classdef DiffAttitudeBuilder
                     rows_z(end+1,1) = z_row; %#ok<AGROW>
                     rows_h(end+1,1) = h_row; %#ok<AGROW>
                     rows_H(end+1,:) = H_row; %#ok<AGROW>
-                    % Stage 76: add L2 EKF row for dual-frequency-fixed baselines.
+                    % Add L2 EKF row for dual-frequency-fixed baselines.
                     % Uses same H (geometry only); different bias = lambda2*N2.
                     isDualFix76_ = ~isempty(info.ambiguityStatus) && ...
                         bi <= size(info.ambiguityStatus,2) && ti <= size(info.ambiguityStatus,1) && ...
@@ -436,7 +436,7 @@ classdef DiffAttitudeBuilder
                 info.nRows             = numel(rows_z);
                 info.residualRMS_m     = sqrt(mean(resid.^2));
                 info.active            = true;
-                info.nBaselineArUsedInEkf = numel(rows_z);  % Stage 75: baselines contributing EKF rows
+                info.nBaselineArUsedInEkf = numel(rows_z);  % Baselines contributing EKF rows
             end
         end
 

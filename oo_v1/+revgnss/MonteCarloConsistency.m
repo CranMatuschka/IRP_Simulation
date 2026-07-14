@@ -1,5 +1,5 @@
 classdef MonteCarloConsistency
-    %MONTECARLOCONSISTENCY  Monte-Carlo NEES/NIS filter-consistency harness (WP-5).
+    %MONTECARLOCONSISTENCY  Monte-Carlo NEES/NIS filter-consistency harness.
     %   The shipped consistency verdict comes from ONE deterministic run, so its NEES/NIS
     %   is a single sample; chi-squared consistency is only meaningful over an ensemble.
     %   run() draws the initial error from P0, varies the measurement/atmosphere seed
@@ -12,7 +12,7 @@ classdef MonteCarloConsistency
     %   Use revgnss.ConfigFactory.matchedErrorBaselineConfig as baseCfg for a two-sided
     %   verdict: masterConfig is conservative-by-design (R/Q inflated) and sits BELOW the
     %   band. Result is labelled 'partialCovarianceAwareSynthetic' -- consistency
-    %   evidence, not real-world proof (Stage-85 scope).
+    %   evidence, not real-world proof.
     %
     %   result = revgnss.MonteCarloConsistency.run(baseCfg)
     %   result = revgnss.MonteCarloConsistency.run(baseCfg, struct('nSeeds',30,'duration_s',3600))

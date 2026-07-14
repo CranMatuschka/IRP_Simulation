@@ -1,6 +1,6 @@
 classdef AmbiguityFixingReadinessGate
-    % AmbiguityFixingReadinessGate  Stage 50/51 ambiguity fixing readiness gate.
-    % Stage 51: collects ALL evidence without early return; arcQuality and
+    % AmbiguityFixingReadinessGate  Ambiguity fixing readiness gate.
+    % Collects ALL evidence without early return; arcQuality and
     % residualConsistency are public; explicit blockerList and readinessScore.
     % Hard facts always false: phaseBiasProductsAvailable, integerStrategyAvailable,
     %   integerFixingImplemented, lambdaImplemented, falseFixRiskControlled.
@@ -12,7 +12,7 @@ classdef AmbiguityFixingReadinessGate
             s.requested = revgnss.AmbiguityFixingReadinessGate.enabled_(cfg);
             if ~s.requested; return; end
             s.enabled = true;
-            % 1. Ambiguity pair metadata (Stage 48)
+            % 1. Ambiguity pair metadata
             try
                 if isfield(summary,'carrierIfAmbiguityPairCount') && isnumeric(summary.carrierIfAmbiguityPairCount)
                     s.pairCount = summary.carrierIfAmbiguityPairCount;
@@ -22,7 +22,7 @@ classdef AmbiguityFixingReadinessGate
                     s.ambiguityMetadataAvailable = true;
                 end
             catch ex; s.warnings{end+1} = ['metadata: ' ex.message]; end
-            % 2. Ambiguity covariance (Stage 41)
+            % 2. Ambiguity covariance
             try
                 if isfield(summary,'ambiguityCovarianceSummary') && ...
                         isstruct(summary.ambiguityCovarianceSummary) && ...
@@ -31,13 +31,13 @@ classdef AmbiguityFixingReadinessGate
                     s.ambiguityCovarianceAvailable = true;
                 end
             catch ex; s.warnings{end+1} = ['covariance: ' ex.message]; end
-            % 3. Carrier IF traceability (Stage 48)
+            % 3. Carrier IF traceability
             try
                 if isfield(summary,'carrierIfPairMetadataAvailable')
                     s.carrierIonoFreeTraceabilityAvailable = logical(summary.carrierIfPairMetadataAvailable);
                 end
             catch; end
-            % 4. WL/NL diagnostics (Stage 49)
+            % 4. WL/NL diagnostics
             try
                 wlClass = 'disabled';
                 if isfield(summary,'wideLaneNarrowLaneClassification')
@@ -62,7 +62,7 @@ classdef AmbiguityFixingReadinessGate
             s.nisMean       = rc.nisMean;
             s.expectedNis   = rc.expectedNis;
             s.warnings      = [s.warnings, rc.warnings];
-            % 7. Stage 53/54: arc-separated ambiguity metadata blockers.
+            % 7. Arc-separated ambiguity metadata blockers.
             try
                 if isfield(summary,'ambiguityArcRowsMissingArcId') && ...
                         isnumeric(summary.ambiguityArcRowsMissingArcId)
@@ -72,7 +72,7 @@ classdef AmbiguityFixingReadinessGate
                         isnumeric(summary.carrierIonoFreeArcInconsistentPairs)
                     s.carrierIonoFreeArcInconsistentPairs = summary.carrierIonoFreeArcInconsistentPairs;
                 end
-                % Stage 54: arc-skipped pairs and WL/NL arc-blocked flag.
+                % Arc-skipped pairs and WL/NL arc-blocked flag.
                 if isfield(summary,'carrierIonoFreeArcSkippedPairs') && ...
                         isnumeric(summary.carrierIonoFreeArcSkippedPairs)
                     s.carrierIonoFreeArcSkippedPairs = summary.carrierIonoFreeArcSkippedPairs;
@@ -91,7 +91,7 @@ classdef AmbiguityFixingReadinessGate
                 double(s.residualDiagnosticsAvailable);
             s.blockers       = revgnss.AmbiguityFixingReadinessGate.blockerList(s);
             s.classification = revgnss.AmbiguityFixingReadinessGate.classify_(s);
-            % Populate Stage 50 report alias fields.
+            % Populate report alias fields.
             s.pairMetadataAvailable           = s.ambiguityMetadataAvailable;
             s.covarianceAvailable             = s.ambiguityCovarianceAvailable;
             s.wideLaneNarrowLaneReady         = s.wideLaneNarrowLaneAvailable;
@@ -115,7 +115,7 @@ classdef AmbiguityFixingReadinessGate
                 end
             catch; end
             if ~slipOn; return; end
-            % Stage 52: prefer carrierArcEvidence compact fields when available.
+            % Prefer carrierArcEvidence compact fields when available.
             if isfield(summary,'carrierArcEvidenceAvailable') && summary.carrierArcEvidenceAvailable
                 aq.available = true;
                 if isfield(summary,'carrierArcNSlipEvents') && isfinite(summary.carrierArcNSlipEvents)
@@ -188,7 +188,7 @@ classdef AmbiguityFixingReadinessGate
                 bl{end+1} = 'Arc quality: no slip/arc count summary available in v1.'; end
             if ~isfield(s,'residualDiagnosticsAvailable')  || ~s.residualDiagnosticsAvailable
                 bl{end+1} = 'Residual/NIS consistency unavailable.'; end
-            % Stage 53: arc-separated ambiguity metadata blockers.
+            % Arc-separated ambiguity metadata blockers.
             if isfield(s,'ambiguityArcRowsMissingArcId') && s.ambiguityArcRowsMissingArcId > 0
                 bl{end+1} = sprintf('Arc metadata: %d row(s) missing arc ID (enable Stage 53 arc separation).', ...
                     s.ambiguityArcRowsMissingArcId);
@@ -198,7 +198,7 @@ classdef AmbiguityFixingReadinessGate
                 bl{end+1} = sprintf('Arc consistency: %d carrier IF pair(s) span incompatible arcs.', ...
                     s.carrierIonoFreeArcInconsistentPairs);
             end
-            % Stage 54: arc enforcement blockers.
+            % Arc enforcement blockers.
             if isfield(s,'carrierIonoFreeArcSkippedPairs') && s.carrierIonoFreeArcSkippedPairs > 0
                 bl{end+1} = sprintf('Arc enforcement: %d carrier IF pair(s) skipped (arc-inconsistent).', ...
                     s.carrierIonoFreeArcSkippedPairs);
@@ -267,12 +267,12 @@ classdef AmbiguityFixingReadinessGate
             s.integerStrategyAvailable=false; s.integerFixingImplemented=false;
             s.lambdaImplemented=false; s.falseFixRiskControlled=false;
             s.readinessScore=0; s.blockers={}; s.warnings={};
-            % Stage 53/54: arc metadata blocker fields.
+            % Arc metadata blocker fields.
             s.ambiguityArcRowsMissingArcId        = 0;
             s.carrierIonoFreeArcInconsistentPairs = 0;
             s.carrierIonoFreeArcSkippedPairs      = 0;
             s.wideLaneNarrowLaneArcBlocked        = false;
-            % Stage 50 ClockExactReportBuilder alias fields (legacy compatibility).
+            % ClockExactReportBuilder alias fields (legacy compatibility).
             s.pairMetadataAvailable       = false;
             s.covarianceAvailable         = false;
             s.wideLaneNarrowLaneReady     = false;

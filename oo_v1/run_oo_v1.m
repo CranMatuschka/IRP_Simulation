@@ -1,6 +1,6 @@
 % run_oo_v1  THE oo_v1 runner: load masterConfig -> simulate -> post -> report.
 %
-% Phase 6 (fixes C-6): one clean runner, NO environment-variable control. The config
+% One clean runner, NO environment-variable control. The config
 % is config/masterConfig.m, full stop — the run's physics never depends on shell state.
 % (The legacy run_oo_reverse_gnss_report.m + OO_V1_* validation tooling is retained for
 % the validation test suite; retiring it fully is a separate coordinated migration.)

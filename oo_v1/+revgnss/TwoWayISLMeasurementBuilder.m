@@ -1,5 +1,5 @@
 classdef TwoWayISLMeasurementBuilder
-    % TwoWayISLMeasurementBuilder  Stage 22 same-epoch two-way ISL range.
+    % TwoWayISLMeasurementBuilder  Same-epoch two-way ISL range.
     %
     % The secondary asset remains represented/external. The EKF row updates
     % only the primary asset position. Same-spacecraft Tx/Rx clock terms are

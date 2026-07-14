@@ -1,5 +1,5 @@
 classdef ImperfectionAudit
-    % ImperfectionAudit  Predicates: does an effect leave a real truth~=model residual? (WP-E/F)
+    % ImperfectionAudit  Predicates: does an effect leave a real truth~=model residual?
     %
     % Several effects (antenna PCO, hardware delay) are ENABLED in the shipped config yet
     % contribute EXACTLY ZERO to the innovation z-h, because truth and model apply the same

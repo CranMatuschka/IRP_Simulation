@@ -1,7 +1,7 @@
 classdef AttitudeEvidenceReport
-    % AttitudeEvidenceReport  Stage 35 single-asset attitude evidence report.
+    % AttitudeEvidenceReport  Single-asset attitude evidence report.
     %
-    % Collects Stage 31-34 diagnostics with run-level truth/estimate histories.
+    % Collects diagnostics with run-level truth/estimate histories.
     % Evidence reporting only: not an attitude accuracy claim, not a new estimator,
     % and not integer ambiguity fixing.
     %
@@ -52,7 +52,7 @@ classdef AttitudeEvidenceReport
                 s.receiverGeometrySummary = 'unavailable';
             end
 
-            % Stage 31 observability classification
+            % Observability classification
             try
                 ao = out.diag.getLastAttitudeAudit();
                 if isstruct(ao) && isfield(ao,'classification')
@@ -60,7 +60,7 @@ classdef AttitudeEvidenceReport
                 end
             catch; end
 
-            % Stage 34 Jacobian audit classification
+            % Jacobian audit classification
             try
                 ja = out.diag.getLastAttitudeJacobianAudit();
                 if isstruct(ja) && isfield(ja,'classification')
@@ -189,7 +189,7 @@ classdef AttitudeEvidenceReport
                 cls = 'inconsistent'; return
             end
 
-            % Weak Stage 31 observability
+            % Weak observability
             weakStage31 = ismember(s.observabilityClassification, ...
                 {'unavailable','not-estimated','unobservable-zero-lever-arm', ...
                  'unobservable-zero-attitude-columns','zero-lever-arm-zero-sensitivity', ...

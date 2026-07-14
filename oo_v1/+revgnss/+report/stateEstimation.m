@@ -1,5 +1,5 @@
 function stateEstimation(fid, plotPaths, stem, cfg, diag, figDir)
-%STATEESTIMATION  "State Estimation Validation" report section (Phase 7).
+%STATEESTIMATION  "State Estimation Validation" report section.
 %   Extracted verbatim from ClockExactReportBuilder.writeStateEstimation_ as part
 %   of the C-9 report decomposition. Read-only: consumes only the precomputed plotPaths
 %   + figure dir and the (now-public) ClockExactReportBuilder formatting toolkit. The

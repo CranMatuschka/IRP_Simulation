@@ -1,7 +1,7 @@
 classdef MultiAssetConfig
-    % MultiAssetConfig  Stage 20 helpers for represented spacecraft assets.
+    % MultiAssetConfig helpers for represented spacecraft assets.
     %
-    % Stage 20 is metadata/truth-architecture only: tower-to-spacecraft
+    % Metadata/truth-architecture only: tower-to-spacecraft
     % measurements still target the primary estimated asset, and ISL/TWSTFT
     % rows are explicitly absent.
 

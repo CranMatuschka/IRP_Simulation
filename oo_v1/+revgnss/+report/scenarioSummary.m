@@ -1,5 +1,5 @@
 function scenarioSummary(fid, cfg, summary, diag, nTwr, nRx, dur, dt, esc, plotPaths, stem, figDir)
-%SCENARIOSUMMARY  "Scenario Summary" report section (Phase 7).
+%SCENARIOSUMMARY  "Scenario Summary" report section.
 %   Extracted verbatim from ClockExactReportBuilder.writeScenarioSummary_ as part
 %   of the C-9 report decomposition. Read-only: consumes only the precomputed plotPaths
 %   + figure dir and the (now-public) ClockExactReportBuilder formatting toolkit. The
@@ -70,7 +70,7 @@ function scenarioSummary(fid, cfg, summary, diag, nTwr, nRx, dur, dt, esc, plotP
         'Ionosphere delay $I_f$ is \\textbf{positive} for code (group delay) and ' ...
         '\\textbf{negative} for carrier (phase advance). ' ...
         'Carrier ambiguity $B_\\phi$ is a float value in metres (raw L1, no integer fixing).\n\n']);
-    % Clock mode / gauge summary (Stage 9: per-mode scientific narrative)
+    % Clock mode / gauge summary (per-mode scientific narrative)
     clockMd1  = CE.getCfgStr_(cfg, {'clock','mode'}, 'spacecraftReceiverClockOnly');
     gaugeMd1  = CE.getCfgStr_(cfg, {'clock','gauge','mode'}, 'externalTowerCorrections');
     refTwr1   = CE.getCfgNum_(cfg, {'clock','gauge','referenceTowerIndex'}, 1);

@@ -1,5 +1,5 @@
 function numericalSummary(fid, cfg, summary, diag)
-%NUMERICALSUMMARY  "Numerical Summary" report section (Phase 7).
+%NUMERICALSUMMARY  "Numerical Summary" report section.
 %   Extracted verbatim from ClockExactReportBuilder.writeNumericalSummary_ as part
 %   of the C-9 report decomposition. Read-only: consumes only the precomputed plotPaths
 %   + figure dir and the (now-public) ClockExactReportBuilder formatting toolkit. The
@@ -44,7 +44,7 @@ function numericalSummary(fid, cfg, summary, diag)
     CE.writeQuantRow_(fid, 'Total code pseudorange rows',               CE.fmtN_(nCd));
     CE.writeQuantRow_(fid, 'Total Doppler rows',                        CE.fmtN_(nDp));
     CE.writeQuantRow_(fid, 'Total carrier phase rows',                  CE.fmtN_(nCr));
-    % Stage 73: slip detection diagnostics
+    % Slip detection diagnostics
     slipMeth73_ = CE.safeField_(summary, 'carrierSlipDetectorMethod', 'rawResidualJump');
     nProdBnd73_ = CE.safeField_(summary, 'nCarrierProductBoundaries', NaN);
     nProdCmp73_ = CE.safeField_(summary, 'nCarrierProductBoundariesCompensated', NaN);
@@ -61,7 +61,7 @@ function numericalSummary(fid, cfg, summary, diag)
         CE.writeQuantRow_(fid, 'Confirmed carrier slips', CE.fmtN_(nSlips73_));
     end
     CE.writeQuantRow_(fid, 'False product-boundary resets', CE.fmtN_(nFalse73_));
-    % Stage 74: shared-error covariance rows
+    % Shared-error covariance rows
     covMode74_  = CE.safeField_(summary, 'covarianceMode', 'diagonalOnly');
     cbcAppl74_  = CE.safeField_(summary, 'codeTowerClockBlockCovarianceApplied', false);
     nBlk74_     = CE.safeField_(summary, 'nCodeClockCovarianceBlocks', 0);

@@ -1,5 +1,5 @@
 classdef AttitudeObservability
-    % AttitudeObservability  Stage 31 single-asset attitude observability audit.
+    % AttitudeObservability  single-asset attitude observability audit.
     %
     % Audits attitude observability from H-matrix attitude columns (Euler states)
     % and lever-arm geometry.  This is an observability audit only; it is NOT an
@@ -40,7 +40,7 @@ classdef AttitudeObservability
 
             s = revgnss.AttitudeObservability.blankStruct_();
 
-            % WP3: is attitude actually being estimated? Used below to warn that a
+            % Is attitude actually being estimated? Used below to warn that a
             % weak/unobservable-but-estimated attitude has a process-noise-limited
             % covariance (driven by sigma_angAccel), not a measurement-constrained one.
             estAtt = isfield(cfg,'estimator') && isfield(cfg.estimator,'estimateAttitude') ...
@@ -143,7 +143,7 @@ classdef AttitudeObservability
                 s.warnings{end+1} = 'Attitude SVD rank = 0 after lever-arm check.';
             end
 
-            % WP3 observability tie-in: when attitude is being ESTIMATED but the
+            % Observability tie-in: when attitude is being ESTIMATED but the
             % geometry makes it weak/rank-deficient, the reported attitude covariance is
             % PROCESS-NOISE-limited (driven by sigma_angAccel), not measurement-
             % constrained. Warn — do not auto-disable — so a small sigma_angAccel is not
@@ -157,7 +157,7 @@ classdef AttitudeObservability
         function la = leverArmStats(cfg)
             % leverArmStats  Return lever-arm statistics via ReceiverGeometry.
             % Supports both plural receiverLeverArms_body_m and singular
-            % receiverLeverArm_body_m (Stage 32 fix: singular was previously ignored).
+            % receiverLeverArm_body_m (singular was previously ignored).
             g = revgnss.ReceiverGeometry.fromConfig(cfg);
             la.nReceivers         = g.nReceiversGeometry;
             la.maxNorm_m          = g.leverArmMaxNorm_m;
