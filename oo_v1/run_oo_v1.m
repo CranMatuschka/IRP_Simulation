@@ -6,9 +6,10 @@
 % the validation test suite; retiring it fully is a separate coordinated migration.)
 %
 % Output (per-run folder):
-%   output/Report_YYYYMMDD/Report_v###_G#S#R#/Report_v###_ts#_G#S#R#.{pdf,mat,out,tex}
+%   output/Report_YYYYMMDD/Report_v###_G#S#R#_TW#/Report_v###_ts#_G#S#R#_TW#.{pdf,mat,out,tex}
 %     v### = cfg.report.runVersion (numeric -> v%03d, else sanitised as-is).
 %     ts#  = simulation duration in seconds; G/S/R = ground towers / space assets / receivers.
+%     TW#  = TWSTFT two-way time transfer enabled (1) or not (0).
 %   output/latest_<configName>.{pdf,mat}   (convenience pointers to the most recent run)
 close all;
 
@@ -37,8 +38,9 @@ nG = 0; try; nG = cfg.scenario.nTowers;      catch; end %#ok<*NASGU>
 nS = 1; try; nS = cfg.scenario.nSpaceAssets; catch; end
 nR = 1; try; nR = cfg.scenario.nReceivers;   catch; end
 durS = 0; try; durS = round(cfg.simulation.duration_s); catch; end
-folderName = sprintf('Report_%s_G%dS%dR%d', verTag, nG, nS, nR);            % per-run folder
-fileStem   = sprintf('Report_%s_ts%d_G%dS%dR%d', verTag, durS, nG, nS, nR); % file stem, ts# = duration
+tw = 0; try; tw = double(logical(cfg.measurements.twstft.enable)); catch; end   % TWSTFT on/off
+folderName = sprintf('Report_%s_G%dS%dR%d_TW%d', verTag, nG, nS, nR, tw);            % per-run folder
+fileStem   = sprintf('Report_%s_ts%d_G%dS%dR%d_TW%d', verTag, durS, nG, nS, nR, tw); % file stem (ts#=duration, TW#=TWSTFT)
 outputDir  = fullfile(thisDir, 'output');
 runFolder  = fullfile(outputDir, ['Report_' dateStr], folderName);
 if ~isfolder(runFolder); mkdir(runFolder); end

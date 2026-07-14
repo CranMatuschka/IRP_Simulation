@@ -162,9 +162,10 @@ function cfg = i_buildCfg(k, nSpaceAssets, nReceivers, duration_s, tag, groupDir
 
     % Per-rung folder inside the shared Ladder_{description} group. The folder keeps the
     % G#S#R# topology; the file stem adds ts# = duration. PDF/MAT/.out/.tex share the stem.
-    runName   = sprintf('Report_v%03d_G%dS%dR%d', k, cfg.scenario.nTowers, nSpaceAssets, nReceivers);
-    fileStem  = sprintf('Report_v%03d_ts%d_G%dS%dR%d', k, round(duration_s), ...
-                        cfg.scenario.nTowers, nSpaceAssets, nReceivers);
+    tw = 0; try; tw = double(logical(cfg.measurements.twstft.enable)); catch; end   % TWSTFT on/off
+    runName   = sprintf('Report_v%03d_G%dS%dR%d_TW%d', k, cfg.scenario.nTowers, nSpaceAssets, nReceivers, tw);
+    fileStem  = sprintf('Report_v%03d_ts%d_G%dS%dR%d_TW%d', k, round(duration_s), ...
+                        cfg.scenario.nTowers, nSpaceAssets, nReceivers, tw);
     runFolder = fullfile(groupDir, runName);
     cfg.report.reportFolder = runFolder;
     cfg.report.stem         = fileStem;
