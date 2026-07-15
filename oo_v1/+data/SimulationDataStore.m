@@ -667,7 +667,12 @@ classdef SimulationDataStore < handle
             end
 
             % --- Error chain ---
-            if ~isempty(errStruct)
+            % A zero-visibility epoch (no towers in view -- inevitable for a fast
+            % LEO overflying a regional tower network) yields a partial errStruct
+            % without the per-measurement totals. Treat it like the empty-errStruct
+            % coasting case below rather than crashing. GEO/MEO always keep towers in
+            % view, so the field is always present there and this is byte-identical.
+            if ~isempty(errStruct) && isfield(errStruct,'truthTotal_m')
                 entry.errors.truthTotal_m = errStruct.truthTotal_m;
                 entry.errors.modelTotal_m = errStruct.modelTotal_m;
                 entry.errors.bySource     = errStruct.bySource;
