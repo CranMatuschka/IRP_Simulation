@@ -76,6 +76,25 @@ classdef OrbitDynamics
             v1 = v0 + (dt_s/6)*(k1v + 2*k2v + 2*k3v + k4v);
         end
 
+        function [r1, v1] = rk4StepWithAccel(r_i_m, v_i_mps, dt_s, model, extraAccelFn, t0_s)
+            % rk4StepWithAccel  RK4 step with a TIME-AWARE extra acceleration [m, m/s].
+            %   Adds extraAccelFn(r, t) [m/s^2] (e.g. luni-solar third-body + SRP from
+            %   OrbitPerturbations.accel) to the base model at each RK4 stage, evaluated at
+            %   the stage's absolute time t0_s(+half/+full dt). TRUTH-ONLY: the EKF uses the
+            %   base rk4Step via EkfDynamicsPredictor and never calls this. Default t0_s=0.
+            if nargin < 6 || isempty(t0_s); t0_s = 0; end
+            acc = @(r, t) models.orbit.OrbitDynamics.accel_mps2(r, model) + extraAccelFn(r(:), t);
+            r0 = r_i_m(:); v0 = v_i_mps(:);
+
+            k1r = v0;                k1v = acc(r0,                t0_s);
+            k2r = v0+0.5*dt_s*k1v;  k2v = acc(r0+0.5*dt_s*k1r,  t0_s+0.5*dt_s);
+            k3r = v0+0.5*dt_s*k2v;  k3v = acc(r0+0.5*dt_s*k2r,  t0_s+0.5*dt_s);
+            k4r = v0+dt_s*k3v;       k4v = acc(r0+dt_s*k3r,      t0_s+dt_s);
+
+            r1 = r0 + (dt_s/6)*(k1r + 2*k2r + 2*k3r + k4r);
+            v1 = v0 + (dt_s/6)*(k1v + 2*k2v + 2*k3v + k4v);
+        end
+
         function E = specificEnergy_Jkg(r_i_m, v_i_mps)
             % specificEnergy_Jkg  Two-body specific orbital energy [J/kg].
             %   E = 0.5*v^2 - mu/r  (conservative; does not include J2).

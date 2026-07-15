@@ -70,22 +70,32 @@ classdef MeasurementModelUtils
             end
         end
 
-        function r_twr = towerPositionEcef(cfg, tower, towerIdx, side)
-            % towerPositionEcef  Tower ECEF with optional survey offset.
-            r_nom = tower.getAntennaPositionECEF();
-            if ~isfield(cfg,'effects') || ~isfield(cfg.effects,'towerSurvey')
-                r_twr = r_nom; return;
+        function r_twr = towerPositionEcef(cfg, tower, towerIdx, side, t_s)
+            % towerPositionEcef  Tower ECEF with optional static survey offset, plus (on the
+            %   TRUTH side, when t_s is supplied) the gated time-varying truth-only
+            %   displacements (R-8): solid-Earth tide + uncorrected EOP. Both default OFF ->
+            %   zero displacement -> byte-identical to the 4-arg call. t_s omitted -> no
+            %   time-varying term (the existing model/golden path is unchanged).
+            if nargin < 5; t_s = []; end
+            r_twr = tower.getAntennaPositionECEF();
+
+            % Static survey offset (existing behaviour).
+            if isfield(cfg,'effects') && isfield(cfg.effects,'towerSurvey')
+                ts = cfg.effects.towerSurvey;
+                if isfield(ts, side) && ts.(side).enable && ...
+                        towerIdx <= numel(cfg.towers) && isfield(cfg.towers(towerIdx),'surveyError_ENU_m')
+                    enu_err = cfg.towers(towerIdx).surveyError_ENU_m;
+                    r_twr = r_twr + models.frames.GeometryUtils.enu2ecef_vector( ...
+                        tower.lat_rad, tower.lon_rad, enu_err);
+                end
             end
-            ts = cfg.effects.towerSurvey;
-            if ~isfield(ts, side) || ~ts.(side).enable
-                r_twr = r_nom; return;
-            end
-            if towerIdx <= numel(cfg.towers) && isfield(cfg.towers(towerIdx),'surveyError_ENU_m')
-                enu_err = cfg.towers(towerIdx).surveyError_ENU_m;
-                r_twr = r_nom + models.frames.GeometryUtils.enu2ecef_vector( ...
-                    tower.lat_rad, tower.lon_rad, enu_err);
-            else
-                r_twr = r_nom;
+
+            % Truth-only time-varying displacements (R-8): solid-Earth tide + EOP. Gated
+            % (both default off -> zero) and applied only on the truth side with a time stamp.
+            if strcmpi(side,'truth') && ~isempty(t_s)
+                r_twr = r_twr ...
+                    + models.frames.SolidEarthTide.towerDisplacement(r_twr, t_s, cfg) ...
+                    + models.frames.TruthEarthOrientation.towerDisplacement(r_twr, t_s, cfg);
             end
         end
 
@@ -146,6 +156,22 @@ classdef MeasurementModelUtils
                     end
                     mapping = 1 / max(sin(elv), sin(elvFloor));
                     sigma   = sigma0 * mapping^p;
+                case 'cn0'
+                    % C/N0-based thermal weighting: sigma = sigma0 * 10^(-(C/N0-45)/20),
+                    % with C/N0 = base_dBHz + elevationGain_dB*sin(el). sigma0 (per-signal)
+                    % is the sigma at 45 dB-Hz, so a higher received C/N0 (better link,
+                    % antenna gain or lower system temperature) LOWERS the code noise, and
+                    % high-elevation links are favoured over low ones. Mirrors ErrorChain.
+                    base_dBHz = 45; elevGain_dB = 6;
+                    if isfield(cfg,'measurements') && isfield(cfg.measurements,'codeNoise') && ...
+                            isfield(cfg.measurements.codeNoise,'cn0')
+                        cn0c = cfg.measurements.codeNoise.cn0;
+                        if isfield(cn0c,'base_dBHz');        base_dBHz   = cn0c.base_dBHz;        end
+                        if isfield(cn0c,'elevationGain_dB'); elevGain_dB = cn0c.elevationGain_dB; end
+                    end
+                    elC      = max(elv, elvFloor);
+                    cn0_dBHz = base_dBHz + elevGain_dB * sin(elC);
+                    sigma    = sigma0 * 10^(-(cn0_dBHz - 45)/20);
                 otherwise
                     sigma = sigma0;
             end

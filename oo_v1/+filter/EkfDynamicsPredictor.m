@@ -93,8 +93,22 @@ classdef EkfDynamicsPredictor
             % Energy before propagation
             info.specificEnergyInitial_Jkg = models.orbit.OrbitDynamics.specificEnergy_Jkg(r_i0, v_i0);
 
-            % RK4 step in inertial frame
-            [r_i1, v_i1] = models.orbit.OrbitDynamics.rk4Step(r_i0, v_i0, dt_s, fmodel);
+            % RK4 step in inertial frame. Optionally add the EKF's OWN luni-solar/SRP
+            % perturbation (cfg.estimator.dynamics.perturbations) so the filter dynamics MATCH
+            % the truth third-body forces (closing the force-model gap) instead of pure J2. Same
+            % constant-Omega ECI as the truth propagator, so the sun/moon ephemeris is consistent.
+            % Default off -> pure rk4Step -> byte-identical.
+            ekfPert = struct('enable', false);
+            try; ekfPert = models.orbit.OrbitPerturbations.configFromStruct( ...
+                    cfg.estimator.dynamics.perturbations); catch; end
+            if ekfPert.enable
+                [r_i1, v_i1] = models.orbit.OrbitDynamics.rk4StepWithAccel( ...
+                    r_i0, v_i0, dt_s, fmodel, ...
+                    @(rr,tt) models.orbit.OrbitPerturbations.accel(rr, tt, ekfPert), t0_s);
+                info.forceModel = [fmodel '+luniSolar'];
+            else
+                [r_i1, v_i1] = models.orbit.OrbitDynamics.rk4Step(r_i0, v_i0, dt_s, fmodel);
+            end
 
             % Energy after propagation
             info.specificEnergyFinal_Jkg = models.orbit.OrbitDynamics.specificEnergy_Jkg(r_i1, v_i1);

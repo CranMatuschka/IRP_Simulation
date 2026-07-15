@@ -34,6 +34,12 @@ classdef OrbitPropagator
         omgE = revgnss.Constants.EARTH_OMEGA_RADPS;
     end
 
+    properties (Access = private)
+        % Truth-only luni-solar/SRP perturbation config (R-3). Default disabled -> the RK4
+        % integration takes the base-model branch and the truth trajectory is byte-identical.
+        truthPerturb = struct('enable', false)
+    end
+
     methods
         function obj = OrbitPropagator(cfg)
             if nargin == 0; return; end
@@ -49,6 +55,9 @@ classdef OrbitPropagator
             elseif isfield(cfg,'orbit') && isfield(cfg.orbit,'mode') && ~isempty(cfg.orbit.mode)
                 obj.orbitMode = cfg.orbit.mode;
             end
+            % Truth-only luni-solar + SRP perturbations (R-3), read from
+            % cfg.truth.perturbations (or cfg.orbit.truth.perturbations). Default off.
+            obj.truthPerturb = models.orbit.OrbitPerturbations.configFrom(cfg);
         end
 
         function [r_ecef_m, v_ecef_mps] = propagate(obj, t_s)
@@ -170,7 +179,15 @@ classdef OrbitPropagator
                     nSub = max(1, ceil(dt / 10));
                     dts  = dt / nSub;
                     for j = 1:nSub
-                        [r_i, v_i] = models.orbit.OrbitDynamics.rk4Step(r_i, v_i, dts, model);
+                        if obj.truthPerturb.enable
+                            tAbs = t_prev + (j-1)*dts;   % absolute time at the sub-step start
+                            [r_i, v_i] = models.orbit.OrbitDynamics.rk4StepWithAccel( ...
+                                r_i, v_i, dts, model, ...
+                                @(rr,tt) models.orbit.OrbitPerturbations.accel(rr, tt, obj.truthPerturb), ...
+                                tAbs);
+                        else
+                            [r_i, v_i] = models.orbit.OrbitDynamics.rk4Step(r_i, v_i, dts, model);
+                        end
                     end
                 end
                 t_prev = t_s(k);
