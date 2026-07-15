@@ -35,10 +35,10 @@ function captureGolden(tier, scenario)
     golden.capturedEpochs = out.sim.simData.nEpochs;
     golden.captureWallSec = toc(t0);
 
-    if strcmp(scenario, 'headline')
-        outFile = fullfile(thisDir, 'golden', ['golden_headline_' golden.tier '.mat']);
-    else
-        outFile = fullfile(thisDir, 'golden', ['golden_' golden.tier '.mat']);
+    switch scenario
+        case 'headline'; outFile = fullfile(thisDir, 'golden', ['golden_headline_' golden.tier '.mat']);
+        case 'realism';  outFile = fullfile(thisDir, 'golden', ['golden_realism_'  golden.tier '.mat']);
+        otherwise;       outFile = fullfile(thisDir, 'golden', ['golden_'          golden.tier '.mat']);
     end
     if ~isfolder(fullfile(thisDir,'golden')); mkdir(fullfile(thisDir,'golden')); end
     save(outFile, '-struct', 'golden');

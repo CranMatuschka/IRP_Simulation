@@ -20,9 +20,10 @@ function out = runGoldenScenario(durationOverride_s, seed, scenario)
     switch lower(scenario)
         case 'single';   cfg = goldenScenarioConfig(durationOverride_s);
         case 'headline'; cfg = goldenHeadlineScenarioConfig(durationOverride_s);
+        case 'realism';  cfg = goldenRealismScenarioConfig(durationOverride_s);
         otherwise
             error('runGoldenScenario:scenario', ...
-                'scenario must be ''single'' or ''headline'' (got ''%s'').', scenario);
+                'scenario must be ''single'', ''headline'', or ''realism'' (got ''%s'').', scenario);
     end
     out = revgnss.ReportRunner.runSingle(cfg);
 end
