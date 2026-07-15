@@ -848,9 +848,15 @@ classdef SimulationDataStore < handle
             catch; end
             entry.NEES_att = NaN;
             try
-                att_err_ = revgnss.AttitudeKinematics.wrapEuler(eul_err);
-                P_att_   = ekf.P(sm.euler_idx, sm.euler_idx);
-                if rcond(P_att_) > 1e-15; entry.NEES_att = (att_err_' * (P_att_ \ att_err_)) / 3; end
+                % R-7 (v4): score the attitude NEES with the EKF's QUATERNION-AWARE
+                % small-angle error (the error in P(euler_idx) space), not a raw
+                % wrapped-Euler subtraction which lives in a different space and is
+                % ill-defined near gimbal lock. Matches ReverseGNSSEKF.computeNEES.
+                if ekf.estimateAttitude
+                    att_err_ = ekf.attitudeSmallAngleError_(asset.attitude_euler_rad);
+                    P_att_   = ekf.P(sm.euler_idx, sm.euler_idx);
+                    if rcond(P_att_) > 1e-15; entry.NEES_att = (att_err_' * (P_att_ \ att_err_)) / 3; end
+                end
             catch; end
 
             % --- Clock gauge diagnostics ---

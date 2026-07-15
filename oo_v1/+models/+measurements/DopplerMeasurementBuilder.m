@@ -153,7 +153,7 @@ classdef DopplerMeasurementBuilder
                 towerClockDriftModel_mps(mi) = twr_drift_model(mi);
 
                 % Truth side
-                r_twr_t = models.measurements.MeasurementModelUtils.towerPositionEcef(cfg, towers{ti}, ti, 'truth');
+                r_twr_t = models.measurements.MeasurementModelUtils.towerPositionEcef(cfg, towers{ti}, ti, 'truth', t_s);
                 delta_t = r_ants_truth(:,ai) - r_twr_t;
                 rho_t   = norm(delta_t); if rho_t < 1; rho_t = 1; end
                 u_t     = delta_t / rho_t;

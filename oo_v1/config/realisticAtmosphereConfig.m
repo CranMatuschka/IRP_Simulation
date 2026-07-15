@@ -67,7 +67,12 @@ function cfg = realisticAtmosphereConfig(cfg)
     % the model honest but self-consistent; the residual is the (1-accuracy) climatology
     % error plus the stochastic TEC and half-cosine shape mismatch Klobuchar cannot forecast.
     cfg.errors.ionosphere.model.correction = 'klobuchar';
-    K_L1_m_per_TECU = 40.308e16 / (1575.42e6)^2;             % ~0.1624 m per TECU at L1
+    % Derive K_L1 from the ACTIVE L1 carrier (canonical 1575.42 MHz by default, or the
+    % experiment frequency override) so the modelled iono/Klobuchar amplitude shrinks
+    % with band exactly as the truth iono does. Byte-identical to the old literal
+    % 40.308e16/(1575.42e6)^2 when no override is set.
+    fL1_atmo        = revgnss.SignalDefinition.get('L1').frequency_Hz;
+    K_L1_m_per_TECU = 40.308e16 / fL1_atmo^2;                % ~0.1624 m per TECU at L1
     nsPerTECU       = K_L1_m_per_TECU / 2.99792458e8 * 1e9;   % ~0.5417 ns per TECU at L1
     klobAccuracy    = 0.75;                                   % broadcast climatology skill (~50-65% RMS removal)
     vDay_TECU       = cfg.errors.ionosphere.truth.diurnal.vtecDay_TECU;

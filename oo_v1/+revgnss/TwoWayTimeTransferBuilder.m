@@ -125,7 +125,7 @@ classdef TwoWayTimeTransferBuilder
             % --- Pass 1: elevation visibility (truth geometry) ------------------
             visTowers = [];
             for ti = capable(:)'
-                r_twr_t = models.measurements.MeasurementModelUtils.towerPositionEcef(cfg, towers{ti}, ti, 'truth');
+                r_twr_t = models.measurements.MeasurementModelUtils.towerPositionEcef(cfg, towers{ti}, ti, 'truth', t_s);
                 if models.frames.GeometryUtils.elevationAngle(r_twr_t, r_sat_t) >= elevMask
                     visTowers(end+1) = ti; %#ok<AGROW>
                 end
@@ -141,7 +141,7 @@ classdef TwoWayTimeTransferBuilder
             rowsMeta = struct([]);
             for jj = 1:numel(visTowers)
                 ti = visTowers(jj);
-                r_twr_t = models.measurements.MeasurementModelUtils.towerPositionEcef(cfg, towers{ti}, ti, 'truth');
+                r_twr_t = models.measurements.MeasurementModelUtils.towerPositionEcef(cfg, towers{ti}, ti, 'truth', t_s);
                 r_twr_e = models.measurements.MeasurementModelUtils.towerPositionEcef(cfg, towers{ti}, ti, 'model');
                 elev    = models.frames.GeometryUtils.elevationAngle(r_twr_t, r_sat_t);
 

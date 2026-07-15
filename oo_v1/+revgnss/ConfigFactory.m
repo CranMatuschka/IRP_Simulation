@@ -82,7 +82,7 @@ classdef ConfigFactory
             %   Body moved to config/baseConfig.m to lift the config base out of this
             %   2512-line monolith; all existing callers keep working via this delegation.
             addpath(fullfile(fileparts(fileparts(mfilename('fullpath'))), 'config'));
-            cfg = baseConfig();
+            cfg = masterConfig('baseOnly');
         end
 
         % ==================================================================

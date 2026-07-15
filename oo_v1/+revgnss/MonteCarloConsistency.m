@@ -71,7 +71,12 @@ classdef MonteCarloConsistency
                 if any(gN); perSeedNisPerDof(j) = sum(nisK(gN)) / sum(mrK(gN)); end
 
                 gE = isfinite(neesK) & neesK >= 0;
-                sumNEES = sumNEES + sum(neesK(gE)); dofNEES = dofNEES + 3 * sum(gE);
+                % R-7 (v4): getNEES() is already PER-DOF (SimulationDataStore divides the
+                % position NEES by its 3 dof), so pooling sum(neesK) against 3*count made
+                % neesPerDof collapse to ~0.33 (a spurious "conservative" verdict, and the
+                % true origin of the v3-reported 0.36). Pool the RAW block NEES (3*neesK)
+                % against 3 dof/sample -> sum ~ chi2(3*N), neesPerDof ~ 1, valid chi2 band.
+                sumNEES = sumNEES + 3 * sum(neesK(gE)); dofNEES = dofNEES + 3 * sum(gE);
                 nUsed = nUsed + 1;
             end
 

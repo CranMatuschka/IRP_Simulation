@@ -189,7 +189,7 @@ classdef CarrierMeasurementBuilder
                 end
 
                 % Truth geometric range (survey + PCO + corrections)
-                r_twr_t = models.measurements.MeasurementModelUtils.towerPositionEcef(cfg, towers{ti}, ti, 'truth');
+                r_twr_t = models.measurements.MeasurementModelUtils.towerPositionEcef(cfg, towers{ti}, ti, 'truth', t_s);
                 if isfield(cfg,'effects') && isfield(cfg.effects,'antennaPCO')
                     pco = cfg.effects.antennaPCO;
                     if isfield(pco,'truth') && pco.truth.enable
@@ -215,8 +215,27 @@ classdef CarrierMeasurementBuilder
                 % scintillation.phaseScint is enabled, so the carrier golden path is unchanged.
                 phaseScint_m = errorChain.envModel.getPhaseScintRad(ti, elv) * lambda / (2*pi);
 
+                % R-6: unknown inter-antenna carrier phase bias (TRUTH-ONLY). Constant per
+                % (antenna, signal), reference antenna ai=1 == 0, keyed independent of tower/
+                % epoch (persistent). Added to z only (NOT to h_phi), so the estimator does not
+                % know it: a constant part is absorbed by the float ambiguity B, a drift leaves
+                % a real residual and can pull an integer fix. Default off -> b_ia_m=0 -> golden.
+                b_ia_m = 0;
+                if isfield(cfg,'errors') && isfield(cfg.errors,'interAntennaCarrierBias') && ...
+                        cfg.errors.interAntennaCarrierBias.enable && ai > 1
+                    iab  = cfg.errors.interAntennaCarrierBias;
+                    sigC = 0.25; if isfield(iab,'sigma_cycles'); sigC = iab.sigma_cycles; end
+                    sKey = si_;  if isfield(iab,'perSignal') && ~iab.perSignal; sKey = 1; end
+                    c    = errorChain.drawKeyed(models.noise.RngSource.ANT_PHASE_BIAS, 0, ai, sKey, 1, 1, 1);
+                    b_ia_m = sigC * lambda * c;
+                    if isfield(iab,'drift') && isfield(iab.drift,'enable') && iab.drift.enable
+                        rate = 0.05; if isfield(iab.drift,'rate_cyclesPerHour'); rate = iab.drift.rate_cyclesPerHour; end
+                        b_ia_m = b_ia_m + rate * lambda * (t_s/3600);
+                    end
+                end
+
                 % z: +trop, -iono (carrier ionosphere is OPPOSITE sign to code)
-                z_phi(rowOut) = rho_t + b_rx_true - b_twr_t + trop_t - iono_t_sig + B_true + noise_phi + phaseScint_m;
+                z_phi(rowOut) = rho_t + b_rx_true - b_twr_t + trop_t - iono_t_sig + B_true + noise_phi + phaseScint_m + b_ia_m;
 
                 % Synthetic slip injection for stress testing
                 try

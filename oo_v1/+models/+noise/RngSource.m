@@ -28,5 +28,6 @@ classdef RngSource
         ATT_REF        = 16   % external attitude-reference perturbation (one-shot)
         PHASE_SCINT    = 17   % EnvironmentModel phase-scintillation GM, per tower (persistent)
         TWSTFT_TWOWAY  = 18   % tower<->spacecraft two-way time-transfer noise (white)
+        ANT_PHASE_BIAS = 19   % unknown per-antenna carrier phase bias, truth-only (persistent)
     end
 end

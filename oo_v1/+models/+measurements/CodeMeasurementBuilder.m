@@ -62,7 +62,7 @@ classdef CodeMeasurementBuilder
                 r_twr_nom = towers{ti}.getAntennaPositionECEF();
 
                 % Truth and model tower positions (survey error only, no PCO yet)
-                r_twr_survey_truth = models.measurements.MeasurementModelUtils.towerPositionEcef(cfg, towers{ti}, ti, 'truth');
+                r_twr_survey_truth = models.measurements.MeasurementModelUtils.towerPositionEcef(cfg, towers{ti}, ti, 'truth', t_s);
                 r_twr_survey_model = models.measurements.MeasurementModelUtils.towerPositionEcef(cfg, towers{ti}, ti, 'model');
 
                 % Tower survey range contribution (truth-model mismatch in range domain)

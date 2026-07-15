@@ -268,7 +268,16 @@ classdef ClockExactReportBuilder
                                 plot(ax, tz, rac(1,seg)*sc, 'r-', 'LineWidth',0.8, 'DisplayName','radial');
                                 plot(ax, tz, rac(2,seg)*sc, 'g-', 'LineWidth',0.8, 'DisplayName','along-track');
                                 plot(ax, tz, rac(3,seg)*sc, 'b-', 'LineWidth',0.8, 'DisplayName','cross-track');
-                                legend(ax,'show','Location','northeast','FontSize',5);
+                                % Filter +-3 sigma envelope per RAC axis (honours the title's
+                                % "dotted = +-3 sigma"; colour-matched, hidden from the legend).
+                                CE = revgnss.ClockExactReportBuilder;
+                                racSig = CE.racPositionSigma_(diag, rTr(:,1:nAll), vTr(:,1:nAll), nAll);
+                                if ~isempty(racSig)
+                                    CE.overlaySigma_(ax, tz, racSig(1,seg)*sc, 3, 'r:');
+                                    CE.overlaySigma_(ax, tz, racSig(2,seg)*sc, 3, 'g:');
+                                    CE.overlaySigma_(ax, tz, racSig(3,seg)*sc, 3, 'b:');
+                                end
+                                legend(ax,'show','Location','northeastoutside','FontSize',5);
                             else
                                 [~, unit, sc] = revgnss.PlotUnitScaler.scaleMetric(nrm(seg), 'm');
                                 plot(ax, tz, nrm(seg)*sc, 'b-', 'LineWidth',0.8);
@@ -519,9 +528,15 @@ classdef ClockExactReportBuilder
                 'PaperUnits','centimeters', 'PaperSize',[7 4.5], ...
                 'PaperPositionMode','auto');
             ax = axes(fig);
-            set(ax, 'FontSize',7, 'FontName','Helvetica', 'Box','off');
+            % Modern, report-scaled look (single insertion point for every report figure):
+            % keep the compact 7 pt font, but soften to dark-grey ink, ticks out, a faint
+            % grid and thin axes lines. Line colours stay per-plot (they are semantic).
+            set(ax, 'FontSize',7, 'FontName','Helvetica', 'Box','off', ...
+                'TickDir','out', 'TickLength',[0.02 0.02], 'LineWidth',0.6, ...
+                'XColor',[0.20 0.20 0.22], 'YColor',[0.20 0.20 0.22], ...
+                'GridColor',[0.45 0.45 0.48], 'GridAlpha',0.15, 'MinorGridAlpha',0.07);
             if nargin > 0 && ~isempty(titleStr)
-                title(ax, titleStr, 'FontSize',7, 'FontWeight','normal');
+                title(ax, titleStr, 'FontSize',7, 'FontWeight','normal', 'Color',[0.20 0.20 0.22]);
             end
         end
 
@@ -551,10 +566,20 @@ classdef ClockExactReportBuilder
                     plot(ax, t, rac(1,:)*sc, 'r-', 'LineWidth', 0.8, 'DisplayName', 'radial');
                     plot(ax, t, rac(2,:)*sc, 'g-', 'LineWidth', 0.8, 'DisplayName', 'along-track');
                     plot(ax, t, rac(3,:)*sc, 'b-', 'LineWidth', 0.8, 'DisplayName', 'cross-track');
-                    legend(ax, 'show', 'Location', 'northeast', 'FontSize', 5);
+                    % Overlay the filter's +-3 sigma envelope per RAC axis (dotted,
+                    % colour-matched, hidden from the legend). The radial band is wide
+                    % under the GEO radial<->clock degeneracy; along/cross hug their traces.
+                    CE = revgnss.ClockExactReportBuilder;
+                    racSig = CE.racPositionSigma_(diag, rTr(:,1:n), vTr(:,1:n), n);
+                    if ~isempty(racSig)
+                        CE.overlaySigma_(ax, t, racSig(1,:)*sc, 3, 'r:');
+                        CE.overlaySigma_(ax, t, racSig(2,:)*sc, 3, 'g:');
+                        CE.overlaySigma_(ax, t, racSig(3,:)*sc, 3, 'b:');
+                    end
+                    legend(ax, 'show', 'Location', 'northeastoutside', 'FontSize', 5);
                     xlabel(ax, 'Time [s]', 'FontSize', 7);
                     ylabel(ax, revgnss.PlotUnitScaler.axisLabel('Error', unit), 'FontSize', 7);
-                    title(ax, 'Position error: RAC frame (estimate - truth)', 'FontSize', 7);
+                    title(ax, 'Position error: RAC frame (dotted = \pm3\sigma)', 'FontSize', 7);
                     grid(ax, 'on');
                     revgnss.PlotUnitScaler.disableExponent(ax);
                     return;
@@ -794,6 +819,38 @@ classdef ClockExactReportBuilder
             hold(ax,'on');
             plot(ax, tt,  k*sig, style, 'LineWidth',0.6, 'HandleVisibility','off');
             plot(ax, tt, -k*sig, style, 'LineWidth',0.6, 'HandleVisibility','off');
+        end
+
+        function racSig = racPositionSigma_(diag, rEcef, vEcef, n)
+            % racPositionSigma_  [3 x n] 1-sigma of the radial / along-track /
+            %   cross-track POSITION error, from the diagonal of the EKF position
+            %   covariance (states 1:3) projected into the RAC frame with the SAME
+            %   v_eff = v_ecef + omega x r convention as OrbitFrame.ecefToRacGeo.
+            %   This is a DIAGONAL projection (the compact store keeps only diag(P));
+            %   it gives the marginal per-axis variance, which for the GEO
+            %   radial<->clock degeneracy is already large on the radial axis.
+            %   Returns [] if Pdiag is unavailable (callers then draw no band).
+            racSig = [];
+            try
+                d_ = diag.getData();
+                if ~isfield(d_,'Pdiag') || isempty(d_.Pdiag) || size(d_.Pdiag,1) < 3
+                    return;
+                end
+                Pxyz = max(d_.Pdiag(1:3,:), 0);               % [3 x N] x/y/z variance
+                w = 7.2921150e-5;
+                try; w = revgnss.Constants.EARTH_OMEGA_RADPS; catch; end
+                omega = [0;0;w];
+                np = min(n, size(Pxyz,2));
+                racSig = nan(3, n);
+                for kk = 1:np
+                    rk = rEcef(:,kk); veff = vEcef(:,kk) + cross(omega, rk);
+                    [rH,aH,hH,ok] = revgnss.OrbitFrame.racBasis(rk, veff);
+                    if ok
+                        p = Pxyz(:,kk);
+                        racSig(:,kk) = sqrt([ (rH.^2).'*p; (aH.^2).'*p; (hH.^2).'*p ]);
+                    end
+                end
+            catch; racSig = []; end
         end
 
         % ================================================================
