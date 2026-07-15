@@ -91,39 +91,45 @@ at **G5S1R4**, for both the **idealised** and **realism** grade.
 Folder tag per the request: `<L1>#<L2>` in GHz to 2 decimals, e.g. `1.58#1.23`, `2.11#2.03`,
 `6.43#5.93`, `5.00#2.10`, `8.40#7.90`, appended to `Battery_idealised_` / `Battery_realism_`.
 
-## 5. What the two grades are (IMPORTANT — they do NOT differ in atmosphere)
+## 5. The THREE grades and TWO topologies (what actually varies)
 
-The battery's `idealised` vs `realism` label maps to `run_oo_v1_battery`'s `Realism` flag, i.e.
-to **`cfg.realism.grade` OFF vs ON** — nothing more. Both grades start from `masterConfig`, whose
-default is **`cfg.atmosphere.realistic = true`**, so **both grades run the SAME realistic
-atmosphere** (Saastamoinen/Niell troposphere + diurnal/Klobuchar ionosphere, non-cancelling
-truth−model residuals). `realismGradeConfig` never touches the troposphere or ionosphere; the
-atmosphere is a *separate* toggle (`cfg.atmosphere.realistic`). Empirically confirmed from the run
-configs: both arms have `atmosphere.realistic=1`, `troposphere.enable=1`, `ionosphere.enable=1`,
-`codeMode=singleFrequency`.
+The battery's grade label maps to `run_oo_v1_battery` flags — **`Realism` (`cfg.realism.grade`)**
+and **`Atmosphere`**. All grades start from `masterConfig`, whose default is
+`cfg.atmosphere.realistic = true`. The atmosphere is a *separate* toggle from the realism grade:
+`realismGradeConfig` never touches the troposphere or ionosphere.
 
-So the grades differ ONLY in the realism-grade overlay:
+| grade | realism overlay | atmosphere | what it is |
+|---|---|---|---|
+| **idealised** | OFF | realistic (iono ∝1/f² present) | optimistic clock/systematics twin |
+| **realism** | ON (`realismGradeConfig`) | realistic (same as idealised) | physically representative |
+| **matchedatmo** | OFF | **OFF** (`atmosphere.realistic=false`) | idealised **minus the atmosphere** → isolates carrier wavelength |
 
-| effect | idealised (grade OFF) | realism (grade ON) |
-|---|---|---|
-| receiver clock template | `legacy` (quiet idealised maser) | `jowTable2p1` (real caesium) |
-| tower-clock product σ | 0.010 m (~33 ps) | 0.100 m (~0.33 ns) |
-| hardware delay / DCB / C/N0 | off / 0 / off | 0.5 m / 0.30 m / on |
-| luni-solar+SRP force gap, EOP, tide | off | on |
-| honest measurement floors, inter-antenna carrier bias | off | on |
-| **troposphere + ionosphere** | **realistic (same)** | **realistic (same)** |
+The realism overlay (idealised→realism) changes ONLY: receiver clock `legacy`→`jowTable2p1`,
+tower-clock product σ 0.010→0.100 m, hardware delay/DCB/C-N0 off→(0.5 m / 0.30 m / on), luni-solar
++SRP force gap / EOP / solid-Earth tide off→on, honest floors + inter-antenna carrier bias off→on.
+It does **not** change the troposphere/ionosphere. So **the ionosphere ∝1/f² effect is present in
+BOTH idealised and realism** (that is why C-band already gets the best *idealised* clock — smaller
+iono, not removed iono).
 
-Consequences for the sweep:
+**matchedatmo** sets `cfg.atmosphere.realistic=false`, which makes `applyAtmosphereProfile` a no-op
+so tropo/iono `enable=0`. **Subtlety that bit us:** scintillation is gated *only* on
+`errors.ionosphere.scintillation.enable` (default TRUE) — not on `ionosphere.enable` — and is
+injected **frequency-scaled** (`∝(f_L1/f)`) into the truth, so it survives `realistic=false` and
+would confound the sweep. The matched grade therefore *also* disables scintillation (+ its phase
+jitter), the higher-order iono, and the stochastic tropo/iono draws, giving a genuine zero-
+atmospheric-error baseline (verified from the finalized config: iono/tropo/scint/higher-order all
+`enable=0`). Contrast **idealised − matchedatmo** = the ionosphere's contribution; **matchedatmo
+across the pairs** = the pure carrier-wavelength effect.
 
-- The **ionosphere ∝ 1/f² frequency effect is present in BOTH grades** (both realistic). Frequency
-  therefore moves the clock/radial in the idealised grade too — e.g. C-band gets the best idealised
-  clock because its iono is smaller, not because iono was removed.
-- The **realism grade is uniformly worse** because it piles the honest clock, looser tower product,
-  and the systematics/force terms *on top of* the same atmosphere. It is the physically
-  representative curve; idealised is the optimistic-clock/systematics twin.
-- **To isolate carrier wavelength alone** (ionosphere genuinely cancelling) you would need a THIRD
-  arm with `cfg.atmosphere.realistic = false` (matched synthetic atmosphere, truth==model). That
-  was NOT run here — say so and I can add it.
+**Two topologies** (Towers=5, one-way TW0): **G5S1R4** (ground-only) and **G5S6R4** (5-secondary
+ISL swarm aiding the primary). The frequency override is provably independent of the ISL path (ECEF
+geometry + metre/m·s⁻¹ sigmas; the ISL carrier row is diagnostic only). Caveat: at S6R4 only the
+**realism** grade carries an honest ISL product σ (0.10/0.10 m); idealised/matchedatmo keep the
+tighter 0.03/0.02 m, so their radial ±3σ coverage at S6R4 reads optimistic — expected, documented.
+
+Full matrix = **3 grades × 5 pairs × 2 topologies = 30 runs**, homed under
+`output/FrequencyTests/{G5S1R4,G5S6R4}/Battery_{idealised,realism,matchedatmo}_<L1>#<L2>/`.
+
 - **Not modelled** (caveats for the write-up): rain fade / gaseous absorption at Ku/Ka, band-
   dependent antenna gain and hardware group delay, and licensing/regulatory feasibility beyond
   the allocation existing.
@@ -149,68 +155,75 @@ byte-identical because the override defaults off.
 
 ---
 
-## 7. Results (G5S1R4, one-way TW0, 3600 s, converged-window RMS)
+## 7. Results (3 grades × 5 pairs × 2 topologies, one-way TW0, 3600 s, converged RMS)
 
-Run 2026-07-15 via `run_oo_v1_freqbattery`. All 10 runs converged (10/10 ok). Folder tags
-round the carriers to 2 dp GHz: S-band L2 2.025→`2.02`, C-band 6.425/5.925→`6.42/5.92`
-(deterministic %.2f; exact Hz preserved in the manifest and run labels).
+Run 2026-07-15 via `run_oo_v1_freqbattery` (30/30 ok). Folder tags round the carriers to 2 dp GHz
+(exact Hz in the manifests). Deliverables under `output/FrequencyTests/{G5S1R4,G5S6R4}/`: per-run
+clockExact PDFs, plus `analysis/`, `../analysis_all/` (comparison_report.md/pdf, .csv, PNGs).
 
-**Idealised grade** — realism-grade overlay OFF (optimistic clock/systematics) but the SAME
-realistic atmosphere as the realism grade (see §5): the ionosphere is present, just paired with a
-quiet legacy clock and tight floors, so it maps mostly into the clock/radial mode:
+### 7.1 Ground-only (G5S1R4) — the radial is degeneracy-limited, not frequency-limited
 
-| Pair (GHz) | 3D pos | radial | clock RMS | attitude |
-|---|---:|---:|---:|---:|
-| 1.58 / 1.23  L-band | 6.12 m | 2.62 m | 9.48 ns | **0.13°** |
-| 2.11 / 2.02  S-band | 4.99 m | 2.48 m | 8.52 ns | **0.12°** |
-| 6.42 / 5.92  C-band | **4.65 m** | **2.10 m** | **7.01 ns** | 2.93° |
-| 5.00 / 2.10  C/S split | 7.22 m | 3.62 m | 11.51 ns | 1.74° |
-| 8.40 / 7.90  X-band | 5.27 m | 3.40 m | 11.24 ns | 2.61° |
+| Pair (GHz) | idealised 3D / rad / clk | realism 3D / rad / clk | matchedatmo 3D / rad / clk |
+|---|---|---|---|
+| 1.58/1.23 L | 6.12 m / 2.62 m / 9.48 ns | 11.7 m / 6.86 m / 20.6 ns | 24.7 m / 24.7 m / 82.0 ns |
+| 2.11/2.02 S | 4.99 m / 2.48 m / 8.52 ns | 14.5 m / 10.4 m / 34.0 ns | 2.04 m / 2.04 m / 6.78 ns |
+| 6.42/5.92 C | 4.65 m / 2.10 m / 7.01 ns | 10.6 m / 6.90 m / 22.0 ns | **0.80 m / 0.79 m / 2.62 ns** |
+| 5.00/2.10 C+S | 7.22 m / 3.62 m / 11.5 ns | 11.2 m / **4.66 m** / **15.6 ns** | 9.85 m / 9.84 m / 32.6 ns |
+| 8.40/7.90 X | 5.27 m / 3.40 m / 11.2 ns | 11.0 m / 7.05 m / 22.8 ns | 2.95 m / 2.95 m / 9.79 ns |
 
-Position spread is modest (4.6–7.2 m); C-band gets the best idealised clock/radial (7.01 ns /
-2.10 m) — consistent with its smaller (not removed) ionosphere. The striking effect is
-**attitude**: L/S-band ≈ 0.12–0.13° but C/X/split
-≈ 1.7–2.9° — ~20× worse. Cause: attitude is differential-carrier and the ambiguity-resolution
-gates (5-cycle integer search half-width, ±1 m lever arms) are L-band-tuned; at C/X wavelengths
-(~5 / ~3.7 cm) a 1 m arm spans 4–5× more cycles, so the AR degrades. **The attitude AR would need
-retuning per band** — a real finding, not a physics limit.
+corr(radial,clock) = **−1.00 for all 15**. Key read: matchedatmo (iono OFF) sharpens the
+**horizontal** dramatically (along/cross fall to 4–90 cm, vs metres for idealised) but the
+**radial** stays trapped in the unobservable radial↔clock mode and swings wildly and
+non-monotonically with the pair (0.79 m at C-band to 24.7 m at L-band). So on a one-way ground-only
+link the radial is set by the observability wall, not by the ionosphere — frequency choice cannot
+fix it. In the realism grade the C+S split is still the best *realistic* ground-only design (radial
+4.66 m, clock 15.6 ns) and the narrow S-band is worst (34 ns), as in the original 10-run sweep.
 
-**Realism grade** — physically-sized truth−model residuals; the ionosphere (∝1/f²) is a genuine
-error, and higher bands / wider separation should help:
+### 7.2 ISL swarm (G5S6R4) — the swarm unlocks radial, and THEN frequency is a clean lever
 
-| Pair (GHz) | 3D pos | radial | clock RMS | consistency |
-|---|---:|---:|---:|---|
-| 1.58 / 1.23  L-band | 11.72 m | 6.86 m | 20.55 ns | consistent |
-| 2.11 / 2.02  S-band | 14.46 m | 10.43 m | **33.96 ns (worst)** | pos σ 2.2× / clk σ 1.6× small; rad 3σ 92% |
-| 6.42 / 5.92  C-band | 10.64 m | 6.90 m | 22.04 ns | pos σ 1.5× small |
-| 5.00 / 2.10  C/S split | 11.24 m | **4.66 m (best)** | **15.57 ns (best)** | NIS optimistic |
-| 8.40 / 7.90  X-band | 10.98 m | 7.05 m | 22.79 ns | pos σ 1.6× small |
+With 5 co-observed secondaries aiding the primary, the radial becomes observable and the
+optimistic-clock grades reach **mm–cm**:
 
-**Headline findings**
+| Pair (GHz) | idealised 3D / rad / clk | matchedatmo 3D / rad / clk | realism 3D / rad / clk |
+|---|---|---|---|
+| 1.58/1.23 L | 345 mm / 313 mm / 31 ps | 58 mm / 19 mm / 38 ps | 2.34 m / 2.03 m / 293 ps |
+| 2.11/2.02 S | 223 mm / 190 mm / 41 ps | 45 mm / 17 mm / 40 ps | 3.18 m / 2.79 m / 693 ps |
+| 6.42/5.92 C | 118 mm / 95 mm / 25 ps | **29 mm / 16 mm / 25 ps** | 2.85 m / 2.49 m / 433 ps |
+| 5.00/2.10 C+S | 406 mm / 356 mm / 37 ps | 72 mm / 23 mm / 53 ps | 3.88 m / 3.43 m / 701 ps |
+| 8.40/7.90 X | 159 mm / 132 mm / 26 ps | 32 mm / 17 mm / 29 ps | 3.15 m / 2.76 m / 568 ps |
 
-1. **Wide frequency SEPARATION wins, not raw band height.** The C/S split (5.00/2.10 GHz) gives
-   the best clock (15.6 ns) and radial (4.66 m) because the 2.4× frequency ratio actually resolves
-   the ionosphere. This is the best-conditioned dual-frequency pair (iono-free noise amp 1.23) and
-   the direct analogue of the VLBI S/X technique.
-2. **The narrow S-band pair is pathological.** 2.110/2.025 GHz (ratio 1.04) is worst on clock
-   (34 ns) and radial (10.4 m) and the only covariance-optimistic run (radial 3σ coverage 92 %):
-   significant iono AND no separation to remove it. A single narrow uplink band cannot do
-   dual-frequency iono correction — exactly the §2 warning, now quantified.
-3. **Same-band C and X help modestly via low raw iono** (~7 % / ~4 % of L-band) — radial ~6.9–7.0 m
-   — but their near-degenerate pairing gives no iono leverage, so they do not beat the split pair.
-4. **Frequency does NOT cure the observability wall.** corr(radial,clock) = −1.000 for *every*
-   pair: the one-way ground→GEO radial↔clock degeneracy is geometric, not dispersive. Frequency
-   only modulates the error *within* that mode; breaking it still needs two-way TWSTFT or a
-   co-observed swarm (see the honest-covariance / two-way work).
+- **matchedatmo isolates the ionosphere cleanly.** With iono OFF the swarm solution is mm-flat
+  across bands (29–72 mm 3D), so position is set by geometry/wavelength, not frequency — exactly the
+  isolation the grade was built for. The **idealised − matchedatmo gap IS the ionosphere cost**, and
+  it scales as 1/f²: ~287 mm at L, ~178 mm at S, ~89 mm at C, ~127 mm at X. C-band is the sweet spot
+  (idealised 118 mm, matchedatmo 29 mm).
+- **realism at S6R4 is honestly poor AND over-confident** — 2.3–3.9 m 3D, clock 0.3–0.7 ns, NEES(pos)
+  200–400, radial 3σ coverage **0 %**, pos σ 25–35× too small. The swarm aiding does NOT rescue the
+  honest-systematics case, and (as flagged in §5) the covariance is badly optimistic because the
+  represented-secondary product σ is still tighter than the real systematics. This is the most
+  important honesty caveat of the whole study: **the mm-cm swarm numbers are an idealised-error
+  artefact; the physically-representative swarm error is metre-level with unreliable covariance.**
 
-**Design implication.** For a realistic reverse-GNSS GEO uplink, pair the RNSS/FSS C-band
-(~5–6 GHz) primary with a widely-separated S-band (~2 GHz) tone. That buys both low absolute iono
-on the primary *and* genuine dual-frequency iono observability — better than any same-band pair,
-and far better than a narrow S-band-only design. Attitude then wants a band-matched AR retune.
+### 7.3 Headline findings (all 30 runs)
 
-Deliverables: `output/Report_20260715/Battery_{idealised,realism}_<L1>#<L2>/…/*.pdf` (per run) and
-`output/Report_20260715/Battery_freqsweep/analysis/` (comparison_report.md/pdf, comparison_metrics.csv,
-comparison_overview.png, radial_clock_timeseries.png).
+1. **The limiting factor is observability, not frequency.** One-way ground-only radial is degeneracy-
+   locked (corr = −1) for every band; only the ISL swarm makes radial observable. Frequency is a
+   second-order lever that only matters once the geometry is fixed.
+2. **Once radial is observable, lower ionosphere wins** — higher band (C/X) and the wide C+S split
+   reduce the iono residual; the iono cost falls ∝1/f² (quantified above via idealised−matchedatmo).
+3. **The narrow S-band pair is the pathological uplink** (worst realism ground-only clock, 34 ns): iono
+   present, no separation to remove it. A single narrow band cannot do dual-frequency correction.
+4. **Attitude is L-band-tuned across every grade/topology**: L/S-band ≈ 6–8 arcmin (~0.12°) but
+   C/X/split ≈ 1.7–3° — the differential-carrier AR gates (5-cycle search, ±1 m arms) do not scale to
+   the shorter C/X wavelengths. A band-matched AR retune is needed, not a physics limit.
+5. **Covariance realism is the real gap at S6R4**: the honest (realism) grade is metre-level and
+   over-confident there, so a swarm design must budget for represented-secondary product realism, not
+   just add links.
+
+**Design implication.** A credible reverse-GNSS GEO system pairs an RNSS/FSS **C-band (~5–6 GHz)**
+primary with a widely-separated **S-band (~2 GHz)** tone (low absolute iono + genuine dual-frequency
+observability) **and** a co-observed swarm to break the radial↔clock wall — then budgets honestly for
+the swarm product covariance and retunes the attitude AR to the chosen band.
 
 ---
 

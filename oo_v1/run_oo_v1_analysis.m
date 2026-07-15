@@ -39,6 +39,7 @@ function A = run_oo_v1_analysis(sel, varargin)
     p.addParameter('ConvergeFrac', 0.2, @(x)isnumeric(x)&&isscalar(x)&&x>0&&x<1);
     p.addParameter('Open', true);
     p.addParameter('Label', {}, @iscell);
+    p.addParameter('A4Pdf', false);   % also write comparison_A4.pdf: one big plot per A4-landscape page
     p.parse(varargin{:});
     opt = p.Results;
 
@@ -105,6 +106,12 @@ function A = run_oo_v1_analysis(sel, varargin)
     catch ME; fprintf('  (pdf report skipped: %s)\n',ME.message); end
     if ~isempty(ovFig) && ishandle(ovFig); close(ovFig); end
     if ~isempty(tsFig) && ishandle(tsFig); close(tsFig); end
+
+    a4Path = fullfile(opt.OutDir,'comparison_A4.pdf');
+    if (islogical(opt.A4Pdf)&&opt.A4Pdf) || isequal(opt.A4Pdf,1)
+        try; i_writeA4Pdf(A, a4Path, opt); fprintf('  A4 one-plot-per-page PDF -> %s\n', a4Path);
+        catch ME; fprintf('  (A4 pdf skipped: %s)\n', ME.message); end
+    end
 
     fprintf('\nWrote:\n  %s\n  %s\n  %s\n  %s\n  %s\n', csvPath, mdPath, pdfPath, ovPath, tsPath);
     if (islogical(opt.Open) && opt.Open) || isequal(opt.Open,1)
@@ -490,24 +497,177 @@ function fig = i_timeseriesFig(A, cf)
     refCol=[0.45 0.45 0.48];
 
     ax1=subplot(1,3,1); hold(ax1,'on'); grid(ax1,'on'); set(ax1,'YScale','log');
-    for i=1:nA; e=sqrt(sum(A(i).ts_rac.^2,1)); plot(ax1,A(i).ts_t,e,'Color',cols(i,:),'LineWidth',1.6,'DisplayName',A(i).label); end
+    for i=1:nA; e=sqrt(sum(A(i).ts_rac.^2,1)); plot(ax1,A(i).ts_t,e,'Color',i_bandColor(A(i).label,cols),'LineStyle',i_topoStyle(A(i).S),'LineWidth',1.6,'DisplayName',A(i).label); end
     xlabel(ax1,'time [s]'); ylabel(ax1,'3D position error [m]'); title(ax1,'Position error convergence');
 
     ax2=subplot(1,3,2); hold(ax2,'on'); grid(ax2,'on');
     % symmetric-log feel: clock spans ps..us across runs, so plot |ns| on a log axis
-    for i=1:nA; plot(ax2,A(i).ts_t,abs(A(i).ts_clk_ns)+eps,'Color',cols(i,:),'LineWidth',1.6,'DisplayName',A(i).label); end
+    for i=1:nA; plot(ax2,A(i).ts_t,abs(A(i).ts_clk_ns)+eps,'Color',i_bandColor(A(i).label,cols),'LineStyle',i_topoStyle(A(i).S),'LineWidth',1.6,'DisplayName',A(i).label); end
     set(ax2,'YScale','log'); xlabel(ax2,'time [s]'); ylabel(ax2,'|clock error| [ns]'); title(ax2,'Clock error (|.|, log)');
 
     ax3=subplot(1,3,3); hold(ax3,'on'); grid(ax3,'on'); set(ax3,'YScale','log');
     for i=1:nA
         ne=A(i).ts_nees_pos; if isempty(ne); continue; end
-        plot(ax3,A(i).ts_t(1:numel(ne)),ne,'Color',cols(i,:),'LineWidth',1.6,'DisplayName',A(i).label);
+        plot(ax3,A(i).ts_t(1:numel(ne)),ne,'Color',i_bandColor(A(i).label,cols),'LineStyle',i_topoStyle(A(i).S),'LineWidth',1.6,'DisplayName',A(i).label);
     end
     yline(ax3,1,'--','Color',refCol,'LineWidth',1.1,'HandleVisibility','off');
     xlabel(ax3,'time [s]'); ylabel(ax3,'NEES(pos) / dof'); title(ax3,'Position consistency (1 = ideal)');
     legend(ax3,'Location','eastoutside','FontSize',8,'Box','off');
 
     sgtitle('Convergence, clock & consistency (all runs)','FontWeight','normal','FontSize',15);
+end
+
+% =========================================================================
+% comparison_A4.pdf — ONE big plot per A4-landscape page (fully readable).
+% Same nine plots as the two overview figures, each exploded onto its own page
+% with large fonts and a one-line "how to read" subtitle.
+function i_writeA4Pdf(A, pdfPath, ~)
+    nA=numel(A); c0=revgnss.Constants.SPEED_OF_LIGHT_MPS;
+    labels=categorical({A.label}); labels=reordercats(labels,{A.label});
+    refCol=[0.45 0.45 0.48];
+    first=true;
+    rawPath=strrep(pdfPath,'.pdf','_raw.pdf');   % pages written here, then normalised to true A4
+
+    % 1 — radial & clock
+    [f,ax]=i_a4fig('Radial & clock error (the degenerate pair)', ...
+        'Both in metres, log axis. radial \approx clock when corr(rad,clk)=-1 (the one-way GEO wall).');
+    i_barColors(bar(ax,labels,[[A.rad_rms]' [A.clk_rms_m]'])); set(ax,'YScale','log'); ylabel(ax,'RMS [m]');
+    legend(ax,{'radial','clock (m)'},'Location','northoutside','Orientation','horizontal','Box','off');
+    first=i_a4save(f,rawPath,first);
+
+    % 2 — horizontal / 3D & velocity
+    [f,ax]=i_a4fig('Horizontal / 3D position & velocity', ...
+        'Along/cross/3D position bars (log, left axis); velocity line (right axis).');
+    yyaxis(ax,'left');  i_barColors(bar(ax,labels,[[A.alo_rms]' [A.crs_rms]' [A.pos3d_rms]'])); set(ax,'YScale','log'); ylabel(ax,'position RMS [m]');
+    yyaxis(ax,'right'); plot(ax,1:nA,[A.vel_rms]'*1e3,'d-','LineWidth',2,'MarkerSize',7,'MarkerFaceColor','auto'); ylabel(ax,'velocity RMS [mm/s]');
+    legend(ax,{'along','cross','3D','velocity'},'Location','northoutside','Orientation','horizontal','Box','off');
+    first=i_a4save(f,rawPath,first);
+
+    % 3 — clock bias & drift
+    [f,ax]=i_a4fig('Clock bias & rate error', 'Receiver clock bias [ns] and drift [mm/s], log axis.');
+    i_barColors(bar(ax,labels,[[A.clk_rms_m]'/c0*1e9 [A.drift_rms_mps]'*1e3])); set(ax,'YScale','log'); ylabel(ax,'clk [ns] / drift [mm/s]');
+    legend(ax,{'clock [ns]','drift [mm/s]'},'Location','northoutside','Orientation','horizontal','Box','off');
+    first=i_a4save(f,rawPath,first);
+
+    % 4 — NEES suite
+    [f,ax]=i_a4fig('NEES per DOF  (1 = consistent, >>1 optimistic)', ...
+        'Each channel should sit on the dashed y=1 line; well above => filter over-confident.');
+    NE=[[A.nees_pos]' [A.nees_vel]' [A.nees_clk]' [A.nees_att]']; NE(~isfinite(NE))=NaN;
+    i_barColors(bar(ax,labels,NE)); set(ax,'YScale','log'); ylabel(ax,'NEES / dof');
+    yline(ax,1,'--','Color',refCol,'LineWidth',1.4); ylim(ax,[max(1e-2,min(NE(:))*0.5) max(10,max(NE(:))*1.5)]);
+    legend(ax,{'pos','vel','clk','att'},'Location','northoutside','Orientation','horizontal','Box','off');
+    first=i_a4save(f,rawPath,first);
+
+    % 5 — covariance realism
+    [f,ax]=i_a4fig('Covariance realism  (filter \sigma / actual RMS)', ...
+        '<1 optimistic (over-confident), >1 conservative; the [0.5, 2] band is acceptable.');
+    RA=[[A.ratio_pos]' [A.ratio_clk]']; RA(~isfinite(RA))=NaN;
+    i_barColors(bar(ax,labels,RA)); set(ax,'YScale','log');
+    yline(ax,1,'--','Color',refCol,'LineWidth',1.4); yline(ax,0.5,':','Color',[0.6 0.6 0.62]); yline(ax,2,':','Color',[0.6 0.6 0.62]);
+    ylabel(ax,'filter \sigma / actual RMS');
+    legend(ax,{'pos','clk'},'Location','northoutside','Orientation','horizontal','Box','off');
+    first=i_a4save(f,rawPath,first);
+
+    % 6 — geometry / DOP + degeneracy
+    [f,ax]=i_a4fig('Geometry / degeneracy', ...
+        'PDOP/TDOP/GDOP bars (log, left); corr(radial,clock) line (right). corr near -1 = degenerate.');
+    yyaxis(ax,'left');  i_barColors(bar(ax,labels,[[A.pdop]' [A.tdop]' [A.gdop]'])); set(ax,'YScale','log'); ylabel(ax,'DOP');
+    yyaxis(ax,'right'); plot(ax,1:nA,[A.corr_rad_clk]','o-','LineWidth',2,'MarkerSize',7,'MarkerFaceColor','auto'); ylabel(ax,'corr(rad,clk)'); ylim(ax,[-1.05 1.05]);
+    legend(ax,{'PDOP','TDOP','GDOP','corr'},'Location','northoutside','Orientation','horizontal','Box','off');
+    first=i_a4save(f,rawPath,first);
+
+    % 7..N — TIMESERIES, split into idealised / realism (one grade per page) so the lines
+    % are readable. Within a page: COLOUR = carrier band, LINE STYLE = topology (S1 solid,
+    % S6 dashed). Each of the 3 convergence plots therefore becomes up to 2 pages.
+    pal5 = i_palette();
+    groups = {};
+    gi = find(arrayfun(@(a) i_labelIsGrade(a.label,'idealised'), A));
+    gr = find(arrayfun(@(a) i_labelIsGrade(a.label,'realism'),   A));
+    if ~isempty(gi); groups(end+1,:) = {'idealised', gi}; end
+    if ~isempty(gr); groups(end+1,:) = {'realism',   gr}; end
+    if isempty(groups); groups = {'all runs', 1:nA}; end
+    tsKinds = { ...
+      'pos', 'Position error convergence',                   '3D position error [m]', ...
+             '3D position error vs time (log). Colour = band; solid = S1 (ground-only), dashed = S6 (swarm).'; ...
+      'clk', 'Clock error convergence  (|.|, log)',           '|clock error| [ns]', ...
+             '|receiver clock bias error| vs time. Colour = band; solid = S1, dashed = S6.'; ...
+      'nees','Position consistency — NEES(pos)  (1 = ideal)', 'NEES(pos) / dof', ...
+             'NEES(pos)/dof vs time (dashed y=1). Colour = band; solid = S1, dashed = S6.' };
+    for kk = 1:size(tsKinds,1)
+        for gg = 1:size(groups,1)
+            gidx = groups{gg,2};
+            [f,ax] = i_a4fig(sprintf('%s  —  %s', tsKinds{kk,2}, groups{gg,1}), tsKinds{kk,4});
+            set(ax,'YScale','log');
+            for i = gidx(:)'
+                switch tsKinds{kk,1}
+                    case 'pos';  t=A(i).ts_t; y=sqrt(sum(A(i).ts_rac.^2,1));
+                    case 'clk';  t=A(i).ts_t; y=abs(A(i).ts_clk_ns)+eps;
+                    case 'nees'; ne=A(i).ts_nees_pos; if isempty(ne); continue; end
+                                 t=A(i).ts_t(1:numel(ne)); y=ne;
+                end
+                plot(ax, t, y, 'Color', i_bandColor(A(i).label,pal5), 'LineStyle', i_topoStyle(A(i).S), ...
+                    'LineWidth', 1.9, 'DisplayName', A(i).label);
+            end
+            if strcmp(tsKinds{kk,1},'nees')
+                yline(ax,1,'--','Color',refCol,'LineWidth',1.4,'HandleVisibility','off');
+            end
+            xlabel(ax,'time [s]'); ylabel(ax,tsKinds{kk,3}); i_a4legend(ax,numel(gidx));
+            first = i_a4save(f,rawPath,first);
+        end
+    end
+
+    % Normalise every page to EXACT A4 landscape (842 x 595 pt) via ghostscript; the
+    % exportgraphics pages are cropped to content, so this re-pages them onto A4. If gs
+    % is unavailable the content-cropped landscape file is kept as the deliverable.
+    if i_toA4(rawPath, pdfPath)
+        if isfile(rawPath); delete(rawPath); end
+    elseif isfile(rawPath)
+        movefile(rawPath, pdfPath);
+    end
+end
+
+function ok = i_toA4(rawPath, outPath)
+    % Re-page a PDF onto fixed A4-landscape media (842 x 595 pt), scaling each page to fit.
+    ok = false;
+    cands = {'/usr/local/bin/gs','/opt/homebrew/bin/gs','/opt/local/bin/gs','gs'};
+    gsBin = '';
+    for i = 1:numel(cands)
+        [st,~] = system([cands{i} ' --version']);
+        if st == 0; gsBin = cands{i}; break; end
+    end
+    if isempty(gsBin); return; end
+    cmd = sprintf(['%s -q -dNOPAUSE -dBATCH -sDEVICE=pdfwrite ' ...
+        '-dDEVICEWIDTHPOINTS=842 -dDEVICEHEIGHTPOINTS=595 -dFIXEDMEDIA -dPDFFitPage ' ...
+        '-dAutoRotatePages=/None -dCompatibilityLevel=1.5 -sOutputFile="%s" "%s"'], ...
+        gsBin, outPath, rawPath);
+    [st,~] = system(cmd);
+    ok = (st == 0) && isfile(outPath);
+end
+
+function [fig,ax]=i_a4fig(titleStr, subStr)
+    % A4 landscape page (29.7 x 21.0 cm) with one large axes.
+    fig=figure('Visible','off','Color','w','Units','centimeters', ...
+        'Position',[0 0 29.7 21.0],'PaperUnits','centimeters', ...
+        'PaperSize',[29.7 21.0],'PaperOrientation','landscape','PaperPositionMode','auto');
+    i_applyFigStyle(fig);
+    set(fig,'DefaultAxesFontSize',15,'DefaultTextFontSize',15,'DefaultLineLineWidth',1.8);
+    ax=axes(fig,'Units','normalized','Position',[0.085 0.13 0.74 0.75]);
+    hold(ax,'on'); grid(ax,'on'); set(ax,'FontSize',15);
+    title(ax,titleStr,'FontSize',21,'FontWeight','normal');
+    if nargin>1 && ~isempty(subStr)
+        try; subtitle(ax,subStr,'FontSize',12.5,'Color',[0.35 0.35 0.38]); catch; end
+    end
+end
+
+function i_a4legend(ax, nA)
+    lg=legend(ax,'Location','eastoutside','Box','off');
+    if nA>16; lg.FontSize=8; lg.NumColumns=2; elseif nA>10; lg.FontSize=9; else; lg.FontSize=11; end
+end
+
+function first=i_a4save(fig,pdfPath,first)
+    if first; exportgraphics(fig,pdfPath,'ContentType','vector');
+    else;     exportgraphics(fig,pdfPath,'Append',true,'ContentType','vector'); end
+    first=false; close(fig);
 end
 
 % =========================================================================
@@ -685,6 +845,31 @@ function bh = i_barColors(bh)
     end
 end
 
+function c = i_bandColor(label, pal)
+    % Colour a run by its carrier band (frequency pair), so lines are distinguishable
+    % by MEANING, not by an arbitrary cycle. Ordered by ascending primary frequency.
+    pairs = {'1.58/1.23','2.11/2.02','5.00/2.10','6.42/5.92','8.40/7.90'};
+    r = numel(pairs)+1;
+    tok = regexp(label,'(\d+\.\d+\s*/\s*\d+\.\d+)','tokens','once');
+    if ~isempty(tok)
+        idx = find(strcmp(pairs, strrep(tok{1},' ','')), 1);
+        if ~isempty(idx); r = idx; end
+    end
+    c = pal(min(r,size(pal,1)),:);
+end
+
+function s = i_topoStyle(nS)
+    % Topology by line STYLE: ground-only (S1) solid, ISL swarm (S6) dashed.
+    if nS > 1; s = '--'; else; s = '-'; end
+end
+
+function tf = i_labelIsGrade(label, grade)
+    lo = lower(label);
+    if strcmpi(grade,'idealised'); tf = contains(lo,'ideal');
+    elseif strcmpi(grade,'realism'); tf = contains(lo,'real') && ~contains(lo,'ideal');
+    else; tf = false; end
+end
+
 function i_applyFigStyle(fig)
     % Modern per-figure defaults (scoped to fig, so a user's groot is untouched).
     FONT = 'Helvetica';
@@ -704,7 +889,9 @@ function i_applyFigStyle(fig)
         'DefaultAxesGridColor',[0.45 0.45 0.48],'DefaultAxesGridAlpha',0.15, ...
         'DefaultAxesTitleFontWeight','normal','DefaultAxesTitleFontSizeMultiplier',1.12, ...
         'DefaultAxesColorOrder',i_palette(), ...
-        'DefaultLineLineWidth',1.7);
+        'DefaultLineLineWidth',1.7, ...
+        'DefaultAxesTickLabelInterpreter','none', ...
+        'DefaultLegendInterpreter','none');   % run labels have '.' etc; DON'T TeX-subscript them
 end
 
 % ---- Adaptive-unit formatting ("smallest numbers") ----------------------
