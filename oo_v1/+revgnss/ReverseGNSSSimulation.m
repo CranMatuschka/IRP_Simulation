@@ -291,15 +291,21 @@ classdef ReverseGNSSSimulation < handle
         function runEstimation_(obj, k, t_s, dt)
             % ESTIMATION stage: predict, form measurements (the ONLY channel through
             % which truth enters the estimator), detect slips, update, and record. The
-            % prediction reads no truth state; truth is read only via computeMeasurements
-            % and post-update diagnostics.
+            % prediction reads no truth state EXCEPT the strapdown gyro reading when the IMU is
+            % enabled -- a NOISY control input (omega_true + bias + ARW), architecturally identical
+            % to a real INS and honest (it never exposes truth omega directly). Truth is otherwise
+            % read only via computeMeasurements and post-update diagnostics.
             cpInfo = [];  % Float carrier cpInfo captured in slip-detection block
 
             % EKF predict (skip at first epoch — no prior state to propagate from)
             if k > 1
                 towerClockModels = cellfun(@(t) t.clock, obj.towers, ...
                     'UniformOutput', false);
-                obj.ekf.predict(dt, towerClockModels, t_s - dt);
+                omega_gyro = [];
+                if obj.ekf.estimateGyroBias
+                    omega_gyro = obj.asset.getGyroReading();   % truth gyro reading for [k-1,k]
+                end
+                obj.ekf.predict(dt, towerClockModels, t_s - dt, omega_gyro);
             end
 
             % Compute measurements — use getMeasurementState() so quaternionErrorState

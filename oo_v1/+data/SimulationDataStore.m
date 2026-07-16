@@ -32,6 +32,7 @@ classdef SimulationDataStore < handle
         tr_v_     % [3 x N] velocity ECEF mps
         tr_eu_    % [3 x N] Euler rad
         tr_om_    % [3 x N] omega rad/s
+        tr_bg_    % [3 x N] truth gyro bias rad/s (IMU/MEKF; NaN when no gyro)
         tr_cbm_   % [N x 1] rx clock bias m
         tr_cbs_   % [N x 1] rx clock bias s
         tr_cdm_   % [N x 1] rx clock drift mps
@@ -42,6 +43,7 @@ classdef SimulationDataStore < handle
         es_v_     % [3 x N]
         es_eu_    % [3 x N]
         es_om_    % [3 x N]
+        es_bg_    % [3 x N] estimated gyro bias rad/s (IMU/MEKF; NaN when no gyro)
         es_cbm_   % [N x 1]
         es_cdm_   % [N x 1]
         % state-dim dependent (lazy):
@@ -256,12 +258,12 @@ classdef SimulationDataStore < handle
             obj.t_s_   = n1();
 
             obj.tr_r_  = n3(); obj.tr_v_  = n3();
-            obj.tr_eu_ = n3(); obj.tr_om_ = n3();
+            obj.tr_eu_ = n3(); obj.tr_om_ = n3(); obj.tr_bg_ = n3();
             obj.tr_cbm_= n1(); obj.tr_cbs_= n1();
             obj.tr_cdm_= n1(); obj.tr_ff_ = n1();
 
             obj.es_r_  = n3(); obj.es_v_  = n3();
-            obj.es_eu_ = n3(); obj.es_om_ = n3();
+            obj.es_eu_ = n3(); obj.es_om_ = n3(); obj.es_bg_ = n3();
             obj.es_cbm_= n1(); obj.es_cdm_= n1();
 
             obj.er_pv_ = n3(); obj.er_pn_ = n1();
@@ -359,6 +361,7 @@ classdef SimulationDataStore < handle
             end
             obj.tr_eu_(:,k) = gv_(entry,{'truth','euler_rad'},nan(3,1));
             obj.tr_om_(:,k) = gv_(entry,{'truth','omega_body_radps'},nan(3,1));
+            obj.tr_bg_(:,k) = gv_(entry,{'truth','gyroBias_radps'},nan(3,1));
             obj.tr_cbm_(k)  = gn_(entry,'truth','rxClockBias_m',NaN);
             obj.tr_cbs_(k)  = gn_(entry,'truth','rxClockBias_s',NaN);
             obj.tr_cdm_(k)  = gn_(entry,'truth','rxClockDrift_mps',NaN);
@@ -377,6 +380,7 @@ classdef SimulationDataStore < handle
             end
             obj.es_eu_(:,k) = gv_(entry,{'estimate','euler_rad'},nan(3,1));
             obj.es_om_(:,k) = gv_(entry,{'estimate','omega_body_radps'},nan(3,1));
+            obj.es_bg_(:,k) = gv_(entry,{'estimate','gyroBias_radps'},nan(3,1));
             obj.es_cbm_(k)  = gn_(entry,'estimate','rxClockBias_m',NaN);
             obj.es_cdm_(k)  = gn_(entry,'estimate','rxClockDrift_mps',NaN);
             eu_es = gv_(entry,{'estimate','euler_rad'},[]);
@@ -621,6 +625,9 @@ classdef SimulationDataStore < handle
             entry.truth.v_cm_ecef_mps    = asset.v_ecef_mps;
             entry.truth.euler_rad        = asset.attitude_euler_rad;
             entry.truth.omega_body_radps = asset.angularRate_body_radps;
+            if ~isempty(asset.gyro)
+                entry.truth.gyroBias_radps = asset.gyro.bias_radps;   % IMU/MEKF truth bias
+            end
             entry.truth.rxClockBias_m    = asset.clock.getBiasMeters();
             entry.truth.rxClockBias_s    = asset.clock.getBiasSeconds();
             entry.truth.rxFracFreq       = asset.clock.getFractionalFrequency();
@@ -634,6 +641,9 @@ classdef SimulationDataStore < handle
             entry.estimate.v_cm_ecef_mps    = x(sm.v_idx);
             entry.estimate.euler_rad        = reportEuler_rad;
             entry.estimate.omega_body_radps = x(sm.omega_idx);
+            if isfield(sm,'gyroBiasIdx') && ~isempty(sm.gyroBiasIdx)
+                entry.estimate.gyroBias_radps = x(sm.gyroBiasIdx);    % IMU/MEKF estimated bias
+            end
             entry.estimate.rxClockBias_m    = x(sm.b_rx_idx);
             entry.estimate.rxClockDrift_mps = x(sm.bdot_rx_idx);
 
@@ -1522,6 +1532,15 @@ classdef SimulationDataStore < handle
 
         function v = getRxClockBiasTrue(obj)
             v = obj.tr_cbs_(1:obj.nEpochs);
+        end
+
+        function v = getGyroBiasTrue(obj)
+            % [3 x N] truth gyro bias [rad/s] (all-NaN when the IMU/gyro is off).
+            v = obj.tr_bg_(:, 1:obj.nEpochs);
+        end
+        function v = getGyroBiasEstimate(obj)
+            % [3 x N] EKF-estimated gyro bias [rad/s] (all-NaN when no gyro-bias state).
+            v = obj.es_bg_(:, 1:obj.nEpochs);
         end
 
         function s = getLastAttitudeAudit(obj)

@@ -218,6 +218,15 @@ classdef ScenarioFactory
                     end
                 end
             end
+
+            % Gyro-bias initial covariance (IMU/MEKF). The filter's prior on b_g -- NOT the truth
+            % bias (which stays unknown to the filter). Zero here would wrongly assert perfect
+            % knowledge, so it must be the configured 1-sigma. No-op when the block is absent.
+            if ekf.estimateGyroBias && isfield(sm,'gyroBiasIdx') && ~isempty(sm.gyroBiasIdx)
+                for k = 1:numel(sm.gyroBiasIdx)
+                    P0(sm.gyroBiasIdx(k), sm.gyroBiasIdx(k)) = ekf.imuP0Bias_^2;
+                end
+            end
         end
     end
 end

@@ -570,6 +570,16 @@ classdef ConfigFactory
             % which sets it false) are left byte-identical.
             cfg = revgnss.ConfigFactory.applyAtmosphereProfile(cfg);
 
+            % ---- IMU / gyro attitude aiding (gated; no-op unless cfg.estimator.imu.enable) ----
+            % Resolve the master switch into the EKF flag here; the truth-side asset gyro config is
+            % attached AFTER MultiAssetConfig.normalize below (adding cfg.asset.imu before the
+            % asset/assets merge would make the struct arrays dissimilar). When off: pure no-op.
+            imuOn = false;
+            try; imuOn = logical(cfg.estimator.imu.enable); catch; end
+            if imuOn
+                cfg.estimator.estimateGyroBias = true;
+            end
+
             % ---- Initialize validation tracking ---------------------------
             if ~isfield(cfg,'validation')
                 cfg.validation = struct();
@@ -1512,6 +1522,16 @@ classdef ConfigFactory
                 end
             end
             cfg = revgnss.MultiAssetConfig.normalize(cfg);
+            % Attach the truth gyro config to the primary asset AFTER normalize (adding cfg.asset.imu
+            % before the asset/assets merge would make the struct arrays dissimilar). Field-level
+            % assignment is struct-array-safe. Gated: only when the IMU master switch is on.
+            if imuOn
+                gyroCfg = cfg.estimator.imu.truth; gyroCfg.enable = true;
+                cfg.asset.imu = gyroCfg;
+                if isfield(cfg,'assets') && ~isempty(cfg.assets)
+                    cfg.assets(1).imu = gyroCfg;
+                end
+            end
             revgnss.ISLMeasurementBuilder.validateConfig(cfg);
             revgnss.TwoWayISLMeasurementBuilder.validateConfig(cfg);
             revgnss.ISLTimingModel.validateConfig(cfg);

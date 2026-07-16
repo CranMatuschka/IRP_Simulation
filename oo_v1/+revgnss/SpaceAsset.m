@@ -47,6 +47,10 @@ classdef SpaceAsset < handle
         % Receiver clock
         clock                    models.clocks.ClockModel
 
+        % Truth strapdown gyro (IMU/MEKF aiding); created only when cfg.imu.enable.
+        gyro                     models.sensors.GyroModel
+        lastGyroReading_radps    (3,1) double = zeros(3,1)
+
         % History log
         history                  (1,1) struct
     end
@@ -75,6 +79,12 @@ classdef SpaceAsset < handle
             end
 
             obj.clock = models.clocks.ClockModel(cfg.clock);
+
+            % Truth gyro (IMU/MEKF): created only when cfg.imu.enable (gated -> off = no gyro).
+            if isfield(cfg,'imu') && isstruct(cfg.imu) && isfield(cfg.imu,'enable') && cfg.imu.enable
+                obj.gyro = models.sensors.GyroModel(cfg.imu);
+                obj.lastGyroReading_radps = obj.angularRate_body_radps;
+            end
 
             obj.history.time_s                = [];
             obj.history.r_ecef_m              = [];
@@ -145,6 +155,11 @@ classdef SpaceAsset < handle
 
             % Clock
             obj.clock.step(dt_s);
+
+            % Truth gyro reading for this interval (IMU/MEKF); no-op when gyro absent.
+            if ~isempty(obj.gyro)
+                obj.lastGyroReading_radps = obj.gyro.sample(obj.angularRate_body_radps, dt_s);
+            end
         end
 
         function logState(obj, t_s)
@@ -167,6 +182,19 @@ classdef SpaceAsset < handle
             obj.attitude_euler_rad = revgnss.AttitudeKinematics.wrapEuler( ...
                 obj.attitude_euler_rad + dt_s * edot);
             obj.clock.step(dt_s);
+            if ~isempty(obj.gyro)
+                obj.lastGyroReading_radps = obj.gyro.sample(obj.angularRate_body_radps, dt_s);
+            end
+        end
+
+        function w = getGyroReading(obj)
+            % getGyroReading  Latest truth gyro body-rate measurement (falls back to the truth
+            % rate when no gyro is configured, so callers work unchanged with the IMU off).
+            if isempty(obj.gyro)
+                w = obj.angularRate_body_radps;
+            else
+                w = obj.lastGyroReading_radps;
+            end
         end
 
         function setTruthFromOrbit(obj, r_ecef_m, v_ecef_mps)

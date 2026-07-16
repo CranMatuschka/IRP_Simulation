@@ -74,6 +74,16 @@ classdef ReverseGNSSEKF < handle
         estimateAttitude      (1,1) logical = true
         estimateAngularRate   (1,1) logical = true
 
+        % Optional gyro-bias states (IMU/MEKF attitude aiding). 3 states appended ONLY when
+        % estimateGyroBias -> nx/state-map unchanged when off (golden-safe). On this path the
+        % attitude is propagated with omega = omega_gyro - b_g (strapdown control input) and the
+        % attitude process noise comes from the gyro ARW instead of the angular-accel model.
+        estimateGyroBias      (1,1) logical = false
+        imuArw_               (1,1) double  = 1e-4    % filter angle random walk [rad/sqrt(s)]
+        imuRrw_               (1,1) double  = 1e-6    % filter bias rate random walk [rad/(s*sqrt(s))]
+        imuP0Bias_            (1,1) double  = 1e-5    % initial bias 1-sigma (init done in ScenarioFactory)
+        imuVanLoan_           (1,1) logical = false   % optional theta<->b_g Q cross term
+
         % Clock model (for process noise)
         rxClockModel     models.clocks.ClockModel
 
@@ -157,6 +167,19 @@ classdef ReverseGNSSEKF < handle
                 obj.nTxCodeBiasStates    = nTowers;
             end
 
+            % Optional gyro-bias states (IMU/MEKF aiding). Gated on estimateGyroBias (default false).
+            if isfield(cfg.estimator,'estimateGyroBias')
+                obj.estimateGyroBias = logical(cfg.estimator.estimateGyroBias);
+            end
+            if obj.estimateGyroBias
+                try
+                    obj.imuArw_     = cfg.estimator.imu.filter.arw_rad_per_sqrt_s;
+                    obj.imuRrw_     = cfg.estimator.imu.filter.rrw_rad_per_s_sqrt_s;
+                    obj.imuP0Bias_  = cfg.estimator.imu.filter.P0_bias_radps;
+                    obj.imuVanLoan_ = logical(cfg.estimator.imu.filter.useVanLoanCrossTerm);
+                catch; end
+            end
+
             obj.nx = obj.nxBase;
             if obj.estimateTowerClocks
                 obj.nx = obj.nx + 2 * nTowers;
@@ -172,6 +195,9 @@ classdef ReverseGNSSEKF < handle
             end
             if obj.estimateTxCodeBias
                 obj.nx = obj.nx + obj.nTxCodeBiasStates;
+            end
+            if obj.estimateGyroBias
+                obj.nx = obj.nx + 3;
             end
 
             if isfield(cfg.estimator,'sigma_accel_mps2')
@@ -247,10 +273,14 @@ classdef ReverseGNSSEKF < handle
         end
 
         % ----------------------------------------------------------------
-        function predict(obj, dt_s, towerClockModels, t0_s)
+        function predict(obj, dt_s, towerClockModels, t0_s, omega_gyro_radps)
             % predict  EKF time propagation.
             %   t0_s — simulation time at start of prediction interval.
+            %   omega_gyro_radps (optional) — strapdown gyro body-rate reading. When the IMU is
+            %   enabled the attitude is propagated with omega = omega_gyro - b_g; otherwise the
+            %   free omega state is used (byte-identical to the pre-IMU behaviour).
             if nargin < 4 || isempty(t0_s); t0_s = 0; end
+            if nargin < 5; omega_gyro_radps = []; end
 
             x  = obj.x;
             sm = obj.stateMap;
@@ -259,6 +289,11 @@ classdef ReverseGNSSEKF < handle
             v   = x(sm.v_idx);
             eul = x(sm.euler_idx);
             omg = x(sm.omega_idx);
+            % IMU strapdown: drive attitude with the gyro reading minus the estimated bias.
+            % omg then flows into the quaternion propagation and buildF_ (skew term) below.
+            if obj.estimateGyroBias && ~isempty(omega_gyro_radps) && ~isempty(sm.gyroBiasIdx)
+                omg = omega_gyro_radps(:) - x(sm.gyroBiasIdx);
+            end
             b_rx    = x(sm.b_rx_idx);
             bdot_rx = x(sm.bdot_rx_idx);
 
@@ -624,6 +659,15 @@ classdef ReverseGNSSEKF < handle
             else
                 sm.txCodeBiasIdx = zeros(nTowers, 1);
             end
+
+            % Optional gyro-bias states (IMU/MEKF). Appended LAST so no existing index shifts;
+            % empty when off -> state map identical to the pre-IMU map (golden-safe).
+            if obj.estimateGyroBias
+                sm.gyroBiasIdx = (nextIdx:nextIdx+2)';
+                nextIdx = nextIdx + 3; %#ok<NASGU>
+            else
+                sm.gyroBiasIdx = [];
+            end
         end
 
         % ----------------------------------------------------------------
@@ -659,6 +703,13 @@ classdef ReverseGNSSEKF < handle
                     sk3 = [0,-omg(3),omg(2); omg(3),0,-omg(1); -omg(2),omg(1),0];
                     F(sm.euler_idx, sm.euler_idx) = eye(3) - sk3 * dt_s;
                     F(sm.euler_idx, sm.omega_idx) = eye(3) * dt_s;
+                    if obj.estimateGyroBias && ~isempty(sm.gyroBiasIdx)
+                        % Strapdown: omega = omega_gyro - b_g, so d(dtheta)/d(b_g) = -d(dtheta)/d(omega).
+                        % The receiver attitude update then observes and corrects b_g through this block.
+                        F(sm.euler_idx, sm.gyroBiasIdx) = -eye(3) * dt_s;
+                        F(sm.euler_idx, sm.omega_idx)   = zeros(3);   % omega state no longer drives attitude
+                        % F(gyroBias,gyroBias)=I already (random walk, from F=eye(nx)).
+                    end
                 else
                     F(sm.euler_idx, sm.euler_idx) = eye(3);
                     F(sm.euler_idx, sm.omega_idx) = zeros(3);
@@ -795,6 +846,26 @@ classdef ReverseGNSSEKF < handle
                 Q(sm.omega_idx(k), sm.omega_idx(k)) = q_omg;
                 Q(sm.euler_idx(k), sm.omega_idx(k)) = q_eul_omg;
                 Q(sm.omega_idx(k), sm.euler_idx(k)) = q_eul_omg;
+            end
+
+            % --- IMU/MEKF process noise: attitude Q from the gyro ARW (REPLACES the angular-accel
+            %     term above), gyro-bias Q from the RRW. Gated -> off = pre-IMU Q (golden-safe).
+            if obj.estimateGyroBias && ~isempty(sm.gyroBiasIdx)
+                gb    = sm.gyroBiasIdx;
+                q_arw = obj.imuArw_^2 * dt_s;
+                q_rrw = obj.imuRrw_^2 * dt_s;
+                for k = 1:3
+                    Q(sm.euler_idx(k), sm.euler_idx(k)) = q_arw;   % gyro ARW replaces angular-accel
+                    Q(sm.euler_idx(k), sm.omega_idx(k)) = 0;       % drop euler<->omega cross on IMU path
+                    Q(sm.omega_idx(k), sm.euler_idx(k)) = 0;
+                    Q(gb(k), gb(k))                     = q_rrw;   % bias rate random walk
+                end
+                if obj.imuVanLoan_
+                    for k = 1:3
+                        Q(sm.euler_idx(k), gb(k)) = -0.5 * q_rrw * dt_s;
+                        Q(gb(k), sm.euler_idx(k)) = -0.5 * q_rrw * dt_s;
+                    end
+                end
             end
 
             % --- Receiver clock process noise ---------------------------
