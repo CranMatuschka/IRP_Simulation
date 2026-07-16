@@ -47,6 +47,15 @@ classdef ReportRealityHelper
             if isfield(cfg, 'estimator') && isfield(cfg.estimator, 'estimateTowerClocks') && cfg.estimator.estimateTowerClocks
                 expectedStates = expectedStates + 2*nTwr;
             end
+            % IMU/MEKF gyro-bias states (3), appended only when the gyro is enabled (default off).
+            imuOn = false;
+            try
+                imuOn = (isfield(cfg.estimator,'estimateGyroBias') && cfg.estimator.estimateGyroBias) || ...
+                        (isfield(cfg.estimator,'imu') && isfield(cfg.estimator.imu,'enable') && cfg.estimator.imu.enable);
+            catch; end
+            if imuOn
+                expectedStates = expectedStates + 3;
+            end
             nStates = revgnss.ReportRealityHelper.safeField_(summary, 'nStates', NaN);
             if isfinite(nStates) && nStates ~= expectedStates
                 error('ClockExactReportBuilder:stateTableCountMismatch', ...
