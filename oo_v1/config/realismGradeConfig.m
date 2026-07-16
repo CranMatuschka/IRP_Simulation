@@ -25,27 +25,28 @@ function cfg = realismGradeConfig(cfg)
 
     inc        = i_resolveIncludes(cfg);   % all-true defaults merged with cfg.realism.include
     expandList = {};                       % single-enable effects switched ON (re-expanded once at end)
+    V          = i_loadRealismValues();    % numeric params from config/realism.json (fallback = defaults)
 
     % ---- R-1  Realistic receiver clock (JOW Table 2.1 caesium, not the idealised legacy maser)
     if inc.clock
-        cfg.asset.clockType             = 'CESIUM1';
-        cfg.clock.templateSource        = 'jowTable2p1';
-        cfg.clockScaling.templateSource = 'jowTable2p1';   % mirror read by config-time makeClockConfig
+        cfg.asset.clockType             = V.clock.clockType;
+        cfg.clock.templateSource        = V.clock.templateSource;
+        cfg.clockScaling.templateSource = V.clock.templateSource;   % mirror read by config-time makeClockConfig
     end
 
     % ---- R-4  Realistic ground broadcast tower-clock product sigma (IGS-RTS, not IGS-final)
     if inc.towerProductSigma
-        cfg.clocks.tower.product.sigmaBias_m    = 0.10;    % ~0.33 ns   (was 0.01 m = 33 ps, IGS-final grade)
-        cfg.clocks.tower.product.sigmaDrift_mps = 0.001;   % ~3.3 ps/s  (was 2e-4)
+        cfg.clocks.tower.product.sigmaBias_m    = V.towerProductSigma.sigmaBias_m;    % ~0.33 ns (was 0.01 m IGS-final)
+        cfg.clocks.tower.product.sigmaDrift_mps = V.towerProductSigma.sigmaDrift_mps; % ~3.3 ps/s (was 2e-4)
     end
 
     % ---- M7  Elevation / C/N0 code-noise weighting (low-elevation towers no longer over-trusted)
     if inc.cn0
         cfg.measurements.codeNoise.model                = 'cn0';
         cfg.measurements.codeNoise.cn0.enable           = true;
-        cfg.measurements.codeNoise.cn0.base_dBHz        = 45;   % nominal received C/N0 [dB-Hz]; raise for a better link
-        cfg.measurements.codeNoise.cn0.elevationGain_dB = 6;    % +6 dB toward zenith
-        cfg.measurements.codeNoise.cn0.sigmaAt45dBHz_m  = 0.30;
+        cfg.measurements.codeNoise.cn0.base_dBHz        = V.cn0.base_dBHz;         % nominal received C/N0 [dB-Hz]
+        cfg.measurements.codeNoise.cn0.elevationGain_dB = V.cn0.elevationGain_dB;  % +6 dB toward zenith
+        cfg.measurements.codeNoise.cn0.sigmaAt45dBHz_m  = V.cn0.sigmaAt45dBHz_m;
     end
 
     % ---- R-5  Turn on the omitted truth-side systematics (each independently gateable)
@@ -56,7 +57,7 @@ function cfg = realismGradeConfig(cfg)
     end
     if inc.hardwareDelay
         cfg.errors.hardwareDelay.enable                    = true;
-        cfg.errors.hardwareDelay.sigma_m                   = 0.5;    % per-tower residual channel
+        cfg.errors.hardwareDelay.sigma_m                   = V.hardwareDelay.sigma_m;    % per-tower residual channel
         cfg.errors.hardwareDelay.residualStochastic.enable = true;
         expandList{end+1} = 'errors.hardwareDelay';
     end
@@ -71,15 +72,15 @@ function cfg = realismGradeConfig(cfg)
     if inc.dcb
         % Differential code bias (global part): a truth inter-frequency code bias with model=0,
         % so it survives z-h. Per-tower DCB is a new-physics follow-up.
-        cfg.biases.interFrequency.code.truth.L1_m = 0.30;   % ~1 ns L1 group delay
-        cfg.biases.interFrequency.code.truth.L2_m = 0.45;   % ~1.5 ns L2 group delay
+        cfg.biases.interFrequency.code.truth.L1_m = V.dcb.L1_m;   % ~1 ns L1 group delay
+        cfg.biases.interFrequency.code.truth.L2_m = V.dcb.L2_m;   % ~1.5 ns L2 group delay
     end
 
     % ---- R-10  Honest floors / real-world sigmas (raise the non-physical / over-tight values)
     if inc.honestFloors
-        cfg.measurement.sigmaFloor_m       = 0.01;   % was 1e-3 (below carrier wavelength -> non-physical)
-        cfg.measurements.doppler.sigma_mps = 0.03;   % raw FLL, not carrier-derived
-        cfg.measurements.carrier.sigma_m   = 0.010;  % reconcile to the real-world guard (>=1 cm)
+        cfg.measurement.sigmaFloor_m       = V.honestFloors.sigmaFloor_m;      % was 1e-3 (sub-wavelength)
+        cfg.measurements.doppler.sigma_mps = V.honestFloors.doppler_sigma_mps; % raw FLL, not carrier-derived
+        cfg.measurements.carrier.sigma_m   = V.honestFloors.carrier_sigma_m;   % real-world guard (>=1 cm)
     end
 
     % ---- R-3  Truth force gap CLOSED in the EKF: sun+moon third-body (and SRP) added to BOTH
@@ -91,7 +92,7 @@ function cfg = realismGradeConfig(cfg)
     % the EKF force, AND the SNC together, so it can never manufacture a one-sided gap.
     if inc.luniSolar
         cfg.estimator.processNoise.modelMismatch.enable     = true;
-        cfg.estimator.processNoise.modelMismatch.sigma_mps2 = 1e-6;
+        cfg.estimator.processNoise.modelMismatch.sigma_mps2 = V.luniSolar.sigma_mps2;
         % Truth-side forces:
         cfg.orbit.truth.perturbations.luniSolar.enable = true;
         cfg.orbit.truth.perturbations.srp.enable       = true;
@@ -113,8 +114,8 @@ function cfg = realismGradeConfig(cfg)
     % believed the inter-satellite aiding was ~10x better than it delivered; loosen the
     % represented-secondary product sigma to a real broadcast-reference quality).
     if inc.islProductSigma
-        cfg.measurements.isl.product.sigmaPos_m   = 0.10;   % ~10 cm secondary ephemeris (was 0.03)
-        cfg.measurements.isl.product.sigmaClock_m = 0.10;   % ~0.33 ns secondary clock (was 0.02)
+        cfg.measurements.isl.product.sigmaPos_m   = V.islProductSigma.sigmaPos_m;   % ~10 cm secondary ephemeris
+        cfg.measurements.isl.product.sigmaClock_m = V.islProductSigma.sigmaClock_m; % ~0.33 ns secondary clock
     end
 
     % ---- R-8 (truth frame): uncorrected EOP (polar motion + UT1 rate) + solid-Earth tide on
@@ -125,9 +126,9 @@ function cfg = realismGradeConfig(cfg)
         % Use the POST-EOP-CORRECTION residual, not the full uncorrected pole offset: a real
         % system applies IERS EOP products, leaving a cm-dm station residual rather than the ~9 m
         % raw polar motion. 0.005" -> ~15 cm tower displacement (real-time/predicted-EOP grade).
-        cfg.frames.truthEop.polarMotion_xp_arcsec  = 0.005;
-        cfg.frames.truthEop.polarMotion_yp_arcsec  = 0.005;
-        cfg.frames.truthEop.ut1Rate_error_msPerDay = 0.05;
+        cfg.frames.truthEop.polarMotion_xp_arcsec  = V.eop.polarMotion_xp_arcsec;
+        cfg.frames.truthEop.polarMotion_yp_arcsec  = V.eop.polarMotion_yp_arcsec;
+        cfg.frames.truthEop.ut1Rate_error_msPerDay = V.eop.ut1Rate_error_msPerDay;
     end
     if inc.solidEarthTide
         cfg.effects.solidEarthTide.truth.enable = true;
@@ -185,4 +186,48 @@ function inc = i_resolveIncludes(cfg)
                 'cfg.realism.include.%s is not a known realism effect; ignored.', n);
         end
     end
+end
+
+% ==========================================================================================
+function V = i_loadRealismValues()
+%I_LOADREALISMVALUES  Numeric realism parameters from config/realism.json, else built-in defaults.
+%   Overlays whatever blocks/fields the JSON provides on top of i_realismDefaults(), so a missing
+%   or partial JSON always yields a complete, valid struct. Values in the shipped realism.json are
+%   byte-identical to i_realismDefaults(), so the resolved config (and the realism golden) are
+%   unchanged; editing realism.json changes only the numbers, not which effects are on.
+    V = i_realismDefaults();
+    jsonPath = fullfile(fileparts(mfilename('fullpath')), 'realism.json');
+    if ~isfile(jsonPath); return; end
+    try
+        J = jsondecode(fileread(jsonPath));
+    catch ME
+        warning('realismGradeConfig:jsonLoad', ...
+            'config/realism.json unreadable (%s); using built-in defaults.', ME.message);
+        return;
+    end
+    blocks = fieldnames(V);
+    for i = 1:numel(blocks)
+        b = blocks{i};
+        if isfield(J, b) && isstruct(J.(b))
+            ff = fieldnames(J.(b));
+            for j = 1:numel(ff)
+                V.(b).(ff{j}) = J.(b).(ff{j});   % JSON value overrides the default
+            end
+        end
+    end
+end
+
+% ==========================================================================================
+function V = i_realismDefaults()
+%I_REALISMDEFAULTS  Hardcoded fallback = the pre-JSON realism numeric parameters (golden-pinned).
+    V.clock             = struct('clockType','CESIUM1','templateSource','jowTable2p1');
+    V.towerProductSigma = struct('sigmaBias_m',0.10,'sigmaDrift_mps',0.001);
+    V.cn0               = struct('base_dBHz',45,'elevationGain_dB',6,'sigmaAt45dBHz_m',0.30);
+    V.hardwareDelay     = struct('sigma_m',0.5);
+    V.dcb               = struct('L1_m',0.30,'L2_m',0.45);
+    V.honestFloors      = struct('sigmaFloor_m',0.01,'doppler_sigma_mps',0.03,'carrier_sigma_m',0.010);
+    V.luniSolar         = struct('sigma_mps2',1e-6);
+    V.islProductSigma   = struct('sigmaPos_m',0.10,'sigmaClock_m',0.10);
+    V.eop               = struct('polarMotion_xp_arcsec',0.005,'polarMotion_yp_arcsec',0.005, ...
+                                 'ut1Rate_error_msPerDay',0.05);
 end
