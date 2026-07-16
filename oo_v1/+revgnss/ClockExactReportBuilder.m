@@ -171,6 +171,10 @@ classdef ClockExactReportBuilder
             paths.clkErr = CE.tryPlot_(figDir, [stem '_clock_error.pdf'], @() ...
                 CE.plotClockError_(diag, t), cfg);
 
+            % Clock: true development vs EKF estimate (the "real clock" overlay)
+            paths.clkTruth = CE.tryPlot_(figDir, [stem '_clock_truth_vs_estimate.pdf'], @() ...
+                CE.plotClockTruthVsEstimate_(diag, t), cfg);
+
             % Clock drift
             paths.clkDrift = CE.tryPlot_(figDir, [stem '_clock_drift.pdf'], @() ...
                 CE.plotClockDrift_(diag, t), cfg);
@@ -615,6 +619,42 @@ classdef ClockExactReportBuilder
                     xlabel(ax, 'Time [s]', 'FontSize',7);
                     ylabel(ax, revgnss.PlotUnitScaler.axisLabel('Clock error', unit), 'FontSize',7);
                     title(ax, 'Receiver clock bias error (dotted = \pm3\sigma)', 'FontSize',7);
+                    grid(ax, 'on');
+                    revgnss.PlotUnitScaler.disableExponent(ax);
+                    return;
+                end
+            catch; end
+            revgnss.ClockExactReportBuilder.noDataAxes_(ax);
+        end
+
+        % ................................................................
+        function fig = plotClockTruthVsEstimate_(diag, t)
+            % True receiver-clock development vs the EKF-estimated ("corrected") clock.
+            % truth = getRxClockBiasTrue [s]; error = getClockBiasErrors [m] = est - truth;
+            % so estimate [s] = truth + error/c. Shows what the clock really does vs the filter's
+            % reconstruction (the residual is the separate clock-error plot). Under the one-way GEO
+            % radial<->clock degeneracy the estimate absorbs the radial common mode and wanders far
+            % more than the (quiet) truth.
+            fig = revgnss.ClockExactReportBuilder.makeCompactFig_('');
+            ax  = gca(fig);
+            try
+                bt = diag.getRxClockBiasTrue();     % [s] truth
+                er = diag.getClockBiasErrors();     % [m] est - truth
+                if ~isempty(t) && ~isempty(bt) && ~isempty(er)
+                    c0 = revgnss.Constants.SPEED_OF_LIGHT_MPS;
+                    n  = min([numel(t) numel(bt) numel(er)]);
+                    t = t(1:n); bt = bt(1:n); er = er(1:n);
+                    est = bt(:) + er(:) / c0;        % [s] estimate = truth + error
+                    % Scale by the estimate range (the visibly-wandering series).
+                    [ests, unit, sc] = revgnss.PlotUnitScaler.scaleMetric(est, 's');
+                    bts = bt(:) * sc;
+                    hold(ax,'on');
+                    plot(ax, t, bts,  'k-',  'LineWidth', 1.1);
+                    plot(ax, t, ests, 'r--', 'LineWidth', 0.8);
+                    xlabel(ax, 'Time [s]', 'FontSize',7);
+                    ylabel(ax, revgnss.PlotUnitScaler.axisLabel('RX clock bias', unit), 'FontSize',7);
+                    title(ax, 'Receiver clock: truth vs EKF estimate', 'FontSize',7);
+                    legend(ax, {'truth','estimate'}, 'FontSize',6, 'Location','best', 'Box','off');
                     grid(ax, 'on');
                     revgnss.PlotUnitScaler.disableExponent(ax);
                     return;
