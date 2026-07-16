@@ -576,6 +576,12 @@ if isfield(cfg,'realism') && isfield(cfg.realism,'grade') && cfg.realism.grade
     cfg = realismGradeConfig(cfg);
 end
 
+% --- Optional matched-force / per-tower-hardware overlays (gated; no-op unless enabled) ------
+% Standalone config/ functions (like realismGradeConfig): masterConfig applies them for the
+% default path; a run script can also call them after masterConfig() once it sets the toggle.
+cfg = applyLuniSolar(cfg);        % cfg.perturbations.sunMoon.enable
+cfg = applyPerTowerHwBias(cfg);   % cfg.errors.hardwareDelay.perTowerBias.enable
+
 % ================================================================
 % Contract check (asserts only; returns cfg unchanged)
 % ================================================================
@@ -724,6 +730,15 @@ cfg.orbit.truth.perturbations.srp.Cr               = 1.3;         % radiation-pr
 cfg.orbit.truth.perturbations.srp.areaToMass_m2pkg = 0.02;        % area-to-mass ratio [m^2/kg]
 cfg.orbit.truth.perturbations.srp.shadow           = 'cylindrical';
 
+% Single convenience switch for the MATCHED Sun+Moon third-body + SRP force model (truth AND
+% EKF), default OFF. When true, i_applyLuniSolar() (end of file) enables both the truth-side and
+% the EKF-side perturbations with matched epoch/Cr/area-to-mass and retunes the residual-
+% acceleration SNC to 1e-6 -- the same coupled unit realism's include.luniSolar applies, but
+% available standalone without the rest of the realism overlay. Default false -> frozen goldens
+% stay byte-identical. (The individual truth/EKF enables above remain for a deliberate one-sided
+% force gap; this switch is the matched, no-gap version.)
+cfg.perturbations.sunMoon.enable = false;
+
 % --- Swarm formation (helix) truth ---------------------------
 % One master control: cfg.scenario.nSpaceAssets. When it is > 1 (and an orbit
 % propagator is active) the secondary assets are placed on a bounded
@@ -794,6 +809,22 @@ cfg.estimator.estimateAngularRate     = false;
 cfg.estimator.estimateAttitudeFromPseudorange     = false;
 cfg.estimator.estimateAngularRateFromPseudorange  = false;
 cfg.estimator.estimateCarrierAmbiguities          = false;
+% --- IMU / gyro attitude aiding (MASTER SWITCH, default OFF -> golden-safe) --------------------
+% When enabled, a strapdown gyro measures body rate (omega_gyro = omega_true + bias + ARW); the
+% EKF propagates the nominal attitude with omega = omega_gyro - b_g and estimates a 3-state gyro
+% bias b_g APPENDED to the state ONLY when enabled (so nStates 24/54/59 are unchanged when off).
+% The multi-antenna receivers still supply the absolute attitude update. finalizeConfig mirrors
+% imu.truth into cfg.asset.imu and sets estimateGyroBias=imu.enable. See +models/+sensors/GyroModel.
+cfg.estimator.imu.enable                       = false;   % master switch
+cfg.estimator.imu.filter.arw_rad_per_sqrt_s    = 1e-4;    % EKF angle random walk (attitude Q)
+cfg.estimator.imu.filter.rrw_rad_per_s_sqrt_s  = 1e-6;    % EKF bias rate random walk (b_g Q)
+cfg.estimator.imu.filter.P0_bias_radps         = 1e-5;    % initial 1-sigma on b_g
+cfg.estimator.imu.filter.useVanLoanCrossTerm   = false;   % optional theta<->b_g Q cross term
+cfg.estimator.imu.truth.arw_rad_per_sqrt_s     = 1e-4;    % TRUTH gyro ARW (honest; own RNG stream)
+cfg.estimator.imu.truth.rrw_rad_per_s_sqrt_s   = 1e-6;    % TRUTH gyro bias RRW
+cfg.estimator.imu.truth.bias0Sigma_radps       = 1e-5;    % TRUTH initial bias draw 1-sigma
+cfg.estimator.imu.truth.seed                   = 909;     % dedicated gyro RNG seed
+cfg.estimator.estimateGyroBias                 = false;   % resolved from imu.enable in finalizeConfig
 % Differential carrier attitude mode.
 % 'off' (safe default) | 'calibratedDifferentialAmbiguity' | 'validationKnownAmbiguity'
 cfg.estimator.attitudeCarrierMode     = 'off';
@@ -1000,6 +1031,18 @@ cfg.errors.hardwareDelay.model.default_m   = 0.0;
 % a constant residual (already supported).
 cfg.errors.hardwareDelay.sigma_m                   = 0.0;
 cfg.errors.hardwareDelay.residualStochastic.enable = false;
+% Per-tower CONSTANT uplink hardware group-delay bias (gated, default OFF -> golden-safe). When
+% enabled, i_applyPerTowerHwBias() (end of file) draws ONE constant delay per tower from
+% [min_ns,max_ns] using perTowerBias.seed on its OWN RandStream (does not disturb the shared
+% draw order), writes it truth-only (model=0 -> survives z-h as a real UNcalibrated systematic),
+% and adds a jitter_ns white residual matched into R. 10-30 ns is a realistic UNcalibrated ground
+% RF-chain delay (cables/filters/LNA/ADC); a well-calibrated site is <1 ns, so this is the
+% conservative "uncorrected" case. Each tower differs (seeded), never hardcoded.
+cfg.errors.hardwareDelay.perTowerBias.enable    = false;
+cfg.errors.hardwareDelay.perTowerBias.min_ns    = 10;
+cfg.errors.hardwareDelay.perTowerBias.max_ns    = 30;
+cfg.errors.hardwareDelay.perTowerBias.jitter_ns = 3;
+cfg.errors.hardwareDelay.perTowerBias.seed      = 4300;
 
 % Unknown inter-antenna carrier phase biases (truth-only) — R-6. Enabling injects an
 % unknown per-antenna, per-signal carrier phase bias (~0.1-0.5 cycle) on the TRUTH carrier
