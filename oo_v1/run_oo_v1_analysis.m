@@ -445,21 +445,21 @@ function fig = i_overviewFig(A)
     subplot(2,3,1);
     bar(labels, [ [A.rad_rms]' [A.clk_rms_m]' ]);
     set(gca,'YScale','log'); grid on; ylabel('RMS [m]');
-    legend({'radial','clock (m)'},'Location','northoutside','Orientation','horizontal');
+    legend({'radial','clock (m)'},'Location','best');
     title('Radial & clock error (degenerate pair)');
 
     % (2) horizontal, 3D & velocity
     subplot(2,3,2); yyaxis left;
     i_barColors(bar(labels, [ [A.alo_rms]' [A.crs_rms]' [A.pos3d_rms]' ])); set(gca,'YScale','log'); ylabel('position RMS [m]');
     yyaxis right; plot(1:nA,[A.vel_rms]'*1e3,'d-','LineWidth',1.8,'MarkerSize',5,'MarkerFaceColor','auto'); ylabel('velocity RMS [mm/s]');
-    grid on; legend({'along','cross','3D','velocity'},'Location','northoutside','Orientation','horizontal');
+    grid on; legend({'along','cross','3D','velocity'},'Location','best');
     title('Horizontal / 3D position & velocity');
 
     % (3) clock bias & drift (fine units)
     subplot(2,3,3);
     bar(labels, [ [A.clk_rms_m]'/c0*1e9 [A.drift_rms_mps]'*1e3 ]);
     set(gca,'YScale','log'); grid on; ylabel('clk [ns] / drift [mm/s]');
-    legend({'clock [ns]','drift [mm/s]'},'Location','northoutside','Orientation','horizontal');
+    legend({'clock [ns]','drift [mm/s]'},'Location','best');
     title('Clock bias & rate error');
 
     % (4) NEES suite — every channel should sit on the dashed y=1 line
@@ -467,7 +467,7 @@ function fig = i_overviewFig(A)
     NE=[ [A.nees_pos]' [A.nees_vel]' [A.nees_clk]' [A.nees_att]' ]; NE(~isfinite(NE))=NaN;
     bar(labels, NE); set(gca,'YScale','log'); grid on; ylabel('NEES / dof');
     yline(1,'--','Color',[0.45 0.45 0.48],'LineWidth',1.2); ylim([max(1e-2,min(NE(:))*0.5) max(10,max(NE(:))*1.5)]);
-    legend({'pos','vel','clk','att'},'Location','northoutside','Orientation','horizontal');
+    legend({'pos','vel','clk','att'},'Location','best');
     title('NEES per DOF (1 = consistent; >>1 optimistic)');
 
     % (5) sigma/RMS consistency ratio — shaded [0.5,2] calibration band
@@ -475,14 +475,14 @@ function fig = i_overviewFig(A)
     RA=[ [A.ratio_pos]' [A.ratio_clk]' ]; RA(~isfinite(RA))=NaN;
     bar(labels, RA); set(gca,'YScale','log');
     yline(1,'--','Color',[0.45 0.45 0.48],'LineWidth',1.2); yline(0.5,':','Color',[0.6 0.6 0.62]); yline(2,':','Color',[0.6 0.6 0.62]); ylabel('filter \sigma / actual RMS');
-    legend({'pos','clk'},'Location','northoutside','Orientation','horizontal');
+    legend({'pos','clk'},'Location','best');
     title('Covariance realism (<1 optimistic, >1 conservative)');
 
     % (6) geometry: DOP (bars, log) + radial<->clock correlation (line)
     subplot(2,3,6); yyaxis left;
     i_barColors(bar(labels, [ [A.pdop]' [A.tdop]' [A.gdop]' ])); set(gca,'YScale','log'); ylabel('DOP');
     yyaxis right; plot(1:nA,[A.corr_rad_clk]','o-','LineWidth',1.8,'MarkerSize',5,'MarkerFaceColor','auto'); ylabel('corr(rad,clk)'); ylim([-1.05 1.05]);
-    grid on; legend({'PDOP','TDOP','GDOP','corr'},'Location','northoutside','Orientation','horizontal');
+    grid on; legend({'PDOP','TDOP','GDOP','corr'},'Location','best');
     title('Geometry / degeneracy');
 
     sgtitle('oo\_v1 multi-run comparison — accuracy, consistency & geometry','FontWeight','normal','FontSize',15);
@@ -512,7 +512,7 @@ function fig = i_timeseriesFig(A, cf)
     end
     yline(ax3,1,'--','Color',refCol,'LineWidth',1.1,'HandleVisibility','off');
     xlabel(ax3,'time [s]'); ylabel(ax3,'NEES(pos) / dof'); title(ax3,'Position consistency (1 = ideal)');
-    legend(ax3,'Location','eastoutside','FontSize',8,'Box','off');
+    legend(ax3,'Location','best','FontSize',8,'Box','off');
 
     sgtitle('Convergence, clock & consistency (all runs)','FontWeight','normal','FontSize',15);
 end
@@ -532,7 +532,7 @@ function i_writeA4Pdf(A, pdfPath, ~)
     [f,ax]=i_a4fig('Radial & clock error (the degenerate pair)', ...
         'Both in metres, log axis. radial \approx clock when corr(rad,clk)=-1 (the one-way GEO wall).');
     i_barColors(bar(ax,labels,[[A.rad_rms]' [A.clk_rms_m]'])); set(ax,'YScale','log'); ylabel(ax,'RMS [m]');
-    legend(ax,{'radial','clock (m)'},'Location','northoutside','Orientation','horizontal','Box','off');
+    legend(ax,{'radial','clock (m)'},'Location','best','Box','off');
     first=i_a4save(f,rawPath,first);
 
     % 2 — horizontal / 3D & velocity
@@ -540,13 +540,13 @@ function i_writeA4Pdf(A, pdfPath, ~)
         'Along/cross/3D position bars (log, left axis); velocity line (right axis).');
     yyaxis(ax,'left');  i_barColors(bar(ax,labels,[[A.alo_rms]' [A.crs_rms]' [A.pos3d_rms]'])); set(ax,'YScale','log'); ylabel(ax,'position RMS [m]');
     yyaxis(ax,'right'); plot(ax,1:nA,[A.vel_rms]'*1e3,'d-','LineWidth',2,'MarkerSize',7,'MarkerFaceColor','auto'); ylabel(ax,'velocity RMS [mm/s]');
-    legend(ax,{'along','cross','3D','velocity'},'Location','northoutside','Orientation','horizontal','Box','off');
+    legend(ax,{'along','cross','3D','velocity'},'Location','best','Box','off');
     first=i_a4save(f,rawPath,first);
 
     % 3 — clock bias & drift
     [f,ax]=i_a4fig('Clock bias & rate error', 'Receiver clock bias [ns] and drift [mm/s], log axis.');
     i_barColors(bar(ax,labels,[[A.clk_rms_m]'/c0*1e9 [A.drift_rms_mps]'*1e3])); set(ax,'YScale','log'); ylabel(ax,'clk [ns] / drift [mm/s]');
-    legend(ax,{'clock [ns]','drift [mm/s]'},'Location','northoutside','Orientation','horizontal','Box','off');
+    legend(ax,{'clock [ns]','drift [mm/s]'},'Location','best','Box','off');
     first=i_a4save(f,rawPath,first);
 
     % 4 — NEES suite
@@ -555,7 +555,7 @@ function i_writeA4Pdf(A, pdfPath, ~)
     NE=[[A.nees_pos]' [A.nees_vel]' [A.nees_clk]' [A.nees_att]']; NE(~isfinite(NE))=NaN;
     i_barColors(bar(ax,labels,NE)); set(ax,'YScale','log'); ylabel(ax,'NEES / dof');
     yline(ax,1,'--','Color',refCol,'LineWidth',1.4); ylim(ax,[max(1e-2,min(NE(:))*0.5) max(10,max(NE(:))*1.5)]);
-    legend(ax,{'pos','vel','clk','att'},'Location','northoutside','Orientation','horizontal','Box','off');
+    legend(ax,{'pos','vel','clk','att'},'Location','best','Box','off');
     first=i_a4save(f,rawPath,first);
 
     % 5 — covariance realism
@@ -565,7 +565,7 @@ function i_writeA4Pdf(A, pdfPath, ~)
     i_barColors(bar(ax,labels,RA)); set(ax,'YScale','log');
     yline(ax,1,'--','Color',refCol,'LineWidth',1.4); yline(ax,0.5,':','Color',[0.6 0.6 0.62]); yline(ax,2,':','Color',[0.6 0.6 0.62]);
     ylabel(ax,'filter \sigma / actual RMS');
-    legend(ax,{'pos','clk'},'Location','northoutside','Orientation','horizontal','Box','off');
+    legend(ax,{'pos','clk'},'Location','best','Box','off');
     first=i_a4save(f,rawPath,first);
 
     % 6 — geometry / DOP + degeneracy
@@ -573,7 +573,7 @@ function i_writeA4Pdf(A, pdfPath, ~)
         'PDOP/TDOP/GDOP bars (log, left); corr(radial,clock) line (right). corr near -1 = degenerate.');
     yyaxis(ax,'left');  i_barColors(bar(ax,labels,[[A.pdop]' [A.tdop]' [A.gdop]'])); set(ax,'YScale','log'); ylabel(ax,'DOP');
     yyaxis(ax,'right'); plot(ax,1:nA,[A.corr_rad_clk]','o-','LineWidth',2,'MarkerSize',7,'MarkerFaceColor','auto'); ylabel(ax,'corr(rad,clk)'); ylim(ax,[-1.05 1.05]);
-    legend(ax,{'PDOP','TDOP','GDOP','corr'},'Location','northoutside','Orientation','horizontal','Box','off');
+    legend(ax,{'PDOP','TDOP','GDOP','corr'},'Location','best','Box','off');
     first=i_a4save(f,rawPath,first);
 
     % 7..N — TIMESERIES, split into idealised / realism (one grade per page) so the lines
