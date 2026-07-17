@@ -57,9 +57,16 @@ function figOut = plot_mat_report(matPath)
     diag = S.diagnostics;
     if isfield(S, 'cfg'); cfg = S.cfg; else; cfg = struct(); end %#ok<NASGU>
 
+    % Per-asset swarm truth (WP1), present only for multi-asset (nSpaceAssets>1)
+    % runs. Drives an extra "Swarm geometry" tab; absent -> the tab is skipped.
+    swarmTruth = [];
+    if isfield(S, 'multiAssetTruth') && ~isempty(S.multiAssetTruth)
+        swarmTruth = S.multiAssetTruth;
+    end
+
     % ---- Build the tabbed window -------------------------------------------
     [~, stem] = fileparts(matPath);
-    figOut = i_buildTabs(diag, i_titleFor(stem, S));
+    figOut = i_buildTabs(diag, i_titleFor(stem, S), swarmTruth);
 
     nTabs = numel(findobj(figOut, 'type', 'uitab'));
     fprintf('plot_mat_report: done -> one window, %d tab(s).\n', nTabs);
@@ -71,7 +78,8 @@ end
 %  WINDOW / TABS
 % ===========================================================================
 
-function fig = i_buildTabs(diag, ttl)
+function fig = i_buildTabs(diag, ttl, swarmTruth)
+    if nargin < 3; swarmTruth = []; end
     t = diag.getTimeVector();
     t = t(:)';
 
@@ -90,6 +98,10 @@ function fig = i_buildTabs(diag, ttl)
         'Doppler & NIS',  @() i_tabDopplerNis(tg, diag, t); ...
         'Measurements',   @() i_tabMeasurements(tg, diag, t); ...
     };
+    % Swarm geometry tab: only for multi-asset runs that carry per-asset truth.
+    if ~isempty(swarmTruth)
+        tabs(end+1, :) = {'Swarm geometry', @() i_tabSwarmGeometry(tg, swarmTruth)};
+    end
     for k = 1:size(tabs, 1)
         try
             tabs{k, 2}();
@@ -271,6 +283,41 @@ function i_tabMeasurements(tg, diag, t)
     yline(ax2, max(nm), 'r--', 'LineWidth', 1.0, 'DisplayName', sprintf('Max %d', max(nm)));
     grid(ax2, 'on'); xlabel(ax2, 'Time [s]'); ylabel(ax2, 'Count'); ylim(ax2, [0, max(max(nm)+1, 2)]);
     title(ax2, 'Total Pseudorange Measurements per Epoch');
+end
+
+function i_tabSwarmGeometry(tg, swarmTruth)
+    % Per-asset swarm TRUTH geometry (WP1/WP2): inter-asset baselines to the
+    % estimated chief (relative) and the formation separation envelope. Truth
+    % only -- secondaries are represented-only, so there is no per-asset ESTIMATE
+    % error here (that is the multiAssetEstimation upgrade).
+    g   = revgnss.MultiAssetGeometry.compute(swarmTruth);
+    ts  = g.time_s(:)';
+    nB  = numel(g.baselineToPrimary);
+    col = lines(max(nB, 1));
+
+    tl = i_tab(tg, 'Swarm geometry', 2);
+
+    % Subplot 1: baseline range from the chief to each secondary (relative).
+    ax1 = nexttile(tl); hold(ax1, 'on');
+    for ii = 1:nB
+        b = g.baselineToPrimary(ii);
+        plot(ax1, ts, b.range_m(:)', 'Color', col(ii, :), 'LineWidth', 1.2, ...
+            'DisplayName', sprintf('%s\\rightarrow%s', g.names{g.primaryIndex}, b.name));
+    end
+    grid(ax1, 'on'); ylabel(ax1, 'Baseline [m]');
+    title(ax1, sprintf('Inter-asset baseline to chief (%s) — relative positioning', ...
+        g.names{g.primaryIndex}));
+    if nB > 0; legend(ax1, 'Location', 'best'); end
+
+    % Subplot 2: pairwise separation envelope (formation stays bounded).
+    ax2 = nexttile(tl); hold(ax2, 'on');
+    plot(ax2, ts, g.separation.max_m(:)',  'k-',  'LineWidth', 1.2, 'DisplayName', 'Max pair');
+    plot(ax2, ts, g.separation.mean_m(:)', 'b--', 'LineWidth', 1.2, 'DisplayName', 'Mean pair');
+    plot(ax2, ts, g.separation.min_m(:)',  'k-',  'LineWidth', 1.2, 'DisplayName', 'Min pair');
+    grid(ax2, 'on'); xlabel(ax2, 'Time [s]'); ylabel(ax2, 'Separation [m]');
+    title(ax2, sprintf('Formation pairwise separation (%d assets, %d pairs)', ...
+        g.nAssets, g.separation.nPairs));
+    legend(ax2, 'Location', 'best');
 end
 
 % ===========================================================================
