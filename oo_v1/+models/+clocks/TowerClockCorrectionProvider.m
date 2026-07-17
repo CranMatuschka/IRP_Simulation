@@ -454,11 +454,11 @@ classdef TowerClockCorrectionProvider
                 rng(double(seed), 'twister');
                 noise = randn(2,1);
                 rng(s0);
-                cache_(key) = struct('b', sigmaBias * noise(1), 'd', sigmaDrift * noise(2));
+                cache_(key) = struct('b', noise(1), 'd', noise(2));
             end
             n = cache_(key);
-            b_noise = n.b;
-            d_noise = n.d;
+            b_noise = sigmaBias  * n.b;
+            d_noise = sigmaDrift * n.d;
         end
 
     end  % private Static methods
