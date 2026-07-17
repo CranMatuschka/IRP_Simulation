@@ -219,6 +219,19 @@ classdef ReverseGNSSEKF < handle
                 end
             catch; end
 
+            % Guard: the strapdown gyro-bias F block (F(theta,b_g) = -I*dt) is only built on the
+            % quaternionErrorState (MEKF) path. On the eulerZYX path b_g would be UNOBSERVABLE
+            % (zero Kalman gain, P(theta,b_g) stays 0) while predict() still propagates attitude
+            % with omega = omega_gyro - b_g -> the attitude silently drifts with the full truth
+            % gyro bias and NO warning is emitted. Refuse the combination rather than run garbage.
+            if obj.estimateGyroBias && strcmp(obj.attitudeParameterization, 'eulerZYX')
+                error('ReverseGNSSEKF:imuRequiresQuaternion', ...
+                    ['IMU gyro-bias estimation (cfg.estimator.imu.enable) requires ' ...
+                     'cfg.estimator.attitude.parameterization = ''quaternionErrorState''. ' ...
+                     'The eulerZYX path has no gyro-bias Jacobian, so b_g would be unobservable ' ...
+                     'and the attitude would drift with the uncorrected sensor bias.']);
+            end
+
             obj.stateMap = obj.buildStateMap_(nTowers);
             obj.x = zeros(obj.nx, 1);
             obj.P = eye(obj.nx);
