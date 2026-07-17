@@ -383,10 +383,19 @@ cfg.estimator.attitude.useDopplerPartials        = false;
 % Initial attitude error and the diagonal covariance/process-noise seeds for the run.
 cfg.estimator.P0_euler_rad             = deg2rad(5);
 cfg.estimator.P0_omega_radps           = 1e-12;
-% Torque-budget-justified attitude process noise (~1e-7 rad/s^2), replacing the
-% over-optimistic 1e-10. alpha = tau / I from cfg.asset (Wertz environmental torques).
-cfg.estimator.sigma_angAccel_radps2    = revgnss.ConfigFactory.angAccelFromTorqueBudget_( ...
-    cfg.asset.inertia_kgm2, cfg.asset.residualDisturbanceTorque_Nm);
+% Attitude process noise (angular-acceleration 1-sigma). EMPIRICALLY RETUNED to 3e-4.
+% A Q-tuning sweep on the attitude-estimating config (nadir GEO, S1R4, 3600 s) has a clear
+% minimum here: attitude tail RMS is 0.1344 deg at the old torque-budget value (~1e-7),
+% 0.0707 deg at 3e-4, and rises again to 0.1391 deg at 1e-3 -- a classic Q bowl. The
+% physical torque-budget value tau/I ~ 1e-7 (revgnss.ConfigFactory.angAccelFromTorqueBudget_)
+% is ~3000x too TIGHT for the ESTIMATOR at the weakly-observed radial<->clock attitude wall:
+% it over-trusts the constant-rate attitude prediction and lags the carrier measurements.
+% Looser Q here both LOWERS the attitude error and makes P more conservative. The torque-
+% budget helper is retained (it still sizes the ConfigFactory attitude presets and documents
+% the physical floor). Single-antenna / positionClockOnly runs leave this inert (the EKF
+% freezes the attitude Q block when attitude is not estimated), so the single-antenna golden
+% is unaffected; the 4-antenna headline and realism goldens move with this value.
+cfg.estimator.sigma_angAccel_radps2    = 3e-4;   % empirical Q optimum (see sweep note above)
 cfg.estimator.initialError.euler_deg   = [1; -1; 0.5];
 cfg.estimator.initialError.omega_radps = [0; 0; 0];
 
