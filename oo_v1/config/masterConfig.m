@@ -752,6 +752,18 @@ cfg.formation.mode        = 'helix';   % only supported formation mode
 cfg.formation.baseline_m  = 1000.0;    % inter-satellite separation [m] (>500 m); changeable
 cfg.formation.phase0_rad  = 0.0;       % phase of the first secondary on the projected-circular ring
 
+% --- WP1: per-asset truth persistence (swarm runs only) -------
+% When nSpaceAssets > 1, ReportRunner persists every asset's truth trajectory
+% (position/velocity/attitude/clock) into the report .mat as `multiAssetTruth`,
+% so per-satellite truth-vs-truth geometry -- inter-asset baselines (relative)
+% and each asset's absolute position vs Earth -- can be compared offline. This
+% is the represented-only secondary truth that already exists in memory but was
+% previously dropped at the save boundary; only asset 1 is EKF-estimated, so no
+% secondary ESTIMATE is produced here (that is the multiAssetEstimation upgrade).
+% Inert for single-asset runs (nothing is written) -> golden-safe.
+cfg.multiAsset.recordTruth   = true;   % persist per-asset truth for swarm (nSpaceAssets>1) runs
+cfg.multiAsset.truthStride_s = 60.0;   % decimation stride [s] to keep long-run .mat small; <=0 = every truth epoch
+
 % --- Ground towers: real ground-station sites in the 23 deg-E GEO footprint ---
 % Name, lat[deg], lon[deg], alt[m]. The first 5 are the frozen-golden network (do
 % NOT reorder or edit them: the Stage-85 golden trims to nTowers=5 = these five).

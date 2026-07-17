@@ -1595,6 +1595,8 @@ classdef ReportRunner
                 diagnostics     = simData;
                 finalStateEstimate = [];
                 finalTruthState    = [];
+                multiAssetTruth    = [];
+                res                = [];
                 try
                     res = sim.getResults();
                     if isfield(res,'ekfHistory')  && ~isempty(res.ekfHistory)
@@ -1605,10 +1607,30 @@ classdef ReportRunner
                     end
                 catch
                 end
-                save(matPath, 'cfg', 'summary', 'diagnostics', ...
-                     'finalStateEstimate', 'finalTruthState', ...
-                     'cs', 'reportVersion', 'reportTimestamp', ...
-                     'pdfPath', 'matPath', '-v7.3');
+                % WP1: persist per-asset truth for swarm (nSpaceAssets>1) runs so
+                % per-satellite truth-vs-truth geometry can be compared offline.
+                % Guarded to multi-asset -> the single-asset save() below is
+                % byte-identical to the pre-WP1 variable list (golden-safe).
+                try
+                    multiAssetTruth = revgnss.ReportRunner.buildMultiAssetTruth_(res, cfg);
+                catch meMat
+                    multiAssetTruth = [];
+                    fprintf('  [WP1] multi-asset truth not persisted: %s\n', meMat.message);
+                end
+                if ~isempty(multiAssetTruth)
+                    save(matPath, 'cfg', 'summary', 'diagnostics', ...
+                         'finalStateEstimate', 'finalTruthState', ...
+                         'multiAssetTruth', ...
+                         'cs', 'reportVersion', 'reportTimestamp', ...
+                         'pdfPath', 'matPath', '-v7.3');
+                    fprintf('  [WP1] multi-asset truth persisted: %d assets x %d epochs (stride %g s)\n', ...
+                        multiAssetTruth.nAssets, numel(multiAssetTruth.time_s), multiAssetTruth.stride_s);
+                else
+                    save(matPath, 'cfg', 'summary', 'diagnostics', ...
+                         'finalStateEstimate', 'finalTruthState', ...
+                         'cs', 'reportVersion', 'reportTimestamp', ...
+                         'pdfPath', 'matPath', '-v7.3');
+                end
 
                 if exist(matPath,'file') ~= 2
                     error('ReportRunner:matNotWritten', 'MAT not written: %s', matPath);
@@ -1673,6 +1695,101 @@ classdef ReportRunner
     end  % public static methods
 
     methods (Static, Access = private)
+
+        function mat = buildMultiAssetTruth_(res, cfg)
+            % buildMultiAssetTruth_  Assemble the per-asset truth bundle persisted
+            % for swarm runs (WP1). Returns [] for single-asset runs or when
+            % recordTruth is off, so the caller keeps the byte-identical
+            % single-asset save. The secondary trajectories are the physically
+            % real helix truth (SwarmFormation + shared propagator) that every
+            % asset already logs each epoch via SpaceAsset.logState; they are
+            % decimated to truthStride_s to keep long-run .mat files small.
+            mat = [];
+
+            % Gate: multi-asset only, opt-in, and histories actually present.
+            nAssets = 1;
+            if isfield(cfg,'scenario') && isfield(cfg.scenario,'nSpaceAssets') && ...
+                    ~isempty(cfg.scenario.nSpaceAssets)
+                nAssets = max(1, round(cfg.scenario.nSpaceAssets));
+            end
+            recordTruth = true;
+            if isfield(cfg,'multiAsset') && isfield(cfg.multiAsset,'recordTruth')
+                recordTruth = logical(cfg.multiAsset.recordTruth);
+            end
+            if nAssets <= 1 || ~recordTruth; return; end
+            if isempty(res) || ~isfield(res,'assetHistories') || ...
+                    numel(res.assetHistories) <= 1
+                return;
+            end
+            hist = res.assetHistories;
+            nAssets = min(nAssets, numel(hist));
+            if isempty(hist{1}) || ~isfield(hist{1},'time_s') || isempty(hist{1}.time_s)
+                return;
+            end
+
+            % Decimation stride (epochs) from truthStride_s and the sim step.
+            dt_s = 1;
+            if isfield(cfg,'simulation') && isfield(cfg.simulation,'dt_s') && ...
+                    cfg.simulation.dt_s > 0
+                dt_s = cfg.simulation.dt_s;
+            end
+            stride_s = 60;
+            if isfield(cfg,'multiAsset') && isfield(cfg.multiAsset,'truthStride_s') && ...
+                    ~isempty(cfg.multiAsset.truthStride_s)
+                stride_s = cfg.multiAsset.truthStride_s;
+            end
+            stride = 1;
+            if stride_s > 0; stride = max(1, round(stride_s / dt_s)); end
+
+            % Common epoch index from the primary time base; always keep the last
+            % epoch so the final-state comparison stays exact.
+            tPrim = hist{1}.time_s(:);
+            nEp   = numel(tPrim);
+            idx   = 1:stride:nEp;
+            if idx(end) ~= nEp; idx = [idx, nEp]; end
+
+            mat = struct();
+            mat.nAssets        = nAssets;
+            mat.estimatedIndex = 1;      % only asset 1 is EKF-estimated (see plan)
+            mat.stride_s       = stride * dt_s;
+            mat.time_s         = tPrim(idx);
+            mat.names          = cell(1, nAssets);
+
+            emptyAsset = struct('name','', 'r_ecef_m',[], 'v_ecef_mps',[], ...
+                'euler_rad',[], 'rxClockBias_m',[], 'rxFracFreq',[]);
+            mat.asset = repmat(emptyAsset, 1, nAssets);
+            for ai = 1:nAssets
+                h  = hist{ai};
+                nm = sprintf('GEO-%d', ai);
+                if isfield(cfg,'assets') && numel(cfg.assets) >= ai && ...
+                        isfield(cfg.assets(ai),'name') && ~isempty(cfg.assets(ai).name)
+                    nm = char(cfg.assets(ai).name);
+                end
+                mat.names{ai}         = nm;
+                li                    = idx(idx <= size(h.r_ecef_m, 2));  % length guard
+                mat.asset(ai).name          = nm;
+                mat.asset(ai).r_ecef_m      = h.r_ecef_m(:, li);
+                mat.asset(ai).v_ecef_mps    = h.v_ecef_mps(:, li);
+                mat.asset(ai).euler_rad     = h.euler_rad(:, li);
+                mat.asset(ai).rxClockBias_m = h.rxClockBias_m(li);
+                mat.asset(ai).rxFracFreq    = h.rxFracFreq(li);
+            end
+
+            % Relative geometry to the estimated primary chief (asset 1): baseline
+            % vector and inter-satellite range per secondary. This is the "relative
+            % positioning between assets" quantity; absolute per-asset position vs
+            % Earth is mat.asset(ai).r_ecef_m. (Richer metrics/plots are WP2.)
+            r1 = mat.asset(1).r_ecef_m;
+            emptyB = struct('toAsset',0, 'baseline_ecef_m',[], 'range_m',[]);
+            mat.baselineToPrimary = repmat(emptyB, 1, max(0, nAssets - 1));
+            for ai = 2:nAssets
+                nc = min(size(mat.asset(ai).r_ecef_m, 2), size(r1, 2));
+                d  = mat.asset(ai).r_ecef_m(:, 1:nc) - r1(:, 1:nc);
+                mat.baselineToPrimary(ai-1).toAsset         = ai;
+                mat.baselineToPrimary(ai-1).baseline_ecef_m = d;
+                mat.baselineToPrimary(ai-1).range_m         = sqrt(sum(d.^2, 1))';
+            end
+        end
 
         function s = finalScalar_(v, dflt)
             % Reduce a possibly per-epoch series to its final-epoch scalar.
