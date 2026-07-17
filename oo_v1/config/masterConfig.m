@@ -809,22 +809,37 @@ cfg.estimator.estimateAngularRate     = false;
 cfg.estimator.estimateAttitudeFromPseudorange     = false;
 cfg.estimator.estimateAngularRateFromPseudorange  = false;
 cfg.estimator.estimateCarrierAmbiguities          = false;
-% --- IMU / gyro attitude aiding (MASTER SWITCH, default OFF -> golden-safe) --------------------
-% When enabled, a strapdown gyro measures body rate (omega_gyro = omega_true + bias + ARW); the
-% EKF propagates the nominal attitude with omega = omega_gyro - b_g and estimates a 3-state gyro
-% bias b_g APPENDED to the state ONLY when enabled (so nStates 24/54/59 are unchanged when off).
-% The multi-antenna receivers still supply the absolute attitude update. finalizeConfig mirrors
-% imu.truth into cfg.asset.imu and sets estimateGyroBias=imu.enable. See +models/+sensors/GyroModel.
-cfg.estimator.imu.enable                       = false;   % master switch
-cfg.estimator.imu.filter.arw_rad_per_sqrt_s    = 1e-4;    % EKF angle random walk (attitude Q)
-cfg.estimator.imu.filter.rrw_rad_per_s_sqrt_s  = 1e-6;    % EKF bias rate random walk (b_g Q)
-cfg.estimator.imu.filter.P0_bias_radps         = 1e-5;    % initial 1-sigma on b_g
-cfg.estimator.imu.filter.useVanLoanCrossTerm   = false;   % optional theta<->b_g Q cross term
-cfg.estimator.imu.truth.arw_rad_per_sqrt_s     = 1e-4;    % TRUTH gyro ARW (honest; own RNG stream)
-cfg.estimator.imu.truth.rrw_rad_per_s_sqrt_s   = 1e-6;    % TRUTH gyro bias RRW
-cfg.estimator.imu.truth.bias0Sigma_radps       = 1e-5;    % TRUTH initial bias draw 1-sigma
-cfg.estimator.imu.truth.seed                   = 909;     % dedicated gyro RNG seed
-cfg.estimator.estimateGyroBias                 = false;   % resolved from imu.enable in finalizeConfig
+% --- IMU attitude aiding (MASTER SWITCH, default OFF -> golden-safe) --------------------------
+% The truth IMU (+models/+sensors/IMUModel) is a full strapdown unit: 3-axis GYRO + 3-axis
+% ACCELEROMETER, each with its own bias random walk, white noise and RNG stream.
+%
+% GYRO -> consumed by the EKF. omega_gyro = omega_true + b_g + ARW; the EKF propagates the nominal
+% attitude with omega = omega_gyro - b_g and estimates a 3-state gyro bias b_g APPENDED to the
+% state ONLY when enabled (so nStates 24/54/59 are unchanged when off). The multi-antenna
+% receivers still supply the absolute attitude update.
+%
+% ACCELEROMETER -> modelled and logged, NOT consumed by the EKF (no config knob: there is nothing
+% to switch on). An accelerometer senses SPECIFIC FORCE, i.e. non-gravitational acceleration only
+% -- it is blind to gravity. This asset is in free fall, so the true specific force is ~0 (at GEO
+% only SRP ~1e-7 m/s^2, below any real accel noise floor): the measurement is pure bias + noise
+% and carries zero orbit information. Feeding it to the EKF could only inject noise, which is why
+% orbit determination uses DYNAMICS models (two-body + J2 + luni-solar/SRP) instead. It becomes
+% informative only under thrust/manoeuvres, via SpaceAsset.specificForce_body_mps2.
+%
+% finalizeConfig mirrors imu.truth into cfg.asset.imu and sets estimateGyroBias = imu.enable.
+cfg.estimator.imu.enable                        = false;   % master switch (gyro + accel)
+cfg.estimator.imu.filter.arw_rad_per_sqrt_s     = 1e-4;    % EKF angle random walk (attitude Q)
+cfg.estimator.imu.filter.rrw_rad_per_s_sqrt_s   = 1e-6;    % EKF bias rate random walk (b_g Q)
+cfg.estimator.imu.filter.P0_bias_radps          = 1e-5;    % initial 1-sigma on b_g
+cfg.estimator.imu.filter.useVanLoanCrossTerm    = false;   % optional theta<->b_g Q cross term
+cfg.estimator.imu.truth.arw_rad_per_sqrt_s      = 1e-4;    % TRUTH gyro ARW (honest; own RNG stream)
+cfg.estimator.imu.truth.rrw_rad_per_s_sqrt_s    = 1e-6;    % TRUTH gyro bias RRW
+cfg.estimator.imu.truth.bias0Sigma_radps        = 1e-5;    % TRUTH gyro initial bias draw 1-sigma
+cfg.estimator.imu.truth.accelVrw_mps_per_sqrt_s = 1e-3;    % TRUTH accel velocity random walk
+cfg.estimator.imu.truth.accelBrw_mps2_sqrt_s    = 1e-6;    % TRUTH accel bias random walk
+cfg.estimator.imu.truth.accelBias0Sigma_mps2    = 1e-4;    % TRUTH accel initial bias draw 1-sigma
+cfg.estimator.imu.truth.seed                    = 909;     % IMU RNG seed (gyro); accel uses seed+1
+cfg.estimator.estimateGyroBias                  = false;   % resolved from imu.enable in finalizeConfig
 % Differential carrier attitude mode.
 % 'off' (safe default) | 'calibratedDifferentialAmbiguity' | 'validationKnownAmbiguity'
 cfg.estimator.attitudeCarrierMode     = 'off';

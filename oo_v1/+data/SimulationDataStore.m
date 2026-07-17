@@ -625,8 +625,8 @@ classdef SimulationDataStore < handle
             entry.truth.v_cm_ecef_mps    = asset.v_ecef_mps;
             entry.truth.euler_rad        = asset.attitude_euler_rad;
             entry.truth.omega_body_radps = asset.angularRate_body_radps;
-            if ~isempty(asset.gyro)
-                entry.truth.gyroBias_radps = asset.gyro.bias_radps;   % IMU/MEKF truth bias
+            if ~isempty(asset.imu)
+                entry.truth.gyroBias_radps = asset.imu.gyroBias_radps;   % IMU/MEKF truth bias
             end
             entry.truth.rxClockBias_m    = asset.clock.getBiasMeters();
             entry.truth.rxClockBias_s    = asset.clock.getBiasSeconds();
