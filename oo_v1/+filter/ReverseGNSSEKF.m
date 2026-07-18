@@ -90,6 +90,12 @@ classdef ReverseGNSSEKF < handle
         estimateSecondaryClocks (1,1) logical = false
         nSecondaryClocks        (1,1) double  = 0
 
+        % P1'/WP4: secondary-asset ORBIT states ([r(3),v(3)] per secondary), appended
+        % after the secondary-clock block. Full [r,v,b,bdot] per secondary => each is a
+        % real estimated asset. Off => nx/state-map identical to WP3 (golden-safe).
+        estimateSecondaryOrbits (1,1) logical = false
+        nSecondaryOrbits        (1,1) double  = 0
+
         % Clock model (for process noise)
         rxClockModel     models.clocks.ClockModel
 
@@ -192,6 +198,9 @@ classdef ReverseGNSSEKF < handle
             nSecClk_ = revgnss.MultiAssetConfig.secondaryClockCount(cfg);
             obj.estimateSecondaryClocks = nSecClk_ > 0;
             obj.nSecondaryClocks        = nSecClk_;
+            nSecOrb_ = revgnss.MultiAssetConfig.secondaryOrbitCount(cfg);
+            obj.estimateSecondaryOrbits = nSecOrb_ > 0;
+            obj.nSecondaryOrbits        = nSecOrb_;
 
             obj.nx = obj.nxBase;
             if obj.estimateTowerClocks
@@ -214,6 +223,9 @@ classdef ReverseGNSSEKF < handle
             end
             if obj.estimateSecondaryClocks
                 obj.nx = obj.nx + 2 * obj.nSecondaryClocks;   % [b_tx, bdot_tx] per secondary
+            end
+            if obj.estimateSecondaryOrbits
+                obj.nx = obj.nx + 6 * obj.nSecondaryOrbits;   % [r(3), v(3)] per secondary
             end
 
             if isfield(cfg.estimator,'sigma_accel_mps2')
@@ -406,10 +418,38 @@ classdef ReverseGNSSEKF < handle
                     x_new(id) = x(id);
                 end
             end
+
+            % Secondary-asset orbits (P1'/WP4): propagate each secondary [r,v] with the
+            % SAME dynamics as the primary (linearized at the ESTIMATE), storing its 6x6
+            % STM for buildF_. Empty cell when off -> buildF_ unchanged (golden-safe).
+            secPhi6 = {};
+            if obj.estimateSecondaryOrbits
+                secPhi6 = cell(1, obj.nSecondaryOrbits);
+                for si = 1:obj.nSecondaryOrbits
+                    ri = x(sm.secondaryOrbitIdx(si,1:3));
+                    vi = x(sm.secondaryOrbitIdx(si,4:6));
+                    if strcmp(dynMode, 'constantVelocity')
+                        x_new(sm.secondaryOrbitIdx(si,1:3)) = ri + dt_s * vi;
+                        x_new(sm.secondaryOrbitIdx(si,4:6)) = vi;
+                        secPhi6{si} = [];   % buildF_ uses the default [I dtI;0 I] block
+                    else
+                        try
+                            [ri_new, vi_new] = filter.EkfDynamicsPredictor.propagateEcef( ...
+                                ri, vi, dt_s, t0_s, obj.cfg);
+                            secPhi6{si} = filter.EkfDynamicsPredictor.finiteDiffStm6( ...
+                                ri, vi, dt_s, t0_s, obj.cfg);
+                        catch
+                            ri_new = ri + dt_s * vi; vi_new = vi; secPhi6{si} = [];
+                        end
+                        x_new(sm.secondaryOrbitIdx(si,1:3)) = ri_new;
+                        x_new(sm.secondaryOrbitIdx(si,4:6)) = vi_new;
+                    end
+                end
+            end
             obj.x = x_new;
 
             % State transition Jacobian F (pass Phi6 override for r/v block)
-            F = obj.buildF_(dt_s, eul, omg, Phi6);
+            F = obj.buildF_(dt_s, eul, omg, Phi6, secPhi6);
 
             % Process noise Q
             Q = obj.buildQ_(dt_s, towerClockModels, secondaryClockModels);
@@ -724,17 +764,32 @@ classdef ReverseGNSSEKF < handle
             else
                 sm.secondaryClockIdx = zeros(0, 2);
             end
+
+            % P1'/WP4 secondary-asset ORBIT states (appended LAST). Row si -> asset si+1,
+            % columns 1:3 = r_i indices, 4:6 = v_i indices. Empty zeros(0,6) when off.
+            if obj.estimateSecondaryOrbits && obj.nSecondaryOrbits > 0
+                orbIdx = zeros(obj.nSecondaryOrbits, 6);
+                for si = 1:obj.nSecondaryOrbits
+                    orbIdx(si,:) = nextIdx:(nextIdx+5);
+                    nextIdx = nextIdx + 6;
+                end
+                sm.secondaryOrbitIdx = orbIdx;
+            else
+                sm.secondaryOrbitIdx = zeros(0, 6);
+            end
         end
 
         % ----------------------------------------------------------------
-        function F = buildF_(obj, dt_s, euler, omega, Phi6)
+        function F = buildF_(obj, dt_s, euler, omega, Phi6, secPhi6)
             % buildF_  Linearised state-transition Jacobian.
             %
             % Euler-euler block: FD derivative of (eul + dt * T(eul,omg)*omg) w.r.t. eul.
             % Euler-omega block: dt * T(euler)  [kinematic transformation].
             % Phi6 (optional): 6x6 translational STM replacing default [I dtI;0 I] block.
+            % secPhi6 (optional, P1'): cell of per-secondary 6x6 orbit STMs.
 
             if nargin < 5; Phi6 = []; end
+            if nargin < 6; secPhi6 = {}; end
 
             nx = obj.nx;
             F  = eye(nx);
@@ -812,6 +867,22 @@ classdef ReverseGNSSEKF < handle
             if obj.estimateSecondaryClocks
                 for si = 1:obj.nSecondaryClocks
                     F(sm.secondaryClockIdx(si,1), sm.secondaryClockIdx(si,2)) = dt_s;
+                end
+            end
+
+            % Secondary-asset orbit STM block (P1'/WP4): 6x6 per secondary, mirroring the
+            % primary r/v block. Uses the propagated STM when available, else the default
+            % constant-velocity coupling [I dtI; 0 I].
+            if obj.estimateSecondaryOrbits
+                for si = 1:obj.nSecondaryOrbits
+                    oi = sm.secondaryOrbitIdx(si,:);
+                    if numel(secPhi6) >= si && ~isempty(secPhi6{si}) && ...
+                            isequal(size(secPhi6{si}), [6,6]) && all(isfinite(secPhi6{si}(:)))
+                        F(oi, oi) = secPhi6{si};
+                    else
+                        F(oi, oi) = eye(6);
+                        F(oi(1:3), oi(4:6)) = dt_s * eye(3);
+                    end
                 end
             end
 
@@ -970,6 +1041,25 @@ classdef ReverseGNSSEKF < handle
                     end
                     Q(ib,ib) = Qsec(1,1); Q(ib,id) = Qsec(1,2);
                     Q(id,ib) = Qsec(2,1); Q(id,id) = Qsec(2,2);
+                end
+            end
+
+            % --- Secondary-asset orbit process noise (P1'/WP4, SNC) -------
+            % Same continuous white-acceleration model as the primary r/v block (uses the
+            % same sigma_accel_mps2). Realism note: P1' also injects truth-side SRP/luni-
+            % solar the J2 block does not model; sa should be tuned to that dynamic gap.
+            if obj.estimateSecondaryOrbits
+                q_r  = sa^2 * dt_s^3 / 3;
+                q_v  = sa^2 * dt_s;
+                q_rv = sa^2 * dt_s^2 / 2;
+                for si = 1:obj.nSecondaryOrbits
+                    oi = sm.secondaryOrbitIdx(si,:);
+                    for k = 1:3
+                        Q(oi(k),   oi(k))   = q_r;
+                        Q(oi(k+3), oi(k+3)) = q_v;
+                        Q(oi(k),   oi(k+3)) = q_rv;
+                        Q(oi(k+3), oi(k))   = q_rv;
+                    end
                 end
             end
 

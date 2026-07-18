@@ -201,6 +201,12 @@ classdef SimulationDataStore < handle
         sc_sigB_
         sc_truB_
 
+        % ---- P1'/WP4 secondary-asset ORBIT (lazy [nSec x N]): 3D position error norm
+        % and 1-sigma of the estimated secondary position. Empty unless estimateMode='position'.
+        nSecOrbits_ (1,1) double = 0
+        so_posErr_
+        so_posSig_
+
         % ---- Euler at last epoch (for ReportRunner summary)
         lastTruthEuler_rad_   double = []
         lastEstEuler_rad_     double = []
@@ -650,6 +656,35 @@ classdef SimulationDataStore < handle
                 obj.sc_estB_(1:nMn2,k) = scEstB(1:nMn2);
                 obj.sc_sigB_(1:nMn2,k) = scSigB(1:nMn2);
                 obj.sc_truB_(1:nMn2,k) = scTruB(1:nMn2);
+            end
+
+            % P1'/WP4 secondary-asset ORBIT est-vs-truth (3D position error norm + sigma).
+            % Truth position routed via errStruct.isl.secondaryTruthPos_m. Skipped
+            % byte-identically when the orbit block is absent.
+            if isfield(sm,'secondaryOrbitIdx') && ~isempty(sm.secondaryOrbitIdx)
+                soIdx = sm.secondaryOrbitIdx;            % [nSec x 6]
+                nSo_  = size(soIdx,1);
+                soErr = nan(nSo_,1); soSig = nan(nSo_,1);
+                truP = [];
+                if isstruct(errStruct) && isfield(errStruct,'isl') && isstruct(errStruct.isl) && ...
+                        isfield(errStruct.isl,'secondaryTruthPos_m') && ~isempty(errStruct.isl.secondaryTruthPos_m)
+                    truP = errStruct.isl.secondaryTruthPos_m;   % [3 x nSec]
+                end
+                for so = 1:nSo_
+                    pIdx = soIdx(so,1:3);
+                    soSig(so) = sqrt(max(0, trace(ekf.P(pIdx,pIdx))));
+                    if ~isempty(truP) && so <= size(truP,2) && all(isfinite(truP(:,so)))
+                        soErr(so) = norm(x(pIdx) - truP(:,so));
+                    end
+                end
+                if isempty(obj.so_posErr_)
+                    obj.nSecOrbits_ = nSo_;
+                    obj.so_posErr_ = nan(nSo_, obj.nAlloc_);
+                    obj.so_posSig_ = nan(nSo_, obj.nAlloc_);
+                end
+                nMn3 = min(nSo_, obj.nSecOrbits_);
+                obj.so_posErr_(1:nMn3,k) = soErr(1:nMn3);
+                obj.so_posSig_(1:nMn3,k) = soSig(1:nMn3);
             end
 
             entry.time_s = t_s;  %#ok<STRNU>
@@ -1842,6 +1877,12 @@ classdef SimulationDataStore < handle
                 d.secondaryClock.sigma_m = obj.sc_sigB_(:,1:N);
                 d.secondaryClock.truth_m = obj.sc_truB_(:,1:N);
                 d.secondaryClock.error_m = obj.sc_estB_(:,1:N) - obj.sc_truB_(:,1:N);
+            end
+
+            % P1'/WP4 secondary-asset orbit (per-satellite 3D position error + sigma)
+            if ~isempty(obj.so_posErr_)
+                d.secondaryOrbit.posError_m = obj.so_posErr_(:,1:N);
+                d.secondaryOrbit.posSigma_m = obj.so_posSig_(:,1:N);
             end
 
             % Orbit cache metadata

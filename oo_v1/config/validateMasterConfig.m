@@ -70,14 +70,21 @@ function cfg = validateMasterConfig(cfg)
             ischar(cfg.multiAsset.estimateMode)
         maMode = cfg.multiAsset.estimateMode;
     end
-    if strcmp(maMode,'clocks')
+    if ismember(maMode,{'clocks','position'})   % 'position' is a superset of 'clocks'
         nA_ = 1;
         if isfield(cfg,'scenario') && isfield(cfg.scenario,'nSpaceAssets')
             nA_ = max(1, round(cfg.scenario.nSpaceAssets));
         end
         if nA_ < 2
             error('validateMasterConfig:secondaryClockNoAsset', ...
-                'cfg.multiAsset.estimateMode=''clocks'' requires cfg.scenario.nSpaceAssets>=2.');
+                'cfg.multiAsset.estimateMode=''%s'' requires cfg.scenario.nSpaceAssets>=2.', maMode);
+        end
+        % P1'/WP4: estimating secondary POSITION needs the ground->secondary observable
+        % (near-radial absolute anchor); ISL alone only ties relative baselines.
+        if strcmp(maMode,'position') && ~i_boolPath(cfg,{'multiAsset','towersObserveSecondaries'})
+            error('validateMasterConfig:secondaryPositionUnobservable', ...
+                ['cfg.multiAsset.estimateMode=''position'' requires ' ...
+                 'cfg.multiAsset.towersObserveSecondaries=true (the absolute position observable).']);
         end
         islEnable  = i_boolPath(cfg,{'measurements','isl','enable'});
         codeEnable = i_boolPath(cfg,{'measurements','isl','code','enable'});
@@ -118,10 +125,10 @@ function cfg = validateMasterConfig(cfg)
     end
 
     % --- WP5 ground-tower -> secondary guard ----------------------------------
-    if i_boolPath(cfg, {'multiAsset','towersObserveSecondaries'}) && ~strcmp(maMode,'clocks')
+    if i_boolPath(cfg, {'multiAsset','towersObserveSecondaries'}) && ~ismember(maMode,{'clocks','position'})
         error('validateMasterConfig:towersObserveSecondariesNoState', ...
-            ['cfg.multiAsset.towersObserveSecondaries=true requires estimateMode=''clocks'' ' ...
-             '(else the tower->secondary row has no secondary clock state to observe).']);
+            ['cfg.multiAsset.towersObserveSecondaries=true requires estimateMode=''clocks'' or ''position'' ' ...
+             '(else the tower->secondary row has no secondary state to observe).']);
     end
 end
 

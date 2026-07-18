@@ -120,6 +120,23 @@ classdef ReverseGNSSSimulation < handle
                 fprintf('  Swarm formation: %s, %d secondaries, baseline=%.0f m, sep=[%.0f, %.0f] m\n', ...
                     fmeta_.mode, fmeta_.nSecondaries, fmeta_.baseline_m, ...
                     fmeta_.minSeparation_m, fmeta_.maxSeparation_m);
+
+                % P1'/WP4: seed each estimated secondary's orbit state from its t=0 helix
+                % TRUTH + a per-secondary perturbation drawn from the SAME P0 the filter
+                % was told (initial NEES O(1)). The truth only exists here, after the cache
+                % is built -- ScenarioFactory set P0 for these states but left x0 at 0.
+                if obj.ekf.estimateSecondaryOrbits
+                    sm_ = obj.ekf.stateMap;
+                    [sp_, sv_i] = revgnss.ScenarioFactory.secondaryOrbitInitSigmas_(obj.cfg);
+                    for si = 1:obj.ekf.nSecondaryOrbits
+                        ai = si + 1;
+                        if numel(sr_) < si || isempty(sr_{si}); continue; end
+                        oi = sm_.secondaryOrbitIdx(si,:);
+                        rngOrb = RandStream('mt19937ar', 'Seed', obj.cfg.simulation.seed + 8800 + ai);
+                        obj.ekf.x(oi(1:3)) = sr_{si}(:,1) + sp_  * randn(rngOrb, 3, 1);
+                        obj.ekf.x(oi(4:6)) = sv_{si}(:,1) + sv_i * randn(rngOrb, 3, 1);
+                    end
+                end
             end
             obj.attInitDone = false;
             obj.attInitInfo = revgnss.AttitudeInitializer.defaultInfo(obj.cfg);

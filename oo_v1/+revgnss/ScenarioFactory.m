@@ -285,6 +285,34 @@ classdef ScenarioFactory
                     P0(id,id) = sbd^2;
                 end
             end
+
+            % P1'/WP4 secondary orbit initial covariance (shares the init-draw sigma set
+            % in ReverseGNSSSimulation.initialize, where the secondary truth exists).
+            if ekf.estimateSecondaryOrbits && isfield(sm,'secondaryOrbitIdx') && ~isempty(sm.secondaryOrbitIdx)
+                [sp, sv] = revgnss.ScenarioFactory.secondaryOrbitInitSigmas_(cfg);
+                for si = 1:ekf.nSecondaryOrbits
+                    oi = sm.secondaryOrbitIdx(si,:);
+                    for k = 1:3
+                        P0(oi(k),   oi(k))   = sp^2;
+                        P0(oi(k+3), oi(k+3)) = sv^2;
+                    end
+                end
+            end
+        end
+
+        function [sigma_pos_m, sigma_vel_mps] = secondaryOrbitInitSigmas_(cfg)
+            % secondaryOrbitInitSigmas_  Single source for the P1' secondary-orbit P0
+            % 1-sigma (per axis), shared by the seeded init draw (in ReverseGNSSSimulation)
+            % and the stated P0 here so they cannot drift apart (initial NEES O(1)).
+            sigma_pos_m   = 100.0;
+            sigma_vel_mps = 0.1;
+            try
+                if isfield(cfg,'multiAsset') && isfield(cfg.multiAsset,'secondaryOrbit')
+                    so = cfg.multiAsset.secondaryOrbit;
+                    if isfield(so,'initSigmaPos_m')   && so.initSigmaPos_m > 0;   sigma_pos_m   = so.initSigmaPos_m;   end
+                    if isfield(so,'initSigmaVel_mps') && so.initSigmaVel_mps > 0; sigma_vel_mps = so.initSigmaVel_mps; end
+                end
+            catch; end
         end
     end
 end

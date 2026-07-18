@@ -25,10 +25,8 @@ classdef MultiAssetConfig
                 error('MultiAssetConfig:badEstimateMode', ...
                     'cfg.multiAsset.estimateMode must be ''off''|''clocks''|''position''; got ''%s''.', estMode);
             end
-            if strcmp(estMode,'position')
-                error('MultiAssetConfig:positionModeUnimplemented', ...
-                    'cfg.multiAsset.estimateMode=''position'' (WP4 secondary position estimation) is not implemented.');
-            end
+            % 'position' (P1'/WP4) is a SUPERSET of 'clocks': each secondary gets a full
+            % [r,v,b,bdot] block. secondaryClockCount treats 'position' as clock-enabled too.
             cfg.multiAsset.estimateMode = estMode;
 
             if ~isfield(cfg,'asset') || isempty(cfg.asset)
@@ -181,12 +179,8 @@ classdef MultiAssetConfig
             % Reads RAW cfg fields only (no dependency on normalize having run), so it is
             % safe to call from the EKF constructor and the report helper alike.
             nSec = 0;
-            mode = 'off';
-            if isfield(cfg,'multiAsset') && isfield(cfg.multiAsset,'estimateMode') && ...
-                    (ischar(cfg.multiAsset.estimateMode) || isstring(cfg.multiAsset.estimateMode))
-                mode = char(cfg.multiAsset.estimateMode);
-            end
-            if ~strcmp(mode,'clocks'); return; end
+            mode = revgnss.MultiAssetConfig.estimateModeStr_(cfg);
+            if ~ismember(mode, {'clocks','position'}); return; end   % 'position' includes clocks
             nA = 1;
             if isfield(cfg,'scenario') && isfield(cfg.scenario,'nSpaceAssets')
                 nA = max(1, round(cfg.scenario.nSpaceAssets));
@@ -200,6 +194,22 @@ classdef MultiAssetConfig
                  g({'measurements','isl','code','enable'}) && ...
                  g({'measurements','isl','code','useInEKF'})); return; end
             nSec = nA - 1;
+        end
+
+        function nSec = secondaryOrbitCount(cfg)
+            % secondaryOrbitCount  P1'/WP4 gate: number of secondaries whose [r,v] are
+            % EKF-estimated. Nonzero only for estimateMode='position' AND when the
+            % secondary is observable (ground->secondary rows on, per the review: never
+            % allocate an orbit block without an observable touching it). Mirrors the
+            % secondaryClockCount allocation-gate discipline.
+            nSec = 0;
+            if ~strcmp(revgnss.MultiAssetConfig.estimateModeStr_(cfg), 'position'); return; end
+            % Position needs a POSITION observable: ground->secondary rows (near-radial
+            % absolute) are required; ISL alone only ties relative baselines.
+            if ~revgnss.MultiAssetConfig.cfgBool_(cfg, {'multiAsset','towersObserveSecondaries'}, false)
+                return;
+            end
+            nSec = revgnss.MultiAssetConfig.secondaryClockCount(cfg);   % same asset set (needs ISL code gate too)
         end
 
         function nSec = groundSecondaryRowCount(cfg)
@@ -216,6 +226,14 @@ classdef MultiAssetConfig
     end
 
     methods (Static, Access = private)
+        function mode = estimateModeStr_(cfg)
+            mode = 'off';
+            if isfield(cfg,'multiAsset') && isfield(cfg.multiAsset,'estimateMode') && ...
+                    (ischar(cfg.multiAsset.estimateMode) || isstring(cfg.multiAsset.estimateMode))
+                mode = char(cfg.multiAsset.estimateMode);
+            end
+        end
+
         function tf = cfgBool_(cfg, path, defaultValue)
             v = cfg;
             for k = 1:numel(path)

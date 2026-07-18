@@ -88,34 +88,53 @@ classdef ISLMeasurementBuilder
                     info.secondaryTruthBias_m(txi-1,1)    = btxTruth;
                     info.secondaryTruthDrift_mps(txi-1,1) = dtxTruth;
                 end
+                % P1'/WP4 diagnostic: per-secondary truth POSITION (est-vs-truth downstream).
+                if isfield(stateMap,'secondaryOrbitIdx') && ~isempty(stateMap.secondaryOrbitIdx) && txi >= 2
+                    info.secondaryTruthPos_m(:,txi-1)  = rTxTruth;
+                    info.secondaryTruthVel_mps(:,txi-1) = vTxTruth;
+                end
+
+                % P1'/WP4: when the secondary ORBIT is estimated, the model uses the
+                % ESTIMATED tx position (product retired) and H gains a -u' column on the
+                % tx r block; else the product position is the model (legacy WP3 path).
+                orbPosIdx = revgnss.ISLMeasurementBuilder.secondaryOrbitPosIdx_(stateMap, txi);
+                if ~isempty(orbPosIdx)
+                    rTxModel = x(orbPosIdx);      rTxModel = rTxModel(:);
+                    vTxModel = x(orbPosIdx + 3);  vTxModel = vTxModel(:);
+                else
+                    rTxModel = rTxProd; vTxModel = vTxProd;
+                end
 
                 [rhoTruth, rrTruth]   = revgnss.ISLMeasurementBuilder.geometry_( ...
                     primaryAsset.r_ecef_m, primaryAsset.v_ecef_mps, rTxTruth, vTxTruth);
                 [rhoModel, rrModel, u] = revgnss.ISLMeasurementBuilder.geometry_( ...
-                    x(stateMap.r_idx), x(stateMap.v_idx), rTxProd, vTxProd);
+                    x(stateMap.r_idx), x(stateMap.v_idx), rTxModel, vTxModel);
 
                 if info.codeEnabled
                     nz = revgnss.ISLMeasurementBuilder.drawNoise_(cfg, txi, epochIdx, 1, info.codeSigma_m, 1);
                     z  = rhoTruth + brxTruth - btxTruth + nz;    % btxTruth no longer cancels under WP3
                     bTxIdx = revgnss.ISLMeasurementBuilder.secondaryClockStateIdx_(stateMap, txi, 1);
+                    sigPos2 = info.product.sigmaPos_m^2;      % product-position variance
+                    if ~isempty(orbPosIdx); sigPos2 = 0; end  % P1': position estimated -> not an R nuisance
                     if bTxIdx > 0
                         % WP3: b_tx is an estimated STATE. h differences x(b_tx); DROP the
-                        % product sigmaClock from R (no longer an R nuisance) but KEEP
-                        % sigmaPos (position stays product). Innovation carries the
-                        % secondary clock estimate error (btxTruth - x(b_tx)).
+                        % product sigmaClock from R. Under P1' (orbPosIdx set) the product
+                        % sigmaPos is also dropped (position is a state).
                         h   = rhoModel + x(stateMap.b_rx_idx) - x(bTxIdx);
-                        Rii = info.codeSigma_m^2 + info.product.sigmaPos_m^2;
+                        Rii = info.codeSigma_m^2 + sigPos2;
                     else
                         h   = rhoModel + x(stateMap.b_rx_idx) - btxProd;                      % legacy
-                        Rii = info.codeSigma_m^2 + info.product.sigmaPos_m^2 + info.product.sigmaClock_m^2;
+                        Rii = info.codeSigma_m^2 + sigPos2 + info.product.sigmaClock_m^2;
                     end
                     metaCols = [stateMap.r_idx(:)' stateMap.b_rx_idx];
                     if bTxIdx > 0; metaCols(end+1) = bTxIdx; end
+                    if ~isempty(orbPosIdx); metaCols = [metaCols orbPosIdx(:)']; end
                     info = revgnss.ISLMeasurementBuilder.addMeta_(info, 'islCode', txi, ...
                         metaCols, info.codeUseInEKF, bTxIdx);
                     if info.codeUseInEKF
                         row = zeros(1, nx); row(stateMap.r_idx) = u'; row(stateMap.b_rx_idx) = 1;
-                        if bTxIdx > 0; row(bTxIdx) = -1; end   % dh/dx(b_tx) = -1
+                        if bTxIdx > 0; row(bTxIdx) = -1; end            % dh/dx(b_tx) = -1
+                        if ~isempty(orbPosIdx); row(orbPosIdx) = -u'; end  % dh/dr_tx = -u'
                         [zAdd, hAdd, HAdd, RAdd] = revgnss.ISLMeasurementBuilder.append_( ...
                             zAdd, hAdd, HAdd, RAdd, z, h, row, Rii);
                     end
@@ -124,20 +143,24 @@ classdef ISLMeasurementBuilder
                     nz = revgnss.ISLMeasurementBuilder.drawNoise_(cfg, txi, epochIdx, 2, info.dopplerSigma_mps, 1);
                     z  = rrTruth + drxTruth - dtxTruth + nz;
                     dTxIdx = revgnss.ISLMeasurementBuilder.secondaryClockStateIdx_(stateMap, txi, 2);
+                    sigVel2 = info.product.sigmaVel_mps^2;
+                    if ~isempty(orbPosIdx); sigVel2 = 0; end   % P1': velocity estimated
                     if dTxIdx > 0
                         h   = rrModel + x(stateMap.bdot_rx_idx) - x(dTxIdx);
-                        Rii = info.dopplerSigma_mps^2 + info.product.sigmaVel_mps^2;     % drop sigmaClockDrift
+                        Rii = info.dopplerSigma_mps^2 + sigVel2;     % drop sigmaClockDrift
                     else
                         h   = rrModel + x(stateMap.bdot_rx_idx) - dtxProd;              % legacy
-                        Rii = info.dopplerSigma_mps^2 + info.product.sigmaVel_mps^2 + info.product.sigmaClockDrift_mps^2;
+                        Rii = info.dopplerSigma_mps^2 + sigVel2 + info.product.sigmaClockDrift_mps^2;
                     end
                     metaCols = [stateMap.v_idx(:)' stateMap.bdot_rx_idx];
                     if dTxIdx > 0; metaCols(end+1) = dTxIdx; end
+                    if ~isempty(orbPosIdx); metaCols = [metaCols (orbPosIdx(:)'+3)]; end
                     info = revgnss.ISLMeasurementBuilder.addMeta_(info, 'islDoppler', txi, ...
                         metaCols, info.dopplerUseInEKF, dTxIdx);
                     if info.dopplerUseInEKF
                         row = zeros(1, nx); row(stateMap.v_idx) = u'; row(stateMap.bdot_rx_idx) = 1;
                         if dTxIdx > 0; row(dTxIdx) = -1; end
+                        if ~isempty(orbPosIdx); row(orbPosIdx + 3) = -u'; end   % dh/dv_tx = -u'
                         [zAdd, hAdd, HAdd, RAdd] = revgnss.ISLMeasurementBuilder.append_( ...
                             zAdd, hAdd, HAdd, RAdd, z, h, row, Rii);
                     end
@@ -234,6 +257,8 @@ classdef ISLMeasurementBuilder
             info.ekfRowSecIdx = [];              % WP3: per-EKF-row resolved b_tx/bdot_tx idx (0=product)
             info.secondaryTruthBias_m = [];      % WP3: per-secondary truth clock bias [m] (diagnostic)
             info.secondaryTruthDrift_mps = [];   % WP3: per-secondary truth clock drift [m/s]
+            info.secondaryTruthPos_m = [];       % P1': per-secondary truth position [3 x nSec] (diagnostic)
+            info.secondaryTruthVel_mps = [];     % P1': per-secondary truth velocity [3 x nSec]
             info.nCodeRows = double(info.codeEnabled) * numel(info.transmitterList);
             info.nDopplerRows = double(info.dopplerEnabled) * numel(info.transmitterList);
             info.nCarrierDiagnosticRows = double(info.carrierEnabled) * numel(info.transmitterList);
@@ -275,6 +300,18 @@ classdef ISLMeasurementBuilder
             si = txi - 1;                      % asset txi (2..N) -> row si (1..N-1)
             if si < 1 || si > size(S,1); return; end
             idx = S(si, which);
+        end
+
+        function posIdx = secondaryOrbitPosIdx_(stateMap, txi)
+            % Position state indices (1x3) for secondary txi's estimated orbit, or [] when
+            % the orbit block is absent (P1' off). Velocity indices are posIdx+3.
+            posIdx = [];
+            if ~isfield(stateMap,'secondaryOrbitIdx'); return; end
+            S = stateMap.secondaryOrbitIdx;
+            if isempty(S); return; end
+            si = txi - 1;
+            if si < 1 || si > size(S,1); return; end
+            posIdx = S(si, 1:3);
         end
 
         function p = productCfg_(cfg)

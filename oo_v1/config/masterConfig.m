@@ -789,6 +789,11 @@ cfg.multiAsset.estimateMode = 'off';
 % enough to stay conservative/under-confident.
 cfg.multiAsset.secondaryClock.initSigma_m        = 100.0;
 cfg.multiAsset.secondaryClock.initSigmaDrift_mps = 1.0;
+% P1'/WP4: prior on each secondary's estimated [r,v] (init draw AND stated P0 share
+% these, so initial NEES is O(1)). estimateMode='position' promotes each secondary to
+% a full [r,v,b,bdot] asset; requires towersObserveSecondaries (the position observable).
+cfg.multiAsset.secondaryOrbit.initSigmaPos_m     = 100.0;   % [m] per axis
+cfg.multiAsset.secondaryOrbit.initSigmaVel_mps   = 0.1;     % [m/s] per axis
 
 % --- WP5: ground-tower -> secondary observation rows (absolute clock anchor) ---
 % When true (and estimateMode='clocks'), each visible ground tower adds a

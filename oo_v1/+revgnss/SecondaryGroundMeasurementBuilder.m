@@ -64,8 +64,22 @@ classdef SecondaryGroundMeasurementBuilder
                 if bTxIdx <= 0; continue; end
                 sec       = assets{ai};
                 rSecTruth = sec.getAntennaPositionECEF();                                  % truth antenna ECEF
-                pb        = revgnss.ISLMeasurementBuilder.productBiasForAsset(cfg, ai, t_s);
-                rSecProd  = rSecTruth + pb.pos;                                            % product ephemeris
+                % P1'/WP4: when the secondary ORBIT is estimated, the model uses the
+                % ESTIMATED position and H gains a +u_ts' column (this near-radial ground
+                % LOS is what makes the secondary POSITION observable); product retired.
+                orbPosIdx = [];
+                if isfield(stateMap,'secondaryOrbitIdx') && ~isempty(stateMap.secondaryOrbitIdx) && ...
+                        si <= size(stateMap.secondaryOrbitIdx,1)
+                    orbPosIdx = stateMap.secondaryOrbitIdx(si, 1:3);
+                end
+                if ~isempty(orbPosIdx)
+                    rSecModel = x(orbPosIdx); rSecModel = rSecModel(:);   % estimated position (column)
+                    RprodRow  = sigma^2;   % position + (its product) now a state -> drop product-pos variance
+                else
+                    pb        = revgnss.ISLMeasurementBuilder.productBiasForAsset(cfg, ai, t_s);
+                    rSecModel = rSecTruth + pb.pos;                                        % product ephemeris (legacy)
+                    RprodRow  = sigma^2 + Rprod;
+                end
                 bTxTruth  = sec.clock.getBiasMeters();
                 for ti = 1:numel(towers)
                     elev = towers{ti}.computeElevationTo(rSecTruth);
@@ -73,14 +87,18 @@ classdef SecondaryGroundMeasurementBuilder
                     rTwrT = models.measurements.MeasurementModelUtils.towerPositionEcef(cfg, towers{ti}, ti, 'truth', t_s);
                     rTwrM = models.measurements.MeasurementModelUtils.towerPositionEcef(cfg, towers{ti}, ti, 'model');
                     [rhoT, ~] = models.corrections.RangeCorrections.correctedPseudorange(rSecTruth, rTwrT, cfg, 'truth', elev, t_s);
-                    [rhoM, ~] = models.corrections.RangeCorrections.correctedPseudorange(rSecProd, rTwrM, cfg, 'model', elev, t_s);
+                    [rhoM, ~] = models.corrections.RangeCorrections.correctedPseudorange(rSecModel, rTwrM, cfg, 'model', elev, t_s);
                     bTwr = towers{ti}.getClockBiasMeters();                                % matched tower clock (mean)
                     node = ti*32 + ai;                                                    % packed into the mod-65536 node field
                     nz   = sigma * errorChain.drawKeyed(models.noise.RngSource.TOWER_SECONDARY, node, 0, 1, epochIdx, 1, 1);
                     z = rhoT + bTxTruth   - bTwr + nz;
                     h = rhoM + x(bTxIdx)  - bTwr;
-                    Rii = sigma^2 + Rprod;
+                    Rii = RprodRow;
                     row = zeros(1, nx); row(bTxIdx) = 1;                                   % receiver clock -> +1
+                    if ~isempty(orbPosIdx)
+                        d = rSecModel - rTwrM; nd = norm(d); if nd < 1; nd = 1; end
+                        row(orbPosIdx) = (d / nd)';                                        % dh/dr_sec = +u_ts'
+                    end
                     zAdd(end+1,1) = z;      %#ok<AGROW>
                     hAdd(end+1,1) = h;      %#ok<AGROW>
                     HAdd(end+1,:) = row;    %#ok<AGROW>
