@@ -83,6 +83,12 @@ classdef ISLMeasurementBuilder
                 btxTruth = tx.clock.getBiasMeters();           dtxTruth = tx.clock.getDriftMetersPerSecond();
                 btxProd  = btxTruth + pb.clk;                  dtxProd  = dtxTruth + pb.clkDrift;
 
+                % WP3 diagnostic: per-secondary truth clock (est-vs-truth is formed downstream).
+                if isfield(stateMap,'secondaryClockIdx') && ~isempty(stateMap.secondaryClockIdx) && txi >= 2
+                    info.secondaryTruthBias_m(txi-1,1)    = btxTruth;
+                    info.secondaryTruthDrift_mps(txi-1,1) = dtxTruth;
+                end
+
                 [rhoTruth, rrTruth]   = revgnss.ISLMeasurementBuilder.geometry_( ...
                     primaryAsset.r_ecef_m, primaryAsset.v_ecef_mps, rTxTruth, vTxTruth);
                 [rhoModel, rrModel, u] = revgnss.ISLMeasurementBuilder.geometry_( ...
@@ -90,13 +96,26 @@ classdef ISLMeasurementBuilder
 
                 if info.codeEnabled
                     nz = revgnss.ISLMeasurementBuilder.drawNoise_(cfg, txi, epochIdx, 1, info.codeSigma_m, 1);
-                    z  = rhoTruth + brxTruth - btxTruth + nz;
-                    h  = rhoModel + x(stateMap.b_rx_idx) - btxProd;
-                    Rii = info.codeSigma_m^2 + info.product.sigmaPos_m^2 + info.product.sigmaClock_m^2;
+                    z  = rhoTruth + brxTruth - btxTruth + nz;    % btxTruth no longer cancels under WP3
+                    bTxIdx = revgnss.ISLMeasurementBuilder.secondaryClockStateIdx_(stateMap, txi, 1);
+                    if bTxIdx > 0
+                        % WP3: b_tx is an estimated STATE. h differences x(b_tx); DROP the
+                        % product sigmaClock from R (no longer an R nuisance) but KEEP
+                        % sigmaPos (position stays product). Innovation carries the
+                        % secondary clock estimate error (btxTruth - x(b_tx)).
+                        h   = rhoModel + x(stateMap.b_rx_idx) - x(bTxIdx);
+                        Rii = info.codeSigma_m^2 + info.product.sigmaPos_m^2;
+                    else
+                        h   = rhoModel + x(stateMap.b_rx_idx) - btxProd;                      % legacy
+                        Rii = info.codeSigma_m^2 + info.product.sigmaPos_m^2 + info.product.sigmaClock_m^2;
+                    end
+                    metaCols = [stateMap.r_idx(:)' stateMap.b_rx_idx];
+                    if bTxIdx > 0; metaCols(end+1) = bTxIdx; end
                     info = revgnss.ISLMeasurementBuilder.addMeta_(info, 'islCode', txi, ...
-                        [stateMap.r_idx(:)' stateMap.b_rx_idx], info.codeUseInEKF);
+                        metaCols, info.codeUseInEKF, bTxIdx);
                     if info.codeUseInEKF
                         row = zeros(1, nx); row(stateMap.r_idx) = u'; row(stateMap.b_rx_idx) = 1;
+                        if bTxIdx > 0; row(bTxIdx) = -1; end   % dh/dx(b_tx) = -1
                         [zAdd, hAdd, HAdd, RAdd] = revgnss.ISLMeasurementBuilder.append_( ...
                             zAdd, hAdd, HAdd, RAdd, z, h, row, Rii);
                     end
@@ -104,12 +123,21 @@ classdef ISLMeasurementBuilder
                 if info.dopplerEnabled
                     nz = revgnss.ISLMeasurementBuilder.drawNoise_(cfg, txi, epochIdx, 2, info.dopplerSigma_mps, 1);
                     z  = rrTruth + drxTruth - dtxTruth + nz;
-                    h  = rrModel + x(stateMap.bdot_rx_idx) - dtxProd;
-                    Rii = info.dopplerSigma_mps^2 + info.product.sigmaVel_mps^2 + info.product.sigmaClockDrift_mps^2;
+                    dTxIdx = revgnss.ISLMeasurementBuilder.secondaryClockStateIdx_(stateMap, txi, 2);
+                    if dTxIdx > 0
+                        h   = rrModel + x(stateMap.bdot_rx_idx) - x(dTxIdx);
+                        Rii = info.dopplerSigma_mps^2 + info.product.sigmaVel_mps^2;     % drop sigmaClockDrift
+                    else
+                        h   = rrModel + x(stateMap.bdot_rx_idx) - dtxProd;              % legacy
+                        Rii = info.dopplerSigma_mps^2 + info.product.sigmaVel_mps^2 + info.product.sigmaClockDrift_mps^2;
+                    end
+                    metaCols = [stateMap.v_idx(:)' stateMap.bdot_rx_idx];
+                    if dTxIdx > 0; metaCols(end+1) = dTxIdx; end
                     info = revgnss.ISLMeasurementBuilder.addMeta_(info, 'islDoppler', txi, ...
-                        [stateMap.v_idx(:)' stateMap.bdot_rx_idx], info.dopplerUseInEKF);
+                        metaCols, info.dopplerUseInEKF, dTxIdx);
                     if info.dopplerUseInEKF
                         row = zeros(1, nx); row(stateMap.v_idx) = u'; row(stateMap.bdot_rx_idx) = 1;
+                        if dTxIdx > 0; row(dTxIdx) = -1; end
                         [zAdd, hAdd, HAdd, RAdd] = revgnss.ISLMeasurementBuilder.append_( ...
                             zAdd, hAdd, HAdd, RAdd, z, h, row, Rii);
                     end
@@ -133,17 +161,27 @@ classdef ISLMeasurementBuilder
             if isempty(info) || ~isfield(info,'ekfRowTypes') || isempty(info.ekfRowTypes); return; end
             intervalIdx = 0;
             if isfield(info,'productIntervalIdx'); intervalIdx = info.productIntervalIdx; end
+            hasSec = isfield(info,'ekfRowSecIdx') && numel(info.ekfRowSecIdx) == numel(info.ekfRowTypes);
             for k = 1:numel(info.ekfRowTypes)
                 txi = info.ekfRowTx(k);
                 tx  = assets{txi};
                 pb  = revgnss.ISLMeasurementBuilder.productBias_(cfg, info.product, txi, intervalIdx);
                 [rhoModel, rrModel] = revgnss.ISLMeasurementBuilder.geometry_( ...
                     x(stateMap.r_idx), x(stateMap.v_idx), tx.r_ecef_m(:) + pb.pos, tx.v_ecef_mps(:) + pb.vel);
+                secIdx = 0; if hasSec; secIdx = info.ekfRowSecIdx(k); end
                 switch info.ekfRowTypes{k}
                     case 'islCode'
-                        h(end+1,1) = rhoModel + x(stateMap.b_rx_idx) - (tx.clock.getBiasMeters() + pb.clk); %#ok<AGROW>
+                        if secIdx > 0
+                            h(end+1,1) = rhoModel + x(stateMap.b_rx_idx) - x(secIdx); %#ok<AGROW>
+                        else
+                            h(end+1,1) = rhoModel + x(stateMap.b_rx_idx) - (tx.clock.getBiasMeters() + pb.clk); %#ok<AGROW>
+                        end
                     case 'islDoppler'
-                        h(end+1,1) = rrModel + x(stateMap.bdot_rx_idx) - (tx.clock.getDriftMetersPerSecond() + pb.clkDrift); %#ok<AGROW>
+                        if secIdx > 0
+                            h(end+1,1) = rrModel + x(stateMap.bdot_rx_idx) - x(secIdx); %#ok<AGROW>
+                        else
+                            h(end+1,1) = rrModel + x(stateMap.bdot_rx_idx) - (tx.clock.getDriftMetersPerSecond() + pb.clkDrift); %#ok<AGROW>
+                        end
                 end
             end
         end
@@ -183,6 +221,9 @@ classdef ISLMeasurementBuilder
             info.rows = struct([]);
             info.ekfRowTypes = {};
             info.ekfRowTx = [];
+            info.ekfRowSecIdx = [];              % WP3: per-EKF-row resolved b_tx/bdot_tx idx (0=product)
+            info.secondaryTruthBias_m = [];      % WP3: per-secondary truth clock bias [m] (diagnostic)
+            info.secondaryTruthDrift_mps = [];   % WP3: per-secondary truth clock drift [m/s]
             info.nCodeRows = double(info.codeEnabled) * numel(info.transmitterList);
             info.nDopplerRows = double(info.dopplerEnabled) * numel(info.transmitterList);
             info.nCarrierDiagnosticRows = double(info.carrierEnabled) * numel(info.transmitterList);
@@ -211,6 +252,19 @@ classdef ISLMeasurementBuilder
                 list = revgnss.ISLMeasurementBuilder.getNum_(cfg, {'measurements','isl','transmitterAssetIndex'}, 2);
             end
             list = list(list >= 2 & list <= nAssets);
+        end
+
+        function idx = secondaryClockStateIdx_(stateMap, txi, which)
+            % which=1 -> bias state, which=2 -> drift state. 0 when the secondary-clock
+            % block is absent (WP3 off) or txi out of range. Explicit isempty test avoids
+            % the 0x2 empty-index trap.
+            idx = 0;
+            if ~isfield(stateMap,'secondaryClockIdx'); return; end
+            S = stateMap.secondaryClockIdx;
+            if isempty(S); return; end
+            si = txi - 1;                      % asset txi (2..N) -> row si (1..N-1)
+            if si < 1 || si > size(S,1); return; end
+            idx = S(si, which);
         end
 
         function p = productCfg_(cfg)
@@ -265,7 +319,8 @@ classdef ISLMeasurementBuilder
             s = RandStream('mt19937ar', 'Seed', key);
         end
 
-        function info = addMeta_(info, obsType, txi, cols, useInEkf)
+        function info = addMeta_(info, obsType, txi, cols, useInEkf, secIdx)
+            if nargin < 6; secIdx = 0; end
             linkId = sprintf('link:isl:a%03d:a%03d', txi, info.receiverAssetIndex);
             role = 'diagnosticOnly'; if useInEkf; role = 'physicalEKF'; end
             row = revgnss.ObservableRowDescriptor.create(0, obsType, linkId, 'ISL-L1', ...
@@ -276,6 +331,7 @@ classdef ISLMeasurementBuilder
             if useInEkf
                 info.ekfRowTypes{end+1} = obsType;
                 info.ekfRowTx(end+1)    = txi;
+                info.ekfRowSecIdx(end+1)= secIdx;   % WP3: estimated b_tx/bdot_tx idx (0=product); pushed in lockstep
                 info.nEkfRows = info.nEkfRows + 1;
             end
         end

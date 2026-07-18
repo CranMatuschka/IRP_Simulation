@@ -305,7 +305,14 @@ classdef ReverseGNSSSimulation < handle
                 if obj.ekf.estimateGyroBias
                     omega_gyro = obj.asset.getGyroReading();   % truth gyro reading for [k-1,k]
                 end
-                obj.ekf.predict(dt, towerClockModels, t_s - dt, omega_gyro);
+                secondaryClockModels = {};
+                if obj.ekf.estimateSecondaryClocks
+                    % obj.assets is a cell of SpaceAsset; each .clock is already
+                    % precomputeNoise'd. si -> asset si+1, matching secondaryClockIdx order.
+                    secondaryClockModels = cellfun(@(a) a.clock, obj.assets(2:end), ...
+                        'UniformOutput', false);
+                end
+                obj.ekf.predict(dt, towerClockModels, t_s - dt, omega_gyro, secondaryClockModels);
             end
 
             % Compute measurements — use getMeasurementState() so quaternionErrorState

@@ -63,4 +63,65 @@ function cfg = validateMasterConfig(cfg)
              'residualStochastic is off -> it contributes EXACTLY 0 to z-h. Use differing ' ...
              'truth/model default_m, or residualStochastic.enable=true with sigma_m>0.']);
     end
+
+    % --- WP3 secondary-clock estimation guards (estimateMode='clocks') ---------
+    maMode = 'off';
+    if isfield(cfg,'multiAsset') && isfield(cfg.multiAsset,'estimateMode') && ...
+            ischar(cfg.multiAsset.estimateMode)
+        maMode = cfg.multiAsset.estimateMode;
+    end
+    if strcmp(maMode,'clocks')
+        nA_ = 1;
+        if isfield(cfg,'scenario') && isfield(cfg.scenario,'nSpaceAssets')
+            nA_ = max(1, round(cfg.scenario.nSpaceAssets));
+        end
+        if nA_ < 2
+            error('validateMasterConfig:secondaryClockNoAsset', ...
+                'cfg.multiAsset.estimateMode=''clocks'' requires cfg.scenario.nSpaceAssets>=2.');
+        end
+        islEnable  = i_boolPath(cfg,{'measurements','isl','enable'});
+        codeEnable = i_boolPath(cfg,{'measurements','isl','code','enable'});
+        codeEkf    = i_boolPath(cfg,{'measurements','isl','code','useInEKF'});
+        dopEkf     = i_boolPath(cfg,{'measurements','isl','doppler','useInEKF'});
+        if ~(islEnable && codeEnable && codeEkf)
+            error('validateMasterConfig:secondaryClockUnobservable', ...
+                ['estimateMode=''clocks'' requires isl.enable + isl.code.enable + ' ...
+                 'isl.code.useInEKF (else b_tx has zero measurement support and diverges).']);
+        end
+        if ~dopEkf
+            warning('validateMasterConfig:secondaryClockDriftWeak', ...
+                'estimateMode=''clocks'' with isl.doppler.useInEKF=false: bdot_tx is only weakly observable.');
+        end
+        % Transmitter list must cover ALL secondaries, else the excluded assets get an
+        % allocated-but-unobservable clock state (P grows unbounded).
+        txSel = 'all';
+        if isfield(cfg,'measurements') && isfield(cfg.measurements,'isl') && ...
+                isfield(cfg.measurements.isl,'transmitters')
+            txSel = cfg.measurements.isl.transmitters;
+        end
+        coversAll = (ischar(txSel)||isstring(txSel)) && strcmpi(char(txSel),'all');
+        if ~coversAll && isnumeric(txSel)
+            coversAll = isequal(sort(round(txSel(:)')), 2:nA_);
+        end
+        if ~coversAll
+            error('validateMasterConfig:secondaryClockTransmitterSubset', ...
+                'estimateMode=''clocks'' requires isl.transmitters=''all'' (or the full 2:N list); a subset leaves unobservable clock states.');
+        end
+        % Vacuous-target warning: deterministic clocks => secondary truth bias == 0.
+        if isfield(cfg,'asset') && isfield(cfg.asset,'clock') && ...
+                isfield(cfg.asset.clock,'deterministic') && cfg.asset.clock.deterministic
+            warning('validateMasterConfig:secondaryClockDeterministic', ...
+                ['estimateMode=''clocks'' but cfg.asset.clock.deterministic=true: secondary ' ...
+                 'truth clocks are identically 0, so the estimation target is trivial. ' ...
+                 'Set cfg.asset.clock.deterministic=false for a meaningful WP3 run.']);
+        end
+    end
+end
+
+function tf = i_boolPath(cfg, path)
+    v = cfg;
+    for k = 1:numel(path)
+        if isstruct(v) && isfield(v, path{k}); v = v.(path{k}); else; tf = false; return; end
+    end
+    tf = islogical(v) && isscalar(v) && v;
 end

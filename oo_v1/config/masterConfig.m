@@ -773,6 +773,23 @@ cfg.formation.phase0_rad  = 0.0;       % phase of the first secondary on the pro
 cfg.multiAsset.recordTruth   = true;   % persist per-asset truth for swarm (nSpaceAssets>1) runs
 cfg.multiAsset.truthStride_s = 60.0;   % decimation stride [s] to keep long-run .mat small; <=0 = every truth epoch
 
+% --- WP3: secondary-asset CLOCK estimation (bias+drift as EKF states) ---------
+% 'off'      (WP<=2) secondaries are represented-only truth; their clock cancels
+%            in the one-way ISL innovation (today's behaviour). Golden-safe.
+% 'clocks'   (WP3)   estimate each secondary's [b_tx, bdot_tx] as 2 EKF states,
+%            appended LAST. Requires nSpaceAssets>=2 AND isl.enable +
+%            isl.code.useInEKF (validated). Secondary POSITIONS stay product (WP4).
+% 'position' (WP4)   NOT IMPLEMENTED -- hard error in MultiAssetConfig.normalize.
+% NOTE: secondary truth clocks only wander when cfg.asset.clock.deterministic=false;
+% with the default deterministic clock the estimation target is identically 0.
+cfg.multiAsset.estimateMode = 'off';
+% Loose a-priori on the secondary clock states (init draw AND stated P0 share these,
+% so initial NEES is O(1)). Deliberately << tower's 1000 m / 10 m/s: a GEO atomic
+% clock's broadcast a-priori is far better than an unknown ground beacon, yet loose
+% enough to stay conservative/under-confident.
+cfg.multiAsset.secondaryClock.initSigma_m        = 100.0;
+cfg.multiAsset.secondaryClock.initSigmaDrift_mps = 1.0;
+
 % --- Ground towers: real ground-station sites in the 23 deg-E GEO footprint ---
 % Name, lat[deg], lon[deg], alt[m]. The first 5 are the frozen-golden network (do
 % NOT reorder or edit them: the Stage-85 golden trims to nTowers=5 = these five).

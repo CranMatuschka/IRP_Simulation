@@ -14,6 +14,23 @@ classdef MultiAssetConfig
             nAssets = max(1, round(cfg.scenario.nSpaceAssets));
             cfg.scenario.nSpaceAssets = nAssets;
 
+            % WP3 estimate mode (isfield-guarded: normalize() is called standalone by
+            % summary()/assetInfos()/instantiateAssets() on cfgs that may lack the field).
+            estMode = 'off';
+            if isfield(cfg,'multiAsset') && isfield(cfg.multiAsset,'estimateMode') && ...
+                    (ischar(cfg.multiAsset.estimateMode) || isstring(cfg.multiAsset.estimateMode))
+                estMode = char(cfg.multiAsset.estimateMode);
+            end
+            if ~ismember(estMode, {'off','clocks','position'})
+                error('MultiAssetConfig:badEstimateMode', ...
+                    'cfg.multiAsset.estimateMode must be ''off''|''clocks''|''position''; got ''%s''.', estMode);
+            end
+            if strcmp(estMode,'position')
+                error('MultiAssetConfig:positionModeUnimplemented', ...
+                    'cfg.multiAsset.estimateMode=''position'' (WP4 secondary position estimation) is not implemented.');
+            end
+            cfg.multiAsset.estimateMode = estMode;
+
             if ~isfield(cfg,'asset') || isempty(cfg.asset)
                 error('MultiAssetConfig:missingPrimaryAsset', 'cfg.asset is required as the primary estimated asset.');
             end
@@ -59,8 +76,13 @@ classdef MultiAssetConfig
             cfg.multiAsset.nSpaceAssets = nAssets;
             cfg.multiAsset.estimatedAssetIndex = 1;
             cfg.multiAsset.estimatedAssetName = cfg.assets(1).name;
-            cfg.multiAsset.multiAssetEstimationEnabled = false;
-            cfg.multiAsset.guardMessage = 'multi-asset estimation not yet enabled; only primary asset estimated';
+            cfg.multiAsset.multiAssetEstimationEnabled = strcmp(estMode,'clocks') && nAssets >= 2;
+            cfg.multiAsset.secondaryClockStates = 2 * revgnss.MultiAssetConfig.secondaryClockCount(cfg);
+            if cfg.multiAsset.multiAssetEstimationEnabled
+                cfg.multiAsset.guardMessage = 'secondary-asset clocks (bias+drift) estimated as EKF states (WP3); positions remain product';
+            else
+                cfg.multiAsset.guardMessage = 'multi-asset estimation not yet enabled; only primary asset estimated';
+            end
             cfg.multiAsset.islRows = revgnss.MultiAssetConfig.islRowCount_(cfg);
             cfg.multiAsset.twstftRows = 0;
         end
@@ -111,10 +133,11 @@ classdef MultiAssetConfig
             s.estimatedAssetIndex = 1;
             s.estimatedAssetName = cfg.assets(1).name;
             s.nonEstimatedAssetNames = {cfg.assets(~[cfg.assets.estimated]).name};
-            s.multiAssetEstimationEnabled = false;
+            s.multiAssetEstimationEnabled = cfg.multiAsset.multiAssetEstimationEnabled;
             s.guardMessage = cfg.multiAsset.guardMessage;
             s.islRows = revgnss.MultiAssetConfig.islRowCount_(cfg);
             s.twstftRows = 0;
+            s.secondaryClockStates = cfg.multiAsset.secondaryClockStates;
             s.futureInactiveLinkTypes = {'TWSTFT','relay/transponder'};
             s.assetTable = assetTable;
         end
@@ -151,9 +174,45 @@ classdef MultiAssetConfig
                 nTx = double(nAssets >= 2);
             end
         end
+
+        function nSec = secondaryClockCount(cfg)
+            % secondaryClockCount  THE single WP3 master gate. Returns the number of
+            % secondaries whose [b_tx,bdot_tx] are EKF-estimated (nSpaceAssets-1), or 0.
+            % Reads RAW cfg fields only (no dependency on normalize having run), so it is
+            % safe to call from the EKF constructor and the report helper alike.
+            nSec = 0;
+            mode = 'off';
+            if isfield(cfg,'multiAsset') && isfield(cfg.multiAsset,'estimateMode') && ...
+                    (ischar(cfg.multiAsset.estimateMode) || isstring(cfg.multiAsset.estimateMode))
+                mode = char(cfg.multiAsset.estimateMode);
+            end
+            if ~strcmp(mode,'clocks'); return; end
+            nA = 1;
+            if isfield(cfg,'scenario') && isfield(cfg.scenario,'nSpaceAssets')
+                nA = max(1, round(cfg.scenario.nSpaceAssets));
+            end
+            if nA < 2; return; end
+            % ISL code must be an active EKF observable or b_tx has zero measurement
+            % support (pure divergent random walk). This makes state allocation and
+            % observability inseparable -- no estimated-but-unobservable clock states.
+            g = @(p) revgnss.MultiAssetConfig.cfgBool_(cfg, p, false);
+            if ~(g({'measurements','isl','enable'}) && ...
+                 g({'measurements','isl','code','enable'}) && ...
+                 g({'measurements','isl','code','useInEKF'})); return; end
+            nSec = nA - 1;
+        end
     end
 
     methods (Static, Access = private)
+        function tf = cfgBool_(cfg, path, defaultValue)
+            v = cfg;
+            for k = 1:numel(path)
+                if isstruct(v) && isfield(v, path{k}); v = v.(path{k});
+                else; tf = islogical(defaultValue) && defaultValue; return; end
+            end
+            tf = islogical(v) && isscalar(v) && v;
+        end
+
         function a = mergePrimary_(a, primary)
             f = fieldnames(primary);
             for k = 1:numel(f); a.(f{k}) = primary.(f{k}); end

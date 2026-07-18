@@ -194,6 +194,13 @@ classdef SimulationDataStore < handle
         tw_mod_
         tw_err_
 
+        % ---- WP3 secondary-asset clocks (lazy [nSec x N]): estimate/sigma/truth of
+        % the estimated secondary clock BIAS. Empty unless estimateMode='clocks'.
+        nSecClocks_ (1,1) double = 0
+        sc_estB_
+        sc_sigB_
+        sc_truB_
+
         % ---- Euler at last epoch (for ReportRunner summary)
         lastTruthEuler_rad_   double = []
         lastEstEuler_rad_     double = []
@@ -617,6 +624,33 @@ classdef SimulationDataStore < handle
             x  = ekf.x;
             c  = revgnss.Constants.SPEED_OF_LIGHT_MPS;
             storeFullThisEpoch = obj.shouldStoreFullSnapshot_(t_s, k);
+
+            % WP3 secondary-asset clock est-vs-truth (bias). Est/sigma from the posterior
+            % EKF; truth routed via errStruct.isl (ISLMeasurementBuilder populated it).
+            % Skipped byte-identically when the block is absent (secondaryClockIdx empty).
+            if isfield(sm,'secondaryClockIdx') && ~isempty(sm.secondaryClockIdx)
+                scIdx  = sm.secondaryClockIdx;             % [nSec x 2]
+                nSec_  = size(scIdx,1);
+                scEstB = x(scIdx(:,1));
+                scSigB = sqrt(max(0, diag(ekf.P(scIdx(:,1), scIdx(:,1)))));
+                scTruB = nan(nSec_,1);
+                if isstruct(errStruct) && isfield(errStruct,'isl') && isstruct(errStruct.isl) && ...
+                        isfield(errStruct.isl,'secondaryTruthBias_m') && ~isempty(errStruct.isl.secondaryTruthBias_m)
+                    tb  = errStruct.isl.secondaryTruthBias_m(:);
+                    nMn = min(nSec_, numel(tb));
+                    scTruB(1:nMn) = tb(1:nMn);
+                end
+                if isempty(obj.sc_estB_)
+                    obj.nSecClocks_ = nSec_;
+                    obj.sc_estB_ = nan(nSec_, obj.nAlloc_);
+                    obj.sc_sigB_ = nan(nSec_, obj.nAlloc_);
+                    obj.sc_truB_ = nan(nSec_, obj.nAlloc_);
+                end
+                nMn2 = min(nSec_, obj.nSecClocks_);
+                obj.sc_estB_(1:nMn2,k) = scEstB(1:nMn2);
+                obj.sc_sigB_(1:nMn2,k) = scSigB(1:nMn2);
+                obj.sc_truB_(1:nMn2,k) = scTruB(1:nMn2);
+            end
 
             entry.time_s = t_s;  %#ok<STRNU>
 
@@ -1800,6 +1834,14 @@ classdef SimulationDataStore < handle
                 d.towerClock.truth_m           = obj.tw_tru_(:,1:N);
                 d.towerClock.model_m           = obj.tw_mod_(:,1:N);
                 d.towerClock.correctionError_m = obj.tw_err_(:,1:N);
+            end
+
+            % WP3 secondary-asset clocks (estimate-vs-truth bias diagnostic)
+            if ~isempty(obj.sc_estB_)
+                d.secondaryClock.est_m   = obj.sc_estB_(:,1:N);
+                d.secondaryClock.sigma_m = obj.sc_sigB_(:,1:N);
+                d.secondaryClock.truth_m = obj.sc_truB_(:,1:N);
+                d.secondaryClock.error_m = obj.sc_estB_(:,1:N) - obj.sc_truB_(:,1:N);
             end
 
             % Orbit cache metadata

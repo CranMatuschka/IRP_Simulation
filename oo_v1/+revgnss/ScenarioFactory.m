@@ -114,6 +114,53 @@ classdef ScenarioFactory
                     x0(idx_bdot) = towers{ti}.getClockDriftMetersPerSecond() + sigma_bd_twr * randn(rngTwr);
                 end
             end
+
+            if ekf.estimateSecondaryClocks
+                % WP3: draw the secondary-clock init from the SAME P0 the filter is told
+                % it has, so initial NEES is O(1) (mirrors the tower-clock convention).
+                % Per-ai identity-keyed stream (seed+8700+ai): adding/removing assets
+                % cannot perturb another secondary's draw (upgrade over the tower shared
+                % stream). Truth anchor = cfg.assets(ai).clock (seed 300+ai); at t=0
+                % coloredBias=0 so config bias_s*c == runtime getBiasMeters() exactly.
+                [sb, sbd] = revgnss.ScenarioFactory.secondaryClockInitSigmas_(cfg);
+                for si = 1:ekf.nSecondaryClocks
+                    ai = si + 1;
+                    ib = sm.secondaryClockIdx(si,1);
+                    id = sm.secondaryClockIdx(si,2);
+                    rngSec = RandStream('mt19937ar', 'Seed', cfg.simulation.seed + 8700 + ai);
+                    [b0, bd0] = revgnss.ScenarioFactory.secondaryClockTruthMeters_(cfg, ai);
+                    x0(ib) = b0  + sb  * randn(rngSec);
+                    x0(id) = bd0 + sbd * randn(rngSec);
+                end
+            end
+        end
+
+        function [sigma_b_m, sigma_bdot_mps] = secondaryClockInitSigmas_(cfg)
+            % secondaryClockInitSigmas_  Single source for the WP3 secondary-clock P0
+            % 1-sigma, shared by the seeded init draw AND the stated P0 so they cannot
+            % drift apart (initial NEES O(1)). Loose broadcast-product-class a-priori.
+            sigma_b_m      = 100.0;   % [m]
+            sigma_bdot_mps = 1.0;     % [m/s]
+            try
+                if isfield(cfg,'multiAsset') && isfield(cfg.multiAsset,'secondaryClock')
+                    scc = cfg.multiAsset.secondaryClock;
+                    if isfield(scc,'initSigma_m')        && scc.initSigma_m > 0;        sigma_b_m      = scc.initSigma_m;        end
+                    if isfield(scc,'initSigmaDrift_mps') && scc.initSigmaDrift_mps > 0; sigma_bdot_mps = scc.initSigmaDrift_mps; end
+                end
+            catch; end
+        end
+
+        function [b_m, bdot_mps] = secondaryClockTruthMeters_(cfg, ai)
+            % secondaryClockTruthMeters_  t=0 truth anchor for secondary ai, read from
+            % the finalized cfg (the runtime SpaceAsset objects do not exist yet at
+            % ScenarioFactory time). Valid because coloredBias_s=0 at t=0, so
+            % getBiasMeters()==bias_s*c. try/catch -> 0 on any missing field.
+            b_m = 0; bdot_mps = 0;
+            try
+                c = revgnss.Constants.SPEED_OF_LIGHT_MPS;
+                b_m      = cfg.assets(ai).clock.bias_s   * c;
+                bdot_mps = cfg.assets(ai).clock.fracFreq * c;
+            catch; end
         end
 
         function [sigma_b_m, sigma_bdot_mps] = towerClockInitSigmas_()
@@ -225,6 +272,17 @@ classdef ScenarioFactory
             if ekf.estimateGyroBias && isfield(sm,'gyroBiasIdx') && ~isempty(sm.gyroBiasIdx)
                 for k = 1:numel(sm.gyroBiasIdx)
                     P0(sm.gyroBiasIdx(k), sm.gyroBiasIdx(k)) = ekf.imuP0Bias_^2;
+                end
+            end
+
+            % WP3 secondary-asset clock initial covariance (shares the init-draw sigma).
+            if ekf.estimateSecondaryClocks && isfield(sm,'secondaryClockIdx') && ~isempty(sm.secondaryClockIdx)
+                [sb, sbd] = revgnss.ScenarioFactory.secondaryClockInitSigmas_(cfg);
+                for si = 1:ekf.nSecondaryClocks
+                    ib = sm.secondaryClockIdx(si,1);
+                    id = sm.secondaryClockIdx(si,2);
+                    P0(ib,ib) = sb^2;
+                    P0(id,id) = sbd^2;
                 end
             end
         end

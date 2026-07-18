@@ -56,6 +56,10 @@ classdef ReportRealityHelper
             if imuOn
                 expectedStates = expectedStates + 3;
             end
+            % WP3 secondary-asset clock states (2 per secondary), gated identically to the
+            % EKF constructor via the shared MultiAssetConfig.secondaryClockCount gate.
+            % +0 for golden (nSpaceAssets=1) -> byte-identical. Mirrors the IMU fix fbb9f6c.
+            expectedStates = expectedStates + 2 * revgnss.MultiAssetConfig.secondaryClockCount(cfg);
             nStates = revgnss.ReportRealityHelper.safeField_(summary, 'nStates', NaN);
             if isfinite(nStates) && nStates ~= expectedStates
                 error('ClockExactReportBuilder:stateTableCountMismatch', ...

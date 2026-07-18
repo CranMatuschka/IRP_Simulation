@@ -84,6 +84,12 @@ classdef ReverseGNSSEKF < handle
         imuP0Bias_            (1,1) double  = 1e-5    % initial bias 1-sigma (init done in ScenarioFactory)
         imuVanLoan_           (1,1) logical = false   % optional theta<->b_g Q cross term
 
+        % WP3: secondary-asset clock states (bias+drift per secondary). Appended LAST
+        % (after gyroBias) so no existing index shifts; off => nx/state-map identical
+        % to today (golden-safe). Gated by MultiAssetConfig.secondaryClockCount(cfg).
+        estimateSecondaryClocks (1,1) logical = false
+        nSecondaryClocks        (1,1) double  = 0
+
         % Clock model (for process noise)
         rxClockModel     models.clocks.ClockModel
 
@@ -180,6 +186,13 @@ classdef ReverseGNSSEKF < handle
                 catch; end
             end
 
+            % WP3 secondary-clock gate. secondaryClockCount returns 0 unless
+            % estimateMode=='clocks' AND nSpaceAssets>=2 AND ISL code is an active EKF
+            % observable -- so golden (nSpaceAssets=1) and mode='off' both force it off.
+            nSecClk_ = revgnss.MultiAssetConfig.secondaryClockCount(cfg);
+            obj.estimateSecondaryClocks = nSecClk_ > 0;
+            obj.nSecondaryClocks        = nSecClk_;
+
             obj.nx = obj.nxBase;
             if obj.estimateTowerClocks
                 obj.nx = obj.nx + 2 * nTowers;
@@ -198,6 +211,9 @@ classdef ReverseGNSSEKF < handle
             end
             if obj.estimateGyroBias
                 obj.nx = obj.nx + 3;
+            end
+            if obj.estimateSecondaryClocks
+                obj.nx = obj.nx + 2 * obj.nSecondaryClocks;   % [b_tx, bdot_tx] per secondary
             end
 
             if isfield(cfg.estimator,'sigma_accel_mps2')
@@ -286,14 +302,17 @@ classdef ReverseGNSSEKF < handle
         end
 
         % ----------------------------------------------------------------
-        function predict(obj, dt_s, towerClockModels, t0_s, omega_gyro_radps)
+        function predict(obj, dt_s, towerClockModels, t0_s, omega_gyro_radps, secondaryClockModels)
             % predict  EKF time propagation.
             %   t0_s — simulation time at start of prediction interval.
             %   omega_gyro_radps (optional) — strapdown gyro body-rate reading. When the IMU is
             %   enabled the attitude is propagated with omega = omega_gyro - b_g; otherwise the
             %   free omega state is used (byte-identical to the pre-IMU behaviour).
+            %   secondaryClockModels (optional, WP3) — cell of secondary-asset ClockModels
+            %   (asset 2..N) supplying the per-secondary clock process noise Q.
             if nargin < 4 || isempty(t0_s); t0_s = 0; end
             if nargin < 5; omega_gyro_radps = []; end
+            if nargin < 6; secondaryClockModels = {}; end
 
             x  = obj.x;
             sm = obj.stateMap;
@@ -377,13 +396,23 @@ classdef ReverseGNSSEKF < handle
                     x_new(id) = x(id);
                 end
             end
+
+            % Secondary-asset clocks (WP3): bias integrates drift; drift is random walk.
+            if obj.estimateSecondaryClocks
+                for si = 1:obj.nSecondaryClocks
+                    ib = sm.secondaryClockIdx(si,1);
+                    id = sm.secondaryClockIdx(si,2);
+                    x_new(ib) = x(ib) + dt_s * x(id);
+                    x_new(id) = x(id);
+                end
+            end
             obj.x = x_new;
 
             % State transition Jacobian F (pass Phi6 override for r/v block)
             F = obj.buildF_(dt_s, eul, omg, Phi6);
 
             % Process noise Q
-            Q = obj.buildQ_(dt_s, towerClockModels);
+            Q = obj.buildQ_(dt_s, towerClockModels, secondaryClockModels);
 
             % Propagate covariance
             obj.P = F * obj.P * F' + Q;
@@ -673,13 +702,27 @@ classdef ReverseGNSSEKF < handle
                 sm.txCodeBiasIdx = zeros(nTowers, 1);
             end
 
-            % Optional gyro-bias states (IMU/MEKF). Appended LAST so no existing index shifts;
+            % Optional gyro-bias states (IMU/MEKF). Appended so no existing index shifts;
             % empty when off -> state map identical to the pre-IMU map (golden-safe).
             if obj.estimateGyroBias
                 sm.gyroBiasIdx = (nextIdx:nextIdx+2)';
-                nextIdx = nextIdx + 3; %#ok<NASGU>
+                nextIdx = nextIdx + 3;
             else
                 sm.gyroBiasIdx = [];
+            end
+
+            % WP3 secondary-asset clock states (appended strictly LAST). Row si (1..N-1)
+            % maps to asset ai=si+1 and holds [b_tx_idx, bdot_tx_idx]. Empty sentinel
+            % zeros(0,2) when off -> byte-identical map (mirrors towerClockIdx pattern).
+            if obj.estimateSecondaryClocks && obj.nSecondaryClocks > 0
+                secIdx = zeros(obj.nSecondaryClocks, 2);
+                for si = 1:obj.nSecondaryClocks
+                    secIdx(si,:) = [nextIdx, nextIdx+1];
+                    nextIdx = nextIdx + 2;
+                end
+                sm.secondaryClockIdx = secIdx;
+            else
+                sm.secondaryClockIdx = zeros(0, 2);
             end
         end
 
@@ -765,6 +808,13 @@ classdef ReverseGNSSEKF < handle
                 end
             end
 
+            % Secondary-asset clock bias<-drift coupling (WP3; tower/rx precedent)
+            if obj.estimateSecondaryClocks
+                for si = 1:obj.nSecondaryClocks
+                    F(sm.secondaryClockIdx(si,1), sm.secondaryClockIdx(si,2)) = dt_s;
+                end
+            end
+
             % Ambiguity states: identity (random walk; F = I already)
             % ZWD states: first-order Gauss-Markov phi = exp(-dt/tau)
             if obj.estimateZwd
@@ -800,7 +850,7 @@ classdef ReverseGNSSEKF < handle
         end
 
         % ----------------------------------------------------------------
-        function Q = buildQ_(obj, dt_s, towerClockModels)
+        function Q = buildQ_(obj, dt_s, towerClockModels, secondaryClockModels)
             % buildQ_  Discrete-time process noise matrix.
             %
             % Position/velocity: continuous white-acceleration model.
@@ -904,6 +954,22 @@ classdef ReverseGNSSEKF < handle
                     end
                     Q(ib,ib) = Qtwr(1,1); Q(ib,id) = Qtwr(1,2);
                     Q(id,ib) = Qtwr(2,1); Q(id,id) = Qtwr(2,2);
+                end
+            end
+
+            % --- Secondary-asset clock process noise (WP3, if estimated) ---
+            % nargin>=4 short-circuit keeps 3-arg callers (e.g. buildQ_(dt,{})) byte-identical.
+            if obj.estimateSecondaryClocks && nargin >= 4 && ~isempty(secondaryClockModels)
+                for si = 1:min(obj.nSecondaryClocks, numel(secondaryClockModels))
+                    ib = sm.secondaryClockIdx(si,1);
+                    id = sm.secondaryClockIdx(si,2);
+                    if ~isempty(secondaryClockModels{si})
+                        Qsec = secondaryClockModels{si}.getProcessNoiseQ(dt_s, 'meters');
+                    else
+                        Qsec = diag([1e-4, 1e-8]) * dt_s;
+                    end
+                    Q(ib,ib) = Qsec(1,1); Q(ib,id) = Qsec(1,2);
+                    Q(id,ib) = Qsec(2,1); Q(id,id) = Qsec(2,2);
                 end
             end
 
