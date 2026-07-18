@@ -152,6 +152,9 @@ function cfg = validateMasterConfig(cfg)
             ['cfg.multiAsset.towersObserveSecondaries=true requires estimateMode=''clocks'' or ''position'' ' ...
              '(else the tower->secondary row has no secondary state to observe).']);
     end
+
+    % --- P2' all-pairs two-way ISL guards (delegated; reads defensively, no-op when off) ---
+    revgnss.SwarmTwoWayISLBuilder.validateConfig(cfg);
 end
 
 function tf = i_boolPath(cfg, path)

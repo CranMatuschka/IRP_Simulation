@@ -837,6 +837,20 @@ cfg.multiAsset.truthSideDynamics.sncSigma_mps2   = 1e-5;  % white-SNC lower boun
                                                           % for a coherent ramp -- Guard C NEES is the arbiter,
                                                           % do NOT raise it to force NEES->1)
 cfg.multiAsset.secondaryOrbit.sigma_accel_mps2   = [];    % [] = inherit primary SNC (byte-identical to P1')
+% --- Swarm all-pairs two-way ISL (clock-free baseline lengths), P2'. Default OFF. -------
+% FUSION with P1' one-way ISL + WP5 ground anchor: independent draws (RngSource 22/23) ->
+% adds Fisher information, NOT double-counting (one-way = range+clock-diff, two-way =
+% clock-free baseline, independent noise). Requires estimateMode='position' (both endpoints
+% are estimated states) AND towersObserveSecondaries (two-way is clock-free and rigid-motion
+% blind -> ground rows supply the clock/absolute anchor). nSpaceAssets=1 -> 0 pairs -> 0 rows
+% -> byte-identical golden. Sharpens the RELATIVE/shape solution only.
+cfg.multiAsset.twoWayISL.enable                 = false;  % master gate (P2')
+cfg.multiAsset.twoWayISL.links                  = 'all';  % 'all' pairs among estimated assets, or an M-by-2 [i k] list
+cfg.multiAsset.twoWayISL.sigma_m                = 0.01;   % white two-way ranging thermal 1-sigma [m] (cm-class wideband crosslink)
+cfg.multiAsset.twoWayISL.delayCal.sigma_const_m = 0.01;   % per-link turn-around+antenna-PCO cal bias, constant part [m] (33 ps = 1 cm)
+cfg.multiAsset.twoWayISL.delayCal.sigma_rw_m    = 0.003;  % per-link cal-bias slow random-walk part [m]
+cfg.multiAsset.twoWayISL.delayCal.tau_s         = 3600;   % cal-bias correlation time [s]
+cfg.multiAsset.twoWayISL.delayCal.nCorrCap      = 60;     % cap on tau/dt R-inflation (honest gate)
 
 % --- Ground towers: real ground-station sites in the 23 deg-E GEO footprint ---
 % Name, lat[deg], lon[deg], alt[m]. The first 5 are the frozen-golden network (do

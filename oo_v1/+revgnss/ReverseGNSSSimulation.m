@@ -443,6 +443,15 @@ classdef ReverseGNSSSimulation < handle
             end
             errStruct.secondaryGround = gsInfo;
 
+            % P2': all-pairs two-way ISL (clock-free baseline lengths). Fuses with the one-way
+            % ISL + ground rows; empty (byte-identical) at nSpaceAssets=1 / when disabled.
+            [z_sw, h_sw, H_sw, R_sw, swInfo] = revgnss.SwarmTwoWayISLBuilder.build( ...
+                obj.cfg, obj.errorChain, obj.assets, obj.ekf.x, obj.ekf.stateMap, obj.ekf.nx, t_s);
+            if ~isempty(z_sw)
+                z = [z; z_sw]; h = [h; h_sw]; H = [H; H_sw]; R = blkdiag(R, R_sw);
+            end
+            errStruct.swarmTwoWayISL = swInfo;
+
             % TWSTFT code time-transfer diagnostic (no EKF rows).
             errStruct.twstftDiag = revgnss.TWSTFTDiagnosticBuilder.build(obj.cfg, islInfo, twoWayInfo);
             if isfield(errStruct,'observableStack')
