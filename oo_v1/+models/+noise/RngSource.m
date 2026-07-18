@@ -29,5 +29,6 @@ classdef RngSource
         PHASE_SCINT    = 17   % EnvironmentModel phase-scintillation GM, per tower (persistent)
         TWSTFT_TWOWAY  = 18   % tower<->spacecraft two-way time-transfer noise (white)
         ANT_PHASE_BIAS = 19   % unknown per-antenna carrier phase bias, truth-only (persistent)
+        TOWER_SECONDARY = 20  % WP5 ground-tower -> secondary-asset code thermal noise (white)
     end
 end

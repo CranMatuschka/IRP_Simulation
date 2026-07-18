@@ -201,6 +201,18 @@ classdef MultiAssetConfig
                  g({'measurements','isl','code','useInEKF'})); return; end
             nSec = nA - 1;
         end
+
+        function nSec = groundSecondaryRowCount(cfg)
+            % groundSecondaryRowCount  WP5 gate. Returns the number of secondaries whose
+            % clock is observed by ground-tower rows (== secondaryClockCount) when
+            % cfg.multiAsset.towersObserveSecondaries is true, else 0. Requires WP3
+            % (secondaryClockCount>0) so the tower row has a secondary clock state to touch.
+            nSec = 0;
+            if ~revgnss.MultiAssetConfig.cfgBool_(cfg, {'multiAsset','towersObserveSecondaries'}, false)
+                return;
+            end
+            nSec = revgnss.MultiAssetConfig.secondaryClockCount(cfg);
+        end
     end
 
     methods (Static, Access = private)

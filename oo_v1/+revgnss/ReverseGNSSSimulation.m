@@ -412,6 +412,20 @@ classdef ReverseGNSSSimulation < handle
             end
             errStruct.twoWayTimeTransfer = twttInfo;
 
+            % WP5: ground-tower -> secondary pseudorange rows. Each visible tower observes
+            % a secondary's b_tx at a near-radial LOS against the KNOWN tower clock, giving
+            % b_tx an ABSOLUTE ground anchor independent of the primary radial (breaks the
+            % WP3 degeneracy). No primary-state columns -> golden byte-identical when off.
+            [z_gs, h_gs, H_gs, R_gs, gsInfo] = revgnss.SecondaryGroundMeasurementBuilder.build( ...
+                obj.cfg, obj.errorChain, obj.assets, obj.towers, obj.ekf.x, obj.ekf.stateMap, obj.ekf.nx, t_s);
+            if ~isempty(z_gs)
+                z = [z; z_gs];
+                h = [h; h_gs];
+                H = [H; H_gs];
+                R = blkdiag(R, R_gs);
+            end
+            errStruct.secondaryGround = gsInfo;
+
             % TWSTFT code time-transfer diagnostic (no EKF rows).
             errStruct.twstftDiag = revgnss.TWSTFTDiagnosticBuilder.build(obj.cfg, islInfo, twoWayInfo);
             if isfield(errStruct,'observableStack')

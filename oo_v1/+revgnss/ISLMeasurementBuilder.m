@@ -156,6 +156,16 @@ classdef ISLMeasurementBuilder
             if ~isempty(zAdd); info.prefitRms = sqrt(mean((zAdd - hAdd).^2)); end
         end
 
+        function pb = productBiasForAsset(cfg, ai, t_s)
+            % productBiasForAsset  Public accessor for a secondary's broadcast-product
+            % ephemeris/clock error at time t_s (pb.pos/vel/clk/clkDrift). Same
+            % realization the ISL rows use, so WP5 ground rows see a CONSISTENT secondary
+            % product across both link types. Zero when the product is disabled.
+            p  = revgnss.ISLMeasurementBuilder.productCfg_(cfg);
+            iv = revgnss.ISLMeasurementBuilder.productInterval_(p, t_s);
+            pb = revgnss.ISLMeasurementBuilder.productBias_(cfg, p, ai, iv);
+        end
+
         function h = predictEkfRows(cfg, primaryAsset, assets, x, stateMap, info)
             h = [];
             if isempty(info) || ~isfield(info,'ekfRowTypes') || isempty(info.ekfRowTypes); return; end

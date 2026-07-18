@@ -790,6 +790,23 @@ cfg.multiAsset.estimateMode = 'off';
 cfg.multiAsset.secondaryClock.initSigma_m        = 100.0;
 cfg.multiAsset.secondaryClock.initSigmaDrift_mps = 1.0;
 
+% --- WP5: ground-tower -> secondary observation rows (absolute clock anchor) ---
+% When true (and estimateMode='clocks'), each visible ground tower adds a
+% pseudorange row observing a secondary's clock bias b_tx at a near-radial LOS
+% against the KNOWN (product-corrected) tower clock. This anchors b_tx to the
+% ground ABSOLUTELY -- independent of the primary radial -- curing the WP3
+% degeneracy (b_tx near-degenerate with the primary radial through the ~horizontal
+% ISL LOS). No primary-state columns, so golden-safe when off / nSpaceAssets=1.
+cfg.multiAsset.towersObserveSecondaries          = false;
+cfg.multiAsset.towerSecondary.code.sigma_m       = 1.0;   % tower->secondary thermal 1-sigma [m]
+% Conservative product-correlation factor: the secondary ephemeris product error is
+% piecewise-CONSTANT over its broadcast interval, so consecutive rows share it; the
+% white-R filter would average it down ~sqrt(N). Inflate the product+tower-clock
+% variance by nCorr so the filter cannot fake that averaging (honest-covariance,
+% mirrors TwoWayTimeTransfer.conservativeProductCorrelation).
+cfg.multiAsset.towerSecondary.productNCorr       = 30;    % effective correlated-sample count
+cfg.multiAsset.towerSecondary.towerClkSigma_m    = 0.03;  % tower clock product residual 1-sigma [m] (~100 ps)
+
 % --- Ground towers: real ground-station sites in the 23 deg-E GEO footprint ---
 % Name, lat[deg], lon[deg], alt[m]. The first 5 are the frozen-golden network (do
 % NOT reorder or edit them: the Stage-85 golden trims to nTowers=5 = these five).

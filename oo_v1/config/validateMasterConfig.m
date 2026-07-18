@@ -116,6 +116,13 @@ function cfg = validateMasterConfig(cfg)
                  'Set cfg.asset.clock.deterministic=false for a meaningful WP3 run.']);
         end
     end
+
+    % --- WP5 ground-tower -> secondary guard ----------------------------------
+    if i_boolPath(cfg, {'multiAsset','towersObserveSecondaries'}) && ~strcmp(maMode,'clocks')
+        error('validateMasterConfig:towersObserveSecondariesNoState', ...
+            ['cfg.multiAsset.towersObserveSecondaries=true requires estimateMode=''clocks'' ' ...
+             '(else the tower->secondary row has no secondary clock state to observe).']);
+    end
 end
 
 function tf = i_boolPath(cfg, path)
