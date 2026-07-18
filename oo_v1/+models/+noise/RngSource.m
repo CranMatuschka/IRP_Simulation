@@ -30,5 +30,7 @@ classdef RngSource
         TWSTFT_TWOWAY  = 18   % tower<->spacecraft two-way time-transfer noise (white)
         ANT_PHASE_BIAS = 19   % unknown per-antenna carrier phase bias, truth-only (persistent)
         TOWER_SECONDARY = 20  % WP5 ground-tower -> secondary-asset code thermal noise (white)
+        ATMO_SEC_UPLINK = 21  % Guard A per-TOWER uplink atmosphere GM for ground->secondary rows
+                              % (truth-side, shared across secondaries, interval-keyed; sig 0=tropo 1=iono)
     end
 end

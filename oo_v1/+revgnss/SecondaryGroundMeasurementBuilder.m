@@ -55,6 +55,19 @@ classdef SecondaryGroundMeasurementBuilder
             end
             Rprod = nCorr * (productSigmaPos^2 + twClkSig^2);
 
+            % Guard A: divergent uplink atmosphere (truth-side, per-tower-shared, interval-
+            % correlated, elevation-mapped). Default off -> byte-identical to the pre-guard row.
+            gb = @(p) revgnss.SecondaryGroundMeasurementBuilder.getBool_(cfg, p, false);
+            atmoOn   = gb({'multiAsset','towerSecondary','atmosphere','enable'});
+            aTropZen = g({'multiAsset','towerSecondary','atmosphere','sigmaTropZen_m'}, 0.05);
+            aIonoZen = g({'multiAsset','towerSecondary','atmosphere','sigmaIonoZen_m'}, 0.20);
+            aTauTrop = g({'multiAsset','towerSecondary','atmosphere','tauTrop_s'}, 1800);
+            aTauIono = g({'multiAsset','towerSecondary','atmosphere','tauIono_s'}, 600);
+            aShellH  = g({'multiAsset','towerSecondary','atmosphere','ionoShellHeight_m'}, 350e3);
+            aChargeR = gb({'multiAsset','towerSecondary','atmosphere','chargeR'});
+            aNCap    = g({'multiAsset','towerSecondary','atmosphere','nCorrCap'}, 60);
+            elvFloor = revgnss.Constants.ELEVATION_FLOOR_RAD;
+
             nAssets = numel(assets);
             rowAsset = []; rowTower = [];
             for ai = 2:nAssets
@@ -91,9 +104,16 @@ classdef SecondaryGroundMeasurementBuilder
                     bTwr = towers{ti}.getClockBiasMeters();                                % matched tower clock (mean)
                     node = ti*32 + ai;                                                    % packed into the mod-65536 node field
                     nz   = sigma * errorChain.drawKeyed(models.noise.RngSource.TOWER_SECONDARY, node, 0, 1, epochIdx, 1, 1);
-                    z = rhoT + bTxTruth   - bTwr + nz;
+                    % Guard A: truth-side divergent uplink atmosphere (into z only -> cannot cancel).
+                    dAtmo = 0; Ratmo = 0;
+                    if atmoOn && dt > 0
+                        [dAtmo, Ratmo] = revgnss.SecondaryGroundMeasurementBuilder.losUplinkAtmo_( ...
+                            errorChain, ti, elev, t_s, dt, elvFloor, ...
+                            aTropZen, aIonoZen, aTauTrop, aTauIono, aShellH, aNCap, aChargeR);
+                    end
+                    z = rhoT + bTxTruth   - bTwr + nz + dAtmo;
                     h = rhoM + x(bTxIdx)  - bTwr;
-                    Rii = RprodRow;
+                    Rii = RprodRow + Ratmo;
                     row = zeros(1, nx); row(bTxIdx) = 1;                                   % receiver clock -> +1
                     if ~isempty(orbPosIdx)
                         d = rSecModel - rTwrM; nd = norm(d); if nd < 1; nd = 1; end
@@ -129,6 +149,35 @@ classdef SecondaryGroundMeasurementBuilder
                 if isstruct(v) && isfield(v, path{k}); v = v.(path{k}); else; tf = dflt; return; end
             end
             tf = islogical(v) && isscalar(v) && v;
+        end
+
+        function [dAtmo, Ratmo] = losUplinkAtmo_(ec, ti, el, t_s, dt, elvFloor, ...
+                sTrop, sIono, tauT, tauI, shellH, nCap, chargeR)
+            % PER-TOWER zenith GM (node = ti), SHARED across all secondaries this tower
+            % observes; per-LOS divergence comes ONLY from the elevation mapping (so the
+            % secondary-secondary axis stays correlated -> the wall cannot average down).
+            % sig 0=tropo, 1=iono. Truth-side metres.
+            gT  = revgnss.SecondaryGroundMeasurementBuilder.unitProc_(ec, ti, 0, tauT, t_s);
+            gI  = revgnss.SecondaryGroundMeasurementBuilder.unitProc_(ec, ti, 1, tauI, t_s);
+            m_w = 1 / max(sin(el), sin(elvFloor));                                    % wet-tropo mapping
+            M_i = models.atmosphere.MappingFunctions.ionosphere(el, 'thinShell', shellH); % iono obliquity
+            dAtmo = sTrop*m_w*gT + sIono*M_i*gI;
+            if chargeR
+                nT = min(max(tauT/dt,1), nCap);  nI = min(max(tauI/dt,1), nCap);
+                Ratmo = nT*(sTrop*m_w)^2 + nI*(sIono*M_i)^2;   % correlated bias: white R cannot average it
+            else
+                Ratmo = 0;                                     % honest-gate default: leave for Guard C NEES
+            end
+        end
+
+        function gval = unitProc_(ec, node, sig, tau, t_s)
+            % Continuous, unit-variance, interval-correlated process: piecewise-linear
+            % interpolation between per-interval knots (k=floor(t/tau)). C0, correlation
+            % length ~tau, NOT white, order-independent (pure fn of node/sig/t).
+            k  = floor(t_s/tau);  f = t_s/tau - k;
+            u0 = ec.drawKeyedInterval(models.noise.RngSource.ATMO_SEC_UPLINK, node, 0, sig, k);
+            u1 = ec.drawKeyedInterval(models.noise.RngSource.ATMO_SEC_UPLINK, node, 0, sig, k+1);
+            gval = ((1-f)*u0 + f*u1) / sqrt((1-f)^2 + f^2);
         end
     end
 end

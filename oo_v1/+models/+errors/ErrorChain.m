@@ -49,6 +49,7 @@ classdef ErrorChain < handle
         % Seed-independence refactor: identity-keyed streams (ON path, default)
         useIndependentStreams (1,1) logical = false
         registry                   % models.noise.RngRegistry (built only when ON)
+        auxRegistry                % Guard A: lazily-built RngRegistry for identity-keyed interval draws when the global one is OFF
         dtCache_s   (1,1) double = 1    % dt_s cached for epoch-index derivation
         epochIdx_   (1,1) int64  = 0    % current epoch index (refreshed each compute())
     end
@@ -152,6 +153,26 @@ classdef ErrorChain < handle
             else
                 x = randn(obj.rngStream, m, n);
             end
+        end
+
+        function x = drawKeyedInterval(obj, src, node, ant, sig, k, m, n)
+            % drawKeyedInterval  Identity-keyed draw indexed by INTERVAL k (piecewise-
+            %   constant per broadcast interval), for temporally-correlated truth-side
+            %   biases (Guard A). ALWAYS identity-keyed (order-independent) regardless of
+            %   the global independentStreams toggle -- this is new behaviour with no legacy
+            %   byte-identity to preserve, and correlation/reproducibility REQUIRE it.
+            if nargin < 8 || isempty(n); n = 1; end
+            if nargin < 7 || isempty(m); m = 1; end
+            if obj.useIndependentStreams
+                reg = obj.registry;
+            else
+                if isempty(obj.auxRegistry)
+                    obj.auxRegistry = models.noise.RngRegistry(obj.seed, 'threefry');
+                end
+                reg = obj.auxRegistry;
+            end
+            s = reg.epochStream(src, node, ant, sig, k);   % epoch field carries the interval index
+            x = randn(s, m, n);
         end
 
         % ----------------------------------------------------------------

@@ -589,6 +589,7 @@ end
 % Standalone config/ functions (like realismGradeConfig): masterConfig applies them for the
 % default path; a run script can also call them after masterConfig() once it sets the toggle.
 cfg = applyLuniSolar(cfg);        % cfg.perturbations.sunMoon.enable
+cfg = applyInjectTruthSideDynamics(cfg);   % Guard B: one-sided truth-side gap (no-op unless swarm 'position')
 cfg = applyPerTowerHwBias(cfg);   % cfg.errors.hardwareDelay.perTowerBias.enable
 
 % ================================================================
@@ -811,6 +812,31 @@ cfg.multiAsset.towerSecondary.code.sigma_m       = 1.0;   % tower->secondary the
 % mirrors TwoWayTimeTransfer.conservativeProductCorrelation).
 cfg.multiAsset.towerSecondary.productNCorr       = 30;    % effective correlated-sample count
 cfg.multiAsset.towerSecondary.towerClkSigma_m    = 0.03;  % tower clock product residual 1-sigma [m] (~100 ps)
+% --- Guard A (P1' realism): divergent uplink atmosphere on ground->secondary rows ---
+% TRUTH-side per-(tower,interval) tropo+iono residual, SHARED across the secondaries a
+% tower sees (per-LOS divergence is elevation-mapping only), interval-correlated (not
+% white). Injected into z, not h -> cannot cancel; kept OUT of R by default so Guard C's
+% per-sat/centroid NEES flags the near-radial common mode it pours into. Default off.
+cfg.multiAsset.towerSecondary.atmosphere.enable            = false;
+cfg.multiAsset.towerSecondary.atmosphere.sigmaTropZen_m    = 0.05;  % wet-tropo zenith residual [m]
+cfg.multiAsset.towerSecondary.atmosphere.sigmaIonoZen_m    = 0.20;  % post-correction iono zenith residual [m]
+cfg.multiAsset.towerSecondary.atmosphere.tauTrop_s         = 1800;  % wet correlation time [s]
+cfg.multiAsset.towerSecondary.atmosphere.tauIono_s         = 600;   % TEC correlation time [s]
+cfg.multiAsset.towerSecondary.atmosphere.ionoShellHeight_m = 350e3;
+cfg.multiAsset.towerSecondary.atmosphere.chargeR           = false; % false: honest gate (bias unmodelled); true: nCorr R inflation
+cfg.multiAsset.towerSecondary.atmosphere.nCorrCap          = 60;
+% --- Guard B (P1' realism): one-sided truth-side SRP + luni-solar dynamics gap ---
+% Truth==EKF (both J2) today => each secondary's DYNAMIC error is identically 0 and NEES
+% measures nothing dynamic. When injectTruthSideDynamics=true (and estimateMode='position'
+% + nSpaceAssets>=2), applyInjectTruthSideDynamics turns on the existing truth-side
+% luni-solar (~7e-6 m/s^2 at GEO) + cannonball SRP while the EKF stays J2 -> a real
+% force-model gap for the WHOLE swarm. Default false -> golden byte-identical.
+cfg.multiAsset.injectTruthSideDynamics           = false;
+cfg.multiAsset.truthSideDynamics.sncSigma_mps2   = 1e-5;  % white-SNC lower bound for the gap [m/s^2]
+                                                          % (sun+moon aligned PEAK ~1.1e-5; a crude white proxy
+                                                          % for a coherent ramp -- Guard C NEES is the arbiter,
+                                                          % do NOT raise it to force NEES->1)
+cfg.multiAsset.secondaryOrbit.sigma_accel_mps2   = [];    % [] = inherit primary SNC (byte-identical to P1')
 
 % --- Ground towers: real ground-station sites in the 23 deg-E GEO footprint ---
 % Name, lat[deg], lon[deg], alt[m]. The first 5 are the frozen-golden network (do

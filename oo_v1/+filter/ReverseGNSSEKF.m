@@ -68,6 +68,7 @@ classdef ReverseGNSSEKF < handle
 
         % Process noise parameters
         sigma_accel_mps2      (1,1) double = 0.01
+        secondarySigmaAccel_mps2 (1,1) double = NaN   % Guard B: independent secondary-orbit SNC; NaN = inherit primary
         sigma_angAccel_radps2 (1,1) double = 1e-4
 
         % Observability flags: set to false to freeze states via Q = ~0
@@ -230,6 +231,13 @@ classdef ReverseGNSSEKF < handle
 
             if isfield(cfg.estimator,'sigma_accel_mps2')
                 obj.sigma_accel_mps2 = cfg.estimator.sigma_accel_mps2;
+            end
+            if isfield(cfg,'multiAsset') && isfield(cfg.multiAsset,'secondaryOrbit') && ...
+                    isfield(cfg.multiAsset.secondaryOrbit,'sigma_accel_mps2')
+                v_ = cfg.multiAsset.secondaryOrbit.sigma_accel_mps2;   % Guard B: [] / <=0 -> inherit (NaN)
+                if isnumeric(v_) && isscalar(v_) && isfinite(v_) && v_ > 0
+                    obj.secondarySigmaAccel_mps2 = v_;
+                end
             end
             if isfield(cfg.estimator,'sigma_angAccel_radps2')
                 obj.sigma_angAccel_radps2 = cfg.estimator.sigma_angAccel_radps2;
@@ -626,6 +634,83 @@ classdef ReverseGNSSEKF < handle
                     nees.coreDof = numel(idx);
                     nees.core    = nees.coreRaw / nees.coreDof;
                 end
+            end
+        end
+
+        % ----------------------------------------------------------------
+        function s = computeSwarmNEES(obj, truthPrimary, secTruth)
+            % computeSwarmNEES  Guard C: per-secondary + formation-centroid NEES.
+            %   Scores each secondary [r,v,(clock)] block and TWO centroid position modes.
+            %   The centroid covariance uses the CROSS-covariances P(r_i,r_j) -- the mode a
+            %   block-diagonal R / matched atmosphere / truth==dynamics make the filter
+            %   over-confident about. Centroid NEES/dof >> 1 flags the small absolute
+            %   (centroid) RMS as a crutch. Golden-safe: empty perSat + NaN centroids when
+            %   nSecondaryOrbits==0.
+            %   truthPrimary : struct .r_ecef_m [3x1]
+            %   secTruth     : struct .pos_m [3 x nSec], .vel_mps [3 x nSec],
+            %                         (optional) .bias_m [nSec x1], .drift_mps [nSec x1]
+            sm = obj.stateMap;
+            s = struct('perSat', struct('pos',{},'vel',{},'clock',{},'posErrNorm_m',{}), ...
+                       'centroid',          struct('pos',NaN,'posErrNorm_m',NaN,'N',0,'cov3',[]), ...
+                       'secondaryCentroid', struct('pos',NaN,'posErrNorm_m',NaN,'N',0,'cov3',[]));
+            if ~obj.estimateSecondaryOrbits || obj.nSecondaryOrbits == 0; return; end
+            orbIdx = sm.secondaryOrbitIdx;                 % [nSec x 6]
+            nSec   = size(orbIdx,1);
+
+            posBlocks = cell(1, nSec+1);  posErr = cell(1, nSec+1);
+            posBlocks{1} = sm.r_idx(:);                                       % primary anchors the CoM
+            posErr{1}    = obj.x(sm.r_idx) - truthPrimary.r_ecef_m(:);
+
+            for si = 1:nSec
+                pIdx = orbIdx(si,1:3).';  vIdx = orbIdx(si,4:6).';
+                er = obj.x(pIdx) - secTruth.pos_m(:,si);
+                ev = obj.x(vIdx) - secTruth.vel_mps(:,si);
+                s.perSat(si).pos          = neesBlock_(obj.P, pIdx, er);
+                s.perSat(si).vel          = neesBlock_(obj.P, vIdx, ev);
+                s.perSat(si).posErrNorm_m = norm(er);
+                s.perSat(si).clock        = NaN;
+                if isfield(secTruth,'bias_m') && numel(secTruth.bias_m) >= si && ...
+                        isfield(sm,'secondaryClockIdx') && size(sm.secondaryClockIdx,1) >= si
+                    cIdx = sm.secondaryClockIdx(si,1);  ec = obj.x(cIdx) - secTruth.bias_m(si);
+                    if size(sm.secondaryClockIdx,2) > 1 && isfield(secTruth,'drift_mps') && ...
+                            numel(secTruth.drift_mps) >= si
+                        cIdx = sm.secondaryClockIdx(si,:).';
+                        ec   = [ec; obj.x(cIdx(2)) - secTruth.drift_mps(si)]; %#ok<AGROW>
+                    end
+                    s.perSat(si).clock = neesBlock_(obj.P, cIdx, ec);
+                end
+                posBlocks{si+1} = pIdx;  posErr{si+1} = er;
+            end
+
+            s.centroid          = obj.centroidNEES_(posBlocks,        posErr);         % {primary + secondaries}
+            s.secondaryCentroid = obj.centroidNEES_(posBlocks(2:end), posErr(2:end));  % secondaries only
+        end
+
+        function c = centroidNEES_(obj, posBlocks, posErr)
+            % centroidNEES_  Centroid position NEES using the CROSS-covariances. The
+            % centroid c = (1/N) sum_i r_i is a linear map c = M x (M has (1/N)I_3 per
+            % included asset), so exactly: ebar = (1/N) sum e_i, Pc = M P M' =
+            % (1/N^2) sum_i sum_j P(idx_i, idx_j), centroidNEES = ebar'(Pc\ebar)/3
+            % (expectation 1 when consistent). The i~=j cross-blocks are what a
+            % block-diagonal R / matched atmosphere / truth==dynamics under-estimate.
+            N = numel(posBlocks);
+            c = struct('pos',NaN,'posErrNorm_m',NaN,'N',N,'cov3',[]);
+            if N < 1; return; end
+            eBar = zeros(3,1);
+            for i = 1:N; eBar = eBar + posErr{i}; end
+            eBar = eBar / N;
+            Pc = zeros(3,3);
+            for i = 1:N
+                for j = 1:N
+                    Pc = Pc + obj.P(posBlocks{i}, posBlocks{j});
+                end
+            end
+            Pc = Pc/(N*N);  Pc = (Pc + Pc.')/2;
+            c.cov3 = Pc;  c.posErrNorm_m = norm(eBar);
+            % rcond guard: Pc is near-singular in the radial direction BY CONSTRUCTION (the
+            % wall). NaN there -> reported as FLAGGED (the intended signal), never a crash.
+            if rcond(Pc) > 1e-15
+                c.pos = (eBar.' * (Pc \ eBar)) / 3;
             end
         end
 
@@ -1049,9 +1134,13 @@ classdef ReverseGNSSEKF < handle
             % same sigma_accel_mps2). Realism note: P1' also injects truth-side SRP/luni-
             % solar the J2 block does not model; sa should be tuned to that dynamic gap.
             if obj.estimateSecondaryOrbits
-                q_r  = sa^2 * dt_s^3 / 3;
-                q_v  = sa^2 * dt_s;
-                q_rv = sa^2 * dt_s^2 / 2;
+                saSec = sa;   % default: inherit primary SNC (byte-identical to P1')
+                if isfinite(obj.secondarySigmaAccel_mps2) && obj.secondarySigmaAccel_mps2 > 0
+                    saSec = obj.secondarySigmaAccel_mps2;   % Guard B: independent secondary SNC
+                end
+                q_r  = saSec^2 * dt_s^3 / 3;
+                q_v  = saSec^2 * dt_s;
+                q_rv = saSec^2 * dt_s^2 / 2;
                 for si = 1:obj.nSecondaryOrbits
                     oi = sm.secondaryOrbitIdx(si,:);
                     for k = 1:3

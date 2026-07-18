@@ -206,6 +206,12 @@ classdef SimulationDataStore < handle
         nSecOrbits_ (1,1) double = 0
         so_posErr_
         so_posSig_
+        % ---- Guard C: per-sat + formation-centroid NEES (lazy). Empty unless estimateMode='position'.
+        so_NEESpos_
+        so_NEESvel_
+        so_NEESclk_
+        cn_NEEScen_
+        cn_NEESseccen_
 
         % ---- Euler at last epoch (for ReportRunner summary)
         lastTruthEuler_rad_   double = []
@@ -685,6 +691,35 @@ classdef SimulationDataStore < handle
                 nMn3 = min(nSo_, obj.nSecOrbits_);
                 obj.so_posErr_(1:nMn3,k) = soErr(1:nMn3);
                 obj.so_posSig_(1:nMn3,k) = soSig(1:nMn3);
+
+                % Guard C: per-secondary + formation-centroid NEES (cross-covariance aware).
+                truV = [];
+                if isstruct(errStruct) && isfield(errStruct,'isl') && isstruct(errStruct.isl) && ...
+                        isfield(errStruct.isl,'secondaryTruthVel_mps')
+                    truV = errStruct.isl.secondaryTruthVel_mps;
+                end
+                if ~isempty(truP) && ~isempty(truV) && size(truP,2) >= nSo_ && size(truV,2) >= nSo_ && ...
+                        all(isfinite(truP(:,1:nSo_)),'all') && all(isfinite(truV(:,1:nSo_)),'all')
+                    secTruth = struct('pos_m', truP(:,1:nSo_), 'vel_mps', truV(:,1:nSo_));
+                    if isfield(errStruct.isl,'secondaryTruthBias_m') && ~isempty(errStruct.isl.secondaryTruthBias_m)
+                        secTruth.bias_m    = errStruct.isl.secondaryTruthBias_m(:);
+                        secTruth.drift_mps = errStruct.isl.secondaryTruthDrift_mps(:);
+                    end
+                    tp = struct('r_ecef_m', asset.r_ecef_m);
+                    sn = ekf.computeSwarmNEES(tp, secTruth);
+                    if isempty(obj.so_NEESpos_)
+                        obj.so_NEESpos_ = nan(nSo_, obj.nAlloc_);  obj.so_NEESvel_ = nan(nSo_, obj.nAlloc_);
+                        obj.so_NEESclk_ = nan(nSo_, obj.nAlloc_);
+                        obj.cn_NEEScen_ = nan(1, obj.nAlloc_);      obj.cn_NEESseccen_ = nan(1, obj.nAlloc_);
+                    end
+                    for so = 1:min(nSo_, numel(sn.perSat))
+                        obj.so_NEESpos_(so,k) = sn.perSat(so).pos;
+                        obj.so_NEESvel_(so,k) = sn.perSat(so).vel;
+                        obj.so_NEESclk_(so,k) = sn.perSat(so).clock;
+                    end
+                    obj.cn_NEEScen_(k)    = sn.centroid.pos;
+                    obj.cn_NEESseccen_(k) = sn.secondaryCentroid.pos;
+                end
             end
 
             entry.time_s = t_s;  %#ok<STRNU>
@@ -1593,6 +1628,15 @@ classdef SimulationDataStore < handle
             v = obj.cn_NEESa_(1:obj.nEpochs);
         end
 
+        function v = getCentroidNEES(obj)   % Guard C: formation-centroid NEES/dof per epoch (NaN if no swarm)
+            if isempty(obj.cn_NEEScen_); v = nan(1,obj.nEpochs); return; end
+            v = obj.cn_NEEScen_(1:obj.nEpochs);
+        end
+        function v = getSecondaryCentroidNEES(obj)
+            if isempty(obj.cn_NEESseccen_); v = nan(1,obj.nEpochs); return; end
+            v = obj.cn_NEESseccen_(1:obj.nEpochs);
+        end
+
         function C = getNISByType(obj)
             C.code    = obj.cn_NIScod_(1:obj.nEpochs);
             C.doppler = obj.cn_NISdop_(1:obj.nEpochs);
@@ -1883,6 +1927,14 @@ classdef SimulationDataStore < handle
             if ~isempty(obj.so_posErr_)
                 d.secondaryOrbit.posError_m = obj.so_posErr_(:,1:N);
                 d.secondaryOrbit.posSigma_m = obj.so_posSig_(:,1:N);
+            end
+            % Guard C: per-satellite + formation-centroid NEES (consistency gate)
+            if ~isempty(obj.so_NEESpos_)
+                d.secondaryOrbit.neesPos = obj.so_NEESpos_(:,1:N);
+                d.secondaryOrbit.neesVel = obj.so_NEESvel_(:,1:N);
+                d.secondaryOrbit.neesClk = obj.so_NEESclk_(:,1:N);
+                d.consistency.centroidNEES          = obj.cn_NEEScen_(1:N);
+                d.consistency.secondaryCentroidNEES = obj.cn_NEESseccen_(1:N);
             end
 
             % Orbit cache metadata
