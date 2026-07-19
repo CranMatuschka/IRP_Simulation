@@ -35,5 +35,7 @@ classdef RngSource
         ISL_TWOWAY_THERMAL  = 22  % P2' all-pairs two-way baseline thermal noise (white, per-pair/per-epoch)
         ISL_TWOWAY_DELAYCAL = 23  % P2' per-link turn-around+antenna-PCO delay-cal bias (interval-keyed: sig 0=const, 1=RW)
         SEC_TWSTFT_TWOWAY   = 24  % P3' ground-tower <-> SECONDARY two-way time-transfer noise (white, per-tower/asset/epoch)
+        ISL_TWSTFT_THERMAL  = 25  % sat<->sat two-way time-transfer thermal noise (white, per-pair/epoch)
+        ISL_TWSTFT_DELAYCAL = 26  % sat<->sat turn-around delay-cal bias (interval-keyed: sig 0=const, 1=RW)
     end
 end

@@ -904,6 +904,25 @@ cfg.multiAsset.twoWayISL.delayCal.sigma_rw_m    = 0.003;  % per-link cal-bias sl
 cfg.multiAsset.twoWayISL.delayCal.tau_s         = 3600;   % cal-bias correlation time [s]
 cfg.multiAsset.twoWayISL.delayCal.nCorrCap      = 60;     % cap on tau/dt R-inflation (honest gate)
 
+% --- Satellite<->satellite TWO-WAY TIME TRANSFER ISL (the DUAL of P2'). Default OFF. -----
+% P2' above uses the two-way SUM (range, clock-free baseline = SHAPE). This uses the two-way
+% DIFFERENCE (range cancels) to observe the inter-satellite CLOCK difference directly and pin
+% the swarm's RELATIVE clocks to each other -- a mesh time-sync independent of the ground:
+%   z=(b_i-b_k)+delayCal+thermal ; h=x(clk_i)-x(clk_k) ; H=+1 on clk_i, -1 on clk_k (no position).
+% REQUIRES the satellites to TRANSMIT+RECEIVE (full crosslink transceiver) -- NOT the plain
+% reverse-GNSS uplink -> explicit "with inter-satellite two-way time transfer" enhancement.
+% Needs estimated secondary clocks (estimateMode 'clocks'/'position'). Fuses with the one-way
+% ISL (independent draws). sigma_m ~0.03 m = 100 ps lab-grade; operational two-way ~0.3-1 ns.
+cfg.multiAsset.twoWayTimeTransferISL.enable                 = false;
+cfg.multiAsset.twoWayTimeTransferISL.useInEKF               = false;
+cfg.multiAsset.twoWayTimeTransferISL.links                  = 'all';  % 'all' clock-node pairs, or M-by-2 [i k]
+cfg.multiAsset.twoWayTimeTransferISL.warmup_s               = 0;
+cfg.multiAsset.twoWayTimeTransferISL.sigma_m                = 0.03;   % white two-way time 1-sigma [m] (~100 ps)
+cfg.multiAsset.twoWayTimeTransferISL.delayCal.sigma_const_m = 0.01;   % per-link turn-around cal bias, constant part [m]
+cfg.multiAsset.twoWayTimeTransferISL.delayCal.sigma_rw_m    = 0.003;  % per-link cal-bias slow random-walk part [m]
+cfg.multiAsset.twoWayTimeTransferISL.delayCal.tau_s         = 3600;   % cal-bias correlation time [s]
+cfg.multiAsset.twoWayTimeTransferISL.delayCal.nCorrCap      = 60;     % cap on tau/dt R-inflation (honest gate)
+
 % --- Ground towers: real ground-station sites in the 23 deg-E GEO footprint ---
 % Name, lat[deg], lon[deg], alt[m]. The first 5 are the frozen-golden network (do
 % NOT reorder or edit them: the Stage-85 golden trims to nTowers=5 = these five).

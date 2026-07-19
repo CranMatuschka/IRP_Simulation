@@ -159,6 +159,9 @@ function cfg = validateMasterConfig(cfg)
     % --- P3' per-secondary two-way time transfer guards (delegated; no-op when off) ---
     revgnss.SecondaryTwoWayTimeTransferBuilder.validateConfig(cfg);
 
+    % --- Sat<->sat two-way time transfer ISL guards (delegated; no-op when off) ---
+    revgnss.SwarmTwoWayTimeTransferBuilder.validateConfig(cfg);
+
     % --- SRP scale-coefficient state guard: needs real orbit dynamics to be observable ---
     if i_boolPath(cfg, {'estimator','srpCoefficient','enable'}) && ...
             i_boolPath(cfg, {'estimator','srpCoefficient','useInEKF'})
