@@ -231,6 +231,14 @@ classdef ClockExactReportBuilder
             % Allan deviation
             paths.allanDev = CE.tryPlot_(figDir, [stem '_allan_deviation.pdf'], @() ...
                 CE.plotAllanDeviation_(diag, t), cfg);
+
+            % Honest multi-asset swarm: per-satellite ABSOLUTE vs RELATIVE position error
+            % (full duration + final-window zoom). Both plot fns return [] for single-asset /
+            % non-'position' runs -> paths stay '' -> report rows omitted -> tex byte-identical.
+            paths.swarmPos = CE.tryPlot_(figDir, [stem '_swarm_position_error.pdf'], @() ...
+                CE.plotSwarmPosError_(diag, t, []), cfg);
+            paths.swarmPosZoom = CE.tryPlot_(figDir, [stem '_swarm_position_error_zoomlast.pdf'], @() ...
+                CE.plotSwarmPosError_(diag, t, zoomSec), cfg);
         end
 
         % ................................................................
@@ -600,6 +608,74 @@ classdef ClockExactReportBuilder
                 end
             catch; end
             revgnss.ClockExactReportBuilder.noDataAxes_(ax);
+        end
+
+        % ................................................................
+        function fig = plotSwarmPosError_(diag, t, zoomSec)
+            % Honest multi-asset swarm: per-satellite ABSOLUTE position error (solid) with
+            % the filter's +/-3-sigma envelope (dashed), over the RELATIVE baseline error to
+            % the chief (the two-way-ISL-sharpened shape). Two stacked panels, all secondaries
+            % on one axis for direct comparison. When zoomSec>0 the x-axis is the final window.
+            %
+            % Returns [] (NOT a graphics handle) when the run carries no secondary-orbit
+            % estimate -- single-asset or non-'position' estimateMode. tryPlot_ then yields ''
+            % and the report row is omitted, so single-asset .tex is byte-identical.
+            fig = [];
+            if nargin < 3; zoomSec = []; end
+            try; d = diag.getData(); catch; return; end
+            if ~isfield(d,'secondaryOrbit') || ~isfield(d.secondaryOrbit,'posError_m') || ...
+                    isempty(d.secondaryOrbit.posError_m) || ~any(isfinite(d.secondaryOrbit.posError_m(:)))
+                return;
+            end
+            so   = d.secondaryOrbit;
+            E    = so.posError_m;
+            SG   = []; if isfield(so,'posSigma_m'); SG = so.posSigma_m; end
+            nSec = size(E,1);
+            tt   = t(:).'; if numel(tt) ~= size(E,2); tt = 1:size(E,2); end
+            xl   = [];
+            if ~isempty(zoomSec) && zoomSec > 0 && numel(tt) > 1
+                xl = [max(tt(end)-zoomSec, tt(1)), tt(end)];
+            end
+            col  = lines(max(nSec,1));
+            zlab = ''; if ~isempty(xl); zlab = sprintf(' --- final %g s', zoomSec); end
+
+            fig = figure('Visible','off','Color','white','Units','pixels','Position',[80 80 1080 760]);
+            tl  = tiledlayout(fig,2,1,'TileSpacing','compact','Padding','compact');
+
+            % Panel 1: ABSOLUTE per-satellite error (solid) vs filter +/-3 sigma (dashed).
+            ax1 = nexttile(tl); hold(ax1,'on'); grid(ax1,'on');
+            for i = 1:nSec
+                plot(ax1, tt, E(i,:), '-', 'Color', col(i,:), 'LineWidth',1.3, ...
+                    'DisplayName', sprintf('GEO-%d abs err', i+1));
+                if ~isempty(SG) && size(SG,1) >= i
+                    plot(ax1, tt, 3*SG(i,:), '--', 'Color', col(i,:), 'LineWidth',0.8, ...
+                        'HandleVisibility','off');
+                end
+            end
+            ylabel(ax1,'|position error| [m]', 'FontSize',9);
+            title(ax1, ['ABSOLUTE per-satellite error (solid) vs filter \pm3\sigma (dashed)' zlab], 'FontSize',10);
+            if nSec > 0; legend(ax1,'Location','northeastoutside','FontSize',8); end
+            if ~isempty(xl); xlim(ax1,xl); end
+
+            % Panel 2: RELATIVE per-satellite baseline error to the chief.
+            ax2 = nexttile(tl); hold(ax2,'on'); grid(ax2,'on');
+            if isfield(so,'baselineError_m') && ~isempty(so.baselineError_m) && any(isfinite(so.baselineError_m(:)))
+                B = so.baselineError_m;
+                for i = 1:nSec
+                    plot(ax2, tt, B(i,:), '-', 'Color', col(i,:), 'LineWidth',1.3, ...
+                        'DisplayName', sprintf('GEO-%d baseline err', i+1));
+                end
+                yline(ax2,0,'k:','HandleVisibility','off');
+                ylabel(ax2,'baseline error (est - truth) [m]', 'FontSize',9);
+                title(ax2, ['RELATIVE per-satellite baseline error to chief (shape)' zlab], 'FontSize',10);
+                if nSec > 0; legend(ax2,'Location','northeastoutside','FontSize',8); end
+                if ~isempty(xl); xlim(ax2,xl); end
+            else
+                revgnss.ClockExactReportBuilder.noDataAxes_(ax2);
+            end
+            xlabel(ax2,'time [s]', 'FontSize',9);
+            title(tl, 'Per-satellite position error --- honest multi-asset swarm', ...
+                'FontWeight','bold', 'FontSize',11);
         end
 
         % ................................................................

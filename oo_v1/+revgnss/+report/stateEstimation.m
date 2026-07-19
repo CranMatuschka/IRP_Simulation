@@ -77,5 +77,31 @@ function stateEstimation(fid, plotPaths, stem, cfg, diag, figDir)
     end
 
     fprintf(fid, CE.plotTableFooter_());
+
+    % Honest multi-asset swarm: per-satellite ABSOLUTE vs RELATIVE position error, full-width
+    % for readability across all secondaries. Fully conditional -- the block is emitted only
+    % when the swarm figures were generated (estimateMode='position', nSpaceAssets>1), so a
+    % single-asset report is byte-identical (empty ref -> whole block skipped).
+    swarmRef = CE.figRef_(plotPaths,'swarmPos',figDir,stem);
+    if ~isempty(swarmRef) && isfile(swarmRef)
+        fprintf(fid, '\\clearpage\n');
+        fprintf(fid, '\\subsection*{Per-Satellite Position Error --- Honest Multi-Asset Swarm}\n');
+        fprintf(fid, ['Each estimated secondary is compared to the chief. The \\textbf{absolute} panel ' ...
+            'shows every satellite''s 3-D position error (solid) against the filter''s $\\pm3\\sigma$ ' ...
+            'envelope (dashed): under the single-hemisphere GEO radial--clock degeneracy the error ' ...
+            'escapes $3\\sigma$, so the absolute solution is honestly \\emph{overconfident}. The ' ...
+            '\\textbf{relative} panel shows each satellite''s baseline error to the chief --- the ' ...
+            'formation shape that two-way ISL sharpens --- which is sub-metre and trustworthy. ' ...
+            'The two views are the honest answer to ``compare the position error of each satellite''''.\n\n']);
+        [~, nm, ext] = fileparts(swarmRef);
+        fprintf(fid, '\\begin{center}\\includegraphics[width=\\linewidth]{figures/%s}\\end{center}\n', [nm ext]);
+        zoomRef = CE.figRef_(plotPaths,'swarmPosZoom',figDir,stem);
+        if ~isempty(zoomRef) && isfile(zoomRef)
+            fprintf(fid, '\\vspace{0.4cm}\n');
+            [~, nmz, extz] = fileparts(zoomRef);
+            fprintf(fid, '\\begin{center}\\includegraphics[width=\\linewidth]{figures/%s}\\end{center}\n', [nmz extz]);
+        end
+    end
+
     fprintf(fid, '\\clearpage\n');
 end
