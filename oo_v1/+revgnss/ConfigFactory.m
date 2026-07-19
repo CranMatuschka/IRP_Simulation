@@ -538,6 +538,11 @@ classdef ConfigFactory
             cfg.multiAsset.towersObserveSecondaries = true;
             cfg.multiAsset.twoWayISL.enable         = true;
 
+            % P4': honest mode estimates the secondary positions, so the broadcast product is
+            % the retired assumed-known beacon -- disable it ("no assumed-known beacon anywhere";
+            % ISLMeasurementBuilder.validateConfig enforces this for position mode).
+            cfg.measurements.isl.product.enable     = false;
+
             % ISL observability essentials -- also closes the "set nSpaceAssets after
             % masterConfig" footgun that leaves the auto-block's ISL disabled. Nested
             % assignment auto-vivifies missing sub-structs; idempotent when already on.

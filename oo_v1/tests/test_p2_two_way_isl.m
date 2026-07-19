@@ -95,9 +95,7 @@ function cfg = i_cfg(nAssets, twoWay)
     cfg.measurements.isl.code.enable = true;    cfg.measurements.isl.code.useInEKF = true;
     cfg.measurements.isl.doppler.enable = true; cfg.measurements.isl.doppler.useInEKF = true;
     cfg.measurements.isl.transmitters = 'all';  cfg.measurements.isl.warmup_s = 0;
-    cfg.measurements.isl.product.enable = true; cfg.measurements.isl.product.sigmaPos_m = 0.0;
-    cfg.measurements.isl.product.sigmaClock_m = 0; cfg.measurements.isl.product.sigmaVel_mps = 0;
-    cfg.measurements.isl.product.sigmaClockDrift_mps = 0;
+    cfg.measurements.isl.product.enable = false;   % P4': position mode is product-free (guard-enforced)
     cfg.multiAsset.twoWayISL.enable = twoWay;
     cfg.asset.clock.deterministic = false;
     cfg.simulation.duration_s = 1800;

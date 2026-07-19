@@ -71,6 +71,28 @@ assert(nxFast == 59, 'T5 FAILED: fast swarm nx expected 59');
 assert(nxHon == 59 + 8*5, 'T5 FAILED: honest swarm nx expected 99 (8 states x 5 secondaries)');
 fprintf('    PASS\n');
 
+% ---------------------------------------------------------------------
+% T6: P4' -- honest mode is product-free, and position + product is a hard error
+% ---------------------------------------------------------------------
+fprintf('  T6: honest is product-free; position+product rejected ...\n');
+hp = masterConfig(); hp.scenario.nSpaceAssets = 6; hp.multiAsset.mode = 'honest';
+hp = revgnss.ConfigFactory.applyMultiAssetMode(hp);
+assert(~hp.measurements.isl.product.enable, 'T6 FAILED: honest mode left the product on');
+% a hand-built position config that keeps the product must be rejected at finalize
+pp = i_swarm('fast');
+pp.multiAsset.estimateMode = 'position'; pp.multiAsset.towersObserveSecondaries = true;
+pp.measurements.isl.enable = true; pp.measurements.isl.code.enable = true; pp.measurements.isl.code.useInEKF = true;
+pp.measurements.isl.product.enable = true;
+eid = '';
+try
+    revgnss.ConfigFactory.finalizeConfig(pp);
+catch ME
+    eid = ME.identifier;
+end
+assert(strcmp(eid,'ISLMeasurementBuilder:productWithEstimatedPosition'), ...
+    'T6 FAILED: position+product not rejected by the P4 guard (got ''%s'')', eid);
+fprintf('    PASS\n');
+
 fprintf('=== test_multiasset_mode_switch: ALL PASS ===\n');
 
 % =====================================================================

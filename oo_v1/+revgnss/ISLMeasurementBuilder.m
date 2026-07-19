@@ -10,11 +10,15 @@ classdef ISLMeasurementBuilder
     %
     % Honesty (the aiding must be realistic, not perfect-truth):
     %   * z carries thermal measurement noise (sigma_m), drawn per epoch/link.
-    %   * the secondary is represented by a PRODUCT (broadcast ephemeris + clock)
-    %     with a fixed-per-run product error; the model h uses the product, z uses
-    %     the true secondary, so the residual contains the product error, and the
-    %     product covariance is added to R (productAidedExternal). The achievable
-    %     primary accuracy is therefore floored by the reference-product quality.
+    %   * FAST / 'clocks' mode: the secondary POSITION is represented by a PRODUCT
+    %     (broadcast ephemeris) with a fixed-per-run product error; the model h uses the
+    %     product, z uses the true secondary, so the residual contains the product error and
+    %     its covariance is added to R (productAidedExternal). The achievable primary accuracy
+    %     is then floored by the reference-product quality (an ASSUMED-KNOWN beacon).
+    %   * 'position' mode (P1'/P4'): the secondary [r,v] (and [b,bdot]) are ESTIMATED states.
+    %     h then uses x() for the tx, z the truth, and the product variances are dropped from
+    %     R -- the product is fully RETIRED (no assumed-known beacon). validateConfig makes
+    %     estimateMode='position' + isl.product.enable=true a hard error to keep it that way.
     %
     % Convention (tx -> rx): u = (r_rx - r_tx)/|r_rx - r_tx|, so H(r_rx)=+u',
     % H(b_rx)=+1 (code) and H(v_rx)=+u', H(bdot_rx)=+1 (Doppler). ISL carrier is
@@ -22,6 +26,25 @@ classdef ISLMeasurementBuilder
 
     methods (Static)
         function validateConfig(cfg)
+            % P4' anti-circularity guard: in estimateMode='position' the secondary orbits
+            % are ESTIMATED states, so the ISL broadcast product is the RETIRED assumed-known
+            % position beacon -- supplying it too is a redundant/circular reference ("no
+            % assumed-known beacon anywhere"). The estimated path already ignores it (h uses
+            % x(), R drops its variances); this makes that honesty a hard contract instead of
+            % a silent no-op. 'clocks' mode legitimately keeps the product for POSITION.
+            estMode = 'off';
+            if isfield(cfg,'multiAsset') && isfield(cfg.multiAsset,'estimateMode') && ...
+                    (ischar(cfg.multiAsset.estimateMode) || isstring(cfg.multiAsset.estimateMode))
+                estMode = char(cfg.multiAsset.estimateMode);
+            end
+            if strcmp(estMode,'position') && ...
+                    revgnss.ISLMeasurementBuilder.getBool_(cfg, {'measurements','isl','product','enable'}, false)
+                error('ISLMeasurementBuilder:productWithEstimatedPosition', ...
+                    ['estimateMode=''position'' estimates the secondary positions; the ISL ' ...
+                     'broadcast product is the retired assumed-known beacon and must not also ' ...
+                     'be supplied. Set cfg.measurements.isl.product.enable=false (or use ' ...
+                     'cfg.multiAsset.mode=''honest'', which does so).']);
+            end
             if ~revgnss.ISLMeasurementBuilder.isEnabled_(cfg); return; end
             nAssets = revgnss.ISLMeasurementBuilder.getNum_(cfg, {'scenario','nSpaceAssets'}, 1);
             rxIdx = revgnss.ISLMeasurementBuilder.getNum_(cfg, {'measurements','isl','receiverAssetIndex'}, 1);
@@ -257,8 +280,11 @@ classdef ISLMeasurementBuilder
             info.ekfRowSecIdx = [];              % WP3: per-EKF-row resolved b_tx/bdot_tx idx (0=product)
             info.secondaryTruthBias_m = [];      % WP3: per-secondary truth clock bias [m] (diagnostic)
             info.secondaryTruthDrift_mps = [];   % WP3: per-secondary truth clock drift [m/s]
-            info.secondaryTruthPos_m = [];       % P1': per-secondary truth position [3 x nSec] (diagnostic)
-            info.secondaryTruthVel_mps = [];     % P1': per-secondary truth velocity [3 x nSec]
+            % P1' diagnostic, P4' NaN pre-alloc: a transmitter skipped this epoch (subset list,
+            % out-of-view) leaves its column NaN -> "unobserved", never a spurious origin (0,0,0).
+            nSec_ = max(0, nAssets - 1);
+            info.secondaryTruthPos_m = NaN(3, nSec_);    % P1': per-secondary truth position [3 x nSec]
+            info.secondaryTruthVel_mps = NaN(3, nSec_);  % P1': per-secondary truth velocity [3 x nSec]
             info.nCodeRows = double(info.codeEnabled) * numel(info.transmitterList);
             info.nDopplerRows = double(info.dopplerEnabled) * numel(info.transmitterList);
             info.nCarrierDiagnosticRows = double(info.carrierEnabled) * numel(info.transmitterList);
