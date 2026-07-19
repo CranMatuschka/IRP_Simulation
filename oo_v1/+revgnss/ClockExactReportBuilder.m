@@ -1204,6 +1204,42 @@ classdef ClockExactReportBuilder
             attNote2    = 'No attitude states.'; if attEn2; attNote2 = sprintf('parameterisation: %s', revgnss.ReportLabel.humanize(attParam2)); end
             diffAttN2   = ''; if diffAttEn2; diffAttN2 = 'calibrated differential ambiguity active.'; end
 
+            % --- Atmosphere honesty ------------------------------------------------
+            % A cfg.errors.*.enable=true does NOT mean a real error is injected. If the
+            % model applies the same delay as the truth (matched), the residual is ZERO;
+            % and the ionosphere is master-gated by cfg.ionosphere.mode (mode='off' means
+            % no ionosphere at all, regardless of errors.ionosphere.enable). Report the
+            % NET effect, not the raw flag. Status 'matched' = applied on both sides -> 0.
+            tropTruthEn  = CE.getLogical_(cfg,{'errors','troposphere','truth','enable'},false);
+            tropModelEn  = CE.getLogical_(cfg,{'errors','troposphere','model','enable'},false);
+            tropBiasFrac = CE.getCfgNum_(cfg,{'errors','troposphere','model','biasFraction'},1);
+            if ~tropTruthEn
+                tropSt = false;     tropNote = 'Not applied (truth troposphere off).';
+            elseif zwdEKF2
+                tropSt = true;      tropNote = 'Truth troposphere injected; residual absorbed by the per-tower ZWD EKF state.';
+            elseif tropModelEn && abs(tropBiasFrac - 1) < 1e-9
+                tropSt = 'matched'; tropNote = 'Zero residual: model matches truth (biasFraction = 1); no error reaches the filter.';
+            else
+                tropSt = true;      tropNote = sprintf('Residual injected: model applies %.0f%% of the truth delay.', 100*tropBiasFrac);
+            end
+            ionoMode2 = lower(CE.getCfgStr_(cfg,{'ionosphere','mode'},'off'));
+            switch ionoMode2
+                case 'off';           ionoSt = false;     ionoNote = 'Not applied (ionosphere.mode = off).';
+                case 'truthonly';     ionoSt = true;      ionoNote = 'Residual injected: truth-only ionosphere (model does not correct).';
+                case 'model';         ionoSt = 'matched'; ionoNote = 'Zero residual: model corrects the truth ionosphere.';
+                case 'ionospherefree';ionoSt = 'matched'; ionoNote = 'Removed by the L1/L2 ionosphere-free combination.';
+                otherwise;            ionoSt = true;      ionoNote = sprintf('mode: %s', ionoMode2);
+            end
+            shapTruthEn = CE.getLogical_(cfg,{'physics','relativity','shapiro','truth','enable'},false);
+            shapModelEn = CE.getLogical_(cfg,{'physics','relativity','shapiro','model','enable'},false);
+            if ~shapTruthEn
+                shapSt = false;     shapNote = '';
+            elseif shapModelEn
+                shapSt = 'matched'; shapNote = 'Zero residual: applied on both truth and model.';
+            else
+                shapSt = true;      shapNote = 'Residual injected: truth-only relativistic range delay.';
+            end
+
             % ---- Five compact group tables (avoids single-table page overflow) ----
             gTitles = { ...
                 'Core geometry and signals', ...
@@ -1232,12 +1268,10 @@ classdef ClockExactReportBuilder
             };
 
             gRows{3} = { ...
-                'Troposphere (truth)',  CE.getLogical_(cfg,{'errors','troposphere','truth','enable'},false), ''; ...
-                'Troposphere (model)', CE.getLogical_(cfg,{'errors','troposphere','model','enable'},false), ''; ...
-                'Ionosphere (truth)',  CE.getLogical_(cfg,{'errors','ionosphere','truth','enable'},false),   ''; ...
-                'Ionosphere (model)',  CE.getLogical_(cfg,{'errors','ionosphere','model','enable'},false),   ''; ...
+                'Troposphere (net residual)',  tropSt,  tropNote; ...
+                'Ionosphere (net residual)',   ionoSt,  ionoNote; ...
                 'Light-time / Sagnac correction',  ltSt,   ltNote; ...
-                'Shapiro delay (truth)',  CE.getLogical_(cfg,{'physics','relativity','shapiro','truth','enable'},false), ''; ...
+                'Shapiro delay (relativistic range)',  shapSt, shapNote; ...
                 'Relativity clock (truth)', CE.getLogical_(cfg,{'physics','relativity','clock','truth','enable'},false), ''; ...
             };
 
@@ -1284,6 +1318,9 @@ classdef ClockExactReportBuilder
                     if isequal(isEn, true)
                         stTex = '\textcolor{green!45!black}{Enabled}';
                         if isempty(act); act = 'Active in this run.'; end
+                    elseif isequal(isEn, 'matched')
+                        stTex = '\textcolor{gray!55!black}{Matched}';
+                        if isempty(act); act = 'Zero residual (model matches truth).'; end
                     elseif isequal(isEn, 'guarded')
                         stTex = '\textcolor{orange!70!black}{Guarded}';
                         if isempty(act); act = 'Not active in current run.'; end
@@ -1299,6 +1336,23 @@ classdef ClockExactReportBuilder
                 end
                 fprintf(fid, '\\bottomrule\n\\end{tabular}\n\\end{center}\n');
                 fprintf(fid, '\\endgroup\n\\vspace{4pt}\n');
+
+                % Per-asset scope note under the atmosphere/propagation table (swarm runs).
+                % The rows above describe the CHIEF's tower links; secondaries only see these
+                % effects when the per-asset guards are enabled -- make that explicit.
+                if gi == 3
+                    nSA_ap = CE.getCfgNum_(cfg, {'scenario','nSpaceAssets'}, 1);
+                    if nSA_ap > 1
+                        guardA_ = CE.getLogical_(cfg, {'multiAsset','towerSecondary','atmosphere','enable'}, false);
+                        dynB_   = CE.getLogical_(cfg, {'multiAsset','injectTruthSideDynamics'}, false);
+                        fprintf(fid, ['{\\footnotesize\\itshape Multi-asset scope (%d spacecraft): the effects above are ' ...
+                            'applied to the chief''s tower links. Each secondary satellite receives a divergent uplink ' ...
+                            'atmosphere only when \\texttt{multiAsset.towerSecondary.atmosphere} is enabled (this run: %s), ' ...
+                            'and truth-side per-satellite dynamics only when \\texttt{injectTruthSideDynamics} is enabled ' ...
+                            '(this run: %s). Inter-satellite links carry no atmosphere.}\\\\[4pt]\n'], ...
+                            round(nSA_ap), CE.yesNo_(guardA_,'enabled','off'), CE.yesNo_(dynB_,'enabled','off'));
+                    end
+                end
             end
         end
 
