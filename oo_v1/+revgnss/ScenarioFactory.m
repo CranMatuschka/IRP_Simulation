@@ -133,6 +133,15 @@ classdef ScenarioFactory
                     x0(id) = bd0 + sbd * randn(rngSec);
                 end
             end
+
+            % SRP scale-coefficient state: deterministic nominal init (no seeded draw). The
+            % truth SRP is applied truth-side with a fixed Cr, so the "truth s" is 1.0 by
+            % construction; initScale=1.0 gives zero initial error for this parameter state.
+            if ekf.estimateSrpScale && isfield(sm,'srpScaleIdx') && ~isempty(sm.srpScaleIdx)
+                initScale = 1.0;
+                try; initScale = cfg.estimator.srpCoefficient.initScale; catch; end
+                x0(sm.srpScaleIdx) = initScale;
+            end
         end
 
         function [sigma_b_m, sigma_bdot_mps] = secondaryClockInitSigmas_(cfg)
@@ -297,6 +306,13 @@ classdef ScenarioFactory
                         P0(oi(k+3), oi(k+3)) = sv^2;
                     end
                 end
+            end
+
+            % SRP scale-coefficient prior variance (dimensionless).
+            if ekf.estimateSrpScale && isfield(sm,'srpScaleIdx') && ~isempty(sm.srpScaleIdx)
+                initSigma = 0.1;
+                try; initSigma = cfg.estimator.srpCoefficient.initSigma; catch; end
+                P0(sm.srpScaleIdx, sm.srpScaleIdx) = initSigma^2;
             end
         end
 

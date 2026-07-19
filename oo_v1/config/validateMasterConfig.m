@@ -158,6 +158,29 @@ function cfg = validateMasterConfig(cfg)
 
     % --- P3' per-secondary two-way time transfer guards (delegated; no-op when off) ---
     revgnss.SecondaryTwoWayTimeTransferBuilder.validateConfig(cfg);
+
+    % --- SRP scale-coefficient state guard: needs real orbit dynamics to be observable ---
+    if i_boolPath(cfg, {'estimator','srpCoefficient','enable'}) && ...
+            i_boolPath(cfg, {'estimator','srpCoefficient','useInEKF'})
+        dynMode = '';
+        if isfield(cfg,'estimator') && isfield(cfg.estimator,'dynamics') && ...
+                isfield(cfg.estimator.dynamics,'mode') && ischar(cfg.estimator.dynamics.mode)
+            dynMode = cfg.estimator.dynamics.mode;
+        end
+        if strcmp(dynMode,'constantVelocity') || isempty(dynMode)
+            error('validateMasterConfig:srpScaleUnobservable', ...
+                ['cfg.estimator.srpCoefficient.useInEKF=true requires an orbit dynamics model ' ...
+                 '(cfg.estimator.dynamics.mode ''twoBody'' or ''j2''); constantVelocity ignores ' ...
+                 'SRP, so the scale is unobservable and its covariance grows unbounded.']);
+        end
+        % The estimated scale drives SRP (Cr=s*refCr) and SUPERSEDES any configured EKF-side
+        % SRP Cr -- warn so a stale dynamics.perturbations.srp.Cr is not assumed to be in effect.
+        if i_boolPath(cfg, {'estimator','dynamics','perturbations','srp','enable'})
+            warning('validateMasterConfig:srpScaleSupersedesConfig', ...
+                ['cfg.estimator.srpCoefficient.useInEKF=true supersedes cfg.estimator.dynamics.' ...
+                 'perturbations.srp (Cr driven by the estimated scale). Set that srp.enable=false.']);
+        end
+    end
 end
 
 function tf = i_boolPath(cfg, path)

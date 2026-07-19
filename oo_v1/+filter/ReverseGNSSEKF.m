@@ -97,6 +97,13 @@ classdef ReverseGNSSEKF < handle
         estimateSecondaryOrbits (1,1) logical = false
         nSecondaryOrbits        (1,1) double  = 0
 
+        % SRP scale-coefficient state (primary only, single scalar): a dimensionless
+        % multiplier s on the reference SRP acceleration (Cr=s*refCr), observed via
+        % trajectory bending. Appended LAST => nx/state-map identical to today when off
+        % (golden-safe). Gated by cfg.estimator.srpCoefficient.{enable,useInEKF}.
+        estimateSrpScale     (1,1) logical = false
+        srpScaleProcNoise_   (1,1) double  = 1e-9   % random-walk 1-sigma [1/sqrt(s)]
+
         % Clock model (for process noise)
         rxClockModel     models.clocks.ClockModel
 
@@ -203,6 +210,15 @@ classdef ReverseGNSSEKF < handle
             obj.estimateSecondaryOrbits = nSecOrb_ > 0;
             obj.nSecondaryOrbits        = nSecOrb_;
 
+            % SRP scale-coefficient gate (primary). enable && useInEKF, both default off.
+            if isfield(cfg,'estimator') && isfield(cfg.estimator,'srpCoefficient')
+                sc = cfg.estimator.srpCoefficient;
+                en = isfield(sc,'enable')   && logical(sc.enable);
+                uk = isfield(sc,'useInEKF') && logical(sc.useInEKF);
+                obj.estimateSrpScale = en && uk;
+                if isfield(sc,'procNoise') && isscalar(sc.procNoise); obj.srpScaleProcNoise_ = sc.procNoise; end
+            end
+
             obj.nx = obj.nxBase;
             if obj.estimateTowerClocks
                 obj.nx = obj.nx + 2 * nTowers;
@@ -227,6 +243,9 @@ classdef ReverseGNSSEKF < handle
             end
             if obj.estimateSecondaryOrbits
                 obj.nx = obj.nx + 6 * obj.nSecondaryOrbits;   % [r(3), v(3)] per secondary
+            end
+            if obj.estimateSrpScale
+                obj.nx = obj.nx + 1;   % single scalar, appended strictly LAST
             end
 
             if isfield(cfg.estimator,'sigma_accel_mps2')
@@ -356,16 +375,32 @@ classdef ReverseGNSSEKF < handle
                 'energyDrift_Jkg',NaN,'warnings',{{}});
             Phi6 = [];  % empty = use default F block in buildF_
             dynMode = filter.EkfDynamicsPredictor.mode(obj.cfg);
+            % SRP scale-coefficient state: propagate r,v with the estimated scale and add its
+            % STM column. Empty srpScale => feature off => the literal pre-feature calls below.
+            srpScale = [];
+            srpCol   = [];
+            if obj.estimateSrpScale && ~isempty(sm.srpScaleIdx)
+                srpScale = x(sm.srpScaleIdx);
+            end
             if strcmp(dynMode, 'constantVelocity')
                 r_new = r + dt_s * v;
                 v_new = v;
                 dynInfo.mode = 'constantVelocity';
             else
                 try
-                    [r_new, v_new, dynInfo] = filter.EkfDynamicsPredictor.propagateEcef( ...
-                        r, v, dt_s, t0_s, obj.cfg);
-                    Phi6 = filter.EkfDynamicsPredictor.finiteDiffStm6( ...
-                        r, v, dt_s, t0_s, obj.cfg);
+                    if isempty(srpScale)
+                        [r_new, v_new, dynInfo] = filter.EkfDynamicsPredictor.propagateEcef( ...
+                            r, v, dt_s, t0_s, obj.cfg);
+                        Phi6 = filter.EkfDynamicsPredictor.finiteDiffStm6( ...
+                            r, v, dt_s, t0_s, obj.cfg);
+                    else
+                        [r_new, v_new, dynInfo] = filter.EkfDynamicsPredictor.propagateEcef( ...
+                            r, v, dt_s, t0_s, obj.cfg, srpScale);
+                        Phi6 = filter.EkfDynamicsPredictor.finiteDiffStm6( ...
+                            r, v, dt_s, t0_s, obj.cfg, srpScale);
+                        srpCol = filter.EkfDynamicsPredictor.srpStmColumn( ...
+                            r, v, dt_s, t0_s, obj.cfg, srpScale);
+                    end
                 catch ME_dyn
                     warning('ReverseGNSSEKF:dynamicsFailed', ...
                         'Stage 58 dynamics failed (%s); reverting to constantVelocity.', ...
@@ -457,7 +492,7 @@ classdef ReverseGNSSEKF < handle
             obj.x = x_new;
 
             % State transition Jacobian F (pass Phi6 override for r/v block)
-            F = obj.buildF_(dt_s, eul, omg, Phi6, secPhi6);
+            F = obj.buildF_(dt_s, eul, omg, Phi6, secPhi6, srpCol);
 
             % Process noise Q
             Q = obj.buildQ_(dt_s, towerClockModels, secondaryClockModels);
@@ -862,19 +897,30 @@ classdef ReverseGNSSEKF < handle
             else
                 sm.secondaryOrbitIdx = zeros(0, 6);
             end
+
+            % SRP scale-coefficient state (single scalar, appended strictly LAST). Empty []
+            % when off -> byte-identical map (mirrors the gyroBiasIdx empty-sentinel pattern).
+            if obj.estimateSrpScale
+                sm.srpScaleIdx = nextIdx;
+                nextIdx = nextIdx + 1; %#ok<NASGU>
+            else
+                sm.srpScaleIdx = [];
+            end
         end
 
         % ----------------------------------------------------------------
-        function F = buildF_(obj, dt_s, euler, omega, Phi6, secPhi6)
+        function F = buildF_(obj, dt_s, euler, omega, Phi6, secPhi6, srpCol)
             % buildF_  Linearised state-transition Jacobian.
             %
             % Euler-euler block: FD derivative of (eul + dt * T(eul,omg)*omg) w.r.t. eul.
             % Euler-omega block: dt * T(euler)  [kinematic transformation].
             % Phi6 (optional): 6x6 translational STM replacing default [I dtI;0 I] block.
             % secPhi6 (optional, P1'): cell of per-secondary 6x6 orbit STMs.
+            % srpCol (optional): 6x1 d([r;v])/d(srpScale) filling F(rv, srpScaleIdx).
 
             if nargin < 5; Phi6 = []; end
             if nargin < 6; secPhi6 = {}; end
+            if nargin < 7; srpCol = []; end
 
             nx = obj.nx;
             F  = eye(nx);
@@ -969,6 +1015,13 @@ classdef ReverseGNSSEKF < handle
                         F(oi(1:3), oi(4:6)) = dt_s * eye(3);
                     end
                 end
+            end
+
+            % SRP scale-coefficient column: d([r;v])/ds fills F(rv, srpScaleIdx). The scale
+            % itself is a random walk -> F(srpScaleIdx,srpScaleIdx)=1 already from F=eye(nx).
+            if obj.estimateSrpScale && ~isempty(sm.srpScaleIdx) ...
+                    && ~isempty(srpCol) && numel(srpCol) == 6 && all(isfinite(srpCol))
+                F(rv_idx, sm.srpScaleIdx) = srpCol(:);
             end
 
             % Ambiguity states: identity (random walk; F = I already)
@@ -1150,6 +1203,13 @@ classdef ReverseGNSSEKF < handle
                         Q(oi(k+3), oi(k))   = q_rv;
                     end
                 end
+            end
+
+            % --- SRP scale-coefficient process noise (random walk) -------
+            % Q = procNoise^2 * dt lets the scale s adapt slowly. Small by default so the
+            % estimate stays smooth (the honest fix vs. blunt orbit-SNC inflation).
+            if obj.estimateSrpScale && ~isempty(sm.srpScaleIdx)
+                Q(sm.srpScaleIdx, sm.srpScaleIdx) = obj.srpScaleProcNoise_^2 * dt_s;
             end
 
             % --- Ambiguity process noise (random walk, very small) -------

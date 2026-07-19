@@ -191,6 +191,22 @@ cfg.estimator.dynamics.mode          = 'constantVelocity';
 cfg.estimator.dynamics.fdPositionStep_m   = 1.0;
 cfg.estimator.dynamics.fdVelocityStep_mps = 1e-3;
 
+%% Estimator: SRP scale-coefficient state (primary only). Gated, DEFAULT OFF.
+% When enable && useInEKF, the EKF appends ONE state s -- a dimensionless multiplier on a
+% reference SRP acceleration (Cr = s*refCr) -- and estimates it from the along-track
+% trajectory bending. This is the PROPER fix for an un-modelled SRP force-gap: it lets the
+% filter recover the missing acceleration (NEES->~1 with a smooth estimate) instead of
+% bluntly inflating the orbit process noise. Requires dynamics.mode ~= 'constantVelocity'
+% (else s is unobservable). Off -> no state appended -> golden byte-identical.
+cfg.estimator.srpCoefficient.enable              = false;
+cfg.estimator.srpCoefficient.useInEKF            = false;
+cfg.estimator.srpCoefficient.initScale           = 1.0;    % s0 prior mean (nominal Cr multiplier)
+cfg.estimator.srpCoefficient.initSigma           = 0.1;    % 1-sigma prior on s
+cfg.estimator.srpCoefficient.procNoise           = 1e-9;   % random-walk 1-sigma [1/sqrt(s)]
+cfg.estimator.srpCoefficient.refCr               = 1.3;    % reference Cr (matches truth default)
+cfg.estimator.srpCoefficient.refAreaToMass_m2pkg = 0.02;   % reference A/m [m^2/kg]
+cfg.estimator.srpCoefficient.fdScaleStep         = 10.0;   % FD step for d/ds (linearity -> exact)
+
 %% Estimator: attitude
 % Quaternion nominal + error-state EKF driven by calibrated differential carrier from
 % the antenna cross pattern. The coarse integer-search initialiser is disabled.
