@@ -119,6 +119,18 @@ classdef SecondaryGroundMeasurementBuilder
                         d = rSecModel - rTwrM; nd = norm(d); if nd < 1; nd = 1; end
                         row(orbPosIdx) = (d / nd)';                                        % dh/dr_sec = +u_ts'
                     end
+                    % Phase-2: per-secondary ZWD state models the (Guard A) truth-side tropo
+                    % residual with the same wet mapping m_w -> the ZWD absorbs it. Gated on the
+                    % state existing -> byte-identical when off.
+                    if isfield(stateMap,'secondaryZwdIdx') && ~isempty(stateMap.secondaryZwdIdx) && ...
+                            si <= size(stateMap.secondaryZwdIdx,1)
+                        zwdIdx = stateMap.secondaryZwdIdx(si, ti);
+                        if zwdIdx > 0
+                            m_w = 1 / max(sin(elev), sin(elvFloor));
+                            h = h + m_w * x(zwdIdx);
+                            row(zwdIdx) = m_w;
+                        end
+                    end
                     zAdd(end+1,1) = z;      %#ok<AGROW>
                     hAdd(end+1,1) = h;      %#ok<AGROW>
                     HAdd(end+1,:) = row;    %#ok<AGROW>

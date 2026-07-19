@@ -886,6 +886,21 @@ cfg.multiAsset.towerSecondary.carrier.enable        = false;
 cfg.multiAsset.towerSecondary.carrier.sigma_m       = 0.005;  % carrier thermal 1-sigma [m] (~5 mm)
 cfg.multiAsset.towerSecondary.carrier.initialSigma_m = 100;   % float-ambiguity prior 1-sigma [m]
 cfg.multiAsset.towerSecondary.carrier.ambProcNoise_m = 1e-4;  % ambiguity random-walk sigma [m/sqrt(s)]
+% --- Per-secondary TROPOSPHERE (ZWD) states (Phase 2: each secondary estimates its own wet
+% delay per tower, like the chief). Gauss-Markov, mirroring the chief per-tower ZWD. Allocated
+% only when Guard A injects a divergent truth-side tropo residual; needs estimateMode='position'
+% + towersObserveSecondaries. Default off -> golden byte-identical.
+% HONEST OBSERVABILITY CAVEAT: at GEO the elevation to each satellite is ~constant, so the wet
+% mapping m_w=1/sin(elev) is ~constant and the ZWD is DEGENERATE with the secondary clock -- it
+% soaks radial<->clock wall error (100 m+, unphysical for a cm-dm tropo) and DEGRADES the
+% absolute rather than improving it. This is the same weak observability the chief's ZWD has;
+% it only becomes beneficial once the wall is broken (two-way ranging). Provided for single-asset
+% structural symmetry; keep OFF unless the wall is broken. (Ionosphere states are dispersive ->
+% require per-secondary dual-frequency: deferred to Phase 2b.)
+cfg.multiAsset.towerSecondary.estimateAtmosphere    = false;
+cfg.multiAsset.towerSecondary.zwd.tau_s             = 1800;    % wet-delay Gauss-Markov correlation time [s]
+cfg.multiAsset.towerSecondary.zwd.sigma_ss_m        = 0.05;    % steady-state zenith wet 1-sigma [m]
+cfg.multiAsset.towerSecondary.zwd.initialSigma_m    = 0.10;    % ZWD prior 1-sigma [m]
 % --- Guard B (P1' realism): one-sided truth-side SRP + luni-solar dynamics gap ---
 % Truth==EKF (both J2) today => each secondary's DYNAMIC error is identically 0 and NEES
 % measures nothing dynamic. When injectTruthSideDynamics=true (and estimateMode='position'

@@ -319,6 +319,16 @@ classdef ScenarioFactory
                 end
             end
 
+            % Phase-2 per-secondary troposphere ZWD prior (like the chief per-tower ZWD).
+            if ekf.estimateSecondaryZwd && isfield(sm,'secondaryZwdIdx') && ~isempty(sm.secondaryZwdIdx)
+                sigma0_sz = 0.10;
+                try; sigma0_sz = cfg.multiAsset.towerSecondary.zwd.initialSigma_m; catch; end
+                zi = sm.secondaryZwdIdx(:);
+                for jj = 1:numel(zi)
+                    P0(zi(jj), zi(jj)) = sigma0_sz^2;
+                end
+            end
+
             % SRP scale-coefficient prior variance (dimensionless).
             if ekf.estimateSrpScale && isfield(sm,'srpScaleIdx') && ~isempty(sm.srpScaleIdx)
                 initSigma = 0.1;

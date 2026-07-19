@@ -225,6 +225,23 @@ classdef MultiAssetConfig
             nSec = revgnss.MultiAssetConfig.secondaryOrbitCount(cfg);
         end
 
+        function nSec = secondaryAtmosphereCount(cfg)
+            % secondaryAtmosphereCount  Phase-2 gate: number of secondaries that get per-
+            % (secondary,tower) troposphere ZWD states. HONEST observability prerequisite:
+            % only allocated when Guard A (towerSecondary.atmosphere.enable) injects a
+            % DIVERGENT truth-side tropo residual for the ZWD to absorb -- with a matched
+            % atmosphere the state sees zero signal and estimating it would be dishonest.
+            % Requires an estimated orbit block (position + towersObserveSecondaries) too.
+            nSec = 0;
+            if ~revgnss.MultiAssetConfig.cfgBool_(cfg, {'multiAsset','towerSecondary','estimateAtmosphere'}, false)
+                return;
+            end
+            if ~revgnss.MultiAssetConfig.cfgBool_(cfg, {'multiAsset','towerSecondary','atmosphere','enable'}, false)
+                return;   % no divergent tropo residual -> unobservable -> refuse to allocate
+            end
+            nSec = revgnss.MultiAssetConfig.secondaryOrbitCount(cfg);
+        end
+
         function nSec = groundSecondaryRowCount(cfg)
             % groundSecondaryRowCount  WP5 gate. Returns the number of secondaries whose
             % clock is observed by ground-tower rows (== secondaryClockCount) when

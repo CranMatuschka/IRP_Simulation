@@ -75,6 +75,9 @@ classdef ReportRealityHelper
             % (one L1 ambiguity per secondary/tower). +0 for golden (count 0) -> byte-identical.
             nTwrCfg_ = nTwr; try; nTwrCfg_ = cfg.scenario.nTowers; catch; end
             expectedStates = expectedStates + revgnss.MultiAssetConfig.secondaryCarrierCount(cfg) * nTwrCfg_;
+            % Phase-2 per-secondary troposphere ZWD states: secondaryAtmosphereCount x nTowers.
+            % +0 for golden (count 0) -> byte-identical.
+            expectedStates = expectedStates + revgnss.MultiAssetConfig.secondaryAtmosphereCount(cfg) * nTwrCfg_;
             nStates = revgnss.ReportRealityHelper.safeField_(summary, 'nStates', NaN);
             if isfinite(nStates) && nStates ~= expectedStates
                 error('ClockExactReportBuilder:stateTableCountMismatch', ...

@@ -106,6 +106,14 @@ classdef ReverseGNSSEKF < handle
         secondaryAmbNTowers_         (1,1) double  = 0      % towers per secondary (=nTowers)
         secondaryAmbProcNoise_       (1,1) double  = 1e-4   % ambiguity random-walk sigma [m/sqrt(s)]
 
+        % Phase-2 per-secondary troposphere ZWD states (one per secondary/tower), Gauss-Markov,
+        % mirroring the chief per-tower ZWD. Appended after the secondary-ambiguity block. Off =>
+        % nx/state-map identical (golden-safe). Gated by MultiAssetConfig.secondaryAtmosphereCount.
+        estimateSecondaryZwd (1,1) logical = false
+        nSecondaryZwdAssets  (1,1) double  = 0      % number of secondaries with ZWD states
+        secondaryZwdTau_     (1,1) double  = 1800   % Gauss-Markov correlation time [s]
+        secondaryZwdSigmaSs_ (1,1) double  = 0.05   % steady-state zenith wet 1-sigma [m]
+
         % SRP scale-coefficient state (primary only, single scalar): a dimensionless
         % multiplier s on the reference SRP acceleration (Cr=s*refCr), observed via
         % trajectory bending. Appended LAST => nx/state-map identical to today when off
@@ -229,6 +237,16 @@ classdef ReverseGNSSEKF < handle
                 try; obj.secondaryAmbProcNoise_ = cfg.multiAsset.towerSecondary.carrier.ambProcNoise_m; catch; end
             end
 
+            % Phase-2 per-secondary troposphere ZWD gate. secondaryAtmosphereCount>0 only for
+            % position mode + towersObserveSecondaries + estimateAtmosphere + Guard A on.
+            nSecZwd_ = revgnss.MultiAssetConfig.secondaryAtmosphereCount(cfg);
+            obj.estimateSecondaryZwd = nSecZwd_ > 0;
+            obj.nSecondaryZwdAssets  = nSecZwd_;
+            if obj.estimateSecondaryZwd
+                try; obj.secondaryZwdTau_     = cfg.multiAsset.towerSecondary.zwd.tau_s;      catch; end
+                try; obj.secondaryZwdSigmaSs_ = cfg.multiAsset.towerSecondary.zwd.sigma_ss_m; catch; end
+            end
+
             % SRP scale-coefficient gate (primary). enable && useInEKF, both default off.
             if isfield(cfg,'estimator') && isfield(cfg.estimator,'srpCoefficient')
                 sc = cfg.estimator.srpCoefficient;
@@ -265,6 +283,9 @@ classdef ReverseGNSSEKF < handle
             end
             if obj.estimateSecondaryAmbiguities
                 obj.nx = obj.nx + obj.nSecondaryAmbAssets * obj.secondaryAmbNTowers_;  % one L1 ambiguity per (secondary, tower)
+            end
+            if obj.estimateSecondaryZwd
+                obj.nx = obj.nx + obj.nSecondaryZwdAssets * nTowers;   % one ZWD per (secondary, tower)
             end
             if obj.estimateSrpScale
                 obj.nx = obj.nx + 1;   % single scalar, appended strictly LAST
@@ -935,6 +956,20 @@ classdef ReverseGNSSEKF < handle
                 sm.secondaryAmbiguityIdx = zeros(0, obj.secondaryAmbNTowers_);
             end
 
+            % Phase-2 per-secondary troposphere ZWD states, appended after the ambiguity block.
+            % secondaryZwdIdx(si,ti) is the state index for secondary si+1 <-> tower ti. Empty
+            % zeros(0,nTowers) when off -> byte-identical map.
+            if obj.estimateSecondaryZwd && obj.nSecondaryZwdAssets > 0
+                zwdIdx = zeros(obj.nSecondaryZwdAssets, nTowers);
+                for si = 1:obj.nSecondaryZwdAssets
+                    zwdIdx(si,:) = nextIdx:(nextIdx + nTowers - 1);
+                    nextIdx = nextIdx + nTowers;
+                end
+                sm.secondaryZwdIdx = zwdIdx;
+            else
+                sm.secondaryZwdIdx = zeros(0, nTowers);
+            end
+
             % SRP scale-coefficient state (single scalar, appended strictly LAST). Empty []
             % when off -> byte-identical map (mirrors the gyroBiasIdx empty-sentinel pattern).
             if obj.estimateSrpScale
@@ -1075,6 +1110,14 @@ classdef ReverseGNSSEKF < handle
                     if idx > 0
                         F(idx, idx) = phi_zwd;
                     end
+                end
+            end
+            % Phase-2 per-secondary ZWD states: same first-order Gauss-Markov as the chief.
+            if obj.estimateSecondaryZwd && isfield(sm,'secondaryZwdIdx') && ~isempty(sm.secondaryZwdIdx)
+                phi_szwd = exp(-dt_s / max(obj.secondaryZwdTau_, eps));
+                zi = sm.secondaryZwdIdx(:);
+                for jj = 1:numel(zi)
+                    if zi(jj) > 0; F(zi(jj), zi(jj)) = phi_szwd; end
                 end
             end
 
@@ -1307,6 +1350,15 @@ classdef ReverseGNSSEKF < handle
                     if idx > 0
                         Q(idx, idx) = q_zwd;
                     end
+                end
+            end
+            % Phase-2 per-secondary ZWD process noise: same Gauss-Markov steady-state form.
+            if obj.estimateSecondaryZwd && isfield(sm,'secondaryZwdIdx') && ~isempty(sm.secondaryZwdIdx)
+                phi_szwd = exp(-dt_s / max(obj.secondaryZwdTau_, eps));
+                q_szwd   = obj.secondaryZwdSigmaSs_^2 * (1 - phi_szwd^2);
+                zi = sm.secondaryZwdIdx(:);
+                for jj = 1:numel(zi)
+                    if zi(jj) > 0; Q(zi(jj), zi(jj)) = q_szwd; end
                 end
             end
 
