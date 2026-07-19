@@ -206,6 +206,7 @@ classdef SimulationDataStore < handle
         nSecOrbits_ (1,1) double = 0
         so_posErr_
         so_posSig_
+        so_baseErr_    % P5': per-secondary RELATIVE baseline error to the chief (est - truth) [m]
         % ---- Guard C: per-sat + formation-centroid NEES (lazy). Empty unless estimateMode='position'.
         so_NEESpos_
         so_NEESvel_
@@ -670,27 +671,35 @@ classdef SimulationDataStore < handle
             if isfield(sm,'secondaryOrbitIdx') && ~isempty(sm.secondaryOrbitIdx)
                 soIdx = sm.secondaryOrbitIdx;            % [nSec x 6]
                 nSo_  = size(soIdx,1);
-                soErr = nan(nSo_,1); soSig = nan(nSo_,1);
+                soErr = nan(nSo_,1); soSig = nan(nSo_,1); soBase = nan(nSo_,1);
                 truP = [];
                 if isstruct(errStruct) && isfield(errStruct,'isl') && isstruct(errStruct.isl) && ...
                         isfield(errStruct.isl,'secondaryTruthPos_m') && ~isempty(errStruct.isl.secondaryTruthPos_m)
                     truP = errStruct.isl.secondaryTruthPos_m;   % [3 x nSec]
                 end
+                rChiefEst = x(sm.r_idx); rChiefEst = rChiefEst(:);   % chief position estimate
+                rChiefTru = asset.r_ecef_m(:);                        % chief position truth
                 for so = 1:nSo_
                     pIdx = soIdx(so,1:3);
                     soSig(so) = sqrt(max(0, trace(ekf.P(pIdx,pIdx))));
                     if ~isempty(truP) && so <= size(truP,2) && all(isfinite(truP(:,so)))
-                        soErr(so) = norm(x(pIdx) - truP(:,so));
+                        rSecEst = x(pIdx); rSecEst = rSecEst(:);
+                        soErr(so) = norm(rSecEst - truP(:,so));      % ABSOLUTE per-sat error
+                        % RELATIVE baseline error to the chief (est baseline - truth baseline).
+                        % Signed: the shape error two-way ISL sharpens, common-mode cancelled.
+                        soBase(so) = norm(rSecEst - rChiefEst) - norm(truP(:,so) - rChiefTru);
                     end
                 end
                 if isempty(obj.so_posErr_)
                     obj.nSecOrbits_ = nSo_;
-                    obj.so_posErr_ = nan(nSo_, obj.nAlloc_);
-                    obj.so_posSig_ = nan(nSo_, obj.nAlloc_);
+                    obj.so_posErr_  = nan(nSo_, obj.nAlloc_);
+                    obj.so_posSig_  = nan(nSo_, obj.nAlloc_);
+                    obj.so_baseErr_ = nan(nSo_, obj.nAlloc_);
                 end
                 nMn3 = min(nSo_, obj.nSecOrbits_);
-                obj.so_posErr_(1:nMn3,k) = soErr(1:nMn3);
-                obj.so_posSig_(1:nMn3,k) = soSig(1:nMn3);
+                obj.so_posErr_(1:nMn3,k)  = soErr(1:nMn3);
+                obj.so_posSig_(1:nMn3,k)  = soSig(1:nMn3);
+                obj.so_baseErr_(1:nMn3,k) = soBase(1:nMn3);
 
                 % Guard C: per-secondary + formation-centroid NEES (cross-covariance aware).
                 truV = [];
@@ -1925,8 +1934,9 @@ classdef SimulationDataStore < handle
 
             % P1'/WP4 secondary-asset orbit (per-satellite 3D position error + sigma)
             if ~isempty(obj.so_posErr_)
-                d.secondaryOrbit.posError_m = obj.so_posErr_(:,1:N);
-                d.secondaryOrbit.posSigma_m = obj.so_posSig_(:,1:N);
+                d.secondaryOrbit.posError_m      = obj.so_posErr_(:,1:N);
+                d.secondaryOrbit.posSigma_m      = obj.so_posSig_(:,1:N);
+                d.secondaryOrbit.baselineError_m = obj.so_baseErr_(:,1:N);   % P5': relative (shape)
             end
             % Guard C: per-satellite + formation-centroid NEES (consistency gate)
             if ~isempty(obj.so_NEESpos_)

@@ -132,6 +132,15 @@ classdef ReportRunner
             % ---- Collect summary metrics --------------------------------
             summary = revgnss.ReportRunner.collectSummary_(simData, cfg, version, reportFolder, pdfPath, matPath);
 
+            % ---- P5' per-satellite estimate table (multi-asset 'position' runs) ----
+            if isfield(summary,'swarmEstimate') && isstruct(summary.swarmEstimate) && ...
+                    isfield(summary.swarmEstimate,'available') && summary.swarmEstimate.available
+                fprintf('\n');
+                lines_ = revgnss.SwarmEstimateSummary.format(summary.swarmEstimate);
+                for li_ = 1:numel(lines_); fprintf('%s\n', lines_{li_}); end
+                fprintf('\n');
+            end
+
             % ---- Export ambiguity state metadata and covariance ----
             doAmbMeta = isfield(cfg,'diagnostics') && isfield(cfg.diagnostics,'ambiguityStateMetadata') && ...
                 isfield(cfg.diagnostics.ambiguityStateMetadata,'enable') && ...
@@ -1813,6 +1822,15 @@ classdef ReportRunner
             summary.nTowers    = cfg.scenario.nTowers;
             summary.nReceivers = cfg.scenario.nReceivers;
             summary.multiAsset = revgnss.MultiAssetConfig.summary(cfg);
+            % P5' per-satellite estimate deliverable. Multi-asset only, so single-asset
+            % (golden) summaries are byte-identical (the field is simply absent).
+            if isfield(cfg,'scenario') && isfield(cfg.scenario,'nSpaceAssets') && cfg.scenario.nSpaceAssets > 1
+                try
+                    summary.swarmEstimate = revgnss.SwarmEstimateSummary.compute(diag.getData());
+                catch
+                    summary.swarmEstimate = struct('available', false);
+                end
+            end
             summary.signals    = cfg.signals.enabled;
             summary.twoFrequency = isfield(cfg,'signals') && ...
                 isfield(cfg.signals,'twoFrequency') && ...

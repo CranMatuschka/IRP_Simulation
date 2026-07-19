@@ -102,6 +102,18 @@ function fig = i_buildTabs(diag, ttl, swarmTruth)
     if ~isempty(swarmTruth)
         tabs(end+1, :) = {'Swarm geometry', @() i_tabSwarmGeometry(tg, swarmTruth)};
     end
+    % Swarm estimate tab (P5'): per-satellite ESTIMATE error, only when the run carries
+    % the secondary-orbit diagnostics (multi-asset estimateMode='position').
+    hasSwarmEst = false;
+    try
+        dse_ = diag.getData();
+        hasSwarmEst = isfield(dse_,'secondaryOrbit') && isfield(dse_.secondaryOrbit,'posError_m') && ...
+            ~isempty(dse_.secondaryOrbit.posError_m) && any(isfinite(dse_.secondaryOrbit.posError_m(:)));
+    catch
+    end
+    if hasSwarmEst
+        tabs(end+1, :) = {'Swarm estimate', @() i_tabSwarmEstimate(tg, diag, t)};
+    end
     for k = 1:size(tabs, 1)
         try
             tabs{k, 2}();
@@ -318,6 +330,51 @@ function i_tabSwarmGeometry(tg, swarmTruth)
     title(ax2, sprintf('Formation pairwise separation (%d assets, %d pairs)', ...
         g.nAssets, g.separation.nPairs));
     legend(ax2, 'Location', 'best');
+end
+
+function i_tabSwarmEstimate(tg, diag, t)
+    % Per-satellite ESTIMATE quality (P5'), the honest answer to "compare the position
+    % error of each satellite": (1) each secondary's ABSOLUTE position error with its
+    % +/-3-sigma envelope (does the covariance cover the error? -- it is radial<->clock
+    % WALL-LIMITED and usually overconfident), and (2) the RELATIVE baseline error to the
+    % chief (the shape solution two-way ISL sharpens; the trustworthy part).
+    d  = diag.getData();
+    so = d.secondaryOrbit;
+    E  = so.posError_m; SG = so.posSigma_m;         % [nSec x nEpoch]
+    nSec = size(E, 1);
+    tt = t(:)'; if numel(tt) ~= size(E, 2); tt = 1:size(E, 2); end
+    col = lines(max(nSec, 1));
+
+    tl = i_tab(tg, 'Swarm estimate', 2);
+
+    % Subplot 1: per-satellite absolute position error (solid) + /-3-sigma (dashed).
+    ax1 = nexttile(tl); hold(ax1, 'on');
+    for i = 1:nSec
+        plot(ax1, tt, E(i, :), 'Color', col(i, :), 'LineWidth', 1.3, ...
+            'DisplayName', sprintf('GEO-%d error', i + 1));
+        plot(ax1, tt, 3 * SG(i, :), '--', 'Color', col(i, :), 'LineWidth', 0.8, ...
+            'HandleVisibility', 'off');
+    end
+    grid(ax1, 'on'); ylabel(ax1, '|position error| [m]');
+    title(ax1, 'Per-satellite ABSOLUTE position error (solid) vs \pm3\sigma (dashed) — wall-limited');
+    if nSec > 0; legend(ax1, 'Location', 'best'); end
+
+    % Subplot 2: relative baseline error to the chief (the trustworthy shape solution).
+    ax2 = nexttile(tl); hold(ax2, 'on');
+    if isfield(so, 'baselineError_m') && ~isempty(so.baselineError_m) && any(isfinite(so.baselineError_m(:)))
+        B = so.baselineError_m;
+        for i = 1:nSec
+            plot(ax2, tt, B(i, :), 'Color', col(i, :), 'LineWidth', 1.3, ...
+                'DisplayName', sprintf('GEO-%d baseline', i + 1));
+        end
+        yline(ax2, 0, 'k:', 'HandleVisibility', 'off');
+        ylabel(ax2, 'baseline error (est - truth) [m]');
+        title(ax2, 'Per-satellite RELATIVE baseline error to chief (shape) — two-way-ISL sharpened');
+        if nSec > 0; legend(ax2, 'Location', 'best'); end
+    else
+        i_noteAxes(ax2, 'No relative baseline diagnostic in this run.');
+    end
+    grid(ax2, 'on'); xlabel(ax2, 'Time [s]');
 end
 
 % ===========================================================================
