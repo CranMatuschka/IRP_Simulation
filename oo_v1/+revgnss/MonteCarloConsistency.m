@@ -14,6 +14,14 @@ classdef MonteCarloConsistency
     %   band. Result is labelled 'partialCovarianceAwareSynthetic' -- consistency
     %   evidence, not real-world proof.
     %
+    %   For a swarm 'position' run it ALSO pools the Guard C formation-CENTROID NEES across
+    %   seeds (result.centroidVerdict / .centroidNeesPerDof / .perSeedCentroidNeesPerDof) --
+    %   the authoritative cross-seed absolute-trustworthiness gate that turns Guard C's single-
+    %   realisation flag into a defensible statement. Each seed contributes one time-averaged
+    %   sample (M independent samples), and the verdict is only VALID with the realism guards
+    %   on (divergent atmosphere + truth-side dynamics); otherwise it reads
+    %   'inconclusiveMatchedCrutch'. Single-asset runs read 'notApplicable'.
+    %
     %   result = revgnss.MonteCarloConsistency.run(baseCfg)
     %   result = revgnss.MonteCarloConsistency.run(baseCfg, struct('nSeeds',30,'duration_s',3600))
 
@@ -33,6 +41,29 @@ classdef MonteCarloConsistency
 
             sumNIS = 0; dofNIS = 0; sumNEES = 0; dofNEES = 0; nUsed = 0;
             perSeedNisPerDof = nan(1, nSeeds);
+
+            % Guard C cross-seed centroid gate (the authoritative absolute-trustworthiness
+            % test). getCentroidNEES() is per-epoch NEES/dof for the formation-centroid
+            % position (span 1 = primary+secondaries, span 2 = secondaries only); NaN unless a
+            % swarm 'position' run. Each seed contributes ONE sample = its post-burn-in time
+            % MEAN, so the M seeds are M INDEPENDENT samples (dof = 3*M). This deliberately
+            % does NOT pool per-epoch: the centroid is a slowly-varying rigid-body mode, so
+            % per-epoch samples are strongly time-correlated and pooling them would over-count
+            % dof and narrow the band into a false verdict. One-mean-per-seed is the textbook
+            % Monte-Carlo NEES form (independent runs).
+            sumCEN = 0; dofCEN = 0; sumSEC = 0; dofSEC = 0;
+            perSeedCentroidNeesPerDof = nan(1, nSeeds);
+            perSeedSecCentroidNeesPerDof = nan(1, nSeeds);
+            % The centroid gate is only a VALID absolute test with the realism guards on
+            % (divergent per-LOS atmosphere + truth-side dynamics). With them off those error
+            % sources are matched (absent), so the run is not the full realistic error
+            % environment: its centroid NEES cannot certify the absolute either way (matched
+            % crutches can hide real error), hence 'inconclusiveMatchedCrutch' regardless of
+            % the number -- even though the radial<->clock wall usually leaves it overconfident.
+            atmoOn = false; dynOn = false;
+            try; atmoOn = logical(baseCfg.multiAsset.towerSecondary.atmosphere.enable); catch; end
+            try; dynOn  = logical(baseCfg.multiAsset.injectTruthSideDynamics);          catch; end
+            realismGuardsActive = atmoOn && dynOn;
 
             for j = 1:nSeeds
                 cfg = baseCfg;
@@ -78,6 +109,22 @@ classdef MonteCarloConsistency
                 % against 3 dof/sample -> sum ~ chi2(3*N), neesPerDof ~ 1, valid chi2 band.
                 sumNEES = sumNEES + 3 * sum(neesK(gE)); dofNEES = dofNEES + 3 * sum(gE);
                 nUsed = nUsed + 1;
+
+                % Guard C centroid gate: one time-averaged sample per seed (3 dof each).
+                cen  = diag.getCentroidNEES();          cen  = cen(:);  cenK = cen(keep);
+                gC = isfinite(cenK) & cenK >= 0;
+                if any(gC)
+                    m = mean(cenK(gC));                 % per-dof time-mean, this seed
+                    perSeedCentroidNeesPerDof(j) = m;
+                    sumCEN = sumCEN + 3 * m; dofCEN = dofCEN + 3;   % one independent 3-dof sample
+                end
+                sec  = diag.getSecondaryCentroidNEES(); sec  = sec(:);  secK = sec(keep);
+                gS = isfinite(secK) & secK >= 0;
+                if any(gS)
+                    m = mean(secK(gS));
+                    perSeedSecCentroidNeesPerDof(j) = m;
+                    sumSEC = sumSEC + 3 * m; dofSEC = dofSEC + 3;
+                end
             end
 
             result = struct('nSeeds', nSeeds, 'nUsed', nUsed, 'confidence', conf, ...
@@ -93,6 +140,27 @@ classdef MonteCarloConsistency
             result.neesPerDof = sumNEES / max(dofNEES, 1);
             [result.neesBand, result.neesInBand] = ...
                 revgnss.MonteCarloConsistency.band_(sumNEES, dofNEES, conf);
+
+            % --- Guard C cross-seed centroid gate (formation-centroid absolute position) ---
+            result.realismGuardsActive = realismGuardsActive;
+            result.centroidAvailable   = dofCEN > 0;
+            result.perSeedCentroidNeesPerDof    = perSeedCentroidNeesPerDof;
+            result.perSeedSecCentroidNeesPerDof = perSeedSecCentroidNeesPerDof;
+
+            result.centroidNeesSum = sumCEN; result.centroidNeesDof = dofCEN;
+            result.centroidNeesPerDof = sumCEN / max(dofCEN, 1);
+            [result.centroidNeesBand, result.centroidNeesInBand, ...
+                result.centroidNeesBelowBand, result.centroidNeesAboveBand] = ...
+                revgnss.MonteCarloConsistency.band_(sumCEN, dofCEN, conf);
+
+            result.secCentroidNeesSum = sumSEC; result.secCentroidNeesDof = dofSEC;
+            result.secCentroidNeesPerDof = sumSEC / max(dofSEC, 1);
+            [result.secCentroidNeesBand, result.secCentroidNeesInBand] = ...
+                revgnss.MonteCarloConsistency.band_(sumSEC, dofSEC, conf);
+
+            result.centroidVerdict = revgnss.MonteCarloConsistency.centroidVerdict_( ...
+                result.centroidAvailable, realismGuardsActive, ...
+                result.centroidNeesInBand, result.centroidNeesBelowBand, result.centroidNeesAboveBand);
         end
     end
 
@@ -101,6 +169,25 @@ classdef MonteCarloConsistency
         function v = opt_(opts, name, default)
             v = default;
             if isstruct(opts) && isfield(opts, name) && ~isempty(opts.(name)); v = opts.(name); end
+        end
+
+        function verdict = centroidVerdict_(available, guardsActive, inBand, belowBand, aboveBand)
+            % Interpret the pooled cross-seed centroid-NEES band into an absolute-
+            % trustworthiness verdict. The gate is only VALID with the realism guards on
+            % (else truth==model -> NEES~1 is a matched crutch, not evidence).
+            if ~available
+                verdict = 'notApplicable';            % no swarm 'position' run -> no centroid
+            elseif ~guardsActive
+                verdict = 'inconclusiveMatchedCrutch'; % guards off -> centroid NEES is not a test
+            elseif aboveBand
+                verdict = 'overconfidentAbsolute';    % filter claims better absolute than it has
+            elseif belowBand
+                verdict = 'conservativeAbsolute';     % under-confident (honest, safe direction)
+            elseif inBand
+                verdict = 'consistent';               % absolute centroid is trustworthy
+            else
+                verdict = 'unknown';
+            end
         end
 
         function [band, inBand, belowBand, aboveBand] = band_(statSum, dof, conf)
