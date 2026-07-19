@@ -97,6 +97,15 @@ classdef ReverseGNSSEKF < handle
         estimateSecondaryOrbits (1,1) logical = false
         nSecondaryOrbits        (1,1) double  = 0
 
+        % Phase-1 per-secondary CARRIER float-ambiguity states (single-frequency L1): one
+        % per (secondary, tower), mirroring the chief's per-tower ambiguity. Appended after
+        % the secondary-orbit block, before srpScale. Off => nx/state-map identical (golden-
+        % safe). Gated by MultiAssetConfig.secondaryCarrierCount(cfg) (needs an orbit block).
+        estimateSecondaryAmbiguities (1,1) logical = false
+        nSecondaryAmbAssets          (1,1) double  = 0      % number of secondaries with carrier rows
+        secondaryAmbNTowers_         (1,1) double  = 0      % towers per secondary (=nTowers)
+        secondaryAmbProcNoise_       (1,1) double  = 1e-4   % ambiguity random-walk sigma [m/sqrt(s)]
+
         % SRP scale-coefficient state (primary only, single scalar): a dimensionless
         % multiplier s on the reference SRP acceleration (Cr=s*refCr), observed via
         % trajectory bending. Appended LAST => nx/state-map identical to today when off
@@ -210,6 +219,16 @@ classdef ReverseGNSSEKF < handle
             obj.estimateSecondaryOrbits = nSecOrb_ > 0;
             obj.nSecondaryOrbits        = nSecOrb_;
 
+            % Phase-1 per-secondary carrier ambiguity gate. secondaryCarrierCount>0 only for
+            % position mode + towersObserveSecondaries + carrier.enable -> golden/off force it 0.
+            nSecCarr_ = revgnss.MultiAssetConfig.secondaryCarrierCount(cfg);
+            obj.estimateSecondaryAmbiguities = nSecCarr_ > 0;
+            obj.nSecondaryAmbAssets          = nSecCarr_;
+            obj.secondaryAmbNTowers_         = nTowers;
+            if obj.estimateSecondaryAmbiguities
+                try; obj.secondaryAmbProcNoise_ = cfg.multiAsset.towerSecondary.carrier.ambProcNoise_m; catch; end
+            end
+
             % SRP scale-coefficient gate (primary). enable && useInEKF, both default off.
             if isfield(cfg,'estimator') && isfield(cfg.estimator,'srpCoefficient')
                 sc = cfg.estimator.srpCoefficient;
@@ -243,6 +262,9 @@ classdef ReverseGNSSEKF < handle
             end
             if obj.estimateSecondaryOrbits
                 obj.nx = obj.nx + 6 * obj.nSecondaryOrbits;   % [r(3), v(3)] per secondary
+            end
+            if obj.estimateSecondaryAmbiguities
+                obj.nx = obj.nx + obj.nSecondaryAmbAssets * obj.secondaryAmbNTowers_;  % one L1 ambiguity per (secondary, tower)
             end
             if obj.estimateSrpScale
                 obj.nx = obj.nx + 1;   % single scalar, appended strictly LAST
@@ -898,6 +920,21 @@ classdef ReverseGNSSEKF < handle
                 sm.secondaryOrbitIdx = zeros(0, 6);
             end
 
+            % Phase-1 per-secondary CARRIER float-ambiguity states (single-frequency L1),
+            % appended after the secondary-orbit block. secondaryAmbiguityIdx(si,ti) is the
+            % state index for secondary si+1 <-> tower ti. Empty zeros(0,nTowers) when off.
+            if obj.estimateSecondaryAmbiguities && obj.nSecondaryAmbAssets > 0
+                nT_ = obj.secondaryAmbNTowers_;
+                ambIdx = zeros(obj.nSecondaryAmbAssets, nT_);
+                for si = 1:obj.nSecondaryAmbAssets
+                    ambIdx(si,:) = nextIdx:(nextIdx + nT_ - 1);
+                    nextIdx = nextIdx + nT_;
+                end
+                sm.secondaryAmbiguityIdx = ambIdx;
+            else
+                sm.secondaryAmbiguityIdx = zeros(0, obj.secondaryAmbNTowers_);
+            end
+
             % SRP scale-coefficient state (single scalar, appended strictly LAST). Empty []
             % when off -> byte-identical map (mirrors the gyroBiasIdx empty-sentinel pattern).
             if obj.estimateSrpScale
@@ -1202,6 +1239,18 @@ classdef ReverseGNSSEKF < handle
                         Q(oi(k),   oi(k+3)) = q_rv;
                         Q(oi(k+3), oi(k))   = q_rv;
                     end
+                end
+            end
+
+            % --- Per-secondary carrier-ambiguity process noise (random walk) ----
+            % Mirrors the chief-ambiguity RW below; tiny so the float ambiguity is
+            % effectively constant between cycle slips (not modelled in Phase 1).
+            if obj.estimateSecondaryAmbiguities && isfield(sm,'secondaryAmbiguityIdx') ...
+                    && ~isempty(sm.secondaryAmbiguityIdx)
+                q_sa = obj.secondaryAmbProcNoise_^2 * dt_s;
+                ai = sm.secondaryAmbiguityIdx(:);
+                for jj = 1:numel(ai)
+                    Q(ai(jj), ai(jj)) = q_sa;
                 end
             end
 

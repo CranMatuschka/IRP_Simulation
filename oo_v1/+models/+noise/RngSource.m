@@ -37,5 +37,7 @@ classdef RngSource
         SEC_TWSTFT_TWOWAY   = 24  % P3' ground-tower <-> SECONDARY two-way time-transfer noise (white, per-tower/asset/epoch)
         ISL_TWSTFT_THERMAL  = 25  % sat<->sat two-way time-transfer thermal noise (white, per-pair/epoch)
         ISL_TWSTFT_DELAYCAL = 26  % sat<->sat turn-around delay-cal bias (interval-keyed: sig 0=const, 1=RW)
+        SEC_CARR_AMB        = 27  % per-secondary ground-carrier float-ambiguity truth (persistent, per tower/asset)
+        SEC_CARR_PHASE      = 28  % per-secondary ground-carrier phase noise (white, per tower/asset/epoch)
     end
 end

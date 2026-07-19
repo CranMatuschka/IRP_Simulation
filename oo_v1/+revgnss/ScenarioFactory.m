@@ -308,6 +308,17 @@ classdef ScenarioFactory
                 end
             end
 
+            % Phase-1 per-secondary carrier float-ambiguity prior (wide, like the chief).
+            % x0 stays 0 (the truth ambiguity lives in the measurement builder); only P0 is set.
+            if ekf.estimateSecondaryAmbiguities && isfield(sm,'secondaryAmbiguityIdx') && ~isempty(sm.secondaryAmbiguityIdx)
+                sigma0_sa = 100;
+                try; sigma0_sa = cfg.multiAsset.towerSecondary.carrier.initialSigma_m; catch; end
+                ai = sm.secondaryAmbiguityIdx(:);
+                for jj = 1:numel(ai)
+                    P0(ai(jj), ai(jj)) = sigma0_sa^2;
+                end
+            end
+
             % SRP scale-coefficient prior variance (dimensionless).
             if ekf.estimateSrpScale && isfield(sm,'srpScaleIdx') && ~isempty(sm.srpScaleIdx)
                 initSigma = 0.1;

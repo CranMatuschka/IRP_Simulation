@@ -212,6 +212,19 @@ classdef MultiAssetConfig
             nSec = revgnss.MultiAssetConfig.secondaryClockCount(cfg);   % same asset set (needs ISL code gate too)
         end
 
+        function nSec = secondaryCarrierCount(cfg)
+            % secondaryCarrierCount  Phase-1 per-secondary-symmetry gate: number of
+            % secondaries that get tower->secondary CARRIER-phase rows + float-ambiguity
+            % states. Requires an estimated orbit block (position mode + towersObserve-
+            % Secondaries; a carrier row needs the secondary's r/v geometric column) AND
+            % the carrier toggle. Returns 0 otherwise -> byte-identical when off / single-asset.
+            nSec = 0;
+            if ~revgnss.MultiAssetConfig.cfgBool_(cfg, {'multiAsset','towerSecondary','carrier','enable'}, false)
+                return;
+            end
+            nSec = revgnss.MultiAssetConfig.secondaryOrbitCount(cfg);
+        end
+
         function nSec = groundSecondaryRowCount(cfg)
             % groundSecondaryRowCount  WP5 gate. Returns the number of secondaries whose
             % clock is observed by ground-tower rows (== secondaryClockCount) when

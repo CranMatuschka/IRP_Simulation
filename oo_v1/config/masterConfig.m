@@ -877,6 +877,15 @@ cfg.multiAsset.towerSecondary.atmosphere.tauIono_s         = 600;   % TEC correl
 cfg.multiAsset.towerSecondary.atmosphere.ionoShellHeight_m = 350e3;
 cfg.multiAsset.towerSecondary.atmosphere.chargeR           = false; % false: honest gate (bias unmodelled); true: nCorr R inflation
 cfg.multiAsset.towerSecondary.atmosphere.nCorrCap          = 60;
+% --- Per-secondary CARRIER phase + float-ambiguity states (Phase 1: single-frequency L1) ---
+% Promotes each secondary from code-only toward a full single-asset model: tower->secondary
+% carrier rows (cm thermal) with a per-(secondary,tower) float-ambiguity state, mirroring the
+% chief's carrier machinery. Needs estimateMode='position' + towersObserveSecondaries (the row
+% uses the secondary's r/v geometric column). Default off -> golden byte-identical.
+cfg.multiAsset.towerSecondary.carrier.enable        = false;
+cfg.multiAsset.towerSecondary.carrier.sigma_m       = 0.005;  % carrier thermal 1-sigma [m] (~5 mm)
+cfg.multiAsset.towerSecondary.carrier.initialSigma_m = 100;   % float-ambiguity prior 1-sigma [m]
+cfg.multiAsset.towerSecondary.carrier.ambProcNoise_m = 1e-4;  % ambiguity random-walk sigma [m/sqrt(s)]
 % --- Guard B (P1' realism): one-sided truth-side SRP + luni-solar dynamics gap ---
 % Truth==EKF (both J2) today => each secondary's DYNAMIC error is identically 0 and NEES
 % measures nothing dynamic. When injectTruthSideDynamics=true (and estimateMode='position'
