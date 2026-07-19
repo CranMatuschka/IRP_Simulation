@@ -585,6 +585,12 @@ if isfield(cfg,'realism') && isfield(cfg.realism,'grade') && cfg.realism.grade
     cfg = realismGradeConfig(cfg);
 end
 
+% --- Resolve the multi-asset mode preset BEFORE the estimateMode-dependent overlays and
+% the contract check, so applyInjectTruthSideDynamics and validateMasterConfig see the
+% granular toggles the switch expands to. No-op for 'fast' (the default). finalizeConfig
+% re-resolves it for ordering-safety when nSpaceAssets/mode are set after masterConfig().
+cfg = revgnss.ConfigFactory.applyMultiAssetMode(cfg);
+
 % --- Optional matched-force / per-tower-hardware overlays (gated; no-op unless enabled) ------
 % Standalone config/ functions (like realismGradeConfig): masterConfig applies them for the
 % default path; a run script can also call them after masterConfig() once it sets the toggle.
@@ -780,10 +786,21 @@ cfg.multiAsset.truthStride_s = 60.0;   % decimation stride [s] to keep long-run 
 % 'clocks'   (WP3)   estimate each secondary's [b_tx, bdot_tx] as 2 EKF states,
 %            appended LAST. Requires nSpaceAssets>=2 AND isl.enable +
 %            isl.code.useInEKF (validated). Secondary POSITIONS stay product (WP4).
-% 'position' (WP4)   NOT IMPLEMENTED -- hard error in MultiAssetConfig.normalize.
+% 'position' (P1'/WP4) estimate each secondary's full [r,v,b,bdot]; requires
+%            towersObserveSecondaries (the near-radial position observable) on top of the
+%            'clocks' preconditions. Superset of 'clocks'.
 % NOTE: secondary truth clocks only wander when cfg.asset.clock.deterministic=false;
 % with the default deterministic clock the estimation target is identically 0.
 cfg.multiAsset.estimateMode = 'off';
+% --- Convenience preset over the granular estimation toggles (resolved by
+% revgnss.ConfigFactory.applyMultiAssetMode, in BOTH masterConfig and finalizeConfig):
+%   'fast'   (default) the classic product-beacon one-way-ISL swarm. PASSTHROUGH -- does
+%            not touch estimateMode/towersObserveSecondaries/twoWayISL, so it is byte-
+%            identical to setting them by hand and the goldens are unaffected.
+%   'honest' bundles the joint per-satellite estimation (estimateMode='position' +
+%            towersObserveSecondaries + twoWayISL + ISL observability). Swarm-only
+%            (nSpaceAssets>=2). Flip this ONE field to switch fast<->honest.
+cfg.multiAsset.mode = 'fast';
 % Loose a-priori on the secondary clock states (init draw AND stated P0 share these,
 % so initial NEES is O(1)). Deliberately << tower's 1000 m / 10 m/s: a GEO atomic
 % clock's broadcast a-priori is far better than an unknown ground beacon, yet loose

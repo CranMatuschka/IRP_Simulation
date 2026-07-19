@@ -489,6 +489,68 @@ classdef ConfigFactory
             cfgClock.noiseCoeffs.hMinus2  = tmpl.hMinus2  * hm2F;
         end
 
+        function cfg = applyMultiAssetMode(cfg)
+            % applyMultiAssetMode  Resolve the cfg.multiAsset.mode convenience switch
+            %   ('fast' | 'honest') into the granular estimation toggles.
+            %
+            %   'fast'   : the classic product-beacon one-way-ISL swarm (today's default).
+            %              PASSTHROUGH -- touches nothing, so configs/tests that set
+            %              estimateMode/towersObserveSecondaries/twoWayISL directly are
+            %              unaffected and the frozen goldens stay byte-identical.
+            %   'honest' : the joint per-satellite estimation bundle -- estimateMode=
+            %              'position' (full [r,v,b,bdot] per secondary) + towersObserve-
+            %              Secondaries (absolute anchor) + twoWayISL (clock-free baselines)
+            %              + the ISL observability flags. Applied only for a swarm
+            %              (nSpaceAssets>=2); mode='honest' at nSpaceAssets<2 is an error.
+            %
+            %   Called from BOTH masterConfig (before validateMasterConfig, so the estimate-
+            %   Mode guards see the resolved toggles) AND finalizeConfig (so the switch
+            %   cannot be defeated by setting nSpaceAssets/mode AFTER masterConfig returns --
+            %   the masterConfig ISL auto-block runs at call time). Idempotent: re-running
+            %   yields the same cfg, safe under finalizeConfig running more than once.
+            mode = 'fast';
+            if isfield(cfg,'multiAsset') && isfield(cfg.multiAsset,'mode') && ...
+                    (ischar(cfg.multiAsset.mode) || isstring(cfg.multiAsset.mode))
+                mode = char(cfg.multiAsset.mode);
+            end
+            switch lower(mode)
+                case 'fast'
+                    return;                         % passthrough: leave granular toggles as-is
+                case 'honest'
+                    % fall through to apply the bundle
+                otherwise
+                    error('ConfigFactory:multiAssetMode', ...
+                        'cfg.multiAsset.mode must be ''fast'' or ''honest'' (got ''%s'').', mode);
+            end
+
+            nA = 1;
+            if isfield(cfg,'scenario') && isfield(cfg.scenario,'nSpaceAssets')
+                nA = max(1, round(cfg.scenario.nSpaceAssets));
+            end
+            if nA < 2
+                error('ConfigFactory:multiAssetModeNeedsSwarm', ...
+                    ['cfg.multiAsset.mode=''honest'' requires cfg.scenario.nSpaceAssets>=2 ' ...
+                     '(no secondaries to estimate).']);
+            end
+
+            % Joint per-satellite estimation bundle.
+            cfg.multiAsset.estimateMode             = 'position';
+            cfg.multiAsset.towersObserveSecondaries = true;
+            cfg.multiAsset.twoWayISL.enable         = true;
+
+            % ISL observability essentials -- also closes the "set nSpaceAssets after
+            % masterConfig" footgun that leaves the auto-block's ISL disabled. Nested
+            % assignment auto-vivifies missing sub-structs; idempotent when already on.
+            cfg.measurements.isl.enable           = true;
+            cfg.measurements.isl.code.enable      = true;
+            cfg.measurements.isl.code.useInEKF    = true;
+            cfg.measurements.isl.doppler.enable   = true;
+            cfg.measurements.isl.doppler.useInEKF = true;
+            if ~isfield(cfg.measurements.isl,'transmitters') || isempty(cfg.measurements.isl.transmitters)
+                cfg.measurements.isl.transmitters = 'all';
+            end
+        end
+
         function cfg = applyAtmosphereProfile(cfg)
             % applyAtmosphereProfile  Apply masterConfig's atmosphere toggles.
             %   Opt-in: returns cfg unchanged unless cfg.atmosphere.realistic is
@@ -569,6 +631,12 @@ classdef ConfigFactory
             % configs that never set the toggle (bespoke tests, and the golden,
             % which sets it false) are left byte-identical.
             cfg = revgnss.ConfigFactory.applyAtmosphereProfile(cfg);
+
+            % ---- Multi-asset mode switch (ordering-safe re-resolution) -----
+            % Resolve cfg.multiAsset.mode ('fast'|'honest') here too, so a run script that
+            % sets nSpaceAssets/mode AFTER masterConfig() still gets the honest bundle (the
+            % masterConfig ISL auto-block only fires at call time). No-op for 'fast'.
+            cfg = revgnss.ConfigFactory.applyMultiAssetMode(cfg);
 
             % ---- IMU / gyro attitude aiding (gated; no-op unless cfg.estimator.imu.enable) ----
             % Resolve the master switch into the EKF flag here; the truth-side asset gyro config is
