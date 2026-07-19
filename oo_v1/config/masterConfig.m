@@ -504,6 +504,25 @@ cfg.measurements.twoWayTimeTransfer.useInEKF = false;
 cfg.measurements.twoWayTimeTransfer.towers   = 'all';   % which ground towers are two-way capable
 cfg.measurements.twoWayTimeTransfer.sigma_m  = 0.03;    % two-way time uncertainty 1-sigma [m] (~100 ps)
 
+%% Per-SECONDARY two-way time transfer (P3'). Default OFF.
+% The per-satellite twin of the primary two-way link above: a ground-tower<->SECONDARY
+% two-way exchange pins each secondary's clock b_tx DIRECTLY (H +1 on the secondary clock
+% state, no position column), decoupled from the secondary radial -- the only lever that
+% improves the per-satellite ABSOLUTE clock (and radial, via the WP5 range row). REQUIRES
+% the secondary to TRANSMIT, which the plain reverse-GNSS uplink does NOT assume -> this is
+% an explicit "with per-satellite two-way time transfer" enhancement, not the baseline
+% geometry; label results accordingly. Needs estimated secondary clocks (estimateMode
+% 'clocks'/'position'). Fuses with the WP5 one-way ground row (independent draws). sigma_m
+% ~0.03 m = 100 ps lab-grade; operational two-way is ~0.3-1 ns (0.1-0.3 m).
+cfg.measurements.secondaryTwoWayTimeTransfer.enable                     = false;
+cfg.measurements.secondaryTwoWayTimeTransfer.useInEKF                   = false;
+cfg.measurements.secondaryTwoWayTimeTransfer.towers                     = 'all';   % 'all' or vector of tower indices
+cfg.measurements.secondaryTwoWayTimeTransfer.sigma_m                    = 0.03;    % 1-sigma [m] (~100 ps lab-grade)
+cfg.measurements.secondaryTwoWayTimeTransfer.warmup_s                   = 0;
+cfg.measurements.secondaryTwoWayTimeTransfer.includeReciprocityResidual = false;  % model motion non-reciprocity (both sides)
+cfg.measurements.secondaryTwoWayTimeTransfer.reciprocitySigma_m         = 0.005;  % residual non-reciprocity 1-sigma [m]
+cfg.measurements.secondaryTwoWayTimeTransfer.conservativeProductCorrelation = true;% inflate tower-product var by epochs/interval
+
 %% Atmosphere realism + ionosphere handling  (SINGLE SOURCE OF TRUTH)
 % The physically-realistic troposphere/ionosphere/scintillation overlay and the
 % ionosphere-handling choice live HERE, not in run_oo_v1. These are DATA toggles;

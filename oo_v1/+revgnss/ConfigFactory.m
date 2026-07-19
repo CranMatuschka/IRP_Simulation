@@ -1608,6 +1608,7 @@ classdef ConfigFactory
             revgnss.ISLMeasurementBuilder.validateConfig(cfg);
             revgnss.TwoWayISLMeasurementBuilder.validateConfig(cfg);
             revgnss.SwarmTwoWayISLBuilder.validateConfig(cfg);
+            revgnss.SecondaryTwoWayTimeTransferBuilder.validateConfig(cfg);
             revgnss.ISLTimingModel.validateConfig(cfg);
             revgnss.TWSTFTDiagnosticBuilder.validateConfig(cfg);
             revgnss.TwoWayTimeTransferBuilder.validateConfig(cfg);

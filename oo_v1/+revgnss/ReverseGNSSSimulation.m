@@ -452,6 +452,16 @@ classdef ReverseGNSSSimulation < handle
             end
             errStruct.swarmTwoWayISL = swInfo;
 
+            % P3': per-secondary ground<->satellite two-way time transfer -- pins each
+            % secondary's clock directly (no position column). Empty (byte-identical) when
+            % disabled or no estimated secondary clocks.
+            [z_st, h_st, H_st, R_st, stInfo] = revgnss.SecondaryTwoWayTimeTransferBuilder.build( ...
+                obj.cfg, obj.errorChain, obj.assets, obj.towers, obj.ekf.x, obj.ekf.stateMap, obj.ekf.nx, t_s);
+            if ~isempty(z_st)
+                z = [z; z_st]; h = [h; h_st]; H = [H; H_st]; R = blkdiag(R, R_st);
+            end
+            errStruct.secondaryTwoWayTimeTransfer = stInfo;
+
             % TWSTFT code time-transfer diagnostic (no EKF rows).
             errStruct.twstftDiag = revgnss.TWSTFTDiagnosticBuilder.build(obj.cfg, islInfo, twoWayInfo);
             if isfield(errStruct,'observableStack')
