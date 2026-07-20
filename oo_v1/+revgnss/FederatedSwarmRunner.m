@@ -47,12 +47,23 @@ classdef FederatedSwarmRunner
             op = models.orbit.OrbitPropagator(cfg.orbit);
             [r0Cells, v0Cells] = revgnss.SwarmFormation.secondaryEciInitialStates(cfg, op);
 
+            baseSeed = 42;
+            if isfield(base,'simulation') && isfield(base.simulation,'seed'); baseSeed = base.simulation.seed; end
             for ai = 1:N
                 ci = base;
                 if ai >= 2
                     si = ai - 1;
                     ci.orbit.eciState0  = [r0Cells{si}; v0Cells{si}];   % this asset's absolute helix IC
-                    ci.asset.clock.seed = 300 + ai;                     % per-asset clock (swarm convention)
+                    ci.asset.clock.seed = 300 + ai;                     % per-asset sat clock (swarm convention)
+                    % PHYSICAL per-asset noise split: offset the measurement-noise master seed so each
+                    % asset's RECEIVER-side noise (code/carrier/Doppler thermal + path atmosphere, all
+                    % rooted at simulation.seed via ErrorChain->RngRegistry) is INDEPENDENT. The clock
+                    % TRUTHS keep their absolute seeds -- tower 200+k stays COMMON across assets (one
+                    % transmitted signal, reverse-GNSS), sat clock is per-asset (300+ai). Asset 1 keeps
+                    % the base seed untouched -> byte-identical to the single-asset golden. Without this,
+                    % all assets share one noise realization -> artificially common-mode -> the swarm
+                    % shape is unphysically sub-mm and the ISL relative layer has nothing to sharpen.
+                    ci.simulation.seed = baseSeed + 100000*(ai-1);
                 end
                 results.asset{ai} = revgnss.FederatedSwarmRunner.runOne_(ci);
             end
@@ -107,6 +118,19 @@ classdef FederatedSwarmRunner
             res.truthV   = sim.asset.v_ecef_mps;
             res.truthClk = sim.asset.clock.getBiasMeters();
             res.posErr   = norm(sim.ekf.x(sm.r_idx) - sim.asset.r_ecef_m);
+
+            % Per-epoch flown truth (this asset's OWN absolute trajectory) for the W2 relative
+            % layer. Read straight from the sim's orbit truth cache -> the EXACT truth this asset
+            % flew (no reconstruction/drift). Empty when the propagator/cache is off (never for a
+            % federated N>1 run, which requires useOrbitPropagator). Adds output fields only -> the
+            % EKF path is untouched, so N=1 byte-identity and all goldens are unaffected.
+            if sim.orbitTruthCache.enabled
+                res.truthTraj    = sim.orbitTruthCache.r_ecef_m;     % [3 x nEp] ECEF
+                res.truthVelTraj = sim.orbitTruthCache.v_ecef_mps;   % [3 x nEp] ECEF
+                res.truthTime_s  = sim.orbitTruthCache.t_s(:).';     % [1 x nEp]
+            else
+                res.truthTraj = []; res.truthVelTraj = []; res.truthTime_s = [];
+            end
         end
     end
 end
