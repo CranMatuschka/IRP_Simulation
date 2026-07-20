@@ -90,7 +90,9 @@ Empirically, running each asset with **no** joint coupling gives every asset ~24
 
 **Gates:** N=1 byte-identical; goldens 184/185 + 190/190 + 185/185 PASS; swarm fingerprint BIT-IDENTICAL (`traceP=50503.7896526557`). G6 rigid-motion-blindness to 1e-10; G8 conservative covariance.
 
+### W2-2 relative clocks — DONE (commit `d6058cf`)
+The clock dual of the shape solve: `SwarmRelativeSolver.solveRelativeClocks_` runs a free-network min-norm solve over sat-sat TWSTFT clock-difference observations (`+1/−1` rows) on the same neighbour graph. Read-only (D1); the 1-D null space is the common (mean) clock (unobservable by TWSTFT → left at the W1 mean; all metrics are gauge-invariant clock differences). **Gated default-OFF** on `cfg.multiAsset.twoWayTimeTransferISL.enable` (needs the sat↔sat transmit premise, beyond plain reverse-GNSS uplink). `FederatedSwarmRunner.runOne_` persists each asset's per-epoch TOTAL truth clock (`res.truthClkTraj_m`, from the `ClockModel` history). **Result:** with the gate ON the swarm relative clock sharpens **33.26 m (110.9 ns) → 2.18 cm (0.073 ns)** — ~1526× at the ~100 ps floor; conservative (0.022 ≤ formal σ 0.037); shape identical gate on/off (`d=0`). Byte-identity: N=1 `max|dx|=0`, goldens + swarm fingerprint bit-identical.
+
 ### Remaining
-- **W2-2** gated sat-sat TWSTFT relative clocks (default OFF; requires the sat↔sat transmit premise — use `SwarmTwoWayTimeTransferBuilder`, the sat↔sat dual, NOT `SecondaryTwoWayTimeTransferBuilder` which is tower↔secondary).
 - **W2-3** seed-locked W2 regression digest (`tests/regression/run_swarm_relative_regression.m`) + MC conservative-covariance check.
 - **W3** symmetric analysis/reporting (any asset as reference). **W4** retire the joint-EKF machinery (§5), each step guarded by the N=1 golden.
