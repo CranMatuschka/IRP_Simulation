@@ -908,6 +908,19 @@ cfg.multiAsset.towerSecondary.carrier.ambProcNoise_m = 1e-4;  % ambiguity random
 % velocity-dominated and Doppler genuinely helps. See docs/asset_symmetry_generalization.md §16.
 cfg.multiAsset.towerSecondary.doppler.enable        = false;  % emit tower->secondary Doppler rows (opt-in; not beneficial at GEO)
 cfg.multiAsset.towerSecondary.doppler.sigma_mps     = 0.05;   % Doppler thermal 1-sigma [m/s] (conservative uplink-degraded; >= chief 0.01)
+% --- Per-secondary MULTI-ANTENNA + ATTITUDE (Phase 4, Axis B/A): give a secondary the chief's
+% attitude-estimation stack. multiAntenna carries the chief's antenna array + lever arms on the
+% secondary (the inter-antenna carrier baseline is the ONLY thing that makes attitude observable);
+% attitude adds per-secondary [euler(3), omega(3)] states. Both DEFAULT OFF -> the state blocks are
+% empty (append-only, byte-identical golden + swarm). Attitude is refused unless multiAntenna is on
+% (no baseline -> unobservable), mirroring the allocation-gate discipline of secondaryOrbitCount.
+% Absolute accuracy is untouched (radial<->clock wall); the deliverable is per-satellite attitude,
+% a rotational DOF orthogonal to the wall. See docs/asset_symmetry_generalization.md §17.
+cfg.multiAsset.towerSecondary.multiAntenna.enable    = false;  % carry the chief antenna array on secondaries
+cfg.multiAsset.towerSecondary.multiAntenna.nAntennas = 4;      % antennas per secondary when enabled (matches the headline 4-antenna cross)
+cfg.multiAsset.towerSecondary.attitude.enable        = false;  % estimate per-secondary attitude (needs multiAntenna)
+cfg.multiAsset.towerSecondary.attitude.initSigma_euler_rad   = 0.05;   % secondary attitude prior 1-sigma [rad]
+cfg.multiAsset.towerSecondary.attitude.initSigma_omega_radps = 1e-4;   % secondary angular-rate prior 1-sigma [rad/s]
 % --- Per-secondary TROPOSPHERE (ZWD) states (Phase 2: each secondary estimates its own wet
 % delay per tower, like the chief). Gauss-Markov, mirroring the chief per-tower ZWD. Allocated
 % only when Guard A injects a divergent truth-side tropo residual; needs estimateMode='position'
