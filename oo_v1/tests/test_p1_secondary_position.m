@@ -54,7 +54,7 @@ smM = simM.ekf.stateMap; oi = smM.secondaryOrbitIdx(1,1:3);
 [~,~,Hisl,~,~] = revgnss.ISLMeasurementBuilder.build(cM, simM.asset, simM.assets, simM.ekf.x, smM, simM.ekf.nx, 5);
 codeRow = find(any(Hisl(:,oi) ~= 0, 2), 1);
 assert(~isempty(codeRow), 'T3 FAILED: no ISL row touches secondary position');
-[~,~,Hgs,~,gi] = revgnss.SecondaryGroundMeasurementBuilder.build(cM, simM.errorChain, simM.assets, simM.towers, simM.ekf.x, smM, simM.ekf.nx, 5);
+[~,~,Hgs,~,gi] = i_secRows(simM, smM, 5);
 assert(gi.nRows > 0 && any(any(Hgs(:,oi) ~= 0)), 'T3 FAILED: no ground row touches secondary position');
 % ground row: +u' (unit norm) on the secondary position, no primary position column
 grow = Hgs(1,:);
@@ -94,6 +94,12 @@ fprintf('    PASS\n');
 fprintf('=== test_p1_secondary_position: ALL PASS ===\n');
 
 % =====================================================================
+function [z, h, H, R, info] = i_secRows(sim, sm, t_s)
+    % Phase 3b-2 (C5): tower->secondary rows now emitted by the shared MeasurementModel.
+    mm = models.measurements.MeasurementModel(sim.cfg, sim.errorChain);
+    [z, h, H, R, info] = mm.computeSecondaryGroundRows(sim.assets, sim.towers, sim.ekf.x, sm, sim.ekf.nx, t_s);
+end
+
 function cfg = i_cfg(nAssets, productPos)
     cfg = masterConfig();
     cfg.scenario.nSpaceAssets = nAssets; cfg.scenario.nReceivers = 1; cfg.scenario.nTowers = 5;

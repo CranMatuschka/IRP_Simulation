@@ -17,8 +17,7 @@ fprintf('=== test_wp5_tower_secondary ===\n');
 % ---------------------------------------------------------------------
 fprintf('  T1: gated off / single-asset -> no rows ...\n');
 sOff = i_sim(2, false, 0.0, 5); simOff = sOff; simOff.initialize();
-[zO,~,~,~,iO] = revgnss.SecondaryGroundMeasurementBuilder.build(simOff.cfg, simOff.errorChain, ...
-    simOff.assets, simOff.towers, simOff.ekf.x, simOff.ekf.stateMap, simOff.ekf.nx, 10);
+[zO,~,~,~,iO] = i_secRows(simOff, simOff.ekf.stateMap, 10);
 assert(isempty(zO) && iO.nRows == 0, 'T1 FAILED: rows built with WP5 off');
 assert(revgnss.MultiAssetConfig.groundSecondaryRowCount(simOff.cfg) == 0, 'T1 FAILED: gate not 0 when off');
 fprintf('    PASS (no rows off)\n');
@@ -28,8 +27,7 @@ fprintf('    PASS (no rows off)\n');
 % ---------------------------------------------------------------------
 fprintf('  T2: row shape + H(b_tx)=+1 sign ...\n');
 sOn = i_sim(2, true, 0.0, 5); simOn = sOn; simOn.initialize();
-[zg,hg,Hg,Rg,gi] = revgnss.SecondaryGroundMeasurementBuilder.build(simOn.cfg, simOn.errorChain, ...
-    simOn.assets, simOn.towers, simOn.ekf.x, simOn.ekf.stateMap, simOn.ekf.nx, 10);
+[zg,hg,Hg,Rg,gi] = i_secRows(simOn, simOn.ekf.stateMap, 10);
 assert(gi.nRows > 0, 'T2 FAILED: no rows built with WP5 on');
 sm = simOn.ekf.stateMap; bTxIdx = sm.secondaryClockIdx(1,1);
 assert(all(Hg(:,bTxIdx) == 1), 'T2 FAILED: H(b_tx) ~= +1');
@@ -71,6 +69,14 @@ fprintf('=== test_wp5_tower_secondary: ALL PASS ===\n');
 function sim = i_sim(nAssets, wp5, productPos, nTowers)
     cfg = i_cfg(nAssets, wp5, productPos, nTowers);
     sim = revgnss.ReverseGNSSSimulation(cfg);
+end
+
+function [z, h, H, R, info] = i_secRows(sim, sm, t_s)
+    % Phase 3b-2 (C5): the tower->secondary rows are now emitted by the shared MeasurementModel
+    % (SecondaryGroundMeasurementBuilder retired). Build one from the sim's cfg + errorChain so
+    % the draws are identical to the retired static build.
+    mm = models.measurements.MeasurementModel(sim.cfg, sim.errorChain);
+    [z, h, H, R, info] = mm.computeSecondaryGroundRows(sim.assets, sim.towers, sim.ekf.x, sm, sim.ekf.nx, t_s);
 end
 
 function [radErr, btxErr, btxSig] = i_run(nAssets, wp5, productPos)

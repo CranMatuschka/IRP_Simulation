@@ -9,9 +9,9 @@ rootDir = fullfile(thisDir, '..');
 addpath(rootDir); addpath(fullfile(rootDir, 'config'));
 fprintf('=== test_secondary_carrier ===\n');
 
-% Phase-3a: the carrier rows are now emitted by SecondaryGroundMeasurementBuilder itself
-% (folded in), so this test drives that merged builder and identifies carrier rows by their
-% float-ambiguity column.
+% Phase 3b-2 (C5): the tower->secondary code + carrier rows are now emitted by the shared
+% MeasurementModel.computeSecondaryGroundRows (SecondaryGroundMeasurementBuilder retired). This
+% test drives that path (via i_secRows) and identifies carrier rows by their float-ambiguity column.
 % ---------------------------------------------------------------------
 % T1: gated off -> ambiguity block empty (golden-safe); builder emits code rows only
 % ---------------------------------------------------------------------
@@ -19,7 +19,7 @@ fprintf('  T1: gated off -> no ambiguity states, code rows only ...\n');
 sOff = i_sim(i_cfg(3, 10, false));
 assert(isempty(sOff.ekf.stateMap.secondaryAmbiguityIdx) || size(sOff.ekf.stateMap.secondaryAmbiguityIdx,1)==0, ...
     'T1 FAILED: ambiguity block present when disabled');
-[~,~,~,~,iOff] = revgnss.SecondaryGroundMeasurementBuilder.build(sOff.cfg, sOff.errorChain, sOff.assets, sOff.towers, sOff.ekf.x, sOff.ekf.stateMap, sOff.ekf.nx, 5);
+[~,~,~,~,iOff] = i_secRows(sOff, sOff.ekf.stateMap, 5);
 assert(iOff.nRows > 0, 'T1 FAILED: no ground code rows built');
 fprintf('    PASS (%d code rows, no ambiguity states)\n', iOff.nRows);
 
@@ -42,7 +42,7 @@ fprintf('    PASS (%d ambiguity states, disjoint)\n', numel(amb));
 %     position, +1 on its clock, +1 on its ambiguity; NO primary column).
 % ---------------------------------------------------------------------
 fprintf('  T3: merged builder -- carrier rows anti-circular ...\n');
-[~,~,H,R,gi] = revgnss.SecondaryGroundMeasurementBuilder.build(sOn.cfg, sOn.errorChain, sOn.assets, sOn.towers, sOn.ekf.x, sm, sOn.ekf.nx, 5);
+[~,~,H,R,gi] = i_secRows(sOn, sm, 5);
 carrierRows = find(any(H(:, amb) ~= 0, 2));   % rows touching an ambiguity column = carrier rows
 assert(~isempty(carrierRows), 'T3 FAILED: no carrier rows built');
 assert(gi.nRows == 2*numel(carrierRows), 'T3 FAILED: expected one carrier row per code row');
@@ -94,7 +94,7 @@ fprintf('  T6: validate guards ...\n');
 cN = masterConfig(); cN.scenario.nSpaceAssets = 3;
 cN.multiAsset.towerSecondary.carrier.enable = true;   % but estimateMode not position
 cN.multiAsset.estimateMode = 'clocks';
-assert(i_throws(@() revgnss.SecondaryGroundMeasurementBuilder.validateConfig(cN)), 'T6 FAILED: non-position not caught');
+assert(i_throws(@() models.measurements.MeasurementModel.validateSecondaryConfig(cN)), 'T6 FAILED: non-position not caught');
 fprintf('    PASS\n');
 
 fprintf('=== test_secondary_carrier: ALL PASS ===\n');
@@ -112,6 +112,13 @@ end
 
 function sim = i_sim(cfg)
     sim = revgnss.ReverseGNSSSimulation(revgnss.ConfigFactory.finalizeConfig(cfg)); sim.initialize();
+end
+
+function [z, h, H, R, info] = i_secRows(sim, sm, t_s)
+    % Phase 3b-2 (C5): tower->secondary rows now emitted by the shared MeasurementModel
+    % (SecondaryGroundMeasurementBuilder retired). Same cfg + errorChain -> identical draws.
+    mm = models.measurements.MeasurementModel(sim.cfg, sim.errorChain);
+    [z, h, H, R, info] = mm.computeSecondaryGroundRows(sim.assets, sim.towers, sim.ekf.x, sm, sim.ekf.nx, t_s);
 end
 
 function [s, e] = i_secPos(cfg)

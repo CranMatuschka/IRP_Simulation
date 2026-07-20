@@ -19,15 +19,15 @@ fprintf('  A1: atmosphere truth-side, off byte-identical ...\n');
 cA = i_posCfg(3);
 simA = revgnss.ReverseGNSSSimulation(revgnss.ConfigFactory.finalizeConfig(cA)); simA.initialize();
 args = {simA.errorChain, simA.assets, simA.towers, simA.ekf.x, simA.ekf.stateMap, simA.ekf.nx, 100};
-[zOff,hOff,~,ROff] = revgnss.SecondaryGroundMeasurementBuilder.build(simA.cfg, args{:});
+[zOff,hOff,~,ROff] = i_secRowsCfg(simA.cfg, args{:});
 cAon = simA.cfg; cAon.multiAsset.towerSecondary.atmosphere.enable = true;
-[zOn,hOn,~,ROn]  = revgnss.SecondaryGroundMeasurementBuilder.build(cAon, args{:});
+[zOn,hOn,~,ROn]  = i_secRowsCfg(cAon, args{:});
 assert(isequal(hOff,hOn), 'A1 FAILED: atmosphere changed h (must be truth-side only)');
 assert(~isequal(zOff,zOn), 'A1 FAILED: atmosphere did not change z');
 assert(isequal(ROff,ROn), 'A1 FAILED: chargeR=false must leave R unchanged');
 % default-off byte identity
 cAabsent = simA.cfg; cAabsent.multiAsset.towerSecondary = rmfield(cAabsent.multiAsset.towerSecondary,'atmosphere');
-[zAbs,~,~,~] = revgnss.SecondaryGroundMeasurementBuilder.build(cAabsent, args{:});
+[zAbs,~,~,~] = i_secRowsCfg(cAabsent, args{:});
 assert(isequal(zOff,zAbs), 'A1 FAILED: enable=false differs from field-absent');
 fprintf('    PASS (h unchanged; z gains truth-side bias; off==absent)\n');
 
@@ -122,6 +122,14 @@ fprintf('    PASS (centroid NEES/dof mean=%.1f -> absolute FLAGGED, honest)\n', 
 fprintf('=== test_p1_realism_guards: ALL PASS ===\n');
 
 % =====================================================================
+function [z, h, H, R, info] = i_secRowsCfg(cfg, ec, assets, towers, x, sm, nx, t_s)
+    % Phase 3b-2 (C5): tower->secondary rows now emitted by the shared MeasurementModel
+    % (SecondaryGroundMeasurementBuilder retired). cfg varies per call (Guard-A on/off/absent);
+    % same errorChain -> identical draws.
+    mm = models.measurements.MeasurementModel(cfg, ec);
+    [z, h, H, R, info] = mm.computeSecondaryGroundRows(assets, towers, x, sm, nx, t_s);
+end
+
 function cfg = i_posCfg(nAssets)
     cfg = masterConfig();
     cfg.scenario.nSpaceAssets = nAssets; cfg.scenario.nReceivers = 1; cfg.scenario.nTowers = 5;

@@ -36,7 +36,7 @@ fprintf('    PASS (%d ZWD states, disjoint)\n', numel(z));
 % T3: code row carries the +m_w ZWD partial
 % ---------------------------------------------------------------------
 fprintf('  T3: code-row ZWD partial ...\n');
-[zc,~,H,~,gi] = revgnss.SecondaryGroundMeasurementBuilder.build(sOn.cfg, sOn.errorChain, sOn.assets, sOn.towers, sOn.ekf.x, sm, sOn.ekf.nx, 5);
+[zc,~,H,~,gi] = i_secRows(sOn, sm, 5);
 assert(gi.nRows > 0, 'T3 FAILED: no ground rows');
 hit = 0;
 for r = 1:gi.nRows
@@ -90,6 +90,12 @@ end
 
 function sim = i_sim(cfg)
     sim = revgnss.ReverseGNSSSimulation(revgnss.ConfigFactory.finalizeConfig(cfg)); sim.initialize();
+end
+
+function [z, h, H, R, info] = i_secRows(sim, sm, t_s)
+    % Phase 3b-2 (C5): tower->secondary rows now emitted by the shared MeasurementModel.
+    mm = models.measurements.MeasurementModel(sim.cfg, sim.errorChain);
+    [z, h, H, R, info] = mm.computeSecondaryGroundRows(sim.assets, sim.towers, sim.ekf.x, sm, sim.ekf.nx, t_s);
 end
 
 function [e, zwdMag, zwdSig] = i_run(cfg)

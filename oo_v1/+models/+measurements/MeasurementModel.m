@@ -526,6 +526,31 @@ classdef MeasurementModel < handle
                 cfg, rngCorr, z_in, R_diag, twr_list, M);
         end
 
+        function validateSecondaryConfig(cfg)
+            % validateSecondaryConfig  Guards for the tower->secondary CARRIER rows.
+            % Relocated from revgnss.SecondaryGroundMeasurementBuilder.validateConfig (Phase 3b-2 C5)
+            % into the class that now owns the secondary rows. No-op when carrier is off.
+            gb = @(p) models.measurements.MeasurementModel.secGetBool_(cfg, p, false);
+            if ~gb({'multiAsset','towerSecondary','carrier','enable'}); return; end
+            mode = 'off';
+            if isfield(cfg,'multiAsset') && isfield(cfg.multiAsset,'estimateMode')
+                mode = char(cfg.multiAsset.estimateMode);
+            end
+            if ~strcmp(mode, 'position')
+                error('MeasurementModel:secondaryCarrierNeedsPosition', ...
+                    ['towerSecondary.carrier.enable requires cfg.multiAsset.estimateMode=''position'' ' ...
+                     '(the carrier row needs the secondary''s estimated r/v geometric column).']);
+            end
+            if ~gb({'multiAsset','towersObserveSecondaries'})
+                error('MeasurementModel:secondaryCarrierNeedsGroundRows', ...
+                    'towerSecondary.carrier.enable requires cfg.multiAsset.towersObserveSecondaries=true.');
+            end
+            s = models.measurements.MeasurementModel.secGetNum_(cfg, {'multiAsset','towerSecondary','carrier','sigma_m'}, 0.005);
+            if ~(isfinite(s) && s > 0)
+                error('MeasurementModel:secondaryCarrierSigma', 'towerSecondary.carrier.sigma_m must be a positive scalar.');
+            end
+        end
+
         function v = secGetNum_(cfg, path, dflt)
             % Safe nested numeric-scalar cfg read (copy of the retired builder's getNum_) for the
             % tower->secondary rows. Returns dflt if any level is missing or the value is not scalar.
