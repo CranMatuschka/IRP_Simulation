@@ -92,6 +92,7 @@ function cfg = i_cfg(nAssets, wp5, productPos, nTowers)
     cfg = masterConfig();
     cfg.scenario.nSpaceAssets = nAssets; cfg.scenario.nReceivers = 1; cfg.scenario.nTowers = nTowers;
     cfg.multiAsset.estimateMode = 'clocks';
+    cfg.multiAsset.towerSecondary.doppler.enable = false;   % clocks mode has no velocity state -> Doppler auto-off; explicit
     cfg.measurements.isl.enable = true;
     cfg.measurements.isl.code.enable = true;    cfg.measurements.isl.code.useInEKF = true;
     cfg.measurements.isl.doppler.enable = true; cfg.measurements.isl.doppler.useInEKF = true;

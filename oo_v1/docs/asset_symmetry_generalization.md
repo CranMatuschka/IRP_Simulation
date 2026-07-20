@@ -226,3 +226,29 @@ Emit-equivalent-first → parallel-diff → flip → delete: **C3** computes new
 ### OUT of 3b-3 scope (Phase 4): per-secondary attitude, multi-antenna + inter-antenna carrier bias, dual-frequency/iono-free, and secondary multipath/scintillation/hardware-delay/correlated-noise (each adds z error without R unless R is co-updated — its own conservatism decision).
 
 ### Open questions → user: (1) confirm Axis 2 SKIP (no noisy-product + cross-asset redesign now); (2) confirm Axis 3 truth-only/chargeR=false, reject chief white-R; (3) Axis 1 + Axis 3 opt-in first (not swarm default); (4) approve `sigma_dop` + `towerClkDriftSigma_mps` conservative defaults for Axis 4; (5) Axis-4 fingerprint schema extension lands in its own prep commit; (6) add the node-budget assert (`ti*32+ai` breaks at assetIdx≥32) now.
+
+### 16.1 Axis 4 (Doppler) — RESULT: honest negative at GEO, shipped gated default-OFF (commit 3b-3.1)
+Implemented `MeasurementModel.computeSecondaryGroundRows` Doppler rows (reusing the chief
+`OneWayRangeRateModel`), `RngSource.SEC_DOPPLER`, matched tower-clock-DRIFT R pad, node-budget assert.
+**Required a fix the plan did not anticipate:** the chief omits `d(rhoDot)/dr` (negligible for a
+well-observed chief), but the SECONDARY position is radial↔clock-wall-limited (~99 km off at init,
+~1–2 km converged), so the range-rate innovation is position-DRIVEN via the Sagnac geometry; without
+the position partial the filter mis-attributes it to velocity/drift and corrupts them (779 m state
+move, 24σ innovations). Added the partial.
+
+**Empirical accuracy (nSpaceAssets=3, 300 s, n=1), secondary final error, Doppler ON vs OFF:**
+position 2072 m → 1298 m (better, a side effect of the position partial), velocity 0.48 → 0.69 m/s
+(worse), **clock-drift 0.39 → 0.66 m/s (worse)**. The architect's core justification — that `+1` on
+the drift column makes secondary clock-drift *directly observable* — is **structurally defeated at
+GEO**: the range-rate is dominated by the position-driven Sagnac (a GEO is ~stationary in ECEF), and
+the wall-limited position confounds the drift signal (the same radial↔clock wall in the drift↔range-
+rate subspace). Swarm NIS ~4.9e5 with or without Doppler (pre-existing wall over-confidence, not
+Doppler-caused). A formal-P "drift sigma shrinks" test would FALSELY pass (over-confidence: P drops
+while error grows), so it is deliberately not asserted.
+
+**Verdict (conservative > optimistic):** default **OFF** at GEO — Doppler does not honestly improve
+the estimate and degrades drift/velocity. Preserved opt-in for high-velocity orbits (LEO/MEO) where
+the range-rate IS velocity-dominated and Doppler genuinely adds information. Recurring project lesson
+reconfirmed: measurement richness does not beat the geometric wall. Ships gated default-OFF → golden
+184/190/185 + swarm fingerprint `|d|=0` (no re-baseline). `test_secondary_doppler` proves the rows
+are structurally honest (H shape, R_new ⊇ R_old, R = sigma_dop^2 + nCorr·towerClkDriftSigma^2).

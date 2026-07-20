@@ -55,9 +55,21 @@ classdef SecondaryMeasurementProfile
                 return;
             end
 
-            % --- Secondary profile (assetIdx >= 2): the retired builder's exact realization ---
+            % --- Secondary profile (assetIdx >= 2): the retired builder's realization + 3b-3 physics ---
             ts = cfg.multiAsset.towerSecondary;
-            p.emitDoppler    = false;
+            % Phase 3b-3 Axis 4: tower->secondary Doppler (default ON in honest mode). Only meaningful
+            % in position mode (needs the velocity state) -- computeSecondaryGroundRows guards on blk.v.
+            dopEnable = isfield(ts,'doppler') && isfield(ts.doppler,'enable') && ts.doppler.enable;
+            dopSigma  = 0.05;
+            if isfield(ts,'doppler') && isfield(ts.doppler,'sigma_mps'); dopSigma = ts.doppler.sigma_mps; end
+            twClkDriftSigma = 1e-3;
+            if isfield(ts,'towerClkDriftSigma_mps'); twClkDriftSigma = ts.towerClkDriftSigma_mps; end
+            p.emitDoppler = dopEnable;
+            p.doppler = struct( ...
+                'source',                 models.noise.RngSource.SEC_DOPPLER, ...
+                'sigma_mps',              dopSigma, ...
+                'towerClkDriftSigma_mps', twClkDriftSigma, ...
+                'nodeScheme',             'towerAsset32');
             p.useErrorChain  = false;
             p.towerClockMode = 'matched';
             if isfield(ts, 'atmosphere') && isfield(ts.atmosphere, 'enable') && ts.atmosphere.enable

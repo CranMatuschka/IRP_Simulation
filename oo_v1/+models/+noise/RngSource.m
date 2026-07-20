@@ -39,5 +39,6 @@ classdef RngSource
         ISL_TWSTFT_DELAYCAL = 26  % sat<->sat turn-around delay-cal bias (interval-keyed: sig 0=const, 1=RW)
         SEC_CARR_AMB        = 27  % per-secondary ground-carrier float-ambiguity truth (persistent, per tower/asset)
         SEC_CARR_PHASE      = 28  % per-secondary ground-carrier phase noise (white, per tower/asset/epoch)
+        SEC_DOPPLER         = 29  % per-secondary tower->secondary range-rate (Doppler) noise (white, per tower/asset/epoch)
     end
 end

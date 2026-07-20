@@ -105,6 +105,7 @@ function cfg = i_cfg(nA, dur, carrierOn)
     cfg.scenario.nSpaceAssets = nA; cfg.scenario.nReceivers = 1; cfg.scenario.nTowers = 5;
     cfg.multiAsset.mode = 'honest';
     cfg.multiAsset.towerSecondary.carrier.enable = carrierOn;
+    cfg.multiAsset.towerSecondary.doppler.enable = false;   % focus on code/carrier rows (Doppler = test_secondary_doppler)
     cfg.simulation.duration_s = dur;
     cfg.report.writePdf=false; cfg.report.writeMat=false; cfg.report.compileTex='never';
     cfg.plots.showFigures=false; cfg.plots.enable=false;

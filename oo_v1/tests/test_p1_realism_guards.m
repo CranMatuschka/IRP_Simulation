@@ -135,6 +135,7 @@ function cfg = i_posCfg(nAssets)
     cfg.scenario.nSpaceAssets = nAssets; cfg.scenario.nReceivers = 1; cfg.scenario.nTowers = 5;
     cfg.multiAsset.estimateMode = 'position';
     cfg.multiAsset.towersObserveSecondaries = true;
+    cfg.multiAsset.towerSecondary.doppler.enable = false;   % focus on Guard-A atmosphere rows
     cfg.measurements.isl.enable = true;
     cfg.measurements.isl.code.enable = true;    cfg.measurements.isl.code.useInEKF = true;
     cfg.measurements.isl.doppler.enable = true; cfg.measurements.isl.doppler.useInEKF = true;

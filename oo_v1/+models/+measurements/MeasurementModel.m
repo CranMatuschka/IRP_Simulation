@@ -389,9 +389,18 @@ classdef MeasurementModel < handle
             carrierOn = revgnss.MultiAssetConfig.secondaryCarrierCount(obj.cfg) > 0;
 
             nAssets = numel(assets);
+            % RngRegistry node is 16-bit (mod 65536); the secondary node encoding is ti*32+ai.
+            if numel(towers) * 32 + nAssets >= 65536
+                error('MeasurementModel:secondaryNodeBudget', ...
+                    ['tower*32+asset node exceeds the 16-bit RngRegistry budget ' ...
+                     '(towers=%d, assets=%d) -- secondary draws would collide.'], numel(towers), nAssets);
+            end
             rowAsset = []; rowTower = [];
-            % Carrier rows collected separately, appended AFTER all code rows (pre-merge order).
+            % Row blocks are grouped, NOT interleaved (the batch update S=HPH'+R is not row-order-
+            % invariant): [all CODE] then [all DOPPLER] then [all CARRIER]. Doppler + carrier are
+            % collected separately here and appended after all code rows.
             zCar = []; hCar = []; HCar = zeros(0, nx); RCar = zeros(0,0); carAsset = []; carTower = [];
+            zDop = []; hDop = []; HDop = zeros(0, nx); RDop = zeros(0,0); dopAsset = []; dopTower = [];
             for ai = 2:nAssets
                 si = ai - 1;
                 if si > size(stateMap.secondaryClockIdx, 1); continue; end
@@ -420,6 +429,17 @@ classdef MeasurementModel < handle
                     RprodRow  = sigma^2 + Rprod;
                 end
                 bTxTruth = sec.clock.getBiasMeters();
+
+                % Phase 3b-3 Axis 4: secondary Doppler is emitted only in position mode (needs the
+                % velocity state blk.v). vSecTruth/bDotTruth are the truth range-rate + clock-drift.
+                emitDop = p.emitDoppler && ~isempty(blk.v);
+                if emitDop
+                    vSecTruth = sec.v_ecef_mps;
+                    vSecModel = x(blk.v); vSecModel = vSecModel(:);
+                    bDotTruth = sec.clock.getDriftMetersPerSecond();
+                    sigmaDop  = p.doppler.sigma_mps;
+                    RdopPad   = nCorr * p.doppler.towerClkDriftSigma_mps^2;   % matched tower-drift pad (mirrors the bias pad)
+                end
 
                 for ti = 1:numel(towers)
                     elev = towers{ti}.computeElevationTo(rSecTruth);
@@ -459,6 +479,33 @@ classdef MeasurementModel < handle
                     rowAsset(end+1) = ai;   %#ok<AGROW>
                     rowTower(end+1) = ti;   %#ok<AGROW>
 
+                    % Phase 3b-3 Axis 4: tower->secondary Doppler row (range-rate). Reuses the chief
+                    % OneWayRangeRateModel with the secondary r/v; matched tower-clock DRIFT (mean-
+                    % cancels, like the bias); H on velocity (u_los') + secondary clock-drift (+1).
+                    % R = sigma_dop^2 + matched-drift pad (block-diagonal -> never shrinks legacy R).
+                    if emitDop
+                        [rhoDotT, ~]    = revgnss.OneWayRangeRateModel.compute(rSecTruth, vSecTruth, rTwrT, obj.cfg);
+                        [rhoDotM, uLos] = revgnss.OneWayRangeRateModel.compute(rSecModel, vSecModel, rTwrM, obj.cfg);
+                        twrDrift = towers{ti}.getClockDriftMetersPerSecond();
+                        nzd  = sigmaDop * ec.drawKeyed(p.doppler.source, node, 0, 1, epochIdx, 1, 1);
+                        rowd = zeros(1, nx);
+                        rowd(blk.v)    = uLos';           % d(rhoDot)/dv = u_los'
+                        rowd(blk.bdot) = 1;               % receiver clock drift -> +1
+                        % d(rhoDot)/dr position partial. The chief OMITS this (negligible for a
+                        % well-observed chief position), but the SECONDARY position is wall-limited /
+                        % poorly observed, so the range-rate innovation is position-DRIVEN (via the
+                        % LOS + Sagnac geometry). Without this column the filter mis-attributes that
+                        % position error to velocity/drift and corrupts them. blk.r is non-empty here
+                        % (emitDop already required ~isempty(blk.v) => position mode).
+                        rowd(blk.r) = revgnss.OneWayRangeRateModel.positionPartial(rSecModel, vSecModel, rTwrM, obj.cfg);
+                        zDop(end+1,1) = rhoDotT + bDotTruth   - twrDrift + nzd; %#ok<AGROW>
+                        hDop(end+1,1) = rhoDotM + x(blk.bdot) - twrDrift;       %#ok<AGROW>
+                        HDop(end+1,:) = rowd;                                   %#ok<AGROW>
+                        RDop = blkdiag(RDop, sigmaDop^2 + RdopPad);
+                        dopAsset(end+1) = ai;   %#ok<AGROW>
+                        dopTower(end+1) = ti;   %#ok<AGROW>
+                    end
+
                     if carrierOn && ~isempty(orbPosIdx) && ~isempty(blk.ambiguity) && ti <= numel(blk.ambiguity)
                         ambIdx = blk.ambiguity(ti);
                         if ambIdx > 0
@@ -478,6 +525,15 @@ classdef MeasurementModel < handle
                         end
                     end
                 end
+            end
+            % Append DOPPLER block after all code rows, then CARRIER block (grouped order).
+            if ~isempty(zDop)
+                zAdd = [zAdd; zDop];
+                hAdd = [hAdd; hDop];
+                HAdd = [HAdd; HDop];
+                RAdd = blkdiag(RAdd, RDop);
+                rowAsset = [rowAsset, dopAsset];
+                rowTower = [rowTower, dopTower];
             end
             if ~isempty(zCar)
                 zAdd = [zAdd; zCar];

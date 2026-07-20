@@ -105,6 +105,7 @@ function cfg = i_cfg(nAssets, productPos)
     cfg.scenario.nSpaceAssets = nAssets; cfg.scenario.nReceivers = 1; cfg.scenario.nTowers = 5;
     cfg.multiAsset.estimateMode = 'position';
     cfg.multiAsset.towersObserveSecondaries = true;
+    cfg.multiAsset.towerSecondary.doppler.enable = false;   % focus on secondary-position rows
     if nAssets >= 2   % ISL requires >=2 assets
         cfg.measurements.isl.enable = true;
         cfg.measurements.isl.code.enable = true;    cfg.measurements.isl.code.useInEKF = true;

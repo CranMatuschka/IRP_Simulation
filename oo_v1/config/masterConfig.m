@@ -864,6 +864,7 @@ cfg.multiAsset.towerSecondary.code.sigma_m       = 1.0;   % tower->secondary the
 % mirrors TwoWayTimeTransfer.conservativeProductCorrelation).
 cfg.multiAsset.towerSecondary.productNCorr       = 30;    % effective correlated-sample count
 cfg.multiAsset.towerSecondary.towerClkSigma_m    = 0.03;  % tower clock product residual 1-sigma [m] (~100 ps)
+cfg.multiAsset.towerSecondary.towerClkDriftSigma_mps = 1e-3;  % tower clock DRIFT residual 1-sigma [m/s]; matched-drift R pad for secondary Doppler (Phase 3b-3)
 % --- Guard A (P1' realism): divergent uplink atmosphere on ground->secondary rows ---
 % TRUTH-side per-(tower,interval) tropo+iono residual, SHARED across the secondaries a
 % tower sees (per-LOS divergence is elevation-mapping only), interval-correlated (not
@@ -886,6 +887,20 @@ cfg.multiAsset.towerSecondary.carrier.enable        = false;
 cfg.multiAsset.towerSecondary.carrier.sigma_m       = 0.005;  % carrier thermal 1-sigma [m] (~5 mm)
 cfg.multiAsset.towerSecondary.carrier.initialSigma_m = 100;   % float-ambiguity prior 1-sigma [m]
 cfg.multiAsset.towerSecondary.carrier.ambProcNoise_m = 1e-4;  % ambiguity random-walk sigma [m/sqrt(s)]
+% --- Per-secondary DOPPLER (Phase 3b-3, Axis 4): tower->secondary range-rate row, symmetric to the
+% chief Doppler. H: u_los' on velocity, +1 on secondary clock-drift, and d(rhoDot)/dr on the
+% secondary position (the chief omits the position partial as negligible, but the secondary position
+% is wall-limited so its range-rate error is position-DRIVEN -- the column is required or the filter
+% mis-attributes it to velocity/drift). Emitted only in estimateMode='position'; block-diagonal R
+% append (never shrinks an existing entry).
+% DEFAULT OFF -- honest GEO finding (Phase 3b-3): at GEO the satellite is ~stationary in ECEF, so the
+% range-rate is dominated by the position-driven Sagnac geometry, not velocity. With the secondary
+% position radial<->clock-wall-limited, Doppler does NOT make the clock-drift observable (drift error
+% ~0.4-0.7 m/s with or without it) and empirically DEGRADES drift/velocity while marginally improving
+% position. It is preserved (opt-in) for high-velocity orbits (LEO/MEO) where the range-rate IS
+% velocity-dominated and Doppler genuinely helps. See docs/asset_symmetry_generalization.md §16.
+cfg.multiAsset.towerSecondary.doppler.enable        = false;  % emit tower->secondary Doppler rows (opt-in; not beneficial at GEO)
+cfg.multiAsset.towerSecondary.doppler.sigma_mps     = 0.05;   % Doppler thermal 1-sigma [m/s] (conservative uplink-degraded; >= chief 0.01)
 % --- Per-secondary TROPOSPHERE (ZWD) states (Phase 2: each secondary estimates its own wet
 % delay per tower, like the chief). Gauss-Markov, mirroring the chief per-tower ZWD. Allocated
 % only when Guard A injects a divergent truth-side tropo residual; needs estimateMode='position'

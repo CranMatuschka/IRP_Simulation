@@ -83,6 +83,7 @@ function cfg = i_cfg(nA, dur, zwdOn)
     cfg.multiAsset.mode = 'honest';
     cfg.multiAsset.towerSecondary.atmosphere.enable = true;     % Guard A: divergent uplink tropo
     cfg.multiAsset.towerSecondary.estimateAtmosphere = zwdOn;   % per-secondary ZWD states
+    cfg.multiAsset.towerSecondary.doppler.enable = false;       % focus on ZWD/atmosphere rows
     cfg.simulation.duration_s = dur;
     cfg.report.writePdf=false; cfg.report.writeMat=false; cfg.report.compileTex='never';
     cfg.plots.showFigures=false; cfg.plots.enable=false;
