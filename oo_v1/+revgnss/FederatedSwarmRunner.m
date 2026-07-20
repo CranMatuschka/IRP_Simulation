@@ -32,19 +32,30 @@ classdef FederatedSwarmRunner
                 return;
             end
 
-            % --- W1 TODO: per-asset TRUTH injection (assets 2..N) ---------------------------------
-            % The single-asset truth IC does NOT come from cfg.asset.r_ecef_m: ScenarioFactory.build
-            % (:24-26) builds the OrbitPropagator from cfg.orbit and OVERWRITES cfg.asset.r_ecef_m
-            % with orbitProp.propagate(0). So to run asset ai on its helix orbit we must inject its
-            % formation orbit IC via cfg_i.orbit -- an ECI r/v initial state (the formation gives each
-            % asset's absolute r0/v0; OrbitPropagator needs an eciState0 option + the ECEF->ECI
-            % velocity term omega x r). Overriding cfg.asset alone silently runs every asset on the
-            % CHIEF orbit (verified: truth separation = 0). Fail loudly until the IC path is wired.
-            error('revgnss:FederatedSwarmRunner:perAssetTruthWIP', ...
-                ['Federated N>1 not yet complete (W1): per-asset truth must be injected via ' ...
-                 'cfg_i.orbit (ECI r/v state), not cfg.asset -- ScenarioFactory derives the truth IC ' ...
-                 'from cfg.orbit. N=1 is byte-identical to the single-asset golden and works. ' ...
-                 'See docs/federated_swarm_architecture.md (W1).']);
+            % --- Per-asset TRUTH injection (assets 2..N) -----------------------------------------
+            % Each asset runs its OWN single-asset EKF on its OWN absolute helix orbit. The truth IC
+            % does not come from cfg.asset.r_ecef_m (ScenarioFactory overwrites it from cfg.orbit), so
+            % we inject asset ai's helix ECI initial state via cfg_i.orbit.eciState0 -- the same r0/v0
+            % SwarmFormation propagates for the joint-swarm truth. Asset 1 (chief) keeps cfg.orbit
+            % unchanged -> its truth is byte-identical to the golden single-asset. No shared covariance
+            % exists between the N runs; ISL/TWSTFT are the separate relative layer (W2).
+            if ~(isfield(cfg,'orbit') && isfield(cfg.orbit,'useOrbitPropagator') && cfg.orbit.useOrbitPropagator)
+                error('revgnss:FederatedSwarmRunner:needsOrbitPropagator', ...
+                    ['Federated N>1 needs cfg.orbit.useOrbitPropagator=true: the per-asset helix ' ...
+                     'formation truth is built from the orbit propagator (elements IC).']);
+            end
+            op = models.orbit.OrbitPropagator(cfg.orbit);
+            [r0Cells, v0Cells] = revgnss.SwarmFormation.secondaryEciInitialStates(cfg, op);
+
+            for ai = 1:N
+                ci = base;
+                if ai >= 2
+                    si = ai - 1;
+                    ci.orbit.eciState0  = [r0Cells{si}; v0Cells{si}];   % this asset's absolute helix IC
+                    ci.asset.clock.seed = 300 + ai;                     % per-asset clock (swarm convention)
+                end
+                results.asset{ai} = revgnss.FederatedSwarmRunner.runOne_(ci);
+            end
         end
     end
 

@@ -42,6 +42,44 @@ classdef SwarmFormation
             dv_hill = [ (rho/2)*n*cos(ph); -rho*n*sin(ph); rho*n*cos(ph) ];
         end
 
+        function [r0Cells, v0Cells] = secondaryEciInitialStates(cfg, orbitProp)
+            % secondaryEciInitialStates  Per-secondary t=0 ECI initial state [3x1] r0/v0 (the
+            % helix ICs that buildSecondaryCaches then propagates). Extracted so the federated
+            % instance layer can run each swarm member as its OWN single-asset absolute orbit by
+            % injecting r0/v0 via cfg.orbit.eciState0. This is the SAME arithmetic as the IC
+            % section of buildSecondaryCaches (kept in sync; that method is the truth path).
+            nSec = revgnss.SwarmFormation.nSecondaries(cfg);
+            r0Cells = cell(1, nSec); v0Cells = cell(1, nSec);
+            if nSec < 1 || isempty(orbitProp); return; end
+
+            baseline = 1000.0; phase0 = 0.0; mode = 'helix';
+            if isfield(cfg,'formation')
+                if isfield(cfg.formation,'baseline_m'); baseline = cfg.formation.baseline_m; end
+                if isfield(cfg.formation,'phase0_rad'); phase0 = cfg.formation.phase0_rad; end
+                if isfield(cfg.formation,'mode');       mode   = cfg.formation.mode;       end
+            end
+            if ~strcmpi(mode, 'helix')
+                error('SwarmFormation:unsupportedMode', ...
+                    'cfg.formation.mode="%s" is not supported (only "helix").', mode);
+            end
+
+            [r_c, v_c] = orbitProp.initialEciState();
+            nMean = orbitProp.meanMotion();
+            Rhat = r_c / norm(r_c);
+            What = cross(r_c, v_c); What = What / norm(What);
+            Shat = cross(What, Rhat);
+            A = [Rhat, Shat, What];         % Hill -> ECI rotation (columns R,S,W)
+            omega = [0; 0; nMean];          % Hill-frame angular velocity (about W)
+            for i = 1:nSec
+                phase = phase0 + 2*pi*(i-1)/nSec;
+                [dr_h, dv_h] = revgnss.SwarmFormation.helixOffsetHill(baseline, nMean, phase);
+                dr_eci = A * dr_h;
+                dv_eci = A * (dv_h + cross(omega, dr_h));   % rotating -> inertial relative velocity
+                r0Cells{i} = r_c + dr_eci;
+                v0Cells{i} = v_c + dv_eci;
+            end
+        end
+
         function [rCells, vCells, meta] = buildSecondaryCaches(cfg, orbitProp, tVec, primaryR_ecef)
             % buildSecondaryCaches  ECEF truth trajectories for assets 2..N.
             %   rCells{i}, vCells{i} : [3 x nEpochs] ECEF r/v for secondary i (asset i+1)
