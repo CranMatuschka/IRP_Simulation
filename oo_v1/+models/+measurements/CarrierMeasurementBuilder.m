@@ -10,7 +10,7 @@ classdef CarrierMeasurementBuilder
                 cfg, errorChain, floatAmbiguityTruth_m, ...
                 asset, towers, twr_pairs, ant_pairs, r_ants_truth, r_ants_est, ...
                 leverArms_model, x_est, stateMap, nx, errStruct, ...
-                towerClkTruth, towerClkModel, towerClkSigma, t_s)
+                towerClkTruth, towerClkModel, towerClkSigma, t_s, assetIdx)
             % buildEkfRows  Carrier EKF measurement rows.
             %
             % z_phi = rho_true + b_rx_true - b_twr_true + trop_true - iono_true + B_true + noise
@@ -23,6 +23,11 @@ classdef CarrierMeasurementBuilder
             % floatAmbiguityTruth_m is a containers.Map (handle class).
             % Keys added here persist in the caller's obj.floatAmbiguityTruth_m.
             if nargin < 18 || isempty(t_s); t_s = 0; end
+            % Phase 3b-1: per-asset state indices via AssetStateBlock (chief=1 aliases stateMap
+            % exactly -> byte-identical). r_idx/euler_idx/b_rx_idx/ambiguityIdx*/zwdIdx/ionoIdx
+            % below read from blk; the isfield(stateMap,...) coarse guards are harmless.
+            if nargin < 19 || isempty(assetIdx); assetIdx = 1; end
+            blk = revgnss.AssetStateBlock.forAsset(stateMap, assetIdx);
 
             Mp = numel(twr_pairs);
 
@@ -61,7 +66,7 @@ classdef CarrierMeasurementBuilder
             carrierSigs_ = revgnss.SignalCatalog.carrierSignalsFromConfig(cfg);
             nSig_        = numel(carrierSigs_);
             b_rx_true = asset.clock.getBiasMeters();
-            b_rx_est  = x_est(stateMap.b_rx_idx);
+            b_rx_est  = x_est(blk.b);
 
             Mp_total = Mp * nSig_;
             z_phi = zeros(Mp_total, 1);
@@ -116,8 +121,8 @@ classdef CarrierMeasurementBuilder
             dsig_carrier = models.measurements.CodeMeasurementBuilder.maskStateTowerSigma_( ...
                 dsig_carrier, twr_pairs, stateMap, 2);
 
-            r_cm_est  = x_est(stateMap.r_idx);
-            euler_est = x_est(stateMap.euler_idx);
+            r_cm_est  = x_est(blk.r);
+            euler_est = x_est(blk.euler);
             doFD      = models.measurements.MeasurementModelUtils.needsFiniteDiffH_(cfg);
 
             for si_ = 1:nSig_
@@ -149,16 +154,16 @@ classdef CarrierMeasurementBuilder
                 B_est = 0;
                 ambStateIdx = 0;
                 if isfield(stateMap,'ambiguityIdx3d') && ...
-                        ti <= size(stateMap.ambiguityIdx3d,1) && ...
-                        ai <= size(stateMap.ambiguityIdx3d,2) && ...
-                        sigIdx <= size(stateMap.ambiguityIdx3d,3)
+                        ti <= size(blk.ambiguity3d,1) && ...
+                        ai <= size(blk.ambiguity3d,2) && ...
+                        sigIdx <= size(blk.ambiguity3d,3)
                     % New mode: tower/receiver/signal indexing
-                    ambStateIdx = stateMap.ambiguityIdx3d(ti, ai, sigIdx);
+                    ambStateIdx = blk.ambiguity3d(ti, ai, sigIdx);
                 elseif isfield(stateMap,'ambiguityIdx') && ...
-                        ti <= size(stateMap.ambiguityIdx,1) && ...
-                        sigIdx <= size(stateMap.ambiguityIdx,2)
+                        ti <= size(blk.ambiguity,1) && ...
+                        sigIdx <= size(blk.ambiguity,2)
                     % Legacy mode: tower/signal indexing
-                    ambStateIdx = stateMap.ambiguityIdx(ti, sigIdx);
+                    ambStateIdx = blk.ambiguity(ti, sigIdx);
                 end
                 if ambStateIdx > 0 && ambStateIdx <= numel(x_est)
                     B_est = x_est(ambStateIdx);
@@ -252,19 +257,19 @@ classdef CarrierMeasurementBuilder
 
                 % h: +trop_model, -iono_model + ZWD state
                 h_phi(rowOut) = rho_e + b_rx_est - b_twr_m + trop_m - iono_m_sig + B_est;
-                if isfield(stateMap,'zwdIdx') && ti <= numel(stateMap.zwdIdx) && ...
-                        stateMap.zwdIdx(ti) > 0
+                if isfield(stateMap,'zwdIdx') && ti <= numel(blk.zwd) && ...
+                        blk.zwd(ti) > 0
                     mf_phi = models.atmosphere.MappingFunctions.troposphere(elv, ...
                         models.measurements.MeasurementModelUtils.zwdMappingKind(cfg));
-                    h_phi(rowOut) = h_phi(rowOut) + mf_phi * x_est(stateMap.zwdIdx(ti));
+                    h_phi(rowOut) = h_phi(rowOut) + mf_phi * x_est(blk.zwd(ti));
                 end
                 % Slant-iono EKF state (prototype): carrier ionosphere is a phase ADVANCE
                 % (negative), so the partial is the NEGATIVE 1/f^2 dispersion.
-                if isfield(stateMap,'ionoIdx') && ti <= numel(stateMap.ionoIdx) && ...
-                        stateMap.ionoIdx(ti) > 0
+                if isfield(stateMap,'ionoIdx') && ti <= numel(blk.iono) && ...
+                        blk.iono(ti) > 0
                     fL1c  = revgnss.SignalDefinition.get('L1').frequency_Hz;
                     fSigc = revgnss.Constants.SPEED_OF_LIGHT_MPS / lambda;
-                    h_phi(rowOut) = h_phi(rowOut) - (fL1c / fSigc)^2 * x_est(stateMap.ionoIdx(ti));
+                    h_phi(rowOut) = h_phi(rowOut) - (fL1c / fSigc)^2 * x_est(blk.iono(ti));
                 end
 
                 % NOTE: towerClkSigma is NOT added to carrier R.
@@ -287,10 +292,10 @@ classdef CarrierMeasurementBuilder
 
                 % ---- H: position columns (analytic or finite-difference) ------
                 if doFD
-                    H_phi(rowOut, stateMap.r_idx) = revgnss.LinkGeometry.finiteDiffPositionJacobian( ...
+                    H_phi(rowOut, blk.r) = revgnss.LinkGeometry.finiteDiffPositionJacobian( ...
                         cfg, towers, ti, ai, r_cm_est, euler_est, leverArms_model, 1.0);
                 else
-                    H_phi(rowOut, stateMap.r_idx) = g_e.losRow;
+                    H_phi(rowOut, blk.r) = g_e.losRow;
                 end
 
                 attGate = revgnss.LinkGeometry.shouldUseAttitudePartials(cfg, 'carrier');
@@ -299,19 +304,19 @@ classdef CarrierMeasurementBuilder
                     if isfield(cfg.estimator,'attitudeJacobianStep_rad')
                         step_e = cfg.estimator.attitudeJacobianStep_rad;
                     end
-                    H_phi(rowOut, stateMap.euler_idx) = revgnss.LinkGeometry.finiteDiffAttitudeJacobian( ...
+                    H_phi(rowOut, blk.euler) = revgnss.LinkGeometry.finiteDiffAttitudeJacobian( ...
                         cfg, towers, ti, ai, r_cm_est, euler_est, leverArms_model, step_e);
                 end
                 % Record closure metadata for this row (after H_phi is populated)
                 cpInfo.attitudePartialsEnabled(rowOut) = attGate.enabled;
                 cpInfo.leverArmNorm_m(rowOut)          = norm(leverArms_model(:, ai));
                 cpInfo.attitudeSensitive(rowOut)       = attGate.enabled && norm(leverArms_model(:,ai)) > 1e-9;
-                if isfield(stateMap,'euler_idx') && ~isempty(stateMap.euler_idx)
-                    cpInfo.hAttitudeNorm(rowOut) = norm(H_phi(rowOut, stateMap.euler_idx));
+                if isfield(stateMap,'euler_idx') && ~isempty(blk.euler)
+                    cpInfo.hAttitudeNorm(rowOut) = norm(H_phi(rowOut, blk.euler));
                 end
 
                 % ---- H: clock, ambiguity, ZWD (always analytic) ---------------
-                H_phi(rowOut, stateMap.b_rx_idx) = 1;
+                H_phi(rowOut, blk.b) = 1;
 
                 if isfield(stateMap,'towerClockIdx') && ...
                         ti <= size(stateMap.towerClockIdx,1) && ...
@@ -325,17 +330,17 @@ classdef CarrierMeasurementBuilder
 
                 % ZWD column: +mf (same sign for carrier and code)
                 if isfield(stateMap,'zwdIdx') && ...
-                        ti <= numel(stateMap.zwdIdx) && stateMap.zwdIdx(ti) > 0
+                        ti <= numel(blk.zwd) && blk.zwd(ti) > 0
                     mf = models.atmosphere.MappingFunctions.troposphere(elv, ...
                         models.measurements.MeasurementModelUtils.zwdMappingKind(cfg));
-                    H_phi(rowOut, stateMap.zwdIdx(ti)) = mf;
+                    H_phi(rowOut, blk.zwd(ti)) = mf;
                 end
                 % Slant-iono column: -(f_L1/f)^2 (carrier ionosphere is a phase advance)
                 if isfield(stateMap,'ionoIdx') && ...
-                        ti <= numel(stateMap.ionoIdx) && stateMap.ionoIdx(ti) > 0
+                        ti <= numel(blk.iono) && blk.iono(ti) > 0
                     fL1c  = revgnss.SignalDefinition.get('L1').frequency_Hz;
                     fSigc = revgnss.Constants.SPEED_OF_LIGHT_MPS / lambda;
-                    H_phi(rowOut, stateMap.ionoIdx(ti)) = -(fL1c / fSigc)^2;
+                    H_phi(rowOut, blk.iono(ti)) = -(fL1c / fSigc)^2;
                 end
 
                 % ---- Known-ambiguity validation (ATTITUDE VALIDATION ONLY — not operational) ----
