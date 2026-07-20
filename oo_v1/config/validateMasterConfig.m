@@ -162,8 +162,9 @@ function cfg = validateMasterConfig(cfg)
     % --- Sat<->sat two-way time transfer ISL guards (delegated; no-op when off) ---
     revgnss.SwarmTwoWayTimeTransferBuilder.validateConfig(cfg);
 
-    % --- Phase-1 per-secondary ground carrier guards (delegated; no-op when off) ---
-    revgnss.SecondaryGroundCarrierBuilder.validateConfig(cfg);
+    % --- Per-secondary ground carrier guards (delegated; no-op when off). Phase 3a folded the
+    % carrier rows into SecondaryGroundMeasurementBuilder, which now owns this validation. ---
+    revgnss.SecondaryGroundMeasurementBuilder.validateConfig(cfg);
 
     % --- Phase-2 per-secondary troposphere ZWD guard: the ZWD absorbs the Guard A divergent
     % tropo residual, so it is unobservable (and refused) unless Guard A is on. Fail loudly

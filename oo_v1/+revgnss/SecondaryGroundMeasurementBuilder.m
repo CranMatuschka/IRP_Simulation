@@ -68,8 +68,26 @@ classdef SecondaryGroundMeasurementBuilder
             aNCap    = g({'multiAsset','towerSecondary','atmosphere','nCorrCap'}, 60);
             elvFloor = revgnss.Constants.ELEVATION_FLOOR_RAD;
 
+            % Phase-3a: fold-in the tower->secondary CARRIER rows (was SecondaryGroundCarrierBuilder).
+            % Same geometry/clock as the code row; adds a per-(secondary,tower) float-ambiguity
+            % state (single-freq L1). carrierOn requires position mode + carrier.enable.
+            carrierOn = revgnss.MultiAssetConfig.secondaryCarrierCount(cfg) > 0;
+            sigmaCarr = g({'multiAsset','towerSecondary','carrier','sigma_m'}, 0.005);
+            ambSpread = g({'multiAsset','towerSecondary','carrier','initialSigma_m'}, 100);
+            ambStd    = min(ambSpread, 10);
+            lambda    = g({'signals','L1','lambda_m'}, 0.1903);
+            Rtwr      = nCorr * twClkSig^2;   % conservative tower-clock padding (float amb absorbs the constant)
+            ambBlock  = zeros(0,0);
+            if isfield(stateMap,'secondaryAmbiguityIdx'); ambBlock = stateMap.secondaryAmbiguityIdx; end
+
             nAssets = numel(assets);
             rowAsset = []; rowTower = [];
+            % Phase-3a: carrier rows are collected SEPARATELY and appended AFTER all code rows,
+            % preserving the exact pre-merge row order (all code, then all carrier). Row order is
+            % not floating-point-invariant in the batch update S=HPH'+R, so grouping -- not
+            % interleaving -- is what keeps the swarm bit-identical. The SEC_CARR_* draws are
+            % identity-keyed, so drawing them inside this shared loop does not change their values.
+            zCar = []; hCar = []; HCar = zeros(0, nx); RCar = zeros(0,0); carAsset = []; carTower = [];
             for ai = 2:nAssets
                 si = ai - 1;
                 if si > size(stateMap.secondaryClockIdx, 1); continue; end
@@ -137,12 +155,69 @@ classdef SecondaryGroundMeasurementBuilder
                     RAdd = blkdiag(RAdd, Rii);
                     rowAsset(end+1) = ai;   %#ok<AGROW>
                     rowTower(end+1) = ti;   %#ok<AGROW>
+
+                    % Phase-3a: the CARRIER row for this (secondary,tower) -- same geometry,
+                    % clock and +u_ts' as the code row above; adds the float ambiguity (metres).
+                    % Byte-identical to the retired SecondaryGroundCarrierBuilder (batch update
+                    % is row-order-invariant; the SEC_CARR_* draws are identity-keyed).
+                    if carrierOn && ~isempty(orbPosIdx) && si <= size(ambBlock,1)
+                        ambIdx = ambBlock(si, ti);
+                        if ambIdx > 0
+                            nCyc  = round((ambStd / lambda) * errorChain.drawKeyedInterval( ...
+                                models.noise.RngSource.SEC_CARR_AMB, node, 0, 0, 0));
+                            Btrue = nCyc * lambda;
+                            nzc   = sigmaCarr * errorChain.drawKeyed( ...
+                                models.noise.RngSource.SEC_CARR_PHASE, node, 0, 1, epochIdx, 1, 1);
+                            rowc = zeros(1, nx);
+                            rowc(orbPosIdx) = row(orbPosIdx);   % same +u_ts' as the code row
+                            rowc(bTxIdx)    = 1;
+                            rowc(ambIdx)    = 1;
+                            zCar(end+1,1) = rhoT + bTxTruth  - bTwr + Btrue + nzc; %#ok<AGROW>
+                            hCar(end+1,1) = rhoM + x(bTxIdx) - bTwr + x(ambIdx);   %#ok<AGROW>
+                            HCar(end+1,:) = rowc;                                  %#ok<AGROW>
+                            RCar = blkdiag(RCar, sigmaCarr^2 + Rtwr);
+                            carAsset(end+1) = ai;   %#ok<AGROW>
+                            carTower(end+1) = ti;   %#ok<AGROW>
+                        end
+                    end
                 end
+            end
+            % Append the carrier block AFTER all code rows (pre-merge order -> bit-identical).
+            if ~isempty(zCar)
+                zAdd = [zAdd; zCar];
+                hAdd = [hAdd; hCar];
+                HAdd = [HAdd; HCar];
+                RAdd = blkdiag(RAdd, RCar);
+                rowAsset = [rowAsset, carAsset];
+                rowTower = [rowTower, carTower];
             end
             info.nRows    = numel(zAdd);
             info.rowAsset = rowAsset;
             info.rowTower = rowTower;
             if info.nRows > 0; info.prefitRms = sqrt(mean((zAdd - hAdd).^2)); end
+        end
+
+        function validateConfig(cfg)
+            % Guards for the folded-in tower->secondary CARRIER rows (Phase 3a). No-op when off.
+            gb = @(p) revgnss.SecondaryGroundMeasurementBuilder.getBool_(cfg, p, false);
+            if ~gb({'multiAsset','towerSecondary','carrier','enable'}); return; end
+            mode = 'off';
+            if isfield(cfg,'multiAsset') && isfield(cfg.multiAsset,'estimateMode')
+                mode = char(cfg.multiAsset.estimateMode);
+            end
+            if ~strcmp(mode, 'position')
+                error('SecondaryGroundMeasurementBuilder:carrierNeedsPosition', ...
+                    ['towerSecondary.carrier.enable requires cfg.multiAsset.estimateMode=''position'' ' ...
+                     '(the carrier row needs the secondary''s estimated r/v geometric column).']);
+            end
+            if ~gb({'multiAsset','towersObserveSecondaries'})
+                error('SecondaryGroundMeasurementBuilder:carrierNeedsGroundRows', ...
+                    'towerSecondary.carrier.enable requires cfg.multiAsset.towersObserveSecondaries=true.');
+            end
+            s = revgnss.SecondaryGroundMeasurementBuilder.getNum_(cfg, {'multiAsset','towerSecondary','carrier','sigma_m'}, 0.005);
+            if ~(isfinite(s) && s > 0)
+                error('SecondaryGroundMeasurementBuilder:carrierSigma', 'towerSecondary.carrier.sigma_m must be a positive scalar.');
+            end
         end
     end
 

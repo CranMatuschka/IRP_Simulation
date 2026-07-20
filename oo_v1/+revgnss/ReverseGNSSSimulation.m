@@ -441,17 +441,10 @@ classdef ReverseGNSSSimulation < handle
                 H = [H; H_gs];
                 R = blkdiag(R, R_gs);
             end
+            % The tower->secondary CARRIER rows are now emitted by SecondaryGroundMeasurementBuilder
+            % itself (Phase 3a: folded in -- same geometry as the code rows), so gsInfo already
+            % carries them; no separate builder call.
             errStruct.secondaryGround = gsInfo;
-
-            % Phase-1 per-secondary symmetry: tower -> secondary CARRIER rows + float
-            % ambiguity states (cm ranging). Empty (byte-identical) when carrier.enable off
-            % / no secondary ambiguity block. Fuses on top of the code rows above.
-            [z_sc, h_sc, H_sc, R_sc, scInfo] = revgnss.SecondaryGroundCarrierBuilder.build( ...
-                obj.cfg, obj.errorChain, obj.assets, obj.towers, obj.ekf.x, obj.ekf.stateMap, obj.ekf.nx, t_s);
-            if ~isempty(z_sc)
-                z = [z; z_sc]; h = [h; h_sc]; H = [H; H_sc]; R = blkdiag(R, R_sc);
-            end
-            errStruct.secondaryGroundCarrier = scInfo;
 
             % P2': all-pairs two-way ISL (clock-free baseline lengths). Fuses with the one-way
             % ISL + ground rows; empty (byte-identical) at nSpaceAssets=1 / when disabled.
