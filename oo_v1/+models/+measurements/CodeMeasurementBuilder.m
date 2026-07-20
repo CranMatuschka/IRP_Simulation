@@ -13,11 +13,19 @@ classdef CodeMeasurementBuilder
                 twr_list, ant_list, elv_list, leverArms, leverArms_model, ...
                 r_ants_truth, r_ants_est, x_est, stateMap, ...
                 towerClkTruth, towerClkModel, towerClkSigma, towerClkMode, t_prod, ...
-                errStruct, t_s)
+                errStruct, t_s, assetIdx)
             % build  Build pseudorange measurement rows [z, h, R] and updated errStruct.
             %
             % Handles single-frequency, multi-frequency, and ionosphere-free combination.
             % Returns updated twr_list/ant_list/M/N_sig (may differ from input for multi-sig).
+            %
+            % assetIdx (optional, default 1): which satellite's state block to read (chief=1).
+            % Phase 3b-1: the per-asset indices (r/euler/b/zwd/iono) are resolved via
+            % AssetStateBlock.forAsset; at assetIdx=1 the block aliases the chief stateMap fields
+            % exactly, so this is byte-identical. Tower-level indices (towerClockIdx, txCodeBias)
+            % stay on stateMap -- they are shared, not per-asset.
+            if nargin < 22; assetIdx = 1; end
+            blk = revgnss.AssetStateBlock.forAsset(stateMap, assetIdx);
 
             M  = numel(twr_list);
 
@@ -25,9 +33,9 @@ classdef CodeMeasurementBuilder
             euler_true = asset.attitude_euler_rad;
             b_rx_true = asset.clock.getBiasMeters();
 
-            r_est     = x_est(stateMap.r_idx);
-            euler_est = x_est(stateMap.euler_idx);
-            b_rx_est  = x_est(stateMap.b_rx_idx);
+            r_est     = x_est(blk.r);
+            euler_est = x_est(blk.euler);
+            b_rx_est  = x_est(blk.b);
 
             sigmaFloor = cfg.measurement.sigmaFloor_m;
 
@@ -181,11 +189,11 @@ classdef CodeMeasurementBuilder
                 h(mi) = rho_est + b_rx_est - b_twr_h + errStruct.modelTotal_m(mi);
 
                 % ZWD state contribution to predicted pseudorange
-                if isfield(stateMap,'zwdIdx') && ti <= numel(stateMap.zwdIdx) && ...
-                        stateMap.zwdIdx(ti) > 0
+                if isfield(blk,'zwd') && ti <= numel(blk.zwd) && ...
+                        blk.zwd(ti) > 0
                     mf_h = models.atmosphere.MappingFunctions.troposphere(elv, ...
                         models.measurements.MeasurementModelUtils.zwdMappingKind(cfg));
-                    h(mi) = h(mi) + mf_h * x_est(stateMap.zwdIdx(ti));
+                    h(mi) = h(mi) + mf_h * x_est(blk.zwd(ti));
                 end
 
                 % Tx code hardware-delay state contribution (+1 sign: delay increases PR)
@@ -376,9 +384,9 @@ classdef CodeMeasurementBuilder
                         % double-counted). It enters each signal through its 1/f^2 dispersion
                         % (freqScale = (f_L1/f_sig)^2), which is what makes it observable from L1/L2.
                         ti_io = twr_list(pi);
-                        if isfield(stateMap,'ionoIdx') && ti_io <= numel(stateMap.ionoIdx) && ...
-                                stateMap.ionoIdx(ti_io) > 0
-                            h_new(mi) = h_new(mi) + freqScale * x_est(stateMap.ionoIdx(ti_io));
+                        if isfield(blk,'iono') && ti_io <= numel(blk.iono) && ...
+                                blk.iono(ti_io) > 0
+                            h_new(mi) = h_new(mi) + freqScale * x_est(blk.iono(ti_io));
                         end
                     end
                 end
