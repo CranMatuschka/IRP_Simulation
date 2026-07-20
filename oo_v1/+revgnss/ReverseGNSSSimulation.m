@@ -429,29 +429,29 @@ classdef ReverseGNSSSimulation < handle
             end
             errStruct.twoWayTimeTransfer = twttInfo;
 
-            % WP5: ground-tower -> secondary pseudorange rows. Each visible tower observes
-            % a secondary's b_tx at a near-radial LOS against the KNOWN tower clock, giving
-            % b_tx an ABSOLUTE ground anchor independent of the primary radial (breaks the
-            % WP3 degeneracy). No primary-state columns -> golden byte-identical when off.
-            [z_gs, h_gs, H_gs, R_gs, gsInfo] = revgnss.SecondaryGroundMeasurementBuilder.build( ...
-                obj.cfg, obj.errorChain, obj.assets, obj.towers, obj.ekf.x, obj.ekf.stateMap, obj.ekf.nx, t_s);
+            % WP5: ground-tower -> secondary pseudorange + carrier rows. Each visible tower observes
+            % a secondary's b_tx at a near-radial LOS against the KNOWN tower clock, giving b_tx an
+            % ABSOLUTE ground anchor independent of the primary radial (breaks the WP3 degeneracy).
+            % No primary-state columns -> byte-identical when off / nSpaceAssets=1.
+            %
+            % Phase 3b-2 C4: the EKF now consumes the NEW profile-driven rows emitted by the shared
+            % MeasurementModel.computeSecondaryGroundRows. The retired SecondaryGroundMeasurementBuilder
+            % stays computed (unused by the EKF) for ONE commit so the parallel-diff assertion remains
+            % live; both the old builder and the assertion are deleted at C5. NEW == OLD is proven
+            % (C3), so the swarm trajectory is unchanged.
+            [z_gs, h_gs, H_gs, R_gs, gsInfo] = obj.measModel.computeSecondaryGroundRows( ...
+                obj.assets, obj.towers, obj.ekf.x, obj.ekf.stateMap, obj.ekf.nx, t_s);
             if ~isempty(z_gs)
                 z = [z; z_gs];
                 h = [h; h_gs];
                 H = [H; H_gs];
                 R = blkdiag(R, R_gs);
             end
-            % The tower->secondary CARRIER rows are now emitted by SecondaryGroundMeasurementBuilder
-            % itself (Phase 3a: folded in -- same geometry as the code rows), so gsInfo already
-            % carries them; no separate builder call.
             errStruct.secondaryGround = gsInfo;
 
-            % Phase 3b-2 C3 (parallel diff, REMOVED at C5): compute the new profile-driven
-            % secondary rows via the shared MeasurementModel and assert bit-identical to the
-            % retired builder BEFORE the EKF is flipped onto them (C4). The EKF still consumes the
-            % OLD rows (z_gs) here. The secondary draws are identity-keyed (pure functions of the
-            % key), so recomputing them does NOT perturb the old realization. Empty (no-op) at
-            % nSpaceAssets=1 -> golden-safe.
+            % C4 parallel-diff (REMOVED at C5): assert the NEW rows now feeding the EKF are still
+            % bit-identical to the retired builder (which computes OLD internally). Identity-keyed
+            % draws -> recomputation does not perturb anything. No-op (both empty) at nSpaceAssets=1.
             obj.assertSecondaryRowsMatchRetired_(z_gs, h_gs, H_gs, R_gs, t_s);
 
             % P2': all-pairs two-way ISL (clock-free baseline lengths). Fuses with the one-way
@@ -737,14 +737,14 @@ classdef ReverseGNSSSimulation < handle
 
     methods (Access = private)
         % ----------------------------------------------------------------
-        function assertSecondaryRowsMatchRetired_(obj, z_old, h_old, H_old, R_old, t_s)
-            % Phase 3b-2 C3 parallel-diff (REMOVED at C5): recompute the tower->secondary rows via
-            % the shared MeasurementModel.computeSecondaryGroundRows and assert them BIT-IDENTICAL
-            % to the retired revgnss.SecondaryGroundMeasurementBuilder output. The EKF consumes the
-            % OLD rows; this only proves equivalence before the C4 flip. Identity-keyed draws ->
-            % recomputation does not perturb any stream. No-op (both empty) at nSpaceAssets=1.
-            [z_new, h_new, H_new, R_new] = obj.measModel.computeSecondaryGroundRows( ...
-                obj.assets, obj.towers, obj.ekf.x, obj.ekf.stateMap, obj.ekf.nx, t_s);
+        function assertSecondaryRowsMatchRetired_(obj, z_new, h_new, H_new, R_new, t_s)
+            % Phase 3b-2 parallel-diff (REMOVED at C5): assert the NEW profile-driven tower->secondary
+            % rows now feeding the EKF (MeasurementModel.computeSecondaryGroundRows) are BIT-IDENTICAL
+            % to the retired revgnss.SecondaryGroundMeasurementBuilder, which is computed here purely
+            % for the comparison. Identity-keyed draws -> recomputation does not perturb any stream.
+            % No-op (both empty) at nSpaceAssets=1.
+            [z_old, h_old, H_old, R_old] = revgnss.SecondaryGroundMeasurementBuilder.build( ...
+                obj.cfg, obj.errorChain, obj.assets, obj.towers, obj.ekf.x, obj.ekf.stateMap, obj.ekf.nx, t_s);
             if ~(isequal(size(z_new), size(z_old)) && isequal(size(h_new), size(h_old)) && ...
                     isequal(size(H_new), size(H_old)) && isequal(size(R_new), size(R_old)))
                 error('revgnss:secondaryRowParallelDiff', ...
