@@ -34,7 +34,7 @@ classdef CodeMeasurementBuilder
             b_rx_true = asset.clock.getBiasMeters();
 
             r_est     = x_est(blk.r);
-            euler_est = x_est(blk.euler);
+            euler_est = revgnss.AssetStateBlock.eulerEst(blk, x_est);
             b_rx_est  = x_est(blk.b);
 
             sigmaFloor = cfg.measurement.sigmaFloor_m;

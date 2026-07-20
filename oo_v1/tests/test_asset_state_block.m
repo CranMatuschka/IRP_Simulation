@@ -35,7 +35,7 @@ fprintf('    PASS\n');
 % T2: forAsset(sm,i>1) maps the secondary blocks; no attitude/iono/3d-ambiguity yet
 % ---------------------------------------------------------------------
 fprintf('  T2: secondary blocks ...\n');
-sm2 = i_state(i_cfgSwarm(3));
+[sm2, x2] = i_state(i_cfgSwarm(3));
 for i = 2:3
     si = i - 1;
     a = revgnss.AssetStateBlock.forAsset(sm2, i);
@@ -45,6 +45,14 @@ for i = 2:3
     assert(isequal(a.bdot, sm2.secondaryClockIdx(si,2)), 'T2 FAILED: secondary .bdot');
     assert(isempty(a.euler) && isempty(a.iono) && isempty(a.ambiguity3d), ...
         'T2 FAILED: secondary should have no attitude/iono/3d-ambiguity yet');
+    % Carrier ambiguity indices must be a [nTwr x 1] COLUMN (matches CarrierMeasurementBuilder's
+    % blk.ambiguity(ti,sigIdx) read); the old [1 x nTwr] row form only resolved tower 1. Only
+    % checkable when the block has a row for this secondary (carrier.enable -> [nSec x nTwr]).
+    if isfield(sm2,'secondaryAmbiguityIdx') && si <= size(sm2.secondaryAmbiguityIdx,1)
+        assert(isequal(a.ambiguity, sm2.secondaryAmbiguityIdx(si,:)'), 'T2 FAILED: secondary .ambiguity value');
+        assert(size(a.ambiguity,2) == 1 && size(a.ambiguity,1) == size(sm2.secondaryAmbiguityIdx,2), ...
+            'T2 FAILED: secondary .ambiguity must be [nTwr x 1]');
+    end
 end
 fprintf('    PASS\n');
 
@@ -62,6 +70,19 @@ end
 assert(isempty(intersect(chief, sec)), 'T3 FAILED: chief/secondary index overlap');
 fprintf('    PASS\n');
 
+% ---------------------------------------------------------------------
+% T4: eulerEst helper -- chief returns x(euler_idx) EXACTLY; secondary (no attitude state)
+%     returns a geometry-neutral zeros(3,1) instead of x_est([]) (which crashes applyLeverArm)
+% ---------------------------------------------------------------------
+fprintf('  T4: eulerEst helper (chief exact, secondary zeros) ...\n');
+bc1 = revgnss.AssetStateBlock.forAsset(sm1, 1);
+assert(isequal(revgnss.AssetStateBlock.eulerEst(bc1, x1), x1(sm1.euler_idx)), ...
+    'T4 FAILED: chief eulerEst ~= x(euler_idx)');
+as2 = revgnss.AssetStateBlock.forAsset(sm2, 2);
+e2 = revgnss.AssetStateBlock.eulerEst(as2, x2);
+assert(isequal(e2, zeros(3,1)), 'T4 FAILED: secondary eulerEst must be zeros(3,1)');
+fprintf('    PASS\n');
+
 fprintf('=== test_asset_state_block: ALL PASS ===\n');
 
 % =====================================================================
@@ -76,6 +97,9 @@ function cfg = i_cfgSwarm(nA)
     cfg = i_cfg1();
     cfg.scenario.nSpaceAssets = nA; cfg.scenario.nReceivers = 1; cfg.scenario.nTowers = 5;
     cfg.multiAsset.mode = 'honest';
+    % correct path is cfg.multiAsset.towerSecondary.* (bare cfg.towerSecondary.* is ignored);
+    % carrier ON allocates the [nSec x nTwr] secondaryAmbiguityIdx block for the orientation check
+    cfg.multiAsset.towerSecondary.carrier.enable = true;
 end
 
 function [sm, x] = i_state(cfg)

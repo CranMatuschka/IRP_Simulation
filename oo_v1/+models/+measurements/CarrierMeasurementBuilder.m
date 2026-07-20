@@ -122,7 +122,7 @@ classdef CarrierMeasurementBuilder
                 dsig_carrier, twr_pairs, stateMap, 2);
 
             r_cm_est  = x_est(blk.r);
-            euler_est = x_est(blk.euler);
+            euler_est = revgnss.AssetStateBlock.eulerEst(blk, x_est);
             doFD      = models.measurements.MeasurementModelUtils.needsFiniteDiffH_(cfg);
 
             for si_ = 1:nSig_

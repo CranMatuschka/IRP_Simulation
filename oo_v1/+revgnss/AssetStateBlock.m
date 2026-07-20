@@ -54,10 +54,26 @@ classdef AssetStateBlock
                 blk.bdot = sm.secondaryClockIdx(si,2);
             end
             if isfield(sm,'secondaryAmbiguityIdx') && si <= size(sm.secondaryAmbiguityIdx,1)
-                blk.ambiguity = sm.secondaryAmbiguityIdx(si,:);
+                % [nTwr x 1] to match the CarrierMeasurementBuilder read blk.ambiguity(ti,sigIdx)
+                % (which expects [nTwr x nSig]). The row form [1 x nTwr] only resolved tower 1.
+                blk.ambiguity = sm.secondaryAmbiguityIdx(si,:)';
             end
             if isfield(sm,'secondaryZwdIdx') && si <= size(sm.secondaryZwdIdx,1)
                 blk.zwd = sm.secondaryZwdIdx(si,:)';
+            end
+        end
+
+        function euler = eulerEst(blk, x_est)
+            % eulerEst  Attitude estimate for this asset's block.
+            % Secondaries carry no attitude state (blk.euler empty) and a single antenna at
+            % zero lever, so the antenna position r_cm + R(euler)*lever is independent of euler
+            % -> return a geometry-neutral zeros(3,1) instead of x_est([]) (which is empty and
+            % crashes applyLeverArm). The chief block has a non-empty blk.euler and returns
+            % x_est(euler_idx) exactly -> byte-identical at assetIdx=1.
+            if isempty(blk.euler)
+                euler = zeros(3,1);
+            else
+                euler = x_est(blk.euler);
             end
         end
     end

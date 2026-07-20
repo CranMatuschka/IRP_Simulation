@@ -99,7 +99,7 @@ classdef MeasurementModel < handle
 
             % ----- EKF state extraction --------------------------------
             r_est     = x_est(blk.r);
-            euler_est = x_est(blk.euler);
+            euler_est = revgnss.AssetStateBlock.eulerEst(blk, x_est);
 
             % ----- Effective lever arms with PCO offset ----------------
             % receiverOffset_body_m is extra common body-frame offset
