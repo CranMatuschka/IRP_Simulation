@@ -284,48 +284,33 @@ classdef ScenarioFactory
                 end
             end
 
-            % WP3 secondary-asset clock initial covariance (shares the init-draw sigma).
-            if ekf.estimateSecondaryClocks && isfield(sm,'secondaryClockIdx') && ~isempty(sm.secondaryClockIdx)
-                [sb, sbd] = revgnss.ScenarioFactory.secondaryClockInitSigmas_(cfg);
-                for si = 1:ekf.nSecondaryClocks
-                    ib = sm.secondaryClockIdx(si,1);
-                    id = sm.secondaryClockIdx(si,2);
-                    P0(ib,ib) = sb^2;
-                    P0(id,id) = sbd^2;
-                end
-            end
-
-            % P1'/WP4 secondary orbit initial covariance (shares the init-draw sigma set
-            % in ReverseGNSSSimulation.initialize, where the secondary truth exists).
-            if ekf.estimateSecondaryOrbits && isfield(sm,'secondaryOrbitIdx') && ~isempty(sm.secondaryOrbitIdx)
-                [sp, sv] = revgnss.ScenarioFactory.secondaryOrbitInitSigmas_(cfg);
-                for si = 1:ekf.nSecondaryOrbits
-                    oi = sm.secondaryOrbitIdx(si,:);
-                    for k = 1:3
-                        P0(oi(k),   oi(k))   = sp^2;
-                        P0(oi(k+3), oi(k+3)) = sv^2;
+            % --- Phase-2 init unification: secondary-asset P0 priors in ONE per-asset loop ----
+            % Consolidates the four separate secondary blocks (WP3 clock, P1'/WP4 orbit, Phase-1
+            % carrier ambiguity, Phase-2 ZWD) into a single loop over the sm.asset(i) view. Each
+            % field is written only when that state exists for the asset (empty otherwise), so
+            % the P0 diagonal is byte-identical to the four-block version. The chief block (asset 1)
+            % is untouched above; at nSpaceAssets=1 the view is length 1 -> this loop is skipped.
+            if numel(sm.asset) > 1
+                [sbClk, sbdClk] = revgnss.ScenarioFactory.secondaryClockInitSigmas_(cfg);
+                [spOrb, svOrb]  = revgnss.ScenarioFactory.secondaryOrbitInitSigmas_(cfg);
+                sigma0_sa = revgnss.ScenarioFactory.getCfgNum_(cfg, {'multiAsset','towerSecondary','carrier','initialSigma_m'}, 100);
+                sigma0_sz = revgnss.ScenarioFactory.getCfgNum_(cfg, {'multiAsset','towerSecondary','zwd','initialSigma_m'}, 0.10);
+                for i = 2:numel(sm.asset)
+                    a = sm.asset(i);
+                    if ~isempty(a.b);    P0(a.b, a.b)       = sbClk^2;  end
+                    if ~isempty(a.bdot); P0(a.bdot, a.bdot) = sbdClk^2; end
+                    if ~isempty(a.r)
+                        for k = 1:3
+                            P0(a.r(k), a.r(k)) = spOrb^2;
+                            P0(a.v(k), a.v(k)) = svOrb^2;
+                        end
                     end
-                end
-            end
-
-            % Phase-1 per-secondary carrier float-ambiguity prior (wide, like the chief).
-            % x0 stays 0 (the truth ambiguity lives in the measurement builder); only P0 is set.
-            if ekf.estimateSecondaryAmbiguities && isfield(sm,'secondaryAmbiguityIdx') && ~isempty(sm.secondaryAmbiguityIdx)
-                sigma0_sa = 100;
-                try; sigma0_sa = cfg.multiAsset.towerSecondary.carrier.initialSigma_m; catch; end
-                ai = sm.secondaryAmbiguityIdx(:);
-                for jj = 1:numel(ai)
-                    P0(ai(jj), ai(jj)) = sigma0_sa^2;
-                end
-            end
-
-            % Phase-2 per-secondary troposphere ZWD prior (like the chief per-tower ZWD).
-            if ekf.estimateSecondaryZwd && isfield(sm,'secondaryZwdIdx') && ~isempty(sm.secondaryZwdIdx)
-                sigma0_sz = 0.10;
-                try; sigma0_sz = cfg.multiAsset.towerSecondary.zwd.initialSigma_m; catch; end
-                zi = sm.secondaryZwdIdx(:);
-                for jj = 1:numel(zi)
-                    P0(zi(jj), zi(jj)) = sigma0_sz^2;
+                    for jj = 1:numel(a.ambiguity)
+                        P0(a.ambiguity(jj), a.ambiguity(jj)) = sigma0_sa^2;
+                    end
+                    for jj = 1:numel(a.zwd)
+                        P0(a.zwd(jj), a.zwd(jj)) = sigma0_sz^2;
+                    end
                 end
             end
 
@@ -350,6 +335,15 @@ classdef ScenarioFactory
                     if isfield(so,'initSigmaVel_mps') && so.initSigmaVel_mps > 0; sigma_vel_mps = so.initSigmaVel_mps; end
                 end
             catch; end
+        end
+
+        function v = getCfgNum_(cfg, path, dflt)
+            % getCfgNum_  Safe nested numeric-scalar config read with a default.
+            v = cfg;
+            for j = 1:numel(path)
+                if isstruct(v) && isfield(v, path{j}); v = v.(path{j}); else; v = dflt; return; end
+            end
+            if ~(isnumeric(v) && isscalar(v) && isfinite(v)); v = dflt; end
         end
     end
 end
