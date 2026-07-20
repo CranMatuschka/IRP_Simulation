@@ -44,6 +44,15 @@ classdef FederatedSwarmRunner
                     ['Federated N>1 needs cfg.orbit.useOrbitPropagator=true: the per-asset helix ' ...
                      'formation truth is built from the orbit propagator (elements IC).']);
             end
+            % 3-D formation by default: the classic CW projected-circular helix is PLANAR (z=2x), so
+            % its out-of-plane shape is only 2nd-order observable from ranging. A cross-track spread
+            % fans the members over distinct z:x ratios -> a non-degenerate 3-D formation whose FULL
+            % shape is first-order observable by the W2 relative layer. Only defaulted when the caller
+            % has not set it (respects an explicit override); the joint/fingerprint path never runs
+            % through here, so it keeps crossTrackSpread absent -> 0 -> planar -> byte-identical.
+            if ~isfield(cfg,'formation') || ~isfield(cfg.formation,'crossTrackSpread')
+                cfg.formation.crossTrackSpread = 1.0;
+            end
             op = models.orbit.OrbitPropagator(cfg.orbit);
             [r0Cells, v0Cells] = revgnss.SwarmFormation.secondaryEciInitialStates(cfg, op);
 

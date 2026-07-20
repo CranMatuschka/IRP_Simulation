@@ -109,7 +109,11 @@ classdef SwarmRelativeSolver
             out.shapeErrRaw_m       = sqrt(mean(shRaw(tsel).^2));
             out.shapeErrSolved_m    = sqrt(mean(shSol(tsel).^2));
             out.formalShapeSigma_m  = mean(fSig(tsel));
-            out.weaklyObservable    = any(weakEp);
+            % Tail-consistent with the reported metrics: flag weak only if the REPORTED (tail) window
+            % has a weakly-observed DOF. An isolated early near-degeneracy (e.g. t=0, where sin(phase)=0
+            % zeroes the cross-track of a helix member) does not degrade the tail-averaged solution.
+            out.weaklyObservable    = any(weakEp(tsel));
+            out.everWeaklyObservable = any(weakEp);   % diagnostic: geometry passed through a degeneracy
             out.perEpoch = struct('time_s', tVec(:).', ...
                 'baselineErrRaw_m', blRaw, 'baselineErrSolved_m', blSol, ...
                 'shapeErrRaw_m', shRaw, 'shapeErrSolved_m', shSol);
@@ -122,7 +126,8 @@ classdef SwarmRelativeSolver
             out = struct('applicable', false, 'nAssets', 0, 'pairs', zeros(0,2), ...
                 'baselineErrRaw_m', NaN, 'baselineErrSolved_m', NaN, ...
                 'shapeErrRaw_m', NaN, 'shapeErrSolved_m', NaN, ...
-                'formalShapeSigma_m', NaN, 'weaklyObservable', false, 'perEpoch', struct());
+                'formalShapeSigma_m', NaN, 'weaklyObservable', false, ...
+                'everWeaklyObservable', false, 'perEpoch', struct());
         end
 
         function [Est, Truth, tVec, ok] = gatherTrajectories_(results, N)
