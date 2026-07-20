@@ -67,3 +67,30 @@ Empirically, running each asset with **no** joint coupling gives every asset ~24
 - Anchoring: absolute is per-asset tower fixes (wall-limited, common-mode). The relative layer pins shape; is a formation-centroid/absolute anchor wanted for reporting, or is per-asset absolute + relative sufficient? (Recommend the latter.)
 - Neighbour re-selection cadence for time-varying geometry (static for GEO; revisit for LEO/MEO).
 - Whether to keep the joint EKF as an opt-in "research" mode or delete it outright (recommend delete after W3 to stop the maintenance drag).
+
+## 7. Implementation status & findings
+
+### W1 — instance layer — DONE (commits `dadb00f`, `2e2aeb2`)
+`revgnss.FederatedSwarmRunner.run(cfg)` runs N independent single-asset EKFs, one per member, each on its own helix orbit (injected via a new `cfg.orbit.eciState0` ECI-IC override on `OrbitPropagator` + `SwarmFormation.secondaryEciInitialStates`). N=1 is byte-identical to the golden (`max|dx|=0`); N=3 gives distinct truth (helix sep 1000/1000/2000 m) and independent per-asset fixes. No shared covariance.
+
+### W2 shape core — DONE (commit `6788c86`)
+`revgnss.SwarmRelativeSolver.solve(cfg, results)` — per-epoch weighted-LSQ free-network (min-norm inner-gauge) shape adjustment from two-way ISL baselines over the ≤5-neighbour graph. Read-only post-processor; no per-asset x/P write path (D1). Sat-sat TWSTFT relative clocks are the gated default-OFF follow-on (W2-2).
+
+**Finding A — per-asset noise must be split (tower-common, rx-independent).** The federated per-asset sims initially shared one `simulation.seed` → identical receiver noise → artificially common-mode absolute errors → the swarm baseline cancelled to sub-mm and ISL looked useless. Verified: a single-asset estimate moves **~6.7 m** when only the measurement seed changes. Fix (user-approved physical split): offset `simulation.seed` per asset so **receiver-side** noise (code/carrier/Doppler thermal + path atmosphere, rooted at `simulation.seed`) is INDEPENDENT, while the **clock TRUTHS** keep their absolute seeds — tower `200+k` stays COMMON (one transmitted signal, reverse-GNSS), sat clock `300+ai` is per-asset. Asset 1 keeps the base seed → golden byte-identical.
+
+**Finding B — ISL sharpens the observable shape ~1000× on physical noise.** With the split, the raw baseline is the physical ~10–15 m; the ISL free-network solve sharpens it to the **~1.3 cm** delay-cal floor:
+
+| N | raw baseline | solved baseline | factor |
+|---|---|---|---|
+| 4 | 14.82 m | 0.0134 m | 1102× |
+| 5 | 9.60 m | 0.0126 m | 764× |
+| 3 (collinear helix) | 2.44 m | 0.0147 m | 166× (weak-flagged) |
+
+**Finding C — the CW projected-circular helix is PLANAR (`z = 2x` in the Hill frame).** Out-of-plane shape displacements affect ranges only to *second order*, so that DOF is weakly observable by construction: `weaklyObservable` fires for **all** N, the in-plane baselines reach cm, and the best-fit-rigid per-point RMS (~1.5–2.5 m) honestly retains the out-of-plane component (the formal σ ≈ 3–4 m reflects it → conservative). A truncated pseudo-inverse (`RANK_TOL`) leaves the weak DOF at the W1 estimate rather than noise-amplifying it (untruncated pinv blew N=3 to 32 m). A genuinely 3-D formation (non-planar truth) would be needed to fully observe out-of-plane shape — a later formation-design choice.
+
+**Gates:** N=1 byte-identical; goldens 184/185 + 190/190 + 185/185 PASS; swarm fingerprint BIT-IDENTICAL (`traceP=50503.7896526557`). G6 rigid-motion-blindness to 1e-10; G8 conservative covariance.
+
+### Remaining
+- **W2-2** gated sat-sat TWSTFT relative clocks (default OFF; requires the sat↔sat transmit premise — use `SwarmTwoWayTimeTransferBuilder`, the sat↔sat dual, NOT `SecondaryTwoWayTimeTransferBuilder` which is tower↔secondary).
+- **W2-3** seed-locked W2 regression digest (`tests/regression/run_swarm_relative_regression.m`) + MC conservative-covariance check.
+- **W3** symmetric analysis/reporting (any asset as reference). **W4** retire the joint-EKF machinery (§5), each step guarded by the N=1 golden.
