@@ -18,6 +18,7 @@ fprintf('  T1: chief block == today''s stateMap indices (exact) ...\n');
 [sm1, x1] = i_state(i_cfg1());
 b = revgnss.AssetStateBlock.forAsset(sm1, 1);
 assert(isequal(b.r, sm1.r_idx),         'T1 FAILED: .r ~= r_idx (value/shape)');
+assert(isequal(b.v, sm1.v_idx),         'T1 FAILED: .v ~= v_idx');
 assert(isequal(b.euler, sm1.euler_idx), 'T1 FAILED: .euler ~= euler_idx');
 assert(isequal(b.b, sm1.b_rx_idx),      'T1 FAILED: .b ~= b_rx_idx');
 assert(isequal(b.bdot, sm1.bdot_rx_idx),'T1 FAILED: .bdot ~= bdot_rx_idx');
@@ -39,6 +40,7 @@ for i = 2:3
     si = i - 1;
     a = revgnss.AssetStateBlock.forAsset(sm2, i);
     assert(isequal(a.r, sm2.secondaryOrbitIdx(si,1:3)'), 'T2 FAILED: secondary .r');
+    assert(isequal(a.v, sm2.secondaryOrbitIdx(si,4:6)'), 'T2 FAILED: secondary .v');
     assert(isequal(a.b, sm2.secondaryClockIdx(si,1)),    'T2 FAILED: secondary .b');
     assert(isequal(a.bdot, sm2.secondaryClockIdx(si,2)), 'T2 FAILED: secondary .bdot');
     assert(isempty(a.euler) && isempty(a.iono) && isempty(a.ambiguity3d), ...

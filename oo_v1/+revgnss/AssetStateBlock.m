@@ -26,12 +26,13 @@ classdef AssetStateBlock
     methods (Static)
         function blk = forAsset(sm, i)
             if nargin < 2; i = 1; end
-            blk = struct('r',[],'euler',[],'b',[],'bdot',[], ...
+            blk = struct('r',[],'v',[],'euler',[],'b',[],'bdot',[], ...
                          'ambiguity3d',[],'ambiguity',[],'zwd',[],'iono',[]);
             if i == 1
                 % Chief block: use the fields AS-IS (exact shape + value) so a substitution
                 % stateMap.r_idx -> blk.r is byte-identical, including result shape.
                 blk.r     = sm.r_idx;
+                blk.v     = sm.v_idx;
                 blk.euler = sm.euler_idx;
                 blk.b     = sm.b_rx_idx;
                 blk.bdot  = sm.bdot_rx_idx;
@@ -46,6 +47,7 @@ classdef AssetStateBlock
             si = i - 1;
             if isfield(sm,'secondaryOrbitIdx') && si <= size(sm.secondaryOrbitIdx,1)
                 blk.r = sm.secondaryOrbitIdx(si,1:3)';
+                blk.v = sm.secondaryOrbitIdx(si,4:6)';
             end
             if isfield(sm,'secondaryClockIdx') && si <= size(sm.secondaryClockIdx,1)
                 blk.b    = sm.secondaryClockIdx(si,1);

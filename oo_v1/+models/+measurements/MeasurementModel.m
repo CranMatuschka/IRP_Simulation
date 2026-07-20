@@ -245,7 +245,7 @@ classdef MeasurementModel < handle
             % ----- Doppler rows (0.5 + 0.6) ----------------------------
             [dopplerRows, dopplerInfo] = models.measurements.DopplerMeasurementBuilder.build( ...
                 obj.cfg, obj.errorChain, asset, towers, twr_list, ant_list, ...
-                r_ants_truth, r_ants_est, x_est, stateMap, towerClkMode, t_s);
+                r_ants_truth, r_ants_est, x_est, stateMap, towerClkMode, t_s, assetIdx);
             errStruct.doppler = dopplerInfo;
             if dopplerRows.ionoRateExclusion
                 H = H_pr;

@@ -13,10 +13,15 @@ classdef DopplerMeasurementBuilder
 
         function [rows, dopplerInfo] = build(cfg, errorChain, asset, towers, ...
                 twr_list, ant_list, r_ants_truth, r_ants_est, x_est, stateMap, ...
-                towerClkMode, t_s)
+                towerClkMode, t_s, assetIdx)
             % build  Construct Doppler measurement rows from a pre-built visibility list.
 
             if nargin < 12 || isempty(t_s); t_s = 0; end
+
+            % Phase 3b-1: per-asset velocity/clock-drift/position indices via AssetStateBlock.
+            % chief (assetIdx=1) aliases the stateMap fields exactly -> byte-identical.
+            if nargin < 13 || isempty(assetIdx); assetIdx = 1; end
+            blk = revgnss.AssetStateBlock.forAsset(stateMap, assetIdx);
 
             M  = numel(twr_list);
             nx = numel(x_est);
@@ -85,9 +90,9 @@ classdef DopplerMeasurementBuilder
             try; includePosPartial = cfg.measurements.doppler.includePositionPartial; catch; end
 
             v_rx_true    = asset.v_ecef_mps;
-            v_rx_est     = x_est(stateMap.v_idx);
+            v_rx_est     = x_est(blk.v);
             bdot_rx_true = asset.clock.getDriftMetersPerSecond();
-            bdot_rx_est  = x_est(stateMap.bdot_rx_idx);
+            bdot_rx_est  = x_est(blk.bdot);
             sigma_dop    = cfg.measurements.doppler.sigma_mps;
 
             zd      = zeros(M,1);
@@ -195,10 +200,10 @@ classdef DopplerMeasurementBuilder
                 % enough that it is negligible, so H is a documented approximation of the
                 % range-rate model h above. Add a d(rhoDot)/dr column here for a non-GEO
                 % regime where the tower-rotation partial matters.
-                Hd(mi, stateMap.v_idx)       = u_e';   % d(rhoDot)/dv
-                Hd(mi, stateMap.bdot_rx_idx) = 1;      % d(rhoDot)/d(bdot_rx)
+                Hd(mi, blk.v)    = u_e';   % d(rhoDot)/dv
+                Hd(mi, blk.bdot) = 1;      % d(rhoDot)/d(bdot_rx)
                 if includePosPartial                    % gated d(rhoDot)/dr (default off)
-                    Hd(mi, stateMap.r_idx) = revgnss.OneWayRangeRateModel.positionPartial( ...
+                    Hd(mi, blk.r) = revgnss.OneWayRangeRateModel.positionPartial( ...
                         r_ants_est(:,ai), v_rx_est, r_twr_e, cfg);
                 end
             end
