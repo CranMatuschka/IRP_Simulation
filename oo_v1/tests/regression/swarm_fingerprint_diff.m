@@ -14,7 +14,8 @@ function [ok, report] = swarm_fingerprint_diff(a, b)
         return;   % shapes differ -> everything else meaningless
     end
 
-    arrFields = {'finalX','finalPdiag','histX','histPdiag','histNIS','histPosErr','secFinalPos'};
+    arrFields = {'finalX','finalPdiag','histX','histPdiag','histNIS','histPosErr', ...
+                 'secFinalPos','secFinalVel','secFinalClock'};
     for k = 1:numel(arrFields)
         f = arrFields{k};
         va = getfield_(a, f); vb = getfield_(b, f);

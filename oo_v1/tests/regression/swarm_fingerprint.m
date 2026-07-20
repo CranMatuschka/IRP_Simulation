@@ -77,11 +77,22 @@ function dg = swarm_fingerprint(varargin)
     dg.sumX     = sum(x);
     dg.finalPos = x(sm.r_idx);
     dg.secFinalPos = [];
+    dg.secFinalVel = [];   % Phase 3b-3: secondary velocity (cols 4:6) -- moved by secondary Doppler
     if isfield(sm, 'secondaryOrbitIdx')
         nSec = size(sm.secondaryOrbitIdx, 1);
         dg.secFinalPos = zeros(3, nSec);
+        dg.secFinalVel = zeros(3, nSec);
         for si = 1:nSec
             dg.secFinalPos(:, si) = x(sm.secondaryOrbitIdx(si, 1:3)');
+            dg.secFinalVel(:, si) = x(sm.secondaryOrbitIdx(si, 4:6)');
+        end
+    end
+    dg.secFinalClock = [];  % Phase 3b-3: secondary clock [bias; drift] -- drift moved by Doppler
+    if isfield(sm, 'secondaryClockIdx')
+        nSecC = size(sm.secondaryClockIdx, 1);
+        dg.secFinalClock = zeros(size(sm.secondaryClockIdx, 2), nSecC);
+        for si = 1:nSecC
+            dg.secFinalClock(:, si) = x(sm.secondaryClockIdx(si, :)');
         end
     end
 
