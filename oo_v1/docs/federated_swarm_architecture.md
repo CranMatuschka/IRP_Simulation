@@ -101,3 +101,20 @@ The clock dual of the shape solve: `SwarmRelativeSolver.solveRelativeClocks_` ru
 
 ### Remaining
 - **W4** retire the joint-EKF machinery (§5 "dies" list), each step guarded by the N=1 golden + the swarm-relative regression. Optionally wire `FederatedSwarmSummary` into the report/viewer.
+
+## 8. W4 staged retirement plan (for a fresh pass)
+
+**Open decision first (design doc §6 Q3):** delete the joint primary-centric EKF outright, OR keep it behind an opt-in `research` flag with federated as the default. Recommend **delete after a one-release deprecation** to stop the maintenance drag; the joint path is always recoverable via git.
+
+**Guard for every step:** the **N=1 golden** stays byte-identical (single-asset — unaffected by joint-path deletion) AND `run_swarm_relative_regression` stays PASS. NB the **joint** `run_swarm_fingerprint` tests the very path being deleted, so it is expected to change and is **retired in the last step** — do not try to preserve it once deletion starts.
+
+Suggested order (each a small, independently-gated commit):
+1. **Make federated the default swarm entry** + gate the joint multi-asset EKF behind `cfg.multiAsset.jointEkf.enable` (default false). Verify N=1 golden + swarm-relative regression; joint fingerprint still passes (path intact, just gated).
+2. **Remove the Phase-4 parity treadmill** — the P4-0.1 secondary attitude/multiAntenna state-map scaffold (`secondaryEulerIdx`/`secondaryOmegaIdx` + count gates) that estimates against no independent signal.
+3. **Remove `computeSecondaryGroundRows` + `SecondaryMeasurementProfile` + `SecondaryUplinkAtmosphere`** (the reduced-secondary measurement path).
+4. **Remove the `secondaryXxxIdx` state blocks** + their F/Q/init/view replicas + the 7 `secondaryXxxCount` gates from `ReverseGNSSEKF`/`ScenarioFactory`.
+5. **Remove `AssetStateBlock`'s secondary branch** + the `assetIdx` threading through the 5 chief builders (never called at `≥2`).
+6. **Remove `cloneAsset_` reductions + the `estimated` force-clear** dual-track in `MultiAssetConfig`.
+7. **Retire the joint `swarm_fingerprint`** (its path is now gone); `run_swarm_relative_regression` is the swarm gate. Delete the gated joint EKF itself if the §6-Q3 decision is "delete".
+
+Each step should shrink the code with zero change to the N=1 golden and the federated regression — the byte-identity net proves the joint machinery was dead weight under the federated design.
