@@ -93,6 +93,11 @@ Empirically, running each asset with **no** joint coupling gives every asset ~24
 ### W2-2 relative clocks — DONE (commit `d6058cf`)
 The clock dual of the shape solve: `SwarmRelativeSolver.solveRelativeClocks_` runs a free-network min-norm solve over sat-sat TWSTFT clock-difference observations (`+1/−1` rows) on the same neighbour graph. Read-only (D1); the 1-D null space is the common (mean) clock (unobservable by TWSTFT → left at the W1 mean; all metrics are gauge-invariant clock differences). **Gated default-OFF** on `cfg.multiAsset.twoWayTimeTransferISL.enable` (needs the sat↔sat transmit premise, beyond plain reverse-GNSS uplink). `FederatedSwarmRunner.runOne_` persists each asset's per-epoch TOTAL truth clock (`res.truthClkTraj_m`, from the `ClockModel` history). **Result:** with the gate ON the swarm relative clock sharpens **33.26 m (110.9 ns) → 2.18 cm (0.073 ns)** — ~1526× at the ~100 ps floor; conservative (0.022 ≤ formal σ 0.037); shape identical gate on/off (`d=0`). Byte-identity: N=1 `max|dx|=0`, goldens + swarm fingerprint bit-identical.
 
+### W2-3 regression guard — DONE (commit `10f343f`)
+`tests/regression/run_swarm_relative_regression.m` — the relative-layer twin of `run_swarm_fingerprint`. Canonical federated N=4 / 300 s with the TWSTFT gate ON; digests shape + relative-clock scalars, per-epoch series, and a W1 anchor (each asset's final position + clock). Bit-reproducible (capture + check `max|Δ|=0`); baseline in `golden/swarm_relative_baseline.mat`.
+
+### W3 symmetric analysis — DONE (commit `cede4a7`)
+`revgnss.FederatedSwarmSummary.build(cfg, results, rel, refAsset)` + `.print(out)` — a symmetric per-satellite summary: each asset's OWN absolute err/σ from its OWN EKF, plus the formation shape / relative clock from the relative layer. **No privileged node** — `refAsset` (any asset) only reframes the relative-position column; the absolute + formation metrics are invariant to it (verified `d=0` for ref 1 vs 3). Consume-only → byte-identical by construction. N=4: per-asset absolute 15–36 m (wall-limited, err/σ 0.4–1.0), ISL-solved shape 4.3 cm, TWSTFT relative clock 78 ps.
+
 ### Remaining
-- **W2-3** seed-locked W2 regression digest (`tests/regression/run_swarm_relative_regression.m`) + MC conservative-covariance check.
-- **W3** symmetric analysis/reporting (any asset as reference). **W4** retire the joint-EKF machinery (§5), each step guarded by the N=1 golden.
+- **W4** retire the joint-EKF machinery (§5 "dies" list), each step guarded by the N=1 golden + the swarm-relative regression. Optionally wire `FederatedSwarmSummary` into the report/viewer.
