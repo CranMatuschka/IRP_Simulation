@@ -343,6 +343,156 @@ classdef MeasurementModel < handle
                 obj.cfg, asset, towers, x_state, errStruct, stateMap, t_s);
         end
 
+        % ----------------------------------------------------------------
+        function [zAdd, hAdd, HAdd, RAdd, info] = computeSecondaryGroundRows(obj, ...
+                assets, towers, x, stateMap, nx, t_s)
+            % computeSecondaryGroundRows  Tower->secondary ground pseudorange + carrier rows.
+            %
+            % Phase 3b-2: folds revgnss.SecondaryGroundMeasurementBuilder into the shared
+            % measurement class -- reproducing its rows EXACTLY, but sourcing per-asset state
+            % indices via revgnss.AssetStateBlock, per-asset behaviour via
+            % models.measurements.SecondaryMeasurementProfile, and Guard-A atmosphere via
+            % models.atmosphere.SecondaryUplinkAtmosphere. Reverse-GNSS (tower TRANSMITS, secondary
+            % RECEIVES) -> H(b_tx)=+1; NO primary-state columns (empty at nSpaceAssets=1). Emits
+            % [all secondary CODE rows] then [all secondary CARRIER rows] (grouped, not interleaved
+            % -- the batch update S=HPH'+R is not row-order-invariant). Bit-identical to the retired
+            % builder (parallel-diff gated in runEstimation_, §15 C3).
+            if nargin < 7; t_s = 0; end
+            ec = obj.errorChain;
+            g  = @(pth, d) models.measurements.MeasurementModel.secGetNum_(obj.cfg, pth, d);
+            gb = @(pth)    models.measurements.MeasurementModel.secGetBool_(obj.cfg, pth, false);
+
+            info = struct('enabled', false, 'nRows', 0, 'rowAsset', [], 'rowTower', [], 'prefitRms', NaN);
+            zAdd = []; hAdd = []; HAdd = zeros(0, nx); RAdd = zeros(0, 0);
+
+            % Gate: WP5 on AND WP3 secondary-clock states present (mirrors the retired builder).
+            nSec = revgnss.MultiAssetConfig.groundSecondaryRowCount(obj.cfg);
+            if nSec < 1 || ~isfield(stateMap, 'secondaryClockIdx') || isempty(stateMap.secondaryClockIdx)
+                return;
+            end
+            info.enabled = true;
+
+            elevMask = g({'estimator','elevationMask_rad'}, 5*pi/180);
+            dt       = g({'simulation','dt_s'}, 1);
+            epochIdx = 0; if dt > 0; epochIdx = round(t_s / dt); end
+            elvFloor = revgnss.Constants.ELEVATION_FLOOR_RAD;
+
+            % Guard-A atmosphere detail params (mode chosen by the profile per asset below).
+            aTropZen = g({'multiAsset','towerSecondary','atmosphere','sigmaTropZen_m'}, 0.05);
+            aIonoZen = g({'multiAsset','towerSecondary','atmosphere','sigmaIonoZen_m'}, 0.20);
+            aTauTrop = g({'multiAsset','towerSecondary','atmosphere','tauTrop_s'}, 1800);
+            aTauIono = g({'multiAsset','towerSecondary','atmosphere','tauIono_s'}, 600);
+            aShellH  = g({'multiAsset','towerSecondary','atmosphere','ionoShellHeight_m'}, 350e3);
+            aNCap    = g({'multiAsset','towerSecondary','atmosphere','nCorrCap'}, 60);
+            aChargeR = gb({'multiAsset','towerSecondary','atmosphere','chargeR'});
+
+            carrierOn = revgnss.MultiAssetConfig.secondaryCarrierCount(obj.cfg) > 0;
+
+            nAssets = numel(assets);
+            rowAsset = []; rowTower = [];
+            % Carrier rows collected separately, appended AFTER all code rows (pre-merge order).
+            zCar = []; hCar = []; HCar = zeros(0, nx); RCar = zeros(0,0); carAsset = []; carTower = [];
+            for ai = 2:nAssets
+                si = ai - 1;
+                if si > size(stateMap.secondaryClockIdx, 1); continue; end
+                blk = revgnss.AssetStateBlock.forAsset(stateMap, ai);
+                bTxIdx = blk.b;
+                if isempty(bTxIdx) || bTxIdx <= 0; continue; end
+
+                p        = models.measurements.SecondaryMeasurementProfile.forAsset(obj.cfg, ai);
+                sigma    = p.code.flatSigma_m;
+                nCorr    = max(1, p.rPad.nCorr);
+                twClkSig = p.rPad.towerClkSigma_m;
+                Rprod    = nCorr * (p.rPad.productSigmaPos_m^2 + twClkSig^2);
+                atmoOn   = strcmp(p.atmosphereMode, 'guardAUplink');
+                sigmaCarr = p.carrier.sigma_m; ambStd = p.carrier.ambStd_m; lambda = p.carrier.lambda_m;
+                Rtwr     = nCorr * twClkSig^2;
+
+                sec       = assets{ai};
+                rSecTruth = sec.getAntennaPositionECEF();
+                orbPosIdx = blk.r;    % [3x1] estimated-position indices (position mode), or [] (clocks mode)
+                if ~isempty(orbPosIdx)
+                    rSecModel = x(orbPosIdx); rSecModel = rSecModel(:);
+                    RprodRow  = sigma^2;
+                else
+                    pb        = revgnss.ISLMeasurementBuilder.productBiasForAsset(obj.cfg, ai, t_s);
+                    rSecModel = rSecTruth + pb.pos;
+                    RprodRow  = sigma^2 + Rprod;
+                end
+                bTxTruth = sec.clock.getBiasMeters();
+
+                for ti = 1:numel(towers)
+                    elev = towers{ti}.computeElevationTo(rSecTruth);
+                    if ~(elev >= elevMask); continue; end
+                    rTwrT = models.measurements.MeasurementModelUtils.towerPositionEcef(obj.cfg, towers{ti}, ti, 'truth', t_s);
+                    rTwrM = models.measurements.MeasurementModelUtils.towerPositionEcef(obj.cfg, towers{ti}, ti, 'model');
+                    [rhoT, ~] = models.corrections.RangeCorrections.correctedPseudorange(rSecTruth, rTwrT, obj.cfg, 'truth', elev, t_s);
+                    [rhoM, ~] = models.corrections.RangeCorrections.correctedPseudorange(rSecModel, rTwrM, obj.cfg, 'model', elev, t_s);
+                    bTwr = towers{ti}.getClockBiasMeters();                % matched tower clock (mean)
+                    node = ti*32 + ai;                                     % packed into the mod-65536 node field
+                    nz   = sigma * ec.drawKeyed(p.code.source, node, 0, 1, epochIdx, 1, 1);
+                    dAtmo = 0; Ratmo = 0;
+                    if atmoOn && dt > 0
+                        [dAtmo, Ratmo] = models.atmosphere.SecondaryUplinkAtmosphere.losUplink( ...
+                            ec, ti, elev, t_s, dt, elvFloor, aTropZen, aIonoZen, aTauTrop, aTauIono, aShellH, aNCap, aChargeR);
+                    end
+                    z = rhoT + bTxTruth  - bTwr + nz + dAtmo;
+                    h = rhoM + x(bTxIdx) - bTwr;
+                    Rii = RprodRow + Ratmo;
+                    row = zeros(1, nx); row(bTxIdx) = 1;                   % receiver clock -> +1
+                    if ~isempty(orbPosIdx)
+                        d = rSecModel - rTwrM; nd = norm(d); if nd < 1; nd = 1; end
+                        row(orbPosIdx) = (d / nd)';                        % dh/dr_sec = +u_ts'
+                    end
+                    if ~isempty(blk.zwd) && ti <= numel(blk.zwd)
+                        zwdIdx = blk.zwd(ti);
+                        if zwdIdx > 0
+                            m_w = 1 / max(sin(elev), sin(elvFloor));
+                            h = h + m_w * x(zwdIdx);
+                            row(zwdIdx) = m_w;
+                        end
+                    end
+                    zAdd(end+1,1) = z;      %#ok<AGROW>
+                    hAdd(end+1,1) = h;      %#ok<AGROW>
+                    HAdd(end+1,:) = row;    %#ok<AGROW>
+                    RAdd = blkdiag(RAdd, Rii);
+                    rowAsset(end+1) = ai;   %#ok<AGROW>
+                    rowTower(end+1) = ti;   %#ok<AGROW>
+
+                    if carrierOn && ~isempty(orbPosIdx) && ~isempty(blk.ambiguity) && ti <= numel(blk.ambiguity)
+                        ambIdx = blk.ambiguity(ti);
+                        if ambIdx > 0
+                            nCyc  = round((ambStd / lambda) * ec.drawKeyedInterval(p.carrier.ambSource, node, 0, 0, 0));
+                            Btrue = nCyc * lambda;
+                            nzc   = sigmaCarr * ec.drawKeyed(p.carrier.phaseSource, node, 0, 1, epochIdx, 1, 1);
+                            rowc = zeros(1, nx);
+                            rowc(orbPosIdx) = row(orbPosIdx);
+                            rowc(bTxIdx)    = 1;
+                            rowc(ambIdx)    = 1;
+                            zCar(end+1,1) = rhoT + bTxTruth  - bTwr + Btrue + nzc; %#ok<AGROW>
+                            hCar(end+1,1) = rhoM + x(bTxIdx) - bTwr + x(ambIdx);   %#ok<AGROW>
+                            HCar(end+1,:) = rowc;                                  %#ok<AGROW>
+                            RCar = blkdiag(RCar, sigmaCarr^2 + Rtwr);
+                            carAsset(end+1) = ai;   %#ok<AGROW>
+                            carTower(end+1) = ti;   %#ok<AGROW>
+                        end
+                    end
+                end
+            end
+            if ~isempty(zCar)
+                zAdd = [zAdd; zCar];
+                hAdd = [hAdd; hCar];
+                HAdd = [HAdd; HCar];
+                RAdd = blkdiag(RAdd, RCar);
+                rowAsset = [rowAsset, carAsset];
+                rowTower = [rowTower, carTower];
+            end
+            info.nRows    = numel(zAdd);
+            info.rowAsset = rowAsset;
+            info.rowTower = rowTower;
+            if info.nRows > 0; info.prefitRms = sqrt(mean((zAdd - hAdd).^2)); end
+        end
+
     end  % public methods
 
     methods (Static)
@@ -374,6 +524,25 @@ classdef MeasurementModel < handle
         function [z_out, R_out, noiseComp] = correlatedNoise(cfg, rngCorr, z_in, R_diag, twr_list, M)
             [z_out, R_out, noiseComp] = models.measurements.MeasurementModelUtils.correlatedNoise( ...
                 cfg, rngCorr, z_in, R_diag, twr_list, M);
+        end
+
+        function v = secGetNum_(cfg, path, dflt)
+            % Safe nested numeric-scalar cfg read (copy of the retired builder's getNum_) for the
+            % tower->secondary rows. Returns dflt if any level is missing or the value is not scalar.
+            v = cfg;
+            for k = 1:numel(path)
+                if isstruct(v) && isfield(v, path{k}); v = v.(path{k}); else; v = dflt; return; end
+            end
+            if ~(isnumeric(v) && isscalar(v)); v = dflt; end
+        end
+
+        function tf = secGetBool_(cfg, path, dflt)
+            % Safe nested logical-scalar cfg read (copy of the retired builder's getBool_).
+            v = cfg;
+            for k = 1:numel(path)
+                if isstruct(v) && isfield(v, path{k}); v = v.(path{k}); else; tf = dflt; return; end
+            end
+            tf = islogical(v) && isscalar(v) && v;
         end
 
     end  % static methods

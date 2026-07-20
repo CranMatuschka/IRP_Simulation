@@ -446,6 +446,14 @@ classdef ReverseGNSSSimulation < handle
             % carries them; no separate builder call.
             errStruct.secondaryGround = gsInfo;
 
+            % Phase 3b-2 C3 (parallel diff, REMOVED at C5): compute the new profile-driven
+            % secondary rows via the shared MeasurementModel and assert bit-identical to the
+            % retired builder BEFORE the EKF is flipped onto them (C4). The EKF still consumes the
+            % OLD rows (z_gs) here. The secondary draws are identity-keyed (pure functions of the
+            % key), so recomputing them does NOT perturb the old realization. Empty (no-op) at
+            % nSpaceAssets=1 -> golden-safe.
+            obj.assertSecondaryRowsMatchRetired_(z_gs, h_gs, H_gs, R_gs, t_s);
+
             % P2': all-pairs two-way ISL (clock-free baseline lengths). Fuses with the one-way
             % ISL + ground rows; empty (byte-identical) at nSpaceAssets=1 / when disabled.
             [z_sw, h_sw, H_sw, R_sw, swInfo] = revgnss.SwarmTwoWayISLBuilder.build( ...
@@ -728,6 +736,31 @@ classdef ReverseGNSSSimulation < handle
     end
 
     methods (Access = private)
+        % ----------------------------------------------------------------
+        function assertSecondaryRowsMatchRetired_(obj, z_old, h_old, H_old, R_old, t_s)
+            % Phase 3b-2 C3 parallel-diff (REMOVED at C5): recompute the tower->secondary rows via
+            % the shared MeasurementModel.computeSecondaryGroundRows and assert them BIT-IDENTICAL
+            % to the retired revgnss.SecondaryGroundMeasurementBuilder output. The EKF consumes the
+            % OLD rows; this only proves equivalence before the C4 flip. Identity-keyed draws ->
+            % recomputation does not perturb any stream. No-op (both empty) at nSpaceAssets=1.
+            [z_new, h_new, H_new, R_new] = obj.measModel.computeSecondaryGroundRows( ...
+                obj.assets, obj.towers, obj.ekf.x, obj.ekf.stateMap, obj.ekf.nx, t_s);
+            if ~(isequal(size(z_new), size(z_old)) && isequal(size(h_new), size(h_old)) && ...
+                    isequal(size(H_new), size(H_old)) && isequal(size(R_new), size(R_old)))
+                error('revgnss:secondaryRowParallelDiff', ...
+                    ['C3 secondary-row SHAPE mismatch at t=%.1fs: ', ...
+                     'z[%s vs %s] h[%s vs %s] H[%s vs %s] R[%s vs %s].'], t_s, ...
+                    mat2str(size(z_new)), mat2str(size(z_old)), mat2str(size(h_new)), mat2str(size(h_old)), ...
+                    mat2str(size(H_new)), mat2str(size(H_old)), mat2str(size(R_new)), mat2str(size(R_old)));
+            end
+            dm = @(a, b) max([0; abs(a(:) - b(:))]);
+            dd = max([dm(z_new, z_old), dm(h_new, h_old), dm(H_new, H_old), dm(R_new, R_old)]);
+            if dd > 0
+                error('revgnss:secondaryRowParallelDiff', ...
+                    'C3 secondary-row VALUE mismatch at t=%.1fs: max|d|=%.6e (z/h/H/R).', t_s, dd);
+            end
+        end
+
         % ----------------------------------------------------------------
         function postfit = computePostfitResiduals_(obj, z, ~, errStruct, t_s)
             % computePostfitResiduals_  Recompute h with updated EKF state.
