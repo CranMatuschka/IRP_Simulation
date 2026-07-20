@@ -199,7 +199,7 @@ classdef MeasurementModel < handle
             % ----- Jacobian H (pseudorange) ----------------------------
             H_pr = models.measurements.CodeJacobianBuilder.build( ...
                 obj.cfg, obj.attitudeJacStep_rad, towers, twr_list, ant_list, ...
-                r_est, euler_est, leverArms_model, x_est, stateMap, nx);
+                r_est, euler_est, leverArms_model, x_est, stateMap, nx, assetIdx);
 
             % ZWD Jacobian columns (perTowerZwd): H(mi, zwdIdx(ti)) = mf(elv)
             if isfield(stateMap,'zwdIdx') && ~isempty(blk.zwd)

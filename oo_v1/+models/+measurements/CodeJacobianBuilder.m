@@ -7,7 +7,7 @@ classdef CodeJacobianBuilder
     methods (Static)
 
         function H = build(cfg, attitudeJacStep_rad, towers, twr_list, ant_list, ...
-                r_cm_est, euler_est, leverArms_model, x_est, stateMap, nx)
+                r_cm_est, euler_est, leverArms_model, x_est, stateMap, nx, assetIdx)
             % build  Measurement Jacobian (analytic or finite-difference).
             %
             % If any model-side correction is on (Sagnac, Shapiro, PCV, PCO)
@@ -22,6 +22,11 @@ classdef CodeJacobianBuilder
 
             M = numel(twr_list);
             H = zeros(M, nx);
+
+            % Phase 3b-1: per-asset H columns via AssetStateBlock (chief=1 aliases stateMap
+            % exactly -> byte-identical). Tower-level indices stay on stateMap.
+            if nargin < 12 || isempty(assetIdx); assetIdx = 1; end
+            blk = revgnss.AssetStateBlock.forAsset(stateMap, assetIdx);
 
             doFD   = models.measurements.MeasurementModelUtils.needsFiniteDiffH_(cfg);
             step_e = attitudeJacStep_rad;
@@ -46,21 +51,21 @@ classdef CodeJacobianBuilder
 
                 % Position Jacobian (FD accounts for all corrections; analytic for clean geometry)
                 if doFD
-                    H(mi, stateMap.r_idx) = revgnss.LinkGeometry.finiteDiffPositionJacobian( ...
+                    H(mi, blk.r) = revgnss.LinkGeometry.finiteDiffPositionJacobian( ...
                         cfg, towers, ti, ai, r_cm_est, euler_est, leverArms_model, 1.0);
                 else
-                    H(mi, stateMap.r_idx) = g.losRow;
+                    H(mi, blk.r) = g.losRow;
                 end
 
                 % Attitude FD (gated by config + non-zero lever)
                 attGate = revgnss.LinkGeometry.shouldUseAttitudePartials(cfg, 'code');
                 if attGate.enabled && leverNorm > 1e-9
-                    H(mi, stateMap.euler_idx) = revgnss.LinkGeometry.finiteDiffAttitudeJacobian( ...
+                    H(mi, blk.euler) = revgnss.LinkGeometry.finiteDiffAttitudeJacobian( ...
                         cfg, towers, ti, ai, r_cm_est, euler_est, leverArms_model, step_e);
                 end
 
                 % Receiver clock: +1 (analytic, independent of corrections)
-                H(mi, stateMap.b_rx_idx) = 1;
+                H(mi, blk.b) = 1;
 
                 % Tower clock state: -1 if estimated
                 if isfield(stateMap,'towerClockIdx') && ...
@@ -78,10 +83,10 @@ classdef CodeJacobianBuilder
 
                 % ZWD Jacobian: H(mi, zwdIdx) = mapping_factor (same sign as code)
                 if isfield(stateMap,'zwdIdx') && ...
-                        ti <= numel(stateMap.zwdIdx) && stateMap.zwdIdx(ti) > 0
+                        ti <= numel(blk.zwd) && blk.zwd(ti) > 0
                     mf_z = models.atmosphere.MappingFunctions.troposphere(g.elevation_rad, ...
                         models.measurements.MeasurementModelUtils.zwdMappingKind(cfg));
-                    H(mi, stateMap.zwdIdx(ti)) = mf_z;
+                    H(mi, blk.zwd(ti)) = mf_z;
                 end
             end
         end
