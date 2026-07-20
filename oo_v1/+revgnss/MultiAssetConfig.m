@@ -242,44 +242,6 @@ classdef MultiAssetConfig
             nSec = revgnss.MultiAssetConfig.secondaryOrbitCount(cfg);
         end
 
-        function nSec = secondaryMultiAntennaCount(cfg)
-            % secondaryMultiAntennaCount  Phase-4 Axis-B gate: number of secondaries that carry the
-            % chief's multi-antenna carrier stack (per-(secondary,tower,antenna) float-ambiguity 3-D
-            % block). Requires the secondary carrier rows (position + towersObserveSecondaries +
-            % carrier.enable) AND the multiAntenna toggle. Returns 0 otherwise -> byte-identical when
-            % off / single-asset (empty ambiguity3d block).
-            nSec = 0;
-            if ~revgnss.MultiAssetConfig.cfgBool_(cfg, {'multiAsset','towerSecondary','multiAntenna','enable'}, false)
-                return;
-            end
-            nSec = revgnss.MultiAssetConfig.secondaryCarrierCount(cfg);
-        end
-
-        function nSec = secondaryAttitudeCount(cfg)
-            % secondaryAttitudeCount  Phase-4 Axis-A gate: number of secondaries whose attitude
-            % [euler(3), omega(3)] is EKF-estimated. HONEST observability prerequisite: attitude is
-            % UNOBSERVABLE without a non-zero inter-antenna baseline, so it is refused unless
-            % multiAntenna is on (mirrors the secondaryOrbitCount "never allocate a block without an
-            % observable touching it" discipline). Requires an estimated orbit block too. Returns 0
-            % otherwise -> byte-identical when off / single-asset (empty euler/omega blocks).
-            nSec = 0;
-            if ~revgnss.MultiAssetConfig.cfgBool_(cfg, {'multiAsset','towerSecondary','attitude','enable'}, false)
-                return;
-            end
-            if revgnss.MultiAssetConfig.secondaryMultiAntennaCount(cfg) < 1
-                return;   % no antenna baseline -> attitude unobservable -> refuse to allocate
-            end
-            nSec = revgnss.MultiAssetConfig.secondaryOrbitCount(cfg);
-        end
-
-        function n = secondaryAntennaCount(cfg)
-            % secondaryAntennaCount  Antennas per secondary when multiAntenna is on (else 1).
-            n = 1;
-            if revgnss.MultiAssetConfig.secondaryMultiAntennaCount(cfg) >= 1
-                n = max(1, round(revgnss.MultiAssetConfig.cfgNum_(cfg, {'multiAsset','towerSecondary','multiAntenna','nAntennas'}, 1)));
-            end
-        end
-
         function nSec = groundSecondaryRowCount(cfg)
             % groundSecondaryRowCount  WP5 gate. Returns the number of secondaries whose
             % clock is observed by ground-tower rows (== secondaryClockCount) when

@@ -114,16 +114,6 @@ classdef ReverseGNSSEKF < handle
         secondaryZwdTau_     (1,1) double  = 1800   % Gauss-Markov correlation time [s]
         secondaryZwdSigmaSs_ (1,1) double  = 0.05   % steady-state zenith wet 1-sigma [m]
 
-        % Phase-4 per-secondary ATTITUDE states [euler(3), omega(3)]. Appended after the ZWD block,
-        % before srpScale (which stays strictly LAST). Off => nx/state-map identical (golden-safe,
-        % empty sentinels). Gated by MultiAssetConfig.secondaryAttitudeCount (refused without a
-        % multi-antenna baseline -> unobservable). The multi-antenna carrier block (ambiguity3d) is
-        % added in Phase-4 Axis B alongside the antenna loop.
-        estimateSecondaryAttitude (1,1) logical = false
-        nSecondaryAttitudeAssets  (1,1) double  = 0     % secondaries with [euler,omega] states
-        secondaryAttInitEuler_    (1,1) double  = 0.05  % attitude prior 1-sigma [rad]
-        secondaryAttInitOmega_    (1,1) double  = 1e-4  % angular-rate prior 1-sigma [rad/s]
-
         % SRP scale-coefficient state (primary only, single scalar): a dimensionless
         % multiplier s on the reference SRP acceleration (Cr=s*refCr), observed via
         % trajectory bending. Appended LAST => nx/state-map identical to today when off
@@ -257,16 +247,6 @@ classdef ReverseGNSSEKF < handle
                 try; obj.secondaryZwdSigmaSs_ = cfg.multiAsset.towerSecondary.zwd.sigma_ss_m; catch; end
             end
 
-            % Phase-4 per-secondary attitude gate. secondaryAttitudeCount>0 only for position mode +
-            % towersObserveSecondaries + multiAntenna + attitude.enable -> golden/off force it 0.
-            nSecAtt_ = revgnss.MultiAssetConfig.secondaryAttitudeCount(cfg);
-            obj.estimateSecondaryAttitude = nSecAtt_ > 0;
-            obj.nSecondaryAttitudeAssets  = nSecAtt_;
-            if obj.estimateSecondaryAttitude
-                try; obj.secondaryAttInitEuler_ = cfg.multiAsset.towerSecondary.attitude.initSigma_euler_rad;   catch; end
-                try; obj.secondaryAttInitOmega_ = cfg.multiAsset.towerSecondary.attitude.initSigma_omega_radps; catch; end
-            end
-
             % SRP scale-coefficient gate (primary). enable && useInEKF, both default off.
             if isfield(cfg,'estimator') && isfield(cfg.estimator,'srpCoefficient')
                 sc = cfg.estimator.srpCoefficient;
@@ -306,9 +286,6 @@ classdef ReverseGNSSEKF < handle
             end
             if obj.estimateSecondaryZwd
                 obj.nx = obj.nx + obj.nSecondaryZwdAssets * nTowers;   % one ZWD per (secondary, tower)
-            end
-            if obj.estimateSecondaryAttitude
-                obj.nx = obj.nx + 6 * obj.nSecondaryAttitudeAssets;    % [euler(3), omega(3)] per secondary
             end
             if obj.estimateSrpScale
                 obj.nx = obj.nx + 1;   % single scalar, appended strictly LAST
@@ -991,24 +968,6 @@ classdef ReverseGNSSEKF < handle
                 sm.secondaryZwdIdx = zwdIdx;
             else
                 sm.secondaryZwdIdx = zeros(0, nTowers);
-            end
-
-            % Phase-4 per-secondary ATTITUDE states [euler(3), omega(3)] per secondary, appended
-            % after the ZWD block. secondaryEulerIdx(si,:)/secondaryOmegaIdx(si,:) are the 3 state
-            % indices for secondary si+1. Empty zeros(0,3) when off -> byte-identical map. (The
-            % multi-antenna carrier ambiguity3d block, Axis B, is inserted here too, before srpScale.)
-            if obj.estimateSecondaryAttitude && obj.nSecondaryAttitudeAssets > 0
-                eulIdx = zeros(obj.nSecondaryAttitudeAssets, 3);
-                omgIdx = zeros(obj.nSecondaryAttitudeAssets, 3);
-                for si = 1:obj.nSecondaryAttitudeAssets
-                    eulIdx(si,:) = nextIdx:(nextIdx + 2);  nextIdx = nextIdx + 3;
-                    omgIdx(si,:) = nextIdx:(nextIdx + 2);  nextIdx = nextIdx + 3;
-                end
-                sm.secondaryEulerIdx = eulIdx;
-                sm.secondaryOmegaIdx = omgIdx;
-            else
-                sm.secondaryEulerIdx = zeros(0, 3);
-                sm.secondaryOmegaIdx = zeros(0, 3);
             end
 
             % SRP scale-coefficient state (single scalar, appended strictly LAST). Empty []
