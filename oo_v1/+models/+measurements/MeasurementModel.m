@@ -409,7 +409,8 @@ classdef MeasurementModel < handle
                 if isempty(bTxIdx) || bTxIdx <= 0; continue; end
 
                 p        = models.measurements.SecondaryMeasurementProfile.forAsset(obj.cfg, ai);
-                sigma    = p.code.flatSigma_m;
+                floorSigma = p.code.flatSigma_m;                          % flat sigma AND the 'chiefFloored' floor
+                chiefFloored = strcmp(p.code.sigmaModel, 'chiefFloored'); % Phase 3b-3 Axis 1
                 nCorr    = max(1, p.rPad.nCorr);
                 twClkSig = p.rPad.towerClkSigma_m;
                 Rprod    = nCorr * (p.rPad.productSigmaPos_m^2 + twClkSig^2);
@@ -422,11 +423,11 @@ classdef MeasurementModel < handle
                 orbPosIdx = blk.r;    % [3x1] estimated-position indices (position mode), or [] (clocks mode)
                 if ~isempty(orbPosIdx)
                     rSecModel = x(orbPosIdx); rSecModel = rSecModel(:);
-                    RprodRow  = sigma^2;
+                    codePad   = 0;
                 else
                     pb        = revgnss.ISLMeasurementBuilder.productBiasForAsset(obj.cfg, ai, t_s);
                     rSecModel = rSecTruth + pb.pos;
-                    RprodRow  = sigma^2 + Rprod;
+                    codePad   = Rprod;   % clocks-mode product-ephemeris variance pad
                 end
                 bTxTruth = sec.clock.getBiasMeters();
 
@@ -450,7 +451,17 @@ classdef MeasurementModel < handle
                     [rhoM, ~] = models.corrections.RangeCorrections.correctedPseudorange(rSecModel, rTwrM, obj.cfg, 'model', elev, t_s);
                     bTwr = towers{ti}.getClockBiasMeters();                % matched tower clock (mean)
                     node = ti*32 + ai;                                     % packed into the mod-65536 node field
-                    nz   = sigma * ec.drawKeyed(p.code.source, node, 0, 1, epochIdx, 1, 1);
+                    % Phase 3b-3 Axis 1: per-row code sigma. 'chiefFloored' = the chief's elevation/
+                    % C-N0 code model floored at the flat 1.0 m -> honest elevation shaping but R never
+                    % drops below today (max(x,floor) >= floor => R_new >= R_old). Byte-identical to
+                    % 'flat' under the default 'constant' code model (codeSignalSigma=0.30 -> floored
+                    % to 1.0). Elevation is the per-tower truth elevation.
+                    sigmaCode = floorSigma;
+                    if chiefFloored
+                        sigmaCode = max(models.measurements.MeasurementModelUtils.codeSignalSigma( ...
+                            obj.cfg.signals.L1, elev, obj.cfg), floorSigma);
+                    end
+                    nz   = sigmaCode * ec.drawKeyed(p.code.source, node, 0, 1, epochIdx, 1, 1);
                     dAtmo = 0; Ratmo = 0;
                     if atmoOn && dt > 0
                         [dAtmo, Ratmo] = models.atmosphere.SecondaryUplinkAtmosphere.losUplink( ...
@@ -458,7 +469,7 @@ classdef MeasurementModel < handle
                     end
                     z = rhoT + bTxTruth  - bTwr + nz + dAtmo;
                     h = rhoM + x(bTxIdx) - bTwr;
-                    Rii = RprodRow + Ratmo;
+                    Rii = sigmaCode^2 + codePad + Ratmo;
                     row = zeros(1, nx); row(bTxIdx) = 1;                   % receiver clock -> +1
                     if ~isempty(orbPosIdx)
                         d = rSecModel - rTwrM; nd = norm(d); if nd < 1; nd = 1; end

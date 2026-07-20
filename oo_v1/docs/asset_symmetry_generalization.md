@@ -252,3 +252,20 @@ the range-rate IS velocity-dominated and Doppler genuinely adds information. Rec
 reconfirmed: measurement richness does not beat the geometric wall. Ships gated default-OFF → golden
 184/190/185 + swarm fingerprint `|d|=0` (no re-baseline). `test_secondary_doppler` proves the rows
 are structurally honest (H shape, R_new ⊇ R_old, R = sigma_dop^2 + nCorr·towerClkDriftSigma^2).
+
+### 16.2 Axis 1 (code sigma) — RESULT: floored elevation shaping, default ON, byte-identical by default (commit 3b-3.2)
+`cfg.multiAsset.towerSecondary.code.sigmaModel='chiefFloored'` (default). Per tower-row code sigma =
+`max(MeasurementModelUtils.codeSignalSigma(L1, el, cfg), code.sigma_m)`, reusing the chief's code-noise
+model with the 1.0 m flat value as a hard floor. `R_new >= R_old` everywhere (algebraic `max(x,f) >= f`;
+proved for el in [5,90] in `test_secondary_measurement_profile` T4). Under the DEFAULT `'constant'`
+code model `codeSignalSigma = codeSigma0_m = 0.30 -> floored to 1.0` = the old flat value, so the swarm
+is **byte-identical** (golden 184/190/185 + swarm fingerprint `|d|=0`, no re-baseline). The elevation
+shaping only activates under a realism-grade code model (`'elevation'`/`'cn0'`), where it inflates
+low-elevation R above 1.0 (honest + more conservative). Clean conservative win; default ON. 8/8 tests PASS.
+
+### 16.3 Phase 3b-3 status
+Done: 3b-3.0 (fingerprint schema), 3b-3.1 (Doppler, honest GEO negative -> default OFF), 3b-3.2 (floored
+code sigma, default ON). Not done (per §16 verdicts): Axis 2 tower clock (SKIP -- weakens conservatism
+7-22x + cross-asset double-count), Axis 3 atmosphere truth-only (available to do; deferred), Axis 5
+draw-key consolidation (SKIP). Phase 4 (per-secondary attitude / multi-antenna / dual-frequency) remains
+out of scope.

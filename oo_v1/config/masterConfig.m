@@ -856,7 +856,14 @@ cfg.multiAsset.secondaryOrbit.initSigmaVel_mps   = 0.1;     % [m/s] per axis
 % degeneracy (b_tx near-degenerate with the primary radial through the ~horizontal
 % ISL LOS). No primary-state columns, so golden-safe when off / nSpaceAssets=1.
 cfg.multiAsset.towersObserveSecondaries          = false;
-cfg.multiAsset.towerSecondary.code.sigma_m       = 1.0;   % tower->secondary thermal 1-sigma [m]
+cfg.multiAsset.towerSecondary.code.sigma_m       = 1.0;   % tower->secondary thermal 1-sigma [m] (flat value AND the 'chiefFloored' floor)
+% Phase 3b-3 Axis 1: secondary code-noise sigma model. 'chiefFloored' = the chief's elevation/C-N0
+% code model (models.measurements.MeasurementModelUtils.codeSignalSigma) floored at code.sigma_m, so
+% the secondary uplink is elevation-shaped like the chief but R NEVER drops below today's 1.0 m
+% (max(x,floor) >= floor => R_new >= R_old, conservative). Byte-identical to 'flat' under the default
+% 'constant' code model (codeSignalSigma=codeSigma0_m=0.30 -> floored to 1.0); the elevation shaping
+% only activates under a realism-grade code model ('elevation'/'cn0'), inflating low-elevation R.
+cfg.multiAsset.towerSecondary.code.sigmaModel    = 'chiefFloored';  % 'flat' | 'chiefFloored'
 % Conservative product-correlation factor: the secondary ephemeris product error is
 % piecewise-CONSTANT over its broadcast interval, so consecutive rows share it; the
 % white-R filter would average it down ~sqrt(N). Inflate the product+tower-clock

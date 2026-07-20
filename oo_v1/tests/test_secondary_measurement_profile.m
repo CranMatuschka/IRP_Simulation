@@ -46,8 +46,8 @@ assert(s.useErrorChain == false,     'T2 FAILED: secondary must NOT use ErrorCha
 assert(strcmp(s.towerClockMode, 'matched'),   'T2 FAILED: secondary matched clock');
 assert(strcmp(s.zwdMappingKind, 'simple'),    'T2 FAILED: secondary ZWD mapping');
 assert(s.code.source == RS('TOWER_SECONDARY'), 'T2 FAILED: secondary code source');
-assert(strcmp(s.code.sigmaModel, 'flat') && s.code.flatSigma_m == ts.code.sigma_m, ...
-    'T2 FAILED: secondary flat code sigma');
+assert(strcmp(s.code.sigmaModel, ts.code.sigmaModel) && s.code.flatSigma_m == ts.code.sigma_m, ...
+    'T2 FAILED: secondary code sigma model/floor');
 assert(strcmp(s.code.nodeScheme, 'towerAsset32'), 'T2 FAILED: secondary code node scheme');
 assert(s.carrier.ambSource == RS('SEC_CARR_AMB') && s.carrier.phaseSource == RS('SEC_CARR_PHASE'), ...
     'T2 FAILED: secondary carrier sources');
@@ -68,6 +68,22 @@ assert(strcmp(sa.atmosphereMode, 'guardAUplink'), 'T3 FAILED: atmosphere.enable 
 cfgB = cfg; cfgB.multiAsset.towerSecondary.atmosphere.enable = false;
 sb = models.measurements.SecondaryMeasurementProfile.forAsset(cfgB, 2);
 assert(strcmp(sb.atmosphereMode, 'none'), 'T3 FAILED: atmosphere off -> none');
+fprintf('    PASS\n');
+
+% ---------------------------------------------------------------------
+% T4: 'chiefFloored' code sigma >= the flat floor for all elevations (R_new >= R_old, conservative),
+%     and == the floor exactly under the default 'constant' model (byte-identical to 'flat').
+% ---------------------------------------------------------------------
+fprintf('  T4: chiefFloored code sigma >= flat floor (conservative) ...\n');
+floor_m = cfg.multiAsset.towerSecondary.code.sigma_m;
+cE = cfg; cE.measurements.codeNoise.model = 'elevation';   % make codeSignalSigma elevation-varying
+for elDeg = 5:5:90
+    el = elDeg*pi/180;
+    sc = max(models.measurements.MeasurementModelUtils.codeSignalSigma(cE.signals.L1, el, cE), floor_m);
+    assert(sc >= floor_m - 1e-12, sprintf('T4 FAILED: floored sigma < floor at %d deg', elDeg));
+end
+scC = max(models.measurements.MeasurementModelUtils.codeSignalSigma(cfg.signals.L1, 45*pi/180, cfg), floor_m);
+assert(abs(scC - floor_m) < 1e-12, 'T4 FAILED: constant model not floored to the flat value (should be byte-identical)');
 fprintf('    PASS\n');
 
 fprintf('=== test_secondary_measurement_profile: ALL PASS ===\n');
