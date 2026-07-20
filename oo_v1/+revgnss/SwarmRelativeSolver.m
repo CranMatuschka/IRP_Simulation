@@ -117,6 +117,16 @@ classdef SwarmRelativeSolver
             out.perEpoch = struct('time_s', tVec(:).', ...
                 'baselineErrRaw_m', blRaw, 'baselineErrSolved_m', blSol, ...
                 'shapeErrRaw_m', shRaw, 'shapeErrSolved_m', shSol);
+
+            % --- W2-2: gated sat-sat TWSTFT RELATIVE-CLOCK solve (default OFF) -------------------
+            % The clock DUAL of the shape solve. Two-way sat<->sat time transfer observes the clock
+            % DIFFERENCE b_i-b_k directly (rows +1/-1), so a free-network min-norm solve over the same
+            % neighbour graph sharpens the swarm's RELATIVE clocks to the TWSTFT floor. Default OFF
+            % (needs the sat<->sat transmit premise, beyond plain reverse-GNSS uplink); when OFF the
+            % clock fields stay NaN and the shape output above is unchanged.
+            if revgnss.SwarmRelativeSolver.getBool_(cfg, {'multiAsset','twoWayTimeTransferISL','enable'}, false)
+                out = revgnss.SwarmRelativeSolver.solveRelativeClocks_(cfg, results, N, pairs, tVec, out);
+            end
         end
     end
 
@@ -127,7 +137,10 @@ classdef SwarmRelativeSolver
                 'baselineErrRaw_m', NaN, 'baselineErrSolved_m', NaN, ...
                 'shapeErrRaw_m', NaN, 'shapeErrSolved_m', NaN, ...
                 'formalShapeSigma_m', NaN, 'weaklyObservable', false, ...
-                'everWeaklyObservable', false, 'perEpoch', struct());
+                'everWeaklyObservable', false, ...
+                'relClockGateOn', false, 'relClockErrRaw_m', NaN, ...
+                'relClockErrSolved_m', NaN, 'relClockFormalSigma_m', NaN, ...
+                'perEpoch', struct());
         end
 
         function [Est, Truth, tVec, ok] = gatherTrajectories_(results, N)
@@ -290,6 +303,94 @@ classdef SwarmRelativeSolver
             end
         end
 
+        function out = solveRelativeClocks_(cfg, results, N, pairs, tVec, out)
+            % Free-network min-norm RELATIVE-CLOCK solve (W2-2): the scalar clock dual of the shape
+            % solve. Sharpens the swarm's relative clocks from sat-sat TWSTFT clock-difference
+            % observations over the same neighbour graph. Read-only (no per-asset x/P write). Reports
+            % the relative-clock error vs truth, raw (W1) vs solved, tail-averaged.
+            nEp = numel(tVec); nP = size(pairs,1);
+            if nP < 1; return; end
+
+            % Per-asset estimated (W1 EKF b_rx) + TOTAL truth clock trajectories, aligned to tVec.
+            estB = zeros(N, nEp); truB = zeros(N, nEp);
+            for i = 1:N
+                a = results.asset{i}; sm = a.stateMap;
+                if ~isfield(sm,'b_rx_idx') || isempty(sm.b_rx_idx); return; end
+                estB(i,:) = a.history.x(sm.b_rx_idx, :);
+                if ~isfield(a,'truthClkTraj_m') || isempty(a.truthClkTraj_m); return; end
+                truB(i,:) = interp1(a.truthClkTime_s, a.truthClkTraj_m, tVec, 'linear', 'extrap');
+            end
+
+            % Per-pair TWSTFT noise (constant delay-cal bias + conservative R) + per-epoch thermal.
+            [pairBias, pairR, thermalSigma] = revgnss.SwarmRelativeSolver.clockNoise_(cfg, pairs);
+            thermal = zeros(nP, nEp);
+            for p = 1:nP
+                node = pairs(p,1)*64 + pairs(p,2);
+                rs = RandStream('mt19937ar', 'Seed', revgnss.SwarmRelativeSolver.baseSeed_(cfg) + 9000 + node);
+                thermal(p,:) = thermalSigma * randn(rs, 1, nEp);
+            end
+            Winv = 1 ./ pairR(:);
+
+            relRaw = nan(1,nEp); relSol = nan(1,nEp); fSig = nan(1,nEp);
+            for kk = 1:nEp
+                eB = estB(:,kk); tB = truB(:,kk);
+                H = zeros(nP, N); res = zeros(nP,1);
+                for p = 1:nP
+                    i = pairs(p,1); k = pairs(p,2);
+                    z = (tB(i) - tB(k)) + pairBias(p) + thermal(p,kk);   % TWSTFT clock difference
+                    res(p) = z - (eB(i) - eB(k));
+                    H(p,i) = 1; H(p,k) = -1;                             % +1 on clk_i, -1 on clk_k
+                end
+                W = diag(Winv);
+                % min-norm inner gauge: the 1-D null space is the common (mean) clock, which sat-sat
+                % TWSTFT cannot observe -> left at the W1 mean; every reported metric is a clock
+                % DIFFERENCE so it is gauge-invariant.
+                [C, delta] = revgnss.SwarmRelativeSolver.truncPinv_(H.'*W*H, H.'*W*res);
+                bHat = eB + delta;
+                relRaw(kk) = revgnss.SwarmRelativeSolver.relClockRms_(eB,   tB, pairs);
+                relSol(kk) = revgnss.SwarmRelativeSolver.relClockRms_(bHat, tB, pairs);
+                fSig(kk)   = sqrt(mean(diag(C)));
+            end
+            tsel = revgnss.SwarmRelativeSolver.tailIdx_(nEp);
+            out.relClockGateOn        = true;
+            out.relClockErrRaw_m      = sqrt(mean(relRaw(tsel).^2));
+            out.relClockErrSolved_m   = sqrt(mean(relSol(tsel).^2));
+            out.relClockFormalSigma_m = mean(fSig(tsel));
+        end
+
+        function rms = relClockRms_(b, truthB, pairs)
+            % RMS over neighbour pairs of the relative-clock error (b_i-b_k) - (truth_i-truth_k).
+            nP = size(pairs,1); e = zeros(nP,1);
+            for p = 1:nP
+                i = pairs(p,1); k = pairs(p,2);
+                e(p) = (b(i) - b(k)) - (truthB(i) - truthB(k));
+            end
+            rms = sqrt(mean(e.^2));
+        end
+
+        function [pairBias, pairR, thermalSigma] = clockNoise_(cfg, pairs)
+            % Per-pair sat-sat TWSTFT noise: constant delay-cal bias (identity-keyed) + conservative
+            % R, faithful to revgnss.SwarmTwoWayTimeTransferBuilder (same cfg keys + R = thermal^2 +
+            % nCorr*(const^2+rw^2), the correlated-bias inflation).
+            g = @(p,d) revgnss.SwarmRelativeSolver.getNum_(cfg, p, d);
+            thermalSigma = g({'multiAsset','twoWayTimeTransferISL','sigma_m'}, 0.03);
+            sConst = g({'multiAsset','twoWayTimeTransferISL','delayCal','sigma_const_m'}, 0.01);
+            sRW    = g({'multiAsset','twoWayTimeTransferISL','delayCal','sigma_rw_m'}, 0.003);
+            tau    = g({'multiAsset','twoWayTimeTransferISL','delayCal','tau_s'}, 3600);
+            nCap   = g({'multiAsset','twoWayTimeTransferISL','delayCal','nCorrCap'}, 60);
+            dt     = g({'simulation','dt_s'}, 1);
+            nCorr  = min(max(tau/max(dt,eps),1), nCap);
+            Rii    = thermalSigma^2 + nCorr*(sConst^2 + sRW^2);
+            sBias  = sqrt(sConst^2 + sRW^2);
+            nP = size(pairs,1);
+            pairBias = zeros(nP,1); pairR = Rii * ones(nP,1);
+            for p = 1:nP
+                node = pairs(p,1)*64 + pairs(p,2);
+                rs = RandStream('mt19937ar', 'Seed', revgnss.SwarmRelativeSolver.baseSeed_(cfg) + 2000 + node);
+                pairBias(p) = sBias * randn(rs);
+            end
+        end
+
         function s = baseSeed_(cfg)
             s = 424242;   % W2 relative-layer noise base seed (independent of the sim streams)
             if isfield(cfg,'simulation') && isfield(cfg.simulation,'seed') && isscalar(cfg.simulation.seed)
@@ -308,6 +409,14 @@ classdef SwarmRelativeSolver
                 if isstruct(v) && isfield(v, path{j}); v = v.(path{j}); else; v = dflt; return; end
             end
             if ~(isnumeric(v) && isscalar(v) && isfinite(v)); v = dflt; end
+        end
+
+        function tf = getBool_(cfg, path, dflt)
+            v = cfg;
+            for j = 1:numel(path)
+                if isstruct(v) && isfield(v, path{j}); v = v.(path{j}); else; tf = dflt; return; end
+            end
+            tf = islogical(v) && isscalar(v) && v;
         end
     end
 end

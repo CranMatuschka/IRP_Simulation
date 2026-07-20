@@ -97,6 +97,7 @@ classdef FederatedSwarmRunner
                 c.multiAsset.mode = 'fast';
                 c.multiAsset.towersObserveSecondaries = false;
                 if isfield(c.multiAsset,'twoWayISL'); c.multiAsset.twoWayISL.enable = false; end
+                if isfield(c.multiAsset,'twoWayTimeTransferISL'); c.multiAsset.twoWayTimeTransferISL.enable = false; end
                 if isfield(c.multiAsset,'towerSecondary')
                     ts = c.multiAsset.towerSecondary;
                     if isfield(ts,'carrier');    ts.carrier.enable = false;    end
@@ -139,6 +140,20 @@ classdef FederatedSwarmRunner
                 res.truthTime_s  = sim.orbitTruthCache.t_s(:).';     % [1 x nEp]
             else
                 res.truthTraj = []; res.truthVelTraj = []; res.truthTime_s = [];
+            end
+
+            % Per-epoch TOTAL truth clock bias (state + colored + any relativistic ramp), for the W2
+            % relative-clock layer (W2-2). Read from the clock's own logged history -> the exact truth
+            % this asset's clock realized. Output field only -> EKF path untouched / byte-identical.
+            res.truthClkTraj_m = []; res.truthClkTime_s = [];
+            try
+                clkHist = sim.asset.clock.history;   % ClockModel is an object; access the property
+                if ~isempty(clkHist.bias_s)
+                    c = revgnss.Constants.SPEED_OF_LIGHT_MPS;
+                    res.truthClkTraj_m = clkHist.bias_s(:).' * c;   % [1 x nEpClk] TOTAL truth bias
+                    res.truthClkTime_s = clkHist.time_s(:).';        % [1 x nEpClk]
+                end
+            catch
             end
         end
     end
