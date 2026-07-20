@@ -117,3 +117,37 @@ This refactor makes each satellite a **faithful single-asset model** and removes
 ## 12. Recommendation
 
 **Do it, phased and append-only.** It is real but bounded work (net a few hundred lines after retiring the sprawl), the truth side is free, and the golden harness makes it byte-identity-verifiable. It is the correct architecture for "every asset relies on the same features," and it stops the per-feature `Secondary*` growth. Temper expectations: it buys fidelity and maintainability, not better absolute numbers — pair it with two-way observables for that.
+
+---
+
+## 13. Progress log (as of 2026-07-20)
+
+| Step | Status | Commit | Notes |
+|---|---|---|---|
+| Phase 1 — `sm.asset(i)` view | done | `b387951` | additive aliasing view over existing indices; byte-identical; foundation. |
+| Phase 1b — F/Q consume the view | **skipped** | — | cosmetic: chief and secondary F/Q blocks can't merge (different STM source, attitude, tau); routing through the view is indirection + frozen-core risk + ~0 collapse. |
+| Phase 2 — P0 init consolidation | done | `df60d76` | 4 secondary P0 blocks → 1 per-asset loop; byte-identical (golden + swarm bit-identity). First real collapse. |
+| Phase 2b — x0 init consolidation | **skipped** | — | cosmetic: clock-x0 (ScenarioFactory) and orbit-x0 (ReverseGNSSSimulation, split off by the helix-truth ordering) already exist; unifying needs a risky orbit-x0 relocation for ~0 gain. |
+| Phase 3a — fold carrier builder into code builder | done | `f83d30c` | retired `SecondaryGroundCarrierBuilder`; carrier rows reuse the code row's geometry; byte-identical. |
+| Phase 3b — secondaries into the chief general builder | **planned** (§14) | — | the real prize; frozen-core; own reviewed effort. |
+
+### The byte-identity technique (validated, reusable for 3b)
+
+Goldens pin `nSpaceAssets=1`, so they do **not** cover the swarm F/Q/measurement paths. For every frozen-core-adjacent refactor, capture a **swarm fingerprint** `{nx, normX, trace(P), sum(x), finalPos, prefit, secPosErr}` from a 3-asset honest run (carrier + ZWD on) BEFORE the change and assert it identical AFTER. This caught two real issues:
+- **Row order is not floating-point-invariant.** The batch update `S = HPH' + R` and its solve depend on row order at the round-off level; Phase 3a's first (interleaved) merge perturbed the 600 s swarm position by ~0.2%. Fix: preserve the exact pre-change row order (group, don't interleave). Identity-keyed RNG draws are order-*invariant in value*, so only ROW order matters, not draw order.
+- **Append-only aliasing** keeps `asset(1)` addressing today's literal indices, so `nx/x/P/F/Q/H` are unchanged at `N=1`.
+
+## 14. Phase 3b — detailed plan (the frozen-core measurement merge)
+
+**Goal.** Generalize the chief's measurement layer to an `asset` + `role` parameter so ONE builder serves every satellite, retiring `SecondaryGroundMeasurementBuilder` (now carrier-folded) and the one-way `ISLMeasurementBuilder`. This is where ~600-900 LOC retires and where each satellite finally becomes a true single-asset.
+
+**Coupling to lift** (verified): `models/+measurements/MeasurementModel.m` and `CarrierMeasurementBuilder.m` read `cfg.asset` lever arms, chief indices `x(r_idx)/x(euler_idx)`, and a chief-scoped truth-ambiguity `containers.Map`. `LinkGeometry` is ALREADY asset-agnostic (takes `r_cm, euler, levers`) — coupling is only in the callers. `ISLMeasurementBuilder.m:54-57` / `TwoWayISLMeasurementBuilder.m:26` hard-error on `receiverAssetIndex~=1`.
+
+**Sub-phases** (each golden byte-identical + swarm bit-identity + adversarial review):
+1. **3b-1 — parameterize, asset 1 only.** Add an `asset` struct arg (`{sm.asset(i) block, lever arms, truth-ambiguity namespace}`) to `CarrierMeasurementBuilder`/`CodeMeasurementBuilder`/`MeasurementModel`, defaulting to asset 1. No secondary use yet. **Gate: byte-identical** — asset 1 must reproduce today's chief rows exactly, INCLUDING row order and the `CARR_AMB`/`CARR_PHASE` draw keys (the per-asset key must reduce to today's key at `asset=1`). Highest-risk step; edits frozen physics without changing behaviour.
+2. **3b-2 — route secondaries through it.** Call the generalized builder per estimated secondary (`sm.asset(2..N)`, `role='towerDownlink'`), emitting code + carrier rows; retire `SecondaryGroundMeasurementBuilder`. Preserve the pre-merge row order (chief rows, then per-secondary blocks) — swarm bit-identity. Fold `secondaryZwd`/Guard-A into the shared path.
+3. **3b-3 — ISL role.** Add `role='isl'` (secondary is transmitter: `H(b_tx)=-1`, `H(r_tx)=-u'`); retire the one-way `ISLMeasurementBuilder`; lift the `receiverAssetIndex==1` guards, writing BOTH endpoints' H. Keep the two-way ISL / TWSTFT builders (genuinely swarm-specific).
+
+**Prerequisites for true parity** (only alongside a wall-breaking observable, per §10): per-secondary attitude + multi-antenna (Phase 4), Doppler-from-towers, dual-frequency + iono states.
+
+**Risk.** HIGH — frozen physics core. Do it in a DEDICATED session, one sub-phase per commit, each with: (a) golden smoke + full byte-identical; (b) swarm fingerprint bit-identical; (c) a 2-reviewer adversarial pass (truth/estimate separation, RNG draw keys, row order, anti-circularity). Do NOT physically re-block asset 1's indices. If a sub-phase can't be made bit-identical, stop and re-scope rather than accept drift.
