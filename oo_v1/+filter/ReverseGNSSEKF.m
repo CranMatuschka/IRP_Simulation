@@ -978,6 +978,48 @@ classdef ReverseGNSSEKF < handle
             else
                 sm.srpScaleIdx = [];
             end
+
+            % --- Phase-1 asset-symmetry VIEW (additive; ALIASES the indices above) ----------
+            % sm.asset(i) aggregates the per-asset state blocks into a uniform structure so
+            % downstream code can loop over satellites (chief = asset 1, secondaries 2..N)
+            % instead of hard-coding the chief scalars plus the per-secondary bolt-on matrices.
+            % It is a pure VIEW over the SAME state indices -- it allocates no state and moves
+            % nothing, so nx/x/P/F/Q/H are unchanged (golden byte-identical). No consumer yet
+            % (Phase 2 init unification is the first). Fields are empty where a state is not
+            % estimated for that asset; asset(1) reproduces today's literal single-asset map.
+            nSecView = max([size(sm.secondaryOrbitIdx,1), size(sm.secondaryClockIdx,1), ...
+                            size(sm.secondaryAmbiguityIdx,1), size(sm.secondaryZwdIdx,1), 0]);
+            blank = struct('r',[],'v',[],'euler',[],'omega',[],'b',[],'bdot',[], ...
+                           'ambiguity',[],'zwd',[],'iono',[],'gyroBias',[]);
+            av = repmat(blank, 1, 1 + nSecView);
+            av(1).r     = sm.r_idx(:)';
+            av(1).v     = sm.v_idx(:)';
+            av(1).euler = sm.euler_idx(:)';
+            av(1).omega = sm.omega_idx(:)';
+            av(1).b     = sm.b_rx_idx;
+            av(1).bdot  = sm.bdot_rx_idx;
+            if isfield(sm,'ambiguityIdx') && ~isempty(sm.ambiguityIdx); av(1).ambiguity = sm.ambiguityIdx; end
+            if isfield(sm,'zwdIdx')  && ~isempty(sm.zwdIdx);  av(1).zwd  = sm.zwdIdx(:)';  end
+            if isfield(sm,'ionoIdx') && ~isempty(sm.ionoIdx); av(1).iono = sm.ionoIdx(:)'; end
+            if isfield(sm,'gyroBiasIdx') && ~isempty(sm.gyroBiasIdx); av(1).gyroBias = sm.gyroBiasIdx(:)'; end
+            for si = 1:nSecView
+                aj = si + 1;
+                if si <= size(sm.secondaryOrbitIdx,1)
+                    av(aj).r = sm.secondaryOrbitIdx(si,1:3);
+                    av(aj).v = sm.secondaryOrbitIdx(si,4:6);
+                end
+                if si <= size(sm.secondaryClockIdx,1)
+                    av(aj).b    = sm.secondaryClockIdx(si,1);
+                    av(aj).bdot = sm.secondaryClockIdx(si,2);
+                end
+                if si <= size(sm.secondaryAmbiguityIdx,1)
+                    av(aj).ambiguity = sm.secondaryAmbiguityIdx(si,:);
+                end
+                if si <= size(sm.secondaryZwdIdx,1)
+                    av(aj).zwd = sm.secondaryZwdIdx(si,:);
+                end
+            end
+            sm.asset = av;
         end
 
         % ----------------------------------------------------------------

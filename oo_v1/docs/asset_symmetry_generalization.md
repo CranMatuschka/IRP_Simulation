@@ -1,0 +1,119 @@
+# Asset-Symmetry Generalization — Design Doc
+
+**Status:** proposed (design only, no code moved)
+**Date:** 2026-07-20
+**Branch context:** `feature/scientific-correctness-v2`
+**Supersedes the incremental bolt-on approach of** `docs/swarm_architecture_redesign.md` §migration; this doc is the concrete, quantified refactor plan.
+
+---
+
+## 1. Problem statement
+
+The simulator estimates a GEO swarm with a **primary-centric** EKF. The *truth* side is already fully general — every asset (chief + secondaries) is a real `revgnss.SpaceAsset` with its own orbit/attitude/clock, propagated identically (`ReverseGNSSSimulation.stepSecondaryAssets_`). The *estimation* side is not:
+
+- The **chief** (asset 1) runs the original single-asset stack: `MeasurementModel` + `CodeMeasurementBuilder` + `CarrierMeasurementBuilder`, full state `[r,v,euler,omega,b_rx,bdot_rx, +per-tower ambiguity/ZWD/iono/txBias]`.
+- Each **secondary** is handled by a *separate, parallel* stack of reduced builders — `SecondaryGroundMeasurementBuilder`, `SecondaryGroundCarrierBuilder`, `ISLMeasurementBuilder`, `SwarmTwoWay*` — with a reduced state `[r,v,b,bdot (+ambiguity +ZWD)]` and **no attitude, no Doppler-from-towers, no iono, single-frequency only**.
+
+The root cause: the original measurement layer is **hardcoded to asset 1**. `MeasurementModel`/`CarrierMeasurementBuilder` read `cfg.asset`'s lever arms and the chief's state indices `x(r_idx)`, `x(euler_idx)` directly — there is no "which asset" argument. So a satellite cannot be added by *reusing* the single-asset code; each capability was **re-implemented** as a secondary builder. Consequences:
+
+1. **Feature asymmetry** — secondaries are weaker models than a standalone single-asset run.
+2. **Code sprawl** — every new capability is a new `Secondary*` builder + state block (position, clock, carrier, ZWD, …), duplicating single-asset logic.
+3. **Growth without convergence** — attitude, Doppler, iono for secondaries would each be *another* bolt-on.
+
+## 2. Goals / non-goals
+
+**Goals**
+- One **asset-indexed** estimation code path: the same builders serve any satellite against any tower (and against another satellite for ISL), selected by an `asset` (and `role`) parameter.
+- Each satellite estimated with the **same features** the chief has (feature parity), subject to observability.
+- **Retire** the reduced `Secondary*` measurement builders by folding them into the general ones.
+- **Golden byte-identity preserved** at every step (single-asset goldens must not move).
+
+**Non-goals**
+- Not a rewrite. `LinkGeometry`, `SpaceAsset`, `SwarmFormation`, and the two-way/TWSTFT physics are reused unchanged.
+- **Not an absolute-accuracy improvement.** See §10 — the radial↔clock wall is geometric and unaffected by state-vector richness.
+- Not N independent filters (that loses every inter-satellite observable — the point of a swarm).
+
+## 3. Current architecture — the coupling points (audited)
+
+| Location | Coupling |
+|---|---|
+| `MultiAssetConfig.m:57-70` | `normalize()` HARD-FORCES `estimated(:)=false; estimated(1)=true` — the central gate that makes only asset 1 estimated. |
+| `ScenarioFactory.m:94-100`, `:189-195` | `buildInitialState_`/`buildInitialCovariance_` write the chief block via **scalar** `sm.r_idx/…/bdot_rx_idx` from the primary `asset` only — no asset loop. |
+| `ScenarioFactory.m:118-135`, `:300-330` | Secondaries get **partial** states via ~6 bolt-on blocks (clock, orbit, ambiguity, ZWD), each with its own loop + sigma helper. No secondary `euler/omega`. |
+| `ReverseGNSSSimulation.m:128-139` | Secondary **orbit x0** is set in `initialize()` (not ScenarioFactory) because helix truth only exists after `SwarmFormation.buildSecondaryCaches` — a two-phase init split. |
+| `MultiAssetConfig.m:281-315` | `cloneAsset_` collapses secondaries to a **single antenna** (`receiverLeverArms_body_m(:,1)`) and does **not** propagate `imu` → secondaries forced single-antenna, no gyro, attitude cloned from chief. |
+| `ISLMeasurementBuilder.m:54-57`, `TwoWayISLMeasurementBuilder.m:26` | Hard-error if `receiverAssetIndex≠1` — "ISL updates only into the primary." Encodes "ISL writes primary columns only." |
+| `models/+measurements/MeasurementModel.m`, `CarrierMeasurementBuilder.m` | Read `cfg.asset` lever arms + chief `x(r_idx)/x(euler_idx)` + a chief-scoped truth-ambiguity `containers.Map`. **The measurement-layer coupling.** |
+| `LinkGeometry.m` | **Already asset-agnostic** — takes `(r_cm, euler, levers)` as arguments. The coupling is only in its *callers*. |
+
+Truth side (already general, **no change**): `MultiAssetConfig.instantiateAssets` returns a per-asset cell of `SpaceAsset`; `stepSecondaryAssets_:886-904` propagates each secondary's attitude+clock and logs full state exactly like the chief; per-asset seeds already exist (secondary clock `seed+8700+ai`, orbit `seed+8800+ai`).
+
+## 4. Target architecture
+
+- **State map:** `sm.asset(i).{r,v,euler,omega,b,bdot, ambiguity, zwd, iono, gyroBias}` for `i=1..N`, plus shared per-tower blocks (towerClock) and scalar/global blocks (srpScale). `predict`/`buildF_`/`buildQ_` loop uniformly over assets.
+- **Measurement builders:** `Code`/`CarrierMeasurementBuilder.build(cfg, asset_i, link, …)` where `link` is a `role`:
+  - `role='towerDownlink'` → tower→satellite (reverse-GNSS), `H` on `asset_i`'s block, `+1` on `asset_i` clock, `−1` on tower clock.
+  - `role='isl'` → satellite↔satellite, `H` on **both** endpoints' blocks (`+u'`/`−u'`, `+1`/`−1`), replacing the one-way `ISLMeasurementBuilder`.
+- **Init:** one `for ai=1:N` loop writing the uniform per-asset block from `assets{ai}` truth, reusing the identity-keyed per-asset seed convention.
+- **Kept as-is:** two-way ISL ranging (`SwarmTwoWayISLBuilder`), TWSTFT clock transfer (`SecondaryTwoWayTimeTransferBuilder`, `SwarmTwoWayTimeTransferBuilder`), `SwarmFormation`, `SwarmEstimateSummary`, `LinkGeometry`, `SpaceAsset`.
+
+## 5. Byte-identity strategy — the key enabler
+
+The refactor is **golden byte-identical** *iff* `asset(1)`'s block is laid out as an **aliasing superset over today's exact literal indices**, with secondaries appended last — the append-only pattern already proven for gyro-bias, SRP-scale, and every secondary block. Then:
+
+- `x/P/F/Q/H` still address indices `1:14` (chief base) and `15+` (chief per-tower blocks) exactly as today.
+- At `nSpaceAssets=1` (the golden pin, `goldenScenarioConfig.m:24-30`) `instantiateAssets` returns `{primary}` only, every secondary block is empty, and the `for ai=1:1` loop degenerates to today's single write.
+- The physics-frozen core (`predict`/`F`/`Q`, measurement `H`, **RNG draw order**) writes byte-identical values.
+
+All six golden `.mat` binaries diffing to zero then **certifies** that the unification did not touch the frozen single-asset physics. **The one real trap:** the seeded init fallback (`ScenarioFactory.m:85-91`) draws `pos,vel,euler,omega,clk,cdot` from one `RandStream seed+7777` in that exact order; the default/golden config takes the *deterministic* branch (`:75-82`, no RNG), so asset-1 init is byte-safe as long as its literal offset write is preserved and no per-asset stream reorders asset 1's draws.
+
+## 6. Change magnitude (quantified)
+
+| Subsystem | LOC touched | LOC retired | Risk |
+|---|---|---|---|
+| Truth (SpaceAsset, SwarmFormation) | ~0 | — | none (already general) |
+| State map (`ReverseGNSSEKF` map/F/Q) | ~150–250 | folds per-secondary blocks into one loop | low (append-only aliasing) |
+| Init (`ScenarioFactory`, `MultiAssetConfig`, `initialize`) | ~250–380 | ~6 bolt-on init blocks + helpers | low–moderate |
+| Measurement + geometry (`MeasurementModel`, `Code`/`Carrier`, callers) | ~400–700 | `SecondaryGround*` + one-way `ISLMeasurementBuilder` (~600–900) | **moderate–high** (frozen physics) |
+| Golden/gating | ~0–40 | — | — (the safety net) |
+| Swarm-specific (two-way, TWSTFT, formation) | keep | — | — |
+
+**Net:** ~1,000–1,400 LOC touched, **~800–1,200 LOC of `Secondary*` sprawl retired** → net addition a few hundred lines. Effort is medium–large and concentrated in the physics-sensitive measurement layer; the *value* is consolidation + fidelity, not line count.
+
+(State-map, measurement, and sprawl LOC are estimates — those three audit readers dropped on API errors; the init and golden/risk figures are from completed audits.)
+
+## 7. Feature-parity gaps to fill (for a secondary to equal a single-asset run)
+
+1. **Attitude** — per-secondary `euler/omega` truth (today cloned from chief) + states + an identity-keyed per-asset attitude/omega init stream (currently missing).
+2. **Multi-antenna** — `cloneAsset_` forces single antenna; needs the full `receiverLeverArms_body_m (3×N)` per asset (prereq for carrier attitude + Doppler + inter-antenna bias).
+3. **Doppler-from-towers** — secondaries get no tower Doppler row today.
+4. **Dual-frequency + iono states** — secondaries are single-freq L1 (Phase 1); iono is dispersive → needs L1+L2 + a `secondaryIonoIdx` block.
+5. **IMU/gyro** — `imu` is not propagated into secondary cfg; per-secondary gyro-bias is impossible until it is.
+
+## 8. Phased implementation plan (each phase golden-byte-identical, reviewed)
+
+- **Phase 1 — State-map unification.** Introduce `sm.asset(i)` blocks with `asset(1)` aliasing today's literal indices; generalize `predict`/`F`/`Q` to loop over assets. No behaviour change; goldens byte-identical. Foundation. *(~1 step, low risk.)*
+- **Phase 2 — Init unification.** One per-asset `x0`/`P0` loop from `assets{ai}` truth; retire the bolt-on secondary init blocks + helpers; lift the `estimated(:)` forcing gate. Resolve the two-phase (SwarmFormation-before-x0) ordering. *(~300 LOC, low–moderate.)*
+- **Phase 3 — Measurement unification.** `asset`+`role`-parameterized `Code`/`CarrierMeasurementBuilder`; retire `SecondaryGroundMeasurementBuilder`, `SecondaryGroundCarrierBuilder`, one-way `ISLMeasurementBuilder`; lift the `receiverAssetIndex==1` guards, writing both endpoints' `H`. **The hard, physics-sensitive phase — adversarial review + golden byte-identity verified per step.** *(~500 LOC.)*
+- **Phase 4 (optional parity) — Fill the §7 gaps** (attitude, multi-antenna, Doppler, iono, IMU) uniformly on the per-asset block.
+
+## 9. Risk & verification
+
+- **Primary gate (absolute):** `run_oo_v1_regression('smoke')` then `('full')` byte-identical on all `coreMetricNames` after every phase. This is the pass/fail line and the proof the frozen physics was untouched.
+- **Structural asserts:** `asset(1)` index identity (a ~10-line unit test); a one-epoch full `x/P` byte-diff harness.
+- **Adversarial review** of Phase 3 (measurement H, RNG draw order, truth/estimate separation, anti-circularity) — mirroring the per-feature reviews already used this branch.
+- **Honest risk rating:** SAFE incremental refactor *iff* the append-only aliasing is held; it silently becomes a **golden re-freeze event** the moment asset-1 indices physically move. Do not physically re-block asset 1.
+
+## 10. The honest caveat (must be stated up front)
+
+This refactor makes each satellite a **faithful single-asset model** and removes the sprawl — but it does **not** improve the absolute position. Every secondary is observed from the same single-hemisphere ground cone → the same **radial↔clock wall** (a standalone single-asset GEO run is wall-limited too). Confirmed repeatedly this branch: the SRP-scale state didn't converge radial (learned 5.06), and per-secondary ZWD is degenerate with the clock (soaks 104 m, degrades). The payoff of this refactor is **fidelity + maintainability + uniform feature application** — and it lets the *wall-breaking* observables (two-way ISL ranging / TWSTFT) apply to every asset uniformly, which is the combination that actually moves the numbers.
+
+## 11. Open decisions
+
+1. Physical state-map re-block (cleaner, forces a one-time golden re-freeze) vs strict append-only aliasing (byte-safe, slightly less tidy). **Recommend aliasing** — keeps the safety net.
+2. Do Phase 4 parity gaps (attitude/Doppler/iono/IMU) as part of this refactor, or after — given they're wall-limited standalone, recommend **after**, paired with a wall-breaking observable.
+3. Keep the two-way/TWSTFT builders separate (they're genuinely swarm-specific) vs fold their range/clock math into the general builder too. **Recommend keep separate.**
+
+## 12. Recommendation
+
+**Do it, phased and append-only.** It is real but bounded work (net a few hundred lines after retiring the sprawl), the truth side is free, and the golden harness makes it byte-identity-verifiable. It is the correct architecture for "every asset relies on the same features," and it stops the per-feature `Secondary*` growth. Temper expectations: it buys fidelity and maintainability, not better absolute numbers — pair it with two-way observables for that.
