@@ -1,7 +1,7 @@
 classdef FederatedSwarmSummary
     % FederatedSwarmSummary  W3 symmetric analysis layer of the federated swarm.
     %
-    % Consumes the W1 per-asset marginals (revgnss.FederatedSwarmRunner output) and the W2 relative
+    % Consumes the W1 per-asset marginals (revgnss.ReportRunner.runFederatedEstimation output) and the W2 relative
     % solution (revgnss.SwarmRelativeSolver output) and produces a SYMMETRIC per-satellite summary:
     % every asset is reported identically (its OWN absolute err/sigma from its OWN EKF), plus the
     % formation shape / relative clock from the relative layer. There is NO privileged node -- "chief"
@@ -9,7 +9,7 @@ classdef FederatedSwarmSummary
     % may be chosen. Tail-averaged (last 20%) to match SwarmRelativeSolver / SwarmEstimateSummary.
     %
     %   out = revgnss.FederatedSwarmSummary.build(cfg, results [, rel [, refAsset]])
-    %       results  = revgnss.FederatedSwarmRunner.run(cfg)
+    %       results  = revgnss.ReportRunner.runFederatedEstimation(cfg)
     %       rel      = revgnss.SwarmRelativeSolver.solve(cfg, results)  (optional; [] -> shape/clock NaN)
     %       refAsset = reference asset index for the relative-position column (default 1; any asset)
     %   out.perAsset(i): absErr_m, absSigma_m, absRatio, clkErr_m, relPosErr_m (vs refAsset)

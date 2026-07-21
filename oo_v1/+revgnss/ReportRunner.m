@@ -95,6 +95,18 @@ classdef ReportRunner
                 fprintf('  MAT writing disabled by cfg.report.writeMat = false.\n');
             end
 
+            % ---- Multi-asset: route to the federated swarm path ---------
+            % nSpaceAssets>1 -> N INDEPENDENT single-asset EKFs + the ISL/TWSTFT relative layer,
+            % written as ONE unified swarm .mat + PDF (docs/federated_swarm_architecture.md). The
+            % single-asset case (nSpaceAssets<=1) falls through to the normal pipeline below and is
+            % byte-identical to the golden. This is the single entry: run_oo_v1 -> runSingle -> here.
+            if isfield(cfg,'scenario') && isfield(cfg.scenario,'nSpaceAssets') && ...
+                    round(cfg.scenario.nSpaceAssets) > 1
+                out = revgnss.ReportRunner.runFederatedSwarm_(cfg, reportFolder, pdfStem, ...
+                    pdfPath, matPath, writePdf, writeMat, version);
+                return;
+            end
+
             % ---- Handle existing files (only if we'll write them) -------
             if writePdf || writeMat
                 if ~exist(reportFolder,'dir'); mkdir(reportFolder); end
@@ -1698,7 +1710,178 @@ classdef ReportRunner
                 revgnss.ReportRunner.writeRunLog_(reportFolder, pdfStem, cfg, cfgLiteral, summary, pdfPath, matPath, out.monteCarlo);
             end
 
+            out.sim = sim;   % expose the sim (used when a federated per-asset report is requested)
             fprintf('=== ReportRunner: done ===\n');
+        end
+
+        % ================================================================
+        % Federated swarm (nSpaceAssets>1): N independent single-asset EKFs + relative layer.
+        % Inlined here so run_oo_v1 -> ReportRunner is the single entry point (no separate runner).
+        % ================================================================
+        function out = runFederatedSwarm_(cfg, reportFolder, stem, pdfPath, matPath, writePdf, writeMat, version)
+            % runFederatedSwarm_  Estimate the swarm (N single-asset EKFs), fuse the ISL/TWSTFT
+            % relative layer, and write ONE unified swarm .mat + PDF. Optionally also writes the N
+            % per-satellite standard single-asset reports (cfg.multiAsset.federated.savePerAssetMat).
+            N0 = round(cfg.scenario.nSpaceAssets);
+            fprintf('\n=== ReportRunner: federated swarm (%d assets) ===\n', N0);
+            if (writePdf || writeMat) && ~isfolder(reportFolder); mkdir(reportFolder); end
+
+            refAsset = 1;
+            try; refAsset = round(cfg.multiAsset.federated.refAsset); catch; end
+            savePerAsset = false;
+            try; savePerAsset = logical(cfg.multiAsset.federated.savePerAssetMat); catch; end
+
+            reportOpts = struct('savePerAsset', savePerAsset, 'folder', reportFolder, ...
+                'stem', stem, 'writePdf', writePdf, 'writeMat', writeMat);
+            results = revgnss.ReportRunner.runFederatedEstimation(cfg, reportOpts);
+            N = results.N;
+            refAsset = max(1, min(refAsset, N));
+
+            rel  = revgnss.SwarmRelativeSolver.solve(cfg, results);
+            summ = revgnss.FederatedSwarmSummary.build(cfg, results, rel, refAsset);
+            revgnss.FederatedSwarmSummary.print(summ);
+
+            out = struct('pdfPath', '', 'matPath', '', 'summary', summ, 'rel', rel, ...
+                'version', version, 'monteCarlo', struct('enabled', false));
+
+            if writeMat
+                swarm = struct('cfg', cfg, 'results', results, 'rel', rel, ...
+                    'summary', summ, 'version', version, 'kind', 'federatedSwarm'); %#ok<NASGU>
+                save(matPath, '-struct', 'swarm', '-v7.3');
+                out.matPath = matPath;
+                fprintf('  Swarm MAT written: %s\n', matPath);
+            end
+            if writePdf
+                ce = revgnss.FederatedSwarmReport.build(cfg, results, rel, summ, reportFolder, stem);
+                if ce.success && ~isempty(ce.pdfPath) && isfile(ce.pdfPath)
+                    out.pdfPath = ce.pdfPath;
+                    info = dir(ce.pdfPath);
+                    fprintf('  Swarm PDF written: %s  (%.1f kB)\n', ce.pdfPath, info.bytes/1024);
+                else
+                    fprintf('  Swarm PDF not compiled; .tex at %s\n', ce.texPath);
+                end
+            end
+            fprintf('=== ReportRunner: federated swarm done ===\n');
+        end
+
+        function results = runFederatedEstimation(cfg, reportOpts)
+            % runFederatedEstimation  Run N INDEPENDENT single-asset EKFs -- one per swarm member on
+            % its own helix orbit. Returns results.asset{i} = {x,P,stateMap,history,truthTraj,...}.
+            % No shared covariance (D1). With reportOpts.savePerAsset, each asset ALSO runs through
+            % the normal single-asset report pipeline (per-satellite .mat + PDF) -- one run per asset,
+            % the sim reused for the relative layer.
+            if nargin < 2; reportOpts = struct('savePerAsset', false); end
+            N = 1;
+            if isfield(cfg,'scenario') && isfield(cfg.scenario,'nSpaceAssets')
+                N = max(1, round(cfg.scenario.nSpaceAssets));
+            end
+            base = revgnss.ReportRunner.singleAssetBase_(cfg);
+            results = struct('N', N, 'asset', {cell(1, N)});
+
+            r0Cells = {}; v0Cells = {}; baseSeed = 42;
+            if N > 1
+                if ~(isfield(cfg,'orbit') && isfield(cfg.orbit,'useOrbitPropagator') && cfg.orbit.useOrbitPropagator)
+                    error('revgnss:ReportRunner:needsOrbitPropagator', ...
+                        'Federated N>1 needs cfg.orbit.useOrbitPropagator=true (per-asset helix truth).');
+                end
+                if ~isfield(cfg,'formation') || ~isfield(cfg.formation,'crossTrackSpread')
+                    cfg.formation.crossTrackSpread = 1.0;   % 3-D formation -> full shape observable
+                end
+                op = models.orbit.OrbitPropagator(cfg.orbit);
+                [r0Cells, v0Cells] = revgnss.SwarmFormation.secondaryEciInitialStates(cfg, op);
+                if isfield(base,'simulation') && isfield(base.simulation,'seed'); baseSeed = base.simulation.seed; end
+            end
+
+            for ai = 1:N
+                ci = base;
+                if ai >= 2
+                    si = ai - 1;
+                    ci.orbit.eciState0  = [r0Cells{si}; v0Cells{si}];   % this asset's absolute helix IC
+                    ci.asset.clock.seed = 300 + ai;                     % per-asset sat clock
+                    ci.simulation.seed  = baseSeed + 100000*(ai-1);     % INDEPENDENT receiver noise
+                end
+                if reportOpts.savePerAsset
+                    ci.report.reportFolder = fullfile(reportOpts.folder, sprintf('%s_asset%d', reportOpts.stem, ai));
+                    ci.report.stem         = sprintf('%s_asset%d', reportOpts.stem, ai);
+                    ci.report.writePdf     = reportOpts.writePdf;
+                    ci.report.writeMat     = reportOpts.writeMat;
+                    o = revgnss.ReportRunner.runSingle(ci);             % full per-asset report
+                    results.asset{ai} = revgnss.ReportRunner.extractAssetResult_(o.sim);
+                else
+                    results.asset{ai} = revgnss.ReportRunner.runOneAsset_(ci);
+                end
+            end
+        end
+
+        function res = runOneAsset_(cfg1)
+            % runOneAsset_  Run one asset's single-asset sim (no report) and extract its result.
+            sim = revgnss.ReverseGNSSSimulation(revgnss.ConfigFactory.finalizeConfig(cfg1));
+            sim.initialize();
+            sim.run();
+            res = revgnss.ReportRunner.extractAssetResult_(sim);
+        end
+
+        function res = extractAssetResult_(sim)
+            % extractAssetResult_  Per-asset estimate + flown truth (position + clock) for the relative
+            % layer, read straight from the sim (no reconstruction). Output-only -> byte-identical.
+            sm = sim.ekf.stateMap;
+            res = struct();
+            res.x        = sim.ekf.x;
+            res.P        = sim.ekf.P;
+            res.stateMap = sm;
+            res.history  = sim.ekf.history;
+            res.truthR   = sim.asset.r_ecef_m;
+            res.truthV   = sim.asset.v_ecef_mps;
+            res.truthClk = sim.asset.clock.getBiasMeters();
+            res.posErr   = norm(sim.ekf.x(sm.r_idx) - sim.asset.r_ecef_m);
+            if sim.orbitTruthCache.enabled
+                res.truthTraj    = sim.orbitTruthCache.r_ecef_m;
+                res.truthVelTraj = sim.orbitTruthCache.v_ecef_mps;
+                res.truthTime_s  = sim.orbitTruthCache.t_s(:).';
+            else
+                res.truthTraj = []; res.truthVelTraj = []; res.truthTime_s = [];
+            end
+            res.truthClkTraj_m = []; res.truthClkTime_s = [];
+            try
+                clkHist = sim.asset.clock.history;
+                if ~isempty(clkHist.bias_s)
+                    c = revgnss.Constants.SPEED_OF_LIGHT_MPS;
+                    res.truthClkTraj_m = clkHist.bias_s(:).' * c;
+                    res.truthClkTime_s = clkHist.time_s(:).';
+                end
+            catch
+            end
+        end
+
+        function base = singleAssetBase_(cfg)
+            % A single-asset config: one estimated asset, no swarm/ISL/secondary machinery.
+            base = revgnss.ReportRunner.stripSwarmEstimation_(cfg);
+            base.scenario.nSpaceAssets = 1;
+        end
+
+        function c = stripSwarmEstimation_(cfg)
+            % Disable secondary estimation + ISL/TWSTFT (relative-layer, not per-asset EKF rows), set
+            % multiAsset.mode='fast' (passthrough). Truth-side untouched. Single-asset cfg -> unchanged.
+            c = cfg;
+            if isfield(c,'multiAsset')
+                c.multiAsset.mode = 'fast';
+                c.multiAsset.towersObserveSecondaries = false;
+                if isfield(c.multiAsset,'twoWayISL'); c.multiAsset.twoWayISL.enable = false; end
+                if isfield(c.multiAsset,'twoWayTimeTransferISL'); c.multiAsset.twoWayTimeTransferISL.enable = false; end
+                if isfield(c.multiAsset,'towerSecondary')
+                    ts = c.multiAsset.towerSecondary;
+                    if isfield(ts,'carrier');    ts.carrier.enable = false;    end
+                    if isfield(ts,'atmosphere');  ts.atmosphere.enable = false;  end
+                    if isfield(ts,'doppler');     ts.doppler.enable = false;     end
+                    if isfield(ts,'estimateAtmosphere'); ts.estimateAtmosphere = false; end
+                    if isfield(ts,'attitude');    ts.attitude.enable = false;    end
+                    if isfield(ts,'multiAntenna'); ts.multiAntenna.enable = false; end
+                    c.multiAsset.towerSecondary = ts;
+                end
+            end
+            if isfield(c,'measurements') && isfield(c.measurements,'isl')
+                c.measurements.isl.enable = false;
+            end
         end
 
     end  % public static methods

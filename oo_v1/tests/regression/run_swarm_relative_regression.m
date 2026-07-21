@@ -4,7 +4,7 @@ function result = run_swarm_relative_regression(mode)
 %   run_swarm_relative_regression()          % compute digest, diff vs frozen baseline; PASS/FAIL
 %   run_swarm_relative_regression('capture') % (re)freeze the baseline -- ONLY for an intended change
 %
-% The federated relative layer (revgnss.FederatedSwarmRunner + revgnss.SwarmRelativeSolver) is fully
+% The federated relative layer (revgnss.ReportRunner.runFederatedEstimation + revgnss.SwarmRelativeSolver) is fully
 % deterministic (per-asset seeded W1 sims + identity-keyed solver noise), so a canonical N=4 run with
 % the sat-sat TWSTFT relative-clock gate ON has a bit-reproducible digest: the shape + relative-clock
 % recovery scalars, the per-epoch solved-error series, and a W1 anchor (each asset's final position +
@@ -54,7 +54,7 @@ function dg = swarmRelativeDigest_()
     cfg.plots.enable = false; cfg.plots.showFigures = false;
     cfg.multiAsset.twoWayTimeTransferISL.enable = true;   % exercise BOTH shape + relative clocks
 
-    r = revgnss.FederatedSwarmRunner.run(cfg);
+    r = revgnss.ReportRunner.runFederatedEstimation(cfg);
     o = revgnss.SwarmRelativeSolver.solve(cfg, r);
 
     dg = struct();

@@ -498,7 +498,7 @@ classdef ConfigFactory
             %              estimateMode/towersObserveSecondaries/twoWayISL directly are
             %              unaffected and the frozen goldens stay byte-identical.
             %   'honest' : RETIRED. Was the joint primary-centric multi-asset EKF; superseded by the
-            %              federated stack (revgnss.FederatedSwarmRunner + SwarmRelativeSolver +
+            %              federated stack (run_oo_v1 (nSpaceAssets>1) + SwarmRelativeSolver +
             %              FederatedSwarmSummary). Now raises an error pointing there.
             %
             %   Called from BOTH masterConfig and finalizeConfig; idempotent for 'fast'.
@@ -513,13 +513,13 @@ classdef ConfigFactory
                 case 'honest'
                     error('ConfigFactory:multiAssetModeRetired', ...
                         ['cfg.multiAsset.mode=''honest'' (the joint primary-centric multi-asset EKF) ' ...
-                         'is RETIRED. Use revgnss.FederatedSwarmRunner (N independent single-asset ' ...
-                         'EKFs) + revgnss.SwarmRelativeSolver + revgnss.FederatedSwarmSummary for ' ...
-                         'multi-asset estimation. See docs/federated_swarm_architecture.md.']);
+                         'is RETIRED. For multi-asset estimation just set cfg.scenario.nSpaceAssets>1 ' ...
+                         'and run through run_oo_v1 -> ReportRunner (the federated N single-asset EKFs ' ...
+                         '+ ISL/TWSTFT relative layer). See docs/federated_swarm_architecture.md.']);
                 otherwise
                     error('ConfigFactory:multiAssetMode', ...
                         ['cfg.multiAsset.mode must be ''fast'' (got ''%s''; ''honest'' is retired ' ...
-                         '-> use revgnss.FederatedSwarmRunner).'], mode);
+                         '-> use run_oo_v1 (nSpaceAssets>1)).'], mode);
             end
         end
 
