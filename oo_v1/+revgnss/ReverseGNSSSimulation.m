@@ -429,22 +429,6 @@ classdef ReverseGNSSSimulation < handle
             end
             errStruct.twoWayTimeTransfer = twttInfo;
 
-            % WP5: ground-tower -> secondary pseudorange + carrier rows. Each visible tower observes
-            % a secondary's b_tx at a near-radial LOS against the KNOWN tower clock, giving b_tx an
-            % ABSOLUTE ground anchor independent of the primary radial (breaks the WP3 degeneracy).
-            % No primary-state columns -> byte-identical when off / nSpaceAssets=1. Emitted by the
-            % shared MeasurementModel.computeSecondaryGroundRows (Phase 3b-2: the reduced
-            % SecondaryGroundMeasurementBuilder was folded in and retired).
-            [z_gs, h_gs, H_gs, R_gs, gsInfo] = obj.measModel.computeSecondaryGroundRows( ...
-                obj.assets, obj.towers, obj.ekf.x, obj.ekf.stateMap, obj.ekf.nx, t_s);
-            if ~isempty(z_gs)
-                z = [z; z_gs];
-                h = [h; h_gs];
-                H = [H; H_gs];
-                R = blkdiag(R, R_gs);
-            end
-            errStruct.secondaryGround = gsInfo;
-
             % P2': all-pairs two-way ISL (clock-free baseline lengths). Fuses with the one-way
             % ISL + ground rows; empty (byte-identical) at nSpaceAssets=1 / when disabled.
             [z_sw, h_sw, H_sw, R_sw, swInfo] = revgnss.SwarmTwoWayISLBuilder.build( ...

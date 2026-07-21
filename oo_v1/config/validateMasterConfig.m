@@ -164,7 +164,6 @@ function cfg = validateMasterConfig(cfg)
 
     % --- Per-secondary ground carrier guards (delegated; no-op when off). Phase 3b-2 (C5) moved
     % the tower->secondary rows into MeasurementModel, which now owns this validation. ---
-    models.measurements.MeasurementModel.validateSecondaryConfig(cfg);
 
     % --- Phase-2 per-secondary troposphere ZWD guard: the ZWD absorbs the Guard A divergent
     % tropo residual, so it is unobservable (and refused) unless Guard A is on. Fail loudly
