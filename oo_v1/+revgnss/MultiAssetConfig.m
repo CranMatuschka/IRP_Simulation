@@ -25,8 +25,6 @@ classdef MultiAssetConfig
                 error('MultiAssetConfig:badEstimateMode', ...
                     'cfg.multiAsset.estimateMode must be ''off''|''clocks''|''position''; got ''%s''.', estMode);
             end
-            % 'position' (P1'/WP4) is a SUPERSET of 'clocks': each secondary gets a full
-            % [r,v,b,bdot] block. secondaryClockCount treats 'position' as clock-enabled too.
             cfg.multiAsset.estimateMode = estMode;
 
             if ~isfield(cfg,'asset') || isempty(cfg.asset)
@@ -75,7 +73,6 @@ classdef MultiAssetConfig
             cfg.multiAsset.estimatedAssetIndex = 1;
             cfg.multiAsset.estimatedAssetName = cfg.assets(1).name;
             cfg.multiAsset.multiAssetEstimationEnabled = strcmp(estMode,'clocks') && nAssets >= 2;
-            cfg.multiAsset.secondaryClockStates = 2 * revgnss.MultiAssetConfig.secondaryClockCount(cfg);
             if cfg.multiAsset.multiAssetEstimationEnabled
                 cfg.multiAsset.guardMessage = 'secondary-asset clocks (bias+drift) estimated as EKF states (WP3); positions remain product';
             else
@@ -135,7 +132,6 @@ classdef MultiAssetConfig
             s.guardMessage = cfg.multiAsset.guardMessage;
             s.islRows = revgnss.MultiAssetConfig.islRowCount_(cfg);
             s.twstftRows = 0;
-            s.secondaryClockStates = cfg.multiAsset.secondaryClockStates;
             s.futureInactiveLinkTypes = {'TWSTFT','relay/transponder'};
             s.assetTable = assetTable;
         end
@@ -173,86 +169,6 @@ classdef MultiAssetConfig
             end
         end
 
-        function nSec = secondaryClockCount(cfg)
-            % secondaryClockCount  THE single WP3 master gate. Returns the number of
-            % secondaries whose [b_tx,bdot_tx] are EKF-estimated (nSpaceAssets-1), or 0.
-            % Reads RAW cfg fields only (no dependency on normalize having run), so it is
-            % safe to call from the EKF constructor and the report helper alike.
-            nSec = 0;
-            mode = revgnss.MultiAssetConfig.estimateModeStr_(cfg);
-            if ~ismember(mode, {'clocks','position'}); return; end   % 'position' includes clocks
-            nA = 1;
-            if isfield(cfg,'scenario') && isfield(cfg.scenario,'nSpaceAssets')
-                nA = max(1, round(cfg.scenario.nSpaceAssets));
-            end
-            if nA < 2; return; end
-            % ISL code must be an active EKF observable or b_tx has zero measurement
-            % support (pure divergent random walk). This makes state allocation and
-            % observability inseparable -- no estimated-but-unobservable clock states.
-            g = @(p) revgnss.MultiAssetConfig.cfgBool_(cfg, p, false);
-            if ~(g({'measurements','isl','enable'}) && ...
-                 g({'measurements','isl','code','enable'}) && ...
-                 g({'measurements','isl','code','useInEKF'})); return; end
-            nSec = nA - 1;
-        end
-
-        function nSec = secondaryOrbitCount(cfg)
-            % secondaryOrbitCount  P1'/WP4 gate: number of secondaries whose [r,v] are
-            % EKF-estimated. Nonzero only for estimateMode='position' AND when the
-            % secondary is observable (ground->secondary rows on, per the review: never
-            % allocate an orbit block without an observable touching it). Mirrors the
-            % secondaryClockCount allocation-gate discipline.
-            nSec = 0;
-            if ~strcmp(revgnss.MultiAssetConfig.estimateModeStr_(cfg), 'position'); return; end
-            % Position needs a POSITION observable: ground->secondary rows (near-radial
-            % absolute) are required; ISL alone only ties relative baselines.
-            if ~revgnss.MultiAssetConfig.cfgBool_(cfg, {'multiAsset','towersObserveSecondaries'}, false)
-                return;
-            end
-            nSec = revgnss.MultiAssetConfig.secondaryClockCount(cfg);   % same asset set (needs ISL code gate too)
-        end
-
-        function nSec = secondaryCarrierCount(cfg)
-            % secondaryCarrierCount  Phase-1 per-secondary-symmetry gate: number of
-            % secondaries that get tower->secondary CARRIER-phase rows + float-ambiguity
-            % states. Requires an estimated orbit block (position mode + towersObserve-
-            % Secondaries; a carrier row needs the secondary's r/v geometric column) AND
-            % the carrier toggle. Returns 0 otherwise -> byte-identical when off / single-asset.
-            nSec = 0;
-            if ~revgnss.MultiAssetConfig.cfgBool_(cfg, {'multiAsset','towerSecondary','carrier','enable'}, false)
-                return;
-            end
-            nSec = revgnss.MultiAssetConfig.secondaryOrbitCount(cfg);
-        end
-
-        function nSec = secondaryAtmosphereCount(cfg)
-            % secondaryAtmosphereCount  Phase-2 gate: number of secondaries that get per-
-            % (secondary,tower) troposphere ZWD states. HONEST observability prerequisite:
-            % only allocated when Guard A (towerSecondary.atmosphere.enable) injects a
-            % DIVERGENT truth-side tropo residual for the ZWD to absorb -- with a matched
-            % atmosphere the state sees zero signal and estimating it would be dishonest.
-            % Requires an estimated orbit block (position + towersObserveSecondaries) too.
-            nSec = 0;
-            if ~revgnss.MultiAssetConfig.cfgBool_(cfg, {'multiAsset','towerSecondary','estimateAtmosphere'}, false)
-                return;
-            end
-            if ~revgnss.MultiAssetConfig.cfgBool_(cfg, {'multiAsset','towerSecondary','atmosphere','enable'}, false)
-                return;   % no divergent tropo residual -> unobservable -> refuse to allocate
-            end
-            nSec = revgnss.MultiAssetConfig.secondaryOrbitCount(cfg);
-        end
-
-        function nSec = groundSecondaryRowCount(cfg)
-            % groundSecondaryRowCount  WP5 gate. Returns the number of secondaries whose
-            % clock is observed by ground-tower rows (== secondaryClockCount) when
-            % cfg.multiAsset.towersObserveSecondaries is true, else 0. Requires WP3
-            % (secondaryClockCount>0) so the tower row has a secondary clock state to touch.
-            nSec = 0;
-            if ~revgnss.MultiAssetConfig.cfgBool_(cfg, {'multiAsset','towersObserveSecondaries'}, false)
-                return;
-            end
-            nSec = revgnss.MultiAssetConfig.secondaryClockCount(cfg);
-        end
     end
 
     methods (Static, Access = private)

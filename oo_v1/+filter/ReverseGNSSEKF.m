@@ -68,7 +68,6 @@ classdef ReverseGNSSEKF < handle
 
         % Process noise parameters
         sigma_accel_mps2      (1,1) double = 0.01
-        secondarySigmaAccel_mps2 (1,1) double = NaN   % Guard B: independent secondary-orbit SNC; NaN = inherit primary
         sigma_angAccel_radps2 (1,1) double = 1e-4
 
         % Observability flags: set to false to freeze states via Q = ~0
@@ -84,35 +83,6 @@ classdef ReverseGNSSEKF < handle
         imuRrw_               (1,1) double  = 1e-6    % filter bias rate random walk [rad/(s*sqrt(s))]
         imuP0Bias_            (1,1) double  = 1e-5    % initial bias 1-sigma (init done in ScenarioFactory)
         imuVanLoan_           (1,1) logical = false   % optional theta<->b_g Q cross term
-
-        % WP3: secondary-asset clock states (bias+drift per secondary). Appended LAST
-        % (after gyroBias) so no existing index shifts; off => nx/state-map identical
-        % to today (golden-safe). Gated by MultiAssetConfig.secondaryClockCount(cfg).
-        estimateSecondaryClocks (1,1) logical = false
-        nSecondaryClocks        (1,1) double  = 0
-
-        % P1'/WP4: secondary-asset ORBIT states ([r(3),v(3)] per secondary), appended
-        % after the secondary-clock block. Full [r,v,b,bdot] per secondary => each is a
-        % real estimated asset. Off => nx/state-map identical to WP3 (golden-safe).
-        estimateSecondaryOrbits (1,1) logical = false
-        nSecondaryOrbits        (1,1) double  = 0
-
-        % Phase-1 per-secondary CARRIER float-ambiguity states (single-frequency L1): one
-        % per (secondary, tower), mirroring the chief's per-tower ambiguity. Appended after
-        % the secondary-orbit block, before srpScale. Off => nx/state-map identical (golden-
-        % safe). Gated by MultiAssetConfig.secondaryCarrierCount(cfg) (needs an orbit block).
-        estimateSecondaryAmbiguities (1,1) logical = false
-        nSecondaryAmbAssets          (1,1) double  = 0      % number of secondaries with carrier rows
-        secondaryAmbNTowers_         (1,1) double  = 0      % towers per secondary (=nTowers)
-        secondaryAmbProcNoise_       (1,1) double  = 1e-4   % ambiguity random-walk sigma [m/sqrt(s)]
-
-        % Phase-2 per-secondary troposphere ZWD states (one per secondary/tower), Gauss-Markov,
-        % mirroring the chief per-tower ZWD. Appended after the secondary-ambiguity block. Off =>
-        % nx/state-map identical (golden-safe). Gated by MultiAssetConfig.secondaryAtmosphereCount.
-        estimateSecondaryZwd (1,1) logical = false
-        nSecondaryZwdAssets  (1,1) double  = 0      % number of secondaries with ZWD states
-        secondaryZwdTau_     (1,1) double  = 1800   % Gauss-Markov correlation time [s]
-        secondaryZwdSigmaSs_ (1,1) double  = 0.05   % steady-state zenith wet 1-sigma [m]
 
         % SRP scale-coefficient state (primary only, single scalar): a dimensionless
         % multiplier s on the reference SRP acceleration (Cr=s*refCr), observed via
@@ -217,36 +187,6 @@ classdef ReverseGNSSEKF < handle
                 catch; end
             end
 
-            % WP3 secondary-clock gate. secondaryClockCount returns 0 unless
-            % estimateMode=='clocks' AND nSpaceAssets>=2 AND ISL code is an active EKF
-            % observable -- so golden (nSpaceAssets=1) and mode='off' both force it off.
-            nSecClk_ = revgnss.MultiAssetConfig.secondaryClockCount(cfg);
-            obj.estimateSecondaryClocks = nSecClk_ > 0;
-            obj.nSecondaryClocks        = nSecClk_;
-            nSecOrb_ = revgnss.MultiAssetConfig.secondaryOrbitCount(cfg);
-            obj.estimateSecondaryOrbits = nSecOrb_ > 0;
-            obj.nSecondaryOrbits        = nSecOrb_;
-
-            % Phase-1 per-secondary carrier ambiguity gate. secondaryCarrierCount>0 only for
-            % position mode + towersObserveSecondaries + carrier.enable -> golden/off force it 0.
-            nSecCarr_ = revgnss.MultiAssetConfig.secondaryCarrierCount(cfg);
-            obj.estimateSecondaryAmbiguities = nSecCarr_ > 0;
-            obj.nSecondaryAmbAssets          = nSecCarr_;
-            obj.secondaryAmbNTowers_         = nTowers;
-            if obj.estimateSecondaryAmbiguities
-                try; obj.secondaryAmbProcNoise_ = cfg.multiAsset.towerSecondary.carrier.ambProcNoise_m; catch; end
-            end
-
-            % Phase-2 per-secondary troposphere ZWD gate. secondaryAtmosphereCount>0 only for
-            % position mode + towersObserveSecondaries + estimateAtmosphere + Guard A on.
-            nSecZwd_ = revgnss.MultiAssetConfig.secondaryAtmosphereCount(cfg);
-            obj.estimateSecondaryZwd = nSecZwd_ > 0;
-            obj.nSecondaryZwdAssets  = nSecZwd_;
-            if obj.estimateSecondaryZwd
-                try; obj.secondaryZwdTau_     = cfg.multiAsset.towerSecondary.zwd.tau_s;      catch; end
-                try; obj.secondaryZwdSigmaSs_ = cfg.multiAsset.towerSecondary.zwd.sigma_ss_m; catch; end
-            end
-
             % SRP scale-coefficient gate (primary). enable && useInEKF, both default off.
             if isfield(cfg,'estimator') && isfield(cfg.estimator,'srpCoefficient')
                 sc = cfg.estimator.srpCoefficient;
@@ -275,31 +215,12 @@ classdef ReverseGNSSEKF < handle
             if obj.estimateGyroBias
                 obj.nx = obj.nx + 3;
             end
-            if obj.estimateSecondaryClocks
-                obj.nx = obj.nx + 2 * obj.nSecondaryClocks;   % [b_tx, bdot_tx] per secondary
-            end
-            if obj.estimateSecondaryOrbits
-                obj.nx = obj.nx + 6 * obj.nSecondaryOrbits;   % [r(3), v(3)] per secondary
-            end
-            if obj.estimateSecondaryAmbiguities
-                obj.nx = obj.nx + obj.nSecondaryAmbAssets * obj.secondaryAmbNTowers_;  % one L1 ambiguity per (secondary, tower)
-            end
-            if obj.estimateSecondaryZwd
-                obj.nx = obj.nx + obj.nSecondaryZwdAssets * nTowers;   % one ZWD per (secondary, tower)
-            end
             if obj.estimateSrpScale
                 obj.nx = obj.nx + 1;   % single scalar, appended strictly LAST
             end
 
             if isfield(cfg.estimator,'sigma_accel_mps2')
                 obj.sigma_accel_mps2 = cfg.estimator.sigma_accel_mps2;
-            end
-            if isfield(cfg,'multiAsset') && isfield(cfg.multiAsset,'secondaryOrbit') && ...
-                    isfield(cfg.multiAsset.secondaryOrbit,'sigma_accel_mps2')
-                v_ = cfg.multiAsset.secondaryOrbit.sigma_accel_mps2;   % Guard B: [] / <=0 -> inherit (NaN)
-                if isnumeric(v_) && isscalar(v_) && isfinite(v_) && v_ > 0
-                    obj.secondarySigmaAccel_mps2 = v_;
-                end
             end
             if isfield(cfg.estimator,'sigma_angAccel_radps2')
                 obj.sigma_angAccel_radps2 = cfg.estimator.sigma_angAccel_radps2;
@@ -384,17 +305,14 @@ classdef ReverseGNSSEKF < handle
         end
 
         % ----------------------------------------------------------------
-        function predict(obj, dt_s, towerClockModels, t0_s, omega_gyro_radps, secondaryClockModels)
+        function predict(obj, dt_s, towerClockModels, t0_s, omega_gyro_radps)
             % predict  EKF time propagation.
             %   t0_s — simulation time at start of prediction interval.
             %   omega_gyro_radps (optional) — strapdown gyro body-rate reading. When the IMU is
             %   enabled the attitude is propagated with omega = omega_gyro - b_g; otherwise the
             %   free omega state is used (byte-identical to the pre-IMU behaviour).
-            %   secondaryClockModels (optional, WP3) — cell of secondary-asset ClockModels
-            %   (asset 2..N) supplying the per-secondary clock process noise Q.
             if nargin < 4 || isempty(t0_s); t0_s = 0; end
             if nargin < 5; omega_gyro_radps = []; end
-            if nargin < 6; secondaryClockModels = {}; end
 
             x  = obj.x;
             sm = obj.stateMap;
@@ -495,50 +413,13 @@ classdef ReverseGNSSEKF < handle
                 end
             end
 
-            % Secondary-asset clocks (WP3): bias integrates drift; drift is random walk.
-            if obj.estimateSecondaryClocks
-                for si = 1:obj.nSecondaryClocks
-                    ib = sm.secondaryClockIdx(si,1);
-                    id = sm.secondaryClockIdx(si,2);
-                    x_new(ib) = x(ib) + dt_s * x(id);
-                    x_new(id) = x(id);
-                end
-            end
-
-            % Secondary-asset orbits (P1'/WP4): propagate each secondary [r,v] with the
-            % SAME dynamics as the primary (linearized at the ESTIMATE), storing its 6x6
-            % STM for buildF_. Empty cell when off -> buildF_ unchanged (golden-safe).
-            secPhi6 = {};
-            if obj.estimateSecondaryOrbits
-                secPhi6 = cell(1, obj.nSecondaryOrbits);
-                for si = 1:obj.nSecondaryOrbits
-                    ri = x(sm.secondaryOrbitIdx(si,1:3));
-                    vi = x(sm.secondaryOrbitIdx(si,4:6));
-                    if strcmp(dynMode, 'constantVelocity')
-                        x_new(sm.secondaryOrbitIdx(si,1:3)) = ri + dt_s * vi;
-                        x_new(sm.secondaryOrbitIdx(si,4:6)) = vi;
-                        secPhi6{si} = [];   % buildF_ uses the default [I dtI;0 I] block
-                    else
-                        try
-                            [ri_new, vi_new] = filter.EkfDynamicsPredictor.propagateEcef( ...
-                                ri, vi, dt_s, t0_s, obj.cfg);
-                            secPhi6{si} = filter.EkfDynamicsPredictor.finiteDiffStm6( ...
-                                ri, vi, dt_s, t0_s, obj.cfg);
-                        catch
-                            ri_new = ri + dt_s * vi; vi_new = vi; secPhi6{si} = [];
-                        end
-                        x_new(sm.secondaryOrbitIdx(si,1:3)) = ri_new;
-                        x_new(sm.secondaryOrbitIdx(si,4:6)) = vi_new;
-                    end
-                end
-            end
             obj.x = x_new;
 
             % State transition Jacobian F (pass Phi6 override for r/v block)
-            F = obj.buildF_(dt_s, eul, omg, Phi6, secPhi6, srpCol);
+            F = obj.buildF_(dt_s, eul, omg, Phi6, srpCol);
 
             % Process noise Q
-            Q = obj.buildQ_(dt_s, towerClockModels, secondaryClockModels);
+            Q = obj.buildQ_(dt_s, towerClockModels);
 
             % Propagate covariance
             obj.P = F * obj.P * F' + Q;
@@ -716,80 +597,18 @@ classdef ReverseGNSSEKF < handle
         end
 
         % ----------------------------------------------------------------
-        function s = computeSwarmNEES(obj, truthPrimary, secTruth)
+        function s = computeSwarmNEES(obj, truthPrimary, secTruth) %#ok<INUSD>
             % computeSwarmNEES  Guard C: per-secondary + formation-centroid NEES.
-            %   Scores each secondary [r,v,(clock)] block and TWO centroid position modes.
-            %   The centroid covariance uses the CROSS-covariances P(r_i,r_j) -- the mode a
-            %   block-diagonal R / matched atmosphere / truth==dynamics make the filter
-            %   over-confident about. Centroid NEES/dof >> 1 flags the small absolute
-            %   (centroid) RMS as a crutch. Golden-safe: empty perSat + NaN centroids when
-            %   nSecondaryOrbits==0.
-            %   truthPrimary : struct .r_ecef_m [3x1]
-            %   secTruth     : struct .pos_m [3 x nSec], .vel_mps [3 x nSec],
-            %                         (optional) .bias_m [nSec x1], .drift_mps [nSec x1]
-            sm = obj.stateMap;
+            %   RETIRED (federated-swarm joint-EKF retirement, W4-4b): the secondary-asset
+            %   orbit/clock EKF states this method scored have been removed (the joint
+            %   secondary measurement path was already deleted, and mode='honest' now
+            %   errors). This method is kept ONLY so its existing callers
+            %   (SimulationDataStore, MonteCarloConsistency) keep working; it always
+            %   returns the empty/NaN sentinel struct since there is no secondary state
+            %   left to score.
             s = struct('perSat', struct('pos',{},'vel',{},'clock',{},'posErrNorm_m',{}), ...
                        'centroid',          struct('pos',NaN,'posErrNorm_m',NaN,'N',0,'cov3',[]), ...
                        'secondaryCentroid', struct('pos',NaN,'posErrNorm_m',NaN,'N',0,'cov3',[]));
-            if ~obj.estimateSecondaryOrbits || obj.nSecondaryOrbits == 0; return; end
-            orbIdx = sm.secondaryOrbitIdx;                 % [nSec x 6]
-            nSec   = size(orbIdx,1);
-
-            posBlocks = cell(1, nSec+1);  posErr = cell(1, nSec+1);
-            posBlocks{1} = sm.r_idx(:);                                       % primary anchors the CoM
-            posErr{1}    = obj.x(sm.r_idx) - truthPrimary.r_ecef_m(:);
-
-            for si = 1:nSec
-                pIdx = orbIdx(si,1:3).';  vIdx = orbIdx(si,4:6).';
-                er = obj.x(pIdx) - secTruth.pos_m(:,si);
-                ev = obj.x(vIdx) - secTruth.vel_mps(:,si);
-                s.perSat(si).pos          = neesBlock_(obj.P, pIdx, er);
-                s.perSat(si).vel          = neesBlock_(obj.P, vIdx, ev);
-                s.perSat(si).posErrNorm_m = norm(er);
-                s.perSat(si).clock        = NaN;
-                if isfield(secTruth,'bias_m') && numel(secTruth.bias_m) >= si && ...
-                        isfield(sm,'secondaryClockIdx') && size(sm.secondaryClockIdx,1) >= si
-                    cIdx = sm.secondaryClockIdx(si,1);  ec = obj.x(cIdx) - secTruth.bias_m(si);
-                    if size(sm.secondaryClockIdx,2) > 1 && isfield(secTruth,'drift_mps') && ...
-                            numel(secTruth.drift_mps) >= si
-                        cIdx = sm.secondaryClockIdx(si,:).';
-                        ec   = [ec; obj.x(cIdx(2)) - secTruth.drift_mps(si)]; %#ok<AGROW>
-                    end
-                    s.perSat(si).clock = neesBlock_(obj.P, cIdx, ec);
-                end
-                posBlocks{si+1} = pIdx;  posErr{si+1} = er;
-            end
-
-            s.centroid          = obj.centroidNEES_(posBlocks,        posErr);         % {primary + secondaries}
-            s.secondaryCentroid = obj.centroidNEES_(posBlocks(2:end), posErr(2:end));  % secondaries only
-        end
-
-        function c = centroidNEES_(obj, posBlocks, posErr)
-            % centroidNEES_  Centroid position NEES using the CROSS-covariances. The
-            % centroid c = (1/N) sum_i r_i is a linear map c = M x (M has (1/N)I_3 per
-            % included asset), so exactly: ebar = (1/N) sum e_i, Pc = M P M' =
-            % (1/N^2) sum_i sum_j P(idx_i, idx_j), centroidNEES = ebar'(Pc\ebar)/3
-            % (expectation 1 when consistent). The i~=j cross-blocks are what a
-            % block-diagonal R / matched atmosphere / truth==dynamics under-estimate.
-            N = numel(posBlocks);
-            c = struct('pos',NaN,'posErrNorm_m',NaN,'N',N,'cov3',[]);
-            if N < 1; return; end
-            eBar = zeros(3,1);
-            for i = 1:N; eBar = eBar + posErr{i}; end
-            eBar = eBar / N;
-            Pc = zeros(3,3);
-            for i = 1:N
-                for j = 1:N
-                    Pc = Pc + obj.P(posBlocks{i}, posBlocks{j});
-                end
-            end
-            Pc = Pc/(N*N);  Pc = (Pc + Pc.')/2;
-            c.cov3 = Pc;  c.posErrNorm_m = norm(eBar);
-            % rcond guard: Pc is near-singular in the radial direction BY CONSTRUCTION (the
-            % wall). NaN there -> reported as FLAGGED (the intended signal), never a crash.
-            if rcond(Pc) > 1e-15
-                c.pos = (eBar.' * (Pc \ eBar)) / 3;
-            end
         end
 
         % ----------------------------------------------------------------
@@ -914,62 +733,6 @@ classdef ReverseGNSSEKF < handle
                 sm.gyroBiasIdx = [];
             end
 
-            % WP3 secondary-asset clock states (appended strictly LAST). Row si (1..N-1)
-            % maps to asset ai=si+1 and holds [b_tx_idx, bdot_tx_idx]. Empty sentinel
-            % zeros(0,2) when off -> byte-identical map (mirrors towerClockIdx pattern).
-            if obj.estimateSecondaryClocks && obj.nSecondaryClocks > 0
-                secIdx = zeros(obj.nSecondaryClocks, 2);
-                for si = 1:obj.nSecondaryClocks
-                    secIdx(si,:) = [nextIdx, nextIdx+1];
-                    nextIdx = nextIdx + 2;
-                end
-                sm.secondaryClockIdx = secIdx;
-            else
-                sm.secondaryClockIdx = zeros(0, 2);
-            end
-
-            % P1'/WP4 secondary-asset ORBIT states (appended LAST). Row si -> asset si+1,
-            % columns 1:3 = r_i indices, 4:6 = v_i indices. Empty zeros(0,6) when off.
-            if obj.estimateSecondaryOrbits && obj.nSecondaryOrbits > 0
-                orbIdx = zeros(obj.nSecondaryOrbits, 6);
-                for si = 1:obj.nSecondaryOrbits
-                    orbIdx(si,:) = nextIdx:(nextIdx+5);
-                    nextIdx = nextIdx + 6;
-                end
-                sm.secondaryOrbitIdx = orbIdx;
-            else
-                sm.secondaryOrbitIdx = zeros(0, 6);
-            end
-
-            % Phase-1 per-secondary CARRIER float-ambiguity states (single-frequency L1),
-            % appended after the secondary-orbit block. secondaryAmbiguityIdx(si,ti) is the
-            % state index for secondary si+1 <-> tower ti. Empty zeros(0,nTowers) when off.
-            if obj.estimateSecondaryAmbiguities && obj.nSecondaryAmbAssets > 0
-                nT_ = obj.secondaryAmbNTowers_;
-                ambIdx = zeros(obj.nSecondaryAmbAssets, nT_);
-                for si = 1:obj.nSecondaryAmbAssets
-                    ambIdx(si,:) = nextIdx:(nextIdx + nT_ - 1);
-                    nextIdx = nextIdx + nT_;
-                end
-                sm.secondaryAmbiguityIdx = ambIdx;
-            else
-                sm.secondaryAmbiguityIdx = zeros(0, obj.secondaryAmbNTowers_);
-            end
-
-            % Phase-2 per-secondary troposphere ZWD states, appended after the ambiguity block.
-            % secondaryZwdIdx(si,ti) is the state index for secondary si+1 <-> tower ti. Empty
-            % zeros(0,nTowers) when off -> byte-identical map.
-            if obj.estimateSecondaryZwd && obj.nSecondaryZwdAssets > 0
-                zwdIdx = zeros(obj.nSecondaryZwdAssets, nTowers);
-                for si = 1:obj.nSecondaryZwdAssets
-                    zwdIdx(si,:) = nextIdx:(nextIdx + nTowers - 1);
-                    nextIdx = nextIdx + nTowers;
-                end
-                sm.secondaryZwdIdx = zwdIdx;
-            else
-                sm.secondaryZwdIdx = zeros(0, nTowers);
-            end
-
             % SRP scale-coefficient state (single scalar, appended strictly LAST). Empty []
             % when off -> byte-identical map (mirrors the gyroBiasIdx empty-sentinel pattern).
             if obj.estimateSrpScale
@@ -978,63 +741,19 @@ classdef ReverseGNSSEKF < handle
             else
                 sm.srpScaleIdx = [];
             end
-
-            % --- Phase-1 asset-symmetry VIEW (additive; ALIASES the indices above) ----------
-            % sm.asset(i) aggregates the per-asset state blocks into a uniform structure so
-            % downstream code can loop over satellites (chief = asset 1, secondaries 2..N)
-            % instead of hard-coding the chief scalars plus the per-secondary bolt-on matrices.
-            % It is a pure VIEW over the SAME state indices -- it allocates no state and moves
-            % nothing, so nx/x/P/F/Q/H are unchanged (golden byte-identical). No consumer yet
-            % (Phase 2 init unification is the first). Fields are empty where a state is not
-            % estimated for that asset; asset(1) reproduces today's literal single-asset map.
-            nSecView = max([size(sm.secondaryOrbitIdx,1), size(sm.secondaryClockIdx,1), ...
-                            size(sm.secondaryAmbiguityIdx,1), size(sm.secondaryZwdIdx,1), 0]);
-            blank = struct('r',[],'v',[],'euler',[],'omega',[],'b',[],'bdot',[], ...
-                           'ambiguity',[],'zwd',[],'iono',[],'gyroBias',[]);
-            av = repmat(blank, 1, 1 + nSecView);
-            av(1).r     = sm.r_idx(:)';
-            av(1).v     = sm.v_idx(:)';
-            av(1).euler = sm.euler_idx(:)';
-            av(1).omega = sm.omega_idx(:)';
-            av(1).b     = sm.b_rx_idx;
-            av(1).bdot  = sm.bdot_rx_idx;
-            if isfield(sm,'ambiguityIdx') && ~isempty(sm.ambiguityIdx); av(1).ambiguity = sm.ambiguityIdx; end
-            if isfield(sm,'zwdIdx')  && ~isempty(sm.zwdIdx);  av(1).zwd  = sm.zwdIdx(:)';  end
-            if isfield(sm,'ionoIdx') && ~isempty(sm.ionoIdx); av(1).iono = sm.ionoIdx(:)'; end
-            if isfield(sm,'gyroBiasIdx') && ~isempty(sm.gyroBiasIdx); av(1).gyroBias = sm.gyroBiasIdx(:)'; end
-            for si = 1:nSecView
-                aj = si + 1;
-                if si <= size(sm.secondaryOrbitIdx,1)
-                    av(aj).r = sm.secondaryOrbitIdx(si,1:3);
-                    av(aj).v = sm.secondaryOrbitIdx(si,4:6);
-                end
-                if si <= size(sm.secondaryClockIdx,1)
-                    av(aj).b    = sm.secondaryClockIdx(si,1);
-                    av(aj).bdot = sm.secondaryClockIdx(si,2);
-                end
-                if si <= size(sm.secondaryAmbiguityIdx,1)
-                    av(aj).ambiguity = sm.secondaryAmbiguityIdx(si,:);
-                end
-                if si <= size(sm.secondaryZwdIdx,1)
-                    av(aj).zwd = sm.secondaryZwdIdx(si,:);
-                end
-            end
-            sm.asset = av;
         end
 
         % ----------------------------------------------------------------
-        function F = buildF_(obj, dt_s, euler, omega, Phi6, secPhi6, srpCol)
+        function F = buildF_(obj, dt_s, euler, omega, Phi6, srpCol)
             % buildF_  Linearised state-transition Jacobian.
             %
             % Euler-euler block: FD derivative of (eul + dt * T(eul,omg)*omg) w.r.t. eul.
             % Euler-omega block: dt * T(euler)  [kinematic transformation].
             % Phi6 (optional): 6x6 translational STM replacing default [I dtI;0 I] block.
-            % secPhi6 (optional, P1'): cell of per-secondary 6x6 orbit STMs.
             % srpCol (optional): 6x1 d([r;v])/d(srpScale) filling F(rv, srpScaleIdx).
 
             if nargin < 5; Phi6 = []; end
-            if nargin < 6; secPhi6 = {}; end
-            if nargin < 7; srpCol = []; end
+            if nargin < 6; srpCol = []; end
 
             nx = obj.nx;
             F  = eye(nx);
@@ -1108,29 +827,6 @@ classdef ReverseGNSSEKF < handle
                 end
             end
 
-            % Secondary-asset clock bias<-drift coupling (WP3; tower/rx precedent)
-            if obj.estimateSecondaryClocks
-                for si = 1:obj.nSecondaryClocks
-                    F(sm.secondaryClockIdx(si,1), sm.secondaryClockIdx(si,2)) = dt_s;
-                end
-            end
-
-            % Secondary-asset orbit STM block (P1'/WP4): 6x6 per secondary, mirroring the
-            % primary r/v block. Uses the propagated STM when available, else the default
-            % constant-velocity coupling [I dtI; 0 I].
-            if obj.estimateSecondaryOrbits
-                for si = 1:obj.nSecondaryOrbits
-                    oi = sm.secondaryOrbitIdx(si,:);
-                    if numel(secPhi6) >= si && ~isempty(secPhi6{si}) && ...
-                            isequal(size(secPhi6{si}), [6,6]) && all(isfinite(secPhi6{si}(:)))
-                        F(oi, oi) = secPhi6{si};
-                    else
-                        F(oi, oi) = eye(6);
-                        F(oi(1:3), oi(4:6)) = dt_s * eye(3);
-                    end
-                end
-            end
-
             % SRP scale-coefficient column: d([r;v])/ds fills F(rv, srpScaleIdx). The scale
             % itself is a random walk -> F(srpScaleIdx,srpScaleIdx)=1 already from F=eye(nx).
             if obj.estimateSrpScale && ~isempty(sm.srpScaleIdx) ...
@@ -1154,14 +850,6 @@ classdef ReverseGNSSEKF < handle
                     end
                 end
             end
-            % Phase-2 per-secondary ZWD states: same first-order Gauss-Markov as the chief.
-            if obj.estimateSecondaryZwd && isfield(sm,'secondaryZwdIdx') && ~isempty(sm.secondaryZwdIdx)
-                phi_szwd = exp(-dt_s / max(obj.secondaryZwdTau_, eps));
-                zi = sm.secondaryZwdIdx(:);
-                for jj = 1:numel(zi)
-                    if zi(jj) > 0; F(zi(jj), zi(jj)) = phi_szwd; end
-                end
-            end
 
             % Slant-iono states: first-order Gauss-Markov phi = exp(-dt/tau)
             if obj.estimateIono
@@ -1181,7 +869,7 @@ classdef ReverseGNSSEKF < handle
         end
 
         % ----------------------------------------------------------------
-        function Q = buildQ_(obj, dt_s, towerClockModels, secondaryClockModels)
+        function Q = buildQ_(obj, dt_s, towerClockModels)
             % buildQ_  Discrete-time process noise matrix.
             %
             % Position/velocity: continuous white-acceleration model.
@@ -1288,57 +976,6 @@ classdef ReverseGNSSEKF < handle
                 end
             end
 
-            % --- Secondary-asset clock process noise (WP3, if estimated) ---
-            % nargin>=4 short-circuit keeps 3-arg callers (e.g. buildQ_(dt,{})) byte-identical.
-            if obj.estimateSecondaryClocks && nargin >= 4 && ~isempty(secondaryClockModels)
-                for si = 1:min(obj.nSecondaryClocks, numel(secondaryClockModels))
-                    ib = sm.secondaryClockIdx(si,1);
-                    id = sm.secondaryClockIdx(si,2);
-                    if ~isempty(secondaryClockModels{si})
-                        Qsec = secondaryClockModels{si}.getProcessNoiseQ(dt_s, 'meters');
-                    else
-                        Qsec = diag([1e-4, 1e-8]) * dt_s;
-                    end
-                    Q(ib,ib) = Qsec(1,1); Q(ib,id) = Qsec(1,2);
-                    Q(id,ib) = Qsec(2,1); Q(id,id) = Qsec(2,2);
-                end
-            end
-
-            % --- Secondary-asset orbit process noise (P1'/WP4, SNC) -------
-            % Same continuous white-acceleration model as the primary r/v block (uses the
-            % same sigma_accel_mps2). Realism note: P1' also injects truth-side SRP/luni-
-            % solar the J2 block does not model; sa should be tuned to that dynamic gap.
-            if obj.estimateSecondaryOrbits
-                saSec = sa;   % default: inherit primary SNC (byte-identical to P1')
-                if isfinite(obj.secondarySigmaAccel_mps2) && obj.secondarySigmaAccel_mps2 > 0
-                    saSec = obj.secondarySigmaAccel_mps2;   % Guard B: independent secondary SNC
-                end
-                q_r  = saSec^2 * dt_s^3 / 3;
-                q_v  = saSec^2 * dt_s;
-                q_rv = saSec^2 * dt_s^2 / 2;
-                for si = 1:obj.nSecondaryOrbits
-                    oi = sm.secondaryOrbitIdx(si,:);
-                    for k = 1:3
-                        Q(oi(k),   oi(k))   = q_r;
-                        Q(oi(k+3), oi(k+3)) = q_v;
-                        Q(oi(k),   oi(k+3)) = q_rv;
-                        Q(oi(k+3), oi(k))   = q_rv;
-                    end
-                end
-            end
-
-            % --- Per-secondary carrier-ambiguity process noise (random walk) ----
-            % Mirrors the chief-ambiguity RW below; tiny so the float ambiguity is
-            % effectively constant between cycle slips (not modelled in Phase 1).
-            if obj.estimateSecondaryAmbiguities && isfield(sm,'secondaryAmbiguityIdx') ...
-                    && ~isempty(sm.secondaryAmbiguityIdx)
-                q_sa = obj.secondaryAmbProcNoise_^2 * dt_s;
-                ai = sm.secondaryAmbiguityIdx(:);
-                for jj = 1:numel(ai)
-                    Q(ai(jj), ai(jj)) = q_sa;
-                end
-            end
-
             % --- SRP scale-coefficient process noise (random walk) -------
             % Q = procNoise^2 * dt lets the scale s adapt slowly. Small by default so the
             % estimate stays smooth (the honest fix vs. blunt orbit-SNC inflation).
@@ -1392,15 +1029,6 @@ classdef ReverseGNSSEKF < handle
                     if idx > 0
                         Q(idx, idx) = q_zwd;
                     end
-                end
-            end
-            % Phase-2 per-secondary ZWD process noise: same Gauss-Markov steady-state form.
-            if obj.estimateSecondaryZwd && isfield(sm,'secondaryZwdIdx') && ~isempty(sm.secondaryZwdIdx)
-                phi_szwd = exp(-dt_s / max(obj.secondaryZwdTau_, eps));
-                q_szwd   = obj.secondaryZwdSigmaSs_^2 * (1 - phi_szwd^2);
-                zi = sm.secondaryZwdIdx(:);
-                for jj = 1:numel(zi)
-                    if zi(jj) > 0; Q(zi(jj), zi(jj)) = q_szwd; end
                 end
             end
 

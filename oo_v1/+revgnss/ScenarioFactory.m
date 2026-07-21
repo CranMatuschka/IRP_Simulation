@@ -115,25 +115,6 @@ classdef ScenarioFactory
                 end
             end
 
-            if ekf.estimateSecondaryClocks
-                % WP3: draw the secondary-clock init from the SAME P0 the filter is told
-                % it has, so initial NEES is O(1) (mirrors the tower-clock convention).
-                % Per-ai identity-keyed stream (seed+8700+ai): adding/removing assets
-                % cannot perturb another secondary's draw (upgrade over the tower shared
-                % stream). Truth anchor = cfg.assets(ai).clock (seed 300+ai); at t=0
-                % coloredBias=0 so config bias_s*c == runtime getBiasMeters() exactly.
-                [sb, sbd] = revgnss.ScenarioFactory.secondaryClockInitSigmas_(cfg);
-                for si = 1:ekf.nSecondaryClocks
-                    ai = si + 1;
-                    ib = sm.secondaryClockIdx(si,1);
-                    id = sm.secondaryClockIdx(si,2);
-                    rngSec = RandStream('mt19937ar', 'Seed', cfg.simulation.seed + 8700 + ai);
-                    [b0, bd0] = revgnss.ScenarioFactory.secondaryClockTruthMeters_(cfg, ai);
-                    x0(ib) = b0  + sb  * randn(rngSec);
-                    x0(id) = bd0 + sbd * randn(rngSec);
-                end
-            end
-
             % SRP scale-coefficient state: deterministic nominal init (no seeded draw). The
             % truth SRP is applied truth-side with a fixed Cr, so the "truth s" is 1.0 by
             % construction; initScale=1.0 gives zero initial error for this parameter state.
@@ -142,34 +123,6 @@ classdef ScenarioFactory
                 try; initScale = cfg.estimator.srpCoefficient.initScale; catch; end
                 x0(sm.srpScaleIdx) = initScale;
             end
-        end
-
-        function [sigma_b_m, sigma_bdot_mps] = secondaryClockInitSigmas_(cfg)
-            % secondaryClockInitSigmas_  Single source for the WP3 secondary-clock P0
-            % 1-sigma, shared by the seeded init draw AND the stated P0 so they cannot
-            % drift apart (initial NEES O(1)). Loose broadcast-product-class a-priori.
-            sigma_b_m      = 100.0;   % [m]
-            sigma_bdot_mps = 1.0;     % [m/s]
-            try
-                if isfield(cfg,'multiAsset') && isfield(cfg.multiAsset,'secondaryClock')
-                    scc = cfg.multiAsset.secondaryClock;
-                    if isfield(scc,'initSigma_m')        && scc.initSigma_m > 0;        sigma_b_m      = scc.initSigma_m;        end
-                    if isfield(scc,'initSigmaDrift_mps') && scc.initSigmaDrift_mps > 0; sigma_bdot_mps = scc.initSigmaDrift_mps; end
-                end
-            catch; end
-        end
-
-        function [b_m, bdot_mps] = secondaryClockTruthMeters_(cfg, ai)
-            % secondaryClockTruthMeters_  t=0 truth anchor for secondary ai, read from
-            % the finalized cfg (the runtime SpaceAsset objects do not exist yet at
-            % ScenarioFactory time). Valid because coloredBias_s=0 at t=0, so
-            % getBiasMeters()==bias_s*c. try/catch -> 0 on any missing field.
-            b_m = 0; bdot_mps = 0;
-            try
-                c = revgnss.Constants.SPEED_OF_LIGHT_MPS;
-                b_m      = cfg.assets(ai).clock.bias_s   * c;
-                bdot_mps = cfg.assets(ai).clock.fracFreq * c;
-            catch; end
         end
 
         function [sigma_b_m, sigma_bdot_mps] = towerClockInitSigmas_()
@@ -284,66 +237,12 @@ classdef ScenarioFactory
                 end
             end
 
-            % --- Phase-2 init unification: secondary-asset P0 priors in ONE per-asset loop ----
-            % Consolidates the four separate secondary blocks (WP3 clock, P1'/WP4 orbit, Phase-1
-            % carrier ambiguity, Phase-2 ZWD) into a single loop over the sm.asset(i) view. Each
-            % field is written only when that state exists for the asset (empty otherwise), so
-            % the P0 diagonal is byte-identical to the four-block version. The chief block (asset 1)
-            % is untouched above; at nSpaceAssets=1 the view is length 1 -> this loop is skipped.
-            if numel(sm.asset) > 1
-                [sbClk, sbdClk] = revgnss.ScenarioFactory.secondaryClockInitSigmas_(cfg);
-                [spOrb, svOrb]  = revgnss.ScenarioFactory.secondaryOrbitInitSigmas_(cfg);
-                sigma0_sa = revgnss.ScenarioFactory.getCfgNum_(cfg, {'multiAsset','towerSecondary','carrier','initialSigma_m'}, 100);
-                sigma0_sz = revgnss.ScenarioFactory.getCfgNum_(cfg, {'multiAsset','towerSecondary','zwd','initialSigma_m'}, 0.10);
-                for i = 2:numel(sm.asset)
-                    a = sm.asset(i);
-                    if ~isempty(a.b);    P0(a.b, a.b)       = sbClk^2;  end
-                    if ~isempty(a.bdot); P0(a.bdot, a.bdot) = sbdClk^2; end
-                    if ~isempty(a.r)
-                        for k = 1:3
-                            P0(a.r(k), a.r(k)) = spOrb^2;
-                            P0(a.v(k), a.v(k)) = svOrb^2;
-                        end
-                    end
-                    for jj = 1:numel(a.ambiguity)
-                        P0(a.ambiguity(jj), a.ambiguity(jj)) = sigma0_sa^2;
-                    end
-                    for jj = 1:numel(a.zwd)
-                        P0(a.zwd(jj), a.zwd(jj)) = sigma0_sz^2;
-                    end
-                end
-            end
-
             % SRP scale-coefficient prior variance (dimensionless).
             if ekf.estimateSrpScale && isfield(sm,'srpScaleIdx') && ~isempty(sm.srpScaleIdx)
                 initSigma = 0.1;
                 try; initSigma = cfg.estimator.srpCoefficient.initSigma; catch; end
                 P0(sm.srpScaleIdx, sm.srpScaleIdx) = initSigma^2;
             end
-        end
-
-        function [sigma_pos_m, sigma_vel_mps] = secondaryOrbitInitSigmas_(cfg)
-            % secondaryOrbitInitSigmas_  Single source for the P1' secondary-orbit P0
-            % 1-sigma (per axis), shared by the seeded init draw (in ReverseGNSSSimulation)
-            % and the stated P0 here so they cannot drift apart (initial NEES O(1)).
-            sigma_pos_m   = 100.0;
-            sigma_vel_mps = 0.1;
-            try
-                if isfield(cfg,'multiAsset') && isfield(cfg.multiAsset,'secondaryOrbit')
-                    so = cfg.multiAsset.secondaryOrbit;
-                    if isfield(so,'initSigmaPos_m')   && so.initSigmaPos_m > 0;   sigma_pos_m   = so.initSigmaPos_m;   end
-                    if isfield(so,'initSigmaVel_mps') && so.initSigmaVel_mps > 0; sigma_vel_mps = so.initSigmaVel_mps; end
-                end
-            catch; end
-        end
-
-        function v = getCfgNum_(cfg, path, dflt)
-            % getCfgNum_  Safe nested numeric-scalar config read with a default.
-            v = cfg;
-            for j = 1:numel(path)
-                if isstruct(v) && isfield(v, path{j}); v = v.(path{j}); else; v = dflt; return; end
-            end
-            if ~(isnumeric(v) && isscalar(v) && isfinite(v)); v = dflt; end
         end
     end
 end

@@ -66,18 +66,6 @@ classdef ReportRealityHelper
             if srpOn
                 expectedStates = expectedStates + 1;
             end
-            % WP3 secondary-asset clock states (2 per secondary), gated identically to the
-            % EKF constructor via the shared MultiAssetConfig.secondaryClockCount gate.
-            % +0 for golden (nSpaceAssets=1) -> byte-identical. Mirrors the IMU fix fbb9f6c.
-            expectedStates = expectedStates + 2 * revgnss.MultiAssetConfig.secondaryClockCount(cfg) ...
-                                            + 6 * revgnss.MultiAssetConfig.secondaryOrbitCount(cfg);
-            % Phase-1 per-secondary carrier ambiguity states: secondaryCarrierCount x nTowers
-            % (one L1 ambiguity per secondary/tower). +0 for golden (count 0) -> byte-identical.
-            nTwrCfg_ = nTwr; try; nTwrCfg_ = cfg.scenario.nTowers; catch; end
-            expectedStates = expectedStates + revgnss.MultiAssetConfig.secondaryCarrierCount(cfg) * nTwrCfg_;
-            % Phase-2 per-secondary troposphere ZWD states: secondaryAtmosphereCount x nTowers.
-            % +0 for golden (count 0) -> byte-identical.
-            expectedStates = expectedStates + revgnss.MultiAssetConfig.secondaryAtmosphereCount(cfg) * nTwrCfg_;
             nStates = revgnss.ReportRealityHelper.safeField_(summary, 'nStates', NaN);
             if isfinite(nStates) && nStates ~= expectedStates
                 error('ClockExactReportBuilder:stateTableCountMismatch', ...
