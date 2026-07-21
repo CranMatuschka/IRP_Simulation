@@ -278,8 +278,9 @@ classdef SwarmRelativeSolver
         end
 
         function [pairBias, pairR] = islNoise_(cfg, pairs)
-            % Per-pair constant delay-cal bias (dominant, un-averageable floor) + conservative R,
-            % faithful to revgnss.SwarmTwoWayISLBuilder (same cfg keys + R formula). The delay-cal
+            % Per-pair constant delay-cal bias (dominant, un-averageable floor) + conservative R.
+            % The two-way-ISL delay-cal + thermal R/noise physics is self-contained here (the
+            % equivalent joint-EKF two-way-ISL builder was retired). The delay-cal
             % bias is drawn once per pair from an IDENTITY-KEYED stream (node = i*64+k) so adding /
             % removing a pair cannot perturb another pair's draw. R = thermal^2 + nCorr*(const^2+rw^2)
             % with nCorr the correlated-bias inflation -> the sequential white-R weight cannot average
@@ -370,8 +371,9 @@ classdef SwarmRelativeSolver
 
         function [pairBias, pairR, thermalSigma] = clockNoise_(cfg, pairs)
             % Per-pair sat-sat TWSTFT noise: constant delay-cal bias (identity-keyed) + conservative
-            % R, faithful to revgnss.SwarmTwoWayTimeTransferBuilder (same cfg keys + R = thermal^2 +
-            % nCorr*(const^2+rw^2), the correlated-bias inflation).
+            % R. The sat-sat two-way time-transfer thermal/delay-cal R physics is self-contained
+            % here (the equivalent joint-EKF sat-sat two-way time-transfer builder was retired);
+            % R = thermal^2 + nCorr*(const^2+rw^2), the correlated-bias inflation.
             g = @(p,d) revgnss.SwarmRelativeSolver.getNum_(cfg, p, d);
             thermalSigma = g({'multiAsset','twoWayTimeTransferISL','sigma_m'}, 0.03);
             sConst = g({'multiAsset','twoWayTimeTransferISL','delayCal','sigma_const_m'}, 0.01);

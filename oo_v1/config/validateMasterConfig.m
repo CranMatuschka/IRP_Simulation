@@ -153,15 +153,6 @@ function cfg = validateMasterConfig(cfg)
              '(else the tower->secondary row has no secondary state to observe).']);
     end
 
-    % --- P2' all-pairs two-way ISL guards (delegated; reads defensively, no-op when off) ---
-    revgnss.SwarmTwoWayISLBuilder.validateConfig(cfg);
-
-    % --- P3' per-secondary two-way time transfer guards (delegated; no-op when off) ---
-    revgnss.SecondaryTwoWayTimeTransferBuilder.validateConfig(cfg);
-
-    % --- Sat<->sat two-way time transfer ISL guards (delegated; no-op when off) ---
-    revgnss.SwarmTwoWayTimeTransferBuilder.validateConfig(cfg);
-
     % --- Per-secondary ground carrier guards (delegated; no-op when off). Phase 3b-2 (C5) moved
     % the tower->secondary rows into MeasurementModel, which now owns this validation. ---
 

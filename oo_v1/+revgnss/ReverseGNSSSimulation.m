@@ -429,34 +429,6 @@ classdef ReverseGNSSSimulation < handle
             end
             errStruct.twoWayTimeTransfer = twttInfo;
 
-            % P2': all-pairs two-way ISL (clock-free baseline lengths). Fuses with the one-way
-            % ISL + ground rows; empty (byte-identical) at nSpaceAssets=1 / when disabled.
-            [z_sw, h_sw, H_sw, R_sw, swInfo] = revgnss.SwarmTwoWayISLBuilder.build( ...
-                obj.cfg, obj.errorChain, obj.assets, obj.ekf.x, obj.ekf.stateMap, obj.ekf.nx, t_s);
-            if ~isempty(z_sw)
-                z = [z; z_sw]; h = [h; h_sw]; H = [H; H_sw]; R = blkdiag(R, R_sw);
-            end
-            errStruct.swarmTwoWayISL = swInfo;
-
-            % P3': per-secondary ground<->satellite two-way time transfer -- pins each
-            % secondary's clock directly (no position column). Empty (byte-identical) when
-            % disabled or no estimated secondary clocks.
-            [z_st, h_st, H_st, R_st, stInfo] = revgnss.SecondaryTwoWayTimeTransferBuilder.build( ...
-                obj.cfg, obj.errorChain, obj.assets, obj.towers, obj.ekf.x, obj.ekf.stateMap, obj.ekf.nx, t_s);
-            if ~isempty(z_st)
-                z = [z; z_st]; h = [h; h_st]; H = [H; H_st]; R = blkdiag(R, R_st);
-            end
-            errStruct.secondaryTwoWayTimeTransfer = stInfo;
-
-            % Sat<->sat two-way TIME transfer ISL (dual of P2'): pins the inter-satellite clock
-            % difference. Empty (byte-identical) when disabled or <2 estimated clocks.
-            [z_tt, h_tt, H_tt, R_tt, ttInfo] = revgnss.SwarmTwoWayTimeTransferBuilder.build( ...
-                obj.cfg, obj.errorChain, obj.assets, obj.ekf.x, obj.ekf.stateMap, obj.ekf.nx, t_s);
-            if ~isempty(z_tt)
-                z = [z; z_tt]; h = [h; h_tt]; H = [H; H_tt]; R = blkdiag(R, R_tt);
-            end
-            errStruct.swarmTwoWayTimeTransfer = ttInfo;
-
             % TWSTFT code time-transfer diagnostic (no EKF rows).
             errStruct.twstftDiag = revgnss.TWSTFTDiagnosticBuilder.build(obj.cfg, islInfo, twoWayInfo);
             if isfield(errStruct,'observableStack')
