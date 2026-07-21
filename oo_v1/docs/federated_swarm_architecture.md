@@ -99,12 +99,20 @@ The clock dual of the shape solve: `SwarmRelativeSolver.solveRelativeClocks_` ru
 ### W3 symmetric analysis — DONE (commit `cede4a7`)
 `revgnss.FederatedSwarmSummary.build(cfg, results, rel, refAsset)` + `.print(out)` — a symmetric per-satellite summary: each asset's OWN absolute err/σ from its OWN EKF, plus the formation shape / relative clock from the relative layer. **No privileged node** — `refAsset` (any asset) only reframes the relative-position column; the absolute + formation metrics are invariant to it (verified `d=0` for ref 1 vs 3). Consume-only → byte-identical by construction. N=4: per-asset absolute 15–36 m (wall-limited, err/σ 0.4–1.0), ISL-solved shape 4.3 cm, TWSTFT relative clock 78 ps.
 
-### Remaining
-- **W4** retire the joint-EKF machinery (§5 "dies" list), each step guarded by the N=1 golden + the swarm-relative regression. Optionally wire `FederatedSwarmSummary` into the report/viewer.
+### W4 retire the joint EKF — FUNCTIONALLY COMPLETE (delete-outright, user-approved)
+The joint primary-centric multi-asset EKF is retired; the federated stack is the sole multi-asset estimator. Eight byte-identical commits (guarded by the N=1 golden + `run_swarm_relative_regression`):
+- **W4-1** `05d8357` — Phase-4 attitude/multiAntenna scaffold (was inert).
+- **W4-2** `c422b35` — `mode='honest'` now raises `ConfigFactory:multiAssetModeRetired`; joint `swarm_fingerprint` retired (relative regression is the sole swarm gate).
+- **W4-3** `85c43c0` — `computeSecondaryGroundRows` + `SecondaryMeasurementProfile` + `SecondaryUplinkAtmosphere` + 7 tests.
+- **W4-4a** `98ac71f` — the two-way ISL/TWSTFT builders (`SwarmTwoWayISLBuilder`, `SecondaryTwoWayTimeTransferBuilder`, `SwarmTwoWayTimeTransferBuilder`) + 3 tests.
+- **W4-4b** `0417e81` — the four secondary EKF **state blocks** (clock/orbit/carrier/ZWD): EKF `predict`/`buildF_`/`buildQ_` signature surgery, `buildStateMap_` blocks, the `sm.asset` view, `computeSwarmNEES`→stub; `ScenarioFactory` init/P0; `SimulationDataStore` recording; `MultiAssetConfig` count gates; `ReportRealityHelper` terms. **701 lines / 6 files + 4 tests.**
+- **W4-5** `f9a1ada` — `AssetStateBlock` collapsed to a chief-only resolver.
 
-## 8. W4 staged retirement plan (for a fresh pass)
+**Residual (optional cosmetic polish, inside SURVIVING files — deferred):** `cloneAsset_`'s reduction logic + the `estimated` force-clear in `MultiAssetConfig.normalize` (the method itself survives — truth-side secondary `SpaceAsset` instantiation is on the §5 survives-list); the `sc_*/so_*` inert storage props in `SimulationDataStore` (stay empty); `ISLMeasurementBuilder`'s isfield-guarded secondary branch (degrades to product-only); vestigial `assetIdx` threading in the 5 builders; a couple of stale `secondaryOrbitCount` prose comments. None affect correctness.
 
-**Open decision first (design doc §6 Q3):** delete the joint primary-centric EKF outright, OR keep it behind an opt-in `research` flag with federated as the default. Recommend **delete after a one-release deprecation** to stop the maintenance drag; the joint path is always recoverable via git.
+### Next (optional)
+- Wire `FederatedSwarmSummary` into the PDF report / .mat viewer so the swarm results appear in the normal reporting flow.
+- The residual cosmetic polish above, if desired.
 
 **Guard for every step:** the **N=1 golden** stays byte-identical (single-asset — unaffected by joint-path deletion) AND `run_swarm_relative_regression` stays PASS. NB the **joint** `run_swarm_fingerprint` tests the very path being deleted, so it is expected to change and is **retired in the last step** — do not try to preserve it once deletion starts.
 
