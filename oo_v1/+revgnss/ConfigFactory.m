@@ -497,17 +497,11 @@ classdef ConfigFactory
             %              PASSTHROUGH -- touches nothing, so configs/tests that set
             %              estimateMode/towersObserveSecondaries/twoWayISL directly are
             %              unaffected and the frozen goldens stay byte-identical.
-            %   'honest' : the joint per-satellite estimation bundle -- estimateMode=
-            %              'position' (full [r,v,b,bdot] per secondary) + towersObserve-
-            %              Secondaries (absolute anchor) + twoWayISL (clock-free baselines)
-            %              + the ISL observability flags. Applied only for a swarm
-            %              (nSpaceAssets>=2); mode='honest' at nSpaceAssets<2 is an error.
+            %   'honest' : RETIRED. Was the joint primary-centric multi-asset EKF; superseded by the
+            %              federated stack (revgnss.FederatedSwarmRunner + SwarmRelativeSolver +
+            %              FederatedSwarmSummary). Now raises an error pointing there.
             %
-            %   Called from BOTH masterConfig (before validateMasterConfig, so the estimate-
-            %   Mode guards see the resolved toggles) AND finalizeConfig (so the switch
-            %   cannot be defeated by setting nSpaceAssets/mode AFTER masterConfig returns --
-            %   the masterConfig ISL auto-block runs at call time). Idempotent: re-running
-            %   yields the same cfg, safe under finalizeConfig running more than once.
+            %   Called from BOTH masterConfig and finalizeConfig; idempotent for 'fast'.
             mode = 'fast';
             if isfield(cfg,'multiAsset') && isfield(cfg.multiAsset,'mode') && ...
                     (ischar(cfg.multiAsset.mode) || isstring(cfg.multiAsset.mode))
@@ -517,42 +511,15 @@ classdef ConfigFactory
                 case 'fast'
                     return;                         % passthrough: leave granular toggles as-is
                 case 'honest'
-                    % fall through to apply the bundle
+                    error('ConfigFactory:multiAssetModeRetired', ...
+                        ['cfg.multiAsset.mode=''honest'' (the joint primary-centric multi-asset EKF) ' ...
+                         'is RETIRED. Use revgnss.FederatedSwarmRunner (N independent single-asset ' ...
+                         'EKFs) + revgnss.SwarmRelativeSolver + revgnss.FederatedSwarmSummary for ' ...
+                         'multi-asset estimation. See docs/federated_swarm_architecture.md.']);
                 otherwise
                     error('ConfigFactory:multiAssetMode', ...
-                        'cfg.multiAsset.mode must be ''fast'' or ''honest'' (got ''%s'').', mode);
-            end
-
-            nA = 1;
-            if isfield(cfg,'scenario') && isfield(cfg.scenario,'nSpaceAssets')
-                nA = max(1, round(cfg.scenario.nSpaceAssets));
-            end
-            if nA < 2
-                error('ConfigFactory:multiAssetModeNeedsSwarm', ...
-                    ['cfg.multiAsset.mode=''honest'' requires cfg.scenario.nSpaceAssets>=2 ' ...
-                     '(no secondaries to estimate).']);
-            end
-
-            % Joint per-satellite estimation bundle.
-            cfg.multiAsset.estimateMode             = 'position';
-            cfg.multiAsset.towersObserveSecondaries = true;
-            cfg.multiAsset.twoWayISL.enable         = true;
-
-            % P4': honest mode estimates the secondary positions, so the broadcast product is
-            % the retired assumed-known beacon -- disable it ("no assumed-known beacon anywhere";
-            % ISLMeasurementBuilder.validateConfig enforces this for position mode).
-            cfg.measurements.isl.product.enable     = false;
-
-            % ISL observability essentials -- also closes the "set nSpaceAssets after
-            % masterConfig" footgun that leaves the auto-block's ISL disabled. Nested
-            % assignment auto-vivifies missing sub-structs; idempotent when already on.
-            cfg.measurements.isl.enable           = true;
-            cfg.measurements.isl.code.enable      = true;
-            cfg.measurements.isl.code.useInEKF    = true;
-            cfg.measurements.isl.doppler.enable   = true;
-            cfg.measurements.isl.doppler.useInEKF = true;
-            if ~isfield(cfg.measurements.isl,'transmitters') || isempty(cfg.measurements.isl.transmitters)
-                cfg.measurements.isl.transmitters = 'all';
+                        ['cfg.multiAsset.mode must be ''fast'' (got ''%s''; ''honest'' is retired ' ...
+                         '-> use revgnss.FederatedSwarmRunner).'], mode);
             end
         end
 

@@ -269,3 +269,89 @@ code sigma, default ON). Not done (per §16 verdicts): Axis 2 tower clock (SKIP 
 7-22x + cross-asset double-count), Axis 3 atmosphere truth-only (available to do; deferred), Axis 5
 draw-key consolidation (SKIP). Phase 4 (per-secondary attitude / multi-antenna / dual-frequency) remains
 out of scope.
+
+---
+
+## 17. Phase 4 — per-secondary attitude / multi-antenna / dual-frequency (the STATE-MAP phase)
+
+Phase 4 gives a secondary the chief's *estimated-state* stack (attitude, multi-antenna carrier, iono),
+closing the "add a space asset = a single asset" goal. Unlike 3b-2/3b-3 (measurement-only), this GROWS
+`nx`: it is a state-map change, strictly higher risk. The plan below is dependency-ordered and honest
+per axis about what it delivers vs the radial↔clock wall.
+
+### 17.1 Headline honesty — what "a secondary = a single asset" means after Phase 4
+- **Feature / code-path parity: YES.** Each secondary becomes a real `[r,v,euler,omega,b,bdot,ambiguity3d,zwd,iono,(gyroBias)]` model routed through the same builders as the chief. This is the deliverable the user asked for.
+- **A genuinely NEW per-satellite deliverable: YES, for attitude only.** Per-secondary attitude/pointing + AR covariance is observed from the inter-antenna baseline — a rotational DOF **orthogonal** to the radial↔clock wall. It converges regardless of the wall. This is the single Phase-4 axis whose value is real observable output, not just structural symmetry.
+- **Absolute accuracy: NO — for either the chief OR any secondary.** Nothing in Phase 4 touches the wall (§10). Secondary absolute position/clock stay hundreds of m regardless of state richness (reconfirmed by 3b-3.1 Doppler, ZWD, SRP). "A secondary = a single asset" holds in *model/code-path* and in *relative-shape/attitude*; it does NOT hold in *absolute accuracy*, and the swarm couples assets (ISL/centroid), so a secondary is never truly independent.
+
+### 17.2 Dependency-ordered staging (and why)
+**Axis 0 (state-map + init foundation) → Axis B (multi-antenna, the enabler) → Axis A (attitude) → Axis C (dual-freq/iono, opt-in).**
+
+Justification:
+1. **Axis 0 first** because every downstream axis needs the append-only secondary state blocks + per-asset init/view/resolver plumbing. Axis 0 is the low-risk scaffold: gated, empty-sentinel at N=1, no observable attached yet.
+2. **Axis B before Axis A** because attitude is *unobservable* without a non-zero antenna baseline (`CarrierMeasurementBuilder.m:301-316` gates the euler column on `norm(leverArms_model(:,ai))>1e-9`). Axis A alone = 6 dead states/secondary that couple harmfully into the wall (project runs: `attitudeCarrierMode='off'` roughly halves the G12 blow-up). B builds the geometry that makes A's states observable.
+3. **B and A ship as one deliberate swarm re-baseline.** B *plumbing* (append-only ambiguity3d + lever config + antenna loop, default single-antenna) is golden- AND swarm-byte-identical and lands first; the multi-antenna+attitude **flip** is a single intentional re-baseline (never bundle two axes, §16).
+4. **Axis C last / opt-in** because it needs secondary dual-frequency (L1+L2), which secondaries lack, and its numeric payoff is ~zero under the default matched config (iono off). It is well-posed at GEO (dispersive → L1−L2 geometry-free is wall-orthogonal, converges) but is a realism-grade-only deliverable.
+
+### 17.3 Byte-identity strategy for the state-map change
+Two tiers, unlike the measurement-only axes:
+
+**Golden (nSpaceAssets=1) — MUST stay byte-identical (184 smoke / 190 full / 185 headline).**
+- Asset(1) stays on today's LITERAL indices: chief `r 1:3, v 4:6, euler 7:9, omega 10:12, b 13, bdot 14` (`ReverseGNSSEKF.m:815-816`) and the chief tail are **never re-blocked**.
+- Every new secondary block is APPEND-ONLY, inserted between `secondaryZwdIdx` (`:960-970`) and the `srpScaleIdx` "strictly LAST" scalar (`:973-979`), each with a `zeros(0,k)`/`[]` empty sentinel — exactly the proven `secondaryAmbiguityIdx`/`secondaryZwdIdx` pattern. At N=1 every secondary count is 0 → blocks empty → `nx`, all literal indices, and `srpScaleIdx`'s absolute value are unchanged. Grep confirms `srpScaleIdx` has NO external literal-offset consumer, so keeping it symbolic + last is sufficient.
+- New counts gate on `nSpaceAssets≥2 AND estimateMode='position' AND <feature>.enable` (mirror `secondaryOrbitCount`/`secondaryCarrierCount`, `MultiAssetConfig.m:199-226`), so both goldens (which pin `nSpaceAssets=1`) hit empty sentinels.
+- The one NON-append edit is the per-asset quaternion-error-state generalization (Axis A). Its N=1 correctness is by *length-1 reduction*: the per-asset nominal-quat array + injection/reset loop must reproduce today's single-`nominalQuat_wxyz` single-`euler_idx` path exactly (`predict :461-465`, `update :592-603`). This is asserted byte-identical at N=1, not aliased.
+
+**Swarm fingerprint (nSpaceAssets=3, `tests/regression/run_swarm_fingerprint.m`, baseline nx=65 / `traceP=50503.7896526557`).**
+- These are STATE additions, so `nx` grows and the digest moves *intentionally* — this is the key difference from the measurement-only axes (Doppler 3b-3.1 stayed `|d|=0`).
+- Re-baseline POLICY: default-OFF gates keep the digest `|d|=0` (no re-baseline) for every plumbing/scaffold commit. A gate going ON is a SINGLE-AXIS intentional re-baseline via `run_swarm_fingerprint('capture')` — never bundle two axes in one capture (§16 discipline).
+- Prep obligation: `swarm_fingerprint.m:65-99` logs only `nx/traceP/normX/secFinalPos/secFinalVel` — it records NO attitude/iono. Extend the digest schema to log secondary `euler/omega` (and later `iono`) in a dedicated prep commit BEFORE the physics, or an attitude regression is invisible (mirror the 3b-3.0 velocity/drift schema prep).
+
+### 17.4 Per-axis verdicts
+
+| Axis | Verdict | Wall relation | Rationale |
+|---|---|---|---|
+| **0 — state-map + init foundation** | **DO** (scaffold only; gate estimation behind observables) | n/a (plumbing) | Low-risk append-only; the enabling foundation. Do NOT allocate live blocks without their observable (allocation-gate discipline, `secondaryOrbitCount` comment). |
+| **B — multi-antenna** | **CONDITIONAL** — ship jointly with A, never standalone | Sidesteps (relative/shape) | Sole enabler of wall-immune per-sat attitude. Alone = z−h mismatch (attitude in truth z, absent from CM-only model h) → unmodelled residual, no observability. |
+| **A — attitude (euler/omega, opt gyroBias)** | **CONDITIONAL** — last axis, bundled with B | **Orthogonal** to wall | The HELP case: genuinely convergent NEW per-satellite deliverable. Value is 100% contingent on B (non-zero baseline). Highest-risk edit = per-asset quaternion core. |
+| **C — dual-freq / iono** | **DEFER / structural-opt-in** — gated default-OFF, code-only, realism-grade only | Wall-orthogonal but NOT degenerate | Well-posed at GEO (dispersive, L1−L2 converges) — unlike ZWD it does NOT soak wall error. But ~zero payoff under default matched config; needs L2 first. Not a swarm default. |
+
+**Degeneracy flags:** Axis C is NOT degenerate (dispersion saves it — this is the distinction from the secondary ZWD, which is non-dispersive and soaked ~104 m into the radial↔clock common mode). The genuine degeneracy hazard is **Axis A under-observed**: a tiny/near-zero secondary baseline injects cross-covariance into the wall-limited position/clock (overconfident-P false pass — P shrinks while error grows), echoing the ZWD soak. Mitigation: A only lands with a real B baseline; NEES-gate the secondary attitude.
+
+### 17.5 Smallest independently-verifiable commits (each with its gate)
+
+**Axis 0 — foundation (all golden 184/190/185 `|d|=0` + swarm `|d|=0`, default-OFF):**
+- **P4-0.1** State-map scaffold: append gated `sm.secondaryEulerIdx [nSec×3]`, `secondaryOmegaIdx [nSec×3]`, `secondaryIonoIdx [nSec×nTwr]`, `secondaryAmbiguityIdx3d [nSec×nTwr×nAnt]` between `secondaryZwdIdx` (`ReverseGNSSEKF.m:970`) and `srpScaleIdx` (`:973`); empty sentinels; wire `nx` accumulation + constructor count-gate reads. New `secondaryAttitudeCount`/`secondaryIonoCount`/`secondaryMultiAntennaCount` in `MultiAssetConfig` (mirror `:199-226`). *Gate: N=1 index-identity unit test + golden + swarm `|d|=0`.*
+- **P4-0.2** View + resolver: extend `sm.asset` populate loop (`:1005-1021`) and `AssetStateBlock.forAsset` (`:45-64`) + `eulerEst` (`:66-78`) to return secondary `.euler/.omega/.iono/.ambiguity3d/.gyroBias` when the block is non-empty; empty-safe. *Gate: `test_asset_state_block` + golden/swarm `|d|=0`.*
+- **P4-0.3** Init plumbing: extend the per-asset P0 loop (`ScenarioFactory.m:293-315`) with attitude/iono/ambiguity3d sigma writes (empty-safe); add the digest schema extension (secondary euler/omega) as the fingerprint prep. *Gate: golden/swarm `|d|=0`.*
+
+**Axis B — multi-antenna (plumbing golden+swarm `|d|=0`; flip = re-baseline):**
+- **P4-B.1** Stop the clone collapse: `cloneAsset_` (`MultiAssetConfig.m:312-313`) carries full `receiverLeverArms_body_m` (3×N) behind `cfg.multiAsset.towerSecondary.multiAntenna.enable` (default off → column-1 today). *Gate: `|d|=0` both.*
+- **P4-B.2** Secondary antenna loop: generalize `computeSecondaryGroundRows` (`MeasurementModel.m:445-538`) to `for ai_ant=1:N_ant` via `getAntennaPositionsECEF(r_cm,euler,levers)` on truth AND model side; default N_ant=1 collapses to today. Add `SEC_ANT_PHASE_BIAS` source (or asset-dim key) — the current `ANT_PHASE_BIAS` key (`RngSource.m:31`, `CarrierMeasurementBuilder.m:234`) is asset-blind and collides. Fixed per-antenna row grouping (batch S not row-order-invariant, §15.3). *Gate: `|d|=0` at N_ant=1.*
+- **P4-B.3 (FLIP, re-baseline)** Enable multi-antenna+attitude together (see A): row count N_twr→N_ant·N_twr. Single-axis `run_swarm_fingerprint('capture')`. *Gate: golden `|d|=0` (N=1 untouched) + intentional swarm re-baseline + 2-reviewer adversarial pass.*
+
+**Axis A — attitude (bundled with B.3):**
+- **P4-A.1** Secondary attitude x0 + independent truth: independent secondary attitude truth + a NEW identity-keyed `seed+8900+ai` attitude stream (currently missing; only 8700 clock / 8800 orbit exist). Slot into the two-phase init (`ReverseGNSSSimulation.initialize:128-139`, post-`SwarmFormation`) without perturbing chief RNG draw order. Stop `cloneAsset_` cloning identical chief attitude. *Gate: golden `|d|=0`; swarm digest move is truth-side, captured.*
+- **P4-A.2 (highest-risk, own review)** Per-asset quaternion core: array of nominal quaternions + per-asset injection/reset in `update()` (`:592-603`) + per-asset quat propagation in `predict()` (`:461-465`); F blocks (`:1074-1099`) and Q blocks (`:1222-1243`) looped per attitude block. **Assert length-1 reduction byte-identical at N=1.** *Gate: golden 184/190/185 `|d|=0` + 2-reviewer adversarial on the quaternion reset shape/order.*
+- **P4-A.3** Route secondary carrier rows through the attitude Jacobian (`CarrierMeasurementBuilder.m:301-316`) with non-empty `blk.euler`. Per-secondary attitude estimate + NEES into `SwarmEstimateSummary`/Guard-C. *Gate: re-baselined swarm + attitude-NEES sanity.*
+
+**Axis C — dual-freq/iono (opt-in, realism-grade only):**
+- **P4-C.1** Append `secondaryIonoIdx` GM F/Q + P0 (mirror chief `:1167-1180`, `:1408-1424`, `ScenarioFactory.m:249-260`) — already scaffolded in P4-0.1. Default OFF. *Gate: `|d|=0` both.*
+- **P4-C.2** Secondary L2 code row: inner signal loop in `computeSecondaryGroundRows` with dispersive iono truth (`freqScale·iono` on z), state h-term, and H column `(f_L1/f_row)^2`. Reuse `TOWER_SECONDARY=20` with the signal in the identity-key slot (NO `ti*32+ai` node-budget change; assert `MeasurementModel.m:393-397`). Prove `R_new ≥ R_old` (block-diagonal 2nd-signal / IF correlation-aware gains). *Gate: golden `|d|=0` + one-time swarm re-baseline + `R_new≥R_old` proof + 2-reviewer.*
+
+### 17.6 Entry points (file:line, state-block names)
+- **State map:** `+filter/ReverseGNSSEKF.m` buildStateMap_ append region `:960-980`; new `sm.secondaryEulerIdx / secondaryOmegaIdx / secondaryIonoIdx / secondaryAmbiguityIdx3d (/ secondaryGyroBiasIdx)`; view populate `:1005-1021`; nx accumulation `:278-292`; constructor count-gate reads `:220-257`.
+- **F/Q:** buildF_ chief attitude `:1074-1099` / iono `:1167-1180`; buildQ_ euler/omega `:1222-1243` / IMU `:1247-1263` / iono `:1408-1424`; secondary-orbit STM `:1121-1132` + ZWD GM are the replication pattern.
+- **Quaternion core (Axis A, frozen):** predict `:461-465`, update injection/reset `:592-603`, getMeasurementState `:369-373`.
+- **Init:** `ScenarioFactory.buildInitialCovariance_` per-asset P0 loop `:293-315`, `buildInitialState_ :68-145`; two-phase secondary x0 `ReverseGNSSSimulation.initialize:128-139`.
+- **Gates/clone:** `MultiAssetConfig.secondaryOrbitCount/secondaryCarrierCount :199-226`; `cloneAsset_ :308-315` (single-antenna collapse `:312`, drops imu).
+- **View/resolver:** `AssetStateBlock.forAsset :45-64`, `eulerEst :66-78`.
+- **Measurement:** `MeasurementModel.computeSecondaryGroundRows :347-561` (single-antenna `rSecTruth :422`, CM-only `rSecModel :425`, carrier `:520-537`); chief antenna loop `:92-155`; `CarrierMeasurementBuilder.m:301-316` attitude Jacobian, `:223-243` inter-antenna bias; `RngSource.m:31` `ANT_PHASE_BIAS` (asset-blind).
+- **Fingerprint:** `tests/regression/swarm_fingerprint.m:65-99` (extend schema), `run_swarm_fingerprint.m`, `golden/swarm_fingerprint_baseline.mat` (re-baseline ONLY on a gate-ON commit).
+
+### 17.7 Open questions for the user
+1. **Attitude value vs risk at GEO.** Per-secondary attitude is the ONE convergent new deliverable, but at GEO with cloned/static secondary attitude truth its NEES is degenerate until independent attitude truth + the `seed+8900+ai` stream (P4-A.1) exist. Is a per-satellite attitude/pointing product worth the per-asset quaternion-core edit (the real cost, P4-A.2) — or is feature/code-path parity alone sufficient?
+2. **Independent secondary attitude truth.** Confirm we want independent secondary attitude truth (real per-sat deliverable) rather than the current chief-clone (parity-only, degenerate NEES). This is truth-side work, low golden risk.
+3. **Dual-freq/iono: structural-only?** Given ~zero payoff under the default matched config and that it only helps under realism grade (removing the Klobuchar ~50% residual), do we ship Axis C as structural-symmetry-only opt-in (P4-C.1 state scaffold, no default enable), deferring the L2 measurement path (P4-C.2) until a realism-grade swarm study needs iono removal?
+4. **gyroBias/IMU scope.** Confirm per-secondary gyroBias/IMU is OUT of Phase 4 (it forces `quaternionErrorState`, per-asset gyro readings, and drops the `eulerZYX` fallback — scope creep on top of the quaternion-core edit).
+5. **Re-baseline bundling.** Approve the B+A joint flip (P4-B.3) as a SINGLE swarm re-baseline — multi-antenna alone buys nothing and injects a z−h mismatch, so they must capture together; confirm this is not treated as bundling two independent axes.
