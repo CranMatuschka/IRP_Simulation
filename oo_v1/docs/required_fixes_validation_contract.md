@@ -26,6 +26,8 @@ Every successful invocation writes:
 - `output/RequiredFixValidation_20260722/metrics.csv`
 - `output/RequiredFixValidation_20260722/metrics.mat`
 - `output/RequiredFixValidation_20260722/summary.md`
+- mode-specific copies named `metrics_<mode>_<focus>.csv`,
+  `metrics_<mode>_<focus>.mat`, and `summary_<mode>_<focus>.md`
 
 The harness fails the MATLAB process when any row has status `fail`. Rows marked `xfail` are allowed only for findings that have a named future commit in the execution plan.
 
@@ -42,7 +44,16 @@ The metrics table records:
 - position and clock RMS;
 - raw and solved relative-shape RMS;
 - swarm gate flags;
-- DCB and higher-order ionosphere active flags.
+- DCB and higher-order ionosphere active flags;
+- runtime order, TW tag, wall time, report wall time, epoch count,
+  row-count source, EKF-update dimension source, accepted/rejected update
+  counts, warning count, battery group name, evidence paths, and release
+  evidence level.
+
+`runtimeOrder` rows for federated swarm runs derive measurement row counts
+from the finalized configuration because the unified swarm MAT intentionally
+saves per-asset EKF histories, not full per-epoch measurement datastores.
+Those rows mark the source explicitly as `source=config-derived`.
 
 ## Scientific Rules
 
