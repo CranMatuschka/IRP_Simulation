@@ -70,6 +70,7 @@ classdef SimulationDataStore < handle
         mc_nc_    % [N x 1] code rows
         mc_ncar_  % [N x 1] carrier rows
         mc_nd_    % [N x 1] doppler rows
+        mc_ntwtt_  % [N x 1] two-way time-transfer rows
         mc_nv_    % [N x 1] visible towers
 
         % ---- Residuals
@@ -81,6 +82,8 @@ classdef SimulationDataStore < handle
         rs_pocar_ % [N x 1] postfit carrier RMS m
         rs_pfd_   % [N x 1] prefit doppler RMS mps
         rs_pod_   % [N x 1] postfit doppler RMS mps
+        rs_pftwtt_ % [N x 1] prefit two-way time-transfer RMS m
+        rs_potwtt_ % [N x 1] postfit two-way time-transfer RMS m
         rs_pfmax_ % [N x 1] prefit max abs
         rs_pomax_ % [N x 1] postfit max abs
 
@@ -89,6 +92,7 @@ classdef SimulationDataStore < handle
         cn_NIScod_
         cn_NIScar_
         cn_NISdop_
+        cn_NIStwtt_
         cn_NEESp_
         cn_NEESv_
         cn_NEESc_
@@ -143,6 +147,9 @@ classdef SimulationDataStore < handle
         s57_cR_
         s57_carR_
         s57_dR_
+        s57_twttN_
+        s57_twttD_
+        s57_twttR_
 
         % ---- Differential attitude
         da_act_
@@ -296,17 +303,18 @@ classdef SimulationDataStore < handle
             obj.er_cd_ = n1(); obj.er_ff_ = n1();
 
             obj.mc_nr_  = n1(); obj.mc_nc_  = n1();
-            obj.mc_ncar_= n1(); obj.mc_nd_  = n1();
+            obj.mc_ncar_= n1(); obj.mc_nd_  = n1(); obj.mc_ntwtt_ = n1();
             obj.mc_nv_  = n1();
 
             obj.rs_pfa_  = n1(); obj.rs_poa_  = n1();
             obj.rs_pfc_  = n1(); obj.rs_poc_  = n1();
             obj.rs_pfcar_= n1(); obj.rs_pocar_= n1();
             obj.rs_pfd_  = n1(); obj.rs_pod_  = n1();
+            obj.rs_pftwtt_ = n1(); obj.rs_potwtt_ = n1();
             obj.rs_pfmax_= n1(); obj.rs_pomax_= n1();
 
             obj.cn_NIS_   = n1(); obj.cn_NIScod_= n1();
-            obj.cn_NIScar_= n1(); obj.cn_NISdop_= n1();
+            obj.cn_NIScar_= n1(); obj.cn_NISdop_= n1(); obj.cn_NIStwtt_ = n1();
             obj.cn_NEESp_ = n1(); obj.cn_NEESv_ = n1();
             obj.cn_NEESc_ = n1(); obj.cn_NEESa_ = n1();
 
@@ -335,6 +343,7 @@ classdef SimulationDataStore < handle
             obj.s57_gR_  = n1(); obj.s57_aR_  = n1();
             obj.s57_cR_  = n1(); obj.s57_carR_= n1();
             obj.s57_dR_  = n1();
+            obj.s57_twttN_ = n1(); obj.s57_twttD_ = n1(); obj.s57_twttR_ = n1();
 
             obj.da_act_  = b1(); obj.da_nR_   = n1();
             obj.da_rR_   = n1(); obj.da_aBl_  = n1();
@@ -451,6 +460,7 @@ classdef SimulationDataStore < handle
             obj.mc_nc_(k)   = g_(entry,'numPseudorangeMeasurements',NaN);
             obj.mc_ncar_(k) = g_(entry,'numCarrierRows',NaN);
             obj.mc_nd_(k)   = g_(entry,'numDopplerRows',NaN);
+            obj.mc_ntwtt_(k)= g_(entry,'numTwoWayTimeTransferRows',NaN);
             obj.mc_nv_(k)   = g_(entry,'numVisibleTowers',NaN);
 
             % Residuals
@@ -462,6 +472,8 @@ classdef SimulationDataStore < handle
             obj.rs_pocar_(k) = g_(entry,'postfitCarrierRMS_m',NaN);
             obj.rs_pfd_(k)   = g_(entry,'prefitDopplerRMS_mps',NaN);
             obj.rs_pod_(k)   = g_(entry,'postfitDopplerRMS_mps',NaN);
+            obj.rs_pftwtt_(k)= g_(entry,'prefitTwoWayTimeTransferRMS_m',NaN);
+            obj.rs_potwtt_(k)= g_(entry,'postfitTwoWayTimeTransferRMS_m',NaN);
             obj.rs_pfmax_(k) = g_(entry,'prefitMaxAbs',NaN);
             obj.rs_pomax_(k) = g_(entry,'postfitMaxAbs',NaN);
 
@@ -470,6 +482,7 @@ classdef SimulationDataStore < handle
             obj.cn_NIScod_(k) = g_(entry,'NIS_code',NaN);
             obj.cn_NIScar_(k) = g_(entry,'NIS_carrier',NaN);
             obj.cn_NISdop_(k) = g_(entry,'NIS_doppler',NaN);
+            obj.cn_NIStwtt_(k)= g_(entry,'NIS_twoWayTimeTransfer',NaN);
             obj.cn_NEESp_(k)  = g_(entry,'NEES_pos',NaN);
             obj.cn_NEESv_(k)  = g_(entry,'NEES_vel',NaN);
             obj.cn_NEESc_(k)  = g_(entry,'NEES_clk',NaN);
@@ -531,6 +544,9 @@ classdef SimulationDataStore < handle
             obj.s57_cR_(k)   = g_(entry,'codeRms57',NaN);
             obj.s57_carR_(k) = g_(entry,'carrierRms57',NaN);
             obj.s57_dR_(k)   = g_(entry,'dopplerRms57',NaN);
+            obj.s57_twttN_(k)= g_(entry,'twoWayTimeTransferNIS57',NaN);
+            obj.s57_twttD_(k)= g_(entry,'twoWayTimeTransferDof57',NaN);
+            obj.s57_twttR_(k)= g_(entry,'twoWayTimeTransferRms57',NaN);
 
             % Differential attitude
             obj.da_act_(k)  = logical(g_(entry,'diffAttActive',false));
@@ -804,37 +820,85 @@ classdef SimulationDataStore < handle
                 M_car_rows = sum(strcmp(errStruct.measType_perRow,'carrier'));
             end
             entry.numCarrierRows = M_car_rows;
+            M_twtt_rows = 0;
+            hasRowTypes = ~isempty(errStruct) && isfield(errStruct,'measType_perRow') && ...
+                iscell(errStruct.measType_perRow) && numel(errStruct.measType_perRow) == numel(z);
+            if hasRowTypes
+                M_twtt_rows = sum(strcmp(errStruct.measType_perRow,'twoWayTimeTransfer'));
+            elseif ~isempty(errStruct) && isfield(errStruct,'twoWayTimeTransfer') && ...
+                    isstruct(errStruct.twoWayTimeTransfer) && isfield(errStruct.twoWayTimeTransfer,'nEkfRows')
+                M_twtt_rows = errStruct.twoWayTimeTransfer.nEkfRows;
+            end
+            entry.numTwoWayTimeTransferRows = M_twtt_rows;
 
             % --- Innovation / residual RMS ---
             if ~isempty(z) && M_pr > 0 && numel(z) >= M_pr
-                innPR = z(1:M_pr) - h(1:M_pr);
+                if hasRowTypes
+                    codeMaskRms = strcmp(errStruct.measType_perRow,'code') | strcmp(errStruct.measType_perRow,'ifCode');
+                    dopMaskRms = strcmp(errStruct.measType_perRow,'doppler');
+                    twttMaskRms = strcmp(errStruct.measType_perRow,'twoWayTimeTransfer');
+                else
+                    codeMaskRms = false(numel(z),1); codeMaskRms(1:M_pr) = true;
+                    dopMaskRms = false(numel(z),1);
+                    if M_dop_rows > 0 && numel(z) >= M_pr + M_dop_rows
+                        dopMaskRms(M_pr+1:M_pr+M_dop_rows) = true;
+                    end
+                    twttMaskRms = false(numel(z),1);
+                end
+                innPR = z(codeMaskRms) - h(codeMaskRms);
                 entry.prefitPseudorangeRMS_m = sqrt(mean(innPR.^2));
                 entry.prefitInnovationRMS    = entry.prefitPseudorangeRMS_m;
-                if M_dop_rows > 0 && numel(z) >= M_pr + M_dop_rows
-                    innDop = z(M_pr+1:M_pr+M_dop_rows) - h(M_pr+1:M_pr+M_dop_rows);
+                if any(dopMaskRms)
+                    innDop = z(dopMaskRms) - h(dopMaskRms);
                     entry.prefitDopplerRMS_mps = sqrt(mean(innDop.^2));
                 else
                     entry.prefitDopplerRMS_mps = 0;
+                end
+                if any(twttMaskRms)
+                    innTwtt = z(twttMaskRms) - h(twttMaskRms);
+                    entry.prefitTwoWayTimeTransferRMS_m = sqrt(mean(innTwtt.^2));
+                else
+                    entry.prefitTwoWayTimeTransferRMS_m = 0;
                 end
             else
                 entry.prefitPseudorangeRMS_m = 0;
                 entry.prefitInnovationRMS    = 0;
                 entry.prefitDopplerRMS_mps   = 0;
+                entry.prefitTwoWayTimeTransferRMS_m = 0;
             end
             if ~isempty(postfitResidual) && numel(postfitResidual) >= M_pr && M_pr > 0
-                resPR = postfitResidual(1:M_pr);
+                if hasRowTypes && numel(postfitResidual) == numel(errStruct.measType_perRow)
+                    codeMaskPost = strcmp(errStruct.measType_perRow,'code') | strcmp(errStruct.measType_perRow,'ifCode');
+                    dopMaskPost = strcmp(errStruct.measType_perRow,'doppler');
+                    twttMaskPost = strcmp(errStruct.measType_perRow,'twoWayTimeTransfer');
+                else
+                    codeMaskPost = false(numel(postfitResidual),1); codeMaskPost(1:M_pr) = true;
+                    dopMaskPost = false(numel(postfitResidual),1);
+                    if M_dop_rows > 0 && numel(postfitResidual) >= M_pr + M_dop_rows
+                        dopMaskPost(M_pr+1:M_pr+M_dop_rows) = true;
+                    end
+                    twttMaskPost = false(numel(postfitResidual),1);
+                end
+                resPR = postfitResidual(codeMaskPost);
                 entry.postfitPseudorangeRMS_m = sqrt(mean(resPR.^2));
                 entry.postfitResidualRMS      = entry.postfitPseudorangeRMS_m;
-                if M_dop_rows > 0 && numel(postfitResidual) >= M_pr + M_dop_rows
-                    resDop = postfitResidual(M_pr+1:M_pr+M_dop_rows);
+                if any(dopMaskPost)
+                    resDop = postfitResidual(dopMaskPost);
                     entry.postfitDopplerRMS_mps = sqrt(mean(resDop.^2));
                 else
                     entry.postfitDopplerRMS_mps = 0;
+                end
+                if any(twttMaskPost)
+                    resTwtt = postfitResidual(twttMaskPost);
+                    entry.postfitTwoWayTimeTransferRMS_m = sqrt(mean(resTwtt.^2));
+                else
+                    entry.postfitTwoWayTimeTransferRMS_m = 0;
                 end
             else
                 entry.postfitPseudorangeRMS_m = 0;
                 entry.postfitResidualRMS      = 0;
                 entry.postfitDopplerRMS_mps   = 0;
+                entry.postfitTwoWayTimeTransferRMS_m = 0;
             end
             if ~isempty(errStruct) && isfield(errStruct,'doppler') && ...
                     isfield(errStruct.doppler,'prefit') && ~isempty(errStruct.doppler.prefit)
@@ -845,6 +909,7 @@ classdef SimulationDataStore < handle
 
             % --- Per-type NIS ---
             entry.NIS_code = 0; entry.NIS_doppler = 0; entry.NIS_carrier = 0;
+            entry.NIS_twoWayTimeTransfer = 0;
             if ~isempty(z) && ~isempty(h) && ~isempty(R) && numel(z) == numel(h)
                 inn_all = z - h;
                 if ~isempty(errStruct) && isfield(errStruct,'measType_perRow') && ...
@@ -853,9 +918,11 @@ classdef SimulationDataStore < handle
                     prMask  = strcmp(mtype_r,'code') | strcmp(mtype_r,'ifCode');
                     dopMask = strcmp(mtype_r,'doppler');
                     carMask = strcmp(mtype_r,'carrier');
+                    twttMask = strcmp(mtype_r,'twoWayTimeTransfer');
                     if any(prMask);  entry.NIS_code    = localNis_(inn_all(prMask),  R(prMask,prMask));   end
                     if any(dopMask); entry.NIS_doppler = localNis_(inn_all(dopMask), R(dopMask,dopMask)); end
                     if any(carMask); entry.NIS_carrier = localNis_(inn_all(carMask), R(carMask,carMask)); end
+                    if any(twttMask); entry.NIS_twoWayTimeTransfer = localNis_(inn_all(twttMask), R(twttMask,twttMask)); end
                 elseif M_pr > 0 && numel(z) >= M_pr
                     entry.NIS_code = localNis_(inn_all(1:M_pr), R(1:M_pr,1:M_pr));
                 end
@@ -927,6 +994,9 @@ classdef SimulationDataStore < handle
             entry.gaugeDof57     = 0;   entry.physicalRms57  = NaN;
             entry.gaugeRms57     = NaN; entry.augRms57       = NaN;
             entry.codeRms57      = NaN; entry.carrierRms57   = NaN; entry.dopplerRms57 = NaN;
+            entry.twoWayTimeTransferNIS57 = NaN;
+            entry.twoWayTimeTransferDof57 = 0;
+            entry.twoWayTimeTransferRms57 = NaN;
             if ~isempty(errStruct) && isfield(errStruct,'ekfAccounting57') && ...
                     isfield(errStruct.ekfAccounting57,'physicalNIS')
                 a57 = errStruct.ekfAccounting57; r57 = errStruct.ekfAccountingRms57;
@@ -936,6 +1006,13 @@ classdef SimulationDataStore < handle
                 entry.gaugeRms57     = r57.gaugeRms;     entry.augRms57      = r57.augmentedRms;
                 entry.codeRms57      = r57.codeRms;      entry.carrierRms57  = r57.carrierRms;
                 entry.dopplerRms57   = r57.dopplerRms;
+                if isfield(a57,'twoWayTimeTransferNIS')
+                    entry.twoWayTimeTransferNIS57 = a57.twoWayTimeTransferNIS;
+                    entry.twoWayTimeTransferDof57 = a57.twoWayTimeTransferDof;
+                end
+                if isfield(r57,'twoWayTimeTransferRms')
+                    entry.twoWayTimeTransferRms57 = r57.twoWayTimeTransferRms;
+                end
             end
 
             % --- Carrier slip ---
@@ -1702,11 +1779,13 @@ classdef SimulationDataStore < handle
             d.meas.nCodeRows       = obj.mc_nc_(1:N);
             d.meas.nCarrierRows    = obj.mc_ncar_(1:N);
             d.meas.nDopplerRows    = obj.mc_nd_(1:N);
+            d.meas.nTwoWayTimeTransferRows = obj.mc_ntwtt_(1:N);
             d.meas.nVisibleTowers  = obj.mc_nv_(1:N);
             d.meas.numRows         = d.meas.nRows;         % analysis alias
             d.meas.numCodeRows     = d.meas.nCodeRows;
             d.meas.numCarrierRows  = d.meas.nCarrierRows;
             d.meas.numDopplerRows  = d.meas.nDopplerRows;
+            d.meas.numTwoWayTimeTransferRows = d.meas.nTwoWayTimeTransferRows;
 
             % Residuals (dual naming for compat)
             d.residual.prefitAllRMS        = obj.rs_pfa_(1:N);
@@ -1717,17 +1796,23 @@ classdef SimulationDataStore < handle
             d.residual.postfitCarrierRMS_m = obj.rs_pocar_(1:N);
             d.residual.prefitDopplerRMS_mps= obj.rs_pfd_(1:N);
             d.residual.postfitDopplerRMS_mps=obj.rs_pod_(1:N);
+            d.residual.prefitTwoWayTimeTransferRMS_m = obj.rs_pftwtt_(1:N);
+            d.residual.postfitTwoWayTimeTransferRMS_m = obj.rs_potwtt_(1:N);
             d.residual.prefitMaxAbs        = obj.rs_pfmax_(1:N);
             d.residual.postfitMaxAbs       = obj.rs_pomax_(1:N);
             d.residual.codeRms_m           = obj.rs_pfc_(1:N);    % analysis alias
             d.residual.carrierRms_m        = obj.rs_pfcar_(1:N);
             d.residual.dopplerRms_m        = obj.rs_pfd_(1:N);
+            d.residual.twoWayTimeTransferPrefitRms_m = obj.rs_pftwtt_(1:N);
+            d.residual.twoWayTimeTransferPostfitRms_m = obj.rs_potwtt_(1:N);
+            d.residual.twoWayTimeTransferRms_m = obj.rs_potwtt_(1:N);
 
             % Consistency
             d.consistency.NIS         = obj.cn_NIS_(1:N);
             d.consistency.NIS_code    = obj.cn_NIScod_(1:N);
             d.consistency.NIS_carrier = obj.cn_NIScar_(1:N);
             d.consistency.NIS_doppler = obj.cn_NISdop_(1:N);
+            d.consistency.NIS_twoWayTimeTransfer = obj.cn_NIStwtt_(1:N);
             d.consistency.NEES_pos    = obj.cn_NEESp_(1:N);
             d.consistency.NEES_vel    = obj.cn_NEESv_(1:N);
             d.consistency.NEES_clk   = obj.cn_NEESc_(1:N);
@@ -1782,6 +1867,9 @@ classdef SimulationDataStore < handle
             d.stage57.codeRms        = obj.s57_cR_(1:N);
             d.stage57.carrierRms     = obj.s57_carR_(1:N);
             d.stage57.dopplerRms     = obj.s57_dR_(1:N);
+            d.stage57.twoWayTimeTransferNIS = obj.s57_twttN_(1:N);
+            d.stage57.twoWayTimeTransferDof = obj.s57_twttD_(1:N);
+            d.stage57.twoWayTimeTransferRms = obj.s57_twttR_(1:N);
 
             % Differential attitude
             d.diffAtt.active          = obj.da_act_(1:N);
@@ -1886,8 +1974,10 @@ classdef SimulationDataStore < handle
             d.est_x                 = d.estimate.x;
             d.est_Pdiag             = d.estimate.Pdiag;
             d.meas_n_rows           = d.meas.nRows;
+            d.meas_twtt_n_rows      = d.meas.nTwoWayTimeTransferRows;
             d.consistency_NIS       = d.consistency.NIS;
             d.res_prefit_all_rms    = d.residual.prefitAllRMS;
+            d.res_postfit_twtt_rms_m = d.residual.postfitTwoWayTimeTransferRMS_m;
             d.geom_gdop_like        = d.geom.gdopLike;
             d.geom_pdop_like        = d.geom.pdopLike;
             d.geom_tdop_like        = d.geom.tdopLike;

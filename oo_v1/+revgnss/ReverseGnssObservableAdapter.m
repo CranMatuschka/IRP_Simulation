@@ -94,6 +94,35 @@ classdef ReverseGnssObservableAdapter
             stack = revgnss.ObservableStackDescriptor.create(endpoints, links, rows);
         end
 
+        function stack = addTwoWayTimeTransferRows(stack, twttInfo)
+            if isempty(stack) || isempty(twttInfo) || ~isstruct(twttInfo) || ...
+                    ~isfield(twttInfo,'enabled') || ~twttInfo.enabled || ...
+                    ~isfield(twttInfo,'observableRows') || isempty(twttInfo.observableRows)
+                return
+            end
+            endpoints = stack.endpoints;
+            links = stack.links;
+            rows = stack.rows;
+            rxIdx = find(strcmp({endpoints.type}, 'spacecraftReceiver'), 1, 'first');
+            if isempty(rxIdx); return; end
+            rxEp = endpoints(rxIdx);
+            startIdx = numel(rows);
+            for k = 1:numel(twttInfo.observableRows)
+                row = twttInfo.observableRows(k);
+                ti = row.towerIndex;
+                linkId = sprintf('link:twtt:t%03d:sat', ti);
+                if ~any(strcmp({links.id}, linkId))
+                    links(end+1) = revgnss.LinkDescriptor.create( ...
+                        linkId, sprintf('tower:%03d', ti), rxEp.id, ...
+                        'twoWayTimeTransfer', rxEp.assetName, rxEp.assetIndex); %#ok<AGROW>
+                end
+                row.rowIndex = startIdx + k;
+                row.linkId = linkId;
+                rows(end+1) = row; %#ok<AGROW>
+            end
+            stack = revgnss.ObservableStackDescriptor.create(endpoints, links, rows);
+        end
+
         function stack = addTWSTFTDiagnosticRows(stack, twstftDiag)
             % addTWSTFTDiagnosticRows  Append twstftCodeDiagnostic row descriptors.
             % No EKF rows (no z/h/H/R). Role = diagnosticOnly.

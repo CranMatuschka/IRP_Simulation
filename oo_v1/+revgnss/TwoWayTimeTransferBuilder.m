@@ -204,16 +204,20 @@ classdef TwoWayTimeTransferBuilder
                 meta = struct('towerIdx', ti, 'elevation_rad', elev, ...
                     'clockDiffTruth_m', b_rx_true - b_tw_true, ...
                     'clockDiffModel_m', b_rx_est - b_tw_model, ...
+                    'towerClockModel_m', b_tw_model, ...
+                    'towerClockStateColumn', towerCol, ...
                     'prefit_m', zi - hi, 'sigma_m', sqrt(Ri), ...
                     'towerClockIsState', towerCol > 0, 'productSigma_m', sig_prod, ...
-                    'reciprocity_m', recip_t);
+                    'reciprocity_m', recip_t, 'reciprocityModel_m', recip_e);
                 if isempty(rowsMeta); rowsMeta = meta; else; rowsMeta(end+1) = meta; end %#ok<AGROW>
 
-                info.observableRows(end+1) = revgnss.ObservableRowDescriptor.create( ...
+                obsRow = revgnss.ObservableRowDescriptor.create( ...
                     0, 'twoWayTimeTransfer', sprintf('link:twtt:t%03d:sat', ti), 'TWTT', ...
                     ti, 1, revgnss.TwoWayTimeTransferBuilder.stateCols_(stateMap, towerCol, recipOn), ...
                     'Tower<->spacecraft two-way time transfer (WP-A)', ...
                     revgnss.TwoWayTimeTransferBuilder.role_(useInEKF));
+                obsRow = revgnss.ObservableRowDescriptor.withFlags(obsRow, useInEKF, false);
+                info.observableRows(end+1) = obsRow;
             end
 
             info.rows        = rowsMeta;
@@ -222,6 +226,63 @@ classdef TwoWayTimeTransferBuilder
             info.conservativeProductCorrelation = consProdCorr;
             info.productCorrelationN = nCorr;   % epochs/interval the product bias is shared over
             if ~isempty(zAdd); info.prefitRms_m = sqrt(mean((zAdd - hAdd).^2)); end
+        end
+
+        function [hPred, HPred, rows] = predictEkfRows(cfg, asset, towers, x, stateMap, info, t_s)
+            % predictEkfRows  Recompute TWTT h from the post-update EKF state.
+            %
+            % Uses row metadata captured by build(), especially the tower-clock product
+            % value used at measurement time. It does not redraw noise or rebuild z.
+            if nargin < 7 || isempty(t_s); t_s = 0; end
+            nx = numel(x);
+            hPred = [];
+            HPred = zeros(0, nx);
+            rows = struct([]);
+            if isempty(info) || ~isstruct(info) || ~isfield(info,'useInEKF') || ~info.useInEKF || ...
+                    ~isfield(info,'rows') || isempty(info.rows)
+                return
+            end
+
+            c = revgnss.Constants.SPEED_OF_LIGHT_MPS;
+            recipOn = revgnss.TwoWayTimeTransferBuilder.getBool_(cfg, ...
+                {'measurements','twoWayTimeTransfer','includeReciprocityResidual'}, false);
+            r_sat_e = x(stateMap.r_idx);
+            v_sat_e = x(stateMap.v_idx);
+            b_rx_e  = x(stateMap.b_rx_idx);
+
+            for jj = 1:numel(info.rows)
+                rowInfo = info.rows(jj);
+                ti = rowInfo.towerIdx;
+                towerCol = revgnss.TwoWayTimeTransferBuilder.rowTowerColumn_(rowInfo, stateMap, ti);
+                if towerCol > 0
+                    b_tw_model = x(towerCol);
+                elseif isfield(rowInfo,'towerClockModel_m') && isfinite(rowInfo.towerClockModel_m)
+                    b_tw_model = rowInfo.towerClockModel_m;
+                else
+                    b_tw_model = b_rx_e - rowInfo.clockDiffModel_m;
+                end
+
+                recip_e = 0;
+                velRow = zeros(1, 3);
+                if recipOn
+                    r_twr_e = models.measurements.MeasurementModelUtils.towerPositionEcef(cfg, towers{ti}, ti, 'model');
+                    [rhoDot_e] = revgnss.OneWayRangeRateModel.compute(r_sat_e, v_sat_e, r_twr_e, cfg);
+                    d_e = r_sat_e - r_twr_e;
+                    rho_e = max(norm(d_e), 1);
+                    u_e = d_e / rho_e;
+                    recip_e = -(rhoDot_e * rho_e) / c;
+                    velRow = -(rho_e / c) * u_e';
+                end
+
+                Hi = zeros(1, nx);
+                Hi(stateMap.b_rx_idx) = 1;
+                if towerCol > 0; Hi(towerCol) = -1; end
+                if recipOn; Hi(stateMap.v_idx) = Hi(stateMap.v_idx) + velRow; end
+
+                hPred(end+1,1) = (b_rx_e - b_tw_model) + recip_e; %#ok<AGROW>
+                HPred(end+1,:) = Hi; %#ok<AGROW>
+                if isempty(rows); rows = rowInfo; else; rows(end+1) = rowInfo; end %#ok<AGROW>
+            end
         end
 
         function validateConfig(cfg)
@@ -276,6 +337,19 @@ classdef TwoWayTimeTransferBuilder
             cols = stateMap.b_rx_idx;
             if towerCol > 0; cols = [cols, towerCol]; end
             if recipOn; cols = [cols, stateMap.v_idx(:)']; end
+        end
+
+        function towerCol = rowTowerColumn_(rowInfo, stateMap, ti)
+            towerCol = 0;
+            if isfield(rowInfo,'towerClockStateColumn') && isfinite(rowInfo.towerClockStateColumn)
+                towerCol = rowInfo.towerClockStateColumn;
+            elseif isfield(stateMap,'towerClockIdx') && ~isempty(stateMap.towerClockIdx) && ...
+                    ti <= size(stateMap.towerClockIdx,1)
+                towerCol = stateMap.towerClockIdx(ti,1);
+            end
+            if isempty(towerCol) || ~isfinite(towerCol) || towerCol < 1
+                towerCol = 0;
+            end
         end
 
         function r = role_(useInEKF)

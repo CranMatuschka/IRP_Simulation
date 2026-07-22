@@ -402,8 +402,16 @@ classdef ReverseGNSSSimulation < handle
                 h = [h; h_twtt];
                 H = [H; H_twtt];
                 R = blkdiag(R, R_twtt);
+                if isfield(errStruct,'measType_perRow') && iscell(errStruct.measType_perRow)
+                    errStruct.measType_perRow = [errStruct.measType_perRow(:); ...
+                        repmat({'twoWayTimeTransfer'}, numel(z_twtt), 1)];
+                end
             end
             errStruct.twoWayTimeTransfer = twttInfo;
+            if isfield(errStruct,'observableStack')
+                errStruct.observableStack = revgnss.ReverseGnssObservableAdapter.addTwoWayTimeTransferRows( ...
+                    errStruct.observableStack, twttInfo);
+            end
 
             % TWSTFT code time-transfer diagnostic (no EKF rows).
             errStruct.twstftDiag = revgnss.TWSTFTDiagnosticBuilder.build(obj.cfg, islInfo, twoWayInfo);
@@ -767,18 +775,27 @@ classdef ReverseGNSSSimulation < handle
                     obj.cfg, obj.asset, obj.assets, obj.ekf.x, sm, errStruct.islTwoWay);
             end
             M_2w = numel(h_2w);
+            h_twtt = [];
+            if isfield(errStruct,'twoWayTimeTransfer') && isstruct(errStruct.twoWayTimeTransfer) && ...
+                    isfield(errStruct.twoWayTimeTransfer,'nEkfRows') && errStruct.twoWayTimeTransfer.nEkfRows > 0
+                h_twtt = revgnss.TwoWayTimeTransferBuilder.predictEkfRows( ...
+                    obj.cfg, obj.asset, obj.towers, obj.ekf.x, sm, errStruct.twoWayTimeTransfer, t_s);
+            end
+            M_twtt = numel(h_twtt);
             if M_dop > 0 || M_car > 0
                 idxIsl = M_pr + M_dop + M_car + 1;
                 postfit = [z(1:M_pr) - h_post_pr; ...
                            z(M_pr+1:M_pr+M_dop) - hd_post; ...
                            z(M_pr+M_dop+1:M_pr+M_dop+M_car) - hc_post; ...
                            z(idxIsl:idxIsl+M_isl-1) - h_isl; ...
-                           z(idxIsl+M_isl:idxIsl+M_isl+M_2w-1) - h_2w];
+                           z(idxIsl+M_isl:idxIsl+M_isl+M_2w-1) - h_2w; ...
+                           z(idxIsl+M_isl+M_2w:idxIsl+M_isl+M_2w+M_twtt-1) - h_twtt];
             else
                 idxIsl = M_pr + 1;
                 postfit = [z(1:M_pr) - h_post_pr; ...
                            z(idxIsl:idxIsl+M_isl-1) - h_isl; ...
-                           z(idxIsl+M_isl:idxIsl+M_isl+M_2w-1) - h_2w];
+                           z(idxIsl+M_isl:idxIsl+M_isl+M_2w-1) - h_2w; ...
+                           z(idxIsl+M_isl+M_2w:idxIsl+M_isl+M_2w+M_twtt-1) - h_twtt];
             end
         end
 
