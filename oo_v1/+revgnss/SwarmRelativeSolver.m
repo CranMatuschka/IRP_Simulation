@@ -44,6 +44,10 @@ classdef SwarmRelativeSolver
     methods (Static)
         function out = solve(cfg, results)
             out = revgnss.SwarmRelativeSolver.emptyOut_();
+            shapeGateOn = revgnss.SwarmRelativeSolver.getBool_(cfg, {'multiAsset','twoWayISL','enable'}, false);
+            clockGateOn = revgnss.SwarmRelativeSolver.getBool_(cfg, {'multiAsset','twoWayTimeTransferISL','enable'}, false);
+            out.shapeGateOn = shapeGateOn;
+            out.shapeObservationSource = 'disabled';
             N = 0;
             if isstruct(results) && isfield(results,'N'); N = results.N; end
             out.nAssets = N;
@@ -65,6 +69,22 @@ classdef SwarmRelativeSolver
             nP = size(pairs,1);
             if nP < 1; return; end
 
+            if ~shapeGateOn
+                [blRaw, shRaw] = revgnss.SwarmRelativeSolver.rawGeometrySeries_(Est, Truth, pairs, nEp, N);
+                tsel = revgnss.SwarmRelativeSolver.tailIdx_(nEp);
+                out.baselineErrRaw_m = sqrt(mean(blRaw(tsel).^2));
+                out.shapeErrRaw_m = sqrt(mean(shRaw(tsel).^2));
+                out.perEpoch = struct('time_s', tVec(:).', ...
+                    'baselineErrRaw_m', blRaw, 'baselineErrSolved_m', nan(1,nEp), ...
+                    'shapeErrRaw_m', shRaw, 'shapeErrSolved_m', nan(1,nEp));
+                out.time_s = tVec(:).';
+                if clockGateOn
+                    out = revgnss.SwarmRelativeSolver.solveRelativeClocks_(cfg, results, N, pairs, tVec, out);
+                end
+                return
+            end
+            out.shapeObservationSource = 'syntheticTwoWayISL';
+
             % --- Per-pair ISL noise: constant delay-cal bias (identity-keyed) + conservative R ---
             [pairBias, pairR] = revgnss.SwarmRelativeSolver.islNoise_(cfg, pairs);
             thermalSigma = revgnss.SwarmRelativeSolver.getNum_(cfg, {'multiAsset','twoWayISL','sigma_m'}, 0.01);
@@ -80,6 +100,7 @@ classdef SwarmRelativeSolver
             blRaw = nan(1,nEp); blSol = nan(1,nEp);
             shRaw = nan(1,nEp); shSol = nan(1,nEp);
             fSig  = nan(1,nEp); weakEp = false(1,nEp);
+            solvedPos = nan(3,N,nEp);                 % ISL-solved positions in their NATIVE (W1) frame (truth-free)
             Winv  = 1 ./ pairR(:);                    % per-pair weight = 1/R
             for kk = 1:nEp
                 estK = zeros(3,N); truthK = zeros(3,N);
@@ -100,6 +121,13 @@ classdef SwarmRelativeSolver
                 shRaw(kk) = revgnss.SwarmRelativeSolver.shapeRms_(estK,  truthK);
                 shSol(kk) = revgnss.SwarmRelativeSolver.shapeRms_(rHat,  truthK);
                 fSig(kk)  = sqrt(mean(Pshape));       % formal 1-sigma of the solved positions
+                % Per-node ISL-solved positions in their NATIVE frame: rHat = W1 estimate + min-norm
+                % shape correction, with the 6-DOF rigid frame LEFT at the W1 value (solveEpoch_). Stored
+                % truth-FREE so the summary's relPos-solved column uses the SAME gauge as relPos-raw (both
+                % ref-differenced vs the reference asset) -> the raw->solved change is genuine ISL shape
+                % sharpening, NOT a truth-alignment artifact. The rigid formation frame, which ISL cannot
+                % observe, is retained in both columns. Output-only: no metric above changes.
+                solvedPos(:,:,kk) = rHat;
             end
 
             % --- Tail-average reporting ---------------------------------------------------------
@@ -117,6 +145,8 @@ classdef SwarmRelativeSolver
             out.perEpoch = struct('time_s', tVec(:).', ...
                 'baselineErrRaw_m', blRaw, 'baselineErrSolved_m', blSol, ...
                 'shapeErrRaw_m', shRaw, 'shapeErrSolved_m', shSol);
+            out.solvedPos = solvedPos;   % [3 x N x nEp] native-frame ISL-solved positions (truth-free; per-satellite relPos-solved)
+            out.time_s = tVec(:).';
 
             % --- W2-2: gated sat-sat TWSTFT RELATIVE-CLOCK solve (default OFF) -------------------
             % The clock DUAL of the shape solve. Two-way sat<->sat time transfer observes the clock
@@ -124,7 +154,7 @@ classdef SwarmRelativeSolver
             % neighbour graph sharpens the swarm's RELATIVE clocks to the TWSTFT floor. Default OFF
             % (needs the sat<->sat transmit premise, beyond plain reverse-GNSS uplink); when OFF the
             % clock fields stay NaN and the shape output above is unchanged.
-            if revgnss.SwarmRelativeSolver.getBool_(cfg, {'multiAsset','twoWayTimeTransferISL','enable'}, false)
+            if clockGateOn
                 out = revgnss.SwarmRelativeSolver.solveRelativeClocks_(cfg, results, N, pairs, tVec, out);
             end
         end
@@ -138,8 +168,10 @@ classdef SwarmRelativeSolver
                 'shapeErrRaw_m', NaN, 'shapeErrSolved_m', NaN, ...
                 'formalShapeSigma_m', NaN, 'weaklyObservable', false, ...
                 'everWeaklyObservable', false, ...
+                'shapeGateOn', false, 'shapeObservationSource', 'disabled', ...
                 'relClockGateOn', false, 'relClockErrRaw_m', NaN, ...
                 'relClockErrSolved_m', NaN, 'relClockFormalSigma_m', NaN, ...
+                'solvedPos', [], 'time_s', [], ...
                 'perEpoch', struct());
         end
 
@@ -159,6 +191,20 @@ classdef SwarmRelativeSolver
                 if size(Est{i},2) ~= nEp; return; end      % all assets must share the epoch grid
             end
             ok = true;
+        end
+
+        function [blRaw, shRaw] = rawGeometrySeries_(Est, Truth, pairs, nEp, N)
+            blRaw = nan(1,nEp);
+            shRaw = nan(1,nEp);
+            for kk = 1:nEp
+                estK = zeros(3,N); truthK = zeros(3,N);
+                for i = 1:N
+                    estK(:,i) = Est{i}(:,kk);
+                    truthK(:,i) = Truth{i}(:,kk);
+                end
+                blRaw(kk) = revgnss.SwarmRelativeSolver.baselineRms_(estK, truthK, pairs);
+                shRaw(kk) = revgnss.SwarmRelativeSolver.shapeRms_(estK, truthK);
+            end
         end
 
         function pairs = neighbourGraph_(meanPos, maxDeg)
@@ -266,6 +312,14 @@ classdef SwarmRelativeSolver
         function rms = shapeRms_(estK, truthK)
             % Best-fit-rigid (6-DOF, NO scale) shape residual RMS: Kabsch-align est -> truth, then
             % per-point position RMS. Gauge-invariant (removes translation + rotation).
+            aligned = revgnss.SwarmRelativeSolver.alignToTruth_(estK, truthK);
+            diffs = aligned - truthK;
+            rms = sqrt(mean(sum(diffs.^2, 1)));
+        end
+
+        function aligned = alignToTruth_(estK, truthK)
+            % Kabsch best-fit-rigid (6-DOF, no scale) transform of estK onto truthK. Shared by
+            % shapeRms_ (byte-identical) and the per-satellite solved-relPos gauge in the summary.
             cE = mean(estK,2); cT = mean(truthK,2);
             E = estK - cE; T = truthK - cT;
             M = E * T.';
@@ -273,8 +327,6 @@ classdef SwarmRelativeSolver
             dsign = sign(det(V*U.')); if dsign == 0; dsign = 1; end
             R = V * diag([1,1,dsign]) * U.';               % rotates est -> truth
             aligned = R * (estK - cE) + cT;
-            diffs = aligned - truthK;
-            rms = sqrt(mean(sum(diffs.^2, 1)));
         end
 
         function [pairBias, pairR] = islNoise_(cfg, pairs)

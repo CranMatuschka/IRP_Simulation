@@ -42,6 +42,8 @@ function result = run_swarm_relative_regression(mode)
         fprintf('\nRESULT: PASS - federated relative layer unchanged vs frozen baseline.\n');
     else
         fprintf('\nRESULT: FAIL - relative-layer output moved (deviation = bug for a byte-identical step).\n');
+        error('run_swarm_relative_regression:changed', ...
+            'Relative-layer regression digest moved; recapture only for an intentional physics/model change.');
     end
 end
 
@@ -52,6 +54,7 @@ function dg = swarmRelativeDigest_()
     cfg.scenario.nSpaceAssets = 4;
     cfg.report.writePdf = false; cfg.report.writeMat = false; cfg.report.compileTex = 'never';
     cfg.plots.enable = false; cfg.plots.showFigures = false;
+    cfg.multiAsset.twoWayISL.enable = true;               % shape layer must be explicitly enabled
     cfg.multiAsset.twoWayTimeTransferISL.enable = true;   % exercise BOTH shape + relative clocks
 
     r = revgnss.ReportRunner.runFederatedEstimation(cfg);
