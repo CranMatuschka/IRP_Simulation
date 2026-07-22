@@ -177,11 +177,13 @@ classdef SimulationDataStore < handle
         ps_cT_
         ps_tT_
         ps_iT_
+        ps_ihoT_
         ps_hT_
         ps_mT_
         ps_cM_
         ps_tM_
         ps_iM_
+        ps_ihoM_
         ps_hM_
         ps_mM_
 
@@ -348,9 +350,9 @@ classdef SimulationDataStore < handle
             obj.di_pCovA_= b1(); obj.di_pCovB_= n1();
             obj.di_pCovS_= n1(); obj.di_pCovP_= b1();
 
-            obj.ps_cT_= n1(); obj.ps_tT_= n1(); obj.ps_iT_= n1();
+            obj.ps_cT_= n1(); obj.ps_tT_= n1(); obj.ps_iT_= n1(); obj.ps_ihoT_= n1();
             obj.ps_hT_= n1(); obj.ps_mT_= n1();
-            obj.ps_cM_= n1(); obj.ps_tM_= n1(); obj.ps_iM_= n1();
+            obj.ps_cM_= n1(); obj.ps_tM_= n1(); obj.ps_iM_= n1(); obj.ps_ihoM_= n1();
             obj.ps_hM_= n1(); obj.ps_mM_= n1();
 
             obj.ck_oWkP_  = n1();
@@ -567,12 +569,14 @@ classdef SimulationDataStore < handle
             obj.ps_cT_(k) = g_(psT,'code',NaN);
             obj.ps_tT_(k) = g_(psT,'trop',NaN);
             obj.ps_iT_(k) = g_(psT,'iono',NaN);
+            obj.ps_ihoT_(k) = g_(psT,'ionoHO',NaN);
             obj.ps_hT_(k) = g_(psT,'hwDelay',NaN);
             obj.ps_mT_(k) = g_(psT,'mp',NaN);
             psM = g_(entry,'perSourceModelRMS',struct());
             obj.ps_cM_(k) = g_(psM,'code',NaN);
             obj.ps_tM_(k) = g_(psM,'trop',NaN);
             obj.ps_iM_(k) = g_(psM,'iono',NaN);
+            obj.ps_ihoM_(k) = g_(psM,'ionoHO',NaN);
             obj.ps_hM_(k) = g_(psM,'hwDelay',NaN);
             obj.ps_mM_(k) = g_(psM,'mp',NaN);
 
@@ -726,7 +730,7 @@ classdef SimulationDataStore < handle
                 else
                     entry.meanLightTime_s = 0; entry.maxLightTime_s = 0;
                 end
-                labels_ = {'code','trop','iono','hwDelay','mp'};
+                labels_ = {'code','trop','iono','ionoHO','hwDelay','mp'};
                 for j_ = 1:numel(labels_)
                     lbl_ = labels_{j_};
                     if isfield(errStruct.bySource,'truth_m') && isfield(errStruct.bySource.truth_m,lbl_)
@@ -750,7 +754,7 @@ classdef SimulationDataStore < handle
                 entry.towerClockTruth_m = []; entry.towerClockModel_m = [];
                 entry.towerClockCorrectionError_m = [];
                 entry.meanLightTime_s = 0; entry.maxLightTime_s = 0;
-                srcLabels_ = {'code','trop','iono','hwDelay','mp'};
+                srcLabels_ = {'code','trop','iono','ionoHO','hwDelay','mp'};
                 for j_ = 1:numel(srcLabels_)
                     lbl_ = srcLabels_{j_};
                     entry.perSourceTruthRMS.(lbl_) = 0;
@@ -1107,7 +1111,7 @@ classdef SimulationDataStore < handle
             z3mps_ = struct('truthRMS_mps',0,'modelRMS_mps',0,'mismatchRMS_mps',0);
             z3cyc_ = struct('truthRMS_cycles',0,'modelRMS_cycles',0,'mismatchRMS_cycles',0);
             cnt_ = struct('codeNoise',z3m_,'troposphere',z3m_,'ionosphere',z3m_, ...
-                'hardwareDelay',z3m_,'multipath',z3m_,'scintillationCodeNoise',z3m_, ...
+                'higherOrderIonosphere',z3m_,'hardwareDelay',z3m_,'multipath',z3m_,'scintillationCodeNoise',z3m_, ...
                 'sagnac',z3m_,'shapiro',z3m_,'towerSurvey',z3m_,'receiverPCO',z3m_, ...
                 'towerPCO',z3m_,'pcv',z3m_,'towerClock',z3m_,'correlatedCommonMode',z3m_, ...
                 'correlatedSameTower',z3m_,'correlatedIndependent',z3m_,'total',z3m_, ...
@@ -1116,7 +1120,8 @@ classdef SimulationDataStore < handle
             if ~isempty(errStruct)
                 if isfield(errStruct,'bySource') && isfield(errStruct.bySource,'truth_m')
                     bst_ = errStruct.bySource.truth_m; bsm_ = errStruct.bySource.model_m;
-                    srcMap_ = {'code','codeNoise';'trop','troposphere';'iono','ionosphere';'hwDelay','hardwareDelay';'mp','multipath'};
+                    srcMap_ = {'code','codeNoise';'trop','troposphere';'iono','ionosphere'; ...
+                               'ionoHO','higherOrderIonosphere';'hwDelay','hardwareDelay';'mp','multipath'};
                     for si_ = 1:size(srcMap_,1)
                         src_ = srcMap_{si_,1}; fld_ = srcMap_{si_,2};
                         if isfield(bst_,src_) && ~isempty(bst_.(src_))
@@ -1813,11 +1818,13 @@ classdef SimulationDataStore < handle
             d.perSource.code    = obj.ps_cT_(1:N);
             d.perSource.trop    = obj.ps_tT_(1:N);
             d.perSource.iono    = obj.ps_iT_(1:N);
+            d.perSource.ionoHO  = obj.ps_ihoT_(1:N);
             d.perSource.hwDelay = obj.ps_hT_(1:N);
             d.perSource.mp      = obj.ps_mT_(1:N);
             d.perSource.codeModel    = obj.ps_cM_(1:N);
             d.perSource.tropModel    = obj.ps_tM_(1:N);
             d.perSource.ionoModel    = obj.ps_iM_(1:N);
+            d.perSource.ionoHOModel  = obj.ps_ihoM_(1:N);
             d.perSource.hwDelayModel = obj.ps_hM_(1:N);
             d.perSource.mpModel      = obj.ps_mM_(1:N);
 
@@ -2041,7 +2048,8 @@ function ef = makeEffStruct_(N)
     z3d = struct('truthRMS_mps',n1(),'modelRMS_mps',n1(),'mismatchRMS_mps',n1());
     z3c = struct('truthRMS_cycles',n1(),'modelRMS_cycles',n1(),'mismatchRMS_cycles',n1());
     ef.codeNoise             = z3m; ef.troposphere           = z3m;
-    ef.ionosphere            = z3m; ef.hardwareDelay         = z3m;
+    ef.ionosphere            = z3m; ef.higherOrderIonosphere = z3m;
+    ef.hardwareDelay         = z3m;
     ef.multipath             = z3m; ef.scintillationCodeNoise= z3m;
     ef.sagnac                = z3m; ef.shapiro               = z3m;
     ef.towerSurvey           = z3m; ef.receiverPCO           = z3m;

@@ -283,13 +283,14 @@ classdef CodeMeasurementBuilder
                 h_new      = zeros(M,1);
                 R_diag_new = zeros(M,1);
 
-                flds  = {'code','trop','iono','hwDelay','mp','scintillation'};
+                flds  = {'code','trop','iono','ionoHO','hwDelay','mp','scintillation'};
                 btOut = struct(); bmOut = struct(); bsOut = struct();
                 for fi = 1:numel(flds)
                     btOut.(flds{fi}) = zeros(M,1);
                     bmOut.(flds{fi}) = zeros(M,1);
                 end
                 bsOut.code = zeros(M,1);
+                bsOut.ionoHO = zeros(M,1);
 
                 sigIdx   = zeros(M,1);
                 sigNames = cell(M,1);
@@ -335,6 +336,9 @@ classdef CodeMeasurementBuilder
                             elv_pi = errStruct.elevations_rad(pi);
                             sigma_code_si = models.measurements.MeasurementModelUtils.codeSignalSigma(sigCfg, elv_pi, cfg);
                             bsOut.code(mi) = sigma_code_si;
+                            if isfield(errStruct.bySource.sigma_m,'ionoHO')
+                                bsOut.ionoHO(mi) = errStruct.bySource.sigma_m.ionoHO(pi);
+                            end
                         else
                             elv_pi        = errStruct.elevations_rad(pi);
                             sigma_code_si = models.measurements.MeasurementModelUtils.codeSignalSigma(sigCfg, elv_pi, cfg);
@@ -349,6 +353,33 @@ classdef CodeMeasurementBuilder
                                 iono_m_si = errStruct.bySource.model_m.iono(pi) * freqScale;
                             end
 
+                            ionoHO_t_si = 0; ionoHO_m_si = 0; ionoHO_sig_si = 0;
+                            if isfield(errStruct.bySource.truth_m,'ionoHO')
+                                ionoL1_t = 0;
+                                if isfield(errStruct.bySource.truth_m,'iono')
+                                    ionoL1_t = errStruct.bySource.truth_m.iono(pi);
+                                end
+                                ionoHO_t_si = models.measurements.CodeMeasurementBuilder.higherOrderIonoAtFrequency_( ...
+                                    cfg, errStruct.bySource.truth_m.ionoHO(pi), ionoL1_t, sigCfg.frequency_Hz, f_L1);
+                            end
+                            if isfield(errStruct.bySource.model_m,'ionoHO')
+                                ionoL1_m = 0;
+                                if isfield(errStruct.bySource.model_m,'iono')
+                                    ionoL1_m = errStruct.bySource.model_m.iono(pi);
+                                end
+                                ionoHO_m_si = models.measurements.CodeMeasurementBuilder.higherOrderIonoAtFrequency_( ...
+                                    cfg, errStruct.bySource.model_m.ionoHO(pi), ionoL1_m, sigCfg.frequency_Hz, f_L1);
+                            end
+                            if isfield(errStruct.bySource.sigma_m,'ionoHO')
+                                sigmaIonoHOL1_pi = errStruct.bySource.sigma_m.ionoHO(pi);
+                                ionoL1_t = 0;
+                                if isfield(errStruct.bySource.truth_m,'iono')
+                                    ionoL1_t = errStruct.bySource.truth_m.iono(pi);
+                                end
+                                ionoHO_sig_si = models.measurements.CodeMeasurementBuilder.higherOrderIonoSigmaAtFrequency_( ...
+                                    cfg, sigmaIonoHOL1_pi, ionoL1_t, sigCfg.frequency_Hz, f_L1);
+                            end
+
                             trop_t = 0; trop_m = 0; hw_t = 0; hw_m = 0; mp_t = 0;
                             if isfield(errStruct.bySource.truth_m,'trop'),    trop_t = errStruct.bySource.truth_m.trop(pi);    end
                             if isfield(errStruct.bySource.model_m,'trop'),    trop_m = errStruct.bySource.model_m.trop(pi);    end
@@ -360,23 +391,31 @@ classdef CodeMeasurementBuilder
                             z_geom_pi = z(pi) - errStruct.truthTotal_m(pi);
                             h_geom_pi = h(pi) - errStruct.modelTotal_m(pi);
 
-                            z_new(mi) = z_geom_pi + trop_t + iono_t_si + hw_t + mp_t + code_t + scint_t;
-                            h_new(mi) = h_geom_pi + trop_m + iono_m_si + hw_m;
+                            z_new(mi) = z_geom_pi + trop_t + iono_t_si + ionoHO_t_si + hw_t + mp_t + code_t + scint_t;
+                            h_new(mi) = h_geom_pi + trop_m + iono_m_si + ionoHO_m_si + hw_m;
 
                             sigma_extra_pi = errStruct.sigmaExtra_m(pi);
+                            sigmaIonoHOL1_pi = 0;
+                            if isfield(errStruct.bySource.sigma_m,'ionoHO')
+                                sigmaIonoHOL1_pi = errStruct.bySource.sigma_m.ionoHO(pi);
+                            end
+                            sigma_extra_si2 = max(sigma_extra_pi^2 - sigmaIonoHOL1_pi^2 + ionoHO_sig_si^2, 0);
                             R_diag_new(mi) = max(sigma_code_si, sigmaFloor)^2 + ...
-                                             scintSig_si^2 + sigma_extra_pi^2 + towerClkSigma(pi)^2;
+                                             scintSig_si^2 + sigma_extra_si2 + towerClkSigma(pi)^2;
 
                             btOut.trop(mi)          = trop_t;
                             bmOut.trop(mi)          = trop_m;
                             btOut.iono(mi)          = iono_t_si;
                             bmOut.iono(mi)          = iono_m_si;
+                            btOut.ionoHO(mi)        = ionoHO_t_si;
+                            bmOut.ionoHO(mi)        = ionoHO_m_si;
                             btOut.hwDelay(mi)       = hw_t;
                             bmOut.hwDelay(mi)       = hw_m;
                             btOut.mp(mi)            = mp_t;
                             btOut.code(mi)          = code_t;
                             btOut.scintillation(mi) = scint_t;
                             bsOut.code(mi)          = sigma_code_si;
+                            bsOut.ionoHO(mi)        = ionoHO_sig_si;
                         end
 
                         % Per-tower slant-iono EKF state (prototype): the state supplies the
@@ -409,6 +448,9 @@ classdef CodeMeasurementBuilder
                     end
                 end
                 errStruct.bySource.sigma_m.code = bsOut.code;
+                if isfield(errStruct.bySource.sigma_m,'ionoHO')
+                    errStruct.bySource.sigma_m.ionoHO = bsOut.ionoHO;
+                end
 
                 % Tile scalar errStruct arrays
                 tileFields = {'towerClockTruth_m','towerClockModel_m','towerClockModelSigma_m', ...
@@ -527,25 +569,32 @@ classdef CodeMeasurementBuilder
                 %       -> CORRELATED unit gain: (alpha+beta)^2*sigma^2 = sigma^2
                 %   first-order ionosphere (dispersive 1/f^2, same physical TEC)
                 %       -> CANCELS: 0
-                %   higher-order ionosphere (dispersive ~1/f^3, same physical TEC)
-                %       -> SURVIVES with gain (alpha + beta*(f1/f2)^3) rel. to its L1 value
+                %   higher-order ionosphere (dispersive f^-3/f^-4, same physical TEC)
+                %       -> SURVIVES as the signed alpha/beta combination of the raw rows
                 %
                 % Implementation: the four independent-per-signal sources all share the
                 % SAME alpha^2/beta^2 gain, so we keep them bundled. We strip only the
                 % correlated + cancelled variance (trop + iono-1st + iono-HO + tower-clock)
-                % out of R_diag -- these sigmas are tiled EQUAL on the L1 and L2 rows, so
-                % the stripped amount is identical for idx1 and idx2 -- apply alpha^2/beta^2
-                % to the independent remainder, then re-add the correlated and higher-order
-                % terms with their correct gains. Keeping the independent remainder inside
+                % out of R_diag; higher-order sigmas are signal-scaled and therefore stripped
+                % separately per row. Apply alpha^2/beta^2 to the independent remainder, then
+                % re-add the correlated and higher-order terms with their correct gains.
+                % Keeping the independent remainder inside
                 % R_diag preserves the per-signal code/scintillation frequency scaling
                 % byte-identically (no re-derivation of those sigmas here).
                 smSig_    = errStruct.bySource.sigma_m;
                 sigTrop_  = zeros(M_pairs_if,1);
                 sigIono1_ = zeros(M_pairs_if,1);
-                sigIonoHO_= zeros(M_pairs_if,1);
+                sigIonoHO_L1_= zeros(M_pairs_if,1);
+                sigIonoHO_L2_= zeros(M_pairs_if,1);
                 if isfield(smSig_,'trop')   && numel(smSig_.trop)   >= M_pairs_if; sigTrop_   = smSig_.trop(idx1);   end
                 if isfield(smSig_,'iono')   && numel(smSig_.iono)   >= M_pairs_if; sigIono1_  = smSig_.iono(idx1);   end
-                if isfield(smSig_,'ionoHO') && numel(smSig_.ionoHO) >= M_pairs_if; sigIonoHO_ = smSig_.ionoHO(idx1); end
+                if isfield(smSig_,'ionoHO') && numel(smSig_.ionoHO) >= 2*M_pairs_if
+                    sigIonoHO_L1_ = smSig_.ionoHO(idx1);
+                    sigIonoHO_L2_ = smSig_.ionoHO(idx2);
+                elseif isfield(smSig_,'ionoHO') && numel(smSig_.ionoHO) >= M_pairs_if
+                    sigIonoHO_L1_ = smSig_.ionoHO(idx1);
+                    sigIonoHO_L2_ = smSig_.ionoHO(idx1);
+                end
                 sigTwr_if_ = zeros(M_pairs_if,1);
                 if numel(towerClkSigma) >= M_pairs_if; sigTwr_if_ = towerClkSigma(1:M_pairs_if); end
                 % Hardware delay is emitted NON-DISPERSIVE by this simulator (one per-tower
@@ -557,25 +606,32 @@ classdef CodeMeasurementBuilder
                 sigHw_ = zeros(M_pairs_if,1);
                 if isfield(smSig_,'hwDelay') && numel(smSig_.hwDelay) >= M_pairs_if; sigHw_ = smSig_.hwDelay(idx1); end
 
-                % Correlated + cancelled variance baked into BOTH the L1 and L2 rows of
-                % R_diag (trop/iono/iono-HO/hwDelay sigmas are tiled equal on L1/L2; tower-
-                % clock sigma is common to the pair). Identical for idx1 and idx2.
-                corrBaked_ = sigTrop_.^2 + sigIono1_.^2 + sigIonoHO_.^2 + sigTwr_if_.^2 + sigHw_.^2;
+                % Correlated + cancelled variance baked into each raw row of R_diag.
+                % Higher-order ionosphere is signal-scaled; the other listed terms are
+                % common to the pair in the current source model.
+                corrBaked_L1_ = sigTrop_.^2 + sigIono1_.^2 + sigIonoHO_L1_.^2 + sigTwr_if_.^2 + sigHw_.^2;
+                corrBaked_L2_ = sigTrop_.^2 + sigIono1_.^2 + sigIonoHO_L2_.^2 + sigTwr_if_.^2 + sigHw_.^2;
 
                 % Independent-per-signal remainder still carries the native per-signal
                 % L1/L2 sigmas (code + multipath + scintillation + signal-dependent HW
                 % delay). Non-negative by construction; max() guards floating-point only.
-                Rindep_L1_ = max(R_diag(idx1) - corrBaked_, 0);
-                Rindep_L2_ = max(R_diag(idx2) - corrBaked_, 0);
+                Rindep_L1_ = max(R_diag(idx1) - corrBaked_L1_, 0);
+                Rindep_L2_ = max(R_diag(idx2) - corrBaked_L2_, 0);
 
-                % Higher-order ionosphere IF survival gain (dispersive ~1/f^3): HO on L2 is
-                % HO_L1*(f1/f2)^3, so IF passes HO_L1 at gain (alpha + beta*(f1/f2)^3).
-                gIonoHO_ = alpha_if + beta_if * (f_L1 / f_L2_if)^3;
+                % Fully correlated signed-source propagation: L1/L2 higher-order terms
+                % are deterministic functions of the same ionosphere ray path, so the IF
+                % one-sigma magnitude follows the signed alpha/beta source combination.
+                sigIonoHO_IF_ = abs(alpha_if * sigIonoHO_L1_ + beta_if * sigIonoHO_L2_);
+                if isfield(errStruct.bySource,'truth_m') && isfield(errStruct.bySource.truth_m,'ionoHO') && ...
+                        numel(errStruct.bySource.truth_m.ionoHO) >= 2*M_pairs_if
+                    sigIonoHO_IF_ = abs(alpha_if * errStruct.bySource.truth_m.ionoHO(idx1) + ...
+                                        beta_if  * errStruct.bySource.truth_m.ionoHO(idx2));
+                end
 
                 R_if = alpha_if^2 * Rindep_L1_ + beta_if^2 * Rindep_L2_ ... % independent per signal
                      + sigTrop_.^2 ...                                      % troposphere: unit gain
                      + 0 * sigIono1_.^2 ...                                 % first-order iono: cancels -> 0
-                     + gIonoHO_^2 * sigIonoHO_.^2 ...                       % higher-order iono: survives
+                     + sigIonoHO_IF_.^2 ...                                  % higher-order iono: correlated signed source
                      + sigTwr_if_.^2 ...                                    % tower-clock: unit gain
                      + sigHw_.^2;                                           % hardware delay: unit gain (non-dispersive)
 
@@ -592,6 +648,9 @@ classdef CodeMeasurementBuilder
                 if isfield(errStruct,'truthTotal_m') && numel(errStruct.truthTotal_m) >= 2*M_pairs_if
                     truthTotal_if = alpha_if * errStruct.truthTotal_m(idx1) + beta_if * errStruct.truthTotal_m(idx2);
                 end
+
+                [btIf_, bmIf_, bsIf_] = models.measurements.CodeMeasurementBuilder.combineIfSources_( ...
+                    errStruct.bySource, idx1, idx2, alpha_if, beta_if, sigIonoHO_IF_);
 
                 z = z_if;
                 h = h_if;
@@ -618,6 +677,9 @@ classdef CodeMeasurementBuilder
                 if isfield(errStruct,'signalName_perMeas') && numel(errStruct.signalName_perMeas) >= M_pairs_if
                     errStruct.signalName_perMeas = repmat({'IF'}, M_pairs_if, 1);
                 end
+                errStruct.bySource.truth_m = btIf_;
+                errStruct.bySource.model_m = bmIf_;
+                errStruct.bySource.sigma_m = bsIf_;
                 % Override the idx1-compressed totals with the IF-combined values (above).
                 if ~isempty(modelTotal_if); errStruct.modelTotal_m = modelTotal_if; end
                 if ~isempty(truthTotal_if); errStruct.truthTotal_m = truthTotal_if; end
@@ -720,6 +782,96 @@ classdef CodeMeasurementBuilder
                 ti = towerList(k);
                 if ti >= 1 && ti <= nT && stateMap.towerClockIdx(ti, col) > 0
                     s(k) = 0;
+                end
+            end
+        end
+
+        % ----------------------------------------------------------------
+        function v = higherOrderIonoAtFrequency_(cfg, sourceL1_m, ionoL1_slant_m, freqHz, f_L1)
+            % higherOrderIonoAtFrequency_  Re-evaluate the configured f^-3/f^-4 model.
+            v = zeros(size(sourceL1_m));
+            if isempty(sourceL1_m) || all(sourceL1_m == 0)
+                return
+            end
+            try
+                ho = cfg.errors.ionosphere.higherOrder;
+                if ~isfield(ho,'enable') || ~ho.enable
+                    return
+                end
+                v = models.errors.HigherOrderIonosphere.totalDelay( ...
+                    ionoL1_slant_m(:), freqHz, f_L1, ho);
+                v = reshape(v, size(sourceL1_m));
+                v(sourceL1_m == 0) = 0;
+            catch
+                v = sourceL1_m .* (f_L1 ./ freqHz).^3;
+            end
+        end
+
+        % ----------------------------------------------------------------
+        function s = higherOrderIonoSigmaAtFrequency_(cfg, sigmaL1_m, ionoL1_slant_m, freqHz, f_L1)
+            % higherOrderIonoSigmaAtFrequency_  Sigma follows the same signed source path.
+            if isempty(sigmaL1_m) || all(sigmaL1_m == 0)
+                s = zeros(size(sigmaL1_m));
+                return
+            end
+            signed = models.measurements.CodeMeasurementBuilder.higherOrderIonoAtFrequency_( ...
+                cfg, sigmaL1_m, abs(ionoL1_slant_m), freqHz, f_L1);
+            if any(signed ~= 0)
+                s = abs(signed);
+            else
+                s = abs(sigmaL1_m) .* abs(f_L1 ./ freqHz).^3;
+            end
+        end
+
+        % ----------------------------------------------------------------
+        function [btIf, bmIf, bsIf] = combineIfSources_(bySource, idx1, idx2, alpha, beta, sigIonoHO_IF)
+            btIf = models.measurements.CodeMeasurementBuilder.combineIfValueStruct_( ...
+                bySource.truth_m, idx1, idx2, alpha, beta);
+            bmIf = models.measurements.CodeMeasurementBuilder.combineIfValueStruct_( ...
+                bySource.model_m, idx1, idx2, alpha, beta);
+            bsIf = struct();
+            sigFields = fieldnames(bySource.sigma_m);
+            for k = 1:numel(sigFields)
+                fn = sigFields{k};
+                v = bySource.sigma_m.(fn);
+                if isempty(v)
+                    bsIf.(fn) = v;
+                    continue
+                end
+                if numel(v) < max(idx2)
+                    bsIf.(fn) = v(1:min(numel(v), numel(idx1)));
+                    continue
+                end
+                s1 = v(idx1);
+                s2 = v(idx2);
+                switch fn
+                    case {'trop','hwDelay'}
+                        bsIf.(fn) = abs(alpha * s1 + beta * s2);
+                    case 'iono'
+                        bsIf.(fn) = zeros(size(s1));
+                    case 'ionoHO'
+                        bsIf.(fn) = sigIonoHO_IF;
+                    otherwise
+                        bsIf.(fn) = sqrt(alpha^2 * s1.^2 + beta^2 * s2.^2);
+                end
+            end
+        end
+
+        % ----------------------------------------------------------------
+        function out = combineIfValueStruct_(src, idx1, idx2, alpha, beta)
+            out = struct();
+            fns = fieldnames(src);
+            for k = 1:numel(fns)
+                fn = fns{k};
+                v = src.(fn);
+                if isempty(v)
+                    out.(fn) = v;
+                elseif numel(v) >= max(idx2)
+                    out.(fn) = alpha * v(idx1) + beta * v(idx2);
+                elseif numel(v) >= numel(idx1)
+                    out.(fn) = v(idx1);
+                else
+                    out.(fn) = v;
                 end
             end
         end
