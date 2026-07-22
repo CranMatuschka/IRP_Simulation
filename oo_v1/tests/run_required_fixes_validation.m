@@ -34,8 +34,7 @@ switch mode
     case 'unit'
         rows = unitRows_(mode, focus);
     case 'quick'
-        rows = scaffoldRows_(mode, focus, 'quick_ladder', ...
-            'Scenario ladder is scheduled for Commit 8; fix-specific unit gates remain authoritative before then.');
+        rows = requiredFixQuickScenarioRows(mode, focus, duration_s);
     case 'release'
         rows = scaffoldRows_(mode, focus, 'release_ladder', ...
             'Release battery validation is scheduled for Commit 10 after all physics fixes pass.');
