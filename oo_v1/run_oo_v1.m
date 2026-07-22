@@ -43,13 +43,7 @@ function out = run_oo_v1(configPath)
     else
         verTag = ['v' regexprep(char(cfg.report.runVersion), '[^A-Za-z0-9._-]', '_')];
     end
-    nG = 0; try; nG = cfg.scenario.nTowers;      catch; end %#ok<*NASGU>
-    nS = 1; try; nS = cfg.scenario.nSpaceAssets; catch; end
-    nR = 1; try; nR = cfg.scenario.nReceivers;   catch; end
-    durS = 0; try; durS = round(cfg.simulation.duration_s); catch; end
-    tw = 0; try; tw = double(logical(cfg.measurements.twstft.enable)); catch; end
-    folderName = sprintf('Report_%s_G%dS%dR%d_TW%d', verTag, nG, nS, nR, tw);
-    fileStem   = sprintf('Report_%s_ts%d_G%dS%dR%d_TW%d', verTag, durS, nG, nS, nR, tw);
+    [folderName, fileStem] = revgnss.RunLabelUtils.reportNameParts(cfg, verTag);
     outputDir  = fullfile(thisDir, 'output');
     runFolder  = fullfile(outputDir, ['Report_' dateStr], folderName);
     if ~isfolder(runFolder); mkdir(runFolder); end

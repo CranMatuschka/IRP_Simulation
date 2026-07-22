@@ -12,7 +12,7 @@ function manifest = run_oo_v1_battery(varargin)
 %   change between runs — no physics/pipeline code is touched.
 %
 %   Writes every run's .mat into
-%     output/Report_YYYYMMDD/Battery_G5G12_TW/Report_v###_G#S#R#_TW#/...
+%     output/Report_YYYYMMDD/Battery_{baseline,idealised,realism}/Report_ts#_G#S#R#_TW#/...
 %   and a manifest (output/.../battery_manifest.mat: struct + matPaths cell).
 %   With 'Analyze' true (default) it then calls run_oo_v1_analysis on the set.
 %
@@ -34,6 +34,7 @@ function manifest = run_oo_v1_battery(varargin)
     p.addParameter('Atmosphere','realistic', @(x)ischar(x)||isstring(x)); % 'realistic' | 'matched'
     p.addParameter('OutRoot',  '', @(x)ischar(x)||isstring(x)); % base output dir (default output/Report_YYYYMMDD)
     p.addParameter('Group',    '');      % override the group folder name (keeps distinct runs apart)
+    p.addParameter('DryRun',   false);   % true -> build configs/manifest only, no simulations
     p.parse(varargin{:});
     o = p.Results;
     o.Atmosphere = lower(char(o.Atmosphere));
@@ -41,13 +42,10 @@ function manifest = run_oo_v1_battery(varargin)
     thisDir = fileparts(mfilename('fullpath'));
     addpath(thisDir); addpath(fullfile(thisDir,'config'));
     dateStr  = datestr(now,'yyyymmdd'); %#ok<TNOW1,DATST>
-    grpName  = 'Battery_idealised';
-    if (islogical(o.Realism)&&o.Realism) || isequal(o.Realism,1); grpName = 'Battery_realism'; end
-    if (islogical(o.HonestCov)&&o.HonestCov) || isequal(o.HonestCov,1); grpName = 'Battery_honestcov'; end
-    if strcmp(o.Atmosphere,'matched'); grpName = 'Battery_matchedatmo'; end
+    [runClass, grpName] = revgnss.RunLabelUtils.batteryClassAndGroup(o.Realism, o.HonestCov, o.Atmosphere);
     % Allow '#' so a frequency tag like Battery_realism_5.00#2.10 survives (the freq
     % battery names groups L1#L2 in GHz on purpose); everything else is sanitised.
-    if ~isempty(o.Group); grpName = regexprep(char(o.Group),'[^A-Za-z0-9._#-]','_'); end
+    if ~isempty(o.Group); grpName = revgnss.RunLabelUtils.sanitizeGroupName(o.Group); end
     % OutRoot overrides the default day folder (used by the freq sweep to home runs
     % under output/FrequencyTests/<topology>/); else the standard output/Report_YYYYMMDD/.
     if ~isempty(o.OutRoot)
@@ -58,7 +56,10 @@ function manifest = run_oo_v1_battery(varargin)
     if ~isfolder(groupDir); mkdir(groupDir); end
     logF = fullfile(groupDir,'battery_log.txt');
 
-    manifest = struct('tag',{},'G',{},'S',{},'R',{},'TW',{},'matPath',{},'ok',{},'wall_s',{},'msg',{});
+    manifest = struct('tag',{},'G',{},'S',{},'R',{},'TW',{}, ...
+        'runClass',{},'atmosphereMode',{},'twoWayTimeTransferInEkf',{}, ...
+        'twstftDiagnosticsEnabled',{},'groupName',{}, ...
+        'matPath',{},'ok',{},'wall_s',{},'msg',{});
     k = 0;
     for g = o.Towers(:)'
         for si = 1:numel(o.SR)
@@ -68,14 +69,26 @@ function manifest = run_oo_v1_battery(varargin)
                 tag = sprintf('G%dS%dR%d_TW%d', g, nS, nR, tw);
                 fprintf('\n===== BATTERY %d/%d : %s (%g s) =====\n', ...
                     k, numel(o.Towers)*numel(o.SR)*numel(o.TW), tag, o.Duration);
-                r = struct('tag',tag,'G',g,'S',nS,'R',nR,'TW',tw,'matPath','', ...
+                r = struct('tag',tag,'G',g,'S',nS,'R',nR,'TW',tw, ...
+                           'runClass',runClass,'atmosphereMode',o.Atmosphere, ...
+                           'twoWayTimeTransferInEkf',logical(tw > 0), ...
+                           'twstftDiagnosticsEnabled',false, ...
+                           'groupName',grpName,'matPath','', ...
                            'ok',false,'wall_s',NaN,'msg','');
                 tS = tic;
                 try
                     cfg = i_buildCfg(g, nS, nR, tw, o.Duration, k, groupDir, o.WritePdf, o.Realism, o.HonestCov, o.Atmosphere);
-                    out = revgnss.ReportRunner.runSingle(cfg);
-                    r.matPath = out.matPath; r.ok = isfile(out.matPath);
-                    fprintf('  DONE %s -> %s\n', tag, r.matPath);
+                    r.twoWayTimeTransferInEkf = revgnss.RunLabelUtils.twoWayTimeTransferInEkf(cfg);
+                    r.twstftDiagnosticsEnabled = revgnss.RunLabelUtils.twstftDiagnosticsEnabled(cfg);
+                    if logical(o.DryRun)
+                        r.ok = true;
+                        r.msg = 'dry-run';
+                        fprintf('  DRY-RUN %s -> %s\n', tag, cfg.report.reportFolder);
+                    else
+                        out = revgnss.ReportRunner.runSingle(cfg);
+                        r.matPath = out.matPath; r.ok = isfile(out.matPath);
+                        fprintf('  DONE %s -> %s\n', tag, r.matPath);
+                    end
                 catch ME
                     r.msg = ME.message;
                     fprintf('  FAILED %s : %s\n', tag, ME.message);
@@ -89,7 +102,9 @@ function manifest = run_oo_v1_battery(varargin)
         end
     end
 
-    matPaths = {manifest(logical([manifest.ok])).matPath};
+    okMask = logical([manifest.ok]);
+    nonEmptyMat = ~cellfun(@isempty, {manifest.matPath});
+    matPaths = {manifest(okMask & nonEmptyMat).matPath};
     manPath  = fullfile(groupDir,'battery_manifest.mat');
     save(manPath, 'manifest', 'matPaths');
     fprintf('\nBattery complete: %d/%d ok. Manifest: %s\n', sum([manifest.ok]), numel(manifest), manPath);
@@ -217,10 +232,11 @@ function cfg = i_buildCfg(nTowers, nSpaceAssets, nReceivers, tw, duration_s, k, 
     end
 
     % STANDARD per-run naming: Report_ts#_G#S#R#_TW#. The day folder (Report_YYYYMMDD/) and the
-    % group folder (Battery_{idealised,realism,honestcov}/) already carry the date and config
+    % group folder (Battery_{baseline,idealised,realism,honestcov}/) already carry the date and config
     % grade, so the run needs neither a version number nor a grade tag. Folder name == file stem.
     runName  = sprintf('Report_ts%d_G%dS%dR%d_TW%d', round(duration_s), ...
-                       nTowers, nSpaceAssets, cfg.scenario.nReceivers, double(twOn));
+                       nTowers, nSpaceAssets, cfg.scenario.nReceivers, ...
+                       double(revgnss.RunLabelUtils.twoWayTimeTransferInEkf(cfg)));
     fileStem = runName;
     cfg.report.reportFolder = fullfile(groupDir, runName);
     cfg.report.stem         = fileStem;
