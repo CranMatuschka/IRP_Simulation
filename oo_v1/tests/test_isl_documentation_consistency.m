@@ -1,0 +1,59 @@
+% test_isl_documentation_consistency
+%
+% Active ISL support exists in routed builders/solvers. The old
+% MeasurementModelUtils.computeISLMeasurements hook is legacy no-row
+% compatibility only and must not advertise "ISL not implemented" without
+% pointing to the active layers.
+
+thisDir = fileparts(mfilename('fullpath'));
+ooRoot = fileparts(thisDir);
+addpath(ooRoot);
+
+fprintf('=== test_isl_documentation_consistency ===\n');
+
+legacyPath = fullfile(ooRoot, '+models', '+measurements', 'MeasurementModelUtils.m');
+legacySrc = fileread(legacyPath);
+assert(contains(legacySrc, 'Legacy compatibility helper'), ...
+    'T1 FAILED: legacy ISL helper must identify itself as compatibility-only.');
+assert(contains(legacySrc, 'revgnss.ISLMeasurementBuilder') && ...
+       contains(legacySrc, 'revgnss.TwoWayISLMeasurementBuilder') && ...
+       contains(legacySrc, 'revgnss.SwarmRelativeSolver'), ...
+       'T1 FAILED: legacy helper must route to active ISL builders/solver.');
+assert(~contains(legacySrc, 'ISL is NOT implemented in oo_v1') && ...
+       ~contains(legacySrc, 'Do NOT advertise ISL as supported'), ...
+       'T1 FAILED: stale unqualified ISL-not-implemented wording remains.');
+[z_isl, h_isl, H_isl] = models.measurements.MeasurementModelUtils.computeISLMeasurements([], [], [], []);
+assert(isempty(z_isl) && isempty(h_isl) && size(H_isl,1) == 0, ...
+    'T1 FAILED: legacy helper must remain no-row compatibility.');
+fprintf('  T1 legacy no-row helper routes to active ISL layers: PASS\n');
+
+activeFiles = { ...
+    fullfile(ooRoot, '+revgnss', 'ISLMeasurementBuilder.m'), ...
+    fullfile(ooRoot, '+revgnss', 'TwoWayISLMeasurementBuilder.m'), ...
+    fullfile(ooRoot, '+revgnss', 'SwarmRelativeSolver.m')};
+required = { ...
+    {'One-way secondary-to-primary ISL', 'islCode'}, ...
+    {'Same-epoch two-way ISL range', 'islTwoWayRange'}, ...
+    {'syntheticTwoWayISL', 'relClockGateOn'}};
+for k = 1:numel(activeFiles)
+    assert(isfile(activeFiles{k}), 'T2 FAILED: active ISL file missing: %s', activeFiles{k});
+    src = fileread(activeFiles{k});
+    toks = required{k};
+    for ti = 1:numel(toks)
+        assert(contains(src, toks{ti}), ...
+            'T2 FAILED: %s missing required routing token "%s".', activeFiles{k}, toks{ti});
+    end
+end
+fprintf('  T2 active one-way, two-way, and relative-layer files are documented: PASS\n');
+
+docPath = fullfile(ooRoot, 'docs', 'swarm_isl_model_notes.md');
+assert(isfile(docPath), 'T3 FAILED: missing docs/swarm_isl_model_notes.md.');
+doc = fileread(docPath);
+docTokens = {'one-way ISL', 'two-way ISL', 'synthetic two-way-ISL', 'relative clock'};
+for k = 1:numel(docTokens)
+    assert(contains(doc, docTokens{k}), ...
+        'T3 FAILED: ISL notes missing "%s".', docTokens{k});
+end
+fprintf('  T3 ISL model notes distinguish active layers: PASS\n');
+
+fprintf('=== test_isl_documentation_consistency: ALL PASS ===\n');

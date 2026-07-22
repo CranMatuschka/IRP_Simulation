@@ -11,14 +11,17 @@ classdef MeasurementModelUtils
     methods (Static)
 
         function [z_isl, h_isl, H_isl] = computeISLMeasurements(asset_rx, asset_tx, ~, ~)
-            % computeISLMeasurements  Future-work stub. ISL is NOT implemented in oo_v1.
+            % computeISLMeasurements  Legacy compatibility helper, not the active ISL router.
             %
-            % Returns empty z/h/H — no EKF rows, no measurement effect.
-            % Do NOT advertise ISL as supported functionality.
+            % This helper intentionally returns empty z/h/H so old callers keep zero
+            % EKF effect. Active ISL layers are built elsewhere:
+            %   * revgnss.ISLMeasurementBuilder: one-way secondary-to-primary ISL rows
+            %   * revgnss.TwoWayISLMeasurementBuilder: same-epoch two-way ISL range rows
+            %   * revgnss.SwarmRelativeSolver: synthetic two-way-ISL formation shape and
+            %     sat-sat TWSTFT relative-clock post-processing
             %
-            % Candidate future one-way range observable:
-            %   z_{rx,tx} = rho_{rx,tx} + b_rx - b_tx + noise
-            % Sign convention: receiver clock adds positively, transmitter subtracts.
+            % Use those routed builders/solver for supported ISL physics instead of this
+            % legacy no-row hook.
             z_isl = [];
             h_isl = [];
             H_isl = zeros(0, 0);
