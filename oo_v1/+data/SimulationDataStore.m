@@ -199,6 +199,7 @@ classdef SimulationDataStore < handle
 
         % ---- Tower clocks (lazy [nTowers x N])
         nTowers_  (1,1) double = 0
+        nTowerClockRowsStored_ (1,1) double = 0
         tw_tru_
         tw_mod_
         tw_err_
@@ -606,18 +607,24 @@ classdef SimulationDataStore < handle
             twT = g_(entry,'towerClockTruth_m',[]);
             twM = g_(entry,'towerClockModel_m',[]);
             if ~isempty(twT) && isnumeric(twT)
-                nT = numel(twT);
-                if isempty(obj.tw_tru_)
-                    obj.nTowers_ = nT;
-                    obj.tw_tru_  = nan(nT, obj.nAlloc_);
-                    obj.tw_mod_  = nan(nT, obj.nAlloc_);
-                    obj.tw_err_  = nan(nT, obj.nAlloc_);
+                nTraw = numel(twT);
+                obj.nTowerClockRowsStored_ = max(obj.nTowerClockRowsStored_, nTraw);
+                nTphys = obj.nTowers_;
+                if nTphys <= 0
+                    nTphys = nTraw;
+                    obj.nTowers_ = nTphys;
                 end
-                nMn = min(nT, obj.nTowers_);
-                obj.tw_tru_(1:nMn,k) = twT(1:nMn);
-                if ~isempty(twM) && isnumeric(twM) && numel(twM) >= nMn
-                    obj.tw_mod_(1:nMn,k) = twM(1:nMn);
-                    obj.tw_err_(1:nMn,k) = twT(1:nMn) - twM(1:nMn);
+                [twTphys, twMphys] = collapseTowerClockRows_(twT, twM, nTphys);
+                if isempty(obj.tw_tru_)
+                    obj.tw_tru_  = nan(nTphys, obj.nAlloc_);
+                    obj.tw_mod_  = nan(nTphys, obj.nAlloc_);
+                    obj.tw_err_  = nan(nTphys, obj.nAlloc_);
+                end
+                nMn = min(numel(twTphys), size(obj.tw_tru_,1));
+                obj.tw_tru_(1:nMn,k) = twTphys(1:nMn);
+                if ~isempty(twMphys) && isnumeric(twMphys) && numel(twMphys) >= nMn
+                    obj.tw_mod_(1:nMn,k) = twMphys(1:nMn);
+                    obj.tw_err_(1:nMn,k) = twTphys(1:nMn) - twMphys(1:nMn);
                 end
             end
         end
@@ -1351,6 +1358,8 @@ classdef SimulationDataStore < handle
             m.nEpochs         = obj.nEpochs;
             m.nState          = obj.nx_;
             m.nTowers         = obj.nTowers_;
+            m.nTowersPhysical = obj.nTowers_;
+            m.nTowerClockRowsStored = obj.nTowerClockRowsStored_;
             m.nReceivers      = obj.nReceivers_;
         end
 
@@ -1366,6 +1375,7 @@ classdef SimulationDataStore < handle
             fprintf('  Epochs written  : %d\n', obj.nEpochs);
             fprintf('  State dim       : %d\n', obj.nx_);
             fprintf('  nTowers         : %d\n', obj.nTowers_);
+            fprintf('  tower clk rows  : %d\n', obj.nTowerClockRowsStored_);
             fprintf('  nReceivers      : %d\n', obj.nReceivers_);
         end
 
@@ -1921,6 +1931,8 @@ classdef SimulationDataStore < handle
 
             % Tower clocks
             if ~isempty(obj.tw_tru_)
+                d.towerClock.nPhysicalTowers = obj.nTowers_;
+                d.towerClock.nRowsStored     = obj.nTowerClockRowsStored_;
                 d.towerClock.truth_m           = obj.tw_tru_(:,1:N);
                 d.towerClock.model_m           = obj.tw_mod_(:,1:N);
                 d.towerClock.correctionError_m = obj.tw_err_(:,1:N);
@@ -2130,6 +2142,37 @@ function v = gv_(s, path, def)
         else; v = def; return; end
     end
     if isempty(v); v = def; end
+end
+
+function [truthPhys, modelPhys] = collapseTowerClockRows_(truthRows, modelRows, nPhysical)
+    truthRows = truthRows(:);
+    if nargin < 2 || isempty(modelRows)
+        modelRows = [];
+    else
+        modelRows = modelRows(:);
+    end
+    if numel(truthRows) == nPhysical
+        truthPhys = truthRows;
+        modelPhys = modelRows;
+        return
+    end
+    if nPhysical <= 0 || mod(numel(truthRows), nPhysical) ~= 0
+        error('SimulationDataStore:towerClockRowExpansion', ...
+            ['Tower-clock vector length %d cannot be mapped to %d physical towers. ' ...
+             'Provide physical tower clocks or an expanded length divisible by the physical count.'], ...
+            numel(truthRows), nPhysical);
+    end
+    truthPhys = mean(reshape(truthRows, nPhysical, []), 2, 'omitnan');
+    if isempty(modelRows)
+        modelPhys = [];
+        return
+    end
+    if numel(modelRows) ~= numel(truthRows)
+        error('SimulationDataStore:towerClockModelExpansion', ...
+            'Tower-clock model length %d does not match truth length %d.', ...
+            numel(modelRows), numel(truthRows));
+    end
+    modelPhys = mean(reshape(modelRows, nPhysical, []), 2, 'omitnan');
 end
 
 function ef = makeEffStruct_(N)
