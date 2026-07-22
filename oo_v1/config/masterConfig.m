@@ -11,9 +11,10 @@ function cfg = masterConfig(mode)
 %   scenario). revgnss.ConfigFactory.defaultConfig calls that, so the derived/test/frozen-
 %   golden configs are all built on the same defaults, from this one file.
 %
-%   v1 limitations: signal-dependent hardware delays / DCB are zero (IF residual not
-%   modelled); the Doppler ionosphere-rate term is not modelled; the PR/Doppler
-%   shared tower-clock cross-covariance is ignored (block-diagonal R).
+%   v1 limitations: signal-dependent hardware delays default to zero and configured
+%   code DCB is global per signal (no calibrated per-link product); the Doppler
+%   ionosphere-rate term is not modelled; the PR/Doppler shared tower-clock
+%   cross-covariance is ignored (block-diagonal R).
     thisDir   = fileparts(mfilename('fullpath'));   % .../oo_v1/config
     oo_v1Root = fileparts(thisDir);                 % .../oo_v1
     addpath(oo_v1Root);                             % +revgnss builders

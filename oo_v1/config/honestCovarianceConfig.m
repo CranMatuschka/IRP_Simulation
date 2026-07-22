@@ -43,8 +43,9 @@ function cfg = honestCovarianceConfig(cfg)
 %   propagated error together, the over-confidence RATIO is invariant to R (and Q) scaling
 %   -- the mathematical reason no honest scalar makes NEES -> 1 (R-floor experiment above).
 %   NOTE two corrections to a naive budget: the 0.5 m hardware-delay residual is WHITE per
-%   epoch (already honestly in R, not a constant bias), and the inter-frequency DCB is inert
-%   on the active raw dual-frequency path (used only by the ionosphere-free diagnostic).
+%   epoch (already honestly in R, not a constant bias), and configured inter-frequency code
+%   DCB is deterministic per signal (residual bias when truth and model differ), not a white
+%   covariance inflation term.
 %
 %   TESTED FIX #2 -- estimate per-tower clock/bias states: DIVERGES (NOT enabled). A constant
 %   per-tower measurement bias is observationally identical to a per-tower clock bias, so

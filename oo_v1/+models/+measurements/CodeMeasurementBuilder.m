@@ -223,6 +223,23 @@ classdef CodeMeasurementBuilder
                 R_diag(mi) = max(sigma_i, sigmaFloor)^2;
             end
 
+            % Deterministic per-signal code DCB contribution. This is code-only and
+            % sigma-free unless an explicit stochastic DCB model is later introduced.
+            % The base rows are L1; L2 rows are reconstructed below with their own DCB.
+            [dcbTruthL1_, dcbModelL1_] = models.measurements.CodeMeasurementBuilder.codeDcbForSignal_(cfg, 'L1');
+            dcbTruthVec_ = dcbTruthL1_ * ones(M,1);
+            dcbModelVec_ = dcbModelL1_ * ones(M,1);
+            z = z + dcbTruthVec_;
+            h = h + dcbModelVec_;
+            errStruct.truthTotal_m = errStruct.truthTotal_m + dcbTruthVec_;
+            errStruct.modelTotal_m = errStruct.modelTotal_m + dcbModelVec_;
+            errStruct.bySource.truth_m.dcb = dcbTruthVec_;
+            errStruct.bySource.model_m.dcb = dcbModelVec_;
+            errStruct.bySource.sigma_m.dcb = zeros(M,1);
+            if isfield(errStruct,'labels') && ~any(strcmp(errStruct.labels, 'dcb'))
+                errStruct.labels{end+1} = 'dcb';
+            end
+
             % Complete the tower-clock product-sigma R double-count guard. The
             % single-freq diagonal above (lines 209-213) guards only a LOCAL copy; the
             % downstream L2/multi-sig diagonal, ionosphere-free R rebuild, and shared-tower
@@ -272,10 +289,9 @@ classdef CodeMeasurementBuilder
 
             if N_sig > 1
                 % NOTE on hardware/code biases (DCB):
-                % Signal-dependent hardware delays on L1 and L2 do NOT cancel in the
-                % IF combination.  HW_IF = alpha*HW_L1 - beta*HW_L2.
-                % In this v1 simulation hardware delays are set to zero (simplified).
-                % LIMITATION: DCB calibration is not implemented.
+                % Configured deterministic code DCB is applied per signal and survives
+                % IF as alpha*DCB_L1 + beta*DCB_L2. This is not a calibrated external
+                % DCB product or per-tower/receiver DCB state model.
                 M_pairs = M;
                 M       = M_pairs * N_sig;
 
@@ -283,7 +299,7 @@ classdef CodeMeasurementBuilder
                 h_new      = zeros(M,1);
                 R_diag_new = zeros(M,1);
 
-                flds  = {'code','trop','iono','ionoHO','hwDelay','mp','scintillation'};
+                flds  = {'code','trop','iono','ionoHO','hwDelay','dcb','mp','scintillation'};
                 btOut = struct(); bmOut = struct(); bsOut = struct();
                 for fi = 1:numel(flds)
                     btOut.(flds{fi}) = zeros(M,1);
@@ -381,6 +397,7 @@ classdef CodeMeasurementBuilder
                             end
 
                             trop_t = 0; trop_m = 0; hw_t = 0; hw_m = 0; mp_t = 0;
+                            [dcb_t, dcb_m] = models.measurements.CodeMeasurementBuilder.codeDcbForSignal_(cfg, sigCfg.name);
                             if isfield(errStruct.bySource.truth_m,'trop'),    trop_t = errStruct.bySource.truth_m.trop(pi);    end
                             if isfield(errStruct.bySource.model_m,'trop'),    trop_m = errStruct.bySource.model_m.trop(pi);    end
                             if isfield(errStruct.bySource.truth_m,'hwDelay'), hw_t   = errStruct.bySource.truth_m.hwDelay(pi); end
@@ -391,8 +408,8 @@ classdef CodeMeasurementBuilder
                             z_geom_pi = z(pi) - errStruct.truthTotal_m(pi);
                             h_geom_pi = h(pi) - errStruct.modelTotal_m(pi);
 
-                            z_new(mi) = z_geom_pi + trop_t + iono_t_si + ionoHO_t_si + hw_t + mp_t + code_t + scint_t;
-                            h_new(mi) = h_geom_pi + trop_m + iono_m_si + ionoHO_m_si + hw_m;
+                            z_new(mi) = z_geom_pi + trop_t + iono_t_si + ionoHO_t_si + hw_t + dcb_t + mp_t + code_t + scint_t;
+                            h_new(mi) = h_geom_pi + trop_m + iono_m_si + ionoHO_m_si + hw_m + dcb_m;
 
                             sigma_extra_pi = errStruct.sigmaExtra_m(pi);
                             sigmaIonoHOL1_pi = 0;
@@ -411,6 +428,8 @@ classdef CodeMeasurementBuilder
                             bmOut.ionoHO(mi)        = ionoHO_m_si;
                             btOut.hwDelay(mi)       = hw_t;
                             bmOut.hwDelay(mi)       = hw_m;
+                            btOut.dcb(mi)           = dcb_t;
+                            bmOut.dcb(mi)           = dcb_m;
                             btOut.mp(mi)            = mp_t;
                             btOut.code(mi)          = code_t;
                             btOut.scintillation(mi) = scint_t;
@@ -854,6 +873,35 @@ classdef CodeMeasurementBuilder
                     otherwise
                         bsIf.(fn) = sqrt(alpha^2 * s1.^2 + beta^2 * s2.^2);
                 end
+            end
+        end
+
+        % ----------------------------------------------------------------
+        function [truth_m, model_m] = codeDcbForSignal_(cfg, signalName)
+            truth_m = models.measurements.CodeMeasurementBuilder.oneCodeDcb_(cfg, 'truth', signalName);
+            model_m = models.measurements.CodeMeasurementBuilder.oneCodeDcb_(cfg, 'model', signalName);
+        end
+
+        % ----------------------------------------------------------------
+        function v = oneCodeDcb_(cfg, side, signalName)
+            v = 0;
+            if isstring(signalName); signalName = char(signalName); end
+            if ~ischar(signalName) || isempty(signalName)
+                return
+            end
+            fld = sprintf('%s_m', signalName);
+            try
+                b = cfg.biases.interFrequency.code.(side);
+                if isfield(b, fld)
+                    v = b.(fld);
+                elseif isfield(b, signalName)
+                    v = b.(signalName);
+                end
+            catch
+                v = 0;
+            end
+            if ~isnumeric(v) || ~isscalar(v) || ~isfinite(v)
+                v = 0;
             end
         end
 
