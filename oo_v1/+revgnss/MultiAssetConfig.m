@@ -1,7 +1,7 @@
 classdef MultiAssetConfig
-    % MultiAssetConfig  Stage 20 helpers for represented spacecraft assets.
+    % MultiAssetConfig helpers for represented spacecraft assets.
     %
-    % Stage 20 is metadata/truth-architecture only: tower-to-spacecraft
+    % Metadata/truth-architecture only: tower-to-spacecraft
     % measurements still target the primary estimated asset, and ISL/TWSTFT
     % rows are explicitly absent.
 
@@ -13,6 +13,19 @@ classdef MultiAssetConfig
             end
             nAssets = max(1, round(cfg.scenario.nSpaceAssets));
             cfg.scenario.nSpaceAssets = nAssets;
+
+            % WP3 estimate mode (isfield-guarded: normalize() is called standalone by
+            % summary()/assetInfos()/instantiateAssets() on cfgs that may lack the field).
+            estMode = 'off';
+            if isfield(cfg,'multiAsset') && isfield(cfg.multiAsset,'estimateMode') && ...
+                    (ischar(cfg.multiAsset.estimateMode) || isstring(cfg.multiAsset.estimateMode))
+                estMode = char(cfg.multiAsset.estimateMode);
+            end
+            if ~ismember(estMode, {'off','clocks','position'})
+                error('MultiAssetConfig:badEstimateMode', ...
+                    'cfg.multiAsset.estimateMode must be ''off''|''clocks''|''position''; got ''%s''.', estMode);
+            end
+            cfg.multiAsset.estimateMode = estMode;
 
             if ~isfield(cfg,'asset') || isempty(cfg.asset)
                 error('MultiAssetConfig:missingPrimaryAsset', 'cfg.asset is required as the primary estimated asset.');
@@ -59,8 +72,12 @@ classdef MultiAssetConfig
             cfg.multiAsset.nSpaceAssets = nAssets;
             cfg.multiAsset.estimatedAssetIndex = 1;
             cfg.multiAsset.estimatedAssetName = cfg.assets(1).name;
-            cfg.multiAsset.multiAssetEstimationEnabled = false;
-            cfg.multiAsset.guardMessage = 'multi-asset estimation not yet enabled; only primary asset estimated';
+            cfg.multiAsset.multiAssetEstimationEnabled = strcmp(estMode,'clocks') && nAssets >= 2;
+            if cfg.multiAsset.multiAssetEstimationEnabled
+                cfg.multiAsset.guardMessage = 'secondary-asset clocks (bias+drift) estimated as EKF states (WP3); positions remain product';
+            else
+                cfg.multiAsset.guardMessage = 'multi-asset estimation not yet enabled; only primary asset estimated';
+            end
             cfg.multiAsset.islRows = revgnss.MultiAssetConfig.islRowCount_(cfg);
             cfg.multiAsset.twstftRows = 0;
         end
@@ -111,7 +128,7 @@ classdef MultiAssetConfig
             s.estimatedAssetIndex = 1;
             s.estimatedAssetName = cfg.assets(1).name;
             s.nonEstimatedAssetNames = {cfg.assets(~[cfg.assets.estimated]).name};
-            s.multiAssetEstimationEnabled = false;
+            s.multiAssetEstimationEnabled = cfg.multiAsset.multiAssetEstimationEnabled;
             s.guardMessage = cfg.multiAsset.guardMessage;
             s.islRows = revgnss.MultiAssetConfig.islRowCount_(cfg);
             s.twstftRows = 0;
@@ -151,9 +168,35 @@ classdef MultiAssetConfig
                 nTx = double(nAssets >= 2);
             end
         end
+
     end
 
     methods (Static, Access = private)
+        function mode = estimateModeStr_(cfg)
+            mode = 'off';
+            if isfield(cfg,'multiAsset') && isfield(cfg.multiAsset,'estimateMode') && ...
+                    (ischar(cfg.multiAsset.estimateMode) || isstring(cfg.multiAsset.estimateMode))
+                mode = char(cfg.multiAsset.estimateMode);
+            end
+        end
+
+        function tf = cfgBool_(cfg, path, defaultValue)
+            v = cfg;
+            for k = 1:numel(path)
+                if isstruct(v) && isfield(v, path{k}); v = v.(path{k});
+                else; tf = islogical(defaultValue) && defaultValue; return; end
+            end
+            tf = islogical(v) && isscalar(v) && v;
+        end
+
+        function v = cfgNum_(cfg, path, defaultValue)
+            v = cfg;
+            for k = 1:numel(path)
+                if isstruct(v) && isfield(v, path{k}); v = v.(path{k}); else; v = defaultValue; return; end
+            end
+            if ~(isnumeric(v) && isscalar(v)); v = defaultValue; end
+        end
+
         function a = mergePrimary_(a, primary)
             f = fieldnames(primary);
             for k = 1:numel(f); a.(f{k}) = primary.(f{k}); end

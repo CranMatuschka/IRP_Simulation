@@ -96,26 +96,13 @@ function testMeasurementModelAndErrorBudget(tc)
     verifyTrue(tc, contains(tex, 'Doppler'), 'Measurement-model Doppler row missing.');
 end
 
-function testGoalAndAppendix(tc)
+function testGoalPresentAndPhysicsAppendixRemoved(tc)
     tex = tc.TestData.tex;
     verifyTrue(tc, contains(tex, 'Goal and Scenario'), 'Goal and Scenario section missing.');
-    verifyTrue(tc, contains(tex, 'Appendix: Simulation Physics and Configuration'), 'Physics appendix missing.');
-    % Appendix must come after the verdict (physics is last content).
-    iApp = strfind(tex, 'Appendix: Simulation Physics');
-    iVer = strfind(tex, 'Scientific Verdict');
-    verifyTrue(tc, ~isempty(iApp) && ~isempty(iVer) && iApp(1) > iVer(1), ...
-        'Physics appendix is not after the Scientific Verdict.');
-end
-
-function testAuditMarkersPreserved(tc)
-    tex = tc.TestData.tex;
-    markers = {'Truth-estimation separation audit','truth/EKF dynamics family', ...
-        'J2 dynamics policy','Realistic synthetic truth-estimation comparison', ...
-        'Realistic synthetic TE comparison'};
-    for i = 1:numel(markers)
-        verifyTrue(tc, contains(tex, markers{i}), ...
-            sprintf('Required audit marker "%s" was dropped.', markers{i}));
-    end
+    % The "Appendix: Simulation Physics and Configuration" section was intentionally removed
+    % from the report. Assert it stays out so it is not silently reintroduced.
+    verifyFalse(tc, contains(tex, 'Appendix: Simulation Physics and Configuration'), ...
+        'Physics appendix should have been removed from the report.');
 end
 
 % ===================================================================

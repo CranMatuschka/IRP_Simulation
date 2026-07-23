@@ -1,0 +1,20 @@
+{
+  "scenario": {
+    "name": "scene_G5S1R4_ts7200_TW0_def",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+  "simulation": {
+    "duration_s": 7200
+  },
+  "measurements": {
+    "twoWayTimeTransfer": {
+      "enable": false,
+      "useInEKF": false
+    }
+  },
+  "report": {
+    "runVersion": "def"
+  }
+}

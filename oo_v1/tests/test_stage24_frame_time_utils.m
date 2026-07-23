@@ -9,8 +9,12 @@ addpath(rootDir);
 
 fprintf('=== test_stage24_frame_time_utils ===\n');
 
-OMEGA = 7.2921150e-5;   % expected WGS-84 rotation rate
-C     = 299792458;
+% WP-12a: expected constants sourced from revgnss.Constants, the single source
+% FrameTimeUtils now routes through (value unchanged; keeps the test in sync).
+OMEGA = revgnss.Constants.EARTH_OMEGA_RADPS;   % expected WGS-84 rotation rate
+C     = revgnss.Constants.SPEED_OF_LIGHT_MPS;
+assert(models.frames.FrameTimeUtils.earthRotationRate_radps() == OMEGA, ...
+    'FrameTimeUtils.earthRotationRate_radps must equal revgnss.Constants.EARTH_OMEGA_RADPS (WP-12a).');
 
 % ----------------------------------------------------------------
 % T1: earthRotationAngle at t=0 is zero; increases with time

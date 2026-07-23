@@ -1,5 +1,5 @@
 classdef ProductClockCovarianceBuilder
-    % ProductClockCovarianceBuilder  Shared product-clock covariance blocks (Stage 83).
+    % ProductClockCovarianceBuilder  Shared product-clock covariance blocks.
     %
     % Centralises block-covariance construction for Doppler and carrier rows
     % that share a common tower-product-clock drift error.

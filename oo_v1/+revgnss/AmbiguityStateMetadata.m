@@ -1,5 +1,5 @@
 classdef AmbiguityStateMetadata
-    % AmbiguityStateMetadata  Stage 41 EKF ambiguity state-map and covariance export.
+    % AmbiguityStateMetadata  EKF ambiguity state-map and covariance export.
     %
     % Exports float ambiguity state-map indices and final covariance sub-block
     % diagnostics from a live EKF object.  Metadata/covariance export only.

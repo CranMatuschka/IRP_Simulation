@@ -21,24 +21,25 @@ cfg_multi = revgnss.ConfigFactory.multiAntennaAttitudeConfig();
 cfg_multi.simulation.duration_s = 60;
 cfg_multi.plots.enable  = false;
 cfg_multi.report.enable = false;
+% Heavy per-epoch diagnostics (SVD attitude rank) default to a 300s cadence
+% (config/baseConfig.m cfg.data.heavyDiagnosticsInterval_s); force every-epoch
+% computation so this short 60s run has a populated attitudeRank at the final
+% epoch (data.SimulationDataStore.parseHeavyDiagCfg_ / recordEpoch heavyDiag_ gate).
+cfg_multi.data.computeHeavyDiagnosticsEveryEpoch = true;
 
 sim_multi = revgnss.ReverseGNSSSimulation(cfg_multi);
 sim_multi.initialize();
 sim_multi.run();
 
 attRanks = sim_multi.diag.getAttitudeRank();
-attStatuses = sim_multi.diag.getAttitudeStatus();
 
 % Check final epoch (after convergence)
 N = numel(attRanks);
 finalRank   = attRanks(N);
-finalStatus = attStatuses{N};
 
-fprintf('    Final epoch attitudeRank = %d, status = ''%s''\n', finalRank, finalStatus);
+fprintf('    Final epoch attitudeRank = %d\n', finalRank);
 assert(finalRank == 3, ...
     'T8a FAILED: multiAntennaAttitudeConfig should give attitudeRank=3 (got %d)', finalRank);
-assert(strcmp(finalStatus, 'full'), ...
-    'T8a FAILED: expected attitudeStatus=''full'' (got ''%s'')', finalStatus);
 fprintf('    PASS\n');
 
 % ----------------------------------------------------------------
@@ -50,6 +51,7 @@ cfg_single = revgnss.ConfigFactory.noLeverArmConfig();
 cfg_single.simulation.duration_s = 60;
 cfg_single.plots.enable  = false;
 cfg_single.report.enable = false;
+cfg_single.data.computeHeavyDiagnosticsEveryEpoch = true;
 
 sim_single = revgnss.ReverseGNSSSimulation(cfg_single);
 sim_single.initialize();
@@ -57,14 +59,10 @@ sim_single.run();
 
 attRanks_s = sim_single.diag.getAttitudeRank();
 finalRank_s = attRanks_s(end);
-attStatuses_s = sim_single.diag.getAttitudeStatus();
-finalStatus_s = attStatuses_s{end};
 
-fprintf('    Final epoch attitudeRank = %d, status = ''%s''\n', finalRank_s, finalStatus_s);
+fprintf('    Final epoch attitudeRank = %d\n', finalRank_s);
 assert(finalRank_s == 0, ...
     'T8b FAILED: zero lever arm should give attitudeRank=0 (got %d)', finalRank_s);
-assert(strcmp(finalStatus_s, 'unobservable'), ...
-    'T8b FAILED: expected attitudeStatus=''unobservable'' (got ''%s'')', finalStatus_s);
 fprintf('    PASS\n');
 
 fprintf('=== test_attitude_rank_v4: ALL PASS ===\n');

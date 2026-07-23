@@ -33,7 +33,7 @@ classdef Diagnostics < handle
     properties
         log     (:,1) struct
         nEpochs (1,1) double = 0
-        % Receiver hardware-bias architecture metadata (Stage 12)
+        % Receiver hardware-bias architecture metadata
         % Set once during construction from cfg; constant across epochs.
         rxCodeBiasMode                  char   = 'absorbedInReceiverClock'
         rxCodeBiasModel_m               double = 0.0
@@ -48,7 +48,7 @@ classdef Diagnostics < handle
         clockObsWinLen_  (1,1) double  = 60
         clockObsMinWin_  (1,1) double  = 5
         clockObsRankTol_
-        cfg_                                        % stored for Stage 31 attitude audit
+        cfg_                                        % stored for attitude audit
         lastAttitudeAudit_       struct = struct() % most recent AttitudeObservability.audit result
         lastAttitudeJacobianAudit_ struct = struct() % most recent AttitudeJacobianAudit result
         % Storage policy (set from cfg.diagnostics.storage in configureCfg)
@@ -166,7 +166,7 @@ classdef Diagnostics < handle
 
             fprintf('  Diagnostics storage: %s\n', obj.storagePolicyMode_);
 
-            % --- Stage 12: receiver bias architecture metadata ---------------
+            % --- Receiver bias architecture metadata ---------------
             if isfield(cfg,'hardware') && isfield(cfg.hardware,'rxCodeBias')
                 rxcb = cfg.hardware.rxCodeBias;
                 if isfield(rxcb,'mode')
@@ -296,7 +296,7 @@ classdef Diagnostics < handle
         end
 
         function s = getInnovationAccountingSummary57(obj)
-            % getInnovationAccountingSummary57  Mean Stage 57 innovation accounting over all epochs.
+            % getInnovationAccountingSummary57  Mean innovation accounting over all epochs.
             s = struct('available', false, ...
                 'meanPhysicalNIS', NaN, 'meanGaugeNIS', NaN, 'meanAugmentedNIS', NaN, ...
                 'meanPhysicalDof', NaN, 'meanGaugeDof', NaN, ...
@@ -615,21 +615,21 @@ classdef Diagnostics < handle
         end
 
         function v = getVelocityNEES(obj)
-            % getVelocityNEES  Velocity NEES per epoch [nEpochs x 1].  Stage 85.
+            % getVelocityNEES  Velocity NEES per epoch [nEpochs x 1].
             if obj.hasArrayData(); v = obj.store_.getData().consistency.NEES_vel; return; end
             if isempty(obj.log); v = []; return; end
             v = [obj.log.NEES_vel]';
         end
 
         function v = getClockNEES(obj)
-            % getClockNEES  Clock (bias+drift joint) NEES per epoch [nEpochs x 1].  Stage 85.
+            % getClockNEES  Clock (bias+drift joint) NEES per epoch [nEpochs x 1].
             if obj.hasArrayData(); v = obj.store_.getData().consistency.NEES_clk; return; end
             if isempty(obj.log); v = []; return; end
             v = [obj.log.NEES_clk]';
         end
 
         function v = getAttitudeNEES(obj)
-            % getAttitudeNEES  Euler-angle NEES per epoch [nEpochs x 1].  Stage 85.
+            % getAttitudeNEES  Euler-angle NEES per epoch [nEpochs x 1].
             if obj.hasArrayData(); v = obj.store_.getData().consistency.NEES_att; return; end
             if isempty(obj.log); v = []; return; end
             v = [obj.log.NEES_att]';
@@ -709,7 +709,7 @@ classdef Diagnostics < handle
             v = [obj.log.clockObsWeakGauged]';
         end
 
-        % --- Stage 31: attitude observability audit getter -----------------
+        % --- Attitude observability audit getter -----------------
 
         function s = getLastAttitudeAudit(obj)
             % getLastAttitudeAudit  Return the most recent AttitudeObservability audit.
@@ -717,7 +717,7 @@ classdef Diagnostics < handle
             s = obj.lastAttitudeAudit_;
         end
 
-        % --- Stage 34: attitude Jacobian audit getter ----------------------
+        % --- Attitude Jacobian audit getter ----------------------
 
         function s = getLastAttitudeJacobianAudit(obj)
             % getLastAttitudeJacobianAudit  Return the most recent AttitudeJacobianAudit result.
@@ -754,7 +754,7 @@ classdef Diagnostics < handle
             v = [obj.log.nTxCodeBiasStates]';
         end
 
-        % --- Carrier slip getters (Stage 14) --------------------------------
+        % --- Carrier slip getters --------------------------------
 
         function v = getCarrierSlipNSlips(obj)
             % getCarrierSlipNSlips  Number of cycle slips detected per epoch.
@@ -888,25 +888,45 @@ classdef Diagnostics < handle
         end
 
         function v = getDiffAttActiveBaselines(obj)
-            if obj.hasArrayData(); v = obj.store_.getData().diffAtt.activeBaselines; return; end
+            % Final-epoch scalar count, consistent across both backends.
+            if obj.hasArrayData()
+                s = obj.store_.getData().diffAtt.activeBaselines;
+                if isempty(s); v = NaN; else; v = s(end); end
+                return;
+            end
             if isempty(obj.log); v = NaN; return; end
             try; v = obj.log(end).diffAttActiveBaselines; catch; v = NaN; end
         end
 
         function v = getDiffAttLostBaselines(obj)
-            if obj.hasArrayData(); v = obj.store_.getData().diffAtt.lostBaselines; return; end
+            % Final-epoch scalar count, consistent across both backends.
+            if obj.hasArrayData()
+                s = obj.store_.getData().diffAtt.lostBaselines;
+                if isempty(s); v = NaN; else; v = s(end); end
+                return;
+            end
             if isempty(obj.log); v = NaN; return; end
             try; v = obj.log(end).diffAttLostBaselines; catch; v = NaN; end
         end
 
         function v = getDiffAttRecalibratedBaselines(obj)
-            if obj.hasArrayData(); v = obj.store_.getData().diffAtt.recalBaselines; return; end
+            % Final-epoch scalar count, consistent across both backends.
+            if obj.hasArrayData()
+                s = obj.store_.getData().diffAtt.recalBaselines;
+                if isempty(s); v = NaN; else; v = s(end); end
+                return;
+            end
             if isempty(obj.log); v = NaN; return; end
             try; v = obj.log(end).diffAttRecalibratedBaselines; catch; v = NaN; end
         end
 
         function v = getDiffAttRejectedRows(obj)
-            if obj.hasArrayData(); v = obj.store_.getData().diffAtt.rejectedRows; return; end
+            % Final-epoch scalar count, consistent across both backends.
+            if obj.hasArrayData()
+                s = obj.store_.getData().diffAtt.rejectedRows;
+                if isempty(s); v = NaN; else; v = s(end); end
+                return;
+            end
             if isempty(obj.log); v = NaN; return; end
             try; v = obj.log(end).diffAttRejectedRows; catch; v = NaN; end
         end

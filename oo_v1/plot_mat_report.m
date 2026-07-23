@@ -57,9 +57,16 @@ function figOut = plot_mat_report(matPath)
     diag = S.diagnostics;
     if isfield(S, 'cfg'); cfg = S.cfg; else; cfg = struct(); end %#ok<NASGU>
 
+    % Per-asset swarm truth (WP1), present only for multi-asset (nSpaceAssets>1)
+    % runs. Drives an extra "Swarm geometry" tab; absent -> the tab is skipped.
+    swarmTruth = [];
+    if isfield(S, 'multiAssetTruth') && ~isempty(S.multiAssetTruth)
+        swarmTruth = S.multiAssetTruth;
+    end
+
     % ---- Build the tabbed window -------------------------------------------
     [~, stem] = fileparts(matPath);
-    figOut = i_buildTabs(diag, i_titleFor(stem, S));
+    figOut = i_buildTabs(diag, i_titleFor(stem, S), swarmTruth);
 
     nTabs = numel(findobj(figOut, 'type', 'uitab'));
     fprintf('plot_mat_report: done -> one window, %d tab(s).\n', nTabs);
@@ -71,7 +78,8 @@ end
 %  WINDOW / TABS
 % ===========================================================================
 
-function fig = i_buildTabs(diag, ttl)
+function fig = i_buildTabs(diag, ttl, swarmTruth)
+    if nargin < 3; swarmTruth = []; end
     t = diag.getTimeVector();
     t = t(:)';
 
@@ -90,6 +98,22 @@ function fig = i_buildTabs(diag, ttl)
         'Doppler & NIS',  @() i_tabDopplerNis(tg, diag, t); ...
         'Measurements',   @() i_tabMeasurements(tg, diag, t); ...
     };
+    % Swarm geometry tab: only for multi-asset runs that carry per-asset truth.
+    if ~isempty(swarmTruth)
+        tabs(end+1, :) = {'Swarm geometry', @() i_tabSwarmGeometry(tg, swarmTruth)};
+    end
+    % Swarm estimate tab (P5'): per-satellite ESTIMATE error, only when the run carries
+    % the secondary-orbit diagnostics (multi-asset estimateMode='position').
+    hasSwarmEst = false;
+    try
+        dse_ = diag.getData();
+        hasSwarmEst = isfield(dse_,'secondaryOrbit') && isfield(dse_.secondaryOrbit,'posError_m') && ...
+            ~isempty(dse_.secondaryOrbit.posError_m) && any(isfinite(dse_.secondaryOrbit.posError_m(:)));
+    catch
+    end
+    if hasSwarmEst
+        tabs(end+1, :) = {'Swarm estimate', @() i_tabSwarmEstimate(tg, diag, t)};
+    end
     for k = 1:size(tabs, 1)
         try
             tabs{k, 2}();
@@ -271,6 +295,86 @@ function i_tabMeasurements(tg, diag, t)
     yline(ax2, max(nm), 'r--', 'LineWidth', 1.0, 'DisplayName', sprintf('Max %d', max(nm)));
     grid(ax2, 'on'); xlabel(ax2, 'Time [s]'); ylabel(ax2, 'Count'); ylim(ax2, [0, max(max(nm)+1, 2)]);
     title(ax2, 'Total Pseudorange Measurements per Epoch');
+end
+
+function i_tabSwarmGeometry(tg, swarmTruth)
+    % Per-asset swarm TRUTH geometry (WP1/WP2): inter-asset baselines to the
+    % estimated chief (relative) and the formation separation envelope. Truth
+    % only -- secondaries are represented-only, so there is no per-asset ESTIMATE
+    % error here (that is the multiAssetEstimation upgrade).
+    g   = revgnss.MultiAssetGeometry.compute(swarmTruth);
+    ts  = g.time_s(:)';
+    nB  = numel(g.baselineToPrimary);
+    col = lines(max(nB, 1));
+
+    tl = i_tab(tg, 'Swarm geometry', 2);
+
+    % Subplot 1: baseline range from the chief to each secondary (relative).
+    ax1 = nexttile(tl); hold(ax1, 'on');
+    for ii = 1:nB
+        b = g.baselineToPrimary(ii);
+        plot(ax1, ts, b.range_m(:)', 'Color', col(ii, :), 'LineWidth', 1.2, ...
+            'DisplayName', sprintf('%s\\rightarrow%s', g.names{g.primaryIndex}, b.name));
+    end
+    grid(ax1, 'on'); ylabel(ax1, 'Baseline [m]');
+    title(ax1, sprintf('Inter-asset baseline to chief (%s) — relative positioning', ...
+        g.names{g.primaryIndex}));
+    if nB > 0; legend(ax1, 'Location', 'best'); end
+
+    % Subplot 2: pairwise separation envelope (formation stays bounded).
+    ax2 = nexttile(tl); hold(ax2, 'on');
+    plot(ax2, ts, g.separation.max_m(:)',  'k-',  'LineWidth', 1.2, 'DisplayName', 'Max pair');
+    plot(ax2, ts, g.separation.mean_m(:)', 'b--', 'LineWidth', 1.2, 'DisplayName', 'Mean pair');
+    plot(ax2, ts, g.separation.min_m(:)',  'k-',  'LineWidth', 1.2, 'DisplayName', 'Min pair');
+    grid(ax2, 'on'); xlabel(ax2, 'Time [s]'); ylabel(ax2, 'Separation [m]');
+    title(ax2, sprintf('Formation pairwise separation (%d assets, %d pairs)', ...
+        g.nAssets, g.separation.nPairs));
+    legend(ax2, 'Location', 'best');
+end
+
+function i_tabSwarmEstimate(tg, diag, t)
+    % Per-satellite ESTIMATE quality (P5'), the honest answer to "compare the position
+    % error of each satellite": (1) each secondary's ABSOLUTE position error with its
+    % +/-3-sigma envelope (does the covariance cover the error? -- it is radial<->clock
+    % WALL-LIMITED and usually overconfident), and (2) the RELATIVE baseline error to the
+    % chief (the shape solution two-way ISL sharpens; the trustworthy part).
+    d  = diag.getData();
+    so = d.secondaryOrbit;
+    E  = so.posError_m; SG = so.posSigma_m;         % [nSec x nEpoch]
+    nSec = size(E, 1);
+    tt = t(:)'; if numel(tt) ~= size(E, 2); tt = 1:size(E, 2); end
+    col = lines(max(nSec, 1));
+
+    tl = i_tab(tg, 'Swarm estimate', 2);
+
+    % Subplot 1: per-satellite absolute position error (solid) + /-3-sigma (dashed).
+    ax1 = nexttile(tl); hold(ax1, 'on');
+    for i = 1:nSec
+        plot(ax1, tt, E(i, :), 'Color', col(i, :), 'LineWidth', 1.3, ...
+            'DisplayName', sprintf('GEO-%d error', i + 1));
+        plot(ax1, tt, 3 * SG(i, :), '--', 'Color', col(i, :), 'LineWidth', 0.8, ...
+            'HandleVisibility', 'off');
+    end
+    grid(ax1, 'on'); ylabel(ax1, '|position error| [m]');
+    title(ax1, 'Per-satellite ABSOLUTE position error (solid) vs \pm3\sigma (dashed) — wall-limited');
+    if nSec > 0; legend(ax1, 'Location', 'best'); end
+
+    % Subplot 2: relative baseline error to the chief (the trustworthy shape solution).
+    ax2 = nexttile(tl); hold(ax2, 'on');
+    if isfield(so, 'baselineError_m') && ~isempty(so.baselineError_m) && any(isfinite(so.baselineError_m(:)))
+        B = so.baselineError_m;
+        for i = 1:nSec
+            plot(ax2, tt, B(i, :), 'Color', col(i, :), 'LineWidth', 1.3, ...
+                'DisplayName', sprintf('GEO-%d baseline', i + 1));
+        end
+        yline(ax2, 0, 'k:', 'HandleVisibility', 'off');
+        ylabel(ax2, 'baseline error (est - truth) [m]');
+        title(ax2, 'Per-satellite RELATIVE baseline error to chief (shape) — two-way-ISL sharpened');
+        if nSec > 0; legend(ax2, 'Location', 'best'); end
+    else
+        i_noteAxes(ax2, 'No relative baseline diagnostic in this run.');
+    end
+    grid(ax2, 'on'); xlabel(ax2, 'Time [s]');
 end
 
 % ===========================================================================

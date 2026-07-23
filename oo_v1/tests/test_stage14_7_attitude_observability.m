@@ -167,7 +167,7 @@ fprintf('    PASS (attitudeObsClass = %s)\n', cls4);
 % ----------------------------------------------------------------
 fprintf('  T5: attitudeJacobianNorm > 0 throughout smoke run ...\n');
 
-jacNorms5 = [out4.diag.log.attitudeJacobianNorm];
+jacNorms5 = out4.simData.getAttitudeJacobianNorm();
 assert(all(jacNorms5 > 1e-9), ...
     'T5 FAILED: %d epochs with attitudeJacobianNorm <= 0', sum(jacNorms5 <= 1e-9));
 fprintf('    PASS (min jac norm = %.4e, mean = %.4e)\n', min(jacNorms5), mean(jacNorms5));

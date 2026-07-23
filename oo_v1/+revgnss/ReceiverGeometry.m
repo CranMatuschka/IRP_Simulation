@@ -1,5 +1,5 @@
 classdef ReceiverGeometry
-    % ReceiverGeometry  Stage 32 single-asset body-frame receiver geometry.
+    % ReceiverGeometry  Single-asset body-frame receiver geometry.
     %
     % Normalises receiver lever arms from existing cfg fields.  These are
     % body-frame receiver reference-point offsets in metres — they are NOT

@@ -8,7 +8,7 @@ classdef CycleSlipDetector
 
         function [isSlip, slipMetric_m] = detectCompensated(observedJump_m, ...
                 expectedModelJump_m, threshold_m, epochCount, minEpochsBeforeDetect)
-            % detectCompensated  Stage 73: model-step-compensated slip detection.
+            % detectCompensated  Model-step-compensated slip detection.
             %
             % Tests the residual jump AFTER removing the expected contribution from
             % known model/product correction changes.  Tower clock product epoch

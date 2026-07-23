@@ -170,6 +170,20 @@ classdef EnvironmentModel < handle
             ionoModelType = 'simpleMapped';
             if isfield(ic,'modelType'); ionoModelType = ic.modelType; end
 
+            % Symmetric oracle guard (twin of the troposphere guard above). The
+            % ionosphere has no 'sameAsTruth' model-residual path today, but reject one
+            % defensively so a future config can never copy the truth TEC realisation into
+            % the model and force the innovation to exactly zero. Golden-safe: the default
+            % never sets this mode, so the guard is inert.
+            if isfield(ic,'stochastic') && isfield(ic.stochastic,'modelResidual') && ...
+                    isfield(ic.stochastic.modelResidual,'enable') && ic.stochastic.modelResidual.enable && ...
+                    isfield(ic.stochastic.modelResidual,'mode') && ...
+                    strcmp(ic.stochastic.modelResidual.mode,'sameAsTruth')
+                error('revgnss:oracleIonoModelResidual', ...
+                    ['ionosphere modelResidual.mode=''sameAsTruth'' is a forbidden oracle read. ' ...
+                     'Use an independent model correction or estimation.ionosphereMode=''perTowerSlant''.']);
+            end
+
             if strcmp(ionoModelType,'tecGaussMarkov') && ...
                     isfield(ic,'stochastic') && isfield(ic.stochastic,'enable') && ...
                     ic.stochastic.enable
@@ -344,8 +358,8 @@ classdef EnvironmentModel < handle
             ic       = obj.cfg.errors.ionosphere;
             elvFloor = revgnss.Constants.ELEVATION_FLOOR_RAD;
 
-            % Stage 7A: use config-driven ionosphere mapping model.
-            % Default 'simpleSecant' preserves Stage 6 backward-compatibility.
+            % Use config-driven ionosphere mapping model.
+            % Default 'simpleSecant' preserves backward-compatibility.
             ionoMapKind   = 'simpleSecant';
             shellHeight_m = 350e3;
             if isfield(obj.cfg,'effects') && isfield(obj.cfg.effects,'ionosphere')

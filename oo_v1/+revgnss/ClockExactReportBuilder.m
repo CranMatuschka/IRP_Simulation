@@ -38,7 +38,6 @@ classdef ClockExactReportBuilder
             % dataMeta: schema metadata from simData.getMeta()
             if nargin < 6; summary = struct(); end
             if nargin < 5 || isempty(cfg); cfg = struct(); end
-            if nargin < 2; dataMeta = struct(); end
 
             result.texPath        = '';
             result.pdfPath        = '';
@@ -67,7 +66,6 @@ classdef ClockExactReportBuilder
             end
 
             % ---- 2. Resolve output paths --------------------------------
-            ver = revgnss.ClockExactReportBuilder.getCfgStr_(cfg, {'report','version'}, '1.00');
 
             % cfg.report.reportFolder bypasses the date-stamped subfolder.
             reportDir = revgnss.ClockExactReportBuilder.getCfgStr_(cfg, {'report','reportFolder'}, '');
@@ -135,7 +133,7 @@ classdef ClockExactReportBuilder
 
     end  % public static
 
-    methods (Static)  % (Phase 7: report toolkit callable by extracted +revgnss/+report/ sections)
+    methods (Static)  % (Report toolkit callable by extracted +revgnss/+report/ sections)
 
         function cleanBuildArtifacts_(texPath, figDir) %#ok<INUSD>
             % cleanBuildArtifacts_  Remove LaTeX intermediates after a successful
@@ -172,6 +170,10 @@ classdef ClockExactReportBuilder
             % Clock bias error
             paths.clkErr = CE.tryPlot_(figDir, [stem '_clock_error.pdf'], @() ...
                 CE.plotClockError_(diag, t), cfg);
+
+            % Clock: true development vs EKF estimate (the "real clock" overlay)
+            paths.clkTruth = CE.tryPlot_(figDir, [stem '_clock_truth_vs_estimate.pdf'], @() ...
+                CE.plotClockTruthVsEstimate_(diag, t), cfg);
 
             % Clock drift
             paths.clkDrift = CE.tryPlot_(figDir, [stem '_clock_drift.pdf'], @() ...
@@ -226,9 +228,17 @@ classdef ClockExactReportBuilder
             paths.attCompZoom = CE.tryPlot_(figDir, [stem '_attitude_components_zoomlast.pdf'], @() ...
                 CE.plotAttZoom_(diag, t, zoomSec), cfg);
 
-            % Allan deviation (Stage 67)
+            % Allan deviation
             paths.allanDev = CE.tryPlot_(figDir, [stem '_allan_deviation.pdf'], @() ...
                 CE.plotAllanDeviation_(diag, t), cfg);
+
+            % Honest multi-asset swarm: per-satellite ABSOLUTE vs RELATIVE position error
+            % (full duration + final-window zoom). Both plot fns return [] for single-asset /
+            % non-'position' runs -> paths stay '' -> report rows omitted -> tex byte-identical.
+            paths.swarmPos = CE.tryPlot_(figDir, [stem '_swarm_position_error.pdf'], @() ...
+                CE.plotSwarmPosError_(diag, t, []), cfg);
+            paths.swarmPosZoom = CE.tryPlot_(figDir, [stem '_swarm_position_error_zoomlast.pdf'], @() ...
+                CE.plotSwarmPosError_(diag, t, zoomSec), cfg);
         end
 
         % ................................................................
@@ -270,7 +280,16 @@ classdef ClockExactReportBuilder
                                 plot(ax, tz, rac(1,seg)*sc, 'r-', 'LineWidth',0.8, 'DisplayName','radial');
                                 plot(ax, tz, rac(2,seg)*sc, 'g-', 'LineWidth',0.8, 'DisplayName','along-track');
                                 plot(ax, tz, rac(3,seg)*sc, 'b-', 'LineWidth',0.8, 'DisplayName','cross-track');
-                                legend(ax,'show','Location','northeast','FontSize',5);
+                                % Filter +-3 sigma envelope per RAC axis (honours the title's
+                                % "dotted = +-3 sigma"; colour-matched, hidden from the legend).
+                                CE = revgnss.ClockExactReportBuilder;
+                                racSig = CE.racPositionSigma_(diag, rTr(:,1:nAll), vTr(:,1:nAll), nAll);
+                                if ~isempty(racSig)
+                                    CE.overlaySigma_(ax, tz, racSig(1,seg)*sc, 3, 'r:');
+                                    CE.overlaySigma_(ax, tz, racSig(2,seg)*sc, 3, 'g:');
+                                    CE.overlaySigma_(ax, tz, racSig(3,seg)*sc, 3, 'b:');
+                                end
+                                legend(ax,'show','Location','best','FontSize',5);
                             else
                                 [~, unit, sc] = revgnss.PlotUnitScaler.scaleMetric(nrm(seg), 'm');
                                 plot(ax, tz, nrm(seg)*sc, 'b-', 'LineWidth',0.8);
@@ -337,7 +356,7 @@ classdef ClockExactReportBuilder
                     end
                     close(tmpFig);
                     if ~isempty(get(ax,'Children'))
-                        legend(ax,'show','Location','northeast','FontSize',6);
+                        legend(ax,'show','Location','best','FontSize',6);
                         xlabel(ax,'Time [s]','FontSize',7);
                         ylabel(ax,'Error [deg]','FontSize',7);
                         grid(ax,'on');
@@ -521,9 +540,15 @@ classdef ClockExactReportBuilder
                 'PaperUnits','centimeters', 'PaperSize',[7 4.5], ...
                 'PaperPositionMode','auto');
             ax = axes(fig);
-            set(ax, 'FontSize',7, 'FontName','Helvetica', 'Box','off');
+            % Modern, report-scaled look (single insertion point for every report figure):
+            % keep the compact 7 pt font, but soften to dark-grey ink, ticks out, a faint
+            % grid and thin axes lines. Line colours stay per-plot (they are semantic).
+            set(ax, 'FontSize',7, 'FontName','Helvetica', 'Box','off', ...
+                'TickDir','out', 'TickLength',[0.02 0.02], 'LineWidth',0.6, ...
+                'XColor',[0.20 0.20 0.22], 'YColor',[0.20 0.20 0.22], ...
+                'GridColor',[0.45 0.45 0.48], 'GridAlpha',0.15, 'MinorGridAlpha',0.07);
             if nargin > 0 && ~isempty(titleStr)
-                title(ax, titleStr, 'FontSize',7, 'FontWeight','normal');
+                title(ax, titleStr, 'FontSize',7, 'FontWeight','normal', 'Color',[0.20 0.20 0.22]);
             end
         end
 
@@ -553,10 +578,20 @@ classdef ClockExactReportBuilder
                     plot(ax, t, rac(1,:)*sc, 'r-', 'LineWidth', 0.8, 'DisplayName', 'radial');
                     plot(ax, t, rac(2,:)*sc, 'g-', 'LineWidth', 0.8, 'DisplayName', 'along-track');
                     plot(ax, t, rac(3,:)*sc, 'b-', 'LineWidth', 0.8, 'DisplayName', 'cross-track');
-                    legend(ax, 'show', 'Location', 'northeast', 'FontSize', 5);
+                    % Overlay the filter's +-3 sigma envelope per RAC axis (dotted,
+                    % colour-matched, hidden from the legend). The radial band is wide
+                    % under the GEO radial<->clock degeneracy; along/cross hug their traces.
+                    CE = revgnss.ClockExactReportBuilder;
+                    racSig = CE.racPositionSigma_(diag, rTr(:,1:n), vTr(:,1:n), n);
+                    if ~isempty(racSig)
+                        CE.overlaySigma_(ax, t, racSig(1,:)*sc, 3, 'r:');
+                        CE.overlaySigma_(ax, t, racSig(2,:)*sc, 3, 'g:');
+                        CE.overlaySigma_(ax, t, racSig(3,:)*sc, 3, 'b:');
+                    end
+                    legend(ax, 'show', 'Location', 'best', 'FontSize', 5);
                     xlabel(ax, 'Time [s]', 'FontSize', 7);
                     ylabel(ax, revgnss.PlotUnitScaler.axisLabel('Error', unit), 'FontSize', 7);
-                    title(ax, 'Position error: RAC frame (estimate - truth)', 'FontSize', 7);
+                    title(ax, 'Position error: RAC frame (dotted = \pm3\sigma)', 'FontSize', 7);
                     grid(ax, 'on');
                     revgnss.PlotUnitScaler.disableExponent(ax);
                     return;
@@ -576,6 +611,74 @@ classdef ClockExactReportBuilder
         end
 
         % ................................................................
+        function fig = plotSwarmPosError_(diag, t, zoomSec)
+            % Honest multi-asset swarm: per-satellite ABSOLUTE position error (solid) with
+            % the filter's +/-3-sigma envelope (dashed), over the RELATIVE baseline error to
+            % the chief (the two-way-ISL-sharpened shape). Two stacked panels, all secondaries
+            % on one axis for direct comparison. When zoomSec>0 the x-axis is the final window.
+            %
+            % Returns [] (NOT a graphics handle) when the run carries no secondary-orbit
+            % estimate -- single-asset or non-'position' estimateMode. tryPlot_ then yields ''
+            % and the report row is omitted, so single-asset .tex is byte-identical.
+            fig = [];
+            if nargin < 3; zoomSec = []; end
+            try; d = diag.getData(); catch; return; end
+            if ~isfield(d,'secondaryOrbit') || ~isfield(d.secondaryOrbit,'posError_m') || ...
+                    isempty(d.secondaryOrbit.posError_m) || ~any(isfinite(d.secondaryOrbit.posError_m(:)))
+                return;
+            end
+            so   = d.secondaryOrbit;
+            E    = so.posError_m;
+            SG   = []; if isfield(so,'posSigma_m'); SG = so.posSigma_m; end
+            nSec = size(E,1);
+            tt   = t(:).'; if numel(tt) ~= size(E,2); tt = 1:size(E,2); end
+            xl   = [];
+            if ~isempty(zoomSec) && zoomSec > 0 && numel(tt) > 1
+                xl = [max(tt(end)-zoomSec, tt(1)), tt(end)];
+            end
+            col  = lines(max(nSec,1));
+            zlab = ''; if ~isempty(xl); zlab = sprintf(' --- final %g s', zoomSec); end
+
+            fig = figure('Visible','off','Color','white','Units','pixels','Position',[80 80 1080 760]);
+            tl  = tiledlayout(fig,2,1,'TileSpacing','compact','Padding','compact');
+
+            % Panel 1: ABSOLUTE per-satellite error (solid) vs filter +/-3 sigma (dashed).
+            ax1 = nexttile(tl); hold(ax1,'on'); grid(ax1,'on');
+            for i = 1:nSec
+                plot(ax1, tt, E(i,:), '-', 'Color', col(i,:), 'LineWidth',1.3, ...
+                    'DisplayName', sprintf('GEO-%d abs err', i+1));
+                if ~isempty(SG) && size(SG,1) >= i
+                    plot(ax1, tt, 3*SG(i,:), '--', 'Color', col(i,:), 'LineWidth',0.8, ...
+                        'HandleVisibility','off');
+                end
+            end
+            ylabel(ax1,'|position error| [m]', 'FontSize',9);
+            title(ax1, ['ABSOLUTE per-satellite error (solid) vs filter \pm3\sigma (dashed)' zlab], 'FontSize',10);
+            if nSec > 0; legend(ax1,'Location','best','FontSize',8); end
+            if ~isempty(xl); xlim(ax1,xl); end
+
+            % Panel 2: RELATIVE per-satellite baseline error to the chief.
+            ax2 = nexttile(tl); hold(ax2,'on'); grid(ax2,'on');
+            if isfield(so,'baselineError_m') && ~isempty(so.baselineError_m) && any(isfinite(so.baselineError_m(:)))
+                B = so.baselineError_m;
+                for i = 1:nSec
+                    plot(ax2, tt, B(i,:), '-', 'Color', col(i,:), 'LineWidth',1.3, ...
+                        'DisplayName', sprintf('GEO-%d baseline err', i+1));
+                end
+                yline(ax2,0,'k:','HandleVisibility','off');
+                ylabel(ax2,'baseline error (est - truth) [m]', 'FontSize',9);
+                title(ax2, ['RELATIVE per-satellite baseline error to chief (shape)' zlab], 'FontSize',10);
+                if nSec > 0; legend(ax2,'Location','best','FontSize',8); end
+                if ~isempty(xl); xlim(ax2,xl); end
+            else
+                revgnss.ClockExactReportBuilder.noDataAxes_(ax2);
+            end
+            xlabel(ax2,'time [s]', 'FontSize',9);
+            title(tl, 'Per-satellite position error --- honest multi-asset swarm', ...
+                'FontWeight','bold', 'FontSize',11);
+        end
+
+        % ................................................................
         function fig = plotClockError_(diag, t)
             fig = revgnss.ClockExactReportBuilder.makeCompactFig_('');
             ax  = gca(fig);
@@ -592,6 +695,42 @@ classdef ClockExactReportBuilder
                     xlabel(ax, 'Time [s]', 'FontSize',7);
                     ylabel(ax, revgnss.PlotUnitScaler.axisLabel('Clock error', unit), 'FontSize',7);
                     title(ax, 'Receiver clock bias error (dotted = \pm3\sigma)', 'FontSize',7);
+                    grid(ax, 'on');
+                    revgnss.PlotUnitScaler.disableExponent(ax);
+                    return;
+                end
+            catch; end
+            revgnss.ClockExactReportBuilder.noDataAxes_(ax);
+        end
+
+        % ................................................................
+        function fig = plotClockTruthVsEstimate_(diag, t)
+            % True receiver-clock development vs the EKF-estimated ("corrected") clock.
+            % truth = getRxClockBiasTrue [s]; error = getClockBiasErrors [m] = est - truth;
+            % so estimate [s] = truth + error/c. Shows what the clock really does vs the filter's
+            % reconstruction (the residual is the separate clock-error plot). Under the one-way GEO
+            % radial<->clock degeneracy the estimate absorbs the radial common mode and wanders far
+            % more than the (quiet) truth.
+            fig = revgnss.ClockExactReportBuilder.makeCompactFig_('');
+            ax  = gca(fig);
+            try
+                bt = diag.getRxClockBiasTrue();     % [s] truth
+                er = diag.getClockBiasErrors();     % [m] est - truth
+                if ~isempty(t) && ~isempty(bt) && ~isempty(er)
+                    c0 = revgnss.Constants.SPEED_OF_LIGHT_MPS;
+                    n  = min([numel(t) numel(bt) numel(er)]);
+                    t = t(1:n); bt = bt(1:n); er = er(1:n);
+                    est = bt(:) + er(:) / c0;        % [s] estimate = truth + error
+                    % Scale by the estimate range (the visibly-wandering series).
+                    [ests, unit, sc] = revgnss.PlotUnitScaler.scaleMetric(est, 's');
+                    bts = bt(:) * sc;
+                    hold(ax,'on');
+                    plot(ax, t, bts,  'k-',  'LineWidth', 1.1);
+                    plot(ax, t, ests, 'r--', 'LineWidth', 0.8);
+                    xlabel(ax, 'Time [s]', 'FontSize',7);
+                    ylabel(ax, revgnss.PlotUnitScaler.axisLabel('RX clock bias', unit), 'FontSize',7);
+                    title(ax, 'Receiver clock: truth vs EKF estimate', 'FontSize',7);
+                    legend(ax, {'truth','estimate'}, 'FontSize',6, 'Location','best', 'Box','off');
                     grid(ax, 'on');
                     revgnss.PlotUnitScaler.disableExponent(ax);
                     return;
@@ -637,7 +776,7 @@ classdef ClockExactReportBuilder
                     hold(ax,'on');
                     if ~isempty(po)
                         plot(ax, t, po, 'r--', 'LineWidth',0.8, 'DisplayName','Post-fit');
-                        legend(ax,'show','Location','northeast','FontSize',6);
+                        legend(ax,'show','Location','best','FontSize',6);
                     end
                     xlabel(ax,'Time [s]','FontSize',7);
                     ylabel(ax,'RMS [m]','FontSize',7);
@@ -696,7 +835,7 @@ classdef ClockExactReportBuilder
                     if ~isempty(pdop)
                         plot(ax,t,pdop,'r--','LineWidth',0.8,'DisplayName','PDOP');
                     end
-                    legend(ax,'show','Location','northeast','FontSize',6);
+                    legend(ax,'show','Location','best','FontSize',6);
                     xlabel(ax,'Time [s]','FontSize',7);
                     ylabel(ax,'DOP [-]','FontSize',7);
                     grid(ax,'on');
@@ -754,7 +893,7 @@ classdef ClockExactReportBuilder
                         end
                     end
                     if ok
-                        legend(ax,'show','Location','northeast','FontSize',6);
+                        legend(ax,'show','Location','best','FontSize',6);
                         xlabel(ax,'Time [s]','FontSize',7);
                         ylabel(ax,'RMS [m]','FontSize',7);
                         grid(ax,'on');
@@ -796,6 +935,38 @@ classdef ClockExactReportBuilder
             hold(ax,'on');
             plot(ax, tt,  k*sig, style, 'LineWidth',0.6, 'HandleVisibility','off');
             plot(ax, tt, -k*sig, style, 'LineWidth',0.6, 'HandleVisibility','off');
+        end
+
+        function racSig = racPositionSigma_(diag, rEcef, vEcef, n)
+            % racPositionSigma_  [3 x n] 1-sigma of the radial / along-track /
+            %   cross-track POSITION error, from the diagonal of the EKF position
+            %   covariance (states 1:3) projected into the RAC frame with the SAME
+            %   v_eff = v_ecef + omega x r convention as OrbitFrame.ecefToRacGeo.
+            %   This is a DIAGONAL projection (the compact store keeps only diag(P));
+            %   it gives the marginal per-axis variance, which for the GEO
+            %   radial<->clock degeneracy is already large on the radial axis.
+            %   Returns [] if Pdiag is unavailable (callers then draw no band).
+            racSig = [];
+            try
+                d_ = diag.getData();
+                if ~isfield(d_,'Pdiag') || isempty(d_.Pdiag) || size(d_.Pdiag,1) < 3
+                    return;
+                end
+                Pxyz = max(d_.Pdiag(1:3,:), 0);               % [3 x N] x/y/z variance
+                w = 7.2921150e-5;
+                try; w = revgnss.Constants.EARTH_OMEGA_RADPS; catch; end
+                omega = [0;0;w];
+                np = min(n, size(Pxyz,2));
+                racSig = nan(3, n);
+                for kk = 1:np
+                    rk = rEcef(:,kk); veff = vEcef(:,kk) + cross(omega, rk);
+                    [rH,aH,hH,ok] = revgnss.OrbitFrame.racBasis(rk, veff);
+                    if ok
+                        p = Pxyz(:,kk);
+                        racSig(:,kk) = sqrt([ (rH.^2).'*p; (aH.^2).'*p; (hH.^2).'*p ]);
+                    end
+                end
+            catch; racSig = []; end
         end
 
         % ================================================================
@@ -844,20 +1015,23 @@ classdef ClockExactReportBuilder
             fprintf(fid, '{\\large Scenario: \\textbf{%s}}\\\\[4pt]\n', esc(scenarioName));
             fprintf(fid, '{\\small Reverse-GNSS EKF simulator \\textemdash{} validation version %s \\\\ Generated %s}\\\\[3pt]\n', ...
                 esc(ver), esc(ts));
-            fprintf(fid, ['{\\footnotesize Controlled synthetic reverse-GNSS scenario. Results are compared against the ' ...
-                'known synthetic truth and are not a real-data or PPP-grade performance claim.}\n']);
+            fprintf(fid, '{\\footnotesize Controlled synthetic reverse-GNSS scenario.}\n');
             fprintf(fid, '\\end{center}\n');
             fprintf(fid, '\\vspace{0.3cm}\n');
 
             % ---- Sections -----------------------------------------------
             revgnss.report.scenarioSummary(fid, cfg, summary, diag, nTwr, nRx, dur, dt, esc, plotPaths, stem, figDir);
-            revgnss.report.stateEstimation(fid, plotPaths, stem, cfg, diag, figDir);
+            % stateEstimation receives `summary` so a federated-swarm run can place the two
+            % swarm plots directly after the RAC final-zoom row (see item-9 change).
+            revgnss.report.stateEstimation(fid, plotPaths, stem, cfg, diag, figDir, summary);
             revgnss.report.measurementValidation(fid, plotPaths, stem, figDir, diag);
             revgnss.report.oscillatorValidation(fid, plotPaths, stem, figDir, cfg);
             revgnss.report.txCodeBias(fid, diag, cfg);
             revgnss.report.tropZwdArchitecture(fid, cfg);
             revgnss.report.numericalSummary(fid, cfg, summary, diag);
-            revgnss.report.activePhysicsConfig(fid, cfg, summary, plotPaths, stem, figDir);
+            % Federated-swarm appendix: emits nothing unless summary.federatedSwarm is set
+            % (swarm runs only) -> single-asset .tex is byte-identical to the golden.
+            revgnss.report.federatedSwarmAppendix(fid, cfg, summary, figDir, esc);
 
             fprintf(fid, '\\end{document}\n');
             fclose(fid);
@@ -867,7 +1041,7 @@ classdef ClockExactReportBuilder
         % SECTION 1 — SCENARIO SUMMARY
         % ================================================================
 
-        % writeScenarioSummary_ extracted to +revgnss/+report/scenarioSummary.m (Phase 7).
+        % writeScenarioSummary_ extracted to +revgnss/+report/scenarioSummary.m.
 
 
         % ================================================================
@@ -1033,6 +1207,42 @@ classdef ClockExactReportBuilder
             attNote2    = 'No attitude states.'; if attEn2; attNote2 = sprintf('parameterisation: %s', revgnss.ReportLabel.humanize(attParam2)); end
             diffAttN2   = ''; if diffAttEn2; diffAttN2 = 'calibrated differential ambiguity active.'; end
 
+            % --- Atmosphere honesty ------------------------------------------------
+            % A cfg.errors.*.enable=true does NOT mean a real error is injected. If the
+            % model applies the same delay as the truth (matched), the residual is ZERO;
+            % and the ionosphere is master-gated by cfg.ionosphere.mode (mode='off' means
+            % no ionosphere at all, regardless of errors.ionosphere.enable). Report the
+            % NET effect, not the raw flag. Status 'matched' = applied on both sides -> 0.
+            tropTruthEn  = CE.getLogical_(cfg,{'errors','troposphere','truth','enable'},false);
+            tropModelEn  = CE.getLogical_(cfg,{'errors','troposphere','model','enable'},false);
+            tropBiasFrac = CE.getCfgNum_(cfg,{'errors','troposphere','model','biasFraction'},1);
+            if ~tropTruthEn
+                tropSt = false;     tropNote = 'Not applied (truth troposphere off).';
+            elseif zwdEKF2
+                tropSt = true;      tropNote = 'Truth troposphere injected; residual absorbed by the per-tower ZWD EKF state.';
+            elseif tropModelEn && abs(tropBiasFrac - 1) < 1e-9
+                tropSt = 'matched'; tropNote = 'Zero residual: model matches truth (biasFraction = 1); no error reaches the filter.';
+            else
+                tropSt = true;      tropNote = sprintf('Residual injected: model applies %.0f%% of the truth delay.', 100*tropBiasFrac);
+            end
+            ionoMode2 = lower(CE.getCfgStr_(cfg,{'ionosphere','mode'},'off'));
+            switch ionoMode2
+                case 'off';           ionoSt = false;     ionoNote = 'Not applied (ionosphere.mode = off).';
+                case 'truthonly';     ionoSt = true;      ionoNote = 'Residual injected: truth-only ionosphere (model does not correct).';
+                case 'model';         ionoSt = 'matched'; ionoNote = 'Zero residual: model corrects the truth ionosphere.';
+                case 'ionospherefree';ionoSt = 'matched'; ionoNote = 'Removed by the L1/L2 ionosphere-free combination.';
+                otherwise;            ionoSt = true;      ionoNote = sprintf('mode: %s', ionoMode2);
+            end
+            shapTruthEn = CE.getLogical_(cfg,{'physics','relativity','shapiro','truth','enable'},false);
+            shapModelEn = CE.getLogical_(cfg,{'physics','relativity','shapiro','model','enable'},false);
+            if ~shapTruthEn
+                shapSt = false;     shapNote = '';
+            elseif shapModelEn
+                shapSt = 'matched'; shapNote = 'Zero residual: applied on both truth and model.';
+            else
+                shapSt = true;      shapNote = 'Residual injected: truth-only relativistic range delay.';
+            end
+
             % ---- Five compact group tables (avoids single-table page overflow) ----
             gTitles = { ...
                 'Core geometry and signals', ...
@@ -1061,12 +1271,10 @@ classdef ClockExactReportBuilder
             };
 
             gRows{3} = { ...
-                'Troposphere (truth)',  CE.getLogical_(cfg,{'errors','troposphere','truth','enable'},false), ''; ...
-                'Troposphere (model)', CE.getLogical_(cfg,{'errors','troposphere','model','enable'},false), ''; ...
-                'Ionosphere (truth)',  CE.getLogical_(cfg,{'errors','ionosphere','truth','enable'},false),   ''; ...
-                'Ionosphere (model)',  CE.getLogical_(cfg,{'errors','ionosphere','model','enable'},false),   ''; ...
+                'Troposphere (net residual)',  tropSt,  tropNote; ...
+                'Ionosphere (net residual)',   ionoSt,  ionoNote; ...
                 'Light-time / Sagnac correction',  ltSt,   ltNote; ...
-                'Shapiro delay (truth)',  CE.getLogical_(cfg,{'physics','relativity','shapiro','truth','enable'},false), ''; ...
+                'Shapiro delay (relativistic range)',  shapSt, shapNote; ...
                 'Relativity clock (truth)', CE.getLogical_(cfg,{'physics','relativity','clock','truth','enable'},false), ''; ...
             };
 
@@ -1113,6 +1321,9 @@ classdef ClockExactReportBuilder
                     if isequal(isEn, true)
                         stTex = '\textcolor{green!45!black}{Enabled}';
                         if isempty(act); act = 'Active in this run.'; end
+                    elseif isequal(isEn, 'matched')
+                        stTex = '\textcolor{gray!55!black}{Matched}';
+                        if isempty(act); act = 'Zero residual (model matches truth).'; end
                     elseif isequal(isEn, 'guarded')
                         stTex = '\textcolor{orange!70!black}{Guarded}';
                         if isempty(act); act = 'Not active in current run.'; end
@@ -1128,6 +1339,23 @@ classdef ClockExactReportBuilder
                 end
                 fprintf(fid, '\\bottomrule\n\\end{tabular}\n\\end{center}\n');
                 fprintf(fid, '\\endgroup\n\\vspace{4pt}\n');
+
+                % Per-asset scope note under the atmosphere/propagation table (swarm runs).
+                % The rows above describe the CHIEF's tower links; secondaries only see these
+                % effects when the per-asset guards are enabled -- make that explicit.
+                if gi == 3
+                    nSA_ap = CE.getCfgNum_(cfg, {'scenario','nSpaceAssets'}, 1);
+                    if nSA_ap > 1
+                        guardA_ = CE.getLogical_(cfg, {'multiAsset','towerSecondary','atmosphere','enable'}, false);
+                        dynB_   = CE.getLogical_(cfg, {'multiAsset','injectTruthSideDynamics'}, false);
+                        fprintf(fid, ['{\\footnotesize\\itshape Multi-asset scope (%d spacecraft): the effects above are ' ...
+                            'applied to the chief''s tower links. Each secondary satellite receives a divergent uplink ' ...
+                            'atmosphere only when \\texttt{multiAsset.towerSecondary.atmosphere} is enabled (this run: %s), ' ...
+                            'and truth-side per-satellite dynamics only when \\texttt{injectTruthSideDynamics} is enabled ' ...
+                            '(this run: %s). Inter-satellite links carry no atmosphere.}\\\\[4pt]\n'], ...
+                            round(nSA_ap), CE.yesNo_(guardA_,'enabled','off'), CE.yesNo_(dynB_,'enabled','off'));
+                    end
+                end
             end
         end
 
@@ -1135,25 +1363,25 @@ classdef ClockExactReportBuilder
         % SECTION 2 — STATE ESTIMATION VALIDATION
         % ================================================================
 
-        % writeStateEstimation_ extracted to +revgnss/+report/stateEstimation.m (Phase 7).
+        % writeStateEstimation_ extracted to +revgnss/+report/stateEstimation.m.
 
         % ================================================================
         % SECTION 3 — MEASUREMENT AND GEOMETRY VALIDATION
         % ================================================================
 
-        % writeMeasurementValidation_ extracted to +revgnss/+report/measurementValidation.m (Phase 7).
+        % writeMeasurementValidation_ extracted to +revgnss/+report/measurementValidation.m.
 
         % ================================================================
         % SECTION 4 — PER-RECEIVER MEASUREMENT DIAGNOSTICS
         % ================================================================
 
-        % writePerReceiverDiagnostics_ extracted to +revgnss/+report/perReceiverDiagnostics.m (Phase 7).
+        % writePerReceiverDiagnostics_ extracted to +revgnss/+report/perReceiverDiagnostics.m.
 
         % ================================================================
         % SECTION 5 — OSCILLATOR STABILITY VALIDATION
         % ================================================================
 
-        % writeOscillatorValidation_ extracted to +revgnss/+report/oscillatorValidation.m (Phase 7).
+        % writeOscillatorValidation_ extracted to +revgnss/+report/oscillatorValidation.m.
 
         % ================================================================
         % SECTION 6 — DISABLED COMPONENTS
@@ -1163,13 +1391,13 @@ classdef ClockExactReportBuilder
         % SECTION 6B — CLOCK OBSERVABILITY AND GAUGE VALIDATION
         % ================================================================
 
-        % writeClockObservability_ extracted to +revgnss/+report/clockObservability.m (Phase 7).
+        % writeClockObservability_ extracted to +revgnss/+report/clockObservability.m.
 
         % ================================================================
-        % SECTION 7 — TRANSMITTER CODE HARDWARE-DELAY STATES (Stage 11)
+        % SECTION 7 — TRANSMITTER CODE HARDWARE-DELAY STATES
         % ================================================================
 
-        % writeTxCodeBias_ extracted to +revgnss/+report/txCodeBias.m (Phase 7).
+        % writeTxCodeBias_ extracted to +revgnss/+report/txCodeBias.m.
 
 
 
@@ -1177,14 +1405,14 @@ classdef ClockExactReportBuilder
         % SECTION 7 — NUMERICAL SUMMARY
         % ================================================================
 
-        % writeNumericalSummary_ extracted to +revgnss/+report/numericalSummary.m (Phase 7).
+        % writeNumericalSummary_ extracted to +revgnss/+report/numericalSummary.m.
 
         % ================================================================
-        % STAGE 68: ACTIVE PHYSICS MODEL CONFIGURATION (non-stage-titled)
+        % ACTIVE PHYSICS MODEL CONFIGURATION
         % ================================================================
-        % writeTropZwdArchitecture_ extracted to +revgnss/+report/tropZwdArchitecture.m (Phase 7).
+        % writeTropZwdArchitecture_ extracted to +revgnss/+report/tropZwdArchitecture.m.
 
-        % writeActivePhysicsConfig_ extracted to +revgnss/+report/activePhysicsConfig.m (Phase 7).
+        % writeActivePhysicsConfig_ extracted to +revgnss/+report/activePhysicsConfig.m.
 
         % Spacecraft + reference-frame schematic moved to the standalone, editable
         % output/utils/make_spacecraft_frames.m (scenario-independent; exported via
@@ -1207,7 +1435,7 @@ classdef ClockExactReportBuilder
         end
 
         % ================================================================
-        % FINAL SCIENTIFIC CLOSURE (Stage 66 compact section)
+        % FINAL SCIENTIFIC CLOSURE
         % ================================================================
         function writeFinalScientificClosure_(fid, summary)
             % writeFinalScientificClosure_  Compact final model closure table.
@@ -1225,7 +1453,7 @@ classdef ClockExactReportBuilder
             fprintf(fid, '\\begin{center}\\small\n');
             fprintf(fid, '\\begin{tabular}{p{0.38\\textwidth}p{0.52\\textwidth}}\n');
             fprintf(fid, '\\toprule\n\\textbf{Property} & \\textbf{Value / Status}\\\\\n\\midrule\n');
-            % Stage 66: single-asset one-way topology rows
+            % Single-asset one-way topology rows
             nSA_ = 1;
             if isfield(summary,'stage66NSpaceAssets'); nSA_ = summary.stage66NSpaceAssets; end
             fprintf(fid, 'nSpaceAssets & %d (single estimated spacecraft)\\\\\n', nSA_);
@@ -1496,8 +1724,7 @@ classdef ClockExactReportBuilder
 
         function ok = compileTex_(texPath, latexCmd)
             texDir = fileparts(texPath);
-            [~,stem] = fileparts(texPath);
-            cmdFmt = '"%s" -interaction=nonstopmode -output-directory "%s" "%s" > /dev/null 2>&1';
+            cmdFmt ='"%s" -interaction=nonstopmode -output-directory "%s" "%s" > /dev/null 2>&1';
             % Run twice for proper table cross-references
             cmd1 = sprintf(cmdFmt, latexCmd, texDir, texPath);
             s1 = system(cmd1);

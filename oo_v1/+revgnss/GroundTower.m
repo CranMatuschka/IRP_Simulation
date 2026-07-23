@@ -78,7 +78,7 @@ classdef GroundTower < handle
             % Build clock
             obj.clock = models.clocks.ClockModel(cfg.clock);
 
-            % Stage 72: seed history with the t=0 initial state so that product
+            % Seed history with the t=0 initial state so that product
             % epoch lookups at t_prod=0 (the first 30+latency seconds of the
             % simulation) always find a valid history entry.  Without this seed,
             % clockAtProductEpoch returns the fallback (current-state) value for

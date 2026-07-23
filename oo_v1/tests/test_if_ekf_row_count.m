@@ -17,7 +17,7 @@ fprintf('=== test_if_ekf_row_count ===\n');
 % Build base config with L1+L2 stacked to get reference row count M_stacked
 % ----------------------------------------------------------------
 cfg_stk = revgnss.ConfigFactory.defaultConfig();
-cfg_stk.signals.twoFrequency.enable = true;
+cfg_stk.signals.names = {'L1','L2'}; cfg_stk.signals.enabledMask = [true true];
 cfg_stk.measurements.codeMode       = 'dualFrequencyStacked';
 cfg_stk.measurements.doppler.useInEKF = false;
 cfg_stk.measurements.carrierMode    = 'off';

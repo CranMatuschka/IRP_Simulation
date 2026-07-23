@@ -276,7 +276,7 @@ try
 catch
     diag_j = struct();
 end
-res_j = revgnss.ClockExactReportBuilder.build(diag_j, [], [], cfg_j, struct());
+res_j = revgnss.ClockExactReportBuilder.build(diag_j, [], [], [], cfg_j, struct());
 assert(isfield(res_j,'texPath') && isfile(res_j.texPath), ...
     'T-P13j FAILED: ClockExactReportBuilder did not produce a .tex file');
 

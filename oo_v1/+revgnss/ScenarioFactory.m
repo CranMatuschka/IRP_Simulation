@@ -100,13 +100,38 @@ classdef ScenarioFactory
             x0(sm.bdot_rx_idx) = asset.clock.getDriftMetersPerSecond() + cdot_pert;
 
             if ekf.estimateTowerClocks
+                % Draw the tower-clock init from the SAME P0 the filter is told
+                % it has, so the initial tower-clock NEES is O(1) instead of exactly 0
+                % (exact-truth init against a 1000 m / 10 m/s stated sigma drove a
+                % meaningless NEES and a covariance transient). Dedicated seeded stream
+                % -> reproducible and independent of the other RNG streams.
+                [sigma_b_twr, sigma_bd_twr] = revgnss.ScenarioFactory.towerClockInitSigmas_();
+                rngTwr = RandStream('mt19937ar', 'Seed', cfg.simulation.seed + 8600);
                 for ti = 1:ekf.nTowers
                     idx_b    = sm.towerClockIdx(ti,1);
                     idx_bdot = sm.towerClockIdx(ti,2);
-                    x0(idx_b)    = towers{ti}.getClockBiasMeters();
-                    x0(idx_bdot) = towers{ti}.getClockDriftMetersPerSecond();
+                    x0(idx_b)    = towers{ti}.getClockBiasMeters()           + sigma_b_twr  * randn(rngTwr);
+                    x0(idx_bdot) = towers{ti}.getClockDriftMetersPerSecond() + sigma_bd_twr * randn(rngTwr);
                 end
             end
+
+            % SRP scale-coefficient state: deterministic nominal init (no seeded draw). The
+            % truth SRP is applied truth-side with a fixed Cr, so the "truth s" is 1.0 by
+            % construction; initScale=1.0 gives zero initial error for this parameter state.
+            if ekf.estimateSrpScale && isfield(sm,'srpScaleIdx') && ~isempty(sm.srpScaleIdx)
+                initScale = 1.0;
+                try; initScale = cfg.estimator.srpCoefficient.initScale; catch; end
+                x0(sm.srpScaleIdx) = initScale;
+            end
+        end
+
+        function [sigma_b_m, sigma_bdot_mps] = towerClockInitSigmas_()
+            % towerClockInitSigmas_  Single source for the tower-clock P0 1-sigma,
+            % shared by buildInitialState_ (seeded init perturbation) and
+            % buildInitialCovariance_ (stated covariance) so they cannot drift apart.
+            % Only reached when estimateTowerClocks=true.
+            sigma_b_m      = 1e3;   % 1000 m  initial tower clock-bias uncertainty
+            sigma_bdot_mps = 1e1;   % 10 m/s  initial tower clock-drift uncertainty
         end
 
         function P0 = buildInitialCovariance_(cfg, ekf)
@@ -123,8 +148,9 @@ classdef ScenarioFactory
             P0(sm.bdot_rx_idx, sm.bdot_rx_idx) = cfg.estimator.P0_bdotRx_mps^2;
 
             if ekf.estimateTowerClocks
-                sigma_b_twr = 1e3;  % 1000 m initial tower clock uncertainty
-                sigma_bd_twr = 1e1;
+                % Shared with buildInitialState_ so the stated 1-sigma and the initial
+                % perturbation cannot drift apart.
+                [sigma_b_twr, sigma_bd_twr] = revgnss.ScenarioFactory.towerClockInitSigmas_();
                 for ti = 1:ekf.nTowers
                     idx_b    = sm.towerClockIdx(ti,1);
                     idx_bdot = sm.towerClockIdx(ti,2);
@@ -200,6 +226,22 @@ classdef ScenarioFactory
                         P0(idx_k, idx_k) = sigma0_tx^2;
                     end
                 end
+            end
+
+            % Gyro-bias initial covariance (IMU/MEKF). The filter's prior on b_g -- NOT the truth
+            % bias (which stays unknown to the filter). Zero here would wrongly assert perfect
+            % knowledge, so it must be the configured 1-sigma. No-op when the block is absent.
+            if ekf.estimateGyroBias && isfield(sm,'gyroBiasIdx') && ~isempty(sm.gyroBiasIdx)
+                for k = 1:numel(sm.gyroBiasIdx)
+                    P0(sm.gyroBiasIdx(k), sm.gyroBiasIdx(k)) = ekf.imuP0Bias_^2;
+                end
+            end
+
+            % SRP scale-coefficient prior variance (dimensionless).
+            if ekf.estimateSrpScale && isfield(sm,'srpScaleIdx') && ~isempty(sm.srpScaleIdx)
+                initSigma = 0.1;
+                try; initSigma = cfg.estimator.srpCoefficient.initSigma; catch; end
+                P0(sm.srpScaleIdx, sm.srpScaleIdx) = initSigma^2;
             end
         end
     end

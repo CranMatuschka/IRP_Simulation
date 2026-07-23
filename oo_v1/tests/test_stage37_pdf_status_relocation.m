@@ -13,18 +13,18 @@ assert(str2double(char(rs.stage)) >= 37, ...
     sprintf('T1: stage should be >= 37, got ''%s''', char(rs.stage)));
 fprintf('T1 PASS: ReportStatus.current().stage = ''%s'' (>= 37)\n', char(rs.stage));
 
-% --- T2: README has "Validation status and missing stages" section ---
+% --- T2: README has a Limitations section ---
 readmePath = fullfile(fileparts(fileparts(mfilename('fullpath'))), 'README_oo_v1.md');
 assert(exist(readmePath,'file') == 2, 'T2: README_oo_v1.md not found');
 readmeTxt = fileread(readmePath);
-assert(contains(readmeTxt, 'Validation status and missing stages'), ...
-    'T2: README should contain heading "Validation status and missing stages"');
-fprintf('T2 PASS: README contains "Validation status and missing stages"\n');
+assert(contains(readmeTxt, 'Limitations'), ...
+    'T2: README should contain a Limitations section');
+fprintf('T2 PASS: README contains a Limitations section\n');
 
-% --- T3: README has at least one missing-stage item ---
-hasMissing = ~isempty(regexp(readmeTxt, '- (Full|Quaternion|Calibrated|L2|Monte)', 'once'));
-assert(hasMissing, 'T3: README should contain at least one missing-stage list item');
-fprintf('T3 PASS: README contains missing-stage items\n');
+% --- T3: README lists at least one limitation ---
+hasMissing = ~isempty(regexp(readmeTxt, '- (No|One-way|Meter)', 'once'));
+assert(hasMissing, 'T3: README should list at least one limitation item');
+fprintf('T3 PASS: README lists limitation items\n');
 
 % --- T4: missingScientificStages non-empty; no "Validation Status" in list ---
 assert(~isempty(rs.missingScientificStages), ...

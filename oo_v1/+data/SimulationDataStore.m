@@ -21,7 +21,7 @@ classdef SimulationDataStore < handle
         nAlloc_   (1,1) double = 0
         nx_       (1,1) double = 0    % state dim (lazy, set on first write)
         initialized_  (1,1) logical = false
-        frozen_       (1,1) logical = false   % Phase 4a immutability guard (set by freeze())
+        frozen_       (1,1) logical = false   % Immutability guard (set by freeze())
         cfg_
 
         % ---- Time
@@ -32,6 +32,7 @@ classdef SimulationDataStore < handle
         tr_v_     % [3 x N] velocity ECEF mps
         tr_eu_    % [3 x N] Euler rad
         tr_om_    % [3 x N] omega rad/s
+        tr_bg_    % [3 x N] truth gyro bias rad/s (IMU/MEKF; NaN when no gyro)
         tr_cbm_   % [N x 1] rx clock bias m
         tr_cbs_   % [N x 1] rx clock bias s
         tr_cdm_   % [N x 1] rx clock drift mps
@@ -42,6 +43,7 @@ classdef SimulationDataStore < handle
         es_v_     % [3 x N]
         es_eu_    % [3 x N]
         es_om_    % [3 x N]
+        es_bg_    % [3 x N] estimated gyro bias rad/s (IMU/MEKF; NaN when no gyro)
         es_cbm_   % [N x 1]
         es_cdm_   % [N x 1]
         % state-dim dependent (lazy):
@@ -68,6 +70,7 @@ classdef SimulationDataStore < handle
         mc_nc_    % [N x 1] code rows
         mc_ncar_  % [N x 1] carrier rows
         mc_nd_    % [N x 1] doppler rows
+        mc_ntwtt_  % [N x 1] two-way time-transfer rows
         mc_nv_    % [N x 1] visible towers
 
         % ---- Residuals
@@ -79,6 +82,8 @@ classdef SimulationDataStore < handle
         rs_pocar_ % [N x 1] postfit carrier RMS m
         rs_pfd_   % [N x 1] prefit doppler RMS mps
         rs_pod_   % [N x 1] postfit doppler RMS mps
+        rs_pftwtt_ % [N x 1] prefit two-way time-transfer RMS m
+        rs_potwtt_ % [N x 1] postfit two-way time-transfer RMS m
         rs_pfmax_ % [N x 1] prefit max abs
         rs_pomax_ % [N x 1] postfit max abs
 
@@ -87,6 +92,7 @@ classdef SimulationDataStore < handle
         cn_NIScod_
         cn_NIScar_
         cn_NISdop_
+        cn_NIStwtt_
         cn_NEESp_
         cn_NEESv_
         cn_NEESc_
@@ -129,7 +135,7 @@ classdef SimulationDataStore < handle
         ck_oCdP_
         ck_oCdG_
 
-        % ---- Stage 57
+        % ---- EKF innovation accounting
         s57_pN_
         s57_gN_
         s57_aN_
@@ -141,6 +147,9 @@ classdef SimulationDataStore < handle
         s57_cR_
         s57_carR_
         s57_dR_
+        s57_twttN_
+        s57_twttD_
+        s57_twttR_
 
         % ---- Differential attitude
         da_act_
@@ -175,11 +184,13 @@ classdef SimulationDataStore < handle
         ps_cT_
         ps_tT_
         ps_iT_
+        ps_ihoT_
         ps_hT_
         ps_mT_
         ps_cM_
         ps_tM_
         ps_iM_
+        ps_ihoM_
         ps_hM_
         ps_mM_
 
@@ -188,9 +199,30 @@ classdef SimulationDataStore < handle
 
         % ---- Tower clocks (lazy [nTowers x N])
         nTowers_  (1,1) double = 0
+        nTowerClockRowsStored_ (1,1) double = 0
         tw_tru_
         tw_mod_
         tw_err_
+
+        % ---- WP3 secondary-asset clocks (lazy [nSec x N]): estimate/sigma/truth of
+        % the estimated secondary clock BIAS. Empty unless estimateMode='clocks'.
+        nSecClocks_ (1,1) double = 0
+        sc_estB_
+        sc_sigB_
+        sc_truB_
+
+        % ---- P1'/WP4 secondary-asset ORBIT (lazy [nSec x N]): 3D position error norm
+        % and 1-sigma of the estimated secondary position. Empty unless estimateMode='position'.
+        nSecOrbits_ (1,1) double = 0
+        so_posErr_
+        so_posSig_
+        so_baseErr_    % P5': per-secondary RELATIVE baseline error to the chief (est - truth) [m]
+        % ---- Guard C: per-sat + formation-centroid NEES (lazy). Empty unless estimateMode='position'.
+        so_NEESpos_
+        so_NEESvel_
+        so_NEESclk_
+        cn_NEEScen_
+        cn_NEESseccen_
 
         % ---- Euler at last epoch (for ReportRunner summary)
         lastTruthEuler_rad_   double = []
@@ -256,12 +288,12 @@ classdef SimulationDataStore < handle
             obj.t_s_   = n1();
 
             obj.tr_r_  = n3(); obj.tr_v_  = n3();
-            obj.tr_eu_ = n3(); obj.tr_om_ = n3();
+            obj.tr_eu_ = n3(); obj.tr_om_ = n3(); obj.tr_bg_ = n3();
             obj.tr_cbm_= n1(); obj.tr_cbs_= n1();
             obj.tr_cdm_= n1(); obj.tr_ff_ = n1();
 
             obj.es_r_  = n3(); obj.es_v_  = n3();
-            obj.es_eu_ = n3(); obj.es_om_ = n3();
+            obj.es_eu_ = n3(); obj.es_om_ = n3(); obj.es_bg_ = n3();
             obj.es_cbm_= n1(); obj.es_cdm_= n1();
 
             obj.er_pv_ = n3(); obj.er_pn_ = n1();
@@ -272,17 +304,18 @@ classdef SimulationDataStore < handle
             obj.er_cd_ = n1(); obj.er_ff_ = n1();
 
             obj.mc_nr_  = n1(); obj.mc_nc_  = n1();
-            obj.mc_ncar_= n1(); obj.mc_nd_  = n1();
+            obj.mc_ncar_= n1(); obj.mc_nd_  = n1(); obj.mc_ntwtt_ = n1();
             obj.mc_nv_  = n1();
 
             obj.rs_pfa_  = n1(); obj.rs_poa_  = n1();
             obj.rs_pfc_  = n1(); obj.rs_poc_  = n1();
             obj.rs_pfcar_= n1(); obj.rs_pocar_= n1();
             obj.rs_pfd_  = n1(); obj.rs_pod_  = n1();
+            obj.rs_pftwtt_ = n1(); obj.rs_potwtt_ = n1();
             obj.rs_pfmax_= n1(); obj.rs_pomax_= n1();
 
             obj.cn_NIS_   = n1(); obj.cn_NIScod_= n1();
-            obj.cn_NIScar_= n1(); obj.cn_NISdop_= n1();
+            obj.cn_NIScar_= n1(); obj.cn_NISdop_= n1(); obj.cn_NIStwtt_ = n1();
             obj.cn_NEESp_ = n1(); obj.cn_NEESv_ = n1();
             obj.cn_NEESc_ = n1(); obj.cn_NEESa_ = n1();
 
@@ -311,6 +344,7 @@ classdef SimulationDataStore < handle
             obj.s57_gR_  = n1(); obj.s57_aR_  = n1();
             obj.s57_cR_  = n1(); obj.s57_carR_= n1();
             obj.s57_dR_  = n1();
+            obj.s57_twttN_ = n1(); obj.s57_twttD_ = n1(); obj.s57_twttR_ = n1();
 
             obj.da_act_  = b1(); obj.da_nR_   = n1();
             obj.da_rR_   = n1(); obj.da_aBl_  = n1();
@@ -326,9 +360,9 @@ classdef SimulationDataStore < handle
             obj.di_pCovA_= b1(); obj.di_pCovB_= n1();
             obj.di_pCovS_= n1(); obj.di_pCovP_= b1();
 
-            obj.ps_cT_= n1(); obj.ps_tT_= n1(); obj.ps_iT_= n1();
+            obj.ps_cT_= n1(); obj.ps_tT_= n1(); obj.ps_iT_= n1(); obj.ps_ihoT_= n1();
             obj.ps_hT_= n1(); obj.ps_mT_= n1();
-            obj.ps_cM_= n1(); obj.ps_tM_= n1(); obj.ps_iM_= n1();
+            obj.ps_cM_= n1(); obj.ps_tM_= n1(); obj.ps_iM_= n1(); obj.ps_ihoM_= n1();
             obj.ps_hM_= n1(); obj.ps_mM_= n1();
 
             obj.ck_oWkP_  = n1();
@@ -359,6 +393,7 @@ classdef SimulationDataStore < handle
             end
             obj.tr_eu_(:,k) = gv_(entry,{'truth','euler_rad'},nan(3,1));
             obj.tr_om_(:,k) = gv_(entry,{'truth','omega_body_radps'},nan(3,1));
+            obj.tr_bg_(:,k) = gv_(entry,{'truth','gyroBias_radps'},nan(3,1));
             obj.tr_cbm_(k)  = gn_(entry,'truth','rxClockBias_m',NaN);
             obj.tr_cbs_(k)  = gn_(entry,'truth','rxClockBias_s',NaN);
             obj.tr_cdm_(k)  = gn_(entry,'truth','rxClockDrift_mps',NaN);
@@ -377,6 +412,7 @@ classdef SimulationDataStore < handle
             end
             obj.es_eu_(:,k) = gv_(entry,{'estimate','euler_rad'},nan(3,1));
             obj.es_om_(:,k) = gv_(entry,{'estimate','omega_body_radps'},nan(3,1));
+            obj.es_bg_(:,k) = gv_(entry,{'estimate','gyroBias_radps'},nan(3,1));
             obj.es_cbm_(k)  = gn_(entry,'estimate','rxClockBias_m',NaN);
             obj.es_cdm_(k)  = gn_(entry,'estimate','rxClockDrift_mps',NaN);
             eu_es = gv_(entry,{'estimate','euler_rad'},[]);
@@ -425,6 +461,7 @@ classdef SimulationDataStore < handle
             obj.mc_nc_(k)   = g_(entry,'numPseudorangeMeasurements',NaN);
             obj.mc_ncar_(k) = g_(entry,'numCarrierRows',NaN);
             obj.mc_nd_(k)   = g_(entry,'numDopplerRows',NaN);
+            obj.mc_ntwtt_(k)= g_(entry,'numTwoWayTimeTransferRows',NaN);
             obj.mc_nv_(k)   = g_(entry,'numVisibleTowers',NaN);
 
             % Residuals
@@ -436,6 +473,8 @@ classdef SimulationDataStore < handle
             obj.rs_pocar_(k) = g_(entry,'postfitCarrierRMS_m',NaN);
             obj.rs_pfd_(k)   = g_(entry,'prefitDopplerRMS_mps',NaN);
             obj.rs_pod_(k)   = g_(entry,'postfitDopplerRMS_mps',NaN);
+            obj.rs_pftwtt_(k)= g_(entry,'prefitTwoWayTimeTransferRMS_m',NaN);
+            obj.rs_potwtt_(k)= g_(entry,'postfitTwoWayTimeTransferRMS_m',NaN);
             obj.rs_pfmax_(k) = g_(entry,'prefitMaxAbs',NaN);
             obj.rs_pomax_(k) = g_(entry,'postfitMaxAbs',NaN);
 
@@ -444,6 +483,7 @@ classdef SimulationDataStore < handle
             obj.cn_NIScod_(k) = g_(entry,'NIS_code',NaN);
             obj.cn_NIScar_(k) = g_(entry,'NIS_carrier',NaN);
             obj.cn_NISdop_(k) = g_(entry,'NIS_doppler',NaN);
+            obj.cn_NIStwtt_(k)= g_(entry,'NIS_twoWayTimeTransfer',NaN);
             obj.cn_NEESp_(k)  = g_(entry,'NEES_pos',NaN);
             obj.cn_NEESv_(k)  = g_(entry,'NEES_vel',NaN);
             obj.cn_NEESc_(k)  = g_(entry,'NEES_clk',NaN);
@@ -493,7 +533,7 @@ classdef SimulationDataStore < handle
             obj.ck_oCdP_(k) = g_(entry,'clockObsCondPhysical',NaN);
             obj.ck_oCdG_(k) = g_(entry,'clockObsCondGauged',NaN);
 
-            % Stage 57
+            % EKF innovation accounting
             obj.s57_pN_(k)   = g_(entry,'physicalNIS57',NaN);
             obj.s57_gN_(k)   = g_(entry,'gaugeNIS57',NaN);
             obj.s57_aN_(k)   = g_(entry,'augmentedNIS57',NaN);
@@ -505,6 +545,9 @@ classdef SimulationDataStore < handle
             obj.s57_cR_(k)   = g_(entry,'codeRms57',NaN);
             obj.s57_carR_(k) = g_(entry,'carrierRms57',NaN);
             obj.s57_dR_(k)   = g_(entry,'dopplerRms57',NaN);
+            obj.s57_twttN_(k)= g_(entry,'twoWayTimeTransferNIS57',NaN);
+            obj.s57_twttD_(k)= g_(entry,'twoWayTimeTransferDof57',NaN);
+            obj.s57_twttR_(k)= g_(entry,'twoWayTimeTransferRms57',NaN);
 
             % Differential attitude
             obj.da_act_(k)  = logical(g_(entry,'diffAttActive',false));
@@ -543,12 +586,14 @@ classdef SimulationDataStore < handle
             obj.ps_cT_(k) = g_(psT,'code',NaN);
             obj.ps_tT_(k) = g_(psT,'trop',NaN);
             obj.ps_iT_(k) = g_(psT,'iono',NaN);
+            obj.ps_ihoT_(k) = g_(psT,'ionoHO',NaN);
             obj.ps_hT_(k) = g_(psT,'hwDelay',NaN);
             obj.ps_mT_(k) = g_(psT,'mp',NaN);
             psM = g_(entry,'perSourceModelRMS',struct());
             obj.ps_cM_(k) = g_(psM,'code',NaN);
             obj.ps_tM_(k) = g_(psM,'trop',NaN);
             obj.ps_iM_(k) = g_(psM,'iono',NaN);
+            obj.ps_ihoM_(k) = g_(psM,'ionoHO',NaN);
             obj.ps_hM_(k) = g_(psM,'hwDelay',NaN);
             obj.ps_mM_(k) = g_(psM,'mp',NaN);
 
@@ -562,18 +607,24 @@ classdef SimulationDataStore < handle
             twT = g_(entry,'towerClockTruth_m',[]);
             twM = g_(entry,'towerClockModel_m',[]);
             if ~isempty(twT) && isnumeric(twT)
-                nT = numel(twT);
-                if isempty(obj.tw_tru_)
-                    obj.nTowers_ = nT;
-                    obj.tw_tru_  = nan(nT, obj.nAlloc_);
-                    obj.tw_mod_  = nan(nT, obj.nAlloc_);
-                    obj.tw_err_  = nan(nT, obj.nAlloc_);
+                nTraw = numel(twT);
+                obj.nTowerClockRowsStored_ = max(obj.nTowerClockRowsStored_, nTraw);
+                nTphys = obj.nTowers_;
+                if nTphys <= 0
+                    nTphys = nTraw;
+                    obj.nTowers_ = nTphys;
                 end
-                nMn = min(nT, obj.nTowers_);
-                obj.tw_tru_(1:nMn,k) = twT(1:nMn);
-                if ~isempty(twM) && isnumeric(twM) && numel(twM) >= nMn
-                    obj.tw_mod_(1:nMn,k) = twM(1:nMn);
-                    obj.tw_err_(1:nMn,k) = twT(1:nMn) - twM(1:nMn);
+                [twTphys, twMphys] = collapseTowerClockRows_(twT, twM, nTphys);
+                if isempty(obj.tw_tru_)
+                    obj.tw_tru_  = nan(nTphys, obj.nAlloc_);
+                    obj.tw_mod_  = nan(nTphys, obj.nAlloc_);
+                    obj.tw_err_  = nan(nTphys, obj.nAlloc_);
+                end
+                nMn = min(numel(twTphys), size(obj.tw_tru_,1));
+                obj.tw_tru_(1:nMn,k) = twTphys(1:nMn);
+                if ~isempty(twMphys) && isnumeric(twMphys) && numel(twMphys) >= nMn
+                    obj.tw_mod_(1:nMn,k) = twMphys(1:nMn);
+                    obj.tw_err_(1:nMn,k) = twTphys(1:nMn) - twMphys(1:nMn);
                 end
             end
         end
@@ -594,7 +645,7 @@ classdef SimulationDataStore < handle
 
         % -----------------------------------------------------------------
         function freeze(obj)
-            % freeze  Make the store immutable after the simulation stage (Phase 4a).
+            % freeze  Make the store immutable after the simulation stage.
             % Post-processing and report may then only READ; any write method throws
             % SimulationDataStore:frozen. Idempotent.
             obj.frozen_ = true;
@@ -621,6 +672,9 @@ classdef SimulationDataStore < handle
             entry.truth.v_cm_ecef_mps    = asset.v_ecef_mps;
             entry.truth.euler_rad        = asset.attitude_euler_rad;
             entry.truth.omega_body_radps = asset.angularRate_body_radps;
+            if ~isempty(asset.imu)
+                entry.truth.gyroBias_radps = asset.imu.gyroBias_radps;   % IMU/MEKF truth bias
+            end
             entry.truth.rxClockBias_m    = asset.clock.getBiasMeters();
             entry.truth.rxClockBias_s    = asset.clock.getBiasSeconds();
             entry.truth.rxFracFreq       = asset.clock.getFractionalFrequency();
@@ -634,6 +688,9 @@ classdef SimulationDataStore < handle
             entry.estimate.v_cm_ecef_mps    = x(sm.v_idx);
             entry.estimate.euler_rad        = reportEuler_rad;
             entry.estimate.omega_body_radps = x(sm.omega_idx);
+            if isfield(sm,'gyroBiasIdx') && ~isempty(sm.gyroBiasIdx)
+                entry.estimate.gyroBias_radps = x(sm.gyroBiasIdx);    % IMU/MEKF estimated bias
+            end
             entry.estimate.rxClockBias_m    = x(sm.b_rx_idx);
             entry.estimate.rxClockDrift_mps = x(sm.bdot_rx_idx);
 
@@ -667,7 +724,12 @@ classdef SimulationDataStore < handle
             end
 
             % --- Error chain ---
-            if ~isempty(errStruct)
+            % A zero-visibility epoch (no towers in view -- inevitable for a fast
+            % LEO overflying a regional tower network) yields a partial errStruct
+            % without the per-measurement totals. Treat it like the empty-errStruct
+            % coasting case below rather than crashing. GEO/MEO always keep towers in
+            % view, so the field is always present there and this is byte-identical.
+            if ~isempty(errStruct) && isfield(errStruct,'truthTotal_m')
                 entry.errors.truthTotal_m = errStruct.truthTotal_m;
                 entry.errors.modelTotal_m = errStruct.modelTotal_m;
                 entry.errors.bySource     = errStruct.bySource;
@@ -691,7 +753,7 @@ classdef SimulationDataStore < handle
                 else
                     entry.meanLightTime_s = 0; entry.maxLightTime_s = 0;
                 end
-                labels_ = {'code','trop','iono','hwDelay','mp'};
+                labels_ = {'code','trop','iono','ionoHO','hwDelay','mp'};
                 for j_ = 1:numel(labels_)
                     lbl_ = labels_{j_};
                     if isfield(errStruct.bySource,'truth_m') && isfield(errStruct.bySource.truth_m,lbl_)
@@ -715,7 +777,7 @@ classdef SimulationDataStore < handle
                 entry.towerClockTruth_m = []; entry.towerClockModel_m = [];
                 entry.towerClockCorrectionError_m = [];
                 entry.meanLightTime_s = 0; entry.maxLightTime_s = 0;
-                srcLabels_ = {'code','trop','iono','hwDelay','mp'};
+                srcLabels_ = {'code','trop','iono','ionoHO','hwDelay','mp'};
                 for j_ = 1:numel(srcLabels_)
                     lbl_ = srcLabels_{j_};
                     entry.perSourceTruthRMS.(lbl_) = 0;
@@ -765,37 +827,85 @@ classdef SimulationDataStore < handle
                 M_car_rows = sum(strcmp(errStruct.measType_perRow,'carrier'));
             end
             entry.numCarrierRows = M_car_rows;
+            M_twtt_rows = 0;
+            hasRowTypes = ~isempty(errStruct) && isfield(errStruct,'measType_perRow') && ...
+                iscell(errStruct.measType_perRow) && numel(errStruct.measType_perRow) == numel(z);
+            if hasRowTypes
+                M_twtt_rows = sum(strcmp(errStruct.measType_perRow,'twoWayTimeTransfer'));
+            elseif ~isempty(errStruct) && isfield(errStruct,'twoWayTimeTransfer') && ...
+                    isstruct(errStruct.twoWayTimeTransfer) && isfield(errStruct.twoWayTimeTransfer,'nEkfRows')
+                M_twtt_rows = errStruct.twoWayTimeTransfer.nEkfRows;
+            end
+            entry.numTwoWayTimeTransferRows = M_twtt_rows;
 
             % --- Innovation / residual RMS ---
             if ~isempty(z) && M_pr > 0 && numel(z) >= M_pr
-                innPR = z(1:M_pr) - h(1:M_pr);
+                if hasRowTypes
+                    codeMaskRms = strcmp(errStruct.measType_perRow,'code') | strcmp(errStruct.measType_perRow,'ifCode');
+                    dopMaskRms = strcmp(errStruct.measType_perRow,'doppler');
+                    twttMaskRms = strcmp(errStruct.measType_perRow,'twoWayTimeTransfer');
+                else
+                    codeMaskRms = false(numel(z),1); codeMaskRms(1:M_pr) = true;
+                    dopMaskRms = false(numel(z),1);
+                    if M_dop_rows > 0 && numel(z) >= M_pr + M_dop_rows
+                        dopMaskRms(M_pr+1:M_pr+M_dop_rows) = true;
+                    end
+                    twttMaskRms = false(numel(z),1);
+                end
+                innPR = z(codeMaskRms) - h(codeMaskRms);
                 entry.prefitPseudorangeRMS_m = sqrt(mean(innPR.^2));
                 entry.prefitInnovationRMS    = entry.prefitPseudorangeRMS_m;
-                if M_dop_rows > 0 && numel(z) >= M_pr + M_dop_rows
-                    innDop = z(M_pr+1:M_pr+M_dop_rows) - h(M_pr+1:M_pr+M_dop_rows);
+                if any(dopMaskRms)
+                    innDop = z(dopMaskRms) - h(dopMaskRms);
                     entry.prefitDopplerRMS_mps = sqrt(mean(innDop.^2));
                 else
                     entry.prefitDopplerRMS_mps = 0;
+                end
+                if any(twttMaskRms)
+                    innTwtt = z(twttMaskRms) - h(twttMaskRms);
+                    entry.prefitTwoWayTimeTransferRMS_m = sqrt(mean(innTwtt.^2));
+                else
+                    entry.prefitTwoWayTimeTransferRMS_m = 0;
                 end
             else
                 entry.prefitPseudorangeRMS_m = 0;
                 entry.prefitInnovationRMS    = 0;
                 entry.prefitDopplerRMS_mps   = 0;
+                entry.prefitTwoWayTimeTransferRMS_m = 0;
             end
             if ~isempty(postfitResidual) && numel(postfitResidual) >= M_pr && M_pr > 0
-                resPR = postfitResidual(1:M_pr);
+                if hasRowTypes && numel(postfitResidual) == numel(errStruct.measType_perRow)
+                    codeMaskPost = strcmp(errStruct.measType_perRow,'code') | strcmp(errStruct.measType_perRow,'ifCode');
+                    dopMaskPost = strcmp(errStruct.measType_perRow,'doppler');
+                    twttMaskPost = strcmp(errStruct.measType_perRow,'twoWayTimeTransfer');
+                else
+                    codeMaskPost = false(numel(postfitResidual),1); codeMaskPost(1:M_pr) = true;
+                    dopMaskPost = false(numel(postfitResidual),1);
+                    if M_dop_rows > 0 && numel(postfitResidual) >= M_pr + M_dop_rows
+                        dopMaskPost(M_pr+1:M_pr+M_dop_rows) = true;
+                    end
+                    twttMaskPost = false(numel(postfitResidual),1);
+                end
+                resPR = postfitResidual(codeMaskPost);
                 entry.postfitPseudorangeRMS_m = sqrt(mean(resPR.^2));
                 entry.postfitResidualRMS      = entry.postfitPseudorangeRMS_m;
-                if M_dop_rows > 0 && numel(postfitResidual) >= M_pr + M_dop_rows
-                    resDop = postfitResidual(M_pr+1:M_pr+M_dop_rows);
+                if any(dopMaskPost)
+                    resDop = postfitResidual(dopMaskPost);
                     entry.postfitDopplerRMS_mps = sqrt(mean(resDop.^2));
                 else
                     entry.postfitDopplerRMS_mps = 0;
+                end
+                if any(twttMaskPost)
+                    resTwtt = postfitResidual(twttMaskPost);
+                    entry.postfitTwoWayTimeTransferRMS_m = sqrt(mean(resTwtt.^2));
+                else
+                    entry.postfitTwoWayTimeTransferRMS_m = 0;
                 end
             else
                 entry.postfitPseudorangeRMS_m = 0;
                 entry.postfitResidualRMS      = 0;
                 entry.postfitDopplerRMS_mps   = 0;
+                entry.postfitTwoWayTimeTransferRMS_m = 0;
             end
             if ~isempty(errStruct) && isfield(errStruct,'doppler') && ...
                     isfield(errStruct.doppler,'prefit') && ~isempty(errStruct.doppler.prefit)
@@ -806,6 +916,7 @@ classdef SimulationDataStore < handle
 
             % --- Per-type NIS ---
             entry.NIS_code = 0; entry.NIS_doppler = 0; entry.NIS_carrier = 0;
+            entry.NIS_twoWayTimeTransfer = 0;
             if ~isempty(z) && ~isempty(h) && ~isempty(R) && numel(z) == numel(h)
                 inn_all = z - h;
                 if ~isempty(errStruct) && isfield(errStruct,'measType_perRow') && ...
@@ -814,9 +925,11 @@ classdef SimulationDataStore < handle
                     prMask  = strcmp(mtype_r,'code') | strcmp(mtype_r,'ifCode');
                     dopMask = strcmp(mtype_r,'doppler');
                     carMask = strcmp(mtype_r,'carrier');
+                    twttMask = strcmp(mtype_r,'twoWayTimeTransfer');
                     if any(prMask);  entry.NIS_code    = localNis_(inn_all(prMask),  R(prMask,prMask));   end
                     if any(dopMask); entry.NIS_doppler = localNis_(inn_all(dopMask), R(dopMask,dopMask)); end
                     if any(carMask); entry.NIS_carrier = localNis_(inn_all(carMask), R(carMask,carMask)); end
+                    if any(twttMask); entry.NIS_twoWayTimeTransfer = localNis_(inn_all(twttMask), R(twttMask,twttMask)); end
                 elseif M_pr > 0 && numel(z) >= M_pr
                     entry.NIS_code = localNis_(inn_all(1:M_pr), R(1:M_pr,1:M_pr));
                 end
@@ -843,9 +956,15 @@ classdef SimulationDataStore < handle
             catch; end
             entry.NEES_att = NaN;
             try
-                att_err_ = revgnss.AttitudeKinematics.wrapEuler(eul_err);
-                P_att_   = ekf.P(sm.euler_idx, sm.euler_idx);
-                if rcond(P_att_) > 1e-15; entry.NEES_att = (att_err_' * (P_att_ \ att_err_)) / 3; end
+                % R-7 (v4): score the attitude NEES with the EKF's QUATERNION-AWARE
+                % small-angle error (the error in P(euler_idx) space), not a raw
+                % wrapped-Euler subtraction which lives in a different space and is
+                % ill-defined near gimbal lock. Matches ReverseGNSSEKF.computeNEES.
+                if ekf.estimateAttitude
+                    att_err_ = ekf.attitudeSmallAngleError_(asset.attitude_euler_rad);
+                    P_att_   = ekf.P(sm.euler_idx, sm.euler_idx);
+                    if rcond(P_att_) > 1e-15; entry.NEES_att = (att_err_' * (P_att_ \ att_err_)) / 3; end
+                end
             catch; end
 
             % --- Clock gauge diagnostics ---
@@ -876,12 +995,15 @@ classdef SimulationDataStore < handle
                 entry.nTxCodeBiasStates = ekf.nTxCodeBiasStates;
             end
 
-            % --- Stage 57: separated EKF innovation accounting ---
+            % --- Separated EKF innovation accounting ---
             entry.physicalNIS57  = NaN; entry.gaugeNIS57     = NaN;
             entry.augmentedNIS57 = NaN; entry.physicalDof57  = 0;
             entry.gaugeDof57     = 0;   entry.physicalRms57  = NaN;
             entry.gaugeRms57     = NaN; entry.augRms57       = NaN;
             entry.codeRms57      = NaN; entry.carrierRms57   = NaN; entry.dopplerRms57 = NaN;
+            entry.twoWayTimeTransferNIS57 = NaN;
+            entry.twoWayTimeTransferDof57 = 0;
+            entry.twoWayTimeTransferRms57 = NaN;
             if ~isempty(errStruct) && isfield(errStruct,'ekfAccounting57') && ...
                     isfield(errStruct.ekfAccounting57,'physicalNIS')
                 a57 = errStruct.ekfAccounting57; r57 = errStruct.ekfAccountingRms57;
@@ -891,6 +1013,13 @@ classdef SimulationDataStore < handle
                 entry.gaugeRms57     = r57.gaugeRms;     entry.augRms57      = r57.augmentedRms;
                 entry.codeRms57      = r57.codeRms;      entry.carrierRms57  = r57.carrierRms;
                 entry.dopplerRms57   = r57.dopplerRms;
+                if isfield(a57,'twoWayTimeTransferNIS')
+                    entry.twoWayTimeTransferNIS57 = a57.twoWayTimeTransferNIS;
+                    entry.twoWayTimeTransferDof57 = a57.twoWayTimeTransferDof;
+                end
+                if isfield(r57,'twoWayTimeTransferRms')
+                    entry.twoWayTimeTransferRms57 = r57.twoWayTimeTransferRms;
+                end
             end
 
             % --- Carrier slip ---
@@ -1066,7 +1195,7 @@ classdef SimulationDataStore < handle
             z3mps_ = struct('truthRMS_mps',0,'modelRMS_mps',0,'mismatchRMS_mps',0);
             z3cyc_ = struct('truthRMS_cycles',0,'modelRMS_cycles',0,'mismatchRMS_cycles',0);
             cnt_ = struct('codeNoise',z3m_,'troposphere',z3m_,'ionosphere',z3m_, ...
-                'hardwareDelay',z3m_,'multipath',z3m_,'scintillationCodeNoise',z3m_, ...
+                'higherOrderIonosphere',z3m_,'hardwareDelay',z3m_,'multipath',z3m_,'scintillationCodeNoise',z3m_, ...
                 'sagnac',z3m_,'shapiro',z3m_,'towerSurvey',z3m_,'receiverPCO',z3m_, ...
                 'towerPCO',z3m_,'pcv',z3m_,'towerClock',z3m_,'correlatedCommonMode',z3m_, ...
                 'correlatedSameTower',z3m_,'correlatedIndependent',z3m_,'total',z3m_, ...
@@ -1075,7 +1204,8 @@ classdef SimulationDataStore < handle
             if ~isempty(errStruct)
                 if isfield(errStruct,'bySource') && isfield(errStruct.bySource,'truth_m')
                     bst_ = errStruct.bySource.truth_m; bsm_ = errStruct.bySource.model_m;
-                    srcMap_ = {'code','codeNoise';'trop','troposphere';'iono','ionosphere';'hwDelay','hardwareDelay';'mp','multipath'};
+                    srcMap_ = {'code','codeNoise';'trop','troposphere';'iono','ionosphere'; ...
+                               'ionoHO','higherOrderIonosphere';'hwDelay','hardwareDelay';'mp','multipath'};
                     for si_ = 1:size(srcMap_,1)
                         src_ = srcMap_{si_,1}; fld_ = srcMap_{si_,2};
                         if isfield(bst_,src_) && ~isempty(bst_.(src_))
@@ -1183,7 +1313,7 @@ classdef SimulationDataStore < handle
                 entry.diffAttRejectedRows  = 0;
             end
 
-            % --- Attitude observability audit (Stage 31) ---
+            % --- Attitude observability audit ---
             mTypeForAudit_ = {};
             if ~isempty(errStruct) && isfield(errStruct,'measType_perRow')
                 mTypeForAudit_ = errStruct.measType_perRow;
@@ -1228,6 +1358,8 @@ classdef SimulationDataStore < handle
             m.nEpochs         = obj.nEpochs;
             m.nState          = obj.nx_;
             m.nTowers         = obj.nTowers_;
+            m.nTowersPhysical = obj.nTowers_;
+            m.nTowerClockRowsStored = obj.nTowerClockRowsStored_;
             m.nReceivers      = obj.nReceivers_;
         end
 
@@ -1243,6 +1375,7 @@ classdef SimulationDataStore < handle
             fprintf('  Epochs written  : %d\n', obj.nEpochs);
             fprintf('  State dim       : %d\n', obj.nx_);
             fprintf('  nTowers         : %d\n', obj.nTowers_);
+            fprintf('  tower clk rows  : %d\n', obj.nTowerClockRowsStored_);
             fprintf('  nReceivers      : %d\n', obj.nReceivers_);
         end
 
@@ -1503,6 +1636,15 @@ classdef SimulationDataStore < handle
             v = obj.cn_NEESa_(1:obj.nEpochs);
         end
 
+        function v = getCentroidNEES(obj)   % Guard C: formation-centroid NEES/dof per epoch (NaN if no swarm)
+            if isempty(obj.cn_NEEScen_); v = nan(1,obj.nEpochs); return; end
+            v = obj.cn_NEEScen_(1:obj.nEpochs);
+        end
+        function v = getSecondaryCentroidNEES(obj)
+            if isempty(obj.cn_NEESseccen_); v = nan(1,obj.nEpochs); return; end
+            v = obj.cn_NEESseccen_(1:obj.nEpochs);
+        end
+
         function C = getNISByType(obj)
             C.code    = obj.cn_NIScod_(1:obj.nEpochs);
             C.doppler = obj.cn_NISdop_(1:obj.nEpochs);
@@ -1511,6 +1653,15 @@ classdef SimulationDataStore < handle
 
         function v = getRxClockBiasTrue(obj)
             v = obj.tr_cbs_(1:obj.nEpochs);
+        end
+
+        function v = getGyroBiasTrue(obj)
+            % [3 x N] truth gyro bias [rad/s] (all-NaN when the IMU/gyro is off).
+            v = obj.tr_bg_(:, 1:obj.nEpochs);
+        end
+        function v = getGyroBiasEstimate(obj)
+            % [3 x N] EKF-estimated gyro bias [rad/s] (all-NaN when no gyro-bias state).
+            v = obj.es_bg_(:, 1:obj.nEpochs);
         end
 
         function s = getLastAttitudeAudit(obj)
@@ -1638,11 +1789,13 @@ classdef SimulationDataStore < handle
             d.meas.nCodeRows       = obj.mc_nc_(1:N);
             d.meas.nCarrierRows    = obj.mc_ncar_(1:N);
             d.meas.nDopplerRows    = obj.mc_nd_(1:N);
+            d.meas.nTwoWayTimeTransferRows = obj.mc_ntwtt_(1:N);
             d.meas.nVisibleTowers  = obj.mc_nv_(1:N);
             d.meas.numRows         = d.meas.nRows;         % analysis alias
             d.meas.numCodeRows     = d.meas.nCodeRows;
             d.meas.numCarrierRows  = d.meas.nCarrierRows;
             d.meas.numDopplerRows  = d.meas.nDopplerRows;
+            d.meas.numTwoWayTimeTransferRows = d.meas.nTwoWayTimeTransferRows;
 
             % Residuals (dual naming for compat)
             d.residual.prefitAllRMS        = obj.rs_pfa_(1:N);
@@ -1653,17 +1806,23 @@ classdef SimulationDataStore < handle
             d.residual.postfitCarrierRMS_m = obj.rs_pocar_(1:N);
             d.residual.prefitDopplerRMS_mps= obj.rs_pfd_(1:N);
             d.residual.postfitDopplerRMS_mps=obj.rs_pod_(1:N);
+            d.residual.prefitTwoWayTimeTransferRMS_m = obj.rs_pftwtt_(1:N);
+            d.residual.postfitTwoWayTimeTransferRMS_m = obj.rs_potwtt_(1:N);
             d.residual.prefitMaxAbs        = obj.rs_pfmax_(1:N);
             d.residual.postfitMaxAbs       = obj.rs_pomax_(1:N);
             d.residual.codeRms_m           = obj.rs_pfc_(1:N);    % analysis alias
             d.residual.carrierRms_m        = obj.rs_pfcar_(1:N);
             d.residual.dopplerRms_m        = obj.rs_pfd_(1:N);
+            d.residual.twoWayTimeTransferPrefitRms_m = obj.rs_pftwtt_(1:N);
+            d.residual.twoWayTimeTransferPostfitRms_m = obj.rs_potwtt_(1:N);
+            d.residual.twoWayTimeTransferRms_m = obj.rs_potwtt_(1:N);
 
             % Consistency
             d.consistency.NIS         = obj.cn_NIS_(1:N);
             d.consistency.NIS_code    = obj.cn_NIScod_(1:N);
             d.consistency.NIS_carrier = obj.cn_NIScar_(1:N);
             d.consistency.NIS_doppler = obj.cn_NISdop_(1:N);
+            d.consistency.NIS_twoWayTimeTransfer = obj.cn_NIStwtt_(1:N);
             d.consistency.NEES_pos    = obj.cn_NEESp_(1:N);
             d.consistency.NEES_vel    = obj.cn_NEESv_(1:N);
             d.consistency.NEES_clk   = obj.cn_NEESc_(1:N);
@@ -1706,7 +1865,7 @@ classdef SimulationDataStore < handle
             d.clock.obsCondPhysical  = obj.ck_oCdP_(1:N);
             d.clock.obsCondGauged    = obj.ck_oCdG_(1:N);
 
-            % Stage 57
+            % EKF innovation accounting
             d.stage57.physicalNIS    = obj.s57_pN_(1:N);
             d.stage57.gaugeNIS       = obj.s57_gN_(1:N);
             d.stage57.augmentedNIS   = obj.s57_aN_(1:N);
@@ -1718,6 +1877,9 @@ classdef SimulationDataStore < handle
             d.stage57.codeRms        = obj.s57_cR_(1:N);
             d.stage57.carrierRms     = obj.s57_carR_(1:N);
             d.stage57.dopplerRms     = obj.s57_dR_(1:N);
+            d.stage57.twoWayTimeTransferNIS = obj.s57_twttN_(1:N);
+            d.stage57.twoWayTimeTransferDof = obj.s57_twttD_(1:N);
+            d.stage57.twoWayTimeTransferRms = obj.s57_twttR_(1:N);
 
             % Differential attitude
             d.diffAtt.active          = obj.da_act_(1:N);
@@ -1754,11 +1916,13 @@ classdef SimulationDataStore < handle
             d.perSource.code    = obj.ps_cT_(1:N);
             d.perSource.trop    = obj.ps_tT_(1:N);
             d.perSource.iono    = obj.ps_iT_(1:N);
+            d.perSource.ionoHO  = obj.ps_ihoT_(1:N);
             d.perSource.hwDelay = obj.ps_hT_(1:N);
             d.perSource.mp      = obj.ps_mT_(1:N);
             d.perSource.codeModel    = obj.ps_cM_(1:N);
             d.perSource.tropModel    = obj.ps_tM_(1:N);
             d.perSource.ionoModel    = obj.ps_iM_(1:N);
+            d.perSource.ionoHOModel  = obj.ps_ihoM_(1:N);
             d.perSource.hwDelayModel = obj.ps_hM_(1:N);
             d.perSource.mpModel      = obj.ps_mM_(1:N);
 
@@ -1767,9 +1931,34 @@ classdef SimulationDataStore < handle
 
             % Tower clocks
             if ~isempty(obj.tw_tru_)
+                d.towerClock.nPhysicalTowers = obj.nTowers_;
+                d.towerClock.nRowsStored     = obj.nTowerClockRowsStored_;
                 d.towerClock.truth_m           = obj.tw_tru_(:,1:N);
                 d.towerClock.model_m           = obj.tw_mod_(:,1:N);
                 d.towerClock.correctionError_m = obj.tw_err_(:,1:N);
+            end
+
+            % WP3 secondary-asset clocks (estimate-vs-truth bias diagnostic)
+            if ~isempty(obj.sc_estB_)
+                d.secondaryClock.est_m   = obj.sc_estB_(:,1:N);
+                d.secondaryClock.sigma_m = obj.sc_sigB_(:,1:N);
+                d.secondaryClock.truth_m = obj.sc_truB_(:,1:N);
+                d.secondaryClock.error_m = obj.sc_estB_(:,1:N) - obj.sc_truB_(:,1:N);
+            end
+
+            % P1'/WP4 secondary-asset orbit (per-satellite 3D position error + sigma)
+            if ~isempty(obj.so_posErr_)
+                d.secondaryOrbit.posError_m      = obj.so_posErr_(:,1:N);
+                d.secondaryOrbit.posSigma_m      = obj.so_posSig_(:,1:N);
+                d.secondaryOrbit.baselineError_m = obj.so_baseErr_(:,1:N);   % P5': relative (shape)
+            end
+            % Guard C: per-satellite + formation-centroid NEES (consistency gate)
+            if ~isempty(obj.so_NEESpos_)
+                d.secondaryOrbit.neesPos = obj.so_NEESpos_(:,1:N);
+                d.secondaryOrbit.neesVel = obj.so_NEESvel_(:,1:N);
+                d.secondaryOrbit.neesClk = obj.so_NEESclk_(:,1:N);
+                d.consistency.centroidNEES          = obj.cn_NEEScen_(1:N);
+                d.consistency.secondaryCentroidNEES = obj.cn_NEESseccen_(1:N);
             end
 
             % Orbit cache metadata
@@ -1797,8 +1986,10 @@ classdef SimulationDataStore < handle
             d.est_x                 = d.estimate.x;
             d.est_Pdiag             = d.estimate.Pdiag;
             d.meas_n_rows           = d.meas.nRows;
+            d.meas_twtt_n_rows      = d.meas.nTwoWayTimeTransferRows;
             d.consistency_NIS       = d.consistency.NIS;
             d.res_prefit_all_rms    = d.residual.prefitAllRMS;
+            d.res_postfit_twtt_rms_m = d.residual.postfitTwoWayTimeTransferRMS_m;
             d.geom_gdop_like        = d.geom.gdopLike;
             d.geom_pdop_like        = d.geom.pdopLike;
             d.geom_tdop_like        = d.geom.tdopLike;
@@ -1953,13 +2144,45 @@ function v = gv_(s, path, def)
     if isempty(v); v = def; end
 end
 
+function [truthPhys, modelPhys] = collapseTowerClockRows_(truthRows, modelRows, nPhysical)
+    truthRows = truthRows(:);
+    if nargin < 2 || isempty(modelRows)
+        modelRows = [];
+    else
+        modelRows = modelRows(:);
+    end
+    if numel(truthRows) == nPhysical
+        truthPhys = truthRows;
+        modelPhys = modelRows;
+        return
+    end
+    if nPhysical <= 0 || mod(numel(truthRows), nPhysical) ~= 0
+        error('SimulationDataStore:towerClockRowExpansion', ...
+            ['Tower-clock vector length %d cannot be mapped to %d physical towers. ' ...
+             'Provide physical tower clocks or an expanded length divisible by the physical count.'], ...
+            numel(truthRows), nPhysical);
+    end
+    truthPhys = mean(reshape(truthRows, nPhysical, []), 2, 'omitnan');
+    if isempty(modelRows)
+        modelPhys = [];
+        return
+    end
+    if numel(modelRows) ~= numel(truthRows)
+        error('SimulationDataStore:towerClockModelExpansion', ...
+            'Tower-clock model length %d does not match truth length %d.', ...
+            numel(modelRows), numel(truthRows));
+    end
+    modelPhys = mean(reshape(modelRows, nPhysical, []), 2, 'omitnan');
+end
+
 function ef = makeEffStruct_(N)
     n1  = @() nan(N,1);
     z3m = struct('truthRMS_m',n1(),'modelRMS_m',n1(),'mismatchRMS_m',n1());
     z3d = struct('truthRMS_mps',n1(),'modelRMS_mps',n1(),'mismatchRMS_mps',n1());
     z3c = struct('truthRMS_cycles',n1(),'modelRMS_cycles',n1(),'mismatchRMS_cycles',n1());
     ef.codeNoise             = z3m; ef.troposphere           = z3m;
-    ef.ionosphere            = z3m; ef.hardwareDelay         = z3m;
+    ef.ionosphere            = z3m; ef.higherOrderIonosphere = z3m;
+    ef.hardwareDelay         = z3m;
     ef.multipath             = z3m; ef.scintillationCodeNoise= z3m;
     ef.sagnac                = z3m; ef.shapiro               = z3m;
     ef.towerSurvey           = z3m; ef.receiverPCO           = z3m;

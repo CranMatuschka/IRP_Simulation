@@ -8,7 +8,7 @@ classdef StageHistory
     % renders these strings (via ReportStatus) as historical record and the
     % test_stage60-63 tests assert specific entries, so the exposed strings are frozen —
     % but they are documentation, not architecture. Report-section rendering is gated by
-    % feature predicates, not by these stage entries (see the C-7 demotion, Phase 8).
+    % feature predicates, not by these stage entries (see the C-7 demotion).
     %
     % Separates stage-history bookkeeping from runtime source-truth in ReportStatus.
     % ReportStatus.current() delegates to this class for long list fields.

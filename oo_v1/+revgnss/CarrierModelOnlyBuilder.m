@@ -1,7 +1,7 @@
 classdef CarrierModelOnlyBuilder
     % CarrierModelOnlyBuilder  Recomputes carrier h with an updated EKF state.
     %
-    % Extracted from MeasurementModel.computeCarrierModelOnly (Stage 12A.2).
+    % Extracted from MeasurementModel.computeCarrierModelOnly.
     % All physics are preserved exactly — pure structural refactor.
     %
     % Used by ReverseGNSSSimulation.computePostfitResiduals_ to produce true

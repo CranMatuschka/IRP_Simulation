@@ -47,6 +47,25 @@ classdef ReportRealityHelper
             if isfield(cfg, 'estimator') && isfield(cfg.estimator, 'estimateTowerClocks') && cfg.estimator.estimateTowerClocks
                 expectedStates = expectedStates + 2*nTwr;
             end
+            % IMU/MEKF gyro-bias states (3), appended only when the gyro is enabled (default off).
+            imuOn = false;
+            try
+                imuOn = (isfield(cfg.estimator,'estimateGyroBias') && cfg.estimator.estimateGyroBias) || ...
+                        (isfield(cfg.estimator,'imu') && isfield(cfg.estimator.imu,'enable') && cfg.estimator.imu.enable);
+            catch; end
+            if imuOn
+                expectedStates = expectedStates + 3;
+            end
+            % SRP scale-coefficient state (1, primary), gated enable && useInEKF (default off -> +0
+            % -> byte-identical). Mirrors the ReverseGNSSEKF constructor gate exactly.
+            srpOn = false;
+            try
+                sc_ = cfg.estimator.srpCoefficient;
+                srpOn = isfield(sc_,'enable') && sc_.enable && isfield(sc_,'useInEKF') && sc_.useInEKF;
+            catch; end
+            if srpOn
+                expectedStates = expectedStates + 1;
+            end
             nStates = revgnss.ReportRealityHelper.safeField_(summary, 'nStates', NaN);
             if isfinite(nStates) && nStates ~= expectedStates
                 error('ClockExactReportBuilder:stateTableCountMismatch', ...
@@ -263,7 +282,7 @@ classdef ReportRealityHelper
         end
 
         function validateTwstft_(cfg, summary)
-            % validateTwstft_  Stage 24 TWSTFT diagnostic reality checks.
+            % validateTwstft_  TWSTFT diagnostic reality checks.
             td = revgnss.ReportRealityHelper.safeField_(summary, 'twstftDiag', struct());
             twEnabled = revgnss.ReportRealityHelper.getCfgBool_(cfg, {'measurements','twstft','enable'}, false);
             if ~twEnabled; return; end

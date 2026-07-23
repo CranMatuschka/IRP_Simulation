@@ -1,7 +1,7 @@
 classdef LinkGeometry
     % LinkGeometry  Shared measurement geometry and Jacobian helpers.
     %
-    % Stage 56: consolidates duplicated code/carrier geometry and Jacobian
+    % Consolidates duplicated code/carrier geometry and Jacobian
     % logic into a single shared helper. CodeJacobianBuilder and
     % CarrierMeasurementBuilder both use this class for tower position,
     % receiver antenna position, analytic LOS Jacobians, and finite-difference
@@ -142,7 +142,7 @@ classdef LinkGeometry
             %
             % observableKind: 'code' | 'carrier' | 'doppler'
             %
-            % Preferred (Stage 56): cfg.estimator.attitude.use<Kind>Partials
+            % Preferred: cfg.estimator.attitude.use<Kind>Partials
             % Legacy fallback: cfg.estimator.estimateAttitude &&
             %                  cfg.estimator.estimateAttitudeFromPseudorange
             %   -> enables code and carrier via compatibility path.
@@ -153,7 +153,7 @@ classdef LinkGeometry
             s.warning = '';
             kind = lower(observableKind);
 
-            % Preferred: cfg.estimator.attitude.use<Kind>Partials (Stage 56)
+            % Preferred: cfg.estimator.attitude.use<Kind>Partials
             if isfield(cfg,'estimator') && isfield(cfg.estimator,'attitude')
                 att = cfg.estimator.attitude;
                 switch kind

@@ -39,10 +39,8 @@ classdef GeometryUtils
             los = r_target_ecef(:) - r_obs_ecef(:);
             los_norm = los / norm(los);
 
-            % Local ENU unit vectors
+            % Local up (zenith) unit vector; only the up component sets elevation.
             up  = [ cos(lat)*cos(lon); cos(lat)*sin(lon); sin(lat)];
-            east = [-sin(lon); cos(lon); 0];
-            north= [-sin(lat)*cos(lon); -sin(lat)*sin(lon); cos(lat)];
 
             up_comp = dot(los_norm, up);
             elev_rad = asin(up_comp);

@@ -1,5 +1,5 @@
 classdef ValidationSummary
-    % ValidationSummary  Write and read Stage 24 validation summary artifacts.
+    % ValidationSummary  Write and read validation summary artifacts.
     %
     % Writes two artifacts to outDir:
     %   latest_validation_summary.json  — machine-readable full summary

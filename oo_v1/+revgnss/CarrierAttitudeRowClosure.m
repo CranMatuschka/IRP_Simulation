@@ -1,5 +1,5 @@
 classdef CarrierAttitudeRowClosure
-    % CarrierAttitudeRowClosure  Stage 60 carrier-attitude row consistency helper.
+    % CarrierAttitudeRowClosure  carrier-attitude row consistency helper.
     %
     % Verifies that carrier attitude EKF rows use consistent receiver-antenna
     % geometry for h and H, and checks attitude Jacobian columns against
@@ -8,7 +8,7 @@ classdef CarrierAttitudeRowClosure
     % No new physics. No integer fixing. No quaternion/error-state EKF.
     % Delegates all geometry and FD computations to LinkGeometry.
     %
-    % Used by: ReportRunner (Stage 60 closure spot-check), test_stage60.
+    % Used by: ReportRunner (closure spot-check), test_stage60.
 
     methods (Static)
 
@@ -154,8 +154,8 @@ classdef CarrierAttitudeRowClosure
 
         function s = spotCheck(cfg, towers, stateMap, r_final, euler_final)
             % spotCheck  Run compareRow on tower 1 / antenna 1 using supplied state.
-            %   Returns compact summary for Stage 60/61 report fields.
-            %   Stage 61: adds stage61CarrierClosureUsesErrorStateJacobian field.
+            %   Returns compact summary for report fields.
+            %   Adds stage61CarrierClosureUsesErrorStateJacobian field.
             s.rowsChecked = 0;
             s.rowsClosed  = 0;
             s.rowsMismatch = 0;
@@ -163,7 +163,7 @@ classdef CarrierAttitudeRowClosure
             s.meanAbsDiff = NaN;
             s.metadataConsistent = false;
             s.classification = 'unavailable';
-            % Stage 61: detect parameterization mode for classification suffix
+            % Detect parameterization mode for classification suffix
             useQES = false;
             try; useQES = strcmp(cfg.estimator.attitude.parameterization,'quaternionErrorState'); catch; end
             s.stage61CarrierClosureUsesErrorStateJacobian = useQES;
@@ -199,7 +199,7 @@ classdef CarrierAttitudeRowClosure
                 end
                 if s.rowsChecked > 0 && s.rowsMismatch == 0
                     s.metadataConsistent = true;
-                    % Stage 61: suffix classification when using error-state Jacobian
+                    % Suffix classification when using error-state Jacobian
                     if useQES
                         s.classification = 'closed-quaternion-error-state';
                     else

@@ -5,9 +5,7 @@ classdef ConsistencyStatistics
     % object and returns grouped status assessments.
     %
     % Scientific caveat: results are labelled partialCovarianceAwareSynthetic.
-    % They are consistency evidence, not real-world proof.  See Stage 85 spec.
-    %
-    % Stage 85.
+    % They are consistency evidence, not real-world proof.
 
     methods (Static)
 

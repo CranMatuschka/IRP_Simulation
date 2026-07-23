@@ -33,8 +33,8 @@ end
 warning(wS1);
 assert(~threwErr1, 'T1 FAILED: smoke run threw an error');
 
-sepVec1  = logical([out1.diag.log.attitudeSeparable]);
-corrVec1 = double([out1.diag.log.attitudeAmbCorrMaxAbs]);
+sepVec1  = logical(out1.simData.getAttitudeSeparable());
+corrVec1 = double(out1.simData.getAttitudeAmbCorrMaxAbs());
 assert(~any(sepVec1), ...
     'T1 FAILED: attitudeSeparable=true in %d epoch(s); expected false for free float EKF', ...
     sum(sepVec1));
@@ -82,7 +82,7 @@ end
 warning(wS3);
 assert(~threwErr3, 'T3 FAILED: smoke run threw an error');
 
-sepVec3 = logical([out3.diag.log.attitudeSeparable]);
+sepVec3 = logical(out3.simData.getAttitudeSeparable());
 assert(~any(sepVec3), 'T3 FAILED: attitudeSeparable=true for nRx=1 (zero lever arm)');
 cls3 = out3.summary.attitudeObsClass;
 assert(strcmp(cls3,'UNOBSERVABLE'), ...

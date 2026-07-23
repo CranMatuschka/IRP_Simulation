@@ -1,0 +1,84 @@
+{
+  "scenario": {
+    "name": "G5S6R4_TW0_realism_point34",
+    "nTowers": 5,
+    "nSpaceAssets": 6,
+    "nReceivers": 4
+  },
+  "simulation": {
+    "duration_s": 3600
+  },
+  "realism": {
+    "grade": true
+  },
+  "measurements": {
+    "twoWayTimeTransfer": {
+      "enable": false,
+      "useInEKF": false
+    },
+    "twstft": {
+      "enable": false,
+      "code": {
+        "enable": false,
+        "useInEKF": false
+      }
+    }
+  },
+  "carrierSlip": {
+    "commonModeCompensation": {
+      "enable": true,
+      "minRows": 4
+    },
+    "baselineDifferencedMode": {
+      "enable": true,
+      "referenceAntenna": 1
+    }
+  },
+  "estimator": {
+    "interAntennaCarrierBias": {
+      "enable": true,
+      "mode": "fixedKnown",
+      "referenceReceiver": 1,
+      "bias_cycles": [
+        [0.0, 0.0],
+        [-0.409113663304464, 0.0862843653898619],
+        [0.172994174137485, -0.0900765134181414],
+        [-0.32344242625433, 0.00815807521237391]
+      ]
+    },
+    "diffAtt": {
+      "ambiguityResolution": {
+        "enforcePhaseBiasStatus": true,
+        "requirePhaseBiasCalibrationForFix": true
+      }
+    }
+  },
+  "report": {
+    "runVersion": "point34",
+    "oscillatorValidationMode": "allanOnly",
+    "kabschAlignmentPlot": {
+      "enable": true
+    }
+  },
+  "multiAsset": {
+    "twoWayISL": {
+      "enable": true,
+      "links": "all",
+      "sigma_m": 0.01,
+      "delayCal": {
+        "sigma_const_m": 0.01,
+        "sigma_rw_m": 0.003,
+        "tau_s": 3600,
+        "nCorrCap": 60
+      }
+    },
+    "twoWayTimeTransferISL": {
+      "enable": true
+    },
+    "federated": {
+      "refAsset": 1,
+      "savePerAssetMat": false,
+      "parallel": true
+    }
+  }
+}

@@ -1,5 +1,5 @@
 classdef OrbitDiagnostics
-    % OrbitDiagnostics  Stage 28 orbit dynamics diagnostic helpers.
+    % OrbitDiagnostics  Orbit dynamics diagnostic helpers.
     %
     % Static helper methods for comparing orbit propagation modes and
     % summarising dynamic properties of a given orbit configuration.

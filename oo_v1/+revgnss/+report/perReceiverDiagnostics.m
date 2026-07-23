@@ -1,5 +1,5 @@
 function perReceiverDiagnostics(fid, plotPaths, stem, figDir, nRx)
-%PERRECEIVERDIAGNOSTICS  "Per-Receiver Measurement Diagnostics" report section (Phase 7).
+%PERRECEIVERDIAGNOSTICS  "Per-Receiver Measurement Diagnostics" report section.
 %   Extracted verbatim from ClockExactReportBuilder.writePerReceiverDiagnostics_ as part
 %   of the C-9 report decomposition. Read-only: consumes only the precomputed plotPaths
 %   + figure dir and the (now-public) ClockExactReportBuilder formatting toolkit. The

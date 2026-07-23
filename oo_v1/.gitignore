@@ -8,5 +8,7 @@ output/notion_stage*.md
 !tests/regression/golden/*.mat
 # Phase-7 report .tex byte-diff reference (overrides the repo-root "*.txt" ignore).
 !tests/report/golden_report_tex.txt
+# User-facing scenario overlays — committed on purpose (overrides the repo-root "*.json" ignore).
+!config/scenarios/*.json
 tests/regression/full_gate_marker.txt
 tests/regression/verify_report_marker.txt

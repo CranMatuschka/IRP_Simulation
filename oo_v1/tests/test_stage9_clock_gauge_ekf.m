@@ -92,7 +92,7 @@ assert(~isempty(gaugePos), ...
 fprintf('    PASS (gauge rows added: %d per update epoch)\n', gaugePos(1));
 
 fprintf('  T-P9e: fixReferenceTower → clock subspace rank finite ...\n');
-clkRank_fix = sim_fix.diag.getClockSubspaceRank();
+clkRank_fix = sim_fix.diag.getClockObsRankGauged();
 validRank   = clkRank_fix(isfinite(clkRank_fix) & clkRank_fix > 0);
 assert(~isempty(validRank), ...
     'T-P9e FAILED: clock subspace rank is all NaN/0 for fixReferenceTower');
@@ -134,7 +134,7 @@ assert(~isempty(gaugePosM), ...
 fprintf('    PASS (gauge rows added: %d per update epoch)\n', gaugePosM(1));
 
 fprintf('  T-P9g: meanGroundClockGauge → clock subspace rank finite ...\n');
-clkRank_mean = sim_mean.diag.getClockSubspaceRank();
+clkRank_mean = sim_mean.diag.getClockObsRankGauged();
 validRankM   = clkRank_mean(isfinite(clkRank_mean) & clkRank_mean > 0);
 assert(~isempty(validRankM), ...
     'T-P9g FAILED: clock subspace rank is all NaN/0 for meanGroundClockGauge');

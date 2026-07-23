@@ -1,7 +1,7 @@
 classdef AllanDeviation
     % AllanDeviation  Overlapping Allan deviation estimator for clock stability.
     %
-    % Stage 67: provides ADEV profiles for asset receiver clock and tower
+    % Provides ADEV profiles for asset receiver clock and tower
     % transmitter clocks from the diagnostic truth-bias time series.
     %
     % Usage:

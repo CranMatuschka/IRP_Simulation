@@ -1,5 +1,5 @@
 classdef IonosphereFreeCombinationDiagnostics
-    % IonosphereFreeCombinationDiagnostics  Stage 43 diagnostic-only L1/L2 IF analysis.
+    % IonosphereFreeCombinationDiagnostics diagnostic-only L1/L2 IF analysis.
     %
     % Computes ionosphere-free (IF) combination coefficients, first-order
     % ionosphere cancellation checks, noise amplification, and carrier

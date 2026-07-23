@@ -9,7 +9,23 @@ addpath(rootDir); addpath(fullfile(rootDir, 'config'));
 
 fprintf('=== test_isl_swarm ===\n');
 
-cfg = masterConfig();                 % 6-asset swarm, ISL auto-configured
+cfg = masterConfig();
+% masterConfig wires the ISL swarm (incl. product-covariance-in-R) from ITS OWN
+% cfg.scenario.nSpaceAssets value at construction time; overriding nSpaceAssets
+% AFTER masterConfig() does NOT re-run that gate. Mirror the FULL helix-swarm
+% ISL block here (run_ladder.m i_buildCfg 'else' branch), otherwise the swarm
+% is built as truth but the product-uncertainty aiding never reaches R.
+cfg.scenario.nSpaceAssets = 6;        % force the 6-asset swarm (default is 1 = ground-only)
+cfg.measurements.isl.enable = true;
+cfg.measurements.isl.transmitters = 'all';
+cfg.measurements.isl.receiverAssetIndex = 1;
+cfg.measurements.isl.code.enable = true;
+cfg.measurements.isl.code.useInEKF = true;
+cfg.measurements.isl.doppler.enable = true;
+cfg.measurements.isl.doppler.useInEKF = true;
+cfg.measurements.isl.product.enable = true;
+cfg.measurements.isl.product.sigmaPos_m   = 0.03;   % ~3 cm SLR-class reference orbit
+cfg.measurements.isl.product.sigmaClock_m = 0.02;   % ~67 ps reference clock product
 cfg.simulation.duration_s = 5;
 cfg.report.writePdf = false; cfg.report.writeMat = false; cfg.report.compileTex = 'never';
 cfg.plots.showFigures = false;

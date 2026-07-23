@@ -16,7 +16,7 @@ classdef ClockModel < handle
     %   WPM:   sigma_y(tau) ~ tau^(-1)
     %   FPM:   sigma_y(tau) ~ tau^(-1)   (different coefficient)
     %   WFM:   sigma_y(tau) ~ tau^(-1/2)
-    %   FFM:   sigma_y(tau) ~ tau^0      (floor)
+    %   FFM:   sigma_y(tau) ~ tau^0       (floor)
     %   RWFM:  sigma_y(tau) ~ tau^(+1/2)
     %
     % -----------------------------------------------------------------------
@@ -77,6 +77,14 @@ classdef ClockModel < handle
         bias_s          (1,1) double  = 0   % WFM+RWFM clock time bias [s]
         fracFreq        (1,1) double  = 0   % RWFM fractional frequency error [-]
         driftRate_fracPerSec (1,1) double = 0  % deterministic frequency drift [1/s^2]
+        relativisticFracFreq (1,1) double = 0  % Constant relativistic fractional-frequency
+                                               % offset [-] (gated, default 0). Added to the phase
+                                               % (bias) increment each step so it accumulates as a
+                                               % LINEAR clock-bias ramp; deliberately NOT part of
+                                               % fracFreq, so it is excluded from getFractional-
+                                               % Frequency()/getDriftMetersPerSecond() and reaches
+                                               % the truth pseudorange as an (initially) unmodelled
+                                               % relativistic clock-rate signature.
 
         % Noise configuration
         noiseCoeffs     (1,1) struct        % h2, h1, h0, hMinus1, hMinus2
@@ -125,6 +133,7 @@ classdef ClockModel < handle
             if isfield(cfg,'bias_s');                obj.bias_s               = cfg.bias_s;               end
             if isfield(cfg,'fracFreq');              obj.fracFreq             = cfg.fracFreq;             end
             if isfield(cfg,'driftRate_fracPerSec'); obj.driftRate_fracPerSec = cfg.driftRate_fracPerSec; end
+            if isfield(cfg,'relativisticFracFreq'); obj.relativisticFracFreq = cfg.relativisticFracFreq; end
 
             % Dedicated RNG stream — independent of global rand state
             obj.rngStream = RandStream('mt19937ar', 'Seed', obj.seed);
@@ -270,7 +279,10 @@ classdef ClockModel < handle
             % If index exceeds array, colored component keeps its last value.
 
             % Propagate WFM+RWFM bias state
-            new_bias_s = obj.bias_s + dt_s * obj.fracFreq + n_bias_wfm;
+            % WP-D: add the (gated) constant relativistic fractional-frequency offset to the
+            % phase increment so the clock bias accumulates a LINEAR relativistic ramp
+            % (c*relativisticFracFreq [m/s]); default 0 -> unchanged / golden byte-identical.
+            new_bias_s = obj.bias_s + dt_s * (obj.fracFreq + obj.relativisticFracFreq) + n_bias_wfm;
 
             % Propagate RWFM fractional-frequency state
             new_frac = obj.fracFreq + det_drift_frac + dn_freq_rwfm;
@@ -323,7 +335,6 @@ classdef ClockModel < handle
 
         function x = getStateVectorMeters(obj)
             % getStateVectorMeters  [bias_m; drift_mps] from TOTAL output.
-            c = revgnss.Constants.SPEED_OF_LIGHT_MPS;
             x = [obj.getBiasMeters(); obj.getDriftMetersPerSecond()];
         end
 
@@ -356,6 +367,12 @@ classdef ClockModel < handle
             % leaves the actual-error/filter-sigma ratio unchanged, so it does NOT
             % restore drift +/-3sigma consistency (that is an R / observability issue,
             % not a process-noise magnitude issue). Kept as an opt-in lever.
+            % ROOT CAUSE: for the CESIUM1 receiver the drift wander (~1e-6 m/s per
+            % step) is 3-4 decades below the Doppler resolution (sigma ~0.01 m/s), so
+            % bdot_rx is measurement-limited and its +/-3sigma envelope reflects Q, not
+            % information -- a FUNDAMENTAL observability limit, not a Q bug. The report
+            % surfaces the empirical drift +/-3sigma coverage (Plotter Fig 06,
+            % revgnss.Plotter.driftCoverage) so the limit is measured, not just asserted.
             %
             % WPM (h2) and FPM (h1) are excluded from Q: they affect
             % timescales << dt and are represented in the truth model only.
@@ -439,11 +456,18 @@ classdef ClockModel < handle
             tau  = tauVec_s(:);
             var_y = zeros(size(tau));
 
+            % NOTE: WPM/FPM terms omit the high-cutoff-frequency (f_h) factors
+            % (WPM propto 3*f_h; FPM propto [1.038 + 3 ln(2 pi f_h tau)]); this
+            % overlay is a magnitude approximation for those two branches.
             var_y = var_y + 3 * h.h2 ./ (4*pi^2 * tau.^2);          % WPM
             var_y = var_y + 1.038 * h.h1 ./ (4*pi^2 * tau.^2);      % FPM
             var_y = var_y + h.h0 ./ (2 * tau);                       % WFM
             var_y = var_y + 2 * log(2) * h.hMinus1;                  % FFM (floor)
-            var_y = var_y + (8*pi^2/6) * h.hMinus2 .* tau;           % RWFM
+            % RWFM: IEEE-1139 Allan VARIANCE is (2*pi^2/3) h_-2 tau. This matches the
+            % code's own process noise (q2 = 2*pi^2 h_-2) and RWFM truth synthesis
+            % (sigma = sqrt(2*pi^2 h_-2 dt)); the previous 8*pi^2/6 = 4*pi^2/3 was 2x
+            % too large in variance (sqrt(2) in deviation).
+            var_y = var_y + (2*pi^2/3) * h.hMinus2 .* tau;           % RWFM
 
             adev_th = sqrt(max(var_y, 0));
         end

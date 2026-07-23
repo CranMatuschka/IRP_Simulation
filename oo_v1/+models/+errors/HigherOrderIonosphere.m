@@ -1,6 +1,6 @@
 classdef HigherOrderIonosphere
     % HigherOrderIonosphere  Second- and third-order ionospheric delay residuals
-    % (WP6, Branch A: bounded-residual model, not a full ray-traced STECxB computation).
+    % (Bounded-residual model, not a full ray-traced STECxB computation).
     %
     % The dual-frequency ionosphere-free (L3) combination removes ~99.9% of the
     % ionospheric delay by cancelling the first-order 40.3*TEC/f^2 term, but the

@@ -263,14 +263,14 @@ assert(~cfg10_fin.measurements.doppler.useInEKF, ...
 fprintf('    doppler.useInEKF=false after finalization, no throw: PASS\n');
 
 % ----------------------------------------------------------------
-% T11: ISL stub returns empty z, h, H (not implemented)
+% T11: legacy ISL helper returns empty z, h, H
 % ----------------------------------------------------------------
-fprintf('  T11: ISL stub returns empty z, h, H (not implemented) ...\n');
+fprintf('  T11: legacy ISL helper returns empty z, h, H ...\n');
 
 [z11, h11, H11] = models.measurements.MeasurementModelUtils.computeISLMeasurements([], [], [], []);
 assert(isempty(z11), 'T11 FAILED: z_isl should be empty');
 assert(isempty(h11), 'T11 FAILED: h_isl should be empty');
 assert(size(H11,1) == 0, 'T11 FAILED: H_isl should have 0 rows');
-fprintf('    ISL stub: z=[], h=[], H=[0x0] (not implemented): PASS\n');
+fprintf('    legacy ISL helper: z=[], h=[], H=[0x0]: PASS\n');
 
 fprintf('=== test_stage7a2_policy_fixes: ALL PASS ===\n');

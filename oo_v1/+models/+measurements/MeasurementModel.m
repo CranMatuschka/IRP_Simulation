@@ -40,7 +40,7 @@ classdef MeasurementModel < handle
         attitudeJacStep_rad (1,1) double = 1e-6
         ambiguityMap                       % containers.Map: (tower*1000+antenna) → integer N (diagnostic)
         floatAmbiguityTruth_m              % containers.Map: (tower*1000+ant) → float B_phi [m] (ekfFloat)
-        rngCorr                            % RandStream for correlated noise (Stage 4)
+        rngCorr                            % RandStream for correlated noise
     end
 
     methods
@@ -55,7 +55,7 @@ classdef MeasurementModel < handle
             if isfield(cfg.estimator,'attitudeJacobianStep_rad')
                 obj.attitudeJacStep_rad = cfg.estimator.attitudeJacobianStep_rad;
             end
-            % Stage 4: correlated noise RNG
+            % Correlated noise RNG
             if isfield(cfg,'effects') && isfield(cfg.effects,'correlatedNoise') && ...
                     isfield(cfg.effects.correlatedNoise,'seed')
                 obj.rngCorr = RandStream('mt19937ar','Seed', cfg.effects.correlatedNoise.seed);
@@ -76,11 +76,18 @@ classdef MeasurementModel < handle
 
         % ----------------------------------------------------------------
         function [z, h, H, R, errStruct] = computeMeasurements(obj, ...
-                asset, towers, x_est, t_s, stateMap)
+                asset, towers, x_est, t_s, stateMap, assetIdx)
             % computeMeasurements  Main measurement function (multi-antenna capable).
             %
             % Loops over all visible (tower, antenna) pairs.  Default config has
             % N_ant=1 with a zero lever arm, recovering the single-antenna case.
+            %
+            % assetIdx (optional, default 1): which satellite this call measures (chief=1).
+            % Phase 3b-1: per-asset indices are resolved via AssetStateBlock.forAsset and threaded
+            % down to the Code/Carrier builders; at assetIdx=1 the block aliases the chief stateMap
+            % fields exactly, so this is byte-identical.
+            if nargin < 7 || isempty(assetIdx); assetIdx = 1; end
+            blk = revgnss.AssetStateBlock.forAsset(stateMap, assetIdx);
 
             % ----- All lever arms (3 x N_ant) --------------------------
             leverArms = asset.receiverLeverArms_body_m;
@@ -89,15 +96,13 @@ classdef MeasurementModel < handle
             % ----- Truth state -----------------------------------------
             r_cm_true  = asset.r_ecef_m;
             euler_true = asset.attitude_euler_rad;
-            b_rx_true  = asset.clock.getBiasMeters();
 
             % ----- EKF state extraction --------------------------------
-            r_est     = x_est(stateMap.r_idx);
-            euler_est = x_est(stateMap.euler_idx);
-            b_rx_est  = x_est(stateMap.b_rx_idx);
+            r_est     = x_est(blk.r);
+            euler_est = revgnss.AssetStateBlock.eulerEst(blk, x_est);
 
             % ----- Effective lever arms with PCO offset ----------------
-            % Stage 3: receiverOffset_body_m is extra common body-frame offset
+            % receiverOffset_body_m is extra common body-frame offset
             % added to all antennas on truth/model side independently.
             leverArms_truth = leverArms;
             leverArms_model = leverArms;
@@ -105,6 +110,14 @@ classdef MeasurementModel < handle
                 pco = obj.cfg.effects.antennaPCO;
                 if isfield(pco,'truth') && pco.truth.enable
                     off = pco.receiverOffset_body_m(:);
+                    % Optional gated truth-only PCO calibration residual -- an antenna
+                    % phase-centre mis-calibration the estimator does NOT know (the model side
+                    % below is unchanged), so it survives z-h as a real imperfection rather than
+                    % cancelling. Default off -> off unchanged -> golden byte-identical.
+                    if isfield(pco,'calibrationResidual') && isfield(pco.calibrationResidual,'enable') && ...
+                            pco.calibrationResidual.enable && isfield(pco.calibrationResidual,'receiverOffset_body_m')
+                        off = off + pco.calibrationResidual.receiverOffset_body_m(:);
+                    end
                     leverArms_truth = leverArms + off * ones(1, N_ant);
                 end
                 if isfield(pco,'model') && pco.model.enable
@@ -149,7 +162,7 @@ classdef MeasurementModel < handle
 
             % ----- Error chain (per measurement) -----------------------
             towerIds = arrayfun(@(ti) towers{ti}.id, twr_list);
-            % WP5: pass ant_list so coloured multipath can key its GM state per link.
+            % Pass ant_list so coloured multipath can key its GM state per link.
             errStruct = obj.errorChain.compute(elv_list, towerIds, twr_list, t_s, ant_list);
 
             % ----- Tower clock corrections — generated ONCE per epoch --
@@ -180,23 +193,23 @@ classdef MeasurementModel < handle
                     twr_list, ant_list, elv_list, leverArms, leverArms_model, ...
                     r_ants_truth, r_ants_est, x_est, stateMap, ...
                     towerClkTruth, towerClkModel, towerClkSigma, towerClkMode, t_prod, ...
-                    errStruct, t_s);
+                    errStruct, t_s, assetIdx);
 
 
             % ----- Jacobian H (pseudorange) ----------------------------
             H_pr = models.measurements.CodeJacobianBuilder.build( ...
                 obj.cfg, obj.attitudeJacStep_rad, towers, twr_list, ant_list, ...
-                r_est, euler_est, leverArms_model, x_est, stateMap, nx);
+                r_est, euler_est, leverArms_model, x_est, stateMap, nx, assetIdx);
 
             % ZWD Jacobian columns (perTowerZwd): H(mi, zwdIdx(ti)) = mf(elv)
-            if isfield(stateMap,'zwdIdx') && ~isempty(stateMap.zwdIdx)
+            if isfield(stateMap,'zwdIdx') && ~isempty(blk.zwd)
                 mfKind = models.measurements.MeasurementModelUtils.zwdMappingKind(obj.cfg);
                 for mi_z = 1:M
                     ti_z = twr_list(mi_z);
-                    if ti_z <= numel(stateMap.zwdIdx) && stateMap.zwdIdx(ti_z) > 0
+                    if ti_z <= numel(blk.zwd) && blk.zwd(ti_z) > 0
                         mf_z = models.atmosphere.MappingFunctions.troposphere( ...
                             errStruct.elevations_rad(mi_z), mfKind);
-                        H_pr(mi_z, stateMap.zwdIdx(ti_z)) = mf_z;
+                        H_pr(mi_z, blk.zwd(ti_z)) = mf_z;
                     end
                 end
             end
@@ -211,7 +224,7 @@ classdef MeasurementModel < handle
             % estimateIono path (dispersion present) or the golden (no iono state).
             hasDispersion_io = false;
             try; hasDispersion_io = revgnss.SignalConfigResolver.hasL2(obj.cfg); catch; end
-            if hasDispersion_io && isfield(stateMap,'ionoIdx') && ~isempty(stateMap.ionoIdx) && any(stateMap.ionoIdx > 0)
+            if hasDispersion_io && isfield(stateMap,'ionoIdx') && ~isempty(blk.iono) && any(blk.iono > 0)
                 f_L1_io = revgnss.SignalDefinition.get('L1').frequency_Hz;
                 if isfield(obj.cfg,'signals') && isfield(obj.cfg.signals,'L1') && ...
                         isfield(obj.cfg.signals.L1,'frequency_Hz')
@@ -219,12 +232,12 @@ classdef MeasurementModel < handle
                 end
                 for mi_i = 1:M
                     ti_i = twr_list(mi_i);
-                    if ti_i <= numel(stateMap.ionoIdx) && stateMap.ionoIdx(ti_i) > 0
+                    if ti_i <= numel(blk.iono) && blk.iono(ti_i) > 0
                         f_row = f_L1_io;
                         if isfield(errStruct,'frequencyHz_perMeas') && mi_i <= numel(errStruct.frequencyHz_perMeas)
                             f_row = errStruct.frequencyHz_perMeas(mi_i);
                         end
-                        H_pr(mi_i, stateMap.ionoIdx(ti_i)) = (f_L1_io / f_row)^2;
+                        H_pr(mi_i, blk.iono(ti_i)) = (f_L1_io / f_row)^2;
                     end
                 end
             end
@@ -232,7 +245,7 @@ classdef MeasurementModel < handle
             % ----- Doppler rows (0.5 + 0.6) ----------------------------
             [dopplerRows, dopplerInfo] = models.measurements.DopplerMeasurementBuilder.build( ...
                 obj.cfg, obj.errorChain, asset, towers, twr_list, ant_list, ...
-                r_ants_truth, r_ants_est, x_est, stateMap, towerClkMode, t_s);
+                r_ants_truth, r_ants_est, x_est, stateMap, towerClkMode, t_s, assetIdx);
             errStruct.doppler = dopplerInfo;
             if dopplerRows.ionoRateExclusion
                 H = H_pr;
@@ -274,7 +287,7 @@ classdef MeasurementModel < handle
                         obj.cfg, obj.errorChain, obj.floatAmbiguityTruth_m, ...
                         asset, towers, twr_list(1:M_pairs_c), ant_list(1:M_pairs_c), ...
                         r_ants_truth, r_ants_est, leverArms_model, x_est, stateMap, nx, ...
-                        errStruct, towerClkTruth, towerClkModel, towerClkSigma, t_s);
+                        errStruct, towerClkTruth, towerClkModel, towerClkSigma, t_s, assetIdx);
                     if ~isempty(z_phi)
                         z = [z; z_phi];
                         h = [h; h_phi];
@@ -303,7 +316,7 @@ classdef MeasurementModel < handle
                     errStruct.carrierPhase = struct();
             end
 
-            % Stage 86: restore cross-observable covariance for shared clock
+            % Restore cross-observable covariance for shared clock
             % product errors after code/Doppler/carrier rows have been stacked.
             [R, stackCovInfo] = models.clocks.ProductClockCovarianceBuilder.addSharedProductClockStack( ...
                 R, errStruct, obj.cfg);
@@ -334,7 +347,7 @@ classdef MeasurementModel < handle
 
     methods (Static)
 
-        % Implementations live in MeasurementModelUtils (Stage 12A.2).
+        % Implementations live in MeasurementModelUtils.
         % These one-line wrappers preserve backward compatibility.
 
         function varargout = computeISLMeasurements(varargin)

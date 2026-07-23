@@ -236,7 +236,7 @@ didThrow11 = false;
 try
     out11 = revgnss.ReportRunner.runSingle(cfg11);
     assert(isfield(out11,'sim'),  'T11 FAILED: runSingle missing sim field');
-    assert(isfield(out11,'diag'),'T11 FAILED: runSingle missing diag field');
+    assert(isfield(out11,'simData'),'T11 FAILED: runSingle missing simData field');
 catch ME11
     didThrow11 = true;
     fprintf('    UNEXPECTED ERROR: %s\n', ME11.message);
@@ -260,7 +260,7 @@ cfg12.plots.enable          = false;
 out12 = revgnss.ReportRunner.runSingle(cfg12);
 
 [figs12, ~] = revgnss.LatexReportBuilder.build( ...
-    out12.diag, out12.sim.asset, out12.sim.towers, out12.cfg, out12.summary);
+    out12.simData, out12.sim.asset, out12.sim.towers, out12.cfg, out12.summary);
 
 verdFig12 = [];
 for k = 1:numel(figs12)

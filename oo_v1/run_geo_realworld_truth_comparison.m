@@ -1,5 +1,5 @@
 function out = run_geo_realworld_truth_comparison()
-% run_geo_realworld_truth_comparison  Stage 86 GEO realistic truth comparison.
+% run_geo_realworld_truth_comparison  GEO realistic truth comparison.
 
 cfg = revgnss.ConfigFactory.geoRealWorldTruthComparisonConfig();
 if ~isfield(cfg,'scenario') || ~isfield(cfg.scenario,'name') || ...

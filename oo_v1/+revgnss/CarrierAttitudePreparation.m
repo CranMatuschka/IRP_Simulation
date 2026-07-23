@@ -1,5 +1,5 @@
 classdef CarrierAttitudePreparation
-    % CarrierAttitudePreparation  Stage 38 carrier-phase attitude preparation audit.
+    % CarrierAttitudePreparation  carrier-phase attitude preparation audit.
     %
     % Assesses whether the carrier measurement stack is configured to support
     % attitude-mode selection.  L2 carrier EKF, integer fixing, and quaternion
@@ -20,7 +20,7 @@ classdef CarrierAttitudePreparation
             end
             s.enabled          = true;
             s.measurementModes = revgnss.CarrierAttitudePreparation.measurementModeSummary(cfg);
-            % Delegate row/ambiguity inventory to Stage 39 helper.
+            % Delegate row/ambiguity inventory to the carrier row metadata helper.
             inv39 = revgnss.CarrierRowMetadataInventory.inventory(out, cfg);
             s.rowInv.carrierRowMetadataAvailable = inv39.rowMetadataAvailable;
             s.rowInv.carrierRowCount             = inv39.carrierRowCount;

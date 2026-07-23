@@ -1,5 +1,5 @@
 classdef CarrierArcEvidence
-    % CarrierArcEvidence  Stage 52 carrier arc and cycle-slip evidence.
+    % CarrierArcEvidence  Carrier arc and cycle-slip evidence.
     %
     % Exports compact arc evidence from CarrierTrackManager: which arcs exist,
     % arc durations, slip/reset counts, valid carrier row counts.

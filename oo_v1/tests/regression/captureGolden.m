@@ -1,23 +1,28 @@
-function captureGolden(tier)
-%CAPTUREGOLDEN  Capture and save the frozen Phase-0 golden reference.
-%   captureGolden('smoke')  % 120 s   -> tests/regression/golden/golden_smoke.mat
-%   captureGolden('full')   % 3600 s  -> tests/regression/golden/golden_full.mat
+function captureGolden(tier, scenario)
+%CAPTUREGOLDEN  Capture and save a frozen Phase-0 golden reference.
+%   captureGolden('smoke')             % single-antenna, 120 s  -> golden_smoke.mat
+%   captureGolden('full')              % single-antenna, 3600 s -> golden_full.mat
+%   captureGolden('full','headline')   % 4-antenna, 3600 s -> golden_headline_full.mat
 %
-%   Stores the full resolved cfg and summary struct (provenance) plus the finite
-%   scalar metric vector the gate compares against. Run ONCE from the validated
-%   Phase-0 state; thereafter the gate re-runs and diffs against these files.
+%   scenario: 'single' (default) | 'headline' (4-antenna cross). Stores the full
+%   resolved cfg and summary struct (provenance) plus the finite scalar metric vector
+%   the gate compares against. Run ONCE from the validated Phase-0 state; thereafter
+%   the gate re-runs and diffs against these files.
+    if nargin < 2 || isempty(scenario); scenario = 'single'; end
+    scenario = lower(scenario);
     thisDir = fileparts(mfilename('fullpath'));
     addpath(thisDir);                        % harness helpers
     addpath(fullfile(thisDir, '..', '..'));  % oo_v1 root, for +revgnss
     dur = tierDuration_(tier);
-    fprintf('Capturing golden [%s] (%s)...\n', tier, durStr_(dur));
+    fprintf('Capturing golden [%s / %s] (%s)...\n', tier, scenario, durStr_(dur));
 
     t0  = tic;
-    out = runGoldenScenario(dur);
+    out = runGoldenScenario(dur, [], scenario);
     M   = extractMetrics(out.summary);
 
     golden = struct();
     golden.tier           = lower(tier);
+    golden.scenario       = scenario;
     golden.duration_s     = out.cfg.simulation.duration_s;
     golden.dt_s           = out.cfg.simulation.dt_s;
     golden.seed           = 42;
@@ -30,7 +35,11 @@ function captureGolden(tier)
     golden.capturedEpochs = out.sim.simData.nEpochs;
     golden.captureWallSec = toc(t0);
 
-    outFile = fullfile(thisDir, 'golden', ['golden_' golden.tier '.mat']);
+    switch scenario
+        case 'headline'; outFile = fullfile(thisDir, 'golden', ['golden_headline_' golden.tier '.mat']);
+        case 'realism';  outFile = fullfile(thisDir, 'golden', ['golden_realism_'  golden.tier '.mat']);
+        otherwise;       outFile = fullfile(thisDir, 'golden', ['golden_'          golden.tier '.mat']);
+    end
     if ~isfolder(fullfile(thisDir,'golden')); mkdir(fullfile(thisDir,'golden')); end
     save(outFile, '-struct', 'golden');
 

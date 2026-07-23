@@ -1,8 +1,8 @@
 classdef WideLaneNarrowLaneDiagnostics
-    % Stage 49: Wide-lane / narrow-lane float ambiguity-combination diagnostics.
+    % Wide-lane / narrow-lane float ambiguity-combination diagnostics.
     %
     % Computes float wide-lane and narrow-lane ambiguity combination diagnostics
-    % from the L1/L2 ambiguity covariance exported by Stage 41.
+    % from the L1/L2 ambiguity covariance exported by the ambiguity state metadata.
     %
     % Let N1 = B_L1/lambda1, N2 = B_L2/lambda2 (cycle-domain ambiguities).
     %
@@ -53,7 +53,7 @@ classdef WideLaneNarrowLaneDiagnostics
                 s.classification = 'inconsistent'; return
             end
 
-            % Pair metadata from Stage 48
+            % Pair metadata
             hasPairs = isstruct(summary) && ...
                 isfield(summary,'carrierIfPairMetadataAvailable') && ...
                 summary.carrierIfPairMetadataAvailable && ...
@@ -72,7 +72,7 @@ classdef WideLaneNarrowLaneDiagnostics
             nAmb = 2 * nPairs;
             pairIdx = [(1:2:nAmb)', (2:2:nAmb)'];  % L1 at 2k-1, L2 at 2k
 
-            % Covariance from Stage 41
+            % Covariance from the ambiguity state metadata
             hasPamb = isfield(summary,'ambiguityCovarianceSummary') && ...
                 isstruct(summary.ambiguityCovarianceSummary) && ...
                 isfield(summary.ambiguityCovarianceSummary,'Pamb') && ...
@@ -115,7 +115,7 @@ classdef WideLaneNarrowLaneDiagnostics
                 s.classification = 'inconsistent';
             end
 
-            % Stage 53: arc consistency from summary fields (if available).
+            % Arc consistency from summary fields (if available).
             if isfield(summary,'carrierIonoFreeArcConsistentPairs') && ...
                     isnumeric(summary.carrierIonoFreeArcConsistentPairs)
                 s.arcMetadataAvailable = true;
@@ -133,7 +133,7 @@ classdef WideLaneNarrowLaneDiagnostics
                     s.arcConsistencyClassification = 'partial-inconsistency';
                 end
             end
-            % Stage 54: block classification when enforcement is active and
+            % Block classification when enforcement is active and
             % arc-inconsistent pairs were present before filtering.
             try
                 if isfield(summary,'carrierArcConsistencyEnforced') && ...
@@ -264,12 +264,12 @@ classdef WideLaneNarrowLaneDiagnostics
             s.sigmaWideLaneMetresMean    = NaN;
             s.sigmaNarrowLaneMetresMean  = NaN;
             s.maxAbsWideNarrowCorr       = NaN;
-            % Stage 53: arc consistency fields.
+            % Arc consistency fields.
             s.arcMetadataAvailable         = false;
             s.nArcConsistentPairs          = 0;
             s.nArcInconsistentPairs        = 0;
             s.arcConsistencyClassification = 'unavailable';
-            % Stage 54: enforcement fields.
+            % Enforcement fields.
             s.arcConsistencyEnforced          = false;
             s.nArcUsablePairs                 = 0;
             s.nArcSkippedPairs                = 0;

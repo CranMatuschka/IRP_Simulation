@@ -34,12 +34,73 @@ classdef SwarmFormation
                  cfg.orbit.useOrbitPropagator;
         end
 
-        function [dr_hill, dv_hill] = helixOffsetHill(baseline_m, meanMotion_radps, phase_rad)
+        function [dr_hill, dv_hill] = helixOffsetHill(baseline_m, meanMotion_radps, phase_rad, crossAmp)
             % helixOffsetHill  Hill-frame relative position [m] and velocity [m/s]
             % (in the rotating frame) at t=0 for one projected-circular member.
+            %
+            % crossAmp (default 1) scales ONLY the cross-track (z) amplitude. crossAmp=1 gives the
+            % classic planar projected-circular helix: z = rho*sin = 2x, so ALL members lie in the
+            % plane z=2x and the instantaneous formation is planar (out-of-plane shape only 2nd-order
+            % observable from ranging). A per-member VARYING crossAmp makes z a per-member multiple of
+            % x, so the formation spans 3-D -> the full shape is first-order observable. Each member
+            % still flies a valid bounded CW relative orbit (in-plane 2:1 no-drift ellipse + an
+            % independent bounded cross-track harmonic of amplitude crossAmp*rho).
+            if nargin < 4 || isempty(crossAmp); crossAmp = 1.0; end
             rho = baseline_m; n = meanMotion_radps; ph = phase_rad;
-            dr_hill = [ (rho/2)*sin(ph);   rho*cos(ph);   rho*sin(ph) ];
-            dv_hill = [ (rho/2)*n*cos(ph); -rho*n*sin(ph); rho*n*cos(ph) ];
+            dr_hill = [ (rho/2)*sin(ph);   rho*cos(ph);   crossAmp*rho*sin(ph) ];
+            dv_hill = [ (rho/2)*n*cos(ph); -rho*n*sin(ph); crossAmp*rho*n*cos(ph) ];
+        end
+
+        function ca = crossAmp_(cfg, i, nSec)
+            % crossAmp_  Per-member cross-track amplitude scale from cfg.formation.crossTrackSpread
+            % (default 0 -> ca=1 for every member -> the classic planar helix, byte-identical). A
+            % spread s>0 fans the members linearly over [1-s, 1+s], giving distinct z:x ratios ->
+            % a non-degenerate 3-D formation.
+            s = 0;
+            if isfield(cfg,'formation') && isfield(cfg.formation,'crossTrackSpread') && ...
+                    isnumeric(cfg.formation.crossTrackSpread) && isscalar(cfg.formation.crossTrackSpread)
+                s = cfg.formation.crossTrackSpread;
+            end
+            ca = 1 + s * (2*(i-1)/max(nSec-1,1) - 1);
+        end
+
+        function [r0Cells, v0Cells] = secondaryEciInitialStates(cfg, orbitProp)
+            % secondaryEciInitialStates  Per-secondary t=0 ECI initial state [3x1] r0/v0 (the
+            % helix ICs that buildSecondaryCaches then propagates). Extracted so the federated
+            % instance layer can run each swarm member as its OWN single-asset absolute orbit by
+            % injecting r0/v0 via cfg.orbit.eciState0. This is the SAME arithmetic as the IC
+            % section of buildSecondaryCaches (kept in sync; that method is the truth path).
+            nSec = revgnss.SwarmFormation.nSecondaries(cfg);
+            r0Cells = cell(1, nSec); v0Cells = cell(1, nSec);
+            if nSec < 1 || isempty(orbitProp); return; end
+
+            baseline = 1000.0; phase0 = 0.0; mode = 'helix';
+            if isfield(cfg,'formation')
+                if isfield(cfg.formation,'baseline_m'); baseline = cfg.formation.baseline_m; end
+                if isfield(cfg.formation,'phase0_rad'); phase0 = cfg.formation.phase0_rad; end
+                if isfield(cfg.formation,'mode');       mode   = cfg.formation.mode;       end
+            end
+            if ~strcmpi(mode, 'helix')
+                error('SwarmFormation:unsupportedMode', ...
+                    'cfg.formation.mode="%s" is not supported (only "helix").', mode);
+            end
+
+            [r_c, v_c] = orbitProp.initialEciState();
+            nMean = orbitProp.meanMotion();
+            Rhat = r_c / norm(r_c);
+            What = cross(r_c, v_c); What = What / norm(What);
+            Shat = cross(What, Rhat);
+            A = [Rhat, Shat, What];         % Hill -> ECI rotation (columns R,S,W)
+            omega = [0; 0; nMean];          % Hill-frame angular velocity (about W)
+            for i = 1:nSec
+                phase = phase0 + 2*pi*(i-1)/nSec;
+                ca = revgnss.SwarmFormation.crossAmp_(cfg, i, nSec);
+                [dr_h, dv_h] = revgnss.SwarmFormation.helixOffsetHill(baseline, nMean, phase, ca);
+                dr_eci = A * dr_h;
+                dv_eci = A * (dv_h + cross(omega, dr_h));   % rotating -> inertial relative velocity
+                r0Cells{i} = r_c + dr_eci;
+                v0Cells{i} = v_c + dv_eci;
+            end
         end
 
         function [rCells, vCells, meta] = buildSecondaryCaches(cfg, orbitProp, tVec, primaryR_ecef)
@@ -83,7 +144,8 @@ classdef SwarmFormation
             perMin = nan(1, nSec); perMax = nan(1, nSec);
             for i = 1:nSec
                 phase = phase0 + 2*pi*(i-1)/nSec;    % distribute members around the ring
-                [dr_h, dv_h] = revgnss.SwarmFormation.helixOffsetHill(baseline, nMean, phase);
+                ca = revgnss.SwarmFormation.crossAmp_(cfg, i, nSec);
+                [dr_h, dv_h] = revgnss.SwarmFormation.helixOffsetHill(baseline, nMean, phase, ca);
                 dr_eci = A * dr_h;
                 dv_eci = A * (dv_h + cross(omega, dr_h));   % rotating -> inertial relative velocity
                 r0 = r_c + dr_eci;

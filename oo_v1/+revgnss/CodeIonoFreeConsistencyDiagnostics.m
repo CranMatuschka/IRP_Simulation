@@ -1,9 +1,9 @@
 classdef CodeIonoFreeConsistencyDiagnostics
-    % CodeIonoFreeConsistencyDiagnostics  Stage 46: audit Stage 45 code IF EKF path.
+    % CodeIonoFreeConsistencyDiagnostics  Audit code IF EKF path.
     %
     % Checks row-count traceability, H Jacobian compatibility assumptions,
     % R/noise amplification, residual/NIS availability, and
-    % signal-dependent code-bias state risk for the Stage 45 code IF EKF path.
+    % signal-dependent code-bias state risk for the code IF EKF path.
     %
     % Allowed classifications:
     %   'disabled'                         - IF rows not requested
@@ -25,7 +25,7 @@ classdef CodeIonoFreeConsistencyDiagnostics
     methods (Static)
 
         function s = assess(summary, cfg)
-            % assess  Full consistency audit struct for the Stage 45 code IF EKF path.
+            % assess  Full consistency audit struct for the code IF EKF path.
             s = revgnss.CodeIonoFreeConsistencyDiagnostics.blank_();
             if nargin < 2 || ~isstruct(cfg) || isempty(cfg); return; end
 

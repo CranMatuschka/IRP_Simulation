@@ -1,5 +1,5 @@
 classdef AmbiguityArcState
-    % AmbiguityArcState  Stage 53 arc-separated float ambiguity metadata.
+    % AmbiguityArcState arc-separated float ambiguity metadata.
     %
     % Collects per-row arc state from cpInfo (after trackMgr.process()) and
     % produces compact summary fields for use by ReportRunner and the
@@ -15,10 +15,10 @@ classdef AmbiguityArcState
     methods (Static)
 
         function s = fromCpInfo(cpInfo)
-            % fromCpInfo  Build arc state summary from cpInfo (Stage 53 fields).
+            % fromCpInfo Build arc state summary from cpInfo (fields).
             %
             % cpInfo is the carrier phase info struct from errStruct.carrierPhase.
-            % If Stage 53 arc fields (arcId, currentArcEpoch, slipCount) are
+            % If arc fields (arcId, currentArcEpoch, slipCount) are
             % present they are used directly; otherwise returns unavailable.
             s = revgnss.AmbiguityArcState.blank_();
             if isempty(cpInfo) || ~isstruct(cpInfo)

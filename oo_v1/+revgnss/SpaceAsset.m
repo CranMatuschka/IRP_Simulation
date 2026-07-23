@@ -47,6 +47,17 @@ classdef SpaceAsset < handle
         % Receiver clock
         clock                    models.clocks.ClockModel
 
+        % Truth strapdown IMU (gyro + accelerometer); created only when cfg.imu.enable.
+        imu                      models.sensors.IMUModel
+        lastGyroReading_radps    (3,1) double = zeros(3,1)
+        lastAccelReading_mps2    (3,1) double = zeros(3,1)
+
+        % Non-gravitational SPECIFIC FORCE in body axes [m/s^2] -- what an accelerometer senses.
+        % Free flight => ~0 (at GEO only SRP ~1e-7 m/s^2); a thrust/manoeuvre model would set this.
+        % An accelerometer is blind to gravity, hence it carries no orbit information in free
+        % flight. See +models/+sensors/IMUModel for the full rationale.
+        specificForce_body_mps2  (3,1) double = zeros(3,1)
+
         % History log
         history                  (1,1) struct
     end
@@ -75,6 +86,12 @@ classdef SpaceAsset < handle
             end
 
             obj.clock = models.clocks.ClockModel(cfg.clock);
+
+            % Truth IMU (gyro + accel): created only when cfg.imu.enable (gated -> off = no IMU).
+            if isfield(cfg,'imu') && isstruct(cfg.imu) && isfield(cfg.imu,'enable') && cfg.imu.enable
+                obj.imu = models.sensors.IMUModel(cfg.imu);
+                obj.lastGyroReading_radps = obj.angularRate_body_radps;
+            end
 
             obj.history.time_s                = [];
             obj.history.r_ecef_m              = [];
@@ -145,6 +162,8 @@ classdef SpaceAsset < handle
 
             % Clock
             obj.clock.step(dt_s);
+
+            obj.sampleIMU_(dt_s);
         end
 
         function logState(obj, t_s)
@@ -167,12 +186,44 @@ classdef SpaceAsset < handle
             obj.attitude_euler_rad = revgnss.AttitudeKinematics.wrapEuler( ...
                 obj.attitude_euler_rad + dt_s * edot);
             obj.clock.step(dt_s);
+            obj.sampleIMU_(dt_s);
+        end
+
+        function w = getGyroReading(obj)
+            % getGyroReading  Latest truth gyro body-rate measurement (falls back to the truth
+            % rate when no IMU is configured, so callers work unchanged with the IMU off).
+            if isempty(obj.imu)
+                w = obj.angularRate_body_radps;
+            else
+                w = obj.lastGyroReading_radps;
+            end
+        end
+
+        function f = getAccelReading(obj)
+            % getAccelReading  Latest truth accelerometer specific-force measurement [m/s^2].
+            % Falls back to the true specific force when no IMU is configured. NOTE: this is
+            % NOT consumed by the EKF -- in free flight an accelerometer senses ~0 (it is blind
+            % to gravity) and carries no orbit information; see +models/+sensors/IMUModel.
+            if isempty(obj.imu)
+                f = obj.specificForce_body_mps2;
+            else
+                f = obj.lastAccelReading_mps2;
+            end
         end
 
         function setTruthFromOrbit(obj, r_ecef_m, v_ecef_mps)
             % setTruthFromOrbit  Override position/velocity from orbit propagator.
             obj.r_ecef_m   = r_ecef_m(:);
             obj.v_ecef_mps = v_ecef_mps(:);
+        end
+    end
+
+    methods (Access = private)
+        function sampleIMU_(obj, dt_s)
+            % sampleIMU_  Truth IMU readings for this interval; no-op when the IMU is absent.
+            if isempty(obj.imu); return; end
+            [obj.lastGyroReading_radps, obj.lastAccelReading_mps2] = ...
+                obj.imu.sample(obj.angularRate_body_radps, obj.specificForce_body_mps2, dt_s);
         end
     end
 end

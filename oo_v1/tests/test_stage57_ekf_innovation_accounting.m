@@ -131,6 +131,12 @@ catch ME
     results(end+1) = makeResult('T6_class_has_required_methods', false, ME.message);
 end
 
+if any(~[results.pass])
+    failed = {results(~[results.pass]).name};
+    error('test_stage57_ekf_innovation_accounting:failed', ...
+        'Stage 57 innovation accounting checks failed: %s', strjoin(failed, ', '));
+end
+
 end
 
 function r = makeResult(name, pass, message)

@@ -28,14 +28,14 @@ sim1.run();
 store1 = sim1.simData;
 
 assert(store1.hasArrayData(), 'T1 FAIL: SimulationDataStore not active');
-nExpected = round(60 / 10);  % 6 epochs
+nExpected = round(60 / 10) + 1;  % 7 epochs incl. t=0
 assert(store1.nEpochs == nExpected, ...
     sprintf('T1 FAIL: nEpochs should be %d, got %d', nExpected, store1.nEpochs));
 d1 = store1.getData();
 assert(numel(d1.t_s) == nExpected,                'T1 FAIL: t_s wrong length');
 assert(size(d1.truth.r_cm_ecef_m, 1) == 3,        'T1 FAIL: truth.r_cm_ecef_m wrong dims');
 assert(size(d1.truth.r_cm_ecef_m, 2) == nExpected,'T1 FAIL: truth.r_cm_ecef_m wrong cols');
-assert(d1.t_s(1) > 0, 'T1 FAIL: t_s(1) should be positive');
+assert(d1.t_s(1) == 0, 'T1 FAIL: t_s(1) should be 0 (first epoch)');
 assert(all(diff(d1.t_s) > 0), 'T1 FAIL: t_s should be monotonically increasing');
 fprintf('T1 PASS: %d epochs written, getData correct sizes\n', store1.nEpochs);
 

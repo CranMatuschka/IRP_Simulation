@@ -2,7 +2,7 @@ classdef StressScenarioFactory
     % StressScenarioFactory  Campaign stress-scenario configuration mutations.
     %
     % All methods take a base config copy and return a mutated copy; no
-    % global state is modified.  Stage 85 campaign runner.
+    % global state is modified.  Campaign runner.
 
     methods (Static)
 

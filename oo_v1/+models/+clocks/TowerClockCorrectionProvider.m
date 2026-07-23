@@ -1,10 +1,10 @@
 classdef TowerClockCorrectionProvider
     % TowerClockCorrectionProvider  Computes per-measurement tower clock corrections.
     %
-    % Extracted from MeasurementModel.computeMeasurements (Stage 12A Step 3).
+    % Extracted from MeasurementModel.computeMeasurements.
     % All physics are preserved exactly — this is a pure structural refactor.
     %
-    % Stage 71: adds 'truthHistoryProductNoisy' mode — a realistic synthetic
+    % Realistic synthetic tower clock correction mode 'truthHistoryProductNoisy':
     % broadcast-product-like clock correction using:
     %   1. Delayed/quantised product epoch: t_prod = floor((t-lat)/dT)*dT
     %   2. Truth clock state at t_prod from tower history
@@ -60,7 +60,7 @@ classdef TowerClockCorrectionProvider
                 if isfield(tc2,'updateInterval_s'); updateInterval_s = tc2.updateInterval_s; end
                 if isfield(tc2,'latency_s');        latency_s        = tc2.latency_s;        end
             end
-            % Stage 71: clocks.tower.product.* takes precedence
+            % clocks.tower.product.* takes precedence
             [~, prodCfg] = models.clocks.TowerClockCorrectionProvider.productConfig_(cfg);
             if prodCfg.updateInterval_s > 0
                 updateInterval_s = prodCfg.updateInterval_s;
@@ -96,7 +96,7 @@ classdef TowerClockCorrectionProvider
                             towers{ti}, t_prod);
                         towerClkModel(mi) = b_p + bd_p * (t_s - t_prod);
                     case 'truthHistoryProductNoisy'
-                        % Stage 71: realistic product correction.
+                        % Realistic product correction.
                         % 1. Read truth clock at product epoch from tower history.
                         [b_p, bd_p] = models.clocks.TowerClockCorrectionProvider.clockAtProductEpoch( ...
                             towers{ti}, t_prod);
@@ -168,7 +168,7 @@ classdef TowerClockCorrectionProvider
             % clockAtProductEpoch  Tower clock bias and drift at the product epoch.
             %
             % Reads from tower history (GroundTower initialises history at t=0
-            % so t_prod=0 always has a valid entry after Stage 72).
+            % so t_prod=0 always has a valid entry).
             %
             % Fallback: when history is empty or predates t_prod, the current
             % tower state is returned with zero effective prediction age.  This
@@ -261,7 +261,7 @@ classdef TowerClockCorrectionProvider
 
         function [bdot_truth, bdot_model, drift_sigma, t_prod_out, meta] = ...
                 computeDrift(cfg, towers, twr_list, t_s)
-            % computeDrift  Tower clock drift for Doppler model (Stage 83).
+            % computeDrift  Tower clock drift for Doppler model.
             %
             % Returns per-measurement drift truth, product model, sigma, and product epoch.
             % Compatible with all tower clock modes. Uses the same persistent product-noise
@@ -328,7 +328,7 @@ classdef TowerClockCorrectionProvider
                         driftSigmaSource_out = 'zero';
 
                     case 'truthHistoryProductNoisy'
-                        % Stage 84: anchor at product-epoch truth drift (not current-epoch).
+                        % Anchor at product-epoch truth drift (not current-epoch).
                         % Consistent with bias path in compute() which uses clockAtProductEpoch.
                         [~, bd_p] = models.clocks.TowerClockCorrectionProvider.clockAtProductEpoch( ...
                             towers{ti}, t_prod_scalar);
@@ -454,11 +454,11 @@ classdef TowerClockCorrectionProvider
                 rng(double(seed), 'twister');
                 noise = randn(2,1);
                 rng(s0);
-                cache_(key) = struct('b', sigmaBias * noise(1), 'd', sigmaDrift * noise(2));
+                cache_(key) = struct('b', noise(1), 'd', noise(2));
             end
             n = cache_(key);
-            b_noise = n.b;
-            d_noise = n.d;
+            b_noise = sigmaBias  * n.b;
+            d_noise = sigmaDrift * n.d;
         end
 
     end  % private Static methods

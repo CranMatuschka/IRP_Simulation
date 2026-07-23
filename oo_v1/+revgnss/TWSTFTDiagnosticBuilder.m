@@ -1,8 +1,8 @@
 classdef TWSTFTDiagnosticBuilder
-    % TWSTFTDiagnosticBuilder  Stage 24 TWSTFT code time-transfer diagnostic.
+    % TWSTFTDiagnosticBuilder  TWSTFT code time-transfer diagnostic.
     %
     % Diagnostic-only. No EKF rows. No relay/transponder. No ISL carrier EKF.
-    % Consumes Stage 23 ISL link-event metadata to form a simplified two-way
+    % Consumes ISL link-event metadata to form a simplified two-way
     % clock offset diagnostic:
     %
     %   twstftClockOffsetDiagnostic_s = 0.5*(T_AB - T_BA)/C - calibratedDelay_s
@@ -13,7 +13,7 @@ classdef TWSTFTDiagnosticBuilder
     % When available, diagnosticClassification = 'diagnosticOnlyApproximation'.
     %
     % This is NOT a full TWSTFT observable. No transmit-epoch separation is
-    % modelled. No EKF rows are generated in Stage 24.
+    % modelled. No EKF rows are generated.
     %
     % Usage:
     %   twstftDiag = revgnss.TWSTFTDiagnosticBuilder.build(cfg, islInfo, twoWayInfo)
@@ -27,7 +27,7 @@ classdef TWSTFTDiagnosticBuilder
     methods (Static)
 
         function diag = build(cfg, islInfo, twoWayInfo)
-            % build  Build TWSTFT diagnostic struct from Stage 23 ISL event metadata.
+            % build  Build TWSTFT diagnostic struct from ISL event metadata.
             diag = revgnss.TWSTFTDiagnosticBuilder.emptyDiag();
             if ~revgnss.TWSTFTDiagnosticBuilder.isEnabled_(cfg); return; end
 
@@ -93,7 +93,7 @@ classdef TWSTFTDiagnosticBuilder
 
         function validateConfig(cfg)
             % validateConfig  Guard TWSTFT configuration. Called by finalizeConfig.
-            % Guard 1: useInEKF must be false in Stage 24
+            % Guard 1: useInEKF must be false
             if revgnss.TWSTFTDiagnosticBuilder.getBool_(cfg, {'measurements','twstft','code','useInEKF'}, false)
                 error('TWSTFTDiagnosticBuilder:useInEkfBlocked', ...
                     'TWSTFT useInEKF=true is not supported in Stage 24. Set useInEKF=false.');

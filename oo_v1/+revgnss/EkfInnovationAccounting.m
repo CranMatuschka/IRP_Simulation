@@ -1,6 +1,6 @@
 classdef EkfInnovationAccounting
     % EkfInnovationAccounting  Separate EKF innovation NIS into physical / gauge /
-    %   augmented contributions.  Stage 57.
+    %   augmented contributions.
     %
     % Physical rows: real measurement rows passed by MeasurementModel (code, doppler,
     %   carrier, IF combinations).  Gauge rows: datum/clock constraint rows appended by
@@ -31,6 +31,9 @@ classdef EkfInnovationAccounting
             rowClass.nTotal    = nTotal;
             rowClass.nPhysical = nPhysical;
             rowClass.nGauge    = nGauge;
+            rowClass.augmentedDof = nTotal;
+            rowClass.physicalDof  = nPhysical;
+            rowClass.gaugeDof     = nGauge;
 
             rowClass.physicalMask        = [true(nPhysical,1);  false(nGauge,1)];
             rowClass.gaugeMask           = [false(nPhysical,1); true(nGauge,1)];
@@ -39,6 +42,7 @@ classdef EkfInnovationAccounting
             rowClass.dopplerMask         = false(nTotal,1);
             rowClass.carrierMask         = false(nTotal,1);
             rowClass.carrierIonoFreeMask = false(nTotal,1);
+            rowClass.twoWayTimeTransferMask = false(nTotal,1);
             rowClass.unknownPhysicalMask = false(nTotal,1);
             rowClass.warnings            = {};
 
@@ -50,6 +54,7 @@ classdef EkfInnovationAccounting
                         case 'ifCode';  rowClass.codeIonoFreeMask(mi) = true;
                         case 'doppler'; rowClass.dopplerMask(mi)      = true;
                         case 'carrier'; rowClass.carrierMask(mi)      = true;
+                        case 'twoWayTimeTransfer'; rowClass.twoWayTimeTransferMask(mi) = true;
                         otherwise;      rowClass.unknownPhysicalMask(mi) = true;
                     end
                 end
@@ -103,6 +108,9 @@ classdef EkfInnovationAccounting
             [acc.carrierIonoFreeNIS, acc.carrierIonoFreeDof, w_] = revgnss.EkfInnovationAccounting.nisForMask_(y, S, rowClass.carrierIonoFreeMask);
             acc.warnings = [acc.warnings, w_];
 
+            [acc.twoWayTimeTransferNIS, acc.twoWayTimeTransferDof, w_] = revgnss.EkfInnovationAccounting.nisForMask_(y, S, rowClass.twoWayTimeTransferMask);
+            acc.warnings = [acc.warnings, w_];
+
             [acc.unknownPhysicalNIS, acc.unknownPhysicalDof, w_] = revgnss.EkfInnovationAccounting.nisForMask_(y, S, rowClass.unknownPhysicalMask);
             acc.warnings = [acc.warnings, w_];
         end
@@ -124,11 +132,12 @@ classdef EkfInnovationAccounting
             rms_.dopplerRms         = revgnss.EkfInnovationAccounting.rmsForMask_(residual, rowClass.dopplerMask);
             rms_.carrierRms         = revgnss.EkfInnovationAccounting.rmsForMask_(residual, rowClass.carrierMask);
             rms_.carrierIonoFreeRms = revgnss.EkfInnovationAccounting.rmsForMask_(residual, rowClass.carrierIonoFreeMask);
+            rms_.twoWayTimeTransferRms = revgnss.EkfInnovationAccounting.rmsForMask_(residual, rowClass.twoWayTimeTransferMask);
             rms_.unknownPhysicalRms = revgnss.EkfInnovationAccounting.rmsForMask_(residual, rowClass.unknownPhysicalMask);
         end
 
         function c = compact(acc, rms_)
-            % compact  Report-safe struct summarising Stage 57 innovation accounting.
+            % compact  Report-safe struct summarising innovation accounting.
 
             c.physicalNIS          = acc.physicalNIS;
             c.gaugeNIS             = acc.gaugeNIS;
@@ -145,6 +154,9 @@ classdef EkfInnovationAccounting
             c.codeResidualRms      = rms_.codeRms;
             c.carrierResidualRms   = rms_.carrierRms;
             c.dopplerResidualRms   = rms_.dopplerRms;
+            c.twoWayTimeTransferNIS = acc.twoWayTimeTransferNIS;
+            c.twoWayTimeTransferDof = acc.twoWayTimeTransferDof;
+            c.twoWayTimeTransferResidualRms = rms_.twoWayTimeTransferRms;
             c.gaugeRowsPresent     = acc.gaugeDof > 0;
 
             if ~c.gaugeRowsPresent

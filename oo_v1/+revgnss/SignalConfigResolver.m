@@ -1,7 +1,7 @@
 classdef SignalConfigResolver
     % SignalConfigResolver  Single consistent signal enablement resolver.
     %
-    % Stage 79 source of truth:
+    % Source of truth:
     %   cfg.signals.names
     %   cfg.signals.enabledMask
     %   cfg.measurements.carrier.enabledByFrequency

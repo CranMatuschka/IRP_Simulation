@@ -1,5 +1,5 @@
 classdef EkfDynamicsPredictor
-    % EkfDynamicsPredictor  Optional physical EKF translational prediction. Stage 58.
+    % EkfDynamicsPredictor  Optional physical EKF translational prediction.
     %
     % Converts the ECEF position/velocity state to an inertial-like frame using a
     % constant-Earth-rotation model, propagates with OrbitDynamics RK4 two-body or J2,
@@ -39,8 +39,11 @@ classdef EkfDynamicsPredictor
             end
         end
 
-        function [r1, v1, info] = propagateEcef(r_ecef_m, v_ecef_mps, dt_s, t0_s, cfg)
+        function [r1, v1, info] = propagateEcef(r_ecef_m, v_ecef_mps, dt_s, t0_s, cfg, srpScale)
             % propagateEcef  Propagate ECEF state by dt_s seconds.
+            %   Optional srpScale (SRP scale-coefficient state): when supplied and non-empty,
+            %   the SRP acceleration is driven from the ESTIMATED scale s (Cr = s*refCr),
+            %   leaving any configured luni-solar untouched. Absent/empty -> byte-identical.
             %
             %   For constantVelocity: r1 = r + dt*v, v1 = v.
             %   For twoBody/j2: convert ECEF->inertial at t0, RK4 propagate, back to ECEF.
@@ -93,8 +96,39 @@ classdef EkfDynamicsPredictor
             % Energy before propagation
             info.specificEnergyInitial_Jkg = models.orbit.OrbitDynamics.specificEnergy_Jkg(r_i0, v_i0);
 
-            % RK4 step in inertial frame
-            [r_i1, v_i1] = models.orbit.OrbitDynamics.rk4Step(r_i0, v_i0, dt_s, fmodel);
+            % RK4 step in inertial frame. Optionally add the EKF's OWN luni-solar/SRP
+            % perturbation (cfg.estimator.dynamics.perturbations) so the filter dynamics MATCH
+            % the truth third-body forces (closing the force-model gap) instead of pure J2. Same
+            % constant-Omega ECI as the truth propagator, so the sun/moon ephemeris is consistent.
+            % Default off -> pure rk4Step -> byte-identical.
+            ekfPert = struct('enable', false);
+            try; ekfPert = models.orbit.OrbitPerturbations.configFromStruct( ...
+                    cfg.estimator.dynamics.perturbations); catch; end
+            % SRP scale-coefficient state: drive SRP from the estimated scale s (Cr=s*refCr),
+            % leaving any configured luni-solar untouched. Absent/empty srpScale -> unchanged.
+            srpScaleActive = false;
+            if nargin >= 6 && ~isempty(srpScale) && isfinite(srpScale)
+                refCr = 1.3; refAM = 0.02;
+                try; refCr = cfg.estimator.srpCoefficient.refCr;               catch; end
+                try; refAM = cfg.estimator.srpCoefficient.refAreaToMass_m2pkg; catch; end
+                ekfPert.srp                        = true;   % REPLACES any config Cr (not stacked)
+                ekfPert.srpParams.Cr               = srpScale * refCr;
+                ekfPert.srpParams.areaToMass_m2pkg = refAM;
+                ekfPert.enable                     = true;   % scaled SRP enters the perturbed path
+                srpScaleActive                     = true;
+            end
+            if ekfPert.enable
+                [r_i1, v_i1] = models.orbit.OrbitDynamics.rk4StepWithAccel( ...
+                    r_i0, v_i0, dt_s, fmodel, ...
+                    @(rr,tt) models.orbit.OrbitPerturbations.accel(rr, tt, ekfPert), t0_s);
+                if srpScaleActive
+                    info.forceModel = [fmodel '+srpScale'];
+                else
+                    info.forceModel = [fmodel '+luniSolar'];
+                end
+            else
+                [r_i1, v_i1] = models.orbit.OrbitDynamics.rk4Step(r_i0, v_i0, dt_s, fmodel);
+            end
 
             % Energy after propagation
             info.specificEnergyFinal_Jkg = models.orbit.OrbitDynamics.specificEnergy_Jkg(r_i1, v_i1);
@@ -113,11 +147,14 @@ classdef EkfDynamicsPredictor
             end
         end
 
-        function Phi6 = finiteDiffStm6(r_ecef_m, v_ecef_mps, dt_s, t0_s, cfg)
+        function Phi6 = finiteDiffStm6(r_ecef_m, v_ecef_mps, dt_s, t0_s, cfg, srpScale)
             % finiteDiffStm6  6x6 translational STM via central finite differences.
             %   Columns 1-3: derivatives w.r.t. r (position perturbation).
             %   Columns 4-6: derivatives w.r.t. v (velocity perturbation).
+            %   Optional srpScale is passed through to propagateEcef so the STM is taken about
+            %   the same (J2 + scaled-SRP) dynamics; absent/empty -> byte-identical (pure J2).
 
+            if nargin < 6; srpScale = []; end
             m = filter.EkfDynamicsPredictor.mode(cfg);
 
             if strcmp(m, 'constantVelocity')
@@ -142,8 +179,8 @@ classdef EkfDynamicsPredictor
             % Columns 1-3: position derivatives
             for k = 1:3
                 dp = zeros(3,1); dp(k) = dr_step;
-                [rp,vp] = filter.EkfDynamicsPredictor.propagateEcef(r+dp, v, dt_s, t0_s, cfg);
-                [rm,vm] = filter.EkfDynamicsPredictor.propagateEcef(r-dp, v, dt_s, t0_s, cfg);
+                [rp,vp] = filter.EkfDynamicsPredictor.propagateEcef(r+dp, v, dt_s, t0_s, cfg, srpScale);
+                [rm,vm] = filter.EkfDynamicsPredictor.propagateEcef(r-dp, v, dt_s, t0_s, cfg, srpScale);
                 Phi6(1:3, k) = (rp - rm) / (2*dr_step);
                 Phi6(4:6, k) = (vp - vm) / (2*dr_step);
             end
@@ -151,11 +188,33 @@ classdef EkfDynamicsPredictor
             % Columns 4-6: velocity derivatives
             for k = 1:3
                 dv = zeros(3,1); dv(k) = dv_step;
-                [rp,vp] = filter.EkfDynamicsPredictor.propagateEcef(r, v+dv, dt_s, t0_s, cfg);
-                [rm,vm] = filter.EkfDynamicsPredictor.propagateEcef(r, v-dv, dt_s, t0_s, cfg);
+                [rp,vp] = filter.EkfDynamicsPredictor.propagateEcef(r, v+dv, dt_s, t0_s, cfg, srpScale);
+                [rm,vm] = filter.EkfDynamicsPredictor.propagateEcef(r, v-dv, dt_s, t0_s, cfg, srpScale);
                 Phi6(1:3, k+3) = (rp - rm) / (2*dv_step);
                 Phi6(4:6, k+3) = (vp - vm) / (2*dv_step);
             end
+        end
+
+        function col = srpStmColumn(r_ecef_m, v_ecef_mps, dt_s, t0_s, cfg, srpScale)
+            % srpStmColumn  6x1 d([r;v])/ds via central finite difference over the SRP scale s.
+            %   SRP acceleration is EXACTLY linear in s, so a deliberately LARGE ds is used: it
+            %   is exact for a linear response AND lifts the tiny position difference above the
+            %   GEO-radius round-off floor (~1e-8 m). The scale's observability flows mainly
+            %   through the (well-conditioned) velocity rows, integrated to position downstream.
+            col = zeros(6,1);
+            m = filter.EkfDynamicsPredictor.mode(cfg);
+            if strcmp(m,'constantVelocity') || isempty(srpScale) || ~isfinite(srpScale)
+                return   % constant-velocity ignores perturbations -> s is inert
+            end
+            ds = 10.0;
+            try
+                v_ = cfg.estimator.srpCoefficient.fdScaleStep;
+                if isnumeric(v_) && isscalar(v_) && isfinite(v_) && v_ > 0; ds = v_; end
+            catch; end
+            [rp,vp] = filter.EkfDynamicsPredictor.propagateEcef(r_ecef_m, v_ecef_mps, dt_s, t0_s, cfg, srpScale+ds);
+            [rm,vm] = filter.EkfDynamicsPredictor.propagateEcef(r_ecef_m, v_ecef_mps, dt_s, t0_s, cfg, srpScale-ds);
+            col(1:3) = (rp(:) - rm(:)) / (2*ds);
+            col(4:6) = (vp(:) - vm(:)) / (2*ds);
         end
 
         function lines = summaryLines(info)

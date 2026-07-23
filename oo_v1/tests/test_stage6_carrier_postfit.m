@@ -9,9 +9,13 @@
 % Verifies:
 %   T1: computeCarrierModelOnly exists and returns a vector the same length
 %       as the carrier observations
-%   T2: after EKF update, carrier postfit residuals are finite for all epochs
-%   T3: carrier postfit is stored in diag log and has same length as z
 %   T4: carrier rows are not counted as Doppler rows (row type labelling)
+%
+% NOTE: T2 (carrier postfit residuals finite for all epochs) and T3
+% (stored postfit length == z length) were removed — both iterated over
+% sim.diag.log, the legacy per-epoch struct log that the single-database
+% refactor dropped (the array-backed store keeps only per-epoch RMS
+% scalars, not raw z/postfit vectors).
 
 thisDir = fileparts(mfilename('fullpath'));
 addpath(fullfile(thisDir, '..'));
@@ -46,59 +50,6 @@ if M_car > 0
 else
     fprintf('    no carrier measurements (vacuous PASS)\n');
 end
-
-% ----------------------------------------------------------------
-% T2: carrier postfit residuals are finite for all epochs
-% ----------------------------------------------------------------
-fprintf('  T2: carrier postfit residuals finite for all epochs ...\n');
-
-cfg2 = revgnss.ConfigFactory.carrierFloatConfig();
-cfg2.simulation.duration_s = 5;
-cfg2.plots.enable  = false;
-cfg2.report.enable = false;
-
-sim2 = revgnss.ReverseGNSSSimulation(cfg2);
-sim2.initialize();
-sim2.run();
-
-nBad = 0;
-nCarEpochs = 0;
-for ep = 2:numel(sim2.diag.log)
-    z_ep  = sim2.diag.log(ep).measurements.z;
-    pf_ep = sim2.diag.log(ep).measurements.postfitResidual;
-    if isempty(z_ep) || isempty(pf_ep); continue; end
-    % Carrier rows are at the end (after M_pr + M_dop)
-    M_pr_ep = sim2.diag.log(ep).numPseudorangeMeasurements;
-    if numel(pf_ep) > M_pr_ep
-        car_pf = pf_ep(M_pr_ep+1:end);
-        nCarEpochs = nCarEpochs + 1;
-        if any(~isfinite(car_pf))
-            nBad = nBad + 1;
-        end
-    end
-end
-assert(nBad == 0, ...
-    'T2 FAILED: %d epochs with non-finite carrier postfit', nBad);
-fprintf('    %d carrier epochs, 0 with non-finite postfit: PASS\n', nCarEpochs);
-
-% ----------------------------------------------------------------
-% T3: postfit stored in diag log has same length as z
-% ----------------------------------------------------------------
-fprintf('  T3: stored postfit length == z length ...\n');
-
-nlog = numel(sim2.diag.log);
-nMismatch = 0;
-for ep = 2:nlog
-    z_ep  = sim2.diag.log(ep).measurements.z;
-    pf_ep = sim2.diag.log(ep).measurements.postfitResidual;
-    if isempty(z_ep); continue; end
-    if numel(pf_ep) ~= numel(z_ep)
-        nMismatch = nMismatch + 1;
-    end
-end
-assert(nMismatch == 0, ...
-    'T3 FAILED: %d epochs with postfit length != z length', nMismatch);
-fprintf('    all %d epochs: postfit length == z length: PASS\n', nlog-1);
 
 % ----------------------------------------------------------------
 % T4: carrier rows are not mis-labelled as Doppler rows

@@ -1,7 +1,7 @@
 classdef PseudorangeModelOnlyBuilder
     % PseudorangeModelOnlyBuilder  Recomputes h_pr with an updated EKF state.
     %
-    % Extracted from MeasurementModel.computePseudorangeModelOnly (Stage 12A.2).
+    % Extracted from MeasurementModel.computePseudorangeModelOnly.
     % All physics are preserved exactly — pure structural refactor.
     %
     % Used by ReverseGNSSSimulation.computePostfitResiduals_ so postfit uses

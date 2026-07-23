@@ -1,5 +1,5 @@
 classdef CarrierIonoFreeRowBuilder
-    % Stage 47: Carrier ionosphere-free float row combination.
+    % Carrier ionosphere-free float row combination.
     %
     % Combines L1+L2 carrier EKF rows (from CarrierMeasurementBuilder.buildEkfRows)
     % into IF rows (float ambiguity, non-integer).
@@ -41,7 +41,7 @@ classdef CarrierIonoFreeRowBuilder
             % Extracts both blocks, applies IF combination, returns Mp IF rows.
             % The IF combination replaces L1+L2 rows (prevents rank deficiency).
             %
-            % Stage 54: when cfg.estimator.enforceCarrierArcConsistency.enable
+            % When cfg.estimator.enforceCarrierArcConsistency.enable
             % is true and cpInfo.arcId is present, pairs with mismatched L1/L2
             % arc IDs are skipped before combining. Returns fewer than Mp rows
             % when pairs are skipped; returns empty arrays when all are skipped.
@@ -59,7 +59,7 @@ classdef CarrierIonoFreeRowBuilder
             idx2    = Mp + 1 : 2*Mp;
             Mp_orig = Mp;
 
-            % Stage 54: enforce arc consistency before IF combination.
+            % Enforce arc consistency before IF combination.
             enforceArc = false;
             try; enforceArc = logical(cfg.estimator.enforceCarrierArcConsistency.enable); catch; end
             nArcSkippedPairs         = 0;
@@ -141,7 +141,7 @@ classdef CarrierIonoFreeRowBuilder
             R_IF = diag(alpha^2 * r1 + beta^2 * r2);
 
             % cpInfo: L1 block becomes IF; L2 block dropped.
-            % Stage 48 adds explicit L1/L2 ambiguity state pair metadata.
+            % Explicit L1/L2 ambiguity state pair metadata added.
             cpInfo_IF                         = cpInfo;
             cpInfo_IF.phi_m                   = alpha * cpInfo.phi_m(idx1) + beta * cpInfo.phi_m(idx2);
             cpInfo_IF.prefit_m                = z_IF - h_IF;
@@ -166,12 +166,12 @@ classdef CarrierIonoFreeRowBuilder
             cpInfo_IF.ifBeta                  = beta;
             cpInfo_IF.hExplicitlyCombined     = true;
             cpInfo_IF.hCombination            = 'alphaH1_betaH2';
-            % Stage 54: arc consistency enforcement metadata.
+            % Arc consistency enforcement metadata.
             cpInfo_IF.nArcSkippedPairs              = nArcSkippedPairs;
             cpInfo_IF.skippedForArcInconsistency    = skippedForInconsistency;
             cpInfo_IF.arcConsistencyEnforced        = arcConsistencyEnforced;
             cpInfo_IF.arcMetaUsedForEnforcement     = arcMetaUsedForEnforcement;
-            % Stage 53: arc consistency check on remaining (post-filter) pairs.
+            % Arc consistency check on remaining (post-filter) pairs.
             if isfield(cpInfo,'arcId') && numel(cpInfo.arcId) >= 2*Mp_orig
                 arcIdL1_ = cpInfo.arcId(idx1);
                 arcIdL2_ = cpInfo.arcId(idx2);

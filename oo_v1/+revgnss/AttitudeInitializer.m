@@ -1,7 +1,7 @@
 classdef AttitudeInitializer
-    % AttitudeInitializer  Stage 16 absolute multi-antenna attitude seeding.
+    % AttitudeInitializer absolute multi-antenna attitude seeding.
     %
-    % This is deliberately narrow: it seeds attitude before Stage 15
+    % This is deliberately narrow: it seeds attitude before
     % calibrated-differential tracking.  It is not PPP, LAMBDA, or global
     % integer ambiguity resolution.
 

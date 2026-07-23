@@ -1,22 +1,22 @@
 classdef BaselineCarrierAmbiguityResolver
-    % BaselineCarrierAmbiguityResolver  Stage 70/75/76: raw-L1 or raw-L1+L2 baseline AR.
+    % BaselineCarrierAmbiguityResolver  raw-L1 or raw-L1+L2 baseline AR.
     %
-    % For each tower/baseline, resolves ΔN in (Stage 70/75, single-frequency):
+    % For each tower/baseline, resolves ΔN in (single-frequency):
     %   ΔΦ − Δρ(q_ref) = λ_L1 · ΔN + noise
     %
-    % Stage 76 dual-frequency: joint integer-pair (N1,N2) search when L2 enabled:
+    % Dual-frequency: joint integer-pair (N1,N2) search when L2 enabled:
     %   ΔΦ_f − Δρ(q_ref) = λ_f · ΔN_f + noise_f,  f ∈ {L1, L2}
     %
     % No LAMBDA/MLAMBDA, no carrier-IF fixing, no formal false-fix probability.
     % Wide-lane consistency used as a screening gate only (not full WL/NL fixing).
     %
-    % Stage 75 acceptance gates (each must pass):
+    % Acceptance gates (each must pass):
     %   n >= minArcEpochs
     %   RMS_residual(N_best) < rmsThreshold_m
     %   ratio = RMS(N_second) / RMS(N_best) > ratioThreshold
     %   |N_float - N_best| < maxFloatDistance_cycles
     %
-    % Stage 76 adds (dual-frequency path):
+    % Adds (dual-frequency path):
     %   both L1 and L2 arc epochs >= minArcEpochs
     %   per-frequency RMS below threshold
     %   combined J ratio > ratioThreshold
@@ -24,10 +24,10 @@ classdef BaselineCarrierAmbiguityResolver
     %   wide-lane consistency: |N_WL_float - (N1_best-N2_best)| < maxWideLaneFloatDistance_cycles
     %   phaseBiasStatus permits integer interpretation
     %
-    % Per-baseline ambiguityStatus values (Stage 76):
+    % Per-baseline ambiguityStatus values:
     %   'fixedDualFrequencyRaw'     — joint L1+L2 fixed, all gates passed
     %   'fixedL1Only'               — L1 fixed; L2 failed gates (dual-freq attempted)
-    %   'fixedInteger'              — L1 fixed; single-frequency mode (Stage 75)
+    %   'fixedInteger'              — L1 fixed; single-frequency mode
     %   'rejectedInsufficientArc'   — n < minArcEpochs
     %   'rejectedRms'               — rms >= rmsThreshold
     %   'rejectedRatio'             — ratio <= ratioThreshold (rms passed)
@@ -35,14 +35,14 @@ classdef BaselineCarrierAmbiguityResolver
     %   'rejectedWideLane'          — wide-lane consistency gate failed (dual-freq)
     %   'floatExternalReference'    — AR disabled or baseline not attempted
     %
-    % Global integerClassification values (Stage 76):
+    % Global integerClassification values:
     %   'fixedDualFrequencyRawAll'  — all baselines fixedDualFrequencyRaw
     %   'fixedL1OnlyAll'            — all baselines fixedL1Only (dual-freq attempted but L2 failed)
     %   'fixedMixedFrequency'       — mix of dual-freq and L1-only fixed
     %   'fixedAll'                  — all fixed (single-freq L1 mode)
     %   'mixedFixedFloat'           — partial fix; float baselines included
     %   'fixedPartialExcludedFloat' — partial fix; float baselines excluded
-    %   'fallbackExternalRef'       — none fixed; Stage 69 float calibration retained
+    %   'fallbackExternalRef'       — none fixed; float calibration retained
     %   'notAttempted'              — AR disabled or nBaselines=0
 
     methods (Static)
@@ -54,7 +54,7 @@ classdef BaselineCarrierAmbiguityResolver
             if ~isfield(c,'phaseBiasStatus'); c.phaseBiasStatus = 'notCalibratedExternalProduct'; end
             if ~isfield(c,'partialFixPolicy'); c.partialFixPolicy = 'mixedFixedFloat'; end
             if ~isfield(c,'differentialIonosphereMode'); c.differentialIonosphereMode = 'neglectedShortBaselineV1'; end
-            % Stage 70/75: initialise summary fields
+            % Initialise summary fields
             store.integerFixAttempted           = false;
             store.integerFixAccepted            = false;
             store.nIntegerFixed                 = 0;
@@ -62,14 +62,15 @@ classdef BaselineCarrierAmbiguityResolver
             store.integerClassification         = 'notAttempted';
             store.externalRefUsedAsSearchCenter = false;
             store.externalRefUsedForCalibration = true;
-            % Stage 75 global fields
+            % Global fields
             store.gnssOnlyAttitudeClaim         = false;
             store.falseFixClassification        = c.falseFixClassification;
             store.phaseBiasStatus               = c.phaseBiasStatus;
             store.partialFixPolicy              = c.partialFixPolicy;
             store.nBaselineArFloatExternal      = 0;
             store.nBaselineArRejectedArc        = 0;
-            % Stage 75: per-baseline metadata (nTowers x nBaselines)
+            store.nBaselineArRejectedPhaseBias  = 0;
+            % Per-baseline metadata (nTowers x nBaselines)
             store.ambiguityStatus   = repmat({'floatExternalReference'}, store.nTowers, store.nBaselines);
             store.N_float_all       = zeros(store.nTowers, store.nBaselines);
             store.floatDistance_all = zeros(store.nTowers, store.nBaselines);
@@ -77,7 +78,7 @@ classdef BaselineCarrierAmbiguityResolver
             store.rmsSecond_all     = zeros(store.nTowers, store.nBaselines);
             store.ratio_all         = zeros(store.nTowers, store.nBaselines);
             store.N_int             = zeros(store.nTowers, store.nBaselines);
-            % Stage 76: dual-frequency fields
+            % Dual-frequency fields
             store.nBaselineArFixedDualFrequency = 0;
             store.nBaselineArFixedL1Only        = 0;
             store.N_float_L2_all    = zeros(store.nTowers, store.nBaselines);
@@ -100,10 +101,22 @@ classdef BaselineCarrierAmbiguityResolver
             % Determine if dual-frequency AR is active
             dualEn = c.enabledByFrequency(1) && numel(c.enabledByFrequency) >= 2 && ...
                 c.enabledByFrequency(2) && isfield(store,'accumN_L2');
-            % Phase-bias guard: only allow integer fixing when bias is known zero or compatible
-            phaseBiasOk = strcmp(c.phaseBiasStatus,'syntheticKnownZero') || ...
-                strcmp(c.phaseBiasStatus,'calibratedExternalProduct') || ...
-                strcmp(c.phaseBiasStatus,'notCalibratedExternalProduct');  % allow float, gate later
+            phaseBiasOk = true;
+            if c.requirePhaseBiasCalibrationForFix
+                phaseBiasOk = strcmp(c.phaseBiasStatus,'syntheticKnownZero') || ...
+                    strcmp(c.phaseBiasStatus,'calibratedExternalProduct');
+            end
+            if ~phaseBiasOk
+                total = store.nTowers * store.nBaselines;
+                store.ambiguityStatus(:) = {'rejectedPhaseBias'};
+                store.integerFixAccepted = false;
+                store.integerClassification = 'fallbackExternalRef';
+                store.nIntegerRejected = total;
+                store.nBaselineArFloatExternal = total;
+                store.nBaselineArRejectedPhaseBias = total;
+                store.externalRefUsedForCalibration = true;
+                return
+            end
 
             if dualEn
                 store.attitudeArMode = 'rawDualFrequencyPair';
@@ -150,13 +163,13 @@ classdef BaselineCarrierAmbiguityResolver
                     store.ratio_all(ti,bi)         = ratio1;
                     store.floatDistance_all(ti,bi) = fd1;
 
-                    % ---- Stage 75 single-frequency gates ----
+                    % ---- Single-frequency gates ----
                     rms1Ok = rms1_best < c.rmsThreshold_m;
                     fd1Ok  = fd1 < c.maxFloatDistance_cycles;
                     % Combined ratio for single-freq is ratio1
                     ratioOk1 = ratio1 > c.ratioThreshold;
 
-                    if dualEn && phaseBiasOk
+                    if dualEn
                         % ---- Dual-frequency path ----
                         n2   = store.accumN_L2(ti,bi);
                         S1_2 = store.accumSum_L2(ti,bi);
@@ -265,7 +278,7 @@ classdef BaselineCarrierAmbiguityResolver
                         end
 
                     else
-                        % ---- Single-frequency path (Stage 70/75 behavior) ----
+                        % ---- Single-frequency path (behavior) ----
                         if rms1Ok && ratioOk1 && fd1Ok
                             store.N_int(ti,bi)   = N1_best;
                             store.delta_B(ti,bi) = lambda1 * N1_best;
@@ -329,7 +342,7 @@ classdef BaselineCarrierAmbiguityResolver
                     fprintf('  [DiffAttAR] All %d baselines failed gates; fallback to external-reference float\n', total);
                 end
             else
-                % Single-frequency classification (Stage 75 behavior preserved)
+                % Single-frequency classification (behavior preserved)
                 if nFixed == total && total > 0
                     store.integerFixAccepted            = true;
                     store.externalRefUsedForCalibration = false;
@@ -371,7 +384,7 @@ classdef BaselineCarrierAmbiguityResolver
         function [en, c] = parseCfg_(cfg)
             en = false; c = struct();
             try; en = logical(cfg.estimator.diffAtt.ambiguityResolution.enable); catch; return; end
-            % Stage 78: derive wavelengths from canonical cfg.signals (set by finalizeConfig)
+            % Derive wavelengths from canonical cfg.signals (set by finalizeConfig)
             % or SignalDefinition; no local hardcoded frequency constants.
             try
                 c.lambda_m = cfg.signals.wavelength_m(1);
@@ -388,17 +401,18 @@ classdef BaselineCarrierAmbiguityResolver
             c.rmsThreshold_m    = 0.10 * c.lambda_m;    % 0.10 cycles (L1 metres)
             c.ratioThreshold    = 2.0;
             c.useExtRefAsCenter = true;
-            % Stage 75 defaults
+            % Defaults
             c.maxFloatDistance_cycles    = Inf;
             c.phaseBiasStatus            = 'notCalibratedExternalProduct';
             c.requireAllForGnssOnlyClaim = true;
+            c.requirePhaseBiasCalibrationForFix = false;
             c.partialFixPolicy           = 'mixedFixedFloat';
             c.falseFixClassification     = 'screenedNotFormal';
-            % Stage 76 defaults
+            % Defaults
             c.enabledByFrequency              = [true, false];  % L1 only by default
             c.maxWideLaneFloatDistance_cycles = 0.5;
             c.differentialIonosphereMode      = 'neglectedShortBaselineV1';
-            % Stage 70 config reads
+            % Config reads
             try; c.searchHalfWidth = cfg.estimator.diffAtt.ambiguityResolution.searchHalfWidth_cycles; catch; end
             try; c.minArcEpochs    = cfg.estimator.diffAtt.ambiguityResolution.minArcEpochs;           catch; end
             try
@@ -407,13 +421,14 @@ classdef BaselineCarrierAmbiguityResolver
             catch; end
             try; c.ratioThreshold    = cfg.estimator.diffAtt.ambiguityResolution.ratioThreshold;                             catch; end
             try; c.useExtRefAsCenter = logical(cfg.estimator.diffAtt.ambiguityResolution.useExternalReferenceAsSearchCenter); catch; end
-            % Stage 75 config reads
+            % Config reads
             try; c.maxFloatDistance_cycles    = cfg.estimator.diffAtt.ambiguityResolution.maxFloatDistance_cycles;            catch; end
             try; c.phaseBiasStatus            = cfg.estimator.diffAtt.ambiguityResolution.phaseBiasStatus;                    catch; end
             try; c.requireAllForGnssOnlyClaim = logical(cfg.estimator.diffAtt.ambiguityResolution.requireAllForGnssOnlyClaim); catch; end
+            try; c.requirePhaseBiasCalibrationForFix = logical(cfg.estimator.diffAtt.ambiguityResolution.requirePhaseBiasCalibrationForFix); catch; end
             try; c.partialFixPolicy           = cfg.estimator.diffAtt.ambiguityResolution.partialFixPolicy;                    catch; end
             try; c.falseFixClassification     = cfg.estimator.diffAtt.ambiguityResolution.falseFixClassification;              catch; end
-            % Stage 76 config reads
+            % Config reads
             try; c.enabledByFrequency = logical(cfg.estimator.diffAtt.ambiguityResolution.enabledByFrequency); catch; end
             try; c.maxWideLaneFloatDistance_cycles = cfg.estimator.diffAtt.ambiguityResolution.maxWideLaneFloatDistance_cycles; catch; end
             try; c.differentialIonosphereMode = cfg.estimator.diffAtt.ambiguityResolution.differentialIonosphereInBaselineAr; catch; end

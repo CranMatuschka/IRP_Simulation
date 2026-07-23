@@ -1,11 +1,11 @@
 classdef CarrierIonoFreeAmbiguityTraceability
-    % Stage 48: Carrier ionosphere-free ambiguity traceability.
+    % Carrier ionosphere-free ambiguity traceability.
     %
     % Each carrier ionosphere-free (IF) EKF row observes the non-integer linear
     % combination B_IF = alpha*B_L1 + beta*B_L2.  The EKF updates both the L1
     % and L2 ambiguity states jointly through a single innovation.  This helper
     % traces the pair of EKF states behind each IF row, propagates the IF
-    % ambiguity variance from the Stage 41 covariance export, and classifies the
+    % ambiguity variance from the covariance export, and classifies the
     % result for the report.
     %
     % Physics:
@@ -22,7 +22,7 @@ classdef CarrierIonoFreeAmbiguityTraceability
     %
     % classifications:
     %   'disabled'                  -- carrier IF EKF rows not used
-    %   'metadata-unavailable'      -- Stage 41 ambiguity metadata absent
+    %   'metadata-unavailable'      -- ambiguity metadata absent
     %   'pairs-found-no-covariance' -- pairs inferred; Pamb not exported
     %   'active-float-traceability' -- pairs found and covariance propagated
 
@@ -51,7 +51,7 @@ classdef CarrierIonoFreeAmbiguityTraceability
                 return
             end
 
-            % Stage 41 ambiguity state metadata required
+            % Ambiguity state metadata required
             hasMeta = isfield(summary,'ambiguityStateMetadata') && ...
                 isstruct(summary.ambiguityStateMetadata) && ...
                 isfield(summary.ambiguityStateMetadata,'nAmbiguities') && ...
@@ -78,7 +78,7 @@ classdef CarrierIonoFreeAmbiguityTraceability
             % L1 at positions 2k-1, L2 at 2k in Pamb (T->R->S ordering)
             s.pairIndices = [(1:2:nAmb)', (2:2:nAmb)'];  % nPairs x 2
 
-            % Covariance propagation from Stage 41 Pamb export
+            % Covariance propagation from Pamb export
             hasPamb = isfield(summary,'ambiguityCovarianceSummary') && ...
                 isstruct(summary.ambiguityCovarianceSummary) && ...
                 isfield(summary.ambiguityCovarianceSummary,'Pamb') && ...
@@ -143,7 +143,7 @@ classdef CarrierIonoFreeAmbiguityTraceability
         function s = fromSummary(summary, cfg)
             % fromSummary  Thin wrapper for report integration.
             s = revgnss.CarrierIonoFreeAmbiguityTraceability.assess(summary, cfg);
-            % Stage 54: populate arc consistency enforcement fields from summary.
+            % Populate arc consistency enforcement fields from summary.
             try
                 if isfield(summary,'carrierArcConsistencyEnforced')
                     s.arcConsistencyEnforced = logical(summary.carrierArcConsistencyEnforced);
@@ -206,7 +206,7 @@ classdef CarrierIonoFreeAmbiguityTraceability
             s.integerAmbiguityIsNonInteger = true;
             s.integerFixingImplemented   = false;
             s.lambdaImplemented          = false;
-            % Stage 54: arc consistency enforcement fields.
+            % Arc consistency enforcement fields.
             s.arcConsistencyEnforced     = false;
             s.arcConsistentPairCount     = 0;
             s.arcInconsistentPairCount   = 0;

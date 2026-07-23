@@ -8,7 +8,6 @@ classdef ScientificValidationCampaign
     % Usage (from ReportRunner after the main simulation):
     %   campResult = revgnss.ScientificValidationCampaign.run(cfg);
     %
-    % Stage 85.
 
     methods (Static)
 
@@ -183,7 +182,6 @@ classdef ScientificValidationCampaign
             result.campaignGeometryStressStatus = revgnss.ScientificValidationCampaign.caseStatus_(result,'reducedTowerGeometry');
 
             % NIS/NEES: aggregate from all nominal runs
-            nisRows = [nominalRows, cellfun(@(r) r, allRows, 'UniformOutput', false)];
             repNis  = revgnss.ScientificValidationCampaign.firstAvailableNis_(allRows);
             result.nisOverallStatus   = revgnss.ScientificValidationCampaign.nisGroupStatus_(repNis,'nisOverall');
             result.nisCodeStatus      = revgnss.ScientificValidationCampaign.nisGroupStatus_(repNis,'nisCode');

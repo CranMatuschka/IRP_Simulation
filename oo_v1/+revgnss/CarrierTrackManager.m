@@ -16,16 +16,19 @@ classdef CarrierTrackManager < handle
     properties (Access = private)
         prevResidual_m   % containers.Map: key -> previous prefit residual [m]
         epochCount       % containers.Map: key -> number of epochs tracked
-        slipCount_       % containers.Map: key -> cumulative slip count (Stage 52)
-        currentArcEpoch_ % containers.Map: key -> epochs in current arc (Stage 52)
-        currentArcId_    % containers.Map: key -> integer arc ID (Stage 53; increments on slip)
-        % Stage 73: model-step-compensated slip detection state
+        slipCount_       % containers.Map: key -> cumulative slip count
+        currentArcEpoch_ % containers.Map: key -> epochs in current arc
+        currentArcId_    % containers.Map: key -> integer arc ID; increments on slip
+        % Model-step-compensated slip detection state
         prevTowerClkModel_m_        % containers.Map: key -> previous tower clock model [m]
         nProductBoundaries_         (1,1) double = 0  % product epoch boundary events (per-track sum)
         nCompensatedBoundaries_     (1,1) double = 0  % boundaries NOT declared slips
         nConfirmedSlips_            (1,1) double = 0  % slips confirmed after compensation
         nUnclassifiedJumps_         (1,1) double = 0  % slips declared without model metadata
         nFalseProductBoundaryResets_ (1,1) double = 0 % boundaries that DID trigger slips
+        nCommonModeEvents_          (1,1) double = 0
+        nSuppressedCommonModeResets_ (1,1) double = 0
+        nBaselineDifferencedRows_   (1,1) double = 0
     end
 
     methods
@@ -64,16 +67,44 @@ classdef CarrierTrackManager < handle
             slipInfo.nSlips         = 0;
             slipInfo.slippedKeys    = {};
             slipInfo.jumpMags_m     = [];
+            slipInfo.nCommonModeEvents = 0;
+            slipInfo.nSuppressedCommonModeResets = 0;
+            slipInfo.commonModeJump_m = 0;
+            slipInfo.nBaselineDifferencedRows = 0;
 
             if ~sd.enable || M == 0
                 obj.updateHistory_(cpInfo, sd);
                 return
             end
 
-            % Stage 73: model-step-compensated detection metadata.
+            % Model-step-compensated detection metadata.
             hasModelMeta = isfield(cpInfo, 'towerClkModel_m') && ...
                            numel(cpInfo.towerClkModel_m) == M;
             doCompensate = hasModelMeta && sd.productStepCompensation;
+
+            useNewMetrics = sd.commonModeEnable || sd.baselineDifferencedEnable;
+            metricOverride_m = zeros(M,1);
+            useOverride = false(M,1);
+            epochNow = zeros(M,1);
+            expectedJump_m = zeros(M,1);
+            if useNewMetrics
+                [baseMetric_m, epochNow, expectedJump_m] = obj.baseMetrics_(cpInfo, sd, doCompensate);
+                [metricOverride_m, useOverride, commonJump_m, commonEvent, nSuppressed, nBaseRows] = ...
+                    revgnss.CarrierTrackManager.metricOverrides_(baseMetric_m, epochNow, cpInfo, sd);
+                if commonEvent
+                    obj.nCommonModeEvents_ = obj.nCommonModeEvents_ + 1;
+                    slipInfo.nCommonModeEvents = 1;
+                    slipInfo.commonModeJump_m = commonJump_m;
+                end
+                if nSuppressed > 0
+                    obj.nSuppressedCommonModeResets_ = obj.nSuppressedCommonModeResets_ + nSuppressed;
+                    slipInfo.nSuppressedCommonModeResets = nSuppressed;
+                end
+                if nBaseRows > 0
+                    obj.nBaselineDifferencedRows_ = obj.nBaselineDifferencedRows_ + nBaseRows;
+                    slipInfo.nBaselineDifferencedRows = nBaseRows;
+                end
+            end
 
             for mi = 1:M
                 ti  = cpInfo.towerIdx(mi);
@@ -85,15 +116,36 @@ classdef CarrierTrackManager < handle
                 ec = 0;
                 if isKey(obj.epochCount, key); ec = obj.epochCount(key); end
                 ec = ec + 1;
+                if useNewMetrics
+                    ec = epochNow(mi);
+                end
 
                 prevRes = 0;
                 if isKey(obj.prevResidual_m, key); prevRes = obj.prevResidual_m(key); end
 
-                % Stage 73: compensated detection when tower clock model metadata
-                % is available.  Otherwise fall back to legacy raw-jump detection.
+                % Compensated detection when tower clock model metadata
+                % is available; otherwise fall back to legacy raw-jump detection.
                 jumpMag  = 0;
                 isSlip   = false;
-                if doCompensate
+                if useOverride(mi)
+                    slipMetric_ = metricOverride_m(mi);
+                    if ec >= sd.minEpochsBeforeDetect
+                        isSlip = abs(slipMetric_) >= sd.threshold_m;
+                        jumpMag = abs(slipMetric_);
+                    end
+                    if isSlip; obj.nConfirmedSlips_ = obj.nConfirmedSlips_ + 1; end
+                    if doCompensate
+                        if ec >= sd.minEpochsBeforeDetect && abs(expectedJump_m(mi)) > 1e-3
+                            obj.nProductBoundaries_ = obj.nProductBoundaries_ + 1;
+                            if ~isSlip
+                                obj.nCompensatedBoundaries_ = obj.nCompensatedBoundaries_ + 1;
+                            else
+                                obj.nFalseProductBoundaryResets_ = obj.nFalseProductBoundaryResets_ + 1;
+                            end
+                        end
+                        obj.prevTowerClkModel_m_(key) = cpInfo.towerClkModel_m(mi);
+                    end
+                elseif doCompensate
                     currModel = cpInfo.towerClkModel_m(mi);
                     prevModel = 0;
                     if isKey(obj.prevTowerClkModel_m_, key)
@@ -142,21 +194,21 @@ classdef CarrierTrackManager < handle
                     % resetAndUse keeps the carrier row and relies on the reset
                     % ambiguity covariance P (inflated to resetSigma_m^2) to absorb
                     % the discontinuity.  Measurement covariance R is not modified.
-                    % Stage 52: record slip; reset current-arc epoch.
+                    % Record slip; reset current-arc epoch.
                     sc = 0;
                     if isKey(obj.slipCount_, key); sc = obj.slipCount_(key); end
                     obj.slipCount_(key)       = sc + 1;
                     obj.currentArcEpoch_(key) = 0;
-                    % Stage 53: increment arc ID on slip (new arc starts after slip).
+                    % Increment arc ID on slip (new arc starts after slip).
                     aid = 1;
                     if isKey(obj.currentArcId_, key); aid = obj.currentArcId_(key) + 1; end
                     obj.currentArcId_(key) = aid;
                 else
-                    % Stage 52: advance current arc epoch.
+                    % Advance current arc epoch.
                     ca = 0;
                     if isKey(obj.currentArcEpoch_, key); ca = obj.currentArcEpoch_(key); end
                     obj.currentArcEpoch_(key) = ca + 1;
-                    % Stage 53: initialize arc ID to 1 on first observation.
+                    % Initialize arc ID to 1 on first observation.
                     if ~isKey(obj.currentArcId_, key)
                         obj.currentArcId_(key) = 1;
                     end
@@ -180,10 +232,13 @@ classdef CarrierTrackManager < handle
             obj.nConfirmedSlips_             = 0;
             obj.nUnclassifiedJumps_          = 0;
             obj.nFalseProductBoundaryResets_ = 0;
+            obj.nCommonModeEvents_           = 0;
+            obj.nSuppressedCommonModeResets_ = 0;
+            obj.nBaselineDifferencedRows_    = 0;
         end
 
         function s = getArcStateSummary(obj, dt_s)
-            % getArcStateSummary  Aggregated arc state summary (Stage 53).
+            % getArcStateSummary  Aggregated arc state summary.
             %
             % Returns struct with statistics over all known tracks, parallel
             % to getArcEvidence but including per-track arc IDs.
@@ -220,7 +275,7 @@ classdef CarrierTrackManager < handle
         end
 
         function arcState = getArcStateForRows(obj, cpInfo)
-            % getArcStateForRows  Per-row arc state lookup (Stage 53).
+            % getArcStateForRows  Per-row arc state lookup.
             %
             % Called AFTER trackMgr.process() so arc IDs reflect current-epoch slips.
             % Returns struct arrays parallel to cpInfo rows.
@@ -252,7 +307,7 @@ classdef CarrierTrackManager < handle
         end
 
         function ev = getArcEvidence(obj, dt_s)
-            % getArcEvidence  Compact arc/slip evidence struct (Stage 52).
+            % getArcEvidence  Compact arc/slip evidence struct.
             ev.nActiveTracks      = double(obj.epochCount.Count);
             ev.available          = ev.nActiveTracks > 0;
             ev.totalSlipEvents    = 0;
@@ -284,12 +339,15 @@ classdef CarrierTrackManager < handle
             if ev.totalSlipEvents == 0; ev.classification = 'arcs-exported';
             else;                        ev.classification = 'arcs-exported-with-slips';
             end
-            % Stage 73: compensated slip detection diagnostics
+            % Compensated slip detection diagnostics
             ev.nProductBoundaries         = obj.nProductBoundaries_;
             ev.nCompensatedBoundaries     = obj.nCompensatedBoundaries_;
             ev.nConfirmedSlips            = obj.nConfirmedSlips_;
             ev.nUnclassifiedJumps         = obj.nUnclassifiedJumps_;
             ev.nFalseProductBoundaryResets = obj.nFalseProductBoundaryResets_;
+            ev.nCommonModeEvents          = obj.nCommonModeEvents_;
+            ev.nSuppressedCommonModeResets = obj.nSuppressedCommonModeResets_;
+            ev.nBaselineDifferencedRows   = obj.nBaselineDifferencedRows_;
         end
 
     end
@@ -313,13 +371,40 @@ classdef CarrierTrackManager < handle
                 if hasModelMeta
                     obj.prevTowerClkModel_m_(key) = cpInfo.towerClkModel_m(mi);
                 end
-                % Stage 52: no slips when detection disabled; advance arc epoch.
+                % No slips when detection disabled; advance arc epoch.
                 ca = 0;
                 if isKey(obj.currentArcEpoch_, key); ca = obj.currentArcEpoch_(key); end
                 obj.currentArcEpoch_(key) = ca + 1;
-                % Stage 53: single arc (ID=1) when detection disabled.
+                % Single arc (ID=1) when detection disabled.
                 if ~isKey(obj.currentArcId_, key)
                     obj.currentArcId_(key) = 1;
+                end
+            end
+        end
+
+        function [metric_m, epochNow, expectedJump_m] = baseMetrics_(obj, cpInfo, sd, doCompensate)
+            M = numel(cpInfo.towerIdx);
+            metric_m = zeros(M,1);
+            epochNow = zeros(M,1);
+            expectedJump_m = zeros(M,1);
+            for mi = 1:M
+                key = sprintf('T%03d_A%03d_S%02d', ...
+                    cpInfo.towerIdx(mi), cpInfo.antennaIdx(mi), cpInfo.signalIdx(mi));
+                ec = 0;
+                if isKey(obj.epochCount, key); ec = obj.epochCount(key); end
+                epochNow(mi) = ec + 1;
+                prevRes = 0;
+                if isKey(obj.prevResidual_m, key); prevRes = obj.prevResidual_m(key); end
+                metric_m(mi) = cpInfo.prefit_m(mi) - prevRes;
+                if doCompensate
+                    prevModel = 0;
+                    if isKey(obj.prevTowerClkModel_m_, key)
+                        prevModel = obj.prevTowerClkModel_m_(key);
+                    end
+                    expectedJump_m(mi) = cpInfo.towerClkModel_m(mi) - prevModel;
+                    metric_m(mi) = metric_m(mi) - expectedJump_m(mi);
+                elseif epochNow(mi) < sd.minEpochsBeforeDetect
+                    metric_m(mi) = 0;
                 end
             end
         end
@@ -328,12 +413,70 @@ classdef CarrierTrackManager < handle
 
     methods (Static, Access = private)
 
+        function [metric_m, useOverride, commonJump_m, commonEvent, nSuppressed, nBaseRows] = ...
+                metricOverrides_(baseMetric_m, epochNow, cpInfo, sd)
+            M = numel(baseMetric_m);
+            metric_m = baseMetric_m;
+            useOverride = false(M,1);
+            commonJump_m = 0;
+            commonEvent = false;
+            nSuppressed = 0;
+            nBaseRows = 0;
+            valid = epochNow >= sd.minEpochsBeforeDetect;
+            useCommon = sd.commonModeEnable || sd.baselineDifferencedEnable;
+            if useCommon && sum(valid) >= sd.commonModeMinRows
+                vals = baseMetric_m(valid);
+                vals = vals(isfinite(vals));
+                if ~isempty(vals)
+                    commonJump_m = median(vals);
+                    commonEvent = abs(commonJump_m) >= sd.threshold_m;
+                end
+            end
+            if sd.commonModeEnable && commonEvent
+                metric_m(valid) = baseMetric_m(valid) - commonJump_m;
+                useOverride(valid) = true;
+            end
+            if sd.baselineDifferencedEnable
+                refAnt = sd.referenceAntenna;
+                for mi = 1:M
+                    if ~valid(mi) || cpInfo.antennaIdx(mi) == refAnt
+                        continue
+                    end
+                    refMask = valid & (cpInfo.towerIdx == cpInfo.towerIdx(mi)) & ...
+                        (cpInfo.signalIdx == cpInfo.signalIdx(mi)) & (cpInfo.antennaIdx == refAnt);
+                    if sum(refMask) == 1
+                        ri = find(refMask, 1);
+                        refLooksLocal = abs(baseMetric_m(ri)) >= sd.threshold_m && ~commonEvent;
+                        if ~refLooksLocal
+                            metric_m(mi) = baseMetric_m(mi) - baseMetric_m(ri);
+                            useOverride(mi) = true;
+                            nBaseRows = nBaseRows + 1;
+                        end
+                    elseif commonEvent
+                        metric_m(mi) = baseMetric_m(mi) - commonJump_m;
+                        useOverride(mi) = true;
+                    end
+                end
+                if commonEvent
+                    refRows = valid & cpInfo.antennaIdx == refAnt;
+                    metric_m(refRows) = baseMetric_m(refRows) - commonJump_m;
+                    useOverride(refRows) = true;
+                end
+            end
+            nSuppressed = sum(valid & useOverride & ...
+                abs(baseMetric_m) >= sd.threshold_m & abs(metric_m) < sd.threshold_m);
+        end
+
         function sd = slipCfg_(cfg)
             sd.enable                  = false;
             sd.threshold_m             = 0.1;
             sd.minEpochsBeforeDetect   = 3;
             sd.action                  = 'resetAndSkip';
-            sd.productStepCompensation = false; % Stage 73 default: off until explicitly enabled
+            sd.productStepCompensation = false; % default: off until explicitly enabled
+            sd.commonModeEnable        = false;
+            sd.commonModeMinRows       = 4;
+            sd.baselineDifferencedEnable = false;
+            sd.referenceAntenna        = 1;
 
             if isfield(cfg,'measurements') && isfield(cfg.measurements,'carrier')
                 cr = cfg.measurements.carrier;
@@ -345,11 +488,21 @@ classdef CarrierTrackManager < handle
                     if isfield(sl,'action');                sd.action                 = sl.action;                end
                 end
             end
-            % Stage 73: productStepCompensation read from cfg.carrierSlip.productStepCompensation.
+            % productStepCompensation read from cfg.carrierSlip.productStepCompensation.
             try
                 if isfield(cfg,'carrierSlip') && isfield(cfg.carrierSlip,'productStepCompensation')
                     sd.productStepCompensation = logical(cfg.carrierSlip.productStepCompensation);
                 end
+            catch; end
+            try
+                cm = cfg.carrierSlip.commonModeCompensation;
+                if isfield(cm,'enable');  sd.commonModeEnable = logical(cm.enable); end
+                if isfield(cm,'minRows'); sd.commonModeMinRows = cm.minRows; end
+            catch; end
+            try
+                bm = cfg.carrierSlip.baselineDifferencedMode;
+                if isfield(bm,'enable'); sd.baselineDifferencedEnable = logical(bm.enable); end
+                if isfield(bm,'referenceAntenna'); sd.referenceAntenna = bm.referenceAntenna; end
             catch; end
         end
 

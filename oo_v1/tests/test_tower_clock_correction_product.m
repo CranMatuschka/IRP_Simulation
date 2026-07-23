@@ -147,7 +147,8 @@ cfg_t4 = revgnss.ConfigFactory.defaultConfig();
 % product mode now requires explicit cfg.towerClock.products struct;
 % this test checks getClockAtProductEpoch_ which is the history-based path.
 cfg_t4.towerClock.correctionMode              = 'truthHistoryProduct';
-cfg_t4.errors.towerClock.updateInterval_s     = 300;
+cfg_t4.clocks.tower.product.updateInterval_s  = 300;
+cfg_t4.clocks.tower.product.latency_s         = 0;
 cfg_t4.simulation.duration_s                  = 500;  % precompute noise far enough
 cfg_t4.measurements.doppler.useInEKF = false;
 cfg_t4.measurements.carrierMode      = 'off';

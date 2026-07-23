@@ -1,5 +1,5 @@
 classdef CarrierRowMetadataInventory
-    % CarrierRowMetadataInventory  Stage 39 carrier row metadata inventory.
+    % CarrierRowMetadataInventory  Carrier row metadata inventory.
     %
     % Inventories carrier rows, differential-attitude rows, receiver/tower/signal
     % associations, and ambiguity states from existing metadata.
@@ -109,7 +109,7 @@ classdef CarrierRowMetadataInventory
             ai.warnings            = {};
             try
                 sm = out.summary;
-                % Prefer Stage 41 state-map export if present.
+                % Prefer state-map export if present.
                 if isfield(sm,'ambiguityStateMetadata') && ...
                         isfield(sm.ambiguityStateMetadata,'available') && ...
                         sm.ambiguityStateMetadata.available

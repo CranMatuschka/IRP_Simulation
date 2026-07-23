@@ -95,6 +95,18 @@ classdef ReportRunner
                 fprintf('  MAT writing disabled by cfg.report.writeMat = false.\n');
             end
 
+            % ---- Multi-asset: route to the federated swarm path ---------
+            % nSpaceAssets>1 -> N INDEPENDENT single-asset EKFs + the ISL/TWSTFT relative layer,
+            % written as ONE unified swarm .mat + PDF (docs/federated_swarm_architecture.md). The
+            % single-asset case (nSpaceAssets<=1) falls through to the normal pipeline below and is
+            % byte-identical to the golden. This is the single entry: run_oo_v1 -> runSingle -> here.
+            if isfield(cfg,'scenario') && isfield(cfg.scenario,'nSpaceAssets') && ...
+                    round(cfg.scenario.nSpaceAssets) > 1
+                out = revgnss.ReportRunner.runFederatedSwarm_(cfg, reportFolder, pdfStem, ...
+                    pdfPath, matPath, writePdf, writeMat, version);
+                return;
+            end
+
             % ---- Handle existing files (only if we'll write them) -------
             if writePdf || writeMat
                 if ~exist(reportFolder,'dir'); mkdir(reportFolder); end
@@ -122,6 +134,7 @@ classdef ReportRunner
             cfg.plots.closeAfterSave        = false;
 
             % ---- Run simulation (finalizeConfig called inside) ----------
+            cfgLiteral = cfg;   % literal (pre-finalizeConfig) snapshot for the .out override dump
             sim = revgnss.ReverseGNSSSimulation(cfg);
             sim.initialize();
             sim.run();
@@ -131,7 +144,16 @@ classdef ReportRunner
             % ---- Collect summary metrics --------------------------------
             summary = revgnss.ReportRunner.collectSummary_(simData, cfg, version, reportFolder, pdfPath, matPath);
 
-            % ---- Stage 41: Export ambiguity state metadata and covariance ----
+            % ---- P5' per-satellite estimate table (multi-asset 'position' runs) ----
+            if isfield(summary,'swarmEstimate') && isstruct(summary.swarmEstimate) && ...
+                    isfield(summary.swarmEstimate,'available') && summary.swarmEstimate.available
+                fprintf('\n');
+                lines_ = revgnss.SwarmEstimateSummary.format(summary.swarmEstimate);
+                for li_ = 1:numel(lines_); fprintf('%s\n', lines_{li_}); end
+                fprintf('\n');
+            end
+
+            % ---- Export ambiguity state metadata and covariance ----
             doAmbMeta = isfield(cfg,'diagnostics') && isfield(cfg.diagnostics,'ambiguityStateMetadata') && ...
                 isfield(cfg.diagnostics.ambiguityStateMetadata,'enable') && ...
                 cfg.diagnostics.ambiguityStateMetadata.enable;
@@ -146,7 +168,7 @@ classdef ReportRunner
                 end
             end
 
-            % ---- Stage 48: carrier IF ambiguity traceability compact fields ----
+            % ---- Carrier IF ambiguity traceability compact fields ----
             % Depends on ambiguityStateMetadata attached above; must stay here.
             nAmb48_ = 0;
             if isfield(summary,'ambiguityStateMetadata') && ...
@@ -165,7 +187,7 @@ classdef ReportRunner
                 summary.carrierIfAmbiguityPairCount > 0;
             summary.carrierIfIntegerAmbiguityIsNonInteger = true;
 
-            % ---- Stage 49: wide-lane / narrow-lane compact fields ----
+            % ---- Wide-lane / narrow-lane compact fields ----
             wl49Req_ = false;
             try; wl49Req_ = logical(cfg.diagnostics.wideLaneNarrowLane.enable); catch; end
             summary.wideLaneNarrowLaneRequested = wl49Req_;
@@ -204,7 +226,7 @@ classdef ReportRunner
                 end
             end
 
-            % ---- Stage 50: ambiguity fixing readiness gate compact fields ----
+            % ---- Ambiguity fixing readiness gate compact fields ----
             amfr50Req_ = false;
             try; amfr50Req_ = logical(cfg.diagnostics.ambiguityFixingReadiness.enable); catch; end
             summary.ambiguityFixingReadinessRequested       = amfr50Req_;
@@ -224,7 +246,7 @@ classdef ReportRunner
                 end
             end
 
-            % ---- Stage 51: ambiguity readiness evidence compact fields ----
+            % ---- Ambiguity readiness evidence compact fields ----
             amre51Req_ = false;
             try; amre51Req_ = logical(cfg.diagnostics.ambiguityReadinessEvidence.enable); catch; end
             summary.ambiguityReadinessEvidenceRequested         = amre51Req_;
@@ -264,14 +286,14 @@ classdef ReportRunner
                 end
             end
 
-            % ---- Stage 73: carrier arc robustness defaults (updated below) ----
+            % ---- Carrier arc robustness defaults (updated below) ----
             summary.nCarrierProductBoundaries            = 0;
             summary.nCarrierProductBoundariesCompensated = 0;
             summary.nConfirmedCarrierSlips               = 0;
             summary.nUnclassifiedCarrierJumps            = 0;
             summary.nFalseProductBoundaryResets          = 0;
 
-            % ---- Stage 52: carrier arc evidence compact fields ----
+            % ---- Carrier arc evidence compact fields ----
             carr52Req_ = false;
             try; carr52Req_ = logical(cfg.diagnostics.carrierArcEvidence.enable); catch; end
             summary.carrierArcEvidenceRequested      = carr52Req_;
@@ -302,7 +324,7 @@ classdef ReportRunner
                 end
             end
 
-            % ---- Stage 53: arc-separated float ambiguity compact fields ----
+            % ---- Arc-separated float ambiguity compact fields ----
             arcSep53Req_ = false;
             try; arcSep53Req_ = logical(cfg.diagnostics.arcSeparatedAmbiguities.enable); catch; end
             summary.arcSeparatedAmbiguitiesEnabled   = arcSep53Req_;
@@ -337,7 +359,7 @@ classdef ReportRunner
                         summary.ambiguityArcMaxEpoch         = asSumm53_.maxArcEpoch;
                         summary.ambiguityResetCount          = asSumm53_.totalSlipEvents;
                     end
-                    % IF arc consistency from Stage 52 arc evidence if already available.
+                    % IF arc consistency from arc evidence if already available.
                     if summary.carrierArcEvidenceAvailable && ...
                             isfield(summary,'carrierArcNSlipEvents')
                         % Derive IF consistency from summary (zero slips = all consistent).
@@ -353,7 +375,7 @@ classdef ReportRunner
                 end
             end
 
-            % ---- Stage 54: arc-consistency enforcement compact fields ----
+            % ---- Arc-consistency enforcement compact fields ----
             arcEnf54Req_ = false;
             try; arcEnf54Req_ = logical(cfg.estimator.enforceCarrierArcConsistency.enable); catch; end
             summary.carrierArcConsistencyEnforced     = arcEnf54Req_;
@@ -379,7 +401,7 @@ classdef ReportRunner
                 end
             end
 
-            % ---- Stage 55: diagnostic plugin registry metadata ----
+            % ---- Diagnostic plugin registry metadata ----
             plugReg55_ = false;
             try; plugReg55_ = logical(cfg.diagnostics.pluginRegistry.enable); catch; end
             if plugReg55_
@@ -391,7 +413,7 @@ classdef ReportRunner
                 end
             end
 
-            % ---- Stage 56: measurement geometry core consolidation ----
+            % ---- Measurement geometry core consolidation ----
             summary.linkGeometryPresent           = true;
             summary.codeJacUsesSharedGeometry     = true;
             summary.carrierMeasUsesSharedGeometry = true;
@@ -431,8 +453,10 @@ classdef ReportRunner
                     cfg_kav.report.writePdf = false;
                     cfg_kav.report.writeMat = false;
                     cfg_kav.plots.enable    = false;
-                    % Stage 85: KAV sub-run must not trigger campaign recursion.
+                    % KAV sub-run must not trigger campaign recursion.
                     try; cfg_kav.validation.scientificCampaign.enable = false; catch; end
+                    % the KAV sub-run must not launch the Monte-Carlo ensemble.
+                    try; cfg_kav.report.monteCarlo.enable = false; catch; end
                     out_kav = revgnss.ReportRunner.runSingle(cfg_kav);
                     r_kav   = out_kav.summary.attitudeImprovementRatio;
                     summary.knownAmbImprovementRatio = r_kav;
@@ -454,7 +478,7 @@ classdef ReportRunner
                 end
             end
 
-            % ---- Stage 57: EKF innovation accounting and gauge/NIS cleanup ----
+            % ---- EKF innovation accounting and gauge/NIS cleanup ----
             summary.stage57EkfAccountingEnabled   = false;
             summary.stage57MeasPhysicsChanged     = false;
             summary.stage57EkfMathChanged         = false;
@@ -488,7 +512,7 @@ classdef ReportRunner
                 end
             catch; end
 
-            % ---- Stage 58: EKF two-body/J2 dynamics prediction ----
+            % ---- EKF two-body/J2 dynamics prediction ----
             summary.ekfDynamicsMode                  = 'constantVelocity';
             summary.ekfDynamicsForceModel            = 'none';
             summary.ekfDynamicsFrameModel            = 'none';
@@ -530,7 +554,7 @@ classdef ReportRunner
                 end
             catch; end
 
-            % ---- Stage 59: single-asset carrier attitude scenario ----
+            % ---- Single-asset carrier attitude scenario ----
             summary.stage59ScenarioEnabled          = false;
             summary.stage59ScenarioClassification   = 'disabled';
             summary.singleAssetAttitudeScenarioName = '';
@@ -556,7 +580,7 @@ classdef ReportRunner
             if isfield(cfg,'scenario') && isfield(cfg.scenario,'name') && ...
                     strcmp(cfg.scenario.name,'singleAssetCarrierAttitude')
                 try
-                    % Stage 60: pre-extract final euler so assess() can use them
+                    % Pre-extract final euler so assess() can use them
                     eu_tr = simData.getFinalTruthEuler_rad();
                     eu_es = simData.getFinalEstimateEuler_rad();
                     if ~isempty(eu_tr)
@@ -591,7 +615,7 @@ classdef ReportRunner
                 end
             end
 
-            % ---- Stage 60: carrier-attitude measurement model closure --------
+            % ---- Carrier-attitude measurement model closure --------
             summary.stage60CarrierAttClosureAvailable      = false;
             summary.stage60CarrierAttClosureClassification = 'unavailable';
             summary.stage60CarrierAttRowsChecked           = 0;
@@ -642,7 +666,7 @@ classdef ReportRunner
                     % Carrier-attitude row closure spot-check
                     sm60_ = sim.ekf.stateMap;
                     r60_  = sim.ekf.x(sm60_.r_idx);
-                    eu60_ = sim.ekf.getReportEulerRad();  % Stage 61: use nominal euler
+                    eu60_ = sim.ekf.getReportEulerRad();  % use nominal euler
                     chk60_ = revgnss.CarrierAttitudeRowClosure.spotCheck( ...
                         cfg, sim.towers, sm60_, r60_, eu60_);
                     summary.stage60CarrierAttRowsChecked   = chk60_.rowsChecked;
@@ -659,7 +683,7 @@ classdef ReportRunner
                 end
             end
 
-            % ---- Stage 61: quaternion error-state EKF summary fields ----
+            % ---- Quaternion error-state EKF summary fields ----
             summary.stage61Parameterization           = 'eulerZYX';
             summary.quaternionErrorStateEkfActive              = false;
             summary.stage61InjectionCount             = 0;
@@ -686,7 +710,7 @@ classdef ReportRunner
                 end
             catch; end
 
-            % ---- Stage 62: quaternion covariance consistency fields ----
+            % ---- Quaternion covariance consistency fields ----
             summary.stage62CovarianceResetOrder         = 'posterior-after-joseph';
             summary.stage62JosephUsesPminus             = true;
             summary.stage62ResetAppliedToPosterior      = true;
@@ -721,7 +745,7 @@ classdef ReportRunner
                 end
             catch; end
 
-            % ---- Stage 63: controlled raw-carrier integer ambiguity fixing ----
+            % ---- Controlled raw-carrier integer ambiguity fixing ----
             summary.integerAmbiguityFixingActive = false;
             summary.stage63Mode                     = 'disabled';
             summary.stage63Classification           = 'disabled';
@@ -754,7 +778,7 @@ classdef ReportRunner
                 end
             catch; end
 
-            % ---- Stage 64: scientific closure summary fields ---------------
+            % ---- Scientific closure summary fields ---------------
             summary.physicsConfigSectionActive = true;
             scen64_ = '';
             try; scen64_ = cfg.scenario.name; catch; end
@@ -790,7 +814,7 @@ classdef ReportRunner
             summary.stage64FalseFixRisk = false;
             summary.stage64PppGrade     = false;
 
-            % ---- Stage 66: single-asset one-way closure summary fields -----
+            % ---- Single-asset one-way closure summary fields -----
             summary.oneWayClosureSectionActive         = true;
             summary.stage66NSpaceAssets   = 1;
             orbitClass66_ = 'GEO';
@@ -810,7 +834,7 @@ classdef ReportRunner
                                             summary.stage66TwoWayDisabled;
             summary.stage66OperationalClaim = false;
 
-            % ---- Stage 67: attitude, clock, and dynamics realism summary ----
+            % ---- Attitude, clock, and dynamics realism summary ----
             attPrim67_ = 'carrierLeverArmQuaternionEkf';
             try; attPrim67_ = cfg.estimator.attitude.primaryMode; catch; end
             summary.stage67PrimaryAttMode = attPrim67_;
@@ -840,7 +864,7 @@ classdef ReportRunner
             summary.stage67OrbitPropMode = propMode67_;
             summary.stage67PerfectCorrectionFalse = ~strcmp(tClkMode67_, 'perfectCorrection');
 
-            % ---- Stage 80: propagation and one-way timing summary --------
+            % ---- Propagation and one-way timing summary --------
             summary.truthPropagatorMode = propMode67_;
             try; summary.truthPropagatorMode = cfg.orbit.truth.mode; catch; end
             summary.estimatorDynamicsMode = dyn67_;
@@ -879,7 +903,7 @@ classdef ReportRunner
                 end
             catch; end
 
-            % ---- MD Stage 95: truth-estimation separation audit (honest, COMPUTED) --------
+            % ---- MD truth-estimation separation audit (honest, COMPUTED) --------
             % Booleans/strings are ignored by extractMetrics (logicals are not numeric in
             % MATLAB), so these never touch the frozen golden fingerprint; the report reads
             % them directly. Computed from cfg via the guard, so they stay honest in every
@@ -903,7 +927,7 @@ classdef ReportRunner
                 summary.teSepStatus = ['auditUnavailable: ' teErr_.message];
             end
 
-            % ---- Stage 82: J2 diagnostics and source-truth summary --------
+            % ---- J2 diagnostics and source-truth summary --------
             summary.representativeJ2Accel_mps2 = 0;
             try; summary.representativeJ2Accel_mps2 = cfg.diagnostics.dynamicsMismatch.representativeJ2Accel_mps2; catch; end
             summary.j2DefaultPolicy = 'twoBodyDefaultJ2Available';
@@ -940,7 +964,7 @@ classdef ReportRunner
                     summary.diffAttSchemaStatus = 'complete';
                 end
             catch; end
-            % Stage 80: validation scope — active single-asset one-way report.
+            % Validation scope — active single-asset one-way report.
             summary.validationScope = 'singleAssetOneWayActive';
             summary.excludedInactiveFeatureTests = { ...
                 'test_isl_stub.m', 'test_stage20_multi_space_assets.m', ...
@@ -949,7 +973,7 @@ classdef ReportRunner
                 'test_stage23_isl_link_timing.m', ...
                 'test_stage24_twstft_diagnostics.m' };
 
-            % Stage 81: scientific profile and model coverage audit fields.
+            % Scientific profile and model coverage audit fields.
             summary.scientificProfileMode  = 'singleAssetOneWaySyntheticClosedV1';
             try; summary.scientificProfileMode = cfg.scientificProfile.mode; catch; end
             summary.claimLevel = 'controlledSynthetic';
@@ -982,7 +1006,7 @@ classdef ReportRunner
             summary.validationStatisticsNisMode = 'partialCovarianceAware';
             try; summary.validationStatisticsNisMode = cfg.validation.statistics.nis.mode; catch; end
 
-            % --- Stage 85: campaign placeholders (populated later by ScientificValidationCampaign.run) ---
+            % --- Campaign placeholders (populated later by ScientificValidationCampaign.run) ---
             summary.scientificCampaignStatus       = 'notRun';
             summary.scientificCampaignProfile      = 'off';
             summary.campaignOverallStatus          = 'notRun';
@@ -1033,7 +1057,7 @@ classdef ReportRunner
             try; sp3Mode = cfg.products.sp3.mode; catch; end
             summary.externalProductsStatus = sp3Mode;
 
-            % Stage 68: atmosphere / antenna / bias enable status.
+            % Atmosphere / antenna / bias enable status.
             summary.stage68TropTruthEn = false;
             try; summary.stage68TropTruthEn = cfg.errors.troposphere.truth.enable; catch; end
             summary.stage68TropModelEn = false;
@@ -1057,7 +1081,7 @@ classdef ReportRunner
             summary.stage68MultipathEn = false;
             try; summary.stage68MultipathEn = cfg.errors.multipath.truth.enable || cfg.errors.multipath.model.enable; catch; end
 
-            % ---- Stage 83: Doppler dynamics and carrier product-covariance ----
+            % ---- Doppler dynamics and carrier product-covariance ----
             summary.dopplerModelLevel                = 'ecefOnlyV1';
             try; summary.dopplerModelLevel           = cfg.measurements.doppler.modelLevel; catch; end
             summary.towerRotationalVelocityIncluded  = false;
@@ -1088,7 +1112,7 @@ classdef ReportRunner
             summary.carrierProductDriftTermIncluded  = false;
             summary.carrierProductBoundaryHandling   = 'withinProductEpochOnlyV1';
             summary.carrierRCondition                = NaN;
-            % Stage 84 new summary fields
+            % New summary fields
             summary.dopplerDriftVarianceDiagonalPolicy   = 'trackingOnlyPlusBlock';
             summary.codeProductCovarianceStatus          = 'stage74BlockRTowerClockCorrelation';
             summary.dopplerProductCovarianceStatus       = 'stage83ProductDriftBlock';
@@ -1140,7 +1164,7 @@ classdef ReportRunner
                         rc83_ = di83_.dopplerRCondition; rc83_ = rc83_(isfinite(rc83_));
                         if ~isempty(rc83_); summary.dopplerRCondition = min(rc83_); end
                     end
-                    % Stage 84: harvest drift diagonal policy and carrier arc reference status
+                    % Harvest drift diagonal policy and carrier arc reference status
                     if isfield(di83_,'dopplerDriftVarianceDiagonalPolicy')
                         uPols_ = unique({di83_.dopplerDriftVarianceDiagonalPolicy});
                         if numel(uPols_) == 1
@@ -1149,7 +1173,7 @@ classdef ReportRunner
                             summary.dopplerDriftVarianceDiagonalPolicy = 'mixed';
                         end
                     end
-                    % Stage 84: harvest driftAnchorStatus from dopplerInfo meta
+                    % Harvest driftAnchorStatus from dopplerInfo meta
                     if isfield(di83_,'driftAnchorStatus')
                         das84_ = unique({di83_.driftAnchorStatus});
                         if numel(das84_) == 1; summary.driftAnchorStatus = das84_{1}; end
@@ -1163,7 +1187,7 @@ classdef ReportRunner
                 end
             catch; end
 
-            % ---- Stage 71/72: tower clock product summary fields -------
+            % ---- Tower clock product summary fields -------
             % MUST be computed before PDF generation so ClockExactReportBuilder
             % receives finite product metadata (not NaN).  All values derive
             % from cfg, not from simulation results, so early placement is safe.
@@ -1191,7 +1215,7 @@ classdef ReportRunner
                     summary.towerClockProductMaxAge_s          = maxAge71_;
                     summary.towerClockProductMeanSigma_m       = sqrt(max(varMean71_,0));
                     summary.towerClockProductMaxSigma_m        = sqrt(max(varMax71_,0));
-                    % Stage 72: shared covariance not implemented; only diagonal R inflation.
+                    % Shared covariance not implemented; only diagonal R inflation.
                     summary.towerClockSharedCovarianceApplied  = false;
                     summary.towerClockProductDiagonalInflation = true;
                     summary.dopplerClockProductUncertaintyStatus = ...
@@ -1225,7 +1249,7 @@ classdef ReportRunner
                 summary.dopplerClockProductUncertaintyStatus = 'unknown';
             end
 
-            % ---- Stage 73: carrier arc robustness summary fields ------------
+            % ---- Carrier arc robustness summary fields ------------
             % Must be computed before PDF generation so ClockExactReportBuilder
             % receives finite slip-detection diagnostics.
             try
@@ -1241,6 +1265,9 @@ classdef ReportRunner
                 summary.nConfirmedCarrierSlips               = ae73_.nConfirmedSlips;
                 summary.nUnclassifiedCarrierJumps            = ae73_.nUnclassifiedJumps;
                 summary.nFalseProductBoundaryResets          = ae73_.nFalseProductBoundaryResets;
+                summary.nCarrierCommonModeEvents             = ae73_.nCommonModeEvents;
+                summary.nSuppressedCommonModeResets          = ae73_.nSuppressedCommonModeResets;
+                summary.nBaselineDifferencedSlipRows         = ae73_.nBaselineDifferencedRows;
             catch ME73a_
                 warning('ReportRunner:stage73CountersFailed', ...
                     'Stage 73 runtime slip counters failed: %s', ME73a_.message);
@@ -1260,9 +1287,10 @@ classdef ReportRunner
                 summary.syntheticSlipInjectionEnabled  = false;
                 try; summary.syntheticSlipInjectionEnabled = ...
                     logical(cfg.carrierSlip.syntheticSlipInjection.enable); catch; end
-                summary.nDiffAttBaselineResets = 0;  % DiffAtt slip detection disabled per Stage 69
+                summary.nDiffAttBaselineResets = 0;  % DiffAtt slip detection disabled
                 nda73_ = NaN;
-                try; nda73_ = double(simData.getDiffAttActiveBaselines()); catch; end
+                try; nda73_ = double(revgnss.ReportRunner.finalScalar_( ...
+                    simData.getDiffAttActiveBaselines(), NaN)); catch; end
                 summary.nDiffAttBaselinesActiveFinal = nda73_;
                 summary.nAmbiguityResets = summary.ambiguityResetCount;
                 if isfield(summary,'nConfirmedCarrierSlips') && ...
@@ -1289,8 +1317,8 @@ classdef ReportRunner
                 summary.carrierArcRobustnessStatus     = 'unknown';
             end
 
-            % ---- Stage 74: shared-error covariance summary fields ----------
-            % Defaults (safe if cfg.covariance block absent or run pre-Stage74)
+            % ---- Shared-error covariance summary fields ----------
+            % Defaults (safe if cfg.covariance block absent or run pre)
             summary.covarianceMode                         = 'diagonalOnly';
             summary.codeTowerClockBlockCovarianceApplied   = false;
             summary.nCodeClockCovarianceBlocks             = 0;
@@ -1333,7 +1361,7 @@ classdef ReportRunner
                     'Stage 74 covariance summary fields failed: %s', ME74_.message);
             end
 
-            % ---- Stage 70: baseline carrier integer fix summary fields --------
+            % ---- Baseline carrier integer fix summary fields --------
             % (Must run before PDF generation so ClockExactReportBuilder sees these fields.)
             try
                 st70_ = sim.diffAttStore;
@@ -1354,7 +1382,7 @@ classdef ReportRunner
                 summary.externalReferenceUsedForCalibration = true;
             end
 
-            % ---- Stage 75: per-baseline ambiguity classification fields --------
+            % ---- Per-baseline ambiguity classification fields --------
             try
                 st75_ = revgnss.DiffAttitudeBuilder.defaultStoreFields(sim.diffAttStore, cfg);
                 summary.baselineArClassification          = st75_.integerClassification;
@@ -1364,6 +1392,7 @@ classdef ReportRunner
                 summary.baselineArPartialPolicy           = st75_.partialFixPolicy;
                 summary.nBaselineArFixed                  = st75_.nIntegerFixed;
                 summary.nBaselineArRejectedArc            = st75_.nBaselineArRejectedArc;
+                summary.nBaselineArRejectedPhaseBias      = st75_.nBaselineArRejectedPhaseBias;
                 summary.nBaselineArFloatExternal          = st75_.nBaselineArFloatExternal;
                 summary.externalRefUsedForAnyCalibration  = st75_.externalRefUsedForCalibration;
                 if strcmp(st75_.partialFixPolicy,'useFixedOnlyOrExplicitMixed') || ...
@@ -1378,13 +1407,14 @@ classdef ReportRunner
                 summary.baselineArGnssOnlyClaim          = false;
                 summary.baselineArFalseFixClassification = 'screenedNotFormal';
                 summary.baselineArPhaseBiasStatus        = 'notCalibratedExternalProduct';
+                summary.nBaselineArRejectedPhaseBias      = 0;
                 summary.baselineArPartialPolicy          = 'mixedFixedFloat';
                 summary.nBaselineArUsedInEkf             = 0;
                 summary.nBaselineArRejectedArc           = 0;
                 summary.nBaselineArFloatExternal         = 0;
             end
 
-            % ---- Stage 76: signal config + dimension contract + dual-freq AR ----
+            % ---- Signal config + dimension contract + dual-freq AR ----
             try
                 % Central signal list from finalized cfg
                 summary.signalNames         = cfg.signals.names;
@@ -1430,7 +1460,7 @@ classdef ReportRunner
                 summary.dimensionContractStatus = 'unknown';
             end
             try
-                % Stage 76: dual-frequency AR summary from diffAttStore
+                % Dual-frequency AR summary from diffAttStore
                 st76_ = sim.diffAttStore;
                 summary.attitudeArMode              = revgnss.DiffAttitudeBuilder.storeField_(st76_,'attitudeArMode','rawL1Only');
                 summary.attitudeArSignalMode        = summary.signalMode;
@@ -1452,7 +1482,7 @@ classdef ReportRunner
                 summary.attitudeArFrequenciesUsed   = {'L1'};
             end
 
-            % ---- Stage 79: central config lock summary --------------------
+            % ---- Central config lock summary --------------------
             try
                 audit79_ = struct();
                 if isfield(cfg,'validation') && isfield(cfg.validation,'centralConfigAudit')
@@ -1540,7 +1570,7 @@ classdef ReportRunner
                     appendRawPlots = cfg.report.appendRawPlots;
                 end
 
-                % Phase 9: latex-style scientific section pages
+                % latex-style scientific section pages
                 texFigs = gobjects(0);
                 if strcmp(reportStyle,'latex')
                     [texFigs, texPath2] = revgnss.LatexReportBuilder.build( ...
@@ -1578,7 +1608,7 @@ classdef ReportRunner
                 fprintf('  PDF written: %s  (%.1f kB)\n', pdfPath, info.bytes/1024);
             end
 
-            % Stage 70/75/76 summary fields populated before PDF generation (above).
+            % Summary fields populated before PDF generation (above).
 
             % ---- Diagnostics storage summary ----------------------------
             try; simData.printStorageSummary(); catch; end
@@ -1591,6 +1621,8 @@ classdef ReportRunner
                 diagnostics     = simData;
                 finalStateEstimate = [];
                 finalTruthState    = [];
+                multiAssetTruth    = [];
+                res                = [];
                 try
                     res = sim.getResults();
                     if isfield(res,'ekfHistory')  && ~isempty(res.ekfHistory)
@@ -1601,10 +1633,30 @@ classdef ReportRunner
                     end
                 catch
                 end
-                save(matPath, 'cfg', 'summary', 'diagnostics', ...
-                     'finalStateEstimate', 'finalTruthState', ...
-                     'cs', 'reportVersion', 'reportTimestamp', ...
-                     'pdfPath', 'matPath', '-v7.3');
+                % WP1: persist per-asset truth for swarm (nSpaceAssets>1) runs so
+                % per-satellite truth-vs-truth geometry can be compared offline.
+                % Guarded to multi-asset -> the single-asset save() below is
+                % byte-identical to the pre-WP1 variable list (golden-safe).
+                try
+                    multiAssetTruth = revgnss.ReportRunner.buildMultiAssetTruth_(res, cfg);
+                catch meMat
+                    multiAssetTruth = [];
+                    fprintf('  [WP1] multi-asset truth not persisted: %s\n', meMat.message);
+                end
+                if ~isempty(multiAssetTruth)
+                    save(matPath, 'cfg', 'summary', 'diagnostics', ...
+                         'finalStateEstimate', 'finalTruthState', ...
+                         'multiAssetTruth', ...
+                         'cs', 'reportVersion', 'reportTimestamp', ...
+                         'pdfPath', 'matPath', '-v7.3');
+                    fprintf('  [WP1] multi-asset truth persisted: %d assets x %d epochs (stride %g s)\n', ...
+                        multiAssetTruth.nAssets, numel(multiAssetTruth.time_s), multiAssetTruth.stride_s);
+                else
+                    save(matPath, 'cfg', 'summary', 'diagnostics', ...
+                         'finalStateEstimate', 'finalTruthState', ...
+                         'cs', 'reportVersion', 'reportTimestamp', ...
+                         'pdfPath', 'matPath', '-v7.3');
+                end
 
                 if exist(matPath,'file') ~= 2
                     error('ReportRunner:matNotWritten', 'MAT not written: %s', matPath);
@@ -1625,7 +1677,7 @@ classdef ReportRunner
                 end
             end
 
-            % ---- Stage 85: Scientific Validation Campaign ------------------
+            % ---- Scientific Validation Campaign ------------------
             % Runs inside same invocation; no PDF produced by sub-simulations.
             campResult85_ = revgnss.ScientificValidationCampaign.run(cfg);
             % Merge all campaign fields into summary
@@ -1652,17 +1704,566 @@ classdef ReportRunner
             out.matPath           = matPath;
             out.texPath           = texPath2;
 
+            % Monte-Carlo NEES/NIS filter-consistency evidence (opt-in, default OFF
+            % -> golden byte-identical). Ensemble consistency is the honest alternative to
+            % a single-run NEES/NIS sample. Runs after the main pipeline so it never
+            % perturbs it; the shipped conservative filter is expected to sit below band.
+            out.monteCarlo = revgnss.ReportRunner.runMonteCarloConsistency_(cfg);
+
             % Run log (<stem>.out) beside the PDF/MAT.
             if writePdf || writeMat
-                revgnss.ReportRunner.writeRunLog_(reportFolder, pdfStem, cfg, summary, pdfPath, matPath);
+                revgnss.ReportRunner.writeRunLog_(reportFolder, pdfStem, cfg, cfgLiteral, summary, pdfPath, matPath, out.monteCarlo);
             end
 
+            out.sim = sim;   % expose the sim (used when a federated per-asset report is requested)
             fprintf('=== ReportRunner: done ===\n');
+        end
+
+        % ================================================================
+        % Federated swarm (nSpaceAssets>1): N independent single-asset EKFs + relative layer.
+        % Inlined here so run_oo_v1 -> ReportRunner is the single entry point (no separate runner).
+        % ================================================================
+        function out = runFederatedSwarm_(cfg, reportFolder, stem, pdfPath, matPath, writePdf, writeMat, version)
+            % runFederatedSwarm_  Estimate the swarm (N single-asset EKFs), fuse the ISL/TWSTFT
+            % relative layer, and write ONE unified swarm .mat + PDF. Optionally also writes the N
+            % per-satellite standard single-asset reports (cfg.multiAsset.federated.savePerAssetMat).
+            N0 = round(cfg.scenario.nSpaceAssets);
+            fprintf('\n=== ReportRunner: federated swarm (%d assets) ===\n', N0);
+            if (writePdf || writeMat) && ~isfolder(reportFolder); mkdir(reportFolder); end
+
+            refAsset = 1;
+            try; refAsset = round(cfg.multiAsset.federated.refAsset); catch; end
+            savePerAsset = false;
+            try; savePerAsset = logical(cfg.multiAsset.federated.savePerAssetMat); catch; end
+
+            reportOpts = struct('savePerAsset', savePerAsset, 'folder', reportFolder, ...
+                'stem', stem, 'writePdf', writePdf, 'writeMat', writeMat);
+            results = revgnss.ReportRunner.runFederatedEstimation(cfg, reportOpts);
+            N = results.N;
+            refAsset = max(1, min(refAsset, N));
+
+            rel  = revgnss.SwarmRelativeSolver.solve(cfg, results);
+            summ = revgnss.FederatedSwarmSummary.build(cfg, results, rel, refAsset);
+            revgnss.FederatedSwarmSummary.print(summ);
+
+            out = struct('pdfPath', '', 'matPath', '', 'summary', summ, 'rel', rel, ...
+                'version', version, 'monteCarlo', struct('enabled', false));
+
+            if writeMat
+                swarm = struct('cfg', cfg, 'results', results, 'rel', rel, ...
+                    'summary', summ, 'version', version, 'kind', 'federatedSwarm'); %#ok<NASGU>
+                save(matPath, '-struct', 'swarm', '-v7.3');
+                out.matPath = matPath;
+                fprintf('  Swarm MAT written: %s\n', matPath);
+            end
+            if writePdf
+                % ONE unified report: the chief satellite's full (original) ClockExact report with
+                % the two swarm tables + two swarm plots injected as a "Federated Swarm" appendix.
+                % Best-effort: the swarm .mat is already saved above, so a report-side failure (chief
+                % re-run, campaign, or pdflatex) must NOT abort the run -- catch and warn instead.
+                try
+                    ce = revgnss.ReportRunner.buildUnifiedSwarmReport_(cfg, results, rel, summ, refAsset, reportFolder, stem);
+                    if ce.success && ~isempty(ce.pdfPath) && isfile(ce.pdfPath)
+                        out.pdfPath = ce.pdfPath;
+                        info = dir(ce.pdfPath);
+                        fprintf('  Swarm PDF written (chief report + swarm appendix): %s  (%.1f kB)\n', ce.pdfPath, info.bytes/1024);
+                    else
+                        fprintf('  Swarm PDF not compiled; .tex at %s\n', ce.texPath);
+                    end
+                catch meRep
+                    fprintf(2, '  Swarm PDF step FAILED (%s).\n', meRep.message);
+                    if writeMat; fprintf(2, '  The swarm .mat is preserved: %s\n', matPath); end
+                end
+            end
+            fprintf('=== ReportRunner: federated swarm done ===\n');
+        end
+
+        function ce = buildUnifiedSwarmReport_(cfg, results, rel, summ, refAsset, reportFolder, stem)
+            % buildUnifiedSwarmReport_  Build the ONE swarm report: the chief (refAsset) satellite's
+            % full single-asset ClockExact report + the federated-swarm appendix (per-satellite
+            % absolute table with relPos raw+solved, the ISL/TWSTFT relative-layer table, and the two
+            % swarm plots). The chief is re-run once through the standard single-asset pipeline (report
+            % suppressed) purely to obtain its rich SimData + summary; the estimation and relative
+            % layer above are untouched, so every asset enters the relative layer symmetrically.
+            ce = struct('success', false, 'pdfPath', '', 'texPath', '');
+
+            % Reconstruct the chief's single-asset config -- identical to runFederatedEstimation asset refAsset.
+            setup   = revgnss.ReportRunner.federatedSetup_(cfg);
+            chiefCi = revgnss.ReportRunner.assetConfigForIndex_(setup, refAsset);
+            chiefCi.report.reportFolder = reportFolder;
+            chiefCi.report.stem         = stem;
+            chiefCi.report.writePdf     = false;   % suppress the chief's own report; compile once with the appendix
+            chiefCi.report.writeMat     = false;
+            fprintf('  Building unified report on chief satellite (asset %d)...\n', refAsset);
+            oChief = revgnss.ReportRunner.runSingle(chiefCi);
+
+            % Render swarm figures into the report's figures/ dir.
+            figDir = fullfile(reportFolder, 'figures');
+            kabschOn = false;
+            try; kabschOn = logical(cfg.report.kabschAlignmentPlot.enable); catch; end
+            [absFig, relFig, kabschFig] = revgnss.FederatedSwarmReport.renderFigures(results, rel, figDir, ...
+                [stem '_swarm_abs_err'], [stem '_swarm_rel_err'], [stem '_swarm_kabsch_alignment'], kabschOn);
+
+            % Scenario counts for the appendix caption.
+            nTowers = 0; try; nTowers = cfg.scenario.nTowers;      catch; end
+            nRx     = 0; try; nRx     = cfg.scenario.nReceivers;   catch; end
+            dur     = 0; try; dur     = cfg.simulation.duration_s; catch; end
+
+            % Attach the swarm appendix payload to the chief's summary and build the (compiling) report.
+            summChief = oChief.summary;
+            summChief.federatedSwarm = struct( ...
+                'perAsset',   summ.perAsset, ...
+                'refAsset',   summ.refAsset, ...
+                'nAssets',    summ.nAssets, ...
+                'rel',        revgnss.ReportRunner.packRel_(rel), ...
+                'absFig',     absFig, ...
+                'relFig',     relFig, ...
+                'kabschFig',  kabschFig, ...
+                'nTowers',    nTowers, ...
+                'nReceivers', nRx, ...
+                'duration_s', dur);
+
+            ccfg = oChief.cfg;
+            ccfg.report.reportFolder = reportFolder;
+            ccfg.report.stem         = stem;
+            if isfield(ccfg,'report') && isfield(ccfg.report,'compileTex') && strcmp(ccfg.report.compileTex,'never')
+                ccfg.report.compileTex = 'auto';   % swarm run requested a PDF -> ensure it compiles
+            end
+            ce = revgnss.ClockExactReportBuilder.build(oChief.simData, oChief.dataMeta, ...
+                oChief.sim.asset, oChief.sim.towers, ccfg, summChief);
+        end
+
+        function r = packRel_(rel)
+            % packRel_  Minimal relative-layer scalar bundle for the swarm appendix (robust to missing
+            % fields; the SwarmRelativeSolver always populates these, this just future-proofs).
+            r = struct('baselineErrRaw_m', NaN, 'baselineErrSolved_m', NaN, 'shapeErrSolved_m', NaN, ...
+                'shapeGateOn', false, 'shapeObservationSource', 'disabled', ...
+                'relClockGateOn', false, 'relClockErrSolved_m', NaN, 'weaklyObservable', false, ...
+                'formalShapeSigma_m', NaN);
+            names = fieldnames(r);
+            for i = 1:numel(names)
+                n = names{i};
+                if isstruct(rel) && isfield(rel, n) && ~isempty(rel.(n)); r.(n) = rel.(n); end
+            end
+            r.shapeGateOn      = logical(r.shapeGateOn);
+            r.relClockGateOn   = logical(r.relClockGateOn);
+            r.weaklyObservable = logical(r.weaklyObservable);
+        end
+
+        function results = runFederatedEstimation(cfg, reportOpts)
+            % runFederatedEstimation  Run N INDEPENDENT single-asset EKFs -- one per swarm member on
+            % its own helix orbit. Returns results.asset{i} = {x,P,stateMap,history,truthTraj,...}.
+            % No shared covariance (D1). With reportOpts.savePerAsset, each asset ALSO runs through
+            % the normal single-asset report pipeline (per-satellite .mat + PDF) -- one run per asset,
+            % the sim reused for the relative layer.
+            if nargin < 2; reportOpts = struct('savePerAsset', false); end
+            setup = revgnss.ReportRunner.federatedSetup_(cfg);
+            N = setup.N;
+            results = struct('N', N, 'asset', {cell(1, N)});
+
+            savePerAsset = isfield(reportOpts,'savePerAsset') && reportOpts.savePerAsset;
+
+            % Opt-in OS-process parallelism (cfg.multiAsset.federated.parallel, default
+            % OFF -> the serial loop below, byte-identical to the golden). The N assets are
+            % fully independent (no shared covariance) and per-asset seeded, so running each
+            % in its own matlab -batch worker yields a bit-identical result to the serial
+            % loop -- only the no-per-asset-report path is parallelized (the savePerAsset
+            % path writes reports and stays serial). See runFederatedEstimationParallel_.
+            if ~savePerAsset && N > 1 && revgnss.ReportRunner.federatedParallelEnabled_(cfg)
+                results = revgnss.ReportRunner.runFederatedEstimationParallel_(cfg, setup, N);
+                return;
+            end
+
+            for ai = 1:N
+                ci = revgnss.ReportRunner.assetConfigForIndex_(setup, ai);
+                if savePerAsset
+                    ci.report.reportFolder = fullfile(reportOpts.folder, sprintf('%s_asset%d', reportOpts.stem, ai));
+                    ci.report.stem         = sprintf('%s_asset%d', reportOpts.stem, ai);
+                    ci.report.writePdf     = reportOpts.writePdf;
+                    ci.report.writeMat     = reportOpts.writeMat;
+                    o = revgnss.ReportRunner.runSingle(ci);             % full per-asset report
+                    results.asset{ai} = revgnss.ReportRunner.extractAssetResult_(o.sim);
+                else
+                    results.asset{ai} = revgnss.ReportRunner.runOneAsset_(ci);
+                end
+            end
+        end
+
+        function tf = federatedParallelEnabled_(cfg)
+            % federatedParallelEnabled_  Read the opt-in swarm-parallel flag (default false ->
+            % byte-identical serial path). Defensive: any missing field => false.
+            tf = false;
+            try; tf = logical(cfg.multiAsset.federated.parallel); catch; end
+        end
+
+        function k = federatedMaxWorkers_(cfg, N)
+            % federatedMaxWorkers_  Concurrency cap for the swarm workers.
+            % Default = min(N, cores-1, RAM-cap); an explicit
+            % cfg.multiAsset.federated.maxWorkers (>0) overrides.
+            %
+            % The RAM cap prevents swap-thrash on small-memory machines: each
+            % `matlab -batch` worker needs ~PERWORKER_GB (MATLAB base + a full
+            % per-asset history at long arcs), and ~RESERVE_GB is left for the OS
+            % + parent MATLAB + file sync. MEASURED (16 GB / 8-core): 4 workers
+            % thrash a 7200 s swarm (1.09x, ~15 GB swap in use), while this
+            % heuristic yields 2 there (1.79x = the measured optimum). Scales up
+            % on bigger RAM (32 GB -> 6). If RAM is undetectable, no RAM cap.
+            RESERVE_GB   = 6;   % OS + parent MATLAB + OneDrive/iCloud sync
+            PERWORKER_GB = 4;   % MATLAB base + long-arc per-asset history
+
+            kCores = N;
+            try; kCores = max(1, feature('numcores') - 1); catch; end
+
+            totGB = NaN;                                   % total physical RAM (GiB)
+            try
+                [st, out] = system('sysctl -n hw.memsize');            % macOS/BSD: bytes
+                if st == 0; b = str2double(strtrim(out)); if isfinite(b) && b > 0; totGB = b / 2^30; end; end
+            catch; end
+            if ~isfinite(totGB)
+                try
+                    [st, out] = system('awk ''/MemTotal/{print $2}'' /proc/meminfo'); % Linux: kB
+                    if st == 0; kb = str2double(strtrim(out)); if isfinite(kb) && kb > 0; totGB = kb / 2^20; end; end
+                catch; end
+            end
+            kRam = kCores;                                 % no cap if RAM undetectable
+            if isfinite(totGB) && totGB > 0
+                kRam = max(1, floor((totGB - RESERVE_GB) / PERWORKER_GB));
+            end
+
+            k = min([kCores, kRam, N]);
+            try
+                mw = cfg.multiAsset.federated.maxWorkers;   % explicit override wins
+                if isnumeric(mw) && isscalar(mw) && mw >= 1; k = round(mw); end
+            catch; end
+            k = max(1, min(k, N));
+        end
+
+        function results = runFederatedEstimationParallel_(cfg, setup, N)
+            % runFederatedEstimationParallel_  Process-level fan-out of the N independent
+            % single-asset EKFs. Each asset runs in its OWN `matlab -batch` worker and writes
+            % its extracted result to a .mat; the parent gathers them. Because each asset is
+            % per-asset seeded and the result struct is pure numeric, the gathered result is
+            % BIT-IDENTICAL to the serial loop (verified by run_swarm_relative_regression).
+            % A failed/absent worker falls back to an in-process serial re-run, so a worker
+            % crash or license cap never changes the answer -- only the speed.
+            results  = struct('N', N, 'asset', {cell(1, N)});
+            repoRoot = fileparts(fileparts(mfilename('fullpath')));   % +revgnss/.. -> repo root
+            cfgDir   = fullfile(repoRoot, 'config');
+            cfgIntDir = fullfile(cfgDir, 'internal');   % config/internal: realisticAtmosphereConfig etc.
+            tmpDir   = tempname();
+            mkdir(tmpDir);
+            oc = onCleanup(@() revgnss.ReportRunner.tryRmdir_(tmpDir)); %#ok<NASGU>
+
+            matlabBin = fullfile(matlabroot, 'bin', 'matlab');
+            cfgMats = cell(1, N); resMats = cell(1, N); workerSh = cell(1, N);
+            for ai = 1:N
+                ci = revgnss.ReportRunner.assetConfigForIndex_(setup, ai); %#ok<NASGU>
+                cfgMats{ai} = fullfile(tmpDir, sprintf('cfg_%d.mat', ai));
+                resMats{ai} = fullfile(tmpDir, sprintf('res_%d.mat', ai));
+                save(cfgMats{ai}, 'ci', '-v7.3');
+                % Self-contained per-worker script -> no inline shell quoting of struct paths.
+                workerSh{ai} = fullfile(tmpDir, sprintf('worker_%d.sh', ai));
+                fid = fopen(workerSh{ai}, 'w');
+                fprintf(fid, '#!/bin/bash\n');
+                % Workers keep MATLAB's default multithreading: measured faster than
+                % -singleCompThread here (the per-asset sim benefits from BLAS threads more
+                % than 6 workers oversubscribing 8 cores costs). Bit-identity is preserved
+                % either way (verified by run_swarm_relative_regression).
+                fprintf(fid, '"%s" -nodisplay -nosplash -batch "addpath(''%s''); addpath(''%s''); addpath(''%s''); revgnss.ReportRunner.runOneAssetToFile_(''%s'',''%s'')"\n', ...
+                    matlabBin, repoRoot, cfgDir, cfgIntDir, cfgMats{ai}, resMats{ai});
+                fclose(fid);
+            end
+
+            maxW = revgnss.ReportRunner.federatedMaxWorkers_(cfg, N);
+            driverSh = fullfile(tmpDir, 'driver.sh');
+            fid = fopen(driverSh, 'w');
+            fprintf(fid, '#!/bin/bash\ni=0\n');
+            for ai = 1:N
+                fprintf(fid, 'bash "%s" &\n', workerSh{ai});
+                fprintf(fid, 'i=$((i+1)); if [ $((i %% %d)) -eq 0 ]; then wait; fi\n', maxW);
+            end
+            fprintf(fid, 'wait\n');
+            fclose(fid);
+
+            fprintf('  [swarm-parallel] %d assets, %d concurrent workers...\n', N, maxW);
+            t0 = tic;
+            [st, ~] = system(sprintf('bash "%s"', driverSh));
+            fprintf('  [swarm-parallel] workers finished in %.1f s (driver exit %d)\n', toc(t0), st);
+
+            nFallback = 0;
+            for ai = 1:N
+                r = revgnss.ReportRunner.loadWorkerResult_(resMats{ai});
+                if isempty(r)
+                    nFallback = nFallback + 1;
+                    fprintf(2, '  [swarm-parallel] asset %d worker produced no result; serial fallback.\n', ai);
+                    ci = revgnss.ReportRunner.assetConfigForIndex_(setup, ai);
+                    r  = revgnss.ReportRunner.runOneAsset_(ci);
+                end
+                results.asset{ai} = r;
+            end
+            if nFallback > 0
+                fprintf('  [swarm-parallel] %d/%d assets fell back to serial (result unchanged).\n', nFallback, N);
+            end
+        end
+
+        function runOneAssetToFile_(cfgMatPath, resMatPath)
+            % runOneAssetToFile_  Worker entry point: load one asset config, run its
+            % single-asset sim, save the extracted result. Writes a `failed` marker on error
+            % so the parent gathers a fallback instead of a corrupt result.
+            try
+                S   = load(cfgMatPath);                                   % S.ci
+                res = revgnss.ReportRunner.runOneAsset_(S.ci); %#ok<NASGU>
+                ok  = true; %#ok<NASGU>
+                save(resMatPath, 'res', 'ok', '-v7.3');
+            catch ME
+                res = struct('failed', true); ok = false; %#ok<NASGU>
+                try; save(resMatPath, 'res', 'ok', '-v7.3'); catch; end
+                fprintf(2, 'runOneAssetToFile_ failed: %s\n', getReport(ME));
+                rethrow(ME);
+            end
+        end
+
+        function r = loadWorkerResult_(resMatPath)
+            % loadWorkerResult_  Return a valid per-asset result struct, or [] if the worker
+            % file is missing / marked failed / unreadable (caller then serial-falls-back).
+            r = [];
+            if ~isfile(resMatPath); return; end
+            try
+                R = load(resMatPath);
+                if isfield(R,'ok') && ~R.ok; return; end
+                if isfield(R,'res') && isstruct(R.res) && ~isfield(R.res,'failed')
+                    r = R.res;
+                end
+            catch
+                r = [];
+            end
+        end
+
+        function tryRmdir_(d)
+            % tryRmdir_  Best-effort recursive tempdir cleanup (never throws).
+            try; if isfolder(d); rmdir(d, 's'); end; catch; end
+        end
+
+        function setup = federatedSetup_(cfg)
+            % federatedSetup_  Shared per-asset config scaffold for the federated swarm: the
+            % single-asset base + the per-member absolute helix ICs (ECI) + the receiver-noise base
+            % seed. Factored out so runFederatedEstimation (all assets) and buildUnifiedReport_ (chief
+            % only) construct IDENTICAL per-asset configs. Behaviour-identical to the pre-refactor
+            % inline construction -> the relative-layer regression digest is byte-unchanged.
+            base = revgnss.ReportRunner.singleAssetBase_(cfg);
+            N = 1;
+            if isfield(cfg,'scenario') && isfield(cfg.scenario,'nSpaceAssets')
+                N = max(1, round(cfg.scenario.nSpaceAssets));
+            end
+            r0Cells = {}; v0Cells = {}; baseSeed = 42;
+            if N > 1
+                if ~(isfield(cfg,'orbit') && isfield(cfg.orbit,'useOrbitPropagator') && cfg.orbit.useOrbitPropagator)
+                    error('revgnss:ReportRunner:needsOrbitPropagator', ...
+                        'Federated N>1 needs cfg.orbit.useOrbitPropagator=true (per-asset helix truth).');
+                end
+                cfgLocal = cfg;
+                if ~isfield(cfgLocal,'formation') || ~isfield(cfgLocal.formation,'crossTrackSpread')
+                    cfgLocal.formation.crossTrackSpread = 1.0;   % 3-D formation -> full shape observable
+                end
+                op = models.orbit.OrbitPropagator(cfgLocal.orbit);
+                [r0Cells, v0Cells] = revgnss.SwarmFormation.secondaryEciInitialStates(cfgLocal, op);
+                if isfield(base,'simulation') && isfield(base.simulation,'seed'); baseSeed = base.simulation.seed; end
+            end
+            setup = struct('base', base, 'N', N, 'r0Cells', {r0Cells}, 'v0Cells', {v0Cells}, 'baseSeed', baseSeed);
+        end
+
+        function ci = assetConfigForIndex_(setup, ai)
+            % assetConfigForIndex_  The single-asset config for swarm member ai: asset 1 is the base;
+            % ai>=2 gets its own absolute helix IC (ECI), per-asset sat clock seed, and INDEPENDENT
+            % receiver-noise seed. Identical to the pre-refactor inline block.
+            ci = setup.base;
+            if ai >= 2
+                si = ai - 1;
+                ci.orbit.eciState0  = [setup.r0Cells{si}; setup.v0Cells{si}];   % this asset's absolute helix IC
+                ci.asset.clock.seed = 300 + ai;                                 % per-asset sat clock
+                ci.simulation.seed  = setup.baseSeed + 100000*(ai-1);           % INDEPENDENT receiver noise
+            end
+        end
+
+        function res = runOneAsset_(cfg1)
+            % runOneAsset_  Run one asset's single-asset sim (no report) and extract its result.
+            sim = revgnss.ReverseGNSSSimulation(revgnss.ConfigFactory.finalizeConfig(cfg1));
+            sim.initialize();
+            sim.run();
+            res = revgnss.ReportRunner.extractAssetResult_(sim);
+        end
+
+        function res = extractAssetResult_(sim)
+            % extractAssetResult_  Per-asset estimate + flown truth (position + clock) for the relative
+            % layer, read straight from the sim (no reconstruction). Output-only -> byte-identical.
+            sm = sim.ekf.stateMap;
+            res = struct();
+            res.x        = sim.ekf.x;
+            res.P        = sim.ekf.P;
+            res.stateMap = sm;
+            res.history  = sim.ekf.history;
+            res.truthR   = sim.asset.r_ecef_m;
+            res.truthV   = sim.asset.v_ecef_mps;
+            res.truthClk = sim.asset.clock.getBiasMeters();
+            res.posErr   = norm(sim.ekf.x(sm.r_idx) - sim.asset.r_ecef_m);
+            if sim.orbitTruthCache.enabled
+                res.truthTraj    = sim.orbitTruthCache.r_ecef_m;
+                res.truthVelTraj = sim.orbitTruthCache.v_ecef_mps;
+                res.truthTime_s  = sim.orbitTruthCache.t_s(:).';
+            else
+                res.truthTraj = []; res.truthVelTraj = []; res.truthTime_s = [];
+            end
+            res.truthClkTraj_m = []; res.truthClkTime_s = [];
+            try
+                clkHist = sim.asset.clock.history;
+                if ~isempty(clkHist.bias_s)
+                    c = revgnss.Constants.SPEED_OF_LIGHT_MPS;
+                    res.truthClkTraj_m = clkHist.bias_s(:).' * c;
+                    res.truthClkTime_s = clkHist.time_s(:).';
+                end
+            catch
+            end
+        end
+
+        function base = singleAssetBase_(cfg)
+            % A single-asset config: one estimated asset, no swarm/ISL/secondary machinery.
+            base = revgnss.ReportRunner.stripSwarmEstimation_(cfg);
+            base.scenario.nSpaceAssets = 1;
+        end
+
+        function c = stripSwarmEstimation_(cfg)
+            % Disable secondary estimation + ISL/TWSTFT (relative-layer, not per-asset EKF rows), set
+            % multiAsset.mode='fast' (passthrough). Truth-side untouched. Single-asset cfg -> unchanged.
+            c = cfg;
+            if isfield(c,'multiAsset')
+                c.multiAsset.mode = 'fast';
+                c.multiAsset.towersObserveSecondaries = false;
+                if isfield(c.multiAsset,'twoWayISL'); c.multiAsset.twoWayISL.enable = false; end
+                if isfield(c.multiAsset,'twoWayTimeTransferISL'); c.multiAsset.twoWayTimeTransferISL.enable = false; end
+                if isfield(c.multiAsset,'towerSecondary')
+                    ts = c.multiAsset.towerSecondary;
+                    if isfield(ts,'carrier');    ts.carrier.enable = false;    end
+                    if isfield(ts,'atmosphere');  ts.atmosphere.enable = false;  end
+                    if isfield(ts,'doppler');     ts.doppler.enable = false;     end
+                    if isfield(ts,'estimateAtmosphere'); ts.estimateAtmosphere = false; end
+                    if isfield(ts,'attitude');    ts.attitude.enable = false;    end
+                    if isfield(ts,'multiAntenna'); ts.multiAntenna.enable = false; end
+                    c.multiAsset.towerSecondary = ts;
+                end
+            end
+            if isfield(c,'measurements') && isfield(c.measurements,'isl')
+                c.measurements.isl.enable = false;
+            end
         end
 
     end  % public static methods
 
     methods (Static, Access = private)
+
+        function mat = buildMultiAssetTruth_(res, cfg)
+            % buildMultiAssetTruth_  Assemble the per-asset truth bundle persisted
+            % for swarm runs (WP1). Returns [] for single-asset runs or when
+            % recordTruth is off, so the caller keeps the byte-identical
+            % single-asset save. The secondary trajectories are the physically
+            % real helix truth (SwarmFormation + shared propagator) that every
+            % asset already logs each epoch via SpaceAsset.logState; they are
+            % decimated to truthStride_s to keep long-run .mat files small.
+            mat = [];
+
+            % Gate: multi-asset only, opt-in, and histories actually present.
+            nAssets = 1;
+            if isfield(cfg,'scenario') && isfield(cfg.scenario,'nSpaceAssets') && ...
+                    ~isempty(cfg.scenario.nSpaceAssets)
+                nAssets = max(1, round(cfg.scenario.nSpaceAssets));
+            end
+            recordTruth = true;
+            if isfield(cfg,'multiAsset') && isfield(cfg.multiAsset,'recordTruth')
+                recordTruth = logical(cfg.multiAsset.recordTruth);
+            end
+            if nAssets <= 1 || ~recordTruth; return; end
+            if isempty(res) || ~isfield(res,'assetHistories') || ...
+                    numel(res.assetHistories) <= 1
+                return;
+            end
+            hist = res.assetHistories;
+            nAssets = min(nAssets, numel(hist));
+            if isempty(hist{1}) || ~isfield(hist{1},'time_s') || isempty(hist{1}.time_s)
+                return;
+            end
+
+            % Decimation stride (epochs) from truthStride_s and the sim step.
+            dt_s = 1;
+            if isfield(cfg,'simulation') && isfield(cfg.simulation,'dt_s') && ...
+                    cfg.simulation.dt_s > 0
+                dt_s = cfg.simulation.dt_s;
+            end
+            stride_s = 60;
+            if isfield(cfg,'multiAsset') && isfield(cfg.multiAsset,'truthStride_s') && ...
+                    ~isempty(cfg.multiAsset.truthStride_s)
+                stride_s = cfg.multiAsset.truthStride_s;
+            end
+            stride = 1;
+            if stride_s > 0; stride = max(1, round(stride_s / dt_s)); end
+
+            % Common epoch index from the primary time base; always keep the last
+            % epoch so the final-state comparison stays exact.
+            tPrim = hist{1}.time_s(:);
+            nEp   = numel(tPrim);
+            idx   = 1:stride:nEp;
+            if idx(end) ~= nEp; idx = [idx, nEp]; end
+
+            mat = struct();
+            mat.nAssets        = nAssets;
+            mat.estimatedIndex = 1;      % only asset 1 is EKF-estimated (see plan)
+            mat.stride_s       = stride * dt_s;
+            mat.time_s         = tPrim(idx);
+            mat.names          = cell(1, nAssets);
+
+            emptyAsset = struct('name','', 'r_ecef_m',[], 'v_ecef_mps',[], ...
+                'euler_rad',[], 'rxClockBias_m',[], 'rxFracFreq',[]);
+            mat.asset = repmat(emptyAsset, 1, nAssets);
+            for ai = 1:nAssets
+                h  = hist{ai};
+                nm = sprintf('GEO-%d', ai);
+                if isfield(cfg,'assets') && numel(cfg.assets) >= ai && ...
+                        isfield(cfg.assets(ai),'name') && ~isempty(cfg.assets(ai).name)
+                    nm = char(cfg.assets(ai).name);
+                end
+                mat.names{ai}         = nm;
+                li                    = idx(idx <= size(h.r_ecef_m, 2));  % length guard
+                mat.asset(ai).name          = nm;
+                mat.asset(ai).r_ecef_m      = h.r_ecef_m(:, li);
+                mat.asset(ai).v_ecef_mps    = h.v_ecef_mps(:, li);
+                mat.asset(ai).euler_rad     = h.euler_rad(:, li);
+                mat.asset(ai).rxClockBias_m = h.rxClockBias_m(li);
+                mat.asset(ai).rxFracFreq    = h.rxFracFreq(li);
+            end
+
+            % Relative geometry to the estimated primary chief (asset 1): baseline
+            % vector and inter-satellite range per secondary. This is the "relative
+            % positioning between assets" quantity; absolute per-asset position vs
+            % Earth is mat.asset(ai).r_ecef_m. (Richer metrics/plots are WP2.)
+            r1 = mat.asset(1).r_ecef_m;
+            emptyB = struct('toAsset',0, 'baseline_ecef_m',[], 'range_m',[]);
+            mat.baselineToPrimary = repmat(emptyB, 1, max(0, nAssets - 1));
+            for ai = 2:nAssets
+                nc = min(size(mat.asset(ai).r_ecef_m, 2), size(r1, 2));
+                d  = mat.asset(ai).r_ecef_m(:, 1:nc) - r1(:, 1:nc);
+                mat.baselineToPrimary(ai-1).toAsset         = ai;
+                mat.baselineToPrimary(ai-1).baseline_ecef_m = d;
+                mat.baselineToPrimary(ai-1).range_m         = sqrt(sum(d.^2, 1))';
+            end
+        end
+
+        function s = finalScalar_(v, dflt)
+            % Reduce a possibly per-epoch series to its final-epoch scalar.
+            % Array-backend accessors return an N-by-1 series; the summary wants
+            % the last epoch. Scalars pass through; empty returns the default.
+            if isempty(v);      s = dflt;
+            elseif isscalar(v); s = v;
+            else;               s = v(end);
+            end
+        end
 
         % ================================================================
         function summary = collectSummary_(diag, cfg, version, reportFolder, pdfPath, matPath)
@@ -1676,6 +2277,15 @@ classdef ReportRunner
             summary.nTowers    = cfg.scenario.nTowers;
             summary.nReceivers = cfg.scenario.nReceivers;
             summary.multiAsset = revgnss.MultiAssetConfig.summary(cfg);
+            % P5' per-satellite estimate deliverable. Multi-asset only, so single-asset
+            % (golden) summaries are byte-identical (the field is simply absent).
+            if isfield(cfg,'scenario') && isfield(cfg.scenario,'nSpaceAssets') && cfg.scenario.nSpaceAssets > 1
+                try
+                    summary.swarmEstimate = revgnss.SwarmEstimateSummary.compute(diag.getData());
+                catch
+                    summary.swarmEstimate = struct('available', false);
+                end
+            end
             summary.signals    = cfg.signals.enabled;
             summary.twoFrequency = isfield(cfg,'signals') && ...
                 isfield(cfg.signals,'twoFrequency') && ...
@@ -1697,7 +2307,7 @@ classdef ReportRunner
                 cfg.estimator.estimateAngularRateFromPseudorange;
             summary.towerClockMode = cfg.estimator.towerClockMode;
 
-            % Attitude classification (Stage 14.8): convergence-based, not rank-only.
+            % Attitude classification: convergence-based, not rank-only.
             % CONVERGED          : rank >= 3, final error < 50% of initial
             % BOUNDED_WEAK_GEOMETRY : rank >= 3, error maintained (0.75–2x ratio)
             % NON_CONVERGENT     : rank >= 3 but error worsened (ratio < 0.75)
@@ -1761,7 +2371,7 @@ classdef ReportRunner
                 end
                 summary.attitudeObsClass = cls2;
 
-                % Stage 14.9: separability metrics (always logged)
+                % Separability metrics (always logged)
                 try
                     sepVec  = diag.getAttitudeSeparable();
                     corrVec = diag.getAttitudeAmbCorrMaxAbs();
@@ -1772,7 +2382,7 @@ classdef ReportRunner
                     summary.attitudeAmbCorrMaxAbs = NaN;
                 end
 
-                % Stage 15: differential carrier attitude classification
+                % Differential carrier attitude classification
                 attMode15 = '';
                 if isfield(cfg,'estimator') && isfield(cfg.estimator,'attitudeCarrierMode')
                     attMode15 = cfg.estimator.attitudeCarrierMode;
@@ -1786,10 +2396,10 @@ classdef ReportRunner
                         summary.diffAttMeanNRows  = mean(nVec(nVec>0), 'omitnan');
                         rVec = diag.getDiffAttResidRMS();
                         summary.diffAttResidRMS_m = mean(rVec(isfinite(rVec) & daActive), 'omitnan');
-                        summary.diffAttActiveBaselines      = double(diag.getDiffAttActiveBaselines());
-                        summary.diffAttLostBaselines        = double(diag.getDiffAttLostBaselines());
-                        summary.diffAttRecalibratedBaselines= double(diag.getDiffAttRecalibratedBaselines());
-                        summary.diffAttRejectedRows         = double(diag.getDiffAttRejectedRows());
+                        summary.diffAttActiveBaselines      = double(revgnss.ReportRunner.finalScalar_(diag.getDiffAttActiveBaselines(), 0));
+                        summary.diffAttLostBaselines        = double(revgnss.ReportRunner.finalScalar_(diag.getDiffAttLostBaselines(), 0));
+                        summary.diffAttRecalibratedBaselines= double(revgnss.ReportRunner.finalScalar_(diag.getDiffAttRecalibratedBaselines(), 0));
+                        summary.diffAttRejectedRows         = double(revgnss.ReportRunner.finalScalar_(diag.getDiffAttRejectedRows(), 0));
                     catch
                         summary.diffAttCalibrated = false;
                         summary.diffAttMeanNRows  = 0;
@@ -1816,7 +2426,7 @@ classdef ReportRunner
                     end
                 end
 
-                % Stage 16: absolute attitude initialization diagnostics.
+                % Absolute attitude initialization diagnostics.
                 % Not stored in flat array schema v3 — populate from cfg defaults.
                 try
                     error('attitudeInit:notInFlatSchema','not stored');
@@ -2163,7 +2773,7 @@ classdef ReportRunner
                                     summary.totalIslDopplerRows + summary.totalIslCarrierDiagnosticRows + ...
                                     summary.totalIslTwoWayRangeRows + summary.totalIslTwoWayDopplerDiagnosticRows;
             summary.observableStack = obs_stack_;
-            % Stage 45: compact code IF row fields
+            % Compact code IF row fields
             summary.codeIonoFreeRowsRequested = revgnss.ReportRunner.safeCfgBool_( ...
                 cfg, {'measurements','code','ionosphereFreeRows','enable'}, false);
             summary.codeIonoFreeRowsUsedInEkf = summary.codeIonoFreeRowsRequested && ...
@@ -2174,7 +2784,7 @@ classdef ReportRunner
             else
                 summary.totalCodeIonoFreeRows = 0;
             end
-            % Stage 46: compact code IF traceability fields
+            % Compact code IF traceability fields
             try
                 co46 = revgnss.IonosphereFreeCombinationDiagnostics.coefficients('L1','L2');
                 summary.codeIonoFreeAlpha              = co46.alpha;
@@ -2195,7 +2805,7 @@ classdef ReportRunner
             else
                 summary.codeIonoFreeCountsSource = 'inferred-from-nTowers-nReceivers';
             end
-            % Stage 47: compact carrier IF row fields
+            % Compact carrier IF row fields
             summary.carrierIonoFreeRowsRequested = revgnss.ReportRunner.safeCfgBool_( ...
                 cfg, {'measurements','carrier','ionosphereFreeRows','enable'}, false);
             summary.carrierIonoFreeRowsUsedInEkf = summary.carrierIonoFreeRowsRequested && ...
@@ -2404,8 +3014,12 @@ classdef ReportRunner
             end
         end
 
-        function writeRunLog_(reportFolder, stem, cfg, summary, pdfPath, matPath)
+        function writeRunLog_(reportFolder, stem, cfg, cfgLiteral, summary, pdfPath, matPath, mc)
             % writeRunLog_  Write a concise <stem>.out run log beside the PDF/MAT.
+            %   cfg is the RESOLVED config (post-finalizeConfig); cfgLiteral is the
+            %   pre-finalizeConfig snapshot, so the .out can show the overrides.
+            %   mc (optional) is the Monte-Carlo consistency result.
+            if nargin < 8; mc = struct('enabled', false); end
             try
                 fid = fopen(fullfile(reportFolder, [stem '.out']), 'w');
                 if fid < 0; return; end
@@ -2428,11 +3042,113 @@ classdef ReportRunner
                         fprintf(fid, '  %-22s : %.6g\n', mkeys{i}, summary.(mkeys{i}));
                     end
                 end
+                % Monte-Carlo NEES/NIS filter-consistency evidence (opt-in).
+                if isstruct(mc) && isfield(mc,'enabled') && mc.enabled
+                    fprintf(fid, '\n-- monte-carlo filter consistency (WP-B) --\n');
+                    if isfield(mc,'ran') && mc.ran && isfield(mc,'result')
+                        r = mc.result;
+                        fprintf(fid, '  seeds used         : %d (confidence %.2f)\n', r.nUsed, r.confidence);
+                        fprintf(fid, '  interpretation     : %s\n', r.interpretation);
+                        fprintf(fid, '  NIS  per dof       : %.4f   (band [%.4f, %.4f])\n', ...
+                            r.nisPerDof, r.nisBand(1)/max(r.nisDof,1), r.nisBand(2)/max(r.nisDof,1));
+                        fprintf(fid, '  NEES per dof       : %.4f   (band [%.4f, %.4f])\n', ...
+                            r.neesPerDof, r.neesBand(1)/max(r.neesDof,1), r.neesBand(2)/max(r.neesDof,1));
+                        fprintf(fid, '  verdict            : %s\n', mc.verdict);
+                    else
+                        m_ = ''; if isfield(mc,'error'); m_ = mc.error; end
+                        fprintf(fid, '  (not run: %s)\n', m_);
+                    end
+                end
+
                 fprintf(fid, '\n-- outputs --\n');
                 fprintf(fid, '  pdf     : %s\n', pdfPath);
                 fprintf(fid, '  mat     : %s\n', matPath);
                 fprintf(fid, '  figures : %s\n', fullfile(reportFolder, 'figures'));
+
+                % make the run self-describing WITHOUT MATLAB. The literal
+                % masterConfig is not what ran; finalizeConfig resolved/overrode many
+                % toggles. Dump the resolved config + the literal-vs-resolved overrides.
+                try
+                    rl = revgnss.ConfigTextDump.flatten(cfg);
+                    fprintf(fid, '\n-- resolved config (post-finalizeConfig; %d fields) --\n', numel(rl));
+                    for i = 1:numel(rl); fprintf(fid, '  %s\n', rl{i}); end
+                    ov = revgnss.ConfigTextDump.diff(cfgLiteral, cfg);
+                    fprintf(fid, ['\n-- literal vs resolved overrides ' ...
+                        '(finalizeConfig changed %d field(s); +%d derived field(s) added) --\n'], ...
+                        size(ov.changed, 1), size(ov.added, 1));
+                    for i = 1:size(ov.changed, 1)
+                        fprintf(fid, '  %s : %s -> %s\n', ov.changed{i,1}, ov.changed{i,2}, ov.changed{i,3});
+                    end
+                catch dumpErr
+                    fprintf(fid, '\n-- resolved-config dump failed: %s --\n', dumpErr.message);
+                end
             catch; end
+        end
+
+        function mc = runMonteCarloConsistency_(cfg)
+            % runMonteCarloConsistency_  ensemble NEES/NIS filter-consistency.
+            %   A single run yields a single NEES/NIS sample; chi-squared consistency is
+            %   only meaningful over an ensemble. When cfg.report.monteCarlo.enable is
+            %   true, run N seeded pipeline draws (initial error from P0, varied
+            %   measurement/atmosphere AND clock-truth seeds), pool post-burn-in NIS/NEES
+            %   and band-check them. Default OFF -> golden byte-identical (build never runs
+            %   the ensemble). Expensive: N extra full pipeline runs, so it uses a short
+            %   duration override by default.
+            mc = struct('enabled', false, 'ran', false, 'verdict', 'disabled');
+            en = false;
+            try; en = logical(cfg.report.monteCarlo.enable); catch; end
+            if ~en; return; end
+            mc.enabled = true;
+
+            nSeeds = 12; dur = 900; conf = 0.99; baseSel = 'self';
+            try; nSeeds = cfg.report.monteCarlo.nSeeds;     catch; end
+            try; dur    = cfg.report.monteCarlo.duration_s; catch; end
+            try; conf   = cfg.report.monteCarlo.confidence; catch; end
+            try; baseSel = cfg.report.monteCarlo.baseConfig; catch; end
+
+            % 'self' (default) characterises the SHIPPED filter (conservative-by-design,
+            % expected below-band); 'matchedBaseline' gives a two-sided verdict.
+            baseCfg = cfg;
+            if ischar(baseSel) && strcmpi(baseSel, 'matchedbaseline')
+                baseCfg = revgnss.ConfigFactory.matchedErrorBaselineConfig();
+            end
+            baseCfg.report.monteCarlo.enable = false;   % never recurse
+
+            fprintf('  [WP-B] Monte-Carlo consistency: %d seeds x %g s ...\n', nSeeds, dur);
+            try
+                res = revgnss.MonteCarloConsistency.run(baseCfg, ...
+                    struct('nSeeds', nSeeds, 'duration_s', dur, 'confidence', conf));
+                mc.ran = true; mc.result = res;
+                mc.verdict = revgnss.ReportRunner.mcVerdict_(res);
+                fprintf(['  [WP-B] %s | NIS/dof=%.3f (band [%.3f, %.3f]) | ' ...
+                         'NEES/dof=%.3f (band [%.3f, %.3f]) | seeds=%d\n'], mc.verdict, ...
+                    res.nisPerDof,  res.nisBand(1)/max(res.nisDof,1),  res.nisBand(2)/max(res.nisDof,1), ...
+                    res.neesPerDof, res.neesBand(1)/max(res.neesDof,1), res.neesBand(2)/max(res.neesDof,1), res.nUsed);
+                % Guard C cross-seed centroid gate (swarm 'position' runs only).
+                if isfield(res,'centroidAvailable') && res.centroidAvailable
+                    mc.centroidVerdict = res.centroidVerdict;
+                    fprintf('  [WP-B] centroid gate: %s | centroid NEES/dof=%.3g (band/dof [%.2f, %.2f]) | guards=%d\n', ...
+                        res.centroidVerdict, res.centroidNeesPerDof, ...
+                        res.centroidNeesBand(1)/max(res.centroidNeesDof,1), ...
+                        res.centroidNeesBand(2)/max(res.centroidNeesDof,1), res.realismGuardsActive);
+                end
+            catch me
+                mc.ran = false; mc.verdict = 'error'; mc.error = me.message;
+                fprintf('  [WP-B] Monte-Carlo consistency FAILED: %s\n', me.message);
+            end
+        end
+
+        function v = mcVerdict_(res)
+            % mcVerdict_  Human-readable NIS-based consistency verdict.
+            if res.nisInBand
+                v = 'CONSISTENT (NIS within chi-square band)';
+            elseif res.nisBelowBand
+                v = 'CONSERVATIVE (NIS below band: filter under-confident; R/Q inflated)';
+            elseif res.nisAboveBand
+                v = 'OPTIMISTIC (NIS above band: filter over-confident)';
+            else
+                v = 'indeterminate';
+            end
         end
 
         function v = fieldOrPath_(s, path, default)

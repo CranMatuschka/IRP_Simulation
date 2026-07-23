@@ -34,6 +34,19 @@ classdef OrbitPropagator
         omgE = revgnss.Constants.EARTH_OMEGA_RADPS;
     end
 
+    properties (Access = private)
+        % Truth-only luni-solar/SRP perturbation config (R-3). Default disabled -> the RK4
+        % integration takes the base-model branch and the truth trajectory is byte-identical.
+        truthPerturb = struct('enable', false)
+
+        % Optional explicit t=0 ECI initial state [r(3); v(3)] that OVERRIDES the element-derived
+        % IC (used by the federated instance layer to run each swarm member on its own absolute
+        % helix orbit via a single-asset run). Empty (default) -> the element IC is used and every
+        % existing config is byte-identical. Only meaningful for the RK4 modes (twoBodyRk4/j2Rk4),
+        % which integrate from initialEciState(); the constructor rejects it for circularAnalytic.
+        eciState0 = []
+    end
+
     methods
         function obj = OrbitPropagator(cfg)
             if nargin == 0; return; end
@@ -48,6 +61,20 @@ classdef OrbitPropagator
                 obj.orbitMode = cfg.mode;
             elseif isfield(cfg,'orbit') && isfield(cfg.orbit,'mode') && ~isempty(cfg.orbit.mode)
                 obj.orbitMode = cfg.orbit.mode;
+            end
+            % Truth-only luni-solar + SRP perturbations (R-3), read from
+            % cfg.truth.perturbations (or cfg.orbit.truth.perturbations). Default off.
+            obj.truthPerturb = models.orbit.OrbitPerturbations.configFrom(cfg);
+            % Optional explicit ECI initial state override (federated instance layer). Requires an
+            % RK4 mode -- circularAnalytic recomputes the IC from elements inline and would silently
+            % ignore it, so reject that combination rather than mislead the caller.
+            if isfield(cfg,'eciState0') && numel(cfg.eciState0) == 6
+                if strcmpi(obj.orbitMode, 'circularAnalytic')
+                    error('OrbitPropagator:eciState0NeedsRk4', ...
+                        ['cfg.orbit.eciState0 (explicit ECI IC) requires an RK4 mode ' ...
+                         '(twoBodyRk4/j2Rk4); it is ignored by circularAnalytic.']);
+                end
+                obj.eciState0 = cfg.eciState0(:);
             end
         end
 
@@ -107,6 +134,13 @@ classdef OrbitPropagator
         function [r_i, v_i] = initialEciState(obj)
             % initialEciState  ECI position/velocity at t=0 from the circular elements.
             % This is the same t=0 inertial state the RK4 modes integrate from.
+            if ~isempty(obj.eciState0)
+                % Explicit override (federated per-asset helix IC) -> the RK4 modes integrate this
+                % state instead of the element-derived one. Empty by default (byte-identical).
+                r_i = obj.eciState0(1:3);
+                v_i = obj.eciState0(4:6);
+                return
+            end
             a    = obj.Re + obj.altitudeMean_m;
             nu0  = obj.trueAnomaly0_rad;
             r_pf = a * [cos(nu0); sin(nu0); 0];
@@ -170,7 +204,15 @@ classdef OrbitPropagator
                     nSub = max(1, ceil(dt / 10));
                     dts  = dt / nSub;
                     for j = 1:nSub
-                        [r_i, v_i] = models.orbit.OrbitDynamics.rk4Step(r_i, v_i, dts, model);
+                        if obj.truthPerturb.enable
+                            tAbs = t_prev + (j-1)*dts;   % absolute time at the sub-step start
+                            [r_i, v_i] = models.orbit.OrbitDynamics.rk4StepWithAccel( ...
+                                r_i, v_i, dts, model, ...
+                                @(rr,tt) models.orbit.OrbitPerturbations.accel(rr, tt, obj.truthPerturb), ...
+                                tAbs);
+                        else
+                            [r_i, v_i] = models.orbit.OrbitDynamics.rk4Step(r_i, v_i, dts, model);
+                        end
                     end
                 end
                 t_prev = t_s(k);

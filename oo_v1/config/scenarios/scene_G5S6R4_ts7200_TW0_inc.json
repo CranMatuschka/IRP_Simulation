@@ -1,0 +1,181 @@
+{
+  "scenario": {
+    "name": "scene_G5S6R4_ts7200_TW0_inc",
+    "nTowers": 5,
+    "nSpaceAssets": 6,
+    "nReceivers": 4
+  },
+  "simulation": {
+    "duration_s": 7200
+  },
+  "measurements": {
+    "twoWayTimeTransfer": {
+      "enable": false,
+      "useInEKF": false
+    },
+    "codeNoise": {
+      "model": "cn0",
+      "cn0": {
+        "enable": true,
+        "base_dBHz": 45,
+        "elevationGain_dB": 6,
+        "sigmaAt45dBHz_m": 0.3
+      }
+    },
+    "doppler": {
+      "sigma_mps": 0.03
+    },
+    "carrier": {
+      "sigma_m": 0.01
+    },
+    "isl": {
+      "product": {
+        "sigmaPos_m": 0.1,
+        "sigmaClock_m": 0.1
+      }
+    }
+  },
+  "report": {
+    "runVersion": "inc"
+  },
+  "realism": {
+    "grade": true,
+    "directOverlay": true,
+    "include": {
+      "multipath": false,
+      "hardwareDelay": false
+    }
+  },
+  "clock": {
+    "templateSource": "jowTable2p1"
+  },
+  "clockScaling": {
+    "templateSource": "jowTable2p1"
+  },
+  "clocks": {
+    "tower": {
+      "product": {
+        "sigmaBias_m": 0.1,
+        "sigmaDrift_mps": 0.001
+      }
+    }
+  },
+  "measurement": {
+    "sigmaFloor_m": 0.01
+  },
+  "errors": {
+    "interAntennaCarrierBias": {
+      "enable": true
+    }
+  },
+  "effects": {
+    "antennaPCV": {
+      "enable": true,
+      "truth": {
+        "enable": true
+      },
+      "model": {
+        "enable": true
+      }
+    },
+    "towerSurvey": {
+      "enable": true,
+      "truth": {
+        "enable": true
+      },
+      "model": {
+        "enable": true
+      }
+    },
+    "solidEarthTide": {
+      "truth": {
+        "enable": true
+      }
+    }
+  },
+  "biases": {
+    "interFrequency": {
+      "code": {
+        "truth": {
+          "L1_m": 0.3,
+          "L2_m": 0.45
+        }
+      }
+    }
+  },
+  "estimator": {
+    "processNoise": {
+      "modelMismatch": {
+        "enable": true,
+        "sigma_mps2": 1e-06
+      }
+    },
+    "dynamics": {
+      "perturbations": {
+        "luniSolar": {
+          "enable": true
+        },
+        "srp": {
+          "enable": true,
+          "Cr": 1.3,
+          "areaToMass_m2pkg": 0.02
+        },
+        "epochJD_TT": 2451545.0
+      }
+    },
+    "diffAtt": {
+      "ambiguityResolution": {
+        "enforcePhaseBiasStatus": true,
+        "requirePhaseBiasCalibrationForFix": true
+      }
+    }
+  },
+  "orbit": {
+    "truth": {
+      "perturbations": {
+        "luniSolar": {
+          "enable": true
+        },
+        "srp": {
+          "enable": true
+        }
+      }
+    }
+  },
+  "physics": {
+    "relativity": {
+      "clock": {
+        "enable": true,
+        "truth": {
+          "enable": true
+        },
+        "model": {
+          "enable": true
+        }
+      }
+    }
+  },
+  "frames": {
+    "truthEop": {
+      "enable": true,
+      "polarMotion_xp_arcsec": 0.005,
+      "polarMotion_yp_arcsec": 0.005,
+      "ut1Rate_error_msPerDay": 0.05
+    }
+  },
+  "carrierSlip": {
+    "commonModeCompensation": {
+      "enable": true,
+      "minRows": 4
+    },
+    "baselineDifferencedMode": {
+      "enable": true,
+      "referenceAntenna": 1
+    }
+  },
+  "multiAsset": {
+    "federated": {
+      "parallel": true
+    }
+  }
+}

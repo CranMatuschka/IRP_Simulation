@@ -23,19 +23,19 @@ w1 = warning('off','all');
 out1 = revgnss.ReportRunner.runSingle(cfg1);
 warning(w1);
 
-assert(ismember(out1.summary.attitudeInitClass, VALID_ABS), ...
-    'T1 FAILED: unexpected attitudeInitClass=%s', out1.summary.attitudeInitClass);
-assert(out1.summary.attitudeInitCandidates == 729, ...
-    'T1 FAILED: candidate count %.0f, expected 729', out1.summary.attitudeInitCandidates);
-assert(out1.summary.attitudeInitDiffRows >= 6, ...
-    'T1 FAILED: too few differential rows: %.0f', out1.summary.attitudeInitDiffRows);
-assert(isfinite(out1.summary.attitudeInitBestResidual), ...
+ai1 = out1.sim.attInitInfo;
+assert(ismember(ai1.classification, VALID_ABS), ...
+    'T1 FAILED: unexpected attitudeInitClass=%s', ai1.classification);
+assert(ai1.nCandidates == 729, ...
+    'T1 FAILED: candidate count %.0f, expected 729', ai1.nCandidates);
+assert(ai1.nDiffRows >= 6, ...
+    'T1 FAILED: too few differential rows: %.0f', ai1.nDiffRows);
+assert(isfinite(ai1.bestResidual), ...
     'T1 FAILED: best residual missing');
-assert(isfinite(out1.summary.attitudeInitRatio), ...
+assert(isfinite(ai1.ratio), ...
     'T1 FAILED: ratio missing');
 fprintf('    PASS (class=%s, rows=%.0f, best=%.4f cyc, ratio=%.3f)\n', ...
-    out1.summary.attitudeInitClass, out1.summary.attitudeInitDiffRows, ...
-    out1.summary.attitudeInitBestResidual, out1.summary.attitudeInitRatio);
+    ai1.classification, ai1.nDiffRows, ai1.bestResidual, ai1.ratio);
 
 % ----------------------------------------------------------------
 % T2: slip on one antenna invalidates only the touched baseline
@@ -72,10 +72,19 @@ fprintf('  T4: summary exposes arc counters ...\n');
 assert(isfield(out1.summary,'diffAttActiveBaselines'), 'T4 FAILED: active baseline field missing');
 assert(isfield(out1.summary,'diffAttLostBaselines'), 'T4 FAILED: lost baseline field missing');
 assert(isfield(out1.summary,'diffAttRecalibratedBaselines'), 'T4 FAILED: recal baseline field missing');
-assert(out1.summary.diffAttActiveBaselines >= 0, 'T4 FAILED: active baseline count invalid');
+% Under the array/flat SimulationDataStore backend, diag.getDiffAttActiveBaselines()
+% (and the Lost/Recalibrated siblings) return the FULL per-epoch time series, not a
+% single last-epoch scalar (unlike the legacy struct-log backend); ReportRunner
+% stores whatever shape comes back into summary.diffAtt*Baselines. Take the final
+% epoch's value here, which is scalar under both backends and matches the intended
+% "final baseline-tracking state" check.
+activeBaselines = out1.summary.diffAttActiveBaselines(end);
+lostBaselines   = out1.summary.diffAttLostBaselines(end);
+recalBaselines  = out1.summary.diffAttRecalibratedBaselines(end);
+assert(isscalar(activeBaselines) && isfinite(activeBaselines) && activeBaselines >= 0, ...
+    'T4 FAILED: active baseline count invalid');
 fprintf('    PASS (active=%.0f lost=%.0f recal=%.0f)\n', ...
-    out1.summary.diffAttActiveBaselines, out1.summary.diffAttLostBaselines, ...
-    out1.summary.diffAttRecalibratedBaselines);
+    activeBaselines, lostBaselines, recalBaselines);
 
 fprintf('=== test_stage17_absolute_attitude_initialization: ALL PASS ===\n');
 

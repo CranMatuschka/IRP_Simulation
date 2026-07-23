@@ -149,8 +149,6 @@ classdef Plotter
 
         function fig = plotRxClockBias(diag, t, cfg)
             % Fig 05: receiver clock bias [m] and [ns] (2 subplots)
-            c       = revgnss.Constants.SPEED_OF_LIGHT_MPS;
-            mPerNs  = c * 1e-9;
             d_      = diag.getData();
             truth_m = d_.truth.rxClockBias_m(:)';
             est_m   = d_.estimate.rxClockBias_m(:)';
@@ -189,12 +187,47 @@ classdef Plotter
             legend('Truth','Estimate'); title('Receiver Fractional Frequency'); grid on;
 
             subplot(2,1,2);
-            plot(t, drift_err, 'k', 'LineWidth',1.2);
-            xlabel('Time [s]'); ylabel('Drift Error [m/s]');
-            title('Clock Drift Error [m/s]'); grid on;
+            plot(t, drift_err, 'k', 'LineWidth',1.2); hold on;
+            % Overlay the filter +-3 sigma drift envelope and annotate empirical
+            % coverage. Under-coverage here is the documented FUNDAMENTAL Cesium+Doppler
+            % drift observability limit (drift wander << Doppler resolution), not a bug.
+            [coverPct, nrms, s3] = revgnss.Plotter.driftCoverage(d_, drift_err);
+            if ~isempty(s3)
+                plot(t, s3, 'r--', t, -s3, 'r--', 'LineWidth',1.0);
+                legend('Drift error','\pm3\sigma','Location','best');
+                title(sprintf(['Clock Drift Error [m/s] — %.0f%% within \\pm3\\sigma, ' ...
+                    'normalised RMS %.2f'], coverPct, nrms));
+            else
+                title('Clock Drift Error [m/s]');
+            end
+            xlabel('Time [s]'); ylabel('Drift Error [m/s]'); grid on;
 
             sgtitle('Receiver Clock Drift / Fractional Frequency');
             revgnss.Plotter.saveFig_(fig, '06_rx_clock_drift', cfg);
+        end
+
+        function [coveragePct, normalizedRms, sigma3] = driftCoverage(d_, driftErr)
+            % driftCoverage  Empirical receiver clock-drift +-3 sigma coverage from a
+            % SimulationDataStore getData() struct. Returns the coverage percentage
+            % (fraction of epochs with |error| <= 3 sigma), the normalised RMS
+            % (rms(error/sigma); ~1 = covariance-consistent, >1 = under-covered), and
+            % the +-3 sigma series for plotting. sigma3 is empty if the drift sigma
+            % series is unavailable.
+            coveragePct = NaN; normalizedRms = NaN; sigma3 = [];
+            bdotIdx = 14;   % base state index of bdot_rx (r,v,euler,omega,b_rx,bdot_rx)
+            if ~isstruct(d_) || ~isfield(d_,'estimate') || ~isfield(d_.estimate,'sigma') ...
+                    || isempty(d_.estimate.sigma) || size(d_.estimate.sigma,1) < bdotIdx
+                return
+            end
+            sigma = d_.estimate.sigma(bdotIdx, :);
+            err   = driftErr(:)';
+            n     = min(numel(sigma), numel(err));
+            sigma = sigma(1:n); err = err(1:n);
+            valid = sigma > 0 & isfinite(err) & isfinite(sigma);
+            if ~any(valid); return; end
+            coveragePct   = mean(abs(err(valid)) <= 3*sigma(valid)) * 100;
+            normalizedRms = sqrt(mean((err(valid) ./ sigma(valid)).^2));
+            sigma3        = 3 * sigma;
         end
 
         function fig = plotPrefitInnovationRMS(diag, t, cfg)
@@ -301,13 +334,17 @@ classdef Plotter
                 end
             end
 
-            % Range-correction diagnostics (sagnac, shapiro truth−model)
-            sagRMS = diag.getSagnacDiffRMS();
+            % Range-correction diagnostics (sagnac, shapiro truth−model). These getters
+            % exist only on the legacy Diagnostics backend, not the array store; guard so
+            % the figure path works with either (both return [] on the store).
+            sagRMS = [];
+            if ismethod(diag, 'getSagnacDiffRMS'); sagRMS = diag.getSagnacDiffRMS(); end
             if any(sagRMS > 0)
                 plot(t, sagRMS, 'c--', 'LineWidth',1.2, 'DisplayName','Sagnac (T-M)');
                 hold on; hasAny = true;
             end
-            shaRMS = diag.getShapiroDiffRMS();
+            shaRMS = [];
+            if ismethod(diag, 'getShapiroDiffRMS'); shaRMS = diag.getShapiroDiffRMS(); end
             if any(shaRMS > 0)
                 plot(t, shaRMS, 'k--', 'LineWidth',1.2, 'DisplayName','Shapiro (T-M)');
                 hold on; hasAny = true;

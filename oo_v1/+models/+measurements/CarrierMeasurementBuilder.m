@@ -1,7 +1,7 @@
 classdef CarrierMeasurementBuilder
     % CarrierMeasurementBuilder  Builds carrier-phase EKF rows (float-ambiguity mode).
     %
-    % Extracted from MeasurementModel.computeCarrierEkfRows_ (Stage 12A Step 2).
+    % Extracted from MeasurementModel.computeCarrierEkfRows_.
     % All physics are preserved exactly — this is a pure structural refactor.
 
     methods (Static)
@@ -10,7 +10,7 @@ classdef CarrierMeasurementBuilder
                 cfg, errorChain, floatAmbiguityTruth_m, ...
                 asset, towers, twr_pairs, ant_pairs, r_ants_truth, r_ants_est, ...
                 leverArms_model, x_est, stateMap, nx, errStruct, ...
-                towerClkTruth, towerClkModel, towerClkSigma, t_s)
+                towerClkTruth, towerClkModel, towerClkSigma, t_s, assetIdx)
             % buildEkfRows  Carrier EKF measurement rows.
             %
             % z_phi = rho_true + b_rx_true - b_twr_true + trop_true - iono_true + B_true + noise
@@ -23,11 +23,16 @@ classdef CarrierMeasurementBuilder
             % floatAmbiguityTruth_m is a containers.Map (handle class).
             % Keys added here persist in the caller's obj.floatAmbiguityTruth_m.
             if nargin < 18 || isempty(t_s); t_s = 0; end
+            % Phase 3b-1: per-asset state indices via AssetStateBlock (chief=1 aliases stateMap
+            % exactly -> byte-identical). r_idx/euler_idx/b_rx_idx/ambiguityIdx*/zwdIdx/ionoIdx
+            % below read from blk; the isfield(stateMap,...) coarse guards are harmless.
+            if nargin < 19 || isempty(assetIdx); assetIdx = 1; end
+            blk = revgnss.AssetStateBlock.forAsset(stateMap, assetIdx);
 
             Mp = numel(twr_pairs);
 
             % Carrier IF float rows are supported through CarrierIonoFreeRowBuilder when
-            % the guarded row toggle is enabled (Stage 47+). Integer ambiguity fixing is
+            % the guarded row toggle is enabled. Integer ambiguity fixing is
             % not implemented. Legacy cfg.measurements.carrierCombinationMode='ionosphereFree'
             % is a deprecated path — reject it here to prevent silent raw-L1 fallback.
             if isfield(cfg,'measurements') && ...
@@ -57,11 +62,11 @@ classdef CarrierMeasurementBuilder
                 sigma_phi = cfg.measurements.carrier.sigma_m;
             end
 
-            % Stage 42: carrier EKF signals from catalog (L1 always; L2 if guarded toggle enabled)
+            % Carrier EKF signals from catalog (L1 always; L2 if guarded toggle enabled)
             carrierSigs_ = revgnss.SignalCatalog.carrierSignalsFromConfig(cfg);
             nSig_        = numel(carrierSigs_);
             b_rx_true = asset.clock.getBiasMeters();
-            b_rx_est  = x_est(stateMap.b_rx_idx);
+            b_rx_est  = x_est(blk.b);
 
             Mp_total = Mp * nSig_;
             z_phi = zeros(Mp_total, 1);
@@ -76,25 +81,27 @@ classdef CarrierMeasurementBuilder
             cpInfo.prefit_m          = zeros(Mp_total, 1);
             cpInfo.ambiguityStateIdx = zeros(Mp_total, 1);
             cpInfo.trackKey          = cell(Mp_total, 1);
-            cpInfo.towerClkModel_m   = zeros(Mp_total, 1); % Stage 73: per-row correction for compensated slip detection
-            % Stage 60: compact carrier-attitude row closure metadata
+            cpInfo.towerClkModel_m   = zeros(Mp_total, 1); % Per-row correction for compensated slip detection
+            cpInfo.interAntennaPhaseBiasTruth_m = zeros(Mp_total, 1);
+            cpInfo.interAntennaPhaseBiasModel_m = zeros(Mp_total, 1);
+            % Compact carrier-attitude row closure metadata
             cpInfo.leverArmNorm_m          = zeros(Mp_total, 1);
             cpInfo.attitudePartialsEnabled = false(Mp_total, 1);
             cpInfo.attitudeSensitive       = false(Mp_total, 1);
             cpInfo.hAttitudeNorm           = zeros(Mp_total, 1);
             cpInfo.rowUsesLinkGeometry     = true;
             cpInfo.carrierAttClosureAvail  = true;
-            % Stage 83: product-clock drift residual covariance metadata
+            % Product-clock drift residual covariance metadata
             cpInfo.productEpoch_s  = zeros(Mp_total, 1);
             cpInfo.productAge_s    = zeros(Mp_total, 1);
             cpInfo.sigmaDrift_mps  = zeros(Mp_total, 1);
-            % Stage 84: arc-reference status — no arc identifier available yet;
+            % Arc-reference status — no arc identifier available yet;
             % product-epoch age used as proxy for time-varying drift residual covariance.
             cpInfo.carrierProductArcReferenceStatus = 'notAvailableUsingProductEpochAgeV1';
-            % Stage 85: per-row injected slip (metres); zero when slip injection disabled.
+            % Per-row injected slip (metres); zero when slip injection disabled.
             cpInfo.injectedSlip_m = zeros(Mp_total, 1);
 
-            % Stage 83: get product epoch and drift sigma for carrier rows
+            % Get product epoch and drift sigma for carrier rows
             t_prod_carrier  = zeros(Mp, 1);
             dsig_carrier    = zeros(Mp, 1);
             applyCarrierProdCov = true;
@@ -108,9 +115,16 @@ classdef CarrierMeasurementBuilder
                     dsig_carrier   = dsig_vec;
                 catch; end
             end
+            % Tower-clock DRIFT product-sigma R double-count guard (carrier). When a
+            % tower's clock drift is an EKF state (towerClockIdx(ti,2)>0) its uncertainty is
+            % in P, so the product drift sigma must not also enter the carrier drift block
+            % or the code x carrier cross-stack (via cpInfo.sigmaDrift_mps). Mask on column 2
+            % using the carrier row tower list. No-op when estimateTowerClocks=false (golden).
+            dsig_carrier = models.measurements.CodeMeasurementBuilder.maskStateTowerSigma_( ...
+                dsig_carrier, twr_pairs, stateMap, 2);
 
-            r_cm_est  = x_est(stateMap.r_idx);
-            euler_est = x_est(stateMap.euler_idx);
+            r_cm_est  = x_est(blk.r);
+            euler_est = revgnss.AssetStateBlock.eulerEst(blk, x_est);
             doFD      = models.measurements.MeasurementModelUtils.needsFiniteDiffH_(cfg);
 
             for si_ = 1:nSig_
@@ -142,16 +156,16 @@ classdef CarrierMeasurementBuilder
                 B_est = 0;
                 ambStateIdx = 0;
                 if isfield(stateMap,'ambiguityIdx3d') && ...
-                        ti <= size(stateMap.ambiguityIdx3d,1) && ...
-                        ai <= size(stateMap.ambiguityIdx3d,2) && ...
-                        sigIdx <= size(stateMap.ambiguityIdx3d,3)
+                        ti <= size(blk.ambiguity3d,1) && ...
+                        ai <= size(blk.ambiguity3d,2) && ...
+                        sigIdx <= size(blk.ambiguity3d,3)
                     % New mode: tower/receiver/signal indexing
-                    ambStateIdx = stateMap.ambiguityIdx3d(ti, ai, sigIdx);
+                    ambStateIdx = blk.ambiguity3d(ti, ai, sigIdx);
                 elseif isfield(stateMap,'ambiguityIdx') && ...
-                        ti <= size(stateMap.ambiguityIdx,1) && ...
-                        sigIdx <= size(stateMap.ambiguityIdx,2)
+                        ti <= size(blk.ambiguity,1) && ...
+                        sigIdx <= size(blk.ambiguity,2)
                     % Legacy mode: tower/signal indexing
-                    ambStateIdx = stateMap.ambiguityIdx(ti, sigIdx);
+                    ambStateIdx = blk.ambiguity(ti, sigIdx);
                 end
                 if ambStateIdx > 0 && ambStateIdx <= numel(x_est)
                     B_est = x_est(ambStateIdx);
@@ -182,7 +196,7 @@ classdef CarrierMeasurementBuilder
                 end
 
                 % Truth geometric range (survey + PCO + corrections)
-                r_twr_t = models.measurements.MeasurementModelUtils.towerPositionEcef(cfg, towers{ti}, ti, 'truth');
+                r_twr_t = models.measurements.MeasurementModelUtils.towerPositionEcef(cfg, towers{ti}, ti, 'truth', t_s);
                 if isfield(cfg,'effects') && isfield(cfg.effects,'antennaPCO')
                     pco = cfg.effects.antennaPCO;
                     if isfield(pco,'truth') && pco.truth.enable
@@ -203,15 +217,34 @@ classdef CarrierMeasurementBuilder
                 noise_phi = sigma_phi * errorChain.drawKeyed( ...
                     models.noise.RngSource.CARR_PHASE, ti, ai, si_, errorChain.epochIdx_, 1, 1);
 
-                % Phase scintillation: a time-correlated truth-side carrier jitter [rad -> m
+                % Time-correlated truth-side carrier jitter [rad -> m
                 % via lambda/(2*pi)]. getPhaseScintRad returns exactly 0 unless
                 % scintillation.phaseScint is enabled, so the carrier golden path is unchanged.
                 phaseScint_m = errorChain.envModel.getPhaseScintRad(ti, elv) * lambda / (2*pi);
 
-                % z: +trop, -iono (carrier ionosphere is OPPOSITE sign to code)
-                z_phi(rowOut) = rho_t + b_rx_true - b_twr_t + trop_t - iono_t_sig + B_true + noise_phi + phaseScint_m;
+                % R-6: unknown inter-antenna carrier phase bias (TRUTH-ONLY). Constant per
+                % (antenna, signal), reference antenna ai=1 == 0, keyed independent of tower/
+                % epoch (persistent). Added to z only (NOT to h_phi), so the estimator does not
+                % know it: a constant part is absorbed by the float ambiguity B, a drift leaves
+                % a real residual and can pull an integer fix. Default off -> b_ia_m=0 -> golden.
+                b_ia_m = 0;
+                if isfield(cfg,'errors') && isfield(cfg.errors,'interAntennaCarrierBias') && ...
+                        cfg.errors.interAntennaCarrierBias.enable && ai > 1
+                    iab  = cfg.errors.interAntennaCarrierBias;
+                    sigC = 0.25; if isfield(iab,'sigma_cycles'); sigC = iab.sigma_cycles; end
+                    sKey = si_;  if isfield(iab,'perSignal') && ~iab.perSignal; sKey = 1; end
+                    c    = errorChain.drawKeyed(models.noise.RngSource.ANT_PHASE_BIAS, 0, ai, sKey, 1, 1, 1);
+                    b_ia_m = sigC * lambda * c;
+                    if isfield(iab,'drift') && isfield(iab.drift,'enable') && iab.drift.enable
+                        rate = 0.05; if isfield(iab.drift,'rate_cyclesPerHour'); rate = iab.drift.rate_cyclesPerHour; end
+                        b_ia_m = b_ia_m + rate * lambda * (t_s/3600);
+                    end
+                end
 
-                % Stage 85: synthetic slip injection for stress testing
+                % z: +trop, -iono (carrier ionosphere is OPPOSITE sign to code)
+                z_phi(rowOut) = rho_t + b_rx_true - b_twr_t + trop_t - iono_t_sig + B_true + noise_phi + phaseScint_m + b_ia_m;
+
+                % Synthetic slip injection for stress testing
                 try
                     sl = cfg.validation.stress.slips;
                     if sl.enable && any(abs(t_s - sl.injectEpochs_s) < 0.5) && ...
@@ -224,24 +257,26 @@ classdef CarrierMeasurementBuilder
                     end
                 catch; end
 
+                b_ia_model_m = revgnss.InterAntennaPhaseBias.modelBiasMeters(cfg, ai, sigIdx);
+
                 % h: +trop_model, -iono_model + ZWD state
-                h_phi(rowOut) = rho_e + b_rx_est - b_twr_m + trop_m - iono_m_sig + B_est;
-                if isfield(stateMap,'zwdIdx') && ti <= numel(stateMap.zwdIdx) && ...
-                        stateMap.zwdIdx(ti) > 0
+                h_phi(rowOut) = rho_e + b_rx_est - b_twr_m + trop_m - iono_m_sig + B_est + b_ia_model_m;
+                if isfield(stateMap,'zwdIdx') && ti <= numel(blk.zwd) && ...
+                        blk.zwd(ti) > 0
                     mf_phi = models.atmosphere.MappingFunctions.troposphere(elv, ...
                         models.measurements.MeasurementModelUtils.zwdMappingKind(cfg));
-                    h_phi(rowOut) = h_phi(rowOut) + mf_phi * x_est(stateMap.zwdIdx(ti));
+                    h_phi(rowOut) = h_phi(rowOut) + mf_phi * x_est(blk.zwd(ti));
                 end
                 % Slant-iono EKF state (prototype): carrier ionosphere is a phase ADVANCE
                 % (negative), so the partial is the NEGATIVE 1/f^2 dispersion.
-                if isfield(stateMap,'ionoIdx') && ti <= numel(stateMap.ionoIdx) && ...
-                        stateMap.ionoIdx(ti) > 0
+                if isfield(stateMap,'ionoIdx') && ti <= numel(blk.iono) && ...
+                        blk.iono(ti) > 0
                     fL1c  = revgnss.SignalDefinition.get('L1').frequency_Hz;
                     fSigc = revgnss.Constants.SPEED_OF_LIGHT_MPS / lambda;
-                    h_phi(rowOut) = h_phi(rowOut) - (fL1c / fSigc)^2 * x_est(stateMap.ionoIdx(ti));
+                    h_phi(rowOut) = h_phi(rowOut) - (fL1c / fSigc)^2 * x_est(blk.iono(ti));
                 end
 
-                % Stage 71 NOTE: towerClkSigma is NOT added to carrier R.
+                % NOTE: towerClkSigma is NOT added to carrier R.
                 % Float ambiguity B_est absorbs constant clock bias per arc; inflating
                 % R would incorrectly degrade carrier from ~5mm to ~0.5m precision.
                 % towerClkSigma is applied to CODE rows only (in CodeMeasurementBuilder).
@@ -253,18 +288,20 @@ classdef CarrierMeasurementBuilder
                 cpInfo.signalIdx(rowOut)          = sigIdx;
                 cpInfo.trackKey{rowOut}           = sprintf('T%03d_A%03d_S%02d', ti, ai, sigIdx);
                 cpInfo.ambiguityStateIdx(rowOut)  = ambStateIdx;
-                cpInfo.towerClkModel_m(rowOut)    = b_twr_m; % Stage 73
-                % Stage 83: product-clock drift residual metadata (per row)
+                cpInfo.towerClkModel_m(rowOut)    = b_twr_m;
+                cpInfo.interAntennaPhaseBiasTruth_m(rowOut) = b_ia_m;
+                cpInfo.interAntennaPhaseBiasModel_m(rowOut) = b_ia_model_m;
+                % Product-clock drift residual metadata (per row)
                 cpInfo.productEpoch_s(rowOut) = t_prod_carrier(mi);
                 cpInfo.productAge_s(rowOut)   = t_s - t_prod_carrier(mi);
                 cpInfo.sigmaDrift_mps(rowOut) = dsig_carrier(mi);
 
                 % ---- H: position columns (analytic or finite-difference) ------
                 if doFD
-                    H_phi(rowOut, stateMap.r_idx) = revgnss.LinkGeometry.finiteDiffPositionJacobian( ...
+                    H_phi(rowOut, blk.r) = revgnss.LinkGeometry.finiteDiffPositionJacobian( ...
                         cfg, towers, ti, ai, r_cm_est, euler_est, leverArms_model, 1.0);
                 else
-                    H_phi(rowOut, stateMap.r_idx) = g_e.losRow;
+                    H_phi(rowOut, blk.r) = g_e.losRow;
                 end
 
                 attGate = revgnss.LinkGeometry.shouldUseAttitudePartials(cfg, 'carrier');
@@ -273,19 +310,19 @@ classdef CarrierMeasurementBuilder
                     if isfield(cfg.estimator,'attitudeJacobianStep_rad')
                         step_e = cfg.estimator.attitudeJacobianStep_rad;
                     end
-                    H_phi(rowOut, stateMap.euler_idx) = revgnss.LinkGeometry.finiteDiffAttitudeJacobian( ...
+                    H_phi(rowOut, blk.euler) = revgnss.LinkGeometry.finiteDiffAttitudeJacobian( ...
                         cfg, towers, ti, ai, r_cm_est, euler_est, leverArms_model, step_e);
                 end
-                % Stage 60: record closure metadata for this row (after H_phi is populated)
+                % Record closure metadata for this row (after H_phi is populated)
                 cpInfo.attitudePartialsEnabled(rowOut) = attGate.enabled;
                 cpInfo.leverArmNorm_m(rowOut)          = norm(leverArms_model(:, ai));
                 cpInfo.attitudeSensitive(rowOut)       = attGate.enabled && norm(leverArms_model(:,ai)) > 1e-9;
-                if isfield(stateMap,'euler_idx') && ~isempty(stateMap.euler_idx)
-                    cpInfo.hAttitudeNorm(rowOut) = norm(H_phi(rowOut, stateMap.euler_idx));
+                if isfield(stateMap,'euler_idx') && ~isempty(blk.euler)
+                    cpInfo.hAttitudeNorm(rowOut) = norm(H_phi(rowOut, blk.euler));
                 end
 
                 % ---- H: clock, ambiguity, ZWD (always analytic) ---------------
-                H_phi(rowOut, stateMap.b_rx_idx) = 1;
+                H_phi(rowOut, blk.b) = 1;
 
                 if isfield(stateMap,'towerClockIdx') && ...
                         ti <= size(stateMap.towerClockIdx,1) && ...
@@ -299,17 +336,17 @@ classdef CarrierMeasurementBuilder
 
                 % ZWD column: +mf (same sign for carrier and code)
                 if isfield(stateMap,'zwdIdx') && ...
-                        ti <= numel(stateMap.zwdIdx) && stateMap.zwdIdx(ti) > 0
+                        ti <= numel(blk.zwd) && blk.zwd(ti) > 0
                     mf = models.atmosphere.MappingFunctions.troposphere(elv, ...
                         models.measurements.MeasurementModelUtils.zwdMappingKind(cfg));
-                    H_phi(rowOut, stateMap.zwdIdx(ti)) = mf;
+                    H_phi(rowOut, blk.zwd(ti)) = mf;
                 end
                 % Slant-iono column: -(f_L1/f)^2 (carrier ionosphere is a phase advance)
                 if isfield(stateMap,'ionoIdx') && ...
-                        ti <= numel(stateMap.ionoIdx) && stateMap.ionoIdx(ti) > 0
+                        ti <= numel(blk.iono) && blk.iono(ti) > 0
                     fL1c  = revgnss.SignalDefinition.get('L1').frequency_Hz;
                     fSigc = revgnss.Constants.SPEED_OF_LIGHT_MPS / lambda;
-                    H_phi(rowOut, stateMap.ionoIdx(ti)) = -(fL1c / fSigc)^2;
+                    H_phi(rowOut, blk.iono(ti)) = -(fL1c / fSigc)^2;
                 end
 
                 % ---- Known-ambiguity validation (ATTITUDE VALIDATION ONLY — not operational) ----
@@ -326,7 +363,7 @@ classdef CarrierMeasurementBuilder
             end  % for mi
             end  % for si_
 
-            % Stage 83: add time-varying product drift covariance to carrier R
+            % Add time-varying product drift covariance to carrier R
             % Policy: timeVaryingProductResidualOnly — constant bias absorbed by float ambiguity;
             % only age-weighted residual (from arc start) enters R.
             carrierCovInfo = struct('carrierProductCovApplied',false,'carrierProductCovBlocks',0, ...
@@ -340,13 +377,13 @@ classdef CarrierMeasurementBuilder
             end
             cpInfo.carrierProductCovInfo = carrierCovInfo;
 
-            % Stage 47: carrier IF post-processing (replaces L1+L2 with IF rows)
+            % Carrier IF post-processing (replaces L1+L2 with IF rows)
             if revgnss.CarrierIonoFreeRowBuilder.shouldCombine(cfg) && nSig_ == 2
-                cpInfo_float63_ = cpInfo;  % Stage 63: preserve float rows before IF replacement
+                cpInfo_float63_ = cpInfo;  % Preserve float rows before IF replacement
                 [z_phi, h_phi, H_phi, R_phi, cpInfo] = ...
                     revgnss.CarrierIonoFreeRowBuilder.buildFromStack( ...
                         z_phi, h_phi, H_phi, R_phi, cpInfo, Mp, cfg);
-                cpInfo.floatRows = cpInfo_float63_;  % Stage 63: embedded for integer fixing
+                cpInfo.floatRows = cpInfo_float63_;  % Embedded for integer fixing
             end
         end
 
@@ -354,7 +391,7 @@ classdef CarrierMeasurementBuilder
                 cfg, errorChain, ambiguityMap, asset, towers, twr_list, ant_list, r_ants_true)
             % buildDiagnostic  Truth carrier phase observables (diagnostic only).
             %
-            % Extracted from MeasurementModel.computeCarrierPhase_ (Stage 12A.2).
+            % Extracted from MeasurementModel.computeCarrierPhase_.
             %
             % z_phi_cycles = (rho + b_rx - b_twr) / lambda + N_ia + noise
             % N_ia: constant integer ambiguity per (tower, antenna) arc.
