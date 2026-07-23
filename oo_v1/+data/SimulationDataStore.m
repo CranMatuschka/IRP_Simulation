@@ -204,19 +204,19 @@ classdef SimulationDataStore < handle
         tw_mod_
         tw_err_
 
-        % ---- WP3 secondary-asset clocks (lazy [nSec x N]): estimate/sigma/truth of
-        % the estimated secondary clock BIAS. Empty unless estimateMode='clocks'.
+        % ---- Secondary-asset clocks (lazy [nSec x N]): estimate/sigma/truth of
+        % the estimated secondary clock bias. Empty unless estimateMode='clocks'.
         nSecClocks_ (1,1) double = 0
         sc_estB_
         sc_sigB_
         sc_truB_
 
-        % ---- P1'/WP4 secondary-asset ORBIT (lazy [nSec x N]): 3D position error norm
+        % ---- Secondary-asset orbit (lazy [nSec x N]): 3D position error norm
         % and 1-sigma of the estimated secondary position. Empty unless estimateMode='position'.
         nSecOrbits_ (1,1) double = 0
         so_posErr_
         so_posSig_
-        so_baseErr_    % P5': per-secondary RELATIVE baseline error to the chief (est - truth) [m]
+        so_baseErr_    % Per-secondary relative baseline error to the chief (est - truth) [m]
         % ---- Guard C: per-sat + formation-centroid NEES (lazy). Empty unless estimateMode='position'.
         so_NEESpos_
         so_NEESvel_
@@ -1938,7 +1938,7 @@ classdef SimulationDataStore < handle
                 d.towerClock.correctionError_m = obj.tw_err_(:,1:N);
             end
 
-            % WP3 secondary-asset clocks (estimate-vs-truth bias diagnostic)
+            % Secondary-asset clocks (estimate-vs-truth bias diagnostic)
             if ~isempty(obj.sc_estB_)
                 d.secondaryClock.est_m   = obj.sc_estB_(:,1:N);
                 d.secondaryClock.sigma_m = obj.sc_sigB_(:,1:N);
@@ -1946,11 +1946,11 @@ classdef SimulationDataStore < handle
                 d.secondaryClock.error_m = obj.sc_estB_(:,1:N) - obj.sc_truB_(:,1:N);
             end
 
-            % P1'/WP4 secondary-asset orbit (per-satellite 3D position error + sigma)
+            % Secondary-asset orbit (per-satellite 3D position error + sigma)
             if ~isempty(obj.so_posErr_)
                 d.secondaryOrbit.posError_m      = obj.so_posErr_(:,1:N);
                 d.secondaryOrbit.posSigma_m      = obj.so_posSig_(:,1:N);
-                d.secondaryOrbit.baselineError_m = obj.so_baseErr_(:,1:N);   % P5': relative (shape)
+                d.secondaryOrbit.baselineError_m = obj.so_baseErr_(:,1:N);   % Relative baseline (shape)
             end
             % Guard C: per-satellite + formation-centroid NEES (consistency gate)
             if ~isempty(obj.so_NEESpos_)

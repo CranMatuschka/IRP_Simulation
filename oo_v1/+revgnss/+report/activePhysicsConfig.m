@@ -125,7 +125,7 @@ function activePhysicsConfig(fid, cfg, summary, plotPaths, stem, figDir) %#ok<IN
     fprintf(fid, 'External products (SP3/CLK/RINEX/ANTEX/IONEX) & %s\\\\\n', H(F('externalProductsStatus','notImplemented')));
     fprintf(fid, '\\bottomrule\n\\end{tabular}\n\n\\vspace{6pt}\n');
 
-    % ---- Known limitations (compact, de-staged) -----------------------------
+    % ---- Known limitations (compact) -------------------------------------------
     fprintf(fid, '\\textbf{Known limitations}\n\n');
     fprintf(fid, '\\begin{tabular}{p{0.92\\textwidth}}\n\\toprule\n');
     fprintf(fid, 'No external RINEX/SP3/CLK/ANTEX/IONEX products ingested; tower-clock product is synthetic.\\\\\n');

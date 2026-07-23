@@ -8,7 +8,7 @@ classdef CarrierAttitudeRowClosure
     % No new physics. No integer fixing. No quaternion/error-state EKF.
     % Delegates all geometry and FD computations to LinkGeometry.
     %
-    % Used by: ReportRunner (closure spot-check), test_stage60.
+    % Used by: ReportRunner (closure spot-check), test suite.
 
     methods (Static)
 
@@ -155,7 +155,7 @@ classdef CarrierAttitudeRowClosure
         function s = spotCheck(cfg, towers, stateMap, r_final, euler_final)
             % spotCheck  Run compareRow on tower 1 / antenna 1 using supplied state.
             %   Returns compact summary for report fields.
-            %   Adds stage61CarrierClosureUsesErrorStateJacobian field.
+            %   Adds carrierClosureUsesErrorStateJacobian field.
             s.rowsChecked = 0;
             s.rowsClosed  = 0;
             s.rowsMismatch = 0;

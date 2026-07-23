@@ -1,5 +1,5 @@
 function cfg = realismGradeConfig(cfg)
-%REALISMGRADECONFIG  Overlay the "realism-grade" corrections (v4 work packages) on a cfg.
+%REALISMGRADECONFIG  Overlay the "realism-grade" corrections on a cfg.
 %   cfg = realismGradeConfig(masterConfig())        % or set cfg.realism.grade=true in masterConfig
 %
 %   De-optimises the idealised headline defaults so a run is PHYSICALLY REPRESENTATIVE of a
@@ -19,7 +19,7 @@ function cfg = realismGradeConfig(cfg)
 %
 %   Covered here (config-level): R-1 clock, R-4 tower product sigma, M7 C/N0 weighting,
 %   R-5 truth systematics (multipath/hardware/PCV/survey/DCB), R-10 honest floors,
-%   R-3 process-noise + matched luni-solar/SRP for the force-model gap, WP-D relativistic
+%   R-3 process-noise + matched luni-solar/SRP for the force-model gap, relativistic
 %   clock, ISL product sigma, R-8 EOP/solid-Earth tide, R-6 inter-antenna carrier bias,
 %   and point34 carrier-arc/phase-bias honesty settings.
 %
@@ -107,7 +107,7 @@ function cfg = realismGradeConfig(cfg)
         cfg.estimator.dynamics.perturbations.srp.areaToMass_m2pkg = cfg.orbit.truth.perturbations.srp.areaToMass_m2pkg;
     end
 
-    % ---- WP-D  Relativistic receiver-clock rate offset present in the truth (modelled, not omitted)
+    % ---- Relativistic receiver-clock rate offset present in the truth (modelled, not omitted)
     if inc.relativity
         cfg.physics.relativity.clock.enable = true;
         expandList{end+1} = 'physics.relativity.clock';
@@ -191,7 +191,7 @@ function inc = i_resolveIncludes(cfg)
         'dcb',                     true, ...   % R-5  inter-frequency code bias (truth)
         'honestFloors',            true, ...   % R-10 honest measurement sigma floors
         'luniSolar',               true, ...   % R-3  matched luni-solar+SRP + retuned SNC (coupled)
-        'relativity',              true, ...   % WP-D relativistic receiver-clock offset
+        'relativity',              true, ...   % relativistic receiver-clock offset
         'islProductSigma',         true, ...   % ISL  realistic secondary product sigma
         'eop',                     true, ...   % R-8  uncorrected EOP frame residual (truth)
         'solidEarthTide',          true, ...   % R-8  solid-Earth tide (truth)

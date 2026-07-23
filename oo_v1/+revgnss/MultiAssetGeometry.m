@@ -2,7 +2,7 @@ classdef MultiAssetGeometry
     % MultiAssetGeometry  Relative + absolute swarm geometry from persisted truth.
     %
     % Computes per-satellite geometry from the `multiAssetTruth` bundle that
-    % ReportRunner persists for swarm runs (WP1). This is the "compare each
+    % ReportRunner persists for swarm runs. This is the "compare each
     % satellite" layer the swarm question asks for, split into the two axes of
     % interest:
     %

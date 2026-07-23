@@ -20,7 +20,7 @@ function cfg = honestCovarianceConfig(cfg)
 %   averages them away over 3600 epochs while the real error does not average. See the
 %   mechanism block below for the full, corrected derivation.
 %
-%   TESTED HYPOTHESIS AND RESULT (2026-07-15): this file first raised the pseudorange R
+%   TESTED HYPOTHESIS AND RESULT: this file first raised the pseudorange R
 %   floor (cfg.measurement.sigmaFloor_m: 0.01 -> 1.0 m) on the theory that R undercounted
 %   the systematics. The full 6-run realism battery was re-run with it. RESULT: NEES barely
 %   moved (e.g. G5S1R4-TW0 pos 183 -> 187, clk 250 -> 252; sigma/RMS 0.05 -> 0.05). Verified
@@ -52,7 +52,7 @@ function cfg = honestCovarianceConfig(cfg)
 %   estimating per-tower clock states (clock.mode='includeTowerClocksInEKF') should absorb the
 %   systematics honestly. But the one-way GEO geometry gives only N pseudoranges per epoch for
 %   N tower clocks + rx clock + position, and the near-static geometry never separates them, so
-%   the weakly-observable subspace random-walks. VERIFIED (2026-07-15): R1 diverges to 378 km
+%   the weakly-observable subspace random-walks. VERIFIED: R1 diverges to 378 km
 %   (externalTowerCorrections gauge) / 3400 km (meanGroundClockGauge); R4 fails a carrier/
 %   attitude Jacobian assertion. finalizeConfig ACCEPTS the config, but config validity is not
 %   dynamic observability. Left OFF (see body). Making it work is a filter-code task: gate to
@@ -64,7 +64,7 @@ function cfg = honestCovarianceConfig(cfg)
 %   observability property of the radial<->rx-clock mode. The ONLY honest cure is GEOMETRY --
 %   two-way time transfer or a co-observed swarm -- which the existing batteries already show:
 %   swarm S6R4 sits at NEES ~50-60 vs ~140-540 for R1/R4, and two-way lowers R1/R4 NEES ~25 %.
-%   DELIBERATELY NOT CHANGED: process noise stays at the physical force budget; no scalar
+%   Process noise deliberately stays at the physical force budget; no scalar
 %   P/covariance inflation anywhere; the truth is identical to the realism grade.
 %
 %   See also: realismGradeConfig, run_oo_v1_battery, run_oo_v1_analysis.
@@ -86,7 +86,7 @@ function cfg = honestCovarianceConfig(cfg)
     % Idea: a constant per-tower measurement bias is observationally identical to a per-tower
     % clock bias, so estimating per-tower clock states (clock.mode='includeTowerClocksInEKF')
     % should let the filter absorb the per-tower systematics with honest covariance.
-    % RESULT (verified 2026-07-15, both gauge modes): it DIVERGES on the one-way GEO geometry.
+    % RESULT (verified with both gauge modes): it DIVERGES on the one-way GEO geometry.
     % Each epoch gives only N pseudoranges for N tower clocks + rx clock + position, and the
     % near-static GEO geometry never separates them -> the weakly-observable subspace random-
     % walks. R1 (5 PR/epoch): externalTowerCorrections -> 378 km, meanGroundClockGauge ->

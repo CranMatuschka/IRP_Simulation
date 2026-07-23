@@ -83,7 +83,7 @@ classdef MeasurementModel < handle
             % N_ant=1 with a zero lever arm, recovering the single-antenna case.
             %
             % assetIdx (optional, default 1): which satellite this call measures (chief=1).
-            % Phase 3b-1: per-asset indices are resolved via AssetStateBlock.forAsset and threaded
+            % Per-asset indices are resolved via AssetStateBlock.forAsset and threaded
             % down to the Code/Carrier builders; at assetIdx=1 the block aliases the chief stateMap
             % fields exactly, so this is byte-identical.
             if nargin < 7 || isempty(assetIdx); assetIdx = 1; end
@@ -177,7 +177,7 @@ classdef MeasurementModel < handle
             errStruct.antennaIdx_perMeas     = ant_list;
             errStruct.nPseudorange           = M;   % 0.4: for postfit split
 
-            % CHANGED: v3→v4 — Issue 6: extended product correction cache.
+            % Extended product correction cache for postfit recomputation.
             % Postfit recomputation must reuse exactly these values (not re-query or re-draw).
             errStruct.towerClockCorrection_m      = towerClkModel;    % correction applied
             errStruct.towerClockCorrectionSigma_m = towerClkSigma;    % sigma used in R

@@ -57,7 +57,7 @@ function figOut = plot_mat_report(matPath)
     diag = S.diagnostics;
     if isfield(S, 'cfg'); cfg = S.cfg; else; cfg = struct(); end %#ok<NASGU>
 
-    % Per-asset swarm truth (WP1), present only for multi-asset (nSpaceAssets>1)
+    % Per-asset swarm truth, present only for multi-asset (nSpaceAssets>1)
     % runs. Drives an extra "Swarm geometry" tab; absent -> the tab is skipped.
     swarmTruth = [];
     if isfield(S, 'multiAssetTruth') && ~isempty(S.multiAssetTruth)
@@ -102,7 +102,7 @@ function fig = i_buildTabs(diag, ttl, swarmTruth)
     if ~isempty(swarmTruth)
         tabs(end+1, :) = {'Swarm geometry', @() i_tabSwarmGeometry(tg, swarmTruth)};
     end
-    % Swarm estimate tab (P5'): per-satellite ESTIMATE error, only when the run carries
+    % Swarm estimate tab: per-satellite ESTIMATE error, only when the run carries
     % the secondary-orbit diagnostics (multi-asset estimateMode='position').
     hasSwarmEst = false;
     try
@@ -298,7 +298,7 @@ function i_tabMeasurements(tg, diag, t)
 end
 
 function i_tabSwarmGeometry(tg, swarmTruth)
-    % Per-asset swarm TRUTH geometry (WP1/WP2): inter-asset baselines to the
+    % Per-asset swarm TRUTH geometry: inter-asset baselines to the
     % estimated chief (relative) and the formation separation envelope. Truth
     % only -- secondaries are represented-only, so there is no per-asset ESTIMATE
     % error here (that is the multiAssetEstimation upgrade).
@@ -333,7 +333,7 @@ function i_tabSwarmGeometry(tg, swarmTruth)
 end
 
 function i_tabSwarmEstimate(tg, diag, t)
-    % Per-satellite ESTIMATE quality (P5'), the honest answer to "compare the position
+    % Per-satellite ESTIMATE quality, the honest answer to "compare the position
     % error of each satellite": (1) each secondary's ABSOLUTE position error with its
     % +/-3-sigma envelope (does the covariance cover the error? -- it is radial<->clock
     % WALL-LIMITED and usually overconfident), and (2) the RELATIVE baseline error to the

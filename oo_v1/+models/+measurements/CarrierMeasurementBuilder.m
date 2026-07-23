@@ -23,7 +23,7 @@ classdef CarrierMeasurementBuilder
             % floatAmbiguityTruth_m is a containers.Map (handle class).
             % Keys added here persist in the caller's obj.floatAmbiguityTruth_m.
             if nargin < 18 || isempty(t_s); t_s = 0; end
-            % Phase 3b-1: per-asset state indices via AssetStateBlock (chief=1 aliases stateMap
+            % Per-asset state indices via AssetStateBlock (chief=1 aliases stateMap
             % exactly -> byte-identical). r_idx/euler_idx/b_rx_idx/ambiguityIdx*/zwdIdx/ionoIdx
             % below read from blk; the isfield(stateMap,...) coarse guards are harmless.
             if nargin < 19 || isempty(assetIdx); assetIdx = 1; end

@@ -5,7 +5,7 @@ function txCodeBias(fid, diag, cfg)
 % Shows gauge type, gauge residual convergence, and number of states.
 %
 % Extracted verbatim from ClockExactReportBuilder.writeTxCodeBias_ as part
-% of the C-9 report decomposition. Read-only: consumes only the
+% of the report decomposition. Read-only: consumes only the
 % (now-public) ClockExactReportBuilder formatting toolkit. The emitted LaTeX
 % is byte-identical to the original method (verified by the normalized .tex
 % diff harness, tests/report/reportTexFingerprint.m).

@@ -279,7 +279,7 @@ classdef ClockModel < handle
             % If index exceeds array, colored component keeps its last value.
 
             % Propagate WFM+RWFM bias state
-            % WP-D: add the (gated) constant relativistic fractional-frequency offset to the
+            % Add the (gated) constant relativistic fractional-frequency offset to the
             % phase increment so the clock bias accumulates a LINEAR relativistic ramp
             % (c*relativisticFracFreq [m/s]); default 0 -> unchanged / golden byte-identical.
             new_bias_s = obj.bias_s + dt_s * (obj.fracFreq + obj.relativisticFracFreq) + n_bias_wfm;

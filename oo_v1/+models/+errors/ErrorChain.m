@@ -492,7 +492,6 @@ classdef ErrorChain < handle
             % Default is 'simpleSecant' (backward-compatible default).
             % This is NOT Klobuchar. Klobuchar is not implemented.
             %
-            % CHANGED: v3→v4 — Issue 1
             % 'constantVerticalTEC' is NOT a valid model: the field verticalDelayL1_m already
             % stores metres of L1 delay, NOT TECU.  If TECU-based input is needed in future,
             % add a separate modelType 'constantVerticalTEC_TECU' that reads
@@ -545,7 +544,6 @@ classdef ErrorChain < handle
                     end
                 end
             elseif strcmp(modelType,'constantVerticalDelay')
-                % CHANGED: v3→v4 — Issue 1
                 % constantVerticalDelay: cfg.errors.ionosphere.*.verticalDelayL1_m [m] is
                 % the vertical L1 delay in metres.
                 % I_slant = verticalDelayL1_m * mapping(el)  [Leick et al. 2015 eq. 9.11]

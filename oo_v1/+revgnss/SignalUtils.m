@@ -81,9 +81,8 @@ classdef SignalUtils
         end
 
         function H_clk = buildClockOnlyH(nMeas, nTowers, towerIdx_perMeas)
-            % buildClockOnlyH  Clock-only design matrix for gauge-mode test (Issue 17).
+            % buildClockOnlyH  Clock-only design matrix for gauge-mode test.
             %
-            % CHANGED: v3→v4 — Issue 17
             % State ordering: [b_rx, b_tower_1, ..., b_tower_N]
             % Each pseudorange row: b_rx = +1, b_tower_i = -1.
             % H_clk has rows of the form [1, 0, ..., -1_ti, ..., 0].
@@ -113,7 +112,6 @@ classdef SignalUtils
         function H_clk = buildClockOnlyH_fixedRef(nMeas, nTowers, towerIdx_perMeas, refTowerIdx)
             % buildClockOnlyH_fixedRef  Clock-only H with fixed reference tower.
             %
-            % CHANGED: v3→v4 — Issue 17
             % The reference tower row is omitted (its clock is known = gauge fixed).
             % State ordering: [b_rx, b_tower_1, ..., b_tower_N] excluding refTowerIdx.
             % With fixedReference: rank(H_clk_fixed) = nTowers + 1 (full rank).

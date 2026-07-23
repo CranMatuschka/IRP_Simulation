@@ -1,7 +1,7 @@
 function out = ionosphere(mode, args, cfg)   %#ok<INUSD>
-%IONOSPHERE  Single entry point for first-order ionosphere (Phase 5 façade).
+%IONOSPHERE  Single entry point for first-order ionosphere façade.
 %   Delegates VERBATIM to models.atmosphere.IonosphereModel — there is no physics here. The
-%   validated Stage-85 math stays in the class; this is the discoverable one-file-per-
+%   Validated math stays in the class; this is the discoverable one-file-per-
 %   effect entry point (models/<domain>/<effect>.m) with a uniform mode-dispatched API.
 %   Standalone: not yet wired into the sim, so it cannot move the regression golden.
 %

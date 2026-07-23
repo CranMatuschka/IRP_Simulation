@@ -20,7 +20,7 @@ classdef CodeMeasurementBuilder
             % Returns updated twr_list/ant_list/M/N_sig (may differ from input for multi-sig).
             %
             % assetIdx (optional, default 1): which satellite's state block to read (chief=1).
-            % Phase 3b-1: the per-asset indices (r/euler/b/zwd/iono) are resolved via
+            % The per-asset indices (r/euler/b/zwd/iono) are resolved via
             % AssetStateBlock.forAsset; at assetIdx=1 the block aliases the chief stateMap fields
             % exactly, so this is byte-identical. Tower-level indices (towerClockIdx, txCodeBias)
             % stay on stateMap -- they are shared, not per-asset.

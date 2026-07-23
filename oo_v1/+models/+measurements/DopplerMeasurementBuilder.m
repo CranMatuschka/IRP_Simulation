@@ -18,7 +18,7 @@ classdef DopplerMeasurementBuilder
 
             if nargin < 12 || isempty(t_s); t_s = 0; end
 
-            % Phase 3b-1: per-asset velocity/clock-drift/position indices via AssetStateBlock.
+            % Per-asset velocity/clock-drift/position indices via AssetStateBlock.
             % chief (assetIdx=1) aliases the stateMap fields exactly -> byte-identical.
             if nargin < 13 || isempty(assetIdx); assetIdx = 1; end
             blk = revgnss.AssetStateBlock.forAsset(stateMap, assetIdx);

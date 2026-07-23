@@ -64,7 +64,7 @@ function cfg = validateMasterConfig(cfg)
              'truth/model default_m, or residualStochastic.enable=true with sigma_m>0.']);
     end
 
-    % --- WP3 secondary-clock estimation guards (estimateMode='clocks') ---------
+    % --- Secondary-clock estimation guards (estimateMode='clocks') ---------
     maMode = 'off';
     if isfield(cfg,'multiAsset') && isfield(cfg.multiAsset,'estimateMode') && ...
             ischar(cfg.multiAsset.estimateMode)
@@ -79,7 +79,7 @@ function cfg = validateMasterConfig(cfg)
             error('validateMasterConfig:secondaryClockNoAsset', ...
                 'cfg.multiAsset.estimateMode=''%s'' requires cfg.scenario.nSpaceAssets>=2.', maMode);
         end
-        % P1'/WP4: estimating secondary POSITION needs the ground->secondary observable
+        % Estimating secondary POSITION needs the ground->secondary observable
         % (near-radial absolute anchor); ISL alone only ties relative baselines.
         if strcmp(maMode,'position') && ~i_boolPath(cfg,{'multiAsset','towersObserveSecondaries'})
             error('validateMasterConfig:secondaryPositionUnobservable', ...
@@ -122,7 +122,7 @@ function cfg = validateMasterConfig(cfg)
                  'truth clocks are identically 0, so the estimation target is trivial. ' ...
                  'Set cfg.asset.clock.deterministic=false for a meaningful WP3 run.']);
         end
-        % --- P1' realism guards (Guard B/C preconditions), position-scoped ---
+        % --- Realism guards (Guard B/C preconditions), position-scoped ---
         if strcmp(maMode,'position')
             atmoOn = i_boolPath(cfg,{'multiAsset','towerSecondary','atmosphere','enable'});
             dynOn  = i_boolPath(cfg,{'multiAsset','injectTruthSideDynamics'});
@@ -146,14 +146,14 @@ function cfg = validateMasterConfig(cfg)
         end
     end
 
-    % --- WP5 ground-tower -> secondary guard ----------------------------------
+    % --- Ground-tower -> secondary guard ----------------------------------
     if i_boolPath(cfg, {'multiAsset','towersObserveSecondaries'}) && ~ismember(maMode,{'clocks','position'})
         error('validateMasterConfig:towersObserveSecondariesNoState', ...
             ['cfg.multiAsset.towersObserveSecondaries=true requires estimateMode=''clocks'' or ''position'' ' ...
              '(else the tower->secondary row has no secondary state to observe).']);
     end
 
-    % --- Per-secondary ground carrier guards (delegated; no-op when off). Phase 3b-2 (C5) moved
+    % --- Per-secondary ground carrier guards (delegated; no-op when off). Moved
     % the tower->secondary rows into MeasurementModel, which now owns this validation. ---
 
     % --- Phase-2 per-secondary troposphere ZWD guard: the ZWD absorbs the Guard A divergent

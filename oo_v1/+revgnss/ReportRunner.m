@@ -144,7 +144,7 @@ classdef ReportRunner
             % ---- Collect summary metrics --------------------------------
             summary = revgnss.ReportRunner.collectSummary_(simData, cfg, version, reportFolder, pdfPath, matPath);
 
-            % ---- P5' per-satellite estimate table (multi-asset 'position' runs) ----
+            % ---- Per-satellite estimate table (multi-asset 'position' runs) ----
             if isfield(summary,'swarmEstimate') && isstruct(summary.swarmEstimate) && ...
                     isfield(summary.swarmEstimate,'available') && summary.swarmEstimate.available
                 fprintf('\n');
@@ -1633,10 +1633,10 @@ classdef ReportRunner
                     end
                 catch
                 end
-                % WP1: persist per-asset truth for swarm (nSpaceAssets>1) runs so
+                % Persist per-asset truth for swarm (nSpaceAssets>1) runs so
                 % per-satellite truth-vs-truth geometry can be compared offline.
                 % Guarded to multi-asset -> the single-asset save() below is
-                % byte-identical to the pre-WP1 variable list (golden-safe).
+                % byte-identical to the previous variable list (golden-safe).
                 try
                     multiAssetTruth = revgnss.ReportRunner.buildMultiAssetTruth_(res, cfg);
                 catch meMat
@@ -2162,7 +2162,7 @@ classdef ReportRunner
 
         function mat = buildMultiAssetTruth_(res, cfg)
             % buildMultiAssetTruth_  Assemble the per-asset truth bundle persisted
-            % for swarm runs (WP1). Returns [] for single-asset runs or when
+            % for swarm runs. Returns [] for single-asset runs or when
             % recordTruth is off, so the caller keeps the byte-identical
             % single-asset save. The secondary trajectories are the physically
             % real helix truth (SwarmFormation + shared propagator) that every
@@ -2242,7 +2242,7 @@ classdef ReportRunner
             % Relative geometry to the estimated primary chief (asset 1): baseline
             % vector and inter-satellite range per secondary. This is the "relative
             % positioning between assets" quantity; absolute per-asset position vs
-            % Earth is mat.asset(ai).r_ecef_m. (Richer metrics/plots are WP2.)
+            % Earth is mat.asset(ai).r_ecef_m. (Richer metrics/plots are future work.)
             r1 = mat.asset(1).r_ecef_m;
             emptyB = struct('toAsset',0, 'baseline_ecef_m',[], 'range_m',[]);
             mat.baselineToPrimary = repmat(emptyB, 1, max(0, nAssets - 1));
@@ -2277,7 +2277,7 @@ classdef ReportRunner
             summary.nTowers    = cfg.scenario.nTowers;
             summary.nReceivers = cfg.scenario.nReceivers;
             summary.multiAsset = revgnss.MultiAssetConfig.summary(cfg);
-            % P5' per-satellite estimate deliverable. Multi-asset only, so single-asset
+            % Per-satellite estimate deliverable. Multi-asset only, so single-asset
             % (golden) summaries are byte-identical (the field is simply absent).
             if isfield(cfg,'scenario') && isfield(cfg.scenario,'nSpaceAssets') && cfg.scenario.nSpaceAssets > 1
                 try
