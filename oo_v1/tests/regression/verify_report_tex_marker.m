@@ -23,15 +23,16 @@ try
     evalc('out = revgnss.ReportRunner.runSingle(cfg);');
     texPath = fullfile(outDir, 'tesep.tex');
     tex = fileread(texPath);
-    checks = {'Truth-estimation separation audit','truth/EKF dynamics family', ...
-              'J2 dynamics policy','Realistic synthetic truth-estimation comparison', ...
-              'Realistic synthetic TE comparison'};
+    % The "Appendix: Simulation Physics and Configuration" (which carried the truth-estimation
+    % separation audit markers) was intentionally removed from the report. Verify it is now
+    % absent rather than present.
+    removed = {'Appendix: Simulation Physics and Configuration', ...
+               'Truth-estimation separation audit','truth/EKF dynamics family', ...
+               'J2 dynamics policy','Realistic synthetic TE comparison'};
     fprintf(fid,'BUILD_OK\ntexPath=%s\n', texPath);
-    for i=1:numel(checks)
-        fprintf(fid,'present[%s]=%d\n', checks{i}, ~isempty(strfind(tex,checks{i}))); %#ok<STREMP>
+    for i=1:numel(removed)
+        fprintf(fid,'absent[%s]=%d\n', removed{i}, isempty(strfind(tex,removed{i}))); %#ok<STREMP>
     end
-    fprintf(fid,'old[mismatch status:]=%d\n', ~isempty(strfind(tex,'mismatch status:')));
-    fprintf(fid,'old[J2 mismatch policy]=%d\n', ~isempty(strfind(tex,'J2 mismatch policy')));
 catch ME
     fprintf(fid,'BUILD_ERROR\n%s\n%s\n', ME.identifier, ME.message);
     for k=1:numel(ME.stack)

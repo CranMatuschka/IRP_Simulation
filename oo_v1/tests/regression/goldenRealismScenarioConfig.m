@@ -1,7 +1,7 @@
 function cfg = goldenRealismScenarioConfig(durationOverride_s)
 %GOLDENREALISMSCENARIOCONFIG  Frozen REALISM-GRADE reference (the SECOND golden family).
 %   Certifies the de-optimised, physically-representative realism configuration — the v4
-%   realism fixes applied together via config/realismGradeConfig.m: realistic JOW caesium
+%   realism fixes applied together via config/internal/realismGradeConfig.m: realistic JOW caesium
 %   clock, IGS-RTS tower-clock sigma, C/N0 + elevation code weighting, multipath / DCB /
 %   hardware-delay / PCV / tower-survey truth systematics, luni-solar + SRP in BOTH the
 %   truth propagator AND the EKF (matched dynamics), relativistic clock, EOP + solid-Earth
@@ -23,7 +23,8 @@ function cfg = goldenRealismScenarioConfig(durationOverride_s)
     thisDir   = fileparts(mfilename('fullpath'));      % .../oo_v1/tests/regression
     oo_v1Root = fullfile(thisDir, '..', '..');         % .../oo_v1
     addpath(oo_v1Root);                                % +revgnss
-    addpath(fullfile(oo_v1Root, 'config'));            % masterConfig / realismGradeConfig
+    addpath(fullfile(oo_v1Root, 'config'));            % masterConfig
+    addpath(fullfile(oo_v1Root, 'config', 'internal'));% internal config helpers
 
     cfg = masterConfig();
 
