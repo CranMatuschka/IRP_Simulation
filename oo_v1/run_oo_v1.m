@@ -4,10 +4,12 @@ function out = run_oo_v1(configPath)
 % One clean entry point, NO environment-variable control. The base config is
 % config/masterConfig.m; an optional JSON file DEEP-OVERLAYS it (only the fields the JSON
 % lists are changed), so a run is fully described by masterConfig + one small JSON.
+% JSON files are direct cfg overlays; this runner does not apply per-JSON MATLAB translators.
 %
 %   run_oo_v1                      % masterConfig only (today's default single-asset run)
 %   run_oo_v1('run.json')         % masterConfig, then overlay the fields in run.json
-%   run_oo_v1('config/swarm.json')% e.g. a JSON that sets scenario.nSpaceAssets = 6
+%   run_oo_v1('realism.json')     % resolves to config/scenarios/realism.json if needed
+%   run_oo_v1('config/scenarios/swarm.json')% e.g. a JSON that sets scenario.nSpaceAssets = 6
 %   out = run_oo_v1(...)          % returns the ReportRunner output struct
 %
 % For a swarm (scenario.nSpaceAssets > 1) ReportRunner runs the N independent single-asset
@@ -23,12 +25,18 @@ function out = run_oo_v1(configPath)
     thisDir = fileparts(mfilename('fullpath'));
     addpath(thisDir);
     addpath(fullfile(thisDir, 'config'));
+    addpath(fullfile(thisDir, 'config', 'internal'));
 
     % ---- Load THE config (masterConfig, optionally overlaid by a JSON) ------
     cfg = masterConfig();
     if nargin >= 1 && ~isempty(configPath)
         jsonPath = configPath;
         if ~isfile(jsonPath); jsonPath = fullfile(thisDir, configPath); end
+        if ~isfile(jsonPath); jsonPath = fullfile(thisDir, 'config', 'scenarios', configPath); end
+        if ~isfile(jsonPath)
+            [~, scenarioName, scenarioExt] = fileparts(configPath);
+            jsonPath = fullfile(thisDir, 'config', 'scenarios', [scenarioName scenarioExt]);
+        end
         assert(isfile(jsonPath), 'run_oo_v1:noJson', 'Config JSON not found: %s', configPath);
         ov  = jsondecode(fileread(jsonPath));
         cfg = i_deepMerge(cfg, ov);
@@ -56,16 +64,22 @@ function out = run_oo_v1(configPath)
     % ---- Convenience latest_* pointers at the output root ------------------
     fprintf('\nRun folder: %s\n', runFolder);
     if cfg.report.writePdf && isfield(out,'pdfPath') && isfile(out.pdfPath)
-        copyfile(out.pdfPath, fullfile(outputDir, sprintf('latest_%s.pdf', configName)));
+        % The latest_* copy is a convenience pointer only; a cloud-sync copy timeout must
+        % NOT fail the run (the primary report is already written in runFolder).
+        try; copyfile(out.pdfPath, fullfile(outputDir, sprintf('latest_%s.pdf', configName)));
+        catch me; fprintf('latest_ PDF copy skipped: %s\n', me.message); end
         fprintf('PDF: %s\n', out.pdfPath);
         try; open(out.pdfPath); catch; end
     end
     if cfg.report.writeMat && isfield(out,'matPath') && isfile(out.matPath)
-        copyfile(out.matPath, fullfile(outputDir, sprintf('latest_%s.mat', configName)));
+        try; copyfile(out.matPath, fullfile(outputDir, sprintf('latest_%s.mat', configName)));
+        catch me; fprintf('latest_ MAT copy skipped: %s\n', me.message); end
         fprintf('MAT: %s\n', out.matPath);
     end
 
     % ---- Atmosphere-only residual diagnostics (single-asset only) ----------
+    nS = 1;
+    try; nS = cfg.scenario.nSpaceAssets; catch; end
     if nS <= 1
         try
             revgnss.AtmosphereResidualPlots.generate(cfg, runFolder);

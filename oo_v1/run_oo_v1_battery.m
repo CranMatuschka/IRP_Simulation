@@ -29,8 +29,8 @@ function manifest = run_oo_v1_battery(varargin)
     p.addParameter('Towers',   [5 12], @isnumeric);
     p.addParameter('SR',       {[1 1],[1 4],[6 4]}, @iscell);
     p.addParameter('TW',       [0 1], @isnumeric);
-    p.addParameter('Realism',  false);   % true -> overlay config/realismGradeConfig (v4 de-optimised)
-    p.addParameter('HonestCov', false);  % true -> overlay config/honestCovarianceConfig (realism + honest R)
+    p.addParameter('Realism',  false);   % true -> overlay config/internal/realismGradeConfig (v4 de-optimised)
+    p.addParameter('HonestCov', false);  % true -> overlay config/internal/honestCovarianceConfig (realism + honest R)
     p.addParameter('Atmosphere','realistic', @(x)ischar(x)||isstring(x)); % 'realistic' | 'matched'
     p.addParameter('OutRoot',  '', @(x)ischar(x)||isstring(x)); % base output dir (default output/Report_YYYYMMDD)
     p.addParameter('Group',    '');      % override the group folder name (keeps distinct runs apart)
@@ -40,7 +40,7 @@ function manifest = run_oo_v1_battery(varargin)
     o.Atmosphere = lower(char(o.Atmosphere));
 
     thisDir = fileparts(mfilename('fullpath'));
-    addpath(thisDir); addpath(fullfile(thisDir,'config'));
+    addpath(thisDir); addpath(fullfile(thisDir,'config')); addpath(fullfile(thisDir,'config','internal'));
     dateStr  = datestr(now,'yyyymmdd'); %#ok<TNOW1,DATST>
     [runClass, grpName] = revgnss.RunLabelUtils.batteryClassAndGroup(o.Realism, o.HonestCov, o.Atmosphere);
     % Allow '#' so a frequency tag like Battery_realism_5.00#2.10 survives (the freq

@@ -21,7 +21,7 @@ function manifest = run_oo_v1_freqbattery(varargin)
 %   and G5S6R4 (5-secondary ISL swarm aiding the primary).
 %
 %   Frequency is applied via revgnss.SignalDefinition.setFrequencyOverride (golden-safe: default
-%   off; ALWAYS cleared in a finally). config/realisticAtmosphereConfig derives its iono K_L1 from
+%   off; ALWAYS cleared in a finally). config/internal/realisticAtmosphereConfig derives its iono K_L1 from
 %   the active L1 so the modelled iono tracks the band.
 %
 %   Output layout:
@@ -51,7 +51,7 @@ function manifest = run_oo_v1_freqbattery(varargin)
     o = p.Results;
 
     thisDir = fileparts(mfilename('fullpath'));
-    addpath(thisDir); addpath(fullfile(thisDir,'config'));
+    addpath(thisDir); addpath(fullfile(thisDir,'config')); addpath(fullfile(thisDir,'config','internal'));
     if isempty(o.OutRoot); o.OutRoot = fullfile(thisDir,'output','FrequencyTests'); else; o.OutRoot = char(o.OutRoot); end
     if ~isfolder(o.OutRoot); mkdir(o.OutRoot); end
 
