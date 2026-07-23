@@ -27,4 +27,10 @@ function cfg = applyLuniSolar(cfg)
     cfg.estimator.dynamics.perturbations.epochJD_TT           = cfg.orbit.truth.perturbations.epochJD_TT;
     cfg.estimator.dynamics.perturbations.srp.Cr               = cfg.orbit.truth.perturbations.srp.Cr;
     cfg.estimator.dynamics.perturbations.srp.areaToMass_m2pkg = cfg.orbit.truth.perturbations.srp.areaToMass_m2pkg;
+    % Sun/Moon ephemeris source ('mg' analytic default | 'de440' via the Orekit bridge),
+    % matched on truth AND EKF so it never manufactures a one-sided gap. Default 'mg'.
+    eph = 'mg';
+    try; eph = char(cfg.perturbations.sunMoon.ephemeris); catch; end
+    cfg.orbit.truth.perturbations.ephemeris        = eph;
+    cfg.estimator.dynamics.perturbations.ephemeris = eph;
 end

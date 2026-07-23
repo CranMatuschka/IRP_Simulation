@@ -803,6 +803,13 @@ cfg.orbit.truth.perturbations.srp.shadow           = 'cylindrical';
 % stay byte-identical. (The individual truth/EKF enables above remain for a deliberate one-sided
 % force gap; this switch is the matched, no-gap version.)
 cfg.perturbations.sunMoon.enable = false;
+% Sun/Moon ephemeris for the luni-solar perturbation (consulted by applyLuniSolar ->
+% OrbitPerturbations). 'mg' = Montenbruck & Gill low-precision analytic (default; ~0.6 m /
+% 4 h luni-solar truth-fidelity gap vs DE-440, adequate for short arcs and self-contained).
+% 'de440' = JPL DE-440 via models.orbit.De440Ephemeris / the Orekit bridge (needs a JVM +
+% ~/orekit-bridge; recovers that gap, for long-arc / high-absolute-fidelity truth). Default
+% 'mg' keeps the frozen goldens byte-identical and needs no external dependency.
+cfg.perturbations.sunMoon.ephemeris = 'mg';
 
 % --- Swarm formation (helix) truth ---------------------------
 % One master control: cfg.scenario.nSpaceAssets. When it is > 1 (and an orbit
