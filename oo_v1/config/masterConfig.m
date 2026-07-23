@@ -18,7 +18,8 @@ function cfg = masterConfig(mode)
     thisDir   = fileparts(mfilename('fullpath'));   % .../oo_v1/config
     oo_v1Root = fileparts(thisDir);                 % .../oo_v1
     addpath(oo_v1Root);                             % +revgnss builders
-    addpath(thisDir);                               % baseConfig (same folder)
+    addpath(thisDir);                               % master config folder
+    addpath(fullfile(thisDir, 'internal'));          % internal config helpers
 
 cfg = i_baseDefaults();   % structural + default base (inlined as the local subfunction below)
 if nargin >= 1 && strcmp(mode,'baseOnly'); return; end   % ConfigFactory.defaultConfig / goldens stop here
@@ -255,6 +256,8 @@ cfg.estimator.diffAtt.ambiguityResolution.maxFloatDistance_cycles      = 0.25;
 cfg.estimator.diffAtt.ambiguityResolution.requireAllForGnssOnlyClaim   = true;
 cfg.estimator.diffAtt.ambiguityResolution.partialFixPolicy             = 'useFixedOnlyOrExplicitMixed';
 cfg.estimator.diffAtt.ambiguityResolution.phaseBiasStatus              = 'syntheticKnownZero';
+cfg.estimator.diffAtt.ambiguityResolution.enforcePhaseBiasStatus       = false;
+cfg.estimator.diffAtt.ambiguityResolution.requirePhaseBiasCalibrationForFix = false;
 cfg.estimator.diffAtt.ambiguityResolution.falseFixClassification       = 'screenedNotFormal';
 cfg.estimator.diffAtt.ambiguityResolution.maxWideLaneFloatDistance_cycles    = 0.5;
 cfg.estimator.diffAtt.ambiguityResolution.differentialIonosphereInBaselineAr = 'neglectedShortBaselineV1';
@@ -275,6 +278,10 @@ cfg.carrierSlip.atmosphereStepCompensation      = true;
 cfg.carrierSlip.antennaStepCompensation         = true;
 cfg.carrierSlip.hardwareStepCompensation        = true;
 cfg.carrierSlip.diffAttitudeBaselineMode        = true;
+cfg.carrierSlip.commonModeCompensation.enable   = false;
+cfg.carrierSlip.commonModeCompensation.minRows  = 4;
+cfg.carrierSlip.baselineDifferencedMode.enable  = false;
+cfg.carrierSlip.baselineDifferencedMode.referenceAntenna = 1;
 cfg.carrierSlip.resetAmbiguityOnConfirmedSlip   = true;
 cfg.carrierSlip.ignoreKnownProductBoundaryJumps = false;
 cfg.carrierSlip.logDiagnostics                  = true;
@@ -582,14 +589,14 @@ cfg.atmosphere.estimateIono   = false;   % per-tower slant-ionosphere EKF state
 
 %% Orbit class  (GEO | MEO | LEO — SINGLE switch)
 % Change cfg.scenario.orbitClass (set under %% Scenario above) to move the whole
-% run between orbit classes. config/orbitClassConfig overrides altitude,
+% run between orbit classes. config/internal/orbitClassConfig overrides altitude,
 % inclination, RAAN, initial true anomaly and the SNC process noise for MEO/LEO;
 % 'GEO' (default) is a strict no-op so the frozen goldens stay byte-identical.
 cfg = orbitClassConfig(cfg);
 
 %% Realism grade  (v4 realism fixes — SINGLE opt-in switch)
 % false (default) -> the current headline config; the frozen goldens are unaffected.
-% true  -> overlay config/realismGradeConfig: realistic JOW caesium clock, IGS-RTS tower
+% true  -> overlay config/internal/realismGradeConfig: realistic JOW caesium clock, IGS-RTS tower
 %          product sigma, C/N0 code weighting, multipath/hardware/PCV/survey/DCB truth
 %          systematics, relativistic clock, honest measurement floors, luni-solar process
 %          noise, and realistic ISL product sigma. Makes the run physically representative
@@ -628,7 +635,7 @@ end
 cfg = revgnss.ConfigFactory.applyMultiAssetMode(cfg);
 
 % --- Optional matched-force / per-tower-hardware overlays (gated; no-op unless enabled) ------
-% Standalone config/ functions (like realismGradeConfig): masterConfig applies them for the
+% Standalone config/internal functions (like realismGradeConfig): masterConfig applies them for the
 % default path; a run script can also call them after masterConfig() once it sets the toggle.
 cfg = applyLuniSolar(cfg);        % cfg.perturbations.sunMoon.enable
 cfg = applyInjectTruthSideDynamics(cfg);   % Guard B: one-sided truth-side gap (no-op unless swarm 'position')
@@ -1300,6 +1307,12 @@ cfg.errors.interAntennaCarrierBias.sigma_cycles             = 0.25;
 cfg.errors.interAntennaCarrierBias.perSignal                = true;
 cfg.errors.interAntennaCarrierBias.drift.enable             = false;
 cfg.errors.interAntennaCarrierBias.drift.rate_cyclesPerHour = 0.05;
+
+cfg.estimator.interAntennaCarrierBias.enable            = false;
+cfg.estimator.interAntennaCarrierBias.mode              = 'none';
+cfg.estimator.interAntennaCarrierBias.referenceReceiver = 1;
+cfg.estimator.interAntennaCarrierBias.bias_cycles       = [];
+cfg.estimator.interAntennaCarrierBias.bias_m            = [];
 
 cfg.errors.multipath.truth.enable              = false;
 cfg.errors.multipath.truth.amplitude_m         = 0.3;

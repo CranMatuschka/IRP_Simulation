@@ -1,0 +1,21 @@
+{
+  "scenario": {
+    "name": "scene_G5S1R1_ts3600_TW1_def",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 1
+  },
+  "simulation": {
+    "duration_s": 3600
+  },
+  "measurements": {
+    "twoWayTimeTransfer": {
+      "enable": true,
+      "useInEKF": true,
+      "towers": "all"
+    }
+  },
+  "report": {
+    "runVersion": "def"
+  }
+}

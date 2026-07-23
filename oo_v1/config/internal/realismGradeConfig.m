@@ -6,6 +6,8 @@ function cfg = realismGradeConfig(cfg)
 %   real one-way >=5-tower GEO reverse-GNSS system rather than an oracle twin. Every change
 %   here is a config-level fix from docs/scientific_correctness_review_v4.md; the frozen
 %   goldens pin their own values and are untouched (this overlay is opt-in, default OFF).
+%   User-facing scenario runs should prefer config/scenarios/realism.json, which directly
+%   overlays masterConfig without calling this helper.
 %
 %   PER-EFFECT SUB-TOGGLES: each block below is gated on cfg.realism.include.<name> (all
 %   default true, i.e. the full overlay). Set any to false in masterConfig to keep realism
@@ -18,14 +20,15 @@ function cfg = realismGradeConfig(cfg)
 %   Covered here (config-level): R-1 clock, R-4 tower product sigma, M7 C/N0 weighting,
 %   R-5 truth systematics (multipath/hardware/PCV/survey/DCB), R-10 honest floors,
 %   R-3 process-noise + matched luni-solar/SRP for the force-model gap, WP-D relativistic
-%   clock, ISL product sigma, R-8 EOP/solid-Earth tide, and R-6 inter-antenna carrier bias.
+%   clock, ISL product sigma, R-8 EOP/solid-Earth tide, R-6 inter-antenna carrier bias,
+%   and point34 carrier-arc/phase-bias honesty settings.
 %
 %   References: JOW Table 2.1; IGS-RTS product accuracy; Kaplan & Hegarty (multipath,
 %   C/N0-DLL); Montenbruck & Gill (luni-solar); Ashby 2003 (relativity).
 
     inc        = i_resolveIncludes(cfg);   % all-true defaults merged with cfg.realism.include
     expandList = {};                       % single-enable effects switched ON (re-expanded once at end)
-    V          = i_loadRealismValues();    % numeric params from config/realism.json (fallback = defaults)
+    V          = i_realismDefaults();       % pinned defaults for legacy programmatic callers
 
     % ---- R-1  Realistic receiver clock (JOW Table 2.1 caesium, not the idealised legacy maser)
     if inc.clock
@@ -141,6 +144,28 @@ function cfg = realismGradeConfig(cfg)
         cfg.errors.interAntennaCarrierBias.enable = true;
     end
 
+    % ---- Point 3/4  Carrier-arc survival and phase-bias honesty.
+    % Use common-mode and baseline-differenced slip metrics under realism so receiver-clock-like
+    % carrier residual jumps do not reset all antenna arcs, while localized slips remain detectable.
+    % Also force the ambiguity report/status to acknowledge truth-side inter-antenna phase bias
+    % instead of inheriting the idealised synthetic-known-zero label.
+    if inc.point34
+        p34 = V.point34;
+        cfg.carrierSlip.commonModeCompensation.enable = logical(p34.carrierSlip.commonModeCompensation.enable);
+        cfg.carrierSlip.commonModeCompensation.minRows = p34.carrierSlip.commonModeCompensation.minRows;
+        cfg.carrierSlip.baselineDifferencedMode.enable = logical(p34.carrierSlip.baselineDifferencedMode.enable);
+        cfg.carrierSlip.baselineDifferencedMode.referenceAntenna = ...
+            p34.carrierSlip.baselineDifferencedMode.referenceAntenna;
+        cfg.estimator.diffAtt.ambiguityResolution.enforcePhaseBiasStatus = ...
+            logical(p34.phaseBias.enforcePhaseBiasStatus);
+        cfg.estimator.diffAtt.ambiguityResolution.requirePhaseBiasCalibrationForFix = ...
+            logical(p34.phaseBias.requirePhaseBiasCalibrationForFix);
+        if cfg.estimator.diffAtt.ambiguityResolution.enforcePhaseBiasStatus
+            cfg.estimator.diffAtt.ambiguityResolution.phaseBiasStatus = ...
+                revgnss.InterAntennaPhaseBias.resolvedStatus(cfg);
+        end
+    end
+
     % Re-slave the single-enable effects to their truth/model pairs (expandEnableToggles already
     % ran in masterConfig; re-run only for the ones flipped ON here so the resolved truth/model
     % pair tracks the master enable and no manufactured truth!=model mismatch is introduced).
@@ -170,7 +195,8 @@ function inc = i_resolveIncludes(cfg)
         'islProductSigma',         true, ...   % ISL  realistic secondary product sigma
         'eop',                     true, ...   % R-8  uncorrected EOP frame residual (truth)
         'solidEarthTide',          true, ...   % R-8  solid-Earth tide (truth)
-        'interAntennaCarrierBias', true);      % R-6  unknown inter-antenna carrier bias (truth)
+        'interAntennaCarrierBias', true, ...   % R-6  unknown inter-antenna carrier bias (truth)
+        'point34',                 true);      % P34  common-mode slip guard + phase-bias status
 
     if ~(isfield(cfg,'realism') && isfield(cfg.realism,'include') && isstruct(cfg.realism.include))
         return;
@@ -189,35 +215,6 @@ function inc = i_resolveIncludes(cfg)
 end
 
 % ==========================================================================================
-function V = i_loadRealismValues()
-%I_LOADREALISMVALUES  Numeric realism parameters from config/realism.json, else built-in defaults.
-%   Overlays whatever blocks/fields the JSON provides on top of i_realismDefaults(), so a missing
-%   or partial JSON always yields a complete, valid struct. Values in the shipped realism.json are
-%   byte-identical to i_realismDefaults(), so the resolved config (and the realism golden) are
-%   unchanged; editing realism.json changes only the numbers, not which effects are on.
-    V = i_realismDefaults();
-    jsonPath = fullfile(fileparts(mfilename('fullpath')), 'realism.json');
-    if ~isfile(jsonPath); return; end
-    try
-        J = jsondecode(fileread(jsonPath));
-    catch ME
-        warning('realismGradeConfig:jsonLoad', ...
-            'config/realism.json unreadable (%s); using built-in defaults.', ME.message);
-        return;
-    end
-    blocks = fieldnames(V);
-    for i = 1:numel(blocks)
-        b = blocks{i};
-        if isfield(J, b) && isstruct(J.(b))
-            ff = fieldnames(J.(b));
-            for j = 1:numel(ff)
-                V.(b).(ff{j}) = J.(b).(ff{j});   % JSON value overrides the default
-            end
-        end
-    end
-end
-
-% ==========================================================================================
 function V = i_realismDefaults()
 %I_REALISMDEFAULTS  Hardcoded fallback = the pre-JSON realism numeric parameters (golden-pinned).
     V.clock             = struct('clockType','CESIUM1','templateSource','jowTable2p1');
@@ -230,4 +227,11 @@ function V = i_realismDefaults()
     V.islProductSigma   = struct('sigmaPos_m',0.10,'sigmaClock_m',0.10);
     V.eop               = struct('polarMotion_xp_arcsec',0.005,'polarMotion_yp_arcsec',0.005, ...
                                  'ut1Rate_error_msPerDay',0.05);
+    V.point34           = struct( ...
+        'carrierSlip', struct( ...
+            'commonModeCompensation', struct('enable', true, 'minRows', 4), ...
+            'baselineDifferencedMode', struct('enable', true, 'referenceAntenna', 1)), ...
+        'phaseBias', struct( ...
+            'enforcePhaseBiasStatus', true, ...
+            'requirePhaseBiasCalibrationForFix', true));
 end
