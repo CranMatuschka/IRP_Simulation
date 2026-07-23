@@ -59,9 +59,14 @@ V3 = @(v) org.hipparchus.geometry.euclidean.threed.Vector3D(v(1), v(2), v(3));
 % ===========================================================================
 % PART A -- ISL inter-satellite range: sim instantaneous vs Orekit light-time
 % ===========================================================================
-fprintf('\n== PART A: ISL range  sim instantaneous |r1-r2| vs Orekit light-time ==\n');
-fprintf('  baseline[km]   inst[m]        ltRange[m]      lt corr[m]\n');
-bls = [1 5 10 50 100 200];   corr = zeros(size(bls));
+% The instantaneous |r1-r2| omits a light-time correction; the sim closes it with the
+% gated cfg.measurements.isl.lightTime.enable, whose first-order term is
+%   rho + (u . v_tx_inertial)*(rho/c),  u = (r_rx - r_tx)/rho.
+% Here the emitter velocity v1 is already inertial (ECI), so that formula is checked
+% directly against Orekit's rigorous light-time (foErr, asserted sub-mm below).
+fprintf('\n== PART A: ISL range  sim instantaneous vs Orekit light-time (+ gated first-order) ==\n');
+fprintf('  baseline[km]   inst[m]        ltRange[m]      lt corr[m]   |1st-order - Orekit|[m]\n');
+bls = [1 5 10 50 100 200];   corr = zeros(size(bls));   foErr = zeros(size(bls));
 for i = 1:numel(bls)
     del = (bls(i)*1000)/rGeo;
     r1 = rGeo*[1;0;0];               v1 = vCirc*[0;1;0];
@@ -70,10 +75,14 @@ for i = 1:numel(bls)
     tau  = org.orekit.estimation.measurements.AbstractMeasurement.signalTimeOfFlightAdjustableEmitter( ...
         i_pv(epoch, r1, v1, -mu/rGeo^3*r1, V3), V3(r2), epoch, frame);
     corr(i) = c*tau - inst;
-    fprintf('  %10d   %12.4f   %13.4f   %10.3e\n', bls(i), inst, c*tau, corr(i));
+    u  = (r2 - r1) / inst;
+    firstOrder = inst + (u' * v1) * (inst / c);           % the sim's gated ISL light-time term
+    foErr(i) = abs(firstOrder - c*tau);
+    fprintf('  %10d   %12.4f   %13.4f   %10.3e   %10.3e\n', bls(i), inst, c*tau, corr(i), foErr(i));
 end
-fprintf('  ISL light-time correction ~%.3f cm/km; max %.3f m at %d km (sim neglects this)\n', ...
-    100*corr(1)/bls(1), corr(end), bls(end));
+fprintf('  ISL light-time correction ~%.3f cm/km (max %.3f m at %d km); sim gated 1st-order matches Orekit to %.2e m\n', ...
+    100*corr(1)/bls(1), corr(end), bls(end), max(foErr));
+assert(max(foErr) < 1e-3, 'ISL first-order light-time vs Orekit %.3e m > 1 mm', max(foErr));
 
 % ===========================================================================
 % PART B -- two-way round-trip: the one-way Sagnac cancels (reciprocity)

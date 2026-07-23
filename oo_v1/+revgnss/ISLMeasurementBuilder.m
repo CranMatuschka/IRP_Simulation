@@ -129,9 +129,9 @@ classdef ISLMeasurementBuilder
                 end
 
                 [rhoTruth, rrTruth]   = revgnss.ISLMeasurementBuilder.geometry_( ...
-                    primaryAsset.r_ecef_m, primaryAsset.v_ecef_mps, rTxTruth, vTxTruth);
+                    primaryAsset.r_ecef_m, primaryAsset.v_ecef_mps, rTxTruth, vTxTruth, info.lightTimeOn, info.c_mps, info.omega_radps);
                 [rhoModel, rrModel, u] = revgnss.ISLMeasurementBuilder.geometry_( ...
-                    x(stateMap.r_idx), x(stateMap.v_idx), rTxModel, vTxModel);
+                    x(stateMap.r_idx), x(stateMap.v_idx), rTxModel, vTxModel, info.lightTimeOn, info.c_mps, info.omega_radps);
 
                 if info.codeEnabled
                     nz = revgnss.ISLMeasurementBuilder.drawNoise_(cfg, txi, epochIdx, 1, info.codeSigma_m, 1);
@@ -223,7 +223,8 @@ classdef ISLMeasurementBuilder
                 tx  = assets{txi};
                 pb  = revgnss.ISLMeasurementBuilder.productBias_(cfg, info.product, txi, intervalIdx);
                 [rhoModel, rrModel] = revgnss.ISLMeasurementBuilder.geometry_( ...
-                    x(stateMap.r_idx), x(stateMap.v_idx), tx.r_ecef_m(:) + pb.pos, tx.v_ecef_mps(:) + pb.vel);
+                    x(stateMap.r_idx), x(stateMap.v_idx), tx.r_ecef_m(:) + pb.pos, tx.v_ecef_mps(:) + pb.vel, ...
+                    info.lightTimeOn, info.c_mps, info.omega_radps);
                 secIdx = 0; if hasSec; secIdx = info.ekfRowSecIdx(k); end
                 switch info.ekfRowTypes{k}
                     case 'islCode'
@@ -272,6 +273,11 @@ classdef ISLMeasurementBuilder
             info.dopplerSigma_mps = revgnss.ISLMeasurementBuilder.getNum_(cfg, {'measurements','isl','doppler','sigma_mps'}, 0.02);
             info.warmup_s = revgnss.ISLMeasurementBuilder.getNum_(cfg, {'measurements','isl','warmup_s'}, 0);
             info.warmupActive = false;
+            % Gated first-order inter-satellite light-time correction (~1 cm/km). Default off
+            % -> geometry_ returns the instantaneous range, byte-identical to the frozen goldens.
+            info.lightTimeOn = revgnss.ISLMeasurementBuilder.getBool_(cfg, {'measurements','isl','lightTime','enable'}, false);
+            info.c_mps       = revgnss.Constants.SPEED_OF_LIGHT_MPS;
+            info.omega_radps = revgnss.Constants.EARTH_OMEGA_RADPS;   % ECEF->inertial transport for the tx velocity
             info.product = revgnss.ISLMeasurementBuilder.productCfg_(cfg);
             info.productIntervalIdx = 0;
             info.rows = struct([]);
@@ -295,11 +301,25 @@ classdef ISLMeasurementBuilder
     end
 
     methods (Static, Access = private)
-        function [rho, rangeRate, u] = geometry_(rRx, vRx, rTx, vTx)
+        function [rho, rangeRate, u] = geometry_(rRx, vRx, rTx, vTx, ltOn, c, omega)
             d = rRx(:) - rTx(:);
             rho = norm(d); if rho < 1; rho = 1; end
             u = d / rho;
             rangeRate = u' * (vRx(:) - vTx(:));
+            % Gated first-order inter-satellite light-time. The signal left the transmitter
+            % (beacon) at t_tx = t_rx - rho/c, so the physical range is |r_rx - r_tx(t_tx)| ~
+            % rho + (u . v_tx_inertial)*(rho/c). The geometry is in the ROTATING ECEF frame, so
+            % the transmitter's INERTIAL velocity is v_tx_ecef + omega x r_tx: for a co-rotating
+            % GEO the ECEF velocity is ~0 and the omega x r_tx term (the Sagnac transport)
+            % DOMINATES -> ~1 cm/km. (u . (omega x r_tx))*(rho/c) equals the standard first-order
+            % Sagnac (omega/c)(tx_x*rx_y - tx_y*rx_x), matching the ground-link convention.
+            % Cross-validated sub-mm vs Orekit's rigorous inter-satellite light-time. Applied to
+            % the measurement VALUE only; the ~1e-5 position partial is dropped from H. Default
+            % off (nargin < 5) -> byte-identical.
+            if nargin >= 5 && ltOn
+                vTxInertial = vTx(:) + cross([0; 0; omega], rTx(:));
+                rho = rho + (u' * vTxInertial) * (rho / c);
+            end
         end
 
         function list = txList_(cfg, nAssets)

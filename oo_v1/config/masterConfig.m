@@ -491,6 +491,12 @@ else
     cfg.measurements.isl.receiverAssetIndex = 1;  % into the primary only
     cfg.measurements.isl.warmup_s      = 300;     % acquire ISL after the ground fix converges
     cfg.measurements.isl.timing.enable = false;
+    % Gated inter-satellite light-time correction (~1 cm/km at km baselines): the beacon
+    % moves during the signal transit, a systematic the instantaneous |r1-r2| omits. Matters
+    % for cm-class carrier-phase / precise-product ISL; negligible for the 0.3 m code row.
+    % Cross-validated sub-mm against Orekit's rigorous inter-satellite light-time. Default OFF
+    % keeps the swarm fingerprint byte-identical; applied to truth AND model when enabled.
+    cfg.measurements.isl.lightTime.enable = false;
     cfg.measurements.isl.code.enable    = true;
     cfg.measurements.isl.code.useInEKF  = true;
     cfg.measurements.isl.code.sigma_m   = 0.3;    % one-way ISL code thermal 1-sigma [m]
