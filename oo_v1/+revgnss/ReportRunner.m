@@ -1265,6 +1265,9 @@ classdef ReportRunner
                 summary.nConfirmedCarrierSlips               = ae73_.nConfirmedSlips;
                 summary.nUnclassifiedCarrierJumps            = ae73_.nUnclassifiedJumps;
                 summary.nFalseProductBoundaryResets          = ae73_.nFalseProductBoundaryResets;
+                summary.nCarrierCommonModeEvents             = ae73_.nCommonModeEvents;
+                summary.nSuppressedCommonModeResets          = ae73_.nSuppressedCommonModeResets;
+                summary.nBaselineDifferencedSlipRows         = ae73_.nBaselineDifferencedRows;
             catch ME73a_
                 warning('ReportRunner:stage73CountersFailed', ...
                     'Stage 73 runtime slip counters failed: %s', ME73a_.message);
@@ -1389,6 +1392,7 @@ classdef ReportRunner
                 summary.baselineArPartialPolicy           = st75_.partialFixPolicy;
                 summary.nBaselineArFixed                  = st75_.nIntegerFixed;
                 summary.nBaselineArRejectedArc            = st75_.nBaselineArRejectedArc;
+                summary.nBaselineArRejectedPhaseBias      = st75_.nBaselineArRejectedPhaseBias;
                 summary.nBaselineArFloatExternal          = st75_.nBaselineArFloatExternal;
                 summary.externalRefUsedForAnyCalibration  = st75_.externalRefUsedForCalibration;
                 if strcmp(st75_.partialFixPolicy,'useFixedOnlyOrExplicitMixed') || ...
@@ -1403,6 +1407,7 @@ classdef ReportRunner
                 summary.baselineArGnssOnlyClaim          = false;
                 summary.baselineArFalseFixClassification = 'screenedNotFormal';
                 summary.baselineArPhaseBiasStatus        = 'notCalibratedExternalProduct';
+                summary.nBaselineArRejectedPhaseBias      = 0;
                 summary.baselineArPartialPolicy          = 'mixedFixedFloat';
                 summary.nBaselineArUsedInEkf             = 0;
                 summary.nBaselineArRejectedArc           = 0;
@@ -1752,16 +1757,97 @@ classdef ReportRunner
                 fprintf('  Swarm MAT written: %s\n', matPath);
             end
             if writePdf
-                ce = revgnss.FederatedSwarmReport.build(cfg, results, rel, summ, reportFolder, stem);
-                if ce.success && ~isempty(ce.pdfPath) && isfile(ce.pdfPath)
-                    out.pdfPath = ce.pdfPath;
-                    info = dir(ce.pdfPath);
-                    fprintf('  Swarm PDF written: %s  (%.1f kB)\n', ce.pdfPath, info.bytes/1024);
-                else
-                    fprintf('  Swarm PDF not compiled; .tex at %s\n', ce.texPath);
+                % ONE unified report: the chief satellite's full (original) ClockExact report with
+                % the two swarm tables + two swarm plots injected as a "Federated Swarm" appendix.
+                % Best-effort: the swarm .mat is already saved above, so a report-side failure (chief
+                % re-run, campaign, or pdflatex) must NOT abort the run -- catch and warn instead.
+                try
+                    ce = revgnss.ReportRunner.buildUnifiedSwarmReport_(cfg, results, rel, summ, refAsset, reportFolder, stem);
+                    if ce.success && ~isempty(ce.pdfPath) && isfile(ce.pdfPath)
+                        out.pdfPath = ce.pdfPath;
+                        info = dir(ce.pdfPath);
+                        fprintf('  Swarm PDF written (chief report + swarm appendix): %s  (%.1f kB)\n', ce.pdfPath, info.bytes/1024);
+                    else
+                        fprintf('  Swarm PDF not compiled; .tex at %s\n', ce.texPath);
+                    end
+                catch meRep
+                    fprintf(2, '  Swarm PDF step FAILED (%s).\n', meRep.message);
+                    if writeMat; fprintf(2, '  The swarm .mat is preserved: %s\n', matPath); end
                 end
             end
             fprintf('=== ReportRunner: federated swarm done ===\n');
+        end
+
+        function ce = buildUnifiedSwarmReport_(cfg, results, rel, summ, refAsset, reportFolder, stem)
+            % buildUnifiedSwarmReport_  Build the ONE swarm report: the chief (refAsset) satellite's
+            % full single-asset ClockExact report + the federated-swarm appendix (per-satellite
+            % absolute table with relPos raw+solved, the ISL/TWSTFT relative-layer table, and the two
+            % swarm plots). The chief is re-run once through the standard single-asset pipeline (report
+            % suppressed) purely to obtain its rich SimData + summary; the estimation and relative
+            % layer above are untouched, so every asset enters the relative layer symmetrically.
+            ce = struct('success', false, 'pdfPath', '', 'texPath', '');
+
+            % Reconstruct the chief's single-asset config -- identical to runFederatedEstimation asset refAsset.
+            setup   = revgnss.ReportRunner.federatedSetup_(cfg);
+            chiefCi = revgnss.ReportRunner.assetConfigForIndex_(setup, refAsset);
+            chiefCi.report.reportFolder = reportFolder;
+            chiefCi.report.stem         = stem;
+            chiefCi.report.writePdf     = false;   % suppress the chief's own report; compile once with the appendix
+            chiefCi.report.writeMat     = false;
+            fprintf('  Building unified report on chief satellite (asset %d)...\n', refAsset);
+            oChief = revgnss.ReportRunner.runSingle(chiefCi);
+
+            % Render swarm figures into the report's figures/ dir.
+            figDir = fullfile(reportFolder, 'figures');
+            kabschOn = false;
+            try; kabschOn = logical(cfg.report.kabschAlignmentPlot.enable); catch; end
+            [absFig, relFig, kabschFig] = revgnss.FederatedSwarmReport.renderFigures(results, rel, figDir, ...
+                [stem '_swarm_abs_err'], [stem '_swarm_rel_err'], [stem '_swarm_kabsch_alignment'], kabschOn);
+
+            % Scenario counts for the appendix caption.
+            nTowers = 0; try; nTowers = cfg.scenario.nTowers;      catch; end
+            nRx     = 0; try; nRx     = cfg.scenario.nReceivers;   catch; end
+            dur     = 0; try; dur     = cfg.simulation.duration_s; catch; end
+
+            % Attach the swarm appendix payload to the chief's summary and build the (compiling) report.
+            summChief = oChief.summary;
+            summChief.federatedSwarm = struct( ...
+                'perAsset',   summ.perAsset, ...
+                'refAsset',   summ.refAsset, ...
+                'nAssets',    summ.nAssets, ...
+                'rel',        revgnss.ReportRunner.packRel_(rel), ...
+                'absFig',     absFig, ...
+                'relFig',     relFig, ...
+                'kabschFig',  kabschFig, ...
+                'nTowers',    nTowers, ...
+                'nReceivers', nRx, ...
+                'duration_s', dur);
+
+            ccfg = oChief.cfg;
+            ccfg.report.reportFolder = reportFolder;
+            ccfg.report.stem         = stem;
+            if isfield(ccfg,'report') && isfield(ccfg.report,'compileTex') && strcmp(ccfg.report.compileTex,'never')
+                ccfg.report.compileTex = 'auto';   % swarm run requested a PDF -> ensure it compiles
+            end
+            ce = revgnss.ClockExactReportBuilder.build(oChief.simData, oChief.dataMeta, ...
+                oChief.sim.asset, oChief.sim.towers, ccfg, summChief);
+        end
+
+        function r = packRel_(rel)
+            % packRel_  Minimal relative-layer scalar bundle for the swarm appendix (robust to missing
+            % fields; the SwarmRelativeSolver always populates these, this just future-proofs).
+            r = struct('baselineErrRaw_m', NaN, 'baselineErrSolved_m', NaN, 'shapeErrSolved_m', NaN, ...
+                'shapeGateOn', false, 'shapeObservationSource', 'disabled', ...
+                'relClockGateOn', false, 'relClockErrSolved_m', NaN, 'weaklyObservable', false, ...
+                'formalShapeSigma_m', NaN);
+            names = fieldnames(r);
+            for i = 1:numel(names)
+                n = names{i};
+                if isstruct(rel) && isfield(rel, n) && ~isempty(rel.(n)); r.(n) = rel.(n); end
+            end
+            r.shapeGateOn      = logical(r.shapeGateOn);
+            r.relClockGateOn   = logical(r.relClockGateOn);
+            r.weaklyObservable = logical(r.weaklyObservable);
         end
 
         function results = runFederatedEstimation(cfg, reportOpts)
@@ -1771,36 +1857,26 @@ classdef ReportRunner
             % the normal single-asset report pipeline (per-satellite .mat + PDF) -- one run per asset,
             % the sim reused for the relative layer.
             if nargin < 2; reportOpts = struct('savePerAsset', false); end
-            N = 1;
-            if isfield(cfg,'scenario') && isfield(cfg.scenario,'nSpaceAssets')
-                N = max(1, round(cfg.scenario.nSpaceAssets));
-            end
-            base = revgnss.ReportRunner.singleAssetBase_(cfg);
+            setup = revgnss.ReportRunner.federatedSetup_(cfg);
+            N = setup.N;
             results = struct('N', N, 'asset', {cell(1, N)});
 
-            r0Cells = {}; v0Cells = {}; baseSeed = 42;
-            if N > 1
-                if ~(isfield(cfg,'orbit') && isfield(cfg.orbit,'useOrbitPropagator') && cfg.orbit.useOrbitPropagator)
-                    error('revgnss:ReportRunner:needsOrbitPropagator', ...
-                        'Federated N>1 needs cfg.orbit.useOrbitPropagator=true (per-asset helix truth).');
-                end
-                if ~isfield(cfg,'formation') || ~isfield(cfg.formation,'crossTrackSpread')
-                    cfg.formation.crossTrackSpread = 1.0;   % 3-D formation -> full shape observable
-                end
-                op = models.orbit.OrbitPropagator(cfg.orbit);
-                [r0Cells, v0Cells] = revgnss.SwarmFormation.secondaryEciInitialStates(cfg, op);
-                if isfield(base,'simulation') && isfield(base.simulation,'seed'); baseSeed = base.simulation.seed; end
+            savePerAsset = isfield(reportOpts,'savePerAsset') && reportOpts.savePerAsset;
+
+            % Opt-in OS-process parallelism (cfg.multiAsset.federated.parallel, default
+            % OFF -> the serial loop below, byte-identical to the golden). The N assets are
+            % fully independent (no shared covariance) and per-asset seeded, so running each
+            % in its own matlab -batch worker yields a bit-identical result to the serial
+            % loop -- only the no-per-asset-report path is parallelized (the savePerAsset
+            % path writes reports and stays serial). See runFederatedEstimationParallel_.
+            if ~savePerAsset && N > 1 && revgnss.ReportRunner.federatedParallelEnabled_(cfg)
+                results = revgnss.ReportRunner.runFederatedEstimationParallel_(cfg, setup, N);
+                return;
             end
 
             for ai = 1:N
-                ci = base;
-                if ai >= 2
-                    si = ai - 1;
-                    ci.orbit.eciState0  = [r0Cells{si}; v0Cells{si}];   % this asset's absolute helix IC
-                    ci.asset.clock.seed = 300 + ai;                     % per-asset sat clock
-                    ci.simulation.seed  = baseSeed + 100000*(ai-1);     % INDEPENDENT receiver noise
-                end
-                if reportOpts.savePerAsset
+                ci = revgnss.ReportRunner.assetConfigForIndex_(setup, ai);
+                if savePerAsset
                     ci.report.reportFolder = fullfile(reportOpts.folder, sprintf('%s_asset%d', reportOpts.stem, ai));
                     ci.report.stem         = sprintf('%s_asset%d', reportOpts.stem, ai);
                     ci.report.writePdf     = reportOpts.writePdf;
@@ -1810,6 +1886,202 @@ classdef ReportRunner
                 else
                     results.asset{ai} = revgnss.ReportRunner.runOneAsset_(ci);
                 end
+            end
+        end
+
+        function tf = federatedParallelEnabled_(cfg)
+            % federatedParallelEnabled_  Read the opt-in swarm-parallel flag (default false ->
+            % byte-identical serial path). Defensive: any missing field => false.
+            tf = false;
+            try; tf = logical(cfg.multiAsset.federated.parallel); catch; end
+        end
+
+        function k = federatedMaxWorkers_(cfg, N)
+            % federatedMaxWorkers_  Concurrency cap for the swarm workers.
+            % Default = min(N, cores-1, RAM-cap); an explicit
+            % cfg.multiAsset.federated.maxWorkers (>0) overrides.
+            %
+            % The RAM cap prevents swap-thrash on small-memory machines: each
+            % `matlab -batch` worker needs ~PERWORKER_GB (MATLAB base + a full
+            % per-asset history at long arcs), and ~RESERVE_GB is left for the OS
+            % + parent MATLAB + file sync. MEASURED (16 GB / 8-core): 4 workers
+            % thrash a 7200 s swarm (1.09x, ~15 GB swap in use), while this
+            % heuristic yields 2 there (1.79x = the measured optimum). Scales up
+            % on bigger RAM (32 GB -> 6). If RAM is undetectable, no RAM cap.
+            RESERVE_GB   = 6;   % OS + parent MATLAB + OneDrive/iCloud sync
+            PERWORKER_GB = 4;   % MATLAB base + long-arc per-asset history
+
+            kCores = N;
+            try; kCores = max(1, feature('numcores') - 1); catch; end
+
+            totGB = NaN;                                   % total physical RAM (GiB)
+            try
+                [st, out] = system('sysctl -n hw.memsize');            % macOS/BSD: bytes
+                if st == 0; b = str2double(strtrim(out)); if isfinite(b) && b > 0; totGB = b / 2^30; end; end
+            catch; end
+            if ~isfinite(totGB)
+                try
+                    [st, out] = system('awk ''/MemTotal/{print $2}'' /proc/meminfo'); % Linux: kB
+                    if st == 0; kb = str2double(strtrim(out)); if isfinite(kb) && kb > 0; totGB = kb / 2^20; end; end
+                catch; end
+            end
+            kRam = kCores;                                 % no cap if RAM undetectable
+            if isfinite(totGB) && totGB > 0
+                kRam = max(1, floor((totGB - RESERVE_GB) / PERWORKER_GB));
+            end
+
+            k = min([kCores, kRam, N]);
+            try
+                mw = cfg.multiAsset.federated.maxWorkers;   % explicit override wins
+                if isnumeric(mw) && isscalar(mw) && mw >= 1; k = round(mw); end
+            catch; end
+            k = max(1, min(k, N));
+        end
+
+        function results = runFederatedEstimationParallel_(cfg, setup, N)
+            % runFederatedEstimationParallel_  Process-level fan-out of the N independent
+            % single-asset EKFs. Each asset runs in its OWN `matlab -batch` worker and writes
+            % its extracted result to a .mat; the parent gathers them. Because each asset is
+            % per-asset seeded and the result struct is pure numeric, the gathered result is
+            % BIT-IDENTICAL to the serial loop (verified by run_swarm_relative_regression).
+            % A failed/absent worker falls back to an in-process serial re-run, so a worker
+            % crash or license cap never changes the answer -- only the speed.
+            results  = struct('N', N, 'asset', {cell(1, N)});
+            repoRoot = fileparts(fileparts(mfilename('fullpath')));   % +revgnss/.. -> repo root
+            cfgDir   = fullfile(repoRoot, 'config');
+            cfgIntDir = fullfile(cfgDir, 'internal');   % config/internal: realisticAtmosphereConfig etc.
+            tmpDir   = tempname();
+            mkdir(tmpDir);
+            oc = onCleanup(@() revgnss.ReportRunner.tryRmdir_(tmpDir)); %#ok<NASGU>
+
+            matlabBin = fullfile(matlabroot, 'bin', 'matlab');
+            cfgMats = cell(1, N); resMats = cell(1, N); workerSh = cell(1, N);
+            for ai = 1:N
+                ci = revgnss.ReportRunner.assetConfigForIndex_(setup, ai); %#ok<NASGU>
+                cfgMats{ai} = fullfile(tmpDir, sprintf('cfg_%d.mat', ai));
+                resMats{ai} = fullfile(tmpDir, sprintf('res_%d.mat', ai));
+                save(cfgMats{ai}, 'ci', '-v7.3');
+                % Self-contained per-worker script -> no inline shell quoting of struct paths.
+                workerSh{ai} = fullfile(tmpDir, sprintf('worker_%d.sh', ai));
+                fid = fopen(workerSh{ai}, 'w');
+                fprintf(fid, '#!/bin/bash\n');
+                % Workers keep MATLAB's default multithreading: measured faster than
+                % -singleCompThread here (the per-asset sim benefits from BLAS threads more
+                % than 6 workers oversubscribing 8 cores costs). Bit-identity is preserved
+                % either way (verified by run_swarm_relative_regression).
+                fprintf(fid, '"%s" -nodisplay -nosplash -batch "addpath(''%s''); addpath(''%s''); addpath(''%s''); revgnss.ReportRunner.runOneAssetToFile_(''%s'',''%s'')"\n', ...
+                    matlabBin, repoRoot, cfgDir, cfgIntDir, cfgMats{ai}, resMats{ai});
+                fclose(fid);
+            end
+
+            maxW = revgnss.ReportRunner.federatedMaxWorkers_(cfg, N);
+            driverSh = fullfile(tmpDir, 'driver.sh');
+            fid = fopen(driverSh, 'w');
+            fprintf(fid, '#!/bin/bash\ni=0\n');
+            for ai = 1:N
+                fprintf(fid, 'bash "%s" &\n', workerSh{ai});
+                fprintf(fid, 'i=$((i+1)); if [ $((i %% %d)) -eq 0 ]; then wait; fi\n', maxW);
+            end
+            fprintf(fid, 'wait\n');
+            fclose(fid);
+
+            fprintf('  [swarm-parallel] %d assets, %d concurrent workers...\n', N, maxW);
+            t0 = tic;
+            [st, ~] = system(sprintf('bash "%s"', driverSh));
+            fprintf('  [swarm-parallel] workers finished in %.1f s (driver exit %d)\n', toc(t0), st);
+
+            nFallback = 0;
+            for ai = 1:N
+                r = revgnss.ReportRunner.loadWorkerResult_(resMats{ai});
+                if isempty(r)
+                    nFallback = nFallback + 1;
+                    fprintf(2, '  [swarm-parallel] asset %d worker produced no result; serial fallback.\n', ai);
+                    ci = revgnss.ReportRunner.assetConfigForIndex_(setup, ai);
+                    r  = revgnss.ReportRunner.runOneAsset_(ci);
+                end
+                results.asset{ai} = r;
+            end
+            if nFallback > 0
+                fprintf('  [swarm-parallel] %d/%d assets fell back to serial (result unchanged).\n', nFallback, N);
+            end
+        end
+
+        function runOneAssetToFile_(cfgMatPath, resMatPath)
+            % runOneAssetToFile_  Worker entry point: load one asset config, run its
+            % single-asset sim, save the extracted result. Writes a `failed` marker on error
+            % so the parent gathers a fallback instead of a corrupt result.
+            try
+                S   = load(cfgMatPath);                                   % S.ci
+                res = revgnss.ReportRunner.runOneAsset_(S.ci); %#ok<NASGU>
+                ok  = true; %#ok<NASGU>
+                save(resMatPath, 'res', 'ok', '-v7.3');
+            catch ME
+                res = struct('failed', true); ok = false; %#ok<NASGU>
+                try; save(resMatPath, 'res', 'ok', '-v7.3'); catch; end
+                fprintf(2, 'runOneAssetToFile_ failed: %s\n', getReport(ME));
+                rethrow(ME);
+            end
+        end
+
+        function r = loadWorkerResult_(resMatPath)
+            % loadWorkerResult_  Return a valid per-asset result struct, or [] if the worker
+            % file is missing / marked failed / unreadable (caller then serial-falls-back).
+            r = [];
+            if ~isfile(resMatPath); return; end
+            try
+                R = load(resMatPath);
+                if isfield(R,'ok') && ~R.ok; return; end
+                if isfield(R,'res') && isstruct(R.res) && ~isfield(R.res,'failed')
+                    r = R.res;
+                end
+            catch
+                r = [];
+            end
+        end
+
+        function tryRmdir_(d)
+            % tryRmdir_  Best-effort recursive tempdir cleanup (never throws).
+            try; if isfolder(d); rmdir(d, 's'); end; catch; end
+        end
+
+        function setup = federatedSetup_(cfg)
+            % federatedSetup_  Shared per-asset config scaffold for the federated swarm: the
+            % single-asset base + the per-member absolute helix ICs (ECI) + the receiver-noise base
+            % seed. Factored out so runFederatedEstimation (all assets) and buildUnifiedReport_ (chief
+            % only) construct IDENTICAL per-asset configs. Behaviour-identical to the pre-refactor
+            % inline construction -> the relative-layer regression digest is byte-unchanged.
+            base = revgnss.ReportRunner.singleAssetBase_(cfg);
+            N = 1;
+            if isfield(cfg,'scenario') && isfield(cfg.scenario,'nSpaceAssets')
+                N = max(1, round(cfg.scenario.nSpaceAssets));
+            end
+            r0Cells = {}; v0Cells = {}; baseSeed = 42;
+            if N > 1
+                if ~(isfield(cfg,'orbit') && isfield(cfg.orbit,'useOrbitPropagator') && cfg.orbit.useOrbitPropagator)
+                    error('revgnss:ReportRunner:needsOrbitPropagator', ...
+                        'Federated N>1 needs cfg.orbit.useOrbitPropagator=true (per-asset helix truth).');
+                end
+                cfgLocal = cfg;
+                if ~isfield(cfgLocal,'formation') || ~isfield(cfgLocal.formation,'crossTrackSpread')
+                    cfgLocal.formation.crossTrackSpread = 1.0;   % 3-D formation -> full shape observable
+                end
+                op = models.orbit.OrbitPropagator(cfgLocal.orbit);
+                [r0Cells, v0Cells] = revgnss.SwarmFormation.secondaryEciInitialStates(cfgLocal, op);
+                if isfield(base,'simulation') && isfield(base.simulation,'seed'); baseSeed = base.simulation.seed; end
+            end
+            setup = struct('base', base, 'N', N, 'r0Cells', {r0Cells}, 'v0Cells', {v0Cells}, 'baseSeed', baseSeed);
+        end
+
+        function ci = assetConfigForIndex_(setup, ai)
+            % assetConfigForIndex_  The single-asset config for swarm member ai: asset 1 is the base;
+            % ai>=2 gets its own absolute helix IC (ECI), per-asset sat clock seed, and INDEPENDENT
+            % receiver-noise seed. Identical to the pre-refactor inline block.
+            ci = setup.base;
+            if ai >= 2
+                si = ai - 1;
+                ci.orbit.eciState0  = [setup.r0Cells{si}; setup.v0Cells{si}];   % this asset's absolute helix IC
+                ci.asset.clock.seed = 300 + ai;                                 % per-asset sat clock
+                ci.simulation.seed  = setup.baseSeed + 100000*(ai-1);           % INDEPENDENT receiver noise
             end
         end
 
