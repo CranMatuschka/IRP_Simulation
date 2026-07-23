@@ -14,7 +14,7 @@ classdef CodeJacobianBuilder
             % OR cfg.estimator.forceFiniteDifferenceH=true, use FD for r and euler columns.
             % Clock columns remain analytic: b_rx=+1, b_twr=-1.
             %
-            % V1 APPROXIMATION: Attitude derivatives of tropospheric and
+            % APPROXIMATION: Attitude derivatives of tropospheric and
             % ionospheric corrections through lever-arm-induced elevation changes
             % are ignored.  This is valid when:
             %     leverArmLength_m << slantRange_m   AND
@@ -23,7 +23,7 @@ classdef CodeJacobianBuilder
             M = numel(twr_list);
             H = zeros(M, nx);
 
-            % Phase 3b-1: per-asset H columns via AssetStateBlock (chief=1 aliases stateMap
+            % Per-asset H columns via AssetStateBlock (chief=1 aliases stateMap
             % exactly -> byte-identical). Tower-level indices stay on stateMap.
             if nargin < 12 || isempty(assetIdx); assetIdx = 1; end
             blk = revgnss.AssetStateBlock.forAsset(stateMap, assetIdx);
@@ -40,7 +40,7 @@ classdef CodeJacobianBuilder
                 g = revgnss.LinkGeometry.analyticLosJacobian( ...
                     cfg, towers, ti, ai, r_cm_est, euler_est, leverArms_model);
 
-                % Lever-arm ratio diagnostic (Issue 13)
+                % Lever-arm ratio diagnostic
                 leverNorm = norm(leverArms_model(:, ai));
                 if g.range_m > 0 && leverNorm / g.range_m > 1e-4 && ...
                         leverNorm > 1e-9 && mod(mi, max(1, numel(twr_list))) == 1

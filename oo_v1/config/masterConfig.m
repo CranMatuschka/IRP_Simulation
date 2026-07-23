@@ -11,7 +11,7 @@ function cfg = masterConfig(mode)
 %   scenario). revgnss.ConfigFactory.defaultConfig calls that, so the derived/test/frozen-
 %   golden configs are all built on the same defaults, from this one file.
 %
-%   v1 limitations: signal-dependent hardware delays default to zero and configured
+%   Limitations: signal-dependent hardware delays default to zero and configured
 %   code DCB is global per signal (no calibrated per-link product); the Doppler
 %   ionosphere-rate term is not modelled; the PR/Doppler shared tower-clock
 %   cross-covariance is ignored (block-diagonal R).
@@ -87,7 +87,7 @@ cfg.signals.enabledMask = [true, true];
 
 %% Physics, relativity and Doppler
 % One master enable per effect (truth/model pair slaved in expandEnableToggles below).
-% Light-time is iterative one-way; the relativistic clock term is guarded off in v1.
+% Light-time is iterative one-way; the relativistic clock term is guarded off.
 cfg.physics.sagnac.enable             = true;
 cfg.physics.lightTime.enable          = true;
 cfg.physics.lightTime.mode            = 'iterativeOneWay';
@@ -528,15 +528,15 @@ cfg.measurements.twoWayTimeTransfer.useInEKF = false;
 cfg.measurements.twoWayTimeTransfer.towers   = 'all';   % which ground towers are two-way capable
 cfg.measurements.twoWayTimeTransfer.sigma_m  = 0.03;    % two-way time uncertainty 1-sigma [m] (~100 ps)
 
-%% Per-SECONDARY two-way time transfer (P3'). Default OFF.
+%% Per-SECONDARY two-way time transfer. Default OFF.
 % The per-satellite twin of the primary two-way link above: a ground-tower<->SECONDARY
 % two-way exchange pins each secondary's clock b_tx DIRECTLY (H +1 on the secondary clock
 % state, no position column), decoupled from the secondary radial -- the only lever that
-% improves the per-satellite ABSOLUTE clock (and radial, via the WP5 range row). REQUIRES
+% improves the per-satellite ABSOLUTE clock (and radial, via the ground-tower range row). REQUIRES
 % the secondary to TRANSMIT, which the plain reverse-GNSS uplink does NOT assume -> this is
 % an explicit "with per-satellite two-way time transfer" enhancement, not the baseline
 % geometry; label results accordingly. Needs estimated secondary clocks (estimateMode
-% 'clocks'/'position'). Fuses with the WP5 one-way ground row (independent draws). sigma_m
+% 'clocks'/'position'). Fuses with the ground one-way row (independent draws). sigma_m
 % ~0.03 m = 100 ps lab-grade; operational two-way is ~0.3-1 ns (0.1-0.3 m).
 cfg.measurements.secondaryTwoWayTimeTransfer.enable                     = false;
 cfg.measurements.secondaryTwoWayTimeTransfer.useInEKF                   = false;
@@ -551,7 +551,7 @@ cfg.measurements.secondaryTwoWayTimeTransfer.conservativeProductCorrelation = tr
 % The physically-realistic troposphere/ionosphere/scintillation overlay and the
 % ionosphere-handling choice live HERE, not in run_oo_v1. These are DATA toggles;
 % the overlay itself is applied in ConfigFactory.finalizeConfig (via
-% applyAtmosphereProfile) so the Stage-85 golden opts out with the single flag below.
+% applyAtmosphereProfile) so the golden opts out with the single flag below.
 %
 %   atmosphere.realistic
 %     true  -> Saastamoinen/Niell troposphere (+per-tower ZWD EKF) and a
@@ -594,14 +594,14 @@ cfg.atmosphere.estimateIono   = false;   % per-tower slant-ionosphere EKF state
 % 'GEO' (default) is a strict no-op so the frozen goldens stay byte-identical.
 cfg = orbitClassConfig(cfg);
 
-%% Realism grade  (v4 realism fixes — SINGLE opt-in switch)
+%% Realism grade  (realism fixes — SINGLE opt-in switch)
 % false (default) -> the current headline config; the frozen goldens are unaffected.
 % true  -> overlay config/internal/realismGradeConfig: realistic JOW caesium clock, IGS-RTS tower
 %          product sigma, C/N0 code weighting, multipath/hardware/PCV/survey/DCB truth
 %          systematics, relativistic clock, honest measurement floors, luni-solar process
 %          noise, and realistic ISL product sigma. Makes the run physically representative
 %          rather than an idealised twin. See docs/scientific_correctness_review_v4.md.
-%          NEW-PHYSICS WPs (truth luni-solar propagator, unknown inter-antenna carrier
+%          New-physics effects (truth luni-solar propagator, unknown inter-antenna carrier
 %          biases, EOP/solid-Earth tide) are applied by their own dedicated builders.
 cfg.realism.grade = false;
 % Per-effect sub-toggles (consulted ONLY when realism.grade = true). Each defaults true,
@@ -619,7 +619,7 @@ cfg.realism.include.towerSurvey             = true;   % R-5  static ENU survey e
 cfg.realism.include.dcb                      = true;   % R-5  inter-frequency code bias (truth)
 cfg.realism.include.honestFloors            = true;   % R-10 honest measurement sigma floors
 cfg.realism.include.luniSolar               = true;   % R-3  matched luni-solar+SRP + retuned SNC (coupled)
-cfg.realism.include.relativity              = true;   % WP-D relativistic receiver-clock offset
+cfg.realism.include.relativity              = true;   % Relativistic receiver-clock offset
 cfg.realism.include.islProductSigma         = true;   % ISL  realistic secondary product sigma
 cfg.realism.include.eop                      = true;   % R-8  uncorrected EOP frame residual (truth)
 cfg.realism.include.solidEarthTide          = true;   % R-8  solid-Earth tide (truth)
@@ -663,7 +663,7 @@ function cfg = i_baseDefaults()
 %   masterConfig seeds from this base and owns every human-facing value/toggle on top.
     addpath(fileparts(fileparts(mfilename('fullpath'))));  % oo_v1 root, for +revgnss builders
 
-% defaultConfig  GEO-1 honest off=off baseline (clarity refactor C-5).
+% defaultConfig  GEO-1 honest off=off baseline.
 %
 % The base default injects NO error effects: troposphere, ionosphere, hardware delay,
 % multipath, tower survey and antenna PCV/PCO are all OFF, and the EKF uses RAW
@@ -811,7 +811,7 @@ cfg.formation.mode        = 'helix';   % only supported formation mode
 cfg.formation.baseline_m  = 1000.0;    % inter-satellite separation [m] (>500 m); changeable
 cfg.formation.phase0_rad  = 0.0;       % phase of the first secondary on the projected-circular ring
 
-% --- WP1: per-asset truth persistence (swarm runs only) -------
+% --- Per-asset truth persistence (swarm runs only) -------
 % When nSpaceAssets > 1, ReportRunner persists every asset's truth trajectory
 % (position/velocity/attitude/clock) into the report .mat as `multiAssetTruth`,
 % so per-satellite truth-vs-truth geometry -- inter-asset baselines (relative)
@@ -823,13 +823,13 @@ cfg.formation.phase0_rad  = 0.0;       % phase of the first secondary on the pro
 cfg.multiAsset.recordTruth   = true;   % persist per-asset truth for swarm (nSpaceAssets>1) runs
 cfg.multiAsset.truthStride_s = 60.0;   % decimation stride [s] to keep long-run .mat small; <=0 = every truth epoch
 
-% --- WP3: secondary-asset CLOCK estimation (bias+drift as EKF states) ---------
-% 'off'      (WP<=2) secondaries are represented-only truth; their clock cancels
+% --- Secondary-asset CLOCK estimation (bias+drift as EKF states) ---------
+% 'off'      secondaries are represented-only truth; their clock cancels
 %            in the one-way ISL innovation (today's behaviour). Golden-safe.
-% 'clocks'   (WP3)   estimate each secondary's [b_tx, bdot_tx] as 2 EKF states,
+% 'clocks'   estimate each secondary's [b_tx, bdot_tx] as 2 EKF states,
 %            appended LAST. Requires nSpaceAssets>=2 AND isl.enable +
-%            isl.code.useInEKF (validated). Secondary POSITIONS stay product (WP4).
-% 'position' (P1'/WP4) estimate each secondary's full [r,v,b,bdot]; requires
+%            isl.code.useInEKF (validated). Secondary POSITIONS stay product.
+% 'position' estimate each secondary's full [r,v,b,bdot]; requires
 %            towersObserveSecondaries (the near-radial position observable) on top of the
 %            'clocks' preconditions. Superset of 'clocks'.
 % NOTE: secondary truth clocks only wander when cfg.asset.clock.deterministic=false;
@@ -850,22 +850,22 @@ cfg.multiAsset.mode = 'fast';
 % enough to stay conservative/under-confident.
 cfg.multiAsset.secondaryClock.initSigma_m        = 100.0;
 cfg.multiAsset.secondaryClock.initSigmaDrift_mps = 1.0;
-% P1'/WP4: prior on each secondary's estimated [r,v] (init draw AND stated P0 share
+% Prior on each secondary's estimated [r,v] (init draw AND stated P0 share
 % these, so initial NEES is O(1)). estimateMode='position' promotes each secondary to
 % a full [r,v,b,bdot] asset; requires towersObserveSecondaries (the position observable).
 cfg.multiAsset.secondaryOrbit.initSigmaPos_m     = 100.0;   % [m] per axis
 cfg.multiAsset.secondaryOrbit.initSigmaVel_mps   = 0.1;     % [m/s] per axis
 
-% --- WP5: ground-tower -> secondary observation rows (absolute clock anchor) ---
+% --- Ground-tower -> secondary observation rows (absolute clock anchor) ---
 % When true (and estimateMode='clocks'), each visible ground tower adds a
 % pseudorange row observing a secondary's clock bias b_tx at a near-radial LOS
 % against the KNOWN (product-corrected) tower clock. This anchors b_tx to the
-% ground ABSOLUTELY -- independent of the primary radial -- curing the WP3
+% ground ABSOLUTELY -- independent of the primary radial -- curing the
 % degeneracy (b_tx near-degenerate with the primary radial through the ~horizontal
 % ISL LOS). No primary-state columns, so golden-safe when off / nSpaceAssets=1.
 cfg.multiAsset.towersObserveSecondaries          = false;
 cfg.multiAsset.towerSecondary.code.sigma_m       = 1.0;   % tower->secondary thermal 1-sigma [m] (flat value AND the 'chiefFloored' floor)
-% Phase 3b-3 Axis 1: secondary code-noise sigma model. 'chiefFloored' = the chief's elevation/C-N0
+% Secondary code-noise sigma model. 'chiefFloored' = the chief's elevation/C-N0
 % code model (models.measurements.MeasurementModelUtils.codeSignalSigma) floored at code.sigma_m, so
 % the secondary uplink is elevation-shaped like the chief but R NEVER drops below today's 1.0 m
 % (max(x,floor) >= floor => R_new >= R_old, conservative). Byte-identical to 'flat' under the default
@@ -879,8 +879,8 @@ cfg.multiAsset.towerSecondary.code.sigmaModel    = 'chiefFloored';  % 'flat' | '
 % mirrors TwoWayTimeTransfer.conservativeProductCorrelation).
 cfg.multiAsset.towerSecondary.productNCorr       = 30;    % effective correlated-sample count
 cfg.multiAsset.towerSecondary.towerClkSigma_m    = 0.03;  % tower clock product residual 1-sigma [m] (~100 ps)
-cfg.multiAsset.towerSecondary.towerClkDriftSigma_mps = 1e-3;  % tower clock DRIFT residual 1-sigma [m/s]; matched-drift R pad for secondary Doppler (Phase 3b-3)
-% --- Guard A (P1' realism): divergent uplink atmosphere on ground->secondary rows ---
+cfg.multiAsset.towerSecondary.towerClkDriftSigma_mps = 1e-3;  % tower clock DRIFT residual 1-sigma [m/s]; matched-drift R pad for secondary Doppler
+% --- Guard A: divergent uplink atmosphere on ground->secondary rows ---
 % TRUTH-side per-(tower,interval) tropo+iono residual, SHARED across the secondaries a
 % tower sees (per-LOS divergence is elevation-mapping only), interval-correlated (not
 % white). Injected into z, not h -> cannot cancel; kept OUT of R by default so Guard C's
@@ -893,7 +893,7 @@ cfg.multiAsset.towerSecondary.atmosphere.tauIono_s         = 600;   % TEC correl
 cfg.multiAsset.towerSecondary.atmosphere.ionoShellHeight_m = 350e3;
 cfg.multiAsset.towerSecondary.atmosphere.chargeR           = false; % false: honest gate (bias unmodelled); true: nCorr R inflation
 cfg.multiAsset.towerSecondary.atmosphere.nCorrCap          = 60;
-% --- Per-secondary CARRIER phase + float-ambiguity states (Phase 1: single-frequency L1) ---
+% --- Per-secondary CARRIER phase + float-ambiguity states (single-frequency L1) ---
 % Promotes each secondary from code-only toward a full single-asset model: tower->secondary
 % carrier rows (cm thermal) with a per-(secondary,tower) float-ambiguity state, mirroring the
 % chief's carrier machinery. Needs estimateMode='position' + towersObserveSecondaries (the row
@@ -902,13 +902,13 @@ cfg.multiAsset.towerSecondary.carrier.enable        = false;
 cfg.multiAsset.towerSecondary.carrier.sigma_m       = 0.005;  % carrier thermal 1-sigma [m] (~5 mm)
 cfg.multiAsset.towerSecondary.carrier.initialSigma_m = 100;   % float-ambiguity prior 1-sigma [m]
 cfg.multiAsset.towerSecondary.carrier.ambProcNoise_m = 1e-4;  % ambiguity random-walk sigma [m/sqrt(s)]
-% --- Per-secondary DOPPLER (Phase 3b-3, Axis 4): tower->secondary range-rate row, symmetric to the
+% --- Per-secondary DOPPLER: tower->secondary range-rate row, symmetric to the
 % chief Doppler. H: u_los' on velocity, +1 on secondary clock-drift, and d(rhoDot)/dr on the
 % secondary position (the chief omits the position partial as negligible, but the secondary position
 % is wall-limited so its range-rate error is position-DRIVEN -- the column is required or the filter
 % mis-attributes it to velocity/drift). Emitted only in estimateMode='position'; block-diagonal R
 % append (never shrinks an existing entry).
-% DEFAULT OFF -- honest GEO finding (Phase 3b-3): at GEO the satellite is ~stationary in ECEF, so the
+% DEFAULT OFF -- honest GEO finding: at GEO the satellite is ~stationary in ECEF, so the
 % range-rate is dominated by the position-driven Sagnac geometry, not velocity. With the secondary
 % position radial<->clock-wall-limited, Doppler does NOT make the clock-drift observable (drift error
 % ~0.4-0.7 m/s with or without it) and empirically DEGRADES drift/velocity while marginally improving
@@ -916,7 +916,7 @@ cfg.multiAsset.towerSecondary.carrier.ambProcNoise_m = 1e-4;  % ambiguity random
 % velocity-dominated and Doppler genuinely helps. See docs/asset_symmetry_generalization.md §16.
 cfg.multiAsset.towerSecondary.doppler.enable        = false;  % emit tower->secondary Doppler rows (opt-in; not beneficial at GEO)
 cfg.multiAsset.towerSecondary.doppler.sigma_mps     = 0.05;   % Doppler thermal 1-sigma [m/s] (conservative uplink-degraded; >= chief 0.01)
-% --- Per-secondary MULTI-ANTENNA + ATTITUDE (Phase 4, Axis B/A): give a secondary the chief's
+% --- Per-secondary MULTI-ANTENNA + ATTITUDE: give a secondary the chief's
 % attitude-estimation stack. multiAntenna carries the chief's antenna array + lever arms on the
 % secondary (the inter-antenna carrier baseline is the ONLY thing that makes attitude observable);
 % attitude adds per-secondary [euler(3), omega(3)] states. Both DEFAULT OFF -> the state blocks are
@@ -929,7 +929,7 @@ cfg.multiAsset.towerSecondary.multiAntenna.nAntennas = 4;      % antennas per se
 cfg.multiAsset.towerSecondary.attitude.enable        = false;  % estimate per-secondary attitude (needs multiAntenna)
 cfg.multiAsset.towerSecondary.attitude.initSigma_euler_rad   = 0.05;   % secondary attitude prior 1-sigma [rad]
 cfg.multiAsset.towerSecondary.attitude.initSigma_omega_radps = 1e-4;   % secondary angular-rate prior 1-sigma [rad/s]
-% --- Per-secondary TROPOSPHERE (ZWD) states (Phase 2: each secondary estimates its own wet
+% --- Per-secondary TROPOSPHERE (ZWD) states (each secondary estimates its own wet
 % delay per tower, like the chief). Gauss-Markov, mirroring the chief per-tower ZWD. Allocated
 % only when Guard A injects a divergent truth-side tropo residual; needs estimateMode='position'
 % + towersObserveSecondaries. Default off -> golden byte-identical.
@@ -939,12 +939,12 @@ cfg.multiAsset.towerSecondary.attitude.initSigma_omega_radps = 1e-4;   % seconda
 % absolute rather than improving it. This is the same weak observability the chief's ZWD has;
 % it only becomes beneficial once the wall is broken (two-way ranging). Provided for single-asset
 % structural symmetry; keep OFF unless the wall is broken. (Ionosphere states are dispersive ->
-% require per-secondary dual-frequency: deferred to Phase 2b.)
+% require per-secondary dual-frequency.)
 cfg.multiAsset.towerSecondary.estimateAtmosphere    = false;
 cfg.multiAsset.towerSecondary.zwd.tau_s             = 1800;    % wet-delay Gauss-Markov correlation time [s]
 cfg.multiAsset.towerSecondary.zwd.sigma_ss_m        = 0.05;    % steady-state zenith wet 1-sigma [m]
 cfg.multiAsset.towerSecondary.zwd.initialSigma_m    = 0.10;    % ZWD prior 1-sigma [m]
-% --- Guard B (P1' realism): one-sided truth-side SRP + luni-solar dynamics gap ---
+% --- Guard B: one-sided truth-side SRP + luni-solar dynamics gap ---
 % Truth==EKF (both J2) today => each secondary's DYNAMIC error is identically 0 and NEES
 % measures nothing dynamic. When injectTruthSideDynamics=true (and estimateMode='position'
 % + nSpaceAssets>=2), applyInjectTruthSideDynamics turns on the existing truth-side
@@ -955,15 +955,15 @@ cfg.multiAsset.truthSideDynamics.sncSigma_mps2   = 1e-5;  % white-SNC lower boun
                                                           % (sun+moon aligned PEAK ~1.1e-5; a crude white proxy
                                                           % for a coherent ramp -- Guard C NEES is the arbiter,
                                                           % do NOT raise it to force NEES->1)
-cfg.multiAsset.secondaryOrbit.sigma_accel_mps2   = [];    % [] = inherit primary SNC (byte-identical to P1')
-% --- Swarm all-pairs two-way ISL (clock-free baseline lengths), P2'. Default OFF. -------
-% FUSION with P1' one-way ISL + WP5 ground anchor: independent draws (RngSource 22/23) ->
+cfg.multiAsset.secondaryOrbit.sigma_accel_mps2   = [];    % [] = inherit primary SNC
+% --- Swarm all-pairs two-way ISL (clock-free baseline lengths). Default OFF. -------
+% FUSION with one-way ISL + ground anchor: independent draws (RngSource 22/23) ->
 % adds Fisher information, NOT double-counting (one-way = range+clock-diff, two-way =
 % clock-free baseline, independent noise). Requires estimateMode='position' (both endpoints
 % are estimated states) AND towersObserveSecondaries (two-way is clock-free and rigid-motion
 % blind -> ground rows supply the clock/absolute anchor). nSpaceAssets=1 -> 0 pairs -> 0 rows
 % -> byte-identical golden. Sharpens the RELATIVE/shape solution only.
-cfg.multiAsset.twoWayISL.enable                 = false;  % master gate (P2')
+cfg.multiAsset.twoWayISL.enable                 = false;  % master gate
 cfg.multiAsset.twoWayISL.links                  = 'all';  % 'all' pairs among estimated assets, or an M-by-2 [i k] list
 cfg.multiAsset.twoWayISL.sigma_m                = 0.01;   % white two-way ranging thermal 1-sigma [m] (cm-class wideband crosslink)
 cfg.multiAsset.twoWayISL.delayCal.sigma_const_m = 0.01;   % per-link turn-around+antenna-PCO cal bias, constant part [m] (33 ps = 1 cm)
@@ -971,8 +971,8 @@ cfg.multiAsset.twoWayISL.delayCal.sigma_rw_m    = 0.003;  % per-link cal-bias sl
 cfg.multiAsset.twoWayISL.delayCal.tau_s         = 3600;   % cal-bias correlation time [s]
 cfg.multiAsset.twoWayISL.delayCal.nCorrCap      = 60;     % cap on tau/dt R-inflation (honest gate)
 
-% --- Satellite<->satellite TWO-WAY TIME TRANSFER ISL (the DUAL of P2'). Default OFF. -----
-% P2' above uses the two-way SUM (range, clock-free baseline = SHAPE). This uses the two-way
+% --- Satellite<->satellite TWO-WAY TIME TRANSFER ISL. Default OFF. -----
+% The two-way SUM path (range, clock-free baseline = SHAPE) is complemented by the two-way
 % DIFFERENCE (range cancels) to observe the inter-satellite CLOCK difference directly and pin
 % the swarm's RELATIVE clocks to each other -- a mesh time-sync independent of the ground:
 %   z=(b_i-b_k)+delayCal+thermal ; h=x(clk_i)-x(clk_k) ; H=+1 on clk_i, -1 on clk_k (no position).
@@ -992,7 +992,7 @@ cfg.multiAsset.twoWayTimeTransferISL.delayCal.nCorrCap      = 60;     % cap on t
 
 % --- Ground towers: real ground-station sites in the 23 deg-E GEO footprint ---
 % Name, lat[deg], lon[deg], alt[m]. The first 5 are the frozen-golden network (do
-% NOT reorder or edit them: the Stage-85 golden trims to nTowers=5 = these five).
+% NOT reorder or edit them: these five are the core network (nTowers=5 default).
 % Towers 6-12 are additional real space-tracking / geodetic sites (ESA/ASI/IGS/NASA)
 % spread across the visible hemisphere to break the radial<->clock degeneracy of a
 % single ground-only GEO (wide lat -26..+68 deg, lon -25..+78 deg angular spread).
@@ -1243,7 +1243,7 @@ cfg.errors.troposphere.stochastic.modelResidual.mode   = 'zero';
 cfg.errors.ionosphere.stochastic.modelResidual.enable  = false;
 cfg.errors.ionosphere.stochastic.modelResidual.mode    = 'zero';
 
-% Honest off=off default (clarity refactor C-5): the base injects NO atmosphere.
+% Honest off=off default: the base injects NO atmosphere.
 % masterConfig / atmosphereConfig / matchedErrorBaselineConfig enable these
 % explicitly. Delay parameters are retained (inert while the enables are false).
 cfg.errors.troposphere.truth.enable        = false;
@@ -1259,15 +1259,15 @@ cfg.errors.ionosphere.model.enable         = false;
 cfg.errors.ionosphere.model.zenithDelay_m  = 5.0;
 cfg.errors.ionosphere.model.biasFraction   = 1.0;
 cfg.errors.ionosphere.sigma_m              = 0.0;
-% CHANGED: v3→v4 — Issue 2/16
+% Tower clock product bias sigma
 % d/dt of first-order iono delay: dot{I}_L1 = -(40.3/f_L1^2)*dot{TEC}.
 % When true, Doppler is excluded from ionoFreeCode mode (no IF Doppler model).
 cfg.errors.ionosphere.includeRateTerm      = false;
 
-% Tower clock product parameters (for product epoch caching — Issue 6/16)
+% Tower clock product parameters (for product epoch caching)
 cfg.errors.towerClock.updateInterval_s     = 300;   % product update interval [s]
 cfg.errors.towerClock.latency_s            = 0;     % product delivery latency [s]
-% CHANGED: v3→v4 — Issue 10/16
+% Tower clock product validity period
 % Shared clock-drift product uncertainty per tower.  Set > 0 if drift
 % corrections are active and their error should appear in R.
 cfg.errors.towerClock.driftCorrSigma_m_per_s = 0;  % [m/s], default: unmodelled
@@ -1435,7 +1435,7 @@ cfg.measurements.doppler.useInEKF     = true;
 cfg.measurements.doppler.includePositionPartial = false;
 
 cfg.measurements.carrierPhase.enable           = true;
-cfg.measurements.carrierPhase.useInEKF         = false;   % governed by carrierMode in v4+
+cfg.measurements.carrierPhase.useInEKF         = false;   % governed by carrierMode
 cfg.measurements.carrierPhase.frequency_Hz     = sigL1Default_.frequency_Hz;
 cfg.measurements.carrierPhase.lambda_m         = sigL1Default_.wavelength_m;
 cfg.measurements.carrierPhase.sigma_cycles     = 0.01;
@@ -1540,11 +1540,11 @@ cfg.measurements.twoWayTimeTransfer.conservativeProductCorrelation = true;
 %   'off'        do not compute carrier phase
 %   'diagnostic' compute carrier z but do not update EKF
 %   'ekfFloat'   carrier as EKF observable with float L1 ambiguity states
-%                NOTE: L2 carrier EKF is NOT supported in v1.
+%                NOTE: L2 carrier EKF is NOT supported.
 %
 % carrierCombinationMode (authoritative):
 %   'raw'             individual L1 phase (L2 not supported in EKF)
-%   'ionosphereFree'  NOT supported — no IF carrier EKF in v1
+%   'ionosphereFree'  NOT supported — no IF carrier EKF
 cfg.measurements.observableMode          = 'code+doppler+carrier';
 cfg.measurements.codeMode                = 'singleFrequency';
 cfg.measurements.carrierMode             = 'diagnostic';
@@ -1652,7 +1652,7 @@ cfg.towerClock.productValidityPolicy  = 'warn';  % 'warn' | 'error'
 %   'fixReferenceTower'        — pin tower-1 clock to zero (differential estimation)
 %   'free'                     — no gauge; legal only with spacecraftReceiverClockOnly
 %
-% clock.hardwareDelay.estimatePerTower — hardware delay EKF state placeholder (v1: not implemented)
+% clock.hardwareDelay.estimatePerTower — hardware delay EKF state placeholder (not implemented)
 cfg.clock.mode                           = 'spacecraftReceiverClockOnly';
 % h-coefficient source for clock templates (canonical selector). 'legacy' keeps
 % every current number bit-identical; 'jowTable2p1' re-anchors OCXO/CESIUM to the
@@ -1764,7 +1764,7 @@ cfg.diagnostics.storage.longRunAutoCompact.epochThreshold     = 10000;
 % 'legacyStruct': kept for backward compat but deprecated (SimulationDataStore is always active)
 cfg.diagnostics.storage.backend = 'array';
 
-% --- Data backend (v3 canonical) --------------------------------
+% --- Data backend (canonical) --------------------------------
 cfg.data.backend                              = 'SimulationDataStore';
 cfg.data.schemaVersion                        = 3;
 cfg.data.storeFullMatricesEveryEpoch          = false;

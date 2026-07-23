@@ -14,7 +14,7 @@ classdef MultiAssetConfig
             nAssets = max(1, round(cfg.scenario.nSpaceAssets));
             cfg.scenario.nSpaceAssets = nAssets;
 
-            % WP3 estimate mode (isfield-guarded: normalize() is called standalone by
+            % Estimate mode (isfield-guarded: normalize() is called standalone by
             % summary()/assetInfos()/instantiateAssets() on cfgs that may lack the field).
             estMode = 'off';
             if isfield(cfg,'multiAsset') && isfield(cfg.multiAsset,'estimateMode') && ...

@@ -83,7 +83,7 @@ classdef ImperfectionAudit
         end
 
         function tf = secondaryClockConverges(d)
-            % secondaryClockConverges  WP3 honesty predicate. Pass when every ESTIMATED
+            % secondaryClockConverges  Honesty predicate. Pass when every ESTIMATED
             % secondary clock's final-third bias error stays within +/-3sigma with >=90%
             % coverage. HONEST by design: b_tx is observable only relative to the primary
             % clock (radial<->clock wall) and aliases the along-LOS product-position error,

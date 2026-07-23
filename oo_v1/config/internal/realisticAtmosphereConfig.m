@@ -17,7 +17,7 @@ function cfg = realisticAtmosphereConfig(cfg)
 %   The divergence is STRUCTURAL (independent RNG streams, estimator lag, functional-form
 %   mismatch) with a single master enable per source -- no oracle read of the truth draw,
 %   no arbitrary noise inflation. This is a SEPARATE builder: masterConfig's default
-%   (matched simpleMapped) and the Stage-85 golden are untouched.
+%   (matched simpleMapped) and the golden baseline are untouched.
 %
 %   References: Saastamoinen 1972 / Davis 1985; Niell 1996; Klobuchar 1987; Bassiri & Hajj
 %   1993; Kaplan & Hegarty; Misra & Enge.

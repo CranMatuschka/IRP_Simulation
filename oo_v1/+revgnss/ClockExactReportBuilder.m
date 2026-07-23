@@ -1375,7 +1375,7 @@ classdef ClockExactReportBuilder
         % SECTION 4 — PER-RECEIVER MEASUREMENT DIAGNOSTICS
         % ================================================================
 
-        % writePerReceiverDiagnostics_ extracted to +revgnss/+report/perReceiverDiagnostics.m.
+        % Per-receiver measurement diagnostics are not generated in this report configuration.
 
         % ================================================================
         % SECTION 5 — OSCILLATOR STABILITY VALIDATION
@@ -1529,7 +1529,7 @@ classdef ClockExactReportBuilder
         end
 
         % ================================================================
-        % STAGE 67 CLOSURE: ATTITUDE, CLOCK, AND DYNAMICS REALISM
+        % ATTITUDE, CLOCK, AND DYNAMICS REALISM CLOSURE
         % ================================================================
         function writeStage67Closure_(fid, summary, plotPaths, stem, figDir)
             CE = revgnss.ClockExactReportBuilder;

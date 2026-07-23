@@ -1,7 +1,7 @@
 function clockObservability(fid, diag, cfg)
 %CLOCKOBSERVABILITY  "Clock Observability and Gauge Validation" report section.
 %   Extracted verbatim from ClockExactReportBuilder.writeClockObservability_ as part
-%   of the C-9 report decomposition. Read-only: consumes only the precomputed plotPaths
+%   of the report decomposition. Read-only: consumes only the precomputed plotPaths
 %   + figure dir and the (now-public) ClockExactReportBuilder formatting toolkit. The
 %   emitted LaTeX is byte-identical to the original method (verified by the normalized
 %   .tex diff harness, tests/report/reportTexFingerprint.m).

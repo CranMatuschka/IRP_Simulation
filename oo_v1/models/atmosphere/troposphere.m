@@ -1,5 +1,5 @@
 function out = troposphere(mode, args, cfg)
-%TROPOSPHERE  Single entry point for troposphere / ZWD (Phase 5 façade).
+%TROPOSPHERE  Single entry point for troposphere / ZWD (façade).
 %   Delegates VERBATIM to models.atmosphere.TroposphereModel — no physics here. The stochastic
 %   truth/model DELAY draws live in the stateful models.errors.ErrorChain (per-epoch); this
 %   façade exposes the deterministic mapping, ZWD process parameters, and the

@@ -8,7 +8,7 @@ classdef StageHistory
     % renders these strings (via ReportStatus) as historical record and the
     % test_stage60-63 tests assert specific entries, so the exposed strings are frozen —
     % but they are documentation, not architecture. Report-section rendering is gated by
-    % feature predicates, not by these stage entries (see the C-7 demotion).
+    % feature predicates, not by these stage entries.
     %
     % Separates stage-history bookkeeping from runtime source-truth in ReportStatus.
     % ReportStatus.current() delegates to this class for long list fields.
@@ -98,7 +98,6 @@ classdef StageHistory
 
         function list = missingScientificItems(~)
             % missingScientificItems  Not-implemented items that must not be claimed.
-            % v1 is at Stage 82. These items are not implemented and must not be claimed.
             list = {
                 'Full CI / full test-suite validation (current: targeted random smoke, 2-5 tests only; full suite NOT RUN)'
                 'Calibrated antenna PCO/PCV and ANTEX hardware-bias products (default PCV=none; toy PCV is synthetic-only; geometry model is reference-point only)'

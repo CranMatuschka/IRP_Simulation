@@ -165,7 +165,6 @@ classdef ConfigFactory
         function cfg = clockNoiseConfig()
             % clockNoiseConfig  Stochastic receiver + tower clocks with noisyCorrection.
             %
-            % CHANGED: v3→v4 — Issue 5
             % SIMULATION NOTE: noisyCorrection is a truth-based simulated external
             % correction product.  It is NOT a model of what a real receiver
             % produces; it adds zero-mean Gaussian noise to the true tower clock.
@@ -302,7 +301,7 @@ classdef ConfigFactory
             % Innovations remain small because model matches truth. This is the
             % matched-error baseline (NOT "all errors off" — same corrections both sides).
             cfg = revgnss.ConfigFactory.defaultConfig();
-            % The base default is now honest off=off (clarity refactor C-5); re-assert
+            % The base default is honest off=off; re-assert
             % this preset's matched-error meaning by enabling tropo+iono on both sides.
             cfg.errors.troposphere.truth.enable = true;
             cfg.errors.troposphere.model.enable = true;
@@ -731,8 +730,8 @@ classdef ConfigFactory
             % Optional convenience surface exposing the plan's datum vocabulary
             % ('none' | 'masterClock' | 'zeroMeanEnsemble' + masterIndex). Present-only:
             % there is NO baseConfig default for cfg.estimator.clockGauge, so configs that
-            % set cfg.clock.gauge.mode directly (the canonical Stage-8 surface) are never
-            % clobbered. This alias only maps the datum mode onto the existing gauge engine;
+            % set cfg.clock.gauge.mode directly are never clobbered. This alias only maps
+            % the datum mode onto the existing gauge engine;
             % it does not by itself enable tower-clock estimation (use cfg.clock.mode for
             % that). Datum rationale: for n clocks only n-1 clock states are separable,
             % leaving one unobservable common-mode datum (Kaplan & Hegarty, control segment).

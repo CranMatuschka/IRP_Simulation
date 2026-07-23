@@ -7,8 +7,7 @@
 %   output/Report-YYYYMMDD/report-vX.XX.pdf
 %   output/Report-YYYYMMDD/report-vX.XX.mat
 %
-% CHANGED: v3→v4 — Issue 19
-% -------  v1 Known Limitations  -------
+% -------  Known Limitations  -------
 %
 % L1. Signal-dependent hardware delays / differential code biases (DCB)
 %     are set to zero.  In the IF combination, HW_IF = a*HW_L1 - b*HW_L2

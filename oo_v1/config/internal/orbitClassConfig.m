@@ -5,7 +5,7 @@ function cfg = orbitClassConfig(cfg)
 %   applier after the scenario assembly, so changing that single string moves
 %   the whole run between orbit classes -- no other edit is needed.
 %
-%   'GEO' (default) is a STRICT NO-OP so the frozen Stage-85 goldens stay
+%   'GEO' (default) is a STRICT NO-OP so the frozen baseline is preserved
 %   byte-identical. 'MEO'/'LEO' override altitude, inclination, RAAN, initial
 %   true anomaly and the residual-acceleration process noise (SNC). Truth and
 %   the EKF stay a matched J2 family (cfg.orbit.truth.mode / dynamics.mode are

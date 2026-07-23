@@ -1,5 +1,5 @@
 classdef SwarmEstimateSummary
-    % SwarmEstimateSummary  P5' per-satellite estimate deliverable.
+    % SwarmEstimateSummary  Per-satellite estimate deliverable.
     %
     % Turns the persisted per-secondary estimate diagnostics (SimulationDataStore
     % d.secondaryOrbit.* + d.consistency.centroidNEES) into the honest answer to

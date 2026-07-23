@@ -3,7 +3,7 @@ classdef LatexReportBuilder
     %
     % LEGACY report path. Production is superseded by ClockExactReportBuilder
     % (the only builder ReportRunner constructs under the default layout='clockExact').
-    % This cluster is unreachable in production but retained for the Stage-6/7 report
+    % This cluster is unreachable in production but retained for the report
     % test suite; do not delete without migrating those tests.
     %
     % Produces 10 numbered section figures (P00–P09) that follow the style

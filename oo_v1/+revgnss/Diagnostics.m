@@ -368,9 +368,8 @@ classdef Diagnostics < handle
         end
 
         function [sumNIS, dof, passes] = accumulatedNISTest(obj, nSigma)
-            % accumulatedNISTest  Chi-squared NIS consistency check (Issue 7).
+            % accumulatedNISTest  Chi-squared NIS consistency check.
             %
-            % CHANGED: v3→v4 — Issue 7
             % Under correct filter: sumNIS ~ chi²(dof) where dof = sum of per-epoch M_k.
             % E[sumNIS] = dof,  Var[sumNIS] = 2*dof
             % Test: |sumNIS - dof| < nSigma * sqrt(2*dof)
@@ -573,13 +572,11 @@ classdef Diagnostics < handle
         end
 
         function v = getAttitudeRank(obj)
-            % CHANGED: v3→v4 — Issue 8
             if obj.hasArrayData(); v = obj.store_.getData().geom.attitudeRank; return; end
             v = [obj.log.attitudeRank]';
         end
 
         function v = getAttitudeStatus(obj)
-            % CHANGED: v3→v4 — Issue 8
             if obj.hasArrayData(); v = []; return; end  % string data not stored in array mode
             v = {obj.log.attitudeStatus}';
         end
