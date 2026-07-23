@@ -137,10 +137,14 @@ classdef DiffAttitudeBuilder
                     phi_i = cpInfo.phi_m(bMask);
                     h_i = models.measurements.MeasurementModelUtils.modelRangeOnly( ...
                         cfg, towers, ti, ai, r_cm, euler, leverArms);
+                    sigRow = 1;
+                    if hasSigIdx; sigRow = cpInfo.signalIdx(bMask); end
+                    b_model = revgnss.InterAntennaPhaseBias.modelBiasMeters(cfg, ai, sigRow) - ...
+                        revgnss.InterAntennaPhaseBias.modelBiasMeters(cfg, 1, sigRow);
                     if store.calibrated && store.activeMask(ti,bi)
                         continue
                     end
-                    dv = (phi_i - phi_ref) - (h_i - h_ref);   % Named variable
+                    dv = (phi_i - phi_ref) - ((h_i - h_ref) + b_model);
                     store.accumN(ti,bi)     = store.accumN(ti,bi)     + 1;
                     store.accumSum(ti,bi)   = store.accumSum(ti,bi)   + dv;
                     store.accumSumSq(ti,bi) = store.accumSumSq(ti,bi) + dv^2;
@@ -169,7 +173,9 @@ classdef DiffAttitudeBuilder
                             phi_i_L2_ = cpInfo.phi_m(bMskL2_);
                             h_i_L2_   = models.measurements.MeasurementModelUtils.modelRangeOnly( ...
                                 cfg, towers, ti, ai, r_cm, euler, leverArms);
-                            dv_L2_ = (phi_i_L2_ - phi_ref_L2_) - (h_i_L2_ - h_ref_L2_);
+                            b_model_L2_ = revgnss.InterAntennaPhaseBias.modelBiasMeters(cfg, ai, 2) - ...
+                                revgnss.InterAntennaPhaseBias.modelBiasMeters(cfg, 1, 2);
+                            dv_L2_ = (phi_i_L2_ - phi_ref_L2_) - ((h_i_L2_ - h_ref_L2_) + b_model_L2_);
                             store.accumN_L2(ti,bi)     = store.accumN_L2(ti,bi)     + 1;
                             store.accumSum_L2(ti,bi)   = store.accumSum_L2(ti,bi)   + dv_L2_;
                             store.accumSumSq_L2(ti,bi) = store.accumSumSq_L2(ti,bi) + dv_L2_^2;
@@ -278,6 +284,7 @@ classdef DiffAttitudeBuilder
             store = setIfMissing_(store,'gnssOnlyAttitudeClaim',false);
             store = setIfMissing_(store,'nBaselineArFloatExternal',nT*nB);
             store = setIfMissing_(store,'nBaselineArRejectedArc',0);
+            store = setIfMissing_(store,'nBaselineArRejectedPhaseBias',0);
             store = setIfMissing_(store,'nBaselineArFixedDualFrequency',0);
             store = setIfMissing_(store,'nBaselineArFixedL1Only',0);
             store = setIfMissing_(store,'attitudeArMode','rawL1Only');
@@ -316,6 +323,7 @@ classdef DiffAttitudeBuilder
             info.partialFixPolicy         = revgnss.DiffAttitudeBuilder.storeField_(store,'partialFixPolicy','mixedFixedFloat');
             info.nBaselineArFloatExternal = revgnss.DiffAttitudeBuilder.storeField_(store,'nBaselineArFloatExternal',0);
             info.nBaselineArRejectedArc   = revgnss.DiffAttitudeBuilder.storeField_(store,'nBaselineArRejectedArc',0);
+            info.nBaselineArRejectedPhaseBias = revgnss.DiffAttitudeBuilder.storeField_(store,'nBaselineArRejectedPhaseBias',0);
             info.ambiguityStatus          = revgnss.DiffAttitudeBuilder.storeField_(store,'ambiguityStatus',{});
             info.nBaselineArExcludedFromEkf = 0;
             % Dual-frequency fields propagated into info.
@@ -393,8 +401,12 @@ classdef DiffAttitudeBuilder
                     phi_i = cpInfo.phi_m(bMask);
                     h_i = models.measurements.MeasurementModelUtils.modelRangeOnly( ...
                         cfg, towers, ti, ai, r_cm, euler, leverArms);
+                    sigRow = 1;
+                    if hasSigIdx; sigRow = cpInfo.signalIdx(bMask); end
+                    b_model = revgnss.InterAntennaPhaseBias.modelBiasMeters(cfg, ai, sigRow) - ...
+                        revgnss.InterAntennaPhaseBias.modelBiasMeters(cfg, 1, sigRow);
                     z_row = phi_i - phi_ref;
-                    h_row = (h_i - h_ref) + store.delta_B(ti,bi);
+                    h_row = (h_i - h_ref) + store.delta_B(ti,bi) + b_model;
                     if abs(z_row - h_row) > 1.0
                         info.rejectedRows = info.rejectedRows + 1;
                         continue
@@ -418,8 +430,10 @@ classdef DiffAttitudeBuilder
                         if sum(refMskL2r_)==1 && sum(bMskL2r_)==1
                             phi_ref_L2r_ = cpInfo.phi_m(refMskL2r_);
                             phi_i_L2r_   = cpInfo.phi_m(bMskL2r_);
+                            b_model_L2r_ = revgnss.InterAntennaPhaseBias.modelBiasMeters(cfg, ai, 2) - ...
+                                revgnss.InterAntennaPhaseBias.modelBiasMeters(cfg, 1, 2);
                             z_row_L2_ = phi_i_L2r_ - phi_ref_L2r_;
-                            h_row_L2_ = (h_i - h_ref) + store.delta_B_L2(ti,bi);
+                            h_row_L2_ = (h_i - h_ref) + store.delta_B_L2(ti,bi) + b_model_L2r_;
                             if abs(z_row_L2_ - h_row_L2_) <= 1.0
                                 rows_z(end+1,1) = z_row_L2_; %#ok<AGROW>
                                 rows_h(end+1,1) = h_row_L2_; %#ok<AGROW>

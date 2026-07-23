@@ -82,6 +82,8 @@ classdef CarrierMeasurementBuilder
             cpInfo.ambiguityStateIdx = zeros(Mp_total, 1);
             cpInfo.trackKey          = cell(Mp_total, 1);
             cpInfo.towerClkModel_m   = zeros(Mp_total, 1); % Per-row correction for compensated slip detection
+            cpInfo.interAntennaPhaseBiasTruth_m = zeros(Mp_total, 1);
+            cpInfo.interAntennaPhaseBiasModel_m = zeros(Mp_total, 1);
             % Compact carrier-attitude row closure metadata
             cpInfo.leverArmNorm_m          = zeros(Mp_total, 1);
             cpInfo.attitudePartialsEnabled = false(Mp_total, 1);
@@ -255,8 +257,10 @@ classdef CarrierMeasurementBuilder
                     end
                 catch; end
 
+                b_ia_model_m = revgnss.InterAntennaPhaseBias.modelBiasMeters(cfg, ai, sigIdx);
+
                 % h: +trop_model, -iono_model + ZWD state
-                h_phi(rowOut) = rho_e + b_rx_est - b_twr_m + trop_m - iono_m_sig + B_est;
+                h_phi(rowOut) = rho_e + b_rx_est - b_twr_m + trop_m - iono_m_sig + B_est + b_ia_model_m;
                 if isfield(stateMap,'zwdIdx') && ti <= numel(blk.zwd) && ...
                         blk.zwd(ti) > 0
                     mf_phi = models.atmosphere.MappingFunctions.troposphere(elv, ...
@@ -285,6 +289,8 @@ classdef CarrierMeasurementBuilder
                 cpInfo.trackKey{rowOut}           = sprintf('T%03d_A%03d_S%02d', ti, ai, sigIdx);
                 cpInfo.ambiguityStateIdx(rowOut)  = ambStateIdx;
                 cpInfo.towerClkModel_m(rowOut)    = b_twr_m;
+                cpInfo.interAntennaPhaseBiasTruth_m(rowOut) = b_ia_m;
+                cpInfo.interAntennaPhaseBiasModel_m(rowOut) = b_ia_model_m;
                 % Product-clock drift residual metadata (per row)
                 cpInfo.productEpoch_s(rowOut) = t_prod_carrier(mi);
                 cpInfo.productAge_s(rowOut)   = t_s - t_prod_carrier(mi);

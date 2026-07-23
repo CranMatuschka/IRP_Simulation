@@ -69,6 +69,7 @@ classdef BaselineCarrierAmbiguityResolver
             store.partialFixPolicy              = c.partialFixPolicy;
             store.nBaselineArFloatExternal      = 0;
             store.nBaselineArRejectedArc        = 0;
+            store.nBaselineArRejectedPhaseBias  = 0;
             % Per-baseline metadata (nTowers x nBaselines)
             store.ambiguityStatus   = repmat({'floatExternalReference'}, store.nTowers, store.nBaselines);
             store.N_float_all       = zeros(store.nTowers, store.nBaselines);
@@ -100,10 +101,22 @@ classdef BaselineCarrierAmbiguityResolver
             % Determine if dual-frequency AR is active
             dualEn = c.enabledByFrequency(1) && numel(c.enabledByFrequency) >= 2 && ...
                 c.enabledByFrequency(2) && isfield(store,'accumN_L2');
-            % Phase-bias guard: only allow integer fixing when bias is known zero or compatible
-            phaseBiasOk = strcmp(c.phaseBiasStatus,'syntheticKnownZero') || ...
-                strcmp(c.phaseBiasStatus,'calibratedExternalProduct') || ...
-                strcmp(c.phaseBiasStatus,'notCalibratedExternalProduct');  % allow float, gate later
+            phaseBiasOk = true;
+            if c.requirePhaseBiasCalibrationForFix
+                phaseBiasOk = strcmp(c.phaseBiasStatus,'syntheticKnownZero') || ...
+                    strcmp(c.phaseBiasStatus,'calibratedExternalProduct');
+            end
+            if ~phaseBiasOk
+                total = store.nTowers * store.nBaselines;
+                store.ambiguityStatus(:) = {'rejectedPhaseBias'};
+                store.integerFixAccepted = false;
+                store.integerClassification = 'fallbackExternalRef';
+                store.nIntegerRejected = total;
+                store.nBaselineArFloatExternal = total;
+                store.nBaselineArRejectedPhaseBias = total;
+                store.externalRefUsedForCalibration = true;
+                return
+            end
 
             if dualEn
                 store.attitudeArMode = 'rawDualFrequencyPair';
@@ -156,7 +169,7 @@ classdef BaselineCarrierAmbiguityResolver
                     % Combined ratio for single-freq is ratio1
                     ratioOk1 = ratio1 > c.ratioThreshold;
 
-                    if dualEn && phaseBiasOk
+                    if dualEn
                         % ---- Dual-frequency path ----
                         n2   = store.accumN_L2(ti,bi);
                         S1_2 = store.accumSum_L2(ti,bi);
@@ -392,6 +405,7 @@ classdef BaselineCarrierAmbiguityResolver
             c.maxFloatDistance_cycles    = Inf;
             c.phaseBiasStatus            = 'notCalibratedExternalProduct';
             c.requireAllForGnssOnlyClaim = true;
+            c.requirePhaseBiasCalibrationForFix = false;
             c.partialFixPolicy           = 'mixedFixedFloat';
             c.falseFixClassification     = 'screenedNotFormal';
             % Defaults
@@ -411,6 +425,7 @@ classdef BaselineCarrierAmbiguityResolver
             try; c.maxFloatDistance_cycles    = cfg.estimator.diffAtt.ambiguityResolution.maxFloatDistance_cycles;            catch; end
             try; c.phaseBiasStatus            = cfg.estimator.diffAtt.ambiguityResolution.phaseBiasStatus;                    catch; end
             try; c.requireAllForGnssOnlyClaim = logical(cfg.estimator.diffAtt.ambiguityResolution.requireAllForGnssOnlyClaim); catch; end
+            try; c.requirePhaseBiasCalibrationForFix = logical(cfg.estimator.diffAtt.ambiguityResolution.requirePhaseBiasCalibrationForFix); catch; end
             try; c.partialFixPolicy           = cfg.estimator.diffAtt.ambiguityResolution.partialFixPolicy;                    catch; end
             try; c.falseFixClassification     = cfg.estimator.diffAtt.ambiguityResolution.falseFixClassification;              catch; end
             % Config reads

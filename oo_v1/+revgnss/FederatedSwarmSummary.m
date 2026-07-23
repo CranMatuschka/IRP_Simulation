@@ -123,10 +123,14 @@ classdef FederatedSwarmSummary
             else
                 fprintf('  relative clock   : off (sat-sat TWSTFT gate disabled)\n');
             end
-            fprintf('  NOTE: absolute is per-asset tower-fix (wall-limited, common-mode); shape/relative\n');
-            fprintf('        are ISL/TWSTFT and NOT fused into the absolute (federated design D1).\n');
-            fprintf('        relPos raw/solved are truth-free (same gauge): raw->solved = genuine ISL shape\n');
-            fprintf('        sharpening, rigid frame retained. Rigid-removed shape accuracy = shape err above.\n');
+            fprintf('  NOTE: absolute is per-asset tower-fix (wall-limited, common-mode).\n');
+            if f.shapeGateOn
+                fprintf('        The ISL/TWSTFT relative layer is not fused into the absolute.\n');
+                fprintf('        relPos raw/solved share the same gauge; raw->solved is ISL shape sharpening.\n');
+            else
+                fprintf('        Sat-sat TWSTFT may solve clocks, but two-way ISL shape is disabled.\n');
+                fprintf('        relPos solved is intentionally not reported.\n');
+            end
         end
     end
 

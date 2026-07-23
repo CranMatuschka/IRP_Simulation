@@ -26,6 +26,9 @@ classdef CarrierTrackManager < handle
         nConfirmedSlips_            (1,1) double = 0  % slips confirmed after compensation
         nUnclassifiedJumps_         (1,1) double = 0  % slips declared without model metadata
         nFalseProductBoundaryResets_ (1,1) double = 0 % boundaries that DID trigger slips
+        nCommonModeEvents_          (1,1) double = 0
+        nSuppressedCommonModeResets_ (1,1) double = 0
+        nBaselineDifferencedRows_   (1,1) double = 0
     end
 
     methods
@@ -64,6 +67,10 @@ classdef CarrierTrackManager < handle
             slipInfo.nSlips         = 0;
             slipInfo.slippedKeys    = {};
             slipInfo.jumpMags_m     = [];
+            slipInfo.nCommonModeEvents = 0;
+            slipInfo.nSuppressedCommonModeResets = 0;
+            slipInfo.commonModeJump_m = 0;
+            slipInfo.nBaselineDifferencedRows = 0;
 
             if ~sd.enable || M == 0
                 obj.updateHistory_(cpInfo, sd);
@@ -75,6 +82,30 @@ classdef CarrierTrackManager < handle
                            numel(cpInfo.towerClkModel_m) == M;
             doCompensate = hasModelMeta && sd.productStepCompensation;
 
+            useNewMetrics = sd.commonModeEnable || sd.baselineDifferencedEnable;
+            metricOverride_m = zeros(M,1);
+            useOverride = false(M,1);
+            epochNow = zeros(M,1);
+            expectedJump_m = zeros(M,1);
+            if useNewMetrics
+                [baseMetric_m, epochNow, expectedJump_m] = obj.baseMetrics_(cpInfo, sd, doCompensate);
+                [metricOverride_m, useOverride, commonJump_m, commonEvent, nSuppressed, nBaseRows] = ...
+                    revgnss.CarrierTrackManager.metricOverrides_(baseMetric_m, epochNow, cpInfo, sd);
+                if commonEvent
+                    obj.nCommonModeEvents_ = obj.nCommonModeEvents_ + 1;
+                    slipInfo.nCommonModeEvents = 1;
+                    slipInfo.commonModeJump_m = commonJump_m;
+                end
+                if nSuppressed > 0
+                    obj.nSuppressedCommonModeResets_ = obj.nSuppressedCommonModeResets_ + nSuppressed;
+                    slipInfo.nSuppressedCommonModeResets = nSuppressed;
+                end
+                if nBaseRows > 0
+                    obj.nBaselineDifferencedRows_ = obj.nBaselineDifferencedRows_ + nBaseRows;
+                    slipInfo.nBaselineDifferencedRows = nBaseRows;
+                end
+            end
+
             for mi = 1:M
                 ti  = cpInfo.towerIdx(mi);
                 ai  = cpInfo.antennaIdx(mi);
@@ -85,6 +116,9 @@ classdef CarrierTrackManager < handle
                 ec = 0;
                 if isKey(obj.epochCount, key); ec = obj.epochCount(key); end
                 ec = ec + 1;
+                if useNewMetrics
+                    ec = epochNow(mi);
+                end
 
                 prevRes = 0;
                 if isKey(obj.prevResidual_m, key); prevRes = obj.prevResidual_m(key); end
@@ -93,7 +127,25 @@ classdef CarrierTrackManager < handle
                 % is available; otherwise fall back to legacy raw-jump detection.
                 jumpMag  = 0;
                 isSlip   = false;
-                if doCompensate
+                if useOverride(mi)
+                    slipMetric_ = metricOverride_m(mi);
+                    if ec >= sd.minEpochsBeforeDetect
+                        isSlip = abs(slipMetric_) >= sd.threshold_m;
+                        jumpMag = abs(slipMetric_);
+                    end
+                    if isSlip; obj.nConfirmedSlips_ = obj.nConfirmedSlips_ + 1; end
+                    if doCompensate
+                        if ec >= sd.minEpochsBeforeDetect && abs(expectedJump_m(mi)) > 1e-3
+                            obj.nProductBoundaries_ = obj.nProductBoundaries_ + 1;
+                            if ~isSlip
+                                obj.nCompensatedBoundaries_ = obj.nCompensatedBoundaries_ + 1;
+                            else
+                                obj.nFalseProductBoundaryResets_ = obj.nFalseProductBoundaryResets_ + 1;
+                            end
+                        end
+                        obj.prevTowerClkModel_m_(key) = cpInfo.towerClkModel_m(mi);
+                    end
+                elseif doCompensate
                     currModel = cpInfo.towerClkModel_m(mi);
                     prevModel = 0;
                     if isKey(obj.prevTowerClkModel_m_, key)
@@ -180,6 +232,9 @@ classdef CarrierTrackManager < handle
             obj.nConfirmedSlips_             = 0;
             obj.nUnclassifiedJumps_          = 0;
             obj.nFalseProductBoundaryResets_ = 0;
+            obj.nCommonModeEvents_           = 0;
+            obj.nSuppressedCommonModeResets_ = 0;
+            obj.nBaselineDifferencedRows_    = 0;
         end
 
         function s = getArcStateSummary(obj, dt_s)
@@ -290,6 +345,9 @@ classdef CarrierTrackManager < handle
             ev.nConfirmedSlips            = obj.nConfirmedSlips_;
             ev.nUnclassifiedJumps         = obj.nUnclassifiedJumps_;
             ev.nFalseProductBoundaryResets = obj.nFalseProductBoundaryResets_;
+            ev.nCommonModeEvents          = obj.nCommonModeEvents_;
+            ev.nSuppressedCommonModeResets = obj.nSuppressedCommonModeResets_;
+            ev.nBaselineDifferencedRows   = obj.nBaselineDifferencedRows_;
         end
 
     end
@@ -324,9 +382,90 @@ classdef CarrierTrackManager < handle
             end
         end
 
+        function [metric_m, epochNow, expectedJump_m] = baseMetrics_(obj, cpInfo, sd, doCompensate)
+            M = numel(cpInfo.towerIdx);
+            metric_m = zeros(M,1);
+            epochNow = zeros(M,1);
+            expectedJump_m = zeros(M,1);
+            for mi = 1:M
+                key = sprintf('T%03d_A%03d_S%02d', ...
+                    cpInfo.towerIdx(mi), cpInfo.antennaIdx(mi), cpInfo.signalIdx(mi));
+                ec = 0;
+                if isKey(obj.epochCount, key); ec = obj.epochCount(key); end
+                epochNow(mi) = ec + 1;
+                prevRes = 0;
+                if isKey(obj.prevResidual_m, key); prevRes = obj.prevResidual_m(key); end
+                metric_m(mi) = cpInfo.prefit_m(mi) - prevRes;
+                if doCompensate
+                    prevModel = 0;
+                    if isKey(obj.prevTowerClkModel_m_, key)
+                        prevModel = obj.prevTowerClkModel_m_(key);
+                    end
+                    expectedJump_m(mi) = cpInfo.towerClkModel_m(mi) - prevModel;
+                    metric_m(mi) = metric_m(mi) - expectedJump_m(mi);
+                elseif epochNow(mi) < sd.minEpochsBeforeDetect
+                    metric_m(mi) = 0;
+                end
+            end
+        end
+
     end
 
     methods (Static, Access = private)
+
+        function [metric_m, useOverride, commonJump_m, commonEvent, nSuppressed, nBaseRows] = ...
+                metricOverrides_(baseMetric_m, epochNow, cpInfo, sd)
+            M = numel(baseMetric_m);
+            metric_m = baseMetric_m;
+            useOverride = false(M,1);
+            commonJump_m = 0;
+            commonEvent = false;
+            nSuppressed = 0;
+            nBaseRows = 0;
+            valid = epochNow >= sd.minEpochsBeforeDetect;
+            useCommon = sd.commonModeEnable || sd.baselineDifferencedEnable;
+            if useCommon && sum(valid) >= sd.commonModeMinRows
+                vals = baseMetric_m(valid);
+                vals = vals(isfinite(vals));
+                if ~isempty(vals)
+                    commonJump_m = median(vals);
+                    commonEvent = abs(commonJump_m) >= sd.threshold_m;
+                end
+            end
+            if sd.commonModeEnable && commonEvent
+                metric_m(valid) = baseMetric_m(valid) - commonJump_m;
+                useOverride(valid) = true;
+            end
+            if sd.baselineDifferencedEnable
+                refAnt = sd.referenceAntenna;
+                for mi = 1:M
+                    if ~valid(mi) || cpInfo.antennaIdx(mi) == refAnt
+                        continue
+                    end
+                    refMask = valid & (cpInfo.towerIdx == cpInfo.towerIdx(mi)) & ...
+                        (cpInfo.signalIdx == cpInfo.signalIdx(mi)) & (cpInfo.antennaIdx == refAnt);
+                    if sum(refMask) == 1
+                        ri = find(refMask, 1);
+                        refLooksLocal = abs(baseMetric_m(ri)) >= sd.threshold_m && ~commonEvent;
+                        if ~refLooksLocal
+                            metric_m(mi) = baseMetric_m(mi) - baseMetric_m(ri);
+                            useOverride(mi) = true;
+                            nBaseRows = nBaseRows + 1;
+                        end
+                    elseif commonEvent
+                        metric_m(mi) = baseMetric_m(mi) - commonJump_m;
+                        useOverride(mi) = true;
+                    end
+                end
+                if commonEvent
+                    refRows = valid & cpInfo.antennaIdx == refAnt;
+                    metric_m(refRows) = baseMetric_m(refRows) - commonJump_m;
+                    useOverride(refRows) = true;
+                end
+            end
+            nSuppressed = sum(valid & useOverride & ...
+                abs(baseMetric_m) >= sd.threshold_m & abs(metric_m) < sd.threshold_m);
+        end
 
         function sd = slipCfg_(cfg)
             sd.enable                  = false;
@@ -334,6 +473,10 @@ classdef CarrierTrackManager < handle
             sd.minEpochsBeforeDetect   = 3;
             sd.action                  = 'resetAndSkip';
             sd.productStepCompensation = false; % default: off until explicitly enabled
+            sd.commonModeEnable        = false;
+            sd.commonModeMinRows       = 4;
+            sd.baselineDifferencedEnable = false;
+            sd.referenceAntenna        = 1;
 
             if isfield(cfg,'measurements') && isfield(cfg.measurements,'carrier')
                 cr = cfg.measurements.carrier;
@@ -350,6 +493,16 @@ classdef CarrierTrackManager < handle
                 if isfield(cfg,'carrierSlip') && isfield(cfg.carrierSlip,'productStepCompensation')
                     sd.productStepCompensation = logical(cfg.carrierSlip.productStepCompensation);
                 end
+            catch; end
+            try
+                cm = cfg.carrierSlip.commonModeCompensation;
+                if isfield(cm,'enable');  sd.commonModeEnable = logical(cm.enable); end
+                if isfield(cm,'minRows'); sd.commonModeMinRows = cm.minRows; end
+            catch; end
+            try
+                bm = cfg.carrierSlip.baselineDifferencedMode;
+                if isfield(bm,'enable'); sd.baselineDifferencedEnable = logical(bm.enable); end
+                if isfield(bm,'referenceAntenna'); sd.referenceAntenna = bm.referenceAntenna; end
             catch; end
         end
 

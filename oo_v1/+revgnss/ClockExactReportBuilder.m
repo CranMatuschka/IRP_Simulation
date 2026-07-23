@@ -289,7 +289,7 @@ classdef ClockExactReportBuilder
                                     CE.overlaySigma_(ax, tz, racSig(2,seg)*sc, 3, 'g:');
                                     CE.overlaySigma_(ax, tz, racSig(3,seg)*sc, 3, 'b:');
                                 end
-                                legend(ax,'show','Location','northeastoutside','FontSize',5);
+                                legend(ax,'show','Location','best','FontSize',5);
                             else
                                 [~, unit, sc] = revgnss.PlotUnitScaler.scaleMetric(nrm(seg), 'm');
                                 plot(ax, tz, nrm(seg)*sc, 'b-', 'LineWidth',0.8);
@@ -356,7 +356,7 @@ classdef ClockExactReportBuilder
                     end
                     close(tmpFig);
                     if ~isempty(get(ax,'Children'))
-                        legend(ax,'show','Location','northeast','FontSize',6);
+                        legend(ax,'show','Location','best','FontSize',6);
                         xlabel(ax,'Time [s]','FontSize',7);
                         ylabel(ax,'Error [deg]','FontSize',7);
                         grid(ax,'on');
@@ -588,7 +588,7 @@ classdef ClockExactReportBuilder
                         CE.overlaySigma_(ax, t, racSig(2,:)*sc, 3, 'g:');
                         CE.overlaySigma_(ax, t, racSig(3,:)*sc, 3, 'b:');
                     end
-                    legend(ax, 'show', 'Location', 'northeastoutside', 'FontSize', 5);
+                    legend(ax, 'show', 'Location', 'best', 'FontSize', 5);
                     xlabel(ax, 'Time [s]', 'FontSize', 7);
                     ylabel(ax, revgnss.PlotUnitScaler.axisLabel('Error', unit), 'FontSize', 7);
                     title(ax, 'Position error: RAC frame (dotted = \pm3\sigma)', 'FontSize', 7);
@@ -654,7 +654,7 @@ classdef ClockExactReportBuilder
             end
             ylabel(ax1,'|position error| [m]', 'FontSize',9);
             title(ax1, ['ABSOLUTE per-satellite error (solid) vs filter \pm3\sigma (dashed)' zlab], 'FontSize',10);
-            if nSec > 0; legend(ax1,'Location','northeastoutside','FontSize',8); end
+            if nSec > 0; legend(ax1,'Location','best','FontSize',8); end
             if ~isempty(xl); xlim(ax1,xl); end
 
             % Panel 2: RELATIVE per-satellite baseline error to the chief.
@@ -668,7 +668,7 @@ classdef ClockExactReportBuilder
                 yline(ax2,0,'k:','HandleVisibility','off');
                 ylabel(ax2,'baseline error (est - truth) [m]', 'FontSize',9);
                 title(ax2, ['RELATIVE per-satellite baseline error to chief (shape)' zlab], 'FontSize',10);
-                if nSec > 0; legend(ax2,'Location','northeastoutside','FontSize',8); end
+                if nSec > 0; legend(ax2,'Location','best','FontSize',8); end
                 if ~isempty(xl); xlim(ax2,xl); end
             else
                 revgnss.ClockExactReportBuilder.noDataAxes_(ax2);
@@ -776,7 +776,7 @@ classdef ClockExactReportBuilder
                     hold(ax,'on');
                     if ~isempty(po)
                         plot(ax, t, po, 'r--', 'LineWidth',0.8, 'DisplayName','Post-fit');
-                        legend(ax,'show','Location','northeast','FontSize',6);
+                        legend(ax,'show','Location','best','FontSize',6);
                     end
                     xlabel(ax,'Time [s]','FontSize',7);
                     ylabel(ax,'RMS [m]','FontSize',7);
@@ -835,7 +835,7 @@ classdef ClockExactReportBuilder
                     if ~isempty(pdop)
                         plot(ax,t,pdop,'r--','LineWidth',0.8,'DisplayName','PDOP');
                     end
-                    legend(ax,'show','Location','northeast','FontSize',6);
+                    legend(ax,'show','Location','best','FontSize',6);
                     xlabel(ax,'Time [s]','FontSize',7);
                     ylabel(ax,'DOP [-]','FontSize',7);
                     grid(ax,'on');
@@ -893,7 +893,7 @@ classdef ClockExactReportBuilder
                         end
                     end
                     if ok
-                        legend(ax,'show','Location','northeast','FontSize',6);
+                        legend(ax,'show','Location','best','FontSize',6);
                         xlabel(ax,'Time [s]','FontSize',7);
                         ylabel(ax,'RMS [m]','FontSize',7);
                         grid(ax,'on');
@@ -1015,20 +1015,23 @@ classdef ClockExactReportBuilder
             fprintf(fid, '{\\large Scenario: \\textbf{%s}}\\\\[4pt]\n', esc(scenarioName));
             fprintf(fid, '{\\small Reverse-GNSS EKF simulator \\textemdash{} validation version %s \\\\ Generated %s}\\\\[3pt]\n', ...
                 esc(ver), esc(ts));
-            fprintf(fid, ['{\\footnotesize Controlled synthetic reverse-GNSS scenario. Results are compared against the ' ...
-                'known synthetic truth and are not a real-data or PPP-grade performance claim.}\n']);
+            fprintf(fid, '{\\footnotesize Controlled synthetic reverse-GNSS scenario.}\n');
             fprintf(fid, '\\end{center}\n');
             fprintf(fid, '\\vspace{0.3cm}\n');
 
             % ---- Sections -----------------------------------------------
             revgnss.report.scenarioSummary(fid, cfg, summary, diag, nTwr, nRx, dur, dt, esc, plotPaths, stem, figDir);
-            revgnss.report.stateEstimation(fid, plotPaths, stem, cfg, diag, figDir);
+            % stateEstimation receives `summary` so a federated-swarm run can place the two
+            % swarm plots directly after the RAC final-zoom row (see item-9 change).
+            revgnss.report.stateEstimation(fid, plotPaths, stem, cfg, diag, figDir, summary);
             revgnss.report.measurementValidation(fid, plotPaths, stem, figDir, diag);
             revgnss.report.oscillatorValidation(fid, plotPaths, stem, figDir, cfg);
             revgnss.report.txCodeBias(fid, diag, cfg);
             revgnss.report.tropZwdArchitecture(fid, cfg);
             revgnss.report.numericalSummary(fid, cfg, summary, diag);
-            revgnss.report.activePhysicsConfig(fid, cfg, summary, plotPaths, stem, figDir);
+            % Federated-swarm appendix: emits nothing unless summary.federatedSwarm is set
+            % (swarm runs only) -> single-asset .tex is byte-identical to the golden.
+            revgnss.report.federatedSwarmAppendix(fid, cfg, summary, figDir, esc);
 
             fprintf(fid, '\\end{document}\n');
             fclose(fid);

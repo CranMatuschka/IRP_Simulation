@@ -20,9 +20,40 @@ classdef TwoWayTimeTransferBuilder
     %
     %   The geometric range cancels by reciprocity; recip_i is the small residual
     %   non-reciprocity from spacecraft/tower relative motion during the ~2*rho/c
-    %   round trip (optional, see includeReciprocityResidual). The Jacobian has
-    %   NO position column (range cancelled) -> this is exactly what breaks the
-    %   radial<->clock degeneracy.
+    %   round trip (optional, see includeReciprocityResidual).
+    %
+    % WHY THIS BREAKS THE DEGENERACY -- AND WHICH AXIS IT ACTUALLY FIXES
+    %   A one-way pseudorange row is  H_i = [ u_hat_i' | +1 ] : the position partial
+    %   is the tower->s/c line-of-sight (LOS) unit vector, and the receiver clock
+    %   enters EVERY row with the same +1 -- a common-mode, rank-1 term. A clock
+    %   shift is therefore indistinguishable from the ONE position shift that also
+    %   perturbs every row equally: the component along the *mean* LOS. From GEO the
+    %   whole Earth subtends a cone of half-angle arcsin(R_earth/r_GEO) = 8.7 deg, so
+    %   every tower LOS lies within 8.7 deg of nadir and the mean LOS ~= RADIAL.
+    %   Hence one-way aliases the clock onto the RADIAL axis specifically -- measured
+    %   corr(radial,clock) = -1.000, and STRUCTURAL (it persists into steady state).
+    %   Along-track / cross-track perturb the rows DIFFERENTIALLY (opposite sign
+    %   across the network), so they stay separable from the clock; they are merely
+    %   weakly observed (small parallax), NOT degenerate with it.
+    %
+    %   The two-way row (see build, below) is
+    %       H_i = [ 0_pos | +1 on b_rx | -1 on b_tower if that clock is an EKF state ]
+    %   i.e. it observes the clock DIRECTLY with no position column, so it
+    %   (a) pins the clock to the reciprocity/noise floor and (b) frees the RADIAL
+    %   axis, since the clock can no longer absorb a radial shift. (With
+    %   includeReciprocityResidual the recip term adds only a small VELOCITY column
+    %   -(rho/c)*u_hat; its d/dr partial, ~1e-5 of the unit LOS partial, is dropped
+    %   -- so "no position column" is exact in H and first-order in the physics.)
+    %
+    % SCOPE -- WHAT TWO-WAY DOES NOT FIX (honest limitation; do not over-read it)
+    %   Two-way is a CLOCK observable: it sharpens the clock and the radial axis
+    %   ONLY. Along-track and cross-track are set by horizontal PARALLAX (the spread
+    %   of LOS directions, itself bounded by the same 8.7 deg cone) -- an independent
+    %   weak-observability floor that a zero-position-column measurement cannot
+    %   touch. Empirically, enabling two-way collapses the radial error by ~1-2
+    %   orders and the clock by ~2-4 orders of magnitude, while the along/cross floor
+    %   (a few metres) is unchanged. Curing that needs geometric diversity (non-GEO
+    %   relative motion, or ISL / swarm baselines), NOT a better time-transfer link.
     %
     % TRUTH / ESTIMATION SEPARATION (the boundary this project enforces)
     %   z (truth)  = (b_rx_true - b_tower_true) + recip_true + noise

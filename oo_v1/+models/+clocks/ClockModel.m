@@ -16,7 +16,7 @@ classdef ClockModel < handle
     %   WPM:   sigma_y(tau) ~ tau^(-1)
     %   FPM:   sigma_y(tau) ~ tau^(-1)   (different coefficient)
     %   WFM:   sigma_y(tau) ~ tau^(-1/2)
-    %   FFM:   sigma_y(tau) ~ tau^0      (floor)
+    %   FFM:   sigma_y(tau) ~ tau^0       (floor)
     %   RWFM:  sigma_y(tau) ~ tau^(+1/2)
     %
     % -----------------------------------------------------------------------

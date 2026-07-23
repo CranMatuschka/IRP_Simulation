@@ -1215,6 +1215,16 @@ classdef ConfigFactory
                     end
                 end
                 cfg.estimator.diffAtt.ambiguityResolution.enabledByFrequency = arMask79_;
+
+                enforceBiasStatus = false;
+                try
+                    enforceBiasStatus = logical(cfg.estimator.diffAtt.ambiguityResolution.enforcePhaseBiasStatus);
+                catch
+                end
+                if enforceBiasStatus
+                    cfg.estimator.diffAtt.ambiguityResolution.phaseBiasStatus = ...
+                        revgnss.InterAntennaPhaseBias.resolvedStatus(cfg);
+                end
             end
 
             % ---- Multi-space-asset policy ------------------------------------
