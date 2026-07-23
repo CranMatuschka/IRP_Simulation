@@ -1,0 +1,10 @@
+{
+  "scenario":   { "nTowers": 5, "nSpaceAssets": 6 },
+  "simulation": { "duration_s": 7200 },
+  "realism":    { "grade": true },
+  "report":     { "runVersion": 2 },
+  "multiAsset": {
+    "twoWayTimeTransferISL": { "enable": true },
+    "federated": { "refAsset": 1, "savePerAssetMat": false, "parallel": true }
+  }
+}
