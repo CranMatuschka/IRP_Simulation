@@ -31,6 +31,7 @@ classdef ReverseGNSSSimulation < handle
         isInit      (1,1) logical = false
 
         trackMgr    revgnss.CarrierTrackManager
+        islTrackMgr revgnss.IslCarrierTrackManager   % ISL carrier arcs/slips (separate history)
         orbitTruthCache               = struct('enabled',false,'built',false,'mode','','source','none','t_s',[],'r_ecef_m',[],'v_ecef_mps',[])
         diffAttStore                  = struct()   % Differential attitude calibration state
         attInitDone    (1,1) logical = false
@@ -102,6 +103,7 @@ classdef ReverseGNSSSimulation < handle
             fprintf('  Legacy diagnostics: disabled\n');
             fprintf('  Per-epoch struct log: disabled\n');
             obj.trackMgr = revgnss.CarrierTrackManager();
+            obj.islTrackMgr = revgnss.IslCarrierTrackManager();
             obj.assets   = revgnss.MultiAssetConfig.instantiateAssets(obj.cfg, obj.asset);
             for ai = 2:numel(obj.assets)
                 obj.assets{ai}.clock.precomputeNoise(obj.tVec);
@@ -370,6 +372,20 @@ classdef ReverseGNSSSimulation < handle
                 h = [h; h_isl];
                 H = [H; H_isl];
                 R = blkdiag(R, R_isl);
+            end
+            % ISL carrier cycle-slip detection + ambiguity covariance reset. Runs BEFORE the
+            % EKF update below (mirroring the ground order at :325/:345) so a slipped arc's
+            % stale ambiguity is re-inflated BEFORE the tight carrier R is applied to it --
+            % otherwise the filter would stay confidently wrong on the new arc. Inert when
+            % cfg.measurements.isl.carrier.slipDetection.enable is false (the default).
+            if ~isempty(obj.islTrackMgr)
+                [islSlipInfo, islResetReq] = obj.islTrackMgr.process(islInfo, obj.cfg);
+                islSlipInfo.nCovarianceResets = 0;
+                if ~isempty(islResetReq)
+                    islSlipInfo.nCovarianceResets = obj.ekf.applyIslAmbiguityResets(islResetReq);
+                end
+                islInfo.slipInfo   = islSlipInfo;
+                islInfo.arcEvidence = obj.islTrackMgr.arcEvidence(obj.cfg.simulation.dt_s);
             end
             errStruct.isl = islInfo;
             if isfield(errStruct,'observableStack')

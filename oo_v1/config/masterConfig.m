@@ -1495,6 +1495,21 @@ cfg.measurements.isl.carrier.ambiguity.enable       = false;  % master gate for 
 cfg.measurements.isl.carrier.ambiguity.nSignals     = 1;      % ISL carrier signals per link
 cfg.measurements.isl.carrier.ambiguity.initialSigma_m = 100;  % P0 / slip-reset inflation [m]
 cfg.measurements.isl.carrier.ambiguity.processNoiseSigma_m_per_sqrt_s = 0;  % 0 = constant within an arc
+% ISL carrier cycle-slip detection. INDEPENDENT of the ground carrier slip settings
+% (cfg.measurements.carrier.slipDetection.*): a crosslink arc and a ground tower arc have
+% unrelated slip statistics. A slip starts a NEW arc, so the ambiguity covariance is
+% re-inflated to initialSigma_m -- without that reset the filter keeps a tight sigma on a
+% stale value (confidently wrong). Only 'resetAndUse' is implemented; the row is kept and
+% the inflated covariance absorbs the jump.
+cfg.measurements.isl.carrier.slipDetection.enable                = false;
+cfg.measurements.isl.carrier.slipDetection.threshold_m            = 0.10;
+% Settle epochs after a row becomes EKF-ACTIVE (i.e. after the acquisition warm-up),
+% NOT after it is first built. MEASURED: 3 (the ground default) is too short -- the
+% ambiguity's ~lambda*N acquisition jump is still in progress, so detection fires on it,
+% the reset re-inflates P, and the ambiguity jumps again (a self-sustaining false-slip
+% loop). 3 gave 3 false slips per link in a clean 500 s run; 30 and 60 gave zero.
+cfg.measurements.isl.carrier.slipDetection.minEpochsBeforeDetect  = 30;
+cfg.measurements.isl.carrier.slipDetection.action                 = 'resetAndUse';
 % ISL acquisition warm-up [s]: ISL rows are diagnostic-only until the ground-only
 % fix has converged (initial covariance shrunk), then they enter the EKF. Prevents
 % the tight-ISL-on-huge-initial-covariance transient overshoot.

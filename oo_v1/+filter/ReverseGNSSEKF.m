@@ -1200,6 +1200,63 @@ classdef ReverseGNSSEKF < handle
         end
 
         % ----------------------------------------------------------------
+        function didReset = resetIslAmbiguityCovariance(obj, txIdx, sigIdx, resetSigma_m)
+            % resetIslAmbiguityCovariance  Reset one ISL ambiguity after a cycle slip.
+            %
+            % Mirrors resetAmbiguityCovariance for the ISL family: zero the row/column and
+            % re-inflate the diagonal, leaving the state VALUE alone so the inflated
+            % covariance lets the filter move it. Independent of the ground reset sigma --
+            % it uses cfg.measurements.isl.carrier.ambiguity.initialSigma_m.
+            %
+            % A float ambiguity is constant only WITHIN an arc; after a slip the old
+            % estimate is stale, and keeping its tight sigma would leave the filter
+            % confidently wrong on the new arc.
+            didReset = false;
+            if ~obj.estimateIslAmbiguities; return; end
+            sm = obj.stateMap;
+            if ~isfield(sm,'islAmbiguityIdx') || isempty(sm.islAmbiguityIdx); return; end
+            if nargin < 3 || isempty(sigIdx); sigIdx = 1; end
+            if nargin < 4 || isempty(resetSigma_m)
+                resetSigma_m = 100;
+                try
+                    resetSigma_m = obj.cfg.measurements.isl.carrier.ambiguity.initialSigma_m;
+                catch; end
+            end
+            % Map the transmitter index through the allocation list (rows follow that
+            % order; transmitter indices are 2..N and may be a subset).
+            if ~isfield(sm,'islAmbiguityTxList') || isempty(sm.islAmbiguityTxList); return; end
+            r = find(sm.islAmbiguityTxList == txIdx, 1);
+            if isempty(r) || r > size(sm.islAmbiguityIdx,1); return; end
+            if sigIdx < 1 || sigIdx > size(sm.islAmbiguityIdx,2); return; end
+            idx = sm.islAmbiguityIdx(r, sigIdx);
+            if idx <= 0 || idx > obj.nx; return; end
+
+            obj.P(idx, :)   = 0;
+            obj.P(:, idx)   = 0;
+            obj.P(idx, idx) = resetSigma_m^2;
+            didReset = true;
+        end
+
+        % ----------------------------------------------------------------
+        function nReset = applyIslAmbiguityResets(obj, resetRequests, resetSigma_m)
+            % applyIslAmbiguityResets  Batch ISL ambiguity covariance resets.
+            %
+            % resetRequests: struct array with fields txIdx and signalIdx (as produced by
+            % revgnss.IslCarrierTrackManager.process).
+            nReset = 0;
+            if nargin < 3; resetSigma_m = []; end
+            for ri = 1:numel(resetRequests)
+                si = 1;
+                if isfield(resetRequests(ri),'signalIdx') && ~isempty(resetRequests(ri).signalIdx)
+                    si = resetRequests(ri).signalIdx;
+                end
+                if obj.resetIslAmbiguityCovariance(resetRequests(ri).txIdx, si, resetSigma_m)
+                    nReset = nReset + 1;
+                end
+            end
+        end
+
+        % ----------------------------------------------------------------
         function info = applyAmbiguityPseudoMeasurement(obj, ambIdx, fixedValue_m, sigma_m)
             % applyAmbiguityPseudoMeasurement  Constrain one ambiguity state.
             %

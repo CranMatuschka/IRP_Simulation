@@ -262,6 +262,12 @@ classdef ISLMeasurementBuilder
                         metaColsC, useC, bTxIdxC, ambIdxC);
                     info.carrierPrefit_m(end+1,1)    = zc - hc;
                     info.carrierTruthAmbiguity_m(end+1,1) = Btruth;
+                    % Per-row link identity, pushed in lockstep with carrierPrefit_m so the
+                    % slip tracker can attribute a residual jump to its link/signal.
+                    info.carrierTxIdx(end+1,1)       = txi;
+                    info.carrierSignalIdx(end+1,1)   = 1;
+                    info.carrierAmbIdx(end+1,1)      = ambIdxC;
+                    info.carrierUsedInEkf(end+1,1)   = useC;
                     if useC
                         rowC = zeros(1, nx);
                         rowC(stateMap.r_idx)    = u';
@@ -429,6 +435,10 @@ classdef ISLMeasurementBuilder
             info.carrierAntennaPcvImplemented  = false;
             info.carrierPrefit_m           = zeros(0,1);
             info.carrierTruthAmbiguity_m   = zeros(0,1);
+            info.carrierTxIdx              = zeros(0,1);
+            info.carrierSignalIdx          = zeros(0,1);
+            info.carrierAmbIdx             = zeros(0,1);
+            info.carrierUsedInEkf          = false(0,1);
             info.codeSigma_m = revgnss.ISLMeasurementBuilder.getNum_(cfg, {'measurements','isl','code','sigma_m'}, 0.5);
             info.dopplerSigma_mps = revgnss.ISLMeasurementBuilder.getNum_(cfg, {'measurements','isl','doppler','sigma_mps'}, 0.02);
             info.warmup_s = revgnss.ISLMeasurementBuilder.getNum_(cfg, {'measurements','isl','warmup_s'}, 0);

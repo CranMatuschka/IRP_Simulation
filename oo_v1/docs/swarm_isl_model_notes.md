@@ -53,3 +53,35 @@ convergence AND covariance consistency).
 Note this is a FLOAT ambiguity: it absorbs the per-arc clock/hardware bias and is
 therefore NOT an integer. Integer resolution needs a differenced parametrisation --
 see `docs/plans/ISL_LAMBDA/03_LAMBDA_INTEGER_RESOLUTION.md`.
+
+### ISL arcs and cycle slips (Phase 1d)
+
+`revgnss.IslCarrierTrackManager` is the ISL twin of `revgnss.CarrierTrackManager`. It
+reuses the stateless `revgnss.CycleSlipDetector` but keeps its own history keyed by
+`revgnss.AmbiguityKey` (`ISL_a00T_a00R_S0S`), leaving the frozen ground tracker (keyed
+`T%03d_A%03d_S%02d`) untouched. On a slip the ISL ambiguity covariance is re-inflated via
+`ekf.applyIslAmbiguityResets` -- a float ambiguity is constant only WITHIN an arc, so
+without the reset the filter keeps a tight sigma on a stale value.
+
+Gated by `cfg.measurements.isl.carrier.slipDetection.*`, independent of the ground slip
+settings. Only `action='resetAndUse'` is implemented; anything else is reported in
+`slipInfo.unsupportedAction` rather than silently applied.
+
+**Two measured design constraints (do not "simplify" these):**
+
+1. **Track only EKF-USED rows.** Rows are built from `t=0` but only enter the filter after
+   the acquisition warm-up. Counting history from `t=0` burns the settle window before the
+   ambiguity starts moving, so detection goes live exactly during the `~lambda*N`
+   acquisition jump; each false slip re-inflates `P` and lets it jump again. Measured:
+   **878 false slips** in a clean 900 s / 3-link run.
+2. **Settle default is 30 epochs, not the ground's 3.** With 3 the acquisition transient
+   still outlasts the window (3 false slips in a clean 500 s run); 30 and 60 gave zero.
+
+**The metric was chosen by measurement.** At the converged state the raw carrier prefit
+jumps ~2 mm epoch-to-epoch (max 6.5 mm), while a code-minus-carrier metric jumps ~0.49 m
+(code-noise dominated) and would fire on 92 % of epochs at a 0.10 m threshold. Raw carrier
+prefit is the correct metric here, despite code-minus-carrier being the textbook choice for
+receivers with much noisier geometry.
+
+Guarded by `tests/test_isl_carrier_slip.m` (9 checks; T9 is the end-to-end no-false-slip
+regression: with no injected slips, enabling detection must leave the ambiguity bit-identical).
