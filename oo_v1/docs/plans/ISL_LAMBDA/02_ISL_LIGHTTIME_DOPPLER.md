@@ -1,5 +1,25 @@
 # 02 — ISL Light-Time & Doppler, consistent with the carrier/ambiguity path
 
+> **STATUS: IMPLEMENTED — with one deliberate deviation from this plan.**
+>
+> **Deviation (§5/§6 below are superseded): the `applyToCarrier` gate was NOT added, on
+> purpose.** The builder computes `rhoTruth`/`rhoModel` **once per link**
+> (`ISLMeasurementBuilder.m:168-170`) and code, Doppler and carrier all consume it, so the
+> coupling is already structural. Adding a per-observable gate would be a *bug generator*:
+> it permits code and carrier to see a different `rho` for the **same physical signal
+> path**, which is incoherent. `tests/test_isl_lighttime_carrier.m` T5 now guards against
+> re-introducing such a split, and T2 pins the coupling (code-vs-carrier light-time
+> mismatch measured **exactly 0.0 m**).
+>
+> **§3's Jacobian question is answered by measurement, not estimate.** A 1 m position error
+> moves the light-time term by **3.1e-6 m** — ~640x below the 2 mm carrier floor (T4). So
+> the dropped partial stays dropped for carrier as well as code; the bound is now recorded
+> in `geometry_` and re-checked by the test rather than argued in prose.
+>
+> §2 item 3 (Doppler must carry no ambiguity partial) is covered by
+> `tests/test_isl_carrier_row.m` T6. §4 (two-way ISL Doppler in the EKF) remains
+> **deferred**, as recommended.
+
 **Goal:** the light-time and Doppler *physics already exist* in the ISL builder. This document does
 **not** add new physics — it makes the existing corrections apply **consistently** across the new
 carrier/ambiguity row (document 01), and closes two honesty gaps (a dropped Jacobian term and a

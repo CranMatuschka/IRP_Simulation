@@ -487,6 +487,16 @@ classdef ISLMeasurementBuilder
             % Cross-validated sub-mm vs Orekit's rigorous inter-satellite light-time. Applied to
             % the measurement VALUE only; the ~1e-5 position partial is dropped from H. Default
             % off (nargin < 5) -> byte-identical.
+            %
+            % The dropped partial is justified for the CARRIER row too, not just code.
+            % MEASURED (tests/test_isl_lighttime_carrier.m T4): a 1 m position error moves the
+            % light-time term by only 3.1e-6 m -- ~640x below the 2 mm carrier noise floor, and
+            % ~1e5 x below the 0.3 m code floor. Restore the partial only if that margin closes.
+            %
+            % Every observable on a link (code, Doppler, carrier) consumes the rho computed HERE,
+            % once per link. That coupling is deliberate: they are the same physical signal path,
+            % so a per-observable light-time gate would permit an incoherent geometry. T2/T5 of
+            % that test pin it.
             if nargin >= 5 && ltOn
                 vTxInertial = vTx(:) + cross([0; 0; omega], rTx(:));
                 rho = rho + (u' * vTxInertial) * (rho / c);
