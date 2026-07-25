@@ -1257,6 +1257,60 @@ classdef ReverseGNSSEKF < handle
         end
 
         % ----------------------------------------------------------------
+        function info = applyIslDifferencedAmbiguityFix(obj, D, dNfixed_cycles, lambda_m, sigma_m)
+            % applyIslDifferencedAmbiguityFix  Condition the state on a DIFFERENCED integer fix.
+            %
+            % Route B fixes dN = N_i - N_ref, not the individual ambiguities, so the
+            % constraint is a set of LINEAR combinations rather than one state each:
+            %
+            %   z = lambda * dN_fixed      h = D * x(islAmb)      H(:, islAmb) = D
+            %
+            % Routed through the standard Joseph-form update(), so this IS the conditional
+            % mixed-integer update x_check = x_hat - Q_ba*Qa^-1*(a_hat - a_fix) (Teunissen
+            % 1995) expressed as a tight pseudo-measurement -- the cross-covariance
+            % P(other, islAmb) carries the correction into position and clock automatically,
+            % and covariance positive-definiteness is preserved by the existing machinery.
+            %
+            % INFORMATION DOUBLE-COUNTING WARNING: this constraint is DETERMINISTIC. Applying
+            % it every epoch would inject the same information repeatedly and drive P toward
+            % zero -- a confidently-wrong covariance. The caller MUST apply it once per arc
+            % (see ReverseGNSSSimulation, which holds the fix and re-applies only after a
+            % cycle slip resets the arc).
+            info = struct('applied', false, 'nConstraints', 0, 'NIS', NaN, ...
+                'traceBefore', NaN, 'traceAfter', NaN, 'warning', '');
+            if ~obj.estimateIslAmbiguities; info.warning = 'no ISL ambiguity states'; return; end
+            sm = obj.stateMap;
+            if ~isfield(sm,'islAmbiguityIdx') || isempty(sm.islAmbiguityIdx)
+                info.warning = 'no islAmbiguityIdx'; return
+            end
+            idx = sm.islAmbiguityIdx(:)';
+            idx = idx(idx > 0);
+            if isempty(idx); info.warning = 'empty ISL ambiguity index'; return; end
+            if size(D,2) ~= numel(idx)
+                info.warning = sprintf('D has %d columns, expected %d', size(D,2), numel(idx));
+                return
+            end
+            m = size(D,1);
+            if m < 1 || numel(dNfixed_cycles) ~= m
+                info.warning = 'dNfixed size mismatch'; return
+            end
+            if nargin < 5 || isempty(sigma_m); sigma_m = 1e-3; end
+
+            H = zeros(m, obj.nx);
+            H(:, idx) = D;
+            z = lambda_m * dNfixed_cycles(:);
+            h = D * obj.x(idx);
+            R = (sigma_m^2) * eye(m);
+
+            info.traceBefore = trace(obj.P(idx, idx));
+            [~, ~, ~, nis] = obj.update(z, h, H, R);
+            info.traceAfter  = trace(obj.P(idx, idx));
+            info.applied      = true;
+            info.nConstraints = m;
+            info.NIS          = nis;
+        end
+
+        % ----------------------------------------------------------------
         function info = applyAmbiguityPseudoMeasurement(obj, ambIdx, fixedValue_m, sigma_m)
             % applyAmbiguityPseudoMeasurement  Constrain one ambiguity state.
             %

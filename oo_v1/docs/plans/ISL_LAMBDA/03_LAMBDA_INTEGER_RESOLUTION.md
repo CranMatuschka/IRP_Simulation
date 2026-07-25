@@ -242,3 +242,44 @@ milestone: it proves LAMBDA end-to-end on an *already-integer* case before any n
 - **LAMBDA + TWSTFT are complementary** (range vs time); TWSTFT can *enable* AR by removing the clock.
 - **Do not claim mm absolute GEO position** from single-receiver AR — the geometry forbids it; the
   wins are attitude and relative/shape.
+
+---
+
+## APPENDIX — Measured outcome of Route B feedback (3600 s, added after implementation)
+
+Phase 3-4b closed the loop: accepted differenced integers are injected back into the filter
+as a linear constraint (`ekf.applyIslDifferencedAmbiguityFix`), applied **once per arc**.
+
+**The integer fix works mechanically and does NOT improve absolute position.**
+
+3600 s, 4 assets, 5 towers, `nReceivers=1`, warm-up 300 s, identical seed:
+
+| arm | pos RMS (tail) | clock RMS (tail) | mean NIS | AR |
+|---|---|---|---|---|
+| A: ISL code only | **0.2513 m** | 0.0117 m (39 ps) | 27.7 | — |
+| B: + ISL carrier (float) | 0.3873 m | 0.0029 m (10 ps) | 30.4 | — |
+| D: + Route-B integer fix | 0.3938 m | **0.0027 m (9 ps)** | 30.4 | fixed, SR=0.999 |
+
+Two findings, both negative for the "AR improves position" hypothesis and both consistent
+with what §3 of this plan predicted up front:
+
+1. **Adding the carrier row trades position for clock** (0.25 → 0.39 m position, 39 → 10 ps
+   clock). The ISL carrier row carries `+1` on **both** the receiver-clock and the ambiguity
+   column, so those two are structurally degenerate on those rows; the filter buys clock
+   precision against radial position — the documented GEO radial↔clock wall.
+2. **Fixing the integers changes almost nothing** (0.3873 → 0.3938 m). By the time the fix is
+   accepted the float ambiguity has already converged to ~cm with σ≈2 cm, so removing the
+   residual ambiguity uncertainty removes a term that was never the limiting one. `NIS ≈ 30`
+   in **all three** arms is the tell: the limit is a structural observability/model deficiency
+   that integer AR cannot address.
+
+**This is the empirical confirmation of §3's warning** that LAMBDA sharpens *relative/shape*
+and *attitude*, not single-receiver *absolute* position. Absolute position at GEO is
+wall-limited, and no amount of ambiguity resolution moves a wall.
+
+**What is NOT yet measured:** the relative/shape benefit. The metric above is the *primary
+asset's absolute* position error, which is exactly the quantity AR is not expected to help.
+Demonstrating the expected win requires the swarm relative metrics
+(`SwarmRelativeSolver` baseline-length / best-fit-rigid shape error) with the fixed
+ambiguities feeding the relative layer. That is the honest next step, and until it is run
+**no relative-accuracy claim should be made.**

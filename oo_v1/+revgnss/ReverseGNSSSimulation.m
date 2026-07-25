@@ -32,6 +32,9 @@ classdef ReverseGNSSSimulation < handle
 
         trackMgr    revgnss.CarrierTrackManager
         islTrackMgr revgnss.IslCarrierTrackManager   % ISL carrier arcs/slips (separate history)
+        islArFixHeld       = []      % held Route-B integer fix (dN cycles); [] = none held
+        islArFixSlipCount  = -1      % slip count when the held fix was applied (arc identity)
+        islArLastInfo      = struct()% last Route-B assessment, for reporting
         orbitTruthCache               = struct('enabled',false,'built',false,'mode','','source','none','t_s',[],'r_ecef_m',[],'v_ecef_mps',[])
         diffAttStore                  = struct()   % Differential attitude calibration state
         attInitDone    (1,1) logical = false
@@ -496,6 +499,12 @@ classdef ReverseGNSSSimulation < handle
                 errStruct.codeNisS57 = revgnss.EkfInnovationAccounting.nisForMask_( ...
                     nu57_, S57_, rowClass57_.codeMask | rowClass57_.codeIonoFreeMask);
 
+                % --- Route B: condition the state on the DIFFERENCED integer fix ---------
+                % Runs AFTER the measurement update, so LAMBDA sees the sharpest float
+                % ambiguities available this epoch. Gated on cfg.estimator.lambda.{enable,
+                % isl.enable} + applyFix; default OFF -> byte-identical.
+                errStruct.islAr = obj.applyIslIntegerFix_(islInfo);
+
                 % Guarded raw-carrier integer ambiguity fixing.
                 % cpInfo63_: use embedded float rows when IF post-processing replaced cpInfo.
                 cpInfo63_ = cpInfo;
@@ -638,6 +647,61 @@ classdef ReverseGNSSSimulation < handle
             fprintf('  Mean visible towers    : %.1f\n',                  mean(nVis));
             fprintf('  Mean measurements/epoch: %.1f\n',                  mean(nMeas));
             fprintf('--------------------------\n\n');
+        end
+
+        % ----------------------------------------------------------------
+        function out = applyIslIntegerFix_(obj, islInfo)
+            % applyIslIntegerFix_  Route-B integer AR: assess, then condition the state ONCE
+            % per arc.
+            %
+            % THE HOLD IS NOT AN OPTIMISATION -- IT IS A CORRECTNESS REQUIREMENT. The fixed
+            % integers are a DETERMINISTIC constraint; re-applying them every epoch would
+            % inject the same information over and over and drive P toward zero, producing a
+            % confidently-wrong covariance (the same failure class as the missing warm-up in
+            % Phase 1c). The fix is therefore applied once and HELD, and only re-applied when
+            % a cycle slip starts a new arc (slip count changes).
+            out = struct('enabled', false, 'assessed', false, 'applied', false, ...
+                'held', false, 'classification', 'off', 'successRate', NaN, ...
+                'nConstraints', 0, 'traceBefore', NaN, 'traceAfter', NaN);
+            applyOn = false;
+            try
+                applyOn = logical(obj.cfg.estimator.lambda.enable) && ...
+                          logical(obj.cfg.estimator.lambda.isl.enable) && ...
+                          logical(obj.cfg.estimator.lambda.isl.applyFix);
+            catch; end
+            if ~applyOn; return; end
+            out.enabled = true;
+
+            % Arc identity: any ISL slip invalidates a held fix.
+            nSlipNow = 0;
+            try; nSlipNow = obj.islTrackMgr.arcEvidence(obj.cfg.simulation.dt_s).totalSlipEvents; catch; end
+            if ~isempty(obj.islArFixHeld) && nSlipNow == obj.islArFixSlipCount
+                out.held = true; out.classification = 'held';   % already applied on this arc
+                return
+            end
+
+            s = revgnss.integer.IslDoubleDifference.assess(obj.ekf, obj.cfg, islInfo);
+            obj.islArLastInfo = s;
+            out.assessed       = true;
+            out.classification = s.classification;
+            out.successRate    = s.successRate;
+            if ~s.accepted || isempty(s.fixedDiff_cycles); return; end
+
+            D   = revgnss.integer.IslDoubleDifference.transform(s.nLinks, s.refLinkIndex);
+            sig = 1e-3;
+            try; sig = obj.cfg.estimator.lambda.isl.fixSigma_m; catch; end
+            fi = obj.ekf.applyIslDifferencedAmbiguityFix( ...
+                D, s.fixedDiff_cycles(:), s.wavelength_m, sig);
+
+            out.applied      = fi.applied;
+            out.nConstraints = fi.nConstraints;
+            out.traceBefore  = fi.traceBefore;
+            out.traceAfter   = fi.traceAfter;
+            if fi.applied
+                obj.islArFixHeld      = s.fixedDiff_cycles(:);
+                obj.islArFixSlipCount = nSlipNow;
+                out.classification    = 'applied';
+            end
         end
 
         % ----------------------------------------------------------------

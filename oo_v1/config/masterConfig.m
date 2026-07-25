@@ -268,6 +268,12 @@ cfg.estimator.lambda.ratioThreshold  = 2.0;     % sqnorm(2)/sqnorm(1) discrimina
 % togglable). Both require cfg.estimator.lambda.enable as the master switch.
 cfg.estimator.lambda.ground.enable   = false;   % ground-to-space carrier AR
 cfg.estimator.lambda.isl.enable      = false;   % inter-satellite carrier AR
+% Route B FEEDBACK: when true the accepted DIFFERENCED integers are injected back into the
+% filter as a linear constraint (the conditional mixed-integer update). False = assess and
+% report only. The constraint is DETERMINISTIC, so it is applied ONCE PER ARC and held --
+% re-applying every epoch would double-count the same information and collapse P.
+cfg.estimator.lambda.isl.applyFix    = false;
+cfg.estimator.lambda.isl.fixSigma_m  = 1e-3;    % tightness of the injected constraint [m]
 cfg.estimator.diffAtt.ambiguityResolution.enable                       = true;
 cfg.estimator.diffAtt.ambiguityResolution.method                       = 'constrainedBaselineIntegerSearch';
 cfg.estimator.diffAtt.ambiguityResolution.signal                       = 'L1';
