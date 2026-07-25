@@ -1,0 +1,206 @@
+# 03 — LAMBDA / MLAMBDA Integer Ambiguity Resolution (ISL + Ground) and the TWSTFT relationship
+
+**Goal:** add proper integer ambiguity resolution using the TU Delft LAMBDA 4.0 toolbox, for **both**
+ISL and ground carrier — but only where the ambiguity is *actually integer*. This is the
+scientifically deepest and highest-risk document. Opus owns all of §2–§5 (parametrisation, states,
+covariance); Sonnet implements the wrapper and tests from the frozen spec.
+
+---
+
+## 1. The gate everything passes through: integers only
+
+Restating document 00 §1 because it decides the whole design: the undifferenced float ambiguity
+`B_est` **absorbs the constant clock + hardware phase bias per arc**
+(`CarrierMeasurementBuilder.m:280`), so `B_est = λ·N + bias`, **not** an integer. `IntegerAmbiguityFixer`
+today just rounds `B/λ` (`:126-131`) — which is *Integer Rounding*, the weakest estimator, and on a
+bias-contaminated float it rounds to the **wrong** integer. **LAMBDA is only valid on a parametrisation
+whose truth is integer.** Three such parametrisations exist, in ascending difficulty:
+
+| Route | Cancels | Integer? | Exists in codebase? |
+|---|---|---|---|
+| **A. Between-antenna single-diff** (attitude, short baseline) | b_rx **and** b_twr (same s/c, same tower) | ✅ clean integer ΔN | ✅ `DiffAttitudeBuilder.m`, `BaselineCarrierAmbiguityResolver` |
+| **B. Between-satellite double-diff** (ISL swarm / relative) | both endpoint clocks + common bias | ✅ integer DD | ⚠️ partial (SwarmRelativeSolver forms baselines; no DD ambiguity states) |
+| **C. Undifferenced + calibrated biases** (PPP-AR, absolute) | nothing structurally — needs external FCB/UPD + TWSTFT clock | ✅ *iff* biases supplied | ❌ no phase-bias product |
+
+**Strategy:** prove the LAMBDA engine on **Route A first** (already integer, lowest risk), extend to
+**Route B** for ISL, and treat **Route C** as a feasibility study likely ending in a documented
+negative result for single-receiver absolute position (§7).
+
+---
+
+## 2. LAMBDA toolbox integration (wrapper design)
+
+Reuse the toolbox (document 00 §5); build a thin MATLAB-namespaced wrapper so the rest of the code
+never calls the loose TU Delft functions directly.
+
+```
+revgnss.integer.LambdaResolver
+    % Inputs assembled from the EKF; outputs the fixed vector + acceptance metrics.
+    static [aFix, info] = resolve(aHat_cycles, Qa_cycles, cfg)
+        % 1. checkMainInputs (toolbox) — symmetry/PD of Qa
+        % 2. SR = Ps_LAMBDA(Qa_cycles, 1, 1)         % bootstrapped success rate BEFORE fixing
+        % 3. if SR < cfg.ambiguity.minSuccessRate -> return float (info.decision='reject-lowSR')
+        % 4. [aFix,sqnorm,nFixed,SR,Z,Qz] = LAMBDA(aHat_cycles, Qa_cycles, method, ...)
+        %       method: 3 ILS (default) or 5 PAR when full-set SR is marginal
+        % 5. ratio/FFRT acceptance test (method 7 or explicit sqnorm-ratio) -> accept/reject
+        % info: SR, FR, ratio, nFixed, sqnorm, ADOP, decision, method
+```
+
+Key points:
+- **Inputs are cycles**: `aHat_cycles = a_hat_m ./ λ`; `Qa_cycles = diag(1/λ) · Qa_m · diag(1/λ)`.
+  The metres→cycles covariance transform already exists for L1/L2 in
+  `WideLaneNarrowLaneDiagnostics.m` (`P_N = D·P_pair·D'`) — generalise that `D` to the full block.
+- **Full covariance, not diagonal**: assemble `Qa_m = P(ambIdx, ambIdx)` as the *full* symmetric block
+  from `ekf.P` (today only the diagonal is read at `IntegerAmbiguityFixer.m:127`). This is the single
+  most important new quantity — ILS decorrelation lives or dies on the off-diagonals.
+- **Success-rate gating is free**: `Ps_LAMBDA.m` returns SR/FR; never accept a fix below
+  `minSuccessRate` (start 0.999). This is the honest guard against false fixes that
+  `IntegerAmbiguityFixer` explicitly lacks (`:82` "falseFixRisk:false").
+- **MLAMBDA as oracle**: `mlambda.m` (McGill) can independently reproduce the fix in tests — use it as
+  a cross-check, not the primary engine.
+
+---
+
+## 3. The conditional state update (the part the toolbox does NOT do)
+
+LAMBDA returns integers `ǎ`; the EKF must then **condition the real-valued states** on the fix. Standard
+mixed-integer least squares (Teunissen 1995):
+
+```
+x_check = x_hat − Q_bâ · Qâ⁻¹ · (â − ǎ)
+P_check = P_bb  − Q_bâ · Qâ⁻¹ · Q_âb
+```
+where `b` are the non-ambiguity states (position, clock, attitude…), `â` the float ambiguities,
+`Q_bâ = P(bIdx, ambIdx)` the cross-covariance (already in `ekf.P`), `Qâ = P(ambIdx,ambIdx)`.
+
+Implementation options in this EKF:
+- **3a (recommended, minimal-surgery):** apply the fix as a **pseudo-measurement** per fixed
+  ambiguity — `applyAmbiguityPseudoMeasurement` **already exists** (`ReverseGNSSEKF.m:1117-1133`):
+  `z = ǎ·λ, h = x(ambIdx), H = e_idx, R = fixSigma²`. Looping it over the fixed set reproduces the
+  conditional update through the existing Joseph-form `update()`, preserving covariance PD. This is
+  the lowest-risk path and reuses validated code.
+- **3b (explicit):** compute `x_check/P_check` directly. More faithful to the batch formula but bypasses
+  the Joseph machinery — only if 3a proves numerically insufficient.
+
+**Recommendation: 3a.** It means "LAMBDA chooses the integers; the existing pseudo-measurement machinery
+injects them," which is both honest and low-blast-radius.
+
+---
+
+## 4. Kalman-filter states required — per route (the explicit question asked)
+
+### Ground communication (reverse GNSS: spacecraft = receiver, towers = transmitters)
+
+- **Route A — attitude (between-antenna DD):** *no new EKF states beyond what exists.* The differential
+  ambiguity `ΔB(tower, antenna-baseline, signal)` is already formed and calibrated in
+  `DiffAttitudeBuilder.m` (`:4-11`). LAMBDA **replaces the ad-hoc `BaselineCarrierAmbiguityResolver`
+  search** with a proper ILS over the `ΔB` vector and its covariance. States consumed: the existing
+  per-baseline differential ambiguities (or the raw per-antenna ambiguities differenced on the fly).
+  **This is the cleanest, do-it-first target.**
+- **Route C — absolute position (single receiver):** you **cannot double-difference with one receiver**,
+  so the undifferenced ambiguity stays bias-contaminated. To attempt AR you need **both**:
+  1. **Clock removal** via `TwoWayTimeTransferBuilder.m` (TWSTFT) — estimates/observes `b_rx`, `b_twr`
+     directly, so the ambiguity no longer has to absorb them; and
+  2. an **external carrier phase-bias product** (satellite/receiver FCB or UPD) — *does not exist*;
+     would be a new truth-side model + state or a supplied product with covariance.
+  States: undifferenced ambiguity [exists] + tower-clock states [exist, `:642-651`] + a **phase-bias
+  state or product** [new]. **Honest expectation: even fully built, absolute AR from the 8.7° nadir
+  cone is weak (radial↔clock wall, `TwoWayTimeTransferBuilder.m:20-40`); likely a negative/º
+  marginal result.**
+
+### ISL communication (satellite-to-satellite)
+
+- **Route B — swarm relative/shape (between-satellite DD):** form double differences across the
+  neighbour graph (two satellites × two "references"). The DD ambiguity `∇ΔN` is a true integer. States:
+  the per-link float ISL ambiguities from **document 01** [new, this feature] → differenced into DD →
+  LAMBDA → conditional update sharpens the **relative shape**, complementary to `SwarmRelativeSolver`.
+  Optionally hold DD ambiguities as states, or difference on the fly (recommended: on-the-fly, keep the
+  undifferenced ISL states from doc 01 as the estimated quantity, apply the DD transform only at the
+  LAMBDA boundary — mirrors how WL/NL is a transform, not a new state).
+- **Two-way ISL:** the two-way **sum** = range (needs AR → LAMBDA), the **difference** = clock (TWSTFT).
+  A two-way carrier crosslink gives both from one exchange (§6).
+
+**Summary table — new states this feature actually adds:**
+
+| Purpose | New EKF state? | Source |
+|---|---|---|
+| ISL float carrier ambiguity (per link × signal) | ✅ yes | document 01 |
+| DD transform for ISL AR | ✖ no (on-the-fly transform) | this doc §4 |
+| Ground attitude DD AR | ✖ no (uses existing ΔB) | Route A |
+| Ground absolute PPP-AR phase bias | ✅ yes (or external product) | Route C, deferred |
+| Tower / secondary clocks (for TWSTFT calibration) | ✖ exist | `:642-651`, estimateMode='clocks' |
+
+---
+
+## 5. TWSTFT × LAMBDA — used together, not instead (the explicit question asked)
+
+**They are duals and TWSTFT is often the enabler.** (Full argument: document 00 §4.)
+
+- TWSTFT / two-way time transfer → **clock difference** (`TwoWayTimeTransferBuilder.m:20-33`), product =
+  **time**.
+- LAMBDA → **integer ambiguity** → product = **mm range** → geometry/shape/attitude.
+- The undifferenced ambiguity is non-integer *because* it absorbs the clock (§1). **TWSTFT removes that
+  clock**, which is precisely the contaminant between the float and an integer. So the precise stack is
+  **TWSTFT (clock) → ambiguity becomes integer → LAMBDA (range)**, and a **two-way carrier** link yields
+  both simultaneously (sum=range needs LAMBDA, difference=clock is TWSTFT).
+- **Never present them as alternatives.** If a design says "use LAMBDA instead of TWSTFT" it has
+  confused a range technique with a time technique.
+
+---
+
+## 6. Two-way carrier ISL (the cleanest precise design — optional stretch)
+
+For a two-way carrier crosslink between satellites i,k:
+```
+sum  Φ_ik + Φ_ki  →  2·ρ + λ(N_ik + N_ki) + ...     (range; integer combo → LAMBDA)
+diff Φ_ik − Φ_ki  →  2·(b_i − b_k) + λ(N_ik − N_ki)  (clock; TWSTFT-like)
+```
+This is the textbook way to get mm range **and** ps time from the same hardware. It requires the
+two-way ISL transceiver premise (already the gating premise of
+`cfg.multiAsset.twoWayTimeTransferISL`, `masterConfig.m:996`). Recommend as a Phase-5 stretch once
+Routes A/B validate the LAMBDA engine.
+
+---
+
+## 7. Phases
+
+| Phase | Scope | Route | Files | Model | Risk |
+|---|---|---|---|---|---|
+| 3-0 | Confirm LAMBDA licence; vendor `third_party/LAMBDA/` + `PROVENANCE.md`, behind toggle | — | new dir | Opus | Low (blocker) |
+| 3-1 | `LambdaResolver` wrapper: metres→cycles, full-`Qa` assembly, `Ps_LAMBDA` SR gate, ILS/PAR, ratio test | — | new `+revgnss/+integer/` | Opus spec / Sonnet impl | Med |
+| 3-2 | Conditional update via existing `applyAmbiguityPseudoMeasurement` loop | — | `ReverseGNSSEKF.m` (reuse) | Sonnet | Med |
+| 3-3 | **Apply to Route A (attitude DD)** — replace `BaselineCarrierAmbiguityResolver` search with LAMBDA | A | `DiffAttitudeBuilder.m` | Opus + Sonnet | Med |
+| 3-4 | **Route B (ISL DD)** — DD transform of doc-01 ISL ambiguities → LAMBDA → shape update | B | new + `SwarmRelativeSolver.m` interface | Opus | High |
+| 3-5 | **Route C study** — TWSTFT-calibrated ground; PPP-AR feasibility (may be negative result) | C | study + report | Opus | High / research |
+| 3-6 *(stretch)* | Two-way carrier ISL sum/diff (range+clock) | B+time | new builder | Opus | High |
+
+Every phase gated **default-off**; golden fingerprint byte-identical when off. Phase 3-3 is the
+milestone: it proves LAMBDA end-to-end on an *already-integer* case before any new parametrisation.
+
+---
+
+## 8. Validation (scientific acceptance)
+
+- **LAMBDA engine unit tests** vs the toolbox's own `LAMBDA_examples/RUN_example_{1,2,3}.m` — reproduce
+  their `a_fix`/`SR` exactly (proves the vendored code + our wrapper are faithful).
+- **MLAMBDA cross-check**: `mlambda.m` and `LAMBDA.m` return the same integer vector on random PD `Qa`.
+- **Route A truth test**: inject a known integer `ΔN`; with adequate arc length the resolver recovers
+  it; success rate from `Ps_LAMBDA` agrees with the empirical fix rate over many seeds.
+- **False-fix guard**: on a deliberately bias-contaminated (undifferenced) vector, the SR gate must
+  **reject** (proves we don't fix what isn't integer — the §1 discipline).
+- **End-to-end**: Route A attitude error and Route B relative-shape error drop to the mm/fixed floor
+  vs the float baseline; report the improvement and the achieved success rate.
+- **Golden inertness**: all toggles off ⇒ `nx=65`, `traceP=50503.7896526557` byte-identical.
+
+---
+
+## 9. Honest bottom line
+
+- **Reuse LAMBDA 4.0** (canonical, validated) behind a wrapper; don't rewrite the ILS.
+- **The engine is the easy part; the parametrisation is the science.** Only fix integers on
+  differenced (Route A/B) or bias-calibrated (Route C) vectors; gate every fix on success rate.
+- **Biggest sure win:** Route A (attitude) — already integer, immediate. Then Route B (ISL relative
+  shape).
+- **LAMBDA + TWSTFT are complementary** (range vs time); TWSTFT can *enable* AR by removing the clock.
+- **Do not claim mm absolute GEO position** from single-receiver AR — the geometry forbids it; the
+  wins are attitude and relative/shape.
