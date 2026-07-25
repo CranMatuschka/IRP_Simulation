@@ -1,5 +1,43 @@
 # 03 — LAMBDA / MLAMBDA Integer Ambiguity Resolution (ISL + Ground) and the TWSTFT relationship
 
+> **STATUS: 3-1 and 3-3 IMPLEMENTED. Route A's value is NOT what this plan assumed — read this first.**
+>
+> **3-1 — `revgnss.integer.LambdaResolver` (done).** Wraps LAMBDA 4.0 as an EXTERNAL,
+> non-vendored dependency (no licence grant exists; see `docs/LAMBDA_SETUP.md`). Adds the
+> metres→cycles transform on the FULL covariance, a bootstrapped success-rate gate, a ratio
+> test, and an explicit integer-parametrisation assertion. Validated: fixed `[3 −7 12 5]` at
+> SR=1.000/ratio=35.5, rejected a hopeless problem at SR=0.217, and **MLAMBDA (independent
+> McGill implementation) returned the identical vector**.
+>
+> **3-3 — Route A (attitude baselines), and the correction to this plan.**
+> §4 claimed LAMBDA "**replaces** the ad-hoc `BaselineCarrierAmbiguityResolver` search with a
+> proper ILS" and §3's ladder implied a decimetre→millimetre win. **That overstates it.**
+>
+> `BaselineCarrierAmbiguityResolver` resolves each `(tower, baseline)` **independently**, so
+> its float ambiguities have a **diagonal** `Qa`. For a diagonal `Qa`, integer least squares
+> provably degenerates to bootstrapping and to plain **rounding** — the Z-transformation has
+> nothing to decorrelate (Teunissen 1998b; Verhagen 2005). **LAMBDA therefore cannot return
+> different integers on Route A, and it does not.** Measured: LAMBDA and the existing fix
+> agree exactly on all 6 baselines (`tests/test_baseline_ambiguity_lambda.m` T2 pins this;
+> a disagreement would mean one of them is *wrong*, so it is asserted, not hoped for).
+>
+> **What Route A genuinely gains** is the thing the existing resolver openly lacks — it
+> reports `falseFixClassification = 'screenedNotFormal'`, i.e. heuristic gates with **no
+> formal false-fix probability**. `Ps_LAMBDA` now supplies a rigorous bootstrapped success
+> rate and failure rate: SR=1.000000/FR=0 for a tight set, and SR=0.034 → **rejected** for a
+> 0.64-cycle-scatter set. That is an upgrade from screening to quantified risk — real, but it
+> is a *statement about confidence*, not a better attitude solution.
+>
+> **To realise ILS's actual advantage** you need a **joint** float solution with genuine
+> cross-baseline covariance (all baselines estimated together, sharing the attitude states).
+> That is a larger change to `DiffAttitudeBuilder` and was deliberately NOT attempted; §4's
+> "no new EKF states beyond what exists" is true but insufficient — the missing ingredient is
+> covariance *structure*, not states.
+>
+> `BaselineAmbiguityLambda` is **reporting-only**: it annotates, it does not modify
+> `store.delta_B` / `store.N_int`. Making LAMBDA authoritative only makes sense once the
+> joint covariance above exists.
+
 **Goal:** add proper integer ambiguity resolution using the TU Delft LAMBDA 4.0 toolbox, for **both**
 ISL and ground carrier — but only where the ambiguity is *actually integer*. This is the
 scientifically deepest and highest-risk document. Opus owns all of §2–§5 (parametrisation, states,
