@@ -190,7 +190,7 @@ The registry + key design must satisfy:
 
 ## 9. Tests
 
-- **Golden inertness:** `run_swarm_fingerprint.m` byte-identical with all new gates off; `nx=65`
+- **Golden inertness:** `run_oo_v1_regression('smoke')` byte-identical with all new gates off; the frozen core-metric set
   unchanged. Registry allocates the identical ground order/count (assert index-by-index).
 - **Registry laws:** `register()` idempotent per key; ISL keys always append; `idxOf` round-trips.
 - **ISL row correctness:** injecting known integer `N` shifts the ISL carrier prefit by exactly `λN`;

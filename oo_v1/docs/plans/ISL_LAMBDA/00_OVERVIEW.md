@@ -119,7 +119,24 @@ they are duals (range vs clock), and TWSTFT/clock-calibration is often a precond
 
 ## 5. TU Delft LAMBDA 4.0 toolbox — reuse or rewrite?
 
-**Recommendation: reuse it (vendored, wrapped), do not rewrite.**
+**Recommendation: reuse it as an EXTERNAL (non-vendored) dependency, wrapped. Do not rewrite, and do
+NOT copy it into this repo.**
+
+> **LICENCE VERDICT (checked 2026-07-25, Phase 0 — this overrides the earlier "vendor it" wording):**
+> the toolbox ships **no licence file and no licence grant of any kind**. Every `.m` file carries only
+> `Copyright: Geoscience & Remote Sensing department @ TUDelft` plus a contact address. Absent an
+> explicit grant, the legal default is all-rights-reserved, so committing the source into this
+> **public** GitHub repo would be unlicensed redistribution.
+>
+> **Resolution:** treat LAMBDA exactly like the existing **Orekit bridge** — a user-installed
+> dependency living OUTSIDE the repo, located via a config path, with the wrapper degrading
+> gracefully (and saying so) when it is absent. Zero legal exposure, identical science, and it
+> matches a precedent already established in this project. Optionally email
+> `LAMBDAtoolbox-CITG-GRS@tudelft.nl` for an explicit grant if bundling is ever wanted.
+>
+> Portability note: the shipped examples use a Windows separator (`addpath('..','..\LAMBDA_toolbox')`,
+> `LAMBDA_examples/RUN_example_1.m:27`), which fails on macOS/Linux. The wrapper must build paths with
+> `fullfile()`.
 
 The attached `LAMBD4-master_2024_10_01/` is the **canonical, peer-reviewed** implementation
 (Massarweh, Verhagen & Teunissen 2024; the Teunissen 1993/1995 and de Jonge–Tiberius 1996 papers are
@@ -166,7 +183,7 @@ Model switching is a **manual user action** — the assistant cannot change its 
 2. `/model claude-sonnet-5` — **[Sonnet]** implement strictly to the spec; run the phase's unit test;
    stop at the golden fingerprint.
 3. `/model claude-opus-4-8` — **[Opus]** review the diff against the spec, run/interpret the golden
-   regression (`tests/regression/run_swarm_fingerprint.m`) and scientific validation, decide
+   regression (`tests/regression/run_oo_v1_regression.m`) and scientific validation, decide
    merge/iterate.
 
 Rule of thumb: **if the edit can change `nx`, covariance structure, or the truth/estimate boundary,
@@ -178,7 +195,8 @@ state-vector change.
 ## 7. Recommended phase order & dependencies
 
 ```
-Phase 0  [Opus]   Confirm LAMBDA licence; vendor to third_party/LAMBDA/ behind a toggle
+Phase 0  [Opus]   LAMBDA licence checked -> NO grant -> do NOT vendor; wire as an external
+                  user-installed dependency (Orekit-bridge pattern) behind a config path
 Phase 1  [01]     Generalised ambiguity-state layer (link dimension); ISL float carrier row
 Phase 2  [02]     ISL light-time + Doppler consistency with the new carrier path
 Phase 3  [03-A]   LAMBDA wrapper + Qa assembly; apply to the INTEGER-READY case first
@@ -189,7 +207,7 @@ Phase 5  [03-C]   TWSTFT-calibrated ground path; PPP-AR feasibility study (may e
 ```
 
 Each phase is independently gated **default-off** and must leave the frozen golden fingerprint
-(`nx=65`, `traceP=50503.7896526557`) byte-identical when its toggle is off. Phase 3 deliberately
+(184 core metrics @ rtol 1e-9 (smoke tier)) byte-identical when its toggle is off. Phase 3 deliberately
 starts on the one case that is *already* integer, so the LAMBDA engine is proven before we invest in
 new differenced parametrisations.
 

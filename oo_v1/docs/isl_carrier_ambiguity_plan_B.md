@@ -193,13 +193,13 @@ And the guard at `ISLMeasurementBuilder.m:73-76` changes from *"always throw"* t
 ## 7. Golden-safety strategy (non-negotiable)
 
 This repo freezes the state vector against a byte-identical golden fingerprint
-(`tests/regression/run_swarm_fingerprint.m`: `nx=65`, `traceP=50503.7896526557`). **Touching `nx`
+(`tests/regression/run_oo_v1_regression.m`, 'smoke' tier: 184 core metrics @ rtol 1e-9). **Touching `nx`
 is the single most dangerous thing in the codebase.**
 
 The safety contract:
 
 1. **`estimateIslAmbiguities` defaults false** → `nIslAmbiguities=0` → `nx` unchanged → every
-   golden byte-identical. Prove it by running `run_swarm_fingerprint.m` after the change.
+   golden byte-identical. Prove it by running `run_oo_v1_regression('smoke')` after the change.
 2. The new state block is appended **after** all existing states (highest `nextIdx`) so no existing
    index shifts even when the block *is* enabled.
 3. `nSpaceAssets=1` → `nIslLinks=0` → block empty regardless of the gate (single-asset goldens safe).
@@ -230,7 +230,7 @@ independent. B5 is polish.
 
 ## 9. Tests
 
-- **Golden-inertness (gate):** `run_swarm_fingerprint.m` byte-identical with defaults;
+- **Golden-inertness (gate):** `run_oo_v1_regression('smoke')` byte-identical with defaults;
   `nx` unchanged when `estimateIslAmbiguities=false`.
 - **State allocation:** enabling the gate with `nSpaceAssets=6` adds exactly `nLinks·nSig` states,
   appended last; `sm.islAmbiguityIdx` maps correctly.

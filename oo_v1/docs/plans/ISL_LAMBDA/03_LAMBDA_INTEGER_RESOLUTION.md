@@ -190,7 +190,7 @@ milestone: it proves LAMBDA end-to-end on an *already-integer* case before any n
   **reject** (proves we don't fix what isn't integer — the §1 discipline).
 - **End-to-end**: Route A attitude error and Route B relative-shape error drop to the mm/fixed floor
   vs the float baseline; report the improvement and the achieved success rate.
-- **Golden inertness**: all toggles off ⇒ `nx=65`, `traceP=50503.7896526557` byte-identical.
+- **Golden inertness**: all toggles off ⇒ 184 core metrics @ rtol 1e-9 (smoke tier) byte-identical.
 
 ---
 
