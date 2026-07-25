@@ -1486,6 +1486,11 @@ cfg.measurements.isl.carrier.sigma_m = 0.002;
 % the ground convention, so the carrier Jacobian column is +1 rather than lambda. The
 % undifferenced B is NOT an integer (it absorbs the clock bias per arc) -- integer
 % resolution needs a differenced parametrisation; see docs/plans/ISL_LAMBDA/03.
+% ISL carrier frequency [Hz]. NaN -> fall back to L1 (1575.42 MHz) so the conventional
+% behaviour is unchanged. Set explicitly for a real crosslink band (e.g. 26e9 for Ka).
+% Only affects the carrier WAVELENGTH (hence the truth ambiguity lambda*N); the geometric
+% range is frequency-independent, as vacuum propagation requires.
+cfg.measurements.isl.carrier.frequency_Hz           = NaN;
 cfg.measurements.isl.carrier.ambiguity.enable       = false;  % master gate for ISL ambiguity STATES
 cfg.measurements.isl.carrier.ambiguity.nSignals     = 1;      % ISL carrier signals per link
 cfg.measurements.isl.carrier.ambiguity.initialSigma_m = 100;  % P0 / slip-reset inflation [m]

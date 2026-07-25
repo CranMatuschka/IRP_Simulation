@@ -70,9 +70,45 @@ classdef ISLMeasurementBuilder
                     ~revgnss.ISLMeasurementBuilder.getBool_(cfg, {'measurements','isl','doppler','enable'}, false)
                 error('ISLMeasurementBuilder:dopplerUseGuard', 'ISL Doppler useInEKF requires ISL Doppler enable=true.');
             end
+            % ISL carrier may enter the EKF ONLY when it has an ambiguity state to hold the
+            % integer cycle count. Without one the filter would drive the unknown integer
+            % into position/clock and silently corrupt the solution -- which is why this
+            % used to be an unconditional error. The guard now checks the actual
+            % precondition instead of refusing outright.
             if revgnss.ISLMeasurementBuilder.getBool_(cfg, {'measurements','isl','carrier','useInEKF'}, false)
-                error('ISLMeasurementBuilder:carrierEkfUnsupported', ...
-                    'ISL carrier EKF use requires ISL ambiguity states; carrier is diagnostic-only here.');
+                if ~revgnss.ISLMeasurementBuilder.getBool_(cfg, {'measurements','isl','carrier','enable'}, false)
+                    error('ISLMeasurementBuilder:carrierUseGuard', ...
+                        'ISL carrier useInEKF requires ISL carrier enable=true.');
+                end
+                if ~revgnss.ISLMeasurementBuilder.islAmbiguityEnabled(cfg)
+                    error('ISLMeasurementBuilder:carrierEkfNeedsAmbiguity', ...
+                        ['ISL carrier EKF use requires ISL ambiguity states. Set ' ...
+                         'cfg.measurements.isl.carrier.ambiguity.enable=true (the float ' ...
+                         'ambiguity absorbs the integer cycle count; without it the ' ...
+                         'integer would be aliased into position/clock).']);
+                end
+                if revgnss.ISLMeasurementBuilder.ambiguityStateCount(cfg) < 1
+                    error('ISLMeasurementBuilder:carrierEkfNoLinks', ...
+                        'ISL carrier EKF use requires at least one active ISL link.');
+                end
+                % MEASURED failure mode (do not relax this): admitting mm-sigma carrier
+                % rows before the code-only solution has converged makes the filter
+                % CONFIDENTLY WRONG. With warmup_s=0 the ambiguity settles 100s of metres
+                % from truth while reporting sigma(B) ~ 12 mm -- the tight R collapses the
+                % covariance around a point reached by an invalid linearisation (position
+                % error is still kilometres at t=0). With the 300 s default the same setup
+                % converges to 1-4 cm with sigma ~ 29 mm, i.e. error ~ sigma (consistent).
+                % The symptom is silent: no NaN, no divergence warning, just a tiny sigma
+                % on a wrong value -- hence a hard error rather than a warning.
+                wu = revgnss.ISLMeasurementBuilder.getNum_(cfg, {'measurements','isl','warmup_s'}, 0);
+                if ~(wu > 0)
+                    error('ISLMeasurementBuilder:carrierEkfNeedsWarmup', ...
+                        ['ISL carrier useInEKF requires cfg.measurements.isl.warmup_s > 0 ' ...
+                         '(default 300). Admitting mm-sigma carrier rows at t=0, while the ' ...
+                         'position error is still kilometres, drives the ambiguity 100s of ' ...
+                         'metres off AND collapses its covariance to ~12 mm -- a silent, ' ...
+                         'confidently-wrong solution.']);
+                end
             end
         end
 
@@ -89,6 +125,7 @@ classdef ISLMeasurementBuilder
             info.warmupActive = t_s < info.warmup_s;
             if info.warmupActive
                 info.codeUseInEKF = false; info.dopplerUseInEKF = false;
+                info.carrierUseInEKF = false;   % carrier follows the same acquisition gate
             end
             epochIdx = 0;
             if isfield(cfg,'simulation') && isfield(cfg.simulation,'dt_s') && cfg.simulation.dt_s > 0
@@ -189,7 +226,52 @@ classdef ISLMeasurementBuilder
                     end
                 end
                 if info.carrierEnabled
-                    info = revgnss.ISLMeasurementBuilder.addMeta_(info, 'islCarrierDiagnostic', txi, [], false);
+                    % ISL carrier phase. The ambiguity is stored in METRES
+                    % (B = lambda*N + absorbed bias), matching the ground convention at
+                    % CarrierMeasurementBuilder.m:333-335, so dh/dB = +1 (NOT lambda).
+                    %
+                    %   z = rho_truth + b_rx_truth - b_tx_truth + lambda*N_true + eps
+                    %   h = rho_model + x(b_rx) - {x(b_tx) | product} + x(B)
+                    %
+                    % NOT-IMPLEMENTED (declared, not silently ignored): phase wind-up and
+                    % antenna PCO/PCV are absent. A constant part of either is absorbed by
+                    % the float ambiguity; only a DRIFT would leave a real residual.
+                    ambIdxC = revgnss.ISLMeasurementBuilder.islAmbStateIdx_(stateMap, txi, 1);
+                    Btruth  = revgnss.ISLMeasurementBuilder.truthAmbiguity_(cfg, info, txi, 1);
+                    nzc = revgnss.ISLMeasurementBuilder.drawNoise_(cfg, txi, epochIdx, 3, info.carrierSigma_m, 1);
+                    zc  = rhoTruth + brxTruth - btxTruth + Btruth + nzc;
+                    bTxIdxC  = revgnss.ISLMeasurementBuilder.secondaryClockStateIdx_(stateMap, txi, 1);
+                    sigPos2c = info.product.sigmaPos_m^2;
+                    if ~isempty(orbPosIdx); sigPos2c = 0; end
+                    if bTxIdxC > 0
+                        hc  = rhoModel + x(stateMap.b_rx_idx) - x(bTxIdxC);
+                        Rc  = info.carrierSigma_m^2 + sigPos2c;
+                    else
+                        hc  = rhoModel + x(stateMap.b_rx_idx) - btxProd;
+                        Rc  = info.carrierSigma_m^2 + sigPos2c + info.product.sigmaClock_m^2;
+                    end
+                    if ambIdxC > 0; hc = hc + x(ambIdxC); end
+                    useC = info.carrierUseInEKF && ambIdxC > 0;
+                    metaColsC = [stateMap.r_idx(:)' stateMap.b_rx_idx];
+                    if bTxIdxC > 0; metaColsC(end+1) = bTxIdxC; end
+                    if ~isempty(orbPosIdx); metaColsC = [metaColsC orbPosIdx(:)']; end
+                    if ambIdxC > 0; metaColsC(end+1) = ambIdxC; end
+                    obsTypeC = 'islCarrierDiagnostic';
+                    if useC; obsTypeC = 'islCarrier'; end
+                    info = revgnss.ISLMeasurementBuilder.addMeta_(info, obsTypeC, txi, ...
+                        metaColsC, useC, bTxIdxC, ambIdxC);
+                    info.carrierPrefit_m(end+1,1)    = zc - hc;
+                    info.carrierTruthAmbiguity_m(end+1,1) = Btruth;
+                    if useC
+                        rowC = zeros(1, nx);
+                        rowC(stateMap.r_idx)    = u';
+                        rowC(stateMap.b_rx_idx) = 1;
+                        if bTxIdxC > 0; rowC(bTxIdxC) = -1; end
+                        if ~isempty(orbPosIdx); rowC(orbPosIdx) = -u'; end
+                        rowC(ambIdxC) = 1;      % dh/dB = +1 (ambiguity in metres)
+                        [zAdd, hAdd, HAdd, RAdd] = revgnss.ISLMeasurementBuilder.append_( ...
+                            zAdd, hAdd, HAdd, RAdd, zc, hc, rowC, Rc);
+                    end
                 end
                 info.linkEvents = revgnss.ISLTimingModel.buildOneWayEvents( ...
                     cfg, primaryAsset, tx, txi, info.receiverAssetIndex, ...
@@ -260,6 +342,7 @@ classdef ISLMeasurementBuilder
             intervalIdx = 0;
             if isfield(info,'productIntervalIdx'); intervalIdx = info.productIntervalIdx; end
             hasSec = isfield(info,'ekfRowSecIdx') && numel(info.ekfRowSecIdx) == numel(info.ekfRowTypes);
+            hasAmb = isfield(info,'ekfRowAmbIdx') && numel(info.ekfRowAmbIdx) == numel(info.ekfRowTypes);
             for k = 1:numel(info.ekfRowTypes)
                 txi = info.ekfRowTx(k);
                 tx  = assets{txi};
@@ -281,6 +364,16 @@ classdef ISLMeasurementBuilder
                         else
                             h(end+1,1) = rrModel + x(stateMap.bdot_rx_idx) - (tx.clock.getDriftMetersPerSecond() + pb.clkDrift); %#ok<AGROW>
                         end
+                    case 'islCarrier'
+                        % Same structure as islCode PLUS the float ambiguity (metres).
+                        ambIdx = 0; if hasAmb; ambIdx = info.ekfRowAmbIdx(k); end
+                        if secIdx > 0
+                            hk = rhoModel + x(stateMap.b_rx_idx) - x(secIdx);
+                        else
+                            hk = rhoModel + x(stateMap.b_rx_idx) - (tx.clock.getBiasMeters() + pb.clk);
+                        end
+                        if ambIdx > 0; hk = hk + x(ambIdx); end
+                        h(end+1,1) = hk; %#ok<AGROW>
                 end
             end
         end
@@ -310,7 +403,32 @@ classdef ISLMeasurementBuilder
             info.dopplerEnabled = revgnss.ISLMeasurementBuilder.getBool_(cfg, {'measurements','isl','doppler','enable'}, false);
             info.dopplerUseInEKF = revgnss.ISLMeasurementBuilder.getBool_(cfg, {'measurements','isl','doppler','useInEKF'}, false);
             info.carrierEnabled = revgnss.ISLMeasurementBuilder.getBool_(cfg, {'measurements','isl','carrier','enable'}, false);
-            info.carrierUseInEKF = false;
+            % Carrier may enter the EKF only when an ISL ambiguity state exists to hold the
+            % integer (validateConfig enforces this as a hard error; here it is also an
+            % AND-gate so a mis-set config degrades to diagnostic-only rather than aliasing
+            % the integer into position/clock).
+            info.carrierUseInEKF = revgnss.ISLMeasurementBuilder.getBool_(cfg, {'measurements','isl','carrier','useInEKF'}, false) ...
+                && info.carrierEnabled ...
+                && revgnss.ISLMeasurementBuilder.islAmbiguityEnabled(cfg);
+            info.carrierSigma_m = revgnss.ISLMeasurementBuilder.getNum_(cfg, {'measurements','isl','carrier','sigma_m'}, 0.002);
+            % ISL carrier frequency -> wavelength. Defaults to L1 so the conventional
+            % behaviour is unchanged; an explicit crosslink band (e.g. Ka) can be set
+            % without touching SignalDefinition. This is also the hook a future
+            % frequency-dependent link-budget sigma would use.
+            fIsl = revgnss.ISLMeasurementBuilder.getNum_(cfg, {'measurements','isl','carrier','frequency_Hz'}, NaN);
+            if ~isfinite(fIsl) || fIsl <= 0
+                fIsl = revgnss.SignalDefinition.get('L1').frequency_Hz;
+            end
+            info.carrierFrequency_Hz = fIsl;
+            info.carrierWavelength_m = revgnss.Constants.SPEED_OF_LIGHT_MPS / fIsl;
+            info.ambiguityStatesEnabled = revgnss.ISLMeasurementBuilder.islAmbiguityEnabled(cfg);
+            info.ambiguityNSignals      = revgnss.ISLMeasurementBuilder.islAmbiguityNSignals(cfg);
+            info.ambiguityInitialSigma_m = revgnss.ISLMeasurementBuilder.getNum_(cfg, ...
+                {'measurements','isl','carrier','ambiguity','initialSigma_m'}, 100);
+            info.carrierPhaseWindupImplemented = false;   % declared, not silently ignored
+            info.carrierAntennaPcvImplemented  = false;
+            info.carrierPrefit_m           = zeros(0,1);
+            info.carrierTruthAmbiguity_m   = zeros(0,1);
             info.codeSigma_m = revgnss.ISLMeasurementBuilder.getNum_(cfg, {'measurements','isl','code','sigma_m'}, 0.5);
             info.dopplerSigma_mps = revgnss.ISLMeasurementBuilder.getNum_(cfg, {'measurements','isl','doppler','sigma_mps'}, 0.02);
             info.warmup_s = revgnss.ISLMeasurementBuilder.getNum_(cfg, {'measurements','isl','warmup_s'}, 0);
@@ -326,6 +444,7 @@ classdef ISLMeasurementBuilder
             info.ekfRowTypes = {};
             info.ekfRowTx = [];
             info.ekfRowSecIdx = [];              % per-EKF-row resolved secondary-clock indices (0=product)
+            info.ekfRowAmbIdx = [];              % per-EKF-row resolved ISL ambiguity indices (0=none)
             info.secondaryTruthBias_m = [];      % per-secondary truth clock bias [m] (diagnostic)
             info.secondaryTruthDrift_mps = [];   % per-secondary truth clock drift [m/s]
             % Diagnostic: NaN pre-allocation when a transmitter is out-of-view at this epoch (subset list).
@@ -454,21 +573,56 @@ classdef ISLMeasurementBuilder
             s = RandStream('mt19937ar', 'Seed', key);
         end
 
-        function info = addMeta_(info, obsType, txi, cols, useInEkf, secIdx)
+        function info = addMeta_(info, obsType, txi, cols, useInEkf, secIdx, ambIdx)
             if nargin < 6; secIdx = 0; end
+            if nargin < 7; ambIdx = 0; end
             linkId = sprintf('link:isl:a%03d:a%03d', txi, info.receiverAssetIndex);
             role = 'diagnosticOnly'; if useInEkf; role = 'physicalEKF'; end
             row = revgnss.ObservableRowDescriptor.create(0, obsType, linkId, 'ISL-L1', ...
                 NaN, 1, cols, 'ISLMeasurementBuilder one-way spacecraft-to-spacecraft row', role);
             row = revgnss.ObservableRowDescriptor.withFlags(row, ...
-                any(strcmp(obsType, {'islCode','islDoppler'})), false);
+                any(strcmp(obsType, {'islCode','islDoppler','islCarrier'})), false);
             if isempty(info.rows); info.rows = row; else; info.rows(end+1) = row; end
             if useInEkf
                 info.ekfRowTypes{end+1} = obsType;
                 info.ekfRowTx(end+1)    = txi;
                 info.ekfRowSecIdx(end+1)= secIdx;   % estimated b_tx/bdot_tx idx (0=product); pushed in lockstep
+                info.ekfRowAmbIdx(end+1)= ambIdx;   % ISL ambiguity idx (0=none); pushed in lockstep
                 info.nEkfRows = info.nEkfRows + 1;
             end
+        end
+
+        function idx = islAmbStateIdx_(stateMap, txi, signalIdx)
+            % ISL ambiguity state index for transmitter txi / signal signalIdx, or 0 when
+            % the block is absent. Rows of islAmbiguityIdx follow the ORDER of the active
+            % transmitter list (registerIslBlock), so txi must be mapped through that list
+            % rather than used as a raw row subscript.
+            idx = 0;
+            if ~isfield(stateMap,'islAmbiguityIdx'); return; end
+            M = stateMap.islAmbiguityIdx;
+            if isempty(M); return; end
+            if ~isfield(stateMap,'islAmbiguityTxList') || isempty(stateMap.islAmbiguityTxList)
+                return
+            end
+            r = find(stateMap.islAmbiguityTxList == txi, 1);
+            if isempty(r) || r > size(M,1); return; end
+            if signalIdx < 1 || signalIdx > size(M,2); return; end
+            idx = M(r, signalIdx);
+        end
+
+        function B = truthAmbiguity_(cfg, info, txi, signalIdx)
+            % Truth carrier ambiguity for one ISL link: a CONSTANT integer number of
+            % cycles, drawn once per (link, signal) from a stream keyed WITHOUT the epoch
+            % index so it does not change over the run (an ambiguity is constant within an
+            % arc by definition). Mirrors the ground truth draw at
+            % CarrierMeasurementBuilder.m:141-151, including the initialSigma/lambda scaling.
+            lam = info.carrierWavelength_m;
+            if ~isfinite(lam) || lam <= 0; B = 0; return; end
+            s = revgnss.ISLMeasurementBuilder.stream_( ...
+                revgnss.ISLMeasurementBuilder.getNum_(cfg, {'simulation','seed'}, 42), ...
+                txi, 0, 900 + signalIdx);          % epochIdx=0 -> constant over the run
+            nCycles = round((info.ambiguityInitialSigma_m / lam) * randn(s, 1));
+            B = lam * nCycles;
         end
 
         function [z, h, H, R] = append_(z, h, H, R, zi, hi, Hi, ri)

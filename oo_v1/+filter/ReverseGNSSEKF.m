@@ -786,10 +786,15 @@ classdef ReverseGNSSEKF < handle
                 reg = revgnss.AmbiguityStateRegistry(nextIdx);
                 sm.islAmbiguityIdx = reg.registerIslBlock(obj.islAmbiguityTxList, ...
                     obj.islAmbiguityRxIdx, obj.islAmbiguityNSignals);
+                % Row order of islAmbiguityIdx follows this transmitter list, so consumers
+                % must map a transmitter index THROUGH it rather than subscripting directly
+                % (transmitter indices are 2..N, and 'transmitters' may select a subset).
+                sm.islAmbiguityTxList = obj.islAmbiguityTxList;
                 obj.islAmbiguityRegistry = reg;
                 nextIdx = nextIdx + reg.count();
             else
-                sm.islAmbiguityIdx = [];
+                sm.islAmbiguityIdx    = [];
+                sm.islAmbiguityTxList = [];
                 obj.islAmbiguityRegistry = [];
             end
 
