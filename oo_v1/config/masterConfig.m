@@ -1470,6 +1470,26 @@ cfg.measurements.isl.doppler.sigma_mps = 0.02;
 cfg.measurements.isl.carrier.enable = false;
 cfg.measurements.isl.carrier.useInEKF = false;
 cfg.measurements.isl.carrier.sigma_m = 0.002;
+% --- ISL carrier AMBIGUITY STATES (feature/ISL-LAMBDA). Default OFF. ---------------
+% One float ambiguity state per (ISL link x signal), appended strictly LAST in the
+% state vector so enabling this shifts NO existing index (golden-safe).
+%
+% DELIBERATELY INDEPENDENT of the ground-to-space ambiguity switches
+% (cfg.estimation.ambiguityMode / cfg.estimation.ambiguity.*). ISL and ground must be
+% togglable separately, and the sigmas must NOT be shared: the ground
+% cfg.estimation.ambiguity.initialSigma_m also drives the TRUTH ambiguity draw
+% (CarrierMeasurementBuilder) and the cycle-slip covariance reset, so reusing it for
+% ISL would couple three unrelated sinks and let an ISL-only change move the ground
+% solution. Enabling requires isl.enable AND isl.carrier.enable as well.
+%
+% NOTE: the ambiguity here is stored in METRES (B = lambda*N + absorbed bias), matching
+% the ground convention, so the carrier Jacobian column is +1 rather than lambda. The
+% undifferenced B is NOT an integer (it absorbs the clock bias per arc) -- integer
+% resolution needs a differenced parametrisation; see docs/plans/ISL_LAMBDA/03.
+cfg.measurements.isl.carrier.ambiguity.enable       = false;  % master gate for ISL ambiguity STATES
+cfg.measurements.isl.carrier.ambiguity.nSignals     = 1;      % ISL carrier signals per link
+cfg.measurements.isl.carrier.ambiguity.initialSigma_m = 100;  % P0 / slip-reset inflation [m]
+cfg.measurements.isl.carrier.ambiguity.processNoiseSigma_m_per_sqrt_s = 0;  % 0 = constant within an arc
 % ISL acquisition warm-up [s]: ISL rows are diagnostic-only until the ground-only
 % fix has converged (initial covariance shrunk), then they enter the EKF. Prevents
 % the tight-ISL-on-huge-initial-covariance transient overshoot.

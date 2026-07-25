@@ -183,6 +183,25 @@ classdef ScenarioFactory
                 end
             end
 
+            % ISL carrier-ambiguity initial covariance. Uses its OWN sigma
+            % (cfg.measurements.isl.carrier.ambiguity.initialSigma_m), deliberately NOT
+            % cfg.estimation.ambiguity.initialSigma_m: that ground knob also drives the
+            % truth ambiguity draw and the cycle-slip reset, so sharing it would couple
+            % three unrelated sinks and make an ISL-only change move the ground solution.
+            % Without this branch the ISL states would keep P0 = 0 from zeros(nx) -> zero
+            % Kalman gain -> the ambiguity could never be estimated.
+            if ekf.estimateIslAmbiguities && isfield(sm,'islAmbiguityIdx') && ...
+                    ~isempty(sm.islAmbiguityIdx)
+                sigma0_isl = 100.0;
+                try
+                    sigma0_isl = cfg.measurements.isl.carrier.ambiguity.initialSigma_m;
+                catch; end
+                for k = 1:numel(sm.islAmbiguityIdx)
+                    idx_k = sm.islAmbiguityIdx(k);
+                    if idx_k > 0; P0(idx_k, idx_k) = sigma0_isl^2; end
+                end
+            end
+
             % TASK 1: ZWD initial covariance (one per tower)
             if ekf.estimateZwd && isfield(sm,'zwdIdx') && ~isempty(sm.zwdIdx)
                 sigma0_zwd = 0.10;

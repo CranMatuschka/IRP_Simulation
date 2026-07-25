@@ -52,6 +52,18 @@ classdef ReverseGNSSEKF < handle
         ambiguityNReceivers  (1,1) double  = 1   % receivers per tower (new mode)
         ambiguityMode        char          = 'floatPerTowerSignal'
 
+        % ISL carrier float ambiguity states (one per inter-satellite link x signal).
+        % INDEPENDENT of the ground ambiguity block above by design: ISL and
+        % ground-to-space are separately togglable, they use separate sigmas, and the
+        % ISL block is appended strictly LAST so enabling it cannot shift any existing
+        % state index (golden-safe). Off by default -> nIslAmbiguities = 0 -> nx unchanged.
+        estimateIslAmbiguities (1,1) logical = false
+        nIslAmbiguities        (1,1) double  = 0
+        islAmbiguityNSignals   (1,1) double  = 1
+        islAmbiguityTxList     (1,:) double  = []   % active ISL transmitter asset indices
+        islAmbiguityRxIdx      (1,1) double  = 1    % receiving (primary) asset index
+        islAmbiguityRegistry                 = []   % revgnss.AmbiguityStateRegistry (key -> index)
+
         % Per-tower ZWD states
         estimateZwd          (1,1) logical = false
         nZwdStates           (1,1) double  = 0
@@ -196,6 +208,21 @@ classdef ReverseGNSSEKF < handle
                 if isfield(sc,'procNoise') && isscalar(sc.procNoise); obj.srpScaleProcNoise_ = sc.procNoise; end
             end
 
+            % ISL carrier-ambiguity gate. Sized from ISLMeasurementBuilder so the state
+            % block and the measurement rows agree on WHICH links exist (one source of
+            % truth). Independent of the ground ambiguity switches.
+            obj.nIslAmbiguities = revgnss.ISLMeasurementBuilder.ambiguityStateCount(cfg);
+            if obj.nIslAmbiguities > 0
+                obj.estimateIslAmbiguities = true;
+                obj.islAmbiguityTxList   = revgnss.ISLMeasurementBuilder.transmitterList(cfg);
+                obj.islAmbiguityNSignals = revgnss.ISLMeasurementBuilder.islAmbiguityNSignals(cfg);
+                obj.islAmbiguityRxIdx    = 1;
+                if isfield(cfg,'measurements') && isfield(cfg.measurements,'isl') && ...
+                        isfield(cfg.measurements.isl,'receiverAssetIndex')
+                    obj.islAmbiguityRxIdx = cfg.measurements.isl.receiverAssetIndex;
+                end
+            end
+
             obj.nx = obj.nxBase;
             if obj.estimateTowerClocks
                 obj.nx = obj.nx + 2 * nTowers;
@@ -216,8 +243,15 @@ classdef ReverseGNSSEKF < handle
                 obj.nx = obj.nx + 3;
             end
             if obj.estimateSrpScale
-                obj.nx = obj.nx + 1;   % single scalar, appended strictly LAST
+                obj.nx = obj.nx + 1;   % single scalar
             end
+            if obj.estimateIslAmbiguities
+                obj.nx = obj.nx + obj.nIslAmbiguities;   % ISL block, appended strictly LAST
+            end
+            % NOTE: this arithmetic is a SECOND implementation of the buildStateMap_
+            % nextIdx walk. Any new block must be added in BOTH places, in the SAME
+            % order; assertStateMapConsistency_ (called below) is the cross-check that
+            % turns a silent mismatch into a hard error.
 
             if isfield(cfg.estimator,'sigma_accel_mps2')
                 obj.sigma_accel_mps2 = cfg.estimator.sigma_accel_mps2;
@@ -737,10 +771,36 @@ classdef ReverseGNSSEKF < handle
             % when off -> byte-identical map (mirrors the gyroBiasIdx empty-sentinel pattern).
             if obj.estimateSrpScale
                 sm.srpScaleIdx = nextIdx;
-                nextIdx = nextIdx + 1; %#ok<NASGU>
+                nextIdx = nextIdx + 1;
             else
                 sm.srpScaleIdx = [];
             end
+
+            % Optional ISL carrier-ambiguity states, appended strictly LAST so enabling
+            % them shifts NO existing index. Allocation goes through the shared
+            % AmbiguityStateRegistry (link -> index), which is append-only and idempotent;
+            % the registry is retained so later phases can resolve an index from an
+            % AmbiguityKey instead of a hard-coded (tower,receiver,signal) triple.
+            % Empty [] sentinel when off -> state map identical to the pre-ISL map.
+            if obj.estimateIslAmbiguities && obj.nIslAmbiguities > 0
+                reg = revgnss.AmbiguityStateRegistry(nextIdx);
+                sm.islAmbiguityIdx = reg.registerIslBlock(obj.islAmbiguityTxList, ...
+                    obj.islAmbiguityRxIdx, obj.islAmbiguityNSignals);
+                obj.islAmbiguityRegistry = reg;
+                nextIdx = nextIdx + reg.count();
+            else
+                sm.islAmbiguityIdx = [];
+                obj.islAmbiguityRegistry = [];
+            end
+
+            % Cross-check the two hand-maintained implementations of the state layout:
+            % the constructor's nx arithmetic and this nextIdx walk. They are independent
+            % code paths, so a block added to one but not the other would otherwise
+            % produce a silently truncated or over-sized state vector.
+            assert(nextIdx - 1 == obj.nx, 'ReverseGNSSEKF:stateMapSizeMismatch', ...
+                ['State-map walk allocated %d states but the constructor computed nx=%d. ' ...
+                 'A state block was added to one path and not the other.'], ...
+                nextIdx - 1, obj.nx);
         end
 
         % ----------------------------------------------------------------
@@ -981,6 +1041,27 @@ classdef ReverseGNSSEKF < handle
             % estimate stays smooth (the honest fix vs. blunt orbit-SNC inflation).
             if obj.estimateSrpScale && ~isempty(sm.srpScaleIdx)
                 Q(sm.srpScaleIdx, sm.srpScaleIdx) = obj.srpScaleProcNoise_^2 * dt_s;
+            end
+
+            % --- ISL ambiguity process noise -----------------------------
+            % Separate knob from the ground ambiguity noise below: an ISL crosslink arc
+            % and a ground tower arc have unrelated stability, and coupling them would
+            % make an ISL-only change silently move the ground solution. Default 0 =
+            % a strictly constant ambiguity within an arc (the physical model); slips are
+            % handled by covariance reset, not by process noise.
+            if obj.estimateIslAmbiguities && isfield(sm,'islAmbiguityIdx') && ...
+                    ~isempty(sm.islAmbiguityIdx)
+                q_isl_sigma = 0;
+                try
+                    q_isl_sigma = obj.cfg.measurements.isl.carrier.ambiguity.processNoiseSigma_m_per_sqrt_s;
+                catch; end
+                if q_isl_sigma > 0
+                    q_isl = q_isl_sigma^2 * dt_s;
+                    for k = 1:numel(sm.islAmbiguityIdx)
+                        idx = sm.islAmbiguityIdx(k);
+                        if idx > 0; Q(idx, idx) = q_isl; end
+                    end
+                end
             end
 
             % --- Ambiguity process noise (random walk, very small) -------

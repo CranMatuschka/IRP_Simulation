@@ -202,6 +202,48 @@ classdef ISLMeasurementBuilder
             if ~isempty(zAdd); info.prefitRms = sqrt(mean((zAdd - hAdd).^2)); end
         end
 
+        function list = transmitterList(cfg)
+            % transmitterList  Public accessor for the ACTIVE ISL transmitter indices.
+            %
+            % Config-only (no assets needed) so the EKF can size the ISL ambiguity state
+            % block from the same selection the measurement rows will use -- one source of
+            % truth for "which links exist". Empty when ISL is disabled or nSpaceAssets<2.
+            list = zeros(1,0);
+            if ~revgnss.ISLMeasurementBuilder.isEnabled_(cfg); return; end
+            nAssets = revgnss.ISLMeasurementBuilder.getNum_(cfg, {'scenario','nSpaceAssets'}, 1);
+            if nAssets < 2; return; end
+            list = revgnss.ISLMeasurementBuilder.txList_(cfg, nAssets);
+        end
+
+        function n = ambiguityStateCount(cfg)
+            % ambiguityStateCount  Number of ISL carrier-ambiguity states this config wants
+            % (one per active link x signal), or 0 when the gated feature is off. Shared by
+            % the EKF sizing arithmetic and the state-map walk so the two cannot disagree.
+            n = 0;
+            if ~revgnss.ISLMeasurementBuilder.islAmbiguityEnabled(cfg); return; end
+            nLinks = numel(revgnss.ISLMeasurementBuilder.transmitterList(cfg));
+            n = nLinks * revgnss.ISLMeasurementBuilder.islAmbiguityNSignals(cfg);
+        end
+
+        function tf = islAmbiguityEnabled(cfg)
+            % islAmbiguityEnabled  Master gate for ISL carrier-ambiguity STATES.
+            %
+            % INDEPENDENT of the ground ambiguity switches (cfg.estimation.ambiguityMode /
+            % cfg.estimation.ambiguity.*) by design: ISL and ground-to-space must be
+            % togglable separately, and sharing a sigma would couple three unrelated sinks
+            % (P0, the truth ambiguity draw, and the cycle-slip reset).
+            g = @(p) revgnss.ISLMeasurementBuilder.getBool_(cfg, p, false);
+            tf = g({'measurements','isl','enable'}) && ...
+                 g({'measurements','isl','carrier','enable'}) && ...
+                 g({'measurements','isl','carrier','ambiguity','enable'});
+        end
+
+        function n = islAmbiguityNSignals(cfg)
+            n = revgnss.ISLMeasurementBuilder.getNum_(cfg, ...
+                {'measurements','isl','carrier','ambiguity','nSignals'}, 1);
+            n = max(1, round(n));
+        end
+
         function pb = productBiasForAsset(cfg, ai, t_s)
             % productBiasForAsset  Public accessor for a secondary's broadcast-product
             % ephemeris/clock error at time t_s (pb.pos/vel/clk/clkDrift). Same
