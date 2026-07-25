@@ -243,6 +243,31 @@ cfg.estimator.integerAmbiguity.maxDistanceToInteger_cycles = 0.20;
 cfg.estimator.integerAmbiguity.maxResidualRmsIncrease_m    = 0.01;
 cfg.estimator.integerAmbiguity.fixVariance_cycles2         = 1e-4;
 cfg.estimator.integerAmbiguity.resetOnSlip                 = true;
+% --- LAMBDA / MLAMBDA integer ambiguity resolution (feature/ISL-LAMBDA). Default OFF. ---
+% Wraps the TU Delft LAMBDA 4.0 toolbox (Massarweh/Verhagen/Teunissen 2024) for a proper
+% ILS search, replacing per-ambiguity ROUNDING (the weakest integer estimator, which is
+% what cfg.estimator.integerAmbiguity does today) and adding the false-fix protection it
+% explicitly lacks: every fix is gated on a bootstrapped success rate.
+%
+% EXTERNAL DEPENDENCY -- the toolbox is NOT vendored. Its files carry a TU Delft copyright
+% with NO licence grant, so shipping them in this public repo would be unlicensed. Point
+% toolboxPath at your own copy (like the Orekit bridge); when absent the resolver returns
+% the FLOAT solution and reports 'unavailable-toolbox' rather than erroring.
+%
+% VALIDITY PRECONDITION: LAMBDA assumes the float vector's TRUTH is an integer. The
+% UNDIFFERENCED ambiguities here are not -- they absorb the per-arc clock/hardware bias --
+% so only DIFFERENCED (between-antenna / between-satellite) or bias-calibrated vectors may
+% be fixed. See docs/plans/ISL_LAMBDA/03_LAMBDA_INTEGER_RESOLUTION.md.
+cfg.estimator.lambda.enable          = false;   % master gate for the LAMBDA engine
+cfg.estimator.lambda.toolboxPath     = '';      % e.g. '/path/to/LAMBD4-master_2024_10_01'
+cfg.estimator.lambda.method          = 3;       % 3=ILS search-and-shrink, 5=PAR, 1=rounding
+cfg.estimator.lambda.nCands          = 2;       % >=2 so a ratio test is possible
+cfg.estimator.lambda.minSuccessRate  = 0.999;   % bootstrapped SR floor (Ps_LAMBDA)
+cfg.estimator.lambda.ratioThreshold  = 2.0;     % sqnorm(2)/sqnorm(1) discrimination test
+% Per-domain gates, INDEPENDENT of each other (ISL vs ground-to-space must be separately
+% togglable). Both require cfg.estimator.lambda.enable as the master switch.
+cfg.estimator.lambda.ground.enable   = false;   % ground-to-space carrier AR
+cfg.estimator.lambda.isl.enable      = false;   % inter-satellite carrier AR
 cfg.estimator.diffAtt.ambiguityResolution.enable                       = true;
 cfg.estimator.diffAtt.ambiguityResolution.method                       = 'constrainedBaselineIntegerSearch';
 cfg.estimator.diffAtt.ambiguityResolution.signal                       = 'L1';
