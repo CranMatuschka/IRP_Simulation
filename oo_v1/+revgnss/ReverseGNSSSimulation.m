@@ -375,6 +375,20 @@ classdef ReverseGNSSSimulation < handle
                 h = [h; h_isl];
                 H = [H; H_isl];
                 R = blkdiag(R, R_isl);
+                % Extend the per-row type labels, exactly as the TWSTFT block below does.
+                % WITHOUT this, numel(measType_perRow) ~= size(H,1), the Stage-57 consumer
+                % bails, every row mask goes false, and NIS_code / NIS_doppler / NIS_carrier
+                % are written as 0 for EVERY ISL-aided epoch -- i.e. the chi-squared
+                % consistency check reads "0" (indistinguishable from "consistent") exactly
+                % where the ISL rows need validating. Labels come from the builder's own
+                % ekfRowTypes so they stay in lockstep with the rows actually appended.
+                if isfield(errStruct,'measType_perRow') && iscell(errStruct.measType_perRow)
+                    islTypes = repmat({'isl'}, numel(z_isl), 1);
+                    if isfield(islInfo,'ekfRowTypes') && numel(islInfo.ekfRowTypes) == numel(z_isl)
+                        islTypes = islInfo.ekfRowTypes(:);
+                    end
+                    errStruct.measType_perRow = [errStruct.measType_perRow(:); islTypes];
+                end
             end
             % ISL carrier cycle-slip detection + ambiguity covariance reset. Runs BEFORE the
             % EKF update below (mirroring the ground order at :325/:345) so a slipped arc's

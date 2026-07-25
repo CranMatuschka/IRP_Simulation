@@ -100,6 +100,20 @@ classdef ISLMeasurementBuilder
                 % converges to 1-4 cm with sigma ~ 29 mm, i.e. error ~ sigma (consistent).
                 % The symptom is silent: no NaN, no divergence warning, just a tiny sigma
                 % on a wrong value -- hence a hard error rather than a warning.
+                % Only signal 1 has a carrier row (the carrier block is not inside a signal
+                % loop). Allowing nSignals>1 would allocate ambiguity states that NO H row
+                % ever touches: with Q=0 they stay frozen at x=0 with the full 100 m initial
+                % sigma for the whole run -- dead mass in P and in any trace/NEES report --
+                % and the Route-B differencing would then difference live against dead
+                % states, collapsing the success rate so AR silently reports 'notFixed'.
+                % Refuse the config rather than produce those numbers.
+                nSigIsl = revgnss.ISLMeasurementBuilder.islAmbiguityNSignals(cfg);
+                if nSigIsl > 1
+                    error('ISLMeasurementBuilder:multiSignalUnsupported', ...
+                        ['cfg.measurements.isl.carrier.ambiguity.nSignals=%d is not supported: ' ...
+                         'only signal 1 emits a carrier row, so the extra ambiguity states ' ...
+                         'would be unobservable dead mass in the covariance. Set it to 1.'], nSigIsl);
+                end
                 wu = revgnss.ISLMeasurementBuilder.getNum_(cfg, {'measurements','isl','warmup_s'}, 0);
                 if ~(wu > 0)
                     error('ISLMeasurementBuilder:carrierEkfNeedsWarmup', ...

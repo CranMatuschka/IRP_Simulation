@@ -50,7 +50,7 @@ classdef BaselineAmbiguityLambda
             end
 
             lam = revgnss.integer.BaselineAmbiguityLambda.lambda_(cfg);
-            [aHat_cyc, var_cyc, nInt, ok] = ...
+            [aHat_cyc, var_cyc, nInt, ok, cmpAll] = ...
                 revgnss.integer.BaselineAmbiguityLambda.gather_(store, lam);
             s.n = numel(aHat_cyc);
             if s.n < 1 || ~any(ok)
@@ -59,7 +59,9 @@ classdef BaselineAmbiguityLambda
             aHat_cyc = aHat_cyc(ok);
             var_cyc  = var_cyc(ok);
             nInt     = nInt(ok);
+            cmpMask  = cmpAll(ok);
             s.n      = numel(aHat_cyc);
+            s.nComparable = sum(cmpMask);
 
             % DIAGONAL by construction -- the per-baseline accumulators carry no
             % cross-baseline covariance. Recorded explicitly so a reader is not misled
@@ -86,10 +88,13 @@ classdef BaselineAmbiguityLambda
             s.lambdaIntegers   = round(aFix_cyc(:)');
             s.existingIntegers = round(nInt(:)');
             if info.accepted
-                d = s.lambdaIntegers - s.existingIntegers;
+                % Compare ONLY where the production resolver produced a fix (see gather_).
+                d = s.lambdaIntegers(cmpMask) - s.existingIntegers(cmpMask);
                 s.nDisagree = sum(d ~= 0);
                 s.agrees    = s.nDisagree == 0;
-                if s.agrees
+                if s.nComparable == 0
+                    s.classification = 'fixed-noProductionFixToCompare';
+                elseif s.agrees
                     s.classification = 'agrees-formalSuccessRate';
                 else
                     % Theory says this cannot happen for a diagonal Qa; surface it loudly
@@ -136,7 +141,7 @@ classdef BaselineAmbiguityLambda
             try; lam = cfg.signals.wavelength_m(1); catch; end
         end
 
-        function [aHat_cyc, var_cyc, nInt, ok] = gather_(store, lam)
+        function [aHat_cyc, var_cyc, nInt, ok, cmp] = gather_(store, lam)
             % Float ambiguity (cycles) and its variance per (tower, baseline).
             %
             %   N_float = S1 / (n*lambda)
@@ -145,7 +150,7 @@ classdef BaselineAmbiguityLambda
             nT = store.nTowers; nB = store.nBaselines;
             m  = nT * nB;
             aHat_cyc = zeros(m,1); var_cyc = zeros(m,1); nInt = zeros(m,1);
-            ok = false(m,1);
+            ok = false(m,1); cmp = false(m,1);   % cmp: production resolver actually FIXED it
             k = 0;
             for ti = 1:nT
                 for bi = 1:nB
@@ -161,6 +166,18 @@ classdef BaselineAmbiguityLambda
                     if ~isfinite(v) || v <= 0; v = eps; end
                     var_cyc(k) = v;
                     if isfield(store,'N_int'); nInt(k) = store.N_int(ti,bi); end
+                    % Only compare against a baseline the PRODUCTION resolver actually
+                    % FIXED. store.N_int is preallocated to ZERO, so a baseline it rejected
+                    % (short arc, rms/ratio/float-distance gate) still reads 0 -- comparing
+                    % LAMBDA's integer against that manufactures a bogus
+                    % 'DISAGREES-investigate', the very alarm this class documents as
+                    % theoretically impossible for a diagonal Qa. Absence of a fix is not
+                    % a disagreement.
+                    cmp(k) = true;
+                    if isfield(store,'ambiguityStatus') && ...
+                            ti <= size(store.ambiguityStatus,1) && bi <= size(store.ambiguityStatus,2)
+                        cmp(k) = ~isempty(strfind(lower(store.ambiguityStatus{ti,bi}), 'fixed'));
+                    end
                     ok(k) = true;
                 end
             end
@@ -171,7 +188,7 @@ classdef BaselineAmbiguityLambda
                 'classification', 'notAttempted', 'decision', 'not-run', 'message', '', ...
                 'n', 0, 'nFixedByLambda', 0, 'successRate', NaN, 'failureRate', NaN, ...
                 'ratio', NaN, 'meanSigma_cycles', NaN, 'maxSigma_cycles', NaN, ...
-                'covarianceStructure', 'unknown', 'lambdaIntegers', [], ...
+                'covarianceStructure', 'unknown', 'nComparable', 0, 'lambdaIntegers', [], ...
                 'existingIntegers', [], 'agrees', false, 'nDisagree', NaN);
         end
 

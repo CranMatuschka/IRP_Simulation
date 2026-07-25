@@ -148,6 +148,27 @@ classdef LambdaResolver
                 return
             end
 
+            % PARTIAL FIXES ARE REFUSED -- this is a safety guard, not a limitation.
+            % With PAR (method 5) LAMBDA fixes only a SUBSET and returns the CONDITIONED
+            % FLOAT for the rest. Those components are real-valued by construction, so
+            % rounding them would INVENT integers the estimator explicitly declined to fix,
+            % and a caller with applyFix on would then inject them as a millimetre-sigma
+            % hard constraint -- fabricated numbers at high confidence. LAMBDA reports only
+            % the COUNT nFixed, not which components, so the fixed subset cannot be safely
+            % recovered here. Refuse rather than guess.
+            % Reachable whenever minSuccessRate < 0.99 (LAMBDA.m:155 hardcodes the internal
+            % PAR threshold at 0.99); at the 0.999 default the full-AR branch is forced and
+            % this never triggers -- which is exactly why it must be an explicit guard.
+            if nFixed < info.n
+                info.decision = 'reject-partialFix';
+                info.message  = sprintf( ...
+                    ['LAMBDA fixed %d of %d components (partial/PAR). The unfixed ones are ' ...
+                     'conditioned FLOATS, not integers; injecting them would fabricate ' ...
+                     'integers at the constraint sigma. Raise minSuccessRate (>=0.99) or ' ...
+                     'use method 3 (full ILS).'], nFixed, info.n);
+                return
+            end
+
             % ---- ratio (discrimination) test --------------------------------------
             % Accept only when the best candidate is clearly better than the runner-up.
             if numel(sqnorm) >= 2 && sqnorm(1) > 0
