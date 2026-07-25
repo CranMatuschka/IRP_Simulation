@@ -491,6 +491,12 @@ else
     cfg.measurements.isl.receiverAssetIndex = 1;  % into the primary only
     cfg.measurements.isl.warmup_s      = 300;     % acquire ISL after the ground fix converges
     cfg.measurements.isl.timing.enable = false;
+    % Gated inter-satellite light-time correction (~1 cm/km at km baselines): the beacon
+    % moves during the signal transit, a systematic the instantaneous |r1-r2| omits. Matters
+    % for cm-class carrier-phase / precise-product ISL; negligible for the 0.3 m code row.
+    % Cross-validated sub-mm against Orekit's rigorous inter-satellite light-time. Default OFF
+    % keeps the swarm fingerprint byte-identical; applied to truth AND model when enabled.
+    cfg.measurements.isl.lightTime.enable = false;
     cfg.measurements.isl.code.enable    = true;
     cfg.measurements.isl.code.useInEKF  = true;
     cfg.measurements.isl.code.sigma_m   = 0.3;    % one-way ISL code thermal 1-sigma [m]
@@ -797,6 +803,13 @@ cfg.orbit.truth.perturbations.srp.shadow           = 'cylindrical';
 % stay byte-identical. (The individual truth/EKF enables above remain for a deliberate one-sided
 % force gap; this switch is the matched, no-gap version.)
 cfg.perturbations.sunMoon.enable = false;
+% Sun/Moon ephemeris for the luni-solar perturbation (consulted by applyLuniSolar ->
+% OrbitPerturbations). 'mg' = Montenbruck & Gill low-precision analytic (default; ~0.6 m /
+% 4 h luni-solar truth-fidelity gap vs DE-440, adequate for short arcs and self-contained).
+% 'de440' = JPL DE-440 via models.orbit.De440Ephemeris / the Orekit bridge (needs a JVM +
+% ~/orekit-bridge; recovers that gap, for long-arc / high-absolute-fidelity truth). Default
+% 'mg' keeps the frozen goldens byte-identical and needs no external dependency.
+cfg.perturbations.sunMoon.ephemeris = 'mg';
 
 % --- Swarm formation (helix) truth ---------------------------
 % One master control: cfg.scenario.nSpaceAssets. When it is > 1 (and an orbit

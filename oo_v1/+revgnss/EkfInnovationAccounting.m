@@ -171,11 +171,12 @@ classdef EkfInnovationAccounting
             c.warnings = acc.warnings;
         end
 
-    end
-
-    methods (Static, Access = private)
-
         function [nis, dof, warns] = nisForMask_(y, S, mask)
+            % nisForMask_  NIS of the y/S rows selected by mask: y'*(S\y), pinv-guarded.
+            %   Public (not just an internal compute() helper) so callers that need a
+            %   row grouping compute() doesn't expose directly -- e.g. ReverseGNSSSimulation
+            %   merging 'code'+'ifCode' rows for the legacy per-type NIS panel scope -- can
+            %   reuse the same exact-S-normalised, pinv-guarded computation.
             warns = {};
             dof = sum(mask);
             if dof == 0
@@ -201,6 +202,10 @@ classdef EkfInnovationAccounting
                 end
             end
         end
+
+    end
+
+    methods (Static, Access = private)
 
         function r = rmsForMask_(x, mask)
             if ~any(mask)

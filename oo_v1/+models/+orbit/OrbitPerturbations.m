@@ -44,9 +44,12 @@ classdef OrbitPerturbations
             %   Shared by the truth propagator (configFrom) and the EKF propagator (which
             %   passes cfg.estimator.dynamics.perturbations directly). Empty/absent -> disabled.
             p = struct('enable',false, 'luniSolar',false, 'srp',false, ...
-                'epochJD_TT',2451545.0, ...
+                'epochJD_TT',2451545.0, 'ephemeris','mg', ...
                 'srpParams',struct('Cr',1.3,'areaToMass_m2pkg',0.02,'shadow','cylindrical'));
             if ~isstruct(pt) || isempty(pt); return; end
+            % Sun/Moon ephemeris source: 'mg' (Montenbruck & Gill analytic, default) or
+            % 'de440' (JPL DE-440 via models.orbit.De440Ephemeris / the Orekit bridge).
+            if isfield(pt,'ephemeris') && ~isempty(pt.ephemeris); p.ephemeris = char(pt.ephemeris); end
             if isfield(pt,'luniSolar') && isfield(pt.luniSolar,'enable'); p.luniSolar = logical(pt.luniSolar.enable); end
             if isfield(pt,'srp')       && isfield(pt.srp,'enable');       p.srp       = logical(pt.srp.enable);       end
             if isfield(pt,'epochJD_TT') && ~isempty(pt.epochJD_TT);       p.epochJD_TT = pt.epochJD_TT;               end
@@ -64,24 +67,30 @@ classdef OrbitPerturbations
             a = [0;0;0];
             if nargin < 3 || ~isstruct(p) || ~p.enable; return; end
             jd = p.epochJD_TT + t_s/86400;
+            src = 'mg'; if isfield(p,'ephemeris') && ~isempty(p.ephemeris); src = p.ephemeris; end
             r  = r_sat_eci_m(:);
             r_sun = [];
             if p.luniSolar
-                r_sun  = models.orbit.OrbitPerturbations.sunPositionEci(jd);
-                r_moon = models.orbit.OrbitPerturbations.moonPositionEci(jd);
+                r_sun  = models.orbit.OrbitPerturbations.sunPositionEci(jd, src);
+                r_moon = models.orbit.OrbitPerturbations.moonPositionEci(jd, src);
                 a = a + models.orbit.OrbitPerturbations.thirdBody_(r, r_sun, ...
                         models.orbit.OrbitPerturbations.GM_SUN);
                 a = a + models.orbit.OrbitPerturbations.thirdBody_(r, r_moon, ...
                         models.orbit.OrbitPerturbations.GM_MOON);
             end
             if p.srp
-                if isempty(r_sun); r_sun = models.orbit.OrbitPerturbations.sunPositionEci(jd); end
+                if isempty(r_sun); r_sun = models.orbit.OrbitPerturbations.sunPositionEci(jd, src); end
                 a = a + models.orbit.OrbitPerturbations.srpAccel_(r, r_sun, p.srpParams);
             end
         end
 
-        function r = sunPositionEci(jd_tt)
-            % sunPositionEci  Low-precision analytic Sun position [m], ECI (M&G 3.3.2).
+        function r = sunPositionEci(jd_tt, source)
+            % sunPositionEci  Sun position [m], geocentric ECI (EME2000). Default = the
+            % Montenbruck & Gill (2000) low-precision analytic series (Sec 3.3.2); pass
+            % source='de440' for JPL DE-440 via models.orbit.De440Ephemeris (Orekit bridge).
+            if nargin >= 2 && strcmpi(source, 'de440')
+                r = models.orbit.De440Ephemeris.sunEci(jd_tt); return;
+            end
             T   = (jd_tt - 2451545.0) / 36525;
             M   = 357.5256 + 35999.049*T;                          % mean anomaly [deg]
             lam = 282.9400 + M + (6892/3600)*sind(M) + (72/3600)*sind(2*M);  % ecliptic long [deg]
@@ -91,8 +100,13 @@ classdef OrbitPerturbations
             r = models.orbit.OrbitPerturbations.ecl2eq_(r_ecl, eps);
         end
 
-        function r = moonPositionEci(jd_tt)
-            % moonPositionEci  Low-precision analytic Moon position [m], ECI (M&G 3.3.2).
+        function r = moonPositionEci(jd_tt, source)
+            % moonPositionEci  Moon position [m], geocentric ECI (EME2000). Default = the
+            % Montenbruck & Gill (2000) low-precision analytic series (Sec 3.3.2); pass
+            % source='de440' for JPL DE-440 via models.orbit.De440Ephemeris (Orekit bridge).
+            if nargin >= 2 && strcmpi(source, 'de440')
+                r = models.orbit.De440Ephemeris.moonEci(jd_tt); return;
+            end
             T  = (jd_tt - 2451545.0) / 36525;
             L0 = 218.31617 + 481267.88088*T;   % mean longitude [deg]
             l  = 134.96292 + 477198.86753*T;   % moon mean anomaly

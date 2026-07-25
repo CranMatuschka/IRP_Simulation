@@ -1,0 +1,72 @@
+{
+  "scenario": {
+    "name": "ideal_G5S1R4_flat_cond",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4,
+    "orbitClass": "GEO"
+  },
+  "simulation": { "duration_s": 3600 },
+
+  "atmosphere": { "realistic": false, "ionosphereFree": false, "estimateIono": false },
+  "realism": { "grade": false },
+
+  "effects": {
+    "antennaPCO":      { "enable": false, "truth": { "enable": false }, "model": { "enable": false } },
+    "antennaPCV":      { "enable": false, "truth": { "enable": false }, "model": { "enable": false } },
+    "towerSurvey":     { "enable": false, "truth": { "enable": false }, "model": { "enable": false } },
+    "correlatedNoise": { "enable": false }
+  },
+  "errors": {
+    "troposphere":   { "enable": false },
+    "ionosphere":    { "enable": false },
+    "hardwareDelay": { "enable": false },
+    "multipath":     { "enable": false },
+    "codeNoise":     { "sigma_m": 0 }
+  },
+
+  "signals": {
+    "L1": { "codeSigma0_m": 0 },
+    "L2": { "codeSigma0_m": 0 }
+  },
+  "measurements": {
+    "twoWayTimeTransfer": { "enable": false, "useInEKF": false },
+    "carrier":  { "sigma_m": 1e-4 },
+    "doppler":  { "sigma_mps": 1e-4 }
+  },
+
+  "clock":        { "receiver": { "deterministic": true } },
+  "clockScaling": {
+    "globalBiasFactor":  0,
+    "globalFreqFactor":  0,
+    "globalNoiseFactor": 0,
+    "receiverNoiseFactor": 0
+  },
+  "clocks": { "tower": { "product": { "mode": "perfectTruth", "addToR": false } } },
+
+  "estimator": {
+    "sigma_accel_mps2":      0,
+    "sigma_angAccel_radps2": 0,
+    "P0_pos_m":      1,
+    "P0_vel_mps":    0.01,
+    "P0_euler_rad":  1e-4,
+    "P0_bRx_m":      1,
+    "P0_bdotRx_mps": 1e-3,
+    "initialError": {
+      "pos_m":         [0, 0, 0],
+      "vel_mps":       [0, 0, 0],
+      "euler_deg":     [0, 0, 0],
+      "omega_radps":   [0, 0, 0],
+      "clockBias_m":   0,
+      "clockDrift_mps": 0
+    }
+  },
+  "estimation": {
+    "ambiguity": {
+      "initialSigma_m": 1e-6,
+      "processNoiseSigma_m_per_sqrt_s": 0
+    }
+  },
+
+  "report": { "runVersion": "flat1" }
+}

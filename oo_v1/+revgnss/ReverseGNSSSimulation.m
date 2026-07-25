@@ -472,6 +472,14 @@ classdef ReverseGNSSSimulation < handle
                 errStruct.ekfAccounting57    = revgnss.EkfInnovationAccounting.compute(nu57_, S57_, rowClass57_);
                 errStruct.ekfAccountingRms57 = revgnss.EkfInnovationAccounting.residualRms(nu57_, rowClass57_);
 
+                % S-normalised NIS for the 'code' report panel, merging 'code'+'ifCode' rows
+                % to match that panel's legacy row scope (rowClass57_ keeps them separate for
+                % Stage-57's own code/codeIonoFree breakdown; this merge is for panel parity
+                % only). Feeds SimulationDataStore's entry.NIS_code -- see WP: per-type NIS
+                % R-vs-S fix (project_stochastic_audit_rac3sigma memory).
+                errStruct.codeNisS57 = revgnss.EkfInnovationAccounting.nisForMask_( ...
+                    nu57_, S57_, rowClass57_.codeMask | rowClass57_.codeIonoFreeMask);
+
                 % Guarded raw-carrier integer ambiguity fixing.
                 % cpInfo63_: use embedded float rows when IF post-processing replaced cpInfo.
                 cpInfo63_ = cpInfo;
