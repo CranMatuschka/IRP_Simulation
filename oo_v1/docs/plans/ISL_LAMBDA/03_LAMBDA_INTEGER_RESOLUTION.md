@@ -281,5 +281,42 @@ wall-limited, and no amount of ambiguity resolution moves a wall.
 asset's absolute* position error, which is exactly the quantity AR is not expected to help.
 Demonstrating the expected win requires the swarm relative metrics
 (`SwarmRelativeSolver` baseline-length / best-fit-rigid shape error) with the fixed
-ambiguities feeding the relative layer. That is the honest next step, and until it is run
-**no relative-accuracy claim should be made.**
+ambiguities feeding the relative layer.
+
+### Why that measurement CANNOT be made in the current architecture
+
+Attempted next, and it is blocked structurally — by design, in two independent places:
+
+1. **The federated swarm path strips ISL from every per-asset EKF.**
+   `ReportRunner.stripSwarmEstimation_` sets `measurements.isl.enable = false` on each
+   per-asset config. This is deliberate: the federated architecture keeps **W1** (ground
+   pseudoranges) and **W2** (the ISL relative layer) on **disjoint** measurements so they
+   cannot double-count (see the `SwarmRelativeSolver` header). Verified empirically —
+   ISL ambiguity states wanted: **3 before the strip, 0 after**; the per-asset EKF comes
+   back with `estimateIslAmbiguities = false` and an empty `islAmbiguityIdx`.
+   **Consequence: a swarm PDF produced with `isl.carrier.useInEKF = true` contains NO ISL
+   carrier contribution.** Its shape/baseline numbers must NOT be read as evidence about
+   this feature. `SwarmRelativeSolver`'s "solved" metrics come from *synthetic* two-way ISL
+   (truth + noise, governed by `cfg.multiAsset.twoWayISL.sigma_m`) and are independent of
+   the carrier implementation entirely.
+
+2. **A single EKF estimates exactly ONE asset position, so it has no shape to observe.**
+   The secondary-asset state blocks (`secondaryOrbitIdx`, `secondaryClockIdx`) were
+   **RETIRED** with the federated pivot (`ReverseGNSSEKF.m` ~:636, "RETIRED … W4-4b") and
+   are never assigned anywhere in the repo. `estimateMode='position'` therefore no longer
+   promotes secondaries to estimated states.
+
+Both facts are pinned by `tests/test_isl_carrier_not_in_federated_swarm.m`, so this cannot
+be silently misread later, and T4 tells a future reader exactly what to re-open if secondary
+orbit states ever return.
+
+**Therefore: no relative-accuracy claim is made, and none can be substantiated without an
+architecture change** — either re-admitting ISL rows into the per-asset EKFs (which would
+require re-establishing W1/W2 disjointness some other way, or accepting the double-count
+and quantifying it), or restoring joint multi-asset states. Both are larger design decisions
+than this feature, and inventing a number without them would be dishonest.
+
+**Net position of Phase 3:** the ISL carrier delivers a measured **4x receiver-clock**
+improvement (39 -> 10 ps) at the cost of ~1.5x absolute position; integer AR works
+(SR=0.999) but moves neither, because the binding constraint is the observability wall.
+The relative/shape upside that motivated Route B remains **plausible but unproven here**.
