@@ -104,6 +104,7 @@ classdef SimulationDataStore < handle
         cv_Rmax_
         cv_Rmn_
         cv_Rnr_
+        cv_PposXtra_  % [3 x N] position-covariance off-diagonal Pxy;Pxz;Pyz (full-P RAC projection)
 
         % ---- Geometry / Jacobian
         gm_mRk_
@@ -321,6 +322,7 @@ classdef SimulationDataStore < handle
 
             obj.cv_Rtrc_= n1(); obj.cv_Rmin_= n1();
             obj.cv_Rmax_= n1(); obj.cv_Rmn_ = n1(); obj.cv_Rnr_ = n1();
+            obj.cv_PposXtra_ = n3();
 
             obj.gm_mRk_  = n1(); obj.gm_cS_  = n1();
             obj.gm_gRk_  = n1(); obj.gm_gdop_= n1();
@@ -488,6 +490,9 @@ classdef SimulationDataStore < handle
             obj.cn_NEESv_(k)  = g_(entry,'NEES_vel',NaN);
             obj.cn_NEESc_(k)  = g_(entry,'NEES_clk',NaN);
             obj.cn_NEESa_(k)  = g_(entry,'NEES_att',NaN);
+
+            pox_ = g_(entry,'PposOffDiag_m2',nan(3,1));
+            obj.cv_PposXtra_(:,k) = pox_(:);
 
             % R summaries from Rdiag
             Rd = g_(entry,'Rdiag',[]);
@@ -915,9 +920,26 @@ classdef SimulationDataStore < handle
             end
 
             % --- Per-type NIS ---
+            % Preferred path: S-normalised (nu'*(S\nu), S=HPH'+R), sourced from Stage-57's
+            % EkfInnovationAccounting -- the statistically correct NIS. Fallback: the
+            % R-only localNis_ below, kept for callers that don't populate
+            % errStruct.ekfAccounting57 (e.g. hand-built errStruct in older/unit tests).
+            % R-only always reads >= the S-based value (S >= R in the PSD order), so it's
+            % a conservative (never worse than honest) approximation, not a correctness bug
+            % in this fallback role -- see project_stochastic_audit_rac3sigma memory.
             entry.NIS_code = 0; entry.NIS_doppler = 0; entry.NIS_carrier = 0;
             entry.NIS_twoWayTimeTransfer = 0;
-            if ~isempty(z) && ~isempty(h) && ~isempty(R) && numel(z) == numel(h)
+            hasS57_ = ~isempty(errStruct) && isfield(errStruct,'ekfAccounting57') && ...
+                       isfield(errStruct.ekfAccounting57,'physicalNIS');
+            if hasS57_
+                a57nis_ = errStruct.ekfAccounting57;
+                if isfield(errStruct,'codeNisS57') && isfinite(errStruct.codeNisS57)
+                    entry.NIS_code = errStruct.codeNisS57;
+                end
+                if isfinite(a57nis_.dopplerNIS);            entry.NIS_doppler = a57nis_.dopplerNIS;            end
+                if isfinite(a57nis_.carrierNIS);             entry.NIS_carrier = a57nis_.carrierNIS;            end
+                if isfinite(a57nis_.twoWayTimeTransferNIS);  entry.NIS_twoWayTimeTransfer = a57nis_.twoWayTimeTransferNIS; end
+            elseif ~isempty(z) && ~isempty(h) && ~isempty(R) && numel(z) == numel(h)
                 inn_all = z - h;
                 if ~isempty(errStruct) && isfield(errStruct,'measType_perRow') && ...
                         numel(errStruct.measType_perRow) == numel(z)
@@ -1295,6 +1317,11 @@ classdef SimulationDataStore < handle
             if storeFullThisEpoch; entry.estimate.P = ekf.P; end
             entry.estimatedPositionSigma_m   = sqrt(sum(Pdiag_(sm.r_idx)));
             entry.estimatedAttitudeSigma_rad = sqrt(sum(Pdiag_(sm.euler_idx)));
+
+            % Position-covariance off-diagonal (Pxy;Pxz;Pyz), so report-side RAC
+            % projections can use the full 3x3 (not just diag(P)) at every epoch.
+            Ppos_ = ekf.P(sm.r_idx, sm.r_idx);
+            entry.PposOffDiag_m2 = [Ppos_(1,2); Ppos_(1,3); Ppos_(2,3)];
 
             % --- Differential attitude ---
             if ~isempty(errStruct) && isfield(errStruct,'diffAttRows') && isstruct(errStruct.diffAttRows)
@@ -1768,6 +1795,9 @@ classdef SimulationDataStore < handle
             else
                 d.estimate.x=[]; d.estimate.Pdiag=[]; d.estimate.sigma=[]; d.Pdiag=[];
             end
+            % Position-covariance off-diagonal [Pxy;Pxz;Pyz], independent of nx_ (always
+            % 3 rows) -- lets report code build the full 3x3 ECEF position covariance.
+            d.PposOffDiag_m2 = obj.cv_PposXtra_(:,1:N);
             d.x = d.estimate.r_cm_ecef_m;  % position alias for analysis script
 
             % Errors

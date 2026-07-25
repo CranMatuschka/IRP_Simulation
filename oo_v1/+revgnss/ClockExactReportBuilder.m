@@ -939,12 +939,14 @@ classdef ClockExactReportBuilder
 
         function racSig = racPositionSigma_(diag, rEcef, vEcef, n)
             % racPositionSigma_  [3 x n] 1-sigma of the radial / along-track /
-            %   cross-track POSITION error, from the diagonal of the EKF position
-            %   covariance (states 1:3) projected into the RAC frame with the SAME
-            %   v_eff = v_ecef + omega x r convention as OrbitFrame.ecefToRacGeo.
-            %   This is a DIAGONAL projection (the compact store keeps only diag(P));
-            %   it gives the marginal per-axis variance, which for the GEO
-            %   radial<->clock degeneracy is already large on the radial axis.
+            %   cross-track POSITION error, from the FULL EKF position covariance
+            %   (states 1:3, including cross-covariance) projected into the RAC frame
+            %   with the SAME v_eff = v_ecef + omega x r convention as
+            %   OrbitFrame.ecefToRacGeo: sigma_axis = sqrt(basis' * Ppos * basis).
+            %   Falls back to the diagonal-only projection (sqrt(sum basis_i^2 * Pii))
+            %   for report data written before PposOffDiag_m2 existed -- the diagonal
+            %   projection under/over-states the band whenever the ellipse isn't
+            %   ECEF-axis-aligned (see project_stochastic_audit_rac3sigma memory).
             %   Returns [] if Pdiag is unavailable (callers then draw no band).
             racSig = [];
             try
@@ -953,6 +955,10 @@ classdef ClockExactReportBuilder
                     return;
                 end
                 Pxyz = max(d_.Pdiag(1:3,:), 0);               % [3 x N] x/y/z variance
+                Xoff = [];                                    % [3 x N] Pxy;Pxz;Pyz, if available
+                if isfield(d_,'PposOffDiag_m2') && size(d_.PposOffDiag_m2,1) == 3
+                    Xoff = d_.PposOffDiag_m2;
+                end
                 w = 7.2921150e-5;
                 try; w = revgnss.Constants.EARTH_OMEGA_RADPS; catch; end
                 omega = [0;0;w];
@@ -961,7 +967,12 @@ classdef ClockExactReportBuilder
                 for kk = 1:np
                     rk = rEcef(:,kk); veff = vEcef(:,kk) + cross(omega, rk);
                     [rH,aH,hH,ok] = revgnss.OrbitFrame.racBasis(rk, veff);
-                    if ok
+                    if ~ok; continue; end
+                    if ~isempty(Xoff) && kk <= size(Xoff,2) && all(isfinite(Xoff(:,kk)))
+                        p = Pxyz(:,kk); xo = Xoff(:,kk);
+                        Ppos = [p(1) xo(1) xo(2); xo(1) p(2) xo(3); xo(2) xo(3) p(3)];
+                        racSig(:,kk) = sqrt(max([rH'*Ppos*rH; aH'*Ppos*aH; hH'*Ppos*hH], 0));
+                    else
                         p = Pxyz(:,kk);
                         racSig(:,kk) = sqrt([ (rH.^2).'*p; (aH.^2).'*p; (hH.^2).'*p ]);
                     end
