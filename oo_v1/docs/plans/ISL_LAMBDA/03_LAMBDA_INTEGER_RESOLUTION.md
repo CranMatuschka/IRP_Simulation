@@ -320,3 +320,52 @@ than this feature, and inventing a number without them would be dishonest.
 improvement (39 -> 10 ps) at the cost of ~1.5x absolute position; integer AR works
 (SR=0.999) but moves neither, because the binding constraint is the observability wall.
 The relative/shape upside that motivated Route B remains **plausible but unproven here**.
+
+---
+
+## APPENDIX B — 8-seed paired validation at the CORRECTED error budget
+
+The Appendix-A results were produced at the defective `carrier.sigma_m = 0.002`. After the
+root cause was found (an over-tight `R`, not a rank deficiency — see the `masterConfig`
+table and `a03f13e`), the identical 8-seed paired campaign was re-run at `sigma_m = 0.20`.
+**24 runs, 0 errors.**
+
+| metric | A: code only | B: + carrier | paired diff | p (t) | p (Wilcoxon) | d_z | verdict |
+|---|---|---|---|---|---|---|---|
+| position RMS [m] | 0.6578 ± 0.2228 | 0.6877 ± 0.2158 | +4.5 % CI[−0.011,+0.071] | 0.126 | 0.142 | +0.61 | **not significant** |
+| clock RMS [m] | 0.01373 ± 0.0059 | 0.00754 ± 0.0041 | **−45.1 %** CI[−0.0116,−0.0008] | **0.031** | **0.042** | −0.95 | **SIGNIFICANT** |
+| mean NIS | 27.517 ± 0.442 | 30.268 ± 0.427 | +10.0 % | 1e−14 | 0.014 | +77 | significant, small |
+
+**Integer AR (D vs B) is null on every metric** (p = 0.95 / 0.59 / 0.99), with 8/8 seeds
+fixed at SR = 0.999. The ambiguity is already converged well inside a cycle, so fixing it
+removes a term that was never the binding constraint.
+
+**What the `R` correction changed** (arm B, same 8 seeds; arm A unchanged at 0.6578,
+proving nothing else moved):
+
+| | σ=0.002 | σ=0.20 |
+|---|---|---|
+| position RMS | 9.9756 m | **0.6877 m** (14.5× better) |
+| clock RMS | 0.0767 m | **0.0075 m** (10.2× better) |
+| mean NIS | 37.28 | 30.27 |
+
+**Ambiguity honesty:** `err/σ` mean 0.56, max 1.50 (was 2.14). A max of 1.50 over 24
+link-samples is ordinary Gaussian scatter (|e|>1.5σ occurs ~13 % of the time), not
+over-confidence.
+
+### Verdict
+
+At `σ = 0.20 m` the ISL carrier is **safe and beneficial**: receiver clock **45 % better
+(46 → 25 ps)** at **no statistically significant position cost**, with an honest ambiguity
+covariance.
+
+Two caveats that must travel with that claim:
+
+1. **NIS rises 10 %** (27.5 → 30.3, highly significant). The enormous t-statistic reflects
+   very low variance, NOT a large effect. Both arms sit ≫ 1 because of the pre-existing
+   observability wall, so the filter is not covariance-consistent either way — the carrier
+   makes a already-inconsistent filter slightly more so.
+2. **Integer AR remains unjustified here.** It is implemented, validated against MLAMBDA,
+   and correctly gated — but on this scenario it buys nothing measurable. Its value would
+   have to come from the relative/shape layer, which is architecturally unmeasurable today
+   (§ Appendix A).
