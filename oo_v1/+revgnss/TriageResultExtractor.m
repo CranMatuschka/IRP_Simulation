@@ -12,6 +12,7 @@ classdef TriageResultExtractor
             metrics.nTowers = revgnss.TriageResultExtractor.cfgNum_(cfg, {'scenario','nTowers'}, NaN);
             metrics.nReceivers = revgnss.TriageResultExtractor.cfgNum_(cfg, {'scenario','nReceivers'}, NaN);
 
+            ambIdx = [];
             if isfield(simOut, 'ekf') && ~isempty(simOut.ekf)
                 ekf = simOut.ekf;
                 metrics.nStates = ekf.nx;
@@ -20,10 +21,11 @@ classdef TriageResultExtractor
                 metrics.covarianceMinEig = min(eig((ekf.P + ekf.P')/2));
                 metrics.covarianceMaxEig = max(eig((ekf.P + ekf.P')/2));
                 metrics.covarianceCondition = cond(ekf.P);
+                ambIdx = revgnss.TriageResultExtractor.ambiguityStateIndices_(ekf);
             end
 
             if isfield(simOut, 'diag') && ~isempty(simOut.diag)
-                metrics = revgnss.TriageResultExtractor.fromDiag_(metrics, simOut.diag);
+                metrics = revgnss.TriageResultExtractor.fromDiag_(metrics, simOut.diag, ambIdx);
             elseif isfield(simOut, 'history') && isstruct(simOut.history)
                 metrics = revgnss.TriageResultExtractor.fromHistory_(metrics, simOut.history);
             end
@@ -44,7 +46,7 @@ classdef TriageResultExtractor
     end
 
     methods (Static, Access = private)
-        function metrics = fromDiag_(metrics, diagObj)
+        function metrics = fromDiag_(metrics, diagObj, ambIdx)
             t = diagObj.getTimeVector();
             metrics.nEpochs = numel(t);
             metrics.initialPositionError_m = revgnss.TriageResultExtractor.first_(diagObj.getPositionErrors());
@@ -85,8 +87,8 @@ classdef TriageResultExtractor
                 if isnan(metrics.nZwdStates) && isfield(logs, 'nZwdStates')
                     metrics.nZwdStates = max([logs.nZwdStates], [], 'omitnan');
                 end
-                if metrics.nAmbiguityStates > 0
-                    metrics.ambiguityRms_m = revgnss.TriageResultExtractor.ambiguityRms_(logs, metrics.nAmbiguityStates);
+                if metrics.nAmbiguityStates > 0 && ~isempty(ambIdx)
+                    metrics.ambiguityRms_m = revgnss.TriageResultExtractor.ambiguityRms_(logs, ambIdx);
                 end
             end
         end
@@ -122,13 +124,29 @@ classdef TriageResultExtractor
             end
         end
 
-        function v = ambiguityRms_(logs, nAmb)
+        function idx = ambiguityStateIndices_(ekf)
+            % ambiguityStateIndices_  Ambiguity state indices from the EKF state map.
+            %   The ambiguity block is NOT always contiguous with the 14 base states:
+            %   buildStateMap_ allocates 2*nTowers tower-clock states in between
+            %   whenever estimateTowerClocks is on (cfg.clock.mode =
+            %   'includeTowerClocksInEKF'), so the literal range x(15:14+nAmb) reads
+            %   tower clocks there.  Reuse the state-map gathering in
+            %   AmbiguityStateMetadata instead of assuming a layout.
+            idx = [];
+            meta = revgnss.AmbiguityStateMetadata.fromEkf(ekf);
+            if meta.available
+                idx = meta.stateIndices(meta.stateIndices > 0);
+            end
+        end
+
+        function v = ambiguityRms_(logs, ambIdx)
             vals = [];
+            ambIdx = ambIdx(:);
             for k = 1:numel(logs)
                 if isfield(logs(k), 'estimate') && isfield(logs(k).estimate, 'x')
                     x = logs(k).estimate.x;
-                    if numel(x) >= 14 + nAmb
-                        vals = [vals; x(15:14+nAmb)]; %#ok<AGROW>
+                    if numel(x) >= max(ambIdx)
+                        vals = [vals; x(ambIdx)]; %#ok<AGROW>
                     end
                 end
             end
