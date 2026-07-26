@@ -184,9 +184,18 @@ classdef IslCarrierTrackManager < handle
             % (cfg.measurements.carrier.slipDetection.*). An ISL crosslink arc and a ground
             % tower arc have unrelated slip statistics, and coupling the thresholds would
             % make an ISL-only change move the ground solution.
-            sd = struct('enable', false, 'threshold_m', 0.10, ...
+            sd = struct('enable', false, 'threshold_m', NaN, ...
                 'minEpochsBeforeDetect', 30, 'action', 'resetAndUse', ...
                 'resetSigma_m', 100);
+            % The detector tests the epoch-to-epoch change of the carrier prefit, whose
+            % noise is sqrt(2)*sigma_carrier (two independent draws). The threshold MUST
+            % therefore scale with the carrier sigma: a fixed 0.10 m threshold that was
+            % sane at sigma=2 mm produces continuous false slips at sigma=0.20 m (measured:
+            % 423 in a clean 500 s run). threshold_m = NaN (the default) means AUTO =
+            % k*sqrt(2)*sigma with k=5, so the two can never silently desync again.
+            sigCar = 0.20;
+            try; sigCar = cfg.measurements.isl.carrier.sigma_m; catch; end
+            autoThresh = 5 * sqrt(2) * sigCar;
             try
                 s = cfg.measurements.isl.carrier.slipDetection;
                 if isfield(s,'enable');                sd.enable                = logical(s.enable); end
@@ -197,6 +206,16 @@ classdef IslCarrierTrackManager < handle
             try
                 sd.resetSigma_m = cfg.measurements.isl.carrier.ambiguity.initialSigma_m;
             catch; end
+            if ~isfinite(sd.threshold_m) || sd.threshold_m <= 0
+                sd.threshold_m = autoThresh;              % AUTO, tied to the carrier sigma
+            elseif sd.enable && sd.threshold_m < 0.8 * autoThresh
+                % Below ~4-sigma of the prefit-difference noise the detector fires on noise.
+                warning('IslCarrierTrackManager:thresholdTooTight', ...
+                    ['ISL slip threshold %.4g m is tight for carrier sigma %.4g m ' ...
+                     '(prefit-difference noise is sqrt(2)*sigma = %.4g m). Expect false ' ...
+                     'slips; auto would use %.4g m.'], ...
+                    sd.threshold_m, sigCar, sqrt(2)*sigCar, autoThresh);
+            end
         end
 
     end

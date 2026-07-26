@@ -255,7 +255,11 @@ function cfg = i_e2eCfg(slipOn)
     cfg.measurements.isl.carrier.ambiguity.enable = true;
     cfg.measurements.isl.carrier.ambiguity.initialSigma_m = 100;
     cfg.measurements.isl.carrier.slipDetection.enable = slipOn;
-    cfg.measurements.isl.carrier.slipDetection.threshold_m = 0.10;
+    % AUTO threshold (NaN) = 5*sqrt(2)*carrier sigma. A FIXED threshold silently desyncs
+    % from the carrier sigma: 0.10 m was fine at sigma=2 mm but gives 423 false slips at
+    % the corrected sigma=0.20 m default, because the prefit-difference noise
+    % (sqrt(2)*sigma = 0.28 m) then exceeds the threshold outright.
+    cfg.measurements.isl.carrier.slipDetection.threshold_m = NaN;
     % leave minEpochsBeforeDetect at the masterConfig default (30): 3 is too short
     % to outlast the ambiguity acquisition transient (measured 3 false slips).
     cfg.measurements.isl.warmup_s = 300;      % must be > 0 (test_isl_carrier_row T8)

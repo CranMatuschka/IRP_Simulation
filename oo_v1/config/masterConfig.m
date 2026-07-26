@@ -1500,7 +1500,31 @@ cfg.measurements.isl.doppler.useInEKF = false;
 cfg.measurements.isl.doppler.sigma_mps = 0.02;
 cfg.measurements.isl.carrier.enable = false;
 cfg.measurements.isl.carrier.useInEKF = false;
-cfg.measurements.isl.carrier.sigma_m = 0.002;
+% ISL carrier 1-sigma [m]. This is the TOTAL error budget for the row, NOT the thermal
+% noise alone -- and that distinction is the difference between a working filter and a
+% diverging one.
+%
+% MEASURED (3600 s, 4 assets, 4 seeds, paired; see docs/plans/ISL_LAMBDA/03 appendix):
+%     sigma      posRMS      clkRMS      B_err/sigma
+%     (off)      0.581 m     0.01382 m      0.71
+%     0.002      13.57 m     0.12593 m      2.14    <- 23x WORSE position, ambiguity inconsistent
+%     0.05        1.337 m    0.00311 m      0.63
+%     0.20        0.644 m    0.00519 m      0.67    <- clock 2.7x better at ~1.1x position cost
+%     1.00        0.587 m    0.01153 m      0.74    <- carrier effectively inert
+%
+% WHY 2 mm IS WRONG: 2 mm is the THERMAL figure. The ISL carrier row's real error budget
+% must also cover the systematics it cannot separate. The row is
+% h = rho + b_rx - b_tx + B, so (b_rx + d, B_i - d) is an EXACT null direction of the
+% carrier rows (verified: ||H_carrier*v||=0); the ONLY thing anchoring it is the 0.3 m
+% code rows. Weighting the carrier at 2 mm therefore lets it dominate a direction it
+% cannot actually observe, and the error accumulates with arc length (2x at 900 s, 26x at
+% 3600 s). Phase wind-up and antenna PCV are also declared not-implemented, and they live
+% in this same budget.
+%
+% 0.20 m is chosen as the smallest value that keeps the ambiguity covariance HONEST
+% (B_err/sigma < 1) and position within ~1.1x of carrier-off while still delivering the
+% clock gain. Lower it only with evidence that the systematics above are modelled.
+cfg.measurements.isl.carrier.sigma_m = 0.20;
 % --- ISL carrier AMBIGUITY STATES (feature/ISL-LAMBDA). Default OFF. ---------------
 % One float ambiguity state per (ISL link x signal), appended strictly LAST in the
 % state vector so enabling this shifts NO existing index (golden-safe).
@@ -1533,7 +1557,14 @@ cfg.measurements.isl.carrier.ambiguity.processNoiseSigma_m_per_sqrt_s = 0;  % 0 
 % stale value (confidently wrong). Only 'resetAndUse' is implemented; the row is kept and
 % the inflated covariance absorbs the jump.
 cfg.measurements.isl.carrier.slipDetection.enable                = false;
-cfg.measurements.isl.carrier.slipDetection.threshold_m            = 0.10;
+% NaN = AUTO: 5*sqrt(2)*carrier sigma. The detector tests the epoch-to-epoch change of
+% the carrier prefit, whose noise is sqrt(2)*sigma, so a FIXED threshold silently desyncs
+% whenever sigma changes (measured: 0.10 m at sigma=0.20 m gave 423 false slips in a clean
+% 500 s run). Set a number only to override deliberately.
+% NOTE the honest consequence at sigma=0.20 m (~1.05 L1 cycles): the auto threshold is
+% ~1.41 m ~ 7 cycles, so SINGLE-cycle slips are undetectable -- a slip the size of the
+% noise cannot be seen. That is a real limit of the corrected error budget, not a bug.
+cfg.measurements.isl.carrier.slipDetection.threshold_m            = NaN;
 % Settle epochs after a row becomes EKF-ACTIVE (i.e. after the acquisition warm-up),
 % NOT after it is first built. MEASURED: 3 (the ground default) is too short -- the
 % ambiguity's ~lambda*N acquisition jump is still in progress, so detection fires on it,
