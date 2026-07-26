@@ -1014,6 +1014,29 @@ cfg.multiAsset.twoWayISL.delayCal.sigma_const_m = 0.01;   % per-link turn-around
 cfg.multiAsset.twoWayISL.delayCal.sigma_rw_m    = 0.003;  % per-link cal-bias slow random-walk part [m]
 cfg.multiAsset.twoWayISL.delayCal.tau_s         = 3600;   % cal-bias correlation time [s]
 cfg.multiAsset.twoWayISL.delayCal.nCorrCap      = 60;     % cap on tau/dt R-inflation (honest gate)
+% --- Two-way ISL LINK BUDGET: derive sigma_m from the link instead of typing it. ------
+% 'fixed' (default) keeps sigma_m exactly as written above -> byte-identical.
+% 'linkBudget' makes the PER-PAIR sigma scale with baseline length via free-space path
+% loss, anchored so that sigma(refDistance_m) == sigma_m. It converts the headline
+% relative-accuracy number from "IF you had a 1 cm device" into "with THIS link at THIS
+% range", which is the difference between an assumption and a result.
+% antennaModel is the physics that must be stated, not defaulted silently:
+%   'fixedAperture' (default) a dish of fixed diameter has G ~ f^2, exactly cancelling
+%                   the f^2 path loss -> sigma is FREQUENCY-INDEPENDENT (sigma ~ d only).
+%   'fixedGain'     constant dBi (patch/omni) -> the f^2 loss is uncompensated, so sigma
+%                   grows with frequency as well as distance.
+% Claiming Ka is automatically noisier than L-band is only true for 'fixedGain'.
+cfg.multiAsset.twoWayISL.linkBudget.model           = 'fixed';   % 'fixed' | 'linkBudget'
+cfg.multiAsset.twoWayISL.linkBudget.antennaModel    = 'fixedAperture';
+cfg.multiAsset.twoWayISL.linkBudget.refDistance_m   = 1000;      % sigma_m is defined HERE
+cfg.multiAsset.twoWayISL.linkBudget.refFrequency_Hz = 26e9;      % Ka crosslink reference
+cfg.multiAsset.twoWayISL.linkBudget.EIRP_dBW        = 15;
+cfg.multiAsset.twoWayISL.linkBudget.GT_dBK          = 5;
+% Two-way light-time: the first-order Sagnac CANCELS by reciprocity in a round trip
+% (Orekit-validated sub-mm); what survives is endpoint relative motion during the trip.
+% MICROMETRES at a 1 km formation baseline -- correct but inert here, relevant at 100 km+.
+% Reported as rel.lightTimeMax_m so the size is visible rather than assumed.
+cfg.multiAsset.twoWayISL.lightTime.enable           = false;
 
 % --- Satellite<->satellite TWO-WAY TIME TRANSFER ISL. Default OFF. -----
 % The two-way SUM path (range, clock-free baseline = SHAPE) is complemented by the two-way

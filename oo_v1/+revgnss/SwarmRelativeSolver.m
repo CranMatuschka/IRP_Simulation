@@ -86,15 +86,27 @@ classdef SwarmRelativeSolver
             out.shapeObservationSource = 'syntheticTwoWayISL';
 
             % --- Per-pair ISL noise: constant delay-cal bias (identity-keyed) + conservative R ---
-            [pairBias, pairR] = revgnss.SwarmRelativeSolver.islNoise_(cfg, pairs);
-            thermalSigma = revgnss.SwarmRelativeSolver.getNum_(cfg, {'multiAsset','twoWayISL','sigma_m'}, 0.01);
+            % meanPos supplies the per-pair BASELINE LENGTH so the thermal sigma can be
+            % derived from a link budget (sigma ~ distance) instead of one typed constant.
+            [pairBias, pairR, pairSigma] = revgnss.SwarmRelativeSolver.islNoise_(cfg, pairs, meanPos);
+            out.linkBudget = revgnss.ISLLinkBudget.describe(cfg, {'multiAsset','twoWayISL'}, 0.01);
+            out.pairSigma_m = pairSigma(:)';
             % Per-(pair,epoch) thermal, drawn once per pair from an identity-keyed stream.
+            % Sigma is now PER PAIR (a 5 km link is noisier than a 1 km link); with the
+            % link budget disabled every pairSigma equals the legacy scalar -> unchanged.
             thermal = zeros(nP, nEp);
             for p = 1:nP
                 node = pairs(p,1)*64 + pairs(p,2);
                 rs = RandStream('mt19937ar', 'Seed', revgnss.SwarmRelativeSolver.baseSeed_(cfg) + 7000 + node);
-                thermal(p,:) = thermalSigma * randn(rs, 1, nEp);
+                thermal(p,:) = pairSigma(p) * randn(rs, 1, nEp);
             end
+            % --- Light-time-aware two-way geometry (gated, default off) -----------------
+            % The synthetic observable used |r_i - r_k| (instantaneous). The physical
+            % two-way range differs by the motion during the round trip. Velocities are
+            % finite-differenced from the truth trajectories (none are stored).
+            ltOn = revgnss.SwarmRelativeSolver.getBool_(cfg, {'multiAsset','twoWayISL','lightTime','enable'}, false);
+            out.lightTimeOn = ltOn;
+            out.lightTimeMax_m = 0;
 
             % --- Per-epoch free-network shape solve ---------------------------------------------
             blRaw = nan(1,nEp); blSol = nan(1,nEp);
@@ -110,7 +122,14 @@ classdef SwarmRelativeSolver
                 zK = zeros(nP,1);
                 for p = 1:nP
                     i = pairs(p,1); k = pairs(p,2);
-                    zK(p) = norm(truthK(:,i) - truthK(:,k)) + pairBias(p) + thermal(p,kk);
+                    rho = norm(truthK(:,i) - truthK(:,k));
+                    if ltOn
+                        lt = revgnss.SwarmRelativeSolver.twoWayLightTime_( ...
+                            Truth, i, k, kk, tVec, rho);
+                        out.lightTimeMax_m = max(out.lightTimeMax_m, abs(lt));
+                        rho = rho + lt;
+                    end
+                    zK(p) = rho + pairBias(p) + thermal(p,kk);
                 end
 
                 [rHat, Pshape, weak] = revgnss.SwarmRelativeSolver.solveEpoch_(estK, zK, pairs, Winv, N);
@@ -329,7 +348,36 @@ classdef SwarmRelativeSolver
             aligned = R * (estK - cE) + cT;
         end
 
-        function [pairBias, pairR] = islNoise_(cfg, pairs)
+        function lt = twoWayLightTime_(Truth, i, k, kk, tVec, rho)
+            % twoWayLightTime_  Residual two-way light-time term [m].
+            %
+            % In a TWO-WAY exchange the first-order Sagnac/transport terms CANCEL by
+            % reciprocity (cross-validated sub-mm vs Orekit, tests/
+            % test_orekit_twoway_isl_crossvalidation.m). What survives is the RELATIVE
+            % motion of the two endpoints during the round trip 2*rho/c:
+            %
+            %   lt ~ (u . dv) * (rho/c)      u = unit baseline, dv = v_i - v_k
+            %
+            % Velocities are finite-differenced from the truth trajectories, since the
+            % relative layer stores positions only. At a 1 km formation baseline this term
+            % is MICROMETRES -- correct but inert; it only becomes relevant at the 100 km+
+            % baselines a wider formation would use. Reported via out.lightTimeMax_m so the
+            % magnitude is visible rather than assumed.
+            lt = 0;
+            n = numel(tVec);
+            if n < 2; return; end
+            a = max(1, kk-1); b = min(n, kk+1);
+            dt = tVec(b) - tVec(a);
+            if ~(dt > 0); return; end
+            vi = (Truth{i}(:,b) - Truth{i}(:,a)) / dt;
+            vk = (Truth{k}(:,b) - Truth{k}(:,a)) / dt;
+            d  = Truth{i}(:,kk) - Truth{k}(:,kk);
+            nd = norm(d); if nd < 1; return; end
+            u  = d / nd;
+            lt = (u.' * (vi - vk)) * (rho / revgnss.Constants.SPEED_OF_LIGHT_MPS);
+        end
+
+        function [pairBias, pairR, pairSigma] = islNoise_(cfg, pairs, meanPos)
             % Per-pair constant delay-cal bias (dominant, un-averageable floor) + conservative R.
             % The two-way-ISL delay-cal + thermal R/noise physics is self-contained here (the
             % equivalent joint-EKF two-way-ISL builder was retired). The delay-cal
@@ -345,11 +393,21 @@ classdef SwarmRelativeSolver
             nCap     = g({'multiAsset','twoWayISL','delayCal','nCorrCap'}, 60);
             dt       = g({'simulation','dt_s'}, 1);
             nCorr    = min(max(tau/max(dt,eps),1), nCap);
-            Rii      = sThermal^2 + nCorr*(sConst^2 + sRW^2);
             sBias    = sqrt(sConst^2 + sRW^2);
             nP = size(pairs,1);
-            pairBias = zeros(nP,1); pairR = Rii * ones(nP,1);
+            pairBias = zeros(nP,1); pairR = zeros(nP,1); pairSigma = zeros(nP,1);
+            haveGeom = nargin >= 3 && ~isempty(meanPos);
             for p = 1:nP
+                % PER-PAIR thermal sigma from the link budget (sigma ~ baseline length).
+                % With linkBudget.model='fixed' (default) this returns the legacy scalar
+                % for every pair, so the solver is byte-identical.
+                sP = sThermal;
+                if haveGeom
+                    dPair = norm(meanPos(:,pairs(p,1)) - meanPos(:,pairs(p,2)));
+                    sP = revgnss.ISLLinkBudget.sigma(cfg, dPair, {'multiAsset','twoWayISL'}, sThermal);
+                end
+                pairSigma(p) = sP;
+                pairR(p) = sP^2 + nCorr*(sConst^2 + sRW^2);
                 node = pairs(p,1)*64 + pairs(p,2);
                 rs = RandStream('mt19937ar', 'Seed', revgnss.SwarmRelativeSolver.baseSeed_(cfg) + node);
                 pairBias(p) = sBias * randn(rs);
