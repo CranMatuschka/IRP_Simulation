@@ -2061,10 +2061,13 @@ classdef ReportRunner
                     error('revgnss:ReportRunner:needsOrbitPropagator', ...
                         'Federated N>1 needs cfg.orbit.useOrbitPropagator=true (per-asset helix truth).');
                 end
+                % crossTrackSpread is now declared in masterConfig (default 1.0). The local
+                % "if missing, use 1.0" override that used to live here was REMOVED: it
+                % disagreed with SwarmFormation.crossAmp_, which reads a missing field as
+                % 0.0. Absence therefore meant 3-D here and PLANAR there, so merely WRITING
+                % the documented default into the config silently flipped the formation and
+                % moved this path by 876 m. One key, one default, one place.
                 cfgLocal = cfg;
-                if ~isfield(cfgLocal,'formation') || ~isfield(cfgLocal.formation,'crossTrackSpread')
-                    cfgLocal.formation.crossTrackSpread = 1.0;   % 3-D formation -> full shape observable
-                end
                 op = models.orbit.OrbitPropagator(cfgLocal.orbit);
                 [r0Cells, v0Cells] = revgnss.SwarmFormation.secondaryEciInitialStates(cfgLocal, op);
                 if isfield(base,'simulation') && isfield(base.simulation,'seed'); baseSeed = base.simulation.seed; end

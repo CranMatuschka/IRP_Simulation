@@ -16,7 +16,7 @@
 %   T1  spread = 0 (default) gives an EXACTLY rank-deficient LOS geometry
 %   T2  the unobservable direction is RADIAL-dominant - which is where the covariance lies
 %   T3  spread > 0 restores full rank, monotonically in the spread
-%   T4  default 0 keeps the formation byte-identical (regression safety)
+%   T4  the DEFAULT COLLISION is fixed: declared once in masterConfig (1.0), no override
 %   T5  HONESTY: spread does NOT cure the ~0.85 m radial bias (only ~9% at s=0.8), so this
 %       fixes the GEOMETRY, not the bias. Asserted so the two are never conflated.
 
@@ -66,27 +66,25 @@ fprintf('    sv3: 0 -> %s (monotonic): PASS\n', mat2str(round(sv3,5)));
 % ----------------------------------------------------------------
 % T4: default 0 is inert
 % ----------------------------------------------------------------
-fprintf('  T4: default spread = 0 keeps the formation unchanged ...\n');
+fprintf('  T4: default collision fixed - one key, one default, one place ...\n');
 
-% crossTrackSpread is deliberately NOT declared in masterConfig. SwarmFormation.crossAmp_
-% already defaults it to 0, so the knob works when set explicitly, and leaving it
-% undeclared keeps the frozen swarm-relative baseline untouched.
-%
-% ANOMALY, RECORDED DELIBERATELY: merely ADDING the line
-% cfg.formation.crossTrackSpread = 0.0 to masterConfig -- a value provably inert
-% (secondary initial states bit-identical, crossAmp = 1.0 either way) -- shifts
-% run_swarm_relative_regression by 876 m on assetFinalPos, reproducibly. The mechanism is
-% unidentified. It was NOT re-baselined: re-baselining for a change believed inert is
-% exactly what that regression exists to prevent. See the commit message.
+% RESOLVED: the default collision is fixed. crossTrackSpread is now declared ONCE in
+% masterConfig (1.0 = 3-D) and ReportRunner's local "if missing, use 1.0" override is
+% deleted. Previously the two disagreed -- crossAmp_ read a missing field as 0.0 while
+% ReportRunner injected 1.0 -- so ABSENCE meant 3-D federated / PLANAR single-EKF, and
+% merely writing the documented default into the config flipped the federated formation
+% and moved it by 876 m. One key, one default, one place.
 cfgD = masterConfig();
-assert(~isfield(cfgD.formation,'crossTrackSpread'), ...
-    ['T4 FAILED: crossTrackSpread is now declared in masterConfig. Adding it shifts the ' ...
-     'swarm-relative regression by 876 m for reasons not yet understood -- resolve that ' ...
-     'first, then update this test.']);
-[svA, ~] = i_losGeometry(0.0);
-[svB, ~] = i_losGeometry([]);      % knob absent entirely -> same fallback
-assert(max(abs(svA - svB)) < 1e-9, 'T4 FAILED: spread=0 differs from the absent-knob fallback');
-fprintf('    declared, default 0, identical to the legacy fallback: PASS\n');
+assert(isfield(cfgD.formation,'crossTrackSpread'), ...
+    'T4 FAILED: crossTrackSpread must be declared in masterConfig (single source of truth)');
+assert(cfgD.formation.crossTrackSpread == 1.0, ...
+    'T4 FAILED: default is %g, expected 1.0 (3-D, non-degenerate)', cfgD.formation.crossTrackSpread);
+% and NO local override may reintroduce the collision
+rrSrc = fileread(fullfile(rootDir,'+revgnss','ReportRunner.m'));
+assert(isempty(regexp(rrSrc,'crossTrackSpread\s*=\s*[0-9]','once')), ...
+    ['T4 FAILED: ReportRunner assigns crossTrackSpread again. That is the default ' ...
+     'collision returning -- the value must come from masterConfig alone.']);
+fprintf('    declared once (1.0), no ReportRunner override: PASS\n');
 
 % ----------------------------------------------------------------
 % T5: HONESTY -- this fixes the geometry, NOT the radial bias

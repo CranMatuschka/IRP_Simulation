@@ -854,6 +854,24 @@ cfg.perturbations.sunMoon.ephemeris = 'mg';
 cfg.formation.mode        = 'helix';   % only supported formation mode
 cfg.formation.baseline_m  = 1000.0;    % inter-satellite separation [m] (>500 m); changeable
 cfg.formation.phase0_rad  = 0.0;       % phase of the first secondary on the projected-circular ring
+% --- Cross-track spread: 0 = PLANAR helix (rank-deficient), 1 = fully 3-D. ------------
+% The classic projected-circular helix sets z = 2x for EVERY member, so all secondaries
+% lie in one plane. MEASURED consequence at spread 0: the matrix of ISL line-of-sight unit
+% vectors is RANK-2 (singular values [1.2566 1.1920 0.0000], sv3/sv1 = 2e-08) -- there is a
+% direction, radial-dominant [0.73 R, 0.33 A, 0.60 C], in which the ISL rows carry NO
+% information while the filter still shrinks the covariance there. That is why along-track
+% is covariance-honest (err/sigma 0.89) but radial and cross-track are not (8.35, 7.28).
+% s > 0 fans each member's cross-track amplitude over [1-s, 1+s] so the formation spans
+% 3-D; every member still flies a valid bounded CW relative orbit.
+%
+% DEFAULT 1.0 -- and this line MUST exist. It previously did not, and
+% ReportRunner.buildFederatedSetup_ carried a local "if missing, use 1.0" fallback while
+% SwarmFormation.crossAmp_ read a missing field as 0.0. Absence therefore meant 3-D in the
+% federated path and PLANAR in the single-EKF path, and simply WRITING the documented
+% default into the config flipped the federated formation and moved its results by 876 m.
+% The local override is deleted; this is now the single source of truth. See
+% tests/test_formation_rank_deficiency.m.
+cfg.formation.crossTrackSpread = 1.0;  % 0 = planar (rank-deficient); 1 = fully 3-D
 
 % --- Per-asset truth persistence (swarm runs only) -------
 % When nSpaceAssets > 1, ReportRunner persists every asset's truth trajectory
