@@ -39,8 +39,13 @@ function out = run_oo_v1(configPath)
         end
         assert(isfile(jsonPath), 'run_oo_v1:noJson', 'Config JSON not found: %s', configPath);
         ov  = jsondecode(fileread(jsonPath));
-        cfg = i_deepMerge(cfg, ov);
-        fprintf('Config overlay applied: %s\n', jsonPath);
+        [cfg, userPaths] = i_deepMerge(cfg, ov);
+        % Record what the SCENARIO owns. Downstream config resolution must not overwrite these
+        % (see docs/plans/TOGGLE_TRUTH/02_toggle_audit_violations.md): eight writers outside
+        % masterConfig currently do, in both directions, which is why e.g. setting
+        % errors.ionosphere.enable=false in a scenario had no effect at all.
+        cfg.provenance.explicit = userPaths;
+        fprintf('Config overlay applied: %s  (%d scenario-owned keys)\n', jsonPath, numel(userPaths));
     end
 
     % ---- Per-run output folder: output/Report_YYYYMMDD/Report_v###_G#S#R#/ --
@@ -97,18 +102,36 @@ function out = run_oo_v1(configPath)
 end
 
 % ---------------------------------------------------------------------------- %
-function base = i_deepMerge(base, ov)
+function [base, paths] = i_deepMerge(base, ov, prefix)
     % i_deepMerge  Recursively overlay struct OV onto struct BASE. Scalar-struct fields
     % recurse; everything else (values, arrays, cells, struct arrays) is replaced by OV's.
-    if ~isstruct(ov); base = ov; return; end
+    %
+    % Also returns PATHS: the dotted path of every LEAF the scenario actually wrote. This is
+    % the provenance record. It exists because after the merge a `false` written by
+    % masterConfig is byte-identical to a `false` written by the user, so nothing downstream
+    % could tell "the user asked for this" from "nobody said anything" -- which is why the
+    % config overlays in finalizeConfig were free to silently overwrite scenario values.
+    % Consumers must treat a path in this list as USER-OWNED and never overwrite it.
+    if nargin < 3; prefix = ''; end
+    paths = {};
+    if ~isstruct(ov)
+        base = ov;
+        if ~isempty(prefix); paths = {prefix}; end
+        return
+    end
     fn = fieldnames(ov);
     for i = 1:numel(fn)
         f = fn{i};
+        % jsondecode maps a leading underscore to 'x_'; those are comment keys, not config.
+        if startsWith(f, 'x_'); base.(f) = ov.(f); continue; end
+        if isempty(prefix); p = f; else; p = [prefix '.' f]; end
         if isfield(base, f) && isstruct(base.(f)) && isstruct(ov.(f)) && ...
                 isscalar(base.(f)) && isscalar(ov.(f))
-            base.(f) = i_deepMerge(base.(f), ov.(f));
+            [base.(f), sub] = i_deepMerge(base.(f), ov.(f), p);
+            paths = [paths, sub]; %#ok<AGROW>
         else
             base.(f) = ov.(f);
+            paths{end+1} = p; %#ok<AGROW>
         end
     end
 end

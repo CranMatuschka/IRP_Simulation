@@ -22,6 +22,20 @@ function cfg = realisticAtmosphereConfig(cfg)
 %   References: Saastamoinen 1972 / Davis 1985; Niell 1996; Klobuchar 1987; Bassiri & Hajj
 %   1993; Kaplan & Hegarty; Misra & Enge.
 
+%   SCENARIO-OWNED KEYS ARE NOT OVERWRITTEN. This overlay runs inside finalizeConfig, i.e.
+%   AFTER run_oo_v1 merges the scenario JSON, so every assignment below used to silently
+%   discard whatever the scenario asked for -- measured: errors.ionosphere.enable=false in a
+%   JSON resolved to 1. Any key listed in cfg.provenance.explicit (written by i_deepMerge) is
+%   now left alone. With no JSON, or for a key the JSON never mentions, behaviour is
+%   unchanged. See docs/plans/TOGGLE_TRUTH/02_toggle_audit_violations.md.
+
+    % Snapshot BEFORE the overlay, apply it unchanged, then put back every key the scenario
+    % owns. A wrapper rather than 40 guarded assignments: it cannot miss one, and the overlay
+    % body below stays exactly as it was.
+    own_ = {};
+    try; own_ = cfg.provenance.explicit; catch; end
+    preUser_ = cfg;
+
     % ---------------- Troposphere ----------------
     cfg.errors.troposphere.enable        = true;
     cfg.errors.troposphere.truth.enable  = true;   % set explicitly (expandEnableToggles already ran)
@@ -99,4 +113,42 @@ function cfg = realisticAtmosphereConfig(cfg)
     cfg.errors.ionosphere.scintillation.phaseScint.enable      = true;   % phase jitter -> truth carrier
     cfg.errors.ionosphere.scintillation.phaseScint.sigmaPhi_rad = 0.2;   % ~6 mm at L1 (disturbed)
     cfg.errors.ionosphere.scintillation.phaseScint.tau_s        = 1.5;   % s (time-correlated, not white)
+
+    % ---- Restore scenario-owned keys -------------------------------------------------
+    % Everything above is a DEFAULT for this profile. Any key the scenario JSON wrote is
+    % user-owned and wins. With no JSON, own_ is empty and this loop does nothing, so the
+    % resolved config is byte-identical to before.
+    for ii_ = 1:numel(own_)
+        p_ = own_{ii_};
+        try
+            v_ = i_getPath(preUser_, p_);
+            cfg = i_setPath(cfg, p_, v_);
+        catch
+            % path absent pre-overlay (a key the JSON introduced): nothing to restore
+        end
+    end
+end
+
+% ---------------------------------------------------------------------------------------
+function v = i_getPath(s, dotted)
+    k = strsplit(dotted, '.');
+    v = s;
+    for i = 1:numel(k)
+        if ~isstruct(v) || ~isfield(v, k{i})
+            error('realisticAtmosphereConfig:noPath', 'no such path: %s', dotted);
+        end
+        v = v.(k{i});
+    end
+end
+
+function s = i_setPath(s, dotted, v)
+    k = strsplit(dotted, '.');
+    if numel(k) == 1
+        s.(k{1}) = v;
+        return
+    end
+    if ~isfield(s, k{1}) || ~isstruct(s.(k{1}))
+        s.(k{1}) = struct();
+    end
+    s.(k{1}) = i_setPath(s.(k{1}), strjoin(k(2:end), '.'), v);
 end
