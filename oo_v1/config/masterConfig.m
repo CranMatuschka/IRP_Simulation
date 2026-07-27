@@ -1042,7 +1042,16 @@ cfg.multiAsset.secondaryOrbit.sigma_accel_mps2   = [];    % [] = inherit primary
 % are estimated states) AND towersObserveSecondaries (two-way is clock-free and rigid-motion
 % blind -> ground rows supply the clock/absolute anchor). nSpaceAssets=1 -> 0 pairs -> 0 rows
 % -> byte-identical golden. Sharpens the RELATIVE/shape solution only.
-cfg.multiAsset.twoWayISL.enable                 = false;  % master gate
+% ON BY DEFAULT. This is the single gate on the relative (shape) layer, read at
+% SwarmRelativeSolver.m:47. With it off, every swarm report printed
+% "-- (two-way ISL shape disabled)" instead of a baseline-solved and shape-error figure, so the
+% headline formation numbers were simply absent from the PDF -- and none of the scene_*.json
+% scenarios set it. It is a PURE CONFIG GATE: the solver needs no observable it does not
+% already have, so switching it on produces a genuine measurement, never a placeholder.
+% Inert for nSpaceAssets=1 (0 pairs -> 0 rows), so the single-asset goldens are byte-identical;
+% the SWARM relative digest does move, deliberately, because the relative solution is now
+% actually computed.
+cfg.multiAsset.twoWayISL.enable                 = true;   % master gate
 cfg.multiAsset.twoWayISL.links                  = 'all';  % 'all' pairs among estimated assets, or an M-by-2 [i k] list
 cfg.multiAsset.twoWayISL.sigma_m                = 0.01;   % white two-way ranging thermal 1-sigma [m] (cm-class wideband crosslink)
 cfg.multiAsset.twoWayISL.delayCal.sigma_const_m = 0.01;   % per-link turn-around+antenna-PCO cal bias, constant part [m] (33 ps = 1 cm)
