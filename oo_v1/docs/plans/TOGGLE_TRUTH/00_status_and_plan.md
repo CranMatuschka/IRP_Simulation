@@ -181,6 +181,124 @@ rather than supplementing the undifferenced rows) — but it is NOT started.
 this session's edits** (verified by stashing). `singleAssetAttitudeErrorNorm_deg` golden 4.866 vs
 current 0.737. That family has not been a working gate. Needs its own fix/re-freeze commit.
 
+### 3.0b UPDATE 2026-07-27c — what the toggles do in the BACKGROUND
+
+The report's toggle table is now truthful (§1 item 8, commit `2f30967`). This section is the
+separate question: **which config keys silently do nothing, and which silently override which.**
+All verdicts MEASURED through `masterConfig()` → `ConfigFactory.finalizeConfig()`.
+
+**The structural cause of all of it.** `run_oo_v1.m:31` calls `masterConfig()`, which writes
+every leaf AND runs both derivation steps — `expandEnableToggles` (`masterConfig.m:163`) and
+`realismGradeConfig` (`masterConfig.m:665`) — and only THEN, at `run_oo_v1.m:42`, is the
+scenario JSON merged. So both derivations run **before they can see what the user asked for**,
+and after the merge a `false` written by masterConfig is byte-identical to a `false` written by
+the user. That single ordering fact produces groups B and C below.
+
+#### Rank 1 — the atmosphere overlay OVERRIDES the individual enables
+`cfg.atmosphere.realistic` defaults **true**, and `applyAtmosphereProfile` →
+`realisticAtmosphereConfig` runs in `finalizeConfig` (i.e. AFTER the merge), setting the
+atmosphere keys **unconditionally**. Measured — the user writes, the run resolves:
+
+| user wrote | resolved to |
+|---|---|
+| `errors.ionosphere.enable=false` (+truth,+model) | **1 / 1 / 1** |
+| `errors.ionosphere.scintillation.enable=false` | **1** |
+| `errors.{iono,tropo}.stochastic.enable=false` | **1 / 1** |
+| `estimation.troposphereMode='none'` | **'perTowerZwd'** |
+| `measurements.codeMode='ionosphereFree'` | **'singleFrequency'** (clobbered, `ConfigFactory.m:576`) |
+
+And with `realistic=false`, `atmosphere.ionosphereFree=true` and `estimateIono=true` are
+**silently ignored** (`applyAtmosphereProfile` returns at `ConfigFactory.m:537-540`).
+
+**Why this is rank 1:** it owns the headline result. The 11.4 m floor is ionosphere-driven, and
+the obvious way to ablate it — `errors.ionosphere.enable=false` — is a NO-OP, so the ablation
+reads back "the ionosphere is not the cause". The working lever is
+`cfg.atmosphere.ionosphereFree`, which is what the `_iffree` twins use.
+
+#### Rank 2 — `errors.<effect>.enable` from a JSON is a SILENT NO-OP
+`expandEnableToggles` slaves twelve effects' `.truth.enable`/`.model.enable` to one master
+`.enable`, correctly — but runs pre-merge. Measured, JSON setting only the master:
+
+```
+errors.multipath.enable=true       -> enable=1  truth=0  model=0   NO-OP
+errors.hardwareDelay.enable=true   -> enable=1  truth=0  model=0   NO-OP
+effects.towerSurvey.enable=true    -> enable=1  truth=0  model=0   NO-OP
+effects.antennaPCV.enable=true     -> enable=1  truth=0  model=0   NO-OP
+physics.relativity.clock.enable=1  -> enable=1  truth=0  model=0   NO-OP
+```
+
+Physics and report both read the PAIR, never the master, so the config says on, the run does
+nothing, and the report honestly says off. `config/scenarios/realism.json` already works around
+this by hand-writing all three keys per effect — that triple-write is the workaround, not the design.
+
+#### Rank 3 — `realism.grade` from a JSON is a COMPLETE no-op
+`masterConfig.m:664-666` is the ONLY read of `cfg.realism.grade` in the codebase, and it runs
+pre-merge. Measured with `realism.grade=true` set after `masterConfig()`:
+`clock.templateSource=legacy` (realism wants `jowTable2p1`), `codeNoise.model=constant` (wants
+`cn0`), `errors.multipath.enable=0` (wants 1), `clocks.tower.product.sigmaBias_m=0.01` (wants 0.10).
+
+**CONSEQUENCE FOR OUR OWN SCENARIO — disclose:** the `scene_*_inc` family hand-copies every
+realism value, so those runs ARE realism-grade. **`config/scenarios/max_realism_G5S6R4_ts3600.json`
+does NOT hand-copy** — it sets `realism.grade` + a `_realism` note claiming R-1..R-10 and
+relies on the flag. So that run is **realism-labelled and realism-free**: its atmosphere is
+realistic (that overlay runs in finalizeConfig) but the caesium clock, IGS-RTS tower product
+sigma, C/N0 weighting and truth systematics are NOT applied. Any number quoted from it must
+not be described as realism-grade.
+
+`realism.directOverlay` has **zero consumers** — it is a comment shaped like a switch.
+`masterConfig` documents 14 `realism.include.*`; `realismGradeConfig` defaults **18**
+(`islCarrier`, `islLinkBudget`, `point34` undocumented).
+
+#### Rank 4 — two signals ⇒ IF combination
+Partly derived, partly hardwired, partly dead. `measurements.code.ionosphereFreeRows.*` are
+DEAD keys (only consumer unreachable); the live gates are `measurements.codeMode` for code and
+`CarrierIonoFreeRowBuilder.shouldCombine` for carrier, and **they disagree by default**
+(code raw, carrier IF). Now reported correctly in the table.
+
+#### The proposed fix — and why it is NOT applied yet
+A tri-state sentinel (`[]`/`'auto'` = derive, anything else = the user meant it) plus a
+provenance set from `i_deepMerge`, resolved in one post-merge `resolveCoupledDefaults` pass at
+the top of `finalizeConfig`. That location alone cures ranks 2 and 3, which exist only because
+their resolution runs pre-merge.
+
+**Adversarial review REFUTED the auto-rules as drafted**: they would hard-error three committed
+scenarios (`ideal_G5S1R4_ts3600_flat*.json`, `baseline_G5S1R4_ts3600_clocksZero.json`, which
+legitimately write `realistic=false` together with explicit `ionosphereFree`/`estimateIono`) and
+the golden fixture. Needs reworking before implementation.
+
+**Also found:** `revgnss.SimulationToggleManifest` has exactly ONE consumer in the repo —
+`tests/test_code_dcb_active_path.m:89`. Neither the report builder nor `ReportRunner` reads it,
+so the 29 manifest rows added in `d187c47` appear in NO pdf. The table the user sees is the
+`ClockExactReportBuilder` one fixed in `2f30967`.
+
+### 3.0c UPDATE — the +-3 sigma over-confidence, ANSWERED
+
+The flat +5.5 ps/s clock-drift offset is the **relativistic clock rate**, and it is
+**deliberately unmodelled**: `ClockModel.m:80-87` states the offset is "deliberately NOT part of
+fracFreq ... reaches the truth pseudorange as an (initially) unmodelled relativistic clock-rate
+signature". Truth phase climbs 0.1615 m/s (581.5 m/hour) while the drift ACCESSOR the report
+scores against excludes it. **Not a bug — an intentional realism effect.**
+
+RETRACTED: the first pass claimed relativity-off halves position error (7.794 -> 3.955 m). The
+verifier ran the missing 2x2: that holds only with the atmosphere ON. With atmosphere OFF,
+0.863 -> 0.863 m, i.e. **zero position cost**. It is an interaction, not a clean effect.
+
+**What IS unobservable — the DIFFERENCE (radial - b_rx), not the clock.** corr(radial, b_rx) at
+the final epoch: **TW0 -0.999898** (sigma_radial 6.390 m, sigma_b_rx 6.362 m = 21.2 ns);
+**TW1 -0.141** (0.089 m, 0.027 m = 90.4 ps). Two-way time transfer breaks it as designed.
+Independent confirmation from geometry: **VDOP (radial) 339-887 vs HDOP (along+cross) 13-34**,
+a stable ~25x ratio that does not improve with time.
+
+**Why errors sit outside +-3 sigma:** NEES_pos/3 = 27.8 (TW0) / 78.4 (TW1) while physical
+NIS/dof = 1.07 / 1.02. **NIS ~ 1 means the noise model is right; NEES >> 1 means the error is
+not noise** -- a slow common-mode term inside H's column space, which the filter explains by
+moving states rather than flagging, while P shrinks on Q and R (honest about the white part only).
+
+**The counter-intuitive part:** TW1 has SMALLER error than TW0 (11.4 vs 12.2 m) but far WORSE
+NEES (78 vs 28). Two-way collapsed P without touching the systematic, so the same physical error
+is now many more sigma. **Fixing the observability is what EXPOSED the over-confidence** -- it
+was always there, hidden under a 6 m sigma.
+
 ### 3.1 Attitude / inter-antenna bias  *(PARKED — see §3.0)*
 1. Build a real calibration **product**: derive from the same seeded draw as the truth minus a
    stated residual. **Risk to clear first:** `drawKeyed` must be idempotent for a repeated key,
