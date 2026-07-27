@@ -252,6 +252,17 @@ classdef DiffAttitudeBuilder
                 nValid, store.nTowers * store.nBaselines);
             % Attempt integer ambiguity resolution for delta_B.
             store = revgnss.BaselineCarrierAmbiguityResolver.resolve(store, cfg);
+            % Formal LAMBDA/Ps_LAMBDA assessment of that fix (Route A: between-antenna single
+            % differencing cancels both clocks, so dN here is a TRUE integer -- the only
+            % integer-ready parametrisation in this codebase). REPORTING ONLY: it annotates
+            % the store, it does not change delta_B or N_int. The resolver's per-baseline
+            % float covariance is DIAGONAL, so ILS provably degenerates to rounding and
+            % cannot return a different integer; what it adds is the rigorous bootstrapped
+            % success/failure rate the existing resolver lacks (it reports
+            % falseFixClassification='screenedNotFormal'). Internally gated on
+            % estimator.lambda.enable AND estimator.lambda.ground.enable, so this is inert
+            % by default and the goldens are untouched.
+            store.lambdaGroundAssessment = revgnss.integer.BaselineAmbiguityLambda.assess(store, cfg);
             store = revgnss.DiffAttitudeBuilder.defaultStoreFields(store, cfg);
         end
 

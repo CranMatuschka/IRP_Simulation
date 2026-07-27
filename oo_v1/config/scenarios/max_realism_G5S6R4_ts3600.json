@@ -1,0 +1,80 @@
+{
+  "_comment": "MAXIMUM-REALISM G5S6R4, 3600 s. Everything the simulation can switch on is on: realism grade (R-1..R-10), BOTH atmosphere layers, the full ISL crosslink stack (code + carrier + float ambiguities + cycle-slip detection), LAMBDA integer AR on ground and ISL, the physics-derived ISL link budget with light-time, two-way ISL, TWSTFT time transfer, the SRP-coefficient state, attitude from 4 receivers, and luni-solar + SRP perturbations. ISL is also kept INSIDE each per-asset EKF (keepIslInPerAssetEkf) so the crosslink contribution appears in the report -- at the cost of W1/W2 overlap, see the note in masterConfig. Run: run_oo_v1('max_realism_G5S6R4_ts3600.json')",
+
+  "scenario":   { "nTowers": 5, "nSpaceAssets": 6, "nReceivers": 4 },
+  "simulation": { "duration_s": 3600 },
+  "report":     { "runVersion": 1, "writePdf": true, "writeMat": true, "compileTex": "require" },
+
+  "_realism": "R-1..R-10: realistic caesium clock, IGS-RTS tower product sigma, C/N0 code weighting, multipath/hardware/PCV/survey/DCB truth systematics, relativistic clock, honest measurement floors, matched luni-solar + SRP, EOP/solid-Earth tide, inter-antenna carrier bias.",
+  "realism": { "grade": true, "directOverlay": true },
+
+  "_atmosphere": "The two master enables that are OFF in masterConfig. cfg.atmosphere.realistic is already true by default, so switching these on gives the Niell/Saastamoinen troposphere and the diurnal + topside + Klobuchar ionosphere with scintillation -- not the synthetic placeholder.",
+  "errors": {
+    "troposphere": { "enable": true, "stochastic": { "enable": true } },
+    "ionosphere":  { "enable": true, "stochastic": { "enable": true }, "scintillation": { "enable": true } }
+  },
+
+  "_isl": "Full one-way crosslink stack. carrier.sigma_m stays at the defensible 0.20 m default; slipDetection.threshold_m NaN auto-derives as 5*sqrt(2)*sigma so it can never desynchronise from R.",
+  "measurements": {
+    "carrierPhase": { "enable": true },
+    "carrierMode": "ekfFloat",
+    "isl": {
+      "enable": true,
+      "transmitters": "all",
+      "receiverAssetIndex": 1,
+      "warmup_s": 300,
+      "code":    { "enable": true, "useInEKF": true },
+      "carrier": {
+        "enable": true,
+        "useInEKF": true,
+        "ambiguity":     { "enable": true, "nSignals": 1, "initialSigma_m": 100 },
+        "slipDetection": { "enable": true, "minEpochsBeforeDetect": 30, "action": "resetAndUse" }
+      }
+    },
+    "_twstftNote": "measurements.twstft (SAT-SAT) is deliberately NOT enabled. It is a diagnostic scaffold that adds no EKF rows, and its requireIslTiming guard hard-errors unless isl.timing.enable is also set. The time transfer that actually does work here is multiAsset.twoWayTimeTransferISL (sat-sat, relative layer) plus measurements.twoWayTimeTransfer (tower<->spacecraft), which IS a real EKF observable: the range cancels by reciprocity so H has +1 on b_rx and no position column, breaking the GEO radial<->clock degeneracy.",
+    "twoWayTimeTransfer": { "enable": true, "useInEKF": true, "towers": "all" }
+  },
+
+  "_lambda": "External TU Delft LAMBDA 4.0. applyFix is TRUE because the ISL AR path is a no-op unless it is: with applyFix=false the resolver returns before ever being called, so LAMBDA would appear enabled while doing nothing. The safety is the resolver's OWN bootstrapped success-rate gate (0.999) plus the ratio test -- it refuses any fix it cannot justify, and partial fixes are rejected outright rather than fabricating integers. Expect refusal here: ISL carrier sigma 0.20 m is ~1.05 cycles at L1, so the success rate lands far below the gate and the run should report 'rejected' with the measured rate. That refusal IS the result. Ground AR acts on the ATTITUDE baselines (Route A), where between-antenna differencing cancels both clocks and dN is genuinely integer.",
+  "estimator": {
+    "lambda": {
+      "enable": true,
+      "toolboxPath": "/Users/ludwigmatuschka/Downloads/LAMBD4-master_2024_10_01",
+      "method": 3,
+      "nCands": 2,
+      "minSuccessRate": 0.999,
+      "ratioThreshold": 2.0,
+      "ground": { "enable": true },
+      "isl":    { "enable": true, "applyFix": true, "fixSigma_m": 0.001 }
+    },
+    "attitudeCarrierMode": "calibratedDifferentialAmbiguity",
+    "srpCoefficient": { "enable": true, "useInEKF": true }
+  },
+
+  "_crosslinkLayer": "Relative layer: two-way ISL with the physics-derived link budget (sigma from free-space path loss, anchored at 1 km) plus two-way light-time, and TWSTFT time transfer.",
+  "multiAsset": {
+    "keepIslInPerAssetEkf": true,
+    "twoWayISL": {
+      "enable": true,
+      "links": "all",
+      "linkBudget": { "model": "linkBudget", "antennaModel": "fixedAperture", "refDistance_m": 1000, "refFrequency_Hz": 26000000000 },
+      "lightTime": { "enable": true }
+    },
+    "twoWayTimeTransferISL": { "enable": true },
+    "federated": { "refAsset": 1, "savePerAssetMat": false, "parallel": true }
+  },
+
+  "_formation": "crossTrackSpread 1.0 = fully 3-D. At 0 the projected-circular helix puts z=2x for every member, making the ISL LOS matrix exactly rank-2.",
+  "formation": { "crossTrackSpread": 1.0 },
+
+  "_perturbations": "Truth-side luni-solar + SRP, matched in the EKF by the realism overlay (R-3).",
+  "orbit": {
+    "truth": {
+      "perturbations": {
+        "luniSolar": { "enable": true },
+        "srp": { "enable": true }
+      }
+    }
+  },
+  "perturbations": { "sunMoon": { "enable": true } }
+}

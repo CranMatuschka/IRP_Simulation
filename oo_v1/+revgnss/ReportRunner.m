@@ -100,8 +100,15 @@ classdef ReportRunner
             % written as ONE unified swarm .mat + PDF (docs/federated_swarm_architecture.md). The
             % single-asset case (nSpaceAssets<=1) falls through to the normal pipeline below and is
             % byte-identical to the golden. This is the single entry: run_oo_v1 -> runSingle -> here.
+            % A per-asset LEAF config carries the full constellation count (so the ISL builder
+            % has transmitters) but must NOT re-enter the swarm: it IS one member of a swarm
+            % already in flight. Forcing nSpaceAssets=1 used to be the implicit guarantee that
+            % no leaf could satisfy this predicate; with the count preserved that guarantee is
+            % gone, so singleAssetBase_ states it explicitly. Without this the chief's report
+            % re-run recursed into a second full 6-asset swarm and NO PDF was ever compiled.
             if isfield(cfg,'scenario') && isfield(cfg.scenario,'nSpaceAssets') && ...
-                    round(cfg.scenario.nSpaceAssets) > 1
+                    round(cfg.scenario.nSpaceAssets) > 1 && ...
+                    ~revgnss.ReportRunner.perAssetLeaf_(cfg)
                 out = revgnss.ReportRunner.runFederatedSwarm_(cfg, reportFolder, pdfStem, ...
                     pdfPath, matPath, writePdf, writeMat, version);
                 return;
@@ -457,6 +464,13 @@ classdef ReportRunner
                     try; cfg_kav.validation.scientificCampaign.enable = false; catch; end
                     % the KAV sub-run must not launch the Monte-Carlo ensemble.
                     try; cfg_kav.report.monteCarlo.enable = false; catch; end
+                    % KAV validates the GROUND attitude ambiguities; it needs no crosslink. On a
+                    % per-asset leaf with keepIslInPerAssetEkf on, cfg still carries the whole
+                    % constellation, so without this the 120 s sub-run rebuilds the full helix and
+                    % carries ISL ambiguity states that -- with warmup_s=300 > 120 -- never receive
+                    % a single measurement row: pure cost and a 100%-artefact sub-run.
+                    cfg_kav.scenario.nSpaceAssets = 1;
+                    try; cfg_kav.measurements.isl.enable = false; catch; end
                     out_kav = revgnss.ReportRunner.runSingle(cfg_kav);
                     r_kav   = out_kav.summary.attitudeImprovementRatio;
                     summary.knownAmbImprovementRatio = r_kav;
@@ -1789,6 +1803,18 @@ classdef ReportRunner
 
             % Reconstruct the chief's single-asset config -- identical to runFederatedEstimation asset refAsset.
             setup   = revgnss.ReportRunner.federatedSetup_(cfg);
+            % assetConfigForIndex_ re-centres cfg.orbit on member ai, so for ai>=2 SwarmFormation
+            % regenerates the neighbours as a helix around THAT member instead of the true
+            % constellation. Only asset 1 sees the physically real neighbour set. With ISL kept in
+            % the per-asset EKF those phantom neighbours become actual measurements, so a report
+            % built on refAsset>1 would be the physically wrong one with nothing saying so.
+            if revgnss.ReportRunner.keepIslInPerAssetEkf_(cfg) && refAsset ~= 1
+                warning('revgnss:ReportRunner:leafRefAssetNotChief', ...
+                    ['keepIslInPerAssetEkf is on and refAsset=%d. The delivered report is built ' ...
+                     'on a leaf whose ISL neighbours are a helix REGENERATED around member %d, ' ...
+                     'not the true constellation. Use refAsset=1 for a physically faithful ' ...
+                     'crosslink geometry.'], refAsset, refAsset);
+            end
             chiefCi = revgnss.ReportRunner.assetConfigForIndex_(setup, refAsset);
             chiefCi.report.reportFolder = reportFolder;
             chiefCi.report.stem         = stem;
@@ -2131,7 +2157,44 @@ classdef ReportRunner
         function base = singleAssetBase_(cfg)
             % A single-asset config: one estimated asset, no swarm/ISL/secondary machinery.
             base = revgnss.ReportRunner.stripSwarmEstimation_(cfg);
-            base.scenario.nSpaceAssets = 1;
+            % nSpaceAssets=1 leaves the ISL builder with ZERO transmitters, so stripping it
+            % here would make keepIslInPerAssetEkf a knob that changes nothing. When ISL is
+            % kept, the constellation must survive into the per-asset sim: the member is the
+            % estimated primary and the others are product beacons (multiAsset.mode='fast').
+            % CAVEAT: assetConfigForIndex_ re-centres cfg.orbit on member ai, so for ai>=2
+            % SwarmFormation regenerates the neighbours as a helix around THAT member rather
+            % than the true constellation. Same shape and baseline statistics, but only the
+            % chief (ai=1) sees the physically true neighbour set.
+            if ~revgnss.ReportRunner.keepIslInPerAssetEkf_(cfg)
+                base.scenario.nSpaceAssets = 1;
+            end
+            % LEAF MARKER (internal plumbing, never a user knob). federatedSetup_ is the sole
+            % caller, so this reaches all leaf consumers -- serial loop, parallel workers,
+            % parallel fallback, the chief report re-run, and the savePerAsset re-run -- and it
+            % survives ConfigFactory.finalizeConfig, which is what also covers the in-leaf
+            % known-ambiguity-validation sub-run. DO NOT rmfield it after the dispatch check:
+            % that would strip it from the KAV config and re-open the recursion.
+            if ~isfield(base,'multiAsset'); base.multiAsset = struct(); end
+            base.multiAsset.perAssetLeaf = true;
+        end
+
+        function tf = keepIslInPerAssetEkf_(cfg)
+            % The one place the toggle is read. See cfg.multiAsset.keepIslInPerAssetEkf.
+            tf = false;
+            if isfield(cfg,'multiAsset') && isfield(cfg.multiAsset,'keepIslInPerAssetEkf')
+                tf = logical(cfg.multiAsset.keepIslInPerAssetEkf);
+            end
+        end
+
+        function tf = perAssetLeaf_(cfg)
+            % perAssetLeaf_  True when this config IS one federated swarm member's single-asset
+            % config (planted by singleAssetBase_), so runSingle must run the single-asset
+            % pipeline instead of re-entering runFederatedSwarm_. Absent => false => today's
+            % behaviour exactly; the golden never plants it.
+            tf = false;
+            if isfield(cfg,'multiAsset') && isfield(cfg.multiAsset,'perAssetLeaf')
+                tf = logical(cfg.multiAsset.perAssetLeaf);
+            end
         end
 
         function c = stripSwarmEstimation_(cfg)
@@ -2154,8 +2217,23 @@ classdef ReportRunner
                     c.multiAsset.towerSecondary = ts;
                 end
             end
-            if isfield(c,'measurements') && isfield(c.measurements,'isl')
+            % ISL rows inside each per-asset EKF. Stripped by default so the per-asset
+            % filters (W1, ground) and the relative layer (W2, ISL/TWSTFT) stay
+            % informationally disjoint -- see cfg.multiAsset.keepIslInPerAssetEkf. Keeping
+            % them makes the ISL carrier visible in the swarm report at the cost of
+            % double-counting ISL between W1 and W2.
+            keepIsl = revgnss.ReportRunner.keepIslInPerAssetEkf_(cfg);
+            if isfield(c,'measurements') && isfield(c.measurements,'isl') && ~keepIsl
                 c.measurements.isl.enable = false;
+            end
+            % Sat-sat TWSTFT is a RELATIVE-LAYER diagnostic scaffold that adds no per-asset EKF
+            % rows, so it belongs with the multiAsset.twoWay* keys above. Stripping it also
+            % removes an asymmetry: its validateConfig requires nSpaceAssets>=2, so a config
+            % with twstft.code.enable=true would hard-error when the leaf is collapsed to one
+            % asset but load fine when keepIslInPerAssetEkf preserves the count -- i.e. the
+            % toggle would decide whether a config is loadable at all.
+            if isfield(c,'measurements') && isfield(c.measurements,'twstft')
+                c.measurements.twstft.enable = false;
             end
         end
 

@@ -66,6 +66,16 @@ classdef ReportRealityHelper
             if srpOn
                 expectedStates = expectedStates + 1;
             end
+            % ISL carrier-ambiguity states (one per active crosslink x signal), appended LAST
+            % by the EKF. Read from the SAME single source of truth the EKF sizes itself from
+            % (+filter/ReverseGNSSEKF.m) so the two cannot drift. Returns 0 whenever ISL or its
+            % ambiguity gate is off, so single-asset expectedStates is arithmetically unchanged.
+            % summary.nAmbiguityStates above counts GROUND ambiguities only; without this term
+            % a swarm leaf with the ISL block was off by exactly ambiguityStateCount and the
+            % PDF died here instead of compiling.
+            nIslAmb_ = 0;
+            try; nIslAmb_ = revgnss.ISLMeasurementBuilder.ambiguityStateCount(cfg); catch; end
+            expectedStates = expectedStates + nIslAmb_;
             nStates = revgnss.ReportRealityHelper.safeField_(summary, 'nStates', NaN);
             if isfinite(nStates) && nStates ~= expectedStates
                 error('ClockExactReportBuilder:stateTableCountMismatch', ...
@@ -238,7 +248,14 @@ classdef ReportRealityHelper
                     error('ClockExactReportBuilder:islDoubleCounting', ...
                         'One-way ISL code and two-way ISL range cannot both be EKF-used without a covariance model.');
                 end
-                if revgnss.ReportRealityHelper.safeField_(summary,'islCarrierUsedInEkf',false)
+                % ISL carrier may be EKF-used ONLY when the ISL ambiguity block exists: an
+                % unbiased carrier row needs its float ambiguity as an estimated state,
+                % otherwise the arc ambiguity biases the row and the filter is confidently
+                % wrong. This guard used to assume that block could never exist; it now
+                % checks, so the guard still fires for a carrier row with no ambiguity state.
+                nIslAmbG_ = 0;
+                try; nIslAmbG_ = revgnss.ISLMeasurementBuilder.ambiguityStateCount(cfg); catch; end
+                if revgnss.ReportRealityHelper.safeField_(summary,'islCarrierUsedInEkf',false) && nIslAmbG_ <= 0
                     error('ClockExactReportBuilder:islCarrierEkfUnsupported', ...
                         'ISL carrier is reported as EKF-used without ISL ambiguity states.');
                 end

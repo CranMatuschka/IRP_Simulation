@@ -1236,13 +1236,59 @@ classdef ClockExactReportBuilder
             else
                 tropSt = true;      tropNote = sprintf('Residual injected: model applies %.0f%% of the truth delay.', 100*tropBiasFrac);
             end
-            ionoMode2 = lower(CE.getCfgStr_(cfg,{'ionosphere','mode'},'off'));
-            switch ionoMode2
-                case 'off';           ionoSt = false;     ionoNote = 'Not applied (ionosphere.mode = off).';
-                case 'truthonly';     ionoSt = true;      ionoNote = 'Residual injected: truth-only ionosphere (model does not correct).';
-                case 'model';         ionoSt = 'matched'; ionoNote = 'Zero residual: model corrects the truth ionosphere.';
-                case 'ionospherefree';ionoSt = 'matched'; ionoNote = 'Removed by the L1/L2 ionosphere-free combination.';
-                otherwise;            ionoSt = true;      ionoNote = sprintf('mode: %s', ionoMode2);
+            % Ionosphere: derive from the LIVE gates, exactly as the troposphere block above
+            % does. This row used to read cfg.ionosphere.mode, which is a legacy key with ZERO
+            % physics consumers -- nothing in ErrorChain reads it and realisticAtmosphereConfig
+            % never updates it, so it sits at its 'off' default forever. A run with the full
+            % realistic ionosphere (tecGaussMarkov truth + diurnal TEC + stochastic + topside +
+            % higher-order + scintillation, Klobuchar-corrected) was therefore reported as
+            % "Disabled -- not applied", i.e. the report UNDER-claimed an active error source
+            % and a reader would conclude the ionosphere had not been modelled at all.
+            ionoTruthEn = CE.getLogical_(cfg,{'errors','ionosphere','truth','enable'},false);
+            ionoModelEn = CE.getLogical_(cfg,{'errors','ionosphere','model','enable'},false);
+            ionoCorr    = lower(CE.getCfgStr_(cfg,{'errors','ionosphere','model','correction'},'none'));
+            ionoTruthMd = CE.getCfgStr_(cfg,{'errors','ionosphere','modelType'},'');
+            ionoStateOn = strcmpi(CE.getCfgStr_(cfg,{'estimation','ionosphereMode'},'none'),'perTowerSlant');
+            % IF rows only cancel the ionosphere if the FILTER actually uses them; enable
+            % alone can leave them diagnostic while the L1 rows (still iono-bearing) drive
+            % the update.
+            ionoIfOn    = CE.getLogical_(cfg,{'measurements','code','ionosphereFreeRows','enable'},false) && ...
+                          CE.getLogical_(cfg,{'measurements','code','ionosphereFreeRows','useInEkf'},false);
+            ionoHighOrd = CE.getLogical_(cfg,{'errors','ionosphere','higherOrder','enable'},false);
+            ionoMode2   = lower(CE.getCfgStr_(cfg,{'ionosphere','mode'},'off'));
+            if ~ionoTruthEn
+                % Backward compatibility: a config that only ever set the legacy key still
+                % reports through the old switch rather than silently reading "off".
+                switch ionoMode2
+                    case 'truthonly';     ionoSt = true;      ionoNote = 'Residual injected: truth-only ionosphere (model does not correct).';
+                    case 'model';         ionoSt = 'matched'; ionoNote = 'Zero residual: model corrects the truth ionosphere.';
+                    case 'ionospherefree';ionoSt = 'matched'; ionoNote = 'Removed by the L1/L2 ionosphere-free combination.';
+                    otherwise;            ionoSt = false;     ionoNote = 'Not applied (no truth ionosphere).';
+                end
+            elseif ionoIfOn
+                % The IF combination cancels the FIRST-ORDER term only. ErrorChain's
+                % higherOrderIono_ injects the second/third-order residual that survives it,
+                % so with higherOrder on a real (cm-level) error still reaches the filter and
+                % 'matched' would overstate the cancellation.
+                if ionoHighOrd
+                    ionoSt = true;
+                    ionoNote = ['First order removed by the L1/L2 ionosphere-free combination; ' ...
+                        'the second/third-order residual survives it and reaches the filter.'];
+                else
+                    ionoSt = 'matched';
+                    ionoNote = 'Removed by the L1/L2 ionosphere-free combination (first order; higher order not modelled).';
+                end
+            elseif ionoStateOn
+                ionoSt = true;      ionoNote = 'Truth ionosphere injected; residual absorbed by the per-tower slant EKF state.';
+            elseif ionoModelEn && ~strcmpi(ionoCorr,'none')
+                ionoSt = true;
+                ionoNote = sprintf(['Residual injected: %s truth, corrected by the %s broadcast model. ' ...
+                    'The correction APPROXIMATES the truth, so a real residual survives.'], ...
+                    revgnss.ReportLabel.humanize(ionoTruthMd), ionoCorr);
+            elseif ionoModelEn
+                ionoSt = 'matched'; ionoNote = 'Zero residual: model corrects the truth ionosphere.';
+            else
+                ionoSt = true;      ionoNote = 'Residual injected: truth-only ionosphere (model does not correct).';
             end
             shapTruthEn = CE.getLogical_(cfg,{'physics','relativity','shapiro','truth','enable'},false);
             shapModelEn = CE.getLogical_(cfg,{'physics','relativity','shapiro','model','enable'},false);

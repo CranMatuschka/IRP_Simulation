@@ -906,6 +906,23 @@ cfg.multiAsset.estimateMode = 'off';
 %            towersObserveSecondaries + twoWayISL + ISL observability). Swarm-only
 %            (nSpaceAssets>=2). Flip this ONE field to switch fast<->honest.
 cfg.multiAsset.mode = 'fast';
+% --- ISL inside the per-asset EKFs (federated swarm only) ------------------
+% In the federated swarm each asset runs its own single-asset EKF (W1, ground rows) and a
+% separate read-only relative layer consumes the ISL/TWSTFT observables (W2). To keep W1
+% and W2 informationally DISJOINT -- so the same photon is never counted twice, once in the
+% per-asset covariance and again in the relative solution -- ReportRunner strips
+% measurements.isl.enable inside each per-asset EKF.
+%
+% false (default) W1/W2 disjoint. Per-asset covariance is honest w.r.t. the relative layer;
+%                 ISL contributes ONLY through the relative solver. Frozen behaviour.
+% true            ISL rows (code and, if enabled, carrier + ambiguity states) stay ACTIVE
+%                 inside every per-asset EKF, so the swarm report shows the ISL carrier
+%                 contribution directly. The ground and ISL information then OVERLAP: the
+%                 relative layer re-uses observables already absorbed by W1, so the
+%                 relative covariance is OPTIMISTIC by an unquantified factor. Diagnostic /
+%                 exploratory use -- do not quote relative sigmas from such a run as
+%                 validated. See docs/federated_swarm_architecture.md.
+cfg.multiAsset.keepIslInPerAssetEkf = false;
 % Loose a-priori on the secondary clock states (init draw AND stated P0 share these,
 % so initial NEES is O(1)). Deliberately << tower's 1000 m / 10 m/s: a GEO atomic
 % clock's broadcast a-priori is far better than an unknown ground beacon, yet loose
@@ -1251,7 +1268,13 @@ cfg.signals.L2.lambda_m      = sigL2Default_.wavelength_m;
 cfg.signals.L2.codeSigma0_m  = 0.45;
 cfg.signals.primary          = 'L1';   % primary signal for iono scaling
 cfg.signals.secondary        = 'L2';   % secondary for IF combination
-cfg.ionosphere.mode          = 'off';  % 'off'|'truthOnly'|'model'|'ionosphereFree'
+% DEPRECATED / DOCUMENTARY ONLY. 'off'|'truthOnly'|'model'|'ionosphereFree'. NOTHING in the
+% physics reads this: the live gates are cfg.errors.ionosphere.{enable,truth.enable,
+% model.enable,model.correction,modelType} (see +models/+errors/ErrorChain) and
+% cfg.atmosphere.realistic -> config/internal/realisticAtmosphereConfig. Setting this key
+% does NOT switch the ionosphere on or off. It is kept only so old configs that reference it
+% still parse; the report derives its ionosphere row from the errors.* gates.
+cfg.ionosphere.mode          = 'off';
 % Central signal list (names, Hz, boolean masks).
 % Populated by finalizeConfig from canonical names/enabledMask resolution.
 cfg.signals.names            = {'L1'};

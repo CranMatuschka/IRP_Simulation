@@ -121,6 +121,79 @@ function cfg = realismGradeConfig(cfg)
         cfg.measurements.isl.product.sigmaClock_m = V.islProductSigma.sigmaClock_m; % ~0.33 ns secondary clock
     end
 
+    % ---- ISL crosslink machinery. Default (grade=false) keeps the SIMPLE SIGMA crosslink:
+    % one constant two-way sigma, no carrier, no ambiguity states -- i.e. Plan A. Realism
+    % grade promotes it to the real observable: one-way code AND carrier rows, a float
+    % ambiguity state per link, cycle-slip detection, a physics-derived sigma from free-space
+    % path loss, and two-way light-time. Every VALUE below is chosen on the CONSERVATIVE
+    % side; see the notes on each.
+    %
+    % LAMBDA is deliberately NOT enabled here. Integer AR is an estimator choice, not a
+    % realism effect, and the measured ISL success rate is ~0.001 (sigma 2.3-3.7 cycles), so
+    % switching it on under a realism flag would add a machine that always refuses. Set
+    % cfg.estimator.lambda.* explicitly when you want it.
+    % ISL needs at least two represented space assets; ISLMeasurementBuilder.validateConfig
+    % hard-errors otherwise. goldenRealismScenarioConfig calls this function with
+    % nSpaceAssets=1, so without this guard the whole golden_realism_* family throws at
+    % finalizeConfig and the regression cannot even run.
+    nSA_isl_ = 1;
+    try; nSA_isl_ = max(1, round(cfg.scenario.nSpaceAssets)); catch; end
+    if inc.islCarrier && nSA_isl_ >= 2
+        iv = V.islCarrier;
+        cfg.measurements.isl.enable            = true;
+        cfg.measurements.isl.transmitters      = 'all';
+        cfg.measurements.isl.code.enable       = true;
+        cfg.measurements.isl.code.useInEKF     = true;
+        cfg.measurements.isl.carrier.enable    = true;
+        cfg.measurements.isl.carrier.useInEKF  = true;
+        % 0.20 m, NOT the mm-class figure a carrier phase suggests. The ISL carrier here is
+        % FLOAT-ambiguity only (no integer fix survives the success-rate gate), so the
+        % effective range accuracy is set by how well the float ambiguity is determined, not
+        % by the phase noise. A mm-class R here diverged the filter by 26x at 3600 s.
+        cfg.measurements.isl.carrier.sigma_m   = iv.carrierSigma_m;
+        % Ambiguity states: without them the carrier row is BIASED by the arc ambiguity and
+        % the filter is confidently wrong. initialSigma 100 m is a deliberately loose prior.
+        cfg.measurements.isl.carrier.ambiguity.enable         = true;
+        cfg.measurements.isl.carrier.ambiguity.initialSigma_m = iv.ambiguityInitialSigma_m;
+        % 0 = constant within an arc, which is what a true ambiguity IS. Any random walk here
+        % would let the state absorb real range error and flatter the result.
+        cfg.measurements.isl.carrier.ambiguity.processNoiseSigma_m_per_sqrt_s = 0;
+        % Slip detection re-inflates a slipped arc's ambiguity BEFORE the tight carrier R is
+        % applied. threshold_m NaN auto-derives as 5*sqrt(2)*sigma so it can never
+        % desynchronise from carrierSigma_m -- a hard-coded threshold produced 423 false slips.
+        cfg.measurements.isl.carrier.slipDetection.enable               = true;
+        cfg.measurements.isl.carrier.slipDetection.threshold_m           = NaN;
+        cfg.measurements.isl.carrier.slipDetection.minEpochsBeforeDetect = iv.slipSettleEpochs;
+        % Carrier rows must not enter the EKF before the ambiguity has had an arc to settle.
+        % A warmup of 0 with carrier.useInEKF gave confidently-wrong errors of 153/330/531 m
+        % at sigma=12 mm, so never shorten an already-longer warmup the scenario asked for.
+        warmNow = 0;
+        try; warmNow = cfg.measurements.isl.warmup_s; catch; end
+        if ~isscalar(warmNow) || ~isfinite(warmNow); warmNow = 0; end
+        cfg.measurements.isl.warmup_s = max(iv.warmup_s, warmNow);
+    end
+    if inc.islLinkBudget && nSA_isl_ >= 2
+        lb = V.islLinkBudget;
+        % The relative (shape) layer. Without this the two-way ISL gate is OFF and the swarm
+        % report has no baseline-solved or shape-error curve to draw at all.
+        cfg.multiAsset.twoWayISL.enable = true;
+        cfg.multiAsset.twoWayISL.links  = 'all';
+        % Sigma from free-space path loss instead of one constant at every range: a 10 km
+        % neighbour is genuinely noisier than a 1 km one. Anchored so sigma(refDistance)
+        % equals the legacy constant exactly.
+        cfg.multiAsset.twoWayISL.linkBudget.model           = 'linkBudget';
+        % fixedAperture: a real dish has G ~ f^2, which EXACTLY cancels the f^2 path loss, so
+        % sigma is frequency-independent. This is the physically correct default and the
+        % claim most often got backwards ("higher frequency = noisier").
+        cfg.multiAsset.twoWayISL.linkBudget.antennaModel    = 'fixedAperture';
+        cfg.multiAsset.twoWayISL.linkBudget.refDistance_m   = lb.refDistance_m;
+        cfg.multiAsset.twoWayISL.linkBudget.refFrequency_Hz = lb.refFrequency_Hz;
+        % Two-way light-time. First-order Sagnac cancels by reciprocity, so this is a
+        % micrometre-level correction at formation baselines -- included for correctness, not
+        % because it moves the answer.
+        cfg.multiAsset.twoWayISL.lightTime.enable           = true;
+    end
+
     % ---- R-8 (truth frame): uncorrected EOP (polar motion + UT1 rate) + solid-Earth tide on
     % the TRUTH tower positions. The model keeps constant-Omega + static towers, so the frame
     % mismatch (~9 m polar motion, ~cm-dm tide) survives z-h as a real residual.
@@ -193,6 +266,8 @@ function inc = i_resolveIncludes(cfg)
         'luniSolar',               true, ...   % R-3  matched luni-solar+SRP + retuned SNC (coupled)
         'relativity',              true, ...   % relativistic receiver-clock offset
         'islProductSigma',         true, ...   % ISL  realistic secondary product sigma
+        'islCarrier',              true, ...   % ISL  one-way code+carrier rows, float ambiguity states, slip detection
+        'islLinkBudget',           true, ...   % ISL  two-way shape layer: path-loss sigma + light-time
         'eop',                     true, ...   % R-8  uncorrected EOP frame residual (truth)
         'solidEarthTide',          true, ...   % R-8  solid-Earth tide (truth)
         'interAntennaCarrierBias', true, ...   % R-6  unknown inter-antenna carrier bias (truth)
@@ -225,6 +300,12 @@ function V = i_realismDefaults()
     V.honestFloors      = struct('sigmaFloor_m',0.01,'doppler_sigma_mps',0.03,'carrier_sigma_m',0.010);
     V.luniSolar         = struct('sigma_mps2',1e-6);
     V.islProductSigma   = struct('sigmaPos_m',0.10,'sigmaClock_m',0.10);
+    % ISL crosslink, conservative side. carrierSigma_m 0.20 is the FLOAT-ambiguity-limited
+    % figure, not the phase noise; slipSettleEpochs 30 avoids the 878 false slips a 3-epoch
+    % settle produced; warmup 300 s stops carrier rows entering before the arc has settled.
+    V.islCarrier        = struct('carrierSigma_m',0.20,'ambiguityInitialSigma_m',100, ...
+                                 'slipSettleEpochs',30,'warmup_s',300);
+    V.islLinkBudget     = struct('refDistance_m',1000,'refFrequency_Hz',26e9);
     V.eop               = struct('polarMotion_xp_arcsec',0.005,'polarMotion_yp_arcsec',0.005, ...
                                  'ut1Rate_error_msPerDay',0.05);
     V.point34           = struct( ...
