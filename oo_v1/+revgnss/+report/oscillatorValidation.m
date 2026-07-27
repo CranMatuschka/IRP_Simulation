@@ -1,10 +1,16 @@
 function oscillatorValidation(fid, plotPaths, stem, figDir, cfg)
 %OSCILLATORVALIDATION  "Oscillator Stability Validation" report section.
-%   Emits oscillator validation rows. The compact mode keeps only Allan deviation.
+%   ALLAN DEVIATION ONLY. The receiver clock-bias and clock-drift figures that used to follow
+%   it are duplicates of the same two figures in the State Estimation section
+%   (+revgnss/+report/stateEstimation.m:68 and :78), so this section repeated them verbatim.
+%
+%   The tower clock-product bar chart ('twrClocks') was ALSO removed here, but note it was NOT
+%   a duplicate -- it appeared nowhere else, so it is now absent from the report entirely.
+%   Re-add it to stateEstimation if it is wanted back.
+%
+%   cfg.report.oscillatorValidationMode is no longer consulted: the section is unconditionally
+%   Allan-only, so 'full' and 'allanOnly' would have been the same thing.
     CE = revgnss.ClockExactReportBuilder;
-    clkMode = CE.getCfgStr_(cfg, {'estimator','towerClockMode'}, 'perfectTruth');
-    mode = CE.getCfgStr_(cfg, {'report','oscillatorValidationMode'}, 'full');
-    allanOnly = strcmpi(mode, 'allanOnly');
     fprintf(fid, '\\section{Oscillator Stability Validation}\n');
     fprintf(fid, CE.plotTableHeader_());
 
@@ -16,26 +22,6 @@ function oscillatorValidation(fid, plotPaths, stem, figDir, cfg)
          'Slope $-0.5$ indicates white frequency noise; slope $+0.5$ indicates ' ...
          'random-walk frequency; flat region indicates frequency flicker. ' ...
          'No laboratory-grade calibration; synthetic oscillator parameters only.']);
-
-    if ~allanOnly
-        CE.writeRow_(fid, CE.figRef_(plotPaths,'clkErr',figDir,stem), ...
-            'Receiver Clock Bias Tracking', ...
-            ['Spacecraft receiver clock bias estimation error. ' ...
-             'Receiver clock sign is POSITIVE (adds to pseudorange). ' ...
-             'The clock bias converges as pseudorange innovations correct the clock state.']);
-
-        CE.writeRow_(fid, CE.figRef_(plotPaths,'clkDrift',figDir,stem), ...
-            'Clock Drift / Fractional Frequency', ...
-            ['Clock drift state (m/s equivalent). Brown-Hwang two-state model. ' ...
-             'Fractional frequency deviation = drift / c.']);
-
-        CE.writeRow_(fid, CE.figRef_(plotPaths,'twrClocks',figDir,stem), ...
-            'Tower Clock Product Validation', ...
-            ['Bar chart of per-tower clock truth bias at the final epoch. ' ...
-             sprintf('Tower clock model: %s. ', CE.esc_(revgnss.ReportLabel.humanize(clkMode))) ...
-             'Tower clock sign is NEGATIVE in the pseudorange model. ' ...
-             'Zero bar means truth and model clock agree.']);
-    end
 
     fprintf(fid, CE.plotTableFooter_());
     fprintf(fid, '\\clearpage\n');
