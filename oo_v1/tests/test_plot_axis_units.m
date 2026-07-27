@@ -98,4 +98,30 @@ assert(~isempty(regexp(src, 'normalizeAxisUnits_\(fig\)', 'once')), ...
     'T5 FAILED: tryPlot_ does not normalise; the main report plots would keep their multipliers');
 fprintf('    tryPlot_ + both direct-export producers hooked: PASS\n');
 
+% ----------------------------------------------------------------
+% T6 was ADDED AFTER A MISS. The first version of this test only exercised LINEAR axes and
+% asserted YAxis.Exponent==0, which does not apply to a log axis at all. The relative-layer
+% figure is semilogy, so it kept its 10^0 / 10^1 / 10^2 tick labels and shipped in a PDF with
+% exactly the notation this change exists to remove. Log SCALE is correct there -- the data
+% spans five decades and linear would flatten the solved curves into the axis -- so the fix is
+% plain-number tick LABELS.
+fprintf('  T6: log axes get plain-number tick labels ...\n');
+f5 = figure('Visible','off'); a5 = axes(f5);
+semilogy(a5, 1:100, logspace(-1,4,100)); ylabel(a5, 'formation error [cm]');
+drawnow;
+before = string(a5.YTickLabel);
+assert(any(contains(before,'^')), ...
+    'T6 PRECONDITION FAILED: MATLAB did not produce exponent labels, so this test proves nothing');
+revgnss.ClockExactReportBuilder.normalizeAxisUnits_(f5);
+after = string(a5.YTickLabel);
+assert(~any(contains(after,'^')), ...
+    'T6 FAILED: log tick labels still carry an exponent: %s', strjoin(after.', ', '));
+assert(strcmpi(a5.YScale,'log'), ...
+    'T6 FAILED: the axis was switched away from log. Five decades of data need log scale.');
+assert(any(strcmp(after,'1')) && any(strcmp(after,'100')), ...
+    'T6 FAILED: expected plain decade labels, got %s', strjoin(after.', ', '));
+fprintf('    %s -> %s, scale still log: PASS\n', ...
+    strjoin(before(1:min(3,end)).', ','), strjoin(after(1:min(3,end)).', ','));
+close(f5);
+
 fprintf('=== test_plot_axis_units: ALL PASS ===\n');

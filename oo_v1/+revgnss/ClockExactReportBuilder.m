@@ -443,8 +443,24 @@ classdef ClockExactReportBuilder
             axList = findall(fig, 'Type', 'axes');
             for ii = 1:numel(axList)
                 ax = axList(ii);
+                % LOG axes first. Their tick labels are inherently 10^n and are NOT the linear
+                % "Exponent" multiplier handled below -- an earlier version of this function
+                % missed them entirely and log plots kept their 10^0/10^1/10^2 ticks. Log scale
+                % is correct where the data spans decades (the relative-layer plot covers five),
+                % so the fix is plain-number tick labels, not a switch to linear which would
+                % flatten the solved curves into the axis.
+                try
+                    if numel(ax.YAxis) == 1 && strcmpi(ax.YScale, 'log')
+                        revgnss.ClockExactReportBuilder.plainLogTicks_(ax, 'Y');
+                    end
+                    if numel(ax.XAxis) == 1 && strcmpi(ax.XScale, 'log')
+                        revgnss.ClockExactReportBuilder.plainLogTicks_(ax, 'X');
+                    end
+                catch
+                end
                 try
                     if numel(ax.YAxis) ~= 1; continue; end        % yyaxis: two units, skip
+                    if strcmpi(ax.YScale, 'log'); continue; end   % handled above; do not rescale
                     lbl = '';
                     try; lbl = ax.YLabel.String; catch; end
                     if iscell(lbl); lbl = strjoin(lbl, ' '); end
@@ -477,6 +493,34 @@ classdef ClockExactReportBuilder
                 catch
                     % leave this axes untouched
                 end
+            end
+        end
+
+        function plainLogTicks_(ax, which)
+            % Replace a log axis's 10^n tick labels with plain numbers (0.1, 1, 10, 1000, ...).
+            % Keeps the log SCALE -- which is correct when the data spans decades -- while
+            % removing the exponent notation the reader does not want.
+            if strcmpi(which,'Y'); ticks = ax.YTick; else; ticks = ax.XTick; end
+            if isempty(ticks); return; end
+            lbl = cell(1, numel(ticks));
+            for k = 1:numel(ticks)
+                v = ticks(k);
+                if ~isfinite(v)
+                    lbl{k} = '';
+                elseif v == 0
+                    lbl{k} = '0';
+                elseif abs(v) >= 1e6 || abs(v) < 1e-4
+                    % Beyond this a plain number is longer than the exponent it replaces, so
+                    % keep it compact rather than printing 0.00001 or 10000000.
+                    lbl{k} = sprintf('%g', v);
+                else
+                    lbl{k} = strtrim(sprintf('%.10g', v));
+                end
+            end
+            if strcmpi(which,'Y')
+                ax.YTickMode = 'manual'; ax.YTickLabelMode = 'manual'; ax.YTickLabel = lbl;
+            else
+                ax.XTickMode = 'manual'; ax.XTickLabelMode = 'manual'; ax.XTickLabel = lbl;
             end
         end
 
