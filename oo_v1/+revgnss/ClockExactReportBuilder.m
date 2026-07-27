@@ -190,8 +190,10 @@ classdef ClockExactReportBuilder
             % Attitude diagnostics
             paths.attComp = CE.tryPlot_(figDir, [stem '_attitude_components.pdf'], @() ...
                 revgnss.ReportRealityHelper.plotAttitudeComponents(diag, t), cfg);
-            paths.attNorm = CE.tryPlot_(figDir, [stem '_attitude_norm.pdf'], @() ...
-                revgnss.ReportRealityHelper.plotAttitudeNorm(diag, t), cfg);
+            % 3D attitude error norm plot REMOVED (user request): it is the Euclidean norm of
+            % the roll/pitch/yaw errors already shown in full by the attitude-components plot
+            % and its final-120 s zoom, so it added no information. The generator
+            % ReportRealityHelper.plotAttitudeNorm is kept for direct/interactive use.
             paths.attSigma = CE.tryPlot_(figDir, [stem '_attitude_sigma.pdf'], @() ...
                 revgnss.ReportRealityHelper.plotAttitudeSigma(diag, t), cfg);
 
@@ -958,11 +960,23 @@ classdef ClockExactReportBuilder
             try
                 gdop = diag.getGDOPLike();
                 pdop = diag.getPDOPLike();
+                hdop = []; vdop = [];
+                try; hdop = diag.getHDOPLike(); catch; end
+                try; vdop = diag.getVDOPLike(); catch; end
                 if ~isempty(t) && ~isempty(gdop)
                     hold(ax,'on');
                     plot(ax,t,gdop,'b-','LineWidth',0.8,'DisplayName','GDOP');
                     if ~isempty(pdop)
                         plot(ax,t,pdop,'r--','LineWidth',0.8,'DisplayName','PDOP');
+                    end
+                    % HDOP/VDOP in the orbital RAC frame (a spacecraft has no local horizon).
+                    % VDOP is the RADIAL axis -- the one degenerate with the receiver clock at
+                    % GEO -- so it is expected to dominate and is the informative curve here.
+                    if ~isempty(vdop) && any(isfinite(vdop))
+                        plot(ax,t,vdop,'m-','LineWidth',0.8,'DisplayName','VDOP (radial)');
+                    end
+                    if ~isempty(hdop) && any(isfinite(hdop))
+                        plot(ax,t,hdop,'g-.','LineWidth',0.8,'DisplayName','HDOP (along+cross)');
                     end
                     legend(ax,'show','Location','best','FontSize',6);
                     xlabel(ax,'Time [s]','FontSize',7);

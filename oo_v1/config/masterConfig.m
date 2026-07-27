@@ -923,6 +923,12 @@ cfg.multiAsset.mode = 'fast';
 %                 exploratory use -- do not quote relative sigmas from such a run as
 %                 validated. See docs/federated_swarm_architecture.md.
 cfg.multiAsset.keepIslInPerAssetEkf = false;
+% Kabsch formation-alignment plot in the swarm report. Previously UNDECLARED: ReportRunner
+% read cfg.report.kabschAlignmentPlot.enable inside a try/catch that defaulted to false, so the
+% figure was silently absent from every swarm report and no config file mentioned it. It is a
+% standard formation diagnostic (best-fit rigid rotation between the estimated and true
+% constellation), so it is declared here and ON by default.
+cfg.report.kabschAlignmentPlot.enable = true;
 % Loose a-priori on the secondary clock states (init draw AND stated P0 share these,
 % so initial NEES is O(1)). Deliberately << tower's 1000 m / 10 m/s: a GEO atomic
 % clock's broadcast a-priori is far better than an unknown ground beacon, yet loose

@@ -32,8 +32,10 @@ classdef ReportRealityHelper
                 if hasLoggedEpochs
                     hasData = false;
                     try; hasData = ~isempty(diag.getAttitudeErrorVecs()); catch; end
-                    hasPlots = isfield(plotPaths, 'attComp') && isfile(plotPaths.attComp) && ...
-                        isfield(plotPaths, 'attNorm') && isfile(plotPaths.attNorm);
+                    % attNorm dropped from this check: the 3D attitude error norm plot was
+                    % removed as redundant with the attitude-components plot. Requiring a file
+                    % that is no longer generated would error every attitude run.
+                    hasPlots = isfield(plotPaths, 'attComp') && isfile(plotPaths.attComp);
                     if ~hasData || ~hasPlots
                         error('ClockExactReportBuilder:attitudePlotMissing', ...
                             'Attitude is estimated but attitude diagnostic data or plots are missing.');

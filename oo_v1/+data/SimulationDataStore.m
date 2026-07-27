@@ -112,6 +112,8 @@ classdef SimulationDataStore < handle
         gm_gRk_
         gm_gdop_
         gm_pdop_
+        gm_hdop_
+        gm_vdop_
         gm_tdop_
         gm_pclk_
         gm_ajN_
@@ -327,6 +329,7 @@ classdef SimulationDataStore < handle
             obj.gm_mRk_  = n1(); obj.gm_cS_  = n1();
             obj.gm_gRk_  = n1(); obj.gm_gdop_= n1();
             obj.gm_pdop_ = n1(); obj.gm_tdop_= n1();
+            obj.gm_hdop_ = n1(); obj.gm_vdop_= n1();
             obj.gm_pclk_ = n1(); obj.gm_ajN_ = n1();
             obj.gm_ajRk_ = n1(); obj.gm_ajCd_= n1();
 
@@ -514,6 +517,8 @@ classdef SimulationDataStore < handle
             obj.gm_gRk_(k)  = g_(entry,'geometryRank',NaN);
             obj.gm_gdop_(k) = g_(entry,'gdopLike',NaN);
             obj.gm_pdop_(k) = g_(entry,'pdopLike',NaN);
+            obj.gm_hdop_(k) = g_(entry,'hdopLike',NaN);
+            obj.gm_vdop_(k) = g_(entry,'vdopLike',NaN);
             obj.gm_tdop_(k) = g_(entry,'tdopLike',NaN);
             obj.gm_pclk_(k) = g_(entry,'positionClockCondition',NaN);
             obj.gm_ajN_(k)  = g_(entry,'attitudeJacobianNorm',NaN);
@@ -1191,6 +1196,7 @@ classdef SimulationDataStore < handle
             % --- Geometry / DOPs ---
             entry.geometryRank = NaN; entry.gdopLike = NaN;
             entry.pdopLike = NaN;    entry.tdopLike = NaN;
+            entry.hdopLike = NaN;    entry.vdopLike = NaN;
             entry.positionClockCondition = NaN;
             posClkIdx_ = [sm.r_idx(:); sm.b_rx_idx]';
             if heavyDiag_ && ~isempty(H) && ~isempty(R) && M_pr >= 4 && ...
@@ -1206,6 +1212,21 @@ classdef SimulationDataStore < handle
                         entry.pdopLike               = sqrt(max(trace(Q_geom_(1:3,1:3)), 0));
                         entry.tdopLike               = sqrt(max(Q_geom_(4,4),            0));
                         entry.positionClockCondition = cond(N_geom_);
+                        % HDOP / VDOP. The textbook definitions are in a ground user's local
+                        % horizon frame, which does not exist for a spacecraft; the meaningful
+                        % analogue is the orbital RAC frame -- "vertical" = RADIAL (the axis
+                        % degenerate with the receiver clock at GEO, so this is the number that
+                        % matters here) and "horizontal" = ALONG + CROSS track.
+                        try
+                            rr_ = asset.r_ecef_m(:); vv_ = asset.v_ecef_mps(:);
+                            uR_ = rr_ / norm(rr_);
+                            uC_ = cross(rr_, vv_); uC_ = uC_ / norm(uC_);
+                            uA_ = cross(uC_, uR_);
+                            T_   = [uR_ uA_ uC_].';               % ECEF -> RAC
+                            Qr_  = T_ * Q_geom_(1:3,1:3) * T_.';
+                            entry.vdopLike = sqrt(max(Qr_(1,1), 0));
+                            entry.hdopLike = sqrt(max(Qr_(2,2) + Qr_(3,3), 0));
+                        catch; end
                     catch; end
                 end
             end
@@ -1467,6 +1488,17 @@ classdef SimulationDataStore < handle
 
         function v = getGDOPLike(obj)
             v = obj.gm_gdop_(1:obj.nEpochs);
+        end
+
+        function v = getHDOPLike(obj)
+            % Horizontal DOP in the orbital RAC frame: along-track + cross-track.
+            v = obj.gm_hdop_(1:obj.nEpochs);
+        end
+
+        function v = getVDOPLike(obj)
+            % Vertical DOP in the orbital RAC frame: RADIAL -- the axis degenerate
+            % with the receiver clock at GEO, so this is the diagnostic that matters.
+            v = obj.gm_vdop_(1:obj.nEpochs);
         end
 
         function v = getPDOPLike(obj)
