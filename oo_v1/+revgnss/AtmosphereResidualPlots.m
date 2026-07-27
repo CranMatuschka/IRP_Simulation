@@ -111,6 +111,8 @@ classdef AtmosphereResidualPlots
     methods (Static, Access = private)
         function save_(fig, pngPath)
             try
+                % Rescale into readable units so no axis carries a x10^-n multiplier.
+                revgnss.ClockExactReportBuilder.normalizeAxisUnits_(fig); 
                 exportgraphics(fig, pngPath, 'Resolution', 150);
             catch
                 print(fig, pngPath, '-dpng', '-r150');

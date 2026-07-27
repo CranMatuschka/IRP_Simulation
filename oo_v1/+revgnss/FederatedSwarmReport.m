@@ -30,11 +30,15 @@ classdef FederatedSwarmReport
                 grid on; xlabel('time [h]'); ylabel('absolute position error [m]');
                 title('Per-satellite absolute position error (each independent EKF)');
                 legend('Location','best'); set(gca,'FontSize',11);
+                % Rescale into readable units so no axis carries a x10^-n multiplier.
+                revgnss.ClockExactReportBuilder.normalizeAxisUnits_(f1); 
                 exportgraphics(f1, fullfile(folder, [absStem '.png']), 'Resolution', 130); close(f1);
                 absName = [absStem '.png'];
             catch; end
             try
                 f2 = revgnss.FederatedSwarmReport.plotRelativeLayer_(t, rel);
+                % Rescale into readable units so no axis carries a x10^-n multiplier.
+                revgnss.ClockExactReportBuilder.normalizeAxisUnits_(f2); 
                 exportgraphics(f2, fullfile(folder, [relStem '.png']), 'Resolution', 130); close(f2);
                 relName = [relStem '.png'];
             catch; end
@@ -42,6 +46,8 @@ classdef FederatedSwarmReport
                 try
                     f3 = revgnss.FederatedSwarmReport.plotKabschAlignment_(results);
                     if isgraphics(f3)
+                        % Rescale into readable units so no axis carries a x10^-n multiplier.
+                        revgnss.ClockExactReportBuilder.normalizeAxisUnits_(f3); 
                         exportgraphics(f3, fullfile(folder, [kabschStem '.png']), 'Resolution', 160);
                         close(f3);
                         kabschName = [kabschStem '.png'];
@@ -76,16 +82,22 @@ classdef FederatedSwarmReport
                 grid on; xlabel('time [h]'); ylabel('absolute position error [m]');
                 title('Per-satellite absolute position error (each independent EKF)');
                 legend('Location','best'); set(gca,'FontSize',11);
+                % Rescale into readable units so no axis carries a x10^-n multiplier.
+                revgnss.ClockExactReportBuilder.normalizeAxisUnits_(f1); 
                 exportgraphics(f1, png1, 'Resolution', 130); close(f1);
             catch; end
             try
                 f2 = revgnss.FederatedSwarmReport.plotRelativeLayer_(t, rel);
+                % Rescale into readable units so no axis carries a x10^-n multiplier.
+                revgnss.ClockExactReportBuilder.normalizeAxisUnits_(f2); 
                 exportgraphics(f2, png2, 'Resolution', 130); close(f2);
             catch; end
             if doKabsch
                 try
                     f3 = revgnss.FederatedSwarmReport.plotKabschAlignment_(results);
                     if isgraphics(f3)
+                        % Rescale into readable units so no axis carries a x10^-n multiplier.
+                        revgnss.ClockExactReportBuilder.normalizeAxisUnits_(f3); 
                         exportgraphics(f3, png3, 'Resolution', 160); close(f3);
                     end
                 catch; end

@@ -430,6 +430,88 @@ classdef ClockExactReportBuilder
         end
 
         % ................................................................
+        function normalizeAxisUnits_(fig)
+            % normalizeAxisUnits_  Remove the "x10^-3" style axis multiplier from every axes by
+            % rescaling the DATA into a sensible unit and saying so in the label -- e.g. metres
+            % -> cm/mm, seconds -> ns/ps. Merely setting Exponent=0 would leave "0.000001".
+            %
+            % Deliberately conservative: each axes is attempted independently inside try/catch,
+            % and it BAILS (leaving the axes exactly as it was) whenever rescaling could be
+            % wrong -- a yyaxis pair, an unlabelled or unrecognised unit, mixed-magnitude
+            % children, or anything non-finite. Worst case is today's behaviour for that one
+            % axes; it can never corrupt a curve.
+            axList = findall(fig, 'Type', 'axes');
+            for ii = 1:numel(axList)
+                ax = axList(ii);
+                try
+                    if numel(ax.YAxis) ~= 1; continue; end        % yyaxis: two units, skip
+                    lbl = '';
+                    try; lbl = ax.YLabel.String; catch; end
+                    if iscell(lbl); lbl = strjoin(lbl, ' '); end
+                    if isempty(lbl); continue; end
+                    tok = regexp(lbl, '\[([^\]]+)\]', 'tokens', 'once');
+                    if isempty(tok); continue; end
+                    unit = strtrim(tok{1});
+
+                    kids = findall(ax, '-property', 'YData');
+                    if isempty(kids); continue; end
+                    mx = 0; any_ = false;
+                    for k = 1:numel(kids)
+                        y = kids(k).YData(:); y = y(isfinite(y));
+                        if isempty(y); continue; end
+                        mx = max(mx, max(abs(y))); any_ = true;
+                    end
+                    if ~any_ || mx <= 0 || ~isfinite(mx); continue; end
+
+                    [f, newUnit] = revgnss.ClockExactReportBuilder.pickUnitScale_(mx, unit);
+                    if f == 1 || ~isfinite(f)
+                        ax.YAxis.Exponent = 0;   % already readable; just kill any multiplier
+                        continue
+                    end
+                    for k = 1:numel(kids)
+                        kids(k).YData = kids(k).YData * f;
+                    end
+                    ax.YLabel.String = strrep(lbl, ['[' unit ']'], ['[' newUnit ']']);
+                    ax.YLimMode = 'auto';
+                    ax.YAxis.Exponent = 0;
+                catch
+                    % leave this axes untouched
+                end
+            end
+        end
+
+        function [f, newUnit] = pickUnitScale_(mx, unit)
+            % Choose a multiplier so the largest plotted value lands in a readable range, and
+            % return the matching unit string. f=1 means "leave the data alone".
+            f = 1; newUnit = unit;
+            u = lower(strtrim(unit));
+            switch u
+                case {'m','metres','meters'}
+                    if     mx < 1e-5, f = 1e9;  newUnit = 'nm';
+                    elseif mx < 1e-2, f = 1e3;  newUnit = 'mm';
+                    elseif mx < 1,    f = 1e2;  newUnit = 'cm';
+                    end
+                case {'s','sec','seconds'}
+                    if     mx < 1e-9, f = 1e12; newUnit = 'ps';
+                    elseif mx < 1e-6, f = 1e9;  newUnit = 'ns';
+                    elseif mx < 1e-3, f = 1e6;  newUnit = '\mus';
+                    elseif mx < 1,    f = 1e3;  newUnit = 'ms';
+                    end
+                case {'m/s','mps'}
+                    if     mx < 1e-3, f = 1e6;  newUnit = '\mum/s';
+                    elseif mx < 1,    f = 1e3;  newUnit = 'mm/s';
+                    end
+                case {'deg','degrees'}
+                    if mx < 1, f = 1e3; newUnit = 'mdeg'; end
+                case {'rad'}
+                    if     mx < 1e-3, f = 1e6;  newUnit = '\murad';
+                    elseif mx < 1,    f = 1e3;  newUnit = 'mrad';
+                    end
+                otherwise
+                    % Unknown unit: do NOT invent a prefix. Exponent suppression only.
+            end
+        end
+
         function outPath = tryPlot_(figDir, fname, plotFcn, cfg)
             % tryPlot_  Run plotFcn, export vector PDF (default) or PNG, return path or ''.
             %
@@ -456,6 +538,9 @@ classdef ClockExactReportBuilder
                 end
                 cleanupObj = onCleanup( ...
                     @() revgnss.ClockExactReportBuilder.safeCloseFig_(fig)); %#ok<NASGU>
+                % Rescale into readable units BEFORE export so no figure carries a "x10^-n"
+                % axis multiplier. Every plot in the report funnels through here.
+                revgnss.ClockExactReportBuilder.normalizeAxisUnits_(fig);
                 set(fig, 'Visible',        'off');
                 set(fig, 'Color',          'white');
                 set(fig, 'InvertHardcopy', 'off');
