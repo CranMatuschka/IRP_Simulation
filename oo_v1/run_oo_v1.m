@@ -19,7 +19,7 @@ function out = run_oo_v1(configPath)
 %
 % Output (per-run folder):
 %   output/Report_YYYYMMDD/Report_v###_G#S#R#_TW#/Report_v###_ts#_G#S#R#_TW#.{pdf,mat,out,tex}
-%   output/latest_<configName>.{pdf,mat}   (convenience pointers to the most recent run)
+%   output/latest/latest_<configName>.{pdf,mat}  (pointers to the most recent run)
 
     close all;
     thisDir = fileparts(mfilename('fullpath'));
@@ -61,18 +61,20 @@ function out = run_oo_v1(configPath)
     % ---- Run the pipeline (single-asset OR federated swarm, chosen inside) --
     out = revgnss.ReportRunner.runSingle(cfg);
 
-    % ---- Convenience latest_* pointers at the output root ------------------
+    % ---- Convenience latest_* pointers in output/latest/ -------------------
+    % Copies only; a cloud-sync copy timeout must NOT fail the run (the primary
+    % report is already written in runFolder).
+    latestDir = fullfile(outputDir, 'latest');
+    if ~isfolder(latestDir); mkdir(latestDir); end
     fprintf('\nRun folder: %s\n', runFolder);
     if cfg.report.writePdf && isfield(out,'pdfPath') && isfile(out.pdfPath)
-        % The latest_* copy is a convenience pointer only; a cloud-sync copy timeout must
-        % NOT fail the run (the primary report is already written in runFolder).
-        try; copyfile(out.pdfPath, fullfile(outputDir, sprintf('latest_%s.pdf', configName)));
+        try; copyfile(out.pdfPath, fullfile(latestDir, sprintf('latest_%s.pdf', configName)));
         catch me; fprintf('latest_ PDF copy skipped: %s\n', me.message); end
         fprintf('PDF: %s\n', out.pdfPath);
         try; open(out.pdfPath); catch; end
     end
     if cfg.report.writeMat && isfield(out,'matPath') && isfile(out.matPath)
-        try; copyfile(out.matPath, fullfile(outputDir, sprintf('latest_%s.mat', configName)));
+        try; copyfile(out.matPath, fullfile(latestDir, sprintf('latest_%s.mat', configName)));
         catch me; fprintf('latest_ MAT copy skipped: %s\n', me.message); end
         fprintf('MAT: %s\n', out.matPath);
     end

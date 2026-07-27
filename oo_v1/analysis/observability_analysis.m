@@ -2,7 +2,7 @@ function observability_analysis(matPath)
 % observability_analysis  Quantify the position<->clock degeneracy of the
 % single-asset reverse-GNSS scenario, and whether an external clock anchor fixes it.
 %
-%   observability_analysis                 % uses output/latest_singleAssetCarrierAttitude.mat
+%   observability_analysis                 % uses output/latest/latest_singleAssetCarrierAttitude.mat
 %   observability_analysis('/path/run.mat')
 %
 % Produces three results and a summary figure (output/observability_summary.png):
@@ -22,7 +22,7 @@ function observability_analysis(matPath)
     root = fileparts(here);
     addpath(root); addpath(fullfile(root, 'config'));
     if nargin < 1 || isempty(matPath)
-        matPath = fullfile(root, 'output', 'latest_singleAssetCarrierAttitude.mat');
+        matPath = fullfile(root, 'output', 'latest', 'latest_singleAssetCarrierAttitude.mat');
     end
     S = load(matPath); d = S.diagnostics; cfg = S.cfg;
 
