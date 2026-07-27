@@ -597,6 +597,19 @@ classdef ConfigFactory
             % clockType + clockFactors; name/deterministic/bias_s/fracFreq preserved.
 
             % ---- Atmosphere profile (opt-in via masterConfig) -------------
+            % Propagate a master `.enable` that the SCENARIO wrote into its truth/model pair.
+            % expandEnableToggles does this at masterConfig.m:163 -- i.e. BEFORE the scenario
+            % JSON is merged -- so a scenario setting errors.multipath.enable=true was a
+            % measured no-op (enable=1, truth=0, model=0) while the physics reads only the
+            % pair. This runs post-merge and, crucially, only for effects whose master the
+            % scenario actually touched, leaving any pair member the scenario wrote itself
+            % alone. No scenario JSON => provenance empty => no-op => goldens unchanged.
+            cfg = resolveEnablePairsPostMerge(cfg, { ...
+                'physics.sagnac', 'physics.lightTime', 'physics.relativity.shapiro', ...
+                'physics.relativity.clock', 'physics.doppler', ...
+                'errors.troposphere', 'errors.ionosphere', 'errors.hardwareDelay', 'errors.multipath', ...
+                'effects.towerSurvey', 'effects.antennaPCO', 'effects.antennaPCV' });
+
             % Apply the physically-realistic atmosphere overlay + ionosphere
             % handling requested by cfg.atmosphere.realistic. Opt-in only:
             % configs that never set the toggle (bespoke tests, and the golden,
