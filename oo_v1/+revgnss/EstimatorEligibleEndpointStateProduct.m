@@ -33,6 +33,7 @@ classdef EstimatorEligibleEndpointStateProduct
         covarianceGroupIdentifiers (1,:) cell
         commonSourceTreatment (1,1) struct
         qualityFlags (1,1) struct
+        clockAnchorDeclaration (1,1)
     end
 
     methods
@@ -42,7 +43,8 @@ classdef EstimatorEligibleEndpointStateProduct
                 'frameIdentifier','clockDatumIdentifier','attitudeErrorCoordinateConvention', ...
                 'covarianceVariantIdentifier','declaredRemoteProductPropagationPolicy', ...
                 'sourceEpoch_s','validAtEpoch_s','deliveryEpoch_s', ...
-                'covarianceGroupIdentifiers','commonSourceTreatment','qualityFlags'};
+                'covarianceGroupIdentifiers','commonSourceTreatment','qualityFlags', ...
+                'clockAnchorDeclaration'};
             supplied = fieldnames(record);
             missing = setdiff(required,supplied);
             unknown = setdiff(supplied,required);
@@ -62,6 +64,15 @@ classdef EstimatorEligibleEndpointStateProduct
             if ~isa(record.diagnosticProduct,'revgnss.EndpointStateProduct')
                 error('EstimatorEligibleEndpointStateProduct:diagnosticProductType', ...
                     'diagnosticProduct must be a revgnss.EndpointStateProduct.');
+            end
+            if ~isa(record.clockAnchorDeclaration,'revgnss.EndpointClockAnchorDeclaration')
+                error('EstimatorEligibleEndpointStateProduct:clockAnchorDeclarationType', ...
+                    'clockAnchorDeclaration must be a revgnss.EndpointClockAnchorDeclaration.');
+            end
+            if ~isequaln(record.clockAnchorDeclaration.toStruct(), ...
+                    record.diagnosticProduct.clockAnchorDeclaration.toStruct())
+                error('EstimatorEligibleEndpointStateProduct:clockAnchorDeclarationMismatch', ...
+                    'clockAnchorDeclaration must equal the wrapped product''s own declaration.');
             end
 
             revgnss.DistributedLinkProtocolContract.requireDeliveryProvenance( ...
@@ -177,13 +188,15 @@ classdef EstimatorEligibleEndpointStateProduct
             obj.covarianceGroupIdentifiers = record.covarianceGroupIdentifiers;
             obj.commonSourceTreatment = record.commonSourceTreatment;
             obj.qualityFlags = record.qualityFlags;
+            obj.clockAnchorDeclaration = record.clockAnchorDeclaration;
         end
 
         function s = toStruct(obj)
             s = struct();
             names = properties(obj);
             for index = 1:numel(names)
-                if strcmp(names{index},'diagnosticProduct')
+                if strcmp(names{index},'diagnosticProduct') || ...
+                        strcmp(names{index},'clockAnchorDeclaration')
                     s.(names{index}) = obj.(names{index}).toStruct();
                 else
                     s.(names{index}) = obj.(names{index});
@@ -220,7 +233,8 @@ classdef EstimatorEligibleEndpointStateProduct
                 'covarianceGroupIdentifiers',{{}}, ...
                 'commonSourceTreatment',commonSourceTreatment, ...
                 'qualityFlags',struct('estimatorDerived',true,'truthUsed',false, ...
-                    'diagnosticOnly',false,'estimatorEligible',true));
+                    'diagnosticOnly',false,'estimatorEligible',true), ...
+                'clockAnchorDeclaration',diagnosticProduct.clockAnchorDeclaration);
             product = revgnss.EstimatorEligibleEndpointStateProduct(record);
         end
     end

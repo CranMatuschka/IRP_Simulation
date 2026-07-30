@@ -38,6 +38,7 @@ classdef CommunicationEndpointState
         terminalGeometry (1,1) struct
         productProvenance (1,1) struct
         qualityFlags (1,1) struct
+        clockAnchorDeclaration (1,1)
     end
 
     methods
@@ -49,7 +50,8 @@ classdef CommunicationEndpointState
                 'stateComponentOrder','covarianceComponentOrder','stateVector', ...
                 'covarianceBlock','positionEcef_m','velocityEcef_mps', ...
                 'attitudeEulerZyx_rad','angularRateBody_radps','clockBias_m', ...
-                'clockDriftRate_mps','terminalGeometry','productProvenance','qualityFlags'};
+                'clockDriftRate_mps','terminalGeometry','productProvenance','qualityFlags', ...
+                'clockAnchorDeclaration'};
             supplied = fieldnames(record);
             missing = setdiff(required,supplied);
             unknown = setdiff(supplied,required);
@@ -69,6 +71,20 @@ classdef CommunicationEndpointState
                     ['endpointIdentifier ''%s'' and canonicalPhysicalAssetIndex %d disagree ' ...
                     'on the physical spacecraft this state describes.'], ...
                     record.endpointIdentifier,record.canonicalPhysicalAssetIndex);
+            end
+            if ~isa(record.clockAnchorDeclaration,'revgnss.EndpointClockAnchorDeclaration')
+                error('CommunicationEndpointState:clockAnchorDeclarationType', ...
+                    'clockAnchorDeclaration must be a revgnss.EndpointClockAnchorDeclaration.');
+            end
+            if record.clockAnchorDeclaration.canonicalPhysicalAssetIndex ~= ...
+                    record.canonicalPhysicalAssetIndex
+                error('CommunicationEndpointState:clockAnchorDeclarationIdentityMismatch', ...
+                    'clockAnchorDeclaration names a different physical spacecraft than this state.');
+            end
+            if ~strcmp(record.clockAnchorDeclaration.clockDatumIdentifier, ...
+                    char(record.clockDatumIdentifier))
+                error('CommunicationEndpointState:clockAnchorDeclarationDatumMismatch', ...
+                    'clockAnchorDeclaration.clockDatumIdentifier does not match this state''s own.');
             end
 
             allowedSources = revgnss.CommunicationEndpointStateProvider.AllowedStateSources;
@@ -280,13 +296,18 @@ classdef CommunicationEndpointState
             obj.terminalGeometry = terminal;
             obj.productProvenance = record.productProvenance;
             obj.qualityFlags = record.qualityFlags;
+            obj.clockAnchorDeclaration = record.clockAnchorDeclaration;
         end
 
         function s = toStruct(obj)
             s = struct();
             names = properties(obj);
             for index = 1:numel(names)
-                s.(names{index}) = obj.(names{index});
+                if strcmp(names{index},'clockAnchorDeclaration')
+                    s.(names{index}) = obj.(names{index}).toStruct();
+                else
+                    s.(names{index}) = obj.(names{index});
+                end
             end
         end
     end

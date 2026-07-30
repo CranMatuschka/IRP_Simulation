@@ -16,6 +16,7 @@ classdef EndpointStateProduct
         covarianceBlock (:,:) double
         processModelProvenance (1,1) struct
         qualityFlags (1,1) struct
+        clockAnchorDeclaration (1,1)
     end
 
     methods
@@ -24,7 +25,7 @@ classdef EndpointStateProduct
                 'sourceEpoch_s','validAtEpoch_s','deliveryEpoch_s','sequenceIdentifier', ...
                 'stateComponentOrder','covarianceComponentOrder','stateVector', ...
                 'stateComponents','covarianceBlock', ...
-                'processModelProvenance','qualityFlags'};
+                'processModelProvenance','qualityFlags','clockAnchorDeclaration'};
             supplied = fieldnames(product);
             missing = setdiff(required,supplied);
             unknown = setdiff(supplied,required);
@@ -83,6 +84,13 @@ classdef EndpointStateProduct
                 error('EndpointStateProduct:attitudeCovarianceCoordinates', ...
                     'Process provenance must state the attitude covariance coordinates.');
             end
+            % Class check MUST run before assignment: a typed (1,1) EndpointClockAnchorDeclaration
+            % property is impossible here for the same reason EstimatorEligibleEndpointStateProduct
+            % documents for diagnosticProduct (that class's constructor has no zero-argument form).
+            if ~isa(product.clockAnchorDeclaration,'revgnss.EndpointClockAnchorDeclaration')
+                error('EndpointStateProduct:clockAnchorDeclarationType', ...
+                    'clockAnchorDeclaration must be a revgnss.EndpointClockAnchorDeclaration.');
+            end
 
             obj.sourceAssetIdentifier = char(product.sourceAssetIdentifier);
             obj.sourceAssetName = char(product.sourceAssetName);
@@ -98,13 +106,18 @@ classdef EndpointStateProduct
             obj.covarianceBlock = (P+P')/2;
             obj.processModelProvenance = product.processModelProvenance;
             obj.qualityFlags = product.qualityFlags;
+            obj.clockAnchorDeclaration = product.clockAnchorDeclaration;
         end
 
         function product = toStruct(obj)
             product = struct();
             names = properties(obj);
             for index = 1:numel(names)
-                product.(names{index}) = obj.(names{index});
+                if strcmp(names{index},'clockAnchorDeclaration')
+                    product.(names{index}) = obj.(names{index}).toStruct();
+                else
+                    product.(names{index}) = obj.(names{index});
+                end
             end
         end
     end
@@ -177,6 +190,8 @@ classdef EndpointStateProduct
                 'angularRate_radps',x(10:12), ...
                 'clockBias_m',x(13), ...
                 'clockDrift_mps',x(14));
+            clockAnchorDeclaration = revgnss.EndpointClockAnchorDeclaration.fromLocalEstimatorConfig( ...
+                sim.cfg,sprintf('spacecraft:%d',assetIndex),assetIndex);
             record = struct( ...
                 'sourceAssetIdentifier',sprintf('spacecraft:%d',assetIndex), ...
                 'sourceAssetName',sim.asset.name, ...
@@ -192,7 +207,8 @@ classdef EndpointStateProduct
                 'covarianceBlock',P, ...
                 'processModelProvenance',provenance, ...
                 'qualityFlags',struct('estimatorDerived',true, ...
-                    'truthUsed',false,'diagnosticOnly',true,'consumedByEstimator',false));
+                    'truthUsed',false,'diagnosticOnly',true,'consumedByEstimator',false), ...
+                'clockAnchorDeclaration',clockAnchorDeclaration);
             product = revgnss.EndpointStateProduct(record);
         end
     end

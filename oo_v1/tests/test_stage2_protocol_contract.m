@@ -175,6 +175,7 @@ revgnss.DistributedLinkProtocolContract.requireDiagnosticOnlyProduct(product);
 revgnss.DistributedLinkProtocolContract.requireDeliveryProvenance(product,product.validAtEpoch_s);
 
 record = product.toStruct();
+record.clockAnchorDeclaration = product.clockAnchorDeclaration;
 record.qualityFlags.diagnosticOnly = false;
 forgedNotDiagnostic = revgnss.EndpointStateProduct(record);
 i_expectError_(@() revgnss.DistributedLinkProtocolContract.requireDiagnosticOnlyProduct( ...
@@ -184,24 +185,28 @@ i_expectError_(@() revgnss.DistributedLinkProtocolContract.requireDeliveryProven
     'DistributedLinkProtocolContract:notDiagnosticOnly');
 
 record = product.toStruct();
+record.clockAnchorDeclaration = product.clockAnchorDeclaration;
 record.qualityFlags.consumedByEstimator = true;
 forgedConsumed = revgnss.EndpointStateProduct(record);
 i_expectError_(@() revgnss.DistributedLinkProtocolContract.requireDiagnosticOnlyProduct( ...
     forgedConsumed),'DistributedLinkProtocolContract:notDiagnosticOnly');
 
 record = product.toStruct();
+record.clockAnchorDeclaration = product.clockAnchorDeclaration;
 record.stateComponentOrder{1} = 'wrongLabel';
 forgedStateOrder = revgnss.EndpointStateProduct(record);
 i_expectError_(@() revgnss.DistributedLinkProtocolContract.requireStateSchemaVersion( ...
     forgedStateOrder),'DistributedLinkProtocolContract:stateComponentOrder');
 
 record = product.toStruct();
+record.clockAnchorDeclaration = product.clockAnchorDeclaration;
 record.covarianceComponentOrder{7} = 'bogusAttitudeErrorLabel';
 forgedCovOrder = revgnss.EndpointStateProduct(record);
 i_expectError_(@() revgnss.DistributedLinkProtocolContract.requireStateSchemaVersion( ...
     forgedCovOrder),'DistributedLinkProtocolContract:covarianceComponentOrder');
 
 record = product.toStruct();
+record.clockAnchorDeclaration = product.clockAnchorDeclaration;
 record.processModelProvenance.attitudeCovarianceCoordinates = 'unknownConvention';
 forgedAttitude = revgnss.EndpointStateProduct(record);
 i_expectError_(@() revgnss.DistributedLinkProtocolContract.requireDeliveryProvenance( ...
@@ -210,6 +215,7 @@ i_expectError_(@() revgnss.DistributedLinkProtocolContract.requireDeliveryProven
 % The declared convention is a known word, but it disagrees with the covariance labels this
 % product actually carries -- must be rejected as a mismatch, not accepted as "a known word".
 record = product.toStruct();
+record.clockAnchorDeclaration = product.clockAnchorDeclaration;
 if strcmp(variant,'euler')
     record.processModelProvenance.attitudeCovarianceCoordinates = ...
         'rightMultiplicativeLocalTangent_rad';
@@ -222,6 +228,7 @@ i_expectError_(@() revgnss.DistributedLinkProtocolContract.requireDeliveryProven
     'DistributedLinkProtocolContract:attitudeConventionMismatch');
 
 record = product.toStruct();
+record.clockAnchorDeclaration = product.clockAnchorDeclaration;
 record.sourceAssetIdentifier = 'spacecraft:99';
 forgedIdentity = revgnss.EndpointStateProduct(record);
 i_expectError_(@() revgnss.DistributedLinkProtocolContract.requireDeliveryProvenance( ...
