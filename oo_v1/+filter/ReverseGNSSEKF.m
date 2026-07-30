@@ -5,7 +5,8 @@ classdef ReverseGNSSEKF < handle
     %   x(1:3)    r_cm_ecef_m          ECEF position [m]
     %   x(4:6)    v_ecef_mps           ECEF velocity [m/s]
     %   x(7:9)    euler_rad            Attitude [roll; pitch; yaw] ZYX [rad]
-    %   x(10:12)  omega_body_radps     Angular velocity body frame [rad/s]
+    %   x(10:12)  omega_B/E^B          Earth-relative body rate [rad/s];
+    %                              a derived gyro-control slot when gyro aiding is active
     %   x(13)     b_rx_m               Receiver clock bias [m]
     %   x(14)     bdot_rx_mps          Receiver clock drift [m/s]
     %
@@ -53,10 +54,8 @@ classdef ReverseGNSSEKF < handle
         ambiguityMode        char          = 'floatPerTowerSignal'
 
         % ISL carrier float ambiguity states (one per inter-satellite link x signal).
-        % INDEPENDENT of the ground ambiguity block above by design: ISL and
-        % ground-to-space are separately togglable, they use separate sigmas, and the
-        % ISL block is appended strictly LAST so enabling it cannot shift any existing
-        % state index (golden-safe). Off by default -> nIslAmbiguities = 0 -> nx unchanged.
+        % This block is independent of the ground ambiguity block and precedes
+        % any joint-secondary state blocks.
         estimateIslAmbiguities (1,1) logical = false
         nIslAmbiguities        (1,1) double  = 0
         islAmbiguityNSignals   (1,1) double  = 1
@@ -86,6 +85,12 @@ classdef ReverseGNSSEKF < handle
         estimateAttitude      (1,1) logical = true
         estimateAngularRate   (1,1) logical = true
 
+        % Centralized multi-spacecraft state. Each secondary contributes
+        % [r, v, attitude error/Euler, body rate, clock bias, clock drift].
+        jointMultiAssetEnabled (1,1) logical = false
+        nSpaceAssets           (1,1) double = 1
+        nSecondaryAssets       (1,1) double = 0
+
         % Optional gyro-bias states (IMU/MEKF attitude aiding). 3 states appended ONLY when
         % estimateGyroBias -> nx/state-map unchanged when off (golden-safe). On this path the
         % attitude is propagated with omega = omega_gyro - b_g (strapdown control input) and the
@@ -94,7 +99,6 @@ classdef ReverseGNSSEKF < handle
         imuArw_               (1,1) double  = 1e-4    % filter angle random walk [rad/sqrt(s)]
         imuRrw_               (1,1) double  = 1e-6    % filter bias rate random walk [rad/(s*sqrt(s))]
         imuP0Bias_            (1,1) double  = 1e-5    % initial bias 1-sigma (init done in ScenarioFactory)
-        imuVanLoan_           (1,1) logical = false   % optional theta<->b_g Q cross term
 
         % SRP scale-coefficient state (primary only, single scalar): a dimensionless
         % multiplier s on the reference SRP acceleration (Cr=s*refCr), observed via
@@ -102,6 +106,13 @@ classdef ReverseGNSSEKF < handle
         % (golden-safe). Gated by cfg.estimator.srpCoefficient.{enable,useInEKF}.
         estimateSrpScale     (1,1) logical = false
         srpScaleProcNoise_   (1,1) double  = 1e-9   % random-walk 1-sigma [1/sqrt(s)]
+
+        % Persistent effective calibration residual for the active coherent
+        % two-way code links.
+        estimateTwoWayCodeCalibrationBias (1,1) logical = false
+        nTwoWayCodeCalibrationBiasStates (1,1) double = 0
+        twoWayCodeCalibrationBiasLinkIdentifiers cell = {}
+        twoWayCodeCalibrationBiasProcessNoise_ (1,1) double = 0
 
         % Clock model (for process noise)
         rxClockModel     models.clocks.ClockModel
@@ -113,7 +124,7 @@ classdef ReverseGNSSEKF < handle
         lastDynamicsPredictInfo (1,1) struct
 
         % Quaternion nominal / error-state attitude EKF
-        nominalQuat_wxyz          double = [1;0;0;0]   % scalar-first unit quaternion
+        nominalQuat_wxyz          double = [1;0;0;0]   % 4 x nSpaceAssets, scalar first
         attitudeParameterization  char   = 'eulerZYX'  % 'eulerZYX' | 'quaternionErrorState'
         lastAttitudeErrorStateInfo (1,1) struct
         attitudeInjectionCount    (1,1) double = 0
@@ -135,6 +146,19 @@ classdef ReverseGNSSEKF < handle
             end
             if isfield(cfg.estimator,'estimateAngularRate')
                 obj.estimateAngularRate = cfg.estimator.estimateAngularRate;
+            end
+            if isfield(cfg,'scenario') && isfield(cfg.scenario,'nSpaceAssets')
+                obj.nSpaceAssets = max(1, round(cfg.scenario.nSpaceAssets));
+            end
+            multiAssetMode = 'fast';
+            if isfield(cfg,'multiAsset') && isfield(cfg.multiAsset,'mode') && ...
+                    (ischar(cfg.multiAsset.mode) || isstring(cfg.multiAsset.mode))
+                multiAssetMode = char(cfg.multiAsset.mode);
+            end
+            obj.jointMultiAssetEnabled = strcmpi(multiAssetMode, 'joint') && ...
+                obj.nSpaceAssets > 1;
+            if obj.jointMultiAssetEnabled
+                obj.nSecondaryAssets = obj.nSpaceAssets - 1;
             end
 
             % Determine if ambiguity states requested
@@ -195,7 +219,6 @@ classdef ReverseGNSSEKF < handle
                     obj.imuArw_     = cfg.estimator.imu.filter.arw_rad_per_sqrt_s;
                     obj.imuRrw_     = cfg.estimator.imu.filter.rrw_rad_per_s_sqrt_s;
                     obj.imuP0Bias_  = cfg.estimator.imu.filter.P0_bias_radps;
-                    obj.imuVanLoan_ = logical(cfg.estimator.imu.filter.useVanLoanCrossTerm);
                 catch; end
             end
 
@@ -247,6 +270,29 @@ classdef ReverseGNSSEKF < handle
             end
             if obj.estimateIslAmbiguities
                 obj.nx = obj.nx + obj.nIslAmbiguities;   % ISL block, appended strictly LAST
+            end
+            if obj.jointMultiAssetEnabled
+                secondaryWidth = 14 + 3 * double(obj.estimateGyroBias);
+                obj.nx = obj.nx + obj.nSecondaryAssets * secondaryWidth;
+            end
+            try
+                biasState = cfg.measurements.isl.twoWay.calibration.residualBiasState;
+                obj.estimateTwoWayCodeCalibrationBias = ...
+                    logical(biasState.enable) && ...
+                    logical(cfg.measurements.isl.twoWay.enable) && ...
+                    logical(cfg.measurements.isl.twoWay.range.useInEKF);
+                obj.twoWayCodeCalibrationBiasProcessNoise_ = ...
+                    biasState.processNoiseSigma_m_per_sqrt_s;
+            catch
+            end
+            if obj.estimateTwoWayCodeCalibrationBias
+                obj.twoWayCodeCalibrationBiasLinkIdentifiers = ...
+                    revgnss.TwoWayISLMeasurementBuilder. ...
+                    calibrationLinkIdentifiers(cfg);
+                obj.nTwoWayCodeCalibrationBiasStates = numel( ...
+                    obj.twoWayCodeCalibrationBiasLinkIdentifiers);
+                obj.nx = obj.nx + ...
+                    obj.nTwoWayCodeCalibrationBiasStates;
             end
             % NOTE: this arithmetic is a SECOND implementation of the buildStateMap_
             % nextIdx walk. Any new block must be added in BOTH places, in the SAME
@@ -305,11 +351,20 @@ classdef ReverseGNSSEKF < handle
         function initState(obj, x0, P0)
             obj.x = x0(:);
             obj.P = P0;
-            % Initialize nominal quaternion from initial Euler state
             if strcmp(obj.attitudeParameterization, 'quaternionErrorState')
-                eul0 = obj.x(obj.stateMap.euler_idx);
-                obj.nominalQuat_wxyz = revgnss.AttitudeErrorStateKinematics.eulerToQuatZYX(eul0);
-                obj.x(obj.stateMap.euler_idx) = zeros(3, 1);  % error state starts at zero
+                nAttitudeBlocks = 1;
+                if isfield(obj.stateMap,'asset')
+                    nAttitudeBlocks = numel(obj.stateMap.asset);
+                end
+                obj.nominalQuat_wxyz = repmat([1;0;0;0], 1, nAttitudeBlocks);
+                for assetIdx = 1:nAttitudeBlocks
+                    attitudeIdx = obj.stateMap.asset(assetIdx).euler;
+                    if isempty(attitudeIdx); continue; end
+                    obj.nominalQuat_wxyz(:,assetIdx) = ...
+                        revgnss.AttitudeErrorStateKinematics.eulerToQuatZYX( ...
+                        obj.x(attitudeIdx));
+                    obj.x(attitudeIdx) = zeros(3,1);
+                end
                 obj.attitudeInjectionCount    = 0;
                 obj.maxAttitudeInjectionNorm_rad = 0;
             end
@@ -323,23 +378,58 @@ classdef ReverseGNSSEKF < handle
             % that h and H are evaluated at the nominal attitude.
             xMeas = obj.x;
             if strcmp(obj.attitudeParameterization, 'quaternionErrorState')
-                xMeas(obj.stateMap.euler_idx) = ...
-                    revgnss.AttitudeErrorStateKinematics.quatToEulerZYX(obj.nominalQuat_wxyz);
+                for assetIdx = 1:numel(obj.stateMap.asset)
+                    attitudeIdx = obj.stateMap.asset(assetIdx).euler;
+                    if isempty(attitudeIdx); continue; end
+                    xMeas(attitudeIdx) = ...
+                        revgnss.AttitudeErrorStateKinematics.quatToEulerZYX( ...
+                        obj.nominalQuat_wxyz(:,assetIdx));
+                end
             end
         end
 
-        function euler_rad = getReportEulerRad(obj)
+        function euler_rad = getReportEulerRad(obj, assetIdx)
             % getReportEulerRad  Attitude angles for reporting/diagnostics.
+            if nargin < 2 || isempty(assetIdx); assetIdx = 1; end
+            attitudeIdx = obj.stateMap.asset(assetIdx).euler;
             if strcmp(obj.attitudeParameterization, 'quaternionErrorState')
                 euler_rad = revgnss.AttitudeErrorStateKinematics.quatToEulerZYX( ...
-                    obj.nominalQuat_wxyz);
+                    obj.nominalQuat_wxyz(:,assetIdx));
             else
-                euler_rad = obj.x(obj.stateMap.euler_idx);
+                euler_rad = obj.x(attitudeIdx);
             end
+        end
+
+        function omega_B_E_meas_radps = inertialGyroscopeToEarthRelative( ...
+                obj,observation,assetIdx)
+            % Convert omega_B/I^B to the rate required by q_E_B propagation.
+            % Only the measured rate, nominal attitude, and declared Earth rate enter.
+            if nargin < 3 || isempty(assetIdx); assetIdx = 1; end
+            assert(isa(observation,'models.sensors.GyroscopeObservation') && ...
+                observation.valid, ...
+                'ReverseGNSSEKF:invalidGyroscopeObservation', ...
+                'A valid inertial gyroscope observation is required.');
+            assert(assetIdx >= 1 && assetIdx <= numel(obj.stateMap.asset), ...
+                'ReverseGNSSEKF:invalidAssetIndex', ...
+                'Gyroscope asset index is outside the estimated state map.');
+            if strcmp(obj.attitudeParameterization,'quaternionErrorState')
+                q_E_B_nominal = obj.nominalQuat_wxyz(:,assetIdx);
+            else
+                attitudeIdx = obj.stateMap.asset(assetIdx).euler;
+                q_E_B_nominal = ...
+                    revgnss.AttitudeErrorStateKinematics.eulerToQuatZYX( ...
+                    obj.x(attitudeIdx));
+            end
+            C_E_B_nominal = revgnss.AttitudeQuaternion.toDcm(q_E_B_nominal);
+            omega_E_I_ecef = models.frames.FrameTimeUtils.omegaEcef_radps();
+            omega_B_E_meas_radps = ...
+                observation.omega_B_I_meas_body_radps - ...
+                C_E_B_nominal.'*omega_E_I_ecef;
         end
 
         % ----------------------------------------------------------------
-        function predict(obj, dt_s, towerClockModels, t0_s, omega_gyro_radps)
+        function predict(obj, dt_s, towerClockModels, t0_s, omega_gyro_radps, ...
+                assetClockModels, omega_gyro_inertial_radps)
             % predict  EKF time propagation.
             %   t0_s — simulation time at start of prediction interval.
             %   omega_gyro_radps (optional) — strapdown gyro body-rate reading. When the IMU is
@@ -347,6 +437,8 @@ classdef ReverseGNSSEKF < handle
             %   free omega state is used (byte-identical to the pre-IMU behaviour).
             if nargin < 4 || isempty(t0_s); t0_s = 0; end
             if nargin < 5; omega_gyro_radps = []; end
+            if nargin < 6; assetClockModels = {}; end
+            if nargin < 7; omega_gyro_inertial_radps = []; end
 
             x  = obj.x;
             sm = obj.stateMap;
@@ -355,10 +447,17 @@ classdef ReverseGNSSEKF < handle
             v   = x(sm.v_idx);
             eul = x(sm.euler_idx);
             omg = x(sm.omega_idx);
+            omegaErrorDynamics = omg;
             % IMU strapdown: drive attitude with the gyro reading minus the estimated bias.
-            % omg then flows into the quaternion propagation and buildF_ (skew term) below.
+            % q_E_B propagation uses omega_B/E. The right-error dynamics use
+            % omega_B/I, when that measured inertial rate is available.
             if obj.estimateGyroBias && ~isempty(omega_gyro_radps) && ~isempty(sm.gyroBiasIdx)
-                omg = omega_gyro_radps(:) - x(sm.gyroBiasIdx);
+                omg = omega_gyro_radps(:,1) - x(sm.gyroBiasIdx);
+                omegaErrorDynamics = omg;
+                if size(omega_gyro_inertial_radps,2) >= 1
+                    omegaErrorDynamics = omega_gyro_inertial_radps(:,1) - ...
+                        x(sm.gyroBiasIdx);
+                end
             end
             b_rx    = x(sm.b_rx_idx);
             bdot_rx = x(sm.bdot_rx_idx);
@@ -412,8 +511,9 @@ classdef ReverseGNSSEKF < handle
             if obj.estimateAttitude
                 if strcmp(obj.attitudeParameterization, 'quaternionErrorState')
                     % Propagate nominal quaternion; error state stays near zero
-                    obj.nominalQuat_wxyz = revgnss.AttitudeErrorStateKinematics.propagateQuatBodyRate( ...
-                        obj.nominalQuat_wxyz, omg, dt_s);
+                    obj.nominalQuat_wxyz(:,1) = ...
+                        revgnss.AttitudeErrorStateKinematics.propagateQuatBodyRate( ...
+                        obj.nominalQuat_wxyz(:,1), omg, dt_s);
                     eul_new = zeros(3, 1);   % error state kept at zero in prediction
                 else
                     edot    = revgnss.AttitudeKinematics.eulerRatesFromBodyRates(eul, omg);
@@ -447,13 +547,127 @@ classdef ReverseGNSSEKF < handle
                 end
             end
 
+            secondaryPhi = cell(1,obj.nSecondaryAssets);
+            secondaryEuler = zeros(3,obj.nSecondaryAssets);
+            secondaryOmega = zeros(3,obj.nSecondaryAssets);
+            secondaryOmegaErrorDynamics = zeros(3,obj.nSecondaryAssets);
+            if obj.jointMultiAssetEnabled
+                for assetIdx = 2:obj.nSpaceAssets
+                    secondaryIdx = assetIdx - 1;
+                    blk = sm.asset(assetIdx);
+                    rSecondary = x(blk.r);
+                    vSecondary = x(blk.v);
+                    if strcmp(dynMode,'constantVelocity')
+                        rSecondaryNew = rSecondary + dt_s*vSecondary;
+                        vSecondaryNew = vSecondary;
+                        secondaryPhi{secondaryIdx} = [];
+                    else
+                        try
+                            [rSecondaryNew,vSecondaryNew] = ...
+                                filter.EkfDynamicsPredictor.propagateEcef( ...
+                                rSecondary,vSecondary,dt_s,t0_s,obj.cfg);
+                            secondaryPhi{secondaryIdx} = ...
+                                filter.EkfDynamicsPredictor.finiteDiffStm6( ...
+                                rSecondary,vSecondary,dt_s,t0_s,obj.cfg);
+                        catch
+                            rSecondaryNew = rSecondary + dt_s*vSecondary;
+                            vSecondaryNew = vSecondary;
+                            secondaryPhi{secondaryIdx} = [];
+                        end
+                    end
+                    x_new(blk.r) = rSecondaryNew;
+                    x_new(blk.v) = vSecondaryNew;
+
+                    eulerSecondary = x(blk.euler);
+                    omegaSecondary = x(blk.omega);
+                    omegaSecondaryErrorDynamics = omegaSecondary;
+                    if obj.estimateGyroBias && size(omega_gyro_radps,2) >= assetIdx && ...
+                            ~isempty(blk.gyroBias)
+                        omegaSecondary = omega_gyro_radps(:,assetIdx) - x(blk.gyroBias);
+                        omegaSecondaryErrorDynamics = omegaSecondary;
+                        if size(omega_gyro_inertial_radps,2) >= assetIdx
+                            omegaSecondaryErrorDynamics = ...
+                                omega_gyro_inertial_radps(:,assetIdx) - ...
+                                x(blk.gyroBias);
+                        end
+                    end
+                    secondaryEuler(:,secondaryIdx) = eulerSecondary;
+                    secondaryOmega(:,secondaryIdx) = omegaSecondary;
+                    secondaryOmegaErrorDynamics(:,secondaryIdx) = ...
+                        omegaSecondaryErrorDynamics;
+                    if obj.estimateAttitude
+                        if strcmp(obj.attitudeParameterization,'quaternionErrorState')
+                            obj.nominalQuat_wxyz(:,assetIdx) = ...
+                                revgnss.AttitudeErrorStateKinematics.propagateQuatBodyRate( ...
+                                obj.nominalQuat_wxyz(:,assetIdx),omegaSecondary,dt_s);
+                            x_new(blk.euler) = zeros(3,1);
+                        else
+                            eulerRate = revgnss.AttitudeKinematics.eulerRatesFromBodyRates( ...
+                                eulerSecondary,omegaSecondary);
+                            x_new(blk.euler) = revgnss.AttitudeKinematics.wrapEuler( ...
+                                eulerSecondary + dt_s*eulerRate);
+                        end
+                    end
+                    x_new(blk.omega) = omegaSecondary;
+                    x_new(blk.b) = x(blk.b) + dt_s*x(blk.bdot);
+                    x_new(blk.bdot) = x(blk.bdot);
+                end
+            end
+
             obj.x = x_new;
 
             % State transition Jacobian F (pass Phi6 override for r/v block)
-            F = obj.buildF_(dt_s, eul, omg, Phi6, srpCol);
+            F = obj.buildF_(dt_s, eul, omegaErrorDynamics, Phi6, srpCol);
+
+            if obj.jointMultiAssetEnabled
+                for assetIdx = 2:obj.nSpaceAssets
+                    secondaryIdx = assetIdx - 1;
+                    blk = sm.asset(assetIdx);
+                    rvIdx = [blk.r;blk.v];
+                    PhiSecondary = secondaryPhi{secondaryIdx};
+                    if ~isempty(PhiSecondary) && isequal(size(PhiSecondary),[6,6]) && ...
+                            all(isfinite(PhiSecondary(:)))
+                        F(rvIdx,rvIdx) = PhiSecondary;
+                    else
+                        F(rvIdx,rvIdx) = eye(6);
+                        F(blk.r,blk.v) = dt_s*eye(3);
+                    end
+                    eulerSecondary = secondaryEuler(:,secondaryIdx);
+                    omegaSecondary = ...
+                        secondaryOmegaErrorDynamics(:,secondaryIdx);
+                    if strcmp(obj.attitudeParameterization,'quaternionErrorState')
+                        skewOmega = [0,-omegaSecondary(3),omegaSecondary(2); ...
+                            omegaSecondary(3),0,-omegaSecondary(1); ...
+                            -omegaSecondary(2),omegaSecondary(1),0];
+                        F(blk.euler,blk.euler) = eye(3) - skewOmega*dt_s;
+                        F(blk.euler,blk.omega) = dt_s*eye(3);
+                        if obj.estimateGyroBias && ~isempty(blk.gyroBias)
+                            F(blk.euler,blk.gyroBias) = -dt_s*eye(3);
+                            F(blk.euler,blk.omega) = zeros(3);
+                        end
+                    else
+                        F(blk.euler,blk.euler) = eye(3) + dt_s * ...
+                            revgnss.AttitudeKinematics.eulerRateJacobian( ...
+                            eulerSecondary,omegaSecondary);
+                        cr = cos(eulerSecondary(1)); sr = sin(eulerSecondary(1));
+                        cp = cos(eulerSecondary(2)); tp = tan(eulerSecondary(2));
+                        if abs(cp) < 1e-6; cp = sign(cp + eps)*1e-6; end
+                        transform = [1,sr*tp,cr*tp;0,cr,-sr;0,sr/cp,cr/cp];
+                        F(blk.euler,blk.omega) = dt_s*transform;
+                    end
+                    if ~obj.estimateAttitude
+                        F(blk.euler,blk.euler) = eye(3);
+                        F(blk.euler,blk.omega) = zeros(3);
+                    end
+                    F(blk.b,blk.bdot) = dt_s;
+                end
+            end
 
             % Process noise Q
             Q = obj.buildQ_(dt_s, towerClockModels);
+            if obj.jointMultiAssetEnabled
+                Q = obj.addJointAssetProcessNoise_(Q,dt_s,assetClockModels);
+            end
 
             % Propagate covariance
             obj.P = F * obj.P * F' + Q;
@@ -505,44 +719,57 @@ classdef ReverseGNSSEKF < handle
             % 7. Quaternion error-state injection + covariance reset
             %    Applied to posterior Pplus, NOT to prior Pminus
             if strcmp(obj.attitudeParameterization, 'quaternionErrorState')
-                deltaTheta = obj.x(obj.stateMap.euler_idx);
-                [obj.nominalQuat_wxyz, injInfo] = revgnss.AttitudeErrorStateKinematics.injectRight( ...
-                    obj.nominalQuat_wxyz, deltaTheta);
-                obj.x(obj.stateMap.euler_idx) = zeros(3, 1);
-                % First-order covariance reset applied to posterior
-                d  = deltaTheta(:);
-                sk = [0,-d(3),d(2); d(3),0,-d(1); -d(2),d(1),0];
-                G  = eye(3) - 0.5 * sk;
-                ei = obj.stateMap.euler_idx;
-                obj.P(ei, :) = G * obj.P(ei, :);
-                obj.P(:, ei) = obj.P(:, ei) * G';
-                obj.P = (obj.P + obj.P') / 2;
-                % Injection diagnostics (reset order, guard, Jacobian condition)
-                injNorm = injInfo.injectionNorm_rad;
-                obj.attitudeInjectionCount       = obj.attitudeInjectionCount + 1;
-                obj.maxAttitudeInjectionNorm_rad = max(obj.maxAttitudeInjectionNorm_rad, injNorm);
                 maxGuard = deg2rad(10);
                 try; maxGuard = obj.cfg.estimator.attitude.maxErrorStateInjection_rad; catch; end
-                if injNorm > maxGuard
-                    warning('ReverseGNSSEKF:update', ...
-                        'Injection norm %.2e rad (%.2f deg) exceeds guard %.2e rad.', ...
-                        injNorm, rad2deg(injNorm), maxGuard);
+                primaryInjectionInfo = struct();
+                largestInjection = 0;
+                for assetIdx = 1:numel(obj.stateMap.asset)
+                    attitudeIdx = obj.stateMap.asset(assetIdx).euler;
+                    if isempty(attitudeIdx); continue; end
+                    deltaTheta = obj.x(attitudeIdx);
+                    [obj.nominalQuat_wxyz(:,assetIdx), injectionInfo] = ...
+                        revgnss.AttitudeErrorStateKinematics.injectRight( ...
+                        obj.nominalQuat_wxyz(:,assetIdx),deltaTheta);
+                    obj.x(attitudeIdx) = zeros(3,1);
+                    d = deltaTheta(:);
+                    skewDelta = [0,-d(3),d(2);d(3),0,-d(1);-d(2),d(1),0];
+                    resetJacobian = eye(3) - 0.5*skewDelta;
+                    obj.P(attitudeIdx,:) = resetJacobian*obj.P(attitudeIdx,:);
+                    obj.P(:,attitudeIdx) = obj.P(:,attitudeIdx)*resetJacobian';
+                    largestInjection = max(largestInjection,injectionInfo.injectionNorm_rad);
+                    if injectionInfo.injectionNorm_rad > maxGuard
+                        warning('ReverseGNSSEKF:update', ...
+                            ['Spacecraft %d attitude injection %.2e rad (%.2f deg) ' ...
+                             'exceeds the %.2e rad guard.'],assetIdx, ...
+                            injectionInfo.injectionNorm_rad, ...
+                            rad2deg(injectionInfo.injectionNorm_rad),maxGuard);
+                    end
+                    if assetIdx == 1
+                        primaryInjectionInfo = injectionInfo;
+                        primaryInjectionInfo.resetCondition = cond(resetJacobian);
+                    end
                 end
-                Gcond = cond(G);
+                obj.P = (obj.P+obj.P')/2;
+                obj.attitudeInjectionCount       = obj.attitudeInjectionCount + 1;
+                obj.maxAttitudeInjectionNorm_rad = max( ...
+                    obj.maxAttitudeInjectionNorm_rad,largestInjection);
                 obj.lastAttitudeErrorStateInfo = struct( ...
                     'parameterization',      'quaternionErrorState', ...
-                    'qNorm',                 injInfo.qNormPost, ...
-                    'lastInjectionNorm_rad', injNorm, ...
+                    'qNorm',                 primaryInjectionInfo.qNormPost, ...
+                    'lastInjectionNorm_rad', primaryInjectionInfo.injectionNorm_rad, ...
                     'maxInjectionNorm_rad',  obj.maxAttitudeInjectionNorm_rad, ...
                     'injectionCount',        obj.attitudeInjectionCount, ...
                     'covarianceResetApplied',  true, ...
                     'covarianceResetOrder',    'posterior-after-joseph', ...
-                    'covarianceResetJacobianCondition', Gcond, ...
+                    'covarianceResetJacobianCondition', primaryInjectionInfo.resetCondition, ...
                     'eulerReportingOnly',      true);
             else
-                % Legacy Euler mode: wrap Euler after state update
-                obj.x(obj.stateMap.euler_idx) = revgnss.AttitudeKinematics.wrapEuler( ...
-                    obj.x(obj.stateMap.euler_idx));
+                for assetIdx = 1:numel(obj.stateMap.asset)
+                    attitudeIdx = obj.stateMap.asset(assetIdx).euler;
+                    if isempty(attitudeIdx); continue; end
+                    obj.x(attitudeIdx) = revgnss.AttitudeKinematics.wrapEuler( ...
+                        obj.x(attitudeIdx));
+                end
             end
 
             % 8. Numerical sanity / PSD guard (after attitude reset if any)
@@ -651,7 +878,8 @@ classdef ReverseGNSSEKF < handle
             % space. Quaternion mode uses the error DCM between nominal and truth;
             % Euler mode uses the wrap-aware reported-minus-truth Euler difference.
             if strcmp(obj.attitudeParameterization, 'quaternionErrorState')
-                C_nom = revgnss.AttitudeErrorStateKinematics.quatToDcm(obj.nominalQuat_wxyz);
+                C_nom = revgnss.AttitudeErrorStateKinematics.quatToDcm( ...
+                    obj.nominalQuat_wxyz(:,1));
                 C_tru = revgnss.AttitudeKinematics.bodyToEcefRotation(truthEuler_rad);
                 dC    = C_nom' * C_tru;   % small rotation body(nominal)->body(truth)
                 aErr  = 0.5 * [dC(3,2)-dC(2,3); dC(1,3)-dC(3,1); dC(2,1)-dC(1,2)];
@@ -796,6 +1024,73 @@ classdef ReverseGNSSEKF < handle
                 sm.islAmbiguityIdx    = [];
                 sm.islAmbiguityTxList = [];
                 obj.islAmbiguityRegistry = [];
+            end
+
+            % Joint secondary blocks are appended after all single-spacecraft
+            % optional states, preserving every existing index when joint mode is off.
+            sm.secondaryOrbitIdx    = zeros(0,6);
+            sm.secondaryAttitudeIdx = zeros(0,6);
+            sm.secondaryClockIdx    = zeros(0,2);
+            sm.secondaryGyroBiasIdx = zeros(0,3);
+            if obj.jointMultiAssetEnabled
+                sm.secondaryOrbitIdx    = zeros(obj.nSecondaryAssets,6);
+                sm.secondaryAttitudeIdx = zeros(obj.nSecondaryAssets,6);
+                sm.secondaryClockIdx    = zeros(obj.nSecondaryAssets,2);
+                if obj.estimateGyroBias
+                    sm.secondaryGyroBiasIdx = zeros(obj.nSecondaryAssets,3);
+                end
+                for secondaryIdx = 1:obj.nSecondaryAssets
+                    sm.secondaryOrbitIdx(secondaryIdx,:) = nextIdx:nextIdx+5;
+                    nextIdx = nextIdx + 6;
+                    sm.secondaryAttitudeIdx(secondaryIdx,:) = nextIdx:nextIdx+5;
+                    nextIdx = nextIdx + 6;
+                    sm.secondaryClockIdx(secondaryIdx,:) = nextIdx:nextIdx+1;
+                    nextIdx = nextIdx + 2;
+                    if obj.estimateGyroBias
+                        sm.secondaryGyroBiasIdx(secondaryIdx,:) = nextIdx:nextIdx+2;
+                        nextIdx = nextIdx + 3;
+                    end
+                end
+            end
+            if obj.estimateTwoWayCodeCalibrationBias
+                count = obj.nTwoWayCodeCalibrationBiasStates;
+                sm.twoWayCodeCalibrationBiasIdx = ...
+                    (nextIdx:nextIdx+count-1)';
+                sm.twoWayCodeCalibrationBiasLinkIdentifiers = ...
+                    obj.twoWayCodeCalibrationBiasLinkIdentifiers;
+                nextIdx = nextIdx + count;
+            else
+                sm.twoWayCodeCalibrationBiasIdx = [];
+                sm.twoWayCodeCalibrationBiasLinkIdentifiers = {};
+            end
+
+            blankAsset = struct('r',[],'v',[],'euler',[],'omega',[], ...
+                'b',[],'bdot',[],'ambiguity3d',[],'ambiguity',[], ...
+                'zwd',[],'iono',[],'gyroBias',[]);
+            sm.asset = repmat(blankAsset, 1, 1 + obj.nSecondaryAssets);
+            sm.asset(1).r       = sm.r_idx;
+            sm.asset(1).v       = sm.v_idx;
+            sm.asset(1).euler   = sm.euler_idx;
+            sm.asset(1).omega   = sm.omega_idx;
+            sm.asset(1).b       = sm.b_rx_idx;
+            sm.asset(1).bdot    = sm.bdot_rx_idx;
+            sm.asset(1).gyroBias = sm.gyroBiasIdx;
+            if isfield(sm,'ambiguityIdx3d'); sm.asset(1).ambiguity3d = sm.ambiguityIdx3d; end
+            if isfield(sm,'ambiguityIdx');   sm.asset(1).ambiguity   = sm.ambiguityIdx;   end
+            if isfield(sm,'zwdIdx');         sm.asset(1).zwd         = sm.zwdIdx;          end
+            if isfield(sm,'ionoIdx');        sm.asset(1).iono        = sm.ionoIdx;         end
+            for assetIdx = 2:1+obj.nSecondaryAssets
+                secondaryIdx = assetIdx - 1;
+                sm.asset(assetIdx).r     = sm.secondaryOrbitIdx(secondaryIdx,1:3)';
+                sm.asset(assetIdx).v     = sm.secondaryOrbitIdx(secondaryIdx,4:6)';
+                sm.asset(assetIdx).euler = sm.secondaryAttitudeIdx(secondaryIdx,1:3)';
+                sm.asset(assetIdx).omega = sm.secondaryAttitudeIdx(secondaryIdx,4:6)';
+                sm.asset(assetIdx).b     = sm.secondaryClockIdx(secondaryIdx,1);
+                sm.asset(assetIdx).bdot  = sm.secondaryClockIdx(secondaryIdx,2);
+                if obj.estimateGyroBias
+                    sm.asset(assetIdx).gyroBias = ...
+                        sm.secondaryGyroBiasIdx(secondaryIdx,:)';
+                end
             end
 
             % Cross-check the two hand-maintained implementations of the state layout:
@@ -995,24 +1290,10 @@ classdef ReverseGNSSEKF < handle
                 Q(sm.omega_idx(k), sm.euler_idx(k)) = q_eul_omg;
             end
 
-            % --- IMU/MEKF process noise: attitude Q from the gyro ARW (REPLACES the angular-accel
-            %     term above), gyro-bias Q from the RRW. Gated -> off = pre-IMU Q (golden-safe).
+            % --- IMU/MEKF process noise
             if obj.estimateGyroBias && ~isempty(sm.gyroBiasIdx)
-                gb    = sm.gyroBiasIdx;
-                q_arw = obj.imuArw_^2 * dt_s;
-                q_rrw = obj.imuRrw_^2 * dt_s;
-                for k = 1:3
-                    Q(sm.euler_idx(k), sm.euler_idx(k)) = q_arw;   % gyro ARW replaces angular-accel
-                    Q(sm.euler_idx(k), sm.omega_idx(k)) = 0;       % drop euler<->omega cross on IMU path
-                    Q(sm.omega_idx(k), sm.euler_idx(k)) = 0;
-                    Q(gb(k), gb(k))                     = q_rrw;   % bias rate random walk
-                end
-                if obj.imuVanLoan_
-                    for k = 1:3
-                        Q(sm.euler_idx(k), gb(k)) = -0.5 * q_rrw * dt_s;
-                        Q(gb(k), sm.euler_idx(k)) = -0.5 * q_rrw * dt_s;
-                    end
-                end
+                Q = obj.applyGyroProcessNoise_(Q,sm.euler_idx, ...
+                    sm.omega_idx,sm.gyroBiasIdx,dt_s);
             end
 
             % --- Receiver clock process noise ---------------------------
@@ -1046,6 +1327,13 @@ classdef ReverseGNSSEKF < handle
             % estimate stays smooth (the honest fix vs. blunt orbit-SNC inflation).
             if obj.estimateSrpScale && ~isempty(sm.srpScaleIdx)
                 Q(sm.srpScaleIdx, sm.srpScaleIdx) = obj.srpScaleProcNoise_^2 * dt_s;
+            end
+            if obj.estimateTwoWayCodeCalibrationBias && ...
+                    ~isempty(sm.twoWayCodeCalibrationBiasIdx)
+                indices = sm.twoWayCodeCalibrationBiasIdx;
+                Q(indices,indices) = ...
+                    obj.twoWayCodeCalibrationBiasProcessNoise_^2*dt_s * ...
+                    eye(numel(indices));
             end
 
             % --- ISL ambiguity process noise -----------------------------
@@ -1616,6 +1904,117 @@ classdef ReverseGNSSEKF < handle
             end
         end
 
+        function Q = addJointAssetProcessNoise_(obj,Q,dt_s,assetClockModels)
+            sm = obj.stateMap;
+            primaryAccelSigma = obj.sigma_accel_mps2;
+            try
+                mismatchSigma = obj.cfg.estimator.processNoise.modelMismatch.sigma_mps2;
+                if obj.cfg.estimator.processNoise.modelMismatch.enable && ...
+                        isscalar(mismatchSigma) && mismatchSigma > 0
+                    primaryAccelSigma = hypot(primaryAccelSigma,mismatchSigma);
+                end
+            catch
+            end
+
+            angularSigma = obj.sigma_angAccel_radps2;
+            qAttitude = angularSigma^2*dt_s^3/3;
+            qRate = angularSigma^2*dt_s;
+            qAttitudeRate = angularSigma^2*dt_s^2/2;
+            if ~obj.estimateAttitude
+                qAttitude = qAttitude*1e-20;
+                qAttitudeRate = qAttitudeRate*1e-20;
+            end
+            if ~obj.estimateAngularRate
+                qRate = qRate*1e-20;
+                qAttitudeRate = qAttitudeRate*1e-20;
+            end
+
+            for assetIdx = 2:obj.nSpaceAssets
+                blk = sm.asset(assetIdx);
+                accelSigma = primaryAccelSigma;
+                try
+                    configuredSigma = obj.cfg.multiAsset.secondaryOrbit.sigma_accel_mps2;
+                    if isscalar(configuredSigma) && isfinite(configuredSigma) && ...
+                            configuredSigma >= 0
+                        accelSigma = configuredSigma;
+                    end
+                catch
+                end
+                qPosition = accelSigma^2*dt_s^3/3;
+                qVelocity = accelSigma^2*dt_s;
+                qPositionVelocity = accelSigma^2*dt_s^2/2;
+                for axisIdx = 1:3
+                    Q(blk.r(axisIdx),blk.r(axisIdx)) = qPosition;
+                    Q(blk.v(axisIdx),blk.v(axisIdx)) = qVelocity;
+                    Q(blk.r(axisIdx),blk.v(axisIdx)) = qPositionVelocity;
+                    Q(blk.v(axisIdx),blk.r(axisIdx)) = qPositionVelocity;
+                    Q(blk.euler(axisIdx),blk.euler(axisIdx)) = qAttitude;
+                    Q(blk.omega(axisIdx),blk.omega(axisIdx)) = qRate;
+                    Q(blk.euler(axisIdx),blk.omega(axisIdx)) = qAttitudeRate;
+                    Q(blk.omega(axisIdx),blk.euler(axisIdx)) = qAttitudeRate;
+                end
+                if obj.estimateGyroBias && ~isempty(blk.gyroBias)
+                    Q = obj.applyGyroProcessNoise_(Q,blk.euler, ...
+                        blk.omega,blk.gyroBias,dt_s);
+                end
+
+                clockModel = [];
+                if numel(assetClockModels) >= obj.nSpaceAssets
+                    clockModel = assetClockModels{assetIdx};
+                elseif numel(assetClockModels) >= assetIdx - 1
+                    clockModel = assetClockModels{assetIdx-1};
+                end
+                if isempty(clockModel)
+                    Qclock = diag([1e-4,1e-8])*dt_s;
+                else
+                    Qclock = clockModel.getProcessNoiseQ(dt_s,'meters');
+                end
+                clockIdx = [blk.b,blk.bdot];
+                Q(clockIdx,clockIdx) = Qclock;
+            end
+            commonEnabled = false;
+            commonSigma = 0;
+            try
+                commonConfig = obj.cfg.estimator.processNoise.commonAcceleration;
+                commonEnabled = logical(commonConfig.enable);
+                commonSigma = commonConfig.sigma_mps2;
+            catch
+            end
+            if commonEnabled && commonSigma > 0
+                qCommon = commonSigma^2 * ...
+                    [dt_s^3/3,dt_s^2/2;dt_s^2/2,dt_s];
+                for firstAsset = 1:obj.nSpaceAssets
+                    firstBlock = sm.asset(firstAsset);
+                    for secondAsset = 1:obj.nSpaceAssets
+                        secondBlock = sm.asset(secondAsset);
+                        for axisIdx = 1:3
+                            firstIndices = [firstBlock.r(axisIdx),firstBlock.v(axisIdx)];
+                            secondIndices = [secondBlock.r(axisIdx),secondBlock.v(axisIdx)];
+                            Q(firstIndices,secondIndices) = ...
+                                Q(firstIndices,secondIndices) + qCommon;
+                        end
+                    end
+                end
+            end
+            Q = (Q+Q')/2;
+        end
+
+        function Q = applyGyroProcessNoise_(obj,Q,attitudeIdx,rateIdx,biasIdx,dt_s)
+            % Discrete covariance for white gyro noise and gyro-bias random walk.
+            arwVariance = obj.imuArw_^2;
+            biasWalkPsd = obj.imuRrw_^2;
+            Qtheta = (arwVariance*dt_s + biasWalkPsd*dt_s^3/3)*eye(3);
+            QthetaBias = -biasWalkPsd*dt_s^2/2*eye(3);
+            Qbias = biasWalkPsd*dt_s*eye(3);
+
+            Q(attitudeIdx,attitudeIdx) = Qtheta;
+            Q(attitudeIdx,rateIdx) = zeros(3);
+            Q(rateIdx,attitudeIdx) = zeros(3);
+            Q(attitudeIdx,biasIdx) = QthetaBias;
+            Q(biasIdx,attitudeIdx) = QthetaBias.';
+            Q(biasIdx,biasIdx) = Qbias;
+        end
+
         % ----------------------------------------------------------------
         function initHistory_(obj)
             obj.history.time_s      = [];
@@ -1623,6 +2022,13 @@ classdef ReverseGNSSEKF < handle
             obj.history.P_diag      = [];
             obj.history.NIS         = [];
             obj.history.posErrNorm_m= [];
+            obj.history.nominalQuat_wxyz = zeros(4, numel(obj.stateMap.asset), 0);
+            obj.history.attitudeErrorCovariance_rad2 = ...
+                zeros(3,3,numel(obj.stateMap.asset),0);
+            obj.history.gyroBiasCovariance_rad2ps2 = ...
+                zeros(3,3,numel(obj.stateMap.asset),0);
+            obj.history.relativePositionCovarianceToReference_m2 = ...
+                zeros(3,3,max(0,numel(obj.stateMap.asset)-1),0);
         end
 
         function logStep(obj, t_s, NIS, posErr_m)
@@ -1631,6 +2037,43 @@ classdef ReverseGNSSEKF < handle
             obj.history.P_diag       = [obj.history.P_diag,       diag(obj.P)];
             obj.history.NIS          = [obj.history.NIS;          NIS];
             obj.history.posErrNorm_m = [obj.history.posErrNorm_m; posErr_m];
+            if strcmp(obj.attitudeParameterization,'quaternionErrorState')
+                quaternionHistoryEntry = obj.nominalQuat_wxyz;
+            else
+                quaternionHistoryEntry = zeros(4,numel(obj.stateMap.asset));
+                for assetIdx = 1:numel(obj.stateMap.asset)
+                    quaternionHistoryEntry(:,assetIdx) = ...
+                        revgnss.AttitudeErrorStateKinematics.eulerToQuatZYX( ...
+                        obj.x(obj.stateMap.asset(assetIdx).euler));
+                end
+            end
+            obj.history.nominalQuat_wxyz(:,:,end+1) = quaternionHistoryEntry;
+            historyIndex = numel(obj.history.time_s);
+            attitudeCovariance = zeros(3,3,numel(obj.stateMap.asset));
+            gyroBiasCovariance = nan(3,3,numel(obj.stateMap.asset));
+            for assetIdx = 1:numel(obj.stateMap.asset)
+                block = obj.stateMap.asset(assetIdx);
+                attitudeCovariance(:,:,assetIdx) = ...
+                    obj.P(block.euler,block.euler);
+                if ~isempty(block.gyroBias)
+                    gyroBiasCovariance(:,:,assetIdx) = ...
+                        obj.P(block.gyroBias,block.gyroBias);
+                end
+            end
+            obj.history.attitudeErrorCovariance_rad2(:,:,:,historyIndex) = ...
+                attitudeCovariance;
+            obj.history.gyroBiasCovariance_rad2ps2(:,:,:,historyIndex) = ...
+                gyroBiasCovariance;
+            for assetIdx = 2:numel(obj.stateMap.asset)
+                referenceBlock = obj.stateMap.asset(1);
+                assetBlock = obj.stateMap.asset(assetIdx);
+                obj.history.relativePositionCovarianceToReference_m2( ...
+                    :,:,assetIdx-1,historyIndex) = ...
+                    obj.P(assetBlock.r,assetBlock.r) + ...
+                    obj.P(referenceBlock.r,referenceBlock.r) - ...
+                    obj.P(assetBlock.r,referenceBlock.r) - ...
+                    obj.P(referenceBlock.r,assetBlock.r);
+            end
         end
     end
 end

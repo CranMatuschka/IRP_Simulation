@@ -47,7 +47,7 @@ fprintf('  |sumNIS - dof| = %.2f\n', abs(sumNIS - dof));
 % (errors.codeNoise off) while R uses the ~0.3 m assumed code-tracking sigma. The
 % innovations are then dominated by deterministic convergence residuals, not stochastic
 % N(0,S) draws, so sumNIS << dof (empirically ratio ~0.05-0.5 here, and <1 even for the
-% stochastic matchedErrorBaselineConfig). Under-confidence is SAFE. The safety-critical
+% stochastic nominal configuration). Under-confidence is SAFE. The safety-critical
 % failure this statistic must catch is OVER-confidence (sumNIS >> dof: the EKF trusting
 % measurements more than warranted, risking divergence). Two-sided chi^2 consistency
 % would require R/P re-tuned to the true statistics, which would move the validated

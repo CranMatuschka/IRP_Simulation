@@ -33,7 +33,8 @@ classdef BaselineCarrierAmbiguityResolver
     %   'rejectedRatio'             — ratio <= ratioThreshold (rms passed)
     %   'rejectedFloatDistance'     — |N_float-N_best| >= maxFloatDistance_cycles
     %   'rejectedWideLane'          — wide-lane consistency gate failed (dual-freq)
-    %   'floatExternalReference'    — AR disabled or baseline not attempted
+    %   'floatSelfCalibrated'       — AR disabled; float self-calibration retained
+    %   'floatExternalReference'    — external-reference mode only
     %
     % Global integerClassification values:
     %   'fixedDualFrequencyRawAll'  — all baselines fixedDualFrequencyRaw
@@ -42,7 +43,7 @@ classdef BaselineCarrierAmbiguityResolver
     %   'fixedAll'                  — all fixed (single-freq L1 mode)
     %   'mixedFixedFloat'           — partial fix; float baselines included
     %   'fixedPartialExcludedFloat' — partial fix; float baselines excluded
-    %   'fallbackExternalRef'       — none fixed; float calibration retained
+    %   'floatSelfCalibrated'       — no integer accepted; self-calibrated float retained
     %   'notAttempted'              — AR disabled or nBaselines=0
 
     methods (Static)
@@ -54,6 +55,12 @@ classdef BaselineCarrierAmbiguityResolver
             if ~isfield(c,'phaseBiasStatus'); c.phaseBiasStatus = 'notCalibratedExternalProduct'; end
             if ~isfield(c,'partialFixPolicy'); c.partialFixPolicy = 'mixedFixedFloat'; end
             if ~isfield(c,'differentialIonosphereMode'); c.differentialIonosphereMode = 'neglectedShortBaselineV1'; end
+            usesExternalReference = isfield(store, 'referenceMode') && ...
+                strcmp(store.referenceMode, 'externalInitialAttitude');
+            floatStatus = 'floatSelfCalibrated';
+            if usesExternalReference
+                floatStatus = 'floatExternalReference';
+            end
             % Initialise summary fields
             store.integerFixAttempted           = false;
             store.integerFixAccepted            = false;
@@ -61,17 +68,19 @@ classdef BaselineCarrierAmbiguityResolver
             store.nIntegerRejected              = 0;
             store.integerClassification         = 'notAttempted';
             store.externalRefUsedAsSearchCenter = false;
-            store.externalRefUsedForCalibration = true;
+            store.externalRefUsedForCalibration = usesExternalReference;
             % Global fields
             store.gnssOnlyAttitudeClaim         = false;
             store.falseFixClassification        = c.falseFixClassification;
             store.phaseBiasStatus               = c.phaseBiasStatus;
             store.partialFixPolicy              = c.partialFixPolicy;
-            store.nBaselineArFloatExternal      = 0;
+            store.nBaselineArFloat              = store.nTowers * store.nBaselines;
+            store.nBaselineArFloatExternal      = ...
+                double(usesExternalReference) * store.nBaselineArFloat;
             store.nBaselineArRejectedArc        = 0;
             store.nBaselineArRejectedPhaseBias  = 0;
             % Per-baseline metadata (nTowers x nBaselines)
-            store.ambiguityStatus   = repmat({'floatExternalReference'}, store.nTowers, store.nBaselines);
+            store.ambiguityStatus   = repmat({floatStatus}, store.nTowers, store.nBaselines);
             store.N_float_all       = zeros(store.nTowers, store.nBaselines);
             store.floatDistance_all = zeros(store.nTowers, store.nBaselines);
             store.rmsBest_all       = zeros(store.nTowers, store.nBaselines);
@@ -94,27 +103,31 @@ classdef BaselineCarrierAmbiguityResolver
 
             if ~arEn || store.nBaselines < 1; return; end
 
+            if ~c.requirePhaseBiasCalibrationForFix
+                error('BaselineCarrierAmbiguityResolver:uncalibratedFixingUnavailable', ...
+                    'Integer fixing cannot bypass phase-bias calibration.');
+            end
             store.integerFixAttempted           = true;
             store.externalRefUsedAsSearchCenter = ...
+                usesExternalReference && ...
                 ~isempty(store.referenceAttitude_euler_rad) && c.useExtRefAsCenter;
 
             % Determine if dual-frequency AR is active
             dualEn = c.enabledByFrequency(1) && numel(c.enabledByFrequency) >= 2 && ...
                 c.enabledByFrequency(2) && isfield(store,'accumN_L2');
-            phaseBiasOk = true;
-            if c.requirePhaseBiasCalibrationForFix
-                phaseBiasOk = strcmp(c.phaseBiasStatus,'syntheticKnownZero') || ...
-                    strcmp(c.phaseBiasStatus,'calibratedExternalProduct');
-            end
+            phaseBiasOk = strcmp(c.phaseBiasStatus,'syntheticKnownZero') || ...
+                strcmp(c.phaseBiasStatus,'calibratedExternalProduct');
             if ~phaseBiasOk
                 total = store.nTowers * store.nBaselines;
                 store.ambiguityStatus(:) = {'rejectedPhaseBias'};
                 store.integerFixAccepted = false;
-                store.integerClassification = 'fallbackExternalRef';
+                store.integerClassification = floatStatus;
                 store.nIntegerRejected = total;
-                store.nBaselineArFloatExternal = total;
+                store.nBaselineArFloat = total;
+                store.nBaselineArFloatExternal = ...
+                    double(usesExternalReference) * total;
                 store.nBaselineArRejectedPhaseBias = total;
-                store.externalRefUsedForCalibration = true;
+                store.externalRefUsedForCalibration = usesExternalReference;
                 return
             end
 
@@ -301,11 +314,13 @@ classdef BaselineCarrierAmbiguityResolver
 
             store.nIntegerFixed              = nFixed;
             store.nIntegerRejected           = nRejArc + nRejGates;
-            store.nBaselineArFloatExternal   = nRejGates;
             store.nBaselineArRejectedArc     = nRejArc;
             store.nBaselineArFixedDualFrequency = nFixedDual;
             store.nBaselineArFixedL1Only        = nFixedL1Only;
             total = store.nTowers * store.nBaselines;
+            store.nBaselineArFloat = max(0, total - nFixed);
+            store.nBaselineArFloatExternal = ...
+                double(usesExternalReference) * store.nBaselineArFloat;
 
             % Global classification
             if dualEn
@@ -328,7 +343,7 @@ classdef BaselineCarrierAmbiguityResolver
                     store.integerFixAccepted = true;
                     if strcmp(c.partialFixPolicy,'mixedFixedFloat')
                         store.integerClassification         = 'mixedFixedFloat';
-                        store.externalRefUsedForCalibration = true;
+                        store.externalRefUsedForCalibration = usesExternalReference;
                     else
                         store.integerClassification         = 'fixedPartialExcludedFloat';
                         store.externalRefUsedForCalibration = false;
@@ -337,9 +352,9 @@ classdef BaselineCarrierAmbiguityResolver
                         nFixed, total, c.partialFixPolicy);
                 else
                     store.integerFixAccepted            = false;
-                    store.externalRefUsedForCalibration = true;
-                    store.integerClassification         = 'fallbackExternalRef';
-                    fprintf('  [DiffAttAR] All %d baselines failed gates; fallback to external-reference float\n', total);
+                    store.externalRefUsedForCalibration = usesExternalReference;
+                    store.integerClassification         = floatStatus;
+                    fprintf('  [DiffAttAR] All %d baselines retained as float\n', total);
                 end
             else
                 % Single-frequency classification (behavior preserved)
@@ -347,12 +362,12 @@ classdef BaselineCarrierAmbiguityResolver
                     store.integerFixAccepted            = true;
                     store.externalRefUsedForCalibration = false;
                     store.integerClassification         = 'fixedAll';
-                    fprintf('  [DiffAttAR] %d/%d baselines integer-fixed (L1 only; extRef search centre only)\n', nFixed, total);
+                    fprintf('  [DiffAttAR] %d/%d baselines integer-fixed (L1 only)\n', nFixed, total);
                 elseif nFixed > 0
                     store.integerFixAccepted = true;
                     if strcmp(c.partialFixPolicy,'mixedFixedFloat')
                         store.integerClassification         = 'mixedFixedFloat';
-                        store.externalRefUsedForCalibration = true;
+                        store.externalRefUsedForCalibration = usesExternalReference;
                     else
                         store.integerClassification         = 'fixedPartialExcludedFloat';
                         store.externalRefUsedForCalibration = false;
@@ -361,20 +376,14 @@ classdef BaselineCarrierAmbiguityResolver
                         nFixed, total, c.partialFixPolicy);
                 else
                     store.integerFixAccepted            = false;
-                    store.externalRefUsedForCalibration = true;
-                    store.integerClassification         = 'fallbackExternalRef';
-                    fprintf('  [DiffAttAR] Integer fix: all %d baselines failed gates; fallback\n', total);
+                    store.externalRefUsedForCalibration = usesExternalReference;
+                    store.integerClassification         = floatStatus;
+                    fprintf('  [DiffAttAR] All %d baselines retained as float\n', total);
                 end
             end
 
-            % GNSS-only attitude claim: true only when all baselines are integer-fixed
-            % (dual or L1-only) and no external-reference calibration is used in EKF rows.
-            if c.requireAllForGnssOnlyClaim
-                store.gnssOnlyAttitudeClaim = (nFixed == total && total > 0 && ...
-                    ~store.externalRefUsedForCalibration);
-            else
-                store.gnssOnlyAttitudeClaim = (nFixed > 0 && ~store.externalRefUsedForCalibration);
-            end
+            % Self-calibration remains conditioned on the initial attitude prior.
+            store.gnssOnlyAttitudeClaim = false;
         end
 
     end  % Static
@@ -405,7 +414,7 @@ classdef BaselineCarrierAmbiguityResolver
             c.maxFloatDistance_cycles    = Inf;
             c.phaseBiasStatus            = 'notCalibratedExternalProduct';
             c.requireAllForGnssOnlyClaim = true;
-            c.requirePhaseBiasCalibrationForFix = false;
+            c.requirePhaseBiasCalibrationForFix = true;
             c.partialFixPolicy           = 'mixedFixedFloat';
             c.falseFixClassification     = 'screenedNotFormal';
             % Defaults

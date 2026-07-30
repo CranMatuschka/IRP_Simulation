@@ -1,9 +1,9 @@
 % test_keep_isl_in_per_asset_ekf
 % cfg.multiAsset.keepIslInPerAssetEkf: do the ISL rows survive into each per-asset EKF?
 %
-% In the federated swarm each member runs its own single-asset EKF on the GROUND rows (W1)
-% while a separate read-only layer consumes the ISL/TWSTFT observables (W2). ReportRunner
-% strips ISL out of W1 so the same photon is never counted twice. That strip is now gated.
+% In the federated swarm each member runs its own single-asset EKF on ground rows,
+% while a separate read-only layer consumes the ISL/time-transfer observables. ReportRunner
+% strips ISL out of the ground filter so the same observation is never counted twice.
 %
 % THE POINT OF THIS TEST is that the gate is not cosmetic. singleAssetBase_ also forces
 % nSpaceAssets=1, and with one asset the ISL builder has ZERO transmitters -- so merely
@@ -36,7 +36,7 @@ fprintf('  T1: default (false) strips ISL and collapses to one asset ...\n');
 cfgOff = i_cfg(false);
 baseOff = i_perAssetBase(cfgOff);
 assert(~baseOff.measurements.isl.enable, ...
-    'T1 FAILED: isl.enable=true with the toggle off; the frozen W1/W2 disjointness is broken');
+    'T1 FAILED: isl.enable=true with the toggle off; estimator disjointness is broken');
 assert(baseOff.scenario.nSpaceAssets == 1, ...
     'T1 FAILED: nSpaceAssets=%d, expected 1', baseOff.scenario.nSpaceAssets);
 fprintf('    isl.enable=false, nSpaceAssets=1: PASS\n');

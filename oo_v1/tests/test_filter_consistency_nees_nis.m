@@ -82,7 +82,7 @@ fprintf('    PASS (matched in band; under-modelled R detected)\n');
 % Part C: shipped filter computeNEES API + conservative (not over-confident)
 % ================================================================
 fprintf('  C. ReverseGNSSEKF.computeNEES on the real filter (conservative by design) ...\n');
-cfg = revgnss.ConfigFactory.matchedErrorBaselineConfig();
+cfg = masterConfig();
 cfg.simulation.duration_s = 200;
 cfg.simulation.dt_s       = 1;
 cfg.plots.enable  = false;

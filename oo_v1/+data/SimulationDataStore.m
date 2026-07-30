@@ -93,6 +93,8 @@ classdef SimulationDataStore < handle
         cn_NIScar_
         cn_NISdop_
         cn_NIStwtt_
+        cn_NISstar_
+        cn_NISstarDof_
         cn_NEESp_
         cn_NEESv_
         cn_NEESc_
@@ -319,6 +321,7 @@ classdef SimulationDataStore < handle
 
             obj.cn_NIS_   = n1(); obj.cn_NIScod_= n1();
             obj.cn_NIScar_= n1(); obj.cn_NISdop_= n1(); obj.cn_NIStwtt_ = n1();
+            obj.cn_NISstar_ = n1(); obj.cn_NISstarDof_ = n1();
             obj.cn_NEESp_ = n1(); obj.cn_NEESv_ = n1();
             obj.cn_NEESc_ = n1(); obj.cn_NEESa_ = n1();
 
@@ -489,6 +492,8 @@ classdef SimulationDataStore < handle
             obj.cn_NIScar_(k) = g_(entry,'NIS_carrier',NaN);
             obj.cn_NISdop_(k) = g_(entry,'NIS_doppler',NaN);
             obj.cn_NIStwtt_(k)= g_(entry,'NIS_twoWayTimeTransfer',NaN);
+            obj.cn_NISstar_(k)= g_(entry,'NIS_starTracker',NaN);
+            obj.cn_NISstarDof_(k)= g_(entry,'NIS_starTrackerDof',0);
             obj.cn_NEESp_(k)  = g_(entry,'NEES_pos',NaN);
             obj.cn_NEESv_(k)  = g_(entry,'NEES_vel',NaN);
             obj.cn_NEESc_(k)  = g_(entry,'NEES_clk',NaN);
@@ -799,6 +804,18 @@ classdef SimulationDataStore < handle
             if storeFullThisEpoch; entry.H = H; entry.R = R;
             else; entry.H = []; entry.R = []; end
             entry.NIS    = NIS;
+            entry.NIS_starTracker = NaN;
+            entry.NIS_starTrackerDof = 0;
+            if ~isempty(errStruct) && isfield(errStruct,'starTracker') && ...
+                    isstruct(errStruct.starTracker)
+                starTrackerInfo = errStruct.starTracker;
+                if isfield(starTrackerInfo,'nRows')
+                    entry.NIS_starTrackerDof = starTrackerInfo.nRows;
+                end
+                if isfield(starTrackerInfo,'NIS')
+                    entry.NIS_starTracker = starTrackerInfo.NIS;
+                end
+            end
             entry.Rsize  = [0, 0]; entry.Rdiag = [];
             if ~isempty(R)
                 entry.Rsize = [size(R,1), size(R,2)]; entry.Rdiag = diag(R);
@@ -821,8 +838,27 @@ classdef SimulationDataStore < handle
             else
                 M_pr = numel(z);
             end
+            jointMeasurementStack = ~isempty(errStruct) && ...
+                isfield(errStruct,'jointGround') && ...
+                isstruct(errStruct.jointGround) && ...
+                isfield(errStruct.jointGround,'enabled') && ...
+                errStruct.jointGround.enabled;
+            if jointMeasurementStack && ...
+                    isfield(errStruct.jointGround,'spacecraft')
+                secondaryRecords = errStruct.jointGround.spacecraft;
+                for recordIdx = 1:numel(secondaryRecords)
+                    if isfield(secondaryRecords(recordIdx),'errors') && ...
+                            isfield(secondaryRecords(recordIdx).errors,'nPseudorange')
+                        M_pr = M_pr + ...
+                            secondaryRecords(recordIdx).errors.nPseudorange;
+                    end
+                end
+            end
             entry.numPseudorangeMeasurements = M_pr;
             entry.numMeasurements            = M_pr;
+            if jointMeasurementStack
+                entry.numMeasurements = numel(z);
+            end
             entry.numMeasurementRows         = numel(z);
             M_dop_rows = 0;
             if ~isempty(errStruct) && isfield(errStruct,'measType_perRow')
@@ -1194,12 +1230,19 @@ classdef SimulationDataStore < handle
             end
 
             % --- Geometry / DOPs ---
+            % NOT gated on heavyDiag_. The heavy gate exists for the full-Jacobian rank,
+            % cond(S) and the attitude SVD, which scale with the whole state/measurement
+            % dimension. The DOPs are a FOUR-column quantity (position + receiver clock):
+            % one rank of an M_pr x 4 and one 4 x 4 inverse. Sampling them at
+            % heavyDiagnosticsInterval_s (default 300 s) produced 13 finite values out of
+            % 3601 epochs, each isolated between NaNs, so the report's DOP figure had no
+            % two adjacent samples to draw a line through and rendered blank.
             entry.geometryRank = NaN; entry.gdopLike = NaN;
             entry.pdopLike = NaN;    entry.tdopLike = NaN;
             entry.hdopLike = NaN;    entry.vdopLike = NaN;
             entry.positionClockCondition = NaN;
             posClkIdx_ = [sm.r_idx(:); sm.b_rx_idx]';
-            if heavyDiag_ && ~isempty(H) && ~isempty(R) && M_pr >= 4 && ...
+            if ~isempty(H) && ~isempty(R) && M_pr >= 4 && ...
                     numel(posClkIdx_) == 4 && size(H,2) >= max(posClkIdx_)
                 H_pr_ = H(1:M_pr,:); R_pr_ = R(1:M_pr,1:M_pr);
                 H_pc_ = H_pr_(:, posClkIdx_);
@@ -1217,15 +1260,35 @@ classdef SimulationDataStore < handle
                         % analogue is the orbital RAC frame -- "vertical" = RADIAL (the axis
                         % degenerate with the receiver clock at GEO, so this is the number that
                         % matters here) and "horizontal" = ALONG + CROSS track.
+                        %
+                        % The cross-track axis is the ORBIT NORMAL, and an orbit normal is
+                        % defined by the INERTIAL velocity -- not the Earth-relative one. A
+                        % geostationary asset has v_ecef == 0 EXACTLY, so cross(r, v_ecef) was
+                        % the zero vector, uC_ = 0/0 = NaN and uA_ = NaN. uR_ stayed finite, so
+                        % VDOP survived while HDOP became sqrt(max(NaN,0)) -- and MATLAB's
+                        % max(NaN,0) is 0, so the report published HDOP = 0, i.e. PERFECT
+                        % horizontal geometry, for exactly the case where it had none. Measured
+                        % on a 60 s GEO run: HDOP = 0 at all 61 epochs, and VDOP^2 + HDOP^2
+                        % missed PDOP^2 by 1.6e-3 relative (the identity is exact for an
+                        % orthonormal triad, so the gap WAS the fabricated zero).
+                        %
+                        % v_inertial on ECEF axes = v_ecef + omega_E x r_ecef.
                         try
                             rr_ = asset.r_ecef_m(:); vv_ = asset.v_ecef_mps(:);
-                            uR_ = rr_ / norm(rr_);
-                            uC_ = cross(rr_, vv_); uC_ = uC_ / norm(uC_);
-                            uA_ = cross(uC_, uR_);
-                            T_   = [uR_ uA_ uC_].';               % ECEF -> RAC
-                            Qr_  = T_ * Q_geom_(1:3,1:3) * T_.';
-                            entry.vdopLike = sqrt(max(Qr_(1,1), 0));
-                            entry.hdopLike = sqrt(max(Qr_(2,2) + Qr_(3,3), 0));
+                            wE_   = [0; 0; revgnss.Constants.EARTH_OMEGA_RADPS];
+                            nOrb_ = cross(rr_, vv_ + cross(wE_, rr_));   % orbit normal
+                            if all(isfinite(nOrb_)) && norm(nOrb_) > 0 && norm(rr_) > 0
+                                uR_ = rr_ / norm(rr_);
+                                uC_ = nOrb_ / norm(nOrb_);
+                                uA_ = cross(uC_, uR_);
+                                T_   = [uR_ uA_ uC_].';           % ECEF -> RAC
+                                Qr_  = T_ * Q_geom_(1:3,1:3) * T_.';
+                                % Leave NaN as NaN: max(NaN,0)=0 would republish an
+                                % uncomputable DOP as a perfect one.
+                                vd_ = Qr_(1,1); hd_ = Qr_(2,2) + Qr_(3,3);
+                                if isfinite(vd_); entry.vdopLike = sqrt(max(vd_, 0)); end
+                                if isfinite(hd_); entry.hdopLike = sqrt(max(hd_, 0)); end
+                            end
                         catch; end
                     catch; end
                 end
@@ -1466,6 +1529,14 @@ classdef SimulationDataStore < handle
             n = obj.cn_NIS_(1:obj.nEpochs);
         end
 
+        function n = getStarTrackerNIS(obj)
+            n = obj.cn_NISstar_(1:obj.nEpochs);
+        end
+
+        function n = getStarTrackerNISDof(obj)
+            n = obj.cn_NISstarDof_(1:obj.nEpochs);
+        end
+
         function nu = getPrefitInnovationRMS(obj)
             nu = obj.rs_pfa_(1:obj.nEpochs);
         end
@@ -1507,6 +1578,13 @@ classdef SimulationDataStore < handle
 
         function v = getTDOPLike(obj)
             v = obj.gm_tdop_(1:obj.nEpochs);
+        end
+
+        function v = getPositionClockCondition(obj)
+            % Condition number of the position + receiver-clock normal matrix. Its size
+            % IS the radial<->clock degeneracy, so the report quotes it next to the DOPs.
+            % Previously reachable only via getData().geom.positionClockCondition.
+            v = obj.gm_pclk_(1:obj.nEpochs);
         end
 
         function v = getGeometryRank(obj)
@@ -1708,6 +1786,8 @@ classdef SimulationDataStore < handle
             C.code    = obj.cn_NIScod_(1:obj.nEpochs);
             C.doppler = obj.cn_NISdop_(1:obj.nEpochs);
             C.carrier = obj.cn_NIScar_(1:obj.nEpochs);
+            C.starTracker = obj.cn_NISstar_(1:obj.nEpochs);
+            C.starTrackerDof = obj.cn_NISstarDof_(1:obj.nEpochs);
         end
 
         function v = getRxClockBiasTrue(obj)
@@ -1793,6 +1873,8 @@ classdef SimulationDataStore < handle
             d.truth.v_cm_ecef_mps     = obj.tr_v_(:,1:N);
             d.truth.euler_rad         = obj.tr_eu_(:,1:N);
             d.truth.omega_body_radps  = obj.tr_om_(:,1:N);
+            d.truth.omega_B_E_body_radps = obj.tr_om_(:,1:N);
+            d.truth.physicalGyroBias_radps = obj.tr_bg_(:,1:N);
             d.truth.rxClockBias_m     = obj.tr_cbm_(1:N);
             d.truth.rxClockBias_s     = obj.tr_cbs_(1:N);
             d.truth.rxClockDrift_mps  = obj.tr_cdm_(1:N);
@@ -1811,6 +1893,20 @@ classdef SimulationDataStore < handle
             d.estimate.v_cm_ecef_mps  = obj.es_v_(:,1:N);
             d.estimate.euler_rad      = obj.es_eu_(:,1:N);
             d.estimate.omega_body_radps= obj.es_om_(:,1:N);
+            d.estimate.gyroBias_radps = obj.es_bg_(:,1:N);
+            gyroAided = false;
+            try; gyroAided = logical(obj.cfg_.estimator.estimateGyroBias); catch; end
+            if gyroAided
+                d.estimate.derivedOmega_B_E_body_radps = obj.es_om_(:,1:N);
+                d.estimate.estimatedOmega_B_E_body_radps = [];
+                d.estimate.omegaStateInterpretation = ...
+                    'derived from inertial gyroscope, estimated bias, and nominal Earth rate';
+            else
+                d.estimate.derivedOmega_B_E_body_radps = [];
+                d.estimate.estimatedOmega_B_E_body_radps = obj.es_om_(:,1:N);
+                d.estimate.omegaStateInterpretation = ...
+                    'estimated constant-rate state';
+            end
             d.estimate.rxClockBias_m  = obj.es_cbm_(1:N);
             d.estimate.rxClockDrift_mps= obj.es_cdm_(1:N);
             d.estimate.r_ecef_m       = d.estimate.r_cm_ecef_m;  % compat alias
@@ -1885,6 +1981,8 @@ classdef SimulationDataStore < handle
             d.consistency.NIS_carrier = obj.cn_NIScar_(1:N);
             d.consistency.NIS_doppler = obj.cn_NISdop_(1:N);
             d.consistency.NIS_twoWayTimeTransfer = obj.cn_NIStwtt_(1:N);
+            d.consistency.NIS_starTracker = obj.cn_NISstar_(1:N);
+            d.consistency.NIS_starTrackerDof = obj.cn_NISstarDof_(1:N);
             d.consistency.NEES_pos    = obj.cn_NEESp_(1:N);
             d.consistency.NEES_vel    = obj.cn_NEESv_(1:N);
             d.consistency.NEES_clk   = obj.cn_NEESc_(1:N);

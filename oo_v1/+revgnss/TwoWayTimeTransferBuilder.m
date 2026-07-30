@@ -38,12 +38,11 @@ classdef TwoWayTimeTransferBuilder
     %
     %   The two-way row (see build, below) is
     %       H_i = [ 0_pos | +1 on b_rx | -1 on b_tower if that clock is an EKF state ]
-    %   i.e. it observes the clock DIRECTLY with no position column, so it
+    %   i.e. it observes the clock directly. The optional first-order
+    %   reciprocity term adds small position and velocity partials, so it
     %   (a) pins the clock to the reciprocity/noise floor and (b) frees the RADIAL
     %   axis, since the clock can no longer absorb a radial shift. (With
-    %   includeReciprocityResidual the recip term adds only a small VELOCITY column
-    %   -(rho/c)*u_hat; its d/dr partial, ~1e-5 of the unit LOS partial, is dropped
-    %   -- so "no position column" is exact in H and first-order in the physics.)
+    %   remains dominated by the clock-difference columns.
     %
     % SCOPE -- WHAT TWO-WAY DOES NOT FIX (honest limitation; do not over-read it)
     %   Two-way is a CLOCK observable: it sharpens the clock and the radial axis
@@ -110,7 +109,9 @@ classdef TwoWayTimeTransferBuilder
                 return
             end
 
-            c         = revgnss.Constants.SPEED_OF_LIGHT_MPS;
+            mode      = revgnss.TwoWayTimeTransferBuilder.getStr_(cfg, ...
+                {'measurements','twoWayTimeTransfer','mode'}, ...
+                revgnss.ReciprocalTimeTransferModel.FirstOrderMode);
             sigma_m   = revgnss.TwoWayTimeTransferBuilder.getNum_(cfg, {'measurements','twoWayTimeTransfer','sigma_m'}, 0.03);
             recipOn   = revgnss.TwoWayTimeTransferBuilder.getBool_(cfg, {'measurements','twoWayTimeTransfer','includeReciprocityResidual'}, false);
             recipSig  = revgnss.TwoWayTimeTransferBuilder.getNum_(cfg, {'measurements','twoWayTimeTransfer','reciprocitySigma_m'}, 0.005);
@@ -126,7 +127,7 @@ classdef TwoWayTimeTransferBuilder
             % lands back at the true product sigma (the honest reference-clock floor) while
             % legitimate cross-interval averaging still applies. This is a conservative
             % (never under-confident) treatment of the time-correlated product error; the
-            % rigorous alternative is a per-tower product-bias EKF state (future WP).
+            % rigorous alternative is a per-tower product-bias EKF state.
             consProdCorr = revgnss.TwoWayTimeTransferBuilder.getBool_(cfg, ...
                 {'measurements','twoWayTimeTransfer','conservativeProductCorrelation'}, true);
             nCorr = 1;
@@ -199,27 +200,36 @@ classdef TwoWayTimeTransferBuilder
                 % recip = -(rhoDot * rho)/c : the leading two-way asymmetry from the
                 % spacecraft moving during the round trip. Modelled on BOTH sides so
                 % it cancels to the state-error level; residual covered by recipSig.
-                recip_t = 0; recip_e = 0; velRow = zeros(1,3);
-                if recipOn
-                    [rhoDot_t] = revgnss.OneWayRangeRateModel.compute(r_sat_t, v_sat_t, r_twr_t, cfg);
-                    rho_t   = max(norm(r_sat_t - r_twr_t), 1);
-                    recip_t = -(rhoDot_t * rho_t) / c;
-                    [rhoDot_e] = revgnss.OneWayRangeRateModel.compute(r_sat_e, v_sat_e, r_twr_e, cfg);
-                    d_e   = r_sat_e - r_twr_e; rho_e = max(norm(d_e), 1); u_e = d_e / rho_e;
-                    recip_e = -(rhoDot_e * rho_e) / c;
-                    velRow  = -(rho_e / c) * u_e';   % d(recip)/dv (dominant partial)
-                end
+                truthReference = struct('position_m',r_twr_t, ...
+                    'velocity_mps',zeros(3,1),'clockBias_m',b_tw_true);
+                truthRemote = struct('position_m',r_sat_t, ...
+                    'velocity_mps',v_sat_t,'clockBias_m',b_rx_true);
+                modelReference = struct('position_m',r_twr_e, ...
+                    'velocity_mps',zeros(3,1),'clockBias_m',b_tw_model);
+                modelRemote = struct('position_m',r_sat_e, ...
+                    'velocity_mps',v_sat_e,'clockBias_m',b_rx_est);
+                truthResult = revgnss.ReciprocalTimeTransferModel.evaluate( ...
+                    truthReference,truthRemote,mode,recipOn);
+                modelResult = revgnss.ReciprocalTimeTransferModel.evaluate( ...
+                    modelReference,modelRemote,mode,recipOn);
 
                 % --- Measurement noise (identity-keyed truth draw) ---------------
                 n = sigma_m * revgnss.TwoWayTimeTransferBuilder.draw_(errorChain, ti, epochIdx);
 
-                zi = (b_rx_true - b_tw_true)  + recip_t + n;
-                hi = (b_rx_est  - b_tw_model) + recip_e;
+                zi = truthResult.value_m + n;
+                hi = modelResult.value_m;
 
                 Hi = zeros(1, nx);
-                Hi(stateMap.b_rx_idx) = 1;              % receiver clock: +1 (range cancels)
-                if towerCol > 0; Hi(towerCol) = -1; end % tower clock state: -1 (if estimated)
-                if recipOn; Hi(stateMap.v_idx) = Hi(stateMap.v_idx) + velRow; end
+                Hi(stateMap.b_rx_idx) = modelResult.remoteClockPartial;
+                if towerCol > 0
+                    Hi(towerCol) = modelResult.referenceClockPartial;
+                end
+                if recipOn
+                    Hi(stateMap.r_idx) = Hi(stateMap.r_idx) + ...
+                        modelResult.remotePositionPartial;
+                    Hi(stateMap.v_idx) = Hi(stateMap.v_idx) + ...
+                        modelResult.remoteVelocityPartial;
+                end
 
                 Ri = sigma_m^2;
                 if addProductVar; Ri = Ri + nCorr * sig_prod^2; end   % conservative: correlated product error
@@ -239,13 +249,15 @@ classdef TwoWayTimeTransferBuilder
                     'towerClockStateColumn', towerCol, ...
                     'prefit_m', zi - hi, 'sigma_m', sqrt(Ri), ...
                     'towerClockIsState', towerCol > 0, 'productSigma_m', sig_prod, ...
-                    'reciprocity_m', recip_t, 'reciprocityModel_m', recip_e);
+                    'reciprocity_m', truthResult.reciprocity_m, ...
+                    'reciprocityModel_m', modelResult.reciprocity_m, ...
+                    'modelMode',mode);
                 if isempty(rowsMeta); rowsMeta = meta; else; rowsMeta(end+1) = meta; end %#ok<AGROW>
 
                 obsRow = revgnss.ObservableRowDescriptor.create( ...
                     0, 'twoWayTimeTransfer', sprintf('link:twtt:t%03d:sat', ti), 'TWTT', ...
                     ti, 1, revgnss.TwoWayTimeTransferBuilder.stateCols_(stateMap, towerCol, recipOn), ...
-                    'Tower<->spacecraft two-way time transfer (WP-A)', ...
+                    'tower-spacecraft first-order reciprocal clock-difference observable', ...
                     revgnss.TwoWayTimeTransferBuilder.role_(useInEKF));
                 obsRow = revgnss.ObservableRowDescriptor.withFlags(obsRow, useInEKF, false);
                 info.observableRows(end+1) = obsRow;
@@ -274,7 +286,9 @@ classdef TwoWayTimeTransferBuilder
                 return
             end
 
-            c = revgnss.Constants.SPEED_OF_LIGHT_MPS;
+            mode = revgnss.TwoWayTimeTransferBuilder.walk_(cfg, ...
+                {'measurements','twoWayTimeTransfer','mode'}, ...
+                revgnss.ReciprocalTimeTransferModel.FirstOrderMode);
             recipOn = revgnss.TwoWayTimeTransferBuilder.getBool_(cfg, ...
                 {'measurements','twoWayTimeTransfer','includeReciprocityResidual'}, false);
             r_sat_e = x(stateMap.r_idx);
@@ -293,24 +307,28 @@ classdef TwoWayTimeTransferBuilder
                     b_tw_model = b_rx_e - rowInfo.clockDiffModel_m;
                 end
 
-                recip_e = 0;
-                velRow = zeros(1, 3);
-                if recipOn
-                    r_twr_e = models.measurements.MeasurementModelUtils.towerPositionEcef(cfg, towers{ti}, ti, 'model');
-                    [rhoDot_e] = revgnss.OneWayRangeRateModel.compute(r_sat_e, v_sat_e, r_twr_e, cfg);
-                    d_e = r_sat_e - r_twr_e;
-                    rho_e = max(norm(d_e), 1);
-                    u_e = d_e / rho_e;
-                    recip_e = -(rhoDot_e * rho_e) / c;
-                    velRow = -(rho_e / c) * u_e';
-                end
+                r_twr_e = models.measurements.MeasurementModelUtils. ...
+                    towerPositionEcef(cfg,towers{ti},ti,'model');
+                modelReference = struct('position_m',r_twr_e, ...
+                    'velocity_mps',zeros(3,1),'clockBias_m',b_tw_model);
+                modelRemote = struct('position_m',r_sat_e, ...
+                    'velocity_mps',v_sat_e,'clockBias_m',b_rx_e);
+                modelResult = revgnss.ReciprocalTimeTransferModel.evaluate( ...
+                    modelReference,modelRemote,mode,recipOn);
 
                 Hi = zeros(1, nx);
-                Hi(stateMap.b_rx_idx) = 1;
-                if towerCol > 0; Hi(towerCol) = -1; end
-                if recipOn; Hi(stateMap.v_idx) = Hi(stateMap.v_idx) + velRow; end
+                Hi(stateMap.b_rx_idx) = modelResult.remoteClockPartial;
+                if towerCol > 0
+                    Hi(towerCol) = modelResult.referenceClockPartial;
+                end
+                if recipOn
+                    Hi(stateMap.r_idx) = Hi(stateMap.r_idx) + ...
+                        modelResult.remotePositionPartial;
+                    Hi(stateMap.v_idx) = Hi(stateMap.v_idx) + ...
+                        modelResult.remoteVelocityPartial;
+                end
 
-                hPred(end+1,1) = (b_rx_e - b_tw_model) + recip_e; %#ok<AGROW>
+                hPred(end+1,1) = modelResult.value_m; %#ok<AGROW>
                 HPred(end+1,:) = Hi; %#ok<AGROW>
                 if isempty(rows); rows = rowInfo; else; rows(end+1) = rowInfo; end %#ok<AGROW>
             end
@@ -327,6 +345,10 @@ classdef TwoWayTimeTransferBuilder
                      'cfg.measurements.twoWayTimeTransfer.enable=true.']);
             end
             if ~en; return; end
+            mode = revgnss.TwoWayTimeTransferBuilder.getStr_(cfg, ...
+                {'measurements','twoWayTimeTransfer','mode'}, ...
+                revgnss.ReciprocalTimeTransferModel.FirstOrderMode);
+            revgnss.ReciprocalTimeTransferModel.validateMode(mode);
             sg = revgnss.TwoWayTimeTransferBuilder.getNum_(cfg, {'measurements','twoWayTimeTransfer','sigma_m'}, 0.03);
             if ~(isfinite(sg) && sg > 0)
                 error('TwoWayTimeTransferBuilder:sigma', ...
@@ -367,7 +389,9 @@ classdef TwoWayTimeTransferBuilder
         function cols = stateCols_(stateMap, towerCol, recipOn)
             cols = stateMap.b_rx_idx;
             if towerCol > 0; cols = [cols, towerCol]; end
-            if recipOn; cols = [cols, stateMap.v_idx(:)']; end
+            if recipOn
+                cols = [cols,stateMap.r_idx(:)',stateMap.v_idx(:)'];
+            end
         end
 
         function towerCol = rowTowerColumn_(rowInfo, stateMap, ti)
@@ -408,6 +432,14 @@ classdef TwoWayTimeTransferBuilder
         function v = getNum_(cfg, path, def)
             v = revgnss.TwoWayTimeTransferBuilder.walk_(cfg, path, def);
             if ~isnumeric(v) || ~isscalar(v); v = def; end
+        end
+
+        function v = getStr_(cfg, path, def)
+            v = revgnss.TwoWayTimeTransferBuilder.walk_(cfg, path, def);
+            if ~(ischar(v) || (isstring(v) && isscalar(v)))
+                v = def;
+            end
+            v = char(v);
         end
 
         function v = walk_(cfg, path, def)

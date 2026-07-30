@@ -46,8 +46,12 @@ classdef ISLTimingModel
         function diag = summarize(cfg, oneWayInfo, twoWayInfo)
             events = [revgnss.ISLTimingModel.eventsFromInfo_(oneWayInfo), ...
                       revgnss.ISLTimingModel.eventsFromInfo_(twoWayInfo)];
+            coherentTwoWay = isstruct(twoWayInfo) && ...
+                isfield(twoWayInfo,'protocol') && ...
+                strcmp(twoWayInfo.protocol,'coherentTranspondedPnTwoWayCode') && ...
+                ~isempty(revgnss.ISLTimingModel.eventsFromInfo_(twoWayInfo));
             diag = struct();
-            diag.enabled = revgnss.ISLTimingModel.isTimingEnabled_(cfg);
+            diag.enabled = revgnss.ISLTimingModel.isTimingEnabled_(cfg) || coherentTwoWay;
             diag.clockTransferDiagnosticAvailable = false;
             diag.eventCount = numel(events);
             diag.timingMode = revgnss.ISLTimingModel.getStr_(cfg, {'measurements','isl','timing','mode'}, 'sameEpoch');
@@ -61,6 +65,12 @@ classdef ISLTimingModel
             diag.relayTransponderImplemented = false;
             diag.islCarrierEkfUsed = revgnss.ISLTimingModel.getBool_(cfg, {'measurements','isl','carrier','useInEKF'}, false);
             diag.events = events;
+            if coherentTwoWay
+                diag.timingMode = 'fourEventLightTime';
+                diag.relayTransponderImplemented = true;
+                diag.processingDelay_s = ...
+                    twoWayInfo.linkEvents(1).processingDelay_s;
+            end
             if isempty(events); return; end
             lt = [events.lightTime_s];
             diag.meanLightTime_s = mean(lt);
@@ -73,7 +83,11 @@ classdef ISLTimingModel
                 ret = twoWay(2).receiverClockBiasAtReceive_m - twoWay(2).transmitterClockBiasAtTransmit_m;
                 diag.twoWayClockResidual_m = 0.5 * (fwd + ret);
             end
-            if strcmp(diag.timingMode, 'sameEpoch')
+            if coherentTwoWay
+                diag.clockCancellationAssumption = ...
+                    ['initiator clock offset cancels in the local round-trip interval; ' ...
+                     'clock rate and event-time mapping remain modeled'];
+            elseif strcmp(diag.timingMode, 'sameEpoch')
                 diag.clockCancellationAssumption = 'sameEpochExactAssumption';
             else
                 diag.clockCancellationAssumption = 'lightTimeApproximateDiagnostic';

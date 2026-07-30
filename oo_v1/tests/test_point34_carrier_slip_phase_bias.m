@@ -104,6 +104,7 @@ fprintf('    PASS\n');
 % -------------------------------------------------------------------------
 fprintf('  T7: ambiguity resolver can block uncalibrated phase-bias fixing ...\n');
 cfg7 = masterConfig();
+cfg7.estimator.diffAtt.ambiguityResolution.enable = true;
 cfg7.estimator.diffAtt.ambiguityResolution.requirePhaseBiasCalibrationForFix = true;
 cfg7.estimator.diffAtt.ambiguityResolution.phaseBiasStatus = 'notCalibratedExternalProduct';
 store7 = localOneBaselineStore_(3, lambda1);
@@ -117,6 +118,27 @@ out7b = revgnss.BaselineCarrierAmbiguityResolver.resolve(store7, cfg7);
 assert(out7b.nIntegerFixed == 1, 'T7 FAILED: known-zero phase bias should allow fixing.');
 assert(strcmp(out7b.ambiguityStatus{1,1}, 'fixedInteger'), ...
     'T7 FAILED: expected fixedInteger after known-zero status.');
+fprintf('    PASS\n');
+
+% -------------------------------------------------------------------------
+fprintf('  T8: a slip clears all differential-carrier statistics ...\n');
+cfg8 = masterConfig();
+store8 = revgnss.DiffAttitudeBuilder.init(cfg8, 1);
+store8.activeMask(1,1) = true;
+store8.accumN(1,1) = 5;
+store8.accumSum(1,1) = 2;
+store8.accumSumSq(1,1) = 3;
+store8.accumN_L2(1,1) = 5;
+store8.accumSum_L2(1,1) = 2;
+store8.accumSumSq_L2(1,1) = 3;
+store8 = revgnss.DiffAttitudeBuilder.handleSlips(store8, ...
+    struct('slippedKeys', {{'T001_A002_S01'}}));
+assert(store8.accumN(1,1) == 0 && store8.accumSum(1,1) == 0 && ...
+    store8.accumSumSq(1,1) == 0, ...
+    'T8 FAILED: stale L1 calibration statistics survived a slip.');
+assert(store8.accumN_L2(1,1) == 0 && store8.accumSum_L2(1,1) == 0 && ...
+    store8.accumSumSq_L2(1,1) == 0, ...
+    'T8 FAILED: stale L2 calibration statistics survived a slip.');
 fprintf('    PASS\n');
 
 fprintf('=== test_point34_carrier_slip_phase_bias: ALL PASS ===\n');

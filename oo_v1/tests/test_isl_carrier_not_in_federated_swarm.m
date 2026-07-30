@@ -12,7 +12,7 @@
 %   2. FEDERATED SWARM (revgnss.ReportRunner, i.e. what run_oo_v1 produces for
 %      nSpaceAssets > 1). ReportRunner.stripSwarmEstimation_ sets
 %      measurements.isl.enable = false on EVERY per-asset EKF config, BY DESIGN: the
-%      federated architecture keeps W1 (ground pseudoranges) and W2 (the ISL relative
+%      federated architecture keeps ground pseudoranges and the ISL relative
 %      layer) on DISJOINT measurements so they cannot double-count
 %      (see the SwarmRelativeSolver header). Consequently NONE of this feature's ISL
 %      carrier machinery runs inside a federated swarm report.

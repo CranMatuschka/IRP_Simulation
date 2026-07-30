@@ -2,16 +2,23 @@ classdef ReverseGnssObservableAdapter
     % ReverseGnssObservableAdapter  Map current tower-centric rows to generic metadata.
 
     methods (Static)
-        function stack = build(cfg, H, nCodeRows, errStruct, stateMap)
+        function stack = build(cfg, H, nCodeRows, errStruct, stateMap, assetIdx)
+            if nargin < 6 || isempty(assetIdx); assetIdx = 1; end
             nTwr = revgnss.ReverseGnssObservableAdapter.getCfgNum_(cfg, {'scenario','nTowers'}, 0);
-            nRx = revgnss.ReverseGnssObservableAdapter.getCfgNum_(cfg, {'scenario','nReceivers'}, 1);
             assetInfos = revgnss.MultiAssetConfig.assetInfos(cfg);
-            assetName = assetInfos(1).name;
+            if assetIdx > numel(assetInfos)
+                error('ObservableAdapter:assetIndex','Spacecraft %d is not configured.',assetIdx);
+            end
+            assetName = assetInfos(assetIdx).name;
+            nRx = assetInfos(assetIdx).nReceivers;
             endpoints = revgnss.ReverseGnssObservableAdapter.endpoints_(nTwr, assetInfos);
-            links = revgnss.ReverseGnssObservableAdapter.links_(nTwr, nRx, assetName, 1);
-            rows = revgnss.ReverseGnssObservableAdapter.physicalRows_(cfg, H, nCodeRows, errStruct, stateMap, assetName);
+            links = revgnss.ReverseGnssObservableAdapter.links_( ...
+                nTwr,nRx,assetName,assetIdx);
+            rows = revgnss.ReverseGnssObservableAdapter.physicalRows_( ...
+                cfg,H,nCodeRows,errStruct,stateMap,assetName,assetIdx);
             stack = revgnss.ObservableStackDescriptor.create(endpoints, links, rows);
-            revgnss.ReverseGnssObservableAdapter.validatePhysicalRows_(stack, H, stateMap);
+            revgnss.ReverseGnssObservableAdapter.validatePhysicalRows_( ...
+                stack,H,stateMap,assetIdx);
         end
 
         function stack = addDifferentialAttitudeRows(stack, diffInfo, stateMap)
@@ -73,16 +80,30 @@ classdef ReverseGnssObservableAdapter
             end
             endpoints = stack.endpoints;
             links = stack.links;
-            txEp = revgnss.EndpointDescriptor.spacecraftTransmitter( ...
-                twInfo.transmitterAssetName, twInfo.transmitterAssetIndex);
-            if ~any(strcmp({endpoints.id}, txEp.id))
-                endpoints(end+1) = txEp;
+            linkInfos = {twInfo};
+            if isfield(twInfo,'linkInfos')
+                linkInfos = twInfo.linkInfos;
             end
-            link = revgnss.LinkDescriptor.islTwoWay( ...
-                twInfo.transmitterAssetName, twInfo.transmitterAssetIndex, ...
-                twInfo.receiverAssetName, twInfo.receiverAssetIndex);
-            if ~any(strcmp({links.id}, link.id))
-                links(end+1) = link;
+            for linkIndex = 1:numel(linkInfos)
+                linkInfo = linkInfos{linkIndex};
+                if isempty(linkInfo) || isempty(linkInfo.rows); continue; end
+                txEp = revgnss.EndpointDescriptor.spacecraftTransmitter( ...
+                    linkInfo.transmitterAssetName, ...
+                    linkInfo.transmitterAssetIndex);
+                if ~any(strcmp({endpoints.id}, txEp.id))
+                    endpoints(end+1) = txEp; %#ok<AGROW>
+                end
+                link = revgnss.LinkDescriptor.islTwoWay( ...
+                    linkInfo.transmitterAssetName, ...
+                    linkInfo.transmitterAssetIndex, ...
+                    linkInfo.receiverAssetName, ...
+                    linkInfo.receiverAssetIndex);
+                if isfield(linkInfo,'linkIdentifier')
+                    link.id = linkInfo.linkIdentifier;
+                end
+                if ~any(strcmp({links.id}, link.id))
+                    links(end+1) = link; %#ok<AGROW>
+                end
             end
             rows = stack.rows;
             startIdx = numel(rows);
@@ -123,6 +144,54 @@ classdef ReverseGnssObservableAdapter
             stack = revgnss.ObservableStackDescriptor.create(endpoints, links, rows);
         end
 
+        function stack = addInterSatelliteTimeTransferRows(stack, info)
+            if isempty(stack) || isempty(info) || ~isstruct(info) || ...
+                    ~isfield(info,'enabled') || ~info.enabled || ...
+                    ~isfield(info,'rows') || isempty(info.rows)
+                return
+            end
+            endpoints = stack.endpoints;
+            links = stack.links;
+            rows = stack.rows;
+            linkInfos = info.linkInfos;
+            for linkIndex = 1:numel(linkInfos)
+                linkInfo = linkInfos{linkIndex};
+                if isempty(linkInfo) || isempty(linkInfo.rows)
+                    continue
+                end
+                referenceEndpoint = ...
+                    revgnss.EndpointDescriptor.spacecraftReceiver( ...
+                    linkInfo.referenceAssetName,1, ...
+                    linkInfo.referenceAssetIndex);
+                remoteEndpoint = ...
+                    revgnss.EndpointDescriptor.spacecraftTransmitter( ...
+                    linkInfo.remoteAssetName,linkInfo.remoteAssetIndex);
+                if ~any(strcmp({endpoints.id},referenceEndpoint.id))
+                    endpoints(end+1) = referenceEndpoint; %#ok<AGROW>
+                end
+                if ~any(strcmp({endpoints.id},remoteEndpoint.id))
+                    endpoints(end+1) = remoteEndpoint; %#ok<AGROW>
+                end
+                if ~any(strcmp({links.id},linkInfo.linkIdentifier))
+                    links(end+1) = revgnss.LinkDescriptor.create( ...
+                        linkInfo.linkIdentifier,remoteEndpoint.id, ...
+                        referenceEndpoint.id,'ISL_TWO_WAY_TIME_TRANSFER', ...
+                        linkInfo.referenceAssetName, ...
+                        linkInfo.referenceAssetIndex, ...
+                        linkInfo.remoteAssetName, ...
+                        linkInfo.remoteAssetIndex); %#ok<AGROW>
+                end
+            end
+            startIndex = numel(rows);
+            for rowIndex = 1:numel(info.rows)
+                row = info.rows(rowIndex);
+                row.rowIndex = startIndex+rowIndex;
+                rows(end+1) = row; %#ok<AGROW>
+            end
+            stack = revgnss.ObservableStackDescriptor.create( ...
+                endpoints,links,rows);
+        end
+
         function stack = addTWSTFTDiagnosticRows(stack, twstftDiag)
             % addTWSTFTDiagnosticRows  Append twstftCodeDiagnostic row descriptors.
             % No EKF rows (no z/h/H/R). Role = diagnosticOnly.
@@ -144,7 +213,7 @@ classdef ReverseGnssObservableAdapter
     end
 
     methods (Static, Access = private)
-        function rows = physicalRows_(cfg, H, nCodeRows, errStruct, stateMap, assetName)
+        function rows = physicalRows_(cfg, H, nCodeRows, errStruct, stateMap, assetName, assetIdx)
             rows = struct([]);
             mType = {};
             if isfield(errStruct,'measType_perRow'); mType = errStruct.measType_perRow; end
@@ -160,7 +229,7 @@ classdef ReverseGnssObservableAdapter
                 typeCounter.(obsType) = typeCounter.(obsType) + 1;
                 [ti, ai, sig] = revgnss.ReverseGnssObservableAdapter.rowIdentity_( ...
                     typeCounter.(obsType), obsType, errStruct);
-                linkId = sprintf('link:a001:t%03d:rx%03d', ti, ai);
+                linkId = sprintf('link:a%03d:t%03d:rx%03d',assetIdx,ti,ai);
                 stateCols = find(abs(H(ri,:)) > 1e-12);
                 role = revgnss.ReverseGnssObservableAdapter.roleFor_(cfg, obsType);
                 provenance = revgnss.ReverseGnssObservableAdapter.provenanceFor_(obsType);
@@ -261,7 +330,8 @@ classdef ReverseGnssObservableAdapter
             tf = rxIdx <= size(arms,2) && norm(arms(:,rxIdx)) > 1e-9;
         end
 
-        function validatePhysicalRows_(stack, H, stateMap)
+        function validatePhysicalRows_(stack, H, stateMap, assetIdx)
+            block = revgnss.AssetStateBlock.forAsset(stateMap,assetIdx);
             physicalRows = stack.rows(~strcmp({stack.rows.observableType}, 'diffCarrierAttitude'));
             if numel(physicalRows) ~= size(H,1)
                 error('ObservableAdapter:physicalRowCountMismatch', ...
@@ -270,14 +340,15 @@ classdef ReverseGnssObservableAdapter
             for k = 1:numel(physicalRows)
                 row = physicalRows(k);
                 if row.updatesClock
-                    clkCols = revgnss.ReverseGnssObservableAdapter.clockColsFor_(row.observableType, stateMap);
+                    clkCols = revgnss.ReverseGnssObservableAdapter.clockColsFor_( ...
+                        row.observableType,block);
                     if isempty(intersect(row.stateColumns, clkCols))
                         error('ObservableAdapter:clockColumnMissing', ...
                             '%s row %d declares clock sensitivity but H has no clock column.', row.observableType, row.rowIndex);
                     end
                 end
                 if row.attitudeSensitive
-                    attCols = stateMap.euler_idx;
+                    attCols = block.euler;
                     if isempty(intersect(row.stateColumns, attCols))
                         error('ObservableAdapter:attitudeColumnMissing', ...
                             '%s row %d declares attitude sensitivity but H attitude columns are zero.', row.observableType, row.rowIndex);
@@ -286,11 +357,11 @@ classdef ReverseGnssObservableAdapter
             end
         end
 
-        function cols = clockColsFor_(obsType, stateMap)
+        function cols = clockColsFor_(obsType, block)
             if strcmp(obsType,'doppler')
-                cols = stateMap.bdot_rx_idx;
+                cols = block.bdot;
             else
-                cols = stateMap.b_rx_idx;
+                cols = block.b;
             end
         end
 

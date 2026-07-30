@@ -3,8 +3,7 @@ classdef DiffAttitudeBuilder
     %
     % Scientific basis: phi(t,i) - phi(t,1) cancels b_rx and b_twr; the
     % differential ambiguity delta_B(t,i) = B(t,i) - B(t,1) is constant per arc.
-    % Differential ambiguity calibrated at an external reference attitude so the
-    % calibration window does not absorb the initial attitude error.
+    % The default self-calibration is conditioned on the initial attitude prior.
     % Integer ambiguity resolution for delta_B via
     %   BaselineCarrierAmbiguityResolver (raw L1 candidate search, RMS gate,
     %   ratio test).  If accepted, delta_B = lambda_L1 * N_int (integer metres).
@@ -38,13 +37,20 @@ classdef DiffAttitudeBuilder
                 calibWin = cfg.estimator.diffAtt.calibWin_s;
             end
             % Reference mode controls calibration attitude source.
-            % 'selfCalibrated'          — use current EKF attitude (relative tracking only)
-            % 'externalInitialAttitude' — use external reference set via setReference()
+            % 'selfCalibrated' uses the current EKF attitude (relative tracking only).
             refMode = 'selfCalibrated';
             if isfield(cfg,'estimator') && isfield(cfg.estimator,'diffAtt') && ...
                     isfield(cfg.estimator.diffAtt,'referenceMode')
                 refMode = cfg.estimator.diffAtt.referenceMode;
             end
+            if strcmp(refMode, 'externalInitialAttitude')
+                error('DiffAttitudeBuilder:externalReferenceUnavailable', ...
+                    ['externalInitialAttitude requires a real attitude observation ' ...
+                     'or product interface, which is not implemented.']);
+            end
+            assert(strcmp(refMode, 'selfCalibrated'), ...
+                'DiffAttitudeBuilder:unknownReferenceMode', ...
+                'Unknown differential-attitude reference mode: %s', refMode);
             nBase = max(0, nRx - 1);
             store.calibrated       = false;
             store.nTowers          = nTowers;
@@ -71,7 +77,9 @@ classdef DiffAttitudeBuilder
             store.nIntegerRejected              = 0;
             store.integerClassification         = 'notAttempted';
             store.externalRefUsedAsSearchCenter = false;
-            store.externalRefUsedForCalibration = true;
+            store.externalRefUsedForCalibration = false;
+            store.solutionInterpretation = ...
+                'relativeAttitudeTrackingConditionedOnInitialPrior';
             % Dual-frequency AR accumulation stores.
             arFreqEn = [true, false];
             try
@@ -89,10 +97,10 @@ classdef DiffAttitudeBuilder
 
         % ----------------------------------------------------------------
         function store = setReference(store, euler_ref)
-            % setReference  Set external initial attitude reference for calibration.
-            % Called once at simulation init when referenceMode='externalInitialAttitude'.
-            store.referenceAttitude_euler_rad = euler_ref(:);
-            store.referenceMode = 'externalInitialAttitude';
+            %#ok<INUSD>
+            error('DiffAttitudeBuilder:externalReferenceUnavailable', ...
+                ['No external attitude observation or product interface is ' ...
+                 'implemented.']);
         end
 
         % ----------------------------------------------------------------
@@ -208,6 +216,7 @@ classdef DiffAttitudeBuilder
                     store.invalidMask(ti,bi) = true;
                     store.accumN(ti,bi)      = 0;
                     store.accumSum(ti,bi)    = 0;
+                    store.accumSumSq(ti,bi)  = 0;
                     % Also reset L2 accumulators on slip
                     if isfield(store,'accumN_L2')
                         store.accumN_L2(ti,bi)     = 0;
@@ -288,19 +297,27 @@ classdef DiffAttitudeBuilder
             store = setIfMissing_(store,'nIntegerFixed',0);
             store = setIfMissing_(store,'nIntegerRejected',0);
             store = setIfMissing_(store,'externalRefUsedAsSearchCenter',false);
-            store = setIfMissing_(store,'externalRefUsedForCalibration',true);
+            useExternalReference = strcmp(revgnss.DiffAttitudeBuilder. ...
+                storeField_(store, 'referenceMode', 'selfCalibrated'), ...
+                'externalInitialAttitude');
+            store = setIfMissing_(store,'externalRefUsedForCalibration',useExternalReference);
             store = setIfMissing_(store,'falseFixClassification',falseFix);
             store = setIfMissing_(store,'phaseBiasStatus',phaseBias);
             store = setIfMissing_(store,'partialFixPolicy',partialPolicy);
             store = setIfMissing_(store,'gnssOnlyAttitudeClaim',false);
-            store = setIfMissing_(store,'nBaselineArFloatExternal',nT*nB);
+            store = setIfMissing_(store,'nBaselineArFloat',nT*nB);
+            store = setIfMissing_(store,'nBaselineArFloatExternal', ...
+                double(useExternalReference) * nT*nB);
             store = setIfMissing_(store,'nBaselineArRejectedArc',0);
             store = setIfMissing_(store,'nBaselineArRejectedPhaseBias',0);
             store = setIfMissing_(store,'nBaselineArFixedDualFrequency',0);
             store = setIfMissing_(store,'nBaselineArFixedL1Only',0);
             store = setIfMissing_(store,'attitudeArMode','rawL1Only');
             store = setIfMissing_(store,'differentialIonosphereInBaselineAr',diffIono);
-            store = setIfMissing_(store,'ambiguityStatus',repmat({'floatExternalReference'}, nT, nB));
+            store = setIfMissing_(store,'ambiguityStatus', ...
+                repmat({'floatSelfCalibrated'}, nT, nB));
+            store = setIfMissing_(store,'solutionInterpretation', ...
+                'relativeAttitudeTrackingConditionedOnInitialPrior');
             store = setIfMissing_(store,'dualFreqStatus',repmat({'notAttempted'}, nT, nB));
             store = setIfMissing_(store,'wideLaneStatus',repmat({'notAttempted'}, nT, nB));
             store.diffAttSchemaStatus = 'complete';
@@ -327,12 +344,17 @@ classdef DiffAttitudeBuilder
             info.integerClassification         = store.integerClassification;
             info.externalRefUsedAsSearchCenter = store.externalRefUsedAsSearchCenter;
             info.externalRefUsedForCalibration = store.externalRefUsedForCalibration;
+            info.solutionInterpretation = revgnss.DiffAttitudeBuilder.storeField_( ...
+                store, 'solutionInterpretation', ...
+                'relativeAttitudeTrackingConditionedOnInitialPrior');
             % Per-baseline classification and GNSS-only claim fields.
             info.gnssOnlyAttitudeClaim    = revgnss.DiffAttitudeBuilder.storeField_(store,'gnssOnlyAttitudeClaim',false);
             info.falseFixClassification   = revgnss.DiffAttitudeBuilder.storeField_(store,'falseFixClassification','screenedNotFormal');
             info.phaseBiasStatus          = revgnss.DiffAttitudeBuilder.storeField_(store,'phaseBiasStatus','notCalibratedExternalProduct');
             info.partialFixPolicy         = revgnss.DiffAttitudeBuilder.storeField_(store,'partialFixPolicy','mixedFixedFloat');
             info.nBaselineArFloatExternal = revgnss.DiffAttitudeBuilder.storeField_(store,'nBaselineArFloatExternal',0);
+            info.nBaselineArFloat = revgnss.DiffAttitudeBuilder.storeField_( ...
+                store,'nBaselineArFloat',0);
             info.nBaselineArRejectedArc   = revgnss.DiffAttitudeBuilder.storeField_(store,'nBaselineArRejectedArc',0);
             info.nBaselineArRejectedPhaseBias = revgnss.DiffAttitudeBuilder.storeField_(store,'nBaselineArRejectedPhaseBias',0);
             info.ambiguityStatus          = revgnss.DiffAttitudeBuilder.storeField_(store,'ambiguityStatus',{});

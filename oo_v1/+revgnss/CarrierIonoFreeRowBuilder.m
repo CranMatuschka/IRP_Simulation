@@ -84,7 +84,8 @@ classdef CarrierIonoFreeRowBuilder
                     try; policy_ = cfg.validation.unsupportedFeaturePolicy; catch; end
                     if strcmp(policy_,'error')
                         error('CarrierIonoFreeRowBuilder:arcMetadataUnavailable', ...
-                            'enforceCarrierArcConsistency=true but cpInfo has no arcId; enable arcSeparatedAmbiguities.');
+                            ['enforceCarrierArcConsistency=true but cpInfo has no arcId ' ...
+                             'before ionosphere-free row construction.']);
                     else
                         arcConsistencyEnforced = false;
                     end
