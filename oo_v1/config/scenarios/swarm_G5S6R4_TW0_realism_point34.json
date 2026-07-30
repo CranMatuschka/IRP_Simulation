@@ -55,7 +55,6 @@
   },
   "report": {
     "runVersion": "point34",
-    "oscillatorValidationMode": "allanOnly",
     "kabschAlignmentPlot": {
       "enable": true
     }
@@ -73,7 +72,7 @@
       }
     },
     "twoWayTimeTransferISL": {
-      "enable": true
+      "enable": false
     },
     "federated": {
       "refAsset": 1,

@@ -40,7 +40,6 @@
   },
   "realism": {
     "grade": true,
-    "directOverlay": true,
     "include": {
       "multipath": false,
       "hardwareDelay": false
@@ -75,7 +74,7 @@
         "enable": true
       },
       "model": {
-        "enable": true
+        "enable": false
       }
     },
     "towerSurvey": {
@@ -84,7 +83,7 @@
         "enable": true
       },
       "model": {
-        "enable": true
+        "enable": false
       }
     },
     "solidEarthTide": {

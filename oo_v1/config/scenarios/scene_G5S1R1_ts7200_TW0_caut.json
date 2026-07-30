@@ -39,8 +39,7 @@
     "runVersion": "caut"
   },
   "realism": {
-    "grade": true,
-    "directOverlay": true
+    "grade": true
   },
   "clock": {
     "templateSource": "jowTable2p1"
@@ -66,7 +65,7 @@
         "enable": true
       },
       "model": {
-        "enable": true
+        "enable": false
       },
       "coloredGM": {
         "enable": true
@@ -78,7 +77,7 @@
         "enable": true
       },
       "model": {
-        "enable": true
+        "enable": false
       },
       "sigma_m": 0.5,
       "residualStochastic": {
@@ -96,7 +95,7 @@
         "enable": true
       },
       "model": {
-        "enable": true
+        "enable": false
       }
     },
     "towerSurvey": {
@@ -105,7 +104,7 @@
         "enable": true
       },
       "model": {
-        "enable": true
+        "enable": false
       }
     },
     "solidEarthTide": {

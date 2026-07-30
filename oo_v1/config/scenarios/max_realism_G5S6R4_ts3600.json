@@ -1,12 +1,12 @@
 {
-  "_comment": "MAXIMUM-REALISM G5S6R4, 3600 s. Everything the simulation can switch on is on: realism grade (R-1..R-10), BOTH atmosphere layers, the full ISL crosslink stack (code + carrier + float ambiguities + cycle-slip detection), LAMBDA integer AR on ground and ISL, the physics-derived ISL link budget with light-time, two-way ISL, TWSTFT time transfer, the SRP-coefficient state, attitude from 4 receivers, and luni-solar + SRP perturbations. ISL is also kept INSIDE each per-asset EKF (keepIslInPerAssetEkf) so the crosslink contribution appears in the report -- at the cost of W1/W2 overlap, see the note in masterConfig. Run: run_oo_v1('max_realism_G5S6R4_ts3600.json')",
+  "_comment": "MAXIMUM-REALISM G5S6R4, 3600 s. The simplified reciprocal ISL time-transfer mode and the future physical four-timestamp mode both remain disabled in this scenario.",
 
   "scenario":   { "nTowers": 5, "nSpaceAssets": 6, "nReceivers": 4 },
   "simulation": { "duration_s": 3600 },
   "report":     { "runVersion": 1, "writePdf": true, "writeMat": true, "compileTex": "require" },
 
-  "_realism": "R-1..R-10: realistic caesium clock, IGS-RTS tower product sigma, C/N0 code weighting, multipath/hardware/PCV/survey/DCB truth systematics, relativistic clock, honest measurement floors, matched luni-solar + SRP, EOP/solid-Earth tide, inter-antenna carrier bias.",
-  "realism": { "grade": true, "directOverlay": true },
+  "_realism": "R-1..R-10: realistic caesium clock, IGS-RTS tower product sigma, C/N0 code weighting, multipath/hardware/PCV/survey/DCB truth systematics, relativistic clock, honest measurement floors, luni-solar and SRP in both truth and estimator force families, EOP/solid-Earth tide, inter-antenna carrier bias.",
+  "realism": { "grade": true },
 
   "_atmosphere": "The two master enables that are OFF in masterConfig. cfg.atmosphere.realistic is already true by default, so switching these on gives the Niell/Saastamoinen troposphere and the diurnal + topside + Klobuchar ionosphere with scintillation -- not the synthetic placeholder.",
   "errors": {
@@ -31,7 +31,7 @@
         "slipDetection": { "enable": true, "minEpochsBeforeDetect": 30, "action": "resetAndUse" }
       }
     },
-    "_twstftNote": "measurements.twstft (SAT-SAT) is deliberately NOT enabled. It is a diagnostic scaffold that adds no EKF rows, and its requireIslTiming guard hard-errors unless isl.timing.enable is also set. The time transfer that actually does work here is multiAsset.twoWayTimeTransferISL (sat-sat, relative layer) plus measurements.twoWayTimeTransfer (tower<->spacecraft), which IS a real EKF observable: the range cancels by reciprocity so H has +1 on b_rx and no position column, breaking the GEO radial<->clock degeneracy.",
+    "_twstftNote": "ISL time transfer is disabled. Ground-to-space first-order reciprocal time transfer remains enabled in this stress scenario.",
     "twoWayTimeTransfer": { "enable": true, "useInEKF": true, "towers": "all" }
   },
 
@@ -51,7 +51,7 @@
     "srpCoefficient": { "enable": true, "useInEKF": true }
   },
 
-  "_crosslinkLayer": "Relative layer: two-way ISL with the physics-derived link budget (sigma from free-space path loss, anchored at 1 km) plus two-way light-time, and TWSTFT time transfer.",
+  "_crosslinkLayer": "Relative layer: two-way ISL with the physics-derived link budget (sigma from free-space path loss, anchored at 1 km) plus two-way light-time. Canonical ISL time transfer remains off.",
   "multiAsset": {
     "keepIslInPerAssetEkf": true,
     "twoWayISL": {
@@ -60,14 +60,14 @@
       "linkBudget": { "model": "linkBudget", "antennaModel": "fixedAperture", "refDistance_m": 1000, "refFrequency_Hz": 26000000000 },
       "lightTime": { "enable": true }
     },
-    "twoWayTimeTransferISL": { "enable": true },
+    "twoWayTimeTransferISL": { "enable": false },
     "federated": { "refAsset": 1, "savePerAssetMat": false, "parallel": true }
   },
 
   "_formation": "crossTrackSpread 1.0 = fully 3-D. At 0 the projected-circular helix puts z=2x for every member, making the ISL LOS matrix exactly rank-2.",
   "formation": { "crossTrackSpread": 1.0 },
 
-  "_perturbations": "Truth-side luni-solar + SRP, matched in the EKF by the realism overlay (R-3).",
+  "_perturbations": "The realism overlay enables luni-solar and SRP terms in both the truth and estimator force families (R-3).",
   "orbit": {
     "truth": {
       "perturbations": {

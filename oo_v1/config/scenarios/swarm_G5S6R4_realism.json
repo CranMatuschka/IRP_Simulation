@@ -4,7 +4,7 @@
   "realism":    { "grade": true },
   "report":     { "runVersion": 2 },
   "multiAsset": {
-    "twoWayTimeTransferISL": { "enable": true },
+    "twoWayTimeTransferISL": { "enable": false },
     "federated": { "refAsset": 1, "savePerAssetMat": false, "parallel": true }
   }
 }
