@@ -187,6 +187,17 @@ classdef DistributedClockGaugeContract
                     ['A time-transfer delivery requires a declared calibration validity ' ...
                     'interval; this record type does not carry one.']);
             end
+            % The declared interval must actually COVER this record's own reference local tag --
+            % otherwise the fields above are write-only decoration, never a real check. A real
+            % generator always sets referenceLocalClockTag_s inside its own declared interval
+            % (today, InterSatelliteTimeTransferBuilder collapses all three to the same instant);
+            % this is what catches a future generator that stops doing so.
+            if ~(record.referenceLocalClockTag_s >= record.calibrationValidFromLocalTag_s && ...
+                    record.referenceLocalClockTag_s <= record.calibrationValidUntilLocalTag_s)
+                error('DistributedClockGaugeContract:calibrationValidityIntervalExpired', ...
+                    ['The record''s referenceLocalClockTag_s must lie within its own declared ' ...
+                    'calibrationValidFromLocalTag_s/calibrationValidUntilLocalTag_s interval.']);
+            end
             treatment = char(persistentCalibrationTreatment);
             if strcmp(treatment,'rejected')
                 paths = revgnss.DistributedClockGaugeContract.TimeTransferPersistentDelayConfigPaths_();

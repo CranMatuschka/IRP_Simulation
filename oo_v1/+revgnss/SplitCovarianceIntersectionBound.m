@@ -63,11 +63,24 @@ classdef SplitCovarianceIntersectionBound
         ShortFormAgreementToleranceRelative = 1e-8;
         AllowedCalibrationStateUnits = {'m'};
         % Plan Section 2.2 bullet 4: an observable is listed here only after its own adapter has
-        % a demonstrated PSD/Loewner-domination reference test. 'coherentTwoWayCodeRange' is the
-        % first and only entry (plan Section 2.3.1, revgnss.CoherentTwoWayRangeLinkUpdateAdapter;
+        % a dedicated reference-test set proving the four premises the bound formula itself
+        % requires (Jacobian correctness, noise independence, R_total==R_ind exactly, and a
+        % well-posed rank structure for that H) -- the Young/Jensen bound formula itself is
+        % proven once, generically, for ARBITRARY K/weights/H (see describeDerivation /
+        % tests/test_conservative_full_state_link_update.m's admissible-cross-covariance sweep),
+        % so admitting a new observable here is a claim about ITS OWN H/R meeting those four
+        % premises, never a re-proof of the formula.
+        % 'coherentTwoWayCodeRange' (plan Section 2.3.1, revgnss.CoherentTwoWayRangeLinkUpdateAdapter;
         % see tests/test_conservative_full_state_link_update.m and
-        % tests/test_coherent_two_way_range_link_update_adapter.m for the reference tests).
-        ObservablesWithDemonstratedConservativeBound = {'coherentTwoWayCodeRange'};
+        % tests/test_coherent_two_way_range_link_update_adapter.m) and
+        % 'firstOrderReciprocalClockTransfer' (plan Section 2.3.2,
+        % revgnss.FirstOrderReciprocalClockTransferLinkUpdateAdapter; see
+        % tests/test_first_order_reciprocal_clock_transfer_link_update_adapter.m -- analytic
+        % Jacobian correctness vs an independent perturbation oracle, remoteContributionCovariance
+        % _m2 == H_remote*P_remote*H_remote' exactly, exact common-mode-blind rank-1 clock
+        % observability audit, and zero position/velocity sensitivity) are the only two entries.
+        ObservablesWithDemonstratedConservativeBound = { ...
+            'coherentTwoWayCodeRange','firstOrderReciprocalClockTransfer'};
     end
 
     methods (Static)
@@ -299,16 +312,19 @@ classdef SplitCovarianceIntersectionBound
         end
 
         function requireObservableHasDemonstratedBound(observableIdentifier)
-            % requireObservableHasDemonstratedBound  Throws for EVERY input today
-            % (ObservablesWithDemonstratedConservativeBound is empty; plan Section 2.2 bullet 4).
+            % requireObservableHasDemonstratedBound  Throws for every observable NOT listed in
+            % ObservablesWithDemonstratedConservativeBound (plan Section 2.2 bullet 4). An
+            % observable is added to that list only after its own adapter has a dedicated
+            % Loewner-domination/independence reference test set; it is never widened by
+            % inference from another observable's proof.
             allowed = revgnss.SplitCovarianceIntersectionBound.ObservablesWithDemonstratedConservativeBound;
             if ~((ischar(observableIdentifier) || ...
                     (isstring(observableIdentifier) && isscalar(observableIdentifier))) && ...
                     any(strcmp(char(observableIdentifier),allowed)))
                 error('SplitCovarianceIntersectionBound:observableBoundNotDemonstrated', ...
-                    ['No observable has a demonstrated conservative split-covariance-intersection ' ...
-                    'bound today (ObservablesWithDemonstratedConservativeBound is empty); ''%s'' ' ...
-                    'is not selectable until a Section 2.3 adapter proves one.'], ...
+                    ['Observable ''%s'' has no demonstrated conservative ' ...
+                    'split-covariance-intersection bound; it is not selectable until its own ' ...
+                    'adapter proves one (ObservablesWithDemonstratedConservativeBound).'], ...
                     char(observableIdentifier));
             end
         end

@@ -2006,6 +2006,11 @@ cfg.measurements.isl.twoWay.timeTransfer.reciprocitySigma_m = 0.005;
 cfg.measurements.isl.twoWay.timeTransfer.warmup_s = 0;
 cfg.measurements.isl.twoWay.timeTransfer.calibration.productIdentifier = ...
     'isl-time-transfer-calibration';
+% Persistent time-transfer calibration error sources (Section 2.3.2's distributed adapter
+% requires both exactly zero via DistributedClockGaugeContract.requireTimeTransferCalibration
+% Provenance; a real persistent value is not modelled as a distributed-adapter state today).
+cfg.measurements.isl.twoWay.timeTransfer.calibration.terminalDelayError_s = 0;
+cfg.measurements.isl.twoWay.timeTransfer.calibration.terminalSigma_s = 0;
 cfg.measurements.isl.twoWay.doppler.enable = false;
 cfg.measurements.isl.twoWay.doppler.useInEKF = false;
 cfg.measurements.isl.timing.enable = false;

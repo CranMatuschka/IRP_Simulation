@@ -1,11 +1,16 @@
 classdef DistributedLinkUpdateAdapter
     % DistributedLinkUpdateAdapter  Interface #3 (plan Section 2.1): generic contract/shape.
     %
-    % RegisteredAdapterClasses carries exactly ONE concrete per-observable adapter (plan Section
-    % 2.3.1): revgnss.CoherentTwoWayRangeLinkUpdateAdapter, for the coherent transponded PN
-    % two-way code range observable. AllowedObservables therefore admits 'none' and
-    % 'coherentTwoWayCodeRange' only; every other real observable identifier -- including every
-    % entry still in ReservedFutureObservables -- remains refused.
+    % RegisteredAdapterClasses carries exactly TWO concrete per-observable adapters:
+    % revgnss.CoherentTwoWayRangeLinkUpdateAdapter (plan Section 2.3.1, coherent transponded PN
+    % two-way code range) and revgnss.FirstOrderReciprocalClockTransferLinkUpdateAdapter (plan
+    % Section 2.3.2, first-order reciprocal ISL clock-difference). AllowedObservables therefore
+    % admits 'none', 'coherentTwoWayCodeRange', and 'firstOrderReciprocalClockTransfer' only;
+    % every other real observable identifier -- including every entry still in
+    % ReservedFutureObservables -- remains refused. revgnss.IndependentFleetCoordinator.
+    % validateConfig additionally refuses any configuration that enables BOTH sanctioned
+    % observables' underlying builders at once (plan Section 2.3.2 U6: combined range +
+    % time-transfer delivery is not supported by this release).
     %
     % This file itself still contains NO residual/Jacobian/covariance physics for any observable:
     % it is a shape/validation gate, and requireUpdateBlock additionally requires a
@@ -14,11 +19,12 @@ classdef DistributedLinkUpdateAdapter
     % requireRecordClassSupportedForObservable and the correlationPolicy check below).
 
     properties (Constant)
-        RegisteredAdapterClasses = {'revgnss.CoherentTwoWayRangeLinkUpdateAdapter'};
-        AllowedObservables = {'none','coherentTwoWayCodeRange'};
+        RegisteredAdapterClasses = {'revgnss.CoherentTwoWayRangeLinkUpdateAdapter', ...
+            'revgnss.FirstOrderReciprocalClockTransferLinkUpdateAdapter'};
+        AllowedObservables = {'none','coherentTwoWayCodeRange', ...
+            'firstOrderReciprocalClockTransfer'};
         % Documentary only: reserved, not implemented, not accepted anywhere today.
-        ReservedFutureObservables = { ...
-            'firstOrderReciprocalClockTransfer','oneWayCode','oneWayDoppler'};
+        ReservedFutureObservables = {'oneWayCode','oneWayDoppler'};
         RequiredAdapterMethods = {'buildUpdateBlock'};
         % Section 2.2 adds ONE new legal assembly value, whose name asserts that no assembly
         % happened INSIDE the block (the assembly itself is performed outside it, by
@@ -62,8 +68,9 @@ classdef DistributedLinkUpdateAdapter
                     (isstring(observableIdentifier) && isscalar(observableIdentifier))) || ...
                     ~any(strcmp(char(observableIdentifier),allowed))
                 error('DistributedLinkUpdateAdapter:observableNotSelectable', ...
-                    ['Observable ''%s'' is not selectable. Only ''none'' and ' ...
-                    '''coherentTwoWayCodeRange'' validate today.'], ...
+                    ['Observable ''%s'' is not selectable. Only ''none'', ' ...
+                    '''coherentTwoWayCodeRange'', and ''firstOrderReciprocalClockTransfer'' ' ...
+                    'validate today.'], ...
                     char(observableIdentifier));
             end
         end
@@ -73,7 +80,8 @@ classdef DistributedLinkUpdateAdapter
                     revgnss.DistributedLinkUpdateAdapter.RegisteredAdapterClasses))
                 error('DistributedLinkUpdateAdapter:adapterNotRegistered', ...
                     ['Adapter class ''%s'' is not registered today (RegisteredAdapterClasses ' ...
-                    'carries only revgnss.CoherentTwoWayRangeLinkUpdateAdapter).'], ...
+                    'carries only revgnss.CoherentTwoWayRangeLinkUpdateAdapter and ' ...
+                    'revgnss.FirstOrderReciprocalClockTransferLinkUpdateAdapter).'], ...
                     char(adapterClassName));
             end
         end

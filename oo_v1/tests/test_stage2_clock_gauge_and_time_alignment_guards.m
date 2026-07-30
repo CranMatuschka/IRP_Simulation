@@ -5,8 +5,9 @@ function test_stage2_clock_gauge_and_time_alignment_guards()
 % plus deliberately varied clock/gauge/tower settings), revgnss.DistributedClockGaugeContract's
 % pair-anchor/datum/clock-claim/remote-state-provenance checks against REAL endpoint states
 % built through a real 2-asset independent fleet (no mocks), and the proof that Section 2.4
-% enables nothing new: RegisteredAdapterClasses/AllowedObservables are unchanged from Section
-% 2.3.1's state.
+% itself enabled nothing new: RegisteredAdapterClasses/AllowedObservables carry exactly the
+% observables each SANCTIONED by its own adapter's stage (Section 2.3.1's coherentTwoWayCodeRange,
+% Section 2.3.2's firstOrderReciprocalClockTransfer), never a Section-2.4-added one.
 
 thisDir = fileparts(mfilename('fullpath'));
 rootDir = fullfile(thisDir,'..');
@@ -170,13 +171,17 @@ end
 
 % ================================================================================================
 function i_test_section24_enables_nothing_new_()
+% Section 2.4 itself added neither vocabulary; the two entries present here are Section
+% 2.3.1's (coherentTwoWayCodeRange) and Section 2.3.2's (firstOrderReciprocalClockTransfer)
+% own sanctioned widenings, each with its own dedicated adapter and stage-acceptance test.
 assert(isequal(revgnss.DistributedLinkUpdateAdapter.AllowedObservables, ...
-    {'none','coherentTwoWayCodeRange'}), ...
-    'Section 2.4 must not widen AllowedObservables.');
+    {'none','coherentTwoWayCodeRange','firstOrderReciprocalClockTransfer'}), ...
+    'AllowedObservables must carry exactly the observables sanctioned through Section 2.3.2.');
 assert(isequal(revgnss.DistributedLinkUpdateAdapter.RegisteredAdapterClasses, ...
-    {'revgnss.CoherentTwoWayRangeLinkUpdateAdapter'}), ...
-    'Section 2.4 must not register a new adapter.');
-fprintf('  PASS Section 2.4 enables nothing new (unchanged since Section 2.3.1)\n');
+    {'revgnss.CoherentTwoWayRangeLinkUpdateAdapter', ...
+    'revgnss.FirstOrderReciprocalClockTransferLinkUpdateAdapter'}), ...
+    'RegisteredAdapterClasses must carry exactly the two sanctioned adapters.');
+fprintf('  PASS Section 2.4 enables nothing new beyond Section 2.3.1/2.3.2''s own widenings\n');
 end
 
 % ================================================================================================
