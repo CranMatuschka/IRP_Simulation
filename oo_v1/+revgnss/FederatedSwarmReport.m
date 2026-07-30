@@ -56,6 +56,59 @@ classdef FederatedSwarmReport
             end
         end
 
+        function [absName, kabschName] = renderIndependentFleetDiagnostics(results, folder, absStem, kabschStem, doKabsch)
+            % renderIndependentFleetDiagnostics  Absolute and geometric diagnostics only.
+            if nargin < 5 || isempty(doKabsch); doKabsch = false; end
+            absName = '';
+            kabschName = '';
+            if ~isfolder(folder); mkdir(folder); end
+            N = 0;
+            if isstruct(results) && isfield(results,'N'); N = results.N; end
+            if N < 1; return; end
+            t = results.asset{1}.history.time_s(:).' / 3600;
+            f = [];
+            try
+                f = figure('visible','off','Position',[0 0 900 480]);
+                hold on;
+                cmap = lines(max(N,1));
+                for i = 1:N
+                    sm = results.asset{i}.stateMap;
+                    e = vecnorm(results.asset{i}.history.x(sm.r_idx,:) - ...
+                        results.asset{i}.truthTraj,2,1);
+                    plot(t,e,'Color',cmap(i,:),'LineWidth',1.0, ...
+                        'DisplayName',sprintf('asset %d',i));
+                end
+                grid on;
+                xlabel('time [h]');
+                ylabel('absolute position error [m]');
+                title('Per-satellite absolute position error (independent local EKFs)');
+                legend('Location','best');
+                set(gca,'FontSize',11);
+                revgnss.ClockExactReportBuilder.normalizeAxisUnits_(f);
+                exportgraphics(f,fullfile(folder,[absStem '.png']),'Resolution',130);
+                close(f);
+                f = [];
+                absName = [absStem '.png'];
+            catch
+                if ~isempty(f) && isgraphics(f); close(f); end
+            end
+            if doKabsch
+                f = [];
+                try
+                    f = revgnss.FederatedSwarmReport.plotKabschAlignment_(results);
+                    if isgraphics(f)
+                        revgnss.ClockExactReportBuilder.normalizeAxisUnits_(f);
+                        exportgraphics(f,fullfile(folder,[kabschStem '.png']),'Resolution',160);
+                        close(f);
+                        f = [];
+                        kabschName = [kabschStem '.png'];
+                    end
+                catch
+                    if ~isempty(f) && isgraphics(f); close(f); end
+                end
+            end
+        end
+
         function ce = build(cfg, results, rel, summ, folder, stem)
             ce = struct('success', false, 'pdfPath', '', 'texPath', '');
             C = revgnss.Constants.SPEED_OF_LIGHT_MPS;
@@ -125,7 +178,7 @@ classdef FederatedSwarmReport
             end
             fp('\\bottomrule\\end{tabular}\\end{center}\n');
             fp('\\section*{Relative layer (ISL / TWSTFT)}\n\\begin{center}\\begin{tabular}{lr}\\toprule\n');
-            fp('formation baseline error (raw W1) & %.3f m \\\\\n', rel.baselineErrRaw_m);
+            fp('formation baseline error (raw per-asset estimates) & %.3f m \\\\\n', rel.baselineErrRaw_m);
             shapeOn = isfield(rel,'shapeGateOn') && logical(rel.shapeGateOn);
             if shapeOn && isfinite(rel.baselineErrSolved_m)
                 fp('formation baseline error (solved) & %.4f m (%.2f cm) \\\\\n', rel.baselineErrSolved_m, rel.baselineErrSolved_m*100);
@@ -260,6 +313,9 @@ classdef FederatedSwarmReport
             pad = 0.18 * span;
             mid = 0.5 * (max(allPts,[],2) + min(allPts,[],2));
             lims = [mid - 0.5*span - pad, mid + 0.5*span + pad];
+            labelOffset = max(1e-3,0.05*span);
+            truthLabelOffset = [labelOffset; labelOffset; labelOffset];
+            estimateLabelOffset = [labelOffset; -labelOffset; -labelOffset];
 
             fig = figure('visible','off','Color','white','Position',[0 0 780 640]);
             ax = axes(fig); hold(ax,'on'); grid(ax,'on'); axis(ax,'equal');
@@ -275,16 +331,19 @@ classdef FederatedSwarmReport
                     [truthCtr(2,i) estAligned(2,i)], ...
                     [truthCtr(3,i) estAligned(3,i)], 'Color',[0.25 0.25 0.25], ...
                     'LineWidth',0.9, 'HandleVisibility','off');
-                text(ax, truthCtr(1,i), truthCtr(2,i), truthCtr(3,i), ...
-                    sprintf('  T%d', i), 'FontSize',8, 'Color','k');
-                text(ax, estAligned(1,i), estAligned(2,i), estAligned(3,i), ...
-                    sprintf('  E%d', i), 'FontSize',8, 'Color',[0.70 0 0]);
+                text(ax,truthCtr(1,i)+truthLabelOffset(1), ...
+                    truthCtr(2,i)+truthLabelOffset(2), ...
+                    truthCtr(3,i)+truthLabelOffset(3),sprintf('T%d',i), ...
+                    'FontSize',8,'Color','k');
+                text(ax,estAligned(1,i)+estimateLabelOffset(1), ...
+                    estAligned(2,i)+estimateLabelOffset(2), ...
+                    estAligned(3,i)+estimateLabelOffset(3),sprintf('E%d',i), ...
+                    'FontSize',8,'Color',[0.70 0 0]);
             end
             xlim(ax, lims(1,:)); ylim(ax, lims(2,:)); zlim(ax, lims(3,:));
             xlabel(ax,'centered ECEF X [m]');
             ylabel(ax,'centered ECEF Y [m]');
             zlabel(ax,'centered ECEF Z [m]');
-            text(ax, 0, 0, 0, '  centroid', 'FontSize',9, 'Color',[0.35 0.25 0]);
             title(ax, sprintf('Final formation after rigid Kabsch alignment: RMS %.3f m, max %.3f m', ...
                 rms_m, max_m));
             legend(ax,'Location','best');

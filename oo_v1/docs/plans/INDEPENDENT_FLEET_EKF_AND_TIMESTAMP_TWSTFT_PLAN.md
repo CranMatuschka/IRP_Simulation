@@ -1,0 +1,757 @@
+# Independent Per-Satellite EKF, Distributed ISL, and Timestamp TWSTFT Plan
+
+**Status:** living roadmap. Stage 1 was implemented and verified on 2026-07-29. Stage 2 Sections 2.0 (protocol contract), 2.1 (generic communication interfaces), and 2.2 (conservative correlation policy) were implemented and verified on 2026-07-29. Section 2.3.1 (the coherent transponded-PN two-way code range adapter, the first source-specific adapter) was implemented and verified end-to-end on 2026-07-30: a real 2-asset fleet run through `IndependentFleetCoordinator` with the sanctioned `linkUpdate` tuple enabled generated, delivered, and consumed ISL link updates with a finite/symmetric/PSD owner posterior. The tuple remains default-disabled; every other Section 2.3 observable and Section 2.3 beyond 2.3.1 is not started.
+
+## Implementation status — 2026-07-29
+
+| Stage | Status | Decision and evidence boundary |
+|---|---|---|
+| 1 — independent fleet baseline | **Complete and verified** | The disabled `masterConfig` controls, independent per-asset coordinator, immutable diagnostic state products, provenance journal, report label, and preservation guards are implemented. Focused acceptance `test_independent_fleet_stage1` and the relevant independent-fleet, joint-architecture, configuration-flow, seed, and ISL-preservation regression tests passed; `git diff --check` passed. The recorded evidence is a focused acceptance set, not a claim that a separately recorded full-golden digest suite was run. |
+| 2 — conservative distributed ISL | **Sections 2.0, 2.1, 2.2, and 2.3.1 complete and verified; default-disabled** | Section 2.0's frozen protocol contract, Section 2.1's four communication-interface abstractions, Section 2.2's proven split-covariance-intersection conservative bound (plus the covariance-group and calibration-ownership wiring), and Section 2.3.1's `CoherentTwoWayRangeLinkUpdateAdapter` are implemented and end-to-end tested (2026-07-30): `DistributedLinkUpdateAdapter.RegisteredAdapterClasses` now contains `CoherentTwoWayRangeLinkUpdateAdapter`, and `coherentTwoWayCodeRange` is the one observable in `SplitCovarianceIntersectionBound.ObservablesWithDemonstratedConservativeBound`. `distributedEstimator.linkUpdate.enable` still defaults to `false`; only the sanctioned tuple (`enable=true`, `ownerPolicy='initiator'`, `correlationPolicy='splitCovarianceIntersection'`, `updateAdapter.observable='coherentTwoWayCodeRange'`, every `commonSourceTreatment` entry `'rejected'`) is accepted, and every other combination — including any partial/mixed one — is rejected by `IndependentFleetCoordinator.validateConfig`. The local-history-commit-before-link-update ordering blocker is **closed** (2026-07-30; see the commit-ordering closure record below). The two documentation-precision nits from the Section 2.2 math review (the `transmittedStateProduct` common-source routing rule, the missing process-noise-rate field on `CommonSourceCovarianceGroup`) are also **closed** (2026-07-30; see Section 2.2's completion record item 8). `InterSatelliteTimeTransferObservationRecord` still has no calibration validity interval; every Section 2.3 observable beyond `coherentTwoWayCodeRange` remains unimplemented. |
+| 3 — correlation-tracked distributed fleet | **Not started** | It depends on a tested Stage-2 delivery protocol and is not a shortcut around Stage-2 correlation handling. |
+| 4 — physical timestamp transfer and relay TWSTFT | **Not started** | It remains independent of the Stage-2 implementation decision except for its reuse of the eventual endpoint/delivery interfaces. |
+
+This status update changes no runtime behavior, public configuration, scenario JSON, or report claim.
+
+## Goal
+
+Make the operational multi-spacecraft architecture an **independent local EKF per satellite**, while preserving the existing centralized joint EKF as an opt-in reference implementation. Add ISL information only through a scientifically valid distributed-estimation path. Then add a physical four-timestamp reciprocal time-transfer capability that is reusable for direct ISL and direct ground-to-space links, without confusing either with classical ground-station-pair TWSTFT through a relay.
+
+The required public configuration flow remains exactly:
+
+```text
+run_oo_v1.m -> one JSON overlay -> masterConfig -> finalized runtime configuration -> simulation
+```
+
+No stage may write, replace, or silently amend a JSON file. `masterConfig.m` remains the sole declaration of user-facing defaults and toggles. Scenario JSON files only override explicitly selected values.
+
+## Scientific decision
+
+The desired operational architecture is:
+
+```text
+asset i: local EKF_i <- own ground / onboard measurements
+                          ^
+                          | timestamped neighbour state, covariance, and ISL record
+                          |
+                    distributed ISL update protocol
+```
+
+This is not the same as either of the current paths:
+
+| Current path | Actual behaviour | Reuse decision |
+|---|---|---|
+| `multiAsset.mode='joint'` | One centralized state vector and full joint covariance for all assets | Preserve unchanged as an opt-in centralized reference and comparison oracle. |
+| `multiAsset.mode='fast'` | One primary simulation EKF; secondaries are represented helpers | Preserve unchanged. Do not relabel it as a distributed estimator. |
+| `ReportRunner.runFederatedEstimation` | Report-time fan-out of independent complete single-asset runs | Reuse its per-asset scenario construction and regression baseline, but do not call it a synchronous distributed filter. |
+| `SwarmRelativeSolver` | Truth-derived/read-only per-epoch diagnostic adjustment | Reuse only Kabsch/shape diagnostics. Never use its synthetic observations as estimator input. |
+
+For an ISL observation between endpoints `i` and `j`, the physically correct measurement depends on both endpoint states. A joint update creates cross-covariance:
+
+\[
+P_{\Delta r}=P_i+P_j-P_{ij}-P_{ji}.
+\]
+
+Therefore two separate EKFs cannot simply process the same link observation independently. That would count shared information twice. The staged solution below first uses a conservative owner-only update and then adds tracked inter-filter correlation for a distributed result comparable to a centralized reference.
+
+## Reuse boundary: what can and cannot be shared
+
+The user is **mostly right** that direct ISL and direct ground-to-space reciprocal transfer should reuse the same lower-level API. They share:
+
+- endpoint identity, local-clock mapping, terminal calibration, and trajectory access;
+- retarded light-time event solving;
+- timestamp/event provenance and schedules;
+- RF/link-quality and covariance-group handling;
+- immutable observation ownership and exactly-once consumption.
+
+They must **not** be forced into one measurement equation:
+
+- coherent two-way PN range estimates range from a round-trip code-delay observable;
+- direct reciprocal time transfer estimates a clock difference from four local time tags;
+- classical TWSTFT is a relay session between two ground stations:
+
+  \[
+  A\rightarrow S\rightarrow B,\qquad B\rightarrow S\rightarrow A,
+  \]
+
+  with four propagation legs, two station modem chains, relay delay/oscillator effects, and ground-space atmosphere. It is a separate session processor built on the common event core, not an ISL round-trip formula.
+
+## Non-negotiable invariants
+
+1. Do not delete, rename, or weaken any existing feature, regression, golden standard, scenario, or report path.
+2. `run_oo_v1.m`, JSON overlay semantics, `masterConfig`, and the current default/single-asset path remain behaviourally unchanged.
+3. `multiAsset.mode='joint'` remains available and unchanged unless an explicitly enabled new comparison test uses it.
+4. All new public toggles are declared in `config/masterConfig.m`, default `false` or `disabled`, and appear in the toggle manifest.
+5. A disabled toggle must leave the relevant existing output byte-identical where an existing golden covers it.
+6. Unsupported combinations must fail in configuration validation. They must never fall back silently to a simpler model.
+7. No estimator path may read truth except through generated measurements, declared products, or diagnostics after the update.
+8. No persistent calibration, terminal delay, or common product error may be copied as independent white diagonal `R` on repeated rows.
+9. Every link datum has one immutable identifier, one configured owner, one eligible epoch, and one consumption record.
+10. All covariance matrices are explicitly symmetric and PSD/PD checked; all units are stated in names and tests.
+11. Tests configure new features in memory. Tests do not rewrite scenario JSON files or `masterConfig.m` at runtime.
+12. Monte Carlo is not an implementation prerequisite. Deterministic physics, covariance, and central-reference tests come first; any Monte Carlo campaign remains separately toggled and off by default.
+
+## Existing code to reuse and code not to promote
+
+| Component | Use in this plan | Do not use it for |
+|---|---|---|
+| `+revgnss/CoherentTwoWayCodeRangingModel.m` | Physical four-event ISL range transport and closure oracle | Replacing it with a simpler range approximation. |
+| `+revgnss/TwoWayCodeEndpointModel.m` | Endpoint clock/antenna/trajectory pattern; extend through adapters | Assuming it already supports ground towers. |
+| `+revgnss/TwoWayISLMeasurementBuilder.m` | Immutable-record-to-linearization pattern, schedules, calibration provenance | Its joint-state-only routing API in a local EKF. |
+| `+revgnss/ReciprocalTimeTransferModel.m` | Existing simplified first-order clock-transfer kernel | Claiming physical four-timestamp transfer; that mode is correctly guarded today. |
+| `+revgnss/TwoWayTimeTransferBuilder.m` | Ground-to-space first-order truth/model/R pattern | Calling it a raw-tag or relay TWSTFT implementation. |
+| `+revgnss/InterSatelliteTimeTransferBuilder.m` | ISL links, records, schedule, and row-provenance pattern | Its centralized-only EKF routing or its `rawTimestampTagsAvailable=false` record as physical tags. |
+| `+revgnss/InterSatelliteRFLinkModel.m` | Per-leg RF, C/N0, frequency, bandwidth, plasma, and tracking-noise machinery | Ground atmosphere or modem-session effects without an adapter. |
+| `+revgnss/ObservationConsumptionLedger.m` | Eligible/consumed discipline | Current two-record-class type restriction; generalize additively. |
+| `+revgnss/EndpointDescriptor.m`, `LinkDescriptor.m`, `ObservableRowDescriptor.m` | Metadata/provenance vocabulary | Physical state propagation or covariance exchange. |
+| `+revgnss/TWSTFTDiagnosticBuilder.m` | Disabled legacy diagnostic only | Any physical formula or EKF implementation. It has no relay session and can pair unrelated legs in a multi-link diagnostic. |
+| `+revgnss/SwarmRelativeSolver.m` | Kabsch and independent report metrics | Estimator observations or an asserted solved state. |
+
+## Claude model policy and token discipline
+
+There is no single Claude model that is simultaneously the strongest and the most token-efficient. Use this policy:
+
+| Work item | Model | Why |
+|---|---|---|
+| Protocol derivation, covariance architecture, observability/gauge review, and final stage acceptance review | Latest available **Claude Opus** | Highest reasoning margin for scientific and architectural decisions. |
+| Implementation, focused refactors, MATLAB tests, regression repair, and documentation updates | Latest available **Claude Sonnet** | Best default for this plan: strong coding/reasoning with substantially lower token/cost use. |
+| Mechanical formatting only after a passing scientific review | Latest available **Claude Sonnet** | Keeps the work homogeneous and avoids an additional low-context handoff. |
+
+Use the provider aliases `opus` and `sonnet` rather than hard-coding a dated model identifier. At the time this plan was written, Anthropic describes Opus as its most capable complex-reasoning/coding model and Sonnet as the high-performance efficient model; Sonnet pricing is materially lower. Verify availability and pricing immediately before execution: [Anthropic model guide](https://docs.anthropic.com/en/docs/welcome) and [pricing](https://docs.anthropic.com/en/docs/about-claude/pricing).
+
+If one model must perform an entire stage, use the latest **Sonnet** and require an Opus review only before merging a stage. Do not spend Opus tokens on exploratory file searching or routine test repair.
+
+### Claude task contract
+
+Give Claude exactly one numbered substep at a time. Every implementation prompt must include:
+
+```text
+Read this plan and implement only Stage X.Y.
+First audit the named existing interfaces. Preserve all existing modes, tests,
+goldens, config files, and run_oo_v1 flow. Add public toggles only in
+config/masterConfig.m and default them disabled. Do not alter external JSON.
+Do not use truth in estimator code. Do not enable a model that lacks its named
+validation tests. Run only the listed focused tests plus git diff --check.
+Report: files changed, scientific assumption, tests run, and remaining guard.
+```
+
+An Opus review prompt must be read-only unless it finds an unambiguous defect:
+
+```text
+Review Stage X against this plan. Check units, signs, clock gauge, information
+ownership, persistent-error covariance, truth/estimator separation, and whether
+the central-reference tests establish the claimed result. Do not redesign or
+expand scope. Return blocking findings with exact files/tests.
+```
+
+## Stage 1 — Epoch-synchronous independent fleet baseline
+
+### Goal
+
+Create a real runtime coordinator with one complete local EKF per spacecraft, synchronized by epoch, while using only each spacecraft's own existing ground/onboard measurement path. This stage adds no ISL measurement update. It replaces neither `fast` nor `joint`; it is an additional, disabled execution path.
+
+### Stage-1 scientific claim after completion
+
+“Each spacecraft has an independent local absolute-state EKF. No ISL datum has been consumed by an EKF.”
+
+Do not claim distributed ISL fusion or solved relative state at this stage.
+
+### 1.1 Freeze the current contracts before refactoring
+
+1. Record the current single-asset golden/regression commands and their expected digests.
+2. Record focused baselines for:
+   - `test_joint_multi_asset_covariance_architecture`;
+   - `test_joint_coherent_two_way_scenario`;
+   - `test_keep_isl_in_per_asset_ekf`;
+   - `test_per_asset_leaf_no_redispatch`;
+   - existing single-asset smoke/golden tests.
+3. Write no new expected numerical value from an unvalidated 3600 s run into a golden.
+4. Add a test that documents the current fact: report-time federation is a fan-out, not an epoch-synchronous fleet runtime. This is a characterization test, not a behaviour change.
+
+**Acceptance:** the pre-stage suite passes before any implementation work begins.
+
+### 1.2 Declare disabled configuration, validation, and manifest entries
+
+Add an additive `cfg.multiAsset.distributedEstimator` section in `config/masterConfig.m`. All fields must have clear physical/estimation names and disabled defaults. The exact field names should be reviewed before coding, but the minimum semantics are:
+
+```text
+distributedEstimator.enable = false
+distributedEstimator.executionMode = 'epochSynchronous'
+distributedEstimator.stateExchange.enable = false
+distributedEstimator.stateExchange.maximumAge_s = 0
+distributedEstimator.stateExchange.deliveryDelay_s = 0
+distributedEstimator.linkUpdate.enable = false
+distributedEstimator.linkUpdate.ownerPolicy = 'disabled'
+distributedEstimator.linkUpdate.correlationPolicy = 'disabled'
+distributedEstimator.outOfSequencePolicy = 'reject'
+```
+
+Rules:
+
+1. `enable=true` requires `nSpaceAssets>1` and `multiAsset.mode='fast'`; it must not reinterpret `joint`.
+2. `linkUpdate.enable=true` is rejected until Stage 2 provides a valid selected correlation policy.
+3. `stateExchange.enable=true` without a link update may be used only for diagnostic/provenance output.
+4. Add equivalent entries to `SimulationToggleManifest` with status `inactive` or `guardedNotImplemented` until the relevant stage is complete.
+5. Do not modify a JSON scenario. Tests assemble overrides in MATLAB structs.
+
+**Tests:** defaults-off, invalid combination rejection, manifest visibility, and byte-identical default configuration resolution.
+
+### 1.3 Extract a shared per-asset scenario factory without changing leaf results
+
+1. Identify the reusable parts of `ReportRunner.federatedSetup_` and `assetConfigForIndex_`.
+2. Extract only those pure configuration calculations into a new clearly named helper, for example `revgnss.IndependentFleetScenarioFactory`.
+3. Keep the existing `ReportRunner` methods as backward-compatible callers of the extracted helper.
+4. Preserve every existing seed rule, clock seed, ECI initial condition, receiver count, and truth epoch.
+5. Correct the non-chief regenerated-neighbour limitation before any ISL feature is enabled: every leaf must refer to one common physical fleet ephemeris, not a helix reconstructed around itself.
+6. Do not change any single-asset `cfg.asset` path, orbit propagator path, or output file naming.
+
+**Tests:** for each asset index in a small swarm, compare the extracted leaf config with the old helper's leaf config field-for-field for existing ground-only behaviour; `N=1` must remain byte-identical.
+
+### 1.4 Add an additive epoch stepping interface
+
+1. Do not rewrite `ReverseGNSSSimulation.run`.
+2. Extract its existing one-epoch sequence into a non-public or narrowly public step method only if necessary for coordination:
+
+   ```text
+   truth advance -> local prediction -> local ground/onboard rows -> local update -> history/log
+   ```
+
+3. Make `run` call the extracted method unchanged, proven by regression.
+4. The extracted step must have no link-fusion branch unless `distributedEstimator.enable=true`.
+5. Make explicit which fields are measured, estimated, product-provided, or truth-only at the step boundary.
+6. Never pass a neighbouring truth state into a local estimation step.
+
+**Tests:** one local simulation stepped epoch-by-epoch matches its legacy `run` result in state history, covariance history, measurement counts, and random-number outcomes.
+
+### 1.5 Add the independent fleet coordinator and exchange journal
+
+Add a clearly named `revgnss.IndependentFleetCoordinator` that:
+
+1. creates one complete local `ReverseGNSSSimulation` instance per asset using the Stage-1 factory;
+2. advances all local instances on the same coordinate-time grid;
+3. runs all local ground/onboard updates before any future ISL exchange phase;
+4. collects a timestamped immutable `EndpointStateProduct` for each local filter after its update;
+5. writes products to a `CommunicationExchangeJournal` without modifying another local filter;
+6. retains source asset identifier, source epoch, valid-at epoch, delivery epoch, state components, covariance sub-block, process-model provenance, sequence identifier, and quality flags;
+7. treats towers as fixed or product endpoints later, but does not yet make them peer filter owners.
+
+The Stage-1 journal is provenance only. It is not an estimator measurement and must not change any `x_i` or `P_i`.
+
+**Tests:**
+
+- six local simulations exist for `N=6` and each has its own state/covariance/history;
+- no off-diagonal cross-spacecraft covariance is created in local EKFs;
+- each local asset receives only its own normal ground/onboard rows;
+- state products have the correct epoch and provenance;
+- enabling journal-only exchange does not change any local estimate;
+- delayed or stale products are stored with status but not applied;
+- no duplicate product sequence/epoch is accepted.
+
+### 1.6 Stage-1 reporting and preservation gate
+
+1. Add a distinct report/data label such as `independentLocalEkfsGroundOnly`; do not call it a fused or solved relative layer.
+2. Reuse existing per-asset absolute plots, Kabsch diagnostics, and report layout only as diagnostics.
+3. Keep old federated report output intact when the new toggle is false.
+4. Add generated/delivered/consumed-by-owner counters, initially showing zero consumed link observations.
+
+### Stage-1 exit tests
+
+Run at minimum:
+
+```text
+single-asset golden/regression suite
+test_keep_isl_in_per_asset_ekf
+test_per_asset_leaf_no_redispatch
+new: test_independent_fleet_epoch_step_parity
+new: test_independent_fleet_n1_golden_parity
+new: test_independent_fleet_state_product_provenance
+new: test_independent_fleet_ground_only_no_link_consumption
+git diff --check
+```
+
+An Opus review must approve the per-asset truth alignment, seed independence/common-product treatment, and proof that no link information enters a local EKF.
+
+### Stage-1 completion record — 2026-07-29
+
+The accepted implementation provides the following, with the controls disabled by default:
+
+1. `masterConfig` declares the nine `multiAsset.distributedEstimator` controls, the validator rejects unsupported link-update/ISL combinations, and the toggle manifest exposes their guarded status.
+2. `IndependentFleetScenarioFactory` preserves the existing leaf configuration behavior while constructing one common physical fleet context; `ReverseGNSSSimulation` has an additive one-epoch local stepping path whose focused parity checks passed.
+3. `IndependentFleetCoordinator` advances one complete local EKF per asset behind an epoch barrier. It publishes immutable `EndpointStateProduct` objects to `CommunicationExchangeJournal`; neither object is estimator-eligible in Stage 1.
+4. The independent route is labelled `independentLocalEkfsGroundOnly`. Its diagnostics explicitly report zero generated/delivered/consumed ISL update rows, and do not claim a fused relative estimate.
+5. Focused verification passed for the Stage-1 acceptance test, independent leaf/non-redispatch behavior, seed handling, canonical configuration flow, existing joint covariance architecture, and coherent two-way joint scenario. No external scenario JSON was modified.
+
+The remaining historical evidence item is only administrative: retain the original full single-asset golden command and digest record before any future change that touches the legacy path. Do not infer that record from the focused Stage-1 checks.
+
+## Stage 2 — Owner-routed conservative distributed ISL updates
+
+### Goal
+
+Use existing physical ISL observables in one designated local filter at a time, with a timestamped uncertain neighbour product and an explicitly conservative correlation policy. This gives a usable autonomous distributed mode without pretending it is identical to a centralized joint filter.
+
+### Stage-2 scientific claim after completion
+
+“A selected local EKF consumes each link observation once. Remote endpoint uncertainty, product age, calibration provenance, and a declared conservative correlation policy are included. The result is a conservative distributed estimate, not an exact centralized-equivalent solution.”
+
+### Stage-2 readiness decision — 2026-07-29
+
+**Decision:** Stage 2 is ready to begin Sections 2.0 and 2.1. It is **not** ready to enable `linkUpdate`, to set any independent-fleet ISL `useInEKF` flag, or to connect an existing joint ISL linearizer directly to a local EKF.
+
+The reusable foundation is real: the coordinator gives one local EKF per asset and an epoch barrier; `EndpointStateProduct` is immutable and estimator-derived; the journal rejects duplicate/stale diagnostic products; the coherent two-way range and first-order reciprocal-transfer generators already separate truth-generated records from estimator prediction; and the local EKF can consume a correctly formed local residual/Jacobian/covariance block. These are foundations, not a distributed update protocol.
+
+The following blockers must remain visible until closed: ~~current local history is committed before a later link update could be recorded~~ (closed 2026-07-30, see the commit-ordering closure record below); products are diagnostic-only and lack required datum/covariance/progression provenance; the ledger is local rather than fleet-owned; no delivery/owner lifecycle or conservative correlation algorithm exists; persistent calibration and clock gauge have no distributed owner; and one-way code/Doppler lacks an immutable distributed record path. The existing coordinator rejection of these configurations is therefore correct and must remain in force.
+
+### 2.0 Freeze the Stage-2 protocol contract and make the epoch link-safe
+
+Complete this section before an observable adapter is allowed to update an EKF.
+
+1. Add an additive distributed-path epoch finalization phase. Its required order is:
+
+   ```text
+   advance the shared physical-fleet truth to the epoch, then all local predictions
+   -> all local ground/onboard updates
+   -> publish and freeze post-local estimator products
+   -> generate, validate, and deliver immutable physical link records
+   -> one owner-only link update per delivery
+   -> commit final local history, report data, and consumption lifecycle
+   ```
+
+   The frozen remote product is estimator-derived; the physical link record may be truth-generated by the simulator, but the adapter may receive only the record, the owner local state, and the frozen remote product. A current-epoch link update must not alter the remote product used in that same epoch. Preserve the legacy `ReverseGNSSSimulation.run` ordering and parity when the distributed path is disabled.
+
+2. Make the first active Stage-2 scope same-epoch only: require `maximumAge_s=0`, `deliveryDelay_s=0`, and reject out-of-sequence delivery. Do not propagate a remote product until its complete relevant state, covariance cross-blocks, transition/process-noise provenance, and propagation tests exist. A position/clock marginal alone is insufficient when attitude, gyro bias, calibration, or force-model states couple to the observable.
+
+3. Define one canonical endpoint identity that maps every physical record endpoint to exactly one product endpoint. Reject the current ambiguous `asset:N` versus `spacecraft:N` mismatch instead of translating it implicitly. Freeze the coordinate time scale, frame identifier, clock datum/gauge identifier, state-schema version, attitude-error coordinate convention, covariance-group identifiers, and calibration validity/provenance required by a delivery.
+
+4. Keep Stage-1 `EndpointStateProduct` diagnostic-only. Add a separate estimator-eligible publication profile only after the previous provenance contract is satisfied. A state product may support more than one distinct link delivery; consumption belongs to the delivery ledger, never to a mutable product-level consumed flag.
+
+5. Freeze the correlation contract before coding the update. Identify independent measurement noise and every potentially common source, including tower clock products, terminal calibration, transmitted state products, session timing products, and shared force/atmospheric products. A known common source must be represented by a declared covariance group, a single estimated owner state, a valid external covariance product, or a rejected configuration.
+
+6. Freeze the clock claim for each time-transfer configuration: reciprocal transfer observes a relative clock bias, not an absolute clock datum and not a direct drift measurement. Drift can change only through declared clock dynamics and bias–drift covariance. Reject a configuration that cannot state a compatible reference datum/anchor or reports a relative result as absolute.
+
+### Section 2.0 completion record — 2026-07-29
+
+Implemented, disabled by default, no observable adapter added:
+
+1. `revgnss.CanonicalEndpointIdentity` (new) resolves `EndpointStateProduct`'s `'spacecraft:N'` scheme and the joint-architecture `'asset:N'` scheme (`TwoWayISLMeasurementBuilder`/`InterSatelliteTimeTransferBuilder`) to one canonical physical index; `requireReconciled` errors unless both parse under a known scheme and agree, and never translates one into the other implicitly.
+2. `revgnss.DistributedLinkProtocolContract` (new) freezes: the coordinate-time-scale/frame/clock-datum assumptions (documented against where each is enforced today); the `EndpointStateProduct` v1 state/covariance label contract (`requireStateSchemaVersion`, reporting which attitude-error variant matched); a paired attitude-convention-vs-label check (`requireDeliveryProvenance`) so a declared convention can never disagree with the labels actually carried; the Stage-1-diagnostic-only guard (`requireDiagnosticOnlyProduct`); a same-epoch delivery-freshness check against a specific delivery epoch; the same-epoch-only scope gate for a future link-update path (`requireSameEpochScope`, `requireOutOfSequenceRejected`, not wired into Stage-1 state exchange, which may still use a nonzero delay/age for diagnostics); the correlation vocabulary (`requireCommonSourceTreatmentDeclared`, `isFullyRejectedCommonSourceTreatment` — only `'rejected'` validates until Section 2.2 proves a treatment); the covariance-group-identifier freeze (`requireSingletonCovarianceGroup`, which records today always fail unless the group equals the record's own observation identifier, since no builder shares covariance across observations yet); the calibration provenance freeze (`requireCalibrationProvenance`, noting `InterSatelliteTimeTransferObservationRecord` has no validity interval today — a gap Section 2.3.2/2.4 must close before a time-transfer delivery can claim temporal calibration scoping); and the clock claim (`requireClockClaim`, only `'relativeBiasOnly'`).
+3. `config/masterConfig.m` declares `multiAsset.distributedEstimator.linkUpdate.commonSourceTreatment.*` (five sources, default `'rejected'`) and `.timeTransferClockClaim` (default `'relativeBiasOnly'`); `SimulationToggleManifest` exposes all six as `guarded_or_config_only`.
+4. `IndependentFleetCoordinator.validateConfig` requires the two new `linkUpdate` sub-fields, validates their vocabulary unconditionally, and folds "every common source still `'rejected'`" into the existing "Stage 1 provides no ISL estimator update" rejection — the runtime gate is unchanged in spirit: everything must sit at its single safe default or configuration fails. `run()` now calls two additive per-epoch no-op hooks (`generateValidateDeliverLinkRecords_`, `applyOwnerOnlyLinkUpdate_`) at the position Section 2.0.1's phase order requires; both are unreachable no-ops today because `linkUpdate.enable=true` is unconditionally rejected before either could run with a live record.
+5. **Open blocker carried forward, not resolved here** (matches the Stage-2 readiness decision above): today's per-epoch local history/report-data commit happens inside `runLocalEstimationEpoch`, before the phase-4/5 hook positions run. A real owner-only link update filled into `applyOwnerOnlyLinkUpdate_` would therefore mutate `ekf.x`/`P` after that epoch's history/NEES row was already written. Section 2.1 must either defer the local history commit past phase 5 or adopt a different update timing before any adapter is enabled; this is documented in code at the hook call site and must not be hidden by a comment implying the ordering is already correct. *(Status update: this item was closed on 2026-07-30 by the deferred-commit split recorded below; the record above is retained as the historical state on 2026-07-29.)*
+6. Verification: an Opus-tier review caught four blocking defects in a first draft (an unchecked attitude-convention/label mismatch; a phase-order comment falsely implying history commit already happened after the placeholder phases; two Section 2.0.3 sub-requirements — covariance-group identifiers and calibration validity/provenance — left unaddressed; and `requireDeliveryProvenance` claiming full coverage while omitting a delivery-epoch freshness check). All four were fixed and re-reviewed against the same code; the focused suite below was re-run afterward. No JSON scenario file was read or written by this work.
+7. Tests: new `tests/test_stage2_protocol_contract.m`, plus `test_independent_fleet_stage1`, `test_keep_isl_in_per_asset_ekf`, `test_per_asset_leaf_no_redispatch`, `test_canonical_configuration_flow`, `test_scientific_validation_manifest`, `test_joint_multi_asset_covariance_architecture`, `test_joint_coherent_two_way_scenario`, and `test_coherent_two_way_code_truth_separation` all pass unchanged. `git diff --check` is clean on the modified tracked files; the new files have no trailing whitespace or tabs.
+
+### 2.1 Define generic communication interfaces before adding an update
+
+Add only the following reusable abstractions; do not rename existing ISL classes:
+
+| New interface | Required responsibility |
+|---|---|
+| `CommunicationEndpointStateProvider` | Return endpoint position, velocity, clock, attitude/terminal geometry, all required covariance blocks/product provenance, coordinate-time scale, frame, clock datum, state-schema version, and attitude-error coordinate convention at a requested coordinate epoch. |
+| `LinkObservationDelivery` | Bind one immutable physical observation to canonical endpoints, one owner filter, source/delivery epochs, a frozen estimator-eligible remote product identifier, covariance/calibration groups, and an exactly-once lifecycle including rejection reason. |
+| `DistributedLinkUpdateAdapter` | Produce one local residual/Jacobian/covariance block from a physical record plus an uncertain remote product, in the owner and remote covariance coordinates actually declared by their providers. |
+| `DistributedLinkCalibrationState` | Define a single owner for persistent link calibration/terminal residuals when such a state is observable. |
+
+Rules:
+
+1. These are adapters around current record classes, not replacements for them.
+2. Generalize `ObservationConsumptionLedger` additively into a coordinator-owned delivery ledger. Retain all current immutable-record rules, but make the new ledger atomically record owner, remote-product identifier, source/delivery epoch, state `eligible|consumed|rejected`, and a precise rejection reason. A per-local ledger alone cannot prove fleet-wide exactly-once consumption.
+3. In the initial implementation, an estimator-eligible delivery requires the frozen same-epoch product defined in Section 2.0. A delayed product is rejected. Only after tested full-state propagation may a later version propagate it with declared transition/process-noise and common-information treatment; it is never silently treated as current.
+4. `ownerPolicy='initiator'` is the first valid policy. The other endpoint does not independently consume the same record. Role reversal is allowed only for a later uniquely identified, non-overlapping scheduled session.
+5. Preserve the Stage-1 diagnostic product and journal behavior. The new estimator-eligible product profile and delivery ledger must be additional paths, selected solely by disabled `masterConfig` toggles.
+
+### Section 2.1 completion record — 2026-07-29
+
+Implemented via a design (Opus) → adversarial design review (Opus) → implementation (Sonnet) → final stage-acceptance review (Opus) pipeline, matching this plan's own model policy. The design review round 1 returned BLOCK; the design was revised and re-reviewed to APPROVE_WITH_NITS before implementation began. Everything below is additive, disabled/inert by default, and `distributedEstimator.linkUpdate.enable` remains unconditionally rejected exactly as in Stage 1/Section 2.0.
+
+1. Twelve new `+revgnss/` classes realize the four named interfaces without a MATLAB `classdef(Abstract)` base (matching this codebase's existing "frozen allow-list contract class" idiom, e.g. `DistributedLinkProtocolContract`): `CommunicationEndpointState` (frozen per-endpoint snapshot type-gate; ECEF, estimator-only, tagged with coordinate-time-scale/frame/clock-datum/schema-version/attitude-convention rather than inferred from label shape), `CommunicationEndpointStateProvider` (frozen `AllowedProviderClasses` allow-list — a hypothetical joint-state-map provider would have to be added here to be usable at all), `OwnerLocalEstimatorEndpointProvider` (reads a local `ReverseGNSSSimulation`'s own `ekf`/`stateMap` directly, exactly as `EndpointStateProduct.fromLocalEstimator` does; discards the simulation handle after construction; refuses a joint state map via two independent discriminators since `stateMap.asset` exists on every EKF, not only joint ones), `FrozenProductEndpointProvider` (builds only from an already-validated `EstimatorEligibleEndpointStateProduct`, re-running `requireDeliveryProvenance` at the delivery epoch), `EstimatorEligibleEndpointStateProduct` (composes, never subclasses, the Stage-1 `EndpointStateProduct`; the separate estimator-eligible profile rule 5 requires), `LinkObservationDelivery` (binds a physical record to canonical endpoints via `CanonicalEndpointIdentity.requireReconciled`, never a hand-rolled string comparison; `ownerPolicy='initiator'` only; a frozen rejection-reason-code vocabulary), `DistributedDeliveryLedger` (coordinator-owned, keyed only by the physical `observationIdentifier`, proving at-most-one-owner/at-most-once-consumption structurally), `DistributedLinkUpdateBlock`/`DistributedLinkUpdateAdapter` (generic shape-only contract, zero physics, empty `RegisteredAdapterClasses`, `residualCovarianceAssembly` has exactly one legal value asserting no assembly occurred — the `H_j P_j H_j^T`-into-`R` shortcut forbidden by Section 2.2.2 is structurally inexpressible today), and `DistributedLinkCalibrationState`/`DistributedLinkCalibrationRegistry` (single declared owner per persistent calibration quantity; the default `calibrationOwnership.policy='undeclared'` disables every registry method).
+2. `config/masterConfig.m` gained 6 new leaf keys under `cfg.multiAsset.distributedEstimator` (`stateExchange.estimatorEligibleProfile.enable`, `linkUpdate.calibrationOwnership.policy`, `linkUpdate.updateAdapter.observable`, and three more forming the schema `IndependentFleetCoordinator.validateConfig` now checks at the leaf level), all defaulting to their single currently-inert value; `SimulationToggleManifest.m` exposes all six as `guarded_or_config_only`.
+3. `IndependentFleetCoordinator.m` gained `deliveryLedger`/`calibrationRegistry_`/`estimatorEligibleProducts_` state, `validateConfig` schema/vocabulary/leaf-assertion/coupling gates for the new keys, and an additive `publishStateProducts_` branch; `IndependentFleetScenarioFactory.m` forces the new sub-toggles off in both leaf builders, mirroring the existing pattern.
+4. The final review independently re-ran all 10 regression tests (not merely trusting the implementer's self-report), independently probed `validateConfig` with 12 configurations to confirm no previously-rejected input became accepted, confirmed no per-observable update physics exists anywhere in `+revgnss/`, confirmed truth/estimator separation and canonical-identity usage hold with no hand-rolled `asset:N`/`spacecraft:N` comparison in any new file, and confirmed the local-history-commit-before-link-update ordering blocker from the Section 2.0 completion record remains open, unsoftened, and asserted present by a new test — exactly as required before any adapter is enabled. It also surfaced (and confirmed as unrelated to this work) that `tests/regression/run_oo_v1_regression('smoke')` currently fails on this branch because the golden was frozen before unrelated, uncommitted `+filter/ReverseGNSSEKF.m` changes; no golden compares the finalized `cfg` struct, so the new config keys cannot perturb it.
+5. Verdict: **APPROVE_WITH_NITS**, no blocking findings. Six non-blocking nits were identified and have since been fixed directly (not deferred): (a)–(b) two rejection-reason-map rows pointed at the wrong code and several reachable identifiers — including the default `calibrationOwnership.policy='undeclared'` production path — were unmapped; the map now covers every identifier `propose()` can raise, with new dedicated codes `commonSourceNotRejected`/`correlationPolicyUnsupported`/`providerClassNotSanctioned`, verified live via `tryPropose`. (c) `reconcileWithLocalLedgers`'s `ownerDisagreements` was hard-coded empty yet folded into `isReconciled`, implying a check that cannot exist until the local ledger records an owner; it is now explicitly flagged `ownerDisagreementsChecked=false` and excluded from `isReconciled`. (d) `processNoisePsd_perS` had no companion units field the way `priorVariance`/`priorVarianceUnits` already does; added `processNoisePsdUnits`, validated against the state-kind suffix. (e) The declared-terminal-geometry branch of `CommunicationEndpointState` had no shape/finiteness validation on the metre-valued lever arms a Section 2.3 adapter will consume directly; added, symmetric to the existing undeclared-branch validation. (f) The calibration validity interval accepted an unbounded `(-Inf, Inf)` interval despite its own error message promising finiteness, and the test fixture normalized that as the canonical example; both are now fixed to require finite bounds. All fixes are covered by new/extended test assertions in `tests/test_stage2_communication_interfaces.m`; the full 10-test regression set was re-run afterward and passes unchanged, `git diff --check` is clean, and no scenario JSON was read or written.
+
+### 2.2 Establish the conservative correlation policy before adding any row
+
+1. Define `correlationPolicy='splitCovarianceIntersection'` as the only proposed Stage-2 active policy. It may become active only after it returns a documented PSD upper bound for the owner posterior under the declared unknown/common-information assumptions.
+2. For owner error update
+
+   \[
+   e_i^+=(I-KH_i)e_i-KH_j e_j-Kv,
+   \]
+
+   require a derivation and deterministic implementation rule. Under independent residual noise \(R_{\mathrm{ind}}\), unknown admissible endpoint cross-covariance, and \(0<\omega<1\), a required Young/CI-bound check is
+
+   \[
+   P_i^+ \preceq
+   \frac{1}{\omega}(I-KH_i)P_i(I-KH_i)^T+
+   \frac{1}{1-\omega}K H_jP_jH_j^T K^T+
+   K R_{\mathrm{ind}}K^T.
+   \]
+
+   The implementation must state the covariance split, the admissible unknown cross-covariance set, the bounded weight-selection criterion, and the reported covariance. Merely adding \(H_jP_jH_j^T\) to measurement \(R\) while retaining the uninflated local prior is not a proof of conservativeness.
+3. Treat `correlationPolicy='assumeIndependent'` as a **test-only guarded mode**. It may be enabled only in an in-memory fixture with independently generated priors/products and no shared measurement, tower product, terminal calibration, or process source.
+4. If a valid conservative bound cannot be demonstrated for an observable, leave that observable disabled and reject its configuration. Do not describe `splitCovarianceIntersection` as implemented or conservative before the proof and PSD tests pass.
+5. Add explicit covariance-group inputs for known shared sources: tower clock products, terminal calibration products, transmitted state products, session timing products, shared force/process products, and any common atmospheric product.
+6. Persistent calibration errors use one configured link-state owner or an externally supplied calibration product with temporal covariance and a validity interval. They must not be injected repeatedly as white \(R\).
+7. Verify that owner scheduling and the global delivery ledger cannot create two consumption records for the same physical observation identifier.
+
+### Section 2.2 completion record — 2026-07-29
+
+Implemented via the same Design (Opus) → adversarial Math Review (Opus) → conditional Fix/Re-review (Opus) → Implementation (Sonnet) pipeline as Section 2.1, with the review phases instructed to independently re-derive the covariance-intersection bound from Young's inequality rather than merely check the design's own derivation. Math review round 1 returned **BLOCK** (a real defect: additively folding common-source/calibration covariance into the remote term is not a valid upper bound); the design was revised to an n-term Young/Jensen split and re-reviewed to **APPROVE_WITH_NITS**. The automated final-review phase failed to run (background-agent weekly usage limit); the verification that phase would have performed was completed directly in this session instead — independent re-derivation was not repeated (already done exhaustively by the math-review agent), but the shipped code was read in full, the two most safety-relevant reviewer-flagged nits were confirmed fixed, one flagged nit was found NOT fixed and was corrected directly, and the PSD claim was independently re-verified numerically with freshly constructed data (different from every fixture in the shipped tests).
+
+1. `revgnss.SplitCovarianceIntersectionBound` (new) — pure math, static-only, no state/config/truth access. Implements the n-term Young/Jensen bound `B(K,ω) = Σ_l (1/ω_l)·T_l·T_l' + K·R_ind·K'` in the Loewner order, valid for any weights in the open simplex and any joint second moment of the n unknown-correlated terms (owner prior, remote prior, one term per declared common source, one term per declared calibration owner). `R_ind` is formed only by subtraction from a caller-declared `totalMeasurementCovariance_m2`, and the caller must explicitly assert `totalMeasurementCovarianceIncludesDeclaredCommonSources=true` — this is the module's honest boundary: it can enforce the subtraction mechanically but cannot verify a caller's claim about what its own declared total physically represents. `ownerPosteriorBound` (the conservative policy) and `ownerPosteriorAssumingIndependence` (the guarded `assumeIndependent` mode, requiring an explicit multi-flag independence attestation and G=P=0) are separate methods, not a shared method gated by a policy string, so the test-only path cannot be reached by supplying a value. `ObservablesWithDemonstratedConservativeBound` was empty at the time of this Section 2.2 record — the algebra is proved for any n, but at that point no observable had one because no adapter existed yet (Section 2.3). Section 2.3.1 (below) has since added the first: `{'coherentTwoWayCodeRange'}`.
+2. `revgnss.OwnerPosteriorBoundResult` (new) — immutable, validated result type enforcing term-decomposition/PSD/monotone-history/policy-kind invariants, with the weight-simplex-sum-to-1 check correctly scoped to `boundKind='psdUpperBoundUnderUnknownCrossCovariance'` only (the `assumeIndependent` branch's weights are `[1 1]` by construction and must not be forced through the same check).
+3. `revgnss.CommonSourceCovarianceGroup` / `CommonSourceCovarianceRegistry` (new) — bullet 5's covariance-group inputs for the five frozen common-source names; `'estimatedOwnerState'` is refused by name (no v1 schema slot exists for it) rather than silently dropping a declared source.
+4. `revgnss.DistributedLinkUpdateAdapter` / `DistributedLinkUpdateBlock` (edited, additive) — a new `residualCovarianceAssembly` legal value and new `persistentCalibrationTreatment` legal values wire `DistributedLinkCalibrationState` ownership into the block (bullet 6); `correlationPolicy` gains `splitCovarianceIntersection` as an expressible-but-still-unreachable value (`ReachableCorrelationPolicies` stays `{'disabled'}`; `IndependentFleetCoordinator.validateConfig` was not touched and still unconditionally rejects `linkUpdate.enable=true`, confirmed both by grep for new vocabulary strings and by file-modification timestamps predating this section's work). Bullet 7 needed a test, not new production code: `DistributedDeliveryLedger`'s single `observationIdentifier`-keyed map already makes two consumption records for one physical datum structurally impossible.
+5. **Independent verification performed in this session** (replacing the failed automated final review): re-read `SplitCovarianceIntersectionBound.m`/`OwnerPosteriorBoundResult.m` in full; confirmed the math-review's finding that the `assumeIndependent` branch's weight-sum-to-1 constructor check was mutually unsatisfiable with the reconstruction check was correctly fixed (scoped by `boundKind`); confirmed the componentwise-sign-agreement overclaim was resolved by restricting the gain-direction reference test to a single-row (m=1) observable, where the certificate is exact rather than merely an L2-norm bound; independently re-ran the full 11-test regression set; independently re-verified the 2-block PSD bound numerically in MATLAB with a fresh 14-state, 2-row, randomly-conditioned example swept to 99.9% admissible correlation (all margins non-negative) — the first construction attempt was wrong (a flawed "block-whitened Cholesky" joint-covariance sampler that does not actually preserve the declared marginals) and was corrected to the standard canonical parametrization `Σ = Gi·C·Gj'` with `‖C‖₂<1` before it gave a trustworthy result, which is recorded here as a reminder that ad hoc joint-covariance sampling for this kind of check is easy to get subtly wrong.
+6. **Found and fixed**: the reviewer's explicit request to rename the misleadingly-named `commonSourceDisjointnessVerified` field (hardcoded `true`, asserting a statistical check the module cannot perform) was not applied by the implementation phase. Renamed to `commonSourceContributionsSubtractedFromDeclaredTotal` across `SplitCovarianceIntersectionBound.m` and `OwnerPosteriorBoundResult.m`, with a header comment stating explicitly that it reports a mechanical fact (subtraction occurred), not a verified statistical property — matching this repo's established convention (`DistributedDeliveryLedger.ownerDisagreementsChecked`). Re-verified clean via `checkcode` and the full regression set after the rename.
+7. **Not independently re-verified in this session, carried on the math reviewer's own credit**: the n>2 term case (declared common-source/calibration contributions) was checked by the shipped test via independent manual reconstruction of the RHS (proving the code correctly implements its stated formula) but not by an independent multi-block joint-reference Monte Carlo sweep on fresh data, because constructing an admissible ≥4-block joint covariance with exact prescribed marginals is nontrivial and a second ad hoc attempt in this session also failed before time ran out; the math-review agent's own reported 4000-draw sweep across varying (n,G,P) is the evidence of record for this case. The n-term generalization of the Young/Jensen argument itself is a standard, low-risk extension of the 2-term case already re-derived independently twice (by the math reviewer and in this session).
+8. **Documentation-precision nits from math-review-2 (non-blocking, explicitly lower priority than N1–N3) — closed 2026-07-30**: the `CommonSourceCovarianceGroup` routing table's uniform "removed from R_total, given its own Young term" rule was physically wrong for `transmittedStateProduct` specifically (that source's error is the remote prediction error `e_j`, not measurement noise, so it isn't inside `totalMeasurementCovariance_m2` to begin with). Fixed: `commonSourceName='transmittedStateProduct'` + `treatment='covarianceGroup'` is now refused by name (`CommonSourceCovarianceGroup:sourceTreatmentIncompatible`), with the class header explaining why and pointing a caller wanting extra conservatism at widening the remote prior covariance `Pj` instead; `treatment='rejected'` for that source remains legal. The missing units-companion field is also fixed: `CommonSourceCovarianceGroup` gained `processNoisePsd_m2PerS` (required and validated exactly when `temporalCovarianceModel` is `randomWalk`/`firstOrderGaussMarkov`, matching `DistributedLinkCalibrationState`'s pattern; units are fixed at m²/s since this class's contributions are always measurement-space, so no separate units field was needed). Both fixes are covered by new assertions in `tests/test_stage2_conservative_correlation_policy.m`; the full regression set was re-run and passes. The remaining design-document-only issues from math-review-2 (illustrative numbers, a convexity-argument phrasing slip, a clock-gauge sentence) were about the design write-up, never the shipped code, and needed no fix.
+9. Tests: `tests/test_stage2_conservative_correlation_policy.m` (new, 21 subtests including all four plan-named tests: `test_distributed_split_covariance_intersection_psd`, `test_distributed_persistent_calibration_not_white_r`, `test_distributed_first_update_conservative_bound_against_two_state_joint_fixture`, `test_distributed_assume_independent_fixture_matches_joint_owner_marginal`), plus the full existing regression set (11 files total), all re-run and passing after this session's rename fix. `checkcode` clean on every touched file; no trailing whitespace/tabs; no scenario JSON read or written; `config/masterConfig.m` and `SimulationToggleManifest.m` untouched (confirmed by grep and by file-modification timestamps predating this section).
+
+### Commit-ordering closure record — 2026-07-30
+
+Closes the one blocker carried open through Sections 2.0, 2.1, and 2.2: the per-epoch local history/report-data commit used to happen inside `runLocalEstimationEpoch`, i.e. before the phase-4/5 hook positions, so a future owner-only link update would have mutated `ekf.x`/`P` behind an already-written history/NEES row. Nothing is enabled by this change and no configuration key was added.
+
+1. `+revgnss/ReverseGNSSSimulation.m` (additive split, no physics touched): `runEstimation_` now *stages* the values its closing `simData.recordEpoch` + `ekf.logStep` pair consumed, in a private `pendingEpochCommit_` property, at exactly the point where the write used to sit. Three new public methods — `runLocalEstimationEpochWithoutHistoryCommit(k)`, `commitPendingEpochHistory()`, `hasPendingEpochHistory()` — plus a private `runLocalEstimationEpochCore_(k)` expose the split. `runLocalEstimationEpoch(k)` keeps its name, signature, and exact side-effect order (core → commit → `lastEstimatedEpoch = k`), so the legacy `run`/`step`, single-asset, and `joint` paths execute an unchanged statement sequence. `lastEstimatedEpoch` is deliberately **not** deferred: `EndpointStateProduct.fromLocalEstimator` and `OwnerLocalEstimatorEndpointProvider` require it to be current at the phase-3 publication position. Guards added (all unreachable on existing paths): commit with nothing staged, a second commit, starting a new epoch while one is staged, and `finishRun` while one is staged.
+2. `+revgnss/IndependentFleetCoordinator.m`: the per-epoch loop now calls `runLocalEstimationEpochWithoutHistoryCommit`, keeps phases 3–5 where they were, and calls `commitPendingEpochHistory` per asset after phase 5 and before `exchangeJournal.advanceToEpoch`. `recordEpoch`/`logStep` read `ekf`/`asset` as handles, so deferring the call defers the snapshot, not the values. The `OPEN SECTION 2.1 BLOCKER` comment block and both phase-hook doc comments were rewritten to describe the new order and to state plainly that this closes only the commit-ordering hazard.
+3. **Still rejected, unchanged:** `distributedEstimator.linkUpdate.enable=true` remains unconditionally refused by `IndependentFleetCoordinator.validateConfig`; `generateValidateDeliverLinkRecords_`/`applyOwnerOnlyLinkUpdate_` remain no-op placeholders; no adapter, delivery, or conservative-bound wiring exists. `config/masterConfig.m` and `SimulationToggleManifest.m` were not touched.
+4. Equivalence evidence: a pre-change snapshot of five paths (legacy single-asset `run()`; the epoch-phased `advanceTruthEpoch`+`runLocalEstimationEpoch` loop; a `multiAsset.mode='joint'` epoch; and `IndependentFleetCoordinator` with state exchange off and on) was captured, verified reproducible across two independent MATLAB sessions, and re-captured after the change: `isequaln` on EKF state/covariance/history, the full `SimulationDataStore` payload and metadata, asset truth history, coordinator `getResults`/`runtimeSummary`, and the journal export/summary — identical on every path. `tests/regression/run_oo_v1_regression('smoke')` output is byte-identical before and after (it still FAILs against `golden_smoke.mat` for the pre-existing, unrelated reason recorded in the Section 2.1 completion record — the golden predates uncommitted `+filter/ReverseGNSSEKF.m` changes on this branch; the failure fingerprint did not move).
+5. Tests: new `tests/test_distributed_epoch_final_history_after_link_update.m` (the plan's own Stage-2 test name) proves split-equals-inline byte-identically, the four commit guards, that a state change applied at the phase-5 position **is** carried by that epoch's committed row and history entry (and is not under the pre-fix order), and that a full coordinator run in the new order equals the same fleet driven epoch-by-epoch in the pre-fix inline order. `tests/test_stage2_communication_interfaces.m`'s `i_epochPhaseOrderUnchangedAndBlockerStillOpen_` was renamed to `i_epochPhaseOrderUnchangedAndCommitOrderingClosed_` and inverted: it still freezes `EpochFinalizationPhaseOrder`, and now additionally asserts by source inspection that the open-blocker comment does not return, that the loop uses the deferred entry point exactly once, and that the commit call site follows both phase-4 and phase-5 call sites. The 12 focused regression files listed for this work all pass.
+
+### 2.3 Reuse observation physics through source-specific adapters
+
+Build and enable one observable at a time, only after Sections 2.0–2.2 pass. The first adapter must not reuse a joint-state-map linearizer as a local update shortcut.
+
+1. **Coherent two-way PN range** is the first candidate. Reuse `CoherentTwoWayCodeRangingModel` and `TwoWayISLMeasurementBuilder` immutable records, preserving four-event propagation, terminal geometry, frequency, turnaround, calibration, schedule, and outage logic. `LinkObservationDelivery` must bind an explicit coordinate event epoch (including the final receive event), and the adapter must differentiate the owner state and remote product in their declared coordinates. In particular, a remote MEKF attitude covariance is a right-multiplicative tangent covariance, not an Euler-angle covariance; validate the local/remote Jacobians against a five-point oracle in those coordinates.
+2. **First-order reciprocal ISL clock transfer** follows only after Section 2.4 passes. Reuse `ReciprocalTimeTransferModel` and `InterSatelliteTimeTransferBuilder` records, keep the `firstOrderReciprocal` label, and preserve the current explicit `rawTimestampTagsAvailable=false` status. Do not claim raw four-timestamp processing.
+3. **One-way ISL code and Doppler** follow only after a new immutable one-way record schema and truth-free distributed adapter exist. Reuse the physical equations and `InterSatelliteRFLinkModel` uncertainty inputs, not the current primary/joint product-aided routing. The Doppler adapter must include the position/line-of-sight derivative or demonstrate a declared approximation against analytic/five-point finite differences; do not copy the current velocity-only partial unexamined. Piecewise-constant product errors require temporal covariance treatment, not a new independent \(R\) at every epoch.
+4. **ISL carrier** remains disabled until Stage 3 has an explicit link/signal/arc state owner, cycle-slip lifecycle, frequency/wavelength and calibration covariance treatment, and a correlation-aware central-reference test. Existing carrier modes remain unchanged.
+
+### Section 2.3.1 completion record — 2026-07-30
+
+Implements item 1 above: the coherent transponded-PN two-way code range adapter, the first Section 2.3 observable.
+
+1. `revgnss.CoherentTwoWayRangeLinkUpdateAdapter` (new) — reuses `CoherentTwoWayCodeRangingModel`/`TwoWayCodeEndpointModel` (via a duplicated, cross-check-tested ECEF→ECI bridge, since the production `TwoWayISLMeasurementBuilder.estimateEndpoint_` is private) to predict the processed range and build both endpoints' Jacobians via a five-point central-difference stencil, one column at a time, perturbing only that role's own endpoint. Angular-rate columns are declared and verified structurally zero. The owner/remote attitude columns dispatch on the declared covariance convention (`attitudeTangent` vs `attitudeEuler`) rather than assuming one; a dedicated test proves `H_euler = H_tangent / T(euler)` (the analytic ZYX kinematic transform) at a large, away-from-small-angle attitude, so a silent conflation of the two conventions cannot pass.
+2. `revgnss.ConservativeFullStateLinkUpdate` (new) — extends Section 2.2's 14-state-schema-only Young/Jensen bound to the full satellite state: a dimensional-congruence rescaling (`D = diag(sqrt(diag(P)))`) resolves the bound's absolute PD-floor rejecting a real 14-state prior that mixes m² position variance with rad²/s² angular-rate variance; `requireConservativeBoundResult` forecloses the `assumeIndependent` degeneracy before any assembly; the non-schema (e.g. ambiguity) state block is inflated by the same weight, proved (by sweeping admissible cross-covariance draws) to Loewner-dominate the true second moment where a naive uninflated rule does not.
+3. `+revgnss/DistributedLinkUpdateAdapter.m`, `SplitCovarianceIntersectionBound.m`, `LinkObservationDelivery.m`, `TwoWayISLMeasurementBuilder.m`, `DistributedDeliveryLedger.m` wired additively: `RegisteredAdapterClasses={'revgnss.CoherentTwoWayRangeLinkUpdateAdapter'}`, `AllowedObservables` gains `'coherentTwoWayCodeRange'`, `ObservablesWithDemonstratedConservativeBound={'coherentTwoWayCodeRange'}`.
+4. `+revgnss/IndependentFleetCoordinator.m`: `generateValidateDeliverLinkRecords_`/`applyOwnerOnlyLinkUpdate_` are now real implementations (previously no-op placeholders). `validateConfig` accepts exactly two `linkUpdate` configurations — fully disabled, or the sanctioned tuple — with every partial/mixed combination rejected; the sanctioned tuple additionally requires `deliveryLedger.enable=true` (a separate toggle phases 4–5 dereference unconditionally, including on the rejection path itself) and a set of ISL-source gates (every persistent calibration/plasma error source must be exactly zero, since none is modelled as a distributed-adapter state; no two enabled links may share an initiator). `IndependentFleetScenarioFactory`'s per-asset-leaf forcing was fixed to reset all four `linkUpdate` word-toggles together, not just `enable` — a leaf inheriting the fleet-level sanctioned-tuple values otherwise landed in an invalid partial state.
+5. End-to-end proof (`tests/test_independent_fleet_sanctioned_link_update_end_to_end.m`): a real 2-asset fleet driven only through `IndependentFleetCoordinator` (no synthetic shortcuts) with the sanctioned tuple enabled generated 6 link records, delivered 6, and had the owner leaf consume all 6 over 6 epochs, with zero rejections and a finite/symmetric/PSD posterior covariance whose trace stays within a generous bound of the ground-only twin run. A companion test proves the missing-`deliveryLedger.enable` gate fails cleanly at `initialize()`, and that the disabled default path is unaffected.
+6. Full existing regression suite (`test_stage2_communication_interfaces`, `test_stage2_conservative_correlation_policy`, `test_stage2_protocol_contract`, `test_independent_fleet_stage1`, plus the two Section 2.3.1 component test files) re-run and passes; the disabled default path is byte-identical.
+
+### 2.4 Clock, gauge, and time-alignment guards
+
+1. Add a distributed clock-observability audit before a time-transfer update is accepted.
+2. State which clock is anchored by ground/product information and which clock difference is observable. Do not convert a relative clock result into an absolute clock claim.
+3. Require compatible coordinate-time scale, clock datum/gauge identifier, and state-schema version for both endpoints. A first-order reciprocal transfer row observes \(b_{\mathrm{remote}}-b_{\mathrm{owner}}\) with its documented sign; it does not directly observe clock drift.
+4. Before a time-transfer row is enabled, require calibration validity interval and temporal covariance provenance. A calibration identifier plus a per-row variance is not sufficient for a recurring persistent delay.
+5. Reject timestamp mismatch, endpoint-identity mismatch, duplicate sequence number, missing calibration validity, negative/invalid propagation delay, nonzero product age in the initial scope, or unsupported out-of-sequence arrival.
+6. Record whether the remote state was a frozen same-epoch peer estimate, a later supported delayed product, or an external product.
+
+### 2.5 Stage-2 reporting
+
+For each observable type and asset, report:
+
+- generated records;
+- delivered records;
+- owner-consumed records;
+- rejected records and exact reason;
+- remote product age;
+- product publication profile and coordinate-time/frame/clock-datum provenance;
+- correlation policy;
+- calibration/product covariance groups;
+- whether the result is conservative distributed or diagnostic-only.
+
+Do not use the terms “joint,” “solved formation,” or “centralized-equivalent” for Stage 2.
+
+### Stage-2 tests
+
+Add and run:
+
+```text
+new: test_distributed_link_delivery_exactly_once
+new: test_distributed_epoch_final_history_after_link_update
+new: test_distributed_canonical_endpoint_identity_rejection
+new: test_distributed_diagnostic_product_not_estimator_eligible
+new: test_distributed_remote_product_epoch_alignment
+new: test_distributed_remote_product_staleness_rejection
+new: test_distributed_two_way_range_local_jacobian
+new: test_distributed_time_transfer_local_clock_sign_and_units
+new: test_distributed_code_and_doppler_owner_routing
+new: test_distributed_split_covariance_intersection_psd
+new: test_distributed_persistent_calibration_not_white_r
+new: test_distributed_first_update_conservative_bound_against_two_state_joint_fixture
+new: test_distributed_assume_independent_fixture_matches_joint_owner_marginal
+new: test_distributed_link_outage_and_role_reversal
+existing: coherent two-way closure, physical Jacobian, schedule, consumption,
+          reciprocal-time-transfer, and RF-link tests
+```
+
+The active conservative-policy fixture must compare against a two-endpoint joint reference and demonstrate local residual sign, gain direction, and \(P_{\mathrm{reported}}-P_{\mathrm{exact\ owner}}\succeq0\). It must not claim numerical equality or multi-epoch equivalence. Exact owner-marginal equality is permitted only in the separately guarded `assumeIndependent` fixture with demonstrably independent priors and no common source.
+
+An Opus review must reject the stage if the conservative bound, ownership policy, common-information treatment, or clock gauge cannot be explained mathematically.
+
+## Stage 3 — Correlation-tracked distributed fleet estimator
+
+### Goal
+
+Add a distributed covariance network so local per-satellite EKFs can exchange and use ISL observations without losing the cross-correlation created by prior common measurements and link updates. This is the stage that can be compared rigorously to the centralized joint reference.
+
+### Stage-3 scientific claim after completion
+
+“Each satellite retains a local state estimate. The fleet also maintains declared pairwise cross-covariance/common-information data, and a link observation produces one synchronized distributed update. Under the tested assumptions and full message delivery, the result agrees with the centralized reference.”
+
+### 3.1 Establish a correlation network, not a hidden joint EKF
+
+Add `revgnss.DistributedCovarianceNetwork` with:
+
+1. local marginal ownership: `P_ii` remains in each satellite's local EKF;
+2. named pairwise cross blocks `P_ij` with source epoch, state-map version, and provenance;
+3. declared common process/product covariance groups;
+4. propagation rule:
+
+   \[
+   P_{ij}^{-}=F_iP_{ij}^{+}F_j^T+Q_{ij};
+   \]
+
+5. measurement-update rule using the full endpoint pair covariance for a link observation;
+6. PSD/symmetry audit of the assembled small-fleet covariance for test and diagnostic purposes;
+7. a hard configured fleet-size limit for this initial exact path; exceeding it fails rather than silently dropping cross blocks.
+
+This is a distributed representation of the required statistics. It must not change the existing `ReverseGNSSEKF` joint state vector or reuse it internally as an undisclosed shortcut.
+
+### 3.2 Synchronize a single physical link update across endpoint filters
+
+For an owner-selected observation involving `i` and `j`:
+
+1. build `H_i`, `H_j`, `R`, and the declared calibration/product blocks at the event epoch;
+2. calculate innovation covariance including `P_ij`;
+3. calculate both endpoint corrections from the same innovation;
+4. deliver a signed immutable correction message to the non-owner endpoint;
+5. update every affected pairwise cross block with the same Joseph-form covariance rule;
+6. mark the original observation consumed only after both endpoint deliveries are acknowledged;
+7. reject partial delivery instead of applying a half update.
+
+The reference pair formula is:
+
+\[
+S=H_iP_{ii}H_i^T+H_iP_{ij}H_j^T+H_jP_{ji}H_i^T+H_jP_{jj}H_j^T+R.
+\]
+
+### 3.3 Model common information explicitly
+
+1. Inventory all common sources in each active scenario: tower clock products, common force/process noise, common atmospheric products, shared terminal calibration, shared time-transfer session terms, and shared external orbit products.
+2. For each source, choose exactly one treatment:
+   - tracked covariance group/cross block;
+   - explicit estimated shared state with an observability audit;
+   - conservative split-covariance treatment;
+   - disabled feature.
+3. Reject any configuration that declares a common source but supplies no treatment.
+4. Do not introduce shared states into a local satellite EKF merely to make a plot converge; shared state ownership must be stated and observable.
+
+### 3.4 Add observables in guarded order
+
+1. Enable coherent two-way ISL range with full endpoint distributed update.
+2. Enable first-order reciprocal ISL clock transfer with a clock-gauge audit.
+3. Enable one-way ISL code and Doppler after analytic/five-point finite-difference agreement in the distributed adapter.
+4. Enable ISL carrier only after all of the following are true:
+   - one link/signal/arc ambiguity owner is explicit;
+   - cycle-slip detection/reset is delivered consistently to all affected endpoint/correlation records;
+   - carrier frequency/wavelength, phase-center, oscillator, and calibration covariance are declared;
+   - a central-reference test validates the update;
+   - the carrier toggle is separately enabled in `masterConfig`.
+
+Every observable remains independently selectable. A disabled mode must leave its existing current behaviour unchanged.
+
+### 3.5 Make reporting mathematically honest
+
+1. Compute relative covariance from actual distributed cross blocks:
+
+   \[
+   P_{\Delta r}=P_i+P_j-P_{ij}-P_{ji}.
+   \]
+
+2. Report link graph rank/rigidity before calling a formation quantity observable.
+3. Retain Kabsch alignment only as a shape diagnostic; it removes translation/rotation and is not an estimator measurement.
+4. Report separate absolute, relative-baseline-vector, baseline-length, shape, clock-difference, NIS, and covariance-consistency results.
+5. Keep the centralized joint result visibly labelled `centralized reference`, never as the operational architecture.
+
+### Stage-3 tests
+
+```text
+new: test_distributed_covariance_network_prediction_cross_block
+new: test_distributed_link_update_matches_joint_two_asset_reference
+new: test_distributed_three_asset_update_matches_joint_reference
+new: test_distributed_common_product_cross_covariance
+new: test_distributed_measurement_order_invariance
+new: test_distributed_partial_delivery_rejected
+new: test_distributed_out_of_sequence_rejected
+new: test_distributed_relative_covariance_formula
+new: test_distributed_clock_gauge_rank_guard
+new: test_distributed_carrier_arc_owner_and_reset
+new: test_distributed_rigidity_report_guard
+existing: joint covariance architecture and physical ISL/range/time-transfer tests
+```
+
+Required reference tests:
+
+1. **Two assets, one measurement, independent priors:** distributed and joint posterior state/covariance must agree to numerical tolerance.
+2. **Three assets, scheduled measurements:** deterministic message order and a reordered but equivalent schedule must agree.
+3. **Declared shared product error:** compare the distributed assembled covariance with a small centralized reference that contains the same shared covariance block.
+4. **No full delivery:** both local states and covariance network remain unchanged; the ledger records rejection.
+5. **N=1 and all new toggles off:** existing golden remains unchanged.
+
+Use a small deterministic ensemble only after these proofs if desired. It is a validation campaign, not a condition for enabling the code path.
+
+An Opus review must approve central-reference equivalence only for the exact tested assumptions. If an untracked common source remains, reports must fall back to the conservative Stage-2 description.
+
+## Stage 4 — Physical timestamp reciprocal transfer and relay TWSTFT
+
+### Goal
+
+Make `fourTimestampPhysical` a real timestamp-level mode for direct ISL and direct ground-to-space reciprocal transfer. Then add a separate relay-session processor for classical ground-station-pair TWSTFT. Preserve all current first-order modes and existing disabled diagnostics.
+
+### Stage-4 scientific claim after completion
+
+For direct links:
+
+“The simulator generates and processes four local time tags with explicit moving-endpoint light time, terminal delays, calibration, and correlated uncertainty.”
+
+For relay sessions:
+
+“The simulator generates a synthetic timestamp-level two-way relay session with stated station, relay, propagation, atmosphere, and calibration models.”
+
+Neither claim means waveform-level hardware fidelity or operational real-world TWSTFT unless external calibration/data validation is later added.
+
+### 4.1 Preserve and explicitly fence current modes
+
+1. Preserve `ReciprocalTimeTransferModel.FirstOrderMode`, `TwoWayTimeTransferBuilder`, and `InterSatelliteTimeTransferBuilder` byte-for-byte when their existing mode remains selected.
+2. Preserve the current rejection of `fourTimestampPhysical` until the new builder and tests are live.
+3. Preserve `TWSTFTDiagnosticBuilder` as disabled diagnostic scaffolding. Add a guard/test that it cannot combine events from different link identifiers if it is invoked diagnostically, but never use it as the Stage-4 physical reference.
+4. Do not remove legacy `measurements.twstft.*` configuration; retain validation guards until the relay-session implementation explicitly owns a new supported mode.
+
+### 4.2 Add a neutral timestamp/event core
+
+Add the smallest reusable layer necessary:
+
+| Interface | Required content |
+|---|---|
+| `ReciprocalTimestampExchangeRecord` | Immutable session ID; endpoint/terminal IDs; four coordinate-time events; four local-clock tags; reference epoch rule; signal/channel; calibration product IDs; covariance group IDs; quality flags; availability. |
+| `ReciprocalTimestampEventModel` | Solve transmit/receive coordinate events and convert them to endpoint local time tags. |
+| `CommunicationEndpointStateProvider` adapters | Spacecraft, fixed tower/station, and relay endpoint geometry, clock, terminal delay, and covariance access. |
+| `ReciprocalTimeTransferCovarianceBuilder` | Counter/tag noise, terminal/modem delay, product, atmosphere, relay, and session common-mode covariance blocks. |
+| `DirectReciprocalTimeTransferBuilder` | Shared direct-link adapter invoked by ISL and ground-to-space configuration paths. |
+
+Do not rename `InterSatelliteObservationRecord` or `InterSatelliteTimeTransferObservationRecord`. New physical records are distinct because those existing schemas intentionally encode a processed observable and/or unavailable raw tags.
+
+### 4.3 Implement direct four-timestamp physics
+
+For endpoints A and B, generate:
+
+```text
+t1: A transmit, tagged by A local clock
+t2: B receive, tagged by B local clock
+t3: B reply transmit, tagged by B local clock
+t4: A receive, tagged by A local clock
+```
+
+Implementation requirements:
+
+1. Solve outgoing and return light time separately for moving endpoints; never assume equality except in a selected static-limit test.
+2. Include endpoint TX/RX terminal delays, turnaround/processing delay, calibration validity interval, and associated covariance.
+3. Use endpoint local-clock conversion at each tag, including clock bias/drift and any declared proper-time/relativity policy.
+4. Use space-space vacuum/declared plasma physics for ISL; apply atmosphere only to ground-space legs when separately toggled.
+5. Define one processed clock-difference observable and, if useful, separate range/round-trip diagnostics. Do not conflate their units or calibration states.
+6. Linearize with respect to position, velocity, clock bias, clock drift, attitude/lever arm where active, and owned calibration states. Verify every derivative against finite differences.
+7. Reject missing, nonfinite, out-of-order, stale, or inconsistent tags. Never replace them with a same-epoch shortcut.
+8. Add no hidden global state. Direct ISL routes through Stage 2 or Stage 3 ownership/covariance policy; direct ground-space routes through its owning local EKF.
+
+### 4.4 Add direct-link configuration and adapters
+
+1. Keep the existing public selection fields for ISL and ground-space time transfer. Add `fourTimestampPhysical` only as a selectable mode once implemented.
+2. Declare all physical-tag noise, terminal delays, turnaround delays, calibration products, schedule, and atmosphere policies in `masterConfig`; default them off/disabled.
+3. Add a ground-to-space adapter for current tower objects. Its fixed endpoint and ground atmosphere correction must be separate from the spacecraft/ISL adapter.
+4. Add an ISL adapter that reuses current ISL link definition, schedule, signal/channel, frequency, and immutable ledger semantics.
+5. Ensure a JSON may select one physical mode but cannot activate an unimplemented companion observable.
+
+### 4.5 Add classical relay TWSTFT as a separate session processor
+
+Only after direct four-timestamp transfer passes its tests, add:
+
+```text
+Ground station A -> relay S -> ground station B
+Ground station B -> relay S -> ground station A
+```
+
+Add a clearly named `GroundRelayTimeTransferSessionBuilder` that:
+
+1. owns the station-pair, relay, modem, signal, and session schedule;
+2. generates all four propagation legs and all station/relay local tags;
+3. models station modem TX/RX delays, relay group delay, any frequency translation/relay oscillator state, and calibration covariance;
+4. applies tropo/iono only to ground-space legs with truth/estimator separation;
+5. builds session block covariance for shared relay, station modem, clock product, and common atmospheric terms;
+6. applies an explicit clock gauge and reports the observable clock difference/frequency difference only;
+7. remains disabled unless a complete station-pair/relay session configuration is present.
+
+Do not call a direct tower-to-space exchange “ground-station-pair TWSTFT.”
+
+### Stage-4 tests
+
+```text
+new: test_four_timestamp_static_symmetric_limit
+new: test_four_timestamp_moving_endpoint_asymmetry
+new: test_four_timestamp_clock_offset_sign_and_units
+new: test_four_timestamp_terminal_delay_calibration
+new: test_four_timestamp_local_tag_coordinate_time_roundtrip
+new: test_four_timestamp_direct_isl_finite_difference_jacobian
+new: test_four_timestamp_ground_space_finite_difference_jacobian
+new: test_four_timestamp_ground_space_atmosphere_truth_model_separation
+new: test_four_timestamp_covariance_block_psd_and_common_terms
+new: test_four_timestamp_invalid_or_out_of_order_tag_rejected
+new: test_four_timestamp_exactly_once_consumption
+new: test_relay_twstft_session_leg_identity
+new: test_relay_twstft_clock_gauge
+new: test_relay_twstft_common_delay_covariance
+new: test_twstft_diagnostic_multilink_guard
+existing: reciprocal-time-transfer, current ground-space time-transfer,
+          ISL time-transfer schedule, physical range closure, and RF-link tests
+```
+
+Required acceptance comparisons:
+
+1. Stationary symmetric direct case agrees with the existing first-order reciprocal result within the derived numerical tolerance.
+2. Moving-endpoint case demonstrates distinct forward/return delays and closes the generated/predicted observable.
+3. Injected clock offset has the documented sign and metre/second conversion.
+4. A persistent terminal/relay calibration offset remains temporally correlated and is not averaged away as white noise.
+5. Ground-space and ISL reuse the same event core but retain different correction policies.
+6. With all new toggles off, all current direct time-transfer and ISL tests remain unchanged.
+
+An Opus review must verify the timestamp convention, local-vs-coordinate time conversion, four-leg relay topology, clock gauge, calibration correlation, and atmosphere routing before the physical mode is enabled in any scenario.
+
+## Stage transition checklist
+
+Before moving to the next stage, the implementing Claude must provide:
+
+1. exact files changed and why each is necessary;
+2. every new public config key and its default;
+3. proof that a disabled toggle changes nothing;
+4. the scientific claim allowed after the stage and claims still forbidden;
+5. focused test output and `git diff --check`;
+6. an explicit statement that no JSON/config file was overwritten;
+7. an Opus review result for the stage boundary.
+
+## Explicitly forbidden shortcuts
+
+- Do not set `keepIslInPerAssetEkf=true` and call it distributed fusion.
+- Do not use `SwarmRelativeSolver` truth-generated rows as EKF measurements.
+- Do not process one ISL record in both local EKFs without one synchronized covariance-aware update.
+- Do not set unknown cross-covariances to zero after link measurements begin.
+- Do not use covariance diagonal inflation as a substitute for a persistent calibration state or session correlation model.
+- Do not make a link update using a neighbour truth state, a future state, or an unstated product covariance.
+- Do not silently treat delayed data as same-epoch data.
+- Do not relabel first-order reciprocal time transfer as four-timestamp physical TWSTFT.
+- Do not use `TWSTFTDiagnosticBuilder` as a physical relay-session model.
+- Do not delete `joint`, `fast`, legacy diagnostics, report modes, or golden tests.
+
+## Completion definition
+
+The plan is complete only when all four stages have passed their named tests, all new public toggles are disabled by default, the single-asset baseline remains intact, the independent per-satellite runtime is the explicit operational path, the centralized joint EKF remains available as a labelled reference, and every report states whether a result is ground-only, conservative distributed, correlation-tracked distributed, centralized reference, first-order reciprocal, direct physical four-timestamp, or relay-session TWSTFT.
