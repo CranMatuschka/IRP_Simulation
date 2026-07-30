@@ -4,7 +4,7 @@ classdef IMUModel < handle
 %   realizations, stepped once per truth epoch by SpaceAsset.
 %
 %   GYRO (rate channel):
-%     omega_meas = omega_true + b_g(t) + ARW
+%     omega_meas = omega_B/I^B + b_g(t) + ARW
 %       b_g : gyro bias, rate random walk (RRW)
 %       ARW : angle random walk (white rate noise), discretised as ARW/sqrt(dt)
 %
@@ -30,7 +30,8 @@ classdef IMUModel < handle
 %
 %   Usage:
 %     imu = models.sensors.IMUModel(cfg.asset.imu);
-%     [wm, fm] = imu.sample(omega_true_radps, f_specific_body_mps2, dt_s);
+%     [wm, fm, gyroObs] = imu.sample(omega_B_I_body_radps, ...
+%         f_specific_body_mps2, dt_s, t_s);
 %
 %   Not modelled (documented, not hidden): scale-factor error, axis misalignment, g-sensitivity,
 %   quantisation. Bias + random walks are the dominant terms for this application.
@@ -38,6 +39,9 @@ classdef IMUModel < handle
 %   See also: +models/+clocks/ClockModel, +filter/ReverseGNSSEKF (gyro-bias states), SpaceAsset.
 
     properties
+        sensorIdentifier          = 'gyroscope-1'
+        biasStateIdentifier       = 'gyroscope-1:bias'
+
         % ---- Gyroscope (rate) ----
         gyroArw_rad_per_sqrt_s    = 1e-4     % angle random walk [rad/sqrt(s)]
         gyroRrw_rad_per_s_sqrt_s  = 1e-6     % bias rate random walk [rad/(s*sqrt(s))]
@@ -57,11 +61,18 @@ classdef IMUModel < handle
     properties (Access = private)
         rngGyro_
         rngAccel_
+        lastSampleTime_s = NaN
+        lastGyroscopeObservation = []
+        lastAccelMeasurement_mps2 = []
     end
 
     methods
         function obj = IMUModel(imuCfg)
             if nargin >= 1 && ~isempty(imuCfg)
+                obj.sensorIdentifier = i_get(imuCfg, {'sensorIdentifier'}, ...
+                    obj.sensorIdentifier);
+                obj.biasStateIdentifier = i_get(imuCfg, {'biasStateIdentifier'}, ...
+                    obj.biasStateIdentifier);
                 % Gyro params (accept the legacy gyro-only field names for back-compat).
                 obj.gyroArw_rad_per_sqrt_s   = i_get(imuCfg, {'gyroArw_rad_per_sqrt_s','arw_rad_per_sqrt_s'},   obj.gyroArw_rad_per_sqrt_s);
                 obj.gyroRrw_rad_per_s_sqrt_s = i_get(imuCfg, {'gyroRrw_rad_per_s_sqrt_s','rrw_rad_per_s_sqrt_s'}, obj.gyroRrw_rad_per_s_sqrt_s);
@@ -80,6 +91,9 @@ classdef IMUModel < handle
             obj.initStreams_();
             obj.history = struct('t_s',{},'gyroBias_radps',{},'omega_meas_radps',{}, ...
                                  'accelBias_mps2',{},'f_meas_mps2',{});
+            obj.lastSampleTime_s = NaN;
+            obj.lastGyroscopeObservation = [];
+            obj.lastAccelMeasurement_mps2 = [];
         end
 
         function precomputeNoise(obj, ~)
@@ -87,31 +101,94 @@ classdef IMUModel < handle
             obj.reset();
         end
 
-        function [omega_meas, f_meas] = sample(obj, omega_true_radps, f_specific_body_mps2, dt_s, t_s)
-            %SAMPLE  One IMU measurement pair; steps both bias random walks by dt_s.
+        function [omega_meas, f_meas, gyroObservation] = sample(obj, ...
+                omega_B_I_body_radps, f_specific_body_mps2, dt_s, t_s)
+            %SAMPLE  One timestamped inertial-rate and specific-force sample.
             %   f_specific_body_mps2 : NON-GRAVITATIONAL specific force in body axes. Pass
             %   zeros(3,1) for free flight (the physical truth at GEO bar ~1e-7 m/s^2 of SRP).
             if nargin < 3 || isempty(f_specific_body_mps2); f_specific_body_mps2 = zeros(3,1); end
             if nargin < 5; t_s = NaN; end
-            dt_s = max(dt_s, eps);
-            omega_true_radps     = omega_true_radps(:);
+            assert(isscalar(dt_s) && isfinite(dt_s) && dt_s > 0, ...
+                'IMUModel:invalidSampleInterval', ...
+                'IMU sample interval must be finite and positive.');
+            omega_B_I_body_radps = omega_B_I_body_radps(:);
             f_specific_body_mps2 = f_specific_body_mps2(:);
+            assert(numel(omega_B_I_body_radps) == 3 && ...
+                all(isfinite(omega_B_I_body_radps)) && ...
+                numel(f_specific_body_mps2) == 3 && ...
+                all(isfinite(f_specific_body_mps2)), ...
+                'IMUModel:invalidTruthInput', ...
+                'IMU truth inputs must contain three finite body-axis components.');
+
+            if isfinite(t_s) && isfinite(obj.lastSampleTime_s)
+                tolerance_s = 10*eps(max(1,abs(t_s)));
+                assert(t_s >= obj.lastSampleTime_s-tolerance_s, ...
+                    'IMUModel:nonMonotonicTime', ...
+                    'IMU sample epochs must be nondecreasing.');
+                if abs(t_s-obj.lastSampleTime_s) <= tolerance_s
+                    gyroObservation = obj.lastGyroscopeObservation;
+                    omega_meas = gyroObservation.omega_B_I_meas_body_radps;
+                    f_meas = obj.lastAccelMeasurement_mps2;
+                    return
+                end
+            end
+
+            biasStep_s = dt_s;
+            if isfinite(t_s)
+                if isfinite(obj.lastSampleTime_s)
+                    biasStep_s = t_s-obj.lastSampleTime_s;
+                else
+                    biasStep_s = 0;
+                end
+            end
 
             % ---- Gyro channel (own stream: identical draws to the gyro-only model) ----
-            obj.gyroBias_radps = obj.gyroBias_radps + ...
-                obj.gyroRrw_rad_per_s_sqrt_s * sqrt(dt_s) * randn(obj.rngGyro_, 3, 1);
-            omega_meas = omega_true_radps + obj.gyroBias_radps + ...
+            if biasStep_s > 0 && obj.gyroRrw_rad_per_s_sqrt_s > 0
+                obj.gyroBias_radps = obj.gyroBias_radps + ...
+                    obj.gyroRrw_rad_per_s_sqrt_s * sqrt(biasStep_s) * ...
+                    randn(obj.rngGyro_, 3, 1);
+            end
+            omega_meas = omega_B_I_body_radps + obj.gyroBias_radps + ...
                 (obj.gyroArw_rad_per_sqrt_s / sqrt(dt_s)) * randn(obj.rngGyro_, 3, 1);
 
             % ---- Accelerometer channel (own stream) ----
-            obj.accelBias_mps2 = obj.accelBias_mps2 + ...
-                obj.accelBrw_mps2_sqrt_s * sqrt(dt_s) * randn(obj.rngAccel_, 3, 1);
+            if biasStep_s > 0 && obj.accelBrw_mps2_sqrt_s > 0
+                obj.accelBias_mps2 = obj.accelBias_mps2 + ...
+                    obj.accelBrw_mps2_sqrt_s * sqrt(biasStep_s) * ...
+                    randn(obj.rngAccel_, 3, 1);
+            end
             f_meas = f_specific_body_mps2 + obj.accelBias_mps2 + ...
                 (obj.accelVrw_mps_per_sqrt_s / sqrt(dt_s)) * randn(obj.rngAccel_, 3, 1);
 
+            gyroObservation = models.sensors.GyroscopeObservation( ...
+                obj.sensorIdentifier,obj.biasStateIdentifier,t_s,omega_meas, ...
+                (obj.gyroArw_rad_per_sqrt_s^2/dt_s)*eye(3), ...
+                obj.gyroRrw_rad_per_s_sqrt_s^2*eye(3),true,'valid');
             obj.history(end+1) = struct('t_s', t_s, ...
                 'gyroBias_radps', obj.gyroBias_radps, 'omega_meas_radps', omega_meas, ...
                 'accelBias_mps2', obj.accelBias_mps2, 'f_meas_mps2', f_meas);
+            if isfinite(t_s)
+                obj.lastSampleTime_s = t_s;
+                obj.lastGyroscopeObservation = gyroObservation;
+                obj.lastAccelMeasurement_mps2 = f_meas;
+            end
+        end
+    end
+
+    methods (Static)
+        function omega_B_I_body_radps = inertialRateFromEarthRelative( ...
+                omega_B_E_body_radps,q_E_B,omega_E_I_ecef_radps)
+            if nargin < 3 || isempty(omega_E_I_ecef_radps)
+                omega_E_I_ecef_radps = models.frames.FrameTimeUtils.omegaEcef_radps();
+            end
+            omegaRelative = omega_B_E_body_radps(:);
+            omegaEarth = omega_E_I_ecef_radps(:);
+            assert(numel(omegaRelative) == 3 && numel(omegaEarth) == 3 && ...
+                all(isfinite(omegaRelative)) && all(isfinite(omegaEarth)), ...
+                'IMUModel:invalidAngularRate', ...
+                'Angular-rate vectors must contain three finite components.');
+            C_E_B = revgnss.AttitudeQuaternion.toDcm(q_E_B);
+            omega_B_I_body_radps = omegaRelative + C_E_B.'*omegaEarth;
         end
     end
 

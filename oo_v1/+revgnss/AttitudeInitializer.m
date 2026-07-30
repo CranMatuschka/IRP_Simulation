@@ -24,6 +24,8 @@ classdef AttitudeInitializer
                 'bestResidual', NaN, ...
                 'secondBestResidual', NaN, ...
                 'ratio', NaN, ...
+                'priorResidualCycles', NaN, ...
+                'residualImprovementRatio', NaN, ...
                 'priorEuler_deg', [NaN; NaN; NaN], ...
                 'truthEuler_deg', [NaN; NaN; NaN], ...
                 'bestCandidateEuler_deg', [NaN; NaN; NaN], ...
@@ -68,27 +70,29 @@ classdef AttitudeInitializer
 
             switch mode
                 case 'knownAttitudeCalibration'
-                    ekf.x(ekf.stateMap.euler_idx) = asset.attitude_euler_rad(:);
-                    sigma = revgnss.AttitudeInitializer.knownSigma_(cfg);
-                    ekf.P(ekf.stateMap.euler_idx, ekf.stateMap.euler_idx) = sigma^2 * eye(3);
-                    info.classification = 'CALIBRATED_ABSOLUTE_REFERENCE';
-                    info.confidenceClass = 'VALIDATION_ONLY';
-                    info.acceptedByEkf = true;
-                    info.message = ['Known attitude declared for calibration; ' ...
-                        'differential carrier tracking is referenced to this attitude.'];
-                    info.decisionReason = info.message;
-                    info.truthEuler_deg = asset.attitude_euler_rad(:) * 180/pi;
-                    info.bestCandidateEuler_deg = info.truthEuler_deg;
-                    info.initializedAttitudeError_deg = 0;
+                    error('AttitudeInitializer:truthAttitudeInputUnavailable', ...
+                        'Simulated truth cannot initialize the attitude estimator.');
 
                 case 'coarseBaselineIntegerSearch'
                     [bestEuler, searchInfo] = revgnss.AttitudeInitializer.coarseSearch_( ...
                         cfg, asset, towers, ekf, cpInfo);
                     info = revgnss.AttitudeInitializer.mergeInfo_(info, searchInfo);
                     if strcmp(info.classification,'ABS_ATT_CONVERGED')
-                        ekf.x(ekf.stateMap.euler_idx) = bestEuler;
+                        attitudeIndex = ekf.stateMap.euler_idx;
+                        if strcmp(ekf.attitudeParameterization, ...
+                                'quaternionErrorState')
+                            ekf.nominalQuat_wxyz(:,1) = ...
+                                revgnss.AttitudeErrorStateKinematics. ...
+                                eulerToQuatZYX(bestEuler);
+                            ekf.x(attitudeIndex) = zeros(3,1);
+                        else
+                            ekf.x(attitudeIndex) = bestEuler;
+                        end
                         sigDeg = revgnss.AttitudeInitializer.searchSigmaDeg_(cfg, info);
-                        ekf.P(ekf.stateMap.euler_idx, ekf.stateMap.euler_idx) = deg2rad(sigDeg)^2 * eye(3);
+                        ekf.P(attitudeIndex,:) = 0;
+                        ekf.P(:,attitudeIndex) = 0;
+                        ekf.P(attitudeIndex,attitudeIndex) = ...
+                            deg2rad(sigDeg)^2*eye(3);
                         info.acceptedByEkf = true;
                         info.initializedAttitudeError_deg = ...
                             norm(revgnss.AttitudeInitializer.wrapPi_(bestEuler - asset.attitude_euler_rad(:))) * 180/pi;
@@ -121,15 +125,6 @@ classdef AttitudeInitializer
             ok = true;
         end
 
-        function sigma = knownSigma_(cfg)
-            sigma = deg2rad(0.1);
-            if isfield(cfg.estimator,'attitudeInit') && ...
-                    isfield(cfg.estimator.attitudeInit,'knownAttitudeCalibration') && ...
-                    isfield(cfg.estimator.attitudeInit.knownAttitudeCalibration,'sigmaDeg')
-                sigma = deg2rad(cfg.estimator.attitudeInit.knownAttitudeCalibration.sigmaDeg);
-            end
-        end
-
         function [bestEuler, info] = coarseSearch_(cfg, asset, towers, ekf, cpInfo)
             info = revgnss.AttitudeInitializer.defaultInfo(cfg);
             info.classification = 'ABS_ATT_INIT_FAILED';
@@ -146,10 +141,13 @@ classdef AttitudeInitializer
             info.searchWindowDeg = win;
             info.stepDeg = step;
             info.nCandidates = numel(axesDeg{1}) * numel(axesDeg{2}) * numel(axesDeg{3});
-            info.priorEuler_deg = ekf.x(ekf.stateMap.euler_idx) * 180/pi;
+            measurementState = ekf.getMeasurementState();
+            e0 = measurementState(ekf.stateMap.euler_idx);
+            info.priorEuler_deg = e0 * 180/pi;
             info.truthEuler_deg = asset.attitude_euler_rad(:) * 180/pi;
             info.priorAttitudeError_deg = ...
-                norm(revgnss.AttitudeInitializer.wrapPi_(ekf.x(ekf.stateMap.euler_idx) - asset.attitude_euler_rad(:))) * 180/pi;
+                norm(revgnss.AttitudeInitializer.wrapPi_( ...
+                e0-asset.attitude_euler_rad(:)))*180/pi;
             if isfield(cfg,'estimator') && isfield(cfg.estimator,'attitudeInitShadow') && ...
                     isfield(cfg.estimator.attitudeInitShadow,'enable') && cfg.estimator.attitudeInitShadow.enable
                 info.shadowMode = 'SHADOW ONLY - not used by main EKF';
@@ -173,9 +171,10 @@ classdef AttitudeInitializer
                 return
             end
             lambda = revgnss.AttitudeInitializer.lambdaL1_(cfg);
-            r_cm = ekf.x(ekf.stateMap.r_idx);
-            e0 = ekf.x(ekf.stateMap.euler_idx);
+            r_cm = measurementState(ekf.stateMap.r_idx);
             arms = cfg.asset.receiverLeverArms_body_m;
+            priorCost = revgnss.AttitudeInitializer.candidateCost_( ...
+                cfg,towers,tiVec,aiVec,obs_m,r_cm,e0,arms,lambda);
 
             bestCost = inf; secondCost = inf;
             bestCandidate = e0;
@@ -186,19 +185,8 @@ classdef AttitudeInitializer
                 for b = axesDeg{2}
                     for c = axesDeg{3}
                         e = e0 + deg2rad([a; b; c]);
-                        geom = zeros(size(obs_m));
-                        for ri = 1:numel(obs_m)
-                            ti = tiVec(ri);
-                            ai = aiVec(ri);
-                            hRef = models.measurements.MeasurementModelUtils.modelRangeOnly( ...
-                                cfg, towers, ti, 1, r_cm, e, arms);
-                            hI = models.measurements.MeasurementModelUtils.modelRangeOnly( ...
-                                cfg, towers, ti, ai, r_cm, e, arms);
-                            geom(ri) = hI - hRef;
-                        end
-                        cyc = (obs_m - geom) / lambda;
-                        residCycles = cyc - round(cyc);
-                        cost = mean(residCycles.^2);
+                        cost = revgnss.AttitudeInitializer.candidateCost_( ...
+                            cfg,towers,tiVec,aiVec,obs_m,r_cm,e,arms,lambda);
                         if cost < bestCost
                             secondCost = bestCost;
                             secondCandidate = bestCandidate;
@@ -217,6 +205,9 @@ classdef AttitudeInitializer
             info.bestResidual = sqrt(bestCost);
             info.secondBestResidual = sqrt(secondCost);
             info.ratio = secondCost / max(bestCost, eps);
+            info.priorResidualCycles = sqrt(priorCost);
+            info.residualImprovementRatio = ...
+                info.priorResidualCycles/max(info.bestResidual,eps);
             bestEuler = revgnss.AttitudeInitializer.wrapPi_(bestCandidate);
             secondEuler = revgnss.AttitudeInitializer.wrapPi_(secondCandidate);
             info.bestCandidateEuler_deg = bestEuler * 180/pi;
@@ -301,8 +292,8 @@ classdef AttitudeInitializer
             if isfield(cfg.estimator.attitudeInit.search,'ambiguousRatioThreshold')
                 ambRatio = cfg.estimator.attitudeInit.search.ambiguousRatioThreshold;
             end
-            improves = isfinite(info.candidateImprovementRatio) && ...
-                info.candidateImprovementRatio >= impTol;
+            improves = isfinite(info.residualImprovementRatio) && ...
+                info.residualImprovementRatio >= impTol;
             nearEqual = isfinite(info.ratio) && info.ratio < ambRatio;
             if ~isfinite(info.bestResidual) || info.nDiffRows < 6
                 cls = 'INVALID_GEOMETRY';
@@ -316,6 +307,25 @@ classdef AttitudeInitializer
             else
                 cls = 'WEAK_ATTITUDE_DETECTED';
             end
+        end
+
+        function cost = candidateCost_(cfg,towers,tiVec,aiVec,obs_m, ...
+                r_cm,euler,arms,lambda)
+            geometry_m = zeros(size(obs_m));
+            for rowIndex = 1:numel(obs_m)
+                towerIndex = tiVec(rowIndex);
+                antennaIndex = aiVec(rowIndex);
+                referenceRange_m = models.measurements. ...
+                    MeasurementModelUtils.modelRangeOnly( ...
+                    cfg,towers,towerIndex,1,r_cm,euler,arms);
+                antennaRange_m = models.measurements. ...
+                    MeasurementModelUtils.modelRangeOnly( ...
+                    cfg,towers,towerIndex,antennaIndex,r_cm,euler,arms);
+                geometry_m(rowIndex) = antennaRange_m-referenceRange_m;
+            end
+            floatCycles = (obs_m-geometry_m)/lambda;
+            integerResidualCycles = floatCycles-round(floatCycles);
+            cost = mean(integerResidualCycles.^2);
         end
 
         function [topCost, topEuler] = insertTop_(topCost, topEuler, cost, euler)

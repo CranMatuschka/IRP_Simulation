@@ -3,8 +3,8 @@
 % Stage 16: absolute multi-antenna attitude initialization.
 %
 % T1: default mode is safe ('none').
-% T2: knownAttitudeCalibration requires an explicit known-attitude declaration.
-% T3: knownAttitudeCalibration seeds the EKF as CALIBRATED_ABSOLUTE_REFERENCE.
+% T2: truth-derived attitude initialization is rejected.
+% T3: the rejection is independent of the legacy allow flag.
 % T4: coarseBaselineIntegerSearch runs through quality gates and reports an
 %     honest Stage 16 classification.
 
@@ -29,9 +29,9 @@ assert(strcmp(cfg1.estimator.attitudeInitMode,'none'), ...
 fprintf('    PASS\n');
 
 % ----------------------------------------------------------------
-% T2: knownAttitudeCalibration requires explicit declaration
+% T2: truth-derived initialization is unavailable
 % ----------------------------------------------------------------
-fprintf('  T2: knownAttitudeCalibration guard requires allow=true ...\n');
+fprintf('  T2: knownAttitudeCalibration is unavailable ...\n');
 cfg2 = mkBaseCfg_(6);
 cfg2.estimator.attitudeInitMode = 'knownAttitudeCalibration';
 cfg2.estimator.attitudeInit.knownAttitudeCalibration.allow = false;
@@ -39,31 +39,30 @@ didThrow2 = false;
 try
     revgnss.ConfigFactory.finalizeConfig(cfg2);
 catch ME2
-    didThrow2 = contains(ME2.identifier, 'knownAttitudeNotDeclared');
+    didThrow2 = contains(ME2.identifier, ...
+        'truthAttitudeInitializationUnavailable');
 end
-assert(didThrow2, 'T2 FAILED: missing known-attitude declaration did not throw expected guard');
+assert(didThrow2, ...
+    'T2 FAILED: truth-derived attitude initialization was accepted');
 fprintf('    PASS\n');
 
 % ----------------------------------------------------------------
-% T3: knownAttitudeCalibration seeds EKF and is reported explicitly
+% T3: legacy allow flag cannot bypass the truth-input guard
 % ----------------------------------------------------------------
-fprintf('  T3: knownAttitudeCalibration smoke run ...\n');
-cfg3 = mkBaseCfg_(20);
-cfg3.estimator.attitudeCarrierMode = 'calibratedDifferentialAmbiguity';
-cfg3.estimator.diffAtt.calibWin_s = 4;
+fprintf('  T3: legacy allow flag cannot bypass the guard ...\n');
+cfg3 = mkBaseCfg_(6);
 cfg3.estimator.attitudeInitMode = 'knownAttitudeCalibration';
 cfg3.estimator.attitudeInit.knownAttitudeCalibration.allow = true;
-cfg3.estimator.attitudeInit.knownAttitudeCalibration.sigmaDeg = 0.1;
-w3 = warning('off','all');
-out3 = revgnss.ReportRunner.runSingle(cfg3);
-warning(w3);
-assert(strcmp(out3.sim.attInitInfo.classification, 'CALIBRATED_ABSOLUTE_REFERENCE'), ...
-    'T3 FAILED: attitudeInitClass=%s', out3.sim.attInitInfo.classification);
-assert(out3.summary.finalAttitudeError_deg < 1.0, ...
-    'T3 FAILED: final attitude error %.3f deg too large for known reference', ...
-    out3.summary.finalAttitudeError_deg);
-fprintf('    PASS (class=%s, final attitude error=%.4f deg)\n', ...
-    out3.sim.attInitInfo.classification, out3.summary.finalAttitudeError_deg);
+didThrow3 = false;
+try
+    revgnss.ConfigFactory.finalizeConfig(cfg3);
+catch ME3
+    didThrow3 = contains(ME3.identifier, ...
+        'truthAttitudeInitializationUnavailable');
+end
+assert(didThrow3, ...
+    'T3 FAILED: legacy allow flag bypassed the truth-input guard');
+fprintf('    PASS\n');
 
 % ----------------------------------------------------------------
 % T4: coarse search reports a valid scientific classification

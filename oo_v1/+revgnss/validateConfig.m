@@ -68,4 +68,6 @@ if isfield(cfg,'orbit')
             'validateConfig: orbit altitude seems too low (< 100 km)');
     end
 end
+
+revgnss.AttitudeSensorSuite.validateConfig(cfg);
 end
