@@ -173,7 +173,7 @@ classdef LinkObservationDelivery
                     'non-overlapping scheduled session, which does not exist.']);
             end
 
-            [ownerField,remoteField] = revgnss.LinkObservationDelivery.ownerEndpointFieldFor_( ...
+            [ownerField,remoteField] = revgnss.LinkObservationDelivery.ownerRemoteEndpointFieldsFor( ...
                 class(record),ownerPolicy);
             ownerRecordEndpointIdentifier = record.(ownerField);
             remoteRecordEndpointIdentifier = record.(remoteField);
@@ -435,8 +435,14 @@ classdef LinkObservationDelivery
         end
     end
 
-    methods (Static, Access = private)
-        function [ownerField,remoteField] = ownerEndpointFieldFor_(recordClass, ownerPolicy)
+    methods (Static)
+        function [ownerField,remoteField] = ownerRemoteEndpointFieldsFor(recordClass, ownerPolicy)
+            % ownerRemoteEndpointFieldsFor  Public (plan Section 2.5): the ONE owner/remote role
+            % mapping in the codebase, promoted from a private helper so a non-throwing report-
+            % time attribution (revgnss.IndependentFleetCoordinator.linkAttributionFromRecord_,
+            % used on the rejection path where no LinkObservationDelivery exists) can reuse the
+            % SAME mapping propose() uses, rather than maintaining a second copy (invariant 9:
+            % one configured owner).
             if strcmp(recordClass,'revgnss.InterSatelliteObservationRecord') && ...
                     strcmp(ownerPolicy,'initiator')
                 ownerField = 'initiatorAssetIdentifier';

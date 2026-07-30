@@ -1841,6 +1841,7 @@ classdef ReportRunner
             else
                 summary.reportStatus = 'dataOnlyIndependentFleet';
             end
+            summary.distributedResultStatus = results.distributedResultStatus;
 
             out = struct('cfg',cfg,'coordinator',coordinator, ...
                 'sim',coordinator.localSimulations{1}, ...

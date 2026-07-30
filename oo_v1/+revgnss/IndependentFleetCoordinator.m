@@ -18,6 +18,14 @@ classdef IndependentFleetCoordinator < handle
         pendingLinkDeliveries_ cell = {}
         coordinatorGeneratedCount_ (1,1) double = 0
         coordinatorDeliveredCount_ (1,1) double = 0
+        % linkGenerationTally_  Plan Section 2.5: per-(observableIdentifier,ownerAssetIdentifier)
+        % generated-record counts. Tracked separately from revgnss.DistributedDeliveryLedger
+        % because "generated" is a phase-4 fact recorded BEFORE any ledger entry exists (the
+        % ledger only ever sees eligible/rejected records, one entry each, never a raw
+        % generated-only count); this is the coordinator's own equivalent of
+        % coordinatorGeneratedCount_, split by key instead of collapsed to one fleet-wide total.
+        linkGenerationTally_ (1,:) struct = struct('observableIdentifier',{}, ...
+            'ownerAssetIdentifier',{},'processedObservableType',{},'generatedRecords',{})
     end
 
     properties (Constant)
@@ -134,6 +142,11 @@ classdef IndependentFleetCoordinator < handle
                 'stateExchange',obj.exchangeJournal.summary(), ...
                 'linkObservationCounters',obj.linkObservationCounters_(), ...
                 'linkDelivery',revgnss.DistributedDeliveryLedger.summaryOrEmpty(obj.deliveryLedger), ...
+                'linkDeliveryByObservableAndOwner', ...
+                    {revgnss.DistributedDeliveryLedger.summaryByObservableAndOwnerOrEmpty(obj.deliveryLedger)}, ...
+                'linkGenerationTally',{obj.linkGenerationTally()}, ...
+                'distributedLinkPolicy',obj.distributedLinkPolicy_(), ...
+                'distributedResultStatus',obj.distributedResultStatus_(), ...
                 'complete',obj.isComplete);
             for assetIndex = 1:obj.nAssets
                 results.asset{assetIndex} = obj.extractAssetResult_( ...
@@ -150,7 +163,9 @@ classdef IndependentFleetCoordinator < handle
                 'linkObservationCounters',counters, ...
                 'linkDelivery',revgnss.DistributedDeliveryLedger.summaryOrEmpty(obj.deliveryLedger), ...
                 'relativeEstimatorStatus','notImplementedInStage1', ...
-                'linkFusionStatus','notImplementedInStage1');
+                'linkFusionStatus','notImplementedInStage1', ...
+                'distributedResultStatus',obj.distributedResultStatus_(), ...
+                'distributedLinkPolicy',obj.distributedLinkPolicy_());
         end
 
         function products = estimatorEligibleProducts(obj)
@@ -158,6 +173,13 @@ classdef IndependentFleetCoordinator < handle
             % publication path (stateExchange.estimatorEligibleProfile.enable). Empty unless
             % that toggle is enabled; every Stage-1 diagnostic-only path is unaffected by it.
             products = obj.estimatorEligibleProducts_;
+        end
+
+        function tally = linkGenerationTally(obj)
+            % linkGenerationTally  Read-only accessor for the plan Section 2.5 per-observable/
+            % per-asset generated-record tally. See linkGenerationTally_'s own header for why
+            % this is tracked outside revgnss.DistributedDeliveryLedger.
+            tally = obj.linkGenerationTally_;
         end
     end
 
@@ -501,6 +523,9 @@ classdef IndependentFleetCoordinator < handle
                 linkInfo = info.linkInfos{observationIndex};
                 linkInfo.truthDiagnostic = []; %#ok<NASGU>
                 obj.coordinatorGeneratedCount_ = obj.coordinatorGeneratedCount_ + 1;
+                attribution = revgnss.IndependentFleetCoordinator.linkAttributionFromRecord_( ...
+                    record,observable,settings.linkUpdate.ownerPolicy);
+                obj.tallyGeneratedLinkRecord_(attribution);
 
                 try
                     if isOneWay
@@ -590,14 +615,15 @@ classdef IndependentFleetCoordinator < handle
                     [delivery,rejection] = revgnss.LinkObservationDelivery.tryPropose(proposeArgs);
                     if rejection.rejected
                         obj.rejectRecord_(record,t_s,rejection.reasonCode,rejection.reasonMessage, ...
-                            rejection.sourceErrorIdentifier);
+                            rejection.sourceErrorIdentifier,attribution);
                         continue
                     end
                     obj.deliveryLedger.recordEligible(delivery);
                     obj.pendingLinkDeliveries_{end+1} = struct( ...
                         'delivery',delivery,'calibrationProduct',calibrationProduct); %#ok<AGROW>
                 catch ME
-                    obj.rejectRecord_(record,t_s,'observablePredictionFailed',ME.message,ME.identifier);
+                    obj.rejectRecord_(record,t_s,'observablePredictionFailed',ME.message,ME.identifier, ...
+                        attribution);
                 end
             end
         end
@@ -736,18 +762,83 @@ classdef IndependentFleetCoordinator < handle
             end
         end
 
-        function rejectRecord_(obj, record, deliveryEpoch_s, reasonCode, reasonMessage, sourceErrorIdentifier)
+        function rejectRecord_(obj, record, deliveryEpoch_s, reasonCode, reasonMessage, ...
+                sourceErrorIdentifier, attribution)
+            % rejectRecord_  attribution (plan Section 2.5) is a
+            % linkAttributionFromRecord_-built struct: no revgnss.LinkObservationDelivery exists
+            % yet on this path (the proposal itself failed, or failed before one could be
+            % built), so the ledger's per-observable/per-asset report accounting still needs an
+            % observable identifier and a best-effort (never reconciled) owner/remote label.
             rejectionRecord = struct( ...
                 'observationIdentifier',record.observationIdentifier, ...
-                'ownerAssetIdentifier','', ...
+                'ownerAssetIdentifier',attribution.ownerAssetIdentifier, ...
+                'remoteAssetIdentifier',attribution.remoteAssetIdentifier, ...
                 'remoteProductIdentifier','', ...
                 'sourceEpoch_s',deliveryEpoch_s, ...
                 'deliveryEpoch_s',deliveryEpoch_s, ...
                 'reasonCode',reasonCode, ...
                 'reasonMessage',reasonMessage, ...
                 'sourceErrorIdentifier',sourceErrorIdentifier, ...
-                'physicalRecordClass',class(record));
+                'physicalRecordClass',class(record), ...
+                'observableIdentifier',attribution.observableIdentifier, ...
+                'processedObservableType',attribution.processedObservableType, ...
+                'processedUnits',attribution.processedUnits, ...
+                'ownerAttributionSource',attribution.ownerAttributionSource);
             obj.deliveryLedger.recordRejected(rejectionRecord);
+        end
+
+        function tallyGeneratedLinkRecord_(obj, attribution)
+            key = @(t) strcmp({t.observableIdentifier},attribution.observableIdentifier) & ...
+                strcmp({t.ownerAssetIdentifier},attribution.ownerAssetIdentifier);
+            index = find(key(obj.linkGenerationTally_),1);
+            if isempty(index)
+                obj.linkGenerationTally_(end+1) = struct( ...
+                    'observableIdentifier',attribution.observableIdentifier, ...
+                    'ownerAssetIdentifier',attribution.ownerAssetIdentifier, ...
+                    'processedObservableType',attribution.processedObservableType, ...
+                    'generatedRecords',1);
+            else
+                obj.linkGenerationTally_(index).generatedRecords = ...
+                    obj.linkGenerationTally_(index).generatedRecords+1;
+            end
+        end
+
+        function policy = distributedLinkPolicy_(obj)
+            % distributedLinkPolicy_  Plan Section 2.5: a flat, report-ready echo of the
+            % sanctioned tuple this run configured, so the report can state the correlation
+            % policy / calibration ownership / propagation policy without a second copy of the
+            % validation logic in validateConfig.
+            settings = revgnss.IndependentFleetCoordinator.settingsFromConfig(obj.cfg);
+            observable = char(settings.linkUpdate.updateAdapter.observable);
+            rowUnits = '';
+            if ~strcmp(observable,'none')
+                rowUnits = revgnss.DistributedLinkUpdateAdapter.RowUnitsByObservable.(observable);
+            end
+            policy = struct( ...
+                'linkUpdateEnabled',settings.linkUpdate.enable, ...
+                'observableIdentifier',observable, ...
+                'observableRowUnits',rowUnits, ...
+                'ownerPolicy',char(settings.linkUpdate.ownerPolicy), ...
+                'correlationPolicy',char(settings.linkUpdate.correlationPolicy), ...
+                'roleReversalPolicy',char(settings.linkUpdate.roleReversalPolicy), ...
+                'remoteProductPropagationPolicy',char(settings.linkUpdate.remoteProductPropagationPolicy), ...
+                'persistentCalibrationTreatment','rejected', ... % literal proposeArgs itself passes, not a config read
+                'calibrationOwnershipPolicy',char(settings.linkUpdate.calibrationOwnership.policy), ...
+                'commonSourceTreatment',settings.linkUpdate.commonSourceTreatment, ...
+                'outOfSequencePolicy',char(settings.outOfSequencePolicy), ...
+                'deliveryLedgerEnabled',settings.deliveryLedger.enable, ...
+                'stateExchangeEnabled',settings.stateExchange.enable, ...
+                'estimatorEligibleProfileEnabled',settings.stateExchange.estimatorEligibleProfile.enable, ...
+                'stateExchangeMaximumAge_s',settings.stateExchange.maximumAge_s, ...
+                'stateExchangeDeliveryDelay_s',settings.stateExchange.deliveryDelay_s);
+        end
+
+        function status = distributedResultStatus_(obj)
+            settings = revgnss.IndependentFleetCoordinator.settingsFromConfig(obj.cfg);
+            counters = obj.linkObservationCounters_();
+            status = revgnss.DistributedFleetReportingContract.resultStatus( ...
+                settings.linkUpdate.enable,char(settings.linkUpdate.correlationPolicy), ...
+                counters.consumedByOwner);
         end
 
         function publishStateProducts_(obj, epochIndex, settings)
@@ -891,6 +982,52 @@ classdef IndependentFleetCoordinator < handle
                 node = node.(path{index});
             end
             if islogical(node) && isscalar(node); value = node; end
+        end
+
+        function attribution = linkAttributionFromRecord_(record, observableIdentifier, ownerPolicy)
+            % linkAttributionFromRecord_  Plan Section 2.5 non-throwing report-time endpoint
+            % attribution: needed on the phase-4 rejection path, where NO
+            % revgnss.LinkObservationDelivery exists yet (the proposal itself may have failed,
+            % or may fail below before one is built) -- observableIdentifier is always the
+            % passed scalar (the coordinator always knows the one sanctioned observable for the
+            % run), never a sentinel, but the owner/remote endpoint labels are only a best-
+            % effort record-declared reading, reusing the SAME role mapping propose() itself
+            % uses (revgnss.LinkObservationDelivery.ownerRemoteEndpointFieldsFor) so there is
+            % never a second copy of that mapping (invariant 9). Deliberately non-throwing: an
+            % uncaught error inside the rejection path itself would be strictly worse than the
+            % frozen 'unattributed' sentinel below, and the sentinel is a strict improvement
+            % over the pre-Section-2.5 behaviour (a bare '').
+            %
+            % CANONICALIZED, not the raw record label: a physical record declares its endpoints
+            % in the 'asset:N' scheme (revgnss.CanonicalEndpointIdentity.fromRecordIdentifier),
+            % but every ledger entry built via a real revgnss.LinkObservationDelivery stores the
+            % 'spacecraft:N' canonical product scheme (out.ownerAssetIdentifier =
+            % args.ownerProvider.endpointIdentifier in propose()). Reading the raw 'asset:N'
+            % label here would key linkGenerationTally_ under a DIFFERENT string than the same
+            % physical satellite's ledger entries use, so DistributedFleetReportingContract.
+            % buildLinkAccounting's join would never match a generated count to its own
+            % delivered/consumed counts for the same asset (found by execution: a real run
+            % showed generated=6 filed under 'asset:1' with 0 delivered, and delivered=6/
+            % consumed=6 filed separately under 'spacecraft:1', reconciled=false).
+            attribution = struct( ...
+                'observableIdentifier',char(observableIdentifier), ...
+                'ownerAssetIdentifier',revgnss.DistributedDeliveryLedger.UnattributedAssetIdentifier, ...
+                'remoteAssetIdentifier','', ...
+                'processedObservableType','', ...
+                'processedUnits','', ...
+                'ownerAttributionSource','unattributed');
+            try
+                [ownerField,remoteField] = revgnss.LinkObservationDelivery.ownerRemoteEndpointFieldsFor( ...
+                    class(record),char(ownerPolicy));
+                ownerCanonical = revgnss.CanonicalEndpointIdentity.fromRecordIdentifier(record.(ownerField));
+                remoteCanonical = revgnss.CanonicalEndpointIdentity.fromRecordIdentifier(record.(remoteField));
+                attribution.ownerAssetIdentifier = sprintf('spacecraft:%d',ownerCanonical.physicalAssetIndex);
+                attribution.remoteAssetIdentifier = sprintf('spacecraft:%d',remoteCanonical.physicalAssetIndex);
+                attribution.processedObservableType = record.processedObservableType;
+                attribution.processedUnits = record.processedUnits;
+                attribution.ownerAttributionSource = 'recordDeclaredEndpointLabel';
+            catch
+            end
         end
 
         function geometry = terminalGeometryFromRecord_(record, role)

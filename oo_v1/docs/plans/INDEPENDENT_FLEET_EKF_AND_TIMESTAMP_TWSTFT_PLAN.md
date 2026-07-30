@@ -1,6 +1,6 @@
 # Independent Per-Satellite EKF, Distributed ISL, and Timestamp TWSTFT Plan
 
-**Status:** living roadmap. Stage 1 was implemented and verified on 2026-07-29. Stage 2 Sections 2.0 (protocol contract), 2.1 (generic communication interfaces), and 2.2 (conservative correlation policy) were implemented and verified on 2026-07-29. Section 2.3.1 (the coherent transponded-PN two-way code range adapter, the first source-specific adapter) was implemented and verified end-to-end on 2026-07-30: a real 2-asset fleet run through `IndependentFleetCoordinator` with the sanctioned `linkUpdate` tuple enabled generated, delivered, and consumed ISL link updates with a finite/symmetric/PSD owner posterior. Section 2.4 (clock, gauge, and time-alignment guards) was implemented and verified on 2026-07-30: an adapter-agnostic clock-anchor/gauge audit layer, live today on the `coherentTwoWayCodeRange` path and complete for a future time-transfer adapter to call into. Section 2.3.2 (the first-order reciprocal ISL clock-transfer adapter, the second source-specific observable) was implemented and verified end-to-end on 2026-07-30: a real 2-asset fleet run through `IndependentFleetCoordinator` with the `firstOrderReciprocalClockTransfer` sanctioned tuple enabled generated, delivered, and consumed time-transfer link updates with a finite/symmetric/PSD owner posterior, and the two sanctioned observables are proved mutually exclusive (U6). Section 2.3 item 3 (one-way ISL code range and Doppler, the third and fourth source-specific observables) was implemented and verified end-to-end on 2026-07-30: `IndependentFleetCoordinator` widened to genuinely N-way (4 sanctioned observables) mutual exclusion, both one-way observables run end-to-end generating/delivering/consuming real link updates with a finite/symmetric/PSD owner posterior. Section 2.3 item 4 (ISL carrier) was assessed on 2026-07-30 and confirmed still structurally blocked on Stage 3 infrastructure that does not exist yet (no ambiguity-state owner, no correlation-tracked cross-covariance network); no code was added for it. Section 2.3 is therefore complete except for item 4, which is Stage 3's own precondition, not a Stage-2 gap. The sanctioned tuple remains default-disabled; Stage 3/4 remain not started.
+**Status:** living roadmap. Stage 1 was implemented and verified on 2026-07-29. Stage 2 Sections 2.0 (protocol contract), 2.1 (generic communication interfaces), and 2.2 (conservative correlation policy) were implemented and verified on 2026-07-29. Section 2.3.1 (the coherent transponded-PN two-way code range adapter, the first source-specific adapter) was implemented and verified end-to-end on 2026-07-30: a real 2-asset fleet run through `IndependentFleetCoordinator` with the sanctioned `linkUpdate` tuple enabled generated, delivered, and consumed ISL link updates with a finite/symmetric/PSD owner posterior. Section 2.4 (clock, gauge, and time-alignment guards) was implemented and verified on 2026-07-30: an adapter-agnostic clock-anchor/gauge audit layer, live today on the `coherentTwoWayCodeRange` path and complete for a future time-transfer adapter to call into. Section 2.3.2 (the first-order reciprocal ISL clock-transfer adapter, the second source-specific observable) was implemented and verified end-to-end on 2026-07-30: a real 2-asset fleet run through `IndependentFleetCoordinator` with the `firstOrderReciprocalClockTransfer` sanctioned tuple enabled generated, delivered, and consumed time-transfer link updates with a finite/symmetric/PSD owner posterior, and the two sanctioned observables are proved mutually exclusive (U6). Section 2.3 item 3 (one-way ISL code range and Doppler, the third and fourth source-specific observables) was implemented and verified end-to-end on 2026-07-30: `IndependentFleetCoordinator` widened to genuinely N-way (4 sanctioned observables) mutual exclusion, both one-way observables run end-to-end generating/delivering/consuming real link updates with a finite/symmetric/PSD owner posterior. Section 2.3 item 4 (ISL carrier) was assessed on 2026-07-30 and confirmed still structurally blocked on Stage 3 infrastructure that does not exist yet (no ambiguity-state owner, no correlation-tracked cross-covariance network); no code was added for it. Section 2.3 is therefore complete except for item 4, which is Stage 3's own precondition, not a Stage-2 gap. Section 2.5 (Stage-2 reporting) was implemented and verified end-to-end on 2026-07-30: the per-observable/per-asset delivery-ledger accounting (generated/delivered/owner-consumed/rejected+exact-reason, remote product age, fleet-wide coordinate-time/frame/clock-datum/product-publication provenance, correlation policy, calibration/covariance groups, and a `diagnosticOnlyNoLinkUpdate`/`conservativeDistributedOwnerOnly`/`linkUpdateEnabledButNoRecordConsumed` result-status vocabulary) is rendered into the existing `IndependentFleetDiagnosticReport`, with an executable, case-insensitive, word-boundary-safe check that the report's own rendered text never uses "joint," "solved formation," or "centralized-equivalent." Stage 2 (Sections 2.0-2.5) is now complete. The sanctioned tuple remains default-disabled; Stage 3/4 remain not started.
 
 ## Implementation status — 2026-07-29
 
@@ -720,6 +720,147 @@ For each observable type and asset, report:
 - whether the result is conservative distributed or diagnostic-only.
 
 Do not use the terms “joint,” “solved formation,” or “centralized-equivalent” for Stage 2.
+
+### Section 2.5 completion record — 2026-07-30
+
+Implements the reporting requirement above, extending the already-wired `run_oo_v1` ->
+`revgnss.ReportRunner.runSingle` -> `runIndependentFleet_` -> `revgnss.IndependentFleetDiagnosticReport.build`
+pipeline (not a parallel report path). The pre-existing `+revgnss/+report/federatedSwarmAppendix.m`/
+`ReportRunner.runFederatedSwarm_` route (a different architecture, `distributedEstimator.enable=false`)
+is untouched.
+
+1. Nine plan items assessed against the existing code before any change: three (remote product
+   age, correlation policy, calibration/product covariance groups) were already fully answered
+   by existing `revgnss.DistributedDeliveryLedger` fields and needed only surfacing, not new
+   work — stated explicitly rather than inventing busywork for them. The real gap was
+   `observableIdentifier`: no ledger entry carried one anywhere, and `physicalRecordClass`
+   cannot substitute since `revgnss.OneWayInterSatelliteObservationRecord` (Section 2.3 item 3)
+   backs both `oneWayCode` and `oneWayDoppler` — a report keyed only by record class could not
+   satisfy "for each observable type."
+2. `revgnss.DistributedDeliveryLedger` gains ten new per-entry fields (`observableIdentifier`,
+   `processedObservableType`, `processedUnits`, `wasDeliveredToOwner`, `ownerAttributionSource`,
+   `remoteStateProvenance`, `clockClaim`, `pairAbsolutelyAnchored`, `pairAnchorDatumIdentifier`,
+   `calibrationStateIdentifiers`) across all four struct-literal sites (`recordEligible`,
+   `recordRejected`, `emptyEntry_`) in identical field order (a MATLAB struct-array assignment
+   requirement), plus a new `summaryByObservableAndOwner()` aggregation method and
+   `emptyObservableOwnerSummary()`/`summaryByObservableAndOwnerOrEmpty()` statics. `summary()`/
+   `emptySummary()` themselves are byte-identical (a regression-locked existing test asserts
+   `isequal` against the disabled path).
+3. `revgnss.LinkObservationDelivery`'s private `ownerEndpointFieldFor_` is promoted to a public
+   `ownerRemoteEndpointFieldsFor` — the ONE owner/remote role mapping in the codebase, reused
+   (not copied) by a new non-throwing `IndependentFleetCoordinator.linkAttributionFromRecord_`
+   report-time helper for the rejection path, where no `LinkObservationDelivery` exists yet.
+4. `IndependentFleetCoordinator` gains a per-`(observableIdentifier, ownerAssetIdentifier)`
+   generation tally (`linkGenerationTally_`, tracked separately from the ledger because
+   "generated" is a phase-4 fact recorded before any ledger entry exists), a
+   `distributedLinkPolicy_()` flat policy echo, and a `distributedResultStatus_()` classification.
+   Four new fields on `getResults()`, two new fields on `runtimeSummary()` (the two pre-existing
+   `'notImplementedInStage1'` Stage-3-capability fields are left completely unchanged, per an
+   explicit decision not to rename stale-sounding-but-still-accurate wording for zero scientific
+   gain).
+5. New `revgnss.DistributedFleetReportingContract` (static, pure, no state/I/O/truth) — the
+   `distributedResultStatus` vocabulary (`diagnosticOnlyNoLinkUpdate`/
+   `conservativeDistributedOwnerOnly`/`linkUpdateEnabledButNoRecordConsumed`, kept orthogonal to
+   and never overwriting the pre-existing `reportStatus` artifact-kind field), the fleet-wide
+   frozen provenance statement (coordinate-time/frame/clock-datum/schema/publication-profile —
+   read directly from `DistributedLinkProtocolContract`'s constants, never plumbed per-delivery,
+   because `CommunicationEndpointState`'s own constructor already refuses any other value fleet-
+   wide), the full per-observable/per-asset accounting join (`buildLinkAccounting`), and an
+   executable forbidden-vocabulary check (`requireNoForbiddenStageTwoTerm`, word-boundary-safe:
+   `disjoint`/`adjoint` do not false-positive on the banned word `joint`) that the report itself
+   calls on its own rendered text before declaring success.
+6. `revgnss.IndependentFleetDiagnosticReport.build` gains a new "Distributed link accounting"
+   `.tex` section (fleet-wide provenance, correlation/calibration policy, the per-observable/
+   per-asset table, a raw-reason-code rejection table, remote-product-age/provenance/calibration-
+   group detail) and an appended status sentence in the existing Interpretation section; when the
+   delivery ledger is disabled it prints one honest sentence instead of a zero-filled table
+   (zeros would misleadingly read as "nothing was rejected"). No new `masterConfig.m` toggle:
+   every changed path already sits behind the existing, default-`false`
+   `distributedEstimator.enable` gate, and this pass adds no physics/state/covariance and never
+   touches `ekf.x`/`ekf.P`.
+7. Two real bugs found by execution, not review, and fixed directly: (a) a `properties(Constant)`
+   added to `revgnss.EstimatorEligibleEndpointStateProduct` to de-duplicate the
+   `'estimatorEligible-v1'` literal broke that class's own `toStruct()` (which enumerates
+   `properties(obj)` as its export list) on the very first real round-trip test that exercised
+   it — reverted to the established inline-literal-per-frozen-class idiom instead, matching how
+   every record class in this codebase already handles this exact tension (a lesson already
+   learned once earlier this session for a record constructor's own allow-list, now confirmed to
+   also apply to a `toStruct()` exporter). (b) the new per-observable/per-asset generation tally
+   was keyed on the physical record's own `asset:N` endpoint labels while every ledger entry
+   (via a real `LinkObservationDelivery`) is keyed on the canonical `spacecraft:N` product
+   scheme — the SAME `asset:N`-vs-`spacecraft:N` distinction `CanonicalEndpointIdentity` exists
+   to reconcile — so the join between generated and delivered/consumed counts for the same
+   physical satellite never matched (`generationTallyReconciled=false`, `delta=12` on a real
+   6-record run); fixed by canonicalizing through `CanonicalEndpointIdentity.fromRecordIdentifier`
+   before keying the tally, re-verified to reconcile exactly (`delta=0`) on the same fixture.
+8. New `tests/test_independent_fleet_stage2_reporting.m` (8 subtests, real execution throughout):
+   a full `ReportRunner.runSingle` round trip asserting the rendered `.tex` contains every
+   required provenance/policy string; the forbidden-vocabulary check against both the real
+   rendered report and five positive-control phrases, plus two negative controls
+   (`disjoint`/`adjoint`) proving the word-boundary regex does not false-positive; per-observable/
+   per-asset accounting exactness across **all four** sanctioned observables in one sweep
+   (`sum(generatedRecords)==fleet-wide generated`, same for consumed, `sum(ledgerRecords)==
+   ledger.distinctObservations` per invariant 9, and `observableRowUnits` correctly split as `m`
+   vs `m/s` even though `oneWayCode`/`oneWayDoppler` share one record class); a real rejection
+   fixture (`stateExchange.maximumAge_s=1`) proving rejected rows carry the exact observable,
+   canonical owner, and raw reason code; the disabled-link-update path proving the report states
+   `diagnosticOnlyNoLinkUpdate` honestly with no zero-filled table; a ledger-aggregation
+   regression lock (`summary()`/`emptySummary()` unchanged, distinct raw reason codes not
+   collapsed); the two Stage-3-status-fields-unchanged and federated-swarm-path-untouched
+   invariant checks. One pre-existing test (`tests/test_stage2_communication_interfaces.m`)
+   updated to add five newly-required fields to a synthetic rejection-record fixture — the same
+   "forward-looking placeholder becomes real" pattern every prior Section 2.3.x/2.4 stage already
+   established, not a regression. Full 20-file regression suite re-run and passes; the disabled
+   default path (`ReportRunner`'s single-asset golden route never constructs
+   `IndependentFleetCoordinator` at all) is unaffected.
+9. Combined Opus stage-acceptance review (2026-07-30): **APPROVE_WITH_NITS**, one real Medium
+   finding plus five Low findings and one non-blocking test-strength note, all fixed directly (no
+   second review round): (a) *Medium* — the per-asset covariance-group-identifier list rendered
+   into the report is genuinely per-epoch-unique (it equals each record's own
+   `observationIdentifier`), so a full `strjoin` grows linearly with run duration; measured by
+   the reviewer at 5,696 characters on one unbreakable LaTeX line at a 120 s arc, projecting to
+   hundreds of kB at the canonical 3,600 s/14,400 s tiers — past pdfTeX's default line buffer, a
+   real (non-`'never'`) compile would fail. Fixed with a new `summarizeList_` helper (count plus
+   a bounded first-two/last-two sample); re-verified at 120 s duration the rendered `.tex`'s
+   longest line is 336 characters, flat regardless of arc length. (b) *Low* — `escapeTex_`'s
+   backslash substitution emitted a literal double backslash (`'\\textbackslash '` in a
+   single-quoted MATLAB string is two backslashes, never collapsed by `fprintf %s`); fixed to
+   `'\textbackslash '`, plus added the four still-missing LaTeX-special characters
+   (`$ { } ~ ^`) `escapeTex_` never covered. (c) *Low* — the forbidden-Stage-2-term check was
+   case-partial (`[Jj]oint` etc. would not catch an all-caps heading); now checked via `regexpi`
+   with plain lower-case patterns, preserving the `disjoint`/`adjoint` word-boundary exemption.
+   (d) *Low* — that same check ran over the WHOLE rendered document, including
+   `\includegraphics{...<stem>...}` lines, where `stem` is a config-derived filename that could
+   incidentally contain "joint" (`multiAsset.mode='joint'` is a legitimate value for the
+   unrelated centralized architecture) — an incidental filename collision would have thrown and
+   silently dropped the entire report via `ReportRunner`'s own catch; now `\includegraphics`
+   lines are excluded before matching. (e) *Low* — `buildLinkAccounting`'s `perObservable`
+   roll-up and the `unitsMatchContract` cross-check (the only signal that would expose an `m`
+   vs `m/s` contract break for the shared `OneWayInterSatelliteObservationRecord` class) were
+   computed but never rendered; a new "Roll-up by observable" subsection and a per-row units
+   line now surface both. (f) *Low* — the remote-product-age table silently showed a header-only
+   table with no explanatory sentence under `linkUpdateEnabledButNoRecordConsumed` (every row's
+   `deliveredRecords==0`), the same failure mode already guarded against for the ledger-disabled
+   case; now prints an explicit sentence in that case too. (g) *Test-strength note, not a code
+   bug* — the 4-observable accounting sweep in `test_independent_fleet_stage2_reporting.m` could
+   have passed vacuously had canonicalization silently rejected every record for three of the
+   four observables (both tally and ledger keys would then agree on the sentinel
+   `asset:unattributed`); confirmed by direct execution this was NOT happening, but the test now
+   also pins `ownerConsumedRecords>0` and the canonical `spacecraft:1` owner label per observable
+   so a future regression cannot hide behind a reconciled-but-empty result. Independently
+   verified by the reviewer and found correct, not merely asserted: the `asset:N`→`spacecraft:N`
+   canonicalization in `linkAttributionFromRecord_` traced correct for all three sanctioned
+   record classes (their owner/remote fields are all `sprintf('asset:%d',...)`-formatted at the
+   source); `buildLinkAccounting`'s outer join is a true union with no silently-dropped key;
+   promoting `emptyObservableOwnerGroup`/`finalizeObservableOwnerGroup` to public on
+   `DistributedDeliveryLedger` (a mid-implementation deviation from the original design, needed
+   because `DistributedFleetReportingContract` requires cross-class access MATLAB private statics
+   cannot grant) introduces no new way to mutate a ledger entry, since neither method touches
+   `entries_`/`order_`; `EstimatorEligibleEndpointStateProduct.m` is confirmed a true no-op in
+   the final diff; every plan invariant (1/4/5/9) holds. All fixes re-verified: the full
+   21-file regression suite (20 pre-existing plus the new Section 2.5 file) re-run and passes; a
+   real `ReportRunner.runSingle` round trip at 120 s duration confirms both the bounded-line-
+   length fix and `forbiddenTermCheckPassed=true`.
 
 ### Stage-2 tests
 
