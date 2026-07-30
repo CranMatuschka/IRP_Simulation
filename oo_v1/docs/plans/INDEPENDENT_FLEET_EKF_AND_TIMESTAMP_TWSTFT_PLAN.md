@@ -1,6 +1,6 @@
 # Independent Per-Satellite EKF, Distributed ISL, and Timestamp TWSTFT Plan
 
-**Status:** living roadmap. Stage 1 was implemented and verified on 2026-07-29. Stage 2 Sections 2.0 (protocol contract), 2.1 (generic communication interfaces), and 2.2 (conservative correlation policy) were implemented and verified on 2026-07-29. Section 2.3.1 (the coherent transponded-PN two-way code range adapter, the first source-specific adapter) was implemented and verified end-to-end on 2026-07-30: a real 2-asset fleet run through `IndependentFleetCoordinator` with the sanctioned `linkUpdate` tuple enabled generated, delivered, and consumed ISL link updates with a finite/symmetric/PSD owner posterior. Section 2.4 (clock, gauge, and time-alignment guards) was implemented and verified on 2026-07-30: an adapter-agnostic clock-anchor/gauge audit layer, live today on the `coherentTwoWayCodeRange` path and complete for a future time-transfer adapter to call into. Section 2.3.2 (the first-order reciprocal ISL clock-transfer adapter, the second source-specific observable) was implemented and verified end-to-end on 2026-07-30: a real 2-asset fleet run through `IndependentFleetCoordinator` with the `firstOrderReciprocalClockTransfer` sanctioned tuple enabled generated, delivered, and consumed time-transfer link updates with a finite/symmetric/PSD owner posterior, and the two sanctioned observables are proved mutually exclusive (U6). The sanctioned tuple remains default-disabled; Section 2.3 items 3-4 (one-way ISL code/Doppler, ISL carrier) remain not started, as does Section 2.3.3/2.3.4.
+**Status:** living roadmap. Stage 1 was implemented and verified on 2026-07-29. Stage 2 Sections 2.0 (protocol contract), 2.1 (generic communication interfaces), and 2.2 (conservative correlation policy) were implemented and verified on 2026-07-29. Section 2.3.1 (the coherent transponded-PN two-way code range adapter, the first source-specific adapter) was implemented and verified end-to-end on 2026-07-30: a real 2-asset fleet run through `IndependentFleetCoordinator` with the sanctioned `linkUpdate` tuple enabled generated, delivered, and consumed ISL link updates with a finite/symmetric/PSD owner posterior. Section 2.4 (clock, gauge, and time-alignment guards) was implemented and verified on 2026-07-30: an adapter-agnostic clock-anchor/gauge audit layer, live today on the `coherentTwoWayCodeRange` path and complete for a future time-transfer adapter to call into. Section 2.3.2 (the first-order reciprocal ISL clock-transfer adapter, the second source-specific observable) was implemented and verified end-to-end on 2026-07-30: a real 2-asset fleet run through `IndependentFleetCoordinator` with the `firstOrderReciprocalClockTransfer` sanctioned tuple enabled generated, delivered, and consumed time-transfer link updates with a finite/symmetric/PSD owner posterior, and the two sanctioned observables are proved mutually exclusive (U6). Section 2.3 item 3 (one-way ISL code range and Doppler, the third and fourth source-specific observables) was implemented and verified end-to-end on 2026-07-30: `IndependentFleetCoordinator` widened to genuinely N-way (4 sanctioned observables) mutual exclusion, both one-way observables run end-to-end generating/delivering/consuming real link updates with a finite/symmetric/PSD owner posterior. The sanctioned tuple remains default-disabled; Section 2.3 item 4 (ISL carrier) remains explicitly blocked pending Stage 3 infrastructure, and Stage 3/4 remain not started.
 
 ## Implementation status — 2026-07-29
 
@@ -452,6 +452,195 @@ propose()`'s `relativeBiasOnly` branch live for the first time.
 6. Two new end-to-end tests: `tests/test_first_order_reciprocal_clock_transfer_link_update_adapter.m` (adapter unit/contract/oracle/error-path coverage) and `tests/test_independent_fleet_time_transfer_sanctioned_link_update_end_to_end.m` (a real 2-asset fleet driven only through `IndependentFleetCoordinator`, sanctioned tuple enabled, generated/delivered/consumed 6 time-transfer link records over 5 epochs with zero rejections and a finite/symmetric/PSD posterior covariance; plus the U6 mutual-exclusion, reciprocity-guard, and disabled-path checks). Full existing Stage-2/Section-2.3.1/2.4 regression suite (13 files) re-run and passes unchanged; the disabled default path and the golden regression suite are both confirmed unaffected (the golden suite's own pre-existing, unrelated failure — traced to commit `509cb62`'s default-scenario redesign predating this work — was independently isolated by re-running the identical gate with this diff stashed, producing byte-identical numbers).
 7. Deliberately not implemented in this pass: `DistributedDeliveryLedger`'s duplicate-session-sequence key (the plan's other named Section 2.0 gap). `TwoWayISLMeasurementBuilder` and `InterSatelliteTimeTransferBuilder` do share one `sessionIdentifier` format for a same-link/same-epoch pair, but Section 2.3.2's own U6 mutual-exclusion gate makes both observables active in the same run unreachable today, so the collision this key would guard against cannot occur yet; adding it now would be validation for a scenario that can't happen rather than a real gap this stage needs closed.
 8. Combined Opus stage-acceptance review (2026-07-30): **APPROVE_WITH_NITS**, one real Medium finding plus three Low findings, all fixed directly in response (no second review round, per the plan's own discipline): (a) *Medium* — `requireSanctionedIslConfiguration_`'s new `firstOrderReciprocalClockTransfer` branch checked only `twoWay.enable`/`timeTransfer.enable`/`includeReciprocityResidual`, never the four persistent-time-transfer-delay config paths `DistributedClockGaugeContract.TimeTransferPersistentDelayConfigPaths_` requires zero — a nonzero `terminalDelayError_s` (or the three sibling keys) passed `validateConfig` cleanly but then silently degraded every delivery to a ledger rejection at runtime (confirmed by execution: `generated=6 delivered=0`), instead of failing at construction like Section 2.3.1's analogous range-branch check; now mirrors that branch exactly, re-verified to fail at `initialize()` as expected. (b) *Low* — `args.configurationSnapshot`'s fail-closed guard in `LinkObservationDelivery.propose` accepted a bare `struct()`, silently vacuating every path lookup it exists to gate; now additionally requires a `measurements` field. (c) *Low* — the new `calibrationValidFromLocalTag_s`/`calibrationValidUntilLocalTag_s` fields were write-only (declared but never read for containment); `requireTimeTransferCalibrationProvenance` now asserts `referenceLocalClockTag_s` actually lies within its own declared interval (a new `calibrationValidityIntervalExpired` rejection code was added and mapped). (d) *Low* — the `ObservablesWithDemonstratedConservativeBound` comment overclaimed that admitting an observable requires its own Loewner-domination sweep; softened to state the bound formula is proven once, generically, for arbitrary `H`, and that admission requires only the four premises (Jacobian correctness, noise independence, `R_total==R_ind`, well-posed rank), matching what the plan's Section 2.2 text and the new reference test actually establish. All fixes re-verified: the exact adversarial config from the review (`terminalDelayError_s=1e-9`) now fails at `initialize()`; both new Section 2.3.2 test files plus the full 13-file existing regression suite re-run and pass.
+
+### Section 2.3 item 3 completion record — 2026-07-30
+
+Implements item 3 above: one-way ISL code range and range rate (Doppler) as two new sanctioned
+distributed observables, the third and fourth Section 2.3 observables. This is the first pair of
+observables sharing one physical record class, and the first non-metre observable (`oneWayDoppler`,
+m/s), so it also widens several previously two-observable-only contracts to genuinely N-way.
+
+1. `revgnss.OneWayInterSatelliteRangingModel` (new) — pure closed-form kernel (no cfg, no truth,
+   no I/O). Both `oneWayCodeRange` (`rho+b_r-b_t`) and `oneWayRangeRate` (`rho_dot+bdot_r-bdot_t`)
+   are exactly frame-invariant (verified by rotating both endpoints' positions/velocities by an
+   arbitrary rotation about the origin and confirming the predicted value is unchanged to
+   round-off), so no ECEF→ECI bridge is needed, for a different reason than Section 2.3.2's
+   (there the partials were zero; here the observable itself is provably rotation-invariant).
+   `geometryPartials` returns the receiver-side closed forms `dRange_dReceiverPosition=u'` and,
+   for the Doppler case, `dRangeRate_dReceiverPosition = deltaVelocity'*(I-u*u')/rho` — the
+   component of relative velocity perpendicular to the line of sight, divided by range. This is
+   the term the legacy `revgnss.ISLMeasurementBuilder`'s Doppler row omits entirely (a
+   velocity-only partial); the plan explicitly required it be included or a declared/tested
+   approximation demonstrated, so it is included, not approximated — verified against an
+   independent five-point finite-difference oracle for all 14 columns of both observables at
+   every role, and separately verified exactly orthogonal to the line-of-sight unit vector and
+   exactly antisymmetric between owner/remote.
+2. `revgnss.OneWayInterSatelliteObservationRecord` (new) — ONE record class for BOTH observables
+   (a frozen `(oneWayCodeRange,m,m^2)`/`(oneWayRangeRate,m/s,m^2/s^2)` type triple), since code and
+   range-rate are two processed products of one physical one-way transmission sharing every
+   identity/terminal/timing/calibration field; the observable-level separation that matters
+   (owner, consumption, Jacobian, bound admission) is enforced where that machinery already
+   lives. `lightTimeCorrectionApplied`/`leverArmRateTermApplied`/`broadcastEphemerisProductApplied`
+   are fail-closed model declarations the constructor refuses unless `false` — the "no persistent/
+   piecewise-constant error" claim (invariant 8) is carried by the datum itself, not a comment.
+3. `revgnss.OneWayInterSatelliteObservationBuilder` (new, truth-reading) — mirrors
+   `InterSatelliteTimeTransferBuilder`'s structure; contains NO broadcast-ephemeris-product
+   mechanism at all (unlike the legacy `ISLMeasurementBuilder`, whose `productBias_` folds a
+   piecewise-constant product error into `R` every epoch — exactly the pattern the plan forbids
+   here). `revgnss.InterSatelliteRFLinkModel` gains one new additive public method,
+   `evaluateOneWayLeg` (delegates to the existing private `evaluateLeg_`, no formula duplicated,
+   no round-trip halving applied — verified to match `evaluate()`'s own forward-leg computation
+   bit-for-bit and to reproduce the round-trip composite exactly when forward=return with unit
+   correlation); `cfg.measurements.isl.oneWay.code.linkBudget.model='physicalRF'` (default
+   `'fixed'`) opts into it for the code sigma. No Doppler sigma model is derived from it: that
+   model has no carrier/frequency-tracking-loop bandwidth or jitter formula, so a real Doppler
+   noise model would require new, unvalidated masterConfig-level physics -- `oneWay.doppler.
+   sigmaSource='declaredConstant'` (frozen single legal value) keeps this honestly scoped out.
+4. `revgnss.OneWayCodeRangeLinkUpdateAdapter` / `revgnss.OneWayDopplerRangeRateLinkUpdateAdapter`
+   (new) — analytic partials throughout, no stencil in either adapter file (the kernel is
+   closed-form for every column); the lever-arm attitude Jacobian dispatches per endpoint's own
+   declared convention exactly as Section 2.3.1's does (`-C*skew(l)` for the tangent convention,
+   `AttitudeKinematics.finiteDiffLeverArmJacobian` for Euler). Owner is always the record's
+   RECEIVER, remote always its TRANSMITTER (`requireTerminalIdentityMatchesRecord` checks only
+   the used terminal/antenna slot per role, since a one-way link is asymmetric by construction).
+5. Units widening (the one real structural change, since `oneWayDoppler` is the first non-metre
+   observable): `revgnss.DistributedLinkUpdateBlock` gains a required `observableRowUnits` field
+   (`'m'`/`'m/s'`) — every existing `_m`/`_m2`/`_mPerErrorUnit` field keeps its frozen v1 spelling
+   unchanged (invariant 1); the two existing adapters (Section 2.3.1/2.3.2) now set
+   `observableRowUnits='m'` explicitly. `DistributedLinkUpdateAdapter` gains `AllowedRowUnits`,
+   `RowUnitsByObservable`, and a `requireUpdateBlock` cross-check that a block's declared units
+   match its own observable's frozen unit — strictly additive, never weaker. `DistributedClockGaugeContract.clockObservabilityAudit`/`requireClockObservability` and
+   `DistributedClockObservabilityAudit` gain a `rowUnits` argument/field (defaulting to `'m'` for
+   every pre-existing call site, so no existing caller needed to change) — the certificate states
+   its own unit explicitly rather than asserting metres from a field-name suffix.
+   `SplitCovarianceIntersectionBound` needed NO signature change: the bound is pure math and
+   exactly unit-covariant (scaling `H_owner`/`H_remote`/`R_total` by any `alpha>0` leaves the
+   reported posterior covariance invariant and scales the gain by `1/alpha`), so only its header
+   gained one sentence stating that, backed by a new companion unit-covariance subtest.
+6. `revgnss.DistributedLinkUpdateAdapter` also gains `requireProcessedObservableTypeSupportedForObservable`
+   (called from `LinkObservationDelivery.propose`, right after the existing class-level check) —
+   closes the one hole the shared record class would otherwise open: a `oneWayRangeRate` record
+   proposed under `observableIdentifier='oneWayCode'` is refused AT PROPOSE TIME with a dedicated
+   reason code, not later as a generic `observablePredictionFailed` ledger rejection (verified by
+   a dedicated test). `ClockClaimByObservable` gains `oneWayCode`/`oneWayDoppler` →
+   `'notAClockObservable'` — neither makes a `relativeBiasOnly`-shaped claim (a one-way
+   pseudorange's position columns are nonzero and dominant, and its clock/range content is not
+   separable within one row, same reasoning as `coherentTwoWayCodeRange`'s existing entry; a
+   Doppler row's drift columns are `+-1` but its position/velocity columns are also nonzero, so
+   no `'relativeDriftOnly'` claim exists either) — no clock guard is weakened, every
+   pair/datum/provenance check still runs unconditionally on every delivery.
+7. `revgnss.IndependentFleetCoordinator` widened from 2-way to genuinely N-way (4 sanctioned
+   observables) throughout: `sanctionedObservables` list, `adapterClassForObservable_`,
+   `generateValidateDeliverLinkRecords_`/`applyOneLinkUpdate_` dispatch (kept as explicit
+   if/switch chains extending the proven Section 2.3.2 pattern, not a table-driven descriptor
+   refactor -- the smaller, more directly reviewable change given the codebase's own established
+   if/elseif idiom throughout this file), `islObservableRequested_` (now three tiers: always-
+   forbidden legacy paths, family-shared parent enables exempt under any sibling observable,
+   leaf enables exempt only under their own observable -- proved byte-identical for the two
+   previously-reachable tuples and correct for the two new ones by direct derivation), and
+   `requireSanctionedIslConfiguration_` (new one-way branch: persistent terminal-delay zero
+   checks mirroring the time-transfer precedent exactly; the legacy broadcast-ephemeris product
+   `measurements.isl.product.enable` refused by name, since `OneWayInterSatelliteObservationBuilder`
+   never reads it and enabling it here would be silently ignored -- but its `sigmaPos_m`/etc
+   siblings are deliberately NOT required zero, since masterConfig's own shipped defaults for
+   those are nonzero and `ISLMeasurementBuilder.productCfg_` itself already zeroes them
+   unconditionally whenever `enable=false`, so requiring literal zero would only force users to
+   override four keys that were never going to be read, not close a real gap -- verified as a
+   real distinction, not assumed, by tracing the legacy builder's own code and re-running the
+   probe both ways). New `terminalGeometryFromOneWayRecord_` helper (role-asymmetric: owner uses
+   only the record's receive slot, remote only its transmit slot; the unused slot carries a
+   frozen sentinel and zero lever arm, matching Section 2.3.2's own precedent).
+   `IndependentFleetScenarioFactory` forces `isl.oneWay.*` off on every leaf alongside the
+   existing `isl.twoWay.*` forcing.
+8. New `masterConfig.m` subtree `measurements.isl.oneWay.*` (enable/code/doppler/terminalGeometry/
+   schedule/calibration), entirely separate from the legacy `measurements.isl.code/doppler/
+   carrier/product.*` keys the forbidden `ISLMeasurementBuilder` routing owns — the two subtrees
+   can never be co-activated (`islObservableRequested_`'s always-forbidden tier still refuses
+   every legacy leaf toggle regardless of which observable is sanctioned, proved by a dedicated
+   6-path test). Every new key defaults off/zero; the disabled path and golden suite are both
+   confirmed unaffected.
+9. Two new end-to-end test files: `tests/test_one_way_isl_link_update_adapters.m` (11 subtests:
+   contract compliance for both observables, all-14-column analytic-vs-five-point-oracle proof
+   for both, the Doppler position-column nonzero-and-orthogonal proof, the code position-column
+   line-of-sight proof, clock-column signs plus the `notAClockObservable` verdict, exact
+   frame-invariance under an arbitrary rotation, the wrong-observable-type propose-time refusal,
+   and the RF-sigma delegation proof) and `tests/test_independent_fleet_one_way_sanctioned_link_
+   update_end_to_end.m` (10 subtests: both observables run end-to-end through the coordinator
+   generating/delivering/consuming 6 records over 5 epochs with zero rejections; a finite/
+   symmetric/PSD posterior; the N-way mutual-exclusion gate as 12 probes across all four
+   observables; the 6-path legacy-builder-refusal proof; the broadcast-product/persistent-
+   terminal-delay/shared-receiver/disabled-path checks). Full existing regression suite (17
+   files spanning Stage 1, Stage 2, and Sections 2.3.1/2.3.2/2.4) re-run and passes; three
+   pre-existing tests needed updates because they had pinned exact values of constants this
+   stage legitimately widens (`test_stage2_clock_gauge_and_time_alignment_guards.m`'s
+   `ClockClaimByObservable`/`AllowedObservables`/`RegisteredAdapterClasses` assertions,
+   `test_stage2_communication_interfaces.m`'s adapter-count assertion, `test_stage2_
+   conservative_correlation_policy.m`'s `ObservablesWithDemonstratedConservativeBound` assertion
+   and its shared block fixture missing the new required field) — not a regression, the same
+   "forward-looking placeholder becomes real" pattern Section 2.3.2 already established.
+10. Real bugs found by execution, not review, and fixed directly: (a) a five-point finite-
+    difference oracle test tolerance (`1e-6` relative) was tighter than the established
+    precedent's own (`1e-5`, from Section 2.3.1's test) for an attitude-column partial at a
+    ~1km baseline — diagnosed via an explicit step-size convergence study (the FD oracle
+    converges to the analytic value to `3.8e-7` relative at the numerically optimal step and
+    diverges predictably on either side from truncation/round-off error; the analytic closed
+    form was independently re-verified correct to `1.8e-13` in isolation) before concluding the
+    tolerance, not the adapter, was wrong; (b) `measurements.isl.product.enable` was not refused
+    under the sanctioned one-way tuple at all (a genuine gap, fixed); (c) the first version of
+    that same fix incorrectly also required the four `product.sigma*` keys to be literally zero,
+    which broke the plain default fixture (their shipped masterConfig defaults are nonzero) —
+    corrected per point 7 above after tracing why they are actually already inert.
+11. Deliberately not implemented in this pass, matching Section 2.3.2's own precedent: `Distributed
+    DeliveryLedger`'s duplicate-session-sequence key (still unreachable — N-way mutual exclusion
+    makes any same-link/same-epoch identifier collision across observables impossible today), a
+    live persistent one-way terminal-delay calibration state (the owning interface —
+    `DistributedLinkCalibrationState`/`Registry`, the block's own calibration slots — already
+    exists and needs no new design; activating it requires `linkUpdate.calibrationOwnership.
+    policy` to leave `'undeclared'`, a gate this pass does not weaken), and `SimulationToggle
+    Manifest.m` rows for the new keys (the existing manifest-coverage tests do not enforce
+    completeness and none failed without them, so this was scoped out as documentation rather
+    than a functional gap).
+12. Combined Opus stage-acceptance review (2026-07-30): **APPROVE_WITH_NITS**, one real Medium
+    finding plus four Low findings, all fixed directly in response (no second review round): (a)
+    *Medium* — `revgnss.OneWayInterSatelliteObservationBuilder.validateConfig` was never called
+    from anywhere (unlike the two-way/time-transfer builders, which `ConfigFactory.finalizeConfig`
+    registers directly), so every gate inside it (sigma-source/link-budget-model vocabulary,
+    schedule bounds, positive sigmas, link-identity/co-firing uniqueness) was dead code; the
+    reviewer demonstrated four distinct silent-degradation failure modes by execution (an unknown
+    `doppler.sigmaSource` string silently accepted, a case-mismatched `linkBudget.model` silently
+    falling back to the fixed sigma, an inverted schedule window running to completion generating
+    zero observations forever, and a duplicate `linkIdentifier` surfacing only as an *uncaught*
+    ledger error mid-run instead of a clean `initialize()`-time refusal) — now wired into
+    `requireSanctionedIslConfiguration_`'s one-way branch, scoped to the sanctioned tuple only.
+    (b) *Low* — `estimatorOneWayLeverArm_`'s comment falsely claimed to read
+    `measurements.isl.oneWay.terminalGeometry.*` from config; it is a hard-coded literal matching
+    the shipped default, same as the pre-existing `estimatorLeverArm_` precedent — the comment now
+    states that honestly instead of asserting a config read that does not happen. (c) *Low* — the
+    completion record (this document) claimed `SplitCovarianceIntersectionBound` gained a header
+    sentence on unit covariance backed by a companion subtest, but neither existed; both now do —
+    a new "UNIT COVARIANCE" header paragraph (which also honestly notes the acceptance gates'
+    absolute-tolerance floor is NOT scale-invariant at an arbitrarily small measurement
+    covariance, unlike the bound formula itself) and a new `i_unitCovarianceInvariance_` subtest
+    in `tests/test_stage2_conservative_correlation_policy.m` proving
+    `ownerPosteriorCovarianceReported_errorUnit2` is invariant and the gain scales as exactly
+    `1/alpha` under a `{1e-3,1,1e3}` rescaling of `{H_owner,H_remote,R_total}`. (d) *Low* —
+    `masterConfig.m`'s `measurements.isl.oneWay.calibration.productIdentifier` was declared but
+    never read (the builder hard-coded the literal); now wired into
+    `OneWayInterSatelliteObservationBuilder.links_`'s default-link branch. All fixes re-verified:
+    the full 19-file regression suite (17 pre-existing plus the two new Section-2.3-item-3 files)
+    re-run and passes, including one test-expectation update (the shared-receiver-refusal test now
+    correctly expects the builder's own, now-live, more specific co-firing error to fire before
+    the coordinator's own). Independently re-verified by the reviewer and found accurate, not
+    overstated: the Doppler position-column claim (re-derived by hand from the kernel's own
+    formula and matched to the shipped code to 3.8e-20; the legacy `ISLMeasurementBuilder`'s own
+    Doppler row was confirmed by direct reading to omit the term entirely, exactly as claimed),
+    the shared-record-class safety against `DistributedDeliveryLedger`'s one-identifier invariant
+    (the type tag embedded in `observationIdentifier` makes cross-observable collision
+    structurally impossible, and N-way mutual exclusion means only one observable is ever active
+    per run regardless), the `observableRowUnits` widening's exact inertness for the two
+    pre-existing adapters (traced the full consumer chain: the value never enters a numeric
+    expression, only a validated label), and the bound-admission evidence for both new
+    observables meeting the same four-premise bar the two prior admissions required.
 
 ### 2.4 Clock, gauge, and time-alignment guards
 

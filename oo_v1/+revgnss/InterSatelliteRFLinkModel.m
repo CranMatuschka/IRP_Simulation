@@ -7,6 +7,25 @@ classdef InterSatelliteRFLinkModel
     % dynamics errors are outside this model.
 
     methods (Static)
+        function out = evaluateOneWayLeg(spec)
+            % evaluateOneWayLeg  Public single-leg entry point for a ONE-WAY observable
+            % (plan Section 2.3 item 3). `spec` carries exactly the fields evaluateLeg_
+            % already accepts (frequency_Hz, distance_m, losses_dB, integrationTime_s,
+            % modulationTrackingCoefficient, bandwidth_Hz|chipRate_Hz, transmitAntenna,
+            % receiveAntenna, transmitPower_dBW|eirp_dBW,
+            % systemNoiseTemperature_K|receiverGT_dB_per_K, optional TEC_electrons_per_m2).
+            % Delegates to the SAME private evaluateLeg_ that evaluate() uses -- no formula
+            % is duplicated. NO round-trip halving is applied here: the 0.5*sqrt(...)
+            % composite inside evaluate() is the half-round-trip rule (a code-tracking
+            % correlation between the forward and return legs of one round trip) and is
+            % meaningless for a single one-way leg. evaluate() itself is left byte-identical.
+            out = revgnss.InterSatelliteRFLinkModel.evaluateLeg_(spec,[],'oneWay');
+            out.oneWayCodeRangeSigma_m = out.codeRangeSigma_m;
+            out.apparentCodeRange_m = out.vacuumGeometricRange_m + out.plasmaGroupDelay_m;
+            out.assumptions{end+1} = ['This is a ONE-WAY leg: no forward/return halving is ' ...
+                'applied (unlike evaluate(), which reports half of a round-trip path).'];
+        end
+
         function result = evaluate(spec)
             if ~isstruct(spec) || ~isfield(spec, 'forward') || ~isfield(spec, 'return')
                 error('InterSatelliteRFLinkModel:InvalidSpecification', ...

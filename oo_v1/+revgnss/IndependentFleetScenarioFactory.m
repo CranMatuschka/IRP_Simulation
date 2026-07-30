@@ -125,6 +125,17 @@ classdef IndependentFleetScenarioFactory
                         ci.measurements.isl.twoWay.timeTransfer.useInEKF = false;
                     end
                 end
+                if isfield(ci.measurements.isl,'oneWay')
+                    ci.measurements.isl.oneWay.enable = false;
+                    if isfield(ci.measurements.isl.oneWay,'code')
+                        ci.measurements.isl.oneWay.code.enable = false;
+                        ci.measurements.isl.oneWay.code.useInEKF = false;
+                    end
+                    if isfield(ci.measurements.isl.oneWay,'doppler')
+                        ci.measurements.isl.oneWay.doppler.enable = false;
+                        ci.measurements.isl.oneWay.doppler.useInEKF = false;
+                    end
+                end
             end
             if isfield(ci,'measurements') && isfield(ci.measurements,'twstft')
                 ci.measurements.twstft.enable = false;

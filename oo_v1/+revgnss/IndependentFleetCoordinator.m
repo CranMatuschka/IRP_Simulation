@@ -288,14 +288,16 @@ classdef IndependentFleetCoordinator < handle
                 revgnss.DistributedLinkProtocolContract.isFullyRejectedCommonSourceTreatment( ...
                 settings.linkUpdate.commonSourceTreatment);
 
-            % Plan Section 2.3.1/2.3.2: exactly ONE non-disabled configuration is sanctioned at a
-            % time -- coherentTwoWayCodeRange OR firstOrderReciprocalClockTransfer, under
-            % splitCovarianceIntersection, owned by the initiator, every common source still
-            % rejected. Every other combination (including any partial/mixed one, and combining
-            % BOTH sanctioned observables at once -- Section 2.3.2 U6) fails validation; there is
-            % no silent fallback (invariant 6).
+            % Plan Section 2.3.1/2.3.2/2.3-item-3: exactly ONE non-disabled configuration is
+            % sanctioned at a time -- one of coherentTwoWayCodeRange, firstOrderReciprocal
+            % ClockTransfer, oneWayCode, or oneWayDoppler, under splitCovarianceIntersection,
+            % owned by the initiator, every common source still rejected. Every other
+            % combination (including any partial/mixed one, and combining more than one
+            % sanctioned observable at once -- Section 2.3.2 U6, generalised N-way) fails
+            % validation; there is no silent fallback (invariant 6).
             sanctionedObservables = { ...
-                'coherentTwoWayCodeRange','firstOrderReciprocalClockTransfer'};
+                'coherentTwoWayCodeRange','firstOrderReciprocalClockTransfer', ...
+                'oneWayCode','oneWayDoppler'};
             sanctionedActive = settings.linkUpdate.enable && strcmp(ownerPolicy,'initiator') && ...
                 strcmp(correlationPolicy,'splitCovarianceIntersection') && ...
                 any(strcmp(observable,sanctionedObservables)) && commonSourceRejected;
@@ -304,15 +306,15 @@ classdef IndependentFleetCoordinator < handle
                 commonSourceRejected;
             if ~sanctionedActive && ~allDisabled
                 error('IndependentFleetCoordinator:linkUpdateUnavailable', ...
-                    ['Only three distributedEstimator.linkUpdate configurations are supported: ' ...
+                    ['Only five distributedEstimator.linkUpdate configurations are supported: ' ...
                     'fully disabled (enable=false, ownerPolicy=''disabled'', ' ...
                     'correlationPolicy=''disabled'', updateAdapter.observable=''none''), or one ' ...
-                    'of the two sanctioned tuples (enable=true, ownerPolicy=''initiator'', ' ...
+                    'of the four sanctioned tuples (enable=true, ownerPolicy=''initiator'', ' ...
                     'correlationPolicy=''splitCovarianceIntersection'', every ' ...
-                    'commonSourceTreatment entry ''rejected'', and ' ...
-                    'updateAdapter.observable=''coherentTwoWayCodeRange'' or ' ...
-                    '''firstOrderReciprocalClockTransfer''). No partial/mixed combination, and ' ...
-                    'no combination of both sanctioned observables at once, is accepted.']);
+                    'commonSourceTreatment entry ''rejected'', and updateAdapter.observable one ' ...
+                    'of ''coherentTwoWayCodeRange'', ''firstOrderReciprocalClockTransfer'', ' ...
+                    '''oneWayCode'', or ''oneWayDoppler''). No partial/mixed combination, and no ' ...
+                    'combination of more than one sanctioned observable at once, is accepted.']);
             end
             sanctionedObservable = 'none';
             if sanctionedActive
@@ -421,28 +423,31 @@ classdef IndependentFleetCoordinator < handle
             end
             % islUpdateUnavailable: every ISL/TWSTFT path stays unconditionally rejected EXCEPT
             % the ones the ACTIVE sanctioned tuple legitimately needs (measurements.isl.enable,
-            % .twoWay.enable, plus .twoWay.range.enable for coherentTwoWayCodeRange or
-            % .twoWay.timeTransfer.enable for firstOrderReciprocalClockTransfer) -- and even
-            % those are permitted only under a matching sanctionedObservable (Section 2.3.2 U6:
-            % the NON-matching observable's own enable path stays rejected even when the other
-            % is sanctioned). range.useInEKF, timeTransfer.useInEKF, and
-            % multiAsset.keepIslInPerAssetEkf stay rejected always: the distributed path never
-            % routes an ISL row through the joint/per-asset-leaf EKF linearizer.
+            % plus the two-way or one-way family parent enable, plus the one leaf enable for the
+            % selected observable) -- and even those are permitted only under a matching
+            % sanctionedObservable (Section 2.3.2 U6, generalised N-way: every non-matching
+            % observable's own enable path stays rejected even when another is sanctioned).
+            % range.useInEKF, timeTransfer.useInEKF, oneWay.code.useInEKF,
+            % oneWay.doppler.useInEKF, and multiAsset.keepIslInPerAssetEkf stay rejected always:
+            % the distributed path never routes an ISL row through the joint/per-asset-leaf EKF
+            % linearizer.
             if revgnss.IndependentFleetCoordinator.logicalPath_( ...
                     cfg,{'multiAsset','keepIslInPerAssetEkf'},false) || ...
                     revgnss.IndependentFleetCoordinator.logicalPath_( ...
                     cfg,{'measurements','isl','twoWay','range','useInEKF'},false) || ...
                     revgnss.IndependentFleetCoordinator.logicalPath_( ...
                     cfg,{'measurements','isl','twoWay','timeTransfer','useInEKF'},false) || ...
+                    revgnss.IndependentFleetCoordinator.logicalPath_( ...
+                    cfg,{'measurements','isl','oneWay','code','useInEKF'},false) || ...
+                    revgnss.IndependentFleetCoordinator.logicalPath_( ...
+                    cfg,{'measurements','isl','oneWay','doppler','useInEKF'},false) || ...
                     revgnss.IndependentFleetCoordinator.islObservableRequested_( ...
                     cfg,sanctionedObservable)
                 error('IndependentFleetCoordinator:islUpdateUnavailable', ...
-                    ['Only measurements.isl.enable/.twoWay.enable, plus .twoWay.range.enable or ' ...
-                    '.twoWay.timeTransfer.enable matching the active sanctioned observable, may ' ...
-                    'be true. measurements.isl.twoWay.range.useInEKF, ' ...
-                    'measurements.isl.twoWay.timeTransfer.useInEKF, and ' ...
-                    'multiAsset.keepIslInPerAssetEkf must always stay false; every other ' ...
-                    'ISL/TWSTFT observable path must stay disabled.']);
+                    ['Only measurements.isl.enable, plus the two-way or one-way family parent ' ...
+                    'enable, plus the one leaf enable matching the active sanctioned observable, ' ...
+                    'may be true. Every *.useInEKF leaf and multiAsset.keepIslInPerAssetEkf must ' ...
+                    'always stay false; every other ISL/TWSTFT observable path must stay disabled.']);
             end
             if sanctionedActive
                 revgnss.IndependentFleetCoordinator.requireSanctionedIslConfiguration_( ...
@@ -475,10 +480,14 @@ classdef IndependentFleetCoordinator < handle
 
             observable = char(settings.linkUpdate.updateAdapter.observable);
             isTimeTransfer = strcmp(observable,'firstOrderReciprocalClockTransfer');
+            isOneWay = strcmp(observable,'oneWayCode') || strcmp(observable,'oneWayDoppler');
 
             t_s = obj.tVec(epochIndex);
             assets = cellfun(@(sim) sim.asset,obj.localSimulations,'UniformOutput',false);
-            if isTimeTransfer
+            if isOneWay
+                [observations,~,info] = revgnss.OneWayInterSatelliteObservationBuilder.generateObservations( ...
+                    obj.cfg,assets,t_s);
+            elseif isTimeTransfer
                 [observations,~,info] = revgnss.InterSatelliteTimeTransferBuilder.generateObservations( ...
                     obj.cfg,assets,t_s);
             else
@@ -494,7 +503,12 @@ classdef IndependentFleetCoordinator < handle
                 obj.coordinatorGeneratedCount_ = obj.coordinatorGeneratedCount_ + 1;
 
                 try
-                    if isTimeTransfer
+                    if isOneWay
+                        ownerCanonical = revgnss.CanonicalEndpointIdentity.fromRecordIdentifier( ...
+                            record.receiverAssetIdentifier);
+                        remoteCanonical = revgnss.CanonicalEndpointIdentity.fromRecordIdentifier( ...
+                            record.transmitterAssetIdentifier);
+                    elseif isTimeTransfer
                         ownerCanonical = revgnss.CanonicalEndpointIdentity.fromRecordIdentifier( ...
                             record.referenceAssetIdentifier);
                         remoteCanonical = revgnss.CanonicalEndpointIdentity.fromRecordIdentifier( ...
@@ -513,7 +527,12 @@ classdef IndependentFleetCoordinator < handle
                             record.observationIdentifier);
                     end
 
-                    if isTimeTransfer
+                    if isOneWay
+                        terminalGeometry = revgnss.IndependentFleetCoordinator. ...
+                            terminalGeometryFromOneWayRecord_(record,'owner');
+                        remoteTerminalGeometry = revgnss.IndependentFleetCoordinator. ...
+                            terminalGeometryFromOneWayRecord_(record,'remote');
+                    elseif isTimeTransfer
                         terminalGeometry = revgnss.IndependentFleetCoordinator. ...
                             terminalGeometryFromTimeTransferRecord_(record,'owner');
                         remoteTerminalGeometry = revgnss.IndependentFleetCoordinator. ...
@@ -537,11 +556,12 @@ classdef IndependentFleetCoordinator < handle
                         eligibleProduct,t_s,remoteTerminalGeometry);
 
                     % No calibration product object exists for firstOrderReciprocalClockTransfer
-                    % (plan Section 2.3.2: unlike the range observable, its adapter's
-                    % buildUpdateBlock arg schema deliberately carries no calibrationProduct at
-                    % all); calibrationProduct stays [] and is never referenced on that path.
+                    % or the one-way observables (plan Section 2.3.2/2.3-item-3: unlike the range
+                    % observable, their adapters' buildUpdateBlock arg schemas deliberately carry
+                    % no calibrationProduct at all); calibrationProduct stays [] and is never
+                    % referenced on those paths.
                     calibrationProduct = [];
-                    if ~isTimeTransfer
+                    if ~isTimeTransfer && ~isOneWay
                         linkDefinitionIndex = 0;
                         if isfield(linkInfo,'linkDefinitionIndex')
                             linkDefinitionIndex = linkInfo.linkDefinitionIndex;
@@ -638,6 +658,18 @@ classdef IndependentFleetCoordinator < handle
                         'persistentCalibrationTreatment','rejected');
                     [block, ~] = revgnss.FirstOrderReciprocalClockTransferLinkUpdateAdapter. ...
                         buildUpdateBlock(buildArgs);
+                case 'oneWayCode'
+                    buildArgs = struct( ...
+                        'delivery',delivery,'ownerState',ownerState,'remoteState',remoteState, ...
+                        'weightSelectionRule','fixedDeclaredWeights', ...
+                        'persistentCalibrationTreatment','rejected');
+                    [block, ~] = revgnss.OneWayCodeRangeLinkUpdateAdapter.buildUpdateBlock(buildArgs);
+                case 'oneWayDoppler'
+                    buildArgs = struct( ...
+                        'delivery',delivery,'ownerState',ownerState,'remoteState',remoteState, ...
+                        'weightSelectionRule','fixedDeclaredWeights', ...
+                        'persistentCalibrationTreatment','rejected');
+                    [block, ~] = revgnss.OneWayDopplerRangeRateLinkUpdateAdapter.buildUpdateBlock(buildArgs);
                 otherwise
                     error('IndependentFleetCoordinator:adapterClassForObservable', ...
                         'Observable ''%s'' has no registered adapter dispatch.', ...
@@ -887,6 +919,39 @@ classdef IndependentFleetCoordinator < handle
             end
         end
 
+        function geometry = terminalGeometryFromOneWayRecord_(record, role)
+            % terminalGeometryFromOneWayRecord_  A one-way record's transmit/receive
+            % terminal+antenna quadruple is asymmetric by role: the owner (always the record's
+            % RECEIVER) uses only its receive slot; the remote (always the record's
+            % TRANSMITTER) uses only its transmit slot -- OneWayCodeRangeLinkUpdateAdapter/
+            % OneWayDopplerRangeRateLinkUpdateAdapter's requireTerminalIdentityMatchesRecord
+            % checks ONLY that used slot per role. The unused slot still needs a value
+            % (CommunicationEndpointState requires the full quadruple regardless of role), so it
+            % is filled with a frozen sentinel and a zero lever arm -- declared-unused, never a
+            % physics input for either observable (the estimator's own configured lever arm,
+            % never a truth diagnostic value, matches the SAME masterConfig key
+            % OneWayInterSatelliteObservationBuilder.truthEndpoint_ reads, mirroring
+            % estimatorLeverArm_'s own precedent).
+            leverArm = revgnss.IndependentFleetCoordinator.estimatorOneWayLeverArm_();
+            if strcmp(role,'owner')
+                geometry = struct('declared',true, ...
+                    'transmitTerminalIdentifier','terminal:notUsedByOneWayRole', ...
+                    'receiveTerminalIdentifier',record.receiveTerminalIdentifier, ...
+                    'transmitAntennaIdentifier','antenna:notUsedByOneWayRole', ...
+                    'receiveAntennaIdentifier',record.receiveAntennaIdentifier, ...
+                    'transmitPhaseCentreOffset_body_m',zeros(3,1), ...
+                    'receivePhaseCentreOffset_body_m',leverArm);
+            else
+                geometry = struct('declared',true, ...
+                    'transmitTerminalIdentifier',record.transmitTerminalIdentifier, ...
+                    'receiveTerminalIdentifier','terminal:notUsedByOneWayRole', ...
+                    'transmitAntennaIdentifier',record.transmitAntennaIdentifier, ...
+                    'receiveAntennaIdentifier','antenna:notUsedByOneWayRole', ...
+                    'transmitPhaseCentreOffset_body_m',leverArm, ...
+                    'receivePhaseCentreOffset_body_m',zeros(3,1));
+            end
+        end
+
         function geometry = terminalGeometryFromTimeTransferRecord_(record, role)
             % terminalGeometryFromTimeTransferRecord_  The time-transfer record carries one
             % terminal identifier per role (referenceTerminalIdentifier/remoteTerminalIdentifier),
@@ -918,6 +983,17 @@ classdef IndependentFleetCoordinator < handle
             % revgnss.TwoWayISLMeasurementBuilder.terminalGeometry_ feeds to BOTH the truth and
             % estimator endpoints today -- so the shipped configuration has no phase-centre error
             % to begin with; a future config could diverge them without changing this code.
+            leverArm = [0.8;0.2;0.3];
+        end
+
+        function leverArm = estimatorOneWayLeverArm_()
+            % estimatorOneWayLeverArm_  Mirrors estimatorLeverArm_'s exact precedent for the
+            % one-way subtree: a hard-coded literal matching masterConfig's shipped
+            % measurements.isl.oneWay.terminalGeometry.* default (the SAME value
+            % revgnss.OneWayInterSatelliteObservationBuilder.truthEndpoint_ reads from config),
+            % not a config read -- so the shipped configuration has no phase-centre error to
+            % begin with, but a future config could diverge the two without changing this code
+            % (same documented, accepted hazard as estimatorLeverArm_'s own header).
             leverArm = [0.8;0.2;0.3];
         end
 
@@ -961,6 +1037,10 @@ classdef IndependentFleetCoordinator < handle
                     className = 'revgnss.CoherentTwoWayRangeLinkUpdateAdapter';
                 case 'firstOrderReciprocalClockTransfer'
                     className = 'revgnss.FirstOrderReciprocalClockTransferLinkUpdateAdapter';
+                case 'oneWayCode'
+                    className = 'revgnss.OneWayCodeRangeLinkUpdateAdapter';
+                case 'oneWayDoppler'
+                    className = 'revgnss.OneWayDopplerRangeRateLinkUpdateAdapter';
                 otherwise
                     error('IndependentFleetCoordinator:adapterClassForObservable', ...
                         'Observable ''%s'' has no registered adapter dispatch.',char(observable));
@@ -968,18 +1048,18 @@ classdef IndependentFleetCoordinator < handle
         end
 
         function tf = islObservableRequested_(cfg,sanctionedObservable)
-            % islObservableRequested_  measurements.isl.enable/.twoWay.enable, plus
-            % .twoWay.range.enable (coherentTwoWayCodeRange) or .twoWay.timeTransfer.enable
-            % (firstOrderReciprocalClockTransfer), are the paths a sanctioned tuple legitimately
-            % needs (plan Section 2.3.1 / audit A17: measurements.isl.enable is the two-way
-            % builder's OWN parent validation gate, not only the one-way builder's runtime gate)
-            % -- each exempted ONLY when its OWN observable is the active sanctionedObservable
-            % (Section 2.3.2 U6: the non-matching observable's own enable path stays rejected
-            % even when the other is sanctioned), and checked unconditionally otherwise. Every
-            % leaf still forces measurements.isl.enable (and every other measurements.isl.* key)
+            % islObservableRequested_  measurements.isl.enable, plus the two-way or one-way
+            % family parent enable, plus the one leaf enable for the SELECTED observable, are
+            % the paths a sanctioned tuple legitimately needs (plan Section 2.3.1 / audit A17:
+            % measurements.isl.enable is the two-way builder's OWN parent validation gate, not
+            % only the one-way LEGACY builder's runtime gate) -- each exempted ONLY when its own
+            % family/observable is the active sanctionedObservable (Section 2.3.2 U6, generalised
+            % N-way: every non-matching family/observable's own enable path stays rejected even
+            % when another is sanctioned), and checked unconditionally otherwise. Every leaf
+            % still forces measurements.isl.enable (and every other measurements.isl.* key)
             % false regardless of this fleet-level value (IndependentFleetScenarioFactory), so
-            % this can never reach a per-asset-leaf EKF; range.useInEKF and
-            % timeTransfer.useInEKF are checked unconditionally by the caller, not here.
+            % this can never reach a per-asset-leaf EKF; every *.useInEKF leaf is checked
+            % unconditionally by the caller, not here.
             if nargin < 2; sanctionedObservable = 'none'; end
             sanctionedObservable = char(sanctionedObservable);
             paths = { ...
@@ -1007,21 +1087,32 @@ classdef IndependentFleetCoordinator < handle
             end
             isRangeSanctioned = strcmp(sanctionedObservable,'coherentTwoWayCodeRange');
             isTimeTransferSanctioned = strcmp(sanctionedObservable,'firstOrderReciprocalClockTransfer');
-            if ~(isRangeSanctioned || isTimeTransferSanctioned)
-                alwaysExemptOtherwise = { ...
-                    {'measurements','isl','enable'}, ...
-                    {'measurements','isl','twoWay','enable'}, ...
-                    {'measurements','isl','twoWay','range','enable'}, ...
-                    {'measurements','isl','twoWay','timeTransfer','enable'}};
-                for index = 1:numel(alwaysExemptOtherwise)
-                    if revgnss.IndependentFleetCoordinator.logicalPath_( ...
-                            cfg,alwaysExemptOtherwise{index},false)
-                        tf = true;
-                        return
-                    end
-                end
+            isOneWayCodeSanctioned = strcmp(sanctionedObservable,'oneWayCode');
+            isOneWayDopplerSanctioned = strcmp(sanctionedObservable,'oneWayDoppler');
+            anySanctioned = isRangeSanctioned || isTimeTransferSanctioned || ...
+                isOneWayCodeSanctioned || isOneWayDopplerSanctioned;
+            % measurements.isl.enable: exempt under ANY sanctioned observable (shared parent of
+            % both the two-way and one-way distributed subtrees).
+            if ~anySanctioned && revgnss.IndependentFleetCoordinator.logicalPath_( ...
+                    cfg,{'measurements','isl','enable'},false)
+                tf = true;
                 return
             end
+            % measurements.isl.twoWay.enable: exempt under range OR time-transfer only.
+            if ~(isRangeSanctioned || isTimeTransferSanctioned) && ...
+                    revgnss.IndependentFleetCoordinator.logicalPath_( ...
+                    cfg,{'measurements','isl','twoWay','enable'},false)
+                tf = true;
+                return
+            end
+            % measurements.isl.oneWay.enable: exempt under oneWayCode OR oneWayDoppler only.
+            if ~(isOneWayCodeSanctioned || isOneWayDopplerSanctioned) && ...
+                    revgnss.IndependentFleetCoordinator.logicalPath_( ...
+                    cfg,{'measurements','isl','oneWay','enable'},false)
+                tf = true;
+                return
+            end
+            % Per-observable leaf toggles: exempt only under their own tuple.
             if ~isRangeSanctioned && revgnss.IndependentFleetCoordinator.logicalPath_( ...
                     cfg,{'measurements','isl','twoWay','range','enable'},false)
                 tf = true;
@@ -1029,6 +1120,16 @@ classdef IndependentFleetCoordinator < handle
             end
             if ~isTimeTransferSanctioned && revgnss.IndependentFleetCoordinator.logicalPath_( ...
                     cfg,{'measurements','isl','twoWay','timeTransfer','enable'},false)
+                tf = true;
+                return
+            end
+            if ~isOneWayCodeSanctioned && revgnss.IndependentFleetCoordinator.logicalPath_( ...
+                    cfg,{'measurements','isl','oneWay','code','enable'},false)
+                tf = true;
+                return
+            end
+            if ~isOneWayDopplerSanctioned && revgnss.IndependentFleetCoordinator.logicalPath_( ...
+                    cfg,{'measurements','isl','oneWay','doppler','enable'},false)
                 tf = true;
                 return
             end
@@ -1107,9 +1208,86 @@ classdef IndependentFleetCoordinator < handle
                     'terminalCalibrationError_s'},'persistentTimeTransferDelayUnavailableForDistributedRow');
                 requireZeroTimeTransfer_({'measurements','isl','twoWay','calibration','terminalSigma_s'}, ...
                     'persistentTimeTransferDelayUnavailableForDistributedRow');
+            elseif strcmp(sanctionedObservable,'oneWayCode') || strcmp(sanctionedObservable,'oneWayDoppler')
+                if ~revgnss.IndependentFleetCoordinator.logicalPath_( ...
+                        cfg,{'measurements','isl','oneWay','enable'},false)
+                    error('IndependentFleetCoordinator:oneWayNotEnabled', ...
+                        'The sanctioned tuple requires measurements.isl.oneWay.enable=true.');
+                end
+                if strcmp(sanctionedObservable,'oneWayCode')
+                    if ~revgnss.IndependentFleetCoordinator.logicalPath_( ...
+                            cfg,{'measurements','isl','oneWay','code','enable'},false)
+                        error('IndependentFleetCoordinator:oneWayCodeNotEnabled', ...
+                            'The sanctioned tuple requires measurements.isl.oneWay.code.enable=true.');
+                    end
+                else
+                    if ~revgnss.IndependentFleetCoordinator.logicalPath_( ...
+                            cfg,{'measurements','isl','oneWay','doppler','enable'},false)
+                        error('IndependentFleetCoordinator:oneWayDopplerNotEnabled', ...
+                            'The sanctioned tuple requires measurements.isl.oneWay.doppler.enable=true.');
+                    end
+                end
+                % revgnss.OneWayInterSatelliteObservationBuilder.validateConfig is otherwise
+                % NEVER called by anything (unlike TwoWayISLMeasurementBuilder/InterSatelliteTime
+                % TransferBuilder, which ConfigFactory.finalizeConfig registers directly) -- every
+                % gate inside it (sigmaSource/linkBudget.model vocabulary, schedule bounds,
+                % positive sigmas, link-identity/co-firing uniqueness) was previously unreachable
+                % dead code. Scoped to the sanctioned tuple so no other path's behaviour moves.
+                revgnss.OneWayInterSatelliteObservationBuilder.validateConfig(cfg);
+                % Mirrors the time-transfer persistent-delay precedent exactly (Section 2.3.2's
+                % own review finding): without this, a nonzero persistent one-way terminal-delay
+                % source passes validateConfig but every delivery is rejected at propose() time,
+                % silently degrading the sanctioned tuple to zero consumed link updates instead
+                % of failing at construction.
+                requireZeroOneWay_ = @(path,identifierSuffix) revgnss.IndependentFleetCoordinator. ...
+                    requireZeroPath_(cfg,path,identifierSuffix);
+                requireZeroOneWay_({'measurements','isl','oneWay','calibration', ...
+                    'transmitTerminalDelayError_s'},'persistentOneWayDelayUnavailableForDistributedRow');
+                requireZeroOneWay_({'measurements','isl','oneWay','calibration', ...
+                    'receiveTerminalDelayError_s'},'persistentOneWayDelayUnavailableForDistributedRow');
+                requireZeroOneWay_({'measurements','isl','oneWay','calibration','terminalSigma_s'}, ...
+                    'persistentOneWayDelayUnavailableForDistributedRow');
+                % The legacy broadcast-ephemeris product (revgnss.ISLMeasurementBuilder's
+                % productBias_) has no counterpart on this path at all -- OneWayInterSatellite
+                % ObservationBuilder never reads measurements.isl.product.*. Refused by name
+                % rather than left silently inert: a user who enables it here would reasonably
+                % expect it to affect the sanctioned tuple, and it never does (invariant 6 --
+                % unsupported combinations fail validation, they never silently no-op).
+                % Only .enable is checked, matching how ISLMeasurementBuilder.productCfg_ itself
+                % treats these keys: masterConfig's shipped sigmaPos_m/sigmaClock_m/etc defaults
+                % are NOT zero (0.05 m / 0.03 m / ...), but productCfg_ unconditionally zeroes
+                % all four the moment enable=false, so they are already fully inert on the
+                % legacy path too -- requiring them literally zero here would only force users
+                % to override four keys that were never going to be read, not close a real gap.
+                if revgnss.IndependentFleetCoordinator.logicalPath_( ...
+                        cfg,{'measurements','isl','product','enable'},false)
+                    error('IndependentFleetCoordinator:broadcastProductUnavailableForDistributedRow', ...
+                        'measurements.isl.product.enable must be false under the sanctioned one-way tuple.');
+                end
+                if revgnss.IndependentFleetCoordinator.logicalPath_( ...
+                        cfg,{'measurements','isl','lightTime','enable'},false)
+                    error('IndependentFleetCoordinator:lightTimeCorrectionUnavailableForDistributedRow', ...
+                        'measurements.isl.lightTime.enable must be false under the sanctioned one-way tuple.');
+                end
             else
                 error('IndependentFleetCoordinator:sanctionedObservable', ...
                     'requireSanctionedIslConfiguration_ requires a sanctioned observable.');
+            end
+
+            isOneWayFamily = strcmp(sanctionedObservable,'oneWayCode') || ...
+                strcmp(sanctionedObservable,'oneWayDoppler');
+            if isOneWayFamily
+                links = revgnss.OneWayInterSatelliteObservationBuilder.linkDefinitions(cfg);
+                if ~isempty(links)
+                    receiverIndices = [links.receiverAssetIndex];
+                    if numel(unique(receiverIndices)) ~= numel(receiverIndices)
+                        error('IndependentFleetCoordinator:coFiringLinksPerOwner', ...
+                            ['No two enabled one-way links may share the same receiverAssetIndex: ' ...
+                            'a second same-epoch delivery to one owner cannot see the first ' ...
+                            'delivery''s update.']);
+                    end
+                end
+                return
             end
 
             links = revgnss.TwoWayISLMeasurementBuilder.linkDefinitions(cfg);

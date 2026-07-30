@@ -46,6 +46,19 @@ classdef SplitCovarianceIntersectionBound
     % and every declared calibration error (no assumption on any of those cross moments beyond
     % joint PSD-ness). Tightness/optimality (selectGainAndWeights) only affects how CONSERVATIVE
     % the reported bound is, never whether it is a bound at all.
+    %
+    % UNIT COVARIANCE (plan Section 2.3 item 3, admitting the first non-metre observable,
+    % oneWayDoppler): the bound FORMULA above is exactly unit-covariant -- scaling
+    % ownerJacobian/remoteJacobian/totalMeasurementCovariance by any alpha>0 (e.g. converting a
+    % metre-valued row to a metre-per-second one) leaves B(K,omega) invariant under the matching
+    % gain rescaling and is verified directly by
+    % tests/test_stage2_conservative_correlation_policy.m's unit-covariance subtest. This is why
+    % admitting oneWayDoppler required no signature change here. The ACCEPTANCE GATES
+    % (requireLoewnerDominates, the PD/PSD checks) are a separate matter: they use an ABSOLUTE
+    % tolerance floor (tol*max(1,norm(.,'fro'))), so they are not scale-invariant at an
+    % arbitrarily small measurement-covariance magnitude -- not triggered at any shipped sigma
+    % today, but a future sub-micron-scale R could be rejected as numerically non-PD. This is a
+    % known, undocumented-until-now limitation, not a new one introduced by the units widening.
 
     properties (Constant)
         ErrorSignConvention = 'estimateMinusTruth';
@@ -78,9 +91,17 @@ classdef SplitCovarianceIntersectionBound
         % tests/test_first_order_reciprocal_clock_transfer_link_update_adapter.m -- analytic
         % Jacobian correctness vs an independent perturbation oracle, remoteContributionCovariance
         % _m2 == H_remote*P_remote*H_remote' exactly, exact common-mode-blind rank-1 clock
-        % observability audit, and zero position/velocity sensitivity) are the only two entries.
+        % observability audit, and zero position/velocity sensitivity) and 'oneWayCode'/
+        % 'oneWayDoppler' (plan Section 2.3 item 3, revgnss.OneWayCodeRangeLinkUpdateAdapter/
+        % revgnss.OneWayDopplerRangeRateLinkUpdateAdapter; see
+        % tests/test_one_way_isl_link_update_adapters.m -- all-14-column analytic Jacobian
+        % correctness vs an independent five-point oracle for both observables, exact
+        % remoteContributionCovariance_m2 == H_remote*P_remote*H_remote', exact
+        % common-mode/frame-invariance and clock-column sign checks, and a real one-way RF
+        % thermal-noise sigma delegation proof) are the only four entries.
         ObservablesWithDemonstratedConservativeBound = { ...
-            'coherentTwoWayCodeRange','firstOrderReciprocalClockTransfer'};
+            'coherentTwoWayCodeRange','firstOrderReciprocalClockTransfer', ...
+            'oneWayCode','oneWayDoppler'};
     end
 
     methods (Static)

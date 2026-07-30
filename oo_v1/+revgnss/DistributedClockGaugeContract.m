@@ -26,10 +26,27 @@ classdef DistributedClockGaugeContract
         % pre-Section-2.3.1 tests to exercise delivery mechanics unrelated to any specific
         % observable's physics) -- it is vacuously not a clock observable, never reaching a
         % relativeBiasOnly-specific check.
+        % oneWayCode/oneWayDoppler (plan Section 2.3 item 3) are 'notAClockObservable': a
+        % relativeBiasOnly claim asserts the row's ENTIRE information content is the scalar
+        % b_remote-b_owner (the certificate simultaneously demands zero drift sensitivity,
+        % common-mode blindness, and rank-1 clock information for exactly this reason). A
+        % one-way pseudorange is rho(r_owner,r_remote)+b_owner-b_remote: its position columns
+        % are nonzero and dominant, and the range/clock content is not separable within one
+        % row -- same reasoning as coherentTwoWayCodeRange, whose transponder clock RATE enters
+        % the round trip yet makes no clock-difference claim. oneWayDoppler is bias-column-zero
+        % but drift-column +-1, which is not a relativeBiasOnly shape either (no
+        % 'relativeDriftOnly' claim exists, and inventing one here would be false: its position
+        % and velocity columns are also nonzero). No guard is weakened by this: every endpoint
+        % pair/datum/provenance check still runs unconditionally on every delivery regardless
+        % of clockClaim (see requireEndpointPairTimeFrameDatumCompatible below); only the four
+        % relativeBiasOnly-specific checks (which probe time-transfer-record-only fields) are
+        % skipped, exactly as for coherentTwoWayCodeRange.
         ClockClaimByObservable = struct( ...
             'none','notAClockObservable', ...
             'coherentTwoWayCodeRange','notAClockObservable', ...
-            'firstOrderReciprocalClockTransfer','relativeBiasOnly');
+            'firstOrderReciprocalClockTransfer','relativeBiasOnly', ...
+            'oneWayCode','notAClockObservable', ...
+            'oneWayDoppler','notAClockObservable');
         AllowedClockClaims = {'notAClockObservable','relativeBiasOnly'};
         RelativeBiasSignConvention = 'remoteMinusOwner';
         CommonModeBlindnessTolerance = 1e-9;
@@ -270,11 +287,18 @@ classdef DistributedClockGaugeContract
         end
 
         function audit = clockObservabilityAudit(ownerState, remoteState, H_owner, H_remote, ...
-                Rind_m2, observableIdentifier, anchorSummary)
+                Rind_m2, observableIdentifier, anchorSummary, rowUnits)
             % clockObservabilityAudit  Pure compute: builds and returns a validated
             % revgnss.DistributedClockObservabilityAudit. H_owner/H_remote are full-state
             % Jacobian ROW vectors in the endpoints' own covarianceComponentOrder; Rind_m2 is the
-            % scalar independent measurement variance.
+            % scalar independent measurement variance; rowUnits (plan Section 2.3 item 3) is the
+            % row's own declared unit ('m' or 'm/s') -- the certificate states it explicitly
+            % rather than asserting metres from a field-name suffix.
+            if nargin < 8 || isempty(rowUnits); rowUnits = 'm'; end
+            if ~any(strcmp(char(rowUnits),revgnss.DistributedLinkUpdateAdapter.AllowedRowUnits))
+                error('DistributedClockGaugeContract:rowUnitsUnsupported', ...
+                    'rowUnits must be one of the frozen allowed row units.');
+            end
             clockClaim = revgnss.DistributedClockGaugeContract.requireObservableClockClaimDeclared( ...
                 observableIdentifier);
             if size(H_owner,1) ~= 1 || size(H_remote,1) ~= 1 || ~isscalar(Rind_m2)
@@ -371,11 +395,14 @@ classdef DistributedClockGaugeContract
                 'pairClockInformationRank',pairRank, ...
                 'pairClockInformationConditionNumber',pairCond, ...
                 'absoluteClaimPermitted',anchorSummary.pairAbsolutelyAnchored, ...
-                'auditVerdict',verdict);
+                'auditVerdict',verdict, ...
+                'rowUnits',char(rowUnits));
             audit = revgnss.DistributedClockObservabilityAudit.fromValidatedRecord(record);
         end
 
-        function audit = requireClockObservability(block, delivery, ownerState, remoteState, clockClaim)
+        function audit = requireClockObservability(block, delivery, ownerState, remoteState, ...
+                clockClaim, rowUnits)
+            if nargin < 6 || isempty(rowUnits); rowUnits = 'm'; end
             if ~isa(block,'revgnss.DistributedLinkUpdateBlock')
                 error('DistributedClockGaugeContract:blockType', ...
                     'requireClockObservability requires a revgnss.DistributedLinkUpdateBlock.');
@@ -385,7 +412,7 @@ classdef DistributedClockGaugeContract
             audit = revgnss.DistributedClockGaugeContract.clockObservabilityAudit( ...
                 ownerState,remoteState,block.ownerJacobian_mPerErrorUnit, ...
                 block.remoteJacobian_mPerErrorUnit,block.independentMeasurementCovariance_m2, ...
-                delivery.observableIdentifier,anchorSummary);
+                delivery.observableIdentifier,anchorSummary,rowUnits);
         end
     end
 

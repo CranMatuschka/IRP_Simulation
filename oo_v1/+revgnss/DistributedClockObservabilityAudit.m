@@ -30,6 +30,7 @@ classdef DistributedClockObservabilityAudit
         pairClockInformationConditionNumber (1,1) double
         absoluteClaimPermitted (1,1) logical
         auditVerdict (1,:) char
+        rowUnits (1,:) char
     end
 
     methods (Access = private)
@@ -42,7 +43,8 @@ classdef DistributedClockObservabilityAudit
                 'pairAnchorDatumIdentifier','pairAbsolutelyAnchored', ...
                 'ownerClockBiasPriorVariance_m2','remoteClockBiasPriorVariance_m2', ...
                 'independentMeasurementCovariance_m2','pairClockInformationRank', ...
-                'pairClockInformationConditionNumber','absoluteClaimPermitted','auditVerdict'};
+                'pairClockInformationConditionNumber','absoluteClaimPermitted','auditVerdict', ...
+                'rowUnits'};
             supplied = fieldnames(record);
             missing = setdiff(required,supplied);
             unknown = setdiff(supplied,required);
@@ -58,6 +60,10 @@ classdef DistributedClockObservabilityAudit
                     revgnss.DistributedClockObservabilityAudit.AllowedAuditVerdicts))
                 error('DistributedClockObservabilityAudit:auditVerdict', ...
                     'auditVerdict must be a frozen allowed verdict.');
+            end
+            if ~any(strcmp(char(record.rowUnits),revgnss.DistributedLinkUpdateAdapter.AllowedRowUnits))
+                error('DistributedClockObservabilityAudit:rowUnits', ...
+                    'rowUnits must be one of the frozen allowed row units.');
             end
 
             % absoluteClaimPermitted can NEVER be looser than the declarative anchor fact: a
@@ -130,6 +136,7 @@ classdef DistributedClockObservabilityAudit
             obj.pairClockInformationConditionNumber = double(record.pairClockInformationConditionNumber);
             obj.absoluteClaimPermitted = logical(record.absoluteClaimPermitted);
             obj.auditVerdict = char(record.auditVerdict);
+            obj.rowUnits = char(record.rowUnits);
         end
     end
 

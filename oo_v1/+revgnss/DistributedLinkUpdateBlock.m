@@ -31,6 +31,13 @@ classdef DistributedLinkUpdateBlock
     %     contract spelling) is simply not a member of AllowedPersistentCalibrationTreatments and
     %     keeps failing the generic :persistentCalibrationTreatment check -- that is correct, it
     %     is the wrong word for this field, not a schema-unavailability case.
+    %
+    % observableRowUnits (plan Section 2.3 item 3): every field ending _m/_m2/_mPerErrorUnit
+    % keeps its frozen v1 spelling (invariant 1 -- no field is ever renamed) even for a non-
+    % metre observable (a one-way Doppler row is m/s and m^2/s^2); observableRowUnits is the
+    % SOLE authority for what unit those suffixes actually mean on THIS block, and every
+    % consumer that cares about units (revgnss.DistributedClockGaugeContract.
+    % clockObservabilityAudit) is told it explicitly rather than assuming metres from the name.
 
     properties (SetAccess = immutable)
         observationIdentifier (1,:) char
@@ -60,6 +67,8 @@ classdef DistributedLinkUpdateBlock
         calibrationMappingJacobian_mPerCalibrationUnit (:,:) double
         calibrationStateUnits (1,:) cell
         persistentCalibrationReferenceLocalTag_s (1,1) double
+        % --- Section 2.3 item 3 addition ---
+        observableRowUnits (1,:) char
     end
 
     methods
@@ -75,7 +84,7 @@ classdef DistributedLinkUpdateBlock
                 'covarianceGroupIdentifiers','correlationPolicy','weightSelectionRule', ...
                 'commonSourceContributionCovariances_m2', ...
                 'calibrationMappingJacobian_mPerCalibrationUnit','calibrationStateUnits', ...
-                'persistentCalibrationReferenceLocalTag_s'};
+                'persistentCalibrationReferenceLocalTag_s','observableRowUnits'};
             supplied = fieldnames(record);
             missing = setdiff(required,supplied);
             unknown = setdiff(supplied,required);
@@ -165,6 +174,12 @@ classdef DistributedLinkUpdateBlock
                     isfinite(record.coordinateEventEpoch_s))
                 error('DistributedLinkUpdateBlock:coordinateEventEpoch', ...
                     'coordinateEventEpoch_s must be a finite scalar.');
+            end
+
+            rowUnits = char(record.observableRowUnits);
+            if ~any(strcmp(rowUnits,revgnss.DistributedLinkUpdateAdapter.AllowedRowUnits))
+                error('DistributedLinkUpdateBlock:observableRowUnits', ...
+                    'observableRowUnits must be one of the frozen allowed row units.');
             end
 
             weightSelectionRule = char(record.weightSelectionRule);
@@ -276,6 +291,7 @@ classdef DistributedLinkUpdateBlock
             obj.calibrationMappingJacobian_mPerCalibrationUnit = calibrationJacobian;
             obj.calibrationStateUnits = cellfun(@char,calibrationUnits,'UniformOutput',false);
             obj.persistentCalibrationReferenceLocalTag_s = double(referenceLocalTag);
+            obj.observableRowUnits = rowUnits;
         end
     end
 

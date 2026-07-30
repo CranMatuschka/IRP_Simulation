@@ -15,7 +15,8 @@ classdef LinkObservationDelivery
     properties (Constant)
         AllowedPhysicalRecordClasses = { ...
             'revgnss.InterSatelliteObservationRecord', ...
-            'revgnss.InterSatelliteTimeTransferObservationRecord'};
+            'revgnss.InterSatelliteTimeTransferObservationRecord', ...
+            'revgnss.OneWayInterSatelliteObservationRecord'};
         AllowedOwnerPolicies = {'disabled','initiator'};
         AllowedRoleReversalPolicies = {'disabled','separateScheduledSession'};
         AllowedRemoteProductPropagationPolicies = {'frozenSameEpochOnly'};
@@ -43,7 +44,7 @@ classdef LinkObservationDelivery
             'timeTransferTimestampMismatch','rawTimestampTagsClaimUnsupported', ...
             'timeTransferModeUnsupported','calibrationValidityMissing', ...
             'persistentTimeTransferDelayUnowned','calibrationTemporalProvenanceMissing', ...
-            'calibrationValidityIntervalExpired'};
+            'calibrationValidityIntervalExpired','processedObservableTypeNotSupportedForObservable'};
     end
 
     properties (SetAccess = immutable)
@@ -142,6 +143,8 @@ classdef LinkObservationDelivery
             end
             revgnss.DistributedLinkUpdateAdapter.requireRecordClassSupportedForObservable( ...
                 args.observableIdentifier,class(record));
+            revgnss.DistributedLinkUpdateAdapter.requireProcessedObservableTypeSupportedForObservable( ...
+                args.observableIdentifier,record.processedObservableType);
             treatment = char(args.persistentCalibrationTreatment);
             if ~any(strcmp(treatment, ...
                     revgnss.DistributedLinkUpdateAdapter.AllowedPersistentCalibrationTreatments))
@@ -420,7 +423,9 @@ classdef LinkObservationDelivery
                 'DistributedClockGaugeContract:calibrationTemporalProvenanceMissing', ...
                     'calibrationTemporalProvenanceMissing'; ...
                 'DistributedClockGaugeContract:calibrationValidityIntervalExpired', ...
-                    'calibrationValidityIntervalExpired'};
+                    'calibrationValidityIntervalExpired'; ...
+                'DistributedLinkUpdateAdapter:processedObservableTypeNotSupportedForObservable', ...
+                    'processedObservableTypeNotSupportedForObservable'};
             row = find(strcmp(map(:,1),errorIdentifier),1);
             if isempty(row)
                 error('LinkObservationDelivery:rejectionReasonUnmapped', ...
@@ -446,6 +451,17 @@ classdef LinkObservationDelivery
                 % exactly as 'transponder' does for the range record.
                 ownerField = 'referenceAssetIdentifier';
                 remoteField = 'remoteAssetIdentifier';
+                return
+            end
+            if strcmp(recordClass,'revgnss.OneWayInterSatelliteObservationRecord') && ...
+                    strcmp(ownerPolicy,'initiator')
+                % For a one-way link the ownership "initiator" is the endpoint that initiates
+                % the MEASUREMENT -- the receiver forms the observable against its own local
+                % clock and its state (position/clock) dominates the row -- so 'initiator' maps
+                % to the receiver here, asserted by the record's own frozen
+                % sessionInitiatorRole='receiver' rather than inferred.
+                ownerField = 'receiverAssetIdentifier';
+                remoteField = 'transmitterAssetIdentifier';
                 return
             end
             error('LinkObservationDelivery:ownerPolicyNotDefinedForRecordType', ...

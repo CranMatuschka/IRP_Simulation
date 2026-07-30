@@ -2013,6 +2013,42 @@ cfg.measurements.isl.twoWay.timeTransfer.calibration.terminalDelayError_s = 0;
 cfg.measurements.isl.twoWay.timeTransfer.calibration.terminalSigma_s = 0;
 cfg.measurements.isl.twoWay.doppler.enable = false;
 cfg.measurements.isl.twoWay.doppler.useInEKF = false;
+
+% --- One-way distributed ISL code/range-rate (plan Section 2.3 item 3) ---
+% Distinct subtree from the legacy measurements.isl.code/doppler.* keys above, which belong
+% to the forbidden joint/primary-aided ISLMeasurementBuilder routing (never reachable together
+% with these -- IndependentFleetCoordinator refuses both at once). All defaults off/zero: the
+% disabled path is byte-identical.
+cfg.measurements.isl.oneWay.enable = false;
+cfg.measurements.isl.oneWay.signalIdentifier = 'ISL-PN';
+cfg.measurements.isl.oneWay.channelIdentifier = 'PN-1';
+cfg.measurements.isl.oneWay.carrierFrequency_Hz = 26e9;
+cfg.measurements.isl.oneWay.codeChipRate_Hz = 10.23e6;
+cfg.measurements.isl.oneWay.warmup_s = 0;
+cfg.measurements.isl.oneWay.terminalGeometry.transmitPhaseCentreOffset_body_m = [0.8;0.2;0.3];
+cfg.measurements.isl.oneWay.terminalGeometry.receivePhaseCentreOffset_body_m = [0.8;0.2;0.3];
+cfg.measurements.isl.oneWay.schedule.updatePeriod_s = 1;
+cfg.measurements.isl.oneWay.schedule.updatePhase_s = 0;
+cfg.measurements.isl.oneWay.schedule.start_s = 0;
+cfg.measurements.isl.oneWay.schedule.stop_s = 1e12;
+cfg.measurements.isl.oneWay.code.enable = false;
+cfg.measurements.isl.oneWay.code.useInEKF = false;
+cfg.measurements.isl.oneWay.code.sigma_m = 0.30;
+cfg.measurements.isl.oneWay.code.linkBudget.model = 'fixed';   % 'fixed' | 'physicalRF'
+cfg.measurements.isl.oneWay.doppler.enable = false;
+cfg.measurements.isl.oneWay.doppler.useInEKF = false;
+cfg.measurements.isl.oneWay.doppler.sigma_mps = 0.02;
+cfg.measurements.isl.oneWay.doppler.sigmaSource = 'declaredConstant';
+cfg.measurements.isl.oneWay.calibration.productIdentifier = 'isl-one-way-calibration';
+cfg.measurements.isl.oneWay.calibration.validFromLocalTag_s = -1e12;
+cfg.measurements.isl.oneWay.calibration.validUntilLocalTag_s = 1e12;
+% Persistent one-way terminal-delay error sources, gated to exactly zero under the sanctioned
+% distributed tuple (mirrors Section 2.3.2's timeTransfer.calibration.* precedent): a real
+% persistent value is not modelled as a distributed-adapter state today.
+cfg.measurements.isl.oneWay.calibration.transmitTerminalDelayError_s = 0;
+cfg.measurements.isl.oneWay.calibration.receiveTerminalDelayError_s = 0;
+cfg.measurements.isl.oneWay.calibration.terminalSigma_s = 0;
+
 cfg.measurements.isl.timing.enable = false;
 cfg.measurements.isl.timing.mode = 'sameEpoch';
 cfg.measurements.isl.timing.maxIter = 3;

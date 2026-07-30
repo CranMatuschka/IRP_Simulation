@@ -34,6 +34,7 @@ i_blockAssemblyPolicyCouplingAndInertSentinels_();
 i_remoteContributionMustBeRemotePriorOnly_();
 i_calibrationVocabularyAndUnitsRefusals_();
 i_observableHasNoDemonstratedBoundYet_();
+i_unitCovarianceInvariance_();
 i_ledgerCannotCreateTwoConsumptionRecords_();
 i_disabledTogglesLeaveSectionTwoOneUnchanged_();
 fprintf('=== test_stage2_conservative_correlation_policy: ALL PASS ===\n');
@@ -940,21 +941,69 @@ end
 
 % ================================================================================================
 function i_observableHasNoDemonstratedBoundYet_()
-% Section 2.3.1: exactly ONE observable (coherentTwoWayCodeRange) now has a demonstrated bound;
-% every other real or reserved observable identifier -- including 'none' and every entry still
-% in ReservedFutureObservables -- remains refused.
-assert(isequal( ...
-    revgnss.SplitCovarianceIntersectionBound.ObservablesWithDemonstratedConservativeBound, ...
-    {'coherentTwoWayCodeRange'}));
-revgnss.SplitCovarianceIntersectionBound.requireObservableHasDemonstratedBound('coherentTwoWayCodeRange');
-reserved = revgnss.DistributedLinkUpdateAdapter.ReservedFutureObservables;
-for idx = 1:numel(reserved)
-    i_expectError_(@() revgnss.SplitCovarianceIntersectionBound.requireObservableHasDemonstratedBound( ...
-        reserved{idx}),'SplitCovarianceIntersectionBound:observableBoundNotDemonstrated');
+% As of Section 2.3 item 3, exactly FOUR observables have a demonstrated bound
+% (coherentTwoWayCodeRange, firstOrderReciprocalClockTransfer, oneWayCode, oneWayDoppler --
+% Sections 2.3.1/2.3.2/2.3-item-3 respectively); every other real observable identifier --
+% including 'none' -- remains refused. ReservedFutureObservables is now empty (both former
+% entries are implemented), so there is nothing left to probe in that former negative-control
+% loop; 'somethingStillUnimplemented' stands in as a genuinely never-declared identifier.
+demonstrated = revgnss.SplitCovarianceIntersectionBound.ObservablesWithDemonstratedConservativeBound;
+assert(isequal(demonstrated, ...
+    {'coherentTwoWayCodeRange','firstOrderReciprocalClockTransfer','oneWayCode','oneWayDoppler'}));
+for idx = 1:numel(demonstrated)
+    revgnss.SplitCovarianceIntersectionBound.requireObservableHasDemonstratedBound(demonstrated{idx});
 end
+assert(isempty(revgnss.DistributedLinkUpdateAdapter.ReservedFutureObservables));
+i_expectError_(@() revgnss.SplitCovarianceIntersectionBound.requireObservableHasDemonstratedBound( ...
+    'somethingStillUnimplemented'),'SplitCovarianceIntersectionBound:observableBoundNotDemonstrated');
 i_expectError_(@() revgnss.SplitCovarianceIntersectionBound.requireObservableHasDemonstratedBound('none'), ...
     'SplitCovarianceIntersectionBound:observableBoundNotDemonstrated');
-fprintf('  PASS only coherentTwoWayCodeRange has a demonstrated conservative bound\n');
+fprintf('  PASS exactly the four sanctioned observables have a demonstrated conservative bound\n');
+end
+
+% ================================================================================================
+function i_unitCovarianceInvariance_()
+% Plan Section 2.3 item 3 (backing SplitCovarianceIntersectionBound's own "UNIT COVARIANCE"
+% header claim): scaling ownerJacobian/remoteJacobian/totalMeasurementCovariance by alpha>0 --
+% exactly what converting a metre-valued row (coherentTwoWayCodeRange) to a metre-per-second one
+% (oneWayDoppler) does -- must leave ownerPosteriorCovarianceReported_errorUnit2 invariant and
+% scale gain_errorUnitPerM by exactly 1/alpha. State-space priors (Pi, Pj) are NOT rescaled: they
+% live in the state's own units (e.g. m^2 position, rad^2/s^2 angular rate), never the
+% observable's.
+[order,convention] = i_v1TangentOrder_();
+n = numel(order);
+Pi = eye(n); Pi(1,1) = 2.5; Pi(13,13) = 0.8;
+Pj = eye(n); Pj(1,1) = 1.1; Pj(13,13) = 3.3;
+Hi = zeros(1,n); Hi(1) = 0.7; Hi(13) = 1;
+Hj = zeros(1,n); Hj(1) = -0.7; Hj(13) = -1;
+Rtot = 0.6;
+
+args1 = i_boundArgs_(Pi,Hi,Pj,Hj,Rtot,i_emptyCommonRows_(),i_emptyCalibRows_(), ...
+    'splitCovarianceIntersection',order,convention);
+result1 = revgnss.SplitCovarianceIntersectionBound.ownerPosteriorBound(args1);
+
+for alpha = [1e-3, 1, 1e3]
+    argsScaled = args1;
+    argsScaled.ownerJacobian_mPerErrorUnit = alpha*Hi;
+    argsScaled.remoteJacobian_mPerErrorUnit = alpha*Hj;
+    argsScaled.totalMeasurementCovariance_m2 = alpha^2*Rtot;
+    resultScaled = revgnss.SplitCovarianceIntersectionBound.ownerPosteriorBound(argsScaled);
+
+    B1 = result1.ownerPosteriorCovarianceReported_errorUnit2;
+    B2 = resultScaled.ownerPosteriorCovarianceReported_errorUnit2;
+    scaleB = max(1,norm(B1,'fro'));
+    assert(norm(B2-B1,'fro') <= 1e-9*scaleB, ...
+        'alpha=%.0e: ownerPosteriorCovarianceReported_errorUnit2 must be invariant under uniform (H,R) rescaling (diff=%.3e).', ...
+        alpha,norm(B2-B1,'fro'));
+
+    K1 = result1.gain_errorUnitPerM;
+    K2 = resultScaled.gain_errorUnitPerM;
+    scaleK = max(1,norm(K1,'fro'));
+    assert(norm(K2-K1/alpha,'fro') <= 1e-9*scaleK, ...
+        'alpha=%.0e: gain_errorUnitPerM must scale as exactly 1/alpha (diff=%.3e).', ...
+        alpha,norm(K2-K1/alpha,'fro'));
+end
+fprintf('  PASS unit_covariance_invariance (alpha in {1e-3,1,1e3})\n');
 end
 
 % ================================================================================================
@@ -1163,7 +1212,8 @@ record = struct( ...
     'commonSourceContributionCovariances_m2',{{}}, ...
     'calibrationMappingJacobian_mPerCalibrationUnit',zeros(1,0), ...
     'calibrationStateUnits',{{}}, ...
-    'persistentCalibrationReferenceLocalTag_s',NaN);
+    'persistentCalibrationReferenceLocalTag_s',NaN, ...
+    'observableRowUnits','m');
 end
 
 function block = i_externalCalibBlock_(order,convention,calibId,refTag)
