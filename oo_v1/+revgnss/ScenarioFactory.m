@@ -99,6 +99,44 @@ classdef ScenarioFactory
             x0(sm.b_rx_idx)    = asset.clock.getBiasMeters() + clk_pert;
             x0(sm.bdot_rx_idx) = asset.clock.getDriftMetersPerSecond() + cdot_pert;
 
+            if ekf.jointMultiAssetEnabled
+                c_mps = revgnss.Constants.SPEED_OF_LIGHT_MPS;
+                [secondaryPosSigma,secondaryVelSigma,secondaryClockSigma, ...
+                    secondaryClockDriftSigma] = ...
+                    revgnss.ScenarioFactory.secondaryInitialSigmas_(cfg);
+                for assetIdx = 2:ekf.nSpaceAssets
+                    blk = sm.asset(assetIdx);
+                    assetCfg = cfg.assets(assetIdx);
+                    if isfield(cfg.estimator,'initialError')
+                        positionError = pos_pert;
+                        velocityError = vel_pert;
+                        attitudeError = eul_pert;
+                        rateError = omg_pert;
+                        clockError = clk_pert;
+                        driftError = cdot_pert;
+                    else
+                        assetStream = RandStream('mt19937ar','Seed', ...
+                            cfg.simulation.seed + 8700 + assetIdx);
+                        positionError = secondaryPosSigma*randn(assetStream,3,1);
+                        velocityError = secondaryVelSigma*randn(assetStream,3,1);
+                        attitudeError = cfg.estimator.P0_euler_rad*randn(assetStream,3,1);
+                        rateError = cfg.estimator.P0_omega_radps*randn(assetStream,3,1);
+                        clockError = secondaryClockSigma*randn(assetStream,1,1);
+                        driftError = secondaryClockDriftSigma*randn(assetStream,1,1);
+                    end
+                    x0(blk.r) = assetCfg.r_ecef_m(:) + positionError;
+                    x0(blk.v) = assetCfg.v_ecef_mps(:) + velocityError;
+                    x0(blk.euler) = assetCfg.attitude_euler_rad(:) + attitudeError;
+                    x0(blk.omega) = assetCfg.angularRate_body_radps(:) + rateError;
+                    clockBias = 0;
+                    clockDrift = 0;
+                    try; clockBias = assetCfg.clock.bias_s*c_mps; catch; end
+                    try; clockDrift = assetCfg.clock.fracFreq*c_mps; catch; end
+                    x0(blk.b) = clockBias + clockError;
+                    x0(blk.bdot) = clockDrift + driftError;
+                end
+            end
+
             if ekf.estimateTowerClocks
                 % Draw the tower-clock init from the SAME P0 the filter is told
                 % it has, so the initial tower-clock NEES is O(1) instead of exactly 0
@@ -134,6 +172,42 @@ classdef ScenarioFactory
             sigma_bdot_mps = 1e1;   % 10 m/s  initial tower clock-drift uncertainty
         end
 
+        function [positionSigma_m,velocitySigma_mps,clockSigma_m, ...
+                clockDriftSigma_mps] = secondaryInitialSigmas_(cfg)
+            positionSigma_m = cfg.estimator.P0_pos_m;
+            velocitySigma_mps = cfg.estimator.P0_vel_mps;
+            clockSigma_m = cfg.estimator.P0_bRx_m;
+            clockDriftSigma_mps = cfg.estimator.P0_bdotRx_mps;
+            try
+                value = cfg.multiAsset.secondaryOrbit.initSigmaPos_m;
+                if isscalar(value) && isfinite(value) && value >= 0
+                    positionSigma_m = value;
+                end
+            catch
+            end
+            try
+                value = cfg.multiAsset.secondaryOrbit.initSigmaVel_mps;
+                if isscalar(value) && isfinite(value) && value >= 0
+                    velocitySigma_mps = value;
+                end
+            catch
+            end
+            try
+                value = cfg.multiAsset.secondaryClock.initSigma_m;
+                if isscalar(value) && isfinite(value) && value >= 0
+                    clockSigma_m = value;
+                end
+            catch
+            end
+            try
+                value = cfg.multiAsset.secondaryClock.initSigmaDrift_mps;
+                if isscalar(value) && isfinite(value) && value >= 0
+                    clockDriftSigma_mps = value;
+                end
+            catch
+            end
+        end
+
         function P0 = buildInitialCovariance_(cfg, ekf)
             sm = ekf.stateMap;
             nx = ekf.nx;
@@ -146,6 +220,25 @@ classdef ScenarioFactory
 
             P0(sm.b_rx_idx,    sm.b_rx_idx)    = cfg.estimator.P0_bRx_m^2;
             P0(sm.bdot_rx_idx, sm.bdot_rx_idx) = cfg.estimator.P0_bdotRx_mps^2;
+
+            if ekf.jointMultiAssetEnabled
+                [secondaryPosSigma,secondaryVelSigma,secondaryClockSigma, ...
+                    secondaryClockDriftSigma] = ...
+                    revgnss.ScenarioFactory.secondaryInitialSigmas_(cfg);
+                for assetIdx = 2:ekf.nSpaceAssets
+                    blk = sm.asset(assetIdx);
+                    P0(blk.r,blk.r) = eye(3)*secondaryPosSigma^2;
+                    P0(blk.v,blk.v) = eye(3)*secondaryVelSigma^2;
+                    P0(blk.euler,blk.euler) = eye(3)*cfg.estimator.P0_euler_rad^2;
+                    P0(blk.omega,blk.omega) = eye(3)*cfg.estimator.P0_omega_radps^2;
+                    P0(blk.b,blk.b) = secondaryClockSigma^2;
+                    P0(blk.bdot,blk.bdot) = secondaryClockDriftSigma^2;
+                    if ekf.estimateGyroBias && ~isempty(blk.gyroBias)
+                        P0(blk.gyroBias,blk.gyroBias) = ...
+                            eye(3)*ekf.imuP0Bias_^2;
+                    end
+                end
+            end
 
             if ekf.estimateTowerClocks
                 % Shared with buildInitialState_ so the stated 1-sigma and the initial
@@ -261,6 +354,18 @@ classdef ScenarioFactory
                 initSigma = 0.1;
                 try; initSigma = cfg.estimator.srpCoefficient.initSigma; catch; end
                 P0(sm.srpScaleIdx, sm.srpScaleIdx) = initSigma^2;
+            end
+            if ekf.estimateTwoWayCodeCalibrationBias && ...
+                    isfield(sm,'twoWayCodeCalibrationBiasIdx') && ...
+                    ~isempty(sm.twoWayCodeCalibrationBiasIdx)
+                sigmaTurnaround_s = ...
+                    cfg.measurements.isl.twoWay.calibration.turnaroundSigma_s;
+                sigmaTerminal_s = ...
+                    cfg.measurements.isl.twoWay.calibration.terminalSigma_s;
+                sigmaBias_m = 0.5*revgnss.Constants.SPEED_OF_LIGHT_MPS * ...
+                    hypot(sigmaTurnaround_s,sigmaTerminal_s);
+                indices = sm.twoWayCodeCalibrationBiasIdx;
+                P0(indices,indices) = sigmaBias_m^2*eye(numel(indices));
             end
         end
     end

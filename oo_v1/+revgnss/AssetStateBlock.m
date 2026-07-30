@@ -1,5 +1,5 @@
 classdef AssetStateBlock
-    % AssetStateBlock  Chief state-index block for the measurement builders.
+    % AssetStateBlock  Per-spacecraft state indices for measurement builders.
     %
     % Returns the estimated satellite's state indices in the EXACT SHAPES the chief measurement
     % builders (MeasurementModel, Code/CarrierMeasurementBuilder) consume, so a substitution
@@ -13,24 +13,30 @@ classdef AssetStateBlock
     %       .ambiguity    chief float ambiguity         (ambiguityIdx)
     %       .zwd/.iono  per-tower ZWD / slant-iono      (zwdIdx / ionoIdx)
     %
-    % Under the federated design there is exactly ONE estimated satellite per EKF (the chief);
-    % the multi-asset secondary branch of this resolver was retired with the joint EKF (W4).
-
     methods (Static)
-        function blk = forAsset(sm, ~)
-            % forAsset  Chief state-index block. The second argument (asset index) is accepted for
-            % call-site compatibility but is always the chief (single estimated asset per EKF).
+        function blk = forAsset(sm, assetIdx)
+            if nargin < 2 || isempty(assetIdx); assetIdx = 1; end
             blk = struct('r',[],'v',[],'euler',[],'b',[],'bdot',[], ...
                          'ambiguity3d',[],'ambiguity',[],'zwd',[],'iono',[]);
-            blk.r     = sm.r_idx;
-            blk.v     = sm.v_idx;
-            blk.euler = sm.euler_idx;
-            blk.b     = sm.b_rx_idx;
-            blk.bdot  = sm.bdot_rx_idx;
+            if isfield(sm,'asset') && assetIdx >= 1 && assetIdx <= numel(sm.asset)
+                source = sm.asset(assetIdx);
+                fields = fieldnames(blk);
+                for fieldIdx = 1:numel(fields)
+                    name = fields{fieldIdx};
+                    if isfield(source,name); blk.(name) = source.(name); end
+                end
+                return
+            end
+            if assetIdx ~= 1
+                error('AssetStateBlock:assetNotEstimated', ...
+                    'No state block exists for spacecraft %d.', assetIdx);
+            end
+            blk.r = sm.r_idx; blk.v = sm.v_idx; blk.euler = sm.euler_idx;
+            blk.b = sm.b_rx_idx; blk.bdot = sm.bdot_rx_idx;
             if isfield(sm,'ambiguityIdx3d'); blk.ambiguity3d = sm.ambiguityIdx3d; end
-            if isfield(sm,'ambiguityIdx');   blk.ambiguity   = sm.ambiguityIdx;   end
-            if isfield(sm,'zwdIdx');         blk.zwd         = sm.zwdIdx;          end
-            if isfield(sm,'ionoIdx');        blk.iono        = sm.ionoIdx;         end
+            if isfield(sm,'ambiguityIdx'); blk.ambiguity = sm.ambiguityIdx; end
+            if isfield(sm,'zwdIdx'); blk.zwd = sm.zwdIdx; end
+            if isfield(sm,'ionoIdx'); blk.iono = sm.ionoIdx; end
         end
 
         function euler = eulerEst(blk, x_est)

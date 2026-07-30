@@ -20,6 +20,14 @@ classdef ReverseGNSSSimulation < handle
         towers      cell
         measModel   models.measurements.MeasurementModel
         errorChain  models.errors.ErrorChain
+        assetMeasModels cell = {}
+        assetErrorChains cell = {}
+        attitudeSensors
+        observationLedger revgnss.ObservationConsumptionLedger
+        interSatelliteObservations cell = {}
+        interSatelliteTruthDiagnostics cell = {}
+        coherentTwoWayRangeStats struct = struct('generatedRecords',0, ...
+            'eligibleRows',0,'consumedRows',0)
         ekf         filter.ReverseGNSSEKF
         orbitProp
 
@@ -29,6 +37,9 @@ classdef ReverseGNSSSimulation < handle
         nEpochs     (1,1) double  = 0
         tVec        (:,1) double  = []
         isInit      (1,1) logical = false
+        lastTruthEpoch (1,1) double = 0
+        lastEstimatedEpoch (1,1) double = 0
+        runComplete (1,1) logical = false
 
         trackMgr    revgnss.CarrierTrackManager
         islTrackMgr revgnss.IslCarrierTrackManager   % ISL carrier arcs/slips (separate history)
@@ -45,6 +56,14 @@ classdef ReverseGNSSSimulation < handle
                                          'lastClassification','disabled','lastSigmaMin',NaN, ...
                                          'lastSigmaMean',NaN,'lastDistToInt',NaN, ...
                                          'enabled',false,'mode','disabled')  % Cumulative log
+    end
+
+    properties (Access = private)
+        % Staged per-epoch history/report-data write (see runEstimation_'s tail,
+        % commitPendingEpochHistory). Empty except between a deferred-commit epoch
+        % and its commit; runLocalEstimationEpoch stages and commits back-to-back, so
+        % on the legacy run/step path this property is empty at every method boundary.
+        pendingEpochCommit_ = []
     end
 
     properties (Dependent)
@@ -111,6 +130,39 @@ classdef ReverseGNSSSimulation < handle
             for ai = 2:numel(obj.assets)
                 obj.assets{ai}.clock.precomputeNoise(obj.tVec);
             end
+            obj.attitudeSensors = revgnss.AttitudeSensorSuite(obj.cfg,obj.ekf);
+            obj.assetMeasModels = {obj.measModel};
+            obj.assetErrorChains = {obj.errorChain};
+            obj.observationLedger = revgnss.ObservationConsumptionLedger();
+            obj.interSatelliteObservations = {};
+            obj.interSatelliteTruthDiagnostics = {};
+            obj.coherentTwoWayRangeStats = struct('generatedRecords',0, ...
+                'eligibleRows',0,'consumedRows',0);
+            if obj.ekf.jointMultiAssetEnabled && obj.secondaryGroundObservationsEnabled_()
+                for ai = 2:numel(obj.assets)
+                    assetCfg = obj.cfg;
+                    assetCfg.asset = obj.cfg.assets(ai);
+                    assetCfg.scenario.nReceivers = ...
+                        size(obj.assets{ai}.receiverLeverArms_body_m,2);
+                    assetCfg.simulation.seed = obj.cfg.simulation.seed + 1000*ai;
+                    if isfield(assetCfg,'effects') && ...
+                            isfield(assetCfg.effects,'correlatedNoise') && ...
+                            isfield(assetCfg.effects.correlatedNoise,'seed')
+                        assetCfg.effects.correlatedNoise.seed = ...
+                            assetCfg.effects.correlatedNoise.seed + 1000*ai;
+                    end
+                    % Per-spacecraft carrier ambiguity blocks are not yet part of
+                    % the joint state. Code and Doppler remain active.
+                    assetCfg.measurements.carrierMode = 'none';
+                    if isfield(assetCfg.measurements,'carrierPhase')
+                        assetCfg.measurements.carrierPhase.enable = false;
+                    end
+                    chain = models.errors.ErrorChain(assetCfg,assetCfg.simulation.seed);
+                    obj.assetErrorChains{ai} = chain;
+                    obj.assetMeasModels{ai} = ...
+                        models.measurements.MeasurementModel(assetCfg,chain);
+                end
+            end
 
             % Helix swarm truth: physically-real secondary orbits (represented-only).
             % Secondaries ride a bounded CW projected-circular formation around the
@@ -125,6 +177,9 @@ classdef ReverseGNSSSimulation < handle
                 fprintf('  Swarm formation: %s, %d secondaries, baseline=%.0f m, sep=[%.0f, %.0f] m\n', ...
                     fmeta_.mode, fmeta_.nSecondaries, fmeta_.baseline_m, ...
                     fmeta_.minSeparation_m, fmeta_.maxSeparation_m);
+            end
+            if obj.ekf.jointMultiAssetEnabled
+                obj.alignJointInitialState_();
             end
             obj.attInitDone = false;
             obj.attInitInfo = revgnss.AttitudeInitializer.defaultInfo(obj.cfg);
@@ -146,41 +201,42 @@ classdef ReverseGNSSSimulation < handle
             end
             if strcmp(attMode15,'calibratedDifferentialAmbiguity')
                 obj.diffAttStore = revgnss.DiffAttitudeBuilder.init(obj.cfg, obj.nTowers);
-                % Set external initial attitude reference so calibration is not
-                % biased by the initial EKF attitude error. The reference (truth + small noise)
-                % represents a realistic initial attitude from star tracker / coarse ADCS.
-                if strcmp(obj.diffAttStore.referenceMode,'externalInitialAttitude')
-                    sigma_rad = 0;
-                    if isfield(obj.cfg,'estimator') && isfield(obj.cfg.estimator,'diffAtt') && ...
-                            isfield(obj.cfg.estimator.diffAtt,'referenceSigma_deg')
-                        sigma_rad = deg2rad(obj.cfg.estimator.diffAtt.referenceSigma_deg);
-                    end
-                    if obj.errorChain.useIndependentStreams
-                        sAtt = obj.errorChain.registry.persistentStream( ...
-                            models.noise.RngSource.ATT_REF, 0);
-                        refEuler = obj.asset.attitude_euler_rad(:) + sigma_rad * randn(sAtt,3,1);
-                    else
-                        refEuler = obj.asset.attitude_euler_rad(:) + sigma_rad * randn(3,1);
-                    end
-                    obj.diffAttStore = revgnss.DiffAttitudeBuilder.setReference( ...
-                        obj.diffAttStore, refEuler);
-                end
             else
                 obj.diffAttStore = struct('calibrated',false,'nBaselines',0,'nValidBaselines',0);
             end
 
             obj.isInit   = true;
+            obj.lastTruthEpoch = 0;
+            obj.lastEstimatedEpoch = 0;
+            obj.runComplete = false;
 
             nRx = size(obj.asset.receiverLeverArms_body_m, 2);
             doAttPR = isfield(obj.cfg.estimator,'estimateAttitudeFromPseudorange') && ...
                 obj.cfg.estimator.estimateAttitudeFromPseudorange;
 
-            fprintf('  Asset       : %s\n', obj.cfg.asset.name);
-            fprintf('  Space assets: %d (primary estimated: %s)\n', ...
-                obj.cfg.scenario.nSpaceAssets, obj.cfg.asset.name);
+            if obj.ekf.jointMultiAssetEnabled
+                nEstimatedAssets = numel(obj.ekf.stateMap.asset);
+                receiverCounts = cellfun(@(asset) ...
+                    size(asset.receiverLeverArms_body_m,2),obj.assets);
+                fprintf('  Estimator   : centralized joint EKF (full covariance)\n');
+                fprintf('  Space assets: %d configured, %d jointly estimated\n', ...
+                    numel(obj.assets),nEstimatedAssets);
+                if all(receiverCounts == receiverCounts(1))
+                    fprintf('  Receivers/asset: %d\n',receiverCounts(1));
+                else
+                    fprintf('  Receivers/asset: %s\n',mat2str(receiverCounts));
+                end
+                fprintf('  Max ground receiver links/epoch: %d\n', ...
+                    obj.nTowers*sum(receiverCounts));
+            else
+                fprintf('  Estimated asset: %s\n', obj.cfg.asset.name);
+                fprintf('  Space assets: %d (estimated states: 1)\n', ...
+                    obj.cfg.scenario.nSpaceAssets);
+                fprintf('  Receivers   : %d\n', nRx);
+                fprintf('  Max ground receiver links/epoch: %d\n', ...
+                    obj.nTowers*nRx);
+            end
             fprintf('  Towers      : %d\n', obj.nTowers);
-            fprintf('  Receivers   : %d\n', nRx);
-            fprintf('  Max meas/epoch: %d\n', obj.nTowers * nRx);
             fprintf('  Attitude from pseudorange: %d\n', doAttPR);
             fprintf('  Epochs      : %d (dt=%.1f s, dur=%.0f s)\n', ...
                 obj.nEpochs, dt, dur);
@@ -192,6 +248,7 @@ classdef ReverseGNSSSimulation < handle
         % ----------------------------------------------------------------
         function run(obj)
             if ~obj.isInit; obj.initialize(); end
+            if obj.runComplete; return; end
         
             fprintf('Running simulation...\n');
         
@@ -214,7 +271,7 @@ classdef ReverseGNSSSimulation < handle
         
             progressEveryEpochs = max(1, round(progressInterval_s / max(dt_s, eps)));
         
-            for k = 1:obj.nEpochs
+            for k = obj.lastEstimatedEpoch+1:obj.nEpochs
                 obj.step(k);
         
                 doPrint = (k == 1) || ...
@@ -242,21 +299,141 @@ classdef ReverseGNSSSimulation < handle
                 end
             end
         
-            fprintf('Simulation complete. %d epochs processed.\n', obj.nEpochs);
-            obj.summarize();
-            obj.simData.freeze();   % Store is immutable when run() returns; post/report read-only
+            obj.finishRun();
         end
 
         % ----------------------------------------------------------------
         function step(obj, k)
-            % Two real pipeline stages: truth generation writes the true
-            % world state; estimation reads it ONLY through the measurement. No local
-            % variable crosses between them (they communicate via obj.asset / obj.towers
-            % / obj.ekf), so this split is exactly behaviour-preserving.
+            obj.advanceTruthEpoch(k);
+            obj.runLocalEstimationEpoch(k);
+        end
+
+        % ----------------------------------------------------------------
+        function advanceTruthEpoch(obj, k)
+            if ~obj.isInit; obj.initialize(); end
+            obj.validateEpochIndex_(k);
+            if obj.runComplete || obj.lastTruthEpoch >= k || ...
+                    obj.lastEstimatedEpoch ~= k-1
+                error('ReverseGNSSSimulation:truthEpochOrder', ...
+                    'Truth epochs must advance once and only after the previous local update.');
+            end
             t_s = obj.tVec(k);
-            dt  = obj.cfg.simulation.dt_s;
-            obj.generateTruth_(k, t_s, dt);
-            obj.runEstimation_(k, t_s, dt);
+            obj.generateTruth_(k, t_s, obj.cfg.simulation.dt_s);
+            obj.lastTruthEpoch = k;
+        end
+
+        % ----------------------------------------------------------------
+        function runLocalEstimationEpoch(obj, k)
+            % runLocalEstimationEpoch  Predict/update epoch k AND commit its history row.
+            %   Unchanged behaviour: the canonical database row and the EKF history log are
+            %   written immediately after the last update of this epoch, exactly as when the
+            %   two statements sat inline at the end of runEstimation_. Callers that must
+            %   interleave work between the update and the commit use
+            %   runLocalEstimationEpochWithoutHistoryCommit + commitPendingEpochHistory.
+            obj.runLocalEstimationEpochCore_(k);
+            obj.commitPendingEpochHistory();
+            obj.lastEstimatedEpoch = k;
+        end
+
+        % ----------------------------------------------------------------
+        function runLocalEstimationEpochWithoutHistoryCommit(obj, k)
+            % runLocalEstimationEpochWithoutHistoryCommit  Deferred-commit variant.
+            %   Performs everything runLocalEstimationEpoch(k) performs EXCEPT the
+            %   simData.recordEpoch/ekf.logStep write, which is staged and must be released
+            %   by a later commitPendingEpochHistory() call. lastEstimatedEpoch is NOT
+            %   deferred: it means "estimation has been performed for this epoch", which
+            %   EndpointStateProduct.fromLocalEstimator and OwnerLocalEstimatorEndpointProvider
+            %   require to be current when products are published.
+            %
+            %   Purpose (plan Section 2.0.1 phase order): a caller may run the distributed
+            %   epoch-finalization phases (publish/freeze products, deliver link records,
+            %   owner-only link update) BETWEEN the local update and the history commit, so a
+            %   link update that mutates ekf.x/P is described by this epoch's committed row
+            %   instead of being written one epoch late. recordEpoch/logStep read obj.ekf and
+            %   obj.asset as handles, so deferring the call defers the snapshot, not the value.
+            obj.runLocalEstimationEpochCore_(k);
+            obj.lastEstimatedEpoch = k;
+        end
+
+        % ----------------------------------------------------------------
+        function commitPendingEpochHistory(obj)
+            % commitPendingEpochHistory  Perform the staged per-epoch history/report write.
+            %   Exactly the simData.recordEpoch + ekf.logStep pair that used to close
+            %   runEstimation_, using the values staged there and the CURRENT obj.ekf/obj.asset
+            %   handles. Errors if nothing is staged (including a second call without an
+            %   intervening estimation epoch) rather than silently writing a duplicate or
+            %   stale row.
+            if isempty(obj.pendingEpochCommit_)
+                error('ReverseGNSSSimulation:noPendingEpochCommit', ...
+                    ['No epoch history is staged for commit. Call ' ...
+                    'runLocalEstimationEpochWithoutHistoryCommit(k) first; each staged epoch ' ...
+                    'may be committed exactly once.']);
+            end
+            pending = obj.pendingEpochCommit_;
+
+            % Record to canonical database
+            obj.simData.recordEpoch(pending.k, pending.t_s, obj.asset, obj.ekf, ...
+                pending.z, pending.h, pending.H, pending.R, pending.NIS, ...
+                pending.errStruct, pending.visIds, pending.visElevs, ...
+                pending.postfitResidual);
+
+            % EKF history log
+            posErr = norm(obj.ekf.x(obj.ekf.stateMap.r_idx) - obj.asset.r_ecef_m);
+            obj.ekf.logStep(pending.t_s, pending.NIS, posErr);
+
+            obj.pendingEpochCommit_ = [];
+        end
+
+        % ----------------------------------------------------------------
+        function tf = hasPendingEpochHistory(obj)
+            % hasPendingEpochHistory  True between a deferred estimation epoch and its commit.
+            tf = ~isempty(obj.pendingEpochCommit_);
+        end
+
+        % ----------------------------------------------------------------
+        function runLocalEstimationEpochCore_(obj, k)
+            % runLocalEstimationEpochCore_  Shared body of both epoch-estimation entry
+            % points: the epoch-order guards plus runEstimation_, which stages (but no
+            % longer writes) this epoch's history/report data. The caller performs the
+            % commit and advances lastEstimatedEpoch.
+            if ~obj.isInit; obj.initialize(); end
+            obj.validateEpochIndex_(k);
+            if obj.runComplete || obj.lastTruthEpoch ~= k || ...
+                    obj.lastEstimatedEpoch ~= k-1
+                error('ReverseGNSSSimulation:estimationEpochOrder', ...
+                    'Local estimation requires exactly one matching truth epoch.');
+            end
+            if ~isempty(obj.pendingEpochCommit_)
+                error('ReverseGNSSSimulation:uncommittedEpochHistory', ...
+                    ['Epoch %d is still staged for commit. Call commitPendingEpochHistory ' ...
+                    'before estimating the next epoch.'],obj.pendingEpochCommit_.k);
+            end
+            obj.runEstimation_(k, obj.tVec(k), obj.cfg.simulation.dt_s);
+        end
+
+        % ----------------------------------------------------------------
+        function finishRun(obj, printSummary)
+            if nargin < 2; printSummary = true; end
+            if ~obj.isInit || obj.lastEstimatedEpoch ~= obj.nEpochs
+                error('ReverseGNSSSimulation:incompleteRun', ...
+                    'All local epochs must be estimated before finalizing the simulation.');
+            end
+            % Freezing the store while a row is staged would silently drop that epoch.
+            % Unreachable on the legacy run/step path (which commits inline) and on the
+            % coordinator path (which commits before finishRun); loud instead of silent.
+            if ~isempty(obj.pendingEpochCommit_)
+                error('ReverseGNSSSimulation:uncommittedEpochHistory', ...
+                    ['Epoch %d history is staged but not committed. Call ' ...
+                    'commitPendingEpochHistory before finalizing the simulation.'], ...
+                    obj.pendingEpochCommit_.k);
+            end
+            if obj.runComplete; return; end
+            if printSummary
+                fprintf('Simulation complete. %d epochs processed.\n', obj.nEpochs);
+                obj.summarize();
+            end
+            obj.simData.freeze();
+            obj.runComplete = true;
         end
 
         % ----------------------------------------------------------------
@@ -290,6 +467,7 @@ classdef ReverseGNSSSimulation < handle
             % Log truth state
             obj.asset.logState(t_s);
             obj.stepSecondaryAssets_(k, t_s, dt);
+            obj.attitudeSensors.generate(obj.assets,t_s,dt);
         end
 
         % ----------------------------------------------------------------
@@ -307,10 +485,18 @@ classdef ReverseGNSSSimulation < handle
                 towerClockModels = cellfun(@(t) t.clock, obj.towers, ...
                     'UniformOutput', false);
                 omega_gyro = [];
+                omega_gyro_inertial = [];
                 if obj.ekf.estimateGyroBias
-                    omega_gyro = obj.asset.getGyroReading();   % truth gyro reading for [k-1,k]
+                    [omega_gyro,omega_gyro_inertial] = ...
+                        obj.attitudeSensors.gyroscopeInputsForFilter(obj.ekf);
                 end
-                obj.ekf.predict(dt, towerClockModels, t_s - dt, omega_gyro);
+                assetClockModels = {};
+                if obj.ekf.jointMultiAssetEnabled
+                    assetClockModels = cellfun(@(a) a.clock,obj.assets, ...
+                        'UniformOutput',false);
+                end
+                obj.ekf.predict(dt,towerClockModels,t_s-dt,omega_gyro, ...
+                    assetClockModels,omega_gyro_inertial);
             end
 
             % Compute measurements — use getMeasurementState() so quaternionErrorState
@@ -366,10 +552,47 @@ classdef ReverseGNSSSimulation < handle
             end
             errStruct.slipInfo = slipInfo;
 
+            secondaryGroundEnabled = obj.ekf.jointMultiAssetEnabled && ...
+                obj.secondaryGroundObservationsEnabled_();
+            jointGroundInfo = struct('enabled',secondaryGroundEnabled, ...
+                'spacecraft',struct([]),'nRows',0);
+            if secondaryGroundEnabled
+                xMeasurement = obj.ekf.getMeasurementState();
+                for assetIdx = 2:numel(obj.assets)
+                    [zAsset,hAsset,HAsset,RAsset,assetError] = ...
+                        obj.assetMeasModels{assetIdx}.computeMeasurements( ...
+                        obj.assets{assetIdx},obj.towers,xMeasurement,t_s, ...
+                        obj.ekf.stateMap,assetIdx);
+                    if isempty(zAsset); continue; end
+                    rowStart = numel(z) + 1;
+                    z = [z;zAsset];
+                    h = [h;hAsset];
+                    H = [H;HAsset];
+                    R = blkdiag(R,RAsset);
+                    entry = struct('assetIndex',assetIdx,'rowStart',rowStart, ...
+                        'rowCount',numel(zAsset),'errors',assetError);
+                    if isempty(jointGroundInfo.spacecraft)
+                        jointGroundInfo.spacecraft = entry;
+                    else
+                        jointGroundInfo.spacecraft(end+1) = entry;
+                    end
+                    jointGroundInfo.nRows = jointGroundInfo.nRows + numel(zAsset);
+                    if isfield(errStruct,'measType_perRow') && ...
+                            isfield(assetError,'measType_perRow')
+                        labels = assetError.measType_perRow(:);
+                        errStruct.measType_perRow = ...
+                            [errStruct.measType_perRow(:);labels];
+                    end
+                end
+                R = obj.addInterAssetProductCovariance_(R,errStruct,jointGroundInfo);
+            end
+            errStruct.jointGround = jointGroundInfo;
+
             % Append one-way ISL code/Doppler EKF rows after the
             % ground-carrier slip filter so legacy carrier row ordering stays intact.
             [z_isl, h_isl, H_isl, R_isl, islInfo] = revgnss.ISLMeasurementBuilder.build( ...
-                obj.cfg, obj.asset, obj.assets, obj.ekf.x, obj.ekf.stateMap, obj.ekf.nx, t_s);
+                obj.cfg, obj.asset, obj.assets, obj.ekf.getMeasurementState(), ...
+                obj.ekf.stateMap, obj.ekf.nx, t_s);
             if ~isempty(z_isl)
                 z = [z; z_isl];
                 h = [h; h_isl];
@@ -409,19 +632,96 @@ classdef ReverseGNSSSimulation < handle
                 errStruct.observableStack = revgnss.ReverseGnssObservableAdapter.addISLRows( ...
                     errStruct.observableStack, islInfo);
             end
-            [z_2w, h_2w, H_2w, R_2w, twoWayInfo] = revgnss.TwoWayISLMeasurementBuilder.build( ...
-                obj.cfg, obj.asset, obj.assets, obj.ekf.x, obj.ekf.stateMap, obj.ekf.nx, t_s);
+            [twoWayObservations,twoWayTruthDiagnostics,twoWayInfo] = ...
+                revgnss.TwoWayISLMeasurementBuilder.generateObservations( ...
+                obj.cfg,obj.asset,obj.assets,t_s);
+            obj.coherentTwoWayRangeStats.generatedRecords = ...
+                obj.coherentTwoWayRangeStats.generatedRecords + numel(twoWayObservations);
+            for observationIndex = 1:numel(twoWayObservations)
+                obj.interSatelliteObservations{end+1} = ...
+                    twoWayObservations{observationIndex};
+                obj.interSatelliteTruthDiagnostics{end+1} = ...
+                    twoWayTruthDiagnostics{observationIndex};
+                twoWayInfo.linkInfos{observationIndex}.truthDiagnostic = [];
+            end
+            twoWayInfo.truthDiagnostic = [];
+            [z_2w,h_2w,H_2w,R_2w,twoWayInfo] = ...
+                revgnss.TwoWayISLMeasurementBuilder. ...
+                linearizeRecordedObservations( ...
+                obj.cfg,twoWayObservations,obj.ekf.getMeasurementState(), ...
+                obj.ekf.stateMap,obj.ekf.nx,t_s,twoWayInfo);
             if ~isempty(z_2w)
+                obj.coherentTwoWayRangeStats.eligibleRows = ...
+                    obj.coherentTwoWayRangeStats.eligibleRows + numel( ...
+                    twoWayInfo.eligibleObservationRecords);
+                for observationIndex = 1:numel( ...
+                        twoWayInfo.eligibleObservationRecords)
+                    obj.observationLedger.markEligible( ...
+                        twoWayInfo.eligibleObservationRecords{observationIndex}, ...
+                        t_s);
+                end
                 z = [z; z_2w];
                 h = [h; h_2w];
                 H = [H; H_2w];
                 R = blkdiag(R, R_2w);
+                if isfield(errStruct,'measType_perRow') && iscell(errStruct.measType_perRow)
+                    rowTypes = repmat({'islTwoWayRange'},numel(z_2w),1);
+                    if isfield(twoWayInfo,'ekfRowTypes') && ...
+                            numel(twoWayInfo.ekfRowTypes) == numel(z_2w)
+                        rowTypes = twoWayInfo.ekfRowTypes(:);
+                    end
+                    errStruct.measType_perRow = [errStruct.measType_perRow(:);rowTypes];
+                end
             end
             errStruct.islTwoWay = twoWayInfo;
             errStruct.islClockTransfer = revgnss.ISLTimingModel.summarize(obj.cfg, islInfo, twoWayInfo);
             if isfield(errStruct,'observableStack')
                 errStruct.observableStack = revgnss.ReverseGnssObservableAdapter.addTwoWayISLRows( ...
                     errStruct.observableStack, twoWayInfo);
+            end
+
+            [timeTransferObservations,timeTransferTruthDiagnostics, ...
+                    islTimeTransferInfo] = ...
+                revgnss.InterSatelliteTimeTransferBuilder. ...
+                generateObservations(obj.cfg,obj.assets,t_s);
+            for observationIndex = 1:numel(timeTransferObservations)
+                obj.interSatelliteObservations{end+1} = ...
+                    timeTransferObservations{observationIndex};
+                obj.interSatelliteTruthDiagnostics{end+1} = ...
+                    timeTransferTruthDiagnostics{observationIndex};
+                islTimeTransferInfo.linkInfos{observationIndex}. ...
+                    truthDiagnostic = [];
+            end
+            [z_isltt,h_isltt,H_isltt,R_isltt,islTimeTransferInfo] = ...
+                revgnss.InterSatelliteTimeTransferBuilder. ...
+                linearizeRecordedObservations( ...
+                obj.cfg,timeTransferObservations, ...
+                obj.ekf.getMeasurementState(),obj.ekf.stateMap, ...
+                obj.ekf.nx,t_s,islTimeTransferInfo);
+            if ~isempty(z_isltt)
+                for observationIndex = 1:numel( ...
+                        islTimeTransferInfo.eligibleObservationRecords)
+                    obj.observationLedger.markEligible( ...
+                        islTimeTransferInfo. ...
+                        eligibleObservationRecords{observationIndex},t_s);
+                end
+                z = [z;z_isltt];
+                h = [h;h_isltt];
+                H = [H;H_isltt];
+                R = blkdiag(R,R_isltt);
+                if isfield(errStruct,'measType_perRow') && ...
+                        iscell(errStruct.measType_perRow)
+                    errStruct.measType_perRow = [ ...
+                        errStruct.measType_perRow(:); ...
+                        islTimeTransferInfo.ekfRowTypes(:)];
+                end
+            end
+            errStruct.islTimeTransfer = islTimeTransferInfo;
+            if isfield(errStruct,'observableStack')
+                errStruct.observableStack = ...
+                    revgnss.ReverseGnssObservableAdapter. ...
+                    addInterSatelliteTimeTransferRows( ...
+                    errStruct.observableStack,islTimeTransferInfo);
             end
 
             % Tower<->spacecraft two-way time transfer (TWSTFT). Range-cancelled
@@ -491,7 +791,26 @@ classdef ReverseGNSSSimulation < handle
             postfitResidual = [];
 
             if ~isempty(z) && numel(z) >= minMeas
-                [~, nu57_, S57_, NIS] = obj.ekf.update(z_ekf, h_ekf, H_ekf, R_ekf);
+                [K57_, nu57_, S57_, NIS] = obj.ekf.update(z_ekf, h_ekf, H_ekf, R_ekf);
+                if ~isempty(z_2w)
+                    for observationIndex = 1:numel( ...
+                            twoWayInfo.eligibleObservationRecords)
+                        obj.observationLedger.consume( ...
+                            twoWayInfo.eligibleObservationRecords{observationIndex}, ...
+                            t_s);
+                    end
+                    obj.coherentTwoWayRangeStats.consumedRows = ...
+                        obj.coherentTwoWayRangeStats.consumedRows + numel( ...
+                        twoWayInfo.eligibleObservationRecords);
+                end
+                if ~isempty(z_isltt)
+                    for observationIndex = 1:numel( ...
+                            islTimeTransferInfo.eligibleObservationRecords)
+                        obj.observationLedger.consume( ...
+                            islTimeTransferInfo. ...
+                            eligibleObservationRecords{observationIndex},t_s);
+                    end
+                end
 
                 % Separated EKF innovation accounting (physical / gauge / augmented).
                 nPhys57_  = numel(z);
@@ -557,12 +876,26 @@ classdef ReverseGNSSSimulation < handle
                 % Postfit residuals: recompute h with updated EKF state.
                 % Use physical z/errStruct (not augmented) so gauge rows
                 % are not included in postfit RMS statistics.
-                postfitResidual = obj.computePostfitResiduals_(z, visIds, errStruct, t_s);
+                if obj.ekf.jointMultiAssetEnabled
+                    stateCorrection = K57_*nu57_;
+                    postfitResidual = (z-h) - H*stateCorrection;
+                else
+                    postfitResidual = obj.computePostfitResiduals_(z, visIds, errStruct, t_s);
+                end
 
             elseif ~isempty(z) && numel(z) < minMeas && mod(k, 100) == 1
                 fprintf('  [t=%.0f s] EKF update skipped: %d measurements < %d minimum\n', ...
                     t_s, numel(z), minMeas);
             end
+
+            [zStar,hStar,HStar,RStar,starTrackerInfo] = ...
+                obj.attitudeSensors.buildStarTrackerRows(obj.ekf,t_s);
+            if ~isempty(zStar)
+                [~,~,~,starTrackerNis] = obj.ekf.update( ...
+                    zStar,hStar,HStar,RStar);
+                starTrackerInfo.NIS = starTrackerNis;
+            end
+            errStruct.starTracker = starTrackerInfo;
 
             % Differential carrier attitude update (separate sequential update): calibration
             % accumulates delta_phi - model_diff for each baseline, then applies attitude-only
@@ -616,13 +949,26 @@ classdef ReverseGNSSSimulation < handle
                     errStruct.observableStack, errStruct.diffAttRows, obj.ekf.stateMap);
             end
 
-            % Record to canonical database
-            obj.simData.recordEpoch(k, t_s, obj.asset, obj.ekf, z, h, H, R, NIS, ...
-                errStruct, visIds, visElevs, postfitResidual);
-
-            % EKF history log
-            posErr = norm(obj.ekf.x(obj.ekf.stateMap.r_idx) - obj.asset.r_ecef_m);
-            obj.ekf.logStep(t_s, NIS, posErr);
+            % Stage the canonical-database row and the EKF history log for commit. The
+            % values below are frozen here, exactly where the write used to sit; the write
+            % itself is performed by commitPendingEpochHistory, which runLocalEstimationEpoch
+            % calls immediately (legacy behaviour, unchanged) and a distributed coordinator
+            % may call after its epoch-finalization phases. recordEpoch/logStep additionally
+            % read obj.ekf/obj.asset as handles, so a state change made between staging and
+            % commit is described by this epoch's row rather than the next one's.
+            pending = struct();
+            pending.k               = k;
+            pending.t_s             = t_s;
+            pending.z               = z;
+            pending.h               = h;
+            pending.H               = H;
+            pending.R               = R;
+            pending.NIS             = NIS;
+            pending.errStruct       = errStruct;
+            pending.visIds          = visIds;
+            pending.visElevs        = visElevs;
+            pending.postfitResidual = postfitResidual;
+            obj.pendingEpochCommit_ = pending;
         end
 
         % ----------------------------------------------------------------
@@ -633,6 +979,15 @@ classdef ReverseGNSSSimulation < handle
             results.ekfHistory   = obj.ekf.history;
             results.assetHistory = obj.asset.history;
             results.assetHistories = cellfun(@(a) a.history, obj.assets, 'UniformOutput', false);
+            results.attitudeSensorHistory = obj.attitudeSensors.history;
+            results.starTrackerConsistency = struct( ...
+                'NIS',obj.simData.getStarTrackerNIS(), ...
+                'dof',obj.simData.getStarTrackerNISDof(), ...
+                'sequentialUpdate',true);
+            results.interSatelliteObservations = obj.interSatelliteObservations;
+            results.interSatelliteTruthDiagnostics = ...
+                obj.interSatelliteTruthDiagnostics;
+            results.coherentTwoWayRange = obj.coherentTwoWayRangeStats;
             results.tVec         = obj.tVec;
             results.cfg          = obj.cfg;
         end
@@ -769,6 +1124,14 @@ classdef ReverseGNSSSimulation < handle
     end
 
     methods (Access = private)
+        function validateEpochIndex_(obj, k)
+            if ~(isnumeric(k) && isscalar(k) && isfinite(k) && ...
+                    k == round(k) && k >= 1 && k <= obj.nEpochs)
+                error('ReverseGNSSSimulation:epochIndex', ...
+                    'Epoch index must select one initialized simulation epoch.');
+            end
+        end
+
         % ----------------------------------------------------------------
         function postfit = computePostfitResiduals_(obj, z, ~, errStruct, t_s)
             % computePostfitResiduals_  Recompute h with updated EKF state.
@@ -874,9 +1237,20 @@ classdef ReverseGNSSSimulation < handle
             if isfield(errStruct,'islTwoWay') && isstruct(errStruct.islTwoWay) && ...
                     isfield(errStruct.islTwoWay,'ekfRowTypes') && ~isempty(errStruct.islTwoWay.ekfRowTypes)
                 h_2w = revgnss.TwoWayISLMeasurementBuilder.predictEkfRows( ...
-                    obj.cfg, obj.asset, obj.assets, obj.ekf.x, sm, errStruct.islTwoWay);
+                    obj.cfg, obj.asset, obj.assets, obj.ekf.x, sm, ...
+                    errStruct.islTwoWay, t_s);
             end
             M_2w = numel(h_2w);
+            h_isltt = [];
+            if isfield(errStruct,'islTimeTransfer') && ...
+                    isstruct(errStruct.islTimeTransfer) && ...
+                    isfield(errStruct.islTimeTransfer,'nEkfRows') && ...
+                    errStruct.islTimeTransfer.nEkfRows > 0
+                h_isltt = revgnss.InterSatelliteTimeTransferBuilder. ...
+                    predictEkfRows(obj.cfg,obj.ekf.x,sm, ...
+                    errStruct.islTimeTransfer);
+            end
+            M_isltt = numel(h_isltt);
             h_twtt = [];
             if isfield(errStruct,'twoWayTimeTransfer') && isstruct(errStruct.twoWayTimeTransfer) && ...
                     isfield(errStruct.twoWayTimeTransfer,'nEkfRows') && errStruct.twoWayTimeTransfer.nEkfRows > 0
@@ -891,13 +1265,19 @@ classdef ReverseGNSSSimulation < handle
                            z(M_pr+M_dop+1:M_pr+M_dop+M_car) - hc_post; ...
                            z(idxIsl:idxIsl+M_isl-1) - h_isl; ...
                            z(idxIsl+M_isl:idxIsl+M_isl+M_2w-1) - h_2w; ...
-                           z(idxIsl+M_isl+M_2w:idxIsl+M_isl+M_2w+M_twtt-1) - h_twtt];
+                           z(idxIsl+M_isl+M_2w: ...
+                           idxIsl+M_isl+M_2w+M_isltt-1) - h_isltt; ...
+                           z(idxIsl+M_isl+M_2w+M_isltt: ...
+                           idxIsl+M_isl+M_2w+M_isltt+M_twtt-1) - h_twtt];
             else
                 idxIsl = M_pr + 1;
                 postfit = [z(1:M_pr) - h_post_pr; ...
                            z(idxIsl:idxIsl+M_isl-1) - h_isl; ...
                            z(idxIsl+M_isl:idxIsl+M_isl+M_2w-1) - h_2w; ...
-                           z(idxIsl+M_isl+M_2w:idxIsl+M_isl+M_2w+M_twtt-1) - h_twtt];
+                           z(idxIsl+M_isl+M_2w: ...
+                           idxIsl+M_isl+M_2w+M_isltt-1) - h_isltt; ...
+                           z(idxIsl+M_isl+M_2w+M_isltt: ...
+                           idxIsl+M_isl+M_2w+M_isltt+M_twtt-1) - h_twtt];
             end
         end
 
@@ -924,6 +1304,77 @@ classdef ReverseGNSSSimulation < handle
                 end
             end
             errStruct.carrierPhase = cp;
+        end
+
+        function alignJointInitialState_(obj)
+            % Preserve the declared initial estimation error while replacing
+            % provisional secondary ephemerides with the generated fleet truth.
+            sm = obj.ekf.stateMap;
+            haveFormation = isfield(obj.orbitTruthCache,'secondary_r_ecef_m') && ...
+                ~isempty(obj.orbitTruthCache.secondary_r_ecef_m);
+            for assetIdx = 2:obj.ekf.nSpaceAssets
+                secondaryIdx = assetIdx - 1;
+                blk = sm.asset(assetIdx);
+                configured = obj.cfg.assets(assetIdx);
+                positionError = obj.ekf.x(blk.r) - configured.r_ecef_m(:);
+                velocityError = obj.ekf.x(blk.v) - configured.v_ecef_mps(:);
+                if haveFormation && numel(obj.orbitTruthCache.secondary_r_ecef_m) >= secondaryIdx
+                    obj.assets{assetIdx}.setTruthFromOrbit( ...
+                        obj.orbitTruthCache.secondary_r_ecef_m{secondaryIdx}(:,1), ...
+                        obj.orbitTruthCache.secondary_v_ecef_mps{secondaryIdx}(:,1));
+                end
+                obj.ekf.x(blk.r) = obj.assets{assetIdx}.r_ecef_m + positionError;
+                obj.ekf.x(blk.v) = obj.assets{assetIdx}.v_ecef_mps + velocityError;
+            end
+        end
+
+        function tf = secondaryGroundObservationsEnabled_(obj)
+            tf = false;
+            if isfield(obj.cfg,'multiAsset') && ...
+                    isfield(obj.cfg.multiAsset,'towersObserveSecondaries')
+                tf = logical(obj.cfg.multiAsset.towersObserveSecondaries);
+            end
+        end
+
+        function R = addInterAssetProductCovariance_(~,R,primaryErrors,jointInfo)
+            if isempty(jointInfo.spacecraft); return; end
+            records = struct('rowStart',1,'errors',primaryErrors);
+            for recordIdx = 1:numel(jointInfo.spacecraft)
+                records(end+1) = struct( ...
+                    'rowStart',jointInfo.spacecraft(recordIdx).rowStart, ...
+                    'errors',jointInfo.spacecraft(recordIdx).errors); %#ok<AGROW>
+            end
+            for firstIdx = 1:numel(records)-1
+                firstErrors = records(firstIdx).errors;
+                if ~isfield(firstErrors,'towerIdx_perMeas') || ...
+                        ~isfield(firstErrors,'towerClockModelSigma_m')
+                    continue
+                end
+                firstCount = firstErrors.nPseudorange;
+                firstRows = records(firstIdx).rowStart + (0:firstCount-1);
+                for secondIdx = firstIdx+1:numel(records)
+                    secondErrors = records(secondIdx).errors;
+                    if ~isfield(secondErrors,'towerIdx_perMeas') || ...
+                            ~isfield(secondErrors,'towerClockModelSigma_m')
+                        continue
+                    end
+                    secondCount = secondErrors.nPseudorange;
+                    secondRows = records(secondIdx).rowStart + (0:secondCount-1);
+                    for firstRowIdx = 1:firstCount
+                        towerIdx = firstErrors.towerIdx_perMeas(firstRowIdx);
+                        candidates = find(secondErrors.towerIdx_perMeas == towerIdx);
+                        for secondRowIdx = candidates(:)'
+                            covariance = ...
+                                firstErrors.towerClockModelSigma_m(firstRowIdx) * ...
+                                secondErrors.towerClockModelSigma_m(secondRowIdx);
+                            if covariance == 0; continue; end
+                            R(firstRows(firstRowIdx),secondRows(secondRowIdx)) = covariance;
+                            R(secondRows(secondRowIdx),firstRows(firstRowIdx)) = covariance;
+                        end
+                    end
+                end
+            end
+            R = (R+R')/2;
         end
 
         function stepSecondaryAssets_(obj, k, t_s, dt)

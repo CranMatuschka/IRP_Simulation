@@ -1,9 +1,5 @@
 classdef MultiAssetConfig
-    % MultiAssetConfig helpers for represented spacecraft assets.
-    %
-    % Metadata/truth-architecture only: tower-to-spacecraft
-    % measurements still target the primary estimated asset, and ISL/TWSTFT
-    % rows are explicitly absent.
+    % MultiAssetConfig helpers for represented and jointly estimated spacecraft.
 
     methods (Static)
         function cfg = normalize(cfg)
@@ -26,6 +22,11 @@ classdef MultiAssetConfig
                     'cfg.multiAsset.estimateMode must be ''off''|''clocks''|''position''; got ''%s''.', estMode);
             end
             cfg.multiAsset.estimateMode = estMode;
+            jointMode = false;
+            if isfield(cfg,'multiAsset') && isfield(cfg.multiAsset,'mode') && ...
+                    (ischar(cfg.multiAsset.mode) || isstring(cfg.multiAsset.mode))
+                jointMode = strcmpi(char(cfg.multiAsset.mode),'joint');
+            end
 
             if ~isfield(cfg,'asset') || isempty(cfg.asset)
                 error('MultiAssetConfig:missingPrimaryAsset', 'cfg.asset is required as the primary estimated asset.');
@@ -53,14 +54,20 @@ classdef MultiAssetConfig
                 end
             end
             if ~any(estimated); estimated(1) = true; end
-            if any(estimated(2:end))
+            if any(estimated(2:end)) && ~jointMode
                 warning('MultiAssetConfig:estimationGuarded', ...
                     'Multi-asset estimation not yet enabled; only primary asset estimated.');
             end
-            estimated(:) = false; estimated(1) = true;
+            if jointMode
+                estimated(:) = true;
+            else
+                estimated(:) = false; estimated(1) = true;
+            end
             for ai = 1:nAssets
                 cfg.assets(ai).estimated = estimated(ai);
-                if estimated(ai)
+                if jointMode
+                    cfg.assets(ai).stateOwner = 'jointEKF';
+                elseif estimated(ai)
                     cfg.assets(ai).stateOwner = 'primaryEKF';
                 else
                     cfg.assets(ai).stateOwner = 'representedOnly';
@@ -72,9 +79,10 @@ classdef MultiAssetConfig
             cfg.multiAsset.nSpaceAssets = nAssets;
             cfg.multiAsset.estimatedAssetIndex = 1;
             cfg.multiAsset.estimatedAssetName = cfg.assets(1).name;
-            cfg.multiAsset.multiAssetEstimationEnabled = strcmp(estMode,'clocks') && nAssets >= 2;
-            if cfg.multiAsset.multiAssetEstimationEnabled
-                cfg.multiAsset.guardMessage = 'secondary-asset clocks (bias+drift) estimated as EKF states (WP3); positions remain product';
+            cfg.multiAsset.multiAssetEstimationEnabled = jointMode && nAssets >= 2;
+            if jointMode
+                cfg.multiAsset.guardMessage = ...
+                    'all spacecraft navigation, clock, and attitude states share one full-covariance EKF';
             else
                 cfg.multiAsset.guardMessage = 'multi-asset estimation not yet enabled; only primary asset estimated';
             end
@@ -113,7 +121,11 @@ classdef MultiAssetConfig
                 owner = 'representedOnly';
                 if isfield(a,'stateOwner'); owner = a.stateOwner; end
                 clkOwner = 'representedTruthClock';
-                if est; clkOwner = 'primaryEKFReceiverClock'; end
+                if strcmp(owner,'jointEKF')
+                    clkOwner = 'jointEKFReceiverClock';
+                elseif est
+                    clkOwner = 'primaryEKFReceiverClock';
+                end
                 activeLinks = nTwr*nRx*est;
                 if islActiveLinks > 0 && (ai == txIdx || ai == rxIdx)
                     activeLinks = activeLinks + islActiveLinks;
@@ -132,7 +144,8 @@ classdef MultiAssetConfig
             s.guardMessage = cfg.multiAsset.guardMessage;
             s.islRows = revgnss.MultiAssetConfig.islRowCount_(cfg);
             s.twstftRows = 0;
-            s.futureInactiveLinkTypes = {'TWSTFT','relay/transponder'};
+            s.futureInactiveLinkTypes = {'fourTimestampPhysicalTimeTransfer', ...
+                'coherentTwoWayDoppler','relay/transponder'};
             s.assetTable = assetTable;
         end
 
@@ -166,6 +179,22 @@ classdef MultiAssetConfig
                 v = round(sel(:)'); nTx = numel(v(v >= 2 & v <= nAssets));
             else
                 nTx = double(nAssets >= 2);
+            end
+        end
+
+        function count = twoWayConcurrentLinkCount_(cfg)
+            links = revgnss.TwoWayISLMeasurementBuilder.linkDefinitions(cfg);
+            if isempty(links)
+                count = 1;
+                return
+            end
+            phases_s = arrayfun(@(link) ...
+                double(link.schedule.updatePhase_s),links);
+            tolerance = 10*eps(max(1,max(abs(phases_s))));
+            count = 0;
+            for linkIndex = 1:numel(links)
+                count = max(count,sum(abs(phases_s-phases_s(linkIndex)) <= ...
+                    tolerance));
             end
         end
 
@@ -262,8 +291,15 @@ classdef MultiAssetConfig
             n = n + oneWayTypes * nTx;
             if isfield(isl,'twoWay') && isfield(isl.twoWay,'enable') && isl.twoWay.enable
                 tw = isl.twoWay;
-                if isfield(tw,'range') && isfield(tw.range,'enable') && tw.range.enable; n = n + 1; end
-                if isfield(tw,'doppler') && isfield(tw.doppler,'enable') && tw.doppler.enable; n = n + 1; end
+                scheduledLinks = ...
+                    revgnss.MultiAssetConfig.twoWayConcurrentLinkCount_(cfg);
+                if isfield(tw,'range') && isfield(tw.range,'enable') && tw.range.enable; n = n + scheduledLinks; end
+                if isfield(tw,'doppler') && isfield(tw.doppler,'enable') && tw.doppler.enable; n = n + scheduledLinks; end
+                if isfield(tw,'timeTransfer') && ...
+                        isfield(tw.timeTransfer,'enable') && ...
+                        tw.timeTransfer.enable
+                    n = n + scheduledLinks;
+                end
             end
         end
 
@@ -282,6 +318,12 @@ classdef MultiAssetConfig
             if isfield(isl,'twoWay') && isfield(isl.twoWay,'enable') && isl.twoWay.enable && ...
                     ((isfield(isl.twoWay,'range') && isfield(isl.twoWay.range,'enable') && isl.twoWay.range.enable) || ...
                      (isfield(isl.twoWay,'doppler') && isfield(isl.twoWay.doppler,'enable') && isl.twoWay.doppler.enable))
+                n = n + 1;
+            end
+            if isfield(isl,'twoWay') && isfield(isl.twoWay,'enable') && ...
+                    isl.twoWay.enable && isfield(isl.twoWay,'timeTransfer') && ...
+                    isfield(isl.twoWay.timeTransfer,'enable') && ...
+                    isl.twoWay.timeTransfer.enable
                 n = n + 1;
             end
         end
