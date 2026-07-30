@@ -20,8 +20,8 @@ classdef EkfInnovationAccounting
         function rowClass = classifyRows(measTypePerRow, nPhysical, nGauge)
             % classifyRows  Build row-classification masks for the augmented innovation vector.
             %
-            %   measTypePerRow — cell array of strings for physical rows ('code','ifCode',
-            %                    'doppler','carrier'); may be empty or wrong length
+            %   measTypePerRow — cell array of strings for physical rows; may be empty
+            %                    or wrong length
             %   nPhysical      — number of physical measurement rows
             %   nGauge         — total gauge rows appended after physical rows
             %
@@ -43,6 +43,7 @@ classdef EkfInnovationAccounting
             rowClass.carrierMask         = false(nTotal,1);
             rowClass.carrierIonoFreeMask = false(nTotal,1);
             rowClass.twoWayTimeTransferMask = false(nTotal,1);
+            rowClass.twoWayIslRangeMask = false(nTotal,1);
             rowClass.unknownPhysicalMask = false(nTotal,1);
             rowClass.warnings            = {};
 
@@ -55,6 +56,7 @@ classdef EkfInnovationAccounting
                         case 'doppler'; rowClass.dopplerMask(mi)      = true;
                         case 'carrier'; rowClass.carrierMask(mi)      = true;
                         case 'twoWayTimeTransfer'; rowClass.twoWayTimeTransferMask(mi) = true;
+                        case 'islTwoWayRange'; rowClass.twoWayIslRangeMask(mi) = true;
                         otherwise;      rowClass.unknownPhysicalMask(mi) = true;
                     end
                 end
@@ -111,6 +113,9 @@ classdef EkfInnovationAccounting
             [acc.twoWayTimeTransferNIS, acc.twoWayTimeTransferDof, w_] = revgnss.EkfInnovationAccounting.nisForMask_(y, S, rowClass.twoWayTimeTransferMask);
             acc.warnings = [acc.warnings, w_];
 
+            [acc.twoWayIslRangeNIS, acc.twoWayIslRangeDof, w_] = revgnss.EkfInnovationAccounting.nisForMask_(y, S, rowClass.twoWayIslRangeMask);
+            acc.warnings = [acc.warnings, w_];
+
             [acc.unknownPhysicalNIS, acc.unknownPhysicalDof, w_] = revgnss.EkfInnovationAccounting.nisForMask_(y, S, rowClass.unknownPhysicalMask);
             acc.warnings = [acc.warnings, w_];
         end
@@ -133,6 +138,7 @@ classdef EkfInnovationAccounting
             rms_.carrierRms         = revgnss.EkfInnovationAccounting.rmsForMask_(residual, rowClass.carrierMask);
             rms_.carrierIonoFreeRms = revgnss.EkfInnovationAccounting.rmsForMask_(residual, rowClass.carrierIonoFreeMask);
             rms_.twoWayTimeTransferRms = revgnss.EkfInnovationAccounting.rmsForMask_(residual, rowClass.twoWayTimeTransferMask);
+            rms_.twoWayIslRangeRms = revgnss.EkfInnovationAccounting.rmsForMask_(residual, rowClass.twoWayIslRangeMask);
             rms_.unknownPhysicalRms = revgnss.EkfInnovationAccounting.rmsForMask_(residual, rowClass.unknownPhysicalMask);
         end
 
@@ -157,6 +163,9 @@ classdef EkfInnovationAccounting
             c.twoWayTimeTransferNIS = acc.twoWayTimeTransferNIS;
             c.twoWayTimeTransferDof = acc.twoWayTimeTransferDof;
             c.twoWayTimeTransferResidualRms = rms_.twoWayTimeTransferRms;
+            c.twoWayIslRangeNIS = acc.twoWayIslRangeNIS;
+            c.twoWayIslRangeDof = acc.twoWayIslRangeDof;
+            c.twoWayIslRangeResidualRms = rms_.twoWayIslRangeRms;
             c.gaugeRowsPresent     = acc.gaugeDof > 0;
 
             if ~c.gaugeRowsPresent

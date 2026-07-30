@@ -1,4 +1,4 @@
-function measurementValidation(fid, plotPaths, stem, figDir, diag)
+function measurementValidation(fid, plotPaths, stem, figDir, diag, cfg, summary)
 %MEASUREMENTVALIDATION  "Measurement and Geometry Validation" report section.
 %   Extracted verbatim from ClockExactReportBuilder.writeMeasurementValidation_ as part
 %   of the report decomposition. Read-only: consumes only the precomputed plotPaths
@@ -6,6 +6,10 @@ function measurementValidation(fid, plotPaths, stem, figDir, diag)
 %   emitted LaTeX is byte-identical to the original method (verified by the normalized
 %   .tex diff harness, tests/report/reportTexFingerprint.m).
     CE = revgnss.ClockExactReportBuilder;
+    if nargin < 6; cfg = struct(); end
+    if nargin < 7; summary = struct(); end
+    jointMode = isfield(summary,'estimatorMultiAssetMode') && ...
+        strcmpi(summary.estimatorMultiAssetMode,'joint');
     fprintf(fid, '\\section{Measurement and Geometry Validation}\n');
     fprintf(fid, ['Pre-fit residuals test the predicted measurement model before correction. ' ...
         'Post-fit residuals show how much error remains after the EKF update. ' ...
@@ -13,12 +17,17 @@ function measurementValidation(fid, plotPaths, stem, figDir, diag)
         'of statistical consistency. ' ...
         'In deterministic or partly deterministic validation runs, NIS should be interpreted ' ...
         'as a numerical conditioning and model-coupling diagnostic.\n\n']);
+    if jointMode
+        fprintf(fid, ['The plotted time histories are the reference-spacecraft diagnostics ' ...
+            'stored by the canonical simulation data store. Joint EKF update counts and ' ...
+            'state dimensions are reported in the scenario and numerical tables.\n\n']);
+    end
     fprintf(fid, CE.plotTableHeader_());
 
     CE.writeRow_(fid, CE.figRef_(plotPaths,'innovRMS',figDir,stem), ...
-        'Pseudorange Pre-Fit and Post-Fit Residual RMS', ...
+        'EKF Measurement Pre-Fit and Post-Fit Residual RMS', ...
         ['The pre-fit innovation (before EKF correction) and post-fit residual (after update) ' ...
-         'are plotted separately. With noise disabled this is a deterministic geometry, ' ...
+         'are plotted separately for the active measurement stack. This is a geometry, ' ...
          'clock-state coupling, and estimator convergence diagnostic.']);
 
     CE.writeRow_(fid, CE.figRef_(plotPaths,'perSrc',figDir,stem), ...
@@ -35,10 +44,12 @@ function measurementValidation(fid, plotPaths, stem, figDir, diag)
     CE.writeRow_(fid, CE.figRef_(plotPaths,'dop',figDir,stem), ...
         'Ground-to-Space Geometry (DOP Metrics)', ...
         ['GDOP and PDOP are geometry-derived scaling factors from the pseudorange observation ' ...
-         'matrix; lower is better. For a single GEO viewing a compact cluster of ground ' ...
-         'transmitters the lines of sight are nearly parallel, so the DOP is very large ' ...
-         '(hundreds to thousands) and almost constant --- the curves appear as two flat lines. ' ...
-         'The geometry is observable (full rank) but weak.']);
+         'matrix; lower is better. VDOP and HDOP resolve the position part in the orbital RAC ' ...
+         'frame (a spacecraft has no local horizon): VDOP is the RADIAL axis, the one degenerate ' ...
+         'with the receiver clock at GEO, and HDOP is along-track plus cross-track. For a GEO ' ...
+         'spacecraft viewing a compact cluster of ground transmitters the lines of sight are nearly ' ...
+         'parallel, so the DOP is very large (hundreds to thousands) and almost constant --- the ' ...
+         'curves appear nearly flat. The geometry is observable (full rank) but weak.']);
 
     fprintf(fid, CE.plotTableFooter_());
 
@@ -47,21 +58,44 @@ function measurementValidation(fid, plotPaths, stem, figDir, diag)
     fprintf(fid, ['Dilution-of-precision factors scale measurement noise into state uncertainty ' ...
         '(lower is better). Values are run medians computed from the pseudorange observation ' ...
         'geometry in the ECEF line-of-sight frame. This chapter is always shown, independent of ' ...
-        'any pass/fail gate. A single GEO viewing a compact cluster of ground transmitters sees ' ...
+        'any pass/fail gate. A GEO spacecraft viewing a compact cluster of ground transmitters sees ' ...
         'nearly parallel lines of sight, so the DOP values are large (hundreds to thousands) and ' ...
         'nearly constant: the geometry is observable (full rank) but weak.\n\n']);
-    vt = 'not available'; gd = 'not available'; pd = 'not available';
-    try; v = diag.getNumVisibleTowers(); v = v(isfinite(v)); if ~isempty(v); vt = sprintf('%.1f', median(v)); end; catch; end
-    try; g = diag.getGDOPLike();        g = g(isfinite(g)); if ~isempty(g); gd = sprintf('%.2f', median(g)); end; catch; end
-    try; p = diag.getPDOPLike();        p = p(isfinite(p)); if ~isempty(p); pd = sprintf('%.2f', median(p)); end; catch; end
+    % Every row is read from the store the same way -- median over the finite samples, or
+    % the literal string 'not available' when the series is absent or all-NaN. The HDOP /
+    % VDOP / condition-number row used to be HARD-CODED to 'not available' even though the
+    % store computes all three, so the table under-reported what the run actually knew.
+    med_ = @(fn) i_medianOf(diag, fn);
+    vt = i_medianOf(diag, 'getNumVisibleTowers', '%.1f');
+    gd = med_('getGDOPLike');   pd = med_('getPDOPLike');   td = med_('getTDOPLike');
+    hd = med_('getHDOPLike');   vd = med_('getVDOPLike');
+    cn = i_medianOf(diag, 'getPositionClockCondition', '%.3g');
     fprintf(fid, '\\begin{center}\\small\n');
     fprintf(fid, '\\begin{tabular}{p{0.52\\textwidth}p{0.38\\textwidth}}\n\\toprule\n');
     fprintf(fid, '\\textbf{Geometry metric} & \\textbf{Value (run median)}\\\\\n\\midrule\n');
     fprintf(fid, 'Visible ground transmitters & %s\\\\\n', vt);
     fprintf(fid, 'GDOP (geometric) & %s\\\\\n', gd);
     fprintf(fid, 'PDOP (position) & %s\\\\\n', pd);
-    fprintf(fid, 'HDOP / VDOP / condition number & not available\\\\\n');
+    fprintf(fid, 'TDOP (receiver clock) & %s\\\\\n', td);
+    fprintf(fid, 'VDOP (radial) / HDOP (along+cross) & %s / %s\\\\\n', vd, hd);
+    fprintf(fid, 'Position--clock normal-matrix condition number & %s\\\\\n', cn);
     fprintf(fid, 'Geometry convention & ECEF line-of-sight; per-tower elevation mask applied\\\\\n');
     fprintf(fid, '\\bottomrule\n\\end{tabular}\n\\end{center}\n\n');
     fprintf(fid, '\\clearpage\n');
+end
+
+function s = i_medianOf(diag, accessor, fmt)
+%I_MEDIANOF  Median over the finite samples of a store series, or 'not available'.
+%   One accessor per row, so a row can never claim a value the store does not hold --
+%   and, equally, can never say 'not available' about a series that is there. The two
+%   accessor layers differ (data.SimulationDataStore vs revgnss.Diagnostics), hence the
+%   try/catch: a missing method degrades to 'not available' rather than erroring.
+    if nargin < 3; fmt = '%.2f'; end
+    s = 'not available';
+    try
+        v = diag.(accessor)();
+        v = v(isfinite(v));
+        if ~isempty(v); s = sprintf(fmt, median(v)); end
+    catch
+    end
 end

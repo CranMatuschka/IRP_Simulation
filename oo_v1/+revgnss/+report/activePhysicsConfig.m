@@ -87,7 +87,7 @@ function activePhysicsConfig(fid, cfg, summary, plotPaths, stem, figDir) %#ok<IN
         fprintf(fid, '\\textbf{Truth-estimation separation audit}\n\n');
         % Only claim "calibration residuals" as an imperfection source when antenna
         % PCO or hardware delay actually leaves a truth~=model residual. In the shipped config
-        % they are matched (zero residual), so the clause is dropped for honesty.
+        % they leave zero residual, so the clause is dropped for honesty.
         calibClause_ = '';
         if revgnss.ImperfectionAudit.pcoLeavesResidual(cfg) || revgnss.ImperfectionAudit.hwDelayLeavesResidual(cfg)
             calibClause_ = 'calibration residuals, ';

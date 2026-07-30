@@ -1,5 +1,5 @@
 classdef ScientificValidationCampaign
-    % ScientificValidationCampaign  Formal synthetic validation campaign runner.
+    % ScientificValidationCampaign  Descriptive synthetic validation campaign.
     %
     % Runs stress scenarios over multiple seeds and returns aggregated performance
     % and NIS/NEES consistency statistics.  Results are synthetic consistency
@@ -23,6 +23,12 @@ classdef ScientificValidationCampaign
             try; profile = baseCfg.validation.scientificCampaign.profile;  catch; profile  = 'light'; end
             try; seeds   = baseCfg.validation.scientificCampaign.seedList;  catch; seeds   = [85,185,285]; end
             try; dur_s   = baseCfg.validation.scientificCampaign.duration_s; catch; dur_s  = 900; end
+            seeds = double(seeds(:)).';
+            assert(~isempty(seeds) && all(isfinite(seeds)) && ...
+                all(seeds >= 0) && all(seeds == floor(seeds)) && ...
+                numel(unique(seeds)) == numel(seeds), ...
+                'ScientificValidationCampaign:invalidSeeds', ...
+                'Campaign seeds must be unique nonnegative integers.');
 
             doNominal  = true;  try; doNominal  = baseCfg.validation.scientificCampaign.runNominal;              catch; end
             doL1       = true;  try; doL1       = baseCfg.validation.scientificCampaign.runL1Only;               catch; end
@@ -41,8 +47,7 @@ classdef ScientificValidationCampaign
             result.scientificCampaignSeeds   = seeds;
             result.scientificCampaignCases   = caseNames;
 
-            allRows      = {};
-            nominalRows  = {};
+            allRows = {};
 
             for ci = 1:numel(caseNames)
                 caseName = caseNames{ci};
@@ -52,16 +57,13 @@ classdef ScientificValidationCampaign
                         baseCfg, caseName, seeds(si), dur_s);
                     caseRows{end+1} = row;
                     allRows{end+1}  = row;
-                    if strcmp(caseName,'nominalDualFrequency')
-                        nominalRows{end+1} = row;
-                    end
                 end
                 result.caseResults.(caseName) = ...
                     revgnss.ScientificValidationCampaign.aggregateCase_(caseRows, caseName);
             end
 
             result = revgnss.ScientificValidationCampaign.aggregateAll_( ...
-                result, allRows, nominalRows, caseNames);
+                result, allRows);
             result.scientificCampaignStatus = 'complete';
         end
 
@@ -72,15 +74,20 @@ classdef ScientificValidationCampaign
         function row = runCase_(baseCfg, caseName, seed, dur_s)
             row.caseName         = caseName;
             row.seed             = seed;
-            row.status           = 'fail';
+            row.status           = 'invalidRun';
             row.failReason       = '';
             row.posRms_m         = NaN;
             row.clockRms_m       = NaN;
             row.kavFinal_deg     = NaN;
             row.nisResult        = struct('available',false);
-            row.slipsInjected    = 0;
-            row.slipsDetected    = 0;
-            row.ambFixRate       = NaN;
+            row.configuredSlipEpochs = 0;
+            row.slipDetectorDeclarations = 0;
+            row.slipDetectionStatus = 'notAvailableWithoutEventAssociation';
+            row.ambiguityAcceptanceFraction = NaN;
+            row.ambiguityAcceptanceStatus = 'notApplicableFixingDisabled';
+            row.ambiguityFixingAttempted = false;
+            row.ambiguityConfiguredCandidateCount = 0;
+            row.ambiguityAcceptedCount = 0;
 
             try
                 cfg = revgnss.StressScenarioFactory.applyCase(baseCfg, caseName, seed, dur_s);
@@ -98,7 +105,7 @@ classdef ScientificValidationCampaign
                 row.posRms_m   = rms(posErrs(isfinite(posErrs)));
                 row.clockRms_m = rms(clkErrs(isfinite(clkErrs)));
 
-                % Final attitude KAV
+                % Final attitude error diagnostic.
                 try
                     attErrs = cell2mat({diagObj.log.attitudeError_rad});
                     if ~isempty(attErrs)
@@ -109,36 +116,62 @@ classdef ScientificValidationCampaign
                 % NIS/NEES
                 row.nisResult = revgnss.ConsistencyStatistics.computeFromDiag(diagObj, finCfg);
 
-                % Slip stats
-                try; row.slipsInjected = finCfg.validation.stress.slips.nInjected; catch; end
-
-                % Ambiguity fix rate from diagnostic arc data
+                configuredSlipEpochs = 0;
                 try
-                    arcs = [diagObj.log.diffAttActiveBaselines];
-                    row.ambFixRate = mean(arcs(isfinite(arcs))) / 15;
-                catch; end
-
-                % Gate: nominal tighter, stress cases looser
-                posGate = 30;  clkGate = 30;
-                if strcmp(caseName,'nominalDualFrequency'); posGate = 20; clkGate = 20; end
-                if row.posRms_m <= posGate && row.clockRms_m <= clkGate
-                    row.status = 'pass';
-                elseif row.posRms_m <= 3*posGate || row.clockRms_m <= 3*clkGate
-                    row.status = 'warn';
-                    row.failReason = sprintf('pos=%.1fm clk=%.1fm exceeds %.0fm gate', ...
-                        row.posRms_m, row.clockRms_m, posGate);
-                else
-                    row.status = 'fail';
-                    row.failReason = sprintf('pos=%.1fm or clk=%.1fm well above gate %.0fm', ...
-                        row.posRms_m, row.clockRms_m, posGate);
+                    configuredSlipEpochs = ...
+                        finCfg.validation.stress.slips.nConfiguredEpochs;
+                catch
                 end
+                arcEvidence = struct();
+                try
+                    arcEvidence = sim.trackMgr.getArcEvidence( ...
+                        finCfg.simulation.dt_s);
+                catch
+                end
+                slipSummary = revgnss.ScientificCampaignMetrics. ...
+                    summarizeSlipDeclarations( ...
+                        arcEvidence, configuredSlipEpochs);
+                row.configuredSlipEpochs = ...
+                    slipSummary.configuredEpochCount;
+                row.slipDetectorDeclarations = ...
+                    slipSummary.nDetectorDeclarations;
+                row.slipDetectionStatus = slipSummary.status;
+
+                ambiguitySummary = revgnss.ScientificCampaignMetrics. ...
+                    summarizeAmbiguityDecisions(sim.diffAttStore);
+                row.ambiguityAcceptanceFraction = ...
+                    ambiguitySummary.acceptanceFraction;
+                row.ambiguityAcceptanceStatus = ambiguitySummary.status;
+                row.ambiguityFixingAttempted = ambiguitySummary.attempted;
+                row.ambiguityConfiguredCandidateCount = ...
+                    ambiguitySummary.nConfiguredCandidates;
+                row.ambiguityAcceptedCount = ambiguitySummary.nAccepted;
+
+                criteria = revgnss.ScientificValidationCampaign. ...
+                    accuracyCriteria_(finCfg, caseName);
+                accuracy = revgnss.ScientificCampaignMetrics.assessAccuracy( ...
+                    row.posRms_m, row.clockRms_m, criteria);
+                row.status = accuracy.status;
+                row.failReason = accuracy.reason;
 
                 fprintf('[Campaign] %s seed=%d => pos=%.2fm clk=%.2fm %s\n', ...
                     caseName, seed, row.posRms_m, row.clockRms_m, row.status);
 
             catch ex
-                row.status     = 'fail';
+                row.status     = 'invalidRun';
                 row.failReason = ex.message;
+                row.posRms_m = NaN;
+                row.clockRms_m = NaN;
+                row.kavFinal_deg = NaN;
+                row.nisResult = struct('available', false);
+                row.configuredSlipEpochs = 0;
+                row.slipDetectorDeclarations = 0;
+                row.slipDetectionStatus = 'invalidRun';
+                row.ambiguityAcceptanceFraction = NaN;
+                row.ambiguityAcceptanceStatus = 'invalidRun';
+                row.ambiguityFixingAttempted = false;
+                row.ambiguityConfiguredCandidateCount = 0;
+                row.ambiguityAcceptedCount = 0;
                 warning('ScientificValidationCampaign:caseError', ...
                     '[Campaign] %s seed=%d FAILED: %s', caseName, seed, ex.message);
             end
@@ -149,30 +182,54 @@ classdef ScientificValidationCampaign
             cagg.nRuns          = numel(rows);
             posVec  = cellfun(@(r) r.posRms_m,   rows);
             clkVec  = cellfun(@(r) r.clockRms_m, rows);
+            attVec  = cellfun(@(r) r.kavFinal_deg, rows);
             statVec = cellfun(@(r) r.status,      rows, 'UniformOutput', false);
-            posVec  = posVec(isfinite(posVec));
-            clkVec  = clkVec(isfinite(clkVec));
-            cagg.medianPosRms_m   = median(posVec);
-            cagg.maxPosRms_m      = max(posVec);
-            cagg.medianClockRms_m = median(clkVec);
-            cagg.maxClockRms_m    = max(clkVec);
-            nFail = sum(strcmp(statVec,'fail'));
-            nWarn = sum(strcmp(statVec,'warn'));
-            if nFail > 0;     cagg.status = 'fail';
-            elseif nWarn > 0; cagg.status = 'warn';
-            else;             cagg.status = 'pass';
+            validRows = ~strcmp(statVec, 'invalidRun');
+            posVec  = posVec(validRows & isfinite(posVec));
+            clkVec  = clkVec(validRows & isfinite(clkVec));
+            attVec  = attVec(validRows & isfinite(attVec));
+            cagg.medianPosRms_m = NaN;
+            cagg.maxPosRms_m = NaN;
+            cagg.medianClockRms_m = NaN;
+            cagg.maxClockRms_m = NaN;
+            cagg.medianAttitudeError_deg = NaN;
+            cagg.maxAttitudeError_deg = NaN;
+            if ~isempty(posVec)
+                cagg.medianPosRms_m = median(posVec);
+                cagg.maxPosRms_m = max(posVec);
             end
+            if ~isempty(clkVec)
+                cagg.medianClockRms_m = median(clkVec);
+                cagg.maxClockRms_m = max(clkVec);
+            end
+            if ~isempty(attVec)
+                cagg.medianAttitudeError_deg = median(attVec);
+                cagg.maxAttitudeError_deg = max(attVec);
+            end
+            cagg.status = revgnss.ScientificCampaignMetrics. ...
+                summarizeStatuses(statVec);
         end
 
-        function result = aggregateAll_(result, allRows, nominalRows, caseNames)
+        function result = aggregateAll_(result, allRows)
             posAll  = cellfun(@(r) r.posRms_m,   allRows);
             clkAll  = cellfun(@(r) r.clockRms_m, allRows);
-            posAll  = posAll(isfinite(posAll));
-            clkAll  = clkAll(isfinite(clkAll));
-            result.campaignMedianPosRms_m   = median(posAll);
-            result.campaignMaxPosRms_m      = max(posAll);
-            result.campaignMedianClockRms_m = median(clkAll);
-            result.campaignMaxClockRms_m    = max(clkAll);
+            attAll  = cellfun(@(r) r.kavFinal_deg, allRows);
+            validRows = cellfun(@(r) ~strcmp(r.status, 'invalidRun'), allRows);
+            posAll  = posAll(validRows & isfinite(posAll));
+            clkAll  = clkAll(validRows & isfinite(clkAll));
+            attAll  = attAll(validRows & isfinite(attAll));
+            if ~isempty(posAll)
+                result.campaignMedianPosRms_m = median(posAll);
+                result.campaignMaxPosRms_m = max(posAll);
+            end
+            if ~isempty(clkAll)
+                result.campaignMedianClockRms_m = median(clkAll);
+                result.campaignMaxClockRms_m = max(clkAll);
+            end
+            if ~isempty(attAll)
+                result.campaignMedianAttitude_deg = median(attAll);
+                result.campaignMaxAttitude_deg = max(attAll);
+            end
 
             % Per-case status
             result.campaignNominalStatus        = revgnss.ScientificValidationCampaign.caseStatus_(result,'nominalDualFrequency');
@@ -181,8 +238,9 @@ classdef ScientificValidationCampaign
             result.campaignSlipStressStatus     = revgnss.ScientificValidationCampaign.caseStatus_(result,'slipInjection');
             result.campaignGeometryStressStatus = revgnss.ScientificValidationCampaign.caseStatus_(result,'reducedTowerGeometry');
 
-            % NIS/NEES: aggregate from all nominal runs
-            repNis  = revgnss.ScientificValidationCampaign.firstAvailableNis_(allRows);
+            % Consistency summaries use one descriptive result per independent nominal run.
+            repNis = revgnss.ScientificCampaignMetrics. ...
+                aggregateConsistency(allRows, 'nominalDualFrequency');
             result.nisOverallStatus   = revgnss.ScientificValidationCampaign.nisGroupStatus_(repNis,'nisOverall');
             result.nisCodeStatus      = revgnss.ScientificValidationCampaign.nisGroupStatus_(repNis,'nisCode');
             result.nisCarrierStatus   = revgnss.ScientificValidationCampaign.nisGroupStatus_(repNis,'nisCarrier');
@@ -200,32 +258,50 @@ classdef ScientificValidationCampaign
             result.neesVelocityMean   = revgnss.ScientificValidationCampaign.nisGroupMean_(repNis,'neesVel');
             result.neesClockMean      = revgnss.ScientificValidationCampaign.nisGroupMean_(repNis,'neesClk');
             result.neesAttitudeMean   = revgnss.ScientificValidationCampaign.nisGroupMean_(repNis,'neesAtt');
+            result.campaignConsistencyIndependentRunCount = ...
+                repNis.independentRunCount;
+            result.campaignConsistencyInterpretation = repNis.interpretation;
 
-            % Slip tracking
-            injVec = cellfun(@(r) r.slipsInjected, allRows);
-            detVec = cellfun(@(r) r.slipsDetected, allRows);
-            totalInj = sum(injVec);
-            if totalInj > 0
-                result.campaignSlipDetectionRate = sum(detVec(injVec>0)) / totalInj;
-            end
+            % Detection probability requires event identities and temporal association.
+            result.campaignConfiguredSlipEpochs = sum(cellfun( ...
+                @(row) row.configuredSlipEpochs, allRows));
+            result.campaignSlipDetectorDeclarations = sum(cellfun( ...
+                @(row) row.slipDetectorDeclarations, allRows));
+            result.campaignSlipDetectionRate = NaN;
+            result.campaignSlipDetectionStatus = ...
+                'notAvailableWithoutEventAssociation';
             result.campaignProductBoundaryFalseResetRate = NaN;
 
-            % Ambiguity fix rate
-            fixV = cellfun(@(r) r.ambFixRate, allRows);
-            result.campaignAmbiguityFixRate = mean(fixV(isfinite(fixV)));
+            configuredAmbiguityCandidates = sum(cellfun( ...
+                @(row) row.ambiguityConfiguredCandidateCount, allRows));
+            acceptedAmbiguities = sum(cellfun( ...
+                @(row) row.ambiguityAcceptedCount, allRows));
+            attemptedAmbiguityFixing = any(cellfun( ...
+                @(row) row.ambiguityFixingAttempted, allRows));
+            result.campaignAmbiguityConfiguredCandidateCount = ...
+                configuredAmbiguityCandidates;
+            result.campaignAmbiguityAcceptedCount = acceptedAmbiguities;
+            result.campaignAmbiguityFixingAttempted = attemptedAmbiguityFixing;
+            if attemptedAmbiguityFixing && configuredAmbiguityCandidates > 0
+                result.campaignAmbiguityAcceptanceFraction = ...
+                    acceptedAmbiguities / configuredAmbiguityCandidates;
+                result.campaignAmbiguityAcceptanceStatus = 'available';
+            elseif attemptedAmbiguityFixing
+                result.campaignAmbiguityAcceptanceStatus = ...
+                    'notAvailableNoConfiguredCandidates';
+            end
+            result.campaignAmbiguityFixRate = NaN;
 
             % Overall
             statAll = cellfun(@(r) r.status, allRows, 'UniformOutput', false);
-            nFail = sum(strcmp(statAll,'fail'));
-            nWarn = sum(strcmp(statAll,'warn'));
-            if nFail > 0;     result.campaignOverallStatus = 'fail';
-            elseif nWarn > 0; result.campaignOverallStatus = 'warn';
-            else;             result.campaignOverallStatus = 'pass';
-            end
+            result.campaignOverallStatus = ...
+                revgnss.ScientificCampaignMetrics.summarizeStatuses(statAll);
 
-            result.monteCarloStatus = 'syntheticLightCampaign';
+            result.monteCarloStatus = ...
+                'syntheticCampaignDescriptiveConsistency';
             result.validationStatisticsInterpretation = ...
-                'syntheticConsistencyEvidenceOnly; partialCovarianceAware; not real-world proof';
+                ['syntheticConsistencyEvidenceOnly; descriptiveAcrossIndependentRuns; ' ...
+                 'notFormalChiSquare; not real-world proof'];
         end
 
         function st = caseStatus_(result, caseName)
@@ -233,16 +309,6 @@ classdef ScientificValidationCampaign
                 st = result.caseResults.(caseName).status;
             else
                 st = 'notRun';
-            end
-        end
-
-        function nis = firstAvailableNis_(rows)
-            nis = struct();
-            for i = 1:numel(rows)
-                r = rows{i};
-                if isfield(r,'nisResult') && r.nisResult.available
-                    nis = r.nisResult;  return;
-                end
             end
         end
 
@@ -272,8 +338,18 @@ classdef ScientificValidationCampaign
             r.campaignMedianAttitude_deg     = NaN;
             r.campaignMaxAttitude_deg        = NaN;
             r.campaignAmbiguityFixRate       = NaN;
+            r.campaignAmbiguityAcceptanceFraction = NaN;
+            r.campaignAmbiguityAcceptanceStatus = 'notApplicableFixingDisabled';
+            r.campaignAmbiguityConfiguredCandidateCount = 0;
+            r.campaignAmbiguityAcceptedCount = 0;
+            r.campaignAmbiguityFixingAttempted = false;
             r.campaignSlipDetectionRate      = NaN;
+            r.campaignSlipDetectionStatus    = 'notAvailableWithoutEventAssociation';
+            r.campaignConfiguredSlipEpochs   = 0;
+            r.campaignSlipDetectorDeclarations = 0;
             r.campaignProductBoundaryFalseResetRate = NaN;
+            r.campaignConsistencyIndependentRunCount = 0;
+            r.campaignConsistencyInterpretation = 'notRun';
             r.nisOverallStatus               = 'notAvailable';
             r.nisCodeStatus                  = 'notAvailable';
             r.nisCarrierStatus               = 'notAvailable';
@@ -294,6 +370,25 @@ classdef ScientificValidationCampaign
             r.monteCarloStatus               = 'notRun';
             r.validationStatisticsInterpretation = 'notRun';
             r.caseResults                    = struct();
+        end
+
+        function criteria = accuracyCriteria_(cfg, caseName)
+            criteria = struct( ...
+                'positionRmsPassLimit_m', NaN, ...
+                'clockBiasRmsPassLimit_m', NaN, ...
+                'positionRmsWarningLimit_m', NaN, ...
+                'clockBiasRmsWarningLimit_m', NaN);
+            try
+                configured = cfg.validation.scientificCampaign. ...
+                    acceptanceCriteria.(caseName);
+                names = fieldnames(criteria);
+                for index = 1:numel(names)
+                    if isfield(configured, names{index})
+                        criteria.(names{index}) = configured.(names{index});
+                    end
+                end
+            catch
+            end
         end
 
     end  % private static

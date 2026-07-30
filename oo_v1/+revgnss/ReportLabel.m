@@ -122,6 +122,7 @@ classdef ReportLabel
 
             % --- Attitude estimation ---
             m('carrierLeverArmQuaternionEkf')   = 'carrier lever-arm quaternion EKF';
+            m('starTrackerGyroscope')           = 'star tracker and inertial gyroscope';
             m('coarseBaselineIntegerSearch')    = 'coarse baseline integer search';
             m('calibratedDifferentialAmbiguity')= 'calibrated differential ambiguity';
             m('rawL1Only')                      = 'raw L1 only';
@@ -140,7 +141,7 @@ classdef ReportLabel
             m('j2')                             = 'J2';
             m('j2Rk4')                          = 'J2 (RK4)';
             m('j2Rk4DefaultOrConfigured')       = 'J2 (RK4)';
-            m('j2TruthJ2EkfMatched')            = 'J2 truth with matched J2 filter dynamics';
+            m('j2TruthJ2EstimatorSameForceFamily') = 'J2 truth and filter use the same force family';
             m('twoBodyDefaultJ2Available')      = 'two-body default (J2 available)';
             m('constantOmegaV1')                = 'constant Earth-rotation rate';
 

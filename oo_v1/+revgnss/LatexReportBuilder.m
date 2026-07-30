@@ -867,7 +867,7 @@ classdef LatexReportBuilder
             validLines{end+1} = 'What IS valid in this run:';
             validLines{end+1} = '  + Pseudorange-based position and clock estimation (EKF)';
             validLines{end+1} = '  + Sagnac / Shapiro corrections (when enabled)';
-            validLines{end+1} = '  + Matched-error baseline (innovations near zero when truth=model)';
+            validLines{end+1} = '  + Truth effects and estimator corrections reported independently';
             if strcmp(codeMode,'ionosphereFree')
                 validLines{end+1} = '  + Ionosphere-free code combination (first-order iono removed algebraically)';
             end

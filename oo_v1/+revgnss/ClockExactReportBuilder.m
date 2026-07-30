@@ -234,13 +234,24 @@ classdef ClockExactReportBuilder
             paths.allanDev = CE.tryPlot_(figDir, [stem '_allan_deviation.pdf'], @() ...
                 CE.plotAllanDeviation_(diag, t), cfg);
 
-            % Honest multi-asset swarm: per-satellite ABSOLUTE vs RELATIVE position error
-            % (full duration + final-window zoom). Both plot fns return [] for single-asset /
-            % non-'position' runs -> paths stay '' -> report rows omitted -> tex byte-identical.
-            paths.swarmPos = CE.tryPlot_(figDir, [stem '_swarm_position_error.pdf'], @() ...
-                CE.plotSwarmPosError_(diag, t, []), cfg);
-            paths.swarmPosZoom = CE.tryPlot_(figDir, [stem '_swarm_position_error_zoomlast.pdf'], @() ...
-                CE.plotSwarmPosError_(diag, t, zoomSec), cfg);
+            isJointFormation = isstruct(summary) && ...
+                isfield(summary, 'jointFormationDiagnostics') && ...
+                isfield(summary.jointFormationDiagnostics, 'available') && ...
+                summary.jointFormationDiagnostics.available;
+            if isJointFormation
+                formationDiagnostics = summary.jointFormationDiagnostics;
+                paths.jointFormation = CE.tryPlot_(figDir, [stem '_joint_formation_error.pdf'], @() ...
+                    revgnss.JointMultiAssetFormationDiagnostics.plotPositionErrors(formationDiagnostics), cfg);
+                paths.jointRelativeLayer = CE.tryPlot_(figDir, [stem '_joint_relative_layer.pdf'], @() ...
+                    revgnss.JointMultiAssetFormationDiagnostics.plotRelativeLayer(formationDiagnostics), cfg);
+                paths.jointKabsch = CE.tryPlot3D_(figDir, [stem '_joint_kabsch_alignment.pdf'], @() ...
+                    revgnss.JointMultiAssetFormationDiagnostics.plotKabschAlignment(formationDiagnostics), 220);
+            else
+                paths.swarmPos = CE.tryPlot_(figDir, [stem '_swarm_position_error.pdf'], @() ...
+                    CE.plotSwarmPosError_(diag, t, []), cfg);
+                paths.swarmPosZoom = CE.tryPlot_(figDir, [stem '_swarm_position_error_zoomlast.pdf'], @() ...
+                    CE.plotSwarmPosError_(diag, t, zoomSec), cfg);
+            end
         end
 
         % ................................................................
@@ -963,21 +974,18 @@ classdef ClockExactReportBuilder
                 hdop = []; vdop = [];
                 try; hdop = diag.getHDOPLike(); catch; end
                 try; vdop = diag.getVDOPLike(); catch; end
-                if ~isempty(t) && ~isempty(gdop)
+                % A DOP series is NaN wherever the geometry was rank-deficient, so it can
+                % be legitimately sparse. Say "no data" only when NOTHING is finite --
+                % otherwise plotSparse_ still renders whatever samples exist.
+                if ~isempty(t) && any(isfinite(gdop))
                     hold(ax,'on');
-                    plot(ax,t,gdop,'b-','LineWidth',0.8,'DisplayName','GDOP');
-                    if ~isempty(pdop)
-                        plot(ax,t,pdop,'r--','LineWidth',0.8,'DisplayName','PDOP');
-                    end
+                    revgnss.ClockExactReportBuilder.plotSparse_(ax,t,gdop,'b','-', 'GDOP');
+                    revgnss.ClockExactReportBuilder.plotSparse_(ax,t,pdop,'r','--','PDOP');
                     % HDOP/VDOP in the orbital RAC frame (a spacecraft has no local horizon).
                     % VDOP is the RADIAL axis -- the one degenerate with the receiver clock at
                     % GEO -- so it is expected to dominate and is the informative curve here.
-                    if ~isempty(vdop) && any(isfinite(vdop))
-                        plot(ax,t,vdop,'m-','LineWidth',0.8,'DisplayName','VDOP (radial)');
-                    end
-                    if ~isempty(hdop) && any(isfinite(hdop))
-                        plot(ax,t,hdop,'g-.','LineWidth',0.8,'DisplayName','HDOP (along+cross)');
-                    end
+                    revgnss.ClockExactReportBuilder.plotSparse_(ax,t,vdop,'m','-', 'VDOP (radial)');
+                    revgnss.ClockExactReportBuilder.plotSparse_(ax,t,hdop,'g','-.','HDOP (along+cross)');
                     legend(ax,'show','Location','best','FontSize',6);
                     xlabel(ax,'Time [s]','FontSize',7);
                     ylabel(ax,'DOP [-]','FontSize',7);
@@ -986,6 +994,28 @@ classdef ClockExactReportBuilder
                 end
             catch; end
             revgnss.ClockExactReportBuilder.noDataAxes_(ax);
+        end
+
+        % ................................................................
+        function plotSparse_(ax, t, y, colour, style, name)
+            % plotSparse_  Draw a series that may be mostly NaN.
+            %   A line segment needs two ADJACENT finite samples. A series sampled at a
+            %   coarse diagnostic interval, or punctuated by rank-deficient epochs, has
+            %   none, so a plain line plot renders an empty axes even though the data is
+            %   there. Fall back to markers in that case so the samples are visible.
+            if isempty(y) || ~any(isfinite(y)); return; end
+            n = min(numel(t), numel(y));
+            t = t(1:n); y = y(1:n);
+            fin = isfinite(y);
+            hasSegment = any(fin(1:end-1) & fin(2:end));
+            if hasSegment
+                plot(ax, t, y, 'Color',colour, 'LineStyle',style, ...
+                    'LineWidth',0.8, 'DisplayName',name);
+            else
+                plot(ax, t(fin), y(fin), 'Color',colour, 'LineStyle','none', ...
+                    'Marker','o', 'MarkerSize',3, 'MarkerFaceColor',colour, ...
+                    'DisplayName',name);
+            end
         end
 
         % ................................................................
@@ -1178,7 +1208,8 @@ classdef ClockExactReportBuilder
             % stateEstimation receives `summary` so a federated-swarm run can place the two
             % swarm plots directly after the RAC final-zoom row (see item-9 change).
             revgnss.report.stateEstimation(fid, plotPaths, stem, cfg, diag, figDir, summary);
-            revgnss.report.measurementValidation(fid, plotPaths, stem, figDir, diag);
+            revgnss.report.measurementValidation( ...
+                fid, plotPaths, stem, figDir, diag, cfg, summary);
             revgnss.report.oscillatorValidation(fid, plotPaths, stem, figDir, cfg);
             revgnss.report.txCodeBias(fid, diag, cfg);
             revgnss.report.tropZwdArchitecture(fid, cfg);
@@ -1743,14 +1774,25 @@ classdef ClockExactReportBuilder
                 if gi == 3
                     nSA_ap = CE.getCfgNum_(cfg, {'scenario','nSpaceAssets'}, 1);
                     if nSA_ap > 1
-                        guardA_ = CE.getLogical_(cfg, {'multiAsset','towerSecondary','atmosphere','enable'}, false);
-                        dynB_   = CE.getLogical_(cfg, {'multiAsset','injectTruthSideDynamics'}, false);
-                        fprintf(fid, ['{\\footnotesize\\itshape Multi-asset scope (%d spacecraft): the effects above are ' ...
-                            'applied to the chief''s tower links. Each secondary satellite receives a divergent uplink ' ...
-                            'atmosphere only when \\texttt{multiAsset.towerSecondary.atmosphere} is enabled (this run: %s), ' ...
-                            'and truth-side per-satellite dynamics only when \\texttt{injectTruthSideDynamics} is enabled ' ...
-                            '(this run: %s). Inter-satellite links carry no atmosphere.}\\\\[4pt]\n'], ...
-                            round(nSA_ap), CE.yesNo_(guardA_,'enabled','off'), CE.yesNo_(dynB_,'enabled','off'));
+                        jointMode_ = strcmpi(CE.getCfgStr_(cfg, ...
+                            {'multiAsset','mode'},'fast'),'joint');
+                        if jointMode_
+                            fprintf(fid, ['{\\footnotesize\\itshape Multi-asset scope (%d spacecraft): ' ...
+                                'each jointly estimated spacecraft uses its own ground-link ' ...
+                                'measurement model and error-chain realization. The configured ' ...
+                                'atmosphere therefore applies to every spacecraft--tower uplink. ' ...
+                                'Inter-satellite links carry no neutral-atmosphere or ionosphere term.}\\\\[4pt]\n'], ...
+                                round(nSA_ap));
+                        else
+                            guardA_ = CE.getLogical_(cfg, {'multiAsset','towerSecondary','atmosphere','enable'}, false);
+                            dynB_   = CE.getLogical_(cfg, {'multiAsset','injectTruthSideDynamics'}, false);
+                            fprintf(fid, ['{\\footnotesize\\itshape Multi-asset scope (%d spacecraft): the effects above are ' ...
+                                'applied to the chief''s tower links. Each secondary satellite receives a divergent uplink ' ...
+                                'atmosphere only when \\texttt{multiAsset.towerSecondary.atmosphere} is enabled (this run: %s), ' ...
+                                'and truth-side per-satellite dynamics only when \\texttt{injectTruthSideDynamics} is enabled ' ...
+                                '(this run: %s). Inter-satellite links carry no atmosphere.}\\\\[4pt]\n'], ...
+                                round(nSA_ap), CE.yesNo_(guardA_,'enabled','off'), CE.yesNo_(dynB_,'enabled','off'));
+                        end
                     end
                 end
             end
@@ -1937,7 +1979,7 @@ classdef ClockExactReportBuilder
                 'Stage~66 single-asset one-way simulation: ' ...
                 '(A) attitude estimator clearly identified as a carrier lever-arm quaternion EKF; ' ...
                 '(B) stochastic tower and spacecraft clocks replace perfect corrections; ' ...
-                '(C) matched twoBodyRk4 truth propagator + twoBody EKF dynamics replace static-ECEF truth.}\n\n']);
+                '(C) twoBodyRk4 truth propagation and twoBody EKF dynamics use the same force family and replace static-ECEF truth.}\n\n']);
 
             fprintf(fid, '\\begin{center}\\small\n');
 
@@ -1987,7 +2029,7 @@ classdef ClockExactReportBuilder
                 strrep(propMode_,'_','\_'));
             dynMode_ = 'twoBody';
             if isfield(summary,'stage67DynamicsMode'); dynMode_ = summary.stage67DynamicsMode; end
-            fprintf(fid, 'EKF dynamics & \\texttt{%s} (matched to truth propagator)\\\\\n', ...
+            fprintf(fid, 'EKF dynamics & \\texttt{%s} (same force family as truth propagator)\\\\\n', ...
                 strrep(dynMode_,'_','\_'));
             propEn_ = true;
             if isfield(summary,'stage67OrbitProp'); propEn_ = summary.stage67OrbitProp; end

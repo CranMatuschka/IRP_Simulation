@@ -9,11 +9,6 @@ classdef MonteCarloConsistency
     %   and band-checks the pooled sums with a two-sided chi-squared interval
     %   (revgnss.ChiSquareConsistency).
     %
-    %   Use revgnss.ConfigFactory.matchedErrorBaselineConfig as baseCfg for a two-sided
-    %   verdict: masterConfig is conservative-by-design (R/Q inflated) and sits BELOW the
-    %   band. Result is labelled 'partialCovarianceAwareSynthetic' -- consistency
-    %   evidence, not real-world proof.
-    %
     %   For a swarm 'position' run it ALSO pools the Guard C formation-CENTROID NEES across
     %   seeds (result.centroidVerdict / .centroidNeesPerDof / .perSeedCentroidNeesPerDof) --
     %   the authoritative cross-seed absolute-trustworthiness gate that turns Guard C's single-

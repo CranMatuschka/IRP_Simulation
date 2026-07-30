@@ -6,7 +6,7 @@ classdef MeasurementStackMetadata
 
     methods (Static)
 
-        function errStruct = annotate(cfg, H, M, errStruct, stateMap)
+        function errStruct = annotate(cfg, H, M, errStruct, stateMap, assetIdx)
             % annotate  Add measType_perRow and observability to errStruct.
             %
             % Inputs:
@@ -20,6 +20,7 @@ classdef MeasurementStackMetadata
             %   .observability    — struct from ObservabilityDiagnostics (or empty struct)
             %   .measType_perRow  — cell array of row-type strings
 
+            if nargin < 6 || isempty(assetIdx); assetIdx = 1; end
             M_rows = size(H, 1);
 
             % Count Doppler rows
@@ -51,14 +52,24 @@ classdef MeasurementStackMetadata
             end
             errStruct.measType_perRow = mType;
             errStruct.observableStack = revgnss.ReverseGnssObservableAdapter.build( ...
-                cfg, H, M, errStruct, stateMap);
+                cfg, H, M, errStruct, stateMap, assetIdx);
 
             % Observability diagnostics (gated by cfg)
             if isfield(cfg,'diagnostics') && ...
                     isfield(cfg.diagnostics,'observability') && ...
                     cfg.diagnostics.observability.enabled
+                analysisMap = stateMap;
+                block = revgnss.AssetStateBlock.forAsset(stateMap,assetIdx);
+                analysisMap.r_idx = block.r;
+                analysisMap.v_idx = block.v;
+                analysisMap.euler_idx = block.euler;
+                analysisMap.b_rx_idx = block.b;
+                analysisMap.bdot_rx_idx = block.bdot;
+                analysisMap.ambiguityIdx = block.ambiguity;
+                analysisMap.zwdIdx = block.zwd;
+                analysisMap.ionoIdx = block.iono;
                 errStruct.observability = revgnss.ObservabilityDiagnostics.analyze( ...
-                    H, stateMap, cfg, mType);
+                    H, analysisMap, cfg, mType);
             else
                 errStruct.observability = struct();
             end

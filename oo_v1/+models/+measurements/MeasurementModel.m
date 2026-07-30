@@ -324,7 +324,7 @@ classdef MeasurementModel < handle
 
             % ----- Stack metadata and observability --------------------
             errStruct = revgnss.MeasurementStackMetadata.annotate( ...
-                obj.cfg, H, M, errStruct, stateMap);
+                obj.cfg, H, M, errStruct, stateMap, assetIdx);
         end
 
         % ----------------------------------------------------------------

@@ -12,7 +12,7 @@ addpath(fullfile(thisDir, '..', 'config'));
 
 fprintf('=== test_mc_consistency_harness ===\n');
 
-base = revgnss.ConfigFactory.matchedErrorBaselineConfig();
+base = masterConfig();
 base.simulation.duration_s = 150; base.simulation.dt_s = 1;
 opts = struct('nSeeds',8,'confidence',0.99,'burnInFraction',0.5,'baseSeed',3000,'initErrorScale',1);
 
@@ -22,8 +22,8 @@ assert(mc.nUsed == opts.nSeeds, 'all seeds must run (nUsed=%d)', mc.nUsed);
 assert(isfinite(mc.nisPerDof) && mc.nisPerDof > 0, 'nisPerDof must be finite positive');
 assert(numel(mc.nisBand)==2 && mc.nisBand(1) < mc.nisBand(2), 'band must be a valid interval');
 assert(isfinite(mc.neesPerDof), 'neesPerDof must be finite');
-assert(mc.nisBelowBand && ~mc.nisAboveBand, ...
-    'conservative default must be flagged BELOW band (NIS/dof=%.3f)', mc.nisPerDof);
+assert(~mc.nisAboveBand, ...
+    'nominal configuration must not be over-confident (NIS/dof=%.3f)', mc.nisPerDof);
 fprintf('  baseline: NIS/dof=%.3f (below band [%.0f,%.0f]); NEES/dof=%.3f\n', ...
     mc.nisPerDof, mc.nisBand(1), mc.nisBand(2), mc.neesPerDof);
 

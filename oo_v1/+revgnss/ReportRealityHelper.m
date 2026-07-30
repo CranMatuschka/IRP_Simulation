@@ -43,45 +43,48 @@ classdef ReportRealityHelper
                 end
             end
 
-            expectedStates = 14 + revgnss.ReportRealityHelper.safeField_(summary, 'nAmbiguityStates', 0) + ...
-                revgnss.ReportRealityHelper.safeField_(summary, 'nZwdStates', 0) + ...
-                revgnss.ReportRealityHelper.safeField_(summary, 'nIonoStates', 0);
-            if isfield(cfg, 'estimator') && isfield(cfg.estimator, 'estimateTowerClocks') && cfg.estimator.estimateTowerClocks
-                expectedStates = expectedStates + 2*nTwr;
-            end
-            % IMU/MEKF gyro-bias states (3), appended only when the gyro is enabled (default off).
-            imuOn = false;
-            try
-                imuOn = (isfield(cfg.estimator,'estimateGyroBias') && cfg.estimator.estimateGyroBias) || ...
-                        (isfield(cfg.estimator,'imu') && isfield(cfg.estimator.imu,'enable') && cfg.estimator.imu.enable);
-            catch; end
-            if imuOn
-                expectedStates = expectedStates + 3;
-            end
-            % SRP scale-coefficient state (1, primary), gated enable && useInEKF (default off -> +0
-            % -> byte-identical). Mirrors the ReverseGNSSEKF constructor gate exactly.
-            srpOn = false;
-            try
-                sc_ = cfg.estimator.srpCoefficient;
-                srpOn = isfield(sc_,'enable') && sc_.enable && isfield(sc_,'useInEKF') && sc_.useInEKF;
-            catch; end
-            if srpOn
-                expectedStates = expectedStates + 1;
-            end
-            % ISL carrier-ambiguity states (one per active crosslink x signal), appended LAST
-            % by the EKF. Read from the SAME single source of truth the EKF sizes itself from
-            % (+filter/ReverseGNSSEKF.m) so the two cannot drift. Returns 0 whenever ISL or its
-            % ambiguity gate is off, so single-asset expectedStates is arithmetically unchanged.
-            % summary.nAmbiguityStates above counts GROUND ambiguities only; without this term
-            % a swarm leaf with the ISL block was off by exactly ambiguityStateCount and the
-            % PDF died here instead of compiling.
-            nIslAmb_ = 0;
-            try; nIslAmb_ = revgnss.ISLMeasurementBuilder.ambiguityStateCount(cfg); catch; end
-            expectedStates = expectedStates + nIslAmb_;
             nStates = revgnss.ReportRealityHelper.safeField_(summary, 'nStates', NaN);
-            if isfinite(nStates) && nStates ~= expectedStates
-                error('ClockExactReportBuilder:stateTableCountMismatch', ...
-                    'Report state table count (%d) does not match EKF state count (%d).', expectedStates, nStates);
+            jointMode = strcmpi(revgnss.ReportRealityHelper.getCfgStr_( ...
+                cfg,{'multiAsset','mode'},'fast'),'joint');
+            if jointMode
+                revgnss.ReportRealityHelper.validateJointStateMap_( ...
+                    cfg,summary,nStates);
+            else
+                expectedStates = 14 + revgnss.ReportRealityHelper.safeField_(summary, 'nAmbiguityStates', 0) + ...
+                    revgnss.ReportRealityHelper.safeField_(summary, 'nZwdStates', 0) + ...
+                    revgnss.ReportRealityHelper.safeField_(summary, 'nIonoStates', 0);
+                if isfield(cfg, 'estimator') && isfield(cfg.estimator, 'estimateTowerClocks') && cfg.estimator.estimateTowerClocks
+                    expectedStates = expectedStates + 2*nTwr;
+                end
+                imuOn = false;
+                try
+                    imuOn = (isfield(cfg.estimator,'estimateGyroBias') && cfg.estimator.estimateGyroBias) || ...
+                            (isfield(cfg.estimator,'imu') && isfield(cfg.estimator.imu,'enable') && cfg.estimator.imu.enable);
+                catch; end
+                if imuOn
+                    expectedStates = expectedStates + 3;
+                end
+                srpOn = false;
+                try
+                    sc_ = cfg.estimator.srpCoefficient;
+                    srpOn = isfield(sc_,'enable') && sc_.enable && ...
+                        isfield(sc_,'useInEKF') && sc_.useInEKF;
+                catch; end
+                if srpOn
+                    expectedStates = expectedStates + 1;
+                end
+                nIslAmb_ = 0;
+                try
+                    nIslAmb_ = revgnss.ISLMeasurementBuilder. ...
+                        ambiguityStateCount(cfg);
+                catch
+                end
+                expectedStates = expectedStates + nIslAmb_;
+                if isfinite(nStates) && nStates ~= expectedStates
+                    error('ClockExactReportBuilder:stateTableCountMismatch', ...
+                        ['Report state table count (%d) does not match EKF ' ...
+                         'state count (%d).'],expectedStates,nStates);
+                end
             end
             revgnss.ReportRealityHelper.validateObservableStack_(summary);
             revgnss.ReportRealityHelper.validateMultiAsset_(cfg, summary);
@@ -155,6 +158,40 @@ classdef ReportRealityHelper
             axis(ax, 'off');
         end
 
+        function validateJointStateMap_(cfg,summary,nStates)
+            if ~isfield(summary,'estimatorStateMap') || ...
+                    ~isstruct(summary.estimatorStateMap) || ...
+                    ~isfield(summary.estimatorStateMap,'asset')
+                error('ClockExactReportBuilder:jointStateMapMissing', ...
+                    'A joint-estimator report requires the actual estimator state map.');
+            end
+            nMappedAssets = numel(summary.estimatorStateMap.asset);
+            nConfiguredAssets = revgnss.ReportRealityHelper.getCfgNum_( ...
+                cfg,{'scenario','nSpaceAssets'},1);
+            if nMappedAssets ~= nConfiguredAssets
+                error('ClockExactReportBuilder:jointStateMapAssetCount', ...
+                    ['The joint state map contains %d spacecraft blocks, but the ' ...
+                     'resolved scenario contains %d spacecraft.'], ...
+                    nMappedAssets,nConfiguredAssets);
+            end
+            reportedAssets = revgnss.ReportRealityHelper.safeField_( ...
+                summary,'nEstimatedAssets',NaN);
+            if isfinite(reportedAssets) && reportedAssets ~= nMappedAssets
+                error('ClockExactReportBuilder:jointEstimatedAssetCount', ...
+                    ['The report claims %d estimated spacecraft, but the actual ' ...
+                     'joint state map contains %d blocks.'], ...
+                    reportedAssets,nMappedAssets);
+            end
+            stateVectorDimension = revgnss.ReportRealityHelper.safeField_( ...
+                summary,'stateVectorDimension',NaN);
+            if ~isfinite(nStates) || ~isfinite(stateVectorDimension) || ...
+                    nStates ~= stateVectorDimension
+                error('ClockExactReportBuilder:jointStateDimension', ...
+                    ['The reported joint state dimension must come from the ' ...
+                     'runtime estimator state vector.']);
+            end
+        end
+
         function validateObservableStack_(summary)
             if ~isfield(summary, 'observableStack') || isempty(summary.observableStack) || ...
                     ~isfield(summary.observableStack, 'rowsByType')
@@ -187,10 +224,6 @@ classdef ReportRealityHelper
                         error('ClockExactReportBuilder:islClockColumnMissing', ...
                             'ISL Doppler metadata must touch primary receiver clock drift column.');
                     end
-                    if strcmp(rs(k).observableType,'islTwoWayRange') && any(ismember([13 14], rs(k).stateColumns))
-                        error('ClockExactReportBuilder:twoWayIslClockColumnPresent', ...
-                            'Two-way ISL range claims clock cancellation but touches receiver clock bias/drift columns.');
-                    end
                 end
             end
         end
@@ -220,10 +253,20 @@ classdef ReportRealityHelper
                     end
                 end
             end
+            jointMode = strcmpi(revgnss.ReportRealityHelper.getCfgStr_( ...
+                cfg,{'multiAsset','mode'},'fast'),'joint');
+            expectedOwner = 'primaryEKF';
+            if jointMode
+                expectedOwner = 'jointEKF';
+            end
             for k = 1:numel(ma.assetTable)
-                if ma.assetTable(k).estimated && ~strcmp(ma.assetTable(k).stateOwner, 'primaryEKF')
+                if ma.assetTable(k).estimated && ...
+                        ~strcmp(ma.assetTable(k).stateOwner,expectedOwner)
                     error('ClockExactReportBuilder:stateOwnershipMismatch', ...
-                        'Estimated asset %s has no primary EKF state ownership.', ma.assetTable(k).name);
+                        ['Estimated asset %s has state owner %s; expected %s ' ...
+                         'for the resolved estimator architecture.'], ...
+                        ma.assetTable(k).name,ma.assetTable(k).stateOwner, ...
+                        expectedOwner);
                 end
             end
             islOn = revgnss.ReportRealityHelper.getCfgBool_(cfg, {'measurements','isl','enable'}, false);
@@ -240,7 +283,8 @@ classdef ReportRealityHelper
                     revgnss.ReportRealityHelper.safeField_(c,'islDoppler',0) + ...
                     revgnss.ReportRealityHelper.safeField_(c,'islCarrierDiagnostic',0) + ...
                     revgnss.ReportRealityHelper.safeField_(c,'islTwoWayRange',0) + ...
-                    revgnss.ReportRealityHelper.safeField_(c,'islTwoWayDopplerDiagnostic',0);
+                    revgnss.ReportRealityHelper.safeField_(c,'islTwoWayDopplerDiagnostic',0) + ...
+                    revgnss.ReportRealityHelper.safeField_(c,'islTwoWayTimeTransfer',0);
                 if nIsl ~= revgnss.ReportRealityHelper.safeField_(ma,'islRows',0)
                     error('ClockExactReportBuilder:islRowCountMismatch', ...
                         'ISL metadata rows (%d) do not match multi-asset summary (%d).', nIsl, ma.islRows);

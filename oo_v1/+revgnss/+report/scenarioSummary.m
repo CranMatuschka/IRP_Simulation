@@ -14,19 +14,35 @@ function scenarioSummary(fid, cfg, summary, diag, nTwr, nRx, dur, dt, esc, plotP
     carrMode = CE.getCfgStr_(cfg, {'measurements','carrierMode'}, 'diagnostic');
     clkMode  = CE.getCfgStr_(cfg, {'estimator','towerClockMode'}, 'perfectTruth');
     L = @revgnss.ReportLabel.humanize;
+    jointMode = strcmpi(CE.getCfgStr_(cfg, ...
+        {'multiAsset','mode'},'fast'),'joint');
 
     fprintf(fid, '\\section{Goal and Scenario}\n');
-    fprintf(fid, ['The goal of this simulation is to evaluate whether a single GEO-class space asset can ' ...
-        'estimate its orbit, receiver clock, and selected auxiliary states from synthetic reverse-GNSS ' ...
-        'measurements transmitted by a small ground network. The report compares the estimator against the ' ...
-        'known synthetic truth and summarises the measurement geometry, stochastic assumptions, and residual ' ...
-        'consistency. Results are valid for this controlled synthetic scenario only and are not a PPP-grade ' ...
-        'or real-data performance claim. ' ...
-        'The run length is %.2f hours (%.0f s) with %.1f s sampling.\n\n'], dur/3600, dur, dt);
+    if jointMode
+        fprintf(fid, ['This controlled synthetic scenario uses one centralized joint ' ...
+            'error-state EKF to estimate every configured spacecraft and their full ' ...
+            'cross-spacecraft covariance. Ground reverse-GNSS observations and explicitly ' ...
+            'configured inter-satellite observations are processed once in that joint filter. ' ...
+            'The report is a deterministic truth comparison, not an ensemble-consistency, ' ...
+            'flight-performance, or complete constellation-network validation. ' ...
+            'The run length is %.2f hours (%.0f s) with %.1f s sampling.\n\n'], ...
+            dur/3600,dur,dt);
+    else
+        fprintf(fid, ['The goal of this simulation is to evaluate whether a single GEO-class space asset can ' ...
+            'estimate its orbit, receiver clock, and selected auxiliary states from synthetic reverse-GNSS ' ...
+            'measurements transmitted by a small ground network. The report compares the estimator against the ' ...
+            'known synthetic truth and summarises the measurement geometry, stochastic assumptions, and residual ' ...
+            'consistency. Results are valid for this controlled synthetic scenario only and are not a PPP-grade ' ...
+            'or real-data performance claim. ' ...
+            'The run length is %.2f hours (%.0f s) with %.1f s sampling.\n\n'], dur/3600, dur, dt);
+    end
 
     % Scenario table (values from cfg/summary; internal modes humanised)
     orbitClass = CE.getCfgStr_(cfg, {'scenario','orbitClass'}, 'GEO');
     nSA        = CE.getCfgNum_(cfg, {'scenario','nSpaceAssets'}, 1);
+    if jointMode && isfield(summary,'nEstimatedAssets')
+        nSA = summary.nEstimatedAssets;
+    end
     % For a federated swarm the chief runs as its own single-asset EKF (the reconstructed
     % chief cfg carries nSpaceAssets == 1); report the true scenario asset count so the
     % "Space assets" row always matches the number of satellites in the scenario.
@@ -39,11 +55,32 @@ function scenarioSummary(fid, cfg, summary, diag, nTwr, nRx, dur, dt, esc, plotP
     families   = {L(codeMode)};
     if ~isempty(carrMode) && ~strcmp(carrMode,'off'); families{end+1} = L(carrMode); end
     if dopEnabled; families{end+1} = 'Doppler'; end
+    groundTimeTransferEnabled = CE.getLogical_(cfg, ...
+        {'measurements','twoWayTimeTransfer','enable'},false);
+    if groundTimeTransferEnabled
+        families{end+1} = 'ground reciprocal time transfer';
+    end
+    islTwoWayEnabled = CE.getLogical_(cfg, ...
+        {'measurements','isl','twoWay','enable'},false);
+    if islTwoWayEnabled && CE.getLogical_(cfg, ...
+            {'measurements','isl','twoWay','range','enable'},false)
+        families{end+1} = 'ISL two-way code range';
+    end
+    islTimeTransferEnabled = islTwoWayEnabled && CE.getLogical_(cfg, ...
+        {'measurements','isl','twoWay','timeTransfer','enable'},false);
+    if islTimeTransferEnabled
+        families{end+1} = 'ISL reciprocal time transfer';
+    end
     famStr = strjoin(families, ', ');
     fprintf(fid, '\\begin{center}\\small\n');
     fprintf(fid, '\\begin{tabular}{p{0.40\\textwidth}p{0.50\\textwidth}}\n\\toprule\n');
     fprintf(fid, '\\textbf{Metric} & \\textbf{Value}\\\\\n\\midrule\n');
-    fprintf(fid, 'Baseline requirement & Single GEO asset reverse-GNSS estimation scenario\\\\\n');
+    if jointMode
+        fprintf(fid, ['Estimator architecture & Centralized joint EKF; %d ' ...
+            'spacecraft state blocks\\\\\n'],nSA);
+    else
+        fprintf(fid, 'Baseline requirement & Single GEO asset reverse-GNSS estimation scenario\\\\\n');
+    end
     fprintf(fid, 'Orbit class & %s\\\\\n', esc(revgnss.ReportLabel.orbitClassLabel(orbitClass)));
     fprintf(fid, 'Space assets & %d\\\\\n', nSA);
     fprintf(fid, 'Ground transmitters & %d\\\\\n', nTwr);
@@ -52,6 +89,24 @@ function scenarioSummary(fid, cfg, summary, diag, nTwr, nRx, dur, dt, esc, plotP
     fprintf(fid, 'Simulation duration & %.0f s (%.2f h)\\\\\n', dur, dur/3600);
     fprintf(fid, 'Validation version & %s\\\\\n', esc(verS));
     fprintf(fid, '\\bottomrule\n\\end{tabular}\n\\end{center}\n\n');
+    if groundTimeTransferEnabled
+        groundTimeTransferMode = CE.getCfgStr_(cfg, ...
+            {'measurements','twoWayTimeTransfer','mode'}, ...
+            'firstOrderReciprocal');
+        fprintf(fid, ['The ground-to-space time-transfer mode is \\texttt{%s}. ' ...
+            'It supplies calibrated receiver--tower clock-difference rows; it is ' ...
+            'not a primitive four-timestamp event simulation.\\\\\n\n'], ...
+            esc(groundTimeTransferMode));
+    end
+    if islTimeTransferEnabled
+        timeTransferMode = CE.getCfgStr_(cfg, ...
+            {'measurements','isl','twoWay','timeTransfer','mode'}, ...
+            'firstOrderReciprocal');
+        fprintf(fid, ['The inter-satellite time-transfer mode is \\texttt{%s}. ' ...
+            'The current first-order reciprocal mode processes a clock-difference ' ...
+            'observable at a common coordinate epoch; it does not claim primitive ' ...
+            'four-timestamp event simulation.\\\\\n\n'],esc(timeTransferMode));
+    end
 
     % Coordinate frames and units
     fprintf(fid, '\\subsection{Coordinate Frames and Units}\n');
@@ -163,16 +218,14 @@ function scenarioSummary(fid, cfg, summary, diag, nTwr, nRx, dur, dt, esc, plotP
 
     % 1.3 State Vector — compact grouped table (ranges from active EKF config)
     fprintf(fid, '\\subsection{State Vector}\n');
-    fprintf(fid, ['The filter is an error-state EKF. The 14 base states are grouped below; optional ' ...
-        'blocks are appended when active. Index ranges are computed from the active filter ' ...
-        'configuration, not hard-coded.\n\n']);
-    doTwrClk = isfield(cfg,'estimator') && isfield(cfg.estimator,'estimateTowerClocks') ...
-        && cfg.estimator.estimateTowerClocks;
-    doAmb = isfield(cfg,'measurements') && isfield(cfg.measurements,'carrierMode') ...
-        && strcmp(cfg.measurements.carrierMode,'ekfFloat');
-    ambMode = CE.getCfgStr_(cfg, {'estimation','ambiguityMode'}, 'none');
-    doZwd = isfield(cfg,'estimation') && isfield(cfg.estimation,'troposphereMode') ...
-        && strcmp(cfg.estimation.troposphereMode,'perTowerZwd');
+    if jointMode
+        fprintf(fid, ['State and asset counts below come from the runtime joint ' ...
+            'state map. No single-spacecraft 14-state assumption is applied.\n\n']);
+    else
+        fprintf(fid, ['The filter is an error-state EKF. The 14 base states are grouped below; optional ' ...
+            'blocks are appended when active. Index ranges are computed from the active filter ' ...
+            'configuration, not hard-coded.\n\n']);
+    end
     fprintf(fid, '\\begin{center}\\small\n');
     fprintf(fid, ['\\begin{longtable}{@{}>{\\raggedright\\arraybackslash}p{0.21\\textwidth}' ...
         '>{\\raggedright\\arraybackslash}p{0.12\\textwidth}' ...
@@ -181,28 +234,75 @@ function scenarioSummary(fid, cfg, summary, diag, nTwr, nRx, dur, dt, esc, plotP
         '>{\\raggedright\\arraybackslash}p{0.36\\textwidth}@{}}\n']);
     fprintf(fid, '\\toprule\n');
     fprintf(fid, '\\textbf{State group} & \\textbf{Indices} & \\textbf{Dim} & \\textbf{Unit} & \\textbf{Description}\\\\\n\\midrule\n');
-    fprintf(fid, 'position & x[1:3] & 3 & m & spacecraft position error (RAC/ECEF as configured)\\\\\n');
-    fprintf(fid, 'velocity & x[4:6] & 3 & m/s & spacecraft velocity error\\\\\n');
-    fprintf(fid, 'attitude & x[7:9] & 3 & rad & small-angle body attitude error\\\\\n');
-    fprintf(fid, 'angular rate & x[10:12] & 3 & rad/s & body angular-rate error\\\\\n');
-    fprintf(fid, 'receiver clock bias & x[13] & 1 & m & receiver clock bias (positive sign)\\\\\n');
-    fprintf(fid, 'receiver clock drift & x[14] & 1 & m/s & receiver clock drift\\\\\n');
-    idxEnd = 14;
-    if doTwrClk
-        nB = 2*nTwr; a = idxEnd+1; b = idxEnd+nB; idxEnd = b;
-        fprintf(fid, 'tower clocks & x[%d:%d] & %d & m, m/s & per-tower clock bias and drift (negative sign in measurement)\\\\\n', a, b, nB);
+    if jointMode
+        if ~isfield(summary,'estimatorStateMap') || ...
+                ~isfield(summary.estimatorStateMap,'asset')
+            error('scenarioSummary:jointStateMapMissing', ...
+                'Joint scenario summary requires the runtime estimator state map.');
+        end
+        stateMap = summary.estimatorStateMap;
+        assignedIndices = [];
+        for assetIdx = 1:numel(stateMap.asset)
+            block = stateMap.asset(assetIdx);
+            indices = [block.r(:);block.v(:);block.euler(:); ...
+                block.omega(:);block.b(:);block.bdot(:)];
+            if isfield(block,'gyroBias') && ~isempty(block.gyroBias)
+                indices = [indices;block.gyroBias(:)]; %#ok<AGROW>
+            end
+            assignedIndices = [assignedIndices;indices]; %#ok<AGROW>
+            assetName = sprintf('spacecraft %d',assetIdx);
+            if isfield(summary,'estimatedAssetNames') && ...
+                    numel(summary.estimatedAssetNames) >= assetIdx
+                assetName = summary.estimatedAssetNames{assetIdx};
+            end
+            fprintf(fid,'%s navigation and clock & %s & %d & mixed & ', ...
+                esc(assetName),formatIndexSet_(indices),numel(indices));
+            fprintf(fid,['position, velocity, local attitude error, angular rate, ' ...
+                'receiver clock, and enabled gyro bias\\\\\n']);
+        end
+        totalStates = summary.stateVectorDimension;
+        additionalIndices = setdiff((1:totalStates).',unique(assignedIndices));
+        if ~isempty(additionalIndices)
+            fprintf(fid,['shared and measurement states & %s & %d & mixed & ' ...
+                'active ground-product, atmosphere, ambiguity, force, or ' ...
+                'hardware-calibration states from the runtime map\\\\\n'], ...
+                formatIndexSet_(additionalIndices),numel(additionalIndices));
+        end
+        fprintf(fid,'\\midrule\n');
+        fprintf(fid,['\\textbf{total} & x[1:%d] & %d & --- & ' ...
+            'runtime joint EKF state dimension\\\\\n'], ...
+            totalStates,totalStates);
+    else
+        fprintf(fid, 'position & x[1:3] & 3 & m & spacecraft position error (RAC/ECEF as configured)\\\\\n');
+        fprintf(fid, 'velocity & x[4:6] & 3 & m/s & spacecraft velocity error\\\\\n');
+        fprintf(fid, 'attitude & x[7:9] & 3 & rad & small-angle body attitude error\\\\\n');
+        fprintf(fid, 'angular rate & x[10:12] & 3 & rad/s & body angular-rate error\\\\\n');
+        fprintf(fid, 'receiver clock bias & x[13] & 1 & m & receiver clock bias (positive sign)\\\\\n');
+        fprintf(fid, 'receiver clock drift & x[14] & 1 & m/s & receiver clock drift\\\\\n');
+        idxEnd = 14;
+        doTwrClk = isfield(cfg,'estimator') && isfield(cfg.estimator,'estimateTowerClocks') ...
+            && cfg.estimator.estimateTowerClocks;
+        doAmb = isfield(cfg,'measurements') && isfield(cfg.measurements,'carrierMode') ...
+            && strcmp(cfg.measurements.carrierMode,'ekfFloat');
+        ambMode = CE.getCfgStr_(cfg, {'estimation','ambiguityMode'}, 'none');
+        doZwd = isfield(cfg,'estimation') && isfield(cfg.estimation,'troposphereMode') ...
+            && strcmp(cfg.estimation.troposphereMode,'perTowerZwd');
+        if doTwrClk
+            nB = 2*nTwr; a = idxEnd+1; b = idxEnd+nB; idxEnd = b;
+            fprintf(fid, 'tower clocks & x[%d:%d] & %d & m, m/s & per-tower clock bias and drift (negative sign in measurement)\\\\\n', a, b, nB);
+        end
+        if doAmb
+            if strcmp(ambMode,'floatPerTowerReceiverSignal'); nB = nTwr*nRx; else; nB = nTwr; end
+            a = idxEnd+1; b = idxEnd+nB; idxEnd = b;
+            fprintf(fid, 'float ambiguities & x[%d:%d] & %d & m & one float carrier ambiguity per active tower/receiver/signal arc\\\\\n', a, b, nB);
+        end
+        if doZwd
+            nB = nTwr; a = idxEnd+1; b = idxEnd+nB; idxEnd = b;
+            fprintf(fid, 'zenith wet delay & x[%d:%d] & %d & m & per-tower zenith wet delay residual\\\\\n', a, b, nB);
+        end
+        fprintf(fid, '\\midrule\n');
+        fprintf(fid, '\\textbf{total} & x[1:%d] & %d & --- & active EKF state dimension\\\\\n', idxEnd, idxEnd);
     end
-    if doAmb
-        if strcmp(ambMode,'floatPerTowerReceiverSignal'); nB = nTwr*nRx; else; nB = nTwr; end
-        a = idxEnd+1; b = idxEnd+nB; idxEnd = b;
-        fprintf(fid, 'float ambiguities & x[%d:%d] & %d & m & one float carrier ambiguity per active tower/receiver/signal arc\\\\\n', a, b, nB);
-    end
-    if doZwd
-        nB = nTwr; a = idxEnd+1; b = idxEnd+nB; idxEnd = b;
-        fprintf(fid, 'zenith wet delay & x[%d:%d] & %d & m & per-tower zenith wet delay residual\\\\\n', a, b, nB);
-    end
-    fprintf(fid, '\\midrule\n');
-    fprintf(fid, '\\textbf{total} & x[1:%d] & %d & --- & active EKF state dimension\\\\\n', idxEnd, idxEnd);
     fprintf(fid, '\\bottomrule\n\\end{longtable}\n\\end{center}\n');
 
     % 1.5 Measurement Model Equations
@@ -222,15 +322,30 @@ function scenarioSummary(fid, cfg, summary, diag, nTwr, nRx, dur, dt, esc, plotP
         'D &= \\dot{\\rho} + \\dot{b}_{\\mathrm{rx}} - \\dot{b}_{\\mathrm{tx}} + \\dot{\\Delta}_{\\mathrm{corr}} + \\epsilon_D \\\\\n' ...
         '\\nu &= z - h(\\hat{x}^{-})\n' ...
         '\\end{align*}\n']);
-    % Inter-satellite link rows (active only in the multi-asset / swarm scenario).
-    fprintf(fid, ['\\begin{align*}\n' ...
-        '\\rho_{\\mathrm{ISL}} &= \\lVert \\mathbf{r}_{\\mathrm{sc}} - \\mathbf{r}_{j} \\rVert + b_{\\mathrm{rx}} - b_{j} + \\epsilon_{\\mathrm{ISL}} \\\\\n' ...
-        'D_{\\mathrm{ISL}} &= \\mathbf{u}_{\\mathrm{sc},j}^{\\top}(\\mathbf{v}_{\\mathrm{sc}} - \\mathbf{v}_{j}) + \\dot{b}_{\\mathrm{rx}} - \\dot{b}_{j} + \\epsilon_{D,\\mathrm{ISL}}\n' ...
-        '\\end{align*}\n']);
-    fprintf(fid, ['{\\footnotesize The inter-satellite link (ISL) rows apply only when the multi-asset ' ...
-        'swarm scenario is enabled: $j$ is a neighbouring space asset and $\\mathbf{u}_{\\mathrm{sc},j}$ is the ' ...
-        'inter-asset line of sight. The ionosphere-free code combination is ' ...
-        '$P_{\\mathrm{IF}} = \\alpha P_{L1} + \\beta P_{L2}$ with $\\alpha=%.4f$, $\\beta=%.4f$.}\n\n'], alpha, beta);
+    twoWayCodeActive = CE.getLogical_(cfg, ...
+        {'measurements','isl','twoWay','range','enable'},false);
+    if twoWayCodeActive
+        fprintf(fid, ['\\begin{align*}\n' ...
+            'y_A &= \\tau_A(t_4)-\\tau_A(t_1) \\\\\n' ...
+            'z_{\\rho,2w} &= \\frac{c}{2}\\left[y_A-' ...
+            '\\widehat{\\delta}_{terminal}-' ...
+            '\\widehat{\\delta}_{turnaround}\\right]\n' ...
+            '\\end{align*}\n']);
+        fprintf(fid, ['{\\footnotesize The active inter-satellite observable is a ' ...
+            'idealized sequential four-event two-way code-delay measurement, referenced ' ...
+            'to the initiating spacecraft''s final reception tag. Its estimator prediction ' ...
+            'solves both propagation legs and uses both endpoint state blocks; it is not ' ...
+            'an instantaneous centre-to-centre range.}\n\n']);
+    else
+        fprintf(fid, ['\\begin{align*}\n' ...
+            '\\rho_{\\mathrm{ISL}} &= \\lVert \\mathbf{r}_{\\mathrm{sc}} - \\mathbf{r}_{j} \\rVert + b_{\\mathrm{rx}} - b_{j} + \\epsilon_{\\mathrm{ISL}} \\\\\n' ...
+            'D_{\\mathrm{ISL}} &= \\mathbf{u}_{\\mathrm{sc},j}^{\\top}(\\mathbf{v}_{\\mathrm{sc}} - \\mathbf{v}_{j}) + \\dot{b}_{\\mathrm{rx}} - \\dot{b}_{j} + \\epsilon_{D,\\mathrm{ISL}}\n' ...
+            '\\end{align*}\n']);
+        fprintf(fid, ['{\\footnotesize The inter-satellite link (ISL) rows apply only when the multi-asset ' ...
+            'swarm scenario is enabled: $j$ is a neighbouring space asset and $\\mathbf{u}_{\\mathrm{sc},j}$ is the ' ...
+            'inter-asset line of sight. The ionosphere-free code combination is ' ...
+            '$P_{\\mathrm{IF}} = \\alpha P_{L1} + \\beta P_{L2}$ with $\\alpha=%.4f$, $\\beta=%.4f$.}\n\n'], alpha, beta);
+    end
     % Observability rank (position + clock geometry) measured from the run.
     grStr = 'not available';
     try
@@ -329,18 +444,35 @@ function scenarioSummary(fid, cfg, summary, diag, nTwr, nRx, dur, dt, esc, plotP
     fprintf(fid, '\\toprule\n');
     fprintf(fid, '\\textbf{Type} & \\textbf{Name} & \\textbf{Frame} & \\textbf{Coord 1} & \\textbf{Coord 2} & \\textbf{Coord 3}\\\\\n');
     fprintf(fid, '\\midrule\n');
-    % Asset
-    rGeo = zeros(3,1);
-    try; rGeo = cfg.asset.r_ecef_m; catch; end
-    fprintf(fid, 'Spacecraft & %s & ECEF centre of mass & X %.5g m & Y %.5g m & Z %.5g m\\\\\n', ...
-        esc(scenarioName), rGeo(1), rGeo(2), rGeo(3));
-    % The same spacecraft position expressed in geodetic WGS84 lat/lon/alt (altitude in km,
-    % as a GEO sub-satellite point sits ~35 786 km above the ellipsoid).
-    try
-        [latSc_, lonSc_, altSc_] = models.frames.GeometryUtils.ecef2geodetic(rGeo);
-        fprintf(fid, 'Spacecraft & %s & Geodetic (WGS84) & Lat %.4f deg & Lon %.4f deg & Alt %.1f km\\\\\n', ...
-            esc(scenarioName), latSc_*180/pi, lonSc_*180/pi, altSc_/1000);
-    catch; end
+    if jointMode && isfield(cfg,'assets')
+        nReportedAssets = min(nSA,numel(cfg.assets));
+        for assetIdx = 1:nReportedAssets
+            assetName = cfg.assets(assetIdx).name;
+            rGeo = cfg.assets(assetIdx).r_ecef_m(:);
+            fprintf(fid, ['Spacecraft & %s & ECEF centre of mass & ' ...
+                'X %.5g m & Y %.5g m & Z %.5g m\\\\\n'], ...
+                esc(assetName),rGeo(1),rGeo(2),rGeo(3));
+            try
+                [latSc_,lonSc_,altSc_] = ...
+                    models.frames.GeometryUtils.ecef2geodetic(rGeo);
+                fprintf(fid, ['Spacecraft & %s & Geodetic (WGS84) & ' ...
+                    'Lat %.4f deg & Lon %.4f deg & Alt %.1f km\\\\\n'], ...
+                    esc(assetName),latSc_*180/pi,lonSc_*180/pi,altSc_/1000);
+            catch
+            end
+        end
+    else
+        rGeo = zeros(3,1);
+        try; rGeo = cfg.asset.r_ecef_m; catch; end
+        fprintf(fid, 'Spacecraft & %s & ECEF centre of mass & X %.5g m & Y %.5g m & Z %.5g m\\\\\n', ...
+            esc(scenarioName), rGeo(1), rGeo(2), rGeo(3));
+        try
+            [latSc_, lonSc_, altSc_] = models.frames.GeometryUtils.ecef2geodetic(rGeo);
+            fprintf(fid, 'Spacecraft & %s & Geodetic (WGS84) & Lat %.4f deg & Lon %.4f deg & Alt %.1f km\\\\\n', ...
+                esc(scenarioName), latSc_*180/pi, lonSc_*180/pi, altSc_/1000);
+        catch
+        end
+    end
     % Towers
     if isfield(cfg,'towers')
         nT = min(nTwr, numel(cfg.towers));
@@ -368,4 +500,25 @@ function s = fmtVal_(x, unit)
     else
         s = sprintf('%.4g %s', x, unit);
     end
+end
+
+function textValue = formatIndexSet_(indices)
+    indices = unique(round(indices(:).'));
+    if isempty(indices)
+        textValue = '---';
+        return
+    end
+    discontinuities = find(diff(indices) ~= 1);
+    starts = indices([1,discontinuities+1]);
+    ends = indices([discontinuities,numel(indices)]);
+    parts = cell(1,numel(starts));
+    for rangeIdx = 1:numel(starts)
+        if starts(rangeIdx) == ends(rangeIdx)
+            parts{rangeIdx} = sprintf('%d',starts(rangeIdx));
+        else
+            parts{rangeIdx} = sprintf('%d:%d', ...
+                starts(rangeIdx),ends(rangeIdx));
+        end
+    end
+    textValue = sprintf('x[%s]',strjoin(parts,','));
 end

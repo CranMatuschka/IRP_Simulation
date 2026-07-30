@@ -95,19 +95,28 @@ classdef ReportRunner
                 fprintf('  MAT writing disabled by cfg.report.writeMat = false.\n');
             end
 
-            % ---- Multi-asset: route to the federated swarm path ---------
-            % nSpaceAssets>1 -> N INDEPENDENT single-asset EKFs + the ISL/TWSTFT relative layer,
-            % written as ONE unified swarm .mat + PDF (docs/federated_swarm_architecture.md). The
-            % single-asset case (nSpaceAssets<=1) falls through to the normal pipeline below and is
-            % byte-identical to the golden. This is the single entry: run_oo_v1 -> runSingle -> here.
+            % ---- Multi-asset estimator routing --------------------------
+            % Joint mode follows the normal pipeline and owns all spacecraft
+            % states in one covariance. Fast mode retains independent filters.
             % A per-asset LEAF config carries the full constellation count (so the ISL builder
             % has transmitters) but must NOT re-enter the swarm: it IS one member of a swarm
             % already in flight. Forcing nSpaceAssets=1 used to be the implicit guarantee that
             % no leaf could satisfy this predicate; with the count preserved that guarantee is
             % gone, so singleAssetBase_ states it explicitly. Without this the chief's report
             % re-run recursed into a second full 6-asset swarm and NO PDF was ever compiled.
+            multiAssetMode = 'fast';
+            if isfield(cfg,'multiAsset') && isfield(cfg.multiAsset,'mode') && ...
+                    (ischar(cfg.multiAsset.mode) || isstring(cfg.multiAsset.mode))
+                multiAssetMode = char(cfg.multiAsset.mode);
+            end
+            if revgnss.IndependentFleetCoordinator.isEnabled(cfg)
+                out = revgnss.ReportRunner.runIndependentFleet_(cfg,reportFolder,pdfStem, ...
+                    pdfPath,matPath,writePdf,writeMat,version);
+                return;
+            end
             if isfield(cfg,'scenario') && isfield(cfg.scenario,'nSpaceAssets') && ...
                     round(cfg.scenario.nSpaceAssets) > 1 && ...
+                    ~strcmpi(multiAssetMode,'joint') && ...
                     ~revgnss.ReportRunner.perAssetLeaf_(cfg)
                 out = revgnss.ReportRunner.runFederatedSwarm_(cfg, reportFolder, pdfStem, ...
                     pdfPath, matPath, writePdf, writeMat, version);
@@ -150,6 +159,12 @@ classdef ReportRunner
 
             % ---- Collect summary metrics --------------------------------
             summary = revgnss.ReportRunner.collectSummary_(simData, cfg, version, reportFolder, pdfPath, matPath);
+            if sim.ekf.jointMultiAssetEnabled
+                summary = revgnss.ReportRunner.attachJointEstimatorSummary_( ...
+                    summary,sim,cfg);
+                summary = revgnss.ReportRunner.attachJointFormationDiagnostics_( ...
+                    summary,sim,cfg);
+            end
 
             % ---- Per-satellite estimate table (multi-asset 'position' runs) ----
             if isfield(summary,'swarmEstimate') && isstruct(summary.swarmEstimate) && ...
@@ -900,15 +915,15 @@ classdef ReportRunner
             try; summary.sagnacDoubleCountGuard = cfg.physics.lightTime.doubleCountGuard; catch; end
             summary.dopplerLightTimeDerivative = 'simplifiedV1';
             try; summary.dopplerLightTimeDerivative = cfg.physics.lightTime.dopplerDerivative; catch; end
-            summary.dynamicsMismatchStatus = 'matchedOrStationary';
+            summary.dynamicsMismatchStatus = 'sameForceFamilyOrStationary';
             if ~strcmpi(summary.truthPropagatorMode,'stationaryEcef') && ...
                     ~contains(lower(summary.truthPropagatorMode), lower(summary.estimatorDynamicsMode))
                 summary.dynamicsMismatchStatus = sprintf('%s truth / %s EKF', ...
                     summary.truthPropagatorMode, summary.estimatorDynamicsMode);
             elseif contains(lower(summary.truthPropagatorMode),'j2') && strcmpi(summary.estimatorDynamicsMode,'j2')
-                summary.dynamicsMismatchStatus = 'matched J2';
+                summary.dynamicsMismatchStatus = 'same J2 force family';
             elseif contains(lower(summary.truthPropagatorMode),'twobody') && strcmpi(summary.estimatorDynamicsMode,'twoBody')
-                summary.dynamicsMismatchStatus = 'two-body matched';
+                summary.dynamicsMismatchStatus = 'same two-body force family';
             end
             summary.processNoiseMismatchSigma_mps2 = 0;
             try
@@ -921,7 +936,7 @@ classdef ReportRunner
             % Booleans/strings are ignored by extractMetrics (logicals are not numeric in
             % MATLAB), so these never touch the frozen golden fingerprint; the report reads
             % them directly. Computed from cfg via the guard, so they stay honest in every
-            % scenario (reduced-dynamics default reports sameModelFamilies=false; a matched
+            % scenario (reduced-dynamics default reports sameModelFamilies=false; a
             % same-family run reports true). The rows cell drives the report table (Step 6).
             try
                 teAudit_ = revgnss.GeoRealWorldScenarioGuard.auditImperfectionSources(cfg);
@@ -1036,8 +1051,15 @@ classdef ReportRunner
             summary.campaignMedianAttitude_deg     = NaN;
             summary.campaignMaxAttitude_deg        = NaN;
             summary.campaignAmbiguityFixRate       = NaN;
+            summary.campaignAmbiguityAcceptanceFraction = NaN;
+            summary.campaignAmbiguityAcceptanceStatus = 'notApplicableFixingDisabled';
             summary.campaignSlipDetectionRate      = NaN;
+            summary.campaignSlipDetectionStatus    = 'notAvailableWithoutEventAssociation';
+            summary.campaignConfiguredSlipEpochs   = 0;
+            summary.campaignSlipDetectorDeclarations = 0;
             summary.campaignProductBoundaryFalseResetRate = NaN;
+            summary.campaignConsistencyIndependentRunCount = 0;
+            summary.campaignConsistencyInterpretation = 'notRun';
             summary.nisOverallStatus               = 'notAvailable';
             summary.nisCodeStatus                  = 'notAvailable';
             summary.nisCarrierStatus               = 'notAvailable';
@@ -1344,8 +1366,13 @@ classdef ReportRunner
             summary.covarianceJitterAdded                  = false;
             summary.nisInterpretation                      = 'diagonalR: code tower-clock product correlation not modelled';
             try
-                se74_ = cfg.covariance.sharedErrors;
-                if se74_.enable
+                if isfield(cfg,'covariance') && ...
+                        isfield(cfg.covariance,'sharedErrors')
+                    se74_ = cfg.covariance.sharedErrors;
+                else
+                    se74_ = struct('enable',false);
+                end
+                if isfield(se74_,'enable') && se74_.enable
                     summary.covarianceMode = se74_.mode;
                     if se74_.applyTowerClockToCode
                         % Extract codeBlockCov from last diag log entry
@@ -1393,7 +1420,7 @@ classdef ReportRunner
                 summary.nBaselineIntegerRejected            = 0;
                 summary.baselineIntegerFixClassification    = 'notAttempted';
                 summary.externalReferenceUsedAsSearchCenter = false;
-                summary.externalReferenceUsedForCalibration = true;
+                summary.externalReferenceUsedForCalibration = false;
             end
 
             % ---- Per-baseline ambiguity classification fields --------
@@ -1407,13 +1434,16 @@ classdef ReportRunner
                 summary.nBaselineArFixed                  = st75_.nIntegerFixed;
                 summary.nBaselineArRejectedArc            = st75_.nBaselineArRejectedArc;
                 summary.nBaselineArRejectedPhaseBias      = st75_.nBaselineArRejectedPhaseBias;
+                summary.nBaselineArFloat                  = st75_.nBaselineArFloat;
                 summary.nBaselineArFloatExternal          = st75_.nBaselineArFloatExternal;
                 summary.externalRefUsedForAnyCalibration  = st75_.externalRefUsedForCalibration;
+                summary.diffAttSolutionInterpretation     = st75_.solutionInterpretation;
                 if strcmp(st75_.partialFixPolicy,'useFixedOnlyOrExplicitMixed') || ...
                         strcmp(st75_.partialFixPolicy,'fixedOnly')
                     summary.nBaselineArUsedInEkf = st75_.nIntegerFixed;
                 else
-                    summary.nBaselineArUsedInEkf = st75_.nIntegerFixed + st75_.nBaselineArFloatExternal;
+                    summary.nBaselineArUsedInEkf = ...
+                        st75_.nIntegerFixed + st75_.nBaselineArFloat;
                 end
             catch ME75_
                 warning('ReportRunner:stage75ArFailed', ...
@@ -1462,10 +1492,21 @@ classdef ReportRunner
                 summary.nReceivers                 = nRx76_;
                 summary.nReceiverBaselinesPerTower = nBase76_;
                 summary.nActiveDiffAttBaselines    = nT76_ * nBase76_;
-                summary.multiAssetSupported        = false;
+                jointMode76_ = isfield(cfg,'multiAsset') && ...
+                    isfield(cfg.multiAsset,'mode') && strcmpi(cfg.multiAsset.mode,'joint');
+                summary.multiAssetSupported        = jointMode76_;
                 summary.multiAssetRequested        = (cfg.scenario.nSpaceAssets > 1);
-                summary.nSpaceAssetsSupported      = 1;
-                summary.dimensionContractStatus    = 'active_singleAsset_nTowersNReceiversVariable';
+                if jointMode76_
+                    summary.nSpaceAssetsSupported = ...
+                        revgnss.ReportRunner.fieldOr_(summary, ...
+                        'nEstimatedAssets',numel(sim.ekf.stateMap.asset));
+                    summary.dimensionContractStatus = ...
+                        'active_jointMultiAsset_nTowersNReceiversVariable';
+                else
+                    summary.nSpaceAssetsSupported = 1;
+                    summary.dimensionContractStatus = ...
+                        'active_singleAsset_nTowersNReceiversVariable';
+                end
             catch ME76dim_
                 warning('ReportRunner:stage76DimFailed','Stage 76 dimension: %s', ME76dim_.message);
                 summary.multiAssetSupported     = false;
@@ -1534,15 +1575,49 @@ classdef ReportRunner
                 summary.frequencyHardcodeAuditStatus  = 'unknown';
             end
 
+            % ---- Optional synthetic validation campaign ------------------
+            campResult85_ = revgnss.ScientificValidationCampaign.run(cfg);
+            campFns85_ = fieldnames(campResult85_);
+            for k85_ = 1:numel(campFns85_)
+                summary.(campFns85_{k85_}) = campResult85_.(campFns85_{k85_});
+            end
+            if ~strcmp(campResult85_.scientificCampaignStatus, 'notRun')
+                fprintf('=== Campaign: %s (overall=%s) ===\n', ...
+                    campResult85_.scientificCampaignProfile, ...
+                    campResult85_.campaignOverallStatus);
+            end
+
             % ---- Determine report layout before PDF generation -----------
             reportLayout = 'default';
             if isfield(cfg,'report') && isfield(cfg.report,'layout')
                 reportLayout = cfg.report.layout;
             end
+            summary.reportLayoutResolved = reportLayout;
+
+            % ---- PDF: joint estimator summary -----------------------------
+            texPath2 = '';
+            if writePdf && strcmp(reportLayout,'jointSummary')
+                jointFigures = revgnss.ReportRunner.makeJointReportFigures_( ...
+                    sim,summary,cfg);
+                fprintf('  Writing joint estimator PDF (%d pages)...\n', ...
+                    numel(jointFigures));
+                cfgWrite = cfg;
+                cfgWrite.plots.savePdf = true;
+                revgnss.ReportWriter.write(pdfPath,jointFigures,cfgWrite);
+                if exist(pdfPath,'file') ~= 2
+                    error('ReportRunner:pdfNotWritten', ...
+                        'Joint estimator PDF not written: %s',pdfPath);
+                end
+                info = dir(pdfPath);
+                if info.bytes <= 0
+                    error('ReportRunner:pdfEmpty', ...
+                        'Joint estimator PDF is empty: %s',pdfPath);
+                end
+                fprintf('  PDF written (joint estimator): %s  (%.1f kB)\n', ...
+                    pdfPath,info.bytes/1024);
 
             % ---- PDF: clockExact path (LaTeX pipeline, no MATLAB figures) -
-            texPath2 = '';
-            if writePdf && strcmp(reportLayout,'clockExact')
+            elseif writePdf && strcmp(reportLayout,'clockExact')
                 ceResult = revgnss.ClockExactReportBuilder.build( ...
                     simData, simData.getMeta(), sim.asset, sim.towers, cfg, summary);
                 texPath2 = ceResult.texPath;
@@ -1636,6 +1711,9 @@ classdef ReportRunner
                 finalStateEstimate = [];
                 finalTruthState    = [];
                 multiAssetTruth    = [];
+                jointEstimate      = [];
+                interSatelliteObservations = {};
+                interSatelliteTruthDiagnostics = {};
                 res                = [];
                 try
                     res = sim.getResults();
@@ -1644,6 +1722,16 @@ classdef ReportRunner
                     end
                     if isfield(res,'assetHistory') && ~isempty(res.assetHistory)
                         finalTruthState = res.assetHistory(end);
+                    end
+                    if isfield(res,'interSatelliteObservations')
+                        interSatelliteObservations = cellfun( ...
+                            @(observation) observation.toStruct(), ...
+                            res.interSatelliteObservations,'UniformOutput',false);
+                    end
+                    if isfield(res,'interSatelliteTruthDiagnostics')
+                        interSatelliteTruthDiagnostics = cellfun( ...
+                            @(diagnostic) diagnostic.toStruct(), ...
+                            res.interSatelliteTruthDiagnostics,'UniformOutput',false);
                     end
                 catch
                 end
@@ -1657,14 +1745,28 @@ classdef ReportRunner
                     multiAssetTruth = [];
                     fprintf('  [WP1] multi-asset truth not persisted: %s\n', meMat.message);
                 end
-                if ~isempty(multiAssetTruth)
+                try
+                    jointEstimate = revgnss.ReportRunner.buildJointEstimate_(sim, res, cfg);
+                catch meJoint
+                    jointEstimate = [];
+                    fprintf('  Joint estimate not persisted: %s\n', meJoint.message);
+                end
+                if ~isempty(multiAssetTruth) || ~isempty(jointEstimate)
                     save(matPath, 'cfg', 'summary', 'diagnostics', ...
                          'finalStateEstimate', 'finalTruthState', ...
-                         'multiAssetTruth', ...
+                         'multiAssetTruth', 'jointEstimate', ...
+                         'interSatelliteObservations', ...
+                         'interSatelliteTruthDiagnostics', ...
                          'cs', 'reportVersion', 'reportTimestamp', ...
                          'pdfPath', 'matPath', '-v7.3');
-                    fprintf('  [WP1] multi-asset truth persisted: %d assets x %d epochs (stride %g s)\n', ...
-                        multiAssetTruth.nAssets, numel(multiAssetTruth.time_s), multiAssetTruth.stride_s);
+                    if ~isempty(multiAssetTruth)
+                        fprintf('  Multi-asset truth persisted: %d assets x %d epochs (stride %g s)\n', ...
+                            multiAssetTruth.nAssets, numel(multiAssetTruth.time_s), multiAssetTruth.stride_s);
+                    end
+                    if ~isempty(jointEstimate)
+                        fprintf('  Joint estimate persisted: %d assets x %d epochs\n', ...
+                            jointEstimate.nAssets, numel(jointEstimate.time_s));
+                    end
                 else
                     save(matPath, 'cfg', 'summary', 'diagnostics', ...
                          'finalStateEstimate', 'finalTruthState', ...
@@ -1689,20 +1791,6 @@ classdef ReportRunner
                 for k = 1:numel(cfg.validation.warnings)
                     fprintf('    %d. %s\n', k, cfg.validation.warnings{k});
                 end
-            end
-
-            % ---- Scientific Validation Campaign ------------------
-            % Runs inside same invocation; no PDF produced by sub-simulations.
-            campResult85_ = revgnss.ScientificValidationCampaign.run(cfg);
-            % Merge all campaign fields into summary
-            campFns85_ = fieldnames(campResult85_);
-            for k85_ = 1:numel(campFns85_)
-                summary.(campFns85_{k85_}) = campResult85_.(campFns85_{k85_});
-            end
-            if campResult85_.scientificCampaignStatus ~= "notRun"
-                fprintf('=== Campaign: %s (overall=%s) ===\n', ...
-                    campResult85_.scientificCampaignProfile, ...
-                    campResult85_.campaignOverallStatus);
             end
 
             % ---- Assemble output struct ---------------------------------
@@ -1731,6 +1819,68 @@ classdef ReportRunner
 
             out.sim = sim;   % expose the sim (used when a federated per-asset report is requested)
             fprintf('=== ReportRunner: done ===\n');
+        end
+
+        function out = runIndependentFleet_(cfg,reportFolder,stem,pdfPath,matPath, ...
+                writePdf,writeMat,version)
+            % This route owns one local EKF per spacecraft and no link-fusion update.
+            if writePdf || writeMat
+                if ~isfolder(reportFolder); mkdir(reportFolder); end
+            end
+            fprintf('\n=== ReportRunner: independent local EKF fleet ===\n');
+            coordinator = revgnss.IndependentFleetCoordinator(cfg);
+            coordinator.initialize();
+            coordinator.run();
+            cfg = coordinator.cfg;
+            results = coordinator.getResults();
+            summary = coordinator.runtimeSummary();
+            summary.version = version;
+            summary.reportDataLabel = revgnss.IndependentFleetCoordinator.ArchitectureLabel;
+            if writePdf
+                summary.reportStatus = 'diagnosticOnlyIndependentFleet';
+            else
+                summary.reportStatus = 'dataOnlyIndependentFleet';
+            end
+
+            out = struct('cfg',cfg,'coordinator',coordinator, ...
+                'sim',coordinator.localSimulations{1}, ...
+                'simData',coordinator.localSimulations{1}.simData, ...
+                'data',coordinator.localSimulations{1}.simData.getData(), ...
+                'dataMeta',coordinator.localSimulations{1}.simData.getMeta(), ...
+                'summary',summary,'fleetResults',results, ...
+                'reportFolder',reportFolder,'pdfPath','','matPath','', ...
+                'texPath','','diagnosticReport',struct(), ...
+                'monteCarlo',struct('enabled',false));
+
+            if writeMat
+                fleet = struct('cfg',cfg,'results',results,'summary',summary, ...
+                    'kind',revgnss.IndependentFleetCoordinator.ArchitectureLabel); %#ok<NASGU>
+                save(matPath,'-struct','fleet','-v7.3');
+                out.matPath = matPath;
+                fprintf('  Independent-fleet MAT written: %s\n',matPath);
+            end
+            if writePdf
+                try
+                    diagnostic = revgnss.IndependentFleetDiagnosticReport.build( ...
+                        cfg,results,summary,reportFolder,stem);
+                    out.diagnosticReport = diagnostic;
+                    out.texPath = diagnostic.texPath;
+                    if diagnostic.success && ~isempty(diagnostic.pdfPath) && ...
+                            isfile(diagnostic.pdfPath)
+                        out.pdfPath = diagnostic.pdfPath;
+                        info = dir(diagnostic.pdfPath);
+                        fprintf('  Independent-fleet diagnostic PDF written: %s  (%.1f kB)\n', ...
+                            diagnostic.pdfPath,info.bytes/1024);
+                    else
+                        fprintf('  Independent-fleet diagnostic .tex written: %s\n', ...
+                            diagnostic.texPath);
+                    end
+                catch reportError
+                    fprintf(2,'  Independent-fleet diagnostic report FAILED (%s).\n', ...
+                        reportError.message);
+                end
+            end
+            fprintf('=== ReportRunner: independent local EKF fleet done ===\n');
         end
 
         % ================================================================
@@ -2071,47 +2221,12 @@ classdef ReportRunner
         end
 
         function setup = federatedSetup_(cfg)
-            % federatedSetup_  Shared per-asset config scaffold for the federated swarm: the
-            % single-asset base + the per-member absolute helix ICs (ECI) + the receiver-noise base
-            % seed. Factored out so runFederatedEstimation (all assets) and buildUnifiedReport_ (chief
-            % only) construct IDENTICAL per-asset configs. Behaviour-identical to the pre-refactor
-            % inline construction -> the relative-layer regression digest is byte-unchanged.
-            base = revgnss.ReportRunner.singleAssetBase_(cfg);
-            N = 1;
-            if isfield(cfg,'scenario') && isfield(cfg.scenario,'nSpaceAssets')
-                N = max(1, round(cfg.scenario.nSpaceAssets));
-            end
-            r0Cells = {}; v0Cells = {}; baseSeed = 42;
-            if N > 1
-                if ~(isfield(cfg,'orbit') && isfield(cfg.orbit,'useOrbitPropagator') && cfg.orbit.useOrbitPropagator)
-                    error('revgnss:ReportRunner:needsOrbitPropagator', ...
-                        'Federated N>1 needs cfg.orbit.useOrbitPropagator=true (per-asset helix truth).');
-                end
-                % crossTrackSpread is now declared in masterConfig (default 1.0). The local
-                % "if missing, use 1.0" override that used to live here was REMOVED: it
-                % disagreed with SwarmFormation.crossAmp_, which reads a missing field as
-                % 0.0. Absence therefore meant 3-D here and PLANAR there, so merely WRITING
-                % the documented default into the config silently flipped the formation and
-                % moved this path by 876 m. One key, one default, one place.
-                cfgLocal = cfg;
-                op = models.orbit.OrbitPropagator(cfgLocal.orbit);
-                [r0Cells, v0Cells] = revgnss.SwarmFormation.secondaryEciInitialStates(cfgLocal, op);
-                if isfield(base,'simulation') && isfield(base.simulation,'seed'); baseSeed = base.simulation.seed; end
-            end
-            setup = struct('base', base, 'N', N, 'r0Cells', {r0Cells}, 'v0Cells', {v0Cells}, 'baseSeed', baseSeed);
+            setup = revgnss.IndependentFleetScenarioFactory.federatedSetup( ...
+                cfg,revgnss.ReportRunner.keepIslInPerAssetEkf_(cfg));
         end
 
         function ci = assetConfigForIndex_(setup, ai)
-            % assetConfigForIndex_  The single-asset config for swarm member ai: asset 1 is the base;
-            % ai>=2 gets its own absolute helix IC (ECI), per-asset sat clock seed, and INDEPENDENT
-            % receiver-noise seed. Identical to the pre-refactor inline block.
-            ci = setup.base;
-            if ai >= 2
-                si = ai - 1;
-                ci.orbit.eciState0  = [setup.r0Cells{si}; setup.v0Cells{si}];   % this asset's absolute helix IC
-                ci.asset.clock.seed = 300 + ai;                                 % per-asset sat clock
-                ci.simulation.seed  = setup.baseSeed + 100000*(ai-1);           % INDEPENDENT receiver noise
-            end
+            ci = revgnss.IndependentFleetScenarioFactory.assetConfigForIndex(setup,ai);
         end
 
         function res = runOneAsset_(cfg1)
@@ -2155,27 +2270,8 @@ classdef ReportRunner
         end
 
         function base = singleAssetBase_(cfg)
-            % A single-asset config: one estimated asset, no swarm/ISL/secondary machinery.
-            base = revgnss.ReportRunner.stripSwarmEstimation_(cfg);
-            % nSpaceAssets=1 leaves the ISL builder with ZERO transmitters, so stripping it
-            % here would make keepIslInPerAssetEkf a knob that changes nothing. When ISL is
-            % kept, the constellation must survive into the per-asset sim: the member is the
-            % estimated primary and the others are product beacons (multiAsset.mode='fast').
-            % CAVEAT: assetConfigForIndex_ re-centres cfg.orbit on member ai, so for ai>=2
-            % SwarmFormation regenerates the neighbours as a helix around THAT member rather
-            % than the true constellation. Same shape and baseline statistics, but only the
-            % chief (ai=1) sees the physically true neighbour set.
-            if ~revgnss.ReportRunner.keepIslInPerAssetEkf_(cfg)
-                base.scenario.nSpaceAssets = 1;
-            end
-            % LEAF MARKER (internal plumbing, never a user knob). federatedSetup_ is the sole
-            % caller, so this reaches all leaf consumers -- serial loop, parallel workers,
-            % parallel fallback, the chief report re-run, and the savePerAsset re-run -- and it
-            % survives ConfigFactory.finalizeConfig, which is what also covers the in-leaf
-            % known-ambiguity-validation sub-run. DO NOT rmfield it after the dispatch check:
-            % that would strip it from the KAV config and re-open the recursion.
-            if ~isfield(base,'multiAsset'); base.multiAsset = struct(); end
-            base.multiAsset.perAssetLeaf = true;
+            base = revgnss.IndependentFleetScenarioFactory.singleAssetBase( ...
+                cfg,revgnss.ReportRunner.keepIslInPerAssetEkf_(cfg));
         end
 
         function tf = keepIslInPerAssetEkf_(cfg)
@@ -2198,48 +2294,430 @@ classdef ReportRunner
         end
 
         function c = stripSwarmEstimation_(cfg)
-            % Disable secondary estimation + ISL/TWSTFT (relative-layer, not per-asset EKF rows), set
-            % multiAsset.mode='fast' (passthrough). Truth-side untouched. Single-asset cfg -> unchanged.
-            c = cfg;
-            if isfield(c,'multiAsset')
-                c.multiAsset.mode = 'fast';
-                c.multiAsset.towersObserveSecondaries = false;
-                if isfield(c.multiAsset,'twoWayISL'); c.multiAsset.twoWayISL.enable = false; end
-                if isfield(c.multiAsset,'twoWayTimeTransferISL'); c.multiAsset.twoWayTimeTransferISL.enable = false; end
-                if isfield(c.multiAsset,'towerSecondary')
-                    ts = c.multiAsset.towerSecondary;
-                    if isfield(ts,'carrier');    ts.carrier.enable = false;    end
-                    if isfield(ts,'atmosphere');  ts.atmosphere.enable = false;  end
-                    if isfield(ts,'doppler');     ts.doppler.enable = false;     end
-                    if isfield(ts,'estimateAtmosphere'); ts.estimateAtmosphere = false; end
-                    if isfield(ts,'attitude');    ts.attitude.enable = false;    end
-                    if isfield(ts,'multiAntenna'); ts.multiAntenna.enable = false; end
-                    c.multiAsset.towerSecondary = ts;
-                end
-            end
-            % ISL rows inside each per-asset EKF. Stripped by default so the per-asset
-            % filters (W1, ground) and the relative layer (W2, ISL/TWSTFT) stay
-            % informationally disjoint -- see cfg.multiAsset.keepIslInPerAssetEkf. Keeping
-            % them makes the ISL carrier visible in the swarm report at the cost of
-            % double-counting ISL between W1 and W2.
-            keepIsl = revgnss.ReportRunner.keepIslInPerAssetEkf_(cfg);
-            if isfield(c,'measurements') && isfield(c.measurements,'isl') && ~keepIsl
-                c.measurements.isl.enable = false;
-            end
-            % Sat-sat TWSTFT is a RELATIVE-LAYER diagnostic scaffold that adds no per-asset EKF
-            % rows, so it belongs with the multiAsset.twoWay* keys above. Stripping it also
-            % removes an asymmetry: its validateConfig requires nSpaceAssets>=2, so a config
-            % with twstft.code.enable=true would hard-error when the leaf is collapsed to one
-            % asset but load fine when keepIslInPerAssetEkf preserves the count -- i.e. the
-            % toggle would decide whether a config is loadable at all.
-            if isfield(c,'measurements') && isfield(c.measurements,'twstft')
-                c.measurements.twstft.enable = false;
-            end
+            c = revgnss.IndependentFleetScenarioFactory.stripSwarmEstimation( ...
+                cfg,revgnss.ReportRunner.keepIslInPerAssetEkf_(cfg));
+        end
+
+        function writeRunLogFromSavedResult( ...
+                cfg,summary,pdfPath,matPath)
+            % Restore the standard run log after report-only regeneration.
+            reportFolder = fileparts(pdfPath);
+            [~,stem] = fileparts(pdfPath);
+            monteCarlo = struct('enabled',false,'ran',false, ...
+                'verdict','disabled');
+            revgnss.ReportRunner.writeRunLog_( ...
+                reportFolder,stem,cfg,cfg,summary,pdfPath,matPath, ...
+                monteCarlo);
         end
 
     end  % public static methods
 
     methods (Static, Access = private)
+
+        function summary = attachJointEstimatorSummary_(summary,sim,cfg)
+            stateMap = sim.ekf.stateMap;
+            nEstimatedAssets = numel(stateMap.asset);
+            nConfiguredAssets = numel(sim.assets);
+            if nEstimatedAssets ~= nConfiguredAssets
+                error('ReportRunner:jointAssetCount', ...
+                    ['The joint state map contains %d spacecraft blocks, but the ' ...
+                     'simulation contains %d spacecraft.'], ...
+                    nEstimatedAssets,nConfiguredAssets);
+            end
+
+            names = cell(1,nEstimatedAssets);
+            for assetIdx = 1:nEstimatedAssets
+                names{assetIdx} = sim.assets{assetIdx}.name;
+            end
+            summary.estimatorMultiAssetMode = 'joint';
+            summary.estimatorArchitecture = 'centralizedJointErrorStateEKF';
+            summary.nConfiguredAssets = nConfiguredAssets;
+            summary.nEstimatedAssets = nEstimatedAssets;
+            summary.estimatedAssetNames = names;
+            summary.stateVectorDimension = sim.ekf.nx;
+            summary.nStates = sim.ekf.nx;
+            summary.estimatorStateMap = stateMap;
+            summary.jointCovarianceDimension = size(sim.ekf.P);
+            summary.jointCovarianceIncludesCrossSpacecraftBlocks = true;
+            summary.validationInterpretation = ...
+                'singleRunDiagnosticNotStatisticalAcceptance';
+            summary.validationManifestStatus = 'notDeclared';
+            try
+                summary.validationManifestStatus = ...
+                    char(cfg.validation.manifest.status);
+            catch
+            end
+
+            twoWayEnabled = revgnss.ReportRunner.safeCfgBool_(cfg, ...
+                {'measurements','isl','twoWay','enable'},false);
+            scheduleSummary = ...
+                revgnss.ReportRunner.coherentTwoWayScheduleSummary_( ...
+                cfg,nEstimatedAssets,twoWayEnabled);
+            summary.coherentTwoWayCodeSchedule = scheduleSummary;
+            summary.coherentTwoWayCodeLinkCount = scheduleSummary.linkCount;
+            summary.coherentTwoWayCodeEndpoints = scheduleSummary.endpoints;
+        end
+
+        function summary = attachJointFormationDiagnostics_(summary,sim,cfg)
+            try
+                results = sim.getResults();
+                jointEstimate = revgnss.ReportRunner.buildJointEstimate_(sim, results, cfg);
+                multiAssetTruth = revgnss.ReportRunner.buildMultiAssetTruth_(results, cfg);
+                provenance = struct('physicalRangeRowsConsumed',0, ...
+                    'physicalRangeLinkCount',0);
+                if isfield(results,'coherentTwoWayRange') && ...
+                        isstruct(results.coherentTwoWayRange) && ...
+                        isfield(results.coherentTwoWayRange,'consumedRows')
+                    provenance.physicalRangeRowsConsumed = ...
+                        results.coherentTwoWayRange.consumedRows;
+                end
+                links = revgnss.TwoWayISLMeasurementBuilder.linkDefinitions(cfg);
+                provenance.physicalRangeLinkCount = numel(links);
+                if provenance.physicalRangeRowsConsumed > 0 && ...
+                        provenance.physicalRangeLinkCount == 0
+                    provenance.physicalRangeLinkCount = 1;
+                end
+                diagnostics = revgnss.JointMultiAssetFormationDiagnostics.compute( ...
+                    jointEstimate, multiAssetTruth, provenance);
+                if diagnostics.available
+                    summary.jointFormationDiagnostics = diagnostics;
+                end
+            catch formationException
+                warning('ReportRunner:jointFormationDiagnostics', ...
+                    'Joint formation diagnostics unavailable: %s', formationException.message);
+            end
+        end
+
+        function figures = makeJointReportFigures_(sim,summary,cfg)
+            figures = [ ...
+                revgnss.ReportRunner.makeJointSummaryPage_(summary,cfg), ...
+                revgnss.ReportRunner.makeJointStateComparisonPage_(sim,summary)];
+        end
+
+        function fig = makeJointSummaryPage_(summary,cfg)
+            fig = figure('Visible','off', ...
+                'Name','00 — Joint Estimator Summary', ...
+                'Units','normalized','Position',[0.08 0.06 0.84 0.88], ...
+                'Color','white');
+            ax = axes(fig,'Position',[0.06 0.05 0.90 0.90], ...
+                'Visible','off');
+
+            scenarioName = revgnss.ReportRunner.safeCfgStr_(cfg, ...
+                {'scenario','name'},'jointMultiSpacecraftScenario');
+            lines = { ...
+                'Joint Multi-Spacecraft Estimation Report'; ...
+                ''; ...
+                sprintf('Scenario: %s',scenarioName); ...
+                sprintf('Estimator: centralized joint error-state EKF'); ...
+                sprintf('Estimated spacecraft: %d of %d configured', ...
+                    summary.nEstimatedAssets,summary.nConfiguredAssets); ...
+                sprintf('State-vector dimension: %d', ...
+                    summary.stateVectorDimension); ...
+                sprintf('Covariance dimension: %d x %d, including cross-spacecraft blocks', ...
+                    summary.jointCovarianceDimension(1), ...
+                    summary.jointCovarianceDimension(2)); ...
+                sprintf('Ground transmitters: %d',summary.nTowers); ...
+                sprintf('Receiver phase centres per spacecraft: %d', ...
+                    summary.nReceivers); ...
+                sprintf('Assets: %s',strjoin(summary.estimatedAssetNames,', ')); ...
+                ''};
+
+            if summary.coherentTwoWayCodeLinkCount > 0
+                schedule = summary.coherentTwoWayCodeSchedule;
+                forwardFrequency = revgnss.ReportRunner.safeCfgNum_(cfg, ...
+                    {'measurements','isl','twoWay','forwardCarrierFrequency_Hz'},NaN);
+                returnFrequency = revgnss.ReportRunner.safeCfgNum_(cfg, ...
+                    {'measurements','isl','twoWay','returnCarrierFrequency_Hz'},NaN);
+                lines = [lines; { ...
+                    'Inter-satellite observation:'; ...
+                    '  idealized sequential four-event two-way code-delay observable'; ...
+                    sprintf('  configured coherent links: %d',schedule.linkCount); ...
+                    sprintf('  configured endpoint topology: %s', ...
+                        schedule.topologyDescription); ...
+                    sprintf('  final-reception reference epoch; open-loop period %.3g s', ...
+                        schedule.updatePeriod_s); ...
+                    sprintf('  forward / return carrier: %.6g / %.6g Hz', ...
+                        forwardFrequency,returnFrequency)}]; %#ok<AGROW>
+
+                if schedule.uniformActiveLinkCount && ...
+                        all(schedule.terminalDisjointByPhase)
+                    lines = [lines; {sprintf( ...
+                        '  each scheduled epoch activates %d terminal-disjoint links', ...
+                        schedule.activeLinkCountByPhase(1))}]; %#ok<AGROW>
+                end
+                for phaseIndex = 1:numel(schedule.phases_s)
+                    activeMask = schedule.linkPhaseIndex == phaseIndex;
+                    endpointText = cell(1,sum(activeMask));
+                    activeIndices = find(activeMask);
+                    for activeIndex = 1:numel(activeIndices)
+                        linkIndex = activeIndices(activeIndex);
+                        endpoints = schedule.endpoints(linkIndex,:);
+                        initiatorName = revgnss.ReportRunner.jointAssetName_( ...
+                            summary.estimatedAssetNames,endpoints(1));
+                        transponderName = revgnss.ReportRunner.jointAssetName_( ...
+                            summary.estimatedAssetNames,endpoints(2));
+                        endpointText{activeIndex} = sprintf('%s -> %s -> %s', ...
+                            initiatorName,transponderName,initiatorName);
+                    end
+                    matchingStatus = 'terminal-disjoint matching';
+                    if ~schedule.terminalDisjointByPhase(phaseIndex)
+                        matchingStatus = 'shared terminal assignments';
+                    end
+                    lines = [lines; {sprintf( ...
+                        '  phase %.3g s: %s (%s)', ...
+                        schedule.phases_s(phaseIndex), ...
+                        strjoin(endpointText,'; '),matchingStatus)}]; %#ok<AGROW>
+                end
+                lines = [lines; { ...
+                    ['  schedule is scenario-declared open loop; no adaptive ' ...
+                     'link scheduler is represented']; ...
+                    ''}]; %#ok<AGROW>
+            else
+                lines = [lines; {'Inter-satellite observation: disabled';''}]; %#ok<AGROW>
+            end
+
+            lines = [lines; { ...
+                sprintf('Validation-manifest status: %s', ...
+                    summary.validationManifestStatus); ...
+                ['Interpretation: deterministic per-run diagnostics. This report is not ' ...
+                 'an ensemble consistency, flight-performance, or full RF-network validation.']}];
+            text(ax,0,1,strjoin(lines,newline), ...
+                'VerticalAlignment','top','Interpreter','none', ...
+                'FontName','Menlo','FontSize',11);
+        end
+
+        function fig = makeJointStateComparisonPage_(sim,summary)
+            fig = figure('Visible','off', ...
+                'Name','01 — Joint State Truth Comparison', ...
+                'Units','normalized','Position',[0.06 0.05 0.88 0.90], ...
+                'Color','white');
+            layout = tiledlayout(fig,3,1,'TileSpacing','compact', ...
+                'Padding','compact');
+            history = sim.ekf.history;
+            time_s = history.time_s(:).';
+            colors = lines(summary.nEstimatedAssets);
+
+            positionAxes = nexttile(layout);
+            hold(positionAxes,'on');
+            clockAxes = nexttile(layout);
+            hold(clockAxes,'on');
+            attitudeAxes = nexttile(layout);
+            hold(attitudeAxes,'on');
+
+            for assetIdx = 1:summary.nEstimatedAssets
+                block = sim.ekf.stateMap.asset(assetIdx);
+                truth = sim.assets{assetIdx}.history;
+                nEpochs = min([numel(time_s),size(history.x,2), ...
+                    size(truth.r_ecef_m,2),numel(truth.rxClockBias_m), ...
+                    size(truth.euler_rad,2)]);
+                if nEpochs == 0
+                    continue
+                end
+                timeAsset_s = time_s(1:nEpochs);
+                positionError_m = vecnorm( ...
+                    history.x(block.r,1:nEpochs)- ...
+                    truth.r_ecef_m(:,1:nEpochs),2,1);
+                clockError_m = history.x(block.b,1:nEpochs)- ...
+                    truth.rxClockBias_m(1:nEpochs).';
+                attitudeError_deg = zeros(1,nEpochs);
+                hasQuaternionHistory = ...
+                    isfield(history,'nominalQuat_wxyz') && ...
+                    size(history.nominalQuat_wxyz,2) >= assetIdx && ...
+                    size(history.nominalQuat_wxyz,3) >= nEpochs;
+                for epochIdx = 1:nEpochs
+                    if hasQuaternionHistory
+                        estimatedQuaternion = ...
+                            history.nominalQuat_wxyz(:,assetIdx,epochIdx);
+                    else
+                        estimatedQuaternion = ...
+                            revgnss.AttitudeErrorStateKinematics.eulerToQuatZYX( ...
+                            history.x(block.euler,epochIdx));
+                    end
+                    truthQuaternion = ...
+                        revgnss.AttitudeErrorStateKinematics.eulerToQuatZYX( ...
+                        truth.euler_rad(:,epochIdx));
+                    attitudeError_deg(epochIdx) = rad2deg( ...
+                        revgnss.AttitudeQuaternion.geodesicDistance( ...
+                        estimatedQuaternion,truthQuaternion));
+                end
+                name = summary.estimatedAssetNames{assetIdx};
+                plot(positionAxes,timeAsset_s,positionError_m, ...
+                    'Color',colors(assetIdx,:),'DisplayName',name);
+                plot(clockAxes,timeAsset_s,clockError_m, ...
+                    'Color',colors(assetIdx,:),'DisplayName',name);
+                plot(attitudeAxes,timeAsset_s,attitudeError_deg, ...
+                    'Color',colors(assetIdx,:),'DisplayName',name);
+            end
+
+            ylabel(positionAxes,'Position error [m]');
+            ylabel(clockAxes,'Clock-bias error [m]');
+            ylabel(attitudeAxes,'Attitude error [deg]');
+            xlabel(attitudeAxes,'Simulation time [s]');
+            grid(positionAxes,'on');
+            grid(clockAxes,'on');
+            grid(attitudeAxes,'on');
+            legend(positionAxes,'Location','eastoutside');
+            title(positionAxes,'All jointly estimated spacecraft');
+            title(clockAxes,'Estimate minus truth');
+            title(attitudeAxes,'Quaternion geodesic error');
+            sgtitle(layout, ...
+                ['Joint-state truth comparison (diagnostic only; ' ...
+                 'not an ensemble validation)']);
+        end
+
+        function joint = buildJointEstimate_(sim, res, cfg)
+            joint = [];
+            jointMode = isfield(cfg,'multiAsset') && ...
+                isfield(cfg.multiAsset,'mode') && strcmpi(cfg.multiAsset.mode,'joint');
+            if ~jointMode || isempty(res) || ~isfield(res,'ekfHistory') || ...
+                    isempty(res.ekfHistory)
+                return;
+            end
+
+            history = res.ekfHistory;
+            stateMap = sim.ekf.stateMap;
+            nAssets = numel(stateMap.asset);
+            if nAssets < 2
+                return;
+            end
+
+            joint = struct();
+            joint.nAssets = nAssets;
+            joint.estimatedIndices = 1:nAssets;
+            joint.time_s = history.time_s(:);
+            joint.stateMap = stateMap;
+            joint.x = history.x;
+            joint.P_diag = history.P_diag;
+            joint.finalCovariance = sim.ekf.P;
+            if isfield(history,'relativePositionCovarianceToReference_m2')
+                joint.relativePositionCovarianceToReference_m2 = ...
+                    history.relativePositionCovarianceToReference_m2;
+            end
+            joint.attitudeErrorConvention = ...
+                'right-multiplicative local body-frame rotation vector';
+            joint.positionCrossCovariance_m2 = zeros(3,3,nAssets,nAssets);
+            joint.attitudeSensorHistory = struct();
+            if isfield(res,'attitudeSensorHistory')
+                joint.attitudeSensorHistory = res.attitudeSensorHistory;
+            end
+
+            emptyAsset = struct('name','', 'stateIndices',struct(), ...
+                'r_ecef_m',[], 'v_ecef_mps',[], 'q_E_B_wxyz',[], ...
+                'euler_rad',[], ...
+                'derivedOmega_B_E_body_radps',[], ...
+                'estimatedOmega_B_E_body_radps',[], ...
+                'omegaStateInterpretation','', ...
+                'gyroBias_radps',[], ...
+                'physicalGyroBiasTruth_radps',[], ...
+                'rxClockBias_m',[], 'rxClockDrift_mps',[], ...
+                'positionVariance_m2',[], ...
+                'attitudeErrorVariance_rad2',[], ...
+                'attitudeErrorCovariance_rad2',[], ...
+                'angularRateStateVariance_rad2ps2',[], ...
+                'gyroBiasVariance_rad2ps2',[], ...
+                'gyroBiasCovariance_rad2ps2',[]);
+            joint.asset = repmat(emptyAsset,1,nAssets);
+            hasQuaternionHistory = isfield(history,'nominalQuat_wxyz') && ...
+                size(history.nominalQuat_wxyz,2) >= nAssets && ...
+                size(history.nominalQuat_wxyz,3) == numel(joint.time_s);
+            hasAttitudeCovarianceHistory = ...
+                isfield(history,'attitudeErrorCovariance_rad2') && ...
+                size(history.attitudeErrorCovariance_rad2,3) >= nAssets && ...
+                size(history.attitudeErrorCovariance_rad2,4) == numel(joint.time_s);
+            hasGyroBiasCovarianceHistory = ...
+                isfield(history,'gyroBiasCovariance_rad2ps2') && ...
+                size(history.gyroBiasCovariance_rad2ps2,3) >= nAssets && ...
+                size(history.gyroBiasCovariance_rad2ps2,4) == numel(joint.time_s);
+            hasGyroBiasTruthHistory = ...
+                isfield(joint.attitudeSensorHistory,'physicalGyroBiasTruth_radps') && ...
+                size(joint.attitudeSensorHistory.physicalGyroBiasTruth_radps,2) >= nAssets && ...
+                size(joint.attitudeSensorHistory.physicalGyroBiasTruth_radps,3) == ...
+                numel(joint.time_s);
+
+            for assetIdx = 1:nAssets
+                block = stateMap.asset(assetIdx);
+                name = sprintf('GEO-%d',assetIdx);
+                if isfield(cfg,'assets') && numel(cfg.assets) >= assetIdx && ...
+                        isfield(cfg.assets(assetIdx),'name')
+                    name = char(cfg.assets(assetIdx).name);
+                end
+                joint.asset(assetIdx).name = name;
+                joint.asset(assetIdx).stateIndices = block;
+                joint.asset(assetIdx).r_ecef_m = history.x(block.r,:);
+                joint.asset(assetIdx).v_ecef_mps = history.x(block.v,:);
+                if sim.ekf.estimateGyroBias
+                    joint.asset(assetIdx).derivedOmega_B_E_body_radps = ...
+                        history.x(block.omega,:);
+                    joint.asset(assetIdx).omegaStateInterpretation = ...
+                        'derived from inertial gyroscope, estimated bias, and nominal Earth rate';
+                else
+                    joint.asset(assetIdx).estimatedOmega_B_E_body_radps = ...
+                        history.x(block.omega,:);
+                    joint.asset(assetIdx).omegaStateInterpretation = ...
+                        'estimated constant-rate state';
+                    joint.asset(assetIdx).angularRateStateVariance_rad2ps2 = ...
+                        history.P_diag(block.omega,:);
+                end
+                joint.asset(assetIdx).rxClockBias_m = history.x(block.b,:);
+                joint.asset(assetIdx).rxClockDrift_mps = history.x(block.bdot,:);
+                joint.asset(assetIdx).positionVariance_m2 = history.P_diag(block.r,:);
+                joint.asset(assetIdx).attitudeErrorVariance_rad2 = ...
+                    history.P_diag(block.euler,:);
+                if hasAttitudeCovarianceHistory
+                    joint.asset(assetIdx).attitudeErrorCovariance_rad2 = ...
+                        reshape(history.attitudeErrorCovariance_rad2( ...
+                        :,:,assetIdx,:),3,3,numel(joint.time_s));
+                end
+                if isfield(block,'gyroBias') && ~isempty(block.gyroBias)
+                    joint.asset(assetIdx).gyroBias_radps = ...
+                        history.x(block.gyroBias,:);
+                    joint.asset(assetIdx).gyroBiasVariance_rad2ps2 = ...
+                        history.P_diag(block.gyroBias,:);
+                    if hasGyroBiasCovarianceHistory
+                        joint.asset(assetIdx).gyroBiasCovariance_rad2ps2 = ...
+                            reshape(history.gyroBiasCovariance_rad2ps2( ...
+                            :,:,assetIdx,:),3,3,numel(joint.time_s));
+                    end
+                    if hasGyroBiasTruthHistory
+                        joint.asset(assetIdx).physicalGyroBiasTruth_radps = ...
+                            reshape(joint.attitudeSensorHistory. ...
+                            physicalGyroBiasTruth_radps(:,assetIdx,:), ...
+                            3,numel(joint.time_s));
+                    end
+                end
+
+                if hasQuaternionHistory
+                    qHistory = reshape(history.nominalQuat_wxyz(:,assetIdx,:), ...
+                        4,numel(joint.time_s));
+                    joint.asset(assetIdx).q_E_B_wxyz = qHistory;
+                    eulerHistory = zeros(3,numel(joint.time_s));
+                    for epochIdx = 1:numel(joint.time_s)
+                        eulerHistory(:,epochIdx) = ...
+                            revgnss.AttitudeErrorStateKinematics.quatToEulerZYX( ...
+                            qHistory(:,epochIdx));
+                    end
+                    joint.asset(assetIdx).euler_rad = eulerHistory;
+                else
+                    joint.asset(assetIdx).euler_rad = history.x(block.euler,:);
+                end
+
+                for otherIdx = 1:nAssets
+                    otherBlock = stateMap.asset(otherIdx);
+                    joint.positionCrossCovariance_m2(:,:,assetIdx,otherIdx) = ...
+                        sim.ekf.P(block.r,otherBlock.r);
+                end
+            end
+
+            joint.relativePositionCovarianceToPrimary_m2 = ...
+                zeros(3,3,max(0,nAssets-1));
+            primary = stateMap.asset(1).r;
+            for assetIdx = 2:nAssets
+                secondary = stateMap.asset(assetIdx).r;
+                joint.relativePositionCovarianceToPrimary_m2(:,:,assetIdx-1) = ...
+                    sim.ekf.P(secondary,secondary) + sim.ekf.P(primary,primary) - ...
+                    sim.ekf.P(secondary,primary) - sim.ekf.P(primary,secondary);
+            end
+        end
 
         function mat = buildMultiAssetTruth_(res, cfg)
             % buildMultiAssetTruth_  Assemble the per-asset truth bundle persisted
@@ -2295,14 +2773,27 @@ classdef ReportRunner
 
             mat = struct();
             mat.nAssets        = nAssets;
-            mat.estimatedIndex = 1;      % only asset 1 is EKF-estimated (see plan)
+            mat.estimatedIndex = 1;
+            mat.estimatedIndices = 1;
+            if isfield(cfg,'multiAsset') && isfield(cfg.multiAsset,'mode') && ...
+                    strcmpi(cfg.multiAsset.mode,'joint')
+                mat.estimatedIndices = 1:nAssets;
+            end
             mat.stride_s       = stride * dt_s;
             mat.time_s         = tPrim(idx);
             mat.names          = cell(1, nAssets);
 
             emptyAsset = struct('name','', 'r_ecef_m',[], 'v_ecef_mps',[], ...
-                'euler_rad',[], 'rxClockBias_m',[], 'rxFracFreq',[]);
+                'euler_rad',[], 'physicalGyroBiasTruth_radps',[], ...
+                'rxClockBias_m',[], 'rxFracFreq',[]);
             mat.asset = repmat(emptyAsset, 1, nAssets);
+            physicalGyroBiasTruth = [];
+            if isfield(res,'attitudeSensorHistory') && ...
+                    isfield(res.attitudeSensorHistory, ...
+                    'physicalGyroBiasTruth_radps')
+                physicalGyroBiasTruth = res.attitudeSensorHistory. ...
+                    physicalGyroBiasTruth_radps;
+            end
             for ai = 1:nAssets
                 h  = hist{ai};
                 nm = sprintf('GEO-%d', ai);
@@ -2316,6 +2807,13 @@ classdef ReportRunner
                 mat.asset(ai).r_ecef_m      = h.r_ecef_m(:, li);
                 mat.asset(ai).v_ecef_mps    = h.v_ecef_mps(:, li);
                 mat.asset(ai).euler_rad     = h.euler_rad(:, li);
+                if ~isempty(physicalGyroBiasTruth) && ...
+                        size(physicalGyroBiasTruth,2) >= ai
+                    biasIndices = idx(idx <= size(physicalGyroBiasTruth,3));
+                    mat.asset(ai).physicalGyroBiasTruth_radps = reshape( ...
+                        physicalGyroBiasTruth(:,ai,biasIndices), ...
+                        3,numel(biasIndices));
+                end
                 mat.asset(ai).rxClockBias_m = h.rxClockBias_m(li);
                 mat.asset(ai).rxFracFreq    = h.rxFracFreq(li);
             end
@@ -2389,14 +2887,26 @@ classdef ReportRunner
             summary.towerClockMode = cfg.estimator.towerClockMode;
 
             % Attitude classification: convergence-based, not rank-only.
-            % CONVERGED          : rank >= 3, final error < 50% of initial
+            % CONVERGED          : final error < 50% of initial with a valid source
             % BOUNDED_WEAK_GEOMETRY : rank >= 3, error maintained (0.75–2x ratio)
             % NON_CONVERGENT     : rank >= 3 but error worsened (ratio < 0.75)
             % WEAKLY_OBSERVABLE  : rank 1-2
             % UNOBSERVABLE       : rank 0 or estimation disabled
-            % INVALID_CONFIG     : multi-rx with zero lever arms
+            % INVALID_CONFIG     : GNSS attitude requested with no physical baseline
             try
                 estAtt2 = isfield(cfg.estimator,'estimateAttitude') && cfg.estimator.estimateAttitude;
+                starTrackerActive2 = estAtt2 && ...
+                    isfield(cfg.estimator,'starTracker') && ...
+                    isfield(cfg.estimator.starTracker,'enable') && ...
+                    cfg.estimator.starTracker.enable && ...
+                    isfield(cfg.estimator.starTracker,'useInEKF') && ...
+                    cfg.estimator.starTracker.useInEKF;
+                gyroscopeActive2 = estAtt2 && ...
+                    isfield(cfg.estimator,'imu') && ...
+                    isfield(cfg.estimator.imu,'enable') && ...
+                    cfg.estimator.imu.enable;
+                summary.starTrackerAttitudeUpdateActive = starTrackerActive2;
+                summary.gyroscopeAttitudePropagationActive = gyroscopeActive2;
                 leverArms2 = zeros(3,1);
                 if isfield(cfg,'asset') && isfield(cfg.asset,'receiverLeverArms_body_m')
                     leverArms2 = cfg.asset.receiverLeverArms_body_m;
@@ -2427,17 +2937,30 @@ classdef ReportRunner
                 if ~isempty(sigVec2); summary.finalAttitudeSigma_deg = sigVec2(end) * 180/pi; end
                 jacN2 = diag.getAttitudeJacobianNorm();
                 summary.meanAttitudeJacNorm = mean(jacN2(jacN2 > 0), 'omitnan');
-                summary.carrierAttJacActive = estAtt2 && ...
-                    isfield(cfg.estimator,'estimateAttitudeFromPseudorange') && ...
-                    cfg.estimator.estimateAttitudeFromPseudorange && ...
+                carrierPartials2 = ...
+                    revgnss.LinkGeometry.shouldUseAttitudePartials(cfg,'carrier');
+                summary.carrierAttJacActive = estAtt2 && carrierPartials2.enabled && ...
                     isfield(cfg.measurements,'carrierMode') && ...
                     strcmp(cfg.measurements.carrierMode,'ekfFloat') && ...
                     any(leverNorms2 > 1e-9);
 
                 impR2 = summary.attitudeImprovementRatio;
+                attitudeTarget_deg2 = 0.05;
+                try
+                    attitudeTarget_deg2 = cfg.validation.manifest.attitude. ...
+                        maximumFinalError_deg;
+                catch
+                end
                 if ~estAtt2
                     cls2 = 'UNOBSERVABLE';
-                elseif all(leverNorms2 < 1e-9)
+                elseif starTrackerActive2 && isfinite(finE2) && ...
+                        finE2 <= attitudeTarget_deg2
+                    cls2 = 'CONVERGED';
+                elseif starTrackerActive2
+                    cls2 = 'NON_CONVERGENT';
+                elseif all(leverNorms2 < 1e-9) && ...
+                        (carrierPartials2.enabled || ...
+                         summary.estimateAttitudeFromPseudorange)
                     cls2 = 'INVALID_CONFIG';
                 elseif medRank2 < 1
                     cls2 = 'UNOBSERVABLE';
@@ -2502,7 +3025,8 @@ classdef ReportRunner
                     summary.diffAttLostBaselines = 0;
                     summary.diffAttRecalibratedBaselines = 0;
                     summary.diffAttRejectedRows = 0;
-                    if strcmp(cls2,'NON_CONVERGENT') && ~summary.attitudeSeparable
+                    if strcmp(cls2,'NON_CONVERGENT') && ...
+                            ~summary.attitudeSeparable && ~starTrackerActive2
                         summary.attitudeObsClass = 'AMBIGUITY_ABSORBED';
                     end
                 end
@@ -2550,6 +3074,8 @@ classdef ReportRunner
                 summary.finalAttitudeSigma_deg     = NaN;
                 summary.meanAttitudeJacNorm        = NaN;
                 summary.carrierAttJacActive        = false;
+                summary.starTrackerAttitudeUpdateActive = false;
+                summary.gyroscopeAttitudePropagationActive = false;
                 summary.attitudeSeparable          = false;
                 summary.attitudeAmbCorrMaxAbs      = NaN;
                 summary.attitudeCarrierMode        = 'off';
@@ -2817,12 +3343,22 @@ classdef ReportRunner
             summary.totalIslCodeRows    = nIslTx_ * double(islOn_ && revgnss.ReportRunner.safeCfgBool_(cfg, {'measurements','isl','code','enable'}, false));
             summary.totalIslDopplerRows = nIslTx_ * double(islOn_ && revgnss.ReportRunner.safeCfgBool_(cfg, {'measurements','isl','doppler','enable'}, false));
             summary.totalIslCarrierDiagnosticRows = nIslTx_ * double(islOn_ && revgnss.ReportRunner.safeCfgBool_(cfg, {'measurements','isl','carrier','enable'}, false));
-            summary.totalIslTwoWayRangeRows = double(islOn_ && ...
+            nConcurrentTwoWayLinks_ = 0;
+            if islOn_ && revgnss.ReportRunner.safeCfgBool_(cfg, ...
+                    {'measurements','isl','twoWay','enable'},false)
+                nConcurrentTwoWayLinks_ = ...
+                    revgnss.MultiAssetConfig.twoWayConcurrentLinkCount_(cfg);
+            end
+            summary.totalIslTwoWayRangeRows = nConcurrentTwoWayLinks_ * double(islOn_ && ...
                 revgnss.ReportRunner.safeCfgBool_(cfg, {'measurements','isl','twoWay','enable'}, false) && ...
                 revgnss.ReportRunner.safeCfgBool_(cfg, {'measurements','isl','twoWay','range','enable'}, false));
-            summary.totalIslTwoWayDopplerDiagnosticRows = double(islOn_ && ...
+            summary.totalIslTwoWayDopplerDiagnosticRows = nConcurrentTwoWayLinks_ * double(islOn_ && ...
                 revgnss.ReportRunner.safeCfgBool_(cfg, {'measurements','isl','twoWay','enable'}, false) && ...
                 revgnss.ReportRunner.safeCfgBool_(cfg, {'measurements','isl','twoWay','doppler','enable'}, false));
+            summary.totalIslTwoWayTimeTransferRows = nConcurrentTwoWayLinks_ * double(islOn_ && ...
+                revgnss.ReportRunner.safeCfgBool_(cfg, {'measurements','isl','twoWay','enable'}, false) && ...
+                revgnss.ReportRunner.safeCfgBool_(cfg, ...
+                {'measurements','isl','twoWay','timeTransfer','enable'}, false));
             nSA_ = 1;
             if isfield(cfg,'scenario') && isfield(cfg.scenario,'nSpaceAssets') && ~isempty(cfg.scenario.nSpaceAssets)
                 nSA_ = cfg.scenario.nSpaceAssets;
@@ -2834,6 +3370,13 @@ classdef ReportRunner
             summary.islCarrierUsedInEkf = revgnss.ReportRunner.safeCfgBool_(cfg, {'measurements','isl','carrier','useInEKF'}, false);
             summary.islTwoWayRangeUsedInEkf = revgnss.ReportRunner.safeCfgBool_(cfg, {'measurements','isl','twoWay','range','useInEKF'}, false);
             summary.islTwoWayDopplerUsedInEkf = revgnss.ReportRunner.safeCfgBool_(cfg, {'measurements','isl','twoWay','doppler','useInEKF'}, false);
+            summary.islTwoWayTimeTransferUsedInEkf = ...
+                revgnss.ReportRunner.safeCfgBool_(cfg, ...
+                {'measurements','isl','twoWay','timeTransfer','useInEKF'},false);
+            summary.islTwoWayTimeTransferMode = ...
+                revgnss.ReportRunner.safeCfgStr_(cfg, ...
+                {'measurements','isl','twoWay','timeTransfer','mode'}, ...
+                'firstOrderReciprocal');
             summary.islTiming = revgnss.ReportRunner.emptyIslTimingSummary_();
             % Build observableStack from summary totals already derived from cfg/data above.
             % The flat schema v3 does not carry a live ObservableStackDescriptor object, so
@@ -2846,13 +3389,16 @@ classdef ReportRunner
                                    'islDoppler', summary.totalIslDopplerRows, ...
                                    'islCarrierDiagnostic', summary.totalIslCarrierDiagnosticRows, ...
                                    'islTwoWayRange', summary.totalIslTwoWayRangeRows, ...
-                                   'islTwoWayDopplerDiagnostic', summary.totalIslTwoWayDopplerDiagnosticRows);
+                                   'islTwoWayDopplerDiagnostic', summary.totalIslTwoWayDopplerDiagnosticRows, ...
+                                   'islTwoWayTimeTransfer', summary.totalIslTwoWayTimeTransferRows);
             obs_stack_    = revgnss.ObservableStackDescriptor.compact([]);
             obs_stack_.rowsByType = obs_rbt_;
             obs_stack_.nRows      = summary.totalCodeRows + summary.totalDopplerRows + ...
                                     summary.totalCarrierRows + summary.totalIslCodeRows + ...
                                     summary.totalIslDopplerRows + summary.totalIslCarrierDiagnosticRows + ...
-                                    summary.totalIslTwoWayRangeRows + summary.totalIslTwoWayDopplerDiagnosticRows;
+                                    summary.totalIslTwoWayRangeRows + ...
+                                    summary.totalIslTwoWayDopplerDiagnosticRows + ...
+                                    summary.totalIslTwoWayTimeTransferRows;
             summary.observableStack = obs_stack_;
             % Compact code IF row fields
             summary.codeIonoFreeRowsRequested = revgnss.ReportRunner.safeCfgBool_( ...
@@ -3095,6 +3641,153 @@ classdef ReportRunner
             end
         end
 
+        function val = safeCfgNum_(cfg,path,default)
+            val = default;
+            node = cfg;
+            for fieldIdx = 1:numel(path)
+                if ~isstruct(node) || ~isfield(node,path{fieldIdx})
+                    return
+                end
+                node = node.(path{fieldIdx});
+            end
+            if isnumeric(node) && isscalar(node) && isfinite(node)
+                val = node;
+            end
+        end
+
+        function schedule = coherentTwoWayScheduleSummary_( ...
+                cfg,nEstimatedAssets,twoWayEnabled)
+            schedule = struct( ...
+                'enabled',logical(twoWayEnabled), ...
+                'linkCount',0, ...
+                'endpoints',zeros(0,2), ...
+                'linkIdentifiers',{{}}, ...
+                'updatePeriod_s',NaN, ...
+                'phases_s',zeros(1,0), ...
+                'linkPhaseIndex',zeros(1,0), ...
+                'activeLinkCountByPhase',zeros(1,0), ...
+                'terminalDisjointByPhase',false(1,0), ...
+                'uniformActiveLinkCount',false, ...
+                'topology','disabled', ...
+                'topologyDescription','disabled');
+            if ~twoWayEnabled
+                return
+            end
+
+            globalPhase_s = revgnss.ReportRunner.safeCfgNum_(cfg, ...
+                {'measurements','isl','twoWay','schedule','updatePhase_s'},0);
+            schedule.updatePeriod_s = revgnss.ReportRunner.safeCfgNum_(cfg, ...
+                {'measurements','isl','twoWay','schedule','updatePeriod_s'},NaN);
+            links = revgnss.TwoWayISLMeasurementBuilder.linkDefinitions(cfg);
+            if isempty(links)
+                schedule.endpoints = [ ...
+                    revgnss.ReportRunner.safeCfgNum_(cfg, ...
+                    {'measurements','isl','receiverAssetIndex'},NaN), ...
+                    revgnss.ReportRunner.safeCfgNum_(cfg, ...
+                    {'measurements','isl','transmitterAssetIndex'},NaN)];
+                schedule.linkIdentifiers = {revgnss.ReportRunner.safeCfgStr_( ...
+                    cfg,{'measurements','isl','twoWay','linkIdentifier'}, ...
+                    'legacy-two-way-code-link')};
+                linkPhases_s = globalPhase_s;
+            else
+                schedule.endpoints = zeros(numel(links),2);
+                schedule.linkIdentifiers = cell(1,numel(links));
+                linkPhases_s = zeros(1,numel(links));
+                for linkIndex = 1:numel(links)
+                    schedule.endpoints(linkIndex,:) = [ ...
+                        links(linkIndex).initiatorAssetIndex, ...
+                        links(linkIndex).transponderAssetIndex];
+                    schedule.linkIdentifiers{linkIndex} = ...
+                        revgnss.ReportRunner.safeCfgStr_( ...
+                        links(linkIndex),{'linkIdentifier'}, ...
+                        sprintf('two-way-code-link-%d',linkIndex));
+                    linkPhases_s(linkIndex) = ...
+                        revgnss.ReportRunner.safeCfgNum_( ...
+                        links(linkIndex),{'schedule','updatePhase_s'}, ...
+                        globalPhase_s);
+                end
+            end
+            schedule.linkCount = size(schedule.endpoints,1);
+
+            [schedule.phases_s,~,phaseIndex] = ...
+                unique(linkPhases_s,'sorted');
+            schedule.phases_s = schedule.phases_s(:).';
+            schedule.linkPhaseIndex = phaseIndex(:).';
+            schedule.activeLinkCountByPhase = accumarray( ...
+                phaseIndex(:),1,[numel(schedule.phases_s),1]).';
+            schedule.terminalDisjointByPhase = ...
+                false(1,numel(schedule.phases_s));
+            for phaseIdx = 1:numel(schedule.phases_s)
+                phaseEndpoints = schedule.endpoints( ...
+                    schedule.linkPhaseIndex == phaseIdx,:);
+                schedule.terminalDisjointByPhase(phaseIdx) = ...
+                    numel(unique(phaseEndpoints(:))) == numel(phaseEndpoints);
+            end
+            schedule.uniformActiveLinkCount = ...
+                ~isempty(schedule.activeLinkCountByPhase) && ...
+                all(schedule.activeLinkCountByPhase == ...
+                schedule.activeLinkCountByPhase(1));
+
+            endpoints = schedule.endpoints;
+            validEndpoints = all(isfinite(endpoints),'all') && ...
+                all(endpoints == round(endpoints),'all') && ...
+                all(endpoints >= 1,'all') && ...
+                all(endpoints <= nEstimatedAssets,'all') && ...
+                all(endpoints(:,1) ~= endpoints(:,2));
+            if ~validEndpoints
+                schedule.topology = 'invalidEndpointDefinition';
+                schedule.topologyDescription = 'invalid endpoint definition';
+                return
+            end
+
+            degrees = accumarray(endpoints(:),1,[nEstimatedAssets,1]);
+            reachable = false(1,nEstimatedAssets);
+            if nEstimatedAssets > 0
+                reachable(1) = true;
+            end
+            for passIndex = 1:max(nEstimatedAssets,1)
+                previousReachable = reachable;
+                for linkIndex = 1:schedule.linkCount
+                    edge = endpoints(linkIndex,:);
+                    if any(reachable(edge))
+                        reachable(edge) = true;
+                    end
+                end
+                if isequal(reachable,previousReachable)
+                    break
+                end
+            end
+            connected = nEstimatedAssets > 0 && all(reachable);
+            undirectedEdges = sort(endpoints,2);
+            uniquePhysicalEdges = size(unique(undirectedEdges,'rows'),1);
+            isRing = nEstimatedAssets >= 3 && connected && ...
+                schedule.linkCount == nEstimatedAssets && ...
+                uniquePhysicalEdges == schedule.linkCount && ...
+                all(degrees == 2);
+            if isRing
+                schedule.topology = 'connectedRing';
+                schedule.topologyDescription = sprintf( ...
+                    'connected ring over %d spacecraft',nEstimatedAssets);
+            elseif connected
+                schedule.topology = 'connectedGraph';
+                schedule.topologyDescription = sprintf( ...
+                    'connected graph over %d spacecraft',nEstimatedAssets);
+            else
+                schedule.topology = 'disconnectedGraph';
+                schedule.topologyDescription = sprintf( ...
+                    'disconnected graph over %d spacecraft',nEstimatedAssets);
+            end
+        end
+
+        function name = jointAssetName_(assetNames,assetIndex)
+            if isfinite(assetIndex) && assetIndex == round(assetIndex) && ...
+                    assetIndex >= 1 && assetIndex <= numel(assetNames)
+                name = assetNames{assetIndex};
+            else
+                name = sprintf('spacecraft[%g]',assetIndex);
+            end
+        end
+
         function writeRunLog_(reportFolder, stem, cfg, cfgLiteral, summary, pdfPath, matPath, mc)
             % writeRunLog_  Write a concise <stem>.out run log beside the PDF/MAT.
             %   cfg is the RESOLVED config (post-finalizeConfig); cfgLiteral is the
@@ -3181,18 +3874,14 @@ classdef ReportRunner
             if ~en; return; end
             mc.enabled = true;
 
-            nSeeds = 12; dur = 900; conf = 0.99; baseSel = 'self';
+            nSeeds = 12; dur = 900; conf = 0.99;
             try; nSeeds = cfg.report.monteCarlo.nSeeds;     catch; end
             try; dur    = cfg.report.monteCarlo.duration_s; catch; end
             try; conf   = cfg.report.monteCarlo.confidence; catch; end
-            try; baseSel = cfg.report.monteCarlo.baseConfig; catch; end
 
-            % 'self' (default) characterises the SHIPPED filter (conservative-by-design,
-            % expected below-band); 'matchedBaseline' gives a two-sided verdict.
+            % Characterise the resolved scenario itself; no alternate truth/model
+            % cancellation profile is substituted for the requested configuration.
             baseCfg = cfg;
-            if ischar(baseSel) && strcmpi(baseSel, 'matchedbaseline')
-                baseCfg = revgnss.ConfigFactory.matchedErrorBaselineConfig();
-            end
             baseCfg.report.monteCarlo.enable = false;   % never recurse
 
             fprintf('  [WP-B] Monte-Carlo consistency: %d seeds x %g s ...\n', nSeeds, dur);

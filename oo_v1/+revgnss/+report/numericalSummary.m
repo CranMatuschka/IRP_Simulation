@@ -12,6 +12,12 @@ function numericalSummary(fid, cfg, summary, diag)
         'performance. Run-level statistics below cover the full record and the final window. ' ...
         'All results are for the controlled synthetic scenario only and are not a real-data or ' ...
         'PPP-grade performance claim.\n\n']);
+    if isfield(summary,'estimatorMultiAssetMode') && ...
+            strcmpi(summary.estimatorMultiAssetMode,'joint')
+        fprintf(fid, ['State-error values and configured ground-observation row counts below ' ...
+            'refer to the reference spacecraft stored in the canonical diagnostic record. ' ...
+            'The maximum EKF row count refers to the complete centralized estimator.\n\n']);
+    end
 
     % Collect metrics
     pos3D = CE.safeDiagScalar_(@() diag.getPositionErrors(), 'last');
@@ -38,12 +44,23 @@ function numericalSummary(fid, cfg, summary, diag)
     CE.writeQuantRow_(fid, 'Final 3D position estimation error',        CE.fmtM_(pos3D));
     CE.writeQuantRow_(fid, 'Final receiver clock estimation error',     CE.fmtM_(clkM));
     CE.writeQuantRow_(fid, 'Final clock range-equivalent error (ps)',   CE.fmtPs_(clkPs));
-    CE.writeQuantRow_(fid, 'Final pre-fit pseudorange innovation RMS',  CE.fmtM_(pfRMS));
-    CE.writeQuantRow_(fid, 'Final post-fit pseudorange residual RMS',   CE.fmtM_(poRMS));
+    CE.writeQuantRow_(fid, 'Final pre-fit measurement innovation RMS', CE.fmtM_(pfRMS));
+    CE.writeQuantRow_(fid, 'Final post-fit measurement residual RMS',  CE.fmtM_(poRMS));
     CE.writeQuantRow_(fid, 'Max EKF measurement rows / epoch',          CE.fmtN_(mxEKF));
-    CE.writeQuantRow_(fid, 'Total code pseudorange rows',               CE.fmtN_(nCd));
-    CE.writeQuantRow_(fid, 'Total Doppler rows',                        CE.fmtN_(nDp));
-    CE.writeQuantRow_(fid, 'Total carrier phase rows',                  CE.fmtN_(nCr));
+    if isfield(summary,'estimatorMultiAssetMode') && ...
+            strcmpi(summary.estimatorMultiAssetMode,'joint')
+        CE.writeQuantRow_(fid, ...
+            'Configured ground code rows / spacecraft / epoch',CE.fmtN_(nCd));
+        CE.writeQuantRow_(fid, ...
+            'Configured ground Doppler rows / spacecraft / epoch',CE.fmtN_(nDp));
+        CE.writeQuantRow_(fid, ...
+            'Configured ground carrier rows / reference spacecraft / epoch', ...
+            CE.fmtN_(nCr));
+    else
+        CE.writeQuantRow_(fid, 'Configured code rows / epoch', CE.fmtN_(nCd));
+        CE.writeQuantRow_(fid, 'Configured Doppler rows / epoch', CE.fmtN_(nDp));
+        CE.writeQuantRow_(fid, 'Configured carrier rows / epoch', CE.fmtN_(nCr));
+    end
     % Slip detection diagnostics
     slipMeth73_ = CE.safeField_(summary, 'carrierSlipDetectorMethod', 'rawResidualJump');
     nProdBnd73_ = CE.safeField_(summary, 'nCarrierProductBoundaries', NaN);
