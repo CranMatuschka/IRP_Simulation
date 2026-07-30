@@ -1,0 +1,209 @@
+{
+  "_comment": "Realism-profile study with a six-spacecraft joint EKF and a scheduled coherent two-way PN code ring.",
+  "scenario": {
+    "name": "joint_G5S6R4_coherent_two_way_code_realism",
+    "nTowers": 5,
+    "nSpaceAssets": 6,
+    "nReceivers": 4
+  },
+  "simulation": {
+    "duration_s": 3600
+  },
+  "realism": {
+    "grade": true
+  },
+  "atmosphere": {
+    "realistic": true
+  },
+  "multiAsset": {
+    "mode": "joint",
+    "keepIslInPerAssetEkf": false,
+    "twoWayISL": {
+      "enable": false,
+      "lightTime": {
+        "enable": false
+      }
+    },
+    "twoWayTimeTransferISL": {
+      "enable": false
+    }
+  },
+  "measurements": {
+    "isl": {
+      "enable": true,
+      "receiverAssetIndex": 1,
+      "transmitterAssetIndex": 2,
+      "code": {
+        "enable": false,
+        "useInEKF": false
+      },
+      "doppler": {
+        "enable": false,
+        "useInEKF": false
+      },
+      "carrier": {
+        "enable": false,
+        "useInEKF": false,
+        "ambiguity": {
+          "enable": false
+        },
+        "slipDetection": {
+          "enable": false
+        }
+      },
+      "timing": {
+        "enable": false
+      },
+      "twoWay": {
+        "enable": true,
+        "protocol": "coherentTranspondedPnTwoWayCode",
+        "forwardCarrierFrequency_Hz": 26000000000,
+        "returnCarrierFrequency_Hz": 26000000000,
+        "carrierFrequencyTurnaroundRatio": 1,
+        "initiatorTerminalGroupDelay_s": 2e-8,
+        "truth": {
+          "turnaroundCalibrationError_s": 0,
+          "terminalCalibrationError_s": 0
+        },
+        "calibration": {
+          "turnaroundSigma_s": 4e-9,
+          "terminalSigma_s": 6e-9,
+          "residualBiasState": {
+            "enable": true,
+            "processNoiseSigma_m_per_sqrt_s": 1e-5
+          }
+        },
+        "schedule": {
+          "updatePeriod_s": 60,
+          "updatePhase_s": 0,
+          "start_s": 0,
+          "stop_s": 3600,
+          "outages_s": [
+            [1800, 1860]
+          ]
+        },
+        "links": [
+          {
+            "enable": true,
+            "linkIdentifier": "isl-two-way-code-link-A1-A2",
+            "initiatorAssetIndex": 1,
+            "transponderAssetIndex": 2,
+            "physicalChainIdentifier": "isl-two-way-code-chain-A1-A2",
+            "calibrationProductIdentifier": "isl-two-way-code-calibration-A1-A2",
+            "turnaroundCalibrationError_s": 1e-9,
+            "terminalCalibrationError_s": 1.5e-9,
+            "signalIdentifier": "ISL-PN",
+            "channelIdentifier": "PN-A1-A2",
+            "schedule": {
+              "updatePhase_s": 0,
+              "commandIdentifier": "open-loop-scenario-schedule-A1-A2"
+            }
+          },
+          {
+            "enable": true,
+            "linkIdentifier": "isl-two-way-code-link-A3-A4",
+            "initiatorAssetIndex": 3,
+            "transponderAssetIndex": 4,
+            "physicalChainIdentifier": "isl-two-way-code-chain-A3-A4",
+            "calibrationProductIdentifier": "isl-two-way-code-calibration-A3-A4",
+            "turnaroundCalibrationError_s": -8e-10,
+            "terminalCalibrationError_s": -1.2e-9,
+            "signalIdentifier": "ISL-PN",
+            "channelIdentifier": "PN-A3-A4",
+            "schedule": {
+              "updatePhase_s": 0,
+              "commandIdentifier": "open-loop-scenario-schedule-A3-A4"
+            }
+          },
+          {
+            "enable": true,
+            "linkIdentifier": "isl-two-way-code-link-A5-A6",
+            "initiatorAssetIndex": 5,
+            "transponderAssetIndex": 6,
+            "physicalChainIdentifier": "isl-two-way-code-chain-A5-A6",
+            "calibrationProductIdentifier": "isl-two-way-code-calibration-A5-A6",
+            "turnaroundCalibrationError_s": 1.2e-9,
+            "terminalCalibrationError_s": 1e-9,
+            "signalIdentifier": "ISL-PN",
+            "channelIdentifier": "PN-A5-A6",
+            "schedule": {
+              "updatePhase_s": 0,
+              "commandIdentifier": "open-loop-scenario-schedule-A5-A6"
+            }
+          },
+          {
+            "enable": true,
+            "linkIdentifier": "isl-two-way-code-link-A2-A3",
+            "initiatorAssetIndex": 2,
+            "transponderAssetIndex": 3,
+            "physicalChainIdentifier": "isl-two-way-code-chain-A2-A3",
+            "calibrationProductIdentifier": "isl-two-way-code-calibration-A2-A3",
+            "turnaroundCalibrationError_s": -1.1e-9,
+            "terminalCalibrationError_s": -1.5e-9,
+            "signalIdentifier": "ISL-PN",
+            "channelIdentifier": "PN-A2-A3",
+            "schedule": {
+              "updatePhase_s": 5,
+              "commandIdentifier": "open-loop-scenario-schedule-A2-A3"
+            }
+          },
+          {
+            "enable": true,
+            "linkIdentifier": "isl-two-way-code-link-A4-A5",
+            "initiatorAssetIndex": 4,
+            "transponderAssetIndex": 5,
+            "physicalChainIdentifier": "isl-two-way-code-chain-A4-A5",
+            "calibrationProductIdentifier": "isl-two-way-code-calibration-A4-A5",
+            "turnaroundCalibrationError_s": 7e-10,
+            "terminalCalibrationError_s": 8e-10,
+            "signalIdentifier": "ISL-PN",
+            "channelIdentifier": "PN-A4-A5",
+            "schedule": {
+              "updatePhase_s": 5,
+              "commandIdentifier": "open-loop-scenario-schedule-A4-A5"
+            }
+          },
+          {
+            "enable": true,
+            "linkIdentifier": "isl-two-way-code-link-A6-A1",
+            "initiatorAssetIndex": 6,
+            "transponderAssetIndex": 1,
+            "physicalChainIdentifier": "isl-two-way-code-chain-A6-A1",
+            "calibrationProductIdentifier": "isl-two-way-code-calibration-A6-A1",
+            "turnaroundCalibrationError_s": -9e-10,
+            "terminalCalibrationError_s": -1e-9,
+            "signalIdentifier": "ISL-PN",
+            "channelIdentifier": "PN-A6-A1",
+            "schedule": {
+              "updatePhase_s": 5,
+              "commandIdentifier": "open-loop-scenario-schedule-A6-A1"
+            }
+          }
+        ],
+        "range": {
+          "enable": true,
+          "useInEKF": true,
+          "linkBudget": {
+            "model": "physicalRF"
+          },
+          "plasma": {
+            "enable": false
+          }
+        },
+        "timeTransfer": {
+          "enable": false,
+          "useInEKF": false,
+          "mode": "firstOrderReciprocal"
+        },
+        "doppler": {
+          "enable": false,
+          "useInEKF": false
+        }
+      }
+    }
+  },
+  "report": {
+    "layout": "clockExact",
+    "runVersion": "joint-code-realism-relative-state"
+  }
+}
