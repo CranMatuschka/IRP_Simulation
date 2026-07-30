@@ -1,6 +1,6 @@
 # Independent Per-Satellite EKF, Distributed ISL, and Timestamp TWSTFT Plan
 
-**Status:** living roadmap. Stage 1 was implemented and verified on 2026-07-29. Stage 2 Sections 2.0 (protocol contract), 2.1 (generic communication interfaces), and 2.2 (conservative correlation policy) were implemented and verified on 2026-07-29. Section 2.3.1 (the coherent transponded-PN two-way code range adapter, the first source-specific adapter) was implemented and verified end-to-end on 2026-07-30: a real 2-asset fleet run through `IndependentFleetCoordinator` with the sanctioned `linkUpdate` tuple enabled generated, delivered, and consumed ISL link updates with a finite/symmetric/PSD owner posterior. Section 2.4 (clock, gauge, and time-alignment guards) was implemented and verified on 2026-07-30: an adapter-agnostic clock-anchor/gauge audit layer, live today on the `coherentTwoWayCodeRange` path and complete for a future time-transfer adapter to call into. Section 2.3.2 (the first-order reciprocal ISL clock-transfer adapter, the second source-specific observable) was implemented and verified end-to-end on 2026-07-30: a real 2-asset fleet run through `IndependentFleetCoordinator` with the `firstOrderReciprocalClockTransfer` sanctioned tuple enabled generated, delivered, and consumed time-transfer link updates with a finite/symmetric/PSD owner posterior, and the two sanctioned observables are proved mutually exclusive (U6). Section 2.3 item 3 (one-way ISL code range and Doppler, the third and fourth source-specific observables) was implemented and verified end-to-end on 2026-07-30: `IndependentFleetCoordinator` widened to genuinely N-way (4 sanctioned observables) mutual exclusion, both one-way observables run end-to-end generating/delivering/consuming real link updates with a finite/symmetric/PSD owner posterior. The sanctioned tuple remains default-disabled; Section 2.3 item 4 (ISL carrier) remains explicitly blocked pending Stage 3 infrastructure, and Stage 3/4 remain not started.
+**Status:** living roadmap. Stage 1 was implemented and verified on 2026-07-29. Stage 2 Sections 2.0 (protocol contract), 2.1 (generic communication interfaces), and 2.2 (conservative correlation policy) were implemented and verified on 2026-07-29. Section 2.3.1 (the coherent transponded-PN two-way code range adapter, the first source-specific adapter) was implemented and verified end-to-end on 2026-07-30: a real 2-asset fleet run through `IndependentFleetCoordinator` with the sanctioned `linkUpdate` tuple enabled generated, delivered, and consumed ISL link updates with a finite/symmetric/PSD owner posterior. Section 2.4 (clock, gauge, and time-alignment guards) was implemented and verified on 2026-07-30: an adapter-agnostic clock-anchor/gauge audit layer, live today on the `coherentTwoWayCodeRange` path and complete for a future time-transfer adapter to call into. Section 2.3.2 (the first-order reciprocal ISL clock-transfer adapter, the second source-specific observable) was implemented and verified end-to-end on 2026-07-30: a real 2-asset fleet run through `IndependentFleetCoordinator` with the `firstOrderReciprocalClockTransfer` sanctioned tuple enabled generated, delivered, and consumed time-transfer link updates with a finite/symmetric/PSD owner posterior, and the two sanctioned observables are proved mutually exclusive (U6). Section 2.3 item 3 (one-way ISL code range and Doppler, the third and fourth source-specific observables) was implemented and verified end-to-end on 2026-07-30: `IndependentFleetCoordinator` widened to genuinely N-way (4 sanctioned observables) mutual exclusion, both one-way observables run end-to-end generating/delivering/consuming real link updates with a finite/symmetric/PSD owner posterior. Section 2.3 item 4 (ISL carrier) was assessed on 2026-07-30 and confirmed still structurally blocked on Stage 3 infrastructure that does not exist yet (no ambiguity-state owner, no correlation-tracked cross-covariance network); no code was added for it. Section 2.3 is therefore complete except for item 4, which is Stage 3's own precondition, not a Stage-2 gap. The sanctioned tuple remains default-disabled; Stage 3/4 remain not started.
 
 ## Implementation status — 2026-07-29
 
@@ -641,6 +641,48 @@ m/s), so it also widens several previously two-observable-only contracts to genu
     pre-existing adapters (traced the full consumer chain: the value never enters a numeric
     expression, only a validated label), and the bound-admission evidence for both new
     observables meeting the same four-premise bar the two prior admissions required.
+
+### Section 2.3 item 4 status — 2026-07-30
+
+Assessed, not implemented: item 4 (ISL carrier) remains structurally blocked exactly as originally
+scoped, and this pass did not weaken that gate or attempt a premature implementation. Re-verified
+against the plan's own Section 3.4 prerequisite list, item by item, against the current state of
+the codebase after Section 2.3 items 1-3:
+
+1. **An explicit link/signal/arc ambiguity state owner** does not exist on the distributed path.
+   None of the three shipped adapters (`CoherentTwoWayRangeLinkUpdateAdapter`,
+   `FirstOrderReciprocalClockTransferLinkUpdateAdapter`, the two one-way adapters) carry, own, or
+   reference any ambiguity/integer-cycle state; the frozen 14-component v1 schema
+   (`DistributedLinkProtocolContract.StateSchemaV1CovarianceComponentOrder*`) has no ambiguity
+   slot, and `DistributedLinkUpdateBlock`'s constructor has no field that could carry one without
+   a schema revision.
+2. **Cycle-slip detection/reset delivered consistently to all affected endpoint/correlation
+   records** requires the correlation-tracked cross-covariance network Section 3.1
+   (`revgnss.DistributedCovarianceNetwork`) defines. That class does not exist yet (`find` over
+   the repo confirms it); Stage 3 itself has not been started (no `P_ij` cross-block ownership,
+   no synchronized-pair-update machinery per Section 3.2). A slip on one endpoint's carrier arc
+   has no mechanism today to invalidate the correlated state at the other endpoint.
+3. **Carrier frequency/wavelength, phase-centre, oscillator, and calibration covariance
+   declared** — the terminal-geometry/phase-centre PATTERN this stage established
+   (`terminalGeometryFromOneWayRecord_`, the record-level lever-arm fields) is reusable
+   scaffolding for a future carrier adapter, but no oscillator or persistent carrier-calibration
+   covariance treatment exists; `DistributedLinkCalibrationState`/`Registry` (built in Section
+   2.2, still unused beyond the declared-and-gated-off `externalCalibrationProduct` path) is the
+   right owning interface but has never been exercised for a carrier-class persistent term.
+4. **A central-reference test validates the update** — impossible before item 2 exists, since
+   "central reference" here means the Stage-3 joint/distributed equivalence proof (Section 3's
+   own required reference tests), not the Stage-2 conservative-bound tests this and prior
+   sections already have.
+5. **The carrier toggle separately enabled in masterConfig** is the only item-4 prerequisite that
+   is mechanically trivial (a new `measurements.isl.oneWay.carrier.enable`-style key) and
+   deliberately not added in isolation: shipping a toggle for a feature with no correlation
+   network, no ambiguity-state owner, and no cycle-slip handling behind it would be exactly the
+   "declares a common source but supplies no treatment" failure Section 3.3 rule 3 forbids in
+   spirit, one stage early.
+
+No code changes accompany this entry. The next unit of real work toward item 4 is Section 3.1
+(`DistributedCovarianceNetwork`), not a Section-2.3-scoped adapter; Section 2.3's own item
+ordering already states this precondition and this assessment found no reason to relax it.
 
 ### 2.4 Clock, gauge, and time-alignment guards
 
