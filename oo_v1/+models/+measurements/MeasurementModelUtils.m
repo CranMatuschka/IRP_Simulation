@@ -16,9 +16,12 @@ classdef MeasurementModelUtils
             % This helper intentionally returns empty z/h/H so old callers keep zero
             % EKF effect. Active ISL layers are built elsewhere:
             %   * revgnss.ISLMeasurementBuilder: one-way secondary-to-primary ISL rows
-            %   * revgnss.TwoWayISLMeasurementBuilder: same-epoch two-way ISL range rows
+            %   * revgnss.TwoWayISLMeasurementBuilder: coherent four-event
+            %     transponded PN two-way code range rows
+            %   * revgnss.InterSatelliteTimeTransferBuilder: processed reciprocal
+            %     inter-satellite clock-difference rows
             %   * revgnss.SwarmRelativeSolver: synthetic two-way-ISL formation shape and
-            %     sat-sat TWSTFT relative-clock post-processing
+            %     legacy relative-clock post-processing
             %
             % Use those routed builders/solver for supported ISL physics instead of this
             % legacy no-row hook.

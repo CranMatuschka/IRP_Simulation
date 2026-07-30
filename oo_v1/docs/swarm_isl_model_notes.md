@@ -6,9 +6,18 @@ This repository has several ISL-related layers. They are not interchangeable.
 
 `revgnss.ISLMeasurementBuilder` builds one-way ISL code and Doppler rows from represented secondary spacecraft to the primary estimated spacecraft. One-way ISL code can enter the EKF when configured, with receiver clock and secondary transmitter clock/product handling made explicit.
 
-`revgnss.TwoWayISLMeasurementBuilder` builds same-epoch two-way ISL range rows. The range row updates the primary position and intentionally has no receiver-clock column because same-spacecraft transmit/receive clock terms cancel under the same-epoch approximation. Two-way ISL Doppler remains diagnostic-only.
+`revgnss.TwoWayISLMeasurementBuilder` builds coherent four-event transponded PN two-way code observations. In joint-estimator mode, one observation row updates both spacecraft endpoint blocks and preserves the resulting cross-covariance. Initiator clock offset cancels from the local round-trip interval, while clock rate, endpoint motion, antenna phase centres, and calibrated hardware delays remain. Coherent two-way Doppler is not implemented and must remain disabled.
 
-`revgnss.SwarmRelativeSolver` is a read-only post-processor for the federated swarm architecture. When `cfg.multiAsset.twoWayISL.enable` is true, it uses a synthetic two-way-ISL formation-shape observation to solve gauge-invariant relative shape. When `cfg.multiAsset.twoWayTimeTransferISL.enable` is true, it also solves sat-sat TWSTFT relative clock differences on the same neighbour graph.
+`revgnss.InterSatelliteTimeTransferBuilder` builds processed
+`firstOrderReciprocal` clock-difference observations. In joint-estimator mode each row
+updates both endpoint clocks and preserves cross-spacecraft covariance. The observation
+record explicitly states that primitive four-timestamp tags are unavailable. The reserved
+`fourTimestampPhysical` mode is rejected.
+
+`revgnss.SwarmRelativeSolver` is a read-only post-processor for the federated swarm
+architecture. Its synthetic two-way-ISL formation-shape solve and historic
+relative clock diagnostic are not epoch observation paths. Canonical configuration
+rejects the old `multiAsset.twoWayTimeTransferISL` activation path.
 
 ## Legacy Helper
 
@@ -16,7 +25,7 @@ This repository has several ISL-related layers. They are not interchangeable.
 
 ## Boundaries
 
-The current active model is synthetic and simulation-internal. It does not ingest external ISL products, calibrated relay/transponder products, or operational TWSTFT station calibrations.
+The one-way represented-product path and the federated relative post-processor remain simulation-internal controls. Coherent code ranging generates a four-event observation. The current time-transfer mode generates a processed common-epoch clock difference, not raw timestamp events. None of these paths ingests real ISL data or operational calibration products.
 
 ## ISL Carrier (feature/ISL-LAMBDA, Phase 1c)
 
