@@ -1,7 +1,7 @@
 classdef FederatedSwarmSummary
-    % FederatedSwarmSummary  W3 symmetric analysis layer of the federated swarm.
+    % FederatedSwarmSummary  Symmetric analysis layer of the federated swarm.
     %
-    % Consumes the W1 per-asset marginals (revgnss.ReportRunner.runFederatedEstimation output) and the W2 relative
+    % Consumes per-asset ground-filter marginals and the diagnostic relative-network
     % solution (revgnss.SwarmRelativeSolver output) and produces a SYMMETRIC per-satellite summary:
     % every asset is reported identically (its OWN absolute err/sigma from its OWN EKF), plus the
     % formation shape / relative clock from the relative layer. There is NO privileged node -- "chief"
@@ -42,11 +42,9 @@ classdef FederatedSwarmSummary
             nEp = numel(tVec);
             tsel = revgnss.FederatedSwarmSummary.tailIdx_(nEp);
 
-            % ISL-solved positions in their NATIVE (W1) frame from the relative layer, if available and
-            % on the same epoch grid -> per-satellite SOLVED relative-position error vs the reference,
-            % computed in the SAME truth-free gauge as relPos-raw (both ref-differenced, truth used only
-            % to score the error). The raw->solved change is thus genuine ISL shape sharpening, not a
-            % truth-alignment artifact; the rigid formation frame (unobservable to ISL) stays in both.
+            % ISL-solved positions retain the native estimated rigid frame, so no
+            % truth-based frame alignment is applied. The legacy relative solver's
+            % synthetic observations are nevertheless generated from truth trajectories.
             solvedPos = [];
             if ~isempty(rel) && isstruct(rel) && isfield(rel,'solvedPos') && ~isempty(rel.solvedPos)
                 sp = rel.solvedPos;

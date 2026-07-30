@@ -1,13 +1,13 @@
 function result = run_swarm_relative_regression(mode)
-% run_swarm_relative_regression  Seed-locked regression for the W2 federated RELATIVE layer.
+% run_swarm_relative_regression  Seed-locked diagnostic relative-network regression.
 %
 %   run_swarm_relative_regression()          % compute digest, diff vs frozen baseline; PASS/FAIL
 %   run_swarm_relative_regression('capture') % (re)freeze the baseline -- ONLY for an intended change
 %
 % The federated relative layer (revgnss.ReportRunner.runFederatedEstimation + revgnss.SwarmRelativeSolver) is fully
-% deterministic (per-asset seeded W1 sims + identity-keyed solver noise), so a canonical N=4 run with
+% deterministic (seeded per-asset simulations and identity-keyed solver noise), so a canonical N=4 run with
 % the sat-sat TWSTFT relative-clock gate ON has a bit-reproducible digest: the shape + relative-clock
-% recovery scalars, the per-epoch solved-error series, and a W1 anchor (each asset's final position +
+% recovery scalars, the per-epoch solved-error series, and a per-asset anchor (final position and
 % clock). PASS iff bit-identical to the baseline (max|delta|=0). This is the relative-layer twin of
 % run_swarm_fingerprint (which locks the joint-path swarm truth+EKF).
 
@@ -69,7 +69,7 @@ function dg = swarmRelativeDigest_()
     dg.perEpochBaselineSolved = o.perEpoch.baselineErrSolved_m(:).';
     dg.perEpochShapeSolved    = o.perEpoch.shapeErrSolved_m(:).';
 
-    % W1 anchor: each asset's final estimated position + receiver clock (catches W1 regressions).
+    % Per-asset anchor catches changes in the independent ground filters.
     N = r.N;
     dg.assetFinalPos = zeros(3, N);
     dg.assetFinalClk = zeros(1, N);

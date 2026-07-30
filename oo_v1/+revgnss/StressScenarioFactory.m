@@ -108,7 +108,7 @@ classdef StressScenarioFactory
             if ~isfield(sl,'magnitude_cycles');  sl.magnitude_cycles = [5, -3];    end
             if ~isfield(sl,'towers');            sl.towers           = [1, 2];     end
             if ~isfield(sl,'signals');           sl.signals          = [1];        end
-            sl.nInjected = numel(sl.injectEpochs_s);
+            sl.nConfiguredEpochs = numel(sl.injectEpochs_s);
             cfg.validation.stress.slips = sl;
             if ~isfield(cfg,'diagnostics'); cfg.diagnostics = struct(); end
             cfg.diagnostics.slipInjectionScenario = true;

@@ -1,9 +1,9 @@
 classdef SwarmRelativeSolver
-    % SwarmRelativeSolver  W2 relative layer -- per-epoch weighted-LSQ FREE-NETWORK shape adjustment.
+    % SwarmRelativeSolver  Diagnostic per-epoch free-network shape adjustment.
     %
     % Recovers the formation SHAPE from two-way inter-satellite ranging over a bounded-degree
     % (<=5 nearest-range, decision D2) neighbour graph, run PURELY as a read-only post-processor of
-    % the W1 federated per-asset marginals (revgnss.ReportRunner.runFederatedEstimation output). It is the second
+    % the federated per-asset marginals (revgnss.ReportRunner.runFederatedEstimation output). It is the second
     % layer of the federated architecture (docs/federated_swarm_architecture.md).
     %
     % HONESTY / SAFETY (the reason for the pivot away from the joint EKF):
@@ -15,20 +15,20 @@ classdef SwarmRelativeSolver
     %     SHAPE is observable; the absolute translation + rotation of the whole formation are NOT.
     %     The solve uses a minimal-constraint (min-norm / inner) gauge, and EVERY reported metric is
     %     gauge-invariant (baseline lengths + best-fit-rigid shape residual), so the gauge is a
-    %     numerical well-posedness device, NOT a channel that launders W1 absolute into the shape.
+    %     numerical well-posedness device, not an absolute-state prior.
     %   * NO absolute claim -- absolute stays per-asset (wall-limited). This layer reports SHAPE only.
-    %   * NO double-count -- W1 (ground pseudoranges) and W2 (ISL) use DISJOINT measurements; the W1
+    %   * NO double-count -- ground pseudoranges and ISL use disjoint measurements; the ground
     %     covariance P_i is deliberately NOT injected as a shape prior.
     %
-    % Sat-sat TWSTFT relative clocks are a separate gated default-OFF enhancement (W2-2); this file
+    % Satellite time-transfer relative clocks are a separate gated default-off diagnostic; this file
     % ships the SHAPE core (two-way ISL) only.
     %
     %   out = revgnss.SwarmRelativeSolver.solve(cfg, results)
     %       out.applicable          false when N<2 (nothing to relate) -> all metrics NaN
     %       out.nAssets, out.pairs  neighbour graph (canonical i<k pairs)
-    %       out.baselineErrRaw_m    tail-avg per-pair baseline-length RMS of the RAW W1 estimates
+    %       out.baselineErrRaw_m    tail-avg baseline RMS of the raw per-asset estimates
     %       out.baselineErrSolved_m tail-avg per-pair baseline-length RMS AFTER the ISL shape solve
-    %       out.shapeErrRaw_m       tail-avg best-fit-rigid (6-DOF, no-scale) shape RMS, raw W1
+    %       out.shapeErrRaw_m       tail-avg best-fit-rigid shape RMS, raw per-asset estimates
     %       out.shapeErrSolved_m    tail-avg best-fit-rigid shape RMS after the solve
     %       out.formalShapeSigma_m  tail-avg formal 1-sigma of the solved shape (min-norm cov) -- G8
     %       out.weaklyObservable    true if the geometry leaves a shape DOF weakly observable (G10)
@@ -112,7 +112,7 @@ classdef SwarmRelativeSolver
             blRaw = nan(1,nEp); blSol = nan(1,nEp);
             shRaw = nan(1,nEp); shSol = nan(1,nEp);
             fSig  = nan(1,nEp); weakEp = false(1,nEp);
-            solvedPos = nan(3,N,nEp);                 % ISL-solved positions in their NATIVE (W1) frame (truth-free)
+            solvedPos = nan(3,N,nEp); % Native estimated frame; no truth-based alignment.
             Winv  = 1 ./ pairR(:);                    % per-pair weight = 1/R
             for kk = 1:nEp
                 estK = zeros(3,N); truthK = zeros(3,N);
@@ -140,12 +140,9 @@ classdef SwarmRelativeSolver
                 shRaw(kk) = revgnss.SwarmRelativeSolver.shapeRms_(estK,  truthK);
                 shSol(kk) = revgnss.SwarmRelativeSolver.shapeRms_(rHat,  truthK);
                 fSig(kk)  = sqrt(mean(Pshape));       % formal 1-sigma of the solved positions
-                % Per-node ISL-solved positions in their NATIVE frame: rHat = W1 estimate + min-norm
-                % shape correction, with the 6-DOF rigid frame LEFT at the W1 value (solveEpoch_). Stored
-                % truth-FREE so the summary's relPos-solved column uses the SAME gauge as relPos-raw (both
-                % ref-differenced vs the reference asset) -> the raw->solved change is genuine ISL shape
-                % sharpening, NOT a truth-alignment artifact. The rigid formation frame, which ISL cannot
-                % observe, is retained in both columns. Output-only: no metric above changes.
+                % rHat retains the estimated rigid frame; no truth-based frame alignment is
+                % applied. The synthetic range observations above are generated from
+                % truth trajectories, so this remains a diagnostic post-processor.
                 solvedPos(:,:,kk) = rHat;
             end
 
@@ -164,10 +161,10 @@ classdef SwarmRelativeSolver
             out.perEpoch = struct('time_s', tVec(:).', ...
                 'baselineErrRaw_m', blRaw, 'baselineErrSolved_m', blSol, ...
                 'shapeErrRaw_m', shRaw, 'shapeErrSolved_m', shSol);
-            out.solvedPos = solvedPos;   % [3 x N x nEp] native-frame ISL-solved positions (truth-free; per-satellite relPos-solved)
+            out.solvedPos = solvedPos; % [3 x N x nEp], native estimated frame.
             out.time_s = tVec(:).';
 
-            % --- W2-2: gated sat-sat TWSTFT RELATIVE-CLOCK solve (default OFF) -------------------
+            % Gated satellite time-transfer relative-clock solve.
             % The clock DUAL of the shape solve. Two-way sat<->sat time transfer observes the clock
             % DIFFERENCE b_i-b_k directly (rows +1/-1), so a free-network min-norm solve over the same
             % neighbour graph sharpens the swarm's RELATIVE clocks to the TWSTFT floor. Default OFF
@@ -255,7 +252,7 @@ classdef SwarmRelativeSolver
         function [rHat, Pshape, weak] = solveEpoch_(estK, zK, pairs, Winv, N)
             % One epoch: Gauss-Newton min-norm (inner-gauge) WLS shape correction over delta in R^{3N}.
             % delta = pinv(H'WH) H'W res puts ZERO in the 6-D rigid null space -> the corrected
-            % positions keep the W1 rigid frame and only the internal shape moves. Reported metrics
+            % positions keep the estimated rigid frame and only the internal shape moves. Reported metrics
             % are gauge-invariant so this choice is inert.
             nP = size(pairs,1);
             r  = estK;                                     % working estimate, updated per GN iter
@@ -280,7 +277,7 @@ classdef SwarmRelativeSolver
                 % amplify a WEAKLY observable shape DOF (e.g. the out-of-line bending of a near-
                 % collinear formation). Untruncated pinv would divide the noise by a tiny singular
                 % value and blow the correction up (32 m on the collinear N=3 helix). The unobserved
-                % direction is simply left at the W1 estimate rather than corrected with noise.
+                % direction is left at the prior estimate rather than corrected with noise.
                 [Cpinv, delta] = revgnss.SwarmRelativeSolver.truncPinv_(Nmat, g);
                 r = r + reshape(delta, 3, N);
                 NmatLast = Nmat; Clast = Cpinv;
@@ -415,14 +412,14 @@ classdef SwarmRelativeSolver
         end
 
         function out = solveRelativeClocks_(cfg, results, N, pairs, tVec, out)
-            % Free-network min-norm RELATIVE-CLOCK solve (W2-2): the scalar clock dual of the shape
+            % Free-network minimum-norm relative-clock solve: the scalar clock dual of the shape
             % solve. Sharpens the swarm's relative clocks from sat-sat TWSTFT clock-difference
             % observations over the same neighbour graph. Read-only (no per-asset x/P write). Reports
-            % the relative-clock error vs truth, raw (W1) vs solved, tail-averaged.
+            % the relative-clock error vs truth, raw vs solved, tail-averaged.
             nEp = numel(tVec); nP = size(pairs,1);
             if nP < 1; return; end
 
-            % Per-asset estimated (W1 EKF b_rx) + TOTAL truth clock trajectories, aligned to tVec.
+            % Per-asset estimated clock bias and truth clock trajectories, aligned to tVec.
             estB = zeros(N, nEp); truB = zeros(N, nEp);
             for i = 1:N
                 a = results.asset{i}; sm = a.stateMap;
@@ -454,7 +451,7 @@ classdef SwarmRelativeSolver
                 end
                 W = diag(Winv);
                 % min-norm inner gauge: the 1-D null space is the common (mean) clock, which sat-sat
-                % TWSTFT cannot observe -> left at the W1 mean; every reported metric is a clock
+                % time transfer cannot observe -> left at the prior mean; every reported metric is a clock
                 % DIFFERENCE so it is gauge-invariant.
                 [C, delta] = revgnss.SwarmRelativeSolver.truncPinv_(H.'*W*H, H.'*W*res);
                 bHat = eB + delta;
@@ -504,7 +501,7 @@ classdef SwarmRelativeSolver
         end
 
         function s = baseSeed_(cfg)
-            s = 424242;   % W2 relative-layer noise base seed (independent of the sim streams)
+            s = 424242;   % Relative-network noise seed, independent of simulation streams.
             if isfield(cfg,'simulation') && isfield(cfg.simulation,'seed') && isscalar(cfg.simulation.seed)
                 s = s + cfg.simulation.seed;
             end
