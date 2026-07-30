@@ -7,18 +7,9 @@ classdef ConfigFactory
     % -----------------------------------------------------------------------
     % CONFIGURATION HIERARCHY
     %
-    %   defaultConfig()          MATCHED-ERROR BASELINE (not "all errors off").
-    %                            Troposphere and ionosphere are BOTH enabled with
-    %                            equal truth and model values so they cancel.
-    %                            Innovations remain small. Use as the standard
-    %                            starting point for any scenario.
-    %
-    %   cleanConfig()            Genuinely error-free code-only baseline.
-    %                            All atmosphere, multipath, and antenna errors
-    %                            disabled. Use for convergence validation.
-    %
-    %   matchedErrorBaselineConfig()  Alias for defaultConfig(). Explicit name
-    %                            for the matched-error intent.
+    %   Product runs resolve masterConfig plus a scenario JSON. defaultConfig()
+    %   is the structural all-off fixture used by focused tests and named
+    %   experimental presets. cleanConfig() is the explicit code-only control.
     %
     % -----------------------------------------------------------------------
     % SUPPORTED OBSERVABLES
@@ -49,10 +40,9 @@ classdef ConfigFactory
     %   Custom      User-filled coefficients
     %
     % Factory configs:
-    %   defaultConfig()              GEO-1, matched-error baseline (trop+iono both on)
+    %   defaultConfig()              Structural honest off=off fixture
     %   idealConfig()                Code noise = 0, all errors off
     %   cleanConfig()                All errors off, code-only
-    %   matchedErrorBaselineConfig() Alias for defaultConfig()
     %   noLeverArmConfig()           Zero lever arm (attitude unobservable)
     %   positionClockOnlyConfig()    Attitude/omega frozen, zero lever arm
     %   multiAntennaAttitudeConfig() 4-antenna cross; attitude observable
@@ -295,25 +285,11 @@ classdef ConfigFactory
             cfg.measurements.carrierMode           = 'off';
         end
 
-        function cfg = matchedErrorBaselineConfig()
-            % matchedErrorBaselineConfig  Truth+model include same deterministic corrections.
-            %
-            % Innovations remain small because model matches truth. This is the
-            % matched-error baseline (NOT "all errors off" — same corrections both sides).
-            cfg = revgnss.ConfigFactory.defaultConfig();
-            % The base default is honest off=off; re-assert
-            % this preset's matched-error meaning by enabling tropo+iono on both sides.
-            cfg.errors.troposphere.truth.enable = true;
-            cfg.errors.troposphere.model.enable = true;
-            cfg.errors.ionosphere.truth.enable  = true;
-            cfg.errors.ionosphere.model.enable  = true;
-        end
-
         function cfg = geoRealWorldTruthComparisonConfig()
             % geoRealWorldTruthComparisonConfig  Canonical GEO scenario.
             %
             % Single source of truth for run_geo_realworld_truth_comparison.m.
-            % The scenario uses matched J2 truth/EKF dynamics and seeded stochastic
+            % The scenario uses the same J2 force family and seeded stochastic
             % residuals in clocks, atmosphere, hardware, multipath, and measurements.
             cfg = revgnss.ConfigFactory.defaultConfig();
             cfg = revgnss.ScenarioPresets.apply(cfg, 'geoRealWorldTruthComparison');
@@ -490,17 +466,13 @@ classdef ConfigFactory
 
         function cfg = applyMultiAssetMode(cfg)
             % applyMultiAssetMode  Resolve the cfg.multiAsset.mode convenience switch
-            %   ('fast' | 'honest') into the granular estimation toggles.
+            %   ('fast' | 'joint') without activating measurement features.
             %
-            %   'fast'   : the classic product-beacon one-way-ISL swarm (today's default).
-            %              PASSTHROUGH -- touches nothing, so configs/tests that set
-            %              estimateMode/towersObserveSecondaries/twoWayISL directly are
-            %              unaffected and the frozen goldens stay byte-identical.
-            %   'honest' : RETIRED. Was the joint primary-centric multi-asset EKF; superseded by the
-            %              federated stack (run_oo_v1 (nSpaceAssets>1) + SwarmRelativeSolver +
-            %              FederatedSwarmSummary). Now raises an error pointing there.
+            %   'fast'  retains the independent-filter compatibility architecture.
+            %   'joint' marks every represented spacecraft as owned by the centralized
+            %           estimator. Sensor and protocol gates remain explicit.
             %
-            %   Called from BOTH masterConfig and finalizeConfig; idempotent for 'fast'.
+            %   Called from both masterConfig and finalizeConfig.
             mode = 'fast';
             if isfield(cfg,'multiAsset') && isfield(cfg.multiAsset,'mode') && ...
                     (ischar(cfg.multiAsset.mode) || isstring(cfg.multiAsset.mode))
@@ -508,17 +480,21 @@ classdef ConfigFactory
             end
             switch lower(mode)
                 case 'fast'
-                    return;                         % passthrough: leave granular toggles as-is
-                case 'honest'
-                    error('ConfigFactory:multiAssetModeRetired', ...
-                        ['cfg.multiAsset.mode=''honest'' (the joint primary-centric multi-asset EKF) ' ...
-                         'is RETIRED. For multi-asset estimation just set cfg.scenario.nSpaceAssets>1 ' ...
-                         'and run through run_oo_v1 -> ReportRunner (the federated N single-asset EKFs ' ...
-                         '+ ISL/TWSTFT relative layer). See docs/federated_swarm_architecture.md.']);
+                    return
+                case 'joint'
+                    nAssets = 1;
+                    if isfield(cfg,'scenario') && isfield(cfg.scenario,'nSpaceAssets')
+                        nAssets = max(1, round(cfg.scenario.nSpaceAssets));
+                    end
+                    if nAssets < 2
+                        error('ConfigFactory:jointModeAssetCount', ...
+                            'cfg.multiAsset.mode=''joint'' requires scenario.nSpaceAssets >= 2.');
+                    end
+                    cfg.multiAsset.mode = 'joint';
+                    cfg = revgnss.MultiAssetConfig.normalize(cfg);
                 otherwise
                     error('ConfigFactory:multiAssetMode', ...
-                        ['cfg.multiAsset.mode must be ''fast'' (got ''%s''; ''honest'' is retired ' ...
-                         '-> use run_oo_v1 (nSpaceAssets>1)).'], mode);
+                        'cfg.multiAsset.mode must be ''fast'' or ''joint''; got ''%s''.', mode);
             end
         end
 
@@ -536,7 +512,7 @@ classdef ConfigFactory
             %   finalizeConfig being called more than once per run.
             if ~(isfield(cfg,'atmosphere') && isfield(cfg.atmosphere,'realistic') ...
                     && cfg.atmosphere.realistic)
-                return;   % matched synthetic atmosphere (golden / bespoke tests)
+                return;
             end
             if isempty(which('realisticAtmosphereConfig'))
                 error('revgnss:ConfigFactory:missingAtmosphereProfile', ...
@@ -596,41 +572,74 @@ classdef ConfigFactory
             % Clock recreation is idempotent: noiseCoeffs are re-derived from
             % clockType + clockFactors; name/deterministic/bias_s/fracFreq preserved.
 
-            % ---- Atmosphere profile (opt-in via masterConfig) -------------
-            % Propagate a master `.enable` that the SCENARIO wrote into its truth/model pair.
-            % expandEnableToggles does this at masterConfig.m:163 -- i.e. BEFORE the scenario
-            % JSON is merged -- so a scenario setting errors.multipath.enable=true was a
-            % measured no-op (enable=1, truth=0, model=0) while the physics reads only the
-            % pair. This runs post-merge and, crucially, only for effects whose master the
-            % scenario actually touched, leaving any pair member the scenario wrote itself
-            % alone. No scenario JSON => provenance empty => no-op => goldens unchanged.
+            % Apply the selected atmosphere profile before resolving parent enables.
+            cfg = revgnss.ConfigFactory.applyAtmosphereProfile(cfg);
+
             cfg = resolveEnablePairsPostMerge(cfg, { ...
                 'physics.sagnac', 'physics.lightTime', 'physics.relativity.shapiro', ...
                 'physics.relativity.clock', 'physics.doppler', ...
                 'errors.troposphere', 'errors.ionosphere', 'errors.hardwareDelay', 'errors.multipath', ...
                 'effects.towerSurvey', 'effects.antennaPCO', 'effects.antennaPCV' });
 
-            % Apply the physically-realistic atmosphere overlay + ionosphere
-            % handling requested by cfg.atmosphere.realistic. Opt-in only:
-            % configs that never set the toggle (bespoke tests, and the golden,
-            % which sets it false) are left byte-identical.
-            cfg = revgnss.ConfigFactory.applyAtmosphereProfile(cfg);
-
             % ---- Multi-asset mode switch (ordering-safe re-resolution) -----
-            % Resolve cfg.multiAsset.mode ('fast'|'honest') here too, so a run script that
-            % sets nSpaceAssets/mode AFTER masterConfig() still gets the honest bundle (the
-            % masterConfig ISL auto-block only fires at call time). No-op for 'fast'.
+            % Resolve cfg.multiAsset.mode after scenario overrides. Joint mode changes
+            % state ownership only; measurement and protocol gates remain explicit.
             cfg = revgnss.ConfigFactory.applyMultiAssetMode(cfg);
+            revgnss.IndependentFleetCoordinator.validateConfig(cfg);
+
+            % ---- PRE-merge writers, re-resolved post-merge (step 2) ---------------------
+            % These four run at masterConfig.m:632/677/678/679, i.e. BEFORE run_oo_v1 merges
+            % the scenario JSON, which makes their trigger keys inert from a scenario:
+            % scenario.orbitClass -- the documented "SINGLE switch" -- perturbations.sunMoon.
+            % enable, multiAsset.injectTruthSideDynamics and errors.hardwareDelay.perTowerBias
+            % .enable. Re-running them here is what makes a scenario able to reach them.
+            %
+            % All four are idempotent (constants and copies; the two `max` clamps converge),
+            % so the masterConfig call is left in place -- it still serves callers that use
+            % masterConfig() without finalizeConfig, e.g. tests/regression/
+            % goldenRealismScenarioConfig -- and this pass simply re-resolves.
+            %
+            % preserveScenarioOwned gives the scenario back every key it wrote, so a writer
+            % supplies defaults but never overrides the JSON. No JSON => no provenance =>
+            % strict pass-through => goldens byte-identical.
+            %
+            % ORDER IS LOAD-BEARING:
+            %   orbitClassConfig FIRST  -- on the LEO path it replaces cfg.towers wholesale,
+            %       and applyPerTowerHwBias draws one bias per tower from numel(cfg.towers).
+            %   applyPerTowerHwBias LAST -- it deliberately forces hardwareDelay.model.enable
+            %       = false (uncalibrated: the bias must survive z - h). resolveEnablePairs-
+            %       PostMerge above would re-slave that member to the master, undoing it.
+            %
+            % NOT relocated here: realismGradeConfig. It is gated on nSpaceAssets >= 2 for its
+            % ISL blocks and masterConfig has nSpaceAssets = 1 at call time, so moving it would
+            % newly fire 21 ISL keys for the 34 swarm scenarios and apply 62 keys to the 46
+            % scenarios that set realism.grade = true -- a campaign-wide result change that
+            % needs its own measured step, not a silent ride-along.
+            cfg = preserveScenarioOwned(cfg, @orbitClassConfig);
+            cfg = preserveScenarioOwned(cfg, @applyLuniSolar);
+            cfg = preserveScenarioOwned(cfg, @applyInjectTruthSideDynamics);
+            cfg = preserveScenarioOwned(cfg, @applyPerTowerHwBias);
+
+            % ---- realism.grade re-resolved post-merge (GATED, default OFF) --------------
+            % The deferred half of step 2. Enabling this makes realism.grade work from a
+            % scenario for the first time -- and 46 of the 69 committed scenarios set it, so
+            % it is a campaign-wide result change, not a refactor. Default OFF so it can be
+            % MEASURED (resolve each scenario both ways and diff) before it is decided.
+            % Turning it on is a scientific decision with a re-run attached; see step 5.
+            resolveRealism_ = false;
+            try; resolveRealism_ = logical(cfg.realism.resolvePostMerge); catch; end
+            gradeOn_ = false;
+            try; gradeOn_ = logical(cfg.realism.grade); catch; end
+            if resolveRealism_ && gradeOn_
+                cfg = preserveScenarioOwned(cfg, @realismGradeConfig);
+            end
 
             % ---- IMU / gyro attitude aiding (gated; no-op unless cfg.estimator.imu.enable) ----
-            % Resolve the master switch into the EKF flag here; the truth-side asset gyro config is
-            % attached AFTER MultiAssetConfig.normalize below (adding cfg.asset.imu before the
-            % asset/assets merge would make the struct arrays dissimilar). When off: pure no-op.
+            % Resolve the master switch into the EKF flag here. Physical IMUs are assigned
+            % after MultiAssetConfig.normalize identifies the estimated spacecraft.
             imuOn = false;
             try; imuOn = logical(cfg.estimator.imu.enable); catch; end
-            if imuOn
-                cfg.estimator.estimateGyroBias = true;
-            end
+            cfg.estimator.estimateGyroBias = imuOn;
 
             % ---- Initialize validation tracking ---------------------------
             if ~isfield(cfg,'validation')
@@ -643,6 +652,29 @@ classdef ConfigFactory
             if ~isfield(cfg.validation,'disabledFeatures'); cfg.validation.disabledFeatures = {}; end
             if ~isfield(cfg.validation,'mappedFeatures');   cfg.validation.mappedFeatures   = {}; end
             policy = cfg.validation.unsupportedFeaturePolicy;
+
+            arcConsistencyRequested = false;
+            try
+                arcConsistencyRequested = logical( ...
+                    cfg.estimator.enforceCarrierArcConsistency.enable);
+            catch
+            end
+            if arcConsistencyRequested
+                error('ConfigFactory:carrierArcConsistencyUnavailable', ...
+                    ['estimator.enforceCarrierArcConsistency.enable is unavailable: ' ...
+                     'arc identifiers are assigned after carrier ionosphere-free rows are built.']);
+            end
+            phaseBiasRequirementDeclared = isfield(cfg, 'estimator') && ...
+                isfield(cfg.estimator, 'diffAtt') && ...
+                isfield(cfg.estimator.diffAtt, 'ambiguityResolution') && ...
+                isfield(cfg.estimator.diffAtt.ambiguityResolution, ...
+                    'requirePhaseBiasCalibrationForFix');
+            if phaseBiasRequirementDeclared && ~logical( ...
+                    cfg.estimator.diffAtt.ambiguityResolution. ...
+                    requirePhaseBiasCalibrationForFix)
+                error('ConfigFactory:uncalibratedIntegerFixingUnavailable', ...
+                    'Integer fixing cannot bypass phase-bias calibration.');
+            end
 
             % ---- User convenience field mappings -------------------------
             % cfg.clock.receiver.deterministic → cfg.asset.clock.deterministic
@@ -933,8 +965,10 @@ classdef ConfigFactory
                                  'float ambiguity states in this configuration ' ...
                                  '(rxCarrierBias.mode=''notImplemented'' + carrierMode=''ekfFloat''). ' ...
                                  'Absolute carrier phase calibration is not available.'];
-                    cfg.validation.warnings{end+1} = warnMsg12;
-                    warning('ConfigFactory:rxCarrierBiasAbsorbed', '%s', warnMsg12);
+                    if ~any(strcmp(cfg.validation.warnings, warnMsg12))
+                        cfg.validation.warnings{end+1} = warnMsg12;
+                        warning('ConfigFactory:rxCarrierBiasAbsorbed', '%s', warnMsg12);
+                    end
                 end
             end
 
@@ -1026,8 +1060,11 @@ classdef ConfigFactory
                 rcOn = (isfield(rc,'truth') && isfield(rc.truth,'enable') && rc.truth.enable) || ...
                        (isfield(rc,'model') && isfield(rc.model,'enable') && rc.model.enable);
                 if rcOn
-                    cfg.validation.mappedFeatures{end+1} = ...
-                        'relativity.clock: gated truth-side relativistic offset on receiver clock (WP-D)';
+                    mappedRelativity = ...
+                        'relativity.clock: truth-side receiver clock-rate offset';
+                    if ~any(strcmp(cfg.validation.mappedFeatures, mappedRelativity))
+                        cfg.validation.mappedFeatures{end+1} = mappedRelativity;
+                    end
                 end
             end
 
@@ -1188,6 +1225,25 @@ classdef ConfigFactory
             cfg.measurements.carrier.enabledByFrequency = carrierMask79_ & sigMask79_;
             cfg.measurements.doppler.enabledByFrequency = dopplerMask79_ & sigMask79_;
 
+            carrierIfActive = revgnss.CarrierIonoFreeRowBuilder.shouldCombine(cfg) && ...
+                nnz(cfg.measurements.carrier.enabledByFrequency) > 1;
+            arcSeparationRequested = false;
+            try
+                arcSeparationRequested = logical( ...
+                    cfg.estimator.arcSeparatedAmbiguities.enable);
+            catch
+            end
+            slipDetectionRequested = false;
+            try
+                slipDetectionRequested = logical(cfg.carrierSlip.enable);
+            catch
+            end
+            if carrierIfActive && (arcSeparationRequested || slipDetectionRequested)
+                error('ConfigFactory:carrierIfArcTrackingUnavailable', ...
+                    ['Carrier ionosphere-free rows are formed before per-frequency ' ...
+                     'arc tracking. Disable carrierSlip and arcSeparatedAmbiguities.']);
+            end
+
             if ~isfield(cfg.measurements.carrier,'l2EkfRows')
                 cfg.measurements.carrier.l2EkfRows = struct();
             end
@@ -1233,7 +1289,14 @@ classdef ConfigFactory
                     enforceBiasStatus = logical(cfg.estimator.diffAtt.ambiguityResolution.enforcePhaseBiasStatus);
                 catch
                 end
-                if enforceBiasStatus
+                phaseBiasStatusOwned = false;
+                try
+                    phaseBiasStatusOwned = any(strcmp( ...
+                        cfg.provenance.explicit, ...
+                        'estimator.diffAtt.ambiguityResolution.phaseBiasStatus'));
+                catch
+                end
+                if enforceBiasStatus && ~phaseBiasStatusOwned
                     cfg.estimator.diffAtt.ambiguityResolution.phaseBiasStatus = ...
                         revgnss.InterAntennaPhaseBias.resolvedStatus(cfg);
                 end
@@ -1356,10 +1419,16 @@ classdef ConfigFactory
                 cfg.estimator.attitudeInitMode = 'none';
             end
             attInitMode16 = cfg.estimator.attitudeInitMode;
-            validInit16 = {'none','knownAttitudeCalibration','coarseBaselineIntegerSearch'};
+            if strcmp(attInitMode16, 'knownAttitudeCalibration')
+                error('ConfigFactory:truthAttitudeInitializationUnavailable', ...
+                    ['knownAttitudeCalibration uses simulated truth as an estimator ' ...
+                     'input and is unavailable.']);
+            end
+            validInit16 = {'none','coarseBaselineIntegerSearch'};
             if ~any(strcmp(attInitMode16, validInit16))
                 error('ConfigFactory:invalidAttitudeInitMode', ...
-                    'cfg.estimator.attitudeInitMode must be none, knownAttitudeCalibration, or coarseBaselineIntegerSearch.');
+                    ['cfg.estimator.attitudeInitMode must be none or ' ...
+                     'coarseBaselineIntegerSearch.']);
             end
             if ~strcmp(attInitMode16,'none')
                 nRx16 = 1;
@@ -1380,17 +1449,6 @@ classdef ConfigFactory
                     error('ConfigFactory:attitudeInitCarrierMode', ...
                         ['attitudeInitMode=%s requires carrierMode=ekfFloat and ' ...
                          'ambiguityMode=floatPerTowerReceiverSignal.'], attInitMode16);
-                end
-                if strcmp(attInitMode16,'knownAttitudeCalibration')
-                    allow16 = isfield(cfg.estimator,'attitudeInit') && ...
-                        isfield(cfg.estimator.attitudeInit,'knownAttitudeCalibration') && ...
-                        isfield(cfg.estimator.attitudeInit.knownAttitudeCalibration,'allow') && ...
-                        cfg.estimator.attitudeInit.knownAttitudeCalibration.allow;
-                    if ~allow16
-                        error('ConfigFactory:knownAttitudeNotDeclared', ...
-                            ['knownAttitudeCalibration requires ' ...
-                             'cfg.estimator.attitudeInit.knownAttitudeCalibration.allow=true.']);
-                    end
                 end
             end
 
@@ -1461,8 +1519,14 @@ classdef ConfigFactory
             if isfield(cfg.asset,'clockType') && isfield(cfg.asset,'clockFactors')
                 cfg.asset.clockFactors.roleNoiseFactor = gs.receiverNoiseFactor;
                 prev = cfg.asset.clock;
+                receiverSeed = 100 + mcOff_;
+                if isfield(prev,'seed') && isnumeric(prev.seed) && ...
+                        isscalar(prev.seed) && isfinite(prev.seed) && prev.seed ~= 100
+                    % Preserve an explicitly configured local receiver-clock stream.
+                    receiverSeed = prev.seed;
+                end
                 clk  = revgnss.ConfigFactory.makeClockConfig( ...
-                    cfg.asset.clockType, 100+mcOff_, cfg.asset.clockFactors, gs);
+                    cfg.asset.clockType, receiverSeed, cfg.asset.clockFactors, gs);
                 clk.name          = prev.name;
                 clk.deterministic = prev.deterministic;
                 clk.bias_s        = prev.bias_s;
@@ -1487,12 +1551,16 @@ classdef ConfigFactory
             % Priority: custom 3×nR arms always win (any nR).
             %           Then auto-fill from 4-column cross pattern if nR<=4.
             %           Else require custom arms or error.
-            % Auto-attitude: nReceivers==1 → all attitude flags false.
-            %                nReceivers >1 → attitude estimated from lever arms.
-            % Angular-rate estimation stays disabled unless a rotational velocity
-            % measurement model is implemented.
+            % A single receiver has no lever-arm attitude information, but a
+            % configured star tracker or inertial gyro still supports attitude states.
             nR_req      = cfg.scenario.nReceivers;
             defaultArms = [1 -1 0 0; 0 0 1 -1; 0.2 0.2 -0.2 -0.2];  % 3 × 4
+            sensorAttitudeEnabled = false;
+            try
+                sensorAttitudeEnabled = logical(cfg.estimator.starTracker.enable) || ...
+                    logical(cfg.estimator.imu.enable);
+            catch
+            end
 
             if nR_req < 1
                 error('ConfigFactory:finalizeConfig', ...
@@ -1500,10 +1568,10 @@ classdef ConfigFactory
             end
 
             if nR_req == 1
-                % Single receiver: force zero lever arm; attitude is unobservable.
+                % Single receiver: zero lever arm, sensor attitude only.
                 cfg.asset.receiverLeverArm_body_m              = [0; 0; 0];
                 cfg.asset.receiverLeverArms_body_m             = [0; 0; 0];
-                cfg.estimator.estimateAttitude                   = false;
+                cfg.estimator.estimateAttitude                   = sensorAttitudeEnabled;
                 cfg.estimator.estimateAngularRate                = false;
                 cfg.estimator.estimateAttitudeFromPseudorange    = false;
                 cfg.estimator.estimateAngularRateFromPseudorange = false;
@@ -1583,19 +1651,35 @@ classdef ConfigFactory
                     cfg.towers(k).surveyError_ENU_m = zeros(3,1);
                 end
             end
-            cfg = revgnss.MultiAssetConfig.normalize(cfg);
-            % Attach the truth gyro config to the primary asset AFTER normalize (adding cfg.asset.imu
-            % before the asset/assets merge would make the struct arrays dissimilar). Field-level
-            % assignment is struct-array-safe. Gated: only when the IMU master switch is on.
-            if imuOn
-                gyroCfg = cfg.estimator.imu.truth; gyroCfg.enable = true;
-                cfg.asset.imu = gyroCfg;
-                if isfield(cfg,'assets') && ~isempty(cfg.assets)
-                    cfg.assets(1).imu = gyroCfg;
+            jointGeometry = false;
+            try; jointGeometry = strcmpi(cfg.multiAsset.mode,'joint'); catch; end
+            if jointGeometry && isfield(cfg,'assets')
+                for assetIdx_ = 1:numel(cfg.assets)
+                    cfg.assets(assetIdx_).receiverLeverArms_body_m = ...
+                        cfg.asset.receiverLeverArms_body_m;
+                    cfg.assets(assetIdx_).receiverLeverArm_body_m = ...
+                        cfg.asset.receiverLeverArm_body_m;
                 end
+            end
+            cfg = revgnss.MultiAssetConfig.normalize(cfg);
+            % One physical IMU belongs to each estimated spacecraft. The primary is
+            % estimated in fast mode; joint mode marks every spacecraft as estimated.
+            if isfield(cfg,'assets') && ~isempty(cfg.assets)
+                for assetIdx_ = 1:numel(cfg.assets)
+                    imuCfg_ = cfg.estimator.imu.truth;
+                    imuCfg_.enable = imuOn && logical(cfg.assets(assetIdx_).estimated);
+                    imuCfg_.seed = cfg.estimator.imu.truth.seed + 1009*(assetIdx_-1);
+                    imuCfg_.sensorIdentifier = sprintf( ...
+                        'spacecraft-%d:gyroscope',assetIdx_);
+                    imuCfg_.biasStateIdentifier = sprintf( ...
+                        'spacecraft-%d:gyroscope-bias',assetIdx_);
+                    cfg.assets(assetIdx_).imu = imuCfg_;
+                end
+                cfg.asset = cfg.assets(1);
             end
             revgnss.ISLMeasurementBuilder.validateConfig(cfg);
             revgnss.TwoWayISLMeasurementBuilder.validateConfig(cfg);
+            revgnss.InterSatelliteTimeTransferBuilder.validateConfig(cfg);
             revgnss.ISLTimingModel.validateConfig(cfg);
             revgnss.TWSTFTDiagnosticBuilder.validateConfig(cfg);
             revgnss.TwoWayTimeTransferBuilder.validateConfig(cfg);
@@ -1801,13 +1885,16 @@ classdef ConfigFactory
                     cfg.estimator.processNoise.modelMismatch.sigma_mps2 = autoSigma82_;
                 end
             elseif isJ2Truth82_ && isJ2EkfMode82_
-                cfg.diagnostics.dynamicsMismatch.j2DefaultPolicy  = 'j2TruthJ2EkfMatched';
+                cfg.diagnostics.dynamicsMismatch.j2DefaultPolicy  = ...
+                    'j2TruthJ2EstimatorSameForceFamily';
                 cfg.diagnostics.dynamicsMismatch.j2ActiveByDefault = true;
-                cfg.diagnostics.dynamicsMismatch.mismatchLabel    = 'j2 matched';
+                cfg.diagnostics.dynamicsMismatch.mismatchLabel    = ...
+                    'same J2 force family';
             else
                 cfg.diagnostics.dynamicsMismatch.j2DefaultPolicy  = 'twoBodyDefaultJ2Available';
                 cfg.diagnostics.dynamicsMismatch.j2ActiveByDefault = false;
-                cfg.diagnostics.dynamicsMismatch.mismatchLabel    = 'matchedOrStationary';
+                cfg.diagnostics.dynamicsMismatch.mismatchLabel    = ...
+                    'sameForceFamilyOrStationary';
             end
 
             % Process-noise consistency audit: sigma_accel must be >= 0.1 * J2 accel.
@@ -1974,7 +2061,7 @@ classdef ConfigFactory
             % Report freshness stage (overwritten below).
             cfg.diagnostics.reportStatusFreshnessStage = 84;
 
-            % --- Formal synthetic validation campaign ---
+            % --- Descriptive synthetic validation campaign ---
             if ~isfield(cfg,'validation'); cfg.validation = struct(); end
             if ~isfield(cfg.validation,'scientificCampaign')
                 cfg.validation.scientificCampaign = struct();

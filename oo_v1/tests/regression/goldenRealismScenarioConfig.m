@@ -44,6 +44,7 @@ function cfg = goldenRealismScenarioConfig(durationOverride_s)
 
     % --- Apply the realism-grade overlay (the physics this golden certifies) -------------
     cfg = realismGradeConfig(cfg);
+    cfg.atmosphere.realistic = true;
 
     % --- Gate overrides: summary is read before any report build; skip PDF/MAT/KAV -------
     cfg.report.writePdf   = false;

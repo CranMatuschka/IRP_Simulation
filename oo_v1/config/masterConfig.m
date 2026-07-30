@@ -40,18 +40,17 @@ cfg.diagnostics.storage.snapshot.interval_s = 300;
 %% Scenario
 % One estimated GEO spacecraft; nSpaceAssets is the swarm switch (1 = ground-only,
 % >1 = helix ISL swarm aiding the primary, primary clock scaling ~1/sqrt(N-1)).
-cfg.scenario.name         = 'singleAssetCarrierAttitude';
+cfg.scenario.name         = 'singleAssetNominalNavigation';
 cfg.scenario.nSpaceAssets = 1;        % helix ISL swarm (5 secondaries) -> ~3 cm / ~50 ps
 cfg.scenario.nTowers      = 5;        % 5-tower default (frozen-golden network). baseConfig
                                       % defines 12 real sites; set nTowers=12 for the wide
                                       % network that breaks the single-GEO radial<->clock
                                       % degeneracy (towers 6-12 are the extra real sites).
 cfg.scenario.orbitClass   = 'GEO';    % 'GEO' | 'MEO' | 'LEO'
-% Receiver antennas. The scenario assembly + finalizeConfig rebuild the lever-arm
-% cross from this and turn attitude estimation ON (>1) or OFF (==1). 4 = headline
-% 4-antenna cross pattern (attitude ON, the stated objective); set to 1 for the
-% ground-only single-antenna knob (G5S1R1, attitude OFF).
-cfg.scenario.nReceivers   = 4;
+% Receiver antennas. One antenna is sufficient for the nominal star-tracker/gyro
+% attitude solution. Four antennas are required only by explicit GNSS lever-arm
+% attitude experiments.
+cfg.scenario.nReceivers   = 1;
 
 %% Report output
 % What the run writes and in which style. 'clockExact' compiles a LaTeX PDF (needs
@@ -106,14 +105,23 @@ cfg.measurements.doppler.useInEKF     = true;
 
 %% Atmosphere
 % Troposphere and ionosphere truth+model with a shared master enable each. Both use
-% the synthetic simpleMapped model; ionosphere adds a stochastic scintillation term.
-cfg.errors.troposphere.enable              = false;
+% simpleMapped models with independent nominal truth and correction values.
+cfg.errors.troposphere.enable              = true;
 cfg.errors.troposphere.modelType           = 'simpleMapped';
-cfg.errors.troposphere.stochastic.enable   = true;
-cfg.errors.ionosphere.enable               = false;
+cfg.errors.troposphere.truth.zenithDelay_m = 2.45;
+cfg.errors.troposphere.model.zenithDelay_m = 2.30;
+cfg.errors.troposphere.model.biasFraction  = 1;
+cfg.errors.troposphere.stochastic.enable   = false;
+cfg.errors.troposphere.sigma_m             = 0.10;
+cfg.errors.ionosphere.enable               = true;
 cfg.errors.ionosphere.modelType            = 'simpleMapped';
-cfg.errors.ionosphere.stochastic.enable    = true;
-cfg.errors.ionosphere.scintillation.enable = true;
+cfg.errors.ionosphere.truth.zenithDelay_m  = 5;
+cfg.errors.ionosphere.model.zenithDelay_m  = 4;
+cfg.errors.ionosphere.model.biasFraction   = 1;
+cfg.errors.ionosphere.stochastic.enable    = false;
+cfg.errors.ionosphere.scintillation.enable = false;
+cfg.errors.ionosphere.higherOrder.enable   = false;
+cfg.errors.ionosphere.sigma_m              = 0.50;
 
 %% Error sources
 % Hardware delay, multipath, tower survey, antenna PCV and correlated noise are off
@@ -210,19 +218,42 @@ cfg.estimator.srpCoefficient.refAreaToMass_m2pkg = 0.02;   % reference A/m [m^2/
 cfg.estimator.srpCoefficient.fdScaleStep         = 10.0;   % FD step for d/ds (linearity -> exact)
 
 %% Estimator: attitude
-% Quaternion nominal + error-state EKF driven by calibrated differential carrier from
-% the antenna cross pattern. The coarse integer-search initialiser is disabled.
+% Quaternion nominal plus local error-state EKF driven by star-tracker observations
+% and inertial gyro measurements. Carrier attitude and integer search are disabled.
 cfg.estimator.attitude.parameterization           = 'quaternionErrorState';
 cfg.estimator.attitude.maxErrorStateInjection_rad = deg2rad(10);
 cfg.diagnostics.attitudeCovarianceReset.enable    = true;
-cfg.estimator.attitude.primaryMode                = 'carrierLeverArmQuaternionEkf';
-cfg.estimator.attitudeCarrierMode                 = 'calibratedDifferentialAmbiguity';
+cfg.estimator.attitude.primaryMode                = 'starTrackerGyroscope';
+cfg.estimator.attitudeCarrierMode                 = 'off';
+cfg.estimator.starTracker.enable                  = true;
+cfg.estimator.starTracker.useInEKF                = true;
+cfg.estimator.starTracker.updatePeriod_s          = 1;
+cfg.estimator.starTracker.updatePhase_s           = 0;
+cfg.estimator.starTracker.whiteAngularSigma_rad   = deg2rad(10/3600);
+cfg.estimator.starTracker.outages_s               = zeros(0,2);
+cfg.estimator.starTracker.truth.seed              = 1201;
+cfg.estimator.starTracker.truth.fixedAlignmentBias_rad = zeros(3,1);
+cfg.estimator.starTracker.truth.alignmentDriftRate_radps = zeros(3,1);
+cfg.estimator.starTracker.truth.alignmentDriftRandomWalk_rad_per_sqrt_s = 0;
+cfg.estimator.starTracker.truth.drawAlignmentFromCalibrationCovariance = false;
+cfg.estimator.starTracker.calibration.identifier  = 'star-tracker-body-alignment-v1';
+cfg.estimator.starTracker.calibration.q_B_S_wxyz  = [1;0;0;0];
+cfg.estimator.starTracker.calibration.covariance_rad2 = zeros(3);
+cfg.estimator.starTracker.calibration.validFrom_s = 0;
+cfg.estimator.starTracker.calibration.validUntil_s = 1e12;
+cfg.estimator.starTracker.calibration.treatment   = 'fixedCalibration';
+cfg.estimator.starTracker.calibration.driftProcessNoise_rad2ps = zeros(3);
+cfg.estimator.imu.enable                          = true;
+cfg.estimator.estimateGyroBias                    = true;
 cfg.estimator.diffAtt.calibWin_s                  = 60;
-cfg.estimator.diffAtt.referenceMode               = 'externalInitialAttitude';
+cfg.estimator.diffAtt.referenceMode               = 'selfCalibrated';
 cfg.estimator.diffAtt.referenceSigma_deg          = 0.1;
+cfg.estimator.diffAtt.solutionInterpretation = ...
+    'relativeAttitudeTrackingConditionedOnInitialPrior';
 cfg.estimator.attitude.carrierSignal              = 'L1';   % documentary (report builder)
 cfg.estimator.attitude.useRawCarrierForAttitude   = true;   % documentary (report builder)
 cfg.estimator.attitudeInitMode                    = 'none';
+cfg.estimator.attitudeInit.knownAttitudeCalibration.allow    = false;
 cfg.estimator.attitudeInit.search.windowDeg               = [2; 2; 2];
 cfg.estimator.attitudeInit.search.stepDeg                 = [0.5; 0.5; 0.5];
 cfg.estimator.attitudeInit.search.maxCandidates           = 729;
@@ -230,12 +261,13 @@ cfg.estimator.attitudeInit.search.ratioThreshold          = 1.20;
 cfg.estimator.attitudeInit.search.ambiguousRatioThreshold = 1.01;
 cfg.estimator.attitudeInit.search.improvementRatioThreshold = 1.05;
 cfg.estimator.attitudeInit.search.maxRmsCycles            = 0.30;
+cfg.estimator.attitudeInit.search.sigmaScaleDeg            = 2.0;
 cfg.estimator.attitudeInitShadow.enable                   = false;
 
 %% Estimator: ambiguity resolution
 % Guarded raw-carrier integer fixing for the receiver-baseline attitude system, with
 % hardened gates. Carrier ionosphere-free integer fixing is explicitly unsupported.
-cfg.estimator.integerAmbiguity.enable                      = true;
+cfg.estimator.integerAmbiguity.enable                      = false;
 cfg.estimator.integerAmbiguity.mode                        = 'controlledRawCarrier';
 cfg.estimator.integerAmbiguity.minArcLength_s              = 300;
 cfg.estimator.integerAmbiguity.maxSigma_cycles             = 0.15;
@@ -274,33 +306,32 @@ cfg.estimator.lambda.isl.enable      = false;   % inter-satellite carrier AR
 % re-applying every epoch would double-count the same information and collapse P.
 cfg.estimator.lambda.isl.applyFix    = false;
 cfg.estimator.lambda.isl.fixSigma_m  = 1e-3;    % tightness of the injected constraint [m]
-cfg.estimator.diffAtt.ambiguityResolution.enable                       = true;
+cfg.estimator.diffAtt.ambiguityResolution.enable                       = false;
 cfg.estimator.diffAtt.ambiguityResolution.method                       = 'constrainedBaselineIntegerSearch';
 cfg.estimator.diffAtt.ambiguityResolution.signal                       = 'L1';
 cfg.estimator.diffAtt.ambiguityResolution.searchHalfWidth_cycles       = 5;
 cfg.estimator.diffAtt.ambiguityResolution.minArcEpochs                 = 60;
 cfg.estimator.diffAtt.ambiguityResolution.rmsThreshold_cycles          = 0.10;
 cfg.estimator.diffAtt.ambiguityResolution.ratioThreshold               = 3.0;
-cfg.estimator.diffAtt.ambiguityResolution.useExternalReferenceAsSearchCenter = true;
-cfg.estimator.diffAtt.ambiguityResolution.allowExternalReferenceFallback     = true;
+cfg.estimator.diffAtt.ambiguityResolution.useExternalReferenceAsSearchCenter = false;
+cfg.estimator.diffAtt.ambiguityResolution.allowExternalReferenceFallback     = false;
 cfg.estimator.diffAtt.ambiguityResolution.maxFloatDistance_cycles      = 0.25;
 cfg.estimator.diffAtt.ambiguityResolution.requireAllForGnssOnlyClaim   = true;
-cfg.estimator.diffAtt.ambiguityResolution.partialFixPolicy             = 'useFixedOnlyOrExplicitMixed';
-cfg.estimator.diffAtt.ambiguityResolution.phaseBiasStatus              = 'syntheticKnownZero';
+cfg.estimator.diffAtt.ambiguityResolution.partialFixPolicy             = 'mixedFixedFloat';
+cfg.estimator.diffAtt.ambiguityResolution.phaseBiasStatus              = 'notCalibratedExternalProduct';
 cfg.estimator.diffAtt.ambiguityResolution.enforcePhaseBiasStatus       = false;
-cfg.estimator.diffAtt.ambiguityResolution.requirePhaseBiasCalibrationForFix = false;
+cfg.estimator.diffAtt.ambiguityResolution.requirePhaseBiasCalibrationForFix = true;
 cfg.estimator.diffAtt.ambiguityResolution.falseFixClassification       = 'screenedNotFormal';
 cfg.estimator.diffAtt.ambiguityResolution.maxWideLaneFloatDistance_cycles    = 0.5;
 cfg.estimator.diffAtt.ambiguityResolution.differentialIonosphereInBaselineAr = 'neglectedShortBaselineV1';
 
 %% Carrier slip detection
-% Model-step-compensated jump test: expected tower-clock-product steps are removed
-% before comparing to threshold, so arcs stay robust across product update intervals.
-cfg.measurements.carrier.slipDetection.enable                = true;
+% Disabled while ionosphere-free carrier rows are formed before per-frequency tracking.
+cfg.measurements.carrier.slipDetection.enable                = false;
 cfg.measurements.carrier.slipDetection.minEpochsBeforeDetect = 3;
 cfg.measurements.carrier.slipDetection.resetSigma_m          = 100;
 cfg.measurements.carrier.slipDetection.action                = 'resetAndSkip';
-cfg.carrierSlip.enable                          = true;
+cfg.carrierSlip.enable                          = false;
 cfg.carrierSlip.method                          = 'modelStepCompensatedResidualJump';
 cfg.carrierSlip.threshold_m                     = 0.10;
 cfg.carrierSlip.minArcLength_s                  = 300;
@@ -379,16 +410,61 @@ cfg.diagnostics.dynamicsMismatch.computeJ2Ratios            = true;
 cfg.diagnostics.carrierDopplerConsistency.status            = 'notImplementedGuarded';
 
 %% Validation and post-run checks
-% How unsupported features are handled, and the short known-ambiguity attitude
-% validation run appended after the main run (validation only, not integer fixing).
-cfg.validation.unsupportedFeaturePolicy   = 'disableWithWarning';
+% Unsupported features fail during configuration resolution.
+cfg.validation.unsupportedFeaturePolicy   = 'error';
 cfg.validation.fullSuiteRun               = false;
-cfg.estimator.runKnownAmbiguityValidation = true;
+cfg.estimator.runKnownAmbiguityValidation = false;
+
+% Predeclared scientific acceptance rules. These values define a campaign; they do
+% not claim that the statistical campaign has already been executed.
+cfg.validation.manifest.identifier = 'coherent-two-way-code-and-attitude-v1';
+cfg.validation.manifest.status = 'declaredNotStatisticallyExecuted';
+cfg.validation.manifest.shortEnsemble.seedList = 1001:1200;
+cfg.validation.manifest.shortEnsemble.minimumIndependentRuns = 200;
+cfg.validation.manifest.fullScenario.seedList = 5001:5050;
+cfg.validation.manifest.fullScenario.minimumIndependentRuns = 50;
+cfg.validation.manifest.fullScenario.duration_s = 3600;
+cfg.validation.manifest.lightTime.maximumResidual_s = 1e-11;
+cfg.validation.manifest.range.maximumZeroNoiseClosure_m = 1e-3;
+cfg.validation.manifest.jacobian.maximumRelativeError = 1e-5;
+cfg.validation.manifest.jacobian.maximumAbsoluteError = 1e-7;
+cfg.validation.manifest.statistics.confidence = 0.95;
+cfg.validation.manifest.statistics.burnInFraction = 0.5;
+cfg.validation.manifest.statistics.evaluationRule = ...
+    'fixedEpochsAcrossIndependentRuns';
+cfg.validation.manifest.attitude.initialError_deg = [1;-1;0.5];
+cfg.validation.manifest.attitude.maximumConvergenceTime_s = 60;
+cfg.validation.manifest.attitude.maximumFinalError_deg = 0.05;
+cfg.validation.manifest.attitude.maximumOutageRecoveryTime_s = 30;
+cfg.validation.manifest.attitude.requireThreeSigmaCoverage = true;
+cfg.validation.manifest.numerics.maximumCovarianceAsymmetry = 1e-10;
+cfg.validation.manifest.numerics.minimumCovarianceEigenvalue = -1e-10;
+
+cfg.validation.scientificCampaign.enable = false;
+cfg.validation.scientificCampaign.profile = 'light';
+cfg.validation.scientificCampaign.seedList = [85, 185, 285];
+cfg.validation.scientificCampaign.duration_s = 900;
+cfg.validation.scientificCampaign.runNominal = true;
+cfg.validation.scientificCampaign.runL1Only = true;
+cfg.validation.scientificCampaign.runDegradedClockProduct = true;
+cfg.validation.scientificCampaign.runSlipInjection = true;
+cfg.validation.scientificCampaign.runReducedTowerGeometry = false;
+unassessedAccuracyCriteria = struct( ...
+    'positionRmsPassLimit_m', NaN, ...
+    'clockBiasRmsPassLimit_m', NaN, ...
+    'positionRmsWarningLimit_m', NaN, ...
+    'clockBiasRmsWarningLimit_m', NaN);
+campaignCases = { ...
+    'nominalDualFrequency', 'l1Only', 'degradedClockProduct', ...
+    'slipInjection', 'reducedTowerGeometry'};
+for campaignCaseIndex = 1:numel(campaignCases)
+    cfg.validation.scientificCampaign.acceptanceCriteria. ...
+        (campaignCases{campaignCaseIndex}) = unassessedAccuracyCriteria;
+end
 
 % ================================================================
 % SCENARIO ASSEMBLY  (runs after the toggles; may override a few of them)
-%   Inlined from ScenarioPresets.singleAssetCarrierAttitude. The
-%   geoRealWorldTruthComparison preset stays in +revgnss/ScenarioPresets.m.
+%   Nominal single-spacecraft navigation with absolute attitude sensors.
 % ================================================================
 
 %% Receiver geometry and lever arms
@@ -416,7 +492,7 @@ end
 if isempty(arms)
     arms = revgnss.ReceiverGeometry.defaultLeverArms(nRecvReq_);
 end
-cfg.scenario.name         = 'singleAssetCarrierAttitude';
+cfg.scenario.name         = 'singleAssetNominalNavigation';
 cfg.scenario.nReceivers   = size(arms,2);
 cfg.asset.receiverLeverArms_body_m = arms;
 cfg.asset.receiverLeverArm_body_m  = arms(:,1);
@@ -424,13 +500,12 @@ cfg.assets(1).receiverLeverArms_body_m = arms;
 cfg.assets(1).receiverLeverArm_body_m  = arms(:,1);
 
 %% Attitude estimation setup
-% Drive attitude from carrier partials only (code/Doppler attitude sensitivity off) so
-% the observation matrix and row metadata stay consistent.
+% Absolute attitude is supplied by the star tracker and inertial gyro.
 cfg.estimator.estimateAttitude                   = true;
 cfg.estimator.estimateAngularRate                = false;
 cfg.estimator.estimateAttitudeFromPseudorange    = false;
 cfg.estimator.estimateAngularRateFromPseudorange = false;
-cfg.estimator.attitude.useCarrierPartials        = true;
+cfg.estimator.attitude.useCarrierPartials        = false;
 cfg.estimator.attitude.useCodePartials           = false;
 cfg.estimator.attitude.useDopplerPartials        = false;
 
@@ -438,40 +513,28 @@ cfg.estimator.attitude.useDopplerPartials        = false;
 % Initial attitude error and the diagonal covariance/process-noise seeds for the run.
 cfg.estimator.P0_euler_rad             = deg2rad(5);
 cfg.estimator.P0_omega_radps           = 1e-12;
-% Attitude process noise (angular-acceleration 1-sigma). EMPIRICALLY RETUNED to 3e-4.
-% A Q-tuning sweep on the attitude-estimating config (nadir GEO, S1R4, 3600 s) has a clear
-% minimum here: attitude tail RMS is 0.1344 deg at the old torque-budget value (~1e-7),
-% 0.0707 deg at 3e-4, and rises again to 0.1391 deg at 1e-3 -- a classic Q bowl. The
-% physical torque-budget value tau/I ~ 1e-7 (revgnss.ConfigFactory.angAccelFromTorqueBudget_)
-% is ~3000x too TIGHT for the ESTIMATOR at the weakly-observed radial<->clock attitude wall:
-% it over-trusts the constant-rate attitude prediction and lags the carrier measurements.
-% Looser Q here both LOWERS the attitude error and makes P more conservative. The torque-
-% budget helper is retained (it still sizes the ConfigFactory attitude presets and documents
-% the physical floor). Single-antenna / positionClockOnly runs leave this inert (the EKF
-% freezes the attitude Q block when attitude is not estimated), so the single-antenna golden
-% is unaffected; the 4-antenna headline and realism goldens move with this value.
-cfg.estimator.sigma_angAccel_radps2    = 3e-4;   % empirical Q optimum (see sweep note above)
+cfg.estimator.sigma_angAccel_radps2    = 1e-7;
 cfg.estimator.initialError.euler_deg   = [1; -1; 0.5];
 cfg.estimator.initialError.omega_radps = [0; 0; 0];
 
 %% Carrier / ambiguity and arc handling (scenario)
-% Re-assert the carrier float-ambiguity EKF, ensure a slip threshold exists, and turn
-% on arc-separated ambiguities with arc-consistency enforcement.
+% Re-assert the carrier float-ambiguity EKF and retain independent arc states.
+% Cross-frequency arc consistency is unavailable in the runtime row ordering.
 cfg.measurements.carrierPhase.enable = true;
 cfg.measurements.carrierMode         = 'ekfFloat';
 cfg.estimation.ambiguityMode         = 'floatPerTowerReceiverSignal';
-cfg.measurements.carrier.slipDetection.enable = true;
+cfg.measurements.carrier.slipDetection.enable = false;
 if ~isfield(cfg.measurements.carrier.slipDetection,'threshold_m')
     cfg.measurements.carrier.slipDetection.threshold_m           = 0.1;
     cfg.measurements.carrier.slipDetection.minEpochsBeforeDetect = 3;
     cfg.measurements.carrier.slipDetection.resetSigma_m          = 100;
     cfg.measurements.carrier.slipDetection.action                = 'resetAndSkip';
 end
-cfg.estimator.arcSeparatedAmbiguities.enable            = true;
-cfg.estimator.enforceCarrierArcConsistency.enable       = true;
-cfg.diagnostics.arcSeparatedAmbiguities.enable          = true;
-cfg.diagnostics.carrierArcConsistencyEnforcement.enable = true;
-cfg.diagnostics.carrierArcEvidence.enable               = true;
+cfg.estimator.arcSeparatedAmbiguities.enable            = false;
+cfg.estimator.enforceCarrierArcConsistency.enable       = false;
+cfg.diagnostics.arcSeparatedAmbiguities.enable          = false;
+cfg.diagnostics.carrierArcConsistencyEnforcement.enable = false;
+cfg.diagnostics.carrierArcEvidence.enable               = false;
 
 %% Observability diagnostics (scenario)
 % Enable attitude-observability, receiver-geometry, and innovation-accounting reporting.
@@ -562,19 +625,12 @@ end
 % ground reference clock is needed to push below ~100 ps (honest reference-clock limit).
 cfg.measurements.twoWayTimeTransfer.enable   = false;   % <- set true (with useInEKF) to enable
 cfg.measurements.twoWayTimeTransfer.useInEKF = false;
+cfg.measurements.twoWayTimeTransfer.mode     = 'firstOrderReciprocal';
 cfg.measurements.twoWayTimeTransfer.towers   = 'all';   % which ground towers are two-way capable
 cfg.measurements.twoWayTimeTransfer.sigma_m  = 0.03;    % two-way time uncertainty 1-sigma [m] (~100 ps)
 
-%% Per-SECONDARY two-way time transfer. Default OFF.
-% The per-satellite twin of the primary two-way link above: a ground-tower<->SECONDARY
-% two-way exchange pins each secondary's clock b_tx DIRECTLY (H +1 on the secondary clock
-% state, no position column), decoupled from the secondary radial -- the only lever that
-% improves the per-satellite ABSOLUTE clock (and radial, via the ground-tower range row). REQUIRES
-% the secondary to TRANSMIT, which the plain reverse-GNSS uplink does NOT assume -> this is
-% an explicit "with per-satellite two-way time transfer" enhancement, not the baseline
-% geometry; label results accordingly. Needs estimated secondary clocks (estimateMode
-% 'clocks'/'position'). Fuses with the ground one-way row (independent draws). sigma_m
-% ~0.03 m = 100 ps lab-grade; operational two-way is ~0.3-1 ns (0.1-0.3 m).
+%% Reserved per-secondary ground-space time transfer. Default OFF.
+% No observation builder consumes this block. Canonical validation rejects activation.
 cfg.measurements.secondaryTwoWayTimeTransfer.enable                     = false;
 cfg.measurements.secondaryTwoWayTimeTransfer.useInEKF                   = false;
 cfg.measurements.secondaryTwoWayTimeTransfer.towers                     = 'all';   % 'all' or vector of tower indices
@@ -594,7 +650,7 @@ cfg.measurements.secondaryTwoWayTimeTransfer.conservativeProductCorrelation = tr
 %     true  -> Saastamoinen/Niell troposphere (+per-tower ZWD EKF) and a
 %              diurnal+stochastic ionosphere (Klobuchar + higher-order + gated
 %              scintillation): non-cancelling, physically-sized truth-model residuals.
-%     false -> matched synthetic atmosphere (truth==model; the frozen-golden physics).
+%     false -> simpleMapped nominal atmosphere with independent truth/model values.
 %
 %   Ionosphere handling -- TWO orthogonal boolean TOGGLES (only meaningful when
 %   realistic==true). Both false = the default RAW dual-frequency processing.
@@ -620,9 +676,51 @@ cfg.measurements.secondaryTwoWayTimeTransfer.conservativeProductCorrelation = tr
 % (These map to cfg.measurements.codeMode / cfg.estimation.ionosphereMode inside
 % ConfigFactory.applyAtmosphereProfile. codeMode='singleFrequency' is the internal name
 % for RAW uncombined dual-frequency -- again, not one frequency.)
-cfg.atmosphere.realistic      = true;
+cfg.atmosphere.realistic      = false;
 cfg.atmosphere.ionosphereFree = false;   % L1/L2 ionosphere-free combination
 cfg.atmosphere.estimateIono   = false;   % per-tower slant-ionosphere EKF state
+
+% Complex atmosphere profile selected by realism.json.
+cfg.atmosphere.realisticProfile.errors.troposphere.enable = true;
+cfg.atmosphere.realisticProfile.errors.troposphere.truth.enable = true;
+cfg.atmosphere.realisticProfile.errors.troposphere.model.enable = true;
+cfg.atmosphere.realisticProfile.errors.troposphere.modelType = 'localWeatherGM';
+cfg.atmosphere.realisticProfile.errors.troposphere.dayOfYear = 180;
+cfg.atmosphere.realisticProfile.errors.troposphere.truth.mappingType = 'niell';
+cfg.atmosphere.realisticProfile.errors.troposphere.model.mappingType = 'niell';
+cfg.atmosphere.realisticProfile.errors.troposphere.stochastic.enable = true;
+cfg.atmosphere.realisticProfile.errors.troposphere.stochastic.process = 'gaussMarkov';
+cfg.atmosphere.realisticProfile.errors.troposphere.stochastic.tau_s = 10800;
+cfg.atmosphere.realisticProfile.errors.troposphere.stochastic.sigmaWet_ss_m = 0.04;
+cfg.atmosphere.realisticProfile.errors.troposphere.stochastic.modelResidual.enable = false;
+cfg.atmosphere.realisticProfile.estimation.troposphereMode = 'perTowerZwd';
+cfg.atmosphere.realisticProfile.environment.weather.hydrostaticModelAssumption = ...
+    'perfectSurfaceMeteorology';
+
+cfg.atmosphere.realisticProfile.errors.ionosphere.enable = true;
+cfg.atmosphere.realisticProfile.errors.ionosphere.truth.enable = true;
+cfg.atmosphere.realisticProfile.errors.ionosphere.model.enable = true;
+cfg.atmosphere.realisticProfile.errors.ionosphere.modelType = 'tecGaussMarkov';
+cfg.atmosphere.realisticProfile.errors.ionosphere.truth.diurnal.enable = true;
+cfg.atmosphere.realisticProfile.errors.ionosphere.truth.diurnal.vtecDay_TECU = 30;
+cfg.atmosphere.realisticProfile.errors.ionosphere.truth.diurnal.vtecNight_TECU = 6;
+cfg.atmosphere.realisticProfile.errors.ionosphere.truth.diurnal.peakLocalTime_h = 14;
+cfg.atmosphere.realisticProfile.errors.ionosphere.topsideFraction = 1;
+cfg.atmosphere.realisticProfile.errors.ionosphere.stochastic.enable = true;
+cfg.atmosphere.realisticProfile.errors.ionosphere.stochastic.process = 'gaussMarkov';
+cfg.atmosphere.realisticProfile.errors.ionosphere.stochastic.tau_s = 600;
+cfg.atmosphere.realisticProfile.errors.ionosphere.stochastic.sigmaVDelayL1_ss_m = 0.3;
+cfg.atmosphere.realisticProfile.errors.ionosphere.model.correction = 'klobuchar';
+cfg.atmosphere.realisticProfile.errors.ionosphere.higherOrder.enable = true;
+cfg.atmosphere.realisticProfile.effects.ionosphere.mappingModel = 'thinShell';
+cfg.atmosphere.realisticProfile.effects.ionosphere.shellHeight_m = 350e3;
+cfg.atmosphere.realisticProfile.errors.ionosphere.scintillation.enable = true;
+cfg.atmosphere.realisticProfile.errors.ionosphere.scintillation.model = 'conker';
+cfg.atmosphere.realisticProfile.errors.ionosphere.scintillation.S4zen = 0.3;
+cfg.atmosphere.realisticProfile.errors.ionosphere.scintillation.tau_s = 30;
+cfg.atmosphere.realisticProfile.errors.ionosphere.scintillation.phaseScint.enable = true;
+cfg.atmosphere.realisticProfile.errors.ionosphere.scintillation.phaseScint.sigmaPhi_rad = 0.2;
+cfg.atmosphere.realisticProfile.errors.ionosphere.scintillation.phaseScint.tau_s = 1.5;
 
 %% Orbit class  (GEO | MEO | LEO — SINGLE switch)
 % Change cfg.scenario.orbitClass (set under %% Scenario above) to move the whole
@@ -655,12 +753,30 @@ cfg.realism.include.antennaPCV              = true;   % R-5  uncalibrated antenn
 cfg.realism.include.towerSurvey             = true;   % R-5  static ENU survey error (truth)
 cfg.realism.include.dcb                      = true;   % R-5  inter-frequency code bias (truth)
 cfg.realism.include.honestFloors            = true;   % R-10 honest measurement sigma floors
-cfg.realism.include.luniSolar               = true;   % R-3  matched luni-solar+SRP + retuned SNC (coupled)
+cfg.realism.include.luniSolar               = true;   % R-3  truth perturbations with reduced-dynamics EKF
 cfg.realism.include.relativity              = true;   % Relativistic receiver-clock offset
 cfg.realism.include.islProductSigma         = true;   % ISL  realistic secondary product sigma
 cfg.realism.include.eop                      = true;   % R-8  uncorrected EOP frame residual (truth)
 cfg.realism.include.solidEarthTide          = true;   % R-8  solid-Earth tide (truth)
 cfg.realism.include.interAntennaCarrierBias = true;   % R-6  unknown inter-antenna carrier bias (truth)
+% The four below were previously UNDECLARED here: realismGradeConfig's i_resolveIncludes
+% invented them with default true, so they were invisible to anyone reading this file.
+% Declared now at their existing values -> zero behaviour change, they are just no longer
+% hidden. Note the block description above promises only "realistic ISL PRODUCT sigma", so
+% islCarrier/islLinkBudget go beyond what realism.grade documents itself as doing; whether
+% they belong here at all is the open question (measure the battery/ladder swarm slices first).
+cfg.realism.include.islCarrier          = true;   % ISL carrier/noise parameters; does not enable rows
+cfg.realism.include.islLinkBudget       = true;   % synthetic diagnostic parameters; does not enable it
+% These two replace the former 'point34' (named after docs/attitude_improvement_review/
+% point_3_*.md and point_4a_*.md -- a doc citation, not an effect, bundling two concerns).
+% Both differ in KIND from every entry above: those add physical error sources to the TRUTH,
+% these change ESTIMATOR behaviour and REPORT honesty.
+cfg.realism.include.carrierArcSurvival  = true;   % common-mode + baseline-differenced slip guard
+cfg.realism.include.phaseBiasHonesty    = true;   % report the RESOLVED phase-bias status, not the ideal one
+cfg.realism.include.attitudeSensorNoise = true;   % conservative star-tracker and gyro noise
+% Compatibility field for older callers. Canonical resolution applies the realism profile
+% before explicit JSON overrides, so post-merge profile application is forbidden.
+cfg.realism.resolvePostMerge = false;
 if isfield(cfg,'realism') && isfield(cfg.realism,'grade') && cfg.realism.grade
     cfg = realismGradeConfig(cfg);
 end
@@ -671,7 +787,7 @@ end
 % re-resolves it for ordering-safety when nSpaceAssets/mode are set after masterConfig().
 cfg = revgnss.ConfigFactory.applyMultiAssetMode(cfg);
 
-% --- Optional matched-force / per-tower-hardware overlays (gated; no-op unless enabled) ------
+% --- Optional force-stressor / per-tower-hardware overlays (gated; no-op unless enabled) ------
 % Standalone config/internal functions (like realismGradeConfig): masterConfig applies them for the
 % default path; a run script can also call them after masterConfig() once it sets the toggle.
 cfg = applyLuniSolar(cfg);        % cfg.perturbations.sunMoon.enable
@@ -707,10 +823,8 @@ function cfg = i_baseDefaults()
 % measurement rows (ionosphere-free rows are opt-in and require L1+L2). Turning an
 % effect on adds a REAL error the estimator does not perfectly cancel (it uses the
 % estimated state, clock products and estimated atmosphere). Named presets set what
-% they need on top: masterConfig (the canonical run), atmosphereConfig,
-% matchedErrorBaselineConfig (tropo+iono matched), cleanConfig (explicit all-off).
-% (Matched vs off atmosphere cancels in the innovation, so this change does not affect
-% the pre-existing zero-noise idealConfig NIS test, which is inconsistent on main too.)
+% they need on top: masterConfig (the canonical run), atmosphereConfig, and
+% cleanConfig (explicit all-off).
 % Tower clocks: perfectTruth (validation mode).
 % Code noise: 0.3 m sigma.
 % Doppler: enabled with useInEKF=true; requires physics.doppler.model.enable=true
@@ -826,13 +940,8 @@ cfg.orbit.truth.perturbations.srp.Cr               = 1.3;         % radiation-pr
 cfg.orbit.truth.perturbations.srp.areaToMass_m2pkg = 0.02;        % area-to-mass ratio [m^2/kg]
 cfg.orbit.truth.perturbations.srp.shadow           = 'cylindrical';
 
-% Single convenience switch for the MATCHED Sun+Moon third-body + SRP force model (truth AND
-% EKF), default OFF. When true, i_applyLuniSolar() (end of file) enables both the truth-side and
-% the EKF-side perturbations with matched epoch/Cr/area-to-mass and retunes the residual-
-% acceleration SNC to 1e-6 -- the same coupled unit realism's include.luniSolar applies, but
-% available standalone without the rest of the realism overlay. Default false -> frozen goldens
-% stay byte-identical. (The individual truth/EKF enables above remain for a deliberate one-sided
-% force gap; this switch is the matched, no-gap version.)
+% Enable Sun/Moon third-body and SRP in both propagators as one force-family option.
+% Individual truth and estimator controls remain available for stress testing.
 cfg.perturbations.sunMoon.enable = false;
 % Sun/Moon ephemeris for the luni-solar perturbation (consulted by applyLuniSolar ->
 % OrbitPerturbations). 'mg' = Montenbruck & Gill low-precision analytic (default; ~0.6 m /
@@ -899,29 +1008,63 @@ cfg.multiAsset.truthStride_s = 60.0;   % decimation stride [s] to keep long-run 
 cfg.multiAsset.estimateMode = 'off';
 % --- Convenience preset over the granular estimation toggles (resolved by
 % revgnss.ConfigFactory.applyMultiAssetMode, in BOTH masterConfig and finalizeConfig):
-%   'fast'   (default) the classic product-beacon one-way-ISL swarm. PASSTHROUGH -- does
-%            not touch estimateMode/towersObserveSecondaries/twoWayISL, so it is byte-
-%            identical to setting them by hand and the goldens are unaffected.
-%   'honest' bundles the joint per-satellite estimation (estimateMode='position' +
-%            towersObserveSecondaries + twoWayISL + ISL observability). Swarm-only
-%            (nSpaceAssets>=2). Flip this ONE field to switch fast<->honest.
+%   'fast'  (default) retains the independent-filter compatibility architecture.
+%   'joint' is reserved for the centralized fleet estimator with full cross-spacecraft
+%           covariance. It remains opt-in until its validation gates pass.
 cfg.multiAsset.mode = 'fast';
-% --- ISL inside the per-asset EKFs (federated swarm only) ------------------
-% In the federated swarm each asset runs its own single-asset EKF (W1, ground rows) and a
-% separate read-only relative layer consumes the ISL/TWSTFT observables (W2). To keep W1
-% and W2 informationally DISJOINT -- so the same photon is never counted twice, once in the
-% per-asset covariance and again in the relative solution -- ReportRunner strips
-% measurements.isl.enable inside each per-asset EKF.
+cfg.multiAsset.federated.refAsset = 1;
+cfg.multiAsset.federated.savePerAssetMat = false;
+cfg.multiAsset.federated.parallel = false;
+cfg.multiAsset.federated.maxWorkers = 0;
+% Independent local-EKF fleet execution. This is intentionally separate from
+% multiAsset.mode: 'joint' remains the centralized reference and 'fast' remains
+% the existing compatibility path unless this explicit runtime is selected.
+cfg.multiAsset.distributedEstimator.enable = false;
+cfg.multiAsset.distributedEstimator.executionMode = 'epochSynchronous';
+cfg.multiAsset.distributedEstimator.stateExchange.enable = false;
+cfg.multiAsset.distributedEstimator.stateExchange.maximumAge_s = 0;
+cfg.multiAsset.distributedEstimator.stateExchange.deliveryDelay_s = 0;
+cfg.multiAsset.distributedEstimator.linkUpdate.enable = false;
+cfg.multiAsset.distributedEstimator.linkUpdate.ownerPolicy = 'disabled';
+cfg.multiAsset.distributedEstimator.linkUpdate.correlationPolicy = 'disabled';
+% Stage 2.0 frozen correlation-contract vocabulary (plan Section 2.0.5): every known
+% common-information source must declare exactly one treatment. No treatment is
+% implemented yet, so 'rejected' is the only value validateConfig currently accepts;
+% the other three words are reserved for Section 2.2 once a proven treatment exists.
+cfg.multiAsset.distributedEstimator.linkUpdate.commonSourceTreatment.towerClockProduct = 'rejected';
+cfg.multiAsset.distributedEstimator.linkUpdate.commonSourceTreatment.terminalCalibration = 'rejected';
+cfg.multiAsset.distributedEstimator.linkUpdate.commonSourceTreatment.transmittedStateProduct = 'rejected';
+cfg.multiAsset.distributedEstimator.linkUpdate.commonSourceTreatment.sessionTimingProduct = 'rejected';
+cfg.multiAsset.distributedEstimator.linkUpdate.commonSourceTreatment.sharedForceAtmosphericProduct = 'rejected';
+% Stage 2.0 frozen clock claim (plan Section 2.0.6): a reciprocal/two-way time-transfer
+% row observes a relative clock bias (b_remote-b_owner), never an absolute clock datum
+% or a direct drift measurement. 'relativeBiasOnly' is the only physically supported value.
+cfg.multiAsset.distributedEstimator.linkUpdate.timeTransferClockClaim = 'relativeBiasOnly';
+cfg.multiAsset.distributedEstimator.outOfSequencePolicy = 'reject';
+% --- Section 2.1 generic communication interfaces (all inert by default) -------------------
+% stateExchange.estimatorEligibleProfile.enable: publishes the ADDITIONAL Section 2.0.4
+% estimator-eligible product profile alongside -- never instead of -- the Stage-1 diagnostic
+% product/journal. deliveryLedger.enable: constructs the coordinator-owned fleet-wide
+% revgnss.DistributedDeliveryLedger (Section 2.1 rule 2). Both default false and are forced
+% false on every per-asset leaf by revgnss.IndependentFleetScenarioFactory, exactly like the
+% three distributedEstimator keys already forced off there.
+cfg.multiAsset.distributedEstimator.stateExchange.estimatorEligibleProfile.enable = false;
+cfg.multiAsset.distributedEstimator.deliveryLedger.enable = false;
+% The remaining four are single-legal-value word toggles: Section 2.1 ships no implementation
+% for any other value, so changing them fails configuration validation
+% (IndependentFleetCoordinator:section21ControlsUnavailable) rather than silently degrading.
+cfg.multiAsset.distributedEstimator.linkUpdate.remoteProductPropagationPolicy = 'frozenSameEpochOnly';
+cfg.multiAsset.distributedEstimator.linkUpdate.roleReversalPolicy = 'disabled';
+cfg.multiAsset.distributedEstimator.linkUpdate.calibrationOwnership.policy = 'undeclared';
+cfg.multiAsset.distributedEstimator.linkUpdate.updateAdapter.observable = 'none';
+% --- ISL inside the independent per-asset EKFs -----------------------------
+% The compatibility architecture runs independent asset filters and a separate read-only
+% relative diagnostic. Keeping ISL out of the asset filters prevents the same observation
+% from being reused in both paths.
 %
-% false (default) W1/W2 disjoint. Per-asset covariance is honest w.r.t. the relative layer;
-%                 ISL contributes ONLY through the relative solver. Frozen behaviour.
-% true            ISL rows (code and, if enabled, carrier + ambiguity states) stay ACTIVE
-%                 inside every per-asset EKF, so the swarm report shows the ISL carrier
-%                 contribution directly. The ground and ISL information then OVERLAP: the
-%                 relative layer re-uses observables already absorbed by W1, so the
-%                 relative covariance is OPTIMISTIC by an unquantified factor. Diagnostic /
-%                 exploratory use -- do not quote relative sigmas from such a run as
-%                 validated. See docs/federated_swarm_architecture.md.
+% false (default) keeps the paths disjoint.
+% true retains ISL rows in each asset filter; this is diagnostic because the relative
+%      layer then reuses those observations and its covariance is not independently valid.
 cfg.multiAsset.keepIslInPerAssetEkf = false;
 % Kabsch formation-alignment plot in the swarm report. Previously UNDECLARED: ReportRunner
 % read cfg.report.kabschAlignmentPlot.enable inside a try/catch that defaulted to false, so the
@@ -964,7 +1107,7 @@ cfg.multiAsset.towerSecondary.code.sigmaModel    = 'chiefFloored';  % 'flat' | '
 % mirrors TwoWayTimeTransfer.conservativeProductCorrelation).
 cfg.multiAsset.towerSecondary.productNCorr       = 30;    % effective correlated-sample count
 cfg.multiAsset.towerSecondary.towerClkSigma_m    = 0.03;  % tower clock product residual 1-sigma [m] (~100 ps)
-cfg.multiAsset.towerSecondary.towerClkDriftSigma_mps = 1e-3;  % tower clock DRIFT residual 1-sigma [m/s]; matched-drift R pad for secondary Doppler
+cfg.multiAsset.towerSecondary.towerClkDriftSigma_mps = 1e-3;  % tower clock-drift product uncertainty [m/s]
 % --- Guard A: divergent uplink atmosphere on ground->secondary rows ---
 % TRUTH-side per-(tower,interval) tropo+iono residual, SHARED across the secondaries a
 % tower sees (per-LOS divergence is elevation-mapping only), interval-correlated (not
@@ -1041,23 +1184,10 @@ cfg.multiAsset.truthSideDynamics.sncSigma_mps2   = 1e-5;  % white-SNC lower boun
                                                           % for a coherent ramp -- Guard C NEES is the arbiter,
                                                           % do NOT raise it to force NEES->1)
 cfg.multiAsset.secondaryOrbit.sigma_accel_mps2   = [];    % [] = inherit primary SNC
-% --- Swarm all-pairs two-way ISL (clock-free baseline lengths). Default OFF. -------
-% FUSION with one-way ISL + ground anchor: independent draws (RngSource 22/23) ->
-% adds Fisher information, NOT double-counting (one-way = range+clock-diff, two-way =
-% clock-free baseline, independent noise). Requires estimateMode='position' (both endpoints
-% are estimated states) AND towersObserveSecondaries (two-way is clock-free and rigid-motion
-% blind -> ground rows supply the clock/absolute anchor). nSpaceAssets=1 -> 0 pairs -> 0 rows
-% -> byte-identical golden. Sharpens the RELATIVE/shape solution only.
-% ON BY DEFAULT. This is the single gate on the relative (shape) layer, read at
-% SwarmRelativeSolver.m:47. With it off, every swarm report printed
-% "-- (two-way ISL shape disabled)" instead of a baseline-solved and shape-error figure, so the
-% headline formation numbers were simply absent from the PDF -- and none of the scene_*.json
-% scenarios set it. It is a PURE CONFIG GATE: the solver needs no observable it does not
-% already have, so switching it on produces a genuine measurement, never a placeholder.
-% Inert for nSpaceAssets=1 (0 pairs -> 0 rows), so the single-asset goldens are byte-identical;
-% the SWARM relative digest does move, deliberately, because the relative solution is now
-% actually computed.
-cfg.multiAsset.twoWayISL.enable                 = true;   % master gate
+% --- Synthetic all-pairs range-network diagnostic. Default OFF. -----------
+% This postprocessed truth-derived adjustment does not feed the spacecraft estimator and is
+% not a sequential radio exchange. It remains available only for explicit diagnostic studies.
+cfg.multiAsset.twoWayISL.enable                 = false;
 cfg.multiAsset.twoWayISL.links                  = 'all';  % 'all' pairs among estimated assets, or an M-by-2 [i k] list
 cfg.multiAsset.twoWayISL.sigma_m                = 0.01;   % white two-way ranging thermal 1-sigma [m] (cm-class wideband crosslink)
 cfg.multiAsset.twoWayISL.delayCal.sigma_const_m = 0.01;   % per-link turn-around+antenna-PCO cal bias, constant part [m] (33 ps = 1 cm)
@@ -1088,15 +1218,9 @@ cfg.multiAsset.twoWayISL.linkBudget.GT_dBK          = 5;
 % Reported as rel.lightTimeMax_m so the size is visible rather than assumed.
 cfg.multiAsset.twoWayISL.lightTime.enable           = false;
 
-% --- Satellite<->satellite TWO-WAY TIME TRANSFER ISL. Default OFF. -----
-% The two-way SUM path (range, clock-free baseline = SHAPE) is complemented by the two-way
-% DIFFERENCE (range cancels) to observe the inter-satellite CLOCK difference directly and pin
-% the swarm's RELATIVE clocks to each other -- a mesh time-sync independent of the ground:
-%   z=(b_i-b_k)+delayCal+thermal ; h=x(clk_i)-x(clk_k) ; H=+1 on clk_i, -1 on clk_k (no position).
-% REQUIRES the satellites to TRANSMIT+RECEIVE (full crosslink transceiver) -- NOT the plain
-% reverse-GNSS uplink -> explicit "with inter-satellite two-way time transfer" enhancement.
-% Needs estimated secondary clocks (estimateMode 'clocks'/'position'). Fuses with the one-way
-% ISL (independent draws). sigma_m ~0.03 m = 100 ps lab-grade; operational two-way ~0.3-1 ns.
+% --- Legacy read-only satellite clock-network diagnostic. Default OFF. ---
+% Retained for noncanonical federated post-processing compatibility. Canonical execution
+% rejects activation; use measurements.isl.twoWay.timeTransfer for epoch observations.
 cfg.multiAsset.twoWayTimeTransferISL.enable                 = false;
 cfg.multiAsset.twoWayTimeTransferISL.useInEKF               = false;
 cfg.multiAsset.twoWayTimeTransferISL.links                  = 'all';  % 'all' clock-node pairs, or M-by-2 [i k]
@@ -1168,10 +1292,10 @@ cfg.estimator.estimateCarrierAmbiguities          = false;
 % The truth IMU (+models/+sensors/IMUModel) is a full strapdown unit: 3-axis GYRO + 3-axis
 % ACCELEROMETER, each with its own bias random walk, white noise and RNG stream.
 %
-% GYRO -> consumed by the EKF. omega_gyro = omega_true + b_g + ARW; the EKF propagates the nominal
-% attitude with omega = omega_gyro - b_g and estimates a 3-state gyro bias b_g APPENDED to the
-% state ONLY when enabled (so nStates 24/54/59 are unchanged when off). The multi-antenna
-% receivers still supply the absolute attitude update.
+% GYRO -> measures omega_B/I in body axes. Before propagation the EKF uses its nominal
+% body-to-ECEF attitude and Earth rate to obtain omega_B/E; truth attitude is never used.
+% A three-state gyro bias is appended only when enabled. Gyro propagation alone cannot
+% determine initial absolute attitude; enable a valid absolute observation separately.
 %
 % ACCELEROMETER -> modelled and logged, NOT consumed by the EKF (no config knob: there is nothing
 % to switch on). An accelerometer senses SPECIFIC FORCE, i.e. non-gravitational acceleration only
@@ -1181,12 +1305,12 @@ cfg.estimator.estimateCarrierAmbiguities          = false;
 % orbit determination uses DYNAMICS models (two-body + J2 + luni-solar/SRP) instead. It becomes
 % informative only under thrust/manoeuvres, via SpaceAsset.specificForce_body_mps2.
 %
-% finalizeConfig mirrors imu.truth into cfg.asset.imu and sets estimateGyroBias = imu.enable.
+% finalizeConfig assigns one uniquely seeded IMU to each estimated spacecraft and sets
+% estimateGyroBias = imu.enable.
 cfg.estimator.imu.enable                        = false;   % master switch (gyro + accel)
 cfg.estimator.imu.filter.arw_rad_per_sqrt_s     = 1e-4;    % EKF angle random walk (attitude Q)
 cfg.estimator.imu.filter.rrw_rad_per_s_sqrt_s   = 1e-6;    % EKF bias rate random walk (b_g Q)
 cfg.estimator.imu.filter.P0_bias_radps          = 1e-5;    % initial 1-sigma on b_g
-cfg.estimator.imu.filter.useVanLoanCrossTerm    = false;   % optional theta<->b_g Q cross term
 cfg.estimator.imu.truth.arw_rad_per_sqrt_s      = 1e-4;    % TRUTH gyro ARW (honest; own RNG stream)
 cfg.estimator.imu.truth.rrw_rad_per_s_sqrt_s    = 1e-6;    % TRUTH gyro bias RRW
 cfg.estimator.imu.truth.bias0Sigma_radps        = 1e-5;    % TRUTH gyro initial bias draw 1-sigma
@@ -1199,9 +1323,49 @@ cfg.estimator.estimateGyroBias                  = false;   % resolved from imu.e
 % 'off' (safe default) | 'calibratedDifferentialAmbiguity' | 'validationKnownAmbiguity'
 cfg.estimator.attitudeCarrierMode     = 'off';
 cfg.estimator.diffAtt.calibWin_s      = 60;   % calibration window length (s)
+cfg.estimator.diffAtt.ambiguityResolution.enable = false;
+cfg.estimator.diffAtt.ambiguityResolution.method = 'constrainedBaselineIntegerSearch';
+cfg.estimator.diffAtt.ambiguityResolution.signal = 'L1';
+cfg.estimator.diffAtt.ambiguityResolution.searchHalfWidth_cycles = 5;
+cfg.estimator.diffAtt.ambiguityResolution.minArcEpochs = 60;
+cfg.estimator.diffAtt.ambiguityResolution.rmsThreshold_cycles = 0.10;
+cfg.estimator.diffAtt.ambiguityResolution.ratioThreshold = 3.0;
+cfg.estimator.diffAtt.ambiguityResolution.useExternalReferenceAsSearchCenter = false;
+cfg.estimator.diffAtt.ambiguityResolution.allowExternalReferenceFallback = false;
+cfg.estimator.diffAtt.ambiguityResolution.maxFloatDistance_cycles = 0.25;
+cfg.estimator.diffAtt.ambiguityResolution.requireAllForGnssOnlyClaim = true;
+cfg.estimator.diffAtt.ambiguityResolution.partialFixPolicy = 'mixedFixedFloat';
+cfg.estimator.diffAtt.ambiguityResolution.phaseBiasStatus = 'notCalibratedExternalProduct';
+cfg.estimator.diffAtt.ambiguityResolution.enforcePhaseBiasStatus = false;
+cfg.estimator.diffAtt.ambiguityResolution.requirePhaseBiasCalibrationForFix = true;
+cfg.estimator.diffAtt.ambiguityResolution.falseFixClassification = 'screenedNotFormal';
+cfg.estimator.diffAtt.ambiguityResolution.maxWideLaneFloatDistance_cycles = 0.5;
+cfg.estimator.diffAtt.ambiguityResolution.differentialIonosphereInBaselineAr = ...
+    'neglectedShortBaselineV1';
+cfg.estimator.starTracker.enable                  = false;
+cfg.estimator.starTracker.useInEKF                = true;
+cfg.estimator.starTracker.updatePeriod_s          = 1;
+cfg.estimator.starTracker.updatePhase_s           = 0;
+cfg.estimator.starTracker.whiteAngularSigma_rad   = deg2rad(10/3600);
+cfg.estimator.starTracker.outages_s               = zeros(0,2);
+cfg.estimator.starTracker.truth.seed              = 1201;
+cfg.estimator.starTracker.truth.fixedAlignmentBias_rad = zeros(3,1);
+cfg.estimator.starTracker.truth.alignmentDriftRate_radps = zeros(3,1);
+cfg.estimator.starTracker.truth.alignmentDriftRandomWalk_rad_per_sqrt_s = 0;
+cfg.estimator.starTracker.truth.drawAlignmentFromCalibrationCovariance = false;
+cfg.estimator.starTracker.calibration.identifier  = 'star-tracker-body-alignment-v1';
+cfg.estimator.starTracker.calibration.q_B_S_wxyz  = [1;0;0;0];
+cfg.estimator.starTracker.calibration.covariance_rad2 = zeros(3);
+cfg.estimator.starTracker.calibration.validFrom_s = 0;
+cfg.estimator.starTracker.calibration.validUntil_s = 1e12;
+cfg.estimator.starTracker.calibration.treatment   = 'fixedCalibration';
+cfg.estimator.starTracker.calibration.driftProcessNoise_rad2ps = zeros(3);
+cfg.carrierSlip.commonModeCompensation.enable = false;
+cfg.carrierSlip.commonModeCompensation.minRows = 4;
+cfg.carrierSlip.baselineDifferencedMode.enable = false;
+cfg.carrierSlip.baselineDifferencedMode.referenceAntenna = 1;
 % Absolute multi-antenna attitude initialization.
-% Safe default is 'none'.  'knownAttitudeCalibration' requires an
-% explicit declaration that the calibration attitude is known.
+% Simulated truth is not an allowed estimator input.
 cfg.estimator.attitudeInitMode = 'none';
 cfg.estimator.attitudeInit.knownAttitudeCalibration.allow = false;
 cfg.estimator.attitudeInit.search.windowDeg = [3; 3; 3];
@@ -1218,7 +1382,7 @@ cfg.estimator.towerClockMode          = 'perfectCorrection';
 cfg.estimator.towerClockCorrectionSigma_m = 0.5; % used if noisyCorrection
 cfg.estimator.elevationMask_rad       = 5 * pi/180;
 cfg.estimator.attitudeJacobianStep_rad = 1e-6;
-cfg.estimator.sigma_accel_mps2        = 1e-6;   % baseline residual-acceleration process noise (SNC) for a MATCHED-J2 GEO EKF: covers SRP (~1e-7), luni-solar third-body (~1e-6) and higher-order geopotential residuals. The old 0.01 was ~1e4x too large and let the weakly-observable radial<->receiver-clock mode random-walk (radial 10 m -> 1.9 m when corrected). For an explicit reduced-dynamics/mismatch run, size the EXTRA noise via processNoise.modelMismatch below, not this baseline.
+cfg.estimator.sigma_accel_mps2        = 1e-6;   % baseline residual-acceleration process noise
 cfg.estimator.dynamics.mode           = 'constantVelocity';
 % EKF propagator luni-solar/SRP perturbations. Default OFF -> the EKF propagates pure J2
 % (or two-body). Enable to make the FILTER dynamics include sun+moon third-body (and SRP),
@@ -1227,11 +1391,13 @@ cfg.estimator.dynamics.mode           = 'constantVelocity';
 % FD STM picks it up automatically. See +models/+orbit/OrbitPerturbations, EkfDynamicsPredictor.
 cfg.estimator.dynamics.perturbations.luniSolar.enable = false;
 cfg.estimator.dynamics.perturbations.srp.enable       = false;
+cfg.estimator.dynamics.perturbations.srp.Cr           = 1.3;
+cfg.estimator.dynamics.perturbations.srp.areaToMass_m2pkg = 0.02;
 cfg.estimator.dynamics.perturbations.epochJD_TT       = 2451545.0;   % match cfg.orbit.truth.perturbations
 % Dynamic-model residual-acceleration process noise. processNoise.modelMismatch is the
 % back-compat field the EKF (ReverseGNSSEKF.buildQ_) reads; it carries the EXTRA process
-% noise sized to a truth-vs-EKF propagator gap. It is ZERO/off in a same-family (matched)
-% run and only active in an explicit reduced-dynamics / mismatch run.
+% noise sized to a truth-vs-EKF propagator gap. It is off when both use the
+% same force family and active only for an explicit reduced-dynamics case.
 cfg.estimator.processNoise.modelMismatch.enable = false;
 cfg.estimator.processNoise.modelMismatch.sigma_mps2 = 1e-6;
 % Canonical (honest) name for the SAME quantity. finalizeConfig keeps this a read-only
@@ -1239,6 +1405,12 @@ cfg.estimator.processNoise.modelMismatch.sigma_mps2 = 1e-6;
 % its physical meaning instead of the loaded word "mismatch". Do NOT read this in the EKF.
 cfg.estimator.processNoise.residualAccelerationUncertainty.enable     = false;
 cfg.estimator.processNoise.residualAccelerationUncertainty.sigma_mps2 = 1e-6;
+% Optional fleet-common stochastic acceleration in ECEF. Its covariance is
+% applied to every spacecraft pair, so the joint EKF retains the induced
+% cross-spacecraft process covariance.
+cfg.estimator.processNoise.commonAcceleration.enable = false;
+cfg.estimator.processNoise.commonAcceleration.sigma_mps2 = 0;
+cfg.estimator.processNoise.commonAcceleration.frame = 'ecef';
 % Near-zero angular-acceleration noise: attitude stays frozen at truth.
 cfg.estimator.sigma_angAccel_radps2   = 1e-15;
 cfg.estimator.minMeasurementsForUpdate = 4;
@@ -1264,6 +1436,14 @@ cfg.estimator.forceFiniteDifferenceH      = false;
 
 % --- Measurement noise floor ----------------------------------
 cfg.measurement.sigmaFloor_m = 1e-3;
+cfg.biases.interFrequency.code.truth.L1_m    = 0;
+cfg.biases.interFrequency.code.truth.L2_m    = 0;
+cfg.biases.interFrequency.code.model.L1_m    = 0;
+cfg.biases.interFrequency.code.model.L2_m    = 0;
+cfg.biases.interFrequency.carrier.truth.L1_m = 0;
+cfg.biases.interFrequency.carrier.truth.L2_m = 0;
+cfg.biases.interFrequency.carrier.model.L1_m = 0;
+cfg.biases.interFrequency.carrier.model.L2_m = 0;
 
 % --- Error sources: all off by default -----------------------
 cfg.errors.codeNoise.sigma_m = 0.3;
@@ -1319,14 +1499,18 @@ cfg.environment.weather.heightScale_m          = 8400;
 cfg.environment.weather.lapseRate_K_per_m      = 0.0065;
 cfg.environment.weather.minTemperature_K        = 220.0;
 cfg.environment.weather.maxTemperature_K        = 320.0;
+cfg.environment.weather.hydrostaticModelAssumption = 'fixedNominalMapping';
 
 % --- Extended atmosphere model config --------------------------------
 % Troposphere: new dry/wet split (backward compat: also keep zenithDelay_m)
 cfg.errors.troposphere.modelType                  = 'simpleMapped';
+cfg.errors.troposphere.dayOfYear                  = 180;
 cfg.errors.troposphere.truth.zenithDryDelay_m     = 2.3;
 cfg.errors.troposphere.truth.zenithWetDelay_m     = 0.15;
+cfg.errors.troposphere.truth.mappingType           = 'simple';
 cfg.errors.troposphere.model.zenithDryDelay_m     = 2.3;
 cfg.errors.troposphere.model.zenithWetDelay_m     = 0.15;
+cfg.errors.troposphere.model.mappingType           = 'simple';
 cfg.errors.troposphere.stochastic.enable          = true;
 cfg.errors.troposphere.stochastic.process         = 'gaussMarkov';
 cfg.errors.troposphere.stochastic.tau_s           = 3600;
@@ -1335,8 +1519,17 @@ cfg.errors.troposphere.stochastic.sigmaModelResidual_m = 0.02;
 
 % Ionosphere: new verticalDelayL1 (backward compat: keep zenithDelay_m)
 cfg.errors.ionosphere.modelType                       = 'simpleMapped';
+cfg.errors.ionosphere.topsideFraction                  = 1;
 cfg.errors.ionosphere.truth.verticalDelayL1_m          = 5.0;
+cfg.errors.ionosphere.truth.diurnal.enable             = false;
+cfg.errors.ionosphere.truth.diurnal.vtecDay_TECU       = 30;
+cfg.errors.ionosphere.truth.diurnal.vtecNight_TECU     = 6;
+cfg.errors.ionosphere.truth.diurnal.peakLocalTime_h    = 14;
 cfg.errors.ionosphere.model.verticalDelayL1_m          = 5.0;
+cfg.errors.ionosphere.model.correction                 = 'biasFraction';
+cfg.errors.ionosphere.model.klobuchar.amplitude_ns     = 20;
+cfg.errors.ionosphere.model.klobuchar.period_h         = 24;
+cfg.errors.ionosphere.model.klobuchar.dc_ns            = 5;
 cfg.errors.ionosphere.stochastic.enable               = false;
 cfg.errors.ionosphere.stochastic.process              = 'gaussMarkov';
 cfg.errors.ionosphere.stochastic.tau_s                = 1800;
@@ -1354,27 +1547,30 @@ cfg.errors.ionosphere.higherOrder.secondOrderCap_m      = 0.05;   % cap 2nd-orde
 cfg.errors.ionosphere.higherOrder.thirdOrderCoeff_perm  = 5e-5;   % 3rd-order coeff [1/m]: d3_L1 = coeff*I_L1^2 (~TEC^2)
 cfg.errors.ionosphere.higherOrder.thirdOrderCap_m       = 0.005;  % cap 3rd-order at L1 [m] (~few mm)
 cfg.errors.ionosphere.scintillation.enable            = true;
+cfg.errors.ionosphere.scintillation.model             = 'conker';
+cfg.errors.ionosphere.scintillation.S4zen              = 0;
 cfg.errors.ionosphere.scintillation.process           = 'gaussMarkov';
 cfg.errors.ionosphere.scintillation.tau_s             = 30;
 cfg.errors.ionosphere.scintillation.sigmaCodeL1_m     = 0.3;
 cfg.errors.ionosphere.scintillation.frequencyExponent = 1.0;
 cfg.errors.ionosphere.scintillation.affectsCodeNoise  = true;
 cfg.errors.ionosphere.scintillation.affectsPseudorangeBias = false;
+cfg.errors.ionosphere.scintillation.phaseScint.enable       = false;
+cfg.errors.ionosphere.scintillation.phaseScint.sigmaPhi_rad = 0.2;
+cfg.errors.ionosphere.scintillation.phaseScint.tau_s        = 1.5;
 
 cfg.errors.troposphere.stochastic.modelResidual.enable = false;
 cfg.errors.troposphere.stochastic.modelResidual.mode   = 'zero';
 cfg.errors.ionosphere.stochastic.modelResidual.enable  = false;
 cfg.errors.ionosphere.stochastic.modelResidual.mode    = 'zero';
 
-% Honest off=off default: the base injects NO atmosphere.
-% masterConfig / atmosphereConfig / matchedErrorBaselineConfig enable these
-% explicitly. Delay parameters are retained (inert while the enables are false).
+% Honest off=off structural default.
 cfg.errors.troposphere.truth.enable        = false;
 cfg.errors.troposphere.truth.zenithDelay_m = 2.3;
 cfg.errors.troposphere.model.enable        = false;
 cfg.errors.troposphere.model.zenithDelay_m = 2.3;
 cfg.errors.troposphere.model.biasFraction  = 1.0;
-cfg.errors.troposphere.sigma_m             = 0.0;
+cfg.errors.troposphere.sigma_m              = 0.0;
 
 cfg.errors.ionosphere.truth.enable         = false;
 cfg.errors.ionosphere.truth.zenithDelay_m  = 5.0;
@@ -1394,7 +1590,17 @@ cfg.errors.towerClock.latency_s            = 0;     % product delivery latency [
 % Shared clock-drift product uncertainty per tower.  Set > 0 if drift
 % corrections are active and their error should appear in R.
 cfg.errors.towerClock.driftCorrSigma_m_per_s = 0;  % [m/s], default: unmodelled
+cfg.clocks.tower.product.mode                   = 'truthHistoryProductNoisy';
+cfg.clocks.tower.product.updateInterval_s       = 30;
+cfg.clocks.tower.product.latency_s              = 5;
+cfg.clocks.tower.product.sigmaBias_m            = 0.01;
+cfg.clocks.tower.product.sigmaDrift_mps         = 0.0002;
+cfg.clocks.tower.product.covBiasDrift           = 0;
+cfg.clocks.tower.product.validity_s             = 120;
+cfg.clocks.tower.product.addToR                 = true;
+cfg.clocks.tower.product.sharedErrorCorrelation = true;
 
+cfg.errors.hardwareDelay.enable            = false;
 cfg.errors.hardwareDelay.truth.enable      = false;
 cfg.errors.hardwareDelay.truth.default_m   = 0.0;
 cfg.errors.hardwareDelay.model.enable      = false;  % honest off=off (was true; default_m=0 made it a no-op)
@@ -1402,7 +1608,7 @@ cfg.errors.hardwareDelay.model.default_m   = 0.0;
 % Hardware-delay real-residual channels, default inert. residualStochastic adds a
 % truth-only white residual (needs enable + sigma_m>0 + truth.enable) that survives z-h;
 % declaring the fields removes the runtime try/catch reliance. NB: enabling hardwareDelay
-% with matched truth==model default_m AND these off contributes EXACTLY 0 -> validateMasterConfig
+% with identical truth/model constants and these off contributes exactly zero; validation
 % warns (validateMasterConfig:hwDelayNoResidual). A differing truth/model default_m also leaves
 % a constant residual (already supported).
 cfg.errors.hardwareDelay.sigma_m                   = 0.0;
@@ -1411,7 +1617,7 @@ cfg.errors.hardwareDelay.residualStochastic.enable = false;
 % enabled, i_applyPerTowerHwBias() (end of file) draws ONE constant delay per tower from
 % [min_ns,max_ns] using perTowerBias.seed on its OWN RandStream (does not disturb the shared
 % draw order), writes it truth-only (model=0 -> survives z-h as a real UNcalibrated systematic),
-% and adds a jitter_ns white residual matched into R. 10-30 ns is a realistic UNcalibrated ground
+% and adds jitter_ns white uncertainty to R. 10-30 ns represents an uncalibrated ground
 % RF-chain delay (cables/filters/LNA/ADC); a well-calibrated site is <1 ns, so this is the
 % conservative "uncorrected" case. Each tower differs (seeded), never hardcoded.
 cfg.errors.hardwareDelay.perTowerBias.enable    = false;
@@ -1437,7 +1643,9 @@ cfg.estimator.interAntennaCarrierBias.referenceReceiver = 1;
 cfg.estimator.interAntennaCarrierBias.bias_cycles       = [];
 cfg.estimator.interAntennaCarrierBias.bias_m            = [];
 
+cfg.errors.multipath.enable                    = false;
 cfg.errors.multipath.truth.enable              = false;
+cfg.errors.multipath.model.enable              = false;
 cfg.errors.multipath.truth.amplitude_m         = 0.3;
 cfg.errors.multipath.truth.frequency_radps     = 0.01;
 cfg.errors.multipath.truth.stochastic_sigma_m  = 0.1;
@@ -1463,6 +1671,7 @@ cfg.errors.multipath.coloredGM.seed                = 6301;   % dedicated per-lin
 % If truth=true and model=true with same params, the effect mostly cancels.
 % R contains stochastic uncertainty only — deterministic bias belongs here.
 
+cfg.effects.towerSurvey.enable       = false;
 cfg.effects.towerSurvey.truth.enable = false;
 cfg.effects.towerSurvey.model.enable = false;
 cfg.effects.towerSurvey.sigmaENU_m   = [0.01; 0.01; 0.03];
@@ -1489,6 +1698,7 @@ cfg.effects.antennaPCO.calibrationResidual.enable               = false;
 cfg.effects.antennaPCO.calibrationResidual.receiverOffset_body_m = [0; 0; 0];
 
 % antennaPCV: toy elevation model only.  NOT calibrated ANTEX.
+cfg.effects.antennaPCV.enable        = false;
 cfg.effects.antennaPCV.truth.enable  = false;
 cfg.effects.antennaPCV.model.enable  = false;
 cfg.effects.antennaPCV.modelType     = 'toyAzEl';
@@ -1537,6 +1747,7 @@ cfg.physics.lightTime.dopplerDerivative = 'simplifiedV1';
 cfg.physics.relativity.shapiro.truth.enable = false;
 cfg.physics.relativity.shapiro.model.enable = false;
 
+cfg.physics.relativity.clock.enable       = false;
 cfg.physics.relativity.clock.truth.enable = false;
 cfg.physics.relativity.clock.model.enable = false;
 
@@ -1668,9 +1879,133 @@ cfg.measurements.isl.product.updateInterval_s    = 300;    % product re-broadcas
                                                            % error is piecewise-constant per interval,
                                                            % so it averages down and R stays consistent
 cfg.measurements.isl.twoWay.enable = false;
+cfg.measurements.isl.twoWay.protocol = 'coherentTranspondedPnTwoWayCode';
+cfg.measurements.isl.twoWay.linkIdentifier = 'isl-two-way-code-link-A1-A2';
+cfg.measurements.isl.twoWay.signalIdentifier = 'ISL-PN';
+cfg.measurements.isl.twoWay.physicalChainIdentifier = ...
+    'isl-two-way-code-chain-A1-A2';
+cfg.measurements.isl.twoWay.channelIdentifier = 'PN-1';
+cfg.measurements.isl.twoWay.localTimeSystemIdentifier = ...
+    'initiatorOnboardClock';
+cfg.measurements.isl.twoWay.timestampReferencePointIdentifier = ...
+    'initiatorReceiveTerminal';
+cfg.measurements.isl.twoWay.forwardCarrierFrequency_Hz = 26e9;
+cfg.measurements.isl.twoWay.returnCarrierFrequency_Hz = 26e9;
+cfg.measurements.isl.twoWay.carrierFrequencyTurnaroundRatio = 1;
+cfg.measurements.isl.twoWay.codeRateTurnaroundRatio = 1;
+cfg.measurements.isl.twoWay.codeChipRate_Hz = 10.23e6;
+cfg.measurements.isl.twoWay.codeLength_chips = 1023;
+cfg.measurements.isl.twoWay.turnaroundProperTime_s = 1e-3;
+cfg.measurements.isl.twoWay.initiatorTerminalGroupDelay_s = 0;
+cfg.measurements.isl.twoWay.terminalGeometry.mode = 'commonAperture';
+cfg.measurements.isl.twoWay.terminalGeometry. ...
+    transmitPhaseCentreOffset_body_m = [0.8;0.2;0.3];
+cfg.measurements.isl.twoWay.terminalGeometry. ...
+    receivePhaseCentreOffset_body_m = [0.8;0.2;0.3];
+cfg.measurements.isl.twoWay.terminalGeometry. ...
+    calibrationProductIdentifier = 'isl-phase-centre-calibration-v1';
+cfg.measurements.isl.twoWay.truth.turnaroundCalibrationError_s = 0;
+cfg.measurements.isl.twoWay.truth.terminalCalibrationError_s = 0;
+cfg.measurements.isl.twoWay.calibration.turnaroundSigma_s = 0;
+cfg.measurements.isl.twoWay.calibration.terminalSigma_s = 0;
+cfg.measurements.isl.twoWay.calibration.errorCorrelationModel = ...
+    'independentPhysicalChains';
+cfg.measurements.isl.twoWay.calibration.productIdentifier = ...
+    'isl-two-way-code-calibration-A1-A2';
+cfg.measurements.isl.twoWay.calibration.validFromLocalTag_s = -1e12;
+cfg.measurements.isl.twoWay.calibration.validUntilLocalTag_s = 1e12;
+cfg.measurements.isl.twoWay.calibration.residualBiasState.enable = false;
+cfg.measurements.isl.twoWay.calibration.residualBiasState. ...
+    processNoiseSigma_m_per_sqrt_s = 0;
+cfg.measurements.isl.twoWay.carrierToNoiseDensity_dBHz = NaN;
+cfg.measurements.isl.twoWay.schedule.updatePeriod_s = 1;
+cfg.measurements.isl.twoWay.schedule.updatePhase_s = 0;
+cfg.measurements.isl.twoWay.schedule.start_s = 0;
+cfg.measurements.isl.twoWay.schedule.stop_s = 1e12;
+cfg.measurements.isl.twoWay.schedule.outages_s = zeros(0,2);
+cfg.measurements.isl.twoWay.schedule.commandIdentifier = ...
+    'open-loop-scenario-schedule-A1-A2';
+cfg.measurements.isl.twoWay.schedule.commandSource = 'scenarioOpenLoop';
+% Fleet scenarios declare an open-loop link schedule here. Common RF, code,
+% calibration-noise, and update-period settings remain in twoWay; each enabled
+% link supplies only its physical identity, endpoints, and schedule phase.
+cfg.measurements.isl.twoWay.links = struct( ...
+    'enable',false, ...
+    'linkIdentifier','isl-two-way-code-link-A1-A2', ...
+    'initiatorAssetIndex',1, ...
+    'transponderAssetIndex',2, ...
+    'physicalChainIdentifier','isl-two-way-code-chain-A1-A2', ...
+    'calibrationProductIdentifier','isl-two-way-code-calibration-A1-A2', ...
+    'turnaroundCalibrationError_s',0, ...
+    'terminalCalibrationError_s',0, ...
+    'signalIdentifier','ISL-PN', ...
+    'channelIdentifier','PN-1', ...
+    'schedule',struct( ...
+        'updatePhase_s',0, ...
+        'commandIdentifier','open-loop-scenario-schedule-A1-A2'));
 cfg.measurements.isl.twoWay.range.enable = false;
 cfg.measurements.isl.twoWay.range.useInEKF = false;
 cfg.measurements.isl.twoWay.range.sigma_m = 0.25;
+cfg.measurements.isl.twoWay.range.linearization.stencil = 'fivePoint';
+cfg.measurements.isl.twoWay.range.linearization.positionStep_m = 0.5;
+cfg.measurements.isl.twoWay.range.linearization.velocityStep_mps = 0.05;
+cfg.measurements.isl.twoWay.range.linearization.attitudeStep_rad = 5e-4;
+cfg.measurements.isl.twoWay.range.linearization.clockBiasStep_m = 10;
+cfg.measurements.isl.twoWay.range.linearization.clockDriftStep_mps = 0.01;
+cfg.measurements.isl.twoWay.range.linkBudget.model = 'fixed';
+cfg.measurements.isl.twoWay.range.linkBudget.antennaModel = 'fixedAperture';
+cfg.measurements.isl.twoWay.range.linkBudget.refDistance_m = 1e5;
+cfg.measurements.isl.twoWay.range.linkBudget.refFrequency_Hz = 26e9;
+cfg.measurements.isl.twoWay.range.linkBudget.EIRP_dBW = 15;
+cfg.measurements.isl.twoWay.range.linkBudget.GT_dBK = 5;
+cfg.measurements.isl.twoWay.range.linkBudget.validationDistance_m = 1e5;
+cfg.measurements.isl.twoWay.range.linkBudget. ...
+    forwardReturnTrackingErrorCorrelation = 0;
+cfg.measurements.isl.twoWay.range.tracking.minimumCarrierToNoiseDensity_dBHz = 25;
+cfg.measurements.isl.twoWay.range.tracking.enforceThreshold = false;
+
+% Physical RF/code-tracking model. It is active only when model='physicalRF'.
+cfg.measurements.isl.twoWay.range.linkBudget.forward.powerDefinition = 'eirp';
+cfg.measurements.isl.twoWay.range.linkBudget.forward.eirp_dBW = 15;
+cfg.measurements.isl.twoWay.range.linkBudget.forward.transmitPower_dBW = 0;
+cfg.measurements.isl.twoWay.range.linkBudget.forward.losses_dB = 3;
+cfg.measurements.isl.twoWay.range.linkBudget.forward.receiverNoiseDefinition = 'GT';
+cfg.measurements.isl.twoWay.range.linkBudget.forward.receiverGT_dB_per_K = 5;
+cfg.measurements.isl.twoWay.range.linkBudget.forward.systemNoiseTemperature_K = 500;
+cfg.measurements.isl.twoWay.range.linkBudget.forward.bandwidthDefinition = 'chipRate';
+cfg.measurements.isl.twoWay.range.linkBudget.forward.effectiveRangingBandwidth_Hz = 10.23e6;
+cfg.measurements.isl.twoWay.range.linkBudget.forward.integrationTime_s = 0.1;
+cfg.measurements.isl.twoWay.range.linkBudget.forward.modulationTrackingCoefficient = 1;
+cfg.measurements.isl.twoWay.range.linkBudget.forward.transmitAntenna.model = 'fixedAperture';
+cfg.measurements.isl.twoWay.range.linkBudget.forward.transmitAntenna.gain_dBi = 12;
+cfg.measurements.isl.twoWay.range.linkBudget.forward.transmitAntenna.diameter_m = 0.25;
+cfg.measurements.isl.twoWay.range.linkBudget.forward.transmitAntenna.efficiency = 0.62;
+cfg.measurements.isl.twoWay.range.linkBudget.forward.receiveAntenna.model = 'fixedAperture';
+cfg.measurements.isl.twoWay.range.linkBudget.forward.receiveAntenna.gain_dBi = 12;
+cfg.measurements.isl.twoWay.range.linkBudget.forward.receiveAntenna.diameter_m = 0.25;
+cfg.measurements.isl.twoWay.range.linkBudget.forward.receiveAntenna.efficiency = 0.62;
+
+cfg.measurements.isl.twoWay.range.linkBudget.return = ...
+    cfg.measurements.isl.twoWay.range.linkBudget.forward;
+
+% Integrated electron content is declared separately for truth and estimator.
+cfg.measurements.isl.twoWay.range.plasma.enable = false;
+cfg.measurements.isl.twoWay.range.plasma.truthForwardTEC_electrons_per_m2 = 0;
+cfg.measurements.isl.twoWay.range.plasma.truthReturnTEC_electrons_per_m2 = 0;
+cfg.measurements.isl.twoWay.range.plasma.estimatorForwardTEC_electrons_per_m2 = 0;
+cfg.measurements.isl.twoWay.range.plasma.estimatorReturnTEC_electrons_per_m2 = 0;
+cfg.measurements.isl.twoWay.range.plasma.residualSigma_m = 0;
+% Processed two-way clock difference. The first-order mode is shared with
+% ground-to-space time transfer. fourTimestampPhysical is reserved and rejected.
+cfg.measurements.isl.twoWay.timeTransfer.enable = false;
+cfg.measurements.isl.twoWay.timeTransfer.useInEKF = false;
+cfg.measurements.isl.twoWay.timeTransfer.mode = 'firstOrderReciprocal';
+cfg.measurements.isl.twoWay.timeTransfer.sigma_m = 0.03;
+cfg.measurements.isl.twoWay.timeTransfer.includeReciprocityResidual = false;
+cfg.measurements.isl.twoWay.timeTransfer.reciprocitySigma_m = 0.005;
+cfg.measurements.isl.twoWay.timeTransfer.warmup_s = 0;
+cfg.measurements.isl.twoWay.timeTransfer.calibration.productIdentifier = ...
+    'isl-time-transfer-calibration';
 cfg.measurements.isl.twoWay.doppler.enable = false;
 cfg.measurements.isl.twoWay.doppler.useInEKF = false;
 cfg.measurements.isl.timing.enable = false;
@@ -1694,7 +2029,7 @@ cfg.measurements.twstft.calibratedDelay_s = 0.0;
 cfg.measurements.twstft.requireIslTiming = true;
 
 % --- Tower<->spacecraft two-way time transfer ---
-% A REAL EKF observable (unlike the spacecraft<->spacecraft TWSTFT scaffold above):
+% An EKF observable distinct from the legacy diagnostic scaffold above:
 % each two-way-capable ground tower exchanges signals with the spacecraft, yielding
 % a range-cancelled measurement of the clock difference (b_rx - b_tower). Because the
 % geometric range cancels by reciprocity, the row observes the RECEIVER CLOCK directly
@@ -1702,6 +2037,7 @@ cfg.measurements.twstft.requireIslTiming = true;
 % that limits the one-way uplink. Default OFF -> goldens byte-identical.
 cfg.measurements.twoWayTimeTransfer.enable                     = false;
 cfg.measurements.twoWayTimeTransfer.useInEKF                   = false;
+cfg.measurements.twoWayTimeTransfer.mode                       = 'firstOrderReciprocal';
 cfg.measurements.twoWayTimeTransfer.towers                     = 'all';   % 'all' or vector of tower indices
 cfg.measurements.twoWayTimeTransfer.sigma_m                    = 0.03;    % two-way time uncertainty 1-sigma [m] (~100 ps)
 cfg.measurements.twoWayTimeTransfer.includeReciprocityResidual = false;  % model motion non-reciprocity (both sides)
@@ -2011,14 +2347,11 @@ cfg.report.version             = '1.00';
 % A single run gives one NEES/NIS sample; chi-squared consistency is only meaningful over
 % an ensemble. Default OFF (golden byte-identical; expensive = N extra full runs). When on,
 % ReportRunner runs N seeded draws (initial error from P0, varied measurement/atmosphere +
-% clock-truth seeds) and band-checks the pooled NIS/NEES. baseConfig 'self' characterises
-% the SHIPPED filter (conservative-by-design -> expected below band); 'matchedBaseline'
-% gives a two-sided verdict.
+% clock-truth seeds) and band-checks the pooled NIS/NEES for the resolved scenario.
 cfg.report.monteCarlo.enable      = false;
 cfg.report.monteCarlo.nSeeds      = 12;
 cfg.report.monteCarlo.duration_s  = 900;      % short override; the shipped run is much longer
 cfg.report.monteCarlo.confidence  = 0.99;
-cfg.report.monteCarlo.baseConfig  = 'self';   % 'self' | 'matchedBaseline'
 cfg.report.baseOutputDir       = fullfile(fileparts(mfilename('fullpath')), '..', 'output');
 cfg.report.dateFolderPrefix    = 'Report-';
 cfg.report.overwrite           = true;

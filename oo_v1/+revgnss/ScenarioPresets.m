@@ -119,11 +119,11 @@ classdef ScenarioPresets
                 cfg.measurements.carrier.slipDetection.action                = 'resetAndSkip';
             end
 
-            % Arc-separated ambiguities and arc consistency enforcement.
+            % Arc-separated ambiguities; cross-frequency enforcement is unavailable.
             cfg.estimator.arcSeparatedAmbiguities.enable             = true;
-            cfg.estimator.enforceCarrierArcConsistency.enable        = true;
+            cfg.estimator.enforceCarrierArcConsistency.enable        = false;
             cfg.diagnostics.arcSeparatedAmbiguities.enable           = true;
-            cfg.diagnostics.carrierArcConsistencyEnforcement.enable  = true;
+            cfg.diagnostics.carrierArcConsistencyEnforcement.enable  = false;
             cfg.diagnostics.carrierArcEvidence.enable                = true;
 
             % Observability and geometry diagnostics.
@@ -361,7 +361,8 @@ classdef ScenarioPresets
             cfg.measurements.twstft.enable = false;
             cfg.estimator.integerAmbiguityFixing.enable = false;
             cfg.estimator.arcSeparatedAmbiguities.enable = true;
-            cfg.estimator.enforceCarrierArcConsistency.enable = true;
+            cfg.estimator.enforceCarrierArcConsistency.enable = false;
+            cfg.diagnostics.carrierArcConsistencyEnforcement.enable = false;
 
             cfg.validation.unsupportedFeaturePolicy = 'error';
             cfg.validation.synthetic = true;
@@ -399,7 +400,7 @@ classdef ScenarioPresets
                 lines{end+1} = 'False-fix-risk control: false';
                 lines{end+1} = 'PPP-grade claim       : false';
             elseif strcmp(name_, 'geoRealWorldTruthComparison')
-                lines{end+1} = 'EKF dynamics         : matched J2 truth-comparison; no intentional truth/model dynamics mismatch.';
+                lines{end+1} = 'EKF dynamics         : same J2 force family in truth and estimator; no intentional force-family stressor.';
                 lines{end+1} = 'Clock products       : simulated noisy product; no perfect tower-clock correction.';
                 lines{end+1} = 'Ambiguities          : float carrier ambiguities only.';
                 lines{end+1} = 'Force limitation     : J2-only; no SRP, third bodies, EOP, SP3/CLK, ANTEX, IONEX, VMF3, or GPT3.';

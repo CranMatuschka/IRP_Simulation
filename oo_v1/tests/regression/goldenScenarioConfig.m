@@ -29,11 +29,18 @@ function cfg = goldenScenarioConfig(durationOverride_s)
     cfg.measurements.isl.twoWay.range.useInEKF   = false;
     cfg.measurements.isl.twoWay.doppler.useInEKF = false;
 
-    % masterConfig now defaults to the physically-realistic atmosphere overlay
-    % (cfg.atmosphere.realistic=true). The frozen golden certifies the MATCHED
-    % synthetic atmosphere, so opt out here -> ConfigFactory.applyAtmosphereProfile
-    % becomes a no-op and the metrics stay byte-identical to the contract.
+    % The frozen reference predates the nominal unmatched atmosphere.
     cfg.atmosphere.realistic = false;
+    cfg.errors.troposphere.enable = false;
+    cfg.errors.troposphere.truth.enable = false;
+    cfg.errors.troposphere.model.enable = false;
+    cfg.errors.troposphere.sigma_m = 0;
+    cfg.errors.ionosphere.enable = false;
+    cfg.errors.ionosphere.truth.enable = false;
+    cfg.errors.ionosphere.model.enable = false;
+    cfg.errors.ionosphere.sigma_m = 0;
+    cfg.errors.ionosphere.scintillation.enable = true;
+    cfg.errors.ionosphere.scintillation.model = 'legacy';
 
     % masterConfig now defaults to nTowers=12 (real ground network). The frozen golden
     % certifies the original 5-tower physics; finalizeConfig trims to the first 5
@@ -59,6 +66,7 @@ function cfg = goldenScenarioConfig(durationOverride_s)
     cfg.report.writeMat   = false;
     cfg.report.compileTex = 'never';
     cfg.plots.showFigures = false;
+    cfg.estimator.runKnownAmbiguityValidation = true;
 
     if nargin >= 1 && ~isempty(durationOverride_s)
         cfg.simulation.duration_s = durationOverride_s;   % SMOKE; else full 3600 s

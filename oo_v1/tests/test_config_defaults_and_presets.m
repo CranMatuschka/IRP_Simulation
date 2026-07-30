@@ -4,7 +4,6 @@
 % Verifies:
 %   - defaultConfig() has all required new v4 fields
 %   - cleanConfig() finalizes without error
-%   - matchedErrorBaselineConfig() finalizes without error
 %   - dualFrequencyIFConfig() finalizes without error
 %   - carrierFloatConfig() finalizes without error
 %   - stochasticErrorsConfig() finalizes without error
@@ -31,8 +30,8 @@ assert(isfield(cfg.diagnostics,'observability'),     'Missing diagnostics.observ
 fprintf('  defaultConfig: all new fields present\n');
 
 % --- Named presets: must finalize without error
-presets = {'cleanConfig','matchedErrorBaselineConfig', ...
-           'dualFrequencyIFConfig','carrierFloatConfig','stochasticErrorsConfig'};
+presets = {'cleanConfig','dualFrequencyIFConfig', ...
+           'carrierFloatConfig','stochasticErrorsConfig'};
 
 for k = 1:numel(presets)
     preset = presets{k};

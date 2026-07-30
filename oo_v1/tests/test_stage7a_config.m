@@ -4,13 +4,14 @@
 % Verifies:
 %   T1: defaultConfig produces errors.troposphere.truth.enable = true (matched, not off)
 %   T2: cleanConfig produces errors.troposphere.truth.enable = false
-%   T3: matchedErrorBaselineConfig equals defaultConfig behavior
+%   T3: master nominal atmosphere truth and correction are independent
 %   T4: observableMode field exists and is a string
 %   T5: defaultConfig has ionosphere.mappingModel = 'simpleSecant' (backward compat)
 %   T6: towerClock.correctionMode = 'product' + no struct → throws after finalize
 
 thisDir = fileparts(mfilename('fullpath'));
 addpath(fullfile(thisDir, '..'));
+addpath(fullfile(thisDir, '..', 'config'));
 
 fprintf('=== test_stage7a_config ===\n');
 
@@ -42,18 +43,22 @@ assert(~cfg2.effects.antennaPCO.truth.enable,  'T2 FAILED: cleanConfig PCO truth
 fprintf('    cleanConfig: all major errors off: PASS\n');
 
 % ----------------------------------------------------------------
-% T3: matchedErrorBaselineConfig is the explicit matched-error baseline (tropo/iono ON)
+% T3: canonical nominal atmosphere is nonzero and non-identical
 % ----------------------------------------------------------------
-fprintf('  T3: matchedErrorBaselineConfig has tropo/iono matched ON ...\n');
+fprintf('  T3: master atmosphere has independent truth and correction ...\n');
 
-cfg3 = revgnss.ConfigFactory.matchedErrorBaselineConfig();
+cfg3 = masterConfig();
 assert(cfg3.errors.troposphere.truth.enable == true && ...
        cfg3.errors.troposphere.model.enable == true, ...
-    'T3 FAILED: matchedErrorBaselineConfig should have troposphere truth=model=true');
+    'T3 FAILED: canonical troposphere should be active on truth and estimator sides');
 assert(cfg3.errors.ionosphere.truth.enable == true && ...
        cfg3.errors.ionosphere.model.enable == true, ...
-    'T3 FAILED: matchedErrorBaselineConfig should have ionosphere truth=model=true');
-fprintf('    matchedErrorBaselineConfig: tropo/iono matched ON: PASS\n');
+    'T3 FAILED: canonical ionosphere should be active on truth and estimator sides');
+assert(cfg3.errors.troposphere.truth.zenithDelay_m ~= ...
+    cfg3.errors.troposphere.model.zenithDelay_m);
+assert(cfg3.errors.ionosphere.truth.zenithDelay_m ~= ...
+    cfg3.errors.ionosphere.model.zenithDelay_m);
+fprintf('    nominal atmosphere truth and estimator correction differ: PASS\n');
 
 % ----------------------------------------------------------------
 % T4: observableMode is a string field in defaultConfig

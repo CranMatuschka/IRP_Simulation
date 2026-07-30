@@ -1,25 +1,10 @@
 function out = run_oo_v1(configPath)
-%RUN_OO_V1  THE oo_v1 runner: masterConfig (optionally overlaid by a JSON) -> simulate -> report.
+%RUN_OO_V1 Resolve masterConfig, overlay one JSON, then simulate and report.
 %
-% One clean entry point, NO environment-variable control. The base config is
-% config/masterConfig.m; an optional JSON file DEEP-OVERLAYS it (only the fields the JSON
-% lists are changed), so a run is fully described by masterConfig + one small JSON.
-% JSON files are direct cfg overlays; this runner does not apply per-JSON MATLAB translators.
-%
-%   run_oo_v1                      % masterConfig only (today's default single-asset run)
-%   run_oo_v1('run.json')         % masterConfig, then overlay the fields in run.json
-%   run_oo_v1('realism.json')     % resolves to config/scenarios/realism.json if needed
-%   run_oo_v1('config/scenarios/swarm.json')% e.g. a JSON that sets scenario.nSpaceAssets = 6
+%   run_oo_v1                      % masterConfig overlaid by default.json
+%   run_oo_v1('realism.json')     % masterConfig overlaid by realism.json
+%   run_oo_v1('run.json')         % masterConfig overlaid by run.json
 %   out = run_oo_v1(...)          % returns the ReportRunner output struct
-%
-% For a swarm (scenario.nSpaceAssets > 1) ReportRunner runs the N independent single-asset
-% EKFs + the ISL/TWSTFT relative layer and writes ONE unified swarm .mat + PDF (see
-% docs/federated_swarm_architecture.md). Every run writes a .mat and (unless report.writePdf
-% is false) a PDF -- no separate hand-called runner.
-%
-% Output (per-run folder):
-%   output/Report_YYYYMMDD/Report_v###_G#S#R#_TW#/Report_v###_ts#_G#S#R#_TW#.{pdf,mat,out,tex}
-%   output/latest/latest_<configName>.{pdf,mat}  (pointers to the most recent run)
 
     close all;
     thisDir = fileparts(mfilename('fullpath'));
@@ -27,26 +12,13 @@ function out = run_oo_v1(configPath)
     addpath(fullfile(thisDir, 'config'));
     addpath(fullfile(thisDir, 'config', 'internal'));
 
-    % ---- Load THE config (masterConfig, optionally overlaid by a JSON) ------
-    cfg = masterConfig();
-    if nargin >= 1 && ~isempty(configPath)
-        jsonPath = configPath;
-        if ~isfile(jsonPath); jsonPath = fullfile(thisDir, configPath); end
-        if ~isfile(jsonPath); jsonPath = fullfile(thisDir, 'config', 'scenarios', configPath); end
-        if ~isfile(jsonPath)
-            [~, scenarioName, scenarioExt] = fileparts(configPath);
-            jsonPath = fullfile(thisDir, 'config', 'scenarios', [scenarioName scenarioExt]);
-        end
-        assert(isfile(jsonPath), 'run_oo_v1:noJson', 'Config JSON not found: %s', configPath);
-        ov  = jsondecode(fileread(jsonPath));
-        [cfg, userPaths] = i_deepMerge(cfg, ov);
-        % Record what the SCENARIO owns. Downstream config resolution must not overwrite these
-        % (see docs/plans/TOGGLE_TRUTH/02_toggle_audit_violations.md): eight writers outside
-        % masterConfig currently do, in both directions, which is why e.g. setting
-        % errors.ionosphere.enable=false in a scenario had no effect at all.
-        cfg.provenance.explicit = userPaths;
-        fprintf('Config overlay applied: %s  (%d scenario-owned keys)\n', jsonPath, numel(userPaths));
+    % ---- Resolve masterConfig through exactly one selected JSON -------------
+    if nargin < 1 || isempty(configPath)
+        configPath = 'default.json';
     end
+    [cfg, configMetadata] = resolveSimulationConfig(configPath);
+    fprintf('Config overlay applied: %s  (%d scenario-owned keys)\n', ...
+        configMetadata.sourcePath, numel(configMetadata.explicitPaths));
 
     % ---- Per-run output folder: output/Report_YYYYMMDD/Report_v###_G#S#R#/ --
     configName = cfg.scenario.name;
@@ -99,39 +71,4 @@ function out = run_oo_v1(configPath)
 
     assignin('base', 'oo_v1_last_out', out);
     assignin('base', 'oo_v1_last_cfg', cfg);
-end
-
-% ---------------------------------------------------------------------------- %
-function [base, paths] = i_deepMerge(base, ov, prefix)
-    % i_deepMerge  Recursively overlay struct OV onto struct BASE. Scalar-struct fields
-    % recurse; everything else (values, arrays, cells, struct arrays) is replaced by OV's.
-    %
-    % Also returns PATHS: the dotted path of every LEAF the scenario actually wrote. This is
-    % the provenance record. It exists because after the merge a `false` written by
-    % masterConfig is byte-identical to a `false` written by the user, so nothing downstream
-    % could tell "the user asked for this" from "nobody said anything" -- which is why the
-    % config overlays in finalizeConfig were free to silently overwrite scenario values.
-    % Consumers must treat a path in this list as USER-OWNED and never overwrite it.
-    if nargin < 3; prefix = ''; end
-    paths = {};
-    if ~isstruct(ov)
-        base = ov;
-        if ~isempty(prefix); paths = {prefix}; end
-        return
-    end
-    fn = fieldnames(ov);
-    for i = 1:numel(fn)
-        f = fn{i};
-        % jsondecode maps a leading underscore to 'x_'; those are comment keys, not config.
-        if startsWith(f, 'x_'); base.(f) = ov.(f); continue; end
-        if isempty(prefix); p = f; else; p = [prefix '.' f]; end
-        if isfield(base, f) && isstruct(base.(f)) && isstruct(ov.(f)) && ...
-                isscalar(base.(f)) && isscalar(ov.(f))
-            [base.(f), sub] = i_deepMerge(base.(f), ov.(f), p);
-            paths = [paths, sub]; %#ok<AGROW>
-        else
-            base.(f) = ov.(f);
-            paths{end+1} = p; %#ok<AGROW>
-        end
-    end
 end

@@ -6,6 +6,8 @@ output/notion_stage*.md
 # Phase-0 regression contract fixtures — committed on purpose (overrides the
 # repo-root "*.mat" ignore). These frozen golden references ARE the contract.
 !tests/regression/golden/*.mat
+!tests/regression/baselines/configuration/configuration_snapshots.mat
+!tests/regression/baselines/configuration/configuration_resolution_manifest.json
 # Phase-7 report .tex byte-diff reference (overrides the repo-root "*.txt" ignore).
 !tests/report/golden_report_tex.txt
 # User-facing scenario overlays — committed on purpose (overrides the repo-root "*.json" ignore).
