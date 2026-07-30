@@ -8,7 +8,7 @@ function cfg = orbitClassConfig(cfg)
 %   'GEO' (default) is a STRICT NO-OP so the frozen baseline is preserved
 %   byte-identical. 'MEO'/'LEO' override altitude, inclination, RAAN, initial
 %   true anomaly and the residual-acceleration process noise (SNC). Truth and
-%   the EKF stay a matched J2 family (cfg.orbit.truth.mode / dynamics.mode are
+%   the EKF use the same J2 force family (cfg.orbit.truth.mode / dynamics.mode are
 %   set in masterConfig); only the geometry and tuning change here.
 %
 %   Initial elements are chosen so the sub-satellite point starts over the
@@ -22,7 +22,7 @@ function cfg = orbitClassConfig(cfg)
 %     * Atmospheric drag -- the dominant non-gravitational force below ~600 km.
 %       The truth propagator is J2-only (+models/+orbit/OrbitPropagator), so a
 %       physical LEO truth needs a drag term in +models/+orbit/OrbitPerturbations.
-%       For the matched-J2 convergence test this is fine (truth and EKF both omit
+%       For a same-force-family convergence test this is acceptable because both omit
 %       it); it is a realism gap, not a convergence blocker.
 %     * Global tower network -- the default sites cluster around 23 deg E, so a
 %       fast LEO loses continuous visibility. Use nTowers=12 (the wide real
@@ -42,7 +42,7 @@ function cfg = orbitClassConfig(cfg)
             cfg.orbit.inclination_rad  = deg2rad(55);
             cfg.orbit.raan_rad         = 0;
             cfg.orbit.trueAnomaly0_rad = deg2rad(40);     % sub-sat ~26E/32N at t=0
-            % Matched-J2 truth/EKF, faster geometry than GEO; a modest SNC bump
+            % Same J2 force family, faster geometry than GEO; a modest SNC bump
             % covers the larger 1-s linearisation step (GEO baseline is 1e-6).
             cfg.estimator.sigma_accel_mps2 = 5e-6;
 

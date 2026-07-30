@@ -683,7 +683,8 @@ classdef ErrorChain < handle
             % TRUTH bias (-> z) and its elevation-scaled steady-state sigma enters R (the
             % estimator does not know the instantaneous value). Kaplan & Hegarty §7.2.6:
             % multipath is the dominant code error and is strongly time-correlated.
-            useGM = isfield(mc,'coloredGM') && isfield(mc.coloredGM,'enable') && mc.coloredGM.enable;
+            useGM = mc.truth.enable && isfield(mc,'coloredGM') && ...
+                isfield(mc.coloredGM,'enable') && mc.coloredGM.enable;
             if useGM
                 g       = mc.coloredGM;
                 tau     = g.tau_s;
