@@ -1,5 +1,5 @@
 classdef Klobuchar
-    % Klobuchar  Single-frequency broadcast ionospheric correction (IS-GPS-200 / Klobuchar 1987).
+    % Klobuchar  Reduced vertical Klobuchar correction kernel.
     %
     % The Klobuchar algorithm models the VERTICAL ionospheric delay as a half-cosine
     % daytime bump (peaking at 14:00 local time) on a constant night-time floor:
@@ -12,16 +12,9 @@ classdef Klobuchar
     % [s] (>= 72000 s per the ICD). The result is a VERTICAL L1 group delay; it is mapped
     % to slant by an obliquity factor elsewhere and scaled to other frequencies by 1/f^2.
     %
-    % This is a deliberately CRUDE climatology: applied against a smoother/ stochastic
-    % truth ionosphere its functional-form and amplitude mismatch leaves a substantial
-    % residual (Klobuchar removes on the order of 50% RMS of the ionospheric range error
-    % for single-frequency users; Klobuchar 1987, IEEE TAES 23(3):325). It is therefore an
-    % honest, imperfect MODEL correction, not an oracle read of the truth realisation.
-    %
     % Note: the full IS-GPS-200 algorithm derives AMP and PER from the 8 broadcast alpha/
     % beta coefficients and the geomagnetic pierce-point latitude. Here AMP/PER/DC are
-    % supplied directly (a fixed climatology), which is adequate for a feasibility study
-    % and avoids asserting pierce-point geometry the reverse-uplink scenario does not fix.
+    % supplied directly as an independent fixed climatology.
 
     properties (Constant)
         PEAK_LOCALTIME_S = 50400;   % 14:00 local time [s]

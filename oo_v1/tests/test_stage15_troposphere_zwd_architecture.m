@@ -26,8 +26,9 @@ assert(isfield(s_a,'note'),           'T-P15a FAILED: missing note');
 assert(s_a.truthEnabled,  'T-P15a FAILED: truthEnabled should be true');
 assert(s_a.modelEnabled,  'T-P15a FAILED: modelEnabled should be true');
 assert(~s_a.zwdEstimated, 'T-P15a FAILED: zwdEstimated should be false when mode=none');
-assert(strcmp(s_a.mode,'matched'), ...
-    'T-P15a FAILED: mode should be matched when truth+model enabled (got %s)', s_a.mode);
+assert(strcmp(s_a.mode,'truthAndCorrection'), ...
+    ['T-P15a FAILED: mode should distinguish active truth and correction ' ...
+     '(got %s)'], s_a.mode);
 fprintf('    PASS (mode=%s, mappingKind=%s)\n', s_a.mode, s_a.mappingKind);
 
 % ----------------------------------------------------------------

@@ -437,12 +437,8 @@ classdef EnvironmentModel < handle
                         vertical = fSeen * (vMean + obj.ionoState(ti).tecResidualTruth_m);
                         delay    = vertical * mapping * freqScale;
                     else % 'model'
-                        % On-board correction. 'biasFraction' (legacy) is a constant vertical
-                        % delay; 'klobuchar' is the single-frequency broadcast climatology, a
-                        % genuinely imperfect corrector that removes ~50% of the RMS iono range
-                        % error (its ~50% residual is a physical bias, not a hand-scaled number).
-                        % Dual-frequency users instead rely on the ionosphere-free rows already
-                        % in the measurement pipeline, which remove the first-order term.
+                        % 'biasFraction' is a constant vertical correction. 'klobuchar' is
+                        % the independent reduced vertical climatology configured by the user.
                         correction = 'biasFraction';
                         if isfield(ic,'model') && isfield(ic.model,'correction')
                             correction = ic.model.correction;

@@ -1,154 +1,45 @@
 function cfg = realisticAtmosphereConfig(cfg)
-%REALISTICATMOSPHERECONFIG  Overlay the physically-realistic atmosphere on a base cfg.
-%   cfg = realisticAtmosphereConfig(masterConfig())
-%
-%   Switches the troposphere and ionosphere from the matched synthetic 'simpleMapped'
-%   models (whose truth-model residual cancels to zero) onto the physically-grounded
-%   stochastic-truth / imperfect-model pair introduced in the atmosphere-realism work:
-%
-%     Troposphere  -> localWeatherGM: Saastamoinen/Davis ZHD + a first-order Gauss-Markov
-%                     wet-delay TRUTH mapped by Niell (NMF); the MODEL corrects ZHD exactly
-%                     and estimates the wet delay with the per-tower ZWD EKF state, so the
-%                     residual is m_w(e)*(ZWD_truth - ZWD_est), ~cm at zenith growing ~1/sin(e).
-%     Ionosphere   -> tecGaussMarkov: a diurnal VTEC + stochastic-TEC TRUTH (thin-shell
-%                     obliquity, uplink topside fraction) corrected by the single-frequency
-%                     Klobuchar broadcast MODEL (~50% RMS removal). Higher-order term on.
-%
-%   The divergence is STRUCTURAL (independent RNG streams, estimator lag, functional-form
-%   mismatch) with a single master enable per source -- no oracle read of the truth draw,
-%   no arbitrary noise inflation. This is a SEPARATE builder: masterConfig's default
-%   (matched simpleMapped) and the golden baseline are untouched.
-%
-%   References: Saastamoinen 1972 / Davis 1985; Niell 1996; Klobuchar 1987; Bassiri & Hajj
-%   1993; Kaplan & Hegarty; Misra & Enge.
+%REALISTICATMOSPHERECONFIG Activate the master-owned complex atmosphere profile.
 
-%   SCENARIO-OWNED KEYS ARE NOT OVERWRITTEN. This overlay runs inside finalizeConfig, i.e.
-%   AFTER run_oo_v1 merges the scenario JSON, so every assignment below used to silently
-%   discard whatever the scenario asked for -- measured: errors.ionosphere.enable=false in a
-%   JSON resolved to 1. Any key listed in cfg.provenance.explicit (written by i_deepMerge) is
-%   now left alone. With no JSON, or for a key the JSON never mentions, behaviour is
-%   unchanged. See docs/plans/TOGGLE_TRUTH/02_toggle_audit_violations.md.
+    if ~isfield(cfg, 'atmosphere') || ...
+            ~isfield(cfg.atmosphere, 'realisticProfile')
+        error('realisticAtmosphereConfig:missingProfile', ...
+            'masterConfig must define atmosphere.realisticProfile.');
+    end
 
-    % Snapshot BEFORE the overlay, apply it unchanged, then put back every key the scenario
-    % owns. A wrapper rather than 40 guarded assignments: it cannot miss one, and the overlay
-    % body below stays exactly as it was.
-    own_ = {};
-    try; own_ = cfg.provenance.explicit; catch; end
-    preUser_ = cfg;
+    explicitPaths = {};
+    try; explicitPaths = cfg.provenance.explicit; catch; end
+    preProfileConfig = cfg;
+    [cfg, ~] = deepMergeConfig(cfg, cfg.atmosphere.realisticProfile);
 
-    % ---------------- Troposphere ----------------
-    cfg.errors.troposphere.enable        = true;
-    cfg.errors.troposphere.truth.enable  = true;   % set explicitly (expandEnableToggles already ran)
-    cfg.errors.troposphere.model.enable  = true;
-    cfg.errors.troposphere.modelType     = 'localWeatherGM';
-    cfg.errors.troposphere.dayOfYear     = 180;                 % mid-year (drives Niell season)
-    cfg.errors.troposphere.truth.mappingType = 'niell';         % NMF hydrostatic/wet truth
-    cfg.errors.troposphere.model.mappingType = 'niell';         % matched mapping; residual is the wet delay
-    cfg.errors.troposphere.stochastic.enable         = true;
-    cfg.errors.troposphere.stochastic.process        = 'gaussMarkov';
-    cfg.errors.troposphere.stochastic.tau_s          = 10800;   % 3 h wet-delay correlation time
-    cfg.errors.troposphere.stochastic.sigmaWet_ss_m  = 0.04;    % ~4 cm steady-state wet fluctuation
-    cfg.errors.troposphere.stochastic.modelResidual.enable = false;  % model wet delay via the EKF, not a GM copy
-
-    % The MODEL wet correction is the per-tower ZWD EKF state (PPP-grade): it observes only
-    % the measurements and lags/biases the truth, so the surviving residual is physical.
-    cfg.estimation.troposphereMode = 'perTowerZwd';
-
-    % ---------------- Ionosphere ----------------
-    cfg.errors.ionosphere.enable       = true;
-    cfg.errors.ionosphere.truth.enable = true;
-    cfg.errors.ionosphere.model.enable = true;
-    cfg.errors.ionosphere.modelType    = 'tecGaussMarkov';
-    % Diurnal VTEC truth (night floor + 14:00 daytime bump)
-    cfg.errors.ionosphere.truth.diurnal.enable          = true;
-    cfg.errors.ionosphere.truth.diurnal.vtecDay_TECU     = 30;   % mid-latitude, solar-moderate
-    cfg.errors.ionosphere.truth.diurnal.vtecNight_TECU   = 6;
-    cfg.errors.ionosphere.truth.diurnal.peakLocalTime_h  = 14;
-    % Uplink column fraction (1.0 = GEO / full column; set <1 or use .topside for a LEO)
-    cfg.errors.ionosphere.topsideFraction = 1.0;
-    % Stochastic TEC fluctuation (a few TECU over minutes)
-    cfg.errors.ionosphere.stochastic.enable             = true;
-    cfg.errors.ionosphere.stochastic.process            = 'gaussMarkov';
-    cfg.errors.ionosphere.stochastic.tau_s              = 600;
-    cfg.errors.ionosphere.stochastic.sigmaVDelayL1_ss_m = 0.3;   % ~2 TECU at L1
-    % Single-frequency broadcast correction (imperfect climatology, ~50% RMS removal).
-    % The Klobuchar amplitude/DC are DERIVED from the same diurnal VTEC the truth uses
-    % (that is precisely what the broadcast alpha/beta coefficients approximate), scaled
-    % by a <1 accuracy factor for the climatology's imperfection. This replaces the old
-    % hand-set 16 ns/5 ns, which over-corrected: its 5 ns night floor (1.5 m) sat ~1.5x
-    % above the 6 TECU truth floor (3.25 ns / 0.97 m), so the "correction" made the
-    % single-frequency residual LARGER than the raw ionosphere. Deriving from VTEC keeps
-    % the model honest but self-consistent; the residual is the (1-accuracy) climatology
-    % error plus the stochastic TEC and half-cosine shape mismatch Klobuchar cannot forecast.
-    cfg.errors.ionosphere.model.correction = 'klobuchar';
-    % Derive K_L1 from the ACTIVE L1 carrier (canonical 1575.42 MHz by default, or the
-    % experiment frequency override) so the modelled iono/Klobuchar amplitude shrinks
-    % with band exactly as the truth iono does. Byte-identical to the old literal
-    % 40.308e16/(1575.42e6)^2 when no override is set.
-    fL1_atmo        = revgnss.SignalDefinition.get('L1').frequency_Hz;
-    K_L1_m_per_TECU = 40.308e16 / fL1_atmo^2;                % ~0.1624 m per TECU at L1
-    nsPerTECU       = K_L1_m_per_TECU / 2.99792458e8 * 1e9;   % ~0.5417 ns per TECU at L1
-    klobAccuracy    = 0.75;                                   % broadcast climatology skill (~50-65% RMS removal)
-    vDay_TECU       = cfg.errors.ionosphere.truth.diurnal.vtecDay_TECU;
-    vNight_TECU     = cfg.errors.ionosphere.truth.diurnal.vtecNight_TECU;
-    cfg.errors.ionosphere.model.klobuchar = struct( ...
-        'amplitude_ns', (vDay_TECU - vNight_TECU) * nsPerTECU * klobAccuracy, ...
-        'period_h',     24, ...
-        'dc_ns',        vNight_TECU * nsPerTECU * klobAccuracy);
-    % Second/third-order residual that survives the ionosphere-free combination
-    cfg.errors.ionosphere.higherOrder.enable = true;
-
-    % Thin-shell obliquity (not the flat-Earth secant) for the ionospheric mapping
-    cfg.effects.ionosphere.mappingModel  = 'thinShell';
-    cfg.effects.ionosphere.shellHeight_m = 350e3;
-
-    % ---------------- Scintillation ----------------
-    % Amplitude fading -> extra code/carrier measurement noise (into R) via the Conker
-    % et al. (2003) 1/sqrt(1-2*S4^2) factor; phase scintillation -> a time-correlated
-    % truth-side carrier-phase jitter the estimator cannot predict (into the innovation).
-    cfg.errors.ionosphere.scintillation.enable  = true;
-    cfg.errors.ionosphere.scintillation.model   = 'conker';   % amplitude fading -> R
-    cfg.errors.ionosphere.scintillation.S4zen   = 0.3;         % moderate zenith S4
-    cfg.errors.ionosphere.scintillation.tau_s   = 30;          % amplitude GM correlation time
-    cfg.errors.ionosphere.scintillation.phaseScint.enable      = true;   % phase jitter -> truth carrier
-    cfg.errors.ionosphere.scintillation.phaseScint.sigmaPhi_rad = 0.2;   % ~6 mm at L1 (disturbed)
-    cfg.errors.ionosphere.scintillation.phaseScint.tau_s        = 1.5;   % s (time-correlated, not white)
-
-    % ---- Restore scenario-owned keys -------------------------------------------------
-    % Everything above is a DEFAULT for this profile. Any key the scenario JSON wrote is
-    % user-owned and wins. With no JSON, own_ is empty and this loop does nothing, so the
-    % resolved config is byte-identical to before.
-    for ii_ = 1:numel(own_)
-        p_ = own_{ii_};
+    for index = 1:numel(explicitPaths)
+        path = explicitPaths{index};
         try
-            v_ = i_getPath(preUser_, p_);
-            cfg = i_setPath(cfg, p_, v_);
+            value = getPath_(preProfileConfig, path);
+            cfg = setPath_(cfg, path, value);
         catch
-            % path absent pre-overlay (a key the JSON introduced): nothing to restore
         end
     end
 end
 
-% ---------------------------------------------------------------------------------------
-function v = i_getPath(s, dotted)
-    k = strsplit(dotted, '.');
-    v = s;
-    for i = 1:numel(k)
-        if ~isstruct(v) || ~isfield(v, k{i})
-            error('realisticAtmosphereConfig:noPath', 'no such path: %s', dotted);
+function value = getPath_(inputStruct, dottedPath)
+    fields = strsplit(dottedPath, '.');
+    value = inputStruct;
+    for index = 1:numel(fields)
+        if ~isstruct(value) || ~isfield(value, fields{index})
+            error('realisticAtmosphereConfig:missingPath', ...
+                'Configuration path does not exist: %s', dottedPath);
         end
-        v = v.(k{i});
+        value = value.(fields{index});
     end
 end
 
-function s = i_setPath(s, dotted, v)
-    k = strsplit(dotted, '.');
-    if numel(k) == 1
-        s.(k{1}) = v;
+function outputStruct = setPath_(outputStruct, dottedPath, value)
+    fields = strsplit(dottedPath, '.');
+    if numel(fields) == 1
+        outputStruct.(fields{1}) = value;
         return
     end
-    if ~isfield(s, k{1}) || ~isstruct(s.(k{1}))
-        s.(k{1}) = struct();
-    end
-    s.(k{1}) = i_setPath(s.(k{1}), strjoin(k(2:end), '.'), v);
+    outputStruct.(fields{1}) = setPath_( ...
+        outputStruct.(fields{1}), strjoin(fields(2:end), '.'), value);
 end

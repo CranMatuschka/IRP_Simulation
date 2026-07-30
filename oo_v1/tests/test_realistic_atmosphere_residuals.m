@@ -2,7 +2,7 @@
 % Acceptance test for realisticAtmosphereConfig: with the physically-realistic
 % atmosphere the troposphere and ionosphere truth-model residuals are NON-ZERO,
 % physically sized, and grow toward low elevation / vary diurnally -- unlike the
-% matched default where they cancel to machine precision.
+% simple nominal profile.
 
 thisDir = fileparts(mfilename('fullpath'));
 addpath(fullfile(thisDir, '..'));
@@ -10,8 +10,7 @@ addpath(fullfile(thisDir, '..', 'config'));
 
 fprintf('=== test_realistic_atmosphere_residuals ===\n');
 
-cfg = masterConfig();
-cfg = realisticAtmosphereConfig(cfg);
+[cfg, ~] = resolveSimulationConfig('realism.json');
 
 % --- Config wired as intended
 assert(strcmp(cfg.errors.troposphere.modelType, 'localWeatherGM'), 'trop modelType');
@@ -66,8 +65,9 @@ assert(max(ionoTruthZen) > 1.5*min(ionoTruthZen), ...
     'iono truth should show a diurnal day/night contrast (max %.3f min %.3f)', ...
     max(ionoTruthZen), min(ionoTruthZen));
 
-% --- Before/after contrast: the matched DEFAULT atmosphere cancels to ~0
-ecDef = models.errors.ErrorChain(masterConfig(), 42);   % simpleMapped, matched truth/model
+% --- Default contrast: simple, enabled, and deliberately unmatched
+[defaultCfg, ~] = resolveSimulationConfig('default.json');
+ecDef = models.errors.ErrorChain(defaultCfg, 42);
 defTrop = 0; defIono = 0;
 for k = 1:numel(ts)
     err = ecDef.compute(el, tid, tidx, ts(k));
@@ -78,11 +78,14 @@ for k = 1:numel(ts)
         defIono = max(defIono, rms(err.bySource.truth_m.iono - err.bySource.model_m.iono));
     end
 end
-assert(defTrop < 1e-9 && defIono < 1e-9, ...
-    'matched default residuals must cancel to ~0 (trop %.2e, iono %.2e)', defTrop, defIono);
+assert(strcmp(defaultCfg.errors.troposphere.modelType, 'simpleMapped'));
+assert(strcmp(defaultCfg.errors.ionosphere.modelType, 'simpleMapped'));
+assert(defTrop > 0.01 && defTrop < 5 && defIono > 0.05 && defIono < 20, ...
+    'simple default residuals are not physically bounded (trop %.3f, iono %.3f)', ...
+    defTrop, defIono);
 
 fprintf('  trop residual RMS = %.4f m (low-el %.3f, zenith %.3f) | iono residual RMS = %.4f m\n', ...
     tropMean, mean(tropMisLow(2:end)), mean(tropMisZen(2:end)), ionoMean);
 fprintf('  iono truth zenith range = [%.3f, %.3f] m (diurnal)\n', min(ionoTruthZen), max(ionoTruthZen));
-fprintf('  matched default (before): trop %.2e m, iono %.2e m (cancels)\n', defTrop, defIono);
+fprintf('  simple default: trop %.3f m, iono %.3f m\n', defTrop, defIono);
 fprintf('  PASS\n');

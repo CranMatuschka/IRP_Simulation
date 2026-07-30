@@ -23,7 +23,7 @@ classdef TroposphereModel
             %   nZwdStates     — number of ZWD states (0 if disabled)
             %   mappingKind    — 'simple' | 'continuedFraction'
             %   mode           — 'disabled' | 'truthOnly' | 'modelOnly' |
-            %                    'matched' | 'zwdEkf'
+            %                    'truthAndCorrection' | 'zwdEkf'
             %   note           — human-readable summary string
 
             if nargin < 2; stateMap = struct(); end
@@ -39,7 +39,7 @@ classdef TroposphereModel
             if s.zwdEstimated
                 s.mode = 'zwdEkf';
             elseif s.truthEnabled && s.modelEnabled
-                s.mode = 'matched';
+                s.mode = 'truthAndCorrection';
             elseif s.truthEnabled && ~s.modelEnabled
                 s.mode = 'truthOnly';
             elseif ~s.truthEnabled && s.modelEnabled
@@ -146,8 +146,9 @@ classdef TroposphereModel
                     note = 'Troposphere truth applied but not modelled. Truth-model mismatch drives residual range error.';
                 case 'modelOnly'
                     note = 'Troposphere correction applied without matching truth error. May over-correct.';
-                case 'matched'
-                    note = 'Troposphere truth and model matched. Net troposphere contribution to innovation is near zero.';
+                case 'truthAndCorrection'
+                    note = ['Troposphere truth and estimator correction are both active. ' ...
+                        'Their independently configured difference remains in the innovation.'];
                 case 'zwdEkf'
                     note = ['ZWD EKF state active (' ...
                         num2str(s.nZwdStates) ' state(s)). ' ...
