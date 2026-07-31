@@ -1057,6 +1057,23 @@ cfg.multiAsset.distributedEstimator.linkUpdate.remoteProductPropagationPolicy = 
 cfg.multiAsset.distributedEstimator.linkUpdate.roleReversalPolicy = 'disabled';
 cfg.multiAsset.distributedEstimator.linkUpdate.calibrationOwnership.policy = 'undeclared';
 cfg.multiAsset.distributedEstimator.linkUpdate.updateAdapter.observable = 'none';
+% --- Stage 3.1 correlation network (all inert by default) ---------------------------------
+% The network tracks pairwise cross-covariance P_ij only; each P_ii stays in its own local EKF
+% and is never duplicated here. Nothing consumes P_ij to move a state in this section: enabling
+% the network is asserted by test to leave every estimate byte-identical. The fleet-size limit
+% is checked at initialize()/registerFleetMembers, never per delivery, so exceeding it fails
+% rather than dropping cross blocks. commonProcessNoiseTreatment stays 'rejected' on the live
+% path because the matching diagonal term lives in each leaf's own buildQ_ (Section 3.3 scope),
+% not here.
+cfg.multiAsset.distributedEstimator.correlationNetwork.policy = 'disabled';
+cfg.multiAsset.distributedEstimator.correlationNetwork.maximumFleetSize = 0;
+cfg.multiAsset.distributedEstimator.correlationNetwork.crossBlockSpan = 'fullLocalStateSpan';
+cfg.multiAsset.distributedEstimator.correlationNetwork.commonProcessNoiseTreatment = 'rejected';
+cfg.multiAsset.distributedEstimator.correlationNetwork.commonProcessNoise.sigma_mps2 = 0;
+cfg.multiAsset.distributedEstimator.correlationNetwork.commonProcessNoise.frame = 'ECEF';
+cfg.multiAsset.distributedEstimator.correlationNetwork.linkUpdateRouting = 'conservativeBoundOnly';
+cfg.multiAsset.distributedEstimator.correlationNetwork.audit.enable = false;
+cfg.multiAsset.distributedEstimator.correlationNetwork.audit.everyNEpochs = 0;
 % --- ISL inside the independent per-asset EKFs -----------------------------
 % The compatibility architecture runs independent asset filters and a separate read-only
 % relative diagnostic. Keeping ISL out of the asset filters prevents the same observation

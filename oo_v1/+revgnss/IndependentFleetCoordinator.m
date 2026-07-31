@@ -26,6 +26,11 @@ classdef IndependentFleetCoordinator < handle
         % coordinatorGeneratedCount_, split by key instead of collapsed to one fleet-wide total.
         linkGenerationTally_ (1,:) struct = struct('observableIdentifier',{}, ...
             'ownerAssetIdentifier',{},'processedObservableType',{},'generatedRecords',{})
+        % Stage 3.1 correlation network. Empty when disabled; every method below is a guarded
+        % no-op in that case so this coordinator's existing byte-identical golden path is
+        % untouched when correlationNetwork.policy stays 'disabled'.
+        correlationNetwork_ = []
+        transitionCaptureProviders_ cell = {}
     end
 
     properties (Constant)
@@ -72,6 +77,40 @@ classdef IndependentFleetCoordinator < handle
                 error('IndependentFleetCoordinator:stateExchangeAssetCount', ...
                     'State exchange requires at least two local spacecraft estimators.');
             end
+
+            % Stage 3.1: construct the correlation network. Item 7's fleet-size limit is
+            % re-checked HERE (validateConfig already checked the configured value against
+            % nSpaceAssets, but that ran before local simulations existed) before a single
+            % epoch runs -- fails, never drops a cross block.
+            if strcmp(settings.correlationNetwork.policy,'exactPairwiseCrossCovariance')
+                ceilingN = revgnss.DistributedCovarianceNetworkContract.MaximumSupportedFleetSize;
+                if obj.nAssets > min(settings.correlationNetwork.maximumFleetSize,ceilingN)
+                    error('IndependentFleetCoordinator:correlationNetworkFleetSizeLimit', ...
+                        ['nSpaceAssets (%d) exceeds the configured correlation-network fleet-size ' ...
+                        'limit (%d).'],obj.nAssets,settings.correlationNetwork.maximumFleetSize);
+                end
+                policyRecord = struct( ...
+                    'policyIdentifier','exactPairwiseCrossCovariance', ...
+                    'configuredMaximumFleetSize',settings.correlationNetwork.maximumFleetSize, ...
+                    'commonProcessNoiseTreatment',settings.correlationNetwork.commonProcessNoiseTreatment, ...
+                    'linkUpdateRoutingPolicy',settings.correlationNetwork.linkUpdateRouting, ...
+                    'crossBlockSpanKind',settings.correlationNetwork.crossBlockSpan, ...
+                    'stateSchemaVersion',revgnss.DistributedLinkProtocolContract.StateSchemaVersion);
+                obj.correlationNetwork_ = revgnss.DistributedCovarianceNetwork(policyRecord);
+                obj.transitionCaptureProviders_ = cell(1,obj.nAssets);
+                memberRecords = struct([]);
+                for assetIndex = 1:obj.nAssets
+                    localSim = obj.localSimulations{assetIndex};
+                    localSim.ekf.retainEpochTransitionOperators = true;
+                    provider = revgnss.OwnerLocalEkfTransitionCaptureProvider.forLocalEkf( ...
+                        localSim.ekf,sprintf('spacecraft:%d',assetIndex),assetIndex);
+                    obj.transitionCaptureProviders_{assetIndex} = provider;
+                    memberRecords = [memberRecords, provider.memberRegistrationRecord(obj.tVec(1))]; %#ok<AGROW>
+                end
+                obj.correlationNetwork_.registerFleetMembers(memberRecords);
+                obj.correlationNetwork_.declareIndependentPriorPairs(obj.tVec(1));
+            end
+
             obj.isInitialized = true;
         end
 
@@ -110,6 +149,9 @@ classdef IndependentFleetCoordinator < handle
                     localSimulation = obj.localSimulations{assetIndex};
                     localSimulation.runLocalEstimationEpochWithoutHistoryCommit(epochIndex);
                 end
+                if ~isempty(obj.correlationNetwork_)
+                    obj.propagateAndConditionCrossCovariance_(epochIndex,settings);
+                end
                 if settings.stateExchange.enable
                     obj.publishStateProducts_(epochIndex,settings);
                 end
@@ -147,6 +189,7 @@ classdef IndependentFleetCoordinator < handle
                 'linkGenerationTally',{obj.linkGenerationTally()}, ...
                 'distributedLinkPolicy',obj.distributedLinkPolicy_(), ...
                 'distributedResultStatus',obj.distributedResultStatus_(), ...
+                'correlationNetwork',obj.correlationNetworkSummary_(), ...
                 'complete',obj.isComplete);
             for assetIndex = 1:obj.nAssets
                 results.asset{assetIndex} = obj.extractAssetResult_( ...
@@ -156,6 +199,11 @@ classdef IndependentFleetCoordinator < handle
 
         function summary = runtimeSummary(obj)
             counters = obj.linkObservationCounters_();
+            netSummary = obj.correlationNetworkSummary_();
+            pairCount = 0;
+            if ~isempty(obj.correlationNetwork_)
+                pairCount = numel(obj.correlationNetwork_.crossBlockIdentifiers());
+            end
             summary = struct('architectureLabel',obj.ArchitectureLabel, ...
                 'nAssets',obj.nAssets, ...
                 'independentLocalEkfs',true, ...
@@ -165,7 +213,10 @@ classdef IndependentFleetCoordinator < handle
                 'relativeEstimatorStatus','notImplementedInStage1', ...
                 'linkFusionStatus','notImplementedInStage1', ...
                 'distributedResultStatus',obj.distributedResultStatus_(), ...
-                'distributedLinkPolicy',obj.distributedLinkPolicy_());
+                'distributedLinkPolicy',obj.distributedLinkPolicy_(), ...
+                'correlationNetworkPolicy',netSummary.policyIdentifier, ...
+                'correlationNetworkPairCount',pairCount, ...
+                'correlationNetworkEquivalenceClaim',netSummary.centralReferenceEquivalenceClaim);
         end
 
         function products = estimatorEligibleProducts(obj)
@@ -226,7 +277,7 @@ classdef IndependentFleetCoordinator < handle
                     'cfg.multiAsset.distributedEstimator must be a struct.');
             end
             required = {'enable','executionMode','stateExchange','linkUpdate', ...
-                'outOfSequencePolicy','deliveryLedger'};
+                'outOfSequencePolicy','deliveryLedger','correlationNetwork'};
             for index = 1:numel(required)
                 if ~isfield(raw,required{index})
                     error('IndependentFleetCoordinator:configurationField', ...
@@ -410,6 +461,8 @@ classdef IndependentFleetCoordinator < handle
                 error('IndependentFleetCoordinator:deliveryLedgerRequiresFleet', ...
                     'deliveryLedger.enable requires distributedEstimator.enable=true.');
             end
+            revgnss.IndependentFleetCoordinator.requireCorrelationNetworkConfiguration_( ...
+                cfg,settings,isPerAssetLeaf);
 
             if ~settings.enable; return; end
 
@@ -643,8 +696,11 @@ classdef IndependentFleetCoordinator < handle
                 delivery = staged.delivery;
                 try
                     obj.applyOneLinkUpdate_(delivery,staged.calibrationProduct);
+                    [route, reasonCode] = obj.correlationNetworkRouteFor_(delivery);
                     obj.deliveryLedger.recordConsumed(delivery.observationIdentifier, ...
                         delivery.ownerAssetIdentifier,delivery.deliveryEpoch_s);
+                    obj.deliveryLedger.recordCorrelationNetworkRoute( ...
+                        delivery.observationIdentifier,route,reasonCode);
                     ownerSim = obj.localSimulations{delivery.ownerCanonicalIndex};
                     ownerSim.observationLedger.markEligible(delivery.physicalObservationRecord, ...
                         delivery.deliveryEpoch_s);
@@ -704,9 +760,8 @@ classdef IndependentFleetCoordinator < handle
             revgnss.DistributedLinkUpdateAdapter.requireUpdateBlock(block,delivery,ownerState,remoteState);
 
             ownerSim = obj.localSimulations{delivery.ownerCanonicalIndex};
-            blk = revgnss.AssetStateBlock.forAsset(ownerSim.ekf.stateMap,1);
-            schemaIndices = [blk.r(:);blk.v(:);blk.euler(:);ownerSim.ekf.stateMap.omega_idx(:); ...
-                blk.b;blk.bdot];
+            schemaIndices = revgnss.DistributedCovarianceNetworkContract.schemaStateIndicesFromStateMap( ...
+                ownerSim.ekf.stateMap,1);
 
             Hi = block.ownerJacobian_mPerErrorUnit;
             Hj = block.remoteJacobian_mPerErrorUnit;
@@ -752,9 +807,35 @@ classdef IndependentFleetCoordinator < handle
                 'nominalQuatPrior',ownerSim.ekf.nominalQuat_wxyz(:,1));
             result = revgnss.ConservativeFullStateLinkUpdate.applyOwnerOnlyUpdate(applyArgs);
 
-            ownerSim.ekf.x = result.xPosterior;
-            ownerSim.ekf.P = result.PPosterior;
-            ownerSim.ekf.nominalQuat_wxyz(:,1) = result.nominalQuatPosterior;
+            % Stage 3.1 Section 2.4: condition the correlation network on this conservative
+            % owner-only update BEFORE writing it to the owner's EKF. Every quantity here (K,
+            % Hi, Hj, the other members' live marginals) is computed against the PRIOR state, so
+            % this reorder changes no numerical result -- it only ensures that if conditioning
+            % throws (a missing live marginal for a tracked pair, a non-finite cross block), the
+            % owner EKF was never mutated, so the caller's ledger rejection is truthful and the
+            % physical observation record remains correctly available rather than being both
+            % applied AND marked rejected (invariant 9: exactly-once consumption).
+            if ~isempty(obj.correlationNetwork_) && ...
+                    obj.correlationNetwork_.isRegisteredMember(delivery.ownerAssetIdentifier)
+                gainFull = zeros(ownerSim.ekf.nx,size(result.gain_errorUnitPerM,2));
+                gainFull(schemaIndices,:) = result.gain_errorUnitPerM;
+                ownerJacobianFull = zeros(size(Hi,1),ownerSim.ekf.nx);
+                ownerJacobianFull(:,schemaIndices) = Hi;
+                [A, B] = revgnss.DistributedCovarianceNetwork.conservativeOwnerOnlyErrorTransforms(struct( ...
+                    'gainFull',gainFull,'ownerJacobianFull',ownerJacobianFull,'remoteJacobian',Hj, ...
+                    'attitudeResetJacobian',result.attitudeResetJacobian, ...
+                    'schemaStateIndices',schemaIndices));
+                marginals = obj.remoteLocalMarginalSupplyExcluding_(delivery.ownerAssetIdentifier);
+                obj.correlationNetwork_.applyConservativeOwnerOnlyLinkTransform(struct( ...
+                    'ownerEndpointIdentifier',delivery.ownerAssetIdentifier, ...
+                    'remoteEndpointIdentifier',delivery.remoteAssetIdentifier, ...
+                    'coordinateEpoch_s',delivery.coordinateEventEpoch_s, ...
+                    'ownerErrorTransition_A',A,'remoteSchemaErrorCoupling_B',B, ...
+                    'remoteLocalMarginalSupply',marginals));
+            end
+
+            ownerSim.ekf.applyDeclaredExternalCovarianceWrite( ...
+                result.xPosterior,result.PPosterior,result.nominalQuatPosterior);
             if result.attitudeInjectionNorm_rad > 0
                 ownerSim.ekf.attitudeInjectionCount = ownerSim.ekf.attitudeInjectionCount + 1;
                 ownerSim.ekf.maxAttitudeInjectionNorm_rad = max( ...
@@ -926,6 +1007,98 @@ classdef IndependentFleetCoordinator < handle
                     'Repeated seeds would create an artificial common clock realization.']);
             end
         end
+
+        function propagateAndConditionCrossCovariance_(obj, epochIndex, settings)
+            % propagateAndConditionCrossCovariance_  Stage 3.1 phase 3
+            % ('propagateAndConditionCrossCovariance', revgnss.
+            % DistributedCovarianceNetworkContract.EpochPhaseOrderWithCorrelationNetwork).
+            % Takes one capture per provider (closing each fence), propagates every stored
+            % cross block, notes any member whose local update went uncorrelated-in-a-
+            % correlated-network, and audits when configured.
+            if epochIndex == 1
+                return   % no predict() ran; every block is exactly zero from declareIndependentPriorPairs
+            end
+            coordinateEpoch_s = obj.tVec(epochIndex);
+            dt = coordinateEpoch_s - obj.tVec(epochIndex-1);
+            captures = revgnss.LocalEpochTransitionCapture.empty;
+            for k = 1:numel(obj.transitionCaptureProviders_)
+                captures(k) = revgnss.LocalEpochTransitionCaptureProvider.requireCaptureAt( ...
+                    obj.transitionCaptureProviders_{k},coordinateEpoch_s-dt,dt); %#ok<AGROW>
+            end
+            epochRecord = struct('coordinateEpoch_s',coordinateEpoch_s,'intervalDuration_s',dt, ...
+                'captures',captures);
+            obj.correlationNetwork_.advanceEpoch(epochRecord);
+
+            memberIds = obj.correlationNetwork_.memberIdentifiers;
+            for k = 1:numel(captures)
+                if captures(k).accountedMeasurementRowCount == 0; continue; end
+                hasNonzeroCross = false;
+                for j = 1:numel(memberIds)
+                    if strcmp(memberIds{j},captures(k).endpointIdentifier); continue; end
+                    M = obj.correlationNetwork_.orientedCrossCovariance( ...
+                        captures(k).endpointIdentifier,memberIds{j});
+                    if any(M(:) ~= 0)
+                        hasNonzeroCross = true;
+                        break
+                    end
+                end
+                if hasNonzeroCross
+                    obj.correlationNetwork_.noteUnappliedCorrelatedLocalUpdate( ...
+                        captures(k).endpointIdentifier,coordinateEpoch_s);
+                end
+            end
+
+            netSettings = settings.correlationNetwork;
+            if netSettings.audit.enable && mod(epochIndex,netSettings.audit.everyNEpochs) == 0
+                obj.correlationNetwork_.requireAssembledFleetCovarianceSymmetricPsd(struct( ...
+                    'localMarginalSupply',obj.remoteLocalMarginalSupplyExcluding_(''), ...
+                    'auditCoordinateEpoch_s',coordinateEpoch_s));
+            end
+        end
+
+        function [route, reasonCode] = correlationNetworkRouteFor_(obj, delivery)
+            if isempty(obj.correlationNetwork_)
+                route = 'conservativeBound';
+                reasonCode = 'correlationNetworkDisabled';
+                return
+            end
+            [route, reasonCode] = obj.correlationNetwork_.routeForDelivery(struct( ...
+                'ownerAssetIdentifier',delivery.ownerAssetIdentifier, ...
+                'remoteAssetIdentifier',delivery.remoteAssetIdentifier, ...
+                'coordinateEventEpoch_s',delivery.coordinateEventEpoch_s));
+        end
+
+        function marginals = remoteLocalMarginalSupplyExcluding_(obj, excludedEndpointIdentifier)
+            % remoteLocalMarginalSupplyExcluding_  LIVE local marginals for every registered
+            % network member except excludedEndpointIdentifier (pass '' to include all members,
+            % used by the periodic audit). Never reads remoteState.covarianceBlock or any other
+            % frozen published product (U16): P_jj/P_jk must come from the leaf's own live
+            % ekf.P, read through the sanctioned revgnss.LocalEpochTransitionCaptureProvider
+            % contract gate (requireLocalMarginal), not by reaching into the EKF directly.
+            memberIds = obj.correlationNetwork_.memberIdentifiers;
+            marginals = struct('endpointIdentifier',{},'localMarginal',{});
+            for k = 1:numel(memberIds)
+                if strcmp(memberIds{k},excludedEndpointIdentifier); continue; end
+                idx = revgnss.CanonicalEndpointIdentity.fromProductIdentifier(memberIds{k}).physicalAssetIndex;
+                P = revgnss.LocalEpochTransitionCaptureProvider.requireLocalMarginal( ...
+                    obj.transitionCaptureProviders_{idx});
+                marginals(end+1) = struct('endpointIdentifier',memberIds{k},'localMarginal',P); %#ok<AGROW>
+            end
+        end
+
+        function s = correlationNetworkSummary_(obj)
+            if isempty(obj.correlationNetwork_)
+                s = struct('policyIdentifier','disabled','configuredMaximumFleetSize',0, ...
+                    'commonProcessNoiseTreatment','rejected','linkUpdateRoutingPolicy','conservativeBoundOnly', ...
+                    'crossBlockSpanKind',revgnss.DistributedCovarianceNetworkContract.CrossBlockSpanKind, ...
+                    'stateSchemaVersion',revgnss.DistributedLinkProtocolContract.StateSchemaVersion, ...
+                    'fleetSize',0,'epochsAdvanced',0,'revisionNumber',0, ...
+                    'conservativeOwnerOnlyConditioningCount',0,'unappliedCorrelatedLocalUpdateCount',0, ...
+                    'centralReferenceEquivalenceClaim','notEvaluated','currentCoordinateEpoch_s',NaN);
+                return
+            end
+            s = obj.correlationNetwork_.toStruct();
+        end
     end
 
     methods (Static, Access = private)
@@ -949,7 +1122,15 @@ classdef IndependentFleetCoordinator < handle
                     'calibrationOwnership',struct('policy','undeclared'), ...
                     'updateAdapter',struct('observable','none')), ...
                 'outOfSequencePolicy','reject', ...
-                'deliveryLedger',struct('enable',false));
+                'deliveryLedger',struct('enable',false), ...
+                'correlationNetwork',struct( ...
+                    'policy','disabled', ...
+                    'maximumFleetSize',0, ...
+                    'crossBlockSpan','fullLocalStateSpan', ...
+                    'commonProcessNoiseTreatment','rejected', ...
+                    'commonProcessNoise',struct('sigma_mps2',0,'frame','ECEF'), ...
+                    'linkUpdateRouting','conservativeBoundOnly', ...
+                    'audit',struct('enable',false,'everyNEpochs',0)));
         end
 
         function requireLogical_(value,name)
@@ -1166,6 +1347,146 @@ classdef IndependentFleetCoordinator < handle
                 node = node.(path{index});
             end
             if ischar(node) || (isstring(node) && isscalar(node)); value = char(node); end
+        end
+
+        function requireCorrelationNetworkConfiguration_(cfg, settings, isPerAssetLeaf)
+            % requireCorrelationNetworkConfiguration_  Plan Stage 3.1 masterConfig validation.
+            % Runs UNCONDITIONALLY (even when distributedEstimator.enable is false), matching
+            % this file's existing coupling-check discipline (invariant 6).
+            net = settings.correlationNetwork;
+
+            % 1. Schema
+            requiredFields = {'policy','maximumFleetSize','crossBlockSpan', ...
+                'commonProcessNoiseTreatment','commonProcessNoise','linkUpdateRouting','audit'};
+            missing = setdiff(requiredFields,fieldnames(net));
+            if ~isempty(missing)
+                error('IndependentFleetCoordinator:correlationNetworkSchema', ...
+                    'distributedEstimator.correlationNetwork.%s must be declared.',missing{1});
+            end
+            if ~(isstruct(net.commonProcessNoise) && isfield(net.commonProcessNoise,'sigma_mps2') && ...
+                    isfield(net.commonProcessNoise,'frame')) || ...
+                    ~(isstruct(net.audit) && isfield(net.audit,'enable') && isfield(net.audit,'everyNEpochs'))
+                error('IndependentFleetCoordinator:correlationNetworkSchema', ...
+                    ['distributedEstimator.correlationNetwork.commonProcessNoise requires ' ...
+                    'sigma_mps2/frame and .audit requires enable/everyNEpochs.']);
+            end
+
+            % 2. Vocabulary
+            policy = revgnss.IndependentFleetCoordinator.requireText_(net.policy,'correlationNetwork.policy');
+            if ~any(strcmp(policy,revgnss.DistributedCovarianceNetworkContract.AllowedNetworkPolicies))
+                error('IndependentFleetCoordinator:correlationNetworkPolicy', ...
+                    'correlationNetwork.policy must be one of the frozen allowed network policies.');
+            end
+            if ~strcmp(char(net.crossBlockSpan),revgnss.DistributedCovarianceNetworkContract.CrossBlockSpanKind)
+                error('IndependentFleetCoordinator:correlationNetworkSchema', ...
+                    'correlationNetwork.crossBlockSpan must be the frozen fullLocalStateSpan value.');
+            end
+            treatment = revgnss.IndependentFleetCoordinator.requireText_( ...
+                net.commonProcessNoiseTreatment,'correlationNetwork.commonProcessNoiseTreatment');
+            if ~any(strcmp(treatment, ...
+                    revgnss.DistributedCovarianceNetworkContract.AllowedCommonProcessNoiseTreatments))
+                error('IndependentFleetCoordinator:correlationNetworkCommonProcessNoiseTreatment', ...
+                    'correlationNetwork.commonProcessNoiseTreatment must be a frozen allowed treatment.');
+            end
+            if ~strcmp(char(net.commonProcessNoise.frame),'ECEF')
+                error('IndependentFleetCoordinator:correlationNetworkSchema', ...
+                    'correlationNetwork.commonProcessNoise.frame must be ''ECEF''.');
+            end
+            routing = revgnss.IndependentFleetCoordinator.requireText_( ...
+                net.linkUpdateRouting,'correlationNetwork.linkUpdateRouting');
+            if ~strcmp(routing,'conservativeBoundOnly')
+                error('IndependentFleetCoordinator:correlationNetworkRoutingUnavailable', ...
+                    ['correlationNetwork.linkUpdateRouting must be ''conservativeBoundOnly'': the ' ...
+                    'pair-exact route requires Section 3.2''s synchronized two-endpoint delivery.']);
+            end
+
+            % 3. All-or-nothing when disabled (the exact Section 2.3.1 partial-configuration
+            % defect, restated so it cannot recur here).
+            enabledPolicy = strcmp(policy,'exactPairwiseCrossCovariance');
+            if ~enabledPolicy
+                if net.maximumFleetSize ~= 0 || ~strcmp(treatment,'rejected') || ...
+                        net.commonProcessNoise.sigma_mps2 ~= 0 || logical(net.audit.enable) || ...
+                        net.audit.everyNEpochs ~= 0
+                    error('IndependentFleetCoordinator:correlationNetworkPartialConfiguration', ...
+                        ['correlationNetwork.policy=''disabled'' requires maximumFleetSize=0, ' ...
+                        'commonProcessNoiseTreatment=''rejected'', commonProcessNoise.sigma_mps2=0, ' ...
+                        'and audit.enable=false/everyNEpochs=0.']);
+                end
+            end
+
+            % 6. Per-asset leaf
+            if isPerAssetLeaf && enabledPolicy
+                error('IndependentFleetCoordinator:perAssetLeafSubToggleUnavailable', ...
+                    ['A per-asset leaf configuration runs one local estimator and owns no fleet ' ...
+                    'accounting; correlationNetwork.policy must stay ''disabled'' on a leaf.']);
+            end
+            if ~enabledPolicy; return; end
+
+            % 4. Enabled preconditions
+            if ~settings.enable
+                error('IndependentFleetCoordinator:correlationNetworkRequiresFleet', ...
+                    ['correlationNetwork.policy=''exactPairwiseCrossCovariance'' requires ' ...
+                    'distributedEstimator.enable=true.']);
+            end
+            if ~settings.deliveryLedger.enable
+                error('IndependentFleetCoordinator:correlationNetworkRequiresDeliveryLedger', ...
+                    ['correlationNetwork.policy=''exactPairwiseCrossCovariance'' requires ' ...
+                    'deliveryLedger.enable=true.']);
+            end
+            ceilingN = revgnss.DistributedCovarianceNetworkContract.MaximumSupportedFleetSize;
+            if ~(isnumeric(net.maximumFleetSize) && isscalar(net.maximumFleetSize) && ...
+                    net.maximumFleetSize == round(net.maximumFleetSize) && net.maximumFleetSize >= 2)
+                error('IndependentFleetCoordinator:correlationNetworkFleetSize', ...
+                    'correlationNetwork.maximumFleetSize must be an integer >= 2 when enabled.');
+            end
+            if net.maximumFleetSize > ceilingN
+                error('IndependentFleetCoordinator:correlationNetworkFleetSizeCeiling', ...
+                    'correlationNetwork.maximumFleetSize (%d) exceeds the frozen ceiling (%d).', ...
+                    net.maximumFleetSize,ceilingN);
+            end
+            nAssets = revgnss.IndependentFleetCoordinator.numericPath_(cfg,{'scenario','nSpaceAssets'},1);
+            if nAssets > net.maximumFleetSize
+                error('IndependentFleetCoordinator:correlationNetworkFleetSizeLimit', ...
+                    ['scenario.nSpaceAssets (%d) exceeds correlationNetwork.maximumFleetSize (%d); ' ...
+                    'the initial exact path fails rather than silently dropping a cross block.'], ...
+                    nAssets,net.maximumFleetSize);
+            end
+            if logical(net.audit.enable) && ~(isnumeric(net.audit.everyNEpochs) && net.audit.everyNEpochs >= 1)
+                error('IndependentFleetCoordinator:correlationNetworkAuditSchema', ...
+                    'correlationNetwork.audit.everyNEpochs must be >= 1 when audit.enable=true.');
+            end
+            revgnss.DistributedLinkProtocolContract.requireCommonSourceTreatmentDeclared( ...
+                settings.linkUpdate.commonSourceTreatment);
+            if ~revgnss.DistributedLinkProtocolContract.isFullyRejectedCommonSourceTreatment( ...
+                    settings.linkUpdate.commonSourceTreatment)
+                error('IndependentFleetCoordinator:correlationNetworkCommonSourceTreatment', ...
+                    'Every linkUpdate.commonSourceTreatment entry must stay ''rejected''.');
+            end
+            if ~revgnss.IndependentFleetCoordinator.logicalPath_( ...
+                    cfg,{'rng','independentStreams','enable'},false)
+                error('IndependentFleetCoordinator:correlationNetworkRequiresIndependentStreams', ...
+                    'correlationNetwork requires rng.independentStreams.enable=true.');
+            end
+
+            % 5. Common process noise: refused on the live path.
+            if strcmp(treatment,'declaredCommonAccelerationGroup')
+                error('IndependentFleetCoordinator:commonProcessNoiseTreatmentUnavailableOnLivePath', ...
+                    ['commonProcessNoiseTreatment=''declaredCommonAccelerationGroup'' is refused on ' ...
+                    'the live coordinator path: filter.ReverseGNSSEKF.addJointAssetProcessNoise_ adds ' ...
+                    'the matching diagonal qCommon only under jointMultiAssetEnabled, so an ' ...
+                    'independent-fleet leaf''s own buildQ_ never receives it -- a cross-only ' ...
+                    'injection would not reproduce the centralized reference and can make the ' ...
+                    'assembled fleet Q indefinite. It is fully implemented and proven at the network ' ...
+                    'level in tests/test_distributed_common_product_cross_covariance.m.']);
+            end
+            commonAccelEnabled = revgnss.IndependentFleetCoordinator.logicalPath_( ...
+                cfg,{'estimator','processNoise','commonAcceleration','enable'},false);
+            if commonAccelEnabled
+                error('IndependentFleetCoordinator:commonProcessNoiseUndeclared', ...
+                    ['cfg.estimator.processNoise.commonAcceleration.enable=true together with an ' ...
+                    'enabled correlation network is refused: a declared common source with no ' ...
+                    'accepted live-path treatment is exactly what plan Section 3.3 forbids.']);
+            end
         end
 
         function className = adapterClassForObservable_(observable)

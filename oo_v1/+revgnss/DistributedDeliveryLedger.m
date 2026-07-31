@@ -80,7 +80,8 @@ classdef DistributedDeliveryLedger < handle
                 'clockClaim',delivery.clockClaim, ...
                 'pairAbsolutelyAnchored',delivery.pairAbsolutelyAnchored, ...
                 'pairAnchorDatumIdentifier',delivery.pairAnchorDatumIdentifier, ...
-                'calibrationStateIdentifiers',{delivery.calibrationStateIdentifiers});
+                'calibrationStateIdentifiers',{delivery.calibrationStateIdentifiers}, ...
+                'correlationNetworkRoute','','correlationNetworkRouteReasonCode','');
             obj.entries_(identifier) = entry;
             obj.order_{end+1} = identifier;
         end
@@ -111,6 +112,31 @@ classdef DistributedDeliveryLedger < handle
             end
             entry.state = 'consumed';
             entry.consumptionEpoch_s = double(updateEpoch_s);
+            obj.entries_(identifier) = entry;
+        end
+
+        function recordCorrelationNetworkRoute(obj, observationIdentifier, route, reasonCode)
+            % recordCorrelationNetworkRoute  Plan Stage 3.1: mutates an EXISTING eligible/
+            % consumed entry with the routing decision (revgnss.DistributedCovarianceNetwork.
+            % routeForDelivery), computed in phase 5 -- after recordEligible already created the
+            % entry in phase 4 -- so this cannot be a recordEligible field.
+            identifier = char(observationIdentifier);
+            if ~isKey(obj.entries_,identifier)
+                error('DistributedDeliveryLedger:unknownObservation', ...
+                    'Observation %s has no fleet-wide delivery ledger entry.',identifier);
+            end
+            if ~any(strcmp(char(route),revgnss.DistributedCovarianceNetworkContract.AllowedLinkUpdateRoutes))
+                error('DistributedDeliveryLedger:correlationNetworkRoute', ...
+                    'route must be one of the frozen AllowedLinkUpdateRoutes.');
+            end
+            if ~any(strcmp(char(reasonCode), ...
+                    revgnss.DistributedCovarianceNetworkContract.AllowedRouteReasonCodes))
+                error('DistributedDeliveryLedger:correlationNetworkRouteReasonCode', ...
+                    'reasonCode must be one of the frozen AllowedRouteReasonCodes.');
+            end
+            entry = obj.entries_(identifier);
+            entry.correlationNetworkRoute = char(route);
+            entry.correlationNetworkRouteReasonCode = char(reasonCode);
             obj.entries_(identifier) = entry;
         end
 
@@ -169,7 +195,8 @@ classdef DistributedDeliveryLedger < handle
                 'clockClaim','', ...
                 'pairAbsolutelyAnchored',false, ...
                 'pairAnchorDatumIdentifier','', ...
-                'calibrationStateIdentifiers',{{}});
+                'calibrationStateIdentifiers',{{}}, ...
+                'correlationNetworkRoute','','correlationNetworkRouteReasonCode','');
             obj.entries_(identifier) = entry;
             obj.order_{end+1} = identifier;
         end
@@ -504,7 +531,8 @@ classdef DistributedDeliveryLedger < handle
                 'observableIdentifier','','processedObservableType','','processedUnits','', ...
                 'wasDeliveredToOwner',false,'ownerAttributionSource','', ...
                 'remoteStateProvenance','','clockClaim','','pairAbsolutelyAnchored',false, ...
-                'pairAnchorDatumIdentifier','','calibrationStateIdentifiers',{{}});
+                'pairAnchorDatumIdentifier','','calibrationStateIdentifiers',{{}}, ...
+                'correlationNetworkRoute','','correlationNetworkRouteReasonCode','');
         end
 
         function group = foldEntryIntoGroup_(group, entry)

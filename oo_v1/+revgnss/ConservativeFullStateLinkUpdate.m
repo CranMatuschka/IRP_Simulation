@@ -301,6 +301,11 @@ classdef ConservativeFullStateLinkUpdate
 
             nominalQuatPosterior = args.nominalQuatPrior;
             attitudeInjectionNorm_rad = 0;
+            % attitudeResetJacobian (plan Stage 3.1, U17): the ONE additive field this method
+            % returns, so revgnss.DistributedCovarianceNetwork can fold the SAME reset Jacobian
+            % applied here into its own conditioning transform (Section 2.4) without
+            % recomputing it -- eye(3) in eulerZYX mode, where no reset is applied.
+            attitudeResetJacobian = eye(3);
             if strcmp(args.attitudeParameterization,'quaternionErrorState')
                 attitudeStateIdx = idxS(7:9);
                 deltaTheta = xPosterior(attitudeStateIdx);
@@ -315,6 +320,7 @@ classdef ConservativeFullStateLinkUpdate
                 PPosterior(:,attitudeStateIdx) = PPosterior(:,attitudeStateIdx)*resetJacobian';
                 PPosterior = (PPosterior+PPosterior')/2;
                 attitudeInjectionNorm_rad = injectionInfo.injectionNorm_rad;
+                attitudeResetJacobian = resetJacobian;
             end
 
             result = struct( ...
@@ -322,7 +328,8 @@ classdef ConservativeFullStateLinkUpdate
                 'PPosterior',PPosterior, ...
                 'nominalQuatPosterior',nominalQuatPosterior, ...
                 'gain_errorUnitPerM',K, ...
-                'attitudeInjectionNorm_rad',attitudeInjectionNorm_rad);
+                'attitudeInjectionNorm_rad',attitudeInjectionNorm_rad, ...
+                'attitudeResetJacobian',attitudeResetJacobian);
         end
     end
 end

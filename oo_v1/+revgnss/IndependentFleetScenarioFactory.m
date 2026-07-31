@@ -99,6 +99,22 @@ classdef IndependentFleetScenarioFactory
                 if isfield(ci.multiAsset.distributedEstimator,'deliveryLedger')
                     ci.multiAsset.distributedEstimator.deliveryLedger.enable = false;
                 end
+                % Stage 3.1: force all nine correlationNetwork keys off together (the exact
+                % Section 2.3.1 partial-configuration defect, restated so it cannot recur here).
+                if isfield(ci.multiAsset.distributedEstimator,'correlationNetwork')
+                    cn = ci.multiAsset.distributedEstimator.correlationNetwork;
+                    cn.policy = 'disabled';
+                    cn.maximumFleetSize = 0;
+                    if isfield(cn,'commonProcessNoiseTreatment'); cn.commonProcessNoiseTreatment = 'rejected'; end
+                    if isfield(cn,'commonProcessNoise') && isfield(cn.commonProcessNoise,'sigma_mps2')
+                        cn.commonProcessNoise.sigma_mps2 = 0;
+                    end
+                    if isfield(cn,'audit')
+                        cn.audit.enable = false;
+                        cn.audit.everyNEpochs = 0;
+                    end
+                    ci.multiAsset.distributedEstimator.correlationNetwork = cn;
+                end
             end
             if isfield(ci,'measurements') && isfield(ci.measurements,'isl')
                 ci.measurements.isl.enable = false;
@@ -171,6 +187,22 @@ classdef IndependentFleetScenarioFactory
                 end
                 if isfield(base.multiAsset.distributedEstimator,'deliveryLedger')
                     base.multiAsset.distributedEstimator.deliveryLedger.enable = false;
+                end
+                % Stage 3.1: see the matching comment in stageOneLeafConfigForIndex -- force all
+                % nine correlationNetwork keys off together.
+                if isfield(base.multiAsset.distributedEstimator,'correlationNetwork')
+                    cn = base.multiAsset.distributedEstimator.correlationNetwork;
+                    cn.policy = 'disabled';
+                    cn.maximumFleetSize = 0;
+                    if isfield(cn,'commonProcessNoiseTreatment'); cn.commonProcessNoiseTreatment = 'rejected'; end
+                    if isfield(cn,'commonProcessNoise') && isfield(cn.commonProcessNoise,'sigma_mps2')
+                        cn.commonProcessNoise.sigma_mps2 = 0;
+                    end
+                    if isfield(cn,'audit')
+                        cn.audit.enable = false;
+                        cn.audit.everyNEpochs = 0;
+                    end
+                    base.multiAsset.distributedEstimator.correlationNetwork = cn;
                 end
             end
         end

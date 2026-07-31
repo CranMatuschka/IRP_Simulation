@@ -123,6 +123,17 @@ classdef ReverseGNSSEKF < handle
         % Last dynamics predict info (compact, overwritten each epoch)
         lastDynamicsPredictInfo (1,1) struct
 
+        % Epoch error-transition retention (plan Stage 3.1 items 4-5). Default false: when
+        % false NOTHING below executes and no arithmetic changes (golden-safe by construction).
+        % Consumed by revgnss.DistributedCovarianceNetwork through
+        % revgnss.OwnerLocalEkfTransitionCaptureProvider. Nothing here is ever read back into
+        % the filter: obj.x, obj.P, F, and Q are never modified by any retention code.
+        retainEpochTransitionOperators  (1,1) logical = false
+        pendingEpochTransition_         (1,1) struct  = filter.ReverseGNSSEKF.emptyEpochTransition()
+        epochTransitionCaptureOpen_     (1,1) logical = false
+        covarianceAtLastAccountedWrite_ (:,:) double  = []
+        epochTransitionSequence_        (1,1) double  = 0
+
         % Quaternion nominal / error-state attitude EKF
         nominalQuat_wxyz          double = [1;0;0;0]   % 4 x nSpaceAssets, scalar first
         attitudeParameterization  char   = 'eulerZYX'  % 'eulerZYX' | 'quaternionErrorState'
@@ -672,6 +683,10 @@ classdef ReverseGNSSEKF < handle
             % Propagate covariance
             obj.P = F * obj.P * F' + Q;
             obj.P = (obj.P + obj.P') / 2;
+
+            if obj.retainEpochTransitionOperators
+                obj.beginEpochTransition_(t0_s, dt_s, F, Q);
+            end
         end
 
         % ----------------------------------------------------------------
@@ -692,6 +707,7 @@ classdef ReverseGNSSEKF < handle
 
             % 1. Save pre-update covariance (all innovation/Joseph ops use Pminus)
             Pminus = obj.P;
+            obj.requireWatermarkCurrent_(Pminus);
 
             % 2. Innovation
             nu = z - h;
@@ -718,6 +734,9 @@ classdef ReverseGNSSEKF < handle
 
             % 7. Quaternion error-state injection + covariance reset
             %    Applied to posterior Pplus, NOT to prior Pminus
+            resetJacobians = {};   % epoch-transition retention accumulator (Stage 3.1); stays
+                                    % empty in eulerZYX mode, meaning the retained attitude reset
+                                    % factor G is identity.
             if strcmp(obj.attitudeParameterization, 'quaternionErrorState')
                 maxGuard = deg2rad(10);
                 try; maxGuard = obj.cfg.estimator.attitude.maxErrorStateInjection_rad; catch; end
@@ -734,6 +753,9 @@ classdef ReverseGNSSEKF < handle
                     d = deltaTheta(:);
                     skewDelta = [0,-d(3),d(2);d(3),0,-d(1);-d(2),d(1),0];
                     resetJacobian = eye(3) - 0.5*skewDelta;
+                    if obj.retainEpochTransitionOperators
+                        resetJacobians{end+1} = struct('rows',attitudeIdx,'jacobian',resetJacobian); %#ok<AGROW>
+                    end
                     obj.P(attitudeIdx,:) = resetJacobian*obj.P(attitudeIdx,:);
                     obj.P(:,attitudeIdx) = obj.P(:,attitudeIdx)*resetJacobian';
                     largestInjection = max(largestInjection,injectionInfo.injectionNorm_rad);
@@ -773,6 +795,7 @@ classdef ReverseGNSSEKF < handle
             end
 
             % 8. Numerical sanity / PSD guard (after attitude reset if any)
+            repairKind = '';   % epoch-transition retention accumulator (Stage 3.1)
             if any(~isfinite(obj.P(:)))
                 warning('ReverseGNSSEKF:update','NaN/Inf in P after update');
             end
@@ -785,10 +808,16 @@ classdef ReverseGNSSEKF < handle
                     'P not PSD (minEig=%.2e); projecting to nearest SPD.', minEig);
                 obj.P = nearestSPD_(obj.P);
                 obj.P = (obj.P + obj.P') / 2;
+                repairKind = 'nearestSpdProjection';
             elseif minEig < 0
                 % Tiny negative eigenvalue from floating-point: nudge diagonal
                 obj.P = (obj.P + obj.P') / 2;
                 obj.P = obj.P + eye(obj.nx) * (tol - minEig);
+                repairKind = 'benignDiagonalNudge';
+            end
+
+            if obj.retainEpochTransitionOperators
+                obj.accumulateEpochTransition_(K, H, resetJacobians, repairKind, numel(z));
             end
 
             % 9. NIS: nu' * S^{-1} * nu  via backslash
@@ -1482,9 +1511,13 @@ classdef ReverseGNSSEKF < handle
             end
             if idx <= 0 || idx > obj.nx; return; end
 
+            obj.requireWatermarkCurrent_(obj.P);
             obj.P(idx, :) = 0;
             obj.P(:, idx) = 0;
             obj.P(idx, idx) = resetSigma_m^2;
+            if obj.retainEpochTransitionOperators
+                obj.noteEpochTransitionRepair_('ambiguityCovarianceReset');
+            end
         end
 
         % ----------------------------------------------------------------
@@ -1519,10 +1552,14 @@ classdef ReverseGNSSEKF < handle
             idx = sm.islAmbiguityIdx(r, sigIdx);
             if idx <= 0 || idx > obj.nx; return; end
 
+            obj.requireWatermarkCurrent_(obj.P);
             obj.P(idx, :)   = 0;
             obj.P(:, idx)   = 0;
             obj.P(idx, idx) = resetSigma_m^2;
             didReset = true;
+            if obj.retainEpochTransitionOperators
+                obj.noteEpochTransitionRepair_('ambiguityCovarianceReset');
+            end
         end
 
         % ----------------------------------------------------------------
@@ -2074,6 +2111,153 @@ classdef ReverseGNSSEKF < handle
                     obj.P(assetBlock.r,referenceBlock.r) - ...
                     obj.P(referenceBlock.r,assetBlock.r);
             end
+        end
+
+        % ----------------------------------------------------------------
+        % Epoch error-transition retention (plan Stage 3.1 items 4-5). Every method below is a
+        % no-op unless retainEpochTransitionOperators is true, and none of them ever writes
+        % obj.x, obj.P, F, or Q -- they only observe and record.
+        function beginEpochTransition_(obj, t0_s, dt_s, F, Q)
+            % beginEpochTransition_  Arms a fresh capture window: A=eye(nx), F/Q retained by
+            % value, counters zeroed, predictApplied=true. Called only from predict().
+            obj.pendingEpochTransition_ = struct( ...
+                'predictApplied',true, ...
+                'intervalStartCoordinateEpoch_s',t0_s, ...
+                'intervalDuration_s',dt_s, ...
+                'localStateDimension',obj.nx, ...
+                'stateTransition',F, ...
+                'processNoise',Q, ...
+                'localUpdateContraction',eye(obj.nx), ...
+                'accountedUpdateCallCount',0, ...
+                'accountedMeasurementRowCount',0, ...
+                'benignDiagonalNudgeCount',0, ...
+                'unmodelledCovarianceTransformCount',0, ...
+                'unmodelledCovarianceTransformKinds',{{}}, ...
+                'captureSequenceNumber',obj.epochTransitionSequence_+1);
+            obj.epochTransitionCaptureOpen_ = true;
+            obj.covarianceAtLastAccountedWrite_ = obj.P;
+        end
+
+        function accumulateEpochTransition_(obj, K, H, resetJacobians, repairKind, rowCount)
+            % accumulateEpochTransition_  Folds one update() call's (K,H) and any attitude-reset
+            % Jacobians into the pending contraction A <- G*(I-K*H)*A. A no-op if no predict()
+            % armed a window this epoch (e.g. a link update applied outside the coordinator's
+            % own epoch loop).
+            if ~obj.epochTransitionCaptureOpen_; return; end
+            nxLocal = obj.pendingEpochTransition_.localStateDimension;
+            G = eye(nxLocal);
+            for index = 1:numel(resetJacobians)
+                rows = resetJacobians{index}.rows;
+                G(rows,rows) = resetJacobians{index}.jacobian;
+            end
+            obj.pendingEpochTransition_.localUpdateContraction = ...
+                G*(eye(nxLocal)-K*H)*obj.pendingEpochTransition_.localUpdateContraction;
+            obj.pendingEpochTransition_.accountedUpdateCallCount = ...
+                obj.pendingEpochTransition_.accountedUpdateCallCount+1;
+            obj.pendingEpochTransition_.accountedMeasurementRowCount = ...
+                obj.pendingEpochTransition_.accountedMeasurementRowCount+rowCount;
+            if strcmp(repairKind,'benignDiagonalNudge')
+                % A positive diagonal addition to P only; never touches a cross block, so it is
+                % counted but does not invalidate the retained operators (U6).
+                obj.pendingEpochTransition_.benignDiagonalNudgeCount = ...
+                    obj.pendingEpochTransition_.benignDiagonalNudgeCount+1;
+            elseif strcmp(repairKind,'nearestSpdProjection')
+                obj.pendingEpochTransition_.unmodelledCovarianceTransformCount = ...
+                    obj.pendingEpochTransition_.unmodelledCovarianceTransformCount+1;
+                obj.pendingEpochTransition_.unmodelledCovarianceTransformKinds{end+1} = repairKind;
+            end
+            obj.covarianceAtLastAccountedWrite_ = obj.P;
+        end
+
+        function requireWatermarkCurrent_(obj, priorP)
+            % requireWatermarkCurrent_  Closes the watermark fence's remaining gap: called at
+            % the TOP of every accounted method (update, the two ambiguity resets), before that
+            % method's own writes, with the obj.P value as it stood at entry. Without this, an
+            % external write landing BETWEEN two accounted calls (e.g. between predict() and the
+            % following update()) was silently absorbed by the re-seed at the END of the
+            % previous accounted call, rather than caught here at the start of the next one.
+            if ~obj.retainEpochTransitionOperators || ~obj.epochTransitionCaptureOpen_; return; end
+            if ~isequal(priorP, obj.covarianceAtLastAccountedWrite_)
+                error('ReverseGNSSEKF:unaccountedCovarianceMutation', ...
+                    ['obj.P was written outside predict()/update()/the ambiguity-covariance ' ...
+                    'resets/applyDeclaredExternalCovarianceWrite before this accounted call ' ...
+                    'began; the retained epoch-transition operators no longer describe obj.P.']);
+            end
+        end
+
+        function noteEpochTransitionRepair_(obj, kindName)
+            % noteEpochTransitionRepair_  Public entry point for a non-linear covariance edit
+            % OUTSIDE update() (the two ambiguity-covariance resets): counts an unmodelled
+            % transform and refreshes the watermark immediately, since no accumulate call
+            % follows a reset.
+            if ~obj.epochTransitionCaptureOpen_; return; end
+            obj.pendingEpochTransition_.unmodelledCovarianceTransformCount = ...
+                obj.pendingEpochTransition_.unmodelledCovarianceTransformCount+1;
+            obj.pendingEpochTransition_.unmodelledCovarianceTransformKinds{end+1} = kindName;
+            obj.covarianceAtLastAccountedWrite_ = obj.P;
+        end
+
+        function raw = takeEpochTransitionCapture(obj)
+            % takeEpochTransitionCapture  Take, not get: closes the open window and returns its
+            % plain struct. The watermark fence makes the accounted-write set enforceable: any
+            % write to obj.P since the last accounted write (predict/update/an ambiguity reset/
+            % applyDeclaredExternalCovarianceWrite) throws here instead of silently corrupting
+            % the retained operators.
+            if ~obj.epochTransitionCaptureOpen_
+                error('ReverseGNSSEKF:epochTransitionCaptureNotOpen', ...
+                    'No predict() has armed an epoch-transition capture window.');
+            end
+            if ~isequal(obj.P, obj.covarianceAtLastAccountedWrite_)
+                error('ReverseGNSSEKF:unaccountedCovarianceMutation', ...
+                    ['obj.P was written outside predict()/update()/the ambiguity-covariance ' ...
+                    'resets/applyDeclaredExternalCovarianceWrite since the last accounted write; ' ...
+                    'the retained epoch-transition operators no longer describe obj.P.']);
+            end
+            raw = obj.pendingEpochTransition_;
+            raw.intervalEndCoordinateEpoch_s = raw.intervalStartCoordinateEpoch_s+raw.intervalDuration_s;
+            obj.epochTransitionCaptureOpen_ = false;
+            obj.epochTransitionSequence_ = raw.captureSequenceNumber;
+        end
+
+        function tf = hasOpenEpochTransitionCapture(obj)
+            tf = obj.epochTransitionCaptureOpen_;
+        end
+
+        function applyDeclaredExternalCovarianceWrite(obj, xPosterior, PPosterior, nominalQuatPosterior)
+            % applyDeclaredExternalCovarianceWrite  The ONE sanctioned external write path for
+            % obj.x/obj.P/obj.nominalQuat_wxyz outside predict()/update() (used by
+            % revgnss.IndependentFleetCoordinator.applyOneLinkUpdate_ in place of three direct
+            % field assignments). Re-seeds the watermark so takeEpochTransitionCapture does not
+            % false-trip on this sanctioned write. Byte-identical to the pre-Stage-3.1 direct
+            % assignments when retainEpochTransitionOperators is false.
+            obj.x = xPosterior;
+            obj.P = PPosterior;
+            obj.nominalQuat_wxyz(:,1) = nominalQuatPosterior;
+            if obj.retainEpochTransitionOperators
+                obj.covarianceAtLastAccountedWrite_ = obj.P;
+            end
+        end
+    end
+
+    methods (Static)
+        function s = emptyEpochTransition()
+            % emptyEpochTransition  Frozen field set for the epoch-transition retention struct
+            % (plan Stage 3.1): the pendingEpochTransition_ property default, and the schema
+            % every predict()/update()-populated struct matches.
+            s = struct( ...
+                'predictApplied',false, ...
+                'intervalStartCoordinateEpoch_s',NaN, ...
+                'intervalDuration_s',NaN, ...
+                'localStateDimension',0, ...
+                'stateTransition',[], ...
+                'processNoise',[], ...
+                'localUpdateContraction',[], ...
+                'accountedUpdateCallCount',0, ...
+                'accountedMeasurementRowCount',0, ...
+                'benignDiagonalNudgeCount',0, ...
+                'unmodelledCovarianceTransformCount',0, ...
+                'unmodelledCovarianceTransformKinds',{{}}, ...
+                'captureSequenceNumber',0);
         end
     end
 end
