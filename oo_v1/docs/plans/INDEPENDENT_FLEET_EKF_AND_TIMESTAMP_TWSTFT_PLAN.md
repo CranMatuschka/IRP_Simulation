@@ -644,6 +644,10 @@ m/s), so it also widens several previously two-observable-only contracts to genu
 
 ### Section 2.3 item 4 status — 2026-07-30
 
+*Superseded by the "Section 2.3/3.4 item 4 status — 2026-07-31" entry under Stage 3.4 below; left
+otherwise as originally written since it accurately reflects the pre-Stage-3 state it was written
+against.*
+
 Assessed, not implemented: item 4 (ISL carrier) remains structurally blocked exactly as originally
 scoped, and this pass did not weaken that gate or attempt a premature implementation. Re-verified
 against the plan's own Section 3.4 prerequisite list, item by item, against the current state of
@@ -1015,6 +1019,160 @@ Implemented and verified end-to-end on 2026-07-31. Design: a 12-agent judge-pane
    - the carrier toggle is separately enabled in `masterConfig`.
 
 Every observable remains independently selectable. A disabled mode must leave its existing current behaviour unchanged.
+
+### Section 3.4 completion record — 2026-07-31
+
+**Zero production code changes.** Items 1-3 are already satisfied by code that exists and runs
+today, live-re-verified this session (not merely cited from a prior stage's memory); item 4 stays
+blocked on real, unmet prerequisites. The entire deliverable is this record plus the superseding
+item-4 re-assessment below. No `+revgnss/*.m`, `+filter/*.m`, `config/masterConfig.m`, or test file
+changed. `correlationNetwork.linkUpdateRouting='conservativeBoundOnly'` and
+`SynchronizedDeliveryContract.PairExactEligibleObservables={'coherentTwoWayCodeRange'}` are both
+untouched — golden safety is a logical certainty here, not merely tested for, because nothing
+executable moves. Design: a 7-agent judge-panel Workflow (ground-truth verification, corrected one
+factual error in its own design brief — see below — then 3 independently-biased proposals, 2
+judges, synthesis); the first attempt stalled on its synthesis step after 6/7 agents completed and
+was resumed from cache rather than re-run from scratch.
+
+**Design-brief correction, load-bearing for the whole section**: the initial brief assumed no
+cycle-slip detection or carrier-phase ambiguity state existed anywhere in the repo. Ground-truth
+verification found this false — `revgnss.CycleSlipDetector`, `revgnss.IslCarrierTrackManager`,
+`revgnss.AmbiguityKey`, `revgnss.AmbiguityStateRegistry`/`AmbiguityArcState`, and
+`filter.ReverseGNSSEKF.applyIslAmbiguityResets` all exist and are wired live (behind
+`measurements.isl.carrier.slipDetection.enable`/`measurements.isl.carrier.ambiguity.enable`, both
+default `false`), exercised by `tests/test_isl_carrier_slip.m`. The correction that survives:
+this is a separate, pre-existing, single-sided, local-EKF-only subsystem invoked directly inside
+`ReverseGNSSSimulation`, never routed through `IndependentFleetCoordinator`/
+`DistributedLinkUpdateAdapter` (`DistributedLinkUpdateAdapter.AllowedObservables` excludes
+`islCarrier`; zero `islCarrier` references in `IndependentFleetCoordinator.m`, confirmed by grep
+both by the design workflow and independently re-confirmed here). It satisfies one independently-run
+satellite's own local need; it does not reach the distributed-fleet link-update path Section 3.4
+concerns.
+
+**Item 1 — coherent two-way ISL range, full endpoint distributed update: already satisfied.**
+`revgnss.CoherentTwoWayRangeLinkUpdateAdapter` (Section 2.3.1) is the sole current member of
+`SynchronizedDeliveryContract.PairExactEligibleObservables` — the strongest treatment Stage 3.2
+built (genuine dual-endpoint synchronized write, two-phase commit, verified rollback). Re-verified
+live this session: `tests/test_independent_fleet_sanctioned_link_update_end_to_end.m` — **ALL
+PASS**.
+
+**Item 2 — first-order reciprocal ISL clock transfer, clock-gauge audit: already satisfied. One
+design question recorded as explicitly open.** `revgnss.FirstOrderReciprocalClockTransferLinkUpdateAdapter`
+(Section 2.3.2) plus `DistributedClockGaugeContract`'s audit are live and gate every delivery today.
+Re-verified live this session: `tests/test_independent_fleet_time_transfer_sanctioned_link_update_end_to_end.m`
+— **ALL PASS**. New finding this pass, confirmed by grep: the gauge audit
+(`DistributedClockGaugeContract.requireClockObservability`, called from
+`DistributedLinkUpdateAdapter.requireUpdateBlock`) is invoked from both the pair-exact branch
+(`IndependentFleetCoordinator.m:811`) and the conservative-bound branch (`:879`) — it already runs
+identically regardless of route, upstream of the route distinction. Textual reading: item 1 names
+"full endpoint distributed update"; item 2 names a different, already-met qualifier ("a
+clock-gauge audit"); item 2's text does not repeat item 1's phrase, so the stronger pair-exact
+treatment is not literally required here. **Open question, recorded honestly on both sides, not
+decided**: should `firstOrderReciprocalClockTransfer` ever be added to
+`PairExactEligibleObservables`? *For*: it is a genuinely symmetric two-endpoint quantity, like the
+observable already made pair-exact-eligible. *Against*: no operational defect motivates it today —
+the gauge audit already runs on every delivery regardless of route, and nothing in the repo (no
+test, no NEES/consistency anomaly) shows conservative-bound-plus-gauge-audit is insufficient for
+this observable. A due-diligence grep found zero `coherentTwoWayCodeRange`-specific literals in
+`SynchronizedPairCorrectionMessage.m`/`SynchronizedPairLinkUpdateTransaction.m` (re-confirmed
+independently here) — both operate generically on state-delta/covariance payloads, so if this
+question is ever answered "yes," it is very likely a one-line `PairExactEligibleObservables` widen
+with no schema or coordinator change. This pass records the question and the audit finding; it does
+not resolve it and adds no code.
+
+**Item 3 — one-way ISL code and Doppler, analytic/five-point finite-difference agreement: already
+satisfied. "Full endpoint distributed update" ruled inapplicable, not merely deferred.**
+`revgnss.OneWayCodeRangeLinkUpdateAdapter`/`OneWayDopplerRangeRateLinkUpdateAdapter` (Section 2.3
+item 3) — item 3's own literal precondition is proven:
+`tests/test_one_way_isl_link_update_adapters.m`, 11/11 subtests, all-14-column
+analytic-vs-five-point central-difference oracle agreement for both observables at 1e-5 relative
+tolerance. Re-verified live this session: `tests/test_independent_fleet_one_way_sanctioned_link_update_end_to_end.m`
+— **ALL PASS**. Ruling: a one-way measurement is directly informative about the owner (receiver)
+only; the transmitter supplies solely a `transmittedStateProduct`, already structurally barred from
+`covarianceGroup` treatment by name (Stage 3.3) because its own prediction error is already carried
+by `SplitCovarianceIntersectionBound`'s remote-prior term. A synchronized dual-write would fabricate
+a transmitter-side correction the measurement carries no information for.
+`PairExactEligibleObservables` correctly excludes both one-way observables; this pass affirms that
+exclusion as the intended permanent shape, not an oversight. The existing unconditional
+`applyConservativeOwnerOnlyLinkTransform` conditioning (`IndependentFleetCoordinator.m:937-953`,
+confirmed observable-agnostic — it runs after the per-observable dispatch switch, gated only on
+network registration) already discharges "distributed update" for both.
+
+**Full regression suite** (`tests/run_all_tests.m`): re-run fresh on current HEAD: **275/291
+passed**, byte-identical failure list to Stage 3.3's baseline (same 16 pre-existing/unrelated
+failures, same file count — confirming zero regression, exactly as expected since zero production
+files changed this pass; re-run anyway as due diligence matching this plan's own established
+discipline).
+
+**Out of scope this pass, and why**: widening `PairExactEligibleObservables` to include
+`firstOrderReciprocalClockTransfer` (no operational defect demonstrates the current treatment is
+insufficient; recorded as an open question, not decided); any pair-exact treatment for
+`oneWayCode`/`oneWayDoppler` (ruled architecturally wrong, not merely unbuilt); any ISL-carrier
+scaffolding on the distributed path (schema slot, adapter class, `islCarrier` switch case,
+masterConfig toggle — item 4's prerequisites 1 and 2 are unmet regardless of Stage 3.1/3.2 now
+existing; adding any of this ahead of a real schema design would be the "declares a source, no
+treatment" failure Section 3.3 already forbids, one stage early).
+
+### Section 2.3/3.4 item 4 status — 2026-07-31 (supersedes the 2026-07-30 entry above)
+
+Re-assessed against the plan's own 5 prerequisites now that Stage 3.1-3.3 exist (the 2026-07-30
+assessment predated Stage 3 entirely).
+
+1. **Explicit link/signal/arc ambiguity owner** — still unmet on the distributed path, but the
+   reason has changed: `revgnss.DistributedLinkProtocolContract.StateSchemaV1CovarianceComponentOrderEuler`/
+   `...Tangent` carry no ambiguity slot, and `DistributedLinkUpdateBlock`'s constructor has no field
+   that could carry one without a schema revision. A separate, pre-existing mechanism *does* own
+   carrier ambiguity state today — `revgnss.AmbiguityStateRegistry`/`AmbiguityArcState`, keyed by
+   `revgnss.AmbiguityKey.islOneWay(...)`, consumed by `filter.ReverseGNSSEKF` — but it is one local
+   EKF's own state, with no notion of a distributed link, an owner endpoint, or a cross-fleet schema
+   slot the coordinator could carry. Reusing it for the distributed path is a schema-design decision
+   (single-owner vs shared, per-link vs per-arc, resettable-in-place vs versioned), not a wiring
+   exercise.
+2. **Cycle-slip detection/reset delivered consistently to all affected endpoint/correlation
+   records** — the infrastructure precondition is now satisfied (Stage 3.1's
+   `DistributedCovarianceNetwork` and Stage 3.2's synchronized delivery both exist and are live),
+   correcting the prior entry's claim that "Stage 3 itself has not been started." The actual
+   requirement remains unmet: `revgnss.CycleSlipDetector` + `revgnss.IslCarrierTrackManager` (used
+   via `ReverseGNSSSimulation` → `ekf.applyIslAmbiguityResets`, gated by
+   `cfg.measurements.isl.carrier.slipDetection.enable`, default `false`) detect and reset a slip on
+   ONE local EKF's own ambiguity state; nothing propagates that reset into a
+   `DistributedCovarianceNetwork` cross block or notifies a second endpoint.
+   `DistributedLinkUpdateAdapter.AllowedObservables` still excludes `islCarrier`, and no
+   `islCarrier` case exists in `IndependentFleetCoordinator.applyOneLinkUpdate_`'s switch (confirmed
+   zero matches by grep). A slip event has to become its own distributed-link delivery type —
+   routed, acknowledged, consumed like any other observable — which needs prerequisite 1's schema
+   slot first. This is real design-plus-code work, not documentation.
+3. **Carrier frequency/wavelength, phase-centre, oscillator, and calibration covariance declared**
+   — still unmet on the distributed path. The one-way adapters' terminal-geometry pattern and
+   `DistributedLinkCalibrationState`/`Registry` (Section 2.2) are reusable scaffolding, but no
+   carrier-class persistent calibration term or oscillator model has ever been exercised through
+   that registry.
+4. **A central-reference test validates the update** — transitively blocked by 1 and 2: no
+   distributed ambiguity state or slip-delivery mechanism exists yet to validate.
+5. **The carrier toggle separately enabled in masterConfig** — mechanically trivial, deliberately
+   still withheld. Shipping it ahead of 1-4 would be exactly the "declares a common source, supplies
+   no treatment" failure Section 3.3 rule 3 forbids, one stage early.
+
+**Correction to the 2026-07-30 entry's bullet 2**: its reasoning ("the correlation-tracked
+cross-covariance network Section 3.1 defines... does not exist yet... Stage 3 itself has not been
+started") is stale — Stage 3.1/3.2 now exist — and superseded by this entry. Also worth recording
+precisely, which the prior entry did not: cycle-slip detection and a real carrier-phase ambiguity
+state already exist elsewhere in the repo (`CycleSlipDetector`, `IslCarrierTrackManager`,
+`AmbiguityStateRegistry`/`AmbiguityArcState`, wired live behind
+`measurements.isl.carrier.slipDetection.enable`/`measurements.isl.carrier.ambiguity.enable`, both
+default `false`), but this is a separate, single-sided, local-EKF-only subsystem
+(`revgnss.ISLMeasurementBuilder`, invoked directly inside `ReverseGNSSSimulation`) never routed
+through `IndependentFleetCoordinator`/`DistributedLinkUpdateAdapter`. It satisfies a single
+independently-run satellite's own local-EKF need; it does not satisfy prerequisite 2 for the
+distributed-fleet link-update path, which is specifically a cross-endpoint, coordinator-level
+requirement this local mechanism cannot reach.
+
+Bullets 1, 3, 5 carry forward from the 2026-07-30 entry's substance (1 gains the schema-design
+framing above; 3, 5 unchanged in state). Bullet 4 remains transitively blocked on bullet 2.
+
+No code changes accompany this entry. The next unit of real work toward item 4 is a dedicated design
+pass owning prerequisites 1 and 2 together (2 cannot be built without 1) — not a
+Section-3.4-scoped adapter written ahead of that design.
 
 ### 3.5 Make reporting mathematically honest
 
