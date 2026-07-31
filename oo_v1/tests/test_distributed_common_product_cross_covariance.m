@@ -176,21 +176,58 @@ end
 
 % ================================================================================================
 function i_test_live_path_refusal_()
-% Q6: live coordinator path refuses declaredCommonAccelerationGroup, and refuses
-% cfg.estimator.processNoise.commonAcceleration.enable=true together with an enabled network.
+% Q6 (Section 3.3 update): declaredCommonAccelerationGroup is NO LONGER refused on the live
+% coordinator path -- Section 3.3 closed the diagonal-buildQ_ gap this refusal used to name (see
+% filter.ReverseGNSSEKF.declaredCommonProcessNoiseGroup_ and this coordinator's own initialize()
+% wiring). This subtest now proves the OPPOSITE of what it originally proved: a positive-sigma
+% declaration validates cleanly end-to-end through the real coordinator; a non-positive-sigma
+% declaration is refused as a pointless declaration (the NEW guard replacing the old blanket
+% refusal); and the sibling commonAcceleration.enable=true guard is untouched.
 cfg = i_twoAssetFleetCfg_();
 cfg.multiAsset.distributedEstimator.correlationNetwork.policy = 'exactPairwiseCrossCovariance';
 cfg.multiAsset.distributedEstimator.correlationNetwork.maximumFleetSize = 2;
 cfg.multiAsset.distributedEstimator.correlationNetwork.commonProcessNoiseTreatment = ...
     'declaredCommonAccelerationGroup';
-threw = false;
-try
-    revgnss.IndependentFleetCoordinator.validateConfig(revgnss.ConfigFactory.finalizeConfig(cfg));
-catch ME
-    threw = strcmp(ME.identifier,'IndependentFleetCoordinator:commonProcessNoiseTreatmentUnavailableOnLivePath');
-end
-assert(threw,'declaredCommonAccelerationGroup must be refused on the live coordinator path');
+cfg.multiAsset.distributedEstimator.correlationNetwork.commonProcessNoise.sigma_mps2 = 1e-3;
+% validateConfig itself must no longer throw for this now-legal combination.
+revgnss.IndependentFleetCoordinator.validateConfig(revgnss.ConfigFactory.finalizeConfig(cfg));
+fprintf('  PASS Q6a: declaredCommonAccelerationGroup with sigma_mps2>0 validates cleanly (no longer refused)\n');
 
+% The real coordinator must run end-to-end and every leaf must receive the identical declared
+% group value, matching the network's own declared group by construction (no parallel formula).
+% revgnss.CommonProcessNoiseCovarianceGroup is a MATLAB value class (immutable properties, no
+% mutators), so isequal is the meaningful check here -- there is no handle-style "same instance."
+cfg.simulation.duration_s = 4; cfg.simulation.dt_s = 1;
+cfg.report.writePdf = false; cfg.report.writeMat = false; cfg.report.compileTex = 'never';
+cfg.plots.enable = false; cfg.plots.showFigures = false;
+coordinator = revgnss.IndependentFleetCoordinator(cfg);
+coordinator.run();
+ekf1 = coordinator.localSimulations{1}.ekf;
+ekf2 = coordinator.localSimulations{2}.ekf;
+assert(~isempty(ekf1.declaredCommonProcessNoiseGroup_) && ~isempty(ekf2.declaredCommonProcessNoiseGroup_), ...
+    'every leaf must receive the declared common-process-noise group');
+assert(isequal(ekf1.declaredCommonProcessNoiseGroup_,ekf2.declaredCommonProcessNoiseGroup_), ...
+    'every leaf must receive the identical group value, not independently-constructed copies');
+fprintf('  PASS Q6b: the real coordinator runs end-to-end and wires the identical group value to every leaf\n');
+
+% A declared group with sigma_mps2<=0 is a pointless declaration, refused by the NEW guard.
+cfgZero = i_twoAssetFleetCfg_();
+cfgZero.multiAsset.distributedEstimator.correlationNetwork.policy = 'exactPairwiseCrossCovariance';
+cfgZero.multiAsset.distributedEstimator.correlationNetwork.maximumFleetSize = 2;
+cfgZero.multiAsset.distributedEstimator.correlationNetwork.commonProcessNoiseTreatment = ...
+    'declaredCommonAccelerationGroup';
+cfgZero.multiAsset.distributedEstimator.correlationNetwork.commonProcessNoise.sigma_mps2 = 0;
+threwZero = false;
+try
+    revgnss.IndependentFleetCoordinator.validateConfig(revgnss.ConfigFactory.finalizeConfig(cfgZero));
+catch MEZero
+    threwZero = strcmp(MEZero.identifier,'IndependentFleetCoordinator:commonProcessNoiseGroupMagnitudeRequired');
+end
+assert(threwZero,'declaredCommonAccelerationGroup with sigma_mps2<=0 must be refused as a pointless declaration');
+fprintf('  PASS Q6c: sigma_mps2<=0 is refused as a pointless declaration\n');
+
+% The sibling guard (a leaf''s own cfg carrying the joint-mode flag alongside an enabled
+% network) is untouched by this change.
 cfg2 = i_twoAssetFleetCfg_();
 cfg2.multiAsset.distributedEstimator.correlationNetwork.policy = 'exactPairwiseCrossCovariance';
 cfg2.multiAsset.distributedEstimator.correlationNetwork.maximumFleetSize = 2;
@@ -201,8 +238,8 @@ try
 catch ME2
     threw2 = strcmp(ME2.identifier,'IndependentFleetCoordinator:commonProcessNoiseUndeclared');
 end
-assert(threw2,'commonAcceleration.enable=true with an enabled network must be refused');
-fprintf('  PASS Q6: live-path refusals fire as designed\n');
+assert(threw2,'commonAcceleration.enable=true with an enabled network must still be refused');
+fprintf('  PASS Q6d: the sibling commonAcceleration.enable guard is untouched\n');
 end
 
 % ================================================================================================
@@ -230,6 +267,10 @@ end
 
 function cfg = i_twoAssetFleetCfg_()
 cfg = masterConfig();
+% Section 3.3's towerClockProductReachableButRejected guard refuses nSpaceAssets>1 with an
+% enabled correlation network unless towerClockMode='perfectCorrection'; every subtest in this
+% file is exercising the commonProcessNoiseTreatment guard, not the tower-clock-product gap.
+cfg.clocks.tower.product.mode = 'perfectCorrection';
 cfg.scenario.nSpaceAssets = 2;
 cfg.multiAsset.mode = 'fast';
 cfg.multiAsset.distributedEstimator.enable = true;

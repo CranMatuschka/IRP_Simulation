@@ -14,11 +14,13 @@ classdef DistributedCovarianceNetwork < handle
     % internally: every quantity here comes from a revgnss.LocalEpochTransitionCaptureProvider
     % (structurally unable to read truth) or from a caller-supplied live local marginal.
     %
-    % SCOPE. Section 3.2's synchronized two-endpoint delivery protocol (signed correction
-    % messages, non-owner delivery, acknowledgement, partial-delivery rejection) is NOT
-    % implemented here. AllowedLinkUpdateRoutingPolicies excludes the word that would select
-    % the exact route, so routeForDelivery can never return 'pairExact' on a validly
-    % constructed network yet -- see routeForDelivery's own header.
+    % SCOPE (as of Stage 3.1; Stage 3.2 has since implemented the synchronized two-endpoint
+    % delivery protocol this paragraph originally described as missing -- signed correction
+    % messages, non-owner delivery, acknowledgement, partial-delivery rejection all now exist,
+    % see revgnss.SynchronizedDeliveryContract and revgnss.SynchronizedPairLinkUpdateTransaction).
+    % routeForDelivery CAN now return 'pairExact' when correlationNetwork.linkUpdateRouting==
+    % 'pairExactWhenBothEndpointsTracked' and the routed observable is pair-exact-eligible -- see
+    % routeForDelivery's own header for the current, authoritative routing rule.
     %
     % HONESTY (no fleet-level conservativeness bound claimed for the mixed assembly). Once
     % applyConservativeOwnerOnlyLinkTransform has conditioned any pair, the cross blocks are

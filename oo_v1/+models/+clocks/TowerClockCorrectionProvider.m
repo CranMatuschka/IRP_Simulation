@@ -418,6 +418,15 @@ classdef TowerClockCorrectionProvider
             pc.latency_s            = 5;
             pc.validity_s           = 120;
             pc.addToR               = true;
+            % sharedErrorCorrelation is currently inert: read here and nowhere else consumed
+            % except a SimulationToggleManifest report row. See config/masterConfig.m's own
+            % comment at this field's declaration (plan Section 3.3) for what actually gates
+            % cross-fleet sharing today (productNoise_'s correction residual is a DETERMINISTIC
+            % function of (towerIndex,productEpoch), identical for every real consumer of that
+            % pair -- not merely cached -- whenever towerClockMode~='perfectCorrection') and what
+            % currently prevents it in an untreated multi-asset independent fleet with an enabled
+            % correlation network
+            % (revgnss.IndependentFleetCoordinator:towerClockProductReachableButRejected).
             pc.sharedErrorCorrelation = true;
             hasProductCfg = false;
             try
@@ -443,6 +452,18 @@ classdef TowerClockCorrectionProvider
             % The global RNG state is saved and restored.
             % This models a real broadcast product: the error is fixed at broadcast
             % time and does not redraw for every measurement epoch.
+            %
+            % The seed below is a pure, deterministic function of (ti,t_prod) only -- no asset
+            % dimension, no process/session state. Every real consumer of the same tower/product
+            % epoch computes the IDENTICAL noise by construction, whether or not this persistent
+            % cache_ is populated: the cache is memoization of that deterministic value (keyed
+            % ONLY by (ti,t_prod)), not the source of the sharing -- clearing it would still
+            % reproduce the same number. This is a raw MATLAB persistent, not routed through the
+            % RNG registry, so rng.independentStreams cannot isolate it either. This is real
+            % cross-fleet sharing, physically correct for a genuinely shared broadcast product,
+            % but currently untreated by the correlation network. See config/masterConfig.m's
+            % sharedErrorCorrelation comment and revgnss.IndependentFleetCoordinator.
+            % validateConfig's towerClockProductReachableButRejected guard (plan Section 3.3).
             persistent cache_;
             if isempty(cache_)
                 cache_ = containers.Map('KeyType','char','ValueType','any');

@@ -11,14 +11,20 @@ classdef CommonProcessNoiseCovarianceGroup
     % cfg.estimator.processNoise.commonAcceleration.{enable,sigma_mps2,frame} values so a
     % centralized comparison is meaningful rather than circular.
     %
-    % LIVE-PATH REFUSAL: addJointAssetProcessNoise_ adds qCommon to the DIAGONAL blocks too, and
-    % only when jointMultiAssetEnabled. An independent-fleet leaf's own buildQ_ never receives
-    % that matching diagonal term, so a cross-only injection into the network would NOT
-    % reproduce the centralized reference and could make the assembled fleet Q indefinite. This
-    % class is fully implemented and fully proven at the network level (see
-    % tests/test_distributed_common_product_cross_covariance.m); the live coordinator path
-    % refuses treatment='declaredCommonAccelerationGroup'
-    % (IndependentFleetCoordinator:commonProcessNoiseTreatmentUnavailableOnLivePath).
+    % LIVE-PATH DIAGONAL (Section 3.3): addJointAssetProcessNoise_ adds qCommon to the DIAGONAL
+    % blocks too, and only when jointMultiAssetEnabled. Stage 3.1/3.2 left an independent-fleet
+    % leaf's own buildQ_ without that matching diagonal term, so a cross-only injection into the
+    % network would NOT have reproduced the centralized reference and could have made the
+    % assembled fleet Q indefinite. Section 3.3 closed that gap: filter.ReverseGNSSEKF.
+    % declaredCommonProcessNoiseGroup_ (set by IndependentFleetCoordinator.initialize() only
+    % when correlationNetwork.commonProcessNoiseTreatment=='declaredCommonAccelerationGroup') is
+    % handed the SAME group instance, so buildQ_ calls THIS class's own ownDiagonalContribution
+    % for its diagonal term -- the identical formula the network's own cross block uses, by
+    % construction. This class is fully implemented and fully proven at the network level (see
+    % tests/test_distributed_common_product_cross_covariance.m and
+    % tests/test_leaf_declared_common_process_noise_diagonal.m); the live coordinator path now
+    % only refuses a declared group with a non-positive magnitude, as a pointless declaration
+    % (IndependentFleetCoordinator:commonProcessNoiseGroupMagnitudeRequired).
 
     properties (Constant)
         AllowedTreatments = {'declaredCommonAccelerationGroup'}
@@ -136,9 +142,12 @@ classdef CommonProcessNoiseCovarianceGroup
         end
 
         function Qii = ownDiagonalContribution(obj, dt_s, schemaIndices, n)
-            % ownDiagonalContribution  Audit/test-reference use only, NEVER applied on the live
-            % path: the diagonal term addJointAssetProcessNoise_ would add to a member's OWN Q,
-            % needed only to build the centralized reference Q in tests.
+            % ownDiagonalContribution  The diagonal term addJointAssetProcessNoise_ would add to
+            % a member's OWN Q. Originally audit/test-reference use only; Section 3.3 gives it a
+            % real live-path caller too -- filter.ReverseGNSSEKF.buildQ_ calls this SAME instance
+            % method (via a leaf's own declaredCommonProcessNoiseGroup_) so a leaf's diagonal and
+            % revgnss.DistributedCovarianceNetwork's own cross block are the identical formula by
+            % construction, not two independently-written formulas kept in sync by a test.
             Qii = obj.crossProcessNoise(dt_s,schemaIndices,schemaIndices,n,n);
         end
     end

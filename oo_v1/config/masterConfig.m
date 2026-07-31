@@ -164,6 +164,22 @@ cfg.clocks.tower.product.sigmaDrift_mps         = 0.0002; % ~0.0007 ppb/s
 cfg.clocks.tower.product.covBiasDrift           = 0;
 cfg.clocks.tower.product.validity_s             = 120;
 cfg.clocks.tower.product.addToR                 = true;
+% sharedErrorCorrelation currently only ASSERTS that a tower's product noise is shared across
+% consumers -- it gates no logic (models.clocks.TowerClockCorrectionProvider reads it into
+% pc.sharedErrorCorrelation and nothing else consumes that field except a report row). The
+% ACTUAL sharing is that models.clocks.TowerClockCorrectionProvider.productNoise_'s correction
+% residual is a DETERMINISTIC function of (towerIndex,productEpoch) -- identical for every real
+% consumer of that pair regardless of process or asset (the persistent cache is memoization of
+% that deterministic value, not the source of the sharing; clearing it would reproduce the same
+% number). This is unconditional whenever towerClockMode~='perfectCorrection', regardless of this
+% flag's value; revgnss.IndependentFleetCoordinator.validateConfig's
+% towerClockProductReachableButRejected guard is what currently prevents that reachable-but-
+% untreated combination in a multi-asset independent fleet with an enabled correlation network
+% (plan Section 3.3). This flag is reserved as the future enable bit for a real MEASUREMENT-SPACE
+% tracked-covariance-group treatment (an R-term, the missing K_i*R_ij*K_j' cross term consumed by
+% revgnss.CommonSourceCovarianceGroup -- NOT a Q-term on the network's own state-space cross
+% blocks, which is a separate mechanism; see revgnss.DistributedLinkProtocolContract.
+% CommonSourceNames's own comment), not yet built.
 cfg.clocks.tower.product.sharedErrorCorrelation = true;
 
 % Slave each single .enable above to its internal truth/model pair (read by ~150
@@ -1619,7 +1635,7 @@ cfg.clocks.tower.product.sigmaDrift_mps         = 0.0002;
 cfg.clocks.tower.product.covBiasDrift           = 0;
 cfg.clocks.tower.product.validity_s             = 120;
 cfg.clocks.tower.product.addToR                 = true;
-cfg.clocks.tower.product.sharedErrorCorrelation = true;
+cfg.clocks.tower.product.sharedErrorCorrelation = true; % currently inert -- see the main block's comment
 
 cfg.errors.hardwareDelay.enable            = false;
 cfg.errors.hardwareDelay.truth.enable      = false;

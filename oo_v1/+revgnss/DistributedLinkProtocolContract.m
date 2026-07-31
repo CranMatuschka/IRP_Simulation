@@ -6,8 +6,11 @@ classdef DistributedLinkProtocolContract
     % clock datum/gauge, state-schema version, attitude-error coordinate convention, the
     % common-information vocabulary, and the time-transfer clock claim. It implements no
     % estimator update and changes no runtime behaviour. distributedEstimator.linkUpdate.enable
-    % remains unconditionally rejected by revgnss.IndependentFleetCoordinator.validateConfig
-    % until a later stage removes that guard.
+    % was unconditionally rejected by revgnss.IndependentFleetCoordinator.validateConfig at the
+    % time this class was first written; Stage 2.3.1 removed that blanket guard and linkUpdate is
+    % now a real, exercised live path (see e.g. tests/test_independent_fleet_synchronized_pair_
+    % live_path.m) -- this header is left describing the class's own scope (the frozen
+    % Stage-2.0 protocol contract), not the coordinator's current gating.
 
     properties (Constant)
         % CoordinateTimeScale, FrameIdentifier, and ClockDatumIdentifier name the single
@@ -62,8 +65,30 @@ classdef DistributedLinkProtocolContract
 
         % Known common-information sources a distributed link update must eventually declare
         % a treatment for (Section 2.0.5 / 2.2.5). Vocabulary is frozen now; no treatment is
-        % implemented yet, so isFullyRejectedCommonSourceTreatment requires every source to be
-        % 'rejected' until Section 2.2 delivers a proven treatment.
+        % implemented at THIS key for any of the five sources, so
+        % isFullyRejectedCommonSourceTreatment still requires every one to be 'rejected' on the
+        % live linkUpdate path. Plan Section 3.3's own inventory/design pass (docs/plans/
+        % INDEPENDENT_FLEET_EKF_AND_TIMESTAMP_TWSTFT_PLAN.md) settled a final treatment for each:
+        %   - sharedForceAtmosphericProduct: 'rejected' here is correct and permanent -- the real
+        %     treatment is a DIFFERENT, state-space channel (correlationNetwork.
+        %     commonProcessNoiseTreatment='declaredCommonAccelerationGroup', a Q-term, not an
+        %     R-term/covarianceGroup at this measurement-space key) -- see revgnss.
+        %     CommonProcessNoiseCovarianceGroup and filter.ReverseGNSSEKF.
+        %     declaredCommonProcessNoiseGroup_.
+        %   - transmittedStateProduct: 'covarianceGroup' is structurally barred BY NAME for this
+        %     source (revgnss.CommonSourceCovarianceGroup.SourceTreatmentIncompatibilities.
+        %     transmittedStateProduct) because the remote's own prediction error is already fully
+        %     carried by revgnss.SplitCovarianceIntersectionBound's remotePrior Young's-inequality
+        %     term. 'rejected' here means "not additionally declared as a covariance group," not
+        %     "untreated" -- the source IS conservatively treated, outside this enum.
+        %   - towerClockProduct, terminalCalibration, sessionTimingProduct: genuinely untreated at
+        %     this key -- no treatment exists yet for any of the three, so 'rejected' is left as
+        %     the only legal value here rather than accepted as a silent mislabel. For
+        %     towerClockProduct specifically, the gap is not merely undisclosed: revgnss.
+        %     IndependentFleetCoordinator.validateConfig's towerClockProductReachableButRejected
+        %     hard error refuses the one combination (an enabled correlation network, nAssets>1,
+        %     towerClockMode~='perfectCorrection') where the false 'rejected' claim would
+        %     otherwise be silently load-bearing.
         CommonSourceNames = { ...
             'towerClockProduct','terminalCalibration','transmittedStateProduct', ...
             'sessionTimingProduct','sharedForceAtmosphericProduct'};

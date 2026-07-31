@@ -134,6 +134,16 @@ classdef ReverseGNSSEKF < handle
         covarianceAtLastAccountedWrite_ (:,:) double  = []
         epochTransitionSequence_        (1,1) double  = 0
 
+        % Section 3.3: this leaf's own declared common-process-noise group membership, if any.
+        % Empty (default) => the block below in buildQ_ is skipped entirely (not merely added as
+        % zero) -- golden-safe by construction. When non-empty, buildQ_ calls this group value's
+        % own ownDiagonalContribution instance method -- the identical code path revgnss.
+        % DistributedCovarianceNetwork.advanceEpoch calls for the cross block -- so the leaf
+        % diagonal and the network cross block can never drift apart; there is no parallel
+        % formula to keep in sync.
+        declaredCommonProcessNoiseGroup_ (1,:) revgnss.CommonProcessNoiseCovarianceGroup = ...
+            revgnss.CommonProcessNoiseCovarianceGroup.empty
+
         % Quaternion nominal / error-state attitude EKF
         nominalQuat_wxyz          double = [1;0;0;0]   % 4 x nSpaceAssets, scalar first
         attitudeParameterization  char   = 'eulerZYX'  % 'eulerZYX' | 'quaternionErrorState'
@@ -1294,6 +1304,13 @@ classdef ReverseGNSSEKF < handle
                 Q(sm.v_idx(k), sm.v_idx(k)) = q_v;
                 Q(sm.r_idx(k), sm.v_idx(k)) = q_rv;
                 Q(sm.v_idx(k), sm.r_idx(k)) = q_rv;
+            end
+
+            % --- Declared common (shared) process-noise diagonal (plan Section 3.3) -------------
+            if ~isempty(obj.declaredCommonProcessNoiseGroup_)
+                schemaIdx = revgnss.DistributedCovarianceNetworkContract.schemaStateIndicesFromStateMap( ...
+                    obj.stateMap, 1);
+                Q = Q + obj.declaredCommonProcessNoiseGroup_.ownDiagonalContribution(dt_s, schemaIdx, nx);
             end
 
             % --- Euler / omega process noise (with cross terms) ---------

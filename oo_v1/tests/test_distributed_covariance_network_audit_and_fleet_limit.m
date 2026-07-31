@@ -22,6 +22,7 @@ i_test_canonical_correlation_violation_localizes_the_pair_();
 i_test_stale_cross_block_();
 i_test_fleet_limit_three_layers_();
 i_test_assembled_dimension_ceiling_();
+i_test_declared_diagonal_keeps_the_real_assembly_psd_();
 fprintf('=== test_distributed_covariance_network_audit_and_fleet_limit: ALL PASS ===\n');
 end
 
@@ -209,6 +210,75 @@ catch ME
 end
 assert(threw,'an assembled dimension above MaximumAssembledFleetDimension must be refused');
 fprintf('  PASS A8: MaximumAssembledFleetDimension guard fires\n');
+end
+
+% ================================================================================================
+function i_test_declared_diagonal_keeps_the_real_assembly_psd_()
+% Section 3.3 (MF-1 review revision): i_test_positive_semi_definite_violation_/
+% i_test_canonical_correlation_violation_localizes_the_pair_ (above) both prove a violation
+% occurs when the SUPPLIED local marginal does NOT carry the matching diagonal term (a synthetic
+% tiny/huge stand-in). This subtest proves the actual fix using the real EKF P, with an initial
+% covariance small enough (1e-4*eye) that the declared common-accel term (sigma=0.05) actually
+% dominates the post-predict P -- at eye(nx) (the original fixture) maxRho was ~0.003 whether or
+% not the diagonal fix was wired at all, making the assertion vacuous. 1e-4 gives a comfortable
+% margin below the Cauchy-Schwarz bound (not the ~1.0 knife-edge a much smaller P0 produces) while
+% still being far from that vacuous regime.
+scaleP0 = 1e-4;
+sigma = 0.05;
+groupRecord = struct( ...
+    'processNoiseGroupIdentifier','group:real-diagonal','commonSourceName','sharedForceAtmosphericProduct', ...
+    'treatment','declaredCommonAccelerationGroup','memberEndpointIdentifiers',{{'spacecraft:1','spacecraft:2'}}, ...
+    'frameIdentifier','ECEF','commonAccelerationSigma_mps2',sigma, ...
+    'stateComponentPairing','positionVelocityPerAxis', ...
+    'sourceConfigurationPath','multiAsset.distributedEstimator.correlationNetwork.commonProcessNoise', ...
+    'validFromCoordinateEpoch_s',0,'validUntilCoordinateEpoch_s',1e9);
+
+[auditWired,rhoWired] = i_runDeclaredDiagonalFixture_(scaleP0,groupRecord,true);
+fprintf('  verdict=%s maxRho=%.6f (real post-predict P, matching diagonal wired)\n',auditWired.verdict,rhoWired);
+assert(strcmp(auditWired.verdict,'symmetricPositiveSemiDefinite'), ...
+    'the real assembled fleet covariance must audit clean once the matching diagonal is wired to both consumers');
+assert(rhoWired <= 1+1e-9, ...
+    'canonical correlation must respect the Cauchy-Schwarz bound for the real, live assembly');
+assert(rhoWired > 0.5, ...
+    'sanity: with scaleP0 this small the declared term must dominate, not reproduce the old vacuous ~0.003 regime');
+
+% Negative control: the group is declared on the NETWORK (so the cross block carries the shared
+% term) but deliberately NOT wired onto either leaf's declaredCommonProcessNoiseGroup_ -- exactly
+% the pre-Section-3.3 gap this pass closed. The supplied marginal then does NOT carry the matching
+% diagonal, so the audit must catch a genuine violation, proving the positive case above is
+% actually exercising the fix and not a coincidence of the fixture.
+[auditUnwired,rhoUnwired] = i_runDeclaredDiagonalFixture_(scaleP0,groupRecord,false);
+fprintf('  verdict=%s maxRho=%.6f (negative control: group declared but NOT wired to either leaf)\n', ...
+    auditUnwired.verdict,rhoUnwired);
+assert(strcmp(auditUnwired.verdict,'pairCanonicalCorrelationViolation'), ...
+    'without the diagonal wired to the leaves, the same declared cross block must trip a genuine violation');
+assert(rhoUnwired > 1+1e-9,'the negative control must genuinely exceed the Cauchy-Schwarz bound');
+fprintf(['  PASS A9: the real live assembly audits clean once buildQ_''s declared diagonal matches the ' ...
+    'network''s own cross block, and a genuine violation is caught when it is not wired\n']);
+end
+
+function [audit,rho] = i_runDeclaredDiagonalFixture_(scaleP0,groupRecord,wireToLeaves)
+[network, providers, ekfs, ids] = i_twoMemberNetworkWithTreatment_('declaredCommonAccelerationGroup');
+group = revgnss.CommonProcessNoiseCovarianceGroup.fromRecord(groupRecord);
+network.declareCommonProcessNoiseGroup(group);
+if wireToLeaves
+    ekfs{1}.declaredCommonProcessNoiseGroup_ = group;
+    ekfs{2}.declaredCommonProcessNoiseGroup_ = group;
+end
+ekfs{1}.initState(zeros(ekfs{1}.nx,1),scaleP0*eye(ekfs{1}.nx));
+ekfs{2}.initState(zeros(ekfs{2}.nx,1),scaleP0*eye(ekfs{2}.nx));
+
+cfg = ekfs{1}.cfg;
+towerClockModels = cell(1,cfg.scenario.nTowers);
+for k = 1:cfg.scenario.nTowers; towerClockModels{k} = ekfs{1}.rxClockModel; end
+ekfs{1}.predict(1,towerClockModels,0); ekfs{2}.predict(1,towerClockModels,0);
+network.advanceEpoch(struct('coordinateEpoch_s',1,'intervalDuration_s',1, ...
+    'captures',[providers{1}.takeEpochCapture(0,1),providers{2}.takeEpochCapture(0,1)]));
+
+localMarginalSupply = struct('endpointIdentifier',ids,'localMarginal',{ekfs{1}.P,ekfs{2}.P});
+audit = network.auditAssembledFleetCovariance(struct( ...
+    'localMarginalSupply',localMarginalSupply,'auditCoordinateEpoch_s',1));
+rho = audit.maximumPairCanonicalCorrelation;
 end
 
 % ================================================================================================

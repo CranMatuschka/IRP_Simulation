@@ -158,6 +158,10 @@ end
 % ================================================================================================
 function cfg = i_pairExactFleetConfig_(nAssets)
 cfg = masterConfig();
+% Section 3.3's towerClockProductReachableButRejected guard refuses nSpaceAssets>1 with an
+% enabled correlation network unless towerClockMode='perfectCorrection'; this fixture's whole
+% point is the synchronized pair-exact live path, not the tower-clock-product gap.
+cfg.clocks.tower.product.mode = 'perfectCorrection';
 cfg.simulation.duration_s = 6;
 cfg.simulation.dt_s = 1;
 cfg.report.writePdf = false; cfg.report.writeMat = false; cfg.report.compileTex = 'never';

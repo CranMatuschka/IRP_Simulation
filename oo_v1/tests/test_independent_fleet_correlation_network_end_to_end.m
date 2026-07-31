@@ -190,6 +190,10 @@ end
 % ================================================================================================
 function cfg = i_sanctionedFleetConfig_(nAssets)
 cfg = masterConfig();
+% Section 3.3's towerClockProductReachableButRejected guard refuses nSpaceAssets>1 with an
+% enabled correlation network unless towerClockMode='perfectCorrection'; this fixture's whole
+% point is the network itself, not the tower-clock-product gap, so opt into the one safe mode.
+cfg.clocks.tower.product.mode = 'perfectCorrection';
 cfg.simulation.duration_s = 4;
 cfg.simulation.dt_s = 1;
 cfg.report.writePdf = false; cfg.report.writeMat = false; cfg.report.compileTex = 'never';

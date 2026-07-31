@@ -283,6 +283,9 @@ classdef OneWayInterSatelliteObservationBuilder
             end
             identifiers = cell(1,numel(links));
             receiverIndices = zeros(1,numel(links));
+            transmitterIndices = zeros(1,numel(links));
+            calibrationIds = cell(1,numel(links));
+            phases_s = zeros(1,numel(links));
             for linkIndex = 1:numel(links)
                 endpoints = [links(linkIndex).transmitterAssetIndex, ...
                     links(linkIndex).receiverAssetIndex];
@@ -293,11 +296,14 @@ classdef OneWayInterSatelliteObservationBuilder
                 end
                 identifiers{linkIndex} = char(links(linkIndex).linkIdentifier);
                 receiverIndices(linkIndex) = links(linkIndex).receiverAssetIndex;
+                transmitterIndices(linkIndex) = links(linkIndex).transmitterAssetIndex;
+                calibrationIds{linkIndex} = char(links(linkIndex).calibrationProductIdentifier);
                 phase_s = links(linkIndex).schedule.updatePhase_s;
                 if ~(isscalar(phase_s) && isfinite(phase_s) && phase_s >= 0 && phase_s < period_s)
                     error('OneWayInterSatelliteObservationBuilder:schedulePhase', ...
                         'Each one-way link phase must be inside one update period.');
                 end
+                phases_s(linkIndex) = phase_s;
             end
             if numel(unique(identifiers)) ~= numel(identifiers)
                 error('OneWayInterSatelliteObservationBuilder:linkIdentity', ...
@@ -306,6 +312,33 @@ classdef OneWayInterSatelliteObservationBuilder
             if numel(unique(receiverIndices)) ~= numel(receiverIndices)
                 error('OneWayInterSatelliteObservationBuilder:coFiringLinksPerOwner', ...
                     'No two enabled one-way links may share the same receiverAssetIndex.');
+            end
+            % Section 3.3 (plan item 3.3-3, defense-in-depth), P-7 review revision: this must NOT
+            % be a blanket ban on two links sharing a transmitterAssetIndex -- that would forbid
+            % the canonical one-way star-broadcast topology (one transmitter, many receivers),
+            % which has nothing to do with common-information treatment. The genuine conflict,
+            % mirroring revgnss.TwoWayISLMeasurementBuilder's real terminalScheduleConflict guard,
+            % is two links commanding the SAME transmitter terminal at the SAME schedule phase --
+            % physically ambiguous (which link's product does that instant's transmission belong
+            % to), and exactly the shared-transmittedStateProduct common-information case Section
+            % 3.3's commonSourceTreatment.transmittedStateProduct='rejected' claims does not
+            % occur. Distinct phases on a shared transmitter are a legitimate star broadcast and
+            % must remain legal.
+            tolerance = 10*eps(max(1,period_s));
+            for firstIndex = 1:numel(links)-1
+                for secondIndex = firstIndex+1:numel(links)
+                    sharedTransmitter = transmitterIndices(firstIndex) == transmitterIndices(secondIndex);
+                    sameEpoch = abs(phases_s(firstIndex)-phases_s(secondIndex)) <= tolerance;
+                    if sharedTransmitter && sameEpoch
+                        error('OneWayInterSatelliteObservationBuilder:transmitterScheduleConflict', ...
+                            ['Links %s and %s command the same transmitter terminal at the same ' ...
+                            'schedule phase.'],identifiers{firstIndex},identifiers{secondIndex});
+                    end
+                end
+            end
+            if numel(unique(calibrationIds)) ~= numel(calibrationIds)
+                error('OneWayInterSatelliteObservationBuilder:calibrationIdentity', ...
+                    'One-way link calibration identifiers must be unique across links.');
             end
         end
 
