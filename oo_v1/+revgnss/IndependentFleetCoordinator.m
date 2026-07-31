@@ -31,6 +31,11 @@ classdef IndependentFleetCoordinator < handle
         % untouched when correlationNetwork.policy stays 'disabled'.
         correlationNetwork_ = []
         transitionCaptureProviders_ cell = {}
+        % Section 3.2: one revgnss.LocalEndpointCorrectionReceiver per fleet member, each
+        % wrapping the SAME transitionCaptureProviders_{k} and the SAME leaf's own
+        % observationLedger a synchronized pair update ultimately writes through -- constructed
+        % alongside transitionCaptureProviders_ only when the correlation network is active.
+        endpointCorrectionReceivers_ cell = {}
     end
 
     properties (Constant)
@@ -98,6 +103,7 @@ classdef IndependentFleetCoordinator < handle
                     'stateSchemaVersion',revgnss.DistributedLinkProtocolContract.StateSchemaVersion);
                 obj.correlationNetwork_ = revgnss.DistributedCovarianceNetwork(policyRecord);
                 obj.transitionCaptureProviders_ = cell(1,obj.nAssets);
+                obj.endpointCorrectionReceivers_ = cell(1,obj.nAssets);
                 memberRecords = struct([]);
                 for assetIndex = 1:obj.nAssets
                     localSim = obj.localSimulations{assetIndex};
@@ -105,6 +111,9 @@ classdef IndependentFleetCoordinator < handle
                     provider = revgnss.OwnerLocalEkfTransitionCaptureProvider.forLocalEkf( ...
                         localSim.ekf,sprintf('spacecraft:%d',assetIndex),assetIndex);
                     obj.transitionCaptureProviders_{assetIndex} = provider;
+                    obj.endpointCorrectionReceivers_{assetIndex} = ...
+                        revgnss.LocalEndpointCorrectionReceiver.forLocalLeaf( ...
+                        provider,localSim.observationLedger);
                     memberRecords = [memberRecords, provider.memberRegistrationRecord(obj.tVec(1))]; %#ok<AGROW>
                 end
                 obj.correlationNetwork_.registerFleetMembers(memberRecords);
@@ -682,12 +691,19 @@ classdef IndependentFleetCoordinator < handle
         end
 
         function applyOwnerOnlyLinkUpdate_(obj, epochIndex, settings)
-            % applyOwnerOnlyLinkUpdate_  Section 2.0.1 phase 5. Each staged delivery is applied
-            % to its OWNER leaf's own local EKF only, via the certified conservative bound
-            % (revgnss.SplitCovarianceIntersectionBound, extended to the full owner state by
-            % revgnss.ConservativeFullStateLinkUpdate). ekf.x/P mutation here is safely ordered:
-            % run() commits each local history row AFTER this phase, so this epoch's recorded
-            % state/NEES row describes the post-update state.
+            % applyOwnerOnlyLinkUpdate_  Section 2.0.1 phase 5. The route is decided BEFORE any
+            % mutation (routeForDelivery is pure, so computing it here rather than after the
+            % owner-only update changes no numerical result -- see correlationNetworkRouteFor_'s
+            % own header for why the routing-policy-gated fields keep the conservativeBoundOnly
+            % path byte-identical to Stage 3.1). Route 'conservativeBound' keeps the ORIGINAL
+            % owner-only path (revgnss.SplitCovarianceIntersectionBound extended by
+            % revgnss.ConservativeFullStateLinkUpdate) unchanged; route 'pairExact' (Section 3.2,
+            % reachable only when correlationNetwork.linkUpdateRouting=
+            % 'pairExactWhenBothEndpointsTracked') instead applies a synchronized exact update to
+            % BOTH endpoint filters via revgnss.SynchronizedPairLinkUpdateTransaction. ekf.x/P
+            % mutation here is safely ordered either way: run() commits each local history row
+            % AFTER this phase, so this epoch's recorded state/NEES row describes the post-
+            % update state for every filter this phase touched.
             if ~settings.linkUpdate.enable; return; end
             t_s = obj.tVec(epochIndex); %#ok<NASGU>
 
@@ -695,24 +711,93 @@ classdef IndependentFleetCoordinator < handle
                 staged = obj.pendingLinkDeliveries_{index};
                 delivery = staged.delivery;
                 try
-                    obj.applyOneLinkUpdate_(delivery,staged.calibrationProduct);
                     [route, reasonCode] = obj.correlationNetworkRouteFor_(delivery);
-                    obj.deliveryLedger.recordConsumed(delivery.observationIdentifier, ...
-                        delivery.ownerAssetIdentifier,delivery.deliveryEpoch_s);
-                    obj.deliveryLedger.recordCorrelationNetworkRoute( ...
-                        delivery.observationIdentifier,route,reasonCode);
-                    ownerSim = obj.localSimulations{delivery.ownerCanonicalIndex};
-                    ownerSim.observationLedger.markEligible(delivery.physicalObservationRecord, ...
-                        delivery.deliveryEpoch_s);
-                    ownerSim.observationLedger.consume(delivery.physicalObservationRecord, ...
-                        delivery.deliveryEpoch_s);
-                    obj.coordinatorDeliveredCount_ = obj.coordinatorDeliveredCount_ + 1;
+                    if strcmp(route,'pairExact')
+                        applied = obj.applySynchronizedPairLinkUpdate_(delivery,staged.calibrationProduct);
+                    else
+                        obj.applyOneLinkUpdate_(delivery,staged.calibrationProduct);
+                        obj.deliveryLedger.recordConsumed(delivery.observationIdentifier, ...
+                            delivery.ownerAssetIdentifier,delivery.deliveryEpoch_s);
+                        obj.deliveryLedger.recordCorrelationNetworkRoute( ...
+                            delivery.observationIdentifier,route,reasonCode);
+                        ownerSim = obj.localSimulations{delivery.ownerCanonicalIndex};
+                        ownerSim.observationLedger.markEligible(delivery.physicalObservationRecord, ...
+                            delivery.deliveryEpoch_s);
+                        ownerSim.observationLedger.consume(delivery.physicalObservationRecord, ...
+                            delivery.deliveryEpoch_s);
+                        applied = true;
+                    end
+                    if applied
+                        obj.coordinatorDeliveredCount_ = obj.coordinatorDeliveredCount_ + 1;
+                    end
                 catch ME
+                    % A sealed network (:fatalUnrecoverablePartialCommit) means the correlation
+                    % network's own covariance bookkeeping is no longer trustworthy for the REST
+                    % of this run, not just this one delivery -- swallowing it into an ordinary
+                    % ledger rejection and continuing would silently keep running on unreliable
+                    % state. Propagate it (Section 3.2 review finding B5); every other exception
+                    % (a genuine physics/bound failure, or a verified-and-rolled-back commit
+                    % failure) becomes a mapped ledger rejection exactly as before.
+                    if ~isempty(regexp(ME.identifier,':fatalUnrecoverablePartialCommit$','once'))
+                        rethrow(ME);
+                    end
                     obj.deliveryLedger.recordRejectedFromEligible(delivery.observationIdentifier, ...
                         'observablePredictionFailed',ME.message,ME.identifier);
                 end
             end
             obj.pendingLinkDeliveries_ = {};
+        end
+
+        function applied = applySynchronizedPairLinkUpdate_(obj, delivery, calibrationProduct)
+            % applySynchronizedPairLinkUpdate_  Section 3.2 phase-5 branch: builds the SAME
+            % physics block applyOneLinkUpdate_ would (revgnss.CoherentTwoWayRangeLinkUpdate
+            % Adapter -- the only pair-exact-eligible observable, already enforced by
+            % requireCorrelationNetworkConfiguration_ at config-validation time), then hands it
+            % to revgnss.SynchronizedPairLinkUpdateTransaction, which applies-or-refuses-both
+            % rather than ever leaving one endpoint corrected and the other not. An ORDINARY
+            % refusal (outcome.applied=false: no exception, nothing was ever written -- partial-
+            % delivery, superseded-this-epoch, stale-revision) is recorded here directly, with
+            % its OWN real revgnss.SynchronizedDeliveryContract.AllowedSynchronizedRefusalReason
+            % Codes value, rather than being converted into a thrown exception the caller would
+            % have to reverse-engineer from a generic catch (Section 3.2 review finding B5). A
+            % genuine C1-C5 commit failure (:commitRolledBack/:fatalUnrecoverablePartialCommit)
+            % still throws, exactly as revgnss.SynchronizedPairLinkUpdateTransaction documents.
+            ownerIdx = delivery.ownerCanonicalIndex;
+            remoteIdx = delivery.remoteCanonicalIndex;
+            ownerState = delivery.ownerProvider.stateAtCoordinateEpoch(delivery.coordinateEventEpoch_s);
+            remoteState = delivery.remoteProvider.stateAtCoordinateEpoch(delivery.coordinateEventEpoch_s);
+            steps = revgnss.IndependentFleetCoordinator.linearizationStepsFromConfig_(obj.cfg);
+            buildArgs = struct( ...
+                'delivery',delivery,'ownerState',ownerState,'remoteState',remoteState, ...
+                'calibrationProduct',calibrationProduct,'linearizationSteps',steps, ...
+                'solverOptions',struct(),'modeledPropagationGroupDelay_s',0, ...
+                'weightSelectionRule','fixedDeclaredWeights', ...
+                'persistentCalibrationTreatment','rejected');
+            [block, ~] = revgnss.CoherentTwoWayRangeLinkUpdateAdapter.buildUpdateBlock(buildArgs);
+            revgnss.DistributedLinkUpdateAdapter.requireUpdateBlock(block,delivery,ownerState,remoteState);
+
+            thirdMemberSupply = obj.thirdMemberLocalMarginalSupplyExcluding_( ...
+                delivery.ownerAssetIdentifier,delivery.remoteAssetIdentifier);
+
+            outcome = revgnss.SynchronizedPairLinkUpdateTransaction.executeSynchronizedPairUpdate(struct( ...
+                'network',obj.correlationNetwork_, ...
+                'delivery',delivery, ...
+                'updateBlock',block, ...
+                'ownerReceiver',obj.endpointCorrectionReceivers_{ownerIdx}, ...
+                'remoteReceiver',obj.endpointCorrectionReceivers_{remoteIdx}, ...
+                'ownerCaptureProvider',obj.transitionCaptureProviders_{ownerIdx}, ...
+                'remoteCaptureProvider',obj.transitionCaptureProviders_{remoteIdx}, ...
+                'thirdMemberSupply',thirdMemberSupply, ...
+                'deliveryLedger',obj.deliveryLedger, ...
+                'coordinateEventEpoch_s',delivery.coordinateEventEpoch_s, ...
+                'issuerIdentifier',delivery.ownerAssetIdentifier));
+
+            applied = outcome.applied;
+            if ~applied
+                obj.deliveryLedger.recordRejectedFromEligible(delivery.observationIdentifier, ...
+                    outcome.refusalReasonCode,outcome.refusalReasonMessage, ...
+                    'IndependentFleetCoordinator:synchronizedPairUpdateRefused');
+            end
         end
 
         function applyOneLinkUpdate_(obj, delivery, calibrationProduct)
@@ -1057,15 +1142,49 @@ classdef IndependentFleetCoordinator < handle
         end
 
         function [route, reasonCode] = correlationNetworkRouteFor_(obj, delivery)
+            % correlationNetworkRouteFor_  The three Section 3.2 routeRequest fields
+            % (observableIdentifier/clockClaim/pairAbsolutelyAnchored) are included ONLY when
+            % this network's own linkUpdateRoutingPolicy is 'pairExactWhenBothEndpointsTracked':
+            % routeForDelivery's two new eligibility checks run whenever those fields are
+            % PRESENT, regardless of the routing policy word, so passing them unconditionally
+            % would change the reasonCode a Stage-3.1 config (linkUpdateRouting=
+            % 'conservativeBoundOnly') reports for an otherwise-fresh, fully-tracked pair -- this
+            % keeps that byte-identical to Stage 3.1's own behaviour.
             if isempty(obj.correlationNetwork_)
                 route = 'conservativeBound';
                 reasonCode = 'correlationNetworkDisabled';
                 return
             end
-            [route, reasonCode] = obj.correlationNetwork_.routeForDelivery(struct( ...
+            routeRequest = struct( ...
                 'ownerAssetIdentifier',delivery.ownerAssetIdentifier, ...
                 'remoteAssetIdentifier',delivery.remoteAssetIdentifier, ...
-                'coordinateEventEpoch_s',delivery.coordinateEventEpoch_s));
+                'coordinateEventEpoch_s',delivery.coordinateEventEpoch_s);
+            if strcmp(obj.correlationNetwork_.linkUpdateRoutingPolicy,'pairExactWhenBothEndpointsTracked')
+                routeRequest.observableIdentifier = delivery.observableIdentifier;
+                routeRequest.clockClaim = delivery.clockClaim;
+                routeRequest.pairAbsolutelyAnchored = delivery.pairAbsolutelyAnchored;
+            end
+            [route, reasonCode] = obj.correlationNetwork_.routeForDelivery(routeRequest);
+        end
+
+        function marginals = thirdMemberLocalMarginalSupplyExcluding_(obj, ownerEndpointIdentifier, ...
+                remoteEndpointIdentifier)
+            % thirdMemberLocalMarginalSupplyExcluding_  Section 3.2's two-identifier counterpart
+            % to remoteLocalMarginalSupplyExcluding_ below (which excludes only one), used to
+            % build revgnss.SynchronizedPairLinkUpdateTransaction's thirdMemberSupply: every
+            % OTHER registered network member's live local marginal, read through the same
+            % sanctioned revgnss.LocalEpochTransitionCaptureProvider contract gate.
+            memberIds = obj.correlationNetwork_.memberIdentifiers;
+            marginals = struct('endpointIdentifier',{},'localMarginal',{});
+            for k = 1:numel(memberIds)
+                if strcmp(memberIds{k},ownerEndpointIdentifier) || strcmp(memberIds{k},remoteEndpointIdentifier)
+                    continue
+                end
+                idx = revgnss.CanonicalEndpointIdentity.fromProductIdentifier(memberIds{k}).physicalAssetIndex;
+                P = revgnss.LocalEpochTransitionCaptureProvider.requireLocalMarginal( ...
+                    obj.transitionCaptureProviders_{idx});
+                marginals(end+1) = struct('endpointIdentifier',memberIds{k},'localMarginal',P); %#ok<AGROW>
+            end
         end
 
         function marginals = remoteLocalMarginalSupplyExcluding_(obj, excludedEndpointIdentifier)
@@ -1094,6 +1213,10 @@ classdef IndependentFleetCoordinator < handle
                     'stateSchemaVersion',revgnss.DistributedLinkProtocolContract.StateSchemaVersion, ...
                     'fleetSize',0,'epochsAdvanced',0,'revisionNumber',0, ...
                     'conservativeOwnerOnlyConditioningCount',0,'unappliedCorrelatedLocalUpdateCount',0, ...
+                    'pairExactSynchronizedUpdateCount',0,'pairExactThirdMemberConditioningCount',0, ...
+                    'unappliedThirdMemberCorrectionCount',0,'maximumOmittedThirdMemberVarianceRatio',0, ...
+                    'supersededDeliveryRejectionCount',0,'isSealed',false,'sealReason','', ...
+                    'linkUpdateConditioningClaim','notEvaluated', ...
                     'centralReferenceEquivalenceClaim','notEvaluated','currentCoordinateEpoch_s',NaN);
                 return
             end
@@ -1394,10 +1517,12 @@ classdef IndependentFleetCoordinator < handle
             end
             routing = revgnss.IndependentFleetCoordinator.requireText_( ...
                 net.linkUpdateRouting,'correlationNetwork.linkUpdateRouting');
-            if ~strcmp(routing,'conservativeBoundOnly')
+            if ~any(strcmp(routing, ...
+                    revgnss.DistributedCovarianceNetworkContract.AllowedLinkUpdateRoutingPolicies))
                 error('IndependentFleetCoordinator:correlationNetworkRoutingUnavailable', ...
-                    ['correlationNetwork.linkUpdateRouting must be ''conservativeBoundOnly'': the ' ...
-                    'pair-exact route requires Section 3.2''s synchronized two-endpoint delivery.']);
+                    ['correlationNetwork.linkUpdateRouting must be one of the frozen ' ...
+                    'AllowedLinkUpdateRoutingPolicies (''conservativeBoundOnly'' or Section 3.2''s ' ...
+                    '''pairExactWhenBothEndpointsTracked'').']);
             end
 
             % 3. All-or-nothing when disabled (the exact Section 2.3.1 partial-configuration
@@ -1406,11 +1531,12 @@ classdef IndependentFleetCoordinator < handle
             if ~enabledPolicy
                 if net.maximumFleetSize ~= 0 || ~strcmp(treatment,'rejected') || ...
                         net.commonProcessNoise.sigma_mps2 ~= 0 || logical(net.audit.enable) || ...
-                        net.audit.everyNEpochs ~= 0
+                        net.audit.everyNEpochs ~= 0 || ~strcmp(routing,'conservativeBoundOnly')
                     error('IndependentFleetCoordinator:correlationNetworkPartialConfiguration', ...
                         ['correlationNetwork.policy=''disabled'' requires maximumFleetSize=0, ' ...
                         'commonProcessNoiseTreatment=''rejected'', commonProcessNoise.sigma_mps2=0, ' ...
-                        'and audit.enable=false/everyNEpochs=0.']);
+                        'linkUpdateRouting=''conservativeBoundOnly'', and audit.enable=false/' ...
+                        'everyNEpochs=0.']);
                 end
             end
 
@@ -1466,6 +1592,17 @@ classdef IndependentFleetCoordinator < handle
                     cfg,{'rng','independentStreams','enable'},false)
                 error('IndependentFleetCoordinator:correlationNetworkRequiresIndependentStreams', ...
                     'correlationNetwork requires rng.independentStreams.enable=true.');
+            end
+            if strcmp(routing,'pairExactWhenBothEndpointsTracked')
+                routedObservable = char(revgnss.IndependentFleetCoordinator.requireText_( ...
+                    settings.linkUpdate.updateAdapter.observable,'linkUpdate.updateAdapter.observable'));
+                if ~revgnss.SynchronizedDeliveryContract.isPairExactEligibleObservable(routedObservable)
+                    error('IndependentFleetCoordinator:correlationNetworkRoutingObservableNotEligible', ...
+                        ['correlationNetwork.linkUpdateRouting=''pairExactWhenBothEndpointsTracked'' ' ...
+                        'requires linkUpdate.updateAdapter.observable to be one of the frozen ' ...
+                        'revgnss.SynchronizedDeliveryContract.PairExactEligibleObservables (today, ' ...
+                        'only ''coherentTwoWayCodeRange'').']);
+                end
             end
 
             % 5. Common process noise: refused on the live path.

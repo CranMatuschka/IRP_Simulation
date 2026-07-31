@@ -47,6 +47,18 @@ classdef DistributedCovarianceNetwork < handle
         conservativeOwnerOnlyConditioningCount (1,1) double = 0
         unappliedCorrelatedLocalUpdateCount    (1,1) double = 0
         lastAuditCertificate = []
+
+        % Section 3.2: synchronized two-endpoint delivery counters/state, mirroring the Section
+        % 3.1 counters above -- see stagePairExactLinkTransform/commitStagedPairExactLinkTransform
+        % and centralReferenceEquivalenceClaim/linkUpdateConditioningClaim, which compute their
+        % reported words from these counters and never from a caller-set flag.
+        pairExactSynchronizedUpdateCount       (1,1) double  = 0
+        pairExactThirdMemberConditioningCount  (1,1) double  = 0
+        unappliedThirdMemberCorrectionCount    (1,1) double  = 0
+        maximumOmittedThirdMemberVarianceRatio (1,1) double  = 0
+        supersededDeliveryRejectionCount       (1,1) double  = 0
+        isSealed                               (1,1) logical = false
+        sealReason                             (1,:) char    = ''
     end
 
     properties (Access = private)
@@ -111,6 +123,7 @@ classdef DistributedCovarianceNetwork < handle
         function registerFleetMembers(obj, memberRecords)
             % registerFleetMembers  One-shot registration (item 7: hard fleet-size limit,
             % checked BEFORE a single cross block is created -- fails, never drops).
+            obj.requireNotSealed_();
             if ~isempty(obj.memberIdentifiers)
                 error('DistributedCovarianceNetwork:alreadyRegistered', ...
                     'registerFleetMembers may be called only once per network instance.');
@@ -154,6 +167,7 @@ classdef DistributedCovarianceNetwork < handle
             % declareIndependentPriorPairs  P_ij(0)=0 is a per-member DECLARATION
             % (priorIndependenceDeclaration, already asserted by requireMemberRecord), not a
             % silent default.
+            obj.requireNotSealed_();
             if isempty(obj.memberIdentifiers)
                 error('DistributedCovarianceNetwork:notRegistered', ...
                     'registerFleetMembers must be called before declareIndependentPriorPairs.');
@@ -172,6 +186,7 @@ classdef DistributedCovarianceNetwork < handle
         end
 
         function declareCommonProcessNoiseGroup(obj, group)
+            obj.requireNotSealed_();
             if ~isa(group,'revgnss.CommonProcessNoiseCovarianceGroup')
                 error('DistributedCovarianceNetwork:commonProcessNoiseGroupType', ...
                     'declareCommonProcessNoiseGroup requires a revgnss.CommonProcessNoiseCovarianceGroup.');
@@ -198,6 +213,7 @@ classdef DistributedCovarianceNetwork < handle
             % advanceEpoch  Items 3+4: P_ij <- A_i*(F_i*P_ij*F_j'+Q_ij)*A_j' for every stored
             % pair. epochRecord.captures must contain exactly one revgnss.
             % LocalEpochTransitionCapture per registered member, matched by identifier.
+            obj.requireNotSealed_();
             required = {'coordinateEpoch_s','intervalDuration_s','captures'};
             missing = setdiff(required,fieldnames(epochRecord));
             if ~isempty(missing)
@@ -308,6 +324,7 @@ classdef DistributedCovarianceNetwork < handle
             % P_jj/P_jk are read live via transformRecord.remoteLocalMarginalSupply, NEVER from
             % a frozen published product: consuming a stale snapshot instead of the live
             % marginal would silently substitute a stale prior.
+            obj.requireNotSealed_();
             required = {'ownerEndpointIdentifier','remoteEndpointIdentifier','coordinateEpoch_s', ...
                 'ownerErrorTransition_A','remoteSchemaErrorCoupling_B','remoteLocalMarginalSupply'};
             missing = setdiff(required,fieldnames(transformRecord));
@@ -406,10 +423,12 @@ classdef DistributedCovarianceNetwork < handle
             % 3.1 or 3.2). The covariance stays exact for the estimators that actually ran; the
             % estimates are sub-optimal versus the centralized reference. Counted so
             % centralReferenceEquivalenceClaim reports this automatically.
+            obj.requireNotSealed_();
             obj.unappliedCorrelatedLocalUpdateCount = obj.unappliedCorrelatedLocalUpdateCount+1;
         end
 
         function block = crossBlockFor(obj, firstEndpointIdentifier, secondEndpointIdentifier)
+            obj.requireNotSealed_();
             key = revgnss.DistributedCovarianceNetworkContract.canonicalPairKey( ...
                 firstEndpointIdentifier,secondEndpointIdentifier);
             if ~isKey(obj.crossBlocks_,key)
@@ -606,11 +625,14 @@ classdef DistributedCovarianceNetwork < handle
             % endpoints are registered members; a cross block exists for the pair; it is fresh
             % at this exact coordinate epoch (no interpolation, matching the existing
             % remoteProductPropagationPolicy='frozenSameEpochOnly' discipline); both stored
-            % fingerprints match the endpoints' CURRENT ones; its provenance is usable; AND
-            % linkUpdateRoutingPolicy=='pairExactWhenBothEndpointsTracked'. That last word is
-            % NOT in AllowedLinkUpdateRoutingPolicies (Section 3.1 freeze), so this classifier
-            % is live and exercised on every delivery but structurally cannot select
-            % 'pairExact' yet; Section 3.2 adds the word and flips this branch on.
+            % fingerprints match the endpoints' CURRENT ones; its provenance is usable; the
+            % observable is pair-exact eligible; the clock claim is gauge-anchored; AND
+            % linkUpdateRoutingPolicy=='pairExactWhenBothEndpointsTracked'. The two observable/
+            % clock-gauge checks (Section 3.2) only run when the caller supplies the optional
+            % routeRequest.observableIdentifier/clockClaim/pairAbsolutelyAnchored fields --
+            % omitting them exercises checks 1-5 and the routing-policy word in isolation, which
+            % revgnss.SynchronizedPairLinkUpdateTransaction's real caller never does.
+            obj.requireNotSealed_();
             required = {'ownerAssetIdentifier','remoteAssetIdentifier','coordinateEventEpoch_s'};
             missing = setdiff(required,fieldnames(routeRequest));
             if ~isempty(missing)
@@ -653,25 +675,74 @@ classdef DistributedCovarianceNetwork < handle
                 reasonCode = 'crossBlockProvenanceUnusable';
                 return
             end
+            if isfield(routeRequest,'observableIdentifier') && ~isempty(routeRequest.observableIdentifier) && ...
+                    ~revgnss.SynchronizedDeliveryContract.isPairExactEligibleObservable( ...
+                    routeRequest.observableIdentifier)
+                reasonCode = 'pairExactRefusedObservableNotEligible';
+                return
+            end
+            if isfield(routeRequest,'clockClaim') && strcmp(char(routeRequest.clockClaim),'relativeBiasOnly') && ...
+                    ~(isfield(routeRequest,'pairAbsolutelyAnchored') && logical(routeRequest.pairAbsolutelyAnchored))
+                reasonCode = 'pairExactRefusedClockGaugeNotAnchored';
+                return
+            end
             if ~strcmp(obj.linkUpdateRoutingPolicy,'pairExactWhenBothEndpointsTracked')
                 reasonCode = 'pairExactRouteRequiresSynchronizedDeliveryStage';
                 return
             end
-            route = 'pairExact'; %#ok<UNRCH> -- unreachable while the frozen policy vocabulary
-                                  % excludes 'pairExactWhenBothEndpointsTracked'; kept live so
-                                  % Section 3.2 need only add the word, not the branch.
+            route = 'pairExact';
             reasonCode = 'pairExactRouteAvailable';
         end
 
         function claim = centralReferenceEquivalenceClaim(obj)
             % centralReferenceEquivalenceClaim  Computed from counters, never set: worst-first
             % precedence so a machine-computed word cannot drift from reality the way prose can.
+            %
+            % Section 3.2 inserts two new tiers between the Section 3.1 pair (unapplied-
+            % correlated-local-update / conservative-owner-only) and the Section 3.1 best case
+            % (exact linear propagation only). A single conservative-owner-only conditioning
+            % ANYWHERE in the fleet still outranks every pair-exact tier: once one pair's cross
+            % blocks are conditioned on a bounded remote marginal, the assembled-minus-true
+            % difference is not block-diagonal fleet-wide (this class's own header), so no
+            % fleet-level equivalence claim is sound even where a DIFFERENT pair was updated
+            % exactly. Within the pair-exact-only regime (no conservative conditioning has ever
+            % run), a 2-member fleet has exactly one possible pair, so a pair-exact update on it
+            % is genuinely complete coverage; a >2-member fleet always has at least one OTHER
+            % pair this particular delivery did not touch (its own cross block, and its own
+            % owner-only route), so full central-reference equivalence cannot be claimed there
+            % even though every block this delivery DID touch is exact.
             if obj.unappliedCorrelatedLocalUpdateCount > 0
                 claim = 'notEquivalentUnappliedCorrelatedLocalUpdates';
+            elseif obj.unappliedThirdMemberCorrectionCount > 0
+                claim = 'notEquivalentUnappliedThirdMemberCorrections';
             elseif obj.conservativeOwnerOnlyConditioningCount > 0
                 claim = 'conditionedOnConservativeOwnerOnlyUpdatesNoFleetBoundClaimed';
+            elseif obj.pairExactSynchronizedUpdateCount > 0
+                if obj.fleetSize() <= 2
+                    claim = 'exactPairSynchronizedUpdatesCentralReferenceEquivalent';
+                else
+                    claim = 'exactPairConditionedNonPairLinksRemainConservative';
+                end
             elseif obj.epochsAdvanced > 0
                 claim = 'exactLinearPropagationOfDeclaredLocalCovariances';
+            else
+                claim = 'notEvaluated';
+            end
+        end
+
+        function claim = linkUpdateConditioningClaim(obj)
+            % linkUpdateConditioningClaim  Orthogonal to centralReferenceEquivalenceClaim above:
+            % WHICH routing rule(s) actually fired this run, independent of whether local ground
+            % updates went uncorrelated. See DistributedCovarianceNetworkContract.
+            % AllowedLinkUpdateConditioningClaims's own header for why this is a separate word.
+            hasConservative = obj.conservativeOwnerOnlyConditioningCount > 0;
+            hasExact = obj.pairExactSynchronizedUpdateCount > 0;
+            if hasConservative && hasExact
+                claim = 'mixedExactAndConservative';
+            elseif hasExact
+                claim = 'exactPairSynchronizedOnly';
+            elseif hasConservative
+                claim = 'conservativeOwnerOnlyOnly';
             else
                 claim = 'notEvaluated';
             end
@@ -694,6 +765,14 @@ classdef DistributedCovarianceNetwork < handle
                 'revisionNumber',obj.revisionNumber, ...
                 'conservativeOwnerOnlyConditioningCount',obj.conservativeOwnerOnlyConditioningCount, ...
                 'unappliedCorrelatedLocalUpdateCount',obj.unappliedCorrelatedLocalUpdateCount, ...
+                'pairExactSynchronizedUpdateCount',obj.pairExactSynchronizedUpdateCount, ...
+                'pairExactThirdMemberConditioningCount',obj.pairExactThirdMemberConditioningCount, ...
+                'unappliedThirdMemberCorrectionCount',obj.unappliedThirdMemberCorrectionCount, ...
+                'maximumOmittedThirdMemberVarianceRatio',obj.maximumOmittedThirdMemberVarianceRatio, ...
+                'supersededDeliveryRejectionCount',obj.supersededDeliveryRejectionCount, ...
+                'isSealed',obj.isSealed, ...
+                'sealReason',obj.sealReason, ...
+                'linkUpdateConditioningClaim',obj.linkUpdateConditioningClaim(), ...
                 'centralReferenceEquivalenceClaim',obj.centralReferenceEquivalenceClaim(), ...
                 'currentCoordinateEpoch_s',obj.currentCoordinateEpoch_s);
         end
@@ -704,6 +783,241 @@ classdef DistributedCovarianceNetwork < handle
             names = fieldnames(prov);
             for index = 1:numel(names)
                 s.(names{index}) = prov.(names{index});
+            end
+        end
+
+        function staged = stagePairExactLinkTransform(obj, message)
+            % stagePairExactLinkTransform  Section 3.2 item 6/7 phase 1b: validates and BUILDS
+            % every replacement cross block a signed revgnss.SynchronizedPairCorrectionMessage
+            % implies, but mutates NOTHING -- obj.crossBlocks_ is read only. Refuses (throws,
+            % never partially stages) on: an unregistered or unknown-pair endpoint
+            % (:crossBlockMissingForThirdMember), a same-epoch pair already conditioned by an
+            % earlier pair-exact commit this epoch (:linearizationPointSupersededByPairExactUpdate
+            % -- the honest refusal the order-invariance proof requires for overlapping pairs,
+            % see revgnss.SynchronizedDeliveryContract's header), a dimension mismatch against
+            % the stored block, or a duplicate staged pair.
+            obj.requireNotSealed_();
+            if ~isa(message,'revgnss.SynchronizedPairCorrectionMessage')
+                error('DistributedCovarianceNetwork:messageType', ...
+                    'stagePairExactLinkTransform requires a revgnss.SynchronizedPairCorrectionMessage.');
+            end
+            revgnss.SynchronizedPairCorrectionMessage.requireIntact(message);
+            revgnss.SynchronizedPairCorrectionMessage.requireApplicableNow(message,obj.revisionNumber);
+
+            corrections = message.crossBlockCorrections;
+            nCorr = numel(corrections);
+            replacementKeys = cell(1,nCorr);
+            replacementBlocks = cell(1,nCorr);
+            for index = 1:nCorr
+                corr = corrections(index);
+                firstId = char(corr.firstEndpointIdentifier);
+                secondId = char(corr.secondEndpointIdentifier);
+                if ~(obj.isRegisteredMember(firstId) && obj.isRegisteredMember(secondId))
+                    error('DistributedCovarianceNetwork:crossBlockMissingForThirdMember', ...
+                        'Staged correction addresses pair (%s,%s) with an unregistered member.', ...
+                        firstId,secondId);
+                end
+                key = revgnss.DistributedCovarianceNetworkContract.canonicalPairKey(firstId,secondId);
+                if ~isKey(obj.crossBlocks_,key)
+                    error('DistributedCovarianceNetwork:crossBlockMissingForThirdMember', ...
+                        'No cross block exists for staged pair (%s,%s).',firstId,secondId);
+                end
+                existing = obj.crossBlocks_(key);
+                if abs(existing.sourceCoordinateEpoch_s-message.coordinateEventEpoch_s) < 1e-9 && ...
+                        strcmp(existing.provenanceKind,'conditionedOnPairExactLinkUpdate')
+                    error('DistributedCovarianceNetwork:linearizationPointSupersededByPairExactUpdate', ...
+                        ['Cross block %s was already conditioned by a pair-exact update at this ' ...
+                        'exact coordinate epoch; a second synchronized delivery touching the same ' ...
+                        'block this epoch cannot be exact-order-invariant and is refused rather ' ...
+                        'than silently applied.'],key);
+                end
+                firstOriented = strcmp(existing.firstEndpointIdentifier,firstId);
+                if firstOriented
+                    newCrossStored = corr.posteriorCrossCovariance;
+                else
+                    newCrossStored = corr.posteriorCrossCovariance';
+                end
+                if ~isequal(size(newCrossStored),size(existing.crossCovariance))
+                    error('DistributedCovarianceNetwork:crossBlockDimensionMismatch', ...
+                        'Staged correction for pair (%s,%s) does not match the stored block''s dimension.', ...
+                        firstId,secondId);
+                end
+                firstIdx = find(strcmp(obj.memberIdentifiers,existing.firstEndpointIdentifier),1);
+                secondIdx = find(strcmp(obj.memberIdentifiers,existing.secondEndpointIdentifier),1);
+                newRecord = struct( ...
+                    'firstEndpointIdentifier',existing.firstEndpointIdentifier, ...
+                    'secondEndpointIdentifier',existing.secondEndpointIdentifier, ...
+                    'crossCovariance',newCrossStored, ...
+                    'crossBlockSpanKind',existing.crossBlockSpanKind, ...
+                    'sourceCoordinateEpoch_s',message.coordinateEventEpoch_s, ...
+                    'stateSchemaVersion',existing.stateSchemaVersion, ...
+                    'firstLocalStateMapFingerprint',obj.memberStateMapFingerprints{firstIdx}, ...
+                    'secondLocalStateMapFingerprint',obj.memberStateMapFingerprints{secondIdx}, ...
+                    'firstSchemaStateIndices',obj.memberSchemaStateIndices{firstIdx}, ...
+                    'secondSchemaStateIndices',obj.memberSchemaStateIndices{secondIdx}, ...
+                    'provenanceKind','conditionedOnPairExactLinkUpdate', ...
+                    'provenanceDetail',sprintf('conditioned on synchronized pair-exact delivery %s', ...
+                        message.messageIdentifier), ...
+                    'contributingObservationIdentifiers',{{message.observationIdentifier}}, ...
+                    'contributingCommonProcessGroupIdentifiers',{{}}, ...
+                    'transformCount',existing.transformCount+1, ...
+                    'networkRevisionNumber',obj.revisionNumber+1);
+                replacementKeys{index} = key;
+                replacementBlocks{index} = revgnss.PairwiseCrossCovarianceBlock.fromRecord(newRecord);
+            end
+            if numel(unique(replacementKeys)) ~= numel(replacementKeys)
+                error('DistributedCovarianceNetwork:duplicateStagedCrossBlock', ...
+                    'A synchronized correction message must not stage the same cross block twice.');
+            end
+            untouchedKeys = setdiff(obj.crossBlocks_.keys,replacementKeys);
+            staged = struct( ...
+                'messageIdentifier',message.messageIdentifier, ...
+                'coordinateEventEpoch_s',message.coordinateEventEpoch_s, ...
+                'replacementKeys',{replacementKeys}, ...
+                'replacementBlocks',{replacementBlocks}, ...
+                'untouchedKeys',{untouchedKeys}, ...
+                'preparedAgainstRevisionNumber',obj.revisionNumber, ...
+                'thirdMemberOmissionAudit',message.thirdMemberOmissionAudit, ...
+                'hasThirdMemberCorrections',nCorr>1);
+        end
+
+        function preImage = stagedPreImage(obj, staged)
+            % stagedPreImage  Journals the live pre-commit VALUE of every block a staged
+            % transform is about to replace, plus every counter commitStagedPairExactLinkTransform
+            % is about to bump -- read-only, called before the one mutating commit step.
+            obj.requireNotSealed_();
+            n = numel(staged.replacementKeys);
+            preBlocks = cell(1,n);
+            for index = 1:n
+                preBlocks{index} = obj.crossBlocks_(staged.replacementKeys{index});
+            end
+            preImage = struct( ...
+                'replacementKeys',{staged.replacementKeys}, ...
+                'preReplacementBlocks',{preBlocks}, ...
+                'untouchedKeys',{staged.untouchedKeys}, ...
+                'preRevisionNumber',obj.revisionNumber, ...
+                'preConservativeOwnerOnlyConditioningCount',obj.conservativeOwnerOnlyConditioningCount, ...
+                'prePairExactSynchronizedUpdateCount',obj.pairExactSynchronizedUpdateCount, ...
+                'prePairExactThirdMemberConditioningCount',obj.pairExactThirdMemberConditioningCount, ...
+                'preUnappliedThirdMemberCorrectionCount',obj.unappliedThirdMemberCorrectionCount, ...
+                'preMaximumOmittedThirdMemberVarianceRatio',obj.maximumOmittedThirdMemberVarianceRatio);
+        end
+
+        function commitStagedPairExactLinkTransform(obj, staged)
+            % commitStagedPairExactLinkTransform  The ONE mutating step of the network's own
+            % half of a synchronized pair update: copies crossBlocks_, writes the staged
+            % replacements into the copy, then performs a SINGLE map-swap assignment -- so if
+            % anything above this line throws, obj.crossBlocks_ still points at the untouched
+            % original map. Throws :pairExactCommitRevisionMismatch if the network has advanced
+            % since staging (another writer raced this transaction).
+            obj.requireNotSealed_();
+            requiredStagedFields = {'messageIdentifier','coordinateEventEpoch_s','replacementKeys', ...
+                'replacementBlocks','untouchedKeys','preparedAgainstRevisionNumber', ...
+                'thirdMemberOmissionAudit','hasThirdMemberCorrections'};
+            missingStagedFields = setdiff(requiredStagedFields,fieldnames(staged));
+            if ~isempty(missingStagedFields)
+                error('DistributedCovarianceNetwork:stagedSchema', ...
+                    'commitStagedPairExactLinkTransform''s staged argument is missing %s.', ...
+                    missingStagedFields{1});
+            end
+            if staged.preparedAgainstRevisionNumber ~= obj.revisionNumber
+                error('DistributedCovarianceNetwork:pairExactCommitRevisionMismatch', ...
+                    'The network has advanced since this pair-exact transform was staged.');
+            end
+            preMap = obj.crossBlocks_;
+            allKeysAtCommit = preMap.keys;
+            partition = union(staged.replacementKeys,staged.untouchedKeys);
+            if numel(partition) ~= numel(allKeysAtCommit) || ...
+                    ~isempty(setxor(partition,allKeysAtCommit)) || ...
+                    ~isempty(intersect(staged.replacementKeys,staged.untouchedKeys))
+                error('DistributedCovarianceNetwork:stagedPartitionCorrupt', ...
+                    ['The staged replacement/untouched key partition does not exactly match the ' ...
+                    'live cross-block set.']);
+            end
+            newMap = containers.Map('KeyType','char','ValueType','any');
+            for index = 1:numel(allKeysAtCommit)
+                newMap(allKeysAtCommit{index}) = preMap(allKeysAtCommit{index});
+            end
+            for index = 1:numel(staged.replacementKeys)
+                newMap(staged.replacementKeys{index}) = staged.replacementBlocks{index};
+            end
+            obj.crossBlocks_ = newMap;
+            obj.revisionNumber = obj.revisionNumber+1;
+            obj.pairExactSynchronizedUpdateCount = obj.pairExactSynchronizedUpdateCount+1;
+            if staged.hasThirdMemberCorrections
+                obj.pairExactThirdMemberConditioningCount = obj.pairExactThirdMemberConditioningCount+1;
+            end
+            audit = staged.thirdMemberOmissionAudit;
+            if ~audit.isNegligible
+                obj.unappliedThirdMemberCorrectionCount = obj.unappliedThirdMemberCorrectionCount+1;
+            end
+            if ~isempty(audit.ratios)
+                obj.maximumOmittedThirdMemberVarianceRatio = max( ...
+                    obj.maximumOmittedThirdMemberVarianceRatio,max(audit.ratios));
+            end
+        end
+
+        function restoreStagedPreImage(obj, preImage)
+            % restoreStagedPreImage  Verified rollback for commitStagedPairExactLinkTransform:
+            % rebuilds crossBlocks_ from the journaled pre-image values (never from any object
+            % reference that might itself have been touched), restores every counter, then
+            % re-reads each restored block and throws :rollbackNotVerified if it does not match
+            % the journal exactly. Deliberately carries NO isSealed guard -- this is itself part
+            % of the recovery path invoked BEFORE a seal decision is made; guarding it would
+            % make recovery unreachable.
+            restoredMap = containers.Map('KeyType','char','ValueType','any');
+            for index = 1:numel(preImage.replacementKeys)
+                restoredMap(preImage.replacementKeys{index}) = preImage.preReplacementBlocks{index};
+            end
+            for index = 1:numel(preImage.untouchedKeys)
+                key = preImage.untouchedKeys{index};
+                if isKey(obj.crossBlocks_,key)
+                    restoredMap(key) = obj.crossBlocks_(key);
+                end
+            end
+            obj.crossBlocks_ = restoredMap;
+            obj.revisionNumber = preImage.preRevisionNumber;
+            obj.conservativeOwnerOnlyConditioningCount = preImage.preConservativeOwnerOnlyConditioningCount;
+            obj.pairExactSynchronizedUpdateCount = preImage.prePairExactSynchronizedUpdateCount;
+            obj.pairExactThirdMemberConditioningCount = preImage.prePairExactThirdMemberConditioningCount;
+            obj.unappliedThirdMemberCorrectionCount = preImage.preUnappliedThirdMemberCorrectionCount;
+            obj.maximumOmittedThirdMemberVarianceRatio = preImage.preMaximumOmittedThirdMemberVarianceRatio;
+            for index = 1:numel(preImage.replacementKeys)
+                key = preImage.replacementKeys{index};
+                if ~isequaln(obj.crossBlocks_(key),preImage.preReplacementBlocks{index})
+                    error('DistributedCovarianceNetwork:rollbackNotVerified', ...
+                        'Cross block %s does not match its pre-image after restoration.',key);
+                end
+            end
+        end
+
+        function sealOnFailedRollback(obj, reason)
+            % sealOnFailedRollback  Last resort: called only when restoreStagedPreImage itself
+            % threw. Idempotent (first reason wins) since a sealed network's own reason should
+            % never be silently overwritten by a later, unrelated failure.
+            if obj.isSealed
+                return
+            end
+            obj.isSealed = true;
+            obj.sealReason = char(reason);
+        end
+
+        function noteSupersededDeliveryRejection(obj)
+            % noteSupersededDeliveryRejection  Counts a delivery refused because its target
+            % cross block was already superseded by an earlier pair-exact commit this same
+            % epoch (see stagePairExactLinkTransform's :linearizationPointSupersededByPairExact
+            % Update). No isSealed guard: incrementing a diagnostic counter on the refusal path
+            % is harmless even against an otherwise-sealed network.
+            obj.supersededDeliveryRejectionCount = obj.supersededDeliveryRejectionCount+1;
+        end
+    end
+
+    methods (Access = private)
+        function requireNotSealed_(obj)
+            if obj.isSealed
+                error('DistributedCovarianceNetwork:networkSealed', ...
+                    ['This DistributedCovarianceNetwork is sealed (%s) after an unverifiable ' ...
+                    'partial commit; no further reads or writes are permitted.'],obj.sealReason);
             end
         end
     end
@@ -815,6 +1129,132 @@ classdef DistributedCovarianceNetwork < handle
             Gi(attitudeIdx,attitudeIdx) = record.attitudeResetJacobian;
             A = Gi*(eye(ni) - record.gainFull*record.ownerJacobianFull);
             B = Gi*(-record.gainFull*record.remoteJacobian);
+        end
+
+        function [Mi, Ni, Nj, Mj] = pairExactErrorTransforms(record)
+            % pairExactErrorTransforms  The four error-transition blocks of the pair-exact
+            % update, factored out of pairMeasurementUpdatePrimitive's own inline computation
+            % (kept byte-identical there) so a caller/test can obtain them independently, e.g.
+            % to build a custom third-member conditioning without re-deriving Ki/Kj's algebra.
+            required = {'Hi','Hj','Ki','Kj'};
+            missing = setdiff(required,fieldnames(record));
+            if ~isempty(missing)
+                error('DistributedCovarianceNetwork:pairErrorTransformSchema', ...
+                    'pairExactErrorTransforms record is missing %s.',missing{1});
+            end
+            ni = size(record.Ki,1);
+            nj = size(record.Kj,1);
+            Mi = eye(ni) - record.Ki*record.Hi;
+            Ni = -record.Ki*record.Hj;
+            Nj = -record.Kj*record.Hi;
+            Mj = eye(nj) - record.Kj*record.Hj;
+        end
+
+        function PijPlus = applyAttitudeResetCongruenceToPairCross(Pij, ownerAttitudeResetJacobian, ...
+                remoteAttitudeResetJacobian, ownerSchemaStateIndices, remoteSchemaStateIndices)
+            % applyAttitudeResetCongruenceToPairCross  Section 3.2 item 4/5: the pair-exact
+            % counterpart of the owner-only quaternion-reset congruence already applied to a
+            % single marginal by revgnss.LocalStateCorrectionInjection -- here BOTH sides of the
+            % cross block get their own 3x3 reset Jacobian, embedded onto each endpoint's own
+            % attitude schema columns/rows (owner columns for Gi, remote columns for Gj; the
+            % 3rd-member axis, if any, is untouched by definition -- see
+            % pairExactThirdMemberCrossTransforms for that one-sided case).
+            ni = size(Pij,1);
+            nj = size(Pij,2);
+            ownerAttIdx = ownerSchemaStateIndices(7:9);
+            remoteAttIdx = remoteSchemaStateIndices(7:9);
+            Gi = eye(ni); Gi(ownerAttIdx,ownerAttIdx) = ownerAttitudeResetJacobian;
+            Gj = eye(nj); Gj(remoteAttIdx,remoteAttIdx) = remoteAttitudeResetJacobian;
+            PijPlus = Gi*Pij*Gj';
+        end
+
+        function [PikPlus, PjkPlus] = pairExactThirdMemberCrossTransforms(record)
+            % pairExactThirdMemberCrossTransforms  Section 3.2 item 5: conditions EVERY third
+            % member's cross block to owner (Pik) and to remote (Pjk) simultaneously, one-sided
+            % (only the owner/remote side's attitude reset is applied -- the third member's own
+            % state was not touched by this observation, so its own axis gets no congruence):
+            %   W_k    = Hi*Pik{k} + Hj*Pjk{k}
+            %   PikPlus{k} = Gi*(Pik{k} - Ki*W_k)
+            %   PjkPlus{k} = Gj*(Pjk{k} - Kj*W_k)
+            % Pik{k}/Pjk{k} are owner-first/remote-first oriented (ni-by-nk / nj-by-nk), matching
+            % revgnss.DistributedCovarianceNetwork.orientedCrossCovariance(ownerId,thirdId)'s own
+            % convention -- see revgnss.SynchronizedPairLinkUpdateTransaction, the only caller
+            % that builds this record from live data.
+            required = {'Hi','Hj','Ki','Kj','Gi','Gj','ownerSchemaStateIndices', ...
+                'remoteSchemaStateIndices','Pik','Pjk'};
+            missing = setdiff(required,fieldnames(record));
+            if ~isempty(missing)
+                error('DistributedCovarianceNetwork:thirdMemberCrossTransformSchema', ...
+                    'pairExactThirdMemberCrossTransforms record is missing %s.',missing{1});
+            end
+            nThird = numel(record.Pik);
+            if numel(record.Pjk) ~= nThird
+                error('DistributedCovarianceNetwork:thirdMemberCrossTransformSchema', ...
+                    'Pik and Pjk must have the same number of third-member entries.');
+            end
+            ni = size(record.Ki,1);
+            nj = size(record.Kj,1);
+            ownerAttIdx = record.ownerSchemaStateIndices(7:9);
+            remoteAttIdx = record.remoteSchemaStateIndices(7:9);
+            GiFull = eye(ni); GiFull(ownerAttIdx,ownerAttIdx) = record.Gi;
+            GjFull = eye(nj); GjFull(remoteAttIdx,remoteAttIdx) = record.Gj;
+            PikPlus = cell(1,nThird);
+            PjkPlus = cell(1,nThird);
+            for k = 1:nThird
+                Wk = record.Hi*record.Pik{k} + record.Hj*record.Pjk{k};
+                PikPlus{k} = GiFull*(record.Pik{k} - record.Ki*Wk);
+                PjkPlus{k} = GjFull*(record.Pjk{k} - record.Kj*Wk);
+                if any(~isfinite(PikPlus{k}(:))) || any(~isfinite(PjkPlus{k}(:)))
+                    error('DistributedCovarianceNetwork:nonFiniteThirdMemberCrossTransform', ...
+                        'Third-member cross-block transform %d produced a non-finite result.',k);
+                end
+            end
+        end
+
+        function audit = thirdMemberOmittedCorrectionAudit(record)
+            % thirdMemberOmittedCorrectionAudit  Section 3.2 item 8: quantifies, per third
+            % member k, the variance this exact pair update WOULD have removed from k's own
+            % local marginal Pkk had k also been jointly updated (it was not -- only its cross
+            % blocks are conditioned, never its own diagonal):
+            %   C_k      = Pki{k}'*Hi' + Pkj{k}'*Hj'     (Pki/Pkj are owner-first/remote-first,
+            %                                              transposed here to the k-first
+            %                                              orientation this formula is stated in)
+            %   omitted  = C_k*(S\C_k')
+            %   ratio_k  = max(diag(omitted)) / max(diag(Pkk))
+            % isNegligible is true iff every ratio_k is within
+            % SynchronizedDeliveryContract.ThirdMemberOmittedVarianceToleranceRelative -- this
+            % audit reports the omission, it never corrects it (Section 3.2 scope is exactly the
+            % owner/remote pair plus third-member CROSS blocks; a third member's own marginal
+            % update is out of scope, see the plan's own Section 3 item list).
+            required = {'S','Hi','Hj','Pki','Pkj','Pkk','endpointIdentifiers'};
+            missing = setdiff(required,fieldnames(record));
+            if ~isempty(missing)
+                error('DistributedCovarianceNetwork:thirdMemberOmissionAuditSchema', ...
+                    'thirdMemberOmittedCorrectionAudit record is missing %s.',missing{1});
+            end
+            nThird = numel(record.Pki);
+            if numel(record.Pkj) ~= nThird || numel(record.Pkk) ~= nThird || ...
+                    numel(record.endpointIdentifiers) ~= nThird
+                error('DistributedCovarianceNetwork:thirdMemberOmissionAuditSchema', ...
+                    'Pki, Pkj, Pkk, and endpointIdentifiers must all have the same number of entries.');
+            end
+            ratios = zeros(1,nThird);
+            tol = revgnss.SynchronizedDeliveryContract.ThirdMemberOmittedVarianceToleranceRelative;
+            for k = 1:nThird
+                Ck = record.Pki{k}'*record.Hi' + record.Pkj{k}'*record.Hj';
+                omitted = Ck*(record.S\Ck');
+                omitted = (omitted+omitted')/2;
+                Pkk = record.Pkk{k};
+                denom = max(diag(Pkk));
+                if denom <= 0
+                    denom = 1;
+                end
+                ratios(k) = max(diag(omitted))/denom;
+            end
+            audit = struct( ...
+                'endpointIdentifiers',{record.endpointIdentifiers}, ...
+                'ratios',ratios, ...
+                'isNegligible',all(ratios <= tol));
         end
     end
 end

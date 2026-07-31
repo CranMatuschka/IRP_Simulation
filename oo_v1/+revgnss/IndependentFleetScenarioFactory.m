@@ -109,6 +109,13 @@ classdef IndependentFleetScenarioFactory
                     if isfield(cn,'commonProcessNoise') && isfield(cn.commonProcessNoise,'sigma_mps2')
                         cn.commonProcessNoise.sigma_mps2 = 0;
                     end
+                    % Section 3.2: routing is the tenth key -- forced back to its single legal
+                    % disabled-policy value alongside the other nine, the exact gap
+                    % requireCorrelationNetworkConfiguration_'s own partial-configuration check
+                    % now asserts against (routing is otherwise orthogonal to policy, so a leaf
+                    % inheriting a fleet-level 'pairExactWhenBothEndpointsTracked' word would
+                    % otherwise fail validation with policy already forced 'disabled').
+                    if isfield(cn,'linkUpdateRouting'); cn.linkUpdateRouting = 'conservativeBoundOnly'; end
                     if isfield(cn,'audit')
                         cn.audit.enable = false;
                         cn.audit.everyNEpochs = 0;
@@ -198,6 +205,10 @@ classdef IndependentFleetScenarioFactory
                     if isfield(cn,'commonProcessNoise') && isfield(cn.commonProcessNoise,'sigma_mps2')
                         cn.commonProcessNoise.sigma_mps2 = 0;
                     end
+                    % Section 3.2: see the matching comment in stageOneLeafConfigForIndex --
+                    % routing is the tenth key, forced back to its single legal disabled-policy
+                    % value alongside the other nine.
+                    if isfield(cn,'linkUpdateRouting'); cn.linkUpdateRouting = 'conservativeBoundOnly'; end
                     if isfield(cn,'audit')
                         cn.audit.enable = false;
                         cn.audit.everyNEpochs = 0;

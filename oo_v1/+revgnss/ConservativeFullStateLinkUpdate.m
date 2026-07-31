@@ -274,14 +274,14 @@ classdef ConservativeFullStateLinkUpdate
             % xPosterior/PPosterior/nominalQuatPosterior onto its own owner filter). Applies the
             % state correction at the certified conservative gain K (from boundResult, mapped
             % back through ownerScale) and the full-state assembled posterior covariance, then
-            % -- in 'quaternionErrorState' mode only -- replicates
-            % +filter/ReverseGNSSEKF.m's update() steps 7 (injectRight + posterior covariance
-            % reset) EXACTLY: same injectRight call, same skew-symmetric reset Jacobian
-            % I-0.5*[deltaTheta]_x, applied to the POSTERIOR (not the prior), in the same order.
-            % This duplication (rather than a shared call) exists because ReverseGNSSEKF.update
-            % computes its OWN gain/covariance internally from H*P*H'+R; it has no seam to accept
-            % an externally certified (K,P+) pair instead, and Section 2.3.1 must never call the
-            % naive/uninflated update path.
+            % delegates the quaternion-mode attitude injection/covariance-reset step to
+            % revgnss.LocalStateCorrectionInjection.applyWithAttitudeReset (plan Stage 3.2,
+            % U29): the exact same math this method always computed (same injectRight call,
+            % same skew-symmetric reset Jacobian I-0.5*[deltaTheta]_x, applied to the POSTERIOR
+            % not the prior, in the same order), now shared with the Stage 3.2 exact pair-update
+            % path so the two never drift apart. This method itself cannot be reused BY that
+            % path: it requires a revgnss.OwnerPosteriorBoundResult, which the exact path
+            % deliberately never produces.
             required = {'xPrior','PPrior','schemaStateIndices','boundResult','H_owner', ...
                 'ownerScale','residual_m','attitudeParameterization','nominalQuatPrior'};
             missing = setdiff(required,fieldnames(args));
@@ -294,42 +294,25 @@ classdef ConservativeFullStateLinkUpdate
             [~, K] = revgnss.ConservativeFullStateLinkUpdate.unscaleBoundResult( ...
                 args.boundResult, args.ownerScale);
 
-            xPosterior = args.xPrior;
-            xPosterior(idxS) = xPosterior(idxS) + K*args.residual_m;
-            PPosterior = revgnss.ConservativeFullStateLinkUpdate.assembleFullStateYoungBound( ...
+            PPriorForBound = revgnss.ConservativeFullStateLinkUpdate.assembleFullStateYoungBound( ...
                 args.PPrior, idxS, args.boundResult, args.H_owner, args.ownerScale);
 
-            nominalQuatPosterior = args.nominalQuatPrior;
-            attitudeInjectionNorm_rad = 0;
-            % attitudeResetJacobian (plan Stage 3.1, U17): the ONE additive field this method
-            % returns, so revgnss.DistributedCovarianceNetwork can fold the SAME reset Jacobian
-            % applied here into its own conditioning transform (Section 2.4) without
-            % recomputing it -- eye(3) in eulerZYX mode, where no reset is applied.
-            attitudeResetJacobian = eye(3);
-            if strcmp(args.attitudeParameterization,'quaternionErrorState')
-                attitudeStateIdx = idxS(7:9);
-                deltaTheta = xPosterior(attitudeStateIdx);
-                [nominalQuatPosterior, injectionInfo] = ...
-                    revgnss.AttitudeErrorStateKinematics.injectRight( ...
-                    args.nominalQuatPrior,deltaTheta);
-                xPosterior(attitudeStateIdx) = zeros(3,1);
-                d = deltaTheta(:);
-                skewDelta = [0,-d(3),d(2); d(3),0,-d(1); -d(2),d(1),0];
-                resetJacobian = eye(3) - 0.5*skewDelta;
-                PPosterior(attitudeStateIdx,:) = resetJacobian*PPosterior(attitudeStateIdx,:);
-                PPosterior(:,attitudeStateIdx) = PPosterior(:,attitudeStateIdx)*resetJacobian';
-                PPosterior = (PPosterior+PPosterior')/2;
-                attitudeInjectionNorm_rad = injectionInfo.injectionNorm_rad;
-                attitudeResetJacobian = resetJacobian;
-            end
+            stateCorrectionFull = zeros(size(args.xPrior));
+            stateCorrectionFull(idxS) = K*args.residual_m;
+
+            injected = revgnss.LocalStateCorrectionInjection.applyWithAttitudeReset(struct( ...
+                'xPrior',args.xPrior,'PPosterior',PPriorForBound,'schemaStateIndices',idxS, ...
+                'stateCorrection_full',stateCorrectionFull, ...
+                'attitudeParameterization',args.attitudeParameterization, ...
+                'nominalQuatPrior',args.nominalQuatPrior));
 
             result = struct( ...
-                'xPosterior',xPosterior, ...
-                'PPosterior',PPosterior, ...
-                'nominalQuatPosterior',nominalQuatPosterior, ...
+                'xPosterior',injected.xPosterior, ...
+                'PPosterior',injected.PPosterior, ...
+                'nominalQuatPosterior',injected.nominalQuatPosterior, ...
                 'gain_errorUnitPerM',K, ...
-                'attitudeInjectionNorm_rad',attitudeInjectionNorm_rad, ...
-                'attitudeResetJacobian',attitudeResetJacobian);
+                'attitudeInjectionNorm_rad',injected.attitudeInjectionNorm_rad, ...
+                'attitudeResetJacobian',injected.attitudeResetJacobian);
         end
     end
 end

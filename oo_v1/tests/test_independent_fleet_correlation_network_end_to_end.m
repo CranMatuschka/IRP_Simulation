@@ -126,11 +126,26 @@ cfg2 = base;
 cfg2.multiAsset.distributedEstimator.correlationNetwork.maximumFleetSize = 5;   % policy stays 'disabled'
 i_assertConstructThrows_(cfg2,'IndependentFleetCoordinator:correlationNetworkPartialConfiguration');
 
+% Section 3.2: 'pairExactWhenBothEndpointsTracked' is now a legal routing word (this fixture's
+% own updateAdapter.observable is 'coherentTwoWayCodeRange', the one pair-exact-eligible
+% observable) -- see test_independent_fleet_synchronized_pair_live_path.m for the real live-path
+% proof. What remains refused is an UNRECOGNISED routing word, and pairing the pair-exact route
+% with an observable outside revgnss.SynchronizedDeliveryContract.PairExactEligibleObservables.
 cfg3 = base;
 cfg3.multiAsset.distributedEstimator.correlationNetwork.policy = 'exactPairwiseCrossCovariance';
 cfg3.multiAsset.distributedEstimator.correlationNetwork.maximumFleetSize = 2;
-cfg3.multiAsset.distributedEstimator.correlationNetwork.linkUpdateRouting = 'pairExactWhenBothEndpointsTracked';
+cfg3.multiAsset.distributedEstimator.correlationNetwork.linkUpdateRouting = 'notARealRoutingWord';
 i_assertConstructThrows_(cfg3,'IndependentFleetCoordinator:correlationNetworkRoutingUnavailable');
+
+cfg3b = base;
+cfg3b.multiAsset.distributedEstimator.correlationNetwork.policy = 'exactPairwiseCrossCovariance';
+cfg3b.multiAsset.distributedEstimator.correlationNetwork.maximumFleetSize = 2;
+cfg3b.multiAsset.distributedEstimator.correlationNetwork.linkUpdateRouting = 'pairExactWhenBothEndpointsTracked';
+cfg3b.multiAsset.distributedEstimator.linkUpdate.updateAdapter.observable = 'oneWayCode';
+cfg3b.measurements.isl.oneWay.enable = true;
+cfg3b.measurements.isl.oneWay.code.enable = true;
+cfg3b.measurements.isl.twoWay.range.enable = false;
+i_assertConstructThrows_(cfg3b,'IndependentFleetCoordinator:correlationNetworkRoutingObservableNotEligible');
 
 % deliveryLedgerRequiresFleet's sanctioned-tuple check would fire first if the linkUpdate tuple
 % were active, so this gate is proven from a fleet WITHOUT it: distributedEstimator.enable=true,

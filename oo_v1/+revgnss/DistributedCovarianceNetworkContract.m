@@ -2,12 +2,15 @@ classdef DistributedCovarianceNetworkContract
     % DistributedCovarianceNetworkContract  Frozen Stage-3.1 vocabulary and shared statics
     % for revgnss.DistributedCovarianceNetwork (plan Section 3.1).
     %
-    % Section 3.1 ships the network's OWN prediction/storage/audit/fleet-limit machinery and
-    % the low-level pair-update PRIMITIVE (item 5). Section 3.2's synchronized two-endpoint
-    % delivery protocol (signed correction messages, non-owner delivery, acknowledgement,
-    % partial-delivery rejection) is NOT implemented here; AllowedLinkUpdateRoutingPolicies
-    % below deliberately excludes the word that would select it, so routeForDelivery can never
-    % return 'pairExact' on the live path yet -- see revgnss.DistributedCovarianceNetwork.
+    % Section 3.1 shipped the network's OWN prediction/storage/audit/fleet-limit machinery and
+    % the low-level pair-update PRIMITIVE (item 5). Section 3.2 adds the synchronized two-
+    % endpoint delivery protocol on top: 'pairExactWhenBothEndpointsTracked' is now a legal
+    % AllowedLinkUpdateRoutingPolicies value, so routeForDelivery can return 'pairExact' when
+    % that routing policy is configured -- see revgnss.SynchronizedPairLinkUpdateTransaction for
+    % the actual dual-endpoint apply-or-reject-both mechanism (this contract only names the
+    % vocabulary; it applies nothing). Sections 3.3 (explicit common-information modeling), 3.4
+    % (guarded observable re-enablement beyond coherentTwoWayCodeRange, including ISL carrier),
+    % and 3.5 (honest reporting) remain not implemented.
     %
     % EpochPhaseOrderWithCorrelationNetwork extends (does not modify)
     % revgnss.DistributedLinkProtocolContract.EpochFinalizationPhaseOrder with exactly one
@@ -23,9 +26,9 @@ classdef DistributedCovarianceNetworkContract
         AllowedCommonProcessNoiseFrames      = {'ECEF'}
         AllowedPriorIndependenceDeclarations = {'independentLocalPriors'}
 
-        % Section 3.1 freeze: 'pairExactWhenBothEndpointsTracked' is deliberately NOT here.
-        % The pair-exact route needs Section 3.2's synchronized two-endpoint delivery.
-        AllowedLinkUpdateRoutingPolicies = {'conservativeBoundOnly'}
+        % Section 3.2: 'pairExactWhenBothEndpointsTracked' selects the synchronized two-endpoint
+        % delivery protocol (revgnss.SynchronizedPairLinkUpdateTransaction).
+        AllowedLinkUpdateRoutingPolicies = {'conservativeBoundOnly','pairExactWhenBothEndpointsTracked'}
         AllowedLinkUpdateRoutes          = {'conservativeBound','pairExact'}
 
         AllowedCrossBlockProvenanceKinds = { ...
@@ -39,7 +42,8 @@ classdef DistributedCovarianceNetworkContract
             'pairExactRouteRequiresSynchronizedDeliveryStage', ...
             'correlationNetworkDisabled','endpointNotFleetMember', ...
             'crossBlockAbsentForPair','crossBlockEpochStale', ...
-            'crossBlockStateMapFingerprintChanged','crossBlockProvenanceUnusable'}
+            'crossBlockStateMapFingerprintChanged','crossBlockProvenanceUnusable', ...
+            'pairExactRefusedObservableNotEligible','pairExactRefusedClockGaugeNotAnchored'}
 
         AllowedAuditVerdicts = { ...
             'symmetricPositiveSemiDefinite','symmetryViolation', ...
@@ -50,7 +54,18 @@ classdef DistributedCovarianceNetworkContract
             'notEvaluated', ...
             'exactLinearPropagationOfDeclaredLocalCovariances', ...
             'conditionedOnConservativeOwnerOnlyUpdatesNoFleetBoundClaimed', ...
-            'notEquivalentUnappliedCorrelatedLocalUpdates'}
+            'notEquivalentUnappliedCorrelatedLocalUpdates', ...
+            'notEquivalentUnappliedThirdMemberCorrections', ...
+            'exactPairConditionedNonPairLinksRemainConservative', ...
+            'exactPairSynchronizedUpdatesCentralReferenceEquivalent'}
+
+        % Orthogonal to the equivalence-claim ladder above: WHICH routing rule(s) actually fired
+        % this run, independent of whether local ground updates went uncorrelated. Two separate
+        % facts get two separate words rather than being folded into one, because overloading
+        % one word is how honest reporting drifts into prose (plan Section 3.5's own concern).
+        AllowedLinkUpdateConditioningClaims = { ...
+            'notEvaluated','conservativeOwnerOnlyOnly','exactPairSynchronizedOnly', ...
+            'mixedExactAndConservative'}
 
         MaximumSupportedFleetSize      = 4
         MaximumAssembledFleetDimension = 512

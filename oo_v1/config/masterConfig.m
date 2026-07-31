@@ -1057,14 +1057,18 @@ cfg.multiAsset.distributedEstimator.linkUpdate.remoteProductPropagationPolicy = 
 cfg.multiAsset.distributedEstimator.linkUpdate.roleReversalPolicy = 'disabled';
 cfg.multiAsset.distributedEstimator.linkUpdate.calibrationOwnership.policy = 'undeclared';
 cfg.multiAsset.distributedEstimator.linkUpdate.updateAdapter.observable = 'none';
-% --- Stage 3.1 correlation network (all inert by default) ---------------------------------
+% --- Stage 3.1/3.2 correlation network (all inert by default) -----------------------------
 % The network tracks pairwise cross-covariance P_ij only; each P_ii stays in its own local EKF
-% and is never duplicated here. Nothing consumes P_ij to move a state in this section: enabling
-% the network is asserted by test to leave every estimate byte-identical. The fleet-size limit
-% is checked at initialize()/registerFleetMembers, never per delivery, so exceeding it fails
-% rather than dropping cross blocks. commonProcessNoiseTreatment stays 'rejected' on the live
-% path because the matching diagonal term lives in each leaf's own buildQ_ (Section 3.3 scope),
-% not here.
+% and is never duplicated here. With the default linkUpdateRouting='conservativeBoundOnly',
+% enabling the network moves nothing: it is asserted by test to leave every estimate byte-
+% identical. Setting linkUpdateRouting='pairExactWhenBothEndpointsTracked' (Section 3.2) is the
+% ONE toggle that changes this -- it applies a synchronized exact update to BOTH endpoint
+% filters (not just the owner) for coherentTwoWayCodeRange deliveries where both endpoints are
+% tracked with a fresh cross block; every other delivery still routes conservativeBound. The
+% fleet-size limit is checked at initialize()/registerFleetMembers, never per delivery, so
+% exceeding it fails rather than dropping cross blocks. commonProcessNoiseTreatment stays
+% 'rejected' on the live path because the matching diagonal term lives in each leaf's own
+% buildQ_ (Section 3.3 scope), not here.
 cfg.multiAsset.distributedEstimator.correlationNetwork.policy = 'disabled';
 cfg.multiAsset.distributedEstimator.correlationNetwork.maximumFleetSize = 0;
 cfg.multiAsset.distributedEstimator.correlationNetwork.crossBlockSpan = 'fullLocalStateSpan';

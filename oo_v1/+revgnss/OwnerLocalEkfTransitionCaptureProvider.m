@@ -120,6 +120,57 @@ classdef OwnerLocalEkfTransitionCaptureProvider
                     'An epoch-transition capture is still open; take it before an external write.');
             end
         end
+
+        % ---- Stage 3.2 additive members (plan Section 3.2, U30/U31) ------------------------
+        function x = localState(obj)
+            x = obj.ekf_.x;
+        end
+
+        function q = nominalQuaternion(obj)
+            q = obj.ekf_.nominalQuat_wxyz(:,1);
+        end
+
+        function p = attitudeParameterization(obj)
+            p = obj.ekf_.attitudeParameterization;
+        end
+
+        function tf = hasOpenEpochTransitionCapture(obj)
+            tf = obj.ekf_.hasOpenEpochTransitionCapture();
+        end
+
+        function hex = localStateDigest(obj)
+            hex = revgnss.ImmutableContentDigest.of(struct( ...
+                'x',obj.localState(),'P',obj.localCovariance(),'nominalQuat',obj.nominalQuaternion()));
+        end
+
+        function snap = takeApplicationRollbackSnapshot(obj)
+            snap = struct( ...
+                'x',obj.ekf_.x,'P',obj.ekf_.P,'nominalQuat_wxyz',obj.ekf_.nominalQuat_wxyz(:,1), ...
+                'attitudeInjectionCount',obj.ekf_.attitudeInjectionCount, ...
+                'maxAttitudeInjectionNorm_rad',obj.ekf_.maxAttitudeInjectionNorm_rad);
+        end
+
+        function applyDeclaredEndpointCorrection(obj, xPosterior, PPosterior, nominalQuatPosterior, ...
+                injectionNorm_rad)
+            % applyDeclaredEndpointCorrection  Writes through the SAME sanctioned external-write
+            % path as the Stage-2 conservative route (applyDeclaredExternalCovarianceWrite), and
+            % bumps the attitude-injection counters identically to
+            % IndependentFleetCoordinator.applyOneLinkUpdate_'s own post-write bookkeeping, so a
+            % remote leaf's counters mean exactly the same thing as an owner leaf's.
+            obj.noteDeclaredExternalCovarianceWrite();
+            obj.ekf_.applyDeclaredExternalCovarianceWrite(xPosterior,PPosterior,nominalQuatPosterior);
+            if injectionNorm_rad > 0
+                obj.ekf_.attitudeInjectionCount = obj.ekf_.attitudeInjectionCount + 1;
+                obj.ekf_.maxAttitudeInjectionNorm_rad = max( ...
+                    obj.ekf_.maxAttitudeInjectionNorm_rad,injectionNorm_rad);
+            end
+        end
+
+        function restoreApplicationRollbackSnapshot(obj, snap)
+            obj.ekf_.applyDeclaredExternalCovarianceWrite(snap.x,snap.P,snap.nominalQuat_wxyz);
+            obj.ekf_.attitudeInjectionCount = snap.attitudeInjectionCount;
+            obj.ekf_.maxAttitudeInjectionNorm_rad = snap.maxAttitudeInjectionNorm_rad;
+        end
     end
 
     methods (Static)
