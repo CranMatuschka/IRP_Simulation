@@ -11,6 +11,11 @@ classdef TWSTFTDiagnosticBuilder
     % metres, divided by C to yield seconds. If the required two-way events
     % are not available, diagnosticClassification = 'unavailableMissingTiming'.
     % When available, diagnosticClassification = 'diagnosticOnlyApproximation'.
+    % If the supplied events span more than one ISL link identifier,
+    % diagnosticClassification = 'unavailableAmbiguousMultiLink' and no offset is
+    % computed. If exactly one link identifier survives but its own asset indices
+    % do not match the configured referenceAssetIndex/remoteAssetIndex pair,
+    % diagnosticClassification = 'unavailableLinkIdentityMismatch'.
     %
     % This is NOT a full TWSTFT observable. No transmit-epoch separation is
     % modelled. No EKF rows are generated.
@@ -53,8 +58,52 @@ classdef TWSTFTDiagnosticBuilder
                 return
             end
 
-            % Extract forward (secondary→primary) and return (primary→secondary) legs
+            % Plan Section 4.1 item 3: this diagnostic models exactly one conceptual two-way link
+            % (a single reference/remote asset pair); twoWayInfo.linkEvents can carry events from
+            % SEVERAL distinct ISL links concatenated together (revgnss.TwoWayISLMeasurementBuilder.
+            % aggregateInfo_ concatenates every active link's events into one flat array with no
+            % re-partitioning). Two distinct failure modes this guards against, both real: (1) if a
+            % future producer ever emitted an unpaired leg, the old linear forward/return scan below
+            % could pick legs from two DIFFERENT links -- a genuinely meaningless cross-link
+            % combination; (2) even with today's producer, which always emits matched
+            % [forwardLeg,returnLeg] pairs per link, the old scan silently kept only the LAST link's
+            % own pair while still labelling the result with cfg's referenceAssetIndex/
+            % remoteAssetIndex -- a real, reachable mislabeling bug this guard also closes by
+            % refusing outright rather than guessing which link the caller meant.
             events = twoWayInfo.linkEvents;
+            if isfield(events,'linkId')
+                linkIds = unique({events.linkId});
+                if numel(linkIds) > 1
+                    diag.diagnosticClassification = 'unavailableAmbiguousMultiLink';
+                    diag.diagnosticNote = sprintf(['%d distinct ISL link identifiers present in ' ...
+                        'twoWayInfo.linkEvents (%s); refusing to combine forward/return legs ' ...
+                        'across different links rather than picking an arbitrary pairing.'], ...
+                        numel(linkIds),strjoin(linkIds,', '));
+                    return
+                end
+            end
+
+            % Even a single surviving link identifier can be the WRONG one relative to this
+            % diagnostic's own configured reference/remote asset pair (e.g. exactly one ISL link
+            % 'isl:3<->4' active while cfg says referenceAssetIndex=1/remoteAssetIndex=2) -- the old
+            % code would still report a real-looking number under the wrong asset labels. Refuse
+            % rather than mislabel whenever the surviving events' own asset indices are available and
+            % do not match the configured pair as a set (forward/return legs swap tx/rx roles by
+            % design, so this compares sets, not per-leg order).
+            if isfield(events,'transmitterAssetIndex') && isfield(events,'receiverAssetIndex')
+                involvedIdx = unique([events.transmitterAssetIndex,events.receiverAssetIndex]);
+                configuredIdx = unique([refIdx,remIdx]);
+                if ~isequal(involvedIdx,configuredIdx)
+                    diag.diagnosticClassification = 'unavailableLinkIdentityMismatch';
+                    diag.diagnosticNote = sprintf(['Surviving link events involve asset indices [%s] ' ...
+                        'but cfg.measurements.twstft declares referenceAssetIndex=%d/' ...
+                        'remoteAssetIndex=%d; refusing to report a diagnostic under the wrong ' ...
+                        'asset labels.'],num2str(involvedIdx),refIdx,remIdx);
+                    return
+                end
+            end
+
+            % Extract forward (secondary→primary) and return (primary→secondary) legs
             fwdEv = []; retEv = [];
             for k = 1:numel(events)
                 if strcmp(events(k).eventRole, 'forwardLeg'); fwdEv = events(k); end

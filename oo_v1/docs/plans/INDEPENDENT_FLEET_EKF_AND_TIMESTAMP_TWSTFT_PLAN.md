@@ -1377,6 +1377,63 @@ Neither claim means waveform-level hardware fidelity or operational real-world T
 3. Preserve `TWSTFTDiagnosticBuilder` as disabled diagnostic scaffolding. Add a guard/test that it cannot combine events from different link identifiers if it is invoked diagnostically, but never use it as the Stage-4 physical reference.
 4. Do not remove legacy `measurements.twstft.*` configuration; retain validation guards until the relay-session implementation explicitly owns a new supported mode.
 
+### Section 4.1 completion record — 2026-08-01
+
+1. **Items 1, 2, 4 — verified already satisfied, zero code changed.** A grounding investigation
+   (later independently re-verified by the combined review, both agreeing) confirmed:
+   `fourTimestampPhysical` is already a named, recognized-but-rejected mode constant
+   (`revgnss.ReciprocalTimeTransferModel.PhysicalTimestampMode`), rejected at exactly one
+   chokepoint (`ReciprocalTimeTransferModel:fourTimestampUnavailable`,
+   `+revgnss/ReciprocalTimeTransferModel.m:81-86`) that both `TwoWayTimeTransferBuilder` and
+   `InterSatelliteTimeTransferBuilder` delegate to via `validateMode` AND independently re-hit
+   inside `evaluate` itself, so no third path could ever accept it unrejected (traced every call
+   site). `measurements.twstft.*` config keys, their `TWSTFTDiagnosticBuilder.validateConfig`
+   guards, and the stricter, pre-existing `validateMasterConfig:legacySatelliteTimeTransfer`
+   canonical-pipeline guard are all untouched this pass (confirmed by file mtimes and diff).
+2. **Item 3 — a real, reachable gap, fixed.** `TWSTFTDiagnosticBuilder.build` had no guard against
+   combining events from different ISL links: `twoWayInfo.linkEvents` can carry events from
+   several concurrently-active ISL links concatenated together
+   (`TwoWayISLMeasurementBuilder.aggregateInfo_`), and the old linear forward/return scan had no
+   `linkId` check at all. Fixed with two guards, in order: (a) refuse (`diagnosticClassification
+   = 'unavailableAmbiguousMultiLink'`) when the supplied events span more than one distinct
+   `linkId`; (b) refuse (`diagnosticClassification = 'unavailableLinkIdentityMismatch'`) when
+   exactly one link identifier survives but its own asset indices don't match the configured
+   `referenceAssetIndex`/`remoteAssetIndex` pair as a set -- a review finding (below) that the
+   uniqueness check alone was not sufficient. Both guards are no-ops (backward compatible) when
+   events don't carry the relevant field at all, matching the plain-struct fixture
+   `tests/test_stage24_twstft_diagnostics.m`'s own pre-existing test still uses. New test
+   `tests/test_twstft_diagnostic_multilink_guard.m` (the exact name the plan's own Stage-4 test
+   list already specifies), 4 subtests, all real `revgnss.ISLLinkEventDescriptor.create` records
+   (the actual production event schema).
+3. **Combined Opus stage-acceptance review (architect-agent, worktree-isolated): ACCEPT, no
+   blocking findings.** Independently re-verified items 1/2/4 from scratch (not trusting the
+   grounding claim), re-verified the new guard's placement, its `unique({events.linkId})` call's
+   robustness against every shape `events` can actually take in production (struct-array
+   homogeneity makes "linkId present on some elements but not others" unreachable by construction;
+   `linkId` is always `char`), confirmed no existing consumer of `diagnosticClassification`
+   branches on its literal value (only `enabled`/`rows`/`useInEKF` are read downstream), and
+   confirmed the guard is unreachable on the golden default path via two independent barriers
+   (`measurements.twstft.enable` defaults false; `validateMasterConfig` hard-rejects any config
+   that turns it on through the canonical pipeline). 3 nits applied: (a) documented the new
+   classification value in the class header, matching the review's own point that the docstring is
+   the contract a future reader consults; (b) corrected the guard's own rationale comment, which
+   had overclaimed the pre-existing defect as "cross-link forward/return mixing" -- the real,
+   reachable defect with today's producer (which always emits matched `[forwardLeg,returnLeg]`
+   pairs per link) is silently keeping only the LAST link's own pair while still labelling it under
+   the WRONG configured asset indices, which is exactly what led to (c); (c) added the link-
+   identity-mismatch guard itself (see item 2), the review's own explicit recommendation as "not
+   optional decoration" since it closes the same defect class the plan item targets and is exactly
+   the identity binding the Stage-4 physical builder will need to get right. One informational,
+   explicitly-out-of-scope finding not fixed this pass: `+revgnss/ISLTimingModel.m:72,80-84` reads
+   `twoWayInfo.linkEvents(1)`/`twoWay(1)`/`twoWay(2)` unguarded against the same multi-link
+   concatenation fragility -- untouched by this change, flagged here for whoever picks up Section
+   4.2+ since the neutral timestamp/event core that stage introduces will need to get this right
+   from the start rather than inherit it.
+4. **Full regression suite**: **281/297 passed**. File count grew from Stage 3.5's 296 to 297 (the
+   1 new Stage 4.1 test file, passing), pass count grew from 280 to 281 by exactly that margin --
+   the same 16 pre-existing/unrelated failures carried forward unchanged, confirming zero
+   regression.
+
 ### 4.2 Add a neutral timestamp/event core
 
 Add the smallest reusable layer necessary:
