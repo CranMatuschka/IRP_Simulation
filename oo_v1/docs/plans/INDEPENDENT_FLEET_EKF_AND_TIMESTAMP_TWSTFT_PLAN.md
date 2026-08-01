@@ -1593,6 +1593,131 @@ Implementation requirements:
 7. Reject missing, nonfinite, out-of-order, stale, or inconsistent tags. Never replace them with a same-epoch shortcut.
 8. Add no hidden global state. Direct ISL routes through Stage 2 or Stage 3 ownership/covariance policy; direct ground-space routes through its owning local EKF.
 
+### Section 4.3 completion record — 2026-08-01
+
+1. **Design: 6-agent judge-panel Workflow (3 independently-biased proposals + 2 judges +
+   synthesis), synthesis independently re-verified every load-bearing claim by reading source
+   directly and discarded one proposal's algebraically-backwards terminal-delay mechanism.** The
+   physics core dispatches ONCE, centrally, on `stateSource` (`physicalTruth` reuses Section 4.2's
+   own `ReciprocalTimestampEventModel.solveDirectRoundTrip` unmodified; `estimatorState` uses a
+   narrowly-scoped duplicate solver, the same golden-safety duplication tradeoff Section 4.2's own
+   completion record already accepted for its own precedent), with shared terminal-delay
+   allocation and clock-difference reduction downstream of that fork.
+2. **4 new files (`FourTimestampObservableBuilder`, `FourTimestampEstimatorEndpointBridge`,
+   `FourTimestampClockDifferenceObservable`, `FourTimestampObservableLinearization`), ZERO
+   existing files edited, ZERO wiring into any live path (confirmed by a repo-wide grep: nothing
+   outside `tests/` and the 4 new files themselves references any of the 4 new classes) --
+   golden-safe by construction.** `FourTimestampObservableBuilder.predictFromEndpointModels` is
+   the estimate-side physics entry point; `fromExchangeRecord` builds item 5's one processed
+   `FourTimestampClockDifferenceObservable` from a finished, already-solved
+   `ReciprocalTimestampExchangeRecord` (truth/diagnostic-side, no re-solve).
+   `FourTimestampEstimatorEndpointBridge` is 3 deliberately-public state-container ->
+   `TwoWayCodeEndpointModel` adapters (ISL, ground-space/local-EKF, fixed tower/broadcast-product)
+   so a Section 4.4 adapter never needs a 4th private copy of the conversion pipeline.
+   `FourTimestampObservableLinearization` is item 6's FD-stencil Jacobian engine: 14-column ISL
+   (`islTwoEndpointJacobian`), 11-column ground-space (`groundSpaceJacobian`, no `angularRate` slot
+   -- structurally absent, not zeroed, since a local EKF's `AssetStateBlock` has none), and the
+   4-column owned-calibration-state sensitivities (`calibrationMappingJacobian`).
+3. **Combined Opus stage-acceptance review (architect-agent, worktree-isolated): initial verdict
+   DO-NOT-ACCEPT (2 blocking, 3 major, 9 minor/nit findings), ALL 14 fixed directly, no second
+   review round, re-verified with real MATLAB execution after every substantive change.** The
+   review independently re-measured two of my own "verified" tolerance justifications and found
+   both factually wrong -- the most consequential findings this stage, more valuable than either
+   blocking finding alone:
+   - **Blocking 1 (real defect):** `groundSpaceJacobian` perturbed attitude by plain-additive-Euler
+     UNCONDITIONALLY, regardless of the estimator's own attitude parameterization -- wrong for
+     `quaternionErrorState` (the actual repo default, `config/masterConfig.m:239`), whose
+     `AssetStateBlock.euler` slot is a zeroed tangent ERROR state under that parameterization, not
+     literal Euler angles; `+revgnss/StageHistory.m:84` records this exact defect class already
+     fixed once before in a different builder. Fixed: `groundSpaceJacobian` now dispatches on a new
+     `options.attitudeParameterization` (default `'quaternionErrorState'`, so a caller that omits it
+     gets the repo's own default, not a silently-wrong one), perturbing the nominal body->ECEF DCM
+     in tangent space via `AttitudeErrorStateKinematics.smallAnglePerturbedDcm` -- exactly mirroring
+     the established, live production precedent `+revgnss/LinkGeometry.m:92-138`
+     (`finiteDiffAttitudeJacobian`). `FourTimestampEstimatorEndpointBridge.fromAssetStateBlock`
+     gained an optional trailing `rotationOverride` argument so the perturbed DCM can be injected
+     directly rather than reconstructed from a perturbed Euler triple (a different, non-equivalent
+     local coordinate patch). A gimbal/pitch guard (tied finding 8) was added alongside it, matching
+     the ISL path's own `requireLinearizableAttitude_`, which `groundSpaceJacobian` previously
+     lacked entirely.
+   - **Blocking 2 (real defect, same bug class as Section 4.2's own review's blocking-1 finding --
+     there m^2 mislabeled s^2, here off by exactly a factor of c):** `calibrationMappingJacobian`
+     returned `d(value_m)/d(delay_s)` (~0.5*c) while its own header comment claimed the output was
+     "pre-scaled to m", contradicting `DistributedLinkUpdateBlock.calibrationStateUnits`'s
+     documented dimensionless-mapping-factor contract. Fixed: the method now returns the exact
+     closed form directly (receiveEvent: -0.5/+0.5; transmitEvent: +0.5/-0.5; splitEvenly: 0/0,
+     verified algebraically to cancel exactly out of the classical `(t2-t1)-(t4-t3)` combination;
+     diagnostic sensitivities always +1/-1 under every allocation) instead of a finite difference --
+     which also resolves major finding 4 below, since the closed form has no epoch dependence at
+     all to be fragile to.
+   - **Major 3 (a false self-verification, not a numerics bug):** my own tolerance-widening for the
+     ISL attitude columns was justified by a claim ("confirmed stable to 7-8 significant figures
+     across a 20x step-size range") that the review's own re-measurement showed was FALSE (actual
+     wobble ~1.8e-5 relative, comparable to the disagreement it was cited to explain away). Fixed
+     per the review's own re-measurement: widened `DefaultLinearizationSteps.attitudeStep_rad` from
+     5e-4 to 5e-3 (the actual lever -- a genuine noise-floor/step-size tradeoff for this specific
+     observable, not truncation error) and restored the STRICT global tolerance for all 14 columns,
+     re-verified live: agreement now holds comfortably within the original strict tolerance.
+   - **Major 4:** covered under blocking 2 above (the forward-difference approach itself was
+     epoch-fragile -- double-precision cancellation scaling with `t4_s`, replaced by the closed
+     form rather than a smaller/larger step).
+   - **Major/finding 5 (test-coverage gap):** `fromExchangeRecord`/`FourTimestampClockDifferenceObservable`
+     had zero test coverage. Fixed: new `test_four_timestamp_processed_observable_from_record.m`
+     (8 subtests: happy-path closed-form match + `toStruct()` round-trip, unavailable-record
+     rejection, incomplete-tags rejection, wrong-topology rejection, wrong-referenceEpochRule
+     rejection, hardware-validity-window rejection, plus 2 subtests for findings 6/7 below).
+   - **Minors, all fixed:** (6) `predictFromEndpointModels`'s `estimatorState` branch had no
+     self-link guard (the `physicalTruth` branch is protected internally by
+     `ReciprocalTimestampEventModel.solveDirectRoundTrip`'s own check) -- fixed with one shared
+     guard covering both branches. (7) `predictFromEndpointModels` never called
+     `hardware.assertValidAt`, unlike `fromExchangeRecord` -- an expired calibration product was
+     silently accepted; fixed. (9) the ground-space test's "oracle" called
+     `FourTimestampObservableBuilder.predictFromEndpointModels` directly -- the SAME production
+     physics core, non-independent for the light-time solve itself (only independent of the
+     state-to-endpoint conversion, which is why it produced a suspiciously-exact match). Fixed with
+     a genuine rewrite: a `ConstantVelocityFourEventLightTimeOracle`-based independent oracle
+     mirroring the ISL test's own established template, hand-rolling tag construction/terminal-delay
+     allocation/clock-difference reduction with zero calls into any of the 4 new production classes
+     -- re-verified live to still agree with the shipped Jacobian (to full double-precision for this
+     fixture's geometry, a stronger result than the disagreement the non-independent oracle
+     previously masked). (10) header comments on `FourTimestampEstimatorEndpointBridge` and
+     `AttitudePitchGuard_rad` misstated which precedent methods were actually
+     `Access=private` -- `CoherentTwoWayRangeLinkUpdateAdapter.estimatorEndpointModelFromState` and
+     its `AttitudePitchGuard_rad` constant are both actually PUBLIC (only `buildEndpointModel_` is
+     private); corrected to state the real reason for duplication (avoiding a
+     Section-4.3-depends-on-Section-2.3.1 coupling), not a false "cannot be called" claim. (11) the
+     acceptance-comparison test's tolerance-derivation comment compared the wrong two numbers (the
+     solver's 1e-13s residual floor is actually LOOSER than the 1e-6m tolerance it was cited to
+     justify, not tighter); corrected to the real mechanism (double-precision cancellation in
+     `reduceClockDifference_` scaling with `t4_s`'s magnitude). (12) `fivePointCentralDifference_`
+     was dead code (the 2 real stencils were hand-inlined separately); wired into both
+     `rolePerturbationJacobian_` and `groundSpaceJacobian`, eliminating the duplication. (13)
+     `fromTowerBroadcastProduct` had no input validation unlike its two sibling factories; added.
+     (14) a printf in the acceptance test claimed "static disagreement was < 1e-7 m" when the
+     actual measured/used tolerance was 1e-6 m; corrected.
+   - **Confirmed correct, not changed:** the ISL path's own attitude-convention dispatch (already
+     correctly reading each endpoint's declared `attitudeErrorCoordinateConvention`); the tx/rx
+     lever-arm fixture fix (distinct offsets break a genuine physical near-cancellation of attitude
+     sensitivity that occurs when tx==rx, independently re-derived by the review); the
+     `physicalTruth`-branch self-link/calibration-validity protections inherited from Section 4.2.
+4. **4 test files (3 originally written + 1 new during the fix pass), all real MATLAB execution, no
+   mocks:** `test_four_timestamp_direct_isl_finite_difference_jacobian` (14-column ISL Jacobian vs
+   an independent `ConstantVelocityFourEventLightTimeOracle`-based oracle, now at the STRICT global
+   tolerance for every column including attitude; closed-form calibration-mapping check plus an
+   independent FD cross-check at a realistic nonzero epoch), `test_four_timestamp_ground_space_finite_difference_jacobian`
+   (11-column ground-space Jacobian vs a rewritten, genuinely independent oracle; structural
+   no-angularRate-column check; gimbal-guard rejection; legacy `eulerZYX` opt-in still works),
+   `test_four_timestamp_static_limit_matches_first_order_reciprocal` (exact v=0 agreement with
+   Section 4.2's own first-order reciprocal model; negative-control velocity-dependence check;
+   truth-side zero-delay byte-identical regression floor against Section 4.2's own solver),
+   `test_four_timestamp_processed_observable_from_record` (new: `fromExchangeRecord`/
+   `FourTimestampClockDifferenceObservable` closed-form match, `toStruct()` round-trip, 6 rejection
+   paths including the 2 new production guards).
+5. **Full regression suite**: **295/311 passed**. File count grew from Stage 4.2's 307 to 311 (4
+   new Stage 4.3 test files, all passing), pass count grew from 291 to 295 by exactly that margin --
+   the same 16 pre-existing/unrelated failures carried forward unchanged (none reference any
+   `FourTimestamp*`/`Linearization`/`EndpointBridge` class), confirming zero regression.
+
 ### 4.4 Add direct-link configuration and adapters
 
 1. Keep the existing public selection fields for ISL and ground-space time transfer. Add `fourTimestampPhysical` only as a selectable mode once implemented.
