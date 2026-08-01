@@ -1,18 +1,20 @@
 classdef DistributedLinkUpdateAdapter
     % DistributedLinkUpdateAdapter  Interface #3 (plan Section 2.1): generic contract/shape.
     %
-    % RegisteredAdapterClasses carries FOUR concrete per-observable adapters:
+    % RegisteredAdapterClasses carries FIVE concrete per-observable adapters:
     % revgnss.CoherentTwoWayRangeLinkUpdateAdapter (plan Section 2.3.1, coherent transponded PN
     % two-way code range), revgnss.FirstOrderReciprocalClockTransferLinkUpdateAdapter (plan
-    % Section 2.3.2, first-order reciprocal ISL clock-difference), and
+    % Section 2.3.2, first-order reciprocal ISL clock-difference),
     % revgnss.OneWayCodeRangeLinkUpdateAdapter / revgnss.OneWayDopplerRangeRateLinkUpdateAdapter
-    % (plan Section 2.3 item 3, one-way ISL code range and range rate). AllowedObservables
-    % therefore admits 'none', 'coherentTwoWayCodeRange', 'firstOrderReciprocalClockTransfer',
-    % 'oneWayCode', and 'oneWayDoppler' only; every other real observable identifier remains
-    % refused. revgnss.IndependentFleetCoordinator.validateConfig additionally refuses any
-    % configuration that enables more than one sanctioned observable's underlying builder at
-    % once (plan Section 2.3.2 U6, generalised N-way for Section 2.3 item 3: no two of the four
-    % sanctioned observables' own measurement generators may be co-activated in one run).
+    % (plan Section 2.3 item 3, one-way ISL code range and range rate), and
+    % revgnss.FourTimestampClockDifferenceLinkUpdateAdapter (plan Section 4.4, direct four-
+    % timestamp ISL clock-difference). AllowedObservables therefore admits 'none',
+    % 'coherentTwoWayCodeRange', 'firstOrderReciprocalClockTransfer', 'oneWayCode',
+    % 'oneWayDoppler', and 'fourTimestampClockDifference' only; every other real observable
+    % identifier remains refused. revgnss.IndependentFleetCoordinator.validateConfig additionally
+    % refuses any configuration that enables more than one sanctioned observable's underlying
+    % builder at once (plan Section 2.3.2 U6, generalised N-way: no two of the five sanctioned
+    % observables' own measurement generators may be co-activated in one run).
     %
     % This file itself still contains NO residual/Jacobian/covariance physics for any observable:
     % it is a shape/validation gate, and requireUpdateBlock additionally requires a
@@ -24,9 +26,11 @@ classdef DistributedLinkUpdateAdapter
         RegisteredAdapterClasses = {'revgnss.CoherentTwoWayRangeLinkUpdateAdapter', ...
             'revgnss.FirstOrderReciprocalClockTransferLinkUpdateAdapter', ...
             'revgnss.OneWayCodeRangeLinkUpdateAdapter', ...
-            'revgnss.OneWayDopplerRangeRateLinkUpdateAdapter'};
+            'revgnss.OneWayDopplerRangeRateLinkUpdateAdapter', ...
+            'revgnss.FourTimestampClockDifferenceLinkUpdateAdapter'};
         AllowedObservables = {'none','coherentTwoWayCodeRange', ...
-            'firstOrderReciprocalClockTransfer','oneWayCode','oneWayDoppler'};
+            'firstOrderReciprocalClockTransfer','oneWayCode','oneWayDoppler', ...
+            'fourTimestampClockDifference'};
         % Documentary only: reserved, not implemented, not accepted anywhere today.
         ReservedFutureObservables = {};
         % Plan Section 2.3 item 3: the row-units vocabulary a block/observable may carry. Every
@@ -39,7 +43,8 @@ classdef DistributedLinkUpdateAdapter
             'coherentTwoWayCodeRange','m', ...
             'firstOrderReciprocalClockTransfer','m', ...
             'oneWayCode','m', ...
-            'oneWayDoppler','m/s');
+            'oneWayDoppler','m/s', ...
+            'fourTimestampClockDifference','m');
         % Couples the SELECTED observable to the record's own processedObservableType, so a
         % oneWayRangeRate record proposed under observableIdentifier='oneWayCode' (both valid
         % class-level, since one record class carries both types) is refused at propose() time
@@ -49,7 +54,8 @@ classdef DistributedLinkUpdateAdapter
             'coherentTwoWayCodeRange','twoWayCodeRange', ...
             'firstOrderReciprocalClockTransfer','twoWayClockDifference', ...
             'oneWayCode','oneWayCodeRange', ...
-            'oneWayDoppler','oneWayRangeRate');
+            'oneWayDoppler','oneWayRangeRate', ...
+            'fourTimestampClockDifference','fourTimestampClockDifference');
         RequiredAdapterMethods = {'buildUpdateBlock'};
         % Section 2.2 adds ONE new legal assembly value, whose name asserts that no assembly
         % happened INSIDE the block (the assembly itself is performed outside it, by
@@ -95,7 +101,8 @@ classdef DistributedLinkUpdateAdapter
                 error('DistributedLinkUpdateAdapter:observableNotSelectable', ...
                     ['Observable ''%s'' is not selectable. Only ''none'', ' ...
                     '''coherentTwoWayCodeRange'', ''firstOrderReciprocalClockTransfer'', ' ...
-                    '''oneWayCode'', and ''oneWayDoppler'' validate today.'], ...
+                    '''oneWayCode'', ''oneWayDoppler'', and ''fourTimestampClockDifference'' ' ...
+                    'validate today.'], ...
                     char(observableIdentifier));
             end
         end

@@ -1726,6 +1726,198 @@ Implementation requirements:
 4. Add an ISL adapter that reuses current ISL link definition, schedule, signal/channel, frequency, and immutable ledger semantics.
 5. Ensure a JSON may select one physical mode but cannot activate an unimplemented companion observable.
 
+### Section 4.4 completion record — 2026-08-01
+
+1. **Design: Explore-agent grounding pass + 6-agent judge-panel Workflow (3 independently-biased
+   proposals + 2 judges + synthesis), synthesis independently re-verified every load-bearing claim
+   against source and corrected a name mismatch and a `DistributedClockGaugeContract` blocker
+   neither upstream proposal found.** Scope decision: ISL four-timestamp physics wired ONLY into
+   the distributed-fleet path (a new sanctioned observable `'fourTimestampClockDifference'`,
+   `revgnss.IndependentFleetCoordinator`); ground-space physics wired into the EXISTING
+   `revgnss.TwoWayTimeTransferBuilder` dispatch (`cfg.measurements.twoWayTimeTransfer.mode`);
+   `revgnss.InterSatelliteTimeTransferBuilder`/`revgnss.ReciprocalTimeTransferModel` untouched
+   (structurally incompatible with raw-tag physics — confirmed by direct read of the latter's
+   frozen-vocabulary constructor). `'fourTimestampPhysical'` (`ReciprocalTimeTransferModel.
+   PhysicalTimestampMode`) stays permanently reserved/rejected everywhere; the real observable uses
+   the separate string `'fourTimestampClockDifference'` throughout — a deliberate naming departure
+   from the plan text's own item 1 (recorded here per combined-review finding m1, since a user
+   who reads `fourTimestampPhysical.*` config leaves and tries `mode='fourTimestampPhysical'` would
+   otherwise hit a confusing `ReciprocalTimeTransferModel:fourTimestampUnavailable`; both that
+   error and the generic `:mode` error now say so explicitly).
+2. **5 new files** (`FourTimestampPhysicalLinkConfig`, `InterSatelliteFourTimestampObservationRecord`,
+   `InterSatelliteFourTimestampTimeTransferBuilder`, `FourTimestampClockDifferenceLinkUpdateAdapter`
+   — the 5th `DistributedLinkUpdateAdapter` — `FourTimestampGroundSpaceTimeTransferBuilder`) **and 9
+   modified files** (`config/masterConfig.m` two new subtrees;
+   `+revgnss/TwoWayTimeTransferBuilder.m` mode dispatch;
+   `+revgnss/ReverseGNSSSimulation.m` two call sites — see finding 3 below;
+   `+revgnss/DistributedLinkUpdateAdapter.m`/`LinkObservationDelivery.m`/`DistributedClockGaugeContract.m`/
+   `IndependentFleetCoordinator.m`/`SplitCovarianceIntersectionBound.m`/`ObservationConsumptionLedger.m`
+   registration and dispatch). Item 4 (verbatim ISL reuse) verified directly: no new
+   `measurements.isl.twoWay.links`/`.schedule`/`.terminalGeometry` leaf exists anywhere in
+   `masterConfig.m`.
+3. **A real, independently-found correctness bug, discovered before any test ran**: both live call
+   sites in `ReverseGNSSSimulation.m` passed raw `obj.ekf.x` into `TwoWayTimeTransferBuilder.build`/
+   `.predictEkfRows`. In `quaternionErrorState` mode (the repo default),
+   `filter.ReverseGNSSEKF.update()` resets `x(euler_idx)` to exactly zero inside EVERY `update()`
+   call — harmless for the legacy `firstOrderReciprocal` physics (which never reads the euler
+   columns) but would have silently linearized the new lever-arm-sensitive four-timestamp physics
+   at IDENTITY attitude. Fixed at both call sites (`obj.ekf.x` → `obj.ekf.getMeasurementState()`,
+   the class's own documented nominal-attitude substitution); proven golden-safe by a scoped
+   `git stash`/re-run/`stash pop` comparison against the committed baseline (byte-identical 22-metric
+   deviation list on the known pre-existing `509cb62` golden mismatch, both with and without this
+   section's changes).
+4. **A real, independently-found bug in a shared allocator, caught only by live end-to-end
+   `IndependentFleetCoordinator` execution**: `ObservationConsumptionLedger.validateInput_` had a
+   hardcoded 3-class allow-list missing the new `InterSatelliteFourTimestampObservationRecord`
+   type. Every `fourTimestampClockDifference` update threw INSIDE
+   `applyOwnerOnlyLinkUpdate_`'s try block, AFTER `recordConsumed` had already succeeded — the
+   catch handler's own `recordRejectedFromEligible` call then itself threw ("not in the eligible
+   state"), masking the real error behind a secondary one. This is the 4th time this project has
+   hit the exact "new record class needs updating in more than one independent allow-list, and at
+   least one gets missed" bug pattern (`LinkObservationDelivery.AllowedPhysicalRecordClasses` and
+   `ownerRemoteEndpointFieldsFor` were separately fixed for the same reason during this section).
+   Fixed by adding the class to the ledger's allow-list; a repo-wide sweep by the combined review
+   confirmed no other such allow-list was missed.
+5. **A major mid-implementation physics correction**: the design's own `relativeBiasOnly`
+   classification for `fourTimestampClockDifference` was measured, not assumed, and found wrong —
+   a live 14-column `islTwoEndpointJacobian` evaluation showed structurally nonzero position/
+   velocity/attitude/drift sensitivity (small under the shipped `commonAperture` geometry, growing
+   to O(0.1-0.6) on attitude under any genuinely distinct tx/rx offset — unlike
+   `firstOrderReciprocalClockTransfer`, whose zero-everything-but-clock-bias status is a
+   DELIBERATE modeling choice, the reciprocity term always being refused). Reclassified
+   `notAClockObservable` (matching `coherentTwoWayCodeRange`'s own "rich, multi-component" shape);
+   a `relativeBiasOnly`-oriented widening of `DistributedClockGaugeContract`'s
+   `requireTimeTransferRecordTimeAlignment`/`requireTimeTransferCalibrationProvenance` built for
+   the wrong classification was cleanly reverted (unreachable dead code under the corrected
+   classification) rather than left in place.
+6. **Combined Opus stage-acceptance review (architect-agent, worktree-isolated, ran real MATLAB
+   execution against both the working tree and the branch-tip baseline): initial verdict
+   DO-NOT-ACCEPT (2 blocking, 5 major, 12 minor, 5 test-coverage gaps), ALL real findings fixed
+   directly, no second review round, re-verified with real MATLAB execution after every
+   substantive change.**
+   - **Blocking 1:** 3 Stage-2 vocabulary-freeze tests regressed (pinned `AllowedObservables`/
+     `RegisteredAdapterClasses`/`ObservablesWithDemonstratedConservativeBound` lists legitimately
+     widened by this section but the 3 tests asserting "exactly four" were not updated) — the
+     combined-review suite ran 301/320, not the expected 304/320. Fixed: all three tests widened
+     to the correct 5-entry lists with corrected comments/messages.
+   - **Blocking 2:** the tower-clock product double-count guard and `conservativeProductCorrelation`
+     inflation (`revgnss.TwoWayTimeTransferBuilder`'s own `nCorr`/`addProductVar`/`isfinite` logic)
+     were dropped from the first cut of `FourTimestampGroundSpaceTimeTransferBuilder.build` —
+     silently averaging the piecewise-constant tower-clock broadcast-product bias down by ~sqrt(N)
+     instead of holding it at the true reference-clock floor, and no tower-clock EKF-state column
+     was wired at all under `estimator.estimateTowerClocks=true` (a silent model inconsistency
+     under a supported legacy config). Fixed: ported the `nCorr`/`isfinite` logic verbatim
+     (empirically re-verified byte-identical `R`/`nCorr` against the legacy builder under identical
+     config at multiple epochs); `estimateTowerClocks=true` is now refused outright
+     (`:towerClockStateUnsupported`) rather than silently mismodeled, since this observable's
+     estimator-side tower endpoint has no live-EKF-state counterpart this stage.
+   - **Major 1:** the `notAClockObservable` classification's own "measured, not assumed" rationale
+     cited numbers (`~1e-3` position, `~0.1-0.6` attitude) that were actually Section 4.3's own
+     deliberately-distinct-offset TEST FIXTURE, not the shipped `commonAperture` masterConfig
+     default (whose real measured values are ~1e-6-1e-5 position/attitude, ~2e-4-5e-4 velocity/
+     drift) — the classification itself was still correct (any user-declared distinct-offset
+     geometry does drive attitude to O(0.1-0.6)), but the cited evidence was wrong by up to 5
+     orders of magnitude. Fixed: corrected all 3 copies of the claim (`DistributedClockGaugeContract`,
+     `SplitCovarianceIntersectionBound`, the adapter test's own header) to state the real measured
+     default-config values and the real reason (structural, config-independent coupling; the
+     shipped default merely happens to nearly cancel it).
+   - **Major 2:** `truth.turnaroundCalibrationError_s` was wired to `anchorTerminalGroupDelay_s`
+     (a genuine physical mismatch inherited from the ISL code-range vocabulary, where "turnaround"
+     is correct — a real turnaround-proper-time error is provably INERT for this observable, t3/t4
+     shifting together and cancelling). Fixed: renamed both `truth.*`/`calibration.*` leaf pairs
+     (ISL and ground-space subtrees) to `originTerminalCalibrationError_s`/
+     `anchorTerminalCalibrationError_s` and `originTerminalSigma_s`/`anchorTerminalSigma_s`,
+     honestly naming which hardware TERMINAL delay each perturbs; all downstream readers
+     (`FourTimestampPhysicalLinkConfig.hardwareModel`, `IndependentFleetCoordinator`'s 4
+     `requireZeroFourTimestamp_` guards, the affected tests) updated to match.
+   - **Major 3 / Major 4:** `calibration.*Sigma_s` (ground-space) and `counterTag.sigma_s` (both
+     hosts) were declared, config-validated-looking knobs that never actually reached either
+     builder's own `Ri` — a nonzero declared uncertainty would silently vanish rather than inflate
+     the reported covariance. Fixed: both are now hard-refused (nonzero) at `validateConfig` time
+     on every path that reads them, matching invariant 6 (a declared-but-inert toggle must fail
+     validation, not silently no-op) rather than accept-and-drop.
+   - **Major 5 (a real scope decision, not a silent gap):** `applyAtmosphere=true` was accepted by
+     `validateConfig` yet provably changed NOTHING in the ground-space builder's own `z`/`h`/`H`/`R`
+     rows — `atmosphereVariance_s2` only ever feeds the TRUTH exchange record's own declared
+     covariance (`ReciprocalTimeTransferCovarianceBuilder.atmosphereBlock`), which this builder's
+     independently-computed `Ri` never reads, and no delay term reaches the truth timestamp events
+     either. Ruled a real defect (not an acceptable "not yet wired" scope limit) precisely because
+     this project's own `IndependentFleetCoordinator.m` already states the governing principle by
+     name for a sibling toggle: a declared config knob that visibly "does nothing" is exactly what
+     invariant 6 forbids. Folding the s²-domain variance into the m²-domain `Ri` was explicitly
+     REJECTED as the fix (would need a c²/4-class scaling this project has already gotten wrong
+     twice — Section 4.2's m²-vs-s², Section 4.3's factor-of-c — and would still be scientifically
+     incoherent while `z`/`h` stayed atmosphere-free). Fixed: `applyAtmosphere=true` is now refused
+     outright (`:atmosphereNotWired`) until a later stage wires a real delay/R contribution; the
+     truth-record-level covariance effect (real, and unaffected by this refusal since it is
+     exercised directly against `DirectReciprocalTimeTransferBuilder`, not through this builder)
+     stays covered by its own dedicated tests.
+   - **12 minor findings, all fixed or explicitly accepted as pre-existing/out-of-scope**: stale
+     plan-naming/"four sanctioned tuples" text corrected in 3 places; `attitudeSensitive` row flag
+     now reflects the row's real euler-column content instead of a hardcoded `false`; a misleading
+     `clockDiffTruth_m` field (this observable's raw t1..t4 combination, NOT a Sagnac-corrected
+     clock difference the way the legacy field of the same name is) renamed
+     `rawFourTimestampTruth_m`; `includeReciprocityResidual=true` now refused under this mode
+     (legacy-only concept the new physics never reads); a hardcoded `assetIdx=1` in
+     `terminalGeometryFromFourTimestampRecord_` documented as genuinely harmless (only feeds
+     identifiers that are immediately overwritten by the record's own real ones) rather than left
+     unexplained; tower-clock drift on the estimate side documented as a real, bounded, currently-
+     unavoidable limitation (`TowerClockCorrectionProvider` has no drift-model output to draw one
+     from); a dead `link:4ts:...` identifier construction (unconditionally overwritten downstream by
+     `ReverseGnssObservableAdapter`) replaced with the string that survives; `info` struct schema
+     gained `conservativeProductCorrelation`/`productCorrelationN`/`towerClockStateColumn`/
+     `towerClockIsState`/`note` for parity with the legacy builder's own shape;
+     `FourTimestampPhysicalLinkConfig`'s silent-defaulting numeric/text readers now backed by
+     explicit `validateConfig`-time finiteness/positivity/ordering checks on every `hardware.*`/
+     `linearizationSteps.*` leaf on both hosts; the ISL record's degenerate
+     `calibrationValidFromLocalTag_s==calibrationValidUntilLocalTag_s` window now populated from the
+     real hardware validity window instead of a single collapsed local tag. One minor finding (a
+     pre-existing, shared robustness gap where certain unstable clock-model configs can hard-abort
+     mid-run on BOTH the legacy and new physics paths, not new to this section) was left as an
+     accepted, documented limitation rather than re-engineered, since fixing it is out of scope for
+     a bug-fix pass on already-shared code.
+   - **Most important test-coverage gap (T1), fixed**: nothing previously bounded the prefit residual
+     (`z-h`) or the adapter's own `residual_m` against the declared measurement uncertainty on
+     either path — every existing assertion checked shape/finiteness/exact-formula-reproduction,
+     which a genuine sign flip or endpoint-order swap would still pass. Fixed: both the ground-space
+     builder's end-to-end test and the ISL adapter's own test now assert `|z-h| < 10*sigma`
+     per-row and `|residual_m| < 10*sqrt(Rtotal)` respectively, using the block's own real declared
+     `independentMeasurementCovariance_m2`/`remoteContributionCovariance_m2`.
+7. **10 new/extended test files, all real MATLAB execution, no mocks**:
+   `test_inter_satellite_four_timestamp_observation_record` (16 subtests: valid construction +
+   round-trip stability, 15 rejection paths), `test_inter_satellite_four_timestamp_time_transfer_builder`
+   (validateConfig accept/5 reject paths including the new counterTag guard;
+   `generateObservations` real-calibration-identifier + determinism checks),
+   `test_four_timestamp_clock_difference_link_update_adapter` (delivery-acceptance +
+   `notAClockObservable` audit agreement, residual closure, exact Jacobian reproduction, exact
+   dominant clock-bias columns, exact `remoteContributionCovariance_m2` formula, 3 rejection
+   paths), `test_four_timestamp_ground_space_time_transfer_builder` (end-to-end epoch + residual
+   closure, `predictEkfRows` exact reproduction, 7 `validateConfig` rejection paths covering every
+   new guard from the combined review), `test_four_timestamp_short_long_terminal_geometry_translation`
+   (8 subtests across both ISL and ground-space translation, both directions,
+   malformed-input rejection), `test_four_timestamp_naming_and_mode_dispatch` (6 subtests proving
+   `fourTimestampClockDifference` really dispatches to the new code paths and
+   `fourTimestampPhysical` stays rejected everywhere), `test_four_timestamp_independent_fleet_coordinator_sanctioned_tuple`
+   (full real end-to-end coordinator run — not direct `LinkObservationDelivery.tryPropose` calls —
+   generation/delivery/consumption counts, posterior-covariance sanity, 2 mutual-exclusion
+   refusals, disabled-tuple no-op), `test_four_timestamp_exactly_once_consumption` (ledger-level
+   unit tests for the new record type plus a 9-epoch coordinator integration proof of
+   generated==delivered==consumedByOwner with zero double-count/drop — this is the test that
+   caught finding 4 above), `test_four_timestamp_ground_space_atmosphere_truth_model_separation`
+   (documents the real truth-record-only covariance effect AND the refusal at this builder's own
+   validation boundary), plus `test_stage2_clock_gauge_and_time_alignment_guards`/
+   `test_stage2_communication_interfaces`/`test_stage2_conservative_correlation_policy` extended to
+   the corrected 5-entry vocabulary lists (blocking 1's fix). `test_conservative_full_state_link_update`
+   (observable-identifier-agnostic; nothing to extend) and
+   `test_first_order_reciprocal_clock_transfer_link_update_adapter` (re-run byte-identical
+   post-revert) independently re-verified unaffected.
+8. **Full regression suite**: **304/320 passed**. File count grew from Section 4.3's 311 to 320 (9
+   new Section 4.4 test files, all passing), pass count grew from 295 to 304 by exactly that
+   margin — the same 16 pre-existing/unrelated failures carried forward unchanged (LAMBDA resolver,
+   Orekit cross-validation, tower-clock-correction/mode/v4, formation rank deficiency, multipath,
+   none referencing any `FourTimestamp*`/`InterSatelliteFourTimestamp*` class or the modified
+   shared files), confirming zero regression.
+
 ### 4.5 Add classical relay TWSTFT as a separate session processor
 
 Only after direct four-timestamp transfer passes its tests, add:

@@ -512,16 +512,16 @@ classdef IndependentFleetCoordinator < handle
                 revgnss.DistributedLinkProtocolContract.isFullyRejectedCommonSourceTreatment( ...
                 settings.linkUpdate.commonSourceTreatment);
 
-            % Plan Section 2.3.1/2.3.2/2.3-item-3: exactly ONE non-disabled configuration is
+            % Plan Section 2.3.1/2.3.2/2.3-item-3/4.4: exactly ONE non-disabled configuration is
             % sanctioned at a time -- one of coherentTwoWayCodeRange, firstOrderReciprocal
-            % ClockTransfer, oneWayCode, or oneWayDoppler, under splitCovarianceIntersection,
-            % owned by the initiator, every common source still rejected. Every other
-            % combination (including any partial/mixed one, and combining more than one
-            % sanctioned observable at once -- Section 2.3.2 U6, generalised N-way) fails
-            % validation; there is no silent fallback (invariant 6).
+            % ClockTransfer, oneWayCode, oneWayDoppler, or fourTimestampClockDifference, under
+            % splitCovarianceIntersection, owned by the initiator, every common source still
+            % rejected. Every other combination (including any partial/mixed one, and combining
+            % more than one sanctioned observable at once -- Section 2.3.2 U6, generalised N-way)
+            % fails validation; there is no silent fallback (invariant 6).
             sanctionedObservables = { ...
                 'coherentTwoWayCodeRange','firstOrderReciprocalClockTransfer', ...
-                'oneWayCode','oneWayDoppler'};
+                'oneWayCode','oneWayDoppler','fourTimestampClockDifference'};
             sanctionedActive = settings.linkUpdate.enable && strcmp(ownerPolicy,'initiator') && ...
                 strcmp(correlationPolicy,'splitCovarianceIntersection') && ...
                 any(strcmp(observable,sanctionedObservables)) && commonSourceRejected;
@@ -530,15 +530,16 @@ classdef IndependentFleetCoordinator < handle
                 commonSourceRejected;
             if ~sanctionedActive && ~allDisabled
                 error('IndependentFleetCoordinator:linkUpdateUnavailable', ...
-                    ['Only five distributedEstimator.linkUpdate configurations are supported: ' ...
+                    ['Only six distributedEstimator.linkUpdate configurations are supported: ' ...
                     'fully disabled (enable=false, ownerPolicy=''disabled'', ' ...
                     'correlationPolicy=''disabled'', updateAdapter.observable=''none''), or one ' ...
-                    'of the four sanctioned tuples (enable=true, ownerPolicy=''initiator'', ' ...
+                    'of the five sanctioned tuples (enable=true, ownerPolicy=''initiator'', ' ...
                     'correlationPolicy=''splitCovarianceIntersection'', every ' ...
                     'commonSourceTreatment entry ''rejected'', and updateAdapter.observable one ' ...
                     'of ''coherentTwoWayCodeRange'', ''firstOrderReciprocalClockTransfer'', ' ...
-                    '''oneWayCode'', or ''oneWayDoppler''). No partial/mixed combination, and no ' ...
-                    'combination of more than one sanctioned observable at once, is accepted.']);
+                    '''oneWayCode'', ''oneWayDoppler'', or ''fourTimestampClockDifference''). No ' ...
+                    'partial/mixed combination, and no combination of more than one sanctioned ' ...
+                    'observable at once, is accepted.']);
             end
             sanctionedObservable = 'none';
             if sanctionedActive
@@ -707,6 +708,7 @@ classdef IndependentFleetCoordinator < handle
             observable = char(settings.linkUpdate.updateAdapter.observable);
             isTimeTransfer = strcmp(observable,'firstOrderReciprocalClockTransfer');
             isOneWay = strcmp(observable,'oneWayCode') || strcmp(observable,'oneWayDoppler');
+            isFourTimestamp = strcmp(observable,'fourTimestampClockDifference');
 
             t_s = obj.tVec(epochIndex);
             assets = cellfun(@(sim) sim.asset,obj.localSimulations,'UniformOutput',false);
@@ -716,6 +718,9 @@ classdef IndependentFleetCoordinator < handle
             elseif isTimeTransfer
                 [observations,~,info] = revgnss.InterSatelliteTimeTransferBuilder.generateObservations( ...
                     obj.cfg,assets,t_s);
+            elseif isFourTimestamp
+                [observations,~,info] = revgnss.InterSatelliteFourTimestampTimeTransferBuilder. ...
+                    generateObservations(obj.cfg,assets,t_s);
             else
                 [observations,~,info] = revgnss.TwoWayISLMeasurementBuilder.generateObservations( ...
                     obj.cfg,assets{1},assets,t_s);
@@ -737,7 +742,12 @@ classdef IndependentFleetCoordinator < handle
                             record.receiverAssetIdentifier);
                         remoteCanonical = revgnss.CanonicalEndpointIdentity.fromRecordIdentifier( ...
                             record.transmitterAssetIdentifier);
-                    elseif isTimeTransfer
+                    elseif isTimeTransfer || isFourTimestamp
+                        % Both revgnss.InterSatelliteTimeTransferObservationRecord and
+                        % revgnss.InterSatelliteFourTimestampObservationRecord (plan Section 4.4)
+                        % share the SAME referenceAssetIdentifier/remoteAssetIdentifier field
+                        % names, by deliberate design choice (+revgnss/
+                        % InterSatelliteFourTimestampObservationRecord.m's own header).
                         ownerCanonical = revgnss.CanonicalEndpointIdentity.fromRecordIdentifier( ...
                             record.referenceAssetIdentifier);
                         remoteCanonical = revgnss.CanonicalEndpointIdentity.fromRecordIdentifier( ...
@@ -766,6 +776,16 @@ classdef IndependentFleetCoordinator < handle
                             terminalGeometryFromTimeTransferRecord_(record,'owner');
                         remoteTerminalGeometry = revgnss.IndependentFleetCoordinator. ...
                             terminalGeometryFromTimeTransferRecord_(record,'remote');
+                    elseif isFourTimestamp
+                        % NOT merged into the isTimeTransfer branch above: unlike
+                        % revgnss.ReciprocalTimeTransferModel's always-zero position/velocity
+                        % partials, this observable's Jacobian (revgnss.
+                        % FourTimestampObservableLinearization.islTwoEndpointJacobian) genuinely
+                        % is lever-arm sensitive, so a real nonzero declared offset is required.
+                        terminalGeometry = revgnss.IndependentFleetCoordinator. ...
+                            terminalGeometryFromFourTimestampRecord_(obj.cfg,record,'owner');
+                        remoteTerminalGeometry = revgnss.IndependentFleetCoordinator. ...
+                            terminalGeometryFromFourTimestampRecord_(obj.cfg,record,'remote');
                     else
                         terminalGeometry = revgnss.IndependentFleetCoordinator.terminalGeometryFromRecord_( ...
                             record,'owner');
@@ -790,7 +810,15 @@ classdef IndependentFleetCoordinator < handle
                     % no calibrationProduct at all); calibrationProduct stays [] and is never
                     % referenced on those paths.
                     calibrationProduct = [];
-                    if ~isTimeTransfer && ~isOneWay
+                    if isFourTimestamp
+                        % revgnss.FourTimestampClockDifferenceLinkUpdateAdapter's buildUpdateBlock
+                        % DOES require a calibrationProduct (a revgnss.ReciprocalLinkHardwareModel,
+                        % not a revgnss.CoherentTwoWayCodeHardwareModel like the range observable's)
+                        % -- built fresh from config here, matching the range observable's own
+                        % staging-time-build pattern.
+                        calibrationProduct = revgnss.FourTimestampPhysicalLinkConfig.hardwareModel( ...
+                            obj.cfg,'isl','calibrationProduct');
+                    elseif ~isTimeTransfer && ~isOneWay
                         linkDefinitionIndex = 0;
                         if isfield(linkInfo,'linkDefinitionIndex')
                             linkDefinitionIndex = linkInfo.linkDefinitionIndex;
@@ -979,6 +1007,15 @@ classdef IndependentFleetCoordinator < handle
                         'weightSelectionRule','fixedDeclaredWeights', ...
                         'persistentCalibrationTreatment','rejected');
                     [block, ~] = revgnss.OneWayDopplerRangeRateLinkUpdateAdapter.buildUpdateBlock(buildArgs);
+                case 'fourTimestampClockDifference'
+                    steps = revgnss.IndependentFleetCoordinator.fourTimestampLinearizationStepsFromConfig_(obj.cfg);
+                    buildArgs = struct( ...
+                        'delivery',delivery,'ownerState',ownerState,'remoteState',remoteState, ...
+                        'calibrationProduct',calibrationProduct,'linearizationSteps',steps, ...
+                        'solverOptions',struct(), ...
+                        'weightSelectionRule','fixedDeclaredWeights', ...
+                        'persistentCalibrationTreatment','rejected');
+                    [block, ~] = revgnss.FourTimestampClockDifferenceLinkUpdateAdapter.buildUpdateBlock(buildArgs);
                 otherwise
                     error('IndependentFleetCoordinator:adapterClassForObservable', ...
                         'Observable ''%s'' has no registered adapter dispatch.', ...
@@ -1560,6 +1597,44 @@ classdef IndependentFleetCoordinator < handle
                 'receivePhaseCentreOffset_body_m',zeros(3,1));
         end
 
+        function geometry = terminalGeometryFromFourTimestampRecord_(cfg, record, role)
+            % terminalGeometryFromFourTimestampRecord_  Plan Section 4.4. Unlike
+            % terminalGeometryFromTimeTransferRecord_ above, this observable's Jacobian
+            % (revgnss.FourTimestampObservableLinearization.islTwoEndpointJacobian) genuinely IS
+            % lever-arm sensitive, so a real, nonzero, generally DISTINCT tx/rx offset is required
+            % -- read from the SAME cfg.measurements.isl.twoWay.terminalGeometry.* leaf every
+            % other ISL observable's estimator side already uses (mirrors estimatorLeverArm_'s own
+            % "hardcoded literal matching the shipped config default" tradeoff below would have
+            % used, but reads real config here since this observable's own physics can genuinely
+            % use a non-commonAperture geometry).
+            % assetIdx=1 (combined-review m7): shortNameIslTerminalGeometry's assetIdx argument
+            % only feeds the identifier strings it generates (transmit/receiveTerminalIdentifier),
+            % which are IMMEDIATELY OVERWRITTEN below by the record's own real identifiers -- only
+            % transmitOffset_body_m/receiveOffset_body_m are actually used, and those do not
+            % depend on assetIdx at all (isl.twoWay.terminalGeometry declares one shared
+            % commonAperture offset for every asset). A hardcoded literal here is therefore
+            % genuinely harmless today, not a latent bug -- but if that config leaf is ever made
+            % per-asset, this call would need the real canonical index, not this literal.
+            geometryShort = revgnss.FourTimestampPhysicalLinkConfig.shortNameIslTerminalGeometry(cfg,1);
+            if strcmp(role,'owner')
+                geometry = struct('declared',true, ...
+                    'transmitTerminalIdentifier',record.referenceTransmitTerminalIdentifier, ...
+                    'receiveTerminalIdentifier',record.referenceReceiveTerminalIdentifier, ...
+                    'transmitAntennaIdentifier',record.referenceTransmitAntennaIdentifier, ...
+                    'receiveAntennaIdentifier',record.referenceReceiveAntennaIdentifier, ...
+                    'transmitPhaseCentreOffset_body_m',geometryShort.transmitOffset_body_m, ...
+                    'receivePhaseCentreOffset_body_m',geometryShort.receiveOffset_body_m);
+            else
+                geometry = struct('declared',true, ...
+                    'transmitTerminalIdentifier',record.remoteTransmitTerminalIdentifier, ...
+                    'receiveTerminalIdentifier',record.remoteReceiveTerminalIdentifier, ...
+                    'transmitAntennaIdentifier',record.remoteTransmitAntennaIdentifier, ...
+                    'receiveAntennaIdentifier',record.remoteReceiveAntennaIdentifier, ...
+                    'transmitPhaseCentreOffset_body_m',geometryShort.transmitOffset_body_m, ...
+                    'receivePhaseCentreOffset_body_m',geometryShort.receiveOffset_body_m);
+            end
+        end
+
         function leverArm = estimatorLeverArm_()
             % estimatorLeverArm_  The ISL terminal lever arm masterConfig already declares
             % (measurements.isl.twoWay.terminalGeometry.*), matching what
@@ -1592,6 +1667,29 @@ classdef IndependentFleetCoordinator < handle
                     cfg,{'measurements','isl','twoWay','range','linearization','clockBiasStep_m'},10), ...
                 'clockDriftStep_mps',revgnss.IndependentFleetCoordinator.numericPath_( ...
                     cfg,{'measurements','isl','twoWay','range','linearization','clockDriftStep_mps'},0.01));
+        end
+
+        function steps = fourTimestampLinearizationStepsFromConfig_(cfg)
+            % fourTimestampLinearizationStepsFromConfig_  Plan Section 4.4. Deliberately a
+            % SEPARATE reader from linearizationStepsFromConfig_ above: that method reads
+            % measurements.isl.twoWay.range.linearization.* -- a leaf scoped to
+            % coherentTwoWayCodeRange specifically, not a shared location -- so reusing it here
+            % would silently read the WRONG observable's step sizes. Reads
+            % measurements.isl.twoWay.fourTimestampPhysical.linearizationSteps.* instead (this
+            % observable's own leaf, config/masterConfig.m), whose defaults already mirror
+            % revgnss.FourTimestampObservableLinearization.DefaultLinearizationSteps.
+            root = {'measurements','isl','twoWay','fourTimestampPhysical','linearizationSteps'};
+            steps = struct( ...
+                'positionStep_m',revgnss.IndependentFleetCoordinator.numericPath_( ...
+                    cfg,[root,{'positionStep_m'}],0.25), ...
+                'velocityStep_mps',revgnss.IndependentFleetCoordinator.numericPath_( ...
+                    cfg,[root,{'velocityStep_mps'}],0.025), ...
+                'attitudeStep_rad',revgnss.IndependentFleetCoordinator.numericPath_( ...
+                    cfg,[root,{'attitudeStep_rad'}],5e-3), ...
+                'clockBiasStep_m',revgnss.IndependentFleetCoordinator.numericPath_( ...
+                    cfg,[root,{'clockBiasStep_m'}],5), ...
+                'clockDriftStep_mps',revgnss.IndependentFleetCoordinator.numericPath_( ...
+                    cfg,[root,{'clockDriftStep_mps'}],0.005));
         end
 
         function ratio = safeRatio_(errorValue, sigmaValue)
@@ -1821,6 +1919,8 @@ classdef IndependentFleetCoordinator < handle
                     className = 'revgnss.OneWayCodeRangeLinkUpdateAdapter';
                 case 'oneWayDoppler'
                     className = 'revgnss.OneWayDopplerRangeRateLinkUpdateAdapter';
+                case 'fourTimestampClockDifference'
+                    className = 'revgnss.FourTimestampClockDifferenceLinkUpdateAdapter';
                 otherwise
                     error('IndependentFleetCoordinator:adapterClassForObservable', ...
                         'Observable ''%s'' has no registered adapter dispatch.',char(observable));
@@ -1869,8 +1969,9 @@ classdef IndependentFleetCoordinator < handle
             isTimeTransferSanctioned = strcmp(sanctionedObservable,'firstOrderReciprocalClockTransfer');
             isOneWayCodeSanctioned = strcmp(sanctionedObservable,'oneWayCode');
             isOneWayDopplerSanctioned = strcmp(sanctionedObservable,'oneWayDoppler');
+            isFourTimestampSanctioned = strcmp(sanctionedObservable,'fourTimestampClockDifference');
             anySanctioned = isRangeSanctioned || isTimeTransferSanctioned || ...
-                isOneWayCodeSanctioned || isOneWayDopplerSanctioned;
+                isOneWayCodeSanctioned || isOneWayDopplerSanctioned || isFourTimestampSanctioned;
             % measurements.isl.enable: exempt under ANY sanctioned observable (shared parent of
             % both the two-way and one-way distributed subtrees).
             if ~anySanctioned && revgnss.IndependentFleetCoordinator.logicalPath_( ...
@@ -1878,8 +1979,10 @@ classdef IndependentFleetCoordinator < handle
                 tf = true;
                 return
             end
-            % measurements.isl.twoWay.enable: exempt under range OR time-transfer only.
-            if ~(isRangeSanctioned || isTimeTransferSanctioned) && ...
+            % measurements.isl.twoWay.enable: exempt under range, time-transfer, OR
+            % fourTimestampClockDifference (plan Section 4.4 -- this observable has no leaf enable
+            % of its own, see below, so it is exempted at THIS parent level instead).
+            if ~(isRangeSanctioned || isTimeTransferSanctioned || isFourTimestampSanctioned) && ...
                     revgnss.IndependentFleetCoordinator.logicalPath_( ...
                     cfg,{'measurements','isl','twoWay','enable'},false)
                 tf = true;
@@ -2049,6 +2152,41 @@ classdef IndependentFleetCoordinator < handle
                     error('IndependentFleetCoordinator:lightTimeCorrectionUnavailableForDistributedRow', ...
                         'measurements.isl.lightTime.enable must be false under the sanctioned one-way tuple.');
                 end
+            elseif strcmp(sanctionedObservable,'fourTimestampClockDifference')
+                if ~revgnss.IndependentFleetCoordinator.logicalPath_( ...
+                        cfg,{'measurements','isl','twoWay','enable'},false)
+                    error('IndependentFleetCoordinator:twoWayNotEnabled', ...
+                        'The sanctioned tuple requires measurements.isl.twoWay.enable=true.');
+                end
+                % Mirrors the time-transfer/one-way persistent-delay precedents' SHAPE exactly
+                % (same "fails at construction, not silently later" rationale), but is the ONLY
+                % enforcement for this observable: unlike firstOrderReciprocalClockTransfer,
+                % fourTimestampClockDifference is classified 'notAClockObservable' (measured, not
+                % assumed -- +revgnss/DistributedClockGaugeContract.m's own
+                % ClockClaimByObservable header), so
+                % revgnss.DistributedClockGaugeContract.requireTimeTransferCalibrationProvenance
+                % is never reached for this observable at all (that method only runs when
+                % clockClaim=='relativeBiasOnly').
+                % Combined-review M2: truth.originTerminalCalibrationError_s/
+                % anchorTerminalCalibrationError_s and calibration.originTerminalSigma_s/
+                % anchorTerminalSigma_s (renamed from turnaround/terminal -- named for which
+                % HARDWARE TERMINAL DELAY each perturbs, not "turnaround": a genuine
+                % turnaroundProperTime_s error is inert for this observable).
+                requireZeroFourTimestamp_ = @(path,identifierSuffix) revgnss.IndependentFleetCoordinator. ...
+                    requireZeroPath_(cfg,path,identifierSuffix);
+                requireZeroFourTimestamp_({'measurements','isl','twoWay','fourTimestampPhysical', ...
+                    'truth','originTerminalCalibrationError_s'}, ...
+                    'persistentCalibrationUnavailableForDistributedRow');
+                requireZeroFourTimestamp_({'measurements','isl','twoWay','fourTimestampPhysical', ...
+                    'truth','anchorTerminalCalibrationError_s'}, ...
+                    'persistentCalibrationUnavailableForDistributedRow');
+                requireZeroFourTimestamp_({'measurements','isl','twoWay','fourTimestampPhysical', ...
+                    'calibration','originTerminalSigma_s'}, ...
+                    'persistentCalibrationUnavailableForDistributedRow');
+                requireZeroFourTimestamp_({'measurements','isl','twoWay','fourTimestampPhysical', ...
+                    'calibration','anchorTerminalSigma_s'}, ...
+                    'persistentCalibrationUnavailableForDistributedRow');
+                revgnss.InterSatelliteFourTimestampTimeTransferBuilder.validateConfig(cfg);
             else
                 error('IndependentFleetCoordinator:sanctionedObservable', ...
                     'requireSanctionedIslConfiguration_ requires a sanctioned observable.');

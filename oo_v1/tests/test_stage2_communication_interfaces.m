@@ -572,17 +572,18 @@ end
 
 % ================================================================================================
 function i_updateAdapterContractShapeOnly_()
-% As of Section 2.3 item 3, FOUR concrete per-observable adapters are registered
-% (coherentTwoWayCodeRange, firstOrderReciprocalClockTransfer, oneWayCode, oneWayDoppler --
-% Sections 2.3.1/2.3.2/2.3-item-3 respectively); every other real observable identifier remains
-% refused, ReservedFutureObservables is now empty (both former entries are implemented), and an
-% unrelated adapter class name remains unregistered.
+% As of plan Section 4.4, FIVE concrete per-observable adapters are registered
+% (coherentTwoWayCodeRange, firstOrderReciprocalClockTransfer, oneWayCode, oneWayDoppler,
+% fourTimestampClockDifference -- Sections 2.3.1/2.3.2/2.3-item-3/4.4 respectively); every other
+% real observable identifier remains refused, ReservedFutureObservables is empty (every former
+% entry is implemented), and an unrelated adapter class name remains unregistered.
 assert(isequal(revgnss.DistributedLinkUpdateAdapter.RegisteredAdapterClasses, ...
     {'revgnss.CoherentTwoWayRangeLinkUpdateAdapter', ...
     'revgnss.FirstOrderReciprocalClockTransferLinkUpdateAdapter', ...
     'revgnss.OneWayCodeRangeLinkUpdateAdapter', ...
-    'revgnss.OneWayDopplerRangeRateLinkUpdateAdapter'}), ...
-    'Exactly four concrete per-observable adapters must be registered.');
+    'revgnss.OneWayDopplerRangeRateLinkUpdateAdapter', ...
+    'revgnss.FourTimestampClockDifferenceLinkUpdateAdapter'}), ...
+    'Exactly five concrete per-observable adapters must be registered.');
 i_expectError_(@() revgnss.DistributedLinkUpdateAdapter.requireRegisteredAdapter('anything'), ...
     'DistributedLinkUpdateAdapter:adapterNotRegistered');
 revgnss.DistributedLinkUpdateAdapter.requireRegisteredAdapter( ...
@@ -592,6 +593,7 @@ revgnss.DistributedLinkUpdateAdapter.requireObservableSelectable('coherentTwoWay
 revgnss.DistributedLinkUpdateAdapter.requireObservableSelectable('firstOrderReciprocalClockTransfer');
 revgnss.DistributedLinkUpdateAdapter.requireObservableSelectable('oneWayCode');
 revgnss.DistributedLinkUpdateAdapter.requireObservableSelectable('oneWayDoppler');
+revgnss.DistributedLinkUpdateAdapter.requireObservableSelectable('fourTimestampClockDifference');
 reserved = revgnss.DistributedLinkUpdateAdapter.ReservedFutureObservables;
 assert(isempty(reserved), ...
     'Every previously-reserved observable is now implemented; ReservedFutureObservables must be empty.');

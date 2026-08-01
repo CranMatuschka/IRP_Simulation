@@ -941,15 +941,17 @@ end
 
 % ================================================================================================
 function i_observableHasNoDemonstratedBoundYet_()
-% As of Section 2.3 item 3, exactly FOUR observables have a demonstrated bound
-% (coherentTwoWayCodeRange, firstOrderReciprocalClockTransfer, oneWayCode, oneWayDoppler --
-% Sections 2.3.1/2.3.2/2.3-item-3 respectively); every other real observable identifier --
-% including 'none' -- remains refused. ReservedFutureObservables is now empty (both former
-% entries are implemented), so there is nothing left to probe in that former negative-control
-% loop; 'somethingStillUnimplemented' stands in as a genuinely never-declared identifier.
+% As of plan Section 4.4, exactly FIVE observables have a demonstrated bound
+% (coherentTwoWayCodeRange, firstOrderReciprocalClockTransfer, oneWayCode, oneWayDoppler,
+% fourTimestampClockDifference -- Sections 2.3.1/2.3.2/2.3-item-3/4.4 respectively); every other
+% real observable identifier -- including 'none' -- remains refused. ReservedFutureObservables is
+% empty (every former entry is implemented), so there is nothing left to probe in that former
+% negative-control loop; 'somethingStillUnimplemented' stands in as a genuinely never-declared
+% identifier.
 demonstrated = revgnss.SplitCovarianceIntersectionBound.ObservablesWithDemonstratedConservativeBound;
 assert(isequal(demonstrated, ...
-    {'coherentTwoWayCodeRange','firstOrderReciprocalClockTransfer','oneWayCode','oneWayDoppler'}));
+    {'coherentTwoWayCodeRange','firstOrderReciprocalClockTransfer','oneWayCode','oneWayDoppler', ...
+    'fourTimestampClockDifference'}));
 for idx = 1:numel(demonstrated)
     revgnss.SplitCovarianceIntersectionBound.requireObservableHasDemonstratedBound(demonstrated{idx});
 end
@@ -958,7 +960,7 @@ i_expectError_(@() revgnss.SplitCovarianceIntersectionBound.requireObservableHas
     'somethingStillUnimplemented'),'SplitCovarianceIntersectionBound:observableBoundNotDemonstrated');
 i_expectError_(@() revgnss.SplitCovarianceIntersectionBound.requireObservableHasDemonstratedBound('none'), ...
     'SplitCovarianceIntersectionBound:observableBoundNotDemonstrated');
-fprintf('  PASS exactly the four sanctioned observables have a demonstrated conservative bound\n');
+fprintf('  PASS exactly the five sanctioned observables have a demonstrated conservative bound\n');
 end
 
 % ================================================================================================

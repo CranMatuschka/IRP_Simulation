@@ -16,7 +16,8 @@ classdef LinkObservationDelivery
         AllowedPhysicalRecordClasses = { ...
             'revgnss.InterSatelliteObservationRecord', ...
             'revgnss.InterSatelliteTimeTransferObservationRecord', ...
-            'revgnss.OneWayInterSatelliteObservationRecord'};
+            'revgnss.OneWayInterSatelliteObservationRecord', ...
+            'revgnss.InterSatelliteFourTimestampObservationRecord'};
         AllowedOwnerPolicies = {'disabled','initiator'};
         AllowedRoleReversalPolicies = {'disabled','separateScheduledSession'};
         AllowedRemoteProductPropagationPolicies = {'frozenSameEpochOnly'};
@@ -455,6 +456,17 @@ classdef LinkObservationDelivery
                 % referenceIndex = link.initiatorAssetIndex by construction, so 'reference' IS
                 % the initiator for this record type; 'remote' plays the owner role's peer here,
                 % exactly as 'transponder' does for the range record.
+                ownerField = 'referenceAssetIdentifier';
+                remoteField = 'remoteAssetIdentifier';
+                return
+            end
+            if strcmp(recordClass,'revgnss.InterSatelliteFourTimestampObservationRecord') && ...
+                    strcmp(ownerPolicy,'initiator')
+                % revgnss.InterSatelliteFourTimestampTimeTransferBuilder.generateObservations sets
+                % referenceAssetIdentifier = the link's initiator (t1-transmitting) endpoint by
+                % construction (plan Section 4.4's own design choice), so 'reference' IS the
+                % initiator here -- the SAME field-name convention as
+                % revgnss.InterSatelliteTimeTransferObservationRecord above.
                 ownerField = 'referenceAssetIdentifier';
                 remoteField = 'remoteAssetIdentifier';
                 return

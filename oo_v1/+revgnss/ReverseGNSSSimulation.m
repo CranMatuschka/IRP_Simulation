@@ -728,8 +728,15 @@ classdef ReverseGNSSSimulation < handle
             % clock-difference rows that observe the receiver clock directly, breaking
             % the GEO radial<->clock degeneracy. Disabled by default (golden byte-identical:
             % build returns empty when cfg.measurements.twoWayTimeTransfer.enable=false).
+            % obj.ekf.getMeasurementState(), not raw obj.ekf.x: Section 4.4's fourTimestampClockDifference
+            % mode is attitude/lever-arm sensitive (unlike the legacy firstOrderReciprocal physics,
+            % which never reads the euler columns at all), and in quaternionErrorState mode
+            % x(euler_idx) is reset to exactly zero inside every ekf.update() call -- raw ekf.x would
+            % silently linearize at identity attitude. getMeasurementState() returns a COPY of x with
+            % only the euler columns substituted, so this is a no-op for the legacy mode (golden-safe).
             [z_twtt, h_twtt, H_twtt, R_twtt, twttInfo] = revgnss.TwoWayTimeTransferBuilder.build( ...
-                obj.cfg, obj.errorChain, obj.asset, obj.towers, obj.ekf.x, obj.ekf.stateMap, obj.ekf.nx, t_s);
+                obj.cfg, obj.errorChain, obj.asset, obj.towers, obj.ekf.getMeasurementState(), ...
+                obj.ekf.stateMap, obj.ekf.nx, t_s);
             if ~isempty(z_twtt)
                 z = [z; z_twtt];
                 h = [h; h_twtt];
@@ -1255,7 +1262,8 @@ classdef ReverseGNSSSimulation < handle
             if isfield(errStruct,'twoWayTimeTransfer') && isstruct(errStruct.twoWayTimeTransfer) && ...
                     isfield(errStruct.twoWayTimeTransfer,'nEkfRows') && errStruct.twoWayTimeTransfer.nEkfRows > 0
                 h_twtt = revgnss.TwoWayTimeTransferBuilder.predictEkfRows( ...
-                    obj.cfg, obj.asset, obj.towers, obj.ekf.x, sm, errStruct.twoWayTimeTransfer, t_s);
+                    obj.cfg, obj.asset, obj.towers, obj.ekf.getMeasurementState(), sm, ...
+                    errStruct.twoWayTimeTransfer, t_s);
             end
             M_twtt = numel(h_twtt);
             if M_dop > 0 || M_car > 0

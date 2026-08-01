@@ -41,12 +41,37 @@ classdef DistributedClockGaugeContract
         % of clockClaim (see requireEndpointPairTimeFrameDatumCompatible below); only the four
         % relativeBiasOnly-specific checks (which probe time-transfer-record-only fields) are
         % skipped, exactly as for coherentTwoWayCodeRange.
+        % fourTimestampClockDifference (plan Section 4.4) is 'notAClockObservable', NOT
+        % relativeBiasOnly -- measured, not assumed: a live 14-column
+        % revgnss.FourTimestampObservableLinearization.islTwoEndpointJacobian evaluation on the
+        % SHIPPED masterConfig geometry (isl.twoWay.terminalGeometry.mode='commonAperture',
+        % identical tx/rx phase-centre offsets) gave position ~1e-6-1e-5 m, velocity ~2e-4-5e-4
+        % m/s, attitude ~1e-6-1e-5 (all near-cancelled by the common aperture), and clockDrift
+        % ~5e-4 m/(m/s) -- small in this default geometry, but structurally NONZERO and, for
+        % velocity/drift, not negligible even here (a combined-review finding corrected an
+        % earlier, wrong claim of ~1e-3 position / ~0.1-0.6 attitude here, which was actually
+        % Section 4.3's own DELIBERATELY-distinct-offset test fixture, not this shipped default).
+        % Under any user-declared geometry with genuinely distinct tx/rx offsets (a real lever
+        % arm), the attitude columns grow to O(0.1-0.6) -- see
+        % tests/test_four_timestamp_ground_space_finite_difference_jacobian.m's own fixture --
+        % which is why this observable is classified 'notAClockObservable' rather than
+        % relativeBiasOnly regardless of the shipped default: unlike
+        % firstOrderReciprocalClockTransfer, whose relativeBiasOnly status comes from a DELIBERATE
+        % modeling choice (revgnss.ReciprocalTimeTransferModel.evaluate's reciprocity term, the
+        % only source of any position/velocity/drift dependence in that model, is always refused
+        % this release -- +revgnss/FirstOrderReciprocalClockTransferLinkUpdateAdapter.m's own
+        % header), the four-timestamp observable has no such switch: its light-time-based physics
+        % couples to position/velocity/attitude/drift unconditionally (structurally, not merely
+        % under a particular config), matching coherentTwoWayCodeRange's own "rich, multi-
+        % component" shape far more than firstOrderReciprocalClockTransfer's "pure gauge" shape,
+        % even though its dominant term is still the same +-1 clock-bias signature.
         ClockClaimByObservable = struct( ...
             'none','notAClockObservable', ...
             'coherentTwoWayCodeRange','notAClockObservable', ...
             'firstOrderReciprocalClockTransfer','relativeBiasOnly', ...
             'oneWayCode','notAClockObservable', ...
-            'oneWayDoppler','notAClockObservable');
+            'oneWayDoppler','notAClockObservable', ...
+            'fourTimestampClockDifference','notAClockObservable');
         AllowedClockClaims = {'notAClockObservable','relativeBiasOnly'};
         RelativeBiasSignConvention = 'remoteMinusOwner';
         CommonModeBlindnessTolerance = 1e-9;
@@ -172,6 +197,12 @@ classdef DistributedClockGaugeContract
         end
 
         function requireTimeTransferRecordTimeAlignment(record, deliveryEpoch_s, coordinateEventEpoch_s)
+            % Plan Section 4.4 note: fourTimestampClockDifference is classified
+            % 'notAClockObservable' (measured, not assumed -- see ClockClaimByObservable's own
+            % header), so this method is reached only for firstOrderReciprocalClockTransfer, as
+            % before Section 4.4. An earlier revision widened this method's signature for the
+            % four-timestamp observable before that measurement was taken; reverted once the
+            % measurement showed the widening would have been unreachable dead code.
             if ~isprop(record,'referenceEpoch_s')
                 error('DistributedClockGaugeContract:timestampMismatch', ...
                     'A time-transfer record must declare referenceEpoch_s.');
@@ -197,6 +228,10 @@ classdef DistributedClockGaugeContract
 
         function requireTimeTransferCalibrationProvenance(record, persistentCalibrationTreatment, ...
                 calibrationRegistry, cfg)
+            % Plan Section 4.4 note: fourTimestampClockDifference is classified
+            % 'notAClockObservable', so this method (gated behind clockClaim=='relativeBiasOnly' in
+            % +revgnss/LinkObservationDelivery.m) is reached only for
+            % firstOrderReciprocalClockTransfer, as before Section 4.4.
             hasValidityInterval = isprop(record,'calibrationValidFromLocalTag_s') && ...
                 isprop(record,'calibrationValidUntilLocalTag_s');
             if ~hasValidityInterval

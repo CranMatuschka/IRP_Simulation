@@ -98,10 +98,22 @@ classdef SplitCovarianceIntersectionBound
         % correctness vs an independent five-point oracle for both observables, exact
         % remoteContributionCovariance_m2 == H_remote*P_remote*H_remote', exact
         % common-mode/frame-invariance and clock-column sign checks, and a real one-way RF
-        % thermal-noise sigma delegation proof) are the only four entries.
+        % thermal-noise sigma delegation proof), and 'fourTimestampClockDifference' (plan Section
+        % 4.4, revgnss.FourTimestampClockDifferenceLinkUpdateAdapter; see
+        % tests/test_four_timestamp_clock_difference_link_update_adapter.m -- 14-column H_owner/
+        % H_remote agree with revgnss.FourTimestampObservableLinearization.islTwoEndpointJacobian
+        % called directly, exact remoteContributionCovariance_m2 == H_remote*P_remote*H_remote'.
+        % Classified 'notAClockObservable' by revgnss.DistributedClockGaugeContract -- a live
+        % measurement showed structurally nonzero position/velocity/attitude/drift sensitivity
+        % (small under the shipped commonAperture geometry, growing to O(0.1-0.6) on attitude
+        % under any genuinely distinct-offset geometry; see that class's own header for the
+        % measured values and the correction of an earlier overstated claim), unlike
+        % firstOrderReciprocalClockTransfer's deliberately-reciprocity-free model, so
+        % requireClockObservability's relativeBiasOnly-specific checks do not apply to it) are the
+        % only five entries.
         ObservablesWithDemonstratedConservativeBound = { ...
             'coherentTwoWayCodeRange','firstOrderReciprocalClockTransfer', ...
-            'oneWayCode','oneWayDoppler'};
+            'oneWayCode','oneWayDoppler','fourTimestampClockDifference'};
     end
 
     methods (Static)

@@ -112,6 +112,15 @@ classdef TwoWayTimeTransferBuilder
             mode      = revgnss.TwoWayTimeTransferBuilder.getStr_(cfg, ...
                 {'measurements','twoWayTimeTransfer','mode'}, ...
                 revgnss.ReciprocalTimeTransferModel.FirstOrderMode);
+            if strcmp(mode,'fourTimestampClockDifference')
+                % Plan Section 4.4: the direct four-timestamp physical mode, dispatched here rather
+                % than through revgnss.ReciprocalTimeTransferModel (that class's own
+                % PhysicalTimestampMode='fourTimestampPhysical' names a DIFFERENT, still-reserved
+                % raw-tag scheme -- see revgnss.FourTimestampClockDifferenceObservable's header).
+                [zAdd, hAdd, HAdd, RAdd, info] = revgnss.FourTimestampGroundSpaceTimeTransferBuilder.build( ...
+                    cfg, errorChain, asset, towers, x, stateMap, nx, t_s);
+                return
+            end
             sigma_m   = revgnss.TwoWayTimeTransferBuilder.getNum_(cfg, {'measurements','twoWayTimeTransfer','sigma_m'}, 0.03);
             recipOn   = revgnss.TwoWayTimeTransferBuilder.getBool_(cfg, {'measurements','twoWayTimeTransfer','includeReciprocityResidual'}, false);
             recipSig  = revgnss.TwoWayTimeTransferBuilder.getNum_(cfg, {'measurements','twoWayTimeTransfer','reciprocitySigma_m'}, 0.005);
@@ -289,6 +298,11 @@ classdef TwoWayTimeTransferBuilder
             mode = revgnss.TwoWayTimeTransferBuilder.walk_(cfg, ...
                 {'measurements','twoWayTimeTransfer','mode'}, ...
                 revgnss.ReciprocalTimeTransferModel.FirstOrderMode);
+            if strcmp(mode,'fourTimestampClockDifference')
+                [hPred, HPred, rows] = revgnss.FourTimestampGroundSpaceTimeTransferBuilder.predictEkfRows( ...
+                    cfg, asset, towers, x, stateMap, info, t_s);
+                return
+            end
             recipOn = revgnss.TwoWayTimeTransferBuilder.getBool_(cfg, ...
                 {'measurements','twoWayTimeTransfer','includeReciprocityResidual'}, false);
             r_sat_e = x(stateMap.r_idx);
@@ -348,6 +362,26 @@ classdef TwoWayTimeTransferBuilder
             mode = revgnss.TwoWayTimeTransferBuilder.getStr_(cfg, ...
                 {'measurements','twoWayTimeTransfer','mode'}, ...
                 revgnss.ReciprocalTimeTransferModel.FirstOrderMode);
+            if strcmp(mode,'fourTimestampClockDifference')
+                % Deliberately NOT routed through revgnss.ReciprocalTimeTransferModel.validateMode:
+                % that class's own vocabulary is frozen to 'firstOrderReciprocal' and the reserved
+                % (still-unimplemented) 'fourTimestampPhysical' string -- neither names this mode.
+                % Combined-review m5: includeReciprocityResidual is a legacy-mode-only concept
+                % (revgnss.ReciprocalTimeTransferModel.evaluate's reciprocity term) that
+                % revgnss.FourTimestampGroundSpaceTimeTransferBuilder never reads at all -- refuse
+                % a nonzero declaration rather than silently ignore it, mirroring the ISL
+                % sanctioned tuple's own equivalent guard
+                % (+revgnss/IndependentFleetCoordinator.m's reciprocityTermUnavailableForDistributedRow).
+                if revgnss.TwoWayTimeTransferBuilder.getBool_( ...
+                        cfg,{'measurements','twoWayTimeTransfer','includeReciprocityResidual'},false)
+                    error('TwoWayTimeTransferBuilder:reciprocityTermUnavailableForFourTimestampMode', ...
+                        ['measurements.twoWayTimeTransfer.includeReciprocityResidual=true is not ' ...
+                        'supported under mode=fourTimestampClockDifference: it is a legacy-mode-' ...
+                        'only concept that this mode''s physics never reads.']);
+                end
+                revgnss.FourTimestampGroundSpaceTimeTransferBuilder.validateConfig(cfg);
+                return
+            end
             revgnss.ReciprocalTimeTransferModel.validateMode(mode);
             sg = revgnss.TwoWayTimeTransferBuilder.getNum_(cfg, {'measurements','twoWayTimeTransfer','sigma_m'}, 0.03);
             if ~(isfinite(sg) && sg > 0)

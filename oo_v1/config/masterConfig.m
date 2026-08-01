@@ -2033,7 +2033,10 @@ cfg.measurements.isl.twoWay.range.plasma.estimatorForwardTEC_electrons_per_m2 = 
 cfg.measurements.isl.twoWay.range.plasma.estimatorReturnTEC_electrons_per_m2 = 0;
 cfg.measurements.isl.twoWay.range.plasma.residualSigma_m = 0;
 % Processed two-way clock difference. The first-order mode is shared with
-% ground-to-space time transfer. fourTimestampPhysical is reserved and rejected.
+% ground-to-space time transfer. This subtree's own .mode vocabulary stays
+% firstOrderReciprocal-only forever -- the direct four-timestamp ISL observable below
+% (isl.twoWay.fourTimestampPhysical.*) is a separate sibling leaf, selected via
+% multiAsset.distributedEstimator.linkUpdate.updateAdapter.observable, not via .timeTransfer.mode.
 cfg.measurements.isl.twoWay.timeTransfer.enable = false;
 cfg.measurements.isl.twoWay.timeTransfer.useInEKF = false;
 cfg.measurements.isl.twoWay.timeTransfer.mode = 'firstOrderReciprocal';
@@ -2048,6 +2051,43 @@ cfg.measurements.isl.twoWay.timeTransfer.calibration.productIdentifier = ...
 % Provenance; a real persistent value is not modelled as a distributed-adapter state today).
 cfg.measurements.isl.twoWay.timeTransfer.calibration.terminalDelayError_s = 0;
 cfg.measurements.isl.twoWay.timeTransfer.calibration.terminalSigma_s = 0;
+
+% Section 4.4: direct four-timestamp ISL physical mode. Selected via the distributed-fleet
+% sanctioned-observable selector cfg.multiAsset.distributedEstimator.linkUpdate.updateAdapter.
+% observable = 'fourTimestampClockDifference' (NOT via isl.twoWay.timeTransfer.mode, which
+% stays scoped to revgnss.InterSatelliteTimeTransferBuilder's first-order-only physics -- see
+% this file's own comment above). Reuses isl.twoWay.links/.schedule/.terminalGeometry verbatim
+% (item 4) -- no new link/schedule/signal/channel/geometry keys are declared here.
+cfg.measurements.isl.twoWay.fourTimestampPhysical.sigma_m                 = 0.03;
+cfg.measurements.isl.twoWay.fourTimestampPhysical.terminalDelayAllocation = 'receiveEvent';
+cfg.measurements.isl.twoWay.fourTimestampPhysical.carrierFrequency_Hz     = 26e9;
+cfg.measurements.isl.twoWay.fourTimestampPhysical.counterTag.sigma_s      = zeros(1,4);
+cfg.measurements.isl.twoWay.fourTimestampPhysical.counterTag.labels       = {'t1','t2','t3','t4'};
+
+cfg.measurements.isl.twoWay.fourTimestampPhysical.hardware.turnaroundProperTime_s     = 1e-3;
+cfg.measurements.isl.twoWay.fourTimestampPhysical.hardware.originTerminalGroupDelay_s = 0;
+cfg.measurements.isl.twoWay.fourTimestampPhysical.hardware.anchorTerminalGroupDelay_s = 0;
+cfg.measurements.isl.twoWay.fourTimestampPhysical.hardware.physicalChainIdentifier    = 'isl-four-timestamp-chain';
+cfg.measurements.isl.twoWay.fourTimestampPhysical.hardware.calibrationProductIdentifier = 'isl-four-timestamp-calibration';
+cfg.measurements.isl.twoWay.fourTimestampPhysical.hardware.validFromLocalTag_s        = -1e12;
+cfg.measurements.isl.twoWay.fourTimestampPhysical.hardware.validUntilLocalTag_s       = 1e12;
+
+% Combined-review M2: named for which HARDWARE TERMINAL DELAY they perturb (origin vs anchor --
+% both are terminal delays, revgnss.FourTimestampPhysicalLinkConfig.hardwareModel's
+% originTerminalGroupDelay_s/anchorTerminalGroupDelay_s), NOT "turnaround" -- a genuine
+% turnaroundProperTime_s error is inert for this observable (t3/t4 shift together and cancel),
+% so the earlier turnaroundCalibrationError_s name described something this leaf does not do.
+cfg.measurements.isl.twoWay.fourTimestampPhysical.truth.originTerminalCalibrationError_s = 0;
+cfg.measurements.isl.twoWay.fourTimestampPhysical.truth.anchorTerminalCalibrationError_s = 0;
+cfg.measurements.isl.twoWay.fourTimestampPhysical.calibration.originTerminalSigma_s      = 0;
+cfg.measurements.isl.twoWay.fourTimestampPhysical.calibration.anchorTerminalSigma_s      = 0;
+
+cfg.measurements.isl.twoWay.fourTimestampPhysical.linearizationSteps.positionStep_m    = 0.25;
+cfg.measurements.isl.twoWay.fourTimestampPhysical.linearizationSteps.velocityStep_mps   = 0.025;
+cfg.measurements.isl.twoWay.fourTimestampPhysical.linearizationSteps.attitudeStep_rad   = 5e-3;
+cfg.measurements.isl.twoWay.fourTimestampPhysical.linearizationSteps.clockBiasStep_m     = 5;
+cfg.measurements.isl.twoWay.fourTimestampPhysical.linearizationSteps.clockDriftStep_mps  = 0.005;
+
 cfg.measurements.isl.twoWay.doppler.enable = false;
 cfg.measurements.isl.twoWay.doppler.useInEKF = false;
 
@@ -2127,6 +2167,58 @@ cfg.measurements.twoWayTimeTransfer.warmup_s                   = 0;       % star
 % reference-clock floor -> honest, never-optimistic clock. Set false for the idealised
 % (independent-product) treatment.
 cfg.measurements.twoWayTimeTransfer.conservativeProductCorrelation = true;
+
+% Section 4.4: direct four-timestamp ground-space physical mode. Selected by setting
+% cfg.measurements.twoWayTimeTransfer.mode = 'fourTimestampClockDifference' above; every
+% field below is this mode's own parameter set and is inert while mode stays at its
+% unchanged default 'firstOrderReciprocal'.
+cfg.measurements.twoWayTimeTransfer.fourTimestampPhysical.sigma_m                    = 0.03;
+cfg.measurements.twoWayTimeTransfer.fourTimestampPhysical.terminalDelayAllocation    = 'receiveEvent';
+cfg.measurements.twoWayTimeTransfer.fourTimestampPhysical.carrierFrequency_Hz        = 2.2e9;
+cfg.measurements.twoWayTimeTransfer.fourTimestampPhysical.counterTag.sigma_s         = zeros(1,4);
+cfg.measurements.twoWayTimeTransfer.fourTimestampPhysical.counterTag.labels          = {'t1','t2','t3','t4'};
+
+cfg.measurements.twoWayTimeTransfer.fourTimestampPhysical.hardware.turnaroundProperTime_s     = 1e-3;
+cfg.measurements.twoWayTimeTransfer.fourTimestampPhysical.hardware.originTerminalGroupDelay_s = 0;   % tower side
+cfg.measurements.twoWayTimeTransfer.fourTimestampPhysical.hardware.anchorTerminalGroupDelay_s = 0;   % spacecraft side
+cfg.measurements.twoWayTimeTransfer.fourTimestampPhysical.hardware.physicalChainIdentifier    = 'ground-space-four-timestamp-chain';
+cfg.measurements.twoWayTimeTransfer.fourTimestampPhysical.hardware.calibrationProductIdentifier = 'ground-space-four-timestamp-calibration';
+cfg.measurements.twoWayTimeTransfer.fourTimestampPhysical.hardware.validFromLocalTag_s        = -1e12;
+cfg.measurements.twoWayTimeTransfer.fourTimestampPhysical.hardware.validUntilLocalTag_s       = 1e12;
+
+% Truth-only additive error + declared (unowned) calibration uncertainty -- mirrors the
+% EXISTING isl.twoWay.truth.*/calibration.* pattern below so item 5's guard can reuse that
+% exact, already-reviewed requireZero_ idiom. Named for which HARDWARE TERMINAL DELAY they
+% perturb (origin=tower side, anchor=spacecraft side -- combined-review M2), NOT "turnaround":
+% a genuine turnaroundProperTime_s error is inert for this observable (t3/t4 shift together).
+cfg.measurements.twoWayTimeTransfer.fourTimestampPhysical.truth.originTerminalCalibrationError_s = 0;
+cfg.measurements.twoWayTimeTransfer.fourTimestampPhysical.truth.anchorTerminalCalibrationError_s = 0;
+cfg.measurements.twoWayTimeTransfer.fourTimestampPhysical.calibration.originTerminalSigma_s      = 0;
+cfg.measurements.twoWayTimeTransfer.fourTimestampPhysical.calibration.anchorTerminalSigma_s      = 0;
+
+% Terminal geometry: LONG names (matches revgnss.CommunicationEndpointState/
+% revgnss.FourTimestampEstimatorEndpointBridge's already-established convention --
+% revgnss.FourTimestampPhysicalLinkConfig translates to the SHORT names the truth-side
+% revgnss.ReciprocalEndpointTruthProvider factories require).
+cfg.measurements.twoWayTimeTransfer.fourTimestampPhysical.towerTerminalGeometry.transmitPhaseCentreOffset_body_m = zeros(3,1);
+cfg.measurements.twoWayTimeTransfer.fourTimestampPhysical.towerTerminalGeometry.receivePhaseCentreOffset_body_m  = zeros(3,1);
+cfg.measurements.twoWayTimeTransfer.fourTimestampPhysical.spacecraftTerminalGeometry.transmitPhaseCentreOffset_body_m = [0.8;0.2;0.3];
+cfg.measurements.twoWayTimeTransfer.fourTimestampPhysical.spacecraftTerminalGeometry.receivePhaseCentreOffset_body_m  = [0.8;0.2;0.3];
+
+% Atmosphere -- item 3's structural separation: this leaf exists ONLY on the ground-space
+% subtree (no ISL counterpart at all, matching plan item 4's vacuum/plasma-only ISL physics).
+cfg.measurements.twoWayTimeTransfer.fourTimestampPhysical.applyAtmosphere       = false;
+cfg.measurements.twoWayTimeTransfer.fourTimestampPhysical.atmosphereVariance_s2 = [];
+
+% Linearization steps -- default MIRRORS revgnss.FourTimestampObservableLinearization.
+% DefaultLinearizationSteps exactly (attitudeStep_rad=5e-3, the empirically re-tuned Section
+% 4.3 review value); exposed for override but never silently diverges from the class's own
+% tuned default.
+cfg.measurements.twoWayTimeTransfer.fourTimestampPhysical.linearizationSteps.positionStep_m    = 0.25;
+cfg.measurements.twoWayTimeTransfer.fourTimestampPhysical.linearizationSteps.velocityStep_mps   = 0.025;
+cfg.measurements.twoWayTimeTransfer.fourTimestampPhysical.linearizationSteps.attitudeStep_rad   = 5e-3;
+cfg.measurements.twoWayTimeTransfer.fourTimestampPhysical.linearizationSteps.clockBiasStep_m     = 5;
+cfg.measurements.twoWayTimeTransfer.fourTimestampPhysical.linearizationSteps.clockDriftStep_mps  = 0.005;
 
 % --- Observable mode (Step 1) -----------------------------------
 % observableMode: DESCRIPTIVE LABEL (not authoritative — does not gate
