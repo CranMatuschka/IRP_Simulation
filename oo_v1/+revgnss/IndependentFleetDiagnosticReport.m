@@ -6,7 +6,8 @@ classdef IndependentFleetDiagnosticReport
             report = struct('success',false,'pdfPath','','texPath','', ...
                 'absoluteFigure','','kabschFigure','', ...
                 'linkAccounting',struct(),'distributedResultStatus','', ...
-                'stageTwoSectionEmitted',false,'forbiddenTermCheckPassed',false);
+                'stageTwoSectionEmitted',false,'relativeCovarianceSectionEmitted',false, ...
+                'forbiddenTermCheckPassed',false);
             if ~isfolder(folder); mkdir(folder); end
             figureFolder = fullfile(folder,'figures');
             kabschEnabled = revgnss.IndependentFleetDiagnosticReport.logical_( ...
@@ -100,9 +101,21 @@ classdef IndependentFleetDiagnosticReport
                 fp('\\caption{Final formation geometry after diagnostic Kabsch alignment.}\n');
                 fp('\\end{figure}\n');
             end
+            relCov = revgnss.IndependentFleetDiagnosticReport.structOrEmpty_(results,{'relativeCovarianceReport'});
+            revgnss.IndependentFleetDiagnosticReport.writeRelativeBaselineCovarianceSection_(fp,relCov);
+            report.relativeCovarianceSectionEmitted = true;
+
             fp('\\section*{Interpretation}\n');
             fp('This report demonstrates independent absolute estimates and diagnostic formation geometry only. ');
-            fp('It does not provide a communication-link relative solution, distributed link fusion, or cross-spacecraft covariance. ');
+            if isfield(relCov,'available') && relCov.available
+                fp(['It additionally reports, in the relative baseline covariance section above, a real ' ...
+                    'relative baseline-vector, baseline-length, and clock-difference covariance for ' ...
+                    'tracked pairs only, computed from the correlation network''s own stored cross ' ...
+                    'blocks; it still does not provide a multi-pair shape estimate, an innovation-based ' ...
+                    'consistency (NIS) result, or coverage for any untracked pair. ']);
+            else
+                fp('It does not provide a communication-link relative solution, distributed link fusion, or cross-spacecraft covariance. ');
+            end
             fp('The distributed link result status for this run is: %s.\n', ...
                 revgnss.IndependentFleetDiagnosticReport.escapeTex_(linkAccounting.distributedResultStatus));
             fp('\\end{document}\n');
@@ -251,6 +264,69 @@ classdef IndependentFleetDiagnosticReport
                 '\\texttt{persistentCalibrationTreatment=rejected} run.\n']);
         end
 
+        function writeRelativeBaselineCovarianceSection_(fp, relCov)
+            % writeRelativeBaselineCovarianceSection_  Plan Section 3.5 items 1/2/4: prints the
+            % link-graph connectivity verdict FIRST, always, before any numeric row -- this is
+            % what structurally enforces item 2's ordering requirement (a reader cannot see a
+            % baseline number before knowing whether the underlying pair graph is fully tracked),
+            % rather than leaving the ordering to caller convention the way the sibling
+            % federated-swarm pipeline's own weaklyObservable check currently does (see the
+            % companion patch to +revgnss/+report/federatedSwarmAppendix.m, which fixes the
+            % identical ordering defect on that separate, disjoint pipeline). relCov.pairs is
+            % already restricted, by construction, to pairs with a real stored cross block
+            % (revgnss.DistributedCovarianceNetwork.crossBlockIdentifiers only ever lists tracked
+            % pairs), so no additional filtering against connectivity is needed here -- a numeric
+            % row can never be fabricated for an untracked pair.
+            esc = @revgnss.IndependentFleetDiagnosticReport.escapeTex_;
+            fp('\\section*{Relative baseline covariance diagnostic}\n');
+            available = isfield(relCov,'available') && relCov.available;
+            if ~available
+                reason = 'correlationNetworkDisabled';
+                if isfield(relCov,'reason') && ~isempty(relCov.reason); reason = relCov.reason; end
+                fp('No relative baseline covariance is reported for this run (reason: %s).\n',esc(reason));
+                return
+            end
+            conn = relCov.connectivity;
+            if conn.isFullySpanning
+                fp(['Link-graph connectivity: %d spacecraft, all %d possible pair(s) tracked ' ...
+                    '(fully spanning).\n'],conn.memberCount,conn.possiblePairCount);
+            else
+                fp(['Link-graph connectivity: %d spacecraft, %d of %d possible pairs tracked, ' ...
+                    '%d connected component(s) (NOT fully spanning). '], ...
+                    conn.memberCount,conn.trackedPairCount,conn.possiblePairCount, ...
+                    conn.connectedComponentCount);
+                fp(['A row below exists only for a pair that IS tracked; no row is fabricated for ' ...
+                    'an untracked pair.\n']);
+            end
+            fp(['This is graph connectivity only (whether a cross block exists per pair); edge ' ...
+                'geometry (rigidity) is not assessed, and no formation quantity is claimed from it.\n']);
+            if isempty(relCov.pairs)
+                fp('No tracked pair currently has a relative baseline covariance to report.\n');
+                return
+            end
+            fp('\\begin{center}\\begin{tabular}{lrrrrrrrrr}\\toprule\n');
+            fp(['pair & baseline err [m] & $\\sigma$ [m] & ratio & length err [m] & $\\sigma$ [m] & ' ...
+                'ratio & clk-diff err [m] & $\\sigma$ [m] & ratio \\\\ \\midrule\n']);
+            for index = 1:numel(relCov.pairs)
+                p = relCov.pairs(index);
+                fp('%s--%s & %.3f & %.3f & %.2f & %.3f & %.3f & %.2f & %.3f & %.3f & %.2f \\\\ %c', ...
+                    esc(p.firstAssetIdentifier),esc(p.secondAssetIdentifier), ...
+                    p.baselineErr_m,p.baselineSigma_m,p.baselineRatio, ...
+                    p.lengthErr_m,p.lengthSigma_m,p.lengthRatio, ...
+                    p.clockDiffErr_m,p.clockDiffSigma_m,p.clockDiffRatio,char(10));
+            end
+            fp('\\bottomrule\\end{tabular}\\end{center}\n');
+            fp(['A small err/$\\sigma$ ratio here (well under 1) is expected, not evidence of an ' ...
+                'optimistic filter: $P_{ij}$ comes from the conservative owner-only conditioning ' ...
+                'route, which bounds rather than fully captures the radial-clock common-mode ' ...
+                'correlation between the two absolute estimates, so this $\\sigma$ is a loose bound ' ...
+                'on the relative error rather than a tight one.\n\n']);
+            fp(['Shape (a multi-pair formation quantity spanning more than one baseline) is not ' ...
+                'reported: it requires a combined multi-satellite estimate this per-pair covariance ' ...
+                'does not provide. ']);
+            fp('NIS is not reported: no per-pair innovation stream exists at this covariance level.\n');
+        end
+
         function text = orNone_(cellList)
             if isempty(cellList)
                 text = '(none)';
@@ -315,6 +391,23 @@ classdef IndependentFleetDiagnosticReport
                 if sigma_m > 0; ratio = error_m/sigma_m; end
             catch
             end
+        end
+
+        function value = structOrEmpty_(source,path)
+            % structOrEmpty_  Same path-walk idiom as number_/logical_/text_, but returns an
+            % empty struct() (never a placeholder scalar) when the path is absent -- used only
+            % for relativeCovarianceReport, whose absence itself (an older results struct built
+            % before Section 3.5) must render as the pre-Section-3.5 blanket-denial sentence,
+            % not as available=false with a fabricated reason.
+            value = source;
+            for index = 1:numel(path)
+                if ~isstruct(value) || ~isfield(value,path{index})
+                    value = struct();
+                    return
+                end
+                value = value.(path{index});
+            end
+            if ~isstruct(value); value = struct(); end
         end
 
         function value = number_(source,path,defaultValue)

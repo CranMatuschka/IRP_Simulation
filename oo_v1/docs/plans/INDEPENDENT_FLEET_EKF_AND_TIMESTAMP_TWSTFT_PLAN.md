@@ -1187,6 +1187,132 @@ Section-3.4-scoped adapter written ahead of that design.
 4. Report separate absolute, relative-baseline-vector, baseline-length, shape, clock-difference, NIS, and covariance-consistency results.
 5. Keep the centralized joint result visibly labelled `centralized reference`, never as the operational architecture.
 
+### Section 3.5 completion record — 2026-08-01
+
+1. **Item 1 — P_i+P_j-P_ij-P_ji from real stored cross blocks: COMPLETE.** The formula itself
+   (`revgnss.DistributedCovarianceNetwork.relativeSchemaCovariance`) already existed since Stage
+   3.1 with a comment reading verbatim "REPORTING it is Section 3.5 scope" -- confirmed by the
+   design workflow's own ground-truth check to have ZERO callers anywhere in the repo. This pass
+   gave it its first caller: `relativeSchemaCovarianceFromLocalMarginals` (restricts a caller-
+   supplied struct array of FULL local marginals to this network's own schema indices via a new
+   shared private lookup, `memberSchemaIndexPairFor_`, used identically by both the marginal-
+   restriction side and the pre-existing cross-block side -- the "cannot drift apart" claim is
+   structural, not by-copy, per a review nit fix) and `IndependentFleetCoordinator.
+   relativeBaselineCovarianceReport()`, which computes a real per-pair baseline-vector/baseline-
+   length/clock-difference error+formal-sigma+ratio triple and wires it additively into
+   `getResults().relativeCovarianceReport`. Wrapped in try/catch (review finding L4): any internal
+   failure degrades to an honest `available=false, reason='internalComputationError'` rather than
+   destroying the caller's access to every other `getResults()` field.
+2. **Item 2 — link graph rank/rigidity before calling a formation quantity observable: PARTIALLY
+   COMPLETE, deliberately narrowed to connectivity.** `DistributedCovarianceNetwork.
+   linkGraphConnectivityReport()` reports pure graph CONNECTIVITY (topology only -- whether a
+   stored cross block exists per pair is already binary, no numerical tolerance needed); full
+   RIGIDITY (which needs edge geometry, not just topology) is out of scope this pass and stated as
+   such both in the method's own header and in the rendered report text (review finding L2). No
+   formation quantity is ever printed without the connectivity verdict appearing first --
+   structurally enforced by `IndependentFleetDiagnosticReport.
+   writeRelativeBaselineCovarianceSection_`, not left to caller convention. **Reachability finding
+   (checked by source inspection, not merely assumed):** `isFullySpanning=false` is currently
+   UNREACHABLE via the public API on any network built the way `IndependentFleetCoordinator.
+   initialize()` builds one -- `registerFleetMembers` is one-shot for the whole configured fleet
+   and `declareIndependentPriorPairs` unconditionally declares a cross block for every pair among
+   currently-registered members in one call, with no method anywhere removing a `crossBlocks_`
+   entry afterward. The union-find logic is written generally and correctly regardless (confirmed
+   by independent review), not merely for the reachable case, so a future stage that adds partial/
+   incremental fleet membership does not need it rewritten, only re-exercised.
+3. **Item 3 — Kabsch alignment as shape-only diagnostic: already satisfied, zero code change.**
+   Confirmed at both existing call sites (`FederatedSwarmReport.m` RMS-only computation;
+   `IndependentFleetDiagnosticReport.m`'s own independent Kabsch section, already captioned "not a
+   relative-state estimate or measurement update"). The companion patch (item 4 below) adds one
+   more explicit caption sentence on the federated-swarm pipeline specifically.
+4. **Item 4 — separate result categories, no conflation: DECISIVELY SCOPED, category by
+   category.** absolute: already reported, untouched. relative-baseline-vector / baseline-length /
+   clock-difference: new, real math (item 1), each with its own err/formal-$\sigma$/ratio row.
+   covariance-consistency: the err/$\sigma$ ratio columns themselves. shape (a genuine multi-pair
+   joint formation quantity -- not derivable from one pair's $P_{\Delta r}$) and NIS (no per-pair
+   innovation stream exists at this covariance level): both explicitly out of scope this pass, one
+   disclaimer sentence each rather than a fabricated number, matching this plan's own established
+   anti-overclaim discipline (the same reasoning Section 2.5's forbidden-vocabulary check exists to
+   enforce). A review finding (L3) added one further interpretive sentence: the reported err/
+   $\sigma$ ratio is expected to run well under 1 because $P_{ij}$ here comes from the conservative
+   owner-only route (bounds, not fully captures, the radial-clock common-mode correlation), so a
+   small ratio is not evidence of an optimistic filter.
+5. **Item 5 — centralized-reference labelling discipline: untouched, unaffected.** No new code
+   this pass claims or implies a centralized/joint architecture; the existing
+   `DistributedFleetReportingContract` forbidden-vocabulary ban on "joint"/"solved formation"/
+   "centralized-equivalent" was independently re-verified clean on every new string this pass added
+   (`forbiddenTermCheckPassed=true` on both the disabled and enabled paths, real pdflatex-compiled
+   report checked).
+6. **Companion patch (explicitly NOT Section 3.5 itself -- a disjoint pipeline, see
+   `DistributedFleetReportingContract`'s own header): `+revgnss/+report/federatedSwarmAppendix.m`
+   and `+revgnss/ReportRunner.m`.** The federated-swarm appendix (`SwarmRelativeSolver`-driven,
+   `nSpaceAssets>1`/`distributedEstimator.enable=false`) had the identical reporting defects items
+   2/4 name: the weak-observability verdict printed LAST after every numeric row (now first), and
+   two formal sigmas `SwarmRelativeSolver` already computed but never printed
+   (`formalShapeSigma_m`/`relClockFormalSigma_m`, now printed as new columns with err/$\sigma$
+   ratios) plus an NIS-not-applicable row and a Kabsch shape-only caption. **Real bug found and
+   fixed during implementation** (not a review finding): `ReportRunner.packRel_`'s field whitelist
+   was missing `relClockFormalSigma_m` entirely, so the solver's real value was silently dropped to
+   `NaN` before ever reaching the appendix, independent of what the printer did with it -- fixed by
+   adding the missing field, verified end-to-end (a real `0.040661` value confirmed reaching the
+   rendered table).
+7. **Combined Opus stage-acceptance review (architect-agent pass, worktree-isolated, 2026-08-01):
+   ACCEPT the core work (items 1-3 and 5), 3 Medium findings required before commit, all in the
+   companion patch.** All 3 fixed and re-verified with real execution:
+   - **M1** (most serious): the dagger mark on the relative-clock row falsely implied it came from
+     the same ill-conditioned shape-solve normal matrix `weaklyObservable` actually measures --
+     `weaklyObservable` is set exclusively from the SHAPE solve's own SVD
+     (`SwarmRelativeSolver.solveEpoch_`), never from the independent relative-clock solve
+     (`solveRelativeClocks_`). Fixed by removing the dagger from the clock row entirely, with a new
+     test subtest forcing `weaklyObservable=true` (via a real solver output with only that one
+     flag overridden) to prove the clock row is NEVER daggered while the shape/baseline-solved rows
+     correctly are -- this exact branch had ZERO test coverage before the fix (review finding M3,
+     below).
+   - **M2**: the new err/$\sigma$ ratio columns paired dimensionally mismatched quantities,
+     inflating the printed ratio by measured factors near $\sqrt{3}\approx1.73\times$: the shape
+     row compared a per-point 3-D residual-NORM error against a per-axis formal $\sigma$ (fixed by
+     scaling the sigma by $\sqrt{3}$ before printing, computable from the already-packed scalar, no
+     solver change); the clock row compared a pair-DIFFERENCE RMS error against a per-node formal
+     $\sigma$ with no exposed conversion factor (fixed by labeling the sigma cell "(per-node)" and
+     leaving the ratio cell honestly blank rather than printing a mismatched, misleadingly-precise
+     number, rather than modifying `SwarmRelativeSolver`'s solver-layer math for a reporting-stage
+     fix).
+   - **M3**: the canonical N=3 test fixture always yields `weaklyObservable=false`, so the entire
+     `weak=true` branch (the dagger, the footnote, and M1's bug) shipped with zero coverage --
+     fixed with a new subtest that forces the flag on a real solver output and asserts the correct
+     dagger/no-dagger split (see M1).
+   4 Low findings, all fixed: **L1** a defensive guard in `linkGraphConnectivityReport` could never
+   fire (the preceding array assignment would already throw first) -- replaced with an explicit,
+   correctly-placed pre-assignment check. **L2/L3** two interpretive sentences added to the
+   rendered report text (rigidity-not-assessed caveat; conservative-bound low-ratio explanation),
+   both described above under items 2/4. **L4** the coordinator's new report computation is now
+   wrapped in try/catch (see item 1) and gained a new 3-asset multi-pair test (the 2-asset test
+   alone never exercised the `crossBlockIdentifiers()` loop body more than once); the sealed-
+   network early-return branch remains deliberately untested this pass -- constructing a genuine
+   seal requires replicating Stage 3.2's fault-injection machinery for a branch the review itself
+   rated compile-safe, and the new try/catch already provides general failure-safety independent of
+   whether that specific branch is hit.
+   2 nits, both closed: the plan's own frozen Stage-3 test-name list (`###
+   Stage-3 tests` below) is annotated (not rewritten) to point at the actual shipped filenames;
+   the schema-index lookup duplication between the two `relativeSchemaCovariance*` methods was
+   consolidated into one shared private helper (`memberSchemaIndexPairFor_`) so the "cannot drift
+   apart" claim in the code's own comments is now structurally true, not merely true by copy.
+   The review independently re-derived every load-bearing new number from scratch against a
+   completely different public code path (`assembleDeclaredFleetCovariance` + a differencing
+   matrix), confirmed the golden default path byte-identical between this stage's HEAD and the
+   pre-Section-3.5 commit via two independent `run_oo_v1_regression('smoke')` runs, and confirmed
+   collateral-damage-free against the 10 most directly related pre-existing distributed tests.
+8. **Full regression suite** (`tests/run_all_tests.m`): **280/296 passed**. File count grew from
+   Stage 3.4's 291 to 296 (the 5 new Stage 3.5 test files, all passing), pass count grew from 275
+   to 280 by exactly that margin -- the same 16 pre-existing/unrelated failures carried forward
+   unchanged (identical failure list), confirming zero regression.
+9. 5 new test files this pass (all real `IndependentFleetCoordinator`/`DistributedCovarianceNetwork`/
+   `SwarmRelativeSolver` execution, no mocks): `tests/test_distributed_covariance_network_relative_schema_covariance_formula.m`,
+   `tests/test_distributed_covariance_network_link_graph_connectivity.m`,
+   `tests/test_independent_fleet_relative_baseline_covariance_report.m`,
+   `tests/test_independent_fleet_relative_covariance_report_text.m`,
+   `tests/test_federated_swarm_appendix_relabel.m`.
+
 ### Stage-3 tests
 
 ```text
@@ -1203,6 +1329,16 @@ new: test_distributed_carrier_arc_owner_and_reset
 new: test_distributed_rigidity_report_guard
 existing: joint covariance architecture and physical ISL/range/time-transfer tests
 ```
+
+*Annotation added 2026-08-01 (Section 3.5 completion, does not rewrite the original list above):*
+`test_distributed_relative_covariance_formula` shipped as
+`tests/test_distributed_covariance_network_relative_schema_covariance_formula.m`;
+`test_distributed_rigidity_report_guard` shipped narrowed to connectivity-only (a deliberate
+Section 3.5 item-2 scoping decision, not an oversight -- full rigidity needs edge geometry, not
+just topology) as `tests/test_distributed_covariance_network_link_graph_connectivity.m`.
+`test_distributed_clock_gauge_rank_guard` and `test_distributed_carrier_arc_owner_and_reset`
+remain unshipped, matching Section 3.4's own item-4 (ISL carrier) status: still blocked on a
+coordinator-side ambiguity-state schema slot and slip-delivery mechanism neither exists yet.
 
 Required reference tests:
 

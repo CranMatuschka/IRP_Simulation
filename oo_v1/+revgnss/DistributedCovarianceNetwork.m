@@ -615,11 +615,92 @@ classdef DistributedCovarianceNetwork < handle
             % (plan Section 3.5 formula). Computed here as one line off the stored data;
             % REPORTING it is Section 3.5 scope.
             block = obj.crossBlockFor(firstId,secondId);
-            firstIdx = obj.memberSchemaStateIndices{strcmp(obj.memberIdentifiers,char(firstId))};
-            secondIdx = obj.memberSchemaStateIndices{strcmp(obj.memberIdentifiers,char(secondId))};
+            [firstIdx,secondIdx] = obj.memberSchemaIndexPairFor_(firstId,secondId);
             Mij = block.orientedTo(firstId,secondId);
             PijSchema = Mij(firstIdx,secondIdx);
             Pdr = firstSchemaMarginal+secondSchemaMarginal-PijSchema-PijSchema';
+        end
+
+        function Pdr = relativeSchemaCovarianceFromLocalMarginals(obj, firstId, secondId, localMarginalSupply)
+            % relativeSchemaCovarianceFromLocalMarginals  Section 3.5 reporting entry point:
+            % localMarginalSupply is a struct array {endpointIdentifier,localMarginal} of FULL
+            % local marginals, the same shape IndependentFleetCoordinator.
+            % remoteLocalMarginalSupplyExcluding_ already returns for the periodic PSD audit.
+            % Restricts each full marginal to THIS network's own schema indices using the SAME
+            % memberSchemaIndexPairFor_ call relativeSchemaCovariance itself uses for the
+            % cross-block side -- one shared lookup, not two independent copies, so the two
+            % restrictions cannot drift apart by construction, not merely by coincidence -- then
+            % defers to relativeSchemaCovariance unmodified.
+            firstFull = obj.localMarginalFor_(localMarginalSupply,firstId);
+            secondFull = obj.localMarginalFor_(localMarginalSupply,secondId);
+            [firstIdx,secondIdx] = obj.memberSchemaIndexPairFor_(firstId,secondId);
+            firstSchemaMarginal = firstFull(firstIdx,firstIdx);
+            secondSchemaMarginal = secondFull(secondIdx,secondIdx);
+            Pdr = obj.relativeSchemaCovariance(firstId,secondId,firstSchemaMarginal,secondSchemaMarginal);
+        end
+
+        function report = linkGraphConnectivityReport(obj)
+            % linkGraphConnectivityReport  Plan Section 3.5 item 2: pure graph CONNECTIVITY
+            % (topology only -- whether a stored cross block exists for a pair is already
+            % binary, so this needs no numerical tolerance constant; full rigidity theory, which
+            % needs edge geometry not just topology, is deliberately out of scope). Members are
+            % nodes; crossBlockIdentifiers() pairs are edges; connected components via label
+            % propagation (no recursion, no local functions -- plain iteration to a fixpoint,
+            % bounded by n passes since each pass can only merge labels, never split them).
+            %
+            % REACHABILITY NOTE (checked by source inspection, not merely assumed): given this
+            % class's own invariants -- registerFleetMembers is explicitly one-shot for the WHOLE
+            % configured fleet, declareIndependentPriorPairs unconditionally declares a cross
+            % block for EVERY pair among currently-registered members in one call, and no method
+            % anywhere ever removes an entry from crossBlocks_ -- isFullySpanning=false is
+            % currently UNREACHABLE via the public API on any network built the way
+            % IndependentFleetCoordinator.initialize() builds one (registerFleetMembers then
+            % declareIndependentPriorPairs for the same, whole, fixed member set). The union-find
+            % logic below is still written generally and correctly (not merely for the reachable
+            % case) so a future stage that adds partial/incremental fleet membership or a
+            % block-removal path does not need this method rewritten, only re-exercised.
+            memberIds = obj.memberIdentifiers;
+            n = numel(memberIds);
+            labels = 1:n;
+            keysList = obj.crossBlockIdentifiers();
+            edgeI = zeros(1,numel(keysList));
+            edgeJ = zeros(1,numel(keysList));
+            spannedPairs = cell(1,numel(keysList));
+            for k = 1:numel(keysList)
+                parts = strsplit(keysList{k},'::');
+                spannedPairs{k} = parts;
+                ia = find(strcmp(memberIds,parts{1}),1);
+                ib = find(strcmp(memberIds,parts{2}),1);
+                if isempty(ia) || isempty(ib)
+                    error('DistributedCovarianceNetwork:connectivityUnknownMember', ...
+                        'crossBlockIdentifiers() named a member (%s or %s) not in memberIdentifiers.', ...
+                        parts{1},parts{2});
+                end
+                edgeI(k) = ia;
+                edgeJ(k) = ib;
+            end
+            for pass = 1:max(n,1)
+                changed = false;
+                for k = 1:numel(keysList)
+                    a = edgeI(k); b = edgeJ(k);
+                    m = min(labels(a),labels(b));
+                    if labels(a) ~= m || labels(b) ~= m
+                        labels(labels==labels(a) | labels==labels(b)) = m;
+                        changed = true;
+                    end
+                end
+                if ~changed; break; end
+            end
+            [~,~,compIdByMember] = unique(labels);
+            report = struct( ...
+                'memberIdentifiers',{memberIds}, ...
+                'memberCount',n, ...
+                'trackedPairCount',numel(keysList), ...
+                'possiblePairCount',nchoosek(max(n,2),2)*double(n>=2), ...
+                'connectedComponentCount',numel(unique(labels)), ...
+                'isFullySpanning',numel(unique(labels))<=1, ...
+                'componentIdByMember',compIdByMember(:)', ...
+                'spannedPairs',{spannedPairs});
         end
 
         function [route, reasonCode] = routeForDelivery(obj, routeRequest)
@@ -1021,6 +1102,28 @@ classdef DistributedCovarianceNetwork < handle
                     ['This DistributedCovarianceNetwork is sealed (%s) after an unverifiable ' ...
                     'partial commit; no further reads or writes are permitted.'],obj.sealReason);
             end
+        end
+
+        function [firstIdx, secondIdx] = memberSchemaIndexPairFor_(obj, firstId, secondId)
+            % memberSchemaIndexPairFor_  The ONE lookup site for a pair's schema index sets,
+            % shared by relativeSchemaCovariance (cross-block side) and
+            % relativeSchemaCovarianceFromLocalMarginals (local-marginal-restriction side) so the
+            % two are structurally the same lookup, not two copies that happen to agree today.
+            firstIdx = obj.memberSchemaStateIndices{strcmp(obj.memberIdentifiers,char(firstId))};
+            secondIdx = obj.memberSchemaStateIndices{strcmp(obj.memberIdentifiers,char(secondId))};
+        end
+
+        function Pii = localMarginalFor_(~, localMarginalSupply, endpointIdentifier)
+            % localMarginalFor_  Same lookup-by-endpointIdentifier pattern as
+            % assembleDeclaredFleetCovariance, reused here so a missing supplied marginal fails
+            % loud with the same identifier rather than growing a second, subtly different check.
+            marginalIds = {localMarginalSupply.endpointIdentifier};
+            entryIdx = find(strcmp(marginalIds,char(endpointIdentifier)),1);
+            if isempty(entryIdx)
+                error('DistributedCovarianceNetwork:localMarginalMissing', ...
+                    'No live local marginal was supplied for member %s.',char(endpointIdentifier));
+            end
+            Pii = localMarginalSupply(entryIdx).localMarginal;
         end
     end
 

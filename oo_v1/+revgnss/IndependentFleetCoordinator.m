@@ -233,6 +233,7 @@ classdef IndependentFleetCoordinator < handle
                 'distributedLinkPolicy',obj.distributedLinkPolicy_(), ...
                 'distributedResultStatus',obj.distributedResultStatus_(), ...
                 'correlationNetwork',obj.correlationNetworkSummary_(), ...
+                'relativeCovarianceReport',obj.relativeBaselineCovarianceReport(), ...
                 'complete',obj.isComplete);
             for assetIndex = 1:obj.nAssets
                 results.asset{assetIndex} = obj.extractAssetResult_( ...
@@ -262,11 +263,118 @@ classdef IndependentFleetCoordinator < handle
                 'correlationNetworkEquivalenceClaim',netSummary.centralReferenceEquivalenceClaim);
         end
 
+        function report = relativeBaselineCovarianceReport(obj)
+            % relativeBaselineCovarianceReport  Plan Section 3.5 items 1/2/4: a real per-pair
+            % relative baseline-vector/baseline-length/clock-difference covariance report
+            % computed from revgnss.DistributedCovarianceNetwork's actual stored P_ij cross
+            % blocks (item 1's P_i+P_j-P_ij-P_ji formula, via
+            % relativeSchemaCovarianceFromLocalMarginals), gated on connectivity (item 2) so a
+            % numeric row is never printed for an untracked pair -- the connectivity report is
+            % attached unconditionally and the caller (IndependentFleetDiagnosticReport) decides
+            % whether to print numbers, but this method itself never fabricates a value for a
+            % pair with no stored cross block, since crossBlockIdentifiers() only ever lists
+            % pairs that ARE tracked. Honest unavailable (zero computation attempted) when the
+            % correlation network is disabled or sealed -- matches this coordinator's own
+            % established "fails loud, degrades honest" discipline (see
+            % correlationNetworkSummary_'s disabled-branch for the same idiom).
+            if isempty(obj.correlationNetwork_)
+                report = struct('available',false,'reason','correlationNetworkDisabled', ...
+                    'connectivity',struct(),'pairs',struct([]));
+                return
+            end
+            if obj.correlationNetwork_.isSealed
+                report = struct('available',false,'reason',obj.correlationNetwork_.sealReason, ...
+                    'connectivity',struct(),'pairs',struct([]));
+                return
+            end
+            % This diagnostic must never take down getResults() as a whole: unlike a per-asset
+            % metric that can drop one row and continue, an error here would previously propagate
+            % straight out of getResults(), destroying the caller's access to every OTHER field
+            % (asset states, delivery ledger, etc.) over a failure in a reporting add-on. Degrade
+            % to an honest, distinctly-labeled unavailable report instead, matching
+            % IndependentFleetDiagnosticReport.positionMetrics_'s own established try/catch
+            % degrade-not-crash idiom for report-layer code.
+            try
+                connectivity = obj.correlationNetwork_.linkGraphConnectivityReport();
+                marginals = obj.remoteLocalMarginalSupplyExcluding_('');
+                keysList = obj.correlationNetwork_.crossBlockIdentifiers();
+                pairs = struct('firstAssetIdentifier',{},'secondAssetIdentifier',{}, ...
+                    'baselineErr_m',{},'baselineSigma_m',{},'baselineRatio',{}, ...
+                    'lengthErr_m',{},'lengthSigma_m',{},'lengthRatio',{}, ...
+                    'clockDiffErr_m',{},'clockDiffSigma_m',{},'clockDiffRatio',{});
+                % Schema position 13 of the frozen 14-order [r(3);v(3);euler(3);omega(3);b(1);
+                % bdot(1)] (revgnss.DistributedCovarianceNetworkContract.
+                % schemaStateIndicesFromStateMap) is the clock-bias scalar; Pdr(13,13) is
+                % therefore the relative clock-bias variance directly, no separate lookup needed.
+                bSchemaIdx = 13;
+                for k = 1:numel(keysList)
+                    parts = strsplit(keysList{k},'::');
+                    firstId = parts{1}; secondId = parts{2};
+                    Pdr = obj.correlationNetwork_.relativeSchemaCovarianceFromLocalMarginals( ...
+                        firstId,secondId,marginals);
+                    PdrPos = (Pdr(1:3,1:3)+Pdr(1:3,1:3)')/2;
+                    firstIdx = revgnss.CanonicalEndpointIdentity.fromProductIdentifier(firstId).physicalAssetIndex;
+                    secondIdx = revgnss.CanonicalEndpointIdentity.fromProductIdentifier(secondId).physicalAssetIndex;
+                    firstAsset = obj.extractAssetResult_(obj.localSimulations{firstIdx},firstIdx);
+                    secondAsset = obj.extractAssetResult_(obj.localSimulations{secondIdx},secondIdx);
+
+                    estFirst = firstAsset.history.x(firstAsset.stateMap.r_idx,end);
+                    estSecond = secondAsset.history.x(secondAsset.stateMap.r_idx,end);
+                    truthFirst = firstAsset.truthTraj(:,end);
+                    truthSecond = secondAsset.truthTraj(:,end);
+                    baselineEst = estFirst-estSecond;
+                    baselineTruth = truthFirst-truthSecond;
+
+                    baselineErr_m = norm(baselineEst-baselineTruth);
+                    baselineSigma_m = sqrt(max(0,trace(PdrPos)));
+                    baselineRatio = revgnss.IndependentFleetCoordinator.safeRatio_(baselineErr_m,baselineSigma_m);
+
+                    lengthErr_m = abs(norm(baselineEst)-norm(baselineTruth));
+                    if norm(baselineEst) > 0
+                        u = baselineEst/norm(baselineEst);
+                    else
+                        u = [1;0;0];
+                    end
+                    lengthSigma_m = sqrt(max(0,u'*PdrPos*u));
+                    lengthRatio = revgnss.IndependentFleetCoordinator.safeRatio_(lengthErr_m,lengthSigma_m);
+
+                    clockEstFirst = firstAsset.history.x(firstAsset.stateMap.b_rx_idx,end);
+                    clockEstSecond = secondAsset.history.x(secondAsset.stateMap.b_rx_idx,end);
+                    clockDiffErr_m = abs((clockEstFirst-clockEstSecond)-(firstAsset.truthClk-secondAsset.truthClk));
+                    clockDiffSigma_m = sqrt(max(0,Pdr(bSchemaIdx,bSchemaIdx)));
+                    clockDiffRatio = revgnss.IndependentFleetCoordinator.safeRatio_(clockDiffErr_m,clockDiffSigma_m);
+
+                    pairs(end+1) = struct('firstAssetIdentifier',firstId,'secondAssetIdentifier',secondId, ...
+                        'baselineErr_m',baselineErr_m,'baselineSigma_m',baselineSigma_m,'baselineRatio',baselineRatio, ...
+                        'lengthErr_m',lengthErr_m,'lengthSigma_m',lengthSigma_m,'lengthRatio',lengthRatio, ...
+                        'clockDiffErr_m',clockDiffErr_m,'clockDiffSigma_m',clockDiffSigma_m, ...
+                        'clockDiffRatio',clockDiffRatio); %#ok<AGROW>
+                end
+                report = struct('available',true,'connectivity',connectivity,'pairs',pairs);
+            catch
+                report = struct('available',false,'reason','internalComputationError', ...
+                    'connectivity',struct(),'pairs',struct([]));
+            end
+        end
+
         function products = estimatorEligibleProducts(obj)
             % estimatorEligibleProducts  Read-only accessor for the Section 2.1 additive
             % publication path (stateExchange.estimatorEligibleProfile.enable). Empty unless
             % that toggle is enabled; every Stage-1 diagnostic-only path is unaffected by it.
             products = obj.estimatorEligibleProducts_;
+        end
+
+        function net = correlationNetworkForDiagnostics(obj)
+            % correlationNetworkForDiagnostics  Read-only diagnostic/test-support accessor for
+            % the Stage 3.1 correlation network handle itself (revgnss.DistributedCovarianceNetwork
+            % or empty when disabled). Mirrors runtimeSummary()/estimatorEligibleProducts()'s own
+            % established pattern of exposing internal state for verification rather than forcing
+            % a caller to re-derive it: added so a test can independently cross-check
+            % relativeBaselineCovarianceReport()'s output against the network's own
+            % orientedCrossCovariance, the same way Section 3.2's own tests already hand-recompute
+            % other coordinator outputs against lower-level accessors. Read-only: callers must not
+            % mutate the returned handle.
+            net = obj.correlationNetwork_;
         end
 
         function tally = linkGenerationTally(obj)
@@ -1484,6 +1592,14 @@ classdef IndependentFleetCoordinator < handle
                     cfg,{'measurements','isl','twoWay','range','linearization','clockBiasStep_m'},10), ...
                 'clockDriftStep_mps',revgnss.IndependentFleetCoordinator.numericPath_( ...
                     cfg,{'measurements','isl','twoWay','range','linearization','clockDriftStep_mps'},0.01));
+        end
+
+        function ratio = safeRatio_(errorValue, sigmaValue)
+            % safeRatio_  Same NaN-when-sigma<=0 idiom as IndependentFleetDiagnosticReport.
+            % positionMetrics_, factored out here since Section 3.5's relative-baseline-
+            % covariance report needs the identical safety check three times per pair.
+            ratio = NaN;
+            if sigmaValue > 0; ratio = errorValue/sigmaValue; end
         end
 
         function value = numericPath_(cfg,path,defaultValue)

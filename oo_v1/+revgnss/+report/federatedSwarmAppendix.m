@@ -69,26 +69,61 @@ function federatedSwarmAppendix(fid, cfg, summary, figDir, esc) %#ok<INUSD>
     end
 
     % ---- Table 2: relative layer -------------------------------------------------------------
+    % Plan Section 3.5 companion patch (a disjoint pipeline from the correlation-network path
+    % Section 3.5 itself targets -- see revgnss.DistributedFleetReportingContract's own header --
+    % but this appendix had the identical reporting defects Section 3.5 items 2/4 name: the
+    % weak-observability verdict was printed LAST, after every numeric row, and the two formal
+    % sigmas SwarmRelativeSolver already computes (formalShapeSigma_m/relClockFormalSigma_m) were
+    % never printed at all despite being available on `rel`).
     g = @(n) getRel_(rel, n);
     fprintf(fid, '\\subsection*{Relative layer (ISL shape / sat--sat TWSTFT clocks)}\n');
-    fprintf(fid, '\\begin{center}\\begin{tabular}{lr}\\toprule\n');
-    fprintf(fid, 'formation baseline error (raw, pre-ISL) & %.3f m \\\\\n', g('baselineErrRaw_m'));
-    if shapeOn && isfinite(g('baselineErrSolved_m'))
-        fprintf(fid, 'formation baseline error (solved) & %.4f m (%.2f cm) \\\\\n', g('baselineErrSolved_m'), g('baselineErrSolved_m')*100);
+    weak = logical(g('weaklyObservable'));
+    if weak
+        fprintf(fid, ['\\textbf{Weakly observable: yes.} The rows below marked $^{\\dagger}$ come from an ' ...
+            'ill-conditioned ISL shape-solve normal matrix (small singular-value ratio); treat them as ' ...
+            'unreliable rather than as a tight bound.\n\n']);
     else
-        fprintf(fid, 'formation baseline error (solved) & -- (two-way ISL shape disabled) \\\\\n');
+        fprintf(fid, 'Weakly observable: no (the ISL shape-solve normal matrix is well-conditioned).\n\n');
+    end
+    dag = ''; if weak; dag = '$^{\dagger}$'; end
+    fprintf(fid, '\\begin{center}\\begin{tabular}{lrrr}\\toprule\n');
+    fprintf(fid, 'quantity & error & formal $\\sigma$ & err/$\\sigma$ \\\\ \\midrule\n');
+    fprintf(fid, 'formation baseline error (raw, pre-ISL) & %.3f m & \\multicolumn{1}{c}{--} & \\multicolumn{1}{c}{--} \\\\\n', g('baselineErrRaw_m'));
+    if shapeOn && isfinite(g('baselineErrSolved_m'))
+        fprintf(fid, 'formation baseline error (solved)%s & %.4f m (%.2f cm) & \\multicolumn{1}{c}{--} & \\multicolumn{1}{c}{--} \\\\\n', ...
+            dag, g('baselineErrSolved_m'), g('baselineErrSolved_m')*100);
+    else
+        fprintf(fid, 'formation baseline error (solved) & -- (two-way ISL shape disabled) & \\multicolumn{1}{c}{--} & \\multicolumn{1}{c}{--} \\\\\n');
     end
     if shapeOn && isfinite(g('shapeErrSolved_m'))
-        fprintf(fid, 'best-fit-rigid shape error (solved) & %.4f m (%.2f cm) \\\\\n', g('shapeErrSolved_m'), g('shapeErrSolved_m')*100);
+        % shapeErrSolved_m is an RMS over points of the 3-D residual NORM (SwarmRelativeSolver.
+        % shapeRms_: sqrt(mean(sum(diffs.^2,1)))); formalShapeSigma_m is a PER-AXIS 1-sigma
+        % (sqrt(mean(diag(C))) over 3N coordinates). Pairing them directly as printed would bias
+        % err/sigma high by exactly sqrt(3) for a perfectly consistent solve -- scale the sigma to
+        % the same per-point-norm quantity the error itself measures before printing either cell.
+        shapeSigma = sqrt(3)*g('formalShapeSigma_m');
+        fprintf(fid, 'best-fit-rigid shape error (solved)%s & %.4f m (%.2f cm) & %s & %s \\\\\n', ...
+            dag, g('shapeErrSolved_m'), g('shapeErrSolved_m')*100, ...
+            sigmaCell_(shapeSigma), ratioCell_(g('shapeErrSolved_m'),shapeSigma));
     else
-        fprintf(fid, 'best-fit-rigid shape error (solved) & -- (two-way ISL shape disabled) \\\\\n');
+        fprintf(fid, 'best-fit-rigid shape error (solved) & -- (two-way ISL shape disabled) & \\multicolumn{1}{c}{--} & \\multicolumn{1}{c}{--} \\\\\n');
     end
     if isfield(rel,'relClockGateOn') && rel.relClockGateOn
-        fprintf(fid, 'relative clock error (sat--sat TWSTFT) & %.5f m (%.4f ns) \\\\\n', g('relClockErrSolved_m'), g('relClockErrSolved_m')/c*1e9);
+        % No dagger here: weaklyObservable is set exclusively from the SHAPE normal matrix's SVD
+        % (SwarmRelativeSolver.solveEpoch_), never from solveRelativeClocks_'s own, independent
+        % normal matrix -- marking this row would be a false conditioning claim. Also,
+        % relClockFormalSigma_m is a PER-NODE 1-sigma while relClockErrSolved_m (relClockRms_) is
+        % an RMS over PAIR-DIFFERENCE errors; for the min-norm gauge these differ by a
+        % topology-dependent factor (sqrt(2N/(N-1)) on a complete graph) SwarmRelativeSolver does
+        % not currently expose, so the sigma is labeled by what it actually is and the ratio cell
+        % is left honestly blank rather than printing a mismatched, misleadingly-precise number.
+        clockSigma = g('relClockFormalSigma_m');
+        fprintf(fid, 'relative clock error (sat--sat TWSTFT) & %.5f m (%.4f ns) & %s (per-node) & \\multicolumn{1}{c}{--} \\\\\n', ...
+            g('relClockErrSolved_m'), g('relClockErrSolved_m')/c*1e9, sigmaCell_(clockSigma));
     else
-        fprintf(fid, 'relative clock (sat--sat TWSTFT) & off \\\\\n');
+        fprintf(fid, 'relative clock (sat--sat TWSTFT) & off & \\multicolumn{1}{c}{--} & \\multicolumn{1}{c}{--} \\\\\n');
     end
-    fprintf(fid, 'weakly observable & %d \\\\\n', logical(g('weaklyObservable')));
+    fprintf(fid, 'NIS & \\multicolumn{3}{l}{not applicable: the shape/clock layer is a per-epoch least-squares solve, not a filter} \\\\\n');
     fprintf(fid, '\\bottomrule\\end{tabular}\\end{center}\n');
 
     % ---- Figures -----------------------------------------------------------------------------
@@ -99,6 +134,10 @@ function federatedSwarmAppendix(fid, cfg, summary, figDir, esc) %#ok<INUSD>
             (isfield(fs,'kabschFig') && ~isempty(fs.kabschFig))
         fprintf(fid, ['\\emph{The per-satellite absolute-error, relative-layer, and Kabsch alignment plots appear with ' ...
             'the state-estimation figures above, immediately after the RAC final-zoom plot.}\n\n']);
+    end
+    if isfield(fs,'kabschFig') && ~isempty(fs.kabschFig)
+        fprintf(fid, ['\\emph{Kabsch alignment uses truth as the reference frame and is a shape-only diagnostic; it ' ...
+            'is not fed back into any estimate.}\n\n']);
     end
 
     if shapeOn
@@ -117,4 +156,25 @@ end
 function v = getRel_(rel, name)
     v = NaN;
     if isstruct(rel) && isfield(rel, name) && ~isempty(rel.(name)); v = rel.(name); end
+end
+
+function cellText = sigmaCell_(sigmaValue)
+% sigmaCell_  Plan Section 3.5 companion patch: renders SwarmRelativeSolver's own
+% formalShapeSigma_m/relClockFormalSigma_m (already computed, previously never printed) as a
+% table cell, honest '--' when unavailable rather than a fabricated 0.
+if isfinite(sigmaValue) && sigmaValue >= 0
+    cellText = sprintf('%.4f m',sigmaValue);
+else
+    cellText = '\multicolumn{1}{c}{--}';
+end
+end
+
+function cellText = ratioCell_(errorValue, sigmaValue)
+% ratioCell_  Same NaN-when-sigma<=0 safety idiom used throughout this plan's other report
+% builders (e.g. IndependentFleetDiagnosticReport.positionMetrics_/safeRatio_).
+if isfinite(errorValue) && isfinite(sigmaValue) && sigmaValue > 0
+    cellText = sprintf('%.2f',errorValue/sigmaValue);
+else
+    cellText = '\multicolumn{1}{c}{--}';
+end
 end

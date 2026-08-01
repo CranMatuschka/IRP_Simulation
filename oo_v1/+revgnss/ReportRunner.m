@@ -2013,10 +2013,15 @@ classdef ReportRunner
         function r = packRel_(rel)
             % packRel_  Minimal relative-layer scalar bundle for the swarm appendix (robust to missing
             % fields; the SwarmRelativeSolver always populates these, this just future-proofs).
+            % Plan Section 3.5 companion patch: relClockFormalSigma_m was missing from this
+            % whitelist entirely -- SwarmRelativeSolver.solve always computes it (see its own
+            % header), but this struct's field list is what packRel_'s copy loop below iterates
+            % over, so the value was silently dropped before it ever reached the appendix,
+            % regardless of what the printer did with it.
             r = struct('baselineErrRaw_m', NaN, 'baselineErrSolved_m', NaN, 'shapeErrSolved_m', NaN, ...
                 'shapeGateOn', false, 'shapeObservationSource', 'disabled', ...
                 'relClockGateOn', false, 'relClockErrSolved_m', NaN, 'weaklyObservable', false, ...
-                'formalShapeSigma_m', NaN);
+                'formalShapeSigma_m', NaN, 'relClockFormalSigma_m', NaN);
             names = fieldnames(r);
             for i = 1:numel(names)
                 n = names{i};
