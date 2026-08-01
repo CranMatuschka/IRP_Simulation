@@ -1448,6 +1448,129 @@ Add the smallest reusable layer necessary:
 
 Do not rename `InterSatelliteObservationRecord` or `InterSatelliteTimeTransferObservationRecord`. New physical records are distinct because those existing schemas intentionally encode a processed observable and/or unavailable raw tags.
 
+### Section 4.2 completion record — 2026-08-01
+
+1. **Design: 3-proposal judge-panel Workflow (maximal-reuse / clean-separation / schema-first),
+   synthesis re-verified every load-bearing claim from all 3 proposals and both judges by reading
+   source directly.** Grounding established `CommunicationEndpointStateProvider` is structurally
+   incompatible (estimator-state-only, frozen-single-epoch-only, requires two distinct spacecraft)
+   -- confirmed by direct read (`+revgnss/CommunicationEndpointStateProvider.m:16-17,60-68,78-90`)
+   and NOT touched; the interface-#3 role is filled instead by 3 new static factories on
+   `ReciprocalEndpointTruthProvider` generalizing `TwoWayISLMeasurementBuilder.truthEndpoint_`'s
+   proven pipeline. `CoherentTwoWayCodeRangingModel.solvePhysicalEventGeometry` was confirmed
+   unreusable for two independently-verified reasons (a PN-code-ranging-specific hardware-type
+   requirement; a hardcoded single "initiator" role for both t1-transmit and t4-receive that
+   cannot represent a 3-node relay pass) -- an initial 3-reason draft of this justification was
+   itself corrected during the combined review (see item 3) after re-reading the source more
+   carefully. `InterSatelliteObservationRecord`/`InterSatelliteTimeTransferObservationRecord`
+   confirmed unreusable and not renamed, per the plan's own instruction.
+2. **6 new files, ZERO existing files edited (golden-safe by construction, confirmed three
+   independent ways by the combined review: blob-hash diff of all 820 tracked files, a repo-wide
+   grep for any external reference to the new classes, and a byte-identical golden-smoke result
+   with the 16 new files moved aside vs present).** `ReciprocalLinkHardwareModel` (generalizes
+   `CoherentTwoWayCodeHardwareModel` minus PN-code fields; free-sized, named
+   `calibrationCovarianceComponentOrder`-labelled calibration covariance).
+   `ReciprocalTimestampExchangeRecord` (immutable raw-tags-only 4-event record, one schema for
+   both `directRoundTrip` and `relayTransit` topologies via `chainEndpointIdentifiers`).
+   `ReciprocalEndpointTruthProvider` (`spacecraft`/`fixedStation`/`relay`-always-throws factories).
+   `ReciprocalTimestampEventModel` (the core new physics: `solveDirectRoundTrip`/
+   `solveRelayTransit` funnel into one private `solveEventChain_` fixed-point light-time solver;
+   `localClockTags` is the concrete fix for the named gap that the pre-existing two-way ranging
+   code never tags a transponder's own t2/t3 with its own clock, only ever the initiator's).
+   `ReciprocalTimeTransferCovarianceBuilder` (assembles named covariance blocks --
+   counter/tag-noise, terminal/modem-delay, product-calibration, atmosphere, relay,
+   session-common-mode -- into one block-diagonal PSD matrix). `DirectReciprocalTimeTransferBuilder`
+   (`buildFromIsl`/`buildFromGroundToSpace` funnel into one private `assembleDirect_`).
+3. **Combined Opus stage-acceptance review (architect-agent, worktree-isolated): initial verdict
+   DO-NOT-ACCEPT (2 blocking, 2 major, ~13 minor/nit findings), all real findings fixed directly,
+   no second review round.** The core physics/tagging/cross-validation was confirmed correct
+   throughout; every finding was in the adapter/validation layer around it:
+   - **Blocking 1 (real, quantified defect):** `assembleDirect_` piped a supplied
+     `CommonSourceCovarianceGroup` (documented, always metres^2-domain) straight into a block
+     stamped `covarianceUnits='s^2'` -- measured live, a 0.3 m common-mode range sigma reported as
+     a 0.3-SECOND timing sigma, wrong by c^2, and a passing test actively drove this exact path.
+     Fixed: `commonSourceGroups` is now always refused when nonempty
+     (`DirectReciprocalTimeTransferBuilder:commonSourceGroupUnits`), deferred to Section 4.5 where
+     a real seconds-domain shared-source type belongs.
+   - **Blocking 2:** the pre-existing two-way ranging code's own `assertValidAt` precedent
+     (`CoherentTwoWayCodeRangingModel.m:54-55`) had been silently dropped on this new path --
+     a stale/expired calibration product previously constructed a "valid" exchange record with no
+     complaint. Fixed: `assembleDirect_` now calls `hardware.assertValidAt(tags_s(4))` and requires
+     every supplied `DistributedLinkCalibrationState.coversLocalTag(tags_s(4))`; also fixed a
+     related nit where `assertValidAt(NaN)` silently passed (`NaN < / >` are both false).
+   - **Major 3:** `legAppliesAtmosphere` (per-event) and `atmosphereVariance_s2` were wired with no
+     cross-check in either direction, and the field had no leg-PAIR consistency check at all
+     (`[true false true false]` previously constructed cleanly). Fixed: the record now enforces
+     `legAppliesAtmosphere(1)==(2)` and `(3)==(4)`; `assembleDirect_` requires
+     `atmosphereVariance_s2` exactly when a leg is declared to apply atmosphere and forbids it
+     otherwise; `buildFromGroundToSpace` gained a real `applyAtmosphere` toggle (plan 4.3 item 4:
+     "only... when separately toggled") instead of an unconditional hard-coded `true`.
+   - **Major 4:** `sessionCommonModeBlock` crashed (`MATLAB:StructConversion:NonPairedArgs`) on an
+     array of 2+ groups despite being documented to accept one. Fixed via `blkdiag` over each
+     group's own sub-block, independently of item 1's separate refusal to wire it into this stage's
+     builder at all.
+   - **Minors, all fixed:** `maximumIterations` floor raised to 3 (below 3 could never satisfy the
+     convergence check; the negative-convergence test was rewritten around a genuinely
+     non-convergent near-light-speed-recession geometry, verified live, rather than a low-cap
+     artifact); `covarianceUnits` hardcoded (was free text alongside a hardcoded guard); default
+     `calibrationCovariance_s2` changed from a fabricated `0` to `zeros(0,0)` (an undeclared
+     covariance degrades to a true zero-row block, not a singular 1x1 zero); added
+     `calibrationCovarianceComponentOrder` (unnamed free-sized rows had no consumer mapping);
+     `productCalibrationBlock`'s s^2 unit guard centralized into the covariance builder itself
+     (was only enforced by one caller); required name-value options across both new classes given
+     sentinel defaults + explicit `ClassName:reason` checks (were surfacing opaque
+     `MATLAB:nonExistentField` errors); `assemble()`/`relayBlock`'s non-empty branch now validate
+     block shape via a shared `validateBlock_` (a malformed block previously failed deep inside
+     block-diagonal placement, or not at all); the record now validates `covarianceComponentOrder`
+     entries and `truthDiagnosticIdentifier` are actually text (previously any value silently
+     `char()`-coerced); the record now requires both `localClockCompareEndpointIdentifiers` to be
+     members of `chainEndpointIdentifiers`; `carrierFrequency_Hz` now accepts a scalar (broadcast)
+     or a genuine 1x4 vector (was collapsed to always-scalar, defeating the record's own
+     per-event/frequency-translating-transponder schema). Class header docstring corrected (2 of 3
+     original reasons for not reusing `CoherentTwoWayCodeRangingModel` were re-verified and found
+     partially inaccurate on closer reading; corrected to the 2 reasons that actually hold).
+   - **Coverage gaps closed:** `properTimeRate` (the one genuinely duplicated-physics formula this
+     stage introduces) and `fixedStation`'s clock bias/rate conversion were previously asserted
+     nowhere; a dedicated rate-sign subtest was added after finding the existing sign/units test's
+     drift contribution sat 34x BELOW its own assertion tolerance (fixed via a distant, tolerance-
+     clearing probe time, not by inflating the drift value, which would have broken the adjacent
+     bias-dominance assertions). Oracle cross-validation tolerances tightened from 1e-9 s/1e-6 m to
+     1e-10 s/1e-8 m after confirming empirically the achieved agreement is at floating-point noise.
+   - **Consciously left as-is, documented rather than code-changed:** `solveRetardedLeg_`/
+     `solverOptions_` are a deliberate golden-safety tradeoff, line-for-line equivalent to
+     `CoherentTwoWayCodeRangingModel.m:321-343,345-376` -- extracting a shared helper would mean
+     editing that existing file, so this is duplicated-by-design and flagged here as a real
+     future-divergence risk for whoever next touches either solver. `originTerminalGroupDelay_s`/
+     `anchorTerminalGroupDelay_s` are declared in the schema but read by no production code yet --
+     correctly scoped: applying terminal delays to the physics is explicitly a Section 4.3 concern
+     (plan 4.3 item 2), not 4.2's. Two solver guards (`:121-124` residual-closure,
+     `:125-128` time-ordering) are structurally unreachable given how delays are constructed --
+     left in place as harmless defensive code, not cited as evidence of correctness. The record's
+     `t1<=t2<=t3<=t4` uses inclusive `<=`, so a degenerate zero-duration exchange constructs
+     cleanly -- intentional (matches `ConstantVelocityFourEventLightTimeOracle`'s own convention),
+     not a gap.
+4. **10 new test files (all named per the plan's own Stage-4 test list where it names a 4.2-scoped
+   item), all real MATLAB execution, no mocks, extensively cross-validated against the
+   pre-existing, independent `ConstantVelocityFourEventLightTimeOracle` closed-form solver rather
+   than only self-checking residual closure:** `test_four_timestamp_static_symmetric_limit`,
+   `test_four_timestamp_moving_endpoint_asymmetry`, `test_four_timestamp_clock_offset_sign_and_units`,
+   `test_four_timestamp_terminal_delay_calibration`,
+   `test_four_timestamp_local_tag_coordinate_time_roundtrip`,
+   `test_four_timestamp_covariance_block_psd_and_common_terms`,
+   `test_four_timestamp_invalid_or_out_of_order_tag_rejected`, `test_reciprocal_endpoint_truth_provider`,
+   `test_reciprocal_link_hardware_model`, `test_direct_reciprocal_time_transfer_builder`. Explicitly
+   deferred to later stages per the plan's own named list: `test_four_timestamp_direct_isl_finite_difference_jacobian`/
+   `test_four_timestamp_ground_space_finite_difference_jacobian` (no linearization exists until
+   Section 4.3); `test_four_timestamp_ground_space_atmosphere_truth_model_separation` (no real
+   atmosphere adapter exists until Section 4.4); `test_four_timestamp_exactly_once_consumption` (no
+   ledger integration exists until Section 4.4); `test_relay_twstft_session_leg_identity`/
+   `test_relay_twstft_clock_gauge`/`test_relay_twstft_common_delay_covariance` (no relay session
+   builder exists until Section 4.5).
+5. **Full regression suite**: **291/307 passed**. File count grew from Stage 4.1's 297 to 307 (the
+   10 new Stage 4.2 test files, all passing), pass count grew from 281 to 291 by exactly that
+   margin -- the same 16 pre-existing/unrelated failures carried forward unchanged, confirming zero
+   regression.
+
 ### 4.3 Implement direct four-timestamp physics
 
 For endpoints A and B, generate:
