@@ -2220,6 +2220,129 @@ cfg.measurements.twoWayTimeTransfer.fourTimestampPhysical.linearizationSteps.att
 cfg.measurements.twoWayTimeTransfer.fourTimestampPhysical.linearizationSteps.clockBiasStep_m     = 5;
 cfg.measurements.twoWayTimeTransfer.fourTimestampPhysical.linearizationSteps.clockDriftStep_mps  = 0.005;
 
+%% --- Classical relay TWSTFT session processor (plan Section 4.5) ---
+% A -> relay S -> B and B -> relay S -> A, combined by revgnss.GroundRelayTimeTransferSessionBuilder
+% into ONE station-pair clock-difference report. Distinct from cfg.measurements.twstft.* (2-space-
+% asset diagnostic-only ISL scaffold above -- never a physical relay model) and from
+% cfg.measurements.twoWayTimeTransfer.* (ground<->ONE spacecraft, direct round trip, no relay).
+% Report-only this stage: NOT routed through IndependentFleetCoordinator/DistributedLinkUpdateAdapter
+% (no ground-station-pair dimension exists there, and the plan does not authorize widening that
+% frozen vocabulary here). Fully inert unless enable=true AND a complete configuration is present;
+% revgnss.GroundRelayPhysicalLinkConfig.requireCompleteSessionConfig hard-refuses an incomplete
+% enable=true configuration.
+%
+% Deliberate, documented deviations from the plan's own item list (combined review M5, recorded
+% here per the Section 4.4 completion-record precedent for an unimplemented plan item -- not a
+% silent omission): plan item 5's "clock product" common-mode term has no config leaf or covariance
+% group this stage (revgnss.GroundRelaySessionCommonCovarianceGroup.AllowedCommonSourceNames covers
+% relay/station-terminal/atmosphere only); plan item 6's "frequency difference" observable is not
+% reported (revgnss.GroundRelaySessionClockDifferenceObservable reports only clock-difference
+% values) -- a frequency difference needs at least two independent sessions to estimate a rate,
+% which this single-session builder does not accumulate. Both are left for a future stage.
+cfg.measurements.groundRelayTimeTransfer.enable    = false;
+cfg.measurements.groundRelayTimeTransfer.useInEKF  = false;   % hard-refused if true this stage
+
+cfg.measurements.groundRelayTimeTransfer.session.stationATowerIndex    = [];   % required int
+cfg.measurements.groundRelayTimeTransfer.session.stationBTowerIndex    = [];   % required int, != stationA
+cfg.measurements.groundRelayTimeTransfer.session.relaySpaceAssetIndex  = [];   % required int
+cfg.measurements.groundRelayTimeTransfer.session.sessionIdentifier     = 'ground-relay-session';
+cfg.measurements.groundRelayTimeTransfer.session.protocolIdentifier    = 'classicalRelayTwstft';
+cfg.measurements.groundRelayTimeTransfer.session.signalIdentifier      = 'TWSTFT-RELAY';
+cfg.measurements.groundRelayTimeTransfer.session.channelIdentifier     = 'relay-1';
+cfg.measurements.groundRelayTimeTransfer.session.carrierFrequency_Hz   = 14.0e9;   % Ku-band, representative
+
+% Both epochs are the FINAL-RECEPTION coordinate time of their own pass (the same t4_s convention
+% revgnss.ReciprocalTimestampEventModel.solveRelayTransit/solveDirectRoundTrip already use
+% everywhere else in this plan) -- required, distinct, finite. A moving relay produces genuinely
+% different forward/return geometry between these two epochs; that asymmetry is exactly what the
+% exact closed-form combiner in revgnss.GroundRelaySessionObservableBuilder is designed to close.
+cfg.measurements.groundRelayTimeTransfer.schedule.forwardReceptionEpoch_s = [];   % required
+cfg.measurements.groundRelayTimeTransfer.schedule.returnReceptionEpoch_s  = [];   % required, != forward
+
+cfg.measurements.groundRelayTimeTransfer.terminalGeometry.stationA.transmitPhaseCentreOffset_body_m = zeros(3,1);
+cfg.measurements.groundRelayTimeTransfer.terminalGeometry.stationA.receivePhaseCentreOffset_body_m  = zeros(3,1);
+cfg.measurements.groundRelayTimeTransfer.terminalGeometry.stationB.transmitPhaseCentreOffset_body_m = zeros(3,1);
+cfg.measurements.groundRelayTimeTransfer.terminalGeometry.stationB.receivePhaseCentreOffset_body_m  = zeros(3,1);
+cfg.measurements.groundRelayTimeTransfer.terminalGeometry.relay.transmitPhaseCentreOffset_body_m    = zeros(3,1);
+cfg.measurements.groundRelayTimeTransfer.terminalGeometry.relay.receivePhaseCentreOffset_body_m     = zeros(3,1);
+
+% Hardware / delay chain. Named for exactly what each perturbs -- a genuine TX-vs-RX split per
+% station (a single combined per-station delay is PROVABLY INERT to the reported clock difference:
+% only each station's own TX-minus-RX asymmetry survives the two-pass combination).
+% relayGroupDelayNominal_s reuses the existing, already-tested
+% revgnss.ReciprocalLinkHardwareModel.turnaroundProperTime_s mechanism verbatim (applied to
+% whichever endpoint occupies the "turnaround" role -- for relayTransit, that is literally the
+% relay); relayGroupDelayAsymmetry_s is an optional forward/return split for testing relay-hardware
+% non-reciprocity (default 0 = perfectly reciprocal relay). relayGroupDelayAsymmetry_s moves only
+% revgnss.GroundRelaySessionClockDifferenceObservable.classicalReciprocityValue_s (the realizable
+% classical relay-TWSTFT combination) -- it is structurally, provably INERT on
+% clockDifferenceValue_s (the truth-geometry-assisted reference value), by design: see
+% revgnss.GroundRelaySessionObservableBuilder.combine's own header for the exact distinction
+% between the two reported values (combined review B1).
+cfg.measurements.groundRelayTimeTransfer.hardware.stationATransmitDelay_s        = 0;
+cfg.measurements.groundRelayTimeTransfer.hardware.stationAReceiveDelay_s         = 0;
+cfg.measurements.groundRelayTimeTransfer.hardware.stationBTransmitDelay_s        = 0;
+cfg.measurements.groundRelayTimeTransfer.hardware.stationBReceiveDelay_s         = 0;
+cfg.measurements.groundRelayTimeTransfer.hardware.relayGroupDelayNominal_s       = 1e-3;
+cfg.measurements.groundRelayTimeTransfer.hardware.relayGroupDelayAsymmetry_s     = 0;
+% Frequency translation / relay oscillator state: NOT numerically modelled this stage
+% (solveRelayTransit is coordinate-time-only, frequency-agnostic). Must equal 1.0 --
+% requireCompleteSessionConfig hard-refuses any other value (mirrors Section 4.4's
+% applyAtmosphere hard-refuse precedent) rather than silently accepting a configured translation
+% the physics never applies.
+cfg.measurements.groundRelayTimeTransfer.hardware.relayFrequencyTranslationRatio = 1.0;
+cfg.measurements.groundRelayTimeTransfer.hardware.relayOscillatorStateIdentifier = 'ground-relay-oscillator';
+cfg.measurements.groundRelayTimeTransfer.hardware.physicalChainIdentifier        = 'ground-relay-twstft-chain';
+cfg.measurements.groundRelayTimeTransfer.hardware.calibrationProductIdentifier   = 'ground-relay-twstft-calibration';
+cfg.measurements.groundRelayTimeTransfer.hardware.validFromLocalTag_s            = -1e12;
+cfg.measurements.groundRelayTimeTransfer.hardware.validUntilLocalTag_s           = 1e12;
+
+% Truth-only additive error, folded into the nominal hardware values above when parameterSource=
+% 'physicalTruth' (matches revgnss.FourTimestampPhysicalLinkConfig.hardwareModel's established
+% truth/calibration split exactly). A nonzero stationATransmitDelayError_s WITHOUT an equal and
+% opposite stationAReceiveDelayError_s produces a real, nonzero, testable bias in the reported
+% clock difference; equal TX/RX errors are a documented, tested NO-OP by design.
+cfg.measurements.groundRelayTimeTransfer.truth.stationATransmitDelayError_s = 0;
+cfg.measurements.groundRelayTimeTransfer.truth.stationAReceiveDelayError_s  = 0;
+cfg.measurements.groundRelayTimeTransfer.truth.stationBTransmitDelayError_s = 0;
+cfg.measurements.groundRelayTimeTransfer.truth.stationBReceiveDelayError_s  = 0;
+cfg.measurements.groundRelayTimeTransfer.truth.relayGroupDelayError_s       = 0;
+
+% Session-common covariance: seconds^2-domain ONLY (revgnss.GroundRelaySessionCommonCovarianceGroup
+% -- NOT revgnss.CommonSourceCovarianceGroup, which is metres^2-domain always).  temporalModel is
+% restricted to the EXISTING revgnss.DistributedLinkCalibrationState.AllowedTemporalCovarianceModels
+% vocabulary (no new word invented); 'whitePerRow' is constructor-forbidden. A large-but-finite
+% correlationTime_s (not Inf) models "persistent for any session timescale this subsystem covers".
+cfg.measurements.groundRelayTimeTransfer.sessionCommonCovariance.relayGroupDelaySigma_s          = 0;
+cfg.measurements.groundRelayTimeTransfer.sessionCommonCovariance.relayGroupDelayTemporalModel     = 'firstOrderGaussMarkov';
+cfg.measurements.groundRelayTimeTransfer.sessionCommonCovariance.relayGroupDelayCorrelationTime_s = 1e9;
+cfg.measurements.groundRelayTimeTransfer.sessionCommonCovariance.stationATerminalSigma_s          = 0;
+cfg.measurements.groundRelayTimeTransfer.sessionCommonCovariance.stationATerminalCorrelationTime_s = 1e9;
+cfg.measurements.groundRelayTimeTransfer.sessionCommonCovariance.stationBTerminalSigma_s          = 0;
+cfg.measurements.groundRelayTimeTransfer.sessionCommonCovariance.stationBTerminalCorrelationTime_s = 1e9;
+cfg.measurements.groundRelayTimeTransfer.sessionCommonCovariance.atmosphereSigma_s                = 0;
+cfg.measurements.groundRelayTimeTransfer.sessionCommonCovariance.atmosphereTemporalModel          = 'firstOrderGaussMarkov';
+cfg.measurements.groundRelayTimeTransfer.sessionCommonCovariance.atmosphereCorrelationTime_s      = 1800;
+
+% Counter/tag noise (mirrors twoWayTimeTransfer.fourTimestampPhysical.counterTag.* exactly).
+cfg.measurements.groundRelayTimeTransfer.counterTag.sigma_s = zeros(1,4);
+cfg.measurements.groundRelayTimeTransfer.counterTag.labels  = {'t1','t2','t3','t4'};
+
+% Atmosphere: applies ONLY to the two ground-space legs of each one-way pass (station<->relay),
+% NEVER to the relay's own turnaround -- enforced STRUCTURALLY, not by a runtime check: the
+% relayTransit exchange-record schema has exactly two propagation legs and no leg object for the
+% turnaround gap at all. perLegResidualVariance_s2 is an INDEPENDENT per-leg noise contribution to
+% each pass's own record covariance (mapping-function/turbulence-scale residual); it is separate
+% from, and additive to, sessionCommonCovariance.atmosphereSigma_s above (a SHARED/correlated
+% systematic sampled once and reused for both appearances of each station-relay path).
+cfg.measurements.groundRelayTimeTransfer.atmosphere.applyTropo               = false;
+cfg.measurements.groundRelayTimeTransfer.atmosphere.applyIono                = false;
+cfg.measurements.groundRelayTimeTransfer.atmosphere.f_L1ReferenceHz          = 1.57542e9;
+cfg.measurements.groundRelayTimeTransfer.atmosphere.perLegResidualVariance_s2 = [0, 0];  % [stationA-relay, relay-stationB]
+
+cfg.measurements.groundRelayTimeTransfer.solverOptions.lightTimeTolerance_s = 1e-13;
+cfg.measurements.groundRelayTimeTransfer.solverOptions.maximumIterations    = 50;
+
 % --- Observable mode (Step 1) -----------------------------------
 % observableMode: DESCRIPTIVE LABEL (not authoritative — does not gate
 % measurements).  Used for report generation and diagnostics only.

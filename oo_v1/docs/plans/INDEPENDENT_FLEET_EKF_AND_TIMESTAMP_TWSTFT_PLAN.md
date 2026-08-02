@@ -1939,6 +1939,140 @@ Add a clearly named `GroundRelayTimeTransferSessionBuilder` that:
 
 Do not call a direct tower-to-space exchange “ground-station-pair TWSTFT.”
 
+### Section 4.5 completion record — 2026-08-02
+
+1. **Design: Explore-agent grounding pass + 6-agent judge-panel Workflow (3 independently-biased
+   proposals + 2 judges + synthesis), synthesis independently re-verified every load-bearing claim
+   against source.** The synthesis independently re-derived the exact closed-form combiner formula
+   (not merely selecting between the proposals' claims) and caught a design defect shared by 2 of
+   3 proposals: a single combined (TX==RX) station modem delay per station is provably inert to the
+   reported clock difference — only the station's own TX-minus-RX asymmetry survives the two-pass
+   combination — so the hardware model tracks 4 separate station delay terms, not 2.
+2. **7 new files, zero existing physics files modified** (`GroundRelaySessionHardwareModel`,
+   `GroundRelayPhysicalLinkConfig`, `GroundRelayOneWayPassRecordBuilder`,
+   `GroundRelaySessionObservableBuilder`, `GroundRelaySessionClockDifferenceObservable`,
+   `GroundRelaySessionCommonCovarianceGroup`, `GroundRelayTimeTransferSessionBuilder`) plus one
+   purely-additive `masterConfig.m` subtree (`cfg.measurements.groundRelayTimeTransfer.*`,
+   default `enable=false`) and two additive `SimulationToggleManifest.m` rows. `solveRelayTransit`,
+   `ReciprocalTimestampExchangeRecord`, `ReciprocalLinkHardwareModel`,
+   `ReciprocalEndpointTruthProvider`, `ReciprocalTimeTransferCovarianceBuilder` all reused
+   unmodified — `revgnss.ReciprocalEndpointTruthProvider.relay()` stays untouched, still throwing
+   `relayNotImplemented` with zero callers (`.spacecraft()` is already fully generic over any
+   bent-pipe relay asset). Report-only this stage: no ground-station-pair dimension exists in
+   `IndependentFleetCoordinator`/`DistributedLinkUpdateAdapter`, and this design does not widen
+   that frozen vocabulary; `useInEKF=true` is hard-refused.
+3. **Combined Opus review verdict: DO-NOT-ACCEPT (2 Blocking, 5 Major, 10 Minor, 6 test-coverage
+   gaps), all fixed directly, zero regression re-verified after every fix.** The review
+   independently re-derived the combiner algebra from first principles and measured every claim
+   against the live code before flagging it — this was not a stylistic pass.
+   - **Blocking 1**: the shipped combiner (`clockDifferenceValue_s`) subtracts the TRUTH-solved
+     coordinate-time transit — ground truth no real relay-TWSTFT receiver has access to — which by
+     construction deletes the two headline error sources classical relay TWSTFT actually suffers
+     (relay-motion non-reciprocity, relay-group-delay asymmetry), making
+     `hardware.relayGroupDelayAsymmetry_s` a declared-but-provably-inert toggle. Fixed by adding a
+     second reported value, `classicalReciprocityValue_s = 0.5*(DeltaF-DeltaR)` — the REALIZABLE
+     classical combination a real station pair actually computes from its own exchanged local tags
+     alone, no geometry knowledge required — and re-documenting `clockDifferenceValue_s` honestly
+     as a truth-geometry-assisted validation reference. Measured: `relayGroupDelayAsymmetry_s=10ms`
+     moves `classicalReciprocityValue_s` by exactly `+5ms` (static-relay limit) while
+     `clockDifferenceValue_s` remains bit-identical, matching the corrected documentation exactly.
+   - **Blocking 2**: `buildSession` never checked `enable=false` itself (only the separately-called
+     `requireCompleteSessionConfig`, a documented no-op while disabled) — a disabled config with
+     the rest of the subtree populated silently built a real observable and silently skipped every
+     other hard refusal. Fixed: `buildSession`'s literal first statement now refuses
+     (`GroundRelayTimeTransferSessionBuilder:disabled`) when disabled, before anything else runs.
+   - **Major 1 (M1)**: `counterTag.sigma_s`, `atmosphere.perLegResidualVariance_s2`, and
+     `solverOptions.*` were declared config leaves that never reached the returned observable/
+     covariance/solver at all. Fixed: added `independentVariance_s2` to the observable (propagates
+     each record's own counter-tag/atmosphere-residual covariance into the reported value's own
+     variance via the combiner's exact +-0.5 Jacobian — the relay's own tag noise correctly
+     contributes zero, matching "relay marginalized out"), and threaded `solverOptions` through to
+     both `buildOneWayPass` calls.
+   - **Major 2 (M2)**: the "recovers `bias_B-bias_A` EXACTLY" claim is false under nonzero clock
+     drift — the true exact identity is `clockDifferenceValue_s == delta_B(stationBEffectiveEpoch_s)
+     - delta_A(stationAEffectiveEpoch_s)`, two generally-DIFFERENT midpoint epochs. Fixed: added
+     `stationAEffectiveEpoch_s`/`stationBEffectiveEpoch_s` to the observable and corrected every
+     header claim to state the precise condition (driftless clocks, or `coordinateAsymmetry_s==0`)
+     under which it collapses to a single value.
+   - **Major 3 (M3)**: `combine()` had no truth/estimator separation guard on its hardware input,
+     and its own header falsely claimed "no place a truth/estimate mix could silently occur" — a
+     `calibrationProduct`-sourced hardware object was silently accepted and applied as truth. Fixed
+     by M4's redesign (below), which gives `assertParameterSource` its first two real callers.
+   - **Major 4 (M4), the deepest fix**: the truth/calibration split was structurally inert — the
+     single hardware object used for both "truth generation" and "correction" meant a PERFECTLY
+     KNOWN, fully-compensated station delay (`truth.*Error_s==0`) still biased the reported value
+     by its own full nominal delay (measured: a "calibrated" 300ns delay produced a 150ns bias).
+     Fixed by redesigning `combine()` to accept TWO hardware objects — `hardwareTruth`
+     (`physicalTruth`, nominal+error — what really happened) and `hardwareCalibration`
+     (`calibrationProduct`, nominal only — what a real receiver's own compensation believes/
+     removes) — with the NET correction `hardwareTruth.*Delay_s - hardwareCalibration.*Delay_s`
+     reducing to exactly the declared `truth.*Error_s` residual whenever calibration matches the
+     real nominal (the normal case). Measured: the same "known" 300ns delay now produces exactly
+     zero bias on both reported values; only genuinely uncalibrated residuals survive.
+   - **Major 5 (M5)**: plan item 5's "clock product" common-mode term and item 6's "frequency
+     difference" observable were silently absent, undocumented. Fixed with an explicit, reasoned
+     "not modelled this stage" note in `masterConfig.m` (a frequency difference needs at least two
+     independent sessions to estimate a rate, which this single-session builder does not
+     accumulate) — matching this project's own established precedent for a documented plan-item
+     deviation rather than a silent gap.
+   - **10 minor findings, all fixed**: m1 (explicit finiteness/scalar/sign validation added for
+     every `hardware.*`/`truth.*`/`counterTag.*`/`atmosphere.*` leaf, closing the same
+     silent-fallback-to-default gap Section 4.4's review already fixed elsewhere but that was not
+     carried over here); m2 (negative `sessionCommonCovariance.*Sigma_s` refused rather than
+     silently squared into a valid-looking wrong variance); m3 (dead, misleadingly-named
+     `modelLeaves` entries removed); m4 (`temporalCovarianceModel` now carried onto the observable
+     as `sessionCommonTemporalModels`, one entry per declared source, so a consumer of the final
+     product alone can see why the covariance is temporally correlated rather than white; the
+     paired "validity window" sub-suggestion was intentionally NOT implemented — the window is
+     hardcoded ±1e12 with no masterConfig leaf, so checking it against real session epochs would be
+     definitionally always-true and vacuous, documented as such rather than added as dead code);
+     m5 (test fixture station B moved from a below-horizon position, which was silently
+     floor-clamped by `EnvironmentModel`, to a genuine ~55° elevation); m6 (relay ECEF position for
+     atmosphere geometry now read directly from the already-built truth endpoint's own
+     `centrePositionAt`, rotated ECI->ECEF via the same rotation the endpoint itself was built
+     through, replacing a linear-ECEF-extrapolation approximation measured to diverge by 329.5 km /
+     1.3° elevation at the shipped 990s schedule gap); m7 (`assertValidAt` now has a real production
+     caller — checked at session level in `combine()` against both passes' own reception epoch;
+     `assertParameterSource` already got real callers from M3/M4's fix); m8
+     (`assembleSessionCommonBlock_` now emits `memberRowCount` labels per group, not exactly one
+     regardless of row count); m9 (an omitted `counterTagSigma_s` now fails with this class's own
+     clear error identifier instead of a confusing Section-4.2 identifier from three call frames
+     down); m10 (`atmosphere.perLegResidualVariance_s2` validated as a finite nonnegative 1x2
+     vector at config-validation time, not a raw MATLAB subscript error deep inside the atmosphere
+     helper).
+   - **6 test-coverage gaps, all closed**: T1 (16 new negative-path assertions: 4 reachable
+     `requireSessionLegIdentity_` branches — including cross-validating against a genuine
+     `directRoundTrip` record built via the unmodified `DirectReciprocalTimeTransferBuilder` — plus
+     a 12-case loop-driven sweep of the observable constructor's own validation, each mutating one
+     field of a real `combine()`-produced baseline; the 5 structurally-unreachable
+     `requireSessionLegIdentity_` branches, given the one shipped production call path, are
+     documented as intentional defense-in-depth, not silently skipped); T2 (added stationB-only,
+     hand-computed-opposite-sign, and both-stations-cancel asymmetric-delay cases, closing a gap
+     where a TX/RX swap bug on station B specifically would have gone undetected); T3 (a relay
+     degenerate-static comparison against first-order reciprocal transfer was assessed as
+     lower-value than the T1/T2 gaps given the combiner algebra was independently re-derived and
+     measured correct by the review itself — not implemented, a scope call recorded here rather
+     than silently dropped); T4 (persistence test's fixture previously declared no session-common
+     source at all, making its own "bit-identical" assertion vacuously true on two `zeros(0,0)`
+     values — fixed with a genuinely nonzero `relayGroupDelaySigma_s` plus an explicit
+     non-shrinking-variance assertion); T5 (atmosphere-routing test asserted only `isa(...)` —
+     fixed with direct `legAppliesAtmosphere`/`atmosphereDelay:*`-row assertions on a raw
+     `buildOneWayPass` record); T6 (moving-relay atmosphere test asserted only that the two
+     per-pass delays differ, never that the residual survives into `clockDifferenceValue_s` as its
+     own comment claimed — fixed with an exact-to-solver-tolerance shift assertion plus a
+     static-relay negative control proving the effect is genuinely motion-driven).
+4. **Full regression suite**: **310/326 passed** (up from Section 4.4's 304/320 baseline by
+   exactly +6 files/+6 passes — all 6 new Section 4.5 test files, all passing), with the SAME 16
+   pre-existing/unrelated failures carried forward byte-for-byte unchanged (LAMBDA resolver, Orekit
+   cross-validation, tower-clock-correction/mode/v4, formation rank deficiency, multipath,
+   carrier-slip, simulation-data-store-array-backend, stage41-ambiguity, stage7a2-policy,
+   linearized-factor-batch, isl-carrier-row, multi-asset-truth-persistence,
+   atmosphere-report-row-truth — none referencing any `GroundRelay*` class or any file this section
+   touched), re-verified identical both before and after the full combined-review fix pass,
+   confirming zero regression from either the initial implementation or the extensive fixes.
+5. **Stage 4 is now fully complete** (Sections 4.1 through 4.5, all combined-reviewed, all findings
+   fixed, all golden-safe).
+
 ### Stage-4 tests
 
 ```text
