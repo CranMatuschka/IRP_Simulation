@@ -1,0 +1,106 @@
+{
+  "_comment": "BEST MEASURED CONFIGURATION. Every setting here is justified by a measurement, not a guess. N=20 because rotation error scales as sigma_abs/(R*sqrt(N)) -- confirmed to 4% (0.0209 deg at N=20 vs 0.0368 deg at N=6). 24 h because what separates formation shape from formation rotation is how far the formation TURNS, not integration time: the separation penalty is 9.9x at 3600 s (15 deg of turn), 2.1x at 6 h (90 deg) and 1.0x at 24 h (360 deg). multiRingHelix because the single-ring layout scales the RADIUS not the separation, so at N=20 the neighbour chord collapses to 329 m and dilutes the shape solve 27x. Cone terminal layout plus delay-bias self-calibration measured shape 4.106 -> 0.0736 m (56x) at N=6. sharedAcrossFormation is NOT optional: with the per-asset atmosphere artefact the wide-lane ambiguity fix rate collapses from 99.9963% to 18.2% and every differenced ground observable is meaningless.",
+
+  "scenario": {
+    "name": "run22_best_G5S20R4_24h",
+    "nTowers": 5,
+    "nSpaceAssets": 20,
+    "nReceivers": 4
+  },
+  "simulation": {
+    "duration_s": 86400
+  },
+  "realism": {
+    "grade": true
+  },
+  "atmosphere": {
+    "realistic": true,
+    "sharedAcrossFormation": {
+      "enable": true
+    }
+  },
+  "formation": {
+    "mode": "multiRingHelix",
+    "spacing_m": 1000.0,
+    "baseline_m": 1000.0,
+    "crossTrackSpread": 1.0
+  },
+  "estimator": {
+    "dynamics": {
+      "perturbations": {
+        "luniSolar": { "enable": true },
+        "srp": { "enable": true }
+      }
+    }
+  },
+  "multiAsset": {
+    "mode": "fast",
+    "twoWayISL": {
+      "enable": true,
+      "links": "all",
+      "sigma_m": 0.02,
+      "terminalLayout": "cones",
+      "coneHalfAngle_deg": 70,
+      "linksPerTerminal": 2,
+      "delayCal": {
+        "sigma_const_m": 0.05,
+        "sigma_rw_m": 0.01,
+        "tau_s": 3600,
+        "nCorrCap": 60,
+        "estimate": { "enable": true }
+      },
+      "lightTime": { "enable": true }
+    },
+    "jointGeometry": {
+      "enable": true,
+      "shapePriorSigma_m": 0.07
+    },
+    "twoWayTimeTransferISL": {
+      "sigma_m": 0.03,
+      "delayCal": {
+        "sigma_const_m": 0.01,
+        "sigma_rw_m": 0.003,
+        "tau_s": 3600,
+        "nCorrCap": 60
+      }
+    },
+    "federated": {
+      "refAsset": 1,
+      "savePerAssetMat": false,
+      "parallel": false
+    }
+  },
+  "measurements": {
+    "twoWayTimeTransfer": {
+      "enable": true,
+      "useInEKF": true,
+      "mode": "firstOrderReciprocal",
+      "towers": "all",
+      "sigma_m": 0.03,
+      "includeReciprocityResidual": true,
+      "reciprocitySigma_m": 0.005,
+      "warmup_s": 0,
+      "conservativeProductCorrelation": true
+    },
+    "isl": {
+      "enable": true,
+      "twoWay": {
+        "enable": true,
+        "timeTransfer": {
+          "enable": true,
+          "useInEKF": false,
+          "mode": "firstOrderReciprocal",
+          "sigma_m": 0.03,
+          "warmup_s": 0
+        },
+        "range": { "enable": false, "useInEKF": false }
+      }
+    }
+  },
+  "report": {
+    "layout": "clockExact",
+    "runVersion": "run22-best-G5S20R4-24h",
+    "writePdf": true,
+    "writeMat": true
+  }
+}
