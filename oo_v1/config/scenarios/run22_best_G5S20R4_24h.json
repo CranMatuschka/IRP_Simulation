@@ -68,7 +68,7 @@
       "refAsset": 1,
       "savePerAssetMat": false,
       "parallel": true,
-      "maxWorkers": 4
+      "maxWorkers": 6
     }
   },
   "measurements": {
