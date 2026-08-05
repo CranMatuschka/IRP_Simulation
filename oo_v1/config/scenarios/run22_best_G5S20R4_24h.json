@@ -67,7 +67,8 @@
     "federated": {
       "refAsset": 1,
       "savePerAssetMat": false,
-      "parallel": false
+      "parallel": true,
+      "maxWorkers": 4
     }
   },
   "measurements": {
