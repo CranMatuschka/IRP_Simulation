@@ -84,6 +84,12 @@ classdef ReverseGNSSSimulation < handle
         function initialize(obj)
             fprintf('=== ReverseGNSSSimulation: initializing ===\n');
 
+            % The two-way ISL guards warn once per link via session-persistent
+            % ledgers. Clear them so a second simulation in the same MATLAB session
+            % (multi-run drivers, the Monte-Carlo path, the test suite) still gets
+            % its own warnings instead of inheriting the first run's silence.
+            revgnss.TwoWayISLMeasurementBuilder.resetGuardLedgers();
+
             % Finalize config: resolves nTowers/nReceivers, sets lever arms,
             % recreates clocks.  Updates obj.cfg so diagnostics below are correct.
             obj.cfg = revgnss.ConfigFactory.finalizeConfig(obj.cfg);

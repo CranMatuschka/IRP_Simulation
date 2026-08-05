@@ -34,6 +34,53 @@ classdef SwarmFormation
                  cfg.orbit.useOrbitPropagator;
         end
 
+        function [rho, phase] = ringLayout_(cfg, memberIndex, nSec, baseline_m, phase0)
+            % ringLayout_  Where member `memberIndex` sits: its ring RADIUS and its phase on it.
+            %
+            % WHY THIS EXISTS. The original layout put EVERY member on ONE ring of radius
+            % baseline_m, evenly spaced in phase, so the chord between neighbours is
+            % 2*rho*sin(pi/nSec) -- it SHRINKS as members are added. At nSec=5 that is 1176 m
+            % (the intended ~1 km); at nSec=19 it collapses to 329 m. Measured consequence at
+            % N=20: nearest-neighbour spacing 328 m instead of ~1000 m, which diluted the shape
+            % solve by 27x (0.149 m -> 4.11 m) because a fixed range bias is a 3x larger ANGULAR
+            % error on a 3x shorter baseline. cfg.formation.baseline_m is therefore the ring
+            % RADIUS, not the inter-satellite separation its comment claims.
+            %
+            % 'multiRingHelix' instead holds the SEPARATION fixed and adds RINGS: ring k has
+            % radius k*spacing and carries round(2*pi*k) members, so the along-ring chord and the
+            % ring-to-ring step are both ~spacing. Members-per-ring 6, 13, 19, ... grows with
+            % circumference exactly as it must for constant spacing.
+            mode = 'helix';
+            spacing = baseline_m;
+            if isfield(cfg,'formation')
+                if isfield(cfg.formation,'mode'); mode = char(cfg.formation.mode); end
+                if isfield(cfg.formation,'spacing_m') && ~isempty(cfg.formation.spacing_m)
+                    spacing = cfg.formation.spacing_m;
+                end
+            end
+            if ~strcmpi(mode,'multiRingHelix')
+                rho = baseline_m;
+                phase = phase0 + 2*pi*(memberIndex-1)/nSec;
+                return
+            end
+            % Fill rings outward until every member has a home.
+            k = 1; placed = 0;
+            while true
+                nk = max(1, round(2*pi*k));            % members this ring holds at ~spacing chord
+                if memberIndex <= placed + nk
+                    idxInRing = memberIndex - placed;
+                    rho = k * spacing;
+                    % Stagger alternate rings by half a step so radial neighbours do not line up.
+                    phase = phase0 + 2*pi*(idxInRing-1)/nk + mod(k,2)*pi/nk;
+                    return
+                end
+                placed = placed + nk; k = k + 1;
+                if k > 1000
+                    error('SwarmFormation:ringLayout','Could not place member %d.', memberIndex);
+                end
+            end
+        end
+
         function [dr_hill, dv_hill] = helixOffsetHill(baseline_m, meanMotion_radps, phase_rad, crossAmp)
             % helixOffsetHill  Hill-frame relative position [m] and velocity [m/s]
             % (in the rotating frame) at t=0 for one projected-circular member.
@@ -80,9 +127,10 @@ classdef SwarmFormation
                 if isfield(cfg.formation,'phase0_rad'); phase0 = cfg.formation.phase0_rad; end
                 if isfield(cfg.formation,'mode');       mode   = cfg.formation.mode;       end
             end
-            if ~strcmpi(mode, 'helix')
+            if ~any(strcmpi(mode, {'helix','multiRingHelix'}))
                 error('SwarmFormation:unsupportedMode', ...
-                    'cfg.formation.mode="%s" is not supported (only "helix").', mode);
+                    ['cfg.formation.mode="%s" is not supported ' ...
+                     '(only "helix" or "multiRingHelix").'], mode);
             end
 
             [r_c, v_c] = orbitProp.initialEciState();
@@ -93,9 +141,9 @@ classdef SwarmFormation
             A = [Rhat, Shat, What];         % Hill -> ECI rotation (columns R,S,W)
             omega = [0; 0; nMean];          % Hill-frame angular velocity (about W)
             for i = 1:nSec
-                phase = phase0 + 2*pi*(i-1)/nSec;
+                [rhoI, phase] = revgnss.SwarmFormation.ringLayout_(cfg, i, nSec, baseline, phase0);
                 ca = revgnss.SwarmFormation.crossAmp_(cfg, i, nSec);
-                [dr_h, dv_h] = revgnss.SwarmFormation.helixOffsetHill(baseline, nMean, phase, ca);
+                [dr_h, dv_h] = revgnss.SwarmFormation.helixOffsetHill(rhoI, nMean, phase, ca);
                 dr_eci = A * dr_h;
                 dv_eci = A * (dv_h + cross(omega, dr_h));   % rotating -> inertial relative velocity
                 r0Cells{i} = r_c + dr_eci;
@@ -120,9 +168,10 @@ classdef SwarmFormation
                 if isfield(cfg.formation,'phase0_rad'); phase0 = cfg.formation.phase0_rad; end
                 if isfield(cfg.formation,'mode');       mode   = cfg.formation.mode;       end
             end
-            if ~strcmpi(mode, 'helix')
+            if ~any(strcmpi(mode, {'helix','multiRingHelix'}))
                 error('SwarmFormation:unsupportedMode', ...
-                    'cfg.formation.mode="%s" is not supported (only "helix").', mode);
+                    ['cfg.formation.mode="%s" is not supported ' ...
+                     '(only "helix" or "multiRingHelix").'], mode);
             end
             if baseline < 500
                 warning('SwarmFormation:smallBaseline', ...
@@ -143,9 +192,9 @@ classdef SwarmFormation
             rCells = cell(1, nSec); vCells = cell(1, nSec);
             perMin = nan(1, nSec); perMax = nan(1, nSec);
             for i = 1:nSec
-                phase = phase0 + 2*pi*(i-1)/nSec;    % distribute members around the ring
+                [rhoI, phase] = revgnss.SwarmFormation.ringLayout_(cfg, i, nSec, baseline, phase0);
                 ca = revgnss.SwarmFormation.crossAmp_(cfg, i, nSec);
-                [dr_h, dv_h] = revgnss.SwarmFormation.helixOffsetHill(baseline, nMean, phase, ca);
+                [dr_h, dv_h] = revgnss.SwarmFormation.helixOffsetHill(rhoI, nMean, phase, ca);
                 dr_eci = A * dr_h;
                 dv_eci = A * (dv_h + cross(omega, dr_h));   % rotating -> inertial relative velocity
                 r0 = r_c + dr_eci;

@@ -39,15 +39,33 @@ steps = [repmat(0.25,3,1);repmat(0.025,3,1);repmat(5e-4,3,1); ...
     5;0.005;repmat(0.25,3,1);repmat(0.025,3,1); ...
     repmat(5e-4,3,1);5;0.005];
 
+% The euler slots do not hold Euler angles under 'quaternionErrorState': they hold a
+% body-frame small-angle error vector that ReverseGNSSEKF.update injects with
+% injectRight. The oracle must therefore differentiate the attitude columns in that
+% same basis, otherwise it validates d(rho)/d(euler) and silently pins the wrong
+% convention. Implemented here independently of the builder, via the DCM form
+% C <- C*Exp([delta]x), so this stays a genuine cross-check.
+tangentBasis = strcmp(simulation.cfg.estimator.attitude.parameterization, ...
+    'quaternionErrorState');
+eulerBlocks = {blockA.euler(:),blockB.euler(:)};
+
 oracleRow = zeros(size(activeRow));
 for columnIndex = 1:numel(columns)
     stateIndex = columns(columnIndex);
     step = steps(columnIndex);
-    xp2 = x; xp1 = x; xm1 = x; xm2 = x;
-    xp2(stateIndex) = xp2(stateIndex)+2*step;
-    xp1(stateIndex) = xp1(stateIndex)+step;
-    xm1(stateIndex) = xm1(stateIndex)-step;
-    xm2(stateIndex) = xm2(stateIndex)-2*step;
+    eulerIdx = [];
+    if tangentBasis
+        for blockIndex = 1:numel(eulerBlocks)
+            if any(eulerBlocks{blockIndex} == stateIndex)
+                eulerIdx = eulerBlocks{blockIndex};
+                break
+            end
+        end
+    end
+    xp2 = tangentPerturbed_(x,eulerIdx,stateIndex,2*step);
+    xp1 = tangentPerturbed_(x,eulerIdx,stateIndex,step);
+    xm1 = tangentPerturbed_(x,eulerIdx,stateIndex,-step);
+    xm2 = tangentPerturbed_(x,eulerIdx,stateIndex,-2*step);
     oracleRow(stateIndex) = ( ...
         -oraclePrediction_(simulation.cfg,observation,xp2, ...
             simulation.ekf.stateMap,t_s) + ...
@@ -79,6 +97,31 @@ assert(abs(activeRow(blockB.bdot)) <= absoluteTolerance, ...
     'A coherent turnaround must not depend on the remote free-running clock.');
 
 fprintf('test_coherent_two_way_code_physical_jacobian: PASS\n');
+end
+
+function xPerturbed = tangentPerturbed_(x,eulerIdx,stateIndex,offset)
+% Offset one column. For an attitude column under 'quaternionErrorState' the offset
+% is a body-frame rotation applied as C <- C*Exp([delta]x); the result is converted
+% back to ZYX Euler angles by inverting Rz(yaw)*Ry(pitch)*Rx(roll) directly, so this
+% shares no code with the builder under test.
+xPerturbed = x;
+component = [];
+if ~isempty(eulerIdx)
+    component = find(eulerIdx(:) == stateIndex,1);
+end
+if isempty(component)
+    xPerturbed(stateIndex) = xPerturbed(stateIndex)+offset;
+    return
+end
+deltaTheta = zeros(3,1);
+deltaTheta(component) = offset;
+nominalRotation = revgnss.AttitudeKinematics.bodyToEcefRotation(x(eulerIdx));
+perturbedRotation = revgnss.AttitudeErrorStateKinematics. ...
+    smallAnglePerturbedDcm(nominalRotation,deltaTheta);
+xPerturbed(eulerIdx) = [ ...
+    atan2(perturbedRotation(3,2),perturbedRotation(3,3)); ...
+    asin(max(-1,min(1,-perturbedRotation(3,1)))); ...
+    atan2(perturbedRotation(2,1),perturbedRotation(1,1))];
 end
 
 function predictedRange_m = oraclePrediction_(cfg,observation,x,stateMap,t_s)

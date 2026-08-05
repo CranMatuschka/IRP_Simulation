@@ -240,6 +240,33 @@ classdef IndependentFleetScenarioFactory
             if isfield(c,'measurements') && isfield(c.measurements,'isl') && ...
                     ~logical(keepIslInLeaf)
                 c.measurements.isl.enable = false;
+                % Clearing only the isl.enable PARENT left the twoWay sub-tree switched on in the
+                % leaf. A fleet config that legitimately sets measurements.isl.twoWay.timeTransfer
+                % .enable=true -- now the sanctioned gate for the relative-clock layer, which reads
+                % the FLEET cfg, not this leaf -- then reached InterSatelliteTimeTransferBuilder
+                % inside a per-asset leaf whose parents were false, and it aborted the whole run
+                % with InterSatelliteTimeTransferBuilder:parentDisabled. Strip the sub-tree the way
+                % stageOneLeafConfigForIndex already does for the distributed leaf, so both leaf
+                % builders are consistently ISL-free (decision D1: ISL never enters a per-asset
+                % absolute filter; it feeds the relative layer only).
+                if isfield(c.measurements.isl,'twoWay')
+                    c.measurements.isl.twoWay.enable = false;
+                    if isfield(c.measurements.isl.twoWay,'range')
+                        c.measurements.isl.twoWay.range.enable = false;
+                        c.measurements.isl.twoWay.range.useInEKF = false;
+                    end
+                    if isfield(c.measurements.isl.twoWay,'timeTransfer')
+                        c.measurements.isl.twoWay.timeTransfer.enable = false;
+                        c.measurements.isl.twoWay.timeTransfer.useInEKF = false;
+                    end
+                    if isfield(c.measurements.isl.twoWay,'doppler')
+                        c.measurements.isl.twoWay.doppler.enable = false;
+                        c.measurements.isl.twoWay.doppler.useInEKF = false;
+                    end
+                end
+                if isfield(c.measurements.isl,'oneWay')
+                    c.measurements.isl.oneWay.enable = false;
+                end
             end
             if isfield(c,'measurements') && isfield(c.measurements,'twstft')
                 c.measurements.twstft.enable = false;

@@ -239,12 +239,89 @@ classdef TwoWayISLMeasurementBuilder
                     ['The calibration residual-bias state requires an active EKF range ' ...
                      'and nonzero calibration uncertainty.']);
             end
-            persistentCalibration = any(calibrationValues(1:4) ~= 0);
+            % A recurring calibration error is a CONSTANT, so folding it into a white
+            % per-epoch R lets the filter average it down as 1/sqrt(n) when it never
+            % shrinks -- hence the refusal below. Two treatments are acceptable:
+            %   (a) the persistent residual-bias state estimates it, or
+            %   (b) the declared range sigma is at least as large as the error, so R
+            %       is merely conservative rather than optimistic.
+            % (b) exists because (a) is NOT always available: the range row constrains
+            % only (geometric range + b_link), so for a link with no other position
+            % observable the bias state is rank-deficient against the baseline and the
+            % estimator walks along that null space (see warnOnBiasExcursion_). Forcing
+            % (a) as the sole remedy would mandate a degenerate state.
+            %
+            % The per-link definitions are checked too: configForLink_ overwrites
+            % truth.turnaroundCalibrationError_s / terminalCalibrationError_s from each
+            % link AFTER this validation runs, so checking only the top-level keys lets
+            % a scenario declare zero here and a nonzero recurring error per link.
+            perLinkErrors_s = revgnss.TwoWayISLMeasurementBuilder. ...
+                linkCalibrationErrorMagnitudes_s(cfg);
+            worstError_s = max([abs(turnaroundError_s)+abs(terminalError_s), ...
+                perLinkErrors_s,0]);
+            persistentCalibration = any(calibrationValues(1:4) ~= 0) || ...
+                worstError_s > 0;
             if useRange && persistentCalibration && ~biasStateEnabled
-                error('TwoWayISLMeasurementBuilder:persistentCalibrationRequiresState', ...
-                    ['A recurring calibration error or uncertainty must use the ' ...
-                     'persistent residual-bias state; it cannot be repeated as white R.']);
+                worstBias_m = 0.5*revgnss.TwoWayISLMeasurementBuilder.C_mps* ...
+                    worstError_s;
+                declaredSigma_m = revgnss.TwoWayISLMeasurementBuilder. ...
+                    declaredRangeSigma_m(cfg);
+                if ~(hypot(turnaroundSigma_s,terminalSigma_s) == 0 && ...
+                        declaredSigma_m >= worstBias_m)
+                    error('TwoWayISLMeasurementBuilder:persistentCalibrationRequiresState', ...
+                        ['A recurring calibration error or uncertainty cannot be ' ...
+                         'repeated as white R. Either enable the persistent ' ...
+                         'residual-bias state, or declare a range sigma that covers ' ...
+                         'the error (worst per-link bias %.4f m, declared sigma ' ...
+                         '%.4f m).'],worstBias_m,declaredSigma_m);
+                end
             end
+        end
+
+        function magnitudes_s = linkCalibrationErrorMagnitudes_s(cfg)
+            % linkCalibrationErrorMagnitudes_s  |turnaround|+|terminal| per link.
+            magnitudes_s = [];
+            links = revgnss.TwoWayISLMeasurementBuilder.linkDefinitions(cfg);
+            for linkIndex = 1:numel(links)
+                link = links(linkIndex);
+                if isfield(link,'enable') && ~link.enable; continue; end
+                magnitudes_s(end+1) = ...
+                    abs(double(link.turnaroundCalibrationError_s))+ ...
+                    abs(double(link.terminalCalibrationError_s)); %#ok<AGROW>
+            end
+        end
+
+        function sigma_m = declaredRangeSigma_m(cfg)
+            % declaredRangeSigma_m  The range sigma a 'fixed'/'linkBudget' scenario
+            % declares, in quadrature with any non-thermal term. Returns 0 for
+            % 'physicalRF', whose sigma is a thermal link-budget output rather than a
+            % declared total budget and therefore cannot vouch for a systematic.
+            model = revgnss.TwoWayISLMeasurementBuilder.getStr_(cfg, ...
+                {'measurements','isl','twoWay','range','linkBudget','model'},'fixed');
+            nonThermal_m = revgnss.TwoWayISLMeasurementBuilder.getNum_(cfg, ...
+                {'measurements','isl','twoWay','range','nonThermalSigma_m'},0);
+            if strcmp(model,'physicalRF')
+                sigma_m = nonThermal_m;
+                return
+            end
+            sigma_m = hypot(revgnss.TwoWayISLMeasurementBuilder.getNum_(cfg, ...
+                {'measurements','isl','twoWay','range','sigma_m'},0.25),nonThermal_m);
+        end
+
+        function resetGuardLedgers()
+            % resetGuardLedgers  Forget which links have already been warned about.
+            %
+            % warnOnFloorlessSigma_ and warnOnBiasExcursion_ warn once per link so a
+            % 3600-epoch run does not emit thousands of identical lines. Those ledgers
+            % are `persistent`, i.e. per MATLAB session, not per simulation -- without
+            % this, an in-process multi-run driver (run_error_ladder.m, the ReportRunner
+            % Monte-Carlo path, tests/run_all_tests.m) would see the warning for the
+            % first scenario only and silently lose it for every scenario after.
+            % Called from ReverseGNSSSimulation.initialize.
+            revgnss.TwoWayISLMeasurementBuilder.warnOnFloorlessSigma_( ...
+                [],[],[],'',true);
+            revgnss.TwoWayISLMeasurementBuilder.warnOnBiasExcursion_( ...
+                [],[],'',true);
         end
 
         function links = linkDefinitions(cfg)
@@ -469,7 +546,30 @@ classdef TwoWayISLMeasurementBuilder
                 'residualBiasState','enable'},false);
             plasmaResidualSigma = revgnss.TwoWayISLMeasurementBuilder.getNum_(cfg, ...
                 {'measurements','isl','twoWay','range','plasma','residualSigma_m'},0);
-            observationVariance = thermalSigma^2 + plasmaResidualSigma^2;
+            % A link budget returns THERMAL jitter only. Real two-way ranging is
+            % limited by multipath, group-delay drift, quantisation and timing
+            % granularity, none of which appear above, so a thermal-only R is a
+            % floorless claim -- at 1 km / 26 GHz / 10.23 MHz the physicalRF model
+            % returns 1.9e-05 m with a 99.9 dB margin. Every other measurement path
+            % in this repo declares a TOTAL error budget instead (the rule is stated
+            % at +revgnss/ISLMeasurementBuilder.m:130). nonThermalSigma_m restores
+            % that term; it defaults to 0, so existing configurations are unchanged.
+            % Gated to physicalRF exactly like plasmaResidualSigma (validateConfig
+            % refuses that one off-physicalRF). On the 'fixed'/'linkBudget' branches
+            % thermalSigma IS the declared sigma_m, which this repo defines as the
+            % TOTAL error budget, so adding a second systematic term there would
+            % double-count it.
+            nonThermalSigma = 0;
+            if ~isempty(rfTruth)
+                nonThermalSigma = ...
+                    revgnss.TwoWayISLMeasurementBuilder.getNum_(cfg, ...
+                    {'measurements','isl','twoWay','range','nonThermalSigma_m'},0);
+                revgnss.TwoWayISLMeasurementBuilder.warnOnFloorlessSigma_( ...
+                    thermalSigma,nonThermalSigma,measuredCn0_dBHz, ...
+                    info.linkIdentifier);
+            end
+            observationVariance = ...
+                thermalSigma^2 + plasmaResidualSigma^2 + nonThermalSigma^2;
             if ~biasStateEnabled
                 observationVariance = observationVariance + calibrationVariance;
             end
@@ -648,6 +748,13 @@ classdef TwoWayISLMeasurementBuilder
                     biasIndex = revgnss.TwoWayISLMeasurementBuilder. ...
                         calibrationBiasIndex_(stateMap,info.linkIdentifier);
                     Hrow(biasIndex) = 1;
+                    [~,priorCalibration] = ...
+                        revgnss.TwoWayISLMeasurementBuilder.hardwareModels_(cfg);
+                    revgnss.TwoWayISLMeasurementBuilder.warnOnBiasExcursion_( ...
+                        x(biasIndex),sqrt( ...
+                        revgnss.TwoWayISLMeasurementBuilder. ...
+                        calibrationVariance_m2_(priorCalibration)), ...
+                        info.linkIdentifier);
                 end
                 zAdd = observation.processedValue;
                 hAdd = predictedRange;
@@ -1192,14 +1299,40 @@ classdef TwoWayISLMeasurementBuilder
                 repmat(attitudeStep,3,1);clockBiasStep;clockDriftStep; ...
                 repmat(positionStep,3,1);repmat(velocityStep,3,1); ...
                 repmat(attitudeStep,3,1);clockBiasStep;clockDriftStep];
+            % Attitude columns must be differentiated in the SAME basis the
+            % estimator injects them in. Under 'quaternionErrorState' the three
+            % euler slots of a block carry a BODY-frame small-angle vector that
+            % ReverseGNSSEKF.update feeds to injectRight, not ZYX Euler angles,
+            % so perturbing the angles directly would return d(rho)/d(euler) --
+            % wrong by the Euler-rate mapping T(euler), which is identity only
+            % at zero attitude and singular at gimbal lock. Mirrors the branch
+            % already used by LinkGeometry.attitudeJacobian and
+            % InterSatelliteTimeTransferBuilder.leverJacobian_.
+            tangentBasis = strcmp( ...
+                revgnss.TwoWayISLMeasurementBuilder.getStr_(cfg, ...
+                {'estimator','attitude','parameterization'},'eulerZYX'), ...
+                'quaternionErrorState');
+            eulerBlocks = {initiator.euler(:),transponder.euler(:)};
             for columnIdx = 1:numel(columns)
                 stateIndex = columns(columnIdx);
                 step = steps(columnIdx);
-                xp2 = x; xp1 = x; xm1 = x; xm2 = x;
-                xp2(stateIndex) = xp2(stateIndex)+2*step;
-                xp1(stateIndex) = xp1(stateIndex)+step;
-                xm1(stateIndex) = xm1(stateIndex)-step;
-                xm2(stateIndex) = xm2(stateIndex)-2*step;
+                eulerIdx = [];
+                if tangentBasis
+                    for blockIdx = 1:numel(eulerBlocks)
+                        if any(eulerBlocks{blockIdx} == stateIndex)
+                            eulerIdx = eulerBlocks{blockIdx};
+                            break
+                        end
+                    end
+                end
+                xp2 = revgnss.TwoWayISLMeasurementBuilder.perturbedState_( ...
+                    x,eulerIdx,stateIndex,2*step);
+                xp1 = revgnss.TwoWayISLMeasurementBuilder.perturbedState_( ...
+                    x,eulerIdx,stateIndex,step);
+                xm1 = revgnss.TwoWayISLMeasurementBuilder.perturbedState_( ...
+                    x,eulerIdx,stateIndex,-step);
+                xm2 = revgnss.TwoWayISLMeasurementBuilder.perturbedState_( ...
+                    x,eulerIdx,stateIndex,-2*step);
                 hp2 = revgnss.TwoWayISLMeasurementBuilder.predictFromState_( ...
                     cfg,observation,calibration,xp2,stateMap,info,t_s);
                 hp1 = revgnss.TwoWayISLMeasurementBuilder.predictFromState_( ...
@@ -1210,6 +1343,102 @@ classdef TwoWayISLMeasurementBuilder
                     cfg,observation,calibration,xm2,stateMap,info,t_s);
                 row(stateIndex) = (-hp2+8*hp1-8*hm1+hm2)/(12*step);
             end
+        end
+
+        function warnOnFloorlessSigma_(thermalSigma,nonThermalSigma, ...
+                measuredCn0_dBHz,linkIdentifier,reset)
+            % warnOnFloorlessSigma_  Flag a thermal-only R that no receiver achieves.
+            %
+            % Fires once per link. A sub-millimetre two-way ranging sigma with no
+            % declared non-thermal term means the EKF is treating the row as an
+            % essentially exact constraint: at 1.9e-05 m a 0.37 m uncalibrated
+            % hardware delay reads as a 20000-sigma inconsistency, and the filter
+            % resolves it by warping geometry rather than by rejecting the row.
+            persistent warnedLinks
+            if isempty(warnedLinks); warnedLinks = {}; end
+            if nargin >= 5 && reset; warnedLinks = {}; return; end
+            plausibilityFloor_m = 1e-3;
+            if nonThermalSigma > 0 || ~isfinite(thermalSigma) || ...
+                    thermalSigma >= plausibilityFloor_m
+                return
+            end
+            if any(strcmp(warnedLinks,linkIdentifier)); return; end
+            warnedLinks{end+1} = linkIdentifier; %#ok<AGROW>
+            warning('TwoWayISLMeasurementBuilder:floorlessRangeSigma', ...
+                ['Link %s: the two-way range sigma is %.3e m (thermal only, ' ...
+                 'C/N0 %.1f dB-Hz) with no measurements.isl.twoWay.range.' ...
+                 'nonThermalSigma_m declared. A link budget bounds thermal ' ...
+                 'jitter, not the total error budget; treating this as R makes ' ...
+                 'the row a near-exact constraint that the estimator will ' ...
+                 'satisfy by distorting geometry.'], ...
+                linkIdentifier,thermalSigma,measuredCn0_dBHz);
+        end
+
+        function warnOnBiasExcursion_(biasValue_m,priorSigma_m,linkIdentifier,reset)
+            % warnOnBiasExcursion_  Flag the per-link calibration bias sliding along
+            % its null space.
+            %
+            % The row constrains only (geometric range + b_link), so for a single
+            % link the pair has an exact one-dimensional unobservable direction and
+            % nothing else in the filter pins b_link. When the estimator drifts along
+            % it, b_link walks off toward the whole baseline while its reported sigma
+            % collapses -- measured on the committed 6-link realism scenario:
+            % b -> 1000/1136/1520/964/1583/1980 m (each link's true baseline) at a
+            % reported sigma of 0.000 m, with the estimated formation collapsed to
+            % under 5 m. The excursion is the only cheap observable signature.
+            persistent warnedLinks
+            if isempty(warnedLinks); warnedLinks = {}; end
+            if nargin >= 4 && reset; warnedLinks = {}; return; end
+            excursionLimit = 5;
+            if ~(priorSigma_m > 0) || ~isfinite(biasValue_m); return; end
+            if abs(biasValue_m) <= excursionLimit*priorSigma_m; return; end
+            if any(strcmp(warnedLinks,linkIdentifier)); return; end
+            warnedLinks{end+1} = linkIdentifier; %#ok<AGROW>
+            warning('TwoWayISLMeasurementBuilder:calibrationBiasExcursion', ...
+                ['Link %s: the estimated two-way calibration residual bias is ' ...
+                 '%.3f m against a %.3f m prior (%.0f sigma). This state is not ' ...
+                 'independently observable -- the range row constrains only ' ...
+                 '(baseline + bias) -- so a large excursion means the estimator ' ...
+                 'is absorbing inter-satellite geometry into the bias. Treat the ' ...
+                 'formation solution as invalid.'], ...
+                linkIdentifier,biasValue_m,priorSigma_m, ...
+                abs(biasValue_m)/priorSigma_m);
+        end
+
+        function xPerturbed = perturbedState_(x,eulerIdx,stateIndex,offset)
+            % perturbedState_  Offset one state column for finite differencing.
+            %
+            % eulerIdx empty        -> plain additive offset (every non-attitude
+            %                          column, and all attitude columns in
+            %                          'eulerZYX' mode where the slots really
+            %                          do hold Euler angles).
+            % eulerIdx non-empty    -> right-multiplicative body-frame rotation,
+            %                          q <- q (x) deltaQuat(offset*e_k), then
+            %                          re-expressed in the euler slots that
+            %                          estimateEndpoint_ reads. This is the same
+            %                          operation ReverseGNSSEKF.update applies
+            %                          when it injects the attitude error state,
+            %                          so the resulting column is d(rho)/d(deltaTheta).
+            xPerturbed = x;
+            component = [];
+            if ~isempty(eulerIdx)
+                component = find(eulerIdx(:) == stateIndex,1);
+            end
+            if isempty(component)
+                xPerturbed(stateIndex) = xPerturbed(stateIndex)+offset;
+                return
+            end
+            deltaTheta = zeros(3,1);
+            deltaTheta(component) = offset;
+            nominalQuaternion = ...
+                revgnss.AttitudeErrorStateKinematics.eulerToQuatZYX( ...
+                x(eulerIdx));
+            perturbedQuaternion = ...
+                revgnss.AttitudeErrorStateKinematics.injectRight( ...
+                nominalQuaternion,deltaTheta);
+            xPerturbed(eulerIdx) = ...
+                revgnss.AttitudeErrorStateKinematics.quatToEulerZYX( ...
+                perturbedQuaternion);
         end
 
         function [physical,calibration] = hardwareModels_(cfg)
