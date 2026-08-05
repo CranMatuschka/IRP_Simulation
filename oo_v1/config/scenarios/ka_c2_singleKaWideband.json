@@ -1,0 +1,104 @@
+{
+  "_comment": "KA-BAND LADDER c2. c1 PLUS BANDWIDTH: code sigma 0.30 -> 0.03 m, which is what the wide codes Ka spectrum permits buy. Ranging precision follows chip RATE, not carrier frequency, so this separates the two effects that a \"move to Ka\" would deliver together. Cross-checks budget_a4_quietCode.",
+  "scenario": {
+    "name": "ka_c2_singleKaWideband",
+    "nTowers": 5,
+    "nSpaceAssets": 6,
+    "nReceivers": 4
+  },
+  "simulation": {
+    "duration_s": 1800
+  },
+  "realism": {
+    "grade": true
+  },
+  "atmosphere": {
+    "realistic": true
+  },
+  "estimator": {
+    "dynamics": {
+      "perturbations": {
+        "luniSolar": {
+          "enable": true
+        },
+        "srp": {
+          "enable": true
+        }
+      }
+    }
+  },
+  "multiAsset": {
+    "mode": "fast",
+    "twoWayISL": {
+      "enable": true,
+      "links": "all",
+      "sigma_m": 0.02,
+      "delayCal": {
+        "sigma_const_m": 0.05,
+        "sigma_rw_m": 0.01,
+        "tau_s": 3600,
+        "nCorrCap": 60
+      },
+      "lightTime": {
+        "enable": true
+      }
+    },
+    "twoWayTimeTransferISL": {
+      "sigma_m": 0.03,
+      "delayCal": {
+        "sigma_const_m": 0.01,
+        "sigma_rw_m": 0.003,
+        "tau_s": 3600,
+        "nCorrCap": 60
+      }
+    },
+    "federated": {
+      "refAsset": 1,
+      "savePerAssetMat": false,
+      "parallel": false
+    }
+  },
+  "measurements": {
+    "twoWayTimeTransfer": {
+      "enable": true,
+      "useInEKF": true,
+      "mode": "firstOrderReciprocal",
+      "towers": "all",
+      "sigma_m": 0.03,
+      "includeReciprocityResidual": true,
+      "reciprocitySigma_m": 0.005,
+      "warmup_s": 0,
+      "conservativeProductCorrelation": true
+    },
+    "isl": {
+      "enable": true,
+      "twoWay": {
+        "enable": true,
+        "timeTransfer": {
+          "enable": true,
+          "useInEKF": false,
+          "mode": "firstOrderReciprocal",
+          "sigma_m": 0.03,
+          "warmup_s": 0
+        },
+        "range": {
+          "enable": false,
+          "useInEKF": false
+        }
+      }
+    }
+  },
+  "report": {
+    "layout": "clockExact",
+    "runVersion": "ka-c2-singleKaWide",
+    "writePdf": false,
+    "writeMat": true
+  },
+  "signals": {
+    "L1": {
+      "frequency_Hz": 30000000000.0,
+      "lambda_m": 0.009993081933333333,
+      "codeSigma0_m": 0.03
+    }
+  }
+}

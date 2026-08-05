@@ -1,0 +1,104 @@
+{
+  "_comment": "KA-BAND LADDER c0. Identical physics to budget_a0 (L1 1.575 GHz single-frequency, code sigma 0.30 m) but written as its own scenario so the Ka ladder is self-contained and its provenance check has a reference computed under the same driver. Reports the differential RADIAL error.",
+  "scenario": {
+    "name": "ka_c0_baseline",
+    "nTowers": 5,
+    "nSpaceAssets": 6,
+    "nReceivers": 4
+  },
+  "simulation": {
+    "duration_s": 1800
+  },
+  "realism": {
+    "grade": true
+  },
+  "atmosphere": {
+    "realistic": true
+  },
+  "estimator": {
+    "dynamics": {
+      "perturbations": {
+        "luniSolar": {
+          "enable": true
+        },
+        "srp": {
+          "enable": true
+        }
+      }
+    }
+  },
+  "multiAsset": {
+    "mode": "fast",
+    "twoWayISL": {
+      "enable": true,
+      "links": "all",
+      "sigma_m": 0.02,
+      "delayCal": {
+        "sigma_const_m": 0.05,
+        "sigma_rw_m": 0.01,
+        "tau_s": 3600,
+        "nCorrCap": 60
+      },
+      "lightTime": {
+        "enable": true
+      }
+    },
+    "twoWayTimeTransferISL": {
+      "sigma_m": 0.03,
+      "delayCal": {
+        "sigma_const_m": 0.01,
+        "sigma_rw_m": 0.003,
+        "tau_s": 3600,
+        "nCorrCap": 60
+      }
+    },
+    "federated": {
+      "refAsset": 1,
+      "savePerAssetMat": false,
+      "parallel": false
+    }
+  },
+  "measurements": {
+    "twoWayTimeTransfer": {
+      "enable": true,
+      "useInEKF": true,
+      "mode": "firstOrderReciprocal",
+      "towers": "all",
+      "sigma_m": 0.03,
+      "includeReciprocityResidual": true,
+      "reciprocitySigma_m": 0.005,
+      "warmup_s": 0,
+      "conservativeProductCorrelation": true
+    },
+    "isl": {
+      "enable": true,
+      "twoWay": {
+        "enable": true,
+        "timeTransfer": {
+          "enable": true,
+          "useInEKF": false,
+          "mode": "firstOrderReciprocal",
+          "sigma_m": 0.03,
+          "warmup_s": 0
+        },
+        "range": {
+          "enable": false,
+          "useInEKF": false
+        }
+      }
+    }
+  },
+  "report": {
+    "layout": "clockExact",
+    "runVersion": "ka-c0-baseline",
+    "writePdf": false,
+    "writeMat": true
+  },
+  "signals": {
+    "L1": {
+      "frequency_Hz": 1575420000.0,
+      "lambda_m": 0.19029367279836487,
+      "codeSigma0_m": 0.3
+    }
+  }
+}

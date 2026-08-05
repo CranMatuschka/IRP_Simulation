@@ -1,0 +1,98 @@
+{
+  "_comment": "RADIAL ERROR BUDGET ABLATION. Tower-clock correction product noise removed (estimator.towerClockCorrectionSigma_m 0.5 -> 0). Base is run15_G5S6R4_federated_full (G5S6R4, 1800 s, federated). Exactly ONE error source changes per file so the differential RADIAL position error -- the only component a nadir ground beam pays for -- can be attributed. Generated for the beamforming budget study; not a physics claim on its own.",
+  "scenario": {
+    "name": "budget_a1_noTowerClk",
+    "nTowers": 5,
+    "nSpaceAssets": 6,
+    "nReceivers": 4
+  },
+  "simulation": {
+    "duration_s": 1800
+  },
+  "realism": {
+    "grade": true
+  },
+  "atmosphere": {
+    "realistic": true
+  },
+  "estimator": {
+    "dynamics": {
+      "perturbations": {
+        "luniSolar": {
+          "enable": true
+        },
+        "srp": {
+          "enable": true
+        }
+      }
+    },
+    "towerClockCorrectionSigma_m": 0.0
+  },
+  "multiAsset": {
+    "mode": "fast",
+    "twoWayISL": {
+      "enable": true,
+      "links": "all",
+      "sigma_m": 0.02,
+      "delayCal": {
+        "sigma_const_m": 0.05,
+        "sigma_rw_m": 0.01,
+        "tau_s": 3600,
+        "nCorrCap": 60
+      },
+      "lightTime": {
+        "enable": true
+      }
+    },
+    "twoWayTimeTransferISL": {
+      "sigma_m": 0.03,
+      "delayCal": {
+        "sigma_const_m": 0.01,
+        "sigma_rw_m": 0.003,
+        "tau_s": 3600,
+        "nCorrCap": 60
+      }
+    },
+    "federated": {
+      "refAsset": 1,
+      "savePerAssetMat": false,
+      "parallel": false
+    }
+  },
+  "measurements": {
+    "twoWayTimeTransfer": {
+      "enable": true,
+      "useInEKF": true,
+      "mode": "firstOrderReciprocal",
+      "towers": "all",
+      "sigma_m": 0.03,
+      "includeReciprocityResidual": true,
+      "reciprocitySigma_m": 0.005,
+      "warmup_s": 0,
+      "conservativeProductCorrelation": true
+    },
+    "isl": {
+      "enable": true,
+      "twoWay": {
+        "enable": true,
+        "timeTransfer": {
+          "enable": true,
+          "useInEKF": false,
+          "mode": "firstOrderReciprocal",
+          "sigma_m": 0.03,
+          "warmup_s": 0
+        },
+        "range": {
+          "enable": false,
+          "useInEKF": false
+        }
+      }
+    }
+  },
+  "report": {
+    "layout": "clockExact",
+    "runVersion": "budget-a1-noTowerClk",
+    "writePdf": true,
+    "writeMat": true
+  }
+}

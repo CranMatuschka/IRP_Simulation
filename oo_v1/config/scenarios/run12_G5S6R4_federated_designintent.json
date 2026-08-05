@@ -1,0 +1,77 @@
+{
+  "_comment": "As run11 but with the masterConfig DEFAULT cm-class crosslink (thermal 0.01 m, delay-cal constant 0.01 m = 33 ps). This is the configuration docs/federated_swarm_architecture.md section 7 Finding B measured at 1.3 cm solved baseline / 4.6 cm shape. Included to show what the architecture delivers when the crosslink hardware is calibrated, i.e. the payoff of fixing the per-link delay bias rather than inflating sigma to hide it. NOTE: the federated relative-CLOCK layer is left OFF because multiAsset.twoWayTimeTransferISL.enable is hard-blocked by validateMasterConfig:legacySatelliteTimeTransfer while SwarmRelativeSolver still reads that path \u2014 the clock half of the relative layer is orphaned. Shape is the beamforming question and its gate is unaffected.",
+  "scenario": {
+    "name": "run12_G5S6R4_federated_designintent",
+    "nTowers": 5,
+    "nSpaceAssets": 6,
+    "nReceivers": 4
+  },
+  "simulation": {
+    "duration_s": 3600
+  },
+  "realism": {
+    "grade": true
+  },
+  "atmosphere": {
+    "realistic": true
+  },
+  "estimator": {
+    "dynamics": {
+      "perturbations": {
+        "luniSolar": {
+          "enable": true
+        },
+        "srp": {
+          "enable": true
+        }
+      }
+    }
+  },
+  "multiAsset": {
+    "mode": "fast",
+    "twoWayISL": {
+      "enable": true,
+      "links": "all",
+      "sigma_m": 0.01,
+      "delayCal": {
+        "sigma_const_m": 0.01,
+        "sigma_rw_m": 0.003,
+        "tau_s": 3600,
+        "nCorrCap": 60
+      },
+      "lightTime": {
+        "enable": false
+      }
+    },
+    "twoWayTimeTransferISL": {
+      "enable": false
+    },
+    "federated": {
+      "refAsset": 1,
+      "savePerAssetMat": false,
+      "parallel": false
+    }
+  },
+  "measurements": {
+    "twoWayTimeTransfer": {
+      "enable": true,
+      "useInEKF": true,
+      "mode": "firstOrderReciprocal",
+      "towers": "all",
+      "sigma_m": 0.03,
+      "includeReciprocityResidual": true,
+      "reciprocitySigma_m": 0.005,
+      "warmup_s": 0,
+      "conservativeProductCorrelation": true
+    },
+    "isl": {
+      "enable": false
+    }
+  },
+  "report": {
+    "layout": "clockExact",
+    "runVersion": "run12-federated-designintent",
+    "writePdf": true,
+    "writeMat": true
+  }
+}

@@ -1,0 +1,104 @@
+{
+  "_comment": "OPTION 2 TEST. Identical to run16_G5S20R4_federated_full except that the gated ground-differenced ROTATION solve is switched on. Two-way ISL fixes the formation SHAPE but is exactly blind to the formation's rigid ROTATION (measured range Jacobian along a rotation direction = 1e-16, machine zero), so the orientation of rel.solvedPos is whatever the per-asset EKF priors supplied -- set by the GROUND link at sigma_theta ~ sigma_abs/(R*sqrt(N)). This scenario adds an Earth-referenced observable: tower->satellite code DOUBLE differences (between satellites, then between towers), which removes the tower clock, the tower survey error, the per-satellite differential clock and the per-satellite constant code bias without estimating any of them. differentialAtmosphereSigma_m = 0 is the PHYSICALLY CORRECT case: two satellites 2 km apart at GEO look through the same air column (11 arcsec ray divergence), so the deterministic atmosphere differences away to 0.006-1.6 mm. Compare against run20, which injects the independent-per-satellite atmosphere the simulator actually generates.",
+  "scenario": {
+    "name": "run19_G5S20R4_groundrot",
+    "nTowers": 5,
+    "nSpaceAssets": 20,
+    "nReceivers": 4
+  },
+  "simulation": {
+    "duration_s": 3600
+  },
+  "realism": {
+    "grade": true
+  },
+  "atmosphere": {
+    "realistic": true
+  },
+  "estimator": {
+    "dynamics": {
+      "perturbations": {
+        "luniSolar": {
+          "enable": true
+        },
+        "srp": {
+          "enable": true
+        }
+      }
+    }
+  },
+  "multiAsset": {
+    "mode": "fast",
+    "twoWayISL": {
+      "enable": true,
+      "links": "all",
+      "sigma_m": 0.02,
+      "delayCal": {
+        "sigma_const_m": 0.05,
+        "sigma_rw_m": 0.01,
+        "tau_s": 3600,
+        "nCorrCap": 60
+      },
+      "lightTime": {
+        "enable": true
+      }
+    },
+    "groundDifferencedRotation": {
+      "enable": true,
+      "codeSigma_m": 1.0,
+      "multipathSigma_m": 0.30,
+      "differentialAtmosphereSigma_m": 0.0,
+      "differentialAtmosphereTau_s": 600
+    },
+    "twoWayTimeTransferISL": {
+      "sigma_m": 0.03,
+      "delayCal": {
+        "sigma_const_m": 0.01,
+        "sigma_rw_m": 0.003,
+        "tau_s": 3600,
+        "nCorrCap": 60
+      }
+    },
+    "federated": {
+      "refAsset": 1,
+      "savePerAssetMat": false,
+      "parallel": false
+    }
+  },
+  "measurements": {
+    "twoWayTimeTransfer": {
+      "enable": true,
+      "useInEKF": true,
+      "mode": "firstOrderReciprocal",
+      "towers": "all",
+      "sigma_m": 0.03,
+      "includeReciprocityResidual": true,
+      "reciprocitySigma_m": 0.005,
+      "warmup_s": 0,
+      "conservativeProductCorrelation": true
+    },
+    "isl": {
+      "enable": true,
+      "twoWay": {
+        "enable": true,
+        "timeTransfer": {
+          "enable": true,
+          "useInEKF": false,
+          "mode": "firstOrderReciprocal",
+          "sigma_m": 0.03,
+          "warmup_s": 0
+        },
+        "range": {
+          "enable": false,
+          "useInEKF": false
+        }
+      }
+    }
+  },
+  "report": {
+    "layout": "clockExact",
+    "runVersion": "run19-G5S20R4-groundrot",
+    "writePdf": true,
+    "writeMat": true
+  }
+}

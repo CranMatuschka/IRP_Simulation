@@ -1,0 +1,97 @@
+{
+  "_comment": "Constellation sweep at 3600 s: 12 ground towers, 3 satellites, 4 receivers. Federated architecture (N independent EKFs + read-only relative layer), four-timestamp ISL range AND clock, ISL delay calibration 0.05 m constant / 0.01 m drift -- ISL-only, the ground TWSTFT keys are untouched. multiAsset.twoWayISL.links='all' and the four-timestamp replay both derive their pairs from nSpaceAssets, so no link list needs editing. NOTE at N=3 the formation has 3*3-6 = 3 shape DOF and exactly 3 baselines: the shape solve is critically determined with ZERO redundancy, so the solver's weaklyObservable flag may fire. That is a real property of a 3-satellite formation, not a configuration fault, and the reported shape error should be read with that in mind.",
+  "scenario": {
+    "name": "run17_G12S3R4_federated_full",
+    "nTowers": 12,
+    "nSpaceAssets": 3,
+    "nReceivers": 4
+  },
+  "simulation": {
+    "duration_s": 3600
+  },
+  "realism": {
+    "grade": true
+  },
+  "atmosphere": {
+    "realistic": true
+  },
+  "estimator": {
+    "dynamics": {
+      "perturbations": {
+        "luniSolar": {
+          "enable": true
+        },
+        "srp": {
+          "enable": true
+        }
+      }
+    }
+  },
+  "multiAsset": {
+    "mode": "fast",
+    "twoWayISL": {
+      "enable": true,
+      "links": "all",
+      "sigma_m": 0.02,
+      "delayCal": {
+        "sigma_const_m": 0.05,
+        "sigma_rw_m": 0.01,
+        "tau_s": 3600,
+        "nCorrCap": 60
+      },
+      "lightTime": {
+        "enable": true
+      }
+    },
+    "twoWayTimeTransferISL": {
+      "sigma_m": 0.03,
+      "delayCal": {
+        "sigma_const_m": 0.01,
+        "sigma_rw_m": 0.003,
+        "tau_s": 3600,
+        "nCorrCap": 60
+      }
+    },
+    "federated": {
+      "refAsset": 1,
+      "savePerAssetMat": false,
+      "parallel": false
+    }
+  },
+  "measurements": {
+    "twoWayTimeTransfer": {
+      "enable": true,
+      "useInEKF": true,
+      "mode": "firstOrderReciprocal",
+      "towers": "all",
+      "sigma_m": 0.03,
+      "includeReciprocityResidual": true,
+      "reciprocitySigma_m": 0.005,
+      "warmup_s": 0,
+      "conservativeProductCorrelation": true
+    },
+    "isl": {
+      "enable": true,
+      "twoWay": {
+        "enable": true,
+        "timeTransfer": {
+          "enable": true,
+          "useInEKF": false,
+          "mode": "firstOrderReciprocal",
+          "sigma_m": 0.03,
+          "warmup_s": 0
+        },
+        "range": {
+          "enable": false,
+          "useInEKF": false
+        }
+      }
+    }
+  },
+  "report": {
+    "layout": "clockExact",
+    "runVersion": "run17-G12S3R4",
+    "writePdf": true,
+    "writeMat": true
+  }
+}

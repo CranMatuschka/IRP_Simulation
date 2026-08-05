@@ -1,0 +1,77 @@
+{
+  "_comment": "LIKE-FOR-LIKE FEDERATED TWIN OF run1. Same scenario/duration/realism/atmosphere/forces and the same ground stack (code+carrier+Doppler+TWSTFT to all 5 towers); the ONLY architectural change is multiAsset.mode 'joint'->'fast', which routes ReportRunner to runFederatedSwarm_: 6 INDEPENDENT single-asset EKFs plus SwarmRelativeSolver as a read-only relative layer. ISL error structure is MATCHED to what run1 actually had, not to its declared sigma: run1's coherent two-way PN range carries ~1.9e-05 m thermal plus a per-link CONSTANT hardware bias of 0.16-0.37 m (RMS 0.28 m) that it never estimates, with sigma inflated to 0.417 m to cover it. So here thermal=0.02 m (realistic wideband) and delayCal.sigma_const_m=0.28 m reproduces that constant-bias structure honestly. Modelling run1's 0.417 m as pure WHITE noise would flatter the federated path, because white averages down over 294 epochs per link and a constant bias does not. NOTE: the federated relative-CLOCK layer is left OFF because multiAsset.twoWayTimeTransferISL.enable is hard-blocked by validateMasterConfig:legacySatelliteTimeTransfer while SwarmRelativeSolver still reads that path \u2014 the clock half of the relative layer is orphaned. Shape is the beamforming question and its gate is unaffected.",
+  "scenario": {
+    "name": "run11_G5S6R4_federated_matched",
+    "nTowers": 5,
+    "nSpaceAssets": 6,
+    "nReceivers": 4
+  },
+  "simulation": {
+    "duration_s": 3600
+  },
+  "realism": {
+    "grade": true
+  },
+  "atmosphere": {
+    "realistic": true
+  },
+  "estimator": {
+    "dynamics": {
+      "perturbations": {
+        "luniSolar": {
+          "enable": true
+        },
+        "srp": {
+          "enable": true
+        }
+      }
+    }
+  },
+  "multiAsset": {
+    "mode": "fast",
+    "twoWayISL": {
+      "enable": true,
+      "links": "all",
+      "sigma_m": 0.02,
+      "delayCal": {
+        "sigma_const_m": 0.28,
+        "sigma_rw_m": 0.003,
+        "tau_s": 3600,
+        "nCorrCap": 60
+      },
+      "lightTime": {
+        "enable": false
+      }
+    },
+    "twoWayTimeTransferISL": {
+      "enable": false
+    },
+    "federated": {
+      "refAsset": 1,
+      "savePerAssetMat": false,
+      "parallel": false
+    }
+  },
+  "measurements": {
+    "twoWayTimeTransfer": {
+      "enable": true,
+      "useInEKF": true,
+      "mode": "firstOrderReciprocal",
+      "towers": "all",
+      "sigma_m": 0.03,
+      "includeReciprocityResidual": true,
+      "reciprocitySigma_m": 0.005,
+      "warmup_s": 0,
+      "conservativeProductCorrelation": true
+    },
+    "isl": {
+      "enable": false
+    }
+  },
+  "report": {
+    "layout": "clockExact",
+    "runVersion": "run11-federated-matched",
+    "writePdf": true,
+    "writeMat": true
+  }
+}
