@@ -2314,6 +2314,7 @@ classdef ReportRunner
                 workerExt = '.sh';
             end
             cfgMats = cell(1, N); resMats = cell(1, N); workerSh = cell(1, N);
+            workerLog = cell(1, N);
             for ai = 1:N
                 ci = revgnss.ReportRunner.assetConfigForIndex_(setup, ai); %#ok<NASGU>
                 cfgMats{ai} = fullfile(tmpDir, sprintf('cfg_%d.mat', ai));
@@ -2326,16 +2327,22 @@ classdef ReportRunner
                 % -singleCompThread here (the per-asset sim benefits from BLAS threads more
                 % than 6 workers oversubscribing 8 cores costs). Bit-identity is preserved
                 % either way (verified by run_swarm_relative_regression).
+                % Each worker gets its OWN log. Without this the fan-out is completely silent:
+                % the parent calls system() with the stdout output discarded, so every worker's
+                % per-epoch progress bar is captured and thrown away and a multi-hour run shows
+                % nothing at all between the two bracket lines below. Per-worker files also beat
+                % streaming, which would interleave 6 progress bars into noise.
+                workerLog{ai} = fullfile(tmpDir, sprintf('worker_%d.log', ai));
                 if isWin
                     fprintf(fid, '@echo off\r\n');
                     % -nodisplay is a Unix-only flag; the Windows equivalent of a headless
                     % worker is -nosplash plus -batch (which already implies no desktop).
-                    fprintf(fid, '"%s" -nosplash -batch "addpath(''%s''); addpath(''%s''); addpath(''%s''); revgnss.ReportRunner.runOneAssetToFile_(''%s'',''%s'')"\r\n', ...
-                        matlabBin, repoRoot, cfgDir, cfgIntDir, cfgMats{ai}, resMats{ai});
+                    fprintf(fid, '"%s" -nosplash -batch "addpath(''%s''); addpath(''%s''); addpath(''%s''); revgnss.ReportRunner.runOneAssetToFile_(''%s'',''%s'')" > "%s" 2>&1\r\n', ...
+                        matlabBin, repoRoot, cfgDir, cfgIntDir, cfgMats{ai}, resMats{ai}, workerLog{ai});
                 else
                     fprintf(fid, '#!/bin/bash\n');
-                    fprintf(fid, '"%s" -nodisplay -nosplash -batch "addpath(''%s''); addpath(''%s''); addpath(''%s''); revgnss.ReportRunner.runOneAssetToFile_(''%s'',''%s'')"\n', ...
-                        matlabBin, repoRoot, cfgDir, cfgIntDir, cfgMats{ai}, resMats{ai});
+                    fprintf(fid, '"%s" -nodisplay -nosplash -batch "addpath(''%s''); addpath(''%s''); addpath(''%s''); revgnss.ReportRunner.runOneAssetToFile_(''%s'',''%s'')" > "%s" 2>&1\n', ...
+                        matlabBin, repoRoot, cfgDir, cfgIntDir, cfgMats{ai}, resMats{ai}, workerLog{ai});
                 end
                 fclose(fid);
             end
@@ -2368,6 +2375,16 @@ classdef ReportRunner
 
             fprintf('  [swarm-parallel] %d assets, %d concurrent workers (%s)...\n', ...
                 N, maxW, revgnss.ReportRunner.ternary_(isWin, 'windows/powershell', 'unix/bash'));
+            % Tell the operator WHERE to watch. The parent is silent for the whole fan-out,
+            % which on a 24 h / 20-asset run is many hours with no output at all.
+            fprintf('  [swarm-parallel] worker logs: %s\n', fullfile(tmpDir, 'worker_<n>.log'));
+            if isWin
+                fprintf('  [swarm-parallel] live progress:  Get-Content "%s" -Wait -Tail 5\n', ...
+                    fullfile(tmpDir, 'worker_1.log'));
+            else
+                fprintf('  [swarm-parallel] live progress:  tail -f "%s"\n', ...
+                    fullfile(tmpDir, 'worker_1.log'));
+            end
             t0 = tic;
             [st, ~] = system(driverCmd);
             fprintf('  [swarm-parallel] workers finished in %.1f s (driver exit %d)\n', toc(t0), st);
