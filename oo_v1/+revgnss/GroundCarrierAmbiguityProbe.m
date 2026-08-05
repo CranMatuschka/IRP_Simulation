@@ -58,6 +58,12 @@ classdef GroundCarrierAmbiguityProbe
             if ~obs.ok; out.reason = obs.reason; return; end
             towerPos = obs.towerPos; nTw = obs.nTw;
             rhoT = obs.rhoTruth; visTw = obs.visTw;
+            % The carrier rides the SAME air column as the code -- reuse the realisation rather
+            % than omitting it. Omitting it was a real defect in the first version of this probe:
+            % it built the carrier from noise-free geometry alone, so the fix rate came out
+            % identical for every differential-atmosphere level, which is impossible.
+            atm = obs.atmDiff;
+            if isempty(atm); atm = zeros(N, nTw, size(rhoT,3)); end
 
             sigPhase = P.getNum_(cfg, {'multiAsset','groundCarrierProbe','phaseSigma_m'}, 0.002);
             seed0    = P.getNum_(cfg, {'simulation','seed'}, 42);
@@ -97,7 +103,8 @@ classdef GroundCarrierAmbiguityProbe
                 for m = okTw
                     if m == ref; continue; end
                     for i = 2:N
-                        ddTrue = (rhoT(i,m,k)-rhoT(1,m,k)) - (rhoT(i,ref,k)-rhoT(1,ref,k));
+                        ddTrue = (rhoT(i,m,k)-rhoT(1,m,k)) - (rhoT(i,ref,k)-rhoT(1,ref,k)) ...
+                               + (atm(i,m,k)-atm(1,m,k)) - (atm(i,ref,k)-atm(1,ref,k));
                         ddPred = (rhoP(i,m)-rhoP(1,m)) - (rhoP(i,ref)-rhoP(1,ref));
                         geomAcc(end+1) = ddTrue - ddPred;                     %#ok<AGROW>
                         for b = 1:nb

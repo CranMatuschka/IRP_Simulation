@@ -110,7 +110,7 @@ classdef GroundDifferencedRotationSolver
             % enters an estimator: callers see only rhoObs and the tower positions.
             G = revgnss.GroundDifferencedRotationSolver;
             obs = struct('ok', false, 'reason', 'notAttempted', 'rhoObs', [], ...
-                'rhoTruth', [], 'visTw', [], ...
+                'rhoTruth', [], 'atmDiff', [], 'visTw', [], ...
                 'towerPos', zeros(3,0), 'nTw', 0, 'codeSigma_m', NaN, ...
                 'multipathSigma_m', NaN, 'differentialAtmosphereSigma_m', NaN);
             nEp = numel(tVec);
@@ -180,6 +180,8 @@ classdef GroundDifferencedRotationSolver
 
             rhoObs   = nan(N, nTw, nEp);
             rhoTruth = nan(N, nTw, nEp);      % noise-free geometry, for the carrier probe
+            atmDiff  = zeros(N, nTw, nEp);    % the differential-atmosphere realisation, so a
+                                              % carrier observable can carry the SAME air column
             visTw    = false(nTw, nEp);
             for k = 1:nEp
                 if k > 1
@@ -198,6 +200,7 @@ classdef GroundDifferencedRotationSolver
                     visTw(m,k) = true;
                     for i = 1:N
                         rhoTruth(i,m,k) = norm(At(:,i) - towerPos(:,m));
+                        atmDiff(i,m,k)  = atS(i,m);
                         rhoObs(i,m,k)   = rhoTruth(i,m,k) + ...
                             sigTh*randn(rsW) + mpS(i,m) + atS(i,m);
                     end
@@ -205,7 +208,7 @@ classdef GroundDifferencedRotationSolver
             end
 
             obs.ok = true; obs.reason = 'ok';
-            obs.rhoObs = rhoObs; obs.rhoTruth = rhoTruth; obs.visTw = visTw;
+            obs.rhoObs = rhoObs; obs.rhoTruth = rhoTruth; obs.atmDiff = atmDiff; obs.visTw = visTw;
             obs.towerPos = towerPos; obs.nTw = nTw;
             obs.codeSigma_m = sigTh;
             obs.multipathSigma_m = sigMp;
