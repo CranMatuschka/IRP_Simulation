@@ -2297,7 +2297,22 @@ classdef ReportRunner
             mkdir(tmpDir);
             oc = onCleanup(@() revgnss.ReportRunner.tryRmdir_(tmpDir)); %#ok<NASGU>
 
-            matlabBin = fullfile(matlabroot, 'bin', 'matlab');
+            % PLATFORM. The fan-out is pure process orchestration, so only the shell layer is
+            % platform-specific: bash + '&'/'wait' on Unix, PowerShell + Start-Process/
+            % Wait-Process on Windows. The worker COMMAND is identical on both, so the result
+            % is bit-identical either way -- workers are per-asset seeded and the gathered
+            % struct is pure numeric. Before this branch existed the Windows path silently
+            % produced no workers at all (it wrote .sh files and invoked `bash`), so a Windows
+            % run with parallel=true fell all the way back to the serial re-run loop below and
+            % looked simply slow rather than broken.
+            isWin = ispc;
+            if isWin
+                matlabBin = fullfile(matlabroot, 'bin', 'matlab.exe');
+                workerExt = '.bat';
+            else
+                matlabBin = fullfile(matlabroot, 'bin', 'matlab');
+                workerExt = '.sh';
+            end
             cfgMats = cell(1, N); resMats = cell(1, N); workerSh = cell(1, N);
             for ai = 1:N
                 ci = revgnss.ReportRunner.assetConfigForIndex_(setup, ai); %#ok<NASGU>
@@ -2305,32 +2320,56 @@ classdef ReportRunner
                 resMats{ai} = fullfile(tmpDir, sprintf('res_%d.mat', ai));
                 save(cfgMats{ai}, 'ci', '-v7.3');
                 % Self-contained per-worker script -> no inline shell quoting of struct paths.
-                workerSh{ai} = fullfile(tmpDir, sprintf('worker_%d.sh', ai));
+                workerSh{ai} = fullfile(tmpDir, sprintf('worker_%d%s', ai, workerExt));
                 fid = fopen(workerSh{ai}, 'w');
-                fprintf(fid, '#!/bin/bash\n');
                 % Workers keep MATLAB's default multithreading: measured faster than
                 % -singleCompThread here (the per-asset sim benefits from BLAS threads more
                 % than 6 workers oversubscribing 8 cores costs). Bit-identity is preserved
                 % either way (verified by run_swarm_relative_regression).
-                fprintf(fid, '"%s" -nodisplay -nosplash -batch "addpath(''%s''); addpath(''%s''); addpath(''%s''); revgnss.ReportRunner.runOneAssetToFile_(''%s'',''%s'')"\n', ...
-                    matlabBin, repoRoot, cfgDir, cfgIntDir, cfgMats{ai}, resMats{ai});
+                if isWin
+                    fprintf(fid, '@echo off\r\n');
+                    % -nodisplay is a Unix-only flag; the Windows equivalent of a headless
+                    % worker is -nosplash plus -batch (which already implies no desktop).
+                    fprintf(fid, '"%s" -nosplash -batch "addpath(''%s''); addpath(''%s''); addpath(''%s''); revgnss.ReportRunner.runOneAssetToFile_(''%s'',''%s'')"\r\n', ...
+                        matlabBin, repoRoot, cfgDir, cfgIntDir, cfgMats{ai}, resMats{ai});
+                else
+                    fprintf(fid, '#!/bin/bash\n');
+                    fprintf(fid, '"%s" -nodisplay -nosplash -batch "addpath(''%s''); addpath(''%s''); addpath(''%s''); revgnss.ReportRunner.runOneAssetToFile_(''%s'',''%s'')"\n', ...
+                        matlabBin, repoRoot, cfgDir, cfgIntDir, cfgMats{ai}, resMats{ai});
+                end
                 fclose(fid);
             end
 
             maxW = revgnss.ReportRunner.federatedMaxWorkers_(cfg, N);
-            driverSh = fullfile(tmpDir, 'driver.sh');
-            fid = fopen(driverSh, 'w');
-            fprintf(fid, '#!/bin/bash\ni=0\n');
-            for ai = 1:N
-                fprintf(fid, 'bash "%s" &\n', workerSh{ai});
-                fprintf(fid, 'i=$((i+1)); if [ $((i %% %d)) -eq 0 ]; then wait; fi\n', maxW);
+            if isWin
+                driverSh = fullfile(tmpDir, 'driver.ps1');
+                fid = fopen(driverSh, 'w');
+                fprintf(fid, '$ErrorActionPreference = ''Continue''\r\n');
+                fprintf(fid, '$procs = @()\r\n');
+                for ai = 1:N
+                    fprintf(fid, '$procs += Start-Process -FilePath "%s" -NoNewWindow -PassThru\r\n', workerSh{ai});
+                    fprintf(fid, 'if ($procs.Count -ge %d) { $procs | Wait-Process; $procs = @() }\r\n', maxW);
+                end
+                fprintf(fid, 'if ($procs.Count -gt 0) { $procs | Wait-Process }\r\n');
+                fclose(fid);
+                driverCmd = sprintf('powershell -NoProfile -ExecutionPolicy Bypass -File "%s"', driverSh);
+            else
+                driverSh = fullfile(tmpDir, 'driver.sh');
+                fid = fopen(driverSh, 'w');
+                fprintf(fid, '#!/bin/bash\ni=0\n');
+                for ai = 1:N
+                    fprintf(fid, 'bash "%s" &\n', workerSh{ai});
+                    fprintf(fid, 'i=$((i+1)); if [ $((i %% %d)) -eq 0 ]; then wait; fi\n', maxW);
+                end
+                fprintf(fid, 'wait\n');
+                fclose(fid);
+                driverCmd = sprintf('bash "%s"', driverSh);
             end
-            fprintf(fid, 'wait\n');
-            fclose(fid);
 
-            fprintf('  [swarm-parallel] %d assets, %d concurrent workers...\n', N, maxW);
+            fprintf('  [swarm-parallel] %d assets, %d concurrent workers (%s)...\n', ...
+                N, maxW, revgnss.ReportRunner.ternary_(isWin, 'windows/powershell', 'unix/bash'));
             t0 = tic;
-            [st, ~] = system(sprintf('bash "%s"', driverSh));
+            [st, ~] = system(driverCmd);
             fprintf('  [swarm-parallel] workers finished in %.1f s (driver exit %d)\n', toc(t0), st);
 
             nFallback = 0;
@@ -2347,6 +2386,10 @@ classdef ReportRunner
             if nFallback > 0
                 fprintf('  [swarm-parallel] %d/%d assets fell back to serial (result unchanged).\n', nFallback, N);
             end
+        end
+
+        function v = ternary_(cond, a, b)
+            if cond; v = a; else; v = b; end
         end
 
         function runOneAssetToFile_(cfgMatPath, resMatPath)
