@@ -130,6 +130,24 @@ function cfg = validateMasterConfig(cfg)
         end
     end
 
+    % --- Formation-shared atmosphere contract (guarded: legacy configs may omit) ---
+    if isfield(cfg,'atmosphere') && isfield(cfg.atmosphere,'sharedAcrossFormation') && ...
+            isstruct(cfg.atmosphere.sharedAcrossFormation)
+        sa = cfg.atmosphere.sharedAcrossFormation;
+        if isfield(sa,'enable')
+            assert(islogical(sa.enable) && isscalar(sa.enable), ...
+                'validateMasterConfig:sharedAtmoEnable', ...
+                'cfg.atmosphere.sharedAcrossFormation.enable must be a logical scalar.');
+        end
+        if isfield(sa,'seed')
+            assert(isnumeric(sa.seed) && isscalar(sa.seed), ...
+                'validateMasterConfig:sharedAtmoSeed', ...
+                ['cfg.atmosphere.sharedAcrossFormation.seed must be a scalar numeric ' ...
+                 'FORMATION-WIDE seed (it must NOT be offset per asset -- that offset is ' ...
+                 'exactly what makes the atmosphere independent per satellite).']);
+        end
+    end
+
     % --- Claim discipline (warn; brief section 0.9: synthetic only) ---
     if isfield(cfg,'scientificProfile') && isfield(cfg.scientificProfile,'allowRealWorldClaim') ...
             && cfg.scientificProfile.allowRealWorldClaim
@@ -239,10 +257,44 @@ function cfg = validateMasterConfig(cfg)
     end
 
     % --- Ground-tower -> secondary guard ----------------------------------
-    if i_boolPath(cfg, {'multiAsset','towersObserveSecondaries'}) && ~ismember(maMode,{'clocks','position'})
+    % The requirement is that the secondary HAS states for the row to observe. Under
+    % the 'fast' architecture secondaries are product/represented-only, so that is
+    % exactly what estimateMode='clocks'/'position' provides. Under multiAsset.mode
+    % ='joint' every spacecraft is already a full [r,v,euler,b,bdot] block in the
+    % centralized covariance (AssetStateBlock.forAsset resolves it), so the premise
+    % does not apply -- and the live path agrees: ReverseGNSSSimulation gates the
+    % tower->secondary measurement models on jointMultiAssetEnabled &&
+    % towersObserveSecondaries alone, never on estimateMode.
+    % Keeping the estimateMode requirement in joint mode would force one-way ISL code
+    % into the EKF (the estimateMode='clocks'/'position' precondition below), which
+    % ReportRealityHelper then refuses to combine with the two-way ISL range
+    % ('islDoubleCounting' -- they share hardware and path with no correlation model).
+    % That coupling made "towers observe every satellite" and "two-way ISL ranging"
+    % mutually exclusive for no physical reason.
+    jointOwnsEverySpacecraft = false;
+    try
+        jointOwnsEverySpacecraft = strcmpi(cfg.multiAsset.mode,'joint');
+    catch
+    end
+    % The federated path owns every spacecraft too, by a different route:
+    % IndependentFleetScenarioFactory.stripSwarmEstimation builds one SINGLE-ASSET leaf per
+    % satellite, each its own chief with the full ground stack, and forces this flag false inside
+    % the leaf. So the flag is INERT here -- there are no secondaries in a leaf to observe. Before
+    % this exemption, defaulting it true errored out every federated run over a knob that path
+    % never reads, which is why "the towers see the whole formation" had to stay opt-in.
+    federatedOwnsEverySpacecraft = false;
+    try
+        federatedOwnsEverySpacecraft = strcmpi(cfg.multiAsset.mode,'fast') && ...
+            isfield(cfg.multiAsset,'federated');
+    catch
+    end
+    if i_boolPath(cfg, {'multiAsset','towersObserveSecondaries'}) && ...
+            ~ismember(maMode,{'clocks','position'}) && ...
+            ~jointOwnsEverySpacecraft && ~federatedOwnsEverySpacecraft
         error('validateMasterConfig:towersObserveSecondariesNoState', ...
             ['cfg.multiAsset.towersObserveSecondaries=true requires estimateMode=''clocks'' or ''position'' ' ...
-             '(else the tower->secondary row has no secondary state to observe).']);
+             '(else the tower->secondary row has no secondary state to observe), ' ...
+             'or multiAsset.mode=''joint'' where every spacecraft already has full states.']);
     end
 
     % --- Per-secondary ground carrier guards (delegated; no-op when off). Moved
@@ -280,6 +332,48 @@ function cfg = validateMasterConfig(cfg)
             warning('validateMasterConfig:srpScaleSupersedesConfig', ...
                 ['cfg.estimator.srpCoefficient.useInEKF=true supersedes cfg.estimator.dynamics.' ...
                  'perturbations.srp (Cr driven by the estimated scale). Set that srp.enable=false.']);
+        end
+    end
+
+    % --- Beamforming phase-budget diagnostic: report-only, so only its own inputs
+    % are checked. A bad value here can never move an estimate, but it can silently
+    % produce a meaningless coherence claim, so refuse it up front. ---
+    if isfield(cfg, 'beamforming')
+        if isfield(cfg.beamforming, 'coherenceCriterionLambdaFraction')
+            fraction = cfg.beamforming.coherenceCriterionLambdaFraction;
+            if ~(isnumeric(fraction) && isscalar(fraction) && isfinite(fraction) && fraction > 0)
+                error('validateMasterConfig:beamformingCoherenceCriterion', ...
+                    ['cfg.beamforming.coherenceCriterionLambdaFraction must be a positive ' ...
+                     'finite scalar (sigma_e = lambda/thisValue); lambda/20 is the ' ...
+                     'conventional essentially-lossless line.']);
+            end
+        end
+        if isfield(cfg.beamforming, 'frequencies_Hz') && ~isempty(cfg.beamforming.frequencies_Hz)
+            frequencies = cfg.beamforming.frequencies_Hz;
+            if ~(isnumeric(frequencies) && all(isfinite(frequencies(:))) && all(frequencies(:) > 0))
+                error('validateMasterConfig:beamformingFrequencies', ...
+                    ['cfg.beamforming.frequencies_Hz must be empty (derive from the ' ...
+                     'solution) or a vector of positive finite frequencies in Hz.']);
+            end
+        end
+        if isfield(cfg.beamforming, 'target') && isfield(cfg.beamforming.target, 'mode')
+            mode = cfg.beamforming.target.mode;
+            if ~(ischar(mode) || isstring(mode)) || ...
+                    ~ismember(char(mode), {'centroidNadir','ecef'})
+                error('validateMasterConfig:beamformingTargetMode', ...
+                    ['cfg.beamforming.target.mode must be ''centroidNadir'' or ''ecef''.']);
+            end
+            if strcmp(char(mode),'ecef')
+                target = [];
+                if isfield(cfg.beamforming.target,'ecef_m')
+                    target = cfg.beamforming.target.ecef_m;
+                end
+                if ~(isnumeric(target) && numel(target) == 3 && all(isfinite(target)))
+                    error('validateMasterConfig:beamformingTargetEcef', ...
+                        ['cfg.beamforming.target.mode=''ecef'' requires ' ...
+                         'cfg.beamforming.target.ecef_m to be a finite 3-vector [m].']);
+                end
+            end
         end
     end
 end

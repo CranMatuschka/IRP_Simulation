@@ -35,6 +35,17 @@ run_oo_v1        % the one entry point: masterConfig -> simulate -> post-process
 | `cfg.measurements.twstft.enable` | two-way time-transfer observable on/off | false |
 | `cfg.physics.relativity.clock.enable` | gated relativistic clock-rate offset (truth-side) | false |
 | `cfg.atmosphere.realistic` | realistic troposphere/ionosphere overlay | true |
+| `cfg.atmosphere.sharedAcrossFormation.enable` | one per-tower air column for the whole swarm (see below) | false |
+
+`sharedAcrossFormation` is off by default, which means **each asset draws its own independent
+atmosphere realisation** — its `EnvironmentModel` is rooted at that asset's `cfg.simulation.seed`.
+That is harmless for a single asset but wrong for a formation: two satellites 2 km apart at GEO see
+one tower through ray paths diverging by 11 arcsec (~0.5 m at the tropopause, ~18 m at a 350 km
+ionospheric pierce point), far inside the decorrelation scale of either layer, so the delay is
+physically common-mode. Turn it on for **any between-satellite differenced ground observable**;
+otherwise the difference carries metres of independent tropo/iono/scintillation instead of the
+~mm the geometry justifies. It shares the atmosphere only — receiver noise, clocks, multipath and
+hardware stay per-asset, unlike the blunt `cfg.rng.independentStreams.enable = false`.
 
 `ConfigFactory.finalizeConfig` resolves the literal config into the operative one (rebuilds lever
 arms, clocks, atmosphere, frequency masks). The literal masterConfig is **not** the whole story, so

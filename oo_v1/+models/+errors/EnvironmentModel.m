@@ -9,6 +9,15 @@ classdef EnvironmentModel < handle
     % All stochastic stepping uses StochasticProcess static methods so that
     % no bare randn calls appear in this class.
     %
+    % Formation scope: by default each asset owns its own EnvironmentModel rooted at
+    % that asset's cfg.simulation.seed, so swarm members draw INDEPENDENT atmospheres.
+    % Set cfg.atmosphere.sharedAcrossFormation.enable = true to root all four stochastic
+    % states (tropo wet, iono TEC, scintillation amplitude, phase scintillation) at a
+    % formation-wide seed instead, making them per-tower and common-mode across the
+    % formation -- the physically correct choice for a sub-10 km cluster and a
+    % precondition for any between-satellite differenced ground observable. Default off,
+    % so existing output is byte-identical. See models.noise.SharedAtmosphereRng.
+    %
     % Usage:
     %   env = models.errors.EnvironmentModel(cfg, nTowers);
     %   env.step(dt_s);
@@ -36,11 +45,34 @@ classdef EnvironmentModel < handle
         % Seed-independence refactor: identity-keyed streams (ON path)
         registry
         useIndep (1,1) logical = false
+        % Formation-shared atmosphere (cfg.atmosphere.sharedAcrossFormation.enable).
+        % When on, every GM state is driven from a FORMATION-WIDE registry root and is
+        % keyed by ABSOLUTE epoch index, so two assets get a byte-identical per-tower
+        % atmosphere. See models.noise.SharedAtmosphereRng for the physics rationale.
+        sharedFormation (1,1) logical = false
+        sharedRegistry
+        % Absolute epoch index the shared states have been advanced to (shared path only).
+        % Epoch 0 is the initial state; step() replays every epoch it has not yet applied,
+        % so an asset that skips epochs (no visible towers -> no ErrorChain.compute) still
+        % lands on the SAME realisation as one that did not.
+        sharedEpoch (1,1) double = 0
+        % Canonical epoch grid (cfg.simulation.dt_s) used by the shared path to index and
+        % replay epochs. It must be the GRID step, not the elapsed time since the last
+        % call: an asset that skipped epochs arrives with a larger elapsed dt, and using
+        % that would both mis-index the epoch and integrate the Gauss-Markov states with
+        % the wrong step. 0 => fall back to the dt handed to step().
+        gridDt_s (1,1) double = 0
+    end
+
+    properties (Constant, Access = private)
+        % Guard against a pathological (t_s, dt) pair turning the shared-path catch-up
+        % replay into an unbounded loop. A 24 h run at dt=1 s is 86400 epochs.
+        MAX_SHARED_CATCHUP_EPOCHS = 1e6
     end
 
     methods
 
-        function obj = EnvironmentModel(cfg, nTowers, registry)
+        function obj = EnvironmentModel(cfg, nTowers, registry, sharedRegistry)
             % Constructor.
             %
             % Inputs:
@@ -50,6 +82,11 @@ classdef EnvironmentModel < handle
             %            (seed-independence ON), each per-tower GM state draws
             %            from its own identity-keyed substream instead of the
             %            single shared envRng below. Empty/omitted => legacy path.
+            %   sharedRegistry (optional) models.noise.RngRegistry rooted at the
+            %            FORMATION-WIDE atmosphere seed. Supplied by ErrorChain so one
+            %            root serves both the GM states here and the per-measurement
+            %            scintillation draw there. Omitted => built from cfg when
+            %            cfg.atmosphere.sharedAcrossFormation.enable is true.
 
             if nargin == 0; return; end
             obj.cfg     = cfg;
@@ -57,6 +94,19 @@ classdef EnvironmentModel < handle
             if nargin >= 3 && ~isempty(registry)
                 obj.registry = registry;
                 obj.useIndep = true;
+            end
+
+            % --- Formation-shared atmosphere (gated, default OFF) --------------
+            % Default off => sharedRegistry stays empty and every code path below is
+            % byte-identical to the pre-existing behaviour.
+            if nargin >= 4 && ~isempty(sharedRegistry)
+                obj.sharedRegistry = sharedRegistry;
+            else
+                obj.sharedRegistry = models.noise.SharedAtmosphereRng.build(cfg);
+            end
+            obj.sharedFormation = ~isempty(obj.sharedRegistry);
+            if isfield(cfg,'simulation') && isfield(cfg.simulation,'dt_s') && cfg.simulation.dt_s > 0
+                obj.gridDt_s = cfg.simulation.dt_s;
             end
 
             % Seeded RNG (legacy shared stream; also the OFF-path stream)
@@ -78,12 +128,18 @@ classdef EnvironmentModel < handle
         end
 
         % ----------------------------------------------------------------
-        function s = envStream_(obj, src, node)
+        function s = envStream_(obj, src, node, ep)
             % envStream_  Stream for a per-tower atmosphere GM state.
+            %   SHARED: identity-keyed substream on the FORMATION-WIDE root, keyed by
+            %        (source, tower, absolute epoch). A pure function of identity and
+            %        epoch, so every asset in the formation draws the same realisation
+            %        regardless of its own seed or how many epochs it has processed.
             %   ON : identity-keyed persistent substream (per source & tower),
             %        so towers/sources are mutually independent and order-free.
             %   OFF: the single shared envRng -- byte-identical to legacy.
-            if obj.useIndep
+            if nargin >= 4 && ~isempty(ep)
+                s = obj.sharedRegistry.epochStream(src, node, 0, 0, ep);
+            elseif obj.useIndep
                 s = obj.registry.persistentStream(src, node);
             else
                 s = obj.envRng;
@@ -106,6 +162,58 @@ classdef EnvironmentModel < handle
             end
 
             if dt <= 0; return; end
+
+            if obj.sharedFormation
+                obj.stepShared_(dt);
+            else
+                obj.stepStates_(dt, []);
+            end
+        end
+
+        % ----------------------------------------------------------------
+        function stepShared_(obj, dt)
+            % stepShared_  Advance the shared states to the current ABSOLUTE epoch.
+            %
+            % The epoch index is derived from the absolute time on the run's CANONICAL
+            % grid, epoch = round(tNow_s / cfg.simulation.dt_s), and every epoch not yet
+            % applied is replayed one grid step at a time. Two things follow, and both are
+            % needed for the formation-shared guarantee:
+            %   * the draw for epoch k is a pure function of (source, tower, k), so it
+            %     does not depend on how many times THIS object has been stepped;
+            %   * an asset whose ErrorChain.compute was skipped for some epochs (zero
+            %     visible towers -> MeasurementModel returns early) catches up on the
+            %     next call and lands on exactly the state its formation partners hold.
+            % Both hinge on using the GRID dt: the skipping asset arrives with a larger
+            % ELAPSED dt, which would mis-index the epoch AND integrate the Gauss-Markov
+            % states with the wrong step size. Without the replay the states would silently
+            % desynchronise on the first epoch where two assets disagreed about visibility.
+
+            dtGrid = obj.gridDt_s;
+            if ~(dtGrid > 0); dtGrid = dt; end   % standalone use with no cfg.simulation.dt_s
+
+            epNow = round(obj.tNow_s / dtGrid);
+            if epNow <= obj.sharedEpoch; return; end
+
+            nCatch = epNow - obj.sharedEpoch;
+            if nCatch > models.errors.EnvironmentModel.MAX_SHARED_CATCHUP_EPOCHS
+                error('revgnss:sharedAtmosphereCatchup', ...
+                    ['Formation-shared atmosphere would replay %d epochs to reach t=%.3f s ' ...
+                     'at dt=%.3f s. Check cfg.simulation.dt_s against the epoch times; the ' ...
+                     'shared path anchors the GM states at epoch 0.'], nCatch, obj.tNow_s, dtGrid);
+            end
+
+            for ep = (obj.sharedEpoch + 1) : epNow
+                obj.stepStates_(dtGrid, ep);
+            end
+            obj.sharedEpoch = epNow;
+        end
+
+        % ----------------------------------------------------------------
+        function stepStates_(obj, dt, ep)
+            % stepStates_  One Gauss-Markov step of every atmosphere state.
+            %
+            %   ep = []  legacy: draw from the persistent (or shared-envRng) stream.
+            %   ep = k   formation-shared: draw from the epoch-keyed shared substream.
 
             tc = obj.cfg.errors.troposphere;
             ic = obj.cfg.errors.ionosphere;
@@ -150,7 +258,7 @@ classdef EnvironmentModel < handle
                         models.noise.StochasticProcess.gaussMarkovStep( ...
                             obj.tropState(k).wetResidualTruth_m, dt, ...
                             tau_trop, sig_trop, ...
-                            obj.envStream_(models.noise.RngSource.ENV_TROP_TRUTH, k));
+                            obj.envStream_(models.noise.RngSource.ENV_TROP_TRUTH, k, ep));
                     if mrEnable
                         switch mrMode
                             case 'independentGM'
@@ -158,7 +266,7 @@ classdef EnvironmentModel < handle
                                     models.noise.StochasticProcess.gaussMarkovStep( ...
                                         obj.tropState(k).wetResidualModel_m, dt, ...
                                         tau_trop, sigModel, ...
-                                        obj.envStream_(models.noise.RngSource.ENV_TROP_MODEL, k));
+                                        obj.envStream_(models.noise.RngSource.ENV_TROP_MODEL, k, ep));
                             otherwise  % 'zero'
                                 obj.tropState(k).wetResidualModel_m = 0;
                         end
@@ -195,7 +303,7 @@ classdef EnvironmentModel < handle
                         models.noise.StochasticProcess.gaussMarkovStep( ...
                             obj.ionoState(k).tecResidualTruth_m, dt, ...
                             tau_iono, sig_iono, ...
-                            obj.envStream_(models.noise.RngSource.ENV_IONO_TRUTH, k));
+                            obj.envStream_(models.noise.RngSource.ENV_IONO_TRUTH, k, ep));
                 end
             end
 
@@ -208,7 +316,7 @@ classdef EnvironmentModel < handle
                 obj.scintAmplitude = ...
                     models.noise.StochasticProcess.gaussMarkovStep( ...
                         obj.scintAmplitude, dt, tau_sc, 1.0, ...
-                        obj.envStream_(models.noise.RngSource.ENV_SCINT, 0));
+                        obj.envStream_(models.noise.RngSource.ENV_SCINT, 0, ep));
                 % Keep amplitude non-negative (scintillation severity is a magnitude)
                 obj.scintAmplitude = abs(obj.scintAmplitude);
             end
@@ -229,7 +337,7 @@ classdef EnvironmentModel < handle
                 for k = 1:obj.nTowers
                     obj.phaseScintState(k) = models.noise.StochasticProcess.gaussMarkovStep( ...
                         obj.phaseScintState(k), dt, tau_ph, 1.0, ...
-                        obj.envStream_(models.noise.RngSource.PHASE_SCINT, k));
+                        obj.envStream_(models.noise.RngSource.PHASE_SCINT, k, ep));
                 end
             end
         end

@@ -50,6 +50,11 @@ classdef ErrorChain < handle
         useIndependentStreams (1,1) logical = false
         registry                   % models.noise.RngRegistry (built only when ON)
         auxRegistry                % Guard A: lazily-built RngRegistry for identity-keyed interval draws when the global one is OFF
+        % Formation-shared atmosphere (cfg.atmosphere.sharedAcrossFormation.enable):
+        % an RngRegistry rooted at a FORMATION-WIDE seed rather than this asset's
+        % cfg.simulation.seed. Empty (and every path inert) when the gate is off.
+        sharedAtmoRegistry
+        sharedAtmosphere (1,1) logical = false
         dtCache_s   (1,1) double = 1    % dt_s cached for epoch-index derivation
         epochIdx_   (1,1) int64  = 0    % current epoch index (refreshed each compute())
     end
@@ -97,6 +102,13 @@ classdef ErrorChain < handle
                 obj.dtCache_s = cfg.simulation.dt_s;
             end
 
+            % --- Formation-shared atmosphere root (gated, default OFF) -----
+            % Built ONCE here and handed to EnvironmentModel so the per-tower GM states
+            % and the per-measurement scintillation draw share one formation-wide root.
+            % Empty when the gate is off => every downstream branch is inert.
+            obj.sharedAtmoRegistry = models.noise.SharedAtmosphereRng.build(cfg);
+            obj.sharedAtmosphere   = ~isempty(obj.sharedAtmoRegistry);
+
             % --- EnvironmentModel: always created --------------------------
             nT = 1;
             if isfield(cfg,'scenario') && isfield(cfg.scenario,'nTowers')
@@ -104,7 +116,8 @@ classdef ErrorChain < handle
             end
             % Pass the registry (empty when OFF) so per-tower atmosphere GM states
             % draw from independent substreams instead of one shared envRng.
-            obj.envModel = models.errors.EnvironmentModel(cfg, nT, obj.registry);
+            obj.envModel = models.errors.EnvironmentModel( ...
+                cfg, nT, obj.registry, obj.sharedAtmoRegistry);
 
             % --- Coloured multipath per-link GM state + dedicated RNG -----
             mpSeed = 6301;
@@ -136,6 +149,30 @@ classdef ErrorChain < handle
                 x = randn(s, m, n);
             else
                 x = randn(obj.rngStream, m, n);
+            end
+        end
+
+        % ----------------------------------------------------------------
+        function x = drawKeyedAtmosphere(obj, src, node, ant, sig, epochIdx, m, n)
+            % drawKeyedAtmosphere  White per-epoch draw for a TRUTH-SIDE ATMOSPHERE term.
+            %
+            % Identical to drawKeyed except for the root: when
+            % cfg.atmosphere.sharedAcrossFormation.enable is on, the substream is rooted
+            % at the FORMATION-WIDE atmosphere seed instead of this asset's
+            % cfg.simulation.seed, so every swarm member draws the same realisation for
+            % the same (source, tower, antenna, signal, epoch). Use it only for effects
+            % that are physically common to the whole formation's air column -- NOT for
+            % receiver thermal noise, clocks, multipath or hardware, which are genuinely
+            % per-asset and must keep drawKeyed.
+            %
+            % Gate off => delegates to drawKeyed verbatim (byte-identical).
+            if nargin < 8 || isempty(n); n = 1; end
+            if nargin < 7 || isempty(m); m = 1; end
+            if obj.sharedAtmosphere
+                s = obj.sharedAtmoRegistry.epochStream(src, node, ant, sig, epochIdx);
+                x = randn(s, m, n);
+            else
+                x = obj.drawKeyed(src, node, ant, sig, epochIdx, m, n);
             end
         end
 

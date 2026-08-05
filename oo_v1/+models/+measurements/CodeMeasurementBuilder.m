@@ -332,7 +332,11 @@ classdef CodeMeasurementBuilder
 
                         scintSigL1_pi = errStruct.scintSigmaL1_m(pi);
                         scintSig_si   = scintSigL1_pi * (f_L1 / sigCfg.frequency_Hz)^scintExpF;
-                        scint_t       = scintSig_si * errorChain.drawKeyed( ...
+                        % Atmosphere-rooted: shares the formation-wide root when
+                        % cfg.atmosphere.sharedAcrossFormation is on (the ionospheric
+                        % irregularities are inside the L-band Fresnel scale for a
+                        % sub-10 km cluster), plain drawKeyed otherwise.
+                        scint_t       = scintSig_si * errorChain.drawKeyedAtmosphere( ...
                             models.noise.RngSource.SCINT_TRUTH, twr_list(pi), ant_list(pi), si, errorChain.epochIdx_, 1, 1);
 
                         if si == 1
@@ -521,10 +525,14 @@ classdef CodeMeasurementBuilder
 
                 % Add scintillation to bySource (L1 only)
                 if isfield(errStruct,'scintSigmaL1_m') && any(errStruct.scintSigmaL1_m > 0)
-                    if errorChain.useIndependentStreams
+                    if errorChain.useIndependentStreams || errorChain.sharedAtmosphere
+                        % drawKeyedAtmosphere roots this at the FORMATION-WIDE seed when
+                        % cfg.atmosphere.sharedAcrossFormation is on (so swarm members see
+                        % one common scintillation realisation) and is byte-identical to
+                        % the previous drawKeyed call when it is off.
                         scintTruth = zeros(M,1);
                         for miS = 1:M
-                            scintTruth(miS) = errStruct.scintSigmaL1_m(miS) * errorChain.drawKeyed( ...
+                            scintTruth(miS) = errStruct.scintSigmaL1_m(miS) * errorChain.drawKeyedAtmosphere( ...
                                 models.noise.RngSource.SCINT_TRUTH, twr_list(miS), ant_list(miS), 1, errorChain.epochIdx_, 1, 1);
                         end
                     else
