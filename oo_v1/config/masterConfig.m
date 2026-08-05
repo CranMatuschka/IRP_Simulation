@@ -696,6 +696,45 @@ cfg.atmosphere.realistic      = false;
 cfg.atmosphere.ionosphereFree = false;   % L1/L2 ionosphere-free combination
 cfg.atmosphere.estimateIono   = false;   % per-tower slant-ionosphere EKF state
 
+% --- Formation scope of the STOCHASTIC atmosphere -------------------------------
+%   atmosphere.sharedAcrossFormation.enable  (default false -> legacy, byte-identical)
+%
+%   false (default): every asset builds its own EnvironmentModel rooted at its own
+%     cfg.simulation.seed (offset per asset by the federated fan-out in ReportRunner),
+%     so swarm members draw STATISTICALLY INDEPENDENT troposphere, ionosphere and
+%     scintillation. Fine for a single asset; wrong for a formation.
+%
+%   true: the four stochastic atmosphere states (tropo wet GM, iono TEC GM,
+%     scintillation amplitude GM, phase-scintillation GM) and the per-measurement
+%     scintillation truth draw are rooted at a FORMATION-WIDE seed and keyed by
+%     (source, tower, epoch). Every asset then sees the SAME per-tower atmosphere.
+%
+%   Why true is the physical answer for a cluster: two satellites 2 km apart at GEO
+%   viewing one tower have ray paths diverging by 2000/36e6 rad = 11 arcsec -- ~0.5 m
+%   of separation at the top of the troposphere, ~18 m at a 350 km ionospheric pierce
+%   point. Both are far inside the decorrelation scale (km for tropo, tens of km for
+%   iono) and inside the L-band Fresnel scale sqrt(lambda*z) ~ 260 m that sets
+%   scintillation coherence. They look through ONE air column, so the delay is
+%   common-mode and a between-satellite single difference should retain only the
+%   ~0.006-1.6 mm the 11 arcsec geometry justifies. With independent draws it instead
+%   carries sqrt(2) x (0.047-0.104 m tropo + 0.34-0.62 m iono + 0.34-2.12 m
+%   scintillation) -- 2-3 orders of magnitude too large, and with 600 s / 10800 s
+%   Gauss-Markov correlation times it barely averages down. Any between-satellite
+%   differenced ground observable (differenced carrier, ground-code DD for rotation)
+%   is evaluated against that artefact unless this is on.
+%
+%   Scope: assets only. Distinct TOWERS keep independent atmospheres (they are
+%   hundreds of km apart), and separate receive antennas on one asset keep their
+%   independent scintillation draw, as before. Receiver thermal noise, clocks,
+%   multipath and hardware delays stay rooted at the per-asset seed either way.
+%
+%   NOT the same as cfg.rng.independentStreams.enable=false: that also gives every
+%   asset a byte-identical atmosphere (via the shared envRng seeded from
+%   cfg.environment.weather.seed) but collapses EVERY other noise stream too, so it
+%   is not a usable scientific control. This flag touches only the atmosphere.
+cfg.atmosphere.sharedAcrossFormation.enable = false;
+cfg.atmosphere.sharedAcrossFormation.seed   = 7201;   % formation-wide root (not per asset)
+
 % Complex atmosphere profile selected by realism.json.
 cfg.atmosphere.realisticProfile.errors.troposphere.enable = true;
 cfg.atmosphere.realisticProfile.errors.troposphere.truth.enable = true;
@@ -976,8 +1015,14 @@ cfg.perturbations.sunMoon.ephemeris = 'mg';
 % (asset 1) is EKF-estimated; secondaries are represented-only truth that can
 % provide ISL aiding. cfg.measurements.isl.* is the separate feature toggle for
 % feeding those links into the EKF.
-cfg.formation.mode        = 'helix';   % only supported formation mode
-cfg.formation.baseline_m  = 1000.0;    % inter-satellite separation [m] (>500 m); changeable
+cfg.formation.mode        = 'helix';   % 'helix' (one ring, legacy default) |
+%   'multiRingHelix' (rings of radius k*spacing_m carrying round(2*pi*k) members each, so
+%   the neighbour spacing stays ~spacing_m however many satellites are added)
+cfg.formation.baseline_m  = 1000.0;    % RING RADIUS [m] (>500 m). NOT the inter-satellite
+%   separation: with mode='helix' every member sits on ONE ring of this radius, so the chord
+%   between neighbours is 2*rho*sin(pi/nSec) and SHRINKS as members are added -- 1176 m at
+%   5 secondaries, 329 m at 19. Use mode='multiRingHelix' to hold the SEPARATION fixed.
+cfg.formation.spacing_m   = 1000.0;    % target inter-satellite separation [m], multiRingHelix only
 cfg.formation.phase0_rad  = 0.0;       % phase of the first secondary on the projected-circular ring
 % --- Cross-track spread: 0 = PLANAR helix (rank-deficient), 1 = fully 3-D. ------------
 % The classic projected-circular helix sets z = 2x for EVERY member, so all secondaries
@@ -1128,7 +1173,16 @@ cfg.multiAsset.secondaryOrbit.initSigmaVel_mps   = 0.1;     % [m/s] per axis
 % ground ABSOLUTELY -- independent of the primary radial -- curing the
 % degeneracy (b_tx near-degenerate with the primary radial through the ~horizontal
 % ISL LOS). No primary-state columns, so golden-safe when off / nSpaceAssets=1.
-cfg.multiAsset.towersObserveSecondaries          = false;
+% DEFAULT true. In JOINT mode, false means the ground stack feeds ONLY the chief: measured at
+% 600 s, all five secondaries froze at an IDENTICAL 1231.08 m error with 4 of 6 baselines exactly
+% 0.00 m, so their mutual geometry was the initial condition rather than an estimate -- and every
+% relative-navigation number read off that run was self-fulfilling. There is no reason to make
+% "the towers see the whole formation" opt-in.
+% INERT in the federated path: IndependentFleetScenarioFactory.stripSwarmEstimation gives each
+% satellite its OWN single-asset leaf, where it is its own chief and already carries the full
+% ground stack. The flag describes tower->SECONDARY rows inside one centralized filter, and a
+% federated leaf has no secondaries.
+cfg.multiAsset.towersObserveSecondaries          = true;
 cfg.multiAsset.towerSecondary.code.sigma_m       = 1.0;   % tower->secondary thermal 1-sigma [m] (flat value AND the 'chiefFloored' floor)
 % Secondary code-noise sigma model. 'chiefFloored' = the chief's elevation/C-N0
 % code model (models.measurements.MeasurementModelUtils.codeSignalSigma) floored at code.sigma_m, so
@@ -1226,11 +1280,54 @@ cfg.multiAsset.secondaryOrbit.sigma_accel_mps2   = [];    % [] = inherit primary
 % not a sequential radio exchange. It remains available only for explicit diagnostic studies.
 cfg.multiAsset.twoWayISL.enable                 = false;
 cfg.multiAsset.twoWayISL.links                  = 'all';  % 'all' pairs among estimated assets, or an M-by-2 [i k] list
+% --- Crosslink TOPOLOGY: who can actually talk to whom -------------------------------
+% A spacecraft has a finite number of steerable crosslink terminals and a line of sight the
+% Earth can block, so it contacts its CLOSEST VISIBLE neighbours, not every other member.
+% Applied in order: line-of-sight, then range, then terminal count.
+cfg.multiAsset.twoWayISL.maxNeighbours      = 5;      % crosslink terminals per spacecraft
+cfg.multiAsset.twoWayISL.maxRange_m         = Inf;    % link-budget reach [m]; Inf = no limit
+cfg.multiAsset.twoWayISL.requireLineOfSight = true;   % reject pairs whose path crosses Earth
+% terminalLayout: 'omni'  keep the historical rule -- the maxNeighbours CLOSEST visible sats.
+%                 'cones' model the actual antenna farm: each terminal serves the nearest
+%                         satellite inside ITS OWN cone. At these separations range is nearly
+%                         free, so the link budget should buy ANGULAR diversity, and one link
+%                         per cone spends it that way by construction. Measured on the N=20
+%                         multi-ring geometry, 70 deg cones: 'omni' leaves 9 of 54 shape DOF
+%                         unobservable with worst-satellite DOP 114; 'cones' with two links per
+%                         terminal spans all 54 at DOP 10.8.
+cfg.multiAsset.twoWayISL.terminalLayout     = 'omni';
+cfg.multiAsset.twoWayISL.coneHalfAngle_deg  = 70;     % antenna half-power reach off boresight
+cfg.multiAsset.twoWayISL.linksPerTerminal   = 2;      % distinct partners per terminal, time-shared
+% Boresights of the hexagonal bus: 3 rim terminals 120 deg apart in the local horizontal plane
+% plus zenith and nadir. rimTilt_deg lifts the rim boresights out of that plane towards zenith.
+% --- Which directions may the crosslinks move? ---------------------------------------
+% The relative solve corrects the EKF geometry to fit the ISL ranges. 'minNorm' (default,
+% historical) treats every direction as equally uncertain -- but it is NOT: ground two-way
+% ranging measures the RADIAL axis directly and the per-asset EKF realises ~0.16 m there
+% against ~3.4 m transverse, while the crosslinks are mostly transverse chords. Measured
+% consequence of ignoring that: the solve improved shape but degraded the BEAMFORMING path
+% error from 0.165 m to 0.584 m, because it spent radial displacement to satisfy transverse
+% residuals -- trading the one axis a ground beam reads for two it does not.
+% 'radialStiff' prices radial corrections at sigmaRadialPrior_m and leaves transverse free.
+cfg.multiAsset.twoWayISL.gauge.mode                  = 'minNorm';
+cfg.multiAsset.twoWayISL.gauge.sigmaRadialPrior_m    = 0.16;  % ground-link radial accuracy [m]
+cfg.multiAsset.twoWayISL.gauge.sigmaTransversePrior_m = Inf;  % Inf = crosslinks own this axis
+cfg.multiAsset.twoWayISL.rimTerminalCount   = 3;
+cfg.multiAsset.twoWayISL.rimTilt_deg        = 0;
+cfg.multiAsset.twoWayISL.useZenithTerminal  = true;
+cfg.multiAsset.twoWayISL.useNadirTerminal   = true;
 cfg.multiAsset.twoWayISL.sigma_m                = 0.01;   % white two-way ranging thermal 1-sigma [m] (cm-class wideband crosslink)
 cfg.multiAsset.twoWayISL.delayCal.sigma_const_m = 0.01;   % per-link turn-around+antenna-PCO cal bias, constant part [m] (33 ps = 1 cm)
 cfg.multiAsset.twoWayISL.delayCal.sigma_rw_m    = 0.003;  % per-link cal-bias slow random-walk part [m]
 cfg.multiAsset.twoWayISL.delayCal.tau_s         = 3600;   % cal-bias correlation time [s]
 cfg.multiAsset.twoWayISL.delayCal.nCorrCap      = 60;     % cap on tau/dt R-inflation (honest gate)
+% Per-link delay-bias NETWORK SELF-CALIBRATION (SwarmRelativeSolver stage 8). These two keys
+% were read by the solver but never declared here, which made the stage UNREACHABLE from any
+% scenario file -- config/internal/deepMergeConfig.m rejects unknown paths, so a JSON that set
+% them aborted the run rather than enabling anything. Declaring them is what makes the measured
+% 0.480 m -> 0.070 m shape improvement actually selectable.
+cfg.multiAsset.twoWayISL.delayCal.estimate.enable     = false;
+cfg.multiAsset.twoWayISL.delayCal.estimate.iterations = 2;
 % --- Two-way ISL LINK BUDGET: derive sigma_m from the link instead of typing it. ------
 % 'fixed' (default) keeps sigma_m exactly as written above -> byte-identical.
 % 'linkBudget' makes the PER-PAIR sigma scale with baseline length via free-space path
@@ -1254,6 +1351,80 @@ cfg.multiAsset.twoWayISL.linkBudget.GT_dBK          = 5;
 % MICROMETRES at a 1 km formation baseline -- correct but inert here, relevant at 100 km+.
 % Reported as rel.lightTimeMax_m so the size is visible rather than assumed.
 cfg.multiAsset.twoWayISL.lightTime.enable           = false;
+
+% --- Ground-differenced formation ROTATION solve (read-only post-processor) ------
+% The one degree of freedom crosslinks can never supply. Two-way ISL observes |r_i-r_k|
+% only, so a rigid rotation of the whole formation leaves every range identically
+% unchanged -- the measured range Jacobian along a rotation direction is 1e-16, machine
+% zero. SwarmRelativeSolver's min-norm gauge therefore inherits whatever orientation the
+% per-asset EKF priors carried, which the GROUND link sets at sigma_theta ~
+% sigma_abs/(R*sqrt(N)) ~ 0.028 deg for a federated G5S20R4 run.
+% This stage estimates that rotation from tower->satellite code DOUBLE differences
+% (between satellites, then between towers). See revgnss.GroundDifferencedRotationSolver
+% for why the second difference is not optional: it removes the per-satellite differential
+% clock, which is otherwise one free parameter per satellite per epoch.
+% Requires multiAsset.twoWayISL.enable (it corrects rel.solvedPos, which only exists then).
+cfg.multiAsset.groundDifferencedRotation.enable = false;
+% Per-epoch white code sigma [m]. Empty/absent falls back to towerSecondary.code.sigma_m.
+cfg.multiAsset.groundDifferencedRotation.codeSigma_m = 1.0;
+% Coloured (Gauss-Markov) multipath on the same observable. The correlation time matters
+% more than the sigma: at tau = 60 s a 3600 s arc holds 60 independent multipath samples
+% against 3600 thermal ones, so 0.30 m of coloured noise is worth 0.30*sqrt(tau/dt) =
+% 2.3 m of white noise for averaging purposes. 0 = thermal only.
+cfg.multiAsset.groundDifferencedRotation.multipathSigma_m = 0.0;
+% DIFFERENTIAL atmosphere between two satellites viewing the SAME tower, per epoch [m].
+% Physically this is ~0: the ray paths diverge by 11 arcsec, i.e. 0.5 m at the top of the
+% troposphere and 18 m at a 350 km pierce point, both far inside the decorrelation scale,
+% so the deterministic model differences away to 0.006-1.6 mm. The simulator does NOT model
+% it that way -- each asset owns its own EnvironmentModel seeded per asset, so with
+% cfg.atmosphere.realistic = true every satellite draws an INDEPENDENT tropo/iono/
+% scintillation realisation worth sqrt(2)*(0.05-0.10 + 0.34-0.62 + 0.34-2.12) m. That is an
+% artefact of treating a 2 km formation as N uncorrelated single satellites. This knob
+% injects it deliberately so its cost can be measured; 0 = the physically correct case.
+cfg.multiAsset.groundDifferencedRotation.differentialAtmosphereSigma_m = 0.0;
+cfg.multiAsset.groundDifferencedRotation.differentialAtmosphereTau_s   = 600;
+
+% --- JOINT shape + rotation solve (supersedes the 3-parameter stage above) -------
+% The 3-parameter rotation solve has no shape freedom, so arc-correlated deformation
+% projects straight onto rotation at a measured 0.30 deg per metre -- and its formal
+% sigma is blind to it. revgnss.JointGeometrySolver carries an arc-CONSTANT shape
+% correction alongside the rotation, so the shape error has somewhere to go.
+% Both parameters are arc-constant on purpose: a PER-EPOCH shape parameter was tried
+% first and still leaked (0.10 m shape -> 0.049 deg rotation), because it tells the
+% estimator the shape error is independent each epoch and can be averaged away. It
+% cannot -- it is the same error every epoch, and that correlation is exactly what
+% leaks.
+% WHAT SEPARATES SHAPE FROM ROTATION IS THE FORMATION TURNING, not integration time.
+% Measured CRLB penalty (rotation sigma with shape co-estimated, vs shape held fixed):
+%   1800 s (  7 deg turn) 14.5x     7200 s ( 30 deg)  5.6x    21600 s ( 90 deg) 2.1x
+%   3600 s ( 15 deg turn)  9.9x    14400 s ( 60 deg)  2.9x    86400 s (360 deg) 1.0x
+% i.e. a 3600 s arc cannot separate them; a quarter orbit gets within 2x; a full orbit
+% is clean. Arc length is the mechanism here, not a tuning knob.
+cfg.multiAsset.jointGeometry.enable = false;
+% ISL shape prior [m], on the shape subspace only (rotation deliberately gets NO prior,
+% because inter-satellite ranging supplies exactly zero information about it). Empty ->
+% falls back to rel.shapeErrSolved_m. Declare it explicitly rather than inheriting a
+% number the ISL layer computed about itself.
+cfg.multiAsset.jointGeometry.shapePriorSigma_m = [];
+
+% --- Coherent-beamforming phase budget (report-only diagnostic) -----------------
+% Reads the final-epoch relative geometry and clock solution and reports the phasor
+% sum of the per-spacecraft signals: what the RELATIVE error would cost a coherent
+% transmit beam. Pure post-processing -- it never touches the truth model, the
+% measurement model or the filter, so enabling it cannot move a single estimate.
+% Emits nothing for single-asset runs, so golden .tex output is unaffected.
+cfg.beamforming.enable = true;
+% Target the beam is focused on. 'centroidNadir' places it at the sub-satellite point
+% of the formation centroid; 'ecef' uses beamforming.target.ecef_m verbatim.
+cfg.beamforming.target.mode   = 'centroidNadir';
+cfg.beamforming.target.ecef_m = [];
+% Carrier frequencies to tabulate [Hz]. Empty means derive a coherent / partial /
+% dead triple from the solution itself plus the run's own L1 carrier, which is what
+% makes the phasor chain visibly curl across the three figure panels.
+cfg.beamforming.frequencies_Hz = [];
+% Coherence criterion: sigma_e = lambda / thisValue. lambda/20 is the conventional
+% "essentially lossless" line (about 0.1 dB); lambda/10 costs roughly 0.4 dB.
+cfg.beamforming.coherenceCriterionLambdaFraction = 20;
 
 % --- Legacy read-only satellite clock-network diagnostic. Default OFF. ---
 % Retained for noncanonical federated post-processing compatibility. Canonical execution
@@ -1983,6 +2154,18 @@ cfg.measurements.isl.twoWay.links = struct( ...
 cfg.measurements.isl.twoWay.range.enable = false;
 cfg.measurements.isl.twoWay.range.useInEKF = false;
 cfg.measurements.isl.twoWay.range.sigma_m = 0.25;
+% Non-thermal (systematic) two-way ranging 1-sigma [m], added to R in quadrature.
+% Read ONLY when linkBudget.model='physicalRF' (gated like plasma.residualSigma_m),
+% because that model returns THERMAL jitter alone and so has no error floor: at
+% 1 km / 26 GHz it yields 1.9e-05 m with a 99.9 dB link margin, four orders below any
+% real two-way ranging budget. On the 'fixed'/'linkBudget' branches sigma_m is already
+% the TOTAL budget, so this term is deliberately not applied there.
+% NOTE this widens R only. It does NOT add multipath or group-delay drift to the
+% simulated observable -- the truth-side tracking error is still drawn from the
+% thermal sigma alone. It buys honest (conservative) weighting, not extra physics.
+% Default 0 preserves existing runs; a floorless sigma raises
+% TwoWayISLMeasurementBuilder:floorlessRangeSigma.
+cfg.measurements.isl.twoWay.range.nonThermalSigma_m = 0;
 cfg.measurements.isl.twoWay.range.linearization.stencil = 'fivePoint';
 cfg.measurements.isl.twoWay.range.linearization.positionStep_m = 0.5;
 cfg.measurements.isl.twoWay.range.linearization.velocityStep_mps = 0.05;

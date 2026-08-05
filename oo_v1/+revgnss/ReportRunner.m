@@ -1908,18 +1908,45 @@ classdef ReportRunner
             refAsset = max(1, min(refAsset, N));
 
             rel  = revgnss.SwarmRelativeSolver.solve(cfg, results);
+            % Beamforming budget of the geometry the CROSSLINKS produced. The final-epoch
+            % beamformingPhasor further down reads jointFormationDiagnostics, i.e. the raw EKF,
+            % so without this the report never shows what the ISL layer bought the beam.
+            rel.beamformingSeries = revgnss.ReportRunner.beamformingSeries_(rel, results, cfg);
             summ = revgnss.FederatedSwarmSummary.build(cfg, results, rel, refAsset);
             revgnss.FederatedSwarmSummary.print(summ);
+            revgnss.ReportRunner.printBeamformingSeries_(rel.beamformingSeries);
 
             out = struct('pdfPath', '', 'matPath', '', 'summary', summ, 'rel', rel, ...
                 'version', version, 'monteCarlo', struct('enabled', false));
 
+            % Lean replay bundle for the relative-error figures: time, per-pair error series,
+            % solved+truth positions, labels, scalars. A few MB, versus the full per-asset EKF
+            % histories -- enough to regenerate every relative-error figure without re-running.
+            relErrorBundle = struct('available',false,'reason','notAttempted');
+            try
+                relErrorBundle = revgnss.RelativeErrorFigures.exportBundle(cfg, results, rel);
+            catch bundleErr
+                relErrorBundle.reason = bundleErr.message;
+            end
+            out.relErrorBundle = relErrorBundle;
+
             if writeMat
                 swarm = struct('cfg', cfg, 'results', results, 'rel', rel, ...
-                    'summary', summ, 'version', version, 'kind', 'federatedSwarm'); %#ok<NASGU>
+                    'summary', summ, 'version', version, 'kind', 'federatedSwarm', ...
+                    'relErrorBundle', relErrorBundle); %#ok<NASGU>
                 save(matPath, '-struct', 'swarm', '-v7.3');
                 out.matPath = matPath;
                 fprintf('  Swarm MAT written: %s\n', matPath);
+                % Standalone lean bundle: everything the relative-error figures replay from and
+                % nothing else, for sharing or re-plotting without the full swarm .mat.
+                try
+                    leanPath = strrep(matPath, '.mat', '_relerror.mat');
+                    save(leanPath, '-struct', 'relErrorBundle', '-v7.3');
+                    d = dir(leanPath);
+                    fprintf('  Relative-error bundle: %s (%.1f MB)\n', leanPath, d.bytes/1e6);
+                catch leanErr
+                    fprintf(2,'  Relative-error bundle not written (%s).\n', leanErr.message);
+                end
             end
             if writePdf
                 % ONE unified report: the chief satellite's full (original) ClockExact report with
@@ -1978,8 +2005,39 @@ classdef ReportRunner
             figDir = fullfile(reportFolder, 'figures');
             kabschOn = false;
             try; kabschOn = logical(cfg.report.kabschAlignmentPlot.enable); catch; end
-            [absFig, relFig, kabschFig] = revgnss.FederatedSwarmReport.renderFigures(results, rel, figDir, ...
-                [stem '_swarm_abs_err'], [stem '_swarm_rel_err'], [stem '_swarm_kabsch_alignment'], kabschOn);
+            [absFig, relFig, kabschFig, relRefFig, relSwarmFig, relRefSwarmFig] = ...
+                revgnss.FederatedSwarmReport.renderFigures(results, rel, figDir, ...
+                [stem '_swarm_abs_err'], [stem '_swarm_rel_err'], [stem '_swarm_kabsch_alignment'], kabschOn, refAsset);
+
+            % Inter-satellite (relative / shape) error figures + the lean replay bundle. Additive
+            % and non-fatal: a failure here must never lose the swarm report that already exists.
+            relErrFigs = {}; relErrBundle = struct('available',false,'reason','notAttempted');
+            try
+                relErrBundle = revgnss.RelativeErrorFigures.exportBundle(cfg, results, rel);
+                relErrFigs = revgnss.RelativeErrorFigures.renderFromBundle( ...
+                    relErrBundle, figDir, [stem '_relerr']);
+            catch relErrErr
+                fprintf(2,'  Relative-error figures skipped (%s).\n', relErrErr.message);
+            end
+
+            % Beamforming path-error series from the ISL-solved geometry. Mandatory for every
+            % multi-asset report: it is the only figure that states the quantity the whole
+            % architecture exists to reduce, in the units (metres of differential path, dB of
+            % coherent gain) that decide whether a coherent spot forms at all.
+            beamFig = '';
+            if ~isfield(rel,'beamformingSeries')
+                rel.beamformingSeries = revgnss.ReportRunner.beamformingSeries_(rel, results, cfg);
+            end
+            try
+                bf = revgnss.BeamformingPhasorDiagnostics.plotPathErrorSeries(rel.beamformingSeries);
+                if ~isempty(bf)
+                    beamFig = fullfile(figDir, [stem '_beamforming_patherror.png']);
+                    exportgraphics(bf, beamFig, 'Resolution', 150); close(bf);
+                end
+            catch beamErr
+                fprintf(2,'  Beamforming path-error figure skipped (%s).\n', beamErr.message);
+            end
+            revgnss.ReportRunner.printBeamformingSeries_(rel.beamformingSeries);
 
             % Scenario counts for the appendix caption.
             nTowers = 0; try; nTowers = cfg.scenario.nTowers;      catch; end
@@ -1996,6 +2054,12 @@ classdef ReportRunner
                 'absFig',     absFig, ...
                 'relFig',     relFig, ...
                 'kabschFig',  kabschFig, ...
+                'relRefFig',  relRefFig, ...
+                'relSwarmFig', relSwarmFig, ...
+                'relRefSwarmFig', relRefSwarmFig, ...
+                'beamFig',    beamFig, ...
+                'beamformingSeries', revgnss.ReportRunner.packBeamSeries_(rel.beamformingSeries), ...
+                'relErrFigs', {relErrFigs}, ...
                 'nTowers',    nTowers, ...
                 'nReceivers', nRx, ...
                 'duration_s', dur);
@@ -2010,6 +2074,100 @@ classdef ReportRunner
                 oChief.sim.asset, oChief.sim.towers, ccfg, summChief);
         end
 
+        function s = beamformingSeries_(rel, results, cfg)
+            % beamformingSeries_  Non-fatal wrapper: a beamforming figure must never cost the
+            % caller a swarm report that already computed successfully.
+            try
+                s = revgnss.BeamformingPhasorDiagnostics.computeSeries(rel, results, cfg);
+            catch err
+                s = revgnss.BeamformingPhasorDiagnostics.emptySeries();
+                s.reason = err.message;
+            end
+        end
+
+        function printBeamformingSeries_(s)
+            % printBeamformingSeries_  Console summary of the beam budget, stated in the two units
+            % that decide it: metres of differential path, and dB of coherent gain.
+            if ~isstruct(s) || ~isfield(s,'available') || ~s.available
+                reason = 'unavailable';
+                if isstruct(s) && isfield(s,'reason'); reason = s.reason; end
+                fprintf('  Beamforming path error: %s\n', reason);
+                return
+            end
+            fprintf('  Beamforming path error (tail RMS, from %s):\n', s.geometrySource);
+            fprintf('    differential path  %.4f m', s.tailPathErrorRms_m);
+            if any(isfinite(s.rawPathErrorRms_m))
+                tsel = max(1,floor(numel(s.time_s)/2)):numel(s.time_s);
+                raw = sqrt(mean(s.rawPathErrorRms_m(tsel).^2,'omitnan'));
+                fprintf('   (raw per-asset EKF %.4f m)', raw);
+            end
+            fprintf('\n');
+            if s.clockTermAvailable
+                tsel = max(1,floor(numel(s.time_s)/2)):numel(s.time_s);
+                fprintf('      geometry %.4f m | clock %.4f m\n', ...
+                    sqrt(mean(s.geometryPathErrorRms_m(tsel).^2,'omitnan')), ...
+                    sqrt(mean(s.clockPathErrorRms_m(tsel).^2,'omitnan')));
+            else
+                fprintf('      geometry only -- no relative clock solution to add\n');
+            end
+            fmt = @(f) revgnss.ReportRunner.freqLabel_(f);
+            if isfinite(s.coherenceFrequency_Hz)
+                fprintf('    coherent (lambda/20) up to %s', fmt(s.coherenceFrequency_Hz));
+                if isfinite(s.rawCoherenceFrequency_Hz)
+                    fprintf('   (raw per-asset EKF %s)', fmt(s.rawCoherenceFrequency_Hz));
+                end
+                fprintf('\n');
+            end
+            if isfinite(s.tailSpotDisplacement_m)
+                fprintf('    the beam MOVES %.0f m on the ground (%.0f%% of the budget is tilt);\n', ...
+                    s.tailSpotDisplacement_m, 100*max(0,min(1,s.tiltFraction)));
+                fprintf('    residual after repointing %.4f m -> coherent up to %s\n', ...
+                    s.tailResidualPathErrorRms_m, ...
+                    fmt(revgnss.ReportRunner.cohFreq_(s.tailResidualPathErrorRms_m)));
+            end
+            floorDb = 10*log10(1/max(s.nAssets,1));
+            for f = 1:numel(s.frequencies_Hz)
+                tag = '';
+                if s.tailCoherentGainLoss_dB(f) <= floorDb + 1; tag = '  [incoherent]'; end
+                fprintf(['    %-8s lambda/20 = %.4f m | beam width %6.0f m | ' ...
+                    'loss %.2f dB at aim, %.2f dB where it lands%s\n'], ...
+                    fmt(s.frequencies_Hz(f)), s.lambdaOver20_m(f), ...
+                    s.beamFootprint_m(f), s.tailCoherentGainLoss_dB(f), ...
+                    s.tailResidualGainLoss_dB(f), tag);
+            end
+        end
+
+        function f = cohFreq_(sigma_m)
+            f = NaN;
+            if isfinite(sigma_m) && sigma_m > 0; f = 299792458/(20*sigma_m); end
+        end
+
+        function lbl = freqLabel_(f_Hz)
+            if ~isfinite(f_Hz);      lbl = 'n/a';
+            elseif f_Hz >= 1e9;      lbl = sprintf('%.3g GHz', f_Hz/1e9);
+            elseif f_Hz >= 1e6;      lbl = sprintf('%.3g MHz', f_Hz/1e6);
+            else;                    lbl = sprintf('%.3g kHz', f_Hz/1e3);
+            end
+        end
+
+        function b = packBeamSeries_(s)
+            % packBeamSeries_  Scalars + the tail summary only. The full per-epoch series stays in
+            % rel; the appendix needs the headline numbers, not another copy of the arrays.
+            b = struct('available', false, 'reason', 'notComputed', ...
+                'tailPathErrorRms_m', NaN, 'frequencies_Hz', [], ...
+                'coherenceFrequency_Hz', NaN, 'rawCoherenceFrequency_Hz', NaN, ...
+                'tailSpotDisplacement_m', NaN, 'tailResidualPathErrorRms_m', NaN, ...
+                'tailResidualGainLoss_dB', [], 'tiltFraction', NaN, 'beamFootprint_m', [], ...
+                'tailCoherentGainLoss_dB', [], 'lambdaOver20_m', [], ...
+                'clockTermAvailable', false, 'geometrySource', 'unavailable', ...
+                'apertureExtent_m', NaN, 'slantRange_m', NaN, 'nearField', false(1,0));
+            if ~isstruct(s); return; end
+            names = fieldnames(b);
+            for i = 1:numel(names)
+                if isfield(s, names{i}); b.(names{i}) = s.(names{i}); end
+            end
+        end
+
         function r = packRel_(rel)
             % packRel_  Minimal relative-layer scalar bundle for the swarm appendix (robust to missing
             % fields; the SwarmRelativeSolver always populates these, this just future-proofs).
@@ -2021,7 +2179,9 @@ classdef ReportRunner
             r = struct('baselineErrRaw_m', NaN, 'baselineErrSolved_m', NaN, 'shapeErrSolved_m', NaN, ...
                 'shapeGateOn', false, 'shapeObservationSource', 'disabled', ...
                 'relClockGateOn', false, 'relClockErrSolved_m', NaN, 'weaklyObservable', false, ...
-                'formalShapeSigma_m', NaN, 'relClockFormalSigma_m', NaN);
+                'formalShapeSigma_m', NaN, 'relClockFormalSigma_m', NaN, ...
+                'rotationGateOn', false, 'rotationReason', 'notAttempted', ...
+                'rotationNObs', 0, 'rotationCondition', NaN);
             names = fieldnames(r);
             for i = 1:numel(names)
                 n = names{i};
@@ -2030,6 +2190,7 @@ classdef ReportRunner
             r.shapeGateOn      = logical(r.shapeGateOn);
             r.relClockGateOn   = logical(r.relClockGateOn);
             r.weaklyObservable = logical(r.weaklyObservable);
+            r.rotationGateOn   = logical(r.rotationGateOn);
         end
 
         function results = runFederatedEstimation(cfg, reportOpts)
@@ -2273,6 +2434,24 @@ classdef ReportRunner
                 end
             catch
             end
+            % Truth ATTITUDE and clock DRIFT histories. Neither is needed by the per-asset EKF,
+            % but revgnss.ReciprocalEndpointTruthProvider.spacecraft requires both to build a
+            % four-timestamp endpoint: attitude rotates the transmit/receive phase-centre offsets
+            % (default [0.8;0.2;0.3] m -- NOT zero, so an assumed attitude would misplace the
+            % antenna by up to ~0.9 m per endpoint), and the drift sets the endpoint's local clock
+            % rate. Recording them here is what lets revgnss.SwarmRelativeSolver replay the REAL
+            % four-timestamp physics instead of a synthetic clock difference.
+            res.truthAttTraj_rad = []; res.truthClkDriftTraj_mps = []; res.truthStateTime_s = [];
+            try
+                D = sim.simData.getData();
+                if isfield(D,'truth')
+                    if isfield(D.truth,'euler_rad');        res.truthAttTraj_rad      = D.truth.euler_rad;        end
+                    if isfield(D.truth,'rxClockDrift_mps'); res.truthClkDriftTraj_mps = D.truth.rxClockDrift_mps(:).'; end
+                end
+                res.truthStateTime_s = sim.simData.getTimeVector();
+                res.truthStateTime_s = res.truthStateTime_s(:).';
+            catch
+            end
         end
 
         function base = singleAssetBase_(cfg)
@@ -2388,9 +2567,63 @@ classdef ReportRunner
                 if diagnostics.available
                     summary.jointFormationDiagnostics = diagnostics;
                 end
+                % Promote the per-pair relative position error to a canonical
+                % top-level summary field so consumers do not have to know which
+                % multi-asset architecture produced the run. Also finish the payload
+                % with the two things only this scope can supply: the final-epoch
+                % cross-covariance (the ONLY route to a sigma for pairs that do not
+                % contain the reference asset -- the filter retains a per-epoch
+                % relative covariance only against the reference) and which pairs an
+                % ISL link actually constrained.
+                if isfield(diagnostics,'pairwiseRelativePositionError')
+                    perPair = diagnostics.pairwiseRelativePositionError;
+                    if isstruct(perPair) && isfield(perPair,'available') && perPair.available
+                        if isfield(jointEstimate,'positionCrossCovariance_m2')
+                            perPair = revgnss.PairwiseRelativePositionError. ...
+                                attachFinalCovariance(perPair, ...
+                                jointEstimate.positionCrossCovariance_m2, ...
+                                'jointEkfExactCrossCovariance');
+                        end
+                        perPair = revgnss.PairwiseRelativePositionError. ...
+                            markIslLinkedPairs(perPair, ...
+                            revgnss.ReportRunner.twoWayLinkPairIndices_(links), ...
+                            'twoWayIslLinkDefinitions');
+                        summary.jointFormationDiagnostics. ...
+                            pairwiseRelativePositionError = perPair;
+                        summary.pairwiseRelativePositionError = perPair;
+                    end
+                end
+
+                % Coherent-beamforming phase budget of the same final-epoch geometry.
+                % Guarded separately from the block above: a failure here must not cost
+                % the caller the formation diagnostics it already computed.
+                try
+                    summary.beamformingPhasor = ...
+                        revgnss.BeamformingPhasorDiagnostics.compute( ...
+                        summary.jointFormationDiagnostics, jointEstimate, ...
+                        multiAssetTruth, cfg);
+                catch beamformingException
+                    warning('ReportRunner:beamformingPhasor', ...
+                        'Beamforming phasor diagnostics unavailable: %s', ...
+                        beamformingException.message);
+                    summary.beamformingPhasor = ...
+                        revgnss.BeamformingPhasorDiagnostics.empty();
+                end
             catch formationException
                 warning('ReportRunner:jointFormationDiagnostics', ...
                     'Joint formation diagnostics unavailable: %s', formationException.message);
+            end
+        end
+
+        function pairIndices = twoWayLinkPairIndices_(links)
+            % twoWayLinkPairIndices_  [initiator transponder] rows from link definitions.
+            pairIndices = zeros(0,2);
+            for linkIndex = 1:numel(links)
+                link = links(linkIndex);
+                if isfield(link,'enable') && ~link.enable; continue; end
+                pairIndices(end+1,:) = [ ...
+                    double(link.initiatorAssetIndex), ...
+                    double(link.transponderAssetIndex)]; %#ok<AGROW>
             end
         end
 
