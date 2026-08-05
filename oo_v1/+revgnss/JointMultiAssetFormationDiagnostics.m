@@ -109,6 +109,45 @@ classdef JointMultiAssetFormationDiagnostics
             diagnostics.relativeStateInformationSource = 'jointEkf';
             diagnostics.finalEstimateEcef_m = estimateEcef_m(:, :, end);
             diagnostics.finalTruthEcef_m = truthEcef_m(:, :, end);
+
+            % Per-pair relative position error, for EVERY pair rather than only each
+            % follower against the reference. The reference-anchored rows above are the
+            % N-1 pairs that contain asset 1; on a run whose reference asset is the
+            % weakest member they are also the N-1 WORST pairs, which misrepresents the
+            % swarm's internal geometry. Guarded because the caller
+            % (ReportRunner.attachJointFormationDiagnostics_) swallows exceptions, so an
+            % unguarded throw here would silently drop every formation diagnostic.
+            try
+                perPair = revgnss.PairwiseRelativePositionError.fromEpochArrays( ...
+                    evaluationTime_s,estimateEcef_m,truthEcef_m,names, ...
+                    'jointEkf','estimateEpochGrid');
+                % Reuse the sigma/NEES this function already computed for the
+                % reference-anchored pairs rather than recomputing them: follower f is
+                % the canonical row of pair (1,f+1).
+                if perPair.available
+                    for followerIndex = 1:(nAssets - 1)
+                        pairRow = revgnss.PairwiseRelativePositionError.pairRow( ...
+                            nAssets,1,followerIndex + 1);
+                        perPair.relativePositionSigma3d_m(pairRow,:) = ...
+                            baselineSigma3d_m(followerIndex,:);
+                        perPair.relativePositionNeesPerDof(pairRow,:) = ...
+                            baselineNeesPerDof(followerIndex,:);
+                        perPair.sigmaSeriesAvailable(pairRow) = covarianceAvailable;
+                    end
+                    if covarianceAvailable
+                        perPair.sigmaSeriesSource = 'jointEkfReferenceAnchoredExact';
+                        tailSelection = ...
+                            perPair.tailStartIndex:numel(evaluationTime_s);
+                        perPair.tailMeanRelativePositionSigma3d_m = mean( ...
+                            perPair.relativePositionSigma3d_m(:,tailSelection), ...
+                            2,'omitnan').';
+                    end
+                end
+                diagnostics.pairwiseRelativePositionError = perPair;
+            catch
+                diagnostics.pairwiseRelativePositionError = ...
+                    revgnss.PairwiseRelativePositionError.empty();
+            end
         end
 
         function fig = plotPositionErrors(diagnostics)
@@ -299,7 +338,9 @@ classdef JointMultiAssetFormationDiagnostics
                 'physicalRangeLinkCount', 0, 'relativePositionDof', 0, ...
                 'rangeOnlyObservabilityStatus', 'unavailable', ...
                 'relativeStateInformationSource', 'unavailable', 'finalEstimateEcef_m', [], ...
-                'finalTruthEcef_m', []);
+                'finalTruthEcef_m', [], ...
+                'pairwiseRelativePositionError', ...
+                revgnss.PairwiseRelativePositionError.empty());
         end
 
         function covarianceHistory = relativeCovarianceHistory_(jointEstimate,nAssets)

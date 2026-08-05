@@ -246,6 +246,18 @@ classdef ClockExactReportBuilder
                     revgnss.JointMultiAssetFormationDiagnostics.plotRelativeLayer(formationDiagnostics), cfg);
                 paths.jointKabsch = CE.tryPlot3D_(figDir, [stem '_joint_kabsch_alignment.pdf'], @() ...
                     revgnss.JointMultiAssetFormationDiagnostics.plotKabschAlignment(formationDiagnostics), 220);
+                % Beamforming phase budget. Each plot method returns [] when the payload
+                % is absent or unavailable, and tryPlot_ turns that into an empty path,
+                % so a single-asset or non-beamforming run adds no figures.
+                if isfield(summary,'beamformingPhasor')
+                    beamforming = summary.beamformingPhasor;
+                    paths.beamPhasor = CE.tryPlot_(figDir, [stem '_beamforming_phasor.pdf'], @() ...
+                        revgnss.BeamformingPhasorDiagnostics.plotPhasorChain(beamforming), cfg);
+                    paths.beamLoss = CE.tryPlot_(figDir, [stem '_beamforming_loss.pdf'], @() ...
+                        revgnss.BeamformingPhasorDiagnostics.plotLossVsFrequency(beamforming), cfg);
+                    paths.beamPattern = CE.tryPlot_(figDir, [stem '_beamforming_pattern.pdf'], @() ...
+                        revgnss.BeamformingPhasorDiagnostics.plotBeamPattern(beamforming), cfg);
+                end
             else
                 paths.swarmPos = CE.tryPlot_(figDir, [stem '_swarm_position_error.pdf'], @() ...
                     CE.plotSwarmPosError_(diag, t, []), cfg);
@@ -1208,6 +1220,14 @@ classdef ClockExactReportBuilder
             % stateEstimation receives `summary` so a federated-swarm run can place the two
             % swarm plots directly after the RAC final-zoom row (see item-9 change).
             revgnss.report.stateEstimation(fid, plotPaths, stem, cfg, diag, figDir, summary);
+            % Mandatory per-pair relative-position table for multi-asset runs. Emits
+            % nothing when summary.pairwiseRelativePositionError is absent or
+            % unavailable, so single-asset .tex stays byte-identical to the golden.
+            revgnss.report.relativeFormationPairs(fid, cfg, summary, esc);
+            % Coherent-beamforming phase budget of the same relative solution. Emits
+            % nothing when summary.beamformingPhasor is absent or unavailable, so
+            % single-asset .tex stays byte-identical to the golden.
+            revgnss.report.beamformingPhasor(fid, cfg, summary, esc, plotPaths);
             revgnss.report.measurementValidation( ...
                 fid, plotPaths, stem, figDir, diag, cfg, summary);
             revgnss.report.oscillatorValidation(fid, plotPaths, stem, figDir, cfg);
