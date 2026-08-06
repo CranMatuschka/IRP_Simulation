@@ -704,6 +704,19 @@ classdef ErrorChain < handle
             truth_m = zeros(N,1);
             model_m = zeros(N,1);
             sigma_m = zeros(N,1);
+
+            % Honour the master enable. This path previously read only truth.enable /
+            % model.enable, so cfg.errors.hardwareDelay.enable was INERT here: a scenario
+            % setting "hardwareDelay": {"enable": false} on top of a realism profile (which
+            % sets truth.enable = true) would not actually switch the channel off.
+            % No-op for every shipped config today -- enable and truth.enable agree in all
+            % of them -- but it closes the misconfiguration trap.
+            hwEnabled = true;
+            try; hwEnabled = hc.enable; catch; end
+            if ~hwEnabled
+                return
+            end
+
             for k = 1:N
                 if hc.truth.enable
                     % Per-tower delay if configured; otherwise use default
@@ -721,11 +734,19 @@ classdef ErrorChain < handle
                     end
                 end
             end
-            if isfield(hc,'sigma_m')
-                sigma_m(:) = hc.sigma_m;
-            end
+            % GATE the sigma on the channel that actually injects it. hc.sigma_m is the
+            % sigma of the stochastic RESIDUAL channel (not of truth.default_m, which is
+            % the deterministic per-tower group delay), and it is injected below only when
+            % residualStochastic.enable AND truth.enable. Assigning it unconditionally
+            % would put it into R for an error that was never drawn -- the same defect
+            % pattern as the ungated atmosphere sigma. No shipped config currently hits the
+            % bad combination (realismGradeConfig sets sigma_m, truth.enable and
+            % residualStochastic.enable together), so this is zero-effect hardening.
             stochHw = false;
             try; stochHw = hc.residualStochastic.enable; catch; end
+            if isfield(hc,'sigma_m') && stochHw && hc.truth.enable
+                sigma_m(:) = hc.sigma_m;
+            end
             if stochHw && any(sigma_m > 0) && hc.truth.enable
                 truth_m = truth_m + sigma_m .* ...
                     obj.drawWhiteVec_(models.noise.RngSource.HWDELAY_RESID, towerIds, [], N);
