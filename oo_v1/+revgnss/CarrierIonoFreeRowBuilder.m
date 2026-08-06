@@ -136,10 +136,31 @@ classdef CarrierIonoFreeRowBuilder
             h_IF = alpha * h(idx1) + beta * h(idx2);
             H_IF = alpha * H(idx1,:) + beta * H(idx2,:);
 
-            % R: diagonal uncorrelated combination
-            r1   = diag(R(idx1, idx1));
-            r2   = diag(R(idx2, idx2));
-            R_IF = diag(alpha^2 * r1 + beta^2 * r2);
+            % R: full covariance propagation R_IF = A*R*A' with A = [alpha*I, beta*I].
+            %
+            % The previous form, diag(alpha^2*diag(R11) + beta^2*diag(R22)), was wrong
+            % on two counts whenever the L1/L2 rows share an error source:
+            %
+            %  1. It drops the cross-blocks R12/R21. ProductClockCovarianceBuilder writes
+            %     a genuine rank-1 tower-clock drift block over rows grouped by
+            %     (towerIdx, productEpoch) a few lines upstream, and the L1 and L2 rows of
+            %     a tower land in the SAME group -- so R12 is populated, and discarding it
+            %     leaves the filter overconfident on the tower-common mode.
+            %  2. For a NON-DISPERSIVE source (the tower-clock residual is identical in
+            %     metres on L1 and L2) the correct IF gain is (alpha+beta)^2 = 1, not
+            %     alpha^2+beta^2 = 8.87. Charging the latter over-inflated the diagonal by
+            %     up to 2.4x in variance at product age 35 s.
+            %
+            % Keeping the cross-blocks recovers both: the 2*alpha*beta*cov12 term is
+            % exactly what turns alpha^2+beta^2 into (alpha+beta)^2 for a perfectly
+            % correlated source, and leaves an independent source at alpha^2+beta^2
+            % unchanged. Same algebra as revgnss.IonoFreeCombination.combineVariance.
+            R11  = R(idx1, idx1);
+            R22  = R(idx2, idx2);
+            R12  = R(idx1, idx2);
+            R21  = R(idx2, idx1);
+            R_IF = alpha^2 * R11 + beta^2 * R22 + alpha * beta * (R12 + R21);
+            R_IF = (R_IF + R_IF') / 2;   % kill any accumulated asymmetry
 
             % cpInfo: L1 block becomes IF; L2 block dropped.
             % Explicit L1/L2 ambiguity state pair metadata added.
