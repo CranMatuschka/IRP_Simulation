@@ -376,9 +376,15 @@ cfg.carrierSlip.syntheticSlipInjection.jumpCycles    = 1;
 cfg.covariance.sharedErrors.enable                   = true;
 cfg.covariance.sharedErrors.mode                     = 'blockTowerClockProduct';
 cfg.covariance.sharedErrors.applyTowerClockToCode    = true;
-cfg.covariance.sharedErrors.applyTowerClockToCarrier = false;
+% Carrier rows carry the SAME product residual as the code rows (z has -b_twr_true,
+% h has -b_twr_model), so the constant bias belongs in the carrier R too. Previously
+% false AND unread: the block was skipped on the grounds that the float ambiguity
+% absorbs a per-arc constant, but the generator redraws the bias every product
+% interval (30 s), which the ambiguity cannot track (~0.055 mm of process noise per
+% interval against a 10-100 mm step). Now a live control, default ON.
+cfg.covariance.sharedErrors.applyTowerClockToCarrier = true;
 cfg.covariance.sharedErrors.applyTowerClockToDoppler = false;
-cfg.covariance.sharedErrors.carrierPolicy            = 'arcBiasAbsorbsConstantProductBias';
+cfg.covariance.sharedErrors.carrierPolicy            = 'sharedProductBiasAndDriftBlocks';
 cfg.covariance.sharedErrors.dopplerPolicy            = 'frameConsistentV2';
 cfg.covariance.sharedErrors.ensureSPD                = true;
 cfg.covariance.sharedErrors.jitter_m2                = 1e-12;

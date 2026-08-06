@@ -82,6 +82,7 @@ classdef CarrierMeasurementBuilder
             cpInfo.ambiguityStateIdx = zeros(Mp_total, 1);
             cpInfo.trackKey          = cell(Mp_total, 1);
             cpInfo.towerClkModel_m   = zeros(Mp_total, 1); % Per-row correction for compensated slip detection
+            cpInfo.towerClkBiasSigma_m = zeros(Mp_total, 1); % Constant product-bias sigma per row
             cpInfo.interAntennaPhaseBiasTruth_m = zeros(Mp_total, 1);
             cpInfo.interAntennaPhaseBiasModel_m = zeros(Mp_total, 1);
             % Compact carrier-attitude row closure metadata
@@ -120,8 +121,30 @@ classdef CarrierMeasurementBuilder
             % in P, so the product drift sigma must not also enter the carrier drift block
             % or the code x carrier cross-stack (via cpInfo.sigmaDrift_mps). Mask on column 2
             % using the carrier row tower list. No-op when estimateTowerClocks=false (golden).
+            dsig_carrier_raw = dsig_carrier;   % pre-mask, for the bias/drift split below
             dsig_carrier = models.measurements.CodeMeasurementBuilder.maskStateTowerSigma_( ...
                 dsig_carrier, twr_pairs, stateMap, 2);
+
+            % Tower-clock product BIAS sigma for the carrier rows.
+            %
+            % towerClkSigma is the FULL product sigma that TowerClockCorrectionProvider
+            % builds as sqrt(sigmaBias^2 + age^2*sigmaDrift^2 + 2*age*covBiasDrift). The
+            % drift part is already represented by addCarrierDriftBlock, so strip it out
+            % here to recover the constant bias term and avoid double-counting it. Use the
+            % UNMASKED drift sigma for the subtraction: if the drift is an EKF state its
+            % variance left R via the column-2 mask, but it was still inside towerClkSigma.
+            sbias_carrier = zeros(size(dsig_carrier_raw));
+            if numel(towerClkSigma) >= numel(dsig_carrier_raw) && ~isempty(t_prod_carrier)
+                age_carrier_  = t_s - t_prod_carrier(:);
+                tcs_          = towerClkSigma(1:numel(dsig_carrier_raw));
+                sbias_carrier = sqrt(max(tcs_(:).^2 - ...
+                                         (age_carrier_.^2) .* (dsig_carrier_raw(:).^2), 0));
+            end
+            % Bias double-count guard: mask on column 1 (bias). When a tower's clock BIAS
+            % is an EKF state its uncertainty lives in P and must not also enter R.
+            % No-op when estimateTowerClocks=false (the default).
+            sbias_carrier = models.measurements.CodeMeasurementBuilder.maskStateTowerSigma_( ...
+                sbias_carrier, twr_pairs, stateMap, 1);
 
             r_cm_est  = x_est(blk.r);
             euler_est = revgnss.AssetStateBlock.eulerEst(blk, x_est);
@@ -276,10 +299,12 @@ classdef CarrierMeasurementBuilder
                     h_phi(rowOut) = h_phi(rowOut) - (fL1c / fSigc)^2 * x_est(blk.iono(ti));
                 end
 
-                % NOTE: towerClkSigma is NOT added to carrier R.
-                % Float ambiguity B_est absorbs constant clock bias per arc; inflating
-                % R would incorrectly degrade carrier from ~5mm to ~0.5m precision.
-                % towerClkSigma is applied to CODE rows only (in CodeMeasurementBuilder).
+                % Tower-clock product residual in the carrier R:
+                %   - the age-weighted DRIFT part is added by addCarrierDriftBlock below
+                %   - the constant BIAS part is added by addCarrierBiasBlock below, gated
+                %     on cfg.covariance.sharedErrors.applyTowerClockToCarrier
+                % Both enter as shared (tower, productEpoch) blocks, not as a diagonal,
+                % because one realisation is common to every row of the group.
 
                 cpInfo.phi_m(rowOut)             = z_phi(rowOut);
                 cpInfo.prefit_m(rowOut)          = z_phi(rowOut) - h_phi(rowOut);
@@ -289,6 +314,7 @@ classdef CarrierMeasurementBuilder
                 cpInfo.trackKey{rowOut}           = sprintf('T%03d_A%03d_S%02d', ti, ai, sigIdx);
                 cpInfo.ambiguityStateIdx(rowOut)  = ambStateIdx;
                 cpInfo.towerClkModel_m(rowOut)    = b_twr_m;
+                cpInfo.towerClkBiasSigma_m(rowOut) = sbias_carrier(min(mi, numel(sbias_carrier)));
                 cpInfo.interAntennaPhaseBiasTruth_m(rowOut) = b_ia_m;
                 cpInfo.interAntennaPhaseBiasModel_m(rowOut) = b_ia_model_m;
                 % Product-clock drift residual metadata (per row)
@@ -375,6 +401,25 @@ classdef CarrierMeasurementBuilder
                         cpInfo.sigmaDrift_mps, cfg);
                 catch; end
             end
+
+            % Constant product-BIAS block. Gated on
+            % cfg.covariance.sharedErrors.applyTowerClockToCarrier, which until now had no
+            % consumer anywhere in the repo (only SimulationToggleManifest reported it and
+            % ScenarioPresets set it) -- it is a live control from here on.
+            applyTwrClkCarrier = false;
+            try; applyTwrClkCarrier = cfg.covariance.sharedErrors.applyTowerClockToCarrier; catch; end
+            biasCovInfo = struct('carrierProductBiasApplied',false,'carrierProductBiasBlocks',0, ...
+                'carrierProductBiasMaxSigma_m',0,'carrierProductBiasSPD',false);
+            if applyTwrClkCarrier && any(sbias_carrier > 0)
+                try
+                    [R_phi, biasCovInfo] = models.clocks.ProductClockCovarianceBuilder.addCarrierBiasBlock( ...
+                        R_phi, cpInfo.towerIdx, cpInfo.productEpoch_s, ...
+                        cpInfo.towerClkBiasSigma_m, cfg);
+                catch; end
+            end
+            carrierCovInfo.carrierProductBiasTermIncluded = biasCovInfo.carrierProductBiasApplied;
+            fn_ = fieldnames(biasCovInfo);
+            for i_ = 1:numel(fn_); carrierCovInfo.(fn_{i_}) = biasCovInfo.(fn_{i_}); end
             cpInfo.carrierProductCovInfo = carrierCovInfo;
 
             % Carrier IF post-processing (replaces L1+L2 with IF rows)

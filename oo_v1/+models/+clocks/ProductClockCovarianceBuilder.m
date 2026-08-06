@@ -124,6 +124,71 @@ classdef ProductClockCovarianceBuilder
             info.carrierRCondition               = models.clocks.ProductClockCovarianceBuilder.rcond_(R);
         end
 
+        function [R, info] = addCarrierBiasBlock(R, towerIdx, t_prod, sigmaBias, cfg)
+            % addCarrierBiasBlock  Add the CONSTANT product-bias covariance to carrier R.
+            %
+            % Companion to addCarrierDriftBlock, which deliberately carries only the
+            % age-weighted drift residual. The constant term was excluded on the grounds
+            % that "the float ambiguity absorbs a constant clock bias per arc". That is
+            % not what the generator does: TowerClockCorrectionProvider.productNoise_ keys
+            % its draw on (towerIndex, productEpoch) with productEpoch = floor(t/updInt),
+            % so the bias is a FRESH INDEPENDENT DRAW every product interval -- a step, not
+            % an arc constant. The float ambiguity cannot follow it: with
+            % ambiguity.processNoiseSigma_m_per_sqrt_s = 1e-5 it can move ~0.055 mm across
+            % a 30 s interval against a 10-100 mm step. The residual therefore lands in the
+            % innovation (z carries -b_twr_true, h carries -b_twr_model) with no matching
+            % term in R.
+            %
+            %   Cov(i,j) += sigmaBias^2   for rows i,j from the same (tower, productEpoch)
+            %
+            % Rows of one group share a single realisation, so this is a rank-1 ones-block,
+            % the same shape addDopplerDriftBlock already uses for the drift. Under the
+            % ionosphere-free carrier collapse the term is NON-DISPERSIVE and so passes at
+            % unit gain (alpha+beta)^2 = 1 -- which CarrierIonoFreeRowBuilder now propagates
+            % correctly via A*R*A'.
+            %
+            % Inputs:
+            %   R          [Mp x Mp] current carrier R
+            %   towerIdx   [Mp x 1] tower index per carrier row
+            %   t_prod     [Mp x 1] product epoch [s] per row
+            %   sigmaBias  [Mp x 1] CONSTANT product bias sigma [m] per row, already
+            %              stripped of the drift contribution and already masked for the
+            %              tower-clock-bias EKF state (column 1) by the caller
+            %   cfg        simulation config
+
+            jitter_m2 = 1e-12;
+            try; jitter_m2 = cfg.covariance.productClock.jitter_m2; catch; end
+            doSPD = true;
+            try; doSPD = cfg.covariance.productClock.ensureSPD; catch; end
+
+            Mp = size(R, 1);
+            nBlocks = 0;
+            maxSigma = 0;
+
+            groupKey = arrayfun(@(i) sprintf('%d_%.3f', towerIdx(i), t_prod(i)), (1:Mp)', ...
+                'UniformOutput', false);
+            uniqueKeys = unique(groupKey);
+
+            for k = 1:numel(uniqueKeys)
+                g = find(strcmp(groupKey, uniqueKeys{k}));
+                if numel(g) < 1; continue; end
+                sb = sigmaBias(g(1));
+                if sb <= 0; continue; end
+                R(g, g) = R(g, g) + sb^2 * ones(numel(g), numel(g));
+                nBlocks = nBlocks + 1;
+                maxSigma = max(maxSigma, sb);
+            end
+
+            if doSPD && nBlocks > 0
+                R = models.clocks.ProductClockCovarianceBuilder.spdGuard_(R, jitter_m2);
+            end
+
+            info.carrierProductBiasApplied    = nBlocks > 0;
+            info.carrierProductBiasBlocks     = nBlocks;
+            info.carrierProductBiasMaxSigma_m = maxSigma;
+            info.carrierProductBiasSPD        = doSPD;
+        end
+
         function [R, info] = addSharedProductClockStack(R, errStruct, cfg)
             % addSharedProductClockStack  Add cross-observable product-clock covariance.
             %
