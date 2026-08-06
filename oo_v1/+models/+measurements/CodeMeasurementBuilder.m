@@ -420,7 +420,22 @@ classdef CodeMeasurementBuilder
                             if isfield(errStruct.bySource.sigma_m,'ionoHO')
                                 sigmaIonoHOL1_pi = errStruct.bySource.sigma_m.ionoHO(pi);
                             end
-                            sigma_extra_si2 = max(sigma_extra_pi^2 - sigmaIonoHOL1_pi^2 + ionoHO_sig_si^2, 0);
+                            % First-order ionosphere is DISPERSIVE: the truth and model
+                            % values on this row were both scaled by freqScale above
+                            % (iono_t_si/iono_m_si), so its sigma must be scaled too.
+                            % sigmaExtra_m carries the L1-level value; swap it for the
+                            % signal-scaled one exactly as the higher-order term is
+                            % swapped. Without this the L2 row charges the L1 iono sigma
+                            % against an error freqScale times larger -> R short by
+                            % freqScale^2 (2.712x for GPS L1/L2) on the dominant term.
+                            sigmaIono1L1_pi = 0;
+                            if isfield(errStruct.bySource.sigma_m,'iono')
+                                sigmaIono1L1_pi = errStruct.bySource.sigma_m.iono(pi);
+                            end
+                            sigmaIono1_si = sigmaIono1L1_pi * freqScale;
+                            sigma_extra_si2 = max(sigma_extra_pi^2 ...
+                                                  - sigmaIonoHOL1_pi^2 + ionoHO_sig_si^2 ...
+                                                  - sigmaIono1L1_pi^2 + sigmaIono1_si^2, 0);
                             R_diag_new(mi) = max(sigma_code_si, sigmaFloor)^2 + ...
                                              scintSig_si^2 + sigma_extra_si2 + towerClkSigma(pi)^2;
 
@@ -473,6 +488,17 @@ classdef CodeMeasurementBuilder
                 errStruct.bySource.sigma_m.code = bsOut.code;
                 if isfield(errStruct.bySource.sigma_m,'ionoHO')
                     errStruct.bySource.sigma_m.ionoHO = bsOut.ionoHO;
+                end
+                % First-order ionosphere is dispersive, so the plain tiling above leaves
+                % the L1 sigma on every signal's row while the truth/model values were
+                % scaled by freqScale. Rescale per row so the reported per-source sigma
+                % agrees with both the injected error and the R built above. Signal 1
+                % scales by 1.0 and is unchanged.
+                if isfield(errStruct.bySource.sigma_m,'iono') && ...
+                        numel(errStruct.bySource.sigma_m.iono) == M
+                    ionoFreqScale_ = (f_L1 ./ freqHz(:)).^2;
+                    errStruct.bySource.sigma_m.iono = ...
+                        errStruct.bySource.sigma_m.iono(:) .* ionoFreqScale_;
                 end
 
                 % Tile scalar errStruct arrays
@@ -636,8 +662,16 @@ classdef CodeMeasurementBuilder
                 % Correlated + cancelled variance baked into each raw row of R_diag.
                 % Higher-order ionosphere is signal-scaled; the other listed terms are
                 % common to the pair in the current source model.
-                corrBaked_L1_ = sigTrop_.^2 + sigIono1_.^2 + sigIonoHO_L1_.^2 + sigTwr_if_.^2 + sigHw_.^2;
-                corrBaked_L2_ = sigTrop_.^2 + sigIono1_.^2 + sigIonoHO_L2_.^2 + sigTwr_if_.^2 + sigHw_.^2;
+                %
+                % First-order ionosphere is signal-scaled too: the L2 row of R_diag now
+                % carries (freqScale*sigIono1_)^2, so the L2 strip must remove that same
+                % scaled variance. Stripping the unscaled L1 value here would leave the
+                % difference inside Rindep_L2_ and then re-charge it at beta^2 instead of
+                % the zero gain the cancellation demands.
+                ionoFreqScale_if_ = (f_L1 / f_L2_if)^2;
+                sigIono1_L2_      = sigIono1_ * ionoFreqScale_if_;
+                corrBaked_L1_ = sigTrop_.^2 + sigIono1_.^2    + sigIonoHO_L1_.^2 + sigTwr_if_.^2 + sigHw_.^2;
+                corrBaked_L2_ = sigTrop_.^2 + sigIono1_L2_.^2 + sigIonoHO_L2_.^2 + sigTwr_if_.^2 + sigHw_.^2;
 
                 % Independent-per-signal remainder still carries the native per-signal
                 % L1/L2 sigmas (code + multipath + scintillation + signal-dependent HW
