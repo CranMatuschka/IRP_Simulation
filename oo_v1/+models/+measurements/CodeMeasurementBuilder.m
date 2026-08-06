@@ -392,12 +392,17 @@ classdef CodeMeasurementBuilder
                             end
                             if isfield(errStruct.bySource.sigma_m,'ionoHO')
                                 sigmaIonoHOL1_pi = errStruct.bySource.sigma_m.ionoHO(pi);
-                                ionoL1_t = 0;
-                                if isfield(errStruct.bySource.truth_m,'iono')
-                                    ionoL1_t = errStruct.bySource.truth_m.iono(pi);
+                                % Scale the SIGMA on the MODEL ionosphere, not the truth.
+                                % The sigma itself is now model-derived (see
+                                % ErrorChain.higherOrderIono_), so using the truth slant as
+                                % the frequency-scaling reference would put truth back into
+                                % R through the cap interaction.
+                                ionoL1_sig = 0;
+                                if isfield(errStruct.bySource.model_m,'iono')
+                                    ionoL1_sig = errStruct.bySource.model_m.iono(pi);
                                 end
                                 ionoHO_sig_si = models.measurements.CodeMeasurementBuilder.higherOrderIonoSigmaAtFrequency_( ...
-                                    cfg, sigmaIonoHOL1_pi, ionoL1_t, sigCfg.frequency_Hz, f_L1);
+                                    cfg, sigmaIonoHOL1_pi, ionoL1_sig, sigCfg.frequency_Hz, f_L1);
                             end
 
                             trop_t = 0; trop_m = 0; hw_t = 0; hw_m = 0; mp_t = 0;
@@ -682,12 +687,15 @@ classdef CodeMeasurementBuilder
                 % Fully correlated signed-source propagation: L1/L2 higher-order terms
                 % are deterministic functions of the same ionosphere ray path, so the IF
                 % one-sigma magnitude follows the signed alpha/beta source combination.
+                %
+                % The sigma fields are used here, NOT bySource.truth_m.ionoHO. An earlier
+                % override read the REALISED higher-order truth straight into R, which is
+                % the same truth leakage just removed from ErrorChain.higherOrderIono_:
+                % it makes the higher-order residual exactly a 1-sigma event by
+                % construction and is information no receiver possesses. sigIonoHO_L1_/L2_
+                % are now model-ionosphere-derived, so the signed combination below is the
+                % correct correlated propagation with no truth in it.
                 sigIonoHO_IF_ = abs(alpha_if * sigIonoHO_L1_ + beta_if * sigIonoHO_L2_);
-                if isfield(errStruct.bySource,'truth_m') && isfield(errStruct.bySource.truth_m,'ionoHO') && ...
-                        numel(errStruct.bySource.truth_m.ionoHO) >= 2*M_pairs_if
-                    sigIonoHO_IF_ = abs(alpha_if * errStruct.bySource.truth_m.ionoHO(idx1) + ...
-                                        beta_if  * errStruct.bySource.truth_m.ionoHO(idx2));
-                end
 
                 R_if = alpha_if^2 * Rindep_L1_ + beta_if^2 * Rindep_L2_ ... % independent per signal
                      + sigTrop_.^2 ...                                      % troposphere: unit gain

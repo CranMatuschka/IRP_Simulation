@@ -293,7 +293,7 @@ classdef ErrorChain < handle
             % the first-order L1 slant delay just computed. Zero (and label harmless) when
             % cfg.errors.ionosphere.higherOrder.enable is false.
             [truth_m.ionoHO, model_m.ionoHO, sigma_m.ionoHO] = ...
-                obj.higherOrderIono_(truth_m.iono, f_L1);
+                obj.higherOrderIono_(truth_m.iono, model_m.iono, f_L1);
 
             % -------- 6. Scintillation sigma (L1 level) ---------------
             scintSigmaL1_m = zeros(N,1);
@@ -766,11 +766,11 @@ classdef ErrorChain < handle
         end
 
         % ----------------------------------------------------------------
-        function [truth_m, model_m, sigma_m] = higherOrderIono_(obj, ionoL1_slant_m, f_L1)
+        function [truth_m, model_m, sigma_m] = higherOrderIono_(obj, ionoL1_truth_m, ionoL1_model_m, f_L1)
             % higherOrderIono_  Second/third-order ionosphere residual at L1.
             %   Derived from the first-order L1 slant delay. Truth-side, unmodelled
             %   (model_m = 0); its magnitude enters R. Zero when disabled (bit-identical).
-            N = numel(ionoL1_slant_m);
+            N = numel(ionoL1_truth_m);
             truth_m = zeros(N,1);
             model_m = zeros(N,1);
             sigma_m = zeros(N,1);
@@ -783,8 +783,37 @@ classdef ErrorChain < handle
             % other signals is a property of models.errors.HigherOrderIonosphere and is
             % exercised in the IF-survival test. Truth-side bounded residual.
             truth_m = models.errors.HigherOrderIonosphere.totalDelay( ...
-                ionoL1_slant_m(:), f_L1, f_L1, ic.higherOrder);
-            sigma_m = abs(truth_m);   % conservative: full unmodelled HO magnitude -> R
+                ionoL1_truth_m(:), f_L1, f_L1, ic.higherOrder);
+
+            % R sigma from the MODEL ionosphere, never from the realised truth.
+            %
+            % This previously read sigma_m = abs(truth_m), i.e. R was set equal to the
+            % error that had just been drawn. That makes every higher-order residual
+            % EXACTLY a 1-sigma event by construction, so NIS/NEES look well-calibrated
+            % on this term with no right to -- and it is information no receiver has,
+            % since knowing |HO| exactly means knowing the truth TEC exactly.
+            %
+            % The honest sigma is what a receiver can compute: the higher-order delay
+            % predicted from its OWN ionosphere model. Same deterministic function, same
+            % caps, same order of magnitude (the model TEC tracks the truth TEC), but no
+            % truth leakage.
+            sigma_m = abs(models.errors.HigherOrderIonosphere.totalDelay( ...
+                ionoL1_model_m(:), f_L1, f_L1, ic.higherOrder));
+
+            % Where the model supplies no ionosphere at all, |HO(model)| collapses to 0
+            % while the injected error does not -- that would be overconfident. Fall back
+            % to the configured cap, which bounds the term and is still truth-free.
+            noModel = ~(abs(ionoL1_model_m(:)) > 0);
+            if any(noModel)
+                capFallback = 0;
+                if isfield(ic.higherOrder,'secondOrderCap_m')
+                    capFallback = capFallback + abs(ic.higherOrder.secondOrderCap_m);
+                end
+                if isfield(ic.higherOrder,'thirdOrderCap_m')
+                    capFallback = capFallback + abs(ic.higherOrder.thirdOrderCap_m);
+                end
+                sigma_m(noModel) = capFallback;
+            end
         end
 
     end
