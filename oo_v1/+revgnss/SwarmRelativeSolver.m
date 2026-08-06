@@ -787,17 +787,28 @@ classdef SwarmRelativeSolver
             % The two-way-ISL delay-cal + thermal R/noise physics is self-contained here (the
             % equivalent joint-EKF two-way-ISL builder was retired). The delay-cal
             % bias is drawn once per pair from an IDENTITY-KEYED stream (node = i*64+k) so adding /
-            % removing a pair cannot perturb another pair's draw. R = thermal^2 + nCorr*(const^2+rw^2)
-            % with nCorr the correlated-bias inflation -> the sequential white-R weight cannot average
-            % the bias below ~sqrt(nCorr) (conservative).
+            % removing a pair cannot perturb another pair's draw.
+            %
+            % R = thermal^2 + (const^2 + rw^2), i.e. the per-epoch error variance.
+            %
+            % This previously carried an extra nCorr = min(tau/dt, nCorrCap) = 60 factor on
+            % the bias term, justified as stopping "the sequential white-R weight" from
+            % averaging the bias below ~sqrt(nCorr). That justification does not apply to
+            % this consumer: solveEpoch_ is a PER-EPOCH weighted least squares (see the
+            % `for kk = 1:nEp` loop) which performs no temporal averaging at all. At any
+            % single epoch the error on a pair is thermal(p,kk) + pairBias(p), whose
+            % variance is exactly sP^2 + sConst^2 + sRW^2 -- the bias is fully present,
+            % not averaged, so inflating it 60x simply overstates R by ~7.4x.
+            %
+            % Because pairR here varies per pair (link-budget thermal sigma), the inflation
+            % was also estimate-affecting: it swamped the per-pair sP^2 and flattened the
+            % relative weights towards uniform. Removing it restores link-budget-driven
+            % weighting. tau_s / nCorrCap remain configured for any future sequential
+            % consumer but no longer inflate this per-epoch R.
             g = @(p,d) revgnss.SwarmRelativeSolver.getNum_(cfg, p, d);
             sThermal = g({'multiAsset','twoWayISL','sigma_m'}, 0.01);
             sConst   = g({'multiAsset','twoWayISL','delayCal','sigma_const_m'}, 0.01);
             sRW      = g({'multiAsset','twoWayISL','delayCal','sigma_rw_m'}, 0.003);
-            tau      = g({'multiAsset','twoWayISL','delayCal','tau_s'}, 3600);
-            nCap     = g({'multiAsset','twoWayISL','delayCal','nCorrCap'}, 60);
-            dt       = g({'simulation','dt_s'}, 1);
-            nCorr    = min(max(tau/max(dt,eps),1), nCap);
             sBias    = sqrt(sConst^2 + sRW^2);
             nP = size(pairs,1);
             pairBias = zeros(nP,1); pairR = zeros(nP,1); pairSigma = zeros(nP,1);
@@ -812,7 +823,7 @@ classdef SwarmRelativeSolver
                     sP = revgnss.ISLLinkBudget.sigma(cfg, dPair, {'multiAsset','twoWayISL'}, sThermal);
                 end
                 pairSigma(p) = sP;
-                pairR(p) = sP^2 + nCorr*(sConst^2 + sRW^2);
+                pairR(p) = sP^2 + sConst^2 + sRW^2;
                 node = pairs(p,1)*64 + pairs(p,2);
                 rs = RandStream('mt19937ar', 'Seed', revgnss.SwarmRelativeSolver.baseSeed_(cfg) + node);
                 pairBias(p) = sBias * randn(rs);
@@ -1083,16 +1094,19 @@ classdef SwarmRelativeSolver
             % Per-pair sat-sat TWSTFT noise: constant delay-cal bias (identity-keyed) + conservative
             % R. The sat-sat two-way time-transfer thermal/delay-cal R physics is self-contained
             % here (the equivalent joint-EKF sat-sat two-way time-transfer builder was retired);
-            % R = thermal^2 + nCorr*(const^2+rw^2), the correlated-bias inflation.
+            % R = thermal^2 + (const^2 + rw^2), the per-epoch error variance.
+            %
+            % As in islNoise_, the former nCorr = min(tau/dt, nCorrCap) = 60 inflation on the
+            % bias term does not apply here: the consumer is a per-epoch weighted least
+            % squares with no temporal averaging, so the constant per-pair bias is fully
+            % present at every epoch rather than being averaged down. pairR is UNIFORM on
+            % this path, so the scale cancelled out of the estimate and the sole casualty
+            % was the reported relClockFormalSigma_m, which ran sqrt(7.37) = 2.72x high.
             g = @(p,d) revgnss.SwarmRelativeSolver.getNum_(cfg, p, d);
             thermalSigma = g({'multiAsset','twoWayTimeTransferISL','sigma_m'}, 0.03);
             sConst = g({'multiAsset','twoWayTimeTransferISL','delayCal','sigma_const_m'}, 0.01);
             sRW    = g({'multiAsset','twoWayTimeTransferISL','delayCal','sigma_rw_m'}, 0.003);
-            tau    = g({'multiAsset','twoWayTimeTransferISL','delayCal','tau_s'}, 3600);
-            nCap   = g({'multiAsset','twoWayTimeTransferISL','delayCal','nCorrCap'}, 60);
-            dt     = g({'simulation','dt_s'}, 1);
-            nCorr  = min(max(tau/max(dt,eps),1), nCap);
-            Rii    = thermalSigma^2 + nCorr*(sConst^2 + sRW^2);
+            Rii    = thermalSigma^2 + sConst^2 + sRW^2;
             sBias  = sqrt(sConst^2 + sRW^2);
             nP = size(pairs,1);
             pairBias = zeros(nP,1); pairR = Rii * ones(nP,1);
