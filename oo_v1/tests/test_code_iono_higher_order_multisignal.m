@@ -53,8 +53,24 @@ expectedIF = alpha * errRaw.bySource.truth_m.ionoHO(idx1) + ...
              beta  * errRaw.bySource.truth_m.ionoHO(idx2);
 assert(max(abs(errIF.bySource.truth_m.ionoHO - expectedIF)) < 1e-10, ...
     'T2 FAILED: IF ionoHO truth is not alpha*L1 + beta*L2.');
-assert(max(abs(errIF.bySource.sigma_m.ionoHO - abs(expectedIF))) < 1e-10, ...
-    'T2 FAILED: IF ionoHO sigma is not the correlated signed-source magnitude.');
+
+% The SIGMA follows the signed source combination of the per-signal SIGMAS, not of
+% the realised TRUTH. This assertion previously read
+%     sigma_m.ionoHO == abs(alpha*truth_L1 + beta*truth_L2)
+% which asserted the defect it was meant to protect: setting R equal to the error
+% that had just been drawn makes every higher-order residual exactly a 1-sigma
+% event by construction, and is information no receiver has (knowing |HO| exactly
+% means knowing the truth TEC exactly). ErrorChain.higherOrderIono_ now derives the
+% sigma from the MODEL ionosphere, so the correct invariant is the signed
+% combination of the sigmas -- which still tests the thing this case exists to
+% test: that the higher-order term propagates as a CORRELATED signed source rather
+% than as alpha^2+beta^2.
+expectedSigIF = abs(alpha * errRaw.bySource.sigma_m.ionoHO(idx1) + ...
+                    beta  * errRaw.bySource.sigma_m.ionoHO(idx2));
+assert(max(abs(errIF.bySource.sigma_m.ionoHO - expectedSigIF)) < 1e-10, ...
+    'T2 FAILED: IF ionoHO sigma is not the correlated signed-source magnitude of the sigmas.');
+assert(max(abs(errIF.bySource.sigma_m.ionoHO - abs(expectedIF))) > 1e-12, ...
+    'T2 FAILED: IF ionoHO sigma still equals the realised truth magnitude (truth leakage).');
 
 truthSum = zeros(size(errIF.truthTotal_m));
 modelSum = zeros(size(errIF.modelTotal_m));

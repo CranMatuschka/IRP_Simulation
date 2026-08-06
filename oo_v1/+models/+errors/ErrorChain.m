@@ -705,17 +705,16 @@ classdef ErrorChain < handle
             model_m = zeros(N,1);
             sigma_m = zeros(N,1);
 
-            % Honour the master enable. This path previously read only truth.enable /
-            % model.enable, so cfg.errors.hardwareDelay.enable was INERT here: a scenario
-            % setting "hardwareDelay": {"enable": false} on top of a realism profile (which
-            % sets truth.enable = true) would not actually switch the channel off.
-            % No-op for every shipped config today -- enable and truth.enable agree in all
-            % of them -- but it closes the misconfiguration trap.
-            hwEnabled = true;
-            try; hwEnabled = hc.enable; catch; end
-            if ~hwEnabled
-                return
-            end
+            % cfg.errors.hardwareDelay.enable is DELIBERATELY NOT read here. The master
+            % switches on this path are truth.enable / model.enable, and at least one
+            % shipped config depends on that: ConfigFactory.geoRealWorldTruthComparisonConfig
+            % resolves to enable=0 with truth.enable=1, sigma_m=0.2 and
+            % residualStochastic.enable=1, and test_stage86_geo_realworld_truth_comparison_smoke
+            % asserts the hardware residual is NON-ZERO. Honouring `enable` was tried and
+            % reverted: it is not a dormant guard, it is a flag this codebase never wired,
+            % and enforcing it silently disables a working configuration.
+            % If it should become the master switch, the configs that rely on the current
+            % semantics have to be migrated in the same change.
 
             for k = 1:N
                 if hc.truth.enable
