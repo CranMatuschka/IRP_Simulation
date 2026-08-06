@@ -508,7 +508,15 @@ classdef ErrorChain < handle
                 try; dtZwd  = obj.cfg.simulation.dt_s;               catch; end
                 sigmaWetR = sigSs * sqrt(max(1 - exp(-2*dtZwd / max(tauZwd,eps)), 0));
             end
-            sigmaStochR = sqrt((sigmaWetR * mappingFn(elv)).^2 + sigmaResidual.^2);
+            % GATE the stochastic sigma on the same flag that gates its INJECTION above
+            % (twin of the ionosphere case). Previously this entered R unconditionally
+            % while the truth draw was skipped, putting 0.054 m of the 0.1136 m zenith
+            % troposphere R sigma against no injected white error.
+            if residualOn
+                sigmaStochR = sqrt((sigmaWetR * mappingFn(elv)).^2 + sigmaResidual.^2);
+            else
+                sigmaStochR = zeros(size(sigmaBase));
+            end
             sigma_m = sqrt(sigmaBase.^2 + sigmaStochR.^2);
         end
 
@@ -669,7 +677,24 @@ classdef ErrorChain < handle
                 try; dtIono    = obj.cfg.simulation.dt_s;                catch; end
                 sigmaVDelayR = sigSsIono * sqrt(max(1 - exp(-2*dtIono / max(tauIono,eps)), 0));
             end
-            sigmaStochR = sqrt((sigmaVDelayR * mapping).^2 + sigmaResidual.^2);
+            % GATE the stochastic sigma on the same flag that gates its INJECTION above.
+            % Previously sigmaStochR entered R unconditionally, read through bare
+            % try/catch, while the truth draw at the `if residualOn` block was skipped.
+            % At the default (stochastic.enable = 0, modelResidual.enable = 0) that put
+            % 1.118 m of the 1.2247 m zenith ionosphere R sigma against no injected white
+            % error at all -- R claiming coverage for a model that is switched off.
+            %
+            % NOTE: this leaves R covering the DETERMINISTIC model bias
+            % (truth.zenithDelay_m - model.zenithDelay_m*biasFraction) * mapping through
+            % sigmaBase alone. That bias is constant, so charging it on a white diagonal
+            % is still the wrong COLOUR -- the filter averages it down as 1/sqrt(N)
+            % against an error that never shrinks. Fixing that needs a state
+            % (estimation.ionosphereMode) or a time-correlated block, not a bigger sigma.
+            if residualOn
+                sigmaStochR = sqrt((sigmaVDelayR * mapping).^2 + sigmaResidual.^2);
+            else
+                sigmaStochR = zeros(N,1);
+            end
             sigma_m = sqrt(sigmaBase.^2 + sigmaStochR.^2);
         end
 

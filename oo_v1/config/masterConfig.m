@@ -112,7 +112,11 @@ cfg.errors.troposphere.truth.zenithDelay_m = 2.45;
 cfg.errors.troposphere.model.zenithDelay_m = 2.30;
 cfg.errors.troposphere.model.biasFraction  = 1;
 cfg.errors.troposphere.stochastic.enable   = false;
-cfg.errors.troposphere.sigma_m             = 0.10;
+% Declared model uncertainty. Must be consistent with the model error this config
+% actually commits: truth 2.45 - model 2.30*biasFraction = 0.15 m at zenith. It read
+% 0.10 while the stochastic sigma (switched off, but formerly still charged into R)
+% quietly made up the difference. 0.10 -> 0.15 states the same total honestly.
+cfg.errors.troposphere.sigma_m             = 0.15;
 cfg.errors.ionosphere.enable               = true;
 cfg.errors.ionosphere.modelType            = 'simpleMapped';
 cfg.errors.ionosphere.truth.zenithDelay_m  = 5;
@@ -121,7 +125,11 @@ cfg.errors.ionosphere.model.biasFraction   = 1;
 cfg.errors.ionosphere.stochastic.enable    = false;
 cfg.errors.ionosphere.scintillation.enable = false;
 cfg.errors.ionosphere.higherOrder.enable   = false;
-cfg.errors.ionosphere.sigma_m              = 0.50;
+% Declared model uncertainty. Twin of the troposphere case: this config commits a
+% truth 5 - model 4*biasFraction = 1.00 m zenith model error while declaring only
+% 0.50 m of uncertainty, with the disabled stochastic sigma silently covering the
+% rest inside R. 0.50 -> 1.00 makes the declaration match the committed error.
+cfg.errors.ionosphere.sigma_m              = 1.00;
 
 %% Error sources
 % Hardware delay, multipath, tower survey, antenna PCV and correlated noise are off

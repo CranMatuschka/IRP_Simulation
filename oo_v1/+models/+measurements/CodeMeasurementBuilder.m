@@ -782,6 +782,8 @@ classdef CodeMeasurementBuilder
             cbc_.blockSizes  = zeros(0,1);
             cbc_.jitterAdded = false;
             cbc_.spd         = true;
+            cbc_.atmosphereCommonModeApplied = false;
+            cbc_.atmosphereCommonModeSources = {};
             if sharedErrEnable_ && sharedErrCode_
                 jitter_m2_ = 1e-12;
                 try; jitter_m2_ = cfg.covariance.sharedErrors.jitter_m2; catch; end
@@ -809,6 +811,41 @@ classdef CodeMeasurementBuilder
                     cbc_.nBlocks = cbc_.nBlocks + 1;
                     cbc_.blockSizes(end+1) = numel(idx_);
                 end
+                % ---- L1 <-> L2 atmospheric common mode ---------------------------------
+                % The troposphere is copied VERBATIM onto every signal's row and the
+                % first-order ionosphere is a fixed deterministic multiple of the L1 value
+                % (freqScale), so the two rows of a (tower, antenna) pair carry the SAME
+                % physical atmosphere at correlation rho = +1. With no off-diagonal the EKF
+                % treats them as two independent samples and averages the atmosphere down
+                % by sqrt(2) -- which it cannot do, because there is only one realisation.
+                %
+                % For a fully correlated source, Cov(i,j) = sigma_s(i)*sigma_s(j). The iono
+                % sigmas are already signal-scaled (see the per-signal swap above), so the
+                % product carries the freqScale factor automatically.
+                %
+                % Diagonal is untouched: R_diag already holds sigma_s^2 on each row.
+                if N_sig > 1
+                    smX_ = errStruct.bySource.sigma_m;
+                    corrSrcs_ = {'trop','iono'};
+                    M_pairs_x_ = round(M / N_sig);
+                    for cs_ = 1:numel(corrSrcs_)
+                        fn_ = corrSrcs_{cs_};
+                        if ~isfield(smX_, fn_) || numel(smX_.(fn_)) ~= M; continue; end
+                        sVec_ = smX_.(fn_)(:);
+                        if ~any(sVec_ > 0); continue; end
+                        for p_ = 1:M_pairs_x_
+                            rows_ = p_ : M_pairs_x_ : M;      % same (tower,antenna), all signals
+                            if numel(rows_) < 2; continue; end
+                            s_ = sVec_(rows_);
+                            blk_ = (s_ * s_') .* (ones(numel(rows_)) - eye(numel(rows_)));
+                            R(rows_, rows_) = R(rows_, rows_) + blk_;
+                        end
+                        cbc_.atmosphereCommonModeSources{end+1} = fn_;
+                    end
+                    cbc_.atmosphereCommonModeApplied = ...
+                        ~isempty(cbc_.atmosphereCommonModeSources);
+                end
+
                 % SPD guard (should never trigger for sigma_tracking > 0)
                 [~, pfail_] = chol(R);
                 if pfail_ ~= 0
