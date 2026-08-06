@@ -13,7 +13,7 @@ classdef DopplerMeasurementBuilder
 
         function [rows, dopplerInfo] = build(cfg, errorChain, asset, towers, ...
                 twr_list, ant_list, r_ants_truth, r_ants_est, x_est, stateMap, ...
-                towerClkMode, t_s, assetIdx)
+                towerClkMode, t_s, assetIdx, sig_list)
             % build  Construct Doppler measurement rows from a pre-built visibility list.
 
             if nargin < 12 || isempty(t_s); t_s = 0; end
@@ -25,6 +25,24 @@ classdef DopplerMeasurementBuilder
 
             M  = numel(twr_list);
             nx = numel(x_est);
+
+            % Signal index per row. twr_list/ant_list arrive multi-signal-EXPANDED
+            % (CodeMeasurementBuilder repmat's them N_sig times), so rows repeat the
+            % same (tower, antenna) pair once per signal. The thermal noise draw must
+            % be keyed on the signal too, otherwise every signal's Doppler row gets the
+            % identical realisation while R declares the rows independent -- handing the
+            % filter N_sig times the information it is entitled to. Absent/empty ->
+            % ones(M,1), which reproduces the single-frequency case exactly.
+            %
+            % The draw below keys on sig_list-1, so signal 1 keeps the historical slot 0
+            % and single-frequency runs stay byte-identical; only the previously
+            % duplicated signal>=2 rows receive their own (new) stream.
+            if nargin < 14 || isempty(sig_list)
+                sig_list = ones(M,1);
+            end
+            if numel(sig_list) ~= M
+                sig_list = ones(M,1);
+            end
 
             rows.z              = [];
             rows.h              = [];
@@ -173,7 +191,7 @@ classdef DopplerMeasurementBuilder
                     end
                     zd(mi) = rhoDot_true + bdot_rx_true - bdot_twr + ...
                              sigma_dop * errorChain.drawKeyed( ...
-                                 models.noise.RngSource.DOPPLER, ti, ai, 0, errorChain.epochIdx_, 1, 1);
+                                 models.noise.RngSource.DOPPLER, ti, ai, sig_list(mi) - 1, errorChain.epochIdx_, 1, 1);
                 end
 
                 % Model side

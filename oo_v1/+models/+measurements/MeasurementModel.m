@@ -243,9 +243,16 @@ classdef MeasurementModel < handle
             end
 
             % ----- Doppler rows (0.5 + 0.6) ----------------------------
+            % sig_list: the Doppler rows are multi-signal-expanded exactly like the code
+            % rows, so the thermal draw must be keyed per signal (see builder header).
+            sigList_dop = [];
+            if isfield(errStruct,'signalIdx_perMeas')
+                sigList_dop = errStruct.signalIdx_perMeas;
+            end
             [dopplerRows, dopplerInfo] = models.measurements.DopplerMeasurementBuilder.build( ...
                 obj.cfg, obj.errorChain, asset, towers, twr_list, ant_list, ...
-                r_ants_truth, r_ants_est, x_est, stateMap, towerClkMode, t_s, assetIdx);
+                r_ants_truth, r_ants_est, x_est, stateMap, towerClkMode, t_s, assetIdx, ...
+                sigList_dop);
             errStruct.doppler = dopplerInfo;
             if dopplerRows.ionoRateExclusion
                 H = H_pr;
