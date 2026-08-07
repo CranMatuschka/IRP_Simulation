@@ -355,6 +355,20 @@ classdef ScenarioFactory
                 try; initSigma = cfg.estimator.srpCoefficient.initSigma; catch; end
                 P0(sm.srpScaleIdx, sm.srpScaleIdx) = initSigma^2;
             end
+
+            % Empirical RTN acceleration prior variance [m^2/s^4]. Zero here would assert
+            % perfect knowledge that the force model is exact, which is the very thing the
+            % state exists to deny, so it must be the configured 1-sigma.
+            if ekf.estimateEmpiricalAccel && isfield(sm,'empAccIdx') && ~isempty(sm.empAccIdx)
+                initSigmaAcc = 1e-7;
+                try; initSigmaAcc = cfg.estimator.empiricalAccel.initialSigma_mps2; catch; end
+                % States are normalised to ekf.empAccScale_ (= sigma_ss), so the prior
+                % must be expressed in the same units.
+                sigma0Scaled = initSigmaAcc / ekf.empAccScale_;
+                for k = 1:numel(sm.empAccIdx)
+                    P0(sm.empAccIdx(k), sm.empAccIdx(k)) = sigma0Scaled^2;
+                end
+            end
             if ekf.estimateTwoWayCodeCalibrationBias && ...
                     isfield(sm,'twoWayCodeCalibrationBiasIdx') && ...
                     ~isempty(sm.twoWayCodeCalibrationBiasIdx)

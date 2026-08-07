@@ -107,6 +107,21 @@ classdef ReverseGNSSEKF < handle
         estimateSrpScale     (1,1) logical = false
         srpScaleProcNoise_   (1,1) double  = 1e-9   % random-walk 1-sigma [1/sqrt(s)]
 
+        % Empirical RTN accelerations (reduced-dynamic filtering)
+        estimateEmpiricalAccel (1,1) logical = false
+        empAccTau_             (1,1) double  = 1800    % GM correlation time [s]
+        empAccSigmaSs_         (1,1) double  = 1e-7    % steady-state 1-sigma [m/s^2]
+        % NORMALISATION. The states are carried in units of empAccSigmaSs_, so the
+        % scaled steady-state sigma is exactly 1 and the physical acceleration is
+        % empAccScale_ * x(empAccIdx). This is NOT cosmetic: the PSD guard in update()
+        % nudges EVERY diagonal by 1e-12*max(diag(P)), and with 100 m carrier-ambiguity
+        % priors (P ~ 1e4) that floor is ~7e-9. Against a physical variance of
+        % (1e-7)^2 = 1e-14 the guard would set the prior 855x too wide and the states
+        % would absorb noise instead of the systematic error they exist to model.
+        % Measured on scene_G5S1R4_ts3600_TW1_empacc before this normalisation:
+        % P(empAcc) at epoch 1 was 7.3064e-09 against a guard floor of 7.3063e-09.
+        empAccScale_           (1,1) double  = 1e-7    % [m/s^2] per unit state
+
         % Persistent effective calibration residual for the active coherent
         % two-way code links.
         estimateTwoWayCodeCalibrationBias (1,1) logical = false
@@ -122,6 +137,11 @@ classdef ReverseGNSSEKF < handle
 
         % Last dynamics predict info (compact, overwritten each epoch)
         lastDynamicsPredictInfo (1,1) struct
+
+        % Last state-transition Jacobian (overwritten each predict; diagnostics only, never
+        % read back by the filter). Lets tests check an STM column against a finite
+        % difference of the real propagation instead of re-deriving the formula.
+        lastF double = []
 
         % Epoch error-transition retention (plan Stage 3.1 items 4-5). Default false: when
         % false NOTHING below executes and no arithmetic changes (golden-safe by construction).
@@ -252,6 +272,24 @@ classdef ReverseGNSSEKF < handle
                 if isfield(sc,'procNoise') && isscalar(sc.procNoise); obj.srpScaleProcNoise_ = sc.procNoise; end
             end
 
+            % Empirical RTN acceleration gate (enable && useInEKF, both default off).
+            if isfield(cfg,'estimator') && isfield(cfg.estimator,'empiricalAccel')
+                ea = cfg.estimator.empiricalAccel;
+                enEa = isfield(ea,'enable')   && logical(ea.enable);
+                ukEa = isfield(ea,'useInEKF') && logical(ea.useInEKF);
+                obj.estimateEmpiricalAccel = enEa && ukEa;
+                if isfield(ea,'tau_s') && isscalar(ea.tau_s) && ea.tau_s > 0
+                    obj.empAccTau_ = ea.tau_s;
+                end
+                if isfield(ea,'sigma_ss_mps2') && isscalar(ea.sigma_ss_mps2)
+                    obj.empAccSigmaSs_ = ea.sigma_ss_mps2;
+                end
+                % Normalise the state to its own steady-state sigma (see empAccScale_).
+                if obj.empAccSigmaSs_ > 0 && isfinite(obj.empAccSigmaSs_)
+                    obj.empAccScale_ = obj.empAccSigmaSs_;
+                end
+            end
+
             % ISL carrier-ambiguity gate. Sized from ISLMeasurementBuilder so the state
             % block and the measurement rows agree on WHICH links exist (one source of
             % truth). Independent of the ground ambiguity switches.
@@ -288,6 +326,9 @@ classdef ReverseGNSSEKF < handle
             end
             if obj.estimateSrpScale
                 obj.nx = obj.nx + 1;   % single scalar
+            end
+            if obj.estimateEmpiricalAccel
+                obj.nx = obj.nx + 3;   % RTN empirical acceleration
             end
             if obj.estimateIslAmbiguities
                 obj.nx = obj.nx + obj.nIslAmbiguities;   % ISL block, appended strictly LAST
@@ -526,6 +567,42 @@ classdef ReverseGNSSEKF < handle
                     dynInfo.warnings{end+1} = ME_dyn.message;
                 end
             end
+            % Empirical RTN accelerations (reduced-dynamic filtering).
+            %
+            % Operator splitting: the nominal propagator above integrates the modelled
+            % forces; this adds the estimated empirical acceleration on top. The state is
+            % a first-order Gauss-Markov vector a(t) = a0*exp(-t/tau) resolved in the
+            % INSTANTANEOUS RTN frame, so over one step the exact contributions are
+            %   dv = a0 * c1,   dr = a0 * c2,
+            %   c1 = tau*(1-exp(-dt/tau)),   c2 = tau*(dt - c1)
+            % which reduce to a0*dt and 0.5*a0*dt^2 for dt << tau (the classical form).
+            % Using the exact integrals keeps the state, the STM column and the GM decay
+            % mutually consistent instead of only agreeing in the small-dt limit.
+            %
+            % The RTN basis is built from the ESTIMATED r,v (the filter has no truth) using
+            % the SAME v_eff = v_ecef + omega x r convention as OrbitFrame.ecefToRacGeo, so
+            % the state is directly comparable with the RAC error/sigma plots.
+            % Splitting error is O(dt^2) per step in the coupling between this acceleration
+            % and the gravity gradient: at 1e-7 m/s^2 and dt=1 s that is ~5e-8 m of
+            % displacement per step against a ~1e-3 m/s^2 gradient response, i.e. negligible.
+            empAccCol = [];
+            if obj.estimateEmpiricalAccel && ~isempty(sm.empAccIdx)
+                [Brtn, okRtn] = filter.ReverseGNSSEKF.rtnBasis_(r, v);
+                if okRtn
+                    [c1, c2, phiAcc] = filter.ReverseGNSSEKF.gmAccelIntegrals_( ...
+                        dt_s, obj.empAccTau_);
+                    % State is normalised: physical acceleration = empAccScale_ * x.
+                    sA    = obj.empAccScale_;
+                    aEcef = Brtn * (sA * x(sm.empAccIdx));
+                    r_new = r_new + c2 * aEcef;
+                    v_new = v_new + c1 * aEcef;
+                    empAccCol = [c2 * sA * Brtn; c1 * sA * Brtn];   % [6x3] d([r;v])/dx
+                    empAccPhi = phiAcc;
+                else
+                    empAccPhi = exp(-dt_s / obj.empAccTau_);
+                end
+            end
+
             obj.lastDynamicsPredictInfo = dynInfo;
 
             % Attitude: kinematics update (frozen when estimation disabled)
@@ -557,6 +634,11 @@ classdef ReverseGNSSEKF < handle
             x_new(sm.omega_idx)   = omg_new;
             x_new(sm.b_rx_idx)    = b_rx_new;
             x_new(sm.bdot_rx_idx) = bdot_rx_new;
+
+            % Empirical acceleration state decays as the Gauss-Markov mean.
+            if obj.estimateEmpiricalAccel && ~isempty(sm.empAccIdx)
+                x_new(sm.empAccIdx) = empAccPhi * x(sm.empAccIdx);
+            end
 
             % Tower clocks (if estimated)
             if obj.estimateTowerClocks && nargin >= 3
@@ -638,7 +720,8 @@ classdef ReverseGNSSEKF < handle
             obj.x = x_new;
 
             % State transition Jacobian F (pass Phi6 override for r/v block)
-            F = obj.buildF_(dt_s, eul, omegaErrorDynamics, Phi6, srpCol);
+            F = obj.buildF_(dt_s, eul, omegaErrorDynamics, Phi6, srpCol, empAccCol);
+            obj.lastF = F;
 
             if obj.jointMultiAssetEnabled
                 for assetIdx = 2:obj.nSpaceAssets
@@ -1103,6 +1186,15 @@ classdef ReverseGNSSEKF < handle
                 sm.twoWayCodeCalibrationBiasLinkIdentifiers = {};
             end
 
+            % Empirical RTN accelerations, appended strictly LAST so enabling them
+            % shifts NO existing index. Empty [] sentinel when off (gyroBiasIdx pattern).
+            if obj.estimateEmpiricalAccel
+                sm.empAccIdx = (nextIdx:nextIdx+2)';
+                nextIdx = nextIdx + 3;
+            else
+                sm.empAccIdx = [];
+            end
+
             blankAsset = struct('r',[],'v',[],'euler',[],'omega',[], ...
                 'b',[],'bdot',[],'ambiguity3d',[],'ambiguity',[], ...
                 'zwd',[],'iono',[],'gyroBias',[]);
@@ -1143,7 +1235,7 @@ classdef ReverseGNSSEKF < handle
         end
 
         % ----------------------------------------------------------------
-        function F = buildF_(obj, dt_s, euler, omega, Phi6, srpCol)
+        function F = buildF_(obj, dt_s, euler, omega, Phi6, srpCol, empAccCol)
             % buildF_  Linearised state-transition Jacobian.
             %
             % Euler-euler block: FD derivative of (eul + dt * T(eul,omg)*omg) w.r.t. eul.
@@ -1153,6 +1245,7 @@ classdef ReverseGNSSEKF < handle
 
             if nargin < 5; Phi6 = []; end
             if nargin < 6; srpCol = []; end
+            if nargin < 7; empAccCol = []; end
 
             nx = obj.nx;
             F  = eye(nx);
@@ -1231,6 +1324,17 @@ classdef ReverseGNSSEKF < handle
             if obj.estimateSrpScale && ~isempty(sm.srpScaleIdx) ...
                     && ~isempty(srpCol) && numel(srpCol) == 6 && all(isfinite(srpCol))
                 F(rv_idx, sm.srpScaleIdx) = srpCol(:);
+            end
+
+            % Empirical RTN acceleration: d([r;v])/d(a_RTN) = [c2*B; c1*B], and the state
+            % itself is a Gauss-Markov process -> F(empAcc,empAcc) = exp(-dt/tau)*I.
+            if obj.estimateEmpiricalAccel && ~isempty(sm.empAccIdx)
+                if ~isempty(empAccCol) && isequal(size(empAccCol), [6,3]) && ...
+                        all(isfinite(empAccCol(:)))
+                    F(rv_idx, sm.empAccIdx) = empAccCol;
+                end
+                [~, ~, phiAccF] = filter.ReverseGNSSEKF.gmAccelIntegrals_(dt_s, obj.empAccTau_);
+                F(sm.empAccIdx, sm.empAccIdx) = phiAccF * eye(3);
             end
 
             % Ambiguity states: identity (random walk; F = I already)
@@ -1468,6 +1572,19 @@ classdef ReverseGNSSEKF < handle
                     if idx > 0
                         Q(idx, idx) = q_iono;
                     end
+                end
+            end
+
+            % --- Empirical RTN acceleration process noise (Gauss-Markov steady state) ---
+            % q = sigma_ss^2 * (1 - phi^2) reproduces the stationary variance sigma_ss^2
+            % exactly under P <- phi^2 P + q, matching the ZWD / slant-iono blocks.
+            if obj.estimateEmpiricalAccel && ~isempty(sm.empAccIdx)
+                [~, ~, phi_acc] = filter.ReverseGNSSEKF.gmAccelIntegrals_(dt_s, obj.empAccTau_);
+                % State is normalised to sigma_ss, so the scaled steady-state variance
+                % is exactly 1 and q = 1 - phi^2.
+                q_acc = (obj.empAccSigmaSs_ / obj.empAccScale_)^2 * (1 - phi_acc^2);
+                for ai = 1:numel(sm.empAccIdx)
+                    Q(sm.empAccIdx(ai), sm.empAccIdx(ai)) = q_acc;
                 end
             end
 
@@ -2257,6 +2374,54 @@ classdef ReverseGNSSEKF < handle
     end
 
     methods (Static)
+        function [B, ok] = rtnBasis_(r_ecef, v_ecef)
+            % rtnBasis_  [3x3] ECEF<-RTN rotation whose columns are the radial,
+            %   along-track and cross-track unit vectors, using the SAME
+            %   v_eff = v_ecef + omega x r convention as OrbitFrame.ecefToRacGeo, so the
+            %   empirical-acceleration state is directly comparable with the RAC error
+            %   and sigma plots. B * a_RTN resolves the acceleration onto ECEF axes.
+            B = eye(3); ok = false;
+            w = 7.2921150e-5;
+            try; w = revgnss.Constants.EARTH_OMEGA_RADPS; catch; end
+            veff = v_ecef(:) + cross([0;0;w], r_ecef(:));
+            [rH, aH, hH, okB] = revgnss.OrbitFrame.racBasis(r_ecef(:), veff);
+            if ~okB; return; end
+            B = [rH, aH, hH];
+            ok = true;
+        end
+
+        function [c1, c2, phi] = gmAccelIntegrals_(dt_s, tau_s)
+            % gmAccelIntegrals_  Exact one-step integrals of a first-order Gauss-Markov
+            %   acceleration a(t) = a0*exp(-t/tau):
+            %     phi = exp(-dt/tau)                              state decay
+            %     c1  = int_0^dt  a/a0 ds     = tau*(1-phi)        -> dt       as tau->inf
+            %     c2  = int_0^dt (dt-s) a/a0  = tau*(dt - c1)      -> dt^2/2   as tau->inf
+            %   Using the exact integrals (rather than dt and dt^2/2) keeps the state
+            %   propagation, the STM column and the GM decay mutually consistent instead
+            %   of only agreeing in the small-dt limit.
+            %
+            %   NUMERICS. The textbook forms tau*(1-phi) and tau*(dt - c1) both cancel
+            %   catastrophically in the operating regime here (dt=1 s, tau=1800 s gives
+            %   r = 5.6e-4). c1 is cured exactly by expm1. c2 = tau^2*(r + expm1(-r)) has
+            %   no library equivalent, so below r = 0.1 it uses the series
+            %     c2 = (dt^2/2) * (1 - r/3 + r^2/12 - r^3/60 + r^4/360 - r^5/2520)
+            %   whose truncation error is ~r^6/20160 < 5e-11 at the switch point, while
+            %   above r = 0.1 the closed form loses only ~eps/r ~ 2e-15. Verified against
+            %   quadrature in tests/test_empirical_accel_states.m (T2).
+            if ~(tau_s > 0) || ~isfinite(tau_s)
+                phi = 1; c1 = dt_s; c2 = 0.5 * dt_s^2; return;
+            end
+            ratio = dt_s / tau_s;
+            phi   = exp(-ratio);
+            c1    = -tau_s * expm1(-ratio);          % = tau*(1-phi), cancellation-free
+            if ratio < 0.1
+                c2 = (dt_s^2 / 2) * (1 - ratio/3 + ratio^2/12 - ratio^3/60 ...
+                                       + ratio^4/360 - ratio^5/2520);
+            else
+                c2 = tau_s * (dt_s - c1);
+            end
+        end
+
         function s = emptyEpochTransition()
             % emptyEpochTransition  Frozen field set for the epoch-transition retention struct
             % (plan Stage 3.1): the pendingEpochTransition_ property default, and the schema
