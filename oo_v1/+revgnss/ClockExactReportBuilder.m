@@ -1230,9 +1230,14 @@ classdef ClockExactReportBuilder
             revgnss.report.beamformingPhasor(fid, cfg, summary, esc, plotPaths);
             revgnss.report.measurementValidation( ...
                 fid, plotPaths, stem, figDir, diag, cfg, summary);
-            revgnss.report.oscillatorValidation(fid, plotPaths, stem, figDir, cfg);
+            % Oscillator Stability Validation removed on request (2026-08-07). It was an
+            % Allan-deviation-only section; the ADEV plot is no longer wanted in the report.
+            % +revgnss/+report/oscillatorValidation.m is retained but no longer called.
             revgnss.report.txCodeBias(fid, diag, cfg);
             revgnss.report.tropZwdArchitecture(fid, cfg);
+            % LAST PLOT before the Numerical Summary: the actual complex sum behind the
+            % scalar beamforming loss. Emits nothing on single-asset runs.
+            revgnss.report.phasorDiagram(fid, cfg, summary, figDir, stem, esc);
             revgnss.report.numericalSummary(fid, cfg, summary, diag);
             % Federated-swarm appendix: emits nothing unless summary.federatedSwarm is set
             % (swarm runs only) -> single-asset .tex is byte-identical to the golden.
@@ -1526,6 +1531,21 @@ classdef ClockExactReportBuilder
             zwdSt2      = 'guarded'; if zwdEKF2; zwdSt2 = true; end
             zwdNote2    = 'Guarded/config-only; weak GEO observability at GEO.';
             if zwdEKF2; zwdNote2 = sprintf('mode: %s', revgnss.ReportLabel.humanize(zwdMode2)); end
+
+            % Empirical RTN accelerations (reduced-dynamic filtering). Three Gauss-Markov
+            % acceleration states absorbing force-model error that no measurement-side
+            % state can reach. Gate is enable && useInEKF, both default false.
+            empAccOn2 = CE.getLogical_(cfg,{'estimator','empiricalAccel','enable'},false) && ...
+                        CE.getLogical_(cfg,{'estimator','empiricalAccel','useInEKF'},false);
+            empAccSt2   = empAccOn2;
+            empAccNote2 = 'Disabled; force-model error is left unmodelled (biases the state, not P).';
+            if empAccOn2
+                tauEa = 1800; sigEa = 1e-7;
+                try; tauEa = cfg.estimator.empiricalAccel.tau_s;         catch; end
+                try; sigEa = cfg.estimator.empiricalAccel.sigma_ss_mps2; catch; end
+                empAccNote2 = sprintf(['3 Gauss-Markov states in the RTN frame, ' ...
+                    'tau = %g s, steady-state sigma = %.3g m/s^2.'], tauEa, sigEa);
+            end
             slipNote2   = '';
             if carSlip2 && arcSep2; slipNote2 = 'model-step-compensated residual jump; arc-separated float ambiguities.'; end
             prodCovSt2  = prodCovEn2 || sharedEn2;
@@ -1660,6 +1680,7 @@ classdef ClockExactReportBuilder
                 'Tower clock product covariance', prodCovSt2,                                prodCovN2; ...
                 'Joint tower clock EKF',          strcmp(clkMd2,'includeTowerClocksInEKF'),  tClkNote2; ...
                 'ZWD / troposphere EKF state',    zwdSt2,                                    zwdNote2; ...
+                'Empirical RTN accelerations',    empAccSt2,                                 empAccNote2; ...
                 ... % was hardcoded 'guarded' with "no dedicated EKF state in v1" -- FALSE:
                 ... % hardware.txCodeBias.useInEKF demonstrably appends one state per tower.
                 'Per-tower TX code bias EKF', CE.getLogical_(cfg,{'hardware','txCodeBias','useInEKF'},false), ...
