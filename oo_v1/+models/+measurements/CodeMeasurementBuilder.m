@@ -335,9 +335,14 @@ classdef CodeMeasurementBuilder
                         % Atmosphere-rooted: shares the formation-wide root when
                         % cfg.atmosphere.sharedAcrossFormation is on (the ionospheric
                         % irregularities are inside the L-band Fresnel scale for a
-                        % sub-10 km cluster), plain drawKeyed otherwise.
+                        % sub-10 km cluster), plain drawKeyed otherwise. antennaKey()
+                        % additionally collapses the antenna field when
+                        % cfg.atmosphere.sharedAcrossAntennas is on -- a 2 m antenna cross
+                        % is <= 8e-3 Fresnel scales across, so its phase centres see one
+                        % diffraction pattern, not four independent ones.
                         scint_t       = scintSig_si * errorChain.drawKeyedAtmosphere( ...
-                            models.noise.RngSource.SCINT_TRUTH, twr_list(pi), ant_list(pi), si, errorChain.epochIdx_, 1, 1);
+                            models.noise.RngSource.SCINT_TRUTH, twr_list(pi), ...
+                            errorChain.antennaKey(ant_list(pi)), si, errorChain.epochIdx_, 1, 1);
 
                         if si == 1
                             z_new(mi)      = z(pi) + scint_t;
@@ -560,11 +565,14 @@ classdef CodeMeasurementBuilder
                         % drawKeyedAtmosphere roots this at the FORMATION-WIDE seed when
                         % cfg.atmosphere.sharedAcrossFormation is on (so swarm members see
                         % one common scintillation realisation) and is byte-identical to
-                        % the previous drawKeyed call when it is off.
+                        % the previous drawKeyed call when it is off. antennaKey() likewise
+                        % collapses the antenna field when cfg.atmosphere.sharedAcrossAntennas
+                        % is on, and is the identity when it is off.
                         scintTruth = zeros(M,1);
                         for miS = 1:M
                             scintTruth(miS) = errStruct.scintSigmaL1_m(miS) * errorChain.drawKeyedAtmosphere( ...
-                                models.noise.RngSource.SCINT_TRUTH, twr_list(miS), ant_list(miS), 1, errorChain.epochIdx_, 1, 1);
+                                models.noise.RngSource.SCINT_TRUTH, twr_list(miS), ...
+                                errorChain.antennaKey(ant_list(miS)), 1, errorChain.epochIdx_, 1, 1);
                         end
                     else
                         scintTruth = errStruct.scintSigmaL1_m .* randn(errorChain.rngStream, M, 1);
