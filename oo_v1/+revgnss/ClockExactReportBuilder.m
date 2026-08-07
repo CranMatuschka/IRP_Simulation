@@ -729,6 +729,17 @@ classdef ClockExactReportBuilder
                 if haveRac
                     [~, unit, sc] = PU(rac(:), 'm');
                     hold(ax,'on');
+                    % Shade the +-3 sigma envelopes FIRST (colour-matched, transparent) so
+                    % the three overlapping bands read as regions and the error traces
+                    % draw on top of them.
+                    CE_ = revgnss.ClockExactReportBuilder;
+                    racSigFill = CE_.racPositionSigma_(diag, rTr(:,1:n), vTr(:,1:n), n);
+                    racRgb = [0.85 0.20 0.20; 0.20 0.65 0.25; 0.20 0.35 0.85];
+                    if ~isempty(racSigFill)
+                        for aFill = 1:3
+                            CE_.fillSigma_(ax, t, racSigFill(aFill,:)*sc, 3, racRgb(aFill,:), 0.13);
+                        end
+                    end
                     plot(ax, t, rac(1,:)*sc, 'r-', 'LineWidth', 0.8, 'DisplayName', 'radial');
                     plot(ax, t, rac(2,:)*sc, 'g-', 'LineWidth', 0.8, 'DisplayName', 'along-track');
                     plot(ax, t, rac(3,:)*sc, 'b-', 'LineWidth', 0.8, 'DisplayName', 'cross-track');
@@ -745,7 +756,12 @@ classdef ClockExactReportBuilder
                     legend(ax, 'show', 'Location', 'best', 'FontSize', 5);
                     xlabel(ax, 'Time [s]', 'FontSize', 7);
                     ylabel(ax, revgnss.PlotUnitScaler.axisLabel('Error', unit), 'FontSize', 7);
-                    title(ax, 'Position error: RAC frame (dotted = \pm3\sigma)', 'FontSize', 7);
+                    % Caption states PRECISION, not uncertainty: the band is built from
+                    % H, R and Q only and carries no term for unmodelled systematics, so
+                    % the error can and does sit outside it without the filter being wrong
+                    % about what it computes.
+                    title(ax, ['Position error: RAC frame (shaded = formal \pm3\sigma, ' ...
+                        'precision only \x2014 excludes unmodelled systematics)'], 'FontSize', 7);
                     grid(ax, 'on');
                     revgnss.PlotUnitScaler.disableExponent(ax);
                     return;
@@ -1113,6 +1129,25 @@ classdef ClockExactReportBuilder
             catch; end
         end
 
+        function fillSigma_(ax, tt, sig, k, rgb, alpha)
+            % fillSigma_  Shade the +/- k*sigma region as a transparent colour-matched
+            %   band, so overlapping axes read like a seaborn/fill_between plot rather
+            %   than six competing dotted lines. Drawn BEFORE the error traces so the
+            %   traces sit on top; hidden from the legend; no-op on bad input.
+            if isempty(sig) || numel(sig) ~= numel(tt) || all(~isfinite(sig)); return; end
+            if nargin < 6 || isempty(alpha); alpha = 0.15; end
+            tt = tt(:).'; sig = sig(:).';
+            good = isfinite(sig) & isfinite(tt);
+            if ~any(good); return; end
+            tt = tt(good); sig = sig(good);
+            hold(ax,'on');
+            xPatch = [tt, fliplr(tt)];
+            yPatch = [k*sig, fliplr(-k*sig)];
+            patch(ax, 'XData',xPatch, 'YData',yPatch, ...
+                'FaceColor',rgb, 'FaceAlpha',alpha, 'EdgeColor','none', ...
+                'HandleVisibility','off');
+        end
+
         function overlaySigma_(ax, tt, sig, k, style)
             % overlaySigma_  Draw +/- k*sigma dotted covariance borders on ax over time tt.
             %   Hidden from the legend; no-op if the sigma vector is unavailable/mismatched.
@@ -1234,7 +1269,10 @@ classdef ClockExactReportBuilder
             % Allan-deviation-only section; the ADEV plot is no longer wanted in the report.
             % +revgnss/+report/oscillatorValidation.m is retained but no longer called.
             revgnss.report.txCodeBias(fid, diag, cfg);
-            revgnss.report.tropZwdArchitecture(fid, cfg);
+            % Troposphere and ZWD Architecture removed on request (2026-08-07). It was a
+            % five-row static configuration table that restated the scenario JSON and carried
+            % no measured quantity. +revgnss/+report/tropZwdArchitecture.m is retained but no
+            % longer called, matching the oscillatorValidation precedent above.
             % LAST PLOT before the Numerical Summary: the actual complex sum behind the
             % scalar beamforming loss. Emits nothing on single-asset runs.
             revgnss.report.phasorDiagram(fid, cfg, summary, figDir, stem, esc);

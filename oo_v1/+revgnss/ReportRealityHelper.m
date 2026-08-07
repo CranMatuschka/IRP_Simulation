@@ -73,6 +73,15 @@ classdef ReportRealityHelper
                 if srpOn
                     expectedStates = expectedStates + 1;
                 end
+                empAccOn = false;
+                try
+                    ea_ = cfg.estimator.empiricalAccel;
+                    empAccOn = isfield(ea_,'enable') && ea_.enable && ...
+                        isfield(ea_,'useInEKF') && ea_.useInEKF;
+                catch; end
+                if empAccOn
+                    expectedStates = expectedStates + 3;   % empirical RTN accelerations
+                end
                 nIslAmb_ = 0;
                 try
                     nIslAmb_ = revgnss.ISLMeasurementBuilder. ...
