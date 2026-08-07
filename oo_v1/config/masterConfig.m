@@ -241,6 +241,28 @@ cfg.estimator.srpCoefficient.refCr               = 1.3;    % reference Cr (match
 cfg.estimator.srpCoefficient.refAreaToMass_m2pkg = 0.02;   % reference A/m [m^2/kg]
 cfg.estimator.srpCoefficient.fdScaleStep         = 10.0;   % FD step for d/ds (linearity -> exact)
 
+% --- Empirical accelerations (reduced-dynamic filtering) -----------------
+% Three first-order Gauss-Markov acceleration states in the RTN (radial /
+% along-track / cross-track) frame, added to the propagated r,v each step.
+% They absorb force-model error that no measurement-side state can reach: the
+% residual after the atmosphere states is a SMOOTH position offset (a quadratic
+% in t), which is an unmodelled ACCELERATION, and a Kalman filter cannot represent
+% a deterministic bias in P -- it has to be given a state.
+%
+% sigma_ss is sized from the measured residual: a constant a produces
+% r = 0.5*a*t^2, so a 0.26 m radial offset over 3600 s is a = 2r/t^2 = 4e-8 m/s^2
+% and the 1.7 m cross-track offset is 2.6e-7 m/s^2. 1e-7 covers both.
+% tau is the classic reduced-dynamic choice: long enough to look like a bias over
+% a pass, short enough not to alias the orbit itself.
+%
+% Default OFF (enable && useInEKF, mirroring srpCoefficient) => nx and every
+% existing state index unchanged, goldens byte-identical.
+cfg.estimator.empiricalAccel.enable              = false;
+cfg.estimator.empiricalAccel.useInEKF            = false;
+cfg.estimator.empiricalAccel.tau_s               = 1800;    % GM correlation time [s]
+cfg.estimator.empiricalAccel.sigma_ss_mps2       = 1e-7;    % steady-state 1-sigma [m/s^2]
+cfg.estimator.empiricalAccel.initialSigma_mps2   = 1e-7;    % prior 1-sigma [m/s^2]
+
 %% Estimator: attitude
 % Quaternion nominal plus local error-state EKF driven by star-tracker observations
 % and inertial gyro measurements. Carrier attitude and integer search are disabled.
@@ -1949,6 +1971,20 @@ cfg.frames.truthEop.enable                 = false;
 cfg.frames.truthEop.polarMotion_xp_arcsec  = 0.2;
 cfg.frames.truthEop.polarMotion_yp_arcsec  = 0.3;
 cfg.frames.truthEop.ut1Rate_error_msPerDay = 1.0;
+
+% --- Estimator-side EOP correction (the honest fix for the truth-only EOP error) ---
+% cfg.frames.truthEop displaces every TRUTH tower by phi x r while the EKF frame keeps
+% nominal ECEF, so the geometry mismatch survives z-h. IERS publishes polar motion to
+% ~0.1 mas, so a real receiver HAS these values -- applying them here is using published
+% data, not truth-assistance. Set these equal to frames.truthEop for a fully corrected
+% system; offset them by the IERS uncertainty for a realistic residual.
+% MEASURED (2026-08-07, scene_G5S1R4_ts3600_TW1): leaving this off costs 0.53 m RMS of
+% CROSS-TRACK error and drops cross-track 3-sigma coverage from 100 % to 92.4 %.
+% Default OFF -> byte-identical no-op.
+cfg.frames.eopModel.enable                 = false;
+cfg.frames.eopModel.polarMotion_xp_arcsec  = 0.0;
+cfg.frames.eopModel.polarMotion_yp_arcsec  = 0.0;
+cfg.frames.eopModel.ut1Rate_error_msPerDay = 0.0;
 cfg.physics.c_mps              = cfg.constants.c_mps;
 cfg.physics.omegaEarth_radps   = cfg.constants.omegaEarth_radps;
 cfg.physics.muEarth_m3ps2      = cfg.constants.muEarth_m3s2;
@@ -2697,7 +2733,21 @@ cfg.hardware.txCodeBias.gaugeMode                 = 'fixReferenceTower'; % 'fixR
 cfg.hardware.txCodeBias.referenceTowerIndex       = 1;
 cfg.hardware.txCodeBias.initialSigma_m            = 10.0;
 cfg.hardware.txCodeBias.processSigma_m_per_sqrt_s = 1e-5;
-cfg.hardware.txCodeBias.gaugeSigma_m              = 1e-6;
+% Gauge sigma loosened 1e-6 -> 1e-3 (2026-08-07). The gauge pins an UNOBSERVABLE
+% datum direction, so ANY finite constraint fixes it equally well -- there is no
+% accuracy benefit to a tighter sigma, only a numerical cost. At 1e-6 the gauge row
+% carries weight 1/sigma^2 = 1e12 against physical pseudoranges at ~1, and that
+% 12-order weight spread makes the observability diagnostic report a FALSE rank
+% collapse (rank() discards every singular value below max(size)*eps*smax).
+%
+% MEASURED on the identical pattern in the clock gauge (cfg.clock.gauge), same
+% scenario, sweeping sigmaDrift only:
+%   sigma 1e-9 -> rank 8 (of 12), cond 1.2e14   <- false collapse
+%   sigma 1e-6 -> rank 12,        cond 4.0e9
+%   sigma 1e-3 -> rank 12,        cond 4.7e6    <- healthy
+% Inert for the default config (txCodeBias.useInEKF = false), so goldens are
+% byte-identical; this only takes effect where the gauge is actually armed.
+cfg.hardware.txCodeBias.gaugeSigma_m              = 1e-3;
 
 % --- Receiver code / carrier hardware-bias architecture ---
 % Receiver code hardware delay has the same first-order sensitivity as
