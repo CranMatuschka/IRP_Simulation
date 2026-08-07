@@ -102,6 +102,15 @@ classdef MeasurementModelUtils
                 r_twr = r_twr ...
                     + models.frames.SolidEarthTide.towerDisplacement(r_twr, t_s, cfg) ...
                     + models.frames.TruthEarthOrientation.towerDisplacement(r_twr, t_s, cfg);
+            elseif strcmpi(side,'model')
+                % Estimator-side EOP correction (cfg.frames.eopModel, default off). The
+                % residual geometry error is (phi_truth - phi_model) x r_tower, so this
+                % is the honest fix for the polar-motion cross-track error rather than
+                % switching the truth off. t_s may be empty on some model-side callers;
+                % displacementFor_ then treats it as 0, which is exact for polar motion
+                % (time-independent) and drops only the UT1 spin term (~1 mm at 3600 s).
+                r_twr = r_twr ...
+                    + models.frames.TruthEarthOrientation.towerDisplacementModel(r_twr, t_s, cfg);
             end
         end
 
