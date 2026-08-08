@@ -892,21 +892,63 @@ classdef ReverseGNSSEKF < handle
             if any(~isfinite(obj.P(:)))
                 warning('ReverseGNSSEKF:update','NaN/Inf in P after update');
             end
-            eigP   = eig(obj.P);
-            minEig = min(eigP);
-            tol    = max(1e-12, 1e-12 * max(abs(diag(obj.P))));
-            if minEig < -tol
-                % Genuinely non-PSD: project to nearest SPD
-                warning('ReverseGNSSEKF:update', ...
-                    'P not PSD (minEig=%.2e); projecting to nearest SPD.', minEig);
-                obj.P = nearestSPD_(obj.P);
-                obj.P = (obj.P + obj.P') / 2;
-                repairKind = 'nearestSpdProjection';
-            elseif minEig < 0
-                % Tiny negative eigenvalue from floating-point: nudge diagonal
-                obj.P = (obj.P + obj.P') / 2;
-                obj.P = obj.P + eye(obj.nx) * (tol - minEig);
-                repairKind = 'benignDiagonalNudge';
+            % SCALE-INVARIANT PSD REPAIR.
+            %
+            % The previous form tested eig(P) and, on a tiny negative eigenvalue, added
+            % (tol - minEig) to EVERY diagonal with tol = 1e-12*max(diag(P)). That nudge
+            % is ABSOLUTE, so any state whose variance sat below that floor had its
+            % covariance dictated by the guard rather than by the filter.
+            %
+            % MEASURED 2026-08-07: with 100 m carrier-ambiguity priors (max(diag(P)) =
+            % 7306) the floor was 7.3e-9. Against an empirical-acceleration variance of
+            % (1e-7)^2 = 1e-14 that set the prior 855x too wide -- P(empAcc) at epoch 1
+            % read 7.3064e-09 against a floor of 7.3063e-09, a 5-significant-figure
+            % match. Any state carried in SI units far below 1 hits the same trap.
+            %
+            % Repair the CORRELATION matrix instead. C = D^-1 P D^-1 has a unit diagonal,
+            % so its eigenvalues are O(1) whatever the state units, and the same additive
+            % nudge on C becomes a RELATIVE inflation of each variance in P. States twelve
+            % orders of magnitude apart are then treated identically. P = D C D is a
+            % congruence transform, so C PSD => P PSD: the guarantee is preserved.
+            dP = diag(obj.P);
+            sd = sqrt(max(dP, 0));
+            scalable = all(isfinite(dP)) && all(sd > 0);
+            if scalable
+                sInv = 1 ./ sd;
+                C = (sInv * sInv.') .* obj.P;      % unit-diagonal correlation matrix
+                C = (C + C.') / 2;
+                minEigC = min(eig(C));
+                tolC    = 1e-12;                   % absolute, but C is O(1) by construction
+                if minEigC < -tolC
+                    warning('ReverseGNSSEKF:update', ...
+                        'P not PSD (correlation minEig=%.2e); projecting to nearest SPD.', minEigC);
+                    C = nearestSPD_(C);
+                    C = (C + C.') / 2;
+                    obj.P = (sd * sd.') .* C;
+                    obj.P = (obj.P + obj.P.') / 2;
+                    repairKind = 'nearestSpdProjection';
+                elseif minEigC < 0
+                    C = C + eye(obj.nx) * (tolC - minEigC);
+                    obj.P = (sd * sd.') .* C;
+                    obj.P = (obj.P + obj.P.') / 2;
+                    repairKind = 'benignDiagonalNudge';
+                end
+            else
+                % A zero or non-finite variance leaves no scale to normalise by, so fall
+                % back to the original absolute test/repair on P itself.
+                minEig = min(eig(obj.P));
+                tol    = max(1e-12, 1e-12 * max(abs(dP)));
+                if minEig < -tol
+                    warning('ReverseGNSSEKF:update', ...
+                        'P not PSD (minEig=%.2e); projecting to nearest SPD.', minEig);
+                    obj.P = nearestSPD_(obj.P);
+                    obj.P = (obj.P + obj.P') / 2;
+                    repairKind = 'nearestSpdProjection';
+                elseif minEig < 0
+                    obj.P = (obj.P + obj.P') / 2;
+                    obj.P = obj.P + eye(obj.nx) * (tol - minEig);
+                    repairKind = 'benignDiagonalNudge';
+                end
             end
 
             if obj.retainEpochTransitionOperators
