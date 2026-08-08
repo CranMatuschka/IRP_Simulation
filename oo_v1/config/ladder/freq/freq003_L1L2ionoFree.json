@@ -1,0 +1,26 @@
+{
+  "_id": "freq rung: L1L2ionoFree. Signal-set change against golden_baseline.json; every other leaf inherited. L1 + L2 combined into the ionosphere-free observable. First-order ionosphere cancels; the 3.0x noise amplification is paid on every row. NOTE: the per-tower slant-ionosphere state is DELIBERATELY LEFT ON here, which is inconsistent -- the combination has already removed the first-order ionosphere, so the state has almost nothing left to estimate. This rung exists to measure the cost of that inconsistency; freq004 is the same combination done honestly, with the state removed. Do not quote freq003 as the ionosphere-free result.",
+  "_extends": "golden_baseline.json",
+  "_delta": "L1 + L2 combined into the ionosphere-free observable. First-order ionosphere cancels; the 3.0x noise amplification is paid on every row. NOTE: the per-tower slant-ionosphere state is DELIBERATELY LEFT ON here, which is inconsistent -- the combination has already removed the first-order ionosphere, so the state has almost nothing left to estimate. This rung exists to measure the cost of that inconsistency; freq004 is the same combination done honestly, with the state removed. Do not quote freq003 as the ionosphere-free result.",
+  "scenario": {
+    "name": "freq003_L1L2ionoFree",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+  "signals": {
+    "enabledMask": [
+      true,
+      true
+    ]
+  },
+  "measurements": {
+    "codeMode": "ionosphereFree"
+  },
+  "atmosphere": {
+    "ionosphereFree": true
+  },
+  "report": {
+    "runVersion": "freq003"
+  }
+}

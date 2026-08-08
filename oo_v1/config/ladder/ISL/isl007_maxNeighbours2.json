@@ -1,0 +1,19 @@
+{
+  "_id": "ISL rung: maxNeighbours2. One crosslink change against golden_baseline_multi.json (G5S6R4 federated, four antennas per spacecraft); every other leaf is inherited. Two crosslink terminals per spacecraft instead of five. Tests whether the relative layer is limited by range count or by geometry.",
+  "_extends": "golden_baseline_multi.json",
+  "_delta": "Two crosslink terminals per spacecraft instead of five. Tests whether the relative layer is limited by range count or by geometry.",
+  "scenario": {
+    "name": "isl007_maxNeighbours2",
+    "nTowers": 5,
+    "nSpaceAssets": 6,
+    "nReceivers": 4
+  },
+  "multiAsset": {
+    "twoWayISL": {
+      "maxNeighbours": 2
+    }
+  },
+  "report": {
+    "runVersion": "isl007"
+  }
+}

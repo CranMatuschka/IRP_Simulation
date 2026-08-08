@@ -1,0 +1,32 @@
+{
+  "_id": "freq rung: L1L5raw. Signal-set change against golden_baseline.json; every other leaf inherited. L1 + L5 raw. L5 is 1176.45 MHz, so the pair is 25.3% apart against L1/L2's 22.0% -- a wider split, hence a smaller iono-free amplification than L1/L2.",
+  "_extends": "golden_baseline.json",
+  "_delta": "L1 + L5 raw. L5 is 1176.45 MHz, so the pair is 25.3% apart against L1/L2's 22.0% -- a wider split, hence a smaller iono-free amplification than L1/L2.",
+  "scenario": {
+    "name": "freq005_L1L5raw",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+  "signals": {
+    "enabledMask": [
+      true,
+      true
+    ],
+    "L2": {
+      "name": "L5",
+      "frequency_Hz": 1176450000.0,
+      "lambda_m": 0.25482804879085386,
+      "codeSigma0_m": 0.45
+    }
+  },
+  "measurements": {
+    "codeMode": "singleFrequency"
+  },
+  "atmosphere": {
+    "ionosphereFree": false
+  },
+  "report": {
+    "runVersion": "freq005"
+  }
+}

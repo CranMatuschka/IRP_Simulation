@@ -1,0 +1,19 @@
+{
+  "_id": "feat rung: noHardwareDelay. One toggle against golden_baseline.json; everything else is inherited via _extends, so the difference in the result is attributable to this toggle alone. Per-tower hardware group delay OFF, including its residual process.",
+  "_extends": "golden_baseline.json",
+  "_delta": "Per-tower hardware group delay OFF, including its residual process.",
+  "scenario": {
+    "name": "feat007_noHardwareDelay",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+  "errors": {
+    "hardwareDelay": {
+      "enable": false
+    }
+  },
+  "report": {
+    "runVersion": "feat007"
+  }
+}

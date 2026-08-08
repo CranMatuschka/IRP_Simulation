@@ -1,0 +1,367 @@
+{
+  "_id": "golden_baseline_multi v2.0 -- THE reference multi-asset (formation) scenario for future analysis. FOUR receive antennas on every spacecraft.",
+  "_purpose": "The N = 6 federated formation twin of golden_baseline.json. The error model, the atmosphere, the clocks, the EOP treatment and the estimator are IDENTICAL to the single-asset baseline, so any difference between the two runs is attributable to the formation and its crosslinks and to nothing else. Every numeric value is sourced in docs/golden_baseline_provenance.md.",
+  "_v2": "v2.0 moves both baselines from one receive antenna to four and closes the two common-mode averaging artefacts that change unlocks (atmosphere.sharedAcrossAntennas and errors.multipath.coloredGM.sharedAcrossAntennas). VERIFIED for this file specifically: all SIX spacecraft really do get four antennas. cfg.assets(2..6) carries a stale single-column lever arm from MultiAssetConfig.cloneAsset_, but the federated runtime never reads it -- each leaf is rebuilt from cfg.asset and re-finalised, and finalizeConfig regenerates the full 3x4 cross from scenario.nReceivers. Measured leaf by leaf; tests/test_golden_baseline.m asserts it so the stale clone cannot start being read without the gate failing.",
+  "_noBeamPointing": "multiAsset.beamPointingLock.enable is EXPLICITLY false. It is a post-processing orientation estimator, it is out of scope for this baseline by request, and it is stated here rather than left to a default so the file is self-describing.",
+  "_architecture": "FEDERATED, and the observations are used ONCE. Each of the six spacecraft runs its own independent single-asset EKF against the ground network; the inter-satellite two-way ranges feed ONLY the read-only relative-geometry layer. keepIslInPerAssetEkf stays false, so no crosslink observation is consumed by a filter and then re-consumed by the relative layer -- which is what makes the relative layer's covariance independently valid.",
+  "_cost": "At four antennas each per-asset EKF carries 105 rows per epoch and 67 states instead of 30 and 37. The federated run is 7 EKF passes (6 leaves + the chief re-run for the report body) and multiAsset.federated.parallel stays false for bit-reproducibility, so budget roughly 4x the v1.0 wall clock.",
+
+  "scenario": {
+    "_nReceivers": "Four phase centres on EVERY spacecraft -- see _v2 above for the verification that the federated path really delivers this.",
+    "name": "golden_baseline_multi",
+    "orbitClass": "GEO",
+    "nTowers": 5,
+    "nSpaceAssets": 6,
+    "nReceivers": 4
+  },
+
+  "simulation": {
+    "_duration": "Not set here. run_oo_v1(configPath, duration_s) owns the arc length and defaults to 3600 s.",
+    "dt_s": 1,
+    "seed": 42
+  },
+
+  "formation": {
+    "_geometry": "One chief plus five secondaries on a bounded Clohessy-Wiltshire projected-circular relative orbit of 1000 m ring radius, propagated with the same dynamics as the chief (not dead-reckoned). crossTrackSpread = 1.0 is REQUIRED, not cosmetic: the textbook projected-circular helix sets z = 2x for every member, which makes the formation planar and the matrix of crosslink line-of-sight vectors RANK 2 (singular values 1.2566, 1.1920, 0.0000). In that configuration there is a radial-dominant direction in which the ranges carry no information while the filter still shrinks its covariance -- an artefact, not a result.",
+    "mode": "helix",
+    "baseline_m": 1000.0,
+    "crossTrackSpread": 1.0
+  },
+
+  "realism": {
+    "grade": true,
+    "include": {
+      "luniSolar": false,
+      "solidEarthTide": false,
+      "interAntennaCarrierBias": true
+    }
+  },
+
+  "atmosphere": {
+    "_sharedAcrossFormation": "MANDATORY FOR A FORMATION, and its absence is a measured artefact. Two satellites 1-2 km apart at GEO looking at one tower have ray paths that diverge by ~11 arcsec, i.e. 0.5 m at the top of the troposphere and 18 m at a 350 km ionospheric pierce point -- both far inside the decorrelation scale, so they look through ONE air column. With per-asset seeds the single-difference atmosphere measured 0.954 m; re-rooting the four stochastic atmosphere states on a formation-wide seed took it to exactly 0. Any between-satellite differenced observable is meaningless without this. It is deliberately NOT set in the single-asset twin, where it is not inert (it would re-root that run's atmosphere for no physical reason) and has no formation to share with.",
+    "_sharedAcrossAntennas": "The ANTENNA-scope gate, a different axis from the formation one: sharedAcrossFormation re-roots the master seed so different SPACECRAFT coincide, sharedAcrossAntennas collapses a key field so different PHASE CENTRES on one spacecraft coincide. Re-rooting cannot do the second job because the substream key carries the antenna index. Both are needed here; see golden_baseline.json for the Fresnel-scale argument and the measurement.",
+    "realistic": true,
+    "ionosphereFree": false,
+    "estimateIono": false,
+    "sharedAcrossFormation": { "enable": true, "seed": 7201 },
+    "sharedAcrossAntennas": { "enable": true }
+  },
+
+  "estimation": {
+    "ionosphereMode": "perTowerSlant",
+    "slantIono": { "tau_s": 600, "sigma_ss_m": 1.0, "initialSigma_m": 5.0 },
+    "troposphereMode": "perTowerZwd",
+    "tropoZwd": { "tau_s": 10800, "sigma_ss_m": 0.04, "initialSigma_m": 0.10 },
+    "ambiguityMode": "floatPerTowerReceiverSignal",
+    "ambiguity": { "initialSigma_m": 100 }
+  },
+
+  "errors": {
+    "_identicalToSingle": "This whole block is a verbatim copy of golden_baseline.json. Keep them in step: the pair is only interpretable as a controlled comparison while the error models match exactly. tests/test_golden_baseline.m compares them leaf by leaf and fails on any drift.",
+    "troposphere": {
+      "enable": true,
+      "truth": { "enable": true, "mappingType": "niell" },
+      "model": { "enable": true, "mappingType": "niell" },
+      "modelType": "localWeatherGM",
+      "dayOfYear": 180,
+      "stochastic": {
+        "enable": true,
+        "tau_s": 10800,
+        "sigmaWet_ss_m": 0.04
+      },
+      "sigma_m": 0.15
+    },
+    "ionosphere": {
+      "enable": true,
+      "truth": {
+        "enable": true,
+        "diurnal": {
+          "enable": true,
+          "vtecDay_TECU": 30,
+          "vtecNight_TECU": 6,
+          "peakLocalTime_h": 14
+        }
+      },
+      "model": { "enable": true, "correction": "klobuchar" },
+      "modelType": "tecGaussMarkov",
+      "topsideFraction": 1,
+      "stochastic": {
+        "enable": true,
+        "tau_s": 600,
+        "sigmaVDelayL1_ss_m": 0.3
+      },
+      "higherOrder": { "enable": true },
+      "scintillation": {
+        "enable": true,
+        "model": "conker",
+        "S4zen": 0.3,
+        "tau_s": 30,
+        "phaseScint": { "enable": true, "sigmaPhi_rad": 0.2, "tau_s": 1.5 }
+      },
+      "sigma_m": 1.00
+    },
+    "multipath": {
+      "enable": true,
+      "truth": { "enable": true },
+      "model": { "enable": false },
+      "coloredGM": {
+        "enable": true,
+        "tau_s": 60,
+        "sigmaCodeL1_ss_m": 0.30,
+        "elevationExponent": 1,
+        "sharedAcrossAntennas": { "enable": true }
+      }
+    },
+    "hardwareDelay": {
+      "enable": true,
+      "truth": { "enable": true },
+      "model": { "enable": false },
+      "sigma_m": 0.05,
+      "residualStochastic": { "enable": true }
+    },
+    "interAntennaCarrierBias": {
+      "enable": true,
+      "sigma_cycles": 0.25,
+      "perSignal": true,
+      "drift": { "enable": false }
+    }
+  },
+
+  "effects": {
+    "ionosphere": { "mappingModel": "thinShell", "shellHeight_m": 350000 },
+    "towerSurvey": {
+      "enable": true,
+      "truth": { "enable": true },
+      "model": { "enable": false },
+      "sigmaENU_m": [0.01, 0.01, 0.03]
+    },
+    "antenna": { "pcvModel": "toy" },
+    "antennaPCO": {
+      "calibrationResidual": {
+        "enable": true,
+        "receiverOffset_body_m": [0.002, 0.002, 0.002]
+      }
+    },
+    "solidEarthTide": { "truth": { "enable": false } }
+  },
+
+  "biases": {
+    "interFrequency": {
+      "code": {
+        "truth": { "L1_m": 0.30, "L2_m": 0.45 },
+        "model": { "L1_m": 0.30, "L2_m": 0.405 }
+      }
+    }
+  },
+
+  "frames": {
+    "truthEop": {
+      "enable": true,
+      "polarMotion_xp_arcsec": 0.150,
+      "polarMotion_yp_arcsec": 0.350,
+      "ut1Rate_error_msPerDay": 0.05
+    },
+    "eopModel": {
+      "enable": true,
+      "polarMotion_xp_arcsec": 0.1497,
+      "polarMotion_yp_arcsec": 0.3497,
+      "ut1Rate_error_msPerDay": 0.04
+    }
+  },
+
+  "physics": {
+    "relativity": {
+      "clock": {
+        "enable": true,
+        "truth": { "enable": true },
+        "model": { "enable": true }
+      }
+    }
+  },
+
+  "clock": {
+    "templateSource": "jowTable2p1",
+    "mode": "spacecraftReceiverClockOnly",
+    "gauge": { "mode": "externalTowerCorrections" }
+  },
+
+  "clocks": {
+    "tower": {
+      "product": {
+        "sigmaBias_m": 0.10,
+        "sigmaDrift_mps": 0.001,
+        "updateInterval_s": 30,
+        "latency_s": 5,
+        "validity_s": 120,
+        "addToR": true
+      }
+    }
+  },
+
+  "measurement": { "sigmaFloor_m": 0.01 },
+
+  "measurements": {
+    "codeNoise": {
+      "model": "cn0",
+      "cn0": {
+        "base_dBHz": 45,
+        "elevationGain_dB": 6,
+        "sigmaAt45dBHz_m": 0.30
+      }
+    },
+    "doppler": { "enable": true, "useInEKF": true, "sigma_mps": 0.0424 },
+    "carrier": { "sigma_m": 0.010 },
+    "carrierPhase": { "enable": true },
+    "carrierMode": "ekfFloat",
+    "twoWayTimeTransfer": {
+      "enable": true,
+      "useInEKF": true,
+      "mode": "firstOrderReciprocal",
+      "towers": "all",
+      "sigma_m": 0.03,
+      "includeReciprocityResidual": true,
+      "reciprocitySigma_m": 0.005,
+      "warmup_s": 0,
+      "conservativeProductCorrelation": true
+    },
+    "isl": {
+      "_off": "The one-way primary-aided ISL path (code/Doppler/carrier rows inside the chief's EKF) is OFF. It belongs to the centralised chief-plus-represented-secondaries architecture, which the federated pivot replaced: here every satellite is its own chief. The crosslinks are used ONCE, by the relative layer under multiAsset.twoWayISL.",
+      "enable": false
+    }
+  },
+
+  "carrierSlip": {
+    "commonModeCompensation": { "enable": true, "minRows": 4 },
+    "baselineDifferencedMode": { "enable": true, "referenceAntenna": 1 }
+  },
+
+  "estimator": {
+    "elevationMask_rad": 0.17453292519943295,
+    "sigma_accel_mps2": 1e-6,
+    "processNoise": { "modelMismatch": { "enable": false } },
+    "dynamics": {
+      "perturbations": {
+        "luniSolar": { "enable": true },
+        "srp": { "enable": true, "Cr": 1.24, "areaToMass_m2pkg": 0.02 },
+        "epochJD_TT": 2451545.0
+      }
+    },
+    "attitude": {
+      "useCodePartials": false,
+      "useCarrierPartials": false
+    },
+    "starTracker": {
+      "whiteAngularSigma_rad": 1.4544410433286078e-04
+    },
+    "imu": {
+      "truth": {
+        "arw_rad_per_sqrt_s": 2e-4,
+        "rrw_rad_per_s_sqrt_s": 3e-6,
+        "bias0Sigma_radps": 3e-5
+      },
+      "filter": {
+        "arw_rad_per_sqrt_s": 2e-4,
+        "rrw_rad_per_s_sqrt_s": 3e-6,
+        "P0_bias_radps": 3e-5
+      }
+    },
+    "srpCoefficient": { "enable": false, "useInEKF": false },
+    "empiricalAccel": { "enable": false, "useInEKF": false },
+    "attitudeCarrierMode": "off",
+    "attitudeInitMode": "none",
+    "lambda": { "enable": false }
+  },
+
+  "orbit": {
+    "truth": {
+      "perturbations": {
+        "luniSolar": { "enable": true },
+        "srp": {
+          "enable": true,
+          "Cr": 1.3,
+          "areaToMass_m2pkg": 0.02,
+          "shadow": "cylindrical"
+        },
+        "epochJD_TT": 2451545.0
+      }
+    }
+  },
+
+  "multiAsset": {
+    "_mode": "'fast' is the federated runtime: N independent per-asset EKFs plus a separate read-only relative layer. The centralised 'joint' fleet estimator remains opt-in until its validation gates pass. NOTE for any future move to 'joint' at four antennas: cfg.assets(2..N) would then be read directly and carries a stale 3x1 lever arm from MultiAssetConfig.cloneAsset_ -- verify it is 3x4 before trusting anything.",
+    "mode": "fast",
+    "estimateMode": "off",
+    "keepIslInPerAssetEkf": false,
+    "recordTruth": true,
+    "truthStride_s": 60.0,
+    "twoWayISL": {
+      "_sigma": "0.05 m two-way thermal 1-sigma at the 1 km reference distance. masterConfig ships 0.01 m (cm-class wideband) and the optimistic corner of this study used 0.001 m; 0.05 m is the conservative Ka figure that a flown, calibrated PN crosslink can be argued for without assuming laboratory hardware.",
+      "_delayCal": "CALIBRATED BUT NOT ZERO: 0.005 m (17 ps) of constant per-link turn-around plus phase-centre calibration residual and 0.002 m of slow random walk, against masterConfig's uncalibrated 0.01/0.003. This term is CONSTANT over the arc and is therefore the floor on the relative geometry -- thermal noise averages, calibration does not.",
+      "_topology": "Five crosslink terminals per spacecraft, Earth-occultation checked. A spacecraft has a finite number of steerable terminals; 'every pair talks to every pair' is a modelling convenience, not a design.",
+      "_gauge": "minNorm. The 'radialStiff' gauge was WITHDRAWN from this study: its apparent gain was a metric artefact plus a prior tuned on truth.",
+      "_lightTime": "Two-way light time is included for correctness. First-order Sagnac cancels by reciprocity, so what survives is endpoint motion during the round trip -- micrometres at 1 km. It is reported so its size is visible rather than assumed.",
+      "_antennaCountIrrelevant": "Nothing in the crosslink layer is a function of scenario.nReceivers: the ISL terminals are separate hardware from the ground-uplink phase centres. Verified by inspection of the relative-layer sources.",
+      "enable": true,
+      "links": "all",
+      "sigma_m": 0.05,
+      "maxNeighbours": 5,
+      "requireLineOfSight": true,
+      "terminalLayout": "omni",
+      "gauge": { "mode": "minNorm" },
+      "delayCal": {
+        "sigma_const_m": 0.005,
+        "sigma_rw_m": 0.002,
+        "tau_s": 3600,
+        "nCorrCap": 60,
+        "estimate": { "enable": false }
+      },
+      "linkBudget": {
+        "model": "linkBudget",
+        "antennaModel": "fixedAperture",
+        "refDistance_m": 1000,
+        "refFrequency_Hz": 26000000000
+      },
+      "lightTime": { "enable": true },
+      "arcAverage": { "enable": false }
+    },
+    "_orientationStagesOff": "beamPointingLock, groundDifferencedRotation, jointGeometry, groundCarrier and groundCarrierProbe are ALL off. beamPointingLock is out of scope by request. The other four were measured to spend formation deformation to buy rotation on this geometry, and a 3600 s arc turns only 15 deg, where the CRLB penalty for separating rotation from shape is 9.9x. Nothing that has not been shown to help is applied to the geometry. Each solver returns 'gateOff' before touching any state, and no overlay (realism grade, orbit class, honest covariance) writes to multiAsset.",
+    "beamPointingLock": { "enable": false },
+    "groundDifferencedRotation": { "enable": false },
+    "jointGeometry": { "enable": false, "frameProbe": { "enable": false } },
+    "groundCarrier": { "enable": false },
+    "groundCarrierProbe": { "enable": false },
+    "twoWayTimeTransferISL": { "enable": false },
+    "distributedEstimator": { "enable": false },
+    "federated": {
+      "_parallel": "SERIAL on purpose. A parallel fan-out reorders floating-point reductions; measured on this code base a 1e-14 arithmetic difference between a serial and a parallel run flipped a guard sitting near its threshold and moved 33 of 148 reported fields. A reference baseline has to be bit-reproducible before it is fast.",
+      "refAsset": 1,
+      "savePerAssetMat": false,
+      "parallel": false
+    }
+  },
+
+  "beamforming": {
+    "_readOnly": "Pure post-processing: it reads the final relative geometry and clock solution and reports the phasor sum, i.e. what the relative error would cost a coherent transmit beam. It never touches the truth model, the measurement model or the filter, so it cannot move an estimate, and it does not depend on beamPointingLock. The pinned 2.1 GHz S-band carrier makes two reports comparable side by side.",
+    "enable": true,
+    "target": { "mode": "centroidNadir" },
+    "communicationFrequency_Hz": 2.1e9,
+    "coherenceCriterionLambdaFraction": 20
+  },
+
+  "report": {
+    "_monteCarlo": "OFF here. Twelve extra federated ensemble members is not affordable at four antennas; the single-asset baseline carries the ensemble consistency evidence and the error model is identical.",
+    "runVersion": "golden-baseline-multi-v2",
+    "layout": "clockExact",
+    "writePdf": true,
+    "writeMat": true,
+    "compileTex": "require",
+    "monteCarlo": { "enable": false }
+  },
+
+  "diagnostics": {
+    "storage": {
+      "mode": "compact",
+      "snapshot": { "enable": true, "interval_s": 300 }
+    }
+  }
+}

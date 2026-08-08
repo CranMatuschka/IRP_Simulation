@@ -1,0 +1,26 @@
+{
+  "_id": "freq rung: L1L2raw. Signal-set change against golden_baseline.json; every other leaf inherited. L1 + L2, both tracked raw (the golden configuration, stated explicitly). codeMode 'singleFrequency' is a misleading name: it means per-frequency raw rows, NOT one frequency.",
+  "_extends": "golden_baseline.json",
+  "_delta": "L1 + L2, both tracked raw (the golden configuration, stated explicitly). codeMode 'singleFrequency' is a misleading name: it means per-frequency raw rows, NOT one frequency.",
+  "scenario": {
+    "name": "freq002_L1L2raw",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+  "signals": {
+    "enabledMask": [
+      true,
+      true
+    ]
+  },
+  "measurements": {
+    "codeMode": "singleFrequency"
+  },
+  "atmosphere": {
+    "ionosphereFree": false
+  },
+  "report": {
+    "runVersion": "freq002"
+  }
+}

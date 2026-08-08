@@ -1,0 +1,27 @@
+{
+  "_id": "feat rung: onLambdaGroundAr. One toggle against golden_baseline.json; everything else is inherited via _extends, so the difference in the result is attributable to this toggle alone. LAMBDA integer ambiguity resolution ON for the ground carrier baselines (diagnostic; no fix is fed back into the navigation solution).",
+  "_extends": "golden_baseline.json",
+  "_delta": "LAMBDA integer ambiguity resolution ON for the ground carrier baselines (diagnostic; no fix is fed back into the navigation solution).",
+  "scenario": {
+    "name": "feat023_onLambdaGroundAr",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+  "estimator": {
+    "lambda": {
+      "enable": true,
+      "toolboxPath": "/Users/ludwigmatuschka/Downloads/LAMBD4-master_2024_10_01",
+      "method": 3,
+      "nCands": 2,
+      "minSuccessRate": 0.999,
+      "ratioThreshold": 2.0,
+      "ground": {
+        "enable": true
+      }
+    }
+  },
+  "report": {
+    "runVersion": "feat023"
+  }
+}

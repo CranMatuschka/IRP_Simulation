@@ -1,0 +1,19 @@
+{
+  "_id": "ISL rung: off. One crosslink change against golden_baseline_multi.json (G5S6R4 federated, four antennas per spacecraft); every other leaf is inherited. Crosslinks OFF entirely. The no-ISL reference every other rung is read against.",
+  "_extends": "golden_baseline_multi.json",
+  "_delta": "Crosslinks OFF entirely. The no-ISL reference every other rung is read against.",
+  "scenario": {
+    "name": "isl001_off",
+    "nTowers": 5,
+    "nSpaceAssets": 6,
+    "nReceivers": 4
+  },
+  "multiAsset": {
+    "twoWayISL": {
+      "enable": false
+    }
+  },
+  "report": {
+    "runVersion": "isl001"
+  }
+}

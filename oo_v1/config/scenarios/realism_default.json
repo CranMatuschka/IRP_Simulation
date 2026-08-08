@@ -1,9 +1,0 @@
-{
-  "_comment": "Compatibility alias for realism.json.",
-  "realism": {
-    "grade": true
-  },
-  "atmosphere": {
-    "realistic": true
-  }
-}

@@ -1,0 +1,23 @@
+{
+  "_id": "feat rung: noCarrierPhase. One toggle against golden_baseline.json; everything else is inherited via _extends, so the difference in the result is attributable to this toggle alone. Carrier-phase rows OFF, so the run is code + Doppler + two-way only and the float ambiguity states disappear.",
+  "_extends": "golden_baseline.json",
+  "_delta": "Carrier-phase rows OFF, so the run is code + Doppler + two-way only and the float ambiguity states disappear.",
+  "scenario": {
+    "name": "feat016_noCarrierPhase",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+  "measurements": {
+    "carrierPhase": {
+      "enable": false
+    },
+    "carrierMode": "diagnostic"
+  },
+  "estimation": {
+    "ambiguityMode": "none"
+  },
+  "report": {
+    "runVersion": "feat016"
+  }
+}

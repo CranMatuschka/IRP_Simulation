@@ -1,0 +1,35 @@
+{
+  "_id": "freq rung: L1L5ionoFree. Signal-set change against golden_baseline.json; every other leaf inherited. L1 + L5 in the ionosphere-free combination. The prediction is that this beats L1/L2 iono-free because the fractional separation is larger.",
+  "_extends": "golden_baseline.json",
+  "_delta": "L1 + L5 in the ionosphere-free combination. The prediction is that this beats L1/L2 iono-free because the fractional separation is larger.",
+  "scenario": {
+    "name": "freq006_L1L5ionoFree",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+  "signals": {
+    "enabledMask": [
+      true,
+      true
+    ],
+    "L2": {
+      "name": "L5",
+      "frequency_Hz": 1176450000.0,
+      "lambda_m": 0.25482804879085386,
+      "codeSigma0_m": 0.45
+    }
+  },
+  "measurements": {
+    "codeMode": "ionosphereFree"
+  },
+  "atmosphere": {
+    "ionosphereFree": true
+  },
+  "estimation": {
+    "ionosphereMode": "none"
+  },
+  "report": {
+    "runVersion": "freq006"
+  }
+}

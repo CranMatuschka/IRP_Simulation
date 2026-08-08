@@ -1,0 +1,19 @@
+{
+  "_id": "ISL rung: beamPointingLock. One crosslink change against golden_baseline_multi.json (G5S6R4 federated, four antennas per spacecraft); every other leaf is inherited. Three-tower beam-pointing lock ON. It is a post-processing orientation diagnostic: the estimator metrics are expected to be bit-identical to the golden, and only the orientation/beamforming panels should move.",
+  "_extends": "golden_baseline_multi.json",
+  "_delta": "Three-tower beam-pointing lock ON. It is a post-processing orientation diagnostic: the estimator metrics are expected to be bit-identical to the golden, and only the orientation/beamforming panels should move.",
+  "scenario": {
+    "name": "isl013_beamPointingLock",
+    "nTowers": 5,
+    "nSpaceAssets": 6,
+    "nReceivers": 4
+  },
+  "multiAsset": {
+    "beamPointingLock": {
+      "enable": true
+    }
+  },
+  "report": {
+    "runVersion": "isl013"
+  }
+}

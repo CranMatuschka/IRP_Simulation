@@ -1,0 +1,66 @@
+{
+  "_migrated": "Owned by the test suite, not by a study. Moved here from config/scenarios/ as joint_G5S2R4_reciprocal_time_transfer.json. simulation.duration_s was REMOVED with the rest of the ladder: the arc length is now the second argument of run_oo_v1 and the calling test passes 3600 s explicitly, so the run is unchanged.",
+  "_comment": "Two-spacecraft joint EKF with scenario-controlled first-order reciprocal ISL time transfer.",
+  "scenario": {
+    "name": "test005_jointReciprocalTimeTransfer",
+    "nTowers": 5,
+    "nSpaceAssets": 2,
+    "nReceivers": 4
+  },
+  "multiAsset": {
+    "mode": "joint",
+    "keepIslInPerAssetEkf": false
+  },
+  "measurements": {
+    "isl": {
+      "enable": true,
+      "receiverAssetIndex": 1,
+      "transmitterAssetIndex": 2,
+      "code": {
+        "enable": false,
+        "useInEKF": false
+      },
+      "doppler": {
+        "enable": false,
+        "useInEKF": false
+      },
+      "carrier": {
+        "enable": false,
+        "useInEKF": false
+      },
+      "twoWay": {
+        "enable": true,
+        "range": {
+          "enable": false,
+          "useInEKF": false
+        },
+        "timeTransfer": {
+          "enable": true,
+          "useInEKF": true,
+          "mode": "firstOrderReciprocal",
+          "sigma_m": 0.03,
+          "includeReciprocityResidual": true,
+          "reciprocitySigma_m": 0.005,
+          "warmup_s": 0,
+          "calibration": {
+            "productIdentifier": "GEO-1-GEO-2-time-transfer-calibration"
+          }
+        },
+        "doppler": {
+          "enable": false,
+          "useInEKF": false
+        },
+        "schedule": {
+          "updatePeriod_s": 10,
+          "updatePhase_s": 0,
+          "start_s": 0,
+          "stop_s": 3600
+        }
+      }
+    }
+  },
+  "report": {
+    "layout": "jointSummary",
+    "runVersion": "test005"
+  }
+}

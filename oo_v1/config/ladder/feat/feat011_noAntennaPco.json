@@ -1,0 +1,21 @@
+{
+  "_id": "feat rung: noAntennaPco. One toggle against golden_baseline.json; everything else is inherited via _extends, so the difference in the result is attributable to this toggle alone. Phase-centre-offset calibration residual OFF.",
+  "_extends": "golden_baseline.json",
+  "_delta": "Phase-centre-offset calibration residual OFF.",
+  "scenario": {
+    "name": "feat011_noAntennaPco",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+  "effects": {
+    "antennaPCO": {
+      "calibrationResidual": {
+        "enable": false
+      }
+    }
+  },
+  "report": {
+    "runVersion": "feat011"
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "_id": "feat rung: noAntennaPcv. One toggle against golden_baseline.json; everything else is inherited via _extends, so the difference in the result is attributable to this toggle alone. Antenna phase-centre variation model set to 'none'.",
+  "_extends": "golden_baseline.json",
+  "_delta": "Antenna phase-centre variation model set to 'none'.",
+  "scenario": {
+    "name": "feat010_noAntennaPcv",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+  "effects": {
+    "antenna": {
+      "pcvModel": "none"
+    }
+  },
+  "report": {
+    "runVersion": "feat010"
+  }
+}

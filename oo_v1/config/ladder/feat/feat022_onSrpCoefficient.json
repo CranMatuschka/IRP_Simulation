@@ -1,0 +1,20 @@
+{
+  "_id": "feat rung: onSrpCoefficient. One toggle against golden_baseline.json; everything else is inherited via _extends, so the difference in the result is attributable to this toggle alone. Solar-radiation-pressure scale factor estimated as an EKF state. The golden fixes truth Cr = 1.30 against model Cr = 1.24, so there is a real mismatch for the state to absorb.",
+  "_extends": "golden_baseline.json",
+  "_delta": "Solar-radiation-pressure scale factor estimated as an EKF state. The golden fixes truth Cr = 1.30 against model Cr = 1.24, so there is a real mismatch for the state to absorb.",
+  "scenario": {
+    "name": "feat022_onSrpCoefficient",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+  "estimator": {
+    "srpCoefficient": {
+      "enable": true,
+      "useInEKF": true
+    }
+  },
+  "report": {
+    "runVersion": "feat022"
+  }
+}

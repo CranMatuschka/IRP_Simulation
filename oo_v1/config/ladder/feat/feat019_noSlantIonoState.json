@@ -1,0 +1,17 @@
+{
+  "_id": "feat rung: noSlantIonoState. One toggle against golden_baseline.json; everything else is inherited via _extends, so the difference in the result is attributable to this toggle alone. Per-tower slant-ionosphere state OFF.",
+  "_extends": "golden_baseline.json",
+  "_delta": "Per-tower slant-ionosphere state OFF.",
+  "scenario": {
+    "name": "feat019_noSlantIonoState",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+  "estimation": {
+    "ionosphereMode": "none"
+  },
+  "report": {
+    "runVersion": "feat019"
+  }
+}

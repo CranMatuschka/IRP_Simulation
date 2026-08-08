@@ -1,0 +1,19 @@
+{
+  "_id": "ISL rung: sigma0p001. One crosslink change against golden_baseline_multi.json (G5S6R4 federated, four antennas per spacecraft); every other leaf is inherited. Two-way ISL range sigma 1 mm -- laboratory hardware, deliberately indefensible, kept as the optimistic corner of the sweep.",
+  "_extends": "golden_baseline_multi.json",
+  "_delta": "Two-way ISL range sigma 1 mm -- laboratory hardware, deliberately indefensible, kept as the optimistic corner of the sweep.",
+  "scenario": {
+    "name": "isl002_sigma0p001",
+    "nTowers": 5,
+    "nSpaceAssets": 6,
+    "nReceivers": 4
+  },
+  "multiAsset": {
+    "twoWayISL": {
+      "sigma_m": 0.001
+    }
+  },
+  "report": {
+    "runVersion": "isl002"
+  }
+}

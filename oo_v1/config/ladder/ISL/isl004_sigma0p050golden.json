@@ -1,0 +1,19 @@
+{
+  "_id": "ISL rung: sigma0p050golden. One crosslink change against golden_baseline_multi.json (G5S6R4 federated, four antennas per spacecraft); every other leaf is inherited. Two-way ISL range sigma 50 mm -- the golden value, stated explicitly so the sweep has its own anchor rather than relying on inheritance.",
+  "_extends": "golden_baseline_multi.json",
+  "_delta": "Two-way ISL range sigma 50 mm -- the golden value, stated explicitly so the sweep has its own anchor rather than relying on inheritance.",
+  "scenario": {
+    "name": "isl004_sigma0p050golden",
+    "nTowers": 5,
+    "nSpaceAssets": 6,
+    "nReceivers": 4
+  },
+  "multiAsset": {
+    "twoWayISL": {
+      "sigma_m": 0.05
+    }
+  },
+  "report": {
+    "runVersion": "isl004"
+  }
+}

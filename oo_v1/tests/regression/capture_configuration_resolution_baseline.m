@@ -40,10 +40,7 @@ function capture_configuration_resolution_baseline(replaceExisting)
         'preResolutionConfig', baseMetadata.preResolutionConfig, ...
         'resolvedConfig', baseResolved);
 
-    scenarioDirectory = fullfile(repositoryRoot, 'config', 'scenarios');
-    scenarioFiles = dir(fullfile(scenarioDirectory, '*.json'));
-    [~, order] = sort({scenarioFiles.name});
-    scenarioFiles = scenarioFiles(order);
+    scenarioFiles = scenarioFileIndex(repositoryRoot);
 
     sources = repmat(struct('file', '', 'sha256', ''), numel(scenarioFiles), 1);
     for index = 1:numel(scenarioFiles)
@@ -66,7 +63,9 @@ function capture_configuration_resolution_baseline(replaceExisting)
     save(snapshotPath, 'records', 'capturedUtc', 'classification', '-v7');
 
     manifest = struct();
-    manifest.schemaVersion = 1;
+    % v2: representativeScenarios.fourAsset -> .multiAsset, and scenarioSources now
+    % enumerates config/*.json + config/ladder/<axis>/*.json instead of config/scenarios/.
+    manifest.schemaVersion = 2;
     manifest.classification = classification;
     manifest.scientificStatus = 'Regression reference; not scientific approval.';
     manifest.capturedUtc = capturedUtc;
@@ -145,14 +144,22 @@ function state = optionalDependencyState_(config)
 end
 
 function selected = representativeScenarios_(records)
+    % Pick the representatives STRUCTURALLY, never by file name. The previous version
+    % asked for assetCounts == 4, which named a scenario family (isl_carrier_ckpt.json)
+    % rather than a property; the config/ladder migration deleted it and left no
+    % four-asset scenario at all, so the capture aborted. The ladder now runs 1, 2, 3
+    % and 6 space assets -- "the largest multi-asset scenario" survives that kind of
+    % re-shuffle, "== 4" does not.
     scenarioRecords = records(2:end);
     sourceFiles = {scenarioRecords.sourcePath};
     assetCounts = arrayfun(@(record) ...
         record.preResolutionConfig.scenario.nSpaceAssets, scenarioRecords);
     singleAssetIndex = find(assetCounts == 1, 1);
-    fourAssetIndex = find(assetCounts == 4, 1);
-    assert(~isempty(singleAssetIndex) && ~isempty(fourAssetIndex), ...
-        'The baseline requires single-asset and four-asset scenarios.');
+    multiAssetIndex = find(assetCounts == max(assetCounts), 1);
+    assert(~isempty(singleAssetIndex) && ~isempty(multiAssetIndex) && ...
+            max(assetCounts) > 1, ...
+        ['The baseline requires at least one single-asset and one multi-asset ' ...
+         'scenario (largest nSpaceAssets found: %d).'], max(assetCounts));
 
     realismGrade = arrayfun(@(record) logicalValue_( ...
         record.preResolutionConfig, {'realism', 'grade'}), scenarioRecords);
@@ -162,7 +169,7 @@ function selected = representativeScenarios_(records)
 
     selected = struct( ...
         'singleAsset', sourceFiles{singleAssetIndex}, ...
-        'fourAsset', sourceFiles{fourAssetIndex}, ...
+        'multiAsset', sourceFiles{multiAssetIndex}, ...
         'realismGradeSelection', {sourceFiles(realismGrade)}, ...
         'interSatelliteLinkRetentionSelection', ...
             {sourceFiles(retainInterSatelliteLinks)});

@@ -1,0 +1,21 @@
+{
+  "_id": "feat rung: noIonoStochastic. One toggle against golden_baseline.json; everything else is inherited via _extends, so the difference in the result is attributable to this toggle alone. Ionosphere kept, its Gauss-Markov TEC process OFF. Isolates the 600 s-correlated part from the diurnal/Klobuchar part.",
+  "_extends": "golden_baseline.json",
+  "_delta": "Ionosphere kept, its Gauss-Markov TEC process OFF. Isolates the 600 s-correlated part from the diurnal/Klobuchar part.",
+  "scenario": {
+    "name": "feat003_noIonoStochastic",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+  "errors": {
+    "ionosphere": {
+      "stochastic": {
+        "enable": false
+      }
+    }
+  },
+  "report": {
+    "runVersion": "feat003"
+  }
+}

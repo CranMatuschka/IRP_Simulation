@@ -1,0 +1,19 @@
+{
+  "_id": "feat rung: noMultipath. One toggle against golden_baseline.json; everything else is inherited via _extends, so the difference in the result is attributable to this toggle alone. Coloured code multipath OFF (truth-only in the golden, 60 s correlated).",
+  "_extends": "golden_baseline.json",
+  "_delta": "Coloured code multipath OFF (truth-only in the golden, 60 s correlated).",
+  "scenario": {
+    "name": "feat006_noMultipath",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+  "errors": {
+    "multipath": {
+      "enable": false
+    }
+  },
+  "report": {
+    "runVersion": "feat006"
+  }
+}

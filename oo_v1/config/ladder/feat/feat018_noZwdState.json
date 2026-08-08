@@ -1,0 +1,17 @@
+{
+  "_id": "feat rung: noZwdState. One toggle against golden_baseline.json; everything else is inherited via _extends, so the difference in the result is attributable to this toggle alone. Per-tower wet-delay state OFF. Measured previously as the dominant consistency lever (NEES 1011 -> 25.6), so this rung is expected to be the worst here.",
+  "_extends": "golden_baseline.json",
+  "_delta": "Per-tower wet-delay state OFF. Measured previously as the dominant consistency lever (NEES 1011 -> 25.6), so this rung is expected to be the worst here.",
+  "scenario": {
+    "name": "feat018_noZwdState",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+  "estimation": {
+    "troposphereMode": "none"
+  },
+  "report": {
+    "runVersion": "feat018"
+  }
+}

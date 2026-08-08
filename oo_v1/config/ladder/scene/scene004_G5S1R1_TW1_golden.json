@@ -1,0 +1,21 @@
+{
+  "_id": "GOLDEN rung for G5S1R1. Built on golden_baseline.json via _extends, so every sigma, bias and process-noise value is the sourced one (docs/golden_baseline_provenance.md) and a change to the golden propagates here automatically. The delta below is the formation size and the two-way time-transfer toggle, nothing else.",
+  "_extends": "golden_baseline.json",
+  "_delta": "nReceivers 1 instead of the golden's 4. The golden is explicitly a four-phase-centre design; this rung is the single-antenna configuration and loses the four independent code-thermal samples per tower per epoch. twoWayTimeTransfer enabled and used in the EKF (TW1).",
+  "scenario": {
+    "name": "scene004_G5S1R1_TW1_golden",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 1
+  },
+  "measurements": {
+    "twoWayTimeTransfer": {
+      "enable": true,
+      "useInEKF": true,
+      "towers": "all"
+    }
+  },
+  "report": {
+    "runVersion": "scene004"
+  }
+}

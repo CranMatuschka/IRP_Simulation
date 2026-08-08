@@ -1,0 +1,260 @@
+{
+  "_id": "golden_baseline_attitude v1.0 -- the CARRIER-BASELINE ATTITUDE variant of golden_baseline.json.",
+  "_purpose": "golden_baseline.json runs four receive antennas that contribute NOTHING to attitude: measured, the ranging measurement Jacobian's attitude columns are identically zero (max|H(:,euler)| = 0, rank 0), and attitude comes entirely from the star tracker and gyro. That is a deliberate choice there, not an oversight. This file is the controlled experiment that asks what the four antennas would buy if they WERE used, and what it costs to make that honest. It is a VARIANT, not a replacement: golden_baseline.json and golden_baseline_multi.json remain the reference pair and are untouched.",
+  "_delta": "EXACTLY THREE THINGS DIFFER from golden_baseline.json. (1) estimator.attitudeCarrierMode = 'calibratedDifferentialAmbiguity' instead of 'off'. (2) errors.interAntennaCarrierBias.sigma_cycles = 0.02 instead of 0.25 -- the inter-antenna line bias is CALIBRATED here, and 0.02 cycles = 3.8 mm is what survives the calibration. (3) the estimator.diffAtt block is stated explicitly instead of inherited. Every other leaf is a verbatim copy, so any difference in the result is attributable to the attitude path and to nothing else.",
+  "_whyTheBiasMustChange": "THE TWO CHANGES ARE ONE DECISION AND CANNOT BE SPLIT. Differential carrier attitude reads exactly the inter-antenna phase differences, which is exactly what an inter-antenna line bias corrupts. At the baseline's uncalibrated 0.25 cycles the bias is 47.6 mm = 4.8x the 10 mm carrier sigma, so an attitude solution built on those baselines is not merely noisy, it is BIASED -- and this code base has that failure on record (attitude divergence traced to the unmodelled truth-side inter-antenna bias, not to the attitude path). A real GPS attitude system calibrates its line biases; this file therefore models the calibrated case, and 0.02 cycles is the residual that survives, the same 'calibrated but not zero' pattern the baseline already uses for the station hardware delay (0.05 m rather than the raw 0.5 m).",
+  "_notCalibratedProduct": "HONEST STATUS, DELIBERATELY. The calibration is represented by making the surviving TRUTH bias small, NOT by handing the estimator a model of it: estimator.interAntennaCarrierBias.mode stays 'none'. Setting a model whose values we cannot know without reading the truth draw is exactly the artefact realismGradeConfig's phaseBiasHonesty block exists to prevent -- 'a run whose calibration corrects by exactly zero can still report calibratedExternalProduct'. The consequence is that InterAntennaPhaseBias.resolvedStatus reports 'notCalibratedExternalProduct' and, with requirePhaseBiasCalibrationForFix true, integer ambiguity resolution on the attitude baselines is REFUSED. That refusal is a RESULT of this scenario, not a defect of it, which is why diffAtt.ambiguityResolution stays off rather than being switched on to watch it decline.",
+  "_measuredResult": "ALREADY MEASURED, 2026-08-07, and the answer is a clean NEGATIVE. Isolating the single variable (this file run twice, attitudeCarrierMode 'off' vs 'calibratedDifferentialAmbiguity', everything else byte-identical, 600 s): the path DOES engage -- the store calibrates with 3 baselines and 15 valid baseline-tower pairs, and DiffAttitudeBuilder.buildRows feeds a genuine second ekf.update() call, which is why the main row count stays at 105 while the filter still sees the rows. Its effect is: attitude SIGMA 44.31712 -> 44.30771 arcsec, a reduction of 0.021 %; attitude ERROR 44.90389 -> 44.92471 arcsec (+0.046 %, one seed, i.e. noise); position RMS 2.165442 -> 2.165450 m, unchanged. So a CALIBRATED four-antenna carrier attitude path adds nothing measurable on top of a 30 arcsec star tracker. That is the point of this file: golden_baseline.json's decision to leave the antennas out of the attitude solution is now a MEASURED result rather than an argument from an information ratio. The obvious follow-up, deliberately not done here, is to degrade the star tracker until the carrier path starts to matter.",
+  "_whatToExpect": "Do NOT expect this to beat the star tracker. Measured information per epoch: 20 carrier rows on a 1.02 m lever at a 10 mm sigma give sigma_theta = 7.5 arcmin, against the star tracker's 30 arcsec -- a ratio of 4.4e-3 in information, i.e. the star tracker is ~15x better in sigma and stays so under averaging. Two further limits: diffAtt.referenceMode is 'selfCalibrated', so this path tracks attitude CHANGES against the EKF's own attitude over a 60 s calibration window and supplies no absolute datum ('externalInitialAttitude' raises externalReferenceUnavailable because there is no real attitude-product interface); and the differential rows are built from the pre-combination L1 float stack, so they are L1-only. The scientific value of this file is the measurement of how much a calibrated 4-antenna array adds to an already-good attitude solution, and how that degrades with the line-bias residual -- not a better number.",
+
+  "scenario": {
+    "name": "golden_baseline_attitude",
+    "orbitClass": "GEO",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+
+  "simulation": {
+    "_duration": "Not set here. run_oo_v1(configPath, duration_s) owns the arc length and defaults to 3600 s.",
+    "dt_s": 1,
+    "seed": 42
+  },
+
+  "realism": {
+    "grade": true,
+    "include": {
+      "luniSolar": false,
+      "solidEarthTide": false,
+      "interAntennaCarrierBias": true
+    }
+  },
+
+  "atmosphere": {
+    "realistic": true,
+    "ionosphereFree": false,
+    "estimateIono": false,
+    "sharedAcrossAntennas": { "enable": true }
+  },
+
+  "estimation": {
+    "ionosphereMode": "perTowerSlant",
+    "slantIono": { "tau_s": 600, "sigma_ss_m": 1.0, "initialSigma_m": 5.0 },
+    "troposphereMode": "perTowerZwd",
+    "tropoZwd": { "tau_s": 10800, "sigma_ss_m": 0.04, "initialSigma_m": 0.10 },
+    "ambiguityMode": "floatPerTowerReceiverSignal",
+    "ambiguity": { "initialSigma_m": 100 }
+  },
+
+  "errors": {
+    "_identicalToBaselineExceptOneLeaf": "Verbatim copy of golden_baseline.json apart from interAntennaCarrierBias.sigma_cycles (0.25 -> 0.02). See _whyTheBiasMustChange.",
+    "troposphere": {
+      "enable": true,
+      "truth": { "enable": true, "mappingType": "niell" },
+      "model": { "enable": true, "mappingType": "niell" },
+      "modelType": "localWeatherGM",
+      "dayOfYear": 180,
+      "stochastic": { "enable": true, "tau_s": 10800, "sigmaWet_ss_m": 0.04 },
+      "sigma_m": 0.15
+    },
+    "ionosphere": {
+      "enable": true,
+      "truth": {
+        "enable": true,
+        "diurnal": { "enable": true, "vtecDay_TECU": 30, "vtecNight_TECU": 6, "peakLocalTime_h": 14 }
+      },
+      "model": { "enable": true, "correction": "klobuchar" },
+      "modelType": "tecGaussMarkov",
+      "topsideFraction": 1,
+      "stochastic": { "enable": true, "tau_s": 600, "sigmaVDelayL1_ss_m": 0.3 },
+      "higherOrder": { "enable": true },
+      "scintillation": {
+        "enable": true,
+        "model": "conker",
+        "S4zen": 0.3,
+        "tau_s": 30,
+        "phaseScint": { "enable": true, "sigmaPhi_rad": 0.2, "tau_s": 1.5 }
+      },
+      "sigma_m": 1.00
+    },
+    "multipath": {
+      "enable": true,
+      "truth": { "enable": true },
+      "model": { "enable": false },
+      "coloredGM": {
+        "enable": true,
+        "tau_s": 60,
+        "sigmaCodeL1_ss_m": 0.30,
+        "elevationExponent": 1,
+        "sharedAcrossAntennas": { "enable": true }
+      }
+    },
+    "hardwareDelay": {
+      "enable": true,
+      "truth": { "enable": true },
+      "model": { "enable": false },
+      "sigma_m": 0.05,
+      "residualStochastic": { "enable": true }
+    },
+    "interAntennaCarrierBias": {
+      "_calibrated": "0.02 cycles = 3.8 mm at L1: the residual left after a routine inter-antenna line-bias calibration, NOT the 0.25 cycles (47.6 mm) of an uncalibrated chain that golden_baseline.json carries. Chosen so the residual sits BELOW the 10 mm carrier sigma -- the point of calibrating is that the bias stops being the dominant term on the attitude baselines. Still truth-only and still unknown to the estimator, so it survives z - h.",
+      "enable": true,
+      "sigma_cycles": 0.02,
+      "perSignal": true,
+      "drift": { "enable": false }
+    }
+  },
+
+  "effects": {
+    "ionosphere": { "mappingModel": "thinShell", "shellHeight_m": 350000 },
+    "towerSurvey": {
+      "enable": true,
+      "truth": { "enable": true },
+      "model": { "enable": false },
+      "sigmaENU_m": [0.01, 0.01, 0.03]
+    },
+    "antenna": { "pcvModel": "toy" },
+    "antennaPCO": {
+      "_commonMode": "NOTE FOR THIS SCENARIO SPECIFICALLY: the PCO calibration residual is ONE body-frame vector broadcast to every antenna column, so it is common-mode across the array and cancels identically in every inter-antenna baseline. It therefore does NOT stress the attitude solution, and this file must not be read as having tested a per-antenna phase-centre error. A per-antenna PCO residual would need a truth-side 3xN offset that the code does not currently provide.",
+      "calibrationResidual": {
+        "enable": true,
+        "receiverOffset_body_m": [0.002, 0.002, 0.002]
+      }
+    },
+    "solidEarthTide": { "truth": { "enable": false } }
+  },
+
+  "biases": {
+    "interFrequency": {
+      "code": {
+        "truth": { "L1_m": 0.30, "L2_m": 0.45 },
+        "model": { "L1_m": 0.30, "L2_m": 0.405 }
+      }
+    }
+  },
+
+  "frames": {
+    "truthEop": {
+      "enable": true,
+      "polarMotion_xp_arcsec": 0.150,
+      "polarMotion_yp_arcsec": 0.350,
+      "ut1Rate_error_msPerDay": 0.05
+    },
+    "eopModel": {
+      "enable": true,
+      "polarMotion_xp_arcsec": 0.1497,
+      "polarMotion_yp_arcsec": 0.3497,
+      "ut1Rate_error_msPerDay": 0.04
+    }
+  },
+
+  "physics": {
+    "relativity": {
+      "clock": { "enable": true, "truth": { "enable": true }, "model": { "enable": true } }
+    }
+  },
+
+  "clock": {
+    "templateSource": "jowTable2p1",
+    "mode": "spacecraftReceiverClockOnly",
+    "gauge": { "mode": "externalTowerCorrections" }
+  },
+
+  "clocks": {
+    "tower": {
+      "product": {
+        "sigmaBias_m": 0.10,
+        "sigmaDrift_mps": 0.001,
+        "updateInterval_s": 30,
+        "latency_s": 5,
+        "validity_s": 120,
+        "addToR": true
+      }
+    }
+  },
+
+  "measurement": { "sigmaFloor_m": 0.01 },
+
+  "measurements": {
+    "codeNoise": {
+      "model": "cn0",
+      "cn0": { "base_dBHz": 45, "elevationGain_dB": 6, "sigmaAt45dBHz_m": 0.30 }
+    },
+    "doppler": { "enable": true, "useInEKF": true, "sigma_mps": 0.0424 },
+    "carrier": { "sigma_m": 0.010 },
+    "carrierPhase": { "enable": true },
+    "carrierMode": "ekfFloat",
+    "twoWayTimeTransfer": {
+      "enable": true,
+      "useInEKF": true,
+      "mode": "firstOrderReciprocal",
+      "towers": "all",
+      "sigma_m": 0.03,
+      "includeReciprocityResidual": true,
+      "reciprocitySigma_m": 0.005,
+      "warmup_s": 0,
+      "conservativeProductCorrelation": true
+    }
+  },
+
+  "carrierSlip": {
+    "_diffAttBaselines": "The differential-attitude baselines deliberately bypass the main carrier slip detector: DiffAtt injections cause degree-level attitude changes per epoch that the ionosphere-free slip detector misreads as slips, and a real cycle slip (~lambda/2 = 95 mm) is small against the 1 m per-row innovation gate DiffAtt uses instead. Recorded here because it is a real difference in arc management between this file and golden_baseline.json.",
+    "commonModeCompensation": { "enable": true, "minRows": 4 },
+    "baselineDifferencedMode": { "enable": true, "referenceAntenna": 1 }
+  },
+
+  "estimator": {
+    "_attitudeOn": "THE ONE STRUCTURAL DIFFERENCE. 'calibratedDifferentialAmbiguity' makes ReverseGNSSSimulation build a DiffAttitudeBuilder store and inject differential-attitude rows into the EKF observable stack. It is a real measurement path, not a diagnostic. Code attitude partials stay OFF: at a 1.02 m lever against a 0.17-0.23 m code sigma they carry ~2e-5 of the star tracker's per-epoch information, so they would be unearned information in this file exactly as in the baseline. The carrier is the only antenna-derived attitude route worth testing.",
+    "_diffAtt": "'selfCalibrated' is the ONLY available reference mode -- 'externalInitialAttitude' raises externalReferenceUnavailable because there is no real attitude-product interface, and using simulated truth would be truth assistance. It calibrates the per-baseline ambiguities against the EKF's own attitude over the first 60 s and then tracks CHANGES, so this path sharpens attitude tracking and supplies NO absolute datum. Stated explicitly rather than inherited so the claim this file can support is bounded in the file itself.",
+    "_ambiguityResolutionOff": "Integer resolution on the attitude baselines stays off, and the reason is a result rather than a preference: with the line bias truth-only and no estimator-side model, InterAntennaPhaseBias.resolvedStatus is 'notCalibratedExternalProduct', and requirePhaseBiasCalibrationForFix (true under realism grade) refuses the fix. Enabling machinery that always declines would add noise, not evidence.",
+    "elevationMask_rad": 0.17453292519943295,
+    "sigma_accel_mps2": 1e-6,
+    "processNoise": { "modelMismatch": { "enable": false } },
+    "dynamics": {
+      "perturbations": {
+        "luniSolar": { "enable": true },
+        "srp": { "enable": true, "Cr": 1.24, "areaToMass_m2pkg": 0.02 },
+        "epochJD_TT": 2451545.0
+      }
+    },
+    "attitude": { "useCodePartials": false, "useCarrierPartials": false },
+    "starTracker": { "whiteAngularSigma_rad": 1.4544410433286078e-04 },
+    "imu": {
+      "truth": { "arw_rad_per_sqrt_s": 2e-4, "rrw_rad_per_s_sqrt_s": 3e-6, "bias0Sigma_radps": 3e-5 },
+      "filter": { "arw_rad_per_sqrt_s": 2e-4, "rrw_rad_per_s_sqrt_s": 3e-6, "P0_bias_radps": 3e-5 }
+    },
+    "srpCoefficient": { "enable": false, "useInEKF": false },
+    "empiricalAccel": { "enable": false, "useInEKF": false },
+    "attitudeCarrierMode": "calibratedDifferentialAmbiguity",
+    "attitudeInitMode": "none",
+    "diffAtt": {
+      "calibWin_s": 60,
+      "referenceMode": "selfCalibrated",
+      "ambiguityResolution": { "enable": false }
+    },
+    "lambda": { "enable": false }
+  },
+
+  "orbit": {
+    "truth": {
+      "perturbations": {
+        "luniSolar": { "enable": true },
+        "srp": { "enable": true, "Cr": 1.3, "areaToMass_m2pkg": 0.02, "shadow": "cylindrical" },
+        "epochJD_TT": 2451545.0
+      }
+    }
+  },
+
+  "report": {
+    "runVersion": "golden-baseline-attitude",
+    "layout": "clockExact",
+    "writePdf": true,
+    "writeMat": true,
+    "compileTex": "require",
+    "monteCarlo": { "enable": false }
+  },
+
+  "diagnostics": {
+    "storage": { "mode": "compact", "snapshot": { "enable": true, "interval_s": 300 } }
+  }
+}

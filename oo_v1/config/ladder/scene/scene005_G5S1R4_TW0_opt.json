@@ -1,0 +1,19 @@
+{
+  "_id": "OPTIMISTIC reference for G5S1R4. masterConfig nominal: realism.grade is OFF, so the atmosphere is matched truth-to-model, the clock template is the idealised 'legacy' set, and none of the truth-only systematics (multipath, hardware delay, tower survey, PCV, DCB, EOP) are injected. This is the best-case number the architecture can produce and it is NOT defensible on its own -- it exists so scene007_G5S1R4_TW0_golden has something to be measured against. The ONLY difference from scene007_G5S1R4_TW0_golden is the error model; the formation and the two-way toggle are identical.",
+  "scenario": {
+    "name": "scene005_G5S1R4_TW0_opt",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+  "measurements": {
+    "twoWayTimeTransfer": {
+      "enable": false,
+      "useInEKF": false
+    }
+  },
+  "report": {
+    "layout": "clockExact",
+    "runVersion": "scene005"
+  }
+}

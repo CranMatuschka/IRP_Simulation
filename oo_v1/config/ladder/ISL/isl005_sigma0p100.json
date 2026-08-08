@@ -1,0 +1,19 @@
+{
+  "_id": "ISL rung: sigma0p100. One crosslink change against golden_baseline_multi.json (G5S6R4 federated, four antennas per spacecraft); every other leaf is inherited. Two-way ISL range sigma 100 mm.",
+  "_extends": "golden_baseline_multi.json",
+  "_delta": "Two-way ISL range sigma 100 mm.",
+  "scenario": {
+    "name": "isl005_sigma0p100",
+    "nTowers": 5,
+    "nSpaceAssets": 6,
+    "nReceivers": 4
+  },
+  "multiAsset": {
+    "twoWayISL": {
+      "sigma_m": 0.1
+    }
+  },
+  "report": {
+    "runVersion": "isl005"
+  }
+}

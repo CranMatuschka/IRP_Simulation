@@ -1,0 +1,17 @@
+{
+  "_id": "ISL rung: keepIslInPerAssetEkf. One crosslink change against golden_baseline_multi.json (G5S6R4 federated, four antennas per spacecraft); every other leaf is inherited. Crosslinks fed into each per-asset EKF as well as the relative layer. DELIBERATELY DOUBLE-COUNTS the observation -- the golden keeps this false precisely so the relative layer's covariance stays independently valid. This rung exists to measure the size of that violation, not to be used as a result.",
+  "_extends": "golden_baseline_multi.json",
+  "_delta": "Crosslinks fed into each per-asset EKF as well as the relative layer. DELIBERATELY DOUBLE-COUNTS the observation -- the golden keeps this false precisely so the relative layer's covariance stays independently valid. This rung exists to measure the size of that violation, not to be used as a result.",
+  "scenario": {
+    "name": "isl009_keepIslInPerAssetEkf",
+    "nTowers": 5,
+    "nSpaceAssets": 6,
+    "nReceivers": 4
+  },
+  "multiAsset": {
+    "keepIslInPerAssetEkf": true
+  },
+  "report": {
+    "runVersion": "isl009"
+  }
+}

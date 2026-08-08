@@ -1,0 +1,21 @@
+{
+  "_id": "GOLDEN rung for G5S3R4. Built on golden_baseline_multi.json via _extends, so every sigma, bias and process-noise value is the sourced one (docs/golden_baseline_provenance.md) and a change to the golden propagates here automatically. The delta below is the formation size and the two-way time-transfer toggle, nothing else.",
+  "_extends": "golden_baseline_multi.json",
+  "_delta": "nSpaceAssets 3 instead of the golden's 6. Fewer crosslinks, so the read-only relative-geometry layer is solved from fewer ranges. twoWayTimeTransfer enabled and used in the EKF (TW1).",
+  "scenario": {
+    "name": "scene012_G5S3R4_TW1_golden",
+    "nTowers": 5,
+    "nSpaceAssets": 3,
+    "nReceivers": 4
+  },
+  "measurements": {
+    "twoWayTimeTransfer": {
+      "enable": true,
+      "useInEKF": true,
+      "towers": "all"
+    }
+  },
+  "report": {
+    "runVersion": "scene012"
+  }
+}

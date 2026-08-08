@@ -1,0 +1,370 @@
+{
+  "_id": "golden_baseline v2.0 -- THE reference single-asset scenario for future analysis. FOUR receive antennas.",
+  "_purpose": "A physically complete, conservatively parameterised, fully sourced one-way reverse-GNSS GEO run. Every numeric value in this file has a citation in docs/golden_baseline_provenance.md (APA7 table, keyed by the JSON path). This scenario is NOT tuned for the best number -- it is tuned so that every setting can be defended. Where a choice trades accuracy for defensibility, the defensible option is taken and the cost is recorded. Where a claim could not be verified in the code, the claim was removed rather than repeated.",
+  "_v2": "v2.0 moves the baseline from ONE receive antenna to FOUR (the flight configuration). That is not a free change: two truth-side errors that are physically COMMON to all four phase centres were drawn INDEPENDENTLY per antenna, which handed a 4-antenna run a free factor sqrt(4)=2 on them. Both are now closed by gated, measured fixes -- atmosphere.sharedAcrossAntennas and errors.multipath.coloredGM.sharedAcrossAntennas below. v2.0 also DELETES three claims v1.0 made that the code does not carry: truth-only antenna PCV (measured residual 2.2e-8 m -- it cancels), and the dead keys measurements.carrier.minElevationDeg and measurements.codeNoise.cn0.enable.",
+  "_notBeamPointing": "multiAsset.beamPointingLock is NOT used anywhere in this baseline (it is a multi-asset post-processor and is explicitly off in golden_baseline_multi.json). Orientation claims are out of scope for the baseline by construction.",
+  "_pairScenario": "golden_baseline_multi.json is the N=6 federated formation twin. The two differ ONLY in the formation/ISL block, so any delta between them is attributable to the formation, not to the error model. tests/test_golden_baseline.m enforces that leaf by leaf.",
+
+  "scenario": {
+    "_geometry": "Five real ground sites already defined in masterConfig (Tenerife, Stockholm, Hartebeesthoek, Bengaluru, Libreville). The minimum elevation over the five is 22.6 deg (Stockholm), so no elevation mask ever removes a tower and the geometry is constant for the whole arc -- the clearest possible geometry to reason about.",
+    "_nReceivers": "FOUR phase centres, the flight configuration. finalizeConfig builds the canonical non-coplanar cross [1 -1 0 0; 0 0 1 -1; 0.2 0.2 -0.2 -0.2] m (adjacent baseline 1.47 m, opposite 2.00 m); the arms are NOT set here because finalizeConfig owns them and a scenario-set value would be overwritten. MEASURED consequences: filter rows 30 -> 105 per epoch (40 code + 20 carrier + 40 Doppler + 5 two-way; the two-way block does not scale with antennas) and state dimension 37 -> 67, the whole growth being float ambiguities (5 towers x 4 antennas x 2 signals = 40, up from 10). WHAT FOUR ANTENNAS BUY HERE: four genuinely independent code-thermal samples per tower per epoch (measured inter-antenna correlation -0.027). WHAT THEY DO NOT BUY: attitude -- see estimator.attitude below. WHAT THEY COST: 30 extra ambiguity states of which half the directions are unobservable (see estimation._ambiguity), and two common-mode errors that needed the gates below before the row count was honest.",
+    "name": "golden_baseline",
+    "orbitClass": "GEO",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+
+  "simulation": {
+    "_duration": "DURATION IS NOT SET HERE. It is a property of the RUN, not of the scenario: run_oo_v1(configPath, duration_s) owns it and defaults to 3600 s, so one scenario file can be swept over arc lengths without editing it. The provenance below is for that 3600 s default. 3600 s = 15 deg of GEO arc. Long enough for the filter to converge and for the 600 s ionospheric and 3 h tropospheric correlation times to be visible; short enough to re-run on every change. DECLARED LIMITATION: one hour cannot separate a rigid formation rotation from a deformation (turn-angle table: 9.9x CRLB penalty at 3600 s), so no orientation claim is made from this arc length.",
+    "dt_s": 1,
+    "seed": 42
+  },
+
+  "realism": {
+    "_grade": "config/internal/realismGradeConfig: JOW Table 2.1 caesium receiver clock, IGS-RTS-class tower clock product, C/N0 code weighting, truth-side multipath / hardware delay / survey / DCB, honest measurement sigma floors, relativistic clock, EOP, conservative star-tracker and gyro noise.",
+    "_luniSolarOff": "The realism overlay's luniSolar block configures a REDUCED-DYNAMICS filter (truth gets sun+moon+SRP, the EKF is left at pure J2, and 1e-5 m/s^2 of mismatch process noise pays for the gap). That is a stress case, not a baseline: any real GEO orbit determination filter models third-body and SRP. Switched off here so this file can state the truth and estimator force models explicitly under orbit.* and estimator.dynamics.* below.",
+    "_solidEarthTideOff": "models.frames.SolidEarthTide is TRUTH-ONLY -- there is no estimator-side tide model. Leaving it on therefore simulates a system that declines to apply a correction the IERS Conventions make mandatory, injecting (measured) 0.098 m of radial tidal breathing into z - h that no real precise system carries. The residual after the IERS degree-2 in-phase model is ~1 mm, i.e. below measurement.sigmaFloor_m. NOTE this is NOT the flattering choice: measured on scene_G5S1R4_ts3600_TW1, removing the tide made the radial bias WORSE (0.2596 -> 0.3062 m) because it had been partially cancelling other truth-only biases.",
+    "_interAntennaBiasON": "TURNED ON IN v2.0, and the reason has changed. At one antenna the effect was structurally dead (CarrierMeasurementBuilder gates it on antenna index > 1). At four antennas it is a real, unavoidable hardware error: each antenna's cable and front end has its own carrier phase delay. Leaving it off would hand any future inter-antenna work a zero-bias truth reference, which is the artefact realism R-6 exists to prevent. MEASURED contribution to z - h at 4 antennas: 0.231 m peak, 0.068 m rms. It is a per-(antenna, signal) CONSTANT, so the per-tower-per-receiver-per-signal float ambiguities absorb it exactly as a real receiver would -- which is precisely why it is safe to include and dishonest to exclude.",
+    "grade": true,
+    "include": {
+      "luniSolar": false,
+      "solidEarthTide": false,
+      "interAntennaCarrierBias": true
+    }
+  },
+
+  "atmosphere": {
+    "_realistic": "Selects masterConfig's atmosphere.realisticProfile: Saastamoinen-class hydrostatic delay from surface meteorology with Niell mapping and a Gauss-Markov wet delay, plus a diurnal + Gauss-Markov TEC truth corrected by an INDEPENDENT Klobuchar climatology. This is the scientifically valuable option rather than the simplest: the truth and the model are different functions, so the residual is a real correction error and not a scaled copy of the truth.",
+    "_ionosphereHandling": "ionosphereFree = false and estimateIono = false leaves the resolved codeMode at 'singleFrequency', which is masterConfig's internal name for RAW UNCOMBINED dual-frequency L1+L2. The ionosphere is then removed by an explicit per-tower slant-delay EKF state (estimation.ionosphereMode below), i.e. the uncombined/undifferenced PPP formulation. Chosen over the ionosphere-free combination because IF halves the code rows and amplifies noise by 2.98x, which a 5-tower geometry cannot afford. estimateIono is left false ON PURPOSE: setting it would force errors.ionosphere.model.correction = 'none' inside ConfigFactory.applyAtmosphereProfile, throwing away the Klobuchar correction and asking the state to absorb the whole 5-15 m slant delay from a 5 m prior. measurements.codeMode is deliberately NOT set here -- applyAtmosphereProfile derives it after the merge and would overwrite any value this file gave.",
+    "_sharedAcrossAntennas": "NEW IN v2.0 AND REQUIRED BY THE FOUR-ANTENNA CONFIGURATION. Amplitude scintillation is a diffraction pattern imposed on the wavefront; it decorrelates over the Fresnel scale sqrt(lambda*z), which at L1 is ~260 m for a 350 km ionospheric screen and ~2.6 km over the full GEO path. The antenna cross spans 2.00 m, i.e. at most 8e-3 Fresnel scales, so the correct inter-antenna correlation is 1 - O(1e-4). The truth draw was keyed on the antenna index, giving correlation exactly 0 instead -- a free factor sqrt(4) = 2 on the LARGEST single truth-only term in this configuration (measured 0.618 m rms of z - h, more than multipath and more than the code thermal noise). R shrank with it, so no NEES or NIS check could have detected the gain. MEASURED with the gate on: inter-antenna scintillation spread collapses 2.58 m -> 7.6e-8 m (the residue is the elevation-driven sigma envelope, which legitimately differs across a 2 m array), and antenna 1 is bit-identical, so no single-antenna result moves. Gate and test: tests/test_common_mode_across_antennas.m.",
+    "_notSharedAcrossFormation": "atmosphere.sharedAcrossFormation is deliberately NOT set in this single-asset file. It is a FORMATION-scope flag and it is not inert for N = 1: it re-roots the atmosphere from simulation.seed to the formation-wide seed, which would change this run's numbers for no physical reason. It is set only in the multi twin, where it is mandatory.",
+    "realistic": true,
+    "ionosphereFree": false,
+    "estimateIono": false,
+    "sharedAcrossAntennas": { "enable": true }
+  },
+
+  "estimation": {
+    "_ionoState": "One L1 slant-ionosphere state per tower, estimating the POST-KLOBUCHAR residual. tau matched to the truth TEC Gauss-Markov correlation time (600 s). sigma_ss 1.0 m and initialSigma 5.0 m bound a Klobuchar residual of roughly half the 30 TECU day-time vertical delay mapped to the 22-59 deg elevations of this network. NOTE the state is per TOWER, not per tower-antenna: the slant delay is common to all four phase centres, which is physically right and is why the four antenna rows legitimately inform one state.",
+    "_zwdState": "One zenith wet delay state per tower, with the SAME first-order Gauss-Markov parameters as the simulated wet delay (tau = 3 h, sigma_ss = 4 cm), so the filter is given a correct -- not an oracle -- process model. This state is the single largest covariance-honesty lever measured on this code base (NEES 1011 -> 25.6, 3-sigma coverage 9/22/1 % -> 100/100/92 %) for +2 % position RMS.",
+    "ionosphereMode": "perTowerSlant",
+    "slantIono": {
+      "tau_s": 600,
+      "sigma_ss_m": 1.0,
+      "initialSigma_m": 5.0
+    },
+    "troposphereMode": "perTowerZwd",
+    "tropoZwd": {
+      "tau_s": 10800,
+      "sigma_ss_m": 0.04,
+      "initialSigma_m": 0.10
+    },
+    "_ambiguity": "Float ambiguities only, one per tower x receiver x signal = 40 at this topology. Integer resolution is NOT attempted: an undifferenced ambiguity absorbs the per-arc clock and hardware bias (including the inter-antenna carrier bias enabled above), so its truth is not an integer, and the LAMBDA engine is an unvendored external toolbox. Float is the conservative choice -- worse, and honest. floatPerTowerReceiverSignal is also the only legal mode above one antenna: ConfigFactory raises carrierAmbiguityReceiverIndexRequired for floatPerTowerSignal at nReceivers > 1. DECLARED LIMITATION: the carrier rows are IONOSPHERE-FREE COMBINED (see measurements.carrier below), so each (tower, antenna) contributes ONE row against TWO ambiguity states -- 20 rows for 40 states. Half the ambiguity directions are therefore unobservable and stay at their 100 m prior, which is harmless for the estimate but inflates max(diag P) and hence the PSD-guard floor.",
+    "ambiguityMode": "floatPerTowerReceiverSignal",
+    "ambiguity": {
+      "initialSigma_m": 100
+    }
+  },
+
+  "errors": {
+    "troposphere": {
+      "_model": "Truth and model share the same physics (hydrostatic from surface met + Niell mapping) and differ only through the stochastic wet term, which is what a real system's residual actually is. sigma_m = 0.15 m of declared zenith uncertainty is 3.75x the 0.04 m stochastic wet sigma and is charged in R IN ADDITION to the ZWD state -- deliberately conservative double coverage, never optimistic.",
+      "enable": true,
+      "truth": { "enable": true, "mappingType": "niell" },
+      "model": { "enable": true, "mappingType": "niell" },
+      "modelType": "localWeatherGM",
+      "dayOfYear": 180,
+      "stochastic": {
+        "enable": true,
+        "tau_s": 10800,
+        "sigmaWet_ss_m": 0.04
+      },
+      "sigma_m": 0.15
+    },
+    "ionosphere": {
+      "_truth": "Diurnal vertical TEC 6 TECU (night) to 30 TECU (14:00 local) plus a 600 s Gauss-Markov residual of 0.3 m vertical at L1 -- a moderately active mid-latitude ionosphere, not a solar-maximum storm.",
+      "_model": "Klobuchar broadcast climatology, computed independently of the truth. Klobuchar removes roughly half the RMS delay by design, so the surviving residual is a real correction error.",
+      "_higherOrder": "Second- and third-order terms survive the first-order removal and are cm-class at L1 under high activity; included as a bounded truth-side residual. MEASURED contribution to z - h: 0.013 m peak.",
+      "_scintillation": "S4 = 0.3 at zenith is the weak/moderate boundary of the standard classification. Two of the five towers (Libreville 0.04 N, Bengaluru 13.0 N) sit in the equatorial anomaly, so scintillation is genuinely in scope for this network; 0.3 is the conservative end of nominal rather than a storm case. MEASURED contribution to z - h: 7.58 m peak, 0.618 m rms -- the largest truth-only term in this configuration, which is why the antenna-scope gate above matters more than any other v2.0 change.",
+      "enable": true,
+      "truth": {
+        "enable": true,
+        "diurnal": {
+          "enable": true,
+          "vtecDay_TECU": 30,
+          "vtecNight_TECU": 6,
+          "peakLocalTime_h": 14
+        }
+      },
+      "model": { "enable": true, "correction": "klobuchar" },
+      "modelType": "tecGaussMarkov",
+      "topsideFraction": 1,
+      "stochastic": {
+        "enable": true,
+        "tau_s": 600,
+        "sigmaVDelayL1_ss_m": 0.3
+      },
+      "higherOrder": { "enable": true },
+      "scintillation": {
+        "enable": true,
+        "model": "conker",
+        "S4zen": 0.3,
+        "tau_s": 30,
+        "phaseScint": { "enable": true, "sigmaPhi_rad": 0.2, "tau_s": 1.5 }
+      },
+      "sigma_m": 1.00
+    },
+    "multipath": {
+      "_why": "Code multipath is the dominant non-atmospheric error in nominal conditions and is strongly time-correlated, so it is modelled as a first-order Gauss-Markov process rather than as white noise. tau = 60 s means a 3600 s arc holds ~60 independent multipath samples against 3600 thermal ones. Truth-only: the estimator does not know the instantaneous value, only its steady-state variance through R. MEASURED contribution to z - h: 0.818 m peak, 0.141 m rms.",
+      "_sharedAcrossAntennas": "NEW IN v2.0 AND REQUIRED BY THE FOUR-ANTENNA CONFIGURATION, for the same reason as the scintillation gate. As parameterised here -- 0.30 m steady state with a 1/sin(el) envelope keyed on the TOWER elevation -- this is the classical GROUND-STATION multipath model: more multipath at low elevation because of the ground bounce at the station. That component is at the transmit end and is therefore COMMON to all four receive antennas, but the implementation kept one Gauss-Markov state per (tower, antenna) link and drew them independently, handing the run a second free sqrt(4). With the gate on there is one link state per tower, stepped once per epoch and shared by every antenna row (measured inter-antenna spread exactly 0, antenna 1 bit-identical). DECLARED: the RECEIVE-end component -- reflections off the spacecraft structure, which genuinely does differ per antenna -- is not separately modelled. Setting this true is the statement that the modelled 0.30 m is the transmit-end term, which is the conservative reading because it removes an averaging gain rather than adding one.",
+      "enable": true,
+      "truth": { "enable": true },
+      "model": { "enable": false },
+      "coloredGM": {
+        "enable": true,
+        "tau_s": 60,
+        "sigmaCodeL1_ss_m": 0.30,
+        "elevationExponent": 1,
+        "sharedAcrossAntennas": { "enable": true }
+      }
+    },
+    "hardwareDelay": {
+      "_why": "CALIBRATED BUT NOT ZERO. The realism overlay ships 0.5 m, which is an UNcalibrated ground RF chain. A flown station calibrates its transmit chain, so the honest residual is the calibration error, not the raw delay: 0.05 m = 167 ps, the conservative end of routine sub-nanosecond station delay calibration. Truth-only, so it survives z - h; MEASURED contribution 0.122 m peak, 0.027 m rms. It is a per-TOWER error and is therefore common to all four antennas, which the code already models correctly.",
+      "enable": true,
+      "truth": { "enable": true },
+      "model": { "enable": false },
+      "sigma_m": 0.05,
+      "residualStochastic": { "enable": true }
+    },
+    "interAntennaCarrierBias": {
+      "_sigma": "0.25 cycles = 47.6 mm at L1, the repo's realism R-6 value: an UNCALIBRATED inter-antenna carrier line bias, which is the honest assumption because this configuration declares no inter-antenna phase calibration (see estimator.attitudeCarrierMode). Drawn once per (antenna, signal) and constant over the arc, relative to antenna 1. The magnitude is only weakly load-bearing precisely because the per-tower-per-receiver-per-signal float ambiguity absorbs a constant exactly -- as a real receiver must.",
+      "_driftOff": "The bias DRIFT (thermal breathing of the cable, masterConfig default 0.05 cycles/hour = 9.5 mm/h at L1) is left OFF. It is real, but it is NOT absorbed by a constant ambiguity and nothing in R pays for it, so switching it on would make the filter quietly inconsistent rather than conservatively wrong. It is named here as a declared omission rather than silently inherited.",
+      "enable": true,
+      "sigma_cycles": 0.25,
+      "perSignal": true,
+      "drift": { "enable": false }
+    }
+  },
+
+  "effects": {
+    "ionosphere": {
+      "_mapping": "Single thin-shell obliquity at a 350 km pierce height, the standard mapping for a broadcast-grade ionosphere; 1/sin(el) over-maps at low elevation.",
+      "mappingModel": "thinShell",
+      "shellHeight_m": 350000
+    },
+    "towerSurvey": {
+      "_why": "Truth-only station coordinate error: the model uses the surveyed position, the truth sits at the surveyed position plus the survey error. 10/10/30 mm ENU is conservative against ITRF-class site coordinates (mm-level for IGS core sites) and representative of a general tracking station's monument/local-tie budget. MEASURED contribution to z - h: 0.032 m peak, 0.021 m rms; per-tower, so common to all four antennas.",
+      "enable": true,
+      "truth": { "enable": true },
+      "model": { "enable": false },
+      "sigmaENU_m": [0.01, 0.01, 0.03]
+    },
+    "antenna": {
+      "_pcvIsCalibrated": "CLAIM CORRECTED IN v2.0. v1.0 declared a 5 mm TRUTH-ONLY phase centre variation. It was not in the run: RangeCorrections.pcvCorrection_ treats the presence of effects.antenna.pcvModel as authoritative and BYPASSES the effects.antennaPCV.<side>.enable gate, so the identical amp*cos(el)^2 is applied to the truth AND the model. MEASURED residual after removing it entirely: 2.2e-8 m -- i.e. it cancels. The honest statement, and the one this file now makes, is that PCV is applied consistently on both sides, which represents a PERFECTLY CALIBRATED antenna. The real post-calibration residual (~5 mm, Schmid et al. 2007) is therefore NOT injected and is part of what the 10 mm carrier sigma pays for. The truth/model pair has been deleted rather than left in place claiming something the code does not do.",
+      "pcvModel": "toy"
+    },
+    "antennaPCO": {
+      "_calibrationResidual": "2 mm per body axis of truth-only receive phase-centre offset mis-calibration, added to the TRUTH lever arms only so it survives z - h. VERIFIED LIVE (unlike PCV): measured contribution 2.75 mm peak, 1.97 mm rms. Representative of the few-mm consistency of absolute phase-centre models. DECLARED: it is one body-frame vector broadcast to all four antenna columns, so it is common-mode across the array and cancels identically in any inter-antenna baseline -- it is a spacecraft-level offset, not four independent antenna errors.",
+      "calibrationResidual": {
+        "enable": true,
+        "receiverOffset_body_m": [0.002, 0.002, 0.002]
+      }
+    },
+    "solidEarthTide": {
+      "_off": "See realism.include.solidEarthTide above -- truth-only with no estimator model would simulate an uncorrected mandatory IERS term.",
+      "truth": { "enable": false }
+    }
+  },
+
+  "biases": {
+    "interFrequency": {
+      "_dcb": "CALIBRATED DIFFERENTIAL CODE BIAS, NOT AN UNCALIBRATED ONE. Truth L1 0.30 m / L2 0.45 m is a 0.5 ns L1-L2 group delay. The model applies a published DCB product, leaving a 0.045 m = 0.15 ns DIFFERENTIAL residual (measured exactly 0.045 m in z - h), which is the consistency routinely reported between independent multi-GNSS DCB products. The common part is absorbed by the receiver clock and is not observable. Measured consequence of getting this wrong: leaving the whole 0.30/0.45 m uncalibrated (the realism-overlay default) costs 0.07 m of constant radial bias and drops radial 3-sigma coverage from 37.7 % to 4.6 %.",
+      "code": {
+        "truth": { "L1_m": 0.30, "L2_m": 0.45 },
+        "model": { "L1_m": 0.30, "L2_m": 0.405 }
+      }
+    }
+  },
+
+  "frames": {
+    "_eop": "REAL POLE, REAL CORRECTION, REAL RESIDUAL. truthEop carries a representative actual pole position (xp 0.150\", yp 0.350\"); eopModel is the IERS product the estimator applies. The 0.3 mas offset between them is the accuracy of a one-day-ahead IERS Bulletin A polar motion prediction, and maps to 9.3 mm of tower displacement (measured 0.037 m peak in z - h). Applying published EOP is USING PUBLISHED DATA, not truth assistance. Measured: with no estimator-side EOP at all, cross-track RMS is 0.53 m worse and cross-track 3-sigma coverage falls from 100 % to 92.4 %. The 0.01 ms/day LOD residual contributes ~0.2 mm over the arc and is retained only for completeness.",
+    "truthEop": {
+      "enable": true,
+      "polarMotion_xp_arcsec": 0.150,
+      "polarMotion_yp_arcsec": 0.350,
+      "ut1Rate_error_msPerDay": 0.05
+    },
+    "eopModel": {
+      "enable": true,
+      "polarMotion_xp_arcsec": 0.1497,
+      "polarMotion_yp_arcsec": 0.3497,
+      "ut1Rate_error_msPerDay": 0.04
+    }
+  },
+
+  "physics": {
+    "_relativity": "The relativistic receiver-clock rate offset (~+46.6 us/day at GEO) is present in the truth AND modelled by the estimator, which is what a real system does. Leaving it truth-only would hand the clock states a 2.3 km ramp to absorb.",
+    "relativity": {
+      "clock": {
+        "enable": true,
+        "truth": { "enable": true },
+        "model": { "enable": true }
+      }
+    }
+  },
+
+  "clock": {
+    "_templateSource": "jowTable2p1 = the project's literature-anchored h-coefficients, deliberately less optimistic than the 'legacy' table the frozen goldens use. clockScaling.templateSource is NOT set here: finalizeConfig derives it from this field, so writing it would be a redundant leaf that could silently disagree.",
+    "_mode": "Tower clocks are NOT EKF states. They are corrected by a broadcast product whose residual enters R, which is exactly the PPP treatment of transmitter clocks and is the clearest architecture to defend. Estimating them (clock.mode = 'includeTowerClocksInEKF') is a documented variant, not the baseline. estimator.estimateTowerClocks is NOT set here for the same reason as clockScaling: finalizeConfig derives it from this mode.",
+    "templateSource": "jowTable2p1",
+    "mode": "spacecraftReceiverClockOnly",
+    "gauge": { "mode": "externalTowerCorrections" }
+  },
+
+  "clocks": {
+    "tower": {
+      "product": {
+        "_sigma": "IGS real-time-service class, not IGS-final: 0.10 m = 0.33 ns bias and 1e-3 m/s drift, re-broadcast every 30 s with 5 s of latency and 120 s of validity. The product residual is piecewise constant per interval and shared by every row from that tower in that interval; covariance.sharedErrors carries that block, and it is the ONE common-mode term R correlates ACROSS THE FOUR ANTENNAS -- measured inter-antenna correlation of two code rows from one tower is 0.0034 = (0.10/1.733)^2, exactly the product variance share.",
+        "sigmaBias_m": 0.10,
+        "sigmaDrift_mps": 0.001,
+        "updateInterval_s": 30,
+        "latency_s": 5,
+        "validity_s": 120,
+        "addToR": true
+      }
+    }
+  },
+
+  "measurement": {
+    "_floor": "1 cm floor on any measurement sigma. The 1 mm default is sub-wavelength and not defensible for any real observable.",
+    "sigmaFloor_m": 0.01
+  },
+
+  "measurements": {
+    "codeNoise": {
+      "_cn0": "Code noise from a carrier-to-noise-density model rather than one constant: 45 dB-Hz nominal with 6 dB of gain towards zenith and 0.30 m of 1-sigma code error at 45 dB-Hz. This is what stops a low-elevation tower being weighted as if it were overhead. The selector is the 'model' string; cn0.enable was deleted in v2.0 because no code reads it.",
+      "model": "cn0",
+      "cn0": {
+        "base_dBHz": 45,
+        "elevationGain_dB": 6,
+        "sigmaAt45dBHz_m": 0.30
+      }
+    },
+    "doppler": {
+      "_sigmaInflation": "0.0424 m/s = 0.03 x sqrt(2). 0.03 m/s is the honest raw-FLL figure; the sqrt(2) is a DELIBERATE, DOCUMENTED mitigation for a known defect in this code base -- the L1 and L2 Doppler rows are generated from an IDENTICAL noise draw, so two rows carry one row of information while R claims two. Inflating each row's sigma by sqrt(2) halves the claimed information and restores the correct total. If the duplicate draw is ever fixed, this line becomes merely conservative rather than corrective; it is safe either way.",
+      "enable": true,
+      "useInEKF": true,
+      "sigma_mps": 0.0424
+    },
+    "carrier": {
+      "_sigma": "10 mm, NOT the 1-3 mm thermal figure. The extra budget covers what this configuration does not model: carrier phase wind-up (up to one cycle = 19 cm per revolution of the antenna, i.e. ~8 mm over a 1 h GEO arc), phase multipath, and the antenna PCV calibration residual that effects.antenna above documents as cancelled rather than injected. Declaring 1-3 mm here would be a claim that those are modelled. minElevationDeg was deleted in v2.0: it is declared in masterConfig and read by nothing.",
+      "_ionosphereFreeRows": "VERIFIED, AND NOT THE KNOB IT LOOKS LIKE. The carrier rows entering the EKF are IONOSPHERE-FREE COMBINATIONS of the L1 and L2 float rows: CarrierMeasurementBuilder replaces the 2 x (towers x antennas) raw rows with (towers x antennas) IF rows whenever CarrierIonoFreeRowBuilder.shouldCombine is true, and that gate reads measurements.carrier.ionosphereFreeRows.{enable,useInEkf} -- BOTH masterConfig defaults, both resolving true here. The legacy measurements.carrierCombinationMode is a DIFFERENT and now-deprecated knob and resolves to 'raw'; reading it alone would give the wrong answer, which is why it is recorded here. So this baseline is deliberately HYBRID: raw uncombined dual-frequency CODE with per-tower slant-ionosphere states (which is what makes the iono state observable, through the L1/L2 code dispersion), and ionosphere-free CARRIER, which removes the first-order ionosphere from the phase rows without needing the state to be right. Kept as-is rather than forced to raw L1: the IF carrier is the standard PPP phase observable, and the 2.98x IF noise amplification that rules IF out for the code is affordable on a 10 mm phase sigma.",
+      "sigma_m": 0.010
+    },
+    "carrierPhase": { "enable": true },
+    "carrierMode": "ekfFloat",
+    "twoWayTimeTransfer": {
+      "_why": "THE ONE STRUCTURAL CHOICE THAT MAKES THE COVARIANCE MEANINGFUL. A one-way uplink to a geostationary asset has an exact radial <-> receiver-clock degeneracy (measured correlation -1.000000 across every frequency tried), so every radial number from a one-way-only run is a projection of a rank-deficient problem. A two-way exchange cancels the geometric range by reciprocity and observes (b_rx - b_tower) directly, breaking it (measured correlation -0.003 with this row active). Without it the baseline could not make an honest 3-sigma statement about the radial axis at all. There are 5 two-way rows, one per tower: this block does NOT scale with the antenna count.",
+      "_sigma": "0.03 m = 100 ps, the demonstrated accuracy class of dedicated ground-space two-way time transfer, and NOT the binding constraint here -- the achievable clock accuracy is floored by max(this, the 0.10 m tower clock product).",
+      "enable": true,
+      "useInEKF": true,
+      "mode": "firstOrderReciprocal",
+      "towers": "all",
+      "sigma_m": 0.03,
+      "includeReciprocityResidual": true,
+      "reciprocitySigma_m": 0.005,
+      "warmup_s": 0,
+      "conservativeProductCorrelation": true
+    }
+  },
+
+  "carrierSlip": {
+    "_baselineDifferenced": "DECLARED EXPLICITLY IN v2.0 BECAUSE IT ONLY BECOMES LIVE AT FOUR ANTENNAS. The realism overlay switches this on by default; at one antenna every carrier row IS the reference antenna, so the loop body never executed. At four antennas the slip metric for antennas 2-4 is differenced against the antenna-1 row of the same tower and signal, which stops a receiver-clock-like common jump from resetting all four arcs at once while keeping a localised slip detectable. Stating it here rather than inheriting it silently is the point: a newly-live arc-management policy is exactly the kind of change that would otherwise not appear anywhere in the scenario.",
+    "commonModeCompensation": { "enable": true, "minRows": 4 },
+    "baselineDifferencedMode": { "enable": true, "referenceAntenna": 1 }
+  },
+
+  "estimator": {
+    "_elevationMask": "10 deg, the standard operational mask for precise GNSS processing. DECLARED DEFECT, harmless here: MeasurementModel reads a TOP-LEVEL cfg.elevationMask_rad that nothing in the repository ever sets, so the code/carrier/Doppler visibility gate silently uses its own 5 deg default; this key does reach the two-way rows. Both are inert for this network because the lowest tower is 22.6 deg, so no row is ever masked either way -- but the claim is stated as it really is rather than as intended.",
+    "_forceModel": "Truth and EKF share the SAME force family -- J2 + Sun/Moon third body (Montenbruck & Gill analytic ephemeris) + cannonball SRP with a cylindrical shadow -- which is what a real GEO orbit determination filter runs. The ONLY declared dynamic gap is the radiation pressure coefficient: truth Cr = 1.30, estimator Cr = 1.24, a 4.6 % reflectivity error worth 5.5e-9 m/s^2, i.e. 35 mm of along-orbit displacement over the arc. That gap is covered ~180x over by the residual-acceleration process noise sigma_accel_mps2 = 1e-6 m/s^2, which is why processNoise.modelMismatch stays OFF: declaring it as well would charge the same uncertainty twice.",
+    "_attitude": "THE FOUR ANTENNAS ARE PHASE CENTRES, NOT AN ATTITUDE SENSOR, AND THAT IS A DECISION. finalizeConfig forces estimateAttitudeFromPseudorange = true at nReceivers > 1 and then immediately reverts it because attitude.useCodePartials is false; the two use*Partials flags are the real knobs and are pinned here so the choice is visible in the scenario. Why false: the lever arm is 1.02 m and the code sigma is 0.166-0.230 m over this network's elevations, so code-derived attitude carries of order 1e-5 of the star tracker's per-epoch information, while the star tracker at 30 arcsec x 1 m lever contributes 0.15 mm of antenna-position error. Adding a mechanism that buys nothing violates the no-unearned-information rule and costs runtime. estimateAttitude / estimateAttitudeFromPseudorange themselves are NOT set here: finalizeConfig rewrites them unconditionally at nReceivers > 1, so a scenario-set value would be silently overridden.",
+    "_attitudeSensors": "Pinned explicitly in v2.0 so the attitude budget is auditable from the scenario alone rather than inherited from the realism overlay. 30 arcsec is the poor end of flight-qualified star trackers, applied as one scalar to all three axes so it also stands in for the weaker about-boresight axis. The gyro angle- and rate-random-walk values sit at the conservative end for a precision platform, so the attitude result is a lower bound.",
+    "_notEstimated": "srpCoefficient (an SRP scale state) and empiricalAccel (three RTN Gauss-Markov acceleration states) are both implemented and both OFF. Measured on this code base: the empirical accelerations move NEES from 25.6 to 25.4 -- nothing -- because the dominant residual is a CONSTANT measurement-side offset, and 0.5*a*t^2 is zero at t=0, so an acceleration cannot represent it. Adding states that do not earn their place is not conservatism.",
+    "_lambda": "Integer ambiguity resolution off. The LAMBDA engine is an external toolbox that is not vendored in this repository (no licence grant), so a baseline that depended on it would not be reproducible from a clean checkout.",
+    "_attitudeCarrierMode": "'off' is now a CHOICE, not a constraint. Below two antennas ConfigFactory force-disables calibratedDifferentialAmbiguity; at four antennas it would survive resolution. It stays off because it requires calibrated inter-antenna phase biases and this configuration deliberately declares them UNcalibrated (errors.interAntennaCarrierBias above).",
+    "elevationMask_rad": 0.17453292519943295,
+    "sigma_accel_mps2": 1e-6,
+    "processNoise": {
+      "modelMismatch": { "enable": false }
+    },
+    "dynamics": {
+      "perturbations": {
+        "luniSolar": { "enable": true },
+        "srp": { "enable": true, "Cr": 1.24, "areaToMass_m2pkg": 0.02 },
+        "epochJD_TT": 2451545.0
+      }
+    },
+    "attitude": {
+      "useCodePartials": false,
+      "useCarrierPartials": false
+    },
+    "starTracker": {
+      "whiteAngularSigma_rad": 1.4544410433286078e-04
+    },
+    "imu": {
+      "truth": {
+        "arw_rad_per_sqrt_s": 2e-4,
+        "rrw_rad_per_s_sqrt_s": 3e-6,
+        "bias0Sigma_radps": 3e-5
+      },
+      "filter": {
+        "arw_rad_per_sqrt_s": 2e-4,
+        "rrw_rad_per_s_sqrt_s": 3e-6,
+        "P0_bias_radps": 3e-5
+      }
+    },
+    "srpCoefficient": { "enable": false, "useInEKF": false },
+    "empiricalAccel": { "enable": false, "useInEKF": false },
+    "attitudeCarrierMode": "off",
+    "attitudeInitMode": "none",
+    "lambda": { "enable": false }
+  },
+
+  "orbit": {
+    "truth": {
+      "perturbations": {
+        "luniSolar": { "enable": true },
+        "srp": {
+          "enable": true,
+          "Cr": 1.3,
+          "areaToMass_m2pkg": 0.02,
+          "shadow": "cylindrical"
+        },
+        "epochJD_TT": 2451545.0
+      }
+    }
+  },
+
+  "report": {
+    "_monteCarlo": "A single run gives ONE NEES/NIS sample; chi-squared consistency is only meaningful over an ensemble. 12 seeds x 900 s appends a pooled NIS/NEES band check to the .out log. It is fully wrapped in a try/catch that runs AFTER the PDF and MAT are written, so it can never lose a completed run. Set enable to false for a fast iteration -- at four antennas it is the dominant cost of the run.",
+    "runVersion": "golden-baseline-single-v2",
+    "layout": "clockExact",
+    "writePdf": true,
+    "writeMat": true,
+    "compileTex": "require",
+    "monteCarlo": {
+      "enable": true,
+      "nSeeds": 12,
+      "duration_s": 900,
+      "confidence": 0.99
+    }
+  },
+
+  "diagnostics": {
+    "storage": {
+      "mode": "compact",
+      "snapshot": { "enable": true, "interval_s": 300 }
+    }
+  }
+}

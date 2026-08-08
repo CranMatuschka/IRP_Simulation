@@ -1,0 +1,29 @@
+{
+  "_id": "freq rung: L1L2ionoFreeNoIonoState. Signal-set change against golden_baseline.json; every other leaf inherited. Ionosphere-free combination AND the per-tower slant-iono state removed. This is the honest iono-free configuration: keeping the state as well would let the filter estimate something the combination has already deleted.",
+  "_extends": "golden_baseline.json",
+  "_delta": "Ionosphere-free combination AND the per-tower slant-iono state removed. This is the honest iono-free configuration: keeping the state as well would let the filter estimate something the combination has already deleted.",
+  "scenario": {
+    "name": "freq004_L1L2ionoFreeNoIonoState",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+  "signals": {
+    "enabledMask": [
+      true,
+      true
+    ]
+  },
+  "measurements": {
+    "codeMode": "ionosphereFree"
+  },
+  "atmosphere": {
+    "ionosphereFree": true
+  },
+  "estimation": {
+    "ionosphereMode": "none"
+  },
+  "report": {
+    "runVersion": "freq004"
+  }
+}

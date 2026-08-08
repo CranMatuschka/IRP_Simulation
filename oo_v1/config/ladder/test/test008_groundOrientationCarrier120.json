@@ -1,0 +1,129 @@
+{
+  "_migrated": "Owned by the test suite, not by a study. Moved here from config/scenarios/ as ground_orientation_carrier120.json. simulation.duration_s was REMOVED with the rest of the ladder: the arc length is now the second argument of run_oo_v1 and the calling test passes 120 s explicitly, so the run is unchanged.",
+  "_comment": "EXECUTION-PLAN PHASE F -- the ambiguity-resolution estimator, on the 120 s smoke arc. Identical to golden_smoke120.json except that multiAsset.groundCarrier.enable is true and the joint solve is allowed to consume the fixed-carrier observable. THIS ARC IS A CODE-PATH CHECK, NOT A RESULT: 120 s turns the formation 0.4 deg, so shape and rotation are the same parameter to within the noise and the joint solve is expected to refuse whatever observable it is handed. What this fixture DOES check is the part that does not depend on the arc at all -- that the Melbourne-Wubbena wide lane, being geometry-free, fixes its integers anyway. If wide-lane fixing needed a good geometry it would fail here, and the whole Phase F argument would be circular. Scientific claims about rotation come from the 6 h arc.",
+  "scenario": {
+    "name": "test008_groundOrientationCarrier120",
+    "nTowers": 5,
+    "nSpaceAssets": 6,
+    "nReceivers": 4
+  },
+  "realism": {
+    "grade": true
+  },
+  "atmosphere": {
+    "realistic": true,
+    "sharedAcrossFormation": {
+      "enable": true
+    }
+  },
+  "estimator": {
+    "dynamics": {
+      "perturbations": {
+        "luniSolar": {
+          "enable": true
+        },
+        "srp": {
+          "enable": true
+        }
+      }
+    }
+  },
+  "multiAsset": {
+    "mode": "fast",
+    "twoWayISL": {
+      "enable": true,
+      "links": "all",
+      "sigma_m": 0.02,
+      "terminalLayout": "cones",
+      "coneHalfAngle_deg": 70,
+      "linksPerTerminal": 2,
+      "delayCal": {
+        "sigma_const_m": 0.05,
+        "sigma_rw_m": 0.01,
+        "tau_s": 3600,
+        "nCorrCap": 60,
+        "estimate": {
+          "enable": true
+        }
+      },
+      "lightTime": {
+        "enable": true
+      }
+    },
+    "jointGeometry": {
+      "enable": true,
+      "shapePriorSigma_m": 0.58,
+      "observable": "auto"
+    },
+    "groundDifferencedRotation": {
+      "enable": true,
+      "codeSigma_m": 1.0,
+      "multipathSigma_m": 0.0,
+      "differentialAtmosphereSigma_m": 0.0,
+      "differentialAtmosphereTau_s": 600,
+      "assumedShapeSigma_m": 0.0736
+    },
+    "groundCarrierProbe": {
+      "enable": true,
+      "phaseSigma_m": 0.002
+    },
+    "twoWayTimeTransferISL": {
+      "sigma_m": 0.03,
+      "delayCal": {
+        "sigma_const_m": 0.01,
+        "sigma_rw_m": 0.003,
+        "tau_s": 3600,
+        "nCorrCap": 60
+      }
+    },
+    "federated": {
+      "refAsset": 1,
+      "savePerAssetMat": false,
+      "parallel": false
+    },
+    "groundCarrier": {
+      "enable": true,
+      "minSuccessRate": 0.999,
+      "ratioThreshold": 2.0,
+      "cascadeToL1": true,
+      "slipRatePerLinkPerHour": 0.0,
+      "differentialIonoSigma_m": 0.0
+    }
+  },
+  "measurements": {
+    "twoWayTimeTransfer": {
+      "enable": true,
+      "useInEKF": true,
+      "mode": "firstOrderReciprocal",
+      "towers": "all",
+      "sigma_m": 0.03,
+      "includeReciprocityResidual": true,
+      "reciprocitySigma_m": 0.005,
+      "warmup_s": 0,
+      "conservativeProductCorrelation": true
+    },
+    "isl": {
+      "enable": true,
+      "twoWay": {
+        "enable": true,
+        "timeTransfer": {
+          "enable": true,
+          "useInEKF": false,
+          "mode": "firstOrderReciprocal",
+          "sigma_m": 0.03,
+          "warmup_s": 0
+        },
+        "range": {
+          "enable": false,
+          "useInEKF": false
+        }
+      }
+    }
+  },
+  "report": {
+    "layout": "clockExact",
+    "runVersion": "test008",
+    "writePdf": false,
+    "writeMat": true
+  }
+}

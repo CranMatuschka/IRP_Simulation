@@ -1,0 +1,20 @@
+{
+  "_id": "feat rung: noDoppler. One toggle against golden_baseline.json; everything else is inherited via _extends, so the difference in the result is attributable to this toggle alone. Doppler rows removed from the EKF and from the measurement set.",
+  "_extends": "golden_baseline.json",
+  "_delta": "Doppler rows removed from the EKF and from the measurement set.",
+  "scenario": {
+    "name": "feat015_noDoppler",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+  "measurements": {
+    "doppler": {
+      "enable": false,
+      "useInEKF": false
+    }
+  },
+  "report": {
+    "runVersion": "feat015"
+  }
+}

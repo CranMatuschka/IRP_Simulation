@@ -1,0 +1,23 @@
+{
+  "_id": "freq rung: L1onlyNoIonoState. Signal-set change against golden_baseline.json; every other leaf inherited. L1 alone with no iono state either: the ionosphere is simply unmodelled beyond Klobuchar. The floor of the frequency ladder.",
+  "_extends": "golden_baseline.json",
+  "_delta": "L1 alone with no iono state either: the ionosphere is simply unmodelled beyond Klobuchar. The floor of the frequency ladder.",
+  "scenario": {
+    "name": "freq008_L1onlyNoIonoState",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+  "signals": {
+    "enabledMask": [
+      true,
+      false
+    ]
+  },
+  "estimation": {
+    "ionosphereMode": "none"
+  },
+  "report": {
+    "runVersion": "freq008"
+  }
+}

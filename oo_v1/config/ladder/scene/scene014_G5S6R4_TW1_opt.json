@@ -1,0 +1,97 @@
+{
+  "_id": "OPTIMISTIC reference for G5S6R4. The error model is masterConfig nominal: realism.grade is OFF, so the atmosphere is matched truth-to-model, the clock template is the idealised 'legacy' set, and none of the truth-only systematics (multipath, hardware delay, tower survey, PCV, DCB, EOP) are injected. This is the best-case number the architecture can produce and it is NOT defensible on its own -- it exists so scene016_G5S6R4_TW1_golden has something to be measured against. ARCHITECTURE IS COPIED FROM golden_baseline_multi.json AND MUST STAY THAT WAY. The whole multiAsset block below is a verbatim copy of the golden's, crosslinks included, so realism.grade is the ONLY variable between this file and scene016_G5S6R4_TW1_golden. It is stated explicitly rather than inherited via _extends because _extends would also drag in the golden's scenario-owned error leaves, which are exactly what this rung is meant to be without. WHY IT MATTERS: masterConfig ships multiAsset.twoWayISL OFF. Without this block the relative-geometry layer has no ranging observable, emits no solvedPos, and the run produces NO relative position error and NO phasor diagnostics at all (relErrorBundle.reason = 'noSolvedPositions'). Measured 2026-08-08.",
+  "scenario": {
+    "name": "scene014_G5S6R4_TW1_opt",
+    "nTowers": 5,
+    "nSpaceAssets": 6,
+    "nReceivers": 4
+  },
+  "measurements": {
+    "twoWayTimeTransfer": {
+      "enable": true,
+      "useInEKF": true,
+      "towers": "all"
+    }
+  },
+  "multiAsset": {
+    "_mode": "'fast' is the federated runtime: N independent per-asset EKFs plus a separate read-only relative layer. The centralised 'joint' fleet estimator remains opt-in until its validation gates pass. NOTE for any future move to 'joint' at four antennas: cfg.assets(2..N) would then be read directly and carries a stale 3x1 lever arm from MultiAssetConfig.cloneAsset_ -- verify it is 3x4 before trusting anything.",
+    "mode": "fast",
+    "estimateMode": "off",
+    "keepIslInPerAssetEkf": false,
+    "recordTruth": true,
+    "truthStride_s": 60.0,
+    "twoWayISL": {
+      "_sigma": "0.05 m two-way thermal 1-sigma at the 1 km reference distance. masterConfig ships 0.01 m (cm-class wideband) and the optimistic corner of this study used 0.001 m; 0.05 m is the conservative Ka figure that a flown, calibrated PN crosslink can be argued for without assuming laboratory hardware.",
+      "_delayCal": "CALIBRATED BUT NOT ZERO: 0.005 m (17 ps) of constant per-link turn-around plus phase-centre calibration residual and 0.002 m of slow random walk, against masterConfig's uncalibrated 0.01/0.003. This term is CONSTANT over the arc and is therefore the floor on the relative geometry -- thermal noise averages, calibration does not.",
+      "_topology": "Five crosslink terminals per spacecraft, Earth-occultation checked. A spacecraft has a finite number of steerable terminals; 'every pair talks to every pair' is a modelling convenience, not a design.",
+      "_gauge": "minNorm. The 'radialStiff' gauge was WITHDRAWN from this study: its apparent gain was a metric artefact plus a prior tuned on truth.",
+      "_lightTime": "Two-way light time is included for correctness. First-order Sagnac cancels by reciprocity, so what survives is endpoint motion during the round trip -- micrometres at 1 km. It is reported so its size is visible rather than assumed.",
+      "_antennaCountIrrelevant": "Nothing in the crosslink layer is a function of scenario.nReceivers: the ISL terminals are separate hardware from the ground-uplink phase centres. Verified by inspection of the relative-layer sources.",
+      "enable": true,
+      "links": "all",
+      "sigma_m": 0.05,
+      "maxNeighbours": 5,
+      "requireLineOfSight": true,
+      "terminalLayout": "omni",
+      "gauge": {
+        "mode": "minNorm"
+      },
+      "delayCal": {
+        "sigma_const_m": 0.005,
+        "sigma_rw_m": 0.002,
+        "tau_s": 3600,
+        "nCorrCap": 60,
+        "estimate": {
+          "enable": false
+        }
+      },
+      "linkBudget": {
+        "model": "linkBudget",
+        "antennaModel": "fixedAperture",
+        "refDistance_m": 1000,
+        "refFrequency_Hz": 26000000000
+      },
+      "lightTime": {
+        "enable": true
+      },
+      "arcAverage": {
+        "enable": false
+      }
+    },
+    "_orientationStagesOff": "beamPointingLock, groundDifferencedRotation, jointGeometry, groundCarrier and groundCarrierProbe are ALL off. beamPointingLock is out of scope by request. The other four were measured to spend formation deformation to buy rotation on this geometry, and a 3600 s arc turns only 15 deg, where the CRLB penalty for separating rotation from shape is 9.9x. Nothing that has not been shown to help is applied to the geometry. Each solver returns 'gateOff' before touching any state, and no overlay (realism grade, orbit class, honest covariance) writes to multiAsset.",
+    "beamPointingLock": {
+      "enable": false
+    },
+    "groundDifferencedRotation": {
+      "enable": false
+    },
+    "jointGeometry": {
+      "enable": false,
+      "frameProbe": {
+        "enable": false
+      }
+    },
+    "groundCarrier": {
+      "enable": false
+    },
+    "groundCarrierProbe": {
+      "enable": false
+    },
+    "twoWayTimeTransferISL": {
+      "enable": false
+    },
+    "distributedEstimator": {
+      "enable": false
+    },
+    "federated": {
+      "_parallel": "SERIAL on purpose. A parallel fan-out reorders floating-point reductions; measured on this code base a 1e-14 arithmetic difference between a serial and a parallel run flipped a guard sitting near its threshold and moved 33 of 148 reported fields. A reference baseline has to be bit-reproducible before it is fast.",
+      "refAsset": 1,
+      "savePerAssetMat": false,
+      "parallel": false
+    }
+  },
+  "report": {
+    "layout": "clockExact",
+    "runVersion": "scene014"
+  }
+}

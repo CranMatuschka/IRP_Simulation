@@ -1,0 +1,21 @@
+{
+  "_id": "ISL rung: arcAverage. One crosslink change against golden_baseline_multi.json (G5S6R4 federated, four antennas per spacecraft); every other leaf is inherited. Arc-averaged crosslink observable instead of per-epoch.",
+  "_extends": "golden_baseline_multi.json",
+  "_delta": "Arc-averaged crosslink observable instead of per-epoch.",
+  "scenario": {
+    "name": "isl012_arcAverage",
+    "nTowers": 5,
+    "nSpaceAssets": 6,
+    "nReceivers": 4
+  },
+  "multiAsset": {
+    "twoWayISL": {
+      "arcAverage": {
+        "enable": true
+      }
+    }
+  },
+  "report": {
+    "runVersion": "isl012"
+  }
+}

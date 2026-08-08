@@ -1,0 +1,19 @@
+{
+  "_id": "feat rung: noTroposphere. One toggle against golden_baseline.json; everything else is inherited via _extends, so the difference in the result is attributable to this toggle alone. Troposphere OFF in truth and model.",
+  "_extends": "golden_baseline.json",
+  "_delta": "Troposphere OFF in truth and model.",
+  "scenario": {
+    "name": "feat001_noTroposphere",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+  "errors": {
+    "troposphere": {
+      "enable": false
+    }
+  },
+  "report": {
+    "runVersion": "feat001"
+  }
+}

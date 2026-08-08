@@ -1,0 +1,21 @@
+{
+  "_id": "feat rung: noRelativity. One toggle against golden_baseline.json; everything else is inherited via _extends, so the difference in the result is attributable to this toggle alone. Relativistic clock correction OFF in truth and model.",
+  "_extends": "golden_baseline.json",
+  "_delta": "Relativistic clock correction OFF in truth and model.",
+  "scenario": {
+    "name": "feat014_noRelativity",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+  "physics": {
+    "relativity": {
+      "clock": {
+        "enable": false
+      }
+    }
+  },
+  "report": {
+    "runVersion": "feat014"
+  }
+}

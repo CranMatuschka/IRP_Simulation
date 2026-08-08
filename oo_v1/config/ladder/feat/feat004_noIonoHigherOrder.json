@@ -1,0 +1,21 @@
+{
+  "_id": "feat rung: noIonoHigherOrder. One toggle against golden_baseline.json; everything else is inherited via _extends, so the difference in the result is attributable to this toggle alone. Second/third-order ionosphere OFF; first order stays.",
+  "_extends": "golden_baseline.json",
+  "_delta": "Second/third-order ionosphere OFF; first order stays.",
+  "scenario": {
+    "name": "feat004_noIonoHigherOrder",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+  "errors": {
+    "ionosphere": {
+      "higherOrder": {
+        "enable": false
+      }
+    }
+  },
+  "report": {
+    "runVersion": "feat004"
+  }
+}

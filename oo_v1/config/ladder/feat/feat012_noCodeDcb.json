@@ -1,0 +1,28 @@
+{
+  "_id": "feat rung: noCodeDcb. One toggle against golden_baseline.json; everything else is inherited via _extends, so the difference in the result is attributable to this toggle alone. Differential code bias zeroed on both sides. In the golden the truth L2 bias (0.45 m) and the model's (0.405 m) differ deliberately; here neither exists.",
+  "_extends": "golden_baseline.json",
+  "_delta": "Differential code bias zeroed on both sides. In the golden the truth L2 bias (0.45 m) and the model's (0.405 m) differ deliberately; here neither exists.",
+  "scenario": {
+    "name": "feat012_noCodeDcb",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+  "biases": {
+    "interFrequency": {
+      "code": {
+        "truth": {
+          "L1_m": 0.0,
+          "L2_m": 0.0
+        },
+        "model": {
+          "L1_m": 0.0,
+          "L2_m": 0.0
+        }
+      }
+    }
+  },
+  "report": {
+    "runVersion": "feat012"
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "_id": "feat rung: onEmpiricalAccel. One toggle against golden_baseline.json; everything else is inherited via _extends, so the difference in the result is attributable to this toggle alone. Empirical RTN acceleration states ON (reduced dynamics). OFF in the golden; the STM columns are finite-difference verified but a constant radial offset is structurally outside what 0.5*a*t^2 can represent.",
+  "_extends": "golden_baseline.json",
+  "_delta": "Empirical RTN acceleration states ON (reduced dynamics). OFF in the golden; the STM columns are finite-difference verified but a constant radial offset is structurally outside what 0.5*a*t^2 can represent.",
+  "scenario": {
+    "name": "feat021_onEmpiricalAccel",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+  "estimator": {
+    "empiricalAccel": {
+      "enable": true,
+      "useInEKF": true
+    }
+  },
+  "report": {
+    "runVersion": "feat021"
+  }
+}

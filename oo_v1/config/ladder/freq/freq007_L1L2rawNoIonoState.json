@@ -1,0 +1,26 @@
+{
+  "_id": "freq rung: L1L2rawNoIonoState. Signal-set change against golden_baseline.json; every other leaf inherited. L1 + L2 raw with the slant-iono state removed, so the dual-frequency information has nowhere to go. Isolates what the state buys from what the second frequency buys.",
+  "_extends": "golden_baseline.json",
+  "_delta": "L1 + L2 raw with the slant-iono state removed, so the dual-frequency information has nowhere to go. Isolates what the state buys from what the second frequency buys.",
+  "scenario": {
+    "name": "freq007_L1L2rawNoIonoState",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+  "signals": {
+    "enabledMask": [
+      true,
+      true
+    ]
+  },
+  "measurements": {
+    "codeMode": "singleFrequency"
+  },
+  "estimation": {
+    "ionosphereMode": "none"
+  },
+  "report": {
+    "runVersion": "freq007"
+  }
+}

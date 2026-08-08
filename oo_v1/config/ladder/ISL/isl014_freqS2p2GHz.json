@@ -1,0 +1,21 @@
+{
+  "_id": "ISL rung: freqS2p2GHz. One crosslink change against golden_baseline_multi.json (G5S6R4 federated, four antennas per spacecraft); every other leaf is inherited. Crosslink link-budget reference frequency at S band (2.2 GHz) instead of the golden's Ka 26 GHz. Changes the achievable antenna gain at fixed aperture.",
+  "_extends": "golden_baseline_multi.json",
+  "_delta": "Crosslink link-budget reference frequency at S band (2.2 GHz) instead of the golden's Ka 26 GHz. Changes the achievable antenna gain at fixed aperture.",
+  "scenario": {
+    "name": "isl014_freqS2p2GHz",
+    "nTowers": 5,
+    "nSpaceAssets": 6,
+    "nReceivers": 4
+  },
+  "multiAsset": {
+    "twoWayISL": {
+      "linkBudget": {
+        "refFrequency_Hz": 2200000000.0
+      }
+    }
+  },
+  "report": {
+    "runVersion": "isl014"
+  }
+}

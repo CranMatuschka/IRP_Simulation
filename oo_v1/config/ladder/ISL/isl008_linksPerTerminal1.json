@@ -1,0 +1,19 @@
+{
+  "_id": "ISL rung: linksPerTerminal1. One crosslink change against golden_baseline_multi.json (G5S6R4 federated, four antennas per spacecraft); every other leaf is inherited. One partner per terminal instead of two time-shared partners.",
+  "_extends": "golden_baseline_multi.json",
+  "_delta": "One partner per terminal instead of two time-shared partners.",
+  "scenario": {
+    "name": "isl008_linksPerTerminal1",
+    "nTowers": 5,
+    "nSpaceAssets": 6,
+    "nReceivers": 4
+  },
+  "multiAsset": {
+    "twoWayISL": {
+      "linksPerTerminal": 1
+    }
+  },
+  "report": {
+    "runVersion": "isl008"
+  }
+}

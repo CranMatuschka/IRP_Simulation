@@ -1,0 +1,20 @@
+{
+  "_id": "GOLDEN rung for G5S1R4. Built on golden_baseline.json via _extends, so every sigma, bias and process-noise value is the sourced one (docs/golden_baseline_provenance.md) and a change to the golden propagates here automatically. The delta below is the formation size and the two-way time-transfer toggle, nothing else.",
+  "_extends": "golden_baseline.json",
+  "_delta": "twoWayTimeTransfer disabled (TW0), so the radial-clock degeneracy is left in place.",
+  "scenario": {
+    "name": "scene007_G5S1R4_TW0_golden",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+  "measurements": {
+    "twoWayTimeTransfer": {
+      "enable": false,
+      "useInEKF": false
+    }
+  },
+  "report": {
+    "runVersion": "scene007"
+  }
+}

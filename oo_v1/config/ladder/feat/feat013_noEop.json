@@ -1,0 +1,22 @@
+{
+  "_id": "feat rung: noEop. One toggle against golden_baseline.json; everything else is inherited via _extends, so the difference in the result is attributable to this toggle alone. Earth-orientation parameters OFF in truth and model. Polar motion is the cross-track term; removing it from truth alone would be dishonest, so both go.",
+  "_extends": "golden_baseline.json",
+  "_delta": "Earth-orientation parameters OFF in truth and model. Polar motion is the cross-track term; removing it from truth alone would be dishonest, so both go.",
+  "scenario": {
+    "name": "feat013_noEop",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+  "frames": {
+    "truthEop": {
+      "enable": false
+    },
+    "eopModel": {
+      "enable": false
+    }
+  },
+  "report": {
+    "runVersion": "feat013"
+  }
+}

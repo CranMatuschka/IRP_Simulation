@@ -1,0 +1,21 @@
+{
+  "_id": "ISL rung: freqKu14GHz. One crosslink change against golden_baseline_multi.json (G5S6R4 federated, four antennas per spacecraft); every other leaf is inherited. Crosslink link-budget reference frequency at Ku band (14 GHz).",
+  "_extends": "golden_baseline_multi.json",
+  "_delta": "Crosslink link-budget reference frequency at Ku band (14 GHz).",
+  "scenario": {
+    "name": "isl015_freqKu14GHz",
+    "nTowers": 5,
+    "nSpaceAssets": 6,
+    "nReceivers": 4
+  },
+  "multiAsset": {
+    "twoWayISL": {
+      "linkBudget": {
+        "refFrequency_Hz": 14000000000.0
+      }
+    }
+  },
+  "report": {
+    "runVersion": "isl015"
+  }
+}

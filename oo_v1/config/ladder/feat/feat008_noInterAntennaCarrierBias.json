@@ -1,0 +1,24 @@
+{
+  "_id": "feat rung: noInterAntennaCarrierBias. One toggle against golden_baseline.json; everything else is inherited via _extends, so the difference in the result is attributable to this toggle alone. Inter-antenna carrier line bias OFF. This is the error previously traced as the cause of attitude divergence, so this rung is the control.",
+  "_extends": "golden_baseline.json",
+  "_delta": "Inter-antenna carrier line bias OFF. This is the error previously traced as the cause of attitude divergence, so this rung is the control.",
+  "scenario": {
+    "name": "feat008_noInterAntennaCarrierBias",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+  "realism": {
+    "include": {
+      "interAntennaCarrierBias": false
+    }
+  },
+  "errors": {
+    "interAntennaCarrierBias": {
+      "enable": false
+    }
+  },
+  "report": {
+    "runVersion": "feat008"
+  }
+}

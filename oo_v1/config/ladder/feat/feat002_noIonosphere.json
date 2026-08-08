@@ -1,0 +1,19 @@
+{
+  "_id": "feat rung: noIonosphere. One toggle against golden_baseline.json; everything else is inherited via _extends, so the difference in the result is attributable to this toggle alone. Ionosphere OFF in truth and model. Removes the whole slant-delay chain.",
+  "_extends": "golden_baseline.json",
+  "_delta": "Ionosphere OFF in truth and model. Removes the whole slant-delay chain.",
+  "scenario": {
+    "name": "feat002_noIonosphere",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+  "errors": {
+    "ionosphere": {
+      "enable": false
+    }
+  },
+  "report": {
+    "runVersion": "feat002"
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "_id": "feat rung: noScintillation. One toggle against golden_baseline.json; everything else is inherited via _extends, so the difference in the result is attributable to this toggle alone. Amplitude and phase scintillation OFF.",
+  "_extends": "golden_baseline.json",
+  "_delta": "Amplitude and phase scintillation OFF.",
+  "scenario": {
+    "name": "feat005_noScintillation",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+  "errors": {
+    "ionosphere": {
+      "scintillation": {
+        "enable": false
+      }
+    }
+  },
+  "report": {
+    "runVersion": "feat005"
+  }
+}

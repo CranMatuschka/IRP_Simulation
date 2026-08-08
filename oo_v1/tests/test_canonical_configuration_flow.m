@@ -129,8 +129,12 @@ assert(~atmosphereOffResolved.errors.ionosphere.truth.enable && ...
     ~atmosphereOffResolved.errors.ionosphere.model.enable);
 
 runnerSource = fileread(fullfile(repositoryRoot, 'run_oo_v1.m'));
-assert(contains(runnerSource, 'resolveSimulationConfig(configPath)'));
+% The runner must go through the canonical resolver, and it must pass the run
+% duration as an override rather than letting a scenario file own it.
+assert(contains(runnerSource, 'resolveSimulationConfig(configPath, runOverrides)'));
 assert(contains(runnerSource, 'configPath = ''default.json'''));
+assert(contains(runnerSource, 'duration_s = 3600'), ...
+    'run_oo_v1 must default the run duration to 3600 s.');
 
 fprintf('test_canonical_configuration_flow: PASS\n');
 

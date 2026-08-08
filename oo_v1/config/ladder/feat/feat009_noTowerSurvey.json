@@ -1,0 +1,19 @@
+{
+  "_id": "feat rung: noTowerSurvey. One toggle against golden_baseline.json; everything else is inherited via _extends, so the difference in the result is attributable to this toggle alone. Truth-only tower survey error OFF (the model already assumes perfect coordinates, so this removes a pure truth-model mismatch).",
+  "_extends": "golden_baseline.json",
+  "_delta": "Truth-only tower survey error OFF (the model already assumes perfect coordinates, so this removes a pure truth-model mismatch).",
+  "scenario": {
+    "name": "feat009_noTowerSurvey",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+  "effects": {
+    "towerSurvey": {
+      "enable": false
+    }
+  },
+  "report": {
+    "runVersion": "feat009"
+  }
+}

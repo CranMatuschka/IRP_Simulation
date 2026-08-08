@@ -1,0 +1,20 @@
+{
+  "_id": "freq rung: L1only. Signal-set change against golden_baseline.json; every other leaf inherited. L1 alone. Single frequency, so the ionosphere cannot be removed by combination and the per-tower slant-iono state carries all of it.",
+  "_extends": "golden_baseline.json",
+  "_delta": "L1 alone. Single frequency, so the ionosphere cannot be removed by combination and the per-tower slant-iono state carries all of it.",
+  "scenario": {
+    "name": "freq001_L1only",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+  "signals": {
+    "enabledMask": [
+      true,
+      false
+    ]
+  },
+  "report": {
+    "runVersion": "freq001"
+  }
+}

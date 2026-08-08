@@ -6,9 +6,11 @@ addpath(repositoryRoot);
 addpath(fullfile(repositoryRoot, 'config'));
 addpath(fullfile(repositoryRoot, 'config', 'internal'));
 
-scenarioFiles = dir(fullfile(repositoryRoot, 'config', 'scenarios', '*.json'));
-assert(numel(scenarioFiles) >= 69, ...
-    'Expected at least the 69 migration-baseline scenarios, found %d.', numel(scenarioFiles));
+% config/*.json plus every config/ladder/<axis>/*.json. The floor is the ladder
+% as built: 5 in config/ + 16 scene + 23 feat + 15 ISL + 8 freq + 9 test = 76.
+scenarioFiles = scenarioFileIndex(repositoryRoot);
+assert(numel(scenarioFiles) >= 76, ...
+    'Expected at least the 76 ladder scenarios, found %d.', numel(scenarioFiles));
 
 exceptions = scenarioResolutionExceptionRegistry();
 exceptionUsed = false(size(exceptions));

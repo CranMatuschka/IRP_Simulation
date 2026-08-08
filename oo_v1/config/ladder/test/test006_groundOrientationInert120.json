@@ -1,0 +1,113 @@
+{
+  "_migrated": "Owned by the test suite, not by a study. Moved here from config/scenarios/ as ground_orientation_inert120.json. simulation.duration_s was REMOVED with the rest of the ladder: the arc length is now the second argument of run_oo_v1 and the calling test passes 120 s explicitly, so the run is unchanged.",
+  "_comment": "GATE-INERTNESS FIXTURE (acceptance test T10). Byte-for-byte identical to golden_smoke120.json except that EVERY ground-referenced gate is off: jointGeometry, groundDifferencedRotation and groundCarrierProbe. It exists to prove the one property the whole commit ladder in docs/ground_referenced_orientation_execution_plan.md promises -- that a disabled stage is not merely harmless but absent. Its fingerprint must not move by a single bit for any commit in Phases A-H; if it does, a supposedly gated change has leaked into the default path and the commit is wrong regardless of how good its own numbers look. Note this is NOT the same claim as 'the smoke fingerprint is stable': the smoke fixture is EXPECTED to move when a Phase B/C/D/E commit changes the estimator, and its frozen value is re-cut deliberately with the reason recorded. This one is never re-cut.",
+  "scenario": {
+    "name": "test006_groundOrientationInert120",
+    "nTowers": 5,
+    "nSpaceAssets": 6,
+    "nReceivers": 4
+  },
+  "realism": {
+    "grade": true
+  },
+  "atmosphere": {
+    "realistic": true,
+    "sharedAcrossFormation": {
+      "enable": true
+    }
+  },
+  "estimator": {
+    "dynamics": {
+      "perturbations": {
+        "luniSolar": {
+          "enable": true
+        },
+        "srp": {
+          "enable": true
+        }
+      }
+    }
+  },
+  "multiAsset": {
+    "mode": "fast",
+    "twoWayISL": {
+      "enable": true,
+      "links": "all",
+      "sigma_m": 0.02,
+      "terminalLayout": "cones",
+      "coneHalfAngle_deg": 70,
+      "linksPerTerminal": 2,
+      "delayCal": {
+        "sigma_const_m": 0.05,
+        "sigma_rw_m": 0.01,
+        "tau_s": 3600,
+        "nCorrCap": 60,
+        "estimate": {
+          "enable": true
+        }
+      },
+      "lightTime": {
+        "enable": true
+      }
+    },
+    "jointGeometry": {
+      "enable": false
+    },
+    "groundDifferencedRotation": {
+      "enable": false
+    },
+    "groundCarrierProbe": {
+      "enable": false
+    },
+    "twoWayTimeTransferISL": {
+      "sigma_m": 0.03,
+      "delayCal": {
+        "sigma_const_m": 0.01,
+        "sigma_rw_m": 0.003,
+        "tau_s": 3600,
+        "nCorrCap": 60
+      }
+    },
+    "federated": {
+      "refAsset": 1,
+      "savePerAssetMat": false,
+      "parallel": false
+    }
+  },
+  "measurements": {
+    "twoWayTimeTransfer": {
+      "enable": true,
+      "useInEKF": true,
+      "mode": "firstOrderReciprocal",
+      "towers": "all",
+      "sigma_m": 0.03,
+      "includeReciprocityResidual": true,
+      "reciprocitySigma_m": 0.005,
+      "warmup_s": 0,
+      "conservativeProductCorrelation": true
+    },
+    "isl": {
+      "enable": true,
+      "twoWay": {
+        "enable": true,
+        "timeTransfer": {
+          "enable": true,
+          "useInEKF": false,
+          "mode": "firstOrderReciprocal",
+          "sigma_m": 0.03,
+          "warmup_s": 0
+        },
+        "range": {
+          "enable": false,
+          "useInEKF": false
+        }
+      }
+    }
+  },
+  "report": {
+    "layout": "clockExact",
+    "runVersion": "test006",
+    "writePdf": false,
+    "writeMat": true
+  }
+}

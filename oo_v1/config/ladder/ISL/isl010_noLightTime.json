@@ -1,0 +1,21 @@
+{
+  "_id": "ISL rung: noLightTime. One crosslink change against golden_baseline_multi.json (G5S6R4 federated, four antennas per spacecraft); every other leaf is inherited. Crosslink light-time iteration OFF. For a co-moving formation the effect was measured at 0.68 um, so this rung should be inert; if it is not, something else moved.",
+  "_extends": "golden_baseline_multi.json",
+  "_delta": "Crosslink light-time iteration OFF. For a co-moving formation the effect was measured at 0.68 um, so this rung should be inert; if it is not, something else moved.",
+  "scenario": {
+    "name": "isl010_noLightTime",
+    "nTowers": 5,
+    "nSpaceAssets": 6,
+    "nReceivers": 4
+  },
+  "multiAsset": {
+    "twoWayISL": {
+      "lightTime": {
+        "enable": false
+      }
+    }
+  },
+  "report": {
+    "runVersion": "isl010"
+  }
+}

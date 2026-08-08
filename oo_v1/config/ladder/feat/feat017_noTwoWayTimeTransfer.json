@@ -1,0 +1,20 @@
+{
+  "_id": "feat rung: noTwoWayTimeTransfer. One toggle against golden_baseline.json; everything else is inherited via _extends, so the difference in the result is attributable to this toggle alone. Two-way time transfer OFF (TW0). The golden is a TW1 run, so this rung is what the architecture costs when the radial-clock degeneracy is not broken.",
+  "_extends": "golden_baseline.json",
+  "_delta": "Two-way time transfer OFF (TW0). The golden is a TW1 run, so this rung is what the architecture costs when the radial-clock degeneracy is not broken.",
+  "scenario": {
+    "name": "feat017_noTwoWayTimeTransfer",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+  "measurements": {
+    "twoWayTimeTransfer": {
+      "enable": false,
+      "useInEKF": false
+    }
+  },
+  "report": {
+    "runVersion": "feat017"
+  }
+}

@@ -1,0 +1,54 @@
+{
+  "_id": "feat rung: allTruthOnlyOff. One toggle against golden_baseline.json; everything else is inherited via _extends, so the difference in the result is attributable to this toggle alone. Every truth-only systematic OFF at once: tower survey, PCV, PCO residual, solid-Earth tide, code DCB and EOP. The leave-one-out ladder showed these partially cancel, so the sum is not the sum of the parts.",
+  "_extends": "golden_baseline.json",
+  "_delta": "Every truth-only systematic OFF at once: tower survey, PCV, PCO residual, solid-Earth tide, code DCB and EOP. The leave-one-out ladder showed these partially cancel, so the sum is not the sum of the parts.",
+  "scenario": {
+    "name": "feat020_allTruthOnlyOff",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+  "effects": {
+    "towerSurvey": {
+      "enable": false
+    },
+    "antenna": {
+      "pcvModel": "none"
+    },
+    "antennaPCO": {
+      "calibrationResidual": {
+        "enable": false
+      }
+    },
+    "solidEarthTide": {
+      "truth": {
+        "enable": false
+      }
+    }
+  },
+  "biases": {
+    "interFrequency": {
+      "code": {
+        "truth": {
+          "L1_m": 0.0,
+          "L2_m": 0.0
+        },
+        "model": {
+          "L1_m": 0.0,
+          "L2_m": 0.0
+        }
+      }
+    }
+  },
+  "frames": {
+    "truthEop": {
+      "enable": false
+    },
+    "eopModel": {
+      "enable": false
+    }
+  },
+  "report": {
+    "runVersion": "feat020"
+  }
+}

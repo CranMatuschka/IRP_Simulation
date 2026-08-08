@@ -1,0 +1,23 @@
+{
+  "_id": "ISL rung: delayCalEstimated. One crosslink change against golden_baseline_multi.json (G5S6R4 federated, four antennas per spacecraft); every other leaf is inherited. Per-link delay calibration estimated instead of assumed.",
+  "_extends": "golden_baseline_multi.json",
+  "_delta": "Per-link delay calibration estimated instead of assumed.",
+  "scenario": {
+    "name": "isl011_delayCalEstimated",
+    "nTowers": 5,
+    "nSpaceAssets": 6,
+    "nReceivers": 4
+  },
+  "multiAsset": {
+    "twoWayISL": {
+      "delayCal": {
+        "estimate": {
+          "enable": true
+        }
+      }
+    }
+  },
+  "report": {
+    "runVersion": "isl011"
+  }
+}
