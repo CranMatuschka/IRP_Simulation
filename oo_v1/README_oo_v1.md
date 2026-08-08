@@ -15,12 +15,35 @@ An optional inter-satellite-link (ISL) swarm of secondaries, and an optional two
 
 ```matlab
 cd oo_v1
-run_oo_v1        % the one entry point: masterConfig -> simulate -> post-process -> report
+run_oo_v1                                        % default.json, 3600 s
+run_oo_v1('scene008_G5S1R4_TW1_golden.json')     % one ladder file, 3600 s
+run_oo_v1('isl004_sigma0p050golden.json', 7200)  % same file, 2 h arc
 ```
 
 - **All run configuration lives in `config/masterConfig.m`.** `run_oo_v1.m` is a thin runner that
   adds no physics toggles of its own; change a run by editing `masterConfig`, never the runner.
+- **Duration is the runner's second argument, defaulting to 3600 s.** No scenario JSON sets
+  `simulation.duration_s` any more: the arc length is a property of the run, so one file can be
+  swept over durations without being edited.
 - Output goes to a self-describing per-run folder (see §5).
+
+### Scenario files
+
+One JSON is overlaid on `masterConfig` per run. They are found by name alone, wherever they live:
+
+| Folder | Prefix | What it holds |
+|--------|--------|---------------|
+| `config/` | — | `masterConfig`'s companions: `golden_baseline*.json`, `default.json`, `realism.json` |
+| `config/ladder/scene/` | `scene###` | formation ladder: four formations x {opt, golden} x {TW0, TW1} |
+| `config/ladder/feat/`  | `feat###`  | one feature toggled per file against `golden_baseline` |
+| `config/ladder/ISL/`   | `isl###`   | crosslink sigma, link configuration and frequency |
+| `config/ladder/freq/`  | `freq###`  | L1 / L2 / L5 raw and ionosphere-free combinations |
+| `config/ladder/test/`  | `test###`  | fixtures owned by the test suite, not by a study |
+
+A ladder file inherits its base through `"_extends": "golden_baseline.json"` and carries only its
+delta, so the file shows exactly what it changes and a golden edit propagates to every rung that
+sits on it. The report is labelled by the file prefix:
+`Report_scene008_ts3600_G5S1R4_TW1`.
 
 ### Run knobs (top of `config/masterConfig.m`)
 
@@ -29,7 +52,7 @@ run_oo_v1        % the one entry point: masterConfig -> simulate -> post-process
 | `cfg.scenario.nTowers` | ground transmitters (12 real sites defined; 5 = the frozen network) | 5 |
 | `cfg.scenario.nSpaceAssets` | 1 = ground-only; >1 = helix ISL swarm aiding the primary | 1 |
 | `cfg.scenario.nReceivers` | receiver antennas: 1 -> attitude OFF, >=2 -> 4-antenna cross, attitude ON | 4 |
-| `cfg.simulation.duration_s` | run length in seconds | 14400 (4 h) |
+| `cfg.simulation.duration_s` | run length in seconds — **overridden by `run_oo_v1`'s second argument**, so this value only applies to direct `resolveSimulationConfig` callers | 14400 (4 h); `run_oo_v1` defaults to 3600 |
 | `cfg.asset.clockType` | oscillator class: `'CESIUM1'` \| `'OCXO'` \| `'RUBIDIUM'` \| `'TCXO'` | `'CESIUM1'` |
 | `cfg.clock.templateSource` | clock realism: `'legacy'` (idealised) \| `'jowTable2p1'` (realistic, literature-anchored) | `'legacy'` |
 | `cfg.measurements.twstft.enable` | two-way time-transfer observable on/off | false |
