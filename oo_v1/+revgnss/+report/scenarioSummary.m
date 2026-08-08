@@ -380,55 +380,232 @@ function scenarioSummary(fid, cfg, summary, diag, nTwr, nRx, dur, dt, esc, plotP
 
     % 1.4b Measurement configuration and error budget (values from cfg)
     fprintf(fid, '\\subsection{Measurement Noise and Error Budget}\n');
+    % Every row below reports the value of the code path that is ACTUALLY ACTIVE for this
+    % run. Earlier versions of these tables read fixed leaves regardless of the selected
+    % model, so a cn0 code-noise run still reported the unused constant sigma, a coloredGM
+    % multipath run reported the legacy sinusoidal amplitude, and a tecGaussMarkov diurnal
+    % ionosphere reported the simpleMapped constant -- i.e. the tables described a different
+    % simulation from the one that produced the numbers beside them.
     codeEn   = true;   % code is the baseline observable
     carrEn   = ~isempty(carrMode) && ~strcmp(carrMode,'off') && ~strcmp(carrMode,'none');
     dopEn    = CE.getLogical_(cfg, {'measurements','doppler','enable'}, false);
-    codeSig  = CE.getCfgNum_(cfg, {'signals','L1','codeSigma0_m'}, NaN);
     carrSig  = CE.getCfgNum_(cfg, {'measurements','carrier','sigma_m'}, NaN);
     dopSig   = CE.getCfgNum_(cfg, {'measurements','doppler','sigma_mps'}, NaN);
     covFloor = CE.getCfgNum_(cfg, {'measurement','sigmaFloor_m'}, NaN);
     prodCov  = CE.getLogical_(cfg, {'covariance','productClock','enable'}, false);
     shrdCov  = CE.getLogical_(cfg, {'covariance','sharedErrors','enable'}, false);
     E = @revgnss.ReportLabel.enabledLabel;
+
+    % --- code noise: report the SELECTED model, not a fixed leaf ------------------
+    codeModel = CE.getCfgStr_(cfg, {'measurements','codeNoise','model'}, 'constant');
+    codeSigConst = CE.getCfgNum_(cfg, {'signals','L1','codeSigma0_m'}, ...
+                   CE.getCfgNum_(cfg, {'errors','codeNoise','sigma_m'}, NaN));
+    switch lower(codeModel)
+        case 'cn0'
+            cn0Base = CE.getCfgNum_(cfg, {'measurements','codeNoise','cn0','base_dBHz'}, NaN);
+            cn0Gain = CE.getCfgNum_(cfg, {'measurements','codeNoise','cn0','elevationGain_dB'}, NaN);
+            cn0Sig  = CE.getCfgNum_(cfg, {'measurements','codeNoise','cn0','sigmaAt45dBHz_m'}, NaN);
+            codeSig = cn0Sig;   % the sigma the error budget actually scales from
+        case 'elevation'
+            codeSig = codeSigConst;
+        otherwise
+            codeSig = codeSigConst;
+    end
+
     fprintf(fid, '\\begin{center}\\small\n');
     fprintf(fid, '\\begin{tabular}{p{0.52\\textwidth}p{0.38\\textwidth}}\n\\toprule\n');
     fprintf(fid, '\\textbf{Measurement model} & \\textbf{Value}\\\\\n\\midrule\n');
+    fprintf(fid, '\\multicolumn{2}{@{}l}{\\itshape Ground observables}\\\\\n');
     fprintf(fid, 'Code pseudorange & %s\\\\\n', E(codeEn));
     fprintf(fid, 'Carrier phase & %s\\\\\n', E(carrEn));
     fprintf(fid, 'Doppler & %s\\\\\n', E(dopEn));
-    fprintf(fid, 'Code noise $\\sigma$ & %s\\\\\n', fmtVal_(codeSig,'m'));
+    fprintf(fid, 'Code noise model & %s\\\\\n', esc(codeModel));
+    switch lower(codeModel)
+        case 'cn0'
+            fprintf(fid, 'Code $\\sigma$ at 45 dB-Hz & %s\\\\\n', fmtVal_(cn0Sig,'m'));
+            fprintf(fid, 'C/N$_0$ base / elevation gain & %s / %s\\\\\n', ...
+                fmtVal_(cn0Base,'dB-Hz'), fmtVal_(cn0Gain,'dB'));
+        case 'elevation'
+            fprintf(fid, 'Code noise $\\sigma$ (zenith) & %s\\\\\n', fmtVal_(codeSig,'m'));
+            fprintf(fid, 'Elevation exponent & %s\\\\\n', ...
+                fmtVal_(CE.getCfgNum_(cfg,{'measurements','codeNoise','elevationExponent'},NaN),''));
+        otherwise
+            fprintf(fid, 'Code noise $\\sigma$ & %s\\\\\n', fmtVal_(codeSig,'m'));
+    end
     fprintf(fid, 'Carrier phase $\\sigma$ & %s\\\\\n', fmtVal_(carrSig,'m'));
     fprintf(fid, 'Doppler $\\sigma$ & %s\\\\\n', fmtVal_(dopSig,'m/s'));
     fprintf(fid, 'Measurement covariance floor & %s\\\\\n', fmtVal_(covFloor,'m'));
     fprintf(fid, 'Shared-product covariance & %s\\\\\n', E(prodCov));
     fprintf(fid, 'Shared transmitter-clock covariance & %s\\\\\n', E(shrdCov));
+
+    % --- ground two-way time transfer -------------------------------------------
+    twttEn = CE.getLogical_(cfg, {'measurements','twoWayTimeTransfer','enable'}, false);
+    if twttEn
+        fprintf(fid, '\\midrule\n\\multicolumn{2}{@{}l}{\\itshape Ground two-way time transfer}\\\\\n');
+        fprintf(fid, 'Two-way time transfer & %s\\\\\n', E(twttEn));
+        fprintf(fid, 'Two-way time transfer $\\sigma$ & %s\\\\\n', ...
+            fmtVal_(CE.getCfgNum_(cfg,{'measurements','twoWayTimeTransfer','sigma_m'},NaN),'m'));
+    end
+
+    % --- inter-satellite links: one-way rows inside the EKF ----------------------
+    islEn = CE.getLogical_(cfg, {'measurements','isl','enable'}, false);
+    if islEn
+        fprintf(fid, '\\midrule\n\\multicolumn{2}{@{}l}{\\itshape Inter-satellite link (one-way, EKF rows)}\\\\\n');
+        fprintf(fid, 'ISL code $\\sigma$ & %s\\\\\n', ...
+            fmtVal_(CE.getCfgNum_(cfg,{'measurements','isl','code','sigma_m'},NaN),'m'));
+        fprintf(fid, 'ISL carrier $\\sigma$ & %s\\\\\n', ...
+            fmtVal_(CE.getCfgNum_(cfg,{'measurements','isl','carrier','sigma_m'},NaN),'m'));
+        fprintf(fid, 'ISL Doppler $\\sigma$ & %s\\\\\n', ...
+            fmtVal_(CE.getCfgNum_(cfg,{'measurements','isl','doppler','sigma_mps'},NaN),'m/s'));
+    end
+
+    % --- inter-satellite links: two-way ranging feeding the relative layer -------
+    tw2En = CE.getLogical_(cfg, {'multiAsset','twoWayISL','enable'}, false);
+    if tw2En
+        lbModel = CE.getCfgStr_(cfg, {'multiAsset','twoWayISL','linkBudget','model'}, 'fixed');
+        fprintf(fid, '\\midrule\n\\multicolumn{2}{@{}l}{\\itshape Inter-satellite link (two-way, relative layer)}\\\\\n');
+        fprintf(fid, 'Two-way ranging $\\sigma$ & %s\\\\\n', ...
+            fmtVal_(CE.getCfgNum_(cfg,{'multiAsset','twoWayISL','sigma_m'},NaN),'m'));
+        fprintf(fid, 'Delay-calibration $\\sigma$ (constant) & %s\\\\\n', ...
+            fmtVal_(CE.getCfgNum_(cfg,{'multiAsset','twoWayISL','delayCal','sigma_const_m'},NaN),'m'));
+        fprintf(fid, 'Delay-calibration $\\sigma$ (random walk) & %s\\\\\n', ...
+            fmtVal_(CE.getCfgNum_(cfg,{'multiAsset','twoWayISL','delayCal','sigma_rw_m'},NaN),'m'));
+        fprintf(fid, 'Delay-calibration correlation time & %s\\\\\n', ...
+            fmtVal_(CE.getCfgNum_(cfg,{'multiAsset','twoWayISL','delayCal','tau_s'},NaN),'s'));
+        fprintf(fid, 'Delay-calibration network self-estimate & %s\\\\\n', ...
+            E(CE.getLogical_(cfg,{'multiAsset','twoWayISL','delayCal','estimate','enable'},false)));
+        fprintf(fid, 'Link-budget model & %s\\\\\n', esc(lbModel));
+        if strcmpi(lbModel,'linkBudget')
+            fprintf(fid, 'Link-budget antenna model & %s\\\\\n', ...
+                esc(CE.getCfgStr_(cfg,{'multiAsset','twoWayISL','linkBudget','antennaModel'},'---')));
+            fprintf(fid, 'Link-budget reference distance & %s\\\\\n', ...
+                fmtVal_(CE.getCfgNum_(cfg,{'multiAsset','twoWayISL','linkBudget','refDistance_m'},NaN),'m'));
+            fprintf(fid, 'Link-budget reference frequency & %s\\\\\n', ...
+                fmtVal_(CE.getCfgNum_(cfg,{'multiAsset','twoWayISL','linkBudget','refFrequency_Hz'},NaN)/1e9,'GHz'));
+        end
+        fprintf(fid, 'Relative-solve gauge & %s\\\\\n', ...
+            esc(CE.getCfgStr_(cfg,{'multiAsset','twoWayISL','gauge','mode'},'minNorm')));
+    end
+
+    % --- beamforming: what the coherence headline is conditioned on --------------
+    lockEn = CE.getLogical_(cfg, {'multiAsset','beamPointingLock','enable'}, false);
+    critN  = CE.getCfgNum_(cfg, {'beamforming','coherenceCriterionLambdaFraction'}, 20);
+    fprintf(fid, '\\midrule\n\\multicolumn{2}{@{}l}{\\itshape Beamforming}\\\\\n');
+    fprintf(fid, 'Coherence criterion & $\\lambda/%g$ (%.1f$^\\circ$ RMS phase, %.2f dB loss)\\\\\n', ...
+        critN, 360/critN, -4.342944819*(2*pi/critN)^2);
+    fprintf(fid, 'Ground beam-pointing lock & %s\\\\\n', E(lockEn));
+    if lockEn
+        fprintf(fid, 'Pointing-lock towers & %s\\\\\n', ...
+            fmtVal_(CE.getCfgNum_(cfg,{'multiAsset','beamPointingLock','nTowers'},NaN),''));
+        fprintf(fid, 'Pointing-lock spot $\\sigma$ & %s\\\\\n', ...
+            fmtVal_(CE.getCfgNum_(cfg,{'multiAsset','beamPointingLock','spotSigma_m'},NaN),'m'));
+        fprintf(fid, 'Pointing-lock minimum elevation & %s\\\\\n', ...
+            fmtVal_(CE.getCfgNum_(cfg,{'multiAsset','beamPointingLock','minElevation_deg'},NaN),'deg'));
+    end
     fprintf(fid, '\\bottomrule\n\\end{tabular}\n\\end{center}\n\n');
 
-    % Error budget (disabled models reported honestly)
+    % Error budget: truth-side injected magnitudes, per the ACTIVE model in each family.
     mpEn     = CE.getLogical_(cfg, {'errors','multipath','truth','enable'}, false);
     tropEn   = CE.getLogical_(cfg, {'errors','troposphere','truth','enable'}, false);
     ionoEn   = CE.getLogical_(cfg, {'errors','ionosphere','truth','enable'}, false);
     twrBias  = CE.getCfgNum_(cfg, {'clocks','tower','product','sigmaBias_m'}, NaN);
     twrDrift = CE.getCfgNum_(cfg, {'clocks','tower','product','sigmaDrift_mps'}, NaN);
-    mpAmp    = CE.getCfgNum_(cfg, {'errors','multipath','truth','amplitude_m'}, NaN);
-    mpSig    = CE.getCfgNum_(cfg, {'errors','multipath','truth','stochastic_sigma_m'}, NaN);
-    tropZ    = CE.getCfgNum_(cfg, {'errors','troposphere','truth','zenithWetDelay_m'}, NaN);
-    ionoV    = CE.getCfgNum_(cfg, {'errors','ionosphere','truth','verticalDelayL1_m'}, NaN);
-    if mpEn;   mpAmpS = fmtVal_(mpAmp,'m'); mpSigS = fmtVal_(mpSig,'m'); else; mpAmpS = 'disabled'; mpSigS = 'disabled'; end
-    if tropEn; tropZS = fmtVal_(tropZ,'m'); else; tropZS = 'disabled'; end
-    if ionoEn; ionoVS = fmtVal_(ionoV,'m'); else; ionoVS = 'disabled'; end
+    tropType = CE.getCfgStr_(cfg, {'errors','troposphere','modelType'}, 'simpleMapped');
+    ionoType = CE.getCfgStr_(cfg, {'errors','ionosphere','modelType'}, 'simpleMapped');
+    mpGM     = CE.getLogical_(cfg, {'errors','multipath','coloredGM','enable'}, false);
+
     fprintf(fid, '\\begin{center}\\small\n');
     fprintf(fid, '\\begin{tabular}{p{0.52\\textwidth}p{0.38\\textwidth}}\n\\toprule\n');
-    fprintf(fid, '\\textbf{Error budget} & \\textbf{Value}\\\\\n\\midrule\n');
+    fprintf(fid, '\\textbf{Error budget (truth-side injection)} & \\textbf{Value}\\\\\n\\midrule\n');
     fprintf(fid, 'Code thermal $\\sigma$ & %s\\\\\n', fmtVal_(codeSig,'m'));
     fprintf(fid, 'Carrier phase $\\sigma$ & %s\\\\\n', fmtVal_(carrSig,'m'));
     fprintf(fid, 'Doppler $\\sigma$ & %s\\\\\n', fmtVal_(dopSig,'m/s'));
     fprintf(fid, 'Tower clock product $\\sigma$ (bias) & %s\\\\\n', fmtVal_(twrBias,'m'));
     fprintf(fid, 'Tower clock product $\\sigma$ (drift) & %s\\\\\n', fmtVal_(twrDrift,'m/s'));
-    fprintf(fid, 'Multipath amplitude & %s\\\\\n', mpAmpS);
-    fprintf(fid, 'Multipath stochastic $\\sigma$ & %s\\\\\n', mpSigS);
-    fprintf(fid, 'Troposphere zenith wet delay & %s\\\\\n', tropZS);
-    fprintf(fid, 'Ionosphere vertical L1 delay & %s\\\\\n', ionoVS);
+
+    % Multipath: coloredGM supersedes the legacy sinusoidal+white pair.
+    fprintf(fid, '\\midrule\n');
+    if ~mpEn
+        fprintf(fid, 'Multipath & disabled\\\\\n');
+    elseif mpGM
+        fprintf(fid, 'Multipath model & coloured Gauss-Markov\\\\\n');
+        fprintf(fid, 'Multipath $\\sigma$ (steady state, L1 zenith) & %s\\\\\n', ...
+            fmtVal_(CE.getCfgNum_(cfg,{'errors','multipath','coloredGM','sigmaCodeL1_ss_m'},NaN),'m'));
+        fprintf(fid, 'Multipath correlation time & %s\\\\\n', ...
+            fmtVal_(CE.getCfgNum_(cfg,{'errors','multipath','coloredGM','tau_s'},NaN),'s'));
+        fprintf(fid, 'Multipath elevation exponent & %s\\\\\n', ...
+            fmtVal_(CE.getCfgNum_(cfg,{'errors','multipath','coloredGM','elevationExponent'},NaN),''));
+    else
+        fprintf(fid, 'Multipath model & legacy sinusoidal + white\\\\\n');
+        fprintf(fid, 'Multipath amplitude & %s\\\\\n', ...
+            fmtVal_(CE.getCfgNum_(cfg,{'errors','multipath','truth','amplitude_m'},NaN),'m'));
+        fprintf(fid, 'Multipath stochastic $\\sigma$ & %s\\\\\n', ...
+            fmtVal_(CE.getCfgNum_(cfg,{'errors','multipath','truth','stochastic_sigma_m'},NaN),'m'));
+    end
+
+    % Troposphere: report the leaf the active modelType actually consumes.
+    fprintf(fid, '\\midrule\n');
+    if ~tropEn
+        fprintf(fid, 'Troposphere & disabled\\\\\n');
+    else
+        fprintf(fid, 'Troposphere model & %s\\\\\n', esc(tropType));
+        if strcmpi(tropType,'localWeatherGM')
+            fprintf(fid, 'Troposphere zenith delay & from per-tower weather (Saastamoinen/Davis)\\\\\n');
+        else
+            fprintf(fid, 'Troposphere zenith delay (truth) & %s\\\\\n', ...
+                fmtVal_(CE.getCfgNum_(cfg,{'errors','troposphere','truth','zenithDelay_m'},NaN),'m'));
+        end
+        if CE.getLogical_(cfg,{'errors','troposphere','stochastic','enable'},false)
+            fprintf(fid, 'Troposphere wet $\\sigma$ (steady state) & %s\\\\\n', ...
+                fmtVal_(CE.getCfgNum_(cfg,{'errors','troposphere','stochastic','sigmaWet_ss_m'},NaN),'m'));
+            fprintf(fid, 'Troposphere correlation time & %s\\\\\n', ...
+                fmtVal_(CE.getCfgNum_(cfg,{'errors','troposphere','stochastic','tau_s'},NaN),'s'));
+            fprintf(fid, 'Troposphere model residual $\\sigma$ & %s\\\\\n', ...
+                fmtVal_(CE.getCfgNum_(cfg,{'errors','troposphere','stochastic','sigmaModelResidual_m'},NaN),'m'));
+        end
+    end
+
+    % Ionosphere: a diurnal tecGaussMarkov truth is not a constant vertical delay.
+    fprintf(fid, '\\midrule\n');
+    if ~ionoEn
+        fprintf(fid, 'Ionosphere & disabled\\\\\n');
+    else
+        fprintf(fid, 'Ionosphere model & %s\\\\\n', esc(ionoType));
+        if CE.getLogical_(cfg,{'errors','ionosphere','truth','diurnal','enable'},false)
+            fprintf(fid, 'Ionosphere diurnal VTEC (day / night) & %s / %s\\\\\n', ...
+                fmtVal_(CE.getCfgNum_(cfg,{'errors','ionosphere','truth','diurnal','vtecDay_TECU'},NaN),'TECU'), ...
+                fmtVal_(CE.getCfgNum_(cfg,{'errors','ionosphere','truth','diurnal','vtecNight_TECU'},NaN),'TECU'));
+        else
+            fprintf(fid, 'Ionosphere vertical L1 delay (truth) & %s\\\\\n', ...
+                fmtVal_(CE.getCfgNum_(cfg,{'errors','ionosphere','truth','verticalDelayL1_m'},NaN),'m'));
+        end
+        if CE.getLogical_(cfg,{'errors','ionosphere','stochastic','enable'},false)
+            fprintf(fid, 'Ionosphere TEC residual $\\sigma$ (steady state) & %s\\\\\n', ...
+                fmtVal_(CE.getCfgNum_(cfg,{'errors','ionosphere','stochastic','sigmaVDelayL1_ss_m'},NaN),'m'));
+            fprintf(fid, 'Ionosphere correlation time & %s\\\\\n', ...
+                fmtVal_(CE.getCfgNum_(cfg,{'errors','ionosphere','stochastic','tau_s'},NaN),'s'));
+        end
+        fprintf(fid, 'Ionosphere model-side correction & %s\\\\\n', ...
+            esc(CE.getCfgStr_(cfg,{'errors','ionosphere','model','correction'},'none')));
+        fprintf(fid, 'Higher-order ionosphere & %s\\\\\n', ...
+            E(CE.getLogical_(cfg,{'errors','ionosphere','higherOrder','enable'},false)));
+        if CE.getLogical_(cfg,{'errors','ionosphere','scintillation','enable'},false)
+            fprintf(fid, 'Scintillation model & %s\\\\\n', ...
+                esc(CE.getCfgStr_(cfg,{'errors','ionosphere','scintillation','model'},'legacy')));
+            fprintf(fid, 'Scintillation code $\\sigma$ (L1) & %s\\\\\n', ...
+                fmtVal_(CE.getCfgNum_(cfg,{'errors','ionosphere','scintillation','sigmaCodeL1_m'},NaN),'m'));
+        else
+            fprintf(fid, 'Scintillation & disabled\\\\\n');
+        end
+    end
+
+    % Hardware and inter-frequency biases.
+    fprintf(fid, '\\midrule\n');
+    fprintf(fid, 'Hardware delay $\\sigma$ & %s\\\\\n', ...
+        fmtVal_(CE.getCfgNum_(cfg,{'errors','hardwareDelay','sigma_m'},NaN),'m'));
+    fprintf(fid, 'Code inter-frequency bias (truth L1 / L2) & %s / %s\\\\\n', ...
+        fmtVal_(CE.getCfgNum_(cfg,{'biases','interFrequency','code','truth','L1_m'},NaN),'m'), ...
+        fmtVal_(CE.getCfgNum_(cfg,{'biases','interFrequency','code','truth','L2_m'},NaN),'m'));
     fprintf(fid, 'Receiver / transmitter clock process-noise drives & defined in the clock model (Appendix)\\\\\n');
     fprintf(fid, '\\bottomrule\n\\end{tabular}\n\\end{center}\n\n');
 

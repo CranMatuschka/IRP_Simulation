@@ -130,6 +130,80 @@ classdef FederatedSwarmSummary
                 fprintf('        relPos solved is intentionally not reported.\n');
             end
         end
+
+        function printGroundOrientation(rel)
+            % printGroundOrientation  The ground-referenced orientation stages, stated so a
+            % reader can tell WHETHER A CORRECTION WAS APPLIED and WHY. Every one of these
+            % stages can run successfully and still decline to touch the geometry -- that is the
+            % designed behaviour, and a summary that only printed the estimate would read as
+            % though it had been used. Takes the relative-layer struct directly rather than the
+            % summary, because the summary deliberately carries only the scalars the appendix
+            % tabulates and widening it would move a shape other tests assert on.
+            if ~isstruct(rel) || isempty(rel); return; end
+            hdr = false;
+            H = @() revgnss.FederatedSwarmSummary.header_();
+
+            if isfield(rel,'rotationReason') && ~strcmp(rel.rotationReason,'gateOff') && ...
+                    ~strcmp(rel.rotationReason,'notAttempted')
+                if ~hdr; H(); hdr = true; end
+                fprintf('  3-parameter rotation : %s\n', rel.rotationReason);
+                if isfield(rel,'rotationTheta_rad')
+                    fprintf('      theta %.5f deg | formal %.5f deg\n', ...
+                        norm(rel.rotationTheta_rad)*180/pi, norm(rel.rotationSigma_rad)*180/pi);
+                end
+            end
+
+            if isfield(rel,'joint') && isstruct(rel.joint) && rel.joint.applicable
+                if ~hdr; H(); hdr = true; end
+                j = rel.joint;
+                fprintf('  joint shape+rotation : observable %s | shape %s, rotation %s\n', ...
+                    j.observable, onoff_(j.acceptedShape), onoff_(j.acceptedRotation));
+                fprintf('      %s\n', j.acceptReason);
+                fprintf('      theta %.5f deg | formal %.5f deg | SNR %.2f | shape step %.4f m\n', ...
+                    norm(j.theta_rad)*180/pi, norm(j.thetaSigma_rad)*180/pi, ...
+                    j.rotationSnrMin, j.shapeStep_m);
+                fprintf('      arc turned %.1f deg | shape DOF constrained %d/%d (gain %.2f-%.2f)\n', ...
+                    j.turnAngle_deg, j.observableShapeDof, j.shapeDofTotal, ...
+                    j.shapeGainMin, j.shapeGainMax);
+                fprintf('      separation penalty %.2fx with the prior, %.3g with the shape free\n', ...
+                    j.separationPenalty, j.separationPenaltyFree);
+                fprintf('      prior %.4f m (%s) | lever arm %s | residual lever DD %.3e m\n', ...
+                    j.shapePriorSigma_m, j.shapePriorSource, j.leverArmMode, ...
+                    j.leverArmDdSystematic_m);
+            elseif isfield(rel,'jointReason') && ~strcmp(rel.jointReason,'gateOff') && ...
+                    ~strcmp(rel.jointReason,'notAttempted')
+                if ~hdr; H(); hdr = true; end
+                fprintf('  joint shape+rotation : %s\n', rel.jointReason);
+            end
+
+            if isfield(rel,'carrierProbe') && isstruct(rel.carrierProbe) && ...
+                    isfield(rel.carrierProbe,'applicable') && rel.carrierProbe.applicable
+                if ~hdr; H(); hdr = true; end
+                cp = rel.carrierProbe;
+                fprintf('  carrier probe        : DD geometry error %.4f m, %d epochs (%.1f effective)\n', ...
+                    cp.geomErrRms_m, cp.nEpochsUsed, cp.nEffectiveEpochs);
+                for b = 1:numel(cp.bands)
+                    bd = cp.bands(b);
+                    fprintf('      %-12s lam %.4f m | fix %.4f [%.4f, %.4f] | p95 float %.3f cyc\n', ...
+                        bd.name, bd.wavelength_m, bd.fixRate, bd.fixRateLo, bd.fixRateHi, ...
+                        bd.p95AbsFloatErr_cyc);
+                end
+                fprintf('      the interval is on the EFFECTIVE count, not the %d counted trials.\n', ...
+                    cp.bands(1).nTrials);
+            end
+
+            if isfield(rel,'orientationBudget') && isstruct(rel.orientationBudget) && ...
+                    isfield(rel.orientationBudget,'available') && rel.orientationBudget.available
+                if ~hdr; H(); end
+                revgnss.OrientationCoherenceBudget.print(rel.orientationBudget, 'final geometry');
+            end
+        end
+    end
+
+    methods (Static, Access = private)
+        function header_()
+            fprintf('  ---- ground-referenced orientation ----\n');
+        end
     end
 
     methods (Static, Access = private)
@@ -166,4 +240,8 @@ classdef FederatedSwarmSummary
             if isstruct(s) && isfield(s, name) && ~isempty(s.(name)); v = s.(name); end
         end
     end
+end
+
+function s = onoff_(tf)
+if tf; s = 'APPLIED'; else; s = 'refused'; end
 end

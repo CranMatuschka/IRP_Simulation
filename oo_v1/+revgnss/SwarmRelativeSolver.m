@@ -232,6 +232,7 @@ classdef SwarmRelativeSolver
             blRaw = nan(1,nEp); blSol = nan(1,nEp);
             shRaw = nan(1,nEp); shSol = nan(1,nEp);
             fSig  = nan(1,nEp); weakEp = false(1,nEp);
+            PshapeAcc = nan(3*N, nEp);
             solvedPos = nan(3,N,nEp); % Native estimated frame; no truth-based alignment.
             Winv  = 1 ./ pairR(:);                    % per-pair weight = 1/R
             for kk = 1:nEp
@@ -262,6 +263,12 @@ classdef SwarmRelativeSolver
                 shRaw(kk) = revgnss.SwarmRelativeSolver.shapeRms_(estK,  truthK);
                 shSol(kk) = revgnss.SwarmRelativeSolver.shapeRms_(rHat,  truthK);
                 fSig(kk)  = sqrt(mean(Pshape));       % formal 1-sigma of the solved positions
+                % C4: keep the PER-COORDINATE variances, not just their scalar mean. The ISL
+                % geometry is strongly anisotropic -- a near-radial direction is constrained far
+                % worse than an along-track one -- and the joint solver's own header names the
+                % isotropic prior as its main stated simplification. This is the cheap half of
+                % the fix: a tail-averaged 3N vector, a few hundred bytes, no per-epoch storage.
+                PshapeAcc(:,kk) = Pshape(:);
                 % rHat retains the estimated rigid frame; no truth-based frame alignment is
                 % applied. The synthetic range observations above are generated from
                 % truth trajectories, so this remains a diagnostic post-processor.
@@ -275,6 +282,10 @@ classdef SwarmRelativeSolver
             out.shapeErrRaw_m       = sqrt(mean(shRaw(tsel).^2));
             out.shapeErrSolved_m    = sqrt(mean(shSol(tsel).^2));
             out.formalShapeSigma_m  = mean(fSig(tsel));
+            % C4: the anisotropic companion to formalShapeSigma_m, on the same tail window.
+            % revgnss.JointGeometrySolver consumes it as its prior, which is what lets the ISL
+            % contribution enter as the covariance it actually is rather than as one scalar.
+            out.shapeSigmaPerCoord_m = sqrt(mean(PshapeAcc(:,tsel), 2, 'omitnan')).';
             % Tail-consistent with the reported metrics: flag weak only if the REPORTED (tail) window
             % has a weakly-observed DOF. An isolated early near-degeneracy (e.g. t=0, where sin(phase)=0
             % zeroes the cross-track of a helix member) does not degrade the tail-averaged solution.
@@ -285,6 +296,10 @@ classdef SwarmRelativeSolver
                 'shapeErrRaw_m', shRaw, 'shapeErrSolved_m', shSol);
             out.solvedPos = solvedPos; % [3 x N x nEp], native estimated frame.
             out.time_s = tVec(:).';
+
+            % Gated ARC AVERAGING of the per-epoch snapshot solves. Default OFF -> every field
+            % above is byte-identical and only the arc* fields are added (all NaN/false).
+            out = revgnss.SwarmRelativeSolver.arcAverage_(cfg, out, Est, Truth, solvedPos, tVec, N);
 
             % Gated satellite time-transfer relative-clock solve.
             % The clock DUAL of the shape solve. Two-way sat<->sat time transfer observes the clock
@@ -322,18 +337,116 @@ classdef SwarmRelativeSolver
             % arc-constant shape correction alongside the rotation, which removes the leakage by
             % construction. It runs LAST so it sees the ISL-solved geometry, and it overwrites
             % solvedPos only on success. Default OFF -> byte-identical.
-            jnt = revgnss.JointGeometrySolver.solve(cfg, results, out);
+            % Gated GROUND CARRIER AMBIGUITY RESOLUTION (execution-plan Phase F -- the
+            % contribution). Runs BEFORE the joint solve because its whole purpose is to hand
+            % that solve a better observable: the wide-lane integers come from the geometry-free
+            % Melbourne-Wubbena combination, so they need no geometry at all, and once fixed the
+            % carrier double difference is an unambiguous range some 500x more precise than the
+            % code that capped the rotation gain at 1.53x.
+            out.carrierResolution = revgnss.GroundCarrierAmbiguityResolver.resolve(cfg, results, out);
+            revgnss.GroundCarrierAmbiguityResolver.print(out.carrierResolution);
+            carrierObs = revgnss.SwarmRelativeSolver.carrierObservableFor(cfg, out.carrierResolution);
+
+            jnt = revgnss.JointGeometrySolver.solve(cfg, results, out, carrierObs);
             out.jointGateOn        = jnt.applicable;
             out.jointReason        = jnt.reason;
             out.jointTheta_rad     = jnt.theta_rad;
             out.jointThetaSigma_rad = jnt.thetaSigma_rad;
             out.jointShapeStep_m   = jnt.shapeStep_m;
             out.jointNObs          = jnt.nObs;
-            if jnt.applicable && ~isempty(jnt.solvedPos)
+            out.joint              = jnt;
+            % C1: the joint solve now decides for itself whether the step it computed is worth
+            % applying, and says so. Honouring jnt.accepted rather than jnt.applicable is the
+            % difference between "the solver ran" and "the solver produced something better".
+            if jnt.applicable && jnt.accepted && ~isempty(jnt.solvedPos)
                 out.solvedPos = jnt.solvedPos;
+            end
+
+            % Gated 3-TOWER BEAM POINTING LOCK. The orientation route that does not go through a
+            % ranging observable at all: a rigid rotation is a pure wavefront TILT, so it displaces
+            % the beam (9.45 km measured on the 6 h arcs) without costing gain, and that
+            % displacement is an ambiguity-free power measurement against known towers. Runs after
+            % the joint solve so it corrects whatever geometry actually survived, and it supersedes
+            % the rotation part of that solve rather than competing with it -- the joint stage
+            % trades recoverable tilt for UNRECOVERABLE deformation (tilt fraction 0.89 -> 0.67 on
+            % the carrier variant), so with this lock on, the rotation branch of the joint solve is
+            % the thing to switch off. Default OFF -> solvedPos untouched and byte-identical.
+            out.beamPointingLock = revgnss.GroundBeamPointingLock.solve(cfg, results, out);
+            out.beamPointingGateOn = out.beamPointingLock.applicable;
+            out.beamPointingReason = out.beamPointingLock.reason;
+            if out.beamPointingLock.applicable && ~isempty(out.beamPointingLock.solvedPos)
+                out.solvedPosPreBeamLock = out.solvedPos;
+                out.solvedPos = out.beamPointingLock.solvedPos;
+            end
+
+            % Gated SHAPE-FRAME SEPARATION PROBE (execution-plan A4). Runs on the geometry as the
+            % joint stage found it, so it must sit before nothing and after the joint solve is
+            % irrelevant -- it perturbs a COPY. Expensive (one joint solve per cell of the
+            % table), hence off by default and worth running once per formation, not per commit.
+            if revgnss.SwarmRelativeSolver.getBool_(cfg, ...
+                    {'multiAsset','jointGeometry','frameProbe','enable'}, false)
+                try
+                    out.shapeFrameProbe = revgnss.ShapeFrameSeparationProbe.sweep(cfg, results, out);
+                    revgnss.ShapeFrameSeparationProbe.print(out.shapeFrameProbe);
+                catch fpErr
+                    out.shapeFrameProbe = struct('applicable', false, 'reason', fpErr.message);
+                    fprintf(2, '  Shape-frame separation probe FAILED (%s).\n', fpErr.message);
+                end
+            end
+
+            % Gated ground CARRIER AMBIGUITY PROBE. A measurement, not an estimator: given the
+            % geometry the stages above actually produced, does the predicted tower double
+            % difference land within half a wavelength of the true one often enough to round to
+            % the right integer? It runs LAST so it sees the final geometry, and it writes
+            % nothing back -- solvedPos is untouched on every path.
+            %
+            % A2: this class had ZERO CALLERS until now, which is why the wide-lane fix rate on
+            % record was a bench number with no committed seed or arc behind it. It is reachable
+            % from a scenario file from here on.
+            out.carrierProbe = revgnss.GroundCarrierAmbiguityProbe.run(cfg, results, out);
+            out.carrierProbeGateOn = out.carrierProbe.applicable;
+            out.carrierProbeReason = out.carrierProbe.reason;
+
+            % G1/G2/G5: state the orientation result in the units that decide the mission --
+            % decibels of coherent array gain and beamwidths of mispointing -- rather than as a
+            % ratio, which cannot be assessed. Always computed; it reads only the final geometry.
+            try
+                out.orientationBudget = revgnss.OrientationCoherenceBudget.fromRel(out, cfg);
+            catch obErr
+                out.orientationBudget = struct('available', false, 'reason', obErr.message);
+            end
+        end
+
+        function ov = carrierObservableFor(cfg, cr)
+            % carrierObservableFor  Which observable the joint solve should consume (F8). Public
+            % because revgnss.ShapeFrameSeparationProbe needs the same decision: its A4
+            % experiment is vacuous on the code observable, which constrains 1 of 12 shape DOF.
+            %
+            % 'auto' takes the best FIXED lane available and falls back to code -- L1 if the
+            % cascade got there, wide-lane if only that fixed, code otherwise. The fallback is
+            % the point: a stage that silently used a wide-lane range it had not fixed would be
+            % reporting carrier precision on a float, which is the exact failure Route 1 died of.
+            ov = [];
+            want = 'auto';
+            try; want = char(cfg.multiAsset.jointGeometry.observable); catch; end
+            if strcmpi(want, 'code'); return; end
+            if ~isstruct(cr) || ~isfield(cr,'applicable') || ~cr.applicable; return; end
+            useL1 = isfield(cr,'l1Observable') && isstruct(cr.l1Observable) && ...
+                isfield(cr.l1Observable,'rhoObs') && ~isempty(cr.l1Observable.rhoObs);
+            useWl = isfield(cr,'wideLaneObservable') && isstruct(cr.wideLaneObservable) && ...
+                isfield(cr.wideLaneObservable,'rhoObs') && ~isempty(cr.wideLaneObservable.rhoObs);
+            switch lower(want)
+                case 'l1'
+                    if useL1; ov = cr.l1Observable; end
+                case 'widelane'
+                    if useWl; ov = cr.wideLaneObservable; end
+                otherwise
+                    if useL1; ov = cr.l1Observable;
+                    elseif useWl; ov = cr.wideLaneObservable; end
             end
         end
     end
+
 
     methods (Static, Access = private)
 
@@ -341,7 +454,8 @@ classdef SwarmRelativeSolver
             out = struct('applicable', false, 'nAssets', 0, 'pairs', zeros(0,2), ...
                 'baselineErrRaw_m', NaN, 'baselineErrSolved_m', NaN, ...
                 'shapeErrRaw_m', NaN, 'shapeErrSolved_m', NaN, ...
-                'formalShapeSigma_m', NaN, 'weaklyObservable', false, ...
+                'formalShapeSigma_m', NaN, 'shapeSigmaPerCoord_m', [], ...
+                'weaklyObservable', false, ...
                 'everWeaklyObservable', false, ...
                 'shapeGateOn', false, 'shapeObservationSource', 'disabled', ...
                 'shapeFallbackReason', '', ...
@@ -358,7 +472,165 @@ classdef SwarmRelativeSolver
                 'jointGateOn', false, 'jointReason', 'notAttempted', ...
                 'jointTheta_rad', [0;0;0], 'jointThetaSigma_rad', [NaN;NaN;NaN], ...
                 'jointShapeStep_m', NaN, 'jointNObs', 0, ...
+                'joint', revgnss.JointGeometrySolver.emptyOut(), ...
+                'carrierProbe', struct('applicable', false, 'reason', 'notAttempted'), ...
+                'carrierProbeGateOn', false, 'carrierProbeReason', 'notAttempted', ...
+                'carrierResolution', struct('applicable', false, 'reason', 'notAttempted'), ...
+                'beamPointingLock', struct('applicable', false, 'reason', 'notAttempted'), ...
+                'beamPointingGateOn', false, 'beamPointingReason', 'notAttempted', ...
+                'orientationBudget', struct('available', false), ...
+                'arcApplicable', false, 'arcReason', 'notAttempted', ...
+                'arcShapeErrSolved_m', NaN, 'arcShapeErrSnapshot_m', NaN, ...
+                'arcShapeErrRaw_m', NaN, 'arcShapeEvolution_m', NaN, ...
+                'arcFitResidual_m', NaN, 'arcTruncation_m', NaN, ...
+                'arcWindowEpochs', 0, 'arcWindow_s', NaN, ...
+                'arcPolyOrder', NaN, 'arcEvalEpochs', 0, 'arcThermalReduction', NaN, ...
                 'perEpoch', struct());
+        end
+
+        function out = arcAverage_(cfg, out, Est, Truth, solvedPos, tVec, N)
+            % ARC SMOOTHING -- estimate the shape at an epoch from a WINDOW of solves, not one.
+            %
+            % WHY THIS EXISTS. solveEpoch_ re-solves all 3N-6 shape DOF from the INSTANTANEOUS
+            % ranges at every epoch, and shapeErrSolved_m is the RMS over those independent
+            % snapshots. Range thermal noise therefore lands in the headline number at full
+            % strength times the range->shape DOP (3.38x measured on the N=6 helix: 15 links,
+            % 12 shape DOF, redundancy 3), even though the per-epoch error is white (measured
+            % lag-1 autocorrelation -0.19) and every epoch is looking at the same physical
+            % formation. Combining a window of epochs recovers that wasted redundancy.
+            %
+            % WHY THIS IS NOT A MEAN. The formation shape is NOT constant. Measured on the N=6
+            % helix, the TRUE shape moves 3.46 m RMS about its own mean over a 360 s window --
+            % 40x larger than the errors being measured, because relative orbital motion IS a
+            % real deformation once the rigid part is removed. A plain arc mean estimates the
+            % mean shape, which is a different object from the shape now, and scoring it against
+            % the mean truth hides that: both sides get blurred identically and the comparison
+            % flatters. So the arc is used to fit a shape TRAJECTORY -- a per-coordinate
+            % polynomial in time over the window -- and the fit is evaluated AT one epoch and
+            % scored against truth AT THAT SAME EPOCH. White noise still averages across the
+            % window; genuine evolution is tracked rather than smeared.
+            %
+            % GAUGE. Each epoch is solved in its own min-norm gauge anchored to that epoch's EKF
+            % estimate, and the formation translates and rotates between epochs. Every window
+            % member is therefore Kabsch-aligned (6-DOF, no scale) onto the evaluation epoch
+            % before the fit, so only SHAPE is combined -- the one thing ranges observe. Fitting
+            % raw positions instead would be fitting the orbital motion.
+            %
+            % WHAT IT CANNOT DO. A per-link delay-calibration bias is CONSTANT over the arc and
+            % survives untouched. This stage removes the thermal term and leaves the bias term
+            % exactly where it was; once bias dominates it buys nothing further.
+            out.arcApplicable = false;
+            out.arcReason = 'gateOff';
+            if ~revgnss.SwarmRelativeSolver.getBool_(cfg, ...
+                    {'multiAsset','twoWayISL','arcAverage','enable'}, false)
+                return;
+            end
+            nEp = numel(tVec);
+            win_s = revgnss.SwarmRelativeSolver.getNum_(cfg, ...
+                {'multiAsset','twoWayISL','arcAverage','window_s'}, 300);
+            order = max(0, round(revgnss.SwarmRelativeSolver.getNum_(cfg, ...
+                {'multiAsset','twoWayISL','arcAverage','polyOrder'}, 2)));
+            nEval = max(1, round(revgnss.SwarmRelativeSolver.getNum_(cfg, ...
+                {'multiAsset','twoWayISL','arcAverage','evalEpochs'}, 20)));
+
+            % Evaluation epochs: spread over the SAME tail the per-epoch metrics report, so
+            % arcShapeErrSolved_m and shapeErrSolved_m describe the same stretch of the run.
+            tsel = revgnss.SwarmRelativeSolver.tailIdx_(nEp);
+            tsel = tsel(:).';
+            evalIdx = unique(round(linspace(tsel(1), tsel(end), min(nEval, numel(tsel)))));
+            if isempty(evalIdx); out.arcReason = 'noEvalEpochs'; return; end
+
+            truthStack = zeros(3, N, nEp); estStack = zeros(3, N, nEp);
+            for kk = 1:nEp
+                for i = 1:N
+                    estStack(:,i,kk)   = Est{i}(:,kk);
+                    truthStack(:,i,kk) = Truth{i}(:,kk);
+                end
+            end
+
+            eSol = nan(1,numel(evalIdx)); eSnap = nan(1,numel(evalIdx));
+            eRaw = nan(1,numel(evalIdx)); eEvo  = nan(1,numel(evalIdx));
+            eFit = nan(1,numel(evalIdx)); nWin  = nan(1,numel(evalIdx));
+            eTrunc = nan(1,numel(evalIdx));
+            for j = 1:numel(evalIdx)
+                k = evalIdx(j);
+                % CAUSAL window: only epochs at or before k, which is what a real system has.
+                w = find(tVec >= tVec(k) - win_s & tVec <= tVec(k));
+                nWin(j) = numel(w);
+                if numel(w) < order + 2; continue; end
+                truthK = truthStack(:,:,k);
+                [fitSol, resSol, truncSol] = revgnss.SwarmRelativeSolver.shapeTrajectoryFit_( ...
+                    solvedPos, w, k, tVec, order);
+                fitRaw = revgnss.SwarmRelativeSolver.shapeTrajectoryFit_( ...
+                    estStack, w, k, tVec, order);
+                eTrunc(j) = truncSol;
+                eSol(j)  = revgnss.SwarmRelativeSolver.shapeRms_(fitSol, truthK);
+                eRaw(j)  = revgnss.SwarmRelativeSolver.shapeRms_(fitRaw, truthK);
+                % Like-for-like control: the SINGLE-epoch solve at the very same epoch.
+                eSnap(j) = revgnss.SwarmRelativeSolver.shapeRms_(solvedPos(:,:,k), truthK);
+                % How much genuine shape evolution the fit had to track across the window.
+                eEvo(j)  = revgnss.SwarmRelativeSolver.shapeRms_(truthStack(:,:,w(1)), truthK);
+                eFit(j)  = resSol;
+            end
+            keep = ~isnan(eSol);
+            if ~any(keep); out.arcReason = 'windowTooShort'; return; end
+
+            out.arcShapeErrSolved_m   = sqrt(mean(eSol(keep).^2));
+            out.arcShapeErrSnapshot_m = sqrt(mean(eSnap(keep).^2));
+            out.arcShapeErrRaw_m      = sqrt(mean(eRaw(keep).^2));
+            out.arcShapeEvolution_m   = sqrt(mean(eEvo(keep).^2));
+            out.arcFitResidual_m      = sqrt(mean(eFit(keep).^2));
+            out.arcTruncation_m       = sqrt(mean(eTrunc(keep).^2, 'omitnan'));
+            out.arcWindowEpochs       = round(mean(nWin(keep)));
+            out.arcWindow_s           = win_s;
+            out.arcPolyOrder          = order;
+            out.arcEvalEpochs         = sum(keep);
+            % Scored against the SNAPSHOT solve at the same epochs -- the honest gain.
+            out.arcThermalReduction   = out.arcShapeErrSnapshot_m / max(out.arcShapeErrSolved_m, eps);
+            out.arcApplicable         = true;
+            out.arcReason             = '';
+            if out.arcTruncation_m > out.arcShapeErrSolved_m
+                out.arcReason = sprintf(['windowTooLong: adding one more polynomial degree moves ' ...
+                    'the answer %.4g m, more than the %.4g m the degree-%d fit delivers -- the ' ...
+                    'window outruns the order. Shorten multiAsset.twoWayISL.arcAverage.window_s ' ...
+                    'or raise .polyOrder'], out.arcTruncation_m, out.arcShapeErrSolved_m, order);
+            end
+        end
+
+        function [fitAtK, residRms, truncation] = shapeTrajectoryFit_(P, w, k, tVec, order)
+            % Per-coordinate polynomial fit of the SHAPE trajectory over window w, evaluated at
+            % epoch k. Every member is Kabsch-aligned onto P(:,:,k) first so the fit sees shape
+            % only, never the formation's rigid motion.
+            %
+            % residRms is the RMS fit residual. It is NOT a window-sizing diagnostic: measured
+            % on the N=6 helix it sits at ~0.07 m whatever the window or order, because it is
+            % dominated by the per-epoch RANGE NOISE the fit is there to remove, not by
+            % unmodelled evolution. Reported for visibility only.
+            %
+            % truncation IS the sizing diagnostic, and it needs no truth: refit at order+1 and
+            % take the distance between the two evaluated shapes. If one more degree of freedom
+            % moves the answer, the window is too long for the order chosen; if it does not, the
+            % polynomial is already tracking the evolution and the extra term only costs noise.
+            ref = P(:,:,k);
+            nW = numel(w);
+            A = zeros(numel(ref), nW);
+            for j = 1:nW
+                Aj = revgnss.SwarmRelativeSolver.alignToTruth_(P(:,:,w(j)), ref);
+                A(:,j) = Aj(:);
+            end
+            dt = tVec(w) - tVec(k);
+            dt = dt(:) / max(max(abs(dt)), eps);      % scale to [-1,0] for conditioning
+            V = zeros(nW, order+2);
+            for c = 0:(order+1); V(:,c+1) = dt.^c; end
+            coef   = V(:,1:order+1) \ A.';             % [(order+1) x 3N]
+            fitAtK = reshape(coef(1,:), size(ref));    % dt = 0 -> the constant term
+            residRms = sqrt(mean((V(:,1:order+1)*coef - A.').^2, 'all'));
+            truncation = NaN;
+            if nW >= order + 3
+                coefHi = V \ A.';
+                fitHi  = reshape(coefHi(1,:), size(ref));
+                truncation = revgnss.SwarmRelativeSolver.shapeRms_(fitHi, fitAtK);
+            end
         end
 
         function [Est, Truth, tVec, ok] = gatherTrajectories_(results, N)
@@ -1128,6 +1400,7 @@ classdef SwarmRelativeSolver
             n0 = max(1, floor(nEp * (1 - revgnss.SwarmRelativeSolver.TAIL_FRAC)) + 1);
             idx = n0:nEp;
         end
+
 
         function v = getNum_(cfg, path, dflt)
             v = cfg;

@@ -600,6 +600,174 @@ classdef BeamformingPhasorDiagnostics
                 payload.coherenceClaimStatus),'FontWeight','bold','FontSize',11);
         end
 
+        function [fig, info, figSpread] = plotCommsPhasor(rel, results, cfg)
+            % plotCommsPhasor  Fixed phasor diagram at the OPERATIONAL comms carrier.
+            %
+            % plotPhasorChain draws whichever three frequencies the run happened to report,
+            % which move between scenarios and so cannot be compared across runs. This one is
+            % pinned to cfg.beamforming.communicationFrequency_Hz (default 2.1 GHz) so the same
+            % picture means the same thing in every multi-asset report.
+            %
+            % TWO OUTPUT FIGURES, deliberately separate rather than one side-by-side pair, so
+            % each can be read at full width on the page:
+            %
+            %   fig       -- the phasor chain at one typical settled epoch.
+            %   figSpread -- the distribution of the loss over the whole settled tail.
+            %
+            % TWO DELIBERATE CHOICES, both to stop the figure being over-read:
+            %
+            % 1. EPOCH SELECTION. Once sigma_e approaches lambda the phasor sum is a random
+            %    walk of N unit vectors and the per-epoch dB is a DRAW, not a measurement. At a
+            %    fixed sigma_e = 0.22 m this run produced -13.35 dB at one epoch and -5.07 dB at
+            %    another. Picking the final epoch, or the epoch nearest the median LOSS, just
+            %    picks a different draw. The epoch is therefore chosen on the underlying
+            %    physical quantity -- path-error RMS closest to its settled median -- so the
+            %    GEOMETRY drawn is typical even though its dB label is still one sample.
+            % 2. figSpread EXISTS FOR THAT REASON. It shows the whole settled-tail
+            %    distribution of the loss with the median and the N-element incoherent floor
+            %    20log10(1/sqrt(N)) marked, so the reader sees the spread the single chain
+            %    cannot show. Quote the median, never the chain's own label.
+            fig = []; figSpread = [];
+            CE  = revgnss.BeamformingPhasorDiagnostics;
+            info = struct('available',false,'reason','notComputed','frequency_Hz',NaN, ...
+                'nAssets',0,'epochIndex',NaN,'time_s',NaN,'pathErrorRms_m',NaN, ...
+                'medianGainLoss_dB',NaN,'incoherentFloor_dB',NaN, ...
+                'p10GainLoss_dB',NaN,'p90GainLoss_dB',NaN);
+
+            fc = CE.getNum_(cfg,{'beamforming','communicationFrequency_Hz'},2.1e9);
+            if ~(isscalar(fc) && isfinite(fc) && fc > 0); info.reason='badFrequency'; return; end
+            if ~isstruct(rel) || ~isfield(rel,'solvedPos') || isempty(rel.solvedPos)
+                info.reason = 'noSolvedPos'; return;
+            end
+            P = rel.solvedPos;
+            if ndims(P) ~= 3; info.reason='badSolvedPos'; return; end
+            [~, N, nEp] = size(P);
+            if N < 2 || nEp < 2; info.reason='tooFewAssetsOrEpochs'; return; end
+            [T, ~, ok] = CE.truthAndRaw_(results, N, nEp);
+            if ~ok; info.reason='noTruth'; return; end
+
+            lambda = CE.C_mps / fc;
+            tsel   = max(1,floor(nEp/2)):nEp;                 % same tail convention as computeSeries
+            sig    = nan(1,numel(tsel));
+            loss   = nan(1,numel(tsel));
+            eKeep  = nan(N,numel(tsel));
+            for q = 1:numel(tsel)
+                k = tsel(q);
+                rT = T(:,:,k);
+                if ~all(isfinite(rT(:))) || ~all(isfinite(reshape(P(:,:,k),[],1))); continue; end
+                target_m = CE.targetPoint_(cfg, mean(rT,2));
+                e = vecnorm(P(:,:,k)-target_m,2,1) - vecnorm(rT-target_m,2,1);
+                e = e - mean(e);                              % common phase steers, costs nothing
+                eKeep(:,q) = e(:);
+                sig(q)  = CE.rms_(e);
+                psi = -2*pi*e/lambda; psi = psi - mean(psi);
+                loss(q) = 20*log10(max(abs(mean(exp(1i*psi))),realmin));
+            end
+            good = find(isfinite(sig));
+            if isempty(good); info.reason='noFiniteEpoch'; return; end
+
+            medSig = median(sig(good),'omitnan');
+            [~, pick] = min(abs(sig(good)-medSig));
+            q = good(pick);
+            e = eKeep(:,q).';
+            floorDb = 20*log10(1/sqrt(N));
+
+            info.available        = true;
+            info.reason           = 'ok';
+            info.frequency_Hz     = fc;
+            info.nAssets          = N;
+            info.epochIndex       = tsel(q);
+            info.pathErrorRms_m   = sig(q);
+            info.medianGainLoss_dB= median(loss(good),'omitnan');
+            info.incoherentFloor_dB = floorDb;
+            info.p10GainLoss_dB   = prctile(loss(good),10);
+            info.p90GainLoss_dB   = prctile(loss(good),90);
+            try; info.time_s = rel.time_s(tsel(q)); catch; end
+
+            psi = -2*pi*e/lambda; psi = psi - mean(psi);
+            phasors = exp(1i*psi);
+            chain   = [0, cumsum(phasors)];
+
+            % FONT SIZING. Both figures are placed at width=\linewidth in the report's
+            % 0.62\textwidth plot column, i.e. ~310 pt on the page. A 820 px canvas is 615 pt,
+            % so everything is scaled by ~0.5 when typeset and a nominal 10 pt label prints at
+            % ~5 pt -- unreadable. Fonts are therefore set from the canvas width so the PRINTED
+            % size lands near the body text, and the canvas stays large enough for the raster
+            % to hold detail at 150 dpi.
+            canvasW  = 820;
+            printedW = 310;                                    % pt, = 0.62\textwidth
+            k        = (canvasW*72/96) / printedW;             % canvas pt per printed pt
+            fTick    = 10*k;  fLab = 10.5*k;  fTitle = 11.5*k;  fSub = 9.5*k;  fNote = 9*k;
+
+            % ---- FIGURE 1: the phasor chain -------------------------------------------------
+            % Axis limits come from the DATA (chain plus the ideal bar), not from the old
+            % fixed +/-(0.8N+0.8) box: once the phasors scatter the chain folds back on itself
+            % and spans ~2 units, so the fixed box left the whole picture in a tiny blob at
+            % the centre. axis equal is kept -- the angles are the physics and must not shear.
+            fig = figure('Visible','off','Color','white','Units','pixels', ...
+                'Position',[80 80 canvasW 560]);
+            ax1 = axes(fig); hold(ax1,'on'); axis(ax1,'equal');
+            plot(ax1,[0 N],[0 0],'-','Color',[0.85 0.85 0.85],'LineWidth',9);
+            for element = 1:N
+                quiver(ax1,real(chain(element)),imag(chain(element)), ...
+                    real(phasors(element)),imag(phasors(element)),0, ...
+                    'Color',[0 0.447 0.741],'LineWidth',2.6,'MaxHeadSize',0.45);
+            end
+            quiver(ax1,0,0,real(sum(phasors)),imag(sum(phasors)),0, ...
+                'Color','k','LineWidth',3.6,'MaxHeadSize',0.35);
+            plot(ax1,real(chain),imag(chain),'o','MarkerSize',5, ...
+                'MarkerFaceColor',[0 0.447 0.741],'MarkerEdgeColor','none');
+            grid(ax1,'on'); box(ax1,'on');
+            set(ax1,'FontSize',fTick);
+            xlabel(ax1,'Re','FontSize',fLab); ylabel(ax1,'Im','FontSize',fLab);
+            % Window the CHAIN, not the chain plus the full ideal bar. Including the bar's far
+            % end makes the x-range ~N wide, and with axis equal a scattered chain -- which
+            % spans only ~2 -- is then squashed into the left edge and unreadable. The bar is
+            % still drawn from 0 to N and simply runs off the right-hand side, which carries
+            % the "the total is nowhere near N" message on its own; the label states where it
+            % would end.
+            pad   = 0.55;
+            reC   = [real(chain), 0];  imC = [imag(chain), 0];
+            xr    = [min(reC)-pad, max(reC)+pad];
+            yr    = [min(imC)-pad, max(imC)+pad];
+            xr(2) = max(xr(2), 0.42*N);        % always show a stretch of the ideal bar
+            xlim(ax1,xr); ylim(ax1,yr);
+            % Bottom-right corner, not next to the bar at Im = 0: the chain routinely passes
+            % through there and the label sat on top of it. Kept SHORT and clipped -- the x
+            % range is set by the data and varies run to run, so a long sentence overflowed
+            % the axes box on the left whenever the chain happened to be compact.
+            text(ax1,xr(2)-0.03*diff(xr),yr(1)+0.07*diff(yr), ...
+                sprintf('grey: all %d in step',N), ...
+                'Color',[0.45 0.45 0.45],'HorizontalAlignment','right', ...
+                'FontSize',fNote,'Clipping','on');
+            title(ax1,sprintf('Adding the %d signals together at %s', ...
+                N, CE.frequencyLabel_(fc)),'FontWeight','bold','FontSize',fTitle);
+            subtitle(ax1,sprintf('arrival times spread over %s', ...
+                CE.spreadInWavelengths_(sig(q), lambda)),'FontSize',fSub);
+
+            % ---- FIGURE 2: how much that total varies over the settled tail -----------------
+            figSpread = figure('Visible','off','Color','white','Units','pixels', ...
+                'Position',[80 80 canvasW 470]);
+            ax2 = axes(figSpread); hold(ax2,'on');
+            histogram(ax2,loss(good),24,'FaceColor',[0.6 0.6 0.6],'EdgeColor','none');
+            yl = [0, ylim(ax2)*[0;1]*1.10];       % headroom so the tallest bin is not flush
+            plot(ax2,[info.medianGainLoss_dB info.medianGainLoss_dB],yl,'k-','LineWidth',3);
+            plot(ax2,[floorDb floorDb],yl,'r--','LineWidth',2.6);
+            plot(ax2,[loss(q) loss(q)],yl,'b-','LineWidth',2.2);
+            ylim(ax2,yl); grid(ax2,'on'); box(ax2,'on');
+            set(ax2,'FontSize',fTick);
+            xlabel(ax2,'coherent gain loss [dB]','FontSize',fLab);
+            ylabel(ax2,'number of epochs','FontSize',fLab);
+            legend(ax2,{'settled epochs','median','no-coherence floor','the epoch drawn above'}, ...
+                'Location','northwest','FontSize',fSub);
+            % Title kept short: at fTitle the longer form overran the canvas and was clipped.
+            title(ax2,'The same loss at every settled epoch', ...
+                'FontWeight','bold','FontSize',fTitle);
+            subtitle(ax2,sprintf('median %.2f dB;  middle 80%% spans %.2f to %.2f dB', ...
+                info.medianGainLoss_dB, info.p10GainLoss_dB, info.p90GainLoss_dB), ...
+                'FontSize',fSub);
+        end
+
         function fig = plotPathErrorSeries(series)
             % plotPathErrorSeries  The beamforming budget over the arc, from the ISL-solved
             % geometry: differential path error against the wavelength thresholds it must beat,
@@ -994,6 +1162,23 @@ classdef BeamformingPhasorDiagnostics
             values = values(isfinite(values));
             if isempty(values); value = NaN; return; end
             value = sqrt(mean(values(:).^2));
+        end
+
+        function s = spreadInWavelengths_(spread_m, lambda_m)
+            % spreadInWavelengths_  Path spread as a plain-language phrase.
+            % "lambda/0.5" is a true but unreadable way of saying "two wavelengths", and the
+            % lambda/K form only reads naturally while K > 1, i.e. while the array is still
+            % coherent. Below that, quote whole wavelengths instead.
+            if ~(isscalar(spread_m) && isfinite(spread_m) && spread_m > 0) || ...
+                    ~(isscalar(lambda_m) && isfinite(lambda_m) && lambda_m > 0)
+                s = 'an undetermined fraction of a wavelength'; return
+            end
+            nWave = spread_m / lambda_m;
+            if nWave < 1
+                s = sprintf('%.4f m, or \\lambda/%.1f', spread_m, 1/nWave);
+            else
+                s = sprintf('%.4f m, or %.1f wavelengths', spread_m, nWave);
+            end
         end
 
         function value = fieldNum_(source,name,defaultValue)

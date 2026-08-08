@@ -7,13 +7,24 @@ function pdfPath = regenerate_report_from_mat(matPath, outFolder)
 %   reconstructs the asset/towers from cfg, and drives revgnss.ClockExactReportBuilder to write
 %   the LaTeX and compile the PDF (requires pdflatex on PATH).
 %
+%   TWO ARCHIVE SHAPES, dispatched automatically. A single-asset run saves cfg + diagnostics +
+%   summary and is rebuilt by ClockExactReportBuilder as described above. A FEDERATED SWARM run
+%   (multiAsset.mode = 'fast' | 'federated') instead saves cfg + results + rel + summary +
+%   relErrorBundle and carries no diagnostics store, because ReportRunner obtains the chief's
+%   SimData by re-running one asset at report time. Those archives are rebuilt by
+%   revgnss.SwarmReportReplay, which recovers the complete swarm, relative-layer and
+%   ground-orientation content and states on its first page which single-asset sections cannot be
+%   recovered without re-running an EKF.
+%
 %   USAGE
 %     regenerate_report_from_mat(PATH_TO_MAT)             % PDF written next to the .mat
 %     regenerate_report_from_mat(PATH_TO_MAT, OUTFOLDER)  % PDF written into OUTFOLDER
 %     regenerate_report_from_mat('latest')                % newest report .mat under output/
+%     regenerate_report_from_mat(FOLDER)                  % every report .mat under FOLDER
 %     pdf = regenerate_report_from_mat(...)               % returns the PDF path
 %
-%   See also: run_oo_v1, plot_mat_report, revgnss.ClockExactReportBuilder
+%   See also: run_oo_v1, plot_mat_report, revgnss.ClockExactReportBuilder,
+%             revgnss.SwarmReportReplay
 
     thisDir = fileparts(mfilename('fullpath'));
     addpath(thisDir); addpath(fullfile(thisDir,'config'));
@@ -21,9 +32,26 @@ function pdfPath = regenerate_report_from_mat(matPath, outFolder)
     if nargin < 1 || isempty(matPath) || strcmpi(matPath,'latest')
         matPath = i_newestMat(fullfile(thisDir,'output'));
     end
+
+    % Batch mode: a folder rebuilds every report .mat underneath it.
+    if isfolder(matPath)
+        rows = revgnss.SwarmReportReplay.fromFolder(matPath);
+        pdfPath = {rows(logical([rows.success])).pdfPath};
+        return
+    end
+
     assert(isfile(matPath), 'regenerate_report_from_mat:noMat', 'No .mat at: %s', matPath);
 
     S = load(matPath);
+
+    % Federated-swarm archive: a different payload shape, not a damaged single-asset one.
+    if revgnss.SwarmReportReplay.isSwarmMat(S)
+        if nargin < 2; outFolder = ''; end
+        out = revgnss.SwarmReportReplay.fromMat(matPath, outFolder);
+        pdfPath = out.pdfPath;
+        return
+    end
+
     for req = {'cfg','diagnostics','summary'}
         assert(isfield(S, req{1}), 'regenerate_report_from_mat:badMat', ...
             '.mat missing "%s" -- not an oo_v1 report .mat: %s', req{1}, matPath);

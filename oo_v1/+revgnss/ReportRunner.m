@@ -1914,6 +1914,7 @@ classdef ReportRunner
             rel.beamformingSeries = revgnss.ReportRunner.beamformingSeries_(rel, results, cfg);
             summ = revgnss.FederatedSwarmSummary.build(cfg, results, rel, refAsset);
             revgnss.FederatedSwarmSummary.print(summ);
+            revgnss.FederatedSwarmSummary.printGroundOrientation(rel);
             revgnss.ReportRunner.printBeamformingSeries_(rel.beamformingSeries);
 
             out = struct('pdfPath', '', 'matPath', '', 'summary', summ, 'rel', rel, ...
@@ -2037,6 +2038,28 @@ classdef ReportRunner
             catch beamErr
                 fprintf(2,'  Beamforming path-error figure skipped (%s).\n', beamErr.message);
             end
+
+            % Fixed phasor at the OPERATIONAL comms carrier (default 2.1 GHz). The three
+            % panels above are derived per run, so they cannot be compared between reports;
+            % this one is pinned to cfg.beamforming.communicationFrequency_Hz so the same
+            % picture means the same thing everywhere.
+            % The chain and its epoch-to-epoch spread are two SEPARATE figures so each is
+            % readable at full width in the report rather than squeezed side by side.
+            commsPhasorFig = ''; commsPhasorSpreadFig = ''; commsPhasorInfo = struct('available',false);
+            try
+                [cp, commsPhasorInfo, cpSpread] = revgnss.BeamformingPhasorDiagnostics.plotCommsPhasor( ...
+                    rel, results, cfg);
+                if ~isempty(cp)
+                    commsPhasorFig = fullfile(figDir, [stem '_beamforming_comms_phasor.png']);
+                    exportgraphics(cp, commsPhasorFig, 'Resolution', 150); close(cp);
+                end
+                if ~isempty(cpSpread)
+                    commsPhasorSpreadFig = fullfile(figDir, [stem '_beamforming_comms_phasor_spread.png']);
+                    exportgraphics(cpSpread, commsPhasorSpreadFig, 'Resolution', 150); close(cpSpread);
+                end
+            catch cpErr
+                fprintf(2,'  Comms-carrier phasor figure skipped (%s).\n', cpErr.message);
+            end
             revgnss.ReportRunner.printBeamformingSeries_(rel.beamformingSeries);
 
             % Scenario counts for the appendix caption.
@@ -2058,6 +2081,9 @@ classdef ReportRunner
                 'relSwarmFig', relSwarmFig, ...
                 'relRefSwarmFig', relRefSwarmFig, ...
                 'beamFig',    beamFig, ...
+                'commsPhasorFig',  commsPhasorFig, ...
+                'commsPhasorSpreadFig', commsPhasorSpreadFig, ...
+                'commsPhasorInfo', commsPhasorInfo, ...
                 'beamformingSeries', revgnss.ReportRunner.packBeamSeries_(rel.beamformingSeries), ...
                 'relErrFigs', {relErrFigs}, ...
                 'nTowers',    nTowers, ...
