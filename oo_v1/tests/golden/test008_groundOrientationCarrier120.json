@@ -1,0 +1,193 @@
+{
+  "labels": {
+    "scenarioName": "test008_groundOrientationCarrier120",
+    "scenarioSha256": "b1a15979cacfb1f91a93d0def595397572a0488f0a254615d93d7959b6e53d2c",
+    "rotationReason": "rotationSnr[fail]: 0.1541 deg estimated against a formal 0.1249 deg -- 1.234 vs threshold 3 (-58.9 %) -- correction NOT applied",
+    "jointReason": "ok",
+    "jointAcceptReason": "rotation fail (1.0628 vs threshold 3 (-64.6 %); |theta| = 1.535 m of rim, formal 1.445 m, arc turned 0.4 deg) | shape pass (0.40618 vs threshold 1.74 (+76.7 %); 0.4062 m step against a 0.58 m prior, 9/12 DOF observable) || shape APPLIED from a rotation-constrained re-solve (0.1635 m), not from the marginal joint estimate",
+    "jointShapeFrame": "ecef",
+    "jointShapePriorSource": "config+perCoordAnisotropy",
+    "jointLeverArmMode": "estimatedAttitude",
+    "carrierProbeReason": "ok"
+  },
+  "values": {
+    "durationSecond": [
+      "120"
+    ],
+    "nSpaceAssets": [
+      "6"
+    ],
+    "seed": [
+      "42"
+    ],
+    "shapeErrRaw_m": [
+      "0.85854433414977227"
+    ],
+    "shapeErrSolved_m": [
+      "0.13861505595134696"
+    ],
+    "baselineErrRaw_m": [
+      "0.99589757792710065"
+    ],
+    "baselineErrSolved_m": [
+      "0.05492249373332158"
+    ],
+    "formalShapeSigma_m": [
+      "0.11598839665214357"
+    ],
+    "relClockErrSolved_m": [
+      "0.020132071682675022"
+    ],
+    "weaklyObservable": [
+      "0"
+    ],
+    "rotationGateOn": [
+      "1"
+    ],
+    "rotationTheta_rad": [
+      "0.00050513557799722894",
+      "-0.00014568612096566615",
+      "0.0026384252570211724"
+    ],
+    "rotationSigma_rad": [
+      "0.00072091257569142594",
+      "0.0013466176996562765",
+      "0.0015556245775911082"
+    ],
+    "rotationNObs": [
+      "2420"
+    ],
+    "rotationCondition": [
+      "43.028341270462263"
+    ],
+    "jointGateOn": [
+      "1"
+    ],
+    "jointAccepted": [
+      "1"
+    ],
+    "jointTheta_rad": [
+      "-0.00062059183423263304",
+      "0.00065553555543937749",
+      "0.001406048723499225"
+    ],
+    "jointThetaSigma_rad": [
+      "0.00044480996697740928",
+      "0.00086731047568586834",
+      "0.0012334285477826096"
+    ],
+    "jointShapeStep_m": [
+      "0.16350499741436342"
+    ],
+    "jointNObs": [
+      "2420"
+    ],
+    "jointShapePriorSigma_m": [
+      "0.57999999999999996"
+    ],
+    "jointObservableShapeDof": [
+      "9"
+    ],
+    "jointShapeDofTotal": [
+      "12"
+    ],
+    "jointShapeGainMedian": [
+      "31.985332971883054"
+    ],
+    "jointShapeGainMax": [
+      "43.344192797644908"
+    ],
+    "jointSeparationPenalty": [
+      "27.674868874491896"
+    ],
+    "jointSeparationPenaltyFree": [
+      "51.700596548680544"
+    ],
+    "jointTurnAngle_deg": [
+      "0.42767350921075381"
+    ],
+    "jointRotationSnrMin": [
+      "1.0628468846613601"
+    ],
+    "jointVarianceFactor": [
+      "14.278128180681293"
+    ],
+    "jointLeverArmDdSystematic_m": [
+      "2.2969914441953635e-10"
+    ],
+    "carrierGeomErrRms_m": [
+      "0.10639313815093024"
+    ],
+    "carrierNEffective": [
+      "5.2670617860560496"
+    ],
+    "carrierFixRate_wideLane": [
+      "0.99876033057851243"
+    ],
+    "carrierP95_wideLane": [
+      "0.25907991588437085"
+    ],
+    "carrierFixRate_L2": [
+      "0.81735537190082641"
+    ],
+    "carrierP95_L2": [
+      "0.87384436215656081"
+    ],
+    "carrierFixRate_L1": [
+      "0.71611570247933887"
+    ],
+    "carrierP95_L1": [
+      "1.1081473245228608"
+    ],
+    "carrierFixRate_narrowLane": [
+      "0.44917355371900825"
+    ],
+    "carrierP95_narrowLane": [
+      "1.9871056527247219"
+    ],
+    "beamPathErrRms_m": [
+      "0.28735536440178611"
+    ],
+    "beamCoherenceFreq_Hz": [
+      "52164061.496486299"
+    ],
+    "beamSpotDisplacement_m": [
+      "14167.199194639503"
+    ],
+    "beamTiltFraction": [
+      "0.83338699882450995"
+    ],
+    "beamGainLoss_dB": [
+      "-10.913843618349492",
+      "-9.9160066445565995",
+      "-9.6344517849276894"
+    ],
+    "orientRotationErr_deg": [
+      "0.090073436512861135"
+    ],
+    "orientRimDisplacement_m": [
+      "1.4430604744296736"
+    ],
+    "orientRotationLever_m": [
+      "917.93183393375807"
+    ],
+    "orientGainLoss_dB": [
+      "-7.7815125038364368",
+      "-7.7815125038364368",
+      "-7.7815125038364368"
+    ],
+    "orientMispointBeamwidths": [
+      "20.216832781712704",
+      "11.552475875264403",
+      "3.8508252917548011"
+    ],
+    "absErr_m": [
+      "3.225559242948207",
+      "3.1673309222625532",
+      "4.0354784131863539",
+      "3.0470271059107539",
+      "1.4551023457781636",
+      "1.5467015695298092"
+    ]
+  }
+}

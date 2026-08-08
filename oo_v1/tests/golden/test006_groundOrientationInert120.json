@@ -1,0 +1,193 @@
+{
+  "labels": {
+    "scenarioName": "test006_groundOrientationInert120",
+    "scenarioSha256": "18dca9928bec19f4a92443a395856bfdd2904970d56b1f08f3de5fd8e367d318",
+    "rotationReason": "gateOff",
+    "jointReason": "gateOff",
+    "jointAcceptReason": "notAttempted",
+    "jointShapeFrame": "ecef",
+    "jointShapePriorSource": "notAttempted",
+    "jointLeverArmMode": "none",
+    "carrierProbeReason": "gateOff"
+  },
+  "values": {
+    "durationSecond": [
+      "120"
+    ],
+    "nSpaceAssets": [
+      "6"
+    ],
+    "seed": [
+      "42"
+    ],
+    "shapeErrRaw_m": [
+      "0.85854433414977227"
+    ],
+    "shapeErrSolved_m": [
+      "0.13861505595134696"
+    ],
+    "baselineErrRaw_m": [
+      "0.99589757792710065"
+    ],
+    "baselineErrSolved_m": [
+      "0.05492249373332158"
+    ],
+    "formalShapeSigma_m": [
+      "0.11598839665214357"
+    ],
+    "relClockErrSolved_m": [
+      "0.020132071682675022"
+    ],
+    "weaklyObservable": [
+      "0"
+    ],
+    "rotationGateOn": [
+      "0"
+    ],
+    "rotationTheta_rad": [
+      "0",
+      "0",
+      "0"
+    ],
+    "rotationSigma_rad": [
+      "NaN",
+      "NaN",
+      "NaN"
+    ],
+    "rotationNObs": [
+      "0"
+    ],
+    "rotationCondition": [
+      "NaN"
+    ],
+    "jointGateOn": [
+      "0"
+    ],
+    "jointAccepted": [
+      "0"
+    ],
+    "jointTheta_rad": [
+      "0",
+      "0",
+      "0"
+    ],
+    "jointThetaSigma_rad": [
+      "NaN",
+      "NaN",
+      "NaN"
+    ],
+    "jointShapeStep_m": [
+      "NaN"
+    ],
+    "jointNObs": [
+      "0"
+    ],
+    "jointShapePriorSigma_m": [
+      "NaN"
+    ],
+    "jointObservableShapeDof": [
+      "NaN"
+    ],
+    "jointShapeDofTotal": [
+      "NaN"
+    ],
+    "jointShapeGainMedian": [
+      "NaN"
+    ],
+    "jointShapeGainMax": [
+      "NaN"
+    ],
+    "jointSeparationPenalty": [
+      "NaN"
+    ],
+    "jointSeparationPenaltyFree": [
+      "NaN"
+    ],
+    "jointTurnAngle_deg": [
+      "NaN"
+    ],
+    "jointRotationSnrMin": [
+      "NaN"
+    ],
+    "jointVarianceFactor": [
+      "NaN"
+    ],
+    "jointLeverArmDdSystematic_m": [
+      "NaN"
+    ],
+    "carrierGeomErrRms_m": [
+      "NaN"
+    ],
+    "carrierNEffective": [
+      "NaN"
+    ],
+    "carrierFixRate_wideLane": [
+      "NaN"
+    ],
+    "carrierP95_wideLane": [
+      "NaN"
+    ],
+    "carrierFixRate_L2": [
+      "NaN"
+    ],
+    "carrierP95_L2": [
+      "NaN"
+    ],
+    "carrierFixRate_L1": [
+      "NaN"
+    ],
+    "carrierP95_L1": [
+      "NaN"
+    ],
+    "carrierFixRate_narrowLane": [
+      "NaN"
+    ],
+    "carrierP95_narrowLane": [
+      "NaN"
+    ],
+    "beamPathErrRms_m": [
+      "0.25332000597332849"
+    ],
+    "beamCoherenceFreq_Hz": [
+      "59172677.035141967"
+    ],
+    "beamSpotDisplacement_m": [
+      "11997.98664770138"
+    ],
+    "beamTiltFraction": [
+      "0.78937495249474499"
+    ],
+    "beamGainLoss_dB": [
+      "-10.27988421565208",
+      "-10.261006566919335",
+      "-10.970902364011042"
+    ],
+    "orientRotationErr_deg": [
+      "NaN"
+    ],
+    "orientRimDisplacement_m": [
+      "NaN"
+    ],
+    "orientRotationLever_m": [
+      "917.92740098379159"
+    ],
+    "orientGainLoss_dB": [
+      "NaN",
+      "NaN",
+      "NaN"
+    ],
+    "orientMispointBeamwidths": [
+      "NaN",
+      "NaN",
+      "NaN"
+    ],
+    "absErr_m": [
+      "3.225559242948207",
+      "3.1673309222625532",
+      "4.0354784131863539",
+      "3.0470271059107539",
+      "1.4551023457781636",
+      "1.5467015695298092"
+    ]
+  }
+}

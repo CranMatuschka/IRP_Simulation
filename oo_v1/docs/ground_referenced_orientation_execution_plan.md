@@ -23,6 +23,7 @@ Stated up front so they don't get re-litigated mid-implementation.
 | "The prior restrains the step, so it's ~3× weaker than declared." | Directionally right, magnitude wrong. It converges toward *unregularised* LS (`x_n = (1−ρⁿ)x_LS`) — the effective σ is inflated, not shrunk, and at present settings it is a **0.03 %** effect. Fix it for correctness, not for impact. |
 | "The tower-motion / Sagnac term is a 2.08 mm unmodelled error." | **Currently inert** — observable and prediction call the same range function, so it cancels in the residual (leak 0.8 µm). It is a **fidelity gap, not a live bug**: the term is real and must be added the moment the observable stops being synthesised from the same helper as the prediction. Size it correctly — the single difference carries `v_tower · b_ij / c` = **2.07 mm** at b = 2176 m, and the double difference carries `(v_m − v_ref) · b_ij / c` ≈ **0.18 mm** for towers ~5° apart in longitude. That DD figure sits right on the 0.135 mm class-B bar, so it belongs in the budget. |
 | "Formation radius 1125 m, mm requirement 0.18 arcsec." | Correct **for run20**, which is the legacy single-ring layout. run22's multiRingHelix has R_rms = 2102.8 m and a rotation lever of `sqrt(2/3)·R_rms` = **1705.7 m**, giving **0.121 arcsec**. Quote the layout with the number. |
+| "Federated parallel is bit-identical to serial, so the goldens can use it." — asserted by `ReportRunner.m:2209`. | **False, measured.** Serial vs `federated.parallel = true` on the same fixture differs in **33 of 148** numeric fields. The goldens therefore stay serial, and the observed speedup on this machine was 1.41× (16m20s → 11m36s), below the 1.79× the RAM-capped heuristic predicts. The comment should be corrected: independence and per-asset seeding are necessary for reproducibility but evidently not sufficient. Keep `ground_orientation_smoke` / `_smoke_par` as a standing pair so the claim stays under test. |
 | "The missing DD factor of 2 in the probe is immaterial." | Conclusion right, argument weak. The sharp proof of non-independence is different: the code's own σ predicts a 2.9e-10 failure rate at 6.3σ, but the reported rate is 3.7e-5 — a factor of **10⁵**. Those 16 failures are one clustered excursion of the arc-correlated geometry error, not thermal noise. Fix the factor anyway (`amp*sigPhase` → `amp*2*sigPhase`); margin goes 6.30σ → 6.05σ and wide-lane still clears. |
 
 **What survives from the closed-loop analysis** and is carried into Phase H: transmit-chain vs
@@ -67,6 +68,7 @@ byte-identical when disabled.
 | A2 | `feat(scenario): make every headline runnable from a committed config` | `prior_sweep.m` does not exist in the tree or in git history, and no shipped scenario sets 0.003 — **1.53× cannot be reproduced by running anything in this repo**. `GroundCarrierAmbiguityProbe` has zero callers, no gate, no scenario, no report plumbing — 99.9963 % exists only as a MATLAB-prompt result with no committed seed or arc. Commit both as scenarios, or relabel them as bench results and strike them from the summary table. |
 | A3 | `test(golden): freeze one .mat per headline and assert it` | One golden per §4 number in the summary, asserted in `tests/`. |
 | A4 | `test(frame): LVLH vs ECEF shape parameterisation` | §1 above. Express `dp` in LVLH (`dp_ECEF(k) = R_k·dp_lvlh`), rebuild `Pr` per epoch, re-run the arc sweep. **Report either outcome.** |
+| A5 | `fix(ground): make the leakage guard decision stable` | **MEASURED 2026-08-05, and it is the reproducibility defect.** The `shapeLeakageDominates` guard is a hard binary — `predLeak > sigTheta` — gating whether a ~0.5 m geometry correction is applied. On the smoke fixture it currently sits at **0.0339 vs 0.0329 deg, a 3 % margin**. Running the same scenario serially vs with `federated.parallel = true` perturbed the arithmetic at the 1e-14 level, flipped the comparison, and produced: `rotationReason` `'ok'` vs `'shapeLeakageDominates … NOT applied'`, `solvedPos` differing by **0.55 m**, `jointShapeStep_m` 0.2448 vs 0.1192 (2×), beam spot displacement differing by **3.8 km**, coherent gain loss by **0.99 dB** — 33 of 148 numeric fields. Any BLAS update, different machine or compiler flag can flip it. The plan previously called leaving `solvedPos` untouched "the correct failure mode"; it is not a failure mode, it is a coin flip that moves the answer by half a metre. Fix: report the margin explicitly, add hysteresis or a dead-band, and treat a near-threshold result as a third outcome (`indeterminate`) rather than silently picking a branch. |
 
 **Gate:** `run_oo_v1` reproduces every §4 number from a committed config; `run_all_tests` covers each.
 **Stop and report before Phase B.**
@@ -242,3 +244,278 @@ closure phase, multi-frequency ambiguity resolution and code-aided carrier are a
 contribution is combining them for a GEO reverse-GNSS swarm and demonstrating that the bootstrap
 closes from the orientation already available. That is a legitimate result. Claimed as a new
 measurement principle it would not survive a viva.
+
+---
+
+# 6. Implementation status — 2026-08-05
+
+Phases **A, B, C, D, E, F and G are implemented**; A5 is implemented; **H is declared out of
+scope** by the G4 statement in `docs/ground_referenced_orientation_requirements.md`. What follows
+is what each commit actually did, what it measured, and where it disagrees with the plan.
+
+## 6.1 New and rewritten components
+
+| file | phase | role |
+|---|---|---|
+| `+revgnss/GuardDecision.m` | A5 | three-way threshold test with a dead-band; `pass` / `fail` / `indeterminate` |
+| `+revgnss/GoldenRunFingerprint.m` | A3 | a run reduced to 81 named, exactly-round-tripped values |
+| `+revgnss/ShapeFrameSeparationProbe.m` | A4 | injection + arc sweep over {ECEF, body} × {ECEF, body} |
+| `+revgnss/OrientationCoherenceBudget.m` | G1/G2/G5 | σ_θ → rim → phase → dB, and beamwidths of mispointing |
+| `+revgnss/GroundCarrierObservationSet.m` | F1/F3/F7 | dual-frequency per-link carrier and code, N₁/N₂ as the only integers, cycle-slip arcs |
+| `+revgnss/GroundCarrierAmbiguityResolver.m` | F2/F4/F5/F6 | the estimator: MW wide lane → fix → conditioned geometry → L1 |
+| `+revgnss/+integer/DecorrelatedBootstrap.m` | F4/F5 | decorrelation, bootstrapping with an exact success rate, bounded ILS |
+| `+revgnss/JointGeometrySolver.m` | B–F | rewritten: orthonormal shape basis, unit equilibration, real R_DD, Cholesky, Schur SNR, split acceptance, swappable observable |
+| `+revgnss/GroundDifferencedRotationSolver.m` | B1/E2/E3/A5 | symmetric lever arm, measured leakage coefficient, no truth, three-way guards |
+
+Tests: `test_golden_ground_orientation`, `test_ground_orientation_estimator_contract`,
+`test_decorrelated_bootstrap`. Scenarios: eight `ground_orientation_*.json`.
+
+## 6.2 What was measured, and what it changes
+
+**The rank problem is real, and carrier fixes it.** C2 asked how many of the 12 shape DOF the
+ground double difference constrains. Measured on the 120 s fixture: **1 of 12** on the code
+observable (max gain 1.11), **9 of 12** on the fixed wide-lane carrier (max gain 42.8). run20 was
+regularising eleven directions it could not see with one scalar prior. That is a rank problem, and
+no retuning of the prior could have fixed it — exactly as §0 of this plan predicted.
+
+**The wide lane fixes without a good geometry, and that is why the bootstrap closes.** The plan's
+stated reason for starting at wide-lane was wavelength: 0.148 m of DD error against a 0.431 m
+half-wavelength. That argument is circular — it makes the fix depend on the geometry error the
+programme is trying to reduce. The implementation uses the **Melbourne–Wübbena** combination
+instead, which is geometry-free and ionosphere-free. Measured on a 120 s arc with 1.4 m of
+geometry error: **P(success) = 1.000000 from the covariance alone, 20 of 20 components realised
+correct.** The fix does not care about the geometry, which is what makes the ladder
+non-circular.
+
+**The cascade closes one rung.** Fixed wide lane → DD σ 2.000 m → 0.023 m (87×) → conditioned
+geometry, shape σ 0.58 → 0.411 m → L1 float σ 3.04 → 0.99 cycles, P(success) 0.13 → 0.39. Still
+refused at 120 s, correctly. L1 needs the 6 h arc.
+
+**Two guards were applying corrections that made things worse.** The 3-parameter stage estimated
+0.159° against a formal 0.125° — SNR 1.27, consistent with noise — passed the leakage test,
+applied 2.5 m of rim displacement and made the relative geometry **2.6× worse**. The leakage guard
+asks whether shape could be masquerading as rotation; it never asked whether the rotation was
+distinguishable from zero. Both stages now carry an absolute SNR test on the Schur complement.
+
+**Acceptance had to split.** Refusing the whole step because the rotation is insignificant throws
+away a shape correction that has its own justification — and breaks the Phase F cascade at its
+most important link. `acceptedShape` and `acceptedRotation` are now decided separately.
+
+**The lever-arm defect is removed and instrumented.** Observable and prediction are both at the
+antenna phase centre; the residual is **3.4e-15 m** and the defect it removed is reported per run
+as `leverArmDdUncorrected_m`. Note that the shipped scenarios have an EKF attitude error of
+identically zero, so this fix is currently exact rather than merely adequate.
+
+## 6.2b A5, re-measured after the fix
+
+The claim under test was `ReportRunner.m:2209` — that the federated parallel fan-out is
+bit-identical to serial because the N assets are independent and per-asset seeded. Measured
+**before** the dead-band: **33 of 148 numeric fields differed**, traced to the leakage guard
+sitting at a 3 % margin and flipping on a 1e-14 perturbation.
+
+Re-measured **after** Phases B–E and A5, same scenario (`ground_orientation_smoke`, 1800 s),
+serial against `ground_orientation_smoke_par`, comparing the FULL relative-layer struct:
+
+```
+numeric fields compared : 178   differing: 0
+string  fields compared :  35   differing: 0
+```
+
+*(Re-measured after the C1b coupling fix of §6.2c, which is why the field count rose from 172 to
+178 — the two constrained-re-solve diagnostics are new. Both measurements agree: zero
+differences.)*
+
+**Identical.** And the guard itself now reports the near-threshold case explicitly, in both runs:
+
+> `shapeLeakage[indeterminate]: predicted 0.0339 deg of spurious rotation from 0.074 m shape
+> error vs 0.0329 deg measurable -- INDETERMINATE: 0.03385 vs threshold 0.032862 is a -3.0 %
+> margin, inside the 10 % dead-band`
+
+That is the same 3 % margin, now a stable third outcome instead of a coin toss.
+
+**Do not read this as "the arithmetic is bit-identical after all."** Two changes landed together
+and the measurement cannot separate them: A5 removed the discontinuity, and D1 replaced
+`pinvTrunc_` — an SVD-based truncated pseudo-inverse, exactly the kind of routine whose last bits
+move with BLAS thread count — with a Cholesky solve, which is far more reproducible. The
+defensible statement is the measured one: **on this configuration, after these commits, serial
+and parallel agree on every reported field.** The standing `smoke` / `smoke_par` pair keeps the
+claim under test rather than settling it.
+
+## 6.2c C1b — a defect this work INTRODUCED, and how it was caught
+
+Worth recording because it was self-inflicted, it passed every existing test, and the guard that
+was supposed to prevent exactly this class of thing waved it through with high confidence.
+
+**What was built.** Phase C1 added an acceptance guard; the Phase F cascade then needed the shape
+correction to be applied on arcs far too short to see a rotation, so acceptance was split into
+`acceptedShape` and `acceptedRotation` and the two were treated as **independent switches**.
+
+**What that produced.** Measured at N = 4 over a 300 s arc, with the wide-lane carrier observable:
+
+```
+rotation pass (SNR 40.795 vs threshold 3, +1260 %) | shape fail (31.03 m step vs 1.74 m, -1683 %)
+  |theta| = 8.66 deg,  formal sigma = 0.21 deg
+  geometry moved by 171 m
+```
+
+An 8.66° rotation, on a formation whose real orientation error is ~0.03°, applied because its
+formal sigma was small. **This is the plan's own cross-cutting warning — "formal σ can be blind to
+the dominant error" — reappearing in new code.** The SNR test is a genuine improvement over
+`rcond`, and it still could not see this, because the estimate was not noisy; it was wrong.
+
+**The actual error in reasoning.** The rotation was never a standalone estimate. It was the
+partner of a 31 m shape step that the estimator itself rejected, and the pair only fitted the data
+*together*. Applying half of a jointly-estimated correction is not the conservative choice — it is
+an incoherent one. And there is no safe fallback for the rotation alone, because a rotation-only
+solve **is** `GroundDifferencedRotationSolver`, the estimator this class exists to replace.
+
+**The rule now enforced**, in `JointGeometrySolver.acceptance` and unit-tested as a truth table in
+`tests/test_ground_orientation_estimator_contract.m`:
+
+| shape | rotation | applied |
+|---|---|---|
+| rejected | either | **nothing** |
+| accepted | rejected | shape only, from a rotation-**constrained** re-solve |
+| accepted | accepted | both |
+
+The constrained re-solve matters and is not a formality: the blocks are correlated, so the shape
+that is right when θ = 0 is not the shape that was fitted alongside a free θ. Measured on the
+120 s carrier fixture, the marginal shape step is 0.2295 m and the constrained one is **0.1298 m**
+— the difference is precisely what the marginal estimate was contributing to explain a rotation
+that is now held at zero. The constrained step is then re-tested against the shape guard, because
+it is the number actually being applied.
+
+**How it was caught:** not by any test, but by asking a question no test asked — *is the ladder
+inert when its gates are off?* The pre-existing fields were bit-identical; `solvedPos` moved by
+171 m. The inertness check found a live bug in the stage it was checking the inertness of.
+
+## 6.2d A4 — THE ANSWER. The turn-angle mechanism is physics, not parameterisation.
+
+This is the item §1 of this plan called "the single cheapest thing that can invalidate the rest",
+and it gates the turn-angle law, the case for long arcs, the joint solve's separation mechanism,
+and Phase H's 4N+3 hardware separation. Measured on the 6 h golden with the fixed wide-lane
+carrier (so the shape has room to move -- 12 of 12 DOF observable in every cell), injecting a
+known 0.02 deg rotation and a known 0.10 m shape error into the ESTIMATE and asking the real
+solver to undo them:
+
+| turn | penalty, dp in ECEF | penalty, dp in formation BODY | body / ecef |
+|---|---|---|---|
+| 9.0 deg | 16.00x | 12.55x | 0.784 |
+| 18.6 deg | 8.40x | 6.39x | 0.761 |
+| 40.7 deg | 4.30x | 3.17x | 0.737 |
+| 99.1 deg | 2.22x | 1.62x | 0.730 |
+
+**THE MECHANISM SURVIVES IN BOTH FRAMES.** The penalty falls monotonically with turn angle in
+ECEF *and* in the body frame, at very nearly `penalty ∝ 1/turn` in both (the product
+`penalty × turn` drifts only 144→220 across a factor of eleven in arc). The separation is
+therefore a property of how far the formation TURNS, not of the coordinates the shape happens to
+be written in. **Three phases rest on physics.** The hypothesis that "G turns, dp does not" is a
+parameterisation artefact is REFUTED.
+
+**The published law reproduces.** Measured ECEF against the quoted table: 16.0x at 9.0 deg vs
+14.5x at 7.5 deg; 8.40x at 18.6 deg vs 9.9x at 15 deg; 4.30x at 40.7 deg vs 5.6x at 30 deg;
+2.22x at 99.1 deg vs 2.1x at 90 deg. Same magnitude, same slope, on a real run rather than a
+scratch CRLB.
+
+**NEW, AND ACTIONABLE: the body frame is consistently BETTER CONDITIONED.** `body/ecef` sits at
+0.73-0.78 at every arc length -- a 22-27 % lower separation penalty, stable across a factor of
+eleven in turn angle. That is not noise, and it is the physically expected direction: a real
+deformation is fixed in the body frame, so parameterising it there matches the physics and buys
+conditioning. `cfg.multiAsset.jointGeometry.shapeFrame = 'formationBody'` is the better choice on
+this evidence.
+
+**BUT THE RECOVERY ERROR DOES NOT FOLLOW THE CONDITIONING, AND THAT IS WORTH STATING.** At 99.1 deg
+against an injected 0.02 deg:
+
+| solver frame | inject frame | rotation error after |
+|---|---|---|
+| ecef | ecef | **0.00000 deg** (exact) |
+| ecef | body | 0.00865 |
+| body | ecef | 0.01059 |
+| body | body | 0.01359 |
+
+The ECEF solver recovers EXACTLY when the shape error really is ECEF-constant, and the
+*matched* body/body cell is worse than the *mismatched* ecef/body cell. The likely reason is in
+the implementation, not the physics: the body frame is reconstructed by Kabsch from the SOLVED
+geometry, which carries its own error, so 'formationBody' pays a reconstruction noise penalty that
+'ecef' -- needing no reconstruction at all -- does not. **So the better-conditioned
+parameterisation is not automatically the more accurate one here, and shapeFrame should stay
+'ecef' by default until that reconstruction is done from something cleaner.** Recorded rather than
+resolved; it is a new question this experiment raised.
+
+**A caveat on the automated verdict line.** `ShapeFrameSeparationProbe.verdict_` compares the
+median matched cell against the median mismatched cell and reports "the frame does not matter"
+below a 3x ratio. On this table it prints exactly that (0.0068 vs 0.0096 deg). The statement is
+true but uninformative: with only two cells per side the median is fragile, and the real content
+of the table is in the monotone penalty columns, not in the verdict. Read the table.
+
+## 6.2e The 6 h results, and the headline re-verified on current code
+
+All at 6 h, N = 6, the same formation and the same arc; only the OBSERVABLE differs.
+
+| run | shape solved | sigma_theta | rim | shape DOF | loss @ 2.1 GHz | mispointing |
+|---|---|---|---|---|---|---|
+| gates off | 0.0736 m | — | — | — | — | — |
+| **code DD** (run20 reproduction) | 0.0736 m | 0.01061 deg | 0.1436 m | 9/12 | −7.78 dB | 2.01 bw |
+| **fixed wide-lane carrier** | 0.0736 m | **0.00020 deg** | **0.0027 m** | **12/12** | **−0.05 dB** | **0.04 bw** |
+
+Carrier buys **53x in rotation sigma** at identical arc length, and takes the mission number from
+"the beam is not there" to inside the 0.1-beamwidth requirement.
+
+**A2/A3 — the reproduction is faithful; the 1.53x headline is not reproducible AS A GAIN.**
+`ground_orientation_full` returns shape = 0.0736 m, exactly the value on record, so the scenario
+is right. But the current estimator does not apply a rotation on that data at all: it reports
+
+> `rotation indeterminate (INDETERMINATE: 2.9626 vs threshold 3 is a -1.2 % margin, inside the
+> 10 % dead-band -- the data cannot distinguish the two branches, so the conservative one is taken)`
+
+**A5 has now caught near-threshold decisions on two independent guards** -- the leakage guard at a
+3 % margin, and this one at **1.2 %**, on the headline scenario itself. Without the dead-band this
+would have been a coin flip deciding whether a 0.50 m rim correction is applied.
+
+**THE HEADLINE WAS RE-MEASURED, because it could not be shown to have been produced on current
+code.** The original carrier 6 h run overlapped the `ClockModel` D1 fix: the file was corrected at
+22:15:08 while that run was executing from 21:32, and MATLAB had already loaded the class, so the
+run used the pre-fix clock. That is exactly the situation Phase A exists to prevent, so the run
+was repeated on current code and the two fingerprints compared:
+
+```
+ORIGINAL (pre-D1 clock)  vs  REVALIDATED (current code)
+  numeric: 72 compared, 0 differ
+  labels :  8 compared, 0 differ
+```
+
+**Bit-identical.** D1 does not reach the relative layer even over 6 h -- the clocks cancel in the
+two-way observables, exactly as the D1 note predicted at 120 s, and the prediction now holds at
+the full arc. The headline stands, and it stands on code that can regenerate it.
+
+**What still does not work, unchanged by any of this.** The L1 rung refuses at
+P(success) = 0.9796 against the 0.999 bar. It has climbed 0.385 -> 0.980 from 120 s to 6 h, so it
+is close and it is arc-limited rather than method-limited, but the cascade stops at wide-lane.
+Every rotation number above is a WIDE-LANE result and none of them depends on the rung that
+failed.
+
+## 6.3 Where the plan is wrong, corrected
+
+| plan says | measured |
+|---|---|
+| run22 rotation lever `sqrt(2/3)·2102.8` = 1705.7 m | **1716.9 m.** The plan's arithmetic is 0.65 % low. The formula is what the test asserts. |
+| "leaving `solvedPos` untouched is the correct failure mode" (the 3-parameter guard) | It is not a failure mode, it is a coin flip — as A5 then established independently. Both branches are now reachable outcomes of a three-way test. |
+| wide-lane is chosen for its wavelength | Wavelength is the weaker and circular argument. It is chosen because MW is geometry-free. |
+| the separation penalty is one number | **Two.** The penalty with the prior in force (what the run pays) and with the shape free (what the ARC can do) differ by orders of magnitude, and reporting only the first lets a tight prior masquerade as a separating arc. Both are published. |
+
+## 6.4 Not implemented, and why
+
+**Phase H.** Out of scope by G4: the uplink measures the receive chain, the beam is formed by the
+transmit chain, and no amount of uplink processing reaches it. It needs reciprocal hardware, an
+internal phase-transfer loop, or ground feedback — a second contribution, not a rescue for the
+first. See `docs/ground_referenced_orientation_requirements.md` §2.
+
+**LAMBDA (TU Delft).** Still an optional, uninstalled dependency. `GroundCarrierAmbiguityResolver`
+uses it when `cfg.estimator.lambda.toolboxPath` points at it and the native decorrelated bootstrap
+otherwise, and it always records which engine ran. The native path is verified against exhaustive
+enumeration and against Monte Carlo in `tests/test_decorrelated_bootstrap.m`.
+
+**The tower-motion / Sagnac term.** Still inert, for the reason the plan gives: the observable and
+the prediction call the same range helper, so it cancels. It becomes live the moment the observable
+stops being synthesised, and it is 0.18 mm at the double difference — on the 0.135 mm bar.

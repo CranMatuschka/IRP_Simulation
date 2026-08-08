@@ -28,10 +28,21 @@ classdef GroundCarrierAmbiguityProbe
     % is an UPPER BOUND on fix rate. Truth enters the observable; the prediction sees only
     % rel.solvedPos and the tower positions.
     %
+    % COUNTED TRIALS ARE NOT INDEPENDENT TRIALS, and the fix rate must never be quoted as though
+    % they were. The dominant DD error is the arc-correlated geometry error, not thermal noise:
+    % the code's own sigma predicts a 2.9e-10 failure rate at 6.3 sigma while the measured rate
+    % was 3.7e-5, a factor of 1e5. Those failures are one clustered excursion of a slowly-varying
+    % error, not 432,000 coin flips. This class therefore reports an EFFECTIVE epoch count from
+    % the lag-1 autocorrelation of the geometry error and a Wilson interval computed on THAT, so
+    % a fix rate can be read with its real uncertainty instead of six false significant figures.
+    %
     %   out = revgnss.GroundCarrierAmbiguityProbe.run(cfg, results, rel)
     %       out.bands(b).name, .wavelength_m, .fixRate, .nTrials
     %                    .medianAbsFloatErr_cyc   how far the float sat from the true integer
     %                    .p95AbsFloatErr_cyc      the tail that actually decides fixing
+    %                    .fixRateLo, .fixRateHi   Wilson 95 % interval on the EFFECTIVE count
+    %       out.nEffectiveEpochs   independent epochs after de-correlating the geometry error
+    %       out.geomErrTau_s       integrated autocorrelation time of that error
 
     properties (Constant, Access = private)
         F1 = 1575.42e6;
@@ -45,8 +56,12 @@ classdef GroundCarrierAmbiguityProbe
             P = revgnss.GroundCarrierAmbiguityProbe;
             c = revgnss.Constants.SPEED_OF_LIGHT_MPS;
             out = struct('applicable', false, 'reason', 'notAttempted', 'bands', struct([]), ...
-                'nEpochsUsed', 0, 'geomErrRms_m', NaN);
+                'nEpochsUsed', 0, 'geomErrRms_m', NaN, 'nEffectiveEpochs', NaN, ...
+                'geomErrTau_s', NaN, 'phaseSigma_m', NaN, 'leverArmMode', 'none');
 
+            if ~P.getBool_(cfg, {'multiAsset','groundCarrierProbe','enable'}, false)
+                out.reason = 'gateOff'; return
+            end
             if ~isstruct(rel) || ~isfield(rel,'solvedPos') || isempty(rel.solvedPos)
                 out.reason = 'noSolvedPos'; return
             end
@@ -87,19 +102,28 @@ classdef GroundCarrierAmbiguityProbe
             fixOk = zeros(1,nb); nTrial = zeros(1,nb);
             floatErr = cell(1,nb); for b=1:nb; floatErr{b} = []; end
             geomAcc = []; nUsed = 0;
+            % Per-epoch mean of the signed DD geometry error. This is the series whose
+            % autocorrelation sets how many INDEPENDENT trials the arc really contains.
+            geomEpoch = nan(1, nEp); tEpoch = nan(1, nEp);
 
             for k = 1:nEp
                 okTw = find(visTw(:,k)).';
                 if numel(okTw) < P.MIN_TOWERS; continue; end
                 Pk = rel.solvedPos(:,:,k);
                 if any(~isfinite(Pk(:))); continue; end
+                % B1: predict at the antenna phase centre, the point the observable is
+                % referenced to. Skipping this leaves a baseline-linear systematic in the DD
+                % prediction error, i.e. in exactly the quantity whose half-wavelength margin
+                % this probe exists to measure.
+                Ak = revgnss.GroundDifferencedRotationSolver.predictedAntenna(obs, Pk, k);
                 rhoP = zeros(N,nTw);
                 for m = okTw
                     for i = 1:N
-                        rhoP(i,m) = norm(Pk(:,i) - towerPos(:,m));
+                        rhoP(i,m) = norm(Ak(:,i) - towerPos(:,m));
                     end
                 end
                 ref = okTw(1);
+                epAcc = 0; epN = 0;
                 for m = okTw
                     if m == ref; continue; end
                     for i = 2:N
@@ -107,10 +131,19 @@ classdef GroundCarrierAmbiguityProbe
                                + (atm(i,m,k)-atm(1,m,k)) - (atm(i,ref,k)-atm(1,ref,k));
                         ddPred = (rhoP(i,m)-rhoP(1,m)) - (rhoP(i,ref)-rhoP(1,ref));
                         geomAcc(end+1) = ddTrue - ddPred;                     %#ok<AGROW>
+                        epAcc = epAcc + (ddTrue - ddPred); epN = epN + 1;
                         for b = 1:nb
                             lam = BANDS{b,2}; amp = BANDS{b,3};
                             nDD = Nint(i,m,b) - Nint(1,m,b) - Nint(i,ref,b) + Nint(1,ref,b);
-                            phi = ddTrue + lam*nDD + amp*sigPhase*randn(rsP);
+                            % B4 -- the DOUBLE difference combines FOUR raw carrier phases, so
+                            % its noise is 2*sigPhase before the band amplification, not
+                            % sigPhase. The factor was missing, which understated the DD phase
+                            % noise by exactly 2x. It does not change the conclusion -- the
+                            % wide-lane margin goes 6.30 sigma -> 6.05 sigma and still clears --
+                            % but it is the number the atmosphere table was fitted against:
+                            % k = 2 reproduces all three of its rows to 0.7 %, while k = 1 and
+                            % k = sqrt(2) are 40-75 % off.
+                            phi = ddTrue + lam*nDD + amp*2*sigPhase*randn(rsP);
                             fl  = (phi - ddPred)/lam;
                             fixOk(b)  = fixOk(b) + (round(fl) == nDD);
                             nTrial(b) = nTrial(b) + 1;
@@ -119,11 +152,14 @@ classdef GroundCarrierAmbiguityProbe
                     end
                 end
                 nUsed = nUsed + 1;
+                if epN > 0; geomEpoch(nUsed) = epAcc/epN; tEpoch(nUsed) = tVec(k); end
             end
 
             if nUsed < 1; out.reason = 'noUsableEpochs'; return; end
+            [nEff, tauInt] = P.effectiveEpochs_(geomEpoch(1:nUsed), tEpoch(1:nUsed));
             bands = struct('name',{},'wavelength_m',{},'fixRate',{},'nTrials',{}, ...
-                'medianAbsFloatErr_cyc',{},'p95AbsFloatErr_cyc',{});
+                'medianAbsFloatErr_cyc',{},'p95AbsFloatErr_cyc',{}, ...
+                'fixRateLo',{},'fixRateHi',{});
             for b = 1:nb
                 bands(b).name = BANDS{b,1};
                 bands(b).wavelength_m = BANDS{b,2};
@@ -131,24 +167,72 @@ classdef GroundCarrierAmbiguityProbe
                 bands(b).nTrials = nTrial(b);
                 bands(b).medianAbsFloatErr_cyc = median(floatErr{b});
                 bands(b).p95AbsFloatErr_cyc = prctile(floatErr{b}, 95);
+                % Interval on the EFFECTIVE count, not the counted one. Reporting the counted
+                % interval would claim a precision the arc-correlated geometry error cannot back.
+                [bands(b).fixRateLo, bands(b).fixRateHi] = ...
+                    P.wilson_(bands(b).fixRate, nEff);
             end
-            out.applicable   = true;
-            out.reason       = 'ok';
-            out.bands        = bands;
-            out.nEpochsUsed  = nUsed;
-            out.geomErrRms_m = sqrt(mean(geomAcc.^2));
-            out.phaseSigma_m = sigPhase;
+            out.applicable       = true;
+            out.reason           = 'ok';
+            out.bands            = bands;
+            out.nEpochsUsed      = nUsed;
+            out.geomErrRms_m     = sqrt(mean(geomAcc.^2));
+            out.phaseSigma_m     = sigPhase;
+            out.nEffectiveEpochs = nEff;
+            out.geomErrTau_s     = tauInt;
+            out.leverArmMode     = obs.leverArmMode;
         end
     end
 
     methods (Static, Access = private)
+
+        function [nEff, tauInt] = effectiveEpochs_(x, t)
+            % effectiveEpochs_  How many INDEPENDENT samples the arc really carries.
+            %
+            % n_eff = n * (1-rho)/(1+rho) with rho the lag-1 autocorrelation -- the standard
+            % AR(1) correction. Deliberately applied to the per-EPOCH mean rather than to every
+            % counted double difference, because the DDs within an epoch share a reference
+            % satellite and a reference tower and are therefore not independent either. This is
+            % the conservative reading, which is the right one when the whole point is to stop
+            % over-claiming.
+            nEff = numel(x); tauInt = 0;
+            x = x(isfinite(x));
+            n = numel(x);
+            if n < 8; nEff = max(1,n); return; end
+            x = x - mean(x);
+            d0 = sum(x.^2);
+            if d0 <= 0; return; end
+            rho = sum(x(1:end-1).*x(2:end)) / d0;
+            rho = max(-0.999, min(0.999, rho));
+            nEff = max(1, n * (1-rho)/(1+rho));
+            dt = 1.0;
+            if numel(t) >= 2; dt = median(diff(t(isfinite(t)))); end
+            if ~isfinite(dt) || dt <= 0; dt = 1.0; end
+            if rho > 0; tauInt = -dt/log(rho); end
+        end
+
+        function [lo, hi] = wilson_(p, n)
+            % wilson_  95 % Wilson score interval. Chosen over the normal approximation because
+            % the rates of interest sit against p = 1, where the normal interval runs past it.
+            z = 1.959963984540054;
+            n = max(1, n);
+            den = 1 + z^2/n;
+            c   = (p + z^2/(2*n)) / den;
+            h   = (z/den) * sqrt(p*(1-p)/n + z^2/(4*n^2));
+            lo  = max(0, c - h); hi = min(1, c + h);
+        end
+
+        function v = getBool_(cfg, path, dflt)
+            v = logical(revgnss.GroundCarrierAmbiguityProbe.getNum_(cfg, path, dflt));
+        end
+
         function v = getNum_(cfg, path, dflt)
             v = dflt; c = cfg;
             for i = 1:numel(path)
                 if ~isstruct(c) || ~isfield(c, path{i}); return; end
                 c = c.(path{i});
             end
-            if ~isempty(c) && isnumeric(c); v = c; end
+            if ~isempty(c) && (isnumeric(c) || islogical(c)); v = c; end
         end
     end
 end

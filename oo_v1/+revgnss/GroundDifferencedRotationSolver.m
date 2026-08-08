@@ -112,12 +112,19 @@ classdef GroundDifferencedRotationSolver
             obs = struct('ok', false, 'reason', 'notAttempted', 'rhoObs', [], ...
                 'rhoTruth', [], 'atmDiff', [], 'visTw', [], ...
                 'towerPos', zeros(3,0), 'nTw', 0, 'codeSigma_m', NaN, ...
-                'multipathSigma_m', NaN, 'differentialAtmosphereSigma_m', NaN);
+                'multipathSigma_m', NaN, 'differentialAtmosphereSigma_m', NaN, ...
+                'leverPred_ecef', [], 'leverArmMode', 'none', ...
+                'leverArm_body_m', [0;0;0], 'leverArmDdSystematic_m', NaN, ...
+                'leverArmDdMax_m', NaN, 'leverArmDdUncorrected_m', NaN, ...
+                'leverArmReason', '');
             nEp = numel(tVec);
 
             % Attitude is REQUIRED: truthTraj is the centre of mass, and the receive antenna sits
             % on a lever arm. At the sub-metre level this observable is trying to see, a metre-class
             % antenna offset per satellite would swamp the rotation signature entirely.
+            if ~isstruct(results) || ~isfield(results,'asset') || numel(results.asset) < N
+                obs.reason = 'noAssetPayload:requires results.asset{1..N}'; return
+            end
             for i = 1:N
                 if ~revgnss.TruthEndpointReplay.isUsable(results.asset{i}, nEp)
                     obs.reason = sprintf('asset%d:%s', i, ...
@@ -137,8 +144,41 @@ classdef GroundDifferencedRotationSolver
             lever = G.leverArm_(cfg);
             mask  = G.getNum_(cfg, {'estimator','elevationMask_rad'}, 5*pi/180);
 
+            % --- LEVER-ARM SYMMETRY (execution plan B1) -------------------------------------
+            % THE DEFECT THIS REPLACES. The observable below is built at the receive ANTENNA
+            % PHASE CENTRE -- truth centre of mass rotated by the truth attitude onto the lever
+            % arm -- which is right, because that is where a real receiver's signal arrives.
+            % Every consumer then predicted the same range from rel.solvedPos, which is a CENTRE
+            % OF MASS quantity, with no lever arm at all. The offset is common-mode only in the
+            % sense that all satellites carry the SAME body-frame lever; it does NOT cancel in a
+            % between-satellite difference, because the single difference retains L.(u_i - u_j).
+            % Sized on the real layouts that is 0.048 mm at b = 1800 m and 0.180 mm at the
+            % 6724 m run22 maximum -- above the 0.135 mm class-B bar with IDENTICAL attitudes on
+            % every satellite. Worse, it is LINEAR IN THE BASELINE, exactly like the rotation
+            % signature, so it ALIASES ONTO ROTATION instead of averaging away.
+            %
+            % THE FIX IS SYMMETRY, NOT A CORRECTION TERM. Two modes, and no third:
+            %   'estimatedAttitude' -- observable uses TRUTH attitude, prediction uses the
+            %       per-asset EKF's ESTIMATED attitude. The residual then carries only the
+            %       attitude ERROR times the lever, which is a real, honestly-modelled error.
+            %       This is what a real receiver could do: it knows its own attitude solution.
+            %   'centreOfMass'      -- lever removed from BOTH sides. The residual carries no
+            %       lever term at all. Used when the EKF does not estimate attitude, because the
+            %       alternative would be to re-introduce the asymmetry under a different name.
+            % Never mixed. leverArmMode is exported so no consumer has to guess.
+            [leverMode, leverPred, leverReason] = G.predictionLeverArms_(cfg, results, lever, N, nEp);
+            if strcmp(leverMode, 'centreOfMass')
+                leverObs = [0;0;0];
+            else
+                leverObs = lever;
+            end
+            obs.leverArmMode    = leverMode;
+            obs.leverArm_body_m = leverObs;
+            if ~isempty(leverReason); obs.leverArmReason = leverReason; end
+
             % --- Truth antenna phase centres, per epoch -------------------------------------
-            Atruth = nan(3, N, nEp);
+            Atruth     = nan(3, N, nEp);
+            leverTruth = zeros(3, N, nEp);
             for k = 1:nEp
                 for i = 1:N
                     replay{i}.seek(k);
@@ -146,7 +186,8 @@ classdef GroundDifferencedRotationSolver
                     % than a local re-derivation -- an Euler convention mismatch here would show
                     % up as a per-satellite metre-class offset, i.e. exactly the signal we want.
                     Atruth(:,i,k) = revgnss.AttitudeKinematics.applyLeverArm( ...
-                        replay{i}.r_ecef_m, replay{i}.attitude_euler_rad, lever);
+                        replay{i}.r_ecef_m, replay{i}.attitude_euler_rad, leverObs);
+                    leverTruth(:,i,k) = Atruth(:,i,k) - replay{i}.r_ecef_m;
                 end
             end
 
@@ -213,6 +254,33 @@ classdef GroundDifferencedRotationSolver
             obs.codeSigma_m = sigTh;
             obs.multipathSigma_m = sigMp;
             obs.differentialAtmosphereSigma_m = sigAtm;
+            obs.leverPred_ecef = leverPred;
+
+            % Size the residual lever-arm systematic that SURVIVES the fix, in the units of the
+            % thing it corrupts: metres of double difference. This is the T3 acceptance number.
+            % In 'centreOfMass' mode it is identically zero by construction; in
+            % 'estimatedAttitude' mode it is the attitude ERROR projected on the lever and then
+            % double-differenced, which is what an honest budget should contain.
+            [obs.leverArmDdSystematic_m, obs.leverArmDdMax_m, obs.leverArmDdUncorrected_m] = ...
+                G.leverArmDdResidual_(Atruth, leverTruth, leverPred, towerPos, visTw, N);
+        end
+
+        function A = predictedAntenna(obs, Pk, k)
+            % predictedAntenna  Turn a predicted CENTRE-OF-MASS geometry into the predicted
+            % ANTENNA PHASE CENTRES the observable is actually referenced to.
+            %
+            % Every consumer of buildObservable must call this instead of using Pk directly --
+            % that asymmetry was execution-plan defect B1. The offset is a FIXED ECEF vector at
+            % epoch k (it comes from the asset's own attitude solution, which is Earth-referenced
+            % and therefore independent of the formation-rotation parameter being estimated), so
+            % it does not enter the rotation Jacobian: the moment arm stays (P_i - centroid).
+            A = Pk;
+            if ~isstruct(obs) || ~isfield(obs,'leverPred_ecef') || isempty(obs.leverPred_ecef)
+                return
+            end
+            L = obs.leverPred_ecef;
+            if k < 1 || k > size(L,3); return; end
+            A = Pk + L(:,:,k);
         end
 
         function out = solveRotationOnly_(cfg, rel, out, obs, N, nEp)
@@ -226,9 +294,15 @@ classdef GroundDifferencedRotationSolver
             sigAtm = obs.differentialAtmosphereSigma_m;
 
             % --- Gauss-Newton on the 3-vector rotation --------------------------------------
-            theta = zeros(3,1); Nmat = zeros(3); nObs = 0; sse = 0;
+            % Ntp (3 x 3N) is accumulated alongside the 3x3 normal matrix. It is the cross-
+            % information between rotation and shape, and it is what turns the shape-leakage
+            % coefficient from a hard-coded constant into a MEASURED property of this run
+            % (execution-plan E3).
+            theta = zeros(3,1); Nmat = zeros(3); Ntp = zeros(3,3*N); nObs = 0; sse = 0;
+            Bshape = [];
             for iter = 1:G.GN_ITERS
-                Nmat = zeros(3); gvec = zeros(3,1); nObs = 0; sse = 0;
+                Nmat = zeros(3); gvec = zeros(3,1); Ntp = zeros(3,3*N);
+                nObs = 0; sse = 0;
                 Rth = G.rot_(theta);
                 for k = 1:nEp
                     okTw = find(visTw(:,k)).';
@@ -237,30 +311,44 @@ classdef GroundDifferencedRotationSolver
                     if any(~isfinite(Pk(:))); continue; end
                     cP = mean(Pk,2);
                     Pe = cP + Rth*(Pk - cP);          % running rotation, about the EST centroid
+                    % B1: predict at the ANTENNA, which is where the observable is formed. The
+                    % offset comes from the asset's own (Earth-referenced) attitude estimate, so
+                    % it does not turn with the formation-rotation parameter -- the moment arm in
+                    % the Jacobian below stays (Pe_i - cP), the centre-of-mass offset.
+                    Ae = revgnss.GroundDifferencedRotationSolver.predictedAntenna(obs, Pe, k);
+                    if isempty(Bshape); Bshape = G.shapeBasis_(Pk, N); end
 
                     rhoP = zeros(N, nTw); uP = zeros(3, N, nTw);
                     for m = okTw
                         for i = 1:N
-                            dP = Pe(:,i) - towerPos(:,m);
+                            dP = Ae(:,i) - towerPos(:,m);
                             rhoP(i,m) = norm(dP);
                             uP(:,i,m) = dP / rhoP(i,m);
                         end
                     end
                     ref = okTw(1);
+                    nDD = (numel(okTw)-1)*(N-1);
+                    Jth = zeros(nDD,3); Jsh = zeros(nDD,3*N); rv = zeros(nDD,1); row = 0;
                     for m = okTw
                         if m == ref; continue; end
                         for i = 2:N
+                            row = row + 1;
                             ddObs = (rhoObs(i,m,k)-rhoObs(1,m,k)) ...
                                   - (rhoObs(i,ref,k)-rhoObs(1,ref,k));
                             ddPrd = (rhoP(i,m)-rhoP(1,m)) - (rhoP(i,ref)-rhoP(1,ref));
                             % d(rho)/d(theta) = u'*(theta x p) = (p x u)'*theta, p about cP
-                            J = (cross(Pe(:,i)-cP, uP(:,i,m))   - cross(Pe(:,1)-cP, uP(:,1,m)) ...
-                               - cross(Pe(:,i)-cP, uP(:,i,ref)) + cross(Pe(:,1)-cP, uP(:,1,ref))).';
-                            r = ddObs - ddPrd;
-                            Nmat = Nmat + (J.'*J); gvec = gvec + (J.'*r);
-                            sse  = sse + r^2; nObs = nObs + 1;
+                            Jth(row,:) = (cross(Pe(:,i)-cP, uP(:,i,m))   - cross(Pe(:,1)-cP, uP(:,1,m)) ...
+                                        - cross(Pe(:,i)-cP, uP(:,i,ref)) + cross(Pe(:,1)-cP, uP(:,1,ref))).';
+                            Jsh(row, 3*(i-1)+(1:3)) =  (uP(:,i,m) - uP(:,i,ref)).';
+                            Jsh(row, 1:3)           = -(uP(:,1,m) - uP(:,1,ref)).';
+                            rv(row) = ddObs - ddPrd;
                         end
                     end
+                    if row < 1; continue; end
+                    Jth = Jth(1:row,:); Jsh = Jsh(1:row,:); rv = rv(1:row);
+                    Nmat = Nmat + (Jth.'*Jth); gvec = gvec + (Jth.'*rv);
+                    Ntp  = Ntp  + (Jth.'*Jsh);
+                    sse  = sse + (rv.'*rv); nObs = nObs + row;
                 end
                 if nObs < 3; out.reason = 'tooFewDoubleDifferences'; return; end
                 if rcond(Nmat) < 1e-12; out.reason = 'rotationGeometrySingular'; return; end
@@ -291,18 +379,67 @@ classdef GroundDifferencedRotationSolver
             % while making the orientation an order of magnitude worse. Refuse to apply the
             % correction unless the predicted leakage is small against the rotation we can
             % actually measure; still report theta so the diagnostic is visible.
-            leakDegPerMetre = 0.30;
+            % E3 -- the coefficient is MEASURED, not asserted. 0.30 deg/m was read off a
+            % truth-injection experiment on one stored geometry and then hard-coded into a guard
+            % that decides whether a correction is applied, on runs with different formations,
+            % arc lengths and tower sets. The map from a shape perturbation to the spurious
+            % rotation it produces is exactly inv(N_thth)*N_thp restricted to the shape subspace,
+            % and both factors are already accumulated above. Quoted per metre of PER-POINT RMS
+            % shape error, which is the unit shapeSigma is in: |dp| = s*sqrt(N) for an
+            % orthonormal basis, so the operator norm carries a sqrt(N).
+            leakDegPerMetre = 0.30; leakSource = 'legacyConstant';
+            if ~isempty(Bshape) && rcond(Nmat) > 1e-12
+                Lop = (Nmat \ Ntp) * Bshape;
+                leakDegPerMetre = norm(Lop) * sqrt(N) * 180/pi;
+                leakSource = 'marginalisedCovariance';
+            end
+
+            % E2 -- NO TRUTH. The previous fallback read rel.shapeErrSolved_m, which
+            % revgnss.SwarmRelativeSolver computes against truthK. That is the worse of the two
+            % truth leaks the execution plan names, because this value does not merely weight an
+            % estimate -- it decides whether the estimate is used at all. And because
+            % assumedShapeSigma_m was never declared in masterConfig while deepMergeConfig throws
+            % on undeclared paths, the truth fallback was the ONLY executable path.
             shapeSigma = G.getNum_(cfg, ...
                 {'multiAsset','groundDifferencedRotation','assumedShapeSigma_m'}, NaN);
-            if ~isfinite(shapeSigma)
-                shapeSigma = G.getNum_(rel, {'shapeErrSolved_m'}, NaN);
+            shapeSigmaSource = 'config';
+            if ~isfinite(shapeSigma) || shapeSigma <= 0
+                f = G.getNum_(rel, {'formalShapeSigma_m'}, NaN);
+                if isfinite(f) && f > 0
+                    shapeSigma = sqrt(3)*f;              % per-axis sigma -> per-point norm
+                    shapeSigmaSource = 'islFormalCovariance';
+                else
+                    out.reason = ['noShapePrior: set multiAsset.groundDifferencedRotation.' ...
+                        'assumedShapeSigma_m, or run the ISL shape layer so its formal ' ...
+                        'covariance is published. There is deliberately no truth fallback, and ' ...
+                        'no default -- an unset prior must fail loudly, because this value ' ...
+                        'decides whether the correction is applied at all.'];
+                    return
+                end
             end
+            out.shapeSigmaSource = shapeSigmaSource;
+            out.leakDegPerMetre  = leakDegPerMetre;
+            out.leakSource       = leakSource;
             sigTheta = norm(sqrt(abs(diag(s2 * inv(Nmat))))) * 180/pi;                %#ok<MINV>
             predLeak = leakDegPerMetre * shapeSigma;
             out.shapeSigmaUsed_m   = shapeSigma;
             out.predictedLeak_deg  = predLeak;
             out.rotationSigma_deg  = sigTheta;
-            out.shapeLeakageDominates = isfinite(predLeak) && predLeak > sigTheta;
+            % A5: THREE outcomes, not two. This comparison decides whether a ~0.5 m geometry
+            % correction is applied, and on the smoke fixture it sat at a 3 % margin -- close
+            % enough that a 1e-14 arithmetic perturbation between a serial and a parallel run
+            % flipped it and moved 33 of 148 reported fields, solvedPos by 0.55 m and the beam
+            % spot by 3.8 km. A dead-band twelve orders of magnitude wider than that
+            % perturbation makes the near-threshold case land deterministically on
+            % 'indeterminate', which is the honest answer: the data cannot tell.
+            deadBand = revgnss.GuardDecision.deadBandFor(cfg, ...
+                {'multiAsset','jointGeometry','guardDeadBand'}, []);
+            deadBand = revgnss.GuardDecision.deadBandFor(cfg, ...
+                {'multiAsset','groundDifferencedRotation','guardDeadBand'}, deadBand);
+            leakGuard = revgnss.GuardDecision.evaluate(predLeak, sigTheta, 'le', deadBand);
+            out.leakGuard = leakGuard;
+            out.leakMargin = leakGuard.margin;
+            out.shapeLeakageDominates = ~leakGuard.pass;
 
             out.applicable     = true;
             out.reason         = 'ok';
@@ -314,6 +451,10 @@ classdef GroundDifferencedRotationSolver
             out.multipathSigma_m = sigMp;
             out.differentialAtmosphereSigma_m = sigAtm;
             out.nTowers        = nTw;
+            out.leverArmMode   = obs.leverArmMode;
+            out.leverArmDdSystematic_m = obs.leverArmDdSystematic_m;
+            out.leverArmDdMax_m        = obs.leverArmDdMax_m;
+            out.leverArmDdUncorrected_m = obs.leverArmDdUncorrected_m;
 
             % Publish the corrected geometry so every downstream consumer of solvedPos
             % (RelativeErrorFigures, BeamformingPhasorDiagnostics, ...) sees the rotation fix --
@@ -322,9 +463,34 @@ classdef GroundDifferencedRotationSolver
             % dominated correction is measurably worse than doing nothing.
             if out.shapeLeakageDominates && ~G.getBool_(cfg, ...
                     {'multiAsset','groundDifferencedRotation','applyDespiteLeakage'}, false)
-                out.reason    = sprintf(['shapeLeakageDominates: predicted %.4f deg of spurious ' ...
-                    'rotation from %.3f m shape error vs %.4f deg measurable -- correction NOT ' ...
-                    'applied'], predLeak, shapeSigma, sigTheta);
+                out.reason    = sprintf(['shapeLeakage[%s]: predicted %.4f deg of spurious ' ...
+                    'rotation from %.3f m shape error vs %.4f deg measurable -- %s -- ' ...
+                    'correction NOT applied'], leakGuard.outcome, predLeak, shapeSigma, ...
+                    sigTheta, leakGuard.text);
+                out.solvedPos = rel.solvedPos;
+                return
+            end
+
+            % SIGNIFICANCE GUARD. The leakage test above asks whether a SHAPE error could be
+            % masquerading as rotation; it never asks whether the rotation is distinguishable
+            % from ZERO. Measured on the 120 s smoke fixture: the stage estimated 0.159 deg
+            % against a formal 0.125 deg -- SNR 1.2, i.e. consistent with noise -- passed the
+            % leakage test, applied 2.5 m of rim displacement and made the relative geometry
+            % 2.6x WORSE. Applying a statistically insignificant rotation is strictly harmful:
+            % ranges already supplied an orientation, so the null action is not "no information",
+            % it is "keep the better estimate". Same absolute-SNR discipline, and the same
+            % config knob, as revgnss.JointGeometrySolver's acceptance test.
+            snrRot = norm(theta) / max(norm(sqrt(abs(diag(Cth)))), realmin);
+            out.rotationSnr = snrRot;
+            minSnr = G.getNum_(cfg, {'multiAsset','jointGeometry','accept','minRotationSnr'}, 3);
+            minSnr = G.getNum_(cfg, ...
+                {'multiAsset','groundDifferencedRotation','accept','minRotationSnr'}, minSnr);
+            snrGuard = revgnss.GuardDecision.evaluate(snrRot, minSnr, 'ge', deadBand);
+            out.snrGuard = snrGuard;
+            if ~snrGuard.pass
+                out.reason = sprintf(['rotationSnr[%s]: %.4f deg estimated against a formal ' ...
+                    '%.4f deg -- %s -- correction NOT applied'], snrGuard.outcome, ...
+                    norm(theta)*180/pi, sigTheta, snrGuard.text);
                 out.solvedPos = rel.solvedPos;
                 return
             end
@@ -348,7 +514,27 @@ classdef GroundDifferencedRotationSolver
                 'condition', NaN, 'codeSigma_m', NaN, 'multipathSigma_m', NaN, ...
                 'differentialAtmosphereSigma_m', NaN, 'nTowers', 0, ...
                 'shapeSigmaUsed_m', NaN, 'predictedLeak_deg', NaN, ...
-                'rotationSigma_deg', NaN, 'shapeLeakageDominates', false);
+                'rotationSigma_deg', NaN, 'shapeLeakageDominates', false, ...
+                'leverArmMode', 'none', 'leverArmDdSystematic_m', NaN, ...
+                'leverArmDdMax_m', NaN, 'leverArmDdUncorrected_m', NaN, ...
+                'leakDegPerMetre', NaN, ...
+                'leakSource', 'notAttempted', 'shapeSigmaSource', 'notAttempted', ...
+                'rotationSnr', NaN, 'leakMargin', NaN, ...
+                'leakGuard', struct('outcome','notAttempted'), ...
+                'snrGuard', struct('outcome','notAttempted'));
+        end
+
+        function B = shapeBasis_(Pk, N)
+            % shapeBasis_  Orthonormal basis of the 3N-6 SHAPE subspace at one epoch: translation
+            % and rotation removed. Used only to restrict the E3 leakage operator -- a rigid
+            % rotation of the geometry is not a "shape error" and must not be charged as one.
+            q = Pk - mean(Pk,2);
+            G = zeros(3*N,3); T = repmat(eye(3), N, 1);
+            for i = 1:N
+                G(3*(i-1)+(1:3),:) = ...
+                    -[0 -q(3,i) q(2,i); q(3,i) 0 -q(1,i); -q(2,i) q(1,i) 0];
+            end
+            B = null([G, T].');
         end
 
         function R = rot_(th)
@@ -382,6 +568,175 @@ classdef GroundDifferencedRotationSolver
             up = towerEcef / norm(towerEcef);
             d  = satEcef - towerEcef;
             e  = asin(max(-1, min(1, (up.'*d) / norm(d))));
+        end
+
+        function [mode, leverPred, reason] = predictionLeverArms_(cfg, results, lever, N, nEp)
+            % predictionLeverArms_  Per-(asset, epoch) ECEF lever-arm offset built from the
+            % ESTIMATED attitude, i.e. from a quantity a real spacecraft actually has.
+            %
+            % Returns 'centreOfMass' with a zero offset whenever the estimated attitude is not
+            % available for every asset over every epoch. That is deliberate and is the whole
+            % point of B1: the failure mode is SYMMETRY LOSS, so the fallback must remove the
+            % lever from both sides rather than leave the prediction short of it.
+            G = revgnss.GroundDifferencedRotationSolver;
+            leverPred = zeros(3, N, nEp); reason = '';
+            want = G.getStr_(cfg, {'multiAsset','groundDifferencedRotation','leverArm','mode'}, 'auto');
+            if strcmpi(want, 'centreOfMass')
+                mode = 'centreOfMass'; reason = 'configForced'; return
+            end
+            if norm(lever) == 0
+                mode = 'centreOfMass'; reason = 'zeroLeverArm'; return
+            end
+            euler = cell(1,N);
+            for i = 1:N
+                [e, why] = G.estimatedEuler_(results, i, nEp);
+                if isempty(e)
+                    if strcmpi(want, 'estimatedAttitude')
+                        error('revgnss:GroundDifferencedRotation:noEstimatedAttitude', ...
+                            ['leverArm.mode = ''estimatedAttitude'' was requested but asset %d ' ...
+                             'has no usable attitude estimate (%s). Set leverArm.mode = ' ...
+                             '''centreOfMass'' to remove the lever arm from BOTH the observable ' ...
+                             'and the prediction instead.'], i, why);
+                    end
+                    mode = 'centreOfMass';
+                    reason = sprintf('asset%d:%s', i, why);
+                    return
+                end
+                euler{i} = e;
+            end
+            mode = 'estimatedAttitude';
+            for k = 1:nEp
+                for i = 1:N
+                    C = revgnss.AttitudeKinematics.bodyToEcefRotation(euler{i}(:,k));
+                    leverPred(:,i,k) = C * lever(:);
+                end
+            end
+        end
+
+        function [e, why] = estimatedEuler_(results, i, nEp)
+            % estimatedEuler_  [3 x nEp] attitude estimate for asset i, or [] with a named reason.
+            %
+            % The attitude source is history.nominalQuat_wxyz, which logStep writes under
+            % BOTH parameterizations (the nominal quaternion in quaternionErrorState mode,
+            % eulerToQuatZYX(x) in eulerZYX mode). The euler rows of history.x are NOT a
+            % usable attitude when that quaternion history exists: under quaternionErrorState
+            % (the default) they hold the post-reset MEKF ERROR state — identically zero at
+            % every epoch — which passes every finiteness guard and would place the lever
+            % prediction at IDENTITY attitude while the observable carries the truth
+            % attitude, re-creating the exact B1 asymmetry this mode exists to remove.
+            e = []; why = '';
+            if ~isfield(results,'asset') || numel(results.asset) < i
+                why = 'noAssetPayload'; return
+            end
+            a = results.asset{i};
+            if ~isstruct(a) || ~isfield(a,'history')
+                why = 'noHistory'; return
+            end
+            if isfield(a.history,'nominalQuat_wxyz') && ~isempty(a.history.nominalQuat_wxyz)
+                q = a.history.nominalQuat_wxyz;
+                if ndims(q) ~= 3 || size(q,1) ~= 4
+                    why = 'quatHistoryBadShape'; return
+                end
+                if size(q,3) < nEp
+                    why = sprintf('attitudeHistoryShort:%d<%d', size(q,3), nEp); return
+                end
+                e = zeros(3, nEp);
+                for k = 1:nEp
+                    qk = q(:,1,k);
+                    if ~all(isfinite(qk)) || norm(qk) < 0.5
+                        e = []; why = 'attitudeQuatHistoryInvalid'; return
+                    end
+                    e(:,k) = revgnss.AttitudeErrorStateKinematics.quatToEulerZYX(qk);
+                end
+                return
+            end
+            % Legacy payloads only (predating the quaternion history): the euler rows of
+            % history.x carried the attitude on the eulerZYX path.
+            if ~isfield(a,'stateMap') || ~isfield(a.history,'x') || isempty(a.history.x)
+                why = 'noHistory'; return
+            end
+            sm = a.stateMap;
+            if ~isfield(sm,'euler_idx') || isempty(sm.euler_idx)
+                why = 'attitudeNotEstimated'; return
+            end
+            idx = sm.euler_idx(:).';
+            if numel(idx) ~= 3 || max(idx) > size(a.history.x,1)
+                why = 'eulerIdxOutOfRange'; return
+            end
+            e = a.history.x(idx, :);
+            if size(e,2) < nEp
+                e = []; why = sprintf('attitudeHistoryShort:%d<%d', size(e,2), nEp); return
+            end
+            e = e(:, 1:nEp);
+            if any(~isfinite(e(:)))
+                e = []; why = 'attitudeHistoryNonFinite'; return
+            end
+            % An estimated attitude is never exactly zero at every epoch; an all-zero
+            % block is the quaternionErrorState error-state signature on a payload that
+            % lost its quaternion history. Refuse it so leverArm_ falls back to the
+            % symmetric centreOfMass mode instead of an identity-attitude lever.
+            if all(e(:) == 0)
+                e = []; why = 'eulerHistoryAllZeroLikelyErrorState'; return
+            end
+        end
+
+        function [rmsDd, maxDd, rmsRaw] = leverArmDdResidual_(Atruth, leverTruth, leverPred, ...
+                towerPos, visTw, N)
+            % leverArmDdResidual_  What the lever arm costs the double difference, before and
+            % after B1.
+            %
+            % AFTER  dL_i = C(euler_truth_i)*L - C(euler_est_i)*L, the residual misplacement of
+            %        satellite i's phase centre once the prediction also carries a lever.
+            % BEFORE dL_i = C(euler_truth_i)*L, i.e. the prediction at the CENTRE OF MASS with
+            %        no lever at all -- the defect as it stood. Reported alongside, because a
+            %        fix whose "after" is machine zero is only convincing next to its "before".
+            %
+            % Both are the DD of the LOS projection, evaluated on the TRUTH lines of sight --
+            % the same construction the B1 analysis used to size the defect (0.048 mm at
+            % b = 1800 m, 0.180 mm at the 6724 m run22 maximum). In 'centreOfMass' mode both
+            % levers are zero and both numbers are exactly 0, which is the point of that mode:
+            % symmetry, not a correction term.
+            rmsDd = 0; maxDd = 0; rmsRaw = 0;
+            if isempty(leverPred) || isempty(leverTruth); return; end
+            nEp = size(Atruth,3); nTw = size(towerPos,2);
+            acc = 0; accRaw = 0; nAcc = 0;
+            for k = 1:nEp
+                okTw = find(visTw(:,k)).';
+                if numel(okTw) < 2; continue; end
+                u = zeros(3,N,nTw);
+                for m = okTw
+                    for i = 1:N
+                        d = Atruth(:,i,k) - towerPos(:,m);
+                        u(:,i,m) = d / norm(d);
+                    end
+                end
+                dL  = leverTruth(:,:,k) - leverPred(:,:,k);
+                dL0 = leverTruth(:,:,k);
+                ref = okTw(1);
+                for m = okTw
+                    if m == ref; continue; end
+                    du1 = u(:,1,m)-u(:,1,ref);
+                    for i = 2:N
+                        dui = u(:,i,m)-u(:,i,ref);
+                        v  = dui.'*dL(:,i)  - du1.'*dL(:,1);
+                        v0 = dui.'*dL0(:,i) - du1.'*dL0(:,1);
+                        acc = acc + v^2; accRaw = accRaw + v0^2; nAcc = nAcc + 1;
+                        maxDd = max(maxDd, abs(v));
+                    end
+                end
+            end
+            if nAcc > 0
+                rmsDd = sqrt(acc/nAcc); rmsRaw = sqrt(accRaw/nAcc);
+            end
+        end
+
+        function v = getStr_(cfg, path, dflt)
+            v = dflt; c = cfg;
+            for i = 1:numel(path)
+                if ~isstruct(c) || ~isfield(c, path{i}); return; end
+                c = c.(path{i});
+            end
+            if ~isempty(c) && (ischar(c) || isstring(c)); v = char(c); end
         end
 
         function L = leverArm_(cfg)
