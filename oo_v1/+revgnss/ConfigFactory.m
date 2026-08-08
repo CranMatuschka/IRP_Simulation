@@ -173,7 +173,11 @@ classdef ConfigFactory
                 cfg.towers(k).clock.bias_s        = (k - 1) * 1e-8;
                 cfg.towers(k).clock.fracFreq      = k * 1e-12;
             end
-            cfg.estimator.towerClockMode = 'noisyCorrection';
+            % Set the KNOB, not the derived field: finalizeConfig maps
+            % towerClock.correctionMode -> estimator.towerClockMode and would overwrite a
+            % direct assignment here. ('noisyCorrection' has no dedicated correctionMode
+            % name; it reaches the internal mode via the switch's passthrough branch.)
+            cfg.towerClock.correctionMode = 'noisyCorrection';
         end
 
         function cfg = atmosphereConfig()
@@ -190,7 +194,8 @@ classdef ConfigFactory
         function cfg = uncorrectedTowerClocksConfig()
             % uncorrectedTowerClocksConfig  Stochastic tower clocks, no correction.
             cfg = revgnss.ConfigFactory.clockNoiseConfig();
-            cfg.estimator.towerClockMode = 'none';
+            % Knob, not the derived field -- see clockNoiseConfig above.
+            cfg.towerClock.correctionMode = 'none';
         end
 
         function cfg = clockDiversityConfig()
@@ -246,8 +251,10 @@ classdef ConfigFactory
             cfg.asset.clock.bias_s        = 0.0;
             cfg.asset.clock.fracFreq      = 0.0;
 
-            % Keep perfectCorrection: assume clock products are broadcast
-            cfg.estimator.towerClockMode = 'perfectCorrection';
+            % Keep perfect correction: assume clock products are broadcast.
+            % Knob, not the derived field -- 'perfectTruth' maps to towerClockMode
+            % 'perfectCorrection'. See clockNoiseConfig above.
+            cfg.towerClock.correctionMode = 'perfectTruth';
             cfg.errors.codeNoise.sigma_m  = 1.0;
         end
 
@@ -698,10 +705,42 @@ classdef ConfigFactory
                 end
                 cfg.errors.towerClockCorrection.mode = cfg.clocks.tower.product.mode;
             end
-            % cfg.errors.towerClockCorrection.mode → cfg.estimator.towerClockMode (legacy)
-            if isfield(cfg,'errors') && isfield(cfg.errors,'towerClockCorrection') && ...
-                    isfield(cfg.errors.towerClockCorrection,'mode')
-                cfg.estimator.towerClockMode = cfg.errors.towerClockCorrection.mode;
+            % cfg.clocks.tower.product.mode → cfg.towerClock.correctionMode (legacy route)
+            % The legacy chain used to write cfg.estimator.towerClockMode directly. Two
+            % reasons it no longer does:
+            %   - Guarding that write on ~isfield(cfg.towerClock,'correctionMode') makes it
+            %     DEAD CODE: masterConfig always assigns cfg.towerClock.correctionMode, so
+            %     the guard is always false. A scenario that set only the legacy knob had it
+            %     silently ignored -- config/ladder/test/test001_idealFlat.json asks for
+            %     'perfectTruth' and got the default 'truthHistoryProductNoisy', worth
+            %     ~0.14 m of position error.
+            %   - The legacy names are EXTERNAL ('perfectTruth'); estimator.towerClockMode
+            %     takes INTERNAL ones ('perfectCorrection'). Writing the external name
+            %     straight in only ever "worked" because TowerClockCorrectionProvider's
+            %     switch falls through to `otherwise -> towerClockModel = 0`.
+            % So route the legacy value into the NEW knob instead and let the normalisation
+            % switch below translate it. OWNERSHIP decides, not field existence: honour the
+            % legacy knob only when the scenario set it and did NOT set the new one.
+            % cfg.provenance.explicit is the same list preserveScenarioOwned uses, and is
+            % absent when finalizeConfig is handed a raw masterConfig -- so a direct call is
+            % unaffected and the new knob still wins.
+            towerClkOwned_ = {};
+            if isfield(cfg,'provenance') && isfield(cfg.provenance,'explicit')
+                towerClkOwned_ = cfg.provenance.explicit;
+            end
+            if any(strcmp(towerClkOwned_,'clocks.tower.product.mode')) && ...
+                    isfield(cfg,'clocks') && isfield(cfg.clocks,'tower') && ...
+                    isfield(cfg.clocks.tower,'product') && ...
+                    isfield(cfg.clocks.tower.product,'mode')
+                if any(strcmp(towerClkOwned_,'towerClock.correctionMode'))
+                    if ~strcmp(cfg.towerClock.correctionMode, cfg.clocks.tower.product.mode)
+                        cfg.validation.warnings{end+1} = ...
+                            'cfg.clocks.tower.product.mode and cfg.towerClock.correctionMode are both scenario-set and disagree; cfg.towerClock.correctionMode wins.';
+                    end
+                else
+                    if ~isfield(cfg,'towerClock'); cfg.towerClock = struct(); end
+                    cfg.towerClock.correctionMode = cfg.clocks.tower.product.mode;
+                end
             end
             % cfg.towerClock.correctionMode → cfg.estimator.towerClockMode (new mapping)
             % Truth-history modes and explicit-struct modes are now distinct.
@@ -722,10 +761,14 @@ classdef ConfigFactory
                 newMode = cfg.towerClock.correctionMode;
                 switch newMode
                     case 'perfectTruth'
-                        % Default value: only set if not already overridden by user.
-                        if ~isfield(cfg,'estimator') || ~isfield(cfg.estimator,'towerClockMode')
-                            cfg.estimator.towerClockMode = 'perfectCorrection';
-                        end
+                        % Assign unconditionally, like every other case. The old
+                        % "only if not already set" guard could never fire -- masterConfig
+                        % always sets cfg.estimator.towerClockMode -- so correctionMode
+                        % 'perfectTruth' was the ONE mode that silently did not map, and you
+                        % got the product mode ('truthHistoryProductNoisy') instead. That
+                        % quietly denied the perfect-truth validation baseline to anyone who
+                        % asked for it.
+                        cfg.estimator.towerClockMode = 'perfectCorrection';
                     case 'truthHistoryProduct'
                         % History-based product. Internal mode 'truthProduct' does NOT
                         % require cfg.towerClock.products — it uses tower truth history.
@@ -1173,10 +1216,33 @@ classdef ConfigFactory
             nSig79_ = numel(sigNames79_);
             freqHz79_ = zeros(1,nSig79_);
             waveM79_  = zeros(1,nSig79_);
+            % SignalDefinition is keyed by NAME, so a scenario that retunes a band while
+            % keeping the name (the Ka ladder moves "L1" to 30 GHz) would have its frequency
+            % silently stamped back to the canonical 1575.42 MHz here -- every ka_*.json ran
+            % at L-band, which nullifies the 1/f^2 ionosphere argument the ladder exists to
+            % test. Honour a frequency the scenario explicitly owns; derive lambda from it so
+            % the pair can never disagree. cfg.provenance.explicit is the same list
+            % preserveScenarioOwned uses, and is absent when finalizeConfig is handed a raw
+            % masterConfig -- hence the guard.
+            ownedSig79_ = {};
+            if isfield(cfg,'provenance') && isfield(cfg.provenance,'explicit')
+                ownedSig79_ = cfg.provenance.explicit;
+            end
             for si79_ = 1:nSig79_
                 sd79_ = revgnss.SignalDefinition.get(sigNames79_{si79_});
                 freqHz79_(si79_) = sd79_.frequency_Hz;
                 waveM79_(si79_)  = sd79_.wavelength_m;
+
+                sn79o_ = sigNames79_{si79_};
+                if any(strcmp(ownedSig79_, sprintf('signals.%s.frequency_Hz', sn79o_))) && ...
+                        isfield(cfg.signals, sn79o_) && ...
+                        isfield(cfg.signals.(sn79o_), 'frequency_Hz')
+                    fOwn79_ = cfg.signals.(sn79o_).frequency_Hz;
+                    if isnumeric(fOwn79_) && isscalar(fOwn79_) && isfinite(fOwn79_) && fOwn79_ > 0
+                        freqHz79_(si79_) = fOwn79_;
+                        waveM79_(si79_)  = 299792458 / fOwn79_;   % c [m/s], as SignalDefinition
+                    end
+                end
             end
             cfg.signals.names        = sigNames79_;
             cfg.signals.frequencyHz  = freqHz79_;

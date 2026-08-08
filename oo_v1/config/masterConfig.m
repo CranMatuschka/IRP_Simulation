@@ -760,8 +760,10 @@ cfg.atmosphere.estimateIono   = false;   % per-tower slant-ionosphere EKF state
 %   is evaluated against that artefact unless this is on.
 %
 %   Scope: assets only. Distinct TOWERS keep independent atmospheres (they are
-%   hundreds of km apart), and separate receive antennas on one asset keep their
-%   independent scintillation draw, as before. Receiver thermal noise, clocks,
+%   hundreds of km apart). Separate receive antennas on ONE asset are a different
+%   axis and are governed by cfg.atmosphere.sharedAcrossAntennas below -- this flag
+%   does not touch them, because the substream key carries the antenna index and
+%   re-rooting the seed leaves that field intact. Receiver thermal noise, clocks,
 %   multipath and hardware delays stay rooted at the per-asset seed either way.
 %
 %   NOT the same as cfg.rng.independentStreams.enable=false: that also gives every
@@ -770,6 +772,39 @@ cfg.atmosphere.estimateIono   = false;   % per-tower slant-ionosphere EKF state
 %   is not a usable scientific control. This flag touches only the atmosphere.
 cfg.atmosphere.sharedAcrossFormation.enable = false;
 cfg.atmosphere.sharedAcrossFormation.seed   = 7201;   % formation-wide root (not per asset)
+
+% --- Scope of the scintillation draw ACROSS ANTENNAS ON ONE SPACECRAFT ----------
+%   atmosphere.sharedAcrossAntennas.enable  (default false -> legacy, byte-identical)
+%
+%   false (default): the amplitude-scintillation truth draw in CodeMeasurementBuilder
+%     is keyed on (source, tower, ANTENNA, signal, epoch), so N receive antennas on one
+%     spacecraft get N statistically INDEPENDENT scintillation realisations. Correct
+%     at nReceivers = 1 (where the key is constant and the flag is a strict no-op) and
+%     wrong for any multi-antenna run.
+%
+%   true: the antenna field of that one key collapses to 1, so all antennas of an asset
+%     see the SAME scintillation realisation for the same (tower, signal, epoch).
+%
+%   Why true is the physical answer for an antenna array: amplitude scintillation is a
+%   diffraction pattern imposed on the wavefront, and its spatial decorrelation length is
+%   the Fresnel scale sqrt(lambda*z). At L1 (lambda = 0.190 m) with a 350 km screen height
+%   that is ~260 m; for the full GEO propagation path it is ~2.6 km. The default 4-antenna
+%   cross spans 2.0 m corner to corner, i.e. <= 8e-3 Fresnel scales, so the correct
+%   inter-antenna correlation is 1 - O(1e-4), indistinguishable from 1. Drawing the
+%   antennas independently instead hands the run a free factor sqrt(nReceivers) reduction
+%   (2x at four antennas) on one of the largest per-row truth errors -- and R shrinks with
+%   it, so no consistency metric can see the gain.
+%
+%   Scope: the amplitude-scintillation code draw ONLY. Phase scintillation is already
+%   per-tower (EnvironmentModel keys it without an antenna field) and is therefore already
+%   common-mode; code thermal noise, carrier phase noise, Doppler noise, the carrier
+%   ambiguity truth and coloured multipath are genuinely per-antenna and keep their
+%   independent draws.
+%
+%   Composes with sharedAcrossFormation: that one re-roots the master seed (across
+%   spacecraft), this one collapses a key field (across antennas). Either may be set
+%   without the other.
+cfg.atmosphere.sharedAcrossAntennas.enable = false;
 
 % Complex atmosphere profile selected by realism.json.
 cfg.atmosphere.realisticProfile.errors.troposphere.enable = true;
@@ -1387,6 +1422,33 @@ cfg.multiAsset.twoWayISL.linkBudget.GT_dBK          = 5;
 % MICROMETRES at a 1 km formation baseline -- correct but inert here, relevant at 100 km+.
 % Reported as rel.lightTimeMax_m so the size is visible rather than assumed.
 cfg.multiAsset.twoWayISL.lightTime.enable           = false;
+% --- ARC SMOOTHING of the per-epoch shape solves (SwarmRelativeSolver stage 9) --------
+% SwarmRelativeSolver re-solves all 3N-6 shape DOF from the INSTANTANEOUS ranges at every
+% epoch, and shapeErrSolved_m is the RMS over those independent snapshots. Range thermal
+% noise therefore lands in the headline number at full strength times the range->shape DOP
+% (3.38x measured on the N=6 helix: 15 links, 12 DOF, redundancy 3), even though the
+% per-epoch error is white (lag-1 autocorrelation -0.19) and every epoch is looking at the
+% same physical formation. This stage spends that wasted redundancy.
+%
+% NOT AN AVERAGE. The shape is not constant: the TRUE shape of this formation moves 3.46 m
+% RMS about its own mean over 360 s, because relative orbital motion IS a deformation once
+% the rigid part is removed. So the window is used to fit a shape TRAJECTORY (a polynomial
+% in time, per coordinate, after Kabsch-aligning every window member onto the evaluation
+% epoch) and the fit is evaluated AT one epoch and scored against truth AT THAT SAME EPOCH.
+% arcShapeErrSnapshot_m is the single-epoch solve at those same epochs, so the reported
+% arcThermalReduction is a like-for-like gain and not an artefact of blurring both sides.
+%
+% Purely additive: with .enable=false every existing field is bit-identical and the arc*
+% fields report NaN/gateOff. A per-link delay-calibration bias is CONSTANT over the arc and
+% survives this untouched -- it removes the thermal term only, after which
+% delayCal.sigma_const_m is the entire floor.
+cfg.multiAsset.twoWayISL.arcAverage.enable    = false;
+cfg.multiAsset.twoWayISL.arcAverage.window_s  = 300;  % CAUSAL window back from each eval epoch
+cfg.multiAsset.twoWayISL.arcAverage.polyOrder = 2;    % 0 = constant shape; 2 tracks relative-motion curvature
+cfg.multiAsset.twoWayISL.arcAverage.evalEpochs = 20;  % eval points spread over the reported tail
+% Sizing rule: arcFitResidual_m is what the polynomial could NOT represent over the window.
+% When it approaches arcShapeErrSolved_m the window is too long for the order and the solver
+% says so in arcReason -- shorten window_s or raise polyOrder.
 
 % --- Ground-differenced formation ROTATION solve (read-only post-processor) ------
 % The one degree of freedom crosslinks can never supply. Two-way ISL observes |r_i-r_k|
@@ -1419,6 +1481,71 @@ cfg.multiAsset.groundDifferencedRotation.multipathSigma_m = 0.0;
 % injects it deliberately so its cost can be measured; 0 = the physically correct case.
 cfg.multiAsset.groundDifferencedRotation.differentialAtmosphereSigma_m = 0.0;
 cfg.multiAsset.groundDifferencedRotation.differentialAtmosphereTau_s   = 600;
+% Shape sigma [m] the leakage guard charges itself against. The solver has 3 free
+% parameters and no shape freedom, so arc-correlated deformation lands on the rotation at a
+% coefficient the solver now MEASURES for itself (execution-plan E3); the guard compares
+% that predicted leak against the rotation it can actually measure and refuses to apply the
+% correction when the leak wins.
+% DECLARED HERE BECAUSE IT WAS NOT. The solver reads this path and used to fall back to
+% rel.shapeErrSolved_m -- a TRUTH-derived quantity (SwarmRelativeSolver computes it against
+% truthK). Because deepMergeConfig throws on undeclared paths, that fallback was the ONLY
+% executable path, so truth was deciding whether an estimate got applied at all. Same defect
+% class as the delayCal.estimate.enable precedent.
+% AS OF PHASE E THERE IS NO TRUTH FALLBACK. Empty -> the ISL layer's own formal covariance
+% (sqrt(3)*rel.formalShapeSigma_m); if that is unavailable too the stage FAILS with a named
+% reason rather than assuming a good shape.
+cfg.multiAsset.groundDifferencedRotation.assumedShapeSigma_m = [];
+% ---------------------------------------------------------------------------------------------
+% 3-TOWER BEAM POINTING LOCK (revgnss.GroundBeamPointingLock).
+% The orientation route that bypasses ranging entirely. A rigid formation rotation is a pure
+% wavefront TILT: it displaces the beam on the ground (9.45 km measured on the 6 h archives, with
+% a tilt fraction of 0.89) without costing coherent gain. That displacement is observable as a
+% POWER peak against known towers, so it needs no carrier phase, no integer ambiguity, and no
+% formation turn -- unlike groundDifferencedRotation/jointGeometry, which need ~99 deg of turn
+% before rotation separates from deformation at all.
+% Default OFF: when off, solvedPos is untouched and every result is byte-identical.
+cfg.multiAsset.beamPointingLock.enable = false;
+% How many towers to lock onto. Rotation has 3 DOF and each tower's spot offset gives 2
+% constraints, so 2 towers is the algebraic minimum; 3 is the default because it is
+% over-determined and because a roll about the line of sight to one tower does not move that
+% tower's spot at all -- only the others see it.
+cfg.multiAsset.beamPointingLock.nTowers = 3;
+% Which towers. Empty = 'auto', which picks the visible towers with the WIDEST angular spread
+% seen from the formation; the solve's conditioning is set by how much the lines of sight differ,
+% so three clustered towers constrain roll no better than one. Otherwise a vector of tower
+% indices into cfg.towers.
+cfg.multiAsset.beamPointingLock.towers = [];
+% How precisely the ground segment can locate the beam's power peak [m]. THIS IS THE ONE NUMBER
+% THAT SETS THE RESULT: the rotation sensitivity is ~9.45 km of spot displacement per 0.0345 deg,
+% so 500 m of peak-location error maps to ~0.0018 deg of rotation. Compare the beam footprint,
+% which is 12.3 km at 400 MHz and 2.35 km at 2100 MHz -- 500 m is a few percent of a beamwidth.
+cfg.multiAsset.beamPointingLock.spotSigma_m = 500;
+% Minimum elevation for a tower to be usable as a beacon [deg].
+cfg.multiAsset.beamPointingLock.minElevation_deg = 10;
+% Seed for the peak-location noise. Its own stream, so toggling this stage cannot move any other
+% draw in the run.
+cfg.multiAsset.beamPointingLock.seed = 90210;
+% Lever-arm handling on the PREDICTION side (execution-plan B1). The observable is formed at
+% the receive antenna phase centre; rel.solvedPos is a centre-of-mass quantity. Predicting
+% without the lever leaves L.(u_i - u_j) in the single difference -- 0.048 mm at b = 1800 m,
+% 0.180 mm at the 6724 m run22 maximum -- which is LINEAR IN THE BASELINE and therefore
+% aliases onto rotation instead of averaging away.
+%   'auto'              estimated attitude when every asset has one, else centre of mass
+%   'estimatedAttitude' require it; error out rather than silently degrade
+%   'centreOfMass'      remove the lever from BOTH sides, so the residual carries no lever
+% There is deliberately no mode that leaves the two sides asymmetric.
+cfg.multiAsset.groundDifferencedRotation.leverArm.mode = 'auto';
+% Minimum |theta|/sigma before this stage is allowed to touch the geometry. The leakage guard
+% asks whether a SHAPE error could be masquerading as rotation; it never asks whether the
+% rotation is distinguishable from zero. Measured on the 120 s smoke fixture: 0.159 deg
+% estimated against a formal 0.125 deg -- SNR 1.2, consistent with noise -- passed the leakage
+% test, applied 2.5 m of rim displacement and made the relative geometry 2.6x WORSE. Empty ->
+% inherit multiAsset.jointGeometry.accept.minRotationSnr, so the two stages judge alike.
+cfg.multiAsset.groundDifferencedRotation.accept.minRotationSnr = [];
+% Dead-band for THIS stage's guards (execution-plan A5). Empty -> inherit
+% multiAsset.jointGeometry.guardDeadBand. The leakage guard here is the one the defect was
+% measured on.
+cfg.multiAsset.groundDifferencedRotation.guardDeadBand = [];
 
 % --- JOINT shape + rotation solve (supersedes the 3-parameter stage above) -------
 % The 3-parameter rotation solve has no shape freedom, so arc-correlated deformation
@@ -1438,10 +1565,126 @@ cfg.multiAsset.groundDifferencedRotation.differentialAtmosphereTau_s   = 600;
 % is clean. Arc length is the mechanism here, not a tuning knob.
 cfg.multiAsset.jointGeometry.enable = false;
 % ISL shape prior [m], on the shape subspace only (rotation deliberately gets NO prior,
-% because inter-satellite ranging supplies exactly zero information about it). Empty ->
-% falls back to rel.shapeErrSolved_m. Declare it explicitly rather than inheriting a
-% number the ISL layer computed about itself.
+% because inter-satellite ranging supplies exactly zero information about it).
+% AS OF PHASE E: empty -> the ISL layer's OWN formal covariance (sqrt(3)*formalShapeSigma_m,
+% the per-axis to per-point-norm conversion), and the anisotropic per-coordinate covariance
+% on top of it when the ISL layer publishes one. There is no truth fallback; if neither is
+% available the stage fails with a named reason.
 cfg.multiAsset.jointGeometry.shapePriorSigma_m = [];
+% Which FRAME is the arc-constant shape error constant in? This is execution-plan A4, the
+% cheapest thing that can invalidate the turn-angle law above -- and with it the case for
+% long arcs, the joint solve's whole separation mechanism, and Phase H's 4N+3 hardware
+% separation, which rests on the identical argument.
+%   'ecef'           one ECEF vector applied identically at every epoch (the legacy
+%                    assumption: "G turns, dp does not")
+%   'formationBody'  dp_ecef(k) = R_k * dp_body, R_k recovered by Kabsch from the SOLVED
+%                    geometry. A physical deformation is fixed in the body/LVLH frame, so
+%                    in ECEF it TURNS WITH the formation -- if it turns the way the rotation
+%                    generator does, the separation is a parameterisation artefact.
+% revgnss.ShapeFrameSeparationProbe measures the penalty under both; report either outcome.
+cfg.multiAsset.jointGeometry.shapeFrame = 'ecef';
+% Restrict the shape correction to the directions the ground DD MEASURES (execution-plan C3).
+% run20 is a RANK problem, not a weight problem: it cut its own fitted DD residual by 1.74x
+% while making the true shape 2.9x worse, which is the signature of unobservable directions,
+% not of a badly-chosen prior. minGain is the ratio sigma_prior/sigma_posterior below which a
+% direction counts as unmeasured and is held at the prior instead of being moved by whatever
+% noise projects onto it. 1.0 would mean "the data said nothing".
+cfg.multiAsset.jointGeometry.shapeSubspace.enable  = true;
+cfg.multiAsset.jointGeometry.shapeSubspace.minGain = 1.1;
+% ACCEPTANCE, before anything is written back (execution-plan C1 + D3). run20 applied a
+% 0.368 m shape step against a 0.0736 m error and shipped it, because the only test was
+% "the solver ran".
+%   minRotationSnr     |theta| in metres of rim displacement over its formal sigma, taken
+%                      from the SCHUR COMPLEMENT -- the only matrix that knows the
+%                      shape/rotation separation penalty. rcond cannot do this job: it is
+%                      scale-free and passes by ten orders either way.
+%   maxShapeStepSigma  refuse a shape step larger than this many prior sigmas.
+cfg.multiAsset.jointGeometry.accept.minRotationSnr    = 3.0;
+cfg.multiAsset.jointGeometry.accept.maxShapeStepSigma = 3.0;
+% RELATIVE DEAD-BAND around every guard threshold (execution-plan A5). A hard comparison that
+% decides whether a metre-class correction is applied is a COIN FLIP when it sits near its
+% threshold: measured 2026-08-05, the sibling solver's leakage guard sat at a 3 % margin, a
+% 1e-14 arithmetic difference between a serial and a parallel run flipped it, and 33 of 148
+% reported fields moved -- solvedPos by 0.55 m, the beam spot by 3.8 km, coherent gain by
+% 0.99 dB. Inside the band the outcome is reported as INDETERMINATE and the conservative branch
+% is taken, deterministically. 0.10 is twelve orders of magnitude wider than the perturbation
+% that caused the flip. 0 restores the old hard comparison, and its non-reproducibility.
+cfg.multiAsset.jointGeometry.guardDeadBand = 0.10;
+% Turn angle [deg] below which the arc is REPORTED as unable to separate shape from
+% rotation. Diagnostic only -- the enforcement is the SNR test above, which sees the same
+% degeneracy through the Schur complement. 30 deg is where the measured penalty falls below
+% ~5.6x.
+cfg.multiAsset.jointGeometry.minTurnAngle_deg = 30;
+% SHAPE-FRAME SEPARATION PROBE (execution-plan A4). Injects a KNOWN rotation and a KNOWN shape
+% error into the estimate -- never into the truth -- and asks the real solver to undo them, over
+% every combination of {shape error injected in ECEF, in the body frame} x {solver parameterised
+% in ECEF, in the body frame}, over prefixes of the arc. The off-diagonal cells say what happens
+% when the parameterisation does not match the physics; the arc sweep says whether the
+% turn-angle law survives in both. EXPENSIVE -- one full joint solve per cell -- so run it once
+% per formation, not per commit.
+cfg.multiAsset.jointGeometry.frameProbe.enable = false;
+% Which observable the joint solve consumes (execution-plan F8). Carrier is ~500x more precise
+% than the code that capped the rotation gain at 1.53x, and swapping it in is the entire payoff
+% of Phase F -- nothing else about the solve changes, because the observable is the only thing
+% that differs.
+%   'auto'      the best FIXED lane the resolver reached, falling back to code. The fallback is
+%               the point: using an UNFIXED lane would report carrier precision on a float,
+%               which is exactly how Route 1 died.
+%   'code'      never use carrier, even when it is available
+%   'wideLane'  force the wide lane
+%   'L1'        force L1 (only if the cascade fixed it)
+cfg.multiAsset.jointGeometry.observable = 'auto';
+
+% --- GROUND CARRIER AMBIGUITY RESOLUTION (execution-plan Phase F) ----------------
+% The estimator, as distinct from multiAsset.groundCarrierProbe, which is a MEASUREMENT: the
+% probe scores itself against an integer it drew, this decides without truth and reports how
+% often it would be WRONG from the covariance alone.
+% WHY IT CAN WORK WHERE THE CODE ROUTE COULD NOT: the wide-lane ambiguity comes from the
+% Melbourne-Wubbena combination, which is GEOMETRY-FREE and IONOSPHERE-FREE. The 0.148 m double-
+% difference geometry error that caps the code route does not enter it at all.
+cfg.multiAsset.groundCarrier.enable = false;
+% Bootstrapped success-rate floor below which a fix is REFUSED. 0.999 is the usual operational
+% bar; it is a probability computed from the covariance, not a counted rate.
+cfg.multiAsset.groundCarrier.minSuccessRate = 0.999;
+% Discrimination (ratio) test on the two best integer candidates.
+cfg.multiAsset.groundCarrier.ratioThreshold = 2.0;
+% Node budget for the bounded integer least-squares search. On exhaustion the BOOTSTRAPPED fix
+% is reported instead, with its exact success rate and no ratio test -- never a truncated search
+% presented as a completed one.
+cfg.multiAsset.groundCarrier.nodeBudget = 200000;
+% Cascade wide-lane -> conditioned geometry -> L1 (F6). This is the step that converts a fix
+% into precision: L1 sits near 87 % on raw geometry and needs the wide-lane-sharpened geometry
+% to get near 1.0.
+cfg.multiAsset.groundCarrier.cascadeToL1 = true;
+% DIFFERENTIAL ionosphere between two satellites viewing the same tower, L1-equivalent [m].
+% Physically ~0 for a 2 km formation (11 arcsec of ray divergence). Non-zero injects it so the
+% cost can be measured; the carrier ADVANCE and code DELAY are modelled with opposite signs,
+% which is what makes the Melbourne-Wubbena combination work at all.
+cfg.multiAsset.groundCarrier.differentialIonoSigma_m = 0.0;
+cfg.multiAsset.groundCarrier.differentialIonoTau_s   = 600;
+% Cycle slips per link per hour (F7). A fix must be HELD; a slip starts a new ambiguity arc and
+% any fix carried across it is simply wrong. 0 reproduces the no-slip upper bound the probe's
+% 99.9963 % figure was measured under -- which is why that figure is an upper bound.
+cfg.multiAsset.groundCarrier.slipRatePerLinkPerHour = 0.0;
+
+% --- Ground carrier ambiguity probe (MEASUREMENT, not an estimator) --------------
+% Asks one question: given the relative geometry the ISL layer actually produced, does the
+% predicted tower double difference land within half a wavelength of the true one often
+% enough to round to the correct integer? Wide-lane clears; nothing shorter fixes directly,
+% which is why the ladder must start there.
+% DECLARED HERE BECAUSE IT WAS NOT -- revgnss.GroundCarrierAmbiguityProbe reads
+% multiAsset.groundCarrierProbe.phaseSigma_m and deepMergeConfig throws on undeclared paths.
+% The class ALSO had zero callers, so the 99.9963 % wide-lane fix rate on record was a bench
+% number from a MATLAB prompt with no committed seed or arc. Both are fixed: the probe runs
+% from revgnss.SwarmRelativeSolver after the geometry is final, and this gate reaches it.
+% IT REMAINS A MEASUREMENT, NOT AN ESTIMATOR. It draws the true integers itself and asks
+% whether rounding recovers them, so its fix rate is an UPPER BOUND (no cycle slips are
+% modelled) and it never writes to the geometry. An estimator that must decide without truth
+% is Phase F.
+cfg.multiAsset.groundCarrierProbe.enable = false;
+% Per-link RAW carrier sigma [m]. A double difference combines four of these, so the DD
+% sigma is 2x this before the wide-lane amplification of sqrt(f1^2+f2^2)/(f1-f2) = 5.74.
+cfg.multiAsset.groundCarrierProbe.phaseSigma_m = 0.002;
 
 % --- Coherent-beamforming phase budget (report-only diagnostic) -----------------
 % Reads the final-epoch relative geometry and clock solution and reports the phasor
@@ -1461,6 +1704,14 @@ cfg.beamforming.frequencies_Hz = [];
 % Coherence criterion: sigma_e = lambda / thisValue. lambda/20 is the conventional
 % "essentially lossless" line (about 0.1 dB); lambda/10 costs roughly 0.4 dB.
 cfg.beamforming.coherenceCriterionLambdaFraction = 20;
+% OPERATIONAL comms carrier [Hz]. beamforming.frequencies_Hz above is derived per run
+% (coherent / partial / dead), so those three panels move between scenarios and cannot be
+% compared across runs. This one is PINNED, so every multi-asset report carries the same
+% phasor picture at the same carrier and two reports can be read side by side. S-band
+% 2.1 GHz is the default because that is the band the formation is being sized for.
+% Read by BeamformingPhasorDiagnostics.plotCommsPhasor; multi-asset reports only, so
+% single-asset golden .tex output is unaffected.
+cfg.beamforming.communicationFrequency_Hz = 2.1e9;
 
 % --- Legacy read-only satellite clock-network diagnostic. Default OFF. ---
 % Retained for noncanonical federated post-processing compatibility. Canonical execution
@@ -1621,7 +1872,11 @@ cfg.estimator.attitudeInit.search.improvementRatioThreshold = 1.05;
 cfg.estimator.attitudeInit.search.maxRmsCycles = 0.30;
 cfg.estimator.attitudeInit.search.sigmaScaleDeg = 2.0;
 cfg.estimator.attitudeInitShadow.enable = false;
-% perfectCorrection: EKF uses known tower clock values (zero here).
+% DERIVED, NOT A KNOB. finalizeConfig overwrites this from
+% cfg.towerClock.correctionMode (see that entry), so setting it here or in a scenario has
+% no effect -- the value below is a placeholder that the mapping replaces. The effective
+% default is 'truthHistoryProductNoisy'. To change the tower-clock treatment, edit
+% cfg.towerClock.correctionMode.
 cfg.estimator.towerClockMode          = 'perfectCorrection';
 cfg.estimator.towerClockCorrectionSigma_m = 0.5; % used if noisyCorrection
 cfg.estimator.elevationMask_rad       = 5 * pi/180;
@@ -1908,6 +2163,21 @@ cfg.errors.multipath.coloredGM.sigmaCodeL1_ss_m    = 0.30;   % steady-state code
 cfg.errors.multipath.coloredGM.elevationExponent   = 1;      % envelope ~ 1/sin(el)^exp (1 or 2); low elev = more MP
 cfg.errors.multipath.coloredGM.carrierScale        = 0.01;   % phase multipath ~ 1/100 of code (reserved)
 cfg.errors.multipath.coloredGM.seed                = 6301;   % dedicated per-link RNG seed
+% Antenna scope of the coloured-multipath link state (default false -> legacy per-antenna).
+%   false: one Gauss-Markov state per (tower, ANTENNA) link, so N receive antennas on one
+%     spacecraft get N independent multipath realisations. Correct for the RECEIVE-end
+%     component (each phase centre sees its own reflections off the spacecraft structure)
+%     and a strict no-op at nReceivers = 1.
+%   true : one state per TOWER, shared by every antenna of this spacecraft.
+% Why true is the better match for the term as PARAMETERISED here: sigmaCodeL1_ss_m with an
+% elevationExponent envelope 1/sin(el)^n keyed on the TOWER elevation is the classical
+% ground-station multipath model (Kaplan & Hegarty, Braasch) -- more multipath at low
+% elevation because of the ground bounce at the STATION. That component is transmit-end and
+% is therefore common to every receive antenna; drawing it per antenna hands a multi-antenna
+% run a free sqrt(nReceivers) reduction on it, exactly as the antenna-independent
+% scintillation draw does. The receive-end component is not separately modelled; a run that
+% sets this true is declaring the modelled term to be the transmit-end one.
+cfg.errors.multipath.coloredGM.sharedAcrossAntennas.enable = false;
 
 % --- Effect toggles: deterministic geometric/structural effects ------
 % cfg.effects groups deterministic geometric/structural effects.
@@ -1978,7 +2248,8 @@ cfg.frames.truthEop.ut1Rate_error_msPerDay = 1.0;
 % ~0.1 mas, so a real receiver HAS these values -- applying them here is using published
 % data, not truth-assistance. Set these equal to frames.truthEop for a fully corrected
 % system; offset them by the IERS uncertainty for a realistic residual.
-% MEASURED (2026-08-07, scene_G5S1R4_ts3600_TW1): leaving this off costs 0.53 m RMS of
+% MEASURED (2026-08-07, scene_G5S1R4_ts3600_TW1 -- scenario file removed in the 2026-08-08
+% config/ladder migration, kept here as provenance): leaving this off costs 0.53 m RMS of
 % CROSS-TRACK error and drops cross-track 3-sigma coverage from 100 % to 92.4 %.
 % Default OFF -> byte-identical no-op.
 cfg.frames.eopModel.enable                 = false;
@@ -2690,7 +2961,18 @@ cfg.effects.lightTime.tol_s   = 1e-12;
 % where dt = t_eval - epoch_s of the product.
 %
 % Validity: if abs(dt) > validity_s, action per productValidityPolicy.
-cfg.towerClock.correctionMode         = 'perfectTruth';
+% This is THE tower-clock knob: finalizeConfig maps it to the internal
+% cfg.estimator.towerClockMode. Do not set that field directly -- it is derived.
+%
+% It reads 'truthHistoryProductNoisy' and not 'perfectTruth' because that is what runs
+% actually used. Until 2026-08-06 this said 'perfectTruth', but the mapping for that one
+% value was behind a guard that could never fire, so the legacy chain
+% (cfg.clocks.tower.product.mode -> errors.towerClockCorrection.mode -> towerClockMode)
+% won and every run silently used 'truthHistoryProductNoisy'. Fixing the guard without
+% fixing this line would have SILENTLY MADE THE DEFAULT MORE OPTIMISTIC (perfect truth
+% correction instead of a noisy history product). Keep this in step with
+% cfg.clocks.tower.product.mode.
+cfg.towerClock.correctionMode         = 'truthHistoryProductNoisy';
 cfg.towerClock.sigmaBias_m            = 0.0;
 cfg.towerClock.sigmaDrift_mps         = 0.0;
 cfg.towerClock.productValidityPolicy  = 'warn';  % 'warn' | 'error'

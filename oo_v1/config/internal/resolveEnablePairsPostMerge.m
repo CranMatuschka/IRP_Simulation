@@ -8,7 +8,7 @@ function cfg = resolveEnablePairsPostMerge(cfg, effectPaths)
 %   writing `errors.multipath.enable = true` was a SILENT NO-OP: measured, it resolved to
 %   enable=1, truth=0, model=0. The physics and the report both read the PAIR, never the
 %   master, so the config said on, the run did nothing, and the report honestly said off.
-%   config/scenarios/realism.json works around it by hand-writing all three keys per effect.
+%   config/realism.json works around it by hand-writing all three keys per effect.
 %
 %   WHY NOT JUST RE-RUN expandEnableToggles POST-MERGE. It overwrites the pair
 %   unconditionally from the master, so a scenario that deliberately writes the PAIR

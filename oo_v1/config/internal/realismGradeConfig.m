@@ -6,7 +6,7 @@ function cfg = realismGradeConfig(cfg)
 %   real one-way >=5-tower GEO reverse-GNSS system rather than an oracle twin. Every change
 %   here is a config-level fix from docs/scientific_correctness_review_v4.md; the frozen
 %   goldens pin their own values and are untouched (this overlay is opt-in, default OFF).
-%   User-facing scenario runs select this profile through config/scenarios/realism.json.
+%   User-facing scenario runs select this profile through config/realism.json.
 %
 %   PER-EFFECT SUB-TOGGLES: each block below is gated on cfg.realism.include.<name> (all
 %   default true, i.e. the full overlay). Set any to false in masterConfig to keep realism
@@ -17,7 +17,8 @@ function cfg = realismGradeConfig(cfg)
 %   golden (goldenRealismScenarioConfig) is unaffected.
 %
 %   Covered here (config-level): R-1 clock, R-4 tower product sigma, M7 C/N0 weighting,
-%   R-5 truth systematics (multipath/hardware/PCV/survey/DCB), R-10 honest floors,
+%   R-5 truth systematics (multipath/hardware/PCV/survey/DCB), R-11 diurnal+stochastic
+%   ionosphere corrected by Klobuchar, R-10 honest floors,
 %   R-3 truth-side luni-solar/SRP with reduced-dynamics process uncertainty, relativistic
 %   clock, ISL product sigma, R-8 EOP/solid-Earth tide, R-6 inter-antenna carrier bias,
 %   and the carrier-arc-survival / phase-bias-honesty settings.
@@ -81,6 +82,45 @@ function cfg = realismGradeConfig(cfg)
         % so it survives z-h. Per-tower DCB is a new-physics follow-up.
         cfg.biases.interFrequency.code.truth.L1_m = V.dcb.L1_m;   % ~1 ns L1 group delay
         cfg.biases.interFrequency.code.truth.L2_m = V.dcb.L2_m;   % ~1.5 ns L2 group delay
+    end
+
+    % ---- R-11  Ionosphere that actually VARIES, corrected by a broadcast-grade Klobuchar
+    % climatology instead of a frozen constant.
+    %
+    % MEASURED DEFECT this fixes (2026-08-06, Report_v001_ts3600_G5S6R4_TW1): realism grade
+    % left cfg.errors.ionosphere.modelType at 'simpleMapped', under which
+    % EnvironmentModel.m:294 gates the stochastic TEC Gauss-Markov state on
+    % modelType=='tecGaussMarkov'. So errors.ionosphere.stochastic.enable=true was read,
+    % passed its own check, and the GM state NEVER STEPPED -- tau_s and sigmaVDelayL1_ss_m
+    % were configured and never used. The surviving residual was the deterministic
+    % (truth zenith - biasFraction*model zenith)/sin(el) alone, and because a GEO asset's
+    % elevation to a fixed tower drifts ~1e-4 deg over an hour it was a HARD CONSTANT
+    % (1.16 m Hartebeesthoek .. 2.59 m Stockholm). A constant common-mode error is exactly
+    % what the radial<->clock degeneracy absorbs invisibly, so it flattered the run twice:
+    % once as an unmodelled bias, once as one the covariance could not see.
+    %
+    % The values are NOT invented here: they are the repo's own realistic ionosphere from
+    % cfg.atmosphere.realisticProfile.errors.ionosphere (masterConfig.m ~:755), which was
+    % dormant because cfg.atmosphere.realistic defaults to false. This promotes that same
+    % definition into realism grade, which is where a reader expects it to live.
+    if inc.ionosphere
+        cfg.errors.ionosphere.enable        = true;
+        cfg.errors.ionosphere.truth.enable  = true;
+        cfg.errors.ionosphere.model.enable  = true;
+        cfg.errors.ionosphere.modelType     = 'tecGaussMarkov';   % UNLOCKS the stochastic branch
+        % Truth: diurnal VTEC (day/night TECU, peaking at local 14:00) + Gauss-Markov TEC residual.
+        cfg.errors.ionosphere.truth.diurnal.enable          = true;
+        cfg.errors.ionosphere.truth.diurnal.vtecDay_TECU    = V.ionosphere.vtecDay_TECU;
+        cfg.errors.ionosphere.truth.diurnal.vtecNight_TECU  = V.ionosphere.vtecNight_TECU;
+        cfg.errors.ionosphere.truth.diurnal.peakLocalTime_h = V.ionosphere.peakLocalTime_h;
+        cfg.errors.ionosphere.topsideFraction               = V.ionosphere.topsideFraction;
+        cfg.errors.ionosphere.stochastic.enable             = true;
+        cfg.errors.ionosphere.stochastic.process            = 'gaussMarkov';
+        cfg.errors.ionosphere.stochastic.tau_s              = V.ionosphere.tau_s;
+        cfg.errors.ionosphere.stochastic.sigmaVDelayL1_ss_m = V.ionosphere.sigmaVDelayL1_ss_m;
+        % Model: independent Klobuchar climatology (NOT a scaled copy of the truth), so the
+        % residual is a real correction error rather than a tuned fraction.
+        cfg.errors.ionosphere.model.correction = 'klobuchar';
     end
 
     % ---- R-10  Honest floors / real-world sigmas (raise the non-physical / over-tight values)
@@ -297,6 +337,7 @@ function inc = i_resolveIncludes(cfg)
         'antennaPCV',              true, ...   % R-5  uncalibrated antenna PCV (truth)
         'towerSurvey',             true, ...   % R-5  static ENU survey error (truth)
         'dcb',                     true, ...   % R-5  inter-frequency code bias (truth)
+        'ionosphere',              true, ...   % R-11 diurnal+stochastic TEC vs Klobuchar model
         'honestFloors',            true, ...   % R-10 honest measurement sigma floors
         'luniSolar',               true, ...   % R-3  truth perturbations, reduced-dynamics EKF
         'relativity',              true, ...   % relativistic receiver-clock offset
@@ -353,6 +394,10 @@ function V = i_realismDefaults()
     V.hardwareDelay     = struct('sigma_m',0.5);
     V.dcb               = struct('L1_m',0.30,'L2_m',0.45);
     V.honestFloors      = struct('sigmaFloor_m',0.01,'doppler_sigma_mps',0.03,'carrier_sigma_m',0.010);
+    % R-11 ionosphere. Same numbers as cfg.atmosphere.realisticProfile.errors.ionosphere in
+    % masterConfig (~:755) -- promoted, not re-derived, so the two definitions cannot drift.
+    V.ionosphere        = struct('vtecDay_TECU',30,'vtecNight_TECU',6,'peakLocalTime_h',14, ...
+                                 'topsideFraction',1,'tau_s',600,'sigmaVDelayL1_ss_m',0.3);
     V.luniSolar         = struct('sigma_mps2',1e-5);
     V.islProductSigma   = struct('sigmaPos_m',0.10,'sigmaClock_m',0.10);
     % ISL crosslink, conservative side. carrierSigma_m 0.20 is the FLOAT-ambiguity-limited

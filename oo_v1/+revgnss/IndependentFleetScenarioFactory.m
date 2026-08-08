@@ -40,7 +40,37 @@ classdef IndependentFleetScenarioFactory
                 secondaryIndex = assetIndex - 1;
                 ci.orbit.eciState0 = [setup.r0Cells{secondaryIndex}; ...
                     setup.v0Cells{secondaryIndex}];
-                ci.asset.clock.seed = 300 + assetIndex;
+                % Seed choice depends on whether this leaf retains its swarm siblings.
+                % singleAssetBase already collapsed ci.scenario.nSpaceAssets to 1 UNLESS
+                % keepIslInPerAssetEkf kept it at the full swarm size -- and when it's 1,
+                % MultiAssetConfig.normalize truncates cfg.assets to a single element
+                % (cfg.assets = cfg.assets(1:1)) before any secondary-asset seed logic can
+                % run, so 300+assetIndex has always been collision-free there and MUST stay
+                % (the swarm-relative regression baseline was captured against exactly this
+                % value for that path -- changing it moves real results for no reason).
+                % When siblings ARE retained (keepIslInPerAssetEkf=true), cfg.assets keeps
+                % assetIndex's own original slot, and MultiAssetConfig.finalizeAsset_ stamps
+                % EVERY cfg.assets(k) for k>1 to 300+k unconditionally, keyed on array
+                % POSITION regardless of which data occupies that slot -- so a cfg.asset seed
+                % drawn from the same 300+k family is guaranteed to collide with whatever
+                % finalizeAsset_ stamps onto position assetIndex. Slot 1 is the one position
+                % finalizeAsset_ never re-stamps (mergePrimary_ handles it instead), so
+                % cfg.asset needs a seed outside BOTH 300+{2..N} and the tower family 200+k.
+                %
+                % IT MUST ALSO DIFFER BETWEEN LEAVES. Each leaf is an independent simulation
+                % of a DIFFERENT physical satellite, so a seed shared across leaves gives every
+                % spacecraft a BIT-IDENTICAL truth clock realization -- the federated relative
+                % layer then differences them and sees exactly zero relative clock error, which
+                % silently flatters every relative-clock and common-mode result. (Measured when
+                % this was briefly a flat 100: max|b_i - b_1| = 0 exactly across all six.)
+                % 100+assetIndex is unique per leaf and collides with neither family.
+                retainsSiblings = isfield(ci,'scenario') && ...
+                    isfield(ci.scenario,'nSpaceAssets') && ci.scenario.nSpaceAssets > 1;
+                if retainsSiblings
+                    ci.asset.clock.seed = 100 + assetIndex;
+                else
+                    ci.asset.clock.seed = 300 + assetIndex;
+                end
                 ci.simulation.seed = setup.baseSeed + 100000*(assetIndex-1);
             end
         end
