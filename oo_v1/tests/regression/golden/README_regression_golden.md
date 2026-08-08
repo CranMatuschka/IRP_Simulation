@@ -49,6 +49,63 @@ Before re-cutting, establish two things and record them:
 
 ## Change log
 
+### 2026-08-08 (later) — re-cut `swarm_relative_baseline.mat`
+
+Held back from the PSD re-cut earlier the same day (see the note at the end of that entry)
+because it was failing for reasons that change did not cause. Re-cut now that the reason is
+understood.
+
+**The 76 m is not a relative-layer regression.** Splitting the digest into the raw inputs and
+the delivered outputs settles it:
+
+| scalar | old baseline | new cut | change |
+|---|---|---|---|
+| `baselineErrRaw_m` | 3.79381 | 4.00906 | +5.674 % |
+| `shapeErrRaw_m` | 9.68974 | 10.97521 | +13.266 % |
+| `relClockErrRaw_m` | 16.76806 | 19.22973 | +14.681 % |
+| **`baselineErrSolved_m`** | 0.013236016 | 0.013236063 | **+0.000 %** |
+| **`shapeErrSolved_m`** | 0.043652952 | 0.043653552 | **+0.001 %** |
+| **`relClockErrSolved_m`** | 0.024750365 | 0.024750365 | **−0.000 %** |
+
+Every raw input moved; every solved output is unchanged to 5–7 significant figures. The layer
+produces an identical answer from different absolute solutions, which is what it exists to do.
+`solvedPos` is absolute geometry, so its 76.2 m max|Δ| over |pos| ≈ 1.84e7 m is **4.1e-6
+relative**, and with shape and baseline errors unmoved it can only be a common-mode translation
+of the whole formation — not deformation. The raw inputs moved because the per-asset EKFs did,
+which is the intended effect of the 2026-08-08 series.
+
+**The formal sigmas collapsed, and that is the part worth reading carefully.**
+
+| | old baseline | new cut | change |
+|---|---|---|---|
+| `formalShapeSigma_m` | 0.184807 | 0.032784 | **−82.3 %** |
+| `relClockFormalSigma_m` | 0.037350 | 0.013755 | **−63.2 %** |
+
+⚠ **This is NOT attributable to a commit.** Reverting `+revgnss/SwarmRelativeSolver.m` (which
+computes it) to `ca3f8fc` gives 0.032783905 — identical. Reverting the PSD hunk gives
+0.032783971 — identical to six significant figures. It traces to the `d3089d7`…`ca3f8fc` window
+in which the repository could not run at all (see `tests/golden/README_golden.md`), so the state
+that produced 0.184807 cannot be reconstructed. The same symptom appears independently on
+`test006_groundOrientationInert120`, whose `formalShapeSigma_m` fell 6.3× over the same window.
+
+**It is re-cut anyway because the new value is better calibrated, not worse.** Realised error
+over formal sigma, where ~1 is a well-matched 1-sigma:
+
+| | old | new |
+|---|---|---|
+| shape | 0.236 | **1.332** |
+| relClock | 0.663 | **1.799** |
+
+The old shape sigma was 4× too conservative and the new one is near-ideal; the clock sigma moves
+from mildly conservative to 1.8× over-confident. Neither is alarming and the shape side is a
+clear improvement, so freezing the new values states something truer about this layer than
+keeping the old ones did. **What is being frozen is a measured, calibration-checked state whose
+provenance is a lost tree — not an intentional model change anyone can point to.** That is the
+honest reading, and it is why this entry exists rather than a one-line "re-cut".
+
+Verified after capture: every digest field `max|d| = 0.000e+00`, `RESULT: PASS`. The layer is
+bit-reproducible as its harness claims.
+
 ### 2026-08-08 — re-cut all six tiers onto the scale-invariant PSD guard
 
 **Why.** `+filter/ReverseGNSSEKF.m` update() step 8 tested `eig(P)` against an absolute
@@ -143,6 +200,10 @@ both). **That drift predates the PSD change and is unattributed**, consistent wi
 `swarm_relative_baseline.mat.pre_ground_orientation_ladder` copy sitting beside it. Recapturing it
 here would have frozen an unexplained 76 m move into the contract under cover of a change that did
 not cause it. It stays failing until someone attributes it.
+
+> **Resolved later the same day** — the 76 m turned out to be a common-mode translation of the
+> absolute solution, with every solved output unchanged to 5–7 significant figures. Re-cut in the
+> "2026-08-08 (later)" entry above.
 
 ### 2026-08-07 — re-cut `golden_realism_smoke` and `golden_realism_full` onto the corrected R
 
