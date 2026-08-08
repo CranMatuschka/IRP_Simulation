@@ -69,6 +69,27 @@ classdef SharedAtmosphereRng
             end
         end
 
+        function tf = isAntennaShared(cfg)
+            % isAntennaShared  True when the antennas of ONE asset must share the
+            %   amplitude-scintillation draw (cfg.atmosphere.sharedAcrossAntennas.enable).
+            %
+            %   Separate axis from isEnabled: that one re-roots the master seed so
+            %   different SPACECRAFT coincide; this one collapses the ANTENNA field of the
+            %   substream key so different phase centres on one spacecraft coincide.
+            %   Re-rooting cannot do this job -- the key carries the antenna index, so all
+            %   four antennas stay separated no matter which root they hang from.
+            tf = false;
+            if ~isstruct(cfg) || ~isfield(cfg,'atmosphere'); return; end
+            a = cfg.atmosphere;
+            if ~isfield(a,'sharedAcrossAntennas'); return; end
+            s = a.sharedAcrossAntennas;
+            if isstruct(s) && isfield(s,'enable')
+                tf = logical(s.enable);
+            elseif islogical(s) || isnumeric(s)
+                tf = logical(s);   % tolerate a bare scalar shorthand
+            end
+        end
+
         function seed = seed(cfg)
             % seed  Formation-wide atmosphere root seed (NOT offset per asset).
             seed = models.noise.SharedAtmosphereRng.DEFAULT_SEED;

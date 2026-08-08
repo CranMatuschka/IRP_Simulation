@@ -1,8 +1,15 @@
-% test_tower_clock_mode_path  Verify cfg.estimator.towerClockMode is read correctly.
+% test_tower_clock_mode_path  Verify the tower-clock mode reaches the measurement model.
 %
-% When towerClockMode = 'perfectCorrection', the predicted pseudorange uses the
-% exact tower clock bias. When mode = 'none', it uses 0. These two modes must
+% When the mode resolves to 'perfectCorrection', the predicted pseudorange uses the
+% exact tower clock bias. When it resolves to 'none', it uses 0. These two modes must
 % produce different h values when tower clocks have nonzero biases.
+%
+% Drive this through cfg.towerClock.correctionMode, NOT cfg.estimator.towerClockMode.
+% The latter is DERIVED -- finalizeConfig overwrites it from correctionMode (see
+% ConfigFactory 'Do NOT set estimator.towerClockMode directly; let finalizeConfig map
+% it'). Until 2026-08-06 this test set the derived field, so both configs were rewritten
+% to the same value and h came out identical -- the test reported a real-looking
+% "modes have no effect" failure that was really its own contract violation.
 
 thisDir = fileparts(mfilename('fullpath'));
 addpath(fullfile(thisDir, '..'));
@@ -23,8 +30,8 @@ for k = 1:numel(cfg_pc.towers)
 end
 
 cfg_none = cfg_pc;
-cfg_none.estimator.towerClockMode = 'none';         % ignore tower clocks
-cfg_pc.estimator.towerClockMode   = 'perfectCorrection';  % use exact bias
+cfg_none.towerClock.correctionMode = 'none';          % -> towerClockMode 'none'
+cfg_pc.towerClock.correctionMode   = 'perfectTruth';  % -> towerClockMode 'perfectCorrection'
 
 % Build measurement models
 [asset_pc, towers_pc, ekf_pc, measModel_pc, ~, ~] = revgnss.ScenarioFactory.build(cfg_pc);

@@ -206,8 +206,12 @@ classdef ClockModel < handle
             % Colored fractional-frequency PSD (WPM, FPM, FFM only)
             Sy_frac = h.h2 * f_pos.^2 + h.h1 * f_pos + h.hMinus1 ./ f_pos;
 
-            % Amplitude spectrum
-            A_frac     = sqrt(max(Sy_frac, 0) * fs / N);
+            % Amplitude spectrum.
+            % Scaling is tied to two conventions used below: MATLAB's ifft carries 1/N,
+            % and each Hermitian-paired bin gets X_k = A_k*(g1+i*g2) with unit-variance
+            % g, so Var(y_n) = (4/N^2)*sum_k A_k^2. Matching the one-sided PSD target
+            % Var(y) = sum_k S_y(f_k)*(fs/N) bin-by-bin requires A_k = sqrt(N*fs*S_k)/2.
+            A_frac     = sqrt(max(Sy_frac, 0) * fs * N) / 2;
 
             % Random complex spectrum → Hermitian symmetry → real IFFT
             WN_frac    = randn(obj.rngStream, N, 1) + 1i*randn(obj.rngStream, N, 1);

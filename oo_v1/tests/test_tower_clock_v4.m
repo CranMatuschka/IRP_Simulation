@@ -63,7 +63,11 @@ sigma = 0.5;  % default sigma from cfg.estimator.towerClockCorrectionSigma_m
 cfg5 = revgnss.ConfigFactory.defaultConfig();
 cfg5.plots.enable  = false;
 cfg5.report.enable = false;
-cfg5.estimator.towerClockMode = 'noisyCorrection';
+% Select the mode through cfg.towerClock.correctionMode -- cfg.estimator.towerClockMode is
+% DERIVED and finalizeConfig overwrites it, so setting it here silently did nothing and the
+% MC below saw zero noise. 'noisyCorrection' has no dedicated correctionMode spelling; it
+% reaches the internal mode through the switch's passthrough branch.
+cfg5.towerClock.correctionMode = 'noisyCorrection';
 cfg5.estimator.towerClockCorrectionSigma_m = sigma;
 % Use nonzero tower clocks so we can separate noise from bias
 for k = 1:numel(cfg5.towers)

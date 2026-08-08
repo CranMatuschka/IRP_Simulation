@@ -256,11 +256,14 @@ else
 end
 
 % ----------------------------------------------------------------
-% T-P13j: Report includes ionosphere sign-convention documentation
-% (Stage 65+: 'Signal and Ionosphere Architecture' section was merged into
-% Troposphere and ZWD Architecture; check for Iono sign convention instead.)
+% T-P13j: Report OMITS the ionosphere sign-convention documentation row
+% (Stage 65+: 'Signal and Ionosphere Architecture' was merged into Troposphere and
+% ZWD Architecture, and that whole table was cut from the report on request
+% 2026-08-07 -- static configuration text, no measured quantity. The +I code /
+% -I carrier convention itself is unchanged and is enforced by T-P13a..i above;
+% this test is inverted, not deleted, so the table cannot silently reappear.)
 % ----------------------------------------------------------------
-fprintf('  T-P13j: ClockExactReportBuilder .tex includes iono sign-convention documentation ...\n');
+fprintf('  T-P13j: ClockExactReportBuilder .tex omits the iono sign-convention table row ...\n');
 
 cfg_j = revgnss.ConfigFactory.defaultConfig();
 cfg_j.report.style          = 'latex';
@@ -281,12 +284,12 @@ assert(isfield(res_j,'texPath') && isfile(res_j.texPath), ...
     'T-P13j FAILED: ClockExactReportBuilder did not produce a .tex file');
 
 src_j = fileread(res_j.texPath);
-assert(contains(src_j, 'Iono sign convention'), ...
-    'T-P13j FAILED: .tex missing iono sign-convention documentation (Troposphere and ZWD Architecture)');
+assert(~contains(src_j, 'Iono sign convention'), ...
+    'T-P13j FAILED: .tex still contains the removed ''Iono sign convention'' row');
 
 try; delete(res_j.texPath); catch; end
 
-fprintf('    PASS (.tex contains iono sign-convention documentation)\n');
+fprintf('    PASS (.tex no longer carries the iono sign-convention table row)\n');
 
 % ----------------------------------------------------------------
 fprintf('=== test_stage13_dual_frequency_ionosphere: ALL PASS ===\n');

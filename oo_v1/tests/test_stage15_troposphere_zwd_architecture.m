@@ -214,9 +214,14 @@ catch ME_g
 end
 
 % ----------------------------------------------------------------
-% T-P15h: Report .tex includes 'Troposphere and ZWD Architecture'
+% T-P15h: Report .tex OMITS 'Troposphere and ZWD Architecture'
+%
+% The section was cut from the report on request (2026-08-07): five static rows
+% restating the scenario JSON, no measured quantity. The ZWD estimator itself is
+% unaffected and is still covered by T-P15a..g above. This test is inverted rather
+% than deleted so the table cannot silently reappear.
 % ----------------------------------------------------------------
-fprintf('  T-P15h: ClockExactReportBuilder .tex includes ''Troposphere and ZWD Architecture'' ...\n');
+fprintf('  T-P15h: ClockExactReportBuilder .tex omits ''Troposphere and ZWD Architecture'' ...\n');
 
 cfg_h = revgnss.ConfigFactory.defaultConfig();
 cfg_h.report.style         = 'latex';
@@ -238,12 +243,12 @@ res_h = revgnss.ClockExactReportBuilder.build(diag_h, [], [], [], cfg_h, struct(
 assert(isfield(res_h,'texPath') && isfile(res_h.texPath), ...
     'T-P15h FAILED: ClockExactReportBuilder did not produce a .tex file');
 src_h = fileread(res_h.texPath);
-assert(contains(src_h, 'Troposphere and ZWD Architecture'), ...
-    'T-P15h FAILED: .tex missing ''Troposphere and ZWD Architecture'' section');
-assert(contains(src_h, 'ZWD EKF state'), ...
-    'T-P15h FAILED: .tex missing ''ZWD EKF state'' row');
+assert(~contains(src_h, 'Troposphere and ZWD Architecture'), ...
+    'T-P15h FAILED: .tex still contains the removed ''Troposphere and ZWD Architecture'' section');
+assert(~contains(src_h, 'ZWD EKF state'), ...
+    'T-P15h FAILED: .tex still contains the removed ''ZWD EKF state'' row');
 try; delete(res_h.texPath); catch; end
-fprintf('    PASS (.tex contains ''Troposphere and ZWD Architecture'' and ZWD EKF state rows)\n');
+fprintf('    PASS (.tex no longer carries the Troposphere and ZWD Architecture table)\n');
 
 % ----------------------------------------------------------------
 % T-P15i: TroposphereModel.weakObservabilityNote warns for low diversity

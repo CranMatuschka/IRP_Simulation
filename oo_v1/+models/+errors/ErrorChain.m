@@ -55,6 +55,17 @@ classdef ErrorChain < handle
         % cfg.simulation.seed. Empty (and every path inert) when the gate is off.
         sharedAtmoRegistry
         sharedAtmosphere (1,1) logical = false
+        % Antenna scope of the amplitude-scintillation draw
+        % (cfg.atmosphere.sharedAcrossAntennas.enable). When true, antennaKey() collapses
+        % the antenna field of that ONE substream key to 1 so every phase centre on this
+        % spacecraft sees the same realisation. Strict no-op at nReceivers = 1.
+        sharedAtmosphereAcrossAntennas (1,1) logical = false
+        % Antenna scope of the coloured-multipath GM link state
+        % (cfg.errors.multipath.coloredGM.sharedAcrossAntennas.enable). The configured
+        % term carries a 1/sin(el) envelope keyed on the TOWER elevation, i.e. it is a
+        % transmit-end (ground) multipath parameterisation, which is common to every
+        % receive antenna. Default false keeps the legacy per-(tower,antenna) link state.
+        sharedMultipathAcrossAntennas (1,1) logical = false
         dtCache_s   (1,1) double = 1    % dt_s cached for epoch-index derivation
         epochIdx_   (1,1) int64  = 0    % current epoch index (refreshed each compute())
     end
@@ -109,6 +120,18 @@ classdef ErrorChain < handle
             obj.sharedAtmoRegistry = models.noise.SharedAtmosphereRng.build(cfg);
             obj.sharedAtmosphere   = ~isempty(obj.sharedAtmoRegistry);
 
+            % --- Antenna scope of the scintillation draw (gated, default OFF) -----
+            % Independent of the formation gate above: this one collapses a key field
+            % rather than re-rooting the seed, and either may be set without the other.
+            obj.sharedAtmosphereAcrossAntennas = ...
+                models.noise.SharedAtmosphereRng.isAntennaShared(cfg);
+            try
+                obj.sharedMultipathAcrossAntennas = ...
+                    logical(cfg.errors.multipath.coloredGM.sharedAcrossAntennas.enable);
+            catch
+                obj.sharedMultipathAcrossAntennas = false;
+            end
+
             % --- EnvironmentModel: always created --------------------------
             nT = 1;
             if isfield(cfg,'scenario') && isfield(cfg.scenario,'nTowers')
@@ -149,6 +172,24 @@ classdef ErrorChain < handle
                 x = randn(s, m, n);
             else
                 x = randn(obj.rngStream, m, n);
+            end
+        end
+
+        % ----------------------------------------------------------------
+        function a = antennaKey(obj, ant)
+            % antennaKey  Antenna field to use in an ATMOSPHERE substream key.
+            %
+            %   Returns ant unchanged (legacy: every phase centre draws independently),
+            %   or 1 when cfg.atmosphere.sharedAcrossAntennas.enable is on, so all
+            %   antennas of this spacecraft share one realisation.
+            %
+            %   Collapsing to 1 rather than 0 is deliberate: antenna 1 is the key an
+            %   nReceivers = 1 run already uses, so the gate is a strict no-op for every
+            %   single-antenna scenario and no existing golden can move even with it on.
+            if obj.sharedAtmosphereAcrossAntennas
+                a = 1;
+            else
+                a = ant;
             end
         end
 
@@ -773,13 +814,27 @@ classdef ErrorChain < handle
                 sigmaSS = g.sigmaCodeL1_ss_m;
                 elExp   = 1;  if isfield(g,'elevationExponent'); elExp = g.elevationExponent; end
                 if nargin < 7 || isempty(elvFloor); elvFloor = revgnss.Constants.ELEVATION_FLOOR_RAD; end
+                % Antenna scope gate (cfg.errors.multipath.coloredGM.sharedAcrossAntennas):
+                % with it on there is ONE physical ground-multipath link per tower, so the
+                % Gauss-Markov chain must be stepped ONCE per tower per call and its value
+                % reused by every antenna row -- stepping it once per row would advance the
+                % chain N times per epoch and give the antennas N successive samples instead
+                % of one shared one. sharedThisCall holds the value already produced in this
+                % call. At nReceivers = 1 it never hits, so the gate is a strict no-op.
+                sharedThisCall = containers.Map('KeyType','int64','ValueType','double');
                 for mi = 1:N
                     ti  = towerIdx(mi);
                     ai  = 1; if nargin >= 5 && ~isempty(antennaIdx); ai = antennaIdx(mi); end
+                    if obj.sharedMultipathAcrossAntennas; ai = 1; end
                     key = int64(round(ti) * 1000 + round(ai));
                     % Elevation-dependent envelope: more multipath at low elevation.
                     sinEl   = max(sin(elv(mi)), sin(elvFloor));
                     sigmaEl = sigmaSS / sinEl^elExp;
+                    if obj.sharedMultipathAcrossAntennas && isKey(sharedThisCall, key)
+                        truth_m(mi) = sharedThisCall(key);   % one link, already stepped
+                        sigma_m(mi) = sigmaEl;               % R still uses this row's elevation
+                        continue
+                    end
                     if isKey(obj.mpState, key); xPrev = obj.mpState(key); else; xPrev = 0; end
                     if obj.useIndependentStreams
                         mpStream = obj.registry.persistentStream( ...
@@ -790,6 +845,7 @@ classdef ErrorChain < handle
                     xNew = models.noise.StochasticProcess.gaussMarkovStep( ...
                         xPrev, dt, tau, sigmaEl, mpStream);
                     obj.mpState(key) = xNew;
+                    if obj.sharedMultipathAcrossAntennas; sharedThisCall(key) = xNew; end
                     truth_m(mi) = xNew;       % correlated truth-side bias -> pseudorange
                     sigma_m(mi) = sigmaEl;    % steady-state 1-sigma -> R
                 end
