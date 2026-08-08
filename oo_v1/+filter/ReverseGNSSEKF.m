@@ -113,13 +113,18 @@ classdef ReverseGNSSEKF < handle
         empAccSigmaSs_         (1,1) double  = 1e-7    % steady-state 1-sigma [m/s^2]
         % NORMALISATION. The states are carried in units of empAccSigmaSs_, so the
         % scaled steady-state sigma is exactly 1 and the physical acceleration is
-        % empAccScale_ * x(empAccIdx). This is NOT cosmetic: the PSD guard in update()
-        % nudges EVERY diagonal by 1e-12*max(diag(P)), and with 100 m carrier-ambiguity
-        % priors (P ~ 1e4) that floor is ~7e-9. Against a physical variance of
-        % (1e-7)^2 = 1e-14 the guard would set the prior 855x too wide and the states
-        % would absorb noise instead of the systematic error they exist to model.
-        % Measured on scene_G5S1R4_ts3600_TW1_empacc before this normalisation:
-        % P(empAcc) at epoch 1 was 7.3064e-09 against a guard floor of 7.3063e-09.
+        % empAccScale_ * x(empAccIdx). Kept for CONDITIONING: a state whose variance
+        % is (1e-7)^2 = 1e-14 sitting beside 100 m carrier-ambiguity priors (P ~ 1e4)
+        % spans 18 orders of magnitude, and P's condition number is what governs how
+        % accurately anything can be read out of it.
+        %
+        % It was originally introduced to dodge the update()-step PSD guard, which
+        % floored every diagonal at 1e-12*max(diag(P)) ~ 7e-9 and so set this prior
+        % 855x too wide (measured on scene_G5S1R4_ts3600_TW1_empacc: P(empAcc) at
+        % epoch 1 read 7.3064e-09 against a floor of 7.3063e-09). That guard now
+        % repairs the CORRELATION matrix and imposes no absolute floor, so the
+        % workaround motive is gone -- but the conditioning argument stands on its
+        % own, and T7 of tests/test_empirical_accel_states.m still pins the scaling.
         empAccScale_           (1,1) double  = 1e-7    % [m/s^2] per unit state
 
         % Persistent effective calibration residual for the active coherent
