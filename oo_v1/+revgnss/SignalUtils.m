@@ -2,10 +2,122 @@ classdef SignalUtils
     % SignalUtils  Signal / frequency configuration helpers.
     %
     % Methods:
-    %   getEnabledSignals        Return struct array of enabled signals from cfg
-    %   getFrequencyScaleToL1    Return (f_L1 / f_sig)^2 scale factor
+    %   getEnabledSignals            Return struct array of enabled signals from cfg
+    %   getFrequencyScaleToL1        Return (f_L1 / f_sig)^2 scale factor
+    %   resolvedSignalTable          Full catalogue carrying the RESOLVED band
+    %   ionosphereFreeCoefficients   IF alpha/beta for the resolved L1/L2 pair
 
     methods (Static)
+
+        function sigs = resolvedSignalTable(cfg)
+            % resolvedSignalTable  Full signal catalogue carrying the RESOLVED band.
+            %
+            % Returns a 1xN struct array with fields:
+            %   name          char     catalogue label, e.g. 'L1'
+            %   frequency_Hz  double   carrier frequency the run actually used [Hz]
+            %   wavelength_m  double   c / frequency_Hz [m]
+            %   enabled       logical  cfg.signals.enabledMask entry
+            %
+            % SignalDefinition is keyed by NAME, so get('L1') returns the canonical
+            % 1575.42 MHz however the scenario retuned the band. The report layer read
+            % it directly and therefore printed L-band physics for every rung of the
+            % licence-exempt frequency ladder -- freq013 runs at 61.25/24.125 GHz and
+            % still reported the GPS IF coefficients.
+            %
+            % ConfigFactory.finalizeConfig's cfg.signals.frequencyHz / .wavelength_m ARE
+            % the resolved arrays: they fold in both the JSON-owned
+            % signals.<name>.frequency_Hz and SignalDefinition's process-local override.
+            % Prefer them, fall back to the per-signal alias, and only then to the
+            % catalogue -- the last case covers a cfg that never went through
+            % finalizeConfig (the LatexReportBuilder unit tests build such structs).
+            %
+            % GOLDEN-SAFE: with no scenario retune the resolved arrays hold exactly the
+            % canonical doubles, and wavelength_m is c/f in both paths, so every field
+            % comes out bit-identical to reading SignalDefinition directly.
+            if nargin < 1 || isempty(cfg) || ~isstruct(cfg); cfg = struct(); end
+            hasSignals = isfield(cfg,'signals') && isstruct(cfg.signals);
+
+            names = {'L1'};
+            if hasSignals && isfield(cfg.signals,'names') && ~isempty(cfg.signals.names)
+                names = cfg.signals.names;
+                if ischar(names); names = {names}; end
+            end
+            nSig = numel(names);
+
+            freqs = [];
+            if hasSignals && isfield(cfg.signals,'frequencyHz') && isnumeric(cfg.signals.frequencyHz)
+                freqs = cfg.signals.frequencyHz(:).';
+            end
+            waves = [];
+            if hasSignals && isfield(cfg.signals,'wavelength_m') && isnumeric(cfg.signals.wavelength_m)
+                waves = cfg.signals.wavelength_m(:).';
+            end
+            mask = true(1,nSig);
+            if hasSignals && isfield(cfg.signals,'enabledMask') ...
+                    && numel(cfg.signals.enabledMask) == nSig
+                mask = logical(cfg.signals.enabledMask(:).');
+            end
+
+            sigs = repmat(struct('name','', 'frequency_Hz',NaN, ...
+                                 'wavelength_m',NaN, 'enabled',false), 1, nSig);
+            for k = 1:nSig
+                nm = names{k};
+                f  = [];
+                if numel(freqs) >= k && isfinite(freqs(k)) && freqs(k) > 0
+                    f = freqs(k);
+                elseif hasSignals && isfield(cfg.signals, nm) && isstruct(cfg.signals.(nm)) ...
+                        && isfield(cfg.signals.(nm), 'frequency_Hz')
+                    fAlias = cfg.signals.(nm).frequency_Hz;
+                    if isnumeric(fAlias) && isscalar(fAlias) && isfinite(fAlias) && fAlias > 0
+                        f = fAlias;
+                    end
+                end
+                if isempty(f)
+                    f = revgnss.SignalDefinition.get(nm).frequency_Hz;
+                end
+                lam = [];
+                if numel(waves) >= k && isfinite(waves(k)) && waves(k) > 0
+                    lam = waves(k);
+                end
+                if isempty(lam)
+                    lam = 299792458 / f;      % c [m/s], as SignalDefinition
+                end
+                sigs(k) = struct('name', nm, 'frequency_Hz', f, ...
+                                 'wavelength_m', lam, 'enabled', mask(k));
+            end
+        end
+
+        function [alpha, beta, f1, f2] = ionosphereFreeCoefficients(cfg)
+            % ionosphereFreeCoefficients  IF code coefficients for the RESOLVED L1/L2 pair.
+            %
+            %   P_IF = alpha*P_L1 + beta*P_L2
+            %   alpha = f1^2 / (f1^2 - f2^2),   beta = -f2^2 / (f1^2 - f2^2)
+            %
+            % f1/f2 are the frequencies the run actually used, not the canonical L-band
+            % constants: a report built straight off SignalDefinition printed
+            % alpha = 2.5457 for EVERY rung of config/ladder/freq, including freq013's
+            % 61.25/24.125 GHz pair whose true alpha is 1.1836.
+            %
+            % A catalogue without an L1 or L2 entry falls back to the canonical value for
+            % the missing member, which is what the direct SignalDefinition reads did.
+            if nargin < 1; cfg = struct(); end
+            sigs = revgnss.SignalUtils.resolvedSignalTable(cfg);
+            nmAll = {sigs.name};
+            i1 = find(strcmpi(nmAll, 'L1'), 1);
+            i2 = find(strcmpi(nmAll, 'L2'), 1);
+            if isempty(i1)
+                f1 = revgnss.SignalDefinition.get('L1').frequency_Hz;
+            else
+                f1 = sigs(i1).frequency_Hz;
+            end
+            if isempty(i2)
+                f2 = revgnss.SignalDefinition.get('L2').frequency_Hz;
+            else
+                f2 = sigs(i2).frequency_Hz;
+            end
+            alpha =  f1^2 / (f1^2 - f2^2);
+            beta  = -f2^2 / (f1^2 - f2^2);
+        end
 
         function signals = getEnabledSignals(cfg)
             % getEnabledSignals  Return struct array for all enabled signals.

@@ -39,15 +39,18 @@ classdef WideLaneNarrowLaneDiagnostics
 
             % Signal frequencies and WL/NL wavelengths
             try
-                sigL1 = revgnss.SignalDefinition.get('L1');
-                sigL2 = revgnss.SignalDefinition.get('L2');
-                s.l1Frequency_Hz     = sigL1.frequency_Hz;
-                s.l2Frequency_Hz     = sigL2.frequency_Hz;
-                s.lambda1_m          = sigL1.wavelength_m;
-                s.lambda2_m          = sigL2.wavelength_m;
+                % Resolved band pair, not the canonical L-band constants -- see
+                % revgnss.SignalUtils.ionosphereFreeCoefficients. Lane wavelengths are
+                % pure frequency differences, so reading the catalogue here reported GPS
+                % lanes for every retuned rung of config/ladder/freq.
+                [~, ~, f1_, f2_]     = revgnss.SignalUtils.ionosphereFreeCoefficients(cfg);
                 c_                   = 299792458;
-                s.lambdaWideLane_m   = c_ / (sigL1.frequency_Hz - sigL2.frequency_Hz);
-                s.lambdaNarrowLane_m = c_ / (sigL1.frequency_Hz + sigL2.frequency_Hz);
+                s.l1Frequency_Hz     = f1_;
+                s.l2Frequency_Hz     = f2_;
+                s.lambda1_m          = c_ / f1_;
+                s.lambda2_m          = c_ / f2_;
+                s.lambdaWideLane_m   = c_ / (f1_ - f2_);
+                s.lambdaNarrowLane_m = c_ / (f1_ + f2_);
             catch ex
                 s.warnings{end+1} = ['Signal lookup failed: ' ex.message];
                 s.classification = 'inconsistent'; return

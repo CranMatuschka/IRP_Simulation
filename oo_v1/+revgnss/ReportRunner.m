@@ -220,11 +220,13 @@ classdef ReportRunner
                 ~isempty(summary.ambiguityCovarianceSummary.Pamb);
             summary.wideLaneNarrowLaneCovarianceAvailable = hasPamb49_;
             try
-                sigL1_49_ = revgnss.SignalDefinition.get('L1');
-                sigL2_49_ = revgnss.SignalDefinition.get('L2');
+                % Resolved band pair, not the canonical L-band constants: the WL/NL
+                % wavelengths are pure frequency differences, so a retuned scenario
+                % reported GPS lane wavelengths for a band it never used.
+                [~, ~, f1_49_, f2_49_] = revgnss.SignalUtils.ionosphereFreeCoefficients(cfg);
                 c49_      = 299792458;
-                summary.wideLaneLambda_m   = c49_ / (sigL1_49_.frequency_Hz - sigL2_49_.frequency_Hz);
-                summary.narrowLaneLambda_m = c49_ / (sigL1_49_.frequency_Hz + sigL2_49_.frequency_Hz);
+                summary.wideLaneLambda_m   = c49_ / (f1_49_ - f2_49_);
+                summary.narrowLaneLambda_m = c49_ / (f1_49_ + f2_49_);
             catch
                 summary.wideLaneLambda_m   = NaN;
                 summary.narrowLaneLambda_m = NaN;
@@ -3769,10 +3771,10 @@ classdef ReportRunner
                 summary.totalCarrierIfRows = 0;
             end
             try
-                sigL1 = revgnss.SignalDefinition.get('L1');
-                sigL2 = revgnss.SignalDefinition.get('L2');
-                [a47, b47] = revgnss.IonoFreeCombination.coefficients( ...
-                    sigL1.frequency_Hz, sigL2.frequency_Hz);
+                % Resolved band pair, not the canonical L-band constants -- see
+                % revgnss.SignalUtils.ionosphereFreeCoefficients.
+                [~, ~, f1_47_, f2_47_] = revgnss.SignalUtils.ionosphereFreeCoefficients(cfg);
+                [a47, b47] = revgnss.IonoFreeCombination.coefficients(f1_47_, f2_47_);
                 summary.carrierIonoFreeAlpha             = a47;
                 summary.carrierIonoFreeBeta              = b47;
                 summary.carrierIonoFreeNoiseAmplification = sqrt(a47^2 + b47^2);

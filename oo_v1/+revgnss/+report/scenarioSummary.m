@@ -305,15 +305,54 @@ function scenarioSummary(fid, cfg, summary, diag, nTwr, nRx, dur, dt, esc, plotP
     end
     fprintf(fid, '\\bottomrule\n\\end{longtable}\n\\end{center}\n');
 
+    % 1.45 Carrier Signals
+    % The report named its signals "L1"/"L2" and never printed a frequency, so a reader
+    % could not tell which band a run used -- and every rung of config/ladder/freq looked
+    % identical on the page. These are the RESOLVED values (cfg.signals.frequencyHz), so
+    % a scenario that retunes a band is reported at the band it actually simulated.
+    sigTbl_ = revgnss.SignalUtils.resolvedSignalTable(cfg);
+    fprintf(fid, '\\subsection{Carrier Signals}\n');
+    fprintf(fid, '\\begin{center}\\small\n');
+    fprintf(fid, ['\\begin{tabular}{p{0.12\\textwidth}p{0.24\\textwidth}' ...
+        'p{0.24\\textwidth}p{0.24\\textwidth}}\n\\toprule\n']);
+    fprintf(fid, ['\\textbf{Signal} & \\textbf{Carrier frequency} & ' ...
+        '\\textbf{Wavelength} & \\textbf{Enabled}\\\\\n\\midrule\n']);
+    % One unit for the whole table, chosen from the largest frequency and the shortest
+    % wavelength, so rows stay directly comparable -- a per-row choice printed
+    % "4.895 mm" beside "1.24 cm" for the 61.25/24.125 GHz pair.
+    if max([sigTbl_.frequency_Hz]) >= 1e9
+        fUnit_ = 'GHz';  fScale_ = 1e-9;  fFmt_ = '%.4f %s';
+    else
+        fUnit_ = 'MHz';  fScale_ = 1e-6;  fFmt_ = '%.3f %s';
+    end
+    lamMin_ = min([sigTbl_.wavelength_m]);
+    if lamMin_ >= 1
+        lUnit_ = 'm';   lScale_ = 1;     lFmt_ = '%.4f %s';
+    elseif lamMin_ >= 0.01
+        lUnit_ = 'cm';  lScale_ = 1e2;   lFmt_ = '%.2f %s';
+    else
+        lUnit_ = 'mm';  lScale_ = 1e3;   lFmt_ = '%.3f %s';
+    end
+    for si_ = 1:numel(sigTbl_)
+        fStr_ = sprintf(fFmt_, sigTbl_(si_).frequency_Hz*fScale_, fUnit_);
+        lStr_ = sprintf(lFmt_, sigTbl_(si_).wavelength_m*lScale_, lUnit_);
+        if sigTbl_(si_).enabled; enStr_ = 'yes'; else; enStr_ = 'no'; end
+        fprintf(fid, '%s & %s & %s & %s\\\\\n', ...
+            esc(sigTbl_(si_).name), fStr_, lStr_, enStr_);
+    end
+    fprintf(fid, '\\bottomrule\n\\end{tabular}\n\\end{center}\n\n');
+    fprintf(fid, ['{\\footnotesize The labels \\texttt{L1} and \\texttt{L2} are catalogue ' ...
+        'names, not a claim that the run used the GPS L-band: a scenario may retune either ' ...
+        'band, and the frequencies above are the ones actually simulated. The wavelength ' ...
+        'is $c/f$ and sets the carrier-phase cycle-to-metre conversion; the ionosphere ' ...
+        'scales as $1/f^2$ between them.}\n\n']);
+
     % 1.5 Measurement Model Equations
     fprintf(fid, '\\subsection{Measurement Model Equations}\n');
-    % Signal frequencies for the ionosphere-free combination (no hardcoded constants).
-    sd78_L1_ = revgnss.SignalDefinition.get('L1');
-    sd78_L2_ = revgnss.SignalDefinition.get('L2');
-    f1 = sd78_L1_.frequency_Hz;
-    f2 = sd78_L2_.frequency_Hz;
-    alpha =  f1^2 / (f1^2 - f2^2);
-    beta  = -f2^2 / (f1^2 - f2^2);
+    % IF coefficients from the RESOLVED band pair, not the canonical L-band constants:
+    % reading SignalDefinition directly printed alpha = 2.5457 even for freq013's
+    % 61.25/24.125 GHz pair, whose true alpha is 1.1836.
+    [alpha, beta] = revgnss.SignalUtils.ionosphereFreeCoefficients(cfg);
     fprintf(fid, ['\\begin{align*}\n' ...
         '\\rho_{\\mathrm{code}} &= \\rho_{\\mathrm{geom}} + b_{\\mathrm{rx}} - b_{\\mathrm{tx}} + T + I_{\\mathrm{code}} ' ...
         '+ \\Delta_{\\mathrm{sagnac}} + \\Delta_{\\mathrm{rel}} + \\Delta_{\\mathrm{ant}} + B_{\\mathrm{code}} + M + \\epsilon_\\rho \\\\\n' ...

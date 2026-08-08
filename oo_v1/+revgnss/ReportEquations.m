@@ -28,19 +28,21 @@ classdef ReportEquations
             };
         end
 
-        function lines = ifEquation()
+        function lines = ifEquation(cfg)
             % ifEquation  Ionosphere-free code combination.
-            f1 = revgnss.SignalDefinition.get('L1').frequency_Hz;
-            f2 = revgnss.SignalDefinition.get('L2').frequency_Hz;
-            a  =  f1^2 / (f1^2 - f2^2);
-            b  = -f2^2 / (f1^2 - f2^2);
+            %   ifEquation(cfg) uses the band pair the run actually resolved; with no
+            %   cfg it falls back to the canonical L-band catalogue. Both coefficients
+            %   and the noise amplification are derived, never hardcoded -- the old
+            %   literal "2.98" is only true for the GPS L1/L2 pair.
+            if nargin < 1; cfg = struct(); end
+            [a, b] = revgnss.SignalUtils.ionosphereFreeCoefficients(cfg);
             lines = { ...
                 'Ionosphere-free code combination:', ...
                 '  P_IF = alpha * P_L1 + beta * P_L2', ...
                 sprintf('  alpha = f_L1^2 / (f_L1^2 - f_L2^2) = %.6f', a), ...
                 sprintf('  beta  = -f_L2^2/ (f_L1^2 - f_L2^2) = %.6f', b), ...
                 '  First-order ionosphere removed; geometry and clocks preserved.', ...
-                '  Noise amplified: sigma_IF ~ 2.98 * sigma_L1', ...
+                sprintf('  Noise amplified: sigma_IF ~ %.2f * sigma_L1', sqrt(a^2 + b^2)), ...
             };
         end
 

@@ -237,10 +237,10 @@ classdef LatexReportBuilder
 
             RL.addSectionHeader(fig, '1.1  Measurement Model and Observation Matrix', 0.97);
 
-            f1 = revgnss.SignalDefinition.get('L1').frequency_Hz;
-            f2 = revgnss.SignalDefinition.get('L2').frequency_Hz;
-            a  = f1^2 / (f1^2 - f2^2);
-            b  = -f2^2 / (f1^2 - f2^2);
+            % Resolved band pair, not the canonical L-band constants -- see
+            % revgnss.SignalUtils.ionosphereFreeCoefficients.
+            [a, b] = revgnss.SignalUtils.ionosphereFreeCoefficients(cfg);
+            ampl = sqrt(a^2 + b^2);
 
             eqLines = {};
             eqLines{end+1} = 'Code pseudorange (single frequency):';
@@ -257,7 +257,8 @@ classdef LatexReportBuilder
             eqLines{end+1} = sprintf('   alpha  =  f1^2 / (f1^2 - f2^2)  =  %.6f', a);
             eqLines{end+1} = sprintf('   beta   = -f2^2 / (f1^2 - f2^2)  =  %.6f', b);
             eqLines{end+1} = '   First-order ionosphere cancels; geometry and clocks are preserved.';
-            eqLines{end+1} = '   Noise amplification: sigma_IF = sqrt(alpha^2 + beta^2) * sigma_L1  ~  2.98 sigma_L1';
+            eqLines{end+1} = sprintf( ...
+                '   Noise amplification: sigma_IF = sqrt(alpha^2 + beta^2) * sigma_L1  ~  %.2f sigma_L1', ampl);
             RL.addBodyText(fig, eqLines, 0.90, 0.55);
 
             RL.addHRule(fig, 0.54);
@@ -1410,10 +1411,9 @@ classdef LatexReportBuilder
 
             % Subsection: Measurement model
             fprintf(fid,'\\subsection{Pseudorange Measurement Model}\n');
-            f1 = revgnss.SignalDefinition.get('L1').frequency_Hz;
-            f2 = revgnss.SignalDefinition.get('L2').frequency_Hz;
-            a  = f1^2 / (f1^2 - f2^2);
-            b2 = -f2^2 / (f1^2 - f2^2);
+            % Resolved band pair, not the canonical L-band constants -- see
+            % revgnss.SignalUtils.ionosphereFreeCoefficients.
+            [a, b2] = revgnss.SignalUtils.ionosphereFreeCoefficients(cfg);
             fprintf(fid,'\\[\nP_f = \\rho + b_{rx} - b_{twr} + T + I_f + \\varepsilon_P, \\quad I_f \\geq 0 \\text{ (positive for code)}\n\\]\n');
             fprintf(fid,'\\[\n\\Phi_f = \\rho + b_{rx} - b_{twr} + T - I_f + B_\\phi + \\varepsilon_\\phi, \\quad -I_f \\text{ (negative for carrier)}\n\\]\n');
             fprintf(fid,'\\[\nP_{\\mathrm{IF}} = \\alpha P_1 + \\beta P_2, \\quad \\alpha = %.6f, \\quad \\beta = %.6f\n\\]\n', a, b2);
