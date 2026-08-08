@@ -2,7 +2,11 @@ function test_joint_secondary_priors_and_process_noise()
 % Secondary configuration fields must define their stated prior and SNC.
 
 repoRoot = fileparts(fileparts(mfilename('fullpath')));
-addpath(genpath(repoRoot));
+% genpath MUST NOT sweep .claude/worktrees -- see tests/run_all_tests.m. addpath prepends, so
+% an unfiltered sweep makes every LATER test in the run resolve to the stale worktree copy.
+claudePath_ = strsplit(genpath(repoRoot), pathsep);
+claudePath_ = claudePath_(~cellfun(@isempty, claudePath_));
+addpath(strjoin(claudePath_(~contains(claudePath_, [filesep '.claude' filesep])), pathsep));
 
 cfg = i_baseConfig();
 cfg.multiAsset.secondaryOrbit.initSigmaPos_m = 17;

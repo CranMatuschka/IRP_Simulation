@@ -6,7 +6,7 @@ mkdir(reportFolder);
 cleanup = onCleanup(@() cleanup_(reportFolder)); %#ok<NASGU>
 
 cfg = resolveSimulationConfig( ...
-    'joint_G5S6R4_coherent_two_way_code.json');
+    'test003_jointCoherentTwoWayCode.json');
 cfg.simulation.duration_s = 1;
 cfg.simulation.dt_s = 1;
 cfg.report.reportFolder = reportFolder;

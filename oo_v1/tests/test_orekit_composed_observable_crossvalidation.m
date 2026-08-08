@@ -16,7 +16,7 @@
 %     rho_true = geometricRange(r_ant, tower_at_transmit) + sagnac + shapiro + pcv
 %     truthTotal = trop + iono + ionoHO + hwDelay + dcb + mp + codeNoise + scint
 %
-% Starting from the "everything off" scenario (config/scenarios/ideal_G5S1R4_ts3600_flat.json)
+% Starting from the "everything off" scenario (config/ladder/test/test001_idealFlat.json)
 % every term above is zero except the geometry and Shapiro, so each effect can be switched
 % on ALONE and its contribution to z read off by differencing whole z vectors.
 %
@@ -84,7 +84,7 @@ om  = revgnss.Constants.EARTH_OMEGA_RADPS;
 assert(abs(c  - org.orekit.utils.Constants.SPEED_OF_LIGHT) <= 1e-6, 'c mismatch sim vs Orekit');
 assert(abs(mu - org.orekit.utils.Constants.WGS84_EARTH_MU) <= 1e3, 'GM mismatch sim vs Orekit');
 
-FLAT = 'ideal_G5S1R4_ts3600_flat.json';
+FLAT = 'test001_idealFlat.json';
 
 % ===========================================================================
 % Baseline: everything off. z = geometry + Shapiro, nothing else.
@@ -337,7 +337,8 @@ fprintf(['\ntest_orekit_composed_observable_crossvalidation: PASS -- composed z 
 function out = runVariant_(scenarioJson, mutator)
     % Resolve the flat scenario, apply the caller's mutation, build the real pipeline,
     % and evaluate one epoch at t = 0. Returns everything the comparisons need.
-    cfg = resolveSimulationConfig(scenarioJson);
+    cfg = resolveSimulationConfig(scenarioJson, ...
+        struct('simulation', struct('duration_s', 3600)));
     cfg.scenario.nTowers   = 5;
     cfg.scenario.nReceivers = 1;      % one antenna -> one row per (tower, signal)
     cfg.plots.enable  = false;

@@ -7,7 +7,7 @@ addpath(fullfile(root,'config'));
 addpath(fullfile(root,'config','internal'));
 
 cfg = resolveSimulationConfig( ...
-    'joint_G5S6R4_coherent_two_way_code.json');
+    'test003_jointCoherentTwoWayCode.json');
 links = revgnss.TwoWayISLMeasurementBuilder.linkDefinitions(cfg);
 assert(numel(links) == 6);
 

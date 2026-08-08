@@ -25,7 +25,7 @@ end
 
 % ================================================================================================
 function i_test_no_persistent_noise_cache_across_epochs_()
-cfg = resolveSimulationConfig('joint_G5S2R4_reciprocal_time_transfer.json');
+cfg = resolveSimulationConfig('test005_jointReciprocalTimeTransfer.json');
 cfg.simulation.duration_s = 1;
 cfg.estimator.minMeasurementsForUpdate = 1;
 simulation = revgnss.ReverseGNSSSimulation(cfg);

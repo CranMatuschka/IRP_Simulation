@@ -2,7 +2,7 @@ function test_inter_satellite_time_transfer_multi_link_schedule()
 % Time transfer reuses the declared fleet link schedule without enabling range.
 
     cfg = resolveSimulationConfig( ...
-        'joint_G5S6R4_coherent_two_way_code.json');
+        'test003_jointCoherentTwoWayCode.json');
     cfg.simulation.duration_s = 1;
     cfg.measurements.isl.twoWay.range.enable = false;
     cfg.measurements.isl.twoWay.range.useInEKF = false;

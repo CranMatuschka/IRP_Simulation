@@ -109,7 +109,7 @@ assert(abs(perpendicular.baselineLengthError_m(1)) < 0.06, ...
      'whose error is cross-baseline.'],perpendicular.baselineLengthError_m(1));
 
 % ---------------------------------------------------------------- T5 + T6 (live run)
-cfg = resolveSimulationConfig('joint_G5S6R4_coherent_two_way_code.json');
+cfg = resolveSimulationConfig('test003_jointCoherentTwoWayCode.json');
 cfg.simulation.duration_s = 60;
 cfg.report.enable = false;
 cfg.report.writePdf = false;

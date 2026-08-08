@@ -2,7 +2,13 @@
 % Verify joint-state absolute, relative, and rigid-formation diagnostics.
 
 repoRoot = fileparts(fileparts(mfilename('fullpath')));
-addpath(genpath(repoRoot));
+% genpath MUST NOT sweep .claude/worktrees: those hold full older copies of the tree, and
+% addpath prepends, so every LATER test in the same run resolves to the stale copy. Measured
+% 2026-08-06: this line put 94 worktree dirs on the path and cascaded ~48 bogus failures
+% (stale tests calling removed APIs). Same filter as tests/run_all_tests.m.
+claudePath_ = strsplit(genpath(repoRoot), pathsep);
+claudePath_ = claudePath_(~cellfun(@isempty, claudePath_));
+addpath(strjoin(claudePath_(~contains(claudePath_, [filesep '.claude' filesep])), pathsep));
 
 time_s = [0; 60; 120];
 truthPositions_m = cat(3, ...

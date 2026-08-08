@@ -29,6 +29,30 @@
 % asserted rather than assumed. Attitude, ambiguity and gyro-bias states have identically
 % zero columns in H here, so they are inert and need no such treatment.
 %
+% TWO FURTHER INPUTS ARE PINNED, for the same reason and in the same style -- Orekit's
+% measurement API cannot be given them, so leaving them free makes the two filters solve
+% different problems rather than the same one:
+%
+%   R MUST BE DIAGONAL. OneWayGNSSRange carries ONE scalar sigma per measurement, so the
+%     reference can only ever be handed sqrt(diag(R)). Since 2026-08-06 (commit 3ed031f)
+%     the sim adds an L1<->L2 common-mode block to R wherever a shared atmosphere sigma is
+%     charged -- correctly, because one physical atmosphere must not be averaged down as
+%     two independent samples. Under this fixture that block reaches rho = 0.68..0.91 even
+%     though the atmosphere is switched off on the truth side, and it silently turned this
+%     comparison into 10.1 m of state disagreement and 20 % of covariance disagreement from
+%     the FIRST update. It is a deliberate sim feature and out of scope here, so
+%     covariance.sharedErrors is switched OFF below and diagonality is then ASSERTED.
+%
+%   NO TOWER-CLOCK CORRECTION. Orekit has no tower clock term, so any correction the sim
+%     folds into h is an unmodelled bias on the reference side. Worth 0.14 m here. The
+%     canonical knob is set below in addition to the fixture's legacy alias, so the test
+%     states its own precondition instead of depending on which alias finalizeConfig
+%     honours, and the resulting correction is ASSERTED to be identically zero.
+%
+% Both are asserted per epoch rather than assumed: a cross-validation that silently stops
+% comparing like with like is worse than no cross-validation at all, and both of these
+% arrived from elsewhere in the codebase long after this test was written.
+%
 %   PART A -- state trajectory: position and velocity at every epoch.
 %   PART B -- covariance: the 6x6 position/velocity block at every epoch, plus a check
 %     that it actually contracts by orders of magnitude (otherwise agreement is vacuous).
@@ -78,7 +102,8 @@ J2  = revgnss.Constants.EARTH_J2;
 % measurements are genuinely noisy -- which is fine, and better: both filters receive the
 % identical realisation, so they must still agree exactly.
 % ---------------------------------------------------------------------------
-cfg = resolveSimulationConfig('ideal_G5S1R4_ts3600_flat.json');
+cfg = resolveSimulationConfig('test001_idealFlat.json', ...
+    struct('simulation', struct('duration_s', 3600)));
 cfg.scenario.nTowers    = 5;
 cfg.scenario.nReceivers = 1;
 cfg.signals.L1.codeSigma0_m = 1.0;
@@ -86,6 +111,11 @@ cfg.signals.L2.codeSigma0_m = 1.0;
 cfg.estimator.dynamics.mode = 'j2';
 cfg.plots.enable  = false;
 cfg.report.enable = false;
+% The two inputs Orekit's measurement API cannot be given -- see the SCOPE note above.
+% Both are asserted below, so a future default that re-enables either one fails loudly
+% here instead of quietly degrading the comparison.
+cfg.covariance.sharedErrors.enable = false;   % -> R diagonal, the only R Orekit can take
+cfg.towerClock.correctionMode      = 'perfectTruth';  % -> no tower clock term in h
 cfg = revgnss.ConfigFactory.finalizeConfig(cfg);
 
 [asset, towers, ekf, mm, ~, orbitProp] = revgnss.ScenarioFactory.build(cfg);
@@ -140,7 +170,7 @@ fprintf('\n== Running the sim EKF over %d epochs (code rows only) ==\n', numel(t
 nEp = numel(tGrid);
 simX = zeros(6, nEp); simP = cell(nEp,1);
 recorded = cell(nEp,1);
-clkMax = 0;
+clkMax = 0; twrMax = 0; offDiagMax = 0;
 for kk = 1:nEp
     t_s = tGrid(kk);
     if kk > 1
@@ -152,6 +182,16 @@ for kk = 1:nEp
 
     M = es.nPseudorange;
     rows = 1:M;                                  % code rows only
+
+    % The two preconditions Orekit cannot be given. Measured, not assumed: the reference
+    % is handed sqrt(diag(R)) and a bias-free h, so a correlated R or a non-zero tower
+    % clock correction means the two filters stop solving the same problem.
+    Rc_ = R(rows,rows);
+    offDiagMax = max(offDiagMax, max(max(abs(Rc_ - diag(diag(Rc_))))));
+    if isfield(es,'towerClockModel_m') && numel(es.towerClockModel_m) >= M
+        twrMax = max(twrMax, max(abs(es.towerClockModel_m(rows))));
+    end
+
     ekf.update(z(rows), h(rows), H(rows,:), R(rows,rows));
 
     simX(:,kk) = ekf.x(orbIdx);
@@ -162,6 +202,21 @@ for kk = 1:nEp
 end
 fprintf('  %d measurements/epoch, R is elevation-weighted (sigma %.2f .. %.2f m)\n', ...
     numel(recorded{1}.z), min(recorded{1}.sigma), max(recorded{1}.sigma));
+
+% ---- The two pinned inputs, verified over the whole arc ------------------------------
+assert(offDiagMax == 0, ...
+    ['R is not diagonal (max |off-diagonal| = %.3e m^2 over the arc). Orekit''s ' ...
+     'OneWayGNSSRange takes one scalar sigma per measurement, so the reference below is ' ...
+     'given sqrt(diag(R)) and a correlated R means the two filters are NOT solving the ' ...
+     'same problem -- the comparison would be meaningless rather than merely loose. ' ...
+     'cfg.covariance.sharedErrors is switched off above; something has re-enabled a ' ...
+     'correlated R term.'], offDiagMax);
+assert(twrMax == 0, ...
+    ['the sim folded a tower-clock correction of up to %.3e m into h. Orekit has no ' ...
+     'tower clock term, so that is an unmodelled bias on the reference side and lands ' ...
+     'directly in the state comparison. cfg.towerClock.correctionMode is set to ' ...
+     '''perfectTruth'' above; check that finalizeConfig still honours it.'], twrMax);
+fprintf('  R diagonal over the arc (max |off-diag| = 0) and no tower-clock term in h (verified)\n');
 
 % The pinned clock is not perfectly immobile -- the Joseph update reintroduces a tiny
 % gain on it -- so the residual excursion is measured rather than assumed. It enters the
@@ -236,14 +291,14 @@ fprintf('  with R inflated 10%%: relative dP at the final epoch = %.3e (matched 
 % Assertions
 %
 %   A/B: with (x0, P0, Q, R, dynamics, measurement model, data) all matched, the two
-%      filters are computing the same deterministic function. Observed agreement is ~7 um
-%      in state and ~6 ppm in covariance; the covariance residual GROWS along the arc
-%      (2e-08 at the first epoch to 6e-06 at the twenty-first) because the sim propagates
-%      P with a fixed-step RK4 finite-difference STM while Orekit integrates variational
-%      equations adaptively, so the two accumulate slightly different truncation. Bounds
-%      are set an order of magnitude above that, which is still three orders below the
-%      sensitivity demonstrated in PART C -- a wrong Q, a missing Joseph term or a
-%      transposed H are percent-level effects, not ppm.
+%      filters are computing the same deterministic function. Measured 2026-08-08:
+%      7.5e-07 m in state, 1.7e-08 m/s in velocity and 4.3e-08 relative in covariance,
+%      the last hovering at 1e-08..3e-08 across the arc rather than trending -- the sim
+%      propagates P with a fixed-step RK4 finite-difference STM while Orekit integrates
+%      variational equations adaptively, so what is left is truncation noise, not a
+%      systematic split. Bounds are set three orders above that, which is still seven
+%      orders below the sensitivity demonstrated in PART C -- a wrong Q, a missing Joseph
+%      term or a transposed H are percent-level effects, not parts per hundred million.
 %   B also asserts the covariance actually contracts, so the agreement cannot be satisfied
 %      by two filters that both simply carry P0 forward.
 %   C asserts the comparison is SENSITIVE: a 10% error in R must show up far above the

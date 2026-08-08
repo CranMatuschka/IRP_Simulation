@@ -5,8 +5,8 @@ addpath(fullfile(root,'config'));
 addpath(fullfile(root,'config','internal'));
 
 scenarioFiles = { ...
-    'joint_G5S6R4_coherent_two_way_code.json', ...
-    'joint_G5S6R4_coherent_two_way_code_realism.json'};
+    'test003_jointCoherentTwoWayCode.json', ...
+    'test004_jointCoherentTwoWayCodeRealism.json'};
 for scenarioIndex = 1:numel(scenarioFiles)
     cfg = resolveSimulationConfig(scenarioFiles{scenarioIndex});
     assert(cfg.scenario.nSpaceAssets == 6 && cfg.scenario.nReceivers == 4);

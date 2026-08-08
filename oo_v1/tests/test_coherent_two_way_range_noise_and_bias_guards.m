@@ -121,7 +121,7 @@ assert(isfinite(sigma_m),'No two-way range observation was generated.');
 end
 
 function cfg = guardScenario_(nonThermalSigma_m)
-cfg = resolveSimulationConfig('joint_G5S6R4_coherent_two_way_code_realism.json');
+cfg = resolveSimulationConfig('test004_jointCoherentTwoWayCodeRealism.json');
 cfg.simulation.duration_s = 2;
 cfg.report.enable = false;
 cfg.report.writePdf = false;

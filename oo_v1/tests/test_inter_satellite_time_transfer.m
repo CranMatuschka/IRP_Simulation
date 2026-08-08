@@ -2,7 +2,7 @@ function test_inter_satellite_time_transfer()
 % Scenario gating, endpoint ownership, recording, and joint-EKF consumption.
 
     cfg = resolveSimulationConfig( ...
-        'joint_G5S2R4_reciprocal_time_transfer.json');
+        'test005_jointReciprocalTimeTransfer.json');
     cfg.simulation.duration_s = 1;
     cfg.estimator.minMeasurementsForUpdate = 1;
     multiAssetSummary = revgnss.MultiAssetConfig.summary(cfg);

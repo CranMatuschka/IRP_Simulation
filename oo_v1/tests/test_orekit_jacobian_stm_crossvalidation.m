@@ -72,7 +72,8 @@ om  = revgnss.Constants.EARTH_OMEGA_RADPS;
 % ===========================================================================
 fprintf('\n== PART A: measurement Jacobian  sim H vs Orekit light-time gradient ==\n');
 
-cfg = resolveSimulationConfig('ideal_G5S1R4_ts3600_flat.json');
+cfg = resolveSimulationConfig('test001_idealFlat.json', ...
+    struct('simulation', struct('duration_s', 3600)));
 cfg.scenario.nTowers    = 5;
 cfg.scenario.nReceivers = 1;
 cfg.plots.enable  = false;

@@ -57,6 +57,21 @@ function dg = swarmRelativeDigest_()
     cfg.multiAsset.twoWayISL.enable = true;               % shape layer must be explicitly enabled
     cfg.multiAsset.twoWayTimeTransferISL.enable = true;   % exercise BOTH shape + relative clocks
 
+    % Ground-referenced orientation stages. Both are post-processors that run AFTER the
+    % shape scalars above are computed (SwarmRelativeSolver:276 vs :308/:325), so enabling
+    % them adds digest fields WITHOUT moving any pre-existing one -- verified by comparing
+    % the recaptured baseline's `scalars` against the previous one. They are enabled here
+    % because docs/ground_referenced_orientation_execution_plan.md Phases B-E rewrite both
+    % classes, and a gate that left them off would catch none of it.
+    % NOTE the 300 s arc turns the formation ~1.25 deg, far below the ~90 deg needed to
+    % separate an arc-constant shape offset from an arc-constant rotation. The rotation
+    % numbers below are therefore MEANINGLESS AS SCIENCE and are here only as a
+    % determinism fingerprint: they must be the SAME every run, not correct.
+    cfg.multiAsset.jointGeometry.enable = true;
+    cfg.multiAsset.jointGeometry.shapePriorSigma_m = 0.58;   % run20's value, frozen deliberately
+    cfg.multiAsset.groundDifferencedRotation.enable = true;
+    cfg.multiAsset.groundDifferencedRotation.assumedShapeSigma_m = 0.0736;  % explicit, never truth
+
     r = revgnss.ReportRunner.runFederatedEstimation(cfg);
     o = revgnss.SwarmRelativeSolver.solve(cfg, r);
 
@@ -68,6 +83,22 @@ function dg = swarmRelativeDigest_()
                   o.formalShapeSigma_m, o.relClockErrRaw_m, o.relClockErrSolved_m, o.relClockFormalSigma_m];
     dg.perEpochBaselineSolved = o.perEpoch.baselineErrSolved_m(:).';
     dg.perEpochShapeSolved    = o.perEpoch.shapeErrSolved_m(:).';
+
+    % --- Ground-referenced orientation fingerprint ---------------------------------
+    % Joint 3N+3 solve (revgnss.JointGeometrySolver).
+    dg.jointScalars = [double(o.jointGateOn), o.jointTheta_rad(:).', o.jointThetaSigma_rad(:).', ...
+                       o.jointShapeStep_m, o.jointNObs];
+    % 3-parameter solve (revgnss.GroundDifferencedRotationSolver), including the leakage
+    % guard's own decision -- E3 replaces the hard-coded 0.30 deg/m that drives it, so the
+    % guard outcome itself has to be under contract.
+    dg.rotScalars   = [double(o.rotationGateOn), o.rotationTheta_rad(:).', o.rotationSigma_rad(:).', ...
+                       o.rotationNObs, o.rotationCondition];
+    % FINAL geometry, after whichever stage last touched it. The pre-existing
+    % perEpochShapeSolved above is computed BEFORE the joint solve, so without this the
+    % digest is blind to a stage that corrupts solvedPos -- which is exactly what run20 did
+    % (0.2184 m of injected deformation on a 0.0736 m error). Everything downstream,
+    % including the beamforming diagnostic, consumes this array.
+    dg.solvedPos    = o.solvedPos;
 
     % Per-asset anchor catches changes in the independent ground filters.
     N = r.N;
@@ -82,7 +113,8 @@ end
 
 % ---------------------------------------------------------------------------- %
 function [ok, report] = diff_(base, cur)
-    fields = {'scalars','perEpochBaselineSolved','perEpochShapeSolved','assetFinalPos','assetFinalClk','pairs','weak'};
+    fields = {'scalars','perEpochBaselineSolved','perEpochShapeSolved','assetFinalPos','assetFinalClk','pairs','weak', ...
+              'jointScalars','rotScalars','solvedPos'};
     report = struct('name', {}, 'maxAbs', {}, 'status', {});
     ok = true;
     for i = 1:numel(fields)
