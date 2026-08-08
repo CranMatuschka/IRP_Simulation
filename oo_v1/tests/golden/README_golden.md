@@ -164,11 +164,63 @@ move:
 | `beamCoherenceFreq_Hz` | 57393256.0 | 59172677.0 |
 | `beamSpotDisplacement_m` | 12948.6 | 11997.99 |
 
-By this file's own rule that is the signature of a supposedly gated change reaching the
-default path. The uncommitted working tree at the time of the re-cut carried modifications to
-`+revgnss/JointGeometrySolver.m`, `+revgnss/GroundDifferencedRotationSolver.m`,
-`+revgnss/GroundCarrierAmbiguityProbe.m` and `config/masterConfig.m`, plus three untracked new
-classes; one of those is the cause. **The fingerprints below were re-cut against that tree, so
-they certify the tree as it stands and NOT a reviewed change.** The gate reasons are still
-`gateOff` on all three ground-referenced stages, so whatever moved did so without switching a
-gate on — that is what needs explaining before these numbers are quoted.
+By this file's own rule that would be the signature of a supposedly gated change reaching the
+default path, and the paragraph originally printed here named the ground-orientation batch
+(`+revgnss/JointGeometrySolver.m`, `+revgnss/GroundDifferencedRotationSolver.m`,
+`+revgnss/GroundCarrierAmbiguityProbe.m`) as the likely cause.
+
+**That accusation was wrong, and the correction is more useful than the guess was.** Each of
+those files was reverted to `ca3f8fc` individually and the fixture re-run: every one came back
+**bit-identical**, including a revert of the whole `b1f1a1f` batch together with its caller
+`SwarmRelativeSolver.m` (0.11598840 / 0.85854433 / 0.99589758 / 5.91727e7). The whole
+ground-orientation batch is inert in this fixture, exactly as its gates claim.
+
+**The real finding is that the drift is not bisectable at all.**
+`+models/+measurements/CodeMeasurementBuilder.m` is byte-identical at `ca3f8fc` and HEAD and
+calls `errorChain.antennaKey(...)`, but `antennaKey` is defined nowhere in the `ca3f8fc` tree —
+its definition existed only in an uncommitted working tree, now committed as `5995bfa`. So
+`ca3f8fc` cannot execute this fixture at all: any run reaching the scintillation draw dies with
+*"Unrecognized method, property, or field 'antennaKey'"*. The 0.72496 value was therefore
+produced by an intermediate working tree that was never committed and has since been
+overwritten, and **no ancestor of the current history can reproduce it.** Stop treating it as a
+reference.
+
+**Standing lesson: a golden cut from an uncommitted working tree is unfalsifiable.** When it
+later moves you cannot distinguish a regression from a rebase, because the state it certified
+cannot be reconstructed. Cut fingerprints only from committed trees. From `03e6264` forward the
+tree is coherent and this fixture IS bisectable.
+
+### ⛔ Nothing cut before `5995bfa` came from a runnable tree
+
+The breakage above is not specific to this fixture, and it is not one commit wide. The call to
+`errorChain.antennaKey(...)` entered `CodeMeasurementBuilder.m` in `d3089d7`; the method itself
+was not committed until `5995bfa`, six commits later. Everything between is unrunnable:
+
+| commit | calls | defs | |
+|---|---|---|---|
+| `2060e9d` | 0 | 0 | ok |
+| `d3089d7` | 2 | 0 | **BROKEN** |
+| `271d4d4` | 2 | 0 | **BROKEN** |
+| `c538f4d` | 2 | 0 | **BROKEN** |
+| `ca3f8fc` | 2 | 0 | **BROKEN** |
+| `5995bfa` | 2 | 1 | ok |
+
+Verified by running, not by reading. A detached worktree at `ca3f8fc` created *outside* the
+repository (so nothing on the MATLAB path could shadow it) fails its own Stage-85 gates before
+producing any output:
+
+```
+CA3F8FC single   CRASH  Unrecognized method, property, or field 'antennaKey' for class 'models.errors.ErrorChain'
+CA3F8FC realism  CRASH  Unrecognized method, property, or field 'antennaKey' for class 'models.errors.ErrorChain'
+```
+
+So the failure is not confined to the scintillation path of one scenario — `run_oo_v1_regression('smoke')`
+itself cannot complete at `ca3f8fc`. The call sits unconditionally inside the per-signal loop;
+no gate skips it.
+
+**The rule this gives you: any fingerprint, golden or quoted metric dated between `d3089d7`
+(2026-08-07) and `ca3f8fc` was measured from a working tree that was never committed.** Those
+numbers are not wrong so much as unverifiable — there is no state anyone can return to in order
+to check them. Treat them as provenance, never as a reference to re-cut against or to quote in
+the write-up. This applies to `tests/regression/golden/` and to any table in `docs/` cut in that
+window, not only to the fixtures here.
