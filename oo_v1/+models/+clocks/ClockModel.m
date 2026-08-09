@@ -89,9 +89,13 @@ classdef ClockModel < handle
         % Noise configuration
         noiseCoeffs     (1,1) struct        % h2, h1, h0, hMinus1, hMinus2
         deterministic   (1,1) logical = false  % if true, no stochastic noise
-        driftFlickerInQ (1,1) logical = false  % opt-in: inject flicker-FM into the drift (freq) Q22
-                                               % (A/B showed it inflates Q22 ~26x but leaves the
-                                               %  actual/sigma ratio unchanged -> not the consistency fix)
+        % Flicker FM (hMinus1) carried in Q as its Allan-equivalent random walk. Default TRUE:
+        % with it off, Q22 is 50-921x below the truth's own frequency wander for
+        % flicker-dominated templates (CESIUM1, RUBIDIUM), which makes the filter
+        % inconsistent for every clock except the one the golden happens to use. Set false
+        % only to reproduce pre-2026-08-09 numbers. SUPERSEDES the old driftFlickerInQ knob,
+        % which added a term a factor 3 below this equivalence and defaulted off.
+        flickerAsEquivalentRwfmInQ (1,1) logical = true
         seed            (1,1) double  = 42
         lastTime_s      (1,1) double  = 0
 
@@ -128,7 +132,19 @@ classdef ClockModel < handle
             end
 
             if isfield(cfg,'deterministic');         obj.deterministic        = cfg.deterministic;        end
-            if isfield(cfg,'driftFlickerInQ');       obj.driftFlickerInQ      = logical(cfg.driftFlickerInQ); end
+            if isfield(cfg,'flickerAsEquivalentRwfmInQ')
+                obj.flickerAsEquivalentRwfmInQ = logical(cfg.flickerAsEquivalentRwfmInQ);
+            end
+            if isfield(cfg,'driftFlickerInQ')
+                % Legacy knob, removed 2026-08-09. It is NOT silently mapped onto the new
+                % one: it added 2*ln(2)*hMinus1*dt to Q22 only, a factor 3 below the Allan
+                % equivalence and with no matching phase term, so honouring it here would
+                % reproduce neither the old nor the new behaviour.
+                warning('ClockModel:driftFlickerInQRemoved', ...
+                    ['cfg.driftFlickerInQ was removed; flicker FM is now carried as its ' ...
+                     'Allan-equivalent random walk via flickerAsEquivalentRwfmInQ ' ...
+                     '(default true). The supplied value is ignored.']);
+            end
             if isfield(cfg,'seed');                  obj.seed                 = cfg.seed;                 end
             if isfield(cfg,'bias_s');                obj.bias_s               = cfg.bias_s;               end
             if isfield(cfg,'fracFreq');              obj.fracFreq             = cfg.fracFreq;             end
@@ -255,18 +271,44 @@ classdef ClockModel < handle
 
             h = obj.noiseCoeffs;
 
-            % WFM: direct phase noise — std = sqrt(h0 * dt / 2)
-            sigma_wfm_bias_s = sqrt(h.h0 * dt_s / 2);
-
-            % RWFM: fractional-frequency random walk — std = sqrt(2*pi^2*hm2 * dt)
-            sigma_rwfm_frac  = sqrt(2 * pi^2 * h.hMinus2 * dt_s);
+            % EXACT two-state discretisation (was forward Euler until 2026-08-09).
+            %
+            % The pair (bias, fracFreq) is propagated with the SAME discrete covariance the
+            % filter charges in getProcessNoiseQ:
+            %     Qs = [q1*dt + q2*dt^3/3,  q2*dt^2/2 ]
+            %          [q2*dt^2/2,          q2*dt     ]
+            % drawn as Qs = L*L' (Cholesky) from two unit normals. The old code drew the WFM
+            % phase jump and the RWFM frequency kick INDEPENDENTLY and applied the kick only
+            % to the NEXT step, so the truth never produced the within-step q2*dt^3/3 phase
+            % term nor the q2*dt^2/2 phase/frequency cross-covariance. That is invisible when
+            % WFM dominates (CESIUM1, RUBIDIUM) and 100x wrong when RWFM dominates: MEASURED
+            % sqrt(Q11)/empirical = 0.01 for jow OCXO and 0.17 for TCXO before this fix, i.e.
+            % the filter charged a phase process noise its own truth never generated.
+            %
+            % Draw order (g1 then g2) and the leading coefficient L(1,1) = sqrt(q1*dt + ...)
+            % are kept so a WFM-dominated clock moves only in the last digits: for jow
+            % CESIUM1 q2*dt^3/3 is ~11 decades below q1*dt.
+            q1 = h.h0 / 2;                      % WFM phase variance rate [s^2/s]
+            q2 = 2 * pi^2 * h.hMinus2;          % RWFM frequency variance rate [1/s]
 
             if obj.deterministic
                 n_bias_wfm   = 0;
                 dn_freq_rwfm = 0;
             else
-                n_bias_wfm   = randn(obj.rngStream) * sigma_wfm_bias_s;   % WFM phase jump [s]
-                dn_freq_rwfm = randn(obj.rngStream) * sigma_rwfm_frac;    % RWFM freq increment [-]
+                g1 = randn(obj.rngStream);
+                g2 = randn(obj.rngStream);
+                v11 = q1*dt_s + q2*dt_s^3/3;
+                v12 = q2*dt_s^2/2;
+                v22 = q2*dt_s;
+                L11 = sqrt(max(v11, 0));
+                if L11 > 0
+                    L21 = v12 / L11;
+                else
+                    L21 = 0;
+                end
+                L22 = sqrt(max(v22 - L21^2, 0));
+                n_bias_wfm   = L11 * g1;                 % phase increment noise [s]
+                dn_freq_rwfm = L21 * g1 + L22 * g2;      % frequency increment noise [-]
             end
 
             % Deterministic frequency drift
@@ -386,19 +428,53 @@ classdef ClockModel < handle
             if nargin < 3; representation = 'meters'; end
             h = obj.noiseCoeffs;
 
-            q1    = h.h0 / 2;                     % WFM phase variance rate
-            q2    = 2 * pi^2 * h.hMinus2;         % RWFM freq-drift variance rate
-            q_ffm = 2 * log(2) * h.hMinus1;       % flicker-FM (FFM) variance term
+            q1 = h.h0 / 2;                        % WFM phase variance rate
+            q2 = 2 * pi^2 * h.hMinus2;            % RWFM freq-drift variance rate
 
-            % Drift (frequency) process-noise entry: RWFM, plus flicker-FM when enabled.
-            q22 = q2 * dt_s;
-            if obj.driftFlickerInQ
-                q22 = q22 + q_ffm * dt_s;
+            % Flicker FM (hMinus1) as an ALLAN-EQUIVALENT random walk (2026-08-09).
+            % Flicker is not Markovian, so it has no exact 2-state representation. Rather
+            % than guess an inflation factor, equate the two models' Allan variances at the
+            % averaging time that matters -- the filter's own propagation interval:
+            %     RWFM     sigma_y^2(tau) = (2*pi^2/3) * hMinus2 * tau
+            %     flicker  sigma_y^2(tau) = 2*ln(2)  * hMinus1
+            %   =>  hMinus2_equivalent = 3*ln(2)*hMinus1 / (pi^2 * tau),  tau = dt
+            %   =>  q2_ffm = 2*pi^2*hMinus2_eq = 6*ln(2)*hMinus1 / dt
+            % This is validated, not asserted: it predicts the measured shortfall of the
+            % PRE-FIX Q22 against the truth's own frequency increments to ~10% across four
+            % templates spanning six decades -- CESIUM1 predicted 1027x vs measured 921x,
+            % RUBIDIUM 56x vs 50x, OCXO 1.000x vs 1.01x, TCXO 1.02x vs 1.03x.
+            %
+            % It replaces two ad-hoc terms: a bare q_ffm*dt added to the PHASE entry Q11
+            % (dimensionally a phase-variance rate, never sourced) and an opt-in
+            % driftFlickerInQ adding q_ffm*dt to Q22, which was a factor 3 below this
+            % equivalence and was left off because it "did not restore drift 3-sigma
+            % coverage". It does not restore that -- correctly, since drift is
+            % measurement-limited at GEO (see below) -- but its absence made Q22 50-921x too
+            % small for flicker-dominated clocks, which is what broke every non-caesium rung
+            % of the config/ladder/clock axis. Feeding it through q2_eff also gives the phase
+            % entry the right flicker term, q2_ffm*dt^3/3 = 2*ln(2)*hMinus1*dt^2, matching
+            % the phase drift sigma_y*dt accumulated over one step.
+            if obj.flickerAsEquivalentRwfmInQ && dt_s > 0
+                q2_ffm = 6 * log(2) * h.hMinus1 / dt_s;
+            else
+                q2_ffm = 0;
             end
+            q2_eff = q2 + q2_ffm;
 
-            % Discrete-time integral: Q over interval dt
-            Q_s = [(q1 + q_ffm)*dt_s + q2*dt_s^3/3,  q2*dt_s^2/2; ...
-                    q2*dt_s^2/2,                       q22];
+            % PRE-EXISTING, UNCHANGED: the drift +/-3sigma envelope is NOT restored by any Q
+            % magnitude. For the CESIUM1 receiver the drift wander (~1e-6 m/s per step) is
+            % 3-4 decades below the Doppler resolution (sigma ~0.01 m/s), so bdot_rx is
+            % measurement-limited -- a FUNDAMENTAL observability limit, not a Q bug. The
+            % report surfaces the empirical coverage (revgnss.Plotter.driftCoverage).
+            %
+            % WPM (h2) and FPM (h1) remain excluded: they act on timescales << dt and are
+            % identically zero in every shipped template (legacy and jowTable2p1).
+
+            % Discrete-time integral: Q over interval dt (exact for the 2-state model, and
+            % the SAME matrix ClockModel.step now draws its truth increments from, modulo
+            % the flicker equivalence above).
+            Q_s = [q1*dt_s + q2_eff*dt_s^3/3,  q2_eff*dt_s^2/2; ...
+                   q2_eff*dt_s^2/2,            q2_eff*dt_s];
 
             % Ensure symmetry (floating-point safety)
             Q_s = (Q_s + Q_s') / 2;

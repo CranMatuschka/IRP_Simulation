@@ -689,6 +689,27 @@ classdef ConfigFactory
                     isfield(cfg.clock.receiver,'deterministic')
                 cfg.asset.clock.deterministic = cfg.clock.receiver.deterministic;
             end
+            % cfg.clock.tower.{clockType,deterministic} → every cfg.towers(k)
+            % The ground twin of the receiver mapping above, and the only route a
+            % scenario JSON has to the tower clocks (cfg.towers is a struct array; a
+            % JSON "towers" key would replace it wholesale). Both are OVERRIDES: an
+            % empty clockType leaves the per-tower type alone, so clockDiversityConfig's
+            % deliberate per-tower mix is not flattened. Written HERE rather than in the
+            % rebuild loop below because that loop reads cfg.towers(k).clockType and
+            % copies prev.deterministic forward — both must already be final.
+            if isfield(cfg,'clock') && isfield(cfg.clock,'tower') && ~isempty(cfg.towers)
+                tw_ = cfg.clock.tower;
+                if isfield(tw_,'clockType') && ~isempty(tw_.clockType)
+                    for k = 1:numel(cfg.towers)
+                        cfg.towers(k).clockType = char(tw_.clockType);
+                    end
+                end
+                if isfield(tw_,'deterministic')
+                    for k = 1:numel(cfg.towers)
+                        cfg.towers(k).clock.deterministic = logical(tw_.deterministic);
+                    end
+                end
+            end
             % Canonical clock product mode → legacy alias sync
             % cfg.clocks.tower.product.mode is canonical; derive errors.towerClockCorrection.mode
             % before the legacy mapping below picks it up.

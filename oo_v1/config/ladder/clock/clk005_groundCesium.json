@@ -22,7 +22,11 @@
   },
   "report": {
     "runVersion": "clk005",
-    "compileTex": "auto"
+    "compileTex": "auto",
+    "monteCarlo": {
+      "enable": false
+    }
   },
-  "_reportNote": "compileTex 'auto' rather than the golden's 'require': a ladder rung's deliverable is its .mat, and a pdflatex hiccup must not throw away a finished run. ReportRunner only escalates a failed compile to an error under 'require'."
+  "_reportNote": "compileTex 'auto' rather than the golden's 'require': a ladder rung's deliverable is its .mat, and a pdflatex hiccup must not throw away a finished run. ReportRunner only escalates a failed compile to an error under 'require'.",
+  "_monteCarloNote": "monteCarlo.enable is FALSE on this axis, unlike golden_baseline.json and the feat/freq/ISL rungs, which inherit its 12 seeds x 900 s. MEASURED on clk001: the 3600 s arc takes ~7 min and the Monte-Carlo block another ~24 min, so it is roughly 3.5x the cost of the rung itself and would have made a 13-rung sweep ~6.5 h instead of ~1.5 h. What is given up is ONLY the pooled NIS/NEES consistency band appended to the .out log; the headline position, clock and attitude errors this axis compares come from the 3600 s arc and are unaffected. CONSEQUENCE for anyone reading these rungs: a clock rung states WHAT the error is, not whether the filter's covariance is statistically consistent at that setting. If a combination looks anomalous, re-run that one rung with monteCarlo.enable true before drawing a covariance conclusion from it."
 }

@@ -19,6 +19,9 @@ function out = run_oo_v1(configPath, duration_s)
 %       config/ladder/feat/     feat###   one feature toggled per file
 %       config/ladder/ISL/      isl###    crosslink sigma / configuration / frequency
 %       config/ladder/freq/     freq###   L1 / L2 / L5 combinations
+%       config/ladder/clock/    clk###    oscillator class on the space and ground
+%                               segments (OCXO / rubidium / caesium), plus the
+%                               legacy-vs-JOW h-coefficient table
 %       config/ladder/test/     test###   fixtures owned by the test suite
 %   and are found by name alone, so the folder never has to be spelled out.
 
