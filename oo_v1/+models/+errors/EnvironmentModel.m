@@ -596,7 +596,9 @@ classdef EnvironmentModel < handle
             %   sigma = |scintAmplitude| * sigmaCodeL1 * (f_L1/f)^exp / sqrt(sin(el))
             % Model 'conker' (gated by scintillation.model='conker'):
             %   amplitude fading raises the tracking noise by the Conker et al. (2003) factor
-            %   1/sqrt(1 - 2*S4^2), with S4 = min(0.7, |scintAmplitude|*S4zen*(1/sin e)^0.9).
+            %   1/sqrt(1 - 2*S4^2), with S4 = min(0.7, |scintAmplitude|*S4zen*sec^0.9). The
+            %   obliquity sec is selected by scintillation.obliquityModel (see scintObliquity_);
+            %   it defaults to the legacy 1/sin(el).
             %
             % Inputs:
             %   elevation_rad  scalar   elevation angle [rad]
@@ -627,7 +629,7 @@ classdef EnvironmentModel < handle
                 % Amplitude scintillation as an effective C/N0 loss (Conker et al. 2003).
                 S4zen = 0.3;
                 if isfield(sc,'S4zen'); S4zen = sc.S4zen; end
-                sec  = 1 / max(sin(elevation_rad), sin(elvFloor));   % secant obliquity proxy
+                sec  = obj.scintObliquity_(elevation_rad, elvFloor, sc);
                 S4   = min(0.7, abs(obj.scintAmplitude) * S4zen * sec^0.9);  % clamp below loss-of-lock
                 sigma = sigmaL1 * freqFactor / sqrt(1 - 2*S4^2);
             else
@@ -823,6 +825,51 @@ classdef EnvironmentModel < handle
                 obj.weatherState(k).lonRad        = lon_rad;
                 obj.weatherState(k).heightKm      = h_km;
             end
+        end
+
+        % ----------------------------------------------------------------
+        function sec = scintObliquity_(obj, elevation_rad, elvFloor, sc)
+            % scintObliquity_  Obliquity factor for the Conker S4 elevation scaling.
+            %
+            % Selected by cfg.errors.ionosphere.scintillation.obliquityModel:
+            %   'simpleSecant'     (default) 1/sin(el) -- the legacy hardcoded proxy.
+            %   'thinShell'        pierce-point obliquity at the configured shell height.
+            %   'matchIonoMapping' follow cfg.effects.ionosphere.mappingModel, so S4 and the
+            %                      first-order slant delay pierce ONE shell with ONE obliquity.
+            %
+            % Defaults to 'simpleSecant', so an un-migrated config is a strict no-op.
+
+            kind = 'simpleSecant';
+            if isfield(sc,'obliquityModel') && ~isempty(sc.obliquityModel)
+                kind = sc.obliquityModel;
+            end
+
+            ionoEffects = struct();
+            if isfield(obj.cfg,'effects') && isfield(obj.cfg.effects,'ionosphere')
+                ionoEffects = obj.cfg.effects.ionosphere;
+            end
+
+            if strcmp(kind,'matchIonoMapping')
+                kind = 'simpleSecant';
+                if isfield(ionoEffects,'mappingModel') && ~isempty(ionoEffects.mappingModel)
+                    kind = ionoEffects.mappingModel;
+                end
+            end
+
+            if strcmp(kind,'simpleSecant')
+                % Kept literal rather than routed through MappingFunctions: the legacy path
+                % floors with max(sin(el), sin(elvFloor)), which is not identical to flooring
+                % the ANGLE, and this branch must stay bit-for-bit the old expression.
+                sec = 1 / max(sin(elevation_rad), sin(elvFloor));
+                return
+            end
+
+            shellHeight_m = 350e3;
+            if isfield(ionoEffects,'shellHeight_m') && ~isempty(ionoEffects.shellHeight_m)
+                shellHeight_m = ionoEffects.shellHeight_m;
+            end
+            sec = models.atmosphere.MappingFunctions.ionosphere( ...
+                elevation_rad, kind, shellHeight_m);
         end
 
     end  % private methods

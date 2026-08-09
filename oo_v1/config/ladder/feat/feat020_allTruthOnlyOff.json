@@ -8,9 +8,12 @@
     "nSpaceAssets": 1,
     "nReceivers": 4
   },
+  "_pairNote": "towerSurvey writes its truth/model pair explicitly -- see feat001. Without it this rung kept the full 10/10/30 mm ENU survey error while claiming every truth-only systematic was off.",
   "effects": {
     "towerSurvey": {
-      "enable": false
+      "enable": false,
+      "truth": { "enable": false },
+      "model": { "enable": false }
     },
     "antenna": {
       "pcvModel": "none"

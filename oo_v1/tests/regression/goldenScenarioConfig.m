@@ -61,6 +61,15 @@ function cfg = goldenScenarioConfig(durationOverride_s)
     % (goldenHeadlineScenarioConfig inherits this pin via delegation.)
     cfg.clock.templateSource = 'legacy';
 
+    % masterConfig now defaults to a NADIR-pointing attitude (attitude_euler_rad computed
+    % from -r_hat). This single-antenna golden has a zero lever arm, so attitude is
+    % unobservable and irrelevant to its ground-only physics; pin the original fixed
+    % [0;0;0] attitude so the nadir default flip cannot disturb the frozen numbers (same
+    % rationale as the templateSource pin above). The 4-antenna headline/realism goldens
+    % DO adopt the nadir attitude, where it physically matters.
+    cfg.asset.attitudePointing   = 'fixed';
+    cfg.asset.attitude_euler_rad = [0; 0; 0];
+
     % Gate overrides: summary is collected before any report build, so skip PDF/MAT.
     cfg.report.writePdf   = false;
     cfg.report.writeMat   = false;

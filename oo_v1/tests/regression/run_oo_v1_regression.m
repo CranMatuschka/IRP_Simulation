@@ -31,8 +31,10 @@ function result = run_oo_v1_regression(tier, scenario)
         case 'single';   goldName = ['golden_' tier '.mat'];
         case 'headline'; goldName = ['golden_headline_' tier '.mat'];
         case 'realism';  goldName = ['golden_realism_' tier '.mat'];
+        case 'feat024';  goldName = ['golden_feat024_' tier '.mat'];
         otherwise; error('run_oo_v1_regression:scenario', ...
-            'scenario must be ''single'', ''headline'', or ''realism'' (got ''%s'').', scenario);
+            ['scenario must be ''single'', ''headline'', ''realism'' or ''feat024'' ' ...
+             '(got ''%s'').'], scenario);
     end
     goldFile = fullfile(thisDir, 'golden', goldName);
     assert(isfile(goldFile), 'run_oo_v1_regression:noGolden', ...

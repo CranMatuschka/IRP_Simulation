@@ -24,10 +24,31 @@ function cfg = resolveEnablePairsPostMerge(cfg, effectPaths)
 %
 %   With no scenario JSON the provenance list is empty and this function is a no-op, so the
 %   frozen goldens are byte-identical. See docs/plans/TOGGLE_TRUTH/02_toggle_audit_violations.md.
+%
+%   OWNERSHIP IS PER LEVEL, NOT PER RUN (fixed 2026-08-09). The flat cfg.provenance.explicit
+%   list cannot answer the question this function asks. resolveSimulationConfig flattens the
+%   whole "_extends" chain into ONE overlay before deepMergeConfig walks it, so a pair member
+%   INHERITED from golden_baseline.json is recorded exactly like one the child declared. The
+%   old flat test therefore read "the parent owns .truth.enable" and skipped the write, which
+%   made a child writing only the master a SILENT NO-OP: measured, feat001/002/006/007/009/014
+%   all resolved to master=0 with truth=1 and ran the effect at full strength.
+%
+%   The rule now compares SPECIFICITY. cfg.provenance.explicitByLevel is base-first, so a
+%   higher index is a more specific file (index numel(...) is the requested JSON, or the
+%   caller overrides when present):
+%     pair member declared at a level >= the master's level -> that file meant the pair, leave it
+%     master declared at a strictly LATER level             -> the master is the newer intent, expand it
+%   Same-level ties keep the pair, which is what makes this golden-safe: golden_baseline.json
+%   is a single level and writes errors.multipath {enable:true, truth:true, model:false}, and
+%   that asymmetric pair must survive untouched.
 
     own = {};
     try; own = cfg.provenance.explicit; catch; end
     if isempty(own); return; end
+
+    byLevel = {};
+    try; byLevel = cfg.provenance.explicitByLevel; catch; end
+    if ~iscell(byLevel); byLevel = {}; end
 
     for i = 1:numel(effectPaths)
         base = effectPaths{i};
@@ -40,11 +61,35 @@ function cfg = resolveEnablePairsPostMerge(cfg, effectPaths)
         catch
             continue
         end
-        if ~ismember([base '.truth.enable'], own)
+        masterLevel = lastLevel_(byLevel, [base '.enable']);
+        if ~pairMemberWins_(byLevel, own, [base '.truth.enable'], masterLevel)
             cfg = setfield(cfg, f{:}, 'truth', 'enable', en); %#ok<SFLD>
         end
-        if ~ismember([base '.model.enable'], own)
+        if ~pairMemberWins_(byLevel, own, [base '.model.enable'], masterLevel)
             cfg = setfield(cfg, f{:}, 'model', 'enable', en); %#ok<SFLD>
+        end
+    end
+end
+
+function tf = pairMemberWins_(byLevel, own, pairPath, masterLevel)
+%PAIRMEMBERWINS_ True when the pair member should be left exactly as merged.
+%   Without per-level provenance (a caller that set cfg.provenance.explicit by hand, or
+%   an older cached config) fall back to the historical flat test, so nothing that used
+%   to work changes behaviour.
+    if isempty(byLevel)
+        tf = ismember(pairPath, own);
+        return
+    end
+    pairLevel = lastLevel_(byLevel, pairPath);
+    tf = pairLevel > 0 && pairLevel >= masterLevel;
+end
+
+function level = lastLevel_(byLevel, path)
+%LASTLEVEL_ Index of the MOST SPECIFIC level that declares PATH; 0 if none does.
+    level = 0;
+    for k = 1:numel(byLevel)
+        if iscell(byLevel{k}) && ismember(path, byLevel{k})
+            level = k;
         end
     end
 end

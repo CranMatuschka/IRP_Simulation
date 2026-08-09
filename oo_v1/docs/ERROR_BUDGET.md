@@ -55,10 +55,69 @@ can be pushed and must be stated in any feasibility claim:
 - **Phase wind-up** — absent (no `effects.phaseWindup`). cm-level on carrier for rotating platforms.
 - **Antenna phase-centre variation (PCV)** — `effects.antennaPCV.enable = false` (PCO is modelled; PCV is not). mm–cm.
 - **Relativistic clock-rate correction** — flag present but **disabled** by the v1 sanitiser (`Relativistic clock-rate correction is not implemented as a validated v1 model`).
-- **Klobuchar ionosphere** — `klobucharStatus = 'notImplemented'` (a synthetic mapped model is used instead).
+- ~~**Klobuchar ionosphere** — `klobucharStatus = 'notImplemented'`~~ **CORRECTED 2026-08-09: this entry was wrong.** The reduced Klobuchar kernel (`models.atmosphere.Klobuchar`) IS implemented and IS applied on the model side whenever `errors.ionosphere.model.correction = 'klobuchar'` — which the shipped `golden_baseline.json` selects. `klobucharStatus` now resolves to `appliedModelSideBroadcastClimatology` or `notSelected` from the config. What is genuinely absent is the ICD's 8-coefficient α/β polynomial and its obliquity `F = 1 + 16(0.53 − E)³`; the thin-shell obliquity is substituted.
 - **Signal-dependent hardware delays / DCB / IFB** — zero (the inter-frequency-bias IF residual is not modelled).
 - **Higher-order ionosphere in the dual-frequency IF *EKF* path** — the WP6 residual is injected on the primary (L1) code truth and its L3 survival is proven algebraically; full per-signal injection into the IF EKF rows is a future extension.
 - **Full orbit-force adequacy, ISL joint EKF clock gauge, integer AR beyond the Stage-63 guarded path** — out of scope (separate plan).
+- **Elevation weighting on the carrier R** — absent. `CarrierMeasurementBuilder` builds
+  `R_phi = sigma_phi^2 * eye(...)`: one scalar for every carrier row, from 5° to zenith.
+  The code path has three selectable per-row models (`MeasurementModelUtils.codeSignalSigma`:
+  `constant` / `elevation` 1/sinᵖ(el) / `cn0`); **there is no carrier equivalent** — no
+  `carrierSignalSigma` function exists. Measured consequence: the non-dispersive part of the
+  carrier budget (troposphere, multipath, antenna phase centre) maps as ~1/sin(el), so a 10 mm
+  zenith floor should be ~20 mm at 30°, ~58 mm at 10° and ~115 mm at 5°. Low-elevation carrier
+  rows are therefore over-weighted by up to ~10× at every band, in every scenario including
+  the goldens. See [Carrier R and the band](#carrier-r-and-the-band) below for why the
+  *thermal* half of this is negligible and the *floor* half is not.
+
+## Carrier R and the band
+
+`cfg.measurements.carrier.sigma_m` is the R applied to every carrier EKF row. Because carrier
+precision is a fraction of a **wavelength**, a value fixed in metres silently rescales with the
+band — 5 mm is 0.026 cycles at GPS L1 (190.29 mm) but 1.02 cycles at the 61.25 GHz ladder rung
+(4.895 mm), where R would assert a whole wavelength of noise and the ambiguity and the noise
+become indistinguishable. Two opt-in band-referenced handles resolve in
+`ConfigFactory.finalizeConfig` once λ is known (both default to `NaN` = not specified, so the
+frozen goldens are byte-identical):
+
+| knob | meaning |
+|------|---------|
+| `measurements.carrier.sigma_cycles` | dispersive term; `sigma_m = sigma_cycles · λ` |
+| `measurements.carrier.sigmaFloor_m` | non-dispersive floor, added **in quadrature**; `NaN` inherits `measurement.sigmaFloor_m` |
+| `carrierSlip.threshold_cycles` | slip threshold in cycles (a slip *is* an integer cycle count) |
+| `carrierSlip.threshold_m = NaN` | AUTO `5·√2·σ`, the idiom already used by `measurements.isl.carrier.slipDetection.threshold_m` |
+
+**Why the floor is mandatory.** `sigma_cycles` alone models only the *dispersive* error — PLL
+thermal noise, phase multipath (bounded by λ/4), phase wind-up (one cycle per revolution) —
+all genuinely proportional to λ. The *non-dispersive* error (troposphere, oscillator phase
+noise, antenna phase-centre stability, PCV residual) is constant in **metres**, so expressed in
+cycles it *grows* with frequency: a fixed cycles figure models it backwards. Without the floor,
+0.01 cycles at 61.25 GHz is 0.049 mm — **204× below** the 1 cm "real-world guard"
+`realismGradeConfig` declares (`honestFloors.carrier_sigma_m`) and `GeoRealWorldScenarioGuard`
+enforces.
+
+**Consequence, worth knowing before reading a band sweep.** With `sigma_cycles = 0.01` and the
+1 cm realism floor, the result is ~1 cm at *every* band — 10.179 mm at L1, 10.000 mm at
+61.25 GHz — because this budget is floor-dominated throughout. That is the honest answer, not a
+bug, and it means a band sweep should **not** be expected to show carrier R improving with
+frequency.
+
+**Why C/N₀-weighting the carrier is not worth implementing.** Under the floor, applying the
+code path's C/N₀ model (45 dB-Hz + 6 dB·sin el) to the carrier moves σ by 1.13 % at L1, 0.08 %
+at 5.8 GHz and 0.00 % at 61.25 GHz. The elevation gap above is a ~10× effect and the thermal
+gap is a ~1 % one; only the former is worth a change, and since any per-row `R_phi` re-baselines
+every frozen golden it should be spent once, together with the R-correlation work (R's
+magnitude is sound; its *colour* — correlated errors charged as white — is the known binding
+constraint, and elevation weighting does not address it).
+
+**Not band-dependent, but assumed constant anyway:** `measurements.codeNoise.cn0.base_dBHz` is
+45 dB-Hz for every band, i.e. the ladder assumes an identical link budget from 915 MHz to
+61.25 GHz. Whether that is optimistic depends on an unstated antenna assumption (fixed-aperture
+dishes give gain ∝ f² at both ends and more than cancel the f² path loss; fixed-gain antennas
+leave C/N₀ falling as 1/f²) — a ~36 dB spread across the ladder. Separately, 61.25 GHz sits in
+the **oxygen absorption band** (~10–15 dB/km at sea level), so `freq013` is not a viable
+ground-link band at all; that frequency is chosen in practice *because* the atmosphere blocks
+it, which makes it a crosslink candidate rather than an uplink one.
 
 ## Scientific-correctness changes (WP1–WP8)
 

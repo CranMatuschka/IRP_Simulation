@@ -35,9 +35,10 @@ function [resolvedConfig, metadata] = resolveSimulationConfig(configPath, overri
         profile = 'realism';
     end
 
+    explicitByLevel = {};
     if nargin >= 1 && ~isempty(configPath)
         sourcePath = locateScenarioFile_(repositoryRoot, configPath);
-        [overlay, extendsChain] = readOverlayChain_(repositoryRoot, sourcePath);
+        [overlay, extendsChain, explicitByLevel] = readOverlayChain_(repositoryRoot, sourcePath);
         sourceSha256 = fileSha256_(sourcePath);
 
         if requestsRealismProfile_(overlay)
@@ -55,10 +56,21 @@ function [resolvedConfig, metadata] = resolveSimulationConfig(configPath, overri
         [preResolutionConfig, overridePaths] = deepMergeConfig( ...
             preResolutionConfig, overrides);
         explicitPaths = [explicitPaths, overridePaths];
+        % Caller overrides are the most specific layer of all -- they are applied last
+        % and win over every file in the chain.
+        explicitByLevel{end + 1} = overridePaths;
     end
 
     if ~isempty(sourcePath)
         preResolutionConfig.provenance.explicit = explicitPaths;
+        % PER-LEVEL provenance, base-first. `explicit` alone cannot answer the question
+        % resolveEnablePairsPostMerge actually asks -- "did THIS file write the pair, or
+        % did it inherit it?" -- because readOverlayChain_ flattens the whole _extends
+        % chain into one overlay before deepMergeConfig sees it, so an inherited leaf is
+        % recorded identically to a child-written one. That made a ladder rung writing
+        % only `errors.<effect>.enable` a silent no-op against any parent declaring the
+        % truth/model pair: six shipped feat rungs disabled nothing at all.
+        preResolutionConfig.provenance.explicitByLevel = explicitByLevel;
     end
     preResolutionConfig = validateMasterConfig(preResolutionConfig);
     resolvedConfig = revgnss.ConfigFactory.finalizeConfig(preResolutionConfig);
@@ -71,10 +83,13 @@ function [resolvedConfig, metadata] = resolveSimulationConfig(configPath, overri
         'preResolutionConfig', preResolutionConfig);
 end
 
-function [overlay, chain] = readOverlayChain_(repositoryRoot, sourcePath)
+function [overlay, chain, levelPaths] = readOverlayChain_(repositoryRoot, sourcePath)
 %READOVERLAYCHAIN_ Decode SOURCEPATH and every file it extends, base first.
 %   CHAIN lists the inherited files in application order (outermost base first,
 %   the requested file last), so provenance can state what a ladder file sits on.
+%   LEVELPATHS is the matching cell array of dotted leaf paths written by EACH file
+%   on its own, in the same order, so a later consumer can distinguish a value a
+%   file declared from one it merely inherited.
 
     maxDepth = 8;
     files = {sourcePath};
@@ -101,9 +116,40 @@ function [overlay, chain] = readOverlayChain_(repositoryRoot, sourcePath)
     end
 
     chain = cell(1, numel(files));
+    levelPaths = cell(1, numel(files));
     for index = 1:numel(files)
         [~, name, extension] = fileparts(files{index});
         chain{index} = [name extension];
+        levelPaths{index} = overlayLeafPaths_(decoded{index}, '');
+    end
+end
+
+function paths = overlayLeafPaths_(overlay, prefix)
+%OVERLAYLEAFPATHS_ Dotted paths of every leaf in ONE decoded overlay.
+%   Mirrors deepMergeConfig's own path construction so the two agree exactly: a
+%   scalar struct recurses, anything else (including a struct ARRAY, which
+%   deepMergeConfig replaces wholesale) is a leaf. 'x_' keys are jsondecode's
+%   rendering of the leading-underscore comment keys and are ignored, as there.
+    paths = {};
+    if ~isstruct(overlay) || ~isscalar(overlay)
+        if ~isempty(prefix); paths = {prefix}; end
+        return
+    end
+    fieldNames = fieldnames(overlay);
+    for fieldIndex = 1:numel(fieldNames)
+        fieldName = fieldNames{fieldIndex};
+        if startsWith(fieldName, 'x_'); continue; end
+        if isempty(prefix)
+            path = fieldName;
+        else
+            path = [prefix '.' fieldName];
+        end
+        value = overlay.(fieldName);
+        if isstruct(value) && isscalar(value)
+            paths = [paths, overlayLeafPaths_(value, path)]; %#ok<AGROW>
+        else
+            paths{end + 1} = path; %#ok<AGROW>
+        end
     end
 end
 

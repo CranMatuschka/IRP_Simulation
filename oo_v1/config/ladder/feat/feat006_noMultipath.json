@@ -8,9 +8,12 @@
     "nSpaceAssets": 1,
     "nReceivers": 4
   },
+  "_pairNote": "The truth/model pair is written out explicitly, not left to the master enable -- see feat001. ErrorChain.multipath_ gates the coloured Gauss-Markov branch on truth.enable && coloredGM.enable and the legacy sinusoid on truth.enable alone, so truth.enable=false closes both.",
   "errors": {
     "multipath": {
-      "enable": false
+      "enable": false,
+      "truth": { "enable": false },
+      "model": { "enable": false }
     }
   },
   "report": {

@@ -117,6 +117,54 @@ classdef AttitudeKinematics
             r_ecef = r_body_origin_ecef(:) + C * leverArm_body_m(:);
         end
 
+        function euler_rad = nadirEulerFromEcef(r_ecef_m, v_ecef_mps, boresight_body)
+            % nadirEulerFromEcef  ZYX Euler angles for a nadir-pointing (LVLH) attitude.
+            %
+            % Returns the constant [roll;pitch;yaw] whose body-to-ECEF DCM
+            % (Rz(yaw)Ry(pitch)Rx(roll)) aligns the antenna boresight body axis
+            % (default body +Z) with nadir (-r_hat) and the body +X axis with the
+            % along-track (velocity) direction -- the standard local-vertical/
+            % local-horizontal (LVLH) Earth-pointing attitude. For a GEO fixed in
+            % ECEF the nadir direction is constant, so this constant Euler is a
+            % nadir lock to <0.01 deg over a day; for fast-moving orbits it is the
+            % instantaneous nadir attitude at this r/v and should be recomputed per epoch.
+            %
+            %   r_ecef_m       [3x1] spacecraft position in ECEF [m]
+            %   v_ecef_mps     [3x1] spacecraft velocity in ECEF [m/s] (optional). Defines
+            %                        the orbit normal; if empty/near-zero the orbit is
+            %                        assumed equatorial-prograde (normal = ECEF +Z).
+            %   boresight_body [3x1] body axis to point at nadir (optional, default +Z;
+            %                        only +Z supported today -- the antenna face-normal).
+            if nargin < 2; v_ecef_mps = []; end
+            if nargin < 3 || isempty(boresight_body); boresight_body = [0;0;1]; end
+            assert(isequal(boresight_body(:), [0;0;1]), ...
+                'AttitudeKinematics:nadirEulerFromEcef: only boresight_body=[0;0;1] is supported.');
+            r = r_ecef_m(:);
+            assert(norm(r) > 0, ...
+                'AttitudeKinematics:nadirEulerFromEcef: r_ecef must be non-zero.');
+            rhat = r / norm(r);
+            if isempty(v_ecef_mps) || norm(v_ecef_mps) < 1e-6
+                nhat = [0;0;1];                     % equatorial-prograde orbit normal
+                if abs(dot(rhat, nhat)) > 0.999     % near-polar r -> pick another reference
+                    nhat = [0;1;0];
+                end
+            else
+                nhat = cross(r, v_ecef_mps(:));
+                nhat = nhat / norm(nhat);
+            end
+            zb = -rhat;                             % boresight (+Z) -> nadir
+            yb = -nhat;                             % pitch axis (+Y) = -orbit normal
+            yb = yb - dot(yb, zb) * zb;             % orthogonalise to the boresight
+            yb = yb / norm(yb);
+            xb = cross(yb, zb);                     % roll axis (+X) -> along-track
+            C  = [xb, yb, zb];                      % body-to-ECEF DCM (columns = body axes)
+            % Extract ZYX Euler from C = Rz(yaw)Ry(pitch)Rx(roll).
+            pitch = -asin(max(-1, min(1, C(3,1))));
+            roll  = atan2(C(3,2), C(3,3));
+            yaw   = atan2(C(2,1), C(1,1));
+            euler_rad = [roll; pitch; yaw];
+        end
+
         % ================================================================
         % Convention hardening methods
         % ================================================================

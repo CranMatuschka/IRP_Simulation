@@ -525,8 +525,18 @@ classdef ErrorChain < handle
                     obj.drawWhiteVec_(models.noise.RngSource.TROP_RESID, towerIdx, [], N);
             end
 
+            % GATE the declared model uncertainty on the delay actually being present.
+            % tc.sigma_m is the declared zenith uncertainty of the troposphere the model
+            % applies; with BOTH sides off there is no delay to be uncertain about, and
+            % charging it would de-weight the row against an error that was never injected
+            % -- the same defect pattern the two gates below already close for the
+            % stochastic channel. This is what makes feat001_noTroposphere a clean
+            % ablation instead of a partial one. Golden-safe: every shipped config that
+            % sets sigma_m also enables at least one side, so R is unchanged there.
             sigmaBase = zeros(N,1);
-            if isfield(tc,'sigma_m')
+            tropPresent = (isfield(tc,'truth') && isfield(tc.truth,'enable') && tc.truth.enable) || ...
+                          (isfield(tc,'model') && isfield(tc.model,'enable') && tc.model.enable);
+            if isfield(tc,'sigma_m') && tropPresent
                 sigmaBase = tc.sigma_m * mappingFn(elv);
             end
 
@@ -576,7 +586,12 @@ classdef ErrorChain < handle
             % Mapping uses MappingFunctions.ionosphere() with
             % cfg.effects.ionosphere.mappingModel ('simpleSecant' or 'thinShell').
             % Default is 'simpleSecant' (backward-compatible default).
-            % This is NOT Klobuchar. Klobuchar is not implemented.
+            % The MAPPING is not Klobuchar's obliquity -- that is the only claim meant
+            % here. Klobuchar itself IS implemented (models.atmosphere.Klobuchar) and is
+            % applied on the model side of the 'tecGaussMarkov' branch when
+            % cfg.errors.ionosphere.model.correction = 'klobuchar'; see
+            % EnvironmentModel.getIonoDelay. The old wording ("Klobuchar is not
+            % implemented") contradicted the shipped kernel and the golden baseline.
             %
             % 'constantVerticalTEC' is NOT a valid model: the field verticalDelayL1_m already
             % stores metres of L1 delay, NOT TECU.  If TECU-based input is needed in future,
@@ -694,8 +709,16 @@ classdef ErrorChain < handle
                     obj.drawWhiteVec_(models.noise.RngSource.IONO_RESID, towerIdx, [], N);
             end
 
+            % GATE the declared model uncertainty on the delay actually being present
+            % (twin of the troposphere case). With both sides off there is no slant delay
+            % to be uncertain about, so charging ic.sigma_m * mapping into R would
+            % de-weight the row against an error that was never injected. This is what
+            % makes feat002_noIonosphere a clean ablation. Golden-safe: every shipped
+            % config that sets sigma_m also enables at least one side.
             sigmaBase = zeros(N,1);
-            if isfield(ic,'sigma_m')
+            ionoPresent = (isfield(ic,'truth') && isfield(ic.truth,'enable') && ic.truth.enable) || ...
+                          (isfield(ic,'model') && isfield(ic.model,'enable') && ic.model.enable);
+            if isfield(ic,'sigma_m') && ionoPresent
                 sigmaBase = ic.sigma_m * mapping;
             end
 

@@ -288,9 +288,23 @@ classdef LatexReportBuilder
 
             ionoMapKind = 'simpleSecant';
             try; ionoMapKind = cfg.effects.ionosphere.mappingModel; catch; end
+            % Read the correction the run ACTUALLY applied. This line used to assert
+            % "(Klobuchar is NOT implemented)" unconditionally, which is false whenever
+            % errors.ionosphere.model.correction = 'klobuchar' -- the shipped golden
+            % baseline -- and models.atmosphere.Klobuchar is called from
+            % EnvironmentModel.getIonoDelay. A report must not contradict its own run.
+            ionoCorrection = 'none';
+            try; ionoCorrection = cfg.errors.ionosphere.model.correction; catch; end
+            switch lower(char(ionoCorrection))
+                case 'klobuchar';    ionoCorrNote = 'Klobuchar broadcast climatology';
+                case 'biasfraction'; ionoCorrNote = 'scaled-bias model correction';
+                case 'none';         ionoCorrNote = 'no model-side correction';
+                otherwise;           ionoCorrNote = char(ionoCorrection);
+            end
             procLines = {};
             procLines{end+1} = sprintf('Process model: constant-velocity CWNA (position/velocity), Brown-Hwang two-state (clock).');
-            procLines{end+1} = sprintf('Ionosphere mapping model: %s   (Klobuchar is NOT implemented)', ionoMapKind);
+            procLines{end+1} = sprintf('Ionosphere mapping model: %s   (model-side correction: %s)', ...
+                ionoMapKind, ionoCorrNote);
             procLines{end+1} = 'ZWD: first-order Gauss-Markov.  Ambiguity: random-walk (near-zero process noise).';
             RL.addBodyText(fig, procLines, 0.18, 0.04);
         end

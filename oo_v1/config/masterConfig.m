@@ -379,7 +379,22 @@ cfg.measurements.carrier.slipDetection.resetSigma_m          = 100;
 cfg.measurements.carrier.slipDetection.action                = 'resetAndSkip';
 cfg.carrierSlip.enable                          = false;
 cfg.carrierSlip.method                          = 'modelStepCompensatedResidualJump';
+% BAND-INVARIANT SLIP THRESHOLD (two opt-in forms; the metre value stays canonical).
+% A slip is an integer number of CYCLES, so a threshold fixed in metres silently rescales
+% with the band: 0.10 m is 0.53 cycles at GPS L1 (190.29 mm) but 20.4 cycles at the
+% 61.25 GHz ladder rung (4.895 mm), i.e. sub-cycle sensitive at one end and blind at the
+% other. Two opt-ins, both resolved in ConfigFactory.finalizeConfig once lambda is known:
+%   threshold_cycles = <n>   -> threshold_m = n * lambda(primary carrier)
+%   threshold_m      = NaN   -> AUTO: 5*sqrt(2)*carrier sigma, the ISL idiom (see
+%                               cfg.measurements.isl.carrier.slipDetection.threshold_m).
+%                               The detector tests the epoch-to-epoch change of the carrier
+%                               prefit, whose noise is sqrt(2)*sigma, so this can never
+%                               desynchronise from the sigma actually in force.
+% DEFAULT UNCHANGED: a fixed 0.10 m, so every existing scenario and the frozen goldens are
+% byte-identical. PRECEDENCE matches the carrier sigma: threshold_cycles wins whenever set,
+% including over a scenario-owned threshold_m, with a validation warning recording it.
 cfg.carrierSlip.threshold_m                     = 0.10;
+cfg.carrierSlip.threshold_cycles                = NaN;   % NaN = not specified; use threshold_m
 cfg.carrierSlip.minArcLength_s                  = 300;
 cfg.carrierSlip.productStepCompensation         = true;
 cfg.carrierSlip.atmosphereStepCompensation      = true;
@@ -920,6 +935,29 @@ cfg = applyLuniSolar(cfg);        % cfg.perturbations.sunMoon.enable
 cfg = applyInjectTruthSideDynamics(cfg);   % Guard B: one-sided truth-side gap (no-op unless swarm 'position')
 cfg = applyPerTowerHwBias(cfg);   % cfg.errors.hardwareDelay.perTowerBias.enable
 
+% --- Attitude pointing: NADIR by default (the antenna face points at Earth) --------------
+% Flip the base 'fixed' attitude (set in i_baseDefaults) to nadir for the full runtime
+% default: the boresight body axis (+Z, the receiver-cross face-normal) points at nadir
+% (-r_hat), body +X along-track (LVLH / Earth-pointing). A GEO fixed in ECEF has a constant
+% nadir direction, so this is a constant Euler (no body rate); it holds nadir to <0.01 deg/day.
+% masterConfig('baseOnly') returned long before this, so defaultConfig / derived / test configs
+% keep the fixed [0;0;0] attitude; only the full run_oo_v1 default and the goldens get nadir.
+% A single antenna at zero lever arm is measurement-neutral to attitude (antenna at CoM);
+% nadir changes the 4-antenna attitude scenarios, the intended physical effect. Opt out with
+% cfg.asset.attitudePointing='fixed' before calling (fields already exist from i_baseDefaults).
+cfg.asset.attitudePointing = 'nadir';
+if strcmpi(cfg.asset.attitudePointing, 'nadir')
+    cfg.asset.attitude_euler_rad = revgnss.AttitudeKinematics.nadirEulerFromEcef( ...
+        cfg.asset.r_ecef_m, cfg.asset.v_ecef_mps, cfg.asset.boresight_body);
+end
+% Keep the primary-asset mirror (cfg.assets(1)) in sync so MultiAssetConfig.normalize sees a
+% consistent primary. Field set already matches (both carry attitudePointing/boresight_body
+% from i_baseDefaults); this syncs the flipped value + computed Euler onto the primary.
+if isfield(cfg,'assets') && ~isempty(cfg.assets)
+    cfg.assets(1).attitudePointing   = cfg.asset.attitudePointing;
+    cfg.assets(1).attitude_euler_rad = cfg.asset.attitude_euler_rad;
+end
+
 % ================================================================
 % Contract check (asserts only; returns cfg unchanged)
 % ================================================================
@@ -1004,6 +1042,13 @@ cfg.asset.r_ecef_m                = r_geo;
 cfg.asset.v_ecef_mps              = [0; 0; 0];   % geostationary in ECEF
 cfg.asset.attitude_euler_rad      = [0; 0; 0];
 cfg.asset.angularRate_body_radps  = [0; 0; 0];
+% Attitude-pointing FIELDS live here (default 'fixed') so that (a) baseOnly/defaultConfig and
+% the ~20 derived/test configs keep the fixed [0;0;0] attitude, and (b) cfg.asset and cfg.assets
+% share the same field set (MultiAssetConfig.normalize assigns cfg.assets(1)=struct, which
+% requires matching fields). The runtime body (after the scenario overlays) flips this to
+% 'nadir' and computes the Euler; masterConfig('baseOnly') returns before that.
+cfg.asset.attitudePointing        = 'fixed';     % 'nadir' | 'fixed'
+cfg.asset.boresight_body          = [0; 0; 1];   % body axis pointed at nadir (antenna face-normal)
 % Lever arms: zero by default (single antenna, attitude unobservable).
 % finalizeConfig() sets cross-pattern arms when nReceivers > 1.
 cfg.asset.receiverLeverArm_body_m  = [0; 0; 0];
@@ -2048,6 +2093,20 @@ cfg.errors.ionosphere.higherOrder.thirdOrderCap_m       = 0.005;  % cap 3rd-orde
 cfg.errors.ionosphere.scintillation.enable            = true;
 cfg.errors.ionosphere.scintillation.model             = 'conker';
 cfg.errors.ionosphere.scintillation.S4zen              = 0;
+% Obliquity used by the Conker S4 elevation scaling S4 = |A|*S4zen*sec^0.9. The scintillating
+% layer is the SAME thin shell the first-order slant delay pierces, so S4 and that delay should
+% share ONE obliquity -- but the legacy code hardcoded a flat-Earth 1/sin(el) proxy while
+% cfg.effects.ionosphere.mappingModel selects 'thinShell' for the delay. 1/sin over-maps at low
+% elevation (which is precisely why 'thinShell' is the chosen mapping), and here that over-mapping
+% is not cosmetic: it drives S4 into the min(0.7,.) clamp that guards the 1/sqrt(1-2*S4^2)
+% singularity at S4 = 1/sqrt(2). Once clamped, the row sigma is pinned at 0.30/sqrt(0.02) = 2.121 m
+% independent of elevation and amplitude -- a hardcoded constant standing in for the model.
+%   'simpleSecant'     (DEFAULT) 1/sin(el). Legacy behaviour; keeps every golden bit-identical.
+%   'thinShell'        pierce-point obliquity at cfg.effects.ionosphere.shellHeight_m.
+%   'matchIonoMapping' follow cfg.effects.ionosphere.mappingModel, so the two terms can never
+%                      disagree again. This is the consistency fix; the other two are controls.
+% Sources: Conker et al. (2003) (validity requires S4 < 1/sqrt(2)); Klobuchar (1987) shell geometry.
+cfg.errors.ionosphere.scintillation.obliquityModel    = 'simpleSecant';
 cfg.errors.ionosphere.scintillation.process           = 'gaussMarkov';
 cfg.errors.ionosphere.scintillation.tau_s             = 30;
 cfg.errors.ionosphere.scintillation.sigmaCodeL1_m     = 0.3;
@@ -2877,8 +2936,44 @@ cfg.measurements.codeMode                = 'singleFrequency';
 cfg.measurements.carrierMode             = 'diagnostic';
 cfg.measurements.carrierCombinationMode  = 'raw';
 
-% Carrier phase in metres (new-style sigma)
+% Carrier phase in metres (new-style sigma). This is the R actually applied to every
+% carrier EKF row (CarrierMeasurementBuilder line ~62), so it is the filter's statement of
+% how much it trusts the carrier.
+%
+% BAND-INVARIANT CARRIER SIGMA (opt-in; the metre value stays canonical).
+% Carrier precision is a fraction of a WAVELENGTH, so a sigma fixed in metres silently
+% rescales with the band: 5 mm is 0.026 cycles at GPS L1 (190.29 mm) but 1.02 cycles at the
+% 61.25 GHz rung (4.895 mm) -- at that point R claims a full wavelength of noise, which
+% makes the ambiguity and the noise indistinguishable and the row carries no information the
+% filter can use. Set sigma_cycles to state the precision in the unit it is physically
+% specified in; ConfigFactory.finalizeConfig derives sigma_m = sigma_cycles * lambda once
+% the primary carrier is resolved.
+% DEFAULT UNCHANGED: NaN means "not specified", so sigma_m below is used verbatim and every
+% existing scenario and the frozen goldens are byte-identical.
+% PRECEDENCE: sigma_cycles WINS whenever set, including over a scenario-owned sigma_m (a
+% validation warning records the override). Metre-wins was tried and is useless:
+% golden_baseline.json declares sigma_m = 0.01 and every ladder file inherits it via
+% _extends, so the cycles knob would be inert everywhere.
+% NOTE the two disagree today at L1: 0.01 cycles (the carrierPhase.sigma_cycles used by the
+% diagnostic path) is 1.9 mm, against the 5 mm asserted here. Setting sigma_cycles adopts
+% the cycles number on BOTH paths, which is a deliberate change of the error budget.
+% TWO-TERM BUDGET. sigma_cycles alone models only the DISPERSIVE error (thermal, phase
+% multipath bounded by lambda/4, wind-up at one cycle per revolution). The NON-DISPERSIVE
+% error -- troposphere, oscillator phase noise, antenna phase-centre stability, PCV residual
+% -- is constant in METRES, so in cycles it GROWS with frequency and a fixed cycles figure
+% models it backwards. finalizeConfig therefore adds a floor in quadrature, ON THE CYCLES
+% PATH ONLY: sigma_m = sqrt((sigma_cycles*lambda)^2 + sigmaFloor_m^2).
+% sigmaFloor_m = NaN inherits cfg.measurement.sigmaFloor_m, the EXISTING general floor (1 mm
+% here, 1 cm under the realism grade, 1 m under honestCovarianceConfig), so the carrier and
+% code floors cannot drift apart. Without it, 0.01 cycles at 61.25 GHz is 0.049 mm -- 204x
+% below the 1 cm real-world guard realismGradeConfig declares and GeoRealWorldScenarioGuard
+% enforces.
+% CONSEQUENCE, worth knowing before reading a band sweep: with the 1 cm realism floor the
+% result is ~1 cm at EVERY band (10.18 mm at L1, 10.00 mm at 61.25 GHz) because this budget
+% is floor-dominated throughout. That is the honest answer, not a bug.
 cfg.measurements.carrier.sigma_m                   = 0.005;
+cfg.measurements.carrier.sigma_cycles              = NaN;   % NaN = not specified; use sigma_m
+cfg.measurements.carrier.sigmaFloor_m              = NaN;   % NaN = inherit measurement.sigmaFloor_m
 cfg.measurements.carrier.minElevationDeg           = 5;
 cfg.measurements.carrier.cycleSlipMode             = 'none';
 cfg.measurements.carrier.syntheticSlipProbability  = 0;

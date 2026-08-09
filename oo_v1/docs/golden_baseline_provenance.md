@@ -107,7 +107,7 @@ likely to be challenged, so every claim here is a measurement.
 | `carrierSlip.baselineDifferencedMode` | `true`, ref antenna 1 | Differences the slip metric for antennas 2–4 against the antenna-1 row of the same tower and signal, so a receiver-clock-like common jump does not reset all four arcs while a localised slip stays detectable. Exactly inert at one antenna; declared explicitly rather than inherited from the realism overlay. | Internal: `+revgnss/CarrierTrackManager.m`; `realismGradeConfig` carrier-arc-survival block |
 | `estimator.attitude.useCodePartials` / `useCarrierPartials` | `false` / `false` | **The four antennas are phase centres, not an attitude sensor, and that is a decision.** The lever arm is 1.02 m against a code σ of 0.166–0.230 m over this network's elevations, so code-derived attitude carries of order 10⁻⁵ of the star tracker's per-epoch information. `finalizeConfig` switches `estimateAttitudeFromPseudorange` on above one antenna and these two flags switch it back off; they are pinned in the scenario so the choice is visible. | Cohen (1996); Markley & Crassidis (2014), §6; internal measurement |
 | *(not set)* | `estimator.estimateAttitude*` | `finalizeConfig` rewrites these unconditionally at `nReceivers > 1`, so a scenario-set value would be silently overridden and would break the no-override assertion in the gate. | Internal: `+revgnss/ConfigFactory.m:1616–1628` |
-| **R across antennas** | tower clock only — **declared, not compensated** | Measured per-row code variance at tower 1: **3.0029 m²** total, of which ionosphere 2.4497, multipath 0.2636, troposphere 0.0659, code thermal 0.0401, tower clock 0.0101, hardware delay 0.0025, higher-order ionosphere 0.0001. The part that is physically **common to all four antennas** is 2.5283 m² = **84.2 %**, but the covariance R actually carries between two antenna rows of one tower is **0.0101 m² — the tower-clock product alone** (correlation 0.003363, and 0.0101 = 0.10² exactly). Why it is nonetheless left alone: the two dominant common terms are *deliberate double coverage on top of estimated states* — the slant ionosphere and the zenith wet delay are **EKF states**, so four rows legitimately determine one state better, and what the missing block costs is a **conservatism margin**, not the estimator's only defence. What that margin buys back is bounded: the genuinely un-estimated common terms (hardware delay, higher-order ionosphere, survey, DCB residual) total ≈ 0.074 m. **Consequence, stated plainly: the per-tower ionosphere-state covariance can be up to √4 = 2× tighter than it should be.** Restoring the margin by inflating σ_iono from 1.0 to 2.0 m would de-weight *all* code data by ≈ 40 % to compensate an allowance that was itself deliberately generous — a larger distortion than the one it fixes. Recorded as declared limitation 5 (§14) rather than tuned away. | Bar-Shalom et al. (2001), §3; internal measurement (§12) |
+| **R across antennas** | tower clock only — **declared, not compensated** | Measured per-row code variance at tower 1 (Tenerife, 35.76°), **at the first epoch** — see the warning under §12, this is *not* the arc average: **3.0029 m²** total = ionosphere 2.4497 + multipath 0.2636 + **scintillation 0.1709** + troposphere 0.0659 + code thermal 0.0401 + tower clock 0.0101 + hardware delay 0.0025 + higher-order ionosphere 0.0001. **CORRECTED 2026-08-08: earlier revisions of this row omitted the scintillation term and their enumeration summed to 2.8320, not to the 3.0029 they claimed.** The omission was structural, not a typo: `ErrorChain` aggregates `labels = {'code','trop','iono','hwDelay','mp','ionoHO'}` and carries scintillation *outside* that list as `err.scintSigmaL1_m` (`+models/+errors/ErrorChain.m:340-352`), so any budget enumerated from `labels` drops it silently. The part physically **common to all four antennas** is everything except code thermal — the only genuinely per-antenna term (measured inter-antenna correlation −0.027) — i.e. **2.9628 m² = 98.7 %**, because the two v2.0 gates (`atmosphere.sharedAcrossAntennas`, `errors.multipath.coloredGM.sharedAcrossAntennas`) moved scintillation and multipath into the common set, as §12 records. The covariance R actually carries between two antenna rows of one tower is **0.0101 m² = 0.34 % of it — the tower-clock product alone** (correlation 0.003363, and 0.0101 = 0.10² exactly). Part of the gap is *deliberate double coverage on top of estimated states*: the slant ionosphere and the zenith wet delay are **EKF states**, so four rows legitimately determine one state better. But the un-estimated common remainder is **not** the ≈ 0.074 m earlier claimed here — with scintillation and multipath correctly counted it is multipath 0.2636 + scintillation 0.1709 + hardware delay 0.0025 + higher-order ionosphere 0.0001 = **0.4371 m², i.e. σ ≈ 0.661 m**, roughly nine times the previous figure, and none of it is backed by a state. **Consequence, stated plainly: on those terms the four antenna rows carry close to ONE independent sample rather than four, so the over-count approaches the full √4 = 2×.** Inflating σ_iono from 1.0 to 2.0 m would de-weight *all* code data by ≈ 40 % to compensate an allowance that was itself deliberately generous, so it remains the wrong lever; the right one is an off-diagonal block, which is not implemented. Recorded as declared limitation 5 (§14) rather than tuned away. | Bar-Shalom et al. (2001), §3; internal measurement (§12) |
 
 ---
 
@@ -306,6 +306,23 @@ Every row is the change in *z* − *h* when that single effect is disabled, at `
 10 epochs, all five towers, both signals. This is what the baseline actually carries — not what
 the config claims.
 
+> **⚠ MEASUREMENT BASIS — read before quoting these numbers (added 2026-08-08).**
+> The window is **10 epochs starting at t = 0**, and three of the terms below are Gauss–Markov
+> processes that start from rest or from a fixed initial value. They are therefore recorded
+> **below their steady state**, and by different factors, so the *ordering* in this table is
+> warm-up-biased and is not the arc-average ordering:
+> * Coloured multipath (τ = 60 s) reaches √(1 − e^(−2t/τ)) = **53 %** of steady state by t = 10 s.
+> * Scintillation (τ = 30 s) reaches **72 %**, and its amplitude state `scintAmplitude`
+>   *initialises to exactly 1.0* (`+models/+errors/EnvironmentModel.m:125`) while its stationary
+>   median is ≈ 0.68 — so this window samples an atypically quiet realisation of it.
+> * Arc-average scintillation variance at Tenerife is ≈ 0.840 m², about **5×** the 0.1709 m²
+>   the first epoch shows, which puts the true arc-average per-row code variance nearer
+>   **3.67 m²** than the 3.0029 m² quoted in §4, and makes scintillation ≈ 20–24 % of the
+>   variance at *every* tower rather than the few percent this table implies.
+>
+> The §4 R-budget row is a **first-epoch** snapshot for the same reason. Quote these figures as
+> "at the first epoch", never as arc averages.
+
 | Truth-side effect | peak \|Δ(*z*−*h*)\| [m] | rms \|Δ(*z*−*h*)\| [m] | Across the four antennas |
 |---|---|---|---|
 | Ionospheric scintillation | 7.583 | 0.618 | **common** (after the §4 gate; was independent) |
@@ -344,13 +361,51 @@ Code thermal noise is per antenna and genuinely independent (measured inter-ante
 
 ---
 
+## 13a. Scintillation obliquity — gated fix, not applied in this baseline
+
+`getScintillationSigma` hardcoded a flat-Earth `1/sin(el)` obliquity for the Conker S4 elevation
+scaling, while `effects.ionosphere.mappingModel` selects `thinShell` at 350 km for the
+first-order slant delay that pierces **the same layer**. The stated reason for choosing
+`thinShell` (§7) is that `1/sin(el)` over-maps at low elevation — and here that over-mapping is
+what drives S4 through the clamp: at Stockholm, S4 = **0.7100** with `1/sin` (clamped) versus
+**0.5769** with the thin shell, i.e. σ = 2.1213 m versus 0.5188 m, a factor **4.09**.
+
+Now selectable via `errors.ionosphere.scintillation.obliquityModel`:
+`'simpleSecant'` (**default — bit-identical to the legacy path**), `'thinShell'`, or
+`'matchIonoMapping'` (follow `effects.ionosphere.mappingModel`, so the two can never disagree).
+Gate: `tests/test_scintillation_obliquity_gated.m`. Ladder rung:
+`config/ladder/feat/feat024_scintObliquityMatchIono.json`. Regression fixture:
+`golden_feat024_<tier>.mat` (`goldenFeat024ScenarioConfig` = the realism fixture with this
+one leaf changed, so any delta against `golden_realism_<tier>` is the obliquity alone —
+measured 24 of 166 metrics differ at the smoke tier). The fixture exists because **no other
+golden reaches the non-default branch**, and the `single` golden cannot reach this code path
+at all: it ships `S4zen = 0`, which makes S4 identically zero and the obliquity structurally
+inert. ⚠ **The `<tier> = full` goldens are 14400 s arcs** (every fixture builds from
+`masterConfig()`, whose duration default is 14400 s; only `run_oo_v1` imposes 3600 s), so they
+are *not* comparable to the 3600 s delta quoted below — different arcs, deliberately.
+
+**This baseline deliberately keeps `'simpleSecant'`** so the v2.0 numbers stand unchanged; the
+fix is recorded and measured rather than silently adopted. Measured at 3600 s, seed 42, paired
+(same unit normals rescaled): network mean scintillation variance 1.0592 → 0.1729 m²;
+positionErrorMax −29.0 %, positionRMS_runwide −3.5 %, codeResidualRms −7.9 %, **meanNIS only
+−0.91 %**; carrier +0.003 %, Doppler and EKF dynamics energy bit-identical. The small NIS move
+is the signature of a **matched** term — the truth is drawn as σ·randn and the same σ² enters R
+(`+models/+measurements/CodeMeasurementBuilder.m:583`), so shrinking σ shrinks both together.
+Stated plainly: **part of the improvement is injecting less noise, not weighting better**, and
+the honest claim is consistency, not performance. The −29 % peak is a max statistic on one
+realisation; quote the RMS figures.
+
+---
+
 ## 14. Declared limitations
 
 1. **Arc length.** 3600 s = 15° of GEO arc cannot separate a rigid formation rotation from a deformation. No orientation claim is made from this baseline.
 2. **Phase wind-up is not modelled.** It is paid for in the 10 mm carrier σ (≈ 8 mm expected over the arc), not simulated.
 3. **Antenna PCV cancels.** The configuration represents a perfectly calibrated antenna; the ~5 mm real residual is not injected (§8). Any write-up must say so.
 4. **Half the float-ambiguity directions are unobservable.** Each (tower, antenna) contributes **one** ionosphere-free carrier row against **two** ambiguity states — 20 rows for 40 states. The unconstrained combinations sit at their 100 m prior. Harmless for the estimate, but they inflate max(diag P) and therefore the PSD-guard floor (§9).
-5. **R has no across-antenna atmospheric block.** 84.2 % of the per-row code variance is physically common to the four antennas, yet R correlates only the 0.0101 m² tower-clock product across them. Because the two dominant common terms are estimated states, the practical cost is a lost conservatism margin — the per-tower ionosphere-state covariance can be up to 2× tighter than it should be. Quantified in §4 and deliberately not compensated; the compensation would distort more than it fixes.
+5. **R has no across-antenna atmospheric block.** **98.7 %** of the per-row code variance is physically common to the four antennas — everything except code thermal, once the two v2.0 sharing gates are counted — yet R correlates only the 0.0101 m² tower-clock product (0.34 %) across them. The dominant common terms *are* estimated states, but **0.4371 m² (σ ≈ 0.661 m) of the common part is un-estimated** (multipath + scintillation + hardware delay + higher-order ionosphere), so on those terms the four rows carry close to one independent sample rather than four and the over-count approaches the full √4 = 2×. Revised upward 2026-08-08: the earlier figures here (84.2 %, ≈ 0.074 m) omitted scintillation. Quantified in §4 and deliberately not compensated; inflating σ_iono is the wrong lever, and the right one — an off-diagonal block — is not implemented.
+
+12. **Scintillation code σ is set by a numerical clamp, not by physics, at low elevation.** The Conker factor 1/√(1 − 2·S4²) is singular at S4 = 1/√2, guarded by `S4 = min(0.7, …)`. With the delivered `S4zen = 0.3` that guard **binds 32.8 % of epochs at Stockholm** (22.58°), 26.1 % at Bengaluru, 15.3 % at Tenerife, 6.1 % at Libreville and 4.4 % at Hartebeesthoek; while it binds, the row σ is pinned at 0.30/√0.02 = **2.1213 m** and stops responding to elevation or to the amplitude state. Two contributing model choices are declared rather than fixed here: (a) `scintAmplitude` is a **single scalar shared by all five towers** (`+models/+errors/EnvironmentModel.m:316`, keyed on tower index 0), so stations with pierce points ~7000 km apart and opposite climatologies fade and clamp in lockstep; (b) `S4zen = 0.3` is an equatorial/disturbed value applied unchanged at 59.3° N, where it is least defensible and does the most damage. A third contributor — the obliquity — **has** been addressed, see §13a.
 6. **The elevation mask is split.** `estimator.elevationMask_rad = 10°` reaches the two-way rows; the code/carrier/Doppler visibility gate uses a hard-coded 5° because it reads a top-level key nothing sets. Inert here (lowest tower 22.58°).
 7. **Single seed.** The main run is one realisation; the ensemble evidence comes from the 12-seed Monte-Carlo block, and even that is short (900 s).
 8. **Effective sample size.** With correlation times of 600 s (ionosphere) and 10 800 s (troposphere), a 3600 s arc contains ~1–6 independent samples of those processes, not 3601. NEES/NIS *means* can look acceptable while the residual autocorrelation says otherwise — check ρ(NIS) at lag ≈ τ, not just NIS/dof.

@@ -964,14 +964,60 @@ classdef ClockExactReportBuilder
             try
                 n = diag.getNIS();
                 if ~isempty(t) && ~isempty(n)
-                    plot(ax, t, n, 'k-', 'LineWidth',0.8);
+                    % E[NIS_k] = M_k, the row count of epoch k -- NOT 1. Drawn bare, a
+                    % curve sitting near 100 reads as a catastrophic failure when it is
+                    % the nominal value, so the dof and its two-sided 95% chi-squared
+                    % band go behind the series as the reference the eye needs.
+                    [dof, lo, hi] = revgnss.ClockExactReportBuilder.nisDofBand_(diag, numel(n));
+                    if numel(t) ~= numel(n); dof = []; end   % band must align with t
+                    hold(ax,'on');
+                    if ~isempty(dof)
+                        tc = t(:);
+                        % Edged, not EdgeColor 'none': the edge draws the band limits
+                        % crisply AND gives the legend swatch a visible outline.
+                        fill(ax, [tc; flipud(tc)], [lo(:); flipud(hi(:))], [0.80 0.80 0.80], ...
+                            'EdgeColor',[0.62 0.62 0.62], 'LineWidth',0.4, ...
+                            'FaceAlpha',0.55, 'DisplayName','95% \chi^2 (per epoch)');
+                        plot(ax, tc, dof, 'r--', 'LineWidth',0.8, 'DisplayName','E[NIS] = dof');
+                    end
+                    plot(ax, t, n, 'k-', 'LineWidth',0.8, 'DisplayName','NIS');
                     xlabel(ax,'Time [s]','FontSize',7);
                     ylabel(ax,'NIS [-]','FontSize',7);
                     grid(ax,'on');
+                    if ~isempty(dof)
+                        % Outside the axes: NIS fills its band top to bottom, so every
+                        % in-axes location lands on the data.
+                        legend(ax,'Location','northoutside','Orientation','horizontal', ...
+                            'FontSize',6,'Box','off');
+                    end
+                    hold(ax,'off');
                     return;
                 end
             catch; end
             revgnss.ClockExactReportBuilder.noDataAxes_(ax);
+        end
+
+        function [dof, lo, hi] = nisDofBand_(diag, nEpochs)
+            % nisDofBand_  Per-epoch NIS dof and its two-sided 95% chi-squared band.
+            %   The dof is the EKF row count, which can change with tower visibility, so
+            %   the band is evaluated per epoch -- but only once per DISTINCT dof, since
+            %   the count is constant in most runs. Empty on any gap: a partial band
+            %   would misplace the reference the plot is being given.
+            dof = []; lo = []; hi = [];
+            rows = double(diag.getNumMeasurementRows());
+            rows = rows(:);
+            if numel(rows) ~= nEpochs || isempty(rows) || any(~isfinite(rows)) || any(rows <= 0)
+                return;
+            end
+            dof = rows;
+            lo  = zeros(size(rows));
+            hi  = zeros(size(rows));
+            for d = unique(rows)'
+                [l_, h_] = revgnss.ChiSquareConsistency.bounds(d, 0.95);
+                m = (rows == d);
+                lo(m) = l_;
+                hi(m) = h_;
+            end
         end
 
         % ................................................................
@@ -2224,6 +2270,109 @@ classdef ClockExactReportBuilder
                     v = v0;
                 end
             end
+        end
+
+        % ----------------------------------------------------------------
+        % NIS dof / chi-squared band
+        % ----------------------------------------------------------------
+
+        function writeNisDofRows_(fid, summary, tableWidth)
+            % writeNisDofRows_  Mean NIS with its dof, normalised ratio, and chi-squared band.
+            %
+            % NIS is the RAW statistic, whose expectation is M_k -- the number of
+            % measurement rows folded into epoch k, 105 for the four-antenna baseline --
+            % and NOT 1. A mean printed on its own invites the reader to compare it
+            % against 1 and read a nominal filter as two orders of magnitude wrong, so
+            % the dof it must be divided by is printed beside it, with the ratio and the
+            % two-sided chi-squared acceptance band. Emits nothing when the run stored no
+            % NIS dof (federated-swarm runs have no single-filter NIS at all), so those
+            % reports stay byte-identical.
+            %
+            % tableWidth: text width of the enclosing two-column table, for the footnote
+            %   \multicolumn spanning both columns.
+            CE      = revgnss.ClockExactReportBuilder;
+            dofAll  = CE.safeField_(summary, 'expectedNIS', NaN);
+            dofPhys = CE.safeField_(summary, 'physicalDof', NaN);
+            nisAll  = CE.safeField_(summary, 'meanNIS',     NaN);
+            nisPhys = CE.safeField_(summary, 'physicalNIS', NaN);
+            if ~CE.isPosFinite_(dofAll) && ~CE.isPosFinite_(dofPhys); return; end
+
+            % NIS itself may legitimately be 0 (a fully deterministic run has zero
+            % innovation), so the value and ratio rows accept any finite number; only
+            % the dof, which divides, must be strictly positive.
+            CE.writeQuantRow_(fid, 'Mean NIS (raw, all rows)', ...
+                CE.nisPairStr_(nisAll, nisPhys, @(v) sprintf('%.2f', v)));
+            CE.writeQuantRow_(fid, 'NIS dof (EKF rows / epoch)', ...
+                CE.nisPairStr_(CE.posOrNan_(dofAll), CE.posOrNan_(dofPhys), ...
+                               @(v) CE.dofStr_(v)));
+            CE.writeQuantRow_(fid, 'Mean NIS / dof (expected 1.00)', ...
+                CE.nisPairStr_(CE.ratio_(nisAll, dofAll), CE.ratio_(nisPhys, dofPhys), ...
+                               @(v) sprintf('%.3f', v)));
+
+            % Band on the physical dof when the accounting separated the gauge rows:
+            % physicalNIS is the chi-squared diagnostic, meanNIS the augmented alias.
+            dofBand = dofPhys;
+            if ~CE.isPosFinite_(dofBand); dofBand = dofAll; end
+            [rlo, rhi] = revgnss.ChiSquareConsistency.bounds(dofBand, 0.95);
+            CE.writeQuantRow_(fid, ...
+                sprintf('95\\%% $\\chi^2$ band, dof $=%s$', CE.dofStr_(dofBand)), ...
+                sprintf('$[%.1f,\\;%.1f]$ raw', rlo, rhi));
+            % writeQuantRow_ passes the label through %s, so it must already be literal
+            % LaTeX -- a doubled backslash here would emit a row break, not \hspace.
+            CE.writeQuantRow_(fid, '\hspace{1em}same band per dof', ...
+                sprintf('$[%.3f,\\;%.3f]$', rlo/dofBand, rhi/dofBand));
+            fprintf(fid, ['\\multicolumn{2}{p{%.2f\\textwidth}}{\\footnotesize ' ...
+                'The $\\chi^2$ band is the two-sided 95\\%% interval for a ' ...
+                '\\textbf{single} epoch. The means above are averaged over epochs whose ' ...
+                'NIS is autocorrelated in this simulation, so the band bounds the ' ...
+                'per-epoch scatter and is not a hypothesis test on the mean.}\\\\\n'], ...
+                tableWidth);
+        end
+
+        function s = nisPairStr_(allVal, physVal, fmt)
+            % nisPairStr_  "<all> (all rows), <phys> (physical)", collapsed when equal.
+            %   Gauge rows are absent in most runs, which makes the two statistics
+            %   identical; printing one number then reads clearer than printing it twice.
+            hasAll  = isnumeric(allVal)  && isscalar(allVal)  && isfinite(allVal);
+            hasPhys = isnumeric(physVal) && isscalar(physVal) && isfinite(physVal);
+            if hasAll && hasPhys
+                if abs(allVal - physVal) <= 1e-9 * max(1, abs(allVal))
+                    s = fmt(allVal);
+                else
+                    s = sprintf('%s (all rows), %s (physical)', fmt(allVal), fmt(physVal));
+                end
+            elseif hasAll
+                s = sprintf('%s (all rows)', fmt(allVal));
+            elseif hasPhys
+                s = sprintf('%s (physical)', fmt(physVal));
+            else
+                s = 'not available';
+            end
+        end
+
+        function s = dofStr_(v)
+            % dofStr_  dof as an integer when the row count is constant, else a mean.
+            if abs(v - round(v)) < 1e-9
+                s = sprintf('%d', round(v));
+            else
+                s = sprintf('%.1f (mean)', v);
+            end
+        end
+
+        function r = ratio_(num, den)
+            r = NaN;
+            if revgnss.ClockExactReportBuilder.isPosFinite_(den) && isfinite(num)
+                r = num / den;
+            end
+        end
+
+        function v = posOrNan_(v)
+            % posOrNan_  Pass a strictly positive finite scalar through, else NaN.
+            if ~revgnss.ClockExactReportBuilder.isPosFinite_(v); v = NaN; end
+        end
+
+        function tf = isPosFinite_(v)
+            tf = isnumeric(v) && isscalar(v) && isfinite(v) && v > 0;
         end
 
         function s = formatCols_(cols)

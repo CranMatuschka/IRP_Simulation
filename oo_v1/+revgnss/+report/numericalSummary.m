@@ -103,6 +103,11 @@ function numericalSummary(fid, cfg, summary, diag)
     jitStr74_ = ''; if jit74_; jitStr74_ = ' (jitter added)'; end
     CE.writeQuantRow_(fid, '$R$ symmetric positive-definite', ...
         sprintf('%s%s', CE.yesNo_(logical(spdOk74_),'yes','no'), jitStr74_));
+    % Filter consistency LAST in this table: the block ends in a \multicolumn footnote,
+    % which belongs against the \bottomrule rather than mid-table. The raw NIS has
+    % E[NIS] = rows per epoch, so the mean quoted without its dof reads as a gross
+    % inconsistency for a nominal filter. 0.82 = the 0.52 + 0.30 column widths.
+    CE.writeNisDofRows_(fid, summary, 0.82);
     fprintf(fid, '\\bottomrule\n\\end{tabular}\n\\end{center}\n');
 
     % Table 2: Metric / Full RMS / Final window

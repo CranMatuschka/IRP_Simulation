@@ -113,7 +113,10 @@ classdef MappingFunctions
             % The thin-shell formula does NOT use magic constants.  It reduces to
             % 1/sin(el) only when hI >> Re, which is not the case for ionosphere.
             %
-            % This is NOT a Klobuchar model.  Klobuchar is not implemented.
+            % This is NOT the Klobuchar DELAY model -- that lives in
+            % models.atmosphere.Klobuchar and is applied on the model side by
+            % EnvironmentModel.getIonoDelay. Only the obliquity differs: this uses the
+            % thin-shell geometry, not the ICD's F = 1 + 16(0.53 - E)^3.
 
             if nargin < 3 || isempty(shellHeight_m)
                 shellHeight_m = 350e3;  % default single-layer height [m]

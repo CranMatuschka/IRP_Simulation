@@ -8,10 +8,13 @@
     "nSpaceAssets": 1,
     "nReceivers": 4
   },
+  "_pairNote": "The truth/model pair is written out explicitly, not left to the master enable -- see feat001. ConfigFactory.finalizeConfig reads physics.relativity.clock.truth.enable to decide whether asset.clock.relativisticFracFreq is armed; the master reaches no consumer.",
   "physics": {
     "relativity": {
       "clock": {
-        "enable": false
+        "enable": false,
+        "truth": { "enable": false },
+        "model": { "enable": false }
       }
     }
   },

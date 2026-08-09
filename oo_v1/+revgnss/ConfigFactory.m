@@ -796,7 +796,12 @@ classdef ConfigFactory
             if isfield(cfg,'carrierSlip') && isfield(cfg.carrierSlip,'threshold_m')
                 if isfield(cfg,'measurements') && isfield(cfg.measurements,'carrier') && ...
                         isfield(cfg.measurements.carrier,'slipDetection')
+                    % NaN on the canonical side means AUTO (resolved later, once lambda and
+                    % the carrier sigma are known) -- not a disagreement. Guard the compare:
+                    % x ~= NaN is ALWAYS true, so without this every auto-threshold run would
+                    % emit a "canonical slip threshold wins" warning that means nothing.
                     if isfield(cfg.measurements.carrier.slipDetection,'threshold_m') && ...
+                            isfinite(cfg.carrierSlip.threshold_m) && ...
                             cfg.measurements.carrier.slipDetection.threshold_m ~= cfg.carrierSlip.threshold_m
                         cfg.validation.warnings{end+1} = ...
                             'cfg.measurements.carrier.slipDetection.threshold_m is derived from cfg.carrierSlip.threshold_m; canonical slip threshold wins.';
@@ -1256,6 +1261,182 @@ classdef ConfigFactory
                 sn79_ = sigNames79_{si79_};
                 cfg.signals.(sn79_).frequency_Hz = freqHz79_(si79_);
                 cfg.signals.(sn79_).lambda_m     = waveM79_(si79_);
+            end
+
+            % ---- carrierPhase frequency/wavelength DERIVED, not frozen -----------------
+            % masterConfig seeds measurements.carrierPhase.frequency_Hz/.lambda_m from the
+            % canonical SignalDefinition.get('L1') -- 1575.42 MHz / 190.29 mm -- and nothing
+            % updated them when a scenario retuned the band. Measured across
+            % config/ladder/freq/freq009..013 (915 MHz .. 61.25 GHz): signals.L1.frequency_Hz
+            % followed the JSON in every file while carrierPhase.frequency_Hz read 1575.42 MHz
+            % in ALL of them, up to a 39x wavelength error at the 61.25 GHz rung. Derive both
+            % from the SAME resolved primary carrier the code path and the ionosphere scaling
+            % already use (cfg.signals.<primary>), so the pair can never disagree with the band.
+            %
+            % The primary carrier is 'L1' when present (masterConfig always names L1 first);
+            % a signal list without an L1 falls back to its first entry. lambda is derived from
+            % the frequency rather than copied, so the two fields are consistent by construction.
+            % A scenario that pins either field explicitly keeps its own value -- same
+            % provenance.explicit ownership test the frequency block above uses.
+            %
+            % GOLDEN-SAFE: golden_baseline.json leaves L1 at the canonical 1575.42 MHz, so the
+            % derived pair comes out bit-identical to masterConfig's seed there.
+            if ~isfield(cfg.measurements,'carrierPhase')
+                cfg.measurements.carrierPhase = struct();
+            end
+            primIdx79_ = find(strcmpi(sigNames79_, 'L1'), 1);
+            if isempty(primIdx79_); primIdx79_ = 1; end
+            if nSig79_ >= 1
+                cpOwnsFreq79_ = any(strcmp(ownedSig79_, 'measurements.carrierPhase.frequency_Hz'));
+                cpOwnsLam79_  = any(strcmp(ownedSig79_, 'measurements.carrierPhase.lambda_m'));
+                if ~cpOwnsFreq79_
+                    cfg.measurements.carrierPhase.frequency_Hz = freqHz79_(primIdx79_);
+                end
+                if ~cpOwnsLam79_
+                    if cpOwnsFreq79_
+                        % Scenario pinned the frequency but not the wavelength: derive from
+                        % what it pinned, not from the signal table it chose to bypass.
+                        cfg.measurements.carrierPhase.lambda_m = ...
+                            299792458 / cfg.measurements.carrierPhase.frequency_Hz;   % c [m/s]
+                    else
+                        % Same array the cfg.signals.<name>.lambda_m aliases come from, so
+                        % carrierPhase.lambda_m == cfg.signals.L1.lambda_m to the last bit.
+                        cfg.measurements.carrierPhase.lambda_m = waveM79_(primIdx79_);
+                    end
+                end
+            end
+
+            % ---- Band-invariant carrier sigma and slip threshold ------------------------
+            % Both quantities are physically specified in CYCLES (a fraction of a wavelength,
+            % and an integer count of wavelengths) but are stored in metres, so they silently
+            % rescale with the band. Resolve them HERE, after lambda is known, and keep the
+            % metre field canonical so every downstream reader is untouched.
+            %
+            % MEASURED, freq009..013 at the fixed metre values: carrier R goes from 0.026
+            % cycles at GPS L1 to 1.02 cycles at 61.25 GHz (R asserting a whole wavelength of
+            % noise), and the slip threshold from 0.53 to 20.4 cycles (sub-cycle sensitive to
+            % blind). The pre-fix ladder could not show this because the carrier wavelength
+            % was stuck at L1 regardless of band; see the carrierPhase block above.
+            %
+            % PRECEDENCE, both fields: THE CYCLES FORM WINS WHENEVER IT IS SET to a finite
+            % positive value, because setting it is an unambiguous opt-in; the metre field is
+            % the fallback. The reverse rule (metre-wins-if-owned) was tried and is useless in
+            % practice: golden_baseline.json explicitly declares
+            % measurements.carrier.sigma_m = 0.01 with a documented 10 mm budget, and EVERY
+            % ladder file inherits it through _extends, so a metre-wins rule would leave the
+            % cycles knob inert on every scenario in the repository. When BOTH are explicitly
+            % scenario-owned the cycles form still wins, and a validation warning records it
+            % so the override is never silent.
+            % GOLDEN-SAFE: masterConfig ships sigma_cycles = NaN and threshold_cycles = NaN,
+            % so with no opt-in nothing is written and the frozen goldens are byte-identical.
+            if nSig79_ >= 1
+                lamPrim79_ = waveM79_(primIdx79_);
+
+                % --- carrier sigma (the R applied to every carrier EKF row) ---
+                if ~isfield(cfg.measurements,'carrier'); cfg.measurements.carrier = struct(); end
+                sigCyc79_ = NaN;
+                if isfield(cfg.measurements.carrier,'sigma_cycles')
+                    sigCyc79_ = cfg.measurements.carrier.sigma_cycles;
+                end
+                if isnumeric(sigCyc79_) && isscalar(sigCyc79_) && isfinite(sigCyc79_) && sigCyc79_ > 0
+                    % TWO-TERM BUDGET. A cycles-only sigma models the DISPERSIVE part of the
+                    % carrier error -- PLL thermal noise, phase multipath (bounded by
+                    % lambda/4), phase wind-up (exactly one cycle per revolution) -- all of
+                    % which really are proportional to lambda. It does NOT model the
+                    % NON-DISPERSIVE part: tropospheric wet-delay fluctuation, oscillator
+                    % phase noise, antenna phase-centre mechanical stability, PCV residual.
+                    % Those are constant in METRES, so expressed in cycles they grow linearly
+                    % with frequency -- a fixed cycles figure is exactly backwards for them.
+                    %
+                    % Without a floor, 0.01 cycles at the 61.25 GHz rung is 0.049 mm, which is
+                    % 204x below the 1 cm "real-world guard" realismGradeConfig declares
+                    % (honestFloors.carrier_sigma_m) and that GeoRealWorldScenarioGuard
+                    % enforces -- i.e. the derivation would silently undercut the repository's
+                    % own realism policy. Add the floor in quadrature so it cannot.
+                    %
+                    % The floor is cfg.measurement.sigmaFloor_m (the EXISTING general floor,
+                    % 1 mm by default, raised to 1 cm by the realism grade and to 1 m by
+                    % honestCovarianceConfig) unless the scenario states a carrier-specific
+                    % one. Reused rather than reinvented so the carrier and code floors cannot
+                    % drift apart.
+                    %
+                    % APPLIED ONLY ON THE CYCLES PATH: a scenario that never sets sigma_cycles
+                    % keeps its sigma_m untouched, so the frozen goldens cannot move.
+                    sigDer79_ = sigCyc79_ * lamPrim79_;
+                    floor79_ = NaN;
+                    if isfield(cfg.measurements.carrier,'sigmaFloor_m')
+                        floor79_ = cfg.measurements.carrier.sigmaFloor_m;
+                    end
+                    if ~(isnumeric(floor79_) && isscalar(floor79_) && isfinite(floor79_) && floor79_ >= 0)
+                        floor79_ = NaN;
+                        if isfield(cfg,'measurement') && isfield(cfg.measurement,'sigmaFloor_m')
+                            floor79_ = cfg.measurement.sigmaFloor_m;
+                        end
+                    end
+                    if isnumeric(floor79_) && isscalar(floor79_) && isfinite(floor79_) && floor79_ > 0
+                        sigDer79_ = sqrt(sigDer79_^2 + floor79_^2);
+                    end
+                    % Warn only on a REAL override. finalizeConfig can run more than once per
+                    % run (see the re-entry note above), and on the second pass the value it
+                    % would report as "scenario-owned" is the one this block already derived
+                    % -- a duplicate warning naming a number the user never wrote.
+                    if any(strcmp(ownedSig79_, 'measurements.carrier.sigma_m')) && ...
+                            cfg.measurements.carrier.sigma_m ~= sigDer79_
+                        cfg.validation.warnings{end+1} = sprintf( ...
+                            ['measurements.carrier.sigma_cycles (%g cyc) overrides the ' ...
+                             'scenario-owned measurements.carrier.sigma_m (%g m); the ' ...
+                             'band-referenced form wins -> %g m at lambda %g m.'], ...
+                            sigCyc79_, cfg.measurements.carrier.sigma_m, ...
+                            sigDer79_, lamPrim79_);
+                    end
+                    cfg.measurements.carrier.sigma_m = sigDer79_;
+                end
+
+                % --- slip threshold (canonical owner is cfg.carrierSlip.threshold_m) ---
+                if isfield(cfg,'carrierSlip')
+                    thrCyc79_ = NaN;
+                    if isfield(cfg.carrierSlip,'threshold_cycles')
+                        thrCyc79_ = cfg.carrierSlip.threshold_cycles;
+                    end
+                    thrM79_ = NaN;
+                    if isfield(cfg.carrierSlip,'threshold_m'); thrM79_ = cfg.carrierSlip.threshold_m; end
+
+                    if isnumeric(thrCyc79_) && isscalar(thrCyc79_) && ...
+                            isfinite(thrCyc79_) && thrCyc79_ > 0
+                        thrDer79_ = thrCyc79_ * lamPrim79_;
+                        % Same re-entry guard as the sigma above.
+                        if any(strcmp(ownedSig79_, 'carrierSlip.threshold_m')) && ...
+                                thrM79_ ~= thrDer79_
+                            cfg.validation.warnings{end+1} = sprintf( ...
+                                ['carrierSlip.threshold_cycles (%g cyc) overrides the ' ...
+                                 'scenario-owned carrierSlip.threshold_m (%g m); the ' ...
+                                 'band-referenced form wins -> %g m.'], ...
+                                thrCyc79_, thrM79_, thrDer79_);
+                        end
+                        cfg.carrierSlip.threshold_m = thrDer79_;
+                    elseif isnumeric(thrM79_) && isscalar(thrM79_) && ~isfinite(thrM79_)
+                        % NaN = AUTO, the ISL idiom: the detector tests the epoch-to-epoch
+                        % change of the carrier prefit, whose noise is sqrt(2)*sigma, so
+                        % 5*sqrt(2)*sigma can never desynchronise from the sigma in force.
+                        sigNow79_ = 0.005;
+                        if isfield(cfg.measurements.carrier,'sigma_m') && ...
+                                isnumeric(cfg.measurements.carrier.sigma_m) && ...
+                                isscalar(cfg.measurements.carrier.sigma_m) && ...
+                                isfinite(cfg.measurements.carrier.sigma_m)
+                            sigNow79_ = cfg.measurements.carrier.sigma_m;
+                        end
+                        cfg.carrierSlip.threshold_m = 5 * sqrt(2) * sigNow79_;
+                    end
+
+                    % Re-assert the canonical sync. The earlier sync (see "Canonical slip
+                    % threshold sync") runs BEFORE lambda is resolved, so anything derived
+                    % here has to be pushed to the runtime field CarrierTrackManager reads.
+                    if isfield(cfg.measurements.carrier,'slipDetection') && ...
+                            isfield(cfg.carrierSlip,'threshold_m')
+                        cfg.measurements.carrier.slipDetection.threshold_m = ...
+                            cfg.carrierSlip.threshold_m;
+                    end
+                end
             end
 
             codeMask79_ = sigMask79_;
@@ -1881,8 +2062,22 @@ classdef ConfigFactory
                     cfg.errors.ionosphere.higherOrder.enable
                 cfg.effects.ionosphere.higherOrderStatus = 'boundedResidualTruthSide';
             end
+            % Klobuchar IS shipped (models.atmosphere.Klobuchar, called from
+            % EnvironmentModel.getIonoDelay on the tecGaussMarkov model side). Stamp the
+            % status from the correction the config actually selects instead of the flat
+            % 'notImplemented' this used to carry -- that literal contradicted both the
+            % shipped kernel and the golden baseline's model.correction = 'klobuchar',
+            % and it propagated into the toggle manifest and the report.
             if ~isfield(cfg.effects.ionosphere,'klobucharStatus')
-                cfg.effects.ionosphere.klobucharStatus = 'notImplemented';
+                ionoCorrection_ = 'none';
+                try; ionoCorrection_ = char(cfg.errors.ionosphere.model.correction); catch; end
+                modelSideOn_ = false;
+                try; modelSideOn_ = logical(cfg.errors.ionosphere.model.enable); catch; end
+                if strcmpi(ionoCorrection_, 'klobuchar') && modelSideOn_
+                    cfg.effects.ionosphere.klobucharStatus = 'appliedModelSideBroadcastClimatology';
+                else
+                    cfg.effects.ionosphere.klobucharStatus = 'notSelected';
+                end
             end
             if ~isfield(cfg.effects.ionosphere,'ionexStatus')
                 cfg.effects.ionosphere.ionexStatus = 'notImplemented';
