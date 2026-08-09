@@ -24,6 +24,8 @@
     "ionosphereMode": "none"
   },
   "report": {
-    "runVersion": "freq004"
-  }
+    "runVersion": "freq004",
+    "compileTex": "auto"
+  },
+  "_reportNote": "compileTex 'auto' rather than the golden's 'require': a ladder rung's deliverable is its .mat, and a pdflatex hiccup must not throw away a finished 25-minute run. ReportRunner only escalates a failed compile to an error under 'require'."
 }

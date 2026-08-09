@@ -1635,8 +1635,24 @@ classdef ReportRunner
                     end
                     fprintf('  PDF written (ClockExact): %s  (%.1f kB)\n', pdfPath, info.bytes/1024);
                 elseif ~ceResult.success
-                    error('ReportRunner:clockExactFailed', ...
-                        'ClockExact report failed: %s', ceResult.message);
+                    % A FAILED PDF MUST NOT DESTROY A FINISHED SIMULATION. The MAT is
+                    % written downstream of this branch, so throwing here threw away the
+                    % whole run: a 2026-08-08 ladder sweep lost 24 minutes of completed
+                    % simulation because pdflatex could not read one figure it had just
+                    % been handed. ClockExactReportBuilder already treats a failed compile
+                    % as a warning (it sets success=false and warns); only 'require' asked
+                    % for the PDF to be mandatory, so only 'require' escalates.
+                    compileMode = 'auto';
+                    try; compileMode = char(cfg.report.compileTex); catch; end
+                    if strcmp(compileMode, 'require')
+                        error('ReportRunner:clockExactFailed', ...
+                            'ClockExact report failed: %s', ceResult.message);
+                    end
+                    warning('ReportRunner:clockExactFailedNonFatal', ...
+                        ['ClockExact report failed: %s\n' ...
+                         '         compileTex=''%s'' (not ''require''), so the run continues ' ...
+                         'and the MAT is still written. The .tex is at: %s'], ...
+                        ceResult.message, compileMode, texPath2);
                 else
                     % compileTex='never': .tex written, no PDF
                     fprintf('  [ClockExact] .tex written (compile skipped): %s\n', texPath2);
@@ -3497,6 +3513,22 @@ classdef ReportRunner
                 summary.finalPositionLast_m  = NaN;
                 summary.finalPositionRMS_m   = NaN;
             end
+            % Initial transient. finalPosition* above -- and every position plot -- are
+            % POSTERIOR: the epoch row is committed after that epoch's update. These two
+            % record what the run actually started from and what survived the opening
+            % update, which is otherwise unrecoverable from the stored series.
+            summary.initialPriorPositionError_m     = NaN;
+            summary.initialPosteriorPositionError_m = NaN;
+            try
+                priorErr = diag.getPriorPositionErrors();
+                if ~isempty(priorErr) && isfinite(priorErr(1))
+                    summary.initialPriorPositionError_m = priorErr(1);
+                end
+                postErr = diag.getPositionErrors();
+                if ~isempty(postErr) && isfinite(postErr(1))
+                    summary.initialPosteriorPositionError_m = postErr(1);
+                end
+            catch; end
             try
                 cbErr = diag.getClockBiasErrors();
                 N  = numel(cbErr);
