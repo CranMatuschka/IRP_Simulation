@@ -67,6 +67,7 @@ cfg.report.layout                = 'clockExact';  % 'clockExact' | 'clockStyle' 
 cfg.report.writeTex              = true;
 cfg.report.compileTex            = 'require';     % 'require' | 'auto' | 'never'
 cfg.report.zoomLastSeconds       = 120;    % zoom plots show the last 120 s (fixed window)
+cfg.report.zoomFirstSeconds      = 120;    % initial-transient plot shows the first 120 s
 cfg.report.compactFinalReport    = true;
 cfg.report.suppressStageSections = true;
 cfg.report.deduplicateFigures    = true;
@@ -155,6 +156,24 @@ cfg.biases.interFrequency.carrier.model.L2_m = 0;
 % scenario assembly) and corrected by a delayed, noisy broadcast product whose
 % age-grown uncertainty enters R.
 cfg.clock.receiver.deterministic  = false;
+% GROUND-SEGMENT oscillator, symmetric with cfg.clock.receiver above and the only
+% scenario-JSON route to the tower clocks: cfg.towers is a STRUCT ARRAY, so a JSON
+% "towers" key would REPLACE the whole array (deepMergeConfig's struct-array branch)
+% and throw away every site's lat/lon/alt. Both fields are OVERRIDES applied by
+% ConfigFactory.finalizeConfig: '' leaves cfg.towers(k).clockType exactly as the
+% scenario assembly wrote it, so the default is byte-identical and
+% ConfigFactory.clockDiversityConfig's per-tower mix survives untouched.
+%
+% TRAP -- the ground clock TYPE is INERT while deterministic stays true. A
+% deterministic models.clocks.ClockModel returns identically zero bias
+% (ClockModel.m:188/264), so no h-coefficient is ever read and
+% TowerClockCorrectionProvider sees towerClkTruth = 0 for every oscillator class.
+% Changing the ground oscillator only means something with
+% cfg.clock.tower.deterministic = false as well; the h-coefficients then drive the
+% wander the broadcast product must chase, and the uncorrected residual over the
+% product's latency + update interval is what reaches the measurement.
+cfg.clock.tower.clockType         = '';     % '' | 'TCXO' | 'OCXO' | 'RUBIDIUM' | 'CESIUM1' | 'ZERO'
+cfg.clock.tower.deterministic     = true;   % true = current behaviour (zero tower-clock truth)
 % Receiver oscillator + clock realism (both single strings, changed right here).
 % clockType picks the oscillator class ('CESIUM1' | 'OCXO' | 'RUBIDIUM' | 'TCXO');
 % templateSource picks the h-coefficient realism: 'legacy' = idealised/optimistic (the
@@ -2101,12 +2120,22 @@ cfg.errors.ionosphere.scintillation.S4zen              = 0;
 % is not cosmetic: it drives S4 into the min(0.7,.) clamp that guards the 1/sqrt(1-2*S4^2)
 % singularity at S4 = 1/sqrt(2). Once clamped, the row sigma is pinned at 0.30/sqrt(0.02) = 2.121 m
 % independent of elevation and amplitude -- a hardcoded constant standing in for the model.
-%   'simpleSecant'     (DEFAULT) 1/sin(el). Legacy behaviour; keeps every golden bit-identical.
-%   'thinShell'        pierce-point obliquity at cfg.effects.ionosphere.shellHeight_m.
-%   'matchIonoMapping' follow cfg.effects.ionosphere.mappingModel, so the two terms can never
-%                      disagree again. This is the consistency fix; the other two are controls.
+%   'matchIonoMapping' (DEFAULT since 2026-08-09) follow cfg.effects.ionosphere.mappingModel,
+%                      so S4 and the slant delay can never disagree about the shell.
+%   'thinShell'        pierce-point obliquity at cfg.effects.ionosphere.shellHeight_m,
+%                      pinned regardless of what the delay mapping is doing.
+%   'simpleSecant'     1/sin(el). The legacy hardcode, retained as a control.
+% WHY THE DEFAULT MOVED. 'simpleSecant' was kept only to hold the goldens still, and the
+% cost of that was measured: on every atmosphere.realistic run the over-mapping drives S4
+% through the min(0.7,.) clamp, after which the row sigma is pinned at
+% 0.30/sqrt(1-2*0.49) = 2.1213 m -- a hardcoded constant, blind to elevation AND to the
+% amplitude state, entering both the injected truth error and R. At Stockholm (22.58 deg
+% to GEO) S4 = 0.7100 with 1/sin versus 0.5769 with the thin shell; sigma 2.1213 -> 0.5188 m.
+% Scintillation is by this repo's own measurement the LARGEST truth-only term
+% (7.58 m peak, 0.618 m rms of z-h), so a clamped constant there is not a small thing.
+% This is a consistency fix, not a fitted parameter: nothing was chosen to improve a number.
 % Sources: Conker et al. (2003) (validity requires S4 < 1/sqrt(2)); Klobuchar (1987) shell geometry.
-cfg.errors.ionosphere.scintillation.obliquityModel    = 'simpleSecant';
+cfg.errors.ionosphere.scintillation.obliquityModel    = 'matchIonoMapping';
 cfg.errors.ionosphere.scintillation.process           = 'gaussMarkov';
 cfg.errors.ionosphere.scintillation.tau_s             = 30;
 cfg.errors.ionosphere.scintillation.sigmaCodeL1_m     = 0.3;
@@ -3278,6 +3307,7 @@ cfg.report.appendRawPlots         = false;
 cfg.report.layout                 = 'default'; % 'default' | 'clockStyle' | 'clockExact'
 cfg.report.includeRawDiagnostics  = false;
 cfg.report.zoomLastSeconds        = 120;       % EKF zoom plots show the last N seconds (fixed window)
+cfg.report.zoomFirstSeconds       = 120;       % initial-transient plot shows the first N seconds
 
 % --- Validation policy ----------------------------------------
 % 'error'             — unsupported features throw (default; safe)

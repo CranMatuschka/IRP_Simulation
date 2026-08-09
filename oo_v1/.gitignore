@@ -11,6 +11,12 @@ output/notion_stage*.md
 # Phase-7 report .tex byte-diff reference (overrides the repo-root "*.txt" ignore).
 !tests/report/golden_report_tex.txt
 # User-facing scenario overlays — committed on purpose (overrides the repo-root "*.json" ignore).
-!config/scenarios/*.json
+# The 2026-08-08 migration replaced config/scenarios/ with config/ + config/ladder/<axis>/,
+# which silently un-negated this rule: every NEW ladder JSON became invisible to `git add`,
+# while the pre-migration files stayed tracked because git keeps tracking what is already in
+# the index. Five band files and two whole axes went unversioned before it was noticed. The
+# axis wildcard is deliberate so a new ladder axis is versioned the moment it is created.
+!config/*.json
+!config/ladder/*/*.json
 tests/regression/full_gate_marker.txt
 tests/regression/verify_report_marker.txt

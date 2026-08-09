@@ -1,0 +1,28 @@
+{
+  "_id": "clk003 -- groundOcxo. clock rung: the OSCILLATOR CLASS axis. One clock choice against golden_baseline.json; every other leaf is inherited through _extends, so the delta in the result is attributable to the oscillator alone. SPACE segment = cfg.asset.clockType, the spacecraft receiver clock, whose bias/drift are EKF states and whose process noise Q is taken from the SAME models.clocks.ClockModel as the truth (filter.ReverseGNSSEKF:1498) -- truth and filter are matched by construction, so a space rung asks 'how good must the on-board oscillator be', not 'what does a Q mismatch cost'. GROUND segment = cfg.clock.tower.{clockType,deterministic}, which finalizeConfig maps onto every cfg.towers(k) (a JSON 'towers' key cannot be used: cfg.towers is a struct array, so deepMergeConfig would REPLACE it and drop every site's lat/lon/alt). Tower clocks are NOT EKF states here -- clock.mode is 'spacecraftReceiverClockOnly' and clock.gauge.mode is 'externalTowerCorrections', so a tower oscillator is chased by the broadcast product and only its UNCORRECTED residual reaches the measurement.",
+  "_extends": "golden_baseline.json",
+  "_delta": "GROUND SWEEP 1/3. The golden's ground oscillator (OCXO) is left in place but allowed to RUN -- deterministic goes false, so the JOW OCXO2 random walk is live and the broadcast product has something real to chase. Space clock held at the golden caesium. Against clk001 this is the pure cost of admitting that the ground clocks are not perfect.",
+  "_trap": "TRAP the ground rungs exist to avoid: the ground clock TYPE is INERT while cfg.clock.tower.deterministic stays true. A deterministic ClockModel returns identically zero bias (ClockModel.m:188/264), so no h-coefficient is ever read and TowerClockCorrectionProvider sees towerClkTruth = 0 for every oscillator class. VERIFIED in MATLAB on 2026-08-09: OCXO deterministic gives |b|max = 0 m over a 3600 s free run; the same OCXO stochastic gives 3.6e3 m. Any ground rung that did not also set deterministic=false would measure nothing.",
+  "_mechanism": "Mechanism the ground rungs actually exercise: clocks.tower.product.mode = 'truthHistoryProductNoisy' rebroadcasts the tower clock every updateInterval_s = 30 s with latency_s = 5 s, and predicts forward linearly from the TRUTH bias and drift at the product epoch (TowerClockCorrectionProvider.m:98-113). So the free-running wander is almost entirely corrected; what survives is the wander the linear prediction cannot follow over an age of 5 to 35 s. PREDICTED residual at the mean age of 20 s, from the resolved jowTable2p1 h-coefficients (white FM contributes sqrt(h0/2 * age), random-walk FM sqrt(2*pi^2*hMinus2 * age^3/3)): RUBIDIUM ~4.9 mm, CESIUM1 ~0.30 m (white-FM dominated, h0 = 1e-19), OCXO ~1.09 m (random-walk-FM dominated, hMinus2 = 2.51e-22). Compare the product's own noise, 0.10 m bias + 0.001 m/s drift = 0.102 m at that age. These are PREDICTIONS to be tested by the run, not results. The non-obvious one: the caesium beam is expected to LOSE to rubidium here, because JOW's caesium is white-FM dominated three orders above rubidium's h0 and its superior long-term stability never gets a chance to matter inside a 30 s product interval.",
+  "_combination": "space = CESIUM1  |  ground = OCXO (stochastic)  |  h-table = jowTable2p1 (inherited from golden_baseline.json)",
+  "scenario": {
+    "name": "clk003_groundOcxo",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+  "clock": {
+    "tower": {
+      "clockType": "OCXO",
+      "deterministic": false
+    }
+  },
+  "asset": {
+    "clockType": "CESIUM1"
+  },
+  "report": {
+    "runVersion": "clk003",
+    "compileTex": "auto"
+  },
+  "_reportNote": "compileTex 'auto' rather than the golden's 'require': a ladder rung's deliverable is its .mat, and a pdflatex hiccup must not throw away a finished run. ReportRunner only escalates a failed compile to an error under 'require'."
+}

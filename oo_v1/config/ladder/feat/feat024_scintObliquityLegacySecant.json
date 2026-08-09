@@ -1,0 +1,27 @@
+{
+  "_id": "feat rung: scintObliquityLegacySecant. One toggle against golden_baseline.json; everything else is inherited via _extends, so the difference in the result is attributable to this toggle alone. The Conker S4 elevation scaling reverts to its legacy hardcoded flat-Earth 1/sin(el) instead of following cfg.effects.ionosphere.mappingModel, which this baseline sets to thinShell at 350 km for the first-order slant delay.",
+  "_extends": "golden_baseline.json",
+  "_delta": "errors.ionosphere.scintillation.obliquityModel: 'matchIonoMapping' (the default since 2026-08-09) -> 'simpleSecant' (legacy hardcode). This rung is the CONTROL that reproduces the pre-2026-08-09 result.",
+  "_polarityNote": "This rung's polarity flipped on 2026-08-09 together with masterConfig's default. It used to select 'matchIonoMapping' against a 'simpleSecant' default; now it selects the legacy branch against a 'matchIonoMapping' default. The purpose is unchanged -- keep the NON-default obliquity path exercised and frozen -- but the sign of the measured delta is reversed. Do not compare a run of this rung with one captured before that date.",
+  "_why": "S4 = |A|*S4zen*sec^0.9 and sigma = 0.30/sqrt(1-2*S4^2). That expression is singular at S4 = 1/sqrt(2) (Conker et al. 2003 validity limit / loss of lock), which the code guards with min(0.7, .). The legacy 1/sin(el) over-maps at low elevation -- the documented reason this baseline picks thinShell for the delay in the first place -- and the over-mapping is enough to drive S4 THROUGH the guard: at Stockholm (22.58 deg to GEO at 23 deg E) S4 = 0.7100 with 1/sin versus 0.5769 with the thin shell. Above the clamp the row sigma is pinned at 0.30/sqrt(0.02) = 2.1213 m, a hardcoded constant that no longer responds to elevation or to the amplitude state. Measured at |A| = 1: sigma 0.5188 m (default) -> 2.1213 m (this rung), a factor 4.09. That clamped constant is why the default moved.",
+  "_notATuningKnob": "The default it departs from is a consistency fix, not a fitted parameter: nothing was chosen to improve a number. The third reading, 'thinShell', pins the shell explicitly regardless of what the delay mapping is doing. Gate and test: tests/test_scintillation_obliquity_gated.m; regression twin: tests/regression/goldenFeat024ScenarioConfig.m.",
+  "scenario": {
+    "name": "feat024_scintObliquityLegacySecant",
+    "orbitClass": "GEO",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+  "errors": {
+    "ionosphere": {
+      "scintillation": {
+        "obliquityModel": "simpleSecant"
+      }
+    }
+  },
+  "report": {
+    "runVersion": "feat024",
+    "compileTex": "auto"
+  },
+  "_reportNote": "compileTex 'auto' rather than the golden's 'require': a ladder rung's deliverable is its .mat, and a pdflatex hiccup must not throw away a finished 25-minute run. ReportRunner only escalates a failed compile to an error under 'require'."
+}

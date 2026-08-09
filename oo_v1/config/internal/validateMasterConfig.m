@@ -11,6 +11,14 @@ function cfg = validateMasterConfig(cfg)
 %   ReverseGNSSSimulation; extracting it is its own equivalence-critical effort. For
 %   now it stays the one derivation step, and this is the one contract-check step.
 
+    % --- Mode-string enumeration (error) ---
+    % Added 2026-08-09. Before this, NO model-name string in the whole config was
+    % validated anywhere: deepMergeConfig checks paths, not values, and every mode
+    % dispatch ends in a silent default branch. A typo was therefore accepted, took the
+    % fallback, and was printed verbatim by the report as the active model. The registry
+    % lists the knobs where that silently changes physics -- see configEnumRegistry.
+    i_validateEnums(cfg);
+
     % --- Hard invariants (error) ---
     assert(isfield(cfg,'scenario') && isfield(cfg.scenario,'name') && ~isempty(cfg.scenario.name), ...
         'validateMasterConfig:scenario', 'cfg.scenario.name must be set.');
@@ -419,4 +427,45 @@ function tf = i_boolPath(cfg, path)
         if isstruct(v) && isfield(v, path{k}); v = v.(path{k}); else; tf = false; return; end
     end
     tf = islogical(v) && isscalar(v) && v;
+end
+
+function i_validateEnums(cfg)
+%I_VALIDATEENUMS  Reject a mode string that no dispatch site handles.
+%   Absent knobs are skipped: many entries live under optional blocks, and a missing
+%   path is the caller declining the feature, not an error. Only a PRESENT value that
+%   matches nothing is rejected -- that is always a typo or a stale name, never intent.
+    entries = configEnumRegistry();
+    for k = 1:numel(entries)
+        entry = entries(k);
+        [found, value] = i_getPath(cfg, strsplit(entry.path, '.'));
+        if ~found; continue; end
+        if ~(ischar(value) || isstring(value)); continue; end   % non-string: not ours to judge
+        value = char(value);
+        if entry.caseSense
+            ok = any(strcmp(value, entry.values));
+        else
+            ok = any(strcmpi(value, entry.values));
+        end
+        if ~ok
+            error('validateMasterConfig:unknownModeValue', ...
+                ['cfg.%s = ''%s'' is not a value any dispatch site handles.\n' ...
+                 '  Legal: %s\n' ...
+                 '  Why this errors instead of falling back: %s'], ...
+                entry.path, value, strjoin(entry.values, ' | '), entry.note);
+        end
+    end
+end
+
+function [found, value] = i_getPath(cfg, path)
+    value = cfg;
+    found = false;
+    for k = 1:numel(path)
+        if isstruct(value) && isscalar(value) && isfield(value, path{k})
+            value = value.(path{k});
+        else
+            value = [];
+            return
+        end
+    end
+    found = true;
 end

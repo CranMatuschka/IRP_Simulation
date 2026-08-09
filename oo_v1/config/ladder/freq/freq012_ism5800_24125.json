@@ -1,0 +1,42 @@
+{
+  "_id": "freq rung: ism5800_24125. LICENCE-EXEMPT band pair -- 5.8 GHz (ISM 5725-5875 MHz) paired with 24.125 GHz (ISM 24.00-24.25 GHz). Both carriers move, unlike freq001-008 which only ever shift L2 inside the protected GPS L-band. MEASURED CONSEQUENCES OF THE BAND CHOICE (computed, not assumed): first-order ionospheric delay scales as 1/f^2, so this pair sees 0.0043 x the L1 ionosphere on the high carrier and 0.0738 x on the low one; the ionosphere-free combination of this pair would amplify uncorrelated code noise by 1.063 x, against 2.975 x for GPS L1/L2 -- IF amplification follows FRACTIONAL separation, and this pair is 122.5% apart against L1/L2's 22.0%. Carrier wavelengths are 12.427 mm and 51.688 mm. SPECTRUM: 150 MHz and 250 MHz of allocation respectively. HELD FIXED ON PURPOSE: codeSigma0_m stays at the golden 0.30 / 0.45 m. A higher carrier does not by itself sharpen the code -- ranging noise follows chip rate and bandwidth, not carrier frequency -- so letting it fall with band would bake in the conclusion. This run is raw dual frequency with the golden's per-tower slant-iono state, i.e. the freq002 configuration with the band moved. 24 GHz is the HIGHEST licence-exempt band that is actually usable for an Earth-space link: everything above it in unlicensed spectrum (57-71 GHz, 122-123 GHz, 244-246 GHz) sits in a molecular absorption band.",
+  "_extends": "golden_baseline.json",
+  "_delta": "signals.L1 -> 24.1250 GHz, signals.L2 -> 5.8000 GHz. Everything else inherited.",
+  "scenario": {
+    "name": "freq012_ism5800_24125",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+  "signals": {
+    "enabledMask": [
+      true,
+      true
+    ],
+    "L1": {
+      "name": "L1",
+      "frequency_Hz": 24125000000.0,
+      "lambda_m": 0.01242663038341969,
+      "codeSigma0_m": 0.3
+    },
+    "L2": {
+      "name": "L2",
+      "frequency_Hz": 5800000000.0,
+      "lambda_m": 0.05168835482758621,
+      "codeSigma0_m": 0.45
+    },
+    "primary": "L1",
+    "secondary": "L2"
+  },
+  "measurements": {
+    "codeMode": "singleFrequency"
+  },
+  "atmosphere": {
+    "ionosphereFree": false
+  },
+  "report": {
+    "runVersion": "freq012",
+    "compileTex": "auto"
+  },
+  "_reportNote": "compileTex 'auto' rather than the golden's 'require': a ladder rung's deliverable is its .mat, and a pdflatex hiccup must not throw away a finished 25-minute run. ReportRunner only escalates a failed compile to an error under 'require'."
+}
