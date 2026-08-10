@@ -85,6 +85,32 @@ classdef TowerClockCorrectionProvider
                 towerClkTruth(mi) = b_t;
                 switch mode
                     case 'none'
+                        % No correction is applied, so the residual IS the raw tower clock
+                        % bias. For a stochastic oscillator that is a random walk: no
+                        % stationary variance, so no finite R covers it, and charging zero
+                        % makes the filter arbitrarily overconfident as the arc lengthens.
+                        % Legal only against a deterministic (identically zero) clock.
+                        % Opt-out for DIAGNOSTIC callers that want to observe the uncorrected
+                        % bias in the innovation without running a filter on it (e.g.
+                        % tests/test_tower_clock_correction_product T5). It is an explicit
+                        % acknowledgement that R is knowingly wrong, never a default.
+                        allowUncorrected_ = false;
+                        try
+                            allowUncorrected_ = logical(cfg.towerClock.allowUncorrectedStochasticClock);
+                        catch
+                        end
+                        if ~towers{ti}.clock.deterministic && ~allowUncorrected_
+                            error('TowerClockCorrectionProvider:uncorrectedStochasticClock', ...
+                                ['towerClockMode=''none'' applies no tower clock correction, ' ...
+                                 'but tower %d carries a STOCHASTIC %s clock. The raw clock ' ...
+                                 'bias then enters the residual unbounded and uncharged, so ' ...
+                                 'no finite R is correct. Use a correction mode, make the ' ...
+                                 'tower clock silent (cfg.clock.tower.deterministic = true, ' ...
+                                 'or clockType ''ZERO''), or set ' ...
+                                 'cfg.towerClock.allowUncorrectedStochasticClock = true if ' ...
+                                 'you are deliberately inspecting the uncorrected residual.'], ...
+                                ti, towers{ti}.clock.clockType);
+                        end
                         towerClkModel(mi) = 0;
                     case 'perfectCorrection'
                         towerClkModel(mi) = b_t;
@@ -94,7 +120,13 @@ classdef TowerClockCorrectionProvider
                     case 'truthProduct'
                         [b_p, bd_p] = models.clocks.TowerClockCorrectionProvider.clockAtProductEpoch( ...
                             towers{ti}, t_prod);
-                        towerClkModel(mi) = b_p + bd_p * (t_s - t_prod);
+                        ageTP = t_s - t_prod;
+                        towerClkModel(mi) = b_p + bd_p * ageTP;
+                        % This mode has NO product noise of its own -- the product is exact
+                        % at t_prod -- so the oscillator's wander over the age is the ENTIRE
+                        % error and R must equal it. It charged zero until 2026-08-10.
+                        towerClkSigma(mi) = sqrt(models.clocks.TowerClockCorrectionProvider. ...
+                            extrapolationWanderVar_(towers{ti}.clock, ageTP));
                     case 'truthHistoryProductNoisy'
                         % Realistic product correction.
                         % 1. Read truth clock at product epoch from tower history.
@@ -107,9 +139,17 @@ classdef TowerClockCorrectionProvider
                         age = t_s - t_prod;
                         towerClkModel(mi) = (b_p + b_noise) + (bd_p + d_noise) * age;
                         % 4. Prediction uncertainty sigma (added to R by caller).
+                        % The first three terms are the PRODUCT's own error. The fourth is
+                        % the oscillator's free-running wander between t_prod and t_s, which
+                        % the product cannot know about and which was missing entirely: with
+                        % stochastic tower clocks on jowTable2p1 it is 2.5 m against a 0.106 m
+                        % product sigma, i.e. R was optimistic by ~24x. Zero for a
+                        % deterministic tower clock, so this is a no-op on those fixtures.
                         var_corr = prodCfg.sigmaBias_m^2 + ...
                                    age^2 * prodCfg.sigmaDrift_mps^2 + ...
-                                   2 * age * prodCfg.covBiasDrift;
+                                   2 * age * prodCfg.covBiasDrift + ...
+                                   models.clocks.TowerClockCorrectionProvider. ...
+                                       extrapolationWanderVar_(towers{ti}.clock, age);
                         towerClkSigma(mi) = sqrt(max(var_corr, 0));
                     case 'product'
                         hasProd = isfield(cfg,'towerClock') && ...
@@ -126,9 +166,15 @@ classdef TowerClockCorrectionProvider
                                  'Use correctionMode=''truthHistoryProduct'' for history-based mode.'], ...
                                 ti, nProd);
                         end
-                        [b_hat, ~] = models.clocks.TowerClockCorrectionProvider.evalProductStruct( ...
+                        [b_hat, sig_p] = models.clocks.TowerClockCorrectionProvider.evalProductStruct( ...
                             cfg, ti, t_s);
                         towerClkModel(mi) = b_hat;
+                        % 'product' assigned NO sigma at all before 2026-08-10 -- the mode
+                        % ran with R = 0 on a correction that is wrong by both the product's
+                        % own error and the oscillator's wander since the product epoch.
+                        towerClkSigma(mi) = sqrt(sig_p^2 + ...
+                            models.clocks.TowerClockCorrectionProvider.explicitProductWanderVar_( ...
+                                cfg, ti, towers{ti}.clock, t_s));
                     case 'productNoisy'
                         hasProd = isfield(cfg,'towerClock') && ...
                                   isfield(cfg.towerClock,'products') && ...
@@ -147,7 +193,12 @@ classdef TowerClockCorrectionProvider
                         [b_hat, sig_corr] = models.clocks.TowerClockCorrectionProvider.evalProductStruct( ...
                             cfg, ti, t_s);
                         towerClkModel(mi) = b_hat;
-                        towerClkSigma(mi) = sig_corr;
+                        % The explicit product struct describes the PRODUCT's uncertainty at
+                        % its own epoch. It cannot know what the oscillator did afterwards,
+                        % so the wander over the product age is charged on top of it.
+                        towerClkSigma(mi) = sqrt(sig_corr^2 + ...
+                            models.clocks.TowerClockCorrectionProvider.explicitProductWanderVar_( ...
+                                cfg, ti, towers{ti}.clock, t_s));
                     otherwise
                         towerClkModel(mi) = 0;
                 end
@@ -259,6 +310,64 @@ classdef TowerClockCorrectionProvider
             sigma_corr = sqrt(max(var_corr, 0));
         end
 
+        function sig_m = productOnlySigma(cfg, age_s)
+            % productOnlySigma  The PIECEWISE-CONSTANT part of the tower-clock correction
+            % sigma [m]: the broadcast product's own error, WITHOUT the oscillator's
+            % free-running wander.
+            %
+            % Exists so consumers can treat the two parts differently, because they have
+            % opposite time structure and a treatment correct for one is wrong for the
+            % other:
+            %   product error   piecewise CONSTANT across an update interval -- N rows in
+            %                   one interval share it, so a sequential filter that treats
+            %                   them as independent averages it down by sqrt(N)
+            %   oscillator wander  a SAWTOOTH -- zero at the product epoch, maximal just
+            %                   before the next one, then reset. It does not survive
+            %                   averaging in the same way and must not be inflated as if it
+            %                   did.
+            % revgnss.TwoWayTimeTransferBuilder inflates the first by n_corr = interval/dt;
+            % applying that same factor to the wander over-charged the two-way rows by up to
+            % 24x in sigma (MEASURED 13.25 m against a true 2.42 m at age 34 s), which
+            % de-weighted the one observable that breaks the GEO radial-clock degeneracy.
+            [~, pc] = models.clocks.TowerClockCorrectionProvider.productConfig_(cfg);
+            a = max(age_s, 0);
+            var_m2 = pc.sigmaBias_m^2 + a^2 * pc.sigmaDrift_mps^2 + 2 * a * pc.covBiasDrift;
+            sig_m  = sqrt(max(var_m2, 0));
+        end
+
+        function var_m2 = carrierBiasWanderVar(cfg, clk, age_s) %#ok<INUSL>
+            % carrierBiasWanderVar  Oscillator wander variance [m^2] the carrier carries,
+            % at the row's OWN correction age -- identical to what the code path charges.
+            %
+            % The carrier's float ambiguity is a CONSTANT fitted across the arc, so what
+            % survives into the residual is the correction error relative to that constant
+            % -- the whole sawtooth the correction traces between product updates, not its
+            % value at one instant. Max age bounds that sawtooth.
+            %
+            % This REPLACES an "excess over the instantaneous age" variant, because the
+            % carrier no longer derives its bias sigma by subtracting the drift term (see
+            % CarrierMeasurementBuilder): it now owns the whole wander outright, once.
+            % THE ROW'S OWN INSTANTANEOUS AGE -- the same quantity the code path charges.
+            %
+            % This deliberately does NOT use a max-age or mean-over-sawtooth sizing. Both
+            % were tried; both are wrong once the code<->carrier cross-covariance exists.
+            % A code row and a carrier row of one tower at one epoch see the IDENTICAL
+            % clock error, so R must charge them the identical sigma: only then is the
+            % cross term s_code*s_car an identity and the code-minus-carrier difference
+            % direction correctly given ZERO tower-clock variance. Any disagreement d
+            % leaves residual variance d^2 in exactly the channel the filter uses to cancel
+            % the clock -- Cauchy-Schwarz keeps R positive semi-definite, but the filter
+            % then over-trusts that difference. MEASURED: with the mean-over-sawtooth
+            % sizing and the cross term present, aggregate NIS went 1.019 -> 1.715.
+            %
+            % The earlier mean-over-sawtooth was calibrated to bring NIS to 0.908 against an
+            % R whose cross term was short by ~1e3x. That calibration fitted the wrong
+            % model and is retired rather than re-tuned.
+            var_m2 = 0;
+            if isempty(clk) || clk.deterministic || nargin < 3 || age_s <= 0; return; end
+            var_m2 = models.clocks.TowerClockCorrectionProvider.extrapolationWanderVar_(clk, age_s);
+        end
+
         function [bdot_truth, bdot_model, drift_sigma, t_prod_out, meta] = ...
                 computeDrift(cfg, towers, twr_list, t_s)
             % computeDrift  Tower clock drift for Doppler model.
@@ -328,29 +437,61 @@ classdef TowerClockCorrectionProvider
                         driftSigmaSource_out = 'zero';
 
                     case 'truthHistoryProductNoisy'
-                        % Anchor at product-epoch truth drift (not current-epoch).
-                        % Consistent with bias path in compute() which uses clockAtProductEpoch.
+                        % TRUTH is the drift at t_s; the MODEL is extrapolated from t_prod.
+                        %
+                        % This REVERSES the Stage-84 change (see revgnss.StageHistory), which
+                        % moved bdot_truth to the product epoch and justified it as "consistent
+                        % with bias path in compute()". That misreads the bias path: there,
+                        % truth is towers{ti}.getClockBiasMeters() at t_s (line 84) and only the
+                        % MODEL is anchored at t_prod. Anchoring both at t_prod made the tower
+                        % clock contribution cancel identically out of the Doppler residual.
+                        %
+                        % Physically a range-rate observable at t_s depends on the tower
+                        % oscillator's fractional frequency AT t_s; a 30 s old frequency has no
+                        % mechanism by which to enter it. The product epoch is a property of the
+                        % CORRECTION, not of the measurement.
+                        %
+                        % Stage 84 could not have caught this: with deterministic tower clocks
+                        % bd_p and the drift at t_s are both identically zero, so every gate it
+                        % ran passed on a difference that could not appear.
                         [~, bd_p] = models.clocks.TowerClockCorrectionProvider.clockAtProductEpoch( ...
                             towers{ti}, t_prod_scalar);
                         [~, d_noise] = models.clocks.TowerClockCorrectionProvider.productNoise_( ...
                             ti, t_prod_scalar, pc.sigmaBias_m, pc.sigmaDrift_mps);
-                        bdot_truth(mi)  = bd_p;  % product-epoch truth
+                        bdot_truth(mi)  = towers{ti}.getClockDriftMetersPerSecond();  % at t_s
                         bdot_model(mi)  = bd_p + d_noise;
-                        drift_sigma(mi) = pc.sigmaDrift_mps;
+                        % R must now cover the FREQUENCY excursion over the correction age, the
+                        % rate-domain twin of extrapolationWanderVar_ on the bias path. Allan
+                        % deviation IS the rms fractional-frequency change over tau, so the
+                        % drift error over the age is c*sigma_y(age) [m/s]. Zero for a
+                        % deterministic tower clock.
+                        age_d = t_s - t_prod_scalar;
+                        drift_sigma(mi) = sqrt(pc.sigmaDrift_mps^2 + ...
+                            models.clocks.TowerClockCorrectionProvider. ...
+                                frequencyWanderVar_(towers{ti}.clock, age_d));
                         truthHistoryProductDriftUsed = true;
-                        driftAnchorStatus = 'productEpochTruth';
-                        driftSigmaSource_out = 'productConfig';
+                        driftAnchorStatus = 'measurementEpochTruth';
+                        driftSigmaSource_out = 'productConfigPlusOscillatorWander';
 
                     case 'truthProduct'
-                        % Pure history-based product drift, no noise.
+                        % Pure history-based product drift, no product noise.
+                        % Truth is the drift at t_s, NOT at the product epoch -- same fix as
+                        % the truthHistoryProductNoisy branch above. Anchoring both sides at
+                        % t_prod made the tower oscillator cancel identically out of the
+                        % range-rate residual, which no gate could see while the clocks were
+                        % deterministic (both values then being exactly zero).
                         [~, bd_p] = models.clocks.TowerClockCorrectionProvider.clockAtProductEpoch( ...
                             towers{ti}, t_prod_scalar);
-                        bdot_truth(mi)  = bd_p;
+                        bdot_truth(mi)  = towers{ti}.getClockDriftMetersPerSecond();  % at t_s
                         bdot_model(mi)  = bd_p;
-                        drift_sigma(mi) = 0;
+                        % No product noise in this mode, so the frequency excursion over the
+                        % age is the entire drift error.
+                        age_tp = t_s - t_prod_scalar;
+                        drift_sigma(mi) = sqrt(models.clocks.TowerClockCorrectionProvider. ...
+                            frequencyWanderVar_(towers{ti}.clock, age_tp));
                         truthHistoryProductDriftUsed = true;
-                        driftAnchorStatus = 'productEpochTruth';
-                        driftSigmaSource_out = 'zero';
+                        driftAnchorStatus = 'measurementEpochTruth';
+                        driftSigmaSource_out = 'oscillatorWander';
 
                     case {'product', 'productNoisy'}
                         % Explicit product struct required; no truth-history fallback.
@@ -359,20 +500,35 @@ classdef TowerClockCorrectionProvider
                                   ti <= numel(cfg.towerClock.products);
                         if hasProd
                             prod = cfg.towerClock.products(ti);
+                            % bdot_truth was NEVER assigned here, so it stayed 0 while the
+                            % model carried the product's drift -- the tower oscillator was
+                            % invisible to the range-rate residual. Invisible in the wrong
+                            % direction too: with a stochastic clock the truth drift at t_s
+                            % is real and nonzero.
+                            bdot_truth(mi) = towers{ti}.getClockDriftMetersPerSecond();
                             if isfield(prod,'drift_mps')
                                 bdot_model(mi) = prod.drift_mps;
                             end
+                            epoch_p = 0;
+                            if isfield(prod,'epoch_s'); epoch_p = prod.epoch_s; end
+                            sig_d = 0;
                             if strcmp(mode,'productNoisy') && isfield(prod,'sigmaDrift_mps')
-                                drift_sigma(mi) = prod.sigmaDrift_mps;
+                                sig_d = prod.sigmaDrift_mps;
                             elseif strcmp(mode,'productNoisy')
-                                drift_sigma(mi) = pc.sigmaDrift_mps;
+                                sig_d = pc.sigmaDrift_mps;
                             end
+                            % Frequency excursion since the product epoch, charged for BOTH
+                            % explicit-product modes: 'product' has no sigma of its own, so
+                            % this is the only thing standing between it and R = 0.
+                            drift_sigma(mi) = sqrt(sig_d^2 + ...
+                                models.clocks.TowerClockCorrectionProvider.frequencyWanderVar_( ...
+                                    towers{ti}.clock, max(t_s - epoch_p, 0)));
                             if isfield(prod,'epoch_s')
                                 t_prod_out(mi) = prod.epoch_s;
                             end
                             explicitProductDriftUsed = true;
-                            driftAnchorStatus = 'explicitProductStruct';
-                            driftSigmaSource_out = 'explicitProduct';
+                            driftAnchorStatus = 'measurementEpochTruth';
+                            driftSigmaSource_out = 'explicitProductPlusOscillatorWander';
                         else
                             % Missing explicit product — use zero drift, report clearly.
                             bdot_model(mi)  = 0;
@@ -382,10 +538,15 @@ classdef TowerClockCorrectionProvider
                         end
 
                     case 'noisyCorrection'
-                        % noisyCorrection is a bias-only toy correction; no drift noise modelled.
-                        bdot_model(mi)  = 0;
+                        % noisyCorrection is a bias-only toy correction: in the bias domain
+                        % it KNOWS the truth and adds noise, so the rate-domain analogue is
+                        % truth == model and a zero residual. Both are anchored at t_s and
+                        % reported honestly; bdot_truth used to be left at 0, which made the
+                        % REPORTED truth wrong even though the residual was right.
+                        bdot_truth(mi)  = towers{ti}.getClockDriftMetersPerSecond();
+                        bdot_model(mi)  = bdot_truth(mi);
                         drift_sigma(mi) = 0;
-                        driftAnchorStatus = 'notApplicableNoisyCorrection';
+                        driftAnchorStatus = 'measurementEpochTruth';
                         driftSigmaSource_out = 'zero';
 
                     otherwise  % 'none'
@@ -442,6 +603,83 @@ classdef TowerClockCorrectionProvider
                 if isfield(tp,'sharedErrorCorrelation'); pc.sharedErrorCorrelation = tp.sharedErrorCorrelation; end
             catch
             end
+        end
+
+        function var_m2 = explicitProductWanderVar_(cfg, ti, clk, t_s)
+            % explicitProductWanderVar_  Wander variance [m^2] for the EXPLICIT-product
+            % modes, whose age is measured from the product struct's own epoch_s rather
+            % than from the quantised broadcast grid the history modes use.
+            epoch_p = 0;
+            try; epoch_p = cfg.towerClock.products(ti).epoch_s; catch; end
+            var_m2 = models.clocks.TowerClockCorrectionProvider.extrapolationWanderVar_( ...
+                clk, max(t_s - epoch_p, 0));
+        end
+
+        function var_m2 = extrapolationWanderVar_(clk, age_s)
+            % extrapolationWanderVar_  Variance [m^2] of the tower oscillator's OWN wander
+            % over the age of the broadcast correction.
+            %
+            % The product pins the clock at t_prod. Between t_prod and the measurement the
+            % oscillator runs free, and that excursion is invisible to the product: it is
+            % not in sigmaBias_m (the product's estimate error at its own epoch) nor in
+            % age^2*sigmaDrift_mps^2 (the uncertainty of the product's DRIFT term). Sizing
+            % it from the oscillator's own Allan deviation at tau = age is the product-age
+            % growth a real PPP user applies to a broadcast clock correction:
+            %     x(tau) ~ sigma_y(tau) * tau  [s]   ->   c * sigma_y(age) * age  [m]
+            %
+            % Uses the THEORETICAL ADEV (from the h-coefficients), not the empirical one:
+            % the empirical history is only as long as the run so far, and R must be right
+            % from epoch 1.
+            %
+            % A deterministic tower clock does not wander at all, so the term is exactly
+            % zero and every deterministic-tower fixture is byte-identical to before.
+            var_m2 = 0;
+            if isempty(clk) || age_s <= 0 || clk.deterministic
+                return
+            end
+            [~, adev] = clk.theoreticalAllanDeviation(age_s);
+            var_m2 = (revgnss.Constants.SPEED_OF_LIGHT_MPS * adev * age_s)^2;
+        end
+
+        function var_m2s2 = frequencyWanderVar_(clk, age_s)
+            % frequencyWanderVar_  Variance [(m/s)^2] of the tower oscillator's FREQUENCY
+            % excursion between the product epoch and the measurement.
+            %
+            % REPLACES a first attempt that used (c*sigma_y(age))^2. That was wrong twice,
+            % in opposite directions, and both errors are measurable against the truth
+            % generator (see T6 of tests/test_tower_clock_product_age_wander_in_R.m):
+            %
+            %  1. Allan variance is defined on adjacent tau-AVERAGES. The drift residual is
+            %     a difference of INSTANTANEOUS frequencies, and for random-walk FM those
+            %     differ by exactly 3x in variance:
+            %         Var(y(t+tau) - y(t)) = 2*pi^2*h_-2*tau        (this term)
+            %         Asigma_y^2(tau)      = (2*pi^2/3)*h_-2*tau    (Winkel eq. 2.156)
+            %     MEASURED sqrt-ratio for the crystals: OCXO2 1.81/1.75, TCXO 1.83/1.78,
+            %     QUARTZ 1.72/1.81 -- all sqrt(3) = 1.732. R was optimistic by 3x in
+            %     variance on exactly the oscillators the ground segment uses.
+            %
+            %  2. The Allan formula's h0/(2*tau) white-FM term does not belong here AT ALL.
+            %     ClockModel.step applies h0 as a PHASE jump (n_bias_wfm -> bias_s), never
+            %     to the frequency state, so it cannot appear in a frequency difference.
+            %     Including it over-charged the atomic classes ~37x (CESIUM1 measured
+            %     0.017 of the charge) -- conservative, but wrong, and it would have hidden
+            %     a real defect behind a huge R.
+            %
+            % The flicker coefficient is CALIBRATED, not derived: flicker FM has no
+            % stationary variance, so Var(Delta y) over tau has no clean closed form. 16*ln2
+            % matches the generator to within +-5% across all eight classes at both the
+            % half-age and full-age product points, and T6 pins that.
+            % Enabled 2026-08-10 once CarrierMeasurementBuilder stopped deriving its bias
+            % sigma by SUBTRACTING this term. While that subtraction existed, making this
+            % term correct drove it negative (age*dsig 4.19 m against a 2.42 m bias sigma),
+            % clamped the carrier bias to zero and destabilised R assembly. The two were
+            % locked together; the subtraction had to go first.
+            var_m2s2 = 0;
+            if isempty(clk) || age_s <= 0 || clk.deterministic; return; end
+            h = clk.noiseCoeffs;
+            var_y = 2*pi^2 * h.hMinus2 * age_s ...   % RWFM, exact (3x the Allan term)
+                  + 16*log(2) * h.hMinus1;           % FFM, calibrated against the generator
+            var_m2s2 = (revgnss.Constants.SPEED_OF_LIGHT_MPS)^2 * max(var_y, 0);
         end
 
         function [b_noise, d_noise] = productNoise_(ti, t_prod, sigmaBias, sigmaDrift)

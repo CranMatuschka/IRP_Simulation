@@ -39,57 +39,68 @@ fprintf('=== test_clock_truth_matches_filter_q ===\n');
 N = 901; dt = 1.0; tVec = (0:N-1)'*dt; nSeed = 8;
 factors = struct('biasFactor',1,'freqFactor',1,'noiseFactor',1,'roleNoiseFactor',1, ...
                  'h2Factor',1,'h1Factor',1,'h0Factor',1,'hMinus1Factor',1,'hMinus2Factor',1);
+scaling = struct('globalBiasFactor',1,'globalFreqFactor',1,'globalNoiseFactor',1);
 
-% Both shipped tables, every template that carries noise. ZERO is excluded (no noise to match).
-for src = {'legacy','jowTable2p1'}
-    scaling = struct('templateSource',src{1},'globalBiasFactor',1, ...
-                     'globalFreqFactor',1,'globalNoiseFactor',1);
-    for tt = {'CESIUM1','RUBIDIUM','OCXO','TCXO'}
-        rb = zeros(1,nSeed); rd = zeros(1,nSeed);
-        for r = 1:nSeed
-            cc = revgnss.ConfigFactory.makeClockConfig(tt{1}, 7000+137*r, factors, scaling);
-            cc.deterministic = false; cc.bias_s = 0; cc.fracFreq = 0;
-            clk = models.clocks.ClockModel(cc);
-            clk.precomputeNoise(tVec);          % arm the coloured path exactly as the sim does
-            b = zeros(1,N); d = zeros(1,N);
-            for i = 2:N
-                clk.step(dt);
-                b(i) = clk.getBiasMeters();
-                d(i) = clk.getDriftMetersPerSecond();
-            end
-            Q = clk.getProcessNoiseQ(dt, 'meters');
-            e_b = b(3:end) - b(2:end-1) - d(2:end-1)*dt;   % predict the tracked bdot out
-            e_d = d(3:end) - d(2:end-1);
-            rb(r) = std(e_b) / sqrt(Q(1,1));
-            rd(r) = std(e_d) / sqrt(Q(2,2));
+% EVERY REGISTERED OSCILLATOR, derived from the catalogue rather than a hardcoded list, so
+% a class added to ConfigFactory.oscillatorCatalog_ is gated the moment it exists. Before
+% 2026-08-10 this loop named four templates over two tables; three of the eight shipped
+% classes (QUARTZ, OCXO1, RUBIDIUM2, CESIUM2) had never been checked at all.
+names = fieldnames(revgnss.ConfigFactory.oscillatorCatalog_())';
+names = names(~strcmp(names,'ZERO'));           % no noise to match
+
+% ... and one CUSTOM oscillator, to prove cfg.clock.customOscillators is covered by this
+% gate too. Deliberately flicker-heavy: flicker is the channel the Allan equivalence
+% approximates, so this is the shape most likely to expose a bad equivalence.
+customName = 'GATEPROBE';
+scaling.customOscillators.(customName) = ...
+    struct('h0',5e-23,'hMinus1',4e-22,'hMinus2',1e-27);
+names{end+1} = customName; %#ok<SAGROW>
+
+for ti = 1:numel(names)
+    tt = names{ti};
+    rb = zeros(1,nSeed); rd = zeros(1,nSeed);
+    for r = 1:nSeed
+        cc = revgnss.ConfigFactory.makeClockConfig(tt, 7000+137*r, factors, scaling);
+        cc.deterministic = false; cc.bias_s = 0; cc.fracFreq = 0;
+        clk = models.clocks.ClockModel(cc);
+        clk.precomputeNoise(tVec);          % arm the coloured path exactly as the sim does
+        b = zeros(1,N); d = zeros(1,N);
+        for i = 2:N
+            clk.step(dt);
+            b(i) = clk.getBiasMeters();
+            d(i) = clk.getDriftMetersPerSecond();
         end
-        mb = mean(rb); md = mean(rd);
-        fprintf('  %-12s %-11s phase %.3f  freq %.3f\n', src{1}, tt{1}, mb, md);
-
-        % Band: Q must be neither optimistic nor wildly conservative. The upper bound is the
-        % one that matters for filter consistency (Q too small -> NIS blows up); the lower
-        % bound catches a Q inflated to hide a modelling error. Flicker is not exactly a
-        % random walk, so the equivalence is deliberately ~10% conservative on the frequency
-        % channel -- hence the asymmetric floor.
-        assert(mb > 0.75 && mb < 1.30, ...
-            ['PHASE channel FAILED for %s/%s: sqrt(Q11) vs truth ratio %.3f. ' ...
-             'Q11 and ClockModel.step must implement the same discretisation ' ...
-             '(q1*dt + q2*dt^3/3); a forward-Euler step gives ~0.01 here for RWFM-dominated ' ...
-             'templates.'], src{1}, tt{1}, mb);
-        assert(md > 0.75 && md < 1.30, ...
-            ['FREQUENCY channel FAILED for %s/%s: sqrt(Q22) vs truth ratio %.3f. ' ...
-             'Q22 must carry flicker FM as its Allan-equivalent random walk ' ...
-             '(6*ln(2)*hMinus1/dt); without it this is 50-921x for flicker-dominated ' ...
-             'templates.'], src{1}, tt{1}, md);
+        Q = clk.getProcessNoiseQ(dt, 'meters');
+        e_b = b(3:end) - b(2:end-1) - d(2:end-1)*dt;   % predict the tracked bdot out
+        e_d = d(3:end) - d(2:end-1);
+        rb(r) = std(e_b) / sqrt(Q(1,1));
+        rd(r) = std(e_d) / sqrt(Q(2,2));
     end
+    mb = mean(rb); md = mean(rd);
+    fprintf('  %-11s phase %.3f  freq %.3f\n', tt, mb, md);
+
+    % Band: Q must be neither optimistic nor wildly conservative. The upper bound is the
+    % one that matters for filter consistency (Q too small -> NIS blows up); the lower
+    % bound catches a Q inflated to hide a modelling error. Flicker is not exactly a
+    % random walk, so the equivalence is deliberately ~10% conservative on the frequency
+    % channel -- hence the asymmetric floor.
+    assert(mb > 0.75 && mb < 1.30, ...
+        ['PHASE channel FAILED for %s: sqrt(Q11) vs truth ratio %.3f. ' ...
+         'Q11 and ClockModel.step must implement the same discretisation ' ...
+         '(q1*dt + q2*dt^3/3); a forward-Euler step gives ~0.01 here for RWFM-dominated ' ...
+         'classes.'], tt, mb);
+    assert(md > 0.75 && md < 1.30, ...
+        ['FREQUENCY channel FAILED for %s: sqrt(Q22) vs truth ratio %.3f. ' ...
+         'Q22 must carry flicker FM as its Allan-equivalent random walk ' ...
+         '(6*ln(2)*hMinus1/dt); without it this is 50-921x for flicker-dominated ' ...
+         'classes.'], tt, md);
 end
 
 % ---- The equivalence is a derivation, not a tuning constant: check the algebra ----------
 % RWFM sigma_y^2(tau) = (2*pi^2/3)*hMinus2*tau  ==  flicker sigma_y^2 = 2*ln(2)*hMinus1
 % at tau = dt  =>  q2_ffm = 2*pi^2*hMinus2_eq = 6*ln(2)*hMinus1/dt.
 cc = revgnss.ConfigFactory.makeClockConfig('CESIUM1', 11, factors, ...
-        struct('templateSource','jowTable2p1','globalBiasFactor',1, ...
-               'globalFreqFactor',1,'globalNoiseFactor',1));
+        struct('globalBiasFactor',1,'globalFreqFactor',1,'globalNoiseFactor',1));
 clk = models.clocks.ClockModel(cc);
 c_mps = revgnss.Constants.SPEED_OF_LIGHT_MPS;
 for dtTest = [0.1 1 10]

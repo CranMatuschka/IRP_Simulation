@@ -212,9 +212,15 @@ cfg_t5_base.errors.codeNoise.sigma_m      = 0;  % noise-free
 cfg_t5_base.plots.enable  = false;
 cfg_t5_base.report.enable = false;
 
-% 'none' mode: no correction, tower clock bias shows in innovation
+% 'none' mode: no correction, tower clock bias shows in innovation.
+% correctionMode='none' against a STOCHASTIC clock is rejected by default since
+% 2026-08-10 -- the raw bias is a random walk with no stationary variance, so no finite R
+% covers it and a filter run on it is arbitrarily overconfident. That is exactly the
+% property this subtest is demonstrating, and it never builds a filter, so it opts out
+% explicitly rather than the guard being softened for everyone.
 cfg_t5_none = cfg_t5_base;
 cfg_t5_none.towerClock.correctionMode = 'none';
+cfg_t5_none.towerClock.allowUncorrectedStochasticClock = true;
 [asset_t5n, towers_t5n, ekf_t5n, mm_t5n] = revgnss.ScenarioFactory.build(cfg_t5_none);
 [z_t5n, h_t5n, ~, ~, errSt_t5n] = mm_t5n.computeMeasurements( ...
     asset_t5n, towers_t5n, ekf_t5n.x, 0, ekf_t5n.stateMap);
