@@ -453,7 +453,11 @@ classdef ISLMeasurementBuilder
             % frequency-dependent link-budget sigma would use.
             fIsl = revgnss.ISLMeasurementBuilder.getNum_(cfg, {'measurements','isl','carrier','frequency_Hz'}, NaN);
             if ~isfinite(fIsl) || fIsl <= 0
-                fIsl = revgnss.SignalDefinition.get('L1').frequency_Hz;
+                % finalizeConfig already substitutes the primary ground carrier for the
+                % NaN sentinel; this only catches a cfg that bypassed it. Resolved band,
+                % never the name-keyed catalogue -- that read pinned the crosslink to
+                % 1575.42 MHz for every retuned scenario.
+                fIsl = revgnss.SignalUtils.frequency(cfg, 'L1');
             end
             info.carrierFrequency_Hz = fIsl;
             info.carrierWavelength_m = revgnss.Constants.SPEED_OF_LIGHT_MPS / fIsl;

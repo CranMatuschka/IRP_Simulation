@@ -1478,7 +1478,14 @@ classdef ReportRunner
             catch ME76sig_
                 warning('ReportRunner:stage76SignalFailed','Stage 76 signal config: %s', ME76sig_.message);
                 summary.signalNames         = {'L1'};
-                summary.signalFrequenciesHz = [revgnss.SignalDefinition.get('L1').frequency_Hz];
+                % Resolved band if it can still be read; NaN is honest on the error path.
+                % A canonical-catalogue constant here would report 1575.42 MHz for a run
+                % that never used it.
+                try
+                    summary.signalFrequenciesHz = revgnss.SignalUtils.frequency(cfg, 'L1');
+                catch
+                    summary.signalFrequenciesHz = NaN;
+                end
                 summary.signalEnabledMask   = [true];
                 summary.signalMode          = 'L1';
                 summary.codeEnabledByFrequency    = [true];
@@ -3772,7 +3779,7 @@ classdef ReportRunner
             end
             % Compact code IF traceability fields
             try
-                co46 = revgnss.IonosphereFreeCombinationDiagnostics.coefficients('L1','L2');
+                co46 = revgnss.IonosphereFreeCombinationDiagnostics.coefficients('L1','L2',cfg);
                 summary.codeIonoFreeAlpha              = co46.alpha;
                 summary.codeIonoFreeBeta               = co46.beta;
                 summary.codeIonoFreeNoiseAmplification = sqrt(co46.alpha^2 + co46.beta^2);

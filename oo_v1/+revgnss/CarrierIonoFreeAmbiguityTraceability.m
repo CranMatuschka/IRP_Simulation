@@ -28,7 +28,7 @@ classdef CarrierIonoFreeAmbiguityTraceability
 
     methods (Static)
 
-        function s = assess(summary, cfg) %#ok<INUSD>
+        function s = assess(summary, cfg)
             % assess  Carrier IF ambiguity traceability from summary fields.
             s = revgnss.CarrierIonoFreeAmbiguityTraceability.blank_();
 
@@ -41,10 +41,8 @@ classdef CarrierIonoFreeAmbiguityTraceability
 
             % IF combination coefficients
             try
-                sigL1 = revgnss.SignalDefinition.get('L1');
-                sigL2 = revgnss.SignalDefinition.get('L2');
-                [s.alpha, s.beta] = revgnss.IonoFreeCombination.coefficients( ...
-                    sigL1.frequency_Hz, sigL2.frequency_Hz);
+                % Resolved band pair, not the name-keyed catalogue.
+                [s.alpha, s.beta] = revgnss.SignalUtils.ionosphereFreeCoefficients(cfg);
             catch ex
                 s.warnings{end+1} = ['Signal lookup failed: ' ex.message];
                 s.classification = 'metadata-unavailable';

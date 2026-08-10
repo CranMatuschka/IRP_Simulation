@@ -96,10 +96,7 @@ classdef PseudorangeModelOnlyBuilder
 
                 if isfield(stateMap,'ionoIdx') && ti <= numel(stateMap.ionoIdx) && ...
                         stateMap.ionoIdx(ti) > 0
-                    f_L1_io = revgnss.SignalDefinition.get('L1').frequency_Hz;
-                    if isfield(cfg,'signals') && isfield(cfg.signals,'L1') && isfield(cfg.signals.L1,'frequency_Hz')
-                        f_L1_io = cfg.signals.L1.frequency_Hz;
-                    end
+                    f_L1_io = revgnss.SignalUtils.frequency(cfg, 'L1');   % resolved band
                     f_row = f_L1_io;
                     if isfield(errStruct,'frequencyHz_perMeas') && mi <= numel(errStruct.frequencyHz_perMeas)
                         f_row = errStruct.frequencyHz_perMeas(mi);

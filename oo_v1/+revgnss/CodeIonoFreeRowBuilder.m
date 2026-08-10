@@ -34,10 +34,10 @@ classdef CodeIonoFreeRowBuilder
                     num2str(size(rowL1.H)), num2str(size(rowL2.H)));
             end
 
-            sigL1 = revgnss.SignalDefinition.get('L1');
-            sigL2 = revgnss.SignalDefinition.get('L2');
-            [alpha, beta] = revgnss.IonoFreeCombination.coefficients( ...
-                sigL1.frequency_Hz, sigL2.frequency_Hz);
+            % IF coefficients from the RESOLVED band pair, never the name-keyed catalogue:
+            % GPS alpha/beta applied to a retuned pair do not cancel the ionosphere, they
+            % invert and amplify it.
+            [alpha, beta] = revgnss.SignalUtils.ionosphereFreeCoefficients(cfg);
 
             rowIF.z     = alpha * rowL1.z + beta * rowL2.z;
             rowIF.h     = alpha * rowL1.h + beta * rowL2.h;
@@ -63,19 +63,23 @@ classdef CodeIonoFreeRowBuilder
             rowIF.metadata.hCombination                   = 'alphaH1_betaH2';
         end
 
-        function H_IF = combineJacobians(H_L1, H_L2)
+        function H_IF = combineJacobians(H_L1, H_L2, cfg)
             % combineJacobians  Combine L1/L2 Jacobian rows using IF coefficients.
             %   H_IF = alpha*H_L1 + beta*H_L2
             %   For synthetic tests and future row-level H verification.
+            %
+            % cfg is REQUIRED: the coefficients follow the resolved band, and there is no
+            % canonical-catalogue fallback to guess it from.
             if ~isequal(size(H_L1), size(H_L2))
                 error('CodeIonoFreeRowBuilder:dimensionMismatch', ...
                     'H dimensions do not match: L1 [%s] vs L2 [%s].', ...
                     num2str(size(H_L1)), num2str(size(H_L2)));
             end
-            sigL1 = revgnss.SignalDefinition.get('L1');
-            sigL2 = revgnss.SignalDefinition.get('L2');
-            [alpha, beta] = revgnss.IonoFreeCombination.coefficients( ...
-                sigL1.frequency_Hz, sigL2.frequency_Hz);
+            if nargin < 3
+                error('CodeIonoFreeRowBuilder:cfgRequired', ...
+                    'combineJacobians(H_L1, H_L2, cfg) needs cfg to resolve the band.');
+            end
+            [alpha, beta] = revgnss.SignalUtils.ionosphereFreeCoefficients(cfg);
             H_IF = alpha * H_L1 + beta * H_L2;
         end
 

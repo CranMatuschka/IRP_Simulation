@@ -225,11 +225,7 @@ classdef MeasurementModel < handle
             hasDispersion_io = false;
             try; hasDispersion_io = revgnss.SignalConfigResolver.hasL2(obj.cfg); catch; end
             if hasDispersion_io && isfield(stateMap,'ionoIdx') && ~isempty(blk.iono) && any(blk.iono > 0)
-                f_L1_io = revgnss.SignalDefinition.get('L1').frequency_Hz;
-                if isfield(obj.cfg,'signals') && isfield(obj.cfg.signals,'L1') && ...
-                        isfield(obj.cfg.signals.L1,'frequency_Hz')
-                    f_L1_io = obj.cfg.signals.L1.frequency_Hz;
-                end
+                f_L1_io = revgnss.SignalUtils.frequency(obj.cfg, 'L1');   % resolved band
                 for mi_i = 1:M
                     ti_i = twr_list(mi_i);
                     if ti_i <= numel(blk.iono) && blk.iono(ti_i) > 0

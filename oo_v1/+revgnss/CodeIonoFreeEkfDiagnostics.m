@@ -49,7 +49,7 @@ classdef CodeIonoFreeEkfDiagnostics
 
             % IF coefficients
             try
-                co = revgnss.IonosphereFreeCombinationDiagnostics.coefficients('L1','L2');
+                co = revgnss.IonosphereFreeCombinationDiagnostics.coefficients('L1','L2',cfg);
                 s.alpha = co.alpha;
                 s.beta  = co.beta;
                 s.rNoiseAmplification = sqrt(co.alpha^2 + co.beta^2);

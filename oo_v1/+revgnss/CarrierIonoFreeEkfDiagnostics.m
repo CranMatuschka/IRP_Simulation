@@ -40,10 +40,11 @@ classdef CarrierIonoFreeEkfDiagnostics
 
             % IF combination coefficients
             try
-                sigL1 = revgnss.SignalDefinition.get('L1');
-                sigL2 = revgnss.SignalDefinition.get('L2');
-                [s.ifAlpha, s.ifBeta] = revgnss.IonoFreeCombination.coefficients( ...
-                    sigL1.frequency_Hz, sigL2.frequency_Hz);
+                % Resolved band pair, not the name-keyed catalogue: the reported
+                % amplification is sqrt(alpha^2+beta^2) and swings from 1.06x to 6.54x
+                % across config/ladder/freq, where the canonical read printed 2.98x for
+                % every rung.
+                [s.ifAlpha, s.ifBeta] = revgnss.SignalUtils.ionosphereFreeCoefficients(cfg);
                 s.noiseAmplification = sqrt(s.ifAlpha^2 + s.ifBeta^2);
             catch
             end

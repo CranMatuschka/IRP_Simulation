@@ -22,25 +22,29 @@ classdef SignalCatalog
 
         function sigs = carrierSignalsFromConfig(cfg)
             % carrierSignalsFromConfig  Return ordered struct array of active carrier EKF signals.
-            if nargin < 1 || isempty(cfg)
-                sigs = revgnss.SignalDefinition.get('L1');
-                return
+            % Built from the RESOLVED cfg only. This used to START from
+            % revgnss.SignalDefinition.get(name) -- a second, NAME-keyed copy of the L-band
+            % constants -- and overlay the band on top, so a cfg carrying no resolved
+            % arrays silently produced 1575.42 MHz / 190.29 mm carrier EKF rows.
+            if nargin < 1 || isempty(cfg) || ~isstruct(cfg)
+                error('SignalCatalog:cfgRequired', ...
+                    ['carrierSignalsFromConfig(cfg) needs a config: carrier frequencies ' ...
+                     'are owned by config/masterConfig.m and there is no catalogue to ' ...
+                     'fall back to.']);
             end
 
+            blank = struct('name','', 'frequency_Hz',NaN, 'wavelength_m',NaN, ...
+                           'ionoScaleRelativeToL1',NaN);
             [names, activeMask] = revgnss.SignalCatalog.carrierMask_(cfg);
             idx = find(activeMask);
             if isempty(idx)
-                sigs = repmat(revgnss.SignalDefinition.get('L1'), 1, 0);
+                sigs = repmat(blank, 1, 0);
                 return
             end
 
-            % SignalDefinition is keyed by NAME, so get('L1') returns the canonical
-            % 1575.42 MHz however the scenario retuned the band -- see resolveBand_.
-            sigs = repmat(revgnss.SignalCatalog.resolveBand_( ...
-                revgnss.SignalDefinition.get(names{idx(1)}), cfg, idx(1), names), 1, numel(idx));
-            for k = 2:numel(idx)
-                sigs(k) = revgnss.SignalCatalog.resolveBand_( ...
-                    revgnss.SignalDefinition.get(names{idx(k)}), cfg, idx(k), names);
+            sigs = repmat(blank, 1, numel(idx));
+            for k = 1:numel(idx)
+                sigs(k) = revgnss.SignalCatalog.resolveBand_(blank, cfg, idx(k), names);
             end
         end
 
@@ -101,12 +105,10 @@ classdef SignalCatalog
             % canonical doubles, so frequency/wavelength are unchanged and the recomputed
             % (f_L1/f)^2 is the identical expression on the identical inputs -- bit-identical.
             fSig = revgnss.SignalCatalog.resolvedFrequency_(cfg, sigIdx, names);
-            if isempty(fSig); fSig = sig.frequency_Hz; end
-            if fSig == sig.frequency_Hz
-                lamSig = sig.wavelength_m;
-            else
-                lamSig = 299792458 / fSig;      % c [m/s], as SignalDefinition
+            if isempty(fSig)
+                fSig = revgnss.SignalUtils.frequency(cfg, names{sigIdx});
             end
+            lamSig = revgnss.Constants.SPEED_OF_LIGHT_MPS / fSig;
             % Prefer finalizeConfig's own wavelength array so this and cfg.signals.<name>
             % .lambda_m can never differ in the last bit.
             if isfield(cfg,'signals') && isfield(cfg.signals,'wavelength_m')
@@ -121,10 +123,10 @@ classdef SignalCatalog
             if isempty(primIdx); primIdx = 1; end
             fPrim = revgnss.SignalCatalog.resolvedFrequency_(cfg, primIdx, names);
             if isempty(fPrim)
-                % Nothing resolved: fall back to the canonical table, as before.
-                fPrim = revgnss.SignalDefinition.get(names{primIdx}).frequency_Hz;
+                fPrim = revgnss.SignalUtils.frequency(cfg, names{primIdx});
             end
 
+            sig.name                  = names{sigIdx};
             sig.frequency_Hz          = fSig;
             sig.wavelength_m          = lamSig;
             sig.ionoScaleRelativeToL1 = (fPrim / fSig)^2;

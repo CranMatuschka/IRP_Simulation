@@ -117,8 +117,10 @@ classdef IntegerAmbiguityFixer
 
                 si = cpInfo.signalIdx(mi);
                 try
+                    % Resolved band: the catalogue read here sized every integer search
+                    % in 190.29 mm / 244.21 mm cycles regardless of the scenario's band.
                     sigId  = revgnss.SignalCatalog.signalId(si);
-                    lambda = revgnss.SignalDefinition.wavelength(sigId);
+                    lambda = revgnss.SignalUtils.wavelength(cfg, sigId);
                 catch
                     continue
                 end

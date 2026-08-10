@@ -23,15 +23,23 @@ classdef IonosphereFreeCombinationDiagnostics
 
     methods (Static)
 
-        function c = coefficients(signalA, signalB)
+        function c = coefficients(signalA, signalB, cfg)
             % coefficients  IF combination coefficients for signalA and signalB.
             %   IF = alpha*obsA + beta*obsB
             %   alpha = fA^2 / (fA^2-fB^2),  beta = -fB^2 / (fA^2-fB^2)
             %   alpha+beta = 1 (by construction).
             %   First-order iono residual cancels exactly (verified numerically).
-            sigA = revgnss.SignalDefinition.get(signalA);
-            sigB = revgnss.SignalDefinition.get(signalB);
-            fA = sigA.frequency_Hz;  fB = sigB.frequency_Hz;
+            %
+            % cfg is REQUIRED: the frequencies come from the resolved config, not from a
+            % name-keyed catalogue. Reading the catalogue here reported GPS alpha = 2.5457
+            % for every rung of config/ladder/freq, including the 61.25/24.125 GHz pair
+            % whose true alpha is 1.1836.
+            if nargin < 3
+                error('IonosphereFreeCombinationDiagnostics:cfgRequired', ...
+                    'coefficients(signalA, signalB, cfg) needs cfg to resolve the band.');
+            end
+            fA = revgnss.SignalUtils.frequency(cfg, signalA);
+            fB = revgnss.SignalUtils.frequency(cfg, signalB);
             d  = fA^2 - fB^2;
             c.signalA       = signalA;      c.signalB       = signalB;
             c.fA_Hz         = fA;           c.fB_Hz         = fB;
@@ -47,20 +55,31 @@ classdef IonosphereFreeCombinationDiagnostics
             c.warnings = {};
         end
 
-        function n = noiseAmplification(signalA, signalB, sigmaA, sigmaB)
+        function n = noiseAmplification(signalA, signalB, sigmaA, sigmaB, cfg)
             % noiseAmplification  IF noise amplification assuming uncorrelated noise.
             %   sigmaIF = sqrt((alpha*sigmaA)^2 + (beta*sigmaB)^2)
             %   For equal sigma: amplificationVsEqualSigma = sqrt(alpha^2 + beta^2).
-            co = revgnss.IonosphereFreeCombinationDiagnostics.coefficients(signalA, signalB);
+            %   cfg is REQUIRED -- the amplification is a property of the resolved pair
+            %   and ranges from 1.06x to 6.54x across config/ladder/freq.
+            if nargin < 5
+                error('IonosphereFreeCombinationDiagnostics:cfgRequired', ...
+                    'noiseAmplification(...,cfg) needs cfg to resolve the band.');
+            end
+            co = revgnss.IonosphereFreeCombinationDiagnostics.coefficients(signalA, signalB, cfg);
             n.sigmaA  = sigmaA;  n.sigmaB = sigmaB;
             n.sigmaIF = sqrt((co.alpha*sigmaA)^2 + (co.beta*sigmaB)^2);
             n.amplificationVsA          = n.sigmaIF / sigmaA;
             n.amplificationVsEqualSigma = sqrt(co.alpha^2 + co.beta^2);
         end
 
-        function txt = carrierAmbiguityCaveat(signalA, signalB)
+        function txt = carrierAmbiguityCaveat(signalA, signalB, cfg)
             % carrierAmbiguityCaveat  Plain-text caveat on IF carrier ambiguity structure.
-            co = revgnss.IonosphereFreeCombinationDiagnostics.coefficients(signalA, signalB);
+            %   cfg is REQUIRED -- see coefficients().
+            if nargin < 3
+                error('IonosphereFreeCombinationDiagnostics:cfgRequired', ...
+                    'carrierAmbiguityCaveat(signalA, signalB, cfg) needs cfg.');
+            end
+            co = revgnss.IonosphereFreeCombinationDiagnostics.coefficients(signalA, signalB, cfg);
             txt = sprintf(['IF carrier %s/%s ambiguity is N_IF = %.4f*N_%s*lam_%s + (%.4f)*N_%s*lam_%s. ' ...
                 'This is NOT a simple integer in cycles of any single frequency. ' ...
                 'Integer fixing requires wide-lane/narrow-lane or direct multi-frequency method. ' ...
@@ -87,12 +106,12 @@ classdef IonosphereFreeCombinationDiagnostics
                 return
             end
             try
-                co = revgnss.IonosphereFreeCombinationDiagnostics.coefficients('L1','L2');
+                co = revgnss.IonosphereFreeCombinationDiagnostics.coefficients('L1','L2',cfg);
                 s.alpha   = co.alpha;   s.beta    = co.beta;
                 s.fL1_Hz  = co.fA_Hz;  s.fL2_Hz  = co.fB_Hz;
                 s.codeIonoResidualCheck_m    = co.firstOrderIonoCheck.codeResidual_m;
                 s.carrierIonoResidualCheck_m = co.firstOrderIonoCheck.carrierResidual_m;
-                na = revgnss.IonosphereFreeCombinationDiagnostics.noiseAmplification('L1','L2',1,1);
+                na = revgnss.IonosphereFreeCombinationDiagnostics.noiseAmplification('L1','L2',1,1,cfg);
                 s.codeNoiseAmplification    = na.amplificationVsEqualSigma;
                 s.carrierNoiseAmplification = na.amplificationVsEqualSigma;
                 s.classification = 'diagnostic-if-available';

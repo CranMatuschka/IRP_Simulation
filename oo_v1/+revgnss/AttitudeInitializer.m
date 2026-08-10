@@ -266,12 +266,16 @@ classdef AttitudeInitializer
         end
 
         function lambda = lambdaL1_(cfg)
-            lambda = revgnss.SignalDefinition.get('L1').wavelength_m;
+            % Resolved band only. The catalogue default that used to seed this pinned the
+            % attitude initialiser's cycle-to-metre conversion to 190.29 mm however the
+            % scenario retuned the band.
             if isfield(cfg,'signals') && isfield(cfg.signals,'L1') && isfield(cfg.signals.L1,'lambda_m')
                 lambda = cfg.signals.L1.lambda_m;
             elseif isfield(cfg,'measurements') && isfield(cfg.measurements,'carrierPhase') && ...
                     isfield(cfg.measurements.carrierPhase,'lambda_m')
                 lambda = cfg.measurements.carrierPhase.lambda_m;
+            else
+                lambda = revgnss.SignalUtils.wavelength(cfg, 'L1');
             end
         end
 

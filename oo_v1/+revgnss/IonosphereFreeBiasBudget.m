@@ -26,7 +26,7 @@ classdef IonosphereFreeBiasBudget
             end
 
             % Get IF coefficients
-            co = revgnss.IonosphereFreeCombinationDiagnostics.coefficients('L1','L2');
+            co = revgnss.IonosphereFreeCombinationDiagnostics.coefficients('L1','L2',cfg);
             s.alpha = co.alpha;
             s.beta  = co.beta;
 
@@ -53,7 +53,7 @@ classdef IonosphereFreeBiasBudget
 
             % Noise amplification
             try
-                na = revgnss.IonosphereFreeCombinationDiagnostics.noiseAmplification('L1','L2',1,1);
+                na = revgnss.IonosphereFreeCombinationDiagnostics.noiseAmplification('L1','L2',1,1,cfg);
                 s.equalSigmaNoiseAmplification = na.amplificationVsEqualSigma;
             catch
                 s.equalSigmaNoiseAmplification = sqrt(co.alpha^2 + co.beta^2);

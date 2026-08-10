@@ -393,17 +393,18 @@ classdef BaselineCarrierAmbiguityResolver
         function [en, c] = parseCfg_(cfg)
             en = false; c = struct();
             try; en = logical(cfg.estimator.diffAtt.ambiguityResolution.enable); catch; return; end
-            % Derive wavelengths from canonical cfg.signals (set by finalizeConfig)
-            % or SignalDefinition; no local hardcoded frequency constants.
+            % Wavelengths from the RESOLVED cfg.signals only (set by finalizeConfig). The
+            % catch-branches used to fall back to the name-keyed catalogue, i.e. the
+            % canonical L-band wavelengths however the scenario had retuned the band.
             try
                 c.lambda_m = cfg.signals.wavelength_m(1);
             catch
-                c.lambda_m = revgnss.SignalDefinition.get('L1').wavelength_m;
+                c.lambda_m = revgnss.SignalUtils.wavelength(cfg, 'L1');
             end
             try
                 c.lambda_m_L2 = cfg.signals.wavelength_m(2);
             catch
-                c.lambda_m_L2 = revgnss.SignalDefinition.get('L2').wavelength_m;
+                c.lambda_m_L2 = revgnss.SignalUtils.wavelength(cfg, 'L2');
             end
             c.searchHalfWidth   = 5;
             c.minArcEpochs      = 10;

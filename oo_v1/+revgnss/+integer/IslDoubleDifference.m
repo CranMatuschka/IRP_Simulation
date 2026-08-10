@@ -165,10 +165,13 @@ classdef IslDoubleDifference
         end
 
         function lam = lambda_(cfg)
+            % ConfigFactory.finalizeConfig resolves the ISL NaN sentinel to the primary
+            % ground carrier, so this is already the band the run is using. The old
+            % catalogue fallback pinned every retuned scenario's ISL to 1575.42 MHz.
             f = NaN;
             try; f = cfg.measurements.isl.carrier.frequency_Hz; catch; end
-            if ~isfinite(f) || f <= 0
-                f = revgnss.SignalDefinition.get('L1').frequency_Hz;
+            if ~isnumeric(f) || ~isscalar(f) || ~isfinite(f) || f <= 0
+                f = revgnss.SignalUtils.frequency(cfg, 'L1');
             end
             lam = revgnss.Constants.SPEED_OF_LIGHT_MPS / f;
         end

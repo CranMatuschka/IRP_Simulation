@@ -43,7 +43,7 @@ classdef CodeIonoFreeConsistencyDiagnostics
 
             % IF noise amplification
             try
-                co = revgnss.IonosphereFreeCombinationDiagnostics.coefficients('L1','L2');
+                co = revgnss.IonosphereFreeCombinationDiagnostics.coefficients('L1','L2',cfg);
                 s.rAmplification   = sqrt(co.alpha^2 + co.beta^2);
                 s.rModelAssumption = 'uncorrelated L1/L2 code noise; R_IF=alpha^2*R_L1+beta^2*R_L2';
             catch ex

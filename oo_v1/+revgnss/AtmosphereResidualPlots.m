@@ -19,7 +19,7 @@ classdef AtmosphereResidualPlots
             if nargin < 2; outDir = ''; end
             floorM = 1e-4;   % log-axis floor [m] so exact-zero baselines still render
 
-            f_L1 = revgnss.SignalDefinition.get('L1').frequency_Hz;
+            f_L1 = revgnss.SignalUtils.frequency(cfg, 'L1');   % resolved band, not canonical
             nT   = 1;
             if isfield(cfg,'scenario') && isfield(cfg.scenario,'nTowers'); nT = cfg.scenario.nTowers; end
 

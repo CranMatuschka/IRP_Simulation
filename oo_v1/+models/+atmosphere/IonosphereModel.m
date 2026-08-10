@@ -22,28 +22,32 @@ classdef IonosphereModel
 
     methods (Static)
 
-        function scale = scaleForSignal(signalName, primaryName)
+        function scale = scaleForSignal(cfg, signalName, primaryName)
             % scaleForSignal  (f_primary/f_signal)^2 — first-order iono scale.
-            scale = revgnss.SignalDefinition.ionoScale(signalName, primaryName);
+            %   cfg is REQUIRED and is the only source of the two frequencies: this used
+            %   to call the name-keyed revgnss.SignalDefinition.ionoScale, which returned
+            %   the GPS L1/L2 ratio 1.6469 whatever the scenario had retuned to (the true
+            %   ratio for freq011's 5.8/5.2 GHz pair is 1.2440).
+            scale = revgnss.SignalUtils.ionoScale(cfg, signalName, primaryName);
         end
 
-        function delay_m = applyCodeSign(delayPrimary_m, signalName, primaryName)
+        function delay_m = applyCodeSign(cfg, delayPrimary_m, signalName, primaryName)
             % applyCodeSign  Positive (group delay) ionosphere correction for code.
             %
             %   delay_m = +delayPrimary_m * (f_primary / f_signal)^2
             %
             % Code pseudorange is delayed (increases measured range).
-            scale   = models.atmosphere.IonosphereModel.scaleForSignal(signalName, primaryName);
+            scale   = models.atmosphere.IonosphereModel.scaleForSignal(cfg, signalName, primaryName);
             delay_m = +delayPrimary_m .* scale;
         end
 
-        function delay_m = applyCarrierSign(delayPrimary_m, signalName, primaryName)
+        function delay_m = applyCarrierSign(cfg, delayPrimary_m, signalName, primaryName)
             % applyCarrierSign  Negative (phase advance) ionosphere for carrier.
             %
             %   delay_m = -delayPrimary_m * (f_primary / f_signal)^2
             %
             % Carrier phase is advanced (reduces measured range equivalent).
-            scale   = models.atmosphere.IonosphereModel.scaleForSignal(signalName, primaryName);
+            scale   = models.atmosphere.IonosphereModel.scaleForSignal(cfg, signalName, primaryName);
             delay_m = -delayPrimary_m .* scale;
         end
 

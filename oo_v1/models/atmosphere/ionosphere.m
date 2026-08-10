@@ -1,4 +1,4 @@
-function out = ionosphere(mode, args, cfg)   %#ok<INUSD>
+function out = ionosphere(mode, args, cfg)
 %IONOSPHERE  Single entry point for first-order ionosphere façade.
 %   Delegates VERBATIM to models.atmosphere.IonosphereModel — there is no physics here. The
 %   Validated math stays in the class; this is the discoverable one-file-per-
@@ -15,19 +15,21 @@ function out = ionosphere(mode, args, cfg)   %#ok<INUSD>
 %     mode = 'truth'       -> UNSUPPORTED: first-order ionosphere TRUTH is drawn inside
 %                             the stateful models.errors.ErrorChain per-epoch pass, not
 %                             reachable as an isolated stateless call. Use the sim.
-%   (cfg is accepted for signature uniformity across effect façades; ionosphere ignores it.)
+%   cfg is REQUIRED for 'model' and 'diagnostic': the (f_primary/f_signal)^2 scale is
+%   resolved from cfg.signals, the one owner of a carrier frequency.
+    if nargin < 3; cfg = struct(); end
     switch mode
         case 'model'
             out.codeDelay_m    = models.atmosphere.IonosphereModel.applyCodeSign( ...
-                args.delayPrimary_m, args.signalName, args.primaryName);
+                cfg, args.delayPrimary_m, args.signalName, args.primaryName);
             out.carrierDelay_m = models.atmosphere.IonosphereModel.applyCarrierSign( ...
-                args.delayPrimary_m, args.signalName, args.primaryName);
+                cfg, args.delayPrimary_m, args.signalName, args.primaryName);
         case 'covariance'
             [out.c1, out.c2] = models.atmosphere.IonosphereModel.ionoFreeCoefficients( ...
                 args.f1_Hz, args.f2_Hz);
         case 'diagnostic'
             out.scale = models.atmosphere.IonosphereModel.scaleForSignal( ...
-                args.signalName, args.primaryName);
+                cfg, args.signalName, args.primaryName);
         case 'truth'
             error('ionosphere:truthNotHere', ...
                 ['First-order ionosphere TRUTH is realized inside models.errors.ErrorChain ', ...

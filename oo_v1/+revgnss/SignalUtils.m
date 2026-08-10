@@ -1,7 +1,16 @@
 classdef SignalUtils
     % SignalUtils  Signal / frequency configuration helpers.
     %
+    % THE resolver for "what frequency is this run actually using". Every method reads
+    % config/masterConfig.m's cfg.signals (as overridden by the scenario JSON) and
+    % nothing else. None of them falls back to a canonical L-band constant: a signal the
+    % config does not define raises SignalUtils:signalUndefined.
+    %
     % Methods:
+    %   frequency(cfg,name)          Carrier frequency [Hz] of a named signal
+    %   wavelength(cfg,name)         Carrier wavelength [m], c / f
+    %   ionoScale(cfg,name,primary)  (f_primary / f_name)^2 dispersive scale
+    %   primaryName(cfg)             cfg.signals.primary, defaulting to 'L1'
     %   getEnabledSignals            Return struct array of enabled signals from cfg
     %   getFrequencyScaleToL1        Return (f_L1 / f_sig)^2 scale factor
     %   resolvedSignalTable          Full catalogue carrying the RESOLVED band
@@ -73,7 +82,14 @@ classdef SignalUtils
                     end
                 end
                 if isempty(f)
-                    f = revgnss.SignalDefinition.get(nm).frequency_Hz;
+                    error('SignalUtils:signalUndefined', ...
+                        ['Signal ''%s'' has no frequency in this config: neither ' ...
+                         'cfg.signals.frequencyHz(%d) nor cfg.signals.%s.frequency_Hz ' ...
+                         'is set. Define it in config/masterConfig.m -- the only owner ' ...
+                         'of a carrier frequency -- or override it from the scenario ' ...
+                         'JSON. There is deliberately no canonical-catalogue fallback: ' ...
+                         'that fallback is how every rung of config/ladder/freq came to ' ...
+                         'report a band it never simulated.'], nm, k, nm);
                 end
                 lam = [];
                 if numel(waves) >= k && isfinite(waves(k)) && waves(k) > 0
@@ -105,15 +121,20 @@ classdef SignalUtils
             nmAll = {sigs.name};
             i1 = find(strcmpi(nmAll, 'L1'), 1);
             i2 = find(strcmpi(nmAll, 'L2'), 1);
-            if isempty(i1)
-                f1 = revgnss.SignalDefinition.get('L1').frequency_Hz;
-            else
-                f1 = sigs(i1).frequency_Hz;
+            if isempty(i1) || isempty(i2)
+                error('SignalUtils:ionoFreeNeedsTwoSignals', ...
+                    ['The ionosphere-free combination needs both L1 and L2 in the ' ...
+                     'resolved signal table; found {%s}. A catalogue fallback used to ' ...
+                     'fill the missing member with a canonical L-band constant, which ' ...
+                     'silently produced GPS alpha/beta for a retuned pair.'], ...
+                    strjoin(nmAll, ', '));
             end
-            if isempty(i2)
-                f2 = revgnss.SignalDefinition.get('L2').frequency_Hz;
-            else
-                f2 = sigs(i2).frequency_Hz;
+            f1 = sigs(i1).frequency_Hz;
+            f2 = sigs(i2).frequency_Hz;
+            if f1 == f2
+                error('SignalUtils:ionoFreeDegeneratePair', ...
+                    ['L1 and L2 are both %.6g Hz: the ionosphere-free combination is ' ...
+                     'singular for a degenerate pair.'], f1);
             end
             alpha =  f1^2 / (f1^2 - f2^2);
             beta  = -f2^2 / (f1^2 - f2^2);
@@ -128,21 +149,13 @@ classdef SignalUtils
             %   lambda_m       double   wavelength [m]
             %   codeSigma0_m   double   baseline code noise sigma [m]
             %
-            % Falls back to L1-only if cfg.signals is missing or empty.
+            % Frequency and wavelength come from the RESOLVED config ONLY. The canonical
+            % L-band structs that used to backfill them are gone: config/masterConfig.m is
+            % the one owner of a carrier frequency, so a name it does not define is a
+            % configuration error rather than something to silently default. An unknown
+            % name used to warn and then be handed L1's frequency, which is how a retuned
+            % scenario could still be measured at 1575.42 MHz.
 
-            sigL1Default   = revgnss.SignalDefinition.get('L1');
-            sigL2Default   = revgnss.SignalDefinition.get('L2');
-
-            defaultL1 = struct('name','L1', ...
-                               'frequency_Hz',  sigL1Default.frequency_Hz, ...
-                               'lambda_m',      sigL1Default.wavelength_m, ...
-                               'codeSigma0_m',  0.30);
-            defaultL2 = struct('name','L2', ...
-                               'frequency_Hz',  sigL2Default.frequency_Hz, ...
-                               'lambda_m',      sigL2Default.wavelength_m, ...
-                               'codeSigma0_m',  0.45);
-
-            % Determine enabled signal names
             if ~isfield(cfg, 'signals') || ~isfield(cfg.signals, 'enabled')
                 enabledNames = {'L1'};
             else
@@ -153,42 +166,26 @@ classdef SignalUtils
             end
 
             nSig = numel(enabledNames);
-            signals = repmat(defaultL1, nSig, 1);  % pre-allocate with L1 template
+            signals = repmat(struct('name','', 'frequency_Hz',NaN, ...
+                                    'lambda_m',NaN, 'codeSigma0_m',NaN), nSig, 1);
+            % Code noise floor per signal is NOT frequency-derived -- ranging noise follows
+            % chip rate and bandwidth, not carrier frequency -- so these stay literal.
+            sigma0Default = struct('L1', 0.30, 'L2', 0.45, 'L5', 0.45);
 
             for k = 1:nSig
-                nm = enabledNames{k};
-                switch upper(nm)
-                    case 'L1'
-                        if isfield(cfg,'signals') && isfield(cfg.signals,'L1')
-                            s = cfg.signals.L1;
-                            signals(k) = struct( ...
-                                'name',          nm, ...
-                                'frequency_Hz',  getfld_(s, 'frequency_Hz', sigL1Default.frequency_Hz), ...
-                                'lambda_m',      getfld_(s, 'lambda_m',     sigL1Default.wavelength_m), ...
-                                'codeSigma0_m',  getfld_(s, 'codeSigma0_m', 0.30));
-                        else
-                            signals(k) = defaultL1;
-                            signals(k).name = nm;
-                        end
-                    case 'L2'
-                        if isfield(cfg,'signals') && isfield(cfg.signals,'L2')
-                            s = cfg.signals.L2;
-                            signals(k) = struct( ...
-                                'name',          nm, ...
-                                'frequency_Hz',  getfld_(s, 'frequency_Hz', sigL2Default.frequency_Hz), ...
-                                'lambda_m',      getfld_(s, 'lambda_m',     sigL2Default.wavelength_m), ...
-                                'codeSigma0_m',  getfld_(s, 'codeSigma0_m', 0.45));
-                        else
-                            signals(k) = defaultL2;
-                            signals(k).name = nm;
-                        end
-                    otherwise
-                        % Unknown signal name: use defaults with f_L1
-                        warning('SignalUtils:unknownSignal', ...
-                            'Unknown signal name ''%s''; using L1 defaults.', nm);
-                        signals(k) = defaultL1;
-                        signals(k).name = nm;
+                nm  = enabledNames{k};
+                sig = revgnss.SignalUtils.lookupResolved_(cfg, nm);
+                key = upper(strtrim(char(nm)));
+                s0  = 0.45;
+                if isfield(sigma0Default, key); s0 = sigma0Default.(key); end
+                if isfield(cfg,'signals') && isfield(cfg.signals, key) && ...
+                        isstruct(cfg.signals.(key))
+                    s0 = getfld_(cfg.signals.(key), 'codeSigma0_m', s0);
                 end
+                signals(k) = struct('name',         nm, ...
+                                    'frequency_Hz', sig.frequency_Hz, ...
+                                    'lambda_m',     sig.wavelength_m, ...
+                                    'codeSigma0_m', s0);
             end
         end
 
@@ -245,14 +242,83 @@ classdef SignalUtils
             %
             % Inputs:
             %   signal   struct   element from getEnabledSignals()
-            %   cfg      struct   simulation config (for f_L1 override)
+            %   cfg      struct   simulation config -- the ONLY source of f_L1
 
-            f_L1 = revgnss.SignalDefinition.get('L1').frequency_Hz;
-            if isfield(cfg,'signals') && isfield(cfg.signals,'L1') && ...
-                    isfield(cfg.signals.L1,'frequency_Hz')
-                f_L1 = cfg.signals.L1.frequency_Hz;
-            end
+            f_L1  = revgnss.SignalUtils.frequency(cfg, 'L1');
             scale = (f_L1 / signal.frequency_Hz)^2;
+        end
+
+        % ---- Resolved-band accessors ------------------------------------------------
+        % The ONLY sanctioned way to ask "what frequency is signal X in this run".
+        % Every one reads the resolved config and nothing else; none has a canonical
+        % fallback. revgnss.SignalDefinition used to answer these questions from a
+        % second, NAME-keyed copy of the L-band constants, so ~30 call sites measured
+        % 1575.42 MHz however the scenario had retuned the band.
+
+        function f = frequency(cfg, name)
+            % frequency  Carrier frequency [Hz] of a named signal, from the config.
+            f = revgnss.SignalUtils.lookupResolved_(cfg, name).frequency_Hz;
+        end
+
+        function lam = wavelength(cfg, name)
+            % wavelength  Carrier wavelength [m] of a named signal, c / f.
+            lam = revgnss.SignalUtils.lookupResolved_(cfg, name).wavelength_m;
+        end
+
+        function nm = primaryName(cfg)
+            % primaryName  cfg.signals.primary, defaulting to 'L1'.
+            nm = 'L1';
+            if isstruct(cfg) && isfield(cfg,'signals') && isfield(cfg.signals,'primary') ...
+                    && ischar(cfg.signals.primary) && ~isempty(cfg.signals.primary)
+                nm = cfg.signals.primary;
+            end
+        end
+
+        function scale = ionoScale(cfg, name, primaryName)
+            % ionoScale  (f_primary / f_name)^2 -- first-order dispersive scale.
+            %   The primary defaults to cfg.signals.primary. For the primary itself this
+            %   is exactly 1.0.
+            if nargin < 3 || isempty(primaryName)
+                primaryName = revgnss.SignalUtils.primaryName(cfg);
+            end
+            fSig  = revgnss.SignalUtils.frequency(cfg, name);
+            fPrim = revgnss.SignalUtils.frequency(cfg, primaryName);
+            scale = (fPrim / fSig)^2;
+        end
+
+    end
+
+    methods (Static, Access = private)
+
+        function sig = lookupResolved_(cfg, name)
+            % lookupResolved_  Resolved (name, frequency, wavelength) or an error.
+            nm = upper(strtrim(char(name)));
+            if isstruct(cfg) && isfield(cfg,'signals')
+                sigs = revgnss.SignalUtils.resolvedSignalTable(cfg);
+                idx  = find(strcmpi({sigs.name}, nm), 1);
+                if ~isempty(idx)
+                    sig = sigs(idx);
+                    return
+                end
+                % Defined in masterConfig but not among the names this scenario resolved
+                % (e.g. L2 asked for while running L1-only). Still the config, not a
+                % catalogue.
+                if isfield(cfg.signals, nm) && isstruct(cfg.signals.(nm)) && ...
+                        isfield(cfg.signals.(nm), 'frequency_Hz')
+                    f = cfg.signals.(nm).frequency_Hz;
+                    if isnumeric(f) && isscalar(f) && isfinite(f) && f > 0
+                        sig = struct('name', nm, 'frequency_Hz', f, ...
+                            'wavelength_m', revgnss.Constants.SPEED_OF_LIGHT_MPS / f, ...
+                            'enabled', false);
+                        return
+                    end
+                end
+            end
+            error('SignalUtils:signalUndefined', ...
+                ['Signal ''%s'' has no frequency in this config. Define ' ...
+                 'cfg.signals.%s.frequency_Hz in config/masterConfig.m -- the only ' ...
+                 'owner of a carrier frequency -- or override it from the scenario ' ...
+                 'JSON. There is deliberately no canonical-catalogue fallback.'], nm, nm);
         end
 
     end

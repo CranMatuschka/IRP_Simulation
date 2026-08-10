@@ -27,10 +27,8 @@ classdef InterAntennaPhaseBias
                 return
             end
             if signalIdx <= 0
-                sigL1 = revgnss.SignalDefinition.get('L1');
-                sigL2 = revgnss.SignalDefinition.get('L2');
-                [alpha, beta] = revgnss.IonoFreeCombination.coefficients( ...
-                    sigL1.frequency_Hz, sigL2.frequency_Hz);
+                % Resolved band pair, not the name-keyed catalogue.
+                [alpha, beta] = revgnss.SignalUtils.ionosphereFreeCoefficients(cfg);
                 b1 = revgnss.InterAntennaPhaseBias.lookupMeters_(biasCfg, cfg, receiverIdx, 1) - ...
                     revgnss.InterAntennaPhaseBias.lookupMeters_(biasCfg, cfg, refIdx, 1);
                 b2 = revgnss.InterAntennaPhaseBias.lookupMeters_(biasCfg, cfg, receiverIdx, 2) - ...
@@ -85,18 +83,16 @@ classdef InterAntennaPhaseBias
         end
 
         function lambda = wavelengthMeters_(cfg, signalIdx)
-            lambda = revgnss.SignalDefinition.get('L1').wavelength_m;
-            try
-                if isfield(cfg,'signals') && isfield(cfg.signals,'wavelength_m') && ...
-                        numel(cfg.signals.wavelength_m) >= signalIdx
-                    lambda = cfg.signals.wavelength_m(signalIdx);
-                    return
-                end
-            catch
+            % Resolved band only. The catalogue fallbacks here handed back the canonical
+            % 190.29 mm / 244.21 mm whatever band the scenario was actually running.
+            if isfield(cfg,'signals') && isfield(cfg.signals,'wavelength_m') && ...
+                    numel(cfg.signals.wavelength_m) >= signalIdx
+                lambda = cfg.signals.wavelength_m(signalIdx);
+                return
             end
-            if signalIdx == 2
-                lambda = revgnss.SignalDefinition.get('L2').wavelength_m;
-            end
+            names  = {'L1','L2','L5'};
+            si     = max(1, min(signalIdx, numel(names)));
+            lambda = revgnss.SignalUtils.wavelength(cfg, names{si});
         end
 
     end

@@ -45,8 +45,6 @@ classdef GroundCarrierAmbiguityProbe
     %       out.geomErrTau_s       integrated autocorrelation time of that error
 
     properties (Constant, Access = private)
-        F1 = 1575.42e6;
-        F2 = 1227.60e6;
         MIN_TOWERS = 2;
     end
 
@@ -83,11 +81,20 @@ classdef GroundCarrierAmbiguityProbe
             sigPhase = P.getNum_(cfg, {'multiAsset','groundCarrierProbe','phaseSigma_m'}, 0.002);
             seed0    = P.getNum_(cfg, {'simulation','seed'}, 42);
 
-            lam1 = c/P.F1; lam2 = c/P.F2;
-            lamWL = c/(P.F1-P.F2); lamNL = c/(P.F1+P.F2);
+            % Carriers from the RESOLVED band. These were private constants pinned at the
+            % GPS pair, so every lane wavelength and noise amplification this probe reported
+            % was L-band whatever the scenario had retuned to -- the GPS wide lane is
+            % 0.8619 m against 8.1 mm for the 61.25/24.125 GHz pair.
+            F1 = revgnss.SignalUtils.frequency(cfg, 'L1');
+            F2 = revgnss.SignalUtils.frequency(cfg, 'L2');
+            if F1 == F2
+                out.reason = 'degenerateSignalPair'; return
+            end
+            lam1 = c/F1; lam2 = c/F2;
+            lamWL = c/(F1-F2); lamNL = c/(F1+F2);
             % Wide-lane noise amplification: sigma_WL = sigma_phase * sqrt(f1^2+f2^2)/(f1-f2)
-            ampWL = sqrt(P.F1^2 + P.F2^2)/(P.F1 - P.F2);
-            ampNL = sqrt(P.F1^2 + P.F2^2)/(P.F1 + P.F2);
+            ampWL = sqrt(F1^2 + F2^2)/(F1 - F2);
+            ampNL = sqrt(F1^2 + F2^2)/(F1 + F2);
             BANDS = { 'wide-lane', lamWL, ampWL; ...
                       'L2',        lam2,  1.0;   ...
                       'L1',        lam1,  1.0;   ...

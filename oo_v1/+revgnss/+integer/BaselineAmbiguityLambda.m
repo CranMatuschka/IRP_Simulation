@@ -137,8 +137,13 @@ classdef BaselineAmbiguityLambda
         end
 
         function lam = lambda_(cfg)
-            lam = revgnss.SignalDefinition.get('L1').wavelength_m;
-            try; lam = cfg.signals.wavelength_m(1); catch; end
+            % Resolved band only -- a catalogue seed here would silently size the
+            % integer search in 190.29 mm cycles at any band.
+            try
+                lam = cfg.signals.wavelength_m(1);
+            catch
+                lam = revgnss.SignalUtils.wavelength(cfg, 'L1');
+            end
         end
 
         function [aHat_cyc, var_cyc, nInt, ok, cmp] = gather_(store, lam)
