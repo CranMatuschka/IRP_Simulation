@@ -1158,10 +1158,14 @@ classdef ReportRunner
             summary.carrierProductArcReferenceStatus     = 'notAvailableUsingProductEpochAgeV1';
             summary.sigmaToRmsJ2Ratio                    = NaN;
             summary.sigmaToMaxJ2Ratio                    = NaN;
-            summary.driftAnchorStatus                    = 'productEpochTruth';
+            % Fallbacks only -- both are overwritten from dopplerInfo below when Doppler rows
+            % exist. Updated 2026-08-09 with the Doppler anchoring fix: truth is read at the
+            % measurement epoch, and drift sigma carries the oscillator wander over the
+            % correction age on top of the product's own sigma.
+            summary.driftAnchorStatus                    = 'measurementEpochTruth';
             summary.explicitProductDriftUsed             = false;
             summary.truthHistoryProductDriftUsed         = false;
-            summary.driftSigmaSource                     = 'productConfig';
+            summary.driftSigmaSource                     = 'productConfigPlusOscillatorWander';
             try; summary.sigmaToRmsJ2Ratio = cfg.diagnostics.dynamicsMismatch.sigmaToRmsJ2Ratio; catch; end
             try; summary.sigmaToMaxJ2Ratio = cfg.diagnostics.dynamicsMismatch.sigmaToMaxJ2Ratio; catch; end
             try; summary.dopplerDriftVarianceDiagonalPolicy = cfg.covariance.productClock.dopplerDriftDiagonalPolicy; catch; end
