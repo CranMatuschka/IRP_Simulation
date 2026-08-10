@@ -118,7 +118,7 @@ function numericalSummary(fid, cfg, summary, diag)
     fprintf(fid, '\\midrule\n');
     fprintf(fid, '3D position error [m] & %s & %s\\\\\n', CE.fmtM_(posRMSFull), CE.fmtM_(pos3D));
     fprintf(fid, 'Clock error [m] & %s & %s\\\\\n', CE.fmtM_(clkRMSFull), CE.fmtM_(clkM));
-    fprintf(fid, 'Pre-fit innovation RMS [m] & --- & %s\\\\\n', CE.fmtM_(pfRMS));
-    fprintf(fid, 'Post-fit residual RMS [m] & --- & %s\\\\\n', CE.fmtM_(poRMS));
+    fprintf(fid, 'Pre-fit innovation RMS [m] & n/a & %s\\\\\n', CE.fmtM_(pfRMS));
+    fprintf(fid, 'Post-fit residual RMS [m] & n/a & %s\\\\\n', CE.fmtM_(poRMS));
     fprintf(fid, '\\bottomrule\n\\end{tabular}\n\\end{center}\n\\normalsize\n');
 end
