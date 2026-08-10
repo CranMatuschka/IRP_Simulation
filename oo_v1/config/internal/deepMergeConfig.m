@@ -20,6 +20,17 @@ function [base, paths] = deepMergeConfig(base, overlay, prefix)
         else
             path = [prefix '.' fieldName];
         end
+        % OPEN CONTAINERS: paths whose CHILD NAMES are user-defined by design, so an
+        % unrecognised field is the intended usage and not a typo. The entry is assigned
+        % wholesale -- a child here is a leaf record, not something to merge into a
+        % schema. Keep this list TINY: every entry is a hole in the protection that
+        % catches 'singleMapped' written for 'simpleMapped'. The consumer must validate
+        % its own contents instead (ConfigFactory.normaliseOscillator_ does).
+        if isOpenContainer_(prefix)
+            base.(fieldName) = overlay.(fieldName);
+            paths{end+1} = path; %#ok<AGROW>
+            continue
+        end
         if ~isfield(base, fieldName)
             error('deepMergeConfig:unknownConfigPath', ...
                 'Unknown configuration path: %s', path);
@@ -44,6 +55,13 @@ function [base, paths] = deepMergeConfig(base, overlay, prefix)
             paths{end+1} = path; %#ok<AGROW>
         end
     end
+end
+
+function tf = isOpenContainer_(prefix)
+    % Paths whose children are user-defined names rather than schema fields.
+    tf = any(strcmp(prefix, { ...
+        'clock.customOscillators' ...   % oscillator NAME -> h-coefficient struct
+    }));
 end
 
 function validateStructSchema_(base, overlay, prefix)

@@ -276,7 +276,7 @@ function cfg = localCleanErrors_(cfg)
     cfg.measurements.carrier.sigma_m = 0.005;
     cfg.measurements.doppler.sigma_mps = 0.01;
     cfg.measurement.sigmaFloor_m = 1e-3;
-    cfg.clock.templateSource = 'legacy';
+    % (templateSource removed 2026-08-10; use cfg.clock.customOscillators to vary coefficients.)
     cfg.asset.clockType = 'CESIUM1';
     cfg.clocks.tower.product.sigmaBias_m = 0.01;
     cfg.clocks.tower.product.sigmaDrift_mps = 0.0002;
@@ -299,9 +299,9 @@ end
 
 function cfg = localClockJowOnly_(cfg)
     cfg.asset.clockType = 'CESIUM1';
-    cfg.clock.templateSource = 'jowTable2p1';
+    % (templateSource removed 2026-08-10 -- the single table already carries these values.)
     if isfield(cfg, 'clockScaling')
-        cfg.clockScaling.templateSource = 'jowTable2p1';
+        % (mirror removed with the selector.)
     end
 end
 
@@ -517,7 +517,7 @@ function row = localExtractCfg_(row, cfg)
     try; row.correlatedNoiseCommon_m = cfg.effects.correlatedNoise.commonModeSigma_m; catch; end
     try; row.correlatedNoiseSameTower_m = cfg.effects.correlatedNoise.sameTowerSigma_m; catch; end
     try; row.correlatedNoiseIndependent_m = cfg.effects.correlatedNoise.independentSigma_m; catch; end
-    try; row.clockTemplateSource = string(cfg.clock.templateSource); catch; end
+    try; row.clockType = string(cfg.asset.clockType); catch; end
     try; row.towerProductSigmaBias_m = cfg.clocks.tower.product.sigmaBias_m; catch; end
     try; row.codeNoiseModel = string(cfg.measurements.codeNoise.model); catch; end
     try; row.dcbL1Truth_m = cfg.biases.interFrequency.code.truth.L1_m; catch; end

@@ -43,7 +43,11 @@ assert(jointRejected, 'Joint mode accepted fewer than two spacecraft.');
 
 [realism, realismMetadata] = resolveSimulationConfig('realism.json');
 assert(strcmp(realismMetadata.profile, 'realism'));
-assert(strcmp(realism.clock.templateSource, 'jowTable2p1'));
+% templateSource removed 2026-08-10 (ONE oscillator table). Realism's clock claim is now
+% the oscillator CLASS; its coefficients are the sourced Winkel (2003) Cesium1 row, which
+% is what the old 'jowTable2p1' selector resolved to anyway.
+assert(strcmp(realism.asset.clockType, 'CESIUM1'));
+assert(realism.asset.clock.noiseCoeffs.h0 == 1e-19);
 assert(realism.atmosphere.realistic);
 assert(realism.errors.multipath.enable);
 assert(realism.errors.multipath.truth.enable && ...
@@ -64,12 +68,16 @@ assert(~realism.estimator.diffAtt.ambiguityResolution.enable);
 override = struct();
 override.realism.grade = true;
 override.atmosphere.realistic = false;
-override.clock.templateSource = 'legacy';
+% Was clock.templateSource = 'legacy'. That knob is gone; the equivalent scenario-owned
+% clock override is now a custom oscillator, which exercises the same "caller wins over
+% the realism profile" path this gate exists to check.
+override.clock.customOscillators.CESIUM1 = struct('h0',1e-26,'hMinus1',1e-28,'hMinus2',1e-30);
 override.errors.multipath.enable = false;
 override.multiAsset.twoWayISL.enable = true;
 [overridden, overrideMetadata] = resolveTemporary_(override);
 assert(strcmp(overrideMetadata.profile, 'realism'));
-assert(strcmp(overridden.clock.templateSource, 'legacy'));
+assert(overridden.asset.clock.noiseCoeffs.h0 == 1e-26, ...
+    'the caller''s custom oscillator must beat the realism profile''s CESIUM1');
 assert(~overridden.atmosphere.realistic);
 assert(~overridden.errors.multipath.enable);
 assert(~overridden.errors.multipath.truth.enable);

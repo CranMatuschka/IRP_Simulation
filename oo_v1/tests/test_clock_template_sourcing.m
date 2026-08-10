@@ -1,99 +1,156 @@
-% test_clock_template_sourcing  WP4 acceptance test: clock h-coefficient templates can
-% be sourced from the optimistic legacy table or the re-anchored JOW Table 2.1 table.
+% test_clock_template_sourcing  ONE oscillator table, extensible and overridable as DATA.
 %
-% The legacy OCXO random-walk-FM coefficient hMinus2 = 2e-29 (which dominates the Allan
-% deviation at long averaging times and drives clock-bias variance growth between
-% updates) is optimistic versus the project primary source JOW Table 2.1 (OCXO2
-% hMinus2 = 2.51e-22). Legacy CESIUM1 h0 = 1e-26 behaves like an idealised maser rather
-% than a caesium beam (JOW Cesium1 h0 = 1e-19). cfg.clock.templateSource selects the
-% table; the default is 'legacy' (bit-identical reproducibility of past results).
+% REWRITTEN 2026-08-10. This test used to gate cfg.clock.templateSource, the selector
+% between a 'legacy' and a 'jowTable2p1' h-coefficient table. Both the selector and the
+% second table are gone, and the reason is worth recording: the "jowTable2p1" table was
+% not the sourced table it claimed to be. Of its four classes only CESIUM1 actually
+% carried Winkel's values; OCXO took one of three coefficients from the source; TCXO and
+% RUBIDIUM were unchanged legacy numbers under comments reading "Aligned to JOW Table 2.1"
+% -- which is why those two resolved BYTE-IDENTICALLY in both tables and any ladder rung
+% sweeping the selector on them measured nothing at all.
+%
+% What is gated now:
+%   A  the single table carries Winkel (2003) Table 2.1 EXACTLY, all eight classes
+%   B  an unknown oscillator ERRORS instead of silently becoming OCXO
+%   C  a NEW oscillator can be added purely as data, with no source edit
+%   D  a custom entry OVERRIDES a built-in of the same name
+%   E  the removed selector is rejected loudly, not ignored
+%   F  the documented back-compat aliases still resolve
 
 thisDir = fileparts(mfilename('fullpath'));
 addpath(fullfile(thisDir, '..'));
 addpath(fullfile(thisDir, '..', 'config'));
+addpath(fullfile(thisDir, '..', 'config', 'internal'));
 
 fprintf('=== test_clock_template_sourcing ===\n');
 
 % ================================================================
-% Part A: template values (jow re-anchored; legacy unchanged)
+% Part A: the table IS the source, coefficient for coefficient
 % ================================================================
-fprintf('  A. template h-coefficients ...\n');
-oL = revgnss.ConfigFactory.getClockTemplate_('OCXO',    'legacy');
-oJ = revgnss.ConfigFactory.getClockTemplate_('OCXO',    'jowTable2p1');
-cL = revgnss.ConfigFactory.getClockTemplate_('CESIUM1', 'legacy');
-cJ = revgnss.ConfigFactory.getClockTemplate_('CESIUM1', 'jowTable2p1');
+fprintf('  A. single table matches Winkel (2003) Table 2.1 ...\n');
+% Winkel, J. Ó. (2003). Modeling and simulating GNSS signal structures and receivers
+%   [Doctoral dissertation, Universität der Bundeswehr München]. Table 2.1, p. 100.
+% {name, h0, hMinus1, hMinus2} transcribed from the source, independently of the code.
+SRC = { ...
+    'QUARTZ',    2e-19,    7e-21,    2e-20   ; ...
+    'TCXO',      1e-21,    1e-20,    2e-20   ; ...
+    'OCXO1',     8e-20,    2e-21,    4e-23   ; ...
+    'OCXO2',     2.51e-26, 2.51e-23, 2.51e-22; ...
+    'RUBIDIUM1', 2e-20,    7e-24,    4e-29   ; ...
+    'RUBIDIUM2', 1e-23,    1e-22,    1.3e-26 ; ...
+    'CESIUM1',   1e-19,    1e-25,    2e-32   ; ...
+    'CESIUM2',   2e-20,    7e-23,    4e-29   };
 
-% jow OCXO hMinus2 == the JOW value and no longer the optimistic 2e-29.
-assert(oJ.hMinus2 == 2.51e-22, 'Part A FAILED: jow OCXO hMinus2=%.3e != 2.51e-22', oJ.hMinus2);
-assert(oJ.hMinus2 >= 1e-23,    'Part A FAILED: jow OCXO hMinus2 still optimistic (%.3e)', oJ.hMinus2);
-% jow CESIUM h0 re-anchored to a caesium beam.
-assert(cJ.h0 >= 1e-20, 'Part A FAILED: jow CESIUM h0=%.3e < 1e-20', cJ.h0);
-assert(cJ.h0 == 1e-19, 'Part A FAILED: jow CESIUM h0=%.3e != 1e-19 (JOW Cesium1)', cJ.h0);
+cat_ = revgnss.ConfigFactory.oscillatorCatalog_();
+for r = 1:size(SRC,1)
+    nm = SRC{r,1};
+    assert(isfield(cat_, nm), 'Part A FAILED: catalogue is missing %s', nm);
+    t = revgnss.ConfigFactory.getClockTemplate_(nm);
+    assert(t.h0 == SRC{r,2} && t.hMinus1 == SRC{r,3} && t.hMinus2 == SRC{r,4}, ...
+        ['Part A FAILED: %s is (%g, %g, %g) but the source says (%g, %g, %g). ' ...
+         'The table must be the source, not a hand-tuned neighbour of it.'], ...
+        nm, t.h0, t.hMinus1, t.hMinus2, SRC{r,2}, SRC{r,3}, SRC{r,4});
+    % The source table has no white/flicker PHASE noise; those stay zero.
+    assert(t.h2 == 0 && t.h1 == 0, 'Part A FAILED: %s has nonzero h2/h1', nm);
+end
+assert(isfield(cat_,'ZERO'), 'Part A FAILED: the explicit ZERO entry is missing');
+z = revgnss.ConfigFactory.getClockTemplate_('ZERO');
+assert(z.h0 == 0 && z.hMinus1 == 0 && z.hMinus2 == 0, 'Part A FAILED: ZERO is not zero');
 
-% Reproducibility guard: legacy returns the ORIGINAL numbers exactly.
-assert(oL.hMinus2 == 2e-29 && oL.h0 == 2e-25 && oL.hMinus1 == 7e-27, ...
-    'Part A FAILED: legacy OCXO values changed');
-assert(cL.h0 == 1e-26 && cL.hMinus1 == 1e-28 && cL.hMinus2 == 1e-30, ...
-    'Part A FAILED: legacy CESIUM values changed');
-
-% Invalid source -> namespaced error.
+% ================================================================
+% Part B: an unknown name ERRORS
+% ================================================================
+fprintf('  B. unknown oscillator errors, never substitutes ...\n');
 threw = false;
-try; revgnss.ConfigFactory.getClockTemplate_('OCXO','bogus'); catch ME
-    threw = contains(ME.identifier,'invalidTemplateSource'); end
-assert(threw, 'Part A FAILED: invalid templateSource not rejected');
-
-% Default remains legacy (backward compatible).
-cfgDef = revgnss.ConfigFactory.defaultConfig();
-assert(strcmp(cfgDef.clock.templateSource, 'legacy'), ...
-    'Part A FAILED: default templateSource should be legacy, got %s', cfgDef.clock.templateSource);
-fprintf('    OCXO hMinus2: legacy=%.2e jow=%.2e | CESIUM h0: legacy=%.2e jow=%.2e | default=legacy\n', ...
-    oL.hMinus2, oJ.hMinus2, cL.h0, cJ.h0);
-fprintf('    PASS\n');
+try
+    revgnss.ConfigFactory.getClockTemplate_('AtomicLike');
+catch me
+    threw = strcmp(me.identifier, 'ConfigFactory:unknownOscillator');
+end
+assert(threw, ...
+    ['Part B FAILED: an unknown oscillator was accepted. It used to WARN and silently ' ...
+     'substitute OCXO, which is exactly how clockDiversityConfig ran OCXO on three ' ...
+     'towers while reporting an atomic standard on one of them.']);
 
 % ================================================================
-% Part B: theoretical Allan deviation of the re-anchored OCXO
+% Part C: add a NEW oscillator as data
 % ================================================================
-fprintf('  B. theoretical ADEV: re-anchored OCXO is less stable long-term ...\n');
-tau = [1, 1000];
-clkL = models.clocks.ClockModel(revgnss.ConfigFactory.makeClockConfig( ...
-    'OCXO', 42, struct(), struct('templateSource','legacy')));
-clkJ = models.clocks.ClockModel(revgnss.ConfigFactory.makeClockConfig( ...
-    'OCXO', 42, struct(), struct('templateSource','jowTable2p1')));
-[~, aL] = clkL.theoreticalAllanDeviation(tau);
-[~, aJ] = clkJ.theoreticalAllanDeviation(tau);
-assert(all(isfinite(aL)) && all(aL > 0) && all(isfinite(aJ)) && all(aJ > 0), ...
-    'Part B FAILED: non-finite/non-positive ADEV');
-% The re-anchor raises the long-term (RWFM-dominated) Allan deviation.
-assert(aJ(2) > aL(2), 'Part B FAILED: jow OCXO not less stable at 1000 s (%.2e vs %.2e)', aJ(2), aL(2));
-% ... to a conservative level, not the optimistic ~5e-13.
-assert(aJ(2) >= 1e-10, 'Part B FAILED: jow OCXO ADEV@1000s=%.2e still optimistic', aJ(2));
-fprintf('    OCXO ADEV @1000s: legacy=%.2e  jow=%.2e  (jow > legacy, conservative)\n', aL(2), aJ(2));
-fprintf('    PASS\n');
+fprintf('  C. a new oscillator is addable without touching source ...\n');
+ov = struct('simulation', struct('duration_s', 600));
+o = ov;
+o.clock.customOscillators.MYMASER = struct('h0',1e-23,'hMinus1',3e-26,'hMinus2',5e-33);
+o.asset.clockType = 'MYMASER';
+c = resolveSimulationConfig('golden_baseline.json', o);
+assert(strcmp(c.asset.clock.clockType,'MYMASER'), ...
+    'Part C FAILED: the custom oscillator name did not reach the resolved clock');
+assert(c.asset.clock.noiseCoeffs.h0 == 1e-23 && ...
+       c.asset.clock.noiseCoeffs.hMinus1 == 3e-26 && ...
+       c.asset.clock.noiseCoeffs.hMinus2 == 5e-33, ...
+    'Part C FAILED: custom coefficients (%g,%g,%g) did not survive to the clock', ...
+    c.asset.clock.noiseCoeffs.h0, c.asset.clock.noiseCoeffs.hMinus1, ...
+    c.asset.clock.noiseCoeffs.hMinus2);
+% It must also be usable on the GROUND segment, through the tower knob.
+o2 = ov;
+o2.clock.customOscillators.MYMASER = struct('h0',1e-23,'hMinus1',3e-26,'hMinus2',5e-33);
+o2.clock.tower.clockType = 'MYMASER';
+o2.clock.tower.deterministic = false;
+c2 = resolveSimulationConfig('golden_baseline.json', o2);
+for k = 1:numel(c2.towers)
+    assert(c2.towers(k).clock.noiseCoeffs.h0 == 1e-23, ...
+        'Part C FAILED: tower %d did not receive the custom oscillator', k);
+end
+% A custom entry missing a required coefficient must be rejected, not defaulted.
+threw = false;
+try
+    o3 = ov;
+    o3.clock.customOscillators.BAD = struct('h0',1e-20);   % no hMinus1 / hMinus2
+    o3.asset.clockType = 'BAD';
+    resolveSimulationConfig('golden_baseline.json', o3);
+catch me
+    threw = strcmp(me.identifier, 'ConfigFactory:incompleteOscillator');
+end
+assert(threw, 'Part C FAILED: an incomplete custom oscillator was silently completed');
 
 % ================================================================
-% Part C: WP-4 exposure. masterConfig exposes the realism string as a one-line knob;
-% both frozen goldens PIN the idealised 'legacy' clock; the realistic CESIUM is noisier.
+% Part D: a custom entry OVERRIDES a built-in of the same name
 % ================================================================
-fprintf('  C. masterConfig exposes templateSource; goldens pin legacy ...\n');
-addpath(fullfile(thisDir, 'regression'));
-assert(strcmp(masterConfig().clock.templateSource, 'legacy'), ...
-    'Part C FAILED: masterConfig default templateSource must be ''legacy''.');
-assert(strcmp(goldenScenarioConfig().clock.templateSource, 'legacy'), ...
-    'Part C FAILED: single-antenna golden must pin templateSource=''legacy''.');
-assert(strcmp(goldenHeadlineScenarioConfig().clock.templateSource, 'legacy'), ...
-    'Part C FAILED: headline golden must pin templateSource=''legacy''.');
+fprintf('  D. a custom entry overrides a built-in ...\n');
+o = ov;
+o.clock.customOscillators.CESIUM1 = struct('h0',1e-26,'hMinus1',1e-28,'hMinus2',1e-30);
+c = resolveSimulationConfig('golden_baseline.json', o);
+assert(c.asset.clock.noiseCoeffs.h0 == 1e-26, ...
+    ['Part D FAILED: the built-in CESIUM1 (h0 = 1e-19) beat the caller''s override ' ...
+     '(got h0 = %g). Overriding a shipped oscillator is how config/ladder/clock/' ...
+     'clk002_refLegacyHTable reproduces the retired optimistic numbers.'], ...
+    c.asset.clock.noiseCoeffs.h0);
+% ... and the shipped table is not mutated by it.
+assert(revgnss.ConfigFactory.getClockTemplate_('CESIUM1').h0 == 1e-19, ...
+    'Part D FAILED: an override leaked into the shipped catalogue');
 
-% Sensitivity: the realistic caesium receiver clock is noisier than legacy at tau=1 s.
-cLl = revgnss.ConfigFactory.makeClockConfig('CESIUM1', 100, struct(), struct('templateSource','legacy'));
-cLj = revgnss.ConfigFactory.makeClockConfig('CESIUM1', 100, struct(), struct('templateSource','jowTable2p1'));
-clkCl = models.clocks.ClockModel(cLl);
-clkCj = models.clocks.ClockModel(cLj);
-[~, adCl] = clkCl.theoreticalAllanDeviation([1 1000]);
-[~, adCj] = clkCj.theoreticalAllanDeviation([1 1000]);
-assert(adCj(1) > adCl(1), ...
-    'Part C FAILED: realistic CESIUM not noisier @1s (%.2e vs %.2e)', adCj(1), adCl(1));
-fprintf('    masterConfig=legacy; goldens pinned; realistic CESIUM ADEV@1s=%.2e > legacy %.2e\n', ...
-    adCj(1), adCl(1));
-fprintf('    PASS\n');
+% ================================================================
+% Part E: the removed selector is rejected, not ignored
+% ================================================================
+fprintf('  E. templateSource is rejected loudly ...\n');
+threw = false;
+try
+    o = ov; o.clock.templateSource = 'legacy';
+    resolveSimulationConfig('golden_baseline.json', o);
+catch
+    threw = true;   % deepMergeConfig:unknownConfigPath or ConfigFactory:templateSourceRemoved
+end
+assert(threw, ...
+    ['Part E FAILED: clock.templateSource was accepted. A removed knob that is silently ' ...
+     'ignored is the inert-toggle defect this codebase keeps rediscovering.']);
 
-fprintf('=== test_clock_template_sourcing: ALL PASS ===\n');
+% ================================================================
+% Part F: documented aliases still resolve
+% ================================================================
+fprintf('  F. OCXO / RUBIDIUM aliases resolve ...\n');
+a = revgnss.ConfigFactory.getClockTemplate_('OCXO');
+b = revgnss.ConfigFactory.getClockTemplate_('OCXO2');
+assert(isequal(a,b), 'Part F FAILED: ''OCXO'' does not resolve to OCXO2');
+a = revgnss.ConfigFactory.getClockTemplate_('RUBIDIUM');
+b = revgnss.ConfigFactory.getClockTemplate_('RUBIDIUM1');
+assert(isequal(a,b), 'Part F FAILED: ''RUBIDIUM'' does not resolve to RUBIDIUM1');
+
+fprintf('=== test_clock_template_sourcing PASSED ===\n');

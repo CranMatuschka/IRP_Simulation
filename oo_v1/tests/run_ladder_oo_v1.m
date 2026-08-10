@@ -124,7 +124,7 @@ function cfg = rung_rxDeterministic(cfg);cfg.clock.receiver.deterministic = true
 function cfg = rung_realisticClock(cfg)
     % WP-4 sensitivity: swap the idealised legacy clock for the realistic,
     % literature-anchored JOW Table 2.1 set (real caesium / OCXO2). One string.
-    cfg.clock.templateSource = 'jowTable2p1';
+    % (templateSource removed 2026-08-10 -- ONE oscillator table, Winkel (2003) Table 2.1.)
 end
 function cfg = rung_towerPerfect(cfg)
     cfg.estimator.towerClockMode = 'perfectCorrection';

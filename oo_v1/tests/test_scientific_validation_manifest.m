@@ -24,7 +24,13 @@ assert(strcmp(manifest.statistics.evaluationRule, ...
 comparison = compareDefaultAndRealismConfigurations();
 paths = string(comparison.changed.Path);
 assert(any(paths == "realism.grade"));
-assert(any(paths == "clock.templateSource"));
+% The clock is deliberately NOT asserted here any more. Until 2026-08-10 the realism
+% overlay differed from the default on clock.templateSource, flipping a whole second
+% h-coefficient table. With ONE table (Winkel 2003 Table 2.1) both resolve to the same
+% CESIUM1 with the same coefficients, so the clock is no longer a default-vs-realism
+% difference at all -- and asserting one would pin an artefact of the retired table.
+assert(~any(paths == "clock.templateSource"), ...
+    'clock.templateSource was removed 2026-08-10 and must not reappear in the manifest.');
 assert(any(paths == "estimator.starTracker.whiteAngularSigma_rad"));
 assert(isempty(comparison.addedBeforeDerivation), ...
     'The realism overlay introduced a field not declared by masterConfig.');

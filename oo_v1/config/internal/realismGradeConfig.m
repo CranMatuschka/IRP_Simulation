@@ -33,9 +33,11 @@ function cfg = realismGradeConfig(cfg)
 
     % ---- R-1  Realistic receiver clock (JOW Table 2.1 caesium, not the idealised legacy maser)
     if inc.clock
-        cfg.asset.clockType             = V.clock.clockType;
-        cfg.clock.templateSource        = V.clock.templateSource;
-        cfg.clockScaling.templateSource = V.clock.templateSource;   % mirror read by config-time makeClockConfig
+        cfg.asset.clockType = V.clock.clockType;
+        % templateSource dropped 2026-08-10: there is ONE oscillator table, so realism no
+        % longer has a second one to switch to. This is a no-op in value terms -- realism
+        % used the jowTable2p1 CESIUM1, whose coefficients ARE the sourced Winkel (2003)
+        % Cesium1 row that the single table now carries for everyone.
     end
 
     % ---- R-4  Realistic ground broadcast tower-clock product sigma (IGS-RTS, not IGS-final)
@@ -388,7 +390,7 @@ end
 % ==========================================================================================
 function V = i_realismDefaults()
 %I_REALISMDEFAULTS  Hardcoded fallback = the pre-JSON realism numeric parameters (golden-pinned).
-    V.clock             = struct('clockType','CESIUM1','templateSource','jowTable2p1');
+    V.clock             = struct('clockType','CESIUM1');
     V.towerProductSigma = struct('sigmaBias_m',0.10,'sigmaDrift_mps',0.001);
     V.cn0               = struct('base_dBHz',45,'elevationGain_dB',6,'sigmaAt45dBHz_m',0.30);
     V.hardwareDelay     = struct('sigma_m',0.5);

@@ -155,7 +155,6 @@
   },
 
   "clock": {
-    "templateSource": "jowTable2p1",
     "mode": "spacecraftReceiverClockOnly",
     "gauge": { "mode": "externalTowerCorrections" }
   },

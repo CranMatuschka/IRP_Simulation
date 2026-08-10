@@ -164,24 +164,35 @@ cfg.clock.receiver.deterministic  = false;
 % scenario assembly wrote it, so the default is byte-identical and
 % ConfigFactory.clockDiversityConfig's per-tower mix survives untouched.
 %
-% TRAP -- the ground clock TYPE is INERT while deterministic stays true. A
-% deterministic models.clocks.ClockModel returns identically zero bias
-% (ClockModel.m:188/264), so no h-coefficient is ever read and
-% TowerClockCorrectionProvider sees towerClkTruth = 0 for every oscillator class.
-% Changing the ground oscillator only means something with
-% cfg.clock.tower.deterministic = false as well; the h-coefficients then drive the
-% wander the broadcast product must chase, and the uncorrected residual over the
-% product's latency + update interval is what reaches the measurement.
+% The ground clock TYPE is INERT while deterministic stays true: a deterministic
+% models.clocks.ClockModel returns identically zero bias (ClockModel.m:204/294), so no
+% h-coefficient is ever read and TowerClockCorrectionProvider sees towerClkTruth = 0 for
+% every oscillator class. That was the shipped default until 2026-08-09 -- five towers
+% labelled OCXO, with OCXO h-coefficients loaded and five distinct seeds allocated, none
+% of which was ever evaluated. The entire ground-segment error was the broadcast
+% product's own injected noise.
+%
+% Now false: the assigned oscillators actually run. The h-coefficients drive the wander
+% the broadcast product must chase, and the residual over the product's latency + update
+% interval (5 + 30 = 35 s) is what reaches the measurement -- 1.4 mm on the 'legacy'
+% h-table, 2.5 m on 'jowTable2p1'. That residual is charged to R by
+% TowerClockCorrectionProvider.extrapolationWanderVar_; before it existed, turning this
+% flag off left R optimistic by ~24x on the jowTable2p1 fixtures.
 cfg.clock.tower.clockType         = '';     % '' | 'TCXO' | 'OCXO' | 'RUBIDIUM' | 'CESIUM1' | 'ZERO'
-cfg.clock.tower.deterministic     = true;   % true = current behaviour (zero tower-clock truth)
-% Receiver oscillator + clock realism (both single strings, changed right here).
-% clockType picks the oscillator class ('CESIUM1' | 'OCXO' | 'RUBIDIUM' | 'TCXO');
-% templateSource picks the h-coefficient realism: 'legacy' = idealised/optimistic (the
-% frozen-golden and headline default) | 'jowTable2p1' = realistic, literature-anchored
-% (JOW Table 2.1 real caesium / OCXO2 -> the sub-100 ps timing result degrades honestly).
-% Change either ONE string; ConfigFactory.finalizeConfig rebuilds every clock from them.
+cfg.clock.tower.deterministic     = false;  % false = the assigned ground oscillators run
+% Receiver oscillator, one string, changed right here. ConfigFactory.finalizeConfig
+% rebuilds every clock from it. The h-coefficients come from ONE table --
+% ConfigFactory.oscillatorCatalog_, Winkel (2003) Table 2.1 -- and the class names are the
+% source's own:
+%   QUARTZ | TCXO | OCXO1 | OCXO2 | RUBIDIUM1 | RUBIDIUM2 | CESIUM1 | CESIUM2 | ZERO
+% 'OCXO' and 'RUBIDIUM' still resolve, as documented aliases for OCXO2 and RUBIDIUM1.
+% The ranking INVERTS with averaging time -- OCXO2 is the best clock at 1 s and the worst
+% at 4 h; read the character notes in oscillatorCatalog_ before choosing.
 cfg.asset.clockType               = 'CESIUM1';
-cfg.clock.templateSource          = 'legacy';
+% Add an oscillator, or overwrite a built-in of the same name, WITHOUT editing source:
+%   cfg.clock.customOscillators.MYCLOCK = struct('h0',1e-21,'hMinus1',1e-23,'hMinus2',1e-26);
+% h0/hMinus1/hMinus2 are required; h2/h1 default to 0. A JSON scenario can set this too.
+cfg.clock.customOscillators       = struct();
 cfg.estimator.estimateTowerClocks = false;
 cfg.clocks.tower.product.mode                   = 'truthHistoryProductNoisy';
 cfg.clocks.tower.product.updateInterval_s       = 30;
@@ -1079,11 +1090,10 @@ cfg.clockScaling.globalFreqFactor    = 1.0;
 cfg.clockScaling.globalNoiseFactor   = 1.0;
 cfg.clockScaling.receiverNoiseFactor = 1.0;
 cfg.clockScaling.towerNoiseFactor    = 1.0;
-% Clock h-coefficient source. 'legacy' = original (optimistic) numbers, kept for
-% exact reproducibility; 'jowTable2p1' = re-anchored to JOW Table 2.1 (less optimistic
-% OCXO/CESIUM). Canonical selector is cfg.clock.templateSource (below); this mirror is
-% read by the config-build-time makeClockConfig calls before cfg.clock exists.
-cfg.clockScaling.templateSource      = 'legacy';
+% Custom/overriding oscillators. Canonical field is cfg.clock.customOscillators (above);
+% this mirror is read by the config-build-time makeClockConfig calls that run before
+% cfg.clock exists. finalizeConfig re-syncs the two before rebuilding any clock.
+cfg.clockScaling.customOscillators   = struct();
 
 % Asset receiver clock fields (simple config fields)
 % CESIUM1 (Cesium beam / H-maser class) is the physically-correct on-board clock for
@@ -1100,7 +1110,11 @@ cfg.asset.clockFactors = struct( ...
 cfg.asset.clock = revgnss.ConfigFactory.makeClockConfig( ...
     cfg.asset.clockType, 100, cfg.asset.clockFactors, cfg.clockScaling);
 cfg.asset.clock.name          = 'RxClock';
-cfg.asset.clock.deterministic = true;
+% deterministic is NOT written here: it is DERIVED from cfg.clock.receiver.deterministic
+% (the knob, ~line 158) by ConfigFactory.finalizeConfig, which runs after every scenario
+% merge and unconditionally overwrites this field. The `= true` that used to sit here was a
+% dead store -- the resolved receiver clock has been stochastic all along -- and it made
+% masterConfig read as though the receiver were noiseless. Change the knob, not this field.
 cfg.asset.clock.bias_s        = 0.0;
 cfg.asset.clock.fracFreq      = 0.0;
 cfg.asset.assetIndex = 1;
@@ -2012,18 +2026,33 @@ cfg.biases.interFrequency.carrier.model.L2_m = 0;
 cfg.errors.codeNoise.sigma_m = 0.3;
 
 % --- Signal / frequency config ----------------------------------------
-sigL1Default_ = revgnss.SignalDefinition.get('L1');
-sigL2Default_ = revgnss.SignalDefinition.get('L2');
+% THE ONLY place a carrier frequency is defined in this code base. Everything
+% downstream -- ionosphere scaling, carrier wavelength, IF alpha/beta, wide/narrow-lane
+% wavelengths, cycle-slip thresholds and the ISL band -- resolves from here via
+% revgnss.SignalUtils. A scenario retunes a band by overriding
+% signals.<name>.frequency_Hz from its JSON. Nothing else may define, default to, or
+% override a frequency: revgnss.SignalDefinition used to hold a second, NAME-keyed copy
+% of these numbers, and ~30 sites read it instead of the config, so every rung of
+% config/ladder/freq silently ran L-band physics at its reported band.
+%
+% Canonical GPS L-band carriers (ITU-R M.1787). lambda is DERIVED from the frequency so
+% the two can never disagree.
 cfg.signals.enabled = {'L1'};
 cfg.signals.twoFrequency.enable = false;
 cfg.signals.L1.name          = 'L1';
-cfg.signals.L1.frequency_Hz  = sigL1Default_.frequency_Hz;
-cfg.signals.L1.lambda_m      = sigL1Default_.wavelength_m;
+cfg.signals.L1.frequency_Hz  = 1575.42e6;
+cfg.signals.L1.lambda_m      = revgnss.Constants.SPEED_OF_LIGHT_MPS / cfg.signals.L1.frequency_Hz;
 cfg.signals.L1.codeSigma0_m  = 0.30;
 cfg.signals.L2.name          = 'L2';
-cfg.signals.L2.frequency_Hz  = sigL2Default_.frequency_Hz;
-cfg.signals.L2.lambda_m      = sigL2Default_.wavelength_m;
+cfg.signals.L2.frequency_Hz  = 1227.60e6;
+cfg.signals.L2.lambda_m      = revgnss.Constants.SPEED_OF_LIGHT_MPS / cfg.signals.L2.frequency_Hz;
 cfg.signals.L2.codeSigma0_m  = 0.45;
+% L5 is defined -- though not enabled -- so ConfigFactory's {'L1','L2','L5'} name
+% resolution never has to reach for a catalogue to fill a third mask entry.
+cfg.signals.L5.name          = 'L5';
+cfg.signals.L5.frequency_Hz  = 1176.45e6;
+cfg.signals.L5.lambda_m      = revgnss.Constants.SPEED_OF_LIGHT_MPS / cfg.signals.L5.frequency_Hz;
+cfg.signals.L5.codeSigma0_m  = 0.45;
 cfg.signals.primary          = 'L1';   % primary signal for iono scaling
 cfg.signals.secondary        = 'L2';   % secondary for IF combination
 % DEPRECATED / DOCUMENTARY ONLY. 'off'|'truthOnly'|'model'|'ionosphereFree'. NOTHING in the
@@ -2036,7 +2065,7 @@ cfg.ionosphere.mode          = 'off';
 % Central signal list (names, Hz, boolean masks).
 % Populated by finalizeConfig from canonical names/enabledMask resolution.
 cfg.signals.names            = {'L1'};
-cfg.signals.frequencyHz      = sigL1Default_.frequency_Hz;
+cfg.signals.frequencyHz      = cfg.signals.L1.frequency_Hz;
 cfg.signals.enabledMask      = [true];
 cfg.measurements.code.enabledByFrequency    = [true];
 cfg.measurements.carrier.enabledByFrequency = [true];
@@ -2387,8 +2416,10 @@ cfg.measurements.doppler.includePositionPartial = false;
 
 cfg.measurements.carrierPhase.enable           = true;
 cfg.measurements.carrierPhase.useInEKF         = false;   % governed by carrierMode
-cfg.measurements.carrierPhase.frequency_Hz     = sigL1Default_.frequency_Hz;
-cfg.measurements.carrierPhase.lambda_m         = sigL1Default_.wavelength_m;
+% Seeded from the one owner above; finalizeConfig re-derives both from the RESOLVED
+% primary carrier after the JSON merge, so a retuned band carries them.
+cfg.measurements.carrierPhase.frequency_Hz     = cfg.signals.L1.frequency_Hz;
+cfg.measurements.carrierPhase.lambda_m         = cfg.signals.L1.lambda_m;
 cfg.measurements.carrierPhase.sigma_cycles     = 0.01;
 cfg.measurements.carrierPhase.initialAmbiguityMode = 'randomInteger';
 cfg.measurements.carrierPhase.seed             = 9001;
@@ -2448,8 +2479,12 @@ cfg.measurements.isl.carrier.sigma_m = 0.20;
 % the ground convention, so the carrier Jacobian column is +1 rather than lambda. The
 % undifferenced B is NOT an integer (it absorbs the clock bias per arc) -- integer
 % resolution needs a differenced parametrisation; see docs/plans/ISL_LAMBDA/03.
-% ISL carrier frequency [Hz]. NaN -> fall back to L1 (1575.42 MHz) so the conventional
-% behaviour is unchanged. Set explicitly for a real crosslink band (e.g. 26e9 for Ka).
+% ISL carrier frequency [Hz]. NaN is a SENTINEL meaning "follow the resolved primary
+% ground carrier"; ConfigFactory.finalizeConfig substitutes cfg.signals.<primary>
+% .frequency_Hz after the JSON merge, so a scenario that retunes the band carries the
+% crosslink with it. It previously resolved inside ISLMeasurementBuilder by reading the
+% name-keyed SignalDefinition, which pinned every retuned scenario's ISL to 1575.42 MHz.
+% Set a number here (or from JSON) for a real crosslink band, e.g. 26e9 for Ka.
 % Only affects the carrier WAVELENGTH (hence the truth ambiguity lambda*N); the geometric
 % range is frequency-independent, as vacuum propagation requires.
 cfg.measurements.isl.carrier.frequency_Hz           = NaN;
@@ -2929,7 +2964,10 @@ cfg.measurements.groundRelayTimeTransfer.counterTag.labels  = {'t1','t2','t3','t
 % systematic sampled once and reused for both appearances of each station-relay path).
 cfg.measurements.groundRelayTimeTransfer.atmosphere.applyTropo               = false;
 cfg.measurements.groundRelayTimeTransfer.atmosphere.applyIono                = false;
-cfg.measurements.groundRelayTimeTransfer.atmosphere.f_L1ReferenceHz          = 1.57542e9;
+% Iono reference frequency for the relay legs. DERIVED from the one owner above, never a
+% second literal; finalizeConfig re-derives it from the resolved primary carrier after the
+% JSON merge so a retuned band carries it, unless a scenario explicitly pins it.
+cfg.measurements.groundRelayTimeTransfer.atmosphere.f_L1ReferenceHz          = cfg.signals.L1.frequency_Hz;
 cfg.measurements.groundRelayTimeTransfer.atmosphere.perLegResidualVariance_s2 = [0, 0];  % [stationA-relay, relay-stationB]
 
 cfg.measurements.groundRelayTimeTransfer.solverOptions.lightTimeTolerance_s = 1e-13;
@@ -3116,10 +3154,9 @@ cfg.towerClock.productValidityPolicy  = 'warn';  % 'warn' | 'error'
 %
 % clock.hardwareDelay.estimatePerTower — hardware delay EKF state placeholder (not implemented)
 cfg.clock.mode                           = 'spacecraftReceiverClockOnly';
-% h-coefficient source for clock templates (canonical selector). 'legacy' keeps
-% every current number bit-identical; 'jowTable2p1' re-anchors OCXO/CESIUM to the
-% project primary source (JOW Table 2.1) — less optimistic, more conservative.
-cfg.clock.templateSource                 = 'legacy';
+% (templateSource removed 2026-08-10 — ONE table now; see cfg.clock.customOscillators
+% above and ConfigFactory.oscillatorCatalog_. finalizeConfig ERRORS if a scenario still
+% sets it, rather than ignoring it silently.)
 cfg.clock.gauge.mode                     = 'externalTowerCorrections';
 cfg.clock.gauge.referenceTowerIndex      = 1;      % used by fixReferenceTower
 cfg.clock.gauge.sigmaBias_m              = 1e-6;   % pseudo-meas sigma for bias gauge [m]

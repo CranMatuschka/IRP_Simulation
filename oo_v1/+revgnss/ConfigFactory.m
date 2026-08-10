@@ -206,7 +206,14 @@ classdef ConfigFactory
             %   2 Stockholm       TCXO       noiseFactor=1.2
             %   3 Hartebeesthoek  Rubidium   noiseFactor=0.8
             %   4 Bengaluru       OCXO       h0Factor=3.0
-            %   5 Libreville      AtomicLike noiseFactor=1.0
+            %   5 Libreville      CESIUM1    noiseFactor=1.0
+            %
+            % FIXED 2026-08-10: tower 5 said 'AtomicLike', which was never a template in
+            % EITHER shipped table. getClockTemplate_ warned and silently substituted OCXO,
+            % so this "diversity" preset actually ran OCXO on towers 1, 4 AND 5 while
+            % reporting an atomic standard on the last. Nothing caught it because the
+            % substitution was a warning. getClockTemplate_ now errors on an unknown name,
+            % which is what surfaced this.
             %
             % Tower clocks are stochastic; mode = perfectCorrection.
             % Default (defaultConfig) run remains fully deterministic.
@@ -222,7 +229,7 @@ classdef ConfigFactory
                 'TCXO',       1.2, 1.0; ...    % 2 Stockholm
                 'Rubidium',   0.8, 1.0; ...    % 3 Hartebeesthoek
                 'OCXO',       1.0, 3.0; ...    % 4 Bengaluru  (h0Factor=3)
-                'AtomicLike', 1.0, 1.0 };      % 5 Libreville
+                'CESIUM1',    1.0, 1.0 };      % 5 Libreville (was the phantom 'AtomicLike')
 
             nT = numel(cfg.towers);
             for k = 1:min(nT, size(towerOverrides,1))
@@ -431,10 +438,11 @@ classdef ConfigFactory
             if nargin < 3 || isempty(factors);       factors       = struct(); end
             if nargin < 4 || isempty(globalScaling); globalScaling = struct(); end
 
-            % Select the h-coefficient source ('legacy' | 'jowTable2p1'), threaded
-            % via cfg.clockScaling.templateSource (synced from cfg.clock.templateSource).
-            tsrc = getf_(globalScaling, 'templateSource', 'legacy');
-            tmpl = revgnss.ConfigFactory.getClockTemplate_(templateName, tsrc);
+            % ONE oscillator table (see getClockTemplate_). Custom or overriding entries are
+            % threaded via cfg.clockScaling.customOscillators, synced from
+            % cfg.clock.customOscillators exactly as templateSource used to be.
+            customs = getf_(globalScaling, 'customOscillators', struct());
+            tmpl = revgnss.ConfigFactory.getClockTemplate_(templateName, customs);
 
             % Extract global scale factors
             gNoise = getf_(globalScaling, 'globalNoiseFactor', 1.0);
@@ -1242,33 +1250,41 @@ classdef ConfigFactory
             nSig79_ = numel(sigNames79_);
             freqHz79_ = zeros(1,nSig79_);
             waveM79_  = zeros(1,nSig79_);
-            % SignalDefinition is keyed by NAME, so a scenario that retunes a band while
-            % keeping the name (the Ka ladder moves "L1" to 30 GHz) would have its frequency
-            % silently stamped back to the canonical 1575.42 MHz here -- every ka_*.json ran
-            % at L-band, which nullifies the 1/f^2 ionosphere argument the ladder exists to
-            % test. Honour a frequency the scenario explicitly owns; derive lambda from it so
-            % the pair can never disagree. cfg.provenance.explicit is the same list
-            % preserveScenarioOwned uses, and is absent when finalizeConfig is handed a raw
-            % masterConfig -- hence the guard.
+            % cfg.provenance.explicit is the same list preserveScenarioOwned uses, and is
+            % absent when finalizeConfig is handed a raw masterConfig -- hence the guard.
+            % It no longer gates the FREQUENCY (see below), only the derived quantities
+            % further down that a scenario may legitimately pin by hand.
             ownedSig79_ = {};
             if isfield(cfg,'provenance') && isfield(cfg.provenance,'explicit')
                 ownedSig79_ = cfg.provenance.explicit;
             end
+            % cfg.signals.<name>.frequency_Hz is the ONE owner of a carrier frequency
+            % (config/masterConfig.m, overridable from a scenario JSON). This block used to
+            % seed each frequency from the NAME-keyed revgnss.SignalDefinition and honour the
+            % config value ONLY when cfg.provenance.explicit happened to list the key -- so a
+            % retuned band was silently stamped back to the canonical 1575.42 MHz whenever
+            % provenance did not record it, which is how every ka_*.json ran at L-band and how
+            % config/ladder/freq reported bands it never simulated. There is no catalogue
+            % fallback now: a named signal with no configured frequency is a configuration
+            % error, not something to guess. lambda is DERIVED so the pair cannot disagree.
             for si79_ = 1:nSig79_
-                sd79_ = revgnss.SignalDefinition.get(sigNames79_{si79_});
-                freqHz79_(si79_) = sd79_.frequency_Hz;
-                waveM79_(si79_)  = sd79_.wavelength_m;
-
                 sn79o_ = sigNames79_{si79_};
-                if any(strcmp(ownedSig79_, sprintf('signals.%s.frequency_Hz', sn79o_))) && ...
-                        isfield(cfg.signals, sn79o_) && ...
-                        isfield(cfg.signals.(sn79o_), 'frequency_Hz')
-                    fOwn79_ = cfg.signals.(sn79o_).frequency_Hz;
-                    if isnumeric(fOwn79_) && isscalar(fOwn79_) && isfinite(fOwn79_) && fOwn79_ > 0
-                        freqHz79_(si79_) = fOwn79_;
-                        waveM79_(si79_)  = 299792458 / fOwn79_;   % c [m/s], as SignalDefinition
-                    end
+                if ~isfield(cfg.signals, sn79o_) || ~isstruct(cfg.signals.(sn79o_)) || ...
+                        ~isfield(cfg.signals.(sn79o_), 'frequency_Hz')
+                    error('ConfigFactory:signalFrequencyUndefined', ...
+                        ['Signal ''%s'' is named in cfg.signals.names but has no ' ...
+                         'cfg.signals.%s.frequency_Hz. Define it in config/masterConfig.m ' ...
+                         '-- the only owner of a carrier frequency -- or override it from ' ...
+                         'the scenario JSON.'], sn79o_, sn79o_);
                 end
+                f79_ = cfg.signals.(sn79o_).frequency_Hz;
+                if ~isnumeric(f79_) || ~isscalar(f79_) || ~isfinite(f79_) || f79_ <= 0
+                    error('ConfigFactory:signalFrequencyInvalid', ...
+                        ['cfg.signals.%s.frequency_Hz must be a finite positive scalar ' ...
+                         '[Hz]; got %s.'], sn79o_, mat2str(f79_));
+                end
+                freqHz79_(si79_) = f79_;
+                waveM79_(si79_)  = revgnss.Constants.SPEED_OF_LIGHT_MPS / f79_;
             end
             cfg.signals.names        = sigNames79_;
             cfg.signals.frequencyHz  = freqHz79_;
@@ -1324,6 +1340,44 @@ classdef ConfigFactory
                         % carrierPhase.lambda_m == cfg.signals.L1.lambda_m to the last bit.
                         cfg.measurements.carrierPhase.lambda_m = waveM79_(primIdx79_);
                     end
+                end
+            end
+
+            % ---- ISL carrier band and the relay ionosphere reference --------------------
+            % Both used to resolve by reading the name-keyed SignalDefinition inside their
+            % own consumers (ISLMeasurementBuilder, the relay atmosphere), which pinned them
+            % to 1575.42 MHz however the scenario retuned the band. Resolve both HERE from
+            % the same freqHz79_ array everything else uses, so one definition exists and a
+            % retuned band carries them.
+            %
+            % ISL: NaN in masterConfig is the sentinel for "follow the primary ground
+            % carrier". A finite positive value -- from masterConfig or JSON -- is a real
+            % crosslink band (e.g. 26e9 for Ka) and is left alone.
+            % GOLDEN-SAFE: at the canonical band both resolve to 1575.42 MHz, which is
+            % exactly what the removed SignalDefinition reads returned.
+            if nSig79_ >= 1
+                if ~isfield(cfg.measurements,'isl'); cfg.measurements.isl = struct(); end
+                if ~isfield(cfg.measurements.isl,'carrier')
+                    cfg.measurements.isl.carrier = struct();
+                end
+                fIsl79_ = NaN;
+                if isfield(cfg.measurements.isl.carrier,'frequency_Hz')
+                    fIsl79_ = cfg.measurements.isl.carrier.frequency_Hz;
+                end
+                if ~isnumeric(fIsl79_) || ~isscalar(fIsl79_) || ~isfinite(fIsl79_) || fIsl79_ <= 0
+                    cfg.measurements.isl.carrier.frequency_Hz = freqHz79_(primIdx79_);
+                end
+
+                if ~isfield(cfg.measurements,'groundRelayTimeTransfer')
+                    cfg.measurements.groundRelayTimeTransfer = struct();
+                end
+                if ~isfield(cfg.measurements.groundRelayTimeTransfer,'atmosphere')
+                    cfg.measurements.groundRelayTimeTransfer.atmosphere = struct();
+                end
+                if ~any(strcmp(ownedSig79_, ...
+                        'measurements.groundRelayTimeTransfer.atmosphere.f_L1ReferenceHz'))
+                    cfg.measurements.groundRelayTimeTransfer.atmosphere.f_L1ReferenceHz = ...
+                        freqHz79_(primIdx79_);
                 end
             end
 
@@ -1754,11 +1808,24 @@ classdef ConfigFactory
 
             % ---- Recreate tower clocks from type + factors (idempotent) ----
             gs = cfg.clockScaling;
-            % Canonical h-coefficient source is cfg.clock.templateSource; mirror it
-            % into the clockScaling struct that makeClockConfig reads.
-            gs.templateSource = getf_(getf_(cfg,'clock',struct()), 'templateSource', ...
-                getf_(gs,'templateSource','legacy'));
-            cfg.clockScaling.templateSource = gs.templateSource;
+            % Canonical custom/override oscillator set is cfg.clock.customOscillators;
+            % mirror it into the clockScaling struct that makeClockConfig reads. Replaces
+            % the old templateSource mirror: there is now ONE table, so the only thing left
+            % to thread is what the run adds to or overrides in it.
+            gs.customOscillators = getf_(getf_(cfg,'clock',struct()), 'customOscillators', ...
+                getf_(gs,'customOscillators',struct()));
+            cfg.clockScaling.customOscillators = gs.customOscillators;
+            % Removed knob, caught loudly rather than silently ignored: a scenario still
+            % setting templateSource is asking for a table that no longer exists.
+            if isfield(cfg,'clock') && isfield(cfg.clock,'templateSource')
+                error('ConfigFactory:templateSourceRemoved', ...
+                    ['cfg.clock.templateSource (''%s'') was removed 2026-08-10: there is now ' ...
+                     'ONE oscillator table, Winkel (2003) Table 2.1, in ' ...
+                     'ConfigFactory.oscillatorCatalog_. Pick the oscillator by name instead ' ...
+                     '(OCXO1/OCXO2/RUBIDIUM1/RUBIDIUM2/CESIUM1/CESIUM2/QUARTZ/TCXO/ZERO), or ' ...
+                     'override coefficients via cfg.clock.customOscillators.'], ...
+                    char(string(cfg.clock.templateSource)));
+            end
             % Optional per-draw clock-seed offset for the Monte-Carlo consistency
             % harness, so tower/receiver CLOCK truth realisations vary across seeds.
             % Default (field absent) resolves to 0 -> seeds unchanged, byte-identical.
@@ -2393,155 +2460,137 @@ classdef ConfigFactory
             end
         end
 
-        function tmpl = getClockTemplate_(templateName, templateSource)
-            % getClockTemplate_  Return base h-coefficient struct for a clock type.
+        function tmpl = getClockTemplate_(templateName, customOscillators)
+            % getClockTemplate_  Resolve an oscillator name to its h-coefficients.
             %
-            % h-values are one-sided PSD of fractional frequency.
-            % References: IEEE Std 1139-2008; Sesia et al.; GPS ICD.
+            % ONE table (revgnss.ConfigFactory.oscillatorCatalog_), optionally extended or
+            % overridden per run through cfg.clock.customOscillators.
             %
-            % templateSource: 'legacy' (default here — the original numbers, kept
-            % for exact reproducibility of past results) or 'jowTable2p1' (h-coefficients
-            % re-anchored to the project primary-source JOW Table 2.1; less optimistic).
-            % The canonical selector is cfg.clock.templateSource, threaded through
-            % makeClockConfig -> cfg.clockScaling.templateSource.
-            if nargin < 2 || isempty(templateSource); templateSource = 'legacy'; end
-            switch lower(templateSource)
-                case 'jowtable2p1'
-                    tmpl = revgnss.ConfigFactory.getClockTemplateJow_(templateName);
+            % Replaces the former 'legacy' / 'jowTable2p1' pair, removed 2026-08-10. That
+            % split did not mean what its name claimed: of the four templates in the
+            % "jowTable2p1" table only CESIUM1 actually carried the sourced values. OCXO took
+            % exactly one of its three coefficients from the source, and TCXO and RUBIDIUM
+            % were unchanged legacy numbers sitting under comments that said "Aligned to JOW
+            % Table 2.1" -- which is why those two resolved byte-identically in BOTH tables
+            % and why any clk### rung sweeping templateSource on them measured nothing.
+            %
+            % customOscillators is a struct whose FIELD NAMES are oscillator names and whose
+            % values carry h0/hMinus1/hMinus2 (h2/h1 optional, default 0). A name that
+            % collides with a built-in REPLACES it for that run: that is the supported way to
+            % overwrite a shipped oscillator, or add a new one, without editing this file.
+            %
+            % An unknown name is an ERROR. It previously warned and silently substituted
+            % OCXO, so a whole campaign could be labelled with an oscillator it never ran.
+
+            if nargin < 2 || isempty(customOscillators); customOscillators = struct(); end
+
+            key = upper(strtrim(char(templateName)));
+
+            % Documented aliases, kept so pre-2026-08-10 scenarios still resolve. The source
+            % names its variants explicitly and so should new configs -- 'OCXO' does not say
+            % whether you meant the good short-term crystal or the good long-term one.
+            switch key
+                case 'OCXO';     key = 'OCXO2';
+                case 'RUBIDIUM'; key = 'RUBIDIUM1';
+            end
+
+            % A custom entry wins over the built-in of the same name.
+            cf = fieldnames(customOscillators);
+            for i = 1:numel(cf)
+                if strcmpi(cf{i}, key)
+                    tmpl = revgnss.ConfigFactory.normaliseOscillator_( ...
+                        customOscillators.(cf{i}), key);
                     return
-                case 'legacy'
-                    % fall through to the legacy table below
-                otherwise
-                    error('ConfigFactory:invalidTemplateSource', ...
-                        'cfg.clock.templateSource must be ''legacy'' or ''jowTable2p1''; got ''%s''.', ...
-                        templateSource);
+                end
             end
 
-            switch upper(templateName)
-                case 'TCXO'
-                    % Temperature-compensated crystal oscillator (moderate stability)
-                    % Typical for low-grade embedded receivers
-                    tmpl.h2      = 0;
-                    tmpl.h1      = 0;
-                    tmpl.h0      = 9e-22;     % WFM  — tau^(-1/2) ADEV ~ 1e-10 at tau=1s
-                    tmpl.hMinus1 = 2e-21;     % FFM  — floor ~ sqrt(2*ln2*hm1) ~ 2e-11
-                    tmpl.hMinus2 = 1e-20;     % RWFM — rises at tau^(+1/2)
-
-                case 'OCXO'
-                    % Oven-controlled crystal oscillator (good stability)
-                    % Typical for GPS control segment / reference stations
-                    tmpl.h2      = 0;
-                    tmpl.h1      = 0;
-                    tmpl.h0      = 2e-25;     % WFM
-                    tmpl.hMinus1 = 7e-27;     % FFM
-                    tmpl.hMinus2 = 2e-29;     % RWFM
-
-                case 'RUBIDIUM'
-                    % Rubidium frequency standard (good medium-to-long term)
-                    tmpl.h2      = 0;
-                    tmpl.h1      = 0;
-                    tmpl.h0      = 1e-22;     % WFM (worse than OCXO short-term)
-                    tmpl.hMinus1 = 4.5e-24;   % FFM
-                    tmpl.hMinus2 = 3e-28;     % RWFM (better long-term than OCXO)
-
-                case 'CESIUM1'
-                    % Cesium beam / hydrogen maser class (excellent stability)
-                    tmpl.h2      = 0;
-                    tmpl.h1      = 0;
-                    tmpl.h0      = 1e-26;
-                    tmpl.hMinus1 = 1e-28;
-                    tmpl.hMinus2 = 1e-30;
-
-                case 'ZERO'
-                    % All zeros; caller fills in values
-                    tmpl.h2      = 0;
-                    tmpl.h1      = 0;
-                    tmpl.h0      = 0;
-                    tmpl.hMinus1 = 0;
-                    tmpl.hMinus2 = 0;
-
-                otherwise
-                    warning('ConfigFactory:unknownTemplate', ...
-                        'Unknown clock template "%s"; defaulting to OCXO.', templateName);
-                    tmpl = revgnss.ConfigFactory.getClockTemplate_('OCXO');
+            cat_ = revgnss.ConfigFactory.oscillatorCatalog_();
+            if ~isfield(cat_, key)
+                error('ConfigFactory:unknownOscillator', ...
+                    ['Unknown oscillator ''%s''. Built-in: %s. To add one, set ' ...
+                     'cfg.clock.customOscillators.%s = struct(''h0'',..,''hMinus1'',..,' ...
+                     '''hMinus2'',..).'], ...
+                    templateName, strjoin(fieldnames(cat_)', ', '), key);
             end
-
-            % Shared fields for all templates
-            tmpl.bias_s   = 0.0;
-            tmpl.fracFreq = 0.0;
-            tmpl.driftRate_fracPerSec = 0.0;
+            tmpl = revgnss.ConfigFactory.normaliseOscillator_(cat_.(key), key);
         end
 
-        function tmpl = getClockTemplateJow_(templateName)
-            % getClockTemplateJow_  h-coefficients re-anchored to JOW Table 2.1.
+        function cat_ = oscillatorCatalog_()
+            % oscillatorCatalog_  The oscillator table: h-coefficients per class.
             %
-            % The legacy OCXO/CESIUM templates are optimistic versus the project's own
-            % primary-source analogue (JOW Table 2.1): the OCXO random-walk-FM term
-            % hMinus2 (which dominates the Allan deviation at long averaging times and
-            % drives the Sg*dt^3/3 growth of clock-bias variance between updates) was
-            % 2e-29, and CESIUM1 h0 was ~7 orders below a real caesium beam. Those make
-            % the clock look more stable over a pass than the real hardware.
+            % Values are Table 2.1 ("Parameters for the Allan variance of several
+            % oscillators", p. 100) of:
             %
-            % h-values are one-sided PSD of fractional frequency (IEEE Std 1139-2008
-            % power-law convention). Sources are cited per coefficient below.
-            switch upper(templateName)
-                case 'TCXO'
-                    % Aligned to JOW Table 2.1 TCXO; already close to the legacy values.
-                    tmpl.h2      = 0;
-                    tmpl.h1      = 0;
-                    tmpl.h0      = 9e-22;     % WFM  (JOW Table 2.1)
-                    tmpl.hMinus1 = 2e-21;     % FFM
-                    tmpl.hMinus2 = 1e-20;     % RWFM
+            %   Winkel, J. Ó. (2003). Modeling and simulating GNSS signal structures and
+            %       receivers [Doctoral dissertation, Universität der Bundeswehr München].
+            %
+            % They are the one-sided PSD of fractional frequency in that source's power-law
+            % convention, eq. (2.154):
+            %     S_y(w) = 2*pi^2*h_-2/w^2  +  pi*h_-1/w  +  h_0/2
+            % and they feed its eq. (2.156):
+            %     Asigma_y^2(tau) = h0/(2*tau) + 2*ln(2)*h_-1 + (2*pi^2/3)*tau*h_-2
+            % which is exactly models.clocks.ClockModel.theoreticalAllanDeviation, and is
+            % what TowerClockCorrectionProvider sizes the product-age R terms from.
+            %
+            % h2 (white PM) and h1 (flicker PM) are not in the source table and are zero for
+            % every built-in class. A custom oscillator may supply them.
+            %
+            % Character of each class, from the resulting sigma_y(tau). Worth reading before
+            % picking one, because THE RANKING INVERTS with averaging time:
+            %   OCXO2      best short-term of all (4.1e-11 at 1 s), worst long-term drift
+            %              (4.9e-9 at 4 h) -- a crystal, so random-walk dominated
+            %   OCXO1      flatter crystal: 2.1e-10 at 1 s, 2.0e-9 at 4 h
+            %   CESIUM1    poor short-term (2.2e-10 at 1 s), best long-term (1.9e-12 at 4 h)
+            %   CESIUM2    2 decades worse long-term than CESIUM1 (1.0e-11 at 4 h)
+            %   RUBIDIUM1  strongest all-rounder: 1.0e-10 at 1 s falling to 3.8e-12 at 4 h
+            %   RUBIDIUM2  flicker-floor limited, flat at ~1.2e-11 across the whole range
+            %   QUARTZ     random-walk dominated, 4.9e-10 at 1 s rising to 4.4e-8 at 4 h
+            %   TCXO       as QUARTZ beyond ~10 s; better only at the very short end
+            %
+            % A broadcast clock product that re-anchors every 30 s only ever samples the
+            % SHORT-tau end of these curves, where the beam tubes are at their weakest. That
+            % is why caesium scores as the WORSE ground oscillator here despite winning on
+            % long-tau intuition -- pinned by T3 of
+            % tests/test_tower_clock_product_age_wander_in_R.m.
 
-                case 'OCXO'
-                    % JOW Table 2.1 OCXO2 (conservative long-term choice). The RWFM term
-                    % is the re-anchored coefficient: hMinus2 = 2.51e-22 (JOW OCXO2),
-                    % NOT the optimistic legacy 2e-29 (JOW OCXO1 = 4e-23 is the less
-                    % pessimistic alternative). h0/hMinus1 retained from the legacy OCXO
-                    % (JOW does not flag them as optimistic and they set only the short-
-                    % term/flicker floor, not the long-term random walk).
-                    tmpl.h2      = 0;
-                    tmpl.h1      = 0;
-                    tmpl.h0      = 2e-25;     % WFM  (retained; short-term floor)
-                    tmpl.hMinus1 = 7e-27;     % FFM  (retained)
-                    tmpl.hMinus2 = 2.51e-22;  % RWFM (JOW Table 2.1 OCXO2 — re-anchored)
+            e = @(h0, hm1, hm2) struct('h2',0, 'h1',0, ...
+                                       'h0',h0, 'hMinus1',hm1, 'hMinus2',hm2);
+            cat_ = struct( ...
+                'QUARTZ',    e(2e-19,    7e-21,    2e-20   ), ... % "Standard quartz"
+                'TCXO',      e(1e-21,    1e-20,    2e-20   ), ...
+                'OCXO1',     e(8e-20,    2e-21,    4e-23   ), ...
+                'OCXO2',     e(2.51e-26, 2.51e-23, 2.51e-22), ...
+                'RUBIDIUM1', e(2e-20,    7e-24,    4e-29   ), ...
+                'RUBIDIUM2', e(1e-23,    1e-22,    1.3e-26 ), ...
+                'CESIUM1',   e(1e-19,    1e-25,    2e-32   ), ...
+                'CESIUM2',   e(2e-20,    7e-23,    4e-29   ), ...
+                'ZERO',      e(0,        0,        0       ));
+            % ZERO is NOT from the source. It is the explicit "this clock contributes
+            % nothing" entry: h-coefficients identically zero, so both the truth wander and
+            % the EKF Q vanish. Prefer it over deterministic=true when you want a clock
+            % absent from the FILTER as well as the truth (see config/masterConfig.m).
+        end
 
-                case 'RUBIDIUM'
-                    % Aligned to JOW Table 2.1 rubidium; already close to legacy.
-                    tmpl.h2      = 0;
-                    tmpl.h1      = 0;
-                    tmpl.h0      = 1e-22;     % WFM
-                    tmpl.hMinus1 = 4.5e-24;   % FFM
-                    tmpl.hMinus2 = 3e-28;     % RWFM
-
-                case 'CESIUM1'
-                    % JOW Table 2.1 Cesium1 (caesium beam): white-FM dominated short term,
-                    % very stable long term. h0 re-anchored ~7 orders up from the legacy
-                    % 1e-26 (which behaved like an idealised maser, not a caesium beam).
-                    tmpl.h2      = 0;
-                    tmpl.h1      = 0;
-                    tmpl.h0      = 1e-19;     % WFM  (JOW Table 2.1 Cesium1 — re-anchored)
-                    tmpl.hMinus1 = 1e-25;     % FFM  (JOW Table 2.1 Cesium1)
-                    tmpl.hMinus2 = 2e-32;     % RWFM (JOW Table 2.1 Cesium1)
-
-                case 'ZERO'
-                    tmpl.h2      = 0;
-                    tmpl.h1      = 0;
-                    tmpl.h0      = 0;
-                    tmpl.hMinus1 = 0;
-                    tmpl.hMinus2 = 0;
-
-                otherwise
-                    warning('ConfigFactory:unknownTemplate', ...
-                        'Unknown clock template "%s"; defaulting to OCXO (jowTable2p1).', templateName);
-                    tmpl = revgnss.ConfigFactory.getClockTemplateJow_('OCXO');
-                    return
+        function tmpl = normaliseOscillator_(src, name)
+            % normaliseOscillator_  Fill in the optional fields of an oscillator entry, so a
+            % custom entry only has to carry the three coefficients the source table defines.
+            req = {'h0','hMinus1','hMinus2'};
+            for i = 1:numel(req)
+                if ~isfield(src, req{i})
+                    error('ConfigFactory:incompleteOscillator', ...
+                        ['Oscillator ''%s'' is missing required coefficient ''%s''. ' ...
+                         'h0, hMinus1 and hMinus2 are all required; h2 and h1 default to 0.'], ...
+                        name, req{i});
+                end
             end
-
-            % Shared fields for all templates
-            tmpl.bias_s   = 0.0;
-            tmpl.fracFreq = 0.0;
-            tmpl.driftRate_fracPerSec = 0.0;
+            tmpl.h2      = getf_(src, 'h2', 0);
+            tmpl.h1      = getf_(src, 'h1', 0);
+            tmpl.h0      = src.h0;
+            tmpl.hMinus1 = src.hMinus1;
+            tmpl.hMinus2 = src.hMinus2;
+            tmpl.bias_s               = getf_(src, 'bias_s',   0.0);
+            tmpl.fracFreq             = getf_(src, 'fracFreq', 0.0);
+            tmpl.driftRate_fracPerSec = getf_(src, 'driftRate_fracPerSec', 0.0);
         end
 
         function saa = angAccelFromTorqueBudget_(inertia_kgm2, torque_Nm)

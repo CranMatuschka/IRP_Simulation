@@ -268,12 +268,24 @@ function cfg = validateMasterConfig(cfg)
                 'estimateMode=''clocks'' requires isl.transmitters=''all'' (or the full 2:N list); a subset leaves unobservable clock states.');
         end
         % Vacuous-target warning: deterministic clocks => secondary truth bias == 0.
-        if isfield(cfg,'asset') && isfield(cfg.asset,'clock') && ...
-                isfield(cfg.asset.clock,'deterministic') && cfg.asset.clock.deterministic
+        % Reads the KNOB (cfg.clock.receiver.deterministic), not the derived
+        % cfg.asset.clock.deterministic: validateMasterConfig runs one line BEFORE
+        % ConfigFactory.finalizeConfig maps the knob onto the derived field, so the derived
+        % field still holds its pre-derivation value here and cannot answer the question.
+        % The fallback covers configs hand-built without the knob.
+        rxDet_ = false;
+        if isfield(cfg,'clock') && isfield(cfg.clock,'receiver') && ...
+                isfield(cfg.clock.receiver,'deterministic')
+            rxDet_ = logical(cfg.clock.receiver.deterministic);
+        elseif isfield(cfg,'asset') && isfield(cfg.asset,'clock') && ...
+                isfield(cfg.asset.clock,'deterministic')
+            rxDet_ = logical(cfg.asset.clock.deterministic);
+        end
+        if rxDet_
             warning('validateMasterConfig:secondaryClockDeterministic', ...
-                ['estimateMode=''clocks'' but cfg.asset.clock.deterministic=true: secondary ' ...
+                ['estimateMode=''clocks'' but cfg.clock.receiver.deterministic=true: secondary ' ...
                  'truth clocks are identically 0, so the estimation target is trivial. ' ...
-                 'Set cfg.asset.clock.deterministic=false for a meaningful WP3 run.']);
+                 'Set cfg.clock.receiver.deterministic=false for a meaningful WP3 run.']);
         end
         % --- Realism guards (Guard B/C preconditions), position-scoped ---
         if strcmp(maMode,'position')
@@ -434,7 +446,8 @@ function i_validateEnums(cfg)
 %   Absent knobs are skipped: many entries live under optional blocks, and a missing
 %   path is the caller declining the feature, not an error. Only a PRESENT value that
 %   matches nothing is rejected -- that is always a typo or a stale name, never intent.
-    entries = configEnumRegistry();
+    % cfg is passed so oscillator-name entries can include cfg.clock.customOscillators.
+    entries = configEnumRegistry(cfg);
     for k = 1:numel(entries)
         entry = entries(k);
         [found, value] = i_getPath(cfg, strsplit(entry.path, '.'));

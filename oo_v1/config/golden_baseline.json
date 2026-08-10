@@ -215,9 +215,8 @@
   },
 
   "clock": {
-    "_templateSource": "jowTable2p1 = the project's literature-anchored h-coefficients, deliberately less optimistic than the 'legacy' table the frozen goldens use. clockScaling.templateSource is NOT set here: finalizeConfig derives it from this field, so writing it would be a redundant leaf that could silently disagree.",
+    "_templateSource": "REMOVED 2026-08-10. There is now ONE oscillator table -- Winkel (2003) Table 2.1, in ConfigFactory.oscillatorCatalog_ -- so there is no source left to select and finalizeConfig ERRORS if this key reappears. Nothing is lost here: the h-coefficients this file used to select ('jowTable2p1' CESIUM1) ARE the sourced Cesium1 row the single table now carries. Pick the oscillator by name (asset.clockType / clock.tower.clockType), or override coefficients via clock.customOscillators.",
     "_mode": "Tower clocks are NOT EKF states. They are corrected by a broadcast product whose residual enters R, which is exactly the PPP treatment of transmitter clocks and is the clearest architecture to defend. Estimating them (clock.mode = 'includeTowerClocksInEKF') is a documented variant, not the baseline. estimator.estimateTowerClocks is NOT set here for the same reason as clockScaling: finalizeConfig derives it from this mode.",
-    "templateSource": "jowTable2p1",
     "mode": "spacecraftReceiverClockOnly",
     "gauge": { "mode": "externalTowerCorrections" }
   },

@@ -55,11 +55,12 @@ function cfg = goldenScenarioConfig(durationOverride_s)
     % (goldenHeadlineScenarioConfig); do NOT retarget this single-antenna golden.
     cfg.scenario.nReceivers = 1;
 
-    % masterConfig exposes cfg.clock.templateSource (idealised 'legacy' | realistic
-    % 'jowTable2p1'). The frozen golden certifies the idealised legacy clock; pin it so a
-    % future default flip to a realistic (noisier) clock cannot disturb the frozen numbers.
-    % (goldenHeadlineScenarioConfig inherits this pin via delegation.)
-    cfg.clock.templateSource = 'legacy';
+    % templateSource removed 2026-08-10: ONE oscillator table (Winkel 2003 Table 2.1).
+    % This fixture used to pin the idealised 'legacy' set so a default flip could not
+    % disturb the frozen numbers. That protection is gone WITH the second table -- the
+    % golden now certifies the sourced coefficients like everything else. To reproduce the
+    % old idealised clock, override it as data:
+    %   cfg.clock.customOscillators.CESIUM1 = struct('h0',1e-26,'hMinus1',1e-28,'hMinus2',1e-30);
 
     % masterConfig now defaults to a NADIR-pointing attitude (attitude_euler_rad computed
     % from -r_hat). This single-antenna golden has a zero lever arm, so attitude is
