@@ -61,6 +61,21 @@ classdef CodeMeasurementBuilder
             transmitTimeTruth_s = NaN(M,1);
             transmitTimeModel_s = NaN(M,1);
 
+            % MODEL-side tower-clock drift, for back-propagating the applied correction to
+            % TRANSMIT time (see the model-side block further down). Taken from the same
+            % provider the one-way h uses, so the model never borrows the truth's drift.
+            % productNoise_ is a memoised deterministic function of (tower, productEpoch),
+            % so re-entering computeDrift here returns the same realisation and draws
+            % nothing new.
+            bdotModelVec_ = zeros(M,1);
+            try
+                [~, bdotModelVec_] = models.clocks.TowerClockCorrectionProvider.computeDrift( ...
+                    cfg, towers, twr_list, t_s);
+                if numel(bdotModelVec_) ~= M; bdotModelVec_ = zeros(M,1); end
+            catch
+                bdotModelVec_ = zeros(M,1);
+            end
+
             for mi = 1:M
                 ti  = twr_list(mi);
                 ai  = ant_list(mi);
@@ -175,6 +190,29 @@ classdef CodeMeasurementBuilder
                             [b_p, bd_p] = models.clocks.TowerClockCorrectionProvider.clockAtProductEpoch( ...
                                 towers{ti}, t_prod);
                             towerClkModel(mi) = b_p + bd_p * (t_tx_model - t_prod);
+
+                        case {'perfectCorrection', 'noisyCorrection'}
+                            % ORACLE modes: the correction IS the truth clock (plus, for
+                            % noisyCorrection, an injected error). So it back-propagates with
+                            % the TRUTH drift, exactly as the truth side above -- that is what
+                            % keeps perfectCorrection's residual identically zero and
+                            % noisyCorrection's residual exactly minus the injected noise,
+                            % which is each mode's defining property.
+                            towerClkModel(mi) = towerClkModel(mi) - ...
+                                towers{ti}.getClockDriftMetersPerSecond() * (t_s - t_tx_model);
+
+                        case 'truthHistoryProductNoisy'
+                            % The DEFAULT mode, and the one this omission actually bit. The
+                            % applied correction is a linear prediction from the product
+                            % epoch, M(t) = (b_p + b_noise) + (bd_p + d_noise)*(t - t_prod).
+                            % Evaluating it at TRANSMIT time instead of measurement time is
+                            % therefore just M(t_s) - (bd_p + d_noise)*tau, and (bd_p +
+                            % d_noise) is precisely the model drift computeDrift returns.
+                            towerClkModel(mi) = towerClkModel(mi) - ...
+                                bdotModelVec_(mi) * (t_s - t_tx_model);
+
+                        % 'none' applies no correction, so there is nothing to
+                        % back-propagate; its zero stays zero.
                     end
                 end
 
