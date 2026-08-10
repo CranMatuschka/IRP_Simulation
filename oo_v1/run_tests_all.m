@@ -81,19 +81,18 @@ function i_freqSlice(root, grade, isReal, atmo, pairs, dur, pdf)
 %I_FREQSLICE  One frequency-battery grade: 5 pairs x {S1R4,S6R4} x {TW0,TW1} = 20 runs.
     grpRoot = fullfile(root,'Battery_L1#L2');
     if ~isfolder(grpRoot); mkdir(grpRoot); end
-    cleaner = onCleanup(@() revgnss.SignalDefinition.clearFrequencyOverride()); %#ok<NASGU>
-    revgnss.SignalDefinition.clearFrequencyOverride();
-
+    % The band travels with the config ('Band' -> cfg.signals.<name>), not through a
+    % process-local override that the config could never see.
     mats = {}; lbls = {};
     for pIdx = 1:numel(pairs)
         l1 = pairs{pIdx}(1); l2 = pairs{pIdx}(2);
         tagP = sprintf('%.2f#%.2f', l1, l2);
         fprintf('\n---- FREQ [%s] pair %d/%d : %s GHz ----\n', grade, pIdx, numel(pairs), tagP);
-        revgnss.SignalDefinition.setFrequencyOverrideGHz(l1, l2);
         try
             bm = run_oo_v1_battery('OutRoot',grpRoot, 'Group',sprintf('%s_%s',grade,tagP), ...
                 'Duration',dur, 'WritePdf',pdf, 'Analyze',false, 'Towers',5, ...
-                'SR',{[1 4],[6 4]}, 'TW',[0 1], 'Realism',isReal, 'Atmosphere',atmo);
+                'SR',{[1 4],[6 4]}, 'TW',[0 1], 'Realism',isReal, 'Atmosphere',atmo, ...
+                'Band', struct('L1', l1, 'L2', l2));
             for kk = 1:numel(bm)
                 if bm(kk).ok
                     mats{end+1} = bm(kk).matPath;               %#ok<AGROW>
@@ -103,7 +102,6 @@ function i_freqSlice(root, grade, isReal, atmo, pairs, dur, pdf)
         catch ME
             fprintf('  FREQ FAILED %s %s: %s\n', grade, tagP, ME.message);
         end
-        revgnss.SignalDefinition.clearFrequencyOverride();
     end
 
     if numel(mats) >= 2

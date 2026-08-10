@@ -35,6 +35,14 @@ function manifest = run_oo_v1_battery(varargin)
     p.addParameter('OutRoot',  '', @(x)ischar(x)||isstring(x)); % base output dir (default output/Report_YYYYMMDD)
     p.addParameter('Group',    '');      % override the group folder name (keeps distinct runs apart)
     p.addParameter('DryRun',   false);   % true -> build configs/manifest only, no simulations
+    % Carrier band for this slice, in GHz: struct('L1',<GHz>,'L2',<GHz>). Empty leaves
+    % masterConfig's canonical L-band alone. This REPLACED
+    % revgnss.SignalDefinition.setFrequencyOverrideGHz, a process-local persistent that
+    % retuned a second, name-keyed copy of the frequencies behind the config's back --
+    % scenarios driven from JSON never saw it, and code reading the config never saw the
+    % override, so the two disagreed. Frequencies are owned by config/masterConfig.m and
+    % are overridden by writing cfg.signals.<name>.frequency_Hz, which is what this does.
+    p.addParameter('Band',     struct(), @isstruct);
     p.parse(varargin{:});
     o = p.Results;
     o.Atmosphere = lower(char(o.Atmosphere));
@@ -77,7 +85,7 @@ function manifest = run_oo_v1_battery(varargin)
                            'ok',false,'wall_s',NaN,'msg','');
                 tS = tic;
                 try
-                    cfg = i_buildCfg(g, nS, nR, tw, o.Duration, k, groupDir, o.WritePdf, o.Realism, o.HonestCov, o.Atmosphere);
+                    cfg = i_buildCfg(g, nS, nR, tw, o.Duration, k, groupDir, o.WritePdf, o.Realism, o.HonestCov, o.Atmosphere, o.Band);
                     r.twoWayTimeTransferInEkf = revgnss.RunLabelUtils.twoWayTimeTransferInEkf(cfg);
                     r.twstftDiagnosticsEnabled = revgnss.RunLabelUtils.twstftDiagnosticsEnabled(cfg);
                     if logical(o.DryRun)
@@ -119,16 +127,35 @@ function manifest = run_oo_v1_battery(varargin)
 end
 
 % =========================================================================
-function cfg = i_buildCfg(nTowers, nSpaceAssets, nReceivers, tw, duration_s, k, groupDir, writePdf, realism, honestCov, atmosphere)
+function cfg = i_buildCfg(nTowers, nSpaceAssets, nReceivers, tw, duration_s, k, groupDir, writePdf, realism, honestCov, atmosphere, band)
     if nargin < 9;  realism   = false; end
     if nargin < 10; honestCov = false; end
     if nargin < 11; atmosphere = 'realistic'; end
+    if nargin < 12; band = struct(); end
     realism   = (islogical(realism)&&realism)     || isequal(realism,1);
     honestCov = (islogical(honestCov)&&honestCov) || isequal(honestCov,1);
     atmosphere = char(atmosphere);
     % Canonical config + the same deltas run_ladder applies, plus the two-way toggle.
     cfg = masterConfig();
     cfg.scenario.nTowers = nTowers;
+
+    % Carrier band for this slice. masterConfig owns the frequencies; retuning means
+    % writing them here, before finalizeConfig resolves everything else off them
+    % (wavelength, iono scaling, IF alpha/beta, lane wavelengths, slip threshold).
+    if isstruct(band) && ~isempty(fieldnames(band))
+        bandNames = fieldnames(band);
+        for bi = 1:numel(bandNames)
+            bn = upper(bandNames{bi});
+            fHz = band.(bandNames{bi}) * 1e9;    % option is in GHz
+            if ~isnumeric(fHz) || ~isscalar(fHz) || ~isfinite(fHz) || fHz <= 0
+                error('run_oo_v1_battery:band', ...
+                    'Band.%s must be a finite positive scalar [GHz].', bandNames{bi});
+            end
+            cfg.signals.(bn).name         = bn;
+            cfg.signals.(bn).frequency_Hz = fHz;
+            cfg.signals.(bn).lambda_m     = revgnss.Constants.SPEED_OF_LIGHT_MPS / fHz;
+        end
+    end
 
     % Atmosphere grade: 'matched' gives ZERO atmospheric error, so the run isolates the
     % carrier-wavelength effect (contrast vs the 'realistic' atmosphere of idealised/realism).

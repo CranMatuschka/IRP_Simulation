@@ -66,9 +66,8 @@ function manifest = run_oo_v1_freqbattery(varargin)
     manifest = struct('topology',{},'nS',{},'nR',{},'grade',{},'l1GHz',{},'l2GHz',{}, ...
                       'tag',{},'label',{},'matPath',{},'ok',{},'wall_s',{});
 
-    cleaner = onCleanup(@() revgnss.SignalDefinition.clearFrequencyOverride()); %#ok<NASGU>
-    revgnss.SignalDefinition.clearFrequencyOverride();   % defensive clean start
-
+    % No process-local frequency override any more: the band travels with the config,
+    % passed to run_oo_v1_battery as 'Band' and written into cfg.signals.<name>.
     nTot = numel(o.SRList)*numel(o.Pairs)*numel(o.Grades); ct = 0;
     for si = 1:numel(o.SRList)
         nS = o.SRList{si}(1); nR = o.SRList{si}(2);
@@ -79,7 +78,6 @@ function manifest = run_oo_v1_freqbattery(varargin)
         for pIdx = 1:numel(o.Pairs)
             pr = o.Pairs{pIdx}; l1 = pr(1); l2 = pr(2);
             tag = sprintf('%.2f#%.2f', l1, l2);
-            revgnss.SignalDefinition.setFrequencyOverrideGHz(l1, l2);
 
             for gIdx = 1:numel(o.Grades)
                 grade = lower(o.Grades{gIdx}); ct = ct + 1;
@@ -98,7 +96,8 @@ function manifest = run_oo_v1_freqbattery(varargin)
                 try
                     bm = run_oo_v1_battery('Duration',o.Duration, 'WritePdf',o.WritePdf, ...
                         'Analyze',false, 'Towers',o.Towers, 'SR',{[nS nR]}, 'TW',0, ...
-                        'Realism',isReal, 'Atmosphere',atmo, 'OutRoot',topoDir, 'Group',grp);
+                        'Realism',isReal, 'Atmosphere',atmo, 'OutRoot',topoDir, 'Group',grp, ...
+                        'Band', struct('L1', l1, 'L2', l2));
                     okIdx = find([bm.ok], 1);
                     if ~isempty(okIdx)
                         mp = bm(okIdx).matPath; ok = true;
@@ -111,7 +110,6 @@ function manifest = run_oo_v1_freqbattery(varargin)
                 manifest(end+1) = struct('topology',topo,'nS',nS,'nR',nR,'grade',grade, ...
                     'l1GHz',l1,'l2GHz',l2,'tag',tag,'label',lbl,'matPath',mp,'ok',ok,'wall_s',toc(tS)); %#ok<AGROW>
             end
-            revgnss.SignalDefinition.clearFrequencyOverride();
         end
     end
 
