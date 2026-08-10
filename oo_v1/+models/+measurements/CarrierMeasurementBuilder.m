@@ -126,10 +126,27 @@ classdef CarrierMeasurementBuilder
             try; sharedErrEnableCar_ = logical(cfg.covariance.sharedErrors.enable); catch; end
             twrModeCar_ = '';
             try; twrModeCar_ = models.clocks.TowerClockCorrectionProvider.towerClockMode(cfg); catch; end
-            % Only the product-based modes leave a shared, correlated tower-clock residual.
-            modeHasSharedProduct_ = any(strcmp(twrModeCar_, ...
+            % Only the product-based modes leave a shared, correlated tower-clock DRIFT
+            % residual: computeDrift's 'noisyCorrection' branch anchors truth==model at t_s
+            % with drift_sigma=0 by construction (a genuine oracle, see
+            % TowerClockCorrectionProvider case 'noisyCorrection'), so it has no drift
+            % block to install. Keep this set exactly as it was.
+            modeHasSharedProductDrift_ = any(strcmp(twrModeCar_, ...
                 {'truthHistoryProductNoisy','truthProduct','product','productNoisy'}));
-            applyCarrierProdCov = prodClockEnable_ && modeHasSharedProduct_;
+            % The BIAS residual, unlike drift, IS shared across every row of a tower in
+            % noisyCorrection too: compute() draws one corrNoise_m per (tower,antenna) row
+            % and installs it as towerClkModel = b_t + corrNoise with towerClkSigma =
+            % noiseSigma (TowerClockCorrectionProvider.m:117-119). The code side charges
+            % that on the diagonal AND the shared off-diagonal (CodeMeasurementBuilder.m
+            % ~254-261, ~883-901); the carrier used to exclude noisyCorrection from this
+            % whole gate, so the identical error carried ZERO carrier R while the residual
+            % (z uses -b_twr_t, h uses -b_twr_m, :275-276/:363 below) carried the full
+            % noiseSigma (0.5 m default). MEASURED: carrier IF R ~2.22e-4 m^2 against an
+            % uncharged variance of 0.25 m^2 -- a 1127x hole concentrated on the carrier
+            % third of the row budget (aggregate NIS ~200 on the smoke tier, constant
+            % across all nine oscillators because this mode is oscillator-blind by design).
+            modeHasSharedBias_ = modeHasSharedProductDrift_ || strcmp(twrModeCar_, 'noisyCorrection');
+            applyCarrierProdCov = prodClockEnable_ && modeHasSharedProductDrift_;
             try; applyCarrierProdCov = applyCarrierProdCov && ...
                     logical(cfg.covariance.productClock.applyToCarrier); catch; end
             % The PRODUCT EPOCH is resolved unconditionally, NOT behind applyCarrierProdCov.
@@ -195,6 +212,20 @@ classdef CarrierMeasurementBuilder
             % double-count the old subtraction was trying (and failing) to prevent.
             sigBiasProd_ = 0;
             try; sigBiasProd_ = cfg.clocks.tower.product.sigmaBias_m; catch; end
+            % noisyCorrection does not use a broadcast product at all -- its correction is
+            % b_t + corrNoise with sigma = noiseSigma (cfg.estimator.
+            % towerClockCorrectionSigma_m, TowerClockCorrectionProvider.m:38-41,:119).
+            % cfg.clocks.tower.product.sigmaBias_m (0.01 m) describes a DIFFERENT
+            % correction this mode never applies; re-deriving from it here is exactly the
+            % divergence this fix closes. Thread the provider's own sigma through instead,
+            % via the identical resolution order it uses.
+            if strcmp(twrModeCar_, 'noisyCorrection')
+                sigBiasProd_ = 0;
+                try; sigBiasProd_ = cfg.estimator.towerClockCorrectionSigma_m; catch; end
+                if isfield(cfg,'towerClockCorrectionSigma_m')
+                    sigBiasProd_ = cfg.towerClockCorrectionSigma_m;
+                end
+            end
             % Wander at the ROW'S OWN age, matching the code path exactly, so the two
             % observables are charged the identical sigma for the identical physical error.
             age_carrier_  = zeros(size(dsig_carrier_raw));
@@ -205,7 +236,14 @@ classdef CarrierMeasurementBuilder
             for mi_ = 1:numel(sbias_carrier)
                 ti_ = twr_pairs(min(mi_, numel(twr_pairs)));
                 wv_ = 0;
-                if ti_ >= 1 && ti_ <= numel(towers)
+                % noisyCorrection's correction is a per-epoch draw, not a broadcast product
+                % pinned at a product epoch -- it has no oscillator wander to charge (the
+                % oracle guardrail: this mode is provably oscillator-blind, see
+                % TowerClockCorrectionProvider case 'noisyCorrection'). age_carrier_ here
+                % would otherwise be nonzero (computeDrift still reports the quantised
+                % broadcast-grid epoch for every mode), so this must be skipped explicitly
+                % rather than relying on age being zero.
+                if ~strcmp(twrModeCar_, 'noisyCorrection') && ti_ >= 1 && ti_ <= numel(towers)
                     wv_ = models.clocks.TowerClockCorrectionProvider.carrierBiasWanderVar( ...
                         cfg, towers{ti_}.clock, age_carrier_(min(mi_, numel(age_carrier_))));
                 end
@@ -494,7 +532,7 @@ classdef CarrierMeasurementBuilder
             % as its own leaf -- see the P5/P6/P7 note where applyCarrierProdCov is built.
             % The code side gates on sharedErrors.enable; the carrier must agree with it or
             % the rank-1 outer product is left half-present, which is indefinite.
-            applyTwrClkCarrier = sharedErrEnableCar_ && modeHasSharedProduct_;
+            applyTwrClkCarrier = sharedErrEnableCar_ && modeHasSharedBias_;
             try; applyTwrClkCarrier = applyTwrClkCarrier && ...
                     logical(cfg.covariance.sharedErrors.applyTowerClockToCarrier); catch; end
             biasCovInfo = struct('carrierProductBiasApplied',false,'carrierProductBiasBlocks',0, ...
@@ -515,15 +553,24 @@ classdef CarrierMeasurementBuilder
             % product an identity rather than an approximation.
             nCarRows_ = numel(cpInfo.towerIdx);
             cpInfo.towerClockSharedSigma_m = zeros(nCarRows_, 1);
-            cpInfo.towerClockBlocksApplied = biasCovInfo.carrierProductBiasApplied && ...
-                                             carrierCovInfo.carrierProductCovApplied;
+            % Gate on the BIAS block ALONE. Requiring both bias AND drift left the
+            % code<->carrier cross suppressed for noisyCorrection even with the bias fix
+            % above, because carrierProductCovApplied is never true for a mode whose drift
+            % residual is provably zero (no drift block is ever installed for it -- see
+            % modeHasSharedProductDrift_ above). The drift contribution below is still only
+            % included when it was actually applied (covApplied_), so this changes nothing
+            % for a mode where both blocks are always present together.
+            biasApplied_ = biasCovInfo.carrierProductBiasApplied;
+            covApplied_  = carrierCovInfo.carrierProductCovApplied;
+            cpInfo.towerClockBlocksApplied = biasApplied_;
             if cpInfo.towerClockBlocksApplied
                 bs_ = cpInfo.towerClkBiasSigma_m(:);
                 ag_ = cpInfo.productAge_s(:);
                 sd_ = cpInfo.sigmaDrift_mps(:);
                 n_  = min([nCarRows_, numel(bs_), numel(ag_), numel(sd_)]);
                 if n_ == nCarRows_
-                    cpInfo.towerClockSharedSigma_m = sqrt(bs_(1:n_).^2 + (ag_(1:n_).*sd_(1:n_)).^2);
+                    cpInfo.towerClockSharedSigma_m = sqrt(biasApplied_*bs_(1:n_).^2 + ...
+                        covApplied_*(ag_(1:n_).*sd_(1:n_)).^2);
                 else
                     % Length disagreement means the metadata did not track a row transform
                     % (the ionosphere-free collapse was one such case). Fail CLOSED and say

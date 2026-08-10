@@ -45,7 +45,25 @@ classdef TowerClockCorrectionProvider
                 % produces; it adds zero-mean Gaussian noise to the true tower clock.
                 % Use for Monte Carlo bias/sigma studies only.
                 % truthHistoryProductNoisy is the more realistic product model.
-                corrNoise_m = noiseSigma * errorChain.drawNormal(M, 1);
+                %
+                % ONE draw per UNIQUE tower per epoch, not per (tower,antenna) row. A tower
+                % has one clock, so its broadcast correction noise is one realisation --
+                % CodeMeasurementBuilder's shared off-diagonal block (:~890-901) already
+                % installs it across every row of that tower on exactly that assumption.
+                % drawNormal(M,1) drew M independent values, one per ROW; that only agreed
+                % with "one per tower" because every committed noisyCorrection fixture has
+                % nReceivers=1, where M == the visible tower count and rows and towers
+                % coincide 1:1. At nReceivers>1 it would silently charge an off-diagonal
+                % correlation for rows whose noise was never actually shared. unique(twr_list)
+                % is ascending and twr_list is built tower-major (ti outer loop in
+                % MeasurementModel), so at nReceivers=1 this draws in the SAME order as the
+                % old per-row call -- byte-identical on golden_smoke/golden_full.
+                corrNoise_m = zeros(M,1);
+                uniqTwrNC_ = unique(twr_list);
+                for ktNC_ = 1:numel(uniqTwrNC_)
+                    idxNC_ = find(twr_list == uniqTwrNC_(ktNC_));
+                    corrNoise_m(idxNC_) = noiseSigma * errorChain.drawNormal(1, 1);
+                end
             else
                 corrNoise_m = zeros(M,1);
             end
@@ -427,13 +445,25 @@ classdef TowerClockCorrectionProvider
 
                 switch mode
                     case 'perfectCorrection'
-                        % Use product-epoch truth drift to be consistent with bias path.
-                        [~, bd_p] = models.clocks.TowerClockCorrectionProvider.clockAtProductEpoch( ...
-                            towers{ti}, t_prod_scalar);
-                        bdot_truth(mi)  = bd_p;
-                        bdot_model(mi)  = bd_p;
+                        % ORACLE mode. Its defining property is a ZERO residual, and the bias
+                        % path delivers that literally: compute() sets towerClkModel = the
+                        % truth bias at t_s, and CodeMeasurementBuilder back-propagates it
+                        % with the TRUTH drift. The rate-domain analogue is the same: truth
+                        % == model, both at t_s, sigma 0.
+                        %
+                        % This USED TO anchor the MODEL at the product epoch (bd_p) while
+                        % DopplerMeasurementBuilder builds z from the drift at t_s (:174/:192)
+                        % and h from this value (:211) -- so the oscillator's full frequency
+                        % excursion over the correction age survived in the residual while R
+                        % charged zero for it. MEASURED: aggregate ratio f_dop=0.362..0.370
+                        % (predicted 1/3 for a 5-tower single-signal stack) reproduced across
+                        % a 500x span in h_-2 on four of nine crystals -- exactly the RWFM/FFM
+                        % frequency-excursion signature and nothing else. Same fix as the
+                        % 'noisyCorrection' branch below, for the same reason.
+                        bdot_truth(mi)  = towers{ti}.getClockDriftMetersPerSecond();
+                        bdot_model(mi)  = bdot_truth(mi);
                         drift_sigma(mi) = 0;
-                        driftAnchorStatus = 'productEpochTruth';
+                        driftAnchorStatus = 'measurementEpochTruth';
                         driftSigmaSource_out = 'zero';
 
                     case 'truthHistoryProductNoisy'

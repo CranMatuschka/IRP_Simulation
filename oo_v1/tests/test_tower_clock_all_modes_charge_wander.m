@@ -84,7 +84,10 @@ assert(threw, ...
 % T4: the Doppler truth is the drift at the MEASUREMENT epoch, in every mode
 % ---------------------------------------------------------------------------
 fprintf('  T4: Doppler truth is anchored at t_s in every mode ...\n');
-for m = {'truthProduct','product','productNoisy','noisyCorrection','truthHistoryProductNoisy'}
+% 'perfectCorrection' was omitted here until 2026-08-10, which is exactly why its
+% computeDrift regression (product-epoch-anchored MODEL *and* TRUTH, drift_sigma=0)
+% went undetected: the mode this test exists to police was never asked about.
+for m = {'truthProduct','product','productNoisy','noisyCorrection','truthHistoryProductNoisy','perfectCorrection'}
     cfgD = i_stochasticTowerCfg(m{1});
     towers = i_buildTowers(cfgD, T_S);
     bdotAtTs = towers{1}.getClockDriftMetersPerSecond();

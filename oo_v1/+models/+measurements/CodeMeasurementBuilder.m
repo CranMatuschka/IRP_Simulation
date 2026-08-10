@@ -169,22 +169,29 @@ classdef CodeMeasurementBuilder
                           stateMap.towerClockIdx(ti,1) > 0)
                     t_tx_model = cModel.t_tx_s;
                     switch towerClkMode
-                        case 'product'
+                        case {'product', 'productNoisy'}
+                            % Re-evaluate the BIAS at transmit time only. The SIGMA stays
+                            % whatever compute() installed -- for BOTH modes that already
+                            % includes explicitProductWanderVar_ (TowerClockCorrectionProvider
+                            % .m:175-177,199-201), which for productNoisy is orders of
+                            % magnitude larger than evalProductStruct's own
+                            % sqrt(sigmaBias^2+dt^2*sigmaDrift^2) term: at t=120s with a
+                            % RWFM-dominated crystal the discarded wander is ~143 m against a
+                            % surviving ~0.1 m, a ~2e6x variance hole (measured NIS 735 to
+                            % 5.08e18 across the sweep -- the top of that band is EKF
+                            % divergence from the first uncharged residual, not the ratio
+                            % itself). 'product' never wrote this field at all, so it was
+                            % always silently correct; 'productNoisy' used to overwrite it
+                            % with evalProductStruct's OWN return, discarding the wander term.
+                            % The light-time between t_s and t_tx_model (~0.12 s at GEO) is
+                            % negligible against wander of that size, so re-anchoring the bias
+                            % here and leaving the sigma untouched is not an approximation.
                             if isfield(cfg,'towerClock') && ...
                                     isfield(cfg.towerClock,'products') && ...
                                     ti <= numel(cfg.towerClock.products)
                                 [b_reev, ~] = models.clocks.TowerClockCorrectionProvider.evalProductStruct( ...
                                     cfg, ti, t_tx_model);
                                 towerClkModel(mi) = b_reev;
-                            end
-                        case 'productNoisy'
-                            if isfield(cfg,'towerClock') && ...
-                                    isfield(cfg.towerClock,'products') && ...
-                                    ti <= numel(cfg.towerClock.products)
-                                [b_reev, sig_reev] = models.clocks.TowerClockCorrectionProvider.evalProductStruct( ...
-                                    cfg, ti, t_tx_model);
-                                towerClkModel(mi) = b_reev;
-                                towerClkSigma(mi) = sig_reev;
                             end
                         case 'truthProduct'
                             [b_p, bd_p] = models.clocks.TowerClockCorrectionProvider.clockAtProductEpoch( ...
