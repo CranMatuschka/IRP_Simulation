@@ -13,9 +13,11 @@ L4 = evalc("captureGolden('full','headline')");
 L5 = evalc("captureGolden('smoke','realism')");
 L6 = evalc("captureGolden('full','realism')");
 % feat024: the realism fixture with ONE leaf changed
-% (scintillation.obliquityModel = 'matchIonoMapping'). Gates the NON-default obliquity
-% branch, which no other golden reaches -- the 'single' fixture ships S4zen = 0, so S4 is
+% (scintillation.obliquityModel = 'simpleSecant'). Gates the NON-default obliquity branch,
+% which no other golden reaches -- the 'single' fixture ships S4zen = 0, so S4 is
 % identically zero there and the obliquity is structurally inert.
+% POLARITY FLIPPED 2026-08-09 with masterConfig's default ('simpleSecant' ->
+% 'matchIonoMapping'); this fixture now pins the legacy secant.
 L7 = evalc("captureGolden('smoke','feat024')");
 L8 = evalc("captureGolden('full','feat024')");
 for L = {L1, L2, L3, L4, L5, L6, L7, L8}
@@ -37,7 +39,7 @@ tables = {fullfile(thisDir,'golden','golden_full.mat'), ...
           fullfile(thisDir,'golden','golden_realism_full.mat'), ...
               'FULL 4-antenna REALISM-GRADE golden (de-optimised v4 config: JOW clock, C/N0, multipath/DCB, luni-solar, EOP/tide)'; ...
           fullfile(thisDir,'golden','golden_feat024_full.mat'), ...
-              'FULL 4-antenna FEAT024 golden (realism + scintillation obliquityModel = matchIonoMapping)'};
+              'FULL 4-antenna FEAT024 golden (realism + scintillation obliquityModel = simpleSecant, the legacy control)'};
 for t = 1:size(tables,1)
     G = load(tables{t,1});
     fprintf('\n--- %s ---\n', tables{t,2});

@@ -370,11 +370,21 @@ first-order slant delay that pierces **the same layer**. The stated reason for c
 what drives S4 through the clamp: at Stockholm, S4 = **0.7100** with `1/sin` (clamped) versus
 **0.5769** with the thin shell, i.e. σ = 2.1213 m versus 0.5188 m, a factor **4.09**.
 
-Now selectable via `errors.ionosphere.scintillation.obliquityModel`:
-`'simpleSecant'` (**default — bit-identical to the legacy path**), `'thinShell'`, or
-`'matchIonoMapping'` (follow `effects.ionosphere.mappingModel`, so the two can never disagree).
+Selectable via `errors.ionosphere.scintillation.obliquityModel`:
+`'matchIonoMapping'` (**default since 2026-08-09** — follow `effects.ionosphere.mappingModel`,
+so S4 and the slant delay can never disagree about the shell), `'thinShell'`, or
+`'simpleSecant'` (the legacy hardcode, retained as a control).
+
+> **DEFAULT FLIPPED 2026-08-09.** `'simpleSecant'` was the default only to hold the goldens
+> still, and the cost was the clamped 2.1213 m constant above — elevation- and
+> amplitude-blind, in both the injected truth error and R, on the largest truth-only term in
+> the configuration. All goldens below the realism tier were re-captured in the same change;
+> **numbers captured before that date are not comparable**. The ladder rung and the
+> regression fixture both flipped polarity with it and now pin the legacy secant, so the
+> non-default branch stays frozen.
+
 Gate: `tests/test_scintillation_obliquity_gated.m`. Ladder rung:
-`config/ladder/feat/feat024_scintObliquityMatchIono.json`. Regression fixture:
+`config/ladder/feat/feat024_scintObliquityLegacySecant.json`. Regression fixture:
 `golden_feat024_<tier>.mat` (`goldenFeat024ScenarioConfig` = the realism fixture with this
 one leaf changed, so any delta against `golden_realism_<tier>` is the obliquity alone —
 measured 24 of 166 metrics differ at the smoke tier). The fixture exists because **no other
