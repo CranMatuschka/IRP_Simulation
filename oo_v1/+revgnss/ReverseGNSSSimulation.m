@@ -1421,6 +1421,58 @@ classdef ReverseGNSSSimulation < handle
         end
 
         function R = addInterAssetProductCovariance_(~,R,primaryErrors,jointInfo)
+            % Cross-asset shared-tower-clock code<->code covariance (D8 EDIT7).
+            %
+            % Two assets ranging off the SAME ground tower at the SAME product epoch
+            % see the identical -(b_twr_true - b_twr_model) error on their code rows
+            % (sensitivity -1 on both, CodeMeasurementBuilder.m:252). R must carry
+            % that correlation or the filter averages a common error down by sqrt(N)
+            % across the formation -- the same failure the within-asset off-diagonal
+            % (CodeMeasurementBuilder.m:986-1001) exists to prevent.
+            %
+            % Three corrections vs. the original EDIT7 (Diagnosis A, 2026-08):
+            %  1. Read errStruct.towerClockSharedSigma_m, the AS-INSTALLED, state-
+            %     masked sigma (CodeMeasurementBuilder.m:974/988) -- NOT the raw
+            %     towerClockModelSigma_m (MeasurementModel.m:175), which stays
+            %     unmasked by design (CodeMeasurementBuilder.m ~309-320) so
+            %     diagnostics can still see the true product sigma. Reading the raw
+            %     field wrote a nonzero cross term across a diagonal that
+            %     estimateTowerClocks had zeroed -> indefinite R.
+            %  2. Gate on codeBlockCov.towersWithOffDiag from BOTH assets before
+            %     writing anything (see PSD note below).
+            %  3. Accumulate (+=), not assign (=), matching every other adder in the
+            %     codebase (CodeMeasurementBuilder.m:997, ProductClockCovarianceBuilder
+            %     .m:56/108/177/287/377) -- an assignment silently discards whatever a
+            %     later cross-asset term (e.g. atmosphere common-mode) might add here.
+            %
+            % PSD note: the exact contribution for a shared tower is C*Sigma*C' with
+            % C the stacked sensitivity (all -1, bias-domain) and Sigma the tower's
+            % source variance; C*Sigma*C' = s*s' is PSD for ANY s, but only if EVERY
+            % block it implies is installed, diagonals AND all off-diagonals
+            % (precondition (i) in the PSD argument this fix was reviewed against).
+            % towersWithOffDiag records which towers actually got their INTRA-asset
+            % block written (CodeMeasurementBuilder.m:965-970) -- exactly the
+            % condition ProductClockCovarianceBuilder.m:326-330 already calls
+            % "mandatory, not defensive" for the code<->carrier cross. A tower absent
+            % from either asset's list means that asset's own block was never
+            % installed (sharedErrors.enable/applyTowerClockToCode off,
+            % estimateTowerClocks masked it to an EKF state, or fewer than 2 rows on
+            % that tower that epoch) -- writing the cross term alone there would add
+            % an off-diagonal with no matching diagonal support, i.e. exactly EDIT7's
+            % original defect. Conservative side effect: a tower with exactly ONE row
+            % per asset never earns an intra-asset block (nothing to pair against) so
+            % never enters towersWithOffDiag either, and its legitimate,
+            % PSD-safe cross-asset term is skipped too. Left that way deliberately --
+            % under-adding a real term is safe, adding an indefinite one is not.
+            %
+            % Product-epoch match: towerClockProductEpoch_s is a single scalar per
+            % errStruct (MeasurementModel.m:186, one call per asset per step) rather
+            % than per-row, because t_prod = floor(t_available/updateInterval)*
+            % updateInterval depends only on (t_s, cfg), not on the row. Two assets
+            % measured at the same t_s under the same product-update config therefore
+            % resolve the same t_prod today; the check below is what stops this from
+            % silently asserting rho=1 between two INDEPENDENT product draws the
+            % moment that stops being true (staggered scheduling, per-asset latency).
             if isempty(jointInfo.spacecraft); return; end
             records = struct('rowStart',1,'errors',primaryErrors);
             for recordIdx = 1:numel(jointInfo.spacecraft)
@@ -1428,37 +1480,107 @@ classdef ReverseGNSSSimulation < handle
                     'rowStart',jointInfo.spacecraft(recordIdx).rowStart, ...
                     'errors',jointInfo.spacecraft(recordIdx).errors); %#ok<AGROW>
             end
+            suppressedTowers_ = {};
+            epochMismatch_ = false;
+            touched_ = false;
             for firstIdx = 1:numel(records)-1
                 firstErrors = records(firstIdx).errors;
                 if ~isfield(firstErrors,'towerIdx_perMeas') || ...
-                        ~isfield(firstErrors,'towerClockModelSigma_m')
+                        ~isfield(firstErrors,'towerClockSharedSigma_m') || ...
+                        ~isfield(firstErrors,'nPseudorange')
                     continue
                 end
+                firstTowersOk_ = zeros(0,1);
+                if isfield(firstErrors,'codeBlockCov') && ...
+                        isfield(firstErrors.codeBlockCov,'towersWithOffDiag')
+                    firstTowersOk_ = firstErrors.codeBlockCov.towersWithOffDiag;
+                end
+                firstEpoch_ = 0;
+                if isfield(firstErrors,'towerClockProductEpoch_s')
+                    firstEpoch_ = firstErrors.towerClockProductEpoch_s;
+                end
                 firstCount = firstErrors.nPseudorange;
+                if firstCount > numel(firstErrors.towerClockSharedSigma_m); continue; end
                 firstRows = records(firstIdx).rowStart + (0:firstCount-1);
                 for secondIdx = firstIdx+1:numel(records)
                     secondErrors = records(secondIdx).errors;
                     if ~isfield(secondErrors,'towerIdx_perMeas') || ...
-                            ~isfield(secondErrors,'towerClockModelSigma_m')
+                            ~isfield(secondErrors,'towerClockSharedSigma_m') || ...
+                            ~isfield(secondErrors,'nPseudorange')
                         continue
                     end
+                    secondTowersOk_ = zeros(0,1);
+                    if isfield(secondErrors,'codeBlockCov') && ...
+                            isfield(secondErrors.codeBlockCov,'towersWithOffDiag')
+                        secondTowersOk_ = secondErrors.codeBlockCov.towersWithOffDiag;
+                    end
+                    secondEpoch_ = 0;
+                    if isfield(secondErrors,'towerClockProductEpoch_s')
+                        secondEpoch_ = secondErrors.towerClockProductEpoch_s;
+                    end
+                    epochsMatch_ = abs(firstEpoch_ - secondEpoch_) < 1e-6;
                     secondCount = secondErrors.nPseudorange;
+                    if secondCount > numel(secondErrors.towerClockSharedSigma_m); continue; end
                     secondRows = records(secondIdx).rowStart + (0:secondCount-1);
                     for firstRowIdx = 1:firstCount
                         towerIdx = firstErrors.towerIdx_perMeas(firstRowIdx);
+                        if ~ismember(towerIdx, firstTowersOk_) || ...
+                                ~ismember(towerIdx, secondTowersOk_)
+                            suppressedTowers_ = union(suppressedTowers_, ...
+                                {sprintf('t%d', towerIdx)});
+                            continue
+                        end
+                        if ~epochsMatch_
+                            epochMismatch_ = true;
+                            continue
+                        end
                         candidates = find(secondErrors.towerIdx_perMeas == towerIdx);
                         for secondRowIdx = candidates(:)'
                             covariance = ...
-                                firstErrors.towerClockModelSigma_m(firstRowIdx) * ...
-                                secondErrors.towerClockModelSigma_m(secondRowIdx);
+                                firstErrors.towerClockSharedSigma_m(firstRowIdx) * ...
+                                secondErrors.towerClockSharedSigma_m(secondRowIdx);
                             if covariance == 0; continue; end
-                            R(firstRows(firstRowIdx),secondRows(secondRowIdx)) = covariance;
-                            R(secondRows(secondRowIdx),firstRows(firstRowIdx)) = covariance;
+                            R(firstRows(firstRowIdx),secondRows(secondRowIdx)) = ...
+                                R(firstRows(firstRowIdx),secondRows(secondRowIdx)) + covariance;
+                            R(secondRows(secondRowIdx),firstRows(firstRowIdx)) = ...
+                                R(firstRows(firstRowIdx),secondRows(secondRowIdx));
+                            touched_ = true;
                         end
                     end
                 end
             end
-            R = (R+R')/2;
+            % Loud, not silent (D12): a several-m^2 term going quietly missing is the
+            % recurring defect class this file is being swept for.
+            if ~isempty(suppressedTowers_)
+                warning('ReverseGNSSSimulation:interAssetProductCovarianceSuppressed', ...
+                    ['Cross-asset shared-tower-clock covariance SUPPRESSED for tower(s) ' ...
+                     '%s: the within-asset off-diagonal block is absent in at least one ' ...
+                     'asset (sharedErrors gate off, estimateTowerClocks masked it to an ' ...
+                     'EKF state, or fewer than 2 rows that epoch). Writing the cross term ' ...
+                     'without that diagonal support would make R indefinite.'], ...
+                    strjoin(suppressedTowers_, ', '));
+            end
+            if epochMismatch_
+                warning('ReverseGNSSSimulation:interAssetProductCovarianceEpochMismatch', ...
+                    ['Cross-asset shared-tower-clock covariance SUPPRESSED for at least one ' ...
+                     'tower pair: the two assets resolved DIFFERENT product epochs this ' ...
+                     'step. The product draw is a fresh independent realization per ' ...
+                     'interval (TowerClockCorrectionProvider.productNoise_), so two ' ...
+                     'different-epoch rows are not correlated at rho=1.']);
+            end
+            if touched_
+                R = (R+R')/2;
+                [~, pfail_] = chol(R);
+                if pfail_ ~= 0
+                    jitter_m2_ = 1e-12;
+                    R = R + jitter_m2_ * eye(size(R,1));
+                    warning('ReverseGNSSSimulation:interAssetProductCovarianceNonSPD', ...
+                        ['Cross-asset R failed the chol() SPD test after the shared-tower-' ...
+                         'clock cross term; jitter applied. This should not happen given ' ...
+                         'the towersWithOffDiag presence gate above -- report if seen, it ' ...
+                         'means the PSD precondition was violated somewhere upstream.']);
+                end
+            end
         end
 
         function stepSecondaryAssets_(obj, k, t_s, dt)

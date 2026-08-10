@@ -276,6 +276,14 @@ cfg = masterConfig();
 cfg.towerClock.correctionMode = 'perfectTruth';
 cfg.scenario.nSpaceAssets = 2;
 cfg.multiAsset.mode = 'fast';
+% Diagnosis B #2 (2026-08): SECOND inherited-default trap in this same helper, on top
+% of the towerClockMode one documented above -- masterConfig.m:1364 defaults
+% towersObserveSecondaries=true (since d05e73d, 2026-08-05, after this test was
+% written), which trips IndependentFleetCoordinator.m's centralSecondaryState guard
+% and aborts i_test_live_path_refusal_ at its very first unguarded validateConfig
+% call (line ~193) before Q6a can print. Declare both explicitly rather than inherit.
+cfg.multiAsset.estimateMode = 'off';
+cfg.multiAsset.towersObserveSecondaries = false;
 cfg.multiAsset.distributedEstimator.enable = true;
 cfg.multiAsset.distributedEstimator.deliveryLedger.enable = true;
 end

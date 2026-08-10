@@ -682,9 +682,23 @@ classdef IndependentFleetCoordinator < handle
             end
             estimateMode = revgnss.IndependentFleetCoordinator.textPath_( ...
                 cfg,{'multiAsset','estimateMode'},'off');
-            if ~strcmpi(estimateMode,'off') || ...
-                    revgnss.IndependentFleetCoordinator.logicalPath_( ...
-                    cfg,{'multiAsset','towersObserveSecondaries'},false)
+            % Diagnosis B #3 (2026-08): the towersObserveSecondaries disjunct that used to
+            % sit here was DROPPED. It refused the masterConfig DEFAULT the moment that
+            % default flipped to true (masterConfig.m:1364, 2026-08-05), even though the
+            % flag is provably INERT on this path: by the time execution reaches this line,
+            % mode has already been pinned to 'fast' (the error at :629-632 above), and
+            % stripSwarmEstimation forces towersObserveSecondaries=false on every leaf this
+            % coordinator builds (IndependentFleetScenarioFactory.m:256) before any leaf-
+            % level validateConfig call, so a 'joint'-only reader (ReverseGNSSSimulation.m
+            % :598, jointMultiAssetEnabled = mode=='joint' && nSpaceAssets>1,
+            % ReverseGNSSEKF.m:204) can never see it true here regardless of what the
+            % fleet-level cfg carries. validateMasterConfig.m:334-345 already documents this
+            % exemption in words ("The flag is INERT here"); this guard is what the words
+            % describe, so the two must agree. estimateMode is kept: 'clocks'/'position' is
+            % a genuine mis-declaration this path cannot honor (it asks for centralized
+            % secondary state a one-EKF-per-asset design cannot allocate), unlike
+            % towersObserveSecondaries which this path forces off regardless of the request.
+            if ~strcmpi(estimateMode,'off')
                 error('IndependentFleetCoordinator:centralSecondaryState', ...
                     ['Stage 1 uses one complete local EKF per asset; centralized secondary ' ...
                     'state allocation is incompatible and must remain disabled.']);

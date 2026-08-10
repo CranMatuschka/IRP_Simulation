@@ -272,17 +272,52 @@ classdef ProductClockCovarianceBuilder
             codeEpoch = models.clocks.ProductClockCovarianceBuilder.expand_( ...
                 models.clocks.ProductClockCovarianceBuilder.fieldOr_(errStruct,'towerClockProductEpoch_s',0), M_code);
             codeAge = models.clocks.ProductClockCovarianceBuilder.expand_( ...
-                models.clocks.ProductClockCovarianceBuilder.fieldOr_(errStruct,'towerClockProductAge_s',0), M_code);
+                models.clocks.ProductClockCovarianceBuilder.fieldOr_(errStruct,'towerClockProductAge_s',0), M_code); %#ok<NASGU> retained for diagnostics; the code<->Doppler cross term below no longer scales by age (see Diagnosis A #5 note)
 
             if applyDop && M_dop > 0 && crossCodeDop
                 dopRows = (M_code + (1:M_dop))';
                 dopTower = models.clocks.ProductClockCovarianceBuilder.fieldOr_(errStruct.doppler,'towerIdx',zeros(M_dop,1));
                 dopEpoch = models.clocks.ProductClockCovarianceBuilder.fieldOr_(errStruct.doppler,'productEpoch_s',zeros(M_dop,1));
                 dopSigma = models.clocks.ProductClockCovarianceBuilder.fieldOr_(errStruct.doppler,'sigmaDrift_mps',zeros(M_dop,1));
+                % AS-INSTALLED, state-masked bias sigma for the code side of the cross
+                % term -- same field the code<->carrier cross uses below (:341-344),
+                % zero for a tower whose bias is an EKF state.
+                sCodeXD_ = models.clocks.ProductClockCovarianceBuilder.fieldOr_( ...
+                    errStruct, 'towerClockSharedSigma_m', zeros(M_code,1));
+                if numel(sCodeXD_) ~= M_code; sCodeXD_ = zeros(M_code,1); end
+                % Diagnosis A #5 (2026-08): the previous formula, pc.covBiasDrift +
+                % codeAge(i)*dopSigma(j)^2, treats Cov(W,Wdot) as a*Var(Wdot). For the
+                % RWFM (h_-2) tower-clock model this repo already uses -- Var W =
+                % c^2*s^2*a^3/3 (extrapolationWanderVar_, :688-719) and Var Wdot =
+                % c^2*s^2*a (frequencyWanderVar_'s RWFM term, :722-765), s^2 =
+                % 2*pi^2*h_-2 -- the TRUE Cov(W,Wdot) is c^2*s^2*a^2/2, i.e. HALF of
+                % a*Var(Wdot). Using a*Var(Wdot) implies rho = a^2/sqrt((a^3/3)*a) =
+                % sqrt(3) = 1.732 > 1: det Sigma = c^4*s^4*(a^4/3 - a^4) < 0, an
+                % INDEFINITE 2x2 for any code/Doppler pair sharing a tower. The
+                % corrected form is rho*s_bias*s_rate with rho = sqrt(3)/2 = 0.866 <
+                % 1, which keeps det Sigma = (1-rho^2)*s_bias^2*s_rate^2 > 0 for ANY
+                % positive sigmas -- PSD by construction, not merely for the RWFM
+                % special case.
+                %
+                % Scope note: s_bias/s_rate here are the TOTAL installed sigmas
+                % (thermal + every noise type folded in), not the RWFM-only
+                % components the sqrt(3)/2 figure is derived from -- isolating the
+                % RWFM-only share would require plumbing the tower ClockModel's
+                % h-coefficients into this errStruct-only function (it receives no
+                % `towers` argument today). Left as a known precision gap: this term
+                % is OFF by default (cfg.covariance.productClock.crossCodeDoppler =
+                % false, masterConfig.m:498) and has zero test references repo-wide,
+                % so correctness (never indefinite) was prioritised over exactness
+                % while it is dormant. pc.covBiasDrift (cfg.clocks.tower.product.
+                % covBiasDrift, default 0) is a SEPARATE, legitimate quantity -- the
+                % product's OWN bias/drift estimate covariance at t_prod, unrelated
+                % to the oscillator's post-epoch wander -- and is kept as an
+                % independent additive term.
+                rhoRwfm_ = sqrt(3)/2;
                 for i = 1:M_code
                     for j = 1:M_dop
                         if codeTower(i) == dopTower(j) && abs(codeEpoch(i)-dopEpoch(j)) < 1e-6
-                            cov_ij = pc.covBiasDrift + codeAge(i) * dopSigma(j)^2;
+                            cov_ij = pc.covBiasDrift + rhoRwfm_ * sCodeXD_(i) * dopSigma(j);
                             if cov_ij ~= 0
                                 R(codeRows(i), dopRows(j)) = R(codeRows(i), dopRows(j)) + cov_ij;
                                 R(dopRows(j), codeRows(i)) = R(codeRows(i), dopRows(j));

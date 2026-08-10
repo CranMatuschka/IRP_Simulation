@@ -308,6 +308,15 @@ cfg.report.compileTex = 'never';
 cfg.plots.enable = false;
 cfg.plots.showFigures = false;
 cfg.scenario.nSpaceAssets = 2;
+% Diagnosis B #1 (2026-08): declare the multiAsset posture explicitly rather than
+% inherit it, mirroring i_sanctionedFleetConfig_ above. masterConfig.m:1364 flipped
+% towersObserveSecondaries's DEFAULT to true on 2026-08-05 (d05e73d), six days after
+% this helper was written; leaving it inherited makes
+% IndependentFleetCoordinator.validateConfig throw centralSecondaryState before
+% i_test_disabled_link_update_path_reports_honestly_ (subtest 5/8) can run.
+cfg.multiAsset.estimateMode = 'off';
+cfg.multiAsset.towersObserveSecondaries = false;
+cfg.multiAsset.keepIslInPerAssetEkf = false;
 cfg.multiAsset.distributedEstimator.enable = true;
 cfg.multiAsset.distributedEstimator.stateExchange.enable = false;
 cfg.multiAsset.distributedEstimator.deliveryLedger.enable = false;

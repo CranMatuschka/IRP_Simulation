@@ -182,14 +182,15 @@ classdef CarrierMeasurementBuilder
                      'the tower-clock sigma by ~age/30. Refusing to build a knowingly ' ...
                      'wrong R.'], ME_carDrift_.identifier);
             end
-            % Tower-clock DRIFT product-sigma R double-count guard (carrier). When a
-            % tower's clock drift is an EKF state (towerClockIdx(ti,2)>0) its uncertainty is
-            % in P, so the product drift sigma must not also enter the carrier drift block
-            % or the code x carrier cross-stack (via cpInfo.sigmaDrift_mps). Mask on column 2
-            % using the carrier row tower list. No-op when estimateTowerClocks=false (golden).
-            dsig_carrier_raw = dsig_carrier;   % pre-mask, for the bias/drift split below
-            dsig_carrier = models.measurements.CodeMeasurementBuilder.maskStateTowerSigma_( ...
-                dsig_carrier, twr_pairs, stateMap, 2);
+            % dsig_carrier_raw is only a SHAPE template for the zeros() calls below
+            % (age_carrier_, sbias_carrier); its content is fully replaced at the
+            % "Carrier drift block" assignment further down before dsig_carrier is
+            % ever read. A column-2 double-count mask used to sit here too, applied to
+            % a value that was then discarded unread -- dead code from before the
+            % 2026-08-10 bias/drift refactor. Diagnosis A #4 (2026-08) removed it
+            % rather than leave a masking call next to the real one below that reads
+            % the opposite way (see that site for why column 2 must NOT be masked).
+            dsig_carrier_raw = dsig_carrier;
 
             % Tower-clock product BIAS sigma for the carrier rows.
             %
@@ -266,8 +267,22 @@ classdef CarrierMeasurementBuilder
             sigDriftProd_ = 0;
             try; sigDriftProd_ = cfg.clocks.tower.product.sigmaDrift_mps; catch; end
             dsig_carrier_raw = sigDriftProd_ * ones(size(dsig_carrier_raw));
-            dsig_carrier     = models.measurements.CodeMeasurementBuilder.maskStateTowerSigma_( ...
-                dsig_carrier_raw, twr_pairs, stateMap, 2);
+            % Diagnosis A #4 (D8, 2026-08): do NOT mask column 2 (drift) here. Masking
+            % removes R's charge for a tower whose DRIFT is an EKF state
+            % (stateMap.towerClockIdx(ti,2)>0) on the theory that the state's own
+            % uncertainty in P already covers it -- but that theory only holds if h_phi
+            % and H_phi also carry a drift term for that tower, and they do not: unlike
+            % the code path (no drift term either, correctly unmasked -- there is no
+            % column-2 mask anywhere in CodeMeasurementBuilder) the carrier path has no
+            % `h_phi -= x_est(towerClockIdx(ti,2))*(t_s-t_prod)` branch and H_phi never
+            % sets a column-2 entry. Masking here was therefore a straight under-charge:
+            % real, still-present drift-residual variance quietly removed from R with
+            % nothing replacing it in the model. Charge the full product drift sigma
+            % unconditionally until a matching h/H drift term exists. No-op change on
+            % the single-asset default: towerClockIdx is empty/zero unless
+            % estimateTowerClocks=true (non-default), so maskStateTowerSigma_ was
+            % already an identity there.
+            dsig_carrier = dsig_carrier_raw;
             % Bias double-count guard: mask on column 1 (bias). When a tower's clock BIAS
             % is an EKF state its uncertainty lives in P and must not also enter R.
             % No-op when estimateTowerClocks=false (the default).
@@ -349,7 +364,23 @@ classdef CarrierMeasurementBuilder
 
                 % Tower clock
                 b_twr_t = towerClkTruth(mi);
-                b_twr_m = towerClkModel(mi);
+                % Diagnosis A #4 (D8, 2026-08): use the EKF STATE when the tower clock
+                % bias is estimated, exactly the branch CodeMeasurementBuilder.m:245-250
+                % already takes (b_twr_h = x_est(stateMap.towerClockIdx(ti,1))) and
+                % CarrierModelOnlyBuilder.m:80-84 already takes on the POSTFIT
+                % recompute. Before this fix h_phi always subtracted the PRODUCT value
+                % while H_phi (below, :514) set -1 on the state column and R (below,
+                % sbias_carrier) charged ZERO for the bias -- an inconsistent triple:
+                % the residual carried the full product error (0.01-2.4 m depending on
+                % age), H told the filter it responds to the state at -1, but the
+                % state never entered h so moving it did not shrink the residual, and
+                % the prefit h disagreed with CarrierModelOnlyBuilder's postfit h.
+                if isfield(stateMap,'towerClockIdx') && ti <= size(stateMap.towerClockIdx,1) && ...
+                        stateMap.towerClockIdx(ti,1) > 0
+                    b_twr_m = x_est(stateMap.towerClockIdx(ti,1));
+                else
+                    b_twr_m = towerClkModel(mi);
+                end
 
                 % Ionosphere — NEGATIVE for carrier; scale by (fL1/f)^2 per signal
                 iono_t = 0; iono_m = 0;
