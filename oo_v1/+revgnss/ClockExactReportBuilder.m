@@ -167,6 +167,18 @@ classdef ClockExactReportBuilder
             paths.posErr = CE.tryPlot_(figDir, [stem '_position_error.pdf'], @() ...
                 CE.plotPositionError_(diag, t), cfg);
 
+            % Initial convergence transient (a priori vs posterior). Omitted for runs
+            % whose data carries no prior series.
+            zoomFirstSec = 120;
+            try
+                if isfield(cfg,'report') && isfield(cfg.report,'zoomFirstSeconds') && ...
+                        isnumeric(cfg.report.zoomFirstSeconds) && cfg.report.zoomFirstSeconds > 0
+                    zoomFirstSec = cfg.report.zoomFirstSeconds;
+                end
+            catch; end
+            paths.initTransient = CE.tryPlot_(figDir, [stem '_initial_transient.pdf'], @() ...
+                CE.plotInitialTransient_(diag, t, zoomFirstSec), cfg);
+
             % Clock bias error
             paths.clkErr = CE.tryPlot_(figDir, [stem '_clock_error.pdf'], @() ...
                 CE.plotClockError_(diag, t), cfg);
@@ -179,9 +191,19 @@ classdef ClockExactReportBuilder
             paths.clkDrift = CE.tryPlot_(figDir, [stem '_clock_drift.pdf'], @() ...
                 CE.plotClockDrift_(diag, t), cfg);
 
-            % Innovation RMS (prefit / postfit)
+            % The settled-tail window, resolved here because the innovation plot draws it
+            % as an inset rather than as a separate figure.
+            zoomSec = 120;
+            try
+                if isfield(cfg,'report') && isfield(cfg.report,'zoomLastSeconds') && ...
+                        isnumeric(cfg.report.zoomLastSeconds) && cfg.report.zoomLastSeconds > 0
+                    zoomSec = cfg.report.zoomLastSeconds;
+                end
+            catch; end
+
+            % Innovation RMS (prefit / postfit), with the settled tail inset in-figure
             paths.innovRMS = CE.tryPlot_(figDir, [stem '_innovation_rms.pdf'], @() ...
-                CE.plotInnovationRMS_(diag, t), cfg);
+                CE.plotInnovationRMS_(diag, t, zoomSec), cfg);
 
             % NIS
             paths.nis = CE.tryPlot_(figDir, [stem '_nis.pdf'], @() ...
@@ -214,13 +236,6 @@ classdef ClockExactReportBuilder
                 CE.plotPerSourceError_(diag, t), cfg);
 
             % Zoom plots: last cfg.report.zoomLastSeconds seconds (fixed window, default 120 s).
-            zoomSec = 120;
-            try
-                if isfield(cfg,'report') && isfield(cfg.report,'zoomLastSeconds') && ...
-                        isnumeric(cfg.report.zoomLastSeconds) && cfg.report.zoomLastSeconds > 0
-                    zoomSec = cfg.report.zoomLastSeconds;
-                end
-            catch; end
             paths.posErrZoom  = CE.tryPlot_(figDir, [stem '_position_error_zoomlast.pdf'], @() ...
                 CE.plotSignalZoom_(diag, t, 'posErr',  zoomSec), cfg);
             paths.clkErrZoom  = CE.tryPlot_(figDir, [stem '_clock_error_zoomlast.pdf'], @() ...
@@ -468,6 +483,10 @@ classdef ClockExactReportBuilder
             axList = findall(fig, 'Type', 'axes');
             for ii = 1:numel(axList)
                 ax = axList(ii);
+                % Inset panels follow their host's scale, applied below. Rescaling one
+                % on its own maximum would silently put it in a different unit from the
+                % axis label it is drawn inside.
+                if strcmp(get(ax,'Tag'), 'reportInset'); continue; end
                 % LOG axes first. Their tick labels are inherently 10^n and are NOT the linear
                 % "Exponent" multiplier handled below -- an earlier version of this function
                 % missed them entirely and log plots kept their 10^0/10^1/10^2 ticks. Log scale
@@ -512,11 +531,29 @@ classdef ClockExactReportBuilder
                     for k = 1:numel(kids)
                         kids(k).YData = kids(k).YData * f;
                     end
+                    revgnss.ClockExactReportBuilder.rescaleInsets_(fig, ax, f);
                     ax.YLabel.String = strrep(lbl, ['[' unit ']'], ['[' newUnit ']']);
                     ax.YLimMode = 'auto';
                     ax.YAxis.Exponent = 0;
                 catch
                     % leave this axes untouched
+                end
+            end
+        end
+
+        function rescaleInsets_(fig, hostAx, f)
+            % rescaleInsets_  Apply the host axes' unit rescale to its inset panels.
+            insets = findall(fig, 'Type','axes', 'Tag','reportInset');
+            for k = 1:numel(insets)
+                try
+                    if ~isequal(insets(k).UserData, hostAx); continue; end
+                    kids = findall(insets(k), '-property', 'YData');
+                    for q = 1:numel(kids)
+                        kids(q).YData = kids(q).YData * f;
+                    end
+                    insets(k).YLimMode = 'auto';
+                    insets(k).YAxis.Exponent = 0;
+                catch
                 end
             end
         end
@@ -756,12 +793,14 @@ classdef ClockExactReportBuilder
                     legend(ax, 'show', 'Location', 'best', 'FontSize', 5);
                     xlabel(ax, 'Time [s]', 'FontSize', 7);
                     ylabel(ax, revgnss.PlotUnitScaler.axisLabel('Error', unit), 'FontSize', 7);
-                    % Caption states PRECISION, not uncertainty: the band is built from
-                    % H, R and Q only and carries no term for unmodelled systematics, so
-                    % the error can and does sit outside it without the filter being wrong
-                    % about what it computes.
-                    title(ax, ['Position error: RAC frame (shaded = formal \pm3\sigma, ' ...
-                        'precision only \x2014 excludes unmodelled systematics)'], 'FontSize', 7);
+                    % Short title by design. The old one ran to 100 characters and, on a
+                    % 7 cm canvas, wrapped into several lines that ate most of the figure
+                    % height, so the plot itself came out tiny on the page. It also
+                    % contained \x2014, which is not a TeX command: MATLAB's TeX
+                    % interpreter gave up on the whole string and printed it raw, so the
+                    % reader saw a literal "\pm3\sigma". The precision-not-uncertainty
+                    % caveat now lives in the LaTeX description column beside the figure.
+                    title(ax, 'RAC position error (shaded = formal \pm3\sigma)', 'FontSize', 7);
                     grid(ax, 'on');
                     revgnss.PlotUnitScaler.disableExponent(ax);
                     return;
@@ -778,6 +817,90 @@ classdef ClockExactReportBuilder
                 end
             catch; end
             revgnss.ClockExactReportBuilder.noDataAxes_(ax);
+        end
+
+        % ................................................................
+        function fig = plotInitialTransient_(diag, t, windowSec)
+            % Initial convergence transient: A PRIORI (pre-update) vs POSTERIOR
+            % (post-update) position error over the opening window, log-y.
+            %
+            % Why this figure exists: the per-epoch history row is committed AFTER the
+            % epoch's measurement update, so the posterior series -- every other position
+            % plot in this report -- begins at an already-corrected value. The configured
+            % cfg.estimator.initialError offset is consumed by the first update and never
+            % appears. The prior series is the only place the initial condition is visible,
+            % and the gap between the two curves at epoch 1 IS the transient.
+            %
+            % Returns [] when no prior series is present (legacy struct-log runs and
+            % .mat files captured before the prior series existed), so tryPlot_ yields ''
+            % and the report row is silently omitted rather than printing an empty axes.
+            fig = [];
+            if nargin < 3 || isempty(windowSec); windowSec = 120; end
+            prior = [];
+            try; prior = diag.getPriorPositionErrors(); catch; return; end
+            if isempty(prior) || ~any(isfinite(prior)); return; end
+
+            post = [];
+            try; post = diag.getPositionErrors(); catch; end
+            sigPrior = [];
+            try; sigPrior = diag.getPriorPositionSigmas(); catch; end
+
+            prior = prior(:).'; post = post(:).'; t = t(:).';
+            n = min([numel(t), numel(prior), numel(post)]);
+            if n < 2; return; end
+            t = t(1:n); prior = prior(1:n); post = post(1:n);
+
+            % Opening window, but always at least a handful of epochs: on a coarse-dt run
+            % windowSec could otherwise select a single point and hide the very step the
+            % figure exists to show.
+            iEnd = find(t <= t(1) + windowSec, 1, 'last');
+            if isempty(iEnd); iEnd = n; end
+            iEnd = max(iEnd, min(n, 10));
+
+            % A log axis renders nothing for non-positive data, so an ideal-flat config
+            % (errors identically zero) would otherwise emit a blank figure. Omit the row
+            % instead.
+            if ~any(prior(1:iEnd) > 0) && ~any(post(1:iEnd) > 0); return; end
+
+            fig = revgnss.ClockExactReportBuilder.makeCompactFig_('');
+            ax  = gca(fig);
+            hold(ax, 'on');
+
+            % 3-sigma RSS of the a priori formal uncertainty. At epoch 1 this is the P0 the
+            % filter was initialised with, so the curve shows the covariance collapsing
+            % alongside the error.
+            if ~isempty(sigPrior) && size(sigPrior,2) >= iEnd
+                s3 = 3 * sqrt(sum(sigPrior(:,1:iEnd).^2, 1));
+                if any(isfinite(s3) & s3 > 0)
+                    plot(ax, t(1:iEnd), s3, ':', 'Color',[0.45 0.45 0.48], ...
+                        'LineWidth',0.7, 'DisplayName','prior 3\sigma (RSS)');
+                    plot(ax, t(1), s3(1), 'o', 'MarkerSize',3.5, ...
+                        'MarkerEdgeColor',[0.45 0.45 0.48], 'MarkerFaceColor','w', ...
+                        'LineWidth',0.7, 'HandleVisibility','off');
+                end
+            end
+
+            plot(ax, t(1:iEnd), prior(1:iEnd), '-', 'Color',[0.85 0.20 0.20], ...
+                'LineWidth',0.9, 'DisplayName','a priori (pre-update)');
+            plot(ax, t(1:iEnd), post(1:iEnd), '-', 'Color',[0.20 0.35 0.85], ...
+                'LineWidth',0.9, 'DisplayName','posterior (post-update)');
+            % Mark epoch 1 explicitly: it is the configured initial error, and on a log
+            % axis over a 120 s window it is one pixel wide without a marker.
+            plot(ax, t(1), prior(1), 'o', 'MarkerSize',3.5, ...
+                'MarkerEdgeColor',[0.85 0.20 0.20], 'MarkerFaceColor','w', ...
+                'LineWidth',0.7, 'HandleVisibility','off');
+
+            set(ax, 'YScale', 'log');
+            grid(ax, 'on');
+            % Pad the left edge: epoch 1 is the whole point of this figure, and flush
+            % against the axis its marker and the near-vertical first segment are clipped.
+            span = t(iEnd) - t(1);
+            if span > 0; xlim(ax, [t(1) - 0.03*span, t(iEnd)]); else; xlim(ax,'auto'); end
+            legend(ax, 'show', 'Location','best', 'FontSize',5);
+            xlabel(ax, 'Time [s]', 'FontSize', 7);
+            ylabel(ax, 'Position error [m]', 'FontSize', 7);
+            title(ax, sprintf('A priori vs posterior (first %g s, log)', ...
+                t(iEnd) - t(1)), 'FontSize', 7);
         end
 
         % ................................................................
@@ -807,7 +930,7 @@ classdef ClockExactReportBuilder
                 xl = [max(tt(end)-zoomSec, tt(1)), tt(end)];
             end
             col  = lines(max(nSec,1));
-            zlab = ''; if ~isempty(xl); zlab = sprintf(' --- final %g s', zoomSec); end
+            zlab = ''; if ~isempty(xl); zlab = sprintf(', final %g s', zoomSec); end
 
             fig = figure('Visible','off','Color','white','Units','pixels','Position',[80 80 1080 760]);
             tl  = tiledlayout(fig,2,1,'TileSpacing','compact','Padding','compact');
@@ -823,7 +946,7 @@ classdef ClockExactReportBuilder
                 end
             end
             ylabel(ax1,'|position error| [m]', 'FontSize',9);
-            title(ax1, ['ABSOLUTE per-satellite error (solid) vs filter \pm3\sigma (dashed)' zlab], 'FontSize',10);
+            title(ax1, ['ABSOLUTE error (solid) vs filter \pm3\sigma (dashed)' zlab], 'FontSize',10);
             if nSec > 0; legend(ax1,'Location','best','FontSize',8); end
             if ~isempty(xl); xlim(ax1,xl); end
 
@@ -837,14 +960,14 @@ classdef ClockExactReportBuilder
                 end
                 yline(ax2,0,'k:','HandleVisibility','off');
                 ylabel(ax2,'baseline error (est - truth) [m]', 'FontSize',9);
-                title(ax2, ['RELATIVE per-satellite baseline error to chief (shape)' zlab], 'FontSize',10);
+                title(ax2, ['RELATIVE baseline error to chief (shape)' zlab], 'FontSize',10);
                 if nSec > 0; legend(ax2,'Location','best','FontSize',8); end
                 if ~isempty(xl); xlim(ax2,xl); end
             else
                 revgnss.ClockExactReportBuilder.noDataAxes_(ax2);
             end
             xlabel(ax2,'time [s]', 'FontSize',9);
-            title(tl, 'Per-satellite position error --- honest multi-asset swarm', ...
+            title(tl, 'Per-satellite position error, honest multi-asset swarm', ...
                 'FontWeight','bold', 'FontSize',11);
         end
 
@@ -935,7 +1058,13 @@ classdef ClockExactReportBuilder
         end
 
         % ................................................................
-        function fig = plotInnovationRMS_(diag, t)
+        function fig = plotInnovationRMS_(diag, t, zoomSec)
+            % plotInnovationRMS_  Pre-fit innovation and post-fit residual RMS, with the
+            %   settled tail inset INSIDE the same axes. The full run is dominated by the
+            %   opening transient, which compresses the converged part of both curves into
+            %   the axis; the inset shows the last zoomSec seconds on its own scale so the
+            %   settled level is readable without spending a second report row on it.
+            if nargin < 3 || isempty(zoomSec); zoomSec = 120; end
             fig = revgnss.ClockExactReportBuilder.makeCompactFig_('');
             ax  = gca(fig);
             try
@@ -946,15 +1075,58 @@ classdef ClockExactReportBuilder
                     hold(ax,'on');
                     if ~isempty(po)
                         plot(ax, t, po, 'r--', 'LineWidth',0.8, 'DisplayName','Post-fit');
-                        legend(ax,'show','Location','best','FontSize',6);
                     end
                     xlabel(ax,'Time [s]','FontSize',7);
                     ylabel(ax,'RMS [m]','FontSize',7);
                     grid(ax,'on');
+                    legend(ax,'show','Location','northoutside', ...
+                        'Orientation','horizontal','FontSize',5,'Box','off');
+                    revgnss.ClockExactReportBuilder.insetTail_(ax, t, ...
+                        {pf, po}, {'b-','r--'}, zoomSec);
                     return;
                 end
             catch; end
             revgnss.ClockExactReportBuilder.noDataAxes_(ax);
+        end
+
+        % ................................................................
+        function insetTail_(ax, t, series, styles, zoomSec)
+            % insetTail_  Draw a small "last zoomSec s" panel inside the parent axes.
+            %   Placed in the upper-right of the parent, which is where these decaying
+            %   curves leave space. Silently does nothing when the window would hold
+            %   fewer than two samples.
+            t = t(:).';
+            if numel(t) < 3 || ~isfinite(zoomSec) || zoomSec <= 0; return; end
+            i0 = find(t >= t(end) - zoomSec, 1, 'first');
+            if isempty(i0) || (numel(t) - i0) < 1; return; end
+            pos = get(ax, 'Position');
+            inPos = [pos(1) + 0.50*pos(3), pos(2) + 0.52*pos(4), ...
+                     0.42*pos(3), 0.36*pos(4)];
+            % Tagged and parented so normalizeAxisUnits_ rescales the inset by the SAME
+            % factor as its host axes. Left to itself it would pick its own SI prefix
+            % from its own (smaller) settled maximum, and the inset would then be a
+            % different unit from the axis label it sits inside, with nothing saying so.
+            axIn = axes(ancestor(ax,'figure'), 'Position', inPos, ...
+                'Tag','reportInset', 'UserData',ax);
+            hold(axIn,'on');
+            drew = false;
+            for k = 1:numel(series)
+                y = series{k};
+                if isempty(y) || numel(y) < numel(t); continue; end
+                y = y(:).';
+                plot(axIn, t(i0:end), y(i0:numel(t)), styles{k}, ...
+                    'LineWidth',0.7, 'HandleVisibility','off');
+                drew = true;
+            end
+            if ~drew; delete(axIn); return; end
+            set(axIn, 'FontSize',5, 'FontName','Helvetica', 'Box','on', ...
+                'TickDir','out', 'LineWidth',0.5, ...
+                'XColor',[0.20 0.20 0.22], 'YColor',[0.20 0.20 0.22], ...
+                'Color',[1 1 1], 'GridColor',[0.45 0.45 0.48], 'GridAlpha',0.15);
+            grid(axIn,'on');
+            xlim(axIn, [t(i0) t(end)]);
+            title(axIn, sprintf('last %g s', zoomSec), 'FontSize',5, ...
+                'FontWeight','normal', 'Color',[0.20 0.20 0.22]);
         end
 
         % ................................................................
@@ -1165,14 +1337,34 @@ classdef ClockExactReportBuilder
             %   row idx, scaled to the plot's units, from sample i0 to the end. Returns []
             %   if the covariance is unavailable or too small (graceful no-band).
             s = [];
+            Pd = revgnss.ClockExactReportBuilder.pdiagOf_(diag);
+            if isempty(Pd) || size(Pd,1) < idx; return; end
+            row = sqrt(max(Pd(idx,:), 0)) * scale;
+            if i0 < 1; i0 = 1; end
+            if i0 > numel(row); return; end
+            s = row(i0:end);
+        end
+
+        function Pd = pdiagOf_(diag)
+            % pdiagOf_  [nx x N] covariance diagonal from either accessor layer.
+            %   Reads the dedicated getPdiag() accessor FIRST. The previous route went
+            %   through the heavy getData() struct, which throws on a store rebuilt from
+            %   an older .mat -- and because every caller wrapped that in try/catch, the
+            %   failure was silent: the clock plots kept their "dotted = +-3 sigma" title
+            %   while drawing no band at all, and the RAC position plot lost its shading.
+            Pd = [];
+            try
+                Pd = diag.getPdiag();
+            catch
+                Pd = [];
+            end
+            if ~isempty(Pd); return; end
             try
                 d_ = diag.getData();
-                if isfield(d_,'Pdiag') && ~isempty(d_.Pdiag) && size(d_.Pdiag,1) >= idx
-                    row = sqrt(max(d_.Pdiag(idx,:), 0)) * scale;
-                    if i0 < 1; i0 = 1; end
-                    s = row(i0:end);
-                end
-            catch; end
+                if isfield(d_,'Pdiag'); Pd = d_.Pdiag; end
+            catch
+                Pd = [];
+            end
         end
 
         function fillSigma_(ax, tt, sig, k, rgb, alpha)
@@ -1216,15 +1408,12 @@ classdef ClockExactReportBuilder
             %   Returns [] if Pdiag is unavailable (callers then draw no band).
             racSig = [];
             try
-                d_ = diag.getData();
-                if ~isfield(d_,'Pdiag') || isempty(d_.Pdiag) || size(d_.Pdiag,1) < 3
+                Pd_ = revgnss.ClockExactReportBuilder.pdiagOf_(diag);
+                if isempty(Pd_) || size(Pd_,1) < 3
                     return;
                 end
-                Pxyz = max(d_.Pdiag(1:3,:), 0);               % [3 x N] x/y/z variance
-                Xoff = [];                                    % [3 x N] Pxy;Pxz;Pyz, if available
-                if isfield(d_,'PposOffDiag_m2') && size(d_.PposOffDiag_m2,1) == 3
-                    Xoff = d_.PposOffDiag_m2;
-                end
+                Pxyz = max(Pd_(1:3,:), 0);                    % [3 x N] x/y/z variance
+                Xoff = revgnss.ClockExactReportBuilder.pposOffDiagOf_(diag);
                 w = 7.2921150e-5;
                 try; w = revgnss.Constants.EARTH_OMEGA_RADPS; catch; end
                 omega = [0;0;w];
@@ -1244,6 +1433,25 @@ classdef ClockExactReportBuilder
                     end
                 end
             catch; racSig = []; end
+        end
+
+        function X = pposOffDiagOf_(diag)
+            % pposOffDiagOf_  [3 x N] (Pxy;Pxz;Pyz), or [] when the store predates it.
+            X = [];
+            try
+                X = diag.getPposOffDiag();
+            catch
+                X = [];
+            end
+            if isempty(X)
+                try
+                    d_ = diag.getData();
+                    if isfield(d_,'PposOffDiag_m2'); X = d_.PposOffDiag_m2; end
+                catch
+                    X = [];
+                end
+            end
+            if ~isempty(X) && size(X,1) ~= 3; X = []; end
         end
 
         % ================================================================
@@ -1290,7 +1498,7 @@ classdef ClockExactReportBuilder
             fprintf(fid, '\\begin{center}\n');
             fprintf(fid, '{\\Large \\textbf{Reverse-GNSS Spacecraft Multi-Observable EKF Report}}\\\\[4pt]\n');
             fprintf(fid, '{\\large Scenario: \\textbf{%s}}\\\\[4pt]\n', esc(scenarioName));
-            fprintf(fid, '{\\small Reverse-GNSS EKF simulator \\textemdash{} validation version %s \\\\ Generated %s}\\\\[3pt]\n', ...
+            fprintf(fid, '{\\small Reverse-GNSS EKF simulator, validation version %s \\\\ Generated %s}\\\\[3pt]\n', ...
                 esc(ver), esc(ts));
             fprintf(fid, '{\\footnotesize Controlled synthetic reverse-GNSS scenario.}\n');
             fprintf(fid, '\\end{center}\n');
@@ -1758,8 +1966,9 @@ classdef ClockExactReportBuilder
             };
 
             gRows{2} = { ...
-                'Receiver clock (spacecraft)',    true,   sprintf('%s oscillator, template %s.', ...
-                    CE.getCfgStr_(cfg,{'asset','clockType'},'unknown'), CE.getCfgStr_(cfg,{'clock','templateSource'},'unknown')); ...
+                'Receiver clock (spacecraft)',    true,   sprintf(['%s oscillator; ' ...
+                    'h-coefficients from Winkel (2003) Table 2.1.'], ...
+                    CE.getCfgStr_(cfg,{'asset','clockType'},'unknown')); ...
                 'Tower clock product correction', prodSt,                                    prodNote; ...
                 'Tower clock product covariance', prodCovSt2,                                prodCovN2; ...
                 'Joint tower clock EKF',          strcmp(clkMd2,'includeTowerClocksInEKF'),  tClkNote2; ...
@@ -1885,7 +2094,7 @@ classdef ClockExactReportBuilder
                         if isempty(act); act = 'Not available in v1.'; end
                     else
                         stTex = '\textcolor{gray}{Disabled}';
-                        if isempty(act); act = '---'; end
+                        if isempty(act); act = 'n/a'; end
                     end
                     fprintf(fid, '%s & %s & %s\\\\\n', comp, stTex, esc(act));
                     fprintf(fid, '\\midrule\n');
@@ -2180,6 +2389,59 @@ classdef ClockExactReportBuilder
             if flag; s = yes; else; s = no; end
         end
 
+        % ================================================================
+        % REPORT-TEXT STATISTICS
+        %   Numbers quoted in a plot's description must come from the SAME series the
+        %   plot draws, so these read the store directly rather than re-deriving from
+        %   a summary struct that may have been built under different gating.
+        % ================================================================
+
+        function idx = tailIndex_(t, windowSec)
+            % tailIndex_  First sample of the trailing windowSec-second window.
+            idx = 1;
+            if isempty(t) || ~isfinite(windowSec) || windowSec <= 0; return; end
+            j = find(t >= t(end) - windowSec, 1, 'first');
+            if ~isempty(j); idx = j; end
+        end
+
+        function s = fmtRms_(v, unit, fmt)
+            % fmtRms_  RMS of the finite entries of v, or 'n/a'.
+            if nargin < 3 || isempty(fmt); fmt = '%.3g'; end
+            s = 'n/a';
+            v = v(:); v = v(isfinite(v));
+            if isempty(v); return; end
+            s = sprintf([fmt ' %s'], sqrt(mean(v.^2)), unit);
+        end
+
+        function [txt, ok] = racTailRms_(diag, t, windowSec)
+            % racTailRms_  "radial A, along-track B, cross-track C" RMS over the trailing
+            %   window, in the RAC frame the zoom figure plots. ok=false when the RAC
+            %   basis is unavailable, in which case txt is the 3-D norm instead.
+            txt = ''; ok = false;
+            try
+                ev = diag.getPositionErrorVecs();
+                n  = numel(t);
+                if isempty(ev) || size(ev,2) ~= n; return; end
+                i0 = revgnss.ClockExactReportBuilder.tailIndex_(t, windowSec);
+                rTr = diag.getTruthPositionVecs(); vTr = diag.getTruthVelocityVecs();
+                if ~isempty(rTr) && ~isempty(vTr) && size(rTr,2) >= n && size(vTr,2) >= n
+                    rac = revgnss.OrbitFrame.ecefToRacGeo(ev, rTr(:,1:n), vTr(:,1:n));
+                    if any(isfinite(rac(:)))
+                        CE_ = revgnss.ClockExactReportBuilder;
+                        txt = sprintf('radial %s, along-track %s, cross-track %s', ...
+                            CE_.fmtRms_(rac(1,i0:n),'m'), ...
+                            CE_.fmtRms_(rac(2,i0:n),'m'), ...
+                            CE_.fmtRms_(rac(3,i0:n),'m'));
+                        ok = true; return;
+                    end
+                end
+                nrm = sqrt(sum(ev(:,i0:n).^2,1));
+                txt = sprintf('3-D norm %s (RAC basis unavailable)', ...
+                    revgnss.ClockExactReportBuilder.fmtRms_(nrm,'m'));
+            catch
+            end
+        end
+
         function writeRow_(fid, imgPath, boldTitle, description)
             % writeRow_  Write one plot-description longtable row.
             % imgPath: full path to image file, or '' for no-plot
@@ -2434,7 +2696,7 @@ classdef ClockExactReportBuilder
         function s = vec3_(v)
             v = v(:);
             if numel(v) < 3 || any(~isfinite(v(1:3)))
-                s = '[---, ---, ---]';
+                s = '[n/a, n/a, n/a]';
             else
                 s = sprintf('[%.3f, %.3f, %.3f]', v(1), v(2), v(3));
             end

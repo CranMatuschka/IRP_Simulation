@@ -160,6 +160,22 @@ classdef EkfInnovationAccounting
             c.codeResidualRms      = rms_.codeRms;
             c.carrierResidualRms   = rms_.carrierRms;
             c.dopplerResidualRms   = rms_.dopplerRms;
+            % PER-TYPE NIS. compute() has always calculated these and compact() threw them
+            % away, leaving only the per-type residual RMS above -- which cannot answer the
+            % question that actually matters when the aggregate NIS moves: WHICH measurement
+            % block is mis-weighted. A residual RMS says how big the error is; only NIS/dof
+            % says whether R and P cover it. Added 2026-08-10 while chasing a 1.50x aggregate
+            % NIS that turned out to sit in one block.
+            typeNames_ = {'code','codeIonoFree','carrier','carrierIonoFree','doppler'};
+            for tn_ = typeNames_
+                nisF_ = [tn_{1} 'NIS']; dofF_ = [tn_{1} 'Dof'];
+                if isfield(acc, nisF_) && isfield(acc, dofF_)
+                    c.(nisF_) = acc.(nisF_);
+                    c.(dofF_) = acc.(dofF_);
+                    c.([tn_{1} 'NisPerDof']) = ...
+                        revgnss.EkfInnovationAccounting.safeDiv_(acc.(nisF_), acc.(dofF_));
+                end
+            end
             c.twoWayTimeTransferNIS = acc.twoWayTimeTransferNIS;
             c.twoWayTimeTransferDof = acc.twoWayTimeTransferDof;
             c.twoWayTimeTransferResidualRms = rms_.twoWayTimeTransferRms;
