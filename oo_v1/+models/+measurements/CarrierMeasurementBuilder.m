@@ -105,17 +105,53 @@ classdef CarrierMeasurementBuilder
             % Get product epoch and drift sigma for carrier rows
             t_prod_carrier  = zeros(Mp, 1);
             dsig_carrier    = zeros(Mp, 1);
-            applyCarrierProdCov = true;
-            try; applyCarrierProdCov = cfg.covariance.productClock.applyToCarrier; catch; end
-            if applyCarrierProdCov
-                try
-                    [~, ~, dsig_vec, tprod_vec, ~] = ...
-                        models.clocks.TowerClockCorrectionProvider.computeDrift( ...
-                        cfg, towers, twr_pairs, t_s);
-                    t_prod_carrier = tprod_vec;
-                    dsig_carrier   = dsig_vec;
-                catch; end
-            end
+            % GATES (P5/P6/P7, 2026-08-10). Three independent things were missing here,
+            % all of them "the toggle exists and the carrier ignores it":
+            %   P7  cfg.covariance.productClock.enable is the MASTER for this whole family
+            %       (masterConfig:473) and was never read -- only the applyToCarrier leaf.
+            %       Setting the master false left the carrier drift block in R.
+            %   P6  cfg.covariance.sharedErrors.enable gates the CODE tower-clock block
+            %       (CodeMeasurementBuilder) but not the carrier one, so turning shared
+            %       errors off produced a half-disabled, asymmetric R -- which is also a
+            %       PSD hazard now that the two sides are one rank-1 outer product.
+            %   P5  neither block considered the correction MODE. perfectCorrection makes
+            %       the tower-clock residual identically zero by construction, and
+            %       noisyCorrection's real error is a PER-ROW draw of
+            %       estimator.towerClockCorrectionSigma_m, not a shared product block.
+            %       Charging a shared block in those modes invents correlated error that
+            %       the measurement provably does not contain.
+            prodClockEnable_ = true;
+            try; prodClockEnable_ = logical(cfg.covariance.productClock.enable); catch; end
+            sharedErrEnableCar_ = true;
+            try; sharedErrEnableCar_ = logical(cfg.covariance.sharedErrors.enable); catch; end
+            twrModeCar_ = '';
+            try; twrModeCar_ = models.clocks.TowerClockCorrectionProvider.towerClockMode(cfg); catch; end
+            % Only the product-based modes leave a shared, correlated tower-clock residual.
+            modeHasSharedProduct_ = any(strcmp(twrModeCar_, ...
+                {'truthHistoryProductNoisy','truthProduct','product','productNoisy'}));
+            applyCarrierProdCov = prodClockEnable_ && modeHasSharedProduct_;
+            try; applyCarrierProdCov = applyCarrierProdCov && ...
+                    logical(cfg.covariance.productClock.applyToCarrier); catch; end
+            % The PRODUCT EPOCH is resolved unconditionally, NOT behind applyCarrierProdCov.
+            % It is not part of the drift block: it defines the correction AGE, which the
+            % tower-clock BIAS path also needs -- and that path is gated on
+            % covariance.sharedErrors, a different switch entirely. Leaving it inside the
+            % drift gate meant that turning covariance.productClock.enable off left
+            % t_prod_carrier at ZEROS, so the age became t_s - 0 (the whole elapsed arc)
+            % instead of the true 5..34 s. MEASURED: age 10 s -> 40 s and the carrier
+            % tower-clock sigma 0.386 m -> 3.083 m. Turning a covariance term OFF made R
+            % nearly an order of magnitude LARGER, which is the opposite of what any gate
+            % should do. computeDrift is memoised on (tower, productEpoch), so calling it
+            % here draws nothing new and costs nothing.
+            try
+                [~, ~, dsig_vec, tprod_vec, ~] = ...
+                    models.clocks.TowerClockCorrectionProvider.computeDrift( ...
+                    cfg, towers, twr_pairs, t_s);
+                t_prod_carrier = tprod_vec;
+                if applyCarrierProdCov
+                    dsig_carrier = dsig_vec;   % the DRIFT BLOCK is what the gate controls
+                end
+            catch; end
             % Tower-clock DRIFT product-sigma R double-count guard (carrier). When a
             % tower's clock drift is an EKF state (towerClockIdx(ti,2)>0) its uncertainty is
             % in P, so the product drift sigma must not also enter the carrier drift block
@@ -454,8 +490,13 @@ classdef CarrierMeasurementBuilder
             % cfg.covariance.sharedErrors.applyTowerClockToCarrier, which until now had no
             % consumer anywhere in the repo (only SimulationToggleManifest reported it and
             % ScenarioPresets set it) -- it is a live control from here on.
-            applyTwrClkCarrier = false;
-            try; applyTwrClkCarrier = cfg.covariance.sharedErrors.applyTowerClockToCarrier; catch; end
+            % Gated on the MASTER shared-errors switch and on the correction mode as well
+            % as its own leaf -- see the P5/P6/P7 note where applyCarrierProdCov is built.
+            % The code side gates on sharedErrors.enable; the carrier must agree with it or
+            % the rank-1 outer product is left half-present, which is indefinite.
+            applyTwrClkCarrier = sharedErrEnableCar_ && modeHasSharedProduct_;
+            try; applyTwrClkCarrier = applyTwrClkCarrier && ...
+                    logical(cfg.covariance.sharedErrors.applyTowerClockToCarrier); catch; end
             biasCovInfo = struct('carrierProductBiasApplied',false,'carrierProductBiasBlocks',0, ...
                 'carrierProductBiasMaxSigma_m',0,'carrierProductBiasSPD',false);
             if applyTwrClkCarrier && any(sbias_carrier > 0)

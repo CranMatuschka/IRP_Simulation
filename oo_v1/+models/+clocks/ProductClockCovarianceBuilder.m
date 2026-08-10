@@ -199,7 +199,8 @@ classdef ProductClockCovarianceBuilder
             % blkdiag would otherwise force to zero.
 
             info = struct('applied',false,'nCrossTerms',0,'jitterAdded_m2',0, ...
-                'spd',true,'condition',NaN,'policy','perProductEpochBiasDriftV1');
+                'spd',true,'condition',NaN,'policy','perProductEpochBiasDriftV1', ...
+                'suppressedReason','');   % '' = nothing suppressed; see the guards below
             if isempty(R) || ~isnumeric(R); return; end
 
             enable = false;
@@ -220,7 +221,32 @@ classdef ProductClockCovarianceBuilder
             M_car = 0;
             try; M_car = numel(errStruct.carrierPhase.towerIdx); catch; end
             nRows = size(R,1);
-            if M_code <= 0 || nRows ~= M_code + M_dop + M_car; return; end
+            % LOUD SUPPRESSION (P8, 2026-08-10). This used to be a bare silent return, and
+            % info.applied = false was indistinguishable from "no cross terms were needed".
+            % The shape assumption is that R is exactly [code; doppler; carrier] -- so
+            % turning measurements.doppler.useInEKF off, which removes the Doppler rows from
+            % R while errStruct.doppler still reports them, silently deleted the ENTIRE
+            % cross stack including the code-carrier term that has nothing to do with
+            % Doppler. A term carrying several m^2 that quietly evaluates to nothing is how
+            % this class of defect returns unnoticed, so say so and record why.
+            if M_code <= 0
+                info.suppressedReason = 'noCodeRows';
+                return
+            end
+            if nRows ~= M_code + M_dop + M_car
+                info.suppressedReason = sprintf( ...
+                    'rowShapeMismatch(R=%d, code=%d, dop=%d, car=%d)', ...
+                    nRows, M_code, M_dop, M_car);
+                warning('ProductClockCovarianceBuilder:crossSuppressed', ...
+                    ['Shared tower-clock cross-covariance SUPPRESSED: R has %d rows but ' ...
+                     'code+doppler+carrier = %d+%d+%d. The tower clock is common to all ' ...
+                     'three, so the cross terms are simply absent from R -- the filter ' ...
+                     'will treat one physical clock error as independent per block. Most ' ...
+                     'often this means a block was excluded from the EKF (e.g. ' ...
+                     'measurements.doppler.useInEKF = false) while errStruct still ' ...
+                     'reports its rows.'], nRows, M_code, M_dop, M_car);
+                return
+            end
 
             pc = models.clocks.ProductClockCovarianceBuilder.productCfg_(cfg);
 
