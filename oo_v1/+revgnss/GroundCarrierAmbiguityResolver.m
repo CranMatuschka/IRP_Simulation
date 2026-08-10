@@ -425,11 +425,31 @@ classdef GroundCarrierAmbiguityResolver
         end
 
         function [aFix, info] = fixIntegers_(cfg, aHat, Q, opts)
-            % fixIntegers_  LAMBDA when the toolbox is installed, the native decorrelated
-            % bootstrap otherwise. Both refuse below the success-rate floor and both report the
-            % reason; the choice is recorded so a result can never be read as ILS when it was
-            % bootstrapping.
-            if revgnss.integer.LambdaResolver.isAvailable(cfg)
+            % fixIntegers_  LAMBDA when the CONFIG asks for it and the toolbox is installed,
+            % the native decorrelated bootstrap otherwise. Both refuse below the success-rate
+            % floor and both report the reason; the choice is recorded so a result can never be
+            % read as ILS when it was bootstrapping.
+            %
+            % THE CONFIG GATES ARE CHECKED FIRST, AND THAT IS THE POINT (fixed 2026-08-09).
+            % This used to branch on LambdaResolver.isAvailable ALONE, i.e. on whether
+            % which('LAMBDA') happened to resolve -- an ENVIRONMENT fact, not a configured
+            % one. Two consequences, both bad:
+            %   1. It ignored cfg.estimator.lambda.enable, the master switch masterConfig:345
+            %      documents as governing every LAMBDA route, and the ground sub-gate
+            %      cfg.estimator.lambda.ground.enable that the sibling ground-AR path
+            %      (BaselineAmbiguityLambda:135) does honour. Two "ground AR" routes, two
+            %      different gates.
+            %   2. With the toolbox on the path but the master OFF, LambdaResolver.resolve
+            %      returns decision='disabled-by-config' with aFix = the FLOAT, and the early
+            %      return below meant DecorrelatedBootstrap never ran -- so NO fixing happened
+            %      at all, silently, where an unconfigured machine would have bootstrapped.
+            % Since tests share one MATLAB session, an earlier test adding LAMBDA to the path
+            % flipped the engine for every later test: order- and machine-dependent results.
+            lambdaRequested = false;
+            try; lambdaRequested = logical(cfg.estimator.lambda.enable); catch; end
+            groundRequested = lambdaRequested;
+            try; groundRequested = lambdaRequested && logical(cfg.estimator.lambda.ground.enable); catch; end
+            if groundRequested && revgnss.integer.LambdaResolver.isAvailable(cfg)
                 [aFix, li] = revgnss.integer.LambdaResolver.resolve(aHat, Q, cfg);
                 info = li; info.engine = 'LAMBDA';
                 if ~isfield(info,'estimator'); info.estimator = 'ils'; end
