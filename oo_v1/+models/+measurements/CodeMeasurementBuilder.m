@@ -278,13 +278,13 @@ classdef CodeMeasurementBuilder
             signals = revgnss.SignalUtils.getEnabledSignals(cfg);
             N_sig   = numel(signals);
 
-            % Use canonical cfg.signals.frequencyHz (set by finalizeConfig)
-            % or SignalDefinition; no hardcoded frequency fallback constant.
+            % Canonical cfg.signals.frequencyHz (set by finalizeConfig); the else-branch
+            % resolves the same owner rather than a name-keyed catalogue.
             if isfield(cfg,'signals') && isfield(cfg.signals,'frequencyHz') && ...
                     numel(cfg.signals.frequencyHz) >= 1
                 f_L1 = cfg.signals.frequencyHz(1);
             else
-                f_L1 = revgnss.SignalDefinition.get('L1').frequency_Hz;
+                f_L1 = revgnss.SignalUtils.frequency(cfg, 'L1');
             end
 
             if N_sig > 1
@@ -671,6 +671,19 @@ classdef CodeMeasurementBuilder
                 % if a hardware-delay sigma is ever enabled.)
                 sigHw_ = zeros(M_pairs_if,1);
                 if isfield(smSig_,'hwDelay') && numel(smSig_.hwDelay) >= M_pairs_if; sigHw_ = smSig_.hwDelay(idx1); end
+                % Multipath is CORRELATED, not independent per signal (fixed 2026-08-09).
+                % This simulator copies ONE realisation onto both rows unscaled -- the L2
+                % row is built with `+ mp_t +` straight from the L1 draw (:424) and takes
+                % its sigma from the same sigmaExtra_m(pi) (:427) -- so the two rows carry
+                % a bit-identical multipath error. A perfectly correlated source passes
+                % the IF at (alpha+beta) = 1, so its IF variance is sigma^2, but leaving
+                % it in the independent bundle charged it (alpha^2+beta^2) = 8.870x. At
+                % the shipped 0.30/sin(el) that is 0.798 m^2 instead of 0.090 m^2 at
+                % zenith. Strip it here and re-add at unit gain below, exactly as
+                % troposphere, tower-clock and hardware delay are handled.
+                % (If multipath is ever drawn per signal, move it back into the bundle.)
+                sigMp_ = zeros(M_pairs_if,1);
+                if isfield(smSig_,'mp') && numel(smSig_.mp) >= M_pairs_if; sigMp_ = smSig_.mp(idx1); end
 
                 % Correlated + cancelled variance baked into each raw row of R_diag.
                 % Higher-order ionosphere is signal-scaled; the other listed terms are
@@ -683,8 +696,8 @@ classdef CodeMeasurementBuilder
                 % the zero gain the cancellation demands.
                 ionoFreqScale_if_ = (f_L1 / f_L2_if)^2;
                 sigIono1_L2_      = sigIono1_ * ionoFreqScale_if_;
-                corrBaked_L1_ = sigTrop_.^2 + sigIono1_.^2    + sigIonoHO_L1_.^2 + sigTwr_if_.^2 + sigHw_.^2;
-                corrBaked_L2_ = sigTrop_.^2 + sigIono1_L2_.^2 + sigIonoHO_L2_.^2 + sigTwr_if_.^2 + sigHw_.^2;
+                corrBaked_L1_ = sigTrop_.^2 + sigIono1_.^2    + sigIonoHO_L1_.^2 + sigTwr_if_.^2 + sigHw_.^2 + sigMp_.^2;
+                corrBaked_L2_ = sigTrop_.^2 + sigIono1_L2_.^2 + sigIonoHO_L2_.^2 + sigTwr_if_.^2 + sigHw_.^2 + sigMp_.^2;
 
                 % Independent-per-signal remainder still carries the native per-signal
                 % L1/L2 sigmas (code + multipath + scintillation + signal-dependent HW
@@ -709,6 +722,7 @@ classdef CodeMeasurementBuilder
                      + sigTrop_.^2 ...                                      % troposphere: unit gain
                      + 0 * sigIono1_.^2 ...                                 % first-order iono: cancels -> 0
                      + sigIonoHO_IF_.^2 ...                                  % higher-order iono: correlated signed source
+                     + sigMp_.^2 ...                                        % multipath: one realisation on both rows -> unit gain
                      + sigTwr_if_.^2 ...                                    % tower-clock: unit gain
                      + sigHw_.^2;                                           % hardware delay: unit gain (non-dispersive)
 
@@ -792,6 +806,16 @@ classdef CodeMeasurementBuilder
             cbc_.spd         = true;
             cbc_.atmosphereCommonModeApplied = false;
             cbc_.atmosphereCommonModeSources = {};
+            % Towers that actually RECEIVED an off-diagonal block, not merely those the gate
+            % let through. cbc_.applied is set below whenever the gate passed, even if every
+            % group hit numel(idx_) < 2 or sig_t_ <= 0 and nothing was written. The
+            % code-carrier cross term in ProductClockCovarianceBuilder needs actual presence:
+            % its rank-1 identity is only PSD if the code off-diagonal block is really there.
+            cbc_.towersWithOffDiag = zeros(0,1);
+            % Per-final-row tower-clock sigma AS INSTALLED (post state-mask). Published so the
+            % cross-observable term is built from what R actually carries rather than from a
+            % nominal recomputation. Always present, so consumers need no isfield dance.
+            errStruct.towerClockSharedSigma_m = zeros(M,1);
             if sharedErrEnable_ && sharedErrCode_
                 jitter_m2_ = 1e-12;
                 try; jitter_m2_ = cfg.covariance.sharedErrors.jitter_m2; catch; end
@@ -807,6 +831,7 @@ classdef CodeMeasurementBuilder
                 % per-row list; guard on column 1 (bias). No-op when estimateTowerClocks=false.
                 sigTwr_ = models.measurements.CodeMeasurementBuilder.maskStateTowerSigma_( ...
                     sigTwr_, twr_list, stateMap, 1);
+                errStruct.towerClockSharedSigma_m = sigTwr_;
                 uniqT_ = unique(twr_list);
                 for kt_ = 1:numel(uniqT_)
                     idx_ = find(twr_list == uniqT_(kt_));
@@ -818,6 +843,7 @@ classdef CodeMeasurementBuilder
                     R(idx_,idx_) = R(idx_,idx_) + cov_add_;
                     cbc_.nBlocks = cbc_.nBlocks + 1;
                     cbc_.blockSizes(end+1) = numel(idx_);
+                    cbc_.towersWithOffDiag(end+1,1) = uniqT_(kt_);
                 end
                 % ---- L1 <-> L2 atmospheric common mode ---------------------------------
                 % The troposphere is copied VERBATIM onto every signal's row and the

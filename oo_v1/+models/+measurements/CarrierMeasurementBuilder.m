@@ -133,13 +133,54 @@ classdef CarrierMeasurementBuilder
             % here to recover the constant bias term and avoid double-counting it. Use the
             % UNMASKED drift sigma for the subtraction: if the drift is an EKF state its
             % variance left R via the column-2 mask, but it was still inside towerClkSigma.
-            sbias_carrier = zeros(size(dsig_carrier_raw));
-            if numel(towerClkSigma) >= numel(dsig_carrier_raw) && ~isempty(t_prod_carrier)
-                age_carrier_  = t_s - t_prod_carrier(:);
-                tcs_          = towerClkSigma(1:numel(dsig_carrier_raw));
-                sbias_carrier = sqrt(max(tcs_(:).^2 - ...
-                                         (age_carrier_.^2) .* (dsig_carrier_raw(:).^2), 0));
+            % REFACTORED 2026-08-10. This used to be a SUBTRACTION:
+            %     sbias = sqrt(towerClkSigma^2 - (age*dsig)^2)
+            % "strip the drift part so addCarrierDriftBlock does not double-count it". That
+            % only ever worked because the drift part was the PRODUCT's sigmaDrift_mps
+            % (0.0002 -> age*sigma = 0.0068 m), negligible against a 0.1 m bias sigma.
+            %
+            % Once the tower oscillators were switched on, BOTH sides carried the same
+            % oscillator wander, and they are algebraically IDENTICAL:
+            %     bias  term:  (c*sigma_y(tau)*tau)^2
+            %     drift term:  tau^2 * (c*sigma_y(tau))^2
+            % so the subtraction cancelled the entire wander out of the carrier bias term
+            % (MEASURED: 2.4161^2 - 2.4161^2 -> 0.0100 m left, the bare product bias). Worse,
+            % the moment the drift sigma is sized CORRECTLY -- the true frequency excursion
+            % is sqrt(3) larger than the Allan value for RWFM-dominated clocks -- the
+            % subtraction goes NEGATIVE, clamps to zero, and destabilises the whole R
+            % assembly. The two errors were locked together.
+            %
+            % The three contributions are independent and are now built as such, each
+            % charged EXACTLY ONCE:
+            %   bias  block  <- product sigmaBias^2  +  oscillator wander at MAX product age
+            %   drift block  <- the PRODUCT's own drift uncertainty only
+            % The oscillator's frequency wander is NOT added to the carrier drift block: its
+            % phase effect is already in the bias term above, and charging it in both is the
+            % double-count the old subtraction was trying (and failing) to prevent.
+            sigBiasProd_ = 0;
+            try; sigBiasProd_ = cfg.clocks.tower.product.sigmaBias_m; catch; end
+            % Wander at the ROW'S OWN age, matching the code path exactly, so the two
+            % observables are charged the identical sigma for the identical physical error.
+            age_carrier_  = zeros(size(dsig_carrier_raw));
+            if ~isempty(t_prod_carrier)
+                age_carrier_ = max(t_s - t_prod_carrier(:), 0);
             end
+            sbias_carrier = zeros(size(dsig_carrier_raw));
+            for mi_ = 1:numel(sbias_carrier)
+                ti_ = twr_pairs(min(mi_, numel(twr_pairs)));
+                wv_ = 0;
+                if ti_ >= 1 && ti_ <= numel(towers)
+                    wv_ = models.clocks.TowerClockCorrectionProvider.carrierBiasWanderVar( ...
+                        cfg, towers{ti_}.clock, age_carrier_(min(mi_, numel(age_carrier_))));
+                end
+                sbias_carrier(mi_) = sqrt(sigBiasProd_^2 + wv_);
+            end
+            % Carrier drift block: the product's own drift uncertainty, nothing else.
+            sigDriftProd_ = 0;
+            try; sigDriftProd_ = cfg.clocks.tower.product.sigmaDrift_mps; catch; end
+            dsig_carrier_raw = sigDriftProd_ * ones(size(dsig_carrier_raw));
+            dsig_carrier     = models.measurements.CodeMeasurementBuilder.maskStateTowerSigma_( ...
+                dsig_carrier_raw, twr_pairs, stateMap, 2);
             % Bias double-count guard: mask on column 1 (bias). When a tower's clock BIAS
             % is an EKF state its uncertainty lives in P and must not also enter R.
             % No-op when estimateTowerClocks=false (the default).
@@ -294,7 +335,13 @@ classdef CarrierMeasurementBuilder
                 % (negative), so the partial is the NEGATIVE 1/f^2 dispersion.
                 if isfield(stateMap,'ionoIdx') && ti <= numel(blk.iono) && ...
                         blk.iono(ti) > 0
-                    fL1c  = revgnss.SignalDefinition.get('L1').frequency_Hz;
+                    % f_L1 from the RESOLVED band, matching the reference frequency
+                    % ErrorChain builds the truth slant delay at. Reading the name-keyed
+                    % SignalDefinition here paired a canonical 1575.42 MHz numerator with a
+                    % resolved denominator, so on freq012's 24.125 GHz L1 rows this partial
+                    % came out 0.0043 instead of 1.0 -- the iono state was all but
+                    % disconnected from the carrier at any band above L.
+                    fL1c  = revgnss.SignalUtils.frequency(cfg, 'L1');
                     fSigc = revgnss.Constants.SPEED_OF_LIGHT_MPS / lambda;
                     h_phi(rowOut) = h_phi(rowOut) - (fL1c / fSigc)^2 * x_est(blk.iono(ti));
                 end
@@ -370,7 +417,8 @@ classdef CarrierMeasurementBuilder
                 % Slant-iono column: -(f_L1/f)^2 (carrier ionosphere is a phase advance)
                 if isfield(stateMap,'ionoIdx') && ...
                         ti <= numel(blk.iono) && blk.iono(ti) > 0
-                    fL1c  = revgnss.SignalDefinition.get('L1').frequency_Hz;
+                    % Resolved band -- see the matching h_phi partial above.
+                    fL1c  = revgnss.SignalUtils.frequency(cfg, 'L1');
                     fSigc = revgnss.Constants.SPEED_OF_LIGHT_MPS / lambda;
                     H_phi(rowOut, blk.iono(ti)) = -(fL1c / fSigc)^2;
                 end
@@ -416,6 +464,32 @@ classdef CarrierMeasurementBuilder
                         R_phi, cpInfo.towerIdx, cpInfo.productEpoch_s, ...
                         cpInfo.towerClkBiasSigma_m, cfg);
                 catch; end
+            end
+            % Tower-clock common-mode sigma AS INSTALLED on the carrier rows, in metres.
+            % addCarrierBiasBlock contributes sbias^2 and addCarrierDriftBlock contributes
+            % (age*sigmaDrift)^2 to every entry of a (tower, productEpoch) group, so within a
+            % group their sum is one constant -- exactly rank-1. Publishing it lets
+            % ProductClockCovarianceBuilder build the code-carrier cross from what R really
+            % carries instead of a nominal recomputation, which is what makes the outer
+            % product an identity rather than an approximation.
+            nCarRows_ = numel(cpInfo.towerIdx);
+            cpInfo.towerClockSharedSigma_m = zeros(nCarRows_, 1);
+            cpInfo.towerClockBlocksApplied = biasCovInfo.carrierProductBiasApplied && ...
+                                             carrierCovInfo.carrierProductCovApplied;
+            if cpInfo.towerClockBlocksApplied
+                bs_ = cpInfo.towerClkBiasSigma_m(:);
+                ag_ = cpInfo.productAge_s(:);
+                sd_ = cpInfo.sigmaDrift_mps(:);
+                n_  = min([nCarRows_, numel(bs_), numel(ag_), numel(sd_)]);
+                if n_ == nCarRows_
+                    cpInfo.towerClockSharedSigma_m = sqrt(bs_(1:n_).^2 + (ag_(1:n_).*sd_(1:n_)).^2);
+                else
+                    % Length disagreement means the metadata did not track a row transform
+                    % (the ionosphere-free collapse was one such case). Fail CLOSED and say
+                    % so, rather than index into the wrong half.
+                    cpInfo.towerClockBlocksApplied = false;
+                    cpInfo.towerClockSharedSigmaSuppressed = 'metadataLengthMismatch';
+                end
             end
             carrierCovInfo.carrierProductBiasTermIncluded = biasCovInfo.carrierProductBiasApplied;
             fn_ = fieldnames(biasCovInfo);

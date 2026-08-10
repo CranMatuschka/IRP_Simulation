@@ -258,18 +258,76 @@ classdef ProductClockCovarianceBuilder
                 carTower = models.clocks.ProductClockCovarianceBuilder.fieldOr_(cp,'towerIdx',zeros(M_car,1));
                 carEpoch = models.clocks.ProductClockCovarianceBuilder.fieldOr_(cp,'productEpoch_s',zeros(M_car,1));
                 carAge = models.clocks.ProductClockCovarianceBuilder.fieldOr_(cp,'productAge_s',zeros(M_car,1));
-                carSigma = models.clocks.ProductClockCovarianceBuilder.fieldOr_(cp,'sigmaDrift_mps',zeros(M_car,1));
-                for i = 1:M_code
-                    for j = 1:M_car
-                        if codeTower(i) == carTower(j) && abs(codeEpoch(i)-carEpoch(j)) < 1e-6
-                            cov_ij = codeAge(i) * carAge(j) * carSigma(j)^2;
-                            if cov_ij ~= 0
-                                R(codeRows(i), carRows(j)) = R(codeRows(i), carRows(j)) + cov_ij;
-                                R(carRows(j), codeRows(i)) = R(codeRows(i), carRows(j));
-                                info.nCrossTerms = info.nCrossTerms + 2;
+                carSigma = models.clocks.ProductClockCovarianceBuilder.fieldOr_(cp,'sigmaDrift_mps',zeros(M_car,1)); %#ok<NASGU>
+                % ONE TOWER CLOCK, ONE RANK-1 OUTER PRODUCT.
+                %
+                % A code row and a carrier row of the same tower at the same epoch contain
+                % the IDENTICAL term -(b_twr_true - b_twr_model): CodeMeasurementBuilder
+                % :140/:189 against CarrierMeasurementBuilder :303/:321, sensitivity -1 on
+                % both, so the correlation is +1 and Cov = s_code(i)*s_car(j).
+                %
+                % The formula this replaces assumed "the constant product bias is absorbed
+                % by the float ambiguity", so it charged only a_i*a_j*Var(d). That premise
+                % is refuted by addCarrierBiasBlock in this same file -- the product bias is
+                % a FRESH DRAW every interval, a step, not an arc constant -- and
+                % CarrierMeasurementBuilder installs that bias block by default. MEASURED
+                % shortfall against the variance the two diagonals agree they share: 1.15e3x
+                % at age 5 s, 5.06e3x at age 34 s. R was declaring three independent
+                % multi-metre nuisances where the physics has one, so the filter could not
+                % form the between-observable differences that cancel a common clock and
+                % averaged it down by sqrt(N) instead.
+                %
+                % Both sigmas are the values the diagonals ACTUALLY installed, published by
+                % their own builders. Within a (tower, productEpoch) group the age is
+                % constant, so each side is piecewise-constant and the identity is exact.
+                %
+                % PSD: per group R = D + s*s', with D the independent remainder. s*s' is PSD
+                % for any s, so the SPD repair below should never fire -- a postcondition,
+                % not a hope. That REQUIRES all four blocks of the outer product to be
+                % present; with the code off-diagonal absent the added matrix is s*s' minus
+                % that block, which is indefinite for >=2 code rows per tower. Hence the
+                % gates below are mandatory, not defensive.
+                sCode = models.clocks.ProductClockCovarianceBuilder.fieldOr_( ...
+                    errStruct, 'towerClockSharedSigma_m', zeros(M_code,1));
+                sCar  = models.clocks.ProductClockCovarianceBuilder.fieldOr_( ...
+                    cp, 'towerClockSharedSigma_m', zeros(M_car,1));
+                cbc   = models.clocks.ProductClockCovarianceBuilder.fieldOr_( ...
+                    errStruct, 'codeBlockCov', struct());
+                towersWithOffDiag = models.clocks.ProductClockCovarianceBuilder.fieldOr_( ...
+                    cbc, 'towersWithOffDiag', zeros(0,1));
+                carBlocksApplied  = logical(models.clocks.ProductClockCovarianceBuilder.fieldOr_( ...
+                    cp, 'towerClockBlocksApplied', false));
+
+                if numel(sCode) ~= M_code
+                    info.crossSuppressedReason = 'codeSigmaLengthMismatch';
+                elseif numel(sCar) ~= M_car
+                    info.crossSuppressedReason = 'carrierSigmaLengthMismatch';
+                elseif ~carBlocksApplied
+                    info.crossSuppressedReason = 'carrierBlockAbsent';
+                elseif isempty(towersWithOffDiag)
+                    info.crossSuppressedReason = 'codeBlockAbsent';
+                else
+                    for i = 1:M_code
+                        if ~ismember(codeTower(i), towersWithOffDiag); continue; end
+                        for j = 1:M_car
+                            if codeTower(i) == carTower(j) && abs(codeEpoch(i)-carEpoch(j)) < 1e-6
+                                cov_ij = sCode(i) * sCar(j);
+                                if cov_ij ~= 0
+                                    R(codeRows(i), carRows(j)) = R(codeRows(i), carRows(j)) + cov_ij;
+                                    R(carRows(j), codeRows(i)) = R(codeRows(i), carRows(j));
+                                    info.nCrossTerms = info.nCrossTerms + 2;
+                                end
                             end
                         end
                     end
+                end
+                if isfield(info,'crossSuppressedReason')
+                    % LOUD, not silent. A term carrying several m^2 that quietly evaluates to
+                    % nothing is how this class of defect returns unnoticed.
+                    warning('ProductClockCovarianceBuilder:crossSuppressed', ...
+                        ['code<->carrier tower-clock cross-covariance suppressed (%s). The ' ...
+                         'tower clock is then charged as two INDEPENDENT errors on the same ' ...
+                         'physical oscillator.'], info.crossSuppressedReason);
                 end
             end
 
