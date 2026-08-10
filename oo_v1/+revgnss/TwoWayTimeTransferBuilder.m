@@ -176,8 +176,11 @@ classdef TwoWayTimeTransferBuilder
             % --- Model tower clock: SAME provider path as the one-way code h ----
             % (truthHistoryProductNoisy / product / etc.) so the two-way h is
             % consistent with the pseudorange model. Product uncertainty -> R.
-            [~, towerClkModelVec, towerClkSigmaVec] = ...
+            [~, towerClkModelVec, towerClkSigmaVec, ~, t_prod_2w] = ...
                 models.clocks.TowerClockCorrectionProvider.compute(cfg, errorChain, towers, visTowers(:), t_s);
+            % Age of the broadcast correction, needed to split towerClkSigmaVec into its
+            % piecewise-constant product part and its sawtooth oscillator-wander part below.
+            age_2w = max(t_s - t_prod_2w, 0);
 
             rowsMeta = struct([]);
             for jj = 1:numel(visTowers)
@@ -241,7 +244,19 @@ classdef TwoWayTimeTransferBuilder
                 end
 
                 Ri = sigma_m^2;
-                if addProductVar; Ri = Ri + nCorr * sig_prod^2; end   % conservative: correlated product error
+                if addProductVar
+                    % n_corr inflates ONLY the piecewise-constant product error, which is
+                    % what the rationale above is about. Since 2026-08-10 towerClkSigmaVec
+                    % also carries the oscillator's free-running WANDER, and that is a
+                    % sawtooth -- zero at the product epoch, maximal just before the next --
+                    % so it is not shared across the interval's rows and must not be
+                    % inflated. Charging n_corr = 30 copies of it took the two-way row from
+                    % 2.42 m to 13.25 m of sigma at age 34 s: a 24x de-weighting of the ONE
+                    % observable that breaks the GEO radial-clock degeneracy.
+                    sConst_    = models.clocks.TowerClockCorrectionProvider.productOnlySigma(cfg, age_2w);
+                    wanderVar_ = max(sig_prod^2 - sConst_^2, 0);
+                    Ri = Ri + nCorr * sConst_^2 + wanderVar_;
+                end
                 if recipOn;       Ri = Ri + recipSig^2; end
 
                 if useInEKF
