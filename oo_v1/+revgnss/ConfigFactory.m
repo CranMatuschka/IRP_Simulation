@@ -771,6 +771,37 @@ classdef ConfigFactory
                     cfg.towerClock.correctionMode = cfg.clocks.tower.product.mode;
                 end
             end
+            % ⚠ THE COMMENT ABOVE USED TO CLAIM "a direct call is unaffected and the new knob
+            % still wins". It does not. With provenance absent, towerClkOwned_ is empty, the
+            % ownership test fails and the whole block is SKIPPED -- so a programmatic caller
+            % setting cfg.clocks.tower.product.mode gets NOTHING, silently.
+            %
+            % The new knob cannot simply win here instead: five presets in this file set
+            % cfg.towerClock.correctionMode directly (towerClockProductConfig = 'product',
+            % clockNoiseConfig = 'noisyCorrection', ...) and inherit the masterConfig DEFAULT
+            % in clocks.tower.product.mode, so "new knob wins" would override every one of
+            % them with the default. The two routes genuinely need ownership to arbitrate,
+            % and ownership only exists on the JSON route.
+            %
+            % So say so rather than ignore it. MEASURED cost of the silence: seven
+            % independent-fleet correlation-network fixtures set
+            % clocks.tower.product.mode = 'perfectCorrection' -- with a comment explaining
+            % exactly why they need it -- and every one resolved to truthHistoryProductNoisy
+            % and died on the towerClockProductReachableButRejected guard. They did the right
+            % thing and it quietly did not take.
+            if isempty(towerClkOwned_) && isfield(cfg,'clocks') && isfield(cfg.clocks,'tower') && ...
+                    isfield(cfg.clocks.tower,'product') && isfield(cfg.clocks.tower.product,'mode') && ...
+                    isfield(cfg,'towerClock') && isfield(cfg.towerClock,'correctionMode') && ...
+                    ~strcmp(char(cfg.clocks.tower.product.mode), char(cfg.towerClock.correctionMode))
+                warning('ConfigFactory:towerClockProductModeIgnored', ...
+                    ['cfg.clocks.tower.product.mode = ''%s'' was IGNORED: it is arbitrated by ' ...
+                     'cfg.provenance.explicit, which only resolveSimulationConfig produces, so ' ...
+                     'setting it programmatically does nothing. The resolved mode stays ''%s''. ' ...
+                     'Set cfg.towerClock.correctionMode instead (values: none | perfectTruth | ' ...
+                     'noisyCorrection | truthProduct | truthHistoryProductNoisy | product | ' ...
+                     'productNoisy), or route the config through resolveSimulationConfig.'], ...
+                    char(cfg.clocks.tower.product.mode), char(cfg.towerClock.correctionMode));
+            end
             % cfg.towerClock.correctionMode → cfg.estimator.towerClockMode (new mapping)
             % Truth-history modes and explicit-struct modes are now distinct.
             %

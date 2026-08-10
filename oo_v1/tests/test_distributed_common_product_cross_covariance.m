@@ -270,7 +270,10 @@ cfg = masterConfig();
 % Section 3.3's towerClockProductReachableButRejected guard refuses nSpaceAssets>1 with an
 % enabled correlation network unless towerClockMode='perfectCorrection'; every subtest in this
 % file is exercising the commonProcessNoiseTreatment guard, not the tower-clock-product gap.
-cfg.clocks.tower.product.mode = 'perfectCorrection';
+% Use the LEGACY knob, not clocks.tower.product.mode: the latter is arbitrated by
+% cfg.provenance.explicit, which only resolveSimulationConfig produces, so setting it
+% on a masterConfig() struct is INERT and this opt-in silently did not take.
+cfg.towerClock.correctionMode = 'perfectTruth';
 cfg.scenario.nSpaceAssets = 2;
 cfg.multiAsset.mode = 'fast';
 cfg.multiAsset.distributedEstimator.enable = true;

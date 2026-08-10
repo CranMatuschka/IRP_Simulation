@@ -39,7 +39,10 @@ assert(threwDefault, ...
     'the default towerClockMode with nAssets>1 and an enabled correlation network must be refused');
 
 cfgPerfect = i_networkFleetCfg_(2);
-cfgPerfect.clocks.tower.product.mode = 'perfectCorrection';
+% Use the LEGACY knob, not clocks.tower.product.mode: the latter is arbitrated by
+% cfg.provenance.explicit, which only resolveSimulationConfig produces, so setting it on a
+% masterConfig() struct is INERT and this opt-in silently did not take.
+cfgPerfect.towerClock.correctionMode = 'perfectTruth';
 revgnss.IndependentFleetCoordinator.validateConfig(revgnss.ConfigFactory.finalizeConfig(cfgPerfect));
 fprintf('  PASS: towerClockMode=''perfectCorrection'' validates cleanly with nAssets>1 and an enabled network\n');
 

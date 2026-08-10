@@ -138,7 +138,10 @@ end
 % ================================================================================================
 function cfg = i_baseFleetCfg_(nAssets)
 cfg = masterConfig();
-cfg.clocks.tower.product.mode = 'perfectCorrection';
+% Use the LEGACY knob, not clocks.tower.product.mode: the latter is arbitrated by
+% cfg.provenance.explicit, which only resolveSimulationConfig produces, so setting it
+% on a masterConfig() struct is INERT and this opt-in silently did not take.
+cfg.towerClock.correctionMode = 'perfectTruth';
 cfg.simulation.duration_s = 4;
 cfg.simulation.dt_s = 1;
 cfg.report.writePdf = false; cfg.report.writeMat = false; cfg.report.compileTex = 'never';
