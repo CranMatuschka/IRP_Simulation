@@ -6,6 +6,12 @@ addpath(fullfile(thisDir, '..'));                          % +revgnss
 addpath(fullfile(thisDir, '..', 'models', 'atmosphere'));  % façade under test
 fprintf('=== test_facade_ionosphere_equivalence ===\n');
 
+% cfg is REQUIRED on both sides since the carrier frequency got a single owner: the
+% (f_primary/f_signal)^2 scale is resolved from cfg.signals, and there is deliberately no
+% canonical-catalogue fallback. The facade and the model must be handed the SAME cfg or
+% this is no longer an equivalence test.
+cfgSig = masterConfig();
+
 signals = {'L1', 'L2'};
 delays  = [0, 1.0, 5.0, -3.2, 12.7];
 fL1 = 1575.42e6; fL2 = 1227.60e6;
@@ -15,10 +21,10 @@ nCheck = 0;
 for s = 1:numel(signals)
     for d = delays
         a = struct('delayPrimary_m', d, 'signalName', signals{s}, 'primaryName', 'L1');
-        o = ionosphere('model', a);
-        assert(isequaln(o.codeDelay_m,    models.atmosphere.IonosphereModel.applyCodeSign(d, signals{s}, 'L1')), ...
+        o = ionosphere('model', a, cfgSig);
+        assert(isequaln(o.codeDelay_m,    models.atmosphere.IonosphereModel.applyCodeSign(cfgSig, d, signals{s}, 'L1')), ...
             'model.codeDelay mismatch (%s, %g)', signals{s}, d);
-        assert(isequaln(o.carrierDelay_m, models.atmosphere.IonosphereModel.applyCarrierSign(d, signals{s}, 'L1')), ...
+        assert(isequaln(o.carrierDelay_m, models.atmosphere.IonosphereModel.applyCarrierSign(cfgSig, d, signals{s}, 'L1')), ...
             'model.carrierDelay mismatch (%s, %g)', signals{s}, d);
         nCheck = nCheck + 2;
     end
@@ -26,8 +32,8 @@ end
 
 % ---- 'diagnostic' mode: iono scale ----
 for s = 1:numel(signals)
-    o = ionosphere('diagnostic', struct('signalName', signals{s}, 'primaryName', 'L1'));
-    assert(isequaln(o.scale, models.atmosphere.IonosphereModel.scaleForSignal(signals{s}, 'L1')), ...
+    o = ionosphere('diagnostic', struct('signalName', signals{s}, 'primaryName', 'L1'), cfgSig);
+    assert(isequaln(o.scale, models.atmosphere.IonosphereModel.scaleForSignal(cfgSig, signals{s}, 'L1')), ...
         'diagnostic.scale mismatch (%s)', signals{s});
     nCheck = nCheck + 1;
 end

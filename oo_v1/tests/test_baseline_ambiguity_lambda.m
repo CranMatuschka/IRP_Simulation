@@ -162,6 +162,11 @@ end
 
 function cfg = i_cfg(tbPath, masterOn, groundOn, islOn)
     cfg = struct();
+    % A carrier frequency has ONE owner and it is the config (there is deliberately no
+    % canonical-catalogue fallback any more -- that fallback is what let the freq ladder
+    % run five bands at one wavelength). A hand-built config must therefore declare its
+    % signals, so take them from the owner rather than restating a frequency here.
+    cfg.signals = masterConfig().signals;
     cfg.estimator.lambda.enable         = masterOn;
     cfg.estimator.lambda.ground.enable  = groundOn;
     cfg.estimator.lambda.isl.enable     = islOn;
