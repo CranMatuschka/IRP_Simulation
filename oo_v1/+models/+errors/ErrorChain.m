@@ -71,6 +71,52 @@ classdef ErrorChain < handle
     end
 
     methods
+        function [truth_m, sigma_m] = multipathForSignal(obj, ti, ai, si, elv_rad, dt_s, elvFloor)
+            % multipathForSignal  Coloured multipath for ONE (tower, antenna, SIGNAL).
+            %
+            % WHY THIS EXISTS. multipath_ maintains one Gauss-Markov chain per
+            % (tower, antenna) and CodeMeasurementBuilder copied its realisation VERBATIM
+            % onto every signal row of that pair -- so L1 and L2 carried a bit-identical
+            % multipath error. That is wrong on the physics and it breaks the project's
+            % independence requirement: the ionosphere, the DCB and the thermal noise on
+            % those same two rows are all correctly per-signal, multipath was not.
+            %
+            % Multipath is frequency-DEPENDENT. One reflection geometry, but the reflected
+            % path length in CYCLES differs with wavelength, so the code multipath at L1 and
+            % L2 are different realisations of the same statistics -- not one value shared.
+            %
+            % si == 1 returns [] and the caller keeps multipath_'s value, so single-frequency
+            % runs and the first signal of a dual-frequency run are byte-identical to before.
+            % Only the additional signals take a chain of their own, keyed (ti, ai, si) with
+            % its own RNG stream -- RngRegistry.persistentStream already carries a signal
+            % axis; multipath was simply passing sig = 0.
+            truth_m = []; sigma_m = [];
+            if si <= 1; return; end
+            mc = obj.cfg.errors.multipath;
+            useGM = mc.truth.enable && isfield(mc,'coloredGM') && ...
+                isfield(mc.coloredGM,'enable') && mc.coloredGM.enable;
+            if ~useGM; return; end
+            g       = mc.coloredGM;
+            elExp   = 1;  if isfield(g,'elevationExponent'); elExp = g.elevationExponent; end
+            if nargin < 7 || isempty(elvFloor); elvFloor = revgnss.Constants.ELEVATION_FLOOR_RAD; end
+            aiKey = ai;
+            if obj.sharedMultipathAcrossAntennas; aiKey = 1; end
+            sinEl   = max(sin(elv_rad), sin(elvFloor));
+            sigma_m = g.sigmaCodeL1_ss_m / sinEl^elExp;
+            key = int64(round(ti) * 1000000 + round(aiKey) * 1000 + round(si));
+            if isKey(obj.mpState, key); xPrev = obj.mpState(key); else; xPrev = 0; end
+            if obj.useIndependentStreams
+                mpStream = obj.registry.persistentStream( ...
+                    models.noise.RngSource.MP_GM, ti, aiKey, si);
+            else
+                mpStream = obj.mpRng;
+            end
+            xNew = models.noise.StochasticProcess.gaussMarkovStep( ...
+                xPrev, dt_s, g.tau_s, sigma_m, mpStream);
+            obj.mpState(key) = xNew;
+            truth_m = xNew;
+        end
+
         function obj = ErrorChain(cfg, seed)
             % ErrorChain  Constructor.
             %
@@ -294,11 +340,7 @@ classdef ErrorChain < handle
             obj.envModel.step(dt, t_s);
 
             % L1 frequency for scintillation and iono scaling reference
-            f_L1 = revgnss.SignalDefinition.get('L1').frequency_Hz;
-            if isfield(obj.cfg,'signals') && isfield(obj.cfg.signals,'L1') && ...
-                    isfield(obj.cfg.signals.L1,'frequency_Hz')
-                f_L1 = obj.cfg.signals.L1.frequency_Hz;
-            end
+            f_L1 = revgnss.SignalUtils.frequency(obj.cfg, 'L1');   % resolved band
 
             % Allocate output
             truth_m = struct();

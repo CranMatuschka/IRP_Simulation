@@ -417,6 +417,23 @@ classdef CodeMeasurementBuilder
                             if isfield(errStruct.bySource.truth_m,'hwDelay'), hw_t   = errStruct.bySource.truth_m.hwDelay(pi); end
                             if isfield(errStruct.bySource.model_m,'hwDelay'), hw_m   = errStruct.bySource.model_m.hwDelay(pi); end
                             if isfield(errStruct.bySource.truth_m,'mp'),      mp_t   = errStruct.bySource.truth_m.mp(pi);      end
+                            % Multipath is frequency-DEPENDENT and was the one error on this
+                            % row that ignored that: the ionosphere is frequency-scaled, the
+                            % DCB is per-signal and the thermal noise is drawn per-signal,
+                            % but mp_t was the SAME base-row realisation copied verbatim onto
+                            % every signal. One reflection geometry, but a different path
+                            % length in CYCLES per wavelength, so L1 and L2 are different
+                            % realisations of the same statistics.
+                            % si == 1 keeps multipath_'s chain, so single-frequency runs and
+                            % the first signal of a dual-frequency run stay byte-identical;
+                            % additional signals get their own (tower, antenna, signal) chain
+                            % and RNG stream. Returns empty whenever multipath or its
+                            % coloured-GM branch is off, so every existing gate still
+                            % disables it completely.
+                            dtMp_ = 1; try; dtMp_ = cfg.simulation.dt_s; catch; end %#ok<NASGU>
+                            mpSi_ = errorChain.multipathForSignal(twr_list(pi), ant_list(pi), ...
+                                si, errStruct.elevations_rad(pi), dtMp_);
+                            if ~isempty(mpSi_); mp_t = mpSi_; end
 
                             % Geometry + clocks (strips L1 error terms from z/h)
                             z_geom_pi = z(pi) - errStruct.truthTotal_m(pi);

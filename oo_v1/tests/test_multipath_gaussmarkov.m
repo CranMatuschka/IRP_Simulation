@@ -30,6 +30,13 @@ K       = 8000;    % epochs (~395 independent samples at tau=20)
 % ================================================================
 fprintf('  A. coloured autocorrelation + steady-state variance ...\n');
 cfgA = revgnss.ConfigFactory.defaultConfig();
+% The coloured-GM branch is gated on mc.truth.enable AND coloredGM.enable
+% (ErrorChain: useGM = mc.truth.enable && ... && mc.coloredGM.enable), and multipath
+% ships OFF (masterConfig errors.multipath.{enable,truth.enable} = false). Setting only
+% coloredGM.enable left useGM false, so the whole test ran against an identically-zero
+% truth and reported empStd = 0.000, r(1) = NaN. The assertions were measuring nothing.
+cfgA.errors.multipath.enable                      = true;
+cfgA.errors.multipath.truth.enable                = true;
 cfgA.errors.multipath.coloredGM.enable            = true;
 cfgA.errors.multipath.coloredGM.tau_s             = tau;
 cfgA.errors.multipath.coloredGM.sigmaCodeL1_ss_m  = sigmaSS;
@@ -99,6 +106,12 @@ for j = 1:2
     c.simulation.duration_s       = 300;
     c.simulation.dt_s             = 1;
     c.plots.enable  = false; c.report.enable = false;
+    % Same gate as Part A: the coloured-GM branch needs the MASTER multipath enable and
+    % its truth side, not just coloredGM.enable. Without them both arms of this
+    % negative control ran with multipath identically off and the comparison was
+    % 37.323 -> 37.323 -- it could never have failed, and never could have passed either.
+    c.errors.multipath.enable                     = en(j);
+    c.errors.multipath.truth.enable               = en(j);
     c.errors.multipath.coloredGM.enable           = en(j);
     c.errors.multipath.coloredGM.tau_s            = tau;
     c.errors.multipath.coloredGM.sigmaCodeL1_ss_m = 0.5;   % clearly above the tiny code noise
