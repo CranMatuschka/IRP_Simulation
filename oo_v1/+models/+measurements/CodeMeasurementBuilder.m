@@ -71,8 +71,26 @@ classdef CodeMeasurementBuilder
             try
                 [~, bdotModelVec_] = models.clocks.TowerClockCorrectionProvider.computeDrift( ...
                     cfg, towers, twr_list, t_s);
-                if numel(bdotModelVec_) ~= M; bdotModelVec_ = zeros(M,1); end
-            catch
+                if numel(bdotModelVec_) ~= M
+                    errStruct.suppressed.codeTransmitTimeDrift = 'lengthMismatch';
+                    warning('CodeMeasurementBuilder:driftUnavailable', ...
+                        ['computeDrift returned %d rows, expected %d; transmit-time ' ...
+                         'back-propagation reverts to zero for this epoch.'], ...
+                        numel(bdotModelVec_), M);
+                    bdotModelVec_ = zeros(M,1);
+                end
+            catch ME_codeDrift_
+                % D12: this fallback silently reverts the 7c65e30 transmit-time
+                % back-propagation fix for the WHOLE epoch with no configuration change
+                % and no record -- and the identical construct exists in
+                % CarrierMeasurementBuilder and DopplerMeasurementBuilder, so one
+                % computeDrift failure can de-model the tower clock across all three
+                % observables while each builder reports only its own all-clear.
+                errStruct.suppressed.codeTransmitTimeDrift = ME_codeDrift_.identifier;
+                warning('CodeMeasurementBuilder:driftUnavailable', ...
+                    ['Tower-clock drift unavailable (%s); transmit-time ' ...
+                     'back-propagation reverts to zero for this epoch.'], ...
+                    ME_codeDrift_.identifier);
                 bdotModelVec_ = zeros(M,1);
             end
 
@@ -656,15 +674,34 @@ classdef CodeMeasurementBuilder
             if isfield(cfg,'measurements') && isfield(cfg.measurements,'codeMode')
                 codeMode_v = cfg.measurements.codeMode;
             end
-            % ionosphereFreeRows toggle maps to existing codeMode path.
+            % ionosphereFreeRows toggle maps to existing codeMode path. This fallback is
+            % DEAD in every shipped config (codeMode is never empty), but read the two
+            % leaves INDEPENDENTLY anyway (D12): sharing one try meant a cfg with .enable
+            % present but .useInEkf missing threw on the second read and silently
+            % discarded the first too -- the code-side twin of the same sharedErrors
+            % pattern fixed above.
             if isempty(codeMode_v) && N_sig == 2
-                try
-                    ifEnable = cfg.measurements.code.ionosphereFreeRows.enable;
-                    ifInEkf  = cfg.measurements.code.ionosphereFreeRows.useInEkf;
-                    if ifEnable && ifInEkf; codeMode_v = 'ionosphereFree'; end
-                catch; end
+                ifEnable_ = false;
+                try; ifEnable_ = logical(cfg.measurements.code.ionosphereFreeRows.enable); catch; end
+                ifInEkf_ = false;
+                try; ifInEkf_ = logical(cfg.measurements.code.ionosphereFreeRows.useInEkf); catch; end
+                if ifEnable_ && ifInEkf_; codeMode_v = 'ionosphereFree'; end
             end
             M_pairs_if = round(M / max(N_sig, 1));
+            % Always set, not only on success (D12): a consumer must never be able to
+            % infer IF rows exist just because this field is unset.
+            errStruct.ifCombination = false;
+            if strcmp(codeMode_v,'ionosphereFree') && N_sig == 2 && M ~= M_pairs_if * 2
+                % Requested but the row shape can't pair into M_pairs_if IF rows (e.g. an
+                % elevation-mask asymmetry broke L1/L2 pairing) -- record it LOUDLY rather
+                % than silently falling through to raw per-signal rows below.
+                errStruct.suppressed.codeIonoFreeRows = sprintf( ...
+                    'rowShape(M=%d, pairs=%d, nSig=%d)', M, M_pairs_if, N_sig);
+                warning('CodeMeasurementBuilder:ifRowShapeMismatch', ...
+                    ['codeMode=ionosphereFree requested but the row shape (M=%d, nSig=%d) ' ...
+                     'does not support pairing into %d IF rows; raw per-signal code rows ' ...
+                     'enter the EKF instead.'], M, N_sig, M_pairs_if);
+            end
             if strcmp(codeMode_v,'ionosphereFree') && N_sig == 2 && M == M_pairs_if * 2
                 signals_if = revgnss.SignalUtils.getEnabledSignals(cfg);
                 f_L2_if    = signals_if(2).frequency_Hz;
@@ -763,7 +800,28 @@ classdef CodeMeasurementBuilder
 
                 % Independent-per-signal remainder still carries the native per-signal
                 % L1/L2 sigmas (code + multipath + scintillation + signal-dependent HW
-                % delay). Non-negative by construction; max() guards floating-point only.
+                % delay). Non-negative BY CONSTRUCTION as long as sigTwr_if_ was stripped
+                % from the SAME masked towerClkSigma R_diag was built from -- towerClkSigma
+                % is reassigned in place to its state-masked form at the guard above
+                % (maskStateTowerSigma_, col=1) BEFORE this IF block runs, so sigTwr_if_ at
+                % :727 already reads it. If a future refactor ever breaks that ordering, the
+                % max(...,0) would silently clamp away the independent code/multipath/
+                % scintillation variance instead of just floating-point dust -- so verify the
+                % shortfall LOUDLY rather than trust the comment.
+                short_L1_ = corrBaked_L1_ - R_diag(idx1);
+                short_L2_ = corrBaked_L2_ - R_diag(idx2);
+                if any(short_L1_ > 1e-9) || any(short_L2_ > 1e-9)
+                    errStruct.suppressed.ifIndependentRemainder = sprintf( ...
+                        'clampedRowsL1=%d clampedRowsL2=%d maxShortfall_m2=%.3e', ...
+                        sum(short_L1_ > 1e-9), sum(short_L2_ > 1e-9), ...
+                        max([short_L1_; short_L2_]));
+                    warning('CodeMeasurementBuilder:ifRemainderClamped', ...
+                        ['corrBaked exceeds R_diag on %d ionosphere-free code row(s); the ' ...
+                         'independent (code+multipath+scintillation) remainder was clamped ' ...
+                         'to zero instead of going negative -- towerClkSigma masking has ' ...
+                         'diverged between R_diag and sigTwr_if_.'], ...
+                        sum(short_L1_ > 1e-9) + sum(short_L2_ > 1e-9));
+                end
                 Rindep_L1_ = max(R_diag(idx1) - corrBaked_L1_, 0);
                 Rindep_L2_ = max(R_diag(idx2) - corrBaked_L2_, 0);
 
@@ -855,19 +913,55 @@ classdef CodeMeasurementBuilder
             % (i != j only — diagonal already contains sigma_twr^2 from R_diag).
             % Result: R = diag(sigma_tracking^2) + sum_t(sigma_t^2 * ones(k_t))
             % which is symmetric positive definite whenever all sigma_tracking > 0.
-            sharedErrEnable_ = false;
-            sharedErrCode_   = false;
+            % Two INDEPENDENT reads, each with its OWN try/catch (D12). Sharing one try
+            % meant that a cfg carrying sharedErrors.enable but missing
+            % applyTowerClockToCode threw on the SECOND assignment and discarded the
+            % FIRST too -- a missing leaf silently disabled the whole master, fail-open
+            % toward the optimistic (lower) R. Record which leaf, if any, fell back.
+            cbc_.configFallback = {};
+            sharedErrEnable_ = true;
             try
-                sharedErrEnable_ = cfg.covariance.sharedErrors.enable;
-                sharedErrCode_   = cfg.covariance.sharedErrors.applyTowerClockToCode;
+                sharedErrEnable_ = logical(cfg.covariance.sharedErrors.enable);
+            catch
+                sharedErrEnable_ = false;
+                cbc_.configFallback{end+1} = 'covariance.sharedErrors.enable missing -> false';
+            end
+            sharedErrCode_ = true;
+            try
+                sharedErrCode_ = logical(cfg.covariance.sharedErrors.applyTowerClockToCode);
+            catch
+                sharedErrCode_ = false;
+                cbc_.configFallback{end+1} = 'covariance.sharedErrors.applyTowerClockToCode missing -> false';
+            end
+            if ~isempty(cbc_.configFallback)
+                warning('CodeMeasurementBuilder:sharedErrorsConfigFallback', ...
+                    'cfg.covariance.sharedErrors leaf missing, defaulted to false: %s', ...
+                    strjoin(cbc_.configFallback, '; '));
+            end
+            % Atmosphere L1<->L2 common-mode block (below) has NOTHING to do with the
+            % tower clock -- it was nested inside the applyTowerClockToCode gate purely
+            % by accident of file history, so toggling applyTowerClockToCode also
+            % silently deleted it (D12). Own leaf, default true so the default R is
+            % unchanged; still under the sharedErrors MASTER (sharedErrEnable_).
+            applyAtmosCommon_ = true;
+            try
+                applyAtmosCommon_ = logical(cfg.covariance.sharedErrors.applyAtmosphereCommonModeAcrossSignals);
             catch; end
+            % ensureSPD (Diagnosis A #6): gates whether the jitter REPAIR is applied, not
+            % whether the chol() diagnostic runs -- the diagnostic must always run so a
+            % non-PD R is reported either way. Previously unread; a reviewer setting this
+            % false to see whether R was genuinely PD always got a silently-repaired R.
+            ensureSPD_ = true;
+            try; ensureSPD_ = logical(cfg.covariance.sharedErrors.ensureSPD); catch; end
             cbc_.applied     = false;
             cbc_.nBlocks     = 0;
             cbc_.blockSizes  = zeros(0,1);
             cbc_.jitterAdded = false;
             cbc_.spd         = true;
+            cbc_.spdGuardSuppressed = false;
             cbc_.atmosphereCommonModeApplied = false;
             cbc_.atmosphereCommonModeSources = {};
+            cbc_.atmosphereCommonModeSuppressed = false;
             % Towers that actually RECEIVED an off-diagonal block, not merely those the gate
             % let through. cbc_.applied is set below whenever the gate passed, even if every
             % group hit numel(idx_) < 2 or sig_t_ <= 0 and nothing was written. The
@@ -879,8 +973,6 @@ classdef CodeMeasurementBuilder
             % nominal recomputation. Always present, so consumers need no isfield dance.
             errStruct.towerClockSharedSigma_m = zeros(M,1);
             if sharedErrEnable_ && sharedErrCode_
-                jitter_m2_ = 1e-12;
-                try; jitter_m2_ = cfg.covariance.sharedErrors.jitter_m2; catch; end
                 % Per-row tower clock sigma after multi-signal expansion
                 sigTwr_ = zeros(M,1);
                 if isfield(errStruct,'towerClockModelSigma_m') && ...
@@ -907,19 +999,28 @@ classdef CodeMeasurementBuilder
                     cbc_.blockSizes(end+1) = numel(idx_);
                     cbc_.towersWithOffDiag(end+1,1) = uniqT_(kt_);
                 end
-                % ---- L1 <-> L2 atmospheric common mode ---------------------------------
-                % The troposphere is copied VERBATIM onto every signal's row and the
-                % first-order ionosphere is a fixed deterministic multiple of the L1 value
-                % (freqScale), so the two rows of a (tower, antenna) pair carry the SAME
-                % physical atmosphere at correlation rho = +1. With no off-diagonal the EKF
-                % treats them as two independent samples and averages the atmosphere down
-                % by sqrt(2) -- which it cannot do, because there is only one realisation.
-                %
-                % For a fully correlated source, Cov(i,j) = sigma_s(i)*sigma_s(j). The iono
-                % sigmas are already signal-scaled (see the per-signal swap above), so the
-                % product carries the freqScale factor automatically.
-                %
-                % Diagonal is untouched: R_diag already holds sigma_s^2 on each row.
+                cbc_.applied = true;
+            end
+            % ---- L1 <-> L2 atmospheric common mode ---------------------------------
+            % D12: this used to be NESTED inside the tower-clock `if` above purely by
+            % accident of file history -- a toggle named applyTowerClockToCode also
+            % silently deleted a term that has nothing to do with the tower clock.
+            % Own leaf (applyAtmosCommon_, default true -> default R unchanged), still
+            % under the sharedErrors MASTER so a global opt-out still reaches it.
+            %
+            % The troposphere is copied VERBATIM onto every signal's row and the
+            % first-order ionosphere is a fixed deterministic multiple of the L1 value
+            % (freqScale), so the two rows of a (tower, antenna) pair carry the SAME
+            % physical atmosphere at correlation rho = +1. With no off-diagonal the EKF
+            % treats them as two independent samples and averages the atmosphere down
+            % by sqrt(2) -- which it cannot do, because there is only one realisation.
+            %
+            % For a fully correlated source, Cov(i,j) = sigma_s(i)*sigma_s(j). The iono
+            % sigmas are already signal-scaled (see the per-signal swap above), so the
+            % product carries the freqScale factor automatically.
+            %
+            % Diagonal is untouched: R_diag already holds sigma_s^2 on each row.
+            if sharedErrEnable_ && applyAtmosCommon_
                 if N_sig > 1
                     smX_ = errStruct.bySource.sigma_m;
                     corrSrcs_ = {'trop','iono'};
@@ -941,16 +1042,35 @@ classdef CodeMeasurementBuilder
                     cbc_.atmosphereCommonModeApplied = ...
                         ~isempty(cbc_.atmosphereCommonModeSources);
                 end
+            elseif sharedErrEnable_ && N_sig > 1
+                cbc_.atmosphereCommonModeSuppressed = true;
+            end
 
-                % SPD guard (should never trigger for sigma_tracking > 0)
+            % SPD guard. The chol() DIAGNOSTIC always runs whenever either block above
+            % could plausibly have touched R (mirrors the prior gate); ensureSPD_ governs
+            % only whether the jitter REPAIR is applied (Diagnosis A #6) -- previously
+            % unread, so disabling it never stopped the silent repair a reviewer wanted
+            % to see through.
+            if sharedErrEnable_ && (sharedErrCode_ || applyAtmosCommon_)
+                jitter_m2_ = 1e-12;
+                try; jitter_m2_ = cfg.covariance.sharedErrors.jitter_m2; catch; end
                 [~, pfail_] = chol(R);
                 if pfail_ ~= 0
-                    R = R + jitter_m2_ * eye(size(R,1));
-                    cbc_.jitterAdded = true;
-                    [~, pfail2_] = chol(R);
-                    cbc_.spd = (pfail2_ == 0);
+                    if ensureSPD_
+                        R = R + jitter_m2_ * eye(size(R,1));
+                        cbc_.jitterAdded = true;
+                        [~, pfail2_] = chol(R);
+                        cbc_.spd = (pfail2_ == 0);
+                    else
+                        cbc_.spd = false;
+                        cbc_.spdGuardSuppressed = true;
+                        warning('CodeMeasurementBuilder:spdGuardSuppressed', ...
+                            ['R failed the chol() SPD test and ensureSPD=false: the jitter ' ...
+                             'repair was NOT applied. R remains non-positive-definite.']);
+                    end
+                else
+                    cbc_.spd = true;
                 end
-                cbc_.applied = true;
             end
             errStruct.codeBlockCov = cbc_;
 
@@ -1004,7 +1124,21 @@ classdef CodeMeasurementBuilder
                     ionoL1_slant_m(:), freqHz, f_L1, ho);
                 v = reshape(v, size(sourceL1_m));
                 v(sourceL1_m == 0) = 0;
-            catch
+            catch ME_hoIono_
+                % D12: silent MODEL SUBSTITUTION, not a deletion -- if the configured
+                % higher-order model throws, both truth and model quietly switch to a
+                % hard-coded pure f^-3 law that was never requested, making any
+                % higher-order-ionosphere ablation unverifiable. persistent one-shot
+                % warning (this runs per-row, per-epoch; do not flood the log).
+                persistent warnedHO_
+                if isempty(warnedHO_); warnedHO_ = false; end
+                if ~warnedHO_
+                    warning('CodeMeasurementBuilder:higherOrderIonoFallback', ...
+                        ['Configured higher-order ionosphere model failed (%s); using the ' ...
+                         'fixed f^-3 approximation instead for the rest of this run.'], ...
+                        ME_hoIono_.identifier);
+                    warnedHO_ = true;
+                end
                 v = sourceL1_m .* (f_L1 ./ freqHz).^3;
             end
         end

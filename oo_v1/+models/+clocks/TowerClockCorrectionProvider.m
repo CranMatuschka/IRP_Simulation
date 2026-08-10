@@ -144,7 +144,7 @@ classdef TowerClockCorrectionProvider
                         % at t_prod -- so the oscillator's wander over the age is the ENTIRE
                         % error and R must equal it. It charged zero until 2026-08-10.
                         towerClkSigma(mi) = sqrt(models.clocks.TowerClockCorrectionProvider. ...
-                            extrapolationWanderVar_(towers{ti}.clock, ageTP));
+                            extrapolationWanderVar_(cfg, towers{ti}.clock, ageTP));
                     case 'truthHistoryProductNoisy'
                         % Realistic product correction.
                         % 1. Read truth clock at product epoch from tower history.
@@ -167,7 +167,7 @@ classdef TowerClockCorrectionProvider
                                    age^2 * prodCfg.sigmaDrift_mps^2 + ...
                                    2 * age * prodCfg.covBiasDrift + ...
                                    models.clocks.TowerClockCorrectionProvider. ...
-                                       extrapolationWanderVar_(towers{ti}.clock, age);
+                                       extrapolationWanderVar_(cfg, towers{ti}.clock, age);
                         towerClkSigma(mi) = sqrt(max(var_corr, 0));
                     case 'product'
                         hasProd = isfield(cfg,'towerClock') && ...
@@ -220,6 +220,19 @@ classdef TowerClockCorrectionProvider
                     otherwise
                         towerClkModel(mi) = 0;
                 end
+            end
+            % Diagnosis A #7: cfg.clocks.tower.product.addToR (default true, prodCfg
+            % already resolved at :82) had NO reader anywhere -- a live-looking R switch
+            % that never touched R. Wired here as the R-ONLY master: it zeros the sigma
+            % this function RETURNS, never the correction VALUE (towerClkModel above) or
+            % the product epoch/age (t_prod, resolved unconditionally above and still
+            % returned as-is) -- zeroing those would INFLATE R exactly as the
+            % productClock.enable gate once did (age growing from the true 5..34 s to
+            % the whole elapsed arc). config/ladder/test/test001_idealFlat.json and
+            % test002 set addToR=false and are the two rungs whose whole purpose is an R
+            % with nothing in it; they were silently NOT getting one.
+            if ~prodCfg.addToR
+                towerClkSigma(:) = 0;
             end
         end
 
@@ -353,7 +366,7 @@ classdef TowerClockCorrectionProvider
             sig_m  = sqrt(max(var_m2, 0));
         end
 
-        function var_m2 = carrierBiasWanderVar(cfg, clk, age_s) %#ok<INUSL>
+        function var_m2 = carrierBiasWanderVar(cfg, clk, age_s)
             % carrierBiasWanderVar  Oscillator wander variance [m^2] the carrier carries,
             % at the row's OWN correction age -- identical to what the code path charges.
             %
@@ -383,7 +396,10 @@ classdef TowerClockCorrectionProvider
             % model and is retired rather than re-tuned.
             var_m2 = 0;
             if isempty(clk) || clk.deterministic || nargin < 3 || age_s <= 0; return; end
-            var_m2 = models.clocks.TowerClockCorrectionProvider.extrapolationWanderVar_(clk, age_s);
+            % cfg now genuinely used: Diagnosis A #8's includeOscillatorWander gate is
+            % applied INSIDE extrapolationWanderVar_, so the carrier and code paths share
+            % the identical gate and can never disagree on whether the wander is charged.
+            var_m2 = models.clocks.TowerClockCorrectionProvider.extrapolationWanderVar_(cfg, clk, age_s);
         end
 
         function [bdot_truth, bdot_model, drift_sigma, t_prod_out, meta] = ...
@@ -498,7 +514,7 @@ classdef TowerClockCorrectionProvider
                         age_d = t_s - t_prod_scalar;
                         drift_sigma(mi) = sqrt(pc.sigmaDrift_mps^2 + ...
                             models.clocks.TowerClockCorrectionProvider. ...
-                                frequencyWanderVar_(towers{ti}.clock, age_d));
+                                frequencyWanderVar_(cfg, towers{ti}.clock, age_d));
                         truthHistoryProductDriftUsed = true;
                         driftAnchorStatus = 'measurementEpochTruth';
                         driftSigmaSource_out = 'productConfigPlusOscillatorWander';
@@ -518,7 +534,7 @@ classdef TowerClockCorrectionProvider
                         % age is the entire drift error.
                         age_tp = t_s - t_prod_scalar;
                         drift_sigma(mi) = sqrt(models.clocks.TowerClockCorrectionProvider. ...
-                            frequencyWanderVar_(towers{ti}.clock, age_tp));
+                            frequencyWanderVar_(cfg, towers{ti}.clock, age_tp));
                         truthHistoryProductDriftUsed = true;
                         driftAnchorStatus = 'measurementEpochTruth';
                         driftSigmaSource_out = 'oscillatorWander';
@@ -552,7 +568,7 @@ classdef TowerClockCorrectionProvider
                             % this is the only thing standing between it and R = 0.
                             drift_sigma(mi) = sqrt(sig_d^2 + ...
                                 models.clocks.TowerClockCorrectionProvider.frequencyWanderVar_( ...
-                                    towers{ti}.clock, max(t_s - epoch_p, 0)));
+                                    cfg, towers{ti}.clock, max(t_s - epoch_p, 0)));
                             if isfield(prod,'epoch_s')
                                 t_prod_out(mi) = prod.epoch_s;
                             end
@@ -585,6 +601,14 @@ classdef TowerClockCorrectionProvider
                         driftAnchorStatus = 'notApplicableNoCorrection';
                         driftSigmaSource_out = 'zero';
                 end
+            end
+
+            % Diagnosis A #7: same R-only master as compute() above (pc.addToR, pc
+            % resolved at :419). Zeros ONLY the sigma this function returns; bdot_truth,
+            % bdot_model and t_prod_out (the correction VALUES and epoch/age) stay
+            % unconditional -- zeroing those would inflate R instead of emptying it.
+            if ~pc.addToR
+                drift_sigma(:) = 0;
             end
 
             meta.mode                        = mode;
@@ -639,13 +663,29 @@ classdef TowerClockCorrectionProvider
             % explicitProductWanderVar_  Wander variance [m^2] for the EXPLICIT-product
             % modes, whose age is measured from the product struct's own epoch_s rather
             % than from the quantised broadcast grid the history modes use.
-            epoch_p = 0;
-            try; epoch_p = cfg.towerClock.products(ti).epoch_s; catch; end
+            %
+            % D12: an empty catch here defaulted epoch_p to 0 on ANY failure, making
+            % age = t_s - 0 the WHOLE ELAPSED ARC (up to 3600 s) instead of the true
+            % product age -- the identical pathology measured on the carrier path
+            % (age 10 s -> 40 s, sigma 0.386 m -> 3.083 m), an R that gets knowingly
+            % WRONG rather than empty. Both callers ('product'/'productNoisy' cases in
+            % compute()) already guard hasProd before reaching here, so the only way in
+            % is a product struct missing its epoch_s field -- fail loud, there is no
+            % honest fallback for an unknown product epoch.
+            if ~(isfield(cfg,'towerClock') && isfield(cfg.towerClock,'products') && ...
+                    ti <= numel(cfg.towerClock.products) && ...
+                    isfield(cfg.towerClock.products(ti), 'epoch_s'))
+                error('TowerClockCorrectionProvider:productEpochUnavailable', ...
+                    ['cfg.towerClock.products(%d).epoch_s is unavailable; epoch_p would ' ...
+                     'default to 0 and the wander age would become the whole elapsed arc, ' ...
+                     'inflating R. Refusing to build a knowingly wrong R.'], ti);
+            end
+            epoch_p = cfg.towerClock.products(ti).epoch_s;
             var_m2 = models.clocks.TowerClockCorrectionProvider.extrapolationWanderVar_( ...
-                clk, max(t_s - epoch_p, 0));
+                cfg, clk, max(t_s - epoch_p, 0));
         end
 
-        function var_m2 = extrapolationWanderVar_(clk, age_s)
+        function var_m2 = extrapolationWanderVar_(cfg, clk, age_s)
             % extrapolationWanderVar_  Variance [m^2] of the tower oscillator's OWN wander
             % over the age of the broadcast correction.
             %
@@ -662,16 +702,24 @@ classdef TowerClockCorrectionProvider
             % from epoch 1.
             %
             % A deterministic tower clock does not wander at all, so the term is exactly
-            % zero and every deterministic-tower fixture is byte-identical to before.
+            % zero and every deterministic-tower fixture is byte-identical to before -- this
+            % gate is ORTHOGONAL to that (Diagnosis A #8): includeOscillatorWander controls
+            % whether the wander is CHARGED TO R for a genuinely stochastic clock; it must
+            % never be inferred from, or substitute for, cfg.clock.tower.deterministic.
             var_m2 = 0;
             if isempty(clk) || age_s <= 0 || clk.deterministic
+                return
+            end
+            includeWander_ = true;
+            try; includeWander_ = logical(cfg.covariance.productClock.includeOscillatorWander); catch; end
+            if ~includeWander_
                 return
             end
             [~, adev] = clk.theoreticalAllanDeviation(age_s);
             var_m2 = (revgnss.Constants.SPEED_OF_LIGHT_MPS * adev * age_s)^2;
         end
 
-        function var_m2s2 = frequencyWanderVar_(clk, age_s)
+        function var_m2s2 = frequencyWanderVar_(cfg, clk, age_s)
             % frequencyWanderVar_  Variance [(m/s)^2] of the tower oscillator's FREQUENCY
             % excursion between the product epoch and the measurement.
             %
@@ -706,6 +754,11 @@ classdef TowerClockCorrectionProvider
             % locked together; the subtraction had to go first.
             var_m2s2 = 0;
             if isempty(clk) || age_s <= 0 || clk.deterministic; return; end
+            % Diagnosis A #8: same includeOscillatorWander gate as extrapolationWanderVar_,
+            % orthogonal to clk.deterministic (see its comment). Default true -> unchanged.
+            includeWander_ = true;
+            try; includeWander_ = logical(cfg.covariance.productClock.includeOscillatorWander); catch; end
+            if ~includeWander_; return; end
             h = clk.noiseCoeffs;
             var_y = 2*pi^2 * h.hMinus2 * age_s ...   % RWFM, exact (3x the Allan term)
                   + 16*log(2) * h.hMinus1;           % FFM, calibrated against the generator

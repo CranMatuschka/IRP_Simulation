@@ -253,8 +253,36 @@ classdef TwoWayTimeTransferBuilder
                     % inflated. Charging n_corr = 30 copies of it took the two-way row from
                     % 2.42 m to 13.25 m of sigma at age 34 s: a 24x de-weighting of the ONE
                     % observable that breaks the GEO radial-clock degeneracy.
-                    sConst_    = models.clocks.TowerClockCorrectionProvider.productOnlySigma(cfg, age_2w);
-                    wanderVar_ = max(sig_prod^2 - sConst_^2, 0);
+                    sConst_ = models.clocks.TowerClockCorrectionProvider.productOnlySigma(cfg, age_2w);
+                    % D12: sig_prod (the PROVIDER's own sigma) and sConst_ (recomputed
+                    % independently here via productOnlySigma) can disagree -- e.g. any
+                    % mode where the provider sigma is NOT the product-only sigma, such as
+                    % noisyCorrection returning estimator.towerClockCorrectionSigma_m. A
+                    % bare max(...,0) clamp then silently drops the wander to 0 AND still
+                    % charges nCorr copies of the LARGER sConst_ -- the identical
+                    % subtraction-then-clamp shape CarrierMeasurementBuilder documents
+                    % (and removed) as having already destabilised the carrier R. Two-way
+                    % is the ONE observable that breaks the GEO radial-clock degeneracy, so
+                    % detect the inversion instead of silently absorbing it.
+                    excessVar_ = sig_prod^2 - sConst_^2;
+                    if excessVar_ < -1e-12
+                        persistent warnedTwtwSplit_
+                        if isempty(warnedTwtwSplit_); warnedTwtwSplit_ = false; end
+                        if ~warnedTwtwSplit_
+                            warning('TwoWayTimeTransferBuilder:wanderSplitInverted', ...
+                                ['Two-way product sigma (%.4f m) is LESS than the ' ...
+                                 'independently recomputed product-only sigma (%.4f m) at ' ...
+                                 'age %.1f s; the bias/wander split is inverted. Falling ' ...
+                                 'back to charging the provider''s own sigma once instead ' ...
+                                 'of nCorr copies of the larger recomputed value.'], ...
+                                sig_prod, sConst_, age_2w);
+                            warnedTwtwSplit_ = true;
+                        end
+                        sConst_    = sig_prod;
+                        wanderVar_ = 0;
+                    else
+                        wanderVar_ = excessVar_;
+                    end
                     Ri = Ri + nCorr * sConst_^2 + wanderVar_;
                 end
                 if recipOn;       Ri = Ri + recipSig^2; end

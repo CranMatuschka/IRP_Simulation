@@ -451,6 +451,12 @@ cfg.carrierSlip.syntheticSlipInjection.jumpCycles    = 1;
 cfg.covariance.sharedErrors.enable                   = true;
 cfg.covariance.sharedErrors.mode                     = 'blockTowerClockProduct';
 cfg.covariance.sharedErrors.applyTowerClockToCode    = true;
+% Own leaf for the L1<->L2 atmosphere common-mode block (troposphere + first-order
+% ionosphere at rho=+1 across signals of one (tower,antenna) pair). Previously nested
+% inside applyTowerClockToCode with no name of its own (D12) -- toggling the tower-clock
+% leaf silently deleted an unrelated multi-metre atmosphere term. Default true: identical
+% R to before this split.
+cfg.covariance.sharedErrors.applyAtmosphereCommonModeAcrossSignals = true;
 % Carrier rows carry the SAME product residual as the code rows (z has -b_twr_true,
 % h has -b_twr_model), so the constant bias belongs in the carrier R too. Previously
 % false AND unread: the block was skipped on the grounds that the float ambiguity
@@ -458,9 +464,24 @@ cfg.covariance.sharedErrors.applyTowerClockToCode    = true;
 % interval (30 s), which the ambiguity cannot track (~0.055 mm of process noise per
 % interval against a 10-100 mm step). Now a live control, default ON.
 cfg.covariance.sharedErrors.applyTowerClockToCarrier = true;
-cfg.covariance.sharedErrors.applyTowerClockToDoppler = false;
+% FLIPPED false->true. This leaf had NO reader anywhere in the repo (only
+% SimulationToggleManifest reported it) -- the Doppler drift-block gate in
+% DopplerMeasurementBuilder.m was covariance.productClock.applyToDoppler ALONE. Now
+% wired in (AND-ed with sharedErrors.enable and productClock.enable, mirroring the
+% carrier gate), so this leaf became a REAL R control. Shipping it false would have
+% turned the same-tower/epoch Doppler drift BLOCK into a diagonal-only fallback and
+% moved the default NIS (a strictly more confident R); true reproduces the pre-existing
+% behaviour bit-for-bit (all four gates true == the old applyToDoppler-only gate), so
+% this is a no-op-by-construction pin, not a new default.
+cfg.covariance.sharedErrors.applyTowerClockToDoppler = true;
+% carrierPolicy is DERIVED in ConfigFactory.finalizeConfig from the two real gates
+% (sharedErrors.applyTowerClockToCarrier, productClock.applyToCarrier) -- it has no
+% reader of its own and setting it here was mistaken for a control (P14).
 cfg.covariance.sharedErrors.carrierPolicy            = 'sharedProductBiasAndDriftBlocks';
-cfg.covariance.sharedErrors.dopplerPolicy            = 'frameConsistentV2';
+% dopplerPolicy DELETED (P15): it was a stale COPY of measurements.doppler.modelLevel
+% (a model knob, not covariance) with no reader anywhere; ReportRunner now publishes
+% the Doppler drift diagonal policy DopplerMeasurementBuilder actually computed
+% (summary.dopplerDriftVarianceDiagonalPolicy) instead of this key.
 cfg.covariance.sharedErrors.ensureSPD                = true;
 cfg.covariance.sharedErrors.jitter_m2                = 1e-12;
 cfg.covariance.sharedErrors.reportDiagnostics        = true;
@@ -479,6 +500,15 @@ cfg.covariance.productClock.carrierPolicy    = 'timeVaryingProductResidualOnly';
 cfg.covariance.productClock.dopplerPolicy    = 'sharedClockDriftProductBlock';
 cfg.covariance.productClock.ensureSPD        = true;
 cfg.covariance.productClock.jitter_m2        = 1e-12;
+% Diagnosis A #8: R-ONLY ablation switch for the tower oscillator's free-running wander
+% between the product epoch and the measurement (added 2026-08-10, up to ~2.5 m on
+% jowTable2p1). Default true = current behaviour, unchanged. false removes the wander
+% from R while leaving the TRUTH clock, the correction VALUE, and the product epoch/age
+% completely alone -- unlike cfg.clock.tower.deterministic, which silences the truth
+% oscillator too and therefore answers a different question. Gated inside
+% TowerClockCorrectionProvider.extrapolationWanderVar_/frequencyWanderVar_ so no call
+% site (code, carrier via carrierBiasWanderVar, Doppler) can forget it.
+cfg.covariance.productClock.includeOscillatorWander = true;
 
 %% Troposphere ZWD EKF state
 % Off in the default report: the per-tower zenith wet delay state is weakly observable

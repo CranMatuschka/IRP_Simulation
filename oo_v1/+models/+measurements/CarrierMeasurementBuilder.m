@@ -168,7 +168,20 @@ classdef CarrierMeasurementBuilder
                 if applyCarrierProdCov
                     dsig_carrier = dsig_vec;   % the DRIFT BLOCK is what the gate controls
                 end
-            catch; end
+            catch ME_carDrift_
+                % D12: an empty catch here is the SAME pathology the comment above
+                % measured once already (age 10 s -> 40 s, sigma 0.386 m -> 3.083 m) --
+                % except a swallowed exception leaves t_prod_carrier at its zeros(Mp,1)
+                % prototype, so age_carrier_ becomes the WHOLE ELAPSED ARC (up to
+                % 3600 s), inflating the tower-clock sigma by roughly age/30 on top of
+                % that. There is no honest fallback for an unknown product epoch;
+                % refuse rather than knowingly build a wrong R.
+                error('CarrierMeasurementBuilder:productEpochUnavailable', ...
+                    ['computeDrift failed (%s); t_prod would default to 0 and the ' ...
+                     'carrier product AGE would become the whole elapsed arc, inflating ' ...
+                     'the tower-clock sigma by ~age/30. Refusing to build a knowingly ' ...
+                     'wrong R.'], ME_carDrift_.identifier);
+            end
             % Tower-clock DRIFT product-sigma R double-count guard (carrier). When a
             % tower's clock drift is an EKF state (towerClockIdx(ti,2)>0) its uncertainty is
             % in P, so the product drift sigma must not also enter the carrier drift block
@@ -264,6 +277,31 @@ classdef CarrierMeasurementBuilder
             r_cm_est  = x_est(blk.r);
             euler_est = revgnss.AssetStateBlock.eulerEst(blk, x_est);
             doFD      = models.measurements.MeasurementModelUtils.needsFiniteDiffH_(cfg);
+
+            % Synthetic slip injection config, validated ONCE here rather than read+
+            % swallowed inside a per-row `try; ...; catch; end` (D12). This block exists
+            % only for deliberate stress testing, so a malformed config should ERROR --
+            % a swallowed exception used to make injectedSlip_m report zero, which reads
+            % identical to a correctly-configured non-injection epoch: a stress test that
+            % quietly stresses nothing looks like a PASS.
+            slipCfg_ = struct('enable', false);
+            try; slipCfg_ = cfg.validation.stress.slips; catch; end
+            if isfield(slipCfg_,'enable') && slipCfg_.enable
+                reqFields_ = {'injectEpochs_s','towers','signals','magnitude_cycles'};
+                for rf_ = 1:numel(reqFields_)
+                    if ~isfield(slipCfg_, reqFields_{rf_})
+                        error('CarrierMeasurementBuilder:slipConfigMissingField', ...
+                            'cfg.validation.stress.slips.enable=true but field ''%s'' is missing.', ...
+                            reqFields_{rf_});
+                    end
+                end
+                if numel(slipCfg_.magnitude_cycles) < numel(slipCfg_.injectEpochs_s)
+                    error('CarrierMeasurementBuilder:slipConfigShapeMismatch', ...
+                        ['cfg.validation.stress.slips.magnitude_cycles has %d entries but ' ...
+                         'injectEpochs_s has %d; every injection epoch needs a magnitude.'], ...
+                        numel(slipCfg_.magnitude_cycles), numel(slipCfg_.injectEpochs_s));
+                end
+            end
 
             for si_ = 1:nSig_
                 sigIdx       = si_;
@@ -382,18 +420,17 @@ classdef CarrierMeasurementBuilder
                 % z: +trop, -iono (carrier ionosphere is OPPOSITE sign to code)
                 z_phi(rowOut) = rho_t + b_rx_true - b_twr_t + trop_t - iono_t_sig + B_true + noise_phi + phaseScint_m + b_ia_m;
 
-                % Synthetic slip injection for stress testing
-                try
-                    sl = cfg.validation.stress.slips;
-                    if sl.enable && any(abs(t_s - sl.injectEpochs_s) < 0.5) && ...
-                            any(sl.towers == ti) && any(sl.signals == sigIdx)
-                        epIdx = find(abs(t_s - sl.injectEpochs_s) < 0.5, 1);
-                        slipCyc = sl.magnitude_cycles(min(epIdx, numel(sl.magnitude_cycles)));
-                        slipM   = slipCyc * lambda;
-                        z_phi(rowOut)           = z_phi(rowOut) + slipM;
-                        cpInfo.injectedSlip_m(rowOut) = slipM;
-                    end
-                catch; end
+                % Synthetic slip injection for stress testing. slipCfg_ validated ONCE
+                % above the loop; no catch here (D12) -- a malformed config now errors
+                % at build time instead of silently injecting nothing.
+                if slipCfg_.enable && any(abs(t_s - slipCfg_.injectEpochs_s) < 0.5) && ...
+                        any(slipCfg_.towers == ti) && any(slipCfg_.signals == sigIdx)
+                    epIdx = find(abs(t_s - slipCfg_.injectEpochs_s) < 0.5, 1);
+                    slipCyc = slipCfg_.magnitude_cycles(min(epIdx, numel(slipCfg_.magnitude_cycles)));
+                    slipM   = slipCyc * lambda;
+                    z_phi(rowOut)           = z_phi(rowOut) + slipM;
+                    cpInfo.injectedSlip_m(rowOut) = slipM;
+                end
 
                 b_ia_model_m = revgnss.InterAntennaPhaseBias.modelBiasMeters(cfg, ai, sigIdx);
 
@@ -521,7 +558,18 @@ classdef CarrierMeasurementBuilder
                     [R_phi, carrierCovInfo] = models.clocks.ProductClockCovarianceBuilder.addCarrierDriftBlock( ...
                         R_phi, cpInfo.towerIdx, cpInfo.productEpoch_s, cpInfo.productAge_s, ...
                         cpInfo.sigmaDrift_mps, cfg);
-                catch; end
+                catch ME_carDriftBlk_
+                    % D12: a swallowed throw here leaves carrierCovInfo at its
+                    % 'carrierProductCovApplied=false' prototype -- indistinguishable from
+                    % the legitimate "no drift to charge" case. Record and warn.
+                    cpInfo.suppressed.carrierProductDrift = sprintf('adderThrew:%s', ...
+                        ME_carDriftBlk_.identifier);
+                    warning('CarrierMeasurementBuilder:driftBlockSuppressed', ...
+                        ['Carrier tower-clock DRIFT block SUPPRESSED (%s). The age-weighted ' ...
+                         'product drift residual is then absent from carrier R while the ' ...
+                         'residual is fully present in the innovation.'], ...
+                        ME_carDriftBlk_.identifier);
+                end
             end
 
             % Constant product-BIAS block. Gated on
@@ -535,6 +583,16 @@ classdef CarrierMeasurementBuilder
             applyTwrClkCarrier = sharedErrEnableCar_ && modeHasSharedBias_;
             try; applyTwrClkCarrier = applyTwrClkCarrier && ...
                     logical(cfg.covariance.sharedErrors.applyTowerClockToCarrier); catch; end
+            % Diagnosis A #7: AND in clocks.tower.product.addToR here too. The carrier
+            % stopped deriving sbias_carrier from towerClkSigma in the 2026-08-10 refactor
+            % (it is built from cfg.clocks.tower.product.sigmaBias_m + carrierBiasWanderVar
+            % directly, above), so zeroing towerClkSigma in TowerClockCorrectionProvider
+            % alone would leave the carrier HALF-CHARGED against a zeroed code block --
+            % the P6 asymmetry (a PSD hazard on the rank-1 code<->carrier cross) all over
+            % again, this time from the toggle meant to remove the term cleanly from both.
+            addToRCar_ = true;
+            try; addToRCar_ = logical(cfg.clocks.tower.product.addToR); catch; end
+            applyTwrClkCarrier = applyTwrClkCarrier && addToRCar_;
             biasCovInfo = struct('carrierProductBiasApplied',false,'carrierProductBiasBlocks',0, ...
                 'carrierProductBiasMaxSigma_m',0,'carrierProductBiasSPD',false);
             if applyTwrClkCarrier && any(sbias_carrier > 0)
@@ -542,7 +600,24 @@ classdef CarrierMeasurementBuilder
                     [R_phi, biasCovInfo] = models.clocks.ProductClockCovarianceBuilder.addCarrierBiasBlock( ...
                         R_phi, cpInfo.towerIdx, cpInfo.productEpoch_s, ...
                         cpInfo.towerClkBiasSigma_m, cfg);
-                catch; end
+                catch ME_carBiasBlk_
+                    % D12: the single largest silently-droppable block in carrier R.
+                    % sbias_carrier can carry the full oscillator-wander bias sigma (up
+                    % to ~2.4 m -> ~5.8 m^2); a swallowed throw here deletes that rank-1
+                    % block, leaves biasCovInfo at its prototype (carrierProductBiasApplied
+                    % =false, indistinguishable from a deliberate opt-out), and CASCADES:
+                    % cpInfo.towerClockBlocksApplied below reads biasCovInfo, so
+                    % ProductClockCovarianceBuilder then suppresses the code<->carrier
+                    % cross with reason 'carrierBlockAbsent' -- a swallowed exception
+                    % laundered into a legitimate-looking gate result one file away.
+                    cpInfo.suppressed.carrierProductBias = sprintf('adderThrew:%s', ...
+                        ME_carBiasBlk_.identifier);
+                    warning('CarrierMeasurementBuilder:biasBlockSuppressed', ...
+                        ['Carrier tower-clock BIAS block SUPPRESSED (%s). The shared ' ...
+                         'product bias (sigma up to %.3f m) is then absent from carrier R ' ...
+                         'while the residual is fully present in the innovation.'], ...
+                        ME_carBiasBlk_.identifier, max(sbias_carrier));
+                end
             end
             % Tower-clock common-mode sigma AS INSTALLED on the carrier rows, in metres.
             % addCarrierBiasBlock contributes sbias^2 and addCarrierDriftBlock contributes
@@ -584,13 +659,30 @@ classdef CarrierMeasurementBuilder
             for i_ = 1:numel(fn_); carrierCovInfo.(fn_{i_}) = biasCovInfo.(fn_{i_}); end
             cpInfo.carrierProductCovInfo = carrierCovInfo;
 
-            % Carrier IF post-processing (replaces L1+L2 with IF rows)
-            if revgnss.CarrierIonoFreeRowBuilder.shouldCombine(cfg) && nSig_ == 2
+            % Carrier IF post-processing (replaces L1+L2 with IF rows). combineStatus
+            % is the ONE predicate that decides this (P12): it ANDs the two config
+            % leaves with the actual signal count, so it can never say "combined"
+            % while the code below runs raw, or vice versa.
+            [combine_, combineReason_] = revgnss.CarrierIonoFreeRowBuilder.combineStatus(cfg);
+            cpInfo.ionoFreeCombined_ = combine_;
+            cpInfo.ionoFreeStatusReason_ = combineReason_;
+            if combine_
                 cpInfo_float63_ = cpInfo;  % Preserve float rows before IF replacement
                 [z_phi, h_phi, H_phi, R_phi, cpInfo] = ...
                     revgnss.CarrierIonoFreeRowBuilder.buildFromStack( ...
                         z_phi, h_phi, H_phi, R_phi, cpInfo, Mp, cfg);
                 cpInfo.floatRows = cpInfo_float63_;  % Embedded for integer fixing
+            elseif strcmp(combineReason_, 'singleCarrierSignal')
+                % The two leaves ASKED for combination but only one carrier signal
+                % is active, so there is nothing to combine with -- raw per-signal
+                % rows enter the EKF instead. Record it LOUDLY: this is exactly the
+                % silent divergence P12 found between the report (which used to
+                % read only the two leaves) and the physics.
+                cpInfo.ionoFreeSuppressedReason = 'singleCarrierSignal';
+                warning('CarrierIonoFreeRowBuilder:singleSignalNoCombination', ...
+                    ['Carrier ionosphere-free combination was requested ' ...
+                     '(ionosphereFreeRows.enable/useInEkf=true) but only one carrier ' ...
+                     'signal is active; raw carrier rows enter the EKF unmodified.']);
             end
         end
 

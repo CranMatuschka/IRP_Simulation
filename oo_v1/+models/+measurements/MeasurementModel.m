@@ -250,18 +250,31 @@ classdef MeasurementModel < handle
                 r_ants_truth, r_ants_est, x_est, stateMap, towerClkMode, t_s, assetIdx, ...
                 sigList_dop);
             errStruct.doppler = dopplerInfo;
+            % D12: ionoRateExclusion used to `H = H_pr; return` here -- a warning that
+            % names ONLY Doppler ("Doppler rows are excluded...") but a bare function
+            % return that ALSO skipped the carrier switch (:284+), addSharedProductClockStack
+            % (:324) and MeasurementStackMetadata.annotate (:329), deleting the entire
+            % carrier third of the row budget and its tower-clock cross-covariance with
+            % no record. Skip ONLY the Doppler stack append below; fall through to
+            % carrier + the cross-observable stack as normal.
             if dopplerRows.ionoRateExclusion
-                H = H_pr;
-                return
-            end
-            if dopplerRows.useInEKF && ~isempty(dopplerRows.z)
+                errStruct.suppressed.dopplerRows = 'ionoRateTermNoIfDopplerModel';
+            elseif dopplerRows.useInEKF && ~isempty(dopplerRows.z)
                 z    = [z;    dopplerRows.z];
                 h    = [h;    dopplerRows.h];
                 H_pr = [H_pr; dopplerRows.H];
                 if size(R,1) == M
                     R = blkdiag(R, dopplerRows.R);
                 else
-                    R = diag([diag(R); diag(dopplerRows.R)]);
+                    % D12: flattening R to diag() here would silently discard EVERY
+                    % off-diagonal built so far -- the tower-clock shared block
+                    % (CodeMeasurementBuilder.m ~897-909), the L1<->L2 atmosphere
+                    % common-mode block, and any correlated-noise blocks. There is no
+                    % case where that is the right answer; refuse instead.
+                    error('MeasurementModel:codeRowCountMismatch', ...
+                        ['R has %d rows but the code builder reported M=%d. Falling back ' ...
+                         'to diag() would discard the tower-clock, atmosphere and ' ...
+                         'correlated-noise off-diagonals; refusing.'], size(R,1), M);
                 end
             end
 

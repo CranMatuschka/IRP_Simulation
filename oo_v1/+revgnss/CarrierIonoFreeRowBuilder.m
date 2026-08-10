@@ -23,12 +23,50 @@ classdef CarrierIonoFreeRowBuilder
     methods (Static)
 
         function ok = shouldCombine(cfg)
-            % shouldCombine  True if carrier IF EKF rows are enabled and active.
+            % shouldCombine  True if the two IF config leaves ask for combination.
+            % Kept as a thin wrapper on intent alone (no feasibility test) because
+            % tests/test_stage47_carrier_iono_free_float_rows.m and
+            % ConfigFactory.m:1581 both call it expecting exactly that: it does NOT
+            % know whether a single carrier signal makes the request infeasible.
+            % Use combineStatus (below) wherever the answer must reflect what
+            % actually happens to the carrier rows -- see P12/P13/P14/P15.
             ok = false;
             try
                 ok = cfg.measurements.carrier.ionosphereFreeRows.enable && ...
                      cfg.measurements.carrier.ionosphereFreeRows.useInEkf;
             catch; end
+        end
+
+        function [tf, reason] = combineStatus(cfg)
+            % combineStatus  Whether the carrier rows ARE ionosphere-free combined.
+            %
+            % shouldCombine (above) answers "was it requested"; this answers "did it
+            % happen". CarrierMeasurementBuilder.m:588 AND-ed shouldCombine with a
+            % second, un-owned condition (nSig_==2) that no config reader ever saw --
+            % with cfg.signals.enabledMask=[true,false] (freq001/freq008) the request
+            % is on, useInEkf is on, and the report still claimed IF rows were built
+            % while the physics silently fell through to raw per-signal rows. This is
+            % the ONE predicate every consumer (physics, both reporters, the EKF
+            % diagnostics classifier) must call so they can never disagree again.
+            %
+            % reason in {'ok','disabled','notUsedInEkf','singleCarrierSignal'}.
+            tf = false;
+            enable_   = false;
+            useInEkf_ = false;
+            try; enable_   = logical(cfg.measurements.carrier.ionosphereFreeRows.enable);   catch; end
+            try; useInEkf_ = logical(cfg.measurements.carrier.ionosphereFreeRows.useInEkf); catch; end
+            if ~enable_
+                reason = 'disabled'; return
+            end
+            if ~useInEkf_
+                reason = 'notUsedInEkf'; return
+            end
+            nSig_ = 1;
+            try; nSig_ = revgnss.SignalCatalog.nCarrierSignals(cfg); catch; end
+            if nSig_ < 2
+                reason = 'singleCarrierSignal'; return
+            end
+            tf = true; reason = 'ok';
         end
 
         function [z_IF, h_IF, H_IF, R_IF, cpInfo_IF] = buildFromStack( ...

@@ -98,8 +98,24 @@ classdef DopplerMeasurementBuilder
             try; includeTowerVel = cfg.measurements.doppler.includeTowerRotationalVelocity; catch; end
             includeProdDrift    = true;
             try; includeProdDrift = cfg.measurements.doppler.includeTowerClockProductDrift; catch; end
+            % Doppler drift-block gate mirrors CarrierMeasurementBuilder.m:123-151 (P6/P7):
+            % applyToDoppler ALONE used to gate this, ignoring both the shared-errors
+            % master (turning sharedErrors off left the Doppler block installed while the
+            % identical code/carrier blocks vanished -- an asymmetric, PSD-hazardous R)
+            % and the productClock master (turning it off left the Doppler drift block
+            % installed too). masterConfig.m:461 (applyTowerClockToDoppler) is now flipped
+            % to true SPECIFICALLY so this AND reproduces today's behaviour bit-for-bit at
+            % the default -- see the comment there.
+            prodClockEnableDop_ = true;
+            try; prodClockEnableDop_ = logical(cfg.covariance.productClock.enable); catch; end
+            sharedErrEnableDop_ = true;
+            try; sharedErrEnableDop_ = logical(cfg.covariance.sharedErrors.enable); catch; end
+            applyTwrClkDoppler_ = true;
+            try; applyTwrClkDoppler_ = logical(cfg.covariance.sharedErrors.applyTowerClockToDoppler); catch; end
             applyDopplerProdCov = true;
-            try; applyDopplerProdCov = cfg.covariance.productClock.applyToDoppler; catch; end
+            try; applyDopplerProdCov = logical(cfg.covariance.productClock.applyToDoppler); catch; end
+            applyDopplerProdCov = prodClockEnableDop_ && sharedErrEnableDop_ && ...
+                applyTwrClkDoppler_ && applyDopplerProdCov;
             % Include the range-rate position partial d(rhoDot)/dr in the Doppler H.
             % Default OFF -> H has only d/dv and d/d(bdot_rx) (the documented approximation);
             % golden byte-identical. ON -> the LOS-rotation + tower-rotation position partial
@@ -136,7 +152,19 @@ classdef DopplerMeasurementBuilder
                     twr_drift_model = bdot_mod_vec;
                     twr_drift_sigma = dsig_vec;
                     t_prod_per_row  = tprod_vec;
-                catch
+                catch ME_dopDrift_
+                    % D12: this fallback loop is BIT-IDENTICAL to the includeProdDrift=false
+                    % branch below, so a computeDrift throw silently turns the ON state into
+                    % the OFF state -- H loses the tower-clock drift term AND the drift sigma
+                    % leaves R (any(twr_drift_sigma>0) below goes false). driftSigmaSource
+                    % stays 'zero', which is ALSO the honest value in several real modes, so
+                    % mark this path distinctly rather than let the two collapse.
+                    driftMeta_.driftSigmaSource  = 'zeroAfterComputeDriftFailure';
+                    driftMeta_.driftAnchorStatus = ME_dopDrift_.identifier;
+                    warning('DopplerMeasurementBuilder:computeDriftFailed', ...
+                        ['computeDrift failed (%s); Doppler tower-clock product drift term ' ...
+                         'and its R contribution are absent for this epoch even though ' ...
+                         'includeTowerClockProductDrift=true.'], ME_dopDrift_.identifier);
                     for mi2 = 1:M
                         ti2 = twr_list(mi2);
                         if strcmp(towerClkMode, 'perfectCorrection')
@@ -242,7 +270,22 @@ classdef DopplerMeasurementBuilder
                     [Rd, doppCovInfo] = models.clocks.ProductClockCovarianceBuilder.addDopplerDriftBlock( ...
                         Rd, twr_list, t_prod_per_row, twr_drift_sigma, cfg);
                     dopplerDriftDiagPolicy = 'trackingOnlyPlusBlock';
-                catch; end
+                catch ME_dopBlock_
+                    % D12: a swallowed exception here used to be reported as
+                    % 'trackingOnlyNoProductDrift' -- the SAME string the legitimate
+                    % "no drift to charge" case uses (dopplerDriftDiagPolicy's initial
+                    % value above), so the diagnostic built to distinguish the two
+                    % policies could not tell a lost block from a genuinely absent one.
+                    % Degrade to the honest diagonal-only fallback (the elseif below is
+                    % skipped once we are inside this branch) rather than to nothing.
+                    Rd = Rd + diag(twr_drift_sigma.^2);
+                    dopplerDriftDiagPolicy = 'diagonalOnlyProductDriftAfterBlockFailure';
+                    doppCovInfo.dopplerProductCovApplied = false;
+                    warning('DopplerMeasurementBuilder:driftBlockSuppressed', ...
+                        ['Doppler product-drift BLOCK failed (%s); fell back to ' ...
+                         'diagonal-only. The shared same-tower/epoch component is absent ' ...
+                         'from R.'], ME_dopBlock_.identifier);
+                end
             elseif any(twr_drift_sigma > 0)
                 % Product cov disabled: add diagonal-only drift contribution (no block).
                 Rd = Rd + diag(twr_drift_sigma.^2);

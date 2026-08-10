@@ -343,7 +343,12 @@ classdef ScenarioPresets
             cfg.effects.towerSurvey.sigmaENU_m = [0.02; 0.02; 0.05];
 
             cfg.covariance.sharedErrors.enable = true;
-            cfg.covariance.sharedErrors.mode = 'sharedTowerClockProductFullStack';
+            % 'sharedTowerClockProductFullStack' was never a value ConfigFactory or any
+            % physics reader recognised -- it described intent, not a dispatched shape.
+            % ConfigFactory.finalizeConfig now VALIDATES this key (only
+            % 'blockTowerClockProduct' or 'none'); migrate to the accepted name for the
+            % one shape that has ever existed, or finalizeConfig throws.
+            cfg.covariance.sharedErrors.mode = 'blockTowerClockProduct';
             cfg.covariance.sharedErrors.applyTowerClockToCode = true;
             cfg.covariance.sharedErrors.applyTowerClockToCarrier = true;
             cfg.covariance.sharedErrors.applyTowerClockToDoppler = true;

@@ -1399,8 +1399,15 @@ classdef ReportRunner
                     if isfield(se74_,'carrierPolicy')
                         summary.carrierTowerClockCovariancePolicy = se74_.carrierPolicy;
                     end
-                    if isfield(se74_,'dopplerPolicy')
-                        summary.dopplerClockProductCovariancePolicy = se74_.dopplerPolicy;
+                    % P15: sharedErrors.dopplerPolicy was DELETED from cfg -- it was a stale
+                    % copy of measurements.doppler.modelLevel with no covariance meaning, so
+                    % a run whose Doppler drift block was actually suppressed still reported
+                    % 'frameConsistentV2'. Publish what R actually contains instead: the
+                    % runtime policy DopplerMeasurementBuilder computed, already harvested
+                    % above into summary.dopplerDriftVarianceDiagonalPolicy.
+                    if isfield(summary,'dopplerDriftVarianceDiagonalPolicy')
+                        summary.dopplerClockProductCovariancePolicy = ...
+                            summary.dopplerDriftVarianceDiagonalPolicy;
                     end
                 end
             catch ME74_
@@ -3802,16 +3809,32 @@ classdef ReportRunner
             else
                 summary.codeIonoFreeCountsSource = 'inferred-from-nTowers-nReceivers';
             end
-            % Compact carrier IF row fields
+            % Compact carrier IF row fields. carrierIonoFreeRowsRequested is intent-only
+            % (the two config leaves, unchanged meaning); carrierIonoFreeRowsUsedInEkf is
+            % now combineStatus (P12) so it can never claim IF rows the physics did not
+            % build -- e.g. freq001/freq008 (single carrier signal) request combination
+            % but combineStatus reports false, matching the raw L1 rows actually in R.
             summary.carrierIonoFreeRowsRequested = revgnss.ReportRunner.safeCfgBool_( ...
-                cfg, {'measurements','carrier','ionosphereFreeRows','enable'}, false);
-            summary.carrierIonoFreeRowsUsedInEkf = summary.carrierIonoFreeRowsRequested && ...
+                cfg, {'measurements','carrier','ionosphereFreeRows','enable'}, false) && ...
                 revgnss.ReportRunner.safeCfgBool_( ...
                 cfg, {'measurements','carrier','ionosphereFreeRows','useInEkf'}, false);
+            summary.carrierIonoFreeRowsUsedInEkf = false;
+            try
+                summary.carrierIonoFreeRowsUsedInEkf = ...
+                    logical(revgnss.CarrierIonoFreeRowBuilder.combineStatus(cfg));
+            catch; end
+            % totalCarrierRows (above) is the PRE-combination generated count
+            % (nTwr*nRx*nCarrierSignals*carrInEKF); totalCarrierRowsInEkf is what the EKF
+            % actually receives after the IF collapse; totalCarrierIfRows is the IF-only
+            % subset of that (nTwr*nRx when combined, 0 otherwise). Distinguishing the
+            % three closes the P12 gap where totalCarrierIfRows==totalCarrierRows reported
+            % 2x the true IF row count even when the combination genuinely happened.
             if summary.carrierIonoFreeRowsUsedInEkf
-                summary.totalCarrierIfRows = summary.totalCarrierRows;
+                summary.totalCarrierIfRows    = nTwr * nRx * carrInEKF;
+                summary.totalCarrierRowsInEkf = summary.totalCarrierIfRows;
             else
-                summary.totalCarrierIfRows = 0;
+                summary.totalCarrierIfRows    = 0;
+                summary.totalCarrierRowsInEkf = summary.totalCarrierRows;
             end
             try
                 % Resolved band pair, not the canonical L-band constants -- see

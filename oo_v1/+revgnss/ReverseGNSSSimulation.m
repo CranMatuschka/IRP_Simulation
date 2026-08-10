@@ -532,8 +532,25 @@ classdef ReverseGNSSSimulation < handle
                 [slipInfo, keepMask, resetRequests] = obj.trackMgr.process(cpInfo, obj.cfg);
                 if any(~keepMask)
                     M_pr  = errStruct.nPseudorange;
+                    % D12: M_dop must count rows ACTUALLY IN z, not rows the Doppler
+                    % builder merely produced. errStruct.doppler.z is populated whenever
+                    % the builder runs, but the rows only enter z when
+                    % cfg.measurements.doppler.useInEKF is true (MeasurementModel.m).
+                    % With useInEKF=false the old numel(errStruct.doppler.z) over-counted,
+                    % fullMask came out too long, the shape guard below failed, and the
+                    % WHOLE removal was skipped -- slipped carrier rows (a cycle-slip-sized
+                    % phase step, metres to tens of metres) stayed in the update against
+                    % unslipped R, while slipInfo still reported nSlips>0 as if they'd been
+                    % removed. Prefer the row-type inventory MeasurementStackMetadata
+                    % already built (mirrors the useInEKF gate exactly); fall back to 0
+                    % Doppler rows, never to the builder's pre-gate count.
                     M_dop = 0;
-                    if isfield(errStruct,'doppler') && isfield(errStruct.doppler,'z')
+                    if isfield(errStruct,'measType_perRow') && iscell(errStruct.measType_perRow)
+                        M_dop = sum(strcmp(errStruct.measType_perRow, 'doppler'));
+                    elseif isfield(errStruct,'doppler') && isfield(errStruct.doppler,'z') && ...
+                            isfield(obj.cfg,'measurements') && isfield(obj.cfg.measurements,'doppler') && ...
+                            isfield(obj.cfg.measurements.doppler,'useInEKF') && ...
+                            obj.cfg.measurements.doppler.useInEKF
                         M_dop = numel(errStruct.doppler.z);
                     end
                     fullMask = [true(M_pr + M_dop, 1); keepMask];
@@ -541,6 +558,16 @@ classdef ReverseGNSSSimulation < handle
                         z = z(fullMask); h = h(fullMask);
                         H = H(fullMask,:); R = R(fullMask, fullMask);
                         errStruct = obj.filterCarrierErrStruct_(errStruct, keepMask);
+                    else
+                        % LOUD, not silent (D12): a shape mismatch here means the
+                        % slipped carrier rows below are NOT being removed from the
+                        % update this epoch.
+                        errStruct.suppressed.slipRowRemoval = sprintf( ...
+                            'maskShape(mask=%d, z=%d)', numel(fullMask), numel(z));
+                        warning('ReverseGNSSSimulation:slipMaskShape', ...
+                            ['Cycle-slip row removal SKIPPED this epoch: mask has %d ' ...
+                             'entries but z has %d. %d slipped carrier row(s) remain in ' ...
+                             'the update.'], numel(fullMask), numel(z), sum(~keepMask));
                     end
                 end
                 resetSig = [];

@@ -23,8 +23,16 @@ classdef CarrierIonoFreeEkfDiagnostics
             s.usedInEkf = s.requested && revgnss.CarrierIonoFreeEkfDiagnostics.safeBool_( ...
                 cfg, 'measurements.carrier.ionosphereFreeRows.useInEkf', false);
 
-            % L2 availability
-            s.l2Enabled = revgnss.SignalConfigResolver.hasL2(cfg);
+            % L2 availability. hasL2(cfg) reads the SIGNAL mask (cfg.signals.enabledMask),
+            % not the carrier observable mask, so a config with L2 in signals but excluded
+            % from cfg.measurements.carrier.enabledByFrequency was classified
+            % 'active-carrier-if-ekf-float' while the filter ran raw L1 (P12). Use the
+            % same signal count CarrierMeasurementBuilder and combineStatus use.
+            try
+                s.l2Enabled = revgnss.SignalCatalog.nCarrierSignals(cfg) > 1;
+            catch
+                s.l2Enabled = revgnss.SignalConfigResolver.hasL2(cfg);
+            end
 
             % Carrier mode
             carrierMode = '';

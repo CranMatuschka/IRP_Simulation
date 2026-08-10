@@ -201,18 +201,33 @@ classdef ProductClockCovarianceBuilder
             info = struct('applied',false,'nCrossTerms',0,'jitterAdded_m2',0, ...
                 'spd',true,'condition',NaN,'policy','perProductEpochBiasDriftV1', ...
                 'suppressedReason','');   % '' = nothing suppressed; see the guards below
-            if isempty(R) || ~isnumeric(R); return; end
+            % D12: this was the ONE bare `return` in the function the P8 pass missed --
+            % info.suppressedReason stayed '' (the struct's own definition of "nothing
+            % suppressed") even though a several-m^2 code<->carrier cross term was in
+            % fact dropped. No warning needed for a deliberate gate; the reason string
+            % plus the surfacing hook (SimulationDataStore/ReportRunner) is enough.
+            if isempty(R) || ~isnumeric(R)
+                info.suppressedReason = 'emptyOrNonNumericR';
+                return
+            end
 
             enable = false;
             try; enable = cfg.covariance.productClock.enable; catch; end
-            if ~enable; return; end
+            if ~enable
+                info.suppressedReason = 'productClockDisabled';
+                return
+            end
 
             applyCode = false; applyDop = false; applyCar = false; crossCodeDop = false;
             try; applyCode = cfg.covariance.productClock.applyToCode; catch; end
             try; applyDop = cfg.covariance.productClock.applyToDoppler; catch; end
             try; applyCar = cfg.covariance.productClock.applyToCarrier; catch; end
             try; crossCodeDop = cfg.covariance.productClock.crossCodeDoppler; catch; end
-            if ~(applyCode && (applyDop || applyCar)); return; end
+            if ~(applyCode && (applyDop || applyCar))
+                info.suppressedReason = sprintf('gatesOff(code=%d,dop=%d,car=%d)', ...
+                    applyCode, applyDop, applyCar);
+                return
+            end
 
             M_code = 0;
             try; M_code = double(errStruct.nPseudorange); catch; end
@@ -313,6 +328,16 @@ classdef ProductClockCovarianceBuilder
                 % present; with the code off-diagonal absent the added matrix is s*s' minus
                 % that block, which is indefinite for >=2 code rows per tower. Hence the
                 % gates below are mandatory, not defensive.
+                % D12: PRESENCE, not just length. fieldOr_ returns a correctly-sized
+                % ZEROS vector when a field is simply missing, so a plain numel() test
+                % against M_code/M_car cannot tell "missing field" from "present but
+                % genuinely zero" -- the length guard passes, the loop runs, every
+                % cov_ij lands on 0 (the `if cov_ij ~= 0` test at :341 below never
+                % writes), and nCrossTerms stays 0 with NO reason recorded at all. That
+                % is how this cross term could vanish even past the four guards added
+                % specifically to catch it.
+                sCodeMissing_ = ~isfield(errStruct, 'towerClockSharedSigma_m');
+                sCarMissing_  = ~isfield(cp, 'towerClockSharedSigma_m');
                 sCode = models.clocks.ProductClockCovarianceBuilder.fieldOr_( ...
                     errStruct, 'towerClockSharedSigma_m', zeros(M_code,1));
                 sCar  = models.clocks.ProductClockCovarianceBuilder.fieldOr_( ...
@@ -324,14 +349,24 @@ classdef ProductClockCovarianceBuilder
                 carBlocksApplied  = logical(models.clocks.ProductClockCovarianceBuilder.fieldOr_( ...
                     cp, 'towerClockBlocksApplied', false));
 
-                if numel(sCode) ~= M_code
-                    info.crossSuppressedReason = 'codeSigmaLengthMismatch';
+                % suppressedReason is the field the struct PROTOTYPE at :201-203 declares
+                % and the guards higher up in this function already write to (D12: this
+                % used to write a DIFFERENT field, crossSuppressedReason, that no
+                % consumer anywhere reads -- a split-brain that made a several-m^2
+                % suppression invisible to anything checking the declared field for
+                % '' == "nothing suppressed").
+                if sCodeMissing_
+                    info.suppressedReason = 'codeSigmaFieldMissing';
+                elseif sCarMissing_
+                    info.suppressedReason = 'carrierSigmaFieldMissing';
+                elseif numel(sCode) ~= M_code
+                    info.suppressedReason = 'codeSigmaLengthMismatch';
                 elseif numel(sCar) ~= M_car
-                    info.crossSuppressedReason = 'carrierSigmaLengthMismatch';
+                    info.suppressedReason = 'carrierSigmaLengthMismatch';
                 elseif ~carBlocksApplied
-                    info.crossSuppressedReason = 'carrierBlockAbsent';
+                    info.suppressedReason = 'carrierBlockAbsent';
                 elseif isempty(towersWithOffDiag)
-                    info.crossSuppressedReason = 'codeBlockAbsent';
+                    info.suppressedReason = 'codeBlockAbsent';
                 else
                     for i = 1:M_code
                         if ~ismember(codeTower(i), towersWithOffDiag); continue; end
@@ -346,14 +381,27 @@ classdef ProductClockCovarianceBuilder
                             end
                         end
                     end
+                    % All gates passed but nothing was written: a zero result must still
+                    % be explained, not left to look identical to "nothing suppressed".
+                    if info.nCrossTerms == 0 && any(sCode > 0) && any(sCar > 0)
+                        info.suppressedReason = 'noTowerEpochOverlap';
+                    end
                 end
-                if isfield(info,'crossSuppressedReason')
-                    % LOUD, not silent. A term carrying several m^2 that quietly evaluates to
-                    % nothing is how this class of defect returns unnoticed.
-                    warning('ProductClockCovarianceBuilder:crossSuppressed', ...
-                        ['code<->carrier tower-clock cross-covariance suppressed (%s). The ' ...
-                         'tower clock is then charged as two INDEPENDENT errors on the same ' ...
-                         'physical oscillator.'], info.crossSuppressedReason);
+                if ~isempty(info.suppressedReason)
+                    % LOUD, not silent, but ONCE per reason per run -- the previous
+                    % unconditional warning fired every epoch (up to 3601 times on a
+                    % 1 Hz/1 h run), which either gets throttled into noise or drowns
+                    % the log; a several-m^2 cross term being absent is worth exactly
+                    % one line, not one per epoch.
+                    persistent warnedReasons_
+                    if isempty(warnedReasons_); warnedReasons_ = {}; end
+                    if ~any(strcmp(warnedReasons_, info.suppressedReason))
+                        warnedReasons_{end+1} = info.suppressedReason;
+                        warning('ProductClockCovarianceBuilder:crossSuppressed', ...
+                            ['code<->carrier tower-clock cross-covariance suppressed (%s). ' ...
+                             'The tower clock is then charged as two INDEPENDENT errors on ' ...
+                             'the same physical oscillator.'], info.suppressedReason);
+                    end
                 end
             end
 

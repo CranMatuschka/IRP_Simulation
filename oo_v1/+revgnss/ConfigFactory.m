@@ -2390,6 +2390,82 @@ classdef ConfigFactory
             if ~isfield(cfg.covariance.productClock,'jitter_m2')
                 cfg.covariance.productClock.jitter_m2 = 1e-12;
             end
+            if ~isfield(cfg.covariance.productClock,'includeOscillatorWander')
+                cfg.covariance.productClock.includeOscillatorWander = true;
+            end
+            % cfg.covariance.sharedErrors.mode has exactly ONE implemented shape
+            % (CodeMeasurementBuilder.m's block tower-clock product term, gated on
+            % .enable && .applyTowerClockToCode; the SHAPE itself is hardcoded, not
+            % dispatched on this string). No code anywhere reads the value, so a typo
+            % or a stale preset ('sharedTowerClockProductFullStack', ScenarioPresets.m)
+            % produced identical R with no warning. Validate it as a VALIDATOR, not a
+            % dispatch: only 'blockTowerClockProduct' (the shipped default, unchanged)
+            % or 'none' (explicitly requesting the block off) are accepted.
+            if ~isfield(cfg.covariance,'sharedErrors'); cfg.covariance.sharedErrors = struct(); end
+            if ~isfield(cfg.covariance.sharedErrors,'mode')
+                cfg.covariance.sharedErrors.mode = 'blockTowerClockProduct';
+            end
+            if ~isfield(cfg.covariance.sharedErrors,'enable')
+                cfg.covariance.sharedErrors.enable = true;
+            end
+            switch cfg.covariance.sharedErrors.mode
+                case 'blockTowerClockProduct'
+                    % no-op: this is what CodeMeasurementBuilder always builds.
+                case 'none'
+                    cfg.covariance.sharedErrors.enable = false;
+                otherwise
+                    error('ConfigFactory:sharedErrorsModeUnknown', ...
+                        ['cfg.covariance.sharedErrors.mode = ''%s'' is not implemented. ' ...
+                         'Only ''blockTowerClockProduct'' (the shipped block shape) and ' ...
+                         '''none'' (disables it) are valid values -- there is no dispatch ' ...
+                         'on this string, so any other value silently did nothing.'], ...
+                        cfg.covariance.sharedErrors.mode);
+            end
+            if ~isfield(cfg.covariance.sharedErrors,'applyTowerClockToCode')
+                cfg.covariance.sharedErrors.applyTowerClockToCode = true;
+            end
+            if ~isfield(cfg.covariance.sharedErrors,'applyTowerClockToCarrier')
+                cfg.covariance.sharedErrors.applyTowerClockToCarrier = true;
+            end
+            if ~isfield(cfg.covariance.sharedErrors,'applyTowerClockToDoppler')
+                cfg.covariance.sharedErrors.applyTowerClockToDoppler = true;
+            end
+            if ~isfield(cfg.covariance.sharedErrors,'applyAtmosphereCommonModeAcrossSignals')
+                cfg.covariance.sharedErrors.applyAtmosphereCommonModeAcrossSignals = true;
+            end
+            % cfg.covariance.sharedErrors.carrierPolicy (P14): no reader ever consulted this
+            % string -- the carrier R composition is decided by two independently-gated
+            % blocks (the constant BIAS block, gated on sharedErrors.applyTowerClockToCarrier,
+            % and the age-weighted DRIFT block, gated on productClock.applyToCarrier). DERIVE
+            % it from those two gates so it can never assert a state the code doesn't match
+            % (it previously described 'sharedProductBiasAndDriftBlocks' even when a preset
+            % had turned applyTowerClockToCarrier off). Always overwritten -- not a control.
+            applyCarBias_  = false;
+            try
+                applyCarBias_ = logical(cfg.covariance.sharedErrors.enable) && ...
+                    logical(cfg.covariance.sharedErrors.applyTowerClockToCarrier);
+            catch; end
+            applyCarDrift_ = false;
+            try
+                applyCarDrift_ = logical(cfg.covariance.productClock.enable) && ...
+                    logical(cfg.covariance.productClock.applyToCarrier);
+            catch; end
+            if applyCarBias_ && applyCarDrift_
+                cfg.covariance.sharedErrors.carrierPolicy = 'sharedProductBiasAndDriftBlocks';
+            elseif applyCarBias_
+                cfg.covariance.sharedErrors.carrierPolicy = 'sharedProductBiasBlockOnly';
+            elseif applyCarDrift_
+                cfg.covariance.sharedErrors.carrierPolicy = 'productDriftBlockOnly';
+            else
+                cfg.covariance.sharedErrors.carrierPolicy = 'none';
+            end
+            % cfg.covariance.sharedErrors.dopplerPolicy DELETED (P15) rather than derived:
+            % it was a stale copy of measurements.doppler.modelLevel with no covariance
+            % meaning at all. If a stale cfg struct still carries it (e.g. loaded from an
+            % old .mat), drop it here so it cannot be mistaken for a live control again.
+            if isfield(cfg.covariance.sharedErrors,'dopplerPolicy')
+                cfg.covariance.sharedErrors = rmfield(cfg.covariance.sharedErrors,'dopplerPolicy');
+            end
             if ~isfield(cfg,'diagnostics'); cfg.diagnostics = struct(); end
             if ~isfield(cfg.diagnostics,'doppler'); cfg.diagnostics.doppler = struct(); end
             if ~isfield(cfg.diagnostics.doppler,'modelLevel')

@@ -1552,10 +1552,13 @@ classdef ClockExactReportBuilder
 
         function tf = carrierIfActive_(cfg)
             % The ONE authority on whether the EKF's carrier rows are the L1/L2 ionosphere-free
-            % combination. Asking the builder directly means this can never drift from the
-            % physics the way measurements.carrier.ionosphereFreeRows.useInEkf did.
+            % combination. Calls combineStatus, not shouldCombine (P12): shouldCombine only
+            % reflects the two config leaves and says "combined" even with a single active
+            % carrier signal, when the physics (CarrierMeasurementBuilder.m) silently falls
+            % through to raw rows. combineStatus ANDs in the signal count so this can never
+            % drift from what the EKF actually received.
             tf = false;
-            try; tf = logical(revgnss.CarrierIonoFreeRowBuilder.shouldCombine(cfg)); catch; end
+            try; tf = logical(revgnss.CarrierIonoFreeRowBuilder.combineStatus(cfg)); catch; end
         end
 
         function s = channelCell_(on)
@@ -1609,7 +1612,7 @@ classdef ClockExactReportBuilder
             iHO   = g({'errors','ionosphere','higherOrder','enable'}, false);
             iCodeIF = strcmpi(gs({'measurements','codeMode'},''), 'ionosphereFree');
             iCarrIF = false;
-            try; iCarrIF = logical(revgnss.CarrierIonoFreeRowBuilder.shouldCombine(cfg)); catch; end
+            try; iCarrIF = logical(revgnss.CarrierIonoFreeRowBuilder.combineStatus(cfg)); catch; end
             iStateOn = strcmpi(gs({'estimation','ionosphereMode'},'none'), 'perTowerSlant');
             if ~iT
                 iNote = 'Not injected. Sigma still charged to R (see Noise).';
@@ -2004,11 +2007,11 @@ classdef ClockExactReportBuilder
                 'Carrier slip guards + arc sep',   carSlip2 && arcSep2,  slipNote2; ...
                 ... % Both IF rows previously read *.ionosphereFreeRows.useInEkf. For CODE that
                 ... % key is DEAD (codeMode is the real gate); for CARRIER the real gate is
-                ... % CarrierIonoFreeRowBuilder.shouldCombine. They disagree in the default config.
+                ... % CarrierIonoFreeRowBuilder.combineStatus. They disagree in the default config.
                 'Code IF rows in EKF',    strcmpi(CE.getCfgStr_(cfg,{'measurements','codeMode'},''),'ionosphereFree'), ...
                     sprintf('Gate is measurements.codeMode = ''%s''.', CE.getCfgStr_(cfg,{'measurements','codeMode'},'unset')); ...
                 'Carrier IF rows in EKF', CE.carrierIfActive_(cfg), ...
-                    'Gate is CarrierIonoFreeRowBuilder.shouldCombine (carrier.ionosphereFreeRows.enable AND useInEkf AND two signals).'; ...
+                    'Gate is CarrierIonoFreeRowBuilder.combineStatus (enable AND useInEkf AND nCarrierSignals>1); the signal-count clause is now in the code, not just this note.'; ...
                 'Raw carrier integer fixing',     intFixSt,             intFixNote; ...
                 'Baseline attitude AR',           baseArSt,             baseArNote; ...
                 'Attitude EKF (spacecraft)',       attEn2,               attNote2; ...
