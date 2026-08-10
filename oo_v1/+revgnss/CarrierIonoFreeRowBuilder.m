@@ -50,10 +50,12 @@ classdef CarrierIonoFreeRowBuilder
             % and beta on the L2 ambiguity column (from H_IF = alpha*H_L1+beta*H_L2).
             % The EKF jointly updates both states via the single IF innovation.
 
-            sigL1 = revgnss.SignalDefinition.get('L1');
-            sigL2 = revgnss.SignalDefinition.get('L2');
-            [alpha, beta] = revgnss.IonoFreeCombination.coefficients( ...
-                sigL1.frequency_Hz, sigL2.frequency_Hz);
+            % IF coefficients from the RESOLVED band pair. This read used to go to the
+            % name-keyed SignalDefinition, i.e. GPS alpha = 2.5457 / beta = -1.5457 whatever
+            % the scenario had retuned to. On a retuned pair those coefficients do not
+            % cancel the ionosphere at all -- for freq012 they invert its sign and amplify
+            % it 24x -- so this row builder was strictly worse than not combining.
+            [alpha, beta] = revgnss.SignalUtils.ionosphereFreeCoefficients(cfg);
 
             idx1    = 1:Mp;
             idx2    = Mp + 1 : 2*Mp;
@@ -102,6 +104,12 @@ classdef CarrierIonoFreeRowBuilder
                 cpInfo_IF.prefit_m                = zeros(0,1);
                 cpInfo_IF.towerIdx                = zeros(0,1);
                 cpInfo_IF.antennaIdx              = zeros(0,1);
+                % Same collapse as the populated branch below -- see the comment there.
+                cpInfo_IF.towerClkBiasSigma_m     = zeros(0,1);
+                cpInfo_IF.productEpoch_s          = zeros(0,1);
+                cpInfo_IF.productAge_s            = zeros(0,1);
+                cpInfo_IF.sigmaDrift_mps          = zeros(0,1);
+                cpInfo_IF.towerClockSharedSigma_m = zeros(0,1);
                 cpInfo_IF.signalIdx               = zeros(0,1);
                 cpInfo_IF.signalId                = {};
                 cpInfo_IF.ambiguityStateIdx       = zeros(0,1);
@@ -169,6 +177,23 @@ classdef CarrierIonoFreeRowBuilder
             cpInfo_IF.prefit_m                = z_IF - h_IF;
             cpInfo_IF.towerIdx                = cpInfo.towerIdx(idx1);
             cpInfo_IF.antennaIdx              = cpInfo.antennaIdx(idx1);
+            % TOWER-CLOCK PRODUCT METADATA must collapse with the rows it describes.
+            % Until 2026-08-10 only towerIdx was collapsed here, so after an
+            % ionosphere-free combination these four stayed at length 2*Mp against a
+            % towerIdx of Mp. ProductClockCovarianceBuilder indexes them at j = 1..M_car
+            % and so read the L1 half -- correct only by accident, because L1 and L2 of one
+            % tower share a product epoch and therefore an age. Any length-checked consumer
+            % silently skipped them instead: ReverseGNSSSimulation.filterCarrierErrStruct_
+            % is generic on numel(v) == numel(keepMask). The tower clock is common to L1 and
+            % L2 and is non-dispersive, so it survives the IF combination at unit gain --
+            % (alpha + beta) == 1 -- and these are the sigmas that must come with it.
+            cpInfo_IF.towerClkBiasSigma_m     = cpInfo.towerClkBiasSigma_m(idx1);
+            cpInfo_IF.productEpoch_s          = cpInfo.productEpoch_s(idx1);
+            cpInfo_IF.productAge_s            = cpInfo.productAge_s(idx1);
+            cpInfo_IF.sigmaDrift_mps          = cpInfo.sigmaDrift_mps(idx1);
+            if isfield(cpInfo, 'towerClockSharedSigma_m')
+                cpInfo_IF.towerClockSharedSigma_m = cpInfo.towerClockSharedSigma_m(idx1);
+            end
             cpInfo_IF.signalIdx               = zeros(Mp, 1);  % 0 = ionosphere-free
             cpInfo_IF.signalId                = repmat({'L_IF'}, Mp, 1);
             ambIdxL1_                         = cpInfo.ambiguityStateIdx(idx1);
@@ -214,20 +239,24 @@ classdef CarrierIonoFreeRowBuilder
             end
         end
 
-        function H_IF = combineJacobians(H_L1, H_L2)
+        function H_IF = combineJacobians(H_L1, H_L2, cfg)
             % combineJacobians  Explicit IF Jacobian combination (utility / tests).
             %
             % For production: H is built by combining full row blocks via buildFromStack.
             % This method is provided for unit tests and diagnostic verification.
+            %
+            % cfg is REQUIRED: the coefficients follow the resolved band, and there is no
+            % canonical-catalogue fallback to guess it from.
             if ~isequal(size(H_L1), size(H_L2))
                 error('CarrierIonoFreeRowBuilder:dimensionMismatch', ...
                     'H_L1 size [%s] does not match H_L2 size [%s].', ...
                     num2str(size(H_L1)), num2str(size(H_L2)));
             end
-            sigL1 = revgnss.SignalDefinition.get('L1');
-            sigL2 = revgnss.SignalDefinition.get('L2');
-            [alpha, beta] = revgnss.IonoFreeCombination.coefficients( ...
-                sigL1.frequency_Hz, sigL2.frequency_Hz);
+            if nargin < 3
+                error('CarrierIonoFreeRowBuilder:cfgRequired', ...
+                    'combineJacobians(H_L1, H_L2, cfg) needs cfg to resolve the band.');
+            end
+            [alpha, beta] = revgnss.SignalUtils.ionosphereFreeCoefficients(cfg);
             H_IF = alpha * H_L1 + beta * H_L2;
         end
 
