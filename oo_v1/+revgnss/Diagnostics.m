@@ -263,6 +263,25 @@ classdef Diagnostics < handle
             e = cell2mat({obj.log.positionErrorVec_m});
         end
 
+        function e = getPriorPositionErrors(obj)
+            % A priori (pre-update) position error norm per epoch. Empty on the legacy
+            % struct-log backend, which never captured a pre-update state.
+            e = [];
+            if obj.hasArrayData(); e = obj.store_.getData().error.priorPositionNorm_m; end
+        end
+
+        function e = getPriorPositionErrorVecs(obj)
+            % Returns [3 x nEpochs] a priori error (estimate - truth, ECEF); [] on legacy.
+            e = [];
+            if obj.hasArrayData(); e = obj.store_.getData().error.priorPositionVec_m; end
+        end
+
+        function s = getPriorPositionSigmas(obj)
+            % Returns [3 x nEpochs] a priori formal sigma per ECEF axis; [] on legacy.
+            s = [];
+            if obj.hasArrayData(); s = obj.store_.getData().error.priorPositionSigma_m; end
+        end
+
         function r = getTruthPositionVecs(obj)
             % Returns [3 x nEpochs] truth centre-of-mass ECEF position (metres).
             if obj.hasArrayData(); r = obj.store_.getData().truth.r_cm_ecef_m; return; end

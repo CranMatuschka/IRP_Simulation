@@ -65,6 +65,13 @@ classdef SimulationDataStore < handle
         er_cd_    % [N x 1] clock drift error mps
         er_ff_    % [N x 1] fractional freq error
 
+        % ---- A priori (pre-update) position series. Parallel to er_pv_/er_pn_, which
+        % are posterior: the history row is committed after the epoch's update, so
+        % without these the initial transient is not recorded anywhere.
+        pr_pv_    % [3 x N] prior position error m
+        pr_pn_    % [N x 1] prior position norm m
+        pr_ps_    % [3 x N] prior position sigma m
+
         % ---- Measurement counts
         mc_nr_    % [N x 1] total rows
         mc_nc_    % [N x 1] code rows
@@ -308,6 +315,8 @@ classdef SimulationDataStore < handle
             obj.er_on_ = n1(); obj.er_cb_ = n1();
             obj.er_cd_ = n1(); obj.er_ff_ = n1();
 
+            obj.pr_pv_ = n3(); obj.pr_pn_ = n1(); obj.pr_ps_ = n3();
+
             obj.mc_nr_  = n1(); obj.mc_nc_  = n1();
             obj.mc_ncar_= n1(); obj.mc_nd_  = n1(); obj.mc_ntwtt_ = n1();
             obj.mc_nv_  = n1();
@@ -448,6 +457,11 @@ classdef SimulationDataStore < handle
             pv = g_(entry,'positionErrorVec_m',nan(3,1));
             if isempty(pv); pv = nan(3,1); end; obj.er_pv_(:,k) = pv(:);
             obj.er_pn_(k) = g_(entry,'positionError_m',NaN);
+            ppv = g_(entry,'priorPositionErrorVec_m',nan(3,1));
+            if numel(ppv) ~= 3; ppv = nan(3,1); end; obj.pr_pv_(:,k) = ppv(:);
+            obj.pr_pn_(k) = g_(entry,'priorPositionError_m',NaN);
+            pps = g_(entry,'priorPositionSigma_m',nan(3,1));
+            if numel(pps) ~= 3; pps = nan(3,1); end; obj.pr_ps_(:,k) = pps(:);
             vv = g_(entry,'velocityErrorVec_mps',nan(3,1));
             if isempty(vv); vv = nan(3,1); end; obj.er_vv_(:,k) = vv(:);
             obj.er_vn_(k) = g_(entry,'velocityError_mps',NaN);
@@ -668,13 +682,20 @@ classdef SimulationDataStore < handle
 
         % -----------------------------------------------------------------
         function recordEpoch(obj, k, t_s, asset, ekf, z, h, H, R, NIS, ...
-                errStruct, visibleTowerIds, elevations_rad, postfitResidual)
+                errStruct, visibleTowerIds, elevations_rad, postfitResidual, ...
+                priorSnapshot)
             if obj.frozen_; error('SimulationDataStore:frozen', 'Store is frozen after the simulation stage; post/report may only read.'); end
             % recordEpoch  Canonical per-epoch recording — the only write path.
             %
             % Contains all computation previously in Diagnostics.record().
             % Calls private storeEntry_(k, entry) when done.
+            %
+            % priorSnapshot (optional) carries the epoch's A PRIORI position error and
+            % formal sigma, captured by the caller before the epoch's first update. It is
+            % stored as a parallel series alongside the posterior one; omitting it yields
+            % NaN in the prior arrays and changes nothing else.
             if nargin < 14; postfitResidual = []; end
+            if nargin < 15; priorSnapshot = []; end
             sm = ekf.stateMap;
             x  = ekf.x;
             c  = revgnss.Constants.SPEED_OF_LIGHT_MPS;
@@ -825,6 +846,26 @@ classdef SimulationDataStore < handle
             r_err = x(sm.r_idx) - asset.r_ecef_m;
             entry.positionError_m    = norm(r_err);
             entry.positionErrorVec_m = r_err;
+
+            % A priori counterparts of the two lines above (pre-update). Supplied by the
+            % caller because the state they describe no longer exists by the time this
+            % method runs -- the update has already overwritten it.
+            entry.priorPositionError_m    = NaN;
+            entry.priorPositionErrorVec_m = nan(3,1);
+            entry.priorPositionSigma_m    = nan(3,1);
+            if isstruct(priorSnapshot)
+                if isfield(priorSnapshot,'positionError_m')
+                    entry.priorPositionError_m = priorSnapshot.positionError_m;
+                end
+                if isfield(priorSnapshot,'positionErrorVec_m') && ...
+                        numel(priorSnapshot.positionErrorVec_m) == 3
+                    entry.priorPositionErrorVec_m = priorSnapshot.positionErrorVec_m(:);
+                end
+                if isfield(priorSnapshot,'positionSigma_m') && ...
+                        numel(priorSnapshot.positionSigma_m) == 3
+                    entry.priorPositionSigma_m = priorSnapshot.positionSigma_m(:);
+                end
+            end
             eul_err = revgnss.AttitudeKinematics.wrapEuler(reportEuler_rad - asset.attitude_euler_rad);
             entry.attitudeError_rad    = eul_err;
             entry.clockBiasError_m     = x(sm.b_rx_idx) - asset.clock.getBiasMeters();
@@ -1505,6 +1546,21 @@ classdef SimulationDataStore < handle
             e = obj.er_pv_(:,1:obj.nEpochs);
         end
 
+        function e = getPriorPositionErrors(obj)
+            % A priori (pre-update) position error norm per epoch. All-NaN for stores
+            % deserialized from a .mat captured before the prior series existed.
+            e = obj.priorSlice_(obj.pr_pn_, 1);
+        end
+
+        function e = getPriorPositionErrorVecs(obj)
+            e = obj.priorSlice_(obj.pr_pv_, 3);
+        end
+
+        function s = getPriorPositionSigmas(obj)
+            % A priori formal position sigma per ECEF axis, [3 x nEpochs].
+            s = obj.priorSlice_(obj.pr_ps_, 3);
+        end
+
         function r = getTruthPositionVecs(obj)
             r = obj.tr_r_(:,1:obj.nEpochs);
         end
@@ -1720,6 +1776,15 @@ classdef SimulationDataStore < handle
             end
         end
 
+        function X = getPposOffDiag(obj)
+            % getPposOffDiag  [3 x nEpochs] position-covariance off-diagonal
+            %   (Pxy; Pxz; Pyz). A direct accessor so report-side RAC projections
+            %   do not have to build the whole getData() struct just to read three
+            %   rows -- getData() is heavy and can fail on a store loaded from an
+            %   older .mat, which silently cost every plot its covariance band.
+            X = obj.cv_PposXtra_(:,1:obj.nEpochs);
+        end
+
         function C = getContributionSeries(obj)
             C = trimEff_(obj.eff_, obj.nEpochs);
         end
@@ -1931,6 +1996,12 @@ classdef SimulationDataStore < handle
             % Errors
             d.error.positionVec_m     = obj.er_pv_(:,1:N);
             d.error.positionNorm_m    = obj.er_pn_(1:N);
+            % A priori counterparts (pre-update, same epoch indexing). priorSlice_ keeps
+            % these present-but-NaN for a store loaded from a pre-prior-series .mat, so
+            % old result files still regenerate a report instead of erroring.
+            d.error.priorPositionVec_m   = obj.priorSlice_(obj.pr_pv_, 3, N);
+            d.error.priorPositionNorm_m  = obj.priorSlice_(obj.pr_pn_, 1, N);
+            d.error.priorPositionSigma_m = obj.priorSlice_(obj.pr_ps_, 3, N);
             d.error.velocityVec_mps   = obj.er_vv_(:,1:N);
             d.error.velocityNorm_mps  = obj.er_vn_(1:N);
             d.error.attitude_rad      = obj.er_ar_(:,1:N);
@@ -2141,6 +2212,8 @@ classdef SimulationDataStore < handle
             d.schemaName     = 'FlatSimulationDataStore';
             d.err_pos_norm_m        = d.error.positionNorm_m;
             d.err_pos_vec_m         = d.error.positionVec_m;
+            d.err_prior_pos_norm_m  = d.error.priorPositionNorm_m;
+            d.err_prior_pos_vec_m   = d.error.priorPositionVec_m;
             d.err_clock_bias_m      = d.error.clockBias_m;
             d.err_clock_drift_mps   = d.error.clockDrift_mps;
             d.est_x                 = d.estimate.x;
@@ -2185,6 +2258,23 @@ classdef SimulationDataStore < handle
 
     % =====================================================================
     methods (Access = private)
+
+        function out = priorSlice_(obj, arr, nRows, N)
+            % priorSlice_  Epoch slice of an a priori array, tolerant of legacy stores.
+            %   A SimulationDataStore deserialized from a .mat written before the prior
+            %   series existed has these properties default-initialised to [], so a plain
+            %   arr(:,1:N) would throw and take the whole report down with it. Return an
+            %   all-NaN slice of the right shape instead: consumers already treat NaN as
+            %   "no prior recorded" and omit the figure.
+            if nargin < 4 || isempty(N); N = obj.nEpochs; end
+            if nRows == 1
+                out = nan(N,1);
+                if ~isempty(arr) && numel(arr) >= N; out = arr(1:N); end
+            else
+                out = nan(nRows,N);
+                if ~isempty(arr) && size(arr,2) >= N; out = arr(1:nRows,1:N); end
+            end
+        end
 
         function lazyInit_(obj, entry)
             obj.initialized_ = true;

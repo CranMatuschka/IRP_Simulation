@@ -378,10 +378,12 @@ classdef ReverseGNSSSimulation < handle
             pending = obj.pendingEpochCommit_;
 
             % Record to canonical database
+            priorSnapshot = [];
+            if isfield(pending, 'prior'); priorSnapshot = pending.prior; end
             obj.simData.recordEpoch(pending.k, pending.t_s, obj.asset, obj.ekf, ...
                 pending.z, pending.h, pending.H, pending.R, pending.NIS, ...
                 pending.errStruct, pending.visIds, pending.visElevs, ...
-                pending.postfitResidual);
+                pending.postfitResidual, priorSnapshot);
 
             % EKF history log
             posErr = norm(obj.ekf.x(obj.ekf.stateMap.r_idx) - obj.asset.r_ecef_m);
@@ -504,6 +506,14 @@ classdef ReverseGNSSSimulation < handle
                 obj.ekf.predict(dt,towerClockModels,t_s-dt,omega_gyro, ...
                     assetClockModels,omega_gyro_inertial);
             end
+
+            % A PRIORI snapshot — the state BEFORE any epoch-k measurement reaches the
+            % filter. The committed history row is written AFTER the update, so without
+            % this the initial transient is invisible: at k=1 the configured
+            % cfg.estimator.initialError offset is erased by the first update before
+            % anything is logged. Captured as a PARALLEL series, never an extra epoch row,
+            % so every existing array keeps its length, its indexing and its values.
+            priorSnapshot = obj.capturePriorSnapshot_();
 
             % Compute measurements — use getMeasurementState() so quaternionErrorState
             % mode evaluates h/H at the nominal attitude rather than the error state.
@@ -981,7 +991,40 @@ classdef ReverseGNSSSimulation < handle
             pending.visIds          = visIds;
             pending.visElevs        = visElevs;
             pending.postfitResidual = postfitResidual;
+            pending.prior           = priorSnapshot;
             obj.pendingEpochCommit_ = pending;
+        end
+
+        % ----------------------------------------------------------------
+        function snap = capturePriorSnapshot_(obj)
+            % capturePriorSnapshot_  A priori position error and formal sigma for the
+            % current epoch: after predict, before the epoch's first update. Truth has
+            % already been advanced to this epoch by advanceTruthEpoch, so the difference
+            % is the honest one-step-ahead prediction error, and at k=1 -- where predict is
+            % skipped -- it is exactly the initState perturbation.
+            %
+            % READ-ONLY: touches obj.ekf.x/P and obj.asset only to copy values out. It
+            % cannot perturb the filter, so the posterior series is bit-identical to what
+            % the same run produced before this snapshot existed.
+            snap = struct('positionErrorVec_m', nan(3,1), ...
+                          'positionError_m',    NaN, ...
+                          'positionSigma_m',    nan(3,1));
+            try
+                sm    = obj.ekf.stateMap;
+                r_err = obj.ekf.x(sm.r_idx) - obj.asset.r_ecef_m;
+                snap.positionErrorVec_m = r_err(:);
+                snap.positionError_m    = norm(r_err);
+                % Diagonal taken by explicit indexing, NOT diag(): this class carries a
+                % property named 'diag', so a bare diag(...) call inside a method is
+                % ambiguous, and the catch below would bury the resulting failure as a
+                % permanently-NaN sigma series.
+                Prr = obj.ekf.P(sm.r_idx, sm.r_idx);
+                snap.positionSigma_m = sqrt(max(0, ...
+                    [Prr(1,1); Prr(2,2); Prr(3,3)]));
+            catch
+                % Leave the NaN prototype: a missing prior must degrade the new series
+                % only, never interrupt the epoch.
+            end
         end
 
         % ----------------------------------------------------------------
