@@ -239,7 +239,10 @@ classdef LatexReportBuilder
 
             % Resolved band pair, not the canonical L-band constants -- see
             % revgnss.SignalUtils.ionosphereFreeCoefficients.
-            [a, b] = revgnss.SignalUtils.ionosphereFreeCoefficients(cfg);
+            % Single-frequency is masterConfig's DEFAULT (signals.enabled = {'L1'}), and the
+            % strict call raises on it -- which made every single-frequency report fatal.
+            % Ask first; with no pair there is no combination to describe.
+            [ifOk_, a, b] = revgnss.SignalUtils.tryIonosphereFreeCoefficients(cfg);
             ampl = sqrt(a^2 + b^2);
 
             eqLines = {};
@@ -1427,7 +1430,10 @@ classdef LatexReportBuilder
             fprintf(fid,'\\subsection{Pseudorange Measurement Model}\n');
             % Resolved band pair, not the canonical L-band constants -- see
             % revgnss.SignalUtils.ionosphereFreeCoefficients.
-            [a, b2] = revgnss.SignalUtils.ionosphereFreeCoefficients(cfg);
+            % Single-frequency is masterConfig's DEFAULT (signals.enabled = {'L1'}), and the
+            % strict call raises on it -- which made every single-frequency report fatal.
+            % Ask first; with no pair there is no combination to describe.
+            [ifOk2_, a, b2] = revgnss.SignalUtils.tryIonosphereFreeCoefficients(cfg);
             fprintf(fid,'\\[\nP_f = \\rho + b_{rx} - b_{twr} + T + I_f + \\varepsilon_P, \\quad I_f \\geq 0 \\text{ (positive for code)}\n\\]\n');
             fprintf(fid,'\\[\n\\Phi_f = \\rho + b_{rx} - b_{twr} + T - I_f + B_\\phi + \\varepsilon_\\phi, \\quad -I_f \\text{ (negative for carrier)}\n\\]\n');
             fprintf(fid,'\\[\nP_{\\mathrm{IF}} = \\alpha P_1 + \\beta P_2, \\quad \\alpha = %.6f, \\quad \\beta = %.6f\n\\]\n', a, b2);

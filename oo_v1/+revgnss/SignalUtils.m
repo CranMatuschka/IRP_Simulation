@@ -103,6 +103,47 @@ classdef SignalUtils
             end
         end
 
+        function [ok, alpha, beta, f1, f2] = tryIonosphereFreeCoefficients(cfg)
+            % tryIonosphereFreeCoefficients  Non-throwing companion for REPORT and
+            % DIAGNOSTIC callers. Returns ok=false, everything NaN, when the run has no
+            % L1/L2 pair to combine.
+            %
+            % WHY THIS EXISTS. masterConfig's own default is single-frequency
+            % (cfg.signals.enabled = {'L1'}), so ionosphereFreeCoefficients raises
+            % SignalUtils:ionoFreeNeedsTwoSignals on the DEFAULT configuration. Report
+            % writers called it unconditionally, which meant NO SINGLE-FREQUENCY RUN COULD
+            % PRODUCE A REPORT -- the run itself was fine, the description of it was fatal.
+            %
+            % The strict version stays strict on purpose. CodeIonoFreeRowBuilder and
+            % CarrierIonoFreeRowBuilder are only reached when the ionosphere-free
+            % combination is actually selected, so a missing pair there IS an error and
+            % must not be softened. This split keeps that: mandatory consumers throw,
+            % descriptive consumers ask first.
+            %
+            % Deliberately NOT a try/catch around the strict call -- that would also
+            % swallow a genuine catalogue or frequency defect and report it as
+            % "single-frequency", which is the silent-degradation pattern this codebase
+            % keeps paying for. It tests the SAME condition the strict version enforces.
+            % Tests ENABLED, not merely PRESENT. resolvedSignalTable returns the full
+            % catalogue with an 'enabled' flag per row, so L1 and L2 are both in the table
+            % even on an L1-only run -- MEASURED: freq001_L1only.json resolves to {L1,L2}.
+            % The strict function's own condition is presence, which is why it does NOT
+            % raise on those rungs; a report gating on presence would therefore quote
+            % alpha/beta for an ionosphere-free combination the run never formed. The
+            % strict function is left alone: changing its condition would alter the
+            % measurement path, and this is a reporting question.
+            ok = false; alpha = NaN; beta = NaN; f1 = NaN; f2 = NaN;
+            if nargin < 1; cfg = struct(); end
+            sigs  = revgnss.SignalUtils.resolvedSignalTable(cfg);
+            nmAll = {sigs.name};
+            i1_ = find(strcmpi(nmAll,'L1'),1);
+            i2_ = find(strcmpi(nmAll,'L2'),1);
+            if isempty(i1_) || isempty(i2_); return; end
+            if ~(i_isEnabled_(sigs(i1_)) && i_isEnabled_(sigs(i2_))); return; end
+            [alpha, beta, f1, f2] = revgnss.SignalUtils.ionosphereFreeCoefficients(cfg);
+            ok = true;
+        end
+
         function [alpha, beta, f1, f2] = ionosphereFreeCoefficients(cfg)
             % ionosphereFreeCoefficients  IF code coefficients for the RESOLVED L1/L2 pair.
             %
@@ -332,5 +373,16 @@ function v = getfld_(s, fname, default)
         v = s.(fname);
     else
         v = default;
+    end
+end
+
+% ============================================================
+function tf = i_isEnabled_(row)
+    % resolvedSignalTable's 'enabled' flag; absent or non-logical is treated as enabled so
+    % a caller handing in a hand-built table is not silently downgraded to single-frequency.
+    tf = true;
+    if isstruct(row) && isfield(row,'enabled')
+        e = row.enabled;
+        if islogical(e) || isnumeric(e); tf = logical(e(1)); end
     end
 end

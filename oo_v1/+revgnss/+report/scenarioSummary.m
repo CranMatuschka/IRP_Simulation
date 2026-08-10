@@ -305,7 +305,12 @@ function scenarioSummary(fid, cfg, summary, diag, nTwr, nRx, dur, dt, esc, plotP
     % IF coefficients from the RESOLVED band pair, not the canonical L-band constants:
     % reading SignalDefinition directly printed alpha = 2.5457 even for freq013's
     % 61.25/24.125 GHz pair, whose true alpha is 1.1836.
-    [alpha, beta] = revgnss.SignalUtils.ionosphereFreeCoefficients(cfg);
+    % masterConfig's own default is single-frequency (signals.enabled = {'L1'}), so the
+    % strict call raises SignalUtils:ionoFreeNeedsTwoSignals on the DEFAULT config and NO
+    % single-frequency run could produce a report. Ask instead of assuming; when there is
+    % no pair, say so rather than printing coefficients for a combination that was never
+    % formed.
+    [ifOk_, alpha, beta] = revgnss.SignalUtils.tryIonosphereFreeCoefficients(cfg);
     fprintf(fid, ['\\begin{align*}\n' ...
         '\\rho_{\\mathrm{code}} &= \\rho_{\\mathrm{geom}} + b_{\\mathrm{rx}} - b_{\\mathrm{tx}} + T + I_{\\mathrm{code}} ' ...
         '+ \\Delta_{\\mathrm{sagnac}} + \\Delta_{\\mathrm{rel}} + \\Delta_{\\mathrm{ant}} + B_{\\mathrm{code}} + M + \\epsilon_\\rho \\\\\n' ...
@@ -361,9 +366,9 @@ function scenarioSummary(fid, cfg, summary, diag, nTwr, nRx, dur, dt, esc, plotP
         'iono carrier', '$-I_f$ (NEGATIVE for carrier)', 'First-order phase advance'; ...
         'float ambiguity', '$+B_\phi$ [m] (L1 only)', 'L1 carrier cycle ambiguity, float'; ...
         'measurement noise', '$\nu \sim N(0, R)$', 'Code / carrier / Doppler noise'; ...
-        'IF coefficient $\alpha$', sprintf('$\\alpha = %.4f$', alpha), ...
+        'IF coefficient $\alpha$', i_ifCoeffText_(ifOk_, '\\alpha', alpha), ...
             'L1 weight in the ionosphere-free code combination'; ...
-        'IF coefficient $\beta$',  sprintf('$\\beta = %.4f$', beta), ...
+        'IF coefficient $\beta$',  i_ifCoeffText_(ifOk_, '\\beta', beta), ...
             'L2 weight; from the RESOLVED band pair, not the L-band constants'; ...
     };
     for k = 1:size(termRows,1)
@@ -777,4 +782,15 @@ function textValue = formatIndexSet_(indices)
         end
     end
     textValue = sprintf('x[%s]',strjoin(parts,','));
+end
+
+% ============================================================================
+function txt = i_ifCoeffText_(ifOk, sym, value)
+    % Single-frequency runs form no ionosphere-free combination, so there is no
+    % coefficient to quote. Say that, rather than printing NaN or a canonical constant.
+    if ifOk
+        txt = sprintf('$%s = %.4f$', sym, value);
+    else
+        txt = 'n/a (single frequency: no ionosphere-free combination)';
+    end
 end

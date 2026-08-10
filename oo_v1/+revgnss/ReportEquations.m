@@ -35,7 +35,15 @@ classdef ReportEquations
             %   and the noise amplification are derived, never hardcoded -- the old
             %   literal "2.98" is only true for the GPS L1/L2 pair.
             if nargin < 1; cfg = struct(); end
-            [a, b] = revgnss.SignalUtils.ionosphereFreeCoefficients(cfg);
+            % masterConfig's own default is single-frequency (signals.enabled = {'L1'}), so the
+            % strict call raises SignalUtils:ionoFreeNeedsTwoSignals on the DEFAULT config and NO
+            % single-frequency run could produce a report. Ask instead of assuming; when there is
+            % no pair, say so rather than printing coefficients for a combination that was never
+            % formed.
+            [ifOk_, a, b] = revgnss.SignalUtils.tryIonosphereFreeCoefficients(cfg);
+            if ~ifOk_
+                a = NaN; b = NaN;
+            end
             lines = { ...
                 'Ionosphere-free code combination:', ...
                 '  P_IF = alpha * P_L1 + beta * P_L2', ...
