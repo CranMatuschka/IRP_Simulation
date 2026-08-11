@@ -349,7 +349,7 @@ classdef ErrorChain < handle
 
             % -------- 1. Code measurement noise (sigma only, no bias) ---
             % Compute elevation-dependent sigma vector (L1 level)
-            sigma_code_vec = obj.computeCodeSigmaVec_(elv, elvFloor);
+            sigma_code_vec = obj.computeCodeSigmaVec_(elv, elvFloor, towerIdx);
             truth_m.code  = sigma_code_vec .* ...
                 obj.drawWhiteVec_(models.noise.RngSource.CODE, towerIdx, antennaIdx, N);
             model_m.code  = zeros(N,1);
@@ -444,7 +444,7 @@ classdef ErrorChain < handle
         end
 
         % ----------------------------------------------------------------
-        function sigma_vec = computeCodeSigmaVec_(obj, elv, elvFloor)
+        function sigma_vec = computeCodeSigmaVec_(obj, elv, elvFloor, towerIdx)
             % computeCodeSigmaVec_  Per-measurement code noise sigma [L1 level].
             %
             % Supports:
@@ -499,10 +499,19 @@ classdef ErrorChain < handle
                     sigmaAt45_m = 0.30;
                     if isfield(cn0cfg,'sigmaAt45dBHz_m');  sigmaAt45_m = cn0cfg.sigmaAt45dBHz_m; end
 
+                    % This tower's own zenith wet delay, so gaseous absorption scales its
+                    % water-vapour column to the SAME humidity the troposphere uses here
+                    % rather than to the frozen table's P.835 reference. Empty when there
+                    % is no weather state to ask.
+                    zwd_m = [];
+                    if nargin >= 4 && ~isempty(towerIdx) && ~isempty(obj.envModel)
+                        zwd_m = obj.envModel.zenithWetDelay_m(towerIdx);
+                    end
+
                     sigma_vec = zeros(N,1);
                     for k = 1:N
                         sigma_vec(k) = models.measurements.MeasurementModelUtils.cn0CodeSigma( ...
-                            sigmaAt45_m, elv(k), obj.cfg, []);
+                            sigmaAt45_m, elv(k), obj.cfg, [], zwd_m);
                     end
 
                 otherwise

@@ -13,13 +13,23 @@ function [gamma_o, gamma_w] = p676_annex1(f_GHz, Pd_hPa, T_K, rho_gm3)
 %   Table 1 (oxygen, 44 lines) and Table 2 (water vapour, 35 lines) below,
 %   equations (1) through (9).
 %
-% PROVENANCE: line tables transcribed from the ITU-Rpy reference
-% implementation's v13 data files. The OXYGEN table is byte-identical to the
-% independent MathWorks P.676-10 transcription, which is a genuine two-source
-% agreement. The WATER VAPOUR table was REVISED between P.676-10 and -13
-% (22.235 GHz b1 0.1130 -> 0.1079, b3 28.11 -> 26.38, and the 1780 GHz line by
-% 21%), so it agrees with no v10 implementation by construction. Verify both
-% against the Recommendation before citing in the traceability register.
+% PROVENANCE: VERIFIED AGAINST THE RECOMMENDATION ITSELF, 2026-08-11.
+%   All 44 oxygen rows and all 35 water-vapour rows match ITU-R P.676-13 exactly,
+%   0 value mismatches. Reproduce with analysis/verify_p676_tables.py.
+%
+%   How, given the PDF is unreadable: the Recommendation's PDF is a SCANNED IMAGE
+%   with no text layer, so no extractor can read it. The Word release
+%   (R-REC-P.676-13-202208-I!!MSW-E.docx) stores both tables as real Word tables,
+%   i.e. as text, and a .docx is zipped XML. Three document conventions have to be
+%   undone when parsing: EN DASH for the minus, the leading zero omitted (".1079"),
+%   and a SPACE as the thousands separator ("1 780.000000").
+%
+%   Before that check the tables came from the ITU-Rpy reference implementation's
+%   v13 data files. The oxygen table was already corroborated, being byte-identical
+%   to the independent MathWorks P.676-10 transcription; the water-vapour table was
+%   REVISED between P.676-10 and -13 (22.235 GHz b1 0.1130 -> 0.1079, b3 28.11 ->
+%   26.38, and the 1780 GHz line by 21%), so no v10 implementation could corroborate
+%   it and it had only one source until the check above.
 
     % ---- Table 1: oxygen ---------------------------------------------------
     %      f0          a1        a2      a3     a4    a5      a6

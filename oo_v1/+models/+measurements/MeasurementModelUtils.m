@@ -150,8 +150,14 @@ classdef MeasurementModelUtils
             rho = models.corrections.RangeCorrections.correctedPseudorange(r_ant, r_twr, cfg, 'model', elv);
         end
 
-        function sigma = codeSignalSigma(sigCfg, elv, cfg)
+        function sigma = codeSignalSigma(sigCfg, elv, cfg, zwd_m)
             % codeSignalSigma  Per-signal code noise sigma at given elevation.
+            %
+            % zwd_m (optional) is the zenith wet delay [m] of the tower this row belongs
+            % to, used only by the 'cn0' model to scale gaseous absorption's water-vapour
+            % column to this site's humidity. Omit it and the frozen table's reference
+            % humidity is assumed instead.
+            if nargin < 4; zwd_m = []; end
             elvFloor  = revgnss.Constants.ELEVATION_FLOOR_RAD;
             sigma0    = sigCfg.codeSigma0_m;
             codeModel = 'constant';
@@ -182,13 +188,13 @@ classdef MeasurementModelUtils
                     end
                     elC   = max(elv, elvFloor);
                     sigma = models.measurements.MeasurementModelUtils.cn0CodeSigma( ...
-                                sigma0, elC, cfg, f_Hz);
+                                sigma0, elC, cfg, f_Hz, zwd_m);
                 otherwise
                     sigma = sigma0;
             end
         end
 
-        function [sigma, cn0_dBHz, A_gas_dB] = cn0CodeSigma(sigma0_m, elevation_rad, cfg, f_Hz)
+        function [sigma, cn0_dBHz, A_gas_dB] = cn0CodeSigma(sigma0_m, elevation_rad, cfg, f_Hz, zwd_m)
             % cn0CodeSigma  Code sigma from a C/N0 link model. THE single implementation.
             %
             %   C/N0  = base_dBHz + elevationGain_dB*sin(el) - A_gas(f, el)
@@ -216,7 +222,15 @@ classdef MeasurementModelUtils
             % ABSORPTION is gated OFF by default and contributes exactly 0 dB when off, so
             % goldens are bit-identical. f_Hz may be empty, in which case the primary
             % signal's frequency is resolved from cfg.
-            if nargin < 4; f_Hz = []; end
+            %
+            % zwd_m is THIS TOWER's zenith wet delay [m], from
+            % EnvironmentModel.zenithWetDelay_m. It scales the frozen table's water-vapour
+            % column so absorption and the troposphere describe ONE atmosphere rather than
+            % two. Empty means "assume the table's own reference humidity", which is only
+            % right if the run happens to use P.835's 7.5 g/m^3 -- it does not by default,
+            % so callers that can supply it should.
+            if nargin < 4; f_Hz  = []; end
+            if nargin < 5; zwd_m = []; end
 
             base_dBHz = 45; elevGain_dB = 6;
             if isfield(cfg,'measurements') && isfield(cfg.measurements,'codeNoise') && ...
@@ -227,13 +241,13 @@ classdef MeasurementModelUtils
             end
 
             A_gas_dB = models.measurements.MeasurementModelUtils.gaseousAbsorption_( ...
-                           cfg, elevation_rad, f_Hz);
+                           cfg, elevation_rad, f_Hz, zwd_m);
 
             cn0_dBHz = base_dBHz + elevGain_dB * sin(elevation_rad) - A_gas_dB;
             sigma    = sigma0_m * 10^(-(cn0_dBHz - 45)/20);
         end
 
-        function A_dB = gaseousAbsorption_(cfg, elevation_rad, f_Hz)
+        function A_dB = gaseousAbsorption_(cfg, elevation_rad, f_Hz, zwd_m)
             % gaseousAbsorption_  ITU-R P.676 slant absorption [dB], or exactly 0 when off.
             %
             % Returns a HARD ZERO unless cfg.atmosphere.gaseousAbsorption.enable is true,
@@ -259,12 +273,15 @@ classdef MeasurementModelUtils
             if isfield(ga,'mappingKind') && ~isempty(ga.mappingKind)
                 opts.mappingKind = ga.mappingKind;
             end
-            % NOTE: the per-tower humidity scaling that GaseousAbsorption supports via
-            % opts.ZWD_m is NOT wired here. Neither call site knows its tower index, so
-            % threading it would touch both measurement builders. The reference ZWD is
-            % used instead, i.e. climatological mean humidity. That is exact below 6 GHz
-            % (water vapour is under 8% of the total there) and is the dominant remaining
-            % approximation at 24.125 GHz, where it is 81%.
+            % PER-TOWER WATER VAPOUR. The frozen table's wet column is scaled by this
+            % tower's own ZWD over the table's reference, so absorption and the troposphere
+            % share ONE atmosphere and one humidity per site. Without it the wet column
+            % silently assumes P.835's 7.5 g/m^3, which the repo's default RH = 0.50 is 22%
+            % drier than -- a ~18% overstatement of total absorption at 24.125 GHz.
+            % Omitted only when the caller genuinely has no tower context.
+            if ~isempty(zwd_m)
+                opts.ZWD_m = zwd_m;
+            end
             A_dB = models.atmosphere.GaseousAbsorption.slantAttenuation_dB( ...
                        f_Hz, elevation_rad, opts);
         end

@@ -681,6 +681,28 @@ classdef EnvironmentModel < handle
             end
         end
 
+        function zwd_m = zenithWetDelay_m(obj, towerIdx)
+            % zenithWetDelay_m  This tower's climatological zenith wet delay [m].
+            %
+            % EXISTS SO ABSORPTION AND THE TROPOSPHERE SHARE ONE ATMOSPHERE. The frozen
+            % ITU-R P.676 table in models.atmosphere.GaseousAbsorption was integrated over
+            % the P.835 mean annual global reference (7.5 g/m^3 surface water vapour,
+            % ZWD_REF_M = 0.095669 m). This model runs its own humidity, so without this
+            % accessor the two would describe DIFFERENT atmospheres -- measured: the repo's
+            % default RH = 0.50 gives ZWD = 0.0750 m, 22% drier than the table assumes,
+            % which overstated the wet column by ~18% of the total at 24.125 GHz where
+            % water vapour is 81% of it. The C/N0 path scales the wet column by
+            % (this value / ZWD_REF_M) to reconcile them.
+            %
+            % Returns the CLIMATOLOGICAL mean, not the stochastic realisation: the
+            % per-epoch GM wet residual is a truth-side perturbation the estimator does not
+            % know, whereas R must be built from what is knowable in advance.
+            zwd_m = 0;
+            if isempty(obj.weatherState); return; end
+            ti = max(1, min(round(towerIdx), numel(obj.weatherState)));
+            zwd_m = obj.weatherState(ti).ZWD_m;
+        end
+
     end  % public methods
 
     methods (Static, Access = private)
@@ -798,6 +820,21 @@ classdef EnvironmentModel < handle
             P0   = 1013.25; if isfield(wc,'defaultPressure_hPa');    P0   = wc.defaultPressure_hPa;    end
             T0   = 293.15;  if isfield(wc,'defaultTemperature_K');   T0   = wc.defaultTemperature_K;   end
             RH0  = 0.50;    if isfield(wc,'defaultRelativeHumidity'); RH0  = wc.defaultRelativeHumidity; end
+            % PER-TOWER humidity. Empty (the default) means every tower takes RH0, which is
+            % what this model did unconditionally before: the five golden towers span
+            % Libreville at 0.04 deg N to Stockholm at 59.3 deg N and all carried RH = 0.50,
+            % so their zenith wet delays were identical to the last digit (0.07500 m) and the
+            % only thing that varied across the network was the ZHD gravity term, by 0.4%.
+            % A non-empty vector gives each tower its own column of water vapour, which is
+            % what makes the slant path towards space genuinely individual per site.
+            RHvec = [];
+            if isfield(wc,'perTowerRelativeHumidity'); RHvec = wc.perTowerRelativeHumidity(:); end
+            if ~isempty(RHvec) && numel(RHvec) ~= nT
+                error('EnvironmentModel:perTowerHumiditySize', ...
+                    ['environment.weather.perTowerRelativeHumidity has %d entries but there ' ...
+                     'are %d towers. Give one value per tower, or leave it empty to use the ' ...
+                     'single defaultRelativeHumidity for all.'], numel(RHvec), nT);
+            end
             lr   = 0.0065;  if isfield(wc,'lapseRate_K_per_m');       lr   = wc.lapseRate_K_per_m;       end
             Tmin = 220.0;   if isfield(wc,'minTemperature_K');        Tmin = wc.minTemperature_K;        end
             Tmax = 320.0;   if isfield(wc,'maxTemperature_K');        Tmax = wc.maxTemperature_K;        end
@@ -840,8 +877,9 @@ classdef EnvironmentModel < handle
                 % Guard pressure: avoid divide-by-zero in humidity terms
                 P_k = max(P_k, 1e-3);
 
-                % Guard relative humidity: [0, 1]
-                RH_k = max(0, min(RH0, 1));
+                % Guard relative humidity: [0, 1]. Per-tower value when supplied.
+                if isempty(RHvec); RH_this = RH0; else; RH_this = RHvec(k); end
+                RH_k = max(0, min(RH_this, 1));
 
                 % Zenith HYDROSTATIC delay from the Saastamoinen model in the Davis et al.
                 % (1985) form: ZHD = 0.0022768*P / (1 - 0.00266*cos(2*phi) - 0.00028*h_km),

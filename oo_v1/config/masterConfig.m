@@ -2182,6 +2182,21 @@ cfg.environment.weather.seed                   = 7201;
 cfg.environment.weather.defaultPressure_hPa    = 1013.25;
 cfg.environment.weather.defaultTemperature_K   = 293.15;
 cfg.environment.weather.defaultRelativeHumidity = 0.50;
+% PER-TOWER relative humidity, one entry per tower, or [] to give every tower the single
+% default above. EMPTY BY DEFAULT, which reproduces the historic behaviour exactly.
+%
+% WHY IT EXISTS. ZWD = 0.15*RH*exp(-alt/2000), so with one global RH and every tower at
+% sea level the whole network carried an IDENTICAL 0.07500 m zenith wet delay -- Libreville
+% at 0.04 deg N and Stockholm at 59.3 deg N had the same column of water vapour. The only
+% quantity that varied across the five golden sites was ZHD, by 0.4%, through the latitude
+% gravity term. That is fine for a delay the estimator largely absorbs, and wrong once
+% gaseous absorption is modelled, because at 24.125 GHz water vapour is 81% of the total
+% attenuation and is therefore genuinely site-specific.
+%
+% Setting this makes each tower's slant path towards space carry its own atmosphere. It
+% MOVES RESULTS: the troposphere ZWD changes per site, so goldens re-cut. Leave empty
+% unless you are deliberately modelling a climatologically diverse network.
+cfg.environment.weather.perTowerRelativeHumidity = [];
 cfg.environment.weather.heightScale_m          = 8400;
 cfg.environment.weather.lapseRate_K_per_m      = 0.0065;
 cfg.environment.weather.minTemperature_K        = 220.0;

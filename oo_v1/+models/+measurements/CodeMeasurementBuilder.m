@@ -428,14 +428,16 @@ classdef CodeMeasurementBuilder
                             end
                             btOut.scintillation(mi) = scint_t;
                             elv_pi = errStruct.elevations_rad(pi);
-                            sigma_code_si = models.measurements.MeasurementModelUtils.codeSignalSigma(sigCfg, elv_pi, cfg);
+                            zwd_pi = models.measurements.CodeMeasurementBuilder.towerZwd_(errorChain, twr_list(pi));
+                            sigma_code_si = models.measurements.MeasurementModelUtils.codeSignalSigma(sigCfg, elv_pi, cfg, zwd_pi);
                             bsOut.code(mi) = sigma_code_si;
                             if isfield(errStruct.bySource.sigma_m,'ionoHO')
                                 bsOut.ionoHO(mi) = errStruct.bySource.sigma_m.ionoHO(pi);
                             end
                         else
                             elv_pi        = errStruct.elevations_rad(pi);
-                            sigma_code_si = models.measurements.MeasurementModelUtils.codeSignalSigma(sigCfg, elv_pi, cfg);
+                            zwd_pi        = models.measurements.CodeMeasurementBuilder.towerZwd_(errorChain, twr_list(pi));
+                            sigma_code_si = models.measurements.MeasurementModelUtils.codeSignalSigma(sigCfg, elv_pi, cfg, zwd_pi);
                             code_t        = sigma_code_si * errorChain.drawKeyed( ...
                                 models.noise.RngSource.CODE_MULTISIG, twr_list(pi), ant_list(pi), si, errorChain.epochIdx_, 1, 1);
 
@@ -1200,6 +1202,20 @@ classdef CodeMeasurementBuilder
         end
 
         % ----------------------------------------------------------------
+        function zwd_m = towerZwd_(errorChain, towerIdx)
+            % towerZwd_  This tower's climatological zenith wet delay [m], or [].
+            %
+            % Feeds gaseous absorption's water-vapour column so it uses the SAME humidity
+            % the troposphere uses at this site, rather than the frozen ITU-R P.676
+            % table's P.835 reference. Returns [] when there is no environment model to
+            % ask, in which case the reference is assumed and the caller is unchanged.
+            zwd_m = [];
+            if isempty(errorChain) || ~isprop(errorChain, 'envModel') || isempty(errorChain.envModel)
+                return;
+            end
+            zwd_m = errorChain.envModel.zenithWetDelay_m(towerIdx);
+        end
+
         function [truth_m, model_m] = codeDcbForSignal_(cfg, signalName)
             truth_m = models.measurements.CodeMeasurementBuilder.oneCodeDcb_(cfg, 'truth', signalName);
             model_m = models.measurements.CodeMeasurementBuilder.oneCodeDcb_(cfg, 'model', signalName);
