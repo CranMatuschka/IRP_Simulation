@@ -31,6 +31,53 @@ classdef IonosphereModel
             scale = revgnss.SignalUtils.ionoScale(cfg, signalName, primaryName);
         end
 
+        function scale = climatologyAnchorScale(f_ref_Hz, exponent)
+            % climatologyAnchorScale  (f_L1_canonical / f_ref)^exponent for an L1-anchored amplitude.
+            %
+            %   Converts a climatology amplitude specified AT 1575.42 MHz into the run's
+            %   ionosphere reference band f_ref_Hz. The exponent is the quantity's own
+            %   dispersive power law and defaults to 2 (first-order group delay):
+            %
+            %     first-order delay      exponent 2   verticalDelayL1_m, Klobuchar amp/DC
+            %     amplitude scintillation exponent = scintillation.frequencyExponent
+            %     second-order iono      exponent 3
+            %     third-order iono       exponent 4
+            %
+            % WHY THIS EXISTS. The delay chain applies (f_ref/f_signal)^2 downstream --
+            % EnvironmentModel.getIonoDelay:freqScale and CodeMeasurementBuilder's
+            % per-signal expansion. Both use f_ref = the RESOLVED band, so for the
+            % primary signal both are identically 1.0. A 5.0 m L1 constant was therefore
+            % applied verbatim at 5.8, 24.125 and 61.25 GHz in the freq009-013 rungs:
+            % the anchor was silently RELABELLED as "at the primary band" rather than
+            % converted. Composing this scale restores the physical total:
+            %
+            %   (f_canon/f_ref)^2 * (f_ref/f_signal)^2 = (f_canon/f_signal)^2
+            %
+            % so it is correct for every caller whatever freqHz they ask for.
+            %
+            % DO NOT apply this to the diurnal VTEC mean. That branch builds its metres
+            % via K_L1 = 40.308e16/f_ref^2, which is already expressed at f_ref; scaling
+            % it again would double-convert. Only the fixed climatology constants
+            % (verticalDelayL1_m, Klobuchar amp/DC, the sigmaVDelayL1_ss_m residual) are
+            % anchored at 1575.42 MHz.
+            %
+            % At the canonical band this is exactly 1.0 in floating point (a value
+            % divided by itself), so goldens are bit-identical.
+            if nargin < 2 || isempty(exponent); exponent = 2; end
+            if ~isscalar(f_ref_Hz) || ~isnumeric(f_ref_Hz) || ~isfinite(f_ref_Hz) || f_ref_Hz <= 0
+                error('IonosphereModel:badReferenceFrequency', ...
+                    ['climatologyAnchorScale needs a finite positive reference frequency [Hz]; ' ...
+                     'got %s. An L1-anchored climatology amplitude must never be consumed ' ...
+                     'as a primary-band delay without conversion.'], mat2str(f_ref_Hz));
+            end
+            if ~isscalar(exponent) || ~isnumeric(exponent) || ~isfinite(exponent)
+                error('IonosphereModel:badAnchorExponent', ...
+                    'climatologyAnchorScale exponent must be a finite scalar; got %s.', ...
+                    mat2str(exponent));
+            end
+            scale = (revgnss.Constants.IONO_ANCHOR_L1_HZ / f_ref_Hz)^exponent;
+        end
+
         function delay_m = applyCodeSign(cfg, delayPrimary_m, signalName, primaryName)
             % applyCodeSign  Positive (group delay) ionosphere correction for code.
             %

@@ -617,7 +617,10 @@ classdef ErrorChain < handle
         function [truth_m, model_m, sigma_m] = ionosphere_(obj, elv, elvFloor, towerIdx, f_L1)
             % ionosphere_  L1 ionospheric slant delay [m] for all visible measurements.
             %
-            % Returns L1-level delay.  MeasurementModel scales to other frequencies.
+            % Returns delay at the RESOLVED REFERENCE BAND f_L1 (which the scenario may
+            % have retuned away from 1575.42 MHz).  MeasurementModel scales from there to
+            % the individual signals.  Config amplitudes are anchored at the canonical L1
+            % and converted here -- see climatologyAnchorScale below.
             %
             % Supported modelType values:
             %   'simpleMapped'         – mapped from cfg.errors.ionosphere.*.zenithDelay_m (compat)
@@ -656,6 +659,13 @@ classdef ErrorChain < handle
             end
             % Compute mapping vector for all elevations.
             mapping = models.atmosphere.MappingFunctions.ionosphere(elv, ionoMapKind, shellHeight_m);
+
+            % verticalDelayL1_m / zenithDelay_m are PHYSICAL 1575.42 MHz delays; f_L1 here
+            % is the RESOLVED band, which the freq009-013 rungs retune. Convert the anchor
+            % so a 5.0 m L1 constant is not applied verbatim at 5.8 or 61.25 GHz. Exactly
+            % 1.0 at the canonical band. The tecGaussMarkov branch below does NOT use this:
+            % it delegates to EnvironmentModel.getIonoDelay, which converts internally.
+            anchorScale = models.atmosphere.IonosphereModel.climatologyAnchorScale(f_L1);
 
             modelType = 'simpleMapped';
             if isfield(ic,'modelType'); modelType = ic.modelType; end
@@ -698,7 +708,7 @@ classdef ErrorChain < handle
                     elseif isfield(ic.truth,'zenithDelay_m')
                         vdel = ic.truth.zenithDelay_m;
                     end
-                    truth_m = vdel * mapping;
+                    truth_m = vdel * anchorScale * mapping;
                 else
                     truth_m = zeros(N,1);
                 end
@@ -711,7 +721,7 @@ classdef ErrorChain < handle
                     end
                     bias_frac = 1;
                     if isfield(ic.model,'biasFraction'); bias_frac = ic.model.biasFraction; end
-                    model_m = vdel * bias_frac * mapping;
+                    model_m = vdel * anchorScale * bias_frac * mapping;
                 else
                     model_m = zeros(N,1);
                 end
@@ -720,7 +730,7 @@ classdef ErrorChain < handle
                 % Mapping uses MappingFunctions.ionosphere() (not hardcoded secant).
                 if isfield(ic,'truth') && isfield(ic.truth,'enable') && ic.truth.enable
                     iono_zenith_m = ic.truth.zenithDelay_m;
-                    truth_m = iono_zenith_m * mapping;
+                    truth_m = iono_zenith_m * anchorScale * mapping;
                 else
                     truth_m = zeros(N,1);
                 end
@@ -729,7 +739,7 @@ classdef ErrorChain < handle
                     zenith_m_model = ic.model.zenithDelay_m;
                     bias_frac = 1;
                     if isfield(ic.model,'biasFraction'); bias_frac = ic.model.biasFraction; end
-                    model_m = zenith_m_model * bias_frac * mapping;
+                    model_m = zenith_m_model * anchorScale * bias_frac * mapping;
                 else
                     model_m = zeros(N,1);
                 end
@@ -945,11 +955,17 @@ classdef ErrorChain < handle
                     ~ic.higherOrder.enable
                 return
             end
-            % Evaluated at L1 here (freqHz = f_L1); the f^-3/f^-4 frequency scaling to
-            % other signals is a property of models.errors.HigherOrderIonosphere and is
-            % exercised in the IF-survival test. Truth-side bounded residual.
+            % secondOrderFractionL1, thirdOrderCoeff_perm AND the two caps are all
+            % calibrated at the canonical L1, while ionoL1_*_m now arrives at the RESOLVED
+            % reference band. Convert back to L1 so the fractions and caps are applied
+            % where they are defined, then let totalDelay carry the f^-3/f^-4 law out to
+            % the reference band. Passing the reference band as its own L1 (the previous
+            % call) both clamped at the wrong magnitude and dropped one power of f.
+            % Identity at the canonical band: anchor2 == 1 and fCanon == f_L1.
+            fCanon  = revgnss.Constants.IONO_ANCHOR_L1_HZ;
+            anchor2 = models.atmosphere.IonosphereModel.climatologyAnchorScale(f_L1);
             truth_m = models.errors.HigherOrderIonosphere.totalDelay( ...
-                ionoL1_truth_m(:), f_L1, f_L1, ic.higherOrder);
+                ionoL1_truth_m(:) / anchor2, f_L1, fCanon, ic.higherOrder);
 
             % R sigma from the MODEL ionosphere, never from the realised truth.
             %
@@ -964,7 +980,7 @@ classdef ErrorChain < handle
             % caps, same order of magnitude (the model TEC tracks the truth TEC), but no
             % truth leakage.
             sigma_m = abs(models.errors.HigherOrderIonosphere.totalDelay( ...
-                ionoL1_model_m(:), f_L1, f_L1, ic.higherOrder));
+                ionoL1_model_m(:) / anchor2, f_L1, fCanon, ic.higherOrder));
 
             % Where the model supplies no ionosphere at all, |HO(model)| collapses to 0
             % while the injected error does not -- that would be overconfident. Fall back

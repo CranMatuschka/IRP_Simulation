@@ -479,6 +479,12 @@ classdef EnvironmentModel < handle
                 max(elevation_rad, elvFloor), ionoMapKind, shellHeight_m);
             freqScale = (f_L1_Hz / freqHz)^2;
 
+            % Converts the fixed climatology amplitudes below (all PHYSICAL 1575.42 MHz
+            % quantities) to the reference band f_L1_Hz, which the scenario may have
+            % retuned. Exactly 1.0 at the canonical band. NOT applied to the diurnal
+            % VTEC mean -- that is built through K_L1 and is already at f_L1_Hz.
+            anchorScale = models.atmosphere.IonosphereModel.climatologyAnchorScale(f_L1_Hz);
+
             modelType = 'simpleMapped';
             if isfield(ic,'modelType'); modelType = ic.modelType; end
 
@@ -494,7 +500,7 @@ classdef EnvironmentModel < handle
                             else
                                 vdelL1 = 0;
                             end
-                            delay = vdelL1 * mapping * freqScale;
+                            delay = vdelL1 * anchorScale * mapping * freqScale;
                         else
                             delay = 0;
                         end
@@ -511,7 +517,7 @@ classdef EnvironmentModel < handle
                             if isfield(ic.model,'biasFraction')
                                 biasFrac = ic.model.biasFraction;
                             end
-                            delay = vdelL1 * biasFrac * mapping * freqScale;
+                            delay = vdelL1 * anchorScale * biasFrac * mapping * freqScale;
                         else
                             delay = 0;
                         end
@@ -530,6 +536,8 @@ classdef EnvironmentModel < handle
                         if useDiurnal
                             lonR = 0;
                             if numel(obj.weatherState) >= ti; lonR = obj.weatherState(ti).lonRad; end
+                            % K_L1 already carries 1/f_L1_Hz^2, so this mean is expressed
+                            % at the reference band. NO anchorScale -- that would double-convert.
                             vMean = models.errors.EnvironmentModel.diurnalVTEC_(ic, obj.tNow_s, lonR) * K_L1;
                         else
                             vMean = 0;
@@ -538,11 +546,15 @@ classdef EnvironmentModel < handle
                             elseif isfield(ic,'truth') && isfield(ic.truth,'zenithDelay_m')
                                 vMean = ic.truth.zenithDelay_m;
                             end
+                            vMean = vMean * anchorScale;   % fixed L1-anchored constant
                         end
                         % Topside/uplink column fraction: a GEO asset sees ~the full column
                         % (f_seen->1), a LEO within/above the F2 peak only a topside fraction.
                         fSeen    = models.errors.EnvironmentModel.ionoTopsideFraction_(ic);
-                        vertical = fSeen * (vMean + obj.ionoState(ti).tecResidualTruth_m);
+                        % The GM residual is driven by stochastic.sigmaVDelayL1_ss_m, an
+                        % L1-anchored amplitude, so it converts like the constants above
+                        % and not like the K_L1 diurnal mean.
+                        vertical = fSeen * (vMean + obj.ionoState(ti).tecResidualTruth_m * anchorScale);
                         delay    = vertical * mapping * freqScale;
                     else % 'model'
                         % 'biasFraction' is a constant vertical correction. 'klobuchar' is
@@ -566,9 +578,11 @@ classdef EnvironmentModel < handle
                                 if isfield(kb,'period_h');     per_s = kb.period_h * 3600;     end
                                 if isfield(kb,'dc_ns');        dc_s  = kb.dc_ns * 1e-9;         end
                             end
+                            % amp_s/dc_s are L1 group delays (ICD 20 ns / 5 ns), so the
+                            % metres this returns are anchored at 1575.42 MHz.
                             vModel = models.atmosphere.Klobuchar.verticalDelayMetres(ltS, amp_s, per_s, dc_s);
                             fSeen  = models.errors.EnvironmentModel.ionoTopsideFraction_(ic);
-                            delay  = fSeen * vModel * mapping * freqScale;
+                            delay  = fSeen * vModel * anchorScale * mapping * freqScale;
                         else  % 'biasFraction' (legacy constant vertical delay)
                             baseVdelL1 = 0;
                             if isfield(ic,'model') && isfield(ic.model,'verticalDelayL1_m')
@@ -577,7 +591,7 @@ classdef EnvironmentModel < handle
                                 baseVdelL1 = ic.model.zenithDelay_m;
                             end
                             residual = obj.ionoState(ti).tecResidualModel_m;
-                            delay    = (baseVdelL1 + residual) * mapping * freqScale;
+                            delay    = (baseVdelL1 + residual) * anchorScale * mapping * freqScale;
                         end
                     end
 
@@ -620,13 +634,26 @@ classdef EnvironmentModel < handle
 
             freqExp = 1.0;
             if isfield(sc,'frequencyExponent'); freqExp = sc.frequencyExponent; end
-            freqFactor = (f_L1_Hz / freqHz)^freqExp;
+            % sigmaCodeL1_m is a PHYSICAL 1575.42 MHz amplitude, but f_L1_Hz is the
+            % resolved band -- so for the primary signal (f_L1_Hz == freqHz) the old
+            % factor was identically 1 and 0.30 m of L1 scintillation was charged into R
+            % at every band, up to 61.25 GHz. Composing the anchor collapses the pair to
+            % (f_canonical/freqHz)^freqExp, which is the physical law. Exactly 1.0 at the
+            % canonical band, so goldens are unchanged. Covers both branches below.
+            freqFactor = models.atmosphere.IonosphereModel.climatologyAnchorScale(f_L1_Hz, freqExp) ...
+                       * (f_L1_Hz / freqHz)^freqExp;
 
             scintModel = 'legacy';
             if isfield(sc,'model'); scintModel = sc.model; end
 
             if strcmp(scintModel,'conker')
                 % Amplitude scintillation as an effective C/N0 loss (Conker et al. 2003).
+                % LIMITATION: S4zen carries NO frequency dependence, so the Conker fading
+                % factor below is band-blind by construction. This is not the anchor defect
+                % fixed above (there is no reference frequency here to mis-resolve) -- it is
+                % a missing term. Literature has S4 ~ f^-1.5; supplying that exponent is a
+                % modelling choice, not a bug fix, so it is left explicit rather than
+                % invented here. Read the freq009-013 fading factor with this in mind.
                 S4zen = 0.3;
                 if isfield(sc,'S4zen'); S4zen = sc.S4zen; end
                 sec  = obj.scintObliquity_(elevation_rad, elvFloor, sc);
