@@ -96,8 +96,21 @@ classdef ScenarioFactory
             x0(sm.euler_idx) = asset.attitude_euler_rad + eul_pert;
             x0(sm.omega_idx) = asset.angularRate_body_radps + omg_pert;
 
-            x0(sm.b_rx_idx)    = asset.clock.getBiasMeters() + clk_pert;
-            x0(sm.bdot_rx_idx) = asset.clock.getDriftMetersPerSecond() + cdot_pert;
+            % The clock STATES are seeded in the estimator's own domain. When the model
+            % applies the published relativistic correction the states carry only the
+            % oscillator's RESIDUAL, so the modelled term must come off the truth value
+            % here too. Both terms are exactly 0 when relativity.clock.model is off.
+            %
+            % The drift seed is the sharp one: getDriftMetersPerSecond() now includes
+            % c*y_rel = 0.1615 m/s (the truth-side fix), while P0 on that state is of
+            % order 1e-3 m/s. Seeding the full value against a residual-domain state would
+            % open the run ~160 sigma out and produce a transient that looks exactly like a
+            % filter defect. t = 0 at initialisation, so the bias term is identically zero
+            % and this line is unchanged for the bias.
+            relBias0_m  = models.clocks.RelativisticClockCorrection.bias_m(cfg, 0);
+            relRate0_mps = models.clocks.RelativisticClockCorrection.rate_mps(cfg);
+            x0(sm.b_rx_idx)    = asset.clock.getBiasMeters() - relBias0_m + clk_pert;
+            x0(sm.bdot_rx_idx) = asset.clock.getDriftMetersPerSecond() - relRate0_mps + cdot_pert;
 
             if ekf.jointMultiAssetEnabled
                 c_mps = revgnss.Constants.SPEED_OF_LIGHT_MPS;

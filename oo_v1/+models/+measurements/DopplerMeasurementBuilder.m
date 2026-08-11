@@ -125,8 +125,18 @@ classdef DopplerMeasurementBuilder
 
             v_rx_true    = asset.v_ecef_mps;
             v_rx_est     = x_est(blk.v);
+            % bdot_rx_true now INCLUDES the relativistic rate: getFractionalFrequency was
+            % corrected on 2026-08-09 so the truth Doppler carries the same offset the
+            % truth pseudorange has always carried, integrated. Before that the two truth
+            % channels disagreed by c*y_rel = 0.1615 m/s and the EKF, which enforces
+            % b_rx' = bdot_rx, had to break one of them -- leaking the difference into
+            % position through the Kalman gain.
             bdot_rx_true = asset.clock.getDriftMetersPerSecond();
-            bdot_rx_est  = x_est(blk.bdot);
+            % Model side applies the same published constant (gated; exactly 0 when off),
+            % so it cancels in z - h and bdot_rx estimates only the oscillator residual.
+            % H is unchanged: the correction is additive and known, so d/d(bdot_rx) = 1.
+            bdot_rx_est  = x_est(blk.bdot) + ...
+                models.clocks.RelativisticClockCorrection.rate_mps(cfg);
             sigma_dop    = cfg.measurements.doppler.sigma_mps;
 
             zd      = zeros(M,1);

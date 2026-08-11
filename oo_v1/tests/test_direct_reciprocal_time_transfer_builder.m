@@ -39,7 +39,7 @@ geom = struct('transmitOffset_body_m',zeros(3,1),'receiveOffset_body_m',zeros(3,
 end
 
 function asset = i_asset_(r_ecef_m,v_ecef_mps,biasM,driftMps)
-clock = struct('getBiasMeters',@() biasM,'getDriftMetersPerSecond',@() driftMps);
+clock = struct('getBiasMeters',@() biasM,'getDriftMetersPerSecond',@() driftMps,'getOscillatorDriftMetersPerSecond',@() driftMps);
 asset = struct('r_ecef_m',r_ecef_m,'v_ecef_mps',v_ecef_mps,'attitude_euler_rad',[0;0;0],'clock',clock);
 end
 

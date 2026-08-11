@@ -33,7 +33,14 @@ classdef ReciprocalEndpointTruthProvider
                 revgnss.AttitudeKinematics.bodyToEcefRotation(asset.attitude_euler_rad);
             c = revgnss.Constants.SPEED_OF_LIGHT_MPS;
             bias_s = asset.clock.getBiasMeters()/c;
-            localClockRate = 1 + asset.clock.getDriftMetersPerSecond()/c;
+            % PROPER-TIME PATH. This endpoint models coordinate->proper time EXPLICITLY via
+            % properTimeRate below, and properTimeRate(sat) - properTimeRate(ground) IS
+            % revgnss.Relativity.clockFracFreq exactly. So the relativistic offset is already
+            % represented here, and localClockRate must carry the OSCILLATOR rate only --
+            % otherwise the same physics is counted twice (0.1615 m/s at GEO). The
+            % ground-space channels take the opposite convention: they work in coordinate
+            % time and let the clock carry the offset, so they use getDriftMetersPerSecond.
+            localClockRate = 1 + asset.clock.getOscillatorDriftMetersPerSecond()/c;
             properTimeRate = revgnss.ReciprocalEndpointTruthProvider.properTimeRate_(rInertial,vInertial);
             endpoint = revgnss.TwoWayCodeEndpointModel.constantVelocity( ...
                 'physicalTruth',sprintf('asset:%d',assetIdx),rInertial,vInertial,t_s, ...

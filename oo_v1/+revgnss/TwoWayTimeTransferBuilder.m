@@ -158,7 +158,13 @@ classdef TwoWayTimeTransferBuilder
             r_sat_t = asset.r_ecef_m(:);   v_sat_t = asset.v_ecef_mps(:);
             r_sat_e = x(stateMap.r_idx);    v_sat_e = x(stateMap.v_idx);
             b_rx_true = asset.clock.getBiasMeters();
-            b_rx_est  = x(stateMap.b_rx_idx);
+            % Model-side relativistic clock correction (gated; exactly 0 when off). The
+            % two-way TIME TRANSFER observable is the clock DIFFERENCE, so the spacecraft
+            % relativistic term does NOT cancel between the two directions the way the
+            % geometric range does -- it has to be modelled here exactly as in the one-way
+            % code h, with the same reference epoch, or these rows would fight the code rows.
+            b_rx_est  = x(stateMap.b_rx_idx) + ...
+                models.clocks.RelativisticClockCorrection.bias_m(cfg, t_s);
 
             epochIdx = 0;
             try; epochIdx = errorChain.epochIdx_; catch; end
@@ -350,7 +356,15 @@ classdef TwoWayTimeTransferBuilder
                 {'measurements','twoWayTimeTransfer','includeReciprocityResidual'}, false);
             r_sat_e = x(stateMap.r_idx);
             v_sat_e = x(stateMap.v_idx);
-            b_rx_e  = x(stateMap.b_rx_idx);
+            % POSTFIT path: the SAME modelled relativistic clock correction, at the SAME
+            % reference epoch, as the prefit h in build(). Without it the postfit TWTT
+            % residual walks away from the prefit at c*y_rel = 0.1615 m/s while every other
+            % channel's postfit tracks correctly -- so a postfit-vs-prefit check fails on
+            % this channel alone, for a reason that looks nothing like relativity. t_s is a
+            % real argument here (ReverseGNSSSimulation passes it), not the nargin default.
+            % Exactly 0 when physics.relativity.clock.model.enable is false.
+            b_rx_e  = x(stateMap.b_rx_idx) + ...
+                models.clocks.RelativisticClockCorrection.bias_m(cfg, t_s);
 
             for jj = 1:numel(info.rows)
                 rowInfo = info.rows(jj);

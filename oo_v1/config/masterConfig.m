@@ -96,10 +96,31 @@ cfg.physics.lightTime.tolerance_s     = 1e-12;
 cfg.physics.relativity.shapiro.enable = true;
 cfg.physics.relativity.clock.enable   = false;  % Gated relativistic clock-rate offset on the
                                                 % TRUTH receiver clock (~+46.6 us/day / ~2.3 km over a
-                                                % 4 h GEO run). Default OFF: the constant offset is fully
-                                                % absorbed by the estimated clock-drift state (observable),
-                                                % so for the circular GEO it does not bias the solution;
-                                                % set true to make the truth physically complete.
+                                                % 4 h GEO run). Default OFF -> byte-identical no-op.
+% CORRECTED 2026-08-09. The claim this comment used to make -- "the constant offset is fully
+% absorbed by the estimated clock-drift state, so for a circular GEO it does not bias the
+% solution" -- was FALSE as implemented, and cost 13 m of position error on any non-caesium
+% oscillator. ClockModel.getFractionalFrequency EXCLUDED the relativistic term (deliberately,
+% and test-enforced), so the truth pseudorange ramped at c*y_rel = 0.1615 m/s while the truth
+% Doppler reported a clock rate of exactly zero. The EKF propagates b_rx' = bdot_rx and so
+% cannot satisfy both channels; whatever the clock-bias state's process noise could not
+% absorb was projected into position by the Kalman gain (measured cos(error, K*1) = 0.9997).
+% Two changes close it: the truth accessor now includes the term, and the block below lets
+% the ESTIMATOR apply the same published constant so the clock states carry only the
+% oscillator residual.
+%
+% MODEL-side relativistic clock correction. y_rel is a published constant derivable from the
+% broadcast orbit, so applying it is using public data, not truth assistance -- the same
+% standing as cfg.frames.eopModel, which applies published polar motion against a truth-side
+% pole offset. fracFreq empty => ConfigFactory derives it from the orbit altitude; set it
+% explicitly, offset from the truth value, to simulate a residual correction error.
+% Default OFF -> byte-identical no-op. Reader: models.clocks.RelativisticClockCorrection.
+% The truth/model enable pair and model.fracFreq are DECLARED in i_baseDefaults with the
+% rest of the physics.relativity block -- declaration there is mandatory, not cosmetic:
+% deepMergeConfig rejects undeclared JSON paths, realismGradeConfig's i_assertDeclaredSchema
+% errors on an undeclared overlay field, and test_scientific_validation_manifest fails if
+% realism resolution ADDS a path. Declaring model.fracFreq makes ConfigFactory's derivation
+% a CHANGE to a declared field rather than a new one.
 cfg.physics.doppler.enable            = true;
 cfg.measurements.doppler.enable       = true;
 cfg.measurements.doppler.useInEKF     = true;
@@ -2423,6 +2444,10 @@ cfg.physics.relativity.shapiro.model.enable = false;
 cfg.physics.relativity.clock.enable       = false;
 cfg.physics.relativity.clock.truth.enable = false;
 cfg.physics.relativity.clock.model.enable = false;
+% Model-side relativistic fractional-frequency offset. [] = derive from the orbit altitude
+% in ConfigFactory (what a receiver does with the broadcast ephemeris); set a number to
+% impose a deliberate model-vs-truth residual, as frames.eopModel does against truthEop.
+cfg.physics.relativity.clock.model.fracFreq = [];
 
 cfg.physics.doppler.truth.enable = false;
 cfg.physics.doppler.model.enable = false;

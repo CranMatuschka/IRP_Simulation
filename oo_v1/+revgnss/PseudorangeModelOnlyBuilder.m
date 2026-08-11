@@ -38,7 +38,13 @@ classdef PseudorangeModelOnlyBuilder
 
             r_est     = x_state(stateMap.r_idx);
             euler_est = x_state(stateMap.euler_idx);
-            b_rx_est  = x_state(stateMap.b_rx_idx);
+            % POSTFIT path: must apply exactly the same modelled relativistic clock
+            % correction, at the same reference epoch, as the prefit h in
+            % CodeMeasurementBuilder -- otherwise the postfit residual drifts away from the
+            % prefit at c*y_rel = 0.1615 m/s and every postfit-vs-prefit gate is invalidated
+            % while still looking plausible. Exactly 0 when relativity.clock.model is off.
+            b_rx_est  = x_state(stateMap.b_rx_idx) + ...
+                models.clocks.RelativisticClockCorrection.bias_m(cfg, t_s);
 
             r_ants_est = asset.getAntennaPositionsECEF(r_est, euler_est, leverArms_model);
 

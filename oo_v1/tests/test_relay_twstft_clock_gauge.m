@@ -138,7 +138,7 @@ geom = i_geom_();
 stationA = revgnss.ReciprocalEndpointTruthProvider.fixedStation([6378137;0;0],0,0,'station:A',geom,10);
 stationB = revgnss.ReciprocalEndpointTruthProvider.fixedStation([0;6378137;0],0,0,'station:B',geom,10);
 staticRelayAsset = struct('r_ecef_m',[42164000;0;0],'v_ecef_mps',[0;0;0],'attitude_euler_rad',[0;0;0], ...
-    'clock',struct('getBiasMeters',@() 0,'getDriftMetersPerSecond',@() 0));
+    'clock',struct('getBiasMeters',@() 0,'getDriftMetersPerSecond',@() 0,'getOscillatorDriftMetersPerSecond',@() 0));
 relay = revgnss.ReciprocalEndpointTruthProvider.spacecraft(staticRelayAsset,1,geom,10);
 hwCal = i_hardwareCalibration_();
 optsF = i_baseOptions_('fwd:1'); optsR = i_baseOptions_('ret:1');
@@ -321,7 +321,7 @@ end
 function relay = i_relay_(clockBiasMeters)
 relayAsset = struct('r_ecef_m',[42164000;0;0],'v_ecef_mps',[0;3074;0], ...
     'attitude_euler_rad',[0;0;0], ...
-    'clock',struct('getBiasMeters',@() clockBiasMeters,'getDriftMetersPerSecond',@() 0));
+    'clock',struct('getBiasMeters',@() clockBiasMeters,'getDriftMetersPerSecond',@() 0,'getOscillatorDriftMetersPerSecond',@() 0));
 relay = revgnss.ReciprocalEndpointTruthProvider.spacecraft(relayAsset,1,i_geom_(),10);
 end
 

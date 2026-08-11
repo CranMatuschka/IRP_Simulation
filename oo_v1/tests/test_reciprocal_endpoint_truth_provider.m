@@ -22,7 +22,12 @@ end
 % ================================================================================================
 function i_test_spacecraft_matches_independently_rederived_pipeline_()
 c = revgnss.Constants.SPEED_OF_LIGHT_MPS;
-clock = struct('getBiasMeters',@() 12.5,'getDriftMetersPerSecond',@() 3e-4);
+% getOscillatorDriftMetersPerSecond is what the PROPER-TIME endpoint path reads: this
+% endpoint supplies properTimeRate separately, so localClockRate must carry the
+% oscillator rate only (see models.clocks.ClockModel). The stub has no relativistic
+% offset, so both accessors return the same value and the assertion below is unchanged.
+clock = struct('getBiasMeters',@() 12.5,'getDriftMetersPerSecond',@() 3e-4, ...
+               'getOscillatorDriftMetersPerSecond',@() 3e-4);
 asset = struct('r_ecef_m',[7000e3;1200e3;300e3],'v_ecef_mps',[10;7400;20], ...
     'attitude_euler_rad',[0.02;-0.01;0.05],'clock',clock);
 geom = struct('transmitOffset_body_m',[0.1;-0.2;0.05],'receiveOffset_body_m',[-0.1;0.2;-0.05], ...
@@ -40,7 +45,7 @@ endpoint = revgnss.ReciprocalEndpointTruthProvider.spacecraft(asset,assetIdx,geo
 bodyToInertial = models.frames.FrameTimeUtils.rotMatEcefToInertial(t_s) * ...
     revgnss.AttitudeKinematics.bodyToEcefRotation(asset.attitude_euler_rad);
 bias_s = asset.clock.getBiasMeters()/c;
-localClockRate = 1+asset.clock.getDriftMetersPerSecond()/c;
+localClockRate = 1+asset.clock.getOscillatorDriftMetersPerSecond()/c;
 
 assert(strcmp(endpoint.assetIdentifier,sprintf('asset:%d',assetIdx)));
 assert(max(abs(endpoint.centrePositionAt(t_s)-rInertial_m)) < 1e-6, ...

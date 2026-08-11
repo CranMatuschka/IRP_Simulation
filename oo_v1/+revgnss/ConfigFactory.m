@@ -1158,10 +1158,13 @@ classdef ConfigFactory
             % offset on the receiver clock (applied at the receiver-clock recreate below via
             % revgnss.Relativity -> cfg.asset.clock.relativisticFracFreq). Previously force-
             % disabled as "not validated v1"; now supported and default OFF (masterConfig).
-            % No separate model-side (broadcast) correction is applied: the constant offset
-            % is observable and absorbed by the estimated receiver clock-drift state, so the
-            % estimation residual for a circular orbit is zero (only an eccentric orbit's
-            % periodic term would survive). See docs/scientific_correctness_review_v3.md.
+            % A model-side (broadcast) correction IS available since 2026-08-09, gated on
+            % physics.relativity.clock.model.enable and resolved into
+            % physics.relativity.clock.model.fracFreq below. The previous claim here -- that
+            % the offset is simply absorbed by the estimated clock-drift state, leaving a zero
+            % residual for a circular orbit -- was measurably wrong: the truth range carried
+            % the ramp while the truth Doppler did not, so the two-state clock could not
+            % represent it and the excess leaked into position through the Kalman gain.
             if isfield(cfg,'physics') && isfield(cfg.physics,'relativity') && ...
                     isfield(cfg.physics.relativity,'clock')
                 rc   = cfg.physics.relativity.clock;
@@ -1911,6 +1914,30 @@ classdef ConfigFactory
                 alt_ = 35786000;
                 try; alt_ = cfg.orbit.altitudeMean_m; catch; end
                 cfg.asset.clock.relativisticFracFreq = revgnss.Relativity.geoClockFracFreq(alt_);
+            end
+
+            % MODEL-side counterpart. y_rel is a published constant derivable from the
+            % broadcast orbit, so resolving it here from the SAME altitude a receiver would
+            % read from the ephemeris is using public data, not truth assistance. Resolved
+            % into the config (rather than left implicit) so the number a run applied is
+            % recorded and traceable. An explicit scenario value is never overwritten, which
+            % is how a deliberate model-vs-truth residual is configured -- the same pattern
+            % as cfg.frames.eopModel against cfg.frames.truthEop.
+            relClkModel_ = false;
+            try; relClkModel_ = logical(cfg.physics.relativity.clock.model.enable); catch; end
+            if relClkModel_
+                haveExplicit_ = false;
+                try
+                    v_ = cfg.physics.relativity.clock.model.fracFreq;
+                    haveExplicit_ = isnumeric(v_) && isscalar(v_) && isfinite(v_);
+                catch
+                end
+                if ~haveExplicit_
+                    altM_ = 35786000;
+                    try; altM_ = cfg.orbit.altitudeMean_m; catch; end
+                    cfg.physics.relativity.clock.model.fracFreq = ...
+                        revgnss.Relativity.geoClockFracFreq(altM_);
+                end
             end
 
             % ---- Receiver lever arms and auto-attitude ----------------------

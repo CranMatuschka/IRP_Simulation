@@ -66,7 +66,11 @@ classdef CarrierMeasurementBuilder
             carrierSigs_ = revgnss.SignalCatalog.carrierSignalsFromConfig(cfg);
             nSig_        = numel(carrierSigs_);
             b_rx_true = asset.clock.getBiasMeters();
-            b_rx_est  = x_est(blk.b);
+            % Model-side relativistic clock correction (gated; exactly 0 when off) --
+            % same term and same reference epoch as the code rows, so the two channels
+            % stay consistent and the float ambiguities are not asked to absorb a ramp.
+            b_rx_est  = x_est(blk.b) + ...
+                models.clocks.RelativisticClockCorrection.bias_m(cfg, t_s);
 
             Mp_total = Mp * nSig_;
             z_phi = zeros(Mp_total, 1);

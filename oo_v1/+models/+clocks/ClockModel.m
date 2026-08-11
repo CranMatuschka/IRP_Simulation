@@ -79,12 +79,16 @@ classdef ClockModel < handle
         driftRate_fracPerSec (1,1) double = 0  % deterministic frequency drift [1/s^2]
         relativisticFracFreq (1,1) double = 0  % Constant relativistic fractional-frequency
                                                % offset [-] (gated, default 0). Added to the phase
-                                               % (bias) increment each step so it accumulates as a
-                                               % LINEAR clock-bias ramp; deliberately NOT part of
-                                               % fracFreq, so it is excluded from getFractional-
-                                               % Frequency()/getDriftMetersPerSecond() and reaches
-                                               % the truth pseudorange as an (initially) unmodelled
-                                               % relativistic clock-rate signature.
+                                               % (bias) increment each step so the clock bias
+                                               % accumulates a LINEAR ramp, AND reported by
+                                               % getFractionalFrequency()/getDriftMetersPerSecond()
+                                               % so the rate and the ramp describe ONE clock.
+                                               % CORRECTED 2026-08-09: it used to be excluded from
+                                               % those accessors, which made the truth internally
+                                               % inconsistent (range ramped at 0.1615 m/s while
+                                               % Doppler reported zero) and cost 13 m of position
+                                               % error. Use getOscillatorFractionalFrequency() where
+                                               % proper time is modelled explicitly.
 
         % Noise configuration
         noiseCoeffs     (1,1) struct        % h2, h1, h0, hMinus1, hMinus2
@@ -358,13 +362,71 @@ classdef ClockModel < handle
         end
 
         function y = getFractionalFrequency(obj)
-            % getFractionalFrequency  Total fractional frequency (state + colored).
-            y = obj.fracFreq + obj.coloredFracFreq_current;
+            % getFractionalFrequency  Total fractional frequency
+            % (state + colored + relativistic offset).
+            %
+            % The relativistic term MUST be here. It is a genuine frequency offset: the
+            % oscillator runs fast by y_rel, so it shows up in the clock's RATE exactly as
+            % it shows up, integrated, in its phase. Excluding it (the behaviour before
+            % 2026-08-09) made the truth internally inconsistent -- the truth pseudorange
+            % ramped at c*y_rel = 0.1615 m/s while the truth Doppler, built from this
+            % accessor in DopplerMeasurementBuilder, reported a rate of exactly zero.
+            %
+            % The EKF propagates b_rx' = bdot_rx, so it cannot satisfy both channels at
+            % once: 40 Doppler rows per epoch pinned bdot_rx at ~0 while the code rows
+            % dragged b_rx along the ramp. Whatever the clock-bias state's process noise
+            % could not absorb was projected into position by the Kalman gain. MEASURED on
+            % G5S1R4 / 3600 s with every error source off: 13.07 m of position error on an
+            % OCXO Q against 0.20 m on a caesium Q, the error vector parallel to K*1
+            % restricted to position (cos = 0.9997), reported sigma identical to 4 s.f. in
+            % both -- so the covariance could not see it and err/sigma reached 34.
+            % Switching the ramp off collapsed OCXO to 0.103 m, onto caesium's 0.107 m.
+            %
+            % GOLDEN SAFETY: relativisticFracFreq defaults to 0 and is only ever written
+            % when physics.relativity.clock.truth.enable is true, so this is a no-op for
+            % every run that does not enable the relativistic clock.
+            y = obj.fracFreq + obj.coloredFracFreq_current + obj.relativisticFracFreq;
         end
 
         function bdot_mps = getDriftMetersPerSecond(obj)
             % getDriftMetersPerSecond  Total clock drift [m/s].
             bdot_mps = obj.getFractionalFrequency() * revgnss.Constants.SPEED_OF_LIGHT_MPS;
+        end
+
+        % ---- Oscillator-only accessors: EXCLUDING the relativistic offset ----- %
+        %
+        % WHICH ONE DO I WANT?
+        %   getFractionalFrequency / getDriftMetersPerSecond
+        %       The clock's TOTAL rate against a ground reference, relativistic offset
+        %       INCLUDED. Use this wherever the model works in COORDINATE time and lets the
+        %       clock carry the relativistic effect -- i.e. every ground-space channel
+        %       (code, carrier, Doppler, TWSTFT). That is the rate such a link observes.
+        %   getOscillatorFractionalFrequency / getOscillatorDriftMetersPerSecond
+        %       The oscillator's OWN rate error, relativistic offset EXCLUDED. Use this
+        %       wherever the surrounding model represents proper time EXPLICITLY -- the
+        %       four-timestamp and two-way-ISL endpoints, which pass a separate
+        %       properTimeRate = 1 - (GM/r + v^2/2)/c^2 into TwoWayCodeEndpointModel.
+        %
+        % WHY THE SPLIT IS EXACTLY RIGHT (algebraic identity, checked numerically in
+        % tests/test_wpD_relativistic_clock T6):
+        %       properTimeRate(r_sat,v_sat) - properTimeRate(Re,v_ground)
+        %     = GM/c^2*(1/Re - 1/r_sat) - v_sat^2/(2c^2) + v_ground^2/(2c^2)
+        %     = revgnss.Relativity.clockFracFreq(r_sat,v_sat)   == y_rel
+        % An endpoint that already supplies properTimeRate is therefore ALREADY carrying
+        % y_rel; adding it again through localClockRate counts the same physics twice.
+        % Measured double-count if this is got wrong: c*y_rel = 0.1615 m/s on every
+        % four-timestamp endpoint rate.
+
+        function y = getOscillatorFractionalFrequency(obj)
+            % getOscillatorFractionalFrequency  Oscillator rate error only [-]
+            % (state + colored, NO relativistic offset).
+            y = obj.fracFreq + obj.coloredFracFreq_current;
+        end
+
+        function bdot_mps = getOscillatorDriftMetersPerSecond(obj)
+            % getOscillatorDriftMetersPerSecond  Oscillator rate error only [m/s].
+            bdot_mps = obj.getOscillatorFractionalFrequency() * ...
+                revgnss.Constants.SPEED_OF_LIGHT_MPS;
         end
 
         % ---- State-only accessors: WFM+RWFM component only ------------ %

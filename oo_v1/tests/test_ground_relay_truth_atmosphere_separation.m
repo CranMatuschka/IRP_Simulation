@@ -52,7 +52,7 @@ stationA = revgnss.ReciprocalEndpointTruthProvider.fixedStation( ...
 stationB = revgnss.ReciprocalEndpointTruthProvider.fixedStation( ...
     stationBTruth.r_ecef_m,0,0,'station:B',geomB,10);
 relayAsset = struct('r_ecef_m',[42164000;0;0],'v_ecef_mps',[0;3074;0], ...
-    'attitude_euler_rad',[0;0;0],'clock',struct('getBiasMeters',@() 0,'getDriftMetersPerSecond',@() 0));
+    'attitude_euler_rad',[0;0;0],'clock',struct('getBiasMeters',@() 0,'getDriftMetersPerSecond',@() 0,'getOscillatorDriftMetersPerSecond',@() 0));
 relay = revgnss.ReciprocalEndpointTruthProvider.spacecraft(relayAsset,1,relayGeom,10);
 hwForward = hardwareWrongSource.asEventSolverHardware('forward');
 threw = false;
@@ -82,7 +82,7 @@ cfg.measurements.groundRelayTimeTransfer.atmosphere.applyTropo = true;
 cfg.measurements.groundRelayTimeTransfer.atmosphere.applyIono = true;
 [stationATruth,stationBTruth,~] = i_truthEndpoints_();
 relayAssetStatic = struct('r_ecef_m',[42164000;0;0],'v_ecef_mps',[0;0;0], ...
-    'attitude_euler_rad',[0;0;0],'clock',struct('getBiasMeters',@() 0,'getDriftMetersPerSecond',@() 0));
+    'attitude_euler_rad',[0;0;0],'clock',struct('getBiasMeters',@() 0,'getDriftMetersPerSecond',@() 0,'getOscillatorDriftMetersPerSecond',@() 0));
 envModel = models.errors.EnvironmentModel(masterConfig(),2);
 observableAtmo = revgnss.GroundRelayTimeTransferSessionBuilder.buildSession( ...
     cfg,stationATruth,stationBTruth,relayAssetStatic,envModel);
@@ -195,5 +195,5 @@ stationATruth = struct('r_ecef_m',[6378137;0;0],'clockBiasMeters',0,'clockDriftM
 stationBTruth = struct('r_ecef_m',6378137*[cosd(30);sind(30);0],'clockBiasMeters',0, ...
     'clockDriftMetersPerSecond',0,'identifier','station:B');
 relayAssetTruth = struct('r_ecef_m',[42164000;0;0],'v_ecef_mps',[0;3074;0], ...
-    'attitude_euler_rad',[0;0;0],'clock',struct('getBiasMeters',@() 0,'getDriftMetersPerSecond',@() 0));
+    'attitude_euler_rad',[0;0;0],'clock',struct('getBiasMeters',@() 0,'getDriftMetersPerSecond',@() 0,'getOscillatorDriftMetersPerSecond',@() 0));
 end

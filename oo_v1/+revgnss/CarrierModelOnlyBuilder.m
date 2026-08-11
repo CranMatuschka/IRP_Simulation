@@ -48,7 +48,11 @@ classdef CarrierModelOnlyBuilder
 
             r_est     = x_state(stateMap.r_idx);
             euler_est = x_state(stateMap.euler_idx);
-            b_rx_est  = x_state(stateMap.b_rx_idx);
+            % POSTFIT path: same modelled relativistic clock correction and same reference
+            % epoch as the prefit h in CarrierMeasurementBuilder, or the postfit carrier
+            % residual drifts from the prefit at 0.1615 m/s. Exactly 0 when the model is off.
+            b_rx_est  = x_state(stateMap.b_rx_idx) + ...
+                models.clocks.RelativisticClockCorrection.bias_m(cfg, t_s);
 
             r_ants_est = asset.getAntennaPositionsECEF(r_est, euler_est, leverArms_model);
 

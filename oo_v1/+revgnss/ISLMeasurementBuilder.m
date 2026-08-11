@@ -163,6 +163,23 @@ classdef ISLMeasurementBuilder
             end
             brxTruth = primaryAsset.clock.getBiasMeters();
             drxTruth = primaryAsset.clock.getDriftMetersPerSecond();
+
+            % ISL AND THE RELATIVISTIC CLOCK TERM. Every space asset inherits the same
+            % relativisticFracFreq (MultiAssetConfig.finalizeAsset_ copies the primary's
+            % clock struct), so in z the term cancels exactly between rx and tx -- ISL is a
+            % SAT-SAT difference and needs no correction there. The two h branches differ:
+            %   secondary clock ESTIMATED -> both sides are residual-domain states, cancels,
+            %                                add nothing;
+            %   legacy BROADCAST PRODUCT  -> btxProd/dtxProd are built from the tx TRUTH
+            %                                accessors and so carry the full term, while
+            %                                x(b_rx)/x(bdot_rx) carry only the residual.
+            % The legacy branch therefore has to rebuild the full rx clock, or h sits
+            % c*y_rel short of z with no relativity visible anywhere in the expression.
+            % Both terms are exactly 0 when relativity.clock.model is off.
+            relClkBias_m  = models.clocks.RelativisticClockCorrection.bias_m(cfg, t_s);
+            relClkRate_mps = models.clocks.RelativisticClockCorrection.rate_mps(cfg);
+            info.relClockBias_m   = relClkBias_m;
+            info.relClockRate_mps = relClkRate_mps;
             info.productIntervalIdx = revgnss.ISLMeasurementBuilder.productInterval_(info.product, t_s);
 
             for txi = info.transmitterList(:)'
@@ -277,7 +294,15 @@ classdef ISLMeasurementBuilder
                         hc  = rhoModel + x(stateMap.b_rx_idx) - x(bTxIdxC);
                         Rc  = info.carrierSigma_m^2 + sigPos2c;
                     else
-                        hc  = rhoModel + x(stateMap.b_rx_idx) - btxProd;
+                        % Legacy broadcast-product branch: btxProd carries the tx TRUTH
+                        % clock (full relativistic term) while x(b_rx) is residual-domain,
+                        % so the full rx clock must be rebuilt -- as the islCode and
+                        % islDoppler legacy branches above already do, and as
+                        % predictEkfRows already does for THIS SAME carrier row. Leaving it
+                        % would make build() and predictEkfRows predict one physical row two
+                        % different ways, and would ask the ISL carrier ambiguity (constant
+                        % per arc) to absorb a term linear in t, which it cannot.
+                        hc  = rhoModel + (x(stateMap.b_rx_idx) + relClkBias_m) - btxProd;
                         Rc  = info.carrierSigma_m^2 + sigPos2c + info.product.sigmaClock_m^2;
                     end
                     if ambIdxC > 0; hc = hc + x(ambIdxC); end
@@ -379,6 +404,14 @@ classdef ISLMeasurementBuilder
             if isfield(info,'productIntervalIdx'); intervalIdx = info.productIntervalIdx; end
             hasSec = isfield(info,'ekfRowSecIdx') && numel(info.ekfRowSecIdx) == numel(info.ekfRowTypes);
             hasAmb = isfield(info,'ekfRowAmbIdx') && numel(info.ekfRowAmbIdx) == numel(info.ekfRowTypes);
+            % Modelled relativistic clock correction, cached by build() because this
+            % function has no epoch argument. The legacy (broadcast-product) branches below
+            % difference a residual-domain rx state against a full-truth tx clock, so they
+            % must rebuild the full rx clock exactly as build() does; the estimated-secondary
+            % branches difference two residual-domain states and need nothing. 0 when off.
+            relClkBias_m = 0; relClkRate_mps = 0;
+            if isfield(info,'relClockBias_m');   relClkBias_m   = info.relClockBias_m;   end
+            if isfield(info,'relClockRate_mps'); relClkRate_mps = info.relClockRate_mps; end
             for k = 1:numel(info.ekfRowTypes)
                 txi = info.ekfRowTx(k);
                 tx  = assets{txi};

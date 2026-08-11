@@ -716,6 +716,21 @@ classdef SimulationDataStore < handle
             entry.truth.rxFracFreq       = asset.clock.getFractionalFrequency();
             entry.truth.rxClockDrift_mps = asset.clock.getDriftMetersPerSecond();
 
+            % --- Relativistic clock correction, model side ---------------------
+            % When the estimator applies the published relativistic offset, the clock
+            % STATES carry only the oscillator's own residual, while the truth accessors
+            % above carry the full physical clock. Every estimate-vs-truth comparison
+            % below must therefore add the correction back, or it would report the whole
+            % c*y_rel*t ramp (581 m over an hour at GEO) as an estimation error. Exactly 0
+            % when physics.relativity.clock.model is off, so nothing moves in that case.
+            relClockBias_m  = 0;
+            relClockRate_mps = 0;
+            try
+                relClockBias_m   = models.clocks.RelativisticClockCorrection.bias_m(ekf.cfg, t_s);
+                relClockRate_mps = models.clocks.RelativisticClockCorrection.rate_mps(ekf.cfg);
+            catch
+            end
+
             % --- Estimate state ---
             reportEuler_rad = ekf.getReportEulerRad();
             entry.estimate.x                = x;
@@ -727,8 +742,16 @@ classdef SimulationDataStore < handle
             if isfield(sm,'gyroBiasIdx') && ~isempty(sm.gyroBiasIdx)
                 entry.estimate.gyroBias_radps = x(sm.gyroBiasIdx);    % IMU/MEKF estimated bias
             end
-            entry.estimate.rxClockBias_m    = x(sm.b_rx_idx);
-            entry.estimate.rxClockDrift_mps = x(sm.bdot_rx_idx);
+            % Reported as the estimator's estimate of the PHYSICAL clock (state +
+            % modelled relativistic term), so it is directly comparable with
+            % entry.truth.rxClock*. The raw states are kept alongside for anyone who
+            % needs the residual the filter actually carries.
+            entry.estimate.rxClockBias_m         = x(sm.b_rx_idx)    + relClockBias_m;
+            entry.estimate.rxClockDrift_mps      = x(sm.bdot_rx_idx) + relClockRate_mps;
+            entry.estimate.rxClockBiasState_m    = x(sm.b_rx_idx);
+            entry.estimate.rxClockDriftState_mps = x(sm.bdot_rx_idx);
+            entry.estimate.rxClockRelModelBias_m  = relClockBias_m;
+            entry.estimate.rxClockRelModelRate_mps = relClockRate_mps;
 
             % --- Velocity error ---
             v_err = x(sm.v_idx) - asset.v_ecef_mps;
@@ -868,8 +891,14 @@ classdef SimulationDataStore < handle
             end
             eul_err = revgnss.AttitudeKinematics.wrapEuler(reportEuler_rad - asset.attitude_euler_rad);
             entry.attitudeError_rad    = eul_err;
-            entry.clockBiasError_m     = x(sm.b_rx_idx) - asset.clock.getBiasMeters();
-            entry.clockDriftError_mps  = x(sm.bdot_rx_idx) - asset.clock.getDriftMetersPerSecond();
+            % The estimated clock STATES live in the residual domain when the model applies
+            % the published relativistic correction, while the truth accessors return the
+            % full clock. Differencing them directly reports the entire c*y*t ramp -- 580 m
+            % over a 3600 s arc -- as estimation error. Add the model term back first so
+            % both sides are in the same domain. Both terms are exactly 0 when the model
+            % gate is off, so relativity-off runs are untouched.
+            entry.clockBiasError_m     = (x(sm.b_rx_idx)    + relClockBias_m)  - asset.clock.getBiasMeters();
+            entry.clockDriftError_mps  = (x(sm.bdot_rx_idx) + relClockRate_mps) - asset.clock.getDriftMetersPerSecond();
             entry.fracFreqError        = entry.clockDriftError_mps / c;
             entry.numVisibleTowers     = numel(visibleTowerIds);
 
@@ -1052,8 +1081,12 @@ classdef SimulationDataStore < handle
             catch; end
             entry.NEES_clk = NaN;
             try
-                clk_err_ = [x(sm.b_rx_idx) - asset.clock.getBiasMeters(); ...
-                             x(sm.bdot_rx_idx) - asset.clock.getDriftMetersPerSecond()];
+                % Same domain correction as clockBiasError_m above -- without it the clock
+                % NEES scores the whole relativistic ramp against a covariance that never
+                % claimed to cover it, and reports a catastrophic filter inconsistency
+                % where there is none.
+                clk_err_ = [(x(sm.b_rx_idx)    + relClockBias_m)   - asset.clock.getBiasMeters(); ...
+                            (x(sm.bdot_rx_idx) + relClockRate_mps) - asset.clock.getDriftMetersPerSecond()];
                 clk_idx_ = [sm.b_rx_idx; sm.bdot_rx_idx];
                 P_clk_   = ekf.P(clk_idx_, clk_idx_);
                 if rcond(P_clk_) > 1e-15; entry.NEES_clk = (clk_err_' * (P_clk_ \ clk_err_)) / 2; end

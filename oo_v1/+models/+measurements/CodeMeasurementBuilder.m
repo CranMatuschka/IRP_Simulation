@@ -35,7 +35,13 @@ classdef CodeMeasurementBuilder
 
             r_est     = x_est(blk.r);
             euler_est = revgnss.AssetStateBlock.eulerEst(blk, x_est);
-            b_rx_est  = x_est(blk.b);
+            % Model-side relativistic clock correction (gated; exactly 0 when off). It is a
+            % published constant derivable from the broadcast orbit, so the estimator may
+            % apply it: the clock STATE then carries only the oscillator's own residual
+            % instead of a 581 m relativistic ramp. H is unchanged -- the correction is a
+            % known additive term, so d/dx(b_rx) is still 1.
+            b_rx_relModel_m = models.clocks.RelativisticClockCorrection.bias_m(cfg, t_s);
+            b_rx_est  = x_est(blk.b) + b_rx_relModel_m;
 
             sigmaFloor = cfg.measurement.sigmaFloor_m;
 

@@ -22,8 +22,13 @@ end
 function i_test_direct_sign_and_units_()
 c = revgnss.Constants.SPEED_OF_LIGHT_MPS;
 geom = i_geometry_();
-clockA = struct('getBiasMeters',@() 30.0,'getDriftMetersPerSecond',@() 1e-3); % +30 m -> ahead
-clockB = struct('getBiasMeters',@() -15.0,'getDriftMetersPerSecond',@() -2e-3); % -15 m -> behind
+% The proper-time endpoint path reads getOscillatorDriftMetersPerSecond (properTimeRate
+% is supplied separately, so the relativistic term must not also ride in localClockRate).
+% These stubs carry no relativistic offset, so both accessors agree.
+clockA = struct('getBiasMeters',@() 30.0,'getDriftMetersPerSecond',@() 1e-3, ...
+                'getOscillatorDriftMetersPerSecond',@() 1e-3); % +30 m -> ahead
+clockB = struct('getBiasMeters',@() -15.0,'getDriftMetersPerSecond',@() -2e-3, ...
+                'getOscillatorDriftMetersPerSecond',@() -2e-3); % -15 m -> behind
 assetA = struct('r_ecef_m',[7000e3;0;0],'v_ecef_mps',[0;0;0],'attitude_euler_rad',[0;0;0],'clock',clockA);
 assetB = struct('r_ecef_m',[7000e3;500e3;0],'v_ecef_mps',[0;0;0],'attitude_euler_rad',[0;0;0],'clock',clockB);
 t4_s = 10;
@@ -40,9 +45,9 @@ tags_s = revgnss.ReciprocalTimestampEventModel.localClockTags(events,{A,B,B,A});
 % localTime(t) = t_s + bias_s + (drift/c)*(t_s-t4_s), where bias_s = biasMeters/c (SAME
 % convention as TwoWayISLMeasurementBuilder.truthEndpoint_, re-derived not called through).
 biasA_s = clockA.getBiasMeters()/c;
-rateA = clockA.getDriftMetersPerSecond()/c;
+rateA = clockA.getOscillatorDriftMetersPerSecond()/c;
 biasB_s = clockB.getBiasMeters()/c;
-rateB = clockB.getDriftMetersPerSecond()/c;
+rateB = clockB.getOscillatorDriftMetersPerSecond()/c;
 expectedT1 = events.t1_s + biasA_s + rateA*(events.t1_s-t4_s);
 expectedT2 = events.t2_s + biasB_s + rateB*(events.t2_s-t4_s);
 expectedT3 = events.t3_s + biasB_s + rateB*(events.t3_s-t4_s);
@@ -84,11 +89,11 @@ function i_test_relay_transponder_clock_not_endpoint_clocks_()
 % permanent test): t2/t3 must be tagged with the RELAY's own clock, never the source's or dest's.
 geom = i_geometry_();
 clockSource = struct('getBiasMeters',@() 100*revgnss.Constants.SPEED_OF_LIGHT_MPS, ...
-    'getDriftMetersPerSecond',@() 0);
+    'getDriftMetersPerSecond',@() 0,'getOscillatorDriftMetersPerSecond',@() 0);
 clockRelay = struct('getBiasMeters',@() 200*revgnss.Constants.SPEED_OF_LIGHT_MPS, ...
-    'getDriftMetersPerSecond',@() 0);
+    'getDriftMetersPerSecond',@() 0,'getOscillatorDriftMetersPerSecond',@() 0);
 clockDest = struct('getBiasMeters',@() 300*revgnss.Constants.SPEED_OF_LIGHT_MPS, ...
-    'getDriftMetersPerSecond',@() 0);
+    'getDriftMetersPerSecond',@() 0,'getOscillatorDriftMetersPerSecond',@() 0);
 assetSource = struct('r_ecef_m',[7000e3;0;0],'v_ecef_mps',[0;7500;0], ...
     'attitude_euler_rad',[0;0;0],'clock',clockSource);
 assetRelay = struct('r_ecef_m',[7000e3;500e3;0],'v_ecef_mps',[0;0;0], ...

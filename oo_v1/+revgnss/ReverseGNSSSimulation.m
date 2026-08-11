@@ -1256,7 +1256,11 @@ classdef ReverseGNSSSimulation < handle
                 r_post    = obj.ekf.x(sm.r_idx);
                 eul_post  = obj.ekf.getReportEulerRad();
                 v_post    = obj.ekf.x(sm.v_idx);
-                bdot_post = obj.ekf.x(sm.bdot_rx_idx);
+                % POSTFIT path: same modelled relativistic clock RATE the prefit Doppler h
+                % applies in DopplerMeasurementBuilder, or the postfit Doppler residual
+                % sits 0.1615 m/s off the prefit one. Exactly 0 when the model is off.
+                bdot_post = obj.ekf.x(sm.bdot_rx_idx) + ...
+                    models.clocks.RelativisticClockCorrection.rate_mps(obj.cfg);
                 leverArms = obj.asset.receiverLeverArms_body_m;
                 twr_list  = errStruct.towerIdx_perMeas;
                 ant_list  = errStruct.antennaIdx_perMeas;
