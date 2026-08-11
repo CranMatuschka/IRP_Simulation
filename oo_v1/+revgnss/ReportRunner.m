@@ -3518,6 +3518,45 @@ classdef ReportRunner
                 summary.expectedNIS = NaN;
             end
 
+            % Per-channel NIS for THIS ARC.
+            %
+            % Deliberately NOT the summary.nis*Status/nis*Mean fields: those belong to
+            % ScientificValidationCampaign and describe its own short multi-seed stress
+            % cases, so they stay NaN/notAvailable whenever the campaign is off (the whole
+            % clock ladder, for one). The per-epoch per-type series has always been
+            % recorded on the main arc and simply had no reader, which meant the run that
+            % produces the headline position error reported no channel breakdown at all --
+            % the split that says WHICH observable is over- or under-charged.
+            % arcNisPerDof is the number to read: 1.0 is consistent, >1 overconfident.
+            try
+                arcCs = revgnss.ConsistencyStatistics.computeFromDiag(diag, cfg);
+                summary.arcNisCodePerDof     = arcCs.nisCode.nisPerDof;
+                summary.arcNisCarrierPerDof  = arcCs.nisCarrier.nisPerDof;
+                summary.arcNisDopplerPerDof  = arcCs.nisDoppler.nisPerDof;
+                summary.arcNisTwoWayPerDof   = arcCs.nisTwoWayTimeTransfer.nisPerDof;
+                summary.arcNisOverallPerDof  = arcCs.nisOverall.nisPerDof;
+                summary.arcNisCodeStatus     = arcCs.nisCode.status;
+                summary.arcNisCarrierStatus  = arcCs.nisCarrier.status;
+                summary.arcNisDopplerStatus  = arcCs.nisDoppler.status;
+                summary.arcNisTwoWayStatus   = arcCs.nisTwoWayTimeTransfer.status;
+                summary.arcNisCarrierDofSource     = arcCs.nisCarrierDofSource;
+                summary.arcNisUnclassifiedRowsMean = arcCs.nisUnclassifiedRowsMean;
+                summary.arcNisRowBudgetCloses      = arcCs.nisRowBudgetCloses;
+            catch
+                summary.arcNisCodePerDof     = NaN;
+                summary.arcNisCarrierPerDof  = NaN;
+                summary.arcNisDopplerPerDof  = NaN;
+                summary.arcNisTwoWayPerDof   = NaN;
+                summary.arcNisOverallPerDof  = NaN;
+                summary.arcNisCodeStatus     = 'notAvailable';
+                summary.arcNisCarrierStatus  = 'notAvailable';
+                summary.arcNisDopplerStatus  = 'notAvailable';
+                summary.arcNisTwoWayStatus   = 'notAvailable';
+                summary.arcNisCarrierDofSource     = 'notAvailable';
+                summary.arcNisUnclassifiedRowsMean = NaN;
+                summary.arcNisRowBudgetCloses      = false;
+            end
+
             % Position and clock metrics
             try
                 posErr = diag.getPositionErrors();

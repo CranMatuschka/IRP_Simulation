@@ -1851,6 +1851,13 @@ classdef SimulationDataStore < handle
             C.code    = obj.cn_NIScod_(1:obj.nEpochs);
             C.doppler = obj.cn_NISdop_(1:obj.nEpochs);
             C.carrier = obj.cn_NIScar_(1:obj.nEpochs);
+            % Two-way time transfer has been recorded per epoch since the twttMask was
+            % added, but was never exposed here, so no consumer could classify it -- and
+            % ConsistencyStatistics, lacking a group for it, folded its ROWS into the
+            % carrier degrees of freedom while its innovations stayed out of the carrier
+            % numerator. It is the observable that breaks the radial-clock degeneracy, so
+            % it is the last one that should have gone unclassified.
+            C.twoWayTimeTransfer = obj.cn_NIStwtt_(1:obj.nEpochs);
             C.starTracker = obj.cn_NISstar_(1:obj.nEpochs);
             C.starTrackerDof = obj.cn_NISstarDof_(1:obj.nEpochs);
         end
