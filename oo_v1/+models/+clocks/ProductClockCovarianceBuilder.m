@@ -495,16 +495,21 @@ classdef ProductClockCovarianceBuilder
         end
 
         function pc = productCfg_(cfg)
-            pc.sigmaBias_m = 0.10;
-            pc.sigmaDrift_mps = 1e-3;
-            pc.covBiasDrift = 0;
-            try
-                tp = cfg.clocks.tower.product;
-                if isfield(tp,'sigmaBias_m'); pc.sigmaBias_m = tp.sigmaBias_m; end
-                if isfield(tp,'sigmaDrift_mps'); pc.sigmaDrift_mps = tp.sigmaDrift_mps; end
-                if isfield(tp,'covBiasDrift'); pc.covBiasDrift = tp.covBiasDrift; end
-            catch
-            end
+            % Diagnosis C: this used to carry its own literal defaults (0.10 m /
+            % 1e-3 m/s), which disagreed with TowerClockCorrectionProvider's
+            % fallback (0.05 m / 0.001 m/s) for the SAME cfg.clocks.tower.product
+            % sigmas -- the code-diagonal and the cross-blocks of one R could be
+            % sized from different sigmas whenever cfg omitted
+            % cfg.clocks.tower.product entirely. Delegating to
+            % TowerClockCorrectionProvider.productSigmaConfig makes the two
+            % halves share one resolver so they cannot diverge. Any cfg built
+            % through masterConfig already declares these fields (0.01 m /
+            % 0.0002 m/s), so the isfield override wins there regardless --
+            % this does not move the shipped default.
+            full = models.clocks.TowerClockCorrectionProvider.productSigmaConfig(cfg);
+            pc.sigmaBias_m    = full.sigmaBias_m;
+            pc.sigmaDrift_mps = full.sigmaDrift_mps;
+            pc.covBiasDrift   = full.covBiasDrift;
         end
 
     end

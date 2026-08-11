@@ -205,6 +205,85 @@ function cfg = validateMasterConfig(cfg)
             'cfg.clocks.tower.product.sigmaBias_m is negative.');
     end
 
+    % --- Product bias/drift cross-covariance must keep (sigmaBias,sigmaDrift,
+    % covBiasDrift) PSD (error) ---
+    % Diagnosis A: nothing anywhere validated covBiasDrift against its own
+    % sigmaBias_m/sigmaDrift_mps. This is an ERROR (not a warn like the sigma check
+    % above) because a violation does not fail loud: with the default
+    % cfg.covariance.productClock.crossCodeDoppler=false it silently CLAMPS the
+    % tower-clock R term to zero (models.clocks.TowerClockCorrectionProvider's
+    % max(var,0) sums, :166-171/:340/:365); with crossCodeDoppler=true it lands in
+    % an off-diagonal (models.clocks.ProductClockCovarianceBuilder:320) that a chol
+    % failure silently repairs by ridging the WHOLE R (:448-457). Neither path
+    % raises anything a caller would see. Checked in BOTH of the two config homes
+    % for this quantity: the fleet-wide cfg.clocks.tower.product triple, and each
+    % element of the separate, explicit cfg.towerClock.products(k) struct
+    % (ConfigFactory.m:407-413), using that element's OWN three fields. Must NOT
+    % reject: covBiasDrift=0 (shipped default) or missing entirely (defaults to 0);
+    % negative covBiasDrift (anti-correlated bias/drift is physically legitimate --
+    % the constraint is on the SQUARE); exact |cov|=sigmaBias*sigmaDrift (singular
+    % but still PSD, admitted by the 1e-9 relative slack for a rho=+/-1 computed in
+    % floating point); or a cfg missing cfg.clocks.tower.product / cfg.towerClock
+    % altogether (falls back to the readers' own defaults elsewhere). Does not
+    % condition on correctionMode/towerClockMode/addToR: towerClockMode is derived
+    % later in finalizeConfig and not reliably readable here (see the
+    % cfg.towerClock.correctionMode note below), and addToR=false only zeroes the
+    % returned sigma at the consumer, it does not make a wrong covariance right.
+    if isfield(cfg,'clocks') && isfield(cfg.clocks,'tower') && isfield(cfg.clocks.tower,'product') ...
+            && isfield(cfg.clocks.tower.product,'sigmaBias_m') ...
+            && isfield(cfg.clocks.tower.product,'sigmaDrift_mps')
+        covBD_ = 0;
+        if isfield(cfg.clocks.tower.product,'covBiasDrift')
+            covBD_ = cfg.clocks.tower.product.covBiasDrift;
+        end
+        i_assertCovBiasDriftPsd(cfg.clocks.tower.product.sigmaBias_m, ...
+            cfg.clocks.tower.product.sigmaDrift_mps, covBD_, 'cfg.clocks.tower.product');
+    end
+    if isfield(cfg,'towerClock') && isfield(cfg.towerClock,'products')
+        for kProd_ = 1:numel(cfg.towerClock.products)
+            prodK_ = cfg.towerClock.products(kProd_);
+            if isfield(prodK_,'sigmaBias_m') && isfield(prodK_,'sigmaDrift_mps')
+                covBDk_ = 0;
+                if isfield(prodK_,'covBiasDrift'); covBDk_ = prodK_.covBiasDrift; end
+                i_assertCovBiasDriftPsd(prodK_.sigmaBias_m, prodK_.sigmaDrift_mps, covBDk_, ...
+                    sprintf('cfg.towerClock.products(%d)', kProd_));
+            end
+        end
+    end
+
+    % --- Warn: explicit per-tower product sigmas silently re-source the same
+    % physical quantity as the fleet-wide default (Diagnosis C) ---
+    % Reads cfg.towerClock.correctionMode directly (declared unconditionally in
+    % masterConfig.m, unlike the DERIVED cfg.estimator.towerClockMode, which is not
+    % reliably available at this pre-resolution stage -- see finalizeConfig).
+    % Fleet-wide and per-tower sigmas are legitimately separate objects and are not
+    % required to match; only a >2x divergence is flagged, and only when the
+    % explicit-product modes are actually selected. Never fires on the shipped
+    % default (correctionMode='truthHistoryProductNoisy').
+    if isfield(cfg,'towerClock') && isfield(cfg.towerClock,'correctionMode') && ...
+            any(strcmp(cfg.towerClock.correctionMode, {'product','productNoisy'})) && ...
+            isfield(cfg.towerClock,'products') && ...
+            isfield(cfg,'clocks') && isfield(cfg.clocks,'tower') && ...
+            isfield(cfg.clocks.tower,'product') && ...
+            isfield(cfg.clocks.tower.product,'sigmaBias_m') && ...
+            cfg.clocks.tower.product.sigmaBias_m ~= 0
+        fleetSigma_ = cfg.clocks.tower.product.sigmaBias_m;
+        for kProd_ = 1:numel(cfg.towerClock.products)
+            if isfield(cfg.towerClock.products(kProd_),'sigmaBias_m')
+                prodSigma_ = cfg.towerClock.products(kProd_).sigmaBias_m;
+                if prodSigma_ ~= 0 && ...
+                        (abs(prodSigma_/fleetSigma_) > 2 || abs(fleetSigma_/prodSigma_) > 2)
+                    warning('validateMasterConfig:productSigmaDivergence', ...
+                        ['cfg.towerClock.correctionMode=''%s'' re-sources sigmaBias_m from ' ...
+                         'cfg.towerClock.products(%d).sigmaBias_m (%.6g m) instead of ' ...
+                         'cfg.clocks.tower.product.sigmaBias_m (%.6g m) -- more than 2x apart. ' ...
+                         'Same physical quantity, two config homes.'], ...
+                        cfg.towerClock.correctionMode, kProd_, prodSigma_, fleetSigma_);
+                end
+            end
+        end
+    end
+
     % --- Warn when hardware delay is enabled but leaves NO residual ---
     % Enabled with truth==model (matched default_m) and residualStochastic off contributes
     % exactly 0 to z-h -- flag it so it is not silently treated as an active imperfection.
@@ -481,4 +560,28 @@ function [found, value] = i_getPath(cfg, path)
         end
     end
     found = true;
+end
+
+function i_assertCovBiasDriftPsd(sigmaBias_m, sigmaDrift_mps, covBiasDrift, label)
+%I_ASSERTCOVBIASDRIFTPSD  Reject a (sigmaBias,sigmaDrift,covBiasDrift) triple whose
+%   implied 2x2 [sigmaBias^2 cov; cov sigmaDrift^2] block would be indefinite, i.e.
+%   |covBiasDrift| > sigmaBias_m*sigmaDrift_mps. covBiasDrift=0 and any NEGATIVE
+%   covBiasDrift both pass (the constraint is on the square, not the sign); a 1e-9
+%   relative slack admits an exact |rho|=1 computed as rho*sigmaBias*sigmaDrift in
+%   floating point (singular but still PSD).
+    bound2 = sigmaBias_m^2 * sigmaDrift_mps^2;
+    if covBiasDrift^2 <= bound2 * (1 + 1e-9)
+        return
+    end
+    denom = sigmaBias_m * sigmaDrift_mps;
+    if denom ~= 0
+        rhoStr = sprintf('%.4g', covBiasDrift / denom);
+    else
+        rhoStr = 'undefined (sigmaBias_m or sigmaDrift_mps is 0)';
+    end
+    error('validateMasterConfig:covBiasDriftNotPsd', ...
+        ['%s.covBiasDrift = %.6g violates |covBiasDrift| <= sigmaBias_m*sigmaDrift_mps ' ...
+         '= %.6g (sigmaBias_m=%.6g, sigmaDrift_mps=%.6g, implied rho=%s). The 2x2 ' ...
+         '[sigmaBias^2 cov; cov sigmaDrift^2] block would be indefinite.'], ...
+        label, covBiasDrift, sqrt(bound2), sigmaBias_m, sigmaDrift_mps, rhoStr);
 end

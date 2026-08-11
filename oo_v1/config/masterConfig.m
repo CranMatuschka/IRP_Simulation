@@ -2229,22 +2229,19 @@ cfg.errors.ionosphere.sigma_m              = 0.0;
 % When true, Doppler is excluded from ionoFreeCode mode (no IF Doppler model).
 cfg.errors.ionosphere.includeRateTerm      = false;
 
-% Tower clock product parameters (for product epoch caching)
-cfg.errors.towerClock.updateInterval_s     = 300;   % product update interval [s]
-cfg.errors.towerClock.latency_s            = 0;     % product delivery latency [s]
-% Tower clock product validity period
-% Shared clock-drift product uncertainty per tower.  Set > 0 if drift
-% corrections are active and their error should appear in R.
-cfg.errors.towerClock.driftCorrSigma_m_per_s = 0;  % [m/s], default: unmodelled
-cfg.clocks.tower.product.mode                   = 'truthHistoryProductNoisy';
-cfg.clocks.tower.product.updateInterval_s       = 30;
-cfg.clocks.tower.product.latency_s              = 5;
-cfg.clocks.tower.product.sigmaBias_m            = 0.01;
-cfg.clocks.tower.product.sigmaDrift_mps         = 0.0002;
-cfg.clocks.tower.product.covBiasDrift           = 0;
-cfg.clocks.tower.product.validity_s             = 120;
-cfg.clocks.tower.product.addToR                 = true;
-cfg.clocks.tower.product.sharedErrorCorrelation = true; % currently inert -- see the main block's comment
+% Diagnosis C: this used to be TWO separate blocks -- cfg.errors.towerClock.
+% {updateInterval_s,latency_s,driftCorrSigma_m_per_s} here, PLUS a verbatim
+% duplicate of the cfg.clocks.tower.product.* assignments already made at
+% :197-221 above. Both are gone. cfg.errors.towerClock.updateInterval_s/
+% latency_s were dead: cfg.clocks.tower.product's own updateInterval_s/
+% latency_s (30/5, always > 0 / >= 0) unconditionally win in
+% TowerClockCorrectionProvider.compute():81-88 and .computeDrift():430-440,
+% so editing the cfg.errors.towerClock pair changed nothing -- an inert
+% live-looking knob. driftCorrSigma_m_per_s had no reader anywhere in the
+% repo. The duplicate cfg.clocks.tower.product.* re-assignment below it
+% restated :197-221 with identical values (a no-op two edit sites for one
+% setting) -- cfg.clocks.tower.product is declared exactly once now, at
+% :197-221.
 
 cfg.errors.hardwareDelay.enable            = false;
 cfg.errors.hardwareDelay.truth.enable      = false;

@@ -71,21 +71,16 @@ classdef TowerClockCorrectionProvider
             % TASK 6: Product epoch computed ONCE before measurement loop so
             % 'product' and 'productNoisy' modes can evaluate b_hat(t_s) =
             % b(t_prod) + bdot(t_prod) * (t_s - t_prod) per tower.
-            updateInterval_s = 300;
-            latency_s        = 0;
-            if isfield(cfg,'errors') && isfield(cfg.errors,'towerClock')
-                tc2 = cfg.errors.towerClock;
-                if isfield(tc2,'updateInterval_s'); updateInterval_s = tc2.updateInterval_s; end
-                if isfield(tc2,'latency_s');        latency_s        = tc2.latency_s;        end
-            end
-            % clocks.tower.product.* takes precedence
+            % Diagnosis C: this used to seed local 300/0 defaults and let a
+            % cfg.errors.towerClock.{updateInterval_s,latency_s} fallback override
+            % them before clocks.tower.product.* took final precedence. That
+            % fallback was dead code -- productConfig_'s OWN internal defaults are
+            % 30 (>0) and 5 (>=0), so prodCfg always won regardless of what
+            % cfg.errors.towerClock held or whether it existed at all. Removed;
+            % cfg.clocks.tower.product is the sole owner of the product grid.
             [~, prodCfg] = models.clocks.TowerClockCorrectionProvider.productConfig_(cfg);
-            if prodCfg.updateInterval_s > 0
-                updateInterval_s = prodCfg.updateInterval_s;
-            end
-            if prodCfg.latency_s >= 0
-                latency_s = prodCfg.latency_s;
-            end
+            updateInterval_s = prodCfg.updateInterval_s;
+            latency_s        = prodCfg.latency_s;
 
             t_available = t_s - latency_s;
             if updateInterval_s > 0
@@ -426,18 +421,13 @@ classdef TowerClockCorrectionProvider
             drift_sigma = zeros(M,1);
             t_prod_out  = zeros(M,1);
 
-            % Product epoch scalar — same logic as compute()
+            % Product epoch scalar — same logic as compute(). Diagnosis C: the
+            % cfg.errors.towerClock fallback this used to consult here (mirroring
+            % compute()'s, now removed at :74-84) was equally dead -- pc.
+            % updateInterval_s/latency_s default to 30/5 inside productConfig_
+            % itself, never <=0/<0, so the fallback branch could not fire.
             updateInterval_s = pc.updateInterval_s;
             latency_s        = pc.latency_s;
-            try
-                tc2 = cfg.errors.towerClock;
-                if isfield(tc2,'updateInterval_s') && pc.updateInterval_s <= 0
-                    updateInterval_s = tc2.updateInterval_s;
-                end
-                if isfield(tc2,'latency_s') && pc.latency_s < 0
-                    latency_s = tc2.latency_s;
-                end
-            catch; end
             t_avail = t_s - latency_s;
             if updateInterval_s > 0
                 t_prod_scalar = floor(t_avail / updateInterval_s) * updateInterval_s;
@@ -619,6 +609,25 @@ classdef TowerClockCorrectionProvider
             meta.truthHistoryProductDriftUsed = truthHistoryProductDriftUsed;
         end
 
+        function pc = productSigmaConfig(cfg)
+            % productSigmaConfig  Public accessor for the product bias/drift/
+            % cross-covariance sigma triple (sigmaBias_m, sigmaDrift_mps,
+            % covBiasDrift), so every consumer that builds R from these three
+            % numbers resolves cfg.clocks.tower.product.* through the SAME
+            % defaults and the SAME isfield fallback as this class's own
+            % compute()/computeDrift(). Diagnosis C: before this existed,
+            % models.clocks.ProductClockCovarianceBuilder carried its own
+            % literal fallback defaults (0.10 m / 1e-3 m/s) that disagreed with
+            % productConfig_'s (0.05 m / 0.001 m/s) here, which disagreed with
+            % masterConfig's shipped value (0.01 m / 0.0002 m/s) -- three homes
+            % for one physical quantity, reachable only when a cfg omits
+            % cfg.clocks.tower.product entirely (masterConfig always declares
+            % it, so the isfield override wins on every shipped path and this
+            % does not move the default). See ProductClockCovarianceBuilder.
+            % productCfg_, the sole remaining caller.
+            [~, pc] = models.clocks.TowerClockCorrectionProvider.productConfig_(cfg);
+        end
+
     end  % Static methods
 
     methods (Static, Access = private)
@@ -760,6 +769,41 @@ classdef TowerClockCorrectionProvider
             try; includeWander_ = logical(cfg.covariance.productClock.includeOscillatorWander); catch; end
             if ~includeWander_; return; end
             h = clk.noiseCoeffs;
+            % Diagnosis B: h2 (WPM) and h1 (FPM) are excluded from this charge, and that
+            % exclusion is CORRECT, not an oversight -- but only because ClockModel.step
+            % never lets them reach the frequency state (h0 is the only phase-noise
+            % branch it draws for the bias increment; :291/:331 there). precomputeNoise
+            % (ClockModel.m:223), by contrast, DOES fold h2/h1 into the synthesised
+            % fractional-frequency series alongside hMinus1, so a nonzero h2/h1 WOULD
+            % show up in a truth frequency difference by the same mechanism hMinus1 uses
+            % above -- this function would then be knowingly wrong (R optimistic), not
+            % merely incomplete. No shipped oscillator class sets h2/h1 (ConfigFactory
+            % oscillatorCatalog_); the only route in is cfg.clock.customOscillators. An
+            % exact charge needs the synthesis grid's Nyquist frequency (ClockModel.m:
+            % 216-218), which this function does not receive, so refuse rather than
+            % guess -- same "won't build a knowingly wrong R" stance as
+            % explicitProductWanderVar_ above.
+            if h.h2 ~= 0 || h.h1 ~= 0
+                policy_ = 'error';
+                try; policy_ = cfg.validation.unsupportedFeaturePolicy; catch; end
+                msg_ = ['Oscillator has nonzero h2/h1 (WPM/FPM), which precomputeNoise ' ...
+                    'folds into the truth frequency state (ClockModel.m:223) but ' ...
+                    'frequencyWanderVar_ has no implemented rate-domain charge for -- R ' ...
+                    'would be knowingly optimistic. Set ' ...
+                    'cfg.validation.unsupportedFeaturePolicy = ''disableWithWarning'' to ' ...
+                    'proceed anyway (h2/h1 stay uncharged), or zero h2/h1 on this ' ...
+                    'oscillator.'];
+                if strcmp(policy_, 'disableWithWarning')
+                    persistent warnedH2H1_
+                    if isempty(warnedH2H1_); warnedH2H1_ = false; end
+                    if ~warnedH2H1_
+                        warning('TowerClockCorrectionProvider:h2h1Uncharged', '%s', msg_);
+                        warnedH2H1_ = true;
+                    end
+                else
+                    error('TowerClockCorrectionProvider:h2h1Uncharged', '%s', msg_);
+                end
+            end
             var_y = 2*pi^2 * h.hMinus2 * age_s ...   % RWFM, exact (3x the Allan term)
                   + 16*log(2) * h.hMinus1;           % FFM, calibrated against the generator
             var_m2s2 = (revgnss.Constants.SPEED_OF_LIGHT_MPS)^2 * max(var_y, 0);

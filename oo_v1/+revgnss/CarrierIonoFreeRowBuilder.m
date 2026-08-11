@@ -148,6 +148,16 @@ classdef CarrierIonoFreeRowBuilder
                 cpInfo_IF.productAge_s            = zeros(0,1);
                 cpInfo_IF.sigmaDrift_mps          = zeros(0,1);
                 cpInfo_IF.towerClockSharedSigma_m = zeros(0,1);
+                % Diagnosis D: same collapse, extended to the seven fields the populated
+                % branch below now also collapses -- see the comment there.
+                cpInfo_IF.towerClkModel_m                 = zeros(0,1);
+                cpInfo_IF.injectedSlip_m                  = zeros(0,1);
+                cpInfo_IF.interAntennaPhaseBiasTruth_m    = zeros(0,1);
+                cpInfo_IF.interAntennaPhaseBiasModel_m    = zeros(0,1);
+                cpInfo_IF.leverArmNorm_m                  = zeros(0,1);
+                cpInfo_IF.attitudePartialsEnabled         = false(0,1);
+                cpInfo_IF.attitudeSensitive               = false(0,1);
+                cpInfo_IF.hAttitudeNorm                   = zeros(0,1);
                 cpInfo_IF.signalIdx               = zeros(0,1);
                 cpInfo_IF.signalId                = {};
                 cpInfo_IF.ambiguityStateIdx       = zeros(0,1);
@@ -232,6 +242,33 @@ classdef CarrierIonoFreeRowBuilder
             if isfield(cpInfo, 'towerClockSharedSigma_m')
                 cpInfo_IF.towerClockSharedSigma_m = cpInfo.towerClockSharedSigma_m(idx1);
             end
+            % Diagnosis D: seven more per-row fields CarrierMeasurementBuilder declares
+            % (:84,86-92,103) that stayed at length 2*Mp here until now, silently
+            % disabling CarrierTrackManager's compensated slip detection (gated on
+            % numel(cpInfo.towerClkModel_m)==M, :81-82/:361) whenever carrier IF
+            % combination is on -- i.e. by default, the moment slip detection itself is
+            % turned on (it is off by default, so this did not move the shipped
+            % headline). towerClkModel_m is NON-DISPERSIVE -- identical on the L1 and L2
+            % rows of one (tower,antenna), so alpha+beta=1 makes v(idx1) exact, same
+            % reasoning as the towerClkBiasSigma_m collapse above. injectedSlip_m and the
+            % inter-antenna phase biases are added directly into z_phi/h_phi at each
+            % signal's OWN magnitude (CarrierMeasurementBuilder:452/462-463/469), so
+            % their contribution to the combined z_IF/h_IF is the alpha/beta combination,
+            % not a passthrough. leverArmNorm_m/attitudePartialsEnabled/
+            % attitudeSensitive/hAttitudeNorm are geometry/attitude row properties
+            % identical on L1 and L2 of one physical row (same antenna, same LOS) -- v(idx1)
+            % is exact.
+            cpInfo_IF.towerClkModel_m = cpInfo.towerClkModel_m(idx1);
+            cpInfo_IF.injectedSlip_m = alpha * cpInfo.injectedSlip_m(idx1) + ...
+                beta * cpInfo.injectedSlip_m(idx2);
+            cpInfo_IF.interAntennaPhaseBiasTruth_m = alpha * cpInfo.interAntennaPhaseBiasTruth_m(idx1) + ...
+                beta * cpInfo.interAntennaPhaseBiasTruth_m(idx2);
+            cpInfo_IF.interAntennaPhaseBiasModel_m = alpha * cpInfo.interAntennaPhaseBiasModel_m(idx1) + ...
+                beta * cpInfo.interAntennaPhaseBiasModel_m(idx2);
+            cpInfo_IF.leverArmNorm_m          = cpInfo.leverArmNorm_m(idx1);
+            cpInfo_IF.attitudePartialsEnabled = cpInfo.attitudePartialsEnabled(idx1);
+            cpInfo_IF.attitudeSensitive       = cpInfo.attitudeSensitive(idx1);
+            cpInfo_IF.hAttitudeNorm           = cpInfo.hAttitudeNorm(idx1);
             cpInfo_IF.signalIdx               = zeros(Mp, 1);  % 0 = ionosphere-free
             cpInfo_IF.signalId                = repmat({'L_IF'}, Mp, 1);
             ambIdxL1_                         = cpInfo.ambiguityStateIdx(idx1);

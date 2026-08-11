@@ -71,15 +71,25 @@ classdef CarrierTrackManager < handle
             slipInfo.nSuppressedCommonModeResets = 0;
             slipInfo.commonModeJump_m = 0;
             slipInfo.nBaselineDifferencedRows = 0;
+            slipInfo.productStepCompensationSuppressedReason = '';
 
             if ~sd.enable || M == 0
                 obj.updateHistory_(cpInfo, sd);
                 return
             end
 
-            % Model-step-compensated detection metadata.
+            % Model-step-compensated detection metadata. Diagnosis D: this gate used to
+            % fail SILENTLY whenever cpInfo carried stale metadata (e.g. the carrier
+            % ionosphere-free collapse leaving towerClkModel_m at 2*M against a
+            % post-collapse M) -- doCompensate just fell to false with no signal a
+            % caller could see. Recorded now, same fail-closed-and-say-so pattern as
+            % CarrierMeasurementBuilder's towerClockSharedSigmaSuppressed.
             hasModelMeta = isfield(cpInfo, 'towerClkModel_m') && ...
                            numel(cpInfo.towerClkModel_m) == M;
+            if sd.productStepCompensation && ~hasModelMeta
+                slipInfo.productStepCompensationSuppressedReason = ...
+                    'metadataLengthMismatch';
+            end
             doCompensate = hasModelMeta && sd.productStepCompensation;
 
             useNewMetrics = sd.commonModeEnable || sd.baselineDifferencedEnable;
@@ -356,6 +366,13 @@ classdef CarrierTrackManager < handle
 
         function updateHistory_(obj, cpInfo, sd)
             % Update history even when detection is disabled or M=0.
+            % Diagnosis D: this is the twin of process()'s hasModelMeta gate (:87-91),
+            % but its ONLY caller is process()'s own `~sd.enable || M==0` early return
+            % (:76-78), so the `if ~sd.enable; return` immediately below makes the loop
+            % body reachable only in the M==0 sub-case -- an empty loop. hasModelMeta
+            % here is therefore always evaluated against a loop that never iterates; no
+            % separate suppressed-reason report is wired here for that reason (there is
+            % nothing to report on an empty loop).
             if ~sd.enable; return; end
             M = numel(cpInfo.towerIdx);
             hasModelMeta = isfield(cpInfo,'towerClkModel_m') && numel(cpInfo.towerClkModel_m)==M;
