@@ -118,15 +118,87 @@ for m = {'truthProduct','product','productNoisy','truthHistoryProductNoisy','non
 end
 fprintf('    all modes: wander term is identically zero when deterministic\n');
 
+% ---------------------------------------------------------------------------
+% T6: 'none' gates on SILENCE, not on the deterministic flag
+% ---------------------------------------------------------------------------
+% T3 asserts the guard fires; this asserts it fires for the right reason. The first
+% version tested ~clock.deterministic alone, which conflates two different routes to a
+% zero bias: the flag SUPPRESSES the draws, while clockType='ZERO' has no noise to draw
+% (every h coefficient is zero). So ZERO with deterministic=false is provably silent --
+% measured, its bias moves 0 m over 64 s where CESIUM1 moves 0.133 m -- and was refused
+% anyway, by an error message that recommends clockType 'ZERO' as the remedy.
+% The converse hole is a clock the flag does NOT silence: driftRate_fracPerSec is a
+% DETERMINISTIC ramp, unsuppressed by the flag and just as uncovered by a finite R as a
+% random walk. No shipped fixture sets it, so it never showed up as a failure.
+fprintf('  T6: ''none'' gates on silence, not on the deterministic flag ...\n');
+silenceCases = { ...
+    'ZERO',    false, 0,     true,  'ZERO has no noise to draw; the flag is irrelevant'; ...
+    'ZERO',    true,  0,     true,  'silent by both routes at once'; ...
+    'CESIUM1', false, 0,     false, 'genuinely stochastic'; ...
+    'CESIUM1', true,  0,     true,  'flag suppresses the draws'; ...
+    'ZERO',    true,  1e-14, false, 'deterministic ramp the flag does not suppress'};
+for i = 1:size(silenceCases, 1)
+    [tc, det, drift, wantAccept, why] = silenceCases{i,:};
+    cfgS = i_stochasticTowerCfg('none', tc, det);
+    if drift ~= 0
+        % driftRate_fracPerSec IS a genuine ClockModel field, copied at construction,
+        % so unlike clockType this post-resolution assignment does reach the physics.
+        for k = 1:numel(cfgS.towers)
+            cfgS.towers(k).clock.driftRate_fracPerSec = drift;
+        end
+    end
+    accepted = true;
+    try
+        i_sigmaAt(cfgS, T_S);
+    catch me
+        if ~strcmp(me.identifier, 'TowerClockCorrectionProvider:uncorrectedStochasticClock')
+            rethrow(me);
+        end
+        accepted = false;
+    end
+    assert(accepted == wantAccept, ...
+        ['T6 FAILED: %s with deterministic=%d, drift=%g was %s by the ''none'' guard, ' ...
+         'but it is %s (%s). The guard must test whether the clock bias is identically ' ...
+         'zero for all time, not whether one suppression flag happens to be set.'], ...
+        tc, det, drift, i_verb(accepted), i_verb(wantAccept), why);
+    fprintf('    %-8s det=%d drift=%-6g -> %-8s  (%s)\n', ...
+        tc, det, drift, i_verb(accepted), why);
+end
+
+% The escape hatch must survive the config system, not just direct struct assignment.
+% It was previously read through a try/catch on a field masterConfig never declared, so
+% the remedy the error message names was rejected with deepMergeConfig:unknownConfigPath.
+cfgOpt = i_stochasticTowerCfg('none');
+cfgOpt.towerClock.allowUncorrectedStochasticClock = true;
+[sigOpt, ~] = i_sigmaAt(cfgOpt, T_S);
+assert(isfinite(sigOpt), 'T6 FAILED: the documented escape hatch did not admit the run.');
+assert(isfield(masterConfig().towerClock, 'allowUncorrectedStochasticClock'), ...
+    ['T6 FAILED: allowUncorrectedStochasticClock is not declared in masterConfig, so ' ...
+     'the escape hatch the error message recommends cannot be set through a scenario ' ...
+     'JSON or an overrides struct -- deepMergeConfig rejects it as an unknown path.']);
+fprintf('    escape hatch is declared in masterConfig and admits the run\n');
+
 fprintf('=== test_tower_clock_all_modes_charge_wander PASSED ===\n');
 
+function v = i_verb(accepted)
+    if accepted; v = 'ACCEPT'; else; v = 'REFUSE'; end
+end
+
 % ===========================================================================
-function cfg = i_stochasticTowerCfg(mode)
+function cfg = i_stochasticTowerCfg(mode, clockType, deterministic)
     % Golden-baseline error model, stochastic OCXO2 towers, one correction mode selected.
     % Explicit product structs are supplied so 'product'/'productNoisy' are reachable.
+    %
+    % The oscillator is selected through the RESOLVER, not by assigning clockType on the
+    % returned cfg. ClockModel copies cfg.noiseCoeffs verbatim and treats clockType as a
+    % label, so a post-resolution assignment renames the clock and leaves its h
+    % coefficients untouched -- the fixture would then test a caesium clock wearing a
+    % 'ZERO' nameplate.
+    if nargin < 2 || isempty(clockType);     clockType     = 'OCXO2'; end
+    if nargin < 3 || isempty(deterministic); deterministic = false;   end
     ov = struct(); ov.plots.enable = false; ov.report.enable = false;
-    ov.clock.tower.clockType = 'OCXO2';
-    ov.clock.tower.deterministic = false;
+    ov.clock.tower.clockType = clockType;
+    ov.clock.tower.deterministic = deterministic;
     cfg = resolveSimulationConfig('golden_baseline.json', ov);
     cfg.towerClock.correctionMode        = mode;
     cfg.towerClock.productValidityPolicy = 'warn';

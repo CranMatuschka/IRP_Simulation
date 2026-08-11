@@ -99,10 +99,12 @@ classdef TowerClockCorrectionProvider
                 switch mode
                     case 'none'
                         % No correction is applied, so the residual IS the raw tower clock
-                        % bias. For a stochastic oscillator that is a random walk: no
-                        % stationary variance, so no finite R covers it, and charging zero
-                        % makes the filter arbitrarily overconfident as the arc lengthens.
-                        % Legal only against a deterministic (identically zero) clock.
+                        % bias. Whenever that bias can wander or ramp, it enters the residual
+                        % unbounded and uncharged: a random walk has no stationary variance,
+                        % a frequency ramp grows without limit, so no finite R covers either
+                        % and the filter grows arbitrarily overconfident as the arc lengthens.
+                        % Legal only against a clock whose bias is identically zero for all
+                        % time -- see isSilentClock_ for what that actually requires.
                         % Opt-out for DIAGNOSTIC callers that want to observe the uncorrected
                         % bias in the innovation without running a filter on it (e.g.
                         % tests/test_tower_clock_correction_product T5). It is an explicit
@@ -112,17 +114,19 @@ classdef TowerClockCorrectionProvider
                             allowUncorrected_ = logical(cfg.towerClock.allowUncorrectedStochasticClock);
                         catch
                         end
-                        if ~towers{ti}.clock.deterministic && ~allowUncorrected_
+                        [silent_, why_] = models.clocks.TowerClockCorrectionProvider ...
+                            .isSilentClock_(towers{ti}.clock);
+                        if ~silent_ && ~allowUncorrected_
                             error('TowerClockCorrectionProvider:uncorrectedStochasticClock', ...
                                 ['towerClockMode=''none'' applies no tower clock correction, ' ...
-                                 'but tower %d carries a STOCHASTIC %s clock. The raw clock ' ...
-                                 'bias then enters the residual unbounded and uncharged, so ' ...
-                                 'no finite R is correct. Use a correction mode, make the ' ...
+                                 'but tower %d carries a NON-SILENT %s clock (%s). The raw ' ...
+                                 'clock bias then enters the residual unbounded and uncharged, ' ...
+                                 'so no finite R is correct. Use a correction mode, make the ' ...
                                  'tower clock silent (cfg.clock.tower.deterministic = true, ' ...
                                  'or clockType ''ZERO''), or set ' ...
                                  'cfg.towerClock.allowUncorrectedStochasticClock = true if ' ...
                                  'you are deliberately inspecting the uncorrected residual.'], ...
-                                ti, towers{ti}.clock.clockType);
+                                ti, towers{ti}.clock.clockType, why_);
                         end
                         towerClkModel(mi) = 0;
                     case 'perfectCorrection'
@@ -631,6 +635,53 @@ classdef TowerClockCorrectionProvider
     end  % Static methods
 
     methods (Static, Access = private)
+
+        function [tf, why] = isSilentClock_(clk)
+            % isSilentClock_  Is this clock's bias identically zero for all time?
+            %
+            % Only a silent clock may be left uncorrected (towerClockMode='none'), because
+            % then and only then is a zero charge in R the truth rather than an optimism.
+            % Three independent ways to be non-silent, all of which must be excluded:
+            %
+            %   1. stochastic wander -- but note that 'deterministic' is a SUPPRESSION FLAG,
+            %      not a statement about the oscillator. A ZERO clock has every h coefficient
+            %      at zero, so it is silent whether or not the flag is set: testing the flag
+            %      alone rejects clockType='ZERO' with deterministic=false, which is provably
+            %      silent, and which the error message itself recommends as the remedy.
+            %      Measured: ZERO/det=0 bias moves 0 m over 64 s, CESIUM1/det=0 moves 0.133 m.
+            %   2. a deterministic frequency ramp (driftRate_fracPerSec), which the
+            %      deterministic flag does NOT suppress -- it suppresses the random draws.
+            %      An uncorrected ramp is just as uncovered by a finite R as a random walk.
+            %   3. the gated relativistic offset, which accumulates as a linear bias ramp.
+            %
+            % No shipped fixture sets (2) or (3) on a tower, so they are latent rather than
+            % live; they are covered here because the predicate is "is the bias bounded and
+            % zero", and answering that question half-way is what produced the flag bug.
+            h  = clk.noiseCoeffs;
+            hv = [h.h2, h.h1, h.h0, h.hMinus1, h.hMinus2];
+            if ~clk.deterministic && any(hv ~= 0)
+                tf = false;
+                % Print the coefficients, not just the verdict. ClockModel copies
+                % cfg.noiseCoeffs verbatim and takes clockType as a LABEL ONLY -- the
+                % catalogue lookup lives in ConfigFactory -- so assigning clockType on an
+                % already-resolved config renames the clock without changing its physics.
+                % A clock reporting 'ZERO' while carrying caesium coefficients is then
+                % legible here instead of looking like a guard malfunction.
+                why = sprintf(['stochastic: deterministic=false with nonzero h ' ...
+                               '[h2 h1 h0 h-1 h-2] = [%g %g %g %g %g]'], hv);
+            elseif clk.driftRate_fracPerSec ~= 0
+                tf = false;
+                why = sprintf('deterministic frequency ramp driftRate_fracPerSec=%g', ...
+                              clk.driftRate_fracPerSec);
+            elseif clk.relativisticFracFreq ~= 0
+                tf = false;
+                why = sprintf('relativistic bias ramp relativisticFracFreq=%g', ...
+                              clk.relativisticFracFreq);
+            else
+                tf  = true;
+                why = '';
+            end
+        end
 
         function [hasProductCfg, pc] = productConfig_(cfg)
             % productConfig_  Parse cfg.clocks.tower.product.* for truthHistoryProductNoisy.

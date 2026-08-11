@@ -3165,6 +3165,16 @@ cfg.towerClock.correctionMode         = 'truthHistoryProductNoisy';
 cfg.towerClock.sigmaBias_m            = 0.0;
 cfg.towerClock.sigmaDrift_mps         = 0.0;
 cfg.towerClock.productValidityPolicy  = 'warn';  % 'warn' | 'error'
+% Diagnostic escape hatch for correctionMode='none'. That mode leaves the raw tower clock
+% bias in the residual, which only has a correct finite R when the clock is SILENT (see
+% TowerClockCorrectionProvider.isSilentClock_); otherwise the provider refuses. Setting
+% this true is an explicit acknowledgement that R is knowingly wrong -- for inspecting the
+% uncorrected residual, never for a filter run whose covariance you intend to believe.
+% Declared here because it was previously read only through a try/catch on a field no
+% config path defined, so the very remedy the error message recommends was rejected by
+% deepMergeConfig with unknownConfigPath. A documented escape hatch that the config system
+% refuses to accept is not an escape hatch.
+cfg.towerClock.allowUncorrectedStochasticClock = false;
 % cfg.towerClock.products is not set in defaultConfig (optional field).
 % Set it in towerClockProductConfig() or manually per tower.
 
