@@ -648,16 +648,31 @@ classdef EnvironmentModel < handle
 
             if strcmp(scintModel,'conker')
                 % Amplitude scintillation as an effective C/N0 loss (Conker et al. 2003).
-                % LIMITATION: S4zen carries NO frequency dependence, so the Conker fading
-                % factor below is band-blind by construction. This is not the anchor defect
-                % fixed above (there is no reference frequency here to mis-resolve) -- it is
-                % a missing term. Literature has S4 ~ f^-1.5; supplying that exponent is a
-                % modelling choice, not a bug fix, so it is left explicit rather than
-                % invented here. Read the freq009-013 fading factor with this in mind.
+                %
+                % S4zen is an L1-anchored climatology amplitude like the delay constants
+                % above, so it needs the SAME anchor conversion -- but with its own power
+                % law. Weak-scatter theory gives S4 ~ f^-1.5. The exponent is a MODELLING
+                % CHOICE rather than a bug fix, so it is explicit and defaults to 0, which
+                % makes climatologyAnchorScale return exactly 1.0 and leaves every existing
+                % result bit-identical. Note this is a SEPARATE exponent from
+                % frequencyExponent above: that one scales the sigma amplitude, this one
+                % scales S4 itself inside the fading factor.
+                %
+                % ⚠ SETTING THIS IS NOT FREE AT L-BAND, and the direction surprises people.
+                % S4 ~ f^-1.5 with L2 BELOW L1 means (1575.42/1227.60)^1.5 = 1.45, i.e. the
+                % L2 row gets 45% MORE scintillation, not less. With S4zen = 0.3 live in the
+                % golden and the min(0.7) clamp already firing on a third of epochs, that
+                % drives more L2 rows into the clamp, where the row sigma is pinned at
+                % 0.30/sqrt(0.02) = 2.121 m. Measure the clamp rate before enabling it under
+                % realism grade, and expect to re-cut goldens if you do.
                 S4zen = 0.3;
                 if isfield(sc,'S4zen'); S4zen = sc.S4zen; end
+                s4Exp = 0;
+                if isfield(sc,'s4FrequencyExponent'); s4Exp = sc.s4FrequencyExponent; end
+                s4Scale = models.atmosphere.IonosphereModel.climatologyAnchorScale(f_L1_Hz, s4Exp) ...
+                        * (f_L1_Hz / freqHz)^s4Exp;
                 sec  = obj.scintObliquity_(elevation_rad, elvFloor, sc);
-                S4   = min(0.7, abs(obj.scintAmplitude) * S4zen * sec^0.9);  % clamp below loss-of-lock
+                S4   = min(0.7, abs(obj.scintAmplitude) * S4zen * s4Scale * sec^0.9);  % clamp below loss-of-lock
                 sigma = sigmaL1 * freqFactor / sqrt(1 - 2*S4^2);
             else
                 % Legacy 1/sqrt(sin el) scaling (default; keeps the golden byte-identical).

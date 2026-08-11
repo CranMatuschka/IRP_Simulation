@@ -563,6 +563,7 @@ classdef ConfigFactory
                 cfg.measurements.codeMode              = 'singleFrequency';
                 cfg.estimation.ionosphereMode          = 'perTowerSlant';
                 cfg.errors.ionosphere.model.correction = 'none';
+
             else
                 cfg.measurements.codeMode = 'singleFrequency';   % RAW uncombined dual-freq
             end
@@ -1101,6 +1102,71 @@ classdef ConfigFactory
                          'hardware delay handling, which is not yet implemented. ' ...
                          'Use rxCodeBias.mode=''absorbedInReceiverClock'' or codeMode=''singleFrequency''.'], ...
                         rxMode13);
+                end
+            end
+
+            % ---- Link closure under gaseous absorption (WP4) --------------
+            % REFUSE a band whose link cannot close, at RESOLVE time, rather than running
+            % a simulation that produces nothing.
+            %
+            % WHY HERE AND NOT PER ROW. The original design dropped measurement rows below
+            % a C/N0 threshold and expected 61.25 GHz to "stop producing a solution at
+            % all", which would have forced the report builder, arcNisRowBudgetCloses and
+            % every gate to survive a zero-row run. It is not needed: the ITU-R P.676 table
+            % settles the question from frequency geometry alone, before a single epoch is
+            % simulated. This is the same principle the frequency sweep already
+            % established for the ionosphere state -- a gate must be computed at resolve
+            % time from frequency geometry, because run diagnostics cannot see it (NIS
+            % stayed in band across configurations differing 6x in position error).
+            %
+            % The test is ZENITH, i.e. the BEST case. If the link does not close looking
+            % straight up it never closes, so this refuses only the genuinely impossible
+            % and never a merely marginal geometry.
+            %
+            % INERT unless gaseous absorption is modelled AND the C/N0 noise model is in
+            % use, so no existing configuration is affected.
+            gaOn14 = isfield(cfg,'atmosphere') && isfield(cfg.atmosphere,'gaseousAbsorption') ...
+                     && isfield(cfg.atmosphere.gaseousAbsorption,'enable') ...
+                     && cfg.atmosphere.gaseousAbsorption.enable;
+            cn0On14 = isfield(cfg,'measurements') && isfield(cfg.measurements,'codeNoise') ...
+                      && isfield(cfg.measurements.codeNoise,'model') ...
+                      && strcmpi(cfg.measurements.codeNoise.model,'cn0');
+            if gaOn14 && cn0On14
+                cn0c14 = cfg.measurements.codeNoise.cn0;
+                base14 = 45;  gain14 = 6;  minTrk14 = 25;
+                if isfield(cn0c14,'base_dBHz');        base14   = cn0c14.base_dBHz;        end
+                if isfield(cn0c14,'elevationGain_dB'); gain14   = cn0c14.elevationGain_dB; end
+                if isfield(cn0c14,'minTrackable_dBHz'); minTrk14 = cn0c14.minTrackable_dBHz; end
+
+                sigs14 = revgnss.SignalUtils.resolvedSignalTable(cfg);
+                for s14 = 1:numel(sigs14)
+                    if ~sigs14(s14).enabled; continue; end
+                    f14 = sigs14(s14).frequency_Hz;
+                    if ~models.atmosphere.GaseousAbsorption.isTabulated(f14)
+                        error('ConfigFactory:gaseousAbsorptionNotTabulated', ...
+                            ['Signal %s resolves to %.4f MHz, which has no frozen ITU-R ' ...
+                             'P.676 entry, so its link budget cannot be checked. Add the ' ...
+                             'frequency to analysis/generate_gas_absorption_table.m, re-run ' ...
+                             'it, and paste the result into ' ...
+                             'models.atmosphere.GaseousAbsorption.TABLE_*.'], ...
+                            sigs14(s14).name, f14/1e6);
+                    end
+                    A14   = models.atmosphere.GaseousAbsorption.slantAttenuation_dB(f14, pi/2);
+                    cn014 = base14 + gain14 - A14;      % zenith: sin(el) = 1
+                    if cn014 < minTrk14
+                        error('ConfigFactory:linkDoesNotClose', ...
+                            ['Signal %s at %.4f MHz does not close: ITU-R P.676 gaseous ' ...
+                             'absorption is %.2f dB at ZENITH, giving C/N0 = %.1f dB-Hz ' ...
+                             'against a %.1f dB-Hz tracking threshold, i.e. %.1f dB short ' ...
+                             'in the best-case geometry.\n' ...
+                             'This is a physical result, not a misconfiguration: a ' ...
+                             'ground-to-space link at this band cannot be established ' ...
+                             'through the atmosphere. Remove the rung, or set ' ...
+                             'cfg.atmosphere.gaseousAbsorption.enable = false to study the ' ...
+                             'geometry in isolation while stating that absorption is ' ...
+                             'excluded.'], ...
+                            sigs14(s14).name, f14/1e6, A14, cn014, minTrk14, minTrk14 - cn014);
+                    end
                 end
             end
 
@@ -2591,6 +2657,39 @@ classdef ConfigFactory
                      'Missing: %s'], ...
                     cfg.validation.modelCoverageAudit.nModelCategoriesMissingUnsafe, ...
                     strjoin(cfg.validation.modelCoverageAudit.modelCoverageBlockingItems, ', '));
+            end
+
+            % --- slant-iono variance owned in TWO places at once ------------------
+            % errors.ionosphere.sigma_m is charged white into R every epoch while
+            % estimation.slantIono.sigma_ss_m hands the SAME amplitude of slow ionosphere
+            % to the state's P/Q, so S = H*P*H' + R pays for it twice. Measured
+            % 2026-08-11: ionosphere is 87.3%% of the code-channel R at 2.39x over-charge,
+            % giving code NIS/dof 0.47 (budget closes, 0.4696 predicted vs 0.4701 measured).
+            %
+            % Placed at the END of finalizeConfig ON PURPOSE. There are TWO independent
+            % routes to perTowerSlant -- atmosphere.estimateIono deriving it above, and a
+            % scenario JSON setting estimation.ionosphereMode outright, which is what
+            % golden_baseline.json does (with estimateIono FALSE). A check on either route
+            % alone is dead for the other, and a check in validateMasterConfig is dead for
+            % both because that runs BEFORE this derivation. Only the resolved value is
+            % trustworthy, and this is the first point where it is final.
+            ionoStateF_ = false;
+            try; ionoStateF_ = strcmp(cfg.estimation.ionosphereMode,'perTowerSlant'); catch; end
+            if ionoStateF_
+                rSigF_ = 0; ssSigF_ = 0; rScaleF_ = 1.0;
+                try; rSigF_   = cfg.errors.ionosphere.sigma_m;               catch; end
+                try; ssSigF_  = cfg.estimation.slantIono.sigma_ss_m;         catch; end
+                try; rScaleF_ = cfg.errors.ionosphere.rScaleWhenStateActive; catch; end
+                if rSigF_ > 0 && ssSigF_ > 0 && rScaleF_ == 1.0
+                    warning('ConfigFactory:slantIonoVarianceDoubleCounted', ...
+                        ['Slant-iono state active with errors.ionosphere.sigma_m = %g m AND ' ...
+                         'estimation.slantIono.sigma_ss_m = %g m: the same slow ionosphere ' ...
+                         'is charged in R and carried in the state covariance. Measured ' ...
+                         '2.39x over-charge on the ionosphere term, code NIS/dof 0.47. Set ' ...
+                         'errors.ionosphere.rScaleWhenStateActive < 1 once the model pair is ' ...
+                         'characterised over seeds/elevations/TEC -- never by tuning against ' ...
+                         'one run''s NIS.'], rSigF_, ssSigF_);
+                end
             end
         end
 

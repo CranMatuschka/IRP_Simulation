@@ -172,24 +172,101 @@ classdef MeasurementModelUtils
                     mapping = 1 / max(sin(elv), sin(elvFloor));
                     sigma   = sigma0 * mapping^p;
                 case 'cn0'
-                    % C/N0-based thermal weighting: sigma = sigma0 * 10^(-(C/N0-45)/20),
-                    % with C/N0 = base_dBHz + elevationGain_dB*sin(el). sigma0 (per-signal)
-                    % is the sigma at 45 dB-Hz, so a higher received C/N0 (better link,
-                    % antenna gain or lower system temperature) LOWERS the code noise, and
-                    % high-elevation links are favoured over low ones. Mirrors ErrorChain.
-                    base_dBHz = 45; elevGain_dB = 6;
-                    if isfield(cfg,'measurements') && isfield(cfg.measurements,'codeNoise') && ...
-                            isfield(cfg.measurements.codeNoise,'cn0')
-                        cn0c = cfg.measurements.codeNoise.cn0;
-                        if isfield(cn0c,'base_dBHz');        base_dBHz   = cn0c.base_dBHz;        end
-                        if isfield(cn0c,'elevationGain_dB'); elevGain_dB = cn0c.elevationGain_dB; end
+                    % Delegates to the ONE shared C/N0 implementation -- see cn0CodeSigma.
+                    % This branch and ErrorChain.computeCodeSigmaVec_ used to carry two
+                    % copies of the same arithmetic, which had already drifted (this one
+                    % floors the elevation, that one does not).
+                    f_Hz = [];
+                    if isstruct(sigCfg) && isfield(sigCfg,'frequency_Hz')
+                        f_Hz = sigCfg.frequency_Hz;
                     end
-                    elC      = max(elv, elvFloor);
-                    cn0_dBHz = base_dBHz + elevGain_dB * sin(elC);
-                    sigma    = sigma0 * 10^(-(cn0_dBHz - 45)/20);
+                    elC   = max(elv, elvFloor);
+                    sigma = models.measurements.MeasurementModelUtils.cn0CodeSigma( ...
+                                sigma0, elC, cfg, f_Hz);
                 otherwise
                     sigma = sigma0;
             end
+        end
+
+        function [sigma, cn0_dBHz, A_gas_dB] = cn0CodeSigma(sigma0_m, elevation_rad, cfg, f_Hz)
+            % cn0CodeSigma  Code sigma from a C/N0 link model. THE single implementation.
+            %
+            %   C/N0  = base_dBHz + elevationGain_dB*sin(el) - A_gas(f, el)
+            %   sigma = sigma0_m * 10^(-(C/N0 - 45)/20)
+            %
+            % sigma0_m is the sigma at 45 dB-Hz, so a better link (more gain, lower system
+            % temperature, less absorption) LOWERS the code noise and high-elevation links
+            % are favoured over low ones.
+            %
+            % WHY THIS IS SHARED. Two call sites computed this independently --
+            % codeSignalSigma above and ErrorChain.computeCodeSigmaVec_ -- and they had
+            % ALREADY DRIFTED before absorption was ever added. Any new term would have had
+            % to be written twice and would eventually have been written differently.
+            %
+            % ⚠ elevation_rad is used AS GIVEN. The caller decides whether to floor it,
+            % because the two callers genuinely differ: codeSignalSigma passes
+            % max(elv, ELEVATION_FLOOR_RAD) and ErrorChain passes the raw elevation. That
+            % difference is PRESERVED here rather than silently unified, because unifying
+            % it would move results below the floor elevation. It is unreachable under the
+            % golden's 10 deg mask, so it is a latent inconsistency, not a live one.
+            %
+            % sigma0_m also differs by caller by design: per-signal codeSigma0_m in one,
+            % cn0.sigmaAt45dBHz_m in the other. It is therefore an ARGUMENT, not a lookup.
+            %
+            % ABSORPTION is gated OFF by default and contributes exactly 0 dB when off, so
+            % goldens are bit-identical. f_Hz may be empty, in which case the primary
+            % signal's frequency is resolved from cfg.
+            if nargin < 4; f_Hz = []; end
+
+            base_dBHz = 45; elevGain_dB = 6;
+            if isfield(cfg,'measurements') && isfield(cfg.measurements,'codeNoise') && ...
+                    isfield(cfg.measurements.codeNoise,'cn0')
+                cn0c = cfg.measurements.codeNoise.cn0;
+                if isfield(cn0c,'base_dBHz');        base_dBHz   = cn0c.base_dBHz;        end
+                if isfield(cn0c,'elevationGain_dB'); elevGain_dB = cn0c.elevationGain_dB; end
+            end
+
+            A_gas_dB = models.measurements.MeasurementModelUtils.gaseousAbsorption_( ...
+                           cfg, elevation_rad, f_Hz);
+
+            cn0_dBHz = base_dBHz + elevGain_dB * sin(elevation_rad) - A_gas_dB;
+            sigma    = sigma0_m * 10^(-(cn0_dBHz - 45)/20);
+        end
+
+        function A_dB = gaseousAbsorption_(cfg, elevation_rad, f_Hz)
+            % gaseousAbsorption_  ITU-R P.676 slant absorption [dB], or exactly 0 when off.
+            %
+            % Returns a HARD ZERO unless cfg.atmosphere.gaseousAbsorption.enable is true,
+            % so every existing result is bit-identical and the gate cannot leak. Nothing
+            % below this line runs in the default configuration -- not even the frequency
+            % resolution, which would otherwise error on the reduced cfg structs some unit
+            % tests build.
+            A_dB = 0;
+
+            if ~isfield(cfg,'atmosphere') || ~isfield(cfg.atmosphere,'gaseousAbsorption')
+                return;
+            end
+            ga = cfg.atmosphere.gaseousAbsorption;
+            if ~isfield(ga,'enable') || ~ga.enable
+                return;
+            end
+
+            if isempty(f_Hz)
+                f_Hz = revgnss.SignalUtils.frequency(cfg, revgnss.SignalUtils.primaryName(cfg));
+            end
+
+            opts = struct();
+            if isfield(ga,'mappingKind') && ~isempty(ga.mappingKind)
+                opts.mappingKind = ga.mappingKind;
+            end
+            % NOTE: the per-tower humidity scaling that GaseousAbsorption supports via
+            % opts.ZWD_m is NOT wired here. Neither call site knows its tower index, so
+            % threading it would touch both measurement builders. The reference ZWD is
+            % used instead, i.e. climatological mean humidity. That is exact below 6 GHz
+            % (water vapour is under 8% of the total there) and is the dominant remaining
+            % approximation at 24.125 GHz, where it is 81%.
+            A_dB = models.atmosphere.GaseousAbsorption.slantAttenuation_dB( ...
+                       f_Hz, elevation_rad, opts);
         end
 
         function d = rxCodeBiasModel(cfg)

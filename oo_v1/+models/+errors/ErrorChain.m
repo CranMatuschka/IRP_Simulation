@@ -485,19 +485,24 @@ classdef ErrorChain < handle
                     sigma_vec = sigma0 * mapping.^p;
 
                 case 'cn0'
-                    % CN0-based sigma model
+                    % CN0-based sigma model. Delegates to the ONE shared implementation,
+                    % models.measurements.MeasurementModelUtils.cn0CodeSigma, which this
+                    % branch used to duplicate. base_dBHz and elevationGain_dB are read
+                    % there; only sigma0 is resolved here, because the two callers source
+                    % it differently on purpose (per-signal codeSigma0_m there,
+                    % cn0.sigmaAt45dBHz_m here).
+                    %
+                    % ⚠ The elevation is passed UNFLOORED, which is what this branch has
+                    % always done. Its twin floors at ELEVATION_FLOOR_RAD. Preserved rather
+                    % than unified so this stays bit-identical -- see cn0CodeSigma.
                     cn0cfg = obj.cfg.measurements.codeNoise.cn0;
-                    base_dBHz   = 45;
-                    elevGain_dB = 6;
                     sigmaAt45_m = 0.30;
-                    if isfield(cn0cfg,'base_dBHz');        base_dBHz   = cn0cfg.base_dBHz; end
-                    if isfield(cn0cfg,'elevationGain_dB'); elevGain_dB = cn0cfg.elevationGain_dB; end
                     if isfield(cn0cfg,'sigmaAt45dBHz_m');  sigmaAt45_m = cn0cfg.sigmaAt45dBHz_m; end
 
                     sigma_vec = zeros(N,1);
                     for k = 1:N
-                        cn0_dBHz  = base_dBHz + elevGain_dB * sin(elv(k));
-                        sigma_vec(k) = sigmaAt45_m * 10^(-(cn0_dBHz - 45)/20);
+                        sigma_vec(k) = models.measurements.MeasurementModelUtils.cn0CodeSigma( ...
+                            sigmaAt45_m, elv(k), obj.cfg, []);
                     end
 
                 otherwise
@@ -811,6 +816,52 @@ classdef ErrorChain < handle
             else
                 sigmaStochR = zeros(N,1);
             end
+
+            % The double-count guard above operates on sigmaVDelayR, which reaches R only
+            % through sigmaStochR. MEASURED 2026-08-11 on golden_baseline: sigmaStochR is
+            % IDENTICALLY ZERO (residualOn false) while sigmaBase carries 100.0% of the
+            % ionosphere R term (1.77302 m^2, exact match). So the guard reduces a quantity
+            % that is already nil and protects nothing, while the term it does not touch is
+            % the entire charge -- and estimation.ionosphereMode='perTowerSlant' IS active,
+            % which is precisely the condition the guard exists for.
+            %
+            % The two knobs are the SAME physical quantity written twice:
+            %     estimation.slantIono.sigma_ss_m = 1   (amplitude the STATE tracks -> P/Q)
+            %     errors.ionosphere.sigma_m       = 1   (charged white into R every epoch)
+            % so S = H*P*H' + R pays for the slow ionosphere on both sides. Consequence,
+            % measured: code-channel NIS/dof 0.47, i.e. R over-charged 2.13x overall, of
+            % which ionosphere is 87.3% at 2.39x. Conservative, not dangerous, but it
+            % de-weights the most numerous observable (40 of 105 rows).
+            %
+            % rScaleWhenStateActive is the single lever that fixes it, DEFAULT 1.0 so this
+            % change is byte-identical. Setting it below 1 is deliberately NOT done here:
+            % the correct value is what the state fails to absorb, which is an observability
+            % property of the geometry, not a closed form -- the perfect-tracking bound is
+            % sigma_ss*sqrt(1-exp(-2*dt/tau)) = 0.0577 m and the no-tracking bound is the
+            % full 1 m, with the measured residual implying ~0.63 m. Pick it by
+            % characterising the model pair over seeds/elevations/TEC, never by tuning until
+            % one run's NIS hits 1.
+            rScale_ = 1.0;
+            try; rScale_ = obj.cfg.errors.ionosphere.rScaleWhenStateActive; catch; end
+            if ionoStateActive
+                if rScale_ == 1.0 && any(sigmaBase > 0)
+                    persistent warnedIonoDoubleCount_
+                    if isempty(warnedIonoDoubleCount_); warnedIonoDoubleCount_ = false; end
+                    if ~warnedIonoDoubleCount_
+                        warning('ErrorChain:ionoVarianceDoubleCounted', ...
+                            ['The slant-iono STATE is active and R still charges the full ' ...
+                             'errors.ionosphere.sigma_m = %g m base, so the same slow ' ...
+                             'ionosphere is paid for in P and in R. Measured cost: code ' ...
+                             'NIS/dof 0.47 (R over-charged 2.13x, ionosphere 87%% of it). ' ...
+                             'Set errors.ionosphere.rScaleWhenStateActive below 1 once the ' ...
+                             'model pair has been characterised.'], ...
+                            obj.cfg.errors.ionosphere.sigma_m);
+                        warnedIonoDoubleCount_ = true;
+                    end
+                end
+                sigmaBase = sigmaBase * rScale_;
+            end
+
             sigma_m = sqrt(sigmaBase.^2 + sigmaStochR.^2);
         end
 

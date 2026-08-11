@@ -9,9 +9,16 @@ function test_stage43_ionosphere_free_combination_diagnostics
     nPass = 0; nFail = 0;
     fL1 = 1575.42e6;  fL2 = 1227.60e6;
 
+    % cfg is REQUIRED since the 2026-08-10 cfg-first migration, which deleted the
+    % name-keyed catalogue fallback: it answered with the GPS L1/L2 constants whatever
+    % band the scenario had retuned to, so ~30 call sites silently measured 1575.42 MHz.
+    % defaultConfig resolves L1/L2/L5 at their catalogue frequencies, which is what the
+    % fL1/fL2 expectations below assume.
+    cfg = revgnss.ConfigFactory.defaultConfig();
+
     % ---- T1: Coefficients ----
     try
-        c = revgnss.IonosphereFreeCombinationDiagnostics.coefficients('L1','L2');
+        c = revgnss.IonosphereFreeCombinationDiagnostics.coefficients('L1','L2',cfg);
         assert(isfinite(c.alpha) && isfinite(c.beta), 'T1: alpha/beta must be finite');
         assert(c.alpha > 1, 'T1: alpha must be > 1');
         assert(c.beta  < 0, 'T1: beta must be < 0');
@@ -25,7 +32,7 @@ function test_stage43_ionosphere_free_combination_diagnostics
 
     % ---- T2: First-order ionosphere cancellation ----
     try
-        c = revgnss.IonosphereFreeCombinationDiagnostics.coefficients('L1','L2');
+        c = revgnss.IonosphereFreeCombinationDiagnostics.coefficients('L1','L2',cfg);
         assert(abs(c.firstOrderIonoCheck.codeResidual_m)    < 1e-9, ...
             'T2: code IF iono residual must be near zero');
         assert(abs(c.firstOrderIonoCheck.carrierResidual_m) < 1e-9, ...
@@ -44,7 +51,7 @@ function test_stage43_ionosphere_free_combination_diagnostics
     % ---- T3: Noise amplification ----
     try
         sigma = 0.03;
-        n = revgnss.IonosphereFreeCombinationDiagnostics.noiseAmplification('L1','L2',sigma,sigma);
+        n = revgnss.IonosphereFreeCombinationDiagnostics.noiseAmplification('L1','L2',sigma,sigma,cfg);
         assert(n.sigmaIF > sigma, 'T3: IF sigma must exceed individual sigma');
         assert(n.amplificationVsA > 1, 'T3: amplificationVsA must be > 1');
         assert(n.amplificationVsEqualSigma > 2, 'T3: amplification factor must be > 2 (expect ~2.98)');

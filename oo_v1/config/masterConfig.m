@@ -152,6 +152,20 @@ cfg.errors.ionosphere.higherOrder.enable   = false;
 % 0.50 m of uncertainty, with the disabled stochastic sigma silently covering the
 % rest inside R. 0.50 -> 1.00 makes the declaration match the committed error.
 cfg.errors.ionosphere.sigma_m              = 1.00;
+% Scales the ionosphere R base when the slant-iono STATE is active, and ONLY then.
+% DEFAULT 1.0 = the historical behaviour, byte-identical: R charges the full sigma_m even
+% though estimation.slantIono.sigma_ss_m already hands the same 1 m to the state. That is
+% a measured double count -- code-channel NIS/dof 0.47, ionosphere 87.3% of code R at
+% 2.39x over-charge -- and this knob is the single lever that resolves it.
+%
+% It is deliberately still 1.0. The correct value is the fraction of the ionosphere the
+% state FAILS to absorb, which is an observability property of the geometry rather than a
+% closed form: the perfect-tracking bound is sigma_ss*sqrt(1-exp(-2*dt/tau)) = 0.058 m and
+% the no-tracking bound is the full 1 m. Fix it by characterising the configured truth/model
+% pair over seeds, elevations and TEC -- a property of the two MODELS, legitimate to
+% measure -- and never by tuning until one run's NIS reaches 1, which would be fitting R to
+% truth. Accept only if NIS/dof approaches 1 ACROSS scenarios and seeds.
+cfg.errors.ionosphere.rScaleWhenStateActive = 1.0;
 
 %% Error sources
 % Hardware delay, multipath, tower survey, antenna PCV and correlated noise are off
@@ -2129,8 +2143,38 @@ cfg.measurements.codeNoise.elevationExponent = 1.0;
 cfg.measurements.codeNoise.cn0.enable           = false;
 cfg.measurements.codeNoise.cn0.base_dBHz        = 45;
 cfg.measurements.codeNoise.cn0.elevationGain_dB = 6;
-cfg.measurements.codeNoise.cn0.weatherLossScale_dB = 2;
 cfg.measurements.codeNoise.cn0.sigmaAt45dBHz_m  = 0.30;
+% Receiver tracking threshold. Below this C/N0 there is no measurement at all, not a
+% noisy one. Used ONLY by the resolve-time link-closure guard in
+% ConfigFactory.finalizeConfig, which refuses a band whose ZENITH (best-case) C/N0 falls
+% below it. 25 dB-Hz is a conventional GNSS carrier-tracking floor. This is not a per-row
+% mask: the guard exists so an impossible band fails at config resolve with the number,
+% rather than running a simulation that produces nothing.
+cfg.measurements.codeNoise.cn0.minTrackable_dBHz = 25;
+% weatherLossScale_dB DELETED 2026-08-11. It was a 2 dB scalar placeholder with no model
+% behind it and NO READER ANYWHERE, i.e. one of the inert toggles the toggle audit counted.
+% Keeping it beside the real ITU-R P.676 absorption term below would have left two knobs
+% that look equivalent, one of which lies. Real gaseous absorption is
+% cfg.atmosphere.gaseousAbsorption.enable.
+
+% --- Gaseous absorption (ITU-R P.676) ---------------------------------
+% Oxygen and water vapour absorb the carrier. Subtracted from C/N0 in the 'cn0' code
+% noise model, so it only bites when codeNoise.model = 'cn0'.
+%
+% DEFAULT OFF, and deliberately NOT part of realism grade. At L-band it is 0.034 dB
+% zenith -- about 0.4% on code sigma at zenith and 2.2% at the 10 deg mask -- so
+% enabling it under realism would re-cut all eight goldens and cost cross-ladder
+% comparability to buy nothing. It exists for the frequency ladder, where it decides
+% whether a band is usable at all: 24.125 GHz costs 4.6% on sigma, and 61.25 GHz costs
+% 161 dB, which no link budget survives.
+%
+% Table and provenance: models.atmosphere.GaseousAbsorption.
+% Generator: analysis/generate_gas_absorption_table.m (plain MATLAB, no toolbox).
+cfg.atmosphere.gaseousAbsorption.enable      = false;
+% Mapping used for the slant path. 'simple' is 1/sin(el); 'niell' splits the hydrostatic
+% and wet obliquities, which matters only where water vapour is a large share of the
+% total (24 GHz, where it is 81%).
+cfg.atmosphere.gaseousAbsorption.mappingKind = 'simple';
 
 % --- Environment / weather -------------------------------------------
 cfg.environment.weather.enable                 = false;
@@ -2220,6 +2264,23 @@ cfg.errors.ionosphere.scintillation.process           = 'gaussMarkov';
 cfg.errors.ionosphere.scintillation.tau_s             = 30;
 cfg.errors.ionosphere.scintillation.sigmaCodeL1_m     = 0.3;
 cfg.errors.ionosphere.scintillation.frequencyExponent = 1.0;
+% Dispersive power law for S4 ITSELF, applied to the L1-anchored S4zen inside the Conker
+% fading factor 1/sqrt(1-2*S4^2). DISTINCT from frequencyExponent above, which scales the
+% sigma AMPLITUDE. Weak-scatter theory gives S4 ~ f^-1.5.
+%
+% DEFAULT 0, which makes the anchor scale exactly 1.0 and reproduces today's behaviour
+% bit-for-bit. Deliberately NOT set to 1.5 under realism grade yet.
+%
+% ⚠ 1.5 is NOT a free change, and it moves L-band the "wrong" way. L2 is BELOW L1, so
+% (1575.42/1227.60)^1.5 = 1.45 puts 45% MORE scintillation on the L2 row. With S4zen = 0.3
+% in the golden and the min(0.7) clamp already firing on ~a third of epochs, that pushes
+% more L2 rows into the clamp, where the row sigma pins at 0.30/sqrt(0.02) = 2.121 m.
+% Measure the clamp rate first; enabling it re-cuts every realism golden.
+%
+% At high bands it does what you would expect and costs nothing: at 61.25 GHz S4 falls from
+% 0.3 to ~0.0012, taking the scintillation sigma from ~54 mm to ~8 mm, which is 1.6% of a
+% 0.30 m code noise budget. That is why this is not worth enabling on its own.
+cfg.errors.ionosphere.scintillation.s4FrequencyExponent = 0;
 cfg.errors.ionosphere.scintillation.affectsCodeNoise  = true;
 cfg.errors.ionosphere.scintillation.affectsPseudorangeBias = false;
 cfg.errors.ionosphere.scintillation.phaseScint.enable       = false;
@@ -3143,6 +3204,14 @@ cfg.estimation.ionosphereMode = 'none';
 cfg.estimation.slantIono.tau_s          = 900;    % slant-iono GM correlation time [s]
 cfg.estimation.slantIono.sigma_ss_m     = 1.0;    % steady-state slant-iono sigma [m]
 cfg.estimation.slantIono.initialSigma_m = 5.0;    % initial 1-sigma [m]
+% ⚠ slantIono.sigma_ss_m and errors.ionosphere.sigma_m are THE SAME PHYSICAL QUANTITY --
+% the amplitude of the slow ionospheric variation -- and both are 1.0. With the state
+% active the filter therefore pays for it TWICE: once in P/Q through this state, once as
+% white noise in R through errors.ionosphere.sigma_m. S = H*P*H' + R is inflated and the
+% code channel reads NIS/dof 0.47 (measured 2026-08-11; ionosphere is 87.3% of code R at
+% 2.39x over-charge, and the whole budget closes to 0.4696 predicted vs 0.4701 measured).
+% validateMasterConfig warns when both are set and the state is on. The lever is
+% errors.ionosphere.rScaleWhenStateActive; see that entry for why it is still 1.0.
 
 % --- Antenna PCV model (Step 4) ---------------------------------
 % pcvModel: 'none' | 'toy' | 'table'

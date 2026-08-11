@@ -58,18 +58,20 @@ cfg2.errors.ionosphere.includeRateTerm = true;  % ON — should trigger guard
 
 [asset2, towers2, ekf2, measModel2, ~, ~] = revgnss.ScenarioFactory.build(cfg2);
 
-warningCaught = false;
-lastwarn('');  % clear last warning
-warnId = 'revgnss:ionoFreeCode';
+% ⚠ lastwarn() CANNOT SEE THIS WARNING, and using it here made the test fail against
+% working code. lastwarn holds only the MOST RECENT warning, and computeMeasurements
+% goes on to emit ProductClockCovarianceBuilder:crossSuppressed -- precisely BECAUSE the
+% guard removed the Doppler rows, leaving R with code+carrier but a row budget that
+% still counts Doppler. So the warning under test is always overwritten by a direct
+% CONSEQUENCE of the behaviour under test. Capture the printed warning stream instead.
+warnState = warning('query', 'revgnss:ionoFreeCode');
+assert(strcmp(warnState.state, 'on'), ...
+    'T2b FAILED: revgnss:ionoFreeCode is disabled, so this test cannot observe it');
 
-[z2, h2, H2, R2, errStruct2] = measModel2.computeMeasurements( ...
-    asset2, towers2, ekf2.x, 0, ekf2.stateMap);
+capture = evalc(['[z2, h2, H2, R2, errStruct2] = measModel2.computeMeasurements(' ...
+                 'asset2, towers2, ekf2.x, 0, ekf2.stateMap);']);
 
-[warnMsg, warnId2] = lastwarn();
-if contains(warnId2, 'ionoFreeCode') || contains(warnMsg, 'includeRateTerm') || ...
-        contains(warnMsg, 'Doppler')
-    warningCaught = true;
-end
+warningCaught = contains(capture, 'ionoFreeCode') || contains(capture, 'includeRateTerm');
 
 % With guard active: numel(z2) should equal M_pr (no Doppler rows)
 M_pr2    = errStruct2.nPseudorange;

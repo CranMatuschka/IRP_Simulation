@@ -188,6 +188,21 @@ function cfg = i_plainCfg()
     cfg.atmosphere.realistic = false;
     cfg.errors.troposphere.enable = false;
     cfg.errors.ionosphere.enable  = false;
+    % ⚠ THE MASTER ENABLE IS NOT ENOUGH, and this test used to assert against a premise
+    % that was simply false. errors.ionosphere.enable has NO physics reader: the truth and
+    % model paths gate on errors.ionosphere.{truth,model}.enable, and
+    % resolveEnablePairsPostMerge does not propagate the master switch down to them. With
+    % only the line above, this config resolves to master 0 / truth 1 -- a LIVE truth
+    % ionosphere -- so T4's "no truth ionosphere" premise did not hold and the row
+    % correctly reported 'matched'. The same defect is why the feat ablation rungs
+    % (feat001/002/006/007/009/014) disable nothing.
+    % Set the fields the physics actually reads. The troposphere needs the same
+    % treatment for the same reason -- T5 asserts cfgOff has no truth troposphere, and
+    % errors.troposphere.enable alone does not deliver that either.
+    cfg.errors.ionosphere.truth.enable  = false;
+    cfg.errors.ionosphere.model.enable  = false;
+    cfg.errors.troposphere.truth.enable = false;
+    cfg.errors.troposphere.model.enable = false;
     cfg.report.writePdf = false; cfg.report.writeMat = false; cfg.report.compileTex = 'never';
     cfg.plots.enable = false; cfg.plots.showFigures = false;
 end
