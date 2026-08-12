@@ -67,6 +67,13 @@ classdef TruthEndpointReplay < handle
                     reason = ['missing:' need{i}]; return
                 end
             end
+            % truthRelativisticFracFreq is legitimately 0 (the default, relativistic clock off), so
+            % it is checked for PRESENCE only -- an isempty test would reject every ordinary run.
+            % Required rather than defaulted because a silent 0 on a run that DID enable the
+            % relativistic clock would double-count y_rel into every endpoint rate.
+            if ~isfield(assetResult,'truthRelativisticFracFreq')
+                reason = 'missing:truthRelativisticFracFreq'; return
+            end
             % State-grid series must cover every epoch; the clock series need only be
             % interpolatable onto it (see isUsable).
             if size(assetResult.truthTraj,2) < nEpoch
@@ -116,6 +123,10 @@ classdef TruthEndpointReplay < handle
 
             obj.nEpoch_ = n;
             obj.clock   = revgnss.TruthEndpointReplayClock();
+            % The recorded drift series is the TOTAL rate (relativistic offset included). The
+            % four-timestamp endpoint supplies properTimeRate separately, so the replay clock needs
+            % the run's y_rel to hand back an oscillator-only rate and avoid double-counting it.
+            obj.clock.setRelativisticFracFreq(assetResult.truthRelativisticFracFreq);
             obj.seek(1);
         end
 

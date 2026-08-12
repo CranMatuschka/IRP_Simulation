@@ -2563,6 +2563,17 @@ classdef ReportRunner
             % antenna by up to ~0.9 m per endpoint), and the drift sets the endpoint's local clock
             % rate. Recording them here is what lets revgnss.SwarmRelativeSolver replay the REAL
             % four-timestamp physics instead of a synthetic clock difference.
+            % Constant relativistic fractional-frequency offset of THIS asset's truth clock. The
+            % recorded drift series below is the TOTAL rate (SimulationDataStore records
+            % clock.getDriftMetersPerSecond()), but the four-timestamp endpoint supplies
+            % properTimeRate separately and therefore needs the oscillator-only rate. Recording
+            % y_rel lets revgnss.TruthEndpointReplayClock subtract it instead of double-counting
+            % c*y_rel = 0.1615 m/s into every replayed endpoint.
+            res.truthRelativisticFracFreq = 0;
+            try
+                res.truthRelativisticFracFreq = sim.asset.clock.relativisticFracFreq;
+            catch
+            end
             res.truthAttTraj_rad = []; res.truthClkDriftTraj_mps = []; res.truthStateTime_s = [];
             try
                 D = sim.simData.getData();
