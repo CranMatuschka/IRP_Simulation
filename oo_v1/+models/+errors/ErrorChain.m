@@ -851,7 +851,11 @@ classdef ErrorChain < handle
             % characterising the model pair over seeds/elevations/TEC, never by tuning until
             % one run's NIS hits 1.
             rScale_ = 1.0;
-            try; rScale_ = obj.cfg.errors.ionosphere.rScaleWhenStateActive; catch; end
+            try
+                v_ = obj.cfg.errors.ionosphere.rScaleWhenStateActive;
+                if ~isempty(v_) && isnumeric(v_) && isscalar(v_); rScale_ = v_; end
+            catch
+            end
             if ionoStateActive
                 if rScale_ == 1.0 && any(sigmaBase > 0)
                     persistent warnedIonoDoubleCount_

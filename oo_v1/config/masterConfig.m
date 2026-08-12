@@ -158,14 +158,20 @@ cfg.errors.ionosphere.sigma_m              = 1.00;
 % a measured double count -- code-channel NIS/dof 0.47, ionosphere 87.3% of code R at
 % 2.39x over-charge -- and this knob is the single lever that resolves it.
 %
-% It is deliberately still 1.0. The correct value is the fraction of the ionosphere the
-% state FAILS to absorb, which is an observability property of the geometry rather than a
-% closed form: the perfect-tracking bound is sigma_ss*sqrt(1-exp(-2*dt/tau)) = 0.058 m and
-% the no-tracking bound is the full 1 m. Fix it by characterising the configured truth/model
-% pair over seeds, elevations and TEC -- a property of the two MODELS, legitimate to
-% measure -- and never by tuning until one run's NIS reaches 1, which would be fitting R to
-% truth. Accept only if NIS/dof approaches 1 ACROSS scenarios and seeds.
-cfg.errors.ionosphere.rScaleWhenStateActive = 1.0;
+% RESOLVED 2026-08-11 to the DERIVED per-step factor sqrt(1-exp(-2*dt/tau)), computed in
+% ConfigFactory from estimation.slantIono.tau_s and simulation.dt_s. This is not a tuned
+% number and no truth was consulted: it is the standard Kalman statement that a quantity
+% carried by a state must not also be charged in R, so R keeps only the part the state does
+% not model -- the one-step process increment. It is the SAME factor the guard already
+% applied to sigmaStochR and had never applied to sigmaBase.
+% MEASURED corroboration, independent of the derivation: the slant-iono state converges to
+% sigma 0.217 m (P 0.047 m^2) while R was charging 4.86 m^2 for the same quantity, a 103x
+% gap. Effect: code NIS/dof 0.4513 -> 0.6479, position 1.6011 -> 1.5986 m.
+% It does NOT reach 1.0. The residual conservatism is NOT in R -- see the code-R budget
+% (diagnostics.codeRBudget) and project notes. Do not chase it by shrinking this further;
+% that would be fitting.
+% [] means DERIVE it from the state's own model (the default). A number pins it.
+cfg.errors.ionosphere.rScaleWhenStateActive = [];
 
 %% Error sources
 % Hardware delay, multipath, tower survey, antenna PCV and correlated noise are off
@@ -3233,7 +3239,8 @@ cfg.estimation.slantIono.initialSigma_m = 5.0;    % initial 1-sigma [m]
 % code channel reads NIS/dof 0.47 (measured 2026-08-11; ionosphere is 87.3% of code R at
 % 2.39x over-charge, and the whole budget closes to 0.4696 predicted vs 0.4701 measured).
 % validateMasterConfig warns when both are set and the state is on. The lever is
-% errors.ionosphere.rScaleWhenStateActive; see that entry for why it is still 1.0.
+% errors.ionosphere.rScaleWhenStateActive, which now DERIVES the per-step factor so the
+% amplitude is carried by this state alone and R keeps only the increment.
 
 % --- Antenna PCV model (Step 4) ---------------------------------
 % pcvModel: 'none' | 'toy' | 'table'

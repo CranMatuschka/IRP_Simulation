@@ -2676,10 +2676,25 @@ classdef ConfigFactory
             ionoStateF_ = false;
             try; ionoStateF_ = strcmp(cfg.estimation.ionosphereMode,'perTowerSlant'); catch; end
             if ionoStateF_
-                rSigF_ = 0; ssSigF_ = 0; rScaleF_ = 1.0;
-                try; rSigF_   = cfg.errors.ionosphere.sigma_m;               catch; end
-                try; ssSigF_  = cfg.estimation.slantIono.sigma_ss_m;         catch; end
+                % DERIVE the per-step factor when it is left empty. A quantity carried by
+                % a state must not also be charged in R, so R keeps only what the state
+                % does not model: the one-step Gauss-Markov increment
+                % sqrt(1-exp(-2*dt/tau)). Nothing is fitted and no truth is read -- this
+                % is the same factor already applied to sigmaStochR, finally applied to
+                % sigmaBase too. An explicit numeric value pins it and is left alone, so a
+                % scenario can still force the historical 1.0.
+                rScaleF_ = [];
                 try; rScaleF_ = cfg.errors.ionosphere.rScaleWhenStateActive; catch; end
+                if isempty(rScaleF_)
+                    tauF_ = 900; dtF_ = 1;
+                    try; tauF_ = cfg.estimation.slantIono.tau_s; catch; end
+                    try; dtF_  = cfg.simulation.dt_s;            catch; end
+                    rScaleF_ = sqrt(max(1 - exp(-2*dtF_/max(tauF_, eps)), 0));
+                    cfg.errors.ionosphere.rScaleWhenStateActive = rScaleF_;
+                end
+                rSigF_ = 0; ssSigF_ = 0;
+                try; rSigF_   = cfg.errors.ionosphere.sigma_m;       catch; end
+                try; ssSigF_  = cfg.estimation.slantIono.sigma_ss_m; catch; end
                 if rSigF_ > 0 && ssSigF_ > 0 && rScaleF_ == 1.0
                     warning('ConfigFactory:slantIonoVarianceDoubleCounted', ...
                         ['Slant-iono state active with errors.ionosphere.sigma_m = %g m AND ' ...
