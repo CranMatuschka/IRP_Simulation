@@ -230,7 +230,7 @@ classdef ISLMeasurementBuilder
                         h   = rhoModel + x(stateMap.b_rx_idx) - x(bTxIdx);
                         Rii = info.codeSigma_m^2 + sigPos2;
                     else
-                        h   = rhoModel + x(stateMap.b_rx_idx) - btxProd;                      % legacy
+                        h   = rhoModel + (x(stateMap.b_rx_idx) + relClkBias_m) - btxProd;     % legacy
                         Rii = info.codeSigma_m^2 + sigPos2 + info.product.sigmaClock_m^2;
                     end
                     metaCols = [stateMap.r_idx(:)' stateMap.b_rx_idx];
@@ -256,7 +256,7 @@ classdef ISLMeasurementBuilder
                         h   = rrModel + x(stateMap.bdot_rx_idx) - x(dTxIdx);
                         Rii = info.dopplerSigma_mps^2 + sigVel2;     % drop sigmaClockDrift
                     else
-                        h   = rrModel + x(stateMap.bdot_rx_idx) - dtxProd;              % legacy
+                        h   = rrModel + (x(stateMap.bdot_rx_idx) + relClkRate_mps) - dtxProd;   % legacy
                         Rii = info.dopplerSigma_mps^2 + sigVel2 + info.product.sigmaClockDrift_mps^2;
                     end
                     metaCols = [stateMap.v_idx(:)' stateMap.bdot_rx_idx];
@@ -297,11 +297,24 @@ classdef ISLMeasurementBuilder
                         % Legacy broadcast-product branch: btxProd carries the tx TRUTH
                         % clock (full relativistic term) while x(b_rx) is residual-domain,
                         % so the full rx clock must be rebuilt -- as the islCode and
-                        % islDoppler legacy branches above already do, and as
-                        % predictEkfRows already does for THIS SAME carrier row. Leaving it
-                        % would make build() and predictEkfRows predict one physical row two
-                        % different ways, and would ask the ISL carrier ambiguity (constant
-                        % per arc) to absorb a term linear in t, which it cannot.
+                        % islDoppler legacy branches above do, and as predictEkfRows does for
+                        % all three legacy branches. Leaving it out would make build() and
+                        % predictEkfRows predict one physical row two different ways, and
+                        % would ask the ISL carrier ambiguity (constant per arc) to absorb a
+                        % term linear in t, which it cannot.
+                        %
+                        % HISTORY (2026-08-12). This comment previously asserted that islCode,
+                        % islDoppler and predictEkfRows "already do" this. All three halves
+                        % were FALSE: build()'s islCode/islDoppler legacy branches and ALL
+                        % THREE of predictEkfRows' legacy branches omitted the term, so this
+                        % carrier row was the only one in the file that carried it. With
+                        % physics.relativity.clock.model.enable ON (which realism.grade turns
+                        % on, while masterConfig defaults it OFF) the ramp is 0.16152 m/s, so
+                        % the ISL code row's prediction ran 48.6 m short at t=300 and 581 m
+                        % short over a 3600 s arc while being weighted at its thermal sigma.
+                        % MEASURED on G5S6R4 realism grade, 3600 s, ISL in the leaf EKFs:
+                        % mean NIS 735,109 with the term missing, 96.6 with it absent from the
+                        % truth instead. Fixed at all five sites.
                         hc  = rhoModel + (x(stateMap.b_rx_idx) + relClkBias_m) - btxProd;
                         Rc  = info.carrierSigma_m^2 + sigPos2c + info.product.sigmaClock_m^2;
                     end
@@ -425,13 +438,13 @@ classdef ISLMeasurementBuilder
                         if secIdx > 0
                             h(end+1,1) = rhoModel + x(stateMap.b_rx_idx) - x(secIdx); %#ok<AGROW>
                         else
-                            h(end+1,1) = rhoModel + x(stateMap.b_rx_idx) - (tx.clock.getBiasMeters() + pb.clk); %#ok<AGROW>
+                            h(end+1,1) = rhoModel + (x(stateMap.b_rx_idx) + relClkBias_m) - (tx.clock.getBiasMeters() + pb.clk); %#ok<AGROW>
                         end
                     case 'islDoppler'
                         if secIdx > 0
                             h(end+1,1) = rrModel + x(stateMap.bdot_rx_idx) - x(secIdx); %#ok<AGROW>
                         else
-                            h(end+1,1) = rrModel + x(stateMap.bdot_rx_idx) - (tx.clock.getDriftMetersPerSecond() + pb.clkDrift); %#ok<AGROW>
+                            h(end+1,1) = rrModel + (x(stateMap.bdot_rx_idx) + relClkRate_mps) - (tx.clock.getDriftMetersPerSecond() + pb.clkDrift); %#ok<AGROW>
                         end
                     case 'islCarrier'
                         % Same structure as islCode PLUS the float ambiguity (metres).
@@ -439,7 +452,7 @@ classdef ISLMeasurementBuilder
                         if secIdx > 0
                             hk = rhoModel + x(stateMap.b_rx_idx) - x(secIdx);
                         else
-                            hk = rhoModel + x(stateMap.b_rx_idx) - (tx.clock.getBiasMeters() + pb.clk);
+                            hk = rhoModel + (x(stateMap.b_rx_idx) + relClkBias_m) - (tx.clock.getBiasMeters() + pb.clk);
                         end
                         if ambIdx > 0; hk = hk + x(ambIdx); end
                         h(end+1,1) = hk; %#ok<AGROW>
