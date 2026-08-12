@@ -1,0 +1,51 @@
+{
+  "_id": "ISL rung: carrier float ambiguity. Built on golden_baseline_multi.json (G5S6R4 federated, four antennas per spacecraft); every other leaf is inherited. Extends isl009 by putting ISL CODE and ISL CARRIER into each per-asset EKF with one float ambiguity state per link (nx 67 -> 72), where isl009 flips keepIslInPerAssetEkf alone and leaves measurements.isl disabled so no crosslink row is actually built. ⚠ INHERITS isl009's WARNING: crosslinks are consumed by the filters AND re-consumed by the relative layer, so the RELATIVE layer's covariance is NOT independently valid here. Absolute per-asset numbers are honest; a relative sigma read off this rung is not. ⚠ ALSO NOT TRUTH-CLEAN: measurements.isl.product.enable stays false, so ISLMeasurementBuilder.productBias_ short-circuits to zero, btxProd collapses to btxTruth and rTxProd to rTxTruth, and h is handed the neighbours' TRUE position and clock. This rung is the ORACLE half of a pair; isl017 is the honest half. Measured 3600 s: 0.003585 m RMS absolute here versus 0.095183 m on isl017, so the gap IS the value of perfect neighbour knowledge.",
+
+  "_delta": "ISL code + carrier + one float ambiguity per link inside each per-asset EKF. Neighbours still taken as TRUTH (product disabled) -- see isl017 for the honest twin.",
+
+  "_whyProcessNoiseOnTheAmbiguity": "measurements.isl.carrier.ambiguity.processNoiseSigma_m_per_sqrt_s ships as 0, meaning 'the ambiguity is exactly constant within an arc'. Its covariance then shrinks monotonically, the Kalman gain for that state follows it down, and the state FREEZES at whatever value it reached. Measured at 26 GHz: the float sat 10.42 cycles from truth while REPORTING 0.2434 cycles, a 43-sigma lie, and every state correlated with it inherited that frozen error. 1e-2 keeps it adaptable: bias/sigma 42.8 -> 0.7, position 0.2753 -> 0.0048 m.",
+
+  "_islBudgetsAreASSUMPTIONS": "code 0.015 and carrier 0.002 are TERMINAL DESIGN ASSUMPTIONS, not values this simulation derived. masterConfig ships 0.50 and 0.20. 15 mm is the four-timestamp two-way range budget the relative layer uses; 2 mm is the carrier THERMAL figure masterConfig itself quotes, its 0.20 being a TOTAL that includes systematics the float ambiguity already absorbs, so charging it in full double-counts. Declare both wherever this rung is cited.",
+
+  "_requiresTheRelativisticFix": "This rung is meaningless without the ISL code/Doppler relativistic-term fix in ISLMeasurementBuilder. realism.grade enables physics.relativity.clock.model while masterConfig defaults it off, and before the fix the ISL code row's prediction ran 581 m short over a 3600 s arc while weighted at its thermal sigma. Mean NIS 735,109 broken versus 95.35 fixed.",
+
+  "_extends": "golden_baseline_multi.json",
+
+  "scenario": {
+    "name": "isl016_carrierFloatAmbiguity",
+    "nTowers": 5,
+    "nSpaceAssets": 6,
+    "nReceivers": 4
+  },
+
+  "multiAsset": {
+    "keepIslInPerAssetEkf": true
+  },
+
+  "measurements": {
+    "isl": {
+      "enable": true,
+      "code": {
+        "enable": true,
+        "useInEKF": true,
+        "sigma_m": 0.015
+      },
+      "carrier": {
+        "_sigmaFloor": "ISLMeasurementBuilder warns below 0.05 m because a tightly weighted carrier row used to dominate the (b_rx, -B) direction it cannot observe. That warning predates the ambiguity process noise below, which is what actually keeps the ambiguity honest. The pairing is deliberate: do not lower sigma_m without also carrying processNoiseSigma_m_per_sqrt_s.",
+        "enable": true,
+        "useInEKF": true,
+        "sigma_m": 0.002,
+        "frequency_Hz": 26000000000,
+        "ambiguity": {
+          "enable": true,
+          "nSignals": 1,
+          "processNoiseSigma_m_per_sqrt_s": 0.01
+        }
+      }
+    }
+  },
+
+  "report": {
+    "runVersion": "isl016"
+  }
+}

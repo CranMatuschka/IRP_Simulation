@@ -1,0 +1,48 @@
+{
+  "_id": "ISL rung: carrier with an HONEST neighbour. isl016 plus the broadcast product, so NO TRUTH REACHES h. This is the defensible half of the pair and the rung to quote. isl016 leaves measurements.isl.product.enable false, which makes ISLMeasurementBuilder.productBias_ return identically zero, btxProd collapse to btxTruth and rTxProd to rTxTruth -- each satellite's MODEL is then handed its five neighbours' TRUE positions and clocks, the strongest idealisation in the code (the builder header calls it 'an ASSUMED-KNOWN beacon'). Here the neighbour is a broadcast product carrying real error, the residual contains that error, and its variance is charged to R. MEASURED 3600 s: 0.095183 m RMS absolute versus 0.003585 m on isl016, a factor of 27 -- that gap IS the value of perfect neighbour knowledge, and it is why isl016 must never be quoted as a result.",
+
+  "_delta": "Broadcast product ON (3 cm position, 2 cm clock) so h never reads truth, plus the relative layer's range budget matched to the same terminal the filters model.",
+
+  "_expectTheFloor": "Range is |r_A - r_B|, so an error in r_B maps into r_A roughly one-to-one along the line of sight and A can never beat its knowledge of B. At sigmaPos_m 0.03 the per-neighbour floor is ~3 cm, averaging down by at most ~sqrt(nLinks) for INDEPENDENT neighbour errors and not at all for anything common to the product. Measured baselineRMS 0.036 m against sigmaPos_m 0.03 -- the floor is visible in the number.",
+
+  "_productBudget": "0.03 m per axis and 0.02 m (~67 ps) are realismGradeConfig's own ISL product figures, described there as an SLR-class precise reference orbit and reference clock product. A PRODUCT QUALITY ASSUMPTION, to be declared wherever this rung is cited.",
+
+  "_whyNotFourTimestampForTheClock": "The physically better answer for the neighbour CLOCK is the reciprocal four-timestamp exchange, which MEASURES (b_remote - b_owner) off the two local clocks and needs no prior knowledge of either. It is implemented (isl.twoWay.timeTransfer.useInEKF) but correctly REFUSED in this architecture: 'ISL clock differences must update both endpoint clocks. Use multiAsset.mode=joint.' A clock-difference row observes a DIFFERENCE, so a filter owning only its own clock would dump the whole difference onto b_owner. A federated leaf owns exactly one clock, and joint diverges (39,516,916 m at 4 assets). The correct home is the DISTRIBUTED path's sanctioned firstOrderReciprocalClockTransfer, applied owner-only under a split-covariance-intersection bound precisely because it cannot update both endpoints. Until that path carries ISL carrier, the product clock is the honest available option.",
+
+  "_relativeLayerBudget": "multiAsset.twoWayISL.sigma_m drops from the parent's 0.05 to 0.015 for INTERNAL CONSISTENCY: this rung already models the same hardware at measurements.isl.code.sigma_m = 0.015 inside the filters, so leaving the relative layer at 0.05 hands one architecture a 3.3x worse observable from one physical terminal. Measured effect on SOLVED shape at 600 s: 0.284870 -> 0.085428 m. delayCal is deliberately NOT scaled with it -- it is separate hardware that does not improve because the thermal figure does, and holding it reveals the real floor at sqrt(0.005^2+0.002^2) = 5.4 mm. 0.015 is a CODE/TIMING budget because the relative layer's observable is the ambiguity-free four-timestamp two-way range; it is NOT the 2 mm carrier figure, and the solver consumes no carrier phase at all today.",
+
+  "_stillInheritsTheDoubleCount": "⚠ keepIslInPerAssetEkf remains true via isl016, so the relative layer re-consumes observations the filters already absorbed. Absolute per-asset numbers here are honest. The relative layer's formal covariance is NOT independently valid -- quote relative geometry from golden_baseline_multi.json instead.",
+
+  "_extends": "isl016_carrierFloatAmbiguity.json",
+
+  "scenario": {
+    "name": "isl017_carrierHonestProduct",
+    "nTowers": 5,
+    "nSpaceAssets": 6,
+    "nReceivers": 4
+  },
+
+  "multiAsset": {
+    "twoWayISL": {
+      "sigma_m": 0.015
+    }
+  },
+
+  "measurements": {
+    "isl": {
+      "product": {
+        "_on": "THE POINT OF THIS RUNG. With enable false, productBias_ short-circuits to zero and h reads the true neighbour. With it true, h reads truth+error and R carries the variance.",
+        "enable": true,
+        "sigmaPos_m": 0.03,
+        "sigmaClock_m": 0.02,
+        "sigmaVel_mps": 1e-4,
+        "sigmaClockDrift_mps": 1e-4,
+        "updateInterval_s": 300
+      }
+    }
+  },
+
+  "report": {
+    "runVersion": "isl017"
+  }
+}
