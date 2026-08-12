@@ -8,6 +8,36 @@ classdef CodeMeasurementBuilder
 
     methods (Static)
 
+        function tf = rBudgetEnabled(cfg)
+            % rBudgetEnabled  Gate for the code-R budget accounting. Default FALSE.
+            tf = false;
+            try; tf = logical(cfg.diagnostics.codeRBudget.enable); catch; end
+        end
+
+        function out = rBudgetAccumulate(terms)
+            % rBudgetAccumulate  Sum the AS-CHARGED R terms across rows and epochs.
+            %   rBudgetAccumulate(terms)  accumulate one row
+            %   rBudgetAccumulate('reset') clear
+            %   out = rBudgetAccumulate('get') retrieve the running sums
+            persistent ACC
+            if isempty(ACC); ACC = struct('n', 0); end
+            out = [];
+            if ischar(terms) || isstring(terms)
+                switch char(terms)
+                    case 'reset'; ACC = struct('n', 0);
+                    case 'get';   out = ACC;
+                end
+                return
+            end
+            fn = fieldnames(terms);
+            for k = 1:numel(fn)
+                f = fn{k};
+                if ~isfield(ACC, f); ACC.(f) = 0; end
+                ACC.(f) = ACC.(f) + terms.(f);
+            end
+            ACC.n = ACC.n + 1;
+        end
+
         function [z, h, R, errStruct, twr_list, ant_list, M, N_sig] = build( ...
                 cfg, errorChain, rngCorr, asset, towers, ...
                 twr_list, ant_list, elv_list, leverArms, leverArms_model, ...
@@ -417,6 +447,32 @@ classdef CodeMeasurementBuilder
                             z_new(mi)      = z(pi) + scint_t;
                             h_new(mi)      = h(pi);
                             R_diag_new(mi) = R_diag(pi) + scintSig_si^2;
+
+                            % Same accounting as the si>1 branch below. The PRIMARY signal
+                            % takes this path, so instrumenting only the other one would
+                            % have measured the L2 rows and reported them as the budget.
+                            % Here R_diag(pi) is already assembled (sigmaTotal^2 +
+                            % towerClk^2, floored), so its parts are re-read from the error
+                            % chain at the same row index rather than recomputed.
+                            if models.measurements.CodeMeasurementBuilder.rBudgetEnabled(cfg)
+                                gs_ = @(f) i_sigSq(errStruct, f, pi);
+                                models.measurements.CodeMeasurementBuilder.rBudgetAccumulate( ...
+                                    struct( ...
+                                      'codeNoise',  gs_('code'), ...
+                                      'scint',      scintSig_si^2, ...
+                                      'extraTotal', gs_('trop') + gs_('iono') + gs_('hwDelay') ...
+                                                    + gs_('mp') + gs_('ionoHO'), ...
+                                      'towerClock', towerClkSigma(pi)^2, ...
+                                      'trop',       gs_('trop'), ...
+                                      'ionoScaled', gs_('iono'), ...
+                                      'ionoL1',     gs_('iono'), ...
+                                      'mp',         gs_('mp'), ...
+                                      'hwDelay',    gs_('hwDelay'), ...
+                                      'ionoHOScaled', gs_('ionoHO'), ...
+                                      'total',      R_diag_new(mi), ...
+                                      'nPrimary',   1, ...
+                                      'floorHit',   0));
+                            end
                             for fi = 1:numel(flds)
                                 fn = flds{fi};
                                 if isfield(errStruct.bySource.truth_m, fn)
@@ -536,6 +592,34 @@ classdef CodeMeasurementBuilder
                                                   - sigmaIono1L1_pi^2 + sigmaIono1_si^2, 0);
                             R_diag_new(mi) = max(sigma_code_si, sigmaFloor)^2 + ...
                                              scintSig_si^2 + sigma_extra_si2 + towerClkSigma(pi)^2;
+
+                            % Gated R-budget accounting, default OFF and byte-identical.
+                            % WHY IT EXISTS: a budget measured on ErrorChain alone is NOT
+                            % this R. ErrorChain reports six sources; the row actually
+                            % charged here adds scintillation and the tower clock on top,
+                            % and frequency-scales the ionosphere per signal. Measuring the
+                            % chain in isolation attributed 87% of code R to the ionosphere
+                            % when scaling it moved the channel by only 13% -- the missing
+                            % terms were the story. This accumulates the terms AS CHARGED,
+                            % so the decomposition can never disagree with the R the filter
+                            % actually inverts.
+                            if models.measurements.CodeMeasurementBuilder.rBudgetEnabled(cfg)
+                                models.measurements.CodeMeasurementBuilder.rBudgetAccumulate( ...
+                                    struct( ...
+                                      'codeNoise',  max(sigma_code_si, sigmaFloor)^2, ...
+                                      'scint',      scintSig_si^2, ...
+                                      'extraTotal', sigma_extra_si2, ...
+                                      'towerClock', towerClkSigma(pi)^2, ...
+                                      'ionoL1',     sigmaIono1L1_pi^2, ...
+                                      'ionoScaled', sigmaIono1_si^2, ...
+                                      'ionoHOScaled', ionoHO_sig_si^2, ...
+                                      'trop',       i_sigSq(errStruct,'trop',pi), ...
+                                      'mp',         i_sigSq(errStruct,'mp',pi), ...
+                                      'hwDelay',    i_sigSq(errStruct,'hwDelay',pi), ...
+                                      'total',      R_diag_new(mi), ...
+                                      'nPrimary',   0, ...
+                                      'floorHit',   double(sigma_code_si < sigmaFloor)));
+                            end
 
                             btOut.trop(mi)          = trop_t;
                             bmOut.trop(mi)          = trop_m;
@@ -1264,4 +1348,15 @@ classdef CodeMeasurementBuilder
         end
 
     end  % Static methods
+end
+
+function v = i_sigSq(errStruct, fname, idx)
+% i_sigSq  Squared per-source sigma at one row, 0 when the source is absent.
+%   Used only by the gated code-R budget accounting.
+    v = 0;
+    if isfield(errStruct,'bySource') && isfield(errStruct.bySource,'sigma_m') && ...
+            isfield(errStruct.bySource.sigma_m, fname)
+        x = errStruct.bySource.sigma_m.(fname);
+        if numel(x) >= idx; v = x(idx)^2; end
+    end
 end

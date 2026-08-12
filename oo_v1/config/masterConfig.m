@@ -274,6 +274,13 @@ cfg = expandEnableToggles(cfg, { ...
 cfg.measurements.code.ionosphereFreeRows.enable     = true;
 cfg.measurements.code.ionosphereFreeRows.useInEkf    = true;
 cfg.diagnostics.codeIonoFreeRows.enable              = true;
+% Accumulate the code-row R terms AS CHARGED by CodeMeasurementBuilder. Default FALSE and
+% byte-identical. Exists because a budget measured on ErrorChain alone is NOT the R the
+% filter inverts: the row adds scintillation and the tower-clock term on top of the chain's
+% six sources, and frequency-scales the ionosphere per signal. Measuring the chain in
+% isolation once attributed 87% of code R to the ionosphere, and scaling that term then
+% moved the channel by 13% -- the terms outside the chain were the story.
+cfg.diagnostics.codeRBudget.enable                   = false;
 cfg.diagnostics.codeIonoFreeConsistency.enable       = true;
 cfg.measurements.carrier.ionosphereFreeRows.enable   = true;
 cfg.measurements.carrier.ionosphereFreeRows.useInEkf = true;
