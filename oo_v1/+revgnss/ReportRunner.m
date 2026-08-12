@@ -3542,6 +3542,17 @@ classdef ReportRunner
                 summary.arcNisCarrierDofSource     = arcCs.nisCarrierDofSource;
                 summary.arcNisUnclassifiedRowsMean = arcCs.nisUnclassifiedRowsMean;
                 summary.arcNisRowBudgetCloses      = arcCs.nisRowBudgetCloses;
+                summary.arcNisCodeNEff       = arcCs.nisCode.nEff;
+                summary.arcNisCarrierNEff    = arcCs.nisCarrier.nEff;
+                summary.arcNisDopplerNEff    = arcCs.nisDoppler.nEff;
+                summary.arcNisCodeLag1       = arcCs.nisCode.lag1Autocorr;
+                summary.arcNisCarrierLag1    = arcCs.nisCarrier.lag1Autocorr;
+                summary.arcNisDopplerLag1    = arcCs.nisDoppler.lag1Autocorr;
+                % Print the per-channel verdict with the run, not buried in the struct.
+                % The aggregate NIS cannot say WHICH observable is mis-weighted; this can,
+                % and every conclusion drawn today about R came from exactly this split.
+                summary.arcNisTable = revgnss.ConsistencyStatistics.formatNisTable(arcCs);
+                fprintf('\n%s\n', summary.arcNisTable);
             catch
                 summary.arcNisCodePerDof     = NaN;
                 summary.arcNisCarrierPerDof  = NaN;
@@ -3555,6 +3566,10 @@ classdef ReportRunner
                 summary.arcNisCarrierDofSource     = 'notAvailable';
                 summary.arcNisUnclassifiedRowsMean = NaN;
                 summary.arcNisRowBudgetCloses      = false;
+                summary.arcNisCodeNEff = NaN; summary.arcNisCarrierNEff = NaN;
+                summary.arcNisDopplerNEff = NaN; summary.arcNisCodeLag1 = NaN;
+                summary.arcNisCarrierLag1 = NaN; summary.arcNisDopplerLag1 = NaN;
+                summary.arcNisTable = 'notAvailable';
             end
 
             % Position and clock metrics

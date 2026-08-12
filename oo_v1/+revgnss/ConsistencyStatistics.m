@@ -93,6 +93,61 @@ classdef ConsistencyStatistics
             result.available = true;
         end
 
+        function txt = formatNisTable(cs)
+            % formatNisTable  Per-channel measurement-covariance verdict for ONE run.
+            %
+            % Answers the question the aggregate NIS cannot: which observable is
+            % mis-weighted, in which direction, and by how much. NIS/dof is
+            % actual/expected, so below 1 the filter expected more error than it got
+            % (CONSERVATIVE -- it under-uses that observable) and above 1 it expected less
+            % (OPTIMISTIC -- it is overconfident, the dangerous direction). The factor is
+            % quoted in VARIANCE, with the sigma factor beside it since sigma is what the
+            % config actually sets.
+            %
+            % The rho and N_eff columns are load-bearing, not decoration. nSamples counts
+            % epochs; a strongly autocorrelated series has far fewer independent samples,
+            % and a channel with N_eff of a few cannot support a confident verdict however
+            % many epochs were run. Read the band as a heuristic, never as a significance
+            % test.
+            rows = { 'code',     'nisCode'; ...
+                     'carrier',  'nisCarrier'; ...
+                     'doppler',  'nisDoppler'; ...
+                     'twoWay',   'nisTwoWayTimeTransfer'; ...
+                     'OVERALL',  'nisOverall' };
+            L = {};
+            L{end+1} = '=== MEASUREMENT COVARIANCE CONSISTENCY (this run) ===';
+            L{end+1} = sprintf('  %-9s %8s %9s %9s %-26s %8s %9s', ...
+                'channel','rows/ep','NIS/dof','sigma x','verdict','rho(1)','N_eff');
+            for k = 1:size(rows,1)
+                nm = rows{k,1}; fld = rows{k,2};
+                if ~isfield(cs, fld); continue; end
+                g = cs.(fld);
+                if ~isfinite(g.nisPerDof)
+                    L{end+1} = sprintf('  %-9s %8s %9s %9s %-26s', nm, '-', '-', '-', ...
+                        char(string(g.status))); %#ok<AGROW>
+                    continue
+                end
+                r = g.nisPerDof;
+                if r < 1
+                    verdict = sprintf('conservative %.2fx', 1/max(r,eps));
+                    sigX    = sqrt(1/max(r,eps));
+                else
+                    verdict = sprintf('OPTIMISTIC   %.2fx', r);
+                    sigX    = sqrt(r);
+                end
+                if r >= 0.8 && r <= 1.25; verdict = 'consistent'; end
+                L{end+1} = sprintf('  %-9s %8.1f %9.4f %9.2f %-26s %8.4f %9.1f', ...
+                    nm, g.expectedDof, r, sigX, verdict, g.lag1Autocorr, g.nEff); %#ok<AGROW>
+            end
+            if isfield(cs,'nisUnclassifiedRowsMean') && isfinite(cs.nisUnclassifiedRowsMean)
+                L{end+1} = sprintf('  unclassified rows/epoch: %.2f   budget closes: %d', ...
+                    cs.nisUnclassifiedRowsMean, cs.nisRowBudgetCloses);
+            end
+            L{end+1} = '  NIS/dof < 1 = conservative (wastes information); > 1 = overconfident.';
+            L{end+1} = '  Low N_eff means the verdict rests on few independent samples -- treat with care.';
+            txt = strjoin(L, newline);
+        end
+
     end  % public static
 
     methods (Static, Access = private)
@@ -161,13 +216,31 @@ classdef ConsistencyStatistics
         function s = groupStat_(nisVec, dofVec, minSamp)
             s = struct('status','notAvailable','mean',NaN,'nisPerDof',NaN,...
                        'median',NaN,'p95',NaN,'expectedDof',NaN, ...
-                       'fractionInside',NaN,'nSamples',0);
+                       'fractionInside',NaN,'nSamples',0, ...
+                       'lag1Autocorr',NaN,'nEff',NaN);
             if isempty(nisVec) || isempty(dofVec); return; end
             ok = isfinite(nisVec) & isfinite(dofVec) & dofVec > 0 & nisVec >= 0;
             nv = nisVec(ok);  dv = dofVec(ok);
             s.nSamples = numel(nv);
             if s.nSamples < minSamp
                 s.status = 'insufficientSamples'; return;
+            end
+
+            % Lag-1 autocorrelation and the EFFECTIVE sample size it implies.
+            % nSamples counts epochs, which is NOT how many independent samples the mean
+            % rests on. A NIS series driven by a slowly-varying error is strongly
+            % autocorrelated, and this project has previously measured N_eff of order 1-2
+            % against thousands of epochs counted. Without this column a ratio of 0.65 off
+            % 3601 epochs reads as overwhelming evidence when it may rest on a handful of
+            % independent samples. AR(1) approximation: nEff = N*(1-rho)/(1+rho).
+            if s.nSamples >= 3
+                x = nv(:) - mean(nv);
+                den = sum(x.^2);
+                if den > 0
+                    s.lag1Autocorr = sum(x(1:end-1).*x(2:end)) / den;
+                    rho = min(max(s.lag1Autocorr, -0.999), 0.999);
+                    s.nEff = s.nSamples * (1 - rho) / (1 + rho);
+                end
             end
             s.mean = mean(nv);
             s.median = median(nv);
