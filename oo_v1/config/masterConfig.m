@@ -1893,7 +1893,7 @@ towerDefs = { ...
     'Stockholm',       59.3,       18.1,    0.0; ...   % 2  (frozen golden)
     'Hartebeesthoek', -25.9,       27.7,    0.0; ...   % 3  SANSA/HartRAO (frozen golden)
     'Bengaluru',       13.0,       77.6,    0.0; ...   % 4  ISRO ISTRAC (frozen golden)
-    'Libreville',       0.0355,    -9.4496,  0.0; ...  % 5  (frozen golden)
+    'Libreville',       0.0355,    9.4496,  0.0; ...  % 5  (frozen golden)
     'Kiruna',          67.88,      21.10,    0.0; ...  % 6  ESA Esrange (far north lever)
     'Cebreros',        40.45,      -4.37,    0.0; ...  % 7  ESA DSA-2 deep-space
     'Matera',          40.65,      16.70,    0.0; ...  % 8  ASI Space Geodesy Centre
