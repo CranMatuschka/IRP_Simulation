@@ -1107,15 +1107,31 @@ classdef CodeMeasurementBuilder
             % treats them as two independent samples and averages the atmosphere down
             % by sqrt(2) -- which it cannot do, because there is only one realisation.
             %
+            % hwDelay belongs in this list for exactly the same reason, and was missing.
+            % ErrorChain.hardwareDelay_ draws it with an EMPTY antenna argument, so
+            % drawWhiteVec_ -> registry.epochStream(src, node, 0, 0, ep) returns a
+            % bit-identical draw for every row of a tower; the builder then reuses hw_t
+            % unchanged on every signal row (deliberately -- the dispersive part is the
+            % separate DCB channel). So the signal rows of a pair carry ONE realisation at
+            % rho = +1, exactly like the troposphere, while R charged them as independent.
+            % The IF path already states the intended treatment ("passes the IF at unit
+            % gain, NOT (alpha^2+beta^2)") and applies it; the raw dual-frequency path did
+            % not. Scope: this block pairs rows across the SIGNAL axis only, so it closes
+            % the sqrt(2) the EKF could take across L1/L2. The ANTENNA axis stays
+            % uncorrelated in R for hwDelay and for trop/iono alike -- a pre-existing
+            % limitation of this block, not one introduced here.
+            %
             % For a fully correlated source, Cov(i,j) = sigma_s(i)*sigma_s(j). The iono
             % sigmas are already signal-scaled (see the per-signal swap above), so the
-            % product carries the freqScale factor automatically.
+            % product carries the freqScale factor automatically. hwDelay is
+            % non-dispersive and its sigma is tiled UNSCALED, which is the correct
+            % unit-gain treatment for a common-mode term.
             %
             % Diagonal is untouched: R_diag already holds sigma_s^2 on each row.
             if sharedErrEnable_ && applyAtmosCommon_
                 if N_sig > 1
                     smX_ = errStruct.bySource.sigma_m;
-                    corrSrcs_ = {'trop','iono'};
+                    corrSrcs_ = {'trop','iono','hwDelay'};
                     M_pairs_x_ = round(M / N_sig);
                     for cs_ = 1:numel(corrSrcs_)
                         fn_ = corrSrcs_{cs_};

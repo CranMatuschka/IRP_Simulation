@@ -68,6 +68,12 @@ classdef ErrorChain < handle
         sharedMultipathAcrossAntennas (1,1) logical = false
         dtCache_s   (1,1) double = 1    % dt_s cached for epoch-index derivation
         epochIdx_   (1,1) int64  = 0    % current epoch index (refreshed each compute())
+        % Per-epoch memo for multipathForSignal under sharedMultipathAcrossAntennas.
+        % multipath_ can hold its equivalent in a call-local map because it is called ONCE
+        % per epoch with all N rows; multipathForSignal is called once per ROW, so the memo
+        % has to survive between calls and be invalidated when the epoch advances.
+        mpSharedThisEpoch_          % containers.Map link-key -> GM value [m], one epoch only
+        mpSharedEpoch_ (1,1) int64 = -1  % epoch mpSharedThisEpoch_ belongs to
     end
 
     methods
@@ -104,6 +110,29 @@ classdef ErrorChain < handle
             sinEl   = max(sin(elv_rad), sin(elvFloor));
             sigma_m = g.sigmaCodeL1_ss_m / sinEl^elExp;
             key = int64(round(ti) * 1000000 + round(aiKey) * 1000 + round(si));
+
+            % Antenna scope gate -- the twin of the sharedThisCall guard in multipath_.
+            % With sharedAcrossAntennas on, aiKey collapses to 1, so all nReceivers rows of
+            % a (tower, signal) share ONE key and therefore ONE physical link. The chain
+            % must be stepped ONCE per epoch and its value reused; stepping it per row gave
+            % the L2 chain nReceivers successive samples per epoch, which does not change
+            % the stationary variance (so R and NIS are blind to it) but shortens the
+            % EFFECTIVE correlation time by the same factor -- measured tau_eff = 15 s
+            % against the configured 60 s at nReceivers = 4, i.e. a free sqrt(4) on any
+            % time-average of the L2 multipath over an arc. Strict no-op at nReceivers = 1,
+            % and no-op with the gate off (the key then carries a real antenna index, so
+            % each chain is stepped exactly once per epoch already).
+            if obj.sharedMultipathAcrossAntennas
+                if obj.mpSharedEpoch_ ~= obj.epochIdx_ || isempty(obj.mpSharedThisEpoch_)
+                    obj.mpSharedThisEpoch_ = containers.Map('KeyType','int64','ValueType','double');
+                    obj.mpSharedEpoch_     = obj.epochIdx_;
+                end
+                if isKey(obj.mpSharedThisEpoch_, key)
+                    truth_m = obj.mpSharedThisEpoch_(key);  % one link, already stepped
+                    return                                   % sigma_m keeps THIS row's elevation
+                end
+            end
+
             if isKey(obj.mpState, key); xPrev = obj.mpState(key); else; xPrev = 0; end
             if obj.useIndependentStreams
                 mpStream = obj.registry.persistentStream( ...
@@ -114,6 +143,9 @@ classdef ErrorChain < handle
             xNew = models.noise.StochasticProcess.gaussMarkovStep( ...
                 xPrev, dt_s, g.tau_s, sigma_m, mpStream);
             obj.mpState(key) = xNew;
+            if obj.sharedMultipathAcrossAntennas
+                obj.mpSharedThisEpoch_(key) = xNew;
+            end
             truth_m = xNew;
         end
 

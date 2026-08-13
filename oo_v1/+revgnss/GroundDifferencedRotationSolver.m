@@ -329,8 +329,10 @@ classdef GroundDifferencedRotationSolver
                     ref = okTw(1);
                     nDD = (numel(okTw)-1)*(N-1);
                     Jth = zeros(nDD,3); Jsh = zeros(nDD,3*N); rv = zeros(nDD,1); row = 0;
+                    nTwUsed = 0;
                     for m = okTw
                         if m == ref; continue; end
+                        nTwUsed = nTwUsed + 1;
                         for i = 2:N
                             row = row + 1;
                             ddObs = (rhoObs(i,m,k)-rhoObs(1,m,k)) ...
@@ -346,6 +348,36 @@ classdef GroundDifferencedRotationSolver
                     end
                     if row < 1; continue; end
                     Jth = Jth(1:row,:); Jsh = Jsh(1:row,:); rv = rv(1:row);
+
+                    % CORRELATED-DD WEIGHTING. Every DD built above subtracts the SAME
+                    % reference satellite (index 1) and the SAME reference tower (ref), so
+                    % these rows are not independent and unweighted normal equations are the
+                    % wrong estimator. With independent undifferenced links of equal
+                    % variance sigma^2, DD_im = rho_im - rho_1m - rho_iref + rho_1ref gives
+                    %     Cov(DD_im, DD_jn) = sigma^2 * (delta_ij + 1) * (delta_mn + 1),
+                    % i.e. 4 sigma^2 on the diagonal and 2 sigma^2 whenever two DDs share a
+                    % satellite or a tower -- the classic DD structure (2 sigma^2 [2 1; 1 2]
+                    % for the 2x2 case, cf. Hofmann-Wellenhof et al. 2008 eq. 6.77).
+                    % Because the row order is tower-major / satellite-minor, that separates
+                    % exactly into a Kronecker product of two (I + J) blocks.
+                    %
+                    % sigma^2 is a SCALE and cancels: solving against the unit-weight
+                    % Omega^-1 and estimating the variance factor from the weighted
+                    % residuals below leaves Cth scale-free, so this fix does NOT introduce
+                    % an assumed sigma -- the file's "formal sigma from the post-fit
+                    % scatter, not from an assumed sigma" property is preserved.
+                    %
+                    % Whitening by the Cholesky factor rather than forming Omega^-1:
+                    % Jth' Omega^-1 Jth = (L\Jth)' (L\Jth) with Omega = L L'.
+                    a_ = N - 1; b_ = nTwUsed;
+                    if a_ >= 1 && b_ >= 1 && a_*b_ == row
+                        Om_ = kron(eye(b_) + ones(b_), eye(a_) + ones(a_));
+                        [L_, pf_] = chol(Om_, 'lower');
+                        if pf_ == 0
+                            Jth = L_ \ Jth;  Jsh = L_ \ Jsh;  rv = L_ \ rv;
+                        end
+                    end
+
                     Nmat = Nmat + (Jth.'*Jth); gvec = gvec + (Jth.'*rv);
                     Ntp  = Ntp  + (Jth.'*Jsh);
                     sse  = sse + (rv.'*rv); nObs = nObs + row;
@@ -357,7 +389,9 @@ classdef GroundDifferencedRotationSolver
 
             % Formal sigma from the post-fit scatter, not from an assumed sigma: the DD carries
             % thermal + multipath + whatever differential atmosphere was injected, and only the
-            % residuals know the total.
+            % residuals know the total. sse and Nmat are both accumulated in the WHITENED
+            % (unit-weight) metric above, so s2 is the GLS variance factor and Cth is the GLS
+            % covariance -- the estimator this correlated row structure actually requires.
             dof   = max(1, nObs - 3);
             s2    = sse / dof;
             Cth   = s2 * inv(Nmat);                                          %#ok<MINV>
