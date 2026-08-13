@@ -1,0 +1,22 @@
+{
+  "_id": "isl016 with the federated fan-out switched ON. Physics, observables and noise budgets are byte-for-byte isl016; the ONLY delta is that the six per-asset EKFs run in six OS processes instead of one loop. Exists so a long arc is affordable without editing golden_baseline_multi.json, which deliberately ships parallel=false.",
+
+  "_whyNotJustEditTheBaseline": "golden_baseline_multi.json states its serial default is for BIT-REPRODUCIBILITY, and cites a measurement: a parallel fan-out reorders floating-point reductions, and a 1e-14 arithmetic difference flipped a guard sitting near its threshold and moved 33 of 148 reported fields. That property belongs to the reference baseline and must not be silently removed from it. This rung takes the speed and accepts the consequence in its own name.",
+
+  "_readThisBeforeCitingNumbersFromThisRung": "NOT bit-identical to isl016. Any field produced by a guard near its threshold may differ. Use isl016 for a reference number and this rung for a long arc where wall clock would otherwise make the run impossible. If a headline value differs between the two, isl016 is the one to quote.",
+
+  "_workers": "maxWorkers 6 for a 6-core host: with nSpaceAssets 6 that is ONE wave, so the fan-out costs one segment instead of six. The parent is idle while waiting, so using every core is not oversubscription here. On a 4-core host set 3; the RAM cap in ReportRunner.federatedMaxWorkers_ CANNOT self-size on Windows (it probes sysctl and /proc/meminfo, neither of which exists there), so this value is the only guard against thrash.",
+
+  "_extends": "isl016_carrierFloatAmbiguity.json",
+
+  "multiAsset": {
+    "federated": {
+      "parallel": true,
+      "maxWorkers": 6
+    }
+  },
+
+  "report": {
+    "runVersion": "isl018"
+  }
+}
