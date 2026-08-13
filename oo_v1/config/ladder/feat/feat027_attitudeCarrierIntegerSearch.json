@@ -1,0 +1,39 @@
+{
+  "_id": "feat rung: attitudeCarrierIntegerSearch. feat025 (star tracker off, gyro on, differenced-carrier attitude) PLUS the coarse baseline integer/attitude candidate search. One toggle against feat025, so the difference in the result is attributable to resolving the differenced-carrier ambiguity alone. This rung exists to test the diagnosis of why feat025 is UNOBSERVABLE.",
+  "_extends": "feat025_attitudeCarrierNoStarTracker.json",
+  "_delta": "estimator.attitudeInitMode: 'none' -> 'coarseBaselineIntegerSearch'. Nothing else.",
+
+  "_theDiagnosisBeingTested": "MEASURED on feat025 at 3600 s: 15 active differenced baselines (3 independent baselines x 5 towers), ZERO rejected rows, residual RMS 13.97 mm -- a model that fits the data essentially perfectly -- while the attitude error stayed at 1.398 deg against a 1.500 deg start and the class read UNOBSERVABLE. The counting explains it: 15 differenced observables against 15 float ambiguities, one per (baseline, tower), is EXACTLY DETERMINED by the ambiguities alone, leaving nothing to inform attitude. At GEO the degeneracy is exact rather than approximate, because a nadir-pointing geostationary satellite has a CONSTANT true attitude in ECEF and a CONSTANT tower line of sight, so a constant attitude error and a constant ambiguity are indistinguishable. The float solution therefore puts the attitude error into the ambiguity and reports a tight sigma.",
+
+  "_theControlThatRulesOutTHEOBVIOUSALTERNATIVE": "The competing explanation -- that the 1.5 deg initial error is simply too large for the filter to interpret -- was tested and REFUTED. Re-running feat025 with a tenfold smaller initial error (0.15 deg, euler [0.1,-0.1,0.05]) gave final error 0.4636 deg: it did not converge, it drifted three times WORSE, and the class stayed UNOBSERVABLE. Decisively, finalAttitudeSigma came out 0.23012 deg against feat025's 0.230097 deg -- IDENTICAL TO FOUR DIGITS whether the true error is 0.46 deg or 1.40 deg. A covariance that carries no information about the actual error is the signature of an unobserved state, not of a struggling one. Cycle wrap is also not the mechanism: at L1 the antenna cross wraps every 10.90 deg (1 m baseline) to 5.45 deg (2 m), so 1.5 deg is 0.14-0.28 of a cycle, far from a half-cycle.",
+
+  "_whyMORE3DANTENNASWOULDNOTHELP": "Each additional baseline brings its OWN ambiguity, one per (baseline, tower), so observables and unknowns grow together and the net information about attitude stays at zero. Six antennas would give 25 observables and 25 ambiguities. Geometry is not the binding constraint while the ambiguities float. Separately, and independent of antenna layout, the attitude sensitivity of a differenced row is (b x e).dtheta, which VANISHES for dtheta parallel to e -- rotation about the line of sight is unobservable from a single tower no matter how the antennas are arranged. Multiple towers supply that axis, but the Earth subtends only ~17 deg from GEO, so the line-of-sight spread is ~10-15 deg and the third axis is weak by roughly 1/sin(10 deg) ~ 6.",
+
+  "_whatThisRungChanges": "coarseBaselineIntegerSearch evaluates attitude candidates over estimator.attitudeInit.search (masterConfig defaults: windowDeg [2;2;2], stepDeg [0.5;0.5;0.5] -> 729 candidates, ratioThreshold 1.20, maxRmsCycles 0.30) and accepts one only if it beats the runner-up by the ratio test. The +/-2 deg window contains the 1.5 deg initial error by construction. If the candidate resolves, the 15 differenced observables stop being absorbed and become pure geometry constraining 3 unknowns, and attitude should become observable. If it does NOT resolve, that is equally informative: it says the differenced carrier at this baseline, this bias level and this line-of-sight diversity cannot support an unambiguous attitude fix, which is a result about the CONFIGURATION rather than about the code.",
+
+  "_STATUS_2026_08_13_theSearchISREACHEDbutRECEIVESNOROWS": "MEASURED, from the LIVE revgnss.ReverseGNSSSimulation.attInitInfo rather than the summary: mode = coarseBaselineIntegerSearch, classification = ABS_ATT_WEAK, message 'Too few differential carrier rows for 3-axis attitude', nCandidates = 729, nBaselines = 3, nDiffRows = 0, nTowers = 0, priorAttitudeError_deg = 1.5. So the initializer IS invoked and DOES build its 729-candidate grid, but the carrier struct it receives has an EMPTY towerIdx: isfield passes, so the line-121 guard clears, and unique(towerIdx) is then empty so it sees no towers and no rows to search. The attitude outcome is consequently unchanged from feat025 to six digits (finalAttitudeError 1.39794 deg, sigma 0.230097 deg, diffAttResidRMS 0.0139742 m). REACHING the initializer required the raw-row fix at ReverseGNSSSimulation.m:811 (it previously read the IF-replaced struct and was inert); that fix is verified golden-safe, with the single/headline/correlated smoke gates all PASS. The remaining blocker is upstream row population, NOT the search and NOT the gate.",
+
+  "_DONOTCITEtheSummaryAttitudeInitFields": "summary.attitudeInitClass / Candidates / DiffRows / BestResidual / SecondResidual are STAMPED PLACEHOLDERS in revgnss.ReportRunner.collectSummary_ -- the flat array schema v3 cannot store the attitudeInit struct and collectSummary_ has no sim handle, so it emits 'UNKNOWN' and zeros unconditionally. An earlier reading of this rung took attitudeInitCandidates = 0 from the summary as proof that the search never ran; the live struct shows 729 candidates. Read out.sim.attInitInfo instead. The placeholder block now carries this warning in place.",
+
+  "_thisIsTheHONESTROUTEandTHEOTHERONEISNOT": "There are two ways to stop the calibration absorbing the attitude error. This rung uses the candidate SEARCH, which reads no truth. The alternative, estimator.diffAtt.referenceMode = 'externalInitialAttitude', calibrates delta_B at an external attitude reference that StageHistory Stage 69 describes as truth + 0.1 deg noise, and revgnss.GeoRealWorldScenarioGuard.m:164 lists it alongside knownAttitudeCalibration as a truth-assisted mode. It is deliberately NOT used here. A rung that resolved attitude by being told the answer would measure nothing.",
+
+  "_windUpCaveatAppliesWITHFORCE": "Phase wind-up is not modelled anywhere in this simulation. On a circularly polarised link it shifts carrier phase by one cycle per revolution of relative antenna orientation, and a nadir-pointing GEO rotates 360 deg per sidereal day relative to each fixed tower. An INTEGER FIX is precisely the operation that unmodelled carrier-phase rotation corrupts, because a slow phase drift is exactly what a wrong integer looks like. A successful fix in this simulation is therefore OPTIMISTIC relative to reality until wind-up is modelled, and any attitude number quoted from this rung must say so.",
+
+  "scenario": {
+    "name": "feat027_attitudeCarrierIntegerSearch",
+    "orbitClass": "GEO",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+
+  "estimator": {
+    "attitudeInitMode": "coarseBaselineIntegerSearch"
+  },
+
+  "report": {
+    "runVersion": "feat027",
+    "compileTex": "auto"
+  },
+  "_reportNote": "compileTex 'auto' rather than the golden's 'require': a ladder rung's deliverable is its .mat, and a pdflatex hiccup must not throw away a finished run."
+}

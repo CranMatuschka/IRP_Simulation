@@ -809,11 +809,45 @@ classdef ReverseGNSSSimulation < handle
             if isfield(obj.cfg.estimator,'attitudeInitMode')
                 attInitMode = obj.cfg.estimator.attitudeInitMode;
             end
+            % RAW carrier rows, not the ionosphere-free ones. When IF carrier rows are
+            % active, CarrierMeasurementBuilder.m:705-709 snapshots the per-signal struct
+            % into cpInfo.floatRows and then REPLACES cpInfo with the IF-combined rows.
+            % This gate used to read the replaced struct, so with
+            % measurements.carrier.ionosphereFreeRows.enable = true -- which
+            % golden_baseline_attitude.json and everything extending it resolve to --
+            % attitudeInitMode was INERT: measured on feat027, attitudeInitCandidates = 0,
+            % best/second residual NaN, and every output byte-identical to feat025.
+            %
+            % Raw rows are also the CORRECT input, not merely the reachable one.
+            % AttitudeInitializer forms inter-antenna differences phi_m(ant) - phi_m(ref)
+            % at one tower (:251-261) and converts them with cfg.measurements.carrierPhase
+            % .lambda_m (:276), which is inherently single-frequency. The IF combination
+            % halves the row count and rescales the ambiguity by alpha/beta, so lambda_m
+            % would be the wrong wavelength for those rows. This is the same substitution
+            % Stage 69 made for DiffAttitudeBuilder ("differential carrier input switched
+            % to floatRows when IF combination is active") and that the integer-fix path
+            % at :892-894 already performs; this one site was left behind.
+            %
+            % floatRows is a COMPLETE snapshot (cpInfo_float63_ = cpInfo before
+            % replacement), so it carries towerIdx, antennaIdx and phi_m -- the three
+            % fields the initializer reads -- with no field loss.
+            %
+            % Golden-safe: the branch needs attitudeInitMode ~= 'none' AND floatRows to
+            % exist. Every shipped config sets attitudeInitMode = 'none'
+            % (masterConfig.m:379), so the first clause short-circuits exactly as before,
+            % and with IF off floatRows is absent and cpInit_ is the struct used today.
+            cpInit_ = [];
+            if isfield(errStruct,'carrierPhase') && isstruct(errStruct.carrierPhase)
+                cpInit_ = errStruct.carrierPhase;
+                if isfield(cpInit_,'floatRows') && isstruct(cpInit_.floatRows)
+                    cpInit_ = cpInit_.floatRows;
+                end
+            end
             if ~obj.attInitDone && ~strcmp(attInitMode,'none') && ...
-                    isfield(errStruct,'carrierPhase') && isstruct(errStruct.carrierPhase) && ...
-                    isfield(errStruct.carrierPhase,'phi_m') && ~isempty(errStruct.carrierPhase.phi_m)
+                    isstruct(cpInit_) && ...
+                    isfield(cpInit_,'phi_m') && ~isempty(cpInit_.phi_m)
                 [obj.ekf, obj.attInitInfo] = revgnss.AttitudeInitializer.run( ...
-                    obj.cfg, obj.asset, obj.towers, obj.ekf, errStruct.carrierPhase, slipInfo);
+                    obj.cfg, obj.asset, obj.towers, obj.ekf, cpInit_, slipInfo);
                 obj.attInitDone = true;
             end
             errStruct.attitudeInit = obj.attInitInfo;

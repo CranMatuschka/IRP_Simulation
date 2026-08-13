@@ -3404,7 +3404,29 @@ classdef ReportRunner
                 end
 
                 % Absolute attitude initialization diagnostics.
-                % Not stored in flat array schema v3 — populate from cfg defaults.
+                %
+                % WARNING -- THESE FIVE FIELDS ARE PLACEHOLDERS, NOT MEASUREMENTS.
+                % attitudeInitClass/Candidates/DiffRows/BestResidual/SecondResidual below
+                % are STAMPED CONSTANTS. They are not read from the run: the flat array
+                % schema v3 stores numeric per-epoch arrays and cannot hold the
+                % attitudeInit STRUCT, and collectSummary_ receives only (diag, cfg) --
+                % it has no handle on the sim object that owns it. The unconditional
+                % error() below exists solely to reach this catch; it is control flow,
+                % not a failure.
+                %
+                % DO NOT READ THEM AS EVIDENCE. 'UNKNOWN' and 0 candidates are emitted
+                % identically whether the initializer never ran, ran and found nothing,
+                % or ran and resolved a candidate. Measured 2026-08-13: a feat027 run
+                % whose LIVE struct held classification 'ABS_ATT_WEAK', nCandidates 729
+                % and nDiffRows 0 still reported attitudeInitClass 'UNKNOWN' and
+                % attitudeInitCandidates 0 here -- a reader concluded from those two
+                % numbers that the search had never executed, which was wrong.
+                %
+                % The authoritative value is revgnss.ReverseGNSSSimulation.attInitInfo
+                % (also placed on errStruct.attitudeInit each epoch). Read it from
+                % out.sim.attInitInfo. Wiring it into the summary needs either a
+                % run-level metadata channel on the store or an extra argument here;
+                % until that exists these stay placeholders and say so.
                 try
                     error('attitudeInit:notInFlatSchema','not stored');
                 catch
