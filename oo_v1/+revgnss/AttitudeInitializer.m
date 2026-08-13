@@ -247,16 +247,46 @@ classdef AttitudeInitializer
         end
 
         function [obs_m, tiVec, aiVec] = diffRows_(cpInfo)
+            % PRIMARY-SIGNAL FILTER. The sum(...) ~= 1 guards below demand exactly ONE
+            % carrier row per (tower, antenna). With two carrier signals enabled -- L1 and
+            % L2, which golden_baseline_attitude.json and everything extending it resolve
+            % to (signals.enabledMask = [true true]) -- every pair has TWO rows, so
+            % sum(ref) == 2, EVERY tower is skipped, and this returned nothing at all.
+            % Measured on feat027 before this fix: nDiffRows = 0, nTowers = 0,
+            % classification ABS_ATT_WEAK, while the search had its full 729-candidate grid
+            % ready. The initializer was reached and then starved.
+            %
+            % This is the SAME defect Stage 69 fixed one class away, with the same
+            % signature: it "adds primary-signal filter in DiffAttitudeBuilder.accumulate
+            % and buildRows so that only the lowest-signalIdx row per tower-antenna pair is
+            % used, fixing a silent zero-calibration bug that occurred with
+            % twoFrequency.enable=true (two L1+L2 rows per pair produced sum(mask)!=1
+            % causing every pair to be skipped)". DiffAttitudeBuilder.m:126-142 got the
+            % filter; this function did not. Collapsing to the lowest signalIdx is the
+            % right choice for the same reason it is there: the inter-antenna baseline
+            % observable is a single-frequency quantity and lambdaL1_ converts it with the
+            % L1 wavelength, so mixing bands here would be dimensionally wrong.
+            %
+            % Degrades to the previous behaviour when signalIdx is absent (older payloads)
+            % or when only one signal is active, where the filter is a strict no-op.
             obs_m = zeros(0,1); tiVec = zeros(0,1); aiVec = zeros(0,1);
+            hasSigIdx = isfield(cpInfo,'signalIdx') && ...
+                numel(cpInfo.signalIdx) == numel(cpInfo.towerIdx);
             towers = unique(cpInfo.towerIdx(:))';
             for ti = towers
                 ref = (cpInfo.towerIdx == ti) & (cpInfo.antennaIdx == 1);
+                if hasSigIdx && any(ref)
+                    ref = ref & (cpInfo.signalIdx == min(cpInfo.signalIdx(ref)));
+                end
                 if sum(ref) ~= 1; continue; end
                 phiRef = cpInfo.phi_m(ref);
                 ants = unique(cpInfo.antennaIdx(cpInfo.towerIdx == ti))';
                 for ai = ants
                     if ai == 1; continue; end
                     mask = (cpInfo.towerIdx == ti) & (cpInfo.antennaIdx == ai);
+                    if hasSigIdx && any(mask)
+                        mask = mask & (cpInfo.signalIdx == min(cpInfo.signalIdx(mask)));
+                    end
                     if sum(mask) ~= 1; continue; end
                     obs_m(end+1,1) = cpInfo.phi_m(mask) - phiRef; %#ok<AGROW>
                     tiVec(end+1,1) = ti; %#ok<AGROW>
