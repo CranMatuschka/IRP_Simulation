@@ -47,6 +47,7 @@ function captureGolden(tier, scenario)
         case 'headline'; outFile = fullfile(thisDir, 'golden', ['golden_headline_' golden.tier '.mat']);
         case 'realism';  outFile = fullfile(thisDir, 'golden', ['golden_realism_'  golden.tier '.mat']);
         case 'feat024';  outFile = fullfile(thisDir, 'golden', ['golden_feat024_'  golden.tier '.mat']);
+        case 'correlated'; outFile = fullfile(thisDir, 'golden', ['golden_correlated_' golden.tier '.mat']);
         otherwise;       outFile = fullfile(thisDir, 'golden', ['golden_'          golden.tier '.mat']);
     end
     if ~isfolder(fullfile(thisDir,'golden')); mkdir(fullfile(thisDir,'golden')); end

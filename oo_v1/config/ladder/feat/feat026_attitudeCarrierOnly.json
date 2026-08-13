@@ -1,0 +1,33 @@
+{
+  "_id": "feat rung: attitudeCarrierOnly. The KINEMATIC limit of feat025 -- star tracker AND gyro both off, so the differenced carrier baseline is the only thing that knows where the spacecraft is pointing. Extends feat025 so the star-tracker removal is inherited and this file changes exactly one further leaf.",
+  "_extends": "feat025_attitudeCarrierNoStarTracker.json",
+  "_delta": "estimator.imu.enable: true -> false. Nothing else.",
+
+  "_theQuestionThisAsks": "feat025 asks 'can differenced carrier phase CORRECT a gyro-propagated attitude', which is how a real GNSS-attitude system works. This rung asks the strictly harder question: 'can differenced carrier phase DETERMINE attitude with no dynamics model at all'. The attitude states are then driven only by the process noise between carrier updates, so this is the observability limit rather than an architecture anyone would fly.",
+
+  "_expectItToBeWorseAndPossiblyUnstable": "This rung may not converge, and a non-converging result is a legitimate finding rather than a failed run -- it is the statement that the carrier baseline alone does not constrain three attitude degrees of freedom at this geometry. Report it as such. Do NOT tune the process noise to make it converge; that would be fitting the answer.",
+
+  "_thisIsWHEREsigmaAngAccelBECOMESLIVEAGAIN": "With imu.enable false, estimateGyroBias resolves FALSE, so ReverseGNSSEKF.applyGyroProcessNoise_ no longer overwrites the attitude block of Q -- and cfg.estimator.sigma_angAccel_radps2 (1e-7 rad/s^2 in masterConfig) becomes the parameter that actually sets attitude process noise. In every other shipped configuration it is inert: measured on the golden-resolved EKF, sweeping sigma_angAccel over EIGHT ORDERS OF MAGNITUDE leaves trace(Q_euler) bit-identical at 1.200090e-07, because the gyro block overwrites it. AttitudeObservability.m:48-50 nonetheless warns that a weak-geometry attitude covariance is 'process-noise-limited (sigma_angAccel)' in every run, which is true HERE and misleading everywhere else. This rung is therefore also the one place that warning can be taken at face value, and the one place tuning sigma_angAccel does anything.",
+
+  "_sameWindUpCaveat": "Phase wind-up is not modelled (see feat025's _knownLimitationThatBitesHardestHere). It applies with even more force here, because carrier phase is now the sole source of attitude information and there is no gyro to arbitrate a slow carrier-phase rotation signature against the true body rotation.",
+
+  "scenario": {
+    "name": "feat026_attitudeCarrierOnly",
+    "orbitClass": "GEO",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+
+  "estimator": {
+    "imu": {
+      "enable": false
+    }
+  },
+
+  "report": {
+    "runVersion": "feat026",
+    "compileTex": "auto"
+  },
+  "_reportNote": "compileTex 'auto' rather than the golden's 'require': a ladder rung's deliverable is its .mat, and a pdflatex hiccup must not throw away a finished run."
+}

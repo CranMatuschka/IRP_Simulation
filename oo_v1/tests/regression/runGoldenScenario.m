@@ -22,6 +22,7 @@ function out = runGoldenScenario(durationOverride_s, seed, scenario)
         case 'headline'; cfg = goldenHeadlineScenarioConfig(durationOverride_s);
         case 'realism';  cfg = goldenRealismScenarioConfig(durationOverride_s);
         case 'feat024';  cfg = goldenFeat024ScenarioConfig(durationOverride_s);
+        case 'correlated'; cfg = goldenCorrelatedScenarioConfig(durationOverride_s);
         otherwise
             error('runGoldenScenario:scenario', ...
                 ['scenario must be ''single'', ''headline'', ''realism'' or ''feat024'' ' ...

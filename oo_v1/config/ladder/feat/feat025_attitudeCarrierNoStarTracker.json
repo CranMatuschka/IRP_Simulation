@@ -1,0 +1,40 @@
+{
+  "_id": "feat rung: attitudeCarrierNoStarTracker. One toggle against golden_baseline_attitude.json -- the star tracker is switched OFF -- so spacecraft attitude is determined by the DIFFERENTIAL CARRIER baseline and gyro propagation alone. Everything else is inherited via _extends, so the difference in the result is attributable to that toggle alone. This is the rung that answers 'what can reverse-GNSS carrier phase actually determine about attitude', which the attitude baseline cannot answer because its 30 arcsec star tracker dominates the solution.",
+  "_extends": "golden_baseline_attitude.json",
+  "_delta": "TWO leaves, and the second is forced by the first. (1) estimator.starTracker.enable: true -> false. (2) estimator.attitude.primaryMode: 'starTrackerGyroscope' -> 'carrierLeverArmQuaternionEkf', because validateMasterConfig.m:97-101 refuses a primaryMode containing 'startracker' while the star tracker is disabled -- correctly, since the label would then assert a sensor that is not there.",
+
+  "_primaryModeIsALABELnotASWITCH": "estimator.attitude.primaryMode selects no physics. Its only consumers are the guard above and one report summary field (ReportRunner.m:870); the mechanism that actually forms the carrier attitude observable is estimator.attitudeCarrierMode = 'calibratedDifferentialAmbiguity', inherited unchanged from the parent. 'carrierLeverArmQuaternionEkf' is the value StageHistory records for the carrier-driven quaternion error-state EKF and is the only shipped alternative to the star-tracker label; it is chosen here because it does not claim a star tracker, NOT because it switches on the lever-arm partial route (estimator.attitude.useCarrierPartials stays false -- see _whyNotUseCarrierPartials).",
+
+  "_whyNotUseCarrierPartials": "There are TWO independent carrier-attitude routes in this code and they must not be confused. (a) estimator.attitude.useCarrierPartials puts the LEVER-ARM sensitivity into the main measurement Jacobian H, so an undifferenced carrier row sees attitude through the antenna offset from the centre of mass. It is false in masterConfig AND in golden_baseline_attitude.json. (b) estimator.attitudeCarrierMode = 'calibratedDifferentialAmbiguity' builds a DiffAttitudeBuilder and forms BETWEEN-ANTENNA differenced carrier rows -- the classic GNSS attitude-determination observable (Naqvi et al. 2013; Abbas et al. 2012, both in Paper/), where a short known baseline between phase centres rotates with the body. golden_baseline_attitude.json already uses (b). This rung keeps (b) and removes the star tracker so (b) has to carry the attitude by itself. Turning on (a) as well would change TWO things at once and is deliberately not done here.",
+
+  "_whatThisIsolates": "In golden_baseline_attitude.json the attitude is constrained by the star tracker (whiteAngularSigma_rad = 1.4544e-4, i.e. 30 arcsec 1-sigma per axis) AND by the differential carrier AND propagated by the gyro. Because the star tracker is by far the tightest of the three on the absolute angles, any attitude accuracy quoted from that baseline is substantially a star-tracker result with GNSS as a contributor. With it removed, the absolute attitude has no external optical reference at all: the differenced carrier must supply it, and the gyro only propagates between updates. The delta between this rung and its parent is therefore the star tracker's contribution, and this rung's own error is the carrier baseline's standalone capability.",
+
+  "_whatToExpect": "Attitude error should DEGRADE relative to the parent, and that is the point -- the number is the honest carrier-only figure, not a regression. Two things govern how far it degrades and both are already modelled here: the inter-antenna carrier bias (errors.interAntennaCarrierBias, 0.02 cycles = 3.8 mm at L1 in the parent, a calibrated residual) sits directly on the differenced observable, and the antenna cross is ~1 m, so an angular error of theta radians moves a phase centre by ~1 m * theta. A 3.8 mm bias on a 1 m baseline is ~3.8 mrad = 0.22 deg of attitude if it is not separated from geometry. Read the rung against that scale before calling any number good or bad.",
+
+  "_knownLimitationThatBitesHardestHere": "PHASE WIND-UP IS NOT MODELLED anywhere in this simulation (docs/ERROR_BUDGET.md lists it as absent). For a circularly polarised signal, relative rotation between transmit and receive antennas about the boresight shifts carrier phase by one cycle per revolution, up to half a wavelength before correction. A nadir-pointing GEO rotates a full 360 deg per sidereal day relative to each fixed ground tower, so the wind-up is a slow arc-correlated carrier drift of ~0.19 m/day/link -- and this rung is the one configuration where carrier phase is the SOLE source of absolute attitude, i.e. where an unmodelled carrier-phase rotation signature is least separable from the thing being estimated. Any attitude claim from this rung must state that wind-up is absent. See Wu, J. T., Wu, S. C., Hajj, G. A., Bertiger, W. I., & Lichten, S. M. (1993), Effects of antenna orientation on GPS carrier phase, Manuscripta Geodaetica 18(2), 91-98.",
+
+  "_gyroStaysOn": "estimator.imu.enable is left TRUE. The gyro is the attitude DYNAMICS model, not an absolute reference: it propagates between carrier updates exactly as a real GNSS-attitude system's IMU does, and removing it as well changes the question from 'can carrier phase correct a propagated attitude' to 'can carrier phase determine attitude kinematically per epoch'. That second question is feat026. Note also that with the gyro on, estimateGyroBias resolves true and applyGyroProcessNoise_ OVERWRITES the sigma_angAccel attitude block, so cfg.estimator.sigma_angAccel_radps2 has no effect on attitude in THIS rung -- do not tune it here expecting a response.",
+
+  "scenario": {
+    "name": "feat025_attitudeCarrierNoStarTracker",
+    "orbitClass": "GEO",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+
+  "estimator": {
+    "starTracker": {
+      "enable": false
+    },
+    "attitude": {
+      "primaryMode": "carrierLeverArmQuaternionEkf"
+    }
+  },
+
+  "report": {
+    "runVersion": "feat025",
+    "compileTex": "auto"
+  },
+  "_reportNote": "compileTex 'auto' rather than the golden's 'require': a ladder rung's deliverable is its .mat, and a pdflatex hiccup must not throw away a finished run."
+}
