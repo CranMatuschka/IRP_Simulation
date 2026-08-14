@@ -452,8 +452,19 @@ classdef CarrierMeasurementBuilder
                     end
                 end
 
+                % RECEIVE-END carrier multipath (TRUTH-ONLY): reflections off the
+                % spacecraft structure. Keyed per (tower, ANTENNA, signal), so unlike the
+                % transmit-end ground bounce in coloredGM -- which is common to all four
+                % phase centres and cancels -- this SURVIVES the inter-antenna single
+                % difference the att ladder is built on, and survives the between-tower
+                % double difference too because the tower's body-frame direction differs.
+                % Added to z only, never to h_phi: the estimator does not know it, exactly
+                % as with the inter-antenna bias above. Returns 0 unless
+                % errors.multipath.receiveEnd.enable, so the golden path is unchanged.
+                mpRx_m = errorChain.receiveEndCarrierMultipath(ti, ai, si_);
+
                 % z: +trop, -iono (carrier ionosphere is OPPOSITE sign to code)
-                z_phi(rowOut) = rho_t + b_rx_true - b_twr_t + trop_t - iono_t_sig + B_true + noise_phi + phaseScint_m + b_ia_m;
+                z_phi(rowOut) = rho_t + b_rx_true - b_twr_t + trop_t - iono_t_sig + B_true + noise_phi + phaseScint_m + b_ia_m + mpRx_m;
 
                 % Synthetic slip injection for stress testing. slipCfg_ validated ONCE
                 % above the loop; no catch here (D12) -- a malformed config now errors

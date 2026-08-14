@@ -36,6 +36,24 @@ commit `bdbeaed` in particular, names them by the old numbers:
 | att009 | fix + DD | 1.235936 | 0.917092 | 1.348 |
 | **att010** | **joint search, NOTHING deleted** | **0.954157** | **1.048386** | **0.910** |
 | **att011** | **att010 + space-grade FOG gyro** | **0.182352** | **0.207983** | **0.877** |
+| **att012** | **att011 + 3 mm receive-end multipath** | **2.522981** | **0.199447** | **12.65** |
+
+**att012 is the honesty rung and it breaks the family.** 3 mm of quasi-static
+per-antenna carrier multipath, at the repo's OWN declared 1/100 code-to-carrier scale
+and not Kaplan's 6x larger benign figure, degrades attitude 13.8x while the sigma does
+not move. The final 2.523 deg is ABOVE the 1.500 deg initial error, i.e. the filter
+ended further from truth than its own prior. The DD residual rises only 1.041x, so the
+damage is nearly invisible in residual RMS: no residual monitor would catch it.
+
+**Why, and this is the finding.** On the FLOAT rungs (att004-att009) `delta_B` is a free
+REAL per (tower, baseline) and absorbs antenna-specific quasi-static offsets. Once the
+joint fix is accepted the rows become `dz = (z_t - z_p) - lambda*(N_t - N_p)` against
+pure geometry, with the Jacobian filling ONLY the attitude columns: no ambiguity, bias
+or clock column survives. **The integer fix removes the absorber.** The mechanism that
+buys att010/att011 their accuracy under a clean error model is the same one that makes
+them fragile under a realistic one. This also disposes of the objection that the result
+turns on an undefended correlation time: a perfectly static offset is no more absorbable
+than a drifting one on that path.
 
 `att010` is the only rung that is both the best in the family on error and honest on
 covariance, and the only one that achieves it without deleting a real hardware effect.

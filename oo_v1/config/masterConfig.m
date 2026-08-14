@@ -2460,6 +2460,36 @@ cfg.errors.multipath.coloredGM.seed                = 6301;   % dedicated per-lin
 % scintillation draw does. The receive-end component is not separately modelled; a run that
 % sets this true is declaring the modelled term to be the transmit-end one.
 cfg.errors.multipath.coloredGM.sharedAcrossAntennas.enable = false;
+% RECEIVE-END carrier multipath: reflections off the SPACECRAFT STRUCTURE.
+%
+% WHY IT IS A SEPARATE TERM. coloredGM above is parameterised as the classical
+% GROUND-STATION model (0.30 m steady state, 1/sin(el) envelope keyed on TOWER
+% elevation), i.e. the TRANSMIT end, which is genuinely COMMON to every receive
+% antenna -- which is exactly why golden_baseline.json sets its sharedAcrossAntennas
+% gate true. That file also states the gap in writing: "the RECEIVE-end component --
+% reflections off the spacecraft structure, which genuinely does differ per antenna --
+% is not separately modelled." This is that component, and flipping the shared gate
+% would NOT be a substitute: it would wrongly make the ground bounce per-antenna.
+%
+% WHY IT MATTERS AND NOTHING ELSE COVERS IT. Only ANTENNA-SPECIFIC errors survive an
+% inter-antenna single difference, which is the observable the whole att ladder is
+% built on. A common term cancels; this one does not. It also differs per TOWER,
+% because the tower direction in the body frame differs, so it does NOT cancel in the
+% between-tower double difference either. It is therefore the one error source that
+% reaches the integer-fixed attitude rows unopposed.
+%
+% MAGNITUDE. 3 mm steady state is coloredGM's own declared carrierScale (0.01) applied
+% to its 0.30 m code figure, i.e. the repo's own 1/100 code-to-carrier rule rather than
+% an invented number. Kaplan's benign-environment carrier multipath of 2 cm is ~6x
+% larger, and lambda/4 = 47.6 mm at L1 is the hard physical bound. NO elevation
+% envelope: at GEO every tower sits within ~9 deg of nadir in the body frame, so the
+% receive-end geometry barely varies across the visible set.
+%
+% TRUTH-ONLY, and default OFF so every existing golden is bit-identical.
+% See ErrorChain.receiveEndCarrierMultipath and CarrierMeasurementBuilder.
+cfg.errors.multipath.receiveEnd.enable            = false;
+cfg.errors.multipath.receiveEnd.sigmaCarrier_ss_m = 0.003;   % steady-state 1-sigma [m]
+cfg.errors.multipath.receiveEnd.tau_s             = 300;     % correlation time [s]
 
 % --- Effect toggles: deterministic geometric/structural effects ------
 % cfg.effects groups deterministic geometric/structural effects.

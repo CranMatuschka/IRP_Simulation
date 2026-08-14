@@ -40,5 +40,8 @@ classdef RngSource
         SEC_CARR_AMB        = 27  % per-secondary ground-carrier float-ambiguity truth (persistent, per tower/asset)
         SEC_CARR_PHASE      = 28  % per-secondary ground-carrier phase noise (white, per tower/asset/epoch)
         SEC_DOPPLER         = 29  % per-secondary tower->secondary range-rate (Doppler) noise (white, per tower/asset/epoch)
+        MP_RX_CARRIER       = 30  % RECEIVE-end (spacecraft structure) carrier multipath, truth-only
+                                  % (persistent GM, per tower/antenna/signal). Distinct from MP_GM,
+                                  % which carries the TRANSMIT-end (ground bounce) term.
     end
 end

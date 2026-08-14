@@ -46,6 +46,7 @@ classdef ErrorChain < handle
         lastT_s     (1,1) double = -1   % last t_s for dt computation
         mpRng                      % Dedicated RandStream for coloured multipath (legacy, OFF path)
         mpState                    % containers.Map link-key -> GM state [m] (persistent)
+        mpRxState                  % containers.Map link-key -> receive-end carrier MP GM state [m]
         % Seed-independence refactor: identity-keyed streams (ON path, default)
         useIndependentStreams (1,1) logical = false
         registry                   % models.noise.RngRegistry (built only when ON)
@@ -149,6 +150,117 @@ classdef ErrorChain < handle
             truth_m = xNew;
         end
 
+        function mp_m = receiveEndCarrierMultipath(obj, ti, ai, si)
+            % receiveEndCarrierMultipath  Truth-only spacecraft-structure carrier multipath.
+            %
+            % WHAT THIS IS AND WHY IT IS NOT coloredGM. multipathForSignal above carries
+            % the TRANSMIT-end term: 0.30 m steady state with a 1/sin(el) envelope keyed
+            % on TOWER elevation, i.e. the ground bounce at the station, which is common
+            % to every receive antenna. golden_baseline.json sets its sharedAcrossAntennas
+            % gate true for exactly that reason, and declares in the same breath that the
+            % RECEIVE-end component, reflections off the spacecraft structure, "genuinely
+            % does differ per antenna" and "is not separately modelled". This is it.
+            %
+            % WHY IT IS THE ONE THAT REACHES ATTITUDE. The att ladder's observable is an
+            % inter-antenna single difference, so a term common to the antennas cancels
+            % identically. This one is keyed on (tower, ANTENNA, signal) and survives.
+            % It also differs per TOWER, because the tower's direction in the body frame
+            % differs, so the between-tower double difference does not remove it either.
+            %
+            % QUASI-STATIC AT GEO, AND THAT IS THE INTERESTING PART. tau defaults to 300 s
+            % against a 3600 s arc, so this is closer to a slowly drifting per-(tower,
+            % antenna) phase OFFSET than to noise. A perfectly constant offset would be
+            % partly absorbed by the ambiguity; a drifting one is exactly what an integer
+            % fix cannot absorb and what the DD cannot cancel.
+            %
+            % Stepped ONCE per epoch per key by construction: the carrier builder emits
+            % exactly one row per (tower, antenna, signal), so unlike the shared-antenna
+            % branch above there is no multi-step shortening of the effective tau.
+            mp_m = 0;
+            if ~isfield(obj.cfg,'errors') || ~isfield(obj.cfg.errors,'multipath'); return; end
+            mc = obj.cfg.errors.multipath;
+            % MASTER GATE FIRST. errors.multipath.truth.enable is the switch every
+            % multipath-ablation rung uses to mean "no multipath in truth". Honouring only
+            % the receiveEnd leaf would leave this term running inside an arm that declares
+            % multipath OFF, which is the inert/mis-declared-toggle failure this repo has
+            % on record. "Multipath off" must mean off, including this term.
+            if ~isfield(mc,'truth') || ~isfield(mc.truth,'enable') || ~mc.truth.enable
+                return
+            end
+            if ~isfield(mc,'receiveEnd') || ~isfield(mc.receiveEnd,'enable') || ...
+                    ~mc.receiveEnd.enable
+                return
+            end
+            r = mc.receiveEnd;
+            sigma_ss = 0.003; if isfield(r,'sigmaCarrier_ss_m'); sigma_ss = r.sigmaCarrier_ss_m; end
+            tau_s    = 300;   if isfield(r,'tau_s');             tau_s    = r.tau_s;             end
+            if ~isfinite(sigma_ss) || sigma_ss <= 0 || ~isfinite(tau_s) || tau_s <= 0; return; end
+            dt = 1.0;
+            try; dt = obj.cfg.simulation.dt_s; catch; end
+            if ~isfinite(dt) || dt <= 0; dt = 1.0; end
+            if isempty(obj.mpRxState)
+                obj.mpRxState = containers.Map('KeyType','int64','ValueType','double');
+            end
+            key = int64(round(ti) * 1000000 + round(ai) * 1000 + round(si));
+            if obj.useIndependentStreams
+                stream = obj.registry.persistentStream( ...
+                    models.noise.RngSource.MP_RX_CARRIER, ti, ai, si);
+            else
+                % NOT obj.mpRng: that stream belongs to the TRANSMIT-end coloured multipath,
+                % and drawing from it here would shift that process's sequence, i.e. turning
+                % this term on would silently change a DIFFERENT error source. Under the
+                % legacy shared-RNG mode there is no collision-free stream to use. Erroring
+                % rather than returning 0 is deliberate: a silent no-op here would be a gate
+                % that is on and inert, which is the exact failure this repo has on record.
+                error('ErrorChain:receiveEndMultipathNeedsIndependentStreams', ...
+                    ['errors.multipath.receiveEnd.enable=true requires identity-keyed RNG ' ...
+                     'streams (useIndependentStreams). The legacy shared stream belongs to ' ...
+                     'the transmit-end multipath and drawing from it would perturb that ' ...
+                     'process. Enable independent streams or leave receiveEnd off.']);
+            end
+            if isKey(obj.mpRxState, key)
+                xPrev = obj.mpRxState(key);
+            else
+                % START FROM THE STATIONARY DISTRIBUTION, NOT FROM ZERO. A GM started at 0
+                % needs ~tau to reach its steady-state amplitude: at tau = 300 s it is at
+                % 0.574 of sigma_ss by t = 60 s and 0.930 by t = 300 s. Both of the things
+                % this family depends on happen inside that warm-up -- the delta_B
+                % calibration window closes at 60 s and the ONE-SHOT joint integer search
+                % runs at the first epoch after it -- so a zero start would fix the integer
+                % during an artificially quiet interval and then let the term drift away
+                % from it, overstating the damage. x0 ~ N(0, sigma_ss) removes that
+                % artefact and makes the process stationary from the first epoch.
+                xPrev = sigma_ss * randn(stream, 1, 1);
+            end
+            xNew = models.noise.StochasticProcess.gaussMarkovStep( ...
+                xPrev, dt, tau_s, sigma_ss, stream);
+            % PHYSICAL BOUND. A reflected ray cannot displace the carrier phase by more
+            % than a quarter wavelength, so |multipath| <= lambda/4 (47.6 mm at L1) however
+            % the Gaussian is parameterised. Without this the tail of an unbounded normal
+            % emits values no reflection can produce, and the term would also be BAND-BLIND
+            % -- a defect this repo already has on record for the carrier path. The clamp is
+            % what couples the metre-valued sigma to the band actually being simulated.
+            lamQ = obj.receiveEndPhaseBound_m();
+            if isfinite(lamQ) && lamQ > 0
+                xNew = max(min(xNew, lamQ), -lamQ);
+            end
+            obj.mpRxState(key) = xNew;
+            mp_m = xNew;
+        end
+
+        function q = receiveEndPhaseBound_m(obj)
+            % receiveEndPhaseBound_m  lambda/4 for the resolved band, or NaN if unreadable.
+            q = NaN;
+            try
+                if isfield(obj.cfg,'signals') && isfield(obj.cfg.signals,'wavelength_m') ...
+                        && ~isempty(obj.cfg.signals.wavelength_m)
+                    q = obj.cfg.signals.wavelength_m(1) / 4;
+                end
+            catch
+                q = NaN;
+            end
+        end
+
         function obj = ErrorChain(cfg, seed)
             % ErrorChain  Constructor.
             %
@@ -229,6 +341,7 @@ classdef ErrorChain < handle
             end
             obj.mpRng   = RandStream('mt19937ar', 'Seed', mpSeed);
             obj.mpState = containers.Map('KeyType', 'int64', 'ValueType', 'double');
+            obj.mpRxState = containers.Map('KeyType', 'int64', 'ValueType', 'double');
         end
 
         % ----------------------------------------------------------------
