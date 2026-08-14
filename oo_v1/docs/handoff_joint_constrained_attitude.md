@@ -20,15 +20,28 @@ information about the actual error is an unobserved state, not a struggling one.
 Three mechanisms were then built and measured (commit `bdbeaed`), 3600 s, GEO,
 5 towers, 4 antennas. `att010` is this pass:
 
-| rung | mechanism | error deg | sigma deg | err/sigma |
-|---|---|---|---|---|
-| att004 | baseline, AR policy-blocked | 1.397941 | 0.230097 | 6.08 |
-| att005 | integer fix (bias DELETED) | 1.159938 | 0.210448 | 5.51 |
-| att006 | tower-common bias | 1.380606 | 0.230438 | 5.99 |
-| att007 | fix + common bias | 1.187378 | 0.210284 | 5.65 |
-| att008 | DD only | 1.649196 | 1.024780 | 1.609 |
-| att009 | fix + DD (bias DELETED) | 1.235936 | 0.917092 | 1.348 |
-| **att010** | **joint search, NOTHING deleted** | **0.954157** | **1.048386** | **0.910** |
+Re-measured 2026-08-14 after the measurement covariance was corrected (see below).
+The `bdbeaed` column is kept because the comparison is the finding, not a footnote:
+it is like-for-like, att008 having been re-run on the pre-fix tree through the same
+extraction to reproduce `1.649196` / `1.024780` exactly.
+
+| rung | mechanism | error deg | sigma deg | err/sigma | was (err / sigma) |
+|---|---|---|---|---|---|
+| att004 | baseline, AR policy-blocked | 1.460038 | 0.227421 | 6.420 | 1.397941 / 0.230097 |
+| att005 | integer fix (bias DELETED) | 1.138511 | 0.208533 | 5.460 | 1.159938 / 0.210448 |
+| att006 | tower-common bias | 1.288407 | 0.227177 | 5.671 | 1.380606 / 0.230438 |
+| att007 | fix + common bias | 1.104871 | 0.208474 | 5.300 | 1.187378 / 0.210284 |
+| att008 | DD only | 1.585572 | 1.010705 | 1.569 | 1.649196 / 1.024780 |
+| att009 | fix + DD (bias DELETED) | 1.439385 | 0.864258 | 1.665 | 1.235936 / 0.917092 |
+| **att010** | **joint search, NOTHING deleted** | **1.036624** | **1.009287** | **1.027** | 0.954157 / 1.048386 |
+
+The correction did NOT buy accuracy: att009 and att010 got worse on error by 16 % and
+8.6 %. It moved att010's `err/sigma` from 0.910 to 1.027, from mildly conservative to
+almost exactly consistent, and that is the whole of what it bought.
+
+**`att011`, `att012` and `att013` are NOT in this table because they have not been
+re-measured under the corrected `R`.** Their rows in `README_att_ladder.md` are pre-fix
+numbers and are not comparable with the seven above.
 
 Two findings from the first three mechanisms, separate virtues in separate rungs:
 
@@ -108,16 +121,17 @@ because there is nothing to confuse the winner with. `neighbourRatio`,
   search delivers the INTEGERS; the EKF estimates attitude from the fixed rows.
 - **The arc buys no averaging, and that is now the limit.** 19.1 mm post-fit DD
   residual over 12 rows at ~5 mm/deg is ~1 deg of single-epoch information, and the
-  rung reports 1.048386 deg after 3601 epochs -- the single-epoch value,
+  rung reports 1.009287 deg after 3601 epochs -- the single-epoch value,
   essentially unimproved. **This rung is not limited by the ambiguity**, which is now
-  fixed and unique.
+  fixed and unique. (The covariance correction moved this from 1.048386 to 1.009287
+  and did not change the reading.)
 
   What it IS limited by is not yet established, and one earlier guess here is now
   ruled out. The resolved gyro numbers are ARW `2e-4 rad/sqrt(s)`, bias RRW
   `3e-6 rad/s/sqrt(s)`, initial bias sigma `3e-5 rad/s` (realism grade doubles
   masterConfig's declared values). ARW alone is only **0.0115 deg per 1 s epoch**, and
   a random-walk-plus-measurement steady state of `sqrt(q*sigma_z) = sqrt(0.0115*1.0)`
-  is ~0.107 deg, TEN TIMES BELOW the 1.048386 deg observed. So angle random walk does
+  is ~0.107 deg, TEN TIMES BELOW the 1.009287 deg observed. So angle random walk does
   not explain it.
 
   The leading candidate is the **gyro BIAS**, not the gyro noise: `3e-5 rad/s`
@@ -143,13 +157,32 @@ because there is nothing to confuse the winner with. `neighbourRatio`,
   `diffAttRejectedRows` 0 across the whole arc, so the integer-fixed rows carried
   every epoch and not just the first.
 
-## The DD R assembly is structurally incomplete (found here, NOT fixed, PRE-EXISTING)
+### Re-verified after the covariance correction (2026-08-14)
 
-Found by adversarial review of this change and confirmed by reading the code. It is
-**not** introduced by this change: `blocks{end+1} = R_row*(eye(m)+ones(m))`, the
-`blkdiag` across groups, and the SD fallback `R_row*eye` are all unchanged lines
-inherited from the `towerDoubleDifference` path, so **it affects att008 and att009 as
-much as att010**.
+- Golden gate **5/5 PASS before and 5/5 PASS after**, same five smoke scenarios.
+  The DD leaf is default OFF, so the goldens are the control, and they held.
+- **The before column is like-for-like, not quoted.** att008 re-run on the pre-fix
+  tree through the same extraction reproduced `1.649196` / `1.024780` to all six
+  decimals, which also confirms the tree state is the one those numbers came from.
+- Liveness re-confirmed in a FRESH process per rung, because the announcement is
+  `persistent` and a batched session prints it for the first rung only (open defect
+  6): `TOWER DD APPLIED: 3 groups, pivot tower 1, 0 rows dropped, 12 DD rows (was
+  15 SD rows)`. That row set is the fully-populated one the closed form covers.
+- att004-att010 were ALL re-run, not only the three DD rungs. The SD fallback `R`
+  was wrong too, so the whole family moved, and publishing corrected rows beside
+  stale ones would have mixed two measurement configs in one table.
+- **att011, att012 and att013 have NOT been re-measured under the corrected `R`.**
+  They post-date this work and their rows in the ladder table are pre-fix numbers.
+
+## The DD R assembly was structurally incomplete (PRE-EXISTING, FIXED 2026-08-14)
+
+Found by adversarial review of this change and confirmed by reading the code. It was
+**not** introduced by that change: `blocks{end+1} = R_row*(eye(m)+ones(m))`, the
+`blkdiag` across groups, and the SD fallback `R_row*eye` were all unchanged lines
+inherited from the `towerDoubleDifference` path, so **it affected att008 and att009 as
+much as att010**, and the SD fallback affected every diffAtt rung in the family.
+
+### The defect
 
 Every baseline at a tower is single-differenced against the SAME reference antenna
 (`refMask = antennaIdx==1` is computed once per tower, outside the baseline loop). So
@@ -161,27 +194,91 @@ Cov(d_{t,b}, d_{t',b'}) = sigma^2 * (delta_bb' + 1) * (delta_tt' + 1)
 ```
 
 i.e. in the fully-populated case `R_true = sigma^2 * (I_nB + J_nB) kron (I_m + J_m)`.
-The code builds `2*sigma^2 * I_nB kron (I_m + J_m)`: correct on the diagonal
+The code built `2*sigma^2 * I_nB kron (I_m + J_m)`: correct on the diagonal
 (`4 sigma^2`) and correct within a baseline group (`2 sigma^2`), but **exactly zero**
 where the truth is `2 sigma^2` (same tower, different baseline) and `sigma^2`
 (different tower, different baseline). `(I3+J3)` has eigenvalues `{4,1,1}` and the code
-substitutes `2` for all three, so the DD combination COMMON to all three baselines is
+substituted `2` for all three, so the DD combination COMMON to all three baselines was
 charged half its true variance.
 
-Two things the review got wrong that should stop anyone over-reading it:
+### The fix
+
+`blkdiag` of per-group blocks cannot represent a covariance that reaches ACROSS groups,
+so the block form was replaced rather than patched. Each row is now written in terms of
+the raw phases it is actually built from, and the covariance is one Gram product over
+the whole stack:
+
+- `sdCoefficients_(rows_key, rows_sig, nTowers, nBaselines)` returns `C` with a `+1` on
+  `(t, b+1, s)` and a `-1` on `(t, 1, sref)` per single-differenced row.
+- `gramCovariance_(C, sigma_phi)` returns `sigma_phi^2 * C*C'`, symmetrised.
+- The DD path accumulates the differencing map `D_dd` alongside the rows it differences,
+  using the SAME pivot choices, and takes `gramCovariance_(D_dd*C, sigma_phi)`.
+- The SD fallback takes `gramCovariance_(C, sigma_phi)` directly, which is NOT diagonal:
+  rows on one tower and signal covary by `sigma_phi^2` through the shared reference.
+
+This is exact for any row set, which the block form could not be: towers or baselines
+missing, groups pivoting on DIFFERENT towers (the pivot is the first row present, so an
+absent tower on one baseline moves that group's pivot and not the others'), and L1 and
+L2 rows mixed in one stack. A `rows_sig` column pair records the signal actually read
+for the row and for its reference rather than assuming the two agree, so the
+shared-reference correlation is keyed off the real observable.
+
+### Positive definiteness is structural, not hoped for
+
+Column `(t, b+1, s)` appears in exactly ONE row of `C`, and after between-tower
+differencing it still appears in exactly one row of `D_dd*C`, because a group's pivot is
+by construction not among its own differenced towers. Every row therefore owns a column
+in which it is the only nonzero, no row is a combination of the others, `C` has full row
+rank, and `sigma_phi^2 * C*C'` is SPD.
+
+Verified rather than argued, over **all 32767 non-empty subsets** of the 15-row golden
+stack (5 towers x 3 baselines), 32552 of which produce DD rows: the worst minimum
+eigenvalue is exactly `1.000000 * sigma_phi^2` for both the SD and the DD assembly, zero
+non-SPD cases, nothing approaching zero. On the fully-populated set the assembled `R`
+reproduces `sigma^2 (I_3+J_3) kron (I_4+J_4)` to `0.000e+00`, and a 400000-sample Monte
+Carlo over rows formed from the raw definition agrees with the assembled `R` to 0.4 %
+and with the OLD `R` to only 50 %. The live ladder row set IS that fully-populated one:
+`TOWER DD APPLIED: 3 groups, pivot tower 1, 0 rows dropped, 12 DD rows (was 15 SD rows)`.
+
+### Two things not to over-read, both still true after the fix
 
 - **The DD rows do not enter any reported NIS.** `ekf.update(z_da,h_da,H_da,R_da)` is
   called with all outputs discarded, and the observable-stack adapter attaches no R and
   no NIS, so the covariance-consistency table in the run summary describes the main
-  measurement stack only. There is no "inflated DD NIS" symptom to look for.
+  measurement stack only. There is no "inflated DD NIS" symptom to look for, before or
+  after. The update itself DOES apply: `ReverseGNSSEKF` is a `handle`, so discarding the
+  return value costs the diagnostic, not the correction.
 - **The aggregate effect is not a simple `sqrt(2)` on the reported sigma.**
-  `tr(R_code^-1 R_true) = 12`, exactly the row count, so a scalar consistency check is
-  blind to this. The effect on `sqrt(trace P_att)` depends on the lever-arm geometry and
-  has to be measured, not asserted.
+  `tr(R_code^-1 R_true) = 12.000000`, exactly the row count, so a scalar consistency
+  check is blind to this. Per direction, `eig(R_code^-1 R_true)` is `2.00` on four
+  eigendirections and `0.50` on the other eight: the old `R` charged HALF the true
+  variance on four of them and TWICE on the other eight, and the two errors cancel
+  exactly in the trace. The `sqrt(2)` is real but lives ONLY on the direction common to
+  every baseline and tower, where the true sigma is `sqrt(20)*sigma_phi = 44.7 mm`
+  against the `sqrt(10)*sigma_phi = 31.6 mm` the old assembly assigned.
 
-Fixing it means assembling one dense R over the whole DD stack instead of `blkdiag`,
-and it will move att008, att009 and att010. That is its own piece of work with its own
-re-runs, which is why it is recorded here rather than patched in passing.
+### The SCALE of R is untouched by this, and is NOT a defect
+
+The structural fix leaves `trace(R)` unchanged, so the expected residual RMS is
+unchanged at `2*sigma_phi`. Nothing here moves the scale, and nothing needed to.
+
+**Do not re-open this on the `sigma_phi = 0.005` reading.** That is the retracted claim
+in open defect 4 below, and it keeps coming back because `masterConfig.m:3210` really
+does say `0.005`. The attitude family does not use that value:
+`golden_baseline_attitude.json:183` sets `"carrier": {"sigma_m": 0.010}`, and every att
+rung inherits it through `att001 -> golden_baseline_attitude.json`. So the assigned DD
+sigma is `2*sigma_phi = 20 mm`, against a measured one-epoch DD residual of 14.5 mm and
+a post-fit arc residual of 19.1 mm. Both sit BELOW the assigned sigma: **R is mildly
+conservative in scale, not optimistic.** The "1.45x optimistic" figure is what you get
+by pairing the measured residual with the masterConfig 5 mm the family overrides, and it
+has been wrong every time it has been quoted.
+
+**What this fix does NOT cover, and att012 proves it matters more.** The Gram assembly
+takes the raw phases as iid. `att012` ships receive-end carrier multipath, which is
+neither white nor independent in time, and reports the error 13.8x worse with the sigma
+unmoved. That is an R CONTENT defect sitting on top of the structural one this section
+fixes, and it is the larger of the two. "R is structurally correct" must not be read as
+"R is correct".
 
 ## Open defects, found and not fixed
 
@@ -206,7 +303,25 @@ re-runs, which is why it is recorded here rather than patched in passing.
    `2*sigma_phi = 20 mm = 0.105101 cycles`, against a measured one-epoch DD residual
    of 14.5 mm and a post-fit arc residual of 19.1 mm. R is mildly CONSERVATIVE in
    scale, not optimistic. The structural defect above is unaffected by this and
-   remains real.
+   was real; it is now fixed. **This retraction has had to be made more than once.**
+   Anyone re-deriving the DD noise MUST resolve `measurements.carrier.sigma_m`
+   through the att chain rather than read `masterConfig.m:3210`, which says 0.005
+   and is overridden to 0.010 by `golden_baseline_attitude.json:183`.
+6. **The DD liveness announcement fires once per MATLAB PROCESS, not per run.**
+   `ddAnnounced_` in `DiffAttitudeBuilder.buildRows` is `persistent`, so running
+   several rungs in one `matlab -batch` session prints
+   `[DiffAtt] TOWER DD APPLIED` for the FIRST rung only. The absence of the line
+   for later rungs in a batch log says NOTHING about whether their DD path ran.
+   This defeats the purpose of the line, which was added precisely to separate
+   "gate on" from "transform applied". Verify liveness with one rung per process
+   until this is keyed on the run rather than the process.
+7. **The attitude error is not in the summary at all.**
+   `singleAssetAttitudeErrorNorm_deg` and every `stage60*` attitude field are
+   gated on `scenario.name == 'singleAssetCarrierAttitude'`, which NO att rung
+   sets, so all of them are `NaN` in every att output `.mat`. The ladder table's
+   `error deg` column is recomputed with stage 60's own formula,
+   `norm(atan2d(sind(est-tru), cosd(est-tru)))`, over the stored final euler.
+   `finalAttitudeSigma_deg` is populated normally and needs no such treatment.
 5. **The acceptance gates were structurally unable to refuse, and this was fixed.**
    The cost is a ROUNDED residual, bounded to [-0.5, 0.5] by construction, so pure
    noise already sits at `1/sqrt(12) = 0.2887` cycles and the inherited 0.30-cycle

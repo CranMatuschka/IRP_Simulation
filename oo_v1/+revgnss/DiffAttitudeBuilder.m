@@ -671,7 +671,6 @@ classdef DiffAttitudeBuilder
                     isfield(cfg.measurements.carrier,'sigma_m')
                 sigma_phi = cfg.measurements.carrier.sigma_m;
             end
-            R_row = 2 * sigma_phi^2;
             step_e = 1e-6;
             if isfield(cfg,'estimator') && isfield(cfg.estimator,'attitudeJacobianStep_rad')
                 step_e = cfg.estimator.attitudeJacobianStep_rad;
@@ -682,6 +681,11 @@ classdef DiffAttitudeBuilder
 
             rows_z = zeros(0,1); rows_h = zeros(0,1); rows_H = zeros(0,nx);
             rows_key = zeros(0,3);   % [towerIdx baselineIdx signalIdx] for optional DD
+            % [ownSignalIdx refSignalIdx] actually read for each row. The reference
+            % antenna picks its own primary signal independently of the baseline
+            % antenna, so the two are recorded rather than assumed equal; the
+            % covariance assembly keys the shared reference phase off refSignalIdx.
+            rows_sig = zeros(0,2);
             % Geometry-ONLY single difference h_i - h_ref, with neither delta_B nor
             % the modelled inter-antenna bias in it. rows_h carries both of those and
             % is the right thing to difference on the float path; the integer-fixed
@@ -696,6 +700,8 @@ classdef DiffAttitudeBuilder
                 end
                 if sum(refMask) ~= 1; continue; end
                 phi_ref = cpInfo.phi_m(refMask);
+                refSig_ = 1;
+                if hasSigIdx; refSig_ = cpInfo.signalIdx(refMask); end
                 h_ref = models.measurements.MeasurementModelUtils.modelRangeOnly( ...
                     cfg, towers, ti, 1, r_cm, euler, leverArms);
                 % QES differential Jacobian — compute reference once per tower.
@@ -753,6 +759,7 @@ classdef DiffAttitudeBuilder
                     rows_g(end+1,1) = h_i - h_ref; %#ok<AGROW>
                     rows_H(end+1,:) = H_row; %#ok<AGROW>
                     rows_key(end+1,:) = [ti bi 1]; %#ok<AGROW>
+                    rows_sig(end+1,:) = [sigRow refSig_]; %#ok<AGROW>
                     % Add L2 EKF row for dual-frequency-fixed baselines.
                     % Uses same H (geometry only); different bias = lambda2*N2.
                     isDualFix76_ = ~isempty(info.ambiguityStatus) && ...
@@ -774,11 +781,23 @@ classdef DiffAttitudeBuilder
                                 rows_g(end+1,1) = h_i - h_ref; %#ok<AGROW>
                                 rows_H(end+1,:) = H_row;     %#ok<AGROW>
                                 rows_key(end+1,:) = [ti bi 2]; %#ok<AGROW>
+                                rows_sig(end+1,:) = [2 2];   %#ok<AGROW>
                             end
                         end
                     end
                 end
             end
+            % ---- Measurement covariance, assembled from the row keys ----
+            % Every row above is a DIFFERENCE of raw carrier phases, and the rows
+            % share those phases: all baselines at a tower are differenced against
+            % the SAME reference antenna. Writing the stack as C*phi with phi iid of
+            % variance sigma_phi^2 gives the whole covariance as one Gram product,
+            % which is exact for any row set -- towers or baselines missing, groups
+            % pivoting on different towers, L1 and L2 mixed. A per-group block, by
+            % construction, cannot carry a covariance ACROSS groups, and those
+            % entries are not zero.
+            C_sd = revgnss.DiffAttitudeBuilder.sdCoefficients_( ...
+                rows_key, rows_sig, store.nTowers, store.nBaselines);
             % ---- Optional between-tower double difference (default OFF) ----
             % The single-differenced rows above still carry the inter-antenna
             % hardware bias, which is a property of the ANTENNA PAIR and is
@@ -824,7 +843,10 @@ classdef DiffAttitudeBuilder
             info.ddGroups = 0; info.ddRowsDropped = 0; info.ddPivotTower = 0;
             R_dd = [];
             if ddEn && ~isempty(rows_z)
-                dz = zeros(0,1); dh = zeros(0,1); dH = zeros(0,nx); blocks = {};
+                dz = zeros(0,1); dh = zeros(0,1); dH = zeros(0,nx);
+                % Rows of the SD -> DD differencing map, accumulated alongside the
+                % rows themselves so the covariance follows the SAME pivot choices.
+                D_dd = zeros(0, size(rows_key,1));
                 if useJoint
                     lamJ  = revgnss.DiffAttitudeBuilder.storeField_(store,'jointLambda_m',NaN);
                     N_dd  = revgnss.DiffAttitudeBuilder.storeField_(store,'jointN_dd',[]);
@@ -873,15 +895,24 @@ classdef DiffAttitudeBuilder
                         dh = [dh; rows_h(rest) - rows_h(p)];  %#ok<AGROW>
                     end
                     dH = [dH; rows_H(rest,:) - rows_H(p,:)];  %#ok<AGROW>
-                    % Sharing one pivot correlates the DD rows within a group:
-                    % var = 2*R_row on the diagonal, cov = R_row off it.
-                    blocks{end+1} = R_row * (eye(m) + ones(m)); %#ok<AGROW>
+                    % Record the differencing, do not assume its covariance here.
+                    % These rows are correlated with the rows of OTHER groups too,
+                    % through the reference antenna they all share at each tower,
+                    % so the covariance is assembled once over the whole stack below.
+                    Dg_ = zeros(m, size(rows_key,1));
+                    for qq = 1:m
+                        Dg_(qq, rest(qq)) = 1;
+                        Dg_(qq, p)        = -1;
+                    end
+                    D_dd = [D_dd; Dg_];  %#ok<AGROW>
                     info.ddGroups = info.ddGroups + 1;
                     if info.ddPivotTower == 0; info.ddPivotTower = rows_key(p,1); end
                 end
                 if ~isempty(dz)
                     rows_z = dz; rows_h = dh; rows_H = dH;
-                    R_dd = blkdiag(blocks{:});
+                    % DD stack in terms of the raw phases, then one Gram product.
+                    R_dd = revgnss.DiffAttitudeBuilder.gramCovariance_( ...
+                        D_dd * C_sd, sigma_phi);
                     info.towerDoubleDifference = true;
                     info.jointConstrainedSearchApplied = useJoint;
                     % daInfo is consumed in-epoch and never persisted, so these
@@ -914,7 +945,11 @@ classdef DiffAttitudeBuilder
                 if ~isempty(R_dd)
                     R_da = R_dd;
                 else
-                    R_da = R_row * eye(numel(rows_z));
+                    % Undifferenced fallback. Still NOT diagonal: the baselines at
+                    % one tower share that tower's reference antenna, so rows on the
+                    % same tower and signal covary by sigma_phi^2. The diagonal is
+                    % unchanged at 2*sigma_phi^2.
+                    R_da = revgnss.DiffAttitudeBuilder.gramCovariance_(C_sd, sigma_phi);
                 end
                 resid = rows_z - rows_h;
                 info.nRows             = numel(rows_z);
@@ -922,6 +957,47 @@ classdef DiffAttitudeBuilder
                 info.active            = true;
                 info.nBaselineArUsedInEkf = numel(rows_z);  % Baselines contributing EKF rows
             end
+        end
+
+        % ----------------------------------------------------------------
+        function C = sdCoefficients_(rows_key, rows_sig, nTowers, nBaselines)
+            % sdCoefficients_  Express each single-differenced row in raw phases.
+            %
+            % Row q is  phi(t_q, b_q+1, s_q) - phi(t_q, 1, sref_q), so C has a +1
+            % and a -1 per row over a (tower, antenna, signal) column space.
+            %
+            % The whole point is the SECOND term. buildRows computes the reference
+            % mask ONCE per tower, outside the baseline loop, so every baseline at
+            % a tower subtracts the SAME phase. Two rows on one tower therefore
+            % covary by sigma_phi^2 even though they share no other measurement,
+            % and after between-tower differencing that correlation reaches rows in
+            % different baseline groups as well. C*C' carries all of it.
+            %
+            % Full rank, hence SPD once scaled: column (t_q, b_q+1, s_q) is unique
+            % to row q, so no row is a combination of the others.
+            nSD  = size(rows_key,1);
+            nAnt = nBaselines + 1;
+            nSig = max([2; rows_sig(:)]);
+            C = zeros(nSD, nTowers * nAnt * nSig);
+            for q = 1:nSD
+                tq = rows_key(q,1);
+                aq = rows_key(q,2) + 1;          % baseline b is read on antenna b+1
+                colOwn = ((tq-1)*nAnt + (aq-1))*nSig + rows_sig(q,1);
+                colRef = ((tq-1)*nAnt          )*nSig + rows_sig(q,2);
+                C(q, colOwn) = C(q, colOwn) + 1;
+                C(q, colRef) = C(q, colRef) - 1;
+            end
+        end
+
+        % ----------------------------------------------------------------
+        function R = gramCovariance_(C, sigma_phi)
+            % gramCovariance_  R = sigma_phi^2 * C*C', symmetrised.
+            % The raw phases are taken iid of variance sigma_phi^2, which is the
+            % same scale assumption the diagonal always carried; only the
+            % off-diagonal structure changes. Entries are small integers times
+            % sigma_phi^2, so the symmetrisation is a guard, not a correction.
+            R = sigma_phi^2 * (C * C.');
+            R = (R + R.') / 2;
         end
 
         % ----------------------------------------------------------------
