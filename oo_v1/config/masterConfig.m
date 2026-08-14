@@ -383,6 +383,16 @@ cfg.estimator.diffAtt.towerCommonBias.enable      = false;
 % spread is only ~17 deg, so the DD observable is 3-6x weaker than the SD one. Default
 % OFF so every existing golden is bit-identical. See DiffAttitudeBuilder.buildRows.
 cfg.estimator.diffAtt.towerDoubleDifference.enable = false;
+% Joint rigid-body integer/attitude search over the between-tower double difference.
+% Resolving each (tower,baseline) cell independently discards the one constraint that
+% actually discriminates: all 15 observables must be explained by ONE rotation of a body
+% whose geometry is known by construction. The search works on between-tower differences,
+% which are free of the inter-antenna bias algebraically, so it never needs that bias
+% calibrated, estimated or deleted. Accepting it forces the DD row form on and replaces
+% the differenced float calibration with the fixed integer. Default OFF so every existing
+% golden is bit-identical. Parameters are read from estimator.attitudeInit.search.
+% See JointConstrainedAttitudeResolver and DiffAttitudeBuilder.runJointSearch_.
+cfg.estimator.diffAtt.jointConstrainedSearch.enable = false;
 cfg.estimator.diffAtt.referenceSigma_deg          = 0.1;
 cfg.estimator.diffAtt.solutionInterpretation = ...
     'relativeAttitudeTrackingConditionedOnInitialPrior';
@@ -397,6 +407,12 @@ cfg.estimator.attitudeInit.search.ratioThreshold          = 1.20;
 cfg.estimator.attitudeInit.search.ambiguousRatioThreshold = 1.01;
 cfg.estimator.attitudeInit.search.improvementRatioThreshold = 1.05;
 cfg.estimator.attitudeInit.search.maxRmsCycles            = 0.30;
+% The 0.30 above cannot refuse anything on its own where the cost is a ROUNDED
+% residual: that is bounded to [-0.5, 0.5] by construction, and pure noise already
+% sits at 1/sqrt(12) = 0.2887. The joint constrained search therefore gates on the
+% expected double-differenced noise instead, accepting only within this many sigma
+% of it, and keeps 0.30 as an outer bound. See JointConstrainedAttitudeResolver.
+cfg.estimator.attitudeInit.search.maxRmsSigmaMultiple      = 3.0;
 cfg.estimator.attitudeInit.search.sigmaScaleDeg            = 2.0;
 cfg.estimator.attitudeInitShadow.enable                   = false;
 

@@ -357,6 +357,187 @@ classdef DiffAttitudeBuilder
         end
 
         % ----------------------------------------------------------------
+        function store = runJointSearch_(store, cfg, towers, leverArms, r_cm, euler, ...
+                rows_key, rows_z)
+            % runJointSearch_  One-shot joint rigid-body integer/attitude search.
+            %
+            % WHY IT LIVES HERE AND NOT IN finalize(). finalize() has the store and
+            % the config but NOT the towers, the lever arms or the position estimate,
+            % so it cannot evaluate a candidate attitude. buildRows has all three.
+            %
+            % WHAT IT NEEDS FROM THE CALLER. Only the L1 single differences already
+            % built this epoch, laid out as [nTowers x nBaselines], plus a handle that
+            % returns the MODELLED single difference for a candidate attitude. The
+            % resolver does its own between-tower differencing, which is what makes it
+            % blind to the inter-antenna hardware bias: that bias is a property of the
+            % antenna pair, identical for every transmitting tower, so it subtracts out
+            % exactly. Nothing here is calibrated, estimated or deleted.
+            %
+            % ONE SHOT, AND WHY THAT IS THE RIGHT NUMBER. The ambiguity is constant per
+            % arc, so the integers only have to be found once. Re-searching every epoch
+            % would cost 729 candidates x 20 range models per epoch for an answer that
+            % cannot change. The cost of one shot is that this fix rides on ONE epoch of
+            % phase: the DD noise is 2*sigma_phi = 20 mm = 0.105 cycles at L1 (the
+            % attitude family resolves carrier sigma_m to 0.010 m, NOT masterConfig's
+            % 0.005 -- golden_baseline_attitude.json budgets 10 mm deliberately), so
+            % the 0.5-cycle rounding margin is 4.8 sigma away. A wrong round is
+            % unlikely but the fix is NOT averaged and carries no arc redundancy.
+            % The one-shot latch is set only once the epoch is known to be USABLE.
+            % Setting it on entry would let a single transient first epoch -- no L1
+            % rows, geometry not yet resolved -- permanently disable the search for
+            % the rest of the arc, and it would do so silently, because both of those
+            % exits return before the announcement below.
+            store.jointSearchAccepted  = false;
+            store.jointClassification  = 'notAttempted';
+            nT = store.nTowers; nB = store.nBaselines;
+            lam = revgnss.DiffAttitudeBuilder.lambdaL1_(cfg);
+            store.jointLambda_m = lam;
+            if nT < 1 || nB < 1 || ~isfinite(lam) || lam <= 0
+                store.jointClassification = 'noGeometry';
+                return
+            end
+            % Lay this epoch's L1 single differences out on the (tower, baseline) grid.
+            zSD = zeros(nT, nB); actSD = false(nT, nB);
+            for qq = 1:size(rows_key,1)
+                if rows_key(qq,3) ~= 1; continue; end
+                ti = rows_key(qq,1); bi = rows_key(qq,2);
+                if ti < 1 || ti > nT || bi < 1 || bi > nB; continue; end
+                zSD(ti,bi)   = rows_z(qq);
+                actSD(ti,bi) = true;
+            end
+            % A baseline needs two towers to be differenced at all, so an epoch with
+            % no differenceable baseline is not evidence about anything and must not
+            % consume the one shot.
+            if ~any(sum(actSD, 1) >= 2)
+                store.jointClassification = 'noDifferenceableBaselineThisEpoch';
+                return
+            end
+            store.jointSearchAttempted = true;
+            s = struct('windowDeg',[2;2;2],'stepDeg',[0.5;0.5;0.5], ...
+                       'ratioThreshold',1.20,'maxRmsCycles',0.30);
+            try; s = cfg.estimator.attitudeInit.search; catch; end
+            cfgSearch = struct( ...
+                'windowDeg',    s.windowDeg, ...
+                'stepDeg',      s.stepDeg, ...
+                'ratioThresh',  s.ratioThreshold, ...
+                'maxRmsCycles', s.maxRmsCycles);
+            geom = struct( ...
+                'gFun',   @(eul) revgnss.DiffAttitudeBuilder.modelledSD_( ...
+                              cfg, towers, r_cm, eul, leverArms, nT, nB, actSD), ...
+                'euler0', euler(:), ...
+                'active', actSD);
+            % The RMS gate has to be scaled by the noise it is judging, because the
+            % rounded residual is bounded to [-0.5, 0.5] and pure noise already sits
+            % at 1/sqrt(12) = 0.2887 cycles. Hand the resolver the expected DD sigma:
+            % each single difference has variance 2*sigma_phi^2 and the between-tower
+            % difference of two of them has 4*sigma_phi^2, so sigma_DD = 2*sigma_phi.
+            sigPhi_ = 0.005;
+            try; sigPhi_ = cfg.measurements.carrier.sigma_m; catch; end
+            ddSigCyc_ = 2 * sigPhi_ / lam;
+            jr = revgnss.JointConstrainedAttitudeResolver.solve( ...
+                cfgSearch, geom, zSD, ...
+                struct('lambda_m', lam, 'ddSigma_cycles', ddSigCyc_));
+            store.jointSearchAccepted   = jr.accepted;
+            store.jointClassification   = jr.classification;
+            store.jointEuler0_rad       = euler(:);
+            store.jointRmsBest_cycles   = jr.rmsBest_cycles;
+            store.jointRmsGate_cycles   = jr.rmsGate_cycles;
+            store.jointExpectedRms_cycles = jr.expectedRms_cycles;
+            store.jointRmsSecond_cycles = jr.rmsSecond_cycles;
+            store.jointRatio            = jr.ratio;
+            store.jointNeighbourRatio   = jr.neighbourRatio;
+            store.jointIntegerUniqueOverWindow = jr.integerUniqueOverWindow;
+            store.jointNDistinctIntegerSets    = jr.nDistinctIntegerSets;
+            store.jointNCandidates      = jr.nCandidates;
+            store.jointNRowsUsed        = jr.nRowsUsed;
+            store.jointPivotTower       = jr.pivotTower;
+            if isequal(size(jr.N_dd), [nT nB])
+                store.jointN_dd = jr.N_dd;
+                % A cell only carries an integer if its baseline had two towers to
+                % difference. One tower on a baseline leaves N at zero, which is not a
+                % fix, and marking it valid would feed an unfixed row to the filter.
+                store.jointN_ddValid = actSD & repmat(sum(actSD,1) >= 2, nT, 1);
+            else
+                store.jointN_dd      = zeros(nT, nB);
+                store.jointN_ddValid = false(nT, nB);
+            end
+            if numel(jr.euler_best) == 3 && any(jr.euler_best ~= 0)
+                store.jointEuler_best_rad = jr.euler_best(:);
+                store.jointCorrection_deg = (jr.euler_best(:) - euler(:)) * 180/pi;
+            else
+                store.jointEuler_best_rad = euler(:);
+                store.jointCorrection_deg = zeros(3,1);
+            end
+            % Announce unconditionally, accepted or refused. A refusal is a RESULT
+            % here -- it says the geometry could not distinguish the winner from the
+            % runner-up -- and daInfo is consumed in-epoch, so without this line the
+            % distinction between "gate on" and "fix applied" is unreadable.
+            fprintf(['  [DiffAtt] JOINT SEARCH: %s | rms %.6f cyc vs gate %.6f ' ...
+                '(expected DD noise %.6f, uniform-noise null 0.2887) | ' ...
+                'ratio %.4f vs %.2f (2nd integer set %.6f cyc) | ' ...
+                '%d distinct integer sets over %d candidates, unique=%d | ' ...
+                'neighbour-attitude ratio %.4f (diagnostic only) | ' ...
+                '%d DD rows, pivot tower %d\n'], ...
+                store.jointClassification, jr.rmsBest_cycles, jr.rmsGate_cycles, ...
+                jr.expectedRms_cycles, ...
+                jr.ratio, cfgSearch.ratioThresh, jr.rmsSecondIntegerSet_cycles, ...
+                jr.nDistinctIntegerSets, jr.nCandidates, jr.integerUniqueOverWindow, ...
+                jr.neighbourRatio, jr.nRowsUsed, jr.pivotTower);
+            % The winning ATTITUDE is not an attitude estimate and is deliberately
+            % not injected anywhere. On this geometry the DD carries 1-5 mm/deg
+            % against a ~15 mm one-epoch DD noise floor, so the winner wanders to
+            % wherever the noise puts it -- it came out on a grid CORNER here. What
+            % the search delivers is the INTEGERS, which are unique over the whole
+            % window; attitude is then estimated by the EKF from the integer-fixed
+            % rows over the full arc, in the normal way.
+            fprintf(['  [DiffAtt] JOINT SEARCH attitude at the winner: ' ...
+                '[%.4f %.4f %.4f] deg from the prior -- DIAGNOSTIC, not injected\n'], ...
+                store.jointCorrection_deg(1), store.jointCorrection_deg(2), ...
+                store.jointCorrection_deg(3));
+        end
+
+        % ----------------------------------------------------------------
+        function g = modelledSD_(cfg, towers, r_cm, euler, leverArms, nT, nB, active)
+            % modelledSD_  [nT x nB] modelled single difference for one attitude.
+            %
+            % Entry (ti,bi) is rho(ti, antenna bi+1) - rho(ti, antenna 1), in metres,
+            % geometry only. No ambiguity, no hardware bias: the resolver differences
+            % between towers and both of those are tower-independent, so neither term
+            % can survive into its cost. Inactive cells are left at zero and are never
+            % read, because the resolver indexes through the same active mask.
+            g = zeros(nT, nB);
+            for ti = 1:nT
+                if ~any(active(ti,:)); continue; end
+                hRef = models.measurements.MeasurementModelUtils.modelRangeOnly( ...
+                    cfg, towers, ti, 1, r_cm, euler, leverArms);
+                for bi = 1:nB
+                    if ~active(ti,bi); continue; end
+                    g(ti,bi) = models.measurements.MeasurementModelUtils.modelRangeOnly( ...
+                        cfg, towers, ti, bi+1, r_cm, euler, leverArms) - hRef;
+                end
+            end
+        end
+
+        % ----------------------------------------------------------------
+        function lam = lambdaL1_(cfg)
+            % lambdaL1_  Resolved L1 wavelength, or NaN if the band cannot be read.
+            % Same resolution order as applyTowerCommonBias_ uses: the scenario's
+            % resolved band first, the catalogue only as a fallback, because these
+            % rungs are swept over bands and a pinned 190.29 mm would be wrong.
+            lam = NaN;
+            try
+                if isfield(cfg,'signals') && isfield(cfg.signals,'wavelength_m') ...
+                        && ~isempty(cfg.signals.wavelength_m)
+                    lam = cfg.signals.wavelength_m(1);
+                else
+                    lam = revgnss.SignalUtils.wavelength(cfg, 'L1');
+                end
+            catch
+                lam = NaN;
+            end
+        end
+
+        % ----------------------------------------------------------------
         function store = defaultStoreFields(store, cfg)
             % defaultStoreFields  Complete DiffAtt store schema.
             if nargin < 2; cfg = struct(); end
@@ -401,11 +582,34 @@ classdef DiffAttitudeBuilder
                 'relativeAttitudeTrackingConditionedOnInitialPrior');
             store = setIfMissing_(store,'dualFreqStatus',repmat({'notAttempted'}, nT, nB));
             store = setIfMissing_(store,'wideLaneStatus',repmat({'notAttempted'}, nT, nB));
+            % Joint constrained integer/attitude search. Declared here so the fields
+            % are readable out of a saved run whether or not the search ever ran, and
+            % so 'notAttempted' is distinguishable from 'attempted and refused'.
+            store = setIfMissing_(store,'jointSearchAttempted',false);
+            store = setIfMissing_(store,'jointSearchAccepted',false);
+            store = setIfMissing_(store,'jointClassification','notAttempted');
+            store = setIfMissing_(store,'jointN_dd',zeros(nT, nB));
+            store = setIfMissing_(store,'jointN_ddValid',false(nT, nB));
+            store = setIfMissing_(store,'jointEuler0_rad',zeros(3,1));
+            store = setIfMissing_(store,'jointEuler_best_rad',zeros(3,1));
+            store = setIfMissing_(store,'jointCorrection_deg',zeros(3,1));
+            store = setIfMissing_(store,'jointRmsBest_cycles',NaN);
+            store = setIfMissing_(store,'jointRmsGate_cycles',NaN);
+            store = setIfMissing_(store,'jointExpectedRms_cycles',NaN);
+            store = setIfMissing_(store,'jointRmsSecond_cycles',NaN);
+            store = setIfMissing_(store,'jointRatio',NaN);
+            store = setIfMissing_(store,'jointNeighbourRatio',NaN);
+            store = setIfMissing_(store,'jointIntegerUniqueOverWindow',false);
+            store = setIfMissing_(store,'jointNDistinctIntegerSets',0);
+            store = setIfMissing_(store,'jointNCandidates',0);
+            store = setIfMissing_(store,'jointNRowsUsed',0);
+            store = setIfMissing_(store,'jointPivotTower',0);
+            store = setIfMissing_(store,'jointLambda_m',NaN);
             store.diffAttSchemaStatus = 'complete';
         end
 
         % ----------------------------------------------------------------
-        function [z_da, h_da, H_da, R_da, info] = buildRows( ...
+        function [z_da, h_da, H_da, R_da, info, store] = buildRows( ...
                 store, cpInfo, x_est, sm, towers, leverArms, cfg, nx)
             % buildRows  Post-calibration differential carrier EKF rows.
             %
@@ -413,6 +617,13 @@ classdef DiffAttitudeBuilder
             % Jacobian uses LinkGeometry.finiteDiffAttitudeJacobian
             %   (quaternion error-state convention) in place of direct Euler
             %   perturbation, consistent with the QES EKF attitude state.
+            %
+            % STORE IS RETURNED because the joint constrained search below is a
+            % ONE-SHOT that has to remember its integers for the rest of the arc.
+            % A persistent would have carried the first run's integers into the
+            % second run in the same MATLAB session; the store is also what
+            % ReportRunner reads, so putting the result there is what makes the
+            % joint diagnostics readable back out of the saved run.
             z_da = []; h_da = []; H_da = zeros(0,nx); R_da = [];
             info.nRows = 0; info.residualRMS_m = NaN; info.active = false;
             info.activeBaselines = 0; info.lostBaselines = 0;
@@ -471,6 +682,12 @@ classdef DiffAttitudeBuilder
 
             rows_z = zeros(0,1); rows_h = zeros(0,1); rows_H = zeros(0,nx);
             rows_key = zeros(0,3);   % [towerIdx baselineIdx signalIdx] for optional DD
+            % Geometry-ONLY single difference h_i - h_ref, with neither delta_B nor
+            % the modelled inter-antenna bias in it. rows_h carries both of those and
+            % is the right thing to difference on the float path; the integer-fixed
+            % path must difference pure geometry, because there the ambiguity comes
+            % from the joint search rather than from the calibration.
+            rows_g = zeros(0,1);
             for ti = 1:store.nTowers
                 refMask = (cpInfo.towerIdx==ti) & (cpInfo.antennaIdx==1);
                 if hasSigIdx && sum(refMask) > 1
@@ -533,6 +750,7 @@ classdef DiffAttitudeBuilder
                     H_row(sm.euler_idx) = H_att_i - H_att_ref;
                     rows_z(end+1,1) = z_row; %#ok<AGROW>
                     rows_h(end+1,1) = h_row; %#ok<AGROW>
+                    rows_g(end+1,1) = h_i - h_ref; %#ok<AGROW>
                     rows_H(end+1,:) = H_row; %#ok<AGROW>
                     rows_key(end+1,:) = [ti bi 1]; %#ok<AGROW>
                     % Add L2 EKF row for dual-frequency-fixed baselines.
@@ -553,6 +771,7 @@ classdef DiffAttitudeBuilder
                             if abs(z_row_L2_ - h_row_L2_) <= 1.0
                                 rows_z(end+1,1) = z_row_L2_; %#ok<AGROW>
                                 rows_h(end+1,1) = h_row_L2_; %#ok<AGROW>
+                                rows_g(end+1,1) = h_i - h_ref; %#ok<AGROW>
                                 rows_H(end+1,:) = H_row;     %#ok<AGROW>
                                 rows_key(end+1,:) = [ti bi 2]; %#ok<AGROW>
                             end
@@ -574,14 +793,62 @@ classdef DiffAttitudeBuilder
             % CANCELS TOO. This formulation is bias-free, not more sensitive.
             ddEn = false;
             try; ddEn = logical(cfg.estimator.diffAtt.towerDoubleDifference.enable); catch; end
+            % ---- Optional joint constrained integer/attitude search (default OFF) ----
+            % Runs ONCE, at the first post-calibration epoch that has rows. It searches
+            % attitude on a grid around the current EKF attitude and, for each candidate,
+            % rounds the between-tower DD to integers; the winner is the attitude whose
+            % integer set fits every row at once. See JointConstrainedAttitudeResolver
+            % for why one rotation against 15 rows is the discriminator a per-cell fix
+            % throws away.
+            jcEn = false;
+            try; jcEn = logical(cfg.estimator.diffAtt.jointConstrainedSearch.enable); catch; end
+            if jcEn && ~revgnss.DiffAttitudeBuilder.storeField_(store,'jointSearchAttempted',false) ...
+                    && ~isempty(rows_key)
+                store = revgnss.DiffAttitudeBuilder.runJointSearch_( ...
+                    store, cfg, towers, leverArms, r_cm, euler, rows_key, rows_z);
+            end
+            useJoint = jcEn && ...
+                revgnss.DiffAttitudeBuilder.storeField_(store,'jointSearchAccepted',false);
+            % An accepted joint fix IS a double difference -- that is the observable it
+            % solved. Forcing the DD form on is not a second toggle, it is the row form
+            % the integers belong to. A refused fix leaves the configured path untouched.
+            if useJoint; ddEn = true; end
+            info.jointConstrainedSearchEnabled = jcEn;
+            info.jointConstrainedSearchApplied = false;
+            info.jointClassification  = revgnss.DiffAttitudeBuilder.storeField_(store,'jointClassification','notAttempted');
+            info.jointRatio           = revgnss.DiffAttitudeBuilder.storeField_(store,'jointRatio',NaN);
+            info.jointRmsBest_cycles  = revgnss.DiffAttitudeBuilder.storeField_(store,'jointRmsBest_cycles',NaN);
+            info.jointRowsDroppedNoInteger  = 0;
+            info.jointRowsSuppressedNoGroup = false;
             info.towerDoubleDifference = false;
             info.ddGroups = 0; info.ddRowsDropped = 0; info.ddPivotTower = 0;
             R_dd = [];
             if ddEn && ~isempty(rows_z)
                 dz = zeros(0,1); dh = zeros(0,1); dH = zeros(0,nx); blocks = {};
+                if useJoint
+                    lamJ  = revgnss.DiffAttitudeBuilder.storeField_(store,'jointLambda_m',NaN);
+                    N_dd  = revgnss.DiffAttitudeBuilder.storeField_(store,'jointN_dd',[]);
+                    N_ok  = revgnss.DiffAttitudeBuilder.storeField_(store,'jointN_ddValid',[]);
+                end
                 keysBS = unique(rows_key(:,[2 3]), 'rows');
                 for kk = 1:size(keysBS,1)
-                    g = find(rows_key(:,2)==keysBS(kk,1) & rows_key(:,3)==keysBS(kk,2));
+                    bK = keysBS(kk,1); sK = keysBS(kk,2);
+                    g = find(rows_key(:,2)==bK & rows_key(:,3)==sK);
+                    if useJoint
+                        % The search is L1-only by construction (its lambda is L1's), and
+                        % it fixed only the cells that were present when it ran. Anything
+                        % it did not fix is dropped rather than passed through on the
+                        % float ambiguity, which would mix two different observables.
+                        keepG = false(numel(g),1);
+                        for qq = 1:numel(g)
+                            keepG(qq) = (sK == 1) && ...
+                                rows_key(g(qq),1) <= size(N_ok,1) && bK <= size(N_ok,2) && ...
+                                N_ok(rows_key(g(qq),1), bK);
+                        end
+                        info.jointRowsDroppedNoInteger = ...
+                            info.jointRowsDroppedNoInteger + sum(~keepG);
+                        g = g(keepG);
+                    end
                     if numel(g) < 2
                         % A single tower on this (baseline,signal) cannot be
                         % differenced; it is dropped rather than passed through
@@ -590,8 +857,21 @@ classdef DiffAttitudeBuilder
                         continue
                     end
                     p = g(1); rest = g(2:end); m = numel(rest);
-                    dz = [dz; rows_z(rest) - rows_z(p)];      %#ok<AGROW>
-                    dh = [dh; rows_h(rest) - rows_h(p)];      %#ok<AGROW>
+                    if useJoint
+                        % z - lambda*dN is the integer-fixed, bias-free observable, and
+                        % the model it is compared against is PURE GEOMETRY. N_dd is
+                        % held against the search's own pivot, so taking the difference
+                        % here makes the row independent of which tower either side
+                        % happened to pivot on.
+                        Np = N_dd(rows_key(p,1), bK);
+                        Nr = zeros(m,1);
+                        for qq = 1:m; Nr(qq) = N_dd(rows_key(rest(qq),1), bK); end
+                        dz = [dz; (rows_z(rest) - rows_z(p)) - lamJ*(Nr - Np)]; %#ok<AGROW>
+                        dh = [dh; rows_g(rest) - rows_g(p)];  %#ok<AGROW>
+                    else
+                        dz = [dz; rows_z(rest) - rows_z(p)];  %#ok<AGROW>
+                        dh = [dh; rows_h(rest) - rows_h(p)];  %#ok<AGROW>
+                    end
                     dH = [dH; rows_H(rest,:) - rows_H(p,:)];  %#ok<AGROW>
                     % Sharing one pivot correlates the DD rows within a group:
                     % var = 2*R_row on the diagonal, cov = R_row off it.
@@ -603,6 +883,7 @@ classdef DiffAttitudeBuilder
                     rows_z = dz; rows_h = dh; rows_H = dH;
                     R_dd = blkdiag(blocks{:});
                     info.towerDoubleDifference = true;
+                    info.jointConstrainedSearchApplied = useJoint;
                     % daInfo is consumed in-epoch and never persisted, so these
                     % fields cannot be read back from the output .mat. Announce
                     % once per run so "the gate was on" can be distinguished from
@@ -611,12 +892,21 @@ classdef DiffAttitudeBuilder
                     persistent ddAnnounced_
                     if isempty(ddAnnounced_); ddAnnounced_ = false; end
                     if ~ddAnnounced_
-                        fprintf(['  [DiffAtt] TOWER DD APPLIED: %d groups, pivot tower %d, ' ...
+                        if useJoint; formLbl_ = 'INTEGER-FIXED DD'; else; formLbl_ = 'TOWER DD'; end
+                        fprintf(['  [DiffAtt] %s APPLIED: %d groups, pivot tower %d, ' ...
                             '%d rows dropped, %d DD rows (was %d SD rows)\n'], ...
-                            info.ddGroups, info.ddPivotTower, info.ddRowsDropped, ...
+                            formLbl_, info.ddGroups, info.ddPivotTower, info.ddRowsDropped, ...
                             numel(dz), size(rows_key,1));
                         ddAnnounced_ = true;
                     end
+                elseif useJoint
+                    % Every group was filtered below two rows. Falling through here
+                    % would hand the EKF the UNDIFFERENCED SD stack, which still
+                    % carries the inter-antenna bias this rung exists to cancel, and
+                    % would do it under an accepted integer fix. Emit nothing instead:
+                    % no rows is a correct answer, a bias-carrying row is not.
+                    rows_z = zeros(0,1); rows_h = zeros(0,1); rows_H = zeros(0,nx);
+                    info.jointRowsSuppressedNoGroup = true;
                 end
             end
             if ~isempty(rows_z)

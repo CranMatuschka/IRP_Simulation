@@ -252,7 +252,7 @@ classdef AttitudeInitializer
             % L2, which golden_baseline_attitude.json and everything extending it resolve
             % to (signals.enabledMask = [true true]) -- every pair has TWO rows, so
             % sum(ref) == 2, EVERY tower is skipped, and this returned nothing at all.
-            % Measured on feat027 before this fix: nDiffRows = 0, nTowers = 0,
+            % Measured on att003 before this fix: nDiffRows = 0, nTowers = 0,
             % classification ABS_ATT_WEAK, while the search had its full 729-candidate grid
             % ready. The initializer was reached and then starved.
             %

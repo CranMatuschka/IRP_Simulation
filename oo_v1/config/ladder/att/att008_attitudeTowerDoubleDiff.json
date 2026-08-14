@@ -1,0 +1,31 @@
+{
+  "_id": "att rung: attitudeTowerDoubleDiff. att004 (star tracker off, differenced-carrier attitude, integer AR enabled but policy-blocked, inter-antenna bias LEFT IN at its realistic 0.02 cycles) PLUS the between-tower double difference. One toggle against att004.",
+  "_extends": "att004_attitudeBaselineAr.json",
+  "_delta": "estimator.diffAtt.towerDoubleDifference.enable: false -> true. Nothing else. The bias is NOT deleted and NOT declared calibrated.",
+
+  "_whyTHISISTHEONLYBIASFREEROUTEinTHEFAMILY": "Every other attempt in this sequence either estimated the inter-antenna bias (att006/att007, tower-common constraint) or deleted it (att005/att007). This rung CANCELS it. The bias is a property of the ANTENNA PAIR -- cable, line electronics, phase-centre offset -- so it is identical for every transmitting tower. Differencing two towers on the same baseline and signal removes it EXACTLY, algebraically, with no calibration, no estimated state and no truth. What survives is b_ij.(e_t - e_p)/lambda + (N_t - N_p): pure geometry plus a difference of integers, which is still an integer. That is the standard GNSS attitude double difference, and grep confirmed no such path existed anywhere in this code base before this change.",
+
+  "_theHONESTCOSTandWHYITMAYNOTWIN": "|e_t - e_p| ~ 0.17-0.30 at GEO because the Earth subtends only ~17 deg, so the DD observable is 3-6x WEAKER than the SD one it replaces. Worse for this particular question: the attitude that was being absorbed into the tower-COMMON term cancels in the DD as well, because a common term is exactly what a DD annihilates. So the DD keeps only the differential-across-towers attitude signature -- which att006/att007 already MEASURED at towerCommonBiasShift_m = 0.002305 m, i.e. 2.3 mm, 0.012 cycles, worth ~0.066 deg. That number is the ceiling on what this rung can recover, and it was measured before this rung was written. DD is the CORRECT formulation, not a more sensitive one: its value is that the result is bias-free, hence honest, not that it is larger.",
+
+  "_whatWOULDCOUNTASSUCCESS": "Not a big error drop -- the ceiling above forbids it. Success is (a) info.towerDoubleDifference true and ddGroups > 0, so the rung is live rather than inert, and (b) the attitude sigma responding, which is the test that separated att005 (0.210448, integers fixed, state observable) from att001/027/030 (0.2301, unchanged, state unobserved). A sigma that moves on a rung where the bias was CANCELLED rather than deleted would be the first honest evidence in this whole sequence that carrier-only attitude is observable at GEO without idealising the hardware. A sigma that stays at 0.2301 says the differential-across-tower signal is too weak to carry the state, which given the 17 deg subtense is the physically expected answer and closes the question.",
+
+  "_theRCOVARIANCEISNOTDIAGONAL": "DD rows built against a shared pivot tower are CORRELATED: var = 2*R_row on the diagonal and cov = R_row off it, so R is assembled as R_row*(I + ones(m)) per (baseline,signal) group and block-diagonalised across groups. Passing a diagonal R here would be the same class of defect as the correlated-noise-charged-as-white finding already on record in the R audit, and would make the filter overconfident by construction. Any (baseline,signal) group with only ONE tower is DROPPED rather than passed through undifferenced, because passing it would silently reintroduce the very bias this rung exists to cancel.",
+
+  "_windUpCaveat": "Phase wind-up is still not modelled. It does NOT cancel in a between-tower DD, because the tower-to-satellite geometry differs per tower, so this rung remains optimistic on that axis.",
+
+  "scenario": {
+    "name": "att008_attitudeTowerDoubleDiff",
+    "orbitClass": "GEO",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+
+  "estimator": {
+    "diffAtt": {
+      "towerDoubleDifference": { "enable": true }
+    }
+  },
+
+  "report": { "runVersion": "att008", "compileTex": "auto" }
+}

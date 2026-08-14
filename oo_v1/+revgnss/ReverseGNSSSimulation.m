@@ -815,8 +815,8 @@ classdef ReverseGNSSSimulation < handle
             % This gate used to read the replaced struct, so with
             % measurements.carrier.ionosphereFreeRows.enable = true -- which
             % golden_baseline_attitude.json and everything extending it resolve to --
-            % attitudeInitMode was INERT: measured on feat027, attitudeInitCandidates = 0,
-            % best/second residual NaN, and every output byte-identical to feat025.
+            % attitudeInitMode was INERT: measured on att003, attitudeInitCandidates = 0,
+            % best/second residual NaN, and every output byte-identical to att001.
             %
             % Raw rows are also the CORRECT input, not merely the reachable one.
             % AttitudeInitializer forms inter-antenna differences phi_m(ant) - phi_m(ref)
@@ -1018,7 +1018,10 @@ classdef ReverseGNSSSimulation < handle
                     obj.diffAttStore = revgnss.DiffAttitudeBuilder.accumulate( ...
                         obj.diffAttStore, cpDA, xDA_, obj.ekf.stateMap, ...
                         obj.towers, lArms15, obj.cfg);
-                    [z_da, h_da, H_da, R_da, daInfo] = revgnss.DiffAttitudeBuilder.buildRows( ...
+                    % buildRows returns the store because the joint constrained search
+                    % is a one-shot whose integers have to survive to the next epoch.
+                    [z_da, h_da, H_da, R_da, daInfo, obj.diffAttStore] = ...
+                        revgnss.DiffAttitudeBuilder.buildRows( ...
                         obj.diffAttStore, cpDA, xDA_, obj.ekf.stateMap, ...
                         obj.towers, lArms15, obj.cfg, obj.ekf.nx);
                     if ~isempty(z_da)

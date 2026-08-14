@@ -3416,7 +3416,7 @@ classdef ReportRunner
                 %
                 % DO NOT READ THEM AS EVIDENCE. 'UNKNOWN' and 0 candidates are emitted
                 % identically whether the initializer never ran, ran and found nothing,
-                % or ran and resolved a candidate. Measured 2026-08-13: a feat027 run
+                % or ran and resolved a candidate. Measured 2026-08-13: an att003 run
                 % whose LIVE struct held classification 'ABS_ATT_WEAK', nCandidates 729
                 % and nDiffRows 0 still reported attitudeInitClass 'UNKNOWN' and
                 % attitudeInitCandidates 0 here -- a reader concluded from those two

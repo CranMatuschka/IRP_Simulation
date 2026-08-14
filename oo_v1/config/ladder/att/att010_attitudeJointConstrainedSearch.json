@@ -1,0 +1,43 @@
+{
+  "_id": "att rung: attitudeJointConstrainedSearch. att004 (star tracker off, differenced-carrier attitude, per-baseline integer AR enabled but policy-blocked, inter-antenna bias LEFT IN at its realistic 0.02 cycles) PLUS the joint rigid-body integer/attitude search. One toggle against att004.",
+  "_extends": "att004_attitudeBaselineAr.json",
+  "_delta": "estimator.diffAtt.jointConstrainedSearch.enable: false -> true. Nothing else. The bias is NOT deleted, NOT estimated and NOT declared calibrated.",
+
+  "_whyTHISISTHEFIRSTQUOTABLERUNGINTHEFAMILY": "Every earlier rung bought one virtue and paid for it with the other. att005/att007 bought ACCURACY (1.159938 deg, the only sigma that ever moved) by DELETING the inter-antenna bias, which makes them diagnostics and not system figures. att008/att009 bought HONESTY (err/sigma 1.609 and 1.348 against 6.08) by cancelling that bias in a between-tower double difference, but left the ambiguity floating and so gave up the accuracy. This rung takes both from the same mechanism: the search resolves the ambiguity as an INTEGER, and it does so on the between-tower difference, where the bias is already gone algebraically. Nothing is deleted and nothing is calibrated.",
+
+  "_theDISCRIMINATORthePERCELLFIXTHROWSAWAY": "BaselineCarrierAmbiguityResolver loops (tower, baseline) and gates each cell on its own RMS and its own ratio. That discards the strongest constraint in the problem: all 15 observables must be explained by ONE rotation of a body whose geometry is known by construction, so 15 observables stand against 3 attitude DOF. A single cell can always be fitted by something, which is why att003 measured a per-cell ratio of 1.0229 on a residual of 0.0607 cycles -- a precise fit that could not discriminate -- and why only 5 of 15 cells fixed.",
+
+  "_whatTHESEARCHACTUALLYDOES": "It grids attitude over estimator.attitudeInit.search (windowDeg [2;2;2], stepDeg [0.5;0.5;0.5], 729 candidates) around the CURRENT EKF attitude, never around truth. For each candidate it forms the between-tower double difference of the observed and modelled single differences, divides by lambda_L1 and rounds. The winner is the attitude whose integer set fits every row at once. Accepting it forces the DD row form on -- that is the observable the integers belong to, not a second toggle -- and replaces the differenced float calibration with lambda*(N_t - N_p), leaving pure geometry on the model side.",
+
+  "_theSURVIVINGDEGENERACYISHARMLESS": "Shifting every tower's integer on baseline i by a common k_i and absorbing it into the hardware bias is invisible to the joint cost. It is equally invisible to ATTITUDE, which enters only through (R b_i).e_t, so the combined shift leaves the attitude term untouched. That is precisely why the search can work on between-tower differences and never needs the bias resolved at all.",
+
+  "_theRATIOGATEWASMEASURINGTHEWRONGTHINGandWASFIXED": "First wiring refused with rejectedJointRatio at ratio 1.0012 against a 1.20 threshold. Dumping the cost surface showed why, and it was the gate and not the physics: the grid is over ATTITUDE, so the runner-up candidate is an adjacent attitude half a step away, and on this geometry it carries the SAME integers. sorted(2)/sorted(1) therefore measured the CURVATURE of the cost surface, not the separation between competing hypotheses. MEASURED over the +/-2 deg window: 0 of 729 candidates produced an integer set different from the winner's, ONE distinct integer set in total, and the first integer flip needs +22.0 / +35.5 / +44.5 deg on the three axes. The old test refused a fix that was not merely unambiguous but maximally so. The ratio now compares the winner against the best candidate carrying a DIFFERENT integer set, which is what the resolver's own docstring always claimed it did; when no such candidate exists the ratio is infinite and refusing is not available, because there is nothing to confuse the winner with. The neighbour-attitude ratio is still reported, labelled as the diagnostic it is.",
+
+  "_THERESULT": "MEASURED 3600 s: finalAttitudeError_deg 0.954157, finalAttitudeSigma_deg 1.048386, err/sigma 0.910. Best error in the family and the ONLY rung with err/sigma below 1, achieved with nothing deleted. Against att004 1.397941 / 0.230097 / 6.08 re-run on the same tree to eight figures, so the comparison is like-for-like and not quoted from bdbeaed. Liveness: jointClassification jointRigidBodyFixed, jointIntegerUniqueOverWindow true, rms 0.076065 cycles against the 0.30 gate, 12 DD rows in 3 groups, 0 dropped, diffAttMeanNRows 12.0 and diffAttRejectedRows 0 across the whole arc, so the integer-fixed rows carried every epoch and not just the first. Position metrics are byte-identical to att004 (2.105 m final, 4.528 m RMS, 1.523 m last-20%), as they must be for attitude-only rows: the ONLY thing this toggle moved is attitude and the NIS that the attitude rows enter.",
+
+  "_theWINNINGATTITUDEISNOTANATTITUDE": "MEASURED DD attitude sensitivity is 1.1 / 5.4 / 1.7 mm per deg on the three axes, against 18 / 4.8 / 34.9 mm per deg in the single difference the DD replaces: the between-tower difference throws away roughly 94 percent of the signal, exactly as att008 predicted from the 17 deg subtense. Against a one-epoch DD residual of 0.076 cycles (14.5 mm) the winning candidate is noise-placed and landed on a grid CORNER. euler_best is therefore recorded as a diagnostic and is deliberately NOT injected into the filter. What the search delivers is the INTEGERS, not an attitude; attitude is estimated afterwards by the EKF from the integer-fixed rows.",
+
+  "_THEARCBUYSNOAVERAGINGandTHATISTHENEXTQUESTION": "The prediction that 3600 epochs would average the one-epoch information down was WRONG and the measurement says so. 19.1 mm post-fit DD residual over 12 rows at ~5 mm per deg is ~1 deg of single-epoch attitude information, and the rung reports a final sigma of 1.048386 deg after 3601 epochs, the single-epoch value essentially unimproved. This rung is NOT limited by the ambiguity, which is now fixed and unique. What it IS limited by is not yet established, and the obvious guess is already ruled out: resolved gyro ARW is 2e-4 rad/sqrt(s), i.e. only 0.0115 deg per 1 s epoch, and a random-walk-plus-measurement steady state sqrt(0.0115*1.0) = 0.107 deg sits TEN TIMES BELOW what is observed, so angle random walk is not the explanation. The leading candidate is the gyro BIAS rather than the gyro noise: initial bias sigma 3e-5 rad/s integrated over the arc is 6.19 deg of drift if unestimated, three gyro-bias states carry it, and a 1-5 mm per deg DD observable is a weak lever for separating a slow bias from attitude. The competing candidate is time-correlation of the DD rows, which would make N_eff far smaller than 3601. NEITHER IS TESTED HERE. The discriminator is a gyro-grade rung against att010, moving truth and filter together so it stays a grade experiment and not a mismatch one.",
+
+  "_theONESHOTCOSTITCARRIES": "The ambiguity is constant per arc, so the search runs once, at the first post-calibration epoch, and holds. That means the fix rides on ONE epoch of phase with no arc averaging and no re-search after a cycle slip. It also means the ratio gate cannot protect against a badly wrong attitude prior: with one integer hypothesis in the window there is nothing to refuse against, so a prior wrong by tens of degrees would fix the wrong set silently. The prior here is wrong by ~1.5 deg against flip distances of 22 to 44.5 deg, so that margin is 15x, but it is a margin and not a guarantee.",
+
+  "_windUpCaveat": "Phase wind-up is not modelled anywhere in this simulation, and an integer fix is exactly the operation a slow unmodelled carrier-phase rotation corrupts. It does NOT cancel in a between-tower DD, because the tower-to-satellite geometry differs per tower. This rung is optimistic on that axis, as every fixed rung in this family is.",
+
+  "_theTHIRDAXISISSTILLWEAK": "The line-of-sight axis is geometrically weak by roughly 1/sin(10 deg) ~ 6 and no integer work changes that. The ~17 deg Earth subtense from GEO is the only thing supplying it. Only a commanded slew -- the bias is fixed in the BODY frame while attitude is not -- or an arc long enough for GEO libration breaks that.",
+
+  "scenario": {
+    "name": "att010_attitudeJointConstrainedSearch",
+    "orbitClass": "GEO",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+
+  "estimator": {
+    "diffAtt": {
+      "jointConstrainedSearch": { "enable": true }
+    }
+  },
+
+  "report": { "runVersion": "att010", "compileTex": "auto" }
+}

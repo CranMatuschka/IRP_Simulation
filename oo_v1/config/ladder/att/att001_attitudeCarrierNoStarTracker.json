@@ -1,5 +1,5 @@
 {
-  "_id": "feat rung: attitudeCarrierNoStarTracker. One toggle against golden_baseline_attitude.json -- the star tracker is switched OFF -- so spacecraft attitude is determined by the DIFFERENTIAL CARRIER baseline and gyro propagation alone. Everything else is inherited via _extends, so the difference in the result is attributable to that toggle alone. This is the rung that answers 'what can reverse-GNSS carrier phase actually determine about attitude', which the attitude baseline cannot answer because its 30 arcsec star tracker dominates the solution.",
+  "_id": "att rung: attitudeCarrierNoStarTracker. One toggle against golden_baseline_attitude.json -- the star tracker is switched OFF -- so spacecraft attitude is determined by the DIFFERENTIAL CARRIER baseline and gyro propagation alone. Everything else is inherited via _extends, so the difference in the result is attributable to that toggle alone. This is the rung that answers 'what can reverse-GNSS carrier phase actually determine about attitude', which the attitude baseline cannot answer because its 30 arcsec star tracker dominates the solution.",
   "_extends": "golden_baseline_attitude.json",
   "_delta": "TWO leaves, and the second is forced by the first. (1) estimator.starTracker.enable: true -> false. (2) estimator.attitude.primaryMode: 'starTrackerGyroscope' -> 'carrierLeverArmQuaternionEkf', because validateMasterConfig.m:97-101 refuses a primaryMode containing 'startracker' while the star tracker is disabled -- correctly, since the label would then assert a sensor that is not there.",
 
@@ -13,10 +13,10 @@
 
   "_knownLimitationThatBitesHardestHere": "PHASE WIND-UP IS NOT MODELLED anywhere in this simulation (docs/ERROR_BUDGET.md lists it as absent). For a circularly polarised signal, relative rotation between transmit and receive antennas about the boresight shifts carrier phase by one cycle per revolution, up to half a wavelength before correction. A nadir-pointing GEO rotates a full 360 deg per sidereal day relative to each fixed ground tower, so the wind-up is a slow arc-correlated carrier drift of ~0.19 m/day/link -- and this rung is the one configuration where carrier phase is the SOLE source of absolute attitude, i.e. where an unmodelled carrier-phase rotation signature is least separable from the thing being estimated. Any attitude claim from this rung must state that wind-up is absent. See Wu, J. T., Wu, S. C., Hajj, G. A., Bertiger, W. I., & Lichten, S. M. (1993), Effects of antenna orientation on GPS carrier phase, Manuscripta Geodaetica 18(2), 91-98.",
 
-  "_gyroStaysOn": "estimator.imu.enable is left TRUE. The gyro is the attitude DYNAMICS model, not an absolute reference: it propagates between carrier updates exactly as a real GNSS-attitude system's IMU does, and removing it as well changes the question from 'can carrier phase correct a propagated attitude' to 'can carrier phase determine attitude kinematically per epoch'. That second question is feat026. Note also that with the gyro on, estimateGyroBias resolves true and applyGyroProcessNoise_ OVERWRITES the sigma_angAccel attitude block, so cfg.estimator.sigma_angAccel_radps2 has no effect on attitude in THIS rung -- do not tune it here expecting a response.",
+  "_gyroStaysOn": "estimator.imu.enable is left TRUE. The gyro is the attitude DYNAMICS model, not an absolute reference: it propagates between carrier updates exactly as a real GNSS-attitude system's IMU does, and removing it as well changes the question from 'can carrier phase correct a propagated attitude' to 'can carrier phase determine attitude kinematically per epoch'. That second question is att002. Note also that with the gyro on, estimateGyroBias resolves true and applyGyroProcessNoise_ OVERWRITES the sigma_angAccel attitude block, so cfg.estimator.sigma_angAccel_radps2 has no effect on attitude in THIS rung -- do not tune it here expecting a response.",
 
   "scenario": {
-    "name": "feat025_attitudeCarrierNoStarTracker",
+    "name": "att001_attitudeCarrierNoStarTracker",
     "orbitClass": "GEO",
     "nTowers": 5,
     "nSpaceAssets": 1,
@@ -33,7 +33,7 @@
   },
 
   "report": {
-    "runVersion": "feat025",
+    "runVersion": "att001",
     "compileTex": "auto"
   },
   "_reportNote": "compileTex 'auto' rather than the golden's 'require': a ladder rung's deliverable is its .mat, and a pdflatex hiccup must not throw away a finished run."
