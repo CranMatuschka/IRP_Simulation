@@ -1,0 +1,31 @@
+{
+  "_id": "feat rung: attitudeTowerCommonBiasZeroBias. DIAGNOSTIC, NOT A REALISM RUNG. feat029 (bias deleted from truth, declared syntheticKnownZero, integer AR therefore actually runs) PLUS the tower-common bias constraint. One toggle against feat029.",
+  "_extends": "feat029_attitudeArZeroBias.json",
+  "_delta": "estimator.diffAtt.towerCommonBias.enable: false -> true. Nothing else.",
+
+  "_whyTHISRUNGEXISTSatALL": "feat030 applied the tower-common constraint on top of feat028, where the phase-bias policy gate BLOCKS integer resolution (ambiguityStatus = rejectedPhaseBias x15, attitudeArMode = rawL1Only). So feat030 measured the constraint ALONE, with no integer fix underneath it, and returned 1.397941 -> 1.380606 deg: a 1.2 % gain. That is a CONFOUNDED comparison for the question 'does constraining the parametrisation help', because the two mechanisms that were supposed to combine -- fixed integers making the observable absolute, and the tower-common constraint removing the surplus reals -- never met. This rung puts them together for the first time.",
+
+  "_whatfeat030ACTUALLYPROVED": "MEASURED: towerCommonBiasApplied = 1 (live, not inert), recovered beta = [-0.15024, 0.052333, -0.17583] cycles, towerCommonBiasShift_m = 0.002305 m. The beta values are the result. The TRUTH inter-antenna bias in that rung is 0.02 cycles, and the recovered common fraction is 2.6x to 8.8x LARGER -- direct, quantitative evidence that the tower-common term is absorbing something that is not hardware bias. Scale check: a 1.5 deg attitude error on a 2 m baseline displaces a phase centre by ~52 mm = 0.27 cycles at L1, and betas of 0.15-0.18 cycles are 28-33 mm, the right order. So the prediction that the near-common GEO line of sight would let the common term eat the attitude is CONFIRMED by measurement, not merely argued.",
+
+  "_whereMYESTIMATEWASWRONG": "I predicted the constraint would recover ~17 % of the absorbed attitude, from sin(10 deg) as the differential-across-towers fraction. Measured was 1.2 %, roughly an order of magnitude less. The shift tells us why: 0.002305 m RMS = 0.012 cycles at L1, i.e. the floats were ALREADY within 0.012 cycles of the constrained form, so the constraint had almost nothing to bind. 2.3 mm on a 2 m baseline is 1.15e-3 rad = 0.066 deg of attitude signal released, and the observed gain was 0.017 deg -- same order, so the mechanism is behaving as designed and it is the AVAILABLE SIGNAL that is small, not the implementation that is broken. The sin(10 deg) figure overestimated the usable tower spread by ~4x.",
+
+  "_theDECISIVEFIELDISTHESIGMAnotTHEERROR": "feat030's finalAttitudeSigma_deg went 0.230097 -> 0.230438, i.e. UNCHANGED (very slightly worse). A covariance that does not respond is the signature of a state that is still unobserved -- the same test that condemned feat025 and feat027. By contrast feat029, where the integers actually fixed, moved the sigma to 0.210448 for the first time in this entire sequence. So the integer fix is what makes attitude observable, and the tower-common constraint on its own does not. If THIS rung moves the sigma below feat029's 0.210448, the two mechanisms are additive and the parametrisation is worth keeping. If the sigma lands at feat029's value, the constraint is redundant once integers are fixed -- which would be a clean negative and would mean the code should be reverted rather than kept.",
+
+  "_WHATTHISCANNOTTELLYOU": "The bias is deleted here, exactly as in feat029, so no number from this rung is a system performance figure. Its only job is to separate 'is the constraint additive to an integer fix' from 'is the constraint a substitute for one'. The realistic counterpart of the whole family is feat028 at 1.397941 deg, and the honest constrained-but-uncalibrated case is feat030 at 1.380606 deg. Phase wind-up remains unmodelled in all of them, so every integer fix in this family is optimistic.",
+
+  "scenario": {
+    "name": "feat031_attitudeTowerCommonBiasZeroBias",
+    "orbitClass": "GEO",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+
+  "estimator": {
+    "diffAtt": {
+      "towerCommonBias": { "enable": true }
+    }
+  },
+
+  "report": { "runVersion": "feat031", "compileTex": "auto" }
+}

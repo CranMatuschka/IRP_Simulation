@@ -1,0 +1,44 @@
+{
+  "_id": "feat rung: attitudeArZeroBias. DIAGNOSTIC, NOT A REALISM RUNG. feat028 (baseline integer AR enabled) with the inter-antenna carrier bias removed from the TRUTH and the resolver told so. Its only purpose is to separate two questions that feat028 could not separate: 'is the integer ambiguity resolvable' from 'is the phase bias calibrated'.",
+  "_extends": "feat028_attitudeBaselineAr.json",
+  "_delta": "TWO leaves, and they are ONE statement. (1) errors.interAntennaCarrierBias.sigma_cycles: 0.02 -> 0.0. (2) estimator.diffAtt.ambiguityResolution.phaseBiasStatus: 'notCalibratedExternalProduct' -> 'syntheticKnownZero'.",
+
+  "_whyBOTHLEAVESORNEITHER": "Setting the status leaf ALONE would be the exact artefact golden_baseline_attitude.json's _notCalibratedProduct block was written to forbid: 'a run whose calibration corrects by exactly zero can still report calibratedExternalProduct'. Declaring the bias known while a 0.02-cycle truth bias is still drawn would let the resolver fix integers onto an observable that genuinely carries an uncalibrated fractional offset -- it would fix CONFIDENTLY and WRONGLY, and the run would look like a success. Zeroing the truth first makes 'syntheticKnownZero' a TRUE statement about this scenario rather than a claim about a calibration that was never performed. The name of the status value says as much: SYNTHETIC known zero, i.e. legitimate only in a run where the synthetic bias is actually zero.",
+
+  "_whatItMeasuresANDWHATITDOESNOT": "MEASURES: whether the per-baseline integer ambiguity is resolvable at all in this geometry, and -- if it resolves -- whether fixing it makes attitude observable. Fixed integers would stop the 15 float ambiguities absorbing the attitude error, which is the degeneracy feat025/feat027 measured (15 differenced observables against 15 float ambiguities, exactly determined, nothing left over for attitude). DOES NOT MEASURE: any achievable attitude accuracy. A real four-antenna array has an uncalibrated inter-antenna line bias; this rung deletes it. Any attitude number from here is an UPPER BOUND on the carrier-only capability and must never be quoted as a system performance figure. The realistic counterpart is feat028.",
+
+  "_whatFEAT028ACTUALLYRETURNED": "MEASURED 2026-08-13 at 3600 s, read from o.sim.diffAttStore rather than the summary: baselineIntegerFixAttempted = true, baselineIntegerFixAccepted = false, nBaselineIntegerFixed = 0, nBaselineIntegerRejected = 15, classification = floatSelfCalibrated, attitudeArMode = rawL1Only, finalAttitudeError_deg = 1.39794 (unchanged from feat025 to six digits). Per-baseline status was rejectedPhaseBias on ALL 15, with rmsBest_all, floatDistance_all, ratio_all and N_float_all ALL EXACTLY 0.0000 -- i.e. the resolver returned at the BaselineCarrierAmbiguityResolver.m:118-119 status gate before evaluating a single candidate. The dual-frequency inputs were present (AR.enabledByFrequency = [true true], accumN_L2 populated), so the wide-lane screen never ran either. feat028 therefore reports a POLICY refusal, not a measurement.",
+
+  "_whyTHEREFUSALISAPOLICYNOTANUMBER": "The gate at :118-119 tests strcmp(phaseBiasStatus,'syntheticKnownZero') || strcmp(...,'calibratedExternalProduct'). It reads a STATUS STRING and never inspects the bias MAGNITUDE. The magnitude in feat028 is 0.02 cycles against a half-cycle rounding margin, i.e. 25x inside the interval where rounding to the correct integer is safe. So the refusal carries no information about whether the fix WOULD have succeeded. This rung supplies that information. Being conservative-by-default is the right policy for a realism run and is NOT being changed; it is being stepped around once, deliberately, in a rung whose name says so.",
+
+  "_WHYMELBOURNEWUBBENAWASNOTBUILTINSTEAD": "The alternative considered and REJECTED on 2026-08-13. A Melbourne-Wubbena wide-lane is geometry-free and wind-up-immune, which addresses the attitude/ambiguity degeneracy and the missing wind-up model -- but it does NOT address a fractional inter-antenna phase bias, which enters the carrier term on BOTH frequencies and so contaminates N1-N2 as thoroughly as it contaminates N1. MW would have been rejected at the same status gate, for the same reason, having cost a new estimator stage. If THIS rung fixes its integers, the blocker was the bias policy and MW was never the answer. If it still refuses or still fixes-without-helping-attitude, the blocker is geometric and MW becomes worth revisiting on its geometry-free merit.",
+
+  "_whatEACHOUTCOMEMEANS": "(a) Integers FIX and attitude error drops well below 1.398 deg: the degeneracy is real, ambiguity resolution breaks it, and the binding constraint on carrier-only attitude in this system is line-bias calibration. (b) Integers FIX and attitude does NOT move: the ambiguities were never what was absorbing the attitude -- the limit is line-of-sight diversity (the Earth subtends ~17 deg from GEO, so the third axis is weak by ~1/sin(10 deg) ~ 6) and no amount of ambiguity work will help. (c) Integers still REJECT, now with a numeric reason (rejectedRms / rejectedRatio / rejectedFloatDistance / rejectedWideLane): the reason NAMES the physical blocker, and rejectedWideLane specifically would be the one result that makes MW worth building.",
+
+  "_windUpCaveatSTILLAPPLIES": "Phase wind-up remains unmodelled. An integer fix is exactly the operation a slow unmodelled carrier-phase rotation corrupts, so a successful fix here is OPTIMISTIC on the L1 side over and above the zeroed bias. Two idealisations therefore stack in this rung and both must be stated wherever its number appears.",
+
+  "scenario": {
+    "name": "feat029_attitudeArZeroBias",
+    "orbitClass": "GEO",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+
+  "errors": {
+    "interAntennaCarrierBias": {
+      "sigma_cycles": 0.0
+    }
+  },
+
+  "estimator": {
+    "diffAtt": {
+      "ambiguityResolution": {
+        "enable": true,
+        "phaseBiasStatus": "syntheticKnownZero"
+      }
+    }
+  },
+
+  "report": { "runVersion": "feat029", "compileTex": "auto" }
+}

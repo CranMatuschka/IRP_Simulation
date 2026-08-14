@@ -1,0 +1,35 @@
+{
+  "_id": "feat rung: attitudeTowerCommonBias. feat028 (star tracker off, differenced-carrier attitude, baseline integer AR enabled, inter-antenna bias LEFT IN at its realistic 0.02 cycles) PLUS the tower-common bias constraint. One toggle against feat028.",
+  "_extends": "feat028_attitudeBaselineAr.json",
+  "_delta": "estimator.diffAtt.towerCommonBias.enable: false -> true. Nothing else. In particular the phase bias is NOT deleted and NOT declared calibrated: this rung keeps feat028's honest 0.02-cycle truth bias and its notCalibratedExternalProduct status.",
+
+  "_whyTHISISTHEHONESTVERSIONOFfeat029": "feat029 answered 'is the ambiguity resolvable' by DELETING the inter-antenna bias and telling the resolver so. That is a legitimate discriminator and it worked (5/15 fixed, ratio 4.57-14.09, attitude 1.397941 -> 1.159938 deg, and the sigma responded for the FIRST TIME at 0.230097 -> 0.210448), but deleting a real hardware effect is not a system result. This rung attacks the same degeneracy WITHOUT touching the bias, by removing the surplus degrees of freedom that were absorbing the attitude instead of removing the physics that motivated them.",
+
+  "_theDEFECTITADDRESSES": "DiffAttitudeBuilder stores delta_B as [nTowers x nBaselines] and time-averages each entry independently (DiffAttitudeBuilder.m:160,244: delta_B = accumSum/accumN). That gives 15 free REAL constants for 5 towers x 3 baselines. Physically there are only THREE free reals: the inter-antenna carrier bias is a property of the ANTENNA PAIR -- cable length, line electronics, phase-centre offset -- and therefore CANNOT depend on which tower is transmitting. The remaining per-(tower,baseline) freedom is an INTEGER cycle count, not a real number. So the parametrisation carries 12 surplus real degrees of freedom, and those are exactly what swallow the attitude error. This is the SAME disease as the 15-observables-vs-15-float-ambiguities degeneracy measured in feat025/feat027, one level up, and it survives even after integers are fixed.",
+
+  "_whatTheConstraintDoes": "For each baseline the float delta_B is converted to cycles and split into a tower-common fractional part beta(i) and a per-tower integer N(t,i), then delta_B is rebuilt as lambda*(N + beta). beta is formed as a CIRCULAR mean, because fractional parts live on a circle and a plain mean is wrong when they straddle the +/-0.5 wrap. The operation reads no truth whatever: its only input is the hardware fact that a line bias cannot depend on the transmitting tower.",
+
+  "_theHONESTCEILINGandWHYITISNOT100PERCENT": "At GEO every tower line of sight lies within ~17 deg of every other, so the attitude signature b.(dtheta x e) is nearly COMMON across towers -- which means beta will absorb most of it, because a nearly-common attitude effect is nearly indistinguishable from a genuinely common bias. Only the DIFFERENTIAL-across-towers part survives to inform attitude, of order sin(10 deg) ~ 0.17 of the total. So the expected gain is that the recoverable fraction moves from 0 to roughly 17 %, NOT that attitude becomes fully observable. If this rung returns an improvement of that order it CONFIRMS the diagnosis; if it returns nothing, the absorption is happening somewhere else and the diagnosis is wrong. Either reading is a result. What it can never do is beat feat029, which had no bias at all.",
+
+  "_whatWOULDliftTheCeiling": "The residual absorption is GEOMETRIC (Earth subtense from GEO) and no parametrisation can remove it. The three routes that can: (1) explicit DOUBLE-DIFFERENCING across towers, which cancels the antenna-pair bias EXACTLY rather than estimating it -- grep confirms no doubleDiff/betweenTower/towerDiff path exists anywhere in this code base; (2) a known attitude SLEW, since the bias is fixed in the BODY frame while attitude is not, so any commanded rotation separates them absolutely; (3) a long arc, since GEO libration slowly rotates the tower directions in the body frame. A baseline-length constraint (|b| = 2.000 m and 1.470 m here, known by construction) is a cheap orthogonal addition that rejects wrong integer sets.",
+
+  "_readTHESEFIELDS": "store.towerCommonBiasApplied (must be true, else the rung is inert and the run means nothing), towerCommonBias_cycles (the 3 recovered biases -- compare against the 0.02-cycle truth sigma; a recovered beta far larger than that is absorbing attitude, which is the predicted behaviour and not a bug), towerCommonBiasNTowers, towerCommonBiasShift_m (RMS movement of delta_B; a shift of ~0 means the floats were already integer-consistent and the constraint bound nothing), then ambiguityStatus, finalAttitudeError_deg and finalAttitudeSigma_deg against feat028's 1.397941 and 0.230097.",
+
+  "_windUpCaveat": "Phase wind-up is still not modelled. An integer fix is exactly the operation an unmodelled slow carrier-phase rotation corrupts, so any fix here is optimistic relative to reality and must say so.",
+
+  "scenario": {
+    "name": "feat030_attitudeTowerCommonBias",
+    "orbitClass": "GEO",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+
+  "estimator": {
+    "diffAtt": {
+      "towerCommonBias": { "enable": true }
+    }
+  },
+
+  "report": { "runVersion": "feat030", "compileTex": "auto" }
+}

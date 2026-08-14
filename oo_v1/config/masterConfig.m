@@ -371,6 +371,18 @@ cfg.estimator.imu.enable                          = true;
 cfg.estimator.estimateGyroBias                    = true;
 cfg.estimator.diffAtt.calibWin_s                  = 60;
 cfg.estimator.diffAtt.referenceMode               = 'selfCalibrated';
+% Constrain the differential ambiguity to bias(baseline) + lambda*N(tower,baseline).
+% The inter-antenna carrier bias belongs to the antenna pair, so it CANNOT depend on
+% which tower transmits; leaving one free real per (tower,baseline) overparametrises
+% 3 physical biases with 15 constants and lets the surplus absorb attitude. Default
+% OFF so every existing golden is bit-identical. See DiffAttitudeBuilder.applyTowerCommonBias_.
+cfg.estimator.diffAtt.towerCommonBias.enable      = false;
+% Between-tower double difference of the attitude rows. The inter-antenna hardware
+% bias is identical for every tower, so differencing two towers on the same baseline
+% cancels it EXACTLY -- no calibration and no bias state. Cost: the GEO line-of-sight
+% spread is only ~17 deg, so the DD observable is 3-6x weaker than the SD one. Default
+% OFF so every existing golden is bit-identical. See DiffAttitudeBuilder.buildRows.
+cfg.estimator.diffAtt.towerDoubleDifference.enable = false;
 cfg.estimator.diffAtt.referenceSigma_deg          = 0.1;
 cfg.estimator.diffAtt.solutionInterpretation = ...
     'relativeAttitudeTrackingConditionedOnInitialPrior';

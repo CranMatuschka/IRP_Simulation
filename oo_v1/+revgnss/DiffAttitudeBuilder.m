@@ -259,6 +259,11 @@ classdef DiffAttitudeBuilder
             end
             fprintf('  [DiffAtt] Calibration done: %d/%d baselines OK\n', ...
                 nValid, store.nTowers * store.nBaselines);
+            % Impose the physical structure of delta_B before any integer work:
+            % the inter-antenna hardware bias belongs to the ANTENNA PAIR and is
+            % identical for every tower, so 15 free (tower,baseline) constants
+            % overparametrise 3 real biases plus 15 integers. Default OFF.
+            store = revgnss.DiffAttitudeBuilder.applyTowerCommonBias_(store, cfg);
             % Attempt integer ambiguity resolution for delta_B.
             store = revgnss.BaselineCarrierAmbiguityResolver.resolve(store, cfg);
             % Formal LAMBDA/Ps_LAMBDA assessment of that fix (Route A: between-antenna single
@@ -273,6 +278,82 @@ classdef DiffAttitudeBuilder
             % by default and the goldens are untouched.
             store.lambdaGroundAssessment = revgnss.integer.BaselineAmbiguityLambda.assess(store, cfg);
             store = revgnss.DiffAttitudeBuilder.defaultStoreFields(store, cfg);
+        end
+
+        % ----------------------------------------------------------------
+        function store = applyTowerCommonBias_(store, cfg)
+            % applyTowerCommonBias_  Constrain delta_B to bias(i) + lambda*N(t,i).
+            %
+            % WHY. store.delta_B is [nTowers x nBaselines] and each entry is
+            % time-averaged independently, so every (tower,baseline) pair owns a
+            % free real constant -- 15 of them for 5 towers and 3 baselines.
+            % Physically there are only 3 free reals: the inter-antenna carrier
+            % bias is a property of the ANTENNA PAIR (cable/line/electronics) and
+            % is therefore IDENTICAL for every tower. The remaining per-(t,i)
+            % freedom is an INTEGER cycle count, not a real number. The surplus
+            % 12 real degrees of freedom are exactly what absorbs the attitude
+            % error and makes it unobservable.
+            %
+            % WHAT. For each baseline, express the float ambiguity in cycles,
+            % split it into a tower-common fractional part beta(i) and a
+            % per-tower integer N(t,i), then rebuild delta_B from the constrained
+            % pair. Nothing here reads truth: it uses only the hardware fact that
+            % the bias cannot depend on which tower is transmitting.
+            %
+            % HONEST LIMIT, STATE IT WHEREVER THIS IS QUOTED. At GEO every tower
+            % line of sight is within ~17 deg of every other, so the attitude
+            % signature b.(dtheta x e) is nearly COMMON across towers and beta
+            % will absorb most of it. Only the differential-across-towers part,
+            % of order sin(10 deg) ~ 0.17 of the total, survives to inform
+            % attitude. This constraint therefore moves the recoverable fraction
+            % from 0 to ~17 %, it does not make attitude fully observable. The
+            % residual absorption is GEOMETRIC (Earth subtense from GEO) and no
+            % parametrisation can remove it -- only tower-differencing with a
+            % wider baseline, a slew, or a longer arc can.
+            store.towerCommonBiasApplied     = false;
+            store.towerCommonBias_cycles     = zeros(1, max(store.nBaselines,1));
+            store.towerCommonBiasNTowers     = zeros(1, max(store.nBaselines,1));
+            store.towerCommonBiasShift_m     = 0;
+            if nargin < 2; cfg = struct(); end
+            en = false;
+            try; en = logical(cfg.estimator.diffAtt.towerCommonBias.enable); catch; end
+            if ~en || ~store.calibrated || store.nBaselines < 1; return; end
+            lam = NaN;
+            try
+                if isfield(cfg,'signals') && isfield(cfg.signals,'wavelength_m') ...
+                        && ~isempty(cfg.signals.wavelength_m)
+                    lam = cfg.signals.wavelength_m(1);
+                else
+                    lam = revgnss.SignalUtils.wavelength(cfg, 'L1');
+                end
+            catch
+                return
+            end
+            if ~isfinite(lam) || lam <= 0; return; end
+            shiftSq = 0; nShift = 0;
+            for bi = 1:store.nBaselines
+                tIdx = find(store.activeMask(:,bi));
+                if numel(tIdx) < 2; continue; end   % 1 tower cannot separate bias from integer
+                nFloat = store.delta_B(tIdx,bi) / lam;          % cycles
+                frac   = nFloat - round(nFloat);                % in [-0.5, 0.5)
+                % Circular mean: the fractional parts live on a circle, so a
+                % plain mean is wrong when they straddle the +/-0.5 wrap.
+                beta = angle(mean(exp(1i * 2*pi * frac))) / (2*pi);
+                Nint = round(nFloat - beta);
+                newB = lam * (Nint + beta);
+                shiftSq = shiftSq + sum((newB - store.delta_B(tIdx,bi)).^2);
+                nShift  = nShift + numel(tIdx);
+                store.delta_B(tIdx,bi)           = newB;
+                store.towerCommonBias_cycles(bi) = beta;
+                store.towerCommonBiasNTowers(bi) = numel(tIdx);
+            end
+            if nShift > 0
+                store.towerCommonBiasShift_m = sqrt(shiftSq / nShift);
+            end
+            store.towerCommonBiasApplied = true;
+            fprintf(['  [DiffAtt] Tower-common bias constraint ON: %d baselines, ' ...
+                'RMS delta_B shift %.4f m\n'], ...
+                sum(store.towerCommonBiasNTowers > 0), store.towerCommonBiasShift_m);
         end
 
         % ----------------------------------------------------------------
@@ -389,6 +470,7 @@ classdef DiffAttitudeBuilder
             hasSigIdx = isfield(cpInfo,'signalIdx');
 
             rows_z = zeros(0,1); rows_h = zeros(0,1); rows_H = zeros(0,nx);
+            rows_key = zeros(0,3);   % [towerIdx baselineIdx signalIdx] for optional DD
             for ti = 1:store.nTowers
                 refMask = (cpInfo.towerIdx==ti) & (cpInfo.antennaIdx==1);
                 if hasSigIdx && sum(refMask) > 1
@@ -452,6 +534,7 @@ classdef DiffAttitudeBuilder
                     rows_z(end+1,1) = z_row; %#ok<AGROW>
                     rows_h(end+1,1) = h_row; %#ok<AGROW>
                     rows_H(end+1,:) = H_row; %#ok<AGROW>
+                    rows_key(end+1,:) = [ti bi 1]; %#ok<AGROW>
                     % Add L2 EKF row for dual-frequency-fixed baselines.
                     % Uses same H (geometry only); different bias = lambda2*N2.
                     isDualFix76_ = ~isempty(info.ambiguityStatus) && ...
@@ -471,14 +554,78 @@ classdef DiffAttitudeBuilder
                                 rows_z(end+1,1) = z_row_L2_; %#ok<AGROW>
                                 rows_h(end+1,1) = h_row_L2_; %#ok<AGROW>
                                 rows_H(end+1,:) = H_row;     %#ok<AGROW>
+                                rows_key(end+1,:) = [ti bi 2]; %#ok<AGROW>
                             end
                         end
                     end
                 end
             end
+            % ---- Optional between-tower double difference (default OFF) ----
+            % The single-differenced rows above still carry the inter-antenna
+            % hardware bias, which is a property of the ANTENNA PAIR and is
+            % therefore IDENTICAL for every tower. Differencing two towers on the
+            % same baseline and signal cancels it EXACTLY -- no calibration, no
+            % estimated bias state, no truth. What survives is
+            %   b_ij . (e_t - e_p) / lambda  +  (N_t - N_p),
+            % i.e. pure geometry plus an integer difference that is still an
+            % integer. HONEST COST: |e_t - e_p| ~ 0.17-0.30 at GEO because the
+            % Earth subtends only ~17 deg, so the DD observable is 3-6x weaker
+            % than the SD one, and the ATTITUDE ABSORBED INTO THE COMMON TERM
+            % CANCELS TOO. This formulation is bias-free, not more sensitive.
+            ddEn = false;
+            try; ddEn = logical(cfg.estimator.diffAtt.towerDoubleDifference.enable); catch; end
+            info.towerDoubleDifference = false;
+            info.ddGroups = 0; info.ddRowsDropped = 0; info.ddPivotTower = 0;
+            R_dd = [];
+            if ddEn && ~isempty(rows_z)
+                dz = zeros(0,1); dh = zeros(0,1); dH = zeros(0,nx); blocks = {};
+                keysBS = unique(rows_key(:,[2 3]), 'rows');
+                for kk = 1:size(keysBS,1)
+                    g = find(rows_key(:,2)==keysBS(kk,1) & rows_key(:,3)==keysBS(kk,2));
+                    if numel(g) < 2
+                        % A single tower on this (baseline,signal) cannot be
+                        % differenced; it is dropped rather than passed through
+                        % undifferenced, which would reintroduce the bias.
+                        info.ddRowsDropped = info.ddRowsDropped + numel(g);
+                        continue
+                    end
+                    p = g(1); rest = g(2:end); m = numel(rest);
+                    dz = [dz; rows_z(rest) - rows_z(p)];      %#ok<AGROW>
+                    dh = [dh; rows_h(rest) - rows_h(p)];      %#ok<AGROW>
+                    dH = [dH; rows_H(rest,:) - rows_H(p,:)];  %#ok<AGROW>
+                    % Sharing one pivot correlates the DD rows within a group:
+                    % var = 2*R_row on the diagonal, cov = R_row off it.
+                    blocks{end+1} = R_row * (eye(m) + ones(m)); %#ok<AGROW>
+                    info.ddGroups = info.ddGroups + 1;
+                    if info.ddPivotTower == 0; info.ddPivotTower = rows_key(p,1); end
+                end
+                if ~isempty(dz)
+                    rows_z = dz; rows_h = dh; rows_H = dH;
+                    R_dd = blkdiag(blocks{:});
+                    info.towerDoubleDifference = true;
+                    % daInfo is consumed in-epoch and never persisted, so these
+                    % fields cannot be read back from the output .mat. Announce
+                    % once per run so "the gate was on" can be distinguished from
+                    % "the transform actually applied" -- the GateOn-means-ran
+                    % trap this code base has on record.
+                    persistent ddAnnounced_
+                    if isempty(ddAnnounced_); ddAnnounced_ = false; end
+                    if ~ddAnnounced_
+                        fprintf(['  [DiffAtt] TOWER DD APPLIED: %d groups, pivot tower %d, ' ...
+                            '%d rows dropped, %d DD rows (was %d SD rows)\n'], ...
+                            info.ddGroups, info.ddPivotTower, info.ddRowsDropped, ...
+                            numel(dz), size(rows_key,1));
+                        ddAnnounced_ = true;
+                    end
+                end
+            end
             if ~isempty(rows_z)
                 z_da = rows_z; h_da = rows_h; H_da = rows_H;
-                R_da = R_row * eye(numel(rows_z));
+                if ~isempty(R_dd)
+                    R_da = R_dd;
+                else
+                    R_da = R_row * eye(numel(rows_z));
+                end
                 resid = rows_z - rows_h;
                 info.nRows             = numel(rows_z);
                 info.residualRMS_m     = sqrt(mean(resid.^2));
