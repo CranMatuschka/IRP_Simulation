@@ -1,0 +1,39 @@
+{
+  "_id": "att rung: attitudeJointSearchMultipathStressBound. att012 (joint rigid-body integer/attitude search, space-grade FOG gyro, 3 mm receive-end carrier multipath) with the multipath amplitude raised 6.7x to 20 mm. This is a STRESS BOUND, not a physically expected operating point. One number against att012.",
+  "_extends": "att012_attitudeJointSearchReceiveEndMultipath.json",
+  "_delta": "errors.multipath.receiveEnd.sigmaCarrier_ss_m: 0.003 -> 0.020. Nothing else.",
+
+  "_THISWASFIRSTCUTASKAPLANMULTIPATHandTHATLABELWASWRONG": "It was originally named attitudeJointSearchKaplanMultipath on the argument that 20 mm is Kaplan and Hegarty's benign-environment carrier multipath and therefore the literature operating point. THAT IS A CATEGORY ERROR AND IT IS CORRECTED HERE. Kaplan's 2 cm is a GROUND RECEIVER figure: terrestrial environment, ground plane, surrounding terrain. This rung injects RECEIVE-end multipath, and in reverse GNSS the receiver is a spacecraft at GEO. A terrestrial ground-receiver number does not bound a spacecraft antenna. The repo's own traceability analysis cites Kaplan's 2 cm correctly, against the LINK's carrier sigma; lifting it onto the spacecraft end was the mistake. The 20 mm is retained as a deliberate STRESS level because the result it produced is worth having (see the gate finding below), not because it is expected.",
+
+  "_WHYRECEIVEENDMULTIPATHISMILLIMETRECLASSANDNOTCENTIMETRE": "Three physical reasons, all absent from the terrestrial case that the 2 cm figure describes. (1) NO GROUND PLANE AND NO TERRAIN: the dominant terrestrial reflector simply is not present in orbit. (2) POLARISATION DISCRIMINATION: GNSS is RHCP, a single specular reflection flips the sense to LHCP, and an RHCP antenna rejects LHCP by roughly 10-20 dB, so a reflected ray starts at ~10-30 percent amplitude before anything else. (3) ANTENNA PATTERN ROLL-OFF: structural reflections arrive at large off-boresight angles where the pattern is down. AGAINST THAT, and why it is not zero: for a nadir-pointing GEO communications satellite the signal arrives from nadir, and the nadir face is exactly where the large Earth-coverage reflectors and feeds sit, so there IS structure in the illuminated direction. Millimetre-class, not centimetre-class. att012's 3 mm is the physically relevant rung; this one is the bound.",
+
+  "_THEBIGCERTAINLYREALMULTIPATHDOESNOTREACHATTITUDEATALL": "Worth stating because it is the answer to 'is multipath a real factor for reverse GNSS'. For POSITION it is, and it lives at the TRANSMIT end: the towers are ground GNSS transmitters with ground bounce, elevation dependent, and coloredGM already models it at 0.30 m code with a 1/sin(el) envelope keyed on tower elevation. It is probably the largest multipath term in the link. But it is COMMON to all four spacecraft phase centres, so it cancels identically in the inter-antenna single difference this ladder is built on -- which is why golden_baseline.json sets its sharedAcrossAntennas gate true, after measuring that a per-antenna draw handed a 4-antenna run a free sqrt(4). The certainly-real, certainly-large multipath is precisely the one that cannot touch attitude. Only the receive-end term can, and that is the small one.",
+
+  "_NOANTENNAPATTERNORPOLARISATIONISMODELLEDONTHISLINK": "VERIFIED: there is no receive-antenna gain pattern and no polarisation model anywhere on the ground-to-spacecraft link; only the inter-satellite link carries a gain model. So this injected term is free-standing -- nothing in the rest of the simulation would attenuate a structural reflection, and nothing constrains its amplitude. Both att012's 3 mm and this rung's 20 mm are ASSUMED levels, not levels derived from the modelled physics. Quote them as assumptions.",
+
+  "_PREREGISTEREDPREDICTIONandHOWITFAILED": "Recorded before the run: scaling the multipath contribution from att011 (0.076358 cycles, no carrier MP) and att012 (0.079642, 3 mm) gave 0.022634 cycles of MP in quadrature, and 6.67x that predicted a total search rms of 0.169115 against a 0.169461 gate, i.e. 0.998 of the gate, a coin flip. MEASURED: 0.228070, so the prediction was 26 percent LOW and the outcome was not close. The error is in the model, not the run: the MP contribution scaled 9.49x for a 6.67x sigma change because the assumed fixed noise floor is not fixed. The attitude prior at the search epoch is itself produced by the run, and heavier multipath corrupts the delta_B calibration that sets it. Pre-registering the prediction is what made that visible.",
+
+  "_THERESULT": "MEASURED 3600 s: the joint search REFUSED -- rejectedJointRms, rms 0.228070 cycles against the 0.169461 gate, 1.35x over. diffAttMeanNRows came back 15 rather than 12, confirming the fallback to float single-differenced rows actually happened rather than the refusal being cosmetic. finalAttitudeError_deg 5.98789366, finalAttitudeSigma_deg 0.02773437, err/sigma 215.90, improvement ratio 0.2505 against the 1.5 deg prior. The sigma COLLAPSED to 0.0277 deg, far tighter than att004's already indefensible 0.230097, because the space-grade gyro no longer inflates the covariance and the filter tightens hard on 15 float rows that are badly biased.",
+
+  "_THEREALVALUEOFTHISRUNGISTHEGATE": "0.228070 is 1.35x the rebuilt noise-scaled gate, so it REFUSED. It is 0.76x the INHERITED 0.30-cycle threshold, so the old gate would have ACCEPTED it and fixed integers on data corrupted well past what the geometry supports. That threshold was already shown to be mathematically incapable of refusing anything, because a rounded residual is bounded to +/-0.5 and pure noise sits at 1/sqrt(12) = 0.2887. This rung is the case where that mattered in practice rather than only in arithmetic. Read att013 as a validation of the acceptance gate, NOT as a physics claim about GEO.",
+
+  "_WHATTHISRUNGDOESNOTSHOW": "It does NOT show that refusing the fix is worse than accepting it. att013 came out worse than att012 (5.988 vs 2.523 deg) but it also carries 6.7x the multipath, so the comparison is not like-for-like and says nothing about fix-versus-float. Settling that needs att012 with the fix forced OFF, or att013 with it forced ON. Neither has been run.",
+
+  "_theRCAVEATSTILLSTANDS": "The DD measurement covariance is still assembled with blkdiag across (baseline,signal) groups, dropping the shared reference-antenna correlation, so absolute sigma claims remain undefendable across this family. att012-vs-att013 is like-for-like because both carry it, and in any case this rung never reaches the DD form because the fix was refused.",
+
+  "scenario": {
+    "name": "att013_attitudeJointSearchMultipathStressBound",
+    "orbitClass": "GEO",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+
+  "errors": {
+    "multipath": {
+      "receiveEnd": { "sigmaCarrier_ss_m": 0.020 }
+    }
+  },
+
+  "report": { "runVersion": "att013", "compileTex": "auto" }
+}

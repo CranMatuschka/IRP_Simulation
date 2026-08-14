@@ -37,6 +37,7 @@ commit `bdbeaed` in particular, names them by the old numbers:
 | **att010** | **joint search, NOTHING deleted** | **0.954157** | **1.048386** | **0.910** |
 | **att011** | **att010 + space-grade FOG gyro** | **0.182352** | **0.207983** | **0.877** |
 | **att012** | **att011 + 3 mm receive-end multipath** | **2.522981** | **0.199447** | **12.65** |
+| att013 | att012 at 20 mm (stress bound) | 5.987894 | 0.027734 | 215.90 |
 
 **att012 is the honesty rung and it breaks the family.** 3 mm of quasi-static
 per-antenna carrier multipath, at the repo's OWN declared 1/100 code-to-carrier scale
@@ -59,6 +60,43 @@ than a drifting one on that path.
 covariance, and the only one that achieves it without deleting a real hardware effect.
 `att005`, `att007` and `att009` delete the inter-antenna bias: they are diagnostics, not
 system performance figures.
+
+## Is multipath a real factor for reverse GNSS? Yes, but not the part you would expect
+
+The question has to be split by END OF THE LINK, because the two ends have opposite
+consequences for attitude.
+
+**Transmit end (the ground towers) — certainly real, probably the largest multipath
+term in the link, and it contributes NOTHING to attitude.** The towers are ground GNSS
+transmitters with ground bounce, elevation dependent. `coloredGM` already models it at
+0.30 m code with a 1/sin(el) envelope keyed on tower elevation. But it is COMMON to all
+four spacecraft phase centres, so it cancels identically in the inter-antenna single
+difference this ladder is built on. That is exactly why `golden_baseline.json` sets its
+`sharedAcrossAntennas` gate true, having measured that a per-antenna draw handed a
+4-antenna run a free `sqrt(4)`. The certainly-real, certainly-large multipath is
+precisely the one that cannot touch attitude.
+
+**Receive end (the spacecraft structure) — the only one that reaches attitude, and it
+is millimetre-class, not centimetre-class.** Three reasons it is far smaller than the
+terrestrial case: no ground plane and no terrain, so the dominant terrestrial reflector
+is absent; RHCP-to-LHCP polarisation flip on a single specular reflection, which an RHCP
+antenna rejects by roughly 10-20 dB, putting a reflected ray at ~10-30 % amplitude
+before anything else; and antenna pattern roll-off at the large off-boresight angles
+structural reflections arrive from. Against that, it is not zero: for a nadir-pointing
+GEO communications satellite the signal arrives from nadir and the nadir face is exactly
+where the large Earth-coverage reflectors and feeds sit.
+
+**So att012's 3 mm is the physically relevant rung and att013's 20 mm is a stress
+bound.** att013 was originally cut as "Kaplan multipath" on the argument that 2 cm is
+the benign-environment literature value. That was a CATEGORY ERROR: Kaplan's 2 cm is a
+GROUND RECEIVER figure and does not bound a spacecraft antenna. It is retained at 20 mm
+because the gate result it produced is worth having, not because it is expected.
+
+**Caveat on both.** There is NO receive-antenna gain pattern and NO polarisation model
+anywhere on the ground-to-spacecraft link (only the ISL link has one), so the injected
+term is free-standing: nothing in the modelled physics attenuates a structural
+reflection or constrains its amplitude. 3 mm and 20 mm are ASSUMED levels, not derived
+ones. Quote them as assumptions.
 
 ## Read these before quoting any number above
 
