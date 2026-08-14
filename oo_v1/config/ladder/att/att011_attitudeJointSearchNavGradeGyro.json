@@ -1,0 +1,54 @@
+{
+  "_id": "att rung: attitudeJointSearchNavGradeGyro. att010 (joint rigid-body integer/attitude search, inter-antenna bias LEFT IN, star tracker OFF, gyro ON) with the gyro moved from its MEMS-class grade to a space-qualified fibre-optic grade. One change against att010, applied to TRUTH and FILTER together.",
+  "_extends": "att010_attitudeJointConstrainedSearch.json",
+  "_delta": "estimator.imu.truth.{arw,rrw,bias0Sigma} and estimator.imu.filter.{arw,rrw,P0_bias} together. Nothing else. The ambiguity mechanism, the bias treatment and the row form are exactly att010's.",
+
+  "_whyTHISISTHENEXTQUESTIONandNOTAFISHINGTRIP": "att010 fixed the ambiguity as a unique integer and STILL reported finalAttitudeSigma_deg 1.048386 after 3601 epochs, which is the SINGLE-EPOCH information content essentially unimproved. So the arc buys no averaging and the ambiguity is no longer what limits this family. Something destroys attitude information between updates as fast as the rows supply it, and this rung asks whether that something is the gyro.",
+
+  "_theOBVIOUSANSWERWASALREADYRULEDOUTBYARITHMETIC": "It is NOT the angle random walk. Resolved ARW is 2e-4 rad/sqrt(s) = 0.0115 deg per 1 s epoch, and a random-walk-plus-measurement steady state sqrt(q*sigma_z) = sqrt(0.0115*1.0) is 0.107 deg, TEN TIMES BELOW the 1.048386 deg observed. The candidate this rung actually tests is the gyro BIAS: initial bias sigma 3e-5 rad/s is 6.188 deg/hr, i.e. 6.19 deg of attitude drift across the arc if it were unestimated, and the filter carries three gyro-bias states to absorb it. A DD observable worth only 1.1 / 5.4 / 1.7 mm per deg is a weak lever for separating a slowly drifting bias from attitude itself, so attitude and bias trade against each other and neither converges.",
+
+  "_THEGRADESandWHERETHENUMBERSCOMEFROM": "FROM (att010, inherited from golden_baseline_attitude.json): ARW 2e-4 rad/sqrt(s) = 0.688 deg/sqrt(hr), bias RRW 3e-6 rad/s/sqrt(s), initial bias sigma 3e-5 rad/s = 6.188 deg/hr. That is consumer/low-tactical MEMS, and it is a deliberately conservative choice, not an error. TO (this rung): ARW 3e-7 rad/sqrt(s) = 0.00103 deg/sqrt(hr), bias RRW 1e-10 rad/s/sqrt(s), initial bias sigma 3e-8 rad/s = 0.0062 deg/hr. That is space-qualified fibre-optic gyro territory (Astrix-120/200 class), which is what a GEO communications satellite would actually carry. The jump is deliberately LARGE, roughly 670x in ARW and 1000x in bias, because this rung is a BOUND and not a tuning step: it asks whether an almost-perfect gyro rescues the solution at all, and only if it does is the location of the knee worth a further rung.",
+
+  "_TRUTHANDFILTERMOVETOGETHERandTHATISLOADBEARING": "Both estimator.imu.truth.* and estimator.imu.filter.* are set to the same values, so this is a GRADE experiment, not a truth/filter MISMATCH experiment. Changing only the filter side would inject a Q that no longer describes the truth process and the result would measure filter inconsistency instead of gyro quality. This code base has the truth/estimation separation discipline on record and this rung respects it.",
+
+  "_WHATEACHOUTCOMEMEANS": "If finalAttitudeSigma_deg collapses towards the ARW-limited floor (sqrt(1.72e-5 * 1.0) ~ 0.004 deg, so anything in the 0.004 to 0.05 deg range), att010 was gyro-bias-limited and the integer work had already done its job: the answer to 'can reverse-GNSS carrier phase determine attitude at GEO' becomes yes, GIVEN a real spacecraft gyro. If the sigma barely moves off 1.048386 deg, the gyro was never the wall and the DD lever arm is, which closes the question in the other direction and says no amount of inertial quality helps. An intermediate landing locates the trade and earns a knee-finding rung.",
+
+  "_theCOMPETINGEXPLANATIONTHISRUNGDOESNOTTEST": "Time-correlation of the DD rows themselves. If the 12 integer-fixed rows are strongly correlated epoch to epoch (same integers, same geometry, slowly varying), N_eff over the arc is far below 3601 and the arc would buy no averaging even with a perfect gyro. This rung DISCRIMINATES that case only by outcome: a sigma that does not move despite a 1000x better gyro is evidence FOR the correlation explanation, not against it. Read a null result that way rather than as 'the gyro does not matter'.",
+
+  "_THERESULT": "MEASURED 3600 s: finalAttitudeError_deg 0.18235218, finalAttitudeSigma_deg 0.20798347, err/sigma 0.877, attitudeImprovementRatio 8.226 from the 1.5 deg initial error. Against att010's 0.954157 / 1.048386 that is 5.23x better on error and 5.04x tighter on sigma, and the covariance stays honest (err/sigma below 1 in both). Liveness: jointRigidBodyFixed, rms 0.076358 cycles against the 0.169461 gate, 1 distinct integer set over 729 candidates, 12 DD rows in 3 groups, 0 rejected. diffAttResidRMS_m 0.01910714 against att010's 0.01913400, i.e. the MEASUREMENT residual barely moved: the rows are the same, only the attitude solution improved. Position metrics byte-identical to att010 and att004 (2.105 m final, 4.528 m RMS), as they must be for attitude-only rows.",
+
+  "_THEGYROWASAWALLBUTNOTTHEONLYONE": "The two outcomes this rung was cut to separate BOTH failed to happen, and the middle landing is the finding. Pure gyro-bias limitation would have collapsed the sigma to the ARW floor of ~0.0042 deg; the rung landed at 0.20798 deg, FIFTY TIMES above it. A null result would have left the sigma near 1.048 deg; it moved 5x. So removing the gyro bias uncovered a THIRD limiter rather than reaching the bottom. Arithmetic on what remains: single-epoch DD information is ~1.02 deg (19.1 mm residual over 12 rows at ~5.4 mm per deg), and 3601 INDEPENDENT epochs would give 1.02/sqrt(3601) = 0.017 deg. The observed 0.208 deg implies N_eff ~ 24 of 3601 epochs, i.e. a correlation time of order 150 s. That is the competing explanation att010 named and could not test: the integer-fixed DD rows carry far less independent information than their count suggests. TREAT N_eff ~ 24 AS AN INFERENCE, NOT A MEASUREMENT -- it rests on the 1.02 deg per-epoch figure. Measuring the DD row autocorrelation directly is the next rung, not another gyro grade.",
+
+  "_aDIAGNOSTICTHATISNOWVISIBLYWRONG": "attitudeObsClass still reports UNOBSERVABLE at 0.182 deg final error from a 1.5 deg start with an 8.2x improvement ratio. That classifier is not tracking reality on this rung and should not be quoted. This code base has stale-label failures on record (GateOn meaning ran, rejectedRms emitted when no named gate failed); this is another.",
+
+  "_theRCAVEATSTILLSTANDS": "The DD measurement covariance is assembled with blkdiag across (baseline,signal) groups, which drops the shared reference-antenna correlation and charges the baseline-common DD direction half its true variance. That defect is PRE-EXISTING, it affects att008/att009/att010 alike, and it is unfixed at the time this rung was cut. It biases the SIGMA this rung is quoted for, so a sigma comparison against att010 is like-for-like (both carry it) but an absolute sigma claim is not.",
+
+  "_windUpCaveatCORRECTED": "Phase wind-up is not modelled anywhere in this simulation, and the caveat carried by every earlier rung in this family -- that it does NOT cancel in a between-tower DD -- is WRONG FOR THIS OBSERVABLE and is corrected here. Wind-up is a function of antenna ORIENTATION about the line of sight, not of position. The primary observable in this family is the INTER-ANTENNA single difference phi(t,a) - phi(t,1) at ONE tower: the transmitter term is the same tower antenna in both, so it cancels exactly, and the receiver term is common to all four spacecraft antennas because the config gives them lever-arm POSITIONS only with a single spacecraft-level boresight_body = [0;0;1], i.e. they are CO-ORIENTED by construction. A term identical on both antennas cancels in the difference. So wind-up is largely absent from this observable, and the between-tower DD of those SDs removes what little survives. The earlier claim is true of UNDIFFERENCED or tower-differenced observables and was carried over without being re-derived for the inter-antenna form. THE REAL RESIDUAL is array non-ideality: antennas that are not perfectly co-oriented, and per-antenna polarisation/phase-pattern differences, neither of which this simulation models. That is a smaller effect than the received caveat implies, and it is NOT the dominant optimism in this rung -- see the next field.",
+
+  "_WHATACTUALLYMAKESTHISRUNGOPTIMISTIC": "Ranked, and the ranking is specific to an INTER-ANTENNA observable, where only ANTENNA-SPECIFIC effects survive the difference. (1) CARRIER MULTIPATH IS ABSENT. Verified: there is no multipath term in CarrierMeasurementBuilder and coloredGM.carrierScale is still 'reserved'. Multipath is antenna-specific and therefore does NOT cancel between antennas, which makes it THE dominant real error source for GNSS attitude arrays. Kaplan's benign-environment carrier multipath alone is 2 cm, twice the 10 mm sigma this family charges. (2) ANTENNA PCV CANCELS BETWEEN TRUTH AND MODEL, measured residual 2.2e-8 m, i.e. a PERFECTLY CALIBRATED array is assumed. The real post-calibration residual (~5 mm, Schmid et al. 2007) is antenna-specific and would survive the inter-antenna difference; it is paid for inside the 10 mm sigma rather than injected. (3) THE INTER-ANTENNA BIAS IS ASSUMED CALIBRATED to a 0.02-cycle residual AND PERFECTLY STATIC over the arc, with no thermal drift. (4) THE FILTER KNOWS THE GYRO EXACTLY: truth and filter share one ARW/RRW model, so scale-factor error, axis misalignment, g-sensitivity and temperature drift are all absent, and the Q is by construction the right Q. (5) THE DD COVARIANCE STRUCTURE IS WRONG (see _theRCAVEATSTILLSTANDS), so the SIGMA is not defensible in absolute terms even though the att010-vs-att011 comparison is like-for-like. (6) The space-qualified FOG grade is a real hardware ASSUMPTION with cost and mass consequences, deliberately aggressive because this rung is a bound.",
+
+  "scenario": {
+    "name": "att011_attitudeJointSearchNavGradeGyro",
+    "orbitClass": "GEO",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+
+  "estimator": {
+    "imu": {
+      "truth": {
+        "arw_rad_per_sqrt_s": 3e-7,
+        "rrw_rad_per_s_sqrt_s": 1e-10,
+        "bias0Sigma_radps": 3e-8
+      },
+      "filter": {
+        "arw_rad_per_sqrt_s": 3e-7,
+        "rrw_rad_per_s_sqrt_s": 1e-10,
+        "P0_bias_radps": 3e-8
+      }
+    }
+  },
+
+  "report": { "runVersion": "att011", "compileTex": "auto" }
+}

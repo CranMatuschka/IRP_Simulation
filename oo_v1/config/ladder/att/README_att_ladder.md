@@ -35,6 +35,7 @@ commit `bdbeaed` in particular, names them by the old numbers:
 | att008 | DD only | 1.649196 | 1.024780 | 1.609 |
 | att009 | fix + DD | 1.235936 | 0.917092 | 1.348 |
 | **att010** | **joint search, NOTHING deleted** | **0.954157** | **1.048386** | **0.910** |
+| **att011** | **att010 + space-grade FOG gyro** | **0.182352** | **0.207983** | **0.877** |
 
 `att010` is the only rung that is both the best in the family on error and honest on
 covariance, and the only one that achieves it without deleting a real hardware effect.
@@ -48,10 +49,25 @@ system performance figures.
   calibration and counted as information, so the filter tightened on a constant it had
   merely fitted. Only the between-tower DD (att008 onward) raises the sigma to what the
   geometry actually supports.
-- **Phase wind-up is not modelled anywhere in this simulation.** An integer fix is
-  exactly the operation a slow unmodelled carrier-phase rotation corrupts, and it does
-  NOT cancel in a between-tower DD because the tower-to-satellite geometry differs per
-  tower. Every fixed rung here is optimistic.
+- **Phase wind-up is not modelled, but the received caveat about it was WRONG for this
+  observable and is corrected as of att011.** Wind-up is a function of antenna
+  ORIENTATION about the line of sight, not position. The observable here is the
+  INTER-ANTENNA single difference at one tower: the transmitter term is the same tower
+  antenna in both and cancels exactly, and the receiver term is common to all four
+  spacecraft antennas, which the config makes co-oriented by construction (lever-arm
+  positions only, one spacecraft-level `boresight_body`). A term identical on both
+  antennas cancels in the difference. The old claim, that wind-up survives a
+  between-tower DD, is true of UNDIFFERENCED observables and was carried over without
+  being re-derived. The real residual is array non-ideality (imperfect co-orientation,
+  per-antenna polarisation differences), which is smaller than the caveat implied.
+- **What actually makes these rungs optimistic** is the ANTENNA-SPECIFIC effects, since
+  only those survive an inter-antenna difference. In order: carrier multipath is
+  ABSENT (no multipath term in `CarrierMeasurementBuilder`, `coloredGM.carrierScale`
+  still reserved) and is the dominant real error source for GNSS attitude arrays;
+  antenna PCV cancels between truth and model, so a PERFECTLY CALIBRATED array is
+  assumed and the ~5 mm real residual is never injected; the inter-antenna bias is
+  assumed calibrated to 0.02 cycles and perfectly static; and in att011 the filter
+  knows the gyro exactly, so scale factor, misalignment and g-sensitivity are absent.
 - **att010's accuracy does not come from the DD being sensitive.** Measured DD attitude
   sensitivity is 1.1 / 5.4 / 1.7 mm per degree, against 18 / 4.8 / 34.9 mm per degree in
   the single difference it replaces: the between-tower difference discards roughly 94 %
