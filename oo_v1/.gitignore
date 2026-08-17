@@ -36,3 +36,19 @@ tests/regression/verify_report_marker.txt
 # above, which exist to keep ladder SCENARIO files versioned.
 IRP Ladder Results/
 IRP Ladder Results HEAD/
+# The two rules above did not cover the sweeps that actually exist on disk. "IRP Ladder
+# Results Final" is 2.4 GB and "IRP Multipath State AB" is 58 MB, both untracked and both
+# one `git add -A` away from being written into history permanently, where they could not
+# be removed without rewriting it. The wildcard is deliberate: the next sweep will invent
+# another suffix and must be caught before someone stages it, not after.
+IRP Ladder Results*/
+IRP Multipath State*/
+# Ladder REPORT directories under output/ -- the aggregated PDF/PNG/mat artefacts a sweep
+# leaves behind, 13.4 MB across four of them today. output/Report-*, Sweep_* and friends
+# were already ignored above; this family was not.
+output/LadderReport_*/
+# Final-run configuration overlays. Held out of version control on request while the
+# numbers they produce are still moving. NOTE these are scenario SOURCES, not artefacts,
+# so this rule is the odd one out here: if the final configuration is ever quoted in a
+# result, it has to come back under version control or the result is untraceable.
+config/final/
