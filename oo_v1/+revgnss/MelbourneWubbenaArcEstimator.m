@@ -25,8 +25,14 @@ classdef MelbourneWubbenaArcEstimator < handle
     % (errors.multipath.coloredGM.tau_s) and, with sharedAcrossAntennas on, ONE chain is
     % shared by every antenna of a tower. So:
     %
-    %   * an arc mean over n epochs does NOT improve as 1/sqrt(n). Charging 1/sqrt(n) over a
-    %     3600 s arc at tau = 60 s overstates the precision by sqrt(T/2tau) ~ 5.5x.
+    %   * an arc mean over n epochs does NOT improve as 1/sqrt(n). The inflation factor is
+    %     sqrt(1 + 2*sum_k rho_k), which for an AR(1) with dt << tau tends to
+    %     sqrt(2*tau/dt) = sqrt(120) = 10.95 here. NOTE THAT IT CONTAINS dt AND NOT T: the
+    %     factor is INDEPENDENT OF ARC LENGTH. An earlier version of this comment said
+    %     sqrt(T/2tau) ~ 5.5x, which is wrong -- it conflates N_eff = T/(2tau) with
+    %     N = T/dt, and the correct ratio is sqrt(N/N_eff). The tell is that the wrong
+    %     formula contains no dt. gaussMarkovSigma_ below already computes the right
+    %     benchmark, and summaryLines prints it four lines under the measured ratio.
     %   * the four antennas on a tower are NOT four independent samples of that term.
     %
     % Rather than assert a noise model, this class MEASURES the covariance of its own arc
@@ -638,7 +644,14 @@ classdef MelbourneWubbenaArcEstimator < handle
             out.floatErrorMax_cyc  = max(abs(out.floatWideLane_cyc - nTrue));
             out.roundedCorrectCount = sum(round(out.floatWideLane_cyc) == nTrue);
             out.nComponents = numel(nTrue);
-            if ~isempty(nFix)
+            % ONLY when the fix was ACCEPTED. DecorrelatedBootstrap.resolve returns aFix =
+            % aHat (the FLOAT) when it refuses, so scoring it here would compute
+            % sum(round(float) == truth), which is roundedCorrectCount under a second name.
+            % Reporting that as "fixed N/N components correct" reads as a fix result and is
+            % not one -- the two lines print identical numbers and the reader cannot tell.
+            % NaN on a refusal, so a rejected fix can never be quoted as a successful one.
+            if ~isempty(nFix) && isstruct(out.fix) && isfield(out.fix,'accepted') && ...
+                    out.fix.accepted
                 out.fixedCorrectCount = sum(round(nFix(:)) == nTrue(:));
                 out.realisedCorrect   = double(all(round(nFix(:)) == nTrue(:)));
             end
@@ -704,7 +717,13 @@ classdef MelbourneWubbenaArcEstimator < handle
             lines{end+1} = sprintf('Epochs used / seen    : %d / %d  (skipped no-ref %d)', ...
                 s.nEpochsUsed, s.nEpochsSeen, s.nEpochsSkippedNoRef);
             lines{end+1} = sprintf('Arcs used / seen      : %d / %d', s.nArcsUsed, s.nArcsSeen);
-            lines{end+1} = sprintf('Wind-up leak (m)      : %.3e  [exact cancellation predicts 0]', ...
+            % WEAK CHECK, and labelled as one. lambda_j = c/f_j, and f_j*(c/f_j) rounds to
+            % EXACTLY c in double precision, so the metre-domain part of the cancellation is
+            % identically zero whatever the wind-up is. All this can actually detect is the
+            % wind-up differing BETWEEN BANDS in cycles. It is not evidence that a real
+            % cancellation succeeded, and a zero here on a run with the wind-up gate OFF is
+            % evidence of nothing at all.
+            lines{end+1} = sprintf('Wind-up band mismatch : %.3e m  [weak check: 0 whenever w_L1 == w_L2]', ...
                 s.windupLeakMax_m);
             if isfinite(s.wideLaneFloatSigmaMean_cyc)
                 lines{end+1} = sprintf('WL float sigma (cyc)  : mean %.4f, max %.4f  [= %.4f m]', ...
