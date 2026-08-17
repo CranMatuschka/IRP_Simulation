@@ -52,7 +52,17 @@ therefore required to reach the cm target — the higher-order residual then dom
 These are **not** modelled; their omission bounds how far the ~3 cm / ~100 ps conclusion
 can be pushed and must be stated in any feasibility claim:
 
-- **Phase wind-up** — absent (no `effects.phaseWindup`). cm-level on carrier for rotating platforms.
+- ~~**Phase wind-up** — absent (no `effects.phaseWindup`).~~ **CORRECTED 2026-08-14: no longer absent.**
+  `models.errors.PhaseWindup` implements Wu et al. 1993 on the carrier (never on code), gated by
+  `errors.phaseWindup.enable` with an estimator-side correction from the *estimated* attitude at
+  `estimator.phaseWindup.correct`. Both default OFF, so every golden is byte-identical. Roles are
+  inverted here — the ground tower transmits and the spacecraft receives — so wind-up is driven by
+  the SPACECRAFT attitude. Measured on `att016`/`att017`: in the nadir-locked GEO case it is
+  constant to 9.82e-08 cycles over a 3600 s arc and therefore absorbed by the float carrier
+  ambiguity, costing 1.1 % of the attitude error and 48 µm of position; and it cancels outright in
+  the inter-antenna single difference the attitude ladder is built on. The "cm-level for rotating
+  platforms" warning still stands for any scenario with a real body rate or yaw-steering law —
+  that case is not run here.
 - **Antenna phase-centre variation (PCV)** — `effects.antennaPCV.enable = false` (PCO is modelled; PCV is not). mm–cm.
 - **Relativistic clock-rate correction** — flag present but **disabled** by the v1 sanitiser (`Relativistic clock-rate correction is not implemented as a validated v1 model`).
 - ~~**Klobuchar ionosphere** — `klobucharStatus = 'notImplemented'`~~ **CORRECTED 2026-08-09: this entry was wrong.** The reduced Klobuchar kernel (`models.atmosphere.Klobuchar`) IS implemented and IS applied on the model side whenever `errors.ionosphere.model.correction = 'klobuchar'` — which the shipped `golden_baseline.json` selects. `klobucharStatus` now resolves to `appliedModelSideBroadcastClimatology` or `notSelected` from the config. What is genuinely absent is the ICD's 8-coefficient α/β polynomial and its obliquity `F = 1 + 16(0.53 − E)³`; the thin-shell obliquity is substituted.

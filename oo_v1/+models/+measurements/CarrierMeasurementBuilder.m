@@ -105,6 +105,38 @@ classdef CarrierMeasurementBuilder
             cpInfo.carrierProductArcReferenceStatus = 'notAvailableUsingProductEpochAgeV1';
             % Per-row injected slip (metres); zero when slip injection disabled.
             cpInfo.injectedSlip_m = zeros(Mp_total, 1);
+            % Per-row phase wind-up (CYCLES, not metres -- wind-up is identical in cycles
+            % on every signal and only becomes frequency-dependent when multiplied by that
+            % row's own wavelength). Zero on both sides when the gates are off.
+            cpInfo.phaseWindupTruth_cycles = zeros(Mp_total, 1);
+            cpInfo.phaseWindupModel_cycles = zeros(Mp_total, 1);
+            % ...and the model side ALSO in metres, because the POSTFIT recompute
+            % (revgnss.CarrierModelOnlyBuilder) has no per-signal wavelength of its own
+            % and must add back exactly what the prefit h carried. Publishing metres
+            % here is what keeps prefit and postfit from silently diverging by the
+            % wind-up term the moment the correction is switched on.
+            cpInfo.phaseWindupModel_m      = zeros(Mp_total, 1);
+
+            % TRUTH float ambiguity per row, in metres, for the Melbourne-Wubbena REGISTER
+            % only (revgnss.MelbourneWubbenaArcEstimator scores its fix against N1 - N2
+            % after every decision has been made, and never reads it back). Gated on
+            % cfg.diagnostics.melbourneWubbena.enable so the default path allocates nothing
+            % and publishes nothing: an estimator that can see this field on the golden
+            % would be a truth leak waiting to be used.
+            mwTruthGate_ = false;
+            if isfield(cfg,'diagnostics') && isfield(cfg.diagnostics,'melbourneWubbena') && ...
+                    isfield(cfg.diagnostics.melbourneWubbena,'enable') && ...
+                    logical(cfg.diagnostics.melbourneWubbena.enable)
+                mwTruthGate_ = true;
+                try
+                    mwTruthGate_ = logical(cfg.diagnostics.melbourneWubbena.truthRegister.enable);
+                catch
+                    mwTruthGate_ = true;
+                end
+            end
+            if mwTruthGate_
+                cpInfo.ambiguityTruth_m = zeros(Mp_total, 1);
+            end
 
             % Get product epoch and drift sigma for carrier rows
             t_prod_carrier  = zeros(Mp, 1);
@@ -322,6 +354,41 @@ classdef CarrierMeasurementBuilder
                 end
             end
 
+            % ---- Phase wind-up: gates and attitude DCMs, resolved ONCE ------------
+            % Both DCMs are row-invariant, so they are hoisted out of the row loop. The
+            % asset-property read is hoisted with them: several test fixtures pass a bare
+            % struct as `asset` with no attitude field at all, and one guarded read here
+            % is easier to keep honest than one per row. Nothing below this block touches
+            % `asset` unless a gate is on, so those fixtures are untouched.
+            wuTruthGate_ = false;
+            try; wuTruthGate_ = logical(cfg.errors.phaseWindup.enable); catch; end
+            wuModelGate_ = false;
+            try; wuModelGate_ = logical(cfg.estimator.phaseWindup.correct); catch; end
+            C_wuTrue_ = eye(3);
+            if wuTruthGate_
+                eulTrue_ = [];
+                if isprop(asset,'attitude_euler_rad') || ...
+                        (isstruct(asset) && isfield(asset,'attitude_euler_rad'))
+                    eulTrue_ = asset.attitude_euler_rad;
+                end
+                if isempty(eulTrue_) || numel(eulTrue_) ~= 3
+                    % Refuse rather than fall back to identity. Wind-up IS the spacecraft
+                    % attitude in this geometry; substituting a default attitude would
+                    % emit a term that looks live, carries a plausible magnitude, and
+                    % measures nothing -- the inert-but-reported failure this repo has on
+                    % record for several toggles.
+                    error('CarrierMeasurementBuilder:windupNeedsTruthAttitude', ...
+                        ['cfg.errors.phaseWindup.enable=true but the asset carries no ' ...
+                         '3-element attitude_euler_rad. Wind-up is driven by the ' ...
+                         'spacecraft attitude; there is no honest default for it.']);
+                end
+                C_wuTrue_ = revgnss.AttitudeKinematics.bodyToEcefRotation(eulTrue_);
+            end
+            C_wuEst_ = eye(3);
+            if wuModelGate_
+                C_wuEst_ = revgnss.AttitudeKinematics.bodyToEcefRotation(euler_est);
+            end
+
             for si_ = 1:nSig_
                 sigIdx       = si_;
                 lambda       = carrierSigs_(si_).wavelength_m;
@@ -463,8 +530,23 @@ classdef CarrierMeasurementBuilder
                 % errors.multipath.receiveEnd.enable, so the golden path is unchanged.
                 mpRx_m = errorChain.receiveEndCarrierMultipath(ti, ai, si_);
 
+                % PHASE WIND-UP (TRUTH side, Wu et al. 1993): the relative rotation of
+                % the tower and spacecraft antennas about the line of sight. Driven by
+                % the TRUE attitude and by the TRUTH geometry (r_twr_t, r_ants_truth),
+                % so it is a genuine truth-side error and not a re-statement of the
+                % model. Accumulated in cycles with continuity by ErrorChain; multiplied
+                % by THIS row's wavelength here, because the effect is constant in cycles
+                % and only becomes frequency-dependent in metres. Exactly 0 when off.
+                wu_cyc_ = 0;
+                if wuTruthGate_
+                    wu_cyc_ = errorChain.phaseWindupCycles('truth', ti, ai, si_, t_s, ...
+                        r_twr_t, r_ants_truth(:, ai), C_wuTrue_, ...
+                        towers{ti}.lat_rad, towers{ti}.lon_rad);
+                end
+                wu_m = wu_cyc_ * lambda;
+
                 % z: +trop, -iono (carrier ionosphere is OPPOSITE sign to code)
-                z_phi(rowOut) = rho_t + b_rx_true - b_twr_t + trop_t - iono_t_sig + B_true + noise_phi + phaseScint_m + b_ia_m + mpRx_m;
+                z_phi(rowOut) = rho_t + b_rx_true - b_twr_t + trop_t - iono_t_sig + B_true + noise_phi + phaseScint_m + b_ia_m + mpRx_m + wu_m;
 
                 % Synthetic slip injection for stress testing. slipCfg_ validated ONCE
                 % above the loop; no catch here (D12) -- a malformed config now errors
@@ -480,8 +562,22 @@ classdef CarrierMeasurementBuilder
 
                 b_ia_model_m = revgnss.InterAntennaPhaseBias.modelBiasMeters(cfg, ai, sigIdx);
 
+                % PHASE WIND-UP (MODEL side): the same Wu-1993 quantity computed from the
+                % ESTIMATED attitude and the MODEL geometry. This is what makes the pair
+                % an experiment rather than an identity -- truth uses the true attitude,
+                % the model uses the filter's, so what survives z - h is the wind-up error
+                % CAUSED BY the attitude error. Its own accumulator, keyed 'model', so the
+                % two continuations never share a cycle count.
+                wuModel_cyc_ = 0;
+                if wuModelGate_
+                    wuModel_cyc_ = errorChain.phaseWindupCycles('model', ti, ai, si_, t_s, ...
+                        g_e.r_tower_model_m, g_e.r_ant_model_m, C_wuEst_, ...
+                        towers{ti}.lat_rad, towers{ti}.lon_rad);
+                end
+                wuModel_m = wuModel_cyc_ * lambda;
+
                 % h: +trop_model, -iono_model + ZWD state
-                h_phi(rowOut) = rho_e + b_rx_est - b_twr_m + trop_m - iono_m_sig + B_est + b_ia_model_m;
+                h_phi(rowOut) = rho_e + b_rx_est - b_twr_m + trop_m - iono_m_sig + B_est + b_ia_model_m + wuModel_m;
                 if isfield(stateMap,'zwdIdx') && ti <= numel(blk.zwd) && ...
                         blk.zwd(ti) > 0
                     mf_phi = models.atmosphere.MappingFunctions.troposphere(elv, ...
@@ -510,6 +606,8 @@ classdef CarrierMeasurementBuilder
                 % Both enter as shared (tower, productEpoch) blocks, not as a diagonal,
                 % because one realisation is common to every row of the group.
 
+                if mwTruthGate_; cpInfo.ambiguityTruth_m(rowOut) = B_true; end
+
                 cpInfo.phi_m(rowOut)             = z_phi(rowOut);
                 cpInfo.prefit_m(rowOut)          = z_phi(rowOut) - h_phi(rowOut);
                 cpInfo.towerIdx(rowOut)           = ti;
@@ -521,6 +619,9 @@ classdef CarrierMeasurementBuilder
                 cpInfo.towerClkBiasSigma_m(rowOut) = sbias_carrier(min(mi, numel(sbias_carrier)));
                 cpInfo.interAntennaPhaseBiasTruth_m(rowOut) = b_ia_m;
                 cpInfo.interAntennaPhaseBiasModel_m(rowOut) = b_ia_model_m;
+                cpInfo.phaseWindupTruth_cycles(rowOut) = wu_cyc_;
+                cpInfo.phaseWindupModel_cycles(rowOut) = wuModel_cyc_;
+                cpInfo.phaseWindupModel_m(rowOut)      = wuModel_m;
                 % Product-clock drift residual metadata (per row)
                 cpInfo.productEpoch_s(rowOut) = t_prod_carrier(mi);
                 cpInfo.productAge_s(rowOut)   = t_s - t_prod_carrier(mi);
@@ -543,6 +644,31 @@ classdef CarrierMeasurementBuilder
                     H_phi(rowOut, blk.euler) = revgnss.LinkGeometry.finiteDiffAttitudeJacobian( ...
                         cfg, towers, ti, ai, r_cm_est, euler_est, leverArms_model, step_e);
                 end
+                % Wind-up attitude partial. With the correction on, h_phi depends on the
+                % estimated attitude through wuModel_m, so H must carry that dependence
+                % or the filter is told the residual does not respond to a state it
+                % demonstrably responds to. Added to the SAME columns as the geometric
+                % partial above, and only when both gates are on -- with the correction
+                % off wuModel_m is identically zero and there is nothing to differentiate.
+                if wuModelGate_ && attGate.enabled && isfield(stateMap,'euler_idx') && ...
+                        ~isempty(blk.euler)
+                    stepW_ = 1e-6;
+                    if isfield(cfg.estimator,'attitudeJacobianStep_rad')
+                        stepW_ = cfg.estimator.attitudeJacobianStep_rad;
+                    end
+                    useQES_ = false;
+                    try
+                        useQES_ = strcmp(cfg.estimator.attitude.parameterization, ...
+                            'quaternionErrorState');
+                    catch; end
+                    [xtW_, ytW_] = models.errors.PhaseWindup.towerAxesEcef( ...
+                        towers{ti}.lat_rad, towers{ti}.lon_rad);
+                    dWu_ = models.errors.PhaseWindup.attitudeJacobianCycles( ...
+                        g_e.r_tower_model_m, g_e.r_ant_model_m, xtW_, ytW_, ...
+                        C_wuEst_, euler_est, stepW_, useQES_);
+                    H_phi(rowOut, blk.euler) = H_phi(rowOut, blk.euler) + dWu_ * lambda;
+                end
+
                 % Record closure metadata for this row (after H_phi is populated)
                 cpInfo.attitudePartialsEnabled(rowOut) = attGate.enabled;
                 cpInfo.leverArmNorm_m(rowOut)          = norm(leverArms_model(:, ai));

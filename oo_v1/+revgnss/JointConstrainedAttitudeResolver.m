@@ -40,9 +40,19 @@ classdef JointConstrainedAttitudeResolver
     % this one epoch.
     %
     % HONEST LIMITS, STATE THEM WHEREVER THIS IS QUOTED.
-    %   - Phase wind-up is NOT modelled anywhere in this simulation, and an
-    %     integer fix is exactly the operation a slow unmodelled carrier-phase
-    %     rotation corrupts. Every fix here is optimistic relative to reality.
+    %   - Phase wind-up IS modelled as of models.errors.PhaseWindup
+    %     (cfg.errors.phaseWindup.enable, default off), and the caveat this bullet
+    %     used to carry -- "not modelled anywhere, so every fix here is optimistic"
+    %     -- was wrong for THIS observable and is withdrawn. Wind-up depends on
+    %     antenna ORIENTATION about the line of sight. The transmit term is the same
+    %     tower antenna in both rows of the inter-antenna difference; the receive
+    %     term is common to all four spacecraft phase centres, which share one
+    %     attitude by construction. It therefore cancels at the FIRST difference,
+    %     before the between-tower DD this resolver works on ever runs. Measured on
+    %     att016/att017 rather than argued. What remains optimistic is array
+    %     NON-IDEALITY -- imperfect co-orientation and per-antenna polarisation
+    %     differences -- which is not modelled and is smaller than the old caveat
+    %     implied.
     %   - The search is bounded by the attitude prior. Given the flip distances
     %     above the integers survive a prior error many times the window, but a
     %     prior wrong by tens of degrees would fix the wrong set silently, because

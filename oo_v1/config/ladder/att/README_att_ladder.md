@@ -46,6 +46,12 @@ like-for-like. Within each block it is.
 | att013 | att012 at 20 mm (stress bound, fix REFUSED, float) | 5.987894 | 0.027734 | 215.90 |
 | **att014** | **att012 with the joint fix FORCED OFF (float, 3 mm)** | **1.173890** | **0.027675** | **42.42** |
 | **att015** | **att011 with the joint fix FORCED OFF (float, clean)** | **1.336773** | **0.027654** | **48.34** |
+| **att016** | **att010 + Wu-1993 phase WIND-UP in truth, uncorrected** | **1.048118** | **1.009445** | **1.038** |
+| **att017** | **att016 + estimator corrects it from its OWN attitude** | **1.045461** | **1.009069** | **1.036** |
+
+`att016`/`att017` extend `att010` directly and were measured against an `att010` RE-RUN on
+the same tree, which reproduced its recorded 1.036624 deg exactly. They are therefore
+like-for-like with the `att004`-`att010` block, not with `att011`-`att015`.
 
 `att011`-`att015` were cut directly on the att axis and never lived on `feat`, so they do
 not appear in the rename table above.
@@ -204,17 +210,40 @@ ones. Quote them as assumptions.
   calibration and counted as information, so the filter tightened on a constant it had
   merely fitted. Only the between-tower DD (att008 onward) raises the sigma to what the
   geometry actually supports.
-- **Phase wind-up is not modelled, but the received caveat about it was WRONG for this
-  observable and is corrected as of att011.** Wind-up is a function of antenna
-  ORIENTATION about the line of sight, not position. The observable here is the
-  INTER-ANTENNA single difference at one tower: the transmitter term is the same tower
-  antenna in both and cancels exactly, and the receiver term is common to all four
-  spacecraft antennas, which the config makes co-oriented by construction (lever-arm
-  positions only, one spacecraft-level `boresight_body`). A term identical on both
-  antennas cancels in the difference. The old claim, that wind-up survives a
-  between-tower DD, is true of UNDIFFERENCED observables and was carried over without
-  being re-derived. The real residual is array non-ideality (imperfect co-orientation,
-  per-antenna polarisation differences), which is smaller than the caveat implied.
+- **Phase wind-up IS modelled as of `att016`, and the caveat every earlier rung carried
+  is now bounded by a measurement rather than an apology.** `models.errors.PhaseWindup`
+  implements Wu et al. 1993 (`errors.phaseWindup.enable`, default off), with an
+  estimator-side correction from the *estimated* attitude
+  (`estimator.phaseWindup.correct`) and the matching partial in `H`. Two separate
+  findings, and they should not be run together:
+  1. **It cancels in the observable.** Wind-up is a function of antenna ORIENTATION about
+     the line of sight, not position. The transmitter term is the same tower antenna in
+     both rows of the inter-antenna single difference; the receiver term is common to all
+     four spacecraft phase centres, which the config makes co-oriented by construction
+     (lever-arm positions only, one spacecraft-level `boresight_body`). The only
+     per-antenna quantity is the line of sight itself, and a 1 m lever arm at GEO turns
+     it by ~3e-8 rad. MEASURED: `diffAttResidRMS_m` moves by 2.2e-05 relative between
+     `att010` and `att016`. `tests/test_phase_windup.m` pins the inter-antenna difference
+     below 1e-7 cycles directly. The old claim, that wind-up survives a between-tower DD,
+     is true of UNDIFFERENCED observables and was carried over without being re-derived.
+  2. **What the undifferenced rows do see is CONSTANT, so the ambiguity eats it.**
+     MEASURED on `att016`: worst per-link variation over the whole arc is **9.82e-08
+     cycles**, against a spread of **0.0475 cycles (9 mm at L1) BETWEEN** links. A per-link
+     constant is exactly what a float carrier ambiguity absorbs. The residual cost is
+     1.1 % of the attitude error and 48 micrometres of position — that is the entire
+     bound the caveat was standing in for.
+  **Both findings are properties of THIS scenario**, not of reverse GNSS: zero body rate,
+  a GEO nearly fixed in ECEF, and an attitude constant in ECEF. A yaw-steering law, a
+  spinning bus or a commanded slew makes wind-up walk through cycles and it is then not
+  absorbed. What remains genuinely unmodelled is array non-ideality — imperfect
+  co-orientation and per-antenna polarisation differences — which is smaller still.
+- **Correcting wind-up with an ESTIMATED attitude makes the term less constant, not
+  more.** `att017` measures `phaseWindupMaxMinusMin_cycles` of 0.0116 against `att016`'s
+  9.82e-08: the truth-side wind-up barely moves because the true attitude does not, while
+  the model-side one tracks a converging attitude estimate. It still nets out positive
+  here (23 % of the penalty recovered, because the 0.047-cycle offset removed beats the
+  0.0116-cycle variation introduced) but the trade reverses on any scenario where the
+  truth wind-up genuinely varies.
 - **What actually makes these rungs optimistic** is the ANTENNA-SPECIFIC effects, since
   only those survive an inter-antenna difference. In order: carrier multipath is the
   dominant real error source for GNSS attitude arrays and was ABSENT until `att012`

@@ -250,6 +250,78 @@ classdef ReportRunner
                 end
             end
 
+            % ---- Melbourne-Wubbena single-asset wide lane ----
+            % Unlike the WL/NL block above, this one CANNOT be an assess(summary, cfg): the
+            % wide lane is built from raw per-band code and carrier rows that exist only
+            % inside the epoch loop and are never persisted. The accumulator therefore lives
+            % on the sim handle (ReverseGNSSSimulation.mwEstimator_) and is finalized here.
+            % finalize() is a pure function of the accumulated arcs, so calling it from the
+            % report is idempotent and moves no state.
+            %
+            % Every numeric is written NaN first and stays NaN when the gate is off, which is
+            % what keeps a disabled feature out of tests/regression/extractMetrics.m -- that
+            % harness promotes any numeric+scalar+FINITE summary field to a tracked metric.
+            mwReq_ = false;
+            try; mwReq_ = logical(cfg.diagnostics.melbourneWubbena.enable); catch; end
+            summary.melbourneWubbenaRequested            = mwReq_;
+            summary.melbourneWubbenaClassification       = 'disabled';
+            summary.melbourneWubbenaMode                 = '';
+            summary.melbourneWubbenaSigmaCyclesMean      = NaN;
+            summary.melbourneWubbenaSigmaCyclesMax       = NaN;
+            summary.melbourneWubbenaSigmaMetresMean      = NaN;
+            summary.melbourneWubbenaWhiteOverstatement   = NaN;
+            summary.melbourneWubbenaMeanAbsFracCycles    = NaN;
+            summary.melbourneWubbenaNArcsUsed            = NaN;
+            summary.melbourneWubbenaNEpochsUsed          = NaN;
+            summary.melbourneWubbenaNBlocksUsed          = NaN;
+            summary.melbourneWubbenaShrinkage            = NaN;
+            summary.melbourneWubbenaWindupLeak_m         = NaN;
+            summary.melbourneWubbenaFixAccepted          = false;
+            summary.melbourneWubbenaFixDecision          = 'not-run';
+            summary.melbourneWubbenaSuccessRate          = NaN;
+            summary.melbourneWubbenaFailureRate          = NaN;
+            summary.melbourneWubbenaRealisedCorrect      = NaN;
+            summary.melbourneWubbenaFixedCorrectCount    = NaN;
+            if mwReq_
+                try
+                    mwEst_ = sim.mwEstimator_;   % property access throws if absent
+                    if ~isempty(mwEst_)
+                        mwS_ = mwEst_.finalize(cfg);
+                        summary.melbourneWubbena                   = mwS_;
+                        summary.melbourneWubbenaClassification     = mwS_.classification;
+                        summary.melbourneWubbenaMode               = mwS_.mode;
+                        summary.melbourneWubbenaSigmaCyclesMean    = mwS_.wideLaneFloatSigmaMean_cyc;
+                        summary.melbourneWubbenaSigmaCyclesMax     = mwS_.wideLaneFloatSigmaMax_cyc;
+                        summary.melbourneWubbenaSigmaMetresMean    = mwS_.wideLaneFloatSigmaMean_m;
+                        summary.melbourneWubbenaWhiteOverstatement = mwS_.whiteOverstatementFactor;
+                        summary.melbourneWubbenaMeanAbsFracCycles  = mwS_.meanAbsFractionalPart_cyc;
+                        summary.melbourneWubbenaNArcsUsed          = mwS_.nArcsUsed;
+                        summary.melbourneWubbenaNEpochsUsed        = mwS_.nEpochsUsed;
+                        summary.melbourneWubbenaNBlocksUsed        = mwS_.nBlocksUsed;
+                        summary.melbourneWubbenaShrinkage          = mwS_.shrinkageIntensity;
+                        summary.melbourneWubbenaWindupLeak_m       = mwS_.windupLeakMax_m;
+                        summary.melbourneWubbenaRealisedCorrect    = mwS_.realisedCorrect;
+                        summary.melbourneWubbenaFixedCorrectCount  = mwS_.fixedCorrectCount;
+                        if isstruct(mwS_.fix) && isfield(mwS_.fix,'decision')
+                            summary.melbourneWubbenaFixAccepted = mwS_.fix.accepted;
+                            summary.melbourneWubbenaFixDecision = mwS_.fix.decision;
+                            summary.melbourneWubbenaSuccessRate  = mwS_.fix.successRate;
+                            summary.melbourneWubbenaFailureRate  = mwS_.fix.failureRate;
+                        end
+                        % summaryLines is PRINTED here rather than left to a formatter.
+                        % revgnss.WideLaneNarrowLaneDiagnostics.summaryLines has zero callers
+                        % in the main tree, so copying that shape alone would have produced a
+                        % second formatter that never runs.
+                        lines_ = revgnss.MelbourneWubbenaArcEstimator.summaryLines(mwS_);
+                        fprintf('  ---- Melbourne-Wubbena single-asset wide lane ----\n');
+                        for li_ = 1:numel(lines_); fprintf('    %s\n', lines_{li_}); end
+                    end
+                catch exMw_
+                    warning('ReportRunner:melbourneWubbenaFailed', ...
+                        'Melbourne-Wubbena wide-lane estimator failed: %s', exMw_.message);
+                end
+            end
+
             % ---- Ambiguity fixing readiness gate compact fields ----
             amfr50Req_ = false;
             try; amfr50Req_ = logical(cfg.diagnostics.ambiguityFixingReadiness.enable); catch; end
@@ -806,6 +878,59 @@ classdef ReportRunner
                     if isfield(lg63,'lastSigmaMin');       summary.stage63MinSigmaCycles    = lg63.lastSigmaMin;       end
                     if isfield(lg63,'lastSigmaMean');      summary.stage63MeanSigmaCycles   = lg63.lastSigmaMean;      end
                     if isfield(lg63,'lastDistToInt');      summary.stage63MaxDistToInt      = lg63.lastDistToInt;      end
+                end
+            catch; end
+
+            % ---- Carrier phase wind-up (Wu et al. 1993) ----
+            % The decisive number here is worst maxMinusMin: a wind-up that is CONSTANT
+            % over the arc is absorbed by the carrier ambiguity and changes nothing, so a
+            % range far below half a cycle settles the standing caveat with a number
+            % instead of an apology. nEpochs is the LIVENESS proof -- it counts epochs on
+            % which the term was actually evaluated per link, so a gate that is on but
+            % inert reports zero links and cannot be mistaken for a null result.
+            % NaN when the term never ran, which keeps it out of the regression extract.
+            summary.phaseWindupTruthActive        = false;
+            summary.phaseWindupCorrectionActive   = false;
+            summary.phaseWindupNLinks             = 0;
+            summary.phaseWindupEpochsPerLink      = NaN;
+            summary.phaseWindupMaxMinusMin_cycles = NaN;
+            summary.phaseWindupDriftRate_cph      = NaN;
+            summary.phaseWindupSpan_cycles        = NaN;
+            try
+                summary.phaseWindupTruthActive = logical(cfg.errors.phaseWindup.enable);
+            catch; end
+            try
+                summary.phaseWindupCorrectionActive = logical(cfg.estimator.phaseWindup.correct);
+            catch; end
+            try
+                wuSum_ = sim.errorChain.phaseWindupArcSummary();
+                if wuSum_.nLinks > 0
+                    summary.phaseWindupNLinks             = wuSum_.nLinks;
+                    summary.phaseWindupEpochsPerLink      = min(wuSum_.nEpochsPerLink);
+                    summary.phaseWindupMaxMinusMin_cycles = wuSum_.worstMaxMinusMin_cycles;
+                    summary.phaseWindupDriftRate_cph      = wuSum_.worstDriftRate_cyclesPerHour;
+                    summary.phaseWindupSpan_cycles        = ...
+                        max(wuSum_.max_cycles) - min(wuSum_.min_cycles);
+                    % The full PER-LINK table, kept as a nested struct so it rides into
+                    % the saved .mat without becoming a regression metric
+                    % (tests/regression/extractMetrics keeps numeric SCALARS only, so a
+                    % struct is invisible to the gate). The scalars above are the worst
+                    % case over links; this is where the per-link detail lives.
+                    summary.phaseWindupPerLink            = wuSum_;
+                    fprintf(['  [PhaseWindup] APPLIED: %d link-sides, %d epochs each | ' ...
+                             'worst max-min %.6g cycles | worst drift %.6g cycles/h | ' ...
+                             'span %.6g cycles | truth=%d correct=%d\n'], ...
+                        wuSum_.nLinks, min(wuSum_.nEpochsPerLink), ...
+                        wuSum_.worstMaxMinusMin_cycles, wuSum_.worstDriftRate_cyclesPerHour, ...
+                        summary.phaseWindupSpan_cycles, ...
+                        summary.phaseWindupTruthActive, summary.phaseWindupCorrectionActive);
+                elseif summary.phaseWindupTruthActive || summary.phaseWindupCorrectionActive
+                    % Gate on, nothing accumulated: the toggle RAN and did not APPLY.
+                    % Say so loudly rather than let a zero read as a physical result.
+                    warning('ReportRunner:phaseWindupInert', ...
+                        ['Phase wind-up is enabled in the config but NO link accumulated ' ...
+                         'a single sample. The gate is on and inert -- do not read the ' ...
+                         'unchanged metrics as evidence that wind-up does not matter.']);
                 end
             catch; end
 
@@ -3581,6 +3706,12 @@ classdef ReportRunner
                 summary.arcNisCodeLag1       = arcCs.nisCode.lag1Autocorr;
                 summary.arcNisCarrierLag1    = arcCs.nisCarrier.lag1Autocorr;
                 summary.arcNisDopplerLag1    = arcCs.nisDoppler.lag1Autocorr;
+                % The two-way channel is the most conservative of the four and its
+                % whiteness was the one never exported, so a reader could not tell a
+                % white channel from an unmeasured one. groupStat_ already computes
+                % both quantities; only the export omitted them.
+                summary.arcNisTwoWayNEff     = arcCs.nisTwoWayTimeTransfer.nEff;
+                summary.arcNisTwoWayLag1     = arcCs.nisTwoWayTimeTransfer.lag1Autocorr;
                 % Print the per-channel verdict with the run, not buried in the struct.
                 % The aggregate NIS cannot say WHICH observable is mis-weighted; this can,
                 % and every conclusion drawn today about R came from exactly this split.
@@ -3602,6 +3733,7 @@ classdef ReportRunner
                 summary.arcNisCodeNEff = NaN; summary.arcNisCarrierNEff = NaN;
                 summary.arcNisDopplerNEff = NaN; summary.arcNisCodeLag1 = NaN;
                 summary.arcNisCarrierLag1 = NaN; summary.arcNisDopplerLag1 = NaN;
+                summary.arcNisTwoWayNEff = NaN; summary.arcNisTwoWayLag1 = NaN;
                 summary.arcNisTable = 'notAvailable';
             end
 
@@ -3794,6 +3926,40 @@ classdef ReportRunner
             summary.nIonoStates = 0;
             if strcmp(revgnss.ReportRunner.safeCfgStr_(cfg, {'estimation','ionosphereMode'}, 'none'), 'perTowerSlant')
                 summary.nIonoStates = nTwr;
+            end
+            % Coloured ground-multipath bias states: one per (tower, SIGNAL), because the
+            % truth chains are per-signal. Mirrors ReverseGNSSEKF's own count exactly --
+            % without this the state-count audit in ReportRealityHelper has no term for
+            % them and every run with estimation.multipathBias.useInEKF = true dies in the
+            % report builder AFTER the arc is finished, losing the run.
+            summary.nMultipathBiasStates = 0;
+            if revgnss.ReportRunner.safeCfgBool_(cfg, {'estimation','multipathBias','useInEKF'}, false)
+                nSigMp = 1;
+                try; nSigMp = max(1, sum(logical(cfg.signals.enabledMask))); catch; end
+                summary.nMultipathBiasStates = nTwr * nSigMp;
+            end
+            % Transmit code-bias states: one per tower. Gated on useInEKF ALONE, not on
+            % hardware.txCodeBias.enable -- ReverseGNSSEKF reads only useInEKF, and a
+            % config with enable=false/useInEKF=true would otherwise be counted here as
+            % zero while the filter allocated nTowers.
+            summary.nTxCodeBiasStates = 0;
+            if revgnss.ReportRunner.safeCfgBool_(cfg, {'hardware','txCodeBias','useInEKF'}, false)
+                summary.nTxCodeBiasStates = nTwr;
+            end
+            % Two-way ISL code calibration residual-bias states: one per calibration link.
+            % Same three-way gate the EKF uses, and the count comes from the builder that
+            % owns the link list rather than being re-derived. Reachable only in
+            % multiAsset.mode='joint' -- TwoWayISLMeasurementBuilder.validateConfig
+            % refuses range.useInEKF outside it -- so this is recorded for the report and
+            % for completeness of the state-count audit, not to repair a live failure.
+            summary.nTwoWayCodeCalibrationBiasStates = 0;
+            if revgnss.ReportRunner.safeCfgBool_(cfg, {'measurements','isl','twoWay','calibration','residualBiasState','enable'}, false) && ...
+               revgnss.ReportRunner.safeCfgBool_(cfg, {'measurements','isl','twoWay','enable'}, false) && ...
+               revgnss.ReportRunner.safeCfgBool_(cfg, {'measurements','isl','twoWay','range','useInEKF'}, false)
+                try
+                    summary.nTwoWayCodeCalibrationBiasStates = numel( ...
+                        revgnss.TwoWayISLMeasurementBuilder.calibrationLinkIdentifiers(cfg));
+                catch; end
             end
             summary.carrierGenerated = isfield(cfg.measurements,'carrierPhase') && ...
                 isfield(cfg.measurements.carrierPhase,'enable') && cfg.measurements.carrierPhase.enable;

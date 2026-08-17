@@ -158,6 +158,9 @@ classdef CarrierIonoFreeRowBuilder
                 cpInfo_IF.attitudePartialsEnabled         = false(0,1);
                 cpInfo_IF.attitudeSensitive               = false(0,1);
                 cpInfo_IF.hAttitudeNorm                   = zeros(0,1);
+                cpInfo_IF.phaseWindupTruth_cycles         = zeros(0,1);
+                cpInfo_IF.phaseWindupModel_cycles         = zeros(0,1);
+                cpInfo_IF.phaseWindupModel_m              = zeros(0,1);
                 cpInfo_IF.signalIdx               = zeros(0,1);
                 cpInfo_IF.signalId                = {};
                 cpInfo_IF.ambiguityStateIdx       = zeros(0,1);
@@ -269,6 +272,24 @@ classdef CarrierIonoFreeRowBuilder
             cpInfo_IF.attitudePartialsEnabled = cpInfo.attitudePartialsEnabled(idx1);
             cpInfo_IF.attitudeSensitive       = cpInfo.attitudeSensitive(idx1);
             cpInfo_IF.hAttitudeNorm           = cpInfo.hAttitudeNorm(idx1);
+            % Phase wind-up is carried in CYCLES and is IDENTICAL on the L1 and L2 rows
+            % of one physical link -- it is a rotation of the wavefront, not a delay, so
+            % it does not disperse. v(idx1) is therefore exact, same passthrough form as
+            % towerClkModel_m above and NOT the alpha/beta combination.
+            %
+            % Do not read that as "wind-up cancels in IF". It does not. The METRE
+            % contribution to z_IF/h_IF is W*(alpha*lambda1 + beta*lambda2) =
+            % W*c/(f1+f2), the NARROW-LANE wavelength (106.95 mm at L1/L2, 56 % of raw
+            % L1). alpha+beta = 1 removes a term constant in METRES; wind-up is constant
+            % in CYCLES, which is a different thing. The combination that does kill it
+            % exactly is the wide-lane N1 - N2, and that is not this row.
+            cpInfo_IF.phaseWindupTruth_cycles = cpInfo.phaseWindupTruth_cycles(idx1);
+            cpInfo_IF.phaseWindupModel_cycles = cpInfo.phaseWindupModel_cycles(idx1);
+            % The METRE field is the alpha/beta combination, not a passthrough -- it is
+            % the actual contribution to h_IF, and it evaluates to W*c/(f1+f2). This is
+            % the pair that makes the cycles-vs-metres distinction above concrete.
+            cpInfo_IF.phaseWindupModel_m = alpha * cpInfo.phaseWindupModel_m(idx1) + ...
+                beta * cpInfo.phaseWindupModel_m(idx2);
             cpInfo_IF.signalIdx               = zeros(Mp, 1);  % 0 = ionosphere-free
             cpInfo_IF.signalId                = repmat({'L_IF'}, Mp, 1);
             ambIdxL1_                         = cpInfo.ambiguityStateIdx(idx1);

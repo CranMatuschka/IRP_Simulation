@@ -599,6 +599,16 @@ cfg.estimation.tropoZwd.tau_s          = 3600;
 % only (no EKF math); arc-separated flags here are re-enabled by the scenario assembly.
 cfg.diagnostics.carrierIonoFreeAmbiguityTraceability.enable = false;
 cfg.diagnostics.wideLaneNarrowLane.enable                   = false;
+% Exports summary.ambiguityStateMetadata and summary.ambiguityCovarianceSummary
+% (revgnss.AmbiguityStateMetadata, gated at ReportRunner:179). DECLARED HERE because
+% wideLaneNarrowLane.enable above cannot do anything without it: ReportRunner:240 guards
+% the WL/NL block on the toggle AND a non-zero L1/L2 pair count AND an available Pamb, and
+% the last two come from this export. The key previously existed only inside
+% run_oo_reverse_gnss_report.m, so deepMergeConfig rejected it as an unknown path from any
+% scenario file and the wide lane was unreachable on the run_oo_v1 entry point -- which is
+% why wideLaneSigmaCyclesMean reads NaN on every rung of the frozen sweep. Default FALSE,
+% metadata only, no EKF math, so every golden is bit-identical.
+cfg.diagnostics.ambiguityStateMetadata.enable               = false;
 cfg.diagnostics.ambiguityFixingReadiness.enable             = false;
 cfg.diagnostics.ambiguityReadinessEvidence.enable           = false;
 cfg.diagnostics.carrierArcEvidence.enable                   = false;
@@ -606,6 +616,49 @@ cfg.estimator.arcSeparatedAmbiguities.enable                = false;
 cfg.diagnostics.arcSeparatedAmbiguities.enable              = false;
 cfg.estimator.enforceCarrierArcConsistency.enable           = false;
 cfg.diagnostics.carrierArcConsistencyEnforcement.enable     = false;
+% Melbourne-Wubbena SINGLE-ASSET wide lane. Gated, DEFAULT OFF.
+% When enabled, revgnss.MelbourneWubbenaArcEstimator accumulates
+%   MW = (f1*L1 - f2*L2)/(f1-f2) - (f1*P1 + f2*P2)/(f1+f2) = lam_WL*N_WL + eps
+% per (tower, antenna) arc from the RAW dual-band rows the simulation already builds, and
+% reports a wide-lane float sigma and an integer decision. Metadata only: it emits no
+% z/h/H/R row and returns nothing to the filter, so OFF and ON are both byte-identical in
+% every EKF quantity. Distinct from multiAsset.groundCarrier.enable, which is the FORMATION
+% cascade over synthetic observables and is inert at nSpaceAssets == 1.
+% PRECONDITIONS, all satisfied by config/golden_baseline.json: two carrier signals, and raw
+% uncombined dual-frequency code (errStruct.ifCombination false). With codeMode
+% 'ionosphereFree' there is no raw code pair and the classification says so.
+cfg.diagnostics.melbourneWubbena.enable                     = false;
+% 'betweenTower' differences each tower against referenceTowerIndex on the SAME antenna,
+% which removes the two biases that are keyed independently of tower and would otherwise
+% stop the undifferenced float from being an integer: the inter-antenna carrier phase bias
+% (~0.354 wide-lane cycles at the default 0.25 cycles/band) and the global code DCB (~0.42
+% wide-lane cycles at the golden 0.30/0.45 m). 'undifferenced' keeps them, which is the
+% right setting when MEASURING them: the mean fractional part of the float is the bias.
+cfg.diagnostics.melbourneWubbena.mode                       = 'betweenTower';
+cfg.diagnostics.melbourneWubbena.referenceTowerIndex        = 1;
+% Batch-mean block length. The arc-mean covariance is MEASURED from block means rather than
+% asserted, because the dominant MW error here is coloured: errors.multipath.coloredGM has
+% tau = 60 s and, with sharedAcrossAntennas on, one chain serves every antenna of a tower.
+% Blocks must be several correlation times long for their means to be near-independent.
+cfg.diagnostics.melbourneWubbena.blockLength_s              = 300;
+cfg.diagnostics.melbourneWubbena.minSamplesPerBlock         = 10;
+% Below minBlocks the float sigma is still reported but NO fix is attempted: a sample
+% covariance from fewer blocks than ambiguities is rank-deficient, and a success rate
+% computed from it is an artefact of that deficiency rather than a property of the data.
+cfg.diagnostics.melbourneWubbena.minBlocks                  = 8;
+cfg.diagnostics.melbourneWubbena.minEpochsPerArc            = 60;
+% Shrinkage of the block-mean covariance toward its diagonal. Negative = auto, which uses
+% min(1, (nAmbiguities+1)/nBlocks). The applied intensity is always reported, so a reader
+% can see how much of the covariance was measured and how much was assumed.
+cfg.diagnostics.melbourneWubbena.shrinkage                  = -1;
+cfg.diagnostics.melbourneWubbena.fix.enable                 = true;
+cfg.diagnostics.melbourneWubbena.fix.minSuccessRate         = 0.999;
+cfg.diagnostics.melbourneWubbena.fix.ratioThreshold         = 2.0;
+% Publishes the truth float ambiguity per carrier row into cpInfo so the realised
+% correctness of the fix can be REGISTERED after the fact. It is never read by any decision
+% (see MelbourneWubbenaArcEstimator.scoreAgainstTruth_) and is gated on the master switch
+% above, so the default path writes nothing extra.
+cfg.diagnostics.melbourneWubbena.truthRegister.enable       = true;
 cfg.diagnostics.pluginRegistry.enable                       = true;
 cfg.diagnostics.ekfInnovationAccounting.enable              = true;
 cfg.diagnostics.ekfDynamics.enable                          = true;
@@ -2491,6 +2544,41 @@ cfg.errors.multipath.receiveEnd.enable            = false;
 cfg.errors.multipath.receiveEnd.sigmaCarrier_ss_m = 0.003;   % steady-state 1-sigma [m]
 cfg.errors.multipath.receiveEnd.tau_s             = 300;     % correlation time [s]
 
+% CARRIER PHASE WIND-UP (Wu et al. 1993) -- the largest effect this simulation was
+% knowingly missing, and the one an examiner who knows GNSS asks about first.
+%
+% WHAT IT IS. For a circularly polarised signal the carrier phase depends on the
+% relative rotation of the transmit and receive antennas ABOUT THE LINE OF SIGHT; one
+% full relative revolution is exactly one cycle. Pure geometry, no randomness, and the
+% SAME number of cycles on every signal. See models.errors.PhaseWindup for the
+% formulation, the tower/spacecraft axis convention the sign depends on, and the
+% algebra of what survives which difference.
+%
+% ROLES ARE INVERTED IN REVERSE GNSS. The ground tower TRANSMITS (axes fixed in ECEF)
+% and the spacecraft RECEIVES (axes carried by the attitude), so wind-up here is driven
+% by the SPACECRAFT ATTITUDE rather than by a satellite yaw-steering law.
+%
+% WHY THERE IS NO .truth/.model PAIR. Every effect in the expandEnableToggles list
+% above has an estimator that models the SAME physical quantity with its own
+% parameters. Wind-up does not: the model side is a CORRECTION COMPUTED FROM THE
+% ESTIMATED ATTITUDE, which is a different object living under cfg.estimator. Declaring
+% an unregistered .truth/.model pair here is also the exact shape of the silent-no-op
+% this repo has on record (a rung writing only .enable leaves truth=0, model=0 and the
+% effect never runs). So this follows the plain-leaf shape of the two most recent
+% truth-only carrier terms above -- receiveEnd multipath and interAntennaCarrierBias.
+%
+% CARRIER ONLY, NEVER CODE: wind-up is a phase rotation, not a delay.
+% Default OFF -> the term is exactly 0 -> every golden is byte-identical.
+cfg.errors.phaseWindup.enable     = false;   % TRUTH-side wind-up, from the TRUE attitude
+
+% Model-side wind-up correction, computed from the ESTIMATED attitude. This is what
+% makes the pair a real experiment rather than a self-cancelling one: truth uses the
+% true attitude, the model uses the filter's, so the residual is the wind-up error
+% CAUSED BY the attitude error -- the physically meaningful coupling. Setting this true
+% with cfg.errors.phaseWindup.enable false is a legitimate (if perverse) mismatch arm:
+% it corrects an error that is not there.
+cfg.estimator.phaseWindup.correct = false;
+
 % --- Effect toggles: deterministic geometric/structural effects ------
 % cfg.effects groups deterministic geometric/structural effects.
 % Each effect has truth/model toggle so mismatches appear as innovation bias.
@@ -3299,6 +3387,27 @@ cfg.estimation.slantIono.initialSigma_m = 5.0;    % initial 1-sigma [m]
 % validateMasterConfig warns when both are set and the state is on. The lever is
 % errors.ionosphere.rScaleWhenStateActive, which now DERIVES the per-step factor so the
 % amplitude is carried by this state alone and R keeps only the increment.
+
+% --- Ground multipath bias states (state augmentation for coloured noise) -------
+% useInEKF adds one Gauss-Markov state per (tower, signal) carrying the ground code
+% multipath, and REMOVES the multipath term from R (ErrorChain returns sigma_m.mp = 0),
+% so its variance is charged exactly once. Default false => nx, the state map and R are
+% all byte-identical to a run without it.
+%
+% WHY. errors.multipath.coloredGM is a tau = 60 s Gauss-Markov process, but charging only
+% its steady-state variance to R tells the filter the error is WHITE. The filter then
+% shrinks P as if it were averaging 900 independent samples over a 900 s arc when the
+% error only decorrelates every 60 s. Measured on scene008_G5S1R4_TW1_golden: NEES/dof
+% 13.32 against an innovation statistic of 0.86, and setting coloredGM.tau_s = 1 s at the
+% SAME sigma (R unchanged) put NEES/dof back to 0.988. The magnitude in R was never
+% wrong; only its colour was.
+%
+% tau_s and sigma_ss_m default to the truth generator's own coloredGM values, so the
+% matched case needs no duplicated numbers. Set them explicitly only to characterise a
+% deliberate truth/model mismatch.
+cfg.estimation.multipathBias.useInEKF   = false;
+cfg.estimation.multipathBias.tau_s      = [];   % [] => errors.multipath.coloredGM.tau_s
+cfg.estimation.multipathBias.sigma_ss_m = [];   % [] => coloredGM.sigmaCodeL1_ss_m
 
 % --- Antenna PCV model (Step 4) ---------------------------------
 % pcvModel: 'none' | 'toy' | 'table'

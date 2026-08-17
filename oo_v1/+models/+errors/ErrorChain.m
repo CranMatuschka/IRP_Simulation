@@ -49,6 +49,14 @@ classdef ErrorChain < handle
         mpRxState                  % containers.Map link-key -> receive-end carrier MP GM state [m]
         % Seed-independence refactor: identity-keyed streams (ON path, default)
         useIndependentStreams (1,1) logical = false
+        % R double-count guard for the multipath-bias EKF states. When the estimator
+        % carries a Gauss-Markov multipath state per (tower, signal), the multipath
+        % uncertainty lives in the state covariance and must NOT also be charged into R
+        % -- the same rule the tower-clock product sigma already follows in
+        % CodeMeasurementBuilder. The TRUTH value is untouched; only sigma_m.mp is
+        % zeroed, which propagates to sigmaTotal, sigmaExtra and therefore to every
+        % code row of every signal without touching the builders.
+        multipathSigmaInState (1,1) logical = false
         registry                   % models.noise.RngRegistry (built only when ON)
         auxRegistry                % Guard A: lazily-built RngRegistry for identity-keyed interval draws when the global one is OFF
         % Formation-shared atmosphere (cfg.atmosphere.sharedAcrossFormation.enable):
@@ -75,6 +83,18 @@ classdef ErrorChain < handle
         % has to survive between calls and be invalidated when the epoch advances.
         mpSharedThisEpoch_          % containers.Map link-key -> GM value [m], one epoch only
         mpSharedEpoch_ (1,1) int64 = -1  % epoch mpSharedThisEpoch_ belongs to
+        % Phase wind-up (models.errors.PhaseWindup). TWO independent accumulators,
+        % one per SIDE: 'truth' integrates the wind-up of the TRUE attitude, 'model'
+        % the wind-up the estimator predicts from its OWN attitude. They must not share
+        % a map -- the whole point of the experiment is that they differ, and the
+        % difference is the wind-up error caused by the attitude error.
+        % Instance properties, never `persistent`: a persistent accumulator would leak
+        % across the scenarios of one batched MATLAB session and across Monte Carlo
+        % trials, and phase continuity fed a non-monotonic arc is silently wrong.
+        wuState_                    % containers.Map sideKey -> accumulated wind-up [cycles]
+        wuThisEpoch_                % containers.Map sideKey -> value already stepped THIS epoch
+        wuEpoch_ (1,1) int64 = -1   % epoch wuThisEpoch_ belongs to
+        wuStats_                    % containers.Map sideKey -> [n; first; last; min; max; tFirst; tLast]
     end
 
     methods
@@ -109,7 +129,12 @@ classdef ErrorChain < handle
             aiKey = ai;
             if obj.sharedMultipathAcrossAntennas; aiKey = 1; end
             sinEl   = max(sin(elv_rad), sin(elvFloor));
-            sigma_m = g.sigmaCodeL1_ss_m / sinEl^elExp;
+            % sigmaDrive is the GM driving envelope (always the physical value, it shapes
+            % the TRUTH); sigma_m is what a caller would charge to R, which is zero once
+            % the estimator carries the multipath as a state.
+            sigmaDrive = g.sigmaCodeL1_ss_m / sinEl^elExp;
+            sigma_m    = sigmaDrive;
+            if obj.multipathSigmaInState; sigma_m = 0; end
             key = int64(round(ti) * 1000000 + round(aiKey) * 1000 + round(si));
 
             % Antenna scope gate -- the twin of the sharedThisCall guard in multipath_.
@@ -142,7 +167,7 @@ classdef ErrorChain < handle
                 mpStream = obj.mpRng;
             end
             xNew = models.noise.StochasticProcess.gaussMarkovStep( ...
-                xPrev, dt_s, g.tau_s, sigma_m, mpStream);
+                xPrev, dt_s, g.tau_s, sigmaDrive, mpStream);
             obj.mpState(key) = xNew;
             if obj.sharedMultipathAcrossAntennas
                 obj.mpSharedThisEpoch_(key) = xNew;
@@ -248,6 +273,157 @@ classdef ErrorChain < handle
             mp_m = xNew;
         end
 
+        function w_cycles = phaseWindupCycles(obj, side, ti, ai, si, t_s, ...
+                r_tx_ecef, r_rx_ecef, C_ecef_body, lat_rad, lon_rad)
+            % phaseWindupCycles  Accumulated Wu-1993 wind-up for ONE (tower, antenna,
+            % signal) link on ONE side, in cycles.
+            %
+            %   side  'truth' -> gated on cfg.errors.phaseWindup.enable, driven by the
+            %                    TRUE spacecraft attitude
+            %         'model' -> gated on cfg.estimator.phaseWindup.correct, driven by
+            %                    the ESTIMATED attitude
+            %
+            % Returns exactly scalar 0 when the side's gate is off, so the term is a
+            % byte-identical no-op on every existing golden. Never returns [] or NaN:
+            % one non-finite value in z_phi deletes dozens of metrics from the
+            % regression gate's extract, which reads as a structural failure rather
+            % than a numeric one.
+            %
+            % IDENTICAL IN CYCLES ON EVERY SIGNAL. The si axis is in the key only so
+            % that the L1 and L2 rows of one physical link each get their own memo
+            % slot; the value they accumulate is the same geometry. The caller converts
+            % to metres with that row's OWN wavelength.
+            %
+            % ONCE PER (link, epoch), NOT once per call. CarrierMeasurementBuilder wraps
+            % its row loop in a SIGNAL loop, so every (tower, antenna) is visited nSig
+            % times per epoch, and the postfit/diagnostic paths can revisit an epoch
+            % again. An accumulator stepped per CALL rather than per EPOCH would advance
+            % the continuation several times per epoch -- a defect invisible to R and to
+            % NIS, exactly as the shortened multipath tau above was. The epoch memo makes
+            % the call idempotent within an epoch.
+            w_cycles = 0;
+            if ~ischar(side) && ~isstring(side); return; end
+            isTruth = strcmp(side, 'truth');
+            if isTruth
+                en = false;
+                try; en = logical(obj.cfg.errors.phaseWindup.enable); catch; end
+            else
+                en = false;
+                try; en = logical(obj.cfg.estimator.phaseWindup.correct); catch; end
+            end
+            if ~en; return; end
+
+            if obj.wuEpoch_ ~= obj.epochIdx_ || isempty(obj.wuThisEpoch_)
+                obj.wuThisEpoch_ = containers.Map('KeyType','int64','ValueType','double');
+                obj.wuEpoch_     = obj.epochIdx_;
+            end
+            % Same (tower, antenna, signal) packing as mpRxState above, with the side in
+            % a leading decade so the two accumulators can never collide. 1e9 rather than
+            % 1e8 keeps the tower field's headroom identical to the existing keys
+            % (ti < 1000) instead of quietly tightening it to ti < 100.
+            key = int64((1 + double(isTruth)) * 1000000000 + ...
+                round(ti) * 1000000 + round(ai) * 1000 + round(si));
+            if isKey(obj.wuThisEpoch_, key)
+                w_cycles = obj.wuThisEpoch_(key);
+                return
+            end
+
+            [x_t, y_t] = models.errors.PhaseWindup.towerAxesEcef(lat_rad, lon_rad);
+            [x_r, y_r] = models.errors.PhaseWindup.spacecraftAxesEcef(C_ecef_body);
+            frac = models.errors.PhaseWindup.fractionalCycles( ...
+                r_tx_ecef, r_rx_ecef, x_t, y_t, x_r, y_r);
+
+            if isempty(obj.wuState_)
+                obj.wuState_ = containers.Map('KeyType','int64','ValueType','double');
+            end
+            hasPrev = isKey(obj.wuState_, key);
+            if hasPrev; wPrev = obj.wuState_(key); else; wPrev = 0; end
+            w_cycles = models.errors.PhaseWindup.accumulate(wPrev, frac, hasPrev);
+            if ~isfinite(w_cycles); w_cycles = 0; end
+
+            obj.wuState_(key)     = w_cycles;
+            obj.wuThisEpoch_(key) = w_cycles;
+            obj.recordWindupStat_(key, w_cycles, t_s);
+        end
+
+        function s = phaseWindupArcSummary(obj)
+            % phaseWindupArcSummary  Per-link arc statistics for the wind-up term.
+            %
+            % This is the measurement that settles the standing caveat. The decisive
+            % number is maxMinusMin: a wind-up that is CONSTANT over the arc is absorbed
+            % by the carrier ambiguity and does nothing at all, so a range far below half
+            % a cycle means the caveat repeated across the attitude ladder was overstated.
+            % driftRate is the same statement as a rate, for arcs where the range is
+            % dominated by a slow ramp rather than by scatter.
+            %
+            % Fields (empty struct when the term never ran):
+            %   nLinks, nEpochsPerLink, side{}, tower, antenna, signal
+            %   first_cycles, last_cycles, min_cycles, max_cycles
+            %   maxMinusMin_cycles, driftRate_cyclesPerHour
+            %   worstMaxMinusMin_cycles, worstDriftRate_cyclesPerHour   (over all links)
+            s = struct('nLinks', 0, 'side', {{}}, 'tower', [], 'antenna', [], 'signal', [], ...
+                'nEpochsPerLink', [], 'first_cycles', [], 'last_cycles', [], ...
+                'min_cycles', [], 'max_cycles', [], 'maxMinusMin_cycles', [], ...
+                'driftRate_cyclesPerHour', [], 'worstMaxMinusMin_cycles', NaN, ...
+                'worstDriftRate_cyclesPerHour', NaN);
+            if isempty(obj.wuStats_) || obj.wuStats_.Count == 0; return; end
+            ks = cell2mat(keys(obj.wuStats_));
+            n  = numel(ks);
+            s.nLinks = n;
+            s.side = cell(n,1);
+            [s.tower, s.antenna, s.signal, s.nEpochsPerLink, s.first_cycles, ...
+                s.last_cycles, s.min_cycles, s.max_cycles, s.maxMinusMin_cycles, ...
+                s.driftRate_cyclesPerHour] = deal(zeros(n,1));
+            for i = 1:n
+                k = ks(i);
+                v = obj.wuStats_(k);   % [n; first; last; min; max; tFirst; tLast]
+                sideCode = floor(double(k) / 1000000000);
+                rem_     = double(k) - sideCode * 1000000000;
+                s.side{i}      = 'model';
+                if sideCode == 2; s.side{i} = 'truth'; end
+                s.tower(i)     = floor(rem_ / 1000000);
+                s.antenna(i)   = floor(mod(rem_, 1000000) / 1000);
+                s.signal(i)    = mod(rem_, 1000);
+                s.nEpochsPerLink(i)     = v(1);
+                s.first_cycles(i)       = v(2);
+                s.last_cycles(i)        = v(3);
+                s.min_cycles(i)         = v(4);
+                s.max_cycles(i)         = v(5);
+                s.maxMinusMin_cycles(i) = v(5) - v(4);
+                dt_ = v(7) - v(6);
+                if dt_ > 0
+                    s.driftRate_cyclesPerHour(i) = (v(3) - v(2)) / dt_ * 3600;
+                else
+                    s.driftRate_cyclesPerHour(i) = 0;
+                end
+            end
+            s.worstMaxMinusMin_cycles      = max(s.maxMinusMin_cycles);
+            s.worstDriftRate_cyclesPerHour = max(abs(s.driftRate_cyclesPerHour));
+        end
+
+        function recordWindupStat_(obj, key, w_cycles, t_s)
+            % recordWindupStat_  Fold one accepted wind-up sample into the arc statistics.
+            %
+            % Called ONLY from the non-memo branch of phaseWindupCycles, so each
+            % (link, epoch) contributes exactly once and nEpochsPerLink is a true epoch
+            % count rather than a call count.
+            if isempty(obj.wuStats_)
+                obj.wuStats_ = containers.Map('KeyType','int64','ValueType','any');
+            end
+            if ~isfinite(t_s); t_s = 0; end
+            if isKey(obj.wuStats_, key)
+                v = obj.wuStats_(key);
+                v(1) = v(1) + 1;
+                v(3) = w_cycles;
+                v(4) = min(v(4), w_cycles);
+                v(5) = max(v(5), w_cycles);
+                v(7) = t_s;
+            else
+                v = [1; w_cycles; w_cycles; w_cycles; w_cycles; t_s; t_s];
+            end
+            obj.wuStats_(key) = v;
+        end
+
         function q = receiveEndPhaseBound_m(obj)
             % receiveEndPhaseBound_m  lambda/4 for the resolved band, or NaN if unreadable.
             q = NaN;
@@ -342,6 +518,16 @@ classdef ErrorChain < handle
             obj.mpRng   = RandStream('mt19937ar', 'Seed', mpSeed);
             obj.mpState = containers.Map('KeyType', 'int64', 'ValueType', 'double');
             obj.mpRxState = containers.Map('KeyType', 'int64', 'ValueType', 'double');
+
+            % Multipath-bias state gate (see the property comment). Read from the same
+            % config field the EKF reads, so the two can never disagree about whether the
+            % variance is being carried by R or by the state.
+            try
+                obj.multipathSigmaInState = ...
+                    logical(cfg.estimation.multipathBias.useInEKF);
+            catch
+                obj.multipathSigmaInState = false;
+            end
         end
 
         % ----------------------------------------------------------------
@@ -1132,6 +1318,9 @@ classdef ErrorChain < handle
                     if obj.sharedMultipathAcrossAntennas; sharedThisCall(key) = xNew; end
                     truth_m(mi) = xNew;       % correlated truth-side bias -> pseudorange
                     sigma_m(mi) = sigmaEl;    % steady-state 1-sigma -> R
+                end
+                if obj.multipathSigmaInState
+                    sigma_m(:) = 0;           % variance lives in the EKF state, not in R
                 end
                 return
             end
