@@ -68,10 +68,18 @@ classdef TriageResultExtractor
             metrics.maxNIS = max(diagObj.getNIS(), [], 'omitnan');
             metrics.medianNEES_pos = median(diagObj.getNEES(), 'omitnan');
             metrics.maxNEES_pos = max(diagObj.getNEES(), [], 'omitnan');
+            % medianPDOP / medianGDOP are the R-WEIGHTED series, so they are in METRES,
+            % not dilution factors. Kept on those names because TriageAnalyzer's
+            % thresholds are calibrated against them and renaming would silently
+            % recalibrate every classification. The *Geometric pair below is the textbook
+            % dimensionless DOP, reported alongside so a reader can tell a weak geometry
+            % from a heavily-weighted one without having to know which is which.
             metrics.medianPDOP = median(diagObj.getPDOPLike(), 'omitnan');
             metrics.maxPDOP = max(diagObj.getPDOPLike(), [], 'omitnan');
             metrics.medianGDOP = median(diagObj.getGDOPLike(), 'omitnan');
             metrics.maxGDOP = max(diagObj.getGDOPLike(), [], 'omitnan');
+            metrics.medianPDOPGeometric = revgnss.TriageResultExtractor.medianOr_(diagObj, 'getPDOPGeometric');
+            metrics.medianGDOPGeometric = revgnss.TriageResultExtractor.medianOr_(diagObj, 'getGDOPGeometric');
             metrics.clockObsRankPhysical = revgnss.TriageResultExtractor.lastFinite_(diagObj.getClockObsRankPhysical());
             metrics.clockObsRankGauged = revgnss.TriageResultExtractor.lastFinite_(diagObj.getClockObsRankGauged());
             metrics.clockObsCondPhysical = revgnss.TriageResultExtractor.lastFinite_(diagObj.getClockObsCondPhysical());
@@ -224,6 +232,20 @@ classdef TriageResultExtractor
 
         function v = lastFinite_(x)
             v = revgnss.TriageResultExtractor.last_(x);
+        end
+
+        function v = medianOr_(diagObj, accessor)
+            % medianOr_  Median of a store series by accessor name, or NaN.
+            %   The triage harness is run against synthetic and legacy diagnostics objects
+            %   as well as live ones, and those need not carry every accessor. A missing
+            %   series must degrade to NaN rather than take the whole extraction down.
+            v = NaN;
+            try
+                x = diagObj.(accessor)();
+                x = x(isfinite(x));
+                if ~isempty(x); v = median(x); end
+            catch
+            end
         end
 
         function v = getField_(s, f, d)

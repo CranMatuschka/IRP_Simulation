@@ -585,6 +585,61 @@ classdef Diagnostics < handle
             v = [obj.log.tdopLike]';
         end
 
+        function v = getHDOPLike(obj)
+            if obj.hasArrayData(); v = obj.store_.getData().geom.hdopLike; return; end
+            v = [obj.log.hdopLike]';
+        end
+
+        function v = getVDOPLike(obj)
+            if obj.hasArrayData(); v = obj.store_.getData().geom.vdopLike; return; end
+            v = [obj.log.vdopLike]';
+        end
+
+        % Unit-weight, DIMENSIONLESS counterparts of the five above. The ...Like set is
+        % R-weighted and carries metres; these are the textbook DOP. Both are recorded
+        % every epoch by data.SimulationDataStore, from the same H and the same RAC triad.
+        %
+        % geomOr_ rather than a bare field read: a store deserialized from a .mat written
+        % before these series existed has no such field, and the struct-backed log never
+        % had one either. Both degrade to an all-NaN column of the right length instead of
+        % erroring, which keeps the weighted curves plottable on old fixtures.
+        function v = getGDOPGeometric(obj)
+            v = obj.geomOr_('gdopGeometric');
+        end
+
+        function v = getPDOPGeometric(obj)
+            v = obj.geomOr_('pdopGeometric');
+        end
+
+        function v = getTDOPGeometric(obj)
+            v = obj.geomOr_('tdopGeometric');
+        end
+
+        function v = getHDOPGeometric(obj)
+            v = obj.geomOr_('hdopGeometric');
+        end
+
+        function v = getVDOPGeometric(obj)
+            v = obj.geomOr_('vdopGeometric');
+        end
+
+        function v = geomOr_(obj, fieldName)
+            % geomOr_  A geometry series by name, or an all-NaN column of matching length.
+            v = [];
+            try
+                if obj.hasArrayData()
+                    g = obj.store_.getData().geom;
+                    if isfield(g, fieldName); v = g.(fieldName); end
+                elseif isfield(obj.log, fieldName)
+                    v = [obj.log.(fieldName)]';
+                end
+            catch
+            end
+            if isempty(v)
+                try; v = nan(numel(obj.getTimeVector()), 1); catch; v = []; end
+            end
+        end
+
         function v = getGeometryRank(obj)
             if obj.hasArrayData(); v = obj.store_.getData().geom.geometryRank; return; end
             v = [obj.log.geometryRank]';

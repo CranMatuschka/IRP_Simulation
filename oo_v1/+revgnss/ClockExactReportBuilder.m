@@ -223,9 +223,16 @@ classdef ClockExactReportBuilder
             paths.visTowers = CE.tryPlot_(figDir, [stem '_visible_towers.pdf'], @() ...
                 CE.plotVisibleTowers_(diag, t), cfg);
 
-            % DOP metrics
+            % DOP metrics. TWO figures, not one axes with two y-scales: on a 1 h arc the
+            % R-weighted curves sawtooth ~120 times with the tower-clock product age, which
+            % renders as a solid band that buries the flat geometry curves underneath it,
+            % and eight legend entries then cover whatever is left. Split, the geometry
+            % figure is legible on its own and the sigma figure gets an inset at a scale
+            % where one sawtooth cycle is actually visible.
             paths.dop = CE.tryPlot_(figDir, [stem '_dop.pdf'], @() ...
                 CE.plotDOP_(diag, t), cfg);
+            paths.dopSigma = CE.tryPlot_(figDir, [stem '_dop_sigma.pdf'], @() ...
+                CE.plotDOPSigma_(diag, t, zoomSec), cfg);
 
             % Tower clock biases (bar chart)
             paths.twrClocks = CE.tryPlot_(figDir, [stem '_tower_clocks.pdf'], @() ...
@@ -1090,11 +1097,17 @@ classdef ClockExactReportBuilder
         end
 
         % ................................................................
-        function insetTail_(ax, t, series, styles, zoomSec)
+        function insetTail_(ax, t, series, styles, zoomSec, titleStr)
             % insetTail_  Draw a small "last zoomSec s" panel inside the parent axes.
             %   Placed in the upper-right of the parent, which is where these decaying
             %   curves leave space. Silently does nothing when the window would hold
             %   fewer than two samples.
+            %
+            %   titleStr overrides the default 'last N s' caption. It exists so a caller
+            %   whose MAIN axes already shows the tail can invert the pair -- pass the full
+            %   span as zoomSec and 'full run' as the title -- without a second helper that
+            %   would have to be kept in visual step with this one.
+            if nargin < 6 || isempty(titleStr); titleStr = sprintf('last %g s', zoomSec); end
             t = t(:).';
             if numel(t) < 3 || ~isfinite(zoomSec) || zoomSec <= 0; return; end
             i0 = find(t >= t(end) - zoomSec, 1, 'first');
@@ -1125,7 +1138,7 @@ classdef ClockExactReportBuilder
                 'Color',[1 1 1], 'GridColor',[0.45 0.45 0.48], 'GridAlpha',0.15);
             grid(axIn,'on');
             xlim(axIn, [t(i0) t(end)]);
-            title(axIn, sprintf('last %g s', zoomSec), 'FontSize',5, ...
+            title(axIn, titleStr, 'FontSize',5, ...
                 'FontWeight','normal', 'Color',[0.20 0.20 0.22]);
         end
 
@@ -1223,23 +1236,128 @@ classdef ClockExactReportBuilder
                 % A DOP series is NaN wherever the geometry was rank-deficient, so it can
                 % be legitimately sparse. Say "no data" only when NOTHING is finite --
                 % otherwise plotSparse_ still renders whatever samples exist.
-                if ~isempty(t) && any(isfinite(gdop))
+                % Unit-weight (dimensionless) counterparts. Absent on stores written before
+                % they existed, in which case this figure falls back to the weighted series
+                % under an honest label rather than rendering nothing.
+                gdopG = []; pdopG = []; vdopG = []; hdopG = [];
+                try; gdopG = diag.getGDOPGeometric(); catch; end
+                try; pdopG = diag.getPDOPGeometric(); catch; end
+                try; vdopG = diag.getVDOPGeometric(); catch; end
+                try; hdopG = diag.getHDOPGeometric(); catch; end
+                hasG_ = any(isfinite(gdopG));
+                if ~hasG_
+                    gdopG = gdop; pdopG = pdop; vdopG = vdop; hdopG = hdop;
+                end
+                if ~isempty(t) && any(isfinite(gdopG))
                     hold(ax,'on');
-                    revgnss.ClockExactReportBuilder.plotSparse_(ax,t,gdop,'b','-', 'GDOP');
-                    revgnss.ClockExactReportBuilder.plotSparse_(ax,t,pdop,'r','--','PDOP');
-                    % HDOP/VDOP in the orbital RAC frame (a spacecraft has no local horizon).
-                    % VDOP is the RADIAL axis -- the one degenerate with the receiver clock at
-                    % GEO -- so it is expected to dominate and is the informative curve here.
-                    revgnss.ClockExactReportBuilder.plotSparse_(ax,t,vdop,'m','-', 'VDOP (radial)');
-                    revgnss.ClockExactReportBuilder.plotSparse_(ax,t,hdop,'g','-.','HDOP (along+cross)');
-                    legend(ax,'show','Location','best','FontSize',6);
+                    CE_ = @revgnss.ClockExactReportBuilder.plotSparse_;
+                    CE_(ax,t,gdopG,'b','-', 'GDOP');
+                    CE_(ax,t,pdopG,'r','--','PDOP');
+                    % HDOP/VDOP in the orbital RAC frame (a spacecraft has no local
+                    % horizon). VDOP is the RADIAL axis -- the one degenerate with the
+                    % receiver clock at GEO -- so it is expected to dominate, and PDOP
+                    % therefore draws underneath it.
+                    CE_(ax,t,vdopG,'m','-', 'VDOP (radial)');
+                    CE_(ax,t,hdopG,'g','-.','HDOP (along+cross)');
+                    if hasG_
+                        ylabel(ax,'DOP [-]','FontSize',7);
+                    else
+                        % No unit-weight series in this store, so what is on screen is the
+                        % R-weighted quantity. Say so in the label rather than let a metre
+                        % value sit under a dimensionless one.
+                        ylabel(ax,'Formal sigma [m] (R-weighted)','FontSize',7);
+                    end
+                    revgnss.ClockExactReportBuilder.legendOutside_(ax);
                     xlabel(ax,'Time [s]','FontSize',7);
-                    ylabel(ax,'DOP [-]','FontSize',7);
                     grid(ax,'on');
                     return;
                 end
             catch; end
             revgnss.ClockExactReportBuilder.noDataAxes_(ax);
+        end
+
+        % ................................................................
+        function fig = plotDOPSigma_(diag, t, zoomSec)
+            % plotDOPSigma_  The R-WEIGHTED DOPs, i.e. single-epoch formal sigmas [m].
+            %
+            % Companion to plotDOP_. Same four quantities, formed with the measurement
+            % covariance instead of unit weights, so they move with R rather than with the
+            % sight lines. On this stack that means a sawtooth: the tower-clock correction
+            % sigma inside R grows with the age of the last clock product and resets every
+            % cfg.clocks.tower.product.updateInterval_s.
+            %
+            % The MAIN axes shows the tail window, not the whole arc, and the inset carries
+            % the full run. At 1 h against a 30 s product interval the arc holds ~120 cycles
+            % at roughly one pixel each: as the main plot that is a solid band which says
+            % nothing about the shape, and it buried the flat geometry curves when the two
+            % flavours shared one axes. The tail window is where the ramp and the reset are
+            % separately visible, and it loses nothing, because the modulation is a function
+            % of the product AGE alone -- MEASURED on golden_baseline_attitude, GDOP at
+            % t = 40 / 70 / 100 s (all age 10 s) is 183.2 / 180.6 / 181.3. The full-run inset
+            % is what backs that claim up: it shows the envelope repeating rather than
+            % drifting, which one window on its own could not establish.
+            if nargin < 3 || isempty(zoomSec); zoomSec = 120; end
+            fig = revgnss.ClockExactReportBuilder.makeCompactFig_('');
+            ax  = gca(fig);
+            try
+                gdop = diag.getGDOPLike();
+                pdop = diag.getPDOPLike();
+                hdop = []; vdop = [];
+                try; hdop = diag.getHDOPLike(); catch; end
+                try; vdop = diag.getVDOPLike(); catch; end
+                if ~isempty(t) && any(isfinite(gdop))
+                    hold(ax,'on');
+                    CE_ = @revgnss.ClockExactReportBuilder.plotSparse_;
+                    CE_(ax,t,gdop,'b','-', 'GDOP x sigma');
+                    CE_(ax,t,pdop,'r','--','PDOP x sigma');
+                    CE_(ax,t,vdop,'m','-', 'VDOP x sigma (radial)');
+                    CE_(ax,t,hdop,'g','-.','HDOP x sigma (along+cross)');
+                    ylabel(ax,'Formal sigma [m]','FontSize',7);
+                    grid(ax,'on');
+                    revgnss.ClockExactReportBuilder.legendOutside_(ax);
+                    % Crop the VIEW to the tail. plotSparse_ has already drawn the whole
+                    % series, so nothing is discarded and the inset below still reaches it.
+                    tSpan_ = t(end) - t(1);
+                    if isfinite(zoomSec) && zoomSec > 0 && zoomSec < tSpan_
+                        xlim(ax, [t(end)-zoomSec, t(end)]);
+                        xlabel(ax, sprintf('Time [s] (last %g s)', zoomSec), 'FontSize',7);
+                    else
+                        xlabel(ax,'Time [s]','FontSize',7);
+                    end
+                    % Full run in the inset. Linespec strings, not RGB triplets: insetTail_
+                    % forwards these straight to plot() as a format argument.
+                    revgnss.ClockExactReportBuilder.insetTail_(ax, t, ...
+                        {gdop, pdop, vdop, hdop}, {'b-','r--','m-','g-.'}, tSpan_, 'full run');
+                    % Thin the inset's ticks. insetTail_ leaves them on auto, which at
+                    % FontSize 5 in a panel this small prints four-digit epoch labels
+                    % close enough to touch. Done here rather than in insetTail_ so the
+                    % innovation figure that shares it keeps its current appearance.
+                    for axIn_ = findall(fig, 'Type','axes', 'Tag','reportInset').'
+                        if ~isequal(axIn_.UserData, ax); continue; end
+                        xl_ = xlim(axIn_); yl_ = ylim(axIn_);
+                        set(axIn_, 'XTick', linspace(xl_(1), xl_(2), 3), ...
+                                   'YTick', linspace(yl_(1), yl_(2), 3));
+                    end
+                    return;
+                end
+            catch; end
+            revgnss.ClockExactReportBuilder.noDataAxes_(ax);
+        end
+
+        % ................................................................
+        function legendOutside_(ax)
+            % legendOutside_  Legend above the axes, horizontal, off the data.
+            %   'Location','best' searches for empty space INSIDE the axes. A series that
+            %   fills its axes -- a sawtooth over a long arc, say -- has none, so 'best'
+            %   parks the box on top of the curves and the figure becomes unreadable
+            %   exactly when it carries the most data. Above the axes there is always room.
+            try
+                lg = legend(ax, 'show');
+                set(lg, 'Location','northoutside', 'Orientation','horizontal', ...
+                    'NumColumns',2, 'FontSize',5, 'Box','off');
+            catch
+                try; legend(ax,'show','Location','best','FontSize',5); catch; end
+            end
         end
 
         % ................................................................

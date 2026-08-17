@@ -119,11 +119,25 @@ classdef SimulationDataStore < handle
         gm_mRk_
         gm_cS_
         gm_gRk_
+        % Two DOP flavours, deliberately both kept. The gm_*dop_ set is R-WEIGHTED and
+        % therefore carries METRES: it is the single-epoch formal sigma of the snapshot
+        % position+clock solve, and it moves with anything that moves R (most visibly the
+        % tower-clock product age, which sawtooths it by ~10x every updateInterval_s).
+        % The gm_*dopG_ set is the TEXTBOOK unit-weight DOP and is dimensionless: pure
+        % geometry, so it holds still when only the weighting changes. Neither substitutes
+        % for the other -- the first answers "how good is the solution right now", the
+        % second answers "how good is the geometry", and reading one as the other is the
+        % mistake this split exists to prevent.
         gm_gdop_
         gm_pdop_
         gm_hdop_
         gm_vdop_
         gm_tdop_
+        gm_gdopG_
+        gm_pdopG_
+        gm_hdopG_
+        gm_vdopG_
+        gm_tdopG_
         gm_pclk_
         gm_ajN_
         gm_ajRk_
@@ -342,6 +356,9 @@ classdef SimulationDataStore < handle
             obj.gm_gRk_  = n1(); obj.gm_gdop_= n1();
             obj.gm_pdop_ = n1(); obj.gm_tdop_= n1();
             obj.gm_hdop_ = n1(); obj.gm_vdop_= n1();
+            obj.gm_gdopG_= n1(); obj.gm_pdopG_= n1();
+            obj.gm_tdopG_= n1(); obj.gm_hdopG_= n1();
+            obj.gm_vdopG_= n1();
             obj.gm_pclk_ = n1(); obj.gm_ajN_ = n1();
             obj.gm_ajRk_ = n1(); obj.gm_ajCd_= n1();
 
@@ -539,6 +556,11 @@ classdef SimulationDataStore < handle
             obj.gm_hdop_(k) = g_(entry,'hdopLike',NaN);
             obj.gm_vdop_(k) = g_(entry,'vdopLike',NaN);
             obj.gm_tdop_(k) = g_(entry,'tdopLike',NaN);
+            obj.gm_gdopG_(k)= g_(entry,'gdopGeometric',NaN);
+            obj.gm_pdopG_(k)= g_(entry,'pdopGeometric',NaN);
+            obj.gm_hdopG_(k)= g_(entry,'hdopGeometric',NaN);
+            obj.gm_vdopG_(k)= g_(entry,'vdopGeometric',NaN);
+            obj.gm_tdopG_(k)= g_(entry,'tdopGeometric',NaN);
             obj.gm_pclk_(k) = g_(entry,'positionClockCondition',NaN);
             obj.gm_ajN_(k)  = g_(entry,'attitudeJacobianNorm',NaN);
             obj.gm_ajRk_(k) = g_(entry,'attitudeRank',NaN);
@@ -1314,6 +1336,9 @@ classdef SimulationDataStore < handle
             entry.geometryRank = NaN; entry.gdopLike = NaN;
             entry.pdopLike = NaN;    entry.tdopLike = NaN;
             entry.hdopLike = NaN;    entry.vdopLike = NaN;
+            entry.gdopGeometric = NaN; entry.pdopGeometric = NaN;
+            entry.tdopGeometric = NaN; entry.hdopGeometric = NaN;
+            entry.vdopGeometric = NaN;
             entry.positionClockCondition = NaN;
             posClkIdx_ = [sm.r_idx(:); sm.b_rx_idx]';
             if ~isempty(H) && ~isempty(R) && M_pr >= 4 && ...
@@ -1322,48 +1347,38 @@ classdef SimulationDataStore < handle
                 H_pc_ = H_pr_(:, posClkIdx_);
                 entry.geometryRank = rank(H_pc_);
                 if entry.geometryRank >= 4
+                    % The RAC triad is a property of the ORBIT, not of the weighting, so it
+                    % is built once and handed to both flavours. Building it twice would let
+                    % the two DOP sets rotate into subtly different frames.
+                    T_ = obj.racTriad_(asset);
+                    % (a) R-WEIGHTED, in METRES. inv(H'*inv(R)*H) is the covariance of the
+                    % snapshot weighted-least-squares solve, so its square roots are formal
+                    % sigmas, not dilution factors. Kept because it is the only place in the
+                    % report where the tower-clock product age is visible modulating R.
                     try
                         N_geom_ = H_pc_' * (R_pr_ \ eye(M_pr)) * H_pc_;
                         Q_geom_ = N_geom_ \ eye(4);
-                        entry.gdopLike               = sqrt(max(trace(Q_geom_),          0));
-                        entry.pdopLike               = sqrt(max(trace(Q_geom_(1:3,1:3)), 0));
-                        entry.tdopLike               = sqrt(max(Q_geom_(4,4),            0));
+                        [entry.gdopLike, entry.pdopLike, entry.tdopLike, ...
+                            entry.vdopLike, entry.hdopLike] = obj.dopFromQ_(Q_geom_, T_);
                         entry.positionClockCondition = cond(N_geom_);
-                        % HDOP / VDOP. The textbook definitions are in a ground user's local
-                        % horizon frame, which does not exist for a spacecraft; the meaningful
-                        % analogue is the orbital RAC frame -- "vertical" = RADIAL (the axis
-                        % degenerate with the receiver clock at GEO, so this is the number that
-                        % matters here) and "horizontal" = ALONG + CROSS track.
-                        %
-                        % The cross-track axis is the ORBIT NORMAL, and an orbit normal is
-                        % defined by the INERTIAL velocity -- not the Earth-relative one. A
-                        % geostationary asset has v_ecef == 0 EXACTLY, so cross(r, v_ecef) was
-                        % the zero vector, uC_ = 0/0 = NaN and uA_ = NaN. uR_ stayed finite, so
-                        % VDOP survived while HDOP became sqrt(max(NaN,0)) -- and MATLAB's
-                        % max(NaN,0) is 0, so the report published HDOP = 0, i.e. PERFECT
-                        % horizontal geometry, for exactly the case where it had none. Measured
-                        % on a 60 s GEO run: HDOP = 0 at all 61 epochs, and VDOP^2 + HDOP^2
-                        % missed PDOP^2 by 1.6e-3 relative (the identity is exact for an
-                        % orthonormal triad, so the gap WAS the fabricated zero).
-                        %
-                        % v_inertial on ECEF axes = v_ecef + omega_E x r_ecef.
-                        try
-                            rr_ = asset.r_ecef_m(:); vv_ = asset.v_ecef_mps(:);
-                            wE_   = [0; 0; revgnss.Constants.EARTH_OMEGA_RADPS];
-                            nOrb_ = cross(rr_, vv_ + cross(wE_, rr_));   % orbit normal
-                            if all(isfinite(nOrb_)) && norm(nOrb_) > 0 && norm(rr_) > 0
-                                uR_ = rr_ / norm(rr_);
-                                uC_ = nOrb_ / norm(nOrb_);
-                                uA_ = cross(uC_, uR_);
-                                T_   = [uR_ uA_ uC_].';           % ECEF -> RAC
-                                Qr_  = T_ * Q_geom_(1:3,1:3) * T_.';
-                                % Leave NaN as NaN: max(NaN,0)=0 would republish an
-                                % uncomputable DOP as a perfect one.
-                                vd_ = Qr_(1,1); hd_ = Qr_(2,2) + Qr_(3,3);
-                                if isfinite(vd_); entry.vdopLike = sqrt(max(vd_, 0)); end
-                                if isfinite(hd_); entry.hdopLike = sqrt(max(hd_, 0)); end
-                            end
-                        catch; end
+                    catch; end
+                    % (b) UNIT-WEIGHT, DIMENSIONLESS -- the textbook DOP. inv(H'*H) with H's
+                    % position/clock columns already being [u_los' 1] per code row, which IS
+                    % the classical G matrix, so no renormalisation is needed or wanted. The
+                    % ionosphere-free combination does not disturb this: its coefficients
+                    % satisfy alpha - beta = 1, so the geometry partial stays a unit vector.
+                    %
+                    % Row count is NOT normalised away. M near-parallel rows genuinely do
+                    % beat one row by sqrt(M), and this run carries 40 pseudorange rows (5
+                    % towers x 4 receivers x 2 frequencies) against 5 distinct sight lines,
+                    % so these values sit a factor sqrt(8) below the one-row-per-transmitter
+                    % figure a GNSS textbook would quote. That is the DOP of the measurement
+                    % SET, which is the honest thing to report for this stack.
+                    try
+                        N_unit_ = H_pc_' * H_pc_;
+                        Q_unit_ = N_unit_ \ eye(4);
+                        [entry.gdopGeometric, entry.pdopGeometric, entry.tdopGeometric, ...
+                            entry.vdopGeometric, entry.hdopGeometric] = obj.dopFromQ_(Q_unit_, T_);
                     catch; end
                 end
             end
@@ -1646,6 +1661,11 @@ classdef SimulationDataStore < handle
             nr = obj.mc_nr_(1:obj.nEpochs);
         end
 
+        % The ...Like accessors return the R-WEIGHTED quantity, which is in METRES: a
+        % single-epoch formal sigma, not a dilution factor. The ...Geometric accessors
+        % return the textbook unit-weight DOP and are dimensionless. Plot or tabulate
+        % them on separate axes; they differ by roughly the effective sigma_UERE, which
+        % is the whole point of keeping both.
         function v = getGDOPLike(obj)
             v = obj.gm_gdop_(1:obj.nEpochs);
         end
@@ -1659,6 +1679,31 @@ classdef SimulationDataStore < handle
             % Vertical DOP in the orbital RAC frame: RADIAL -- the axis degenerate
             % with the receiver clock at GEO, so this is the diagnostic that matters.
             v = obj.gm_vdop_(1:obj.nEpochs);
+        end
+
+        % priorSlice_, not a raw index: a store deserialized from a .mat written before
+        % these series existed has the properties at their [] default, and gm_gdopG_(1:N)
+        % on an empty array throws. The report call sites are wrapped in try/catch and
+        % would silently degrade the whole DOP figure to "no data" rather than showing the
+        % weighted curves it CAN still draw. An all-NaN slice is the honest answer.
+        function v = getGDOPGeometric(obj)
+            v = obj.priorSlice_(obj.gm_gdopG_, 1);
+        end
+
+        function v = getPDOPGeometric(obj)
+            v = obj.priorSlice_(obj.gm_pdopG_, 1);
+        end
+
+        function v = getTDOPGeometric(obj)
+            v = obj.priorSlice_(obj.gm_tdopG_, 1);
+        end
+
+        function v = getHDOPGeometric(obj)
+            v = obj.priorSlice_(obj.gm_hdopG_, 1);
+        end
+
+        function v = getVDOPGeometric(obj)
+            v = obj.priorSlice_(obj.gm_vdopG_, 1);
         end
 
         function v = getPDOPLike(obj)
@@ -2113,6 +2158,13 @@ classdef SimulationDataStore < handle
             d.geom.gdopLike              = obj.gm_gdop_(1:N);
             d.geom.pdopLike              = obj.gm_pdop_(1:N);
             d.geom.tdopLike              = obj.gm_tdop_(1:N);
+            d.geom.hdopLike              = obj.gm_hdop_(1:N);
+            d.geom.vdopLike              = obj.gm_vdop_(1:N);
+            d.geom.gdopGeometric         = obj.priorSlice_(obj.gm_gdopG_, 1, N);
+            d.geom.pdopGeometric         = obj.priorSlice_(obj.gm_pdopG_, 1, N);
+            d.geom.tdopGeometric         = obj.priorSlice_(obj.gm_tdopG_, 1, N);
+            d.geom.hdopGeometric         = obj.priorSlice_(obj.gm_hdopG_, 1, N);
+            d.geom.vdopGeometric         = obj.priorSlice_(obj.gm_vdopG_, 1, N);
             d.geom.positionClockCondition= obj.gm_pclk_(1:N);
             d.geom.attitudeJacobianNorm  = obj.gm_ajN_(1:N);
             d.geom.attitudeRank          = obj.gm_ajRk_(1:N);
@@ -2298,6 +2350,60 @@ classdef SimulationDataStore < handle
 
     % =====================================================================
     methods (Access = private)
+
+        function T = racTriad_(~, asset)
+            % racTriad_  ECEF -> radial/along/cross rotation for the asset, or [].
+            %
+            % The cross-track axis is the ORBIT NORMAL, and an orbit normal is defined by
+            % the INERTIAL velocity, not the Earth-relative one. A geostationary asset has
+            % v_ecef == 0 EXACTLY, so cross(r, v_ecef) was the zero vector, uC = 0/0 = NaN
+            % and uA = NaN. uR stayed finite, so VDOP survived while HDOP became
+            % sqrt(max(NaN,0)) -- and MATLAB's max(NaN,0) is 0, so the report published
+            % HDOP = 0, i.e. PERFECT horizontal geometry, for exactly the case where it had
+            % none. Measured on a 60 s GEO run: HDOP = 0 at all 61 epochs, and
+            % VDOP^2 + HDOP^2 missed PDOP^2 by 1.6e-3 relative (the identity is exact for
+            % an orthonormal triad, so the gap WAS the fabricated zero).
+            %
+            % v_inertial on ECEF axes = v_ecef + omega_E x r_ecef.
+            T = [];
+            try
+                rr_ = asset.r_ecef_m(:); vv_ = asset.v_ecef_mps(:);
+                wE_   = [0; 0; revgnss.Constants.EARTH_OMEGA_RADPS];
+                nOrb_ = cross(rr_, vv_ + cross(wE_, rr_));   % orbit normal
+                if all(isfinite(nOrb_)) && norm(nOrb_) > 0 && norm(rr_) > 0
+                    uR_ = rr_ / norm(rr_);
+                    uC_ = nOrb_ / norm(nOrb_);
+                    uA_ = cross(uC_, uR_);
+                    T   = [uR_ uA_ uC_].';                   % ECEF -> RAC
+                end
+            catch
+            end
+        end
+
+        function [g, p, t, v, h] = dopFromQ_(~, Q, T)
+            % dopFromQ_  The five DOP scalars from a 4x4 position/clock cofactor matrix.
+            %
+            % Shared by the R-weighted and the unit-weight paths so the two can never drift
+            % apart in convention: whatever "VDOP" means for one, it means for the other,
+            % and the only difference between the flavours is the matrix handed in. Q in m^2
+            % gives metres out, a dimensionless Q gives dimensionless out.
+            %
+            % HDOP / VDOP are in the orbital RAC frame, because the textbook local-horizon
+            % definitions have no meaning for a spacecraft: "vertical" = RADIAL (the axis
+            % degenerate with the receiver clock at GEO, so this is the number that matters
+            % here) and "horizontal" = ALONG + CROSS track.
+            g = sqrt(max(trace(Q),          0));
+            p = sqrt(max(trace(Q(1:3,1:3)), 0));
+            t = sqrt(max(Q(4,4),            0));
+            v = NaN; h = NaN;
+            if isempty(T); return; end
+            Qr_ = T * Q(1:3,1:3) * T.';
+            % Leave NaN as NaN: max(NaN,0)=0 would republish an uncomputable DOP as a
+            % perfect one, which is the exact bug racTriad_'s comment records.
+            vd_ = Qr_(1,1); hd_ = Qr_(2,2) + Qr_(3,3);
+            if isfinite(vd_); v = sqrt(max(vd_, 0)); end
+            if isfinite(hd_); h = sqrt(max(hd_, 0)); end
+        end
 
         function out = priorSlice_(obj, arr, nRows, N)
             % priorSlice_  Epoch slice of an a priori array, tolerant of legacy stores.

@@ -60,6 +60,12 @@ classdef TriageAnalyzer
                 revgnss.TriageAnalyzer.num_(metrics, 'zwdRms_m') > 5 || ...
                 revgnss.TriageAnalyzer.num_(metrics, 'ambiguityRms_m') > 1000 || ...
                 revgnss.TriageAnalyzer.num_(metrics, 'maxNIS') > 1e6 || ~isempty(flags);
+            % UNITS: medianPDOP is the R-WEIGHTED series, i.e. a formal sigma in METRES,
+            % not a dilution factor -- so 100 here reads "100 m of single-epoch position
+            % uncertainty", not "PDOP 100". The threshold was calibrated against that and
+            % is deliberately left on it, because re-pointing it at the dimensionless
+            % metrics.medianPDOPGeometric would silently reclassify every archived triage
+            % run. Change the metric and the number together, or neither.
             if revgnss.TriageAnalyzer.num_(metrics, 'medianPDOP') > 100
                 flags{end+1} = 'WEAK_GEOMETRY_HIGH_PDOP';
             end

@@ -16,6 +16,10 @@
 %     used to hard-code "not available" for all three while the store held them.
 % T3: plotSparse_ still renders a series whose finite samples are all isolated, so a
 %     coarse cadence or rank-deficient epochs can never again produce a blank axes.
+% T4: the DIMENSIONLESS unit-weight DOP is present alongside the R-weighted one, obeys
+%     the same RAC identity, and is actually R-free -- the two must not collapse into
+%     each other, because the whole point of carrying both is that one tracks geometry
+%     and the other tracks weighting.
 
 thisDir = fileparts(mfilename('fullpath'));
 addpath(fullfile(thisDir, '..'));
@@ -105,6 +109,56 @@ assert(drawnFinite == 4, ...
     'T3 FAILED: expected the 4 isolated samples to be drawn, got %d', drawnFinite);
 assert(~strcmp(get(kids(1),'Marker'), 'none'), ...
     'T3 FAILED: isolated samples must be drawn with markers, else the axes looks empty');
+fprintf('    PASS\n');
+
+% ----------------------------------------------------------------
+% T4: the unit-weight (dimensionless) DOP exists and is genuinely R-FREE.
+% ----------------------------------------------------------------
+fprintf('  T4: unit-weight DOP present, dimensionless, and R-free ...\n');
+
+gdopG = sim.diag.getGDOPGeometric();
+pdopG = sim.diag.getPDOPGeometric();
+vdopG = sim.diag.getVDOPGeometric();
+hdopG = sim.diag.getHDOPGeometric();
+
+assert(sum(isfinite(gdopG)) == nFin, ...
+    ['T4 FAILED: unit-weight GDOP finite at %d epochs but R-weighted at %d. Both are ' ...
+     'computed from the SAME H at the same epochs, so the counts cannot differ.'], ...
+    sum(isfinite(gdopG)), nFin);
+
+% Same orthonormal-triad identity as T2. It holds for any 4x4 cofactor matrix, so a
+% failure here means the two flavours took different RAC triads.
+kG = find(isfinite(vdopG) & isfinite(hdopG) & isfinite(pdopG), 1);
+assert(~isempty(kG), 'T4 FAILED: no epoch has unit-weight VDOP, HDOP and PDOP together');
+lhsG = vdopG(kG)^2 + hdopG(kG)^2;
+rhsG = pdopG(kG)^2;
+assert(abs(lhsG - rhsG) <= 1e-9 * rhsG, ...
+    ['T4 FAILED: unit-weight VDOP^2 + HDOP^2 = %.10g must equal PDOP^2 = %.10g. The two ' ...
+     'DOP flavours are not sharing one RAC triad.'], lhsG, rhsG);
+
+% The decisive one. Over this arc the GEO sight lines barely move, so a genuinely
+% unit-weight DOP is near-constant. The R-weighted series is NOT: the tower-clock
+% correction sigma inside R grows with the age of the last clock product and resets
+% every cfg.clocks.tower.product.updateInterval_s, which sawtooths it by roughly an
+% order of magnitude. If someone ever wires the weighting back into the "geometric"
+% path, the two coefficients of variation collapse together and this fires.
+cov_ = @(v) std(v(isfinite(v))) / abs(mean(v(isfinite(v))));
+covG = cov_(gdopG); covW = cov_(gdop);
+fprintf('    CoV: unit-weight %.4g vs R-weighted %.4g\n', covG, covW);
+assert(covG < 0.01, ...
+    ['T4 FAILED: unit-weight GDOP varies by %.3g relative over the arc. It depends on the ' ...
+     'sight lines alone, which barely move at GEO in %g s, so it is carrying R.'], ...
+    covG, cfg.simulation.duration_s);
+assert(covW > 10 * covG, ...
+    ['T4 FAILED: R-weighted GDOP (CoV %.3g) is no more variable than the unit-weight one ' ...
+     '(CoV %.3g). The weighted path has stopped seeing R.'], covW, covG);
+
+% Dimensionless vs metres: the two differ by the effective ranging sigma, so they must
+% not be equal. Equality would mean R came through as the identity.
+ratio = median(gdop(isfinite(gdop))) / median(gdopG(isfinite(gdopG)));
+fprintf('    median ratio (weighted / unit-weight) = %.4g m  [effective sigma_UERE]\n', ratio);
+assert(abs(ratio - 1) > 1e-6, ...
+    'T4 FAILED: the two DOP flavours are numerically identical, so R is being read as I.');
 fprintf('    PASS\n');
 
 fprintf('=== test_dop_series_dense_and_plottable: ALL PASS ===\n');
