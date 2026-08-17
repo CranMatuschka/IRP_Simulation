@@ -1,0 +1,60 @@
+{
+  "_id": "carr rung: carr017 with a REAL CAESIUM ground reference instead of the baseline OCXO. This is the hardware answer to the tower-clock defect that test010_towerClockEpochMismatch documents. The code observable back-propagates the tower clock to transmit time and the carrier observable does not, so every code-carrier combination inherits -bdot_twr * tau. That term is proportional to the CLOCK DRIFT, so a better ground oscillator attacks it directly, and this rung prices exactly how much of it a purchasable part buys.",
+
+  "_THEPART": "Microchip 5071B, caesium beam. h0 = 1.5e-22, h-1 = 1.6e-28, h-2 <= 1.1e-33, quoted sigma_y(20 s) = 2.29e-12. Installed here through cfg.clock.customOscillators, which is the supported route for an oscillator that is not one of the nine built-in templates, and then selected with cfg.clock.tower.clockType. VERIFIED APPLIED: the resolved cfg.towers(k).clockType reads CESIUM_5071B on all five towers and the realised drift falls to 1.42e-05 m/s, so this is not one of the inert toggles this repository collects.",
+
+  "_WHATTHEBASELINEACTUALLYIS": "OCXO. Not caesium, and not compliant. The resolved golden_baseline towers carry clockType OCXO, whose template gives sigma_y(20 s) = 1.0e-10 against the programme requirement of 1.67e-11 -- SIX TIMES OVER. The 5071B gives 1.94e-12 by the same three-coefficient formula, which is 8.6x INSIDE it. So this rung is not a luxury upgrade over an already-adequate reference; it is the difference between a non-compliant ground segment and a compliant one.",
+
+  "_ALSOWORTHKNOWING": "The repository's own built-in CESIUM1 template is h0 = 1e-19, h-1 = 1e-25, h-2 = 2e-32, giving sigma_y(20 s) = 5.0e-11. That ALSO fails the 1.67e-11 requirement, by 3x, and it is 26x worse in Allan deviation than the real 5071B it is named after. Anyone reaching for clockType CESIUM1 expecting datasheet caesium performance is not getting it. The custom-oscillator route used here is the way to model a real part.",
+
+  "_MEASURED_900s": "Against carr017 at 900 s with four antennas and errors.multipath.truth.enable false, so the bias stands clear of the coloured-multipath noise that otherwise buries it. BASELINE OCXO: max |bdot| 0.6814 m/s, MW signed bias -0.10476 cycles, sign census 0 of 16 positive, float sigma 0.03250 cycles. 5071B CAESIUM: max |bdot| 1.421e-05 m/s, MW signed bias +0.01526 cycles, sign census 15 of 16, float sigma 0.02302 cycles. The drift falls by 48000x and the bias by 6.9x. The drift ratio is consistent with the h-2 ratio (4e-23 against 1.1e-33 is 3.6e10 in PSD, so 1.9e5 in amplitude) once h0 and h-1 are included, which is the check that the template was really swapped rather than silently defaulted.",
+
+  "_WHATITDOESNOTFIX": "The remaining +0.01526 cycles, still 15 of 16 on one side. Buying a caesium removes the CLOCK term and nothing else, and this rung is bit-indistinguishable from the clock.tower.deterministic control at five decimal places, which is the expected outcome once -bdot*tau is down at 2e-06 cycles. Whatever produces the residual is a separate term and is not identified. Higher-order ionosphere accounts for 0.0025 of it. Do not read this rung as closing the bias question.",
+
+  "_ANDTHEHONESTCAVEAT": "This makes the SIMULATION better, not the physics. The right fix for the -bdot*tau term is to back-propagate the tower clock in CarrierMeasurementBuilder exactly as CodeMeasurementBuilder does, at which point the bias disappears for every oscillator including the OCXO. Buying hardware to suppress a modelling asymmetry would be the wrong lesson. What this rung legitimately shows is (a) how large the defect is in drift terms and (b) that the ground segment is running a non-compliant oscillator class in the reference scenario, which is a real finding independent of the defect.",
+
+  "_extends": "carr017_melbourneWubbenaSingleAsset.json",
+  "_delta": "clock.customOscillators.CESIUM_5071B defined from the datasheet and clock.tower.clockType set to it (carr017 resolves to OCXO), plus errors.multipath.truth.enable false and the 150 s block length. The estimator and its gates are inherited unchanged.",
+  "_WHYMULTIPATHISOFFHERE": "So the rung reproduces its own quoted numbers. The clock term is 0.10 cycles and coloured code multipath is 0.087 cycles of noise, so with multipath ON the effect is buried and carr020 would differ from carr017 by nothing legible. THE COMPARISON PARTNER IS THEREFORE NOT carr017 AS PUBLISHED but carr017 run with the same two settings, which is what the measurements below are against. The separate and equally fair question -- what a caesium buys at full reference grade with multipath on -- is NOT answered by this rung, and the honest expectation there is 'almost nothing visible', because the noise dominates. Setting this deliberately rather than inheriting it is the difference between a rung whose numbers reproduce and one whose numbers cannot.",
+
+  "scenario": {
+    "name": "carr020_melbourneWubbenaCaesium5071B",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+
+  "errors": {
+    "multipath": {
+      "truth": {
+        "enable": false
+      }
+    }
+  },
+
+  "diagnostics": {
+    "melbourneWubbena": {
+      "blockLength_s": 150,
+      "minBlocks": 4
+    }
+  },
+
+  "clock": {
+    "customOscillators": {
+      "CESIUM_5071B": {
+        "h0": 1.5e-22,
+        "hMinus1": 1.6e-28,
+        "hMinus2": 1.1e-33
+      }
+    },
+    "tower": {
+      "clockType": "CESIUM_5071B"
+    }
+  },
+
+  "report": {
+    "runVersion": "carr020",
+    "compileTex": "auto"
+  },
+  "_reportNote": "compileTex 'auto' rather than the golden's 'require': a ladder rung's deliverable is its .mat, and a pdflatex hiccup must not throw away a finished run."
+}
