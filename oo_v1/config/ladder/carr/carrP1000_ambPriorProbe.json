@@ -1,0 +1,8 @@
+{
+  "_id": "carr PROBE (diagnostic, short arc): identical to golden_baseline except estimation.ambiguity.initialSigma_m = 1000 m instead of 100. Purpose is to decide WHY the float ambiguity sigma parks at 51.9004 m. If the posterior scales with the prior, the direction is exactly unobservable and the prior alone sets the reported covariance. If the posterior lands on 51.9 regardless of the prior, something in the measurement determines it and the direction is only weakly observable. Not a results rung, not for citation.",
+  "_extends": "golden_baseline.json",
+  "_delta": "estimation.ambiguity.initialSigma_m 1000 (was 100).",
+  "scenario": { "name": "carrP1000_ambPriorProbe", "nTowers": 5, "nSpaceAssets": 1, "nReceivers": 4 },
+  "estimation": { "ambiguity": { "initialSigma_m": 1000 } },
+  "report": { "runVersion": "carrP1000", "compileTex": "auto" }
+}

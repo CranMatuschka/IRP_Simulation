@@ -1,0 +1,23 @@
+{
+  "_id": "carr rung: the carr002 physics budget carried to 5.8 GHz. Its parent is freq010, NOT carr002, so exactly one setting moves relative to its declared parent and the comparison stays clean under the one-change-per-rung rule. Against freq010 the ONLY delta is the carrier error model. lambda = 51.688 mm, so the resolved sigma is 6.057 mm against the 10 mm freq010 charges, i.e. 1.65x tighter. In the carrier's own unit the change is larger than that ratio suggests: freq010 charges 0.193 cycles and this rung charges 0.117.",
+  "_extends": "freq010_ism2450_5800.json",
+  "_delta": "measurements.carrier.sigma_cycles 0.016 (was NaN), measurements.carrier.sigmaFloor_m 0.006 (was NaN). Band, code sigmas, ionosphere handling and everything else inherited from freq010.",
+  "_whatThePairAnswers": "carr004 vs freq010 and carr005 vs freq012 together answer the question the flat model cannot: does the frequency sweep change SHAPE once the carrier stops being band-blind? The freq axis currently charges an identical 10 mm at every band, so any band ranking it reports was obtained with the carrier held artificially constant. If the ranking survives, the published conclusion that the signal pair matters through its conditioning kappa = |1 - (fp/fs)^2| rather than through its band is strengthened, because it then holds with the carrier free to follow the band as well. If the ranking moves, the conclusion needs qualifying.",
+  "scenario": {
+    "name": "carr004_carrierPhysicsBudget58",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+  "measurements": {
+    "carrier": {
+      "sigma_cycles": 0.016,
+      "sigmaFloor_m": 0.006
+    }
+  },
+  "report": {
+    "runVersion": "carr004",
+    "compileTex": "auto"
+  },
+  "_reportNote": "compileTex 'auto' rather than the golden's 'require': a ladder rung's deliverable is its .mat, and a pdflatex hiccup must not throw away a finished run."
+}

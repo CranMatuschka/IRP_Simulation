@@ -1,0 +1,24 @@
+{
+  "_id": "carr rung: integer fixing on the ONE configuration where the float ambiguity is actually small enough to fix. Measured on the frozen freq008, the undifferenced ambiguity sigma converges to 0.0150 m, which at lambda_L1 is 0.079 CYCLES, against the resolver's maxSigma_cycles gate of 0.15. It passes. Every other reported configuration fails that gate by orders of magnitude, the dual-signal reference by a factor of 1818 at 272.7 cycles. The controlled comparison across the freq axis is unambiguous about why: two carrier signals 51.9004 m whether the iono state is on (freq002) or OFF (freq007), one carrier signal 0.5741 m (freq001), one signal with no iono state 0.0150 m (freq008). It is the SECOND SIGNAL that freezes the ambiguity, not the ionosphere state.",
+  "_extends": "freq008_L1onlyNoIonoState.json",
+  "_delta": "estimator.integerAmbiguity.enable true (was false). Every gate left at its masterConfig value: minArcLength_s 300, maxSigma_cycles 0.15, maxDistanceToInteger_cycles 0.20, maxResidualRmsIncrease_m 0.01. Nothing loosened.",
+  "_ISTHETRUTHACTUALLYANINTEGERHERE": "Partly, and that is the point of the rung. Checked on the frozen freq008 resolved config: hardware.rxCarrierBias is DISABLED with sigma 0 and fixedValue 0, biases.interFrequency.carrier.truth.L1_m is 0, and errors.phaseWindup is off. So there is no absolute receiver or transmitter carrier phase bias, and on the REFERENCE antenna the ambiguity truth is exactly lambda*N, a genuine integer. But errors.interAntennaCarrierBias is ENABLED at sigma 0.25 cycles while the estimator side is mode 'none' and enable false, so the ambiguities on the other three antennas absorb an uncorrected per-antenna bias and their truth is NOT an integer.",
+  "_THEPREDICTION": "maxDistanceToInteger_cycles is 0.20. A row carrying a quarter-cycle-class bias sits about 0.25 cycles from the nearest integer and should be REFUSED by that gate, while a reference-antenna row sits near zero and should be accepted. So the expected outcome is a PARTIAL fix, roughly the reference antenna only, with the biased rows declined. If instead every row fixes, the gate is not protecting against a non-integer truth and that is a defect. If a biased row fixes and lands on the wrong integer, the run will show it as a whole-wavelength jump the filter cannot undo, which is the failure mode the theory chapter describes and which no rung of this thesis has yet exhibited.",
+  "_WHATITCOSTSTOGETHERE": "freq008 is not free. Its converged position is 3.727 m against the dual-frequency reference at 1.524 m, because a single frequency with no ionosphere state gives up the ionospheric correction. So this rung asks whether a fixable ambiguity is worth a 2.4x worse starting point, and the answer is only interesting if the fix buys back more than that factor.",
+  "scenario": {
+    "name": "carr010_fixOnSingleFreq",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+  "estimator": {
+    "integerAmbiguity": {
+      "enable": true
+    }
+  },
+  "report": {
+    "runVersion": "carr010",
+    "compileTex": "auto"
+  },
+  "_reportNote": "compileTex 'auto' rather than the golden's 'require': a ladder rung's deliverable is its .mat, and a pdflatex hiccup must not throw away a finished run."
+}

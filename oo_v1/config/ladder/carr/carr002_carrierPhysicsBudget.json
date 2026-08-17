@@ -1,0 +1,24 @@
+{
+  "_id": "carr rung: the carrier error budget built from its physics instead of asserted as one number. TWO TERMS, because the budget has two halves that scale oppositely with frequency. DISPERSIVE half, constant in CYCLES: PLL thermal jitter, which by Kaplan and Hegarty's carrier tracking expression sigma_phi = sqrt(Bn/(C/N0) * (1 + 1/(2*T*C/N0))) / 2pi is 0.00283 cyc at Bn = 10 Hz, T = 20 ms and C/N0 = 45 dB-Hz and contains NO wavelength, plus phase multipath, which is bounded by a quarter cycle by geometry and is taken here at this repository's own declared 1/100 code-to-carrier rule, 0.01 * 0.30 m = 3 mm at L1 = 0.0158 cyc. Quadrature sum 0.0160 cyc. NON-DISPERSIVE half, constant in METRES: residual troposphere after the per-tower ZWD state at 3 mm, antenna phase-centre residual after calibration at 5 mm following Schmid et al. 2007, and oscillator plus cable stability at 2 mm. Quadrature sum 6.2 mm, rounded to 6 mm. RESOLVED VALUES: 6.728 mm at L1, 6.057 mm at 5.8 GHz, 6.003 mm at 24.125 GHz.",
+  "_extends": "golden_baseline.json",
+  "_delta": "measurements.carrier.sigma_cycles 0.016 (was NaN), measurements.carrier.sigmaFloor_m 0.006 (was NaN, i.e. inherit the 0.01 m general floor). Everything else inherited, including measurement.sigmaFloor_m, so the CODE channel is untouched.",
+  "_whatThisMeasures": "The difference against carr001 is the cost of the flat 10 mm assumption at L1, and nothing else. At L1 this rung is 1.49x TIGHTER than the golden. The result to watch is NOT whether position improves. It is whether it improves by the sigma ratio or by far less. Float ambiguities mean the carrier constrains the CHANGE in geometry at its own precision while the ABSOLUTE range stays anchored to the code at ~0.45 m, so a large sigma change buying a small position change would show the carrier sigma is not the binding constraint and would point at estimator.integerAmbiguity.enable, which is false on every reported rung, as the real limit.",
+  "_whyNotLowerStill": "3 mm would be the figure for a well-modelled geodetic undifferenced residual, but this simulation models NO carrier multipath at all (errors.multipath.coloredGM.carrierScale is inert, read by nothing) and NO phase wind-up (errors.phaseWindup.enable is false), so part of what the sigma stands for is physics absent from the world rather than physics that is present and small. 6 mm keeps a margin for that. carr003 bounds the other direction.",
+  "scenario": {
+    "name": "carr002_carrierPhysicsBudget",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+  "measurements": {
+    "carrier": {
+      "sigma_cycles": 0.016,
+      "sigmaFloor_m": 0.006
+    }
+  },
+  "report": {
+    "runVersion": "carr002",
+    "compileTex": "auto"
+  },
+  "_reportNote": "compileTex 'auto' rather than the golden's 'require': a ladder rung's deliverable is its .mat, and a pdflatex hiccup must not throw away a finished run."
+}

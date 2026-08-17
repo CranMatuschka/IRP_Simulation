@@ -1,0 +1,23 @@
+{
+  "_id": "carr rung: the inert sentinel of the carrier-R axis. It turns the sigma_cycles path ON and tunes it to land on the value the golden already uses, so it must reproduce scene008. Its ONLY job is to prove the band-referenced path is live and arithmetically correct BEFORE any rung uses it to claim anything. sigma_cycles = 0.0525503547 cyc at lambda_L1 = 0.190293672798 m gives 0.010000000 m, the golden's flat value. measurements.carrier.sigmaFloor_m = 0 selects the PURE cycles path: ConfigFactory only adds the quadrature floor when floor > 0, so a zero floor gives sigma_m = sigma_cycles * lambda exactly. EXPECTED RESULT: identical to scene008_G5S1R4_TW1_golden to every reported digit. Agreement is to floating point rather than bit-exact, because 0.0525503547 * lambda is not the same double as the literal 0.010, so a residual of order 1e-12 in sigma_m is expected and is NOT a failure. A percent-level disagreement WOULD be, and would mean the derivation reads the wrong wavelength or applies the floor when it should not.",
+  "_extends": "golden_baseline.json",
+  "_delta": "measurements.carrier.sigma_cycles 0.0525503547 (was NaN, i.e. path off), measurements.carrier.sigmaFloor_m 0 (was NaN, i.e. inherit the 0.01 m general floor). Everything else inherited.",
+  "_whyThisAxisExists": "measurements.carrier.sigma_m is the ENTIRE carrier error model. CarrierMeasurementBuilder.m:79 builds R_phi = sigma_phi^2 * eye(Mp_total), one scalar on every carrier row, with no wavelength, no elevation and no per-signal term. The code channel by contrast is C/N0- and elevation-weighted and carries a max() floor, so the carrier is the only channel in this filter whose R has no physical structure. A flat metre value also means the SAME number is 0.053 cycles at GPS L1 and 0.805 cycles at 24.125 GHz, so the band sweep charges the carrier most of a wavelength at its high end. The two-term construction that fixes this is already implemented at ConfigFactory.finalizeConfig and tested by tests/test_carrier_sigma_and_slip_threshold_follow_band.m. It is gated on sigma_cycles being finite, and masterConfig ships NaN, so it has never run on any reported rung. This axis exercises it.",
+  "scenario": {
+    "name": "carr001_carrierCyclesSentinel",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+  "measurements": {
+    "carrier": {
+      "sigma_cycles": 0.0525503547,
+      "sigmaFloor_m": 0.0
+    }
+  },
+  "report": {
+    "runVersion": "carr001",
+    "compileTex": "auto"
+  },
+  "_reportNote": "compileTex 'auto' rather than the golden's 'require': a ladder rung's deliverable is its .mat, and a pdflatex hiccup must not throw away a finished run."
+}

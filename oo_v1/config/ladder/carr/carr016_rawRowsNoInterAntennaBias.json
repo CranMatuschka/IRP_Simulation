@@ -1,0 +1,31 @@
+{
+  "_id": "carr rung: carr012 with the uncorrected inter-antenna carrier bias removed from the truth. This is the rung that should finally produce an ambiguity that is BOTH precise AND an integer. carr012 solved observability, taking the ambiguity sigma from 51.90 m to 0.0318 m by dropping the ionosphere-free row, at a cost of 1.6 % in position. But its ambiguity VALUES are not near integers: the fractional part of x/lambda is indistinguishable from uniform, measured std 0.2923 cycles against 0.2887 for a true uniform. The diagnosis is in the structure. Scatter WITHIN each tower is 0.2736 cycles while the scatter of the tower MEANS is only 0.0969, so the displacement is per-(tower, antenna) and not per-tower. That rules out the tower clock and names the one per-(tower, antenna) term in the configuration: errors.interAntennaCarrierBias, injected at sigma 0.25 cycles with estimator.interAntennaCarrierBias.mode = 'none' so nothing corrects it. Injected 0.25, observed 0.2736. The ambiguity is absorbing it, which is correct filter behaviour and fatal to integer fixing.",
+  "_extends": "golden_baseline.json",
+  "_delta": "measurements.carrier.ionosphereFreeRows.useInEkf false (as carr012) AND errors.interAntennaCarrierBias.enable false. Two keys, deliberately. Read carr016 against carr012, which differs from it by exactly the bias key.",
+  "_WHATSHOULDHAPPEN": "With no ionosphere-free row the ambiguity stays observable, and with no uncorrected per-antenna bias its truth is exactly lambda*N on every antenna rather than on the reference one alone. So the fractional part of x/lambda should collapse from uniform towards zero, bounded by the estimate's own sigma of about 0.167 cycles. That is the first time in this thesis that an uplink ambiguity would be both determined and legitimately roundable.",
+  "_ANDTHETESTTHATDECIDESIT": "Do NOT read the sigma. carr013 already demonstrated a sigma of 0.070 cycles, better than anything else measured, on a configuration whose NIS was 164 and whose ambiguities were absorbing an unmodelled ionosphere. The test that matters is the fractional part of x/lambda against the estimate's own sigma, plus a healthy NIS. Both must hold. A small sigma alone is not a licence to fix, and this axis now carries a worked example of why.",
+  "_WHATITSTILLDOESNOTLICENSE": "A real receiver carries an uncalibrated carrier phase bias, so removing this one from the truth is a SIMULATION condition, not a capability. What the rung establishes is the size of the calibration requirement: the inter-antenna phase bias must be calibrated to well inside the 0.20-cycle distance-to-integer gate, i.e. to a few centimetres at L1, before undifferenced uplink fixing could be attempted on hardware. That is a number a requirement can be written from, which is the useful output.",
+  "scenario": {
+    "name": "carr016_rawRowsNoInterAntennaBias",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+  "measurements": {
+    "carrier": {
+      "ionosphereFreeRows": {
+        "useInEkf": false
+      }
+    }
+  },
+  "errors": {
+    "interAntennaCarrierBias": {
+      "enable": false
+    }
+  },
+  "report": {
+    "runVersion": "carr016",
+    "compileTex": "auto"
+  },
+  "_reportNote": "compileTex 'auto' rather than the golden's 'require': a ladder rung's deliverable is its .mat, and a pdflatex hiccup must not throw away a finished run."
+}

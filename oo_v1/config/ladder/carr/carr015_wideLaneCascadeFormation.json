@@ -1,0 +1,29 @@
+{
+  "_id": "carr rung: the actual wide-lane CASCADE, run where the code can run it. GroundCarrierAmbiguityResolver forms one ambiguity per (satellite i>=2, tower /= ref, arc), so it needs a formation and cannot operate on a single asset. This rung therefore takes the six-asset formation twin and enables the ground-carrier resolver over it, at the reference grade rather than at the idealised grade the existing orientation rungs use. multiAsset.groundCarrier.enable is the estimator, as distinct from the groundCarrierProbe which scores itself against an integer it drew; the resolver decides without truth and reports how often it would be WRONG from the covariance alone.",
+  "_extends": "golden_baseline_multi.json",
+  "_delta": "multiAsset.groundCarrier.enable true (was false), diagnostics.wideLaneNarrowLane.enable true (was false) so the lane statistics are recorded alongside. minSuccessRate left at the masterConfig 0.999. Nothing loosened to manufacture a fix.",
+  "_HOWTHISDIFFERSFROMtest008": "test008 runs the same resolver on the ORIENTATION path, at 120 s cadence with the joint geometry solve consuming the fixed lane, and it is the rung whose wide-lane fix was perfect (20 of 20, bootstrapped 1.000) while the orientation solve it fed was wrong by a factor of twenty-one. This rung asks the narrower and cleaner question: what does the cascade do to the FORMATION ESTIMATE itself at the reference grade, with no rotation solve downstream to confuse the reading. The wide lane being geometry-free is exactly why those two questions have different answers.",
+  "_THETHINGTOREADFIRST": "Whether the NARROW lane fixes. The wide lane is expected to fix, because it is geometry-free and 86 cm long, and test008 already showed it doing so against a shape error larger than a wavelength at most bands. The narrow lane is NOT geometry-free, so it is the step where a shape error bites, and its absence in test008 is recorded in the thesis as an evidence gap rather than a negative result. If it fixes here it closes that gap. If it refuses, the REASON it gives is the result.",
+  "_WHATWOULDMAKETHISUNSAFETOQUOTE": "A wide-lane fix that is accepted and wrong. The combination is geometry-free, which makes its integer robust to a bad shape and simultaneously means a correct wide-lane fix says NOTHING about whether the geometry underneath is good enough for anything else. That inference is natural and would be wrong, and the thesis already carries a worked example of it going wrong. So report the wide-lane success rate and the narrow-lane outcome separately, and never let the first stand in for the second.",
+  "scenario": {
+    "name": "carr015_wideLaneCascadeFormation",
+    "nTowers": 5,
+    "nSpaceAssets": 6,
+    "nReceivers": 4
+  },
+  "multiAsset": {
+    "groundCarrier": {
+      "enable": true
+    }
+  },
+  "diagnostics": {
+    "wideLaneNarrowLane": {
+      "enable": true
+    }
+  },
+  "report": {
+    "runVersion": "carr015",
+    "compileTex": "auto"
+  },
+  "_reportNote": "compileTex 'auto' rather than the golden's 'require': a ladder rung's deliverable is its .mat, and a pdflatex hiccup must not throw away a finished run."
+}

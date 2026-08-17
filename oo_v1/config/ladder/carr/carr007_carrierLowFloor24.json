@@ -1,0 +1,24 @@
+{
+  "_id": "carr rung: the carr006 low-floor model carried to 24.125 GHz, and the only rung in this thesis where the carrier is charged a MILLIMETRE. Resolved sigma 1.020 mm, against the 10 mm freq012 charges, i.e. 9.8x tighter. Its parent is freq012, so exactly one setting moves relative to that parent. In the carrier's own unit it is 0.082 cycles, against freq012's 0.805, so this is the first rung in which the high band is charged a small enough fraction of a wavelength for the phase observable to mean what the theory chapter says it means.",
+  "_extends": "freq012_ism5800_24125.json",
+  "_delta": "measurements.carrier.sigma_cycles 0.016 (was NaN), measurements.carrier.sigmaFloor_m 0.001 (was NaN). Band, code sigmas and everything else inherited from freq012.",
+  "_whatTheFourCornerRungsDecide": "carr002 L1 6.728 mm, carr005 24 GHz 6.003 mm, carr006 L1 3.205 mm, carr007 24 GHz 1.020 mm. Read as a 2x2 in band and floor. Across band at a 6 mm floor the sigma falls 1.12x, and across band at a 1 mm floor it falls 3.14x. If the converged position tracks those sigma ratios, the carrier sigma is the binding constraint and the flat 10 mm was costing real accuracy. If position barely moves across all four while the sigma spans 6.6x, then the float ambiguity is the binding constraint, the absolute range stays anchored to the code at ~0.45 m, and no carrier sigma reachable by configuration changes the answer. The second outcome would be the more useful result, because it would say the carrier work belongs in estimator.integerAmbiguity, which is false on every reported rung, rather than in R.",
+  "_theBandCaveatThatSurvivesEitherWay": "At 24.125 GHz a 1 mm sigma is 0.082 cycles, which is resolvable, but the ambiguity wavelength is only 12.4 mm, so a single cycle slip displaces the range by 12.4 mm and any unmodelled systematic above 6 mm is indistinguishable from an integer. The high band buys phase precision and spends ambiguity robustness. That trade is not visible in a sigma comparison and needs the slip and fixing diagnostics read alongside it.",
+  "scenario": {
+    "name": "carr007_carrierLowFloor24",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+  "measurements": {
+    "carrier": {
+      "sigma_cycles": 0.016,
+      "sigmaFloor_m": 0.001
+    }
+  },
+  "report": {
+    "runVersion": "carr007",
+    "compileTex": "auto"
+  },
+  "_reportNote": "compileTex 'auto' rather than the golden's 'require': a ladder rung's deliverable is its .mat, and a pdflatex hiccup must not throw away a finished run."
+}

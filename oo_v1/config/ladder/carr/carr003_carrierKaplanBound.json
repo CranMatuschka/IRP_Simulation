@@ -1,0 +1,24 @@
+{
+  "_id": "carr rung: the pessimistic end of the same two-term budget, and it goes the OTHER WAY from the golden. Identical construction to carr002, with one term replaced: carrier phase multipath is taken at Kaplan and Hegarty's benign-environment figure of 2 cm at L1 rather than at this repository's 1/100 rule of 3 mm. 20 mm at lambda_L1 is 0.1051 cyc, which with the 0.00283 cyc thermal term gives 0.105 cyc, still comfortably inside the quarter-cycle geometric bound. Non-dispersive floor unchanged at 6 mm. RESOLVED VALUES: 20.862 mm at L1, 8.090 mm at 5.8 GHz, 6.140 mm at 24.125 GHz. So at L1 this rung is 2.09x LOOSER than the golden's flat 10 mm, at 5.8 GHz it is close to it, and by 24.125 GHz it has converged with carr002 because the non-dispersive floor has taken over.",
+  "_extends": "golden_baseline.json",
+  "_delta": "measurements.carrier.sigma_cycles 0.105 (was NaN), measurements.carrier.sigmaFloor_m 0.006 (was NaN). Everything else inherited.",
+  "_whyThisRungMatters": "It is the rung that stops the axis being a one-sided argument. The flat 10 mm is not uniformly conservative. Under the repository's own 1/100 multipath rule it is 1.49x too LARGE at L1, and under the Kaplan figure the repository ALSO cites it is 2.09x too SMALL at L1. A flat number cannot be right at both ends of a budget whose dominant term scales with lambda, and this pair brackets it. If carr002 and carr003 give materially the same converged position despite a 3.1x spread in carrier sigma, the honest conclusion is that the carrier sigma was never the binding constraint and the flat value cost nothing, which would retrospectively justify every frozen rung.",
+  "_theConvergenceIsThePoint": "carr002 and carr003 differ by 3.1x at L1 and by only 1.02x at 24.125 GHz. That convergence is real physics rather than a construction artefact: above roughly 6 GHz the non-dispersive residual dominates whatever the multipath assumption is, because it is a fixed LENGTH while the wavelength keeps shrinking. The same fact is why no floor choice makes the carrier resolvable to a small fraction of a cycle above about 30 GHz.",
+  "scenario": {
+    "name": "carr003_carrierKaplanBound",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+  "measurements": {
+    "carrier": {
+      "sigma_cycles": 0.105,
+      "sigmaFloor_m": 0.006
+    }
+  },
+  "report": {
+    "runVersion": "carr003",
+    "compileTex": "auto"
+  },
+  "_reportNote": "compileTex 'auto' rather than the golden's 'require': a ladder rung's deliverable is its .mat, and a pdflatex hiccup must not throw away a finished run."
+}

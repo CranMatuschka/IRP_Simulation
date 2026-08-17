@@ -1,0 +1,23 @@
+{
+  "_id": "carr rung: the carr002 physics budget carried to 24.125 GHz, the band where the flat model is most obviously wrong in the carrier's own unit. Its parent is freq012, so exactly one setting moves. lambda = 12.427 mm, so freq012's flat 10 mm is 0.805 cycles, four fifths of a wavelength of asserted noise on an observable whose entire worth is sub-cycle resolution. This rung resolves to 6.003 mm, which is 0.483 cycles. Note that even the physically derived budget is nearly half a cycle here, because the non-dispersive residual is a fixed LENGTH and the wavelength has shrunk below it. That is not a configuration choice and no floor value removes it.",
+  "_extends": "freq012_ism5800_24125.json",
+  "_delta": "measurements.carrier.sigma_cycles 0.016 (was NaN), measurements.carrier.sigmaFloor_m 0.006 (was NaN). Band, code sigmas and everything else inherited from freq012.",
+  "_theStructuralResultThisRungCarries": "The pair carr002 at L1 and carr005 at 24.125 GHz shows the derived budget falling only from 6.73 mm to 6.00 mm while the wavelength falls by 15.3x. In metres the carrier barely improves with band, because above roughly 300 MHz the non-dispersive half already dominates and the dispersive half it would have to beat is already negligible. In cycles it gets steadily worse, from 0.035 to 0.483. The practical reading is that raising the carrier frequency does not buy carrier precision in this budget, it only shortens the ambiguity's wavelength, and past about 30 GHz it stops being a resolvable phase observable at all. If that holds in the run it is a genuine constraint on the band choice argued elsewhere in the thesis on aperture and coherence grounds.",
+  "scenario": {
+    "name": "carr005_carrierPhysicsBudget24",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+  "measurements": {
+    "carrier": {
+      "sigma_cycles": 0.016,
+      "sigmaFloor_m": 0.006
+    }
+  },
+  "report": {
+    "runVersion": "carr005",
+    "compileTex": "auto"
+  },
+  "_reportNote": "compileTex 'auto' rather than the golden's 'require': a ladder rung's deliverable is its .mat, and a pdflatex hiccup must not throw away a finished run."
+}

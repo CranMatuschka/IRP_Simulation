@@ -1,0 +1,23 @@
+{
+  "_id": "carr rung: the same dispersive term as carr002, with the NON-DISPERSIVE floor cut from 6 mm to 1 mm, at L1. Resolved sigma 3.205 mm. This rung exists because the floor, not the cycles term, is what decides whether the carrier improves with frequency at all, and carr002 to carr005 all hold it fixed at 6 mm so they cannot separate the two. WHY 1 mm IS DEFENSIBLE HERE, and arguably better than 6: the 6 mm of carr002 is built mostly on Schmid et al. 2007's ~5 mm post-calibration phase-centre residual, which is a GROUND-STATION figure over varied azimuth and elevation. This geometry is the opposite case. One calibrated spacecraft antenna views all five towers inside a cone of about 9 deg about nadir, so the PCV excursion across the visible set is small and largely common. The residual troposphere is also better absorbed here than in a terrestrial network, because each tower sits at a near-constant elevation for the whole arc, which is exactly the condition a per-tower ZWD state is built for. And the oscillator term is arguably double-counted in R at all, since the clock states already carry it.",
+  "_extends": "golden_baseline.json",
+  "_delta": "measurements.carrier.sigma_cycles 0.016 (was NaN), measurements.carrier.sigmaFloor_m 0.001 (was NaN, i.e. inherit the 0.01 m general floor). Same dispersive term as carr002. Everything else inherited.",
+  "_thePairThisBelongsTo": "carr006 at L1 and carr007 at 24.125 GHz are the SAME error model at two bands, with the floor low enough that it does not bind. Their ratio is 3.14x, against the 1.12x that carr002 and carr005 show at a 6 mm floor over the same band range. That contrast is the measurement: it separates 'does the carrier get better with frequency' from 'what is the non-dispersive residual', which the ladder could not do while the floor was held fixed. The honest reading is that the carrier improves with band ONLY to the extent that the floor allows, so the floor is the quantity worth arguing about, not the band.",
+  "scenario": {
+    "name": "carr006_carrierLowFloorL1",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+  "measurements": {
+    "carrier": {
+      "sigma_cycles": 0.016,
+      "sigmaFloor_m": 0.001
+    }
+  },
+  "report": {
+    "runVersion": "carr006",
+    "compileTex": "auto"
+  },
+  "_reportNote": "compileTex 'auto' rather than the golden's 'require': a ladder rung's deliverable is its .mat, and a pdflatex hiccup must not throw away a finished run."
+}

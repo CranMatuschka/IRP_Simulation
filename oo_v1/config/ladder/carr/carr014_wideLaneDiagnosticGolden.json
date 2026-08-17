@@ -1,0 +1,24 @@
+{
+  "_id": "carr rung: switch on the Melbourne-Wubbena wide-lane and narrow-lane DIAGNOSTIC over the reference configuration. cfg.diagnostics.wideLaneNarrowLane.enable is false on all 108 rungs of the frozen sweep, so wideLaneSigmaCyclesMean and narrowLaneSigmaCyclesMean read NaN everywhere and the thesis has never measured the wide lane on the single-asset uplink. This rung measures it. NOTE THE SCOPE HONESTLY: this is metadata only, no EKF math, so position and NIS must come out bit-identical to scene008. The deliverable is the wide-lane float sigma in CYCLES, which decides whether a cascade could work here at all.",
+  "_extends": "golden_baseline.json",
+  "_delta": "diagnostics.wideLaneNarrowLane.enable true (was false). Nothing else. No estimator path changes, so a non-zero difference in position would itself be a defect.",
+  "_WHYTHEWIDELANEISTHERIGHTPLACETOLOOK": "The wide lane is the one combination that escapes both problems this axis has uncovered. It is GEOMETRY-FREE, so the metre-class position error does not enter it. It is IONOSPHERE-FREE, so it needs neither the IF row that destroys the ambiguity nor the per-tower state that replaces it. And its wavelength is 86 cm against L1's 19 cm, so the same absolute error is 4.5x smaller measured in cycles. That is why the theory chapter routes the cascade through it, and why test008 fixed twenty of twenty components there at a bootstrapped success rate of 1.000 while the code rotation solve refused.",
+  "_WHATTHENUMBERWILLMEAN": "The fixing gate is 0.15 cycles. On test008 the wide-lane float sigma was 0.010 cycles, comfortably inside it, but that was a between-satellite DOUBLE DIFFERENCE on a six-asset formation. This rung asks what the wide lane looks like UNDIFFERENCED on one asset, where the receiver clock and the hardware phase bias do not cancel. Expect it to be worse than 0.010 cycles. The question is whether it is worse than 0.15.",
+  "_ANDWHATITCANNOTSHOW": "It cannot show a fix. GroundCarrierAmbiguityResolver forms one ambiguity per (satellite i>=2, tower /= ref, arc), so it needs at least two satellites and does not run on a single-asset scenario at all. The wide-lane CASCADE in this repository is a post-processing layer over a formation, not an in-EKF capability, which the traceability document states outright. So a good sigma here is a statement about feasibility, not a demonstration, and must be quoted that way.",
+  "scenario": {
+    "name": "carr014_wideLaneDiagnosticGolden",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+  "diagnostics": {
+    "wideLaneNarrowLane": {
+      "enable": true
+    }
+  },
+  "report": {
+    "runVersion": "carr014",
+    "compileTex": "auto"
+  },
+  "_reportNote": "compileTex 'auto' rather than the golden's 'require': a ladder rung's deliverable is its .mat, and a pdflatex hiccup must not throw away a finished run."
+}

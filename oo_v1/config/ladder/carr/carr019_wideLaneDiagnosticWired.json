@@ -1,0 +1,28 @@
+{
+  "_id": "carr rung: carr014 with the two UPSTREAM dependencies the wide-lane diagnostic silently needs. carr014 set diagnostics.wideLaneNarrowLane.enable true, the resolved config confirmed it, and the run still reported classification 'disabled' with pairCount 0. Tracing ReportRunner showed why. The wide-lane block at :240 is guarded by three conditions, not one: the toggle, a non-zero L1/L2 pair count, and an available ambiguity covariance. The last two come from summary.ambiguityStateMetadata and summary.ambiguityCovarianceSummary, both produced by revgnss.AmbiguityStateMetadata and both gated at ReportRunner:179 on cfg.diagnostics.ambiguityStateMetadata.enable. That key is NOT declared in masterConfig at all. It is set only in run_oo_reverse_gnss_report.m:73, a different entry point, so no run launched through run_oo_v1 has ever had it on and the wide lane has never been computable anywhere in this thesis.",
+  "_extends": "golden_baseline.json",
+  "_delta": "diagnostics.wideLaneNarrowLane.enable true AND diagnostics.ambiguityStateMetadata.enable true. Both are metadata-only, no EKF math, so this rung must stay bit-identical to scene008 on the estimate exactly as carr014 did. A non-zero difference would be a defect.",
+  "_THEPREDICTIONUNDERTEST": "On the reference configuration the EKF consumes an ionosphere-free carrier row, so the L1/L2 ambiguity covariance is rank-one along v proportional to (-beta, alpha) with alpha 2.545728 and beta -1.545728. The wide lane N_WL = B1/lambda1 - B2/lambda2 has direction w = (5.2550, -4.0948), and w.v/|v| = -0.7728 rather than zero, so the wide lane lies PARTLY in the blind direction and must inherit it. From the 100 m prior that predicts sigma_N_WL = 77.3 CYCLES. The same projection already reproduced the individual ambiguity sigmas of 51.9004 m and 85.4772 m to 0.00005 m and held to 1.000000 across a 100x prior sweep, so it is a sharp prediction rather than a guess.",
+  "_WHATITWOULDMEAN": "A wide lane at 77 cycles against a fixing gate of 0.15 would say the ionosphere-free row poisons the wide lane too. That is the counterintuitive part worth reporting: the wide lane's usual defence is being geometry-free and ionosphere-free, and neither helps here, because the damage happened UPSTREAM when two ambiguities were collapsed into one row. It would make carr012's raw-row configuration a prerequisite for the wide-lane cascade as well, not only for direct fixing. If instead the wide lane comes back small, the combination survives the collapse and the cascade is available on the reference configuration after all, which would be the better news and equally worth knowing.",
+  "_ANOTETOCARRYINTOTHETHESIS": "Three separate ambiguity capabilities have now been found declared-but-unreachable on the run_oo_v1 path: estimator.integerAmbiguity, scoped by a literal scenario-name check; estimator.lambda.ground, with no consumer outside the toggle manifest; and this one, gated on a key masterConfig never declares. None is a bug in the physics. All three are the same reporting hazard, a toggle that reads as available and produces silence, and the frozen sweep records the silence as a result.",
+  "scenario": {
+    "name": "carr019_wideLaneDiagnosticWired",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+  "diagnostics": {
+    "wideLaneNarrowLane": {
+      "enable": true
+    },
+    "ambiguityStateMetadata": {
+      "enable": true
+    }
+  },
+  "report": {
+    "runVersion": "carr019",
+    "compileTex": "auto"
+  },
+  "_reportNote": "compileTex 'auto' rather than the golden's 'require': a ladder rung's deliverable is its .mat, and a pdflatex hiccup must not throw away a finished run.",
+  "_RENUMBEREDFROMcarr017": "Originally authored and RUN as carr017. Renumbered to carr019 because a concurrent session committed a different carr017_melbourneWubbenaSingleAsset.json at 6734d2a. The measurement this rung produced therefore sits in output/Report_20260817/Report_carr017_G5S1R4_TW1 and in output/latest/latest_carr017_wideLaneDiagnosticWired.mat, under the OLD number. Its result: wideLaneNarrowLaneClassification 'active-float-diagnostics', pairCount 20, wideLaneSigmaCyclesMean 77.276 cycles against a closed-form prediction of 77.3, narrowLaneSigmaCyclesMean 622.75, and the position series bit-identical to frozen scene008 as a metadata-only rung must be. Re-running under the new number reproduces it; the old output is kept because it is the run the 77.3-cycle prediction was tested against."
+}

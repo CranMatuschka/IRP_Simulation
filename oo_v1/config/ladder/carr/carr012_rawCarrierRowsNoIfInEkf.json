@@ -1,0 +1,26 @@
+{
+  "_id": "carr rung: feed the EKF RAW L1 and L2 carrier rows instead of their ionosphere-free combination. This is the rung the whole carr axis has been converging on. Measured on the frozen sweep, the undifferenced float ambiguity parks at 51.9004 m on L1 and 85.4772 m on L2 and never moves again, and the reason is exactly algebraic rather than physical. With ionosphereFreeRows.useInEkf true the EKF receives ONE row per (tower, antenna) carrying alpha*B1 + beta*B2, where alpha = 2.545728 and beta = -1.545728. One equation, two ambiguity unknowns, so the pair is rank-deficient by exactly one BY CONSTRUCTION. The surviving marginals are the 100 m prior projected onto the direction orthogonal to (alpha, beta): 100*|beta|/sqrt(alpha^2+beta^2) = 51.9004 m and 100*alpha/sqrt(alpha^2+beta^2) = 85.4772 m. Both match the measurement to 0.00005 m, and their ratio alpha/|beta| is identically (f_L1/f_L2)^2 = 1.646944 against a measured 1.646947.",
+  "_extends": "golden_baseline.json",
+  "_delta": "measurements.carrier.ionosphereFreeRows.useInEkf false (was true). The IF rows are still BUILT (ionosphereFreeRows.enable stays true) so the diagnostics that read them survive, they are simply not the rows the filter updates on. l2EkfRows.enable stays true, so both signals still reach the EKF, now as two independent rows. Everything else inherited, including the per-tower slant-ionosphere state that must now absorb the ionosphere the IF combination used to eliminate.",
+  "_THEPREDICTION": "Two raw rows for two ambiguities per (tower, antenna) removes the rank deficiency, so the ambiguity should CONVERGE rather than freeze. The scale to expect is set by freq008, the only frozen rung with no IF combination available (single signal), where the ambiguity reaches 0.0150 m. If carr012 lands anywhere near that, the 51.9 m is confirmed as an artefact of the row construction and not a property of reverse GNSS.",
+  "_WHATITSHOULDCOST": "The ionosphere-free combination exists to eliminate the first-order ionosphere at unit gain. Giving it up hands that job to the per-tower slant-iono state, which is a weaker instrument, so position may well get WORSE. That is the trade this rung prices: an observable ambiguity against a noisier ionospheric correction. freq008 pays 3.727 m against the reference 1.524 m for the same escape by a different route, but freq008 also throws away the second frequency entirely, which carr012 does not.",
+  "_WHYITMATTERSBEYONDTHISLADDER": "Every dual-frequency rung of the frozen sweep feeds the EKF an IF carrier combination, including the ones named 'raw'. freq002_L1L2raw carries carrierCombinationMode 'raw' and ionosphereFreeRows.useInEkf true at the same time, because that legacy string governs a different path. So 'the uplink ambiguity is unobservable' has been a property of one configuration choice made in the baseline, inherited silently by everything below it, and never varied. This rung varies it.",
+  "scenario": {
+    "name": "carr012_rawCarrierRowsNoIfInEkf",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+  "measurements": {
+    "carrier": {
+      "ionosphereFreeRows": {
+        "useInEkf": false
+      }
+    }
+  },
+  "report": {
+    "runVersion": "carr012",
+    "compileTex": "auto"
+  },
+  "_reportNote": "compileTex 'auto' rather than the golden's 'require': a ladder rung's deliverable is its .mat, and a pdflatex hiccup must not throw away a finished run."
+}

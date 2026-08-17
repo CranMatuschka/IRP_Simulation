@@ -1,0 +1,29 @@
+{
+  "_id": "carr rung: the clean half of the fixing pair. Identical to carr010 except that the uncorrected per-antenna carrier bias is removed from the TRUTH, so every undifferenced ambiguity is exactly lambda*N and the integer estimator's validity precondition is satisfied on every row rather than on the reference antenna only. This is the rung that answers 'what would fixing the uplink ambiguity actually buy', with the confound removed. It is a SIMULATION-ONLY condition and must be labelled as such wherever it is quoted, because a real receiver always carries an uncalibrated carrier phase bias and cannot reach this state without an external phase-bias product.",
+  "_extends": "freq008_L1onlyNoIonoState.json",
+  "_delta": "estimator.integerAmbiguity.enable true (was false), errors.interAntennaCarrierBias.enable false (was true, sigma 0.25 cycles). Two keys, which breaks the one-change-per-rung rule ON PURPOSE and only against freq008: the pair carr010/carr011 is the controlled comparison, and carr010 is the one that differs from freq008 by exactly one key. Read carr011 against carr010, not against freq008.",
+  "_WHATTHEPAIRSEPARATES": "carr010 keeps the bias, so three of the four antennas carry a non-integer truth and the maxDistanceToInteger gate should decline them. carr011 removes the bias, so all four carry an integer truth and the resolver should fix broadly. The DIFFERENCE between the two is therefore the cost of an uncalibrated carrier phase bias to an integer-fixing architecture, measured rather than argued. That number is the one a hardware requirement would be written from, because it prices the phase-bias calibration product the architecture would have to buy.",
+  "_WHATTOREADOUT": "Three things, in order. First the count of accepted fixes and the realised correctness of each, which the simulation can grade because it holds truth. Second the converged position against freq008's 3.727 m, which is the actual payoff and the only reason to accept a single-frequency configuration at all. Third whether the filter's own covariance shrinks in step with the accuracy, because a fix is asserted as certain and an over-tight covariance after fixing is the standard way this goes wrong quietly.",
+  "_THEHONESTCEILING": "Even a perfect result here does not license 'the uplink ambiguity can be fixed'. It licenses 'the uplink ambiguity can be fixed in a single-frequency configuration with no ionosphere state, at a 2.4x worse starting position, and only once the carrier phase bias is calibrated by something outside this simulation'. The dual-frequency reference remains unfixable at 272.7 cycles regardless.",
+  "scenario": {
+    "name": "carr011_fixOnSingleFreqTrueInteger",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+  "estimator": {
+    "integerAmbiguity": {
+      "enable": true
+    }
+  },
+  "errors": {
+    "interAntennaCarrierBias": {
+      "enable": false
+    }
+  },
+  "report": {
+    "runVersion": "carr011",
+    "compileTex": "auto"
+  },
+  "_reportNote": "compileTex 'auto' rather than the golden's 'require': a ladder rung's deliverable is its .mat, and a pdflatex hiccup must not throw away a finished run."
+}

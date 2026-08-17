@@ -1,0 +1,28 @@
+{
+  "_id": "carr rung: raw carrier rows AND no ionosphere state, the dual-frequency analogue of freq008. carr012 removes the ionosphere-free combination but leaves the per-tower slant-iono state to absorb the ionosphere. This rung removes both, so the ionosphere is neither eliminated by combination nor estimated by a state. The pairing is deliberate: freq008 reached an ambiguity sigma of 0.0150 m by having ONE signal and no iono state, and it is the only frozen rung whose ambiguity converges. carr013 asks whether the second frequency can be kept while still reaching that regime, which freq008 cannot answer because it discards the second signal to get there.",
+  "_extends": "golden_baseline.json",
+  "_delta": "measurements.carrier.ionosphereFreeRows.useInEkf false (was true) AND estimation.ionosphereMode 'none' (was the golden's per-tower slant state). Two keys, which breaks the one-change rule ON PURPOSE. Read carr013 against carr012, which differs from it by exactly the iono-state key, and read carr012 against the golden. The three form a chain in which each step moves one setting.",
+  "_WHATTHECHAINSEPARATES": "golden to carr012 is the cost of giving up the ionosphere-free combination while keeping an iono state. carr012 to carr013 is the further cost of giving up the state as well. Between them they say whether the ambiguity's observability is bought by removing the COMBINATION, by removing the STATE, or only by removing both. The frozen evidence already rules out the state acting alone: freq007 removes the iono state while keeping the IF combination and the ambiguity stays at 51.9004 m, bit-for-bit with freq002. So the combination is the necessary half, and this pair measures whether it is also the sufficient half.",
+  "_EXPECTEDCOST": "Highest of the three. With no ionosphere-free combination and no ionospheric state, the first-order ionosphere reaches the carrier rows unmodelled and the ambiguities must absorb it. They can, because an ambiguity is a free constant per arc, but only to the extent the ionosphere is constant, and the golden's ionosphere is a Gauss-Markov process with a 600 s correlation time over a 3600 s arc. So expect the ambiguity to look observable and be biased, which is the interesting failure rather than a boring one. Read the ambiguity ERROR against truth, not only its sigma, before calling this configuration fixable.",
+  "scenario": {
+    "name": "carr013_rawCarrierRowsNoIonoState",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+  "measurements": {
+    "carrier": {
+      "ionosphereFreeRows": {
+        "useInEkf": false
+      }
+    }
+  },
+  "estimation": {
+    "ionosphereMode": "none"
+  },
+  "report": {
+    "runVersion": "carr013",
+    "compileTex": "auto"
+  },
+  "_reportNote": "compileTex 'auto' rather than the golden's 'require': a ladder rung's deliverable is its .mat, and a pdflatex hiccup must not throw away a finished run."
+}

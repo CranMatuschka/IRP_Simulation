@@ -1,0 +1,31 @@
+{
+  "_id": "carr rung: the proper integer least-squares engine on the ground-to-space carrier, rather than the per-ambiguity rounding of carr008. Wraps the TU Delft LAMBDA 4.0 toolbox through estimator.lambda with method 3, the ILS search-and-shrink, and keeps its bootstrapped success-rate floor at 0.999 and its ratio test at 2.0. This is the same engine and the same gates the wide-lane fix of test008 passed, pointed at the undifferenced uplink instead of at a differenced observable. THE POINT OF THE RUNG IS THE CONTRAST. On a differenced observable the engine fixed twenty of twenty components at a bootstrapped success rate of 1.000. On this one the float sigma is 272.7 cycles at L1, so the same engine with the same threshold should refuse everything. A resolver that fixes the differenced case and refuses the undifferenced case is behaving exactly as the theory says it must, and demonstrating that pair is worth more than either half alone.",
+  "_extends": "golden_baseline.json",
+  "_delta": "estimator.lambda.enable true (was false), estimator.lambda.ground.enable true (was false), estimator.lambda.toolboxPath set. Method, nCands, minSuccessRate and ratioThreshold all left at their masterConfig values. estimator.lambda.isl.enable stays false, so the crosslink path is untouched and this rung is about the ground link only.",
+  "_HOWTHISDIFFERSFROMfeat023": "feat023_onLambdaGroundAr set exactly these keys and came out BIT-IDENTICAL to scene008 on all 3601 epochs, max difference 0.0. That rung is therefore already evidence, but it is silent evidence: identical output could mean the resolver refused, or that it never ran, or that the toolbox was absent and it returned the float solution with 'unavailable-toolbox'. This rung is run with the toolbox present and confirmed on disk, and the deliverable is the resolver's own REPORTED reason rather than the absence of a difference. Distinguishing 'refused, and here is the success rate it computed' from 'never executed' is the whole value.",
+  "_theExternalDependency": "The toolbox is not vendored, because its files carry a TU Delft copyright with no licence grant. toolboxPath points at a local copy. If it is missing the resolver returns the float solution and reports 'unavailable-toolbox' rather than erroring, which is why the reported reason matters more than the numeric result.",
+  "scenario": {
+    "name": "carr009_lambdaGroundAr",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+  "estimator": {
+    "lambda": {
+      "enable": true,
+      "toolboxPath": "/Users/ludwigmatuschka/Downloads/LAMBD4-master_2024_10_01",
+      "method": 3,
+      "nCands": 2,
+      "minSuccessRate": 0.999,
+      "ratioThreshold": 2.0,
+      "ground": {
+        "enable": true
+      }
+    }
+  },
+  "report": {
+    "runVersion": "carr009",
+    "compileTex": "auto"
+  },
+  "_reportNote": "compileTex 'auto' rather than the golden's 'require': a ladder rung's deliverable is its .mat, and a pdflatex hiccup must not throw away a finished run."
+}

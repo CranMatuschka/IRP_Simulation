@@ -1,0 +1,23 @@
+{
+  "_id": "carr rung: turn the built-in raw-carrier integer resolver ON over the golden baseline, which no rung of the frozen sweep does. estimator.integerAmbiguity.enable is false on all 108 rungs, so 'the uplink ambiguity is never fixed' has been an untested configuration statement rather than a measured result. This rung tests it. THE EXPECTED OUTCOME IS REFUSAL, and the refusal is the deliverable. Measured on scene008, the undifferenced ambiguity state sigma is 51.900 m at L1 and 85.477 m at L2 after a full 3600 s arc, which is 272.7 and 350.0 CYCLES. The gate maxSigma_cycles is 0.15. Every row therefore fails the sigma gate by more than three orders of magnitude, and a run in which nothing is fixed is the correct behaviour of a correctly built resolver.",
+  "_extends": "golden_baseline.json",
+  "_delta": "estimator.integerAmbiguity.enable true (was false). Every gate left at its masterConfig value: minArcLength_s 300, maxSigma_cycles 0.15, maxDistanceToInteger_cycles 0.20, maxResidualRmsIncrease_m 0.01, fixVariance_cycles2 1e-4, resetOnSlip true. Nothing is loosened to manufacture a fix.",
+  "_whyFIXINGHEREWOULDBEWRONGANYWAY": "masterConfig's own validity precondition states it: an integer estimator assumes the float vector's TRUTH is an integer, and the UNDIFFERENCED ambiguity here is not one. It absorbs the receiver carrier hardware phase bias, which is uncalibrated in this configuration (rxCarrierBias.mode = 'notImplemented' with carrierMode = 'ekfFloat', a combination ConfigFactory warns about at run time), plus the per-arc clock content. So the quantity is a real number that happens to contain an integer, and rounding it to an integer would assert a falsehood and then treat it as certain. That is exactly the failure mode the theory chapter describes: a wrong integer displaces the row by a whole wavelength, and because the fix is thereafter treated as certain the filter cannot detect or undo it. The thesis's own structural rule says the same thing, that only differenced or explicitly calibrated combinations may legitimately be fixed.",
+  "_whatARESULTWOULDMEAN": "If this rung reports zero fixes and reproduces the golden, it establishes by measurement that the uplink ambiguity cannot be fixed in this configuration and names the reason, which is a stronger statement than the current silence. If it reports ANY accepted fix, that is a defect worth chasing, because no gate should pass at 272.7 cycles of float sigma.",
+  "scenario": {
+    "name": "carr008_integerFixRawCarrier",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+  "estimator": {
+    "integerAmbiguity": {
+      "enable": true
+    }
+  },
+  "report": {
+    "runVersion": "carr008",
+    "compileTex": "auto"
+  },
+  "_reportNote": "compileTex 'auto' rather than the golden's 'require': a ladder rung's deliverable is its .mat, and a pdflatex hiccup must not throw away a finished run."
+}
