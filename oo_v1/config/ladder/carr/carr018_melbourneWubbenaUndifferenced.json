@@ -1,0 +1,27 @@
+{
+  "_id": "carr rung: the SAME Melbourne-Wubbena estimator with the between-tower difference switched OFF, so the undifferenced float carries the biases carr017 removes. The pair exists to MEASURE the bias budget rather than assert it. Nothing else differs between the two rungs, so the whole delta in meanAbsFractionalPart is attributable to the differencing.",
+  "_extends": "golden_baseline.json",
+  "_delta": "diagnostics.melbourneWubbena.enable true (was false) and diagnostics.melbourneWubbena.mode 'undifferenced' (the masterConfig default is 'betweenTower'). Everything else inherited from the reference, exactly as carr017.",
+  "_THEPREDICTION_STATED_BEFORE_THE_RUN": "Two biases are keyed independently of tower and therefore survive here and cancel in carr017. errors.interAntennaCarrierBias at sigma_cycles 0.25, drawn independently per signal (perSignal true), contributes 0.25*sqrt(2) = 0.354 wide-lane cycles on antennas 2..4 and exactly zero on antenna 1, which is the reference antenna. biases.interFrequency.code truth 0.30/0.45 m against model 0.30/0.405 m contributes (f1*d1 + f2*d2)/(f1+f2)/lam_WL, which is 0.424 wide-lane cycles on the RAW observable and 0.023 cycles if the model DCB has already been removed. So the undifferenced mean |fractional part| should land near 0.35-0.42 cycles on antennas 2..4 and be markedly smaller on antenna 1. If antenna 1 comes back near zero and the others near 0.35, the inter-antenna bias is confirmed as the dominant term by direct measurement.",
+  "_MEASURED_2700s_PILOT": "A 2700 s pilot (nReceivers 4, 9 blocks, 20 arcs) gave: WL float sigma 0.0725 cycles; mean |fractional part| 0.2254 cycles; and, from the truth register, mean float error 0.6327 cycles with only 7 of 20 components rounding to the correct integer, against 16 of 16 for the differenced twin carr017. THE PREDICTION ABOVE WAS WRONG IN ITS SPECIFICS AND IS LEFT STANDING RATHER THAN REWRITTEN. It expected antenna 1 to be near zero and antennas 2-4 near 0.35 cycles. The measurement inverts that: A1 = 0.393, A2 = 0.107, A3 = 0.226, A4 = 0.176. The reason is that |fractional part| is the distance to the NEAREST integer, so it saturates at 0.5 and WRAPS. Antenna 1 carries the code DCB alone, predicted at 0.424 cycles and measured at 0.393, which is the prediction confirmed almost exactly. Antennas 2-4 carry the DCB PLUS the inter-antenna bias, whose sum pushes past half a cycle and wraps back down to a small-looking number. So on this rung the fractional part is a MISLEADING statistic and the truth register is the one that tells the truth: 13 of 20 ambiguities are wrong by a whole cycle.",
+  "_MEASURED_THETRAPTHISEXPOSES": "carr018 reports a HIGHER bootstrap success rate than carr017 (0.999994 against 0.999543) while getting 7 of 20 right instead of 16 of 16. A covariance-derived success rate is a statement about PRECISION and is blind to BIAS by construction, so it cannot see the very thing that is wrong here. This pair is therefore the worked counter-example to quoting P(success) on its own, and it belongs next to the existing test008 example of a perfect wide-lane fix feeding an orientation solve that was wrong by a factor of twenty-one.",
+  "_WHYTHISISNOTJUSTANEGATIVECONTROL": "0.354 cycles is larger than the 0.15-cycle gate a wide-lane fix is normally held to, so this rung is the quantitative statement of WHY undifferenced single-asset fixing cannot work in this configuration. That is a publishable sentence with a number behind it, which 'the bias is too large' is not.",
+  "_READALONGSIDE": "carr017_melbourneWubbenaSingleAsset.json is the differenced twin. carr014_wideLaneDiagnosticGolden.json measures a DIFFERENT quantity -- the covariance lane out of the EKF's P, not the MW data combination -- and the two must never be quoted as the same number.",
+  "scenario": {
+    "name": "carr018_melbourneWubbenaUndifferenced",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+  "diagnostics": {
+    "melbourneWubbena": {
+      "enable": true,
+      "mode": "undifferenced"
+    }
+  },
+  "report": {
+    "runVersion": "carr018",
+    "compileTex": "auto"
+  },
+  "_reportNote": "compileTex 'auto' rather than the golden's 'require': a ladder rung's deliverable is its .mat, and a pdflatex hiccup must not throw away a finished run."
+}

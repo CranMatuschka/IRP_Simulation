@@ -56,6 +56,10 @@ classdef ReverseGNSSSimulation < handle
                                          'lastClassification','disabled','lastSigmaMin',NaN, ...
                                          'lastSigmaMean',NaN,'lastDistToInt',NaN, ...
                                          'enabled',false,'mode','disabled')  % Cumulative log
+        % Melbourne-Wubbena single-asset wide-lane accumulator. Constructed unconditionally
+        % (the object is inert when its gate is off) so ReportRunner can read it without a
+        % property-existence dance. Empty only on a simulation that never initialized.
+        mwEstimator_                 = []
     end
 
     properties (Access = private)
@@ -199,6 +203,11 @@ classdef ReverseGNSSSimulation < handle
                 isfield(obj.cfg.estimator,'integerAmbiguity') && ...
                 isfield(obj.cfg.estimator.integerAmbiguity,'enable') && ...
                 logical(obj.cfg.estimator.integerAmbiguity.enable);
+
+            % Melbourne-Wubbena single-asset wide lane. Built from the FINALIZED cfg above,
+            % so it resolves the same band the measurement builders do. Inert unless
+            % cfg.diagnostics.melbourneWubbena.enable.
+            obj.mwEstimator_ = revgnss.MelbourneWubbenaArcEstimator(obj.cfg);
 
             % Differential carrier attitude calibration store
             attMode15 = '';
@@ -594,6 +603,18 @@ classdef ReverseGNSSSimulation < handle
                 end
             end
             errStruct.slipInfo = slipInfo;
+
+            % Melbourne-Wubbena single-asset wide lane. THIS IS THE ONLY POINT IN THE EPOCH
+            % WHERE IT CAN RUN. The cycle-slip block above has finished, so the per-row arc
+            % state is final; and it is ahead of the joint secondary-ground append below and
+            % of every ISL/two-way/gauge append after it, so z(1:errStruct.nPseudorange) is
+            % still purely this asset's uplink code stack and its row indices still match
+            % errStruct.towerIdx_perMeas. Read-only: it never writes z, h, H, R, errStruct or
+            % the EKF, which is what makes gate-on and gate-off byte-identical in every
+            % filter quantity (tests/test_melbourne_wubbena_single_asset.m proves it).
+            if ~isempty(obj.mwEstimator_) && obj.mwEstimator_.enabled
+                obj.mwEstimator_.accumulate(k, t_s, z, errStruct, obj.cfg);
+            end
 
             secondaryGroundEnabled = obj.ekf.jointMultiAssetEnabled && ...
                 obj.secondaryGroundObservationsEnabled_();
