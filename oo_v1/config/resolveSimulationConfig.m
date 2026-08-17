@@ -219,12 +219,53 @@ function sourcePath = locateScenarioFile_(repositoryRoot, configPath)
     sourcePath = '';
     for index = 1:numel(candidates)
         if isfile(candidates{index})
-            sourcePath = char(java.io.File(candidates{index}).getCanonicalPath());
+            sourcePath = canonicalPath_(candidates{index});
             break
         end
     end
     assert(~isempty(sourcePath), 'resolveSimulationConfig:scenarioNotFound', ...
         'Configuration JSON not found: %s', requestedPath);
+end
+
+function absolutePath = canonicalPath_(candidate)
+%CANONICALPATH_ Absolute canonical form of a path isfile has already accepted.
+%   MATLAB and the JVM do not agree on what a RELATIVE path means. isfile
+%   resolves one against the current folder, while java.io.File resolves one
+%   against the JVM's user.dir, which is fixed at MATLAB startup and does NOT
+%   follow cd. Canonicalising a relative candidate directly therefore selects
+%   the right file and then returns a path rooted at the STARTUP folder, and
+%   the caller fails later in readOverlayChain_ with fileread:cannotOpenFile.
+%
+%   Only the first candidate can be relative, because repositoryRoot comes from
+%   mfilename('fullpath') and every other candidate is built from it. Anchoring
+%   here with MATLAB's own view of the file, rather than earlier in the search,
+%   keeps the candidate order and precedence exactly as they were.
+    candidate = char(candidate);
+    if ~isAbsolutePath_(candidate)
+        located = dir(candidate);
+        if ~isempty(located)
+            % dir().folder is absolute and follows the same rules isfile just
+            % used, including ~ expansion, so the two cannot disagree
+            candidate = fullfile(located(1).folder, located(1).name);
+        else
+            candidate = fullfile(pwd, candidate);
+        end
+    end
+    absolutePath = char(java.io.File(candidate).getCanonicalPath());
+end
+
+function tf = isAbsolutePath_(path)
+%ISABSOLUTEPATH_ True for a path the OS resolves without a working directory.
+%   A leading ~ is deliberately NOT treated as absolute: MATLAB expands it and
+%   java.io.File does not, so it must go through the dir() branch above.
+    tf = false;
+    if isempty(path); return; end
+    if ispc
+        tf = (numel(path) >= 2 && isletter(path(1)) && path(2) == ':') || ...
+             (numel(path) >= 2 && (all(path(1:2) == '\') || all(path(1:2) == '/')));
+    else
+        tf = path(1) == '/';
+    end
 end
 
 function dirs = scenarioSearchDirs_(repositoryRoot)
