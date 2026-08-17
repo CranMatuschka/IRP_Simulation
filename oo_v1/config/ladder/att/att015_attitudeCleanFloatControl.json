@@ -1,0 +1,27 @@
+{
+  "_id": "att rung: attitudeCleanFloatControl. att011 (space-grade FOG gyro, NO carrier multipath, joint rigid-body integer fix ON) with the JOINT FIX FORCED OFF. One toggle against att011. This is the fourth cell of the 2x2 and it is what makes att014 interpretable.",
+  "_extends": "att011_attitudeJointSearchNavGradeGyro.json",
+  "_delta": "estimator.diffAtt.jointConstrainedSearch.enable: true -> false. Nothing else.",
+
+  "_WHYTHISCELLISNEEDED": "att014 alone compares fix-on against fix-off at ONE multipath level, which shows whether the fix helps or hurts THERE but cannot separate the fix effect from its interaction with multipath. With this rung the family closes a clean 2x2 in {fix on, fix off} x {multipath off, 3 mm}: att011 fix-on/clean, att012 fix-on/multipath, att015 fix-off/clean, att014 fix-off/multipath. The main effect of the fix, the main effect of the multipath, and crucially the INTERACTION between them all become readable, and the interaction is the whole of att012's claim -- that the fix is what removes the absorber, so multipath should cost far more with the fix on than with it off.",
+
+  "_WHATTHISCELLALONESHOULDSHOW": "With no multipath there is nothing for delta_B to absorb, so the fix should be a clear WIN here: att015 is expected to be WORSE than att011's 0.182352 deg, because the integer fix is what bought that accuracy in the first place (att010 measured the fix as the mechanism, att011 only removed the gyro wall). If att015 instead matches or beats att011, then the fix was never buying anything even in the clean case and att010's headline needs revisiting.",
+
+  "_theINERTNESSTRAPTHISRUNGMUSTAVOID": "Same as att014. A leaf set false through the _extends chain must be PROVED live: the '[DiffAtt] JOINT SEARCH:' line must be ABSENT and diffAttMeanNRows must be 15 rather than 12. This repo has ablation rungs that disabled nothing on record.",
+
+  "scenario": {
+    "name": "att015_attitudeCleanFloatControl",
+    "orbitClass": "GEO",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+
+  "estimator": {
+    "diffAtt": {
+      "jointConstrainedSearch": { "enable": false }
+    }
+  },
+
+  "report": { "runVersion": "att015", "compileTex": "auto" }
+}

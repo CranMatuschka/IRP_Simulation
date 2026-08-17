@@ -1,0 +1,27 @@
+{
+  "_id": "att rung: attitudeMultipathFloatControl. att012 (space-grade FOG gyro, 3 mm receive-end carrier multipath, joint rigid-body integer fix ON) with the JOINT FIX FORCED OFF. One toggle against att012. This is the control that tests att012's central claim.",
+  "_extends": "att012_attitudeJointSearchReceiveEndMultipath.json",
+  "_delta": "estimator.diffAtt.jointConstrainedSearch.enable: true -> false. Nothing else. Same multipath, same gyro, same everything.",
+
+  "_THECLAIMTHISRUNGTESTS": "att012 argued that the integer fix REMOVES THE ABSORBER. On the float path delta_B is a free REAL constant per (tower, baseline) and can soak up an antenna-specific quasi-static offset; once the joint fix is accepted the rows become dz = (z_t - z_p) - lambda*(N_t - N_p) against pure geometry, with the Jacobian filling ONLY sm.euler_idx, so no ambiguity, bias or clock column survives to absorb anything. That was established by reading the row construction, NOT by measurement. This rung measures it: same multipath, same gyro, fix off. If the claim holds, att014 beats att012 despite carrying identical error.",
+
+  "_WHYTHEABSORPTIONSHOULDBEPARTIALandNOTTOTAL": "delta_B is indexed per (tower, baseline), and the injected multipath is per (tower, ANTENNA). The single difference mp(t,ai) - mp(t,1) is therefore exactly a per-(tower,baseline) quantity, so delta_B can absorb it EXACTLY -- but only the part that is constant. delta_B is calibrated over the first 60 s and then held, while the term drifts with tau = 300 s over a 3600 s arc. So the prediction is that att014 absorbs the value at calibration time and suffers only the subsequent drift, landing BETTER than att012 but WORSE than att011's multipath-free 0.182352 deg. A result at or above att012 would refute the absorber claim outright.",
+
+  "_theINERTNESSTRAPTHISRUNGMUSTAVOID": "This repo has ablation rungs that DISABLED NOTHING on record, because _extends inheritance was recorded as ownership. A rung that sets a leaf false through the extends chain must be PROVED live, not assumed. Two independent runtime checks are available here and both must be read: (a) the one-shot '[DiffAtt] JOINT SEARCH:' line must be ABSENT from the log, and (b) diffAttMeanNRows must come back 15, not 12, because the float path emits 15 single-differenced rows where the integer-fixed path emits 12 double-differenced ones. att013 already demonstrated that signature when its fix was refused.",
+
+  "scenario": {
+    "name": "att014_attitudeMultipathFloatControl",
+    "orbitClass": "GEO",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+
+  "estimator": {
+    "diffAtt": {
+      "jointConstrainedSearch": { "enable": false }
+    }
+  },
+
+  "report": { "runVersion": "att014", "compileTex": "auto" }
+}

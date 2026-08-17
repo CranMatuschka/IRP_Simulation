@@ -301,6 +301,14 @@ classdef CodeMeasurementBuilder
                     h(mi) = h(mi) + x_est(stateMap.txCodeBiasIdx(ti));
                 end
 
+                % Ground multipath bias state (+1 sign: a longer reflected path increases
+                % PR, same convention as the tx delay above). These base rows are signal 1;
+                % the additional signals pick up their own state in the expansion below.
+                if isfield(stateMap,'mpBiasIdx') && ti <= size(stateMap.mpBiasIdx,1) && ...
+                        stateMap.mpBiasIdx(ti,1) > 0
+                    h(mi) = h(mi) + x_est(stateMap.mpBiasIdx(ti,1));
+                end
+
                 % Receiver code hardware-delay model correction
                 d_rx_code_h = models.measurements.MeasurementModelUtils.rxCodeBiasModel(cfg);
                 if d_rx_code_h ~= 0
@@ -565,6 +573,24 @@ classdef CodeMeasurementBuilder
                             % Geometry + clocks (strips L1 error terms from z/h)
                             z_geom_pi = z(pi) - errStruct.truthTotal_m(pi);
                             h_geom_pi = h(pi) - errStruct.modelTotal_m(pi);
+
+                            % The multipath-bias state is per SIGNAL, and h(pi) carries the
+                            % signal-1 state (added in the base loop). modelTotal_m does not
+                            % contain it, so h_geom_pi still does -- swap it for this signal's
+                            % own state here, or every L2 row would be predicted with the L1
+                            % multipath and the two chains would fight over one state.
+                            if isfield(stateMap,'mpBiasIdx') && twr_list(pi) <= size(stateMap.mpBiasIdx,1)
+                                idxMp1_ = stateMap.mpBiasIdx(twr_list(pi), 1);
+                                if idxMp1_ > 0
+                                    h_geom_pi = h_geom_pi - x_est(idxMp1_);
+                                end
+                                if si <= size(stateMap.mpBiasIdx,2)
+                                    idxMpSi_ = stateMap.mpBiasIdx(twr_list(pi), si);
+                                    if idxMpSi_ > 0
+                                        h_geom_pi = h_geom_pi + x_est(idxMpSi_);
+                                    end
+                                end
+                            end
 
                             z_new(mi) = z_geom_pi + trop_t + iono_t_si + ionoHO_t_si + hw_t + dcb_t + mp_t + code_t + scint_t;
                             h_new(mi) = h_geom_pi + trop_m + iono_m_si + ionoHO_m_si + hw_m + dcb_m;

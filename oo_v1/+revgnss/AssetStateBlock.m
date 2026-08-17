@@ -12,12 +12,13 @@ classdef AssetStateBlock
     %       .ambiguity3d  chief 3-D carrier ambiguity  (ambiguityIdx3d)
     %       .ambiguity    chief float ambiguity         (ambiguityIdx)
     %       .zwd/.iono  per-tower ZWD / slant-iono      (zwdIdx / ionoIdx)
+    %       .mpBias     per-tower-per-signal multipath  (mpBiasIdx)
     %
     methods (Static)
         function blk = forAsset(sm, assetIdx)
             if nargin < 2 || isempty(assetIdx); assetIdx = 1; end
             blk = struct('r',[],'v',[],'euler',[],'b',[],'bdot',[], ...
-                         'ambiguity3d',[],'ambiguity',[],'zwd',[],'iono',[]);
+                         'ambiguity3d',[],'ambiguity',[],'zwd',[],'iono',[],'mpBias',[]);
             if isfield(sm,'asset') && assetIdx >= 1 && assetIdx <= numel(sm.asset)
                 source = sm.asset(assetIdx);
                 fields = fieldnames(blk);
@@ -37,6 +38,7 @@ classdef AssetStateBlock
             if isfield(sm,'ambiguityIdx'); blk.ambiguity = sm.ambiguityIdx; end
             if isfield(sm,'zwdIdx'); blk.zwd = sm.zwdIdx; end
             if isfield(sm,'ionoIdx'); blk.iono = sm.ionoIdx; end
+            if isfield(sm,'mpBiasIdx'); blk.mpBias = sm.mpBiasIdx; end
         end
 
         function euler = eulerEst(blk, x_est)

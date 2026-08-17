@@ -238,6 +238,35 @@ classdef MeasurementModel < handle
                 end
             end
 
+            % Multipath-bias Jacobian columns: H(mi, mpBiasIdx(ti, si)) = 1.
+            % The state is an additive code-range bias, so the partial is exactly one, and
+            % it is keyed by SIGNAL as well as tower because the truth chains are per-signal.
+            % Also publishes the elevation-scaled steady-state sigma per link, which is the
+            % only place the per-row elevations and the (tower, signal) identity meet; the
+            % EKF needs it for the Gauss-Markov process noise.
+            if isfield(stateMap,'mpBiasIdx') && ~isempty(blk.mpBias) && any(blk.mpBias(:) > 0)
+                sigList_mp = ones(M,1);
+                if isfield(errStruct,'signalIdx_perMeas') && numel(errStruct.signalIdx_perMeas) == M
+                    sigList_mp = errStruct.signalIdx_perMeas;
+                end
+                nT_mp = size(blk.mpBias,1); nS_mp = size(blk.mpBias,2);
+                sigmaSsTbl = nan(nT_mp, nS_mp);
+                mpSigmaSs0 = 0.3; mpElExp = 1;
+                try; mpSigmaSs0 = obj.cfg.errors.multipath.coloredGM.sigmaCodeL1_ss_m; catch; end
+                try; mpElExp    = obj.cfg.errors.multipath.coloredGM.elevationExponent; catch; end
+                elvFloor_mp = revgnss.Constants.ELEVATION_FLOOR_RAD;
+                for mi_m = 1:M
+                    ti_m = twr_list(mi_m); si_m = sigList_mp(mi_m);
+                    if ti_m < 1 || ti_m > nT_mp || si_m < 1 || si_m > nS_mp; continue; end
+                    idx_m = blk.mpBias(ti_m, si_m);
+                    if idx_m <= 0; continue; end
+                    H_pr(mi_m, idx_m) = 1;
+                    sinEl_m = max(sin(errStruct.elevations_rad(mi_m)), sin(elvFloor_mp));
+                    sigmaSsTbl(ti_m, si_m) = mpSigmaSs0 / sinEl_m^mpElExp;
+                end
+                errStruct.multipathBiasSigmaSs = sigmaSsTbl;
+            end
+
             % ----- Doppler rows (0.5 + 0.6) ----------------------------
             % sig_list: the Doppler rows are multi-signal-expanded exactly like the code
             % rows, so the thermal draw must be keyed per signal (see builder header).

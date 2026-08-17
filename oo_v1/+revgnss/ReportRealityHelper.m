@@ -89,6 +89,33 @@ classdef ReportRealityHelper
                 catch
                 end
                 expectedStates = expectedStates + nIslAmb_;
+                % Coloured ground-multipath bias states, one per (tower, signal). The
+                % count comes from the summary rather than being recomputed here, for the
+                % same reason the ambiguity/ZWD/iono terms do: one owner of the number.
+                % Zero whenever estimation.multipathBias.useInEKF is false, which is the
+                % masterConfig default, so this term cannot move any frozen golden.
+                expectedStates = expectedStates + ...
+                    revgnss.ReportRealityHelper.safeField_(summary, 'nMultipathBiasStates', 0);
+                % Transmit code-bias states, one per tower. ReverseGNSSEKF allocates them
+                % on hardware.txCodeBias.useInEKF and this enumeration counted them
+                % NOWHERE, so turning that gate on finished the entire arc and then died
+                % right here -- the PDF is built before the .mat is saved in
+                % ReportRunner.runSingle, so the run was lost. Default off, so the term
+                % cannot move a frozen golden. Same defect as the multipath block above.
+                %
+                % The two-way ISL code calibration residual-bias states are added for
+                % COMPLETENESS, not because they were reachable: they require
+                % isl.twoWay.range.useInEKF, and TwoWayISLMeasurementBuilder.validateConfig
+                % hard-errors unless multiAsset.mode='joint', which takes the joint branch
+                % above and does no arithmetic at all. So this term is provably zero on
+                % every path that reaches this line today. It is written down anyway
+                % because ReverseGNSSEKF's own note says this arithmetic is a SECOND
+                % implementation of the buildStateMap_ walk and every block must appear in
+                % both -- an enumeration with a known hole is one relaxed validator away
+                % from being the same lost-run bug again.
+                expectedStates = expectedStates + ...
+                    revgnss.ReportRealityHelper.safeField_(summary, 'nTxCodeBiasStates', 0) + ...
+                    revgnss.ReportRealityHelper.safeField_(summary, 'nTwoWayCodeCalibrationBiasStates', 0);
                 if isfinite(nStates) && nStates ~= expectedStates
                     error('ClockExactReportBuilder:stateTableCountMismatch', ...
                         ['Report state table count (%d) does not match EKF ' ...

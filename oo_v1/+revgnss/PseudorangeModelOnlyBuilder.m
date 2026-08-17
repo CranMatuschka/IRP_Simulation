@@ -115,6 +115,21 @@ classdef PseudorangeModelOnlyBuilder
                     h_pr(mi) = h_pr(mi) + x_state(stateMap.txCodeBiasIdx(ti));
                 end
 
+                % Ground multipath bias state, keyed by (tower, signal) exactly as the
+                % forward model does. Omitting it here would leave the whole multipath
+                % state in the postfit residual and make a correctly-working filter look
+                % like it had a metre-class unmodelled bias.
+                if isfield(stateMap,'mpBiasIdx') && ti <= size(stateMap.mpBiasIdx,1)
+                    si_mp = 1;
+                    if isfield(errStruct,'signalIdx_perMeas') && mi <= numel(errStruct.signalIdx_perMeas)
+                        si_mp = errStruct.signalIdx_perMeas(mi);
+                    end
+                    if si_mp >= 1 && si_mp <= size(stateMap.mpBiasIdx,2) && ...
+                            stateMap.mpBiasIdx(ti, si_mp) > 0
+                        h_pr(mi) = h_pr(mi) + x_state(stateMap.mpBiasIdx(ti, si_mp));
+                    end
+                end
+
                 d_rx = models.measurements.MeasurementModelUtils.rxCodeBiasModel(cfg);
                 if d_rx ~= 0
                     h_pr(mi) = h_pr(mi) + d_rx;

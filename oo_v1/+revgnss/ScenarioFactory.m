@@ -265,6 +265,22 @@ classdef ScenarioFactory
                 end
             end
 
+            % Multipath bias initial covariance: the process is stationary, so the honest
+            % prior at t = 0 IS its steady-state variance. Starting at zero mean with
+            % sigma_ss reproduces the truth chain, which also starts at x = 0 and relaxes
+            % into the stationary distribution. The zenith value is used because no
+            % elevation is known before the first measurement build.
+            if ekf.estimateMultipathBias && isfield(sm,'mpBiasIdx')
+                for ti = 1:ekf.nTowers
+                    for si = 1:size(sm.mpBiasIdx,2)
+                        idxMp = sm.mpBiasIdx(ti,si);
+                        if idxMp > 0
+                            P0(idxMp, idxMp) = ekf.mpBiasSigmaSs_^2;
+                        end
+                    end
+                end
+            end
+
             % TASK 1: float ambiguity initial covariance
             if ekf.estimateAmbiguities
                 sigma0_amb = 100.0;

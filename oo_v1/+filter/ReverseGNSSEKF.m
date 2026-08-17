@@ -77,6 +77,28 @@ classdef ReverseGNSSEKF < handle
         estimateTxCodeBias   (1,1) logical = false
         nTxCodeBiasStates    (1,1) double  = 0
 
+        % Per-tower-per-signal ground multipath bias states (state augmentation for
+        % COLOURED measurement noise). The truth-side code multipath is a first-order
+        % Gauss-Markov process with correlation time tau, one chain per (tower, signal)
+        % when errors.multipath.coloredGM.sharedAcrossAntennas is on. Charging its
+        % steady-state variance to R and nothing else tells the filter the error is
+        % WHITE, so P shrinks like 1/N when the true error only averages down like
+        % 1/sqrt(N*dt/2tau) -- the measured result was NEES/dof = 13.3 at NIS 0.86.
+        % These states carry the correlation explicitly: F = exp(-dt/tau),
+        % Q = sigma_ss^2 (1 - phi^2), H = +1 on the matching code row, and the
+        % multipath term is REMOVED from R (ErrorChain returns sigma_m.mp = 0) so its
+        % variance is charged exactly once. Default off -> nx and the state map are
+        % byte-identical to a run without them.
+        estimateMultipathBias   (1,1) logical = false
+        nMultipathBiasStates    (1,1) double  = 0
+        mpBiasNSignals          (1,1) double  = 1
+        mpBiasTau_              (1,1) double  = 60     % GM correlation time [s]
+        mpBiasSigmaSs_          (1,1) double  = 0.3    % nominal zenith steady-state sigma [m]
+        % [nTowers x nSignals] elevation-scaled steady-state sigma, refreshed each epoch
+        % from the measurement build. Empty until the first build -> the nominal scalar
+        % is used, which is what a filter with no elevation history could know anyway.
+        mpBiasSigmaSsPerLink_          = []
+
         % Process noise parameters
         sigma_accel_mps2      (1,1) double = 0.01
         sigma_angAccel_radps2 (1,1) double = 1e-4
@@ -256,6 +278,29 @@ classdef ReverseGNSSEKF < handle
                 obj.nTxCodeBiasStates    = nTowers;
             end
 
+            % Ground multipath bias states. One per (tower, signal), because the truth
+            % chains are per-signal: multipath_ owns signal 1 and multipathForSignal
+            % owns every additional signal with its own RNG stream, so L1 and L2 are
+            % independent realisations of the same statistics and a shared state could
+            % only ever fit their mean.
+            if isfield(cfg,'estimation') && isfield(cfg.estimation,'multipathBias') && ...
+                    isfield(cfg.estimation.multipathBias,'useInEKF') && ...
+                    logical(cfg.estimation.multipathBias.useInEKF)
+                mb_ = cfg.estimation.multipathBias;
+                nSigMp = 1;
+                try; nSigMp = max(1, sum(logical(cfg.signals.enabledMask))); catch; end
+                obj.estimateMultipathBias = true;
+                obj.mpBiasNSignals        = nSigMp;
+                obj.nMultipathBiasStates  = nTowers * nSigMp;
+                % Default the process parameters to the TRUTH generator's own values, so
+                % the matched case needs no duplicated numbers in the config. Either may
+                % still be overridden to characterise a deliberate mismatch.
+                try; obj.mpBiasTau_     = cfg.errors.multipath.coloredGM.tau_s;            catch; end
+                try; obj.mpBiasSigmaSs_ = cfg.errors.multipath.coloredGM.sigmaCodeL1_ss_m; catch; end
+                if isfield(mb_,'tau_s')      && ~isempty(mb_.tau_s);      obj.mpBiasTau_     = mb_.tau_s;      end
+                if isfield(mb_,'sigma_ss_m') && ~isempty(mb_.sigma_ss_m); obj.mpBiasSigmaSs_ = mb_.sigma_ss_m; end
+            end
+
             % Optional gyro-bias states (IMU/MEKF aiding). Gated on estimateGyroBias (default false).
             if isfield(cfg.estimator,'estimateGyroBias')
                 obj.estimateGyroBias = logical(cfg.estimator.estimateGyroBias);
@@ -325,6 +370,9 @@ classdef ReverseGNSSEKF < handle
             end
             if obj.estimateTxCodeBias
                 obj.nx = obj.nx + obj.nTxCodeBiasStates;
+            end
+            if obj.estimateMultipathBias
+                obj.nx = obj.nx + obj.nMultipathBiasStates;
             end
             if obj.estimateGyroBias
                 obj.nx = obj.nx + 3;
@@ -965,6 +1013,16 @@ classdef ReverseGNSSEKF < handle
         end
 
         % ----------------------------------------------------------------
+        function setMultipathBiasSigmaSs(obj, tbl)
+            % setMultipathBiasSigmaSs  Refresh the [nTowers x nSignals] elevation-scaled
+            % steady-state sigma used by the multipath-bias process noise. Called once per
+            % epoch from the measurement build, which is the only place the per-row
+            % elevations exist. No-op when the states are off.
+            if ~obj.estimateMultipathBias || isempty(tbl); return; end
+            obj.mpBiasSigmaSsPerLink_ = tbl;
+        end
+
+        % ----------------------------------------------------------------
         function nees = computeNEES(obj, truth)
             % computeNEES  Normalised estimation error squared vs truth (consistency).
             %
@@ -1155,6 +1213,23 @@ classdef ReverseGNSSEKF < handle
                 sm.txCodeBiasIdx = zeros(nTowers, 1);
             end
 
+            % Optional per-tower-per-signal multipath bias states.
+            % m_i,s [m]: Gauss-Markov ground multipath on the (tower i, signal s) code row.
+            % Positive m increases measured pseudorange, same sign convention as the tx
+            % code bias above. Zeros sentinel when off -> map identical to a run without it.
+            if obj.estimateMultipathBias && obj.nMultipathBiasStates > 0
+                mpIdx = zeros(nTowers, obj.mpBiasNSignals);
+                for ti = 1:nTowers
+                    for si = 1:obj.mpBiasNSignals
+                        mpIdx(ti, si) = nextIdx;
+                        nextIdx = nextIdx + 1;
+                    end
+                end
+                sm.mpBiasIdx = mpIdx;
+            else
+                sm.mpBiasIdx = zeros(nTowers, max(1, obj.mpBiasNSignals));
+            end
+
             % Optional gyro-bias states (IMU/MEKF). Appended so no existing index shifts;
             % empty when off -> state map identical to the pre-IMU map (golden-safe).
             if obj.estimateGyroBias
@@ -1257,6 +1332,7 @@ classdef ReverseGNSSEKF < handle
             if isfield(sm,'ambiguityIdx');   sm.asset(1).ambiguity   = sm.ambiguityIdx;   end
             if isfield(sm,'zwdIdx');         sm.asset(1).zwd         = sm.zwdIdx;          end
             if isfield(sm,'ionoIdx');        sm.asset(1).iono        = sm.ionoIdx;         end
+            if isfield(sm,'mpBiasIdx');      sm.asset(1).mpBias      = sm.mpBiasIdx;       end
             for assetIdx = 2:1+obj.nSecondaryAssets
                 secondaryIdx = assetIdx - 1;
                 sm.asset(assetIdx).r     = sm.secondaryOrbitIdx(secondaryIdx,1:3)';
@@ -1413,6 +1489,20 @@ classdef ReverseGNSSEKF < handle
                     idx = sm.ionoIdx(ti);
                     if idx > 0
                         F(idx, idx) = phi_iono;
+                    end
+                end
+            end
+
+            % Multipath bias states: first-order Gauss-Markov phi = exp(-dt/tau), the same
+            % transition the truth chain uses in models.noise.StochasticProcess.gaussMarkovStep.
+            if obj.estimateMultipathBias && isfield(sm,'mpBiasIdx')
+                phi_mp = exp(-dt_s / obj.mpBiasTau_);
+                for ti = 1:obj.nTowers
+                    for si = 1:obj.mpBiasNSignals
+                        idx = sm.mpBiasIdx(ti, si);
+                        if idx > 0
+                            F(idx, idx) = phi_mp;
+                        end
                     end
                 end
             end
@@ -1648,6 +1738,32 @@ classdef ReverseGNSSEKF < handle
                     idx = sm.txCodeBiasIdx(ti);
                     if idx > 0
                         Q(idx, idx) = q_tx;
+                    end
+                end
+            end
+
+            % --- Multipath bias process noise (Gauss-Markov steady-state) ---
+            % q = sigma_ss^2 (1 - phi^2) holds the stationary variance at sigma_ss^2 under
+            % P <- phi^2 P + q, matching the ZWD / slant-iono / empirical-accel blocks.
+            % sigma_ss is ELEVATION-SCALED per link, because the truth envelope is
+            % sigmaCodeL1_ss_m / sin(el)^elevationExponent; the per-link table is refreshed
+            % from each measurement build, so this uses the previous epoch's geometry --
+            % causal, and at GEO the elevations move by microdegrees per second.
+            if obj.estimateMultipathBias && isfield(sm,'mpBiasIdx')
+                phi_mp = exp(-dt_s / obj.mpBiasTau_);
+                haveTbl = ~isempty(obj.mpBiasSigmaSsPerLink_);
+                for ti = 1:obj.nTowers
+                    for si = 1:obj.mpBiasNSignals
+                        idx = sm.mpBiasIdx(ti, si);
+                        if idx <= 0; continue; end
+                        s_ss = obj.mpBiasSigmaSs_;
+                        if haveTbl && ti <= size(obj.mpBiasSigmaSsPerLink_,1) && ...
+                                si <= size(obj.mpBiasSigmaSsPerLink_,2) && ...
+                                isfinite(obj.mpBiasSigmaSsPerLink_(ti,si)) && ...
+                                obj.mpBiasSigmaSsPerLink_(ti,si) > 0
+                            s_ss = obj.mpBiasSigmaSsPerLink_(ti,si);
+                        end
+                        Q(idx, idx) = s_ss^2 * (1 - phi_mp^2);
                     end
                 end
             end

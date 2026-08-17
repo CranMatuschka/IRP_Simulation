@@ -529,6 +529,14 @@ classdef ReverseGNSSSimulation < handle
             [z, h, H, R, errStruct] = obj.measModel.computeMeasurements( ...
                 obj.asset, obj.towers, obj.ekf.getMeasurementState(), t_s, obj.ekf.stateMap);
 
+            % Hand the multipath-bias process noise its elevation-scaled steady-state
+            % sigma. The measurement build is the only place the per-row elevations and
+            % the (tower, signal) identity meet; the EKF uses it in the NEXT predict, so
+            % the filter never reads a geometry it could not already have observed.
+            if isfield(errStruct,'multipathBiasSigmaSs')
+                obj.ekf.setMultipathBiasSigmaSs(errStruct.multipathBiasSigmaSs);
+            end
+
             % Cycle-slip detection and ambiguity reset (carrier ekfFloat only).
             % Runs after computeMeasurements but before gauge rows are appended so
             % keepMask operates only on the physical measurement stack.
