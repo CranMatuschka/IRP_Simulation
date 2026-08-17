@@ -1,0 +1,25 @@
+{
+  "_extends": "scene008_G5S1R4_TW1_golden.json",
+  "scenario": {
+    "name": "prod030_productInterval30s",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+  "clocks": {
+    "tower": {
+      "product": {
+        "updateInterval_s": 30
+      }
+    }
+  },
+  "report": {
+    "runVersion": "prod030",
+    "compileTex": "auto",
+    "monteCarlo": {
+      "enable": false
+    }
+  },
+  "_id": "prod030_productInterval30s -- tower clock product rebroadcast interval = 30 s. Does the tower-clock broadcast product cause the two-way channel's innovation autocorrelation? The reference run reports rho(1) = 0.725 on the two-way rows, the highest of any channel, against 0.31 on code and 0.09 on Doppler. Removing multipath leaves it bit-identical, so it is not the code-channel mechanism. The product is held for updateInterval_s and extrapolated linearly, which makes its residual smooth within each window, so if the product is the cause then rho(1) must rise with the interval. PREDICTION: rho(1) increases monotonically from the 5 s rung to the 90 s rung. A flat result across an 18x span refutes the hypothesis and the cause lies elsewhere.",
+  "_delta": "PRODUCT-INTERVAL PROBE 2/3. CONTROL. Identical to scene008 in every resolved leaf, re-run on the current tree so the comparison is like-for-like. Must reproduce the frozen scene008 two-way autocorrelation of 0.725."
+}
