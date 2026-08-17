@@ -1,0 +1,49 @@
+{
+  "_id": "test fixture: EXPOSES A REAL DEFECT. The code observable back-propagates the tower clock to TRANSMIT time; the carrier observable does not and uses it at RECEIVE time. Any code-carrier combination therefore inherits the difference, which is the tower clock DRIFT RATE times the LIGHT TIME. This rung is the configuration in which that term is visible on its own, and its job is to keep measuring it until somebody fixes the builder.",
+
+  "_THETWOLINES": "models/measurements/CodeMeasurementBuilder.m:203-207 computes tau_truth = t_s - cTruth.t_tx_s and then b_twr_truth_h = towerClkTruth(mi) - towers{ti}.getClockDriftMetersPerSecond() * tau_truth. models/measurements/CarrierMeasurementBuilder.m:437 computes b_twr_t = towerClkTruth(mi) and stops there. A band-independent term cancels inside Melbourne-Wubbena ONLY if the code and the carrier carry the same value of it, because the phase-part coefficient is (f1-f2)/(f1-f2) = 1 and the code-part coefficient is (f1+f2)/(f1+f2) = 1. Here they carry values evaluated at instants separated by the light time, so what survives is exactly -bdot_twr * tau.",
+
+  "_WHYTHISCONFIGURATION": "diagnostics.melbourneWubbena.enable true gives the observable. errors.multipath.truth.enable false is the part that makes the defect VISIBLE rather than merely present: coloured code multipath is the dominant MW noise at sigma 0.087 cycles and it buries a 0.10 cycle bias. With multipath off the noise falls to 0.032 cycles and the bias stands clear of it. Nothing else is changed from the reference.",
+
+  "_MEASURED_AND_HOW_IT_WAS_ATTRIBUTED": "On a 900 s arc with four antennas: signed mean float error -0.10476 cycles with ALL SIXTEEN arcs on the same side of zero. Zero-mean noise gives a fifty-fifty split, so the sign census alone establishes that this is a bias. The per-arc errors group in FOURS -- one group per non-reference tower, identical across that tower's four antennas -- which is the signature of a per-tower, antenna-independent term, i.e. a clock. Predicting the size from first principles: the arc-mean tower clock drifts were -0.53, +0.68, +0.16, +0.04 and +0.16 m/s and the light times 0.127, 0.131, 0.122, 0.130 and 0.120 s, giving predicted between-tower differences of -0.181, -0.101, -0.084 and -0.101 cycles for a predicted mean of -0.117 against the measured -0.105. Eleven percent, with the correct sign on every component.",
+
+  "_THECONTROL": "Set clock.tower.deterministic true on top of this rung and the drift is identically zero on every tower. Measured: the signed mean moves from -0.10476 to +0.01526 cycles and the sign census from 0/16 to 15/16, i.e. the bias falls by 6.9x the moment the mechanism is removed. That control is the proof, and it is the cheapest way to re-verify this rung after any change to either builder.",
+
+  "_WHATWASELIMINATEDFIRST": "Recorded so nobody repeats the search. Ablated and measured, each of them NOT the cause: code multipath (sigma falls 0.0872 to 0.0319 while the error barely moves), scintillation, hardware delay (and its deterministic knobs are off anyway -- truth.default_m is 0, truth.perTower absent, perTowerBias.enable 0), ionosphere truth (-0.10476 to -0.10581), inter-antenna carrier bias (bit-identical, it cancels between towers by construction), code DCB (between-tower difference measured EXACTLY zero) and higher-order ionosphere (0.0027 cycles, fifty times too small). Note that errors.ionosphere.enable and errors.troposphere.enable are INERT knobs: the master switches are errors.<x>.truth.enable, and three ablation arms came back bit-identical before that was noticed.",
+
+  "_WHATTHISDOESNOTAFFECT": "The EKF. On the carrier both z and h read the tower clock at receive time, and on the code both read it at transmit time, so each observable is internally consistent and the prefit residual, the filter and every existing golden are untouched. ONLY code-carrier CROSS combinations break. That is Melbourne-Wubbena today and any geometry-free or wide-lane construction added later, which is precisely why this needs a standing fixture rather than a comment.",
+
+  "_THEFIX_NOT_APPLIED": "CarrierMeasurementBuilder should back-propagate the tower clock exactly as CodeMeasurementBuilder does. It is a few lines. It is NOT applied here because it is a TRUTH-side change: it moves every carrier observable, so carrier residuals, NIS and the frozen goldens all shift, and that decision belongs to whoever owns the carrier path. When it is applied, this rung's signed mean should fall from -0.105 toward the higher-order-ionosphere floor near -0.003 cycles, and THAT is the acceptance criterion.",
+
+  "_extends": "golden_baseline.json",
+  "_delta": "diagnostics.melbourneWubbena.enable true (was false) and errors.multipath.truth.enable false (was true). Everything else inherited.",
+
+  "scenario": {
+    "name": "test010_towerClockEpochMismatch",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+
+  "diagnostics": {
+    "melbourneWubbena": {
+      "enable": true,
+      "blockLength_s": 150,
+      "minBlocks": 4
+    }
+  },
+
+  "errors": {
+    "multipath": {
+      "truth": {
+        "enable": false
+      }
+    }
+  },
+
+  "report": {
+    "runVersion": "test010",
+    "compileTex": "auto"
+  },
+  "_reportNote": "compileTex 'auto' rather than the golden's 'require': a fixture's deliverable is its .mat, and a pdflatex hiccup must not throw away a finished run."
+}
