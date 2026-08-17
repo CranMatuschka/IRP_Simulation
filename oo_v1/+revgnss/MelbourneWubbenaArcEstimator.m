@@ -57,18 +57,32 @@ classdef MelbourneWubbenaArcEstimator < handle
     %   * the code DCB (biases.interFrequency.code, global per signal) enters at
     %     (f1*d1 + f2*d2)/(f1+f2) / lam_WL, which is 0.42 WL cycles for the golden 0.30/0.45 m.
     % Both are constant across towers, so a between-tower single difference removes them
-    % identically. One asset sees five towers, so this needs no second satellite. What
-    % survives is the per-tower code hardware delay, which is on the CODE ONLY and therefore
-    % does not cancel inside MW.
+    % identically. One asset sees five towers, so this needs no second satellite.
     %
-    % 'undifferenced' is kept because measuring those biases is a legitimate experiment: the
-    % mean fractional part of the undifferenced float IS the bias, and it is reported.
+    % WHAT SURVIVES THE DIFFERENCE, audited rather than assumed. An earlier version of this
+    % comment said the per-tower code hardware delay survives. It does not: on the reference
+    % config errors.hardwareDelay.truth.default_m is 0, truth.perTower is absent and
+    % perTowerBias.enable is 0, so no deterministic per-tower delay exists at all. The only
+    % DETERMINISTIC term surviving both the MW combination and the between-tower difference is
+    % higher-order ionosphere, measured at 0.0025 WL cycles. Everything else that survives --
+    % code multipath, code scintillation, the hardware-delay residual -- is ZERO MEAN and
+    % therefore averages down. meanAbsFractionalPart is consequently NOT a bias in
+    % betweenTower mode; it is coloured noise that has not finished averaging, and it falls
+    % with arc length (0.2077 at 2700 s, 0.1332 at 3600 s, 0.1162 at 7200 s).
     %
-    % WIND-UP CANNOT REACH THIS OBSERVABLE, and the class proves it rather than claiming it.
-    % Phase wind-up is constant in CYCLES, so its metre contribution on band j is lam_j*w and
-    % the wide-lane phase combination sees (f1*lam1 - f2*lam2)*w/(f1-f2) = (c - c)*w/(f1-f2) = 0.
-    % windupLeakMax_m is computed from the per-row wind-up the builder actually applied, so a
-    % non-zero value is a real finding about the wind-up implementation, not a rounding story.
+    % 'undifferenced' is kept because measuring the two removed biases is a legitimate
+    % experiment. THERE the fractional part IS dominated by bias -- but read it with care: it
+    % is folded to the nearest integer, so once the bias exceeds half a cycle it WRAPS and a
+    % badly biased link reports a deceptively small number. Only the truth register sees that.
+    %
+    % WIND-UP CANNOT REACH THIS OBSERVABLE, but windupLeakMax_m is NOT the evidence. Wind-up
+    % is constant in CYCLES, so its metre contribution on band j is lam_j*w and the wide-lane
+    % phase combination sees (f1*lam1 - f2*lam2)*w/(f1-f2). Since lam_j = c/f_j and f_j*(c/f_j)
+    % rounds to EXACTLY c in double precision, that term is identically zero whatever w is --
+    % so the metric can only ever detect w differing BETWEEN BANDS, and it cannot fail for the
+    % reason it appears to test. The cancellation is real and is proved algebraically and by
+    % test T4c; a zero here is a weak check, and on a run with the wind-up gate off it is no
+    % check at all.
     %
     % NO TRUTH ENTERS ANY DECISION. successRate and failureRate come from the covariance
     % alone, by integer bootstrapping, which is exact and is a rigorous lower bound for
@@ -737,7 +751,7 @@ classdef MelbourneWubbenaArcEstimator < handle
                 lines{end+1} = sprintf('  AR(1) at tau        : %.4f cyc  [comparison only]', ...
                     mean(s.sigmaGaussMarkov_cyc(isfinite(s.sigmaGaussMarkov_cyc))));
             end
-            lines{end+1} = sprintf('Fractional part (cyc) : mean |frac| %.4f, max %.4f  [the leftover BIAS]', ...
+            lines{end+1} = sprintf('Fractional part (cyc) : mean |frac| %.4f, max %.4f  [NOT a bias: coloured noise still averaging]', ...
                 s.meanAbsFractionalPart_cyc, s.maxAbsFractionalPart_cyc);
             if isstruct(s.fix) && isfield(s.fix, 'decision')
                 lines{end+1} = sprintf('Fix                   : %s', s.fix.decision);
