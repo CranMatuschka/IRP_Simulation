@@ -2,7 +2,7 @@
   "_migrated": "Owned by the test suite, not by a study. Moved here from config/scenarios/ as ka_c3_kaIonoFree.json. simulation.duration_s was REMOVED with the rest of the ladder: the arc length is now the second argument of run_oo_v1 and the calling test passes 1800 s explicitly, so the run is unchanged.",
   "_comment": "KA-BAND LADDER c3. FALSIFICATION RUN, EXPECTED TO BE WORSE THAN c2. Ka pair 30.0/28.0 GHz in the ionosphere-free combination. IF amplification depends on FRACTIONAL separation: this pair is 6.7% apart, giving ~10.3x noise amplification against L1/L2s 3.0x, while the raw Ka ionosphere it removes is only ~1.4 cm. Prediction: the amplified noise costs far more than the ionosphere it deletes, i.e. iono-free is the WRONG choice above ~6 GHz. If c3 does NOT degrade, that argument is wrong.",
   "scenario": {
-    "name": "test009_kaIonoFree",
+    "name": "freq014_kaIonoFree",
     "nTowers": 5,
     "nSpaceAssets": 6,
     "nReceivers": 4
@@ -89,7 +89,7 @@
   },
   "report": {
     "layout": "clockExact",
-    "runVersion": "test009",
+    "runVersion": "freq014",
     "writePdf": false,
     "writeMat": true
   },

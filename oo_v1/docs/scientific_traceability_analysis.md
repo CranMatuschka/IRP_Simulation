@@ -346,7 +346,7 @@ internal.
 **Consequence.** Shortfall per IF row `(α²+β² − 1)σ_el² = 7.870 σ_el²` for GPS L1/L2
 (α = 2.545727, β = −1.545727, √(α²+β²) = 2.9782 — the same 2.98× the golden baseline documents). At
 `sigmaCodeL1_ss_m = 0.30`: at 22.6° elevation, charged 0.6095 m² against a correct 5.406 m² (short
-4.80 m²). **For the Ka 30/28 GHz pair of `test009` the factor is 105.9× in variance, not 8.87×.**
+4.80 m²). **For the Ka 30/28 GHz pair of `freq014` the factor is 105.9× in variance, not 8.87×.**
 Direction: R too small → the filter over-trusts IF code rows → optimistic covariance.
 
 **Liveness.** Both gates must be on and `masterConfig` defaults **both** off
@@ -356,7 +356,7 @@ golden — `golden_baseline.json:39` states explicitly that `ionosphereFree=fals
 the *carrier* rows are IF there. It **is** live in four shipped rungs:
 `config/ladder/freq/freq003_L1L2ionoFree.json`, `freq004_L1L2ionoFreeNoIonoState.json`,
 `freq006_L1L5ionoFree.json` (all `_extends: golden_baseline.json`, inheriting `coloredGM.enable=true`),
-and `config/ladder/test/test009_kaIonoFree.json` (via `realism.grade`).
+and `config/ladder/freq/freq014_kaIonoFree.json` (via `realism.grade`).
 
 **Fix.** Delete `+ sigMp_.^2` from `:890-891` and `:937`, letting `α²·Rindep_L1 + β²·Rindep_L2` carry it —
 which also makes R agree with what `combineIfSources_` already reports.
@@ -3803,7 +3803,7 @@ Cross-cutting block: correlation-aware IF variance **NOW-WRONG for multipath** (
 - **Mechanism**: the comment at `:865-875` states the premise explicitly — "This simulator copies ONE realisation onto both rows unscaled — the L2 row is built with `+ mp_t +` straight from the L1 draw (:424)". That premise was **falsified by `9650bcd` on 2026-08-10**, which is *after* the R rebuild was written. The same comment even leaves the instruction: "(If multipath is ever drawn per signal, move it back into the bundle.)" That was never done. Line `:424` no longer exists in the form cited.
 - **Size**: this is an **under-charge**, not an over-charge. Correct gain for an independent source is α²σ_L1² + β²σ_L2² = (α²+β²)σ² = **8.8698σ²**; charged is σ². At the golden's σ_ss = 0.30 m with a 1/sin(el) envelope: at el = 22.6° σ_el = 0.781 m → charged 0.609 m², should be **5.40 m²** (short by 4.79 m² per IF row); at el = 59° σ_el = 0.350 m → charged 0.123 m², should be **1.087 m²**.
 - **Corroboration inside the same file**: `combineIfSources_` at `:1282-1283` puts multipath through the `otherwise` branch, i.e. `sqrt(α²s1² + β²s2²) = 2.978σ`. So the **reported** IF multipath sigma is 2.978σ while the **charged** one is σ. The file already disagrees with itself by a factor 2.978 in σ, 8.87 in variance.
-- **Reachability**: `codeMode = 'ionosphereFree'` with multipath on → `config/ladder/freq/freq003`, `freq004`, `freq006`, `config/ladder/test/test009`. The golden baselines run `codeMode = 'singleFrequency'`, so **no golden moves** — but every ionosphere-free code rung is over-confident on the dominant non-atmospheric error.
+- **Reachability**: `codeMode = 'ionosphereFree'` with multipath on → `config/ladder/freq/freq003`, `freq004`, `freq006`, `config/ladder/freq/freq014`. The golden baselines run `codeMode = 'singleFrequency'`, so **no golden moves** — but every ionosphere-free code rung is over-confident on the dominant non-atmospheric error.
 - **Severity**: HIGH for the freq/test IF rungs; NONE for the goldens.
 
 ### DC-2 — Doppler σ still carries the √2 inflation for a duplicate draw that was fixed two days before the config was written  **[MEDIUM-HIGH, live in every baseline]**
@@ -3877,7 +3877,7 @@ Severity HIGH: this is live in the shipped baseline, on one of the two largest t
 - **H side**: `+models/+measurements/MeasurementModel.m:227-239` runs **after** `CodeMeasurementBuilder.build` has already collapsed M to M_pairs and set N_sig = 1. It reads `errStruct.frequencyHz_perMeas`, which the IF block compressed to the L1 values at `:974-979`, so `f_row = f_L1` and it writes `H_pr(row, ionoIdx) = (f_L1/f_L1)^2 = 1.0`.
 - **Result**: ∂h/∂x_iono = 0 while H says 1. The filter is told each IF code row responds one-for-one to the slant-iono state; moving that state changes nothing in h, so the residual never shrinks. Simultaneously the state's variance (initial σ = 5 m, converged P ≈ 0.047 m²) is injected into S = HPHᵀ + R on every IF code row, and the Kalman gain drives the state from residuals containing no ionospheric information — corrupting position and clock through the cross-covariance.
 - **Contrast**: the **carrier** IF path does this correctly, combining H with the same α, β as z/h (`+revgnss/CarrierIonoFreeRowBuilder.m:193`, `H_IF = alpha*H(idx1,:) + beta*H(idx2,:)`). The asymmetry is the tell.
-- **Reachability**: exactly one shipped rung — `config/ladder/freq/freq003_L1L2ionoFree.json` sets `measurements.codeMode = 'ionosphereFree'` while inheriting `estimation.ionosphereMode = 'perTowerSlant'` from `golden_baseline.json`. `freq004` and `freq006` both set `ionosphereMode = 'none'`; `test009` leaves it at the masterConfig default `'none'`.
+- **Reachability**: exactly one shipped rung — `config/ladder/freq/freq003_L1L2ionoFree.json` sets `measurements.codeMode = 'ionosphereFree'` while inheriting `estimation.ionosphereMode = 'perTowerSlant'` from `golden_baseline.json`. `freq004` and `freq006` both set `ionosphereMode = 'none'`; `freq014` leaves it at the masterConfig default `'none'`.
 - **Why it matters beyond one rung**: freq003's own `_id` says it "exists to measure the cost of that inconsistency" and describes the inconsistency as "the state has almost nothing left to estimate". That is a **misdiagnosis**. Any number quoted from freq003 measures an H/h mismatch, not the cost of an idle state.
 
 ### LF-3 — The code-R budget diagnostic has no consumer anywhere in the repository  **[MEDIUM]**

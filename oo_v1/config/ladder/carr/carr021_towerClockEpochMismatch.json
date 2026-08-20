@@ -1,5 +1,5 @@
 {
-  "_id": "test fixture: EXPOSES A REAL DEFECT. The code observable back-propagates the tower clock to TRANSMIT time; the carrier observable does not and uses it at RECEIVE time. Any code-carrier combination therefore inherits the difference, which is the tower clock DRIFT RATE times the LIGHT TIME. This rung is the configuration in which that term is visible on its own, and its job is to keep measuring it until somebody fixes the builder.",
+  "_id": "carr rung: EXPOSES A REAL DEFECT. The code observable back-propagates the tower clock to TRANSMIT time; the carrier observable does not and uses it at RECEIVE time. Any code-carrier combination therefore inherits the difference, which is the tower clock DRIFT RATE times the LIGHT TIME. This rung is the configuration in which that term is visible on its own, and its job is to keep measuring it until somebody fixes the builder.",
 
   "_THETWOLINES": "models/measurements/CodeMeasurementBuilder.m:203-207 computes tau_truth = t_s - cTruth.t_tx_s and then b_twr_truth_h = towerClkTruth(mi) - towers{ti}.getClockDriftMetersPerSecond() * tau_truth. models/measurements/CarrierMeasurementBuilder.m:437 computes b_twr_t = towerClkTruth(mi) and stops there. A band-independent term cancels inside Melbourne-Wubbena ONLY if the code and the carrier carry the same value of it, because the phase-part coefficient is (f1-f2)/(f1-f2) = 1 and the code-part coefficient is (f1+f2)/(f1+f2) = 1. Here they carry values evaluated at instants separated by the light time, so what survives is exactly -bdot_twr * tau.",
 
@@ -19,7 +19,7 @@
   "_delta": "diagnostics.melbourneWubbena.enable true (was false) and errors.multipath.truth.enable false (was true). Everything else inherited.",
 
   "scenario": {
-    "name": "test010_towerClockEpochMismatch",
+    "name": "carr021_towerClockEpochMismatch",
     "nTowers": 5,
     "nSpaceAssets": 1,
     "nReceivers": 4
@@ -42,7 +42,7 @@
   },
 
   "report": {
-    "runVersion": "test010",
+    "runVersion": "carr021",
     "compileTex": "auto"
   },
   "_reportNote": "compileTex 'auto' rather than the golden's 'require': a fixture's deliverable is its .mat, and a pdflatex hiccup must not throw away a finished run."
