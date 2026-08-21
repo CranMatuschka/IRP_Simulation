@@ -1,0 +1,25 @@
+{
+  "_id": "test010: does an honest process noise stop the JOINT filter diverging? ONE leaf against test003_jointCoherentTwoWayCode, which is the joint fixture and the matched control. Everything else, including the six-link coherent PN ring and residualBiasState, is inherited untouched.",
+  "_extends": "test003_jointCoherentTwoWayCode.json",
+  "_delta": "estimator.processNoise.modelMismatch.enable false -> true, sigma_mps2 1e-6 -> 1e-5. Nothing else moves.",
+  "_theDiagnosisThisTests": "project_federated_vs_joint_like_for_like measured, from run1's own stored cross-covariance at the final epoch, that the joint filter applied only 3 per cent of every ISL range: sigma_rel along the baseline was 0.07 m against a measurement sigma of 0.417 m, so the Kalman weight K_w = P_hh/(P_hh+R) = 0.028. Its prior was 28x overconfident, believing 0.146 m where the truth was 4.026 m. Root cause stated there: correlated systematics modelled as WHITE, so P shrinks as if sqrt(N)-averaging errors that are in fact constants. Self-reinforcing trap: overconfident prior -> down-weight the measurement -> learn nothing -> stay overconfident.",
+  "_whyTHISlever": "The per-link bias state is NOT the fix and is already on in test003, which still diverges. project_relay_closure_turnaround_bias_observability settles why: a per-LINK turn-around delay does not close even at N=20 full mesh (43.9 mm over a 3600 s arc against the 10 mm it must beat), and per-SATELLITE does not close at N=5 either. At six assets the bias is not estimable, so the only honest remaining lever is to stop P collapsing in the first place. estimator.processNoise.modelMismatch is the dedicated unmodelled-dynamics term and is added in quadrature to sigma_accel_mps2 for the primary AND, via addJointAssetProcessNoise_ (ReverseGNSSEKF.m:2241-2248), for every secondary block.",
+  "_sizing": "1e-5 is 10x the 1e-6 default. Target: raise sigma_rel from 0.07 m to roughly 0.7 m so that P_hh ~ 0.49 against R = 0.417^2 = 0.174, giving K_w ~ 0.74. That would take the filter from using 3 per cent of each ISL range to about three quarters of it. A FIRST PROBE, not a tuned value: if the direction is right the next step is a small sweep, and if it is wrong the diagnosis needs revisiting rather than the number.",
+  "_whatWouldFalsifyIt": "If position error stays at the 1e5 m scale with K_w still near 0.03, the prior is not what is driving the divergence and the cause is elsewhere. If error falls but NEES stays enormous, the filter is merely being made vague rather than made honest, which is not a fix either.",
+  "_readThisBeforeQuoting": "JOINT MODE IS ON THE STANDING DO-NOT-USE LIST for this thesis (2026-08-12). This rung is DIAGNOSTIC ONLY. Nothing from it may be quoted as a result without that instruction being revisited, and it exists to test whether the joint architecture is repairable at all, which is what R-MA-P-050 currently records as structurally unanswerable.",
+  "estimator": {
+    "processNoise": {
+      "modelMismatch": {
+        "enable": true,
+        "sigma_mps2": 1e-5
+      }
+    }
+  },
+  "report": {
+    "runVersion": "test010",
+    "compileTex": "auto"
+  },
+  "scenario": {
+    "name": "test010_jointModelMismatchProbe"
+  }
+}
