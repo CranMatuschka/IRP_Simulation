@@ -1,0 +1,22 @@
+{
+  "_id": "GOLDEN rung for G5S20R4. Built on golden_baseline_multi.json via _extends, so every sigma, bias and process-noise value is the sourced one (docs/golden_baseline_provenance.md) and a change to the golden propagates here automatically. The delta below is the formation size and the two-way time-transfer toggle, nothing else.",
+  "_extends": "golden_baseline_multi.json",
+  "_delta": "nSpaceAssets 20 instead of the multi golden's 6, on the same 1000 m helix, so the ring chord spacing tightens from about 1000 m to about 313 m, inside the 200-500 m gap band of the originating swarm concept. Crosslink terminals stay at maxNeighbours 5, so the link graph is no longer complete at this formation size. twoWayTimeTransfer enabled and used in the EKF (TW1).",
+  "_purpose": "Scaling point for the fleet-size and shape-versus-N questions: N=1/3/6 exist as scene rungs; this adds N=20, the size of the originating swarm concept. Read against scene016 (S6 TW1) and scene017 (S20 TW0).",
+  "scenario": {
+    "name": "scene018_G5S20R4_TW1_golden",
+    "nTowers": 5,
+    "nSpaceAssets": 20,
+    "nReceivers": 4
+  },
+  "measurements": {
+    "twoWayTimeTransfer": {
+      "enable": true,
+      "useInEKF": true,
+      "towers": "all"
+    }
+  },
+  "report": {
+    "runVersion": "scene018"
+  }
+}
