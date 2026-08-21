@@ -1,0 +1,28 @@
+{
+  "_id": "GOLDEN rung for G12S1R4. Built on golden_baseline.json via _extends, so every sigma, bias and process-noise value is the sourced one (docs/golden_baseline_provenance.md) and a change to the golden propagates here automatically. The delta below is the GROUND TOWER COUNT, nothing else.",
+  "_extends": "golden_baseline.json",
+  "_delta": "nTowers 12 instead of the golden's 5. The extra seven (Kiruna, Cebreros, Matera, SantaMaria, Malindi, Ascension, AbuDhabi) are real space-tracking / geodetic sites already defined in masterConfig; finalizeConfig selects the first 12 of the 30-site table. twoWayTimeTransfer enabled and used in the EKF (TW1), matching scene008.",
+  "_purpose": "Tower-count scaling point. The scene axis has held the ground network fixed at five and varied the SPACE segment (S1/S3/S6/S20); this opens the ground axis at G12 and scene020 opens it at G30. Read against scene008 (G5S1R4 TW1) and scene020 (G30S1R4 TW1): the three differ ONLY in nTowers, so any delta is attributable to ground geometry.",
+  "_whyTW1": "TW0 is NOT the useful arm here and the reason is on record. A one-way single-asset GEO carries a radial<->clock degeneracy with corr = -1.000 at BOTH G5 and G12, and its magnitude is a fragile, NON-MONOTONIC function of tower geometry (G5 ~7-10 m radial, G12 ~27-33 m). A TW0 tower-count sweep would therefore measure how badly each particular network happens to condition an unobservable split, not what ground geometry buys. Two-way time transfer breaks the null space (radial 26.7 -> 0.42 m, corr -1.000 -> -0.53), so TW1 is the arm in which the tower-count effect is actually readable.",
+  "_geometryCheck": "MASK IS 10 deg, NOT 5. cfg.estimator.elevationMask_rad defaults to 5 deg in masterConfig, but golden_baseline.json -- which this rung extends -- overrides it to 10 deg. MEASURED on the resolved config: all 12 towers clear it, minimum 13.68 deg (Kiruna), maximum 74.07 deg (Libreville), against 22.58 deg (Stockholm) at G5. No tower is ever masked and the GEO is stationary in ECEF, so every elevation is a constant for the arc and the geometry does not change -- the same property golden_baseline.json claims for the core five.",
+  "_cost": "Rows and states both scale with the tower count: roughly 20 pseudorange/carrier/Doppler rows + 1 two-way row per tower, and ~10 states per tower (8 float ambiguities at 4 antennas x 2 signals, 1 slant-iono, 1 ZWD). Expect ~250 rows/epoch and ~150 states against the golden's 105 and 67.",
+
+  "scenario": {
+    "name": "scene019_G12S1R4_TW1_golden",
+    "nTowers": 12,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+
+  "measurements": {
+    "twoWayTimeTransfer": {
+      "enable": true,
+      "useInEKF": true,
+      "towers": "all"
+    }
+  },
+
+  "report": {
+    "runVersion": "scene019"
+  }
+}

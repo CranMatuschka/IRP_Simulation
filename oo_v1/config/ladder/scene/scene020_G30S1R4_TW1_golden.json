@@ -1,0 +1,31 @@
+{
+  "_id": "GOLDEN rung for G30S1R4. Built on golden_baseline.json via _extends, so every sigma, bias and process-noise value is the sourced one (docs/golden_baseline_provenance.md) and a change to the golden propagates here automatically. The delta below is the GROUND TOWER COUNT, nothing else.",
+  "_extends": "golden_baseline.json",
+  "_delta": "nTowers 30 instead of the golden's 5, the full masterConfig site table. twoWayTimeTransfer enabled and used in the EKF (TW1), matching scene008 and scene019.",
+  "_purpose": "The far end of the tower-count axis. Read against scene008 (G5) and scene019 (G12): the three differ ONLY in nTowers, so any delta is attributable to ground geometry. The question is whether ground-network size buys anything once two-way has already broken the radial<->clock degeneracy, or whether the single-GEO geometry is the wall regardless of how many sites look at it.",
+  "_towerProvenance": "Sites 13-30 were ADDED to masterConfig on 2026-08-22 for this rung (towers 1-12 already existed). They are real IGS / ILRS / IVS / ESTRACK / national-agency geodetic and tracking stations: Wettzell, Onsala, Herstmonceux, Metsahovi, Hofn, Dakar, Djibouti, Windhoek, Sutherland, MarionIsland, Syowa, Kerguelen, LaReunion, DiegoGarcia, Almaty, Lhasa, Fortaleza, CachoeiraPaulista. Coordinates are nominal site positions (~100 m), NOT surveyed ITRF coordinates -- the same standard as towers 1-12, which is what errors.survey exists to charge for. They were appended, never inserted, so finalizeConfig's cfg.towers(1:nTowers) trim leaves every nTowers <= 12 result bit-identical.",
+  "_geometryCheck": "MASK IS 10 deg, NOT 5. cfg.estimator.elevationMask_rad defaults to 5 deg in masterConfig, but golden_baseline.json -- which this rung extends -- overrides it to 10 deg, and that is the value the sites actually have to clear. MEASURED on the resolved config, not assumed: all 30 towers are above the mask, minimum 10.36 deg (Lhasa), maximum 74.07 deg (Libreville); for reference the same check gives 22.58 deg (Stockholm) at G5 and 13.68 deg (Kiruna) at G12. No tower is ever removed and the GEO is stationary in ECEF, so every elevation is a CONSTANT for the arc and the geometry does not change. Angular spread lat -69.0 .. +67.9 deg, lon -45.0 .. +91.1 deg.",
+  "_lhasaMargin": "Lhasa clears the 10 deg mask by 0.36 deg. Safe as configured -- a stationary GEO means the margin cannot erode with time -- but it is the first site to drop out under ANY geometry change: a raised mask, a sub-satellite longitude moved off 23 deg E, or orbitClass set to MEO/LEO. If any of those change, re-run the elevation check before trusting that this rung is still a 30-tower network. Lhasa is kept rather than dropped because it is the best far-east lever that clears 10 deg at all: the obvious alternative, Urumqi, comes to 9.86 deg and FAILS.",
+  "_rejectedSites": "Six otherwise-real candidates were rejected, recorded so nobody re-adds them. THREE FAIL THE 10 deg MASK OUTRIGHT: Kourou (5.5 deg), SanaeIV (7.8 deg) and Brasilia (9.8 deg) -- all three would have passed a 5 deg mask, which is exactly why the mask value matters here. THREE ARE NEAR-DUPLICATES of sites already in the table: Yebes (110 km from Cebreros), Zimmerwald (500 km from Wettzell) and Noto (430 km from Matera).",
+  "_cost": "THIS IS THE EXPENSIVE RUNG. Rows and states scale with the tower count: expect ~630 rows/epoch (30 towers x ~20 rows + 30 two-way) and ~320 states, against the golden's 105 and 67. The EKF Jacobian is finite-differenced, so cost grows faster than linearly in the state dimension -- budget accordingly and read the smoke-test epoch rate before assuming a wall-clock.",
+  "_readWithCare": "A 30-site ground network for ONE GEO is a geometry study, not a deployment proposal. It is also far outside the requirement set: R-MIS-010/-040 and the ground-segment sizing in the SA requirements are derived at G5. Do not quote a scene020 number against those targets without restating them at G30 or declaring the result outside the requirement set.",
+
+  "scenario": {
+    "name": "scene020_G30S1R4_TW1_golden",
+    "nTowers": 30,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+
+  "measurements": {
+    "twoWayTimeTransfer": {
+      "enable": true,
+      "useInEKF": true,
+      "towers": "all"
+    }
+  },
+
+  "report": {
+    "runVersion": "scene020"
+  }
+}

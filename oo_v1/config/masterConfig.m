@@ -43,9 +43,11 @@ cfg.diagnostics.storage.snapshot.interval_s = 300;
 cfg.scenario.name         = 'singleAssetNominalNavigation';
 cfg.scenario.nSpaceAssets = 1;        % helix ISL swarm (5 secondaries) -> ~3 cm / ~50 ps
 cfg.scenario.nTowers      = 5;        % 5-tower default (frozen-golden network). baseConfig
-                                      % defines 12 real sites; set nTowers=12 for the wide
-                                      % network that breaks the single-GEO radial<->clock
-                                      % degeneracy (towers 6-12 are the extra real sites).
+                                      % defines 30 real sites; nTowers selects a PREFIX of
+                                      % them (finalizeConfig trims cfg.towers(1:nTowers)).
+                                      % 12 = the wide network that attacks the single-GEO
+                                      % radial<->clock degeneracy; 30 = the full screened
+                                      % network (scene019 / scene020 scaling rungs).
 cfg.scenario.orbitClass   = 'GEO';    % 'GEO' | 'MEO' | 'LEO'
 % Receiver antennas. One antenna is sufficient for the nominal star-tracker/gyro
 % attitude solution. Four antennas are required only by explicit GNSS lever-arm
@@ -1996,6 +1998,26 @@ cfg.multiAsset.twoWayTimeTransferISL.delayCal.nCorrCap      = 60;     % cap on t
 % Towers 6-12 are additional real space-tracking / geodetic sites (ESA/ASI/IGS/NASA)
 % spread across the visible hemisphere to break the radial<->clock degeneracy of a
 % single ground-only GEO (wide lat -26..+68 deg, lon -25..+78 deg angular spread).
+% Towers 13-30 (added 2026-08-22) extend that to a 30-site network for the tower-count
+% scaling rungs (scene019 G12, scene020 G30). They are real IGS / ILRS / IVS / ESTRACK /
+% national-agency geodetic and tracking stations.
+% SCREEN AGAINST 10 deg, NOT THE 5 deg DEFAULT BELOW. cfg.estimator.elevationMask_rad
+% defaults to 5 deg here, but golden_baseline.json -- which every scene rung extends --
+% OVERRIDES it to 10 deg, and that is the mask these sites actually have to clear. Measured
+% on the resolved configs: G5 min 22.58 deg (Stockholm), G12 min 13.68 deg (Kiruna),
+% G30 min 10.36 deg (Lhasa). All clear 10 deg, so no tower is ever masked at nTowers
+% = 5 / 12 / 30 and the geometry is constant for the whole arc -- the property
+% golden_baseline.json claims for the core five.
+% ⚠ LHASA CLEARS BY ONLY 0.36 deg. That is safe as configured because a GEO is stationary in
+% ECEF, so each tower's elevation is a CONSTANT for the arc and the margin cannot erode with
+% time. It is NOT safe under a changed geometry: raise the mask above 10.36 deg, move the
+% sub-satellite longitude off 23 deg E, or set orbitClass to MEO/LEO, and Lhasa is the first
+% site to drop out -- which would silently change the network size a rung thinks it is running.
+% Coordinates are nominal site positions (~100 m), NOT surveyed ITRF coordinates; that is the
+% same standard as towers 1-12 and is why errors.survey exists.
+% APPEND-ONLY IS LOAD-BEARING: finalizeConfig trims cfg.towers(1:nTowers), so adding sites
+% after index 12 cannot move any nTowers <= 12 result. Adding a site BEFORE an existing one
+% would renumber the network and break every frozen golden. Never insert, only append.
 towerDefs = { ...
     'Tenerife',        28.3,      -16.5,    0.0; ...   % 1  ESA/INTA (frozen golden)
     'Stockholm',       59.3,       18.1,    0.0; ...   % 2  (frozen golden)
@@ -2008,7 +2030,25 @@ towerDefs = { ...
     'SantaMaria',      36.97,     -25.17,    0.0; ...  % 9  Azores (west Atlantic lever)
     'Malindi',         -2.996,     40.19,    0.0; ...  % 10 ASI Luigi Broglio (east equ.)
     'Ascension',       -7.95,     -14.41,    0.0; ...  % 11 NASA/IGS (south Atlantic)
-    'AbuDhabi',        24.43,      54.62,    0.0 };    % 12 Yahsat (Middle East / east)
+    'AbuDhabi',        24.43,      54.62,    0.0; ...   % 12 Yahsat (Middle East / east)
+    'Wettzell',        49.145,     12.878,   0.0; ...   % 13 BKG geodetic fundamental stn (DE)
+    'Onsala',          57.395,     11.926,   0.0; ...   % 14 Onsala Space Observatory (SE)
+    'Herstmonceux',    50.867,      0.336,   0.0; ...   % 15 NERC Space Geodesy Facility (UK)
+    'Metsahovi',       60.217,     24.395,   0.0; ...   % 16 Finnish Geospatial Res Inst (FI)
+    'Hofn',            64.267,    -15.198,   0.0; ...   % 17 IGS HOFN, north-west lever (IS)
+    'Dakar',           14.723,    -17.190,   0.0; ...   % 18 IGS DAKR, west Africa (SN)
+    'Djibouti',        11.527,     42.847,   0.0; ...   % 19 IGS DJIG, Horn of Africa (DJ)
+    'Windhoek',       -22.575,     17.084,   0.0; ...   % 20 IGS WIND, south-west Africa (NA)
+    'Sutherland',     -32.381,     20.811,   0.0; ...   % 21 SAAO (IGS SUTH), south Africa (ZA)
+    'MarionIsland',   -46.878,     37.858,   0.0; ...   % 22 SANAP sub-Antarctic island (ZA)
+    'Syowa',          -69.006,     39.590,   0.0; ...   % 23 JARE Antarctic (IGS SYOG) (AQ)
+    'Kerguelen',      -49.351,     70.256,   0.0; ...   % 24 IGS KERG, south Indian Ocean (TAAF)
+    'LaReunion',      -21.208,     55.572,   0.0; ...   % 25 IGS REUN, Indian Ocean (FR)
+    'DiegoGarcia',     -7.269,     72.370,   0.0; ...   % 26 IGS DGAR, equatorial Indian (IO)
+    'Almaty',          43.240,     76.917,   0.0; ...   % 27 ILRS/IGS central Asia (KZ)
+    'Lhasa',           29.657,     91.104,   0.0; ...   % 28 IGS LHAZ, far-east lever (CN)
+    'Fortaleza',       -3.877,    -38.426,   0.0; ...   % 29 INPE / IVS FORTLEZA (BR)
+    'CachoeiraPaulista', -22.687, -45.007,   0.0 };     % 30 INPE (IGS CHPI), far-west lever (BR)
 
 % Build ALL defined towers; finalizeConfig() trims to cfg.scenario.nTowers.
 cfg.towers = struct();
