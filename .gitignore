@@ -28,3 +28,7 @@ oo_v1/output/triage/
 oo_v1/output/Report-*
 
 
+
+# Python bytecode (thesis_figures/ and any future Python tooling).
+__pycache__/
+*.pyc
