@@ -1,0 +1,24 @@
+{
+  "_id": "scene008 with the Monte-Carlo consistency ensemble run at the FULL 3600 s arc instead of the 900 s default. This is the REFERENCE half of the pair whose other half is feat025mc: the two differ in estimation.multipathBias.useInEKF and in nothing else, so the difference in the NEES verdict is attributable to the multipath error model alone.",
+  "_extends": "scene008_G5S1R4_TW1_golden.json",
+  "_delta": "report.monteCarlo.enable true (was false) and duration_s 3600 (golden_baseline ships 900). nSeeds 12 and confidence 0.99 inherited unchanged.",
+  "_WHYTHISRUNGEXISTS": "The frozen Final sweep has validationStatisticsNeesEnable = 0 and monteCarloStatus = notRun on every rung, so neesPositionMean is NaN and neesPositionStatus is notAvailable. The state-covariance question R-SA-P-020 asks therefore has NO evidence behind it anywhere in the sweep. NIS is a measurement-side statistic and is silent about it. This rung and feat025mc supply that evidence for the one lever that is expected to move it.",
+  "_WHYNOTTHE900sDEFAULT": "MonteCarloConsistency uses burnInFraction 0.5, which is NOT exposed through cfg.report.monteCarlo. At the 900 s default it pools epochs 451-900 and at 3600 s it pools 1801-3600. The converged metric this chapter reports is the last 20 percent of a 3600 s arc, so a 900 s ensemble would band-check a transient and attach the verdict to a converged number. Same reasoning as best002mc.",
+  "_REGRESSIONCHECK": "MonteCarloConsistency runs AFTER the main pipeline and cannot reach back into it, so the main arc here must reproduce scene008 exactly: posRMS_tail20pct 1.5233 m. If it does not, something other than the MC block moved and the pair is void.",
+  "scenario": {
+    "name": "scene008mc_goldenMonteCarlo",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+  "report": {
+    "runVersion": "scene008mc",
+    "compileTex": "auto",
+    "monteCarlo": {
+      "enable": true,
+      "nSeeds": 12,
+      "duration_s": 3600,
+      "confidence": 0.99
+    }
+  }
+}

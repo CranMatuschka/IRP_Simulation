@@ -1,0 +1,24 @@
+{
+  "_id": "feat rung: onMultipathBiasStates. One toggle against golden_baseline.json; everything else is inherited via _extends, so the difference in the result is attributable to this toggle alone. Ground code multipath carried as a Gauss-Markov EKF state per (tower, signal) instead of as a white variance on the code rows of R. OFF in the golden, where the truth generator runs a tau = 60 s coloured process whose steady-state variance alone reaches the filter, so the filter is told the error is independent from epoch to epoch when it is not.",
+  "_extends": "golden_baseline.json",
+  "_delta": "Ground code multipath carried as Gauss-Markov EKF states (one per tower and signal) instead of as white variance in R.",
+  "scenario": {
+    "name": "feat025_onMultipathBiasStates",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+  "_whatThisMeasures": "The COLOUR of the multipath, not its size. feat006 answers what the multipath costs by deleting it, which is not an option in flight. This rung leaves the truth realisation untouched and changes only what the filter believes about it, so the delta is attributable to the error model alone. Read the consistency statistics first and the accuracy second: the expected result is that NEES falls towards its band while the converged position error RISES, because the baseline accuracy was partly bought by over-trusting the code rows.",
+  "_matchedModelCaveat": "estimation.multipathBias.tau_s and sigma_ss_m are left empty, so ReverseGNSSEKF defaults them to the truth generator's own errors.multipath.coloredGM values. That is a PERFECTLY MATCHED model and an idealisation: in flight neither the correlation time nor the steady-state sigma is known per link, so the consistency gain measured here is an upper bound on what the same remedy buys on real data. Set the two keys explicitly to characterise a deliberate mismatch.",
+  "_variancePaidOnce": "ErrorChain.multipathSigmaInState reads the same config field the EKF reads and returns sigma_m.mp = 0 when it is set, so the multipath variance is carried by the state or by R and never by both. The truth value added to the measurement is untouched either way.",
+  "estimation": {
+    "multipathBias": {
+      "useInEKF": true
+    }
+  },
+  "report": {
+    "runVersion": "feat025",
+    "compileTex": "auto"
+  },
+  "_reportNote": "compileTex 'auto' rather than the golden's 'require': a ladder rung's deliverable is its .mat, and a pdflatex hiccup must not throw away a finished 25-minute run. ReportRunner only escalates a failed compile to an error under 'require'."
+}

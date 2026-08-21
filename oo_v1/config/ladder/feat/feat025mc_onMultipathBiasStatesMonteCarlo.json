@@ -1,0 +1,24 @@
+{
+  "_id": "feat025 with the Monte-Carlo consistency ensemble run at the FULL 3600 s arc instead of the 900 s default. This is the TREATMENT half of the pair whose other half is scene008mc: the two differ in estimation.multipathBias.useInEKF and in nothing else.",
+  "_extends": "feat025_onMultipathBiasStates.json",
+  "_delta": "report.monteCarlo.enable true (was false) and duration_s 3600 (golden_baseline ships 900). nSeeds 12 and confidence 0.99 inherited unchanged.",
+  "_WHATTHEPAIRMEASURES": "Whether carrying the tau = 60 s ground code multipath as a Gauss-Markov state, instead of charging its steady-state variance to R as though it were white, moves the POSITION NEES towards its acceptance band. NIS is expected to barely move, because R already charges the multipath at the correct marginal variance. A large NEES change against a flat NIS is the signature that the defect is the COLOUR of the error and not its size.",
+  "_READTHECOSTTOO": "The expected accuracy result is that the converged position error gets WORSE, because the baseline number was partly bought by the filter over-trusting its code rows. Report both halves or the rung is misleading.",
+  "_WHYNOTTHE900sDEFAULT": "Same reasoning as scene008mc and best002mc: burnInFraction 0.5 is not configurable, so 900 s pools a transient while 3600 s pools the regime the converged metric lives in.",
+  "scenario": {
+    "name": "feat025mc_onMultipathBiasStatesMonteCarlo",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+  "report": {
+    "runVersion": "feat025mc",
+    "compileTex": "auto",
+    "monteCarlo": {
+      "enable": true,
+      "nSeeds": 12,
+      "duration_s": 3600,
+      "confidence": 0.99
+    }
+  }
+}
