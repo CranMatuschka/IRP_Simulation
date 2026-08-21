@@ -1,0 +1,20 @@
+{
+  "_id": "best102 with the Monte-Carlo consistency ensemble at the FULL 3600 s arc, 12 seeds, confidence 0.99. Matches best002mc/best007mc/best002cs/best007cs so all five verdicts sit on one scale.",
+  "_extends": "best102_stackMultiAssetLowBand.json",
+  "_delta": "report.monteCarlo.enable true and duration_s 3600. Nothing else, so the main federated run must reproduce best102 exactly: pos_rms_m 0.730537, tail 0.081756, solved shape 0.101115.",
+  "_WHATTHISVERDICTCOVERSANDWHATITDOESNOT": "⚠ READ THIS BEFORE QUOTING THE VERDICT. MonteCarloConsistency.run constructs revgnss.ReverseGNSSSimulation(cfg) directly and never enters the federated multi-asset path, so every one of the 12 seeds exercises the CHIEF ONLY. The verdict therefore band-checks asset 1's per-asset EKF. It says NOTHING about the other five assets, and NOTHING about the relative layer, the solved formation shape or the beamforming path error. That is also why it is affordable: ~6 min per seed rather than the 33 min a full six-asset draw would take.",
+  "_WHYRUNITANYWAY": "Because the per-asset absolute solution IS the multi-asset headline number. best102's 0.730537 m run-wide and 0.081756 m tail are per-asset tower-fix quantities, and they are exactly what the chief ensemble tests. What stays untested is the formation geometry, which is truth-referenced anyway and needs no covariance claim.",
+  "_THEGUARDCCENTROIDGATE": "If the run resolves as a swarm 'position' run the ensemble also pools the formation-CENTROID NEES across seeds, one time-averaged sample per seed. That gate is only VALID with the realism guards on (divergent atmosphere plus truth-side dynamics), otherwise it reports 'inconclusiveMatchedCrutch'. Read result.centroidVerdict before reading centroidNeesPerDof.",
+  "_WHATTOEXPECT": "The four completed ensembles all returned CONSERVATIVE on NIS (0.813 to 0.856 against a band of [0.998, 1.002]) with NEES at 1.125 to 1.134 against [0.986, 1.014]. So expect CONSERVATIVE on innovations with the position covariance ~11% over-confident, and report both halves rather than the single verdict word, which is NIS-only by construction in ReportRunner.mcVerdict_.",
+  "scenario": {
+    "name": "best102mc_stackMultiAssetLowBandMonteCarlo",
+    "nTowers": 5,
+    "nSpaceAssets": 6,
+    "nReceivers": 4
+  },
+  "report": {
+    "runVersion": "best102mc",
+    "compileTex": "auto",
+    "monteCarlo": { "enable": true, "nSeeds": 12, "duration_s": 3600, "confidence": 0.99 }
+  }
+}

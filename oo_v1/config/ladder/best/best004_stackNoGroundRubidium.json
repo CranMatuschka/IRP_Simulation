@@ -1,0 +1,27 @@
+{
+  "_id": "best rung 4/5: THE REDUNDANCY CONTROL. best001 with the ground rubidium taken back out, so the towers run the golden's OCXO and the only clock-side change is the 5 s product interval. Its whole purpose is to price one hypothesis: that prod005 and clk004 are SUBSTITUTES rather than complements, because both remove the same physical quantity -- the tower oscillator's wander across the interval between the product epoch and the measurement epoch.",
+  "_extends": "best001_stackSingleAsset.json",
+  "_delta": "clock.tower reverted to the golden's inherited OCXO by removing the RUBIDIUM override. Band and product interval as best001.",
+  "_theEVIDENCETHATMOTIVATESIT": "Read across the frozen sweep and the 2026-08-17 product probe, both routes land in the same place from opposite directions. Ground OCXO at 30 s (scene008): tail 2.1193 m, clkRMS 0.4212 m. Ground OCXO at 5 s (prod005): 1.7608 / 0.1055. Ground RUBIDIUM at 30 s (clk004): 1.7960 / 0.0832. Two different pieces of hardware-or-policy, one shared mechanism, one shared answer near a 1.78 m tail.",
+  "_WHATTHEOUTCOMEDECIDES": "If best004 reproduces best001 to within the ~4% single-run resolution of this simulation, the rubidium is redundant once the product is issued every 5 s and the recommendation is unambiguous: buy the cadence, not the oscillator. Five towers x a rubidium frequency standard is roughly 20k of hardware that a data-rate decision makes unnecessary. If best001 is materially better than best004, the two are complementary after all and the clock budget has to carry both.",
+  "_theFLOORthatBOUNDSBOTH": "Neither route can go below the product's own noise. golden_baseline sets clocks.tower.product.sigmaBias_m = 0.10 m (0.33 ns, IGS-RTS class) and sigmaDrift_mps = 1e-3, and prod005 already returned clkRMS 0.1055 m. Shortening the interval below 5 s therefore buys nothing without a better product, and that is the requirement this pair of rungs actually writes.",
+  "scenario": {
+    "name": "best004_stackNoGroundRubidium",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+  "clock": {
+    "tower": {
+      "clockType": "OCXO",
+      "deterministic": false
+    }
+  },
+  "report": {
+    "runVersion": "best004",
+    "compileTex": "auto",
+    "monteCarlo": {
+      "enable": false
+    }
+  }
+}

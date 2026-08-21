@@ -1,0 +1,51 @@
+{
+  "_id": "best rung 6: THE RUN THE THESIS SAID IT DID NOT DO. best101 plus the three-tower beam-pointing lock plus 1 mm relative-layer crosslink ranging. Its whole purpose is to MEASURE the post-pointing coherence frequency on ONE configuration instead of assembling it from two rungs that were never run together.",
+
+  "_RENAMEDFROMbest104": "Renamed 2026-08-19. A SECOND, UNRELATED config (best104_isl017Product5sMonteCarlo.json, scenario.name best104_isl017Product5s) also declared report.runVersion best104, so both resolved to Report_best104_G5S6R4_TW1 and the later run OVERWROTE this one at 18:12 on 2026-08-18. Reading that directory gives -10.11 dB at 2.1 GHz and 168 MHz, which reverses the conclusion this rung supports. runVersion is NOT unique across the ladder; scenario.name is. Always read output/latest/latest_<scenario.name>.mat.",
+
+  "_extends": "best101_stackMultiAsset.json",
+
+  "_delta": "TWO leaves against best101. multiAsset.beamPointingLock.enable -> true (from isl013) and multiAsset.twoWayISL.sigma_m 0.015 -> 0.001 (from isl002). Nothing else. The uplink stack, the ISL carrier package, the broadcast neighbour product and the federated architecture are inherited untouched.",
+
+  "_theGAPTHISCLOSES": "The thesis assembles its headline post-pointing coherence figure of 718 MHz from isl002 (1 mm ranging, residual 8.05 mm, NO lock) and isl013 (the lock, at 50 mm ranging). No rung in the frozen sweep combines them, and the orientation chapter states in its own text that this is 'the single most informative run this thesis did not perform'. This rung performs it.",
+
+  "_WHATTHEMEASUREDBASELINEIS": "best102mc's main arc, 2026-08-18, is the only place the best multi-asset stack has ever been put through the beam budget. It reports differential path 0.0969 m, tilt 16 percent of the budget, beam displacement 1854 m, residual after repointing 0.0887 m, and coherence 155 MHz rising to 169 MHz repointed, with -9.92 dB at 2.1 GHz. That 88.7 mm residual is the shape floor at 50 mm crosslink ranging, inherited from isl017. THIS RUN TESTS WHETHER 1 mm RANGING PLUS THE LOCK REACHES THE 8 mm CLASS AND THEREFORE THE 700 MHz CLASS.",
+
+  "_whatToExpect": "Two predictions, both falsifiable. FIRST, the lock should remove the tilt and leave the residual untouched, exactly as it did on isl013 against isl004 (tilt fraction 0.467 -> 0.001, residual 294.81 -> 294.85 mm, unchanged to five figures). If the residual MOVES here, the mispointing reading of the orientation chapter is wrong and must be revisited. SECOND, the residual should fall to roughly 8 to 9 mm, because at 1 mm thermal ranging the per-link delay calibration takes over at sqrt(0.005^2 + 0.002^2) = 5.4 mm and the measured shape law bottoms out near 8.9 mm. Coherence should then land near 700 MHz rather than the 169 MHz best102mc measured.",
+
+  "_whyDelayCalIsNOTScaled": "Deliberate, and inherited from isl017's own reasoning. delayCal is separate hardware that does not improve because the thermal ranging figure does. Holding it while dropping sigma_m from 0.015 to 0.001 is what EXPOSES the calibration floor rather than hiding it, and the floor is the engineering conclusion this rung exists to support.",
+
+  "_theBANDISIMMATERIALHERE": "best104 extends best101 (24.125/5.800 GHz uplink) and not best102 (2.450/0.915 GHz). That choice does not affect any quantity this rung is run for. Everything relative is frozen across best101, best102 and best103 to five decimals: solved shape 0.10111x, deformation 0.08880, rotation 0.00256, and the converged tail differs by 0.06 percent. The uplink levers reach ABSOLUTE position only, so the beam result measured here transfers to best102 unchanged and the system recommendation is unaffected.",
+
+  "_noTruthInTheEstimator": "measurements.isl.product.enable stays TRUE through isl017. isl016 and isl018 leave it false, which short-circuits ISLMeasurementBuilder.productBias_ to zero and lets the neighbour's true position and clock reach h. This rung inherits the honest path and must never be re-parented onto isl016 or isl018.",
+
+  "_monteCarlo": "OFF, as on best101. The multi-asset MonteCarloConsistency path is chief-only, and best102mc has already returned that verdict for this stack: NIS/dof 0.780 conservative, NEES/dof 82.980 against a band of [0.986, 1.014], twelve seeds. Re-running it here would cost six hours to reproduce a number that is already known and that this rung's two leaves cannot move, since neither touches the per-asset filters.",
+
+  "_readTheLogNotTheReturnValue": "On the federated path the Monte Carlo result never reaches out.monteCarlo in what run_oo_v1 returns, so a wrapper checking mc.ran reports ran=0 even when twelve seeds completed. Irrelevant here because MC is off, recorded so the next person does not lose an ensemble to it.",
+
+  "scenario": {
+    "name": "best106_stackMultiAssetBeamLockFineIsl",
+    "nTowers": 5,
+    "nSpaceAssets": 6,
+    "nReceivers": 4
+  },
+
+  "multiAsset": {
+    "beamPointingLock": {
+      "_provenance": "Verbatim from isl013_beamPointingLock.json. Three towers, post-processing orientation stage, runs after the joint solve so it corrects whatever geometry survived.",
+      "enable": true
+    },
+    "twoWayISL": {
+      "_provenance": "The isl002 value. Laboratory-grade crosslink ranging, the optimistic corner of the ISL sweep, kept here because the question is what the architecture reaches at its best and not what it reaches today.",
+      "sigma_m": 0.001
+    }
+  },
+
+  "report": {
+    "runVersion": "best106",
+    "compileTex": "auto",
+    "monteCarlo": {
+      "enable": false
+    }
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "_id": "CONTROL for the ISL-product-interval fix. isl017 exactly as frozen, with Monte Carlo added at 12 seeds x 3600 s. It exists because there is NO 3600 s ensemble for isl017 anywhere: the frozen sweep ran 900 s seeds, and best102mc's NEES of 82.98 came from a rung that also moved the band, the tower product and the ground oscillator. Without this control the fix rung has nothing clean to be measured against.",
+  "_extends": "isl017_carrierHonestProduct.json",
+  "_delta": "report.monteCarlo enabled at 12 seeds x 3600 s, confidence 0.99. NOTHING ELSE. measurements.isl.product.updateInterval_s stays at its frozen 300 s.",
+  "_WHATITMUSTSHOW": "A NEES/dof in the same family as best102mc's 82.98. If it comes back near 1 instead, the defect is NOT in isl017 and belongs to something best102 added, which would invalidate the diagnosis rather than confirm it.",
+  "_THEPREDICTION": "sigma factor sqrt(300) = 17.3x from the 300 s hold, so NEES/dof of order 100-300 depending on how much of the per-asset error the hold explains. On the seed-42 realisation the chief already reads 145.4 recomputed straight from its saved P_diag.",
+  "scenario": { "name": "best105_isl017ProductControl", "nTowers": 5, "nSpaceAssets": 6, "nReceivers": 4 },
+  "report": {
+    "runVersion": "best105", "compileTex": "auto",
+    "monteCarlo": { "enable": true, "nSeeds": 12, "duration_s": 3600, "confidence": 0.99 }
+  }
+}

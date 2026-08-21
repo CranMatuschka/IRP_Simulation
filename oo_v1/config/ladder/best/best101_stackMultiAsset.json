@@ -1,0 +1,59 @@
+{
+  "_id": "best rung 5/5: the MULTI-ASSET STACK. Six spacecraft on the 1000 m projected-circular helix, four phase centres each, federated (N independent per-asset EKFs plus a relative layer), with the same three single-asset levers applied on top of the honest ISL carrier package. The parent is isl017 and NOT isl016/isl018 -- that choice is the whole point and is argued below.",
+  "_extends": "isl017_carrierHonestProduct.json",
+  "_delta": "THREE deltas against isl017, identical to the ones best001 applies against golden_baseline: signals -> 24.125/5.800 GHz, clocks.tower.product.updateInterval_s -> 5, clock.tower -> RUBIDIUM stochastic. The ISL package -- code 15 mm, carrier 2 mm at 26 GHz with one float ambiguity per link, broadcast neighbour product ON, relative-layer range budget 15 mm -- is inherited untouched.",
+  "_whyISL017ANDNOTISL016": "isl016 and isl018 post the best multi-asset numbers on the frozen sweep (posRMS 2.0035 m, tail 0.0056 m) and BOTH ARE EXCLUDED HERE. They leave measurements.isl.product.enable false, which makes ISLMeasurementBuilder.productBias_ short-circuit to zero so that btxProd collapses to btxTruth: the neighbour's TRUE position and clock reach h. That is truth in the estimator and it is on the standing do-not-use list. isl017 turns the broadcast product on (3 cm position, 2 cm clock, masterConfig's defaults, described there as SLR-class and 3.3x/5x tighter than realismGradeConfig's 10 cm / 0.33 ns; see isl017 _productBudget) and pays 0.0032 m of run-wide position and 0.0931 m of tail for it, which is the price of the numbers being defensible.",
+  "_whatISL017ISWORTHONITSOWN": "Against scene016 (G5S6R4 golden, posRMS 4.1193 m, tail 2.3233 m, shape 0.3358 m): 2.0067 / 0.0987 / 0.1011. Note WHICH quantity each lever moves. Every rung isl001 through isl015 returns posRMS 4.1193 to four decimals -- ISL ranging does not improve absolute position AT ALL, it only sets the formation shape, and shape is linear in the ISL sigma at 6.7 m per m down to a floor near 8.9 mm set by delay calibration. What moves absolute position is the ISL CARRIER with a float ambiguity per link, which is what isl016 introduced and isl017 made honest.",
+  "_theCAVEATTHATTRAVELSWITHIT": "isl017's formal sigma was audited at 13.7x optimistic, and it inherits keepIslInPerAssetEkf true from isl016, so the relative layer re-consumes observations the per-asset filters already absorbed. Absolute per-asset position and clock from this rung are honest; the relative layer's FORMAL COVARIANCE is not independently valid and formation-geometry covariance should still be quoted from golden_baseline_multi.json. The shape ERROR is a truth-referenced quantity and is unaffected by that defect.",
+  "_theSWARMMONTECARLOTRAP": "Monte Carlo is off here and would be worth little if it were on: the multi-asset MonteCarloConsistency path is CHIEF-ONLY, proven by the S1 = S3 = S6 band identity, so it would report the chief's consistency and say nothing about the other five.",
+  "scenario": {
+    "name": "best101_stackMultiAsset",
+    "nTowers": 5,
+    "nSpaceAssets": 6,
+    "nReceivers": 4
+  },
+  "signals": {
+    "_provenance": "Verbatim from freq012_ism5800_24125.json, as best001. This is the GROUND-TO-SPACE uplink pair only; the ISL carrier stays at its own 26 GHz set by isl016 and is not touched.",
+    "enabledMask": [true, true],
+    "L1": {
+      "name": "L1",
+      "frequency_Hz": 24125000000.0,
+      "lambda_m": 0.01242663038341969,
+      "codeSigma0_m": 0.3
+    },
+    "L2": {
+      "name": "L2",
+      "frequency_Hz": 5800000000.0,
+      "lambda_m": 0.05168835482758621,
+      "codeSigma0_m": 0.45
+    },
+    "primary": "L1",
+    "secondary": "L2"
+  },
+  "measurements": {
+    "codeMode": "singleFrequency"
+  },
+  "atmosphere": {
+    "ionosphereFree": false
+  },
+  "clocks": {
+    "tower": {
+      "product": {
+        "updateInterval_s": 5
+      }
+    }
+  },
+  "clock": {
+    "tower": {
+      "clockType": "RUBIDIUM",
+      "deterministic": false
+    }
+  },
+  "report": {
+    "runVersion": "best101",
+    "compileTex": "auto",
+    "monteCarlo": {
+      "enable": false
+    }
+  }
+}

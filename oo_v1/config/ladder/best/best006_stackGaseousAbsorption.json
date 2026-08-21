@@ -1,0 +1,28 @@
+{
+  "_id": "best rung 7/7: best001 with ITU-R P.676 gaseous absorption TURNED ON. This rung exists because the band lever, which is the largest non-idealised single-asset lever on the frozen sweep, was measured with a term switched off that only matters at the band it recommends. Without this rung the best-of stack would be quoting a 24.125 GHz uplink that pays no atmospheric attenuation, and that is exactly the class of idealisation the stack is supposed to exclude.",
+  "_extends": "best001_stackSingleAsset.json",
+  "_delta": "atmosphere.gaseousAbsorption.enable true (masterConfig ships false and realism grade deliberately does NOT turn it on), mappingKind 'niell' rather than 'simple'.",
+  "_whyTHEDEFAULTISOFFANDWHYTHATISDEFENSIBLEEVERYWHEREEXCEPTHERE": "masterConfig's own note: at L-band the term is 0.034 dB at zenith, about 0.4% on code sigma at zenith and 2.2% at the 10 deg mask, so enabling it under realism grade would re-cut all eight goldens and cost cross-ladder comparability to buy nothing. That reasoning holds for every rung of the frozen sweep that stays near L-band. It stops holding the moment a rung is quoted AT 24 GHz, and masterConfig says so in the same paragraph: 24.125 GHz costs 4.6% on sigma.",
+  "_whyNIELLANDNOTSIMPLE": "'simple' is 1/sin(el). 'niell' splits the hydrostatic and wet obliquities, which only matters where water vapour is a large share of the total. At 24 GHz it is 81% of the attenuation, because 24.125 GHz sits on the shoulder of the 22.235 GHz water-vapour resonance. That is the single worst place in the whole licence-exempt spectrum to put a carrier for this reason, and it is worth the rung saying so with a number rather than a caveat.",
+  "_THERUNGTHISDISQUALIFIES": "freq013_ism24125_61250 returns posRMS 2.4171 m on the frozen sweep, third best of the whole freq axis, and IT MUST NEVER BE QUOTED. 61.25 GHz is inside the oxygen absorption complex and masterConfig prices it at 161 dB of slant absorption, which no link budget survives. The frozen sweep ran it with absorption off, so its number is arithmetically correct and physically meaningless. The same audit clears freq009 and freq010, whose bands are all below 6 GHz where the term is negligible.",
+  "_THEPREDICTION": "A 4.6% rise in code sigma against a run whose code residual is dominated by multipath rather than thermal noise. Expect single-digit percent on position, i.e. the band recommendation SURVIVES. If it does not, the honest recommendation moves to best002's 2.450/0.915 GHz pair, which pays this term at the 0.4% level and was already within 5% of best001 on run-wide position and AHEAD of it on the tail.",
+  "scenario": {
+    "name": "best006_stackGaseousAbsorption",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+  "atmosphere": {
+    "gaseousAbsorption": {
+      "enable": true,
+      "mappingKind": "niell"
+    }
+  },
+  "report": {
+    "runVersion": "best006",
+    "compileTex": "auto",
+    "monteCarlo": {
+      "enable": false
+    }
+  }
+}

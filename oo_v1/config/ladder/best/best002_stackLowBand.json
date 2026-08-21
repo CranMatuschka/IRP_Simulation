@@ -1,0 +1,38 @@
+{
+  "_id": "best rung 2/5: the SINGLE-ASSET STACK at the LOW band. Identical to best001 except that the 24.125/5.800 GHz pair is replaced by freq009's 2.450/0.915 GHz pair. It exists because the frozen sweep does not agree with itself about which band wins: freq012 has the best RUN-WIDE position (2.2758 m against freq009's 2.3991) while freq009 has the best TAIL (1.1149 m against freq012's 1.2310). One of those is the number a mission would be sized on and the other is the number a convergence plot shows.",
+  "_extends": "best001_stackSingleAsset.json",
+  "_delta": "signals only -> freq009's 2.450 GHz / 915 MHz ISM pair. Product interval, ground oscillator and every error source inherited from best001.",
+  "_whyTHISbandMATTERSbeyondTHENUMBER": "The two bands are separated by 26x in carrier frequency and the run-wide difference between them is 5%. If that holds under stacking, band selection for THIS system is not an accuracy argument at all and can be decided on the arguments that actually differ: 24 GHz carries roughly 0.2 dB/km of gaseous absorption against 0.01 at 2.45 GHz, needs a far tighter pointing budget, and -- measured on carr005 -- charges the carrier 0.483 cycles of noise against 0.035 at L1, which removes any prospect of integer ambiguity resolution. The 915 MHz / 2.45 GHz pair gives up 5% of run-wide position and takes all of that back.",
+  "_theCONDITIONINGARGUMENT": "The freq axis result is that the ionosphere/geometry separation is driven by |1-(fp/fs)^2|: 16.3 for the 24.125/5.8 pair, 6.17 for 2.45/0.915, and 0.647 for the L1/L2 pair the golden carries. Both ISM pairs are an order better conditioned than L1/L2 and the difference between them is the second-order effect this rung prices.",
+  "scenario": {
+    "name": "best002_stackLowBand",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+  "signals": {
+    "_provenance": "Verbatim from freq009_ism915_2450.json. 915 MHz (ITU Region 2 ISM 902-928 MHz) with 2.45 GHz (ISM 2400-2500 MHz).",
+    "enabledMask": [true, true],
+    "L1": {
+      "name": "L1",
+      "frequency_Hz": 2450000000.0,
+      "lambda_m": 0.12236426857142857,
+      "codeSigma0_m": 0.3
+    },
+    "L2": {
+      "name": "L2",
+      "frequency_Hz": 915000000.0,
+      "lambda_m": 0.32764203060109287,
+      "codeSigma0_m": 0.45
+    },
+    "primary": "L1",
+    "secondary": "L2"
+  },
+  "report": {
+    "runVersion": "best002",
+    "compileTex": "auto",
+    "monteCarlo": {
+      "enable": false
+    }
+  }
+}

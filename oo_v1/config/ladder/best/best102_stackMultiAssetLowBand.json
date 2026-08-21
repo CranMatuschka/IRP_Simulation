@@ -1,0 +1,29 @@
+{
+  "_id": "THE MULTI-ASSET HEADLINE CANDIDATE. best101 with the uplink moved from 24.125/5.800 GHz to 2.450/0.915 GHz, i.e. the exact change that made best002 beat best001 on the converged window in the single-asset case. Six spacecraft, four phase centres each, federated, honest ISL carrier with the broadcast neighbour product ON.",
+  "_extends": "best101_stackMultiAsset.json",
+  "_delta": "signals only -> freq009's 2.450 GHz / 915 MHz ISM pair. Product interval 5 s, ground rubidium, and the whole isl017 ISL package inherited untouched. ONE leaf against best101, so the band is the only thing the comparison can attribute a difference to.",
+  "_WHYTHISRUNGHADTOEXIST": "best101 was cut before the single-asset band question was settled, so it carries best001's band. The single-asset ladder then found that 24.125/5.8 wins RUN-WIDE by 9% while 2.450/0.915 wins the CONVERGED window by 20% on the last 20 epochs and 13% over the last 120 s. Multi-asset has a different figure of merit -- the per-asset absolute solution and the formation geometry -- so the single-asset answer cannot simply be assumed to carry over. This rung measures it rather than inheriting it.",
+  "_WHATSHOULDMOVEANDWHATSHOULDNOT": "PREDICTED TO MOVE: per-asset absolute position, since the band acts on the ionosphere/geometry conditioning of the ground-to-space link that every asset solves independently. best101 already took posRMS from isl017's 2.0067 m to 0.6851 m on the uplink levers alone. PREDICTED NOT TO MOVE: shape_err_solved_m. best101 left it at 0.101116 against isl017's 0.101104, unmoved to four decimals, because the solved formation shape is floored by ISL delay calibration and nothing on the uplink reaches it. The ISL carrier stays at its own 26 GHz throughout and is not touched by this delta.",
+  "_THESHAPEFLOORISNOTACONFIGURATIONLEVER": "Measured across isl002-isl006, solved shape is LINEAR in the ISL ranging sigma at 6.72 m per m, floored near 8.9 mm by delay calibration. isl017 sits at sigma 0.015 m and returns 0.1011 m, which is 6.74 x 0.015 and lands exactly on that line. Shape could therefore be bought down by tightening measurements.isl.code.sigma_m, but isl016's own config records that its 15 mm code and 2 mm carrier are TERMINAL DESIGN ASSUMPTIONS rather than values this simulation derived. Tightening them further would be assuming better hardware, not configuring the system better, so this rung does not.",
+  "_MONTECARLONOTE": "OFF, and it would be worth little if it were on: the swarm Monte-Carlo path is CHIEF-ONLY, proven by the S1 = S3 = S6 band identity, so it would report the chief's consistency and say nothing about the other five assets.",
+  "_THECAVEATTHATTRAVELSWITHISL017": "Inherited and unchanged. isl017's formal sigma was audited at 13.7x optimistic and it carries keepIslInPerAssetEkf true, so the relative layer re-consumes observations the per-asset filters already absorbed. Absolute per-asset position and clock are honest. The relative layer's FORMAL COVARIANCE is not independently valid. The shape ERROR is truth-referenced and is unaffected by that defect.",
+  "scenario": {
+    "name": "best102_stackMultiAssetLowBand",
+    "nTowers": 5,
+    "nSpaceAssets": 6,
+    "nReceivers": 4
+  },
+  "signals": {
+    "_provenance": "Verbatim from freq009_ism915_2450.json, as best002. GROUND-TO-SPACE uplink only; the ISL carrier keeps its own 26 GHz from isl016.",
+    "enabledMask": [true, true],
+    "L1": { "name": "L1", "frequency_Hz": 2450000000.0, "lambda_m": 0.12236426857142857, "codeSigma0_m": 0.3 },
+    "L2": { "name": "L2", "frequency_Hz": 915000000.0,  "lambda_m": 0.32764203060109287, "codeSigma0_m": 0.45 },
+    "primary": "L1",
+    "secondary": "L2"
+  },
+  "report": {
+    "runVersion": "best102",
+    "compileTex": "auto",
+    "monteCarlo": { "enable": false }
+  }
+}

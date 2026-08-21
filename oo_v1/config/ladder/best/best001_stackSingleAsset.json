@@ -1,0 +1,61 @@
+{
+  "_id": "best rung 1/5: the SINGLE-ASSET STACK. Every other rung of this ladder moves one key against golden_baseline.json and reports what that key is worth in isolation. This rung asks the question none of them can answer on its own -- whether the three largest NON-IDEALISED single-asset levers found across the 108-rung frozen sweep and the 2026-08-17 carrier/product runs are additive when applied together. It is the only rung in the ladder that deliberately stacks.",
+  "_extends": "golden_baseline.json",
+  "_delta": "THREE deltas, each traceable to one measured rung: (1) signals -> freq012's 24.125/5.800 GHz ISM pair; (2) clocks.tower.product.updateInterval_s 30 -> 5, from prod005; (3) clock.tower RUBIDIUM stochastic, from clk004. Nothing else moves. Every truth-side error source golden_baseline carries -- multipath, scintillation, hardware delay, DCB, survey, inter-antenna carrier bias, higher-order ionosphere, EOP, relativity -- stays ON.",
+  "_whatEachLeverWasWorthALONE": "Against scene008 (posRMS 4.5279 m, tail 2.1193 m, clkRMS 0.4212 m, NIS/dof 0.866): freq012 gave 2.2758 / 1.2310 / 0.4211 / 0.757, the largest single position lever on the whole sweep that is not an idealisation. prod005 gave 4.3680 / 1.7608 / 0.1055 / 0.869. clk004 gave 4.3054 / 1.7960 / 0.0832 / 0.844.",
+  "_thePREDICTIONthisRUNGtests": "The band lever and the clock levers act on DIFFERENT error terms -- band conditioning acts on the ionosphere/geometry separation, product interval and ground oscillator both act on the tower clock residual -- so band SHOULD stack with either clock lever. Predicted posRMS near 2.2 m with a tail near 1.0 m. What must NOT stack is prod005 against clk004: both remove the same quantity, the tower oscillator's wander over the product age, and both landed on a tail near 1.78 m from opposite directions. best004 is the control that prices that redundancy.",
+  "_whyNOTtheOTHERlevers": "feat006_noMultipath is the biggest lever on the sweep (1.2092 / 0.8918) and is EXCLUDED: deleting a truth-side error source is an idealisation, not a design choice. Same for feat005_noScintillation, which also made the tail WORSE. The att axis is excluded because its rungs run with the star tracker OFF: the best carrier-only attitude measured anywhere is att011 at 0.192 deg, still an order below the 0.0168 deg this configuration already gets from the star tracker it keeps.",
+  "scenario": {
+    "name": "best001_stackSingleAsset",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+  "signals": {
+    "_provenance": "Verbatim from freq012_ism5800_24125.json. Licence-exempt pair: 5.8 GHz (ISM 5725-5875 MHz) and 24.125 GHz (ISM 24.00-24.25 GHz). codeSigma0_m unchanged from the golden, so no code-precision advantage is smuggled in with the band.",
+    "enabledMask": [true, true],
+    "L1": {
+      "name": "L1",
+      "frequency_Hz": 24125000000.0,
+      "lambda_m": 0.01242663038341969,
+      "codeSigma0_m": 0.3
+    },
+    "L2": {
+      "name": "L2",
+      "frequency_Hz": 5800000000.0,
+      "lambda_m": 0.05168835482758621,
+      "codeSigma0_m": 0.45
+    },
+    "primary": "L1",
+    "secondary": "L2"
+  },
+  "measurements": {
+    "codeMode": "singleFrequency"
+  },
+  "atmosphere": {
+    "ionosphereFree": false
+  },
+  "clocks": {
+    "tower": {
+      "product": {
+        "_updateInterval": "5 s is the IGS real-time-service clock cadence, not an idealisation: sigmaBias_m stays at the golden's 0.10 m and latency_s at 5 s, so the product is no more accurate at the epoch it is issued -- it is only re-issued more often, which shortens the linear extrapolation the receiver has to run.",
+        "updateInterval_s": 5
+      }
+    }
+  },
+  "clock": {
+    "_towerType": "Verbatim from clk004_groundRubidium.json. deterministic:false is load bearing -- a deterministic ClockModel returns identically zero bias and the oscillator class is then inert.",
+    "tower": {
+      "clockType": "RUBIDIUM",
+      "deterministic": false
+    }
+  },
+  "report": {
+    "runVersion": "best001",
+    "compileTex": "auto",
+    "monteCarlo": {
+      "enable": false
+    }
+  },
+  "_monteCarloNote": "OFF for the first pass. The Monte-Carlo block is appended AFTER the main run and changes none of its numbers, so pos/clk/NIS stay directly comparable to the frozen sweep; what is given up is only the pooled CONSERVATIVE/OPTIMISTIC verdict, which is worth re-running on whichever rung wins."
+}

@@ -1,0 +1,23 @@
+{
+  "_id": "best rung 3/5: best001 with the per-tower slant-ionosphere STATE removed. This is the stacking test for the second-largest non-idealised single-asset lever on the frozen sweep. feat019 (ionosphereMode 'none', L1/L2 as shipped) measured 2.8290 / 1.7482 against scene008's 4.5279 / 2.1193, i.e. deleting an estimator state made position 37.5% BETTER, and freq007 reproduced it exactly (2.8290 / 1.7482) from the other direction.",
+  "_extends": "best001_stackSingleAsset.json",
+  "_delta": "estimation.ionosphereMode 'perTowerSlant' -> 'none'. Five slant-iono states leave the filter. The truth-side ionosphere is UNTOUCHED: diurnal VTEC, the Gauss-Markov stochastic layer, higher-order terms and scintillation all stay on, and the Klobuchar model correction stays on. This is an estimator-architecture change, not an idealisation.",
+  "_THEPREDICTIONANDWHYITISTHEINTERESTINGONE": "The wide band and the iono state attack the SAME degeneracy from opposite ends. The state exists to absorb the slant ionosphere the dual-frequency observable cannot separate; the wide band improves the separation until the state has little left to absorb and starts soaking geometry instead. If they were independent, best003 would land near 2.2758 x (2.8290/4.5279) = 1.42 m. If they are substitutes, best003 lands on top of best001 or WORSE than it. The second outcome is the more useful one, because it would say the feat019 result was never an ionosphere result at all -- it was the L1/L2 pair's poor conditioning showing up as an over-parameterised filter.",
+  "_whatWOULDmakeTHISrungWRONGtoQUOTE": "A NIS/dof that leaves the conservative band. feat019 held 0.850 and freq007 held 0.850, so the state removal was consistent at L1/L2. carr013 is the worked counter-example on this axis: it removed the iono state under a different row construction and returned NIS/dof 53.18 with arc NIS carrier 164.3, a filter whose ambiguities were absorbing an unmodelled ionosphere. Read NIS before reading position.",
+  "scenario": {
+    "name": "best003_stackNoIonoState",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+  "estimation": {
+    "ionosphereMode": "none"
+  },
+  "report": {
+    "runVersion": "best003",
+    "compileTex": "auto",
+    "monteCarlo": {
+      "enable": false
+    }
+  }
+}

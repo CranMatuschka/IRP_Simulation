@@ -1,0 +1,24 @@
+{
+  "_id": "best002 with the Monte-Carlo consistency ensemble run at the FULL 3600 s arc instead of the 900 s default. Same 12 seeds and same 0.99 confidence as the frozen sweep, so the verdict is comparable to all 108 of its rungs, but drawn from the regime the headline number actually lives in.",
+  "_extends": "best002_stackLowBand.json",
+  "_delta": "report.monteCarlo.enable true (was false) and duration_s 3600 (golden_baseline ships 900). nSeeds 12 and confidence 0.99 inherited unchanged. NOTHING ELSE MOVES, which makes the main run a free regression check: it must reproduce best002's 2.0200 / 0.2497 / 0.0579 exactly, because MonteCarloConsistency runs AFTER the main pipeline and cannot reach back into it.",
+  "_WHYTHE900sDEFAULTWASNOTGOODENOUGHHERE": "MonteCarloConsistency uses burnInFraction 0.5, which is NOT exposed through cfg.report.monteCarlo and cannot be set from a scenario. At the 900 s default it therefore pools epochs 451-900 and at 3600 s it pools 1801-3600. Those are different regimes: this configuration's tail metric is the last 20 epochs of a 3600 s arc, and at 900 s the filter has not reached that state, so a 900 s ensemble would be band-checking a transient and attaching the verdict to a converged number. The frozen sweep's 101 CONSERVATIVE / 7 OPTIMISTIC split carries exactly that caveat and this rung does not.",
+  "_WHATTHEVERDICTCANANDCANNOTSAY": "The gate is a two-sided chi-square band on the pooled per-epoch NIS (dof = measurement rows) and position NEES (dof = 3). CONSERVATIVE means the filter is under-confident, which is the safe direction and is where 101 of the frozen sweep's 108 rungs sit. OPTIMISTIC means over-confident and would disqualify the number. The single-run figure for best002 is NIS/dof 0.818, comfortably conservative, but one deterministic run is one sample and that is the whole reason this rung exists.",
+  "_COST": "12 seeds x 3600 s serially, MonteCarloConsistency loops seeds in a plain for-loop with no parallel path. At the ~7 min this configuration takes per 3600 s arc that is roughly 1.5 h of ensemble on top of a 9 min main run.",
+  "scenario": {
+    "name": "best002mc_stackLowBandMonteCarlo",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+  "report": {
+    "runVersion": "best002mc",
+    "compileTex": "auto",
+    "monteCarlo": {
+      "enable": true,
+      "nSeeds": 12,
+      "duration_s": 3600,
+      "confidence": 0.99
+    }
+  }
+}

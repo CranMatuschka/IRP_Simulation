@@ -1,0 +1,19 @@
+{
+  "_id": "CONTROL. best007 with scenario.name changed to 'singleAssetCarrierAttitude' and integer fixing still OFF. It exists for one purpose: to prove that the rename is physics-neutral, so that any difference best011 shows can be attributed to the fixing and not to the name.",
+  "_extends": "best007_stackLowBandRawRows.json",
+  "_delta": "scenario.name -> 'singleAssetCarrierAttitude'. estimator.integerAmbiguity.enable stays FALSE.",
+  "_WHYARENAMEISNEEDEDATALL": "revgnss.IntegerAmbiguityFixer.assess line 21 reads scenOk = strcmp(cfg.scenario.name,'singleAssetCarrierAttitude') and returns classification 'disabled-not-single-asset-attitude' for anything else, BEFORE any of the four acceptance gates are evaluated. MEASURED on best008: enabling estimator.integerAmbiguity.enable on best007 produced a run BIT-IDENTICAL to best007 on every summary metric to nine decimals, with nCandidates 0. Zero of the 155 scenario JSONs in this repository carry that name, so the knob is dead for every configuration the ladder can express. The only route in is revgnss.ScenarioPresets, used by the tests.",
+  "_WHYNOTAPPLYTHEPRESETINSTEAD": "revgnss.ScenarioPresets.singleAssetCarrierAttitude(cfg) sets the name AND a large block of other configuration. Applying it would change the physics being measured and destroy the comparison with best007. Setting the NAME ALONE satisfies the fixer's gate while leaving every other leaf inherited, which is why this rung takes the narrower route.",
+  "_WHATTHERENAMEDOESSWITCHON": "Three report-side blocks key on the same string: ReportRunner's Stage 59 block at :684 and Stage 60 block at :747, and ScenarioPresets.summaryLines at :392. Reading them, all three only populate summary fields and report text. None writes to cfg or to the filter. This rung TESTS that reading rather than trusting it. PASS CRITERION: every core metric bit-identical to best007 -- positionRMS_runwide_m 2.019322934, finalPositionRMS_m 0.263186430, clockBiasRMS_runwide_m 0.057905030, arcNisOverallPerDof 0.857170104. Any deviation means the rename is not neutral and best011 cannot be read as a fixing result.",
+  "scenario": {
+    "name": "singleAssetCarrierAttitude",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+  "report": {
+    "runVersion": "best010",
+    "compileTex": "auto",
+    "monteCarlo": { "enable": false }
+  }
+}

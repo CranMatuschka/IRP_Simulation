@@ -1,0 +1,16 @@
+{
+  "_id": "THE FIX RUNG. best105 with measurements.isl.product.updateInterval_s cut from 300 s to 5 s. ONE LEAF, ZERO CODE. Tests whether the multi-asset covariance defect is entirely the broadcast hold being charged as white noise.",
+  "_extends": "best105_isl017ProductControlMonteCarlo.json",
+  "_delta": "measurements.isl.product.updateInterval_s 300 -> 5. Product QUALITY is untouched: sigmaPos_m stays 0.03, sigmaClock_m stays 0.02. The product is no more accurate at the epoch it is issued, it is only re-issued more often.",
+  "_THEDEFECTBEINGTESTED": "ISLMeasurementBuilder.productInterval_ (:637-641) states that the piecewise-constant product error 'averages down over the run and the white-R model stays consistent'. The second half of that is wrong. It averages down across INTERVALS, and a 3600 s arc at 300 s contains twelve of them, while the filter is handed 3600 epochs and charges each as an independent draw. Variance inflation 300, sigma factor sqrt(300) = 17.3x.",
+  "_THEARITHMETICTHATMOTIVATESIT": "Chief claims 4.96 mm/axis and delivers 98.6 mm, a ratio of 19.9x. The hold alone predicts 4.96 x 17.3 = 85.9 mm against that measured 98.6 mm, agreement within 13%. So the hold should account for essentially all of it.",
+  "_THEPREDICTION": "At 5 s there are 720 independent draws instead of 12 and five epochs per draw, so the sigma factor falls from 17.3x to 2.2x and NEES/dof should fall from order 100 to order 5. If it lands near 5 the diagnosis is confirmed and the residual is the honest remainder. If it barely moves, the hold is NOT the mechanism and the 9x lives somewhere else.",
+  "_WHATTHISDOESNOTCLAIM": "Shortening the interval makes the violation SMALLER, not the model CORRECT. A residual 2.2x would remain, because five epochs still share one draw. Reaching 1.0x needs either no hold at all or a per-neighbour product bias state with a matched Gauss-Markov, which is state augmentation and real work. This rung buys an order of magnitude for one config leaf, not correctness.",
+  "_ANDWATCHTHEACCURACYTOO": "prod005 did exactly this for the TOWER clock and improved BOTH consistency and accuracy, taking clkRMS from 0.4212 to 0.1055 m and the tail from 2.1193 to 1.7608 m. If the same happens here, the 5 s ISL product is a free accuracy lever as well as a covariance fix, and isl017's frozen 2.0067 m should improve.",
+  "scenario": { "name": "best104_isl017Product5s", "nTowers": 5, "nSpaceAssets": 6, "nReceivers": 4 },
+  "measurements": { "isl": { "product": { "updateInterval_s": 5 } } },
+  "report": {
+    "runVersion": "best104", "compileTex": "auto",
+    "monteCarlo": { "enable": true, "nSeeds": 12, "duration_s": 3600, "confidence": 0.99 }
+  }
+}

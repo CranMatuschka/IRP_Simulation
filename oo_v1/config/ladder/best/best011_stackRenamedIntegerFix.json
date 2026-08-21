@@ -1,0 +1,21 @@
+{
+  "_id": "THE MEASUREMENT. best010 with estimator.integerAmbiguity.enable true, i.e. the first configuration in this work in which the controlled raw-carrier integer fixer actually executes rather than short-circuiting on a scenario-name check. Read it ONLY against best010, which differs from it by that one leaf.",
+  "_extends": "best010_stackRenameControlNoFix.json",
+  "_delta": "estimator.integerAmbiguity.enable true. The four gates keep their masterConfig values: minArcLength_s 300, maxSigma_cycles 0.15, maxDistanceToInteger_cycles 0.20, maxResidualRmsIncrease_m 0.01.",
+  "_WHATTHISISNOT": "cfg.estimator.integerAmbiguity is PER-AMBIGUITY ROUNDING in mode controlledRawCarrier, described in masterConfig's own comment as 'the weakest integer estimator'. No ILS search, no bootstrapped success rate, no ratio test -- the false-fix protection the LAMBDA block exists to add and which is unavailable because the TU Delft toolbox is not vendored. summary.stage63PppGradeClaim stays false and this must never be reported as PPP-grade ambiguity resolution.",
+  "_NOWTHEGATESCANACTUALLYBIND": "best007 clears maxSigma_cycles with 0.066 cycles against 0.15 and clears minArcLength_s on a 3600 s arc. The gate expected to bind is maxDistanceToInteger_cycles 0.20, because errors.interAntennaCarrierBias injects 0.25 cycles per (tower, antenna) with estimator.interAntennaCarrierBias.mode 'none'. CarrierMeasurementBuilder gates that bias on antenna index > 1, so antenna 1 should be roundable and antennas 2-4 should not: predicted acceptance near 10 of 40.",
+  "_READINGORDER": "stage63Classification, then nCandidates/nAccepted/nHeld/nRejected, then stage63MaxDistToInt against 0.20, and only then position against best010's numbers. A wrong rounding displaces the range by exactly one wavelength, 122.4 mm at 2.450 GHz, and the filter absorbs it silently while reporting a tight sigma. carr018 is the standing example of a fixing statistic that looked certain and was wrong: P(success) 0.999999 with 9 of 20 integers wrong.",
+  "_THEEXPECTEDNULL": "The frozen-sweep result is that the undifferenced ambiguity direction is EXACTLY unobservable in position: across a 1730x change in ambiguity sigma between best002 and best007 the position covariance moved by four parts per million. If that holds, fixing the ambiguity should also move position by essentially nothing, and the honest conclusion is that uplink integer resolution is not where the accuracy is. That null is a publishable result, not a failed run.",
+  "scenario": {
+    "name": "singleAssetCarrierAttitude",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+  "estimator": { "integerAmbiguity": { "enable": true } },
+  "report": {
+    "runVersion": "best011",
+    "compileTex": "auto",
+    "monteCarlo": { "enable": false }
+  }
+}

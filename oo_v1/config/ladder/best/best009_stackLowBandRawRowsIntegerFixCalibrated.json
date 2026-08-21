@@ -1,0 +1,28 @@
+{
+  "_id": "best008 with the inter-antenna carrier phase bias CALIBRATED, from 0.25 cycles of an uncalibrated chain to the 0.02-cycle residual that survives a routine line-bias calibration. best008 asks whether the fixing machinery accepts anything; this rung asks what fixing is worth once the one term that blocks it has been calibrated rather than deleted.",
+  "_extends": "best008_stackLowBandRawRowsIntegerFix.json",
+  "_delta": "errors.interAntennaCarrierBias.sigma_cycles 0.25 -> 0.02. The error stays ENABLED and stays on the truth side. Nothing is removed.",
+  "_WHYTHISISACALIBRATIONANDNOTANIDEALISATION": "The distinction matters and it is the whole reason this rung is separate from carr016. carr016 set errors.interAntennaCarrierBias.enable = false, which deletes the term from the truth, and its own config file records that this is 'a SIMULATION condition, not a capability' because a real receiver carries an uncalibrated carrier phase bias. This rung instead keeps the term live and reduces it to what a real calibration leaves behind. The 0.02-cycle figure is NOT invented here: it is the value golden_baseline_attitude.json already carries, chosen there so the residual sits below the 10 mm carrier sigma, with its own note that it is 'the residual left after a routine inter-antenna line-bias calibration, NOT the 0.25 cycles (47.6 mm) of an uncalibrated chain'.",
+  "_THEREQUIREMENTTHISWRITES": "0.02 cycles at 2.450 GHz is 2.4 mm of cable-and-front-end matching between phase centres. Compare 24 GHz, where the same 0.02 cycles is 0.25 mm. That ratio is the quantitative form of the band argument this ladder has been making: the low band does not merely give the best converged position, it makes the calibration that licenses integer fixing an order of magnitude easier to meet.",
+  "_THEPREDICTION": "With the bias at 0.02 cycles the distance to integer should fall well inside maxDistanceToInteger_cycles 0.20 on ALL FOUR antennas, not just antenna 1, so expect nAccepted near 40 against best008's predicted 10. Whether that BUYS anything is the separate question: the frozen-sweep result is that the undifferenced ambiguity direction is exactly unobservable in position, so fixing it may again move position sigma by parts per million. If position does improve materially, that is the first evidence in this work that uplink integer resolution is worth the calibration it demands.",
+  "_THETRAPTHISRUNGMUSTNOTFALLINTO": "A fix accepted is not a fix correct. carr018 reported a bootstrap P(success) of 0.999999 and got 9 of 20 integers wrong, because a covariance-derived success rate is a precision statement and is blind to bias by construction. Here the equivalent trap is that rounding to a wrong integer displaces the range by exactly one wavelength, 122.4 mm at 2.450 GHz, and the filter will happily absorb that into position while reporting a tight sigma. Read positionRMS_runwide_m and the truth-referenced last-120 s window, never the fix counters alone.",
+  "scenario": {
+    "name": "best009_stackLowBandRawRowsIntegerFixCalibrated",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+  "errors": {
+    "interAntennaCarrierBias": {
+      "enable": true,
+      "sigma_cycles": 0.02
+    }
+  },
+  "report": {
+    "runVersion": "best009",
+    "compileTex": "auto",
+    "monteCarlo": {
+      "enable": false
+    }
+  }
+}

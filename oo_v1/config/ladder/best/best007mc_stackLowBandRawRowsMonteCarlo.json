@@ -1,0 +1,24 @@
+{
+  "_id": "best007 with the Monte-Carlo consistency ensemble run at the FULL 3600 s arc. The twin of best002mc, and the more load-bearing of the two: best007 is the rung that carries the integer-ambiguity claim, and a fixing decision made on an OPTIMISTIC covariance is the specific failure this whole ladder has a worked example of.",
+  "_extends": "best007_stackLowBandRawRows.json",
+  "_delta": "report.monteCarlo.enable true and duration_s 3600. nSeeds 12, confidence 0.99. Nothing else, so the main run must reproduce best007's 2.0193 / 0.2632 / 0.0579 and NIS/dof 0.857 exactly.",
+  "_WHYTHISONEMATTERSMORETHANbest002mc": "best007 reports an undifferenced float ambiguity sigma of 0.0080 m = 0.066 cycles, inside the 0.15-cycle fixing gate, the first configuration in this work to get there. That sigma is a COVARIANCE claim, and the covariance is precisely what the ensemble tests. carr018 is the standing counter-example: it reported a bootstrap P(success) of 0.999999, essentially certainty, and got 9 of 20 integers WRONG, because a covariance-derived success rate is a precision statement and is blind to bias by construction. An OPTIMISTIC verdict here would not merely weaken the position number, it would withdraw the ambiguity claim.",
+  "_WHATANOPTIMISTICVERDICTWOULDANDWOULDNOTKILL": "It would not touch the POSITION result, which is truth-referenced and needs no covariance to be true. It would kill any statement that reads the ambiguity sigma as a licence to round, and it would put best002 back as the rung to quote for the headline.",
+  "_theOTHERGATETHATSTILLHASNOTBEENPASSED": "Even a CONSERVATIVE verdict does not license fixing on hardware. errors.interAntennaCarrierBias injects 0.25 cycles per (tower, antenna) with estimator.interAntennaCarrierBias.mode 'none', so the ambiguity absorbs it and its truth is lambda*N only on the reference antenna. The requirement that follows is calibration to inside ~0.20 cycles, which at 122.4 mm is 24 mm of cable-and-front-end matching.",
+  "scenario": {
+    "name": "best007mc_stackLowBandRawRowsMonteCarlo",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+  "report": {
+    "runVersion": "best007mc",
+    "compileTex": "auto",
+    "monteCarlo": {
+      "enable": true,
+      "nSeeds": 12,
+      "duration_s": 3600,
+      "confidence": 0.99
+    }
+  }
+}

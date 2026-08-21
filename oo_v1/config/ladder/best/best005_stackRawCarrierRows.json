@@ -1,0 +1,29 @@
+{
+  "_id": "best rung 6/6: best001 with the ionosphere-free CARRIER row taken out of the EKF, so the filter updates on the two RAW carrier rows instead. This is the one structural result from the 2026-08-17 carrier axis that belongs in a best-of stack, and it is here on an OBSERVABILITY argument rather than an accuracy one.",
+  "_extends": "best001_stackSingleAsset.json",
+  "_delta": "measurements.carrier.ionosphereFreeRows.useInEkf false. The IF rows are still BUILT (ionosphereFreeRows.enable stays true) so every diagnostic that reads them survives; they are simply not the rows the filter updates on. Both signals still reach the EKF, now as two independent rows.",
+  "_whatCARR012ESTABLISHED": "With the IF row in the EKF the filter receives ONE row per (tower, antenna) carrying alpha*B1 + beta*B2 with alpha = 2.545728 and beta = -1.545728, so the ambiguity PAIR is rank-deficient by exactly one BY CONSTRUCTION. The surviving marginals are the 100 m prior projected orthogonal to (alpha, beta): 51.9004 m on L1 and 85.4772 m on L2, matched to 0.00005 m, frozen for all 3601 epochs. carr012 removed that row and the ambiguity sigma fell from 51.9004 m to 0.0318 m -- a factor of 1632 -- for 0.02% of run-wide position (4.5279 -> 4.5191) and 1.3% of tail (2.1193 -> 2.1468), with NIS/dof still conservative at 0.911.",
+  "_whyITISINABESTOFSTACKATALL": "It buys no accuracy today and is not claimed to. What it buys is the PRECONDITION for everything the carrier is supposed to be worth: estimator.integerAmbiguity.enable is false on all 108 frozen rungs because the gate at maxSigma_cycles = 0.15 cannot be met by a 272.7-cycle sigma. At 0.0318 m the gate is reachable for the first time. A best-of configuration that forecloses carrier ambiguity resolution by construction is the wrong recommendation even when its position number is a hair better.",
+  "_THEPREDICTIONANDTHERISK": "carr012 was measured at L1/L2, where |1-(fp/fs)^2| = 0.647. This rung asks whether the escape survives at 16.3, where the IF coefficients are far milder (alpha near 1.06) and the ionosphere the per-tower slant state must now absorb is 16x smaller in the same units. The risk is on the NIS: carr013 removed the slant-iono state under exactly these raw rows and returned NIS/dof 53.18 with arc NIS carrier 164.3. This rung KEEPS the state, as carr012 did, which is what kept carr012 consistent. Read NIS before position.",
+  "_theAMBIGUITYISSTILLNOTANINTEGER": "Even at 0.0318 m the fractional part of x/lambda measured indistinguishable from uniform, because errors.interAntennaCarrierBias injects 0.25 cycles per (tower, antenna) with no estimator-side correction. carr016 removed that bias from the truth and returned EKF metrics bit-identical to carr012 (4.5191 / 2.1468 / 0.911), which fixes the calibration requirement rather than the performance: the inter-antenna phase bias must be calibrated well inside the 0.20-cycle distance-to-integer gate before undifferenced uplink fixing could be attempted on hardware.",
+  "scenario": {
+    "name": "best005_stackRawCarrierRows",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+  "measurements": {
+    "carrier": {
+      "ionosphereFreeRows": {
+        "useInEkf": false
+      }
+    }
+  },
+  "report": {
+    "runVersion": "best005",
+    "compileTex": "auto",
+    "monteCarlo": {
+      "enable": false
+    }
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "_id": "best rung: best007 with estimator.integerAmbiguity.enable turned ON. best007 is the first configuration in this work whose undifferenced uplink ambiguity sits inside the fixing gate (0.0080 m = 0.066 cycles against maxSigma_cycles 0.15), and estimator.integerAmbiguity has been false on all 108 rungs of the frozen sweep. This rung cashes that, or finds out why it cannot be cashed.",
+  "_extends": "best007_stackLowBandRawRows.json",
+  "_delta": "estimator.integerAmbiguity.enable true (was false). ONE leaf. The four gates keep their masterConfig values -- minArcLength_s 300, maxSigma_cycles 0.15, maxDistanceToInteger_cycles 0.20, maxResidualRmsIncrease_m 0.01 -- because a rung that both enables a feature and loosens its acceptance criteria cannot say which produced the result.",
+  "_WHATTHEFIXERACTUALLYIS": "cfg.estimator.integerAmbiguity is PER-AMBIGUITY ROUNDING in mode controlledRawCarrier, and masterConfig calls it 'the weakest integer estimator' in its own comment. It is NOT LAMBDA: there is no ILS search, no bootstrapped success rate and no ratio test, which is exactly the false-fix protection the LAMBDA block was written to add and which is unavailable here because the TU Delft toolbox is not vendored. So a fix accepted by this rung is accepted on a distance-to-integer threshold alone. Report it as controlled rounding, never as PPP-grade ambiguity resolution -- summary.stage63PppGradeClaim exists and stays false.",
+  "_THEBINDINGGATEISNOTSIGMA": "best007 clears maxSigma_cycles 0.15 with 0.066 and clears minArcLength_s 300 on a 3600 s arc. The gate that decides this rung is maxDistanceToInteger_cycles = 0.20, and errors.interAntennaCarrierBias injects 0.25 cycles per (tower, antenna) with estimator.interAntennaCarrierBias.mode 'none', so nothing corrects it and the ambiguity absorbs it. carr016 measured the resulting fractional part as indistinguishable from uniform: std 0.2923 cycles against 0.2887 for a true uniform.",
+  "_THEPREDICTION": "CarrierMeasurementBuilder gates the inter-antenna bias on antenna index > 1, so antenna 1 carries no per-antenna bias and its ambiguity truth should be lambda*N. That is 5 towers x 2 signals = 10 of the 40 ambiguities. Antennas 2, 3 and 4 carry the uncorrected 0.25-cycle bias and should be rejected by the distance gate. PREDICTED OUTCOME: classification 'active-fixed-raw-carrier' with roughly 10 accepted and roughly 30 rejected. A result near 40 accepted would mean the distance gate is not seeing the bias and would need investigating before anything is claimed. A result of 0 accepted means antenna 1's truth is not an integer either, which would point at the receiver carrier phase bias (rxCarrierBias.mode 'notImplemented') rather than the inter-antenna term.",
+  "_WHATTOREADANDINWHATORDER": "summary.stage63Classification first, then nCandidates / nAccepted / nHeld / nRejected, then stage63MaxDistToInt against the 0.20 threshold, and only then position. A fix that lands is only worth having if positionRMS_runwide_m and the last-120 s window improve on best007's 2.0193 m and 0.3182 m AND arcNisOverallPerDof stays conservative. Rounding to a WRONG integer displaces the range by one wavelength, which at 2.450 GHz is 122.4 mm, and it does so silently.",
+  "_MONTECARLOISOFFHERE": "This is a capability probe, and the ensemble costs 1.5 h. Run it with monteCarlo.enable true only if the fix lands and improves position, because only then is there a covariance claim worth band-checking.",
+  "scenario": {
+    "name": "best008_stackLowBandRawRowsIntegerFix",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+  "estimator": {
+    "integerAmbiguity": {
+      "enable": true
+    }
+  },
+  "report": {
+    "runVersion": "best008",
+    "compileTex": "auto",
+    "monteCarlo": {
+      "enable": false
+    }
+  }
+}

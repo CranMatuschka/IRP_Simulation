@@ -1,0 +1,42 @@
+{
+  "_id": "best002 with the ground oscillator changed from the catalogue RUBIDIUM1 to the Microchip 5071B caesium beam, entered as a CUSTOM oscillator from its own h-coefficients rather than picked from the built-in table. Monte Carlo on, 12 seeds at the full 3600 s arc, matching best002mc so the two verdicts are directly comparable.",
+  "_extends": "best002mc_stackLowBandMonteCarlo.json",
+  "_delta": "clock.customOscillators.CS5071B declared, and clock.tower.clockType RUBIDIUM -> CS5071B. Band, product interval, Monte-Carlo block and every error source inherited. The SPACE clock is untouched and stays at the golden's CESIUM1: the source table is a GROUND oscillator requirement table (1U rack and benchtop parts, checked against sigma_y(20 s) <= 1.67e-11), so it has no bearing on the space segment.",
+  "_WHYTHISISNOTJUSTCLK005AGAIN": "clk005_groundCesium already exists on the frozen sweep and returned a WORSE tail than the rubidium (2.0408 against clk004's 1.7960), and ConfigFactory.oscillatorCatalog_ states the reason in its own docstring: a product that re-anchors every 30 s only ever samples the SHORT-tau end of the curves, where beam tubes are weakest. THAT CONCLUSION IS ABOUT WINKEL'S GENERIC 2003 CESIUM1, NOT ABOUT A REAL 5071B. The catalogue's CESIUM1 carries h0 = 1e-19; the 5071B carries h0 = 1.5e-22, nearly three orders better on exactly the white-FM term that dominates at short tau. This rung tests whether the codebase's standing 'caesium is the worse ground oscillator' note is a property of caesium or a property of a twenty-year-old generic table entry.",
+  "_THEALLANARITHMETIC": "From Asigma_y^2(tau) = h0/(2 tau) + 2 ln2 h_-1 + (2 pi^2/3) tau h_-2, the model this code implements in ClockModel.theoreticalAllanDeviation. At the product ages this configuration actually uses (5 s interval + 5 s latency, so an age of 5 to 10 s): CS5071B 2.74e-12 at tau = 10 s against RUBIDIUM1's 3.18e-11, i.e. the caesium is 11.6x better. At tau = 20 s it is 1.94e-12 against 2.26e-11, 11.7x. The source table's own sigma_y(20 s) column reads 2.29e-12 for this part, which is the datasheet figure and sits 18% above the three-term model, so the model here is if anything the optimistic side of the part.",
+  "_THEPREDICTIONANDWHYTHENULLWOULDBETHEUSEFULRESULT": "An 11.6x better oscillator will probably NOT buy 11.6x. best004 established the ladder: ground OCXO at 5 s gives clkRMS 0.1056 m, ground RUBIDIUM at 5 s gives 0.0580 m, and clocks.tower.product.sigmaBias_m is 0.10 m with sigmaDrift_mps 1e-3. The oscillator only pays for the wander the linear extrapolation cannot follow across the product age; the product's OWN noise is charged regardless of what oscillator sits under it. If clkRMS lands near 0.055 m the system is PRODUCT-limited rather than oscillator-limited, and the procurement recommendation is do not buy the caesium, improve the product. That null is the more valuable outcome, because it puts a hard stop on a line of spending.",
+  "_hMinus2ISABOUND": "The source gives h_-2 <= 1.1e-33 rather than an equality, so 1.1e-33 is used as written. That is the conservative choice: taking the bound charges the part the most random-walk FM it is permitted, and the term contributes 7.2e-32 of a 7.5e-24 total variance at tau = 10 s, i.e. one part in 1e8, so the choice cannot change the answer. h1 is not specified in the source and is left at the catalogue default of 0, as it is for every built-in class.",
+  "scenario": {
+    "name": "best002cs_stackLowBandCesium5071B",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+  "clock": {
+    "_source": "Microchip 5071B, caesium beam. h-coefficients as tabulated in the ground-oscillator requirement study, where this part shows sigma_y(20 s) = 2.29e-12 against the 1.67e-11 requirement, a margin of 7.3x.",
+    "customOscillators": {
+      "CS5071B": {
+        "h2": 0.0,
+        "h1": 0.0,
+        "h0": 1.5e-22,
+        "hMinus1": 1.6e-28,
+        "hMinus2": 1.1e-33
+      }
+    },
+    "tower": {
+      "clockType": "CS5071B",
+      "deterministic": false
+    },
+    "_h2AndH1AreZeroed": "h2 (white PM) is set to 0 rather than the source table's 8.0e-30, and h1 was already 'n.s.'. This is FORCED and it is free. TowerClockCorrectionProvider.frequencyWanderVar_ REFUSES to run on a nonzero h2/h1 (error id h2h1Uncharged): ClockModel.precomputeNoise folds h2/h1 into the synthesised truth frequency series, but frequencyWanderVar_ has no rate-domain charge for them, so R would be knowingly optimistic. Overriding that via cfg.validation.unsupportedFeaturePolicy = 'disableWithWarning' was rejected: this rung exists to Monte-Carlo the covariance, so deliberately seeding a known R defect into it would answer nothing. COST OF ZEROING IT, computed against the same three-term model the code implements plus the standard white-PM term 3*f_h*h2/(4 pi^2 tau^2) at the 1 s grid's Nyquist f_h = 0.5 Hz: h2 is 2.0e-10 of the total Allan variance at tau = 20 s and 8.1e-10 at tau = 5 s, so sigma_y is IDENTICAL TO SEVEN SIGNIFICANT FIGURES either way (1.936549e-12 at 20 s in both cases). Every built-in class in oscillatorCatalog_ carries h2 = h1 = 0 for the same reason, so this part is entered on exactly the footing the shipped catalogue uses."
+  },
+  "report": {
+    "runVersion": "best002cs",
+    "compileTex": "auto",
+    "monteCarlo": {
+      "enable": true,
+      "nSeeds": 12,
+      "duration_s": 3600,
+      "confidence": 0.99
+    }
+  }
+}

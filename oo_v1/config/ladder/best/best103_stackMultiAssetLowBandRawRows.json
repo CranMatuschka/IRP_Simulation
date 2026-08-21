@@ -1,0 +1,23 @@
+{
+  "_id": "best102 with the ionosphere-free UPLINK carrier row taken out of each per-asset EKF, so the filters update on the two raw carrier rows instead. The multi-asset analogue of best007, and the rung that asks whether the ambiguity-observability escape survives six independent federated filters.",
+  "_extends": "best102_stackMultiAssetLowBand.json",
+  "_delta": "measurements.carrier.ionosphereFreeRows.useInEkf false. ONE leaf against best102. This is the GROUND-TO-SPACE carrier only. The ISL carrier ambiguity is a separate mechanism, one float state per link, and is untouched.",
+  "_WHATTHESINGLEASSETVERSIONFOUND": "best007 took the undifferenced uplink ambiguity from 13.81 m (112.9 cycles, frozen and rank-deficient by construction) to 0.0080 m (0.066 cycles, inside the 0.15-cycle gate), and paid 5% of the converged window for it. Position sigma was IDENTICAL to six significant figures across that 1730x change, which is what established that the ambiguity direction is exactly unobservable in position.",
+  "_THEQUESTIONTHATISNEWHERE": "In the federated architecture each asset runs its OWN EKF with its own uplink ambiguity block, and the relative layer then solves formation geometry from ISL ranges. So there are two distinct places the change could show up, and they are independent. FIRST, per-asset absolute position, where the single-asset result predicts a small cost and no covariance change. SECOND, the relative geometry, where a systematically better-conditioned per-asset solution could in principle sharpen shape_err_raw_m even though shape_err_solved_m is floored by ISL delay calibration. best101 already moved shape_err_raw_m from 0.0625 to 0.0538 on the uplink levers while leaving solved shape at 0.1011, so that raw-versus-solved split is the thing to read.",
+  "_WHATWOULDMAKETHISTHEBESTMULTIASSETRUNG": "Only a measured improvement in per-asset absolute position or in raw relative geometry, at no cost to solved shape and with the arc NIS staying conservative. If it merely reproduces best102 at a small position cost, then best102 is the multi-asset headline and this rung is the capability note beside it, exactly as best007 sits beside best002.",
+  "_ANDWHATITSTILLDOESNOTLICENSE": "Integer fixing, on this or any other rung in this repository. MEASURED on best011: with the fixer actually executing, sigma passes at 0.036 to 0.060 cycles but the distance to integer saturates at 0.4999 against a 0.20 gate, and all 144040 candidate-epochs are rejected. The uplink ambiguity truth is not an integer on ANY antenna because it absorbs the uncalibrated receiver carrier phase bias (rxCarrierBias.mode 'notImplemented') and the code DCB. Nothing about moving to six assets changes that.",
+  "scenario": {
+    "name": "best103_stackMultiAssetLowBandRawRows",
+    "nTowers": 5,
+    "nSpaceAssets": 6,
+    "nReceivers": 4
+  },
+  "measurements": {
+    "carrier": { "ionosphereFreeRows": { "useInEkf": false } }
+  },
+  "report": {
+    "runVersion": "best103",
+    "compileTex": "auto",
+    "monteCarlo": { "enable": false }
+  }
+}

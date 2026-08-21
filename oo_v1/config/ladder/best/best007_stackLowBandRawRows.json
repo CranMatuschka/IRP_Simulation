@@ -1,0 +1,28 @@
+{
+  "_id": "best rung 8/8: best002's 2.450/0.915 GHz pair with best005's raw carrier rows. Cut AFTER best001-best006 returned, because those six between them found a trade the ladder had never had both halves of at once, and this rung is the corner that resolves it.",
+  "_extends": "best002_stackLowBand.json",
+  "_delta": "measurements.carrier.ionosphereFreeRows.useInEkf false, exactly as best005 applies it to best001. Band, product interval, ground oscillator and every error source inherited from best002.",
+  "_THETRADETHISRUNGRESOLVES": "MEASURED on the six rungs above, undifferenced float ambiguity sigma at the last epoch. With the ionosphere-free row in the EKF the ambiguity pair is rank-deficient by construction and the sigma never converges: 51.9004 m at L1/L2 (scene008), 13.8142 m at 2.450/0.915 (best002), 5.7703 m at 24.125/5.8 (best001). Take the IF row out and it collapses: 0.0325 m at L1/L2 (carr012), 0.0058 m at 24.125/5.8 (best005). But the gate that licenses integer fixing is stated in CYCLES, at maxSigma_cycles = 0.15, and in cycles the ranking INVERTS -- carr012 reaches 0.17 cycles while best005, five times better in metres, reaches only 0.47 because its wavelength is 12.4 mm.",
+  "_THEPREDICTION": "0.0058 m of ambiguity precision was bought at 24.125 GHz by a band whose conditioning |1-(fp/fs)^2| is 16.3. At 2.450/0.915 the conditioning is 6.17, so expect the metre figure to land between carr012's 0.0325 and best005's 0.0058. Against a 122.4 mm wavelength even the pessimistic end of that range is 0.27 cycles and the optimistic end is 0.05. If it lands below 0.15 cycles this is the FIRST configuration in this work where the undifferenced uplink ambiguity is simultaneously observable, sub-gate, and sitting on the best converged position the ladder has produced.",
+  "_WHATITWOULDSTILLNOTLICENSE": "Reaching the sigma gate is necessary and not sufficient. errors.interAntennaCarrierBias injects 0.25 cycles per (tower, antenna) with estimator.interAntennaCarrierBias.mode 'none', so the ambiguity ABSORBS it and its truth is not lambda*N on any antenna but the reference one. carr016 established that removing the bias from the truth leaves EKF metrics bit-identical, so this is a calibration requirement rather than a performance one: the inter-antenna phase bias must be calibrated well inside the 0.20-cycle distance-to-integer gate before fixing could be attempted on hardware. At 122.4 mm that is 24 mm of cable-and-front-end matching, which is a far easier requirement than the 2.5 mm the 24 GHz band would demand for the same fraction of a cycle.",
+  "scenario": {
+    "name": "best007_stackLowBandRawRows",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+  "measurements": {
+    "carrier": {
+      "ionosphereFreeRows": {
+        "useInEkf": false
+      }
+    }
+  },
+  "report": {
+    "runVersion": "best007",
+    "compileTex": "auto",
+    "monteCarlo": {
+      "enable": false
+    }
+  }
+}
