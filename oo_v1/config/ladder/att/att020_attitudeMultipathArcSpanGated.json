@@ -1,0 +1,16 @@
+{
+  "_id": "att rung: attitudeMultipathArcSpanGated. att012 (att011 plus 3 mm receive-end carrier multipath, truth-only, per antenna) with the clock-noise master-span gate ON, so the clock realisation stops depending on the arc length. One toggle against att012.",
+  "_extends": "att012_attitudeJointSearchReceiveEndMultipath.json",
+  "_delta": "clock.noiseMasterSpan.enable: false -> true, span_s 86400. Nothing else.",
+
+  "_whyTHISRUNGEXISTS": "att011 and att012 are quoted from the FINAL EPOCH of a 3600 s arc and neither series is settled there. Over the second half att011 rises at +0.249 deg/h and att012 falls at -0.559 deg/h, and each final-epoch value differs from its own last-600 s mean by about 20 per cent (att011 0.192 against 0.230, att012 0.811 against 0.971). Whether the arc bounds those figures cannot be answered by simply running longer, because with the gate OFF a 7200 s run draws a DIFFERENT clock realisation rather than extending the same one, so an arc-length difference is confounded with a draw difference. This rung and att020 exist to make the two durations comparable.",
+
+  "_WHATTHEGATEDOES": "ClockModel.precomputeNoise synthesises the coloured clock noise on a fixed 86400 s grid and takes this run's leading window, instead of synthesising on the run's own grid where every sample depends on N. Measured end to end, a 120 s and a 600 s run differed by 5.339 m at the same epoch with the gate off and by exactly 0 with it on, so with the gate on a 3600 s run is a bit-exact prefix of a 7200 s one.",
+
+  "_WHATITDOESNOTMEAN": "The numbers here are NOT comparable with att012's published 0.811 deg. Different clock realisation is a different draw of the same process, not a better or worse one. Compare this rung only against att019, which carries the same gate and the same span.",
+
+  "_STILLnEQUALS1": "One clock draw. A paired 1 h against 2 h comparison answers whether the second hour helped THIS realisation, not whether longer arcs help. The four-duration study of 2026-08-19 scattered by a factor of 2.2 with no ordering across four draws.",
+
+  "scenario": { "name": "att020_attitudeMultipathArcSpanGated", "orbitClass": "GEO", "nTowers": 5, "nSpaceAssets": 1, "nReceivers": 4 },
+  "clock": { "noiseMasterSpan": { "enable": true, "span_s": 86400 } }
+}
