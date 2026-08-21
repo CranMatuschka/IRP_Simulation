@@ -159,6 +159,15 @@ classdef ReportRunner
 
             % ---- Collect summary metrics --------------------------------
             summary = revgnss.ReportRunner.collectSummary_(simData, cfg, version, reportFolder, pdfPath, matPath);
+
+            % The runtime state map, for EVERY run rather than joint mode only. The
+            % single-asset State Vector table used to re-derive its blocks by hand and
+            % got them wrong (nTowers*nReceivers ambiguities, dropping the signal
+            % dimension, and no gyro-bias block at all), so a 27-state filter was
+            % reported as 19. Reading the map the filter built cannot drift from it.
+            summary.estimatorStateMap    = sim.ekf.stateMap;
+            summary.stateVectorDimension = sim.ekf.nx;
+
             if sim.ekf.jointMultiAssetEnabled
                 summary = revgnss.ReportRunner.attachJointEstimatorSummary_( ...
                     summary,sim,cfg);

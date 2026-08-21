@@ -1679,578 +1679,540 @@ classdef ClockExactReportBuilder
             try; tf = logical(revgnss.CarrierIonoFreeRowBuilder.combineStatus(cfg)); catch; end
         end
 
-        function s = channelCell_(on)
-            % One channel of the three-channel effect table. Deliberately binary: the whole
-            % point of splitting truth/model/noise is that each channel IS on or off.
-            if isequal(on, true)
+        % ================================================================
+        % CONFIGURATION STATUS TABLES
+        %   One vocabulary for the whole report: a filled mark means the channel is
+        %   on, a hollow mark means it is off, a dash means the column does not apply.
+        %   The last column is always MODE -- the selected variant, read from the
+        %   resolved cfg. There is no free-text Note column: a note that is not a mode
+        %   is prose, and prose that describes configuration drifts away from it.
+        %
+        %   Four tables replace the five ad-hoc group tables, the two status halves of
+        %   the noise/budget tables, the Clocks table and the hand-derived State Vector
+        %   table. Each component appears in EXACTLY ONE of them:
+        %     Observables   -- anything that builds measurement rows      (On/In EKF)
+        %     Error sources -- anything that perturbs z, corrects h, or inflates R
+        %     Clocks        -- the two clock segments and the datum
+        %     State blocks  -- anything that can appear in x, read from the state map
+        %   A fifth table (processing) is emitted ONLY when something in it is on, so
+        %   a default run shows four tables and loses nothing when features are armed.
+        % ================================================================
+
+        function s = markCell_(v)
+            % markCell_  The single status vocabulary. [] is "column does not apply".
+            if isempty(v)
+                s = '\textcolor{gray!55}{--}';
+            elseif isequal(logical(v), true)
                 s = '\textcolor{green!45!black}{$\bullet$}';
             else
                 s = '\textcolor{gray!45}{$\circ$}';
             end
         end
 
-        function rows = atmosphereEffectRows_(cfg)
-            % atmosphereEffectRows_  Three-channel status for each propagation error source.
-            % Row schema: {name, truthOn, modelOn, noiseOn, note}. Every gate below is the key
-            % the PHYSICS reads, verified against its consumer -- not a documentary mirror.
-            CE = revgnss.ClockExactReportBuilder;
-            g  = @(p,d) CE.getLogical_(cfg, p, d);
-            gs = @(p,d) CE.getCfgStr_(cfg, p, d);
-
-            % --- troposphere -----------------------------------------------------------
-            tT = g({'errors','troposphere','truth','enable'}, false);
-            tM = g({'errors','troposphere','model','enable'}, false);
-            tBias = CE.getCfgNum_(cfg, {'errors','troposphere','model','biasFraction'}, 1);
-            zwdOn = strcmpi(gs({'estimation','troposphereMode'},'none'), 'perTowerZwd');
-            if ~tT
-                tNote = 'Not injected. Sigma still charged to R (see Noise).';
-            elseif zwdOn
-                tNote = 'Injected; residual absorbed by the per-tower ZWD EKF state.';
-            elseif tM && abs(tBias-1) < 1e-9
-                tNote = 'Injected and corrected identically: residual is ZERO by construction, not a modelled effect.';
-            elseif tM
-                tNote = sprintf('Injected; model applies %.0f%% of the truth delay, so a residual survives.', 100*tBias);
+        function s = modeCell_(txt)
+            % modeCell_  The Mode column. Empty / 'none' / 'off' collapse to a dash so
+            % "there is only one mode" and "the mode is off" never look like content.
+            txt = char(txt);
+            if isempty(txt) || any(strcmpi(txt, {'none','off','unset'}))
+                s = '\textcolor{gray!55}{--}';
             else
-                tNote = 'Injected with NO correction: the full delay reaches the filter.';
+                s = sprintf('{\\footnotesize\\ttfamily %s}', ...
+                    revgnss.ClockExactReportBuilder.esc_(txt));
             end
+        end
 
-            % --- ionosphere ------------------------------------------------------------
-            % The first-order term is removed by the L1/L2 ionosphere-free combination -- but
-            % CODE and CARRIER are gated SEPARATELY and disagree in the default config:
-            %   code    : cfg.measurements.codeMode == 'ionosphereFree'
-            %   carrier : revgnss.CarrierIonoFreeRowBuilder.shouldCombine(cfg)
-            % measurements.code.ionosphereFreeRows.{enable,useInEkf} are DEAD keys -- their only
-            % non-test consumer is an unreachable fallback in CodeMeasurementBuilder, dead
-            % because codeMode is never empty. An earlier version of this row read them and
-            % therefore reported the opposite of what the run did.
-            iT = g({'errors','ionosphere','truth','enable'}, false);
-            iM = g({'errors','ionosphere','model','enable'}, false);
-            iCorr = lower(gs({'errors','ionosphere','model','correction'},'none'));
-            iMdl  = gs({'errors','ionosphere','modelType'},'');
-            iHO   = g({'errors','ionosphere','higherOrder','enable'}, false);
-            iCodeIF = strcmpi(gs({'measurements','codeMode'},''), 'ionosphereFree');
-            iCarrIF = false;
-            try; iCarrIF = logical(revgnss.CarrierIonoFreeRowBuilder.combineStatus(cfg)); catch; end
-            iStateOn = strcmpi(gs({'estimation','ionosphereMode'},'none'), 'perTowerSlant');
-            if ~iT
-                iNote = 'Not injected. Sigma still charged to R (see Noise).';
+        function s = residualText_(truthOn, modelOn, approx, extra)
+            % residualText_  What actually reaches the residual, as PLAIN TEXT.
+            %   THREE outcomes, not two. The old binary status could not say that an
+            %   effect applied identically to truth and model contributes exactly zero,
+            %   which is how antenna PCO and the hardware delay came to read "Enabled --
+            %   Active in this run" on a run whose filter state was bit-identical with
+            %   them off. A model that only APPROXIMATES the truth is a third case again.
+            %   Plain text, not a rendered cell, so the row builders stay assertable.
+            if nargin < 4; extra = ''; end
+            if ~truthOn
+                s = extra;
+                return
+            end
+            if modelOn && approx
+                s = 'approximated: residual survives';
+            elseif modelOn
+                s = 'matched: zero residual';
             else
-                ifTxt = sprintf('First order: %s on code rows, %s on carrier rows (L1/L2 IF combination).', ...
-                    CE.yesNo_(iCodeIF,'cancelled','SURVIVES'), CE.yesNo_(iCarrIF,'cancelled','SURVIVES'));
-                if iStateOn
-                    iNote = [ifTxt ' Remainder absorbed by the per-tower slant EKF state.'];
-                elseif iM && ~strcmpi(iCorr,'none')
-                    iNote = sprintf('%s %s truth corrected by the %s broadcast model, which APPROXIMATES it, so a residual survives.%s', ...
-                        ifTxt, revgnss.ReportLabel.humanize(iMdl), iCorr, ...
-                        CE.yesNo_(iHO,' Higher-order terms survive the IF combination.',''));
-                else
-                    iNote = [ifTxt ' No model correction: the residual reaches the filter in full.'];
+                s = 'uncorrected: full residual';
+            end
+            if ~isempty(extra); s = [s ', ' extra]; end
+        end
+
+        function writeStatusTable_(fid, title, colspec, headers, subheaders, rows)
+            % writeStatusTable_  One table, rules only at block boundaries.
+            %   The old group tables emitted \midrule after EVERY row, which cost more
+            %   vertical space than the rows themselves. A row of the literal 'MID'
+            %   starts a new block.
+            fprintf(fid, '\\begin{center}\\small\n');
+            if ~isempty(title)
+                fprintf(fid, '{\\bfseries\\small %s}\\\\[2pt]\n', title);
+            end
+            fprintf(fid, '\\begin{tabular}{%s}\n\\toprule\n', colspec);
+            fprintf(fid, '%s\\\\\n', strjoin(cellfun(@(h) sprintf('\\textbf{%s}', h), ...
+                headers, 'UniformOutput', false), ' & '));
+            if ~isempty(subheaders)
+                sub = cellfun(@(s) revgnss.ClockExactReportBuilder.subCell_(s), ...
+                    subheaders, 'UniformOutput', false);
+                fprintf(fid, '%s\\\\\n', strjoin(sub, ' & '));
+            end
+            fprintf(fid, '\\midrule\n');
+            for k = 1:numel(rows)
+                r = rows{k};
+                if ischar(r) && strcmp(r, 'MID')
+                    fprintf(fid, '\\midrule\n');
+                    continue
                 end
+                fprintf(fid, '%s\\\\\n', strjoin(r, ' & '));
             end
+            fprintf(fid, '\\bottomrule\n\\end{tabular}\n\\end{center}\n');
+        end
 
-            % --- Shapiro: the archetypal former 'Matched' row --------------------------
-            sT = g({'physics','relativity','shapiro','truth','enable'}, false);
-            sM = g({'physics','relativity','shapiro','model','enable'}, false);
-            if sT && sM
-                sNote = 'Applied identically to truth and model: the residual is ZERO. Nothing about this effect reaches the filter.';
-            elseif sT
-                sNote = 'Injected with no correction: a real residual reaches the filter.';
-            else
-                sNote = 'Not injected.';
-            end
+        function s = subCell_(txt)
+            if isempty(txt); s = ''; else; s = sprintf('{\\tiny %s}', txt); end
+        end
 
-            % --- light-time / Sagnac ---------------------------------------------------
-            ltT = g({'physics','lightTime','enable'}, false);
-            ltMode = gs({'physics','lightTime','mode'},'');
-            sagT = g({'physics','sagnac','truth','enable'}, false);
-            if ltT
-                ltNote = sprintf('Iterative one-way light-time (%s); Sagnac subsumed by the geometric Earth rotation, so a separate Sagnac term would double-count.', ltMode);
-            elseif sagT
-                ltNote = 'First-order Sagnac only (no iterative light-time).';
-            else
-                ltNote = 'Neither light-time nor Sagnac applied.';
-            end
-
-            % --- relativistic clock ----------------------------------------------------
-            rcT = g({'physics','relativity','clock','truth','enable'}, false);
-            rcM = g({'physics','relativity','clock','model','enable'}, false);
-            if rcT && ~rcM
-                rcNote = 'Truth-side rate offset with no model; largely absorbed by the estimated clock drift.';
-            elseif rcT && rcM
-                rcNote = 'Applied to truth and model: residual is ZERO.';
-            else
-                rcNote = 'Not injected.';
-            end
-
-            % NOISE column. Troposphere and ionosphere sigmas are computed UNCONDITIONALLY in
-            % ErrorChain and charged into R whatever the truth/model gates say -- that is the
-            % channel a binary status hides. The others contribute no R term.
+        % ---------------------------------------------------------------- 1 --
+        function rows = observableRows_(cfg)
+            % observableRows_  {name, onLogical, inEkfLogical, modeText}. DATA, not
+            %   LaTeX, so the gates can be asserted directly by a test.
+            %
+            %   ON and IN EKF are separate because they genuinely differ: a diagnostic
+            %   row can be generated and never reach H. The old single Enabled cell
+            %   reported measurements.carrierPhase.enable=false as "Carrier disabled"
+            %   on a run whose carrier rows still drove the update, because the
+            %   authoritative gate is measurements.carrierMode and carrierPhase.enable
+            %   is only a fallback.
+            CE = revgnss.ClockExactReportBuilder;
+            codeMode = CE.getCfgStr_(cfg, {'measurements','codeMode'}, 'singleFrequency');
+            carrMode = CE.getCfgStr_(cfg, {'measurements','carrierMode'}, 'none');
+            carrIfEkf = false;
+            try; carrIfEkf = logical(revgnss.CarrierIonoFreeRowBuilder.combineStatus(cfg)); catch; end
             rows = { ...
-                'Troposphere',                        tT,   tM,   true,  tNote; ...
-                'Ionosphere',                          iT,   iM,   true,  iNote; ...
-                'Light-time / Sagnac',                 ltT || sagT, ltT || sagT, false, ltNote; ...
-                'Shapiro delay (relativistic range)',  sT,   sM,   false, sNote; ...
-                'Relativistic clock offset',           rcT,  rcM,  false, rcNote; ...
+                'Code pseudorange',             true, true, codeMode; ...
+                'Code ionosphere-free rows',    CE.getLogical_(cfg,{'measurements','code','ionosphereFreeRows','enable'},false), ...
+                                                strcmpi(codeMode,'ionosphereFree'), codeMode; ...
+                'Carrier phase',                CE.getLogical_(cfg,{'measurements','carrierPhase','enable'},false), ...
+                                                strcmp(carrMode,'ekfFloat'), carrMode; ...
+                'Carrier ionosphere-free rows', CE.getLogical_(cfg,{'measurements','carrier','ionosphereFreeRows','enable'},false), ...
+                                                carrIfEkf, 'L1/L2 combination'; ...
+                'Doppler range-rate',           CE.getLogical_(cfg,{'measurements','doppler','enable'},false), ...
+                                                CE.getLogical_(cfg,{'measurements','doppler','useInEKF'},false), ...
+                                                CE.getCfgStr_(cfg,{'measurements','doppler','modelLevel'},''); ...
+                'Ground two-way time transfer', CE.getLogical_(cfg,{'measurements','twoWayTimeTransfer','enable'},false), ...
+                                                CE.getLogical_(cfg,{'measurements','twoWayTimeTransfer','useInEKF'},false), ...
+                                                CE.getCfgStr_(cfg,{'measurements','twoWayTimeTransfer','mode'},''); ...
             };
         end
 
-        function writeComponentRows_(fid, cfg, esc)
+        function writeObservableTable_(fid, cfg, esc) %#ok<INUSD>
+            % writeObservableTable_  Render observableRows_, then the crosslink block.
             CE = revgnss.ClockExactReportBuilder;
-
-            % --- Clock / gauge ---
-            clkMd2  = CE.getCfgStr_(cfg, {'clock','mode'}, 'spacecraftReceiverClockOnly');
-            gaugMd2 = CE.getCfgStr_(cfg, {'clock','gauge','mode'}, 'externalTowerCorrections');
-
-            % --- Signal mask: read cfg.signals.enabledMask (not twoFrequency.enable) ---
-            sigMask2 = logical([true, false]);
-            try
-                nd = cfg.signals.enabledMask;
-                if islogical(nd)||isnumeric(nd); sigMask2 = logical(nd); end
-            catch; end
-            isDual2 = numel(sigMask2) >= 2 && sigMask2(2);
-
-            % --- Carrier ---
-            carMode2 = CE.getCfgStr_(cfg, {'measurements','carrierMode'}, '');
-            carEn2   = CE.getLogical_(cfg, {'measurements','carrierPhase','enable'}, false);
-            carEKF2  = strcmp(carMode2, 'ekfFloat');
-            carL2EKF2  = carEKF2 && isDual2;
-            codeIF2    = CE.getLogical_(cfg, {'measurements','code','ionosphereFreeRows','useInEkf'}, false);
-            carIF2     = CE.getLogical_(cfg, {'measurements','carrier','ionosphereFreeRows','useInEkf'}, false);
-            carSlip2   = CE.getLogical_(cfg, {'carrierSlip','enable'}, false);
-            arcSep2    = CE.getLogical_(cfg, {'estimator','arcSeparatedAmbiguities','enable'}, false);
-
-            % --- Integer ambiguity ---
-            intFixEn2  = CE.getLogical_(cfg, {'estimator','integerAmbiguity','enable'}, false);
-            intFixMode2 = CE.getCfgStr_(cfg, {'estimator','integerAmbiguity','mode'}, '');
-            baseArEn2  = CE.getLogical_(cfg, {'estimator','diffAtt','ambiguityResolution','enable'}, false);
-            baseArMeth2 = CE.getCfgStr_(cfg, {'estimator','diffAtt','ambiguityResolution','method'}, '');
-
-            % --- Tower product correction ---
-            prodMode2  = CE.getCfgStr_(cfg, {'clocks','tower','product','mode'}, '');
-            prodEn2    = strcmp(prodMode2, 'truthHistoryProductNoisy');
-            prodCovEn2 = CE.getLogical_(cfg, {'covariance','productClock','enable'}, false);
-            sharedEn2  = CE.getLogical_(cfg, {'covariance','sharedErrors','enable'}, false);
-
-            % --- Light-time ---
-            ltEn2   = CE.getLogical_(cfg, {'physics','lightTime','enable'}, false);
-            ltMode2 = CE.getCfgStr_(cfg, {'physics','lightTime','mode'}, '');
-
-            % --- Doppler ---
-            dopEKF2 = CE.getLogical_(cfg, {'measurements','doppler','useInEKF'}, false);
-            dopMdl2 = CE.getCfgStr_(cfg, {'measurements','doppler','modelLevel'}, '');
-
-            % --- Attitude ---
-            attEn2     = CE.getLogical_(cfg, {'estimator','estimateAttitude'}, false);
-            attParam2  = CE.getCfgStr_(cfg, {'estimator','attitude','parameterization'}, '');
-            diffAttEn2 = strcmp(CE.getCfgStr_(cfg, {'estimator','attitudeCarrierMode'}, ''), ...
-                                'calibratedDifferentialAmbiguity');
-
-            % --- ZWD EKF ---
-            zwdMode2 = CE.getCfgStr_(cfg, {'estimation','troposphereMode'}, 'none');
-            zwdEKF2  = ~strcmp(zwdMode2, 'none') && ~isempty(zwdMode2);
-
-            % ---- Build row descriptions ----
-            % Status values: true=Enabled, false=Disabled, 'guarded'=Guarded/config-only, 'nimpl'=Not implemented
-
-            % Carrier L1 float note
-            if carEKF2 && carEn2
-                carL1Note = 'Float ambiguity EKF, raw L1.';
-            elseif carEn2
-                carL1Note = 'Carrier enabled but not in EKF.';
-            else
-                carL1Note = 'Carrier phase disabled.';
+            src = CE.observableRows_(cfg);
+            rows = cell(1, size(src,1));
+            for k = 1:size(src,1)
+                rows{k} = {CE.esc_(src{k,1}), CE.markCell_(src{k,2}), ...
+                           CE.markCell_(src{k,3}), CE.modeCell_(src{k,4})};
             end
+            % Crosslinks. On a single-asset run these are one honest row rather than a
+            % block of hollow marks; the full block appears as soon as anything is armed.
+            rows = [rows, {'MID'}, CE.islObservableRows_(cfg)];
+            CE.writeStatusTable_(fid, 'Observables', ...
+                ['>{\raggedright\arraybackslash}p{0.29\textwidth} c c ' ...
+                 '>{\raggedright\arraybackslash}p{0.33\textwidth}'], ...
+                {'Observable','On','In EKF','Mode'}, {'','generated','in $H$',''}, rows);
+        end
 
-            % Carrier L2 status/note
-            if carL2EKF2
-                carL2St = true;
-                carL2Note = 'Float ambiguity EKF, raw L2 (L1+L2 active).';
-            elseif carEKF2 && ~isDual2
-                carL2St = false;
-                carL2Note = 'L1 only; L2 float rows available when dual-freq enabled.';
-            else
-                carL2St = false;
-                carL2Note = 'Carrier or dual-freq not active.';
+        function rows = islObservableRows_(cfg)
+            CE = revgnss.ClockExactReportBuilder;
+            M  = @CE.markCell_;
+            D  = @CE.modeCell_;
+            g  = @(p) CE.getLogical_(cfg, p, false);
+            nSA = CE.getCfgNum_(cfg, {'scenario','nSpaceAssets'}, 1);
+            any_ = g({'measurements','isl','enable'}) || g({'measurements','isl','twoWay','enable'}) || ...
+                   g({'multiAsset','twoWayISL','enable'}) || g({'multiAsset','distributedEstimator','enable'}) || ...
+                   g({'measurements','twstft','enable'}) || ...
+                   g({'measurements','secondaryTwoWayTimeTransfer','enable'});
+            if nSA <= 1 && ~any_
+                rows = {{'Inter-satellite links', M(false), M(false), D('single asset: no crosslinks')}};
+                rows = rows(:).';
+                return
             end
-
-            % Code IF status/note
-            if codeIF2
-                codeIFSt = true;
-                codeIFNote = 'Code IF rows reduce ionosphere in EKF.';
-            elseif isDual2
-                codeIFSt = false;
-                codeIFNote = 'L1+L2 available; code IF rows not enabled.';
-            else
-                codeIFSt = false;
-                codeIFNote = 'Requires L1+L2; L1 only active.';
-            end
-
-            % Carrier IF float status/note
-            if carIF2
-                carIFSt = true;
-                carIFNote = 'IF carrier float rows in EKF; no integer fixing.';
-            elseif carEKF2 && isDual2
-                carIFSt = false;
-                carIFNote = 'Carrier float+dual-freq active; IF float rows not enabled.';
-            else
-                carIFSt = false;
-                carIFNote = 'Requires carrier float and L1+L2.';
-            end
-
-            % Raw integer fixing status/note
-            if intFixEn2
-                intFixSt = true;
-                intFixNote = sprintf('Guarded %s; fixes attempted only when arc/sigma/distance/RMS gates pass.', revgnss.ReportLabel.humanize(intFixMode2));
-            else
-                intFixSt = false;
-                intFixNote = 'Disabled; guarded raw-carrier fixing available, not active in this run.';
-            end
-
-            % Baseline attitude AR status/note
-            if baseArEn2
-                baseArSt = true;
-                baseArNote = sprintf('method: %s; requires carrier float, 4 receivers, attitude EKF, and differential-attitude mode.', revgnss.ReportLabel.humanize(baseArMeth2));
-            else
-                baseArSt = false;
-                baseArNote = 'Not active; requires carrier float + 4rx + attitude EKF + diffAtt mode.';
-            end
-
-            % Tower product correction status/note
-            if prodEn2
-                prodSt = true;
-                prodNote = sprintf('External noisy product correction (%s).', revgnss.ReportLabel.humanize(prodMode2));
-            else
-                prodSt = false;
-                prodNote = 'Perfect external tower correction assumed.';
-            end
-
-            % Light-time / Sagnac status and note
-            sagEn2 = CE.getLogical_(cfg, {'physics','sagnac','truth','enable'}, false) || ...
-                     CE.getLogical_(cfg, {'physics','sagnac','model','enable'}, false);
-            if ltEn2
-                ltSt   = true;
-                ltNote = sprintf('%s; Sagnac subsumed when iterative light-time active.', revgnss.ReportLabel.humanize(ltMode2));
-            elseif sagEn2
-                ltSt   = true;
-                ltNote = 'First-order Sagnac only (no iterative light-time).';
-            else
-                ltSt   = false;
-                ltNote = '';
-            end
-
-            % Pre-compute conditional notes (avoids need for ternary helper)
-            if isDual2; dualNote2 = 'L1+L2; IF combination available.'; else; dualNote2 = 'L1 only.'; end
-            dopNote2    = ''; if dopEKF2; dopNote2 = sprintf('model: %s', revgnss.ReportLabel.humanize(dopMdl2)); end
-            zwdSt2      = 'guarded'; if zwdEKF2; zwdSt2 = true; end
-            zwdNote2    = 'Guarded/config-only; weak GEO observability at GEO.';
-            if zwdEKF2; zwdNote2 = sprintf('mode: %s', revgnss.ReportLabel.humanize(zwdMode2)); end
-
-            % Empirical RTN accelerations (reduced-dynamic filtering). Three Gauss-Markov
-            % acceleration states absorbing force-model error that no measurement-side
-            % state can reach. Gate is enable && useInEKF, both default false.
-            empAccOn2 = CE.getLogical_(cfg,{'estimator','empiricalAccel','enable'},false) && ...
-                        CE.getLogical_(cfg,{'estimator','empiricalAccel','useInEKF'},false);
-            empAccSt2   = empAccOn2;
-            empAccNote2 = 'Disabled; force-model error is left unmodelled (biases the state, not P).';
-            if empAccOn2
-                tauEa = 1800; sigEa = 1e-7;
-                try; tauEa = cfg.estimator.empiricalAccel.tau_s;         catch; end
-                try; sigEa = cfg.estimator.empiricalAccel.sigma_ss_mps2; catch; end
-                empAccNote2 = sprintf(['3 Gauss-Markov states in the RTN frame, ' ...
-                    'tau = %g s, steady-state sigma = %.3g m/s^2.'], tauEa, sigEa);
-            end
-            slipNote2   = '';
-            if carSlip2 && arcSep2; slipNote2 = 'model-step-compensated residual jump; arc-separated float ambiguities.'; end
-            prodCovSt2  = prodCovEn2 || sharedEn2;
-            prodCovN2   = 'No product covariance applied to R.';
-            if prodCovSt2; prodCovN2 = 'R-inflation from product age and drift uncertainty.'; end
-            tClkNote2   = sprintf('mode: %s; gauge: %s.', revgnss.ReportLabel.humanize(clkMd2), revgnss.ReportLabel.humanize(gaugMd2));
-            attNote2    = 'No attitude states.'; if attEn2; attNote2 = sprintf('parameterisation: %s', revgnss.ReportLabel.humanize(attParam2)); end
-            diffAttN2   = ''; if diffAttEn2; diffAttN2 = 'calibrated differential ambiguity active.'; end
-
-            % --- Atmosphere honesty ------------------------------------------------
-            % SUPERSEDED -- DO NOT EXTEND. tropSt/ionoSt/shapSt/ltSt below are no longer
-            % consumed by any table: gRows{3} now comes from atmosphereEffectRows_, which
-            % reports the three independent channels (truth into z / model into h / noise into
-            % R) instead of one status. Kept only because several LOCAL variables computed in
-            % this block (dualNote2, zwdEKF2, ltMode2, ...) are still used by tables 1, 2 and 4.
-            % If you are changing how an atmospheric effect is REPORTED, edit
-            % atmosphereEffectRows_ -- editing here changes nothing.
-            % A cfg.errors.*.enable=true does NOT mean a real error is injected. If the
-            % model applies the same delay as the truth (matched), the residual is ZERO;
-            % and the ionosphere is master-gated by cfg.ionosphere.mode (mode='off' means
-            % no ionosphere at all, regardless of errors.ionosphere.enable). Report the
-            % NET effect, not the raw flag. Status 'matched' = applied on both sides -> 0.
-            tropTruthEn  = CE.getLogical_(cfg,{'errors','troposphere','truth','enable'},false);
-            tropModelEn  = CE.getLogical_(cfg,{'errors','troposphere','model','enable'},false);
-            tropBiasFrac = CE.getCfgNum_(cfg,{'errors','troposphere','model','biasFraction'},1);
-            if ~tropTruthEn
-                tropSt = false;     tropNote = 'Not applied (truth troposphere off).';
-            elseif zwdEKF2
-                tropSt = true;      tropNote = 'Truth troposphere injected; residual absorbed by the per-tower ZWD EKF state.';
-            elseif tropModelEn && abs(tropBiasFrac - 1) < 1e-9
-                tropSt = 'matched'; tropNote = 'Zero residual: model matches truth (biasFraction = 1); no error reaches the filter.';
-            else
-                tropSt = true;      tropNote = sprintf('Residual injected: model applies %.0f%% of the truth delay.', 100*tropBiasFrac);
-            end
-            % Ionosphere: derive from the LIVE gates, exactly as the troposphere block above
-            % does. This row used to read cfg.ionosphere.mode, which is a legacy key with ZERO
-            % physics consumers -- nothing in ErrorChain reads it and realisticAtmosphereConfig
-            % never updates it, so it sits at its 'off' default forever. A run with the full
-            % realistic ionosphere (tecGaussMarkov truth + diurnal TEC + stochastic + topside +
-            % higher-order + scintillation, Klobuchar-corrected) was therefore reported as
-            % "Disabled -- not applied", i.e. the report UNDER-claimed an active error source
-            % and a reader would conclude the ionosphere had not been modelled at all.
-            ionoTruthEn = CE.getLogical_(cfg,{'errors','ionosphere','truth','enable'},false);
-            ionoModelEn = CE.getLogical_(cfg,{'errors','ionosphere','model','enable'},false);
-            ionoCorr    = lower(CE.getCfgStr_(cfg,{'errors','ionosphere','model','correction'},'none'));
-            ionoTruthMd = CE.getCfgStr_(cfg,{'errors','ionosphere','modelType'},'');
-            ionoStateOn = strcmpi(CE.getCfgStr_(cfg,{'estimation','ionosphereMode'},'none'),'perTowerSlant');
-            % IF rows only cancel the ionosphere if the FILTER actually uses them; enable
-            % alone can leave them diagnostic while the L1 rows (still iono-bearing) drive
-            % the update.
-            ionoIfOn    = CE.getLogical_(cfg,{'measurements','code','ionosphereFreeRows','enable'},false) && ...
-                          CE.getLogical_(cfg,{'measurements','code','ionosphereFreeRows','useInEkf'},false);
-            ionoHighOrd = CE.getLogical_(cfg,{'errors','ionosphere','higherOrder','enable'},false);
-            ionoMode2   = lower(CE.getCfgStr_(cfg,{'ionosphere','mode'},'off'));
-            if ~ionoTruthEn
-                % Backward compatibility: a config that only ever set the legacy key still
-                % reports through the old switch rather than silently reading "off".
-                switch ionoMode2
-                    case 'truthonly';     ionoSt = true;      ionoNote = 'Residual injected: truth-only ionosphere (model does not correct).';
-                    case 'model';         ionoSt = 'matched'; ionoNote = 'Zero residual: model corrects the truth ionosphere.';
-                    case 'ionospherefree';ionoSt = 'matched'; ionoNote = 'Removed by the L1/L2 ionosphere-free combination.';
-                    otherwise;            ionoSt = false;     ionoNote = 'Not applied (no truth ionosphere).';
-                end
-            elseif ionoIfOn
-                % The IF combination cancels the FIRST-ORDER term only. ErrorChain's
-                % higherOrderIono_ injects the second/third-order residual that survives it,
-                % so with higherOrder on a real (cm-level) error still reaches the filter and
-                % 'matched' would overstate the cancellation.
-                if ionoHighOrd
-                    ionoSt = true;
-                    ionoNote = ['First order removed by the L1/L2 ionosphere-free combination; ' ...
-                        'the second/third-order residual survives it and reaches the filter.'];
-                else
-                    ionoSt = 'matched';
-                    ionoNote = 'Removed by the L1/L2 ionosphere-free combination (first order; higher order not modelled).';
-                end
-            elseif ionoStateOn
-                ionoSt = true;      ionoNote = 'Truth ionosphere injected; residual absorbed by the per-tower slant EKF state.';
-            elseif ionoModelEn && ~strcmpi(ionoCorr,'none')
-                ionoSt = true;
-                ionoNote = sprintf(['Residual injected: %s truth, corrected by the %s broadcast model. ' ...
-                    'The correction APPROXIMATES the truth, so a real residual survives.'], ...
-                    revgnss.ReportLabel.humanize(ionoTruthMd), ionoCorr);
-            elseif ionoModelEn
-                ionoSt = 'matched'; ionoNote = 'Zero residual: model corrects the truth ionosphere.';
-            else
-                ionoSt = true;      ionoNote = 'Residual injected: truth-only ionosphere (model does not correct).';
-            end
-            shapTruthEn = CE.getLogical_(cfg,{'physics','relativity','shapiro','truth','enable'},false);
-            shapModelEn = CE.getLogical_(cfg,{'physics','relativity','shapiro','model','enable'},false);
-            if ~shapTruthEn
-                shapSt = false;     shapNote = '';
-            elseif shapModelEn
-                shapSt = 'matched'; shapNote = 'Zero residual: applied on both truth and model.';
-            else
-                shapSt = true;      shapNote = 'Residual injected: truth-only relativistic range delay.';
-            end
-
-            % ---- Five compact group tables (avoids single-table page overflow) ----
-            gTitles = { ...
-                'Core geometry and signals', ...
-                'Clock and covariance', ...
-                'Atmosphere and propagation', ...
-                'Carrier, ambiguity and attitude', ...
-                'Antenna, hardware and unsupported', ...
+            rows = { ...
+                {'ISL code range',        M(g({'measurements','isl','code','enable'})),    M(g({'measurements','isl','code','useInEKF'})),    D('')}; ...
+                {'ISL carrier phase',     M(g({'measurements','isl','carrier','enable'})), M(g({'measurements','isl','carrier','useInEKF'})), D('')}; ...
+                {'ISL Doppler',           M(g({'measurements','isl','doppler','enable'})), M(g({'measurements','isl','doppler','useInEKF'})), D('')}; ...
+                {'ISL two-way range',     M(g({'measurements','isl','twoWay','range','enable'})), M(g({'measurements','isl','twoWay','range','useInEKF'})), D('')}; ...
+                {'ISL time transfer',     M(g({'measurements','isl','twoWay','timeTransfer','enable'})), ...
+                                          M(g({'measurements','isl','twoWay','timeTransfer','useInEKF'})), ...
+                                          D(CE.getCfgStr_(cfg,{'measurements','isl','twoWay','timeTransfer','mode'},''))}; ...
+                {'ISL neighbour product', M(g({'measurements','isl','product','enable'})), M([]), D('')}; ...
+                {'Relative two-way ISL layer', M(g({'multiAsset','twoWayISL','enable'})), M([]), ...
+                                          D(CE.islRelativeMode_(cfg))}; ...
+                {'Distributed fleet EKF', M(g({'multiAsset','distributedEstimator','enable'})), ...
+                                          M(g({'multiAsset','distributedEstimator','linkUpdate','enable'})), ...
+                                          D(CE.getCfgStr_(cfg,{'multiAsset','distributedEstimator','executionMode'},''))}; ...
+                {'Legacy TWSTFT diagnostics', M(g({'measurements','twstft','enable'})), M([]), D('')}; ...
             };
+            % ALWAYS a row vector. The single-asset branch returns one entry and hid
+            % this: the multi-asset branch built a column, and writeObservableTable_
+            % concatenates it onto a row, so the first swarm report threw on horzcat.
+            rows = rows(:).';
+        end
 
-            gRows = cell(5, 1);
-
-            % STALE ROWS RE-POINTED. Each of these previously read a key with no physics
-            % consumer, or was a hardcoded literal that read no config at all:
-            %   'Ground segment geometry'   hardcoded true -> now reports the real tower count
-            %   'Carrier phase enabled'     read measurements.carrierPhase.enable, which is only
-            %                               a FALLBACK; the authoritative gate is carrierMode
-            %                               (MeasurementModel.m:268-281), and masterConfig always
-            %                               defines it, so the old key could never change anything
-            carModeStr2 = CE.getCfgStr_(cfg, {'measurements','carrierMode'}, 'none');
-            carRealOn2  = strcmpi(carModeStr2, 'ekfFloat');
-            nTwrRow2    = CE.getCfgNum_(cfg, {'scenario','nTowers'}, 0);
-            nRxRow2     = CE.getCfgNum_(cfg, {'scenario','nReceivers'}, 1);
-            gRows{1} = { ...
-                'Ground segment geometry',       nTwrRow2 > 0, sprintf('%d transmitting towers, %d receive antennas.', round(nTwrRow2), round(nRxRow2)); ...
-                'L1+L2 dual-frequency signals',  isDual2, dualNote2; ...
-                'Carrier phase in EKF',          carRealOn2, sprintf('Gate is measurements.carrierMode = ''%s'' (carrierPhase.enable is a fallback only).', carModeStr2); ...
-                'Doppler in EKF',                dopEKF2, dopNote2; ...
-            };
-
-            gRows{2} = { ...
-                'Receiver clock (spacecraft)',    true,   sprintf(['%s oscillator; ' ...
-                    'h-coefficients from Winkel (2003) Table 2.1.'], ...
-                    CE.getCfgStr_(cfg,{'asset','clockType'},'unknown')); ...
-                'Tower clock product correction', prodSt,                                    prodNote; ...
-                'Tower clock product covariance', prodCovSt2,                                prodCovN2; ...
-                'Joint tower clock EKF',          strcmp(clkMd2,'includeTowerClocksInEKF'),  tClkNote2; ...
-                'ZWD / troposphere EKF state',    zwdSt2,                                    zwdNote2; ...
-                'Empirical RTN accelerations',    empAccSt2,                                 empAccNote2; ...
-                ... % was hardcoded 'guarded' with "no dedicated EKF state in v1" -- FALSE:
-                ... % hardware.txCodeBias.useInEKF demonstrably appends one state per tower.
-                'Per-tower TX code bias EKF', CE.getLogical_(cfg,{'hardware','txCodeBias','useInEKF'},false), ...
-                    sprintf('%d estimated tower code-bias states.', ...
-                        round(CE.getLogical_(cfg,{'hardware','txCodeBias','useInEKF'},false) * nTwrRow2)); ...
-            };
-
-            % ---- Table 3 uses the THREE-CHANNEL schema -------------------------------
-            % An error source enters the filter through up to three INDEPENDENT channels, and
-            % a single Enabled/Disabled cell cannot describe any of them honestly:
-            %   TRUTH  the effect perturbs the measurement z
-            %   MODEL  the filter subtracts a correction in h
-            %   NOISE  the effect inflates the measurement covariance R
-            % This replaces the old 'Matched' status. 'Matched' asserted "applied to both sides
-            % so the residual is zero", which reads as though the effect is active when it is
-            % arithmetically a no-op -- and for the ionosphere it was measured still producing
-            % 1.3-3.0 m of residual, i.e. the label was simply false. Truth+Model both green with
-            % an explicit note carries the same information without the false implication.
-            % The NOISE column is what a binary status hides completely: ErrorChain charges the
-            % troposphere and ionosphere sigmas into R UNCONDITIONALLY -- not gated on
-            % truth.enable, model.enable or stochastic.enable -- so with the atmosphere fully
-            % "Disabled" the ionosphere still supplies most of the measurement variance.
-            gRows{3} = revgnss.ClockExactReportBuilder.atmosphereEffectRows_(cfg);
-
-            gRows{4} = { ...
-                'Carrier L1 float rows in EKF',   carEKF2 && carEn2,    carL1Note; ...
-                'Carrier L2 float rows in EKF',   carL2St,              carL2Note; ...
-                'Carrier slip guards + arc sep',   carSlip2 && arcSep2,  slipNote2; ...
-                ... % Both IF rows previously read *.ionosphereFreeRows.useInEkf. For CODE that
-                ... % key is DEAD (codeMode is the real gate); for CARRIER the real gate is
-                ... % CarrierIonoFreeRowBuilder.combineStatus. They disagree in the default config.
-                'Code IF rows in EKF',    strcmpi(CE.getCfgStr_(cfg,{'measurements','codeMode'},''),'ionosphereFree'), ...
-                    sprintf('Gate is measurements.codeMode = ''%s''.', CE.getCfgStr_(cfg,{'measurements','codeMode'},'unset')); ...
-                'Carrier IF rows in EKF', CE.carrierIfActive_(cfg), ...
-                    'Gate is CarrierIonoFreeRowBuilder.combineStatus (enable AND useInEkf AND nCarrierSignals>1); the signal-count clause is now in the code, not just this note.'; ...
-                'Raw carrier integer fixing',     intFixSt,             intFixNote; ...
-                'Baseline attitude AR',           baseArSt,             baseArNote; ...
-                'Attitude EKF (spacecraft)',       attEn2,               attNote2; ...
-                'Diff. carrier att. calibration',  diffAttEn2,           diffAttN2; ...
-            };
-
-            % PCV: the row used to read effects.antennaPCV.truth.enable, but
-            % RangeCorrections gates on effects.antenna.pcvModel and returns zero for 'none',
-            % so the flag could read Enabled while the correction was identically zero.
-            pcvModel2 = CE.getCfgStr_(cfg, {'effects','antenna','pcvModel'}, 'none');
-            pcvOn2    = CE.getLogical_(cfg,{'effects','antennaPCV','truth','enable'},false) && ...
-                        ~strcmpi(pcvModel2, 'none');
-            % Multipath: the coloured Gauss-Markov path is gated on coloredGM.enable, not on
-            % the truth flag alone.
-            mpTruth2 = CE.getLogical_(cfg,{'errors','multipath','truth','enable'},false);
-            mpGM2    = CE.getLogical_(cfg,{'errors','multipath','coloredGM','enable'},false);
-            % LAMBDA: 'Not impl.' is stale on this branch -- the engine exists and is gated.
-            lamOn2   = CE.getLogical_(cfg,{'estimator','lambda','enable'},false);
-            lamPath2 = CE.getCfgStr_(cfg,{'estimator','lambda','toolboxPath'},'');
-            if lamOn2 && ~isempty(lamPath2)
-                lamSt2 = true;
-                lamNote2 = 'External TU Delft LAMBDA engine active (reports a bootstrapped success rate; a fix below the gate is refused).';
-            elseif lamOn2
-                lamSt2 = 'guarded'; lamNote2 = 'Enabled but estimator.lambda.toolboxPath is unset, so the engine cannot run.';
+        function s = islRelativeMode_(cfg)
+            CE = revgnss.ClockExactReportBuilder;
+            if CE.getLogical_(cfg, {'multiAsset','twoWayISL','enable'}, false)
+                s = sprintf('gauge %s', CE.getCfgStr_(cfg,{'multiAsset','twoWayISL','gauge','mode'},''));
             else
-                lamSt2 = false; lamNote2 = 'Available on this branch but switched off.';
+                s = '';
             end
-            gRows{5} = { ...
-                'Antenna PCO (truth)',       CE.getLogical_(cfg,{'effects','antennaPCO','truth','enable'},false),   ''; ...
-                'Antenna PCV (truth)',       pcvOn2, sprintf('Gate is effects.antenna.pcvModel = ''%s''; ''none'' yields an identically zero correction whatever the truth flag says.', pcvModel2); ...
-                'Hardware delay (truth)',    CE.getLogical_(cfg,{'errors','hardwareDelay','truth','enable'},false), ''; ...
-                'Multipath (truth)',         mpTruth2 && mpGM2, CE.yesNo_(mpGM2, 'Time-correlated (coloured Gauss-Markov) code multipath.', 'Truth flag set but coloredGM.enable is off, so no multipath is generated.'); ...
-                'LAMBDA / MLAMBDA',          lamSt2, lamNote2; ...
-                'Carrier IF integer fixing', 'nimpl', 'Explicitly unsupported; the IF ambiguity is not an integer.'; ...
-                'ANTEX / SP3 / CLK parsers', 'nimpl', 'Synthetic constants only; no file-based corrections.'; ...
-                'PPP-grade processing',     'nimpl', 'Not implemented.'; ...
+        end
+
+        % ---------------------------------------------------------------- 2 --
+        function rows = errorSourceRows_(cfg)
+            % errorSourceRows_  Every error source on the three channels it can reach
+            %   the filter through: {name, truthOn, modelOn, noiseOn, modeText}.
+            %   DATA, not LaTeX, so the gates can be asserted directly by a test.
+            %
+            %   The truth/model/noise split used to apply to the atmosphere only, which
+            %   is why the antenna and hardware half kept a binary that hid the exact
+            %   truth-model cancellation. Propagation and site errors are the same kind
+            %   of thing and answer the same question, so they are two blocks of one
+            %   table rather than two tables with two vocabularies. Every gate below is
+            %   the key the PHYSICS reads, verified against its consumer.
+            CE = revgnss.ClockExactReportBuilder;
+            T  = @CE.residualText_;
+            g  = @(p) CE.getLogical_(cfg, p, false);
+            gs = @(p) CE.getCfgStr_(cfg, p, '');
+
+            % --- propagation ---------------------------------------------------
+            tropT = g({'errors','troposphere','truth','enable'});
+            tropM = g({'errors','troposphere','model','enable'});
+            tropB = CE.getCfgNum_(cfg, {'errors','troposphere','model','biasFraction'}, 1);
+            tropS = g({'errors','troposphere','stochastic','enable'});
+            tropExtra = gs({'errors','troposphere','modelType'});
+            if strcmpi(gs({'estimation','troposphereMode'}), 'perTowerZwd')
+                tropExtra = [tropExtra ', residual absorbed by the ZWD state'];
+            end
+            ionoT = g({'errors','ionosphere','truth','enable'});
+            ionoM = g({'errors','ionosphere','model','enable'});
+            ionoS = g({'errors','ionosphere','stochastic','enable'});
+            ionoHO = g({'errors','ionosphere','higherOrder','enable'});
+            scint  = g({'errors','ionosphere','scintillation','enable'});
+            % Quote the correction at the case the config uses; the Mode column is a
+            % verbatim echo of the resolved value, not a paraphrase of it.
+            ionoCorr = gs({'errors','ionosphere','model','correction'});
+            ionoCorrOn = ~isempty(ionoCorr) && ~strcmpi(ionoCorr,'none');
+            ionoExtra = gs({'errors','ionosphere','modelType'});
+            if ionoCorrOn; ionoExtra = sprintf('%s / %s', ionoExtra, ionoCorr); end
+            % CODE and CARRIER are gated SEPARATELY for the ionosphere-free combination
+            % and they disagree in the default config, so one verdict for both is wrong.
+            % measurements.code.ionosphereFreeRows.* is NOT consulted: its only consumer
+            % is unreachable because codeMode is never empty.
+            ifCode = strcmpi(gs({'measurements','codeMode'}), 'ionosphereFree');
+            ifCarr = false;
+            try; ifCarr = logical(revgnss.CarrierIonoFreeRowBuilder.combineStatus(cfg)); catch; end
+            ionoExtra = sprintf('%s, first order: code %s, carrier %s', ionoExtra, ...
+                CE.yesNo_(ifCode,'cancelled','survives'), CE.yesNo_(ifCarr,'cancelled','survives'));
+            ltT = g({'physics','lightTime','truth','enable'});
+            ltM = g({'physics','lightTime','model','enable'});
+            if ltT; sagExtra = 'subsumed by light time'; else; sagExtra = ''; end
+            shapT = g({'physics','relativity','shapiro','truth','enable'});
+            shapM = g({'physics','relativity','shapiro','model','enable'});
+            relT  = g({'physics','relativity','clock','truth','enable'});
+            relM  = g({'physics','relativity','clock','model','enable'});
+
+            % --- site and hardware ----------------------------------------------
+            pcvModel = gs({'effects','antenna','pcvModel'});
+            pcvOn    = ~strcmpi(pcvModel,'none');
+            % RangeCorrections gates on pcvModel and returns zero for 'none', so the
+            % truth flag alone could read on while the correction was identically zero.
+            pcvT = g({'effects','antennaPCV','truth','enable'}) && pcvOn;
+            pcvM = g({'effects','antennaPCV','model','enable'}) && pcvOn;
+            mpT  = g({'errors','multipath','truth','enable'});
+            mpM  = g({'errors','multipath','model','enable'});
+            mpGM = g({'errors','multipath','coloredGM','enable'});
+            if mpGM; mpExtra = 'coloured Gauss-Markov';
+            elseif mpT; mpExtra = 'legacy sinusoid + white';
+            else; mpExtra = ''; end
+            hwT = g({'errors','hardwareDelay','truth','enable'});
+            hwM = g({'errors','hardwareDelay','model','enable'});
+            if g({'errors','hardwareDelay','perTowerBias','enable'}); hwExtra = 'per-tower bias';
+            elseif hwT; hwExtra = 'global per signal';
+            else; hwExtra = ''; end
+            dcbOn = CE.getCfgNum_(cfg,{'biases','interFrequency','code','truth','L1_m'},0) ~= 0 || ...
+                    CE.getCfgNum_(cfg,{'biases','interFrequency','code','truth','L2_m'},0) ~= 0;
+            corrN = g({'effects','correlatedNoise','enable'});
+            iacbT = g({'errors','interAntennaCarrierBias','enable'});
+            iacbM = g({'estimator','interAntennaCarrierBias','enable'});
+            wupT  = g({'errors','phaseWindup','enable'});
+            wupM  = g({'estimator','phaseWindup','correct'});
+            tideT = g({'effects','solidEarthTide','truth','enable'});
+            tideM = g({'effects','solidEarthTide','model','enable'});
+
+            % --- broadcast tower-clock product ----------------------------------
+            % The product is an error source like any other: its residual is injected,
+            % the estimator applies it, and its sigma is charged into R. Carrying it
+            % here is what lets the covariance sub-toggles land in the Noise column
+            % instead of needing a table of their own.
+            prodMode = gs({'clocks','tower','product','mode'});
+            prodOn   = strcmp(prodMode, 'truthHistoryProductNoisy');
+            prodR    = g({'covariance','productClock','enable'}) || ...
+                       g({'clocks','tower','product','addToR'});
+
+            rows = { ...
+                'Troposphere',                    tropT, tropM, true,  T(tropT, tropM, abs(tropB-1) > 1e-9, tropExtra); ...
+                'Troposphere stochastic wet',     tropS, false, tropS, ''; ...
+                'Ionosphere (first order)',       ionoT, ionoM, true,  T(ionoT, ionoM, ionoCorrOn, ionoExtra); ...
+                'Ionosphere stochastic TEC',      ionoS, false, ionoS, ''; ...
+                'Ionosphere higher order',        ionoHO, false, ionoHO, ''; ...
+                'Scintillation',                  scint, false, scint, CE.onlyIf_(scint, gs({'errors','ionosphere','scintillation','model'})); ...
+                'Light time',                     ltT,   ltM,   false, gs({'physics','lightTime','mode'}); ...
+                'Sagnac',                         g({'physics','sagnac','truth','enable'}), ...
+                                                  g({'physics','sagnac','model','enable'}), false, sagExtra; ...
+                'Shapiro range delay',            shapT, shapM, false, T(shapT, shapM, false); ...
+                'Relativistic clock offset',      relT,  relM,  false, T(relT, relM, false); ...
+                'Tower clock product',            prodOn, prodOn, prodR, prodMode; ...
+                'Antenna phase-centre offset',    g({'effects','antennaPCO','truth','enable'}), ...
+                                                  g({'effects','antennaPCO','model','enable'}), false, ...
+                                                  T(g({'effects','antennaPCO','truth','enable'}), ...
+                                                    g({'effects','antennaPCO','model','enable'}), false); ...
+                'Antenna phase-centre variation', pcvT, pcvM, false, T(pcvT, pcvM, false, CE.onlyIf_(pcvOn, pcvModel)); ...
+                'Tower survey error',             g({'effects','towerSurvey','truth','enable'}), ...
+                                                  g({'effects','towerSurvey','model','enable'}), false, ...
+                                                  T(g({'effects','towerSurvey','truth','enable'}), ...
+                                                    g({'effects','towerSurvey','model','enable'}), false); ...
+                'Hardware group delay',           hwT, hwM, false, T(hwT, hwM, false, hwExtra); ...
+                'Code inter-frequency bias',      dcbOn, false, false, ''; ...
+                'Code multipath',                 mpT, mpM, mpT, T(mpT, mpM, false, mpExtra); ...
+                'Correlated measurement noise',   corrN, false, corrN, ''; ...
+                'Inter-antenna carrier bias',     iacbT, iacbM, false, T(iacbT, iacbM, false); ...
+                'Carrier phase wind-up',          wupT, wupM, false, T(wupT, wupM, false); ...
+                'Solid-Earth tide',               tideT, tideM, false, T(tideT, tideM, false); ...
+                'Polar motion / EOP',             g({'frames','eopModel','enable'}), false, false, ''; ...
             };
+        end
 
-            for gi = 1:5
-                fprintf(fid, '\\begingroup\n\\small\n');
-                fprintf(fid, '\\setlength{\\tabcolsep}{3pt}\n');
-                fprintf(fid, '\\renewcommand{\\arraystretch}{0.92}\n');
-                fprintf(fid, '\\begin{center}\n');
-                fprintf(fid, '{\\bfseries\\small %s}\\\\[2pt]\n', gTitles{gi});
-                rws = gRows{gi};
-                isEffectTable = (size(rws, 2) == 5);   % {name, truth, model, noise, note}
-                if isEffectTable
-                    fprintf(fid, ['\\begin{tabular}{>{\\raggedright\\arraybackslash}p{0.24\\textwidth}' ...
-                                  ' c c c' ...
-                                  ' >{\\raggedright\\arraybackslash}p{0.44\\textwidth}}\n']);
-                    fprintf(fid, '\\toprule\n');
-                    fprintf(fid, ['\\textbf{Error source} & \\textbf{Truth} & \\textbf{Model} & ' ...
-                                  '\\textbf{Noise} & \\textbf{What actually reaches the filter}\\\\\n']);
-                    fprintf(fid, ['& {\\tiny in $z$} & {\\tiny in $h$} & {\\tiny in $R$} & \\\\\n']);
-                else
-                    fprintf(fid, ['\\begin{tabular}{>{\\raggedright\\arraybackslash}p{0.34\\textwidth}' ...
-                                  ' >{\\raggedright\\arraybackslash}p{0.18\\textwidth}' ...
-                                  ' >{\\raggedright\\arraybackslash}p{0.40\\textwidth}}\n']);
-                    fprintf(fid, '\\toprule\n');
-                    fprintf(fid, '\\textbf{Component} & \\textbf{Status} & \\textbf{Note}\\\\\n');
-                end
-                fprintf(fid, '\\midrule\n');
-                for k = 1:size(rws, 1)
-                    comp = esc(rws{k,1});
-                    if isEffectTable
-                        % Each channel is genuinely binary -- that is the point of splitting them.
-                        tick = @(b) revgnss.ClockExactReportBuilder.channelCell_(b);
-                        fprintf(fid, '%s & %s & %s & %s & %s\\\\\n', comp, ...
-                            tick(rws{k,2}), tick(rws{k,3}), tick(rws{k,4}), esc(rws{k,5}));
-                        fprintf(fid, '\\midrule\n');
-                        continue
-                    end
-                    isEn = rws{k,2};
-                    act  = rws{k,3};
-                    if isequal(isEn, true)
-                        stTex = '\textcolor{green!45!black}{Enabled}';
-                        if isempty(act); act = 'Active in this run.'; end
-                    elseif isequal(isEn, 'guarded')
-                        stTex = '\textcolor{orange!70!black}{Guarded}';
-                        if isempty(act); act = 'Not active in current run.'; end
-                    elseif isequal(isEn, 'nimpl')
-                        stTex = '\textcolor{gray!80}{Not\,impl.}';
-                        if isempty(act); act = 'Not available in v1.'; end
-                    else
-                        stTex = '\textcolor{gray}{Disabled}';
-                        if isempty(act); act = 'n/a'; end
-                    end
-                    fprintf(fid, '%s & %s & %s\\\\\n', comp, stTex, esc(act));
-                    fprintf(fid, '\\midrule\n');
-                end
-                fprintf(fid, '\\bottomrule\n\\end{tabular}\n\\end{center}\n');
-                fprintf(fid, '\\endgroup\n\\vspace{4pt}\n');
-
-                % Per-asset scope note under the atmosphere/propagation table (swarm runs).
-                % The rows above describe the CHIEF's tower links; secondaries only see these
-                % effects when the per-asset guards are enabled -- make that explicit.
-                if gi == 3
-                    nSA_ap = CE.getCfgNum_(cfg, {'scenario','nSpaceAssets'}, 1);
-                    if nSA_ap > 1
-                        jointMode_ = strcmpi(CE.getCfgStr_(cfg, ...
-                            {'multiAsset','mode'},'fast'),'joint');
-                        if jointMode_
-                            fprintf(fid, ['{\\footnotesize\\itshape Multi-asset scope (%d spacecraft): ' ...
-                                'each jointly estimated spacecraft uses its own ground-link ' ...
-                                'measurement model and error-chain realization. The configured ' ...
-                                'atmosphere therefore applies to every spacecraft--tower uplink. ' ...
-                                'Inter-satellite links carry no neutral-atmosphere or ionosphere term.}\\\\[4pt]\n'], ...
-                                round(nSA_ap));
-                        else
-                            guardA_ = CE.getLogical_(cfg, {'multiAsset','towerSecondary','atmosphere','enable'}, false);
-                            dynB_   = CE.getLogical_(cfg, {'multiAsset','injectTruthSideDynamics'}, false);
-                            fprintf(fid, ['{\\footnotesize\\itshape Multi-asset scope (%d spacecraft): the effects above are ' ...
-                                'applied to the chief''s tower links. Each secondary satellite receives a divergent uplink ' ...
-                                'atmosphere only when \\texttt{multiAsset.towerSecondary.atmosphere} is enabled (this run: %s), ' ...
-                                'and truth-side per-satellite dynamics only when \\texttt{injectTruthSideDynamics} is enabled ' ...
-                                '(this run: %s). Inter-satellite links carry no atmosphere.}\\\\[4pt]\n'], ...
-                                round(nSA_ap), CE.yesNo_(guardA_,'enabled','off'), CE.yesNo_(dynB_,'enabled','off'));
-                        end
-                    end
-                end
+        function writeErrorSourceTable_(fid, cfg, esc) %#ok<INUSD>
+            % writeErrorSourceTable_  Render errorSourceRows_ as the one error table.
+            CE = revgnss.ClockExactReportBuilder;
+            src = CE.errorSourceRows_(cfg);
+            rows = cell(1, size(src,1));
+            for k = 1:size(src,1)
+                rows{k} = {CE.esc_(src{k,1}), CE.markCell_(src{k,2}), CE.markCell_(src{k,3}), ...
+                           CE.markCell_(src{k,4}), CE.modeCell_(src{k,5})};
             end
+            % Propagation above the rule, site and hardware below it.
+            iSplit = find(strcmp(src(:,1), 'Tower clock product'), 1);
+            if ~isempty(iSplit)
+                rows = [rows(1:iSplit-1), {'MID'}, rows(iSplit:end)];
+            end
+            CE.writeStatusTable_(fid, 'Error sources', ...
+                ['>{\raggedright\arraybackslash}p{0.29\textwidth} c c c ' ...
+                 '>{\raggedright\arraybackslash}p{0.27\textwidth}'], ...
+                {'Error source','Truth','Model','Noise','Mode'}, ...
+                {'','in $z$','in $h$','in $R$',''}, rows);
+            fprintf(fid, ['{\\footnotesize Not implemented in v1 and therefore absent from ' ...
+                'the table rather than reported as off: carrier ionosphere-free integer ' ...
+                'fixing (the IF ambiguity is not an integer), and ANTEX/SP3/CLK/IONEX ' ...
+                'product ingestion (all corrections here are synthetic).}\n\n']);
+        end
+
+        function s = onlyIf_(tf, txt)
+            if tf; s = txt; else; s = ''; end
+        end
+
+        % ---------------------------------------------------------------- 3 --
+        function writeClockStatusTable_(fid, cfg, esc) %#ok<INUSD>
+            % writeClockStatusTable_  Which oscillator, whether its truth wanders, and
+            %   which estimator architecture consumes it. A deterministic ClockModel
+            %   returns zero bias whatever the class is, so the Stochastic column is the
+            %   one that says whether the named oscillator does anything at all.
+            CE = revgnss.ClockExactReportBuilder;
+            M  = @CE.markCell_;
+            D  = @CE.modeCell_;
+            twrType = CE.getCfgStr_(cfg, {'clock','tower','clockType'}, '');
+            if isempty(twrType); twrType = 'per tower definition'; end
+            rows = { ...
+                {'Spacecraft receiver clock', CE.esc_(CE.getCfgStr_(cfg,{'asset','clockType'},'')), ...
+                     M(~CE.getLogical_(cfg,{'clock','receiver','deterministic'},false)), ...
+                     D(CE.getCfgStr_(cfg,{'clock','mode'},''))}; ...
+                {'Ground transmitter clocks', CE.esc_(twrType), ...
+                     M(~CE.getLogical_(cfg,{'clock','tower','deterministic'},true)), ...
+                     D(CE.getCfgStr_(cfg,{'clocks','tower','product','mode'},''))}; ...
+                {'Clock datum', M([]), M([]), D(CE.getCfgStr_(cfg,{'clock','gauge','mode'},''))}; ...
+                {'Noise master span', M([]), M(CE.getLogical_(cfg,{'clock','noiseMasterSpan','enable'},false)), D('')}; ...
+                {'h-coefficient table', CE.esc_('Winkel (2003) Tab 2.1'), M([]), D('single table')}; ...
+            };
+            CE.writeStatusTable_(fid, '', ...
+                ['>{\raggedright\arraybackslash}p{0.24\textwidth}' ...
+                 '>{\raggedright\arraybackslash}p{0.17\textwidth} c ' ...
+                 '>{\raggedright\arraybackslash}p{0.30\textwidth}'], ...
+                {'Segment','Oscillator','Stochastic','Mode'}, ...
+                {'','class','truth wander',''}, rows);
+        end
+
+        % ---------------------------------------------------------------- 4 --
+        function writeStateBlockTable_(fid, cfg, summary, esc) %#ok<INUSD>
+            % writeStateBlockTable_  The state vector, read from the RUNTIME state map.
+            %   It was previously re-derived here by hand and got it wrong: the
+            %   ambiguity count dropped the signal dimension (nTowers*nReceivers rather
+            %   than nTowers*nReceivers*nSignals) and there was no gyro-bias row at all,
+            %   so a 27-state filter was reported as 19 and the total did not move when
+            %   the IMU was disabled. Reading the map cannot drift, and the guard below
+            %   makes any future gap loud instead of silent.
+            CE = revgnss.ClockExactReportBuilder;
+            M  = @CE.markCell_;
+            D  = @CE.modeCell_;
+            [blocks, nx, ok] = CE.stateBlocks_(cfg, summary);
+            rows = {};
+            accounted = 0;
+            for k = 1:size(blocks,1)
+                n = blocks{k,2};
+                accounted = accounted + n;
+                if n == 0 && ~blocks{k,3}; continue; end   % structurally impossible here
+                rows{end+1} = {CE.esc_(blocks{k,1}), M(n > 0), CE.dimCell_(n), D(blocks{k,4})}; %#ok<AGROW>
+            end
+            rows{end+1} = 'MID';
+            if ok
+                rows{end+1} = {'\textbf{total}', '', sprintf('\\textbf{%d}', nx), ...
+                    D('runtime EKF state dimension')};
+            else
+                % Never under-report in silence. If the blocks do not sum to nx the
+                % table says so, which is exactly the failure the old table hid.
+                rows{end+1} = {'\textbf{total}', '', sprintf('\\textbf{%d}', nx), ...
+                    D(sprintf('runtime dimension; %d states not attributed to a block', nx - accounted))};
+            end
+            % Attitude AIDING belongs with the states it feeds, not in a table of its
+            % own: the star tracker and the gyro are why the attitude and gyro-bias
+            % blocks above are observable at all, and neither was reported anywhere in
+            % the old layout even though disabling the IMU removes three states.
+            rows{end+1} = 'MID';
+            rows{end+1} = {CE.esc_('Star tracker'), ...
+                M(CE.getLogical_(cfg,{'estimator','starTracker','enable'},false)), ...
+                M([]), D('aiding measurement, not a state')};
+            rows{end+1} = {CE.esc_('Inertial gyro (IMU)'), ...
+                M(CE.getLogical_(cfg,{'estimator','imu','enable'},false)), ...
+                M([]), D('drives the gyro-bias block above')};
+            attCarr = CE.getCfgStr_(cfg, {'estimator','attitudeCarrierMode'}, '');
+            rows{end+1} = {CE.esc_('Differential carrier attitude'), ...
+                M(~isempty(attCarr) && ~any(strcmpi(attCarr,{'off','none'}))), ...
+                M([]), D(attCarr)};
+
+            CE.writeStatusTable_(fid, '', ...
+                ['>{\raggedright\arraybackslash}p{0.29\textwidth} c c ' ...
+                 '>{\raggedright\arraybackslash}p{0.33\textwidth}'], ...
+                {'State block','On','States','Mode'}, {'','in $x$','dim',''}, rows);
+        end
+
+        function s = dimCell_(n)
+            if n > 0; s = sprintf('%d', n); else; s = '\textcolor{gray!55}{--}'; end
+        end
+
+        function [blocks, nx, ok] = stateBlocks_(cfg, summary)
+            % stateBlocks_  {name, dim, alwaysShow, mode} from the runtime state map.
+            %   alwaysShow marks a block that has a user-facing toggle, so the reader is
+            %   told it is off rather than left to wonder whether it exists.
+            CE = revgnss.ClockExactReportBuilder;
+            gs = @(p) CE.getCfgStr_(cfg, p, '');
+            sm = struct(); nx = NaN;
+            try; sm = summary.estimatorStateMap; catch; end
+            try; nx = summary.stateVectorDimension; catch; end
+            c = @(f) CE.stateCount_(sm, f);
+            nAmb = c('ambiguityIdx3d') + c('ambiguityIdx');
+            blocks = { ...
+                'position',              c('r_idx'),        true,  ''; ...
+                'velocity',              c('v_idx'),        true,  ''; ...
+                'attitude error',        c('euler_idx'),    true,  gs({'estimator','attitude','parameterization'}); ...
+                'angular rate',          c('omega_idx'),    true,  ''; ...
+                'receiver clock bias',   c('b_rx_idx'),     true,  ''; ...
+                'receiver clock drift',  c('bdot_rx_idx'),  true,  ''; ...
+                'tower clocks',          c('towerClockIdx'), true, gs({'clock','gauge','mode'}); ...
+                'float ambiguities',     nAmb,              true,  gs({'estimation','ambiguityMode'}); ...
+                'zenith wet delay',      c('zwdIdx'),       true,  gs({'estimation','troposphereMode'}); ...
+                'slant ionosphere',      c('ionoIdx'),      true,  gs({'estimation','ionosphereMode'}); ...
+                'TX code bias',          c('txCodeBiasIdx'), true, gs({'hardware','txCodeBias','mode'}); ...
+                'multipath bias',        c('mpBiasIdx'),    true,  ''; ...
+                'gyro bias',             c('gyroBiasIdx'),  true,  'from the IMU master switch'; ...
+                'SRP scale',             c('srpScaleIdx'),  true,  ''; ...
+                'empirical RTN accel.',  c('empAccIdx'),    true,  ''; ...
+                'two-way code calibration', c('twoWayCodeCalibrationBiasIdx'), false, ''; ...
+                'ISL ambiguities',       c('islAmbiguityIdx'), false, ''; ...
+                'secondary orbit',       c('secondaryOrbitIdx'),    false, ''; ...
+                'secondary attitude',    c('secondaryAttitudeIdx'), false, ''; ...
+                'secondary clock',       c('secondaryClockIdx'),    false, ''; ...
+                'secondary gyro bias',   c('secondaryGyroBiasIdx'), false, ''; ...
+            };
+            accounted = sum(cell2mat(blocks(:,2)));
+            ok = isfinite(nx) && accounted == nx;
+            if ~isfinite(nx); nx = accounted; ok = true; end
+        end
+
+        function n = stateCount_(sm, f)
+            n = 0;
+            if isstruct(sm) && isfield(sm, f)
+                v = sm.(f);
+                if isnumeric(v); n = numel(v(v > 0)); end
+            end
+        end
+
+        % ---------------------------------------------------------------- 5 --
+        function writeProcessingTable_(fid, cfg, esc) %#ok<INUSD>
+            % writeProcessingTable_  Ambiguity resolution and carrier-arc handling.
+            %   CONDITIONAL: emitted only when something in it is armed, so the default
+            %   single-asset run shows four tables and a run that arms an engine still
+            %   reports it. Nothing here is lost when the table is skipped -- every row
+            %   is off in that case, which is what skipping it means.
+            CE = revgnss.ClockExactReportBuilder;
+            M  = @CE.markCell_;
+            D  = @CE.modeCell_;
+            g  = @(p) CE.getLogical_(cfg, p, false);
+            gs = @(p) CE.getCfgStr_(cfg, p, '');
+
+            baseAr = g({'estimator','diffAtt','ambiguityResolution','enable'});
+            intFix = g({'estimator','integerAmbiguity','enable'});
+            lam    = g({'estimator','lambda','enable'});
+            mw     = g({'diagnostics','melbourneWubbena','enable'});
+            slip   = g({'carrierSlip','enable'});
+            arcSep = g({'estimator','arcSeparatedAmbiguities','enable'});
+            lock   = g({'multiAsset','beamPointingLock','enable'});
+            if ~(baseAr || intFix || lam || mw || slip || arcSep || lock); return; end
+
+            lamPath = gs({'estimator','lambda','toolboxPath'});
+            if lam && isempty(lamPath)
+                lamMode = 'toolboxPath unset: the engine cannot run';
+            else
+                lamMode = '';
+            end
+            rows = { ...
+                {'Baseline attitude AR',       M(baseAr), D(CE.onlyIf_(baseAr, gs({'estimator','diffAtt','ambiguityResolution','method'})))}; ...
+                {'Raw carrier integer fixing', M(intFix), D(CE.onlyIf_(intFix, gs({'estimator','integerAmbiguity','mode'})))}; ...
+                {'LAMBDA / MLAMBDA engine',    M(lam),    D(lamMode)}; ...
+                {'Melbourne-Wubbena wide lane',M(mw),     D('')}; ...
+                {'Cycle-slip detection',       M(slip),   D('')}; ...
+                {'Arc-separated ambiguities',  M(arcSep), D('')}; ...
+                {'Ground beam-pointing lock',  M(lock),   D('')}; ...
+            };
+            CE.writeStatusTable_(fid, 'Ambiguity resolution and carrier-arc handling', ...
+                ['>{\raggedright\arraybackslash}p{0.32\textwidth} c ' ...
+                 '>{\raggedright\arraybackslash}p{0.44\textwidth}'], ...
+                {'Component','On','Mode'}, {'','configured',''}, rows);
+        end
+
+        function writeConfigurationTables_(fid, cfg, esc)
+            % writeConfigurationTables_  The two tables that live at the end of the
+            %   scenario section. Clocks and state blocks are written earlier, in the
+            %   subsections that already own them, so no component is reported twice.
+            CE = revgnss.ClockExactReportBuilder;
+            CE.writeObservableTable_(fid, cfg, esc);
+            CE.writeErrorSourceTable_(fid, cfg, esc);
+            CE.writeProcessingTable_(fid, cfg, esc);
         end
 
         % ================================================================

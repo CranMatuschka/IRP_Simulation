@@ -5,8 +5,10 @@ function scenarioSummary(fid, cfg, summary, diag, nTwr, nRx, dur, dt, esc, plotP
 %   + figure dir and the (now-public) ClockExactReportBuilder formatting toolkit. The
 %   emitted LaTeX is byte-identical to the original method (verified by the normalized
 %   .tex diff harness, tests/report/reportTexFingerprint.m).
-%   NOTE: writeComponentRows_ is intentionally NOT extracted (left as a public
-%   method on ClockExactReportBuilder) and is invoked below via CE.writeComponentRows_.
+%   NOTE: the configuration status tables are intentionally NOT extracted (left as
+%   public methods on ClockExactReportBuilder) and are invoked below via
+%   CE.writeConfigurationTables_, CE.writeClockStatusTable_ and
+%   CE.writeStateBlockTable_. Each component belongs to exactly one of them.
     CE = revgnss.ClockExactReportBuilder;
 
     scenarioName = CE.getCfgStr_(cfg, {'asset','name'}, 'GEO-1');
@@ -167,27 +169,21 @@ function scenarioSummary(fid, cfg, summary, diag, nTwr, nRx, dur, dt, esc, plotP
     % Clocks. One table instead of the old four paragraphs of prose: who the two
     % clocks are, which sign each carries into the pseudorange, which of them the EKF
     % actually estimates, and what pins the datum.
-    writeClockTable_(fid, cfg, esc, L, CE, nTwr);
+    writeClockTable_(fid, cfg, esc, CE);
 
     % State Vector, compact grouped table (ranges from active EKF config)
     fprintf(fid, '\\subsection{State Vector}\n');
     if jointMode
         fprintf(fid, ['State and asset counts below come from the runtime joint ' ...
             'state map. No single-spacecraft 14-state assumption is applied.\n\n']);
-    else
-        fprintf(fid, ['The filter is an error-state EKF. The 14 base states are grouped below; optional ' ...
-            'blocks are appended when active. Index ranges are computed from the active filter ' ...
-            'configuration, not hard-coded.\n\n']);
-    end
-    fprintf(fid, '\\begin{center}\\small\n');
-    fprintf(fid, ['\\begin{longtable}{@{}>{\\raggedright\\arraybackslash}p{0.21\\textwidth}' ...
-        '>{\\raggedright\\arraybackslash}p{0.12\\textwidth}' ...
-        '>{\\raggedright\\arraybackslash}p{0.05\\textwidth}' ...
-        '>{\\raggedright\\arraybackslash}p{0.10\\textwidth}' ...
-        '>{\\raggedright\\arraybackslash}p{0.36\\textwidth}@{}}\n']);
-    fprintf(fid, '\\toprule\n');
-    fprintf(fid, '\\textbf{State group} & \\textbf{Indices} & \\textbf{Dim} & \\textbf{Unit} & \\textbf{Description}\\\\\n\\midrule\n');
-    if jointMode
+        fprintf(fid, '\\begin{center}\\small\n');
+        fprintf(fid, ['\\begin{longtable}{@{}>{\\raggedright\\arraybackslash}p{0.21\\textwidth}' ...
+            '>{\\raggedright\\arraybackslash}p{0.12\\textwidth}' ...
+            '>{\\raggedright\\arraybackslash}p{0.05\\textwidth}' ...
+            '>{\\raggedright\\arraybackslash}p{0.10\\textwidth}' ...
+            '>{\\raggedright\\arraybackslash}p{0.36\\textwidth}@{}}\n']);
+        fprintf(fid, '\\toprule\n');
+        fprintf(fid, '\\textbf{State group} & \\textbf{Indices} & \\textbf{Dim} & \\textbf{Unit} & \\textbf{Description}\\\\\n\\midrule\n');
         if ~isfield(summary,'estimatorStateMap') || ...
                 ~isfield(summary.estimatorStateMap,'asset')
             error('scenarioSummary:jointStateMapMissing', ...
@@ -225,38 +221,20 @@ function scenarioSummary(fid, cfg, summary, diag, nTwr, nRx, dur, dt, esc, plotP
         fprintf(fid,['\\textbf{total} & x[1:%d] & %d & n/a & ' ...
             'runtime joint EKF state dimension\\\\\n'], ...
             totalStates,totalStates);
+        fprintf(fid, '\\bottomrule\n\\end{longtable}\n\\end{center}\n');
     else
-        fprintf(fid, 'position & x[1:3] & 3 & m & spacecraft position error (RAC/ECEF as configured)\\\\\n');
-        fprintf(fid, 'velocity & x[4:6] & 3 & m/s & spacecraft velocity error\\\\\n');
-        fprintf(fid, 'attitude & x[7:9] & 3 & rad & small-angle body attitude error\\\\\n');
-        fprintf(fid, 'angular rate & x[10:12] & 3 & rad/s & body angular-rate error\\\\\n');
-        fprintf(fid, 'receiver clock bias & x[13] & 1 & m & receiver clock bias (positive sign)\\\\\n');
-        fprintf(fid, 'receiver clock drift & x[14] & 1 & m/s & receiver clock drift\\\\\n');
-        idxEnd = 14;
-        doTwrClk = isfield(cfg,'estimator') && isfield(cfg.estimator,'estimateTowerClocks') ...
-            && cfg.estimator.estimateTowerClocks;
-        doAmb = isfield(cfg,'measurements') && isfield(cfg.measurements,'carrierMode') ...
-            && strcmp(cfg.measurements.carrierMode,'ekfFloat');
-        ambMode = CE.getCfgStr_(cfg, {'estimation','ambiguityMode'}, 'none');
-        doZwd = isfield(cfg,'estimation') && isfield(cfg.estimation,'troposphereMode') ...
-            && strcmp(cfg.estimation.troposphereMode,'perTowerZwd');
-        if doTwrClk
-            nB = 2*nTwr; a = idxEnd+1; b = idxEnd+nB; idxEnd = b;
-            fprintf(fid, 'tower clocks & x[%d:%d] & %d & m, m/s & per-tower clock bias and drift (negative sign in measurement)\\\\\n', a, b, nB);
-        end
-        if doAmb
-            if strcmp(ambMode,'floatPerTowerReceiverSignal'); nB = nTwr*nRx; else; nB = nTwr; end
-            a = idxEnd+1; b = idxEnd+nB; idxEnd = b;
-            fprintf(fid, 'float ambiguities & x[%d:%d] & %d & m & one float carrier ambiguity per active tower/receiver/signal arc\\\\\n', a, b, nB);
-        end
-        if doZwd
-            nB = nTwr; a = idxEnd+1; b = idxEnd+nB; idxEnd = b;
-            fprintf(fid, 'zenith wet delay & x[%d:%d] & %d & m & per-tower zenith wet delay residual\\\\\n', a, b, nB);
-        end
-        fprintf(fid, '\\midrule\n');
-        fprintf(fid, '\\textbf{total} & x[1:%d] & %d & n/a & active EKF state dimension\\\\\n', idxEnd, idxEnd);
+        % SINGLE ASSET. The block list and every dimension are READ from the runtime
+        % state map, not re-derived here. The old hand-derivation was measurably wrong:
+        % it counted nTowers*nReceivers float ambiguities and dropped the signal
+        % dimension, and it had no gyro-bias row at all, so a 27-state filter was
+        % reported as 19 and the total did not move when the IMU was switched off.
+        fprintf(fid, ['The filter is an error-state EKF. Every block below, and the ' ...
+            'total, is read from the runtime state map, so the table is the state ' ...
+            'vector the filter actually ran. Blocks with a user-facing switch are ' ...
+            'listed even when empty, so an unused one reads as off rather than ' ...
+            'being silently absent.\n\n']);
+        CE.writeStateBlockTable_(fid, cfg, summary, esc);
     end
-    fprintf(fid, '\\bottomrule\n\\end{longtable}\n\\end{center}\n');
 
     % 1.45 Carrier Signals
     % The report named its signals "L1"/"L2" and never printed a frequency, so a reader
@@ -289,7 +267,9 @@ function scenarioSummary(fid, cfg, summary, diag, nTwr, nRx, dur, dt, esc, plotP
     for si_ = 1:numel(sigTbl_)
         fStr_ = sprintf(fFmt_, sigTbl_(si_).frequency_Hz*fScale_, fUnit_);
         lStr_ = sprintf(lFmt_, sigTbl_(si_).wavelength_m*lScale_, lUnit_);
-        if sigTbl_(si_).enabled; enStr_ = 'yes'; else; enStr_ = 'no'; end
+        % Same mark as every other status cell in the report; 'yes'/'no' here was
+        % a sixth vocabulary for the same binary fact.
+        enStr_ = CE.markCell_(sigTbl_(si_).enabled);
         fprintf(fid, '%s & %s & %s & %s\\\\\n', ...
             esc(sigTbl_(si_).name), fStr_, lStr_, enStr_);
     end
@@ -421,10 +401,10 @@ function scenarioSummary(fid, cfg, summary, diag, nTwr, nRx, dur, dt, esc, plotP
     fprintf(fid, '\\begin{center}\\small\n');
     fprintf(fid, '\\begin{tabular}{p{0.52\\textwidth}p{0.38\\textwidth}}\n\\toprule\n');
     fprintf(fid, '\\textbf{Measurement model} & \\textbf{Value}\\\\\n\\midrule\n');
+    % This table carries the NUMBERS only. Whether each observable is on, and whether
+    % it reaches the filter, is the Observables table below -- stating it twice is how
+    % the two halves came to read different gates for the same thing.
     fprintf(fid, '\\multicolumn{2}{@{}l}{\\itshape Ground observables}\\\\\n');
-    fprintf(fid, 'Code pseudorange & %s\\\\\n', E(codeEn));
-    fprintf(fid, 'Carrier phase & %s\\\\\n', E(carrEn));
-    fprintf(fid, 'Doppler & %s\\\\\n', E(dopEn));
     fprintf(fid, 'Code noise model & %s\\\\\n', esc(codeModel));
     switch lower(codeModel)
         case 'cn0'
@@ -441,14 +421,11 @@ function scenarioSummary(fid, cfg, summary, diag, nTwr, nRx, dur, dt, esc, plotP
     fprintf(fid, 'Carrier phase $\\sigma$ & %s\\\\\n', fmtVal_(carrSig,'m'));
     fprintf(fid, 'Doppler $\\sigma$ & %s\\\\\n', fmtVal_(dopSig,'m/s'));
     fprintf(fid, 'Measurement covariance floor & %s\\\\\n', fmtVal_(covFloor,'m'));
-    fprintf(fid, 'Shared-product covariance & %s\\\\\n', E(prodCov));
-    fprintf(fid, 'Shared transmitter-clock covariance & %s\\\\\n', E(shrdCov));
 
     % --- ground two-way time transfer -------------------------------------------
     twttEn = CE.getLogical_(cfg, {'measurements','twoWayTimeTransfer','enable'}, false);
     if twttEn
         fprintf(fid, '\\midrule\n\\multicolumn{2}{@{}l}{\\itshape Ground two-way time transfer}\\\\\n');
-        fprintf(fid, 'Two-way time transfer & %s\\\\\n', E(twttEn));
         fprintf(fid, 'Two-way time transfer $\\sigma$ & %s\\\\\n', ...
             fmtVal_(CE.getCfgNum_(cfg,{'measurements','twoWayTimeTransfer','sigma_m'},NaN),'m'));
     end
@@ -499,7 +476,6 @@ function scenarioSummary(fid, cfg, summary, diag, nTwr, nRx, dur, dt, esc, plotP
     fprintf(fid, '\\midrule\n\\multicolumn{2}{@{}l}{\\itshape Beamforming}\\\\\n');
     fprintf(fid, 'Coherence criterion & $\\lambda/%g$ (%.1f$^\\circ$ RMS phase, %.2f dB loss)\\\\\n', ...
         critN, 360/critN, -4.342944819*(2*pi/critN)^2);
-    fprintf(fid, 'Ground beam-pointing lock & %s\\\\\n', E(lockEn));
     if lockEn
         fprintf(fid, 'Pointing-lock towers & %s\\\\\n', ...
             fmtVal_(CE.getCfgNum_(cfg,{'multiAsset','beamPointingLock','nTowers'},NaN),''));
@@ -529,31 +505,31 @@ function scenarioSummary(fid, cfg, summary, diag, nTwr, nRx, dur, dt, esc, plotP
     fprintf(fid, 'Tower clock product $\\sigma$ (bias) & %s\\\\\n', fmtVal_(twrBias,'m'));
     fprintf(fid, 'Tower clock product $\\sigma$ (drift) & %s\\\\\n', fmtVal_(twrDrift,'m/s'));
 
-    % Multipath: coloredGM supersedes the legacy sinusoidal+white pair.
-    fprintf(fid, '\\midrule\n');
-    if ~mpEn
-        fprintf(fid, 'Multipath & disabled\\\\\n');
-    elseif mpGM
-        fprintf(fid, 'Multipath model & coloured Gauss-Markov\\\\\n');
-        fprintf(fid, 'Multipath $\\sigma$ (steady state, L1 zenith) & %s\\\\\n', ...
-            fmtVal_(CE.getCfgNum_(cfg,{'errors','multipath','coloredGM','sigmaCodeL1_ss_m'},NaN),'m'));
-        fprintf(fid, 'Multipath correlation time & %s\\\\\n', ...
-            fmtVal_(CE.getCfgNum_(cfg,{'errors','multipath','coloredGM','tau_s'},NaN),'s'));
-        fprintf(fid, 'Multipath elevation exponent & %s\\\\\n', ...
-            fmtVal_(CE.getCfgNum_(cfg,{'errors','multipath','coloredGM','elevationExponent'},NaN),''));
-    else
-        fprintf(fid, 'Multipath model & legacy sinusoidal + white\\\\\n');
-        fprintf(fid, 'Multipath amplitude & %s\\\\\n', ...
-            fmtVal_(CE.getCfgNum_(cfg,{'errors','multipath','truth','amplitude_m'},NaN),'m'));
-        fprintf(fid, 'Multipath stochastic $\\sigma$ & %s\\\\\n', ...
-            fmtVal_(CE.getCfgNum_(cfg,{'errors','multipath','truth','stochastic_sigma_m'},NaN),'m'));
+    % Multipath parameters. Whether multipath is injected at all is the Error sources
+    % table; only the numbers of an ACTIVE model belong here. coloredGM supersedes the
+    % legacy sinusoidal+white pair.
+    if mpEn
+        fprintf(fid, '\\midrule\n');
+        if mpGM
+            fprintf(fid, 'Multipath model & coloured Gauss-Markov\\\\\n');
+            fprintf(fid, 'Multipath $\\sigma$ (steady state, L1 zenith) & %s\\\\\n', ...
+                fmtVal_(CE.getCfgNum_(cfg,{'errors','multipath','coloredGM','sigmaCodeL1_ss_m'},NaN),'m'));
+            fprintf(fid, 'Multipath correlation time & %s\\\\\n', ...
+                fmtVal_(CE.getCfgNum_(cfg,{'errors','multipath','coloredGM','tau_s'},NaN),'s'));
+            fprintf(fid, 'Multipath elevation exponent & %s\\\\\n', ...
+                fmtVal_(CE.getCfgNum_(cfg,{'errors','multipath','coloredGM','elevationExponent'},NaN),''));
+        else
+            fprintf(fid, 'Multipath model & legacy sinusoidal + white\\\\\n');
+            fprintf(fid, 'Multipath amplitude & %s\\\\\n', ...
+                fmtVal_(CE.getCfgNum_(cfg,{'errors','multipath','truth','amplitude_m'},NaN),'m'));
+            fprintf(fid, 'Multipath stochastic $\\sigma$ & %s\\\\\n', ...
+                fmtVal_(CE.getCfgNum_(cfg,{'errors','multipath','truth','stochastic_sigma_m'},NaN),'m'));
+        end
     end
 
     % Troposphere: report the leaf the active modelType actually consumes.
-    fprintf(fid, '\\midrule\n');
-    if ~tropEn
-        fprintf(fid, 'Troposphere & disabled\\\\\n');
-    else
+    if tropEn
+        fprintf(fid, '\\midrule\n');
         fprintf(fid, 'Troposphere model & %s\\\\\n', esc(tropType));
         if strcmpi(tropType,'localWeatherGM')
             fprintf(fid, 'Troposphere zenith delay & from per-tower weather (Saastamoinen/Davis)\\\\\n');
@@ -572,10 +548,8 @@ function scenarioSummary(fid, cfg, summary, diag, nTwr, nRx, dur, dt, esc, plotP
     end
 
     % Ionosphere: a diurnal tecGaussMarkov truth is not a constant vertical delay.
-    fprintf(fid, '\\midrule\n');
-    if ~ionoEn
-        fprintf(fid, 'Ionosphere & disabled\\\\\n');
-    else
+    if ionoEn
+        fprintf(fid, '\\midrule\n');
         fprintf(fid, 'Ionosphere model & %s\\\\\n', esc(ionoType));
         if CE.getLogical_(cfg,{'errors','ionosphere','truth','diurnal','enable'},false)
             fprintf(fid, 'Ionosphere diurnal VTEC (day / night) & %s / %s\\\\\n', ...
@@ -593,15 +567,11 @@ function scenarioSummary(fid, cfg, summary, diag, nTwr, nRx, dur, dt, esc, plotP
         end
         fprintf(fid, 'Ionosphere model-side correction & %s\\\\\n', ...
             esc(CE.getCfgStr_(cfg,{'errors','ionosphere','model','correction'},'none')));
-        fprintf(fid, 'Higher-order ionosphere & %s\\\\\n', ...
-            E(CE.getLogical_(cfg,{'errors','ionosphere','higherOrder','enable'},false)));
         if CE.getLogical_(cfg,{'errors','ionosphere','scintillation','enable'},false)
             fprintf(fid, 'Scintillation model & %s\\\\\n', ...
                 esc(CE.getCfgStr_(cfg,{'errors','ionosphere','scintillation','model'},'legacy')));
             fprintf(fid, 'Scintillation code $\\sigma$ (L1) & %s\\\\\n', ...
                 fmtVal_(CE.getCfgNum_(cfg,{'errors','ionosphere','scintillation','sigmaCodeL1_m'},NaN),'m'));
-        else
-            fprintf(fid, 'Scintillation & disabled\\\\\n');
         end
     end
 
@@ -669,97 +639,59 @@ function scenarioSummary(fid, cfg, summary, diag, nTwr, nRx, dur, dt, esc, plotP
     end
     fprintf(fid, '\\bottomrule\n\\end{longtable}\n\\normalsize\n\\end{center}\n');
 
-    % Component Status: compact grouped multi-tables (5 categories)
-    CE.writeComponentRows_(fid, cfg, esc);
+    % Configuration status. Observables and error sources; the clocks and the state
+    % blocks are written above, in the subsections that already own them, so no
+    % component is reported twice. A fifth table (ambiguity resolution) appears only
+    % when something in it is armed.
+    CE.writeConfigurationTables_(fid, cfg, esc);
     fprintf(fid, '\\clearpage\n');
 end
 
-function writeClockTable_(fid, cfg, esc, L, CE, nTwr)
-%WRITECLOCKTABLE_  The run's two clocks, their signs, what the EKF solves, and the gauge.
-%   Every value is READ from the resolved cfg, so a scenario that swaps an oscillator or
-%   a gauge cannot leave a stale sentence behind.
+function writeClockTable_(fid, cfg, esc, CE)
+%WRITECLOCKTABLE_  The run's two clocks, the datum, and the sign each carries.
+%   The STATUS rows come from CE.writeClockStatusTable_, so the clock segments are
+%   described in the same vocabulary as every other component and appear exactly
+%   once in the report. What stays here is the part that is not a status: the sign
+%   convention, and what this run's gauge actually pins. "Clock states in the EKF"
+%   is deliberately gone -- the tower-clock block is a state block and is reported
+%   by the State Vector table, which reads the runtime state map.
     fprintf(fid, '\\subsection{Clocks}\n');
     fprintf(fid, ['A one-way pseudorange sees the DIFFERENCE of two clocks, so both are ' ...
         'listed here with the sign each carries into the measurement.\n\n']);
 
-    % --- receiver (spacecraft) oscillator -------------------------------------
-    rxType = CE.getCfgStr_(cfg, {'asset','clockType'}, 'CESIUM1');
-    rxDet  = CE.getLogical_(cfg, {'clock','receiver','deterministic'}, false);
-    if rxDet
-        rxKind = 'deterministic (truth bias identically zero)';
-    else
-        rxKind = 'stochastic (Brown-Hwang two-state, power-law $h$ coefficients)';
-    end
+    CE.writeClockStatusTable_(fid, cfg, esc);
 
-    % --- transmitter (ground tower) oscillator --------------------------------
-    twrType = CE.getCfgStr_(cfg, {'clock','tower','clockType'}, '');
-    twrDet  = CE.getLogical_(cfg, {'clock','tower','deterministic'}, true);
-    if isempty(twrType)
-        % No network-wide override: each tower keeps whatever its own definition set.
-        twrTypeStr = 'per tower, from the tower definitions';
-    else
-        twrTypeStr = sprintf('\\texttt{%s}', esc(twrType));
-    end
-    if twrDet
-        % A deterministic ClockModel returns zero bias regardless of clockType, so the
-        % oscillator class is inert; say so rather than quoting a class that does nothing.
-        twrKind = 'deterministic (truth bias identically zero; the oscillator class is inert)';
-    else
-        twrKind = 'stochastic (Brown-Hwang two-state, power-law $h$ coefficients)';
-    end
+    fprintf(fid, ['{\\footnotesize Signs in the pseudorange: $b_{rx}$ enters ' ...
+        '\\textbf{positive} (adds range), $b_{twr}$ enters \\textbf{negative} ' ...
+        '(subtracts). Troposphere $T$ is positive for code and carrier alike. ' ...
+        'Ionosphere $I_f$ is positive for code (group delay) and negative for carrier ' ...
+        '(phase advance). The carrier ambiguity $B_\\phi$ is a float value in metres.}\n\n']);
+    fprintf(fid, '{\\footnotesize %s}\n\n', gaugeSentence_(cfg, CE, esc));
+end
 
-    % --- which clocks the EKF carries as states -------------------------------
-    estTwr = false;
-    try; estTwr = logical(cfg.estimator.estimateTowerClocks); catch; end
-    if estTwr
-        ekfStr = sprintf(['RX + TX: receiver clock bias and drift, plus %d tower clock ' ...
-            'bias/drift pairs'], nTwr);
-    else
-        ekfStr = ['RX only: receiver clock bias and drift. Tower clocks are not states; ' ...
-            'they enter through external corrections'];
-    end
-
-    clockMd = CE.getCfgStr_(cfg, {'clock','mode'}, 'spacecraftReceiverClockOnly');
+function s = gaugeSentence_(cfg, CE, esc)
+%GAUGESENTENCE_  Why a gauge is needed at all, and what this run's gauge pins.
     gaugeMd = CE.getCfgStr_(cfg, {'clock','gauge','mode'}, 'externalTowerCorrections');
     refTwr  = CE.getCfgNum_(cfg, {'clock','gauge','referenceTowerIndex'}, 1);
     sigBias = CE.getCfgNum_(cfg, {'clock','gauge','sigmaBias_m'},    1e-6);
     sigDrft = CE.getCfgNum_(cfg, {'clock','gauge','sigmaDrift_mps'}, 1e-9);
+    lead = ['Why a gauge is needed at all: a one-way pseudorange only ever measures ' ...
+        '$b_{rx}-b_{twr}$, so the two biases cannot be separated without an external ' ...
+        'datum. This run''s datum: '];
     switch gaugeMd
         case 'fixReferenceTower'
-            gaugeStr = sprintf(['\\texttt{fixReferenceTower} (tower %d). That tower''s ' ...
-                'clock bias and drift are pinned to zero by pseudo-measurement rows ' ...
-                '($\\sigma_{bias}=%g$\\,m, $\\sigma_{drift}=%g$\\,m/s), so every clock ' ...
-                'estimate is relative to its timescale'], refTwr, sigBias, sigDrft);
+            s = sprintf(['%stower %d''s clock bias and drift are pinned to zero by ' ...
+                'pseudo-measurement rows ($\\sigma_{bias}=%g$\\,m, ' ...
+                '$\\sigma_{drift}=%g$\\,m/s), so every clock estimate is relative to ' ...
+                'its timescale.'], lead, refTwr, sigBias, sigDrft);
         case 'meanGroundClockGauge'
-            gaugeStr = sprintf(['\\texttt{meanGroundClockGauge}. Zero-mean pseudo-measurement ' ...
-                'rows over all tower clocks ($\\sigma_{bias}=%g$\\,m, ' ...
-                '$\\sigma_{drift}=%g$\\,m/s), so the receiver clock is relative to the ' ...
-                'mean ground timescale'], sigBias, sigDrft);
+            s = sprintf(['%szero-mean pseudo-measurement rows over all tower clocks ' ...
+                '($\\sigma_{bias}=%g$\\,m, $\\sigma_{drift}=%g$\\,m/s), so the receiver ' ...
+                'clock is relative to the mean ground timescale.'], lead, sigBias, sigDrft);
         otherwise
-            gaugeStr = sprintf(['\\texttt{%s}. The datum comes from outside the filter, ' ...
-                'as broadcast tower-clock corrections'], esc(gaugeMd));
+            s = sprintf(['%sit comes from outside the filter, as broadcast tower-clock ' ...
+                'corrections (\\texttt{%s}).'], lead, esc(gaugeMd));
     end
-
-    fprintf(fid, '\\begin{center}\\small\n');
-    fprintf(fid, ['\\begin{tabular}{>{\\raggedright\\arraybackslash}p{0.24\\textwidth}' ...
-        '>{\\raggedright\\arraybackslash}p{0.66\\textwidth}}\n\\toprule\n']);
-    fprintf(fid, '\\textbf{Item} & \\textbf{This run}\\\\\n\\midrule\n');
-    fprintf(fid, 'Receiver clock (spacecraft) & \\texttt{%s}, %s\\\\\n', ...
-        esc(rxType), rxKind);
-    fprintf(fid, 'Transmitter clock (ground) & %s, %s\\\\\n', ...
-        twrTypeStr, twrKind);
-    fprintf(fid, ['Signs in the pseudorange & $b_{rx}$ enters \\textbf{positive} (adds ' ...
-        'range), $b_{twr}$ enters \\textbf{negative} (subtracts). Troposphere $T$ is ' ...
-        'positive for code and carrier alike. Ionosphere $I_f$ is positive for code ' ...
-        '(group delay) and negative for carrier (phase advance). The carrier ambiguity ' ...
-        '$B_\\phi$ is a float value in metres.\\\\\n']);
-    fprintf(fid, 'Clock states in the EKF & %s\\\\\n', ekfStr);
-    fprintf(fid, 'Clock architecture & %s\\\\\n', esc(L(clockMd)));
-    fprintf(fid, 'Clock gauge & %s\\\\\n', gaugeStr);
-    fprintf(fid, '\\bottomrule\n\\end{tabular}\n\\end{center}\n\n');
-    fprintf(fid, ['{\\footnotesize Why a gauge is needed at all: a one-way pseudorange ' ...
-        'only ever measures $b_{rx}-b_{twr}$, so the two biases cannot be separated ' ...
-        'without an external datum. The gauge row above is what supplies it.}\n\n']);
 end
 
 function s = fmtVal_(x, unit)
