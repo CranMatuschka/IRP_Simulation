@@ -1,0 +1,45 @@
+{
+  "_id": "att rung: make the wide-lane consistency screen BINDING on the raw attitude fix. att005 already runs the wide lane -- attitudeArMode resolves to rawDualFrequencyPair and wideLaneScreeningEnabled is true -- but at maxWideLaneFloatDistance_cycles 0.5 the screen is set to exactly the half-cycle rounding margin, which is the weakest test that can be written: it fires only when the wide-lane float sits further than half a cycle from N1_best - N2_best, i.e. only when the two single-frequency searches have already landed on integers that cannot both be right. This rung tightens it to 0.10 so that the wide lane has to AGREE rather than merely not contradict.",
+  "_extends": "att005_attitudeArZeroBias.json",
+  "_delta": "estimator.diffAtt.ambiguityResolution.maxWideLaneFloatDistance_cycles: 0.5 -> 0.10. Nothing else.",
+
+  "_WHATATT005ACTUALLYRETURNED": "MEASURED, read from IRP Ladder Results Final/att/*/summary rather than from any note: attitudeArMode = rawDualFrequencyPair, attitudeArSignalMode = L1L2, wideLaneScreeningEnabled = true, attitudeArEnabledByFrequency = [true true], baselineIntegerFixAttempted = true, baselineIntegerFixAccepted = true, nBaselineIntegerFixed = 5, nBaselineIntegerRejected = 10, nBaselineArFixedDualFrequency = 5, nBaselineArRejectedPhaseBias = 0, baselineArPhaseBiasStatus = syntheticKnownZero, classification = mixedFixedFloat, finalAttitudeError_deg = 1.13851110337291. So the L1+L2 pair search and the wide-lane gate BOTH ran, on 15 baselines (5 towers x 3), and five of them fixed dual-frequency. Contrast att004, which is rawL1Only with nBaselineArRejectedPhaseBias = 15 and err 1.46003762065155: att004 returns at the phase-bias status gate (BaselineCarrierAmbiguityResolver.m:118-119) BEFORE attitudeArMode is assigned, which is why it looks L1-only and why any claim that the wide lane never ran on the att axis is wrong from att005 onward.",
+
+  "_WHYTHESCREENMAYNEVERHAVEFIRED": "The accept condition at BaselineCarrierAmbiguityResolver.m:236 is rms1Ok && rms2Ok && fd1Ok && fd2Ok && ratioCombOk && wlOk, and the other five gates are already tight on the resolved config (rmsThreshold_cycles 0.10, ratioThreshold 3.0, maxFloatDistance_cycles 0.25, all from masterConfig.m:488-505). wlOk at 0.5 cycles is therefore the loosest term in a conjunction of six, and a term that never binds contributes nothing. Whether it bound on att005 is CURRENTLY UNKNOWABLE from the .mat: wideLaneStatus, wideLaneN_float and dualFreqStatus live only in the diffAtt store and reach neither summary nor a data.SimulationDataStore accessor. Only the boolean wideLaneScreeningEnabled is exported, and it reports that the feature is on, not that it did anything. This rung ships with the store-to-summary export that closes that gap.",
+
+  "_WHATTOREADFIRST": "nWideLaneScreenPassed / nWideLaneScreenFailed and wideLaneScreenMaxDiscrepancy_cycles, all new. Read them BEFORE the attitude error. Three outcomes and all three are results: (1) maxDiscrepancy < 0.10 -- the screen cannot have fired at either threshold, every output should be bit-identical to att005, and the honest statement is that the wide lane is NOT load-bearing on the raw attitude fix. (2) some baselines move from passed to failed and nBaselineArFixedDualFrequency drops below 5 -- the difference is exactly the count of att005 fixes that were surviving on a wide-lane margin between 0.10 and 0.5, and every att005/att007/att009 number inherits that. (3) failures appear but the fix count is unchanged -- the wide lane is rejecting baselines that another gate was rejecting anyway, so it is real but redundant.",
+
+  "_HOWTOTELLARESULTFROMANINERTRUNG": "Outcome (1) above and an INERT rung produce the same bit-identical .mat, and this ladder has been caught by that before (att001 = att003 = att004). The discriminator is wideLaneScreenMaxDiscrepancy_cycles: it is written where wlDisc is already computed, so a FINITE value proves the branch executed and the screen was evaluated on real numbers. NaN, or nWideLaneScreenNotAttempted = 15, means the branch never ran and the rung measures nothing -- check nWideLaneScreenL2ArcInsufficient first, since the L2 arc gate needs accumN_L2 >= minArcEpochs = 60.",
+
+  "_MEASURED_300s_SMOKE_ANDTHISISTHEANSWER": "RUN 2026-08-20, att005 and att018 at 300 s, same seed, only maxWideLaneFloatDistance_cycles differing. Wide-lane screen: nWideLaneScreenPassed 15, nWideLaneScreenFailed 0, nWideLaneScreenNotAttempted 0, nWideLaneScreenL2ArcInsufficient 0 -- ON BOTH RUNGS. wideLaneScreenMaxDiscrepancy_cycles 0.04099743728 and median 0.02302701449, IDENTICAL on both. Fix counts identical: nBaselineArFixedDualFrequency 5, nBaselineIntegerFixed 5, nBaselineIntegerRejected 10, classification mixedFixedFloat. Downstream identical: finalAttitudeError_deg 1.126147671, finalAttitudeSigma_deg 0.2146527972, finalPositionRMS_m 3.888126309. THE VERDICT IS OUTCOME (1): the wide-lane screen NEVER FIRES on the raw attitude fix, at either threshold. The worst baseline sits 12.2x inside the 0.5-cycle gate and still 2.44x inside the tightened 0.10-cycle gate, so all 10 rejections come from the rms / ratio / float-distance gates and none from the wide lane. The wide lane is present, evaluated and NOT load-bearing here.",
+
+  "_WHYA300sSMOKEISTHEWHOLEANSWERANDNOTAPILOT": "The integer decision is taken ONCE and early. DiffAttitudeBuilder.finalize runs in the single epoch where the calibration window closes (calibWin_s = 60 s, masterConfig.m:399), calls BaselineCarrierAmbiguityResolver.resolve at DiffAttitudeBuilder.m:268, and sets store.calibrated at :251. calibrated is assigned in exactly two places -- false at :55 and there -- and is never reset, and handleSlips is disabled on the diffAtt path, so resolve is never called again however long the arc runs. Every wide-lane and fix-count field above is therefore the SAME number a 3600 s run would report; only the tail attitude and position figures depend on arc length. It follows that att018 at 3600 s must come out BIT-IDENTICAL to att005 at 3600 s, and running it adds a ladder row rather than a result.",
+
+  "_THISRUNGISNOTREADONLY": "Unlike the Melbourne-Wubbena rungs carr017/018/020/021, which emit no z/h/H/R row and must come out bit-identical to their reference, this one CAN change the EKF result: a baseline that loses its dual-frequency fix loses its delta_B / delta_B_L2 injection and its L2 attitude row (DiffAttitudeBuilder.m:763-780), so position, NIS and the attitude error may all move. A difference here is expected, not a gating defect. The direction is one-sided: tightening wlOk can only make the conjunction harder, so nBaselineArFixedDualFrequency can fall or stay equal, never rise.",
+
+  "_WHATTHISDOESNOTMEASURE": "This is the wide lane as a VETO, not as an observable. The resolver still searches L1 and L2 independently and forms N_WL_float = N_float_L1 - N_float_L2 only to check the pair afterwards; it never fixes the wide lane first and cascades down. It is also not the Melbourne-Wubbena combination -- no code observable is touched anywhere on this path, so nothing here is comparable with carr017/carr018, whose precision comes from code noise over the arc. Do not quote a number from this rung against an MW number.",
+
+  "_ANDWHYAWIDELANEINTEGERISWORTHLITTLEANGLEHERE": "lambda_WL = c/(f1-f2) = 0.8619 m against an adjacent inter-antenna baseline of 1.4697 m and an opposite baseline of 2.00 m, so ONE wide-lane cycle is 0.586 rad = 33.6 deg of rotation, or 24.7 deg on the opposite pair. Fixing the wide lane on a 1.5 m baseline is nearly free and buys nearly no angle; the accuracy has to come from the cascade down to L1. That is the same conclusion the absolute-fix result reached, and it is why this rung is framed as a test of whether the screen is honest rather than as an accuracy lever.",
+
+  "scenario": {
+    "name": "att018_wideLaneScreenBinding",
+    "orbitClass": "GEO",
+    "nTowers": 5,
+    "nSpaceAssets": 1,
+    "nReceivers": 4
+  },
+
+  "estimator": {
+    "diffAtt": {
+      "ambiguityResolution": {
+        "maxWideLaneFloatDistance_cycles": 0.10
+      }
+    }
+  },
+
+  "report": {
+    "runVersion": "att018",
+    "compileTex": "auto"
+  },
+  "_reportNote": "compileTex 'auto' rather than 'require': a ladder rung's deliverable is its .mat, and a pdflatex hiccup must not throw away a finished run."
+}

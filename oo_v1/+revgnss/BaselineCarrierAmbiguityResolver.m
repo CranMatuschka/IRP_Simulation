@@ -94,6 +94,11 @@ classdef BaselineCarrierAmbiguityResolver
             store.floatDist_L2_all  = zeros(store.nTowers, store.nBaselines);
             store.rmsBest_L2_all    = zeros(store.nTowers, store.nBaselines);
             store.wideLaneN_float   = zeros(store.nTowers, store.nBaselines);
+            % The wide-lane screen's MARGIN, not just its verdict. NaN rather than 0 so
+            % 'the screen never ran on this baseline' stays distinguishable from 'it ran
+            % and the discrepancy was zero'. Written where wlDisc is already computed;
+            % recording it changes no decision.
+            store.wideLaneDiscrepancy_cycles = nan(store.nTowers, store.nBaselines);
             store.wideLaneStatus    = repmat({'notAttempted'}, store.nTowers, store.nBaselines);
             store.dualFreqStatus    = repmat({'notAttempted'}, store.nTowers, store.nBaselines);
             store.delta_B_L2        = zeros(store.nTowers, store.nBaselines);
@@ -223,6 +228,7 @@ classdef BaselineCarrierAmbiguityResolver
                             wlDisc     = abs(N_WL_float - N_WL_int);
                             wlOk       = wlDisc < c.maxWideLaneFloatDistance_cycles;
                             store.wideLaneN_float(ti,bi) = N_WL_float;
+                            store.wideLaneDiscrepancy_cycles(ti,bi) = wlDisc;
                             if wlOk
                                 store.wideLaneStatus{ti,bi} = 'passed';
                             else

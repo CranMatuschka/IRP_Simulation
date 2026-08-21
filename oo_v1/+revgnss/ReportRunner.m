@@ -1670,6 +1670,41 @@ classdef ReportRunner
                 summary.nBaselineArFixedDualFrequency = revgnss.DiffAttitudeBuilder.storeField_(st76_,'nBaselineArFixedDualFrequency',0);
                 summary.nBaselineArFixedL1Only        = revgnss.DiffAttitudeBuilder.storeField_(st76_,'nBaselineArFixedL1Only',0);
                 summary.attitudeArFrequenciesUsed   = summary.signalNames(logical(summary.attitudeArEnabledByFrequency(1:min(end,numel(summary.signalNames)))));
+                % --- Wide-lane screen OUTCOME, not just whether it was enabled. ---------
+                % wideLaneScreeningEnabled above says the feature is on; it says nothing
+                % about whether the screen ever fired. Without these fields a rung that
+                % tightens maxWideLaneFloatDistance_cycles cannot report its own result,
+                % because wideLaneStatus and the discrepancy live only in the store and
+                % reach neither the summary nor a diagnostics accessor.
+                %
+                % Read the STATUS counts, not the rejection reasons: ambiguityStatus
+                % records only the FIRST failing gate (rms -> ratio -> floatDistance ->
+                % wideLane), so 'rejectedWideLane' undercounts wide-lane failures whenever
+                % an earlier gate also failed. wideLaneStatus is independent of that chain.
+                try; summary.wideLaneScreenThreshold_cycles = cfg.estimator.diffAtt.ambiguityResolution.maxWideLaneFloatDistance_cycles; catch; summary.wideLaneScreenThreshold_cycles = 0.5; end
+                wlSt76_ = revgnss.DiffAttitudeBuilder.storeField_(st76_,'wideLaneStatus',{});
+                if iscell(wlSt76_) && ~isempty(wlSt76_)
+                    summary.nWideLaneScreenPassed            = sum(strcmp(wlSt76_(:),'passed'));
+                    summary.nWideLaneScreenFailed            = sum(strcmp(wlSt76_(:),'failed'));
+                    summary.nWideLaneScreenL2ArcInsufficient = sum(strcmp(wlSt76_(:),'l2ArcInsufficient'));
+                    summary.nWideLaneScreenNotAttempted      = sum(strcmp(wlSt76_(:),'notAttempted'));
+                else
+                    summary.nWideLaneScreenPassed            = 0;
+                    summary.nWideLaneScreenFailed            = 0;
+                    summary.nWideLaneScreenL2ArcInsufficient = 0;
+                    summary.nWideLaneScreenNotAttempted      = 0;
+                end
+                wlD76_ = revgnss.DiffAttitudeBuilder.storeField_(st76_,'wideLaneDiscrepancy_cycles',[]);
+                wlD76_ = wlD76_(isfinite(wlD76_));
+                if isempty(wlD76_)
+                    summary.wideLaneScreenMaxDiscrepancy_cycles    = NaN;
+                    summary.wideLaneScreenMedianDiscrepancy_cycles = NaN;
+                else
+                    summary.wideLaneScreenMaxDiscrepancy_cycles    = max(wlD76_);
+                    summary.wideLaneScreenMedianDiscrepancy_cycles = median(wlD76_);
+                end
+                summary.nBaselineArRejectedWideLaneFirstGate = sum(strcmp( ...
+                    revgnss.DiffAttitudeBuilder.storeField_(st76_,'ambiguityStatus',{}), 'rejectedWideLane'), 'all');
             catch ME76ar_
                 warning('ReportRunner:stage76ArFailed','Stage 76 AR summary: %s', ME76ar_.message);
                 summary.attitudeArMode              = 'rawL1Only';
@@ -1680,6 +1715,14 @@ classdef ReportRunner
                 summary.nBaselineArFixedL1Only        = 0;
                 summary.differentialIonosphereInBaselineAr = 'neglectedShortBaselineV1';
                 summary.attitudeArFrequenciesUsed   = {'L1'};
+                summary.wideLaneScreenThreshold_cycles         = NaN;
+                summary.nWideLaneScreenPassed                  = 0;
+                summary.nWideLaneScreenFailed                  = 0;
+                summary.nWideLaneScreenL2ArcInsufficient       = 0;
+                summary.nWideLaneScreenNotAttempted            = 0;
+                summary.wideLaneScreenMaxDiscrepancy_cycles    = NaN;
+                summary.wideLaneScreenMedianDiscrepancy_cycles = NaN;
+                summary.nBaselineArRejectedWideLaneFirstGate   = 0;
             end
 
             % ---- Central config lock summary --------------------

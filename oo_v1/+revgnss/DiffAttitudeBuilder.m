@@ -582,6 +582,7 @@ classdef DiffAttitudeBuilder
                 'relativeAttitudeTrackingConditionedOnInitialPrior');
             store = setIfMissing_(store,'dualFreqStatus',repmat({'notAttempted'}, nT, nB));
             store = setIfMissing_(store,'wideLaneStatus',repmat({'notAttempted'}, nT, nB));
+            store = setIfMissing_(store,'wideLaneDiscrepancy_cycles',nan(nT, nB));
             % Joint constrained integer/attitude search. Declared here so the fields
             % are readable out of a saved run whether or not the search ever ran, and
             % so 'notAttempted' is distinguishable from 'attempted and refused'.
