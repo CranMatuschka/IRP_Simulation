@@ -137,7 +137,9 @@ classdef ReverseGNSSSimulation < handle
             obj.trackMgr = revgnss.CarrierTrackManager();
             obj.islTrackMgr = revgnss.IslCarrierTrackManager();
             obj.assets   = revgnss.MultiAssetConfig.instantiateAssets(obj.cfg, obj.asset);
+            secondarySpan = revgnss.ScenarioFactory.clockNoiseMasterSpan(obj.cfg);
             for ai = 2:numel(obj.assets)
+                obj.assets{ai}.clock.noiseMasterSpan_s = secondarySpan;
                 obj.assets{ai}.clock.precomputeNoise(obj.tVec);
             end
             obj.attitudeSensors = revgnss.AttitudeSensorSuite(obj.cfg,obj.ekf);

@@ -115,6 +115,17 @@ classdef ClockModel < handle
         noiseTimeVec_s      (:,1) double = []
         sampleIndex         (1,1) double = 1   % pointer into precomputed arrays
 
+        % ARC-LENGTH INDEPENDENCE OF THE SYNTHESISED COLOUR (gated; 0 = legacy).
+        % Set from cfg.clock.noiseMasterSpan by ScenarioFactory, never in a scenario JSON.
+        %   0  legacy: precomputeNoise synthesises on the RUN's own grid, so the
+        %      realisation is a function of the arc length -- the same seed observed for
+        %      2 h and for 6 h yields two DIFFERENT clocks (measured: correlation 0.617
+        %      over the common span, 1.41 m of range peak-to-peak).
+        %   >0 synthesise once on the fixed grid 0:dt:noiseMasterSpan_s and take this
+        %      run's leading window, so one seed defines ONE clock and a longer arc
+        %      merely observes more of it.
+        noiseMasterSpan_s   (1,1) double = 0
+
         % Current colored component (updated each step; added by accessors)
         coloredBias_s_current    (1,1) double = 0
         coloredFracFreq_current  (1,1) double = 0
@@ -211,6 +222,44 @@ classdef ClockModel < handle
                 return
             end
 
+            % Synthesis grid. See noiseMasterSpan_s: legacy synthesises on the run's
+            % own grid (realisation depends on the arc length); master-grid synthesises
+            % once on a fixed grid and takes this run's leading window.
+            if obj.noiseMasterSpan_s > 0
+                if abs(tVec_s(1)) > 0.5*dt
+                    error('ClockModel:precomputeNoise', ...
+                        ['Master-grid synthesis requires tVec_s to start at 0 (got %g). ' ...
+                         'The window is the LEADING one by construction.'], tVec_s(1));
+                end
+                if tVec_s(end) > obj.noiseMasterSpan_s + 0.5*dt
+                    error('ClockModel:precomputeNoise', ...
+                        ['Run span %g s exceeds clock.noiseMasterSpan.span_s = %g s. Raise ' ...
+                         'the master span explicitly -- it must NOT be derived from the run ' ...
+                         'duration, or the realisation depends on the arc length again, ' ...
+                         'which is the defect the gate exists to remove.'], ...
+                        tVec_s(end), obj.noiseMasterSpan_s);
+                end
+                gridT = (0 : dt : obj.noiseMasterSpan_s)';
+            else
+                gridT = tVec_s(:);
+            end
+
+            [x_bias_col, y_frac_col] = obj.synthesiseColoured_(gridT);
+
+            % Leading window. A strict no-op on the legacy path (gridT IS tVec_s).
+            obj.noiseBias_s_vec   = x_bias_col(1:N);
+            obj.noiseFracFreq_vec = y_frac_col(1:N);
+        end
+
+        % -------------------------------------------------------------- %
+        function [x_bias_col, y_frac_col] = synthesiseColoured_(obj, tVec_s)
+            % synthesiseColoured_  FFT spectral synthesis of the WPM/FPM/FFM colour
+            % on WHATEVER grid it is handed. Extracted verbatim from precomputeNoise so
+            % the legacy path stays byte-identical; the only caller decision is which
+            % grid to pass.
+            N  = numel(tVec_s);
+            dt = mean(diff(tVec_s));
+
             % Use per-instance stream — never touches global rng state
             % Reset stream so precomputeNoise is reproducible regardless of
             % how many step() calls have already consumed random numbers.
@@ -242,9 +291,6 @@ classdef ClockModel < handle
             % Integrate frac-freq colored noise → phase (bias) colored noise
             % cumtrapz gives ABSOLUTE phase sequence, starting at 0.
             x_bias_col = cumtrapz(tVec_s, y_frac_col);
-
-            obj.noiseBias_s_vec   = x_bias_col;
-            obj.noiseFracFreq_vec = y_frac_col;
         end
 
         % -------------------------------------------------------------- %

@@ -234,6 +234,33 @@ cfg.asset.clockType               = 'CESIUM1';
 %   cfg.clock.customOscillators.MYCLOCK = struct('h0',1e-21,'hMinus1',1e-23,'hMinus2',1e-26);
 % h0/hMinus1/hMinus2 are required; h2/h1 default to 0. A JSON scenario can set this too.
 cfg.clock.customOscillators       = struct();
+
+% --- ARC-LENGTH INDEPENDENCE OF THE SYNTHESISED CLOCK COLOUR -------------------
+%   clock.noiseMasterSpan.enable  (default false -> legacy, byte-identical)
+%
+%   ClockModel.precomputeNoise synthesises the WPM/FPM/FFM colour by FFT spectral
+%   shaping. The DFT frequency grid is spaced 1/T, where T is the span it is handed,
+%   and every output sample is a sum over ALL bins -- so with the legacy default the
+%   realisation is a function of the ARC LENGTH. The same seed run for 2 h and for 6 h
+%   gives two different clocks over their common span (MEASURED: correlation 0.617,
+%   peak difference 4.70e-9 s = 1.41 m of range). precomputeNoise also consumes 2N
+%   draws before step() begins, so the WFM/RWFM draws shift with the arc length too.
+%
+%   true: synthesise once on the FIXED grid 0:dt:span_s and give each run its leading
+%   window. One seed then defines ONE clock and a longer arc merely observes more of
+%   it, which is what a duration study needs. span_s must be set to the longest arc
+%   the campaign will use and must NEVER be derived from simulation.duration_s -- that
+%   would reintroduce the very dependence this removes. A run longer than span_s is a
+%   hard error, not a silent re-synthesis.
+%
+%   The Allan deviation is unaffected: over 8 seeds the windowed series tracks the
+%   flicker floor to within the same ~1 % as the legacy one, and it drops the legacy
+%   bump near tau = T/12 that is an artefact of the FFT wrapping on itself.
+%
+%   NOT byte-identical when enabled: every clock realisation changes, so the
+%   regression goldens must be re-cut in the same commit that flips the default.
+cfg.clock.noiseMasterSpan.enable   = false;
+cfg.clock.noiseMasterSpan.span_s   = 86400;   % 24 h; only read when enable is true
 cfg.estimator.estimateTowerClocks = false;
 cfg.clocks.tower.product.mode                   = 'truthHistoryProductNoisy';
 cfg.clocks.tower.product.updateInterval_s       = 30;

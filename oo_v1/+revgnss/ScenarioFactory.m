@@ -58,10 +58,33 @@ classdef ScenarioFactory
             dur  = cfg.simulation.duration_s;
             tVec = 0 : dt : dur;
 
+            masterSpan = revgnss.ScenarioFactory.clockNoiseMasterSpan(cfg);
+            asset.clock.noiseMasterSpan_s = masterSpan;
             asset.clock.precomputeNoise(tVec);
             for k = 1:nT
+                towers{k}.clock.noiseMasterSpan_s = masterSpan;
                 towers{k}.clock.precomputeNoise(tVec);
             end
+        end
+
+        % ----------------------------------------------------------------
+        function span_s = clockNoiseMasterSpan(cfg)
+            % clockNoiseMasterSpan  Resolve cfg.clock.noiseMasterSpan to the span that
+            % ClockModel should synthesise its colour on. 0 means "the run's own grid",
+            % the legacy behaviour in which the realisation depends on the arc length.
+            %
+            % Deliberately NOT derived from cfg.simulation.duration_s: a span that
+            % tracks the run length is exactly the defect the gate removes.
+            span_s = 0;
+            if ~isfield(cfg,'clock') || ~isfield(cfg.clock,'noiseMasterSpan'); return; end
+            nms = cfg.clock.noiseMasterSpan;
+            if ~isfield(nms,'enable') || ~nms.enable; return; end
+            if ~isfield(nms,'span_s') || ~isscalar(nms.span_s) || ~(nms.span_s > 0)
+                error('ScenarioFactory:clockNoiseMasterSpan', ...
+                    ['clock.noiseMasterSpan.enable is true but span_s is missing or ' ...
+                     'non-positive. Set it to the longest arc the campaign will use.']);
+            end
+            span_s = double(nms.span_s);
         end
 
         % ----------------------------------------------------------------
