@@ -1,0 +1,850 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>oo_v1 scenario configuration editor</title>
+<!--
+  GENERATED FILE. Edit tools/config_editor/template.html and re-run buildConfigEditor.
+  The schema below is inlined rather than fetched because a page opened from file://
+  cannot XHR a sibling file. tests/test_config_editor_schema.m fails if this copy has
+  drifted from the current masterConfig.
+-->
+<style>
+  :root {
+    --bg: #f6f7f9;      --panel: #ffffff;   --ink: #16191d;     --muted: #5d6672;
+    --line: #dde1e7;    --accent: #1f6feb;  --accent-soft: #e8f0fe;
+    --warn: #a15c00;    --warn-soft: #fff4e0; --stop: #b3261e;  --stop-soft: #fdecea;
+    --ok: #1a7f43;      --ok-soft: #e7f5ec; --code: #f1f3f5;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14171b;    --panel: #1c2026;   --ink: #e6e9ee;     --muted: #98a2b0;
+      --line: #2d333b;  --accent: #58a6ff;  --accent-soft: #1b2b45;
+      --warn: #e3a04a;  --warn-soft: #3a2c15; --stop: #f08a80;  --stop-soft: #3d1f1c;
+      --ok: #56d18a;    --ok-soft: #14301f; --code: #23282f;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+
+  .layout { display: grid; grid-template-columns: 340px minmax(0, 1fr); min-height: 100vh; }
+  @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } }
+
+  /* ---- sidebar ---- */
+  aside {
+    background: var(--panel); border-right: 1px solid var(--line);
+    padding: 20px; position: sticky; top: 0; height: 100vh; overflow-y: auto;
+  }
+  @media (max-width: 900px) { aside { position: static; height: auto; } }
+  aside h1 { font-size: 16px; margin: 0 0 2px; letter-spacing: -0.01em; }
+  aside .sub { color: var(--muted); font-size: 12px; margin-bottom: 18px; }
+  .field { margin-bottom: 14px; }
+  .field > label { display: block; font-size: 11px; text-transform: uppercase;
+    letter-spacing: 0.06em; color: var(--muted); margin-bottom: 5px; font-weight: 600; }
+  select, input[type=text], input[type=search], textarea {
+    width: 100%; padding: 7px 9px; border: 1px solid var(--line); border-radius: 6px;
+    background: var(--bg); color: var(--ink); font-size: 13px; font-family: inherit;
+  }
+  select:focus, input:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+
+  .seg { display: flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+  .seg button {
+    flex: 1; padding: 7px 4px; border: 0; background: var(--bg); color: var(--muted);
+    font: inherit; font-size: 12px; cursor: pointer; border-right: 1px solid var(--line);
+  }
+  .seg button:last-child { border-right: 0; }
+  .seg button[aria-pressed=true] { background: var(--accent); color: #fff; font-weight: 600; }
+
+  .btn {
+    display: block; width: 100%; padding: 9px; margin-bottom: 8px; border-radius: 6px;
+    border: 1px solid var(--line); background: var(--bg); color: var(--ink);
+    font: inherit; font-size: 13px; cursor: pointer; text-align: center;
+  }
+  .btn:hover { border-color: var(--accent); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  .btn.primary:hover { filter: brightness(1.08); }
+  .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+  .tally { font-size: 12px; color: var(--muted); padding: 10px 0; border-top: 1px solid var(--line);
+    border-bottom: 1px solid var(--line); margin: 16px 0; }
+  .tally b { color: var(--ink); }
+  .stamp { font-size: 10.5px; color: var(--muted); margin-top: 18px; padding-top: 12px;
+    border-top: 1px solid var(--line); line-height: 1.5; }
+  .stamp code { font-family: ui-monospace, Menlo, monospace; }
+
+  /* ---- main ---- */
+  main { padding: 22px 26px 90px; min-width: 0; }
+  .note {
+    background: var(--accent-soft); border: 1px solid var(--line); border-left: 3px solid var(--accent);
+    border-radius: 6px; padding: 11px 13px; font-size: 12.5px; color: var(--ink); margin-bottom: 18px;
+  }
+  .note code { background: var(--code); padding: 1px 4px; border-radius: 3px; font-size: 12px; }
+
+  details.group {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+    margin-bottom: 10px; overflow: hidden;
+  }
+  details.group > summary {
+    padding: 13px 16px; cursor: pointer; display: flex; align-items: center; gap: 10px;
+    list-style: none; user-select: none;
+  }
+  details.group > summary::-webkit-details-marker { display: none; }
+  details.group > summary:hover { background: var(--bg); }
+  .caret { color: var(--muted); font-size: 11px; width: 10px; transition: transform 0.12s; }
+  details.group[open] .caret { transform: rotate(90deg); }
+  .gtitle { font-weight: 600; font-size: 14px; }
+  .gblurb { color: var(--muted); font-size: 12px; flex: 1; min-width: 0;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pill {
+    font-size: 11px; padding: 2px 8px; border-radius: 10px; white-space: nowrap;
+    background: var(--code); color: var(--muted); font-weight: 600;
+  }
+  .pill.on { background: var(--accent); color: #fff; }
+  .gbody { border-top: 1px solid var(--line); }
+
+  .sub-h {
+    padding: 9px 16px 5px; font-size: 11px; font-weight: 700; letter-spacing: 0.05em;
+    text-transform: uppercase; color: var(--muted); background: var(--bg);
+    border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 1;
+  }
+
+  .row { padding: 12px 16px; border-bottom: 1px solid var(--line); display: grid;
+    grid-template-columns: minmax(0,1fr) 260px; gap: 8px 18px; align-items: start; }
+  .row:last-child { border-bottom: 0; }
+  .row.changed { background: var(--ok-soft); }
+  .row.blocked { opacity: 0.72; }
+  @media (max-width: 700px) { .row { grid-template-columns: 1fr; } }
+
+  .rpath { font-size: 12.5px; font-weight: 600; word-break: break-all; }
+  .rmeta { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .rdoc { font-size: 12px; color: var(--muted); margin-top: 5px; max-width: 68ch; }
+  .rdoc.block { font-style: italic; opacity: 0.85; }
+  .tag { display: inline-block; font-size: 10px; padding: 1px 6px; border-radius: 3px;
+    background: var(--code); color: var(--muted); margin-right: 5px; font-weight: 600; }
+  .tag.ok   { background: var(--ok-soft);   color: var(--ok); }
+  .tag.warn { background: var(--warn-soft); color: var(--warn); }
+  .tag.stop { background: var(--stop-soft); color: var(--stop); }
+
+  .ctl { display: flex; flex-direction: column; gap: 5px; }
+  .ctl input[type=text], .ctl select, .ctl input[type=number] {
+    width: 100%; padding: 6px 8px; font-size: 12.5px; border: 1px solid var(--line);
+    border-radius: 5px; background: var(--bg); color: var(--ink); font-family: ui-monospace, Menlo, monospace;
+  }
+  .bool { display: flex; gap: 6px; align-items: center; }
+  .bool input { width: 16px; height: 16px; accent-color: var(--accent); }
+  .bool span { font-size: 12.5px; font-family: ui-monospace, Menlo, monospace; }
+  .basev { font-size: 11px; color: var(--muted); }
+  .basev code { background: var(--code); padding: 1px 4px; border-radius: 3px; }
+  .reset { background: none; border: 0; color: var(--accent); font: inherit; font-size: 11px;
+    cursor: pointer; padding: 0; text-align: left; text-decoration: underline; }
+
+  .advice { font-size: 11.5px; border-radius: 5px; padding: 7px 9px; margin-top: 4px; }
+  .advice.warn { background: var(--warn-soft); color: var(--warn); }
+  .advice.stop { background: var(--stop-soft); color: var(--stop); }
+  .advice.info { background: var(--accent-soft); color: var(--ink); }
+
+  .empty { padding: 26px 16px; text-align: center; color: var(--muted); font-size: 13px; }
+
+  /* ---- delta drawer ---- */
+  .drawer {
+    position: fixed; bottom: 0; right: 0; left: 340px; background: var(--panel);
+    border-top: 1px solid var(--line); box-shadow: 0 -3px 14px rgba(0,0,0,0.09); z-index: 20;
+  }
+  @media (max-width: 900px) { .drawer { left: 0; } }
+  .drawer > summary {
+    padding: 9px 20px; cursor: pointer; font-size: 12.5px; font-weight: 600;
+    list-style: none; display: flex; align-items: center; gap: 10px;
+  }
+  .drawer > summary::-webkit-details-marker { display: none; }
+  .drawer pre {
+    margin: 0; padding: 0 20px 16px; max-height: 42vh; overflow: auto; font-size: 12px;
+    line-height: 1.45; white-space: pre; color: var(--ink);
+  }
+  .drawer .hint { font-weight: 400; color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="layout">
+
+<aside>
+  <h1>Scenario configuration</h1>
+  <div class="sub">oo_v1 &middot; writes a delta into <code>config/personal/</code></div>
+
+  <div class="field">
+    <label for="baseSel">Base scenario (<code>_extends</code>)</label>
+    <select id="baseSel"></select>
+    <div class="rmeta" id="baseSummary"></div>
+  </div>
+
+  <div class="field">
+    <label for="nameIn">Scenario name</label>
+    <input type="text" id="nameIn" placeholder="myRun" spellcheck="false">
+    <div class="rmeta" id="nameHint"></div>
+  </div>
+
+  <div class="field">
+    <label>Detail level</label>
+    <div class="seg" id="depthSeg">
+      <button data-depth="essentials" aria-pressed="true">Essentials</button>
+      <button data-depth="used" aria-pressed="false">Standard</button>
+      <button data-depth="everything" aria-pressed="false">Everything</button>
+    </div>
+    <div class="rmeta" id="depthHint"></div>
+  </div>
+
+  <div class="field">
+    <label for="searchIn">Search</label>
+    <input type="search" id="searchIn" placeholder="multipath, clock, sigma..." spellcheck="false">
+  </div>
+
+  <div class="field">
+    <label class="bool" style="text-transform:none;letter-spacing:0;font-size:12.5px;font-weight:400;color:var(--ink)">
+      <input type="checkbox" id="onlyChanged"> Show only what I changed
+    </label>
+  </div>
+
+  <div class="tally" id="tally"></div>
+
+  <button class="btn primary" id="saveBtn">Save JSON</button>
+  <button class="btn" id="copyBtn">Copy JSON</button>
+  <button class="btn" id="loadBtn">Open an existing JSON</button>
+  <input type="file" id="loadIn" accept=".json,application/json" hidden>
+  <button class="btn" id="clearBtn">Discard all changes</button>
+
+  <div class="stamp" id="stamp"></div>
+</aside>
+
+<main>
+  <div class="note">
+    <strong>How this file is used.</strong> You are editing a <em>delta</em>: only the knobs you
+    change are written, and everything else is inherited from the base through
+    <code>_extends</code>, exactly like the shipped ladder rungs. Save into
+    <code>config/personal/</code>, then run it by name alone:
+    <code>run_oo_v1('myRun.json', 3600)</code>.
+    <br><br>
+    <strong>Switching an effect on or off</strong> is one checkbox, the row tagged
+    <em>master toggle</em>. It drives that effect's internal truth and model pair for you, so
+    set the master and leave the pair alone. Writing a pair member directly makes your file own
+    it and stops the master from driving it, which is how six shipped ladder rungs once
+    disabled nothing at all.
+    <br><br>
+    <strong>Before you run it</strong>, check it in MATLAB with
+    <code>checkPersonalConfig('myRun.json')</code>. This page knows the base file's own keys, but
+    the realism grade and the atmosphere profile derive further values at resolve time, and only
+    MATLAB can tell you what a knob actually resolves to and whether anything you set was
+    overridden.
+  </div>
+
+  <div id="groups"></div>
+</main>
+
+</div>
+
+<details class="drawer" id="drawer">
+  <summary>
+    <span class="caret">&#9654;</span>
+    <span>File preview</span>
+    <span class="hint" id="drawerHint"></span>
+  </summary>
+  <pre class="mono" id="deltaOut"></pre>
+</details>
+
+<script>
+"use strict";
+
+const SCHEMA = /*__SCHEMA__*/null;
+
+/* ------------------------------------------------------------------ state */
+
+/* The generator omits a field's optional keys rather than writing them empty, and
+   interns the shared block prose and section headers into two pools. Both are undone
+   once, here, so nothing downstream has to know the page was compressed. */
+for (const f of SCHEMA.fields) {
+  f.blockDoc  = f.bd  >= 0 ? SCHEMA.blockDocs[f.bd]  : "";
+  f.section   = f.sec >= 0 ? SCHEMA.sections[f.sec]  : "";
+  f.doc       = f.doc       || "";
+  f.values    = f.values    || [];
+  f.suggested = f.suggested || [];
+  f.enumNote  = f.enumNote  || "";
+  f.usedBy    = f.usedBy    || 0;
+  f.derived   = f.derived   || { severity: "", instead: "", note: "" };
+}
+
+const FIELDS = SCHEMA.fields;
+const BY_PATH = new Map(FIELDS.map(f => [f.path, f]));
+const BASES = new Map(SCHEMA.bases.map(b => [b.name, b]));
+const MASTER_ENABLES = new Set(SCHEMA.masterEnables);
+const DEPTH_RANK = { essentials: 0, used: 1, everything: 2 };
+
+const state = {
+  base: BASES.has("golden_baseline.json") ? "golden_baseline.json" : SCHEMA.bases[0].name,
+  name: "myRun",
+  depth: "essentials",
+  query: "",
+  onlyChanged: false,
+  changes: new Map()   // path -> parsed JS value
+};
+
+/* --------------------------------------------------------------- helpers */
+
+function parseJson(text, fallback) {
+  if (text === "" || text === undefined || text === null) return fallback;
+  try { return JSON.parse(text); } catch (e) { return fallback; }
+}
+
+function defaultValue(field) { return parseJson(field.default, null); }
+
+/** Value a path holds in the selected base, walking "_extends" child-first.
+ *  A base declares only its own leaves, so the chain is walked from the selected
+ *  file upward and the first declaration wins, which is the same precedence
+ *  resolveSimulationConfig applies when it merges the chain base-first. */
+function baseValue(path) {
+  let name = state.base;
+  const seen = new Set();
+  while (name && BASES.has(name) && !seen.has(name)) {
+    seen.add(name);
+    const base = BASES.get(name);
+    const hit = base.leaves.find(l => l.path === path);
+    if (hit) return { value: parseJson(hit.value, null), from: base.name };
+    name = base.extends;
+  }
+  const field = BY_PATH.get(path);
+  return { value: field ? defaultValue(field) : null, from: "masterConfig" };
+}
+
+function effectiveValue(path) {
+  if (state.changes.has(path)) return state.changes.get(path);
+  return baseValue(path).value;
+}
+
+function sameValue(a, b) { return JSON.stringify(a) === JSON.stringify(b); }
+
+function isChanged(path) {
+  if (!state.changes.has(path)) return false;
+  return !sameValue(state.changes.get(path), baseValue(path).value);
+}
+
+function show(value) {
+  if (value === null || value === undefined) return "(none)";
+  if (typeof value === "string") return JSON.stringify(value);
+  return JSON.stringify(value);
+}
+
+function escapeHtml(text) {
+  return String(text).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+}
+
+/** The pair members of the twelve master enables, e.g. errors.multipath.truth.enable. */
+function pairMemberOf(path) {
+  const m = path.match(/^(.*)\.(truth|model)\.enable$/);
+  return (m && MASTER_ENABLES.has(m[1])) ? m[1] : null;
+}
+
+/* --------------------------------------------------------------- filtering */
+
+function visibleFields() {
+  const query = state.query.trim().toLowerCase();
+  const limit = DEPTH_RANK[state.depth];
+  return FIELDS.filter(f => {
+    // A changed knob is always visible. Losing sight of your own edit because it
+    // sits below the current detail level is how a delta acquires a line nobody
+    // remembers writing.
+    const changed = isChanged(f.path);
+    if (state.onlyChanged && !changed) return false;
+    if (!changed) {
+      if (DEPTH_RANK[f.tier] > limit) return false;
+    }
+    if (query) {
+      const hay = (f.path + " " + f.doc + " " + f.blockDoc + " " + f.section).toLowerCase();
+      if (!hay.includes(query)) return false;
+    }
+    return true;
+  });
+}
+
+/* ---------------------------------------------------------------- rendering */
+
+function render() {
+  renderTally();
+  renderGroups();
+  renderDelta();
+}
+
+function renderTally() {
+  const changed = FIELDS.filter(f => isChanged(f.path)).length;
+  const visible = visibleFields().length;
+  document.getElementById("tally").innerHTML =
+    `<b>${changed}</b> knob${changed === 1 ? "" : "s"} changed<br>` +
+    `<b>${visible}</b> of ${FIELDS.length} shown`;
+  document.getElementById("depthHint").textContent = {
+    essentials: `${SCHEMA.counts.essentials} knobs the shipped scenarios set most often`,
+    used: `${SCHEMA.counts.essentials + SCHEMA.counts.used} knobs some shipped scenario sets`,
+    everything: `all ${FIELDS.length} knobs in masterConfig`
+  }[state.depth];
+  document.getElementById("nameHint").textContent =
+    `writes scenario.name and report.runVersion, saves as ${state.name || "myRun"}.json`;
+  const base = BASES.get(state.base);
+  document.getElementById("baseSummary").textContent =
+    base && base.summary ? base.summary.slice(0, 190) : "";
+}
+
+function renderGroups() {
+  const fields = visibleFields();
+  const byGroup = new Map();
+  for (const f of fields) {
+    if (!byGroup.has(f.group)) byGroup.set(f.group, []);
+    byGroup.get(f.group).push(f);
+  }
+
+  const host = document.getElementById("groups");
+  const openGroups = new Set(
+    [...host.querySelectorAll("details.group[open]")].map(d => d.dataset.group));
+  // A search should reveal its hits rather than leave them behind a closed header.
+  const forceOpen = state.query.trim() !== "" || state.onlyChanged;
+
+  host.innerHTML = "";
+  let shown = 0;
+
+  for (const group of SCHEMA.groups) {
+    const list = byGroup.get(group.id) || [];
+    if (!list.length) continue;
+    shown++;
+
+    const changed = list.filter(f => isChanged(f.path)).length;
+    const details = document.createElement("details");
+    details.className = "group";
+    details.dataset.group = group.id;
+    details.open = forceOpen || openGroups.has(group.id);
+
+    const summary = document.createElement("summary");
+    summary.innerHTML =
+      `<span class="caret">&#9654;</span>` +
+      `<span class="gtitle">${escapeHtml(group.title)}</span>` +
+      `<span class="pill${changed ? " on" : ""}">${changed ? changed + " changed" : list.length}</span>` +
+      `<span class="gblurb">${escapeHtml(group.blurb)}</span>`;
+    details.appendChild(summary);
+
+    const body = document.createElement("div");
+    body.className = "gbody";
+    details.appendChild(body);
+
+    // Rows are built when the header first opens. Building all of them up front is
+    // ~1400 DOM subtrees rebuilt on every keystroke in the search box.
+    const fill = () => {
+      if (body.dataset.filled === "1") return;
+      body.dataset.filled = "1";
+      let subgroup = null;
+      for (const f of list) {
+        if (f.subgroup !== subgroup) {
+          subgroup = f.subgroup;
+          const head = document.createElement("div");
+          head.className = "sub-h";
+          head.textContent = subgroup;
+          body.appendChild(head);
+        }
+        body.appendChild(renderRow(f));
+      }
+    };
+    if (details.open) fill();
+    details.addEventListener("toggle", () => { if (details.open) fill(); });
+
+    host.appendChild(details);
+  }
+
+  if (!shown) {
+    host.innerHTML = `<div class="empty">Nothing matches. Try a different search, or raise the detail level.</div>`;
+  }
+}
+
+function renderRow(field) {
+  const row = document.createElement("div");
+  row.className = "row";
+  const changed = isChanged(field.path);
+  if (changed) row.classList.add("changed");
+
+  const blocked = field.derived.severity === "blocked" || field.derived.severity === "error";
+  if (blocked) row.classList.add("blocked");
+
+  /* ---- left: identity and documentation ---- */
+  const left = document.createElement("div");
+  const tags = [];
+  if (changed) tags.push(`<span class="tag ok">changed</span>`);
+  if (field.derived.severity === "blocked") tags.push(`<span class="tag stop">derived</span>`);
+  if (field.derived.severity === "error") tags.push(`<span class="tag stop">removed</span>`);
+  if (field.derived.severity === "warn") tags.push(`<span class="tag warn">conditional</span>`);
+  const isMaster = field.path.endsWith(".enable") &&
+    MASTER_ENABLES.has(field.path.replace(/\.enable$/, ""));
+  if (isMaster) {
+    tags.push(`<span class="tag" title="One toggle for the whole effect. The resolver expands it into the internal truth/model pair, so write this alone and leave the pair untouched.">master toggle</span>`);
+  }
+  if (field.section) tags.push(`<span class="tag">${escapeHtml(field.section)}</span>`);
+
+  left.innerHTML =
+    `<div class="rpath mono">${escapeHtml(field.path)}</div>` +
+    `<div class="rmeta">${tags.join("")}` +
+    (field.usedBy ? `used by ${field.usedBy} shipped scenario${field.usedBy === 1 ? "" : "s"}` : "not set by any shipped scenario") +
+    `</div>` +
+    (field.doc ? `<div class="rdoc">${escapeHtml(field.doc)}</div>` : "") +
+    (field.blockDoc && !field.doc ? `<div class="rdoc block">${escapeHtml(field.blockDoc)}</div>` : "");
+
+  if (field.derived.severity) {
+    const kind = field.derived.severity === "warn" ? "warn" : "stop";
+    const instead = field.derived.instead
+      ? ` Set <code>${escapeHtml(field.derived.instead)}</code> instead.` : "";
+    left.insertAdjacentHTML("beforeend",
+      `<div class="advice ${kind}">${escapeHtml(field.derived.note)}${instead}</div>`);
+  }
+
+  const masterOf = pairMemberOf(field.path);
+  if (masterOf) {
+    left.insertAdjacentHTML("beforeend",
+      `<div class="advice warn">Writing a pair member makes this file own it and suppresses the ` +
+      `master expansion, so <code>${escapeHtml(masterOf)}.enable</code> would stop driving it. ` +
+      `Set the master unless you deliberately want an asymmetric truth/model pair.</div>`);
+  }
+  if (field.enumNote) {
+    left.insertAdjacentHTML("beforeend",
+      `<div class="advice info">${escapeHtml(field.enumNote)}</div>`);
+  }
+  row.appendChild(left);
+
+  /* ---- right: the control ---- */
+  const right = document.createElement("div");
+  right.className = "ctl";
+  const base = baseValue(field.path);
+  const current = effectiveValue(field.path);
+
+  if (!field.editable) {
+    right.innerHTML = `<div class="basev">Not editable here: this value is a structure the ` +
+      `editor cannot represent. Set it in the JSON by hand if you need it.</div>`;
+  } else if (field.type === "bool") {
+    const wrap = document.createElement("label");
+    wrap.className = "bool";
+    const box = document.createElement("input");
+    box.type = "checkbox";
+    box.checked = current === true;
+    box.disabled = blocked;
+    const label = document.createElement("span");
+    label.textContent = box.checked ? "true" : "false";
+    box.addEventListener("change", () => { setValue(field.path, box.checked); });
+    wrap.append(box, label);
+    right.appendChild(wrap);
+  } else if (field.type === "enum" || (field.suggested && field.suggested.length)) {
+    const options = field.type === "enum" ? field.values : field.suggested;
+    const select = document.createElement("select");
+    select.disabled = blocked;
+    const values = options.slice();
+    const currentText = typeof current === "string" ? current : "";
+    if (currentText && !values.includes(currentText)) values.unshift(currentText);
+    for (const option of values) {
+      const node = document.createElement("option");
+      node.value = option;
+      node.textContent = option === "" ? "(empty)" : option;
+      node.selected = option === currentText;
+      select.appendChild(node);
+    }
+    if (field.type !== "enum") {
+      // The list came from a comment, not from a checked registry, so a value outside
+      // it may still be legal. Keep a way to type one.
+      const other = document.createElement("option");
+      other.value = " other";
+      other.textContent = "other...";
+      select.appendChild(other);
+    }
+    select.addEventListener("change", () => {
+      if (select.value === " other") {
+        const typed = window.prompt("Value for " + field.path, currentText);
+        if (typed === null) { select.value = currentText; return; }
+        setValue(field.path, typed);
+      } else {
+        setValue(field.path, select.value);
+      }
+    });
+    right.appendChild(select);
+    if (field.type !== "enum") {
+      right.insertAdjacentHTML("beforeend",
+        `<div class="basev">Choices read from the code comment, not from a checked registry.</div>`);
+    }
+  } else if (field.type === "number") {
+    const input = document.createElement("input");
+    input.type = "text";
+    input.inputMode = "decimal";
+    input.value = current === null ? "" : String(current);
+    input.disabled = blocked;
+    input.addEventListener("change", () => {
+      const text = input.value.trim();
+      if (text === "") { clearValue(field.path); return; }
+      const parsed = Number(text);
+      if (!Number.isFinite(parsed)) {
+        input.value = String(effectiveValue(field.path));
+        alert(field.path + " takes a number.");
+        return;
+      }
+      setValue(field.path, parsed);
+    });
+    right.appendChild(input);
+  } else {
+    // Strings and arrays share a JSON text box. An array has no sensible widget at this
+    // scale, and typing valid JSON is checkable, which a bare comma list is not.
+    const input = document.createElement("input");
+    input.type = "text";
+    input.value = field.type === "string" && typeof current === "string"
+      ? current : JSON.stringify(current);
+    input.disabled = blocked;
+    input.addEventListener("change", () => {
+      if (field.type === "string") { setValue(field.path, input.value); return; }
+      const parsed = parseJson(input.value, undefined);
+      if (parsed === undefined) {
+        input.value = JSON.stringify(effectiveValue(field.path));
+        alert(field.path + " takes JSON, for example [1, 2, 3] or [[1,0],[0,1]].");
+        return;
+      }
+      setValue(field.path, parsed);
+    });
+    right.appendChild(input);
+  }
+
+  const origin = base.from === "masterConfig"
+    ? "masterConfig default" : "from " + base.from;
+  right.insertAdjacentHTML("beforeend",
+    `<div class="basev">${origin}: <code>${escapeHtml(show(base.value))}</code></div>`);
+
+  if (changed) {
+    const reset = document.createElement("button");
+    reset.className = "reset";
+    reset.textContent = "reset to base";
+    reset.addEventListener("click", () => clearValue(field.path));
+    right.appendChild(reset);
+  }
+
+  row.appendChild(right);
+  return row;
+}
+
+/* ------------------------------------------------------------------ edits */
+
+function setValue(path, value) {
+  if (sameValue(value, baseValue(path).value)) state.changes.delete(path);
+  else state.changes.set(path, value);
+  render();
+}
+
+function clearValue(path) { state.changes.delete(path); render(); }
+
+/* ------------------------------------------------------------- the output */
+
+function nest(target, path, value) {
+  const parts = path.split(".");
+  let node = target;
+  for (let i = 0; i < parts.length - 1; i++) {
+    if (typeof node[parts[i]] !== "object" || node[parts[i]] === null) node[parts[i]] = {};
+    node = node[parts[i]];
+  }
+  node[parts[parts.length - 1]] = value;
+}
+
+function buildDelta() {
+  const name = (state.name || "myRun").trim();
+  const out = {};
+  out._id = `personal scenario "${name}", built on ${state.base} with the config editor.`;
+  out._extends = state.base;
+
+  // scenario.name labels the output folder and report.runVersion labels the report, so
+  // both are written even when untouched. Anything the user set explicitly wins.
+  nest(out, "scenario.name", name);
+  nest(out, "report.runVersion", name);
+
+  const paths = [...state.changes.keys()].filter(p => isChanged(p)).sort();
+  for (const path of paths) nest(out, path, state.changes.get(path));
+  return out;
+}
+
+function deltaText() { return JSON.stringify(buildDelta(), null, 2) + "\n"; }
+
+function renderDelta() {
+  const text = deltaText();
+  document.getElementById("deltaOut").textContent = text;
+  const count = [...state.changes.keys()].filter(p => isChanged(p)).length;
+  document.getElementById("drawerHint").textContent =
+    `${(state.name || "myRun")}.json · ${count} knob${count === 1 ? "" : "s"} beyond the base`;
+}
+
+/* -------------------------------------------------------------- save/load */
+
+async function save() {
+  const fileName = (state.name || "myRun").trim().replace(/[^A-Za-z0-9._-]/g, "_") + ".json";
+  const text = deltaText();
+
+  if (window.showSaveFilePicker) {
+    try {
+      const handle = await window.showSaveFilePicker({
+        suggestedName: fileName,
+        types: [{ description: "Scenario JSON", accept: { "application/json": [".json"] } }]
+      });
+      const stream = await handle.createWritable();
+      await stream.write(text);
+      await stream.close();
+      afterSave(fileName);
+      return;
+    } catch (e) {
+      if (e && e.name === "AbortError") return;   // the user closed the picker
+      // Anything else falls through to the download, which always works.
+    }
+  }
+
+  const url = URL.createObjectURL(new Blob([text], { type: "application/json" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  link.click();
+  URL.revokeObjectURL(url);
+  afterSave(fileName);
+}
+
+function afterSave(fileName) {
+  alert(
+    `Saved ${fileName}.\n\n` +
+    `Put it in config/personal/ if it is not there already, then in MATLAB:\n\n` +
+    `  checkPersonalConfig('${fileName}')\n` +
+    `  run_oo_v1('${fileName}', 3600)\n\n` +
+    `checkPersonalConfig is the one that tells you whether every knob you set survived ` +
+    `resolution. This page cannot see that.`);
+}
+
+function loadFile(file) {
+  const reader = new FileReader();
+  reader.onload = () => {
+    let parsed;
+    try { parsed = JSON.parse(reader.result); }
+    catch (e) { alert("That file is not valid JSON:\n\n" + e.message); return; }
+
+    if (typeof parsed._extends === "string" && BASES.has(parsed._extends)) {
+      state.base = parsed._extends;
+      document.getElementById("baseSel").value = state.base;
+    }
+    state.changes.clear();
+
+    const unknown = [];
+    (function walk(node, prefix) {
+      for (const [key, value] of Object.entries(node)) {
+        if (key.startsWith("_")) continue;
+        const path = prefix ? prefix + "." + key : key;
+        const isLeaf = value === null || typeof value !== "object" || Array.isArray(value);
+        if (isLeaf) {
+          if (!BY_PATH.has(path)) { unknown.push(path); continue; }
+          state.changes.set(path, value);
+        } else {
+          walk(value, path);
+        }
+      }
+    })(parsed, "");
+
+    if (parsed.scenario && typeof parsed.scenario.name === "string") {
+      state.name = parsed.scenario.name;
+      document.getElementById("nameIn").value = state.name;
+    }
+    // scenario.name and report.runVersion are re-emitted from the name box, so holding
+    // them as edits too would show two changes the user never made.
+    state.changes.delete("scenario.name");
+    state.changes.delete("report.runVersion");
+
+    render();
+    if (unknown.length) {
+      alert(
+        `Loaded, but ${unknown.length} path(s) in that file are not in the current ` +
+        `masterConfig and were dropped:\n\n  ${unknown.slice(0, 12).join("\n  ")}` +
+        (unknown.length > 12 ? `\n  ...` : "") +
+        `\n\nEither the file predates a rename, or this editor needs regenerating with ` +
+        `buildConfigEditor.`);
+    }
+  };
+  reader.readAsText(file);
+}
+
+/* --------------------------------------------------------------- wiring up */
+
+function init() {
+  // Which masterConfig this copy was generated from. A page handed to someone else, or
+  // left in a branch, is otherwise indistinguishable from a current one.
+  document.getElementById("stamp").innerHTML =
+    `Generated from masterConfig <code>${SCHEMA.generated.masterConfigSha256.slice(0, 12)}</code>` +
+    `<br>${SCHEMA.generated.leafCount} knobs · ${SCHEMA.generated.scenarioCount} base scenarios` +
+    `<br>MATLAB R${SCHEMA.generated.matlabRelease}` +
+    `<br>Stale? Re-run <code>buildConfigEditor</code>.`;
+
+  const baseSel = document.getElementById("baseSel");
+  const byFolder = new Map();
+  for (const base of SCHEMA.bases) {
+    if (!byFolder.has(base.folder)) byFolder.set(base.folder, []);
+    byFolder.get(base.folder).push(base);
+  }
+  for (const [folder, list] of byFolder) {
+    const group = document.createElement("optgroup");
+    group.label = folder;
+    for (const base of list) {
+      const option = document.createElement("option");
+      option.value = base.name;
+      option.textContent = base.name;
+      option.selected = base.name === state.base;
+      group.appendChild(option);
+    }
+    baseSel.appendChild(group);
+  }
+  baseSel.addEventListener("change", () => { state.base = baseSel.value; render(); });
+
+  const nameIn = document.getElementById("nameIn");
+  nameIn.value = state.name;
+  nameIn.addEventListener("input", () => { state.name = nameIn.value; renderTally(); renderDelta(); });
+
+  document.getElementById("depthSeg").addEventListener("click", event => {
+    const button = event.target.closest("button[data-depth]");
+    if (!button) return;
+    state.depth = button.dataset.depth;
+    for (const other of document.querySelectorAll("#depthSeg button")) {
+      other.setAttribute("aria-pressed", String(other === button));
+    }
+    render();
+  });
+
+  let debounce;
+  document.getElementById("searchIn").addEventListener("input", event => {
+    clearTimeout(debounce);
+    const value = event.target.value;
+    debounce = setTimeout(() => { state.query = value; render(); }, 130);
+  });
+
+  document.getElementById("onlyChanged").addEventListener("change", event => {
+    state.onlyChanged = event.target.checked;
+    render();
+  });
+
+  document.getElementById("saveBtn").addEventListener("click", save);
+  document.getElementById("copyBtn").addEventListener("click", async () => {
+    try { await navigator.clipboard.writeText(deltaText()); alert("JSON copied."); }
+    catch (e) { document.getElementById("drawer").open = true; alert("Could not reach the clipboard. The JSON is open in the preview at the bottom."); }
+  });
+  document.getElementById("loadBtn").addEventListener("click",
+    () => document.getElementById("loadIn").click());
+  document.getElementById("loadIn").addEventListener("change", event => {
+    if (event.target.files[0]) loadFile(event.target.files[0]);
+    event.target.value = "";
+  });
+  document.getElementById("clearBtn").addEventListener("click", () => {
+    if (!state.changes.size || confirm("Discard every change and go back to the base?")) {
+      state.changes.clear();
+      render();
+    }
+  });
+
+  render();
+}
+
+document.addEventListener("DOMContentLoaded", init);
+</script>
+</body>
+</html>
