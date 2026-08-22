@@ -52,3 +52,14 @@ output/LadderReport_*/
 # so this rule is the odd one out here: if the final configuration is ever quoted in a
 # result, it has to come back under version control or the result is untraceable.
 config/final/
+
+# Personal scenario overlays written by tools/config_editor. A scratch space per person:
+# "everyone can run their own json files" means the folder collects experiments, not
+# shared sources, so the *.json in it stay untracked while the README that explains the
+# folder is committed. The same caveat as config/final/ applies and is worth repeating,
+# because these are scenario SOURCES and not artefacts: if a personal run is ever quoted
+# in a result, promote its JSON into config/ladder/<axis>/ or the result is untraceable.
+# scenarioFileIndex adds this folder to the NAME LOOKUP path only, never to the gate set,
+# so an unfinished file here cannot fail the shared test suite.
+config/personal/**/*.json
+!config/personal/README.md
