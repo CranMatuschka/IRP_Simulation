@@ -32,3 +32,8 @@ oo_v1/output/Report-*
 # Python bytecode (thesis_figures/ and any future Python tooling).
 __pycache__/
 *.pyc
+
+# Word lock files. Office writes "~$name.docx" beside any open document and deletes
+# it on close, so it is never a source -- but it appears as untracked the moment
+# someone opens a .docx and is one "git add -A" from history.
+~$*
