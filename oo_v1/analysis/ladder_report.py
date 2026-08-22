@@ -14,6 +14,24 @@ Layouts understood (rung name is taken from the .mat stem):
     <root>/<ladder>/<rung>.mat             flat
     <root>/<a>/<b>/<rung>/<rung>.mat       nested, ladder = "a/b"
 
+A tree assembled from several passes is not uniform, so three things in the
+directory layout carry meaning and are read rather than assumed:
+
+  provenance   a rung directory holds `_OK` if the sweep driver produced it and
+               `_IMPORTED.txt` if it was copied in from an ad-hoc run made by
+               later code. The two are not guaranteed like-for-like, so the
+               marker becomes a column instead of being silently dropped.
+  aliases      a directory holding `_RENAMED.txt` is a pre-rename alias of a
+               rung that now lives elsewhere. It is the same run under its old
+               name, so it is skipped: counting it would double-count the run.
+  arc length   `<rung>_ts<seconds>` is the same config run at a non-base arc.
+               Those rungs are kept and charted, but never pooled into a
+               statistic with the base-arc rungs. See BASE_DURATION_S.
+
+Directories whose name begins with "." or "_" are never descended into, which
+is also what keeps a superseded run parked under `_superseded_ts120/` from
+being walked as a rung of its own.
+
 Two .mat schemas are handled and unified onto the same columns:
 
   report  single-asset report mats, carrying a ~670-field `summary` struct.
@@ -45,6 +63,23 @@ except ImportError:  # pragma: no cover
     sys.exit("h5py is required:  python3 -m pip install h5py")
 
 C_LIGHT = 299792458.0
+
+# The arc length this tree is built around. Rungs run at a different arc are
+# kept, labelled with their arc, and charted, but they are never pooled into a
+# statistic with the base-arc rungs: a tail metric over 21600 s does not measure
+# the same thing as one over 3600 s, so a median across the mixture would be a
+# median over two populations. Per-rung rows show everything; only aggregates
+# and ratios are restricted.
+BASE_DURATION_S = 3600.0
+
+# Marker files left in a rung directory by the sweep driver and by the later
+# import passes. Nothing else distinguishes those runs, so these are read.
+MARK_SWEPT = "_OK"               # produced by the sweep driver
+MARK_IMPORTED = "_IMPORTED.txt"  # copied in from an ad-hoc run, later code
+MARK_RENAMED = "_RENAMED.txt"    # pre-rename alias; the run lives elsewhere
+
+# <rung>_ts<seconds>: the same config run at a non-base arc length.
+ARC_SUFFIX_RE = re.compile(r"_ts(\d+)$")
 
 # ---------------------------------------------------------------------------
 # metric registry
@@ -191,7 +226,8 @@ GROUP_TITLES = {
 HEADLINE = ["pos_rms_m", "clk_rms_m", "att_err_deg", "nis_per_dof"]
 
 # context columns carried through but never charted as a bar
-CONTEXT = ["schema", "n_assets", "n_receivers", "n_states", "duration_s", "n_epochs"]
+CONTEXT = ["schema", "provenance", "n_assets", "n_receivers", "n_states",
+           "duration_s", "arc_class", "base_rung", "n_epochs"]
 
 
 # ---------------------------------------------------------------------------
@@ -256,6 +292,45 @@ def _safe_ratio(a: float, b: float) -> float:
     if not (math.isfinite(a) and math.isfinite(b)) or b == 0:
         return math.nan
     return a / b
+
+
+def _extract_cfg(f: h5py.File) -> dict:
+    """Run conditions from the cfg struct frozen inside the mat.
+
+    cfg.simulation.duration_s is the authoritative arc length for both schemas:
+    it is what the run was configured to do, rather than what a history vector
+    happens to end at, and it is present on the single-asset report mats, which
+    carry no time history at all.
+
+    scenario.name is taken and report.runVersion deliberately is not. runVersion
+    is inherited through _extends when a config declares no report block, so the
+    arc-span rungs att019/att020 carry their parents' 'att011'/'att012'. Keying
+    anything on it would resolve them to the wrong rung.
+    """
+    out: dict = {}
+    try:
+        cfg = f["cfg"]
+    except KeyError:
+        return out
+    if not _is_group(cfg):
+        return out
+    try:
+        sim = cfg["simulation"]
+        d = _scalar(sim, "duration_s")
+        if math.isfinite(d):
+            out["duration_s"] = d
+        dt = _scalar(sim, "dt_s")
+        if math.isfinite(dt):
+            out["dt_s"] = dt
+    except (KeyError, TypeError):
+        pass
+    try:
+        nm = _mstr(cfg["scenario"]["name"])
+        if nm:
+            out["scenario_name"] = nm
+    except (KeyError, TypeError):
+        pass
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -745,16 +820,34 @@ class Rung:
 
 
 def discover(roots: list[str], include: str | None, exclude: str | None) -> list[str]:
+    """Every rung .mat under the roots, minus the two things that are not rungs.
+
+    A directory beginning with "." or "_" is never descended into. That is what
+    keeps `_superseded_ts120/`, where the 120 s scene018 run was parked when its
+    3600 s run replaced it, from being walked as a rung in its own right, along
+    with `_MAXWORKERS`, the lane logs and the marker files.
+
+    A directory carrying `_RENAMED.txt` is a pre-rename alias: the same run, kept
+    in place so the old name still resolves, byte-identical to the copy that now
+    lives under the new name. Walking both would count one run twice, so the
+    alias is dropped here and named on stdout rather than being silently lost.
+    """
     mats: list[str] = []
+    aliases: list[str] = []
     for root in roots:
         if not os.path.isdir(root):
             print(f"  ! not a directory, skipped: {root}", file=sys.stderr)
             continue
         for dirpath, dirnames, filenames in os.walk(root):
             dirnames[:] = [d for d in dirnames if not d.startswith((".", "_"))]
+            if MARK_RENAMED in filenames:
+                aliases.append(dirpath)
+                continue
             for fn in filenames:
                 if fn.endswith(".mat") and not fn.endswith("_relerror.mat"):
                     mats.append(os.path.join(dirpath, fn))
+    for d in sorted(aliases):
+        print(f"  alias skipped (pre-rename, {MARK_RENAMED}): {os.path.relpath(d)}")
     if include:
         rx = re.compile(include)
         mats = [m for m in mats if rx.search(m)]
@@ -792,6 +885,54 @@ def ladder_of(path: str, roots: list[str], multi_root: bool, group_by: str,
     return os.path.basename(parent)
 
 
+def _provenance(rung_dir: str) -> str:
+    """swept / imported, read from the marker the producing pass left behind.
+
+    The distinction is load-bearing rather than cosmetic: the swept rungs came
+    from one frozen snapshot of the tree and the imported ones from the live tree
+    weeks later, so a comparison that crosses the boundary is not automatically
+    like-for-like. Carrying it as a column is the only way the workbook can say
+    so at the point where somebody reads a number.
+    """
+    has_ok = os.path.exists(os.path.join(rung_dir, MARK_SWEPT))
+    has_imp = os.path.exists(os.path.join(rung_dir, MARK_IMPORTED))
+    if has_ok and has_imp:
+        return "swept+imported"
+    if has_ok:
+        return "swept"
+    if has_imp:
+        return "imported"
+    return "unmarked"
+
+
+def split_arc_suffix(name: str) -> tuple[str, float]:
+    """`att020_x_ts7200` -> ('att020_x', 7200.0);  a plain name -> (name, nan)."""
+    m = ARC_SUFFIX_RE.search(name)
+    if not m:
+        return name, math.nan
+    return name[: m.start()], float(m.group(1))
+
+
+def arc_of(r: "Rung") -> float:
+    d = r.metrics.get("duration_s", math.nan)
+    return float(d) if isinstance(d, (int, float)) and math.isfinite(d) else math.nan
+
+
+def is_base_arc(r: "Rung") -> bool:
+    """True when the rung sits at the tree's common arc length.
+
+    An unreadable duration counts as base rather than being quarantined: the
+    older mats predate the check, and dropping them from every aggregate would
+    be a larger error than including one whose arc cannot be confirmed.
+    """
+    a = arc_of(r)
+    return (not math.isfinite(a)) or a == BASE_DURATION_S
+
+
+def base_arc_only(rungs: list["Rung"]) -> list["Rung"]:
+    return [r for r in rungs if is_base_arc(r)]
+
+
 def load_rung(path: str, ladder: str, tail_frac: float, want_raw: bool) -> Rung:
     r = Rung(name=os.path.splitext(os.path.basename(path))[0], ladder=ladder, path=path)
     try:
@@ -804,11 +945,33 @@ def load_rung(path: str, ladder: str, tail_frac: float, want_raw: bool) -> Rung:
                 r.metrics = {"schema": "unknown"}
             if want_raw:
                 r.raw = _extract_raw(f)
+            cfg = _extract_cfg(f)
     except Exception as e:  # a truncated or half-written mat must not kill the run
         # loud on purpose: a silent "error" schema once hid a real bug in here
         print(f"    ! {os.path.basename(path)}: {type(e).__name__}: {e}", file=sys.stderr)
         r.metrics = {"schema": f"error: {type(e).__name__}"}
         return r
+
+    # cfg wins over anything derived from a history vector: it is what the run
+    # was told to do, and it is the only source the report mats carry at all.
+    if math.isfinite(cfg.get("duration_s", math.nan)):
+        r.metrics["duration_s"] = cfg["duration_s"]
+
+    # the directory name carries the arc, the .mat's scenario.name does not: the
+    # arc-span rungs were run from one config at several arcs, so every one of
+    # them reports the same scenario.name as its 3600 s base.
+    base, arc_from_name = split_arc_suffix(r.name)
+    r.metrics["base_rung"] = base
+    r.metrics["scenario_name"] = cfg.get("scenario_name", "")
+    if not math.isfinite(r.metrics.get("duration_s", math.nan)) and math.isfinite(arc_from_name):
+        r.metrics["duration_s"] = arc_from_name
+    arc = r.metrics.get("duration_s", math.nan)
+    if math.isfinite(arc_from_name) and math.isfinite(arc) and arc != arc_from_name:
+        print(f"    ! {r.name}: directory says {arc_from_name:g} s, "
+              f"cfg says {arc:g} s; using cfg", file=sys.stderr)
+    r.metrics["arc_class"] = ("base" if (not math.isfinite(arc)) or arc == BASE_DURATION_S
+                              else f"{arc:g}s")
+    r.metrics["provenance"] = _provenance(os.path.dirname(path))
 
     stem = os.path.splitext(path)[0]
     rel, series = _extract_relerror(stem + "_relerror.mat", want_series=True)
@@ -834,18 +997,26 @@ def live_metrics(rungs: list[Rung]) -> list[Metric]:
 
 
 def pick_reference(rungs: list[Rung], mode: str) -> int:
+    """Index of the rung every ratio on this tab is taken against.
+
+    Restricted to base-arc rungs. A reference at another arc would turn every
+    ratio on the tab into a cross-arc comparison without saying so, and with
+    --ref best an off-base rung could win the argmin purely by having had longer
+    to converge. Rungs are sorted base-first, so a base rung is index 0.
+    """
     if not rungs:
         return 0
+    pool = [i for i, r in enumerate(rungs) if is_base_arc(r)] or list(range(len(rungs)))
     if mode == "first":
-        return 0
+        return pool[0]
     if mode == "best":
-        vals = [r.metrics.get("pos_rms_m", math.inf) for r in rungs]
+        vals = [rungs[i].metrics.get("pos_rms_m", math.inf) for i in pool]
         vals = [v if isinstance(v, (int, float)) and math.isfinite(v) else math.inf for v in vals]
-        return int(np.argmin(vals))
-    for i, r in enumerate(rungs):
-        if mode.lower() in r.name.lower():
+        return pool[int(np.argmin(vals))]
+    for i in pool:
+        if mode.lower() in rungs[i].name.lower():
             return i
-    return 0
+    return pool[0]
 
 
 def use_log(vals: list[float]) -> bool:
@@ -954,32 +1125,51 @@ def write_excel(path: str, ladders: dict[str, list[Rung]], ref_mode: str, dump_a
     # ---- overview ---------------------------------------------------------
     ov = wb.add_worksheet(sanitize_sheet("Overview", used))
     ov.set_column(0, 0, 30)
-    ov.set_column(1, 8, 18)
+    ov.set_column(1, 12, 15)
     ov.write(0, 0, "Ladder sweep comparison", fmt_t)
     ov.write(1, 0, "Every rung of every ladder, read straight from the .mat files. "
                    "NIS/dof is meanNIS divided by the expected row count, because the "
-                   "raw NIS is not comparable between rungs with different row counts.",
-             fmt_s)
+                   "raw NIS is not comparable between rungs with different row counts. "
+                   f"The four aggregate columns are over the {BASE_DURATION_S:g} s rungs "
+                   "ONLY; rungs at another arc are counted separately and listed on the "
+                   "'Arc span' tab. See the 'Notes' tab before comparing across "
+                   "provenance.", fmt_s)
     row = 3
-    ov.write_row(row, 0, ["Ladder", "Rungs", "Schema", "Best pos RMS [m]",
-                          "Worst pos RMS [m]", "Median pos RMS [m]",
-                          "Median NIS/dof", "Metrics charted"], fmt_h)
+    ov.write_row(row, 0, ["Ladder", "Rungs", f"At {BASE_DURATION_S:g} s", "Other arcs",
+                          "Swept", "Imported", "Schema",
+                          "Best pos RMS [m]", "Worst pos RMS [m]",
+                          "Median pos RMS [m]", "Median NIS/dof",
+                          "Metrics charted"], fmt_h)
     row += 1
     for lad, rungs in ladders.items():
-        pr = [r.metrics.get("pos_rms_m", math.nan) for r in rungs]
+        base = base_arc_only(rungs)
+        # every aggregate below is over `base` on purpose: pooling a 21600 s tail
+        # metric with a 3600 s one would produce a median over two populations
+        pr = [r.metrics.get("pos_rms_m", math.nan) for r in base]
         pr = [v for v in pr if isinstance(v, (int, float)) and math.isfinite(v)]
-        nd = [r.metrics.get("nis_per_dof", math.nan) for r in rungs]
+        nd = [r.metrics.get("nis_per_dof", math.nan) for r in base]
         nd = [v for v in nd if isinstance(v, (int, float)) and math.isfinite(v)]
         schemas = sorted({r.metrics.get("schema", "?") for r in rungs})
+        prov = [r.metrics.get("provenance", "") for r in rungs]
         ov.write(row, 0, lad, fmt_txt)
         ov.write_number(row, 1, len(rungs), fmt_txt)
-        ov.write(row, 2, ",".join(schemas), fmt_txt)
-        for c, v in ((3, min(pr) if pr else None), (4, max(pr) if pr else None),
-                     (5, float(np.median(pr)) if pr else None),
-                     (6, float(np.median(nd)) if nd else None)):
+        ov.write_number(row, 2, len(base), fmt_txt)
+        ov.write_number(row, 3, len(rungs) - len(base), fmt_txt)
+        ov.write_number(row, 4, sum(1 for p in prov if p.startswith("swept")), fmt_txt)
+        ov.write_number(row, 5, sum(1 for p in prov if p == "imported"), fmt_txt)
+        ov.write(row, 6, ",".join(schemas), fmt_txt)
+        for c, v in ((7, min(pr) if pr else None), (8, max(pr) if pr else None),
+                     (9, float(np.median(pr)) if pr else None),
+                     (10, float(np.median(nd)) if nd else None)):
             ov.write_number(row, c, v, fmt_n) if v is not None else ov.write(row, c, "n/a", fmt_txt)
-        ov.write_number(row, 7, len(live_metrics(rungs)), fmt_txt)
+        ov.write_number(row, 11, len(live_metrics(rungs)), fmt_txt)
         row += 1
+    tot = [r for rungs in ladders.values() for r in rungs]
+    ov.write(row + 1, 0, f"{len(tot)} rungs total, {len(base_arc_only(tot))} at "
+                         f"{BASE_DURATION_S:g} s, "
+                         f"{sum(1 for r in tot if r.metrics.get('provenance','').startswith('swept'))} swept, "
+                         f"{sum(1 for r in tot if r.metrics.get('provenance') == 'imported')} imported.",
+             fmt_s)
 
     # ---- one tab per ladder ----------------------------------------------
     for lad, rungs in ladders.items():
@@ -990,9 +1180,16 @@ def write_excel(path: str, ladders: dict[str, list[Rung]], ref_mode: str, dump_a
         ws.set_column(0, 0, 34)
         ws.set_column(1, len(CONTEXT), 11)
         ws.set_column(1 + len(CONTEXT), 1 + len(CONTEXT) + len(live), 16)
+        base = base_arc_only(rungs)
+        off = [r for r in rungs if not is_base_arc(r)]
         ws.write(0, 0, f"Ladder: {lad}", fmt_t)
         ws.write(1, 0, f"{len(rungs)} rungs; reference = {rungs[ref].name}. "
-                       f"Blank cells are metrics this rung's .mat does not carry.", fmt_s)
+                       f"Blank cells are metrics this rung's .mat does not carry."
+                       + (f"  {len(off)} rung(s) here are NOT at {BASE_DURATION_S:g} s "
+                          f"({', '.join(r.name for r in off)}); they are listed last, "
+                          "are excluded from the charts and from the ratio table below, "
+                          "and are compared against their own base sibling on the "
+                          "'Arc span' tab." if off else ""), fmt_s)
 
         hdr = 3
         m0 = 1 + len(CONTEXT)          # first metric column
@@ -1017,6 +1214,9 @@ def write_excel(path: str, ladders: dict[str, list[Rung]], ref_mode: str, dump_a
                 else:
                     ws.write_blank(rr, m0 + j, None, fmt_txt)
         first, last = hdr + 1, hdr + len(rungs)
+        # charts run over the base-arc block only. Rungs are sorted base-first,
+        # so that block is contiguous and expressible as a single cell range.
+        cfirst, clast = hdr + 1, hdr + max(len(base), 1)
         ws.freeze_panes(hdr + 1, 1)
 
         # delta vs reference, as a ratio (dimensionless, so all metrics share an axis)
@@ -1028,7 +1228,9 @@ def write_excel(path: str, ladders: dict[str, list[Rung]], ref_mode: str, dump_a
         dmetrics = [m for m in live if m.group in ("position", "clock", "attitude", "formation")]
         for j, m in enumerate(dmetrics):
             ws.write(drow, 1 + j, f"{m.label} ratio", fmt_h)
-        for i, r in enumerate(rungs):
+        # base-arc rungs only: a ratio of a 21600 s rung to a 3600 s reference
+        # measures the arc as much as it measures the rung
+        for i, r in enumerate(base):
             rr = drow + 1 + i
             ws.write(rr, 0, r.name, fmt_ref if i == ref else fmt_txt)
             for j, m in enumerate(dmetrics):
@@ -1040,7 +1242,10 @@ def write_excel(path: str, ladders: dict[str, list[Rung]], ref_mode: str, dump_a
                     ws.write_number(rr, 1 + j, v, fmt_n)
                 else:
                     ws.write_blank(rr, 1 + j, None, fmt_txt)
-        dfirst, dlast = drow + 1, drow + len(rungs)
+        dfirst, dlast = drow + 1, drow + max(len(base), 1)
+        if off:
+            ws.write(dlast + 1, 0, f"{len(off)} rung(s) at another arc are excluded "
+                                   "from this table; see the 'Arc span' tab.", fmt_s)
 
         # charts, one per metric group
         anchor_row = dlast + 3
@@ -1055,19 +1260,20 @@ def write_excel(path: str, ladders: dict[str, list[Rung]], ref_mode: str, dump_a
                 col = m0 + live.index(m)
                 ch.add_series({
                     "name": f"{m.label} [{m.unit}]",
-                    "categories": [ws.get_name(), first, 0, last, 0],
-                    "values": [ws.get_name(), first, col, last, col],
+                    "categories": [ws.get_name(), cfirst, 0, clast, 0],
+                    "values": [ws.get_name(), cfirst, col, clast, col],
                     "gap": 40,
                 })
-                vals = [r.metrics.get(m.key, math.nan) for r in rungs]
+                vals = [r.metrics.get(m.key, math.nan) for r in base]
                 logs.append(m.log and use_log(vals))
-            ch.set_title({"name": f"{GROUP_TITLES.get(grp, grp)} - {lad}"})
+            ch.set_title({"name": f"{GROUP_TITLES.get(grp, grp)} - {lad}"
+                                  + (f"  ({BASE_DURATION_S:g} s rungs)" if off else "")})
             ch.set_x_axis({"num_font": {"rotation": -45, "size": 8}})
             yax = {"name": ", ".join(sorted({m.unit for m in mets}))}
             if logs and all(logs):
                 yax["log_base"] = 10
             ch.set_y_axis(yax)
-            ch.set_size({"width": max(680, 34 * len(rungs) + 260), "height": 380})
+            ch.set_size({"width": max(680, 34 * len(base) + 260), "height": 380})
             ch.set_legend({"position": "bottom"})
             ws.insert_chart(anchor_row, 0, ch)
             anchor_row += 20
@@ -1096,8 +1302,8 @@ def write_excel(path: str, ladders: dict[str, list[Rung]], ref_mode: str, dump_a
             sc = wb.add_chart({"type": "scatter"})
             sc.add_series({
                 "name": "rungs",
-                "categories": [ws.get_name(), first, cx, last, cx],
-                "values": [ws.get_name(), first, cy, last, cy],
+                "categories": [ws.get_name(), cfirst, cx, clast, cx],
+                "values": [ws.get_name(), cfirst, cy, clast, cy],
                 "marker": {"type": "circle", "size": 7},
             })
             sc.set_title({"name": f"Accuracy vs consistency - {lad}"})
@@ -1109,44 +1315,173 @@ def write_excel(path: str, ladders: dict[str, list[Rung]], ref_mode: str, dump_a
     # ---- cross-ladder comparison -----------------------------------------
     cmp_ws = wb.add_worksheet(sanitize_sheet("Comparison", used))
     cmp_ws.set_column(0, 0, 22)
-    cmp_ws.set_column(1, 1, 34)
-    cmp_ws.set_column(2, 2 + len(HEADLINE), 18)
+    cmp_ws.set_column(1, 1, 40)
+    cmp_ws.set_column(2, 3, 13)
+    cmp_ws.set_column(4, 4 + len(HEADLINE), 18)
     cmp_ws.write(0, 0, "All rungs, all ladders", fmt_t)
-    cmp_ws.write(1, 0, "Headline metrics side by side. Use the ladder column to filter.", fmt_s)
+    cmp_ws.write(1, 0, "Headline metrics side by side. Filter on Ladder, Arc or Provenance. "
+                       f"Rows are ordered {BASE_DURATION_S:g} s first, then the other arcs; "
+                       "the charts below cover the base-arc block only.", fmt_s)
     hdr = 3
-    cmp_ws.write_row(hdr, 0, ["Ladder", "Rung"]
+    C0 = 4                                   # first metric column
+    cmp_ws.write_row(hdr, 0, ["Ladder", "Rung", "Arc [s]", "Provenance"]
                      + [f"{METRIC_BY_KEY[k].label}\n[{METRIC_BY_KEY[k].unit}]" for k in HEADLINE],
                      fmt_h)
     rr = hdr + 1
-    for lad, rungs in ladders.items():
-        for r in rungs:
-            cmp_ws.write(rr, 0, lad, fmt_txt)
-            cmp_ws.write(rr, 1, r.name, fmt_txt)
-            for j, k in enumerate(HEADLINE):
-                v = r.metrics.get(k, math.nan)
-                if isinstance(v, (int, float)) and math.isfinite(v):
-                    cmp_ws.write_number(rr, 2 + j, float(v), fmt_n)
-                else:
-                    cmp_ws.write_blank(rr, 2 + j, None, fmt_txt)
-            rr += 1
-    cmp_ws.autofilter(hdr, 0, rr - 1, 1 + len(HEADLINE))
+    # base-arc rungs across every ladder first, so the chart range below is one
+    # contiguous block that contains no cross-arc mixing
+    ordered = ([(lad, r) for lad, rungs in ladders.items() for r in rungs if is_base_arc(r)]
+               + [(lad, r) for lad, rungs in ladders.items() for r in rungs if not is_base_arc(r)])
+    n_base_all = sum(1 for _, r in ordered if is_base_arc(r))
+    for lad, r in ordered:
+        cmp_ws.write(rr, 0, lad, fmt_txt)
+        cmp_ws.write(rr, 1, r.name, fmt_txt)
+        arc = arc_of(r)
+        if math.isfinite(arc):
+            cmp_ws.write_number(rr, 2, arc, fmt_txt)
+        else:
+            cmp_ws.write(rr, 2, "?", fmt_txt)
+        cmp_ws.write(rr, 3, str(r.metrics.get("provenance", "")), fmt_txt)
+        for j, k in enumerate(HEADLINE):
+            v = r.metrics.get(k, math.nan)
+            if isinstance(v, (int, float)) and math.isfinite(v):
+                cmp_ws.write_number(rr, C0 + j, float(v), fmt_n)
+            else:
+                cmp_ws.write_blank(rr, C0 + j, None, fmt_txt)
+        rr += 1
+    cmp_ws.autofilter(hdr, 0, rr - 1, C0 - 1 + len(HEADLINE))
     cmp_ws.freeze_panes(hdr + 1, 2)
 
     n_rows = rr - 1 - hdr
+    clast_all = hdr + max(n_base_all, 1)
     for j, k in enumerate(HEADLINE):
         ch = wb.add_chart({"type": "column"})
         ch.add_series({
             "name": METRIC_BY_KEY[k].label,
-            "categories": [cmp_ws.get_name(), hdr + 1, 1, rr - 1, 1],
-            "values": [cmp_ws.get_name(), hdr + 1, 2 + j, rr - 1, 2 + j],
+            "categories": [cmp_ws.get_name(), hdr + 1, 1, clast_all, 1],
+            "values": [cmp_ws.get_name(), hdr + 1, C0 + j, clast_all, C0 + j],
             "gap": 30,
         })
-        ch.set_title({"name": f"{METRIC_BY_KEY[k].label} - every rung"})
+        ch.set_title({"name": f"{METRIC_BY_KEY[k].label} - every rung at "
+                              f"{BASE_DURATION_S:g} s"})
         ch.set_x_axis({"num_font": {"rotation": -45, "size": 7}})
         ch.set_y_axis({"name": METRIC_BY_KEY[k].unit})
         ch.set_size({"width": max(900, 16 * n_rows + 300), "height": 400})
         ch.set_legend({"none": True})
         cmp_ws.insert_chart(rr + 2 + j * 21, 0, ch)
+
+    # ---- arc span: the rungs that are not at the base arc ------------------
+    # These exist because att019/att020 are arc-span gated: the clock noise is
+    # drawn over a fixed 24 h master span, so the realisation stops depending on
+    # the arc and runs at different arcs become comparable to EACH OTHER. That
+    # makes the base sibling, not the ladder reference, the only honest baseline
+    # for them, which is what this tab computes.
+    off_all = [(lad, r) for lad, rungs in ladders.items() for r in rungs if not is_base_arc(r)]
+    if off_all:
+        aw = wb.add_worksheet(sanitize_sheet("Arc span", used))
+        aw.set_column(0, 0, 12)
+        aw.set_column(1, 2, 40)
+        aw.set_column(3, 4, 13)
+        aw.set_column(5, 5 + 2 * len(HEADLINE), 17)
+        aw.write(0, 0, f"Rungs not at {BASE_DURATION_S:g} s", fmt_t)
+        aw.write(1, 0, "Every rung whose arc differs from the tree's base, each grouped "
+                       "under the base rung it shares a config with. The ratio columns are "
+                       "against that base sibling, never against the ladder reference. A "
+                       "base rung with no 3600 s run has no ratio: the absence is the "
+                       "result, and the arc-span rungs are not comparable to the 3600 s "
+                       "ladder either way.", fmt_s)
+        hdr = 3
+        R0 = 5 + len(HEADLINE)
+        aw.write_row(hdr, 0, ["Ladder", "Base rung", "Rung", "Arc [s]", "Provenance"]
+                     + [f"{METRIC_BY_KEY[k].label}\n[{METRIC_BY_KEY[k].unit}]" for k in HEADLINE]
+                     + [f"{METRIC_BY_KEY[k].label}\nratio to base" for k in HEADLINE], fmt_h)
+        # index every rung by its base name so a sibling lookup is exact
+        by_base: dict[tuple[str, str], list[Rung]] = {}
+        for lad, rungs in ladders.items():
+            for r in rungs:
+                by_base.setdefault((lad, str(r.metrics.get("base_rung", r.name))), []).append(r)
+        ar = hdr + 1
+        for key in sorted({(lad, str(r.metrics.get("base_rung", r.name))) for lad, r in off_all}):
+            lad, bname = key
+            fam = sorted(by_base.get(key, []), key=lambda r: (not is_base_arc(r), arc_of(r)))
+            anchor = next((r for r in fam if is_base_arc(r)), None)
+            for r in fam:
+                aw.write(ar, 0, lad, fmt_txt)
+                aw.write(ar, 1, bname, fmt_txt)
+                aw.write(ar, 2, r.name, fmt_ref if r is anchor else fmt_txt)
+                arc = arc_of(r)
+                if math.isfinite(arc):
+                    aw.write_number(ar, 3, arc, fmt_txt)
+                else:
+                    aw.write(ar, 3, "?", fmt_txt)
+                aw.write(ar, 4, str(r.metrics.get("provenance", "")), fmt_txt)
+                for j, k in enumerate(HEADLINE):
+                    v = r.metrics.get(k, math.nan)
+                    if isinstance(v, (int, float)) and math.isfinite(v):
+                        aw.write_number(ar, 5 + j, float(v), fmt_n)
+                    else:
+                        aw.write_blank(ar, 5 + j, None, fmt_txt)
+                    q = (_safe_ratio(v, anchor.metrics.get(k, math.nan))
+                         if anchor is not None and isinstance(v, (int, float)) else math.nan)
+                    if isinstance(q, float) and math.isfinite(q):
+                        aw.write_number(ar, R0 + j, q, fmt_n)
+                    else:
+                        aw.write_blank(ar, R0 + j, None, fmt_txt)
+                ar += 1
+            if anchor is None:
+                aw.write(ar, 2, f"(no {BASE_DURATION_S:g} s run of {bname} exists)", fmt_s)
+                ar += 1
+        aw.freeze_panes(hdr + 1, 3)
+
+    # ---- notes: what this tree is, and what must not be compared -----------
+    nw = wb.add_worksheet(sanitize_sheet("Notes", used))
+    nw.set_column(0, 0, 118)
+    allr_n = [r for rungs in ladders.values() for r in rungs]
+    n_off = sum(1 for r in allr_n if not is_base_arc(r))
+    notes = [
+        ("How this workbook was built", None),
+        (f"{len(allr_n)} rungs read from {len(ladders)} ladders, straight from each rung's "
+         ".mat. Nothing here calls MATLAB or the simulation; every number is read or "
+         "recomputed from a stored history.", "s"),
+        ("", None),
+        ("Provenance: these rungs did not all come from one pass", None),
+        (f"{sum(1 for r in allr_n if str(r.metrics.get('provenance','')).startswith('swept'))} rungs "
+         "carry _OK and were produced by the sweep driver from one frozen snapshot of the "
+         f"tree. {sum(1 for r in allr_n if r.metrics.get('provenance') == 'imported')} carry "
+         "_IMPORTED.txt and were copied in from ad-hoc runs made by the live tree weeks "
+         "later. Code changed in between, so a comparison that crosses that boundary is not "
+         "automatically like-for-like; the Provenance column is on every tab so the boundary "
+         "is visible at the point a number is read.", "s"),
+        ("", None),
+        ("Arc length: aggregates never mix arcs", None),
+        (f"{n_off} rung(s) are not at {BASE_DURATION_S:g} s. They appear in full in their "
+         "ladder's table with their arc in the duration_s column, but they are excluded from "
+         "every pooled statistic, from the ladder charts and from the ratio-to-reference "
+         "table, because a tail metric over a longer arc does not measure the same thing. "
+         "They are compared against their own base sibling on the 'Arc span' tab instead.",
+         "s"),
+        ("", None),
+        ("Two directories that are not rungs", None),
+        ("A directory carrying _RENAMED.txt is a pre-rename alias: the same run kept under "
+         "its old name so it still resolves, byte-identical to the copy under the new name. "
+         "Those are skipped, so a renamed rung is counted once. A superseded run parked under "
+         "a directory beginning with _ (for example _superseded_ts120/) is never descended "
+         "into and cannot appear as a rung of its own.", "s"),
+        ("", None),
+        ("One thing this workbook deliberately does not key on", None),
+        ("report.runVersion. A config that declares no report block inherits runVersion "
+         "through _extends, so the arc-span rungs att019 and att020 carry their parents' "
+         "'att011' and 'att012'. Rungs here are identified by directory name, with "
+         "scenario.name read from the .mat alongside it; runVersion is not used to match "
+         "anything.", "s"),
+    ]
+    nrow = 0
+    for text, kind in notes:
+        if not text:
+            nrow += 1
+            continue
+        nw.write(nrow, 0, text, fmt_s if kind == "s" else fmt_t)
+        nrow += 1
 
     if dump_all:
         allkeys: set[str] = set()
@@ -1421,6 +1756,14 @@ def write_pdf(outdir: str, ladders: dict[str, list[Rung]], ref_mode: str) -> lis
             continue
         ref = pick_reference(rungs, ref_mode)
         names = [r.name for r in rungs]
+        # the absolute bar charts show every rung, arc suffix and all. The ratio
+        # pages do not: a ratio against a reference at a different arc measures
+        # the arc as much as the rung, so those run over the base block only.
+        base = base_arc_only(rungs)
+        bnames = [r.name for r in base]
+        # identity, not equality: Rung is a dataclass whose fields hold numpy
+        # arrays, so `in` / .index() would compare those elementwise and raise
+        bref = next((i for i, b in enumerate(base) if b is rungs[ref]), 0)
         safe = re.sub(r"[^\w.-]", "_", lad)
         p = os.path.join(figdir, f"{safe}.pdf")
 
@@ -1436,15 +1779,20 @@ def write_pdf(outdir: str, ladders: dict[str, list[Rung]], ref_mode: str) -> lis
             fig.text(0.5, 0.48, f"{len(live)} metrics with data   "
                                 f"schemas: {', '.join(sorted({r.metrics.get('schema','?') for r in rungs}))}",
                      ha="center", size=10, color="#555")
+            _off = len(rungs) - len(base)
             fig.text(0.5, 0.38, "Reference rung is highlighted in orange on every bar chart.\n"
-                                "Bars marked n/a are metrics this rung's .mat does not carry.",
+                                "Bars marked n/a are metrics this rung's .mat does not carry."
+                                + (f"\n{_off} rung(s) are not at {BASE_DURATION_S:g} s and are "
+                                   "shown on the absolute bar charts only, never on the "
+                                   "ratio pages." if _off else ""),
                      ha="center", size=9, color="#666")
             pdf.savefig(fig)
             plt.close(fig)
 
             # the differences first: that is what a ladder is read for
             headline = [m for m in live if m.key in HEADLINE] or live[:4]
-            pct_page(pdf, lad, rungs, headline, ref, names)
+            if base:
+                pct_page(pdf, lad, base, headline, bref, bnames)
 
             for grp, mets in by_group.items():
                 for chunk in [mets[i:i + 4] for i in range(0, len(mets), 4)]:
@@ -1467,20 +1815,20 @@ def write_pdf(outdir: str, ladders: dict[str, list[Rung]], ref_mode: str) -> lis
 
             # every error channel against the reference, on one dimensionless axis
             dm = [m for m in live if m.group in ("position", "clock", "attitude", "formation")]
-            if dm:
-                fig, ax = plt.subplots(figsize=(max(11.7, 0.36 * len(rungs)), 6.4))
+            if dm and base:
+                fig, ax = plt.subplots(figsize=(max(11.7, 0.36 * len(base)), 6.4))
                 w = 0.8 / len(dm)
-                x = np.arange(len(rungs))
+                x = np.arange(len(base))
                 for j, m in enumerate(dm):
-                    b = rungs[ref].metrics.get(m.key, math.nan)
-                    vals = [_safe_ratio(r.metrics.get(m.key, math.nan), b) for r in rungs]
+                    b = base[bref].metrics.get(m.key, math.nan)
+                    vals = [_safe_ratio(r.metrics.get(m.key, math.nan), b) for r in base]
                     ax.bar(x + j * w - 0.4 + w / 2,
                            [np.nan if not math.isfinite(v) else v for v in vals],
                            width=w, label=m.label, edgecolor="#333", linewidth=0.3)
                 ax.axhline(1.0, color="#2E7D32", ls="--", lw=1.4)
                 ax.set_yscale("log")
                 ax.set_xticks(x)
-                ax.set_xticklabels(names, rotation=60, ha="right", fontsize=6.5)
+                ax.set_xticklabels(bnames, rotation=60, ha="right", fontsize=6.5)
                 ax.set_ylabel("ratio to reference (1.0 = unchanged)")
                 ax.set_title(f"Every error channel vs {rungs[ref].name} - {lad}", size=11)
                 ax.legend(fontsize=7, ncol=min(4, len(dm)))
@@ -1553,7 +1901,9 @@ def write_pdf(outdir: str, ladders: dict[str, list[Rung]], ref_mode: str) -> lis
             for key in HEADLINE:
                 data, labels = [], []
                 for lad, rungs in ladders.items():
-                    v = [r.metrics.get(key, math.nan) for r in rungs]
+                    # a box is a distribution over the ladder, so it is the one
+                    # place a non-base arc would silently change the statistic
+                    v = [r.metrics.get(key, math.nan) for r in base_arc_only(rungs)]
                     v = [q for q in v if isinstance(q, (int, float)) and math.isfinite(q)]
                     if len(v) >= 2:
                         data.append(v)
@@ -1572,7 +1922,8 @@ def write_pdf(outdir: str, ladders: dict[str, list[Rung]], ref_mode: str) -> lis
                     ax.axhline(m.target, color="#2E7D32", ls="--", lw=1.2)
                 ax.set_ylabel(f"{m.label} [{m.unit}]")
                 ax.set_xticklabels(labels, rotation=25, ha="right", fontsize=8)
-                ax.set_title(f"Spread of {m.label} within each ladder", size=12, weight="bold")
+                ax.set_title(f"Spread of {m.label} within each ladder "
+                             f"({BASE_DURATION_S:g} s rungs only)", size=12, weight="bold")
                 fig.tight_layout()
                 pdf.savefig(fig)
                 plt.close(fig)
@@ -1641,13 +1992,31 @@ def main(argv=None) -> int:
         print(f"  [{i:3d}/{len(mats)}] {lad:<28s} {rung.name:<40s} "
               f"{rung.metrics.get('schema','?')}")
     for lad in ladders:
-        ladders[lad].sort(key=lambda r: r.name)
+        # base-arc rungs first, then the other arcs, each alphabetically. The
+        # order is load-bearing: every chart range in the workbook covers the
+        # base block, which is only a range if those rungs are contiguous.
+        ladders[lad].sort(key=lambda r: (not is_base_arc(r), r.name))
     ladders = dict(sorted(ladders.items()))
 
     print(f"\n{len(ladders)} ladders:")
     for lad, rungs in ladders.items():
+        n_off = sum(1 for r in rungs if not is_base_arc(r))
         print(f"  {lad:<28s} {len(rungs):3d} rungs, "
-              f"{len(live_metrics(rungs)):2d} metrics with data")
+              f"{len(live_metrics(rungs)):2d} metrics with data"
+              + (f", {n_off} off-base arc" if n_off else ""))
+
+    allr = [r for rungs in ladders.values() for r in rungs]
+    n_base = len(base_arc_only(allr))
+    prov: dict[str, int] = {}
+    for r in allr:
+        prov[str(r.metrics.get("provenance", "?"))] = prov.get(
+            str(r.metrics.get("provenance", "?")), 0) + 1
+    print(f"\n{len(allr)} rungs: {n_base} at {BASE_DURATION_S:g} s, "
+          f"{len(allr) - n_base} at another arc")
+    print("  provenance: " + ", ".join(f"{k} {v}" for k, v in sorted(prov.items())))
+    off = [r for r in allr if not is_base_arc(r)]
+    for r in sorted(off, key=lambda r: (arc_of(r), r.name)):
+        print(f"    off-base  {arc_of(r):8.0f} s  {r.ladder}/{r.name}")
 
     print()
     if "csv" in formats:
@@ -1657,6 +2026,15 @@ def main(argv=None) -> int:
         xp = os.path.join(args.out, args.name + ".xlsx")
         if write_excel(xp, ladders, args.ref, args.dump_all):
             print(f"  wrote {xp}")
+        # --name defaults to ladder_comparison, so a run that meant to refresh a
+        # differently named workbook leaves the old one sitting there looking
+        # current. That has already happened once in this output directory.
+        stale = sorted(f for f in os.listdir(args.out)
+                       if f.endswith(".xlsx") and f != os.path.basename(xp))
+        for f in stale:
+            print(f"  ! {f} in this directory was NOT regenerated by this run "
+                  f"(--name is '{args.name}'). It still describes an earlier scan.",
+                  file=sys.stderr)
     if "pdf" in formats:
         for p in write_pdf(args.out, ladders, args.ref):
             print(f"  wrote {p}")
