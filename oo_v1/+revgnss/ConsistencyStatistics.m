@@ -190,9 +190,18 @@ classdef ConsistencyStatistics
         end
 
         function r = defaultResult_()
+            % SHAPE MUST MATCH groupStat_'s RETURN, field for field. It did not between
+            % 2026-08-17 and today: groupStat_ returns lag1Autocorr and nEff, this struct
+            % did not carry them, and the two-way channel falls back to THIS struct
+            % whenever two-way time transfer is unavailable, which is the entire
+            % single-asset ladder. ReportRunner then read .nEff off it, threw, and its
+            % bare catch NaN'd all eleven arcNis metrics -- including the ones already
+            % computed correctly. Adding a group statistic here without adding it to
+            % groupStat_ (or the reverse) re-arms exactly that failure.
             empty = struct('status','notAvailable','mean',NaN,'nisPerDof',NaN, ...
                            'median',NaN,'p95',NaN,'expectedDof',NaN, ...
-                           'fractionInside',NaN,'nSamples',0);
+                           'fractionInside',NaN,'nSamples',0, ...
+                           'lag1Autocorr',NaN,'nEff',NaN);
             r.available      = false;
             r.nisOverall     = empty;
             r.nisCode        = empty;

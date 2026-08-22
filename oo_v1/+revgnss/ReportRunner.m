@@ -3769,7 +3769,14 @@ classdef ReportRunner
                 % and every conclusion drawn today about R came from exactly this split.
                 summary.arcNisTable = revgnss.ConsistencyStatistics.formatNisTable(arcCs);
                 fprintf('\n%s\n', summary.arcNisTable);
-            catch
+            catch ME_arcNis_
+                % NEVER SILENT. This block went dead on 2026-08-17 and nothing said so
+                % for five days: eleven metrics read NaN and every rung quoting them
+                % lost its evidence, while the run still reported success. A diagnostic
+                % that can fail quietly is one you cannot trust when it succeeds.
+                warning('ReportRunner:arcNisFailed', ...
+                    'Per-channel arc NIS unavailable, all arcNis* metrics are NaN: %s', ...
+                    ME_arcNis_.message);
                 summary.arcNisCodePerDof     = NaN;
                 summary.arcNisCarrierPerDof  = NaN;
                 summary.arcNisDopplerPerDof  = NaN;
