@@ -10,6 +10,9 @@
   "_cost": "THIS IS THE EXPENSIVE RUNG. Rows and states scale with the tower count: expect ~630 rows/epoch (30 towers x ~20 rows + 30 two-way) and ~320 states, against the golden's 105 and 67. The EKF Jacobian is finite-differenced, so cost grows faster than linearly in the state dimension -- budget accordingly and read the smoke-test epoch rate before assuming a wall-clock.",
   "_readWithCare": "A 30-site ground network for ONE GEO is a geometry study, not a deployment proposal. It is also far outside the requirement set: R-MIS-010/-040 and the ground-segment sizing in the SA requirements are derived at G5. Do not quote a scene020 number against those targets without restating them at G30 or declaring the result outside the requirement set.",
 
+  "_monteCarloDisabled": "⚠ MONTE CARLO IS OFF ON THIS RUNG ONLY, AND THAT BREAKS ONE COMPARISON. golden_baseline.json sets report.monteCarlo.enable true (12 seeds x 900 s) and every other scene rung inherits it; this file overrides it to false. REASON, recorded so it is not mistaken for a preference: the first scene020 attempt (2026-08-22, 3600 s) was SIGKILLed by the macOS out-of-memory killer at epoch 2400 of 3601 (rc=137, crash dump matlab_crash_dump.6943-1, stack inside libomp). The host is an 8-core / 16 GB machine that was already at 11.2 of 12.3 GB swap from other processes, with load average 135. At 317 states and 630 rows/epoch this rung is the heaviest on the ladder, and the 12 x 901-epoch MC block is three times the filtering work of the arc itself, so it is what pushed the host over.",
+  "_whatIsLostByThat": "NO NEES / NIS ENSEMBLE VERDICT. A single run yields ONE covariance sample, which is why the golden baseline runs the ensemble at all. scene019 (G12) returned NEES/dof 15.778 against a [0.972, 1.029] band, i.e. the state covariance is NOT honest at 12 towers, and whether a 30-site network moves that number is the single most interesting question on this axis. scene020 as configured CANNOT answer it. Everything else still compares cleanly to scene008 and scene019: position error, tail RMS, per-run NIS/dof by channel, tower visibility and geometry. To recover the NEES comparison, re-run this rung with monteCarlo.enable true on a machine with no other MATLAB engine and free swap; budget about 2.6 h for the MC block on top of a ~45 min arc at the measured uncontended 0.75 s/epoch.",
+
   "scenario": {
     "name": "scene020_G30S1R4_TW1_golden",
     "nTowers": 30,
@@ -26,6 +29,9 @@
   },
 
   "report": {
-    "runVersion": "scene020"
+    "runVersion": "scene020",
+    "monteCarlo": {
+      "enable": false
+    }
   }
 }
