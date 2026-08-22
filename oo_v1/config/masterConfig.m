@@ -255,9 +255,16 @@ cfg.clock.customOscillators       = struct();
 %   would reintroduce the very dependence this removes. A run longer than span_s is a
 %   hard error, not a silent re-synthesis.
 %
-%   The Allan deviation is unaffected: over 8 seeds the windowed series tracks the
-%   flicker floor to within the same ~1 % as the legacy one, and it drops the legacy
-%   bump near tau = T/12 that is an artefact of the FFT wrapping on itself.
+%   The Allan deviation stays on the flicker floor, which is the claim the gate test
+%   actually asserts: over 12 seeds (test_clock_noise_master_span, sd = 211:222) the
+%   windowed series sits inside a +-15 % band. MEASURED ADEV/theory at tau = 10/60/300 s:
+%   legacy 0.981/1.013/0.982, windowed 0.998/1.012/0.940. Note the direction at the
+%   longest tau probed -- the windowed series is FURTHER from theory there (6.0 % low
+%   against 1.8 %), not closer, so this gate is not an accuracy improvement in the
+%   Allan sense and must not be sold as one. Whether it removes the legacy bump near
+%   tau = T/12 is NOT MEASURED: the test series is 7200 s, so T/12 = 600 s, and the
+%   probe points stop at 300 s. An earlier version of this note claimed 8 seeds, a
+%   ~1 % agreement and a removed bump. None of the three was measured.
 %
 %   NOT byte-identical when enabled: every clock realisation changes, so the
 %   regression goldens must be re-cut in the same commit that flips the default.
