@@ -26,7 +26,10 @@ function pdfPath = regenerate_report_from_mat(matPath, outFolder)
 %   See also: run_oo_v1, plot_mat_report, revgnss.ClockExactReportBuilder,
 %             revgnss.SwarmReportReplay
 
-    thisDir = fileparts(mfilename('fullpath'));
+    thisDir = fileparts(fileparts(mfilename('fullpath')));   % repo root, NOT scripts/
+    % This file moved into scripts/ on 2026-08-23. Every fullfile(thisDir,...) below
+    % resolves against the REPOSITORY ROOT, so the extra fileparts is load-bearing:
+    % without it config/, output/ and tests/ would be looked for inside scripts/.
     addpath(thisDir); addpath(fullfile(thisDir,'config'));
 
     if nargin < 1 || isempty(matPath) || strcmpi(matPath,'latest')

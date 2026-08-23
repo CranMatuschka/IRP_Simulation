@@ -4,7 +4,10 @@ function run_swarm_check(dur_s, tag)
 %   run_swarm_check(600, 'reportcheck')
 if nargin < 1 || isempty(dur_s); dur_s = 600; end
 if nargin < 2 || isempty(tag);   tag   = 'swarmcheck'; end
-thisDir = fileparts(mfilename('fullpath'));
+thisDir = fileparts(fileparts(mfilename('fullpath')));   % repo root, NOT scripts/
+% This file moved into scripts/ on 2026-08-23. Every fullfile(thisDir,...) below
+% resolves against the REPOSITORY ROOT, so the extra fileparts is load-bearing:
+% without it config/, output/ and tests/ would be looked for inside scripts/.
 addpath(thisDir); addpath(fullfile(thisDir,'config'));
 
 cfg = masterConfig();                 % swarm default (nSpaceAssets>1)

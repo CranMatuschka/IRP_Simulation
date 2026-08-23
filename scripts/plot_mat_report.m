@@ -28,7 +28,10 @@ function figOut = plot_mat_report(matPath)
 %
 %   See also: run_oo_v1, run_ladder, revgnss.OrbitFrame
 
-    thisDir = fileparts(mfilename('fullpath'));
+    thisDir = fileparts(fileparts(mfilename('fullpath')));   % repo root, NOT scripts/
+    % This file moved into scripts/ on 2026-08-23. Every fullfile(thisDir,...) below
+    % resolves against the REPOSITORY ROOT, so the extra fileparts is load-bearing:
+    % without it config/, output/ and tests/ would be looked for inside scripts/.
     addpath(thisDir);                       % +revgnss / +data packages
     addpath(fullfile(thisDir, 'config'));
 

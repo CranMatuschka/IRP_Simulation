@@ -50,7 +50,10 @@ function manifest = run_oo_v1_freqbattery(varargin)
     p.parse(varargin{:});
     o = p.Results;
 
-    thisDir = fileparts(mfilename('fullpath'));
+    thisDir = fileparts(fileparts(mfilename('fullpath')));   % repo root, NOT scripts/
+    % This file moved into scripts/ on 2026-08-23. Every fullfile(thisDir,...) below
+    % resolves against the REPOSITORY ROOT, so the extra fileparts is load-bearing:
+    % without it config/, output/ and tests/ would be looked for inside scripts/.
     addpath(thisDir); addpath(fullfile(thisDir,'config')); addpath(fullfile(thisDir,'config','internal'));
     if isempty(o.OutRoot); o.OutRoot = fullfile(thisDir,'output','FrequencyTests'); else; o.OutRoot = char(o.OutRoot); end
     if ~isfolder(o.OutRoot); mkdir(o.OutRoot); end

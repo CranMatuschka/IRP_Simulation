@@ -31,7 +31,10 @@ function A = run_oo_v1_analysis(sel, varargin)
 %
 %   See also: run_oo_v1_battery, run_ladder, plot_mat_report, run_oo_v1.
 
-    thisDir = fileparts(mfilename('fullpath'));
+    thisDir = fileparts(fileparts(mfilename('fullpath')));   % repo root, NOT scripts/
+    % This file moved into scripts/ on 2026-08-23. Every fullfile(thisDir,...) below
+    % resolves against the REPOSITORY ROOT, so the extra fileparts is load-bearing:
+    % without it config/, output/ and tests/ would be looked for inside scripts/.
     addpath(thisDir); addpath(fullfile(thisDir,'config'));
 
     p = inputParser;

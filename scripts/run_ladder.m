@@ -23,7 +23,10 @@ function results = run_ladder(idx, durationOverride_s, description, nTowersOverr
 %
 %   See also: run_oo_v1, plot_mat_report, RUN_PLAN_scenario_ladder.
 
-    thisDir = fileparts(mfilename('fullpath'));
+    thisDir = fileparts(fileparts(mfilename('fullpath')));   % repo root, NOT scripts/
+    % This file moved into scripts/ on 2026-08-23. Every fullfile(thisDir,...) below
+    % resolves against the REPOSITORY ROOT, so the extra fileparts is load-bearing:
+    % without it config/, output/ and tests/ would be looked for inside scripts/.
     addpath(thisDir);
     addpath(fullfile(thisDir, 'config'));
 

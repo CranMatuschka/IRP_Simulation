@@ -11,7 +11,10 @@ function run_product_interval_probe()
 %   frozen reference. 90 s is the longest interval that keeps the product age
 %   inside validity_s = 120, so no validity policy fires and one key moves.
 
-    here = fileparts(mfilename('fullpath'));
+    here = fileparts(fileparts(mfilename('fullpath')));   % repo root, NOT scripts/
+    % This file moved into scripts/ on 2026-08-23. Every fullfile(here,...) below
+    % resolves against the REPOSITORY ROOT, so the extra fileparts is load-bearing:
+    % without it config/, output/ and tests/ would be looked for inside scripts/.
     cd(here);
     addpath(here);
     addpath(fullfile(here, 'config'));

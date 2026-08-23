@@ -42,7 +42,10 @@ function results = run_error_ladder(mode, varargin)
 %
 %   See also: run_ladder, run_oo_v1_battery, run_oo_v1_analysis, run_tests_all.
 
-    thisDir = fileparts(mfilename('fullpath'));
+    thisDir = fileparts(fileparts(mfilename('fullpath')));   % repo root, NOT scripts/
+    % This file moved into scripts/ on 2026-08-23. Every fullfile(thisDir,...) below
+    % resolves against the REPOSITORY ROOT, so the extra fileparts is load-bearing:
+    % without it config/, output/ and tests/ would be looked for inside scripts/.
     addpath(thisDir); addpath(fullfile(thisDir,'config'));
 
     mode = lower(char(mode));

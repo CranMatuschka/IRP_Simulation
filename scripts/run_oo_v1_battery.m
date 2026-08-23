@@ -47,7 +47,10 @@ function manifest = run_oo_v1_battery(varargin)
     o = p.Results;
     o.Atmosphere = lower(char(o.Atmosphere));
 
-    thisDir = fileparts(mfilename('fullpath'));
+    thisDir = fileparts(fileparts(mfilename('fullpath')));   % repo root, NOT scripts/
+    % This file moved into scripts/ on 2026-08-23. Every fullfile(thisDir,...) below
+    % resolves against the REPOSITORY ROOT, so the extra fileparts is load-bearing:
+    % without it config/, output/ and tests/ would be looked for inside scripts/.
     addpath(thisDir); addpath(fullfile(thisDir,'config')); addpath(fullfile(thisDir,'config','internal'));
     dateStr  = datestr(now,'yyyymmdd'); %#ok<TNOW1,DATST>
     [runClass, grpName] = revgnss.RunLabelUtils.batteryClassAndGroup(o.Realism, o.HonestCov, o.Atmosphere);
