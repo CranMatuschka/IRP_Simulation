@@ -32,7 +32,10 @@ GOLDEN = 0.618
 # This file sits in IRP/Codes/IRP_Simulation/thesis_figures/.
 HERE = os.path.dirname(os.path.abspath(__file__))
 SIMDIR = os.path.abspath(os.path.join(HERE, os.pardir))                 # IRP_Simulation
-OO_V1 = os.path.join(SIMDIR, "oo_v1")                                   # runs and sweeps
+# oo_v1 WAS a subdirectory and IS the repository root as of 2026-08-23, so the runs
+# and sweeps sit beside this folder rather than one level in. SIMDIR is unchanged:
+# thesis_figures did not move, the tree around it did.
+OO_V1 = SIMDIR                                                          # runs and sweeps
 SWEEP = os.path.join(OO_V1, "IRP Ladder Results Final")                 # the frozen sweep
 THESIS = os.path.abspath(os.path.join(SIMDIR, os.pardir, os.pardir, "Test"))
 FIGDIR = os.path.join(THESIS, "figures")                                # thesis figures/
