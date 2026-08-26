@@ -1,6 +1,5 @@
 % test_golden_ground_orientation  The regression gate for the ground-referenced orientation
-% commit ladder (docs/ground_referenced_orientation_execution_plan.md, acceptance tests T1 and
-% T10).
+% stages (acceptance tests T1 and T10).
 %
 % TWO MODES, AND THE DIFFERENCE MATTERS.
 %

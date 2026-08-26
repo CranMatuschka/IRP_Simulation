@@ -66,9 +66,8 @@ from a regression that was papered over.
 
 ### 2026-08-05 — initial cut
 
-All three fixtures cut for the first time, against the commit ladder in
-`docs/ground_referenced_orientation_execution_plan.md` Phases A–G and F. Nothing to compare
-against; this is the baseline the ladder is measured from.
+All three fixtures cut for the first time, against the ground-referenced orientation stages.
+Nothing to compare against; this is the baseline everything else is measured from.
 
 Verified at cut time: `test006_groundOrientationInert120` and `test007_groundOrientationSmoke120` both
 reproduce **bit-for-bit** on a re-run (81 values, relative tolerance 1e-12 and 1e-9).

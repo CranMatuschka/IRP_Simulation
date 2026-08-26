@@ -61,7 +61,7 @@ convergence AND covariance consistency).
 
 Note this is a FLOAT ambiguity: it absorbs the per-arc clock/hardware bias and is
 therefore NOT an integer. Integer resolution needs a differenced parametrisation --
-see `docs/plans/ISL_LAMBDA/03_LAMBDA_INTEGER_RESOLUTION.md`.
+see `docs/LAMBDA_SETUP.md`.
 
 ### ISL arcs and cycle slips (Phase 1d)
 

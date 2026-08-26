@@ -6,7 +6,7 @@ classdef IslCarrierTrackManager < handle
     % the link-agnostic revgnss.AmbiguityKey ('ISL_a00T_a00R_S0S'), so the frozen
     % ground-carrier tracker (keyed 'T%03d_A%03d_S%02d') is left completely untouched.
     %
-    % WHY A SEPARATE TRACKER (decision 4b in docs/plans/ISL_LAMBDA/01):
+    % WHY A SEPARATE TRACKER:
     %   The ground tracker's key has no LINK dimension and its resetRequests carry
     %   tower/receiver/signal. Generalising it in place would touch the byte-identical
     %   ground path; a parallel tracker costs some duplication but cannot regress it.

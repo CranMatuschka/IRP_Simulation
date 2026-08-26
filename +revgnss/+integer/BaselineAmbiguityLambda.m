@@ -1,7 +1,7 @@
 classdef BaselineAmbiguityLambda
     % BaselineAmbiguityLambda  Formal LAMBDA assessment of the attitude-baseline fix.
     %
-    % Route A of docs/plans/ISL_LAMBDA/03: between-antenna single differencing cancels BOTH
+    % Between-antenna single differencing cancels BOTH
     % the receiver and the tower clock, so the differential ambiguity dN is a TRUE INTEGER.
     % It is the only integer-ready parametrisation in this codebase, which makes it the
     % right place to put the LAMBDA engine to work on live data.

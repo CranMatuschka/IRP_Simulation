@@ -74,9 +74,33 @@ be resolved. `LambdaResolver.assertIntegerParametrisation` makes that explicit a
 site, and the success-rate gate will usually reject a contaminated vector anyway — but the
 assertion is the contract.
 
-See `docs/plans/ISL_LAMBDA/03_LAMBDA_INTEGER_RESOLUTION.md` for the three routes (A:
-between-antenna attitude — already integer-ready; B: between-satellite ISL; C: PPP-AR,
-which needs a phase-bias product that does not exist here).
+## Which vectors qualify, and what each costs in EKF states
+
+Three observables can in principle be resolved. They differ in whether the integer
+parametrisation is already available and in what the filter has to carry.
+
+**Between-antenna attitude (ground link).** The differential ambiguity
+`ΔB(tower, antenna-baseline, signal)` is formed and calibrated in `DiffAttitudeBuilder.m`,
+so it is integer-parametrised as it stands. LAMBDA replaces the per-baseline search in
+`BaselineCarrierAmbiguityResolver` with an ILS over `ΔB` and its covariance. **No new EKF
+states.** This is the one route that is ready without further modelling.
+
+**Between-satellite ISL.** Double-difference across the neighbour graph (two satellites ×
+two references); the DD ambiguity `∇ΔN` is a true integer. Costs one float ambiguity state
+per link × signal. Apply the DD transform at the LAMBDA boundary rather than holding DD
+ambiguities as states, the same way a wide-lane/narrow-lane combination is a transform and
+not a state. A fixed DD sharpens relative shape, complementary to `SwarmRelativeSolver`.
+
+**Absolute position (PPP-AR).** A single receiver cannot double-difference, so the
+undifferenced ambiguity stays bias-contaminated. Resolving it needs both clock removal via
+`TwoWayTimeTransferBuilder.m` and an external carrier phase-bias product (FCB or UPD).
+**No such product exists here**, and it would be a new state or a supplied product with its
+own covariance. Expect little even if it were built: absolute AR from the 8.7° nadir cone
+runs into the radial↔clock wall.
+
+TWSTFT and LAMBDA are duals rather than alternatives — the two-way sum is range, which needs
+ambiguity resolution, and the two-way difference is clock. Time transfer is often what makes
+a vector resolvable in the first place.
 
 ## References (PDFs ship with the toolbox)
 

@@ -61,8 +61,7 @@ function dg = swarmRelativeDigest_()
     % shape scalars above are computed (SwarmRelativeSolver:276 vs :308/:325), so enabling
     % them adds digest fields WITHOUT moving any pre-existing one -- verified by comparing
     % the recaptured baseline's `scalars` against the previous one. They are enabled here
-    % because docs/ground_referenced_orientation_execution_plan.md Phases B-E rewrite both
-    % classes, and a gate that left them off would catch none of it.
+    % because the ground-referenced work rewrites both classes, and a gate that left them off would catch none of it.
     % NOTE the 300 s arc turns the formation ~1.25 deg, far below the ~90 deg needed to
     % separate an arc-constant shape offset from an arc-constant rotation. The rotation
     % numbers below are therefore MEANINGLESS AS SCIENCE and are here only as a

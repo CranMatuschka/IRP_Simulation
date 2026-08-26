@@ -23,9 +23,9 @@ function cfg = resolveEnablePairsPostMerge(cfg, effectPaths)
 %     - scenario wrote neither                -> leave everything as masterConfig resolved it
 %
 %   With no scenario JSON the provenance list is empty and this function is a no-op, so the
-%   frozen goldens are byte-identical. See docs/plans/TOGGLE_TRUTH/02_toggle_audit_violations.md.
+%   frozen goldens are byte-identical.
 %
-%   OWNERSHIP IS PER LEVEL, NOT PER RUN (fixed 2026-08-09). The flat cfg.provenance.explicit
+%   OWNERSHIP IS PER LEVEL, NOT PER RUN. The flat cfg.provenance.explicit
 %   list cannot answer the question this function asks. resolveSimulationConfig flattens the
 %   whole "_extends" chain into ONE overlay before deepMergeConfig walks it, so a pair member
 %   INHERITED from golden_baseline.json is recorded exactly like one the child declared. The

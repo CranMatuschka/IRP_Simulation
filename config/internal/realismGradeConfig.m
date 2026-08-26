@@ -3,9 +3,8 @@ function cfg = realismGradeConfig(cfg)
 %   cfg = realismGradeConfig(masterConfig())        % or set cfg.realism.grade=true in masterConfig
 %
 %   De-optimises the idealised headline defaults so a run is PHYSICALLY REPRESENTATIVE of a
-%   real one-way >=5-tower GEO reverse-GNSS system rather than an oracle twin. Every change
-%   here is a config-level fix from docs/scientific_correctness_review_v4.md; the frozen
-%   goldens pin their own values and are untouched (this overlay is opt-in, default OFF).
+%   real one-way >=5-tower GEO reverse-GNSS system rather than an oracle twin. The overlay is
+%   opt-in and default OFF; the frozen goldens pin their own values and are untouched.
 %   User-facing scenario runs select this profile through config/realism.json.
 %
 %   PER-EFFECT SUB-TOGGLES: each block below is gated on cfg.realism.include.<name> (all
@@ -353,11 +352,8 @@ function inc = i_resolveIncludes(cfg)
         'phaseBiasHonesty',        true, ...   % report the RESOLVED phase-bias status, not the ideal one
         'attitudeSensorNoise',     true);      % conservative star-tracker and gyro noise
 
-    % The last two replace the former 'point34'. That name came from the section headings of
-    % docs/attitude_improvement_review/point_3_*.md and point_4a_*.md, so it named where the
-    % idea was written down rather than what it does -- and it bundled two unrelated concerns.
-    % Note both differ in KIND from the effects above: those add physical error sources to the
-    % truth, whereas these change estimator behaviour and reporting honesty. Turning them off
+    % The last two differ in KIND from the effects above: those add physical error sources to
+    % the truth, whereas these change estimator behaviour and reporting honesty. Turning them off
     % does not make the simulated world less realistic; it makes the filter worse at surviving
     % arcs and the report more optimistic than the run earns.
 

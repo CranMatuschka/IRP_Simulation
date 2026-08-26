@@ -1,5 +1,5 @@
 function results = run_ladder(idx, durationOverride_s, description, nTowersOverride)
-%RUN_LADDER  Execute the step-wise scenario ladder (see RUN_PLAN_scenario_ladder.md).
+%RUN_LADDER  Execute the step-wise scenario ladder.
 %
 %   run_ladder                 % run ALL scenarios in order (long; the last is 24 h)
 %   run_ladder(k)              % run only scenario k (1..10)
@@ -21,7 +21,7 @@ function results = run_ladder(idx, durationOverride_s, description, nTowersOverr
 %     B2..B6  receivers 4,   space assets 2..6        (3600 s)
 %     C1      6 assets, 4 receivers                   (86400 s = 24 h)
 %
-%   See also: run_oo_v1, plot_mat_report, RUN_PLAN_scenario_ladder.
+%   See also: run_oo_v1, plot_mat_report.
 
     thisDir = fileparts(fileparts(mfilename('fullpath')));   % repo root, NOT scripts/
     % This file moved into scripts/ on 2026-08-23. Every fullfile(thisDir,...) below

@@ -11,9 +11,7 @@ classdef SplitCovarianceIntersectionBound
     % agnostic (it takes only matrices, never a physical record), so Section 2.3's eventual
     % adapter can call the SAME proven function rather than re-deriving it.
     %
-    % THE MATHEMATICAL CLAIM (see docs/plans/INDEPENDENT_FLEET_EKF_AND_TIMESTAMP_TWSTFT_PLAN.md
-    % Section 2.2 and the approved design "Section 2.2 Design (Revision 2)" for the full
-    % derivation). Owner error recursion:
+    % THE MATHEMATICAL CLAIM. Owner error recursion:
     %
     %   e_i^+ = (I-K*Hi)*e_i - K*Hj*e_j + K*sum_g(w_g) + K*sum_k(u_k) + K*v
     %

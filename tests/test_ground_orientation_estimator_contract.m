@@ -1,6 +1,6 @@
 % test_ground_orientation_estimator_contract  The properties the ground-referenced orientation
 % stages must hold regardless of which run they are pointed at
-% (docs/ground_referenced_orientation_execution_plan.md, acceptance tests T3, T4, T5, T9, T10).
+% (acceptance tests T3, T4, T5, T9, T10).
 %
 % These are all cheap: none of them runs a simulation. They exercise the estimator classes
 % directly on synthetic geometry, or read the source, which is what makes them suitable for
@@ -148,9 +148,8 @@ assert(b.available, 'G2 FAILED: the coherence budget did not compute');
 assert(abs(b.rotationLever_m - sqrt(2/3)*2102.8) < 1e-6, ...
     'G2 FAILED: lever %.4f m, expected %.4f m', b.rotationLever_m, sqrt(2/3)*2102.8);
 % PREDICTED-VS-MEASURED REGISTER. The execution plan quotes sqrt(2/3)*2102.8 = 1705.7 m. It is
-% 1716.9 m: the plan's own arithmetic is 0.65 % low. The FORMULA is what is asserted here,
-% because it is the thing that can be derived; the quoted value is corrected in
-% docs/ground_referenced_orientation_execution_plan.md rather than encoded as a target.
+% 1716.9 m: the quoted value is 0.65 % low. The FORMULA is what is asserted here,
+% because it is the thing that can be derived, rather than the quoted value as a target.
 assert(abs(b.rotationLever_m - 1716.9) < 0.5, ...
     'G2 FAILED: run22 multiRingHelix lever should be 1716.9 m, got %.1f m', b.rotationLever_m);
 % The expected coherent gain can never fall below the incoherent floor of -10*log10(N).

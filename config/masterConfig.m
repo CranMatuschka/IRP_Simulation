@@ -477,7 +477,7 @@ cfg.estimator.integerAmbiguity.resetOnSlip                 = true;
 % VALIDITY PRECONDITION: LAMBDA assumes the float vector's TRUTH is an integer. The
 % UNDIFFERENCED ambiguities here are not -- they absorb the per-arc clock/hardware bias --
 % so only DIFFERENCED (between-antenna / between-satellite) or bias-calibrated vectors may
-% be fixed. See docs/plans/ISL_LAMBDA/03_LAMBDA_INTEGER_RESOLUTION.md.
+% be fixed. See docs/LAMBDA_SETUP.md.
 cfg.estimator.lambda.enable          = false;   % master gate for the LAMBDA engine
 cfg.estimator.lambda.toolboxPath     = '';      % e.g. '/path/to/LAMBD4-master_2024_10_01'
 cfg.estimator.lambda.method          = 3;       % 3=ILS search-and-shrink, 5=PAR, 1=rounding
@@ -1101,7 +1101,7 @@ cfg = orbitClassConfig(cfg);
 %          product sigma, C/N0 code weighting, multipath/hardware/PCV/survey/DCB truth
 %          systematics, relativistic clock, honest measurement floors, luni-solar process
 %          noise, and realistic ISL product sigma. Makes the run physically representative
-%          rather than an idealised twin. See docs/scientific_correctness_review_v4.md.
+%          rather than an idealised twin.
 %          New-physics effects (truth luni-solar propagator, unknown inter-antenna carrier
 %          biases, EOP/solid-Earth tide) are applied by their own dedicated builders.
 cfg.realism.grade = false;
@@ -1133,10 +1133,8 @@ cfg.realism.include.interAntennaCarrierBias = true;   % R-6  unknown inter-anten
 % they belong here at all is the open question (measure the battery/ladder swarm slices first).
 cfg.realism.include.islCarrier          = true;   % ISL carrier/noise parameters; does not enable rows
 cfg.realism.include.islLinkBudget       = true;   % synthetic diagnostic parameters; does not enable it
-% These two replace the former 'point34' (named after docs/attitude_improvement_review/
-% point_3_*.md and point_4a_*.md -- a doc citation, not an effect, bundling two concerns).
-% Both differ in KIND from every entry above: those add physical error sources to the TRUTH,
-% these change ESTIMATOR behaviour and REPORT honesty.
+% These two differ in KIND from every entry above: those add physical error sources to the
+% TRUTH, these change ESTIMATOR behaviour and REPORT honesty.
 cfg.realism.include.carrierArcSurvival  = true;   % common-mode + baseline-differenced slip guard
 cfg.realism.include.phaseBiasHonesty    = true;   % report the RESOLVED phase-bias status, not the ideal one
 cfg.realism.include.attitudeSensorNoise = true;   % conservative star-tracker and gyro noise
@@ -1576,7 +1574,7 @@ cfg.multiAsset.towerSecondary.carrier.ambProcNoise_m = 1e-4;  % ambiguity random
 % position radial<->clock-wall-limited, Doppler does NOT make the clock-drift observable (drift error
 % ~0.4-0.7 m/s with or without it) and empirically DEGRADES drift/velocity while marginally improving
 % position. It is preserved (opt-in) for high-velocity orbits (LEO/MEO) where the range-rate IS
-% velocity-dominated and Doppler genuinely helps. See docs/asset_symmetry_generalization.md §16.
+% velocity-dominated and Doppler genuinely helps.
 cfg.multiAsset.towerSecondary.doppler.enable        = false;  % emit tower->secondary Doppler rows (opt-in; not beneficial at GEO)
 cfg.multiAsset.towerSecondary.doppler.sigma_mps     = 0.05;   % Doppler thermal 1-sigma [m/s] (conservative uplink-degraded; >= chief 0.01)
 % --- Per-secondary MULTI-ANTENNA + ATTITUDE: give a secondary the chief's
@@ -1586,7 +1584,7 @@ cfg.multiAsset.towerSecondary.doppler.sigma_mps     = 0.05;   % Doppler thermal 
 % empty (append-only, byte-identical golden + swarm). Attitude is refused unless multiAntenna is on
 % (no baseline -> unobservable), mirroring the allocation-gate discipline of secondaryOrbitCount.
 % Absolute accuracy is untouched (radial<->clock wall); the deliverable is per-satellite attitude,
-% a rotational DOF orthogonal to the wall. See docs/asset_symmetry_generalization.md §17.
+% a rotational DOF orthogonal to the wall.
 cfg.multiAsset.towerSecondary.multiAntenna.enable    = false;  % carry the chief antenna array on secondaries
 cfg.multiAsset.towerSecondary.multiAntenna.nAntennas = 4;      % antennas per secondary when enabled (matches the headline 4-antenna cross)
 cfg.multiAsset.towerSecondary.attitude.enable        = false;  % estimate per-secondary attitude (needs multiAntenna)
@@ -2803,7 +2801,7 @@ cfg.measurements.isl.carrier.useInEKF = false;
 % noise alone -- and that distinction is the difference between a working filter and a
 % diverging one.
 %
-% MEASURED (3600 s, 4 assets, 4 seeds, paired; see docs/plans/ISL_LAMBDA/03 appendix):
+% MEASURED (3600 s, 4 assets, 4 seeds, paired):
 %     sigma      posRMS      clkRMS      B_err/sigma
 %     (off)      0.581 m     0.01382 m      0.71
 %     0.002      13.57 m     0.12593 m      2.14    <- 23x WORSE position, ambiguity inconsistent
@@ -2839,7 +2837,7 @@ cfg.measurements.isl.carrier.sigma_m = 0.20;
 % NOTE: the ambiguity here is stored in METRES (B = lambda*N + absorbed bias), matching
 % the ground convention, so the carrier Jacobian column is +1 rather than lambda. The
 % undifferenced B is NOT an integer (it absorbs the clock bias per arc) -- integer
-% resolution needs a differenced parametrisation; see docs/plans/ISL_LAMBDA/03.
+% resolution needs a differenced parametrisation; see docs/LAMBDA_SETUP.md.
 % ISL carrier frequency [Hz]. NaN is a SENTINEL meaning "follow the resolved primary
 % ground carrier"; ConfigFactory.finalizeConfig substitutes cfg.signals.<primary>
 % .frequency_Hz after the JSON merge, so a scenario that retunes the band carries the

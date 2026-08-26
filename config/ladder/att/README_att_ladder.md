@@ -62,8 +62,7 @@ The single- and double-differenced attitude rows share raw phases: every baselin
 tower is differenced against the SAME reference antenna. The shipped `R` charged that
 correlation as zero across baseline groups, because `blkdiag` of per-group blocks cannot
 represent a covariance that reaches between groups. Replaced by a Gram assembly over the
-whole stack, exact for any row set. Derivation, SPD proof and verification are in
-`docs/handoff_joint_constrained_attitude.md`.
+whole stack, exact for any row set.
 
 | rung | error before -> after | sigma before -> after | err/sigma before -> after |
 |---|---|---|---|

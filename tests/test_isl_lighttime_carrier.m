@@ -7,7 +7,7 @@
 % all three observables see the SAME geometry, because they are the same physical signal
 % path -- code and carrier disagreeing about rho would be physically incoherent.
 %
-% DESIGN NOTE (deviation from docs/plans/ISL_LAMBDA/02 section 5): that plan proposed a
+% DESIGN NOTE. An earlier design proposed a
 % separate cfg.measurements.isl.lightTime.applyToCarrier gate. That would be a BUG
 % GENERATOR: it permits exactly the incoherent state described above. The builder computes
 % rhoTruth/rhoModel ONCE per link (ISLMeasurementBuilder.m:168-170) and every observable

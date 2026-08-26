@@ -63,12 +63,10 @@ classdef DistributedLinkProtocolContract
         AllowedAttitudeErrorCoordinateConventions = { ...
             'eulerZYXError_rad','rightMultiplicativeLocalTangent_rad'};
 
-        % Known common-information sources a distributed link update must eventually declare
-        % a treatment for (Section 2.0.5 / 2.2.5). Vocabulary is frozen now; no treatment is
-        % implemented at THIS key for any of the five sources, so
-        % isFullyRejectedCommonSourceTreatment still requires every one to be 'rejected' on the
-        % live linkUpdate path. Plan Section 3.3's own inventory/design pass (docs/plans/
-        % INDEPENDENT_FLEET_EKF_AND_TIMESTAMP_TWSTFT_PLAN.md) settled a final treatment for each:
+        % Known common-information sources a distributed link update must declare a treatment
+        % for. No treatment is implemented at THIS key for any of the five, so
+        % isFullyRejectedCommonSourceTreatment requires every one to be 'rejected' on the live
+        % linkUpdate path. The intended treatment for each:
         %   - sharedForceAtmosphericProduct: 'rejected' here is correct and permanent -- the real
         %     treatment is a DIFFERENT, state-space channel (correlationNetwork.
         %     commonProcessNoiseTreatment='declaredCommonAccelerationGroup', a Q-term, not an

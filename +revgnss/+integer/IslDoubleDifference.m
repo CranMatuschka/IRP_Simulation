@@ -1,7 +1,7 @@
 classdef IslDoubleDifference
     % IslDoubleDifference  Between-satellite differencing of the ISL carrier ambiguities.
     %
-    % Route B of docs/plans/ISL_LAMBDA/03. All ISL links share ONE receiver (the primary),
+    % All ISL links share ONE receiver (the primary),
     % so differencing two links against a common reference link cancels the receiver clock:
     %
     %   Phi_i     = rho_i + b_rx - b_tx_i + lambda*N_i + eps

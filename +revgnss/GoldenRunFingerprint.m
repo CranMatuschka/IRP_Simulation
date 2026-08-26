@@ -1,14 +1,12 @@
 classdef GoldenRunFingerprint
     % GoldenRunFingerprint  A run reduced to the numbers a regression can actually assert on.
     %
-    % WHY THIS EXISTS. Execution-plan A3. Every headline in
-    % docs/ground_referenced_orientation_summary.md was a value read off a console or a MATLAB
-    % prompt: 1.53x rotation gain, 99.9963 % wide-lane fix rate, 56x shape improvement. None of
-    % them was pinned to anything, so nothing could tell whether a later commit had changed them.
-    % Two of the three could not be regenerated from the repository at all. This class turns a
-    % run into an ORDERED, NAMED set of scalars that can be frozen in tests/golden/ and compared,
-    % which is what makes "the commit ladder leaves the tree green" a checkable statement rather
-    % than an intention.
+    % WHY THIS EXISTS. The headline numbers -- 1.53x rotation gain, 99.9963 % wide-lane fix
+    % rate, 56x shape improvement -- were values read off a console or a MATLAB prompt. None
+    % was pinned to anything, so nothing could tell whether a later change had moved them, and
+    % two of the three could not be regenerated from the repository at all. This class turns a
+    % run into an ORDERED, NAMED set of scalars that can be frozen in tests/golden/ and
+    % compared, which makes "the tree is still green" a checkable statement.
     %
     % WHAT A FINGERPRINT IS NOT. It is not a claim that the numbers are RIGHT. It is a claim that
     % they have not MOVED. A frozen fingerprint is re-cut deliberately, with the reason recorded

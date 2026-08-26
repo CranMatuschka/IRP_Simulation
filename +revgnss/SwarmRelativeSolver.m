@@ -4,7 +4,7 @@ classdef SwarmRelativeSolver
     % Recovers the formation SHAPE from two-way inter-satellite ranging over a bounded-degree
     % (<=5 nearest-range, decision D2) neighbour graph, run PURELY as a read-only post-processor of
     % the federated per-asset marginals (revgnss.ReportRunner.runFederatedEstimation output). It is the second
-    % layer of the federated architecture (docs/federated_swarm_architecture.md).
+    % layer of the federated architecture.
     %
     % HONESTY / SAFETY (the reason for the pivot away from the joint EKF):
     %   * D1 -- NO shared covariance, NO write path to any per-asset x/P. The solver reads

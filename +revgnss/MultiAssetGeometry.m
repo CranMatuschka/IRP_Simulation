@@ -16,7 +16,7 @@ classdef MultiAssetGeometry
     % TRUTH-ONLY, by construction. Only asset 1 is EKF-estimated, so there is no
     % secondary ESTIMATE to difference against here; this compares the physically
     % real helix TRUTH across satellites. Per-satellite ESTIMATE error comparison
-    % arrives with the multiAssetEstimation upgrade (see docs/multi_asset_estimation_plan.md).
+    % arrives with the multiAssetEstimation upgrade.
     %
     % GEO note: the ECEF velocity of a geostationary asset is ~0, so the plain RAC
     % basis is degenerate; the RAC projection here uses OrbitFrame.ecefToRacGeo,

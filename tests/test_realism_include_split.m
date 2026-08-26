@@ -4,9 +4,8 @@
 % BACKGROUND. masterConfig declared 15 realism.include.* keys; realismGradeConfig's
 % i_resolveIncludes knew 18, inventing `islCarrier`, `islLinkBudget` and `point34` with
 % default true. Three toggles that shape a run and appeared nowhere in the config file.
-% `point34` was additionally named after docs/attitude_improvement_review/point_3_*.md and
-% point_4a_*.md -- a citation of where the idea was written down, not of what it does -- and
-% it bundled two unrelated concerns:
+% `point34` was named for where the idea was written down rather than what it does, and it
+% bundled two unrelated concerns:
 %   carrierArcSurvival : carrierSlip common-mode + baseline-differenced slip guard (ESTIMATOR)
 %   phaseBiasHonesty   : enforce the resolved phase-bias status in reporting
 %

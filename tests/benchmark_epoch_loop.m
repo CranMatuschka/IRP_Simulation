@@ -8,7 +8,7 @@ function benchmark_epoch_loop(varargin)
 %
 % Purpose: give an authoritative per-function ranking of where a single run's
 % per-epoch time goes, so byte-identical optimizations (see
-% docs/performance_optimization_plan.md) can be prioritized and re-measured.
+% below) can be prioritized and re-measured.
 %
 % NOTE: the MATLAB profiler adds ~5-8x uniform overhead, so use the ms/epoch as a
 % RELATIVE ranking, not an absolute wall-clock. R2025b's profile('info')

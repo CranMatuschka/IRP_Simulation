@@ -15,7 +15,7 @@ classdef LambdaResolver
     %   pretends to have fixed anything).
     %   Download: contact LAMBDAtoolbox-CITG-GRS@tudelft.nl
     %
-    % THE PRECONDITION THAT MATTERS MOST (docs/plans/ISL_LAMBDA/03 section 1):
+    % THE PRECONDITION THAT MATTERS MOST (docs/LAMBDA_SETUP.md):
     %   LAMBDA finds the integer vector nearest a float vector UNDER THE ASSUMPTION that
     %   the truth is an integer. The UNDIFFERENCED ambiguities in this codebase are NOT:
     %   they absorb the per-arc clock/hardware bias (CarrierMeasurementBuilder.m:280), so
@@ -198,7 +198,7 @@ classdef LambdaResolver
                 'LambdaResolver:nonIntegerParametrisation', ...
                 ['%s is not a differenced or bias-calibrated ambiguity, so its truth is ' ...
                  'NOT an integer (it absorbs the per-arc clock/hardware bias). Fixing it ' ...
-                 'would inject a bias-sized error. See docs/plans/ISL_LAMBDA/03.'], context);
+                 'would inject a bias-sized error. See docs/LAMBDA_SETUP.md.'], context);
         end
 
     end
