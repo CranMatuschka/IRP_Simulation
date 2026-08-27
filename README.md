@@ -29,6 +29,7 @@ graph BT
 | [Quick start](#quick-start) | run your first scenario |
 | [The one thing to understand first](#the-one-thing-to-understand-first) | configuration layering |
 | [Scenarios](#scenarios) | the 172-file experiment ladder |
+| [Configuration editor](#configuration-editor) | build a run without reading all 1362 knobs |
 | [Architecture](#architecture) | where the code lives |
 | [What it measures](#what-it-measures) | observables, state vector, sign conventions |
 | [Output](#output) | what a run writes |
@@ -155,30 +156,47 @@ A ladder file inherits through `"_extends": "golden_baseline.json"` and carries 
 so the file shows exactly what it changes, and a golden edit propagates to every rung sitting on
 it. Reports are labelled by file prefix: `Report_scene008_ts3600_G5S1R4_TW1`.
 
-### Building a scenario without reading `masterConfig`
+---
 
-`masterConfig` carries 1362 leaves. `tools/config_editor/` generates a standalone page that knows
-which are live and which are derived:
+## Configuration editor
+
+**Build a scenario without reading `masterConfig`.** Its 1362 leaves are not a list anyone can
+work through, and a hand-written scenario JSON fails in a way that looks like success. A knob the
+resolution derives accepts your value at merge time, discards it before the run, and the report
+prints the setting as active.
+
+`tools/config_editor/` generates a **standalone HTML page** that knows which leaves are live and
+which are derived. No server, no network, no MATLAB in the loop. Open it by double-clicking.
 
 ```bash
 matlab -batch "addpath('tools/config_editor'); buildConfigEditor"
 ```
 
-Open the generated `config_editor.html` by double-clicking — no server, no network. Pick a base,
-open the sections you care about, save a delta into `config/personal/`. Every knob shows
-`masterConfig`'s own prose, its base value, the legal values where `configEnumRegistry` defines a
-set, and a **refusal** where the path is derived and a scenario cannot own it. Three detail levels:
-the effect toggles plus the 70 most-set knobs, then the 379 any shipped scenario sets, then all 1362.
+Pick a base scenario, open the sections you care about, then save a delta into `config/personal/`.
+Every knob shows `masterConfig`'s own prose, the value it inherits and which file that came from,
+the legal values where `configEnumRegistry` defines a checked set, and a **refusal** where the
+path is derived and a scenario cannot own it. Pair members of the twelve master effect toggles
+carry their own warning, which is the mistake that once left six shipped ladder rungs disabling
+nothing at all.
 
-Then check it before running:
+Three detail levels, and the split between them is measured rather than chosen. The effect
+toggles plus the 70 most-set knobs, then the 379 any shipped scenario sets, then all 1362.
+
+Then check it before running, because the page cannot see what `finalizeConfig` derives.
 
 ```matlab
 checkPersonalConfig('myRun.json')   % names any leaf that did not survive resolution
 run_oo_v1('myRun.json', 3600)
 ```
 
-Re-run `buildConfigEditor` after editing `masterConfig`; `tests/test_config_editor_schema.m` fails
+Re-run `buildConfigEditor` after editing `masterConfig`. `tests/test_config_editor_schema.m` fails
 when the generated page and the working tree have parted.
+
+> [!TIP]
+> **The full instructions are in [`docs/CONFIG_EDITOR_MANUAL.md`](docs/CONFIG_EDITOR_MANUAL.md).**
+> Every control on the page, the four warnings it raises, the twelve master toggles and the
+> truth/model pair mistake they prevent, what `checkPersonalConfig` tells you that the page
+> cannot, and how the staleness gate works.
 
 ---
 
@@ -376,6 +394,7 @@ typically within 600–1800 s.
 | Document | What it covers |
 |---|---|
 | **[docs/VALIDATION_MANUAL.md](docs/VALIDATION_MANUAL.md)** | **The full scientific audit** — every error model term by term, where it enters `z` / `h` / `R` / the state, the double-count check, and the test that verifies it |
+| **[docs/CONFIG_EDITOR_MANUAL.md](docs/CONFIG_EDITOR_MANUAL.md)** | **How to build a scenario** — the config editor page control by control, the warnings it raises, the master toggles, and `checkPersonalConfig` |
 | [docs/golden_baseline_provenance.md](docs/golden_baseline_provenance.md) | A citation for every numeric value in `golden_baseline.json` |
 | [docs/ERROR_BUDGET.md](docs/ERROR_BUDGET.md) | The error budget breakdown |
 | [docs/equipment_fit_realism_grade.md](docs/equipment_fit_realism_grade.md) | What real hardware meets the derived requirements |
