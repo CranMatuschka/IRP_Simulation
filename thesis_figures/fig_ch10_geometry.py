@@ -6,7 +6,7 @@ Left: the array itself, on the platform that carries it. The four phase centres 
 on a cross of 2.00 m across and 1.47 m between adjacent pairs, two of them 0.20 m
 proud of the nadir face and two 0.20 m proud of the far face. The three rotation
 axes of the right panel are drawn on it. Two lie in the deck. The third is the
-nadir line, out of the deck and into the page, and every tower lies within 8.7
+nadir line, out of the deck and into the page, and every tower lies within 8.0
 degrees of it, which is the whole of the weak axis. A rotation about that line
 swings every antenna across its line of sight rather than along it.
 
@@ -132,7 +132,7 @@ def deck_panel(ax, lever, disc):
             transform=ax.transAxes, ha="left", va="top", fontsize=7.0,
             color=tv.INK_SECOND, linespacing=1.3, zorder=8)
     ax.text(0.5, 0.0, "two antennas on each face, $0.20\\,\\mathrm{m}$ proud, and every\n"
-            "tower lies within $8.7^\\circ$ of the nadir line",
+            "tower lies within $8.0^\\circ$ of the nadir line",
             transform=ax.transAxes, ha="center", va="bottom", fontsize=7.0,
             color=tv.INK_SECOND, linespacing=1.35, zorder=8)
 

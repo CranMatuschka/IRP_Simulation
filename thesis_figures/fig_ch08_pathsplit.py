@@ -17,7 +17,7 @@ def main():
     d = tv.read_dat("ch9_pathsplit.dat")
     sigma, total, resid = d["sigma"], d["total"], d["resid"]
 
-    fig, ax = tv.figure(width_frac=0.85, height_in=3.25)
+    fig, ax = tv.figure(width_frac=0.62, height_in=2.50)
 
     tv.hline(ax, LAMBDA_20_MM, color=tv.INK_SECOND)
     ax.plot(sigma, total, "-s", color=tv.BLUE, markersize=4.4, linewidth=1.0,
