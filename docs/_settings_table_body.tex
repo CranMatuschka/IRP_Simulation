@@ -1,0 +1,202 @@
+\begin{center}
+\small
+\singlespacing
+\begin{longtable}{>{\raggedright\arraybackslash\scriptsize\ttfamily}p{0.27\textwidth}|>{\raggedright\arraybackslash}p{0.38\textwidth}|>{\raggedright\arraybackslash\scriptsize\ttfamily}p{0.21\textwidth}}
+\caption{Settings of the golden-baseline reference scenario}
+\label{tab:golden_baseline_settings} \\
+\hline
+\textbf{\normalfont\normalsize Setting} & \textbf{\normalsize Short description} & \textbf{\normalfont\normalsize Value} \\ \hline
+\endfirsthead
+\multicolumn{3}{l}{\emph{\normalfont\normalsize Table \ref{tab:golden_baseline_settings}, continued from the previous page}} \\ \hline
+\textbf{\normalfont\normalsize Setting} & \textbf{\normalsize Short description} & \textbf{\normalfont\normalsize Value} \\ \hline
+\endhead
+\hline \multicolumn{3}{r}{\emph{\normalfont\normalsize continued on the next page}} \\
+\endfoot
+\hline
+\endlastfoot
+\multicolumn{3}{l}{\textbf{Scenario and run}} \\ \hline
+\texttt{scenario.\allowbreak n\allowbreak Receivers} & Number of receive antenna phase centres on the spacecraft & \texttt{4} \\
+\texttt{scenario.\allowbreak n\allowbreak Space\allowbreak Assets} & Number of space assets simulated & \texttt{1} \\
+\texttt{scenario.\allowbreak n\allowbreak Towers} & Number of ground tracking stations in the network & \texttt{5} \\
+\texttt{scenario.\allowbreak name} & Scenario name label used in reports and run fingerprints & \texttt{golden\_\allowbreak baseline} \\
+\texttt{scenario.\allowbreak orbit\allowbreak Class} & Orbit class of the tracked spacecraft & \texttt{GEO} \\
+\texttt{simulation.\allowbreak dt\_\allowbreak s} & Measurement and propagation time step in seconds & \texttt{1} \\
+\texttt{simulation.\allowbreak seed} & Master random number seed for bit-reproducible runs & \texttt{42} \\
+\hline
+\multicolumn{3}{l}{\textbf{Grade overlays}} \\ \hline
+\texttt{atmosphere.\allowbreak estimate\allowbreak Iono} & Profile shortcut enabling slant ionosphere states, dropping Klobuchar correction & \texttt{false} \\
+\texttt{atmosphere.\allowbreak ionosphere\allowbreak Free} & Selects ionosphere-free code combination rather than raw dual frequency & \texttt{false} \\
+\texttt{atmosphere.\allowbreak realistic} & Selects the physically realistic troposphere and ionosphere profile & \texttt{true} \\
+\texttt{atmosphere.\allowbreak shared\allowbreak Across\allowbreak Antennas.\allowbreak enable} & Shares one scintillation draw across all receive antennas & \texttt{true} \\
+\texttt{realism.\allowbreak grade} & Opt-in switch for the whole realism error overlay & \texttt{true} \\
+\texttt{realism.\allowbreak include.\allowbreak inter\allowbreak Antenna\allowbreak Carrier\allowbreak Bias} & Overlay sub-toggle for per-antenna carrier line bias & \texttt{true} \\
+\texttt{realism.\allowbreak include.\allowbreak luni\allowbreak Solar} & Overlay sub-toggle for the reduced-dynamics luni-solar stress case & \texttt{false} \\
+\texttt{realism.\allowbreak include.\allowbreak solid\allowbreak Earth\allowbreak Tide} & Overlay sub-toggle for truth-only solid Earth tide displacement & \texttt{false} \\
+\hline
+\multicolumn{3}{l}{\textbf{Orbit and force model}} \\ \hline
+\texttt{orbit.\allowbreak truth.\allowbreak perturbations.\allowbreak epoch\allowbreak JD\_\allowbreak TT} & Sun and Moon ephemeris reference epoch, Julian date & \texttt{2451545.\allowbreak 0} \\
+\texttt{orbit.\allowbreak truth.\allowbreak perturbations.\allowbreak luni\allowbreak Solar.\allowbreak enable} & Sun and Moon third-body acceleration in truth propagation & \texttt{true} \\
+\texttt{orbit.\allowbreak truth.\allowbreak perturbations.\allowbreak srp.\allowbreak Cr} & Cannonball radiation pressure reflectivity coefficient, dimensionless & \texttt{1.\allowbreak 3} \\
+\texttt{orbit.\allowbreak truth.\allowbreak perturbations.\allowbreak srp.\allowbreak area\allowbreak To\allowbreak Mass\_\allowbreak m2pkg} & Spacecraft area-to-mass ratio, square metres per kilogram & \texttt{0.\allowbreak 02} \\
+\texttt{orbit.\allowbreak truth.\allowbreak perturbations.\allowbreak srp.\allowbreak enable} & Solar radiation pressure acceleration in truth propagation & \texttt{true} \\
+\texttt{orbit.\allowbreak truth.\allowbreak perturbations.\allowbreak srp.\allowbreak shadow} & Eclipse shadow geometry used for radiation pressure & \texttt{cylindrical} \\
+\hline
+\multicolumn{3}{l}{\textbf{Propagation and geometry effects}} \\ \hline
+\texttt{effects.\allowbreak antenna.\allowbreak pcv\allowbreak Model} & Antenna phase centre variation model, applied to truth and model & \texttt{toy} \\
+\texttt{effects.\allowbreak antenna\allowbreak PCO.\allowbreak calibration\allowbreak Residual.\allowbreak enable} & Gate for truth-only phase centre offset mis-calibration & \texttt{true} \\
+\texttt{effects.\allowbreak antenna\allowbreak PCO.\allowbreak calibration\allowbreak Residual.\allowbreak receiver\allowbreak Offset\_\allowbreak body\_\allowbreak m} & Receive phase centre mis-calibration per body axis, metres & \texttt{[0.\allowbreak 002,\allowbreak 0.\allowbreak 002,\allowbreak 0.\allowbreak 002]} \\
+\texttt{effects.\allowbreak ionosphere.\allowbreak mapping\allowbreak Model} & Obliquity mapping converting vertical to slant ionospheric delay & \texttt{thin\allowbreak Shell} \\
+\texttt{effects.\allowbreak ionosphere.\allowbreak shell\allowbreak Height\_\allowbreak m} & Ionospheric thin-shell pierce point height, metres & \texttt{350000} \\
+\texttt{effects.\allowbreak solid\allowbreak Earth\allowbreak Tide.\allowbreak truth.\allowbreak enable} & Displaces true tower positions by the solid Earth tide & \texttt{false} \\
+\texttt{effects.\allowbreak tower\allowbreak Survey.\allowbreak enable} & Master gate for the tower coordinate survey error & \texttt{true} \\
+\texttt{effects.\allowbreak tower\allowbreak Survey.\allowbreak model.\allowbreak enable} & Applies the survey error to the estimator's tower positions & \texttt{false} \\
+\texttt{effects.\allowbreak tower\allowbreak Survey.\allowbreak sigma\allowbreak ENU\_\allowbreak m} & Tower survey error one-sigma, east north up, metres & \texttt{[0.\allowbreak 01,\allowbreak 0.\allowbreak 01,\allowbreak 0.\allowbreak 03]} \\
+\texttt{effects.\allowbreak tower\allowbreak Survey.\allowbreak truth.\allowbreak enable} & Applies the survey error to the true tower positions & \texttt{true} \\
+\texttt{frames.\allowbreak eop\allowbreak Model.\allowbreak enable} & Applies published IERS orientation correction inside the estimator & \texttt{true} \\
+\texttt{frames.\allowbreak eop\allowbreak Model.\allowbreak polar\allowbreak Motion\_\allowbreak xp\_\allowbreak arcsec} & Predicted pole x used by the estimator, arcseconds & \texttt{0.\allowbreak 1497} \\
+\texttt{frames.\allowbreak eop\allowbreak Model.\allowbreak polar\allowbreak Motion\_\allowbreak yp\_\allowbreak arcsec} & Predicted pole y used by the estimator, arcseconds & \texttt{0.\allowbreak 3497} \\
+\texttt{frames.\allowbreak eop\allowbreak Model.\allowbreak ut1\allowbreak Rate\_\allowbreak error\_\allowbreak ms\allowbreak Per\allowbreak Day} & Predicted length-of-day rate correction, milliseconds per day & \texttt{0.\allowbreak 04} \\
+\texttt{frames.\allowbreak truth\allowbreak Eop.\allowbreak enable} & Applies truth-side Earth orientation error to tower positions & \texttt{true} \\
+\texttt{frames.\allowbreak truth\allowbreak Eop.\allowbreak polar\allowbreak Motion\_\allowbreak xp\_\allowbreak arcsec} & True pole x displacement, arcseconds & \texttt{0.\allowbreak 15} \\
+\texttt{frames.\allowbreak truth\allowbreak Eop.\allowbreak polar\allowbreak Motion\_\allowbreak yp\_\allowbreak arcsec} & True pole y displacement, arcseconds & \texttt{0.\allowbreak 35} \\
+\texttt{frames.\allowbreak truth\allowbreak Eop.\allowbreak ut1\allowbreak Rate\_\allowbreak error\_\allowbreak ms\allowbreak Per\allowbreak Day} & True length-of-day rate error, milliseconds per day & \texttt{0.\allowbreak 05} \\
+\texttt{physics.\allowbreak relativity.\allowbreak clock.\allowbreak enable} & Master gate for the relativistic clock rate offset & \texttt{true} \\
+\texttt{physics.\allowbreak relativity.\allowbreak clock.\allowbreak model.\allowbreak enable} & Estimator models the relativistic clock rate offset & \texttt{true} \\
+\texttt{physics.\allowbreak relativity.\allowbreak clock.\allowbreak truth.\allowbreak enable} & Puts the relativistic clock rate offset in truth & \texttt{true} \\
+\hline
+\multicolumn{3}{l}{\textbf{Clocks}} \\ \hline
+\texttt{clock.\allowbreak gauge.\allowbreak mode} & How the clock datum ambiguity is resolved & \texttt{external\allowbreak Tower\allowbreak Corrections} \\
+\texttt{clock.\allowbreak mode} & Which clocks enter the EKF state vector & \texttt{spacecraft\allowbreak Receiver\allowbreak Clock\allowbreak Only} \\
+\texttt{clocks.\allowbreak tower.\allowbreak product.\allowbreak add\allowbreak To\allowbreak R} & Charges the product uncertainty to measurement noise covariance & \texttt{true} \\
+\texttt{clocks.\allowbreak tower.\allowbreak product.\allowbreak latency\_\allowbreak s} & Delivery latency of the clock correction, seconds & \texttt{5} \\
+\texttt{clocks.\allowbreak tower.\allowbreak product.\allowbreak sigma\allowbreak Bias\_\allowbreak m} & Broadcast tower clock bias residual sigma, metres & \texttt{0.\allowbreak 1} \\
+\texttt{clocks.\allowbreak tower.\allowbreak product.\allowbreak sigma\allowbreak Drift\_\allowbreak mps} & Broadcast clock drift residual sigma, metres per second & \texttt{0.\allowbreak 001} \\
+\texttt{clocks.\allowbreak tower.\allowbreak product.\allowbreak update\allowbreak Interval\_\allowbreak s} & Rebroadcast interval of the clock correction product, seconds & \texttt{30} \\
+\texttt{clocks.\allowbreak tower.\allowbreak product.\allowbreak validity\_\allowbreak s} & Validity span of one clock correction, seconds & \texttt{120} \\
+\hline
+\multicolumn{3}{l}{\textbf{Truth-side error sources}} \\ \hline
+\texttt{biases.\allowbreak inter\allowbreak Frequency.\allowbreak code.\allowbreak model.\allowbreak L1\_\allowbreak m} & L1 code bias the estimator corrects, metres & \texttt{0.\allowbreak 3} \\
+\texttt{biases.\allowbreak inter\allowbreak Frequency.\allowbreak code.\allowbreak model.\allowbreak L2\_\allowbreak m} & L2 code bias the estimator corrects, metres & \texttt{0.\allowbreak 405} \\
+\texttt{biases.\allowbreak inter\allowbreak Frequency.\allowbreak code.\allowbreak truth.\allowbreak L1\_\allowbreak m} & True L1 code group delay bias, metres & \texttt{0.\allowbreak 3} \\
+\texttt{biases.\allowbreak inter\allowbreak Frequency.\allowbreak code.\allowbreak truth.\allowbreak L2\_\allowbreak m} & True L2 code group delay bias, metres & \texttt{0.\allowbreak 45} \\
+\texttt{errors.\allowbreak hardware\allowbreak Delay.\allowbreak enable} & Master switch for the tower hardware group delay & \texttt{true} \\
+\texttt{errors.\allowbreak hardware\allowbreak Delay.\allowbreak model.\allowbreak enable} & Applies a hardware delay correction on the estimator side & \texttt{false} \\
+\texttt{errors.\allowbreak hardware\allowbreak Delay.\allowbreak residual\allowbreak Stochastic.\allowbreak enable} & Draws the white hardware delay residual and charges R & \texttt{true} \\
+\texttt{errors.\allowbreak hardware\allowbreak Delay.\allowbreak sigma\_\allowbreak m} & Hardware delay calibration residual one sigma in metres & \texttt{0.\allowbreak 05} \\
+\texttt{errors.\allowbreak hardware\allowbreak Delay.\allowbreak truth.\allowbreak enable} & Adds the hardware delay to the truth range & \texttt{true} \\
+\texttt{errors.\allowbreak inter\allowbreak Antenna\allowbreak Carrier\allowbreak Bias.\allowbreak drift.\allowbreak enable} & Adds thermal drift to the inter-antenna carrier bias & \texttt{false} \\
+\texttt{errors.\allowbreak inter\allowbreak Antenna\allowbreak Carrier\allowbreak Bias.\allowbreak enable} & Injects an unknown per-antenna carrier phase line bias & \texttt{true} \\
+\texttt{errors.\allowbreak inter\allowbreak Antenna\allowbreak Carrier\allowbreak Bias.\allowbreak per\allowbreak Signal} & Draws an independent bias for each carrier signal & \texttt{true} \\
+\texttt{errors.\allowbreak inter\allowbreak Antenna\allowbreak Carrier\allowbreak Bias.\allowbreak sigma\_\allowbreak cycles} & Inter-antenna carrier phase bias one sigma in cycles & \texttt{0.\allowbreak 25} \\
+\texttt{errors.\allowbreak ionosphere.\allowbreak enable} & Master switch for the ionospheric delay error source & \texttt{true} \\
+\texttt{errors.\allowbreak ionosphere.\allowbreak higher\allowbreak Order.\allowbreak enable} & Add second and third order ionosphere residuals, truth only & \texttt{true} \\
+\texttt{errors.\allowbreak ionosphere.\allowbreak model.\allowbreak correction} & Which broadcast ionosphere correction the estimator applies & \texttt{klobuchar} \\
+\texttt{errors.\allowbreak ionosphere.\allowbreak model.\allowbreak enable} & Apply the estimator side ionospheric correction & \texttt{true} \\
+\texttt{errors.\allowbreak ionosphere.\allowbreak model\allowbreak Type} & Ionosphere formulation, unlocking the stochastic TEC branch & \texttt{tec\allowbreak Gauss\allowbreak Markov} \\
+\texttt{errors.\allowbreak ionosphere.\allowbreak scintillation.\allowbreak S4zen} & Zenith amplitude scintillation index, dimensionless & \texttt{0.\allowbreak 3} \\
+\texttt{errors.\allowbreak ionosphere.\allowbreak scintillation.\allowbreak enable} & Add ionospheric amplitude scintillation to truth and R & \texttt{true} \\
+\texttt{errors.\allowbreak ionosphere.\allowbreak scintillation.\allowbreak model} & Scintillation formulation supplying the fading factor & \texttt{conker} \\
+\texttt{errors.\allowbreak ionosphere.\allowbreak scintillation.\allowbreak phase\allowbreak Scint.\allowbreak enable} & Add phase scintillation to the truth carrier & \texttt{true} \\
+\texttt{errors.\allowbreak ionosphere.\allowbreak scintillation.\allowbreak phase\allowbreak Scint.\allowbreak sigma\allowbreak Phi\_\allowbreak rad} & Phase scintillation standard deviation, radians & \texttt{0.\allowbreak 2} \\
+\texttt{errors.\allowbreak ionosphere.\allowbreak scintillation.\allowbreak phase\allowbreak Scint.\allowbreak tau\_\allowbreak s} & Correlation time of the phase scintillation, seconds & \texttt{1.\allowbreak 5} \\
+\texttt{errors.\allowbreak ionosphere.\allowbreak scintillation.\allowbreak tau\_\allowbreak s} & Correlation time of the scintillation amplitude, seconds & \texttt{30} \\
+\texttt{errors.\allowbreak ionosphere.\allowbreak sigma\_\allowbreak m} & Declared vertical ionosphere uncertainty charged in R, metres & \texttt{1.\allowbreak 0} \\
+\texttt{errors.\allowbreak ionosphere.\allowbreak stochastic.\allowbreak enable} & Add a time correlated residual TEC component & \texttt{true} \\
+\texttt{errors.\allowbreak ionosphere.\allowbreak stochastic.\allowbreak sigma\allowbreak VDelay\allowbreak L1\_\allowbreak ss\_\allowbreak m} & Steady state vertical L1 residual delay, metres & \texttt{0.\allowbreak 3} \\
+\texttt{errors.\allowbreak ionosphere.\allowbreak stochastic.\allowbreak tau\_\allowbreak s} & Correlation time of the residual TEC process, seconds & \texttt{600} \\
+\texttt{errors.\allowbreak ionosphere.\allowbreak topside\allowbreak Fraction} & Fraction of the vertical TEC column the spacecraft sees & \texttt{1} \\
+\texttt{errors.\allowbreak ionosphere.\allowbreak truth.\allowbreak diurnal.\allowbreak enable} & Vary the truth vertical TEC over the daily cycle & \texttt{true} \\
+\texttt{errors.\allowbreak ionosphere.\allowbreak truth.\allowbreak diurnal.\allowbreak peak\allowbreak Local\allowbreak Time\_\allowbreak h} & Local solar time of the TEC peak, hours & \texttt{14} \\
+\texttt{errors.\allowbreak ionosphere.\allowbreak truth.\allowbreak diurnal.\allowbreak vtec\allowbreak Day\_\allowbreak TECU} & Daytime peak vertical TEC, TECU & \texttt{30} \\
+\texttt{errors.\allowbreak ionosphere.\allowbreak truth.\allowbreak diurnal.\allowbreak vtec\allowbreak Night\_\allowbreak TECU} & Night-time floor vertical TEC, TECU & \texttt{6} \\
+\texttt{errors.\allowbreak ionosphere.\allowbreak truth.\allowbreak enable} & Inject ionospheric delay into the simulated truth observations & \texttt{true} \\
+\texttt{errors.\allowbreak multipath.\allowbreak colored\allowbreak GM.\allowbreak elevation\allowbreak Exponent} & Exponent of the inverse-sine elevation multipath envelope & \texttt{1} \\
+\texttt{errors.\allowbreak multipath.\allowbreak colored\allowbreak GM.\allowbreak enable} & Selects the coloured Gauss-Markov multipath process over the white model & \texttt{true} \\
+\texttt{errors.\allowbreak multipath.\allowbreak colored\allowbreak GM.\allowbreak shared\allowbreak Across\allowbreak Antennas.\allowbreak enable} & Shares one multipath state per tower across all antennas & \texttt{true} \\
+\texttt{errors.\allowbreak multipath.\allowbreak colored\allowbreak GM.\allowbreak sigma\allowbreak Code\allowbreak L1\_\allowbreak ss\_\allowbreak m} & Steady-state L1 code multipath one sigma in metres & \texttt{0.\allowbreak 3} \\
+\texttt{errors.\allowbreak multipath.\allowbreak colored\allowbreak GM.\allowbreak tau\_\allowbreak s} & Multipath correlation time in seconds & \texttt{60} \\
+\texttt{errors.\allowbreak multipath.\allowbreak enable} & Master switch for the code multipath error & \texttt{true} \\
+\texttt{errors.\allowbreak multipath.\allowbreak model.\allowbreak enable} & Applies a multipath correction on the estimator side & \texttt{false} \\
+\texttt{errors.\allowbreak multipath.\allowbreak truth.\allowbreak enable} & Adds multipath to the truth pseudorange & \texttt{true} \\
+\texttt{errors.\allowbreak troposphere.\allowbreak day\allowbreak Of\allowbreak Year} & Day of year driving the Niell mapping seasonal term & \texttt{180} \\
+\texttt{errors.\allowbreak troposphere.\allowbreak enable} & Master switch for the tropospheric delay error source & \texttt{true} \\
+\texttt{errors.\allowbreak troposphere.\allowbreak model.\allowbreak enable} & Apply the estimator side tropospheric delay correction & \texttt{true} \\
+\texttt{errors.\allowbreak troposphere.\allowbreak model.\allowbreak mapping\allowbreak Type} & Elevation mapping function used by the estimator model & \texttt{niell} \\
+\texttt{errors.\allowbreak troposphere.\allowbreak model\allowbreak Type} & Troposphere formulation, surface weather hydrostatic plus stochastic wet delay & \texttt{local\allowbreak Weather\allowbreak GM} \\
+\texttt{errors.\allowbreak troposphere.\allowbreak sigma\_\allowbreak m} & Declared zenith troposphere uncertainty charged in R, metres & \texttt{0.\allowbreak 15} \\
+\texttt{errors.\allowbreak troposphere.\allowbreak stochastic.\allowbreak enable} & Add a time correlated residual zenith wet delay & \texttt{true} \\
+\texttt{errors.\allowbreak troposphere.\allowbreak stochastic.\allowbreak sigma\allowbreak Wet\_\allowbreak ss\_\allowbreak m} & Steady state zenith wet delay variability, metres & \texttt{0.\allowbreak 04} \\
+\texttt{errors.\allowbreak troposphere.\allowbreak stochastic.\allowbreak tau\_\allowbreak s} & Correlation time of the wet delay process, seconds & \texttt{10800} \\
+\texttt{errors.\allowbreak troposphere.\allowbreak truth.\allowbreak enable} & Inject tropospheric delay into the simulated truth observations & \texttt{true} \\
+\texttt{errors.\allowbreak troposphere.\allowbreak truth.\allowbreak mapping\allowbreak Type} & Elevation mapping function used on the truth side & \texttt{niell} \\
+\hline
+\multicolumn{3}{l}{\textbf{Measurements}} \\ \hline
+\texttt{carrier\allowbreak Slip.\allowbreak baseline\allowbreak Differenced\allowbreak Mode.\allowbreak enable} & Whether slip metrics are differenced against a reference antenna & \texttt{true} \\
+\texttt{carrier\allowbreak Slip.\allowbreak baseline\allowbreak Differenced\allowbreak Mode.\allowbreak reference\allowbreak Antenna} & Index of the antenna used as differencing reference & \texttt{1} \\
+\texttt{carrier\allowbreak Slip.\allowbreak common\allowbreak Mode\allowbreak Compensation.\allowbreak enable} & Whether the common-mode jump is removed before slip detection & \texttt{true} \\
+\texttt{carrier\allowbreak Slip.\allowbreak common\allowbreak Mode\allowbreak Compensation.\allowbreak min\allowbreak Rows} & Minimum valid carrier rows needed to estimate the common jump & \texttt{4} \\
+\texttt{measurement.\allowbreak sigma\allowbreak Floor\_\allowbreak m} & Lower bound applied to any measurement sigma, metres & \texttt{0.\allowbreak 01} \\
+\texttt{measurements.\allowbreak carrier.\allowbreak sigma\_\allowbreak m} & Carrier phase measurement noise sigma, metres & \texttt{0.\allowbreak 01} \\
+\texttt{measurements.\allowbreak carrier\allowbreak Mode} & Carrier phase mode, off, diagnostic or float ambiguity & \texttt{ekf\allowbreak Float} \\
+\texttt{measurements.\allowbreak carrier\allowbreak Phase.\allowbreak enable} & Legacy carrier phase gate, a fallback when carrier mode absent & \texttt{true} \\
+\texttt{measurements.\allowbreak code\allowbreak Noise.\allowbreak cn0.\allowbreak base\_\allowbreak d\allowbreak BHz} & Baseline carrier-to-noise density in the C/N0 link model, dB-Hz & \texttt{45} \\
+\texttt{measurements.\allowbreak code\allowbreak Noise.\allowbreak cn0.\allowbreak elevation\allowbreak Gain\_\allowbreak d\allowbreak B} & Carrier-to-noise density gain from horizon to zenith, decibels & \texttt{6} \\
+\texttt{measurements.\allowbreak code\allowbreak Noise.\allowbreak cn0.\allowbreak sigma\allowbreak At45d\allowbreak BHz\_\allowbreak m} & Reference code noise sigma at 45 dB-Hz, metres & \texttt{0.\allowbreak 3} \\
+\texttt{measurements.\allowbreak code\allowbreak Noise.\allowbreak model} & Code noise model, constant, elevation weighted or C/N0 & \texttt{cn0} \\
+\texttt{measurements.\allowbreak doppler.\allowbreak enable} & Whether Doppler range-rate observables are generated & \texttt{true} \\
+\texttt{measurements.\allowbreak doppler.\allowbreak sigma\_\allowbreak mps} & Doppler measurement noise sigma, metres per second & \texttt{0.\allowbreak 0424} \\
+\texttt{measurements.\allowbreak doppler.\allowbreak use\allowbreak In\allowbreak EKF} & Whether Doppler rows update the filter & \texttt{true} \\
+\texttt{measurements.\allowbreak two\allowbreak Way\allowbreak Time\allowbreak Transfer.\allowbreak conservative\allowbreak Product\allowbreak Correlation} & Whether tower clock product variance is inflated for within-interval correlation & \texttt{true} \\
+\texttt{measurements.\allowbreak two\allowbreak Way\allowbreak Time\allowbreak Transfer.\allowbreak enable} & Whether tower-spacecraft two-way time transfer rows are generated & \texttt{true} \\
+\texttt{measurements.\allowbreak two\allowbreak Way\allowbreak Time\allowbreak Transfer.\allowbreak include\allowbreak Reciprocity\allowbreak Residual} & Whether motion non-reciprocity of the two-way path is modelled & \texttt{true} \\
+\texttt{measurements.\allowbreak two\allowbreak Way\allowbreak Time\allowbreak Transfer.\allowbreak mode} & Two-way observable formulation, first-order reciprocal or four-timestamp & \texttt{first\allowbreak Order\allowbreak Reciprocal} \\
+\texttt{measurements.\allowbreak two\allowbreak Way\allowbreak Time\allowbreak Transfer.\allowbreak reciprocity\allowbreak Sigma\_\allowbreak m} & Residual non-reciprocity sigma of the two-way path, metres & \texttt{0.\allowbreak 005} \\
+\texttt{measurements.\allowbreak two\allowbreak Way\allowbreak Time\allowbreak Transfer.\allowbreak sigma\_\allowbreak m} & Two-way time transfer noise sigma, metres & \texttt{0.\allowbreak 03} \\
+\texttt{measurements.\allowbreak two\allowbreak Way\allowbreak Time\allowbreak Transfer.\allowbreak towers} & Which ground towers are two-way capable & \texttt{all} \\
+\texttt{measurements.\allowbreak two\allowbreak Way\allowbreak Time\allowbreak Transfer.\allowbreak use\allowbreak In\allowbreak EKF} & Whether two-way time transfer rows update the filter & \texttt{true} \\
+\texttt{measurements.\allowbreak two\allowbreak Way\allowbreak Time\allowbreak Transfer.\allowbreak warmup\_\allowbreak s} & Delay before two-way rows begin, seconds & \texttt{0} \\
+\hline
+\multicolumn{3}{l}{\textbf{Estimator configuration}} \\ \hline
+\texttt{estimation.\allowbreak ambiguity.\allowbreak initial\allowbreak Sigma\_\allowbreak m} & Initial one-sigma prior on each carrier ambiguity state, metres & \texttt{100} \\
+\texttt{estimation.\allowbreak ambiguity\allowbreak Mode} & How carrier phase ambiguities are parameterised as filter states & \texttt{float\allowbreak Per\allowbreak Tower\allowbreak Receiver\allowbreak Signal} \\
+\texttt{estimation.\allowbreak ionosphere\allowbreak Mode} & Whether and how the filter estimates ionospheric delay states & \texttt{per\allowbreak Tower\allowbreak Slant} \\
+\texttt{estimation.\allowbreak slant\allowbreak Iono.\allowbreak initial\allowbreak Sigma\_\allowbreak m} & Initial one-sigma prior on the slant-ionosphere state, metres & \texttt{5.\allowbreak 0} \\
+\texttt{estimation.\allowbreak slant\allowbreak Iono.\allowbreak sigma\_\allowbreak ss\_\allowbreak m} & Steady-state sigma of the slant-ionosphere state, metres & \texttt{1.\allowbreak 0} \\
+\texttt{estimation.\allowbreak slant\allowbreak Iono.\allowbreak tau\_\allowbreak s} & Correlation time of the slant-ionosphere Gauss-Markov state, seconds & \texttt{600} \\
+\texttt{estimation.\allowbreak tropo\allowbreak Zwd.\allowbreak initial\allowbreak Sigma\_\allowbreak m} & Initial one-sigma prior on the zenith wet delay state, metres & \texttt{0.\allowbreak 1} \\
+\texttt{estimation.\allowbreak tropo\allowbreak Zwd.\allowbreak sigma\_\allowbreak ss\_\allowbreak m} & Steady-state sigma of the zenith wet delay state, metres & \texttt{0.\allowbreak 04} \\
+\texttt{estimation.\allowbreak tropo\allowbreak Zwd.\allowbreak tau\_\allowbreak s} & Correlation time of the zenith wet delay state, seconds & \texttt{10800} \\
+\texttt{estimation.\allowbreak troposphere\allowbreak Mode} & Whether and how the filter estimates wet tropospheric delay states & \texttt{per\allowbreak Tower\allowbreak Zwd} \\
+\texttt{estimator.\allowbreak attitude.\allowbreak use\allowbreak Carrier\allowbreak Partials} & Lets carrier phase rows contribute attitude partials to the filter & \texttt{false} \\
+\texttt{estimator.\allowbreak attitude.\allowbreak use\allowbreak Code\allowbreak Partials} & Lets pseudorange rows contribute attitude partials to the filter & \texttt{false} \\
+\texttt{estimator.\allowbreak attitude\allowbreak Carrier\allowbreak Mode} & Selects the carrier phase attitude measurement path & \texttt{off} \\
+\texttt{estimator.\allowbreak attitude\allowbreak Init\allowbreak Mode} & Selects the absolute attitude seeding search before tracking & \texttt{none} \\
+\texttt{estimator.\allowbreak dynamics.\allowbreak perturbations.\allowbreak epoch\allowbreak JD\_\allowbreak TT} & Julian date in terrestrial time anchoring the Sun Moon ephemeris & \texttt{2451545.\allowbreak 0} \\
+\texttt{estimator.\allowbreak dynamics.\allowbreak perturbations.\allowbreak luni\allowbreak Solar.\allowbreak enable} & Sun and Moon third body acceleration in the filter propagator & \texttt{true} \\
+\texttt{estimator.\allowbreak dynamics.\allowbreak perturbations.\allowbreak srp.\allowbreak Cr} & Filter reflectivity coefficient for solar radiation pressure, dimensionless & \texttt{1.\allowbreak 24} \\
+\texttt{estimator.\allowbreak dynamics.\allowbreak perturbations.\allowbreak srp.\allowbreak area\allowbreak To\allowbreak Mass\_\allowbreak m2pkg} & Filter area to mass ratio in square metres per kilogram & \texttt{0.\allowbreak 02} \\
+\texttt{estimator.\allowbreak dynamics.\allowbreak perturbations.\allowbreak srp.\allowbreak enable} & Solar radiation pressure in the filter propagator & \texttt{true} \\
+\texttt{estimator.\allowbreak elevation\allowbreak Mask\_\allowbreak rad} & Elevation cutoff in radians below which measurements are rejected & \texttt{0.\allowbreak 1745\allowbreak 3292\allowbreak 5199\allowbreak 43295} \\
+\texttt{estimator.\allowbreak empirical\allowbreak Accel.\allowbreak enable} & Master gate for three empirical radial along track cross track accelerations & \texttt{false} \\
+\texttt{estimator.\allowbreak empirical\allowbreak Accel.\allowbreak use\allowbreak In\allowbreak EKF} & Appends the empirical acceleration states to the filter & \texttt{false} \\
+\texttt{estimator.\allowbreak imu.\allowbreak filter.\allowbreak P0\_\allowbreak bias\_\allowbreak radps} & Initial gyro bias uncertainty one sigma in radians per second & \texttt{3e-05} \\
+\texttt{estimator.\allowbreak imu.\allowbreak filter.\allowbreak arw\_\allowbreak rad\_\allowbreak per\_\allowbreak sqrt\_\allowbreak s} & Filter gyro angle random walk in radians per root second & \texttt{0.\allowbreak 0002} \\
+\texttt{estimator.\allowbreak imu.\allowbreak filter.\allowbreak rrw\_\allowbreak rad\_\allowbreak per\_\allowbreak s\_\allowbreak sqrt\_\allowbreak s} & Filter gyro rate random walk, radians per second per root second & \texttt{3e-06} \\
+\texttt{estimator.\allowbreak imu.\allowbreak truth.\allowbreak arw\_\allowbreak rad\_\allowbreak per\_\allowbreak sqrt\_\allowbreak s} & Truth gyro angle random walk in radians per root second & \texttt{0.\allowbreak 0002} \\
+\texttt{estimator.\allowbreak imu.\allowbreak truth.\allowbreak bias0\allowbreak Sigma\_\allowbreak radps} & Truth gyro initial bias draw one sigma in radians per second & \texttt{3e-05} \\
+\texttt{estimator.\allowbreak imu.\allowbreak truth.\allowbreak rrw\_\allowbreak rad\_\allowbreak per\_\allowbreak s\_\allowbreak sqrt\_\allowbreak s} & Truth gyro rate random walk, radians per second per root second & \texttt{3e-06} \\
+\texttt{estimator.\allowbreak lambda.\allowbreak enable} & Master gate for LAMBDA integer ambiguity resolution & \texttt{false} \\
+\texttt{estimator.\allowbreak process\allowbreak Noise.\allowbreak model\allowbreak Mismatch.\allowbreak enable} & Adds extra process noise for a truth versus filter force gap & \texttt{false} \\
+\texttt{estimator.\allowbreak sigma\_\allowbreak accel\_\allowbreak mps2} & Residual acceleration process noise one sigma in metres per second squared & \texttt{1e-06} \\
+\texttt{estimator.\allowbreak srp\allowbreak Coefficient.\allowbreak enable} & Master gate for the solar radiation pressure scale state & \texttt{false} \\
+\texttt{estimator.\allowbreak srp\allowbreak Coefficient.\allowbreak use\allowbreak In\allowbreak EKF} & Appends the solar pressure scale state to the filter & \texttt{false} \\
+\texttt{estimator.\allowbreak star\allowbreak Tracker.\allowbreak white\allowbreak Angular\allowbreak Sigma\_\allowbreak rad} & Star tracker white angular noise one sigma in radians & \texttt{0.\allowbreak 0001\allowbreak 4544\allowbreak 4104\allowbreak 3328608} \\
+\hline
+\multicolumn{3}{l}{\textbf{Ensemble reporting}} \\ \hline
+\texttt{report.\allowbreak monte\allowbreak Carlo.\allowbreak confidence} & Confidence level of the chi-squared consistency band & \texttt{0.\allowbreak 99} \\
+\texttt{report.\allowbreak monte\allowbreak Carlo.\allowbreak duration\_\allowbreak s} & Arc length of each Monte Carlo run, seconds & \texttt{900} \\
+\texttt{report.\allowbreak monte\allowbreak Carlo.\allowbreak enable} & Appends a pooled multi-seed NEES and NIS consistency check & \texttt{true} \\
+\texttt{report.\allowbreak monte\allowbreak Carlo.\allowbreak n\allowbreak Seeds} & Number of seeded runs in the Monte Carlo ensemble & \texttt{12} \\
+\hline
+\end{longtable}
+\end{center}

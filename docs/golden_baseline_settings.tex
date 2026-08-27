@@ -1,0 +1,46 @@
+% golden_baseline_settings.tex
+%
+% Companion listing to Appendix C of the thesis. The thesis prints only the
+% provenance of the sigma-bearing settings; the full resolved listing lives here.
+%
+% The table body is held in _settings_table_body.tex so that a regenerated
+% listing can replace it without touching this wrapper.
+%
+% Build: pdflatex golden_baseline_settings   (twice, for the longtable widths)
+
+\documentclass[10pt,a4paper]{article}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage[margin=2cm]{geometry}
+\usepackage{array}
+\usepackage{longtable}
+\usepackage{setspace}
+\pagestyle{plain}
+
+\begin{document}
+
+\begin{center}
+{\large\bfseries Golden-baseline reference scenario, resolved settings}\\[4pt]
+Companion to Appendix C of the thesis.\\
+Generated from \texttt{config/golden\_baseline.json}.
+\end{center}
+
+\vspace{1em}
+
+\noindent
+The settings below are the resolved contents of
+\texttt{config/golden\_baseline.json}, excepting eight that name output files and set
+diagnostic storage and so cannot reach any reported quantity. Two cautions carry with
+the listing. First, the file is an overlay, so it states only what differs from the
+master configuration and every setting not listed here takes its master default.
+Second, a setting appearing here means the scenario file declares it, not that it
+necessarily reaches the physics. The framework carries keys that no longer have a
+consumer, and a listing cannot by itself distinguish a live setting from an inert one.
+Claims in the thesis rest on measured runs and on the regression gates, never on the
+presence of a key in a configuration file.
+
+\vspace{1em}
+
+\input{_settings_table_body}
+
+\end{document}

@@ -132,3 +132,16 @@ config/final/
 # so an unfinished file here cannot fail the shared test suite.
 config/personal/**/*.json
 !config/personal/README.md
+
+# Claude Code's project-local state (agent defs, prompt docs, personal settings,
+# scratch worktrees). Kept out of version control entirely -- local tooling, not
+# a repository source.
+.claude/
+# ---- Documents the thesis cites by name -------------------------------------
+# The blanket *.pdf and *.tex rules above would keep these out of the repository,
+# and Appendix C and Appendix G of the thesis both state that they ship with it.
+# Negated individually rather than by !docs/*, so no other artefact is swept in.
+!docs/golden_baseline_settings.pdf
+!docs/golden_baseline_settings.tex
+!docs/_settings_table_body.tex
+!docs/example_report_best106_stackMultiAssetBeamLockFineIsl.pdf
