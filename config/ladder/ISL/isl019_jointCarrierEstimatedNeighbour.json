@@ -1,0 +1,39 @@
+{
+  "_id": "THE SELF-CONSISTENT RUNG. isl016's crosslink carrier package with multiAsset.mode flipped to joint, so each filter carries its neighbours' orbits as states and ISLMeasurementBuilder line 207 reads rTxModel = x(orbPosIdx), the neighbour's ESTIMATED position, instead of a product or the truth. Nothing is handed in from outside.",
+
+  "_whyItExists": "isl016 and isl018 read the neighbour's TRUE position (product disabled short-circuits productBias_ to zero, so rTxProd collapses to rTxTruth). isl017 reads truth plus a 3 cm per-axis draw. Neither is an estimate. The whole absolute-position result of the formation chapters rests on that choice and the alternative was never run. This rung runs it.",
+
+  "_whatIsNOTTheEvidenceAgainstThis": "test003, test004 and test005 are the only joint-mode rungs in the repository and two of them diverge at 3600 s. They are NOT this configuration. All three set measurements.isl.code.useInEKF false and measurements.isl.carrier.useInEKF false, and drive measurements.isl.twoWay (coherentTranspondedPnTwoWayCode) instead. test004's failure was CoherentTwoWayCodeRangingModel:lightTimeConvergence, inside a model this rung does not enable (isl.twoWay.enable stays 0 through isl016). Joint mode has never been run with the ISL carrier.",
+
+  "_readingOrder": "Read pos_final_m and summary/perAsset/absErr_m against isl017 at the SAME arc length, never against the 3600 s frozen values. If this rung lands near isl017's 0.0886 m the product assumption is not doing the work. If it lands near the unaided 2.0618 m it is doing all of it.",
+
+  "_expectedFailureMode": "Joint may diverge on a long arc. Run 600 s first, where test004 passed, before attempting 3600 s. A divergence at 600 s is itself reportable and would mean the self-consistent architecture is not available at this fleet size.",
+
+  "_extends": "isl016_carrierFloatAmbiguity.json",
+
+  "_delta": "ONE substantive leaf. multiAsset.mode fast -> joint. measurements.isl.product.enable is restated false only to make explicit that no broadcast product is present, which is what isl016 already inherits.",
+
+  "scenario": {
+    "name": "isl019_jointCarrierEstimatedNeighbour",
+    "nTowers": 5,
+    "nSpaceAssets": 6,
+    "nReceivers": 4
+  },
+
+  "multiAsset": {
+    "mode": "joint"
+  },
+
+  "measurements": {
+    "isl": {
+      "product": {
+        "enable": false
+      }
+    }
+  },
+
+  "report": {
+    "runVersion": "isl019",
+    "monteCarlo": { "enable": false }
+  }
+}
